@@ -21,8 +21,11 @@ run_spike() {
 # --- spike list ---
 run_spike "$REPO_ROOT/spikes/s00_smoke"
 run_spike "$REPO_ROOT/spikes/s02_transformer"
-# run_spike "$REPO_ROOT/spikes/s03_fragments"
-# run_spike "$REPO_ROOT/spikes/s04_catalog_tx"
+# Gate-1 F6: s03/s04 re-enabled — both suites pass (s03 15 tests, s04 6 tests)
+# against local Postgres. Their mechanisms are also ported into samen_core, but
+# the spike suites are green so we run them rather than drop coverage.
+run_spike "$REPO_ROOT/spikes/s03_fragments"
+run_spike "$REPO_ROOT/spikes/s04_catalog_tx"
 run_spike "$REPO_ROOT/spikes/s05_vault"
 run_spike "$REPO_ROOT/spikes/s07_pii_reads"
 

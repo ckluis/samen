@@ -60,6 +60,49 @@ defmodule Demo.VerifiersTest do
       assert code == 0,
              "C3 pii_reads found leaks in demo lib/: #{inspect(failing)}"
     end
+
+    # -----------------------------------------------------------------------
+    # Gate-1 F1 red path (b): the standard Ash convention `config :demo,
+    # ash_domains: [...]` must build a NON-EMPTY registry through discovery
+    # (Mix.Project.config()[:app] => :demo), and that registry must catch a
+    # planted Logger.info(contact.full_name) leak. Before F1, C3 discovered only
+    # from :samen_core, so a demo-convention-only host had an empty registry and
+    # every leak passed (fail-OPEN).
+    # -----------------------------------------------------------------------
+    test "demo-convention config builds a non-empty registry and catches Logger.info(contact.full_name)" do
+      # Discovery path (no explicit :resources / :domains): reads :demo's
+      # ash_domains, the standard Ash convention. This is the exact key the demo
+      # sets in config/config.exs (config :demo, ash_domains: [Demo.Crm]).
+      registry = Samen.PiiReads.Registry.build()
+
+      refute MapSet.size(registry.pii_attributes) == 0,
+             "demo-convention discovery produced an EMPTY registry — F1 regressed"
+
+      assert Samen.PiiReads.Registry.pii_attribute?(registry, :full_name)
+
+      planted_leak = """
+      defmodule Demo.PlantedLeak do
+        require Logger
+
+        def go(contact) do
+          Logger.info(contact.full_name)
+        end
+      end
+      """
+
+      {code, findings} =
+        Samen.PiiReads.Harness.check_sources(
+          [{"planted_leak.ex", planted_leak}],
+          registry
+        )
+
+      failing = Samen.PiiReads.Harness.failing(findings)
+
+      assert code == 1,
+             "Expected the planted contact.full_name leak to be caught, got: #{inspect(failing)}"
+
+      assert Enum.any?(failing, &(&1.kind == :direct_leak and :full_name in List.wrap(&1.pii)))
+    end
   end
 
   # =========================================================================

@@ -14,9 +14,5 @@ config :demo, start_repo?: false
 
 config :samen_core, Oban, testing: :manual
 
-# catalog_parity allow-list: the cnt_contact table has a non-Ash raw DDL column
-# cnt_notes (the non_pii! reviewed plaintext column) added by migration.
-config :demo, :catalog_parity_allow_list, [
-  {"cnt_contact", "cnt_notes"},
-  {"cnt_contact", "cnt_subject_id"}
-]
+# NOTE (Gate-1 F3): the catalog_parity_allow_list moved to config/config.exs
+# (shared) so `bash demo/ci.sh` is green in every env, not only :test.

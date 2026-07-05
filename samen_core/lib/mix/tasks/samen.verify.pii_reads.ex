@@ -38,6 +38,15 @@ defmodule Mix.Tasks.Samen.Verify.PiiReads do
   Unparseable source is a `:parse_error` (never silently skipped).
   `:laundered_hint` advisories are printed but NEVER affect the exit code.
 
+  **Empty-registry guard (Gate-1 F1):** if the built PII registry contains zero
+  PII attributes — the default when a host app has not configured its
+  `ash_domains` (or configured them under a key the registry does not read) — the
+  taint set is empty and EVERY leak would pass. That is a fail-OPEN safety defect,
+  so the task **exits 1 with a config diagnostic** rather than printing a
+  misleading "OK". A vacuous check must never pass. Domains are discovered from
+  the host app's `ash_domains` (the standard Ash convention C1/C4 use), with the
+  legacy `:samen_core, :ash_domains` key honored only as a fallback alias.
+
   ## Usage
 
       mix samen.verify.pii_reads
@@ -61,6 +70,8 @@ defmodule Mix.Tasks.Samen.Verify.PiiReads do
     Mix.Task.run("app.start")
 
     registry = Registry.build()
+    halt_if_registry_empty!(registry)
+
     source_dirs = resolve_source_dirs(opts)
     findings = scan(source_dirs, registry)
 
@@ -91,6 +102,42 @@ defmodule Mix.Tasks.Samen.Verify.PiiReads do
   end
 
   # ---------------------------------------------------------------------------
+
+  # Fail-closed guard (Gate-1 F1): an empty PII registry means the taint set is
+  # empty, so EVERY leak would pass — a vacuous check. That is a fail-OPEN safety
+  # defect, so we refuse to run and exit 1 with a config diagnostic instead of
+  # printing a misleading "OK". This never silently passes.
+  defp halt_if_registry_empty!(%Registry{pii_attributes: pii_attributes}) do
+    if MapSet.size(pii_attributes) == 0 do
+      IO.puts("")
+
+      IO.puts(
+        "FAIL: #{@task_name} refusing to run against an EMPTY PII registry " <>
+          "(0 PII attributes discovered)."
+      )
+
+      IO.puts("")
+
+      IO.puts(
+        "  No PII resources were discovered. Configure your Ash domains the " <>
+          "standard way:"
+      )
+
+      IO.puts("")
+      IO.puts("      config #{inspect(Mix.Project.config()[:app])}, ash_domains: [MyApp.MyDomain]")
+      IO.puts("")
+
+      IO.puts(
+        "  A vacuous PII check would pass every leak, so this is a fail-closed " <>
+          "refusal, not a pass."
+      )
+
+      IO.puts("")
+      :erlang.halt(1)
+    end
+
+    :ok
+  end
 
   defp resolve_source_dirs(opts) do
     case Keyword.get_values(opts, :source_dirs) do

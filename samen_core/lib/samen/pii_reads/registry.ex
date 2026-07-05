@@ -25,11 +25,16 @@ defmodule Samen.PiiReads.Registry do
 
   ## Discovery
 
-  Resources are discovered from `config :samen_core, :ash_domains` (the same
-  source `Samen.Catalog` uses), so the registry covers every resource the host
-  app declares. Pass `:domains` to `build/1` to override (tests inject a fixed
-  set). Non-PII resources contribute nothing; resources with no reveal actions
-  contribute nothing to the reveal map.
+  Resources are discovered from the host app's `:ash_domains` — i.e.
+  `config <otp_app>, ash_domains: [...]`, where `<otp_app>` is
+  `Mix.Project.config()[:app]`. This is the standard Ash convention that C1
+  (`catalog_parity`) and C4 (`pii_classify`) already use, so a consumer that
+  configures domains the ordinary way (`config :my_app, ash_domains: [...]`) gets
+  a non-empty registry with no extra duplication. The legacy
+  `config :samen_core, :ash_domains` key is honored only as a fallback alias for
+  backwards compatibility. Pass `:domains` to `build/1` to override (tests inject
+  a fixed set). Non-PII resources contribute nothing; resources with no reveal
+  actions contribute nothing to the reveal map.
   """
 
   alias Samen.Pii.Info
@@ -121,8 +126,24 @@ defmodule Samen.PiiReads.Registry do
         resources_from_domains(domains)
 
       true ->
-        resources_from_domains(Application.get_env(:samen_core, :ash_domains, []))
+        resources_from_domains(discover_domains())
     end
+  end
+
+  # Unified domain discovery: the standard Ash convention (C1/C4 already use it)
+  # is `config <otp_app>, ash_domains: [...]` where <otp_app> is the host app.
+  # The legacy `config :samen_core, :ash_domains` key is honored only as an alias
+  # so a pre-existing consumer keeps working. Merged + de-duped so both keys
+  # contribute (a consumer mid-migration is fully covered).
+  defp discover_domains do
+    otp_app = Mix.Project.config()[:app]
+
+    host_domains =
+      if otp_app, do: Application.get_env(otp_app, :ash_domains, []), else: []
+
+    legacy_domains = Application.get_env(:samen_core, :ash_domains, [])
+
+    (host_domains ++ legacy_domains) |> Enum.uniq()
   end
 
   defp resources_from_domains(domains) do

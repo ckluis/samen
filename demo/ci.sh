@@ -12,10 +12,17 @@
 
 set -euo pipefail
 
+# Gate-1 F3: run the gate against the canonical env. The verifiers query a live
+# DB (catalog_parity, prefixes, no_plaintext_pii); MIX_ENV=test targets demo_test,
+# which the test harness migrates and which carries the intentional shadow columns.
+# Respect a caller-provided MIX_ENV (root ci.sh already sets it) but default to test
+# so a direct `bash demo/ci.sh` is green without extra env setup.
+export MIX_ENV="${MIX_ENV:-test}"
+
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DEMO_DIR"
 
-echo "==> demo CI gate: starting"
+echo "==> demo CI gate: starting (MIX_ENV=$MIX_ENV)"
 
 # 1. Compile
 echo "--- step 1/6: mix compile --warnings-as-errors"

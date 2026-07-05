@@ -10,6 +10,14 @@ config :samen_core, SamenCore.TestRepo,
 
 config :logger, level: :warning
 
+# Gate-1 F1 red-path hook: the empty-registry exit-code test runs the pii_reads
+# task in a child OS process with SAMEN_EMPTY_ASH_DOMAINS=1, which clears the
+# discovered domains so the built PII registry is empty. This lets the test prove
+# the task exits 1 (fail-closed) on a vacuous check rather than exit 0.
+if System.get_env("SAMEN_EMPTY_ASH_DOMAINS") == "1" do
+  config :samen_core, ash_domains: []
+end
+
 # test_helper.exs owns the Repo lifecycle (storage_up + migrate before connect).
 config :samen_core, start_repo?: false
 

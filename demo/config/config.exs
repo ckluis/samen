@@ -16,6 +16,18 @@ config :ash, disable_async?: true
 config :demo, Demo.Repo,
   migration_primary_key: [name: :id, type: :binary_id]
 
+# catalog_parity allow-list (Gate-1 F3): the cnt_contact table has two raw-DDL
+# columns added by migration — cnt_notes (the non_pii! reviewed plaintext column)
+# and cnt_subject_id — that are NOT Ash resource attributes, so catalog_sync never
+# emitted fld_field rows for them. They are intentional shadow columns, allow-listed
+# so C1 catalog_parity does not flag them. This lives in the SHARED config (not
+# config/test.exs) so `bash demo/ci.sh` is green in any MIX_ENV, not only :test.
+# Keyed under :demo — the verifier reads Application.get_env(Mix.Project.config()[:app], …).
+config :demo, :catalog_parity_allow_list, [
+  {"cnt_contact", "cnt_notes"},
+  {"cnt_contact", "cnt_subject_id"}
+]
+
 # Reveal-grant model: wire Samen.Reveal.Grants (T1.6).
 config :samen_core, :reveal_grant, Samen.Reveal.Grants
 config :samen_core, :reveal_grant_repo, Demo.Repo
