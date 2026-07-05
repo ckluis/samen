@@ -1,0 +1,13 @@
+{
+  "$comment": "PERMANENT abbrev registry. Abbrevs are 3-letter lowercase, collision-checked, and NEVER recycled or changed once assigned to a resource — like a stock ticker. Adding a row is allowed; changing or removing a resource's abbrev, or reusing an abbrev for a second resource, fails compile (Samen.Verifiers.AbbrevRegistry). Keys are abbrevs; values are the fully-qualified resource module names that own them.",
+  "abbrevs": {
+    "com": "SamenCore.Support.Crm.Contact",
+    "cpy": "SamenCore.Support.Crm.Company",
+    "pat": "SamenCore.Support.Clinical.Patient",
+    "stf": "SamenCore.Support.Clinical.Staff",
+    "prp": "SamenCore.Support.PropFixture",
+    "pgn": "SamenCore.Support.PropGen",
+    "piv": "SamenCore.PiiRedPath.BadVault",
+    "piu": "SamenCore.PiiRedPath.UnclassifiedNonPii"
+  }
+}
