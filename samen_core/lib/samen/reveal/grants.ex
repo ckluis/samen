@@ -353,12 +353,46 @@ defmodule Samen.Reveal.Grants do
   # ==========================================================================
 
   @doc """
-  Write a reveal-grant lifecycle audit row. Plain rows now; the tamper-evident
-  hash chain over these rows is Phase 4 (G4).
+  Write a reveal-grant lifecycle audit row AND a corresponding `aud_event` row
+  (T2.2 migration: grant lifecycle events write to the append-only event tier
+  carrying tokens only).
+
+  Both writes share the caller's transaction context where `r` is already in a
+  transaction; the `aud_event` insert is a second INSERT in the same connection.
+  If the `aud_event` table does not yet exist (e.g. in tests that have not run
+  the T2.2 migration), the write is skipped gracefully — the `rvl_reveal_audit`
+  row always lands.
+
+  The `aud_event` row carries ONLY opaque/token-safe fields:
+    * `event_type` — "grant_lifecycle"
+    * `subject_id` — the subject's UUID / token (NOT plaintext PII)
+    * `actor_id`   — the operator actor id (NOT plaintext name)
+    * `correlation_id` — the request or grant UUID
+    * `detail`     — operator-authored lifecycle metadata (event name, outcome token)
   """
   @spec write_audit(module(), map()) :: {:ok, RevealAudit.t()} | {:error, term}
   def write_audit(r, attrs) do
-    r.insert(audit_changeset(attrs))
+    result = r.insert(audit_changeset(attrs))
+
+    # Also emit to the aud_event tier (T2.2 — grant lifecycle events are
+    # mirrored to the append-only event/audit tier carrying tokens only).
+    # The T2.2 migration ensures aud_event exists before this code runs.
+    aud_attrs = %{
+      event_type: "grant_lifecycle",
+      subject_id: attrs[:subject_id] || attrs["subject_id"],
+      actor_id: attrs[:actor_id] || attrs["actor_id"],
+      correlation_id:
+        attrs[:grant_id] || attrs[:request_id] || attrs["grant_id"] || attrs["request_id"],
+      detail:
+        "event=#{attrs[:event] || attrs["event"]} " <>
+          "#{(attrs[:detail] || attrs["detail"] || "") |> String.trim()}",
+      occurred_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    }
+
+    Samen.AuditEvent.insert(r, aud_attrs)
+
+    # The return value is always the primary rvl_reveal_audit result.
+    result
   end
 
   @doc "List audit rows for a subject, newest first (for tests / operator UI)."

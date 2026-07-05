@@ -148,7 +148,10 @@ defmodule Mix.Tasks.Samen.Verify.Prefixes do
   end
 
   # Resolve the resource module string back to a module and read its abbrev.
-  # Returns nil if the module is not loaded / not a Samen resource.
+  # Returns nil if the module is not loaded, not a Samen resource, or not a
+  # Spark DSL module (e.g. plain Ecto schemas like Samen.AuditEvent that are
+  # catalogued but not Ash/Spark resources — their columns are prefixed by
+  # convention but they have no Spark abbrev declaration).
   defp abbrev_for_resource(resource_str) do
     module = Module.concat([resource_str])
 
@@ -158,6 +161,9 @@ defmodule Mix.Tasks.Samen.Verify.Prefixes do
     else
       _ -> nil
     end
+  rescue
+    # Spark raises ArgumentError when get_opt is called on a non-DSL module.
+    ArgumentError -> nil
   end
 
   # ---------------------------------------------------------------------------

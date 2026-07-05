@@ -1,0 +1,137 @@
+{
+  "tables": [
+    {
+      "fields": [
+        {
+          "column_name": "cnt_active",
+          "logical_name": "active",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "cnt_display_name",
+          "logical_name": "display_name",
+          "type": "String"
+        },
+        {
+          "column_name": "cnt_emails",
+          "logical_name": "emails",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "cnt_full_name",
+          "logical_name": "full_name",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "cnt_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cnt_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cnt_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cnt_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_cnt_dob",
+          "logical_name": "dob",
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Demo.Crm.Contact",
+      "table_name": "cnt_contact"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "mbr_contact_id",
+          "logical_name": "contact_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mbr_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mbr_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "mbr_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mbr_role",
+          "logical_name": "role",
+          "type": "String"
+        },
+        {
+          "column_name": "mbr_status",
+          "logical_name": "status",
+          "type": "String"
+        },
+        {
+          "column_name": "mbr_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Crm.Membership",
+      "table_name": "mbr_membership"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "org_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "org_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "org_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "org_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "org_plan",
+          "logical_name": "plan",
+          "type": "String"
+        },
+        {
+          "column_name": "org_slug",
+          "logical_name": "slug",
+          "type": "String"
+        },
+        {
+          "column_name": "org_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Crm.Org",
+      "table_name": "org_org"
+    }
+  ]
+}

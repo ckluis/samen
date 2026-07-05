@@ -144,28 +144,68 @@ defmodule Samen.ResourceTest do
     refute rel.destination == Core.Person
   end
 
-  test "generated DDL contains NO INHERITS anywhere" do
+  test "generated DDL contains NO INHERITS anywhere (resource tables; PARTITION OF is allowed)" do
+    # This test verifies that Postgres table INHERITANCE (`INHERITS`) is NOT used
+    # for Samen resource tables — fragment composition uses a single physical table
+    # per composed resource, never Postgres INHERITS (doc: "explicitly NOT...
+    # Postgres INHERITS"). Note: PARTITION OF (used by aud_event, T2.2) is NOT
+    # INHERITS — it uses a different DDL path, so migrations using "PARTITION OF"
+    # are explicitly excluded from this check.
     ddl_files =
       Path.wildcard(Path.join([__DIR__, "..", "priv", "test_repo", "migrations", "*.exs"]))
 
     assert ddl_files != []
 
     for f <- ddl_files do
-      refute File.read!(f) =~ ~r/inherits/i, "INHERITS found in #{f}"
+      content = File.read!(f)
+
+      # Skip files that use PARTITION OF (aud_event tier, T2.2) — they are
+      # partitioned tables, not table inheritance.
+      unless content =~ ~r/PARTITION\s+OF/i do
+        refute content =~ ~r/\bINHERITS\b/i,
+               "INHERITS keyword found in #{f} (should use fragment composition instead)"
+      end
     end
   end
 
-  test "the LIVE database schema uses no table inheritance (pg_inherits is empty)" do
-    %{rows: [[count]]} = TestRepo.query!("SELECT count(*) FROM pg_inherits", [])
-    assert count == 0
-
+  test "the LIVE database schema uses no table inheritance (pg_inherits only has partitions)" do
+    # pg_inherits has entries for BOTH table inheritance AND partition parents.
+    # We assert that NO rows in pg_inherits come from classic table inheritance
+    # (relkind 'r' as child of a non-partitioned 'r' parent). Partition parent-child
+    # rows (relkind 'r' child of a 'p' partitioned-table parent) are allowed — that
+    # is the aud_event RANGE partition structure added in T2.2.
     %{rows: rows} =
+      TestRepo.query!(
+        """
+        SELECT c.relname, p.relname AS parent_name, p.relkind AS parent_kind
+        FROM pg_inherits i
+        JOIN pg_class c ON c.oid = i.inhrelid
+        JOIN pg_class p ON p.oid = i.inhparent
+        """,
+        []
+      )
+
+    # All pg_inherits rows should come from PARTITIONED tables (parent_kind = 'p')
+    # or inherited indexes (parent_kind = 'I' — indexes on partitioned tables are
+    # automatically created on child partitions and appear in pg_inherits with
+    # kind 'I'). A parent_kind of 'r' (regular table) would be classic table
+    # inheritance — prohibited.
+    non_partition_inheritance = Enum.filter(rows, fn [_child, _parent, parent_kind] ->
+      parent_kind not in ["p", "I"]
+    end)
+
+    assert non_partition_inheritance == [],
+           "Classic table INHERITS found (not partitioning): #{inspect(non_partition_inheritance)}"
+
+    # Verify that our resource tables (the ones fragment composition produces)
+    # are plain regular tables with no subclasses.
+    %{rows: res_rows} =
       TestRepo.query!(
         "SELECT relname, relkind, relhassubclass FROM pg_class WHERE relname = ANY($1)",
         [["pat_patient", "stf_staff", "com_contact", "cpy_company"]]
       )
 
-    by_name = Map.new(rows, fn [name, kind, hassub] -> {name, {kind, hassub}} end)
+    by_name = Map.new(res_rows, fn [name, kind, hassub] -> {name, {kind, hassub}} end)
     assert by_name["pat_patient"] == {"r", false}
     assert by_name["stf_staff"] == {"r", false}
     assert by_name["com_contact"] == {"r", false}

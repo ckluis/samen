@@ -156,7 +156,7 @@ defmodule Samen.Erasure do
         ])
         |> repo.insert()
       end)
-      # STEP 4 — audit row on the reveal lifecycle log (event "erased").
+      # STEP 4a — audit row on the reveal lifecycle log (event "erased").
       |> Ecto.Multi.run(:audit, fn repo, changes ->
         {sealed, _} = changes.seal_vault
         %{count: redacted} = changes.redact_non_pii
@@ -169,6 +169,23 @@ defmodule Samen.Erasure do
           detail:
             "outcome=#{outcome} attestation_id=#{attestation[:attestation_id] || "none"} " <>
               "vault_sealed=#{sealed} non_pii_redacted=#{redacted}"
+        })
+      end)
+      # STEP 4b — append-only event tier row (T2.2: erasure events mirror to
+      # aud_event carrying tokens only, never plaintext PII).
+      |> Ecto.Multi.run(:aud_event, fn repo, changes ->
+        {sealed, _} = changes.seal_vault
+        %{count: redacted} = changes.redact_non_pii
+        outcome = changes.report.outcome
+
+        Samen.AuditEvent.insert(repo, %{
+          event_type: "erasure",
+          subject_id: subject_id,
+          actor_id: actor_id,
+          detail:
+            "outcome=#{outcome} vault_sealed=#{sealed} non_pii_redacted=#{redacted} " <>
+              "attestation_id=#{attestation[:attestation_id] || "none"}",
+          occurred_at: now
         })
       end)
 

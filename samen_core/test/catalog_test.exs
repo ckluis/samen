@@ -244,11 +244,24 @@ defmodule SamenCore.CatalogTest do
   # Section 5 — mix samen.verify.column_refs (CI linter RED PATH)
   # ============================================================
 
+  # ---------------------------------------------------------------------------
+  # Helper: create a unique isolated scratch dir under a self-owned parent,
+  # register cleanup, and return the dir path.
+  # Using a unique subdir (not bare /tmp) prevents stray files from concurrent
+  # or failed test runs from leaking across test cases (Gate-1 PRE-a fix).
+  # ---------------------------------------------------------------------------
+  defp make_scratch_dir(ctx_name) do
+    base = Path.join([System.tmp_dir!(), "samen_colrefs_test", ctx_name])
+    File.mkdir_p!(base)
+    base
+  end
+
   describe "mix samen.verify.column_refs — CI linter" do
     test "no violations on files that only reference known catalogued columns" do
-      # Write a temp file referencing only known columns
-      tmp_dir = System.tmp_dir!()
-      file_path = Path.join(tmp_dir, "good_source_#{:rand.uniform(100_000)}.ex")
+      # Each test gets its own isolated scratch dir — stray files from other
+      # tests cannot pollute this scan (PRE-a fix for Gate-1 caveat).
+      scratch = make_scratch_dir("good_#{System.unique_integer([:positive])}")
+      file_path = Path.join(scratch, "good_source.ex")
 
       File.write!(file_path, """
       defmodule GoodModule do
@@ -257,17 +270,17 @@ defmodule SamenCore.CatalogTest do
       end
       """)
 
-      on_exit(fn -> File.rm(file_path) end)
+      on_exit(fn -> File.rm_rf(scratch) end)
 
-      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [tmp_dir])
+      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [scratch])
       assert violations == [], "Expected no violations, got: #{inspect(violations)}"
     end
 
     test "RED PATH: linter catches a seeded bogus column reference" do
       # Plant a reference to a column that does NOT exist in fld_field.
       # This is the mandatory red-path for the CI linter.
-      tmp_dir = System.tmp_dir!()
-      file_path = Path.join(tmp_dir, "bad_source_#{:rand.uniform(100_000)}.ex")
+      scratch = make_scratch_dir("bad_#{System.unique_integer([:positive])}")
+      file_path = Path.join(scratch, "bad_source.ex")
 
       # "xyz_hallucinated_column" is a valid ^[a-z]{3}_ token but is NOT in fld_field
       File.write!(file_path, """
@@ -276,9 +289,9 @@ defmodule SamenCore.CatalogTest do
       end
       """)
 
-      on_exit(fn -> File.rm(file_path) end)
+      on_exit(fn -> File.rm_rf(scratch) end)
 
-      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [tmp_dir])
+      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [scratch])
 
       assert length(violations) >= 1, "Expected at least 1 violation, got: #{inspect(violations)}"
 
@@ -288,8 +301,8 @@ defmodule SamenCore.CatalogTest do
 
     test "linter ignores catalog infrastructure tokens (tam_, fld_)" do
       # tam_ and fld_ tokens are part of the catalog infra and should never be flagged
-      tmp_dir = System.tmp_dir!()
-      file_path = Path.join(tmp_dir, "infra_source_#{:rand.uniform(100_000)}.ex")
+      scratch = make_scratch_dir("infra_#{System.unique_integer([:positive])}")
+      file_path = Path.join(scratch, "infra_source.ex")
 
       File.write!(file_path, """
       defmodule InfraModule do
@@ -300,15 +313,15 @@ defmodule SamenCore.CatalogTest do
       end
       """)
 
-      on_exit(fn -> File.rm(file_path) end)
+      on_exit(fn -> File.rm_rf(scratch) end)
 
-      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [tmp_dir])
+      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [scratch])
       assert violations == [], "Catalog infra tokens must not be flagged"
     end
 
     test "samen:allow comment suppresses a specific token on that line" do
-      tmp_dir = System.tmp_dir!()
-      file_path = Path.join(tmp_dir, "allowed_source_#{:rand.uniform(100_000)}.ex")
+      scratch = make_scratch_dir("allow_#{System.unique_integer([:positive])}")
+      file_path = Path.join(scratch, "allowed_source.ex")
 
       File.write!(file_path, """
       defmodule AllowedModule do
@@ -316,16 +329,16 @@ defmodule SamenCore.CatalogTest do
       end
       """)
 
-      on_exit(fn -> File.rm(file_path) end)
+      on_exit(fn -> File.rm_rf(scratch) end)
 
-      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [tmp_dir])
+      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [scratch])
       assert violations == [], "samen:allow should suppress the flagged token"
     end
 
     test "linter scans .ex and .exs files" do
-      tmp_dir = System.tmp_dir!()
-      ex_path = Path.join(tmp_dir, "check_me_#{:rand.uniform(100_000)}.ex")
-      exs_path = Path.join(tmp_dir, "check_me_#{:rand.uniform(100_000)}.exs")
+      scratch = make_scratch_dir("scan_#{System.unique_integer([:positive])}")
+      ex_path = Path.join(scratch, "check_me.ex")
+      exs_path = Path.join(scratch, "check_me.exs")
 
       bad_content = """
       def something do
@@ -336,12 +349,9 @@ defmodule SamenCore.CatalogTest do
       File.write!(ex_path, bad_content)
       File.write!(exs_path, bad_content)
 
-      on_exit(fn ->
-        File.rm(ex_path)
-        File.rm(exs_path)
-      end)
+      on_exit(fn -> File.rm_rf(scratch) end)
 
-      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [tmp_dir])
+      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [scratch])
       # Both files should be scanned — at least 2 violations
       assert length(violations) >= 2, "Expected violations from both .ex and .exs files"
     end

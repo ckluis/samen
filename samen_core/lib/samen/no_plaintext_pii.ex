@@ -44,16 +44,21 @@ defmodule Samen.NoPlaintextPii do
   alias Samen.NoPlaintextPii.Tiers.{
     VaultDeclarations,
     AuditRows,
+    AudEvent,
+    Rollup,
     Catalog,
     LogTelemetry
   }
 
   @doc """
-  The default CI-mode tier roster. Phase-2 T2.9 appends `cdc_mirror` / `rollup` /
-  `trace_sink` tier modules here (or passes them via `run(tiers: …)`).
+  The default CI-mode tier roster.
+
+  T2.2 adds `AudEvent` (the append-only event/audit tier).
+  Phase-2 T2.9 appends `cdc_mirror` / `rollup` / `trace_sink` tier modules here
+  (or passes them via `run(tiers: …)`).
   """
   @spec default_tiers() :: [module()]
-  def default_tiers, do: [VaultDeclarations, AuditRows, Catalog, LogTelemetry]
+  def default_tiers, do: [VaultDeclarations, AuditRows, AudEvent, Catalog, LogTelemetry]
 
   @doc """
   Run the CI-mode invariant and return every finding (violations + exempts).
