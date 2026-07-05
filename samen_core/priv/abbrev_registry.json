@@ -8,6 +8,11 @@
     "prp": "SamenCore.Support.PropFixture",
     "pgn": "SamenCore.Support.PropGen",
     "piv": "SamenCore.PiiRedPath.BadVault",
-    "piu": "SamenCore.PiiRedPath.UnclassifiedNonPii"
+    "piu": "SamenCore.PiiRedPath.UnclassifiedNonPii",
+    "rvp": "SamenCore.Support.RevealDomain.RevealPerson",
+    "pcl": "SamenCore.Support.PiiClassify.PersonRecord",
+    "org": "Demo.Crm.Org",
+    "mbr": "Demo.Crm.Membership",
+    "cnt": "Demo.Crm.Contact"
   }
 }

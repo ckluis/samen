@@ -244,34 +244,39 @@ defmodule Samen.ResourceTest do
 
     assert patient.primary_provider_id == staff.id
 
+    # Vault-stack fix: PII is vault-routed, so filter on a NON-PII column
+    # (primary_provider_id) — the plaintext MRN no longer lives in the column to
+    # filter on (it's a `vt_*` token). This proves the FK + read round-trip while
+    # the PII fields mask.
     [read_back] =
       Patient
-      |> Ash.Query.filter(mrn == "MRN-9")
-      |> Ash.Query.ensure_selected([:full_name, :dob, :primary_provider_id])
+      |> Ash.Query.filter(primary_provider_id == ^staff.id)
+      |> Ash.Query.ensure_selected([:full_name, :dob, :mrn, :primary_provider_id])
       |> Ash.read!()
 
     assert read_back.id == patient.id
-    assert read_back.dob == ~D[1906-12-09]
     assert read_back.primary_provider_id == staff.id
 
-    # Composite FullName round-trips through the jsonb column (Ash returns the
-    # stored map for a bare :map storage type; the %Masked{} materialization of
-    # this value is T1.4/T1.5 — here we prove the composite routes and stores).
-    assert read_back.full_name in [
-             %Samen.Type.FullName{first: "Grace", last: "Hopper"},
-             %{"first" => "Grace", "last" => "Hopper"}
-           ]
+    # Vault-stack fix (P0): every vault-routed PII field reads back as %Masked{},
+    # the field's NORMAL value — composite AND scalar, no per-resource read hook.
+    assert %Samen.Masked{} = read_back.full_name
+    assert %Samen.Masked{} = read_back.dob
+    assert %Samen.Masked{} = read_back.mrn
 
-    # The scalar PII column really is stored as pii_pat_mrn (pii_ prefix), the
-    # composite full_name as pat_full_name (no pii_ prefix) — routing by DECLARATION,
-    # not by the storage-name prefix. Both are vault-routed per Samen.Pii.Info.
-    %{rows: [[mrn_val, fname]]} =
+    # Vault-stack fix (P0): the domain column holds a `vt_*` TOKEN, NOT plaintext.
+    # Raw SQL is the ground truth — no "MRN-9", no "Grace"/"Hopper" anywhere.
+    %{rows: [[mrn_val, fname, dob_val]]} =
       TestRepo.query!(
-        "SELECT pii_pat_mrn, pat_full_name FROM pat_patient WHERE pat_id = $1",
+        "SELECT pii_pat_mrn, pat_full_name, pii_pat_dob FROM pat_patient WHERE pat_id = $1",
         [Ecto.UUID.dump!(patient.id)]
       )
 
-    assert mrn_val == "MRN-9"
-    assert fname == %{"first" => "Grace", "last" => "Hopper"}
+    for v <- [mrn_val, fname, dob_val] do
+      assert String.starts_with?(v, "vt_"), "expected a vault token, got: #{inspect(v)}"
+    end
+
+    refute mrn_val == "MRN-9"
+    refute fname =~ "Grace"
+    refute fname =~ "Hopper"
   end
 end

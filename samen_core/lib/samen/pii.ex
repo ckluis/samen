@@ -56,6 +56,32 @@ defmodule Samen.Pii.Attribute do
         }
 end
 
+defmodule Samen.Pii.RevealAction do
+  @moduledoc """
+  A `reveal :action_name` declaration inside a `pii do … end` block (T1.5 clause
+  (c)).
+
+  Marks an Ash action as a **reveal action**: an action that may return vault
+  plaintext for a *granted* actor, and denies otherwise. This is a **first-class,
+  introspectable** marker — the C3 `pii_reads` verifier (T1.8b) and the
+  `Samen.Reveal` runtime key on this DECLARATION via `Samen.Pii.Info`, NOT on the
+  action name matching a `reveal` lexical prefix.
+
+  Gate-0 fix task #6 requires real introspection, not name matching: the S0.7
+  spike suppressed sinks inside any function whose name *started with* `reveal`,
+  a false-negative evasion surface (`def reveal_report/1` laundered a leak). Here
+  the reveal boundary is a declared marker resolved from DSL state, so
+  `reveal_action?/2` answers truthfully regardless of what the action is named.
+
+  The named action must exist on the resource — declaring `reveal :nope` for a
+  non-existent action is a compile error (`Samen.Pii.Verifiers.RevealActionExists`
+  + the `Samen.Transformers.RevealActions` fail-closed check).
+  """
+  defstruct [:name, __spark_metadata__: nil]
+
+  @type t :: %__MODULE__{name: atom(), __spark_metadata__: term()}
+end
+
 defmodule Samen.Pii do
   @moduledoc """
   Spark DSL extension carrying the `pii do … end` section — the real vault-routing
@@ -96,7 +122,8 @@ defmodule Samen.Pii do
 
   @vault %Spark.Dsl.Entity{
     name: :vault,
-    describe: "Declares a valid vault routing target. A pii_attribute may only route to a declared vault.",
+    describe:
+      "Declares a valid vault routing target. A pii_attribute may only route to a declared vault.",
     target: Samen.Pii.Vault,
     args: [:name],
     schema: [
@@ -107,7 +134,8 @@ defmodule Samen.Pii do
 
   @pii_attribute %Spark.Dsl.Entity{
     name: :pii_attribute,
-    describe: "Declares a vault-routed PII field. Composite types route by vault name (no pii_ prefix); scalars carry the pii_ prefix.",
+    describe:
+      "Declares a vault-routed PII field. Composite types route by vault name (no pii_ prefix); scalars carry the pii_ prefix.",
     target: Samen.Pii.Attribute,
     args: [:name, :type],
     schema: [
@@ -117,7 +145,23 @@ defmodule Samen.Pii do
       storage_type: [
         type: :atom,
         required: false,
-        doc: "Physical column type for the T1.3 materialization (defaults from the declared type)."
+        doc:
+          "Physical column type for the T1.3 materialization (defaults from the declared type)."
+      ]
+    ]
+  }
+
+  @reveal %Spark.Dsl.Entity{
+    name: :reveal,
+    describe:
+      "Marks an Ash action as a reveal action (returns vault plaintext for a granted actor, denies otherwise). First-class, introspectable — the C3 verifier and Samen.Reveal key on this declaration, not on the action name.",
+    target: Samen.Pii.RevealAction,
+    args: [:name],
+    schema: [
+      name: [
+        type: :atom,
+        required: true,
+        doc: "The name of an action on this resource that is a reveal action."
       ]
     ]
   }
@@ -125,11 +169,14 @@ defmodule Samen.Pii do
   @pii %Spark.Dsl.Section{
     name: :pii,
     describe: "PII routing declarations. Each field routes to a declared vault.",
-    entities: [@vault, @pii_attribute]
+    entities: [@vault, @pii_attribute, @reveal]
   }
 
   use Spark.Dsl.Extension,
     sections: [@pii],
-    transformers: [Samen.Transformers.MaterializePii],
-    verifiers: [Samen.Pii.Verifiers.VaultDeclared]
+    transformers: [Samen.Transformers.MaterializePii, Samen.Transformers.RevealActions],
+    verifiers: [
+      Samen.Pii.Verifiers.VaultDeclared,
+      Samen.Pii.Verifiers.RevealActionExists
+    ]
 end

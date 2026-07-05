@@ -1,0 +1,8 @@
+{
+  "$comment": "PERMANENT abbrev registry for the Demo contact-manager dogfood app. Abbrevs are 3-letter lowercase, collision-checked, and NEVER recycled or changed once assigned to a resource.",
+  "abbrevs": {
+    "org": "Demo.Crm.Org",
+    "mbr": "Demo.Crm.Membership",
+    "cnt": "Demo.Crm.Contact"
+  }
+}

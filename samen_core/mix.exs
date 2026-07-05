@@ -9,11 +9,27 @@ defmodule SamenCore.MixProject do
       version: @version,
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
+      # Protocol consolidation OFF in :test only. Property fixtures (e.g.
+      # abbrev_property_test.exs) recompile modules at runtime via
+      # Code.compile_string/1; each recompile re-derives Inspect for the fixture
+      # module, which — once protocols are consolidated — emits a "has no effect"
+      # warning that `mix test --warnings-as-errors` treats as an error. Disabling
+      # consolidation in test (the standard Elixir remedy for runtime-recompiled
+      # modules) removes the false failure without affecting dev/prod, where
+      # protocols stay consolidated. Pre-existing condition surfaced by T1.6's
+      # --warnings-as-errors gate.
+      consolidate_protocols: Mix.env() != :test,
       start_permanent: Mix.env() == :prod,
+      # test/pii_reads_corpus/ holds the C3 `pii_reads` verifier corpus (T1.8b):
+      # `.ex` files with INTENTIONAL PII leaks that the walker reads as TEXT and
+      # must never be compiled or loaded as tests. Elixir 1.20 warns about any
+      # file under test/ that neither matches `:test_load_filters` (*_test.exs)
+      # nor is ignored — and `mix test --warnings-as-errors` treats that warning
+      # as a failure. Ignore the corpus dir so the corpus is text-only fixtures.
+      test_ignore_filters: [&String.starts_with?(&1, "test/pii_reads_corpus/")],
       deps: deps(),
       aliases: aliases(),
-      description:
-        "Samen foundry kernel: self-qualifying storage, machine catalog, PII vault.",
+      description: "Samen foundry kernel: self-qualifying storage, machine catalog, PII vault.",
       package: package()
     ]
   end
@@ -41,7 +57,17 @@ defmodule SamenCore.MixProject do
       {:ecto_sql, "== 3.14.0"},
       {:postgrex, "== 0.22.2"},
       {:jason, "~> 1.4"},
-      {:stream_data, "== 1.3.0"}
+      {:stream_data, "== 1.3.0"},
+      # Oban: durable jobs on the same Postgres. T1.6 enqueues the reveal-grant
+      # auto-revoke job IN THE SAME TRANSACTION that writes the grant (same-tx
+      # enqueue), so a grant insert that rolls back leaves no orphan job. Pinned
+      # (T2.1 will layer AshOban conventions on top of this base Oban).
+      {:oban, "== 2.23.0"},
+      # phoenix_html provides Phoenix.HTML.Safe — %Masked{} implements it so a
+      # HEEx `<%= @person.email %>` renders "••••" and never raises/leaks
+      # (Gate-0 fix task #1, T1.5 acceptance clause (a)). Runtime dep: host apps
+      # that render masked values in HEEx need the protocol present.
+      {:phoenix_html, "~> 4.1"}
     ]
   end
 

@@ -80,8 +80,16 @@ defmodule Samen.AbbrevPropertyTest do
       end
       """
 
+      # Purge the fixture module AND its derived Inspect protocol impl. Ash
+      # resources define a per-module `Inspect.<Resource>` impl; recompiling the
+      # fixture each run redefines that impl, which emits a "redefining module"
+      # warning that `mix test --warnings-as-errors` treats as an error. Purging
+      # the impl module too keeps the runtime-recompile loop warning-free.
+      inspect_impl = Module.concat(Inspect, @gen_module)
       :code.purge(@gen_module)
       :code.delete(@gen_module)
+      :code.purge(inspect_impl)
+      :code.delete(inspect_impl)
       modules = Code.compile_string(src)
       assert Enum.any?(modules, fn {m, _bin} -> m == @gen_module end)
 

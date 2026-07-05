@@ -114,6 +114,57 @@ defmodule Samen.Pii.Info do
     resource |> fields() |> Enum.map(& &1.storage_name)
   end
 
+  @doc """
+  The set of **reveal actions** declared for a resource via `reveal :action` in
+  its `pii do … end` block (T1.5 clause (c); Gate-0 fix task #6).
+
+  This is real introspection: it reads the persisted marker set
+  (`Samen.Transformers.RevealActions`), NOT the action *name*. The C3 `pii_reads`
+  verifier (T1.8b) keys reveal-scope suppression on THIS, so a laundering
+  `def reveal_report/1` cannot masquerade as a reveal boundary — only a declared
+  `reveal :name` action is one.
+
+  Returns a `MapSet` of action-name atoms. Empty for a resource that declares no
+  reveal actions (default deny: nothing is a reveal action unless declared).
+  """
+  @spec reveal_actions(Spark.Dsl.t() | module()) :: MapSet.t(atom())
+  def reveal_actions(resource) do
+    resource
+    |> persisted(Samen.Transformers.RevealActions.persist_key())
+    |> case do
+      %MapSet{} = set ->
+        set
+
+      _ ->
+        # Fallback for DSL-state contexts where persistence isn't materialized:
+        # read the declarations directly. Same source of truth (the `reveal`
+        # entity), never the action name.
+        resource
+        |> Extension.get_entities([:pii])
+        |> Enum.filter(&match?(%Samen.Pii.RevealAction{}, &1))
+        |> Enum.map(& &1.name)
+        |> MapSet.new()
+    end
+  end
+
+  @doc """
+  Is `action_name` a declared reveal action on `resource`? Keys on the DECLARATION
+  (`reveal :name`), never on the action name matching a `reveal` prefix.
+  """
+  @spec reveal_action?(Spark.Dsl.t() | module(), atom()) :: boolean()
+  def reveal_action?(resource, action_name) do
+    MapSet.member?(reveal_actions(resource), action_name)
+  end
+
+  # Reads a persisted value from either a compiled module or a raw DSL state.
+  # Spark.Dsl.Extension.get_persisted/3 handles a compiled module atom directly
+  # (extension.ex line 296) and a %Spark.Dsl{}/map DSL state.
+  defp persisted(resource, key) do
+    Spark.Dsl.Extension.get_persisted(resource, key, nil)
+  rescue
+    _ -> nil
+  end
+
   defp composite?(type) do
     module = resolve(type)
 
