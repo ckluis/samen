@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Samen — build the 20%, inherit the 80%, run the whole company on it</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,560;1,9..144,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:#FAF7F2; --card:#FFFDF9; --ink:#201B14; --muted:#6E6457; --faint:#6E6457; --decor:#99907F;
+    --rule:#E7DFD2; --orange:#FF6200; --orange-deep:#C44A00; --orange-wash:#FFF1E6;
+    --green:#4C7A34; --green-wash:#EDF3E6; --blue:#3A5A78; --blue-wash:#E9EFF4;
+    --mono:'JetBrains Mono',ui-monospace,monospace; --display:'Fraunces',Georgia,serif; --body:'Inter',-apple-system,sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  ::selection { background:var(--orange); color:#fff; }
+  html { scroll-behavior:smooth; scroll-padding-top:88px; }
+  body { background:var(--paper); color:var(--ink); font-family:var(--body); font-size:17px; line-height:1.65; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1080px; margin:0 auto; padding:0 28px; }
+  .measure { max-width:66ch; }
+  a { color:var(--orange-deep); }
+  /* a11y: deep-link targets clear the sticky bar even where scroll-padding doesn't apply */
+  section, header.hero, [id] { scroll-margin-top:88px; }
+  /* a11y: visible focus indicator (WCAG 2.4.7) — keyboard users see where they are */
+  a:focus-visible, button:focus-visible, [tabindex]:focus-visible { outline:2px solid var(--orange-deep); outline-offset:2px; border-radius:3px; }
+  /* a11y: skip-link, visible only when focused */
+  .skip-link { position:absolute; left:12px; top:-48px; z-index:40; background:var(--ink); color:#fff; font-family:var(--mono); font-size:13px; padding:9px 16px; border-radius:8px; text-decoration:none; transition:top .15s; }
+  .skip-link:focus { top:12px; }
+
+  nav { display:flex; align-items:baseline; justify-content:space-between; padding:26px 0 24px; border-bottom:1px solid var(--rule); position:sticky; top:0; background:rgba(250,247,242,.86); backdrop-filter:blur(8px); z-index:20; }
+  .wordmark { font-family:var(--display); font-weight:560; font-size:22px; letter-spacing:-0.01em; }
+  .wordmark .dot { color:var(--orange); }
+  nav .navlinks { display:flex; flex-wrap:wrap; gap:8px 13px; font-family:var(--mono); font-size:12px; color:var(--muted); justify-content:flex-end; }
+  nav .navlinks a { color:var(--muted); text-decoration:none; }
+  nav .navlinks a:hover { color:var(--orange-deep); }
+  nav .navlinks a:focus-visible { color:var(--orange-deep); outline:2px solid var(--orange-deep); outline-offset:3px; border-radius:3px; }
+  /* < 760px: keep wayfinding — a horizontally-scrollable in-page TOC, not hidden */
+  @media (max-width:760px){
+    nav { flex-direction:column; align-items:flex-start; gap:12px; }
+    nav .navlinks { flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; width:100%; justify-content:flex-start; padding-bottom:2px; }
+    nav .navlinks a { white-space:nowrap; }
+  }
+
+  .hero { padding:88px 0 56px; }
+  .kicker { font-family:var(--mono); font-size:13px; font-weight:500; color:var(--orange-deep); letter-spacing:0.06em; text-transform:uppercase; margin-bottom:26px; }
+  h1 { font-family:var(--display); font-weight:560; font-size:clamp(42px,6.4vw,72px); line-height:1.03; letter-spacing:-0.024em; max-width:17ch; }
+  h1 em { font-style:italic; font-weight:400; color:var(--orange-deep); }
+  .hero .sub { margin-top:30px; font-size:20px; line-height:1.6; color:var(--muted); max-width:62ch; }
+  .hero .sub strong { color:var(--ink); font-weight:600; }
+  .surfaces { margin-top:40px; display:flex; flex-wrap:wrap; gap:10px; }
+  .pill { font-family:var(--mono); font-size:13px; padding:7px 14px; border:1px solid var(--rule); border-radius:100px; background:var(--card); color:var(--muted); }
+  .pill b { color:var(--ink); font-weight:500; }
+  .pill.lit { border-color:var(--orange); color:var(--orange-deep); background:var(--orange-wash); }
+
+  .fade { opacity:0; transform:translateY(14px); animation:rise .7s cubic-bezier(.2,.6,.2,1) forwards; }
+  .d1{animation-delay:.05s}.d2{animation-delay:.15s}.d3{animation-delay:.25s}.d4{animation-delay:.35s}
+  @keyframes rise { to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion:reduce){ .fade{animation:none;opacity:1;transform:none;} }
+
+  section { padding:74px 0; border-top:1px solid var(--rule); }
+  .sec-label { font-family:var(--mono); font-size:12.5px; font-weight:500; letter-spacing:0.07em; text-transform:uppercase; color:var(--faint); margin-bottom:18px; }
+  .sec-label::before { content:"— "; color:var(--orange); }
+  h2 { font-family:var(--display); font-weight:560; font-size:clamp(28px,3.8vw,42px); line-height:1.12; letter-spacing:-0.015em; max-width:27ch; margin-bottom:20px; }
+  h2 em { font-style:italic; font-weight:400; color:var(--orange-deep); }
+  h3 { font-family:var(--display); font-size:20px; font-weight:560; letter-spacing:-0.01em; }
+  .prose p { color:var(--muted); margin-bottom:18px; }
+  .prose p strong { color:var(--ink); font-weight:600; }
+  .prose .lead { font-size:20px; line-height:1.6; }
+  .ic { font-family:var(--mono); font-size:13.5px; background:var(--orange-wash); padding:2px 6px; border-radius:5px; color:var(--orange-deep); white-space:nowrap; }
+  .lock { color:var(--orange-deep); font-size:12px; }
+
+  .pillars { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:40px; }
+  .layer { background:var(--card); border:1px solid var(--rule); border-radius:14px; padding:24px 22px; transition:border-color .2s; }
+  .layer:hover { border-color:var(--orange); }
+  .layer h3 { font-size:19px; margin-bottom:10px; }
+  .layer p { font-size:14.5px; color:var(--muted); line-height:1.56; }
+  .layer p b { color:var(--ink); font-weight:600; }
+
+  .codecard { background:#221C14; border-radius:14px; padding:18px 22px 20px; color:#EDE6DA; font-family:var(--mono); font-size:12.5px; line-height:1.7; overflow-x:auto; margin:24px 0; }
+  .codecard .bar { display:flex; gap:7px; align-items:center; margin-bottom:14px; }
+  .codecard .bar i { width:10px; height:10px; border-radius:50%; background:#4A4338; }
+  .codecard .bar i:first-child { background:var(--orange); }
+  .codecard .fname { margin-left:10px; font-size:11px; color:#918876; }
+  .codecard pre { white-space:pre; font-family:var(--mono); }
+  .cm{color:#918876;font-style:italic}.str{color:#B7D7A8}.kw{color:#FFB077}.at{color:#F2E3C8}
+
+  .grid2 { display:grid; grid-template-columns:1fr 1.05fr; gap:44px; align-items:start; }
+  .fig { margin:30px 0 8px; border:1px solid var(--rule); border-radius:16px; background:var(--card); padding:20px; }
+  .fig svg { display:block; width:100%; height:auto; }
+  .figcap { font-family:var(--mono); font-size:12px; color:var(--faint); margin-top:12px; line-height:1.5; }
+  .figcap b { color:var(--orange-deep); font-weight:500; }
+
+  /* audience cards */
+  .aud { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-top:36px; }
+  .ac { border-radius:14px; padding:24px 22px; border:1px solid var(--rule); background:var(--card); min-width:0; }
+  .ac .ic { white-space:normal; overflow-wrap:anywhere; }
+  .ac.cto { border-top:3px solid var(--blue); }
+  .ac.cpo { border-top:3px solid var(--orange); }
+  .ac.cfo { border-top:3px solid var(--green); }
+  .ac .role { font-family:var(--mono); font-size:12px; letter-spacing:0.05em; text-transform:uppercase; margin-bottom:6px; }
+  .ac.cto .role { color:var(--blue); } .ac.cpo .role { color:var(--orange-deep); } .ac.cfo .role { color:var(--green); }
+  .ac h3 { font-size:18px; line-height:1.25; margin-bottom:14px; }
+  .ac ul { list-style:none; }
+  .ac li { font-size:14px; color:var(--muted); padding:7px 0 7px 18px; position:relative; line-height:1.5; }
+  .ac li::before { content:"·"; position:absolute; left:4px; color:var(--orange); font-weight:700; }
+  .ac li b { color:var(--ink); font-weight:600; }
+  .ac .obj { margin-top:14px; padding-top:14px; border-top:1px dashed var(--rule); font-size:13px; color:var(--faint); }
+  .ac .obj b { color:var(--ink); }
+
+  /* ERD tables */
+  .erd { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:36px; }
+  .erd .base { grid-column:1 / -1; }
+  .etable.base .erd-cols { }
+  .etable { border:1px solid var(--rule); border-radius:14px; overflow:hidden; background:var(--card); }
+  .etable.base { border-color:var(--ink); }
+  .etable .eh { padding:14px 20px; border-bottom:1px solid var(--rule); display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+  .etable.base .eh { background:var(--ink); }
+  .etable.base .eh .en, .etable.base .eh .et { color:#fff; }
+  .etable .en { font-family:var(--mono); font-size:14px; font-weight:500; }
+  .etable .et { font-size:12.5px; color:var(--muted); font-style:italic; }
+  .erow { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; padding:8px 20px; font-family:var(--mono); font-size:12.5px; }
+  .erow + .erow { border-top:1px solid var(--rule); }
+  .erow .col { color:var(--ink); }
+  .erow .col .ct { color:var(--faint); }
+  .erow.added { background:var(--orange-wash); }
+  .erow.added .col { color:var(--orange-deep); font-weight:500; }
+  .tag { font-family:var(--mono); font-size:9.5px; padding:2px 6px; border-radius:4px; white-space:nowrap; }
+  .tag.core { background:#EFEBE3; color:var(--muted); }
+  .tag.pii { background:var(--orange-deep); color:#fff; }
+  .tag.fk { background:var(--blue-wash); color:var(--blue); }
+  .tag.t0 { background:var(--green-wash); color:#3C611F; }
+  .tag.t1 { background:#F0E9D8; color:#6E5417; }
+  .tag.aud { background:#ECECEC; color:#5E5E5E; }
+  .efree { padding:11px 20px; border-top:1px dashed var(--rule); font-family:var(--mono); font-size:12px; color:var(--muted); line-height:1.5; }
+  .eprob { padding:11px 20px; font-size:13px; color:var(--muted); border-top:1px solid var(--rule); }
+  .eprob b { color:var(--ink); }
+
+  .stat { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin:30px 0 8px; }
+  .stat .s { background:var(--card); border:1px solid var(--rule); border-radius:12px; padding:20px; text-align:center; }
+  .stat .sv { font-family:var(--display); font-size:34px; font-weight:560; color:var(--orange-deep); letter-spacing:-0.01em; }
+  .stat .sl { font-family:var(--mono); font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.4; }
+
+  .compare { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:28px; }
+  .saas { background:var(--card); border:1px solid var(--rule); border-radius:14px; padding:20px; }
+  .saas .sn { font-family:var(--display); font-size:19px; font-weight:560; color:var(--orange-deep); }
+  .saas .sd { font-size:12.5px; color:var(--muted); margin-bottom:10px; }
+  .saas .bt { font-size:13px; color:var(--muted); line-height:1.5; }
+  .saas .bt b { color:var(--ink); }
+
+  .resolution { border:1px solid var(--orange); background:var(--orange-wash); border-radius:14px; padding:28px 32px; display:flex; gap:18px; align-items:baseline; margin-top:34px; }
+  .resolution .mark { font-family:var(--display); font-style:italic; font-size:28px; color:var(--orange); flex-shrink:0; }
+  .resolution .claim { font-family:var(--display); font-size:clamp(19px,2.3vw,24px); font-weight:560; line-height:1.32; letter-spacing:-0.012em; color:var(--orange-deep); }
+  .resolution .claim span { color:var(--ink); }
+
+  .honest { background:var(--card); border:1px solid var(--rule); border-radius:14px; padding:30px 32px; margin-top:8px; }
+  .honest ul { list-style:none; }
+  .honest li { padding:11px 0 11px 26px; position:relative; color:var(--muted); font-size:14.5px; }
+  .honest li + li { border-top:1px dashed var(--rule); }
+  .honest li::before { content:"↳"; position:absolute; left:0; color:var(--orange); font-family:var(--mono); }
+  .honest li strong { color:var(--ink); font-weight:600; }
+
+  .scopes-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:32px; }
+  .sc { background:var(--card); border:1px solid var(--rule); border-radius:12px; padding:16px 16px; }
+  .sc .scn { font-family:var(--display); font-size:15.5px; font-weight:560; margin-bottom:4px; }
+  .sc .obj { font-family:var(--mono); font-size:10.5px; color:#A33D00; line-height:1.5; }
+  @media (max-width:760px){ .scopes-grid{grid-template-columns:1fr 1fr;} }
+
+  .cta { padding:90px 0 100px; }
+  .cta h2 { max-width:30ch; }
+  .cta-ask { margin-top:34px; display:flex; flex-wrap:wrap; gap:14px; align-items:center; }
+  .cta-btn { font-family:var(--body); font-size:15px; font-weight:600; text-decoration:none; padding:14px 26px; border-radius:100px; display:inline-flex; align-items:center; gap:9px; transition:transform .15s, box-shadow .15s, background .15s; }
+  .cta-btn .arr { font-family:var(--mono); font-weight:500; }
+  /* a11y: white-on-orange-deep clears WCAG AA (~4.5:1+) where white-on-#FF6200 did not */
+  .cta-btn.primary { background:var(--orange-deep); color:#fff; box-shadow:0 1px 0 #9c3b00; }
+  .cta-btn.primary:hover { transform:translateY(-1px); box-shadow:0 6px 18px rgba(196,74,0,.32); }
+  .cta-btn.ghost { background:var(--card); color:var(--orange-deep); border:1px solid var(--orange); }
+  .cta-btn.ghost:hover { background:var(--orange-wash); }
+  .cta-note { font-family:var(--mono); font-size:12px; color:var(--faint); margin-top:20px; }
+  .cta-note b { color:var(--orange-deep); font-weight:500; }
+  /* mid-doc soft CTA — the ask is reachable before the limits wall */
+  .soft-cta { margin-top:38px; border:1px solid var(--orange); background:var(--orange-wash); border-radius:14px; padding:22px 26px; display:flex; flex-wrap:wrap; gap:16px 22px; align-items:center; justify-content:space-between; }
+  .soft-cta .sct { font-family:var(--display); font-size:18px; font-weight:560; letter-spacing:-0.01em; color:var(--orange-deep); max-width:46ch; }
+  .soft-cta .sct span { color:var(--ink); }
+  @media (max-width:520px){ .cta-btn { width:100%; justify-content:center; } }
+  footer { border-top:1px solid var(--rule); padding:26px 0 40px; display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+  footer span { font-family:var(--mono); font-size:12px; color:var(--faint); }
+
+  @media (max-width:880px){ .pillars,.grid2,.aud,.erd,.compare,.stat{grid-template-columns:1fr;} .erd .base{grid-column:auto;} .hero{padding:56px 0 40px;} section{padding:54px 0;} }
+</style>
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<nav class="wrap" style="max-width:1080px;margin:0 auto;">
+  <div class="wordmark">samen<span class="dot">.</span></div>
+  <div class="navlinks">
+    <a href="#thesis">thesis</a>
+    <a href="#b2b">b2b</a>
+    <a href="#cto">cto</a>
+    <a href="#cpo">cpo</a>
+    <a href="#cfo">cfo</a>
+    <a href="#core">core</a>
+    <a href="#extend">extend</a>
+    <a href="#data">data</a>
+    <a href="#liveview">scale</a>
+    <a href="#runs">runs</a>
+    <a href="#control">control</a>
+    <a href="#llm">llm</a>
+    <a href="#honest">limits</a>
+    <a href="#start">cta</a>
+  </div>
+</nav>
+
+<main id="main">
+
+<header class="hero">
+  <div class="wrap">
+    <div class="kicker fade d1">A governed substrate for B2B SaaS — Software as a Service, or Service as Software</div>
+    <h1 class="fade d2">Build the 20%. Inherit the 80%. <em>Run the whole company on it.</em></h1>
+    <p class="sub fade d3">If you're shipping your <strong>second or third SaaS</strong>, you've rebuilt the same eighty percent — identity, billing, CRM, email, content, support — a little worse each time, then <em>again</em> as internal tooling. Samen presets that core as <strong>governed, catalogued, PII-safe, malleable idioms on a single Postgres</strong>: engineering writes only the B2B problem, an LLM grounds on idioms where a hallucinated column fails the build and a mistyped PII field is flagged by the PII scanner in CI, and the control plane that runs your business is the same substrate you sell.</p>
+    <div class="surfaces fade d4">
+      <span class="pill"><b>one runtime</b> — Elixir · Ash · Oban</span>
+      <span class="pill"><b>one Postgres</b> — the whole stateful surface</span>
+      <span class="pill lit">PII vaulted · catalogued · LLM-grounded</span>
+    </div>
+  </div>
+</header>
+
+<!-- ===================== THESIS ===================== -->
+<section id="thesis">
+  <div class="wrap">
+    <div class="sec-label">The thesis</div>
+    <h2>You're rebuilding the same eighty percent — <em>twice</em></h2>
+    <div class="prose measure">
+      <p class="lead">Once as the product: auth, orgs, roles, Stripe, customers, subscriptions, invoices, a contacts model, lifecycle email, a marketing site, a help desk, notifications, files, search, audit, webhooks. None of it is your product; all of it gets built anyway.</p>
+      <p>Then again as the business: the internal admin, the support console, the billing-ops desk, the "log in as this customer to see what they see" tool that every serious B2B SaaS eventually hand-rolls — usually with PII handling bolted on at the end and no audit trail. <strong>No framework presets the universal substrate as one governed, queryable, safe-by-construction object model — let alone both planes of it.</strong> Which is strange, because it's the same substrate every time.</p>
+      <p>You pay that double tax once per SaaS — and if you're an operator or studio on your <strong>second or third product</strong>, you've paid it two or three times over. Samen's whole job is to make building a SaaS about <strong>the B2B problem only</strong>, and to make running it a capability you inherit, not a second project. The mechanism is six idioms applied uniformly to every object in every scope — which is exactly what makes the substrate consistent enough for a human <em>or</em> a model to build on. The honest qualifier, stated up front: this is the core <em>extracted</em> by the Rule of Three, so the inheritance pays from the third product on — not a foundry you build before you've shipped one.</p>
+    </div>
+    <div class="pillars">
+      <div class="layer"><h3>Self-qualifying storage</h3><p>You write idiomatic <span class="ic">attribute :name</span>; a compile-time transformer projects it to <span class="ic">com_name</span> in the DB, CDC, logs, and catalog. <b>One stable column identity across DB, CDC, logs, and catalog — a row says what it is everywhere, with no rename drift.</b></p></div>
+      <div class="layer"><h3>A catalog for machines</h3><p>A generated data dictionary (<span class="ic">tam_table</span>/<span class="ic">fld_field</span>) names every object and field. <b>An agent grounds on it; a CI linter rejects any code referencing a column that doesn't exist — and an adversarial scanner (<span class="ic">samen.verify.pii_classify</span>) flags any new plain-typed column that <em>looks</em> like PII.</b></p></div>
+      <div class="layer"><h3>PII in a vault</h3><p>Personal fields are FK tokens into encrypted vaults; composite types are the unit; masking is the default render. <b>Crypto-shred destroys a subject's key; leakage is a compile-time verifier check.</b></p></div>
+      <div class="layer"><h3>Postgres as the engine</h3><p>Oban makes durable jobs, cron, and workflows rows in your DB — enqueued in the same transaction as the data. <b>No Redis, no broker, no worker fleet.</b></p></div>
+      <div class="layer"><h3>A malleability ladder</h3><p>Config rows → custom fields → custom objects → builder code-composition. <b>End-users bend the model without forking the product; system guarantees stay provable.</b> The top rung is a <b>context boundary</b> — where a vertical writes its own ubiquitous language over the shared infrastructure, not merely "more malleability."</p></div>
+      <div class="layer"><h3>Two planes, one core</h3><p>The product your tenants use and the control plane you run the business with are the same objects. <b>Masked impersonation lets you support a tenant without seeing their customers' PII.</b></p></div>
+    </div>
+
+    <!-- POSITIONING — name the alternatives, place it on a map -->
+    <div class="sec-label" style="margin-top:54px">Where it sits — and what it replaces</div>
+    <h2 style="max-width:30ch">Not a new category. <em>A governed substrate where you'd otherwise hand-roll one.</em></h2>
+    <div class="prose measure">
+      <p>The honest status quo for the multi-product operator on their second or third SaaS isn't a competitor — it's <strong>a stack you assemble and an admin you hand-roll, twice.</strong> Samen is positioned against three real alternatives, not an abstraction:</p>
+    </div>
+    <div class="compare">
+      <div class="saas">
+        <div class="sn">vs. rebuild on Rails/Django + a vendor stack</div>
+        <div class="sd">the default: a web framework + Clerk + Stripe + Segment + Zendesk + Inngest, then a hand-rolled internal admin</div>
+        <div class="bt">That stack gives you the 80% as <b>six integration surfaces and six failure domains</b>, PII smeared across all of them, and an internal tooling project nobody scoped. Samen presets the same 80% as <b>one governed object model on one Postgres</b> — vault, catalog, audit, and the operator plane come with it, not after it. The trade is an opinionated core for a smaller bill of integration-and-compliance work.</div>
+      </div>
+      <div class="saas">
+        <div class="sn">vs. Supabase / Firebase</div>
+        <div class="sd">backend-as-a-service: auth + a database + functions</div>
+        <div class="bt">A BaaS gives you primitives and a console — <b>no governed control plane, no PII-by-construction, no catalogued object model where a hallucinated column fails to compile and a mistyped PII field is caught by the PII scanner in CI (a CI step, not the Elixir compiler).</b> You still build the CRM, billing, support, the catalog, the vault, and the impersonation seam yourself. Samen is the <b>governed substrate</b> a BaaS leaves you to assemble — the difference between rented infrastructure and a presolved 80%.</div>
+      </div>
+      <div class="saas">
+        <div class="sn">vs. Retool / an internal-platform team</div>
+        <div class="sd">admin-UI builders and internal tooling squads</div>
+        <div class="bt">Retool and a platform team build the <b>admin UI on top of</b> a product database someone else designed — a second plane that lags the product by months and reaches across PII by default. Samen makes the control plane the <b>same objects as the product</b>, so "what you ship is what ops can see," masked by default. It is the <b>product substrate</b>, not a viewer bolted onto one.</div>
+      </div>
+    </div>
+    <div class="prose measure" style="margin-top:24px">
+      <p><strong>Who it is for, sharply: the multi-product operator or studio past their third product</strong> — the buyer the honest edges name, extracting the shared core by the Rule of Three. Not a single-SaaS team expecting a finished platform off the shelf; before the third product you're still building the three, and the inheritance hasn't begun to pay. The lead buyer is <strong>CTO-led</strong> — the architecture is theirs to sign — with the CPO (velocity) and CFO (cost and compliance) as the expansion case once the CTO is convinced. We don't claim a searchable new category; we claim an ownable position: <strong>the governed substrate for the universal-infrastructure 80%, where the alternative is hand-rolling it.</strong></p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== BUILT FOR B2B ===================== -->
+<section id="b2b">
+  <div class="wrap">
+    <div class="sec-label">The software it's for</div>
+    <h2>Built for <em>B2B SaaS</em> — whether a human uses it, or an agent <em>is</em> it</h2>
+    <div class="prose measure">
+      <p>Samen is not a general web framework. It is a substrate for <strong>B2B SaaS</strong> — software a business buys, a security team audits, and other businesses' data flows through. That shape comes in two forms today, and the substrate is built for both:</p>
+      <p>· <strong>Software as a Service</strong> — humans use your product to do their work. In B2B the inherited 80% (multi-tenant orgs, RBAC/SSO, billing &amp; entitlements, audit, the PII vault, the operator plane) is exactly what a buyer's <em>security review</em> demands <em>before</em> they sign — so it isn't scale-stage polish, it's table stakes to close the first contract.<br>
+      · <strong>Service as Software</strong> — the AI-native pattern: you sell the <em>outcome</em>, and an agent does the work a human team used to. Software that <em>is</em> the service needs more than a model — it needs a governed system of record to <em>act</em> in: a catalog it can't hallucinate off of, policies that bound what it may touch, a vault so it never lands a name in the clear, and a first-class audit row for every action it takes. That governed substrate is this.</p>
+    </div>
+    <div class="compare">
+      <div class="saas">
+        <div class="sn">Table stakes to <em>sell</em></div>
+        <div class="sd">the B2B 80% <em>is</em> the security questionnaire</div>
+        <div class="bt">Orgs, RBAC, SSO, billing, an audit trail, PII handling — the questions an enterprise buyer asks <b>before</b> a contract — answered by the substrate, not your roadmap. In B2B the 80% isn't deferred until scale; it gates deal #1.</div>
+      </div>
+      <div class="saas">
+        <div class="sn">Compliance is <em>revenue</em></div>
+        <div class="sd">vault · crypto-shred · masked impersonation · audit</div>
+        <div class="bt">SOC2 / GDPR / HIPAA diligence is what unblocks the enterprise deal. PII-safe-by-construction plus a tamper-evident audit log answer a large part of the questionnaire as a <b>substrate property</b>, not a months-long scramble per launch.</div>
+      </div>
+      <div class="saas">
+        <div class="sn">An agent you can <em>trust</em> in the loop</div>
+        <div class="sd">the precondition for Service as Software</div>
+        <div class="bt">Every object is catalogued, policy-scoped, vault-routed, and audited — so an AI agent can operate on <b>real customer data</b> with guardrails that hold. The model can still be wrong; the substrate makes wrong <b>bounded, masked, and logged</b> instead of a breach. That's what makes selling the outcome safe.</div>
+      </div>
+    </div>
+    <div class="prose measure" style="margin-top:22px">
+      <p>Where the product is yours — the freight broker's settlement math, the clinic's clinical workflow, the agent's domain reasoning — you write native Ash with no ceiling. Samen takes the universal B2B 80% off your plate so every line you write, <em>and every agent you deploy</em>, spends itself on <strong>the part that's actually your business.</strong></p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== TRI-AUDIENCE ===================== -->
+<section id="audiences">
+  <div class="wrap">
+    <div class="sec-label">Why it makes sense — for the people who decide</div>
+    <h2>One architecture the <em>CTO</em> signs — and the CPO and CFO expand on</h2>
+    <div class="prose measure">
+      <p>The lead buyer is the <strong>CTO</strong>: this is an architecture decision before it is a budget or a roadmap one, so the case has to close with them first. The CPO and CFO cases below are the <strong>expansion</strong> — why the same decision compounds into faster launches and a retired vendor-and-compliance liability once the substrate is in. Read top-to-bottom: convince the CTO, then widen.</p>
+    </div>
+    <div class="aud">
+      <div class="ac cto" id="cto">
+        <div class="role">For the CTO</div>
+        <h3>Build less. Govern more. Ship correctness from the same artifact as velocity.</h3>
+        <ul>
+          <li><b>One Postgres, no sidecar zoo.</b> Oban gives durable, transactional, SKIP-LOCKED workflows — no Redis, no broker, no queue service.</li>
+          <li><b>No integration tax — CRM, support, and marketing are <em>native</em>, not bolted on.</b> They're Ash resources on the same Postgres, not third-party systems you sync to — so there's no <strong>Salesforce / HubSpot / Zendesk</strong> connector to build and version, no webhook reconciliation, no two-systems-of-record drifting apart, no nightly ETL that's down at 2am. The integration <em>is</em> a join.</li>
+          <li><b>PII is structurally safe, and erasure is provable.</b> Encrypted vault tokens; plaintext only behind <span class="ic">:reveal</span>; the opt-in gap — a sensitive field given a plain type — is caught by <span class="ic">samen.verify.pii_classify</span> at build, not left to discipline. Erasure is crypto-shred: destroy a subject's <strong>external-KMS key</strong> (a PITR restore brings back ciphertext, never the key) and their vault-tokenized PII goes undecryptable across every tier — proven by <span class="ic">mix samen.verify.no_plaintext_pii</span>, carve-outs named in <em>the limits</em>.</li>
+          <li><b>The catalog is your LLM-grounding and your linter.</b> Velocity and correctness from one data dictionary — no hallucinated columns, no tribal knowledge onboarding.</li>
+          <li><b>Compile-time guarantees for the system core</b> — code-extended core objects are policy-checked at build, not runtime config you defend in a postmortem; tenant Tier-1/2 customization is validated-at-write (the honest edge below names the seam).</li>
+        </ul>
+        <div class="obj"><b>"Elixir is a small pond."</b> True — but the surface you hire <em>for</em> is smaller too: no queue team, no auth team, no analytics-plumbing team. The trade is fewer candidates, each doing the work of three. A bet, not a free lunch.</div>
+      </div>
+      <div class="ac cpo" id="cpo">
+        <div class="role">For the CPO</div>
+        <h3>Velocity on the inherited 80%. The vertical 20% is still real work — and that's the honest deal.</h3>
+        <ul>
+          <li><b>A real customization ladder</b>, not "submit a feature request": config rows cover ~70%, then custom fields, custom objects, and code-extended core — full guarantees, no fork.</li>
+          <li><b>Time-to-market collapses on the 80%</b> — identity, CRM, billing, email, CMS, support are presets, not your roadmap. The honest half: your vertical's nouns and money model (the 20%) are domain work you still author — Samen makes the <em>context to build them in</em> faster, not the domain itself. Velocity where it's inherited; real work where it's yours.</li>
+          <li><b>What you ship equals what your ops team can see.</b> The control plane is the same substrate — no lagging internal admin built six months later.</li>
+          <li><b>One source of truth — not a data hunt.</b> Customer, subscription, ticket, and campaign all live in one catalogued object model, so "this account's usage, open tickets, and MRR" is one query — not a swivel-chair across <strong>Salesforce</strong>, the billing tool, and <strong>Zendesk</strong> stitched together by a reverse-ETL pipe. The 360° view is the default, not a warehouse project.</li>
+          <li><b>Customization is governed, so it doesn't rot.</b> Every custom field is catalogued; every record is org-scoped by policy.</li>
+        </ul>
+        <div class="obj"><b>"An opinionated core constrains the product."</b> It constrains the 80% you didn't want to design anyway — auth shape, PII, tenancy, durability. Where your product is distinct, you write native Ash with no ceiling.</div>
+      </div>
+      <div class="ac cfo" id="cfo">
+        <div class="role">For the CFO</div>
+        <h3>Collapse the vendor stack. Retire a compliance liability. More revenue per launch.</h3>
+        <ul>
+          <li><b>Vendor consolidation, against the status quo you'd otherwise run.</b> The <em>named alternative</em> — rebuilding the 80% on a web framework plus a developer-infra stack (managed PG + Upstash + Inngest + Clerk + Segment) — runs <b>~$2k–$8k/mo</b> before it scales with seats, and that's just the bill, not the engineers patching those surfaces. Samen's base is one Neon Postgres + one app: <b>~$300–$1.5k/mo.</b> You retire the assembled stack, not a vague "infra spend."</li>
+          <li><b>And the bigger line: the software you'd buy to <em>run</em> the company.</b> The operator plane is a real account CRM, help desk, and lifecycle-email console built from the same objects — so you're not also paying per-seat for <strong>Salesforce / HubSpot</strong> to track your customers, <strong>Zendesk</strong> to support them, and a marketing-automation contract on top. That's the second 80% every SaaS buys <em>and</em> rebuilds as internal tooling — inherited here, not expensed per head.</li>
+          <li><b>Fewer engineers building <em>and running</em> the 80%</b> — headcount goes to revenue features, not integrating and patching six vendors.</li>
+          <li><b>Faster revenue per launch</b> — the 80% is presolved, so each product reaches market on the 20% timeline. More shots on goal per engineer-year.</li>
+          <li><b>The cost of not governing PII is the big one.</b> GDPR fines reach 4% of global revenue; a plaintext breach is a board event. Samen makes plaintext the rare, audited exception — and erasure a <strong>key-destruction, not a copy-hunt</strong>: destroy a subject's external-KMS key and their vault-tokenized PII goes undecryptable across every tier. The <span class="ic">mix samen.verify.no_plaintext_pii --tiers all</span> oracle run is what you show an auditor.</li>
+        </ul>
+        <div class="obj"><b>"Consolidation is a single point of failure."</b> Owned, not dodged. On <em>hardware</em>, a managed, replicated Neon beats six surfaces and six contracts. The real risk is the <em>logical</em> failure domain — one Postgres is truth + queue + cron + audit + vault — which we engineer down with BEAM/Oban isolation, a read replica, and the expand/contract + PITR posture with stated RPO/RTO (see <em>How it runs § 2b</em>). A smaller, drilled blast radius for a larger one — on standard Postgres + Elixir, so you stay portable.</div>
+      </div>
+    </div>
+    <div class="resolution">
+      <div class="mark">∴</div>
+      <div class="claim">Samen presets the universal 80% as governed, PII-safe, malleable idioms on a single Postgres — so <span>engineering builds less, product ships its 20% faster, and finance retires both a vendor stack and a compliance liability.</span></div>
+    </div>
+    <div class="soft-cta">
+      <div class="sct">Convinced at the architecture level? <span>The fastest next step is a 45-minute architecture review against the two products you've already shipped.</span></div>
+      <a class="cta-btn primary" href="mailto:hello@samen.dev?subject=Architecture%20review%20—%20extracting%20our%20shared%20core">Book an architecture review <span class="arr">→</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== THE SHARED CORE ===================== -->
+<section id="core">
+  <div class="wrap">
+    <div class="sec-label">The inherited 80%</div>
+    <h2>One governed core, under <em>every</em> product</h2>
+    <div class="prose measure"><p>Every product inherits the universal scopes as Ash resources in the same idioms — catalogued, PII-safe, malleable. PII fields (<span class="lock">🔒</span>) route to the vault; the operator plane is built from the very same objects.</p></div>
+    <div class="scopes-grid">
+      <div class="sc"><div class="scn">Identity</div><div class="obj">org · user🔒 · membership · role · api_key · invitation🔒 · audit</div></div>
+      <div class="sc"><div class="scn">CRM</div><div class="obj">company · person🔒 · opportunity · pipeline · activity · attachment</div></div>
+      <div class="sc"><div class="scn">Billing</div><div class="obj">customer🔒 · subscription · plan · price · invoice · payment · usage · entitlement</div></div>
+      <div class="sc"><div class="scn">Marketing</div><div class="obj">campaign · segment · subscriber🔒 · template · send · email_event · suppression</div></div>
+      <div class="sc"><div class="scn">CMS</div><div class="obj">page · post · block · media · navigation · seo_meta · content_version</div></div>
+      <div class="sc"><div class="scn">Support</div><div class="obj">ticket · conversation · message🔒 · agent🔒 · sla · macro · csat</div></div>
+      <div class="sc"><div class="scn">Primitives</div><div class="obj">notification🔒 · file · search · audit · webhook🔒 · feature_flag</div></div>
+      <div class="sc" style="border-color:var(--orange);background:var(--orange-wash)"><div class="scn" style="color:var(--orange-deep)">Operator plane</div><div class="obj">same objects → your tenants, your tickets, your MRR</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== EXTEND — THE ERD CENTERPIECE ===================== -->
+<section id="extend">
+  <div class="wrap">
+    <div class="sec-label">The proof — one base, many shapes</div>
+    <h2>Compose a core object in code — and inherit <em>everything</em></h2>
+    <div class="prose measure">
+      <p>Here is one core object, <span class="ic">person</span>, shown four ways: the <strong>base system table</strong> (unmodified), then three real SaaS that <strong>compose it in code</strong> by adding their own columns. The added fields are highlighted. Everything that isn't highlighted is injected by the base macro — and so are the guarantees: the <strong>storage convention, vault routing, masking, org-scope, audit, catalog parity, and crypto-shred</strong> all come <strong>free</strong> on every column, including the new ones. Be precise about <em>which</em> 80% that is: what is inherited free is the cross-cutting <strong>infrastructure</strong> — the idioms every column obeys — <strong>not the domain meaning of the noun</strong>. The composed resource keeps the shared plumbing and writes its own semantics on top.</p>
+      <p>One clarity note before the diagram, because it is the whole safety story: this is <strong>Ash resource/extension composition</strong> — a base macro and Ash fragments that fold shared attributes into one resource that compiles to <strong>one physical table</strong> (single-table model, normal <span class="ic">UNIQUE</span>/<span class="ic">PK</span>/<span class="ic">FK</span>). It is emphatically <em>not</em> Postgres <span class="ic">CREATE TABLE … INHERITS</span> — table inheritance is a well-known footgun (a UNIQUE/PK constraint on the parent doesn't cover child rows, and an FK can't target the inheritance set). Samen never emits it.</p>
+      <p>Mind the two senses of <span class="ic">person</span>, because the FKs depend on it: <span class="ic">Core.Person</span> is the <strong>fragment</strong> — a tableless bundle of shared attributes and PII routing with no data layer of its own — while the <span class="ic">person</span> table above is a <strong>shipped CRM resource that composes that fragment</strong>. A relationship can only target a real, queryable resource, so every <span class="ic">belongs_to</span> below points at a <strong>composed resource with its own table</strong> (the CRM <span class="ic">person</span>, or the vertical's own <span class="ic">client</span>/<span class="ic">staff</span> — each itself <span class="ic">use</span>s the base over the same fragment), <em>never</em> at the fragment. The fragment is folded in; references resolve to the table it was folded into.</p>
+    </div>
+
+    <div class="erd">
+      <!-- BASE -->
+      <div class="etable base base">
+        <div class="eh"><span class="en">person</span><span class="et">shipped CRM resource (composes Core.Person) — unmodified</span></div>
+        <div class="erow"><span class="col">per_id <span class="ct">uuid</span></span><span class="tag core">core · pk</span></div>
+        <div class="erow"><span class="col">per_full_name <span class="ct">FullName composite</span></span><span class="tag pii">PII → pii_name vault</span></div>
+        <div class="erow"><span class="col">per_emails <span class="ct">Emails composite</span></span><span class="tag pii">PII → pii_email vault</span></div>
+        <div class="erow"><span class="col">per_phones <span class="ct">Phones composite</span></span><span class="tag pii">PII → pii_phone vault</span></div>
+        <div class="erow"><span class="col">per_job_title <span class="ct">text</span></span><span class="tag core">core</span></div>
+        <div class="erow"><span class="col">per_company_id <span class="ct">uuid</span></span><span class="tag fk">FK → company</span></div>
+        <div class="erow"><span class="col">per_custom <span class="ct">jsonb</span></span><span class="tag t1">Tier-1 bag</span></div>
+        <div class="erow"><span class="col">per_inserted_at · per_updated_at</span><span class="tag aud">audit</span></div>
+        <div class="efree">PII routing note: composite-type fields (<span class="ic">per_full_name</span>, <span class="ic">per_emails</span>) route by <strong>vault name</strong> (<span class="ic">→ pii_name</span> / <span class="ic">pii_email</span>), so they carry the resource abbrev but <em>not</em> a <span class="ic">pii_</span> column prefix; scalar <span class="ic">pii_attribute</span> fields below carry the <span class="ic">pii_</span> prefix. Both are vault-routed — the verifier keys on the <span class="ic">pii do</span> / vault declaration, not the column name alone.<br>FREE on every row, no code: a catalog row the LLM grounds on · masking by default (<span class="ic">%Masked{} → ••••</span>) · <span class="ic">org_id</span> policy scoping · audit trail · crypto-shred via the per-subject vault key (held in an external KMS, outside the WAL/PITR surface).</div>
+      </div>
+
+      <!-- PawChart -->
+      <div class="etable">
+        <div class="eh"><span class="en">patient <span style="color:var(--faint)">composes person</span></span><span class="et">PawChart · vet</span></div>
+        <div class="erow added"><span class="col">pat_species <span class="ct">text</span></span><span class="tag core">core</span></div>
+        <div class="erow added"><span class="col">pat_breed <span class="ct">text</span></span><span class="tag core">core</span></div>
+        <div class="erow added"><span class="col">pat_weight_kg <span class="ct">decimal</span></span><span class="tag core">core</span></div>
+        <div class="erow added"><span class="col">pii_pat_microchip <span class="ct">text</span></span><span class="tag pii">PII → vault</span></div>
+        <div class="erow added"><span class="col">pat_owner_id <span class="ct">uuid</span></span><span class="tag fk">FK → client tbl</span></div>
+        <div class="erow added"><span class="col">pat_temperament <span class="ct">enum</span></span><span class="tag t0">Tier-0</span></div>
+        <div class="eprob"><b>Problem:</b> the animal is the record, but you bill and message the human owner — two PII subjects, one relationship.</div>
+      </div>
+
+      <!-- Driftwood -->
+      <div class="etable">
+        <div class="eh"><span class="en">driver <span style="color:var(--faint)">composes person</span></span><span class="et">Driftwood · freight</span></div>
+        <div class="erow added"><span class="col">pii_drv_cdl_number <span class="ct">text</span></span><span class="tag pii">PII → vault</span></div>
+        <div class="erow added"><span class="col">drv_cdl_state <span class="ct">text</span></span><span class="tag core">core</span></div>
+        <div class="erow added"><span class="col">drv_medical_card_expiry <span class="ct">date</span></span><span class="tag core">core</span></div>
+        <div class="erow added"><span class="col">drv_carrier_id <span class="ct">uuid</span></span><span class="tag fk">FK → company tbl</span></div>
+        <div class="erow added"><span class="col">drv_eld_provider <span class="ct">enum</span></span><span class="tag t0">Tier-0</span></div>
+        <div class="eprob"><b>Problem:</b> FMCSA compliance demands encrypted CDL handling and hard expiry tracking before a driver can be legally dispatched.</div>
+      </div>
+
+      <!-- Lumen -->
+      <div class="etable">
+        <div class="eh"><span class="en">patient <span style="color:var(--faint)">composes person</span></span><span class="et">Lumen Health · telehealth</span></div>
+        <div class="erow added"><span class="col">pii_pat_dob <span class="ct">date</span></span><span class="tag pii">PII → vault</span></div>
+        <div class="erow added"><span class="col">pii_pat_mrn <span class="ct">text</span></span><span class="tag pii">PII → vault</span></div>
+        <div class="erow added"><span class="col">pat_blood_type <span class="ct">enum</span></span><span class="tag t0">Tier-0</span></div>
+        <div class="erow added"><span class="col">pat_primary_provider_id <span class="ct">uuid</span></span><span class="tag fk">FK → staff tbl</span></div>
+        <div class="erow added"><span class="col">pat_consent_on_file <span class="ct">bool</span></span><span class="tag core">core</span></div>
+        <div class="eprob"><b>Problem:</b> HIPAA requires DOB and MRN encrypted-and-shreddable, with provider assignment and consent gating every clinical action.</div>
+      </div>
+
+      <!-- FK-target note: every FK arrow points at a real composed table, never the fragment -->
+      <div class="etable" style="grid-column:1 / -1; border-style:dashed;">
+        <div class="efree" style="border-top:none;"><strong>Every FK above resolves to a real table, never to <span class="ic">Core.Person</span> (the fragment).</strong> <span class="ic">company</span> is the shipped CRM resource; <span class="ic">client</span> (PawChart) and <span class="ic">staff</span> (Lumen) are each their <em>own</em> composed resource — they too <span class="ic">use Samen.Resource, base: Core.Person</span>, so each compiles to its own physical table (<span class="ic">cli_*</span> / <span class="ic">stf_*</span>) carrying the same inherited plumbing. A <span class="ic">belongs_to</span> targets a queryable resource; the fragment is folded <em>into</em> those tables, so an arrow could never point at it.</div>
+      </div>
+    </div>
+
+    <div class="codecard">
+      <div class="bar"><i></i><i></i><i></i><span class="fname">builder code-composition — the base macro injects the shared core; new PII rides the same vault, the same machinery</span></div>
+<pre><span class="cm"># the SHARED base: a fragment carrying the core attrs + guarantees.</span>
+<span class="cm"># the 9 core columns of a person: id, full_name, emails, phones,</span>
+<span class="cm"># job_title, company_id, custom, inserted_at, updated_at — the</span>
+<span class="cm"># fragment declares the domain ones; Samen.Resource injects</span>
+<span class="cm"># id/company_id/timestamps when this fragment is folded into a resource.</span>
+<span class="kw">defmodule</span> <span class="at">Core.Person</span> <span class="kw">do</span>
+  <span class="cm"># a fragment, not a resource — no data layer, no table of its own.</span>
+  <span class="cm"># it must declare the extensions whose DSL it uses (pii do / catalog):</span>
+  <span class="kw">use</span> Spark.Dsl.Fragment,
+    of: <span class="at">Ash.Resource</span>,
+    extensions: [<span class="at">Samen.Pii</span>, <span class="at">Samen.Catalog</span>]   <span class="cm"># composable, not class inheritance</span>
+  attributes <span class="kw">do</span>
+    attribute <span class="at">:job_title</span>, <span class="at">:string</span>
+    attribute <span class="at">:custom</span>, <span class="at">:map</span>             <span class="cm"># Tier-1 jsonb bag</span>
+  <span class="kw">end</span>
+  pii <span class="kw">do</span>
+    pii_attribute <span class="at">:full_name</span>, <span class="at">Samen.Type.FullName</span>, vault: <span class="at">:pii_name</span>
+    pii_attribute <span class="at">:emails</span>,    <span class="at">Samen.Type.Emails</span>,   vault: <span class="at">:pii_email</span>
+    pii_attribute <span class="at">:phones</span>,    <span class="at">Samen.Type.Phones</span>,   vault: <span class="at">:pii_phone</span>
+  <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="kw">defmodule</span> <span class="at">Lumen.Patient</span> <span class="kw">do</span>
+  <span class="cm"># base: folds in Core.Person's attrs+pii via Spark fragment composition —</span>
+  <span class="cm"># ONE resource, ONE physical table (NOT Postgres CREATE TABLE … INHERITS)</span>
+  <span class="kw">use</span> Samen.Resource, domain: <span class="at">Lumen.Clinical</span>, abbrev: <span class="str">"pat"</span>, base: <span class="at">Core.Person</span>
+  attributes <span class="kw">do</span>
+    attribute <span class="at">:blood_type</span>, <span class="at">:atom</span>, constraints: [one_of: [<span class="at">:a</span>,<span class="at">:b</span>,<span class="at">:ab</span>,<span class="at">:o</span>]]  <span class="cm"># Tier-0</span>
+    attribute <span class="at">:consent_on_file</span>, <span class="at">:boolean</span>, default: <span class="at">false</span>
+  <span class="kw">end</span>
+  pii <span class="kw">do</span>
+    pii_attribute <span class="at">:dob</span>, <span class="at">:date</span>,           vault: <span class="at">:pii_dob</span>   <span class="cm"># new PII → same vault; per-subject key in external KMS (outside PITR)</span>
+    pii_attribute <span class="at">:mrn</span>, <span class="at">:string</span>,         vault: <span class="at">:pii_mrn</span>
+  <span class="kw">end</span>
+  relationships <span class="kw">do</span>
+    <span class="cm"># FK targets a REAL composed resource (its own table), never the fragment —</span>
+    <span class="cm"># Lumen.Staff also `use`s Samen.Resource with base: Core.Person (→ stf_* table)</span>
+    belongs_to <span class="at">:primary_provider</span>, <span class="at">Lumen.Staff</span>
+  <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="cm"># the bounded-context translation, shown — not just claimed: Lumen renames</span>
+<span class="cm"># the kernel nouns and reshapes money in a thin anti-corruption layer.</span>
+<span class="kw">defmodule</span> <span class="at">Lumen.Context</span> <span class="kw">do</span>
+  <span class="cm"># a DSL must declare its extension — same rule as the fragment above</span>
+  <span class="kw">use</span> Samen.Context, domain: <span class="at">Lumen.Clinical</span>
+  <span class="cm"># kernel Activity is re-identified as the vertical's Encounter (aliased action)</span>
+  alias_resource <span class="at">Core.Activity</span>, as: <span class="at">Lumen.Encounter</span>
+  <span class="cm"># kernel invoice money is reshaped: one charge → patient_responsibility + payer_claim</span>
+  <span class="cm"># total: invoice gross (Core.Invoice attr); covered_amount: payer-covered portion</span>
+  reshape <span class="at">Core.Invoice</span> <span class="kw">do</span>
+    calculate <span class="at">:patient_responsibility</span>, <span class="at">:money</span>, expr(<span class="at">total</span> - <span class="at">covered_amount</span>)
+    calculate <span class="at">:payer_claim</span>,             <span class="at">:money</span>, expr(<span class="at">covered_amount</span>)
+  <span class="kw">end</span>
+  <span class="cm"># inherited plumbing (vault · catalog · org-scope · audit · crypto-shred)</span>
+  <span class="cm"># stays underneath unchanged — only the ubiquitous language is translated.</span>
+<span class="kw">end</span></pre>
+    </div>
+    <div class="prose measure">
+      <p><strong>Four shapes, one governed base.</strong> <span class="ic">base: Core.Person</span> folds the nine core attributes (and their guarantees) into one resource via Spark fragment composition; the transformer prefixes every column with the resource's own abbrev (<span class="ic">pat_*</span>, <span class="ic">pii_pat_*</span>); <span class="ic">pii_attribute</span> on the composed resource routes new PII through the <em>same</em> vault and crypto-shred key; the catalog verifier emits <span class="ic">tam_table</span>/<span class="ic">fld_field</span> rows for the additions automatically. You inherit the 80% — the base macro injects the nine core columns plus masking, the data-dictionary catalog, org-scope, audit, and crypto-shred for free — and you write your 20%.</p>
+      <p>Be exact about the two axes you are inheriting on, because they are priced differently:</p>
+      <p>· <strong>Infrastructure (the strong claim).</strong> What is inherited free on every column is the <em>cross-cutting plumbing</em>: the storage convention, vault routing, masking, org-scope, audit, catalog parity, and crypto-shred. This <em>is</em> single-table — the composed resource compiles to <strong>one physical table</strong>, so the catalog has a coherent grounding surface and the LLM never invents the infrastructure.<br>
+      · <strong>Domain (the calibrated claim).</strong> What you inherit is a <strong>shared kernel of primitives plus a per-vertical bounded context</strong> — <em>not</em> one universal noun every product extends. The kernel gives you a person/company/money/event shape and all the plumbing above; the vertical supplies its own ubiquitous language on top. The LLM grounds on the inherited infrastructure idioms it can verify and on <em>this vertical's</em> catalog — not on a fiction that vet, freight, and telehealth share a single domain model.</p>
+    </div>
+
+    <div class="compare">
+      <div class="saas"><div class="sn">PawChart</div><div class="sd">vet clinics</div><div class="bt"><b>Billing:</b> kept as plain subscriptions. <b>Tier-2:</b> a VaccineLot object clinics define themselves. Ticketing &amp; CMS untouched.</div></div>
+      <div class="saas"><div class="sn">Driftwood</div><div class="sd">freight brokerage</div><div class="bt"><b>Billing reshaped to settlements</b> — invoice = carrier settlement (linehaul − advances − factoring); two-sided money. Company → Carrier/Shipper; Opportunity → Load.</div></div>
+      <div class="saas"><div class="sn">Lumen Health</div><div class="sd">telehealth</div><div class="bt"><b>Billing reshaped to insurance/copay</b> — invoice splits into patient_responsibility + payer_claim; entitlements gate covered visits. Activity → Encounter.</div></div>
+    </div>
+    <div class="prose measure" style="margin-top:24px">
+      <p><strong>Read that comparison honestly: two of the three are bounded-context translations, not additive extensions.</strong> PawChart mostly <em>adds</em> — plain subscriptions, a Tier-2 object — and is the easy case. Driftwood and Lumen do something stronger: they <strong>re-identify the core nouns</strong> (Company → Carrier/Shipper, Opportunity → Load, Activity → Encounter) and <strong>reshape money</strong> (settlement-netting; a patient_responsibility + payer_claim split). That is a new ubiquitous language, not a wider <span class="ic">person</span>. The shared kernel still pays off, but as <strong>primitives under an anti-corruption layer</strong>: each vertical maps the kernel's person/company/money/event primitives into its own context through a <strong>context map</strong> — Ash calculations, aliased actions, and a thin translation module — so the rename and the billing reshape live in the vertical's bounded context while the inherited infrastructure (vault, catalog, org-scope, audit, crypto-shred) stays underneath unchanged. You inherit the plumbing and a faster context to build in; you still author the domain. Calling that "one resource you extend" would undersell the work and oversell the inheritance — so we don't.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== DATA TIER ===================== -->
+<section id="data">
+  <div class="wrap">
+    <div class="sec-label">The data tier</div>
+    <h2>One Postgres is the <em>whole</em> stateful surface</h2>
+    <div class="grid2">
+      <div class="prose">
+        <p>One Neon Postgres holds live truth, the durable queue, cron, durable workflows, <strong>and</strong> history and analytics good enough for the overwhelming majority of products. There is no second datastore to provision, secure, back up, or reason about. Nothing else is required to ship and run a real, profitable SaaS.</p>
+        <p>History and analytics work on Postgres alone, concretely:</p>
+        <p>· an <strong>append-only event/audit table</strong> (system-versioned rows) is your event stream and history-of-record in one;<br>
+        · <strong>time partitioning</strong> by month, so queries prune to a window and old partitions detach for archival once their derived rollups have aged out of the erasure-relevant window — a partition still feeding a rebuildable rollup is retained, and an erasure landing in an already-archived window takes the exclude/suppress arm instead of a rebuild (see <em>the honest edges</em>);<br>
+        · <strong>BRIN indexes</strong> on time columns — a few-KB index over a huge append-only table;<br>
+        · <strong>rollup tables / matviews refreshed by AshOban</strong> — dashboards read the small summary, never aggregate raw events live.</p>
+        <p>A well-provisioned Postgres handles <strong>tens of millions</strong> of event rows and the dashboards over them comfortably.</p>
+      </div>
+      <div>
+        <div class="codecard" style="margin-top:0">
+          <div class="bar"><i></i><i></i><i></i><span class="fname">dashboards read a rollup, refreshed on a schedule — not a live scan</span></div>
+<pre><span class="cm">-- append-only, time-partitioned, BRIN on time</span>
+<span class="kw">CREATE TABLE</span> aud_event (...)
+  <span class="kw">PARTITION BY RANGE</span> (aud_occurred_at);
+<span class="kw">CREATE INDEX</span> <span class="kw">ON</span> aud_event
+  <span class="kw">USING</span> brin (aud_occurred_at);
+
+<span class="cm">-- AshOban rolls events into a per-day/per-org summary</span>
+trigger <span class="at">:refresh_rollup</span> <span class="kw">do</span>
+  action <span class="at">:rebuild_daily</span>
+  scheduler_cron <span class="str">"*/10 * * * *"</span>
+<span class="kw">end</span>
+<span class="cm">-- the dashboard query hits ENG_daily_rollup (small), not raw events</span></pre>
+        </div>
+        <div class="resolution" style="margin-top:18px;padding:22px 26px">
+          <div class="mark">≈</div>
+          <div class="claim" style="font-size:19px">You can run a real, profitable SaaS on Postgres alone. <span>ClickHouse is a power-up, not a prerequisite.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="prose measure" style="margin-top:28px">
+      <p><strong>The honest ceiling.</strong> Postgres analytics starts to hurt when raw event tables cross <strong>~100M+ rows</strong> and you need ad-hoc big scans (not just rollups), or when heavy concurrent aggregations compete with OLTP for buffers and I/O. That's the signal — not before.</p>
+      <p><strong>The optional upgrade.</strong> When a <em>specific</em> product outgrows Postgres analytics, flip on the managed <a href="https://clickhouse.com/cloud/postgres">clickhouse.com/cloud/postgres</a> path: native CDC (ClickPipes/PeerDB) mirrors the append-only event stream into ClickHouse, queried via a second Ecto repo (<span class="ic">ecto_ch</span>) or <span class="ic">pg_clickhouse</span> pushdown. The model becomes <em>live = Postgres, analytics = ClickHouse, seconds-stale.</em> It is not free — a second datastore plus a CDC pipe is real operational surface — so it is <strong>opt-in per product, default off.</strong> Most products never turn it on. The rule that keeps both honest: <strong>never read a "current" value from the analytics tier.</strong></p>
+      <p><strong>The token-only-downstream invariant</strong> is what makes the mirror safe — and turns the CDC reach into a strength rather than a liability. Across the key-reachable in-Postgres tiers, personal data exists only as ciphertext under the per-subject vault key or as a vault-FK token: the CDC mirror, rollup tables, matviews, app logs, and the append-only audit log carry vault tokens, not plaintext PII. The <em>external trace/event backend</em> (Honeycomb/Tempo/Loki) is in-scope but a different class — third-party and not key-reachable, so it is held to an ingress rule rather than key-shred (the limits name it as a carve-out). The observability plane is therefore governed, not exempt: spans carry no SQL text or bind params (<span class="ic">db_statement: :disabled</span>), the reveal path is excluded from span/log attributes, and the per-subject identifier the sink does carry is a <strong>per-subject-keyed pseudonym</strong> keyed on the subject's KMS key, so it goes unlinkable when that key is destroyed (see <em>How it runs § 4b</em> and the limits) — so the dual control (the <span class="ic">pii_reads</span> AST match plus the sink allow-list) is built to keep a revealed name out of a third-party trace store, short of a sound taint proof. So <strong>destroying one subject's external-KMS key renders all of that subject's vault-tokenized PII ciphertext permanently undecryptable across the live, replica, backup/PITR, CDC-mirror, rollup, and audit tiers at once</strong> — a key-destruction, not a copy-chasing job or a destruction-by-eventual-consistency. (The two key-shred-class carve-outs in the limits — the trace-sink pseudonyms and the review-gated <span class="ic">non_pii!</span> columns — are the surfaces key-shred does not reach; derived aggregates are governed separately by rebuild-or-exclude-on-erasure, below.) The detail that makes "across backups" earned rather than asserted: the per-subject key is <strong>not itself a Postgres row</strong> — it lives in an <strong>external KMS held outside the WAL/PITR surface</strong>, so a point-in-time restore of any pre-shred WAL brings back the <em>ciphertext</em> (already useless) but cannot resurrect the destroyed key. Were the key a row in the same continuously-archived Postgres, a PITR restore would re-decrypt every "dead" copy — which is exactly why the key store is excluded from the backup surface, and why <span class="ic">no_plaintext_pii</span> audits the key store and PITR history as tiers, not just the data tables. The CDC pipe deliberately carries token-blind rows, so the analytics plane inherits erasure for free instead of forking a second compliance surface. Derived aggregates (rollups/matviews) are governed separately — see the honest edges — by minimum-cohort suppression and a rebuild-or-exclude-on-erasure policy, since an aggregate computed before a shred must not resurrect the erased subject.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== LIVEVIEW / SCALE ===================== -->
+<section id="liveview">
+  <div class="wrap">
+    <div class="sec-label">Production &amp; scale</div>
+    <h2>LiveView deletes the parts of production you <em>pay the most for</em></h2>
+    <div class="prose measure">
+      <p>LiveView renders HTML on the server and ships only minimal diffs over a persistent websocket. That one choice collapses most of what a modern web stack spends its production budget on:</p>
+      <p>· <strong>No SPA build pipeline.</strong> No separate React app to bundle, version, and push to a CDN. A product is <em>one</em> <span class="ic">mix release</span> — the same deploy ships your business logic and your UI. There's no "frontend out of sync with backend," because there's no second deployable.<br>
+      · <strong>No internal browser↔server RPC tier to hand-roll.</strong> LiveView's UI talks to the server with in-process calls against your Ash resources — there is no hand-rolled REST/GraphQL controller, serializer, and contract-test layer sitting <em>between your own UI and your own backend</em>, and no "frontend out of sync with backend." Note the precise scope: what disappears is the <em>internal</em> UI-to-server RPC plumbing, <strong>not</strong> the external product API your tenants integrate against — that one is first-class and governed, below.<br>
+      · <strong>No client/server state sync.</strong> State lives in one place: the LiveView process. No Redux, no cache invalidation, no optimistic-update reconciliation — and the vault stays honest, because masked values render server-side and plaintext never reaches a client store.<br>
+      · <strong>SEO &amp; first paint are free</strong> (the first response is real server-rendered HTML), and <strong>presence + PubSub are built in</strong> — multi-tenant broadcasts and "who's online" are framework primitives, not a Pusher bill.</p>
+    </div>
+
+    <div class="stat">
+      <div class="s"><div class="sv">2,000,000</div><div class="sl"><em>idle/heartbeat</em> websockets on a single 40-core node — an OS-ulimit-bound benchmark where each connection does no per-message work (Phoenix). Web-tier headroom, not throughput.</div></div>
+      <div class="s"><div class="sv">5M+</div><div class="sl">concurrent users — Discord, same BEAM runtime, in production (their cited post). Evidences BEAM <em>connection-handling</em>; Discord's hot fan-out path is Rust-assisted, so it is not a LiveView/Ash per-interaction figure.</div></div>
+      <div class="s"><div class="sv">1 artifact</div><div class="sl">mix release ships UI + logic + workers + cron; rolling deploy on Fly, clustered PubSub over WireGuard</div></div>
+    </div>
+
+    <div class="prose measure" style="margin-top:26px">
+      <p><strong>Read those two numbers honestly — they measure the web tier, not Samen's work.</strong> Both are <em>connection-handling</em> ceilings: the 2M figure is an idle benchmark (the bottleneck is precisely <span class="ic">ulimit</span> <em>because</em> there is no per-message work), and Discord's headline is BEAM holding sockets while a Rust-assisted fan-out does the hot path. <strong>Every Samen interaction is different:</strong> it runs a policy check plus an org-scoped SQL round-trip (see <em>How it runs</em>), so active concurrency is bounded by <strong>Ash action + Postgres throughput</strong>, not socket count. So these stats prove only that the <em>front door</em> is effectively free — useful headroom, not application throughput.</p>
+      <p><strong>Vertical scale:</strong> the BEAM uses every core via per-core schedulers, and processes are cheap — one big node goes very far. <strong>Horizontal scale:</strong> nodes are stateless except the socket; <span class="ic">dns_cluster</span>/libcluster auto-form a BEAM cluster and PubSub fans across it transparently — you add nodes, the only stickiness is session affinity for the live socket. <strong>Where the ceiling actually is — and this is the point the numbers above set up:</strong> almost never the web tier — it's Postgres, which is deliberate, because one row-scoped DB per product is the thing you scale and (eventually) shard.</p>
+      <p><strong>Put a number on that ceiling, mirroring the read-side rollup honesty.</strong> Each governed interaction is not one INSERT — it is an order-of-magnitude write budget: the domain row(s), <em>plus</em> one append-only <span class="ic">aud_event</span> row, <em>plus</em> typically one Oban-job INSERT enqueued in the same transaction — call it <strong>~3–10 row-writes per interaction</strong> at the primary. A single well-provisioned primary commits on the order of <strong>a few thousand such write-transactions per second</strong> before commit/WAL throughput and autovacuum on the hot append-only tables become the binding constraint (read replicas absorb dashboard scans, so reads are <em>not</em> what saturates the primary first — writes are). So the practical primary-write regime is roughly <strong>low-10³ interactions/sec today, reaching into the 10⁴ range only on a well-provisioned primary as the write fan-out tightens — before sharding becomes the move</strong> (and consistent with the few-thousand-write-transaction/sec basis above, since each interaction is ~3–10 of those writes); the rollup/BRIN/partitioning posture above is what keeps the <em>read</em> side off that budget. <strong>Sharding begins where a single product's primary-write rate approaches that ceiling</strong> — and because every row is already org-scoped, the shard key is the tenant: you split one product's busiest tenants onto their own primary before you ever reach for a second datastore. That is the honest write-side counterpart to the ~100M-row read ceiling.</p>
+      <p><strong>The honest trade-offs:</strong> sockets are stateful, so memory-per-connection is real and <strong>reconnect storms</strong> (a deploy or network blip) can stampede — mitigate with rolling deploys, jittered reconnect, and presence-aware draining. LiveView is also latency-sensitive to client distance, since every interaction round-trips — mitigate by deploying to regions near your users. For governed B2B SaaS, these are the right trades.</p>
+    </div>
+
+    <!-- EXTERNAL PRODUCT API — first-class and governed, distinct from the internal RPC tier -->
+    <div class="sec-label" style="margin-top:54px">The external surface — a versioned public API and webhooks</div>
+    <h2 style="max-width:32ch">LiveView removes the internal RPC tier. <em>The product API your tenants integrate against is first-class.</em></h2>
+    <div class="prose measure">
+      <p>Deleting the internal UI-to-server plumbing does <strong>not</strong> mean a B2B SaaS ships without a public API. A serious tenant owes integrations, automations, and outbound events — and Samen treats them as core, not an afterthought: <span class="ic">api_key</span> and <span class="ic">webhook</span> are <strong>inherited objects in the Identity and Primitives scopes</strong>, and the public API is generated by <strong>AshJsonApi / AshGraphql over the very same Ash resources</strong> the LiveView UI and the operator plane already use. One write path, one policy stack, one catalog — governed both <em>inbound</em> (the API runs the same org-scope + RBAC + reveal-grant checks) and <em>outbound</em> (webhooks emit the same masked, catalogued payloads). The apparent contradiction — "no API" yet "webhooks in the 80%" — resolves because these are two different surfaces: the internal RPC tier is gone; the external contract is owned.</p>
+      <p>Because it is a public contract a tenant builds against, it carries the obligations a public contract owes — stated, not hand-waved:</p>
+      <p>· <strong>Versioning &amp; deprecation.</strong> The API is explicitly versioned (URL-namespaced, e.g. <span class="ic">/api/v1</span>; GraphQL behind a dated schema), with a published deprecation policy: a field or version is announced, sunset-dated, and kept alive through a stated window. AshJsonApi/AshGraphql derive the surface from resources, so a <strong>structural</strong> breaking change is visible at compile time, and a <strong>schema-diff contract test in CI</strong> fails the build on an un-versioned <em>structural</em> break — a removed or renamed field, a narrowed type, a dropped route or required-arg addition — rather than surprising a tenant in production. Be precise about the boundary: the diff catches the <strong>shape</strong> of the contract; a <em>semantic</em> break that keeps the shape (the same field, same type, but a changed meaning or unit) is not a schema diff and remains the <strong>author's responsibility</strong> — the test does not claim to catch it.<br>
+      · <strong>Scoped credentials — and two key classes, not one.</strong> An <span class="ic">api_key</span> carries <strong>scopes</strong> (read/write per resource family) and is bound to exactly one of two planes; the same Ash policies that gate the UI gate the key, so a key can never see more than its actor may. The masking rule is <strong>plane-scoped, not blanket</strong>: a <strong>tenant key</strong> is org-bound and acts <em>as the tenant</em> over the tenant's own data — the tenant owns its customers' PII in clear, so its key reads that PII per the tenant's own RBAC, with <em>no operator reveal grant involved</em> (the reveal seam is an operator-plane construct; it does not sit between a tenant and its own records). The reveal-grant gate applies to the <strong>operator-plane / cross-tenant key</strong> — a key acting on the control plane across orgs it does not own; that class is masked by default and crosses the reveal seam, so a subject's plaintext renders <span class="ic">••••</span> unless a grant exists. Same policy stack, two actors: tenant-as-owner needs no grant; operator-across-tenants does.<br>
+      · <strong>Reliable webhook delivery.</strong> Outbound events are <strong>Oban-backed</strong>: each delivery is a durable job in the same Postgres, with <strong>at-least-once delivery, capped exponential-backoff retries, a dead-letter queue, and per-event idempotency keys</strong> so a redelivered event is safe to process twice. Payloads are <strong>signed</strong> (HMAC over the body with a per-endpoint secret and a timestamp, so receivers verify authenticity and reject replays).<br>
+      · <strong>A serialization boundary that protects the storage convention — opt-in by allowlist, never auto-published.</strong> Field exposure is the load-bearing control here, so it is stated, not defaulted: a resource's columns are <strong>not auto-published</strong> to the API or webhook surface. Each field is an <strong>explicit opt-in into the public allowlist</strong> (the <span class="ic">json_api</span> / webhook payload declaration names it); a field absent from that allowlist is <strong>absent from the payload by omission</strong> — the default is not-exposed, so a newly added storage column never silently appears on the public contract, and "PII absent by omission" is a structural property of the allowlist, not a hope. When a field <em>is</em> allowlisted, the payload exposes the <strong>catalog field name</strong> (<span class="ic">:name</span>, <span class="ic">:full_name</span>) — <em>never</em> the physical storage name (<span class="ic">com_name</span>, <span class="ic">per_</span>, <span class="ic">pii_</span>) or the vault a field routes to. The abbrev/prefix convention and the vault routing are internal storage details; the public schema is the stable contract. So renaming a column or re-prefixing a resource never breaks a tenant's integration, and the vault structure is never leaked into a payload — what marks an allowlisted field as PII is its <strong>vault routing</strong> (the <span class="ic">pii do</span> declaration), not whether the storage column happens to carry a <span class="ic">pii_</span> prefix: a masked value serializes as <span class="ic">••••</span>, and on the operator plane a vaulted field is absent unless a reveal grant covers it (a tenant key reading its own org's PII needs no grant, per the two-key-classes rule above — the reveal gate is operator-scoped).</p>
+    </div>
+
+    <div class="codecard">
+      <div class="bar"><i></i><i></i><i></i><span class="fname">the external API is generated from the SAME Ash resources — versioned, scoped, catalog-named</span></div>
+<pre><span class="cm"># the public product API: AshJsonApi/AshGraphql over the same resources</span>
+<span class="kw">defmodule</span> <span class="at">Crm.Contact</span> <span class="kw">do</span>
+  <span class="kw">use</span> Samen.Resource, otp_app: <span class="at">:acme</span>,
+    extensions: [<span class="at">AshJsonApi.Resource</span>]   <span class="cm"># same single write path, governed</span>
+
+  json_api <span class="kw">do</span>
+    type <span class="str">"contact"</span>
+    <span class="cm"># exposes CATALOG names (:name), never storage names (com_name / pii_)</span>
+    routes <span class="kw">do</span> base <span class="str">"/v1/contacts"</span>; get <span class="at">:read</span>; index <span class="at">:read</span>; post <span class="at">:create</span> <span class="kw">end</span>
+  <span class="kw">end</span>
+  <span class="cm"># inbound: the SAME org-scope + RBAC + :reveal policies the UI runs —</span>
+  <span class="cm"># an api_key's scopes can never out-reach its actor; PII stays masked</span>
+<span class="kw">end</span>
+
+<span class="cm"># outbound webhooks are durable Oban jobs in the SAME Postgres:</span>
+<span class="cm">#   at-least-once · capped exponential backoff · dead-letter queue</span>
+<span class="cm">#   per-event idempotency key · HMAC-signed body + timestamp (anti-replay)</span>
+Samen.Webhook.deliver(<span class="at">:"contact.created"</span>, contact, scope: actor_scope)
+<span class="cm"># payload carries fld_field catalog names + masked/absent PII tokens —</span>
+<span class="cm"># the abbrev storage convention never couples a tenant to the schema.</span>
+
+<span class="cm"># CI: a schema-diff contract test fails the build on an un-versioned</span>
+<span class="cm"># STRUCTURAL break to v1 (field/type/route removal or narrowing).</span>
+<span class="cm"># Semantic breaks (same shape, changed meaning) stay the author's job.</span>
+mix samen.verify.api_contract --version v1   <span class="cm"># fail-closed (structural)</span></pre>
+    </div>
+
+    <div class="figcap" style="margin-top:8px">Sources: <a href="https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections">phoenixframework.org — 2M websockets</a> · <a href="https://discord.com/blog/how-discord-scaled-elixir-to-5-000-000-concurrent-users">discord.com — scaling Elixir to 5M concurrent users (Rust-assisted fan-out)</a> · <a href="https://fly.io/docs/elixir/the-basics/clustering/">fly.io — clustering</a></div>
+  </div>
+</section>
+
+<!-- ===================== HOW IT RUNS ===================== -->
+<section id="runs">
+  <div class="wrap">
+    <div class="sec-label">How it actually runs</div>
+    <h2>The mechanisms are real code surfaces — <em>not magic</em></h2>
+
+    <figure class="fig">
+      <svg viewBox="0 0 1000 470" role="img" aria-labelledby="runs-svg-title runs-svg-desc" xmlns="http://www.w3.org/2000/svg">
+        <title id="runs-svg-title">One substrate — the whole architecture</title>
+        <desc id="runs-svg-desc">How the substrate runs, in reading order. One BEAM release contains the web tier, the workers, and cron as a single artifact. A browser exchanges HTML diffs over a websocket with a LiveView process, which holds server state and renders server-side. The LiveView calls the Ash Domain layer, which runs policies, org-scoping, the vault, the catalog, and the storage transformer; every Ash action emits SQL that already speaks the prefixed storage name com_name because the transformer ran at compile time. In the same database transaction, work is enqueued into Oban, whose jobs are rows in the same Postgres; Oban runs workers and cron and pushes diffs back to LiveView via PubSub for live re-render. Postgres on Neon is the single source of truth, queue, cron, history, audit, and vault. ClickHouse is an optional, per-product, off-by-default analytics tier fed by token-blind CDC; it never holds plaintext PII. The net result: no Redis, no broker, no worker fleet, no internal RPC tier, no SPA build, and no second datastore until you choose one.</desc>
+        <defs>
+          <marker id="rf" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1.5 1.5L8 5L1.5 8.5" fill="none" stroke="#6E6457" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>
+          <marker id="rfo" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1.5 1.5L8 5L1.5 8.5" fill="none" stroke="#C44A00" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>
+        </defs>
+        <rect x="60" y="40" width="640" height="318" rx="14" fill="none" stroke="#FF6200" stroke-width="1.1" stroke-dasharray="6 5"/>
+        <text x="76" y="60" font-family="JetBrains Mono, monospace" font-size="11" fill="#C44A00">ONE BEAM RELEASE — web · workers · cron, one artifact</text>
+
+        <rect x="84" y="78" width="200" height="48" rx="10" fill="#FFFDF9" stroke="#E7DFD2"/><text x="184" y="100" text-anchor="middle" font-family="Inter, sans-serif" font-size="13" font-weight="600" fill="#201B14">Browser</text><text x="184" y="116" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#6E6457">HTML diff over websocket</text>
+        <rect x="84" y="158" width="200" height="56" rx="10" fill="#FFF1E6" stroke="#FF6200"/><text x="184" y="181" text-anchor="middle" font-family="Inter, sans-serif" font-size="13.5" font-weight="600" fill="#C44A00">LiveView</text><text x="184" y="198" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#C44A00">holds state · server-rendered</text>
+        <rect x="84" y="246" width="200" height="72" rx="10" fill="#FAF7F2" stroke="#E7DFD2"/><text x="184" y="270" text-anchor="middle" font-family="Inter, sans-serif" font-size="13.5" font-weight="600" fill="#201B14">Ash Domain</text><text x="184" y="287" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#6E6457">policies · org-scope</text><text x="184" y="301" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#6E6457">vault · catalog · transformer</text>
+
+        <rect x="430" y="158" width="248" height="48" rx="10" fill="#FAF7F2" stroke="#E7DFD2"/><text x="554" y="180" text-anchor="middle" font-family="Inter, sans-serif" font-size="13" font-weight="600" fill="#201B14">Oban — workers · cron</text><text x="554" y="196" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#6E6457">jobs are rows in the SAME Postgres</text>
+        <rect x="430" y="246" width="248" height="48" rx="10" fill="#FFF1E6" stroke="#FF6200"/><text x="554" y="274" text-anchor="middle" font-family="Inter, sans-serif" font-size="12.5" font-weight="600" fill="#C44A00">PubSub → live re-render</text>
+
+        <rect x="760" y="150" width="200" height="86" rx="12" fill="#FFFDF9" stroke="#E7DFD2"/><text x="860" y="180" text-anchor="middle" font-family="Inter, sans-serif" font-size="15" font-weight="600" fill="#201B14">Postgres · Neon</text><text x="860" y="200" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#6E6457">truth · queue · cron</text><text x="860" y="216" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#6E6457">history · audit · vault</text>
+        <rect x="760" y="280" width="200" height="64" rx="12" fill="#FFFDF9" stroke="#E7DFD2" stroke-dasharray="4 4"/><text x="860" y="306" text-anchor="middle" font-family="Inter, sans-serif" font-size="13" font-weight="600" fill="#6E6457">ClickHouse</text><text x="860" y="324" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#6E6457">optional · per product · off by default</text>
+
+        <line x1="184" y1="126" x2="184" y2="156" stroke="#6E6457" stroke-width="1.3" marker-start="url(#rf)" marker-end="url(#rf)"/>
+        <line x1="184" y1="214" x2="184" y2="244" stroke="#6E6457" stroke-width="1.3" marker-end="url(#rf)"/><text x="194" y="234" font-family="JetBrains Mono, monospace" font-size="10" fill="#6E6457">Ash action</text>
+        <line x1="284" y1="278" x2="428" y2="186" stroke="#C44A00" stroke-width="1.3" marker-end="url(#rfo)"/><text x="320" y="246" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#C44A00">enqueue · same tx</text>
+        <line x1="430" y1="270" x2="286" y2="186" stroke="#C44A00" stroke-width="1.2" marker-end="url(#rfo)"/><text x="300" y="300" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#C44A00">push diff</text>
+        <line x1="284" y1="282" x2="758" y2="200" stroke="#6E6457" stroke-width="1.3" marker-start="url(#rf)" marker-end="url(#rf)"/><text x="500" y="360" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#6E6457">SQL · already says com_name (transformer ran at compile time)</text>
+        <line x1="678" y1="182" x2="758" y2="185" stroke="#6E6457" stroke-width="1.3" marker-end="url(#rf)"/>
+        <line x1="860" y1="236" x2="860" y2="278" stroke="#99907F" stroke-width="1.2" stroke-dasharray="4 4" marker-end="url(#rf)"/><text x="870" y="262" font-family="JetBrains Mono, monospace" font-size="10" fill="#6E6457">CDC</text>
+        <text x="500" y="395" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#C44A00">no Redis · no broker · no worker fleet · no internal RPC tier · no SPA build · no second datastore (until you choose one)</text>
+      </svg>
+      <figcaption class="figcap"><b>One substrate.</b> One BEAM release runs web, workers, and cron; one Postgres is truth, queue, cron, history, audit, and vault. The transformer/catalog/vault live <em>in</em> the Ash layer, so the query already speaks <span class="ic">com_name</span> and PII never materializes without a <span class="ic">:reveal</span>. ClickHouse is a dotted, opt-in branch. <b>"No internal RPC tier"</b> means no hand-rolled UI-to-server plumbing — the <em>external</em> product API and webhooks are first-class (AshJsonApi/AshGraphql over these same resources, versioned and governed; see Production &amp; scale above).</figcaption>
+    </figure>
+
+    <div class="prose measure">
+        <p><strong>1 · Request lifecycle.</strong> A click hits the Phoenix endpoint and lands in a LiveView. On <span class="ic">mount/3</span> the socket holds server state and an <span class="ic">Ash.Scope</span> carrying <span class="ic">actor</span> + <span class="ic">org_id</span> (from the membership). Every interaction calls an Ash action, which runs the policy check (org-scope + RBAC) and emits SQL already saying <span class="ic">WHERE com_org_id = $1</span> — the transformer ran at compile time, so the query says <span class="ic">com_name</span>, not <span class="ic">name</span>. The vault sits beside the row: the contact carries a token; plaintext is fetched only when a <span class="ic">:reveal</span> action runs. LiveView computes the HTML diff and pushes it down the socket.</p>
+        <p><strong>2 · Deploy &amp; migrations.</strong> <span class="ic">mix release</span> is one self-contained artifact. Fly does a rolling deploy; the <strong>expand</strong> migration runs as a release command <em>before</em> the new image takes traffic — and the build gate has teeth. Migrations are <strong>expand/contract, never edit-in-place</strong>: <em>expand</em> only adds backward-compatible structure (a nullable column, a new index built <span class="ic">CONCURRENTLY</span>), so it is safe for the <em>old</em> binary to keep running against the <em>new</em> schema — which is exactly what makes <strong>code rollback = redeploy the previous stateless binary</strong> safe: rollback only ever runs an old binary against a schema it was forward-compatible with by construction. The destructive <em>contract</em> step (drop the old column, add the NOT-NULL/FK constraint) is a <strong>separate, later release</strong>, gated behind a <span class="ic">contract_ready?</span> check that refuses to run until the expand-phase code has been the <em>only</em> code in production for a full bake window — so "old binary against new schema" can never see a column the contract phase already removed.</p>
+        <p><strong>2b · Migration safety posture &amp; the reverse path.</strong> The timeout posture is <strong>scoped to where it helps and carved out where it would hurt</strong>: the <em>DDL transaction</em> of every migration sets <span class="ic">lock_timeout = 5s</span> and <span class="ic">statement_timeout = 15s</span> up front, so a transactional migration that would take a blocking lock <em>fails fast and aborts</em> rather than freezing live traffic behind it (the classic single-substrate stall). But the two long-running maintenance ops the expand phase relies on run <strong>outside that transaction</strong>, precisely so the 15s ceiling can't abort them: a <span class="ic">CREATE INDEX CONCURRENTLY</span> build (non-transactional by definition) and <strong>batched backfills</strong> both run with the statement timeout disabled or set per-statement to a long bound (each chunk is its own short, committed transaction off the critical path, never one long transaction). The protective timeout therefore guards live OLTP traffic <em>without</em> aborting the maintenance work the same paragraph depends on. The reverse path is <strong>rehearsed, not improvised</strong>: every expand migration ships a tested <span class="ic">down/0</span> (the expand phase is reversible because it is additive), and the irreversible <em>contract</em> phase is covered instead by PITR — Neon's branch-and-restore — exercised in a quarterly game-day against a production-sized branch. <strong>Two RPO scenarios, told apart honestly.</strong> <em>Steady-state durability</em> is <strong>RPO ≤ 1 min</strong> (continuous WAL/PITR) — what you lose to a hardware or infra failure. But the headline incident here, a <em>bad contract that ran</em>, is different: a PITR restore to a point <em>before</em> the contract throws away every business write since the contract committed, so the effective RPO there is <strong>your detection latency</strong>, not 1 min. That is exactly why the preferred control for a bad contract is to catch it fast and <strong>forward-fix or reverse the expand</strong> rather than restore — restore is the last resort that costs real writes, not the default. Stated RTO targets on a single substrate: <strong>RTO ≤ 30 min</strong> for a forward-fix or expand-phase reversal (a <em>target</em> for the live-binary path — it has a runbook but no full game-day drill basis yet), <strong>RTO ≤ 2 h</strong> for a full PITR restore of a bad contract (the quarterly game-day number). A bad migration on one Postgres is the highest-consequence incident we run, which is exactly why it is the one with a drilled runbook and a number attached, not a forward-fix-and-hope.</p>
+        <p><strong>3 · The build fails closed.</strong> Before any of this ships, the gate runs — the guarantees are AST/Spark-checked, not grepped (the verifier stack shown below: <span class="ic">catalog_parity</span>, <span class="ic">prefixes</span>, <span class="ic">pii_reads</span>, <span class="ic">pii_classify</span>, <span class="ic">no_plaintext_pii</span>), and every step exits non-zero on a violation. An unprefixed or uncatalogued column, or a vault-routed value read outside a <span class="ic">:reveal</span> action (keyed on the <span class="ic">pii do</span> / vault declaration, not the column name alone), never reaches the deploy above.</p>
+        <p><strong>4 · Observability — three layers, not one, and audit is a fourth thing.</strong> A single-node BEAM on a single Postgres makes <em>per-request</em> and <em>per-tenant</em> failure modes — a wedged process, a slow Ash action under buffer contention, one tenant's mount-storm — <em>more</em> likely, not less, so "metrics into Prometheus" alone is not observability. We run a genuine tier:</p>
+        <p><strong>4a · Distributed tracing (OpenTelemetry).</strong> One trace context is established at <span class="ic">mount/3</span> and propagated through the vertical path — LiveView event → Ash action → policy check → SQL (via <span class="ic">OpentelemetryEcto</span>) → vault reveal — and across the Oban boundary (the enqueueing span id rides the job row and continues when the worker runs), so one failing request is one end-to-end trace. <strong>Two scrubs keep tracing inside the no-plaintext invariant, because spans leave the substrate.</strong> First, <span class="ic">OpentelemetryEcto</span> runs <span class="ic">db_statement: :disabled</span> — it records operation, table, row-count, and Ecto <strong>execution/queue timing</strong> (queue, query, decode, total), <em>never</em> the SQL text or bind params, so a <span class="ic">pii_</span> token never serializes into <span class="ic">db.statement</span>. Note the precise scope: that timing is <em>not</em> a Postgres query plan — <span class="ic">OpentelemetryEcto</span> never EXPLAINs; a plan, if wanted, comes from server-side <span class="ic">auto_explain</span> (sampled, log-only), not the trace — and that server log is itself a token-only-downstream sink under the same invariant: a vaulted value never sits in a WHERE/index condition as plaintext (it is a <span class="ic">pii_</span> token or bounded ID), so the index-condition and filter values <span class="ic">auto_explain</span> prints are tokens, not names, and the server log carries no plaintext PII for the same reason the trace and app-log sinks don't. Second, the <strong>reveal path is excluded from span attributes by construction</strong>: a <span class="ic">:reveal</span> span's attributes are allow-listed to <span class="ic">subject_id</span>, <span class="ic">grant_id</span>, <span class="ic">reason</span> — the decrypted value is never a span attribute, log field, or event. The <span class="ic">pii_reads</span> AST verifier fails the build on a <strong>direct</strong> flow of a revealed/<span class="ic">pii_</span> value into a span/log/sink call (a dataflow match, not a sound taint proof); indirect laundering through a helper is caught instead by the <strong>schema allow-list at the sink</strong> (§4b — the field must be a bounded ID / token / enum / number). Direct leak: AST. Laundered leak: the sink schema. Together they close the path without claiming full taint analysis.</p>
+        <p><strong>4b · Structured wide events.</strong> Each request emits <em>one</em> wide, canonical event carrying the fields you debug on — <span class="ic">request_id</span>, <span class="ic">trace_id</span>, <span class="ic">tenant_id</span>, <span class="ic">actor_id</span>, <span class="ic">action</span>, row-count, query-operation/timing summary, queue depth — shipped to a trace/event backend (OpenTelemetry → Honeycomb/Tempo/Loki) where you slice by any of them. This is where per-tenant debugging lives, deliberately <em>not</em> in metric labels (below). <strong>Every wide-event field is an opaque ID, a token, a bounded enum, or a number — never a plaintext PII value or a query containing one</strong> (<span class="ic">tenant_id</span> is the org's opaque id; the operation summary is operation + table + duration, not SQL text — consistent with <span class="ic">db_statement: :disabled</span>). So the backend is a <strong>token-only-downstream sink</strong> under the same ingress-class invariant as the CDC mirror and app-log sink, and the schema is allow-listed — a build-time check fails on any span/wide-event field not typed as a bounded ID / token / enum / number, so a future debug field can't smuggle a name into Honeycomb. <strong>One seam this sink has that the in-Postgres tiers don't: it is third-party and append-only, so key-shred cannot reach it.</strong> So <span class="ic">actor_id</span> is a <strong>per-subject-keyed pseudonym</strong> — <span class="ic">HMAC(subject_key, subject_id)</span>, where <span class="ic">subject_key</span> is the subject's own KMS-held key — so destroying that key on erasure makes the pseudonym <strong>promptly unlinkable to the subject</strong> (a one-way handle whose key is gone), riding the same KMS destruction the in-Postgres shred already attests rather than waiting on an epoch rollover; the sink is retained under a stated TTL besides. That is an <em>ingress</em>-class guarantee (tokens/bounded IDs admitted at write time), distinct from the destruction-class shred of the in-Postgres tiers; the limits name it as a carve-out.</p>
+        <p><strong>4c · BEAM introspection for the wedged-process case.</strong> When a request is stuck rather than slow, you go below the trace: a guarded remote console / <span class="ic">:observer</span> attach to the running node, <span class="ic">Process.info</span> + current-stacktrace on the offending pid, reduction and message-queue-length telemetry per process, and <span class="ic">:telemetry</span> handlers on Oban + Ecto pool checkout so buffer/connection contention shows up as a signal, not a mystery. <em>Who debugs it:</em> the on-call engineer opens the trace by <span class="ic">request_id</span>, confirms the symptom class (slow action vs. wedged pid vs. mount-storm), and drops to the remote console only for the live-process case — a runbook step, not a heroic.</p>
+        <p><strong>4d · Bounded-cardinality metrics — and audit is separate.</strong> Prometheus series are tagged with <em>bounded</em> labels only — <span class="ic">action</span>, route, result, a hashed/bucketed tenant-tier — <strong>never raw <span class="ic">org_id</span>/<span class="ic">actor_id</span></strong>, because per-tenant labels are unbounded cardinality and would be their own outage. The per-tenant detail lives in the wide events and traces above; metrics carry <strong>exemplars</strong> (a <span class="ic">trace_id</span> on the bucket) so a spiking latency histogram links straight to an exemplar trace. Distinct from all of this, the <strong>audit log</strong> — "which operator saw what, when," including every masked-impersonation reveal — is <em>first-class rows</em>: <span class="ic">SELECT</span> against <span class="ic">aud_event</span>. Audit is a compliance record, not telemetry; we keep the two surfaces separate on purpose so neither is sized or trusted as the other.</p>
+      </div>
+    <div class="codecard" style="margin-top:30px">
+          <div class="bar"><i></i><i></i><i></i><span class="fname">3 · the build fails closed — guarantees are AST/Spark-checked, not grepped</span></div>
+<pre><span class="cm"># one base macro wires the transformer + catalog + vault + verifiers</span>
+<span class="kw">defmodule</span> <span class="at">Crm.Contact</span> <span class="kw">do</span>
+  <span class="kw">use</span> Samen.Resource, otp_app: <span class="at">:acme</span>   <span class="cm"># injects abbrev transformer + Samen.Catalog + Samen.Pii</span>
+  attributes <span class="kw">do</span>
+    attribute <span class="at">:name</span>, <span class="at">:string</span>      <span class="cm"># → stored as com_name</span>
+  <span class="kw">end</span>
+  pii <span class="kw">do</span>
+    pii_attribute <span class="at">:full_name</span>, <span class="at">Samen.Type.FullName</span>, vault: <span class="at">:pii_name</span>
+  <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="cm"># CI gate — every step exits non-zero on a violation (fail-closed):</span>
+mix compile --warnings-as-errors \
+  &amp;&amp; mix samen.verify.catalog_parity \  <span class="cm"># column ⇄ fld_field row, both ways</span>
+  &amp;&amp; mix samen.verify.prefixes \        <span class="cm"># every column carries its resource abbrev</span>
+  &amp;&amp; mix samen.verify.pii_reads \       <span class="cm"># AST: a vault-routed value (pii do / pii_*) reaches a span/</span>
+                                       <span class="cm">#   log/sink ONLY inside :reveal; schema allow-list backs it</span>
+                                       <span class="cm">#   at the sink (NOT a sound taint proof)</span>
+  &amp;&amp; mix samen.verify.pii_classify \     <span class="cm">#   (scope-aware — a text grep cannot be)</span>
+  &amp;&amp; mix samen.verify.no_plaintext_pii   <span class="cm"># destruction oracle (CI + post-shred)</span>
+<span class="cm"># pii_classify = heuristic name+value scanner over NEW plain-typed</span>
+<span class="cm"># string/date columns; FLAGS likely-PII names/values (ssn · dob · mrn ·</span>
+<span class="cm"># cdl · email-shaped) NOT declared pii_attribute → fails until declared</span>
+<span class="cm"># OR cleared by a REVIEW-GATED non_pii! exception (a 2nd reviewer must</span>
+<span class="cm"># sign off; forbidden on a likely-PII string/date without review). Each</span>
+<span class="cm"># accepted override is REGISTERED in the catalog. (flag-on-hit, not</span>
+<span class="cm"># "assume every string is PII".)</span>
+
+<span class="cm"># no_plaintext_pii = the DESTRUCTION ORACLE. In CI it asserts the</span>
+<span class="cm"># token-only-downstream invariant: every projected tier (CDC mirror,</span>
+<span class="cm"># rollups, matviews, app-log sink, aud_event audit log, AND the trace/</span>
+<span class="cm"># event sink schema — span attrs + wide-event fields) exposes ONLY</span>
+<span class="cm"># pii_-token / fld_field-tokenized / bounded-ID columns — never a</span>
+<span class="cm"># plaintext PII type, and OpentelemetryEcto runs db_statement:disabled.</span>
+<span class="cm"># Run post-shred against a subject_id, --tiers all ORCHESTRATES THREE</span>
+<span class="cm"># CHECKS to prove the erasure took:</span>
+mix samen.verify.no_plaintext_pii --subject &lt;uuid&gt; --tiers all
+<span class="cm">#   (1) DB-TIER CONTENT SCAN — live·replica·cdc_mirror·rollup·audit·</span>
+<span class="cm">#       registered_non_pii: FAIL (exit 1) if any holds decryptable</span>
+<span class="cm">#       plaintext OR ciphertext that decrypts under a key other than</span>
+<span class="cm">#       the destroyed one. The registered_non_pii tier = the audited,</span>
+<span class="cm">#       review-gated non_pii! columns (plaintext-at-rest by design);</span>
+<span class="cm">#       it asserts row-level deletion/redaction ran for the subject,</span>
+<span class="cm">#       so the override is NOT a surface the oracle is blind to.</span>
+<span class="cm">#   (2) BACKUP/PITR-HISTORY SCAN — the per-subject KEY is an EXTERNAL</span>
+<span class="cm">#       KMS handle, NOT a Postgres row, so it is OUTSIDE the WAL/PITR</span>
+<span class="cm">#       surface; a restore brings back ciphertext, never the key. The</span>
+<span class="cm">#       scan asserts the key is absent from every DB tier + PITR hist.</span>
+<span class="cm">#   (3) KMS DESTRUCTION ATTESTATION — the oracle QUERIES the KMS and</span>
+<span class="cm">#       checks it reports the subject key destroyed. This is an</span>
+<span class="cm">#       ATTESTATION it reads, NOT a destruction the oracle itself</span>
+<span class="cm">#       proves — the KMS is the system of record for key state.</span>
+<span class="cm">#   INGRESS-CLASS tier (not destruction-class): the third-party</span>
+<span class="cm">#   trace_sink is append-only + NOT key-reachable, so it is held to a</span>
+<span class="cm">#   schema-asserted INGRESS rule — the oracle asserts it only ever</span>
+<span class="cm">#   RECEIVED tokens / bounded IDs / per-subject-KEYED pseudonyms (token-</span>
+<span class="cm">#   only by construction at write), so there is no plaintext to shred and</span>
+<span class="cm">#   the pseudonym HMAC(subject_key, subject_id) goes unlinkable the moment</span>
+<span class="cm">#   that subject's KMS key is destroyed (rides check 3, not an epoch).</span>
+<span class="cm">#   It is NOT a post-shred content scan (the sink is external+append-</span>
+<span class="cm">#   only); the limits name it + registered_non_pii as the two key-shred-</span>
+<span class="cm">#   class carve-outs (derived aggregates are governed separately).</span>
+<span class="cm">#   PASS only when every key-reachable copy is a dangling token /</span>
+<span class="cm">#   undecryptable bytes, every non_pii! row is redacted, and the KMS</span>
+<span class="cm">#   attests the key destroyed.</span>
+
+<span class="cm"># NOTE: there is no grep smoke check. A text grep for 'pii_' flags the</span>
+<span class="cm"># project's OWN pii_attribute declarations and this doc's own canonical</span>
+<span class="cm"># code, so it false-positives on legitimate sites and is not even a</span>
+<span class="cm"># useful smoke check. The MECHANISM is samen.verify.pii_reads (AST/Spark,</span>
+<span class="cm"># scope-aware, keyed on the pii do / vault declaration) — it knows a</span>
+<span class="cm"># declaration site from a sink, which a grep cannot.</span>
+
+<span class="cm"># the catalog is generated IN the migration transaction</span>
+<span class="kw">BEGIN</span>;
+  <span class="kw">ALTER TABLE</span> com_contact <span class="kw">ADD COLUMN</span> com_name text;
+  <span class="kw">INSERT INTO</span> fld_field (tam_table, name, col, type)
+    <span class="kw">VALUES</span> (<span class="str">'com_contact'</span>,<span class="str">'name'</span>,<span class="str">'com_name'</span>,<span class="str">'text'</span>);
+<span class="kw">COMMIT</span>;  <span class="cm">-- atomic · fail-closed</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== CONTROL PLANE (brief) ===================== -->
+<section id="control">
+  <div class="wrap">
+    <div class="sec-label">Running the business</div>
+    <h2>Support any tenant — <em>without your staff seeing their customers</em></h2>
+    <div class="prose measure">
+      <p>The product your tenants use and the control plane you run the business with are the <strong>same objects on the same substrate</strong> — an operator CRM where accounts <em>are</em> tenant orgs, ticketing for their support, billing rolled up across tenants. The seam is impersonation: an operator opens a tenant and sees its real UI, but the session carries <strong>no reveal grant</strong>, so personal data renders <span class="ic">••••</span> by default (masking is the field type's normal value — no CSV, API, or log path leaks by omission).</p>
+      <p>Unmasking one subject is <strong>second-party</strong>: an operator <em>requests</em>, a distinct party approves (dual-control, tenant-gate, or audited break-glass), enforced in policy <em>and</em> by a database <span class="ic">CHECK (granted_by &lt;&gt; requestor_id)</span> — written to a hash-chained, tenant-readable log the operator cannot edit. Cross-tenant views (MRR, queues) run on a separate <strong>token-blind</strong> actor whose resources have no <span class="ic">pii_</span> columns at all. The two paths are mutually exclusive.</p>
+      <p><strong>"Time-boxed" is a built mechanism, not an adjective.</strong> An approved grant is a row carrying an <span class="ic">expires_at</span> (a bounded default window — minutes, not a standing entitlement) alongside <span class="ic">subject_id</span>, <span class="ic">granted_by</span>, and <span class="ic">reason</span>. The <span class="ic">:reveal</span> policy <strong>denies the decrypt the moment <span class="ic">now() &gt; expires_at</span></strong> — the window is checked in policy on every reveal, so an expired grant fails closed exactly like no grant at all, even if the row is never cleaned up. Cleanup is nonetheless durable: an <strong>Oban job auto-revokes the grant</strong> at <span class="ic">expires_at</span> (a job scheduled in the same transaction that writes the grant, so revocation can't be forgotten), flipping it to <span class="ic">revoked</span> and writing the expiry to the same hash-chained audit log. Re-access after the window means a fresh request and a fresh second-party approval — there is no renew-in-place.</p>
+      <p><strong>Immutable and crypto-shreddable don't contradict</strong>, because the audit log never stores plaintext: each entry holds vault-FK token references and per-subject key-destroyable ciphertext, plus the hash chain over those tokens. So the chain stays append-only and tamper-evident — nobody edits or deletes a row — while erasing a subject still works: destroying their key turns their referenced ciphertext into permanently undecryptable bytes and their tokens into dangling references. The record of <em>that an event happened</em> is preserved (which is the point of WORM); <em>who it was about</em> becomes unrecoverable. The destruction oracle covers this tier too: <span class="ic">mix samen.verify.no_plaintext_pii</span> asserts the audit log holds tokens only.</p>
+    </div>
+    <figure class="fig">
+      <svg viewBox="0 0 1000 470" role="img" aria-labelledby="control-svg-title control-svg-desc" xmlns="http://www.w3.org/2000/svg">
+        <title id="control-svg-title">Two planes, two operator paths</title>
+        <desc id="control-svg-desc">How PII stays safe across the operator seam, in reading order. On the left is the tenant plane: the tenant's own product — org-scoped CRM, billing, tickets, and site — where the tenant sees their customers' names and emails in clear because they own that data. A dashed vertical operator seam separates it from the operator and control plane on the right, which has exactly two paths. Path one is cross-tenant aggregate work — operator CRM of tenant accounts and billing or MRR rolled up across tenants — which runs through a token-blind aggregate actor that has no org_id and reads a ClickHouse projection where pii_ columns are physically absent; this path never crosses the seam into anyone's plaintext. Path two is single-org impersonation: an operator opens one tenant's world and by default all PII renders as masked bullets because the session carries no reveal grant. Unmasking one subject must pass two gates in sequence — first a reveal request, then a second-party approval by a distinct approver, enforced so the requestor is never the approver. The two paths are mutually exclusive. An approved reveal exposes a single subject and is written to a tamper-evident, hash-chained, WORM-anchored, tenant-readable audit log the operator cannot edit; that log stores only token references and key-destroyable ciphertext, so it is both immutable and crypto-shreddable.</desc>
+        <defs>
+          <marker id="tp" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1.5 1.5L8 5L1.5 8.5" fill="none" stroke="#6E6457" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>
+          <marker id="tpo" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M1.5 1.5L8 5L1.5 8.5" fill="none" stroke="#C44A00" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>
+        </defs>
+        <rect x="30" y="64" width="380" height="300" rx="14" fill="none" stroke="#201B14" stroke-opacity="0.32"/>
+        <text x="220" y="54" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#201B14">TENANT PLANE — they own the data, PII in clear</text>
+        <rect x="590" y="64" width="380" height="300" rx="14" fill="none" stroke="#201B14" stroke-opacity="0.32"/>
+        <text x="780" y="48" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#201B14">OPERATOR / CONTROL PLANE</text>
+        <text x="780" y="60" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#6E6457">two paths: token-blind aggregate · single-org impersonation</text>
+        <line x1="500" y1="70" x2="500" y2="372" stroke="#FF6200" stroke-width="1.3" stroke-dasharray="5 5"/>
+        <text x="500" y="84" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#C44A00">OPERATOR SEAM</text>
+
+        <rect x="54" y="104" width="332" height="150" rx="11" fill="#FFF1E6" stroke="#FF6200"/>
+        <text x="220" y="132" text-anchor="middle" font-family="Inter, sans-serif" font-size="13.5" font-weight="600" fill="#C44A00">Their product</text>
+        <text x="220" y="152" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#C44A00">org-scoped · CRM · billing · tickets · site</text>
+        <text x="220" y="196" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#6E6457">their customers' names &amp; emails,</text>
+        <text x="220" y="210" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#6E6457">visible to them — they own it</text>
+
+        <rect x="614" y="100" width="160" height="50" rx="9" fill="#FAF7F2" stroke="#E7DFD2"/><text x="694" y="122" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="600" fill="#201B14">Operator CRM</text><text x="694" y="138" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#6E6457">tenant accounts</text>
+        <rect x="786" y="100" width="160" height="50" rx="9" fill="#FAF7F2" stroke="#E7DFD2"/><text x="866" y="122" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="600" fill="#201B14">Billing · MRR</text><text x="866" y="138" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#6E6457">across tenants</text>
+
+        <!-- two-stage gate -->
+        <rect x="472" y="172" width="56" height="56" rx="8" transform="rotate(45 500 200)" fill="#FFF1E6" stroke="#FF6200"/>
+        <text x="500" y="195" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#C44A00">reveal</text>
+        <text x="500" y="205" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#C44A00">requested?</text>
+        <rect x="472" y="244" width="56" height="56" rx="8" transform="rotate(45 500 272)" fill="#FFF1E6" stroke="#FF6200"/>
+        <text x="500" y="267" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#C44A00">2nd party</text>
+        <text x="500" y="277" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" fill="#C44A00">approved?</text>
+        <text x="500" y="316" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#6E6457">requestor ≠ approver</text>
+
+        <!-- path 1: token-blind aggregate, does NOT cross seam -->
+        <line x1="866" y1="150" x2="866" y2="246" stroke="#6E6457" stroke-width="1.4" marker-end="url(#tp)"/>
+        <text x="876" y="180" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#6E6457">operator_aggregate</text>
+        <text x="876" y="192" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#6E6457">token-blind · no org_id</text>
+        <rect x="600" y="248" width="346" height="46" rx="10" fill="#FAF7F2" stroke="#E7DFD2"/>
+        <text x="773" y="267" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" font-weight="600" fill="#201B14">ClickHouse projection · vault-excluded</text>
+        <text x="773" y="283" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#6E6457">pii_ columns physically absent</text>
+
+        <!-- path 2: impersonation crosses to gate -->
+        <line x1="640" y1="126" x2="532" y2="184" stroke="#C44A00" stroke-width="1.5" marker-end="url(#tpo)"/>
+        <text x="556" y="150" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#C44A00">impersonation · single org</text>
+
+        <!-- mutual exclusion -->
+        <line x1="620" y1="200" x2="700" y2="200" stroke="#C0392B" stroke-width="1.1" stroke-dasharray="2 3"/>
+        <text x="660" y="194" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#C0392B">✕</text>
+        <text x="660" y="216" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7.5" fill="#C0392B">mutually exclusive</text>
+
+        <!-- gate1 default masked -->
+        <line x1="472" y1="200" x2="388" y2="168" stroke="#6E6457" stroke-width="1.3" marker-end="url(#tp)"/>
+        <text x="250" y="280" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#6E6457">no request → PII renders ••••</text>
+        <line x1="500" y1="228" x2="500" y2="244" stroke="#C44A00" stroke-width="1.1" marker-end="url(#tpo)"/><text x="508" y="241" font-family="JetBrains Mono, monospace" font-size="7.5" fill="#C44A00">yes</text>
+        <line x1="478" y1="282" x2="392" y2="220" stroke="#C44A00" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#tpo)"/>
+        <text x="250" y="296" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#C44A00">approved → reveal one subject + AUDIT</text>
+
+        <!-- tamper-evident log -->
+        <rect x="54" y="312" width="332" height="50" rx="10" fill="#FFF1E6" stroke="#FF6200"/>
+        <text x="220" y="333" text-anchor="middle" font-family="Inter, sans-serif" font-size="12" font-weight="600" fill="#C44A00">tamper-evident log</text>
+        <text x="220" y="350" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#C44A00">hash-chained · WORM-anchored · we can't edit · tenant-readable</text>
+        <line x1="360" y1="220" x2="300" y2="310" stroke="#C44A00" stroke-width="1.1" marker-end="url(#tpo)"/>
+      </svg>
+      <figcaption class="figcap"><b>Two planes, two operator paths.</b> Cross-tenant work runs <b>token-blind</b> — an aggregate actor with no <span class="ic">org_id</span> reading a vault-excluded projection where <span class="ic">pii_</span> columns physically don't exist. Seeing one tenant's world is the separate, single-org impersonation path, masked by default. They are mutually exclusive. Unmasking a subject passes <b>two gates</b> (request → distinct second-party approval) and emits a <b>tamper-evident, tenant-readable log we cannot edit</b> — which stores token references and key-destroyable ciphertext only, so "immutable" and "crypto-shreddable" hold at once.</figcaption>
+    </figure>
+
+    <div class="resolution">
+      <div class="mark">∴</div>
+      <div class="claim">"PII is <span>masked by default. We run your business — structure, workflow, aggregates — without unmasking anyone.</span> Token-blindness is input privacy; the output-privacy half has two tiers, stated apart: the aggregate plane <em>enforces today</em> a minimum-cohort and minimum-distinct floor (k-anonymity + l-diversity), and treats the <span style="color:var(--ink)">cross-query / differencing</span> defense — a <em>global, per-cohort</em> query budget plus a differential-privacy posture — as posture under construction, not a solved proof. Unmasking a single subject is the separate path — grant-gated, second-party-approved, logged, time-boxed, tenant-readable, and crypto-shreddable down to a dangling token."</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== LLM ===================== -->
+<section id="llm">
+  <div class="wrap">
+    <div class="sec-label">Why it's the substrate for software an agent builds — and runs</div>
+    <h2>A catalogued object model is ground an agent <em>can't invent its way off of</em></h2>
+    <div class="prose measure">
+      <p>Ask an LLM to build a SaaS from a blank schema and it invents a <span class="ic">users</span> table, guesses <span class="ic">status</span> is a string, hand-rolls a dunning state machine, pastes an email into a free-text column, and writes four different retry loops. Every one is a place the model can be wrong — and silently is.</p>
+      <p>Samen removes the blank page. Every object and field is <strong>in the catalog</strong>, so the agent grounds on a known model. Be precise about <em>which</em> identity is unambiguous, because the agent grounds on two different names: the <strong>physical storage column is globally self-qualifying</strong> — <span class="ic">com_name</span> carries its resource abbrev, so a stored column name never collides or drifts across a rename, and there is genuinely no "which table's <span class="ic">com_status</span>?" question at the storage layer. The <strong>catalog / API field name</strong> the agent writes against (<span class="ic">:status</span>, <span class="ic">:name</span>) is <strong>resource-scoped, not globally unique</strong> — two resources can each have a <span class="ic">:status</span> — so the agent disambiguates not by a bare field name but by the <strong>resource-qualified catalog entry</strong> (the <span class="ic">tam_table</span> + <span class="ic">fld_field</span> pair), which names exactly one field on exactly one resource. The "no which-table ambiguity" property is therefore the catalog's <em>resource-qualified</em> entry doing the work, plus the self-qualifying storage name it maps to — not a fiction that a bare <span class="ic">:status</span> is globally unique. PII is <strong>declared and vault-routed</strong>: a schema hallucination fails at compile time, and net-new PII — the case where the agent writes <span class="ic">attribute :ssn, :string</span> with a real type and no <span class="ic">pii_</span> prefix, landing plaintext at rest — is caught by <strong><span class="ic">mix samen.verify.pii_classify</span></strong> before it merges, or requires an explicit audited <span class="ic">non_pii!</span> override. And a <strong>CI linter rejects any reference to a column that isn't catalogued</strong> — a hallucinated field doesn't compile. The agent stops inventing infrastructure and starts composing your business logic on idioms it can verify.</p>
+      <p><strong>And the same catalog is the ground an agent <em>operates</em> on — not just builds on.</strong> The AI-native B2B pattern — <a href="#b2b">Service as Software</a>, where you sell the outcome and an agent does the work — puts a model in the loop acting on <em>live customer data</em>. Grounding stops it inventing the schema; the rest of the substrate keeps it safe at runtime. An Ash <strong>policy</strong> bounds every action to the org and role it's allowed; the <strong>vault</strong> means it reads tokens and a name materializes only behind an explicit, expiring <span class="ic">:reveal</span> grant; and every action it takes is a <strong>first-class audit row</strong>, including which subject it touched and why. The model can be wrong — but the substrate makes wrong <strong>bounded, masked, and logged</strong> instead of a breach or a silent corruption. That is the difference between a demo agent and one whose outcome you can sell to a regulated business.</p>
+      <p><strong><span class="ic">mix samen.verify.pii_classify</span> is the backstop that closes the opt-in gap.</strong> Vault routing only protects fields the author <em>declared</em> as PII; nothing stops a human or a model from giving a sensitive field a plain type. So a compile-time scanner reads the AST of every <em>new</em> plain-typed string/date column and scores it on two axes — the <strong>identifier shape of its name</strong> (<span class="ic">ssn</span>, <span class="ic">dob</span>, <span class="ic">mrn</span>, <span class="ic">cdl</span>, <span class="ic">tax_id</span>, <span class="ic">email</span>) and the <strong>PII shape of its sample/seed values</strong> (email-shaped, SSN-shaped, phone-shaped). A hit fails the build until the column is either moved into a <span class="ic">pii do</span> block or cleared by a <strong>review-gated <span class="ic">non_pii!</span> exception — not a self-serve stamp.</strong> <span class="ic">non_pii!</span> is <em>forbidden</em> on any string/date column that <span class="ic">pii_classify</span> scored likely-PII unless a second reviewer signs off; every accepted override is <strong>registered</strong> (recorded in the catalog as a reviewed exception with who/why), and because a registered <span class="ic">non_pii!</span> column is plaintext-at-rest by definition, it is erased not by key-shred but by <strong>row-level deletion/redaction on an erasure request</strong> — and the destruction oracle includes the registered-<span class="ic">non_pii!</span> set in its tier list, so the override is never a surface the oracle is structurally blind to. It is adversarial on purpose, but be precise about the mechanism: it is a <strong>heuristic name+value scanner that flags on a hit</strong> — a new plain-typed string/date column whose <em>name</em> matches a likely-PII identifier or whose <em>sample/seed values</em> match a PII shape fails the build until it is declared <span class="ic">pii_attribute</span> or co-signed through a review-gated <span class="ic">non_pii!</span>. It is not "assume every string is PII"; it is flag-on-hit against an identifier/value heuristic, which is why a reviewer co-sign (not a self-serve stamp) is the calibrated escape and why the heuristic, like any heuristic, can miss a non-obvious name — the review gate, not the scanner, is the backstop for the miss.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== HONEST ===================== -->
+<section id="honest">
+  <div class="wrap">
+    <div class="sec-label">What we won't pretend</div>
+    <h2>The honest edges</h2>
+    <div class="honest">
+      <ul>
+        <li><strong>Elixir is a smaller pond.</strong> Fewer candidates — mitigated because the surface you hire <em>for</em> is smaller (no queue/auth/analytics teams) and onboarding is against a catalog, not tribal knowledge. A defensible bet, not a free lunch.</li>
+        <li><strong>The privacy DSL is only as safe as its coverage.</strong> Every field type must be classified or the verifier can't reason about it — so unknown types default to PII (mask-by-default). The one escape hatch, <span class="ic">non_pii!</span> ("provably non-PII"), is <strong>review-gated</strong> (a second reviewer must sign off; forbidden on a likely-PII string/date without review), registered, and backstopped by the adversarial identifier-scanner before it reaches the aggregate plane.</li>
+        <li><strong>Token-blind isn't inference-blind — and k-anonymity is necessary, not sufficient.</strong> Absence of <span class="ic">pii_</span> columns is <em>input</em> privacy; it says nothing about what the answers leak. A cross-tenant aggregate with count-of-one cohorts re-identifies, so minimum-cohort (k-anonymity) suppression is the floor — but k-anon alone falls to a homogeneity attack (every member of a k-cohort shares the sensitive value), which is why the aggregate plane also enforces <strong>l-diversity</strong> (a minimum number of <em>distinct</em> values for the sensitive attribute within each cohort) — with <strong>t-closeness</strong> (bounding the distance between a cohort's sensitive-value distribution and the overall distribution) as the stronger distributional defense on the same posture-under-construction track as the query budget below. And because the store is append-only, repeated overlapping queries enable a <strong>differencing attack</strong> (diff two near-identical cohorts to isolate one subject). The unit matters here: a <em>per-actor</em> budget does not compose against <strong>collusion</strong> — two coordinating accounts each spend a fresh budget and recombine the answers — so the budget has to be tracked at the wrong-for-attacker granularity: <strong>global / per-cohort</strong>, accounted against the cohort being queried (and per-tenant in aggregate), not per requesting actor. The honest mitigation is therefore a <strong>global, per-cohort query budget with cross-query suppression</strong> and a differential-privacy posture (calibrated noise composed across queries) for repeated aggregates. We enforce the minimum-cohort / minimum-distinct floor today and treat the cross-query budget / DP layer as <strong>posture under construction, not a solved proof</strong> — and we name per-actor accounting as the wrong unit rather than implying it would hold.</li>
+        <li><strong>Erasure has residues, and they are governed — not waved away.</strong> Crypto-shred reaches at-rest ciphertext everywhere because every key-reachable tier holds tokens, not plaintext (CDC mirror, replicas, backups, app logs, and the audit log carry vault-FK references only — the <span class="ic">pii_classify</span> backstop from the LLM section is what keeps net-new PII <em>inside</em> the vault). The piece that makes "across backups" sound rather than hand-waved: the per-subject key is <strong>not a Postgres row under PITR</strong> — it lives in an <strong>external KMS outside the WAL/backup surface</strong>, so restoring any pre-shred backup resurrects ciphertext but never the destroyed key; if the key shared the continuously-archived Postgres, a point-in-time restore would re-decrypt every supposedly-dead copy, so it deliberately does not. The precise claim, not an absolute: the destruction oracle <span class="ic">mix samen.verify.no_plaintext_pii --tiers all</span> orchestrates a DB-tier content scan, a backup/PITR-history scan, and a <strong>KMS destruction attestation</strong> (the KMS line is an attestation it queries, not a destruction the oracle independently proves) across the live, replica, backup/PITR, CDC-mirror, rollup, and audit tiers. <strong>Two key-shred-class carve-outs we do <em>not</em> claim key-shred covers</strong> — plus derived aggregates, governed separately. The <strong>two key-shred-class carve-outs</strong> are: (a) the <strong>append-only external trace sink</strong> (Honeycomb/Tempo/Loki) — third-party and not key-reachable, so the per-subject identifier it carries is a <strong>per-subject-keyed pseudonym</strong> (<span class="ic">HMAC(subject_key, subject_id)</span>, where <span class="ic">subject_key</span> is the subject's own KMS-held key) that becomes <strong>promptly unlinkable the moment that key is destroyed on erasure</strong> — so it rides the oracle's existing KMS destruction attestation (check 3) rather than waiting on an epoch rollover, and the sink is retained under a <strong>stated TTL</strong> besides; this is an ingress-class guarantee (token/bounded-ID/pseudonym-only at write), not a post-shred content scan; (b) <strong>audited <span class="ic">non_pii!</span> columns</strong> — the review-gated exception is plaintext-at-rest by design, so it is <strong>registered</strong> and erased by <strong>row-level deletion/redaction</strong> on an erasure request, which the oracle includes as a tier in its scan rather than leaving structurally blind. <strong>Separately governed: derived aggregates</strong> — a rollup or matview computed before a shred can still encode the subject, so aggregates are governed by minimum-cohort suppression <em>and</em> a <strong>rebuild-or-exclude-on-erasure</strong> policy: where the raw partition is still retained the rollup is rebuilt without the subject, and where the erasure falls in an <em>already-archived/detached</em> window — which can no longer be rebuilt from raw — the <strong>exclude/suppress arm</strong> applies and the erased subject is suppressed from the derived row instead; either way shred does not retroactively scrub a cohort statistic an operator already exported (which is why the aggregate-plane budget above exists).</li>
+        <li><strong>"Can't log it ⇒ can't see it" is a real availability cost — and break-glass has a built degraded mode.</strong> Routine reveal fails closed if the audit sink or control-plane DB is unreachable — deliberate (deny-recoverable beats leak-unrecoverable). But emergency break-glass is not left to fail-closed-and-pray: it writes to a <strong>locally-durable, deferred-anchor audit</strong> — an append-only, hash-chained record on the operator node's own disk (fsync'd, not the central DB) that captures who/what/why <em>before</em> the reveal is granted. When the control plane returns, those entries are <strong>anchored</strong> into the WORM chain (and reconciled into <span class="ic">aud_event</span>); the chain detects any gap or tamper because each local entry carries the prior hash. So break-glass during a control-plane outage is <em>degraded but accountable</em>, not unlogged — you trade synchronous anchoring for deferred anchoring, never accountability for availability. <strong>What "survives the control plane being down" precisely means</strong>, reconciled with the external-KMS decision: the ciphertext is the row's own data, so it is local and available even when the central audit DB is unreachable — but a reveal still has to <em>decrypt</em>, and the per-subject key lives in the external KMS, a <em>separate</em> availability surface from the control-plane DB. So break-glass survives the <strong>control plane</strong> being down (audit anchoring goes deferred, the reveal still completes by reaching the KMS); it does <em>not</em> manufacture plaintext when the <strong>KMS itself</strong> is unreachable — decryptability depends on KMS reachability by the same design that makes key-shred final, and there is no degraded path that bypasses it. <strong>So the KMS gets its own availability posture, named — not just Postgres'.</strong> Because every decrypt/reveal and erasure-finality is a synchronous KMS call, the KMS is run <strong>replicated/quorum across zones with its own availability target (on the order of the data tier's), and its outage is the wider, all-tenant "no PII renders" failure class</strong> — which we accept deliberately because that outage <strong>fails closed (deny-recoverable, not leak)</strong>: a KMS partition denies decrypts until it heals, it never resurrects a shredded key or exposes plaintext, so the failure mode is unavailability, not disclosure. The degraded mode is therefore: local ciphertext + deferred-anchor audit + a live KMS call; if the KMS is also down the reveal fails closed (deny-recoverable, by construction). The honest residue: between the local write and the anchor there is a window where the audit lives only on one node's disk, and break-glass shares the KMS's availability for the decrypt step; we treat that node's disk durability, the anchor reconciliation, and KMS reachability as the things to monitor.</li>
+        <li><strong>One substrate is one blast radius — and we engineer the radius down, not away.</strong> Truth, queue, cron, audit, and vault sharing one Postgres means a correlated failure is possible that six vendors couldn't have (this is the CFO objection, owned not dodged). The mitigations are concrete: <strong>BEAM process isolation</strong> so a crashing job or LiveView takes only its own process, never the node; Oban's <span class="ic">SKIP LOCKED</span> + <strong>separate queues with per-queue concurrency limits</strong> so a runaway worker class can't starve the others or the OLTP path; a <strong>read replica</strong> for heavy analytics so dashboard scans don't compete with live writes for buffers and I/O; and the expand/contract + <span class="ic">lock_timeout</span>/<span class="ic">statement_timeout</span> + PITR posture (steady-state RPO ≤ 1 min; RTO ≤ 30 min forward-fix / expand reversal as a target, ≤ 2 h full PITR — see <em>How it runs § 2b</em> for why a bad-contract restore's effective RPO is detection latency, not 1 min) for the one incident — a bad migration — that <em>can</em> touch all five at once. The blast radius is real; the work is making it small, drilled, and recoverable, not pretending consolidation removed it.</li>
+        <li><strong>System is provable; tenant is best-effort.</strong> Compile-time guarantees cover the system regime. Tier-1/2 customization is validated-at-write and contained to a jsonb zone — strong and sealed, but not the same proof.</li>
+        <li><strong>"Inherit, don't rebuild" pays after the third product.</strong> The core is the residue of shipping, extracted by the Rule of Three — not a speculative platform you perfect first. The fastest way to ship zero SaaS is to build the foundry before you've built three.</li>
+        <li><strong>You inherit infrastructure, not a domain model — and the third product is where that bites.</strong> Be precise about what the shared core actually buys. Every non-trivial vertical <strong>re-identifies the core nouns</strong> (Company → Carrier/Shipper, Opportunity → Load, Activity → Encounter) and <strong>reshapes billing</strong> (settlement-netting; patient_responsibility + payer_claim) — those are bounded-context translations over a shared kernel of primitives, not additive extensions of one universal noun. So the Rule-of-Three payoff is <strong>"inherited infrastructure + a faster context to build"</strong> (storage convention, vault, masking, org-scope, audit, catalog parity, crypto-shred — free on every column), <em>not</em> "inherited domain model." The leaky-abstraction tax is real and it lands at the third product, exactly when the bet is supposed to pay: that product's value is that the plumbing and the context map are already there, not that its nouns came pre-shaped. One more bound on the hero copy: "the universal 80% of <em>every</em> SaaS" means the cross-cutting infrastructure idioms — strongest for person/company-centric B2B SaaS; the kernel is shared <em>primitives</em>, never shared <em>nouns</em>.</li>
+        <li><strong>The core is Postgres-solid; ClickHouse is a power-up.</strong> One Postgres runs a real, profitable SaaS. The analytics tier is opt-in per product, default off — and you never read a "current" value from it.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== CTA ===================== -->
+<section id="start" class="cta" style="border-top:1px solid var(--rule)">
+  <div class="wrap">
+    <div class="sec-label">The whole thing, in one sentence</div>
+    <h2>Inherit the universal 80% on one Postgres — and spend every line you write on <em>the only part that's yours.</em></h2>
+    <div class="cta-ask">
+      <a class="cta-btn primary" href="mailto:hello@samen.dev?subject=Architecture%20review%20—%20extracting%20our%20shared%20core">Book an architecture review <span class="arr">→</span></a>
+      <a class="cta-btn ghost" href="mailto:hello@samen.dev?subject=Request%20the%20extraction%20playbook">Request the extraction playbook <span class="arr">↗</span></a>
+    </div>
+    <div class="cta-note">The searchable wedge: you're after a <b>shared core / internal platform across multiple SaaS products — with a PII vault and a built-in operator plane</b> — and tired of assembling it from a web framework plus six vendors, twice. Bring the two products you've already shipped; we'll map the 80% you rebuilt and what extracting a shared core would inherit. The analytics tier stays <b>default off, opt-in per product</b> — nothing to rip out if you never need it.</div>
+  </div>
+</section>
+
+</main>
+
+<div class="wrap">
+  <footer>
+    <span>samen — dutch for "together": every scope, two planes, one runtime, one spine</span>
+    <span>elixir ⚡ phoenix ⚡ liveview ⚡ ash ⚡ oban ⚡ postgres</span>
+  </footer>
+</div>
+
+</body>
+</html>

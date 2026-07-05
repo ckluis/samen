@@ -1,0 +1,5 @@
+deps/
+_build/
+*.beam
+.elixir_ls/
+erl_crash.dump
