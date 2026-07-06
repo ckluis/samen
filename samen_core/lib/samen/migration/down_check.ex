@@ -18,11 +18,17 @@ defmodule Samen.Migration.DownCheck do
 
     1. Migrate all the way up (`Ecto.Migrator.run(:up, all: true)`).
     2. For each `:expand` migration, in reverse-version order:
-       a. `Ecto.Migrator.run(:down, to: <this version - 1 by stepping down 1>)` —
-          exercises the migration's `down/0`.
-       b. Assert it left the migration UNapplied.
-       c. `Ecto.Migrator.run(:up, step: 1)` — re-apply, asserting the pair is a clean
-          round trip (down then up does not error).
+       a. `Ecto.Migrator.run(:down, to: <this version - 1>)` — rolls the applied
+          stack down THROUGH this expand (running this expand's `down/0`, and the
+          `down/0` of any migration applied above it). Using `to:` rather than
+          `step: 1` makes the check robust to non-expand migrations layered on top
+          of an expand (e.g. a later scope-mount migration): stepping by 1 would peel
+          the newest applied migration, not the expand under test.
+       b. Assert this expand's version is among the rolled-back set (its `down/0`
+          actually ran).
+       c. `Ecto.Migrator.run(:up, all: true)` — re-apply the whole stack, asserting
+          the pair is a clean round trip (down then up does not error) and restoring
+          full state for the next (older) expand's turn.
     3. Any raise / missing-down / non-reversible op is a violation.
 
   A migration whose `up/0` is not reversible (no `down/0`, or a `change/0` with a
@@ -134,29 +140,32 @@ defmodule Samen.Migration.DownCheck do
 
   # ---------------------------------------------------------------------------
 
-  # Step this expand migration down by one, then back up, catching a broken down.
+  # Roll the applied stack down through this expand (running its down/0), then bring
+  # everything back up. Using `:down, to: version - 1` (rather than `:step, 1`) makes
+  # the check robust to NON-expand migrations layered on top of an expand — stepping
+  # by one would peel the newest applied migration, which may not be the expand under
+  # test (e.g. a later scope-mount migration). Rolling `to:` version-1 guarantees this
+  # expand's down/0 runs, regardless of what sits above it.
   defp exercise_down(repo, migrations_path, %{version: version, name: module}, log) do
-    # Down exactly this version. Ecto's :down + :step 1 rolls back the most recently
-    # applied migration; because we sort desc and re-apply after each, the migration
-    # under test is always the newest applied one when we step down.
     try do
-      case Ecto.Migrator.run(repo, migrations_path, :down, step: 1, log: log) do
-        [^version] ->
-          # Re-apply to restore state for the next (older) expand's turn.
-          case Ecto.Migrator.run(repo, migrations_path, :up, step: 1, log: log) do
-            [^version] ->
-              :ok
+      rolled = Ecto.Migrator.run(repo, migrations_path, :down, to: version - 1, log: log)
 
-            other ->
+      if version in rolled do
+        # Re-apply the whole stack to restore state for the next (older) expand's turn.
+        case Ecto.Migrator.run(repo, migrations_path, :up, all: true, log: log) do
+          reapplied when is_list(reapplied) ->
+            if version in reapplied do
+              :ok
+            else
               {:violation,
                "#{inspect(module)} (v#{version}): re-apply after down did not re-run this " <>
-                 "migration (got #{inspect(other)}) — down/0 is not a clean round trip."}
-          end
-
-        rolled ->
-          {:violation,
-           "#{inspect(module)} (v#{version}): stepping down rolled back #{inspect(rolled)} " <>
-             "instead of this migration — check migration ordering."}
+                 "migration (re-applied #{inspect(reapplied)}) — down/0 is not a clean round trip."}
+            end
+        end
+      else
+        {:violation,
+         "#{inspect(module)} (v#{version}): rolling down to v#{version - 1} did not roll back " <>
+           "this expand (rolled #{inspect(rolled)}) — check migration ordering / down/0."}
       end
     rescue
       e in [Ecto.MigrationError, Postgrex.Error, DBConnection.ConnectionError, RuntimeError] ->

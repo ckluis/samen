@@ -162,7 +162,12 @@ defmodule Demo.Crm.Contact do
           label: :emails
         }
 
-        if Samen.Reveal.granted?(ctx) do
+        # Use the configured grant checker (default-deny). NOTE: `Samen.Reveal` has
+        # no bare `granted?/1` — the grant callback lives on the checker MODULE
+        # (`grant_checker().granted?/1`), exactly as the scope-authoring guide §5
+        # documents and the Identity blueprint does. A bare `Samen.Reveal.granted?(ctx)`
+        # would raise UndefinedFunctionError if this action were ever invoked.
+        if Samen.Reveal.grant_checker().granted?(ctx) do
           {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
         else
           {:error, :denied}

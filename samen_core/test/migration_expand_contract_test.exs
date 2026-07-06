@@ -28,6 +28,7 @@ defmodule Samen.MigrationExpandContractTest do
 
   @good_migrations Path.expand("fixtures/downcheck_good", __DIR__)
   @broken_migrations Path.expand("fixtures/downcheck_broken", __DIR__)
+  @layered_migrations Path.expand("fixtures/downcheck_layered", __DIR__)
   @carveout_migrations Path.expand("fixtures/carveouts", __DIR__)
 
   # ---------------------------------------------------------------------------
@@ -301,6 +302,28 @@ defmodule Samen.MigrationExpandContractTest do
         Path.join(@good_migrations, "20260101000000_create_base.exs")
 
       assert Samen.Migration.DownCheck.phase_of_file(base_file) == nil
+    end
+
+    # REGRESSION (T3.1): a NON-expand migration layered on TOP of an expand (a
+    # scope-mount migration with a later version, as AddIdentityScope did to the demo's
+    # expand) must not defeat the down-check. The old `:down, step: 1` peeled the newer
+    # non-expand migration; the `:down, to: version - 1` fix rolls down THROUGH the
+    # expand regardless. This fixture reproduces the exact scenario that broke demo/ci.sh.
+    test "GREEN: exercises an expand's down/0 with a NON-expand migration layered on top" do
+      {repo, config} = start_scratch_repo("dc_layered")
+
+      try do
+        assert {:ok, checked} =
+                 Samen.Migration.DownCheck.run(repo, @layered_migrations, log: false)
+
+        # Only the expand (v…0102…) is exercised; the base and the layered-on-top
+        # widget2 migration are un-phased and are NOT reported as checked expands.
+        assert 20_260_102_000_000 in checked
+        refute 20_260_101_000_000 in checked
+        refute 20_260_103_000_000 in checked
+      after
+        stop_scratch_repo(repo, config)
+      end
     end
   end
 

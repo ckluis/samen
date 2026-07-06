@@ -4,14 +4,15 @@ import Config
 # It uses samen_core as a path dep and exercises EVERY T1 feature.
 config :demo,
   ecto_repos: [Demo.Repo],
-  ash_domains: [Demo.Crm, Demo.Identity]
+  ash_domains: [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope]
 
 # samen_core verifiers (C1/C2/C3/C4/C5) discover domains from
 # :samen_core :ash_domains. Register the demo's domains here so the
 # verifier tasks find the demo resources — including the mounted Identity
-# scope (T3.1: Identity resources are catalogued in the HOST's catalog and
-# scanned by the host's UNCHANGED verifiers, per ADR-004).
-config :samen_core, :ash_domains, [Demo.Crm, Demo.Identity]
+# scope (T3.1), the CRM scope (T3.2), the Billing scope (T3.3), the
+# Marketing scope (T3.4), and the CMS scope (T3.5: resources catalogued in
+# HOST's catalog, scanned by host's UNCHANGED verifiers, per ADR-004).
+config :samen_core, :ash_domains, [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope]
 
 config :ash, disable_async?: true
 

@@ -3,6 +3,859 @@
     {
       "fields": [
         {
+          "column_name": "act_body",
+          "logical_name": "body",
+          "type": "String"
+        },
+        {
+          "column_name": "act_company_id",
+          "logical_name": "company_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "act_completed_at",
+          "logical_name": "completed_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "act_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "act_due_at",
+          "logical_name": "due_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "act_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "act_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "act_opportunity_id",
+          "logical_name": "opportunity_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "act_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "act_person_id",
+          "logical_name": "person_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "act_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "act_subject",
+          "logical_name": "subject",
+          "type": "String"
+        },
+        {
+          "column_name": "act_type",
+          "logical_name": "type",
+          "type": "Atom"
+        },
+        {
+          "column_name": "act_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.CrmScope.Activity",
+      "table_name": "act_activity"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "att_company_id",
+          "logical_name": "company_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "att_content_type",
+          "logical_name": "content_type",
+          "type": "String"
+        },
+        {
+          "column_name": "att_file_name",
+          "logical_name": "file_name",
+          "type": "String"
+        },
+        {
+          "column_name": "att_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "att_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "att_opportunity_id",
+          "logical_name": "opportunity_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "att_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "att_person_id",
+          "logical_name": "person_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "att_size_bytes",
+          "logical_name": "size_bytes",
+          "type": "Integer"
+        },
+        {
+          "column_name": "att_storage_key",
+          "logical_name": "storage_key",
+          "type": "String"
+        },
+        {
+          "column_name": "att_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.CrmScope.Attachment",
+      "table_name": "att_attachment"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "bcu_currency",
+          "logical_name": "currency",
+          "type": "String"
+        },
+        {
+          "column_name": "bcu_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "bcu_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bcu_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bcu_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bcu_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "bcu_stripe_customer_id",
+          "logical_name": "stripe_customer_id",
+          "type": "String"
+        },
+        {
+          "column_name": "bcu_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_bcu_billing_email",
+          "logical_name": "billing_email",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "pii_bcu_billing_name",
+          "logical_name": "billing_name",
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Demo.BillingScope.Customer",
+      "table_name": "bcu_customer"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "ben_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "ben_expires_at",
+          "logical_name": "expires_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ben_feature",
+          "logical_name": "feature",
+          "type": "Atom"
+        },
+        {
+          "column_name": "ben_granted",
+          "logical_name": "granted",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "ben_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "ben_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ben_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "ben_plan_id",
+          "logical_name": "plan_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "ben_subscription_id",
+          "logical_name": "subscription_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "ben_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.BillingScope.Entitlement",
+      "table_name": "ben_entitlement"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "bin_amount_due_cents",
+          "logical_name": "amount_due_cents",
+          "type": "Integer"
+        },
+        {
+          "column_name": "bin_amount_paid_cents",
+          "logical_name": "amount_paid_cents",
+          "type": "Integer"
+        },
+        {
+          "column_name": "bin_currency",
+          "logical_name": "currency",
+          "type": "String"
+        },
+        {
+          "column_name": "bin_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "bin_customer_id",
+          "logical_name": "customer_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bin_due_date",
+          "logical_name": "due_date",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bin_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bin_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bin_line_items",
+          "logical_name": "line_items",
+          "type": "{:array, Ash.Type.Map}"
+        },
+        {
+          "column_name": "bin_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bin_paid_at",
+          "logical_name": "paid_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bin_period_end",
+          "logical_name": "period_end",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bin_period_start",
+          "logical_name": "period_start",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bin_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "bin_stripe_invoice_id",
+          "logical_name": "stripe_invoice_id",
+          "type": "String"
+        },
+        {
+          "column_name": "bin_subscription_id",
+          "logical_name": "subscription_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bin_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.BillingScope.Invoice",
+      "table_name": "bin_invoice"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "bpl_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "bpl_description",
+          "logical_name": "description",
+          "type": "String"
+        },
+        {
+          "column_name": "bpl_enabled",
+          "logical_name": "enabled",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "bpl_features",
+          "logical_name": "features",
+          "type": "Map"
+        },
+        {
+          "column_name": "bpl_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bpl_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bpl_interval",
+          "logical_name": "interval",
+          "type": "Atom"
+        },
+        {
+          "column_name": "bpl_label",
+          "logical_name": "label",
+          "type": "String"
+        },
+        {
+          "column_name": "bpl_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "bpl_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bpl_stripe_plan_id",
+          "logical_name": "stripe_plan_id",
+          "type": "String"
+        },
+        {
+          "column_name": "bpl_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.BillingScope.Plan",
+      "table_name": "bpl_plan"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "bpr_active",
+          "logical_name": "active",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "bpr_currency",
+          "logical_name": "currency",
+          "type": "String"
+        },
+        {
+          "column_name": "bpr_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "bpr_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bpr_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bpr_interval",
+          "logical_name": "interval",
+          "type": "Atom"
+        },
+        {
+          "column_name": "bpr_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bpr_plan_id",
+          "logical_name": "plan_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bpr_stripe_price_id",
+          "logical_name": "stripe_price_id",
+          "type": "String"
+        },
+        {
+          "column_name": "bpr_unit_amount_cents",
+          "logical_name": "unit_amount_cents",
+          "type": "Integer"
+        },
+        {
+          "column_name": "bpr_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.BillingScope.Price",
+      "table_name": "bpr_price"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "bpy_amount_cents",
+          "logical_name": "amount_cents",
+          "type": "Integer"
+        },
+        {
+          "column_name": "bpy_currency",
+          "logical_name": "currency",
+          "type": "String"
+        },
+        {
+          "column_name": "bpy_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "bpy_customer_id",
+          "logical_name": "customer_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bpy_failure_code",
+          "logical_name": "failure_code",
+          "type": "String"
+        },
+        {
+          "column_name": "bpy_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bpy_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bpy_invoice_id",
+          "logical_name": "invoice_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bpy_last4",
+          "logical_name": "last4",
+          "type": "String"
+        },
+        {
+          "column_name": "bpy_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bpy_paid_at",
+          "logical_name": "paid_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bpy_payment_method_type",
+          "logical_name": "payment_method_type",
+          "type": "Atom"
+        },
+        {
+          "column_name": "bpy_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "bpy_stripe_payment_intent_id",
+          "logical_name": "stripe_payment_intent_id",
+          "type": "String"
+        },
+        {
+          "column_name": "bpy_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.BillingScope.Payment",
+      "table_name": "bpy_payment"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "bsb_cancel_at",
+          "logical_name": "cancel_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bsb_cancelled_at",
+          "logical_name": "cancelled_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bsb_current_period_end",
+          "logical_name": "current_period_end",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bsb_current_period_start",
+          "logical_name": "current_period_start",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bsb_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "bsb_customer_id",
+          "logical_name": "customer_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bsb_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bsb_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bsb_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bsb_plan_id",
+          "logical_name": "plan_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bsb_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "bsb_stripe_subscription_id",
+          "logical_name": "stripe_subscription_id",
+          "type": "String"
+        },
+        {
+          "column_name": "bsb_trial_end",
+          "logical_name": "trial_end",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bsb_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.BillingScope.Subscription",
+      "table_name": "bsb_subscription"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "bus_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bus_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bus_metric",
+          "logical_name": "metric",
+          "type": "Atom"
+        },
+        {
+          "column_name": "bus_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bus_period_end",
+          "logical_name": "period_end",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bus_period_start",
+          "logical_name": "period_start",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bus_quantity",
+          "logical_name": "quantity",
+          "type": "Integer"
+        },
+        {
+          "column_name": "bus_reported_at",
+          "logical_name": "reported_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bus_subscription_id",
+          "logical_name": "subscription_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "bus_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.BillingScope.Usage",
+      "table_name": "bus_usage"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "cbl_block_type",
+          "logical_name": "block_type",
+          "type": "Atom"
+        },
+        {
+          "column_name": "cbl_content",
+          "logical_name": "content",
+          "type": "Map"
+        },
+        {
+          "column_name": "cbl_enabled",
+          "logical_name": "enabled",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "cbl_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cbl_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cbl_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "cbl_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cbl_page_id",
+          "logical_name": "page_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cbl_position",
+          "logical_name": "position",
+          "type": "Integer"
+        },
+        {
+          "column_name": "cbl_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.CmsScope.Block",
+      "table_name": "cbl_block"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "cmd_alt_text",
+          "logical_name": "alt_text",
+          "type": "String"
+        },
+        {
+          "column_name": "cmd_content_type",
+          "logical_name": "content_type",
+          "type": "String"
+        },
+        {
+          "column_name": "cmd_file_name",
+          "logical_name": "file_name",
+          "type": "String"
+        },
+        {
+          "column_name": "cmd_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cmd_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cmd_media_type",
+          "logical_name": "media_type",
+          "type": "Atom"
+        },
+        {
+          "column_name": "cmd_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cmd_size_bytes",
+          "logical_name": "size_bytes",
+          "type": "Integer"
+        },
+        {
+          "column_name": "cmd_storage_key",
+          "logical_name": "storage_key",
+          "type": "String"
+        },
+        {
+          "column_name": "cmd_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.CmsScope.Media",
+      "table_name": "cmd_media"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "cmp_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "cmp_domain",
+          "logical_name": "domain",
+          "type": "String"
+        },
+        {
+          "column_name": "cmp_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cmp_industry",
+          "logical_name": "industry",
+          "type": "String"
+        },
+        {
+          "column_name": "cmp_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cmp_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "cmp_notes",
+          "logical_name": "notes",
+          "type": "String"
+        },
+        {
+          "column_name": "cmp_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cmp_size",
+          "logical_name": "size",
+          "type": "String"
+        },
+        {
+          "column_name": "cmp_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cmp_website",
+          "logical_name": "website",
+          "type": "String"
+        }
+      ],
+      "resource": "Demo.CrmScope.Company",
+      "table_name": "cmp_company"
+    },
+    {
+      "fields": [
+        {
           "column_name": "cnt_active",
           "logical_name": "active",
           "type": "Boolean"
@@ -50,6 +903,311 @@
       ],
       "resource": "Demo.Crm.Contact",
       "table_name": "cnt_contact"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "cnv_enabled",
+          "logical_name": "enabled",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "cnv_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cnv_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cnv_label",
+          "logical_name": "label",
+          "type": "String"
+        },
+        {
+          "column_name": "cnv_nav_type",
+          "logical_name": "nav_type",
+          "type": "Atom"
+        },
+        {
+          "column_name": "cnv_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cnv_position",
+          "logical_name": "position",
+          "type": "Integer"
+        },
+        {
+          "column_name": "cnv_target",
+          "logical_name": "target",
+          "type": "Atom"
+        },
+        {
+          "column_name": "cnv_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cnv_url",
+          "logical_name": "url",
+          "type": "String"
+        }
+      ],
+      "resource": "Demo.CmsScope.Navigation",
+      "table_name": "cnv_navigation"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "cpg_body",
+          "logical_name": "body",
+          "type": "String"
+        },
+        {
+          "column_name": "cpg_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "cpg_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cpg_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cpg_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cpg_published_at",
+          "logical_name": "published_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cpg_slug",
+          "logical_name": "slug",
+          "type": "String"
+        },
+        {
+          "column_name": "cpg_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "cpg_title",
+          "logical_name": "title",
+          "type": "String"
+        },
+        {
+          "column_name": "cpg_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.CmsScope.Page",
+      "table_name": "cpg_page"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "cpt_body",
+          "logical_name": "body",
+          "type": "String"
+        },
+        {
+          "column_name": "cpt_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "cpt_excerpt",
+          "logical_name": "excerpt",
+          "type": "String"
+        },
+        {
+          "column_name": "cpt_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cpt_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cpt_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cpt_published_at",
+          "logical_name": "published_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cpt_slug",
+          "logical_name": "slug",
+          "type": "String"
+        },
+        {
+          "column_name": "cpt_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "cpt_title",
+          "logical_name": "title",
+          "type": "String"
+        },
+        {
+          "column_name": "cpt_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.CmsScope.Post",
+      "table_name": "cpt_post"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "csm_canonical_url",
+          "logical_name": "canonical_url",
+          "type": "String"
+        },
+        {
+          "column_name": "csm_description",
+          "logical_name": "description",
+          "type": "String"
+        },
+        {
+          "column_name": "csm_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "csm_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "csm_meta_title",
+          "logical_name": "meta_title",
+          "type": "String"
+        },
+        {
+          "column_name": "csm_no_follow",
+          "logical_name": "no_follow",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "csm_no_index",
+          "logical_name": "no_index",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "csm_og_description",
+          "logical_name": "og_description",
+          "type": "String"
+        },
+        {
+          "column_name": "csm_og_title",
+          "logical_name": "og_title",
+          "type": "String"
+        },
+        {
+          "column_name": "csm_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "csm_page_id",
+          "logical_name": "page_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "csm_post_id",
+          "logical_name": "post_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "csm_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.CmsScope.SeoMeta",
+      "table_name": "csm_seo_meta"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "cvr_author_id",
+          "logical_name": "author_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cvr_change_summary",
+          "logical_name": "change_summary",
+          "type": "String"
+        },
+        {
+          "column_name": "cvr_content_snapshot",
+          "logical_name": "content_snapshot",
+          "type": "Map"
+        },
+        {
+          "column_name": "cvr_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cvr_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cvr_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cvr_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "cvr_subject_id",
+          "logical_name": "subject_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "cvr_subject_type",
+          "logical_name": "subject_type",
+          "type": "String"
+        },
+        {
+          "column_name": "cvr_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cvr_version_number",
+          "logical_name": "version_number",
+          "type": "Integer"
+        }
+      ],
+      "resource": "Demo.CmsScope.ContentVersion",
+      "table_name": "cvr_content_version"
     },
     {
       "fields": [
@@ -325,6 +1483,474 @@
     {
       "fields": [
         {
+          "column_name": "mca_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "mca_description",
+          "logical_name": "description",
+          "type": "String"
+        },
+        {
+          "column_name": "mca_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mca_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "mca_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "mca_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mca_scheduled_at",
+          "logical_name": "scheduled_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "mca_sent_at",
+          "logical_name": "sent_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "mca_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "mca_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.MarketingScope.Campaign",
+      "table_name": "mca_campaign"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "mee_event_type",
+          "logical_name": "event_type",
+          "type": "Atom"
+        },
+        {
+          "column_name": "mee_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mee_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "mee_metadata",
+          "logical_name": "metadata",
+          "type": "Map"
+        },
+        {
+          "column_name": "mee_occurred_at",
+          "logical_name": "occurred_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "mee_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mee_send_id",
+          "logical_name": "send_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mee_subscriber_id",
+          "logical_name": "subscriber_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mee_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.MarketingScope.EmailEvent",
+      "table_name": "mee_email_event"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "msg_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "msg_description",
+          "logical_name": "description",
+          "type": "String"
+        },
+        {
+          "column_name": "msg_filter_criteria",
+          "logical_name": "filter_criteria",
+          "type": "Map"
+        },
+        {
+          "column_name": "msg_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "msg_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "msg_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "msg_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "msg_subscriber_count",
+          "logical_name": "subscriber_count",
+          "type": "Integer"
+        },
+        {
+          "column_name": "msg_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.MarketingScope.Segment",
+      "table_name": "msg_segment"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "msn_campaign_id",
+          "logical_name": "campaign_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "msn_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "msn_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "msn_idempotency_key",
+          "logical_name": "idempotency_key",
+          "type": "String"
+        },
+        {
+          "column_name": "msn_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "msn_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "msn_queued_at",
+          "logical_name": "queued_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "msn_sent_at",
+          "logical_name": "sent_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "msn_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "msn_subscriber_id",
+          "logical_name": "subscriber_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "msn_template_id",
+          "logical_name": "template_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "msn_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.MarketingScope.Send",
+      "table_name": "msn_send"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "msp_active",
+          "logical_name": "active",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "msp_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "msp_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "msp_notes",
+          "logical_name": "notes",
+          "type": "String"
+        },
+        {
+          "column_name": "msp_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "msp_reason",
+          "logical_name": "reason",
+          "type": "Atom"
+        },
+        {
+          "column_name": "msp_subscriber_id",
+          "logical_name": "subscriber_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "msp_suppressed_at",
+          "logical_name": "suppressed_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "msp_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.MarketingScope.Suppression",
+      "table_name": "msp_suppression"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "msu_consent_at",
+          "logical_name": "consent_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "msu_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "msu_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "msu_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "msu_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "msu_source",
+          "logical_name": "source",
+          "type": "String"
+        },
+        {
+          "column_name": "msu_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "msu_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_msu_email",
+          "logical_name": "email",
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Demo.MarketingScope.Subscriber",
+      "table_name": "msu_subscriber"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "mtp_body_html",
+          "logical_name": "body_html",
+          "type": "String"
+        },
+        {
+          "column_name": "mtp_body_text",
+          "logical_name": "body_text",
+          "type": "String"
+        },
+        {
+          "column_name": "mtp_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "mtp_enabled",
+          "logical_name": "enabled",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "mtp_from_address",
+          "logical_name": "from_address",
+          "type": "String"
+        },
+        {
+          "column_name": "mtp_from_name",
+          "logical_name": "from_name",
+          "type": "String"
+        },
+        {
+          "column_name": "mtp_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mtp_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "mtp_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "mtp_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mtp_subject_line",
+          "logical_name": "subject_line",
+          "type": "String"
+        },
+        {
+          "column_name": "mtp_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.MarketingScope.Template",
+      "table_name": "mtp_template"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "opp_close_date",
+          "logical_name": "close_date",
+          "type": "Date"
+        },
+        {
+          "column_name": "opp_company_id",
+          "logical_name": "company_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "opp_currency",
+          "logical_name": "currency",
+          "type": "String"
+        },
+        {
+          "column_name": "opp_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "opp_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "opp_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "opp_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "opp_notes",
+          "logical_name": "notes",
+          "type": "String"
+        },
+        {
+          "column_name": "opp_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "opp_pipeline_id",
+          "logical_name": "pipeline_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "opp_probability",
+          "logical_name": "probability",
+          "type": "Integer"
+        },
+        {
+          "column_name": "opp_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "opp_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "opp_value_cents",
+          "logical_name": "value_cents",
+          "type": "Integer"
+        }
+      ],
+      "resource": "Demo.CrmScope.Opportunity",
+      "table_name": "opp_opportunity"
+    },
+    {
+      "fields": [
+        {
           "column_name": "org_id",
           "logical_name": "id",
           "type": "UUID"
@@ -362,6 +1988,118 @@
       ],
       "resource": "Demo.Crm.Org",
       "table_name": "org_org"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "per_company_id",
+          "logical_name": "company_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "per_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "per_display_name",
+          "logical_name": "display_name",
+          "type": "String"
+        },
+        {
+          "column_name": "per_emails",
+          "logical_name": "emails",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "per_full_name",
+          "logical_name": "full_name",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "per_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "per_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "per_job_title",
+          "logical_name": "job_title",
+          "type": "String"
+        },
+        {
+          "column_name": "per_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "per_phones",
+          "logical_name": "phones",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "per_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.CrmScope.Person",
+      "table_name": "per_person"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pip_enabled",
+          "logical_name": "enabled",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "pip_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "pip_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pip_label",
+          "logical_name": "label",
+          "type": "String"
+        },
+        {
+          "column_name": "pip_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "pip_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "pip_stage_order",
+          "logical_name": "stage_order",
+          "type": "Integer"
+        },
+        {
+          "column_name": "pip_stage_type",
+          "logical_name": "stage_type",
+          "type": "Atom"
+        },
+        {
+          "column_name": "pip_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.CrmScope.Pipeline",
+      "table_name": "pip_pipeline"
     },
     {
       "fields": [
