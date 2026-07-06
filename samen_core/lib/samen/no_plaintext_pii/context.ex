@@ -4,7 +4,7 @@ defmodule Samen.NoPlaintextPii.Context do
 
   Built once by `Samen.NoPlaintextPii.build_context/1`, it carries:
 
-    * `repo` — the Ecto repo the DB-tier scans query.
+    * `repo` — the Ecto repo the DB-tier scans query (the **live** tier).
     * `resources` — the Ash resources discovered from `:ash_domains`.
     * `vault_routed` — a `MapSet` of `{table_name, column_name}` for every
       vault-routed `pii_attribute` storage column. These MUST be token columns.
@@ -12,6 +12,23 @@ defmodule Samen.NoPlaintextPii.Context do
       VALID registered `non_pii!` override (distinct reviewer). These are
       plaintext-at-rest by design → exempt-but-listed (doc D8).
     * `deps` — the app dependency list (for the config-level opentelemetry check).
+
+  ## Post-shred fields (T2.9, only set in `--subject` mode)
+
+    * `subject_id` — the erased subject the post-shred oracle scans for. `nil` in
+      CI mode.
+    * `replica_repo` — the Ecto repo of the **replica** tier. There is NO physical
+      replica in this environment (plan HARD note): the post-shred oracle SIMULATES
+      one as a second DB restored from a snapshot of the live DB. `nil` means "no
+      replica configured" — the DbContent tier then treats the replica as
+      **fail-closed unless explicitly declared absent** via `replica: :none`.
+    * `pitr_repos` — a list of Ecto repos representing the **backup/PITR-history**
+      snapshots the BackupPitr tier scans (the pg_dump-based history from T2.5's
+      drill machinery, restored into throwaway DBs). Each is scanned for the
+      subject key's presence and for decryptable ciphertext.
+    * `replica_declared_absent?` — set true by `replica: :none`; lets an operator
+      state on the record "there is no replica in this deployment" so the tier
+      passes with a documented note instead of failing closed on a `nil` repo.
 
   ## Plaintext-PII-type classification
 
@@ -32,14 +49,28 @@ defmodule Samen.NoPlaintextPii.Context do
   alias Samen.NonPii
 
   @enforce_keys [:repo, :resources, :vault_routed, :non_pii_exempt, :deps]
-  defstruct [:repo, :resources, :vault_routed, :non_pii_exempt, :deps]
+  defstruct [
+    :repo,
+    :resources,
+    :vault_routed,
+    :non_pii_exempt,
+    :deps,
+    :subject_id,
+    :replica_repo,
+    :pitr_repos,
+    replica_declared_absent?: false
+  ]
 
   @type t :: %__MODULE__{
           repo: module() | nil,
           resources: [module()],
           vault_routed: MapSet.t({String.t(), String.t()}),
           non_pii_exempt: MapSet.t({String.t(), String.t()}),
-          deps: [atom()]
+          deps: [atom()],
+          subject_id: String.t() | nil,
+          replica_repo: module() | nil,
+          pitr_repos: [module()] | nil,
+          replica_declared_absent?: boolean()
         }
 
   @doc """
@@ -55,14 +86,31 @@ defmodule Samen.NoPlaintextPii.Context do
   @spec build(keyword()) :: t()
   def build(opts \\ []) do
     resources = resolve_resources(opts)
+    {replica_repo, replica_absent?} = resolve_replica(opts)
 
     %__MODULE__{
       repo: Keyword.get(opts, :repo) || default_repo(),
       resources: resources,
       vault_routed: vault_routed_set(resources),
       non_pii_exempt: non_pii_exempt_set(opts),
-      deps: Keyword.get(opts, :deps) || project_deps()
+      deps: Keyword.get(opts, :deps) || project_deps(),
+      subject_id: Keyword.get(opts, :subject_id),
+      replica_repo: replica_repo,
+      pitr_repos: Keyword.get(opts, :pitr_repos),
+      replica_declared_absent?: replica_absent?
     }
+  end
+
+  # The replica tier is SIMULATED in this environment (no physical replica —
+  # plan HARD note). `replica: :none` lets an operator state on the record that
+  # there is no replica in this deployment (the tier then passes with a note);
+  # anything else is treated as an explicit replica repo module.
+  defp resolve_replica(opts) do
+    case Keyword.get(opts, :replica) do
+      nil -> {nil, false}
+      :none -> {nil, true}
+      repo when is_atom(repo) -> {repo, false}
+    end
   end
 
   @doc """

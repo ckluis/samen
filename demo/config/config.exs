@@ -25,7 +25,11 @@ config :demo, Demo.Repo,
 # Keyed under :demo — the verifier reads Application.get_env(Mix.Project.config()[:app], …).
 config :demo, :catalog_parity_allow_list, [
   {"cnt_contact", "cnt_notes"},
-  {"cnt_contact", "cnt_subject_id"}
+  {"cnt_contact", "cnt_subject_id"},
+  # T2.4 expand-phase demo: cnt_tier is an operational shadow column added by the
+  # ExpandAddContactTier expand migration (nullable, backward-compatible). Not an
+  # Ash attribute, so allow-listed like cnt_notes.
+  {"cnt_contact", "cnt_tier"}
 ]
 
 # Reveal-grant model: wire Samen.Reveal.Grants (T1.6).
@@ -54,5 +58,48 @@ config :samen_core, Oban,
      ]},
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
   ]
+
+# T2.3 rollup registry (plain maps — config is evaluated before modules load, so
+# Samen.Rollup.specs/0 builds %Spec{} at runtime). `rol_daily_event_count`:
+# per-day / per-org / per-subject event counts over aud_event. The framework
+# (RollupRefreshWorker cron), rebuild-or-exclude-on-erasure, and the
+# no_plaintext_pii Rollup oracle tier all read this single registry.
+config :samen_core, :rollups, [
+  %{
+    name: :daily_event_count,
+    table: "rol_daily_event_count",
+    subject_column: "rol_subject_id",
+    suppressed_column: "rol_suppressed",
+    bounded_columns:
+      ~w(rol_id rol_day rol_org_id rol_subject_id rol_event_count rol_suppressed rol_refreshed_at),
+    rebuild_sql:
+      {"DELETE FROM rol_daily_event_count",
+       """
+       INSERT INTO rol_daily_event_count
+         (rol_day, rol_org_id, rol_subject_id, rol_event_count, rol_suppressed, rol_refreshed_at)
+       SELECT
+         aud_occurred_at::date AS rol_day,
+         aud_correlation_id    AS rol_org_id,
+         aud_subject_id::uuid  AS rol_subject_id,
+         COUNT(*)::int         AS rol_event_count,
+         FALSE                 AS rol_suppressed,
+         now()                 AS rol_refreshed_at
+       FROM aud_event
+       WHERE aud_subject_id IS NOT NULL
+       GROUP BY aud_occurred_at::date, aud_correlation_id, aud_subject_id::uuid
+       """}
+  }
+]
+
+# T2.6 OTel: db_statement must be :disabled (asserted by the LogTelemetry tier).
+# The demo app calls OpentelemetryEcto.setup([:demo, :repo], db_statement: :disabled)
+# in Demo.Application.start/2 when OTel is configured.
+config :demo, :opentelemetry_ecto, db_statement: :disabled
+
+# OTel SDK: no exporter in dev/test (operators wire a real OTLP exporter in prod).
+# The :none value suppresses the "opentelemetry_exporter not found" warning.
+config :opentelemetry,
+  span_processor: :simple,
+  traces_exporter: :none
 
 import_config "#{config_env()}.exs"

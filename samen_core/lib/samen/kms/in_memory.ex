@@ -152,6 +152,20 @@ defmodule Samen.Kms.InMemory do
     end
   end
 
+  @impl true
+  def list_active_subjects do
+    ensure_started()
+
+    subjects =
+      Agent.get(__MODULE__, fn state ->
+        state.store
+        |> Enum.filter(fn {_id, row} -> row.state == :active end)
+        |> Enum.map(fn {id, _row} -> id end)
+      end)
+
+    {:ok, subjects}
+  end
+
   defp ensure_started do
     case Process.whereis(__MODULE__) do
       nil -> start_link()

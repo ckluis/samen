@@ -57,7 +57,13 @@ defmodule SamenCore.Support.PiiReadsCorpusLabels do
       {"direct_leaks.ex", 39, [:emails]},
       {"direct_leaks.ex", 44, [:full_name]},
       {"direct_leaks.ex", 49, [:pat_full_name]},
-      {"direct_leaks.ex", 54, [:pii_pat_mrn]}
+      {"direct_leaks.ex", 54, [:pii_pat_mrn]},
+      # f2_sinks.ex — Gate-1 F2 sink-inventory expansion (T2.7). Each is a direct
+      # flow into a newly-modelled sink: :telemetry.execute · Sentry · File.write · send.
+      {"f2_sinks.ex", 18, [:full_name]},
+      {"f2_sinks.ex", 24, [:pii_pat_dob]},
+      {"f2_sinks.ex", 29, [:mrn]},
+      {"f2_sinks.ex", 35, [:emails]}
     ]
   end
 

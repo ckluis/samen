@@ -76,5 +76,19 @@ echo "--- step 6/7: mix samen.verify.no_plaintext_pii"
 mix samen.verify.no_plaintext_pii
 echo "    PASSED"
 
+# 7. T2.4 expand-migration down/0 CI check: every :expand migration's down/0 is
+#    exercised in a throwaway scratch DB (created + dropped by the task). Fails
+#    closed if any expand's down is missing/broken/non-reversible.
+echo "--- step 7/8: mix samen.verify.migrations (expand down/0 check)"
+mix samen.verify.migrations
+echo "    PASSED"
+
+# 8. J2 sink-schema allow-list check (T2.7): every wide-event/span field must be a
+#    bounded ID / token / enum / number. Fails on any free-string/untyped field —
+#    the laundered-leak backstop the layered privacy design (C3 + J2) promises.
+echo "--- step 8/8: mix samen.verify.sink_schema (J2 wide-event/span schema)"
+mix samen.verify.sink_schema
+echo "    PASSED"
+
 echo ""
 echo "==> demo CI gate: ALL PASSED"

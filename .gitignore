@@ -3,3 +3,5 @@ _build/
 *.beam
 .elixir_ls/
 erl_crash.dump
+.pitr_drill_work/
+.antitaut_scratch/

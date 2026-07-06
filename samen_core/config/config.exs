@@ -29,10 +29,16 @@ config :samen_core, :reveal_grant_repo, SamenCore.TestRepo
 # the erasure orchestration (rebuild-or-exclude-on-erasure), and the
 # no_plaintext_pii oracle tier (Tiers.Rollup) all read this single registry.
 #
+# The registry is PLAIN DATA (maps), not `%Samen.Rollup.Spec{}` structs: config
+# is evaluated before the app's modules are compiled/loaded, so a struct literal
+# here cannot resolve `Samen.Rollup.Spec.__struct__/1`. `Samen.Rollup.specs/0`
+# builds `%Spec{}` structs from this data at runtime (`Spec.from_config/1`),
+# which also validates the shape fail-closed.
+#
 # `rol_daily_event_count`: per-day / per-org(correlation) / per-subject event
 # counts over `aud_event`. Token/bounded-ID/count columns only — no plaintext PII.
 config :samen_core, :rollups, [
-  %Samen.Rollup.Spec{
+  %{
     name: :daily_event_count,
     table: "rol_daily_event_count",
     subject_column: "rol_subject_id",
@@ -84,5 +90,25 @@ config :samen_core, Oban,
     reveal: 5
   ],
   plugins: false
+
+# T2.6 OTel tracing: db_statement MUST be :disabled on a Samen substrate.
+# OpentelemetryEcto records SQL text + bind params by default — disabling it
+# ensures no pii_ token / plaintext value serializes into db.statement in any
+# span. The LogTelemetry tier of no_plaintext_pii asserts this both at config
+# level (Phase 1) and at live-setup time (Phase 2, T2.6).
+#
+# Host apps MUST call:
+#   OpentelemetryEcto.setup([:my_app, :repo], db_statement: :disabled)
+# in their application start — and configure the same key so the CI tier can
+# verify it:
+#   config :my_app, :opentelemetry_ecto, db_statement: :disabled
+config :samen_core, :opentelemetry_ecto, db_statement: :disabled
+
+# OTel SDK: in test we use the simple (synchronous) processor + the pid
+# exporter so tests can assert on spans inline. In prod, the host configures
+# its own exporter (OTLP → Honeycomb/Tempo/etc.).
+config :opentelemetry,
+  span_processor: :simple,
+  traces_exporter: :none
 
 import_config "#{config_env()}.exs"

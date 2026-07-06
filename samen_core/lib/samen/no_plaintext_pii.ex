@@ -47,8 +47,11 @@ defmodule Samen.NoPlaintextPii do
     AudEvent,
     Rollup,
     Catalog,
-    LogTelemetry
+    LogTelemetry,
+    TraceSink
   }
+
+  alias Samen.NoPlaintextPii.Tiers.PostShred
 
   @doc """
   The default CI-mode tier roster.
@@ -58,25 +61,57 @@ defmodule Samen.NoPlaintextPii do
   (or passes them via `run(tiers: …)`).
   """
   @spec default_tiers() :: [module()]
-  def default_tiers, do: [VaultDeclarations, AuditRows, AudEvent, Catalog, LogTelemetry]
+  def default_tiers,
+    do: [VaultDeclarations, AuditRows, AudEvent, Rollup, Catalog, LogTelemetry, TraceSink]
 
   @doc """
-  Run the CI-mode invariant and return every finding (violations + exempts).
+  The **post-shred** tier roster (T2.9 — `--subject <uuid> --tiers all`).
+
+  The doc's three orchestrated checks, plus the ingress-class trace-sink assertion
+  and the inactive CDC-mirror stub:
+
+    * `PostShred.DbContent`        — check (1): DB-tier content scan
+      (live·replica·rollup·audit·registered_non_pii; wrong-key probe).
+    * `PostShred.BackupPitr`       — check (2): backup/PITR-history scan
+      (key absent from every DB tier + PITR history; store backups disabled).
+    * `PostShred.KmsAttestation`   — check (3): positive `:shredded` tombstone
+      (`:absent` == FAIL) + wrapped DEK gone + store backups disabled.
+    * `PostShred.TraceSinkIngress` — ingress-class trace-sink schema assertion +
+      pseudonym-unlinks-on-shred (NOT a content scan).
+    * `PostShred.CdcMirror`        — STUB (inactive until Phase-6 H4 / T6.5).
+
+  These are `:post_shred`-mode tiers: inert in CI mode, driven only by a `run/1`
+  with `mode: :post_shred` and a `:subject_id`.
+  """
+  @spec post_shred_tiers() :: [module()]
+  def post_shred_tiers,
+    do: [
+      PostShred.DbContent,
+      PostShred.BackupPitr,
+      PostShred.KmsAttestation,
+      PostShred.TraceSinkIngress,
+      PostShred.CdcMirror
+    ]
+
+  @doc """
+  Run the oracle and return every finding (violations + exempts + passes).
 
   Options:
-    * `:tiers` — override the tier roster (T2.9 / tests). Defaults to
-      `default_tiers/0`.
-    * `:mode` — `:ci` (default) runs only `:ci` tiers. (`:post_shred` is the T2.9
-      hook; no post-shred tiers ship in this task.)
+    * `:mode` — `:ci` (default) runs only `:ci` tiers (the token-only-downstream
+      invariant). `:post_shred` runs the T2.9 destruction oracle's three checks
+      against a `:subject_id`.
+    * `:tiers` — override the tier roster (tests / custom rosters). Defaults to
+      `default_tiers/0` for `:ci` and `post_shred_tiers/0` for `:post_shred`.
     * everything else is forwarded to `Samen.NoPlaintextPii.Context.build/1`
-      (`:repo`, `:resources`, `:domains`, `:deps`, `:non_pii_entries`).
+      (`:repo`, `:resources`, `:domains`, `:deps`, `:non_pii_entries`,
+      and — post-shred — `:subject_id`, `:replica`, `:pitr_repos`).
 
   Returns `{:ok, [Finding.t()]}`.
   """
   @spec run(keyword()) :: {:ok, [Finding.t()]}
   def run(opts \\ []) do
     mode = Keyword.get(opts, :mode, :ci)
-    tiers = Keyword.get(opts, :tiers, default_tiers())
+    tiers = Keyword.get(opts, :tiers, default_roster(mode))
 
     context =
       opts
@@ -91,9 +126,12 @@ defmodule Samen.NoPlaintextPii do
     {:ok, findings}
   end
 
+  defp default_roster(:post_shred), do: post_shred_tiers()
+  defp default_roster(_), do: default_tiers()
+
   @doc """
-  The subset of findings that FAIL the build (`:violation`). `:exempt` findings
-  are excluded — they are listed, not failed (clause (d)).
+  The subset of findings that FAIL the build (`:violation`). `:exempt` and `:pass`
+  findings are excluded — they are listed, not failed.
   """
   @spec violations([Finding.t()]) :: [Finding.t()]
   def violations(findings), do: Enum.filter(findings, &(&1.severity == :violation))
@@ -101,6 +139,10 @@ defmodule Samen.NoPlaintextPii do
   @doc "The `:exempt` findings (listed in output, do not fail the build)."
   @spec exemptions([Finding.t()]) :: [Finding.t()]
   def exemptions(findings), do: Enum.filter(findings, &(&1.severity == :exempt))
+
+  @doc "The `:pass` findings — positive post-shred attestations (listed, never fail)."
+  @spec passes([Finding.t()]) :: [Finding.t()]
+  def passes(findings), do: Enum.filter(findings, &(&1.severity == :pass))
 
   # ---------------------------------------------------------------------------
 

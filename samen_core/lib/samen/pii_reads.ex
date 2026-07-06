@@ -97,7 +97,28 @@ defmodule Samen.PiiReads do
     IO => [:puts, :inspect, :write, :warn],
     IO.ANSI => [],
     OpenTelemetry.Tracer => [:set_attribute, :set_attributes, :add_event],
-    OpenTelemetry.Span => [:set_attribute, :set_attributes, :add_event]
+    OpenTelemetry.Span => [:set_attribute, :set_attributes, :add_event],
+    # Gate-1 F2: grow the sink inventory. A plaintext PII value passed to any of
+    # these sails past C3 today (Gate-1 report F2) — the wide-event/span schema
+    # (J2) is the laundered-leak backstop, but a DIRECT flow into these is a
+    # syntactic leak C3 should also catch. These are the concrete "corpus cases"
+    # the Gate-1 F2 fix-task names.
+    #   * :telemetry.execute/3 — the wide-event/metric emit path (erlang module).
+    #   * Sentry.* — error-reporting sink (a revealed name in a captured message).
+    #   * File.write/File.write! — a plaintext value written to disk.
+    #   * :erlang.send / Process.send — inter-process handoff of a pii value.
+    File => [:write, :write!, :open, :open!],
+    Sentry => [:capture_message, :capture_exception, :set_context, :set_extra, :set_tags],
+    Process => [:send, :send_after]
+  }
+
+  # Erlang-atom-module sinks: `:telemetry.execute(...)`, `:erlang.send(...)`,
+  # `:logger.log(...)`. Keyed by the atom module (not an Elixir alias, so it never
+  # goes through alias resolution).
+  @erlang_module_sinks %{
+    telemetry: [:execute, :span],
+    erlang: [:send],
+    logger: [:log, :info, :debug, :warning, :error, :notice, :critical, :alert, :emergency]
   }
 
   # Short aliases that are conventionally the OTel span/tracer modules even
@@ -109,7 +130,9 @@ defmodule Samen.PiiReads do
   }
 
   # Bare-function sinks (no module prefix). Suffix `_sink` matches any name.
-  @bare_sink_fns [:emit_event, :emit, :record_event, :publish_event, :ship_event]
+  # Gate-1 F2: `send/2` is a Kernel-imported bare call — a pii value handed to
+  # another process is off to wherever that process ships it.
+  @bare_sink_fns [:emit_event, :emit, :record_event, :publish_event, :ship_event, :send]
 
   @doc """
   Scan a list of `{file_path, source_string}` pairs. Returns `{:ok, findings}`.
@@ -335,16 +358,17 @@ defmodule Samen.PiiReads do
   defp sink_call(_, _ctx), do: :no
 
   defp lookup_module_sink(mod, fun) do
-    case Map.get(@sink_module_calls, mod) do
-      funs when is_list(funs) ->
-        if fun in funs, do: inspect(mod), else: nil
+    elixir_funs = Map.get(@sink_module_calls, mod)
+    erlang_funs = if is_atom(mod), do: Map.get(@erlang_module_sinks, mod), else: nil
+    otel_funs = Map.get(@otel_leaf_sinks, mod)
 
-      nil ->
-        # Fall back to the OTel leaf-name sinks (bare `Tracer`/`Span`).
-        case Map.get(@otel_leaf_sinks, mod) do
-          funs when is_list(funs) -> if fun in funs, do: inspect(mod), else: nil
-          nil -> nil
-        end
+    cond do
+      is_list(elixir_funs) -> if fun in elixir_funs, do: inspect(mod), else: nil
+      # Erlang atom-module sinks: `:telemetry.execute`, `:erlang.send`, … (Gate-1 F2).
+      is_list(erlang_funs) -> if fun in erlang_funs, do: ":#{mod}", else: nil
+      # Fall back to the OTel leaf-name sinks (bare `Tracer`/`Span`).
+      is_list(otel_funs) -> if fun in otel_funs, do: inspect(mod), else: nil
+      true -> nil
     end
   end
 

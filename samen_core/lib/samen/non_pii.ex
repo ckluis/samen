@@ -187,6 +187,62 @@ defmodule Samen.NonPii do
     {:ok, total, Enum.reverse(details)}
   end
 
+  @doc """
+  Oracle probe (T2.9, DB-tier check for the `registered_non_pii` tier): does any
+  registered `non_pii!` column STILL hold a non-redacted value for `subject_id`?
+
+  The `registered_non_pii` tier asserts row-level redaction actually ran. This
+  returns the list of columns where a row for the subject still carries a value
+  DISTINCT from the recipe's redaction sentinel (i.e. plaintext survived erasure)
+  — each entry is a violation the oracle fails on. An empty list means every
+  registered column for the subject is redacted (or has no rows), the expected
+  post-shred state.
+
+  Uses the SAME identifier-hardening (`safe_ident!`) and bound parameters as the
+  redaction arm — the table/column/subject-column come from the registry, never
+  end-user input.
+  """
+  @spec unredacted_columns_for_subject(String.t(), module(), keyword()) :: [map()]
+  def unredacted_columns_for_subject(subject_id, r, opts \\ []) do
+    only_entries = Keyword.get(opts, :entries) || entries(repo: r)
+
+    Enum.flat_map(only_entries, fn %Entry{} = e ->
+      case count_unredacted(subject_id, e, r) do
+        :error ->
+          [
+            %{
+              "table" => e.table_name,
+              "column" => e.column_name,
+              "unredacted" => "introspection_failed"
+            }
+          ]
+
+        count when count > 0 ->
+          [%{"table" => e.table_name, "column" => e.column_name, "unredacted" => count}]
+
+        _zero ->
+          []
+      end
+    end)
+  end
+
+  defp count_unredacted(subject_id, %Entry{} = e, r) do
+    table = safe_ident!(e.table_name)
+    column = safe_ident!(e.column_name)
+    subject_column = safe_ident!(e.subject_column)
+
+    sql =
+      "SELECT count(*) FROM #{table} " <>
+        "WHERE #{subject_column} = $2 AND (#{column} IS DISTINCT FROM $1) AND #{column} IS NOT NULL"
+
+    %{rows: [[n]]} = Ecto.Adapters.SQL.query!(r, sql, [e.redaction, subject_id])
+    n
+  rescue
+    # A registry entry naming a table/column that does not exist in this repo is a
+    # fail-closed condition for the oracle, surfaced as a large sentinel count.
+    _ -> :error
+  end
+
   # Redact a single registered column for a subject. Uses a parameterized UPDATE:
   # identifiers validated, values bound.
   defp redact_one(subject_id, %Entry{} = e, r) do

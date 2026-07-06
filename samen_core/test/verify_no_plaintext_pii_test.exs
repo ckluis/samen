@@ -268,12 +268,23 @@ defmodule SamenCore.VerifyNoPlaintextPiiTest do
   describe "RED PATH (c): opentelemetry_ecto config assertion" do
     @tag :red_path
     test "flags when opentelemetry_ecto is present and db_statement is not disabled" do
-      # Inject the dep via the Context :deps option (no real OTel install needed).
+      # T2.6: opentelemetry_ecto is now a real dep with config :disabled set in
+      # config/config.exs. We temporarily clear that config so the tier sees the
+      # dep present but db_statement absent — proving the check is real.
+      prev = Application.get_env(:samen_core, :opentelemetry_ecto)
+      Application.delete_env(:samen_core, :opentelemetry_ecto)
+
+      on_exit(fn ->
+        if prev do
+          Application.put_env(:samen_core, :opentelemetry_ecto, prev)
+        end
+      end)
+
       findings =
         run_check(
           domains: @clean_domains,
           deps: [:opentelemetry_ecto],
-          # No :samen_core :opentelemetry_ecto config set → db_statement is nil.
+          # db_statement config now cleared above → nil → violation expected
           tiers: [Samen.NoPlaintextPii.Tiers.LogTelemetry]
         )
 

@@ -76,13 +76,19 @@ defmodule Samen.Erasure do
     r = Keyword.get(opts, :repo) || default_repo()
     actor_id = Keyword.get(opts, :actor_id, "system:erasure")
 
+    # Options forwarded to the rollup erasure policy (T2.3): `:specs` (override the
+    # registry) and `:raw_retained?` (force the rebuild/suppress arm — tests use
+    # this to exercise the archived-window suppress arm without physically
+    # detaching a partition; see the simulation seam in `Samen.Rollup`).
+    rollup_opts = Keyword.take(opts, [:specs, :raw_retained?])
+
     # STEP 1 — destroy the key FIRST, outside the DB tx. This is the load-bearing
     # act. It is the ONLY thing that can make the guarantee fail closed (if the
     # key store is unreachable we must NOT proceed and NOT fabricate an
     # attestation).
     case Kms.adapter().shred(subject_id) do
       {:ok, attestation} ->
-        seal_db_tiers(subject_id, attestation, :from_state, actor_id, r)
+        seal_db_tiers(subject_id, attestation, :from_state, actor_id, r, rollup_opts)
 
       {:error, :absent} ->
         # Subject never had a key. Still redact any non_pii! rows and write a
@@ -97,7 +103,7 @@ defmodule Samen.Erasure do
           checked_at: DateTime.utc_now()
         }
 
-        seal_db_tiers(subject_id, absent_att, "absent", actor_id, r)
+        seal_db_tiers(subject_id, absent_att, "absent", actor_id, r, rollup_opts)
 
       {:error, reason} ->
         # Key store unreachable (outage) — FAIL CLOSED. No sentinel, no report,
@@ -109,7 +115,7 @@ defmodule Samen.Erasure do
   # STEP 2–5 in one transaction. `outcome_mode` is `:from_state` (derive from the
   # seal result — "shredded" on the first call that seals rows, "already_shredded"
   # on an idempotent later call) or a fixed string (e.g. "absent").
-  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, r) do
+  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, r, rollup_opts) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     multi =
@@ -126,12 +132,23 @@ defmodule Samen.Erasure do
         {:ok, count, details} = NonPii.redact_for_subject(subject_id, repo)
         {:ok, %{count: count, details: details}}
       end)
-      # STEP 5 (built here, needs step 2/3 results) — the erasure report.
+      # STEP 3b — rebuild-or-exclude-on-erasure for every registered rollup (T2.3
+      # (b)). A derived aggregate computed BEFORE the shred can still encode the
+      # subject (key-shred does not touch a count) — so each rollup is governed
+      # separately: REBUILD without the subject where the raw partitions are
+      # retained, or EXCLUDE/SUPPRESS the derived row where the window is
+      # archived/detached. Runs INSIDE the erasure tx so it commits atomically
+      # with the sentinel/redaction/report.
+      |> Ecto.Multi.run(:rollups, fn repo, _changes ->
+        {:ok, Samen.Rollup.erase_subject(subject_id, repo, rollup_opts)}
+      end)
+      # STEP 5 (built here, needs step 2/3/3b results) — the erasure report.
       |> Ecto.Multi.run(:report, fn repo, changes ->
         {sealed, _} = changes.seal_vault
         %{count: redacted, details: redaction_details} = changes.redact_non_pii
+        rollup_report = changes.rollups
 
-        tiers = build_tiers(subject_id, attestation, sealed, redaction_details, repo)
+        tiers = build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, repo)
         outcome = resolve_outcome(outcome_mode, subject_id, sealed, repo)
 
         report_attrs = %{
@@ -202,7 +219,7 @@ defmodule Samen.Erasure do
   # Tier descriptors — what the T2.9 oracle reads (D7 report).
   # ---------------------------------------------------------------------------
 
-  defp build_tiers(subject_id, attestation, sealed, redaction_details, repo) do
+  defp build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, repo) do
     remaining_active =
       repo.aggregate(
         from(v in VaultRow, where: v.subject_id == ^subject_id and v.state == "active"),
@@ -233,7 +250,14 @@ defmodule Samen.Erasure do
       "registered_non_pii" => %{
         # The carve-out tier: assert row-level redaction ran.
         "columns" => redaction_details
-      }
+      },
+      # Derived-aggregate tier (T2.3): the per-rollup rebuild-or-exclude report —
+      # each entry is `%{"rollup" => name, "arm" => "rebuild"|"suppress",
+      # "rows_affected" => n}`. The oracle asserts every registered rollup was
+      # governed (rebuilt subject-free or the subject's derived rows suppressed);
+      # a registered rollup ABSENT from this list on a post-shred report is a
+      # fail-closed gap.
+      "rollups" => rollup_report
     }
   end
 

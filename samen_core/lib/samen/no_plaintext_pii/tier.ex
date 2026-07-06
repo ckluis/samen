@@ -67,14 +67,23 @@ defmodule Samen.NoPlaintextPii.Finding do
     * `:violation` — fails the build (the token-only invariant is broken here).
     * `:exempt`    — a registered `non_pii!` plaintext column: listed in output,
       does NOT fail the build (doc D8; T1.8d clause (d)).
+    * `:pass`      — a **positive attestation** a post-shred tier emits when it
+      has affirmatively PROVEN its check (T2.9). The oracle's whole premise is
+      "absence of evidence is not evidence of absence", so a post-shred tier must
+      emit a `:pass` when it has really looked and found the erasure took (e.g.
+      the KMS returned a `:shredded` tombstone, the DB scan found no decryptable
+      bytes). A post-shred tier that returns an EMPTY list is treated by the
+      harness as a fail-closed gap — it must speak, one way or the other. `:pass`
+      findings are listed in output but never affect the exit code.
 
   `tier` names the emitting tier; `subject` names the offending item (a
-  `table.column`, a config key, …); `detail` is the human explanation.
+  `table.column`, a config key, a KMS subject, …); `detail` is the human
+  explanation.
   """
   @enforce_keys [:tier, :severity, :subject, :detail]
   defstruct [:tier, :severity, :subject, :detail]
 
-  @type severity :: :violation | :exempt
+  @type severity :: :violation | :exempt | :pass
 
   @type t :: %__MODULE__{
           tier: atom(),
@@ -93,10 +102,23 @@ defmodule Samen.NoPlaintextPii.Finding do
   def exempt(tier, subject, detail),
     do: %__MODULE__{tier: tier, severity: :exempt, subject: subject, detail: detail}
 
+  @doc """
+  Build a `:pass` finding — a positive attestation from a post-shred tier (T2.9).
+
+  Listed in output as evidence the check ran and affirmatively held; never fails
+  the build.
+  """
+  @spec pass(atom(), String.t(), String.t()) :: t()
+  def pass(tier, subject, detail),
+    do: %__MODULE__{tier: tier, severity: :pass, subject: subject, detail: detail}
+
   @doc "Format a finding for human output."
   @spec format(t()) :: String.t()
   def format(%__MODULE__{severity: :exempt} = f),
     do: "[#{f.tier}] EXEMPT (non_pii!): #{f.subject} — #{f.detail}"
+
+  def format(%__MODULE__{severity: :pass} = f),
+    do: "[#{f.tier}] PASS: #{f.subject} — #{f.detail}"
 
   def format(%__MODULE__{} = f),
     do: "[#{f.tier}] #{f.subject} — #{f.detail}"

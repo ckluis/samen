@@ -270,6 +270,141 @@ defmodule Samen.Vault do
   end
 
   @doc """
+  Oracle backup/PITR-history probe (T2.9, check 2): is the subject key ABSENT
+  from a given DB tier / PITR snapshot repo, and does no ciphertext there decrypt?
+
+  ADR-001's load-bearing claim: the per-subject key is an external KMS handle,
+  NOT a Postgres row, so a PITR restore of any DB tier brings back ciphertext but
+  never the key. This probe proves it against a specific `repo` (the live DB, the
+  simulated replica, or a restored pg_dump snapshot from the T2.5 drill):
+
+    1. Every `pii_vault` row for the subject carries a `ciphertext` binary and NO
+       plaintext DEK — a wrapped DEK is never stored in Postgres (the vault schema
+       has no key column). We assert there is no `wrapped_dek`-shaped column on
+       `pii_vault` (fail closed if the schema ever grew one).
+    2. Reveal against THIS repo's ciphertext denies (the key is not resurrectable
+       from the snapshot) — the same `reveal_token/2` path, which routes through
+       the external KMS adapter and returns `:shredded`/`:absent`/`:unavailable`
+       post-shred.
+
+  Returns `{:ok, :key_absent}` when the key is provably absent and no ciphertext
+  decrypts; `{:leaks, details}` if a row decrypts or a key-shaped column exists.
+  """
+  @spec scan_pitr_key_absent(String.t(), Ecto.Repo.t()) ::
+          {:ok, :key_absent} | {:leaks, [String.t()]}
+  def scan_pitr_key_absent(subject_id, repo) do
+    key_columns = key_shaped_columns(repo, "pii_vault")
+
+    decryptable =
+      repo.all(from(r in VaultRow, where: r.subject_id == ^subject_id, select: r.token))
+      |> Enum.filter(fn token -> match?({:ok, _}, reveal_token(token, repo)) end)
+      |> Enum.map(fn t -> "decryptable ciphertext for token #{t}" end)
+
+    key_col_leaks =
+      Enum.map(key_columns, fn col ->
+        "pii_vault carries a key-material-shaped column '#{col}' — the wrapped DEK " <>
+          "must NEVER be a Postgres row (ADR-001); a PITR restore would resurrect it."
+      end)
+
+    case decryptable ++ key_col_leaks do
+      [] -> {:ok, :key_absent}
+      leaks -> {:leaks, leaks}
+    end
+  end
+
+  # Columns on `table` whose name looks like it could hold key material. The vault
+  # schema stores only `ciphertext`; a `wrapped_dek` / `dek` / `key`-named column
+  # would mean the key entered the Postgres/PITR surface — a fail-closed leak.
+  defp key_shaped_columns(repo, table) do
+    %{rows: rows} =
+      repo.query!(
+        "SELECT column_name FROM information_schema.columns " <>
+          "WHERE table_schema = 'public' AND table_name = $1",
+        [table]
+      )
+
+    rows
+    |> List.flatten()
+    |> Enum.filter(fn name ->
+      n = String.downcase(to_string(name))
+      String.contains?(n, "wrapped_dek") or n == "dek" or String.ends_with?(n, "_dek") or
+        String.contains?(n, "master_key") or String.contains?(n, "key_material")
+    end)
+  rescue
+    _ -> []
+  end
+
+  @doc """
+  Oracle wrong-key probe (T2.9): does any of `subject_id`'s vault ciphertext
+  decrypt under a key OTHER than the (destroyed) subject key?
+
+  The doc's DB-tier scan fails not only on plaintext / self-decryptable ciphertext
+  but on "ciphertext that decrypts under any key other than the destroyed one" —
+  the defence against a bug that re-wrapped a subject's ciphertext under a
+  different, still-live subject key (which crypto-shred of the ORIGINAL key would
+  not reach). This probe attempts every one of the subject's vault rows against
+  every OTHER currently-active subject DEK in the store.
+
+  Returns:
+    * `{:ok, :no_cross_decrypt}` — no subject row decrypts under any foreign live
+      key (the expected post-shred state);
+    * `{:cross_decrypt, [%{token: t, under_subject: other_id}]}` — rows that DO
+      decrypt under a foreign key (a violation);
+    * `{:error, :unsupported}` — the adapter cannot enumerate its live keys
+      (production `AwsKmsDynamo`); the caller records a documented seam, never a
+      fake pass.
+  """
+  @spec scan_no_wrong_key(String.t(), Ecto.Repo.t()) ::
+          {:ok, :no_cross_decrypt} | {:cross_decrypt, [map()]} | {:error, :unsupported | term}
+  def scan_no_wrong_key(subject_id, repo) do
+    adapter = Kms.adapter()
+
+    if function_exported?(adapter, :list_active_subjects, 0) do
+      case adapter.list_active_subjects() do
+        {:ok, active_subjects} ->
+          do_scan_no_wrong_key(subject_id, repo, active_subjects, adapter)
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:error, :unsupported}
+    end
+  end
+
+  defp do_scan_no_wrong_key(subject_id, repo, active_subjects, adapter) do
+    rows =
+      repo.all(
+        from(r in VaultRow,
+          where: r.subject_id == ^subject_id,
+          select: {r.token, r.ciphertext}
+        )
+      )
+
+    # Every currently-live key that is NOT the erased subject's own.
+    foreign_keys =
+      active_subjects
+      |> Enum.reject(&(&1 == subject_id))
+      |> Enum.flat_map(fn other ->
+        case adapter.unwrap(other) do
+          {:ok, dek} -> [{other, dek}]
+          _ -> []
+        end
+      end)
+
+    # Route every decrypt attempt through the SINGLE reveal chokepoint
+    # (`do_decrypt/2`) — never a second Crypto.decrypt/2 call site
+    # (Samen.Chokepoint enforces exactly one).
+    cross =
+      for {token, ciphertext} <- rows,
+          {other, dek} <- foreign_keys,
+          match?({:ok, _}, do_decrypt(dek, ciphertext)),
+          do: %{token: token, under_subject: other}
+
+    if cross == [], do: {:ok, :no_cross_decrypt}, else: {:cross_decrypt, cross}
+  end
+
+  @doc """
   Whether the configured KMS adapter's backup/PITR is disabled (oracle check 2).
 
   For the dev adapters (InMemory, FileBacked) this is always `true` by

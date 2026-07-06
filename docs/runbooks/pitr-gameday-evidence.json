@@ -1,0 +1,19 @@
+{
+  "drill": "T2.5 PITR game-day LOCAL SIMULATION",
+  "timestamp_utc": "2026-07-05T20:23:22Z",
+  "postgres_version": "16.13(Homebrew)",
+  "simulation_seam": "Neon branch-and-restore simulated with pg_dump (pre-contract snapshot) + psql restore into a fresh DB; real Neon drill registered as operator TODO in pitr-gameday.md",
+  "base_db": "samen_pitr_drill_base",
+  "restore_db": "samen_pitr_drill_restore",
+  "dump_bytes": 32048,
+  "detection_ms": 1611,
+  "arm_i_reverse_expand_forwardfix_ms": 1489,
+  "arm_ii_restore_ms": 267,
+  "arm_ii_validate_ms": 1381,
+  "arm_ii_total_ms": 1737,
+  "key_store_exclusion_proven": true,
+  "rto_target_forward_fix_ms": 1800000,
+  "rto_target_full_pitr_ms": 7200000,
+  "arm_i_within_forward_fix_target": true,
+  "arm_ii_within_pitr_target": true
+}

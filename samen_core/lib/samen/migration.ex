@@ -97,8 +97,22 @@ defmodule Samen.Migration do
   """
 
   defmacro __using__(opts) do
+    {phase, ecto_opts} = Keyword.pop(opts, :phase)
+
+    if phase not in [nil, :expand, :contract] do
+      raise ArgumentError,
+            "use Samen.Migration, phase: must be :expand or :contract, got #{inspect(phase)}"
+    end
+
     quote do
-      use Ecto.Migration, unquote(opts)
+      use Ecto.Migration, unquote(ecto_opts)
+
+      # A migration declares itself expand or contract. The down/0 CI check
+      # (`Samen.Migration.DownCheck`) exercises every :expand migration's down/0
+      # in a scratch DB; :contract migrations are covered by PITR (doc §runs 2b),
+      # not down/0.
+      @doc false
+      def __samen_phase__, do: unquote(phase)
 
       import Samen.Migration,
         only: [
@@ -106,8 +120,152 @@ defmodule Samen.Migration do
           catalog_sync: 2,
           catalog_sync_down: 1,
           catalog_sync_down: 2,
-          create_catalog_tables: 0
+          create_catalog_tables: 0,
+          create_migration_meta_table: 0,
+          expand_setup: 0,
+          expand_setup: 1,
+          contract_setup: 1,
+          contract_setup: 2,
+          add_nullable_column: 3,
+          add_nullable_column: 4,
+          concurrent_index: 2,
+          concurrent_index: 3,
+          chunked_backfill: 3,
+          chunked_backfill: 4
         ]
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Expand/contract macros (T2.4). These inject `caller:` so the underlying
+  # `Samen.Migration.ExpandContract` functions can read `__migration__/0` on the
+  # migration module (the same technique catalog_sync uses for the DDL-tx guard)
+  # and label meta rows with the migration name.
+  # ---------------------------------------------------------------------------
+
+  @doc "Expand-phase DDL timeout posture (lock 5s / statement 15s). See `Samen.Migration.ExpandContract.expand_setup/1`."
+  defmacro expand_setup do
+    caller = __CALLER__.module
+
+    quote do
+      Samen.Migration.ExpandContract.expand_setup(caller: unquote(caller))
+    end
+  end
+
+  @doc "See `expand_setup/0`. Pass `change_key:` to write the bake-window meta row."
+  defmacro expand_setup(opts) do
+    caller = __CALLER__.module
+
+    quote do
+      Samen.Migration.ExpandContract.expand_setup(
+        Keyword.put(unquote(opts), :caller, unquote(caller))
+      )
+    end
+  end
+
+  @doc "Contract-phase gate + timeout posture. See `Samen.Migration.ExpandContract.contract_setup/2`."
+  defmacro contract_setup(change_key) do
+    caller = __CALLER__.module
+
+    quote do
+      Samen.Migration.ExpandContract.contract_setup(unquote(change_key), caller: unquote(caller))
+    end
+  end
+
+  @doc "See `contract_setup/1`. Pass `bake_window: {n, unit}` to override the window (tests)."
+  defmacro contract_setup(change_key, opts) do
+    caller = __CALLER__.module
+
+    quote do
+      Samen.Migration.ExpandContract.contract_setup(
+        unquote(change_key),
+        Keyword.put(unquote(opts), :caller, unquote(caller))
+      )
+    end
+  end
+
+  @doc "Additive nullable column add. See `Samen.Migration.ExpandContract.add_nullable_column/4`."
+  defmacro add_nullable_column(table, column, type) do
+    quote do
+      Samen.Migration.ExpandContract.add_nullable_column(
+        unquote(table),
+        unquote(column),
+        unquote(type),
+        []
+      )
+    end
+  end
+
+  @doc "See `add_nullable_column/3`."
+  defmacro add_nullable_column(table, column, type, opts) do
+    quote do
+      Samen.Migration.ExpandContract.add_nullable_column(
+        unquote(table),
+        unquote(column),
+        unquote(type),
+        unquote(opts)
+      )
+    end
+  end
+
+  @doc "CREATE INDEX CONCURRENTLY carve-out (requires @disable_ddl_transaction true). See `Samen.Migration.ExpandContract.concurrent_index/3`."
+  defmacro concurrent_index(table, columns) do
+    caller = __CALLER__.module
+
+    quote do
+      Samen.Migration.ExpandContract.concurrent_index(
+        unquote(table),
+        unquote(columns),
+        caller: unquote(caller)
+      )
+    end
+  end
+
+  @doc "See `concurrent_index/2`."
+  defmacro concurrent_index(table, columns, opts) do
+    caller = __CALLER__.module
+
+    quote do
+      Samen.Migration.ExpandContract.concurrent_index(
+        unquote(table),
+        unquote(columns),
+        Keyword.put(unquote(opts), :caller, unquote(caller))
+      )
+    end
+  end
+
+  @doc "Chunked backfill carve-out (requires @disable_ddl_transaction true). See `Samen.Migration.ExpandContract.chunked_backfill/4`."
+  defmacro chunked_backfill(repo, table, set_clause) do
+    caller = __CALLER__.module
+
+    quote do
+      Samen.Migration.ExpandContract.chunked_backfill(
+        unquote(repo),
+        unquote(table),
+        unquote(set_clause),
+        caller: unquote(caller)
+      )
+    end
+  end
+
+  @doc "See `chunked_backfill/3`."
+  defmacro chunked_backfill(repo, table, set_clause, opts) do
+    caller = __CALLER__.module
+
+    quote do
+      Samen.Migration.ExpandContract.chunked_backfill(
+        unquote(repo),
+        unquote(table),
+        unquote(set_clause),
+        Keyword.put(unquote(opts), :caller, unquote(caller))
+      )
+    end
+  end
+
+  @doc "Create the samen_migration_meta bake-window table. See `Samen.Migration.ExpandContract.create_migration_meta_table/0`."
+  defmacro create_migration_meta_table do
+    quote do
+      Samen.Migration.ExpandContract.create_migration_meta_table()
     end
   end
 

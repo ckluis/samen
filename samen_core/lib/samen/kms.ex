@@ -105,6 +105,23 @@ defmodule Samen.Kms do
   # --- pseudonym key derivation (J2 / §runs 4b), same DEK ---
   @callback pseudonym(subject_id, subject_id) :: {:ok, binary()} | {:error, :shredded | term}
 
+  # --- (OPTIONAL) the wrong-key-decrypt oracle probe (T2.9) ---
+  @doc """
+  The subject ids whose DEK is CURRENTLY LIVE (state `:active`) in the store.
+
+  OPTIONAL — used ONLY by the destruction oracle's wrong-key probe (T2.9): to
+  prove no ciphertext for an erased subject decrypts "under any key other than
+  the destroyed one", the oracle attempts each of the subject's vault rows under
+  every OTHER live key. A store that cannot cheaply enumerate its keys (the
+  production `AwsKmsDynamo` — one would not `Scan` DynamoDB per oracle run) may
+  return `{:error, :unsupported}`; the oracle then records the wrong-key probe as
+  a documented seam (operator TODO) rather than faking a pass. The local dev
+  adapters (`InMemory`, `FileBacked`) implement it so the red path is real in the
+  demo/kernel suites.
+  """
+  @callback list_active_subjects() :: {:ok, [subject_id]} | {:error, :unsupported | term}
+  @optional_callbacks [list_active_subjects: 0]
+
   @doc """
   The configured KMS adapter for this runtime.
 

@@ -133,4 +133,14 @@ defmodule Samen.Kms.AwsKmsDynamo do
   def pseudonym(subject_id, target_subject_id) do
     stub_delegate(:pseudonym, [subject_id, target_subject_id])
   end
+
+  @impl true
+  def list_active_subjects do
+    # A DynamoDB `Scan` of every wrapped-DEK item per oracle run is not something
+    # production should do casually (cost + throughput). The oracle's wrong-key
+    # probe is therefore an operator TODO on the AWS adapter (documented seam),
+    # NOT a faked pass: it returns `:unsupported` so the DbContent tier records a
+    # documented gap rather than silently claiming the probe held.
+    {:error, :unsupported}
+  end
 end

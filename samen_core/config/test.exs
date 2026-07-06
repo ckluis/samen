@@ -46,3 +46,10 @@ config :samen_core, :catalog_parity_allow_list, [
   {"pat_patient", "pat_care_note"},
   {"pat_patient", "pat_subject_id"}
 ]
+
+# T2.6 OTel test config: use the pid exporter so tests receive spans as messages
+# and can assert on attributes inline. The simple processor sends spans
+# synchronously (no buffer) so spans are delivered before the test assertion.
+config :opentelemetry,
+  span_processor: :simple,
+  traces_exporter: {:otel_exporter_pid, self()}

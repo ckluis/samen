@@ -26,7 +26,13 @@ defmodule SamenCore.MixProject do
       # file under test/ that neither matches `:test_load_filters` (*_test.exs)
       # nor is ignored — and `mix test --warnings-as-errors` treats that warning
       # as a failure. Ignore the corpus dir so the corpus is text-only fixtures.
-      test_ignore_filters: [&String.starts_with?(&1, "test/pii_reads_corpus/")],
+      test_ignore_filters: [
+        &String.starts_with?(&1, "test/pii_reads_corpus/"),
+        # T2.4: scratch migration fixtures for the down/0 CI check and the live
+        # carve-out test. Real migration `.exs` files loaded by Ecto.Migrator against
+        # a throwaway DB — not ExUnit files — so not treated as tests.
+        &String.starts_with?(&1, "test/fixtures/")
+      ],
       deps: deps(),
       aliases: aliases(),
       description: "Samen foundry kernel: self-qualifying storage, machine catalog, PII vault.",
@@ -63,11 +69,27 @@ defmodule SamenCore.MixProject do
       # enqueue), so a grant insert that rolls back leaves no orphan job. Pinned
       # (T2.1 will layer AshOban conventions on top of this base Oban).
       {:oban, "== 2.23.0"},
+      # telemetry_metrics: the standard definition structs for bounded-cardinality
+      # metrics (T2.8). Provides Telemetry.Metrics.counter/2, distribution/2, etc.
+      # Host apps wire these definitions to a reporter (e.g. TelemetryMetricsPrometheus).
+      {:telemetry_metrics, "~> 1.1"},
       # phoenix_html provides Phoenix.HTML.Safe — %Masked{} implements it so a
       # HEEx `<%= @person.email %>` renders "••••" and never raises/leaks
       # (Gate-0 fix task #1, T1.5 acceptance clause (a)). Runtime dep: host apps
       # that render masked values in HEEx need the protocol present.
-      {:phoenix_html, "~> 4.1"}
+      {:phoenix_html, "~> 4.1"},
+      # OTel tracing (T2.6): opentelemetry_api is the compile-time API surface;
+      # opentelemetry is the SDK (span processor, exporter, BEAM propagation).
+      # opentelemetry_ecto attaches to Ecto telemetry events — REQUIRED config:
+      #   OpentelemetryEcto.setup([:my_app, :repo], db_statement: :disabled)
+      # The :disabled flag suppresses SQL text + bind params from every span so
+      # no pii_ token ever serializes into db.statement (doc §runs 4a).
+      # opentelemetry_process_propagator carries span context across Process.spawn
+      # and Task boundaries (not strictly required for Oban since we propagate via
+      # job meta, but present for completeness on the BEAM process boundary).
+      {:opentelemetry_api, "~> 1.4"},
+      {:opentelemetry, "~> 1.5"},
+      {:opentelemetry_ecto, "~> 1.2"}
     ]
   end
 

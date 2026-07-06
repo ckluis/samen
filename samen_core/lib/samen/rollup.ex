@@ -51,6 +51,92 @@ defmodule Samen.Rollup.Spec do
           rebuild_sql: {String.t(), String.t()},
           bounded_columns: [String.t()]
         }
+
+  @doc """
+  Build a `%Spec{}` from plain config data (a map with atom keys) or pass a
+  `%Spec{}` through unchanged.
+
+  The rollup registry lives in `config :samen_core, :rollups` as PLAIN MAPS, not
+  struct literals — config is evaluated before this module is loaded, so a struct
+  literal in config cannot resolve `Spec.__struct__/1`. This builder converts each
+  config map into a validated struct at runtime and **fails closed** on a
+  malformed entry (missing/blank keys, wrong `rebuild_sql` shape).
+  """
+  @spec from_config(t() | map()) :: t()
+  def from_config(%__MODULE__{} = spec) do
+    validate!(spec)
+    spec
+  end
+
+  def from_config(%{} = data) do
+    spec = %__MODULE__{
+      name: fetch!(data, :name),
+      table: fetch!(data, :table),
+      subject_column: fetch!(data, :subject_column),
+      suppressed_column: fetch!(data, :suppressed_column),
+      rebuild_sql: fetch!(data, :rebuild_sql),
+      bounded_columns: fetch!(data, :bounded_columns)
+    }
+
+    validate!(spec)
+    spec
+  end
+
+  defp fetch!(data, key) do
+    case Map.fetch(data, key) do
+      {:ok, value} -> value
+      :error -> raise ArgumentError, "rollup spec is missing required key #{inspect(key)}: #{inspect(data)}"
+    end
+  end
+
+  # Fail-closed shape validation: a misconfigured rollup must NOT silently pass
+  # (a registered rollup the erasure policy + oracle operate on must be well-formed).
+  defp validate!(%__MODULE__{} = s) do
+    unless is_atom(s.name) and not is_nil(s.name) do
+      raise ArgumentError, "rollup :name must be a non-nil atom, got #{inspect(s.name)}"
+    end
+
+    for {field, value} <- [
+          table: s.table,
+          subject_column: s.subject_column,
+          suppressed_column: s.suppressed_column
+        ] do
+      unless is_binary(value) and value != "" do
+        raise ArgumentError, "rollup #{inspect(s.name)} #{field} must be a non-empty string, got #{inspect(value)}"
+      end
+    end
+
+    case s.rebuild_sql do
+      {del, ins} when is_binary(del) and is_binary(ins) and del != "" and ins != "" ->
+        :ok
+
+      other ->
+        raise ArgumentError,
+              "rollup #{inspect(s.name)} :rebuild_sql must be a {delete_sql, insert_sql} pair of " <>
+                "non-empty strings, got #{inspect(other)}"
+    end
+
+    unless is_list(s.bounded_columns) and s.bounded_columns != [] and
+             Enum.all?(s.bounded_columns, &(is_binary(&1) and &1 != "")) do
+      raise ArgumentError,
+            "rollup #{inspect(s.name)} :bounded_columns must be a non-empty list of non-empty " <>
+              "strings, got #{inspect(s.bounded_columns)}"
+    end
+
+    unless s.subject_column in s.bounded_columns do
+      raise ArgumentError,
+            "rollup #{inspect(s.name)} :subject_column #{inspect(s.subject_column)} must appear in " <>
+              ":bounded_columns (the erasure arm matches on it)"
+    end
+
+    unless s.suppressed_column in s.bounded_columns do
+      raise ArgumentError,
+            "rollup #{inspect(s.name)} :suppressed_column #{inspect(s.suppressed_column)} must appear " <>
+              "in :bounded_columns (the suppress arm flips it)"
+    end
+
+    :ok
+  end
 end
 
 defmodule Samen.Rollup do
@@ -119,10 +205,15 @@ defmodule Samen.Rollup do
   """
   @spec specs(keyword()) :: [Spec.t()]
   def specs(opts \\ []) do
-    case Keyword.get(opts, :specs) do
-      nil -> Application.get_env(:samen_core, :rollups, [])
-      list -> list
-    end
+    raw =
+      case Keyword.get(opts, :specs) do
+        nil -> Application.get_env(:samen_core, :rollups, [])
+        list -> list
+      end
+
+    # Build (and fail-closed validate) a `%Spec{}` from each registry entry.
+    # Entries may be plain maps (from config) or already-built structs (tests).
+    Enum.map(raw, &Spec.from_config/1)
   end
 
   @doc "Look up a registered rollup spec by name, or `nil`."
@@ -231,9 +322,14 @@ defmodule Samen.Rollup do
     subject_col = safe_ident!(s.subject_column)
     suppressed_col = safe_ident!(s.suppressed_column)
 
+    # Compare on `::text` so the arm is robust to the physical type of the
+    # subject column (UUID rollups, opaque-string rollups) and to the subject id's
+    # representation. A subject id that does not exist in this rollup (e.g. a
+    # non-UUID subject that was never rolled into a UUID-keyed rollup) simply
+    # matches 0 rows — never a crash.
     sql =
       "UPDATE #{table} SET #{suppressed_col} = TRUE " <>
-        "WHERE #{subject_col} = $1 AND (#{suppressed_col} IS DISTINCT FROM TRUE)"
+        "WHERE #{subject_col}::text = $1 AND (#{suppressed_col} IS DISTINCT FROM TRUE)"
 
     %{num_rows: n} = Ecto.Adapters.SQL.query!(repo, sql, [subject_id])
 

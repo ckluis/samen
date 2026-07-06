@@ -244,6 +244,30 @@ defmodule Samen.Kms.FileBacked do
     end
   end
 
+  @impl true
+  def list_active_subjects do
+    subjects_dir = Path.join(key_dir(), "subjects")
+
+    case File.ls(subjects_dir) do
+      {:ok, entries} ->
+        active =
+          entries
+          |> Enum.filter(&String.ends_with?(&1, ".dek"))
+          |> Enum.map(&String.replace_suffix(&1, ".dek", ""))
+          # A subject with a tombstone is shredded even if a .dek somehow lingers;
+          # key on the ADAPTER's own live/shredded state, not just file presence.
+          |> Enum.reject(fn id -> File.exists?(tomb_path(id)) end)
+
+        {:ok, active}
+
+      {:error, :enoent} ->
+        {:ok, []}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp read_tombstone!(subject_id) do
     map =
       tomb_path(subject_id)
