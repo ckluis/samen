@@ -89,7 +89,13 @@ defmodule SamenCore.MixProject do
       # job meta, but present for completeness on the BEAM process boundary).
       {:opentelemetry_api, "~> 1.4"},
       {:opentelemetry, "~> 1.5"},
-      {:opentelemetry_ecto, "~> 1.2"}
+      {:opentelemetry_ecto, "~> 1.2"},
+      # simple_sat: pure-Elixir SAT solver Ash's policy authorizer requires to solve
+      # policy scenarios (T3.1 Identity scope policies: org-scope + RBAC). Ash lists
+      # it as an OPTIONAL dep (picosat_elixir or simple_sat); we choose simple_sat to
+      # avoid a NIF/C toolchain requirement in this environment. No AWS/Neon here —
+      # a pure-Elixir solver keeps the policy layer self-contained and CI-portable.
+      {:simple_sat, "~> 0.1"}
     ]
   end
 

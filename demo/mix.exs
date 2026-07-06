@@ -32,7 +32,10 @@ defmodule Demo.MixProject do
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_html, "~> 4.1"},
       # Stream-data for property tests (T1.9 acceptance)
-      {:stream_data, "~> 1.3"}
+      {:stream_data, "~> 1.3"},
+      # simple_sat: Ash policy authorizer's SAT solver (pure Elixir; no NIF). Needed
+      # by the mounted Identity scope's org-scope + RBAC policies (T3.1).
+      {:simple_sat, "~> 0.1"}
     ]
   end
 

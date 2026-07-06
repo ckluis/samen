@@ -54,6 +54,195 @@
     {
       "fields": [
         {
+          "column_name": "ido_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "ido_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ido_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "ido_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "ido_plan",
+          "logical_name": "plan",
+          "type": "String"
+        },
+        {
+          "column_name": "ido_slug",
+          "logical_name": "slug",
+          "type": "String"
+        },
+        {
+          "column_name": "ido_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Identity.Org",
+      "table_name": "ido_org"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "inv_accept_token",
+          "logical_name": "accept_token",
+          "type": "String"
+        },
+        {
+          "column_name": "inv_email",
+          "logical_name": "email",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "inv_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "inv_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "inv_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "inv_role",
+          "logical_name": "role",
+          "type": "Atom"
+        },
+        {
+          "column_name": "inv_status",
+          "logical_name": "status",
+          "type": "String"
+        },
+        {
+          "column_name": "inv_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Identity.Invitation",
+      "table_name": "inv_invitation"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "iro_enabled",
+          "logical_name": "enabled",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "iro_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "iro_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "iro_label",
+          "logical_name": "label",
+          "type": "String"
+        },
+        {
+          "column_name": "iro_name",
+          "logical_name": "name",
+          "type": "Atom"
+        },
+        {
+          "column_name": "iro_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "iro_rank",
+          "logical_name": "rank",
+          "type": "Integer"
+        },
+        {
+          "column_name": "iro_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Identity.Role",
+      "table_name": "iro_role"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "key_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "key_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "key_membership_id",
+          "logical_name": "membership_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "key_minter_role",
+          "logical_name": "minter_role",
+          "type": "Atom"
+        },
+        {
+          "column_name": "key_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "key_plane",
+          "logical_name": "plane",
+          "type": "Atom"
+        },
+        {
+          "column_name": "key_revoked_at",
+          "logical_name": "revoked_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "key_scopes",
+          "logical_name": "scopes",
+          "type": "Map"
+        },
+        {
+          "column_name": "key_token_digest",
+          "logical_name": "token_digest",
+          "type": "String"
+        },
+        {
+          "column_name": "key_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Identity.ApiKey",
+      "table_name": "key_api_key"
+    },
+    {
+      "fields": [
+        {
           "column_name": "mbr_contact_id",
           "logical_name": "contact_id",
           "type": "UUID"
@@ -95,6 +284,47 @@
     {
       "fields": [
         {
+          "column_name": "mbs_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mbs_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "mbs_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "mbs_role",
+          "logical_name": "role",
+          "type": "Atom"
+        },
+        {
+          "column_name": "mbs_status",
+          "logical_name": "status",
+          "type": "String"
+        },
+        {
+          "column_name": "mbs_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "mbs_user_id",
+          "logical_name": "user_id",
+          "type": "UUID"
+        }
+      ],
+      "resource": "Demo.Identity.Membership",
+      "table_name": "mbs_membership"
+    },
+    {
+      "fields": [
+        {
           "column_name": "org_id",
           "logical_name": "id",
           "type": "UUID"
@@ -132,6 +362,52 @@
       ],
       "resource": "Demo.Crm.Org",
       "table_name": "org_org"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "usr_emails",
+          "logical_name": "emails",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "usr_full_name",
+          "logical_name": "full_name",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "usr_handle",
+          "logical_name": "handle",
+          "type": "String"
+        },
+        {
+          "column_name": "usr_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "usr_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "usr_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "usr_status",
+          "logical_name": "status",
+          "type": "String"
+        },
+        {
+          "column_name": "usr_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Identity.User",
+      "table_name": "usr_user"
     }
   ]
 }

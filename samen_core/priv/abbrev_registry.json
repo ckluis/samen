@@ -13,6 +13,12 @@
     "pcl": "SamenCore.Support.PiiClassify.PersonRecord",
     "org": "Demo.Crm.Org",
     "mbr": "Demo.Crm.Membership",
-    "cnt": "Demo.Crm.Contact"
+    "cnt": "Demo.Crm.Contact",
+    "ido": "Demo.Identity.Org",
+    "usr": "Demo.Identity.User",
+    "mbs": "Demo.Identity.Membership",
+    "iro": "Demo.Identity.Role",
+    "key": "Demo.Identity.ApiKey",
+    "inv": "Demo.Identity.Invitation"
   }
 }
