@@ -245,13 +245,22 @@ defmodule SamenCore.CatalogTest do
   # ============================================================
 
   # ---------------------------------------------------------------------------
-  # Helper: create a unique isolated scratch dir under a self-owned parent,
-  # register cleanup, and return the dir path.
-  # Using a unique subdir (not bare /tmp) prevents stray files from concurrent
-  # or failed test runs from leaking across test cases (Gate-1 PRE-a fix).
+  # Helper: create a unique isolated scratch dir under a self-owned, project-local
+  # parent, register cleanup, and return the dir path.
+  #
+  # Gate-2 F2.4: the scratch parent is a PROJECT-LOCAL `samen_core/tmp/` dir
+  # (git-ignored), NOT the shared `/tmp` root. The gate's scratch-dir rule is
+  # "scratch OUTSIDE the /tmp root"; the previous PRE-a fix isolated per-test with a
+  # unique subdir but still rooted it at `/tmp/samen_colrefs_test/`, so a hostile or
+  # stray file dropped directly in shared `/tmp` was outside our subtree (fine) but
+  # the parent itself lived under the shared root. Rooting the scratch subtree in a
+  # self-owned project dir removes the shared-root dependency entirely: no other
+  # process, test suite, or user writes into `samen_core/tmp/colrefs_scratch/`.
   # ---------------------------------------------------------------------------
+  @scratch_root Path.join([__DIR__, "..", "tmp", "colrefs_scratch"])
+
   defp make_scratch_dir(ctx_name) do
-    base = Path.join([System.tmp_dir!(), "samen_colrefs_test", ctx_name])
+    base = Path.expand(Path.join(@scratch_root, ctx_name))
     File.mkdir_p!(base)
     base
   end

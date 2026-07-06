@@ -5,3 +5,6 @@ _build/
 erl_crash.dump
 .pitr_drill_work/
 .antitaut_scratch/
+# Gate-2 F2.4: project-local test-isolation scratch (column_refs linter), never /tmp
+samen_core/tmp/
+gate2_scratch/

@@ -187,6 +187,49 @@ defmodule Samen.MetricsLabelLintTest do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # Gate-2 F2.3 — the actual mix TASK run/1 (not just the pure filter).
+  #
+  # The task is what demo/ci.sh now gates (step 9/9). Before F2.3 `run/1`
+  # crashed on `Map.keys/1` of the `:tag_values` FUNCTION, so it never actually
+  # ran — the gate would have exploded, not linted. These tests exercise the real
+  # entry point so a regression is caught.
+  # ---------------------------------------------------------------------------
+
+  defmodule Gate2GoodMetrics do
+    def definitions do
+      import Telemetry.Metrics
+      [counter("good.events", event_name: [:good, :events], tags: [:action, :result])]
+    end
+  end
+
+  defmodule Gate2BadMetrics do
+    def definitions do
+      import Telemetry.Metrics
+      [counter("bad.events", event_name: [:bad, :events], tags: [:action, :org_id])]
+    end
+  end
+
+  describe "F2.3 — the mix task run/1 (what CI gates)" do
+    test "runs clean (no raise) on a bounded-only module — does NOT crash on :tag_values" do
+      # The pre-F2.3 bug: run/1 did Map.keys/1 on the :tag_values function and
+      # crashed. This asserts the task completes without raising on good metrics.
+      assert :ok =
+               (try do
+                  Mix.Tasks.Samen.Verify.MetricLabels.run(["--module", to_string(Gate2GoodMetrics)])
+                  :ok
+                rescue
+                  e -> {:raised, e}
+                end)
+    end
+
+    test "RED PATH: run/1 raises (exit 1) on a module with a raw org_id tag" do
+      assert_raise Mix.Error, ~r/forbidden metric tags/, fn ->
+        Mix.Tasks.Samen.Verify.MetricLabels.run(["--module", to_string(Gate2BadMetrics)])
+      end
+    end
+  end
+
   defp metric_name(%{name: name}) when is_list(name), do: Enum.join(name, ".")
   defp metric_name(%{name: name}) when is_binary(name), do: name
   defp metric_name(_), do: "(unknown)"

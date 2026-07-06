@@ -83,4 +83,68 @@ defmodule Samen.WideEventJ2LaunderedTest do
     assert {:error, reasons} = WideEvent.emit(ev)
     assert Enum.any?(reasons, &String.contains?(&1, "tenant_id"))
   end
+
+  # ---------------------------------------------------------------------------
+  # Gate-2 F2.2 — single-token PII value shapes (no whitespace) are now REJECTED.
+  #
+  # Before F2.2 the runtime guard only rejected whitespace-containing values, so a
+  # single-word email/SSN/phone/atom-ized name passed the shape guard. F2.2 reuses
+  # the C4 `Samen.PiiValueShape` heuristics so these obvious PII literals fail
+  # closed at the bounded ID/token/enum fields too. (This is a value-SHAPE
+  # heuristic, not a taint proof — the schema-level no-free-string-field defence,
+  # proven in STEP 2, remains the load-bearing J2 guarantee.)
+  # ---------------------------------------------------------------------------
+
+  describe "F2.2 — single-token PII value shapes rejected at bounded fields" do
+    test "an email (no whitespace) is rejected in tenant_id / actor_id / action" do
+      email = "alice@example.com"
+      assert {:error, _} = WideEvent.new(action: :req, tenant_id: email)
+      assert {:error, _} = WideEvent.new(action: :req, actor_id: email)
+
+      # atom-ized email in the open :action enum is rejected too.
+      assert {:error, reasons} = WideEvent.new(action: String.to_atom(email))
+      assert Enum.any?(reasons, &String.contains?(&1, "action"))
+    end
+
+    test "a dashed SSN is rejected in tenant_id / actor_id" do
+      ssn = "123-45-6789"
+      assert {:error, _} = WideEvent.new(action: :req, tenant_id: ssn)
+      assert {:error, _} = WideEvent.new(action: :req, actor_id: ssn)
+    end
+
+    test "a phone number is rejected in tenant_id / actor_id" do
+      phone = "+15551234567"
+      assert {:error, _} = WideEvent.new(action: :req, tenant_id: phone)
+      assert {:error, _} = WideEvent.new(action: :req, actor_id: phone)
+    end
+
+    test "an atom-ized name stuffed into :action is rejected" do
+      # A host atom-izes a person's name and passes it as the action label.
+      assert {:error, reasons} = WideEvent.new(action: String.to_atom("Alice Anders"))
+      assert Enum.any?(reasons, &String.contains?(&1, "action"))
+    end
+
+    test "a single-word atom-ized name in :action is rejected only if PII-shaped" do
+      # A single opaque word is NOT reliably PII by shape — a legitimate action
+      # label like :create must still pass (heuristic is discriminating, not
+      # always-fail). This documents the honest bound of the heuristic.
+      assert {:ok, _} = WideEvent.new(action: :create)
+      assert {:ok, _} = WideEvent.new(action: :contact_created)
+    end
+
+    test "legitimate opaque IDs/tokens still pass (heuristic is not always-fail)" do
+      assert {:ok, _} =
+               WideEvent.new(
+                 action: :req,
+                 tenant_id: "01HZX4M8Q0000000000000000",
+                 actor_id: "vt_9f3a1c7e5b2d4088aa11bb22cc33dd44"
+               )
+    end
+
+    test "the emit path re-validates single-token PII shapes too" do
+      ev = %WideEvent{action: :req, tenant_id: "alice@example.com"}
+      assert {:error, reasons} = WideEvent.emit(ev)
+      assert Enum.any?(reasons, &String.contains?(&1, "tenant_id"))
+    end
+  end
 end

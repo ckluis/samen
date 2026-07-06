@@ -8,17 +8,28 @@ defmodule Samen.WideEvent do
   > backend (OpenTelemetry → Honeycomb/Tempo/Loki) where you slice by any of
   > them."
 
-  ## Two defences, one struct
+  ## Two defences, one struct — the SCHEMA is load-bearing, the runtime is a belt
 
-    1. **Build-time (static)** — `Samen.WideEvent.Schema` declares every field
-       with a bounded type; `mix samen.verify.sink_schema` (J2) fails the build on
-       any free-string/untyped field. A laundered PII value has nowhere to land.
+    1. **Build-time (static) — the load-bearing J2 defence.**
+       `Samen.WideEvent.Schema` declares every field with a bounded type
+       (`:opaque_id | :token | :enum | :number`); `mix samen.verify.sink_schema`
+       (J2, demo/ci.sh) **fails the build on any free-string/untyped field**. This
+       is the real guarantee: there is *no free-string field* for a laundered PII
+       value to land in. This is what the vision doc stakes and it is enforced.
 
-    2. **Runtime (dynamic)** — `new/1` validates every supplied value against its
-       declared field type (`bounded ID / token / enum / number`) and REJECTS an
-       unknown field or a value that doesn't fit its bounded type. So even if the
-       schema check were skipped, a runtime emit of a name-shaped value into a
-       bounded field fails closed.
+    2. **Runtime (dynamic) — a value-SHAPE heuristic, NOT a taint proof.**
+       `new/1` validates every supplied value against its declared field type and
+       REJECTS an unknown field, a wrong-typed value, or a value whose *shape* is
+       obviously PII — a space-separated name, an email, a phone, or an SSN stuffed
+       into a bounded `:opaque_id`/`:token` field, and a PII/name-shaped atom in an
+       open `:enum` (`:action`). It reuses the C4 `Samen.PiiValueShape` heuristics.
+
+       **Honesty note:** this runtime check is a *shape heuristic*, not a proof of
+       non-PII. It catches the obvious "a host typed a PII literal into tenant_id"
+       mistake, but a single-token opaque value that happens to be a real surname
+       is indistinguishable from a legitimate token by shape alone. Do not
+       over-trust it: the **schema-level no-free-string-field defence (1) is the
+       load-bearing J2 guarantee**; this heuristic is a belt on top of it.
 
   ## `actor_id` is a per-subject-keyed pseudonym
 
@@ -77,12 +88,17 @@ defmodule Samen.WideEvent do
   Build a validated wide event from a keyword/map of fields.
 
   Returns `{:ok, %Samen.WideEvent{}}` or `{:error, reasons}` where `reasons` is a
-  list of human strings. Validation is the **runtime** half of the J2 defence:
+  list of human strings. Validation is the **runtime** half of the J2 defence — a
+  value-shape belt, not a taint proof (the schema type is the load-bearing gate):
 
     * an **unknown field** (not in `Schema.field_names/0`) is rejected — you
       cannot smuggle an undeclared field past the runtime;
-    * every supplied value must fit its **declared bounded type** — a name-shaped
-      binary in a `:number` field, or a value not in a closed `:enum` set, fails.
+    * every supplied value must fit its **declared bounded type** — a value in a
+      `:number` field must be a number; a `:enum` value must be in the closed set;
+    * a bounded `:opaque_id`/`:token` value that is *obviously* PII-shaped (a
+      space-separated name, an email, a phone, an SSN) is rejected, and a
+      PII/name-shaped atom in an open `:enum` is rejected. This is a heuristic:
+      it catches the obvious literal, not every possible PII value.
 
   `nil` values are permitted (a field may be absent for a given request).
   """
@@ -236,13 +252,24 @@ defmodule Samen.WideEvent do
 
   # :enum — a value drawn from the declared closed set, or (for :action) any atom
   # since :action's closed set is app-defined; but it MUST be an atom (never a
-  # free binary), so a laundered name can't sit in an enum field either.
+  # free binary), so a laundered name can't sit in an enum field either. For an
+  # OPEN enum (`:action`) we additionally reject an atom whose printable form is
+  # name/email/phone/SSN-shaped — an atom-ized PII value (`:"alice@example.com"`,
+  # `:"Alice Anders"`) is not a legitimate action label.
   defp value_violation(name, :enum, opts, value) do
     case Keyword.get(opts, :allowed) do
       :open ->
-        if is_atom(value),
-          do: [],
-          else: ["#{inspect(name)} (:enum) must be an atom label — got #{inspect(value)}"]
+        cond do
+          not is_atom(value) ->
+            ["#{inspect(name)} (:enum) must be an atom label — got #{inspect(value)}"]
+
+          pii_shaped_atom?(value) ->
+            ["#{inspect(name)} (:enum) atom label #{inspect(value)} is PII/name-shaped — " <>
+               "an :action is a bounded label, not a value carrier (J2 runtime guard)"]
+
+          true ->
+            []
+        end
 
       allowed when is_list(allowed) ->
         if value in allowed,
@@ -255,11 +282,26 @@ defmodule Samen.WideEvent do
   end
 
   # A bounded id/token shape: a binary, length-capped, with no internal
-  # whitespace and no space-separated words (a name has spaces; a uuid/token
-  # doesn't). This is a shape guard, not a taint proof — the schema type is the
-  # real gate; this rejects the obvious "someone put a name in tenant_id" case.
+  # whitespace/space-separated words (a name has spaces; a uuid/token doesn't),
+  # AND not an email/phone/SSN-shaped literal (a single-token PII value stuffed
+  # into an opaque-ID field). This is a **value-shape heuristic, not a taint
+  # proof** — the schema type (no free-string field, `mix samen.verify.sink_schema`)
+  # is the load-bearing J2 gate. This heuristic is a belt that rejects the obvious
+  # "a host typed a PII literal into tenant_id/actor_id" mistake; it reuses the C4
+  # `Samen.PiiValueShape` heuristics (Gate-2 F2.2) rather than re-deriving them.
   @max_id_len 256
   defp bounded_id_shape?(value) do
-    byte_size(value) <= @max_id_len and not String.contains?(value, [" ", "\t", "\n"])
+    byte_size(value) <= @max_id_len and
+      not String.contains?(value, [" ", "\t", "\n"]) and
+      not Samen.PiiValueShape.pii_shaped_id?(value)
   end
+
+  # An atom is PII/name-shaped if its printable form matches the ID value-shape
+  # heuristic (email/phone/SSN/space-separated name). `Atom.to_string/1` recovers
+  # the printable form so an atom-ized name/email is caught in an open `:enum`.
+  defp pii_shaped_atom?(value) when is_atom(value) and value not in [nil, true, false] do
+    Samen.PiiValueShape.pii_shaped_id?(Atom.to_string(value))
+  end
+
+  defp pii_shaped_atom?(_), do: false
 end

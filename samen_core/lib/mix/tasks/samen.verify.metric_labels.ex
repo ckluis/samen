@@ -96,13 +96,16 @@ defmodule Mix.Tasks.Samen.Verify.MetricLabels do
     defs = safe_definitions(mod)
 
     Enum.flat_map(defs, fn metric ->
-      # Telemetry.Metrics structs have a :tags field (list of atoms).
-      # Check both :tags and :tag_values keys.
-      tags = Map.get(metric, :tags, [])
-      tag_values_keys = Map.get(metric, :tag_values, %{}) |> Map.keys()
-      all_keys = tags ++ tag_values_keys
-
-      Enum.flat_map(all_keys, fn key ->
+      # `Telemetry.Metrics` structs expose the label dimensions as the `:tags`
+      # field (a list of atoms). `:tag_values` is a *transform function*
+      # (measurements -> tag map), NOT a map — its output keys are not statically
+      # inspectable, so we cannot lint them here; the label dimensions that become
+      # Prometheus series are exactly `:tags`. (Gate-2 F2.3: the previous code did
+      # `Map.keys/1` on that function and crashed, which is why the task was never
+      # actually gated.)
+      metric
+      |> Map.get(:tags, [])
+      |> Enum.flat_map(fn key ->
         if key in forbidden do
           [{mod, metric_name(metric), key}]
         else

@@ -23,6 +23,22 @@ defmodule Samen.NoPlaintextPii.Tiers.PostShred.TraceSinkIngress do
   laundered-name-carrier surface), exactly as in CI mode — the schema is the
   invariant, valid in every run.
 
+  ## What the load-bearing defence is (and what it is NOT)
+
+  This tier asserts over the **schema** (`Schema.violations/0`), which is the
+  load-bearing J2 guarantee: **no free-string field exists**, so a laundered PII
+  value has nowhere to land. That is a build-checked structural invariant
+  (`mix samen.verify.sink_schema`), not a scan of values.
+
+  Separately, `Samen.WideEvent.new/1`/`emit/1` apply a **runtime value-shape
+  heuristic** (`Samen.PiiValueShape`) that rejects a value whose shape is obviously
+  PII (email/phone/SSN/space-separated name) in a bounded ID/token field, and a
+  PII/name-shaped atom in an open `:enum`. That runtime check is a *heuristic, not
+  a taint proof* — a single-token opaque value that happens to be a real surname is
+  indistinguishable from a legitimate token by shape alone. The oracle does not and
+  cannot lean on the runtime heuristic for its guarantee; the **schema-level
+  no-free-string-field invariant is what is load-bearing** here.
+
   ## Positive attestation
 
   `:post_shred` tier: emits `:pass` for the two ingress guarantees it clears (schema

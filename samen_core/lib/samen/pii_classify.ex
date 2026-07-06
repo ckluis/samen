@@ -114,18 +114,14 @@ defmodule Samen.PiiClassify do
   )
 
   # ---------------------------------------------------------------------------
-  # Value-shape regex patterns (for seeded/default values)
+  # Value-shape patterns (for seeded/default values)
+  #
+  # The email/SSN/phone regexes live in `Samen.PiiValueShape` — the single shared
+  # source of truth also used by the J2 runtime guard (`Samen.WideEvent`). This
+  # module delegates to it rather than duplicating the regexes (Gate-2 F2.2).
   # ---------------------------------------------------------------------------
 
-  # Email-shaped value
-  @email_regex ~r/^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/
-
-  # SSN-shaped value: NNN-NN-NNNN or NNNNNNNNN
-  @ssn_regex ~r/^\d{3}-?\d{2}-?\d{4}$/
-
-  # Phone-shaped: various common formats
-  # E.g. +1-800-555-1234, (800) 555-1234, 800.555.1234, 8005551234
-  @phone_regex ~r/^(\+\d{1,3}[\s\-.]?)?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}$/
+  alias Samen.PiiValueShape
 
   # ---------------------------------------------------------------------------
   # Main API
@@ -218,16 +214,7 @@ defmodule Samen.PiiClassify do
   Returns `{true, :email | :ssn | :phone}` on a hit, `{false, nil}` otherwise.
   """
   @spec pii_shaped_value?(String.t()) :: {boolean(), atom() | nil}
-  def pii_shaped_value?(value) when is_binary(value) do
-    cond do
-      Regex.match?(@email_regex, value) -> {true, :email}
-      Regex.match?(@ssn_regex, value) -> {true, :ssn}
-      Regex.match?(@phone_regex, value) -> {true, :phone}
-      true -> {false, nil}
-    end
-  end
-
-  def pii_shaped_value?(_), do: {false, nil}
+  def pii_shaped_value?(value), do: PiiValueShape.classify_value(value)
 
   @doc """
   Load the committed `schema.dict.json` baseline as a `baseline_set`.
