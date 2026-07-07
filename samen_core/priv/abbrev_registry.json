@@ -86,6 +86,8 @@
     "fat": "Driftwood.Crm.Attachment",
     "drv": "Driftwood.Freight.Driver",
     "stl": "Driftwood.Freight.Settlement",
-    "dsp": "Driftwood.Freight.DispatchEvent"
+    "dsp": "Driftwood.Freight.DispatchEvent",
+    "dag": "Driftwood.Aggregate.LoadVolumeByLane",
+    "dtq": "Driftwood.Aggregate.MrrByTier"
   }
 }

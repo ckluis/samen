@@ -3,6 +3,57 @@
     {
       "fields": [
         {
+          "column_name": "dag_gross_cents",
+          "logical_name": "gross_cents",
+          "type": "Integer"
+        },
+        {
+          "column_name": "dag_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "dag_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dag_lane",
+          "logical_name": "lane",
+          "type": "String"
+        },
+        {
+          "column_name": "dag_load_count",
+          "logical_name": "load_count",
+          "type": "Integer"
+        },
+        {
+          "column_name": "dag_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "dag_refreshed_at",
+          "logical_name": "refreshed_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dag_tenant_count",
+          "logical_name": "tenant_count",
+          "type": "Integer"
+        },
+        {
+          "column_name": "dag_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Aggregate.LoadVolumeByLane",
+      "table_name": "dag_load_volume_by_lane"
+    },
+    {
+      "fields": [
+        {
           "column_name": "drv_carrier_id",
           "logical_name": "carrier_id",
           "type": "UUID"
@@ -131,6 +182,52 @@
       ],
       "resource": "Driftwood.Freight.DispatchEvent",
       "table_name": "dsp_dispatch_event"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dtq_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "dtq_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dtq_mrr_cents",
+          "logical_name": "mrr_cents",
+          "type": "Integer"
+        },
+        {
+          "column_name": "dtq_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "dtq_refreshed_at",
+          "logical_name": "refreshed_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dtq_tenant_count",
+          "logical_name": "tenant_count",
+          "type": "Integer"
+        },
+        {
+          "column_name": "dtq_tier",
+          "logical_name": "tier",
+          "type": "String"
+        },
+        {
+          "column_name": "dtq_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Aggregate.MrrByTier",
+      "table_name": "dtq_mrr_by_tier"
     },
     {
       "fields": [

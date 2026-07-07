@@ -146,11 +146,23 @@ The seam is the **snapshot substrate** (logical dump vs CoW WAL branch). Everyth
 downstream — fresh-DB restore, app validation, and the load-bearing key-store
 exclusion — is identical between the two.
 
-**Run it:**
+**Run it (Drill #1 — demo-shaped):**
 ```
 bash docs/runbooks/pitr-gameday-sim.sh                 # full drill, both arms, evidence -> §G
 bash docs/runbooks/pitr-gameday-sim.sh --probe-corrupt # red-path probe (see below)
 ```
+
+**Run it (Drill #2 — Driftwood, production-sized, plan T5.5):** the reference-vertical
+drill uses the same seam but a Driftwood-shaped schema at scale (thousands of loads/
+settlements across several tenants), a freight-specific bad contract (`DROP COLUMN
+stl_advances_cents`), and a **settlement-integrity** validation. It is run by
+`driftwood/ci.sh` step 20 and writes `driftwood/reports/T5.5.md`:
+```
+cd driftwood
+bash priv/gameday/pitr_gameday_sim.sh                  # full drill, both arms, report -> reports/T5.5.md
+bash priv/gameday/pitr_gameday_sim.sh --probe-corrupt  # red-path probe
+```
+See §G Drill #2 for the measured Driftwood evidence.
 
 **What the simulation does (both arms, measured):**
 1. Migrate a demo-shaped DB to the **pre-contract baseline**; seed a real
@@ -222,8 +234,85 @@ real RTO):**
   the promotable artifact; the real drill measures promote/cutover as part of
   `RTO_arm_ii`.
 
-### Drill #2 — REAL Neon (PENDING — operator TODO)
+### Drill #2 — DRIFTWOOD LOCAL SIMULATION, production-sized (2026-07-07, plan T5.5)
 
-_Not yet run. Requires Neon project + API key + KMS reachability. Append measured
-`detection_latency`, `RTO_arm_i`, `RTO_arm_ii`, and the key-store-exclusion result
-here after the first production-sized quarterly drill._
+The **PITR game-day #2** against the **Driftwood reference vertical** (freight
+brokerage) on a **production-sized** dataset. This is the second local simulation:
+same seam as Drill #1 (`pg_dump`/`psql` substitutes for a Neon CoW branch), but now
+against a Driftwood-shaped schema at scale, with a **freight-specific bad contract**
+and a **settlement-integrity** validation.
+
+- **Substrate:** local Postgres 16.13 (Homebrew), `pg_dump`/`psql` snapshot (Neon
+  simulated — §F seam).
+- **Base DB:** `driftwood_pitr_drill_base` → **restore DB:** `driftwood_pitr_drill_restore`
+  (both throwaway; created + dropped by the drill).
+- **Dataset (production-sized):** **4 tenants, 160 carriers, 2 400 loads, 2 400
+  settlements** + one real CDL-bearing driver vault-seeded. **Dump size: ~1.03 MB**
+  (vs Drill #1's ~32 KB).
+- **Bad contract:** `DROP COLUMN stl_advances_cents` — a load-bearing settlement
+  INPUT. With advances gone, the design-§3 netting math silently treats advances as 0
+  and **over-pays every carrier** (the freight-brokerage form of "a bad contract that
+  ran"). Irreversible by `down/0` (the advance data is gone) — covered by PITR.
+- **Load-bearing validation:** a **settlement-integrity** harness
+  (`Driftwood.PitrGameday.SettlementIntegrity`) re-derives
+  `net_payable = max((linehaul+fuel+accessorial) − advances − factoring_fee −
+  claims, 0)` **in SQL** over the whole dataset and asserts: input column present,
+  dataset non-empty, no NULL money inputs, the non-negative clamp holds for every row,
+  and an independent Elixir re-derivation matches the SQL on a sample. Fails closed if
+  `stl_advances_cents` is gone.
+- **Orchestrator:** `driftwood/priv/gameday/pitr_gameday_sim.sh` (drives
+  `driftwood/priv/drills/pitr_drill.exs`). Run by `driftwood/ci.sh` step 20.
+- **Report:** `driftwood/reports/T5.5.md` (machine-generated, regenerated each CI run).
+- **Evidence JSON:** `driftwood/reports/pitr-gameday2-evidence.json`.
+
+| Measurement | Value | Target | Within target |
+|---|---|---|---|
+| Dataset build (2 400 settlements across 4 tenants) | **~1.1 s** | — | — |
+| pg_dump (branch @ pre-contract, ~1.03 MB) | **~0.07 s** | — | — |
+| Detection (settlement integrity fails on bad contract) | **~0.74 s** | — (proxy for detection latency) | n/a |
+| **Arm (i)** — reverse expand via `down/0` + forward-fix | **~0.77 s** | ≤ 30 min forward-fix | **YES** |
+| **Arm (ii)** — restore (pg_dump → fresh DB) | **~0.19 s** | — | — |
+| **Arm (ii)** — validate settlement-integrity suite | **~0.75 s** | — | — |
+| **Arm (ii)** — restore + validate total | **~0.99 s** | ≤ 2 h full PITR | **YES** |
+| Key-store exclusion proven (empty key dir denies CDL decrypt) | **YES** (`:unavailable`) | must be YES | **YES** |
+
+**Red path + anti-tautology (plan hard-rule 2):**
+- **Red path:** the sim exits non-zero if post-restore settlement-integrity validation
+  fails on a clean restore. `--probe-corrupt` drops `stl_advances_cents` on the restore
+  target once and asserts validation **fails closed** — verified: **PROBE OK**
+  (validation exit 1 on the corrupted restore, probe exit 0). Also pinned as a CI-run
+  in-suite test: `driftwood/test/pitr_gameday2_test.exs` (GREEN on intact data, RED on
+  the column drop, RED on an empty dataset).
+- **Anti-tautology:** in a project-local scratch copy of the drill harness,
+  `SettlementIntegrity.run/1` was sabotaged to always return `{:ok, ...}`. Against an
+  advances-dropped DB the **shipped** harness returned exit **1** (fails closed) while
+  the **sabotaged** copy returned exit **0** (falsely passes) — proving the red path's
+  pass/fail is driven by the schema-reading integrity logic, not a constant. Reverted;
+  scratch dir removed.
+
+**Honest caveats (same floors as Drill #1, now at Driftwood scale):**
+- Even at 2 400 settlements / ~1 MB, the numbers are **floors on localhost**, not the
+  real Neon RTO. A production-sized Neon branch restore scales with branch size, WAL
+  replay depth, promote latency, and network — minutes-to-hours, not sub-second. The
+  simulation proves the **runbook mechanics + the settlement-integrity + key-store
+  invariants at scale**, not the production RTO magnitude. The ≤ 30 min / ≤ 2 h targets
+  remain **targets pending the real Neon drill**.
+- **Detection latency here is the harness runtime (~0.74 s), NOT a real incident's
+  monitoring-driven detection latency** — which is the true bad-contract RPO. A real
+  Driftwood incident's RPO = the time from the contract COMMIT to the first alert
+  (a settlement-integrity monitor, an AP-clerk noticing an over-payment, a smoke test).
+  The real drill MUST measure detection from monitoring.
+- "Promote" is not simulated (infra-level cutover). The validated fresh restore DB is
+  the promotable artifact.
+
+### Drill #3 — REAL Neon, Driftwood production branch (PENDING — operator TODO)
+
+_Not yet run. The real quarterly drill against a Driftwood Fly + Neon deployment.
+Requires: **(1)** a Neon project with continuous PITR on the Driftwood production
+branch; **(2)** `NEON_API_KEY` with branch create/delete scope; **(3)** the app's AWS
+KMS reachable from the drill runner (per ADR-001). Steps: run §A–§E against a
+`drill-YYYY-QN` branch cloned from the Driftwood production branch, injecting the same
+freight bad contract (`DROP COLUMN stl_advances_cents`) and validating with the
+settlement-integrity harness pointed at the branch conn string. Append measured
+`detection_latency` (from monitoring), `RTO_arm_i`, `RTO_arm_ii` (including promote/
+cutover), and the key-store-exclusion result here. Owner: on-call platform lead._

@@ -8,3 +8,7 @@ erl_crash.dump
 # Gate-2 F2.4: project-local test-isolation scratch (column_refs linter), never /tmp
 samen_core/tmp/
 gate2_scratch/
+# T5.3: Driftwood LOCAL dev KMS key store (file-backed) — a dev-only secret, never
+# committed. A real deploy uses AWS KMS (OPERATOR TODO). The test suite uses a
+# per-run tmp keystore (test_helper), so this only exists after `MIX_ENV=dev`.
+driftwood/priv/dev_keystore/
