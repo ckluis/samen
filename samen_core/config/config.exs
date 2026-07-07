@@ -33,6 +33,10 @@ config :samen_core, SamenCore.TestRepo,
 # The Ecto repo the T1.6 reveal-grant model uses. Host apps configure their own.
 config :samen_core, :reveal_grant_repo, SamenCore.TestRepo
 
+# The Ecto repo the T4.1 masked-impersonation session runtime uses. Falls back to
+# :reveal_grant_repo if unset. Host apps configure their own.
+config :samen_core, :impersonation_repo, SamenCore.TestRepo
+
 # T2.3 rollup registry. A rollup is a small derived summary over the raw
 # append-only `aud_event` tier — dashboards read the rollup, never scan raw
 # events. The framework (Samen.Rollup.rebuild_all/1, RollupRefreshWorker cron),

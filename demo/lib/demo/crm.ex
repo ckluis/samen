@@ -136,6 +136,26 @@ defmodule Demo.Crm.Contact do
     type("contact")
     show_fields([:id, :display_name, :active, :full_name, :emails, :dob])
 
+    # F3.7 — make the FILTER surface match the SERIALIZATION surface. AshJsonApi
+    # derives a `?filter[…]` parameter from the resource's public attributes by
+    # default (`derive_filter?` default true) — and Ash's filter parser accepts ANY
+    # public attribute, INCLUDING one kept OFF `show_fields` (e.g. `org_id`, an
+    # internal-routing column). That let `?filter[org_id]=…` act as a real predicate:
+    # a hit/miss side channel over a field the allowlist omits from the body (Gate-3
+    # §F3.7). Turning `derive_filter?` off routes any `filter` param to an unused
+    # action argument (dropped), so a non-allowlisted field can no longer influence the
+    # result set. Cross-org is already defended by OrgScope's FilterCheck; this closes
+    # the residual same-org side channel over a de-allowlisted field.
+    #
+    # SORT is governed DIFFERENTLY and needs no flag here: AshJsonApi's sort parser
+    # validates each `?sort=` field against `show_field?/2` and returns InvalidSort
+    # (400) for a field absent from the allowlist — so `?sort=org_id` is ALREADY
+    # refused. (Note: `AshJsonApi.Resource.Info.derive_sort?/1` reads the mis-keyed
+    # option `:derive_sort` rather than the DSL's `:derive_sort?`, so a
+    # `derive_sort?(false)` here is a no-op upstream — but it is unnecessary, since
+    # show_fields already closes the sort surface. See the F3.7 red-path test.)
+    derive_filter?(false)
+
     routes do
       base("/contacts")
       get(:read)

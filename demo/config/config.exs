@@ -4,7 +4,7 @@ import Config
 # It uses samen_core as a path dep and exercises EVERY T1 feature.
 config :demo,
   ecto_repos: [Demo.Repo],
-  ash_domains: [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.PrimitivesScope]
+  ash_domains: [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.PrimitivesScope, Demo.Aggregate]
 
 # samen_core verifiers (C1/C2/C3/C4/C5) discover domains from
 # :samen_core :ash_domains. Register the demo's domains here so the
@@ -13,7 +13,7 @@ config :demo,
 # Marketing scope (T3.4), the CMS scope (T3.5), the Support scope
 # (T3.6), and the Primitives scope (T3.7 — resources catalogued in HOST's
 # catalog, scanned by host's UNCHANGED verifiers, per ADR-004).
-config :samen_core, :ash_domains, [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.PrimitivesScope]
+config :samen_core, :ash_domains, [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.PrimitivesScope, Demo.Aggregate]
 
 # T3.6 SLA breach detection: configure the ticket resource for the Oban cron.
 config :samen_core, :support_sla_breach_ticket_resource, Demo.SupportScope.Ticket
@@ -45,6 +45,18 @@ config :samen_core, :reveal_grant, Samen.Reveal.Grants
 config :samen_core, :reveal_grant_repo, Demo.Repo
 config :samen_core, :non_pii_repo, Demo.Repo
 config :samen_core, :verify_repo, Demo.Repo
+
+# T4.1 masked impersonation: the repo backing impersonation sessions + the operator
+# plane resource map (accounts ARE tenant orgs — Identity Org joined to Billing
+# Subscription/Plan and Support Ticket rollups). Single-org paths only (cross-tenant
+# aggregates are T4.2).
+config :samen_core, :impersonation_repo, Demo.Repo
+
+config :samen_core, :operator_plane,
+  org: Demo.Identity.Org,
+  subscription: Demo.BillingScope.Subscription,
+  plan: Demo.BillingScope.Plan,
+  ticket: Demo.SupportScope.Ticket
 
 # T3.8 Tier-1 custom fields: the repo backing the `tnt_field` catalog and the
 # validated-at-write change fallback. The change resolves the resource's own

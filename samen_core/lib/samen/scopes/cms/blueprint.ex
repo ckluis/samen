@@ -309,6 +309,11 @@ defmodule Samen.Scopes.Cms.Blueprint do
           end
         end
 
+        # F3.5 same-org FK: a block may only reference a same-org page.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:page]})
+        end
+
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
         end
@@ -509,6 +514,11 @@ defmodule Samen.Scopes.Cms.Blueprint do
             attribute_type(:uuid)
             allow_nil?(true)
           end
+        end
+
+        # F3.5 same-org FK: seo_meta may only reference a same-org page/post.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:page, :post]})
         end
 
         actions do

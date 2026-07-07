@@ -133,6 +133,11 @@ defmodule Samen.Scopes.Crm.Blueprint do
           end
         end
 
+        # F3.5 same-org FK: a person may only reference a same-org company.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:company]})
+        end
+
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
 
@@ -279,6 +284,11 @@ defmodule Samen.Scopes.Crm.Blueprint do
             attribute_type(:uuid)
             allow_nil?(true)
           end
+        end
+
+        # F3.5 same-org FK: an opportunity may only reference same-org parents.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:company, :pipeline]})
         end
 
         actions do

@@ -21,6 +21,32 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobsTest do
   # The test repo (SamenCore.TestRepo) runs the samen_core test DB.
   @repo SamenCore.TestRepo
 
+  # T3.13 flake root-cause + deflake:
+  #
+  # This module previously ran WITHOUT a sandbox — its `insert_test_job/3` writes
+  # committed straight to the shared `oban_jobs` table, and its scans (via the
+  # oracle tier) read every committed row. The tier's `fetch_recent_jobs/3` samples
+  # only the top-100-by-id rows PER QUEUE (`ORDER BY id DESC LIMIT 100` — a
+  # deliberate production sampling seam). When other tests concurrently enqueued
+  # ≥100 higher-id jobs into the `default` queue between this test's insert and its
+  # scan, the seeded PII-shaped row fell OUT of the top-100 window and the red-path
+  # assertion saw `viols == []` — the intermittent failure (mis-attributed to
+  # `Core.Ctx.Activity.create` in the T3.13 report; the real flaky module is this
+  # one).
+  #
+  # The fix is proper test isolation: check out a sandboxed connection in `{:shared,
+  # self()}` mode (the same idiom `jobs_enqueue_in_tx_test.exs` uses). Every insert
+  # and every tier scan now run inside THIS test's rolled-back transaction on the
+  # owned connection — so the `default` queue starts empty per test, the top-100
+  # window deterministically contains the seeded row, and concurrent async tests'
+  # oban_jobs writes (in their own sandboxes) are invisible here. Deterministic, no
+  # sleeps, no quarantine.
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
+    Ecto.Adapters.SQL.Sandbox.mode(@repo, {:shared, self()})
+    :ok
+  end
+
   # ---------------------------------------------------------------------------
   # Helpers
 
@@ -237,10 +263,14 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobsTest do
         findings = ObanJobs.check(ctx)
         viols = violations(findings)
 
-        # The PII job must produce a violation.
+        # The PII job must produce an email-shaped violation. The tier deliberately
+        # does NOT echo the plaintext value into the finding (that would itself leak
+        # PII); it names the JOB ID, the arg KEY, and the SHAPE. So we key on the PII
+        # job's id + "email"-shape, not on the raw value.
         pii_viols =
           Enum.filter(viols, fn f ->
-            String.contains?(f.detail, "alice.antitaut@example.com")
+            String.contains?(f.subject, "oban_jobs[#{pii_job}]") and
+              String.contains?(f.detail, "email-shaped")
           end)
 
         assert pii_viols != [],
@@ -248,11 +278,12 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobsTest do
                  "The ObanJobs tier must be a genuine discriminator, not an always-pass tautology. " <>
                  "All violations: #{inspect(viols)}"
 
-        # The clean job's ID should NOT appear in violations for its args.
+        # The clean job (an opaque UUID in the same arg key) must NOT produce a
+        # violation — proving the check discriminates on VALUE SHAPE, not on the key
+        # name or the worker (both identical across the two jobs).
         clean_viols =
           Enum.filter(viols, fn f ->
-            String.contains?(f.detail, "3e4e5f6a-7b8c-9d0e-1f2a-3b4c5d6e7f8a") and
-              String.contains?(f.detail, to_string(pii_job)) == false
+            String.contains?(f.subject, "oban_jobs[#{clean_job}]")
           end)
 
         assert clean_viols == [],
@@ -284,14 +315,21 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobsTest do
     _ -> false
   end
 
+  # T3.13 deflake (part 2): pass the args MAP directly as the jsonb parameter — NOT
+  # a pre-`Jason.encode!`-ed string with `$2::jsonb`. Postgrex's jsonb type extension
+  # JSON-encodes the Elixir term once; feeding it an already-encoded STRING made it
+  # encode a SECOND time, so the column stored a jsonb STRING ("{\"k\":…}") rather
+  # than a jsonb OBJECT ({"k":…}). The oracle tier reads `args::text` then
+  # `Jason.decode`s it — a doubly-encoded value decodes to a bare string, yields an
+  # empty arg map, and the red-path scan found NOTHING. That malformed-jsonb bug
+  # (latent in this helper) was the deterministic half of the T3.13 flake; the
+  # sampling-window race (fixed by the sandbox above) was the intermittent half.
   defp insert_test_job(queue, args, worker) do
-    args_json = Jason.encode!(args)
-
     %{rows: [[id]]} =
       @repo.query!(
         "INSERT INTO oban_jobs (queue, args, worker, state, inserted_at, scheduled_at, attempted_at, priority, max_attempts, attempt) " <>
-          "VALUES ($1, $2::jsonb, $3, 'available', now(), now(), now(), 0, 20, 0) RETURNING id",
-        [queue, args_json, worker]
+          "VALUES ($1, $2, $3, 'available', now(), now(), now(), 0, 20, 0) RETURNING id",
+        [queue, args, worker]
       )
 
     id

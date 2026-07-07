@@ -102,6 +102,8 @@ defmodule Samen.Reveal do
   which itself fails closed on shred / KMS outage. Returns:
 
     * `{:ok, plaintext}` — granted and decryptable
+    * `{:error, :aggregate_actor_denied}` — the token-blind aggregate actor may
+      NEVER reveal (T4.2 mutual exclusion; refused before any grant/vault check)
     * `{:error, :not_reveal_action}` — the action is not a declared reveal action
     * `{:error, :denied}` — no approving grant (default with DenyAll)
     * `{:error, :shredded | :unavailable | :not_found | term}` — from the vault
@@ -118,7 +120,14 @@ defmodule Samen.Reveal do
   """
   @spec reveal(term(), Masked.t(), atom(), module(), keyword()) ::
           {:ok, binary()}
-          | {:error, :not_reveal_action | :denied | :shredded | :unavailable | :not_found | term}
+          | {:error,
+             :aggregate_actor_denied
+             | :not_reveal_action
+             | :denied
+             | :shredded
+             | :unavailable
+             | :not_found
+             | term}
   def reveal(actor, %Masked{} = masked, action_name, resource, opts \\ []) do
     vault_mod = Keyword.get(opts, :vault, Samen.Vault)
     grant_mod = Keyword.get(opts, :grant, grant_checker())
@@ -132,6 +141,16 @@ defmodule Samen.Reveal do
     }
 
     cond do
+      # Mutual-exclusion gate (T4.2): the token-blind aggregate actor can NEVER
+      # cross the reveal seam. The two operator paths — cross-tenant token-blind
+      # aggregates and single-subject reveal — are MUTUALLY EXCLUSIVE by principal
+      # class (doc §control "The two paths are mutually exclusive"). This is
+      # structural: it precedes the grant check, so even a (spuriously present)
+      # live grant cannot let an :operator_aggregate actor decrypt. There is no
+      # code path by which the aggregate actor reaches the vault.
+      Samen.Aggregate.Actor.aggregate?(actor) ->
+        {:error, :aggregate_actor_denied}
+
       # Marker gate: only a declared reveal action can produce plaintext here.
       not Info.reveal_action?(resource, action_name) ->
         {:error, :not_reveal_action}

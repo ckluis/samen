@@ -15,6 +15,7 @@
 #   samen.verify.vault_declared_parity (F3.1 de-vault backstop; pii_* column ⇄ route)
 #   samen.verify.tnt_catalog  (T3.8 Tier-1 + T3.9 Tier-2 catalog parity)
 #   samen.verify.tnt_boundary (T3.9 one-way boundary: no system→tnt_record ref)
+#   samen.verify.same_org_fk  (F3.5 same-org-FK guard on every org-scoped belongs_to)
 #
 # T1.9 acceptance: every verifier must pass on the demo.
 # Exit: 0 = all green, non-zero = first failure.
@@ -143,8 +144,28 @@ echo "    PASSED"
 #     the vision doc — each diagnostic states this note.
 #     Re-snapshot intentional versioned changes with:
 #       mix samen.verify.api_contract --version v1 --update
-echo "--- step 13/13: mix samen.verify.api_contract --version v1 (C6 structural break check)"
+echo "--- step 13/14: mix samen.verify.api_contract --version v1 (C6 structural break check)"
 mix samen.verify.api_contract --version v1 --snapshot "$DEMO_DIR/api_contract.v1.json"
+echo "    PASSED"
+
+# 14. F3.5 same-org-FK guard: every tenant-plane org-scoped resource that declares a
+#     belongs_to FK to an org-scoped target must carry a `Samen.Policy.SameOrgFk`
+#     change covering that FK. Turns the scope-authoring guide §10 prose rule into a
+#     gated invariant (Gate-3 §F3.5). Fails closed on an unguarded org-scoped FK —
+#     matters most now that the operator plane's cross-tenant reach is going live.
+echo "--- step 14/15: mix samen.verify.same_org_fk (F3.5 same-org-FK guard)"
+mix samen.verify.same_org_fk
+echo "    PASSED"
+
+# 15. C7 no_pii_columns: the token-blind aggregate plane (T4.2) must have NO pii_
+#     columns at all. Whole-app backstop to the compile-time NoPiiColumns verifier +
+#     transformer: (a) re-runs the C7 rules on every `use Samen.Aggregate.Resource`
+#     resource (fails on a pii_attribute / vault / pii_-shaped column / relationship
+#     reaching a PII-bearing resource), and (b) asserts via information_schema that
+#     each aggregate projection table physically contains no pii_ column. This is the
+#     "pii_ columns physically don't exist" claim asserted against the LIVE database.
+echo "--- step 15/15: mix samen.verify.no_pii_columns (C7 token-blind aggregate plane)"
+mix samen.verify.no_pii_columns
 echo "    PASSED"
 
 echo ""

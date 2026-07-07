@@ -331,6 +331,11 @@ defmodule Samen.Scopes.Billing.Blueprint do
           end
         end
 
+        # F3.5 same-org FK: a price may only reference a same-org plan.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:plan]})
+        end
+
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
         end
@@ -570,6 +575,11 @@ defmodule Samen.Scopes.Billing.Blueprint do
           end
         end
 
+        # F3.5 same-org FK: a usage row may only reference a same-org subscription.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:subscription]})
+        end
+
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
         end
@@ -667,6 +677,11 @@ defmodule Samen.Scopes.Billing.Blueprint do
             attribute_type(:uuid)
             allow_nil?(true)
           end
+        end
+
+        # F3.5 same-org FK: an entitlement may only reference a same-org subscription/plan.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:subscription, :plan]})
         end
 
         actions do

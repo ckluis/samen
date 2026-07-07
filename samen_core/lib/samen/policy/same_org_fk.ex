@@ -53,7 +53,7 @@ defmodule Samen.Policy.SameOrgFk do
   @impl true
   def change(changeset, opts, _context) do
     Ash.Changeset.before_action(changeset, fn changeset ->
-      case Ash.Changeset.get_attribute(changeset, :org_id) do
+      case org_id_for(changeset) do
         nil ->
           # No org on the row → OrgScope fails this closed already; nothing to compare.
           changeset
@@ -64,6 +64,24 @@ defmodule Samen.Policy.SameOrgFk do
       end
     end)
   end
+
+  # The write's org_id. On a create it is set on the changeset (by the action /
+  # CoreAttributes). On an update that does NOT touch org_id, `get_attribute/2`
+  # returns the NotLoaded/nil changeset value — so we fall back to the PERSISTED
+  # `changeset.data.org_id`. Without this fallback, an update that leaves org_id
+  # unchanged would compare a same-org FK target against a NotLoaded sentinel and
+  # spuriously fail (the ApiKey revoke red path).
+  defp org_id_for(changeset) do
+    case Ash.Changeset.get_attribute(changeset, :org_id) do
+      %Ash.NotLoaded{} -> data_org_id(changeset)
+      nil -> data_org_id(changeset)
+      org_id -> org_id
+    end
+  end
+
+  defp data_org_id(%{data: %{org_id: %Ash.NotLoaded{}}}), do: nil
+  defp data_org_id(%{data: %{org_id: org_id}}), do: org_id
+  defp data_org_id(_), do: nil
 
   defp relationships_to_check(changeset, opts) do
     case Keyword.get(opts, :relationships) do
@@ -83,6 +101,7 @@ defmodule Samen.Policy.SameOrgFk do
     resource = changeset.resource
 
     with %{type: :belongs_to} = rel <- Ash.Resource.Info.relationship(resource, rel_name),
+         true <- fk_being_written?(changeset, rel.source_attribute),
          fk_value when not is_nil(fk_value) <-
            Ash.Changeset.get_attribute(changeset, rel.source_attribute) do
       case target_org_id(rel, fk_value) do
@@ -117,9 +136,23 @@ defmodule Samen.Policy.SameOrgFk do
           )
       end
     else
-      # No such relationship, or FK not set (nil optional FK) → nothing to check.
+      # No such relationship, FK not being written this action, or FK not set
+      # (nil optional FK) → nothing to check.
       _ -> changeset
     end
+  end
+
+  # Whether this action is actually WRITING the FK attribute. On a create the FK is
+  # always written (even if to nil). On an update we only re-validate an FK that is
+  # being CHANGED — an unchanged FK was validated at its own write time, and
+  # re-checking it on an unrelated update (e.g. an ApiKey `revoke` that only touches
+  # `revoked_at`) would spuriously fail and, worse, block a legitimate write. This
+  # is a NARROWING of when we check, never a widening: a same-org invariant, once
+  # established at write, holds until the FK is rewritten.
+  defp fk_being_written?(%{action_type: :create}, _source_attr), do: true
+
+  defp fk_being_written?(changeset, source_attr) do
+    Ash.Changeset.changing_attribute?(changeset, source_attr)
   end
 
   # Load ONLY the target row's org_id, directly from the target table (bounded UUID,

@@ -79,6 +79,93 @@
     {
       "fields": [
         {
+          "column_name": "amr_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "amr_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "amr_mrr_cents",
+          "logical_name": "mrr_cents",
+          "type": "Integer"
+        },
+        {
+          "column_name": "amr_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "amr_refreshed_at",
+          "logical_name": "refreshed_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "amr_tenant_count",
+          "logical_name": "tenant_count",
+          "type": "Integer"
+        },
+        {
+          "column_name": "amr_tier",
+          "logical_name": "tier",
+          "type": "String"
+        },
+        {
+          "column_name": "amr_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Aggregate.MrrByTier",
+      "table_name": "amr_mrr_by_tier"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "atq_depth",
+          "logical_name": "depth",
+          "type": "Integer"
+        },
+        {
+          "column_name": "atq_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "atq_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "atq_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "atq_refreshed_at",
+          "logical_name": "refreshed_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "atq_status",
+          "logical_name": "status",
+          "type": "String"
+        },
+        {
+          "column_name": "atq_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Aggregate.TicketQueueDepth",
+      "table_name": "atq_ticket_queue_depth"
+    },
+    {
+      "fields": [
+        {
           "column_name": "att_company_id",
           "logical_name": "company_id",
           "type": "UUID"

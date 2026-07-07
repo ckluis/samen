@@ -64,6 +64,17 @@
     "pff": "Demo.PrimitivesScope.FeatureFlag",
     "cea": "Core.Ctx.Activity",
     "cei": "Core.Ctx.Invoice",
-    "waw": "Demo.WebhookAllowlist.Widget"
+    "waw": "Demo.WebhookAllowlist.Widget",
+    "sfp": "SamenCore.Support.SameOrgFkFixture.Parent",
+    "sfg": "SamenCore.Support.SameOrgFkFixture.Guarded",
+    "sfu": "SamenCore.Support.SameOrgFkFixture.Unguarded",
+    "sfn": "SamenCore.Support.SameOrgFkFixture.NotOrgScoped",
+    "amr": "Demo.Aggregate.MrrByTier",
+    "atq": "Demo.Aggregate.TicketQueueDepth",
+    "agc": "SamenCore.Support.AggregateFixture.CleanProjection",
+    "agp": "SamenCore.Support.AggregateFixture.PiiProjection",
+    "agv": "SamenCore.Support.AggregateFixture.VaultProjection",
+    "agr": "SamenCore.Support.AggregateFixture.RelationshipProjection",
+    "agb": "SamenCore.Support.AggregateFixture.PiiBearingTarget"
   }
 }

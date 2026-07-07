@@ -14,6 +14,14 @@ defmodule Samen.Api.PiiResolution do
       omission, not `••••` — the doc's "vaulted field is absent unless a reveal grant
       covers it." We implement absence by setting the field to `%Ash.ForbiddenField{}`,
       which the AshJsonApi serializer omits from the payload entirely.
+    * an **impersonation** scope (T4.1; `plane: :operator` + an `:impersonation`
+      marker) is masked but **PRESENT** — a vaulted field renders `••••` (`%Masked{}`),
+      NOT omitted, because the doc's impersonation seam (§control) states "the operator
+      opens a tenant and sees its real UI, but the session carries no reveal grant, so
+      personal data renders •••• by default." So under impersonation the operator sees
+      the tenant's REAL data shape with `••••` where PII would be, rather than the
+      field vanishing. A live second-party reveal grant on top produces plaintext, the
+      same as any operator path.
 
   ## Where this runs
 
@@ -120,11 +128,22 @@ defmodule Samen.Api.PiiResolution do
         reveal_plaintext(masked, opts) || masked
 
       :operator ->
-        if operator_granted?(record, label, resource, reveal_action, actor, opts) do
-          reveal_plaintext(masked, opts) || forbidden(label)
-        else
-          # No grant → ABSENT (the serializer omits %Ash.ForbiddenField{}).
-          forbidden(label)
+        cond do
+          operator_granted?(record, label, resource, reveal_action, actor, opts) ->
+            reveal_plaintext(masked, opts) || masked_or_forbidden(masked, label, actor)
+
+          # IMPERSONATION UI posture (T4.1; doc §control: "personal data renders ••••
+          # by default"): under an impersonation session the operator sees the tenant's
+          # REAL UI with the field PRESENT-but-masked (`••••`), NOT omitted. The API
+          # operator-KEY posture below is different — a cross-tenant key omits the field.
+          impersonated?(actor) ->
+            masked
+
+          # Operator API-KEY posture (T3.11; doc §external-surface: "a vaulted field is
+          # absent unless a reveal grant covers it"). No grant → ABSENT (the serializer
+          # omits %Ash.ForbiddenField{}).
+          true ->
+            forbidden(label)
         end
 
       _ ->
@@ -138,6 +157,25 @@ defmodule Samen.Api.PiiResolution do
 
   defp plane_of(actor) when is_map(actor), do: Map.get(actor, :plane)
   defp plane_of(_), do: nil
+
+  # Is this actor an impersonation scope (T4.1)? The impersonation scope builder
+  # (`Samen.Impersonation.Scope`) sets a `:impersonation` marker on the actor map. A
+  # plain operator API-KEY actor has no such marker.
+  defp impersonated?(actor) when is_map(actor) do
+    case Map.get(actor, :impersonation) do
+      %{session_id: _} -> true
+      _ -> false
+    end
+  end
+
+  defp impersonated?(_), do: false
+
+  # On a granted read whose decrypt failed: an impersonation UI keeps `%Masked{}`
+  # (`••••`, never absent); an operator API key omits the field (forbidden). Fail-safe
+  # either way — no plaintext.
+  defp masked_or_forbidden(masked, label, actor) do
+    if impersonated?(actor), do: masked, else: forbidden(label)
+  end
 
   defp reveal_plaintext(%Masked{} = masked, opts) do
     vault = Keyword.get(opts, :vault, Samen.Vault)

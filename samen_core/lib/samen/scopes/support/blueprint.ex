@@ -143,6 +143,11 @@ defmodule Samen.Scopes.Support.Blueprint do
           end
         end
 
+        # F3.5 same-org FK: a ticket may only reference a same-org sla.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:sla]})
+        end
+
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
         end
@@ -636,6 +641,11 @@ defmodule Samen.Scopes.Support.Blueprint do
             attribute_type(:uuid)
             allow_nil?(true)
           end
+        end
+
+        # F3.5 same-org FK: a csat may only reference a same-org ticket/agent.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:ticket, :agent]})
         end
 
         actions do

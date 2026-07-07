@@ -342,6 +342,11 @@ defmodule Samen.Scopes.Identity.Blueprint do
           end
         end
 
+        # F3.5 same-org FK: a membership may only reference a same-org user.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:user]})
+        end
+
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
         end
@@ -484,6 +489,11 @@ defmodule Samen.Scopes.Identity.Blueprint do
             attribute_type(:uuid)
             allow_nil?(false)
           end
+        end
+
+        # F3.5 same-org FK: an api_key may only reference a same-org membership.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:membership]})
         end
 
         actions do

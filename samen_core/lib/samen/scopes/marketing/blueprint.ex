@@ -362,6 +362,16 @@ defmodule Samen.Scopes.Marketing.Blueprint do
           end
         end
 
+        # F3.5 same-org FK: a send may only reference same-org campaign/template.
+        # (The subscriber FK is additionally guarded by the inline suppression-time
+        # check inside :create_checked below — the load-bearing case — but the
+        # SameOrgFk change covers ALL of them uniformly so the F3.5 verifier passes
+        # by the same gated invariant every other scope uses. Redundant on subscriber,
+        # harmless: SameOrgFk's before_action re-reads the same bounded org_id.)
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:subscriber, :campaign, :template]})
+        end
+
         actions do
           # Intentionally NO default :create — all sends must go through
           # :create_checked so suppression is enforced at send-time.
@@ -522,6 +532,11 @@ defmodule Samen.Scopes.Marketing.Blueprint do
           end
         end
 
+        # F3.5 same-org FK: an email event may only reference same-org send/subscriber.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:send, :subscriber]})
+        end
+
         actions do
           defaults([:read, create: :*, update: :*])
         end
@@ -583,6 +598,11 @@ defmodule Samen.Scopes.Marketing.Blueprint do
             attribute_type(:uuid)
             allow_nil?(false)
           end
+        end
+
+        # F3.5 same-org FK: a suppression row may only reference a same-org subscriber.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:subscriber]})
         end
 
         actions do
