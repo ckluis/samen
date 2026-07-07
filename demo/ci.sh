@@ -13,6 +13,8 @@
 #   samen.verify.sink_schema  (T2.7 J2 wide-event/span allow-list)
 #   samen.verify.metric_labels (T2.8 bounded-cardinality label-lint; Gate-2 F2.3)
 #   samen.verify.vault_declared_parity (F3.1 de-vault backstop; pii_* column ⇄ route)
+#   samen.verify.tnt_catalog  (T3.8 Tier-1 + T3.9 Tier-2 catalog parity)
+#   samen.verify.tnt_boundary (T3.9 one-way boundary: no system→tnt_record ref)
 #
 # T1.9 acceptance: every verifier must pass on the demo.
 # Exit: 0 = all green, non-zero = first failure.
@@ -110,8 +112,39 @@ echo "    PASSED"
 #     (pii_smg_body / pii_pnt_rendered_body / pii_pwh_signing_secret left in the DB
 #     while the resource dropped the vault route) — the exact gap C4 pii_classify
 #     misses because those logical names aren't in its heuristic token-list.
-echo "--- step 10/10: mix samen.verify.vault_declared_parity (F3.1 de-vault backstop)"
+echo "--- step 10/11: mix samen.verify.vault_declared_parity (F3.1 de-vault backstop)"
 mix samen.verify.vault_declared_parity
+echo "    PASSED"
+
+# 11. T3.8 Tier-1 custom-field catalog parity: tnt_field ⇄ tam_table (no orphan
+#     custom field on a ghost table) + bag keys ⇄ tnt_field (no INVISIBLE custom
+#     field — a jsonb bag key with no tnt_field row is an uncatalogued custom
+#     field, the "customization that rotted past the catalog" failure the
+#     validated-at-write change prevents; this is the durable CI backstop that
+#     also catches a raw-SQL write that bypassed Ash).
+echo "--- step 11/12: mix samen.verify.tnt_catalog (T3.8 Tier-1 + T3.9 Tier-2 catalog parity)"
+mix samen.verify.tnt_catalog
+echo "    PASSED"
+
+# 12. T3.9 one-way boundary: no demo system resource declares a relationship INTO
+#     tnt_record, and no FK targets a tenant-regime table (tnt_record/tnt_object).
+#     The tenant regime references OUT to system rows as validated opaque IDs,
+#     never the reverse. Compile-time enforced per-resource by
+#     Samen.Verifiers.TntBoundary; this is the whole-app CI backstop.
+echo "--- step 12/13: mix samen.verify.tnt_boundary (T3.9 one-way boundary)"
+mix samen.verify.tnt_boundary
+echo "    PASSED"
+
+# 13. C6 api_contract verifier (T3.12): diffs the live public API surface against
+#     the committed `api_contract.v1.json` snapshot. Fails closed on ANY un-versioned
+#     STRUCTURAL break: removed/renamed field, narrowed type, dropped route, new
+#     required arg. Additive changes pass (new field, new route, new optional arg).
+#     Semantic breaks (same shape, changed meaning) are explicitly out of scope per
+#     the vision doc — each diagnostic states this note.
+#     Re-snapshot intentional versioned changes with:
+#       mix samen.verify.api_contract --version v1 --update
+echo "--- step 13/13: mix samen.verify.api_contract --version v1 (C6 structural break check)"
+mix samen.verify.api_contract --version v1 --snapshot "$DEMO_DIR/api_contract.v1.json"
 echo "    PASSED"
 
 echo ""

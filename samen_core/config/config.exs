@@ -10,8 +10,18 @@ config :samen_core,
     SamenCore.Support.Crm,
     SamenCore.Support.Clinical,
     SamenCore.Support.PropDomain,
-    SamenCore.Support.PiiClassifyDomain
+    SamenCore.Support.PiiClassifyDomain,
+    SamenCore.Support.CustomFields,
+    Samen.CustomObjects.Domain,
+    # T3.10 bounded-context DSL toy KERNEL domain (aliased/reshaped by Ctx.Toy).
+    Core.Ctx
   ]
+
+# T3.9 Tier-2 custom objects: the repo backing the `tnt_record` Ash resource +
+# the `tnt_object`/`tnt_field` catalog. Host apps configure their own; falls back
+# to :vault_repo in the runtime API. Compile-time here because the Record
+# resource's `postgres do repo(...) end` reads it via compile_env.
+config :samen_core, :tnt_record_repo, SamenCore.TestRepo
 
 config :ash, disable_async?: true
 

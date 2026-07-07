@@ -29,6 +29,11 @@ config :samen_core, :verify_repo, SamenCore.TestRepo
 # (already configured in config/config.exs).
 config :samen_core, :non_pii_repo, SamenCore.TestRepo
 
+# T3.8 Tier-1 custom fields: the repo backing the `tnt_field` catalog + the
+# validated-at-write change. Host apps configure their own; the change resolves
+# the resource's AshPostgres repo first and falls back to :vault_repo.
+config :samen_core, :vault_repo, SamenCore.TestRepo
+
 # Oban in :manual testing mode: `Oban.insert` writes the job row (so the same-tx
 # enqueue and its rollback are observable), but queues do NOT auto-execute. The
 # auto-revoke test drains the :reveal queue explicitly with

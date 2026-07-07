@@ -35,7 +35,11 @@ defmodule Demo.MixProject do
       {:stream_data, "~> 1.3"},
       # simple_sat: Ash policy authorizer's SAT solver (pure Elixir; no NIF). Needed
       # by the mounted Identity scope's org-scope + RBAC policies (T3.1).
-      {:simple_sat, "~> 0.1"}
+      {:simple_sat, "~> 0.1"},
+      # AshJsonApi: the public /api/v1 surface (T3.11; plan OD-6 — AshJsonApi ONLY).
+      # Field exposure is opt-in via the `json_api` DSL (allowlist serialization);
+      # the same Ash policy stack (org-scope + RBAC + reveal-grant) gates the API.
+      {:ash_json_api, "~> 1.7"}
     ]
   end
 

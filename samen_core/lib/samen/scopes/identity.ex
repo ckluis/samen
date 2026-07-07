@@ -86,6 +86,15 @@ defmodule Samen.Scopes.Identity do
     # via `abbrevs: %{org: "abc", ...}`; otherwise the defaults are used.
     abbrevs = resolve_abbrevs(Keyword.get(opts, :abbrevs), __CALLER__)
 
+    # T3.11 — opt-in public API surface. When `json_api: true`, the blueprint injects
+    # the `AshJsonApi.Resource` extension + a `json_api do … end` ALLOWLIST block on
+    # the API-exposed resources (Org, User, Membership). Default OFF, so samen_core
+    # itself needs no ash_json_api dependency: the HOST that mounts `/api/v1` opts in
+    # (and must have ash_json_api compiled). This keeps "field exposure is opt-in"
+    # true at the SCOPE level too — an Identity mount publishes nothing to the public
+    # contract unless the host explicitly asks.
+    json_api? = Keyword.get(opts, :json_api, false) |> Macro.expand(__CALLER__)
+
     org_mod = Module.concat(namespace, Org)
     user_mod = Module.concat(namespace, User)
     membership_mod = Module.concat(namespace, Membership)
@@ -114,7 +123,8 @@ defmodule Samen.Scopes.Identity do
         unquote(otp_app),
         unquote(domain),
         unquote(repo),
-        unquote(abbrevs.org)
+        unquote(abbrevs.org),
+        unquote(json_api?)
       )
 
       Samen.Scopes.Identity.Blueprint.define_user(
@@ -122,7 +132,8 @@ defmodule Samen.Scopes.Identity do
         unquote(otp_app),
         unquote(domain),
         unquote(repo),
-        unquote(abbrevs.user)
+        unquote(abbrevs.user),
+        unquote(json_api?)
       )
 
       Samen.Scopes.Identity.Blueprint.define_membership(
@@ -132,7 +143,8 @@ defmodule Samen.Scopes.Identity do
         unquote(repo),
         unquote(abbrevs.membership),
         unquote(user_mod),
-        unquote(org_mod)
+        unquote(org_mod),
+        unquote(json_api?)
       )
 
       Samen.Scopes.Identity.Blueprint.define_role(

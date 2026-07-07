@@ -25,9 +25,69 @@ defmodule Samen.Scopes.Identity.Blueprint do
   """
 
   # ---------------------------------------------------------------------------
+  # T3.11 — allowlist serialization helpers.
+  #
+  # `api_extensions/1` returns the AshJsonApi.Resource extension list when the host
+  # opted into the public API (`json_api: true`), else []. Fail-closed: if the flag
+  # is set but ash_json_api is NOT compiled, raise — a mount misconfiguration must
+  # not silently drop the public surface (nor silently publish it).
+  #
+  # `json_api_block/3` emits the `json_api do … end` block for a resource. It uses
+  # `show_fields` — the LOAD-BEARING allowlist. `show_fields` is the schema-level
+  # opt-in: a field NOT named here is absent from every payload, even via the
+  # `?fields=` query param (AshJsonApi's serializer filters the final field set
+  # through `show_field?`, which requires `field in show_fields`). This is exactly
+  # the doc's "default not-exposed; a field absent from the allowlist is absent from
+  # the payload by omission" — a newly added storage column never silently appears.
+  #
+  # The names in `show_fields` are the CATALOG field names (`:name`, `:full_name`),
+  # NEVER storage names (`ido_name`, `pii_usr_dob`): AshJsonApi serializes by Ash
+  # attribute name, and the abbrev storage column exists only in the postgres layer.
+  @doc false
+  def api_enabled!(false), do: false
+
+  def api_enabled!(true) do
+    if Code.ensure_loaded?(AshJsonApi.Resource) do
+      true
+    else
+      raise """
+      Samen.Scopes.Identity was mounted with `json_api: true` but AshJsonApi is not \
+      compiled. The public /api/v1 surface is opt-in; add `{:ash_json_api, "~> 1.7"}` \
+      to the host's deps (plan OD-6). Refusing to mount an Identity scope whose public \
+      API silently disappears.
+      """
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Org — the tenant anchor. Org-less (no org_id FK on itself). No PII.
   # ---------------------------------------------------------------------------
-  defmacro define_org(module, otp_app, domain, repo, abbrev) do
+  defmacro define_org(module, otp_app, domain, repo, abbrev, json_api? \\ false) do
+    api? = api_enabled!(json_api?)
+
+    extensions =
+      if api?, do: [AshJsonApi.Resource], else: []
+
+    json_api_block =
+      if api? do
+        quote do
+          json_api do
+            type("org")
+
+            # ALLOWLIST (opt-in, default not-exposed): only these catalog names are
+            # published. `plan` is Tier-0 config; `slug`/`org_id` are NOT allowlisted
+            # → absent from every payload by omission.
+            show_fields([:id, :name, :plan])
+
+            routes do
+              base("/orgs")
+              get(:read)
+              index(:read)
+            end
+          end
+        end
+      end
+
     quote do
       defmodule unquote(module) do
         @moduledoc "Identity.Org — the tenant anchor (doc scope table). No PII, org-less."
@@ -36,12 +96,15 @@ defmodule Samen.Scopes.Identity.Blueprint do
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
+          extensions: unquote(extensions),
           abbrev: unquote(abbrev)
 
         postgres do
           table("#{unquote(abbrev)}_org")
           repo(unquote(repo))
         end
+
+        unquote(json_api_block)
 
         attributes do
           attribute(:name, :string, public?: true, allow_nil?: false)
@@ -85,7 +148,44 @@ defmodule Samen.Scopes.Identity.Blueprint do
   # User — 🔒 PII: full_name (vault :pii_name), emails (vault :pii_email).
   # Org-scoped. A user belongs to an org (the org_id core column).
   # ---------------------------------------------------------------------------
-  defmacro define_user(module, otp_app, domain, repo, abbrev) do
+  defmacro define_user(module, otp_app, domain, repo, abbrev, json_api? \\ false) do
+    api? = api_enabled!(json_api?)
+    extensions = if api?, do: [AshJsonApi.Resource], else: []
+
+    json_api_block =
+      if api? do
+        quote do
+          json_api do
+            type("user")
+
+            # ALLOWLIST. `handle` and `status` are non-PII. `full_name` and `emails`
+            # are vault-routed PII — allowlisted so they can appear (masked `••••` /
+            # absent per plane), which is the whole two-key-classes proof. What marks
+            # them PII is their vault routing (the `pii do`), NOT a `pii_` prefix.
+            # NOT allowlisted → absent by omission: `org_id`, `inserted_at`, etc.
+            show_fields([:id, :handle, :status, :full_name, :emails])
+
+            routes do
+              base("/users")
+              get(:read)
+              index(:read)
+            end
+          end
+        end
+      end
+
+    # T3.11 — the API PII-resolution rule on all reads (only when the API is mounted).
+    # Inert for plane-less internal reads; on the API it clears own-org PII for a
+    # tenant key and forbids (omits) vaulted fields for an operator key without a grant.
+    api_preparations =
+      if api? do
+        quote do
+          preparations do
+            prepare(Samen.Api.PiiResolution)
+          end
+        end
+      end
+
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -97,12 +197,15 @@ defmodule Samen.Scopes.Identity.Blueprint do
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
+          extensions: unquote(extensions),
           abbrev: unquote(abbrev)
 
         postgres do
           table("#{unquote(abbrev)}_user")
           repo(unquote(repo))
         end
+
+        unquote(json_api_block)
 
         attributes do
           # A non-PII display handle (safe to log/label — like the CRM display_name).
@@ -119,6 +222,8 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
           reveal(:reveal_user)
         end
+
+        unquote(api_preparations)
 
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
@@ -166,7 +271,36 @@ defmodule Samen.Scopes.Identity.Blueprint do
   # Membership — (user, org, role). RBAC-gated: only admins+ may mutate; no
   # escalation above the actor's own rank. Org-scoped. No PII.
   # ---------------------------------------------------------------------------
-  defmacro define_membership(module, otp_app, domain, repo, abbrev, user_mod, _org_mod) do
+  defmacro define_membership(
+             module,
+             otp_app,
+             domain,
+             repo,
+             abbrev,
+             user_mod,
+             _org_mod,
+             json_api? \\ false
+           ) do
+    api? = api_enabled!(json_api?)
+    extensions = if api?, do: [AshJsonApi.Resource], else: []
+
+    json_api_block =
+      if api? do
+        quote do
+          json_api do
+            type("membership")
+            # ALLOWLIST. `role`/`status` are bounded config; no PII on membership.
+            show_fields([:id, :role, :status])
+
+            routes do
+              base("/memberships")
+              get(:read)
+              index(:read)
+            end
+          end
+        end
+      end
+
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -179,12 +313,15 @@ defmodule Samen.Scopes.Identity.Blueprint do
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
+          extensions: unquote(extensions),
           abbrev: unquote(abbrev)
 
         postgres do
           table("#{unquote(abbrev)}_membership")
           repo(unquote(repo))
         end
+
+        unquote(json_api_block)
 
         attributes do
           # The RBAC role. Bounded enum (Samen.Scope.Role). Default :member.

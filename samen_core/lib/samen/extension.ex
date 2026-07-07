@@ -32,6 +32,11 @@ defmodule Samen.Extension do
     * `Samen.Transformers.CoreAttributes` — injects `id`, `org_id`,
       `inserted_at`, `updated_at` on every resource (runs before AbbrevStorage so
       they get prefixed).
+    * `Samen.Transformers.MaterializeCustomFields` — when a resource declares a
+      `:custom` jsonb bag (Tier-1), injects `Samen.CustomFields.Change` so every
+      write to the bag is validated-at-write against the org's `tnt_field`
+      definitions (type + constraint + PII-shape containment). Opt-in: no bag, no
+      change.
     * `Samen.Transformers.AbbrevStorage` — rewrites every attribute `:source` to
       `<abbrev>_<name>`.
 
@@ -40,6 +45,10 @@ defmodule Samen.Extension do
     * `Samen.Verifiers.AbbrevRegistry` — enforces the committed abbrev registry
       (permanence, 3-letter-lowercase, collision-free, never-recycled). See
       `Samen.AbbrevRegistry`.
+    * `Samen.Verifiers.TntBoundary` — enforces the Tier-2 one-way boundary (T3.9):
+      a system resource declaring a relationship to `Samen.CustomObjects.Record`
+      (`tnt_record`) fails compile. The tenant regime references OUT to system rows
+      as validated opaque IDs, never the reverse.
   """
   use Spark.Dsl.Extension,
     sections: [
@@ -62,9 +71,11 @@ defmodule Samen.Extension do
     ],
     transformers: [
       Samen.Transformers.CoreAttributes,
+      Samen.Transformers.MaterializeCustomFields,
       Samen.Transformers.AbbrevStorage
     ],
     verifiers: [
-      Samen.Verifiers.AbbrevRegistry
+      Samen.Verifiers.AbbrevRegistry,
+      Samen.Verifiers.TntBoundary
     ]
 end

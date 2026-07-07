@@ -48,7 +48,8 @@ defmodule Samen.NoPlaintextPii do
     Rollup,
     Catalog,
     LogTelemetry,
-    TraceSink
+    TraceSink,
+    ObanJobs
   }
 
   alias Samen.NoPlaintextPii.Tiers.PostShred
@@ -59,10 +60,11 @@ defmodule Samen.NoPlaintextPii do
   T2.2 adds `AudEvent` (the append-only event/audit tier).
   Phase-2 T2.9 appends `cdc_mirror` / `rollup` / `trace_sink` tier modules here
   (or passes them via `run(tiers: …)`).
+  T3.13 / F2.1 adds `ObanJobs` — the `oban_jobs` token-only-args convention tier.
   """
   @spec default_tiers() :: [module()]
   def default_tiers,
-    do: [VaultDeclarations, AuditRows, AudEvent, Rollup, Catalog, LogTelemetry, TraceSink]
+    do: [VaultDeclarations, AuditRows, AudEvent, Rollup, Catalog, LogTelemetry, TraceSink, ObanJobs]
 
   @doc """
   The **post-shred** tier roster (T2.9 — `--subject <uuid> --tiers all`).

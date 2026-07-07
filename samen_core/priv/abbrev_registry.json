@@ -11,6 +11,8 @@
     "piu": "SamenCore.PiiRedPath.UnclassifiedNonPii",
     "rvp": "SamenCore.Support.RevealDomain.RevealPerson",
     "pcl": "SamenCore.Support.PiiClassify.PersonRecord",
+    "tcf": "SamenCore.Support.CustomFields.Widget",
+    "tnr": "Samen.CustomObjects.Record",
     "org": "Demo.Crm.Org",
     "mbr": "Demo.Crm.Membership",
     "cnt": "Demo.Crm.Contact",
@@ -59,6 +61,8 @@
     "pfl": "Demo.PrimitivesScope.File",
     "psh": "Demo.PrimitivesScope.SearchIndex",
     "pwh": "Demo.PrimitivesScope.Webhook",
-    "pff": "Demo.PrimitivesScope.FeatureFlag"
+    "pff": "Demo.PrimitivesScope.FeatureFlag",
+    "cea": "Core.Ctx.Activity",
+    "cei": "Core.Ctx.Invoice"
   }
 }

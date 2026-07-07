@@ -73,7 +73,10 @@ defmodule Demo.CrmVaultTest do
         Contact
         |> Ash.Query.filter(id == ^c.id)
         |> Ash.Query.ensure_selected([:full_name, :emails])
-        |> Ash.read!()
+        # authorize?: false — this is a vault round-trip test, not an authz test. The
+        # T3.11 org-scope read policy now gates Contact reads (a public-API request
+        # carries a scoped api_key actor); this internal dogfood read is unscoped.
+        |> Ash.read!(authorize?: false)
 
       assert %Masked{} = read_back.full_name
       assert %Masked{} = read_back.emails
@@ -148,7 +151,8 @@ defmodule Demo.CrmVaultTest do
         Contact
         |> Ash.Query.filter(id == ^c.id)
         |> Ash.Query.ensure_selected([:dob])
-        |> Ash.read!()
+        # authorize?: false — vault round-trip test, not an authz test (see above).
+        |> Ash.read!(authorize?: false)
 
       assert %Masked{} = read_back.dob
       assert to_string(read_back.dob) == "••••"

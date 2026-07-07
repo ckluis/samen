@@ -11,7 +11,12 @@ defmodule Demo.Crm do
     - crypto-shred
     - all 5 verifiers pass in CI gate
   """
-  use Ash.Domain, validate_config_inclusion?: false
+  # T3.11 — AshJsonApi.Domain makes this domain routable (it generates the
+  # `json_api_match_route/2` dispatcher the AshJsonApi controller calls). Safe here:
+  # the CRM resources are top-level `defmodule`s (not nested in this module body), so
+  # the domain's `json_api/1` macro import does not collide with the resource-level
+  # `json_api/1` on Demo.Crm.Contact. Only Contact carries a resource `json_api` block.
+  use Ash.Domain, validate_config_inclusion?: false, extensions: [AshJsonApi.Domain]
 
   resources do
     resource(Demo.Crm.Org)
@@ -103,11 +108,39 @@ defmodule Demo.Crm.Contact do
     otp_app: :demo,
     domain: Demo.Crm,
     data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshJsonApi.Resource],
     abbrev: "cnt"
 
   postgres do
     table("cnt_contact")
     repo(Demo.Repo)
+  end
+
+  # T3.11 — the public API surface over a PII-bearing CRM resource.
+  #
+  # ALLOWLIST (opt-in, default not-exposed). `show_fields` is the load-bearing
+  # control: a field NOT named here is ABSENT from every payload, even via
+  # `?fields=` (AshJsonApi filters the final field set through `show_field?`, which
+  # requires `field in show_fields`). So `active` is exposed, but a newly added
+  # storage column is absent by omission until it is explicitly allowlisted — the
+  # `newly added storage column does not appear` red path proves this.
+  #
+  # The names are CATALOG names (`:full_name`, `:emails`, `:display_name`) — never
+  # storage names (`com_name`, `pii_cnt_dob`). What marks `full_name`/`emails`/`dob`
+  # as PII is their vault routing (the `pii do` below), not any `pii_` prefix. Those
+  # PII fields serialize `••••` (masked) or absent-on-operator-plane (see the API
+  # masking layer). Deliberately NOT allowlisted: `notes` (the non_pii! plaintext
+  # column) — a plaintext-at-rest field is never auto-published.
+  json_api do
+    type("contact")
+    show_fields([:id, :display_name, :active, :full_name, :emails, :dob])
+
+    routes do
+      base("/contacts")
+      get(:read)
+      index(:read)
+    end
   end
 
   attributes do
@@ -117,6 +150,12 @@ defmodule Demo.Crm.Contact do
     # A non-PII boolean — not a pii_ column, not a PII name. Proves pii_classify
     # does not flag everything.
     attribute(:active, :boolean, public?: true, default: true)
+
+    # NOTE: `org_id` is injected by Samen.Transformers.CoreAttributes (public?: true,
+    # allow_nil?: false → the NOT NULL `cnt_org_id` column). It is the tenant boundary
+    # the org-scope policy filters on for the API's tenant-key cross-org denial proof.
+    # It is deliberately NOT in the API allowlist (`show_fields`) — the org boundary
+    # is internal routing, absent from the public payload by omission.
   end
 
   pii do
@@ -141,6 +180,14 @@ defmodule Demo.Crm.Contact do
     has_many :memberships, Demo.Crm.Membership do
       public?(true)
     end
+  end
+
+  # T3.11 — the API PII-resolution rule on all reads. Inert for plane-less internal
+  # reads (leaves `%Masked{}` → `••••`); on the API it makes tenant-plane keys read
+  # own-org PII in clear, and operator-plane keys see `%Ash.ForbiddenField{}` (absent)
+  # without a grant. The same read path serves UI + API.
+  preparations do
+    prepare(Samen.Api.PiiResolution)
   end
 
   actions do
@@ -173,6 +220,38 @@ defmodule Demo.Crm.Contact do
           {:error, :denied}
         end
       end)
+    end
+  end
+
+  # T3.11 — the org-scope policy the tenant-plane API key runs under, on READS: a
+  # tenant key scoped to org A reads only org A's contacts (the FilterCheck makes org
+  # B's rows not exist → the `tenant key cross-org request denied` red path). This is
+  # the load-bearing API boundary.
+  #
+  # Writes are left unauthorized (`always()`) so the T1.9 PII-vault dogfood — which
+  # seeds contacts directly via `Ash.create` with no scoped actor — keeps working;
+  # Contact is the T1.9 dogfood surface, and write-side org-scope is proven on the
+  # policy-gated Identity scope (T3.1), not re-litigated here. The reveal action
+  # carries its own grant gate (default-deny) inside its run/2.
+  policies do
+    # READS are org-scoped — the load-bearing API tenant boundary. A public API request
+    # ALWAYS carries a scoped api_key actor; an actor-less API read (no/invalid key)
+    # hits the FilterCheck's nil-org branch and sees ZERO rows (fail closed — the
+    # boundary never opens by omission). The T1.9 PII-vault dogfood seeds/reads with
+    # `authorize?: false`, so it is unaffected by this policy.
+    policy action_type(:read) do
+      authorize_if(Samen.Policy.OrgScope)
+    end
+
+    # Writes are left unauthorized (`always()`): the T1.9 dogfood seeds contacts via
+    # `Ash.create` with no scoped actor, and write-side org-scope is proven on the
+    # policy-gated Identity scope (T3.1). The reveal action carries its own grant gate.
+    policy action_type([:create, :update, :destroy]) do
+      authorize_if(always())
+    end
+
+    policy action(:reveal_contact) do
+      authorize_if(always())
     end
   end
 end

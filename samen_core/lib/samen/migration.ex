@@ -121,6 +121,9 @@ defmodule Samen.Migration do
           catalog_sync_down: 1,
           catalog_sync_down: 2,
           create_catalog_tables: 0,
+          create_tnt_field_table: 0,
+          create_tnt_object_table: 0,
+          create_tnt_record_table: 0,
           create_migration_meta_table: 0,
           expand_setup: 0,
           expand_setup: 1,
@@ -299,6 +302,123 @@ defmodule Samen.Migration do
           name: "fld_field_table_column_index"
         )
       )
+    end
+  end
+
+  @doc """
+  Create the `tnt_field` table — the Tier-1 tenant custom-field catalog
+  (plan T3.8; vision doc §core "Every custom field is catalogued").
+
+  A plain Ecto DDL table (like `tam_table`/`fld_field`), not an Ash resource:
+  same bootstrap reasoning (you cannot catalog the catalog with the catalog
+  mechanism), and it must exist before any `xxx_custom` bag write is validated.
+
+  Unlike `fld_field` (system columns, org-agnostic), `tnt_field` is **org-scoped**
+  (`tnt_org_id`) — one row per `(org, table, field)` custom-field definition.
+  A UNIQUE index on that triple makes `Samen.CustomFields.define_field/1`'s upsert
+  well-defined. There is deliberately **no FK** from any system table into a
+  custom-field *value*: this table describes bag keys, the bag is a `:map` column,
+  and the jsonb zone is sealed.
+  """
+  defmacro create_tnt_field_table do
+    quote do
+      create table(:tnt_field, primary_key: false) do
+        add(:tnt_id, :uuid, primary_key: true, null: false, default: fragment("gen_random_uuid()"))
+        add(:tnt_org_id, :uuid, null: false)
+        add(:tnt_table_name, :text, null: false)
+        add(:tnt_field_name, :text, null: false)
+        add(:tnt_type, :text, null: false)
+        add(:tnt_constraints, :map, null: false, default: fragment("'{}'::jsonb"))
+        add(:tnt_pii_declared, :boolean, null: false, default: false)
+        timestamps(type: :utc_datetime_usec)
+      end
+
+      create(
+        unique_index(:tnt_field, [:tnt_org_id, :tnt_table_name, :tnt_field_name],
+          name: "tnt_field_org_table_field_index"
+        )
+      )
+    end
+  end
+
+  @doc """
+  Bootstrap the `tnt_object` table — the **Tier-2 tenant custom-object catalog**
+  (plan T3.9; vision doc §core "custom OBJECTS in `tnt_record` + `tnt_object`",
+  malleability ladder rung 3, Twenty metadata model as SPEC).
+
+  Like `tnt_field`, `tnt_object` is a plain Ecto DDL table (not an Ash resource) —
+  same bootstrap reasoning: it must exist before any `tnt_record` write is
+  validated against it, and you cannot catalog the tenant catalog with the catalog
+  mechanism. Org-scoped: one row per `(org, object_key)` custom-object definition.
+
+  A UNIQUE index on `(tnt_org_id, tnt_object_key)` makes the object-definition
+  upsert well-defined. There is deliberately **no FK** from any *system* table into
+  this table or into `tnt_record`: the tenant regime references OUT to system rows
+  as validated opaque IDs, never the reverse (the one-way boundary, T3.9).
+  """
+  defmacro create_tnt_object_table do
+    quote do
+      create table(:tnt_object, primary_key: false) do
+        add(:tnt_id, :uuid, primary_key: true, null: false, default: fragment("gen_random_uuid()"))
+        add(:tnt_org_id, :uuid, null: false)
+        # The logical object key (e.g. "vaccine_lot"). The `tnt_record` bag rows
+        # for this object validate against `tnt_field` rows whose tnt_table_name is
+        # the object's synthetic table name (see Samen.CustomObjects.object_table/1).
+        add(:tnt_object_key, :text, null: false)
+        add(:tnt_label, :text)
+        # Whether this object definition is active (soft-disable without deleting
+        # its records — a Tier-0-style config toggle).
+        add(:tnt_enabled, :boolean, null: false, default: true)
+        timestamps(type: :utc_datetime_usec)
+      end
+
+      create(
+        unique_index(:tnt_object, [:tnt_org_id, :tnt_object_key],
+          name: "tnt_object_org_key_index"
+        )
+      )
+    end
+  end
+
+  @doc """
+  Bootstrap the `tnt_record` table — **Tier-2 tenant custom-object rows** (plan
+  T3.9; vision doc §core "custom OBJECTS in `tnt_record`").
+
+  Unlike `tnt_field`/`tnt_object` (plain DDL catalog tables), `tnt_record` is the
+  physical backing table for the `Samen.CustomObjects.Record` **Ash resource** — so
+  its columns follow the abbrev-prefixed storage convention (`tnr_*`) that the base
+  macro emits, and it inherits the universal columns (`tnr_id`, `tnr_org_id`,
+  `tnr_inserted_at`, `tnr_updated_at`) plus org-scope policies. This migration
+  creates the physical table; the resource is validated-at-write and org-scoped.
+
+  ## The one-way boundary (T3.9)
+
+  `tnr_object_key` scopes a record to its object definition; `tnr_attributes` is
+  the validated jsonb bag (validated against the object's `tnt_field` rows, reusing
+  the Tier-1 machinery). `tnr_refs` holds **opaque out-references** to system rows
+  (validated opaque IDs), NOT foreign keys — so no referential edge is created FROM
+  the system schema INTO `tnt_record`. There is deliberately **no FK** on this
+  table pointing at a system table, and (enforced by the one-way-boundary verifier)
+  no system resource may declare a relationship pointing back at `tnt_record`.
+  """
+  defmacro create_tnt_record_table do
+    quote do
+      # Column shapes match the base macro's injected core columns
+      # (`Samen.Transformers.CoreAttributes`): `:utc_datetime` timestamps (second
+      # precision), abbrev-prefixed `tnr_*`. No FK anywhere (one-way boundary).
+      create table(:tnt_record, primary_key: false) do
+        add(:tnr_object_key, :text, null: false)
+        add(:tnr_attributes, :map, null: false, default: fragment("'{}'::jsonb"))
+        # Opaque OUT-references to system rows: %{"role" => "<uuid>"} — validated as
+        # opaque IDs, stored as data, NEVER a Postgres FK (one-way boundary).
+        add(:tnr_refs, :map, null: false, default: fragment("'{}'::jsonb"))
+        add(:tnr_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+        add(:tnr_org_id, :uuid, null: false)
+        add(:tnr_inserted_at, :utc_datetime, null: false)
+        add(:tnr_updated_at, :utc_datetime, null: false)
+      end
+
+      create(index(:tnt_record, [:tnr_org_id, :tnr_object_key], name: "tnt_record_org_object_index"))
     end
   end
 

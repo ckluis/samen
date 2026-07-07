@@ -1,0 +1,170 @@
+{
+  "resources": [
+    {
+      "fields": [
+        {
+          "name": "active",
+          "required": false,
+          "type": "Ash.Type.Boolean"
+        },
+        {
+          "name": "display_name",
+          "required": true,
+          "type": "Ash.Type.String"
+        },
+        {
+          "name": "dob",
+          "required": false,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "name": "emails",
+          "required": false,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "name": "full_name",
+          "required": false,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "name": "id",
+          "required": true,
+          "type": "Ash.Type.UUID"
+        }
+      ],
+      "module": "Demo.Crm.Contact",
+      "routes": [
+        {
+          "action": "read",
+          "method": "GET",
+          "path": "/contacts",
+          "required_args": []
+        },
+        {
+          "action": "read",
+          "method": "GET",
+          "path": "/contacts/:id",
+          "required_args": []
+        }
+      ],
+      "type": "contact"
+    },
+    {
+      "fields": [
+        {
+          "name": "id",
+          "required": true,
+          "type": "Ash.Type.UUID"
+        },
+        {
+          "name": "role",
+          "required": false,
+          "type": "Ash.Type.Atom"
+        },
+        {
+          "name": "status",
+          "required": false,
+          "type": "Ash.Type.String"
+        }
+      ],
+      "module": "Demo.Identity.Membership",
+      "routes": [
+        {
+          "action": "read",
+          "method": "GET",
+          "path": "/memberships",
+          "required_args": []
+        },
+        {
+          "action": "read",
+          "method": "GET",
+          "path": "/memberships/:id",
+          "required_args": []
+        }
+      ],
+      "type": "membership"
+    },
+    {
+      "fields": [
+        {
+          "name": "id",
+          "required": true,
+          "type": "Ash.Type.UUID"
+        },
+        {
+          "name": "name",
+          "required": true,
+          "type": "Ash.Type.String"
+        },
+        {
+          "name": "plan",
+          "required": false,
+          "type": "Ash.Type.String"
+        }
+      ],
+      "module": "Demo.Identity.Org",
+      "routes": [
+        {
+          "action": "read",
+          "method": "GET",
+          "path": "/orgs",
+          "required_args": []
+        },
+        {
+          "action": "read",
+          "method": "GET",
+          "path": "/orgs/:id",
+          "required_args": []
+        }
+      ],
+      "type": "org"
+    },
+    {
+      "fields": [
+        {
+          "name": "emails",
+          "required": false,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "name": "full_name",
+          "required": false,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "name": "handle",
+          "required": false,
+          "type": "Ash.Type.String"
+        },
+        {
+          "name": "id",
+          "required": true,
+          "type": "Ash.Type.UUID"
+        },
+        {
+          "name": "status",
+          "required": false,
+          "type": "Ash.Type.String"
+        }
+      ],
+      "module": "Demo.Identity.User",
+      "routes": [
+        {
+          "action": "read",
+          "method": "GET",
+          "path": "/users",
+          "required_args": []
+        },
+        {
+          "action": "read",
+          "method": "GET",
+          "path": "/users/:id",
+          "required_args": []
+        }
+      ],
+      "type": "user"
+    }
+  ],
+  "version": "v1"
+}
