@@ -60,5 +60,15 @@ echo "==> Running demo CI gate (5 verifiers)"
 )
 echo "==> demo CI gate: PASSED"
 
+# --- Driftwood reference-vertical gate (Phase 5, T5.2) ---
+echo ""
+echo "==> Running Driftwood CI gate (full 18-step verifier gate)"
+(
+  cd "$REPO_ROOT/driftwood"
+  mix deps.get --quiet
+  MIX_ENV=test bash ci.sh
+)
+echo "==> Driftwood CI gate: PASSED"
+
 echo ""
 echo "==> ROOT CI: ALL PASSED"

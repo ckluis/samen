@@ -77,6 +77,15 @@
     "agr": "SamenCore.Support.AggregateFixture.RelationshipProjection",
     "agb": "SamenCore.Support.AggregateFixture.PiiBearingTarget",
     "aqp": "Samen.AggregatePrivacyVerifierTest.WithSpec",
-    "aqv": "Samen.AggregatePrivacyVerifierTest.WithoutSpec"
+    "aqv": "Samen.AggregatePrivacyVerifierTest.WithoutSpec",
+    "fcm": "Driftwood.Crm.Company",
+    "fpr": "Driftwood.Crm.Person",
+    "fpp": "Driftwood.Crm.Pipeline",
+    "fop": "Driftwood.Crm.Opportunity",
+    "fac": "Driftwood.Crm.Activity",
+    "fat": "Driftwood.Crm.Attachment",
+    "drv": "Driftwood.Freight.Driver",
+    "stl": "Driftwood.Freight.Settlement",
+    "dsp": "Driftwood.Freight.DispatchEvent"
   }
 }

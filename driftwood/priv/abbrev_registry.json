@@ -1,0 +1,8 @@
+{
+  "$comment": "PERMANENT abbrev registry for the Driftwood freight-brokerage vertical (Phase 5). Abbrevs are 3-letter lowercase, collision-checked, and NEVER recycled or changed once assigned. Driftwood keeps the CRM/Billing/Identity/Support/Primitives scope-DEFAULT abbrevs (DECISION AB, design §1.1) — the registry is per-app so there is no cross-app collision with demo. The vertical-authored resources take fresh abbrevs drv/stl/dsp.",
+  "abbrevs": {
+    "drv": "Driftwood.Freight.Driver",
+    "stl": "Driftwood.Freight.Settlement",
+    "dsp": "Driftwood.Freight.DispatchEvent"
+  }
+}

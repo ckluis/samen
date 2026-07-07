@@ -142,6 +142,54 @@ defmodule Samen.ImpersonationTest do
   end
 
   # ==========================================================================
+  # RED PATH + ANTI-TAUTOLOGY: suspension terminates a LIVE session (F4.2)
+  # ==========================================================================
+
+  describe "suspending an operator ends a live session on its next request (F4.2)" do
+    alias Samen.OperatorPlane.Suspension
+
+    test "a suspend mid-session makes the next scope rebuild DENY; the unsuspended session continues" do
+      op = operator()
+      org = org_id()
+
+      # Open a live, unexpired session and confirm the scope rebuilds cleanly.
+      {:ok, session} = Impersonation.open(op, org, "billing dispute #123", window_minutes: 30)
+      assert {:ok, %Samen.Scope{}} = Scope.for_session(op.id, org)
+
+      # Suspend the operator MID-SESSION.
+      {:ok, _} = Suspension.suspend(%{operator_id: op.id, reason: "budget breach", repo: @repo})
+
+      # RED PATH: the NEXT scope rebuild DENIES with the access-denied shape — even though
+      # the session row is still unexpired and OPEN (deny is the suspension gate, not expiry).
+      assert {:error, :operator_suspended} = Scope.for_session(op.id, org)
+      assert %Session{closed_at: nil} = Sessions.get(session.id)
+      # The unexpired session confirms this is NOT the expiry path firing.
+      assert Sessions.active?(op.id, org)
+
+      # ANTI-TAUTOLOGY / positive control: clear the suspension and the SAME session's scope
+      # rebuild succeeds again — the deny was the suspension gate, not a blanket refusal.
+      {:ok, _} = Suspension.clear(op.id, %{repo: @repo})
+      assert {:error, :operator_suspended} != Scope.for_session(op.id, org)
+      assert {:ok, %Samen.Scope{}} = Scope.for_session(op.id, org)
+    end
+
+    test "a DIFFERENT operator's live session is unaffected by this operator's suspension" do
+      op_suspended = operator()
+      op_clean = operator()
+      org = org_id()
+
+      {:ok, _} = Impersonation.open(op_suspended, org, "case A", window_minutes: 30)
+      {:ok, _} = Impersonation.open(op_clean, org, "case B", window_minutes: 30)
+
+      {:ok, _} = Suspension.suspend(%{operator_id: op_suspended.id, reason: "abuse", repo: @repo})
+
+      # The suspended operator is denied; the clean operator over the SAME org still builds.
+      assert {:error, :operator_suspended} = Scope.for_session(op_suspended.id, org)
+      assert {:ok, %Samen.Scope{}} = Scope.for_session(op_clean.id, org)
+    end
+  end
+
+  # ==========================================================================
   # RED PATH: no renew-in-place
   # ==========================================================================
 

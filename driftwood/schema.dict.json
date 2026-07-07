@@ -1,0 +1,598 @@
+{
+  "tables": [
+    {
+      "fields": [
+        {
+          "column_name": "drv_carrier_id",
+          "logical_name": "carrier_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "drv_cdl_expiry",
+          "logical_name": "cdl_expiry",
+          "type": "String"
+        },
+        {
+          "column_name": "drv_cdl_state",
+          "logical_name": "cdl_state",
+          "type": "String"
+        },
+        {
+          "column_name": "drv_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "drv_eld_provider",
+          "logical_name": "eld_provider",
+          "type": "Atom"
+        },
+        {
+          "column_name": "drv_emails",
+          "logical_name": "emails",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "drv_full_name",
+          "logical_name": "full_name",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "drv_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "drv_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "drv_job_title",
+          "logical_name": "job_title",
+          "type": "String"
+        },
+        {
+          "column_name": "drv_medical_card_expiry",
+          "logical_name": "medical_card_expiry",
+          "type": "Date"
+        },
+        {
+          "column_name": "drv_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "drv_phones",
+          "logical_name": "phones",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "drv_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "drv_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_drv_cdl_number",
+          "logical_name": "cdl_number",
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Driftwood.Freight.Driver",
+      "table_name": "drv_driver"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dsp_dispatched_at",
+          "logical_name": "dispatched_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dsp_driver_id",
+          "logical_name": "driver_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsp_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsp_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dsp_load_id",
+          "logical_name": "load_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsp_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsp_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "dsp_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Freight.DispatchEvent",
+      "table_name": "dsp_dispatch_event"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fac_body",
+          "logical_name": "body",
+          "type": "String"
+        },
+        {
+          "column_name": "fac_company_id",
+          "logical_name": "company_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fac_completed_at",
+          "logical_name": "completed_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fac_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "fac_due_at",
+          "logical_name": "due_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fac_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fac_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fac_opportunity_id",
+          "logical_name": "opportunity_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fac_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fac_person_id",
+          "logical_name": "person_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fac_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "fac_subject",
+          "logical_name": "subject",
+          "type": "String"
+        },
+        {
+          "column_name": "fac_type",
+          "logical_name": "type",
+          "type": "Atom"
+        },
+        {
+          "column_name": "fac_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Crm.Activity",
+      "table_name": "fac_activity"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fat_company_id",
+          "logical_name": "company_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fat_content_type",
+          "logical_name": "content_type",
+          "type": "String"
+        },
+        {
+          "column_name": "fat_file_name",
+          "logical_name": "file_name",
+          "type": "String"
+        },
+        {
+          "column_name": "fat_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fat_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fat_opportunity_id",
+          "logical_name": "opportunity_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fat_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fat_person_id",
+          "logical_name": "person_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fat_size_bytes",
+          "logical_name": "size_bytes",
+          "type": "Integer"
+        },
+        {
+          "column_name": "fat_storage_key",
+          "logical_name": "storage_key",
+          "type": "String"
+        },
+        {
+          "column_name": "fat_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Crm.Attachment",
+      "table_name": "fat_attachment"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fcm_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "fcm_domain",
+          "logical_name": "domain",
+          "type": "String"
+        },
+        {
+          "column_name": "fcm_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fcm_industry",
+          "logical_name": "industry",
+          "type": "String"
+        },
+        {
+          "column_name": "fcm_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fcm_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "fcm_notes",
+          "logical_name": "notes",
+          "type": "String"
+        },
+        {
+          "column_name": "fcm_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fcm_size",
+          "logical_name": "size",
+          "type": "String"
+        },
+        {
+          "column_name": "fcm_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fcm_website",
+          "logical_name": "website",
+          "type": "String"
+        }
+      ],
+      "resource": "Driftwood.Crm.Company",
+      "table_name": "fcm_company"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fop_close_date",
+          "logical_name": "close_date",
+          "type": "Date"
+        },
+        {
+          "column_name": "fop_company_id",
+          "logical_name": "company_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fop_currency",
+          "logical_name": "currency",
+          "type": "String"
+        },
+        {
+          "column_name": "fop_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "fop_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fop_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fop_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "fop_notes",
+          "logical_name": "notes",
+          "type": "String"
+        },
+        {
+          "column_name": "fop_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fop_pipeline_id",
+          "logical_name": "pipeline_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fop_probability",
+          "logical_name": "probability",
+          "type": "Integer"
+        },
+        {
+          "column_name": "fop_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "fop_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fop_value_cents",
+          "logical_name": "value_cents",
+          "type": "Integer"
+        }
+      ],
+      "resource": "Driftwood.Crm.Opportunity",
+      "table_name": "fop_opportunity"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fpp_enabled",
+          "logical_name": "enabled",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fpp_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fpp_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fpp_label",
+          "logical_name": "label",
+          "type": "String"
+        },
+        {
+          "column_name": "fpp_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "fpp_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fpp_stage_order",
+          "logical_name": "stage_order",
+          "type": "Integer"
+        },
+        {
+          "column_name": "fpp_stage_type",
+          "logical_name": "stage_type",
+          "type": "Atom"
+        },
+        {
+          "column_name": "fpp_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Crm.Pipeline",
+      "table_name": "fpp_pipeline"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fpr_company_id",
+          "logical_name": "company_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fpr_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "fpr_display_name",
+          "logical_name": "display_name",
+          "type": "String"
+        },
+        {
+          "column_name": "fpr_emails",
+          "logical_name": "emails",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "fpr_full_name",
+          "logical_name": "full_name",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "fpr_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fpr_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fpr_job_title",
+          "logical_name": "job_title",
+          "type": "String"
+        },
+        {
+          "column_name": "fpr_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "fpr_phones",
+          "logical_name": "phones",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "fpr_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Crm.Person",
+      "table_name": "fpr_person"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "stl_accessorial_cents",
+          "logical_name": "accessorial_cents",
+          "type": "Integer"
+        },
+        {
+          "column_name": "stl_advances_cents",
+          "logical_name": "advances_cents",
+          "type": "Integer"
+        },
+        {
+          "column_name": "stl_carrier_id",
+          "logical_name": "carrier_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "stl_claim_deduction_cents",
+          "logical_name": "claim_deduction_cents",
+          "type": "Integer"
+        },
+        {
+          "column_name": "stl_currency",
+          "logical_name": "currency",
+          "type": "String"
+        },
+        {
+          "column_name": "stl_factoring_rate_bps",
+          "logical_name": "factoring_rate_bps",
+          "type": "Integer"
+        },
+        {
+          "column_name": "stl_fuel_surcharge_cents",
+          "logical_name": "fuel_surcharge_cents",
+          "type": "Integer"
+        },
+        {
+          "column_name": "stl_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "stl_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "stl_linehaul_cents",
+          "logical_name": "linehaul_cents",
+          "type": "Integer"
+        },
+        {
+          "column_name": "stl_load_id",
+          "logical_name": "load_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "stl_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "stl_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "stl_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Freight.Settlement",
+      "table_name": "stl_settlement"
+    }
+  ]
+}

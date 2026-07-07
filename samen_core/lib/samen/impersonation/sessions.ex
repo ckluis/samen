@@ -34,6 +34,22 @@ defmodule Samen.Impersonation.Sessions do
 
   The `no_plaintext_pii` oracle's `AudEvent` tier already asserts this invariant.
 
+  ## The `reason` / `detail` free-text is a NON-shreddable plaintext channel (F4.3)
+
+  Everything above is a bounded token EXCEPT the operator-authored `reason` (and the
+  `detail` it flows into). That text is **plaintext metadata**: it is stored in the
+  `imp_impersonation_session` row and copied into `aud_event.aud_detail` / the `aud_chain`
+  hash payload. A subject crypto-shred (erasing a subject's DEK) does NOT erase it — a DEK
+  destruction cannot reach a plaintext column, and the audit chain deliberately preserves
+  the detail token (ADR-002 §2.5). So the "who it was about becomes unrecoverable"
+  guarantee holds for the vaulted PII, but NOT for whatever an operator freely typed into a
+  reason. The honest posture is to keep this channel free of subject PII in the first
+  place: `open/1` runs `Samen.PiiReasonScan.check/2` (email/SSN/phone value-shape scan,
+  fail-closed REJECT) at the write boundary and refuses a PII-shaped reason with
+  `{:error, {:pii_shaped_reason, shape}}` before any row lands. This is a best-effort belt,
+  not a taint proof; the load-bearing control is the human convention "reasons name the
+  ticket, not the person."
+
   ## Tenant-visible (T4.1 clause (c))
 
   `list_for_org/2` returns the impersonation sessions against a given org — who
@@ -118,6 +134,12 @@ defmodule Samen.Impersonation.Sessions do
       not is_binary(reason) or String.trim(reason) == "" ->
         # Reason-for-access is required (doc §control). Refuse before any write.
         {:error, :reason_required}
+
+      # F4.3: the reason is a NON-shreddable plaintext channel (ADR-002 §2.5). Reject a
+      # reason that is *itself* an email/SSN/phone value shape BEFORE any write, so PII
+      # never lands in a channel a later crypto-shred cannot reach. Fail-closed default.
+      (reason_scan = Samen.PiiReasonScan.check(reason, "impersonation reason")) != :ok ->
+        reason_scan
 
       # T4.4 clause (d): a SUSPENDED operator (breadth-budget breach) cannot open an
       # impersonation session — all reveal/operator paths deny while suspended.

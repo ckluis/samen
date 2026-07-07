@@ -46,10 +46,30 @@ defmodule Samen.Impersonation.Scope do
   operator's request fails closed exactly like no session. This is the "policy checks
   expiry per-request, not per-open" guarantee: rebuild the scope each request and an
   expired session denies mid-flight.
+
+  ## Suspension terminates a LIVE session on its next request (F4.2, Gate-4 carry)
+
+  Expiry is not the only per-request gate. `for_session/3` ALSO consults
+  `Samen.OperatorPlane.Suspension.suspended?/2` for the session's operator on every
+  rebuild. Suspending an operator mid-session (T4.4 auto-suspend, or an explicit
+  operator-plane suspend) therefore ENDS an already-open impersonation session on its
+  NEXT request: the rebuild returns `{:error, :operator_suspended}` — the same
+  access-denied shape a suspended operator gets on every other reveal/operator path —
+  even though the underlying `imp_impersonation_session` row is still unexpired and
+  open. This closes the "a suspension does not touch a session already in flight" gap:
+  `open/1` refuses to START a session while suspended, and `for_session/3` refuses to
+  CONTINUE one. The suspension check is fail-closed (`suspended?/2` defaults to
+  "treat as suspended" when the suspension table is unreachable), so a rebuild that
+  cannot confirm the operator is un-suspended denies.
+
+  The positive control (anti-tautology): an UNSUSPENDED operator's active session keeps
+  rebuilding to `{:ok, scope}` — the deny is the suspension gate firing, not a blanket
+  refusal.
   """
 
   alias Samen.Impersonation.Session
   alias Samen.Impersonation.Sessions
+  alias Samen.OperatorPlane.Suspension
 
   @doc """
   Build a tenant `%Samen.Scope{}` from an operator + a target org, validating there is
@@ -57,22 +77,40 @@ defmodule Samen.Impersonation.Scope do
   check).
 
   Returns:
-    * `{:ok, %Samen.Scope{}}` — an active session exists; the scope carries the target
-      org_id, a `:member` role, the operator id, `:plane => :operator`, and the
-      `:impersonation` marker. NO reveal grant.
+    * `{:ok, %Samen.Scope{}}` — an active session exists AND the operator is not
+      suspended; the scope carries the target org_id, a `:member` role, the operator
+      id, `:plane => :operator`, and the `:impersonation` marker. NO reveal grant.
+    * `{:error, :operator_suspended}` — the session's operator is suspended (F4.2). A
+      live session ends on its NEXT request when its operator is suspended mid-session.
+      Fail-closed: an unreachable suspension table also denies here.
     * `{:error, :session_inactive}` — no active/unexpired session for this pair
       (fail closed). Covers: never opened, closed, expired mid-flight.
+
+  The suspension check runs BEFORE the session lookup so a suspended operator is denied
+  regardless of session state (a suspended operator has no operator-plane reach at all).
 
   Options:
     * `:repo` — override the configured repo.
     * `:now`  — inject the clock (for the anti-tautology expiry probe).
   """
   @spec for_session(String.t(), String.t(), keyword()) ::
-          {:ok, Samen.Scope.t()} | {:error, :session_inactive}
+          {:ok, Samen.Scope.t()} | {:error, :session_inactive | :operator_suspended}
   def for_session(operator_id, org_id, opts \\ []) when is_binary(operator_id) do
-    case Sessions.active_session(operator_id, org_id, opts) do
-      %Session{} = session -> {:ok, build(session)}
-      nil -> {:error, :session_inactive}
+    # F4.2: suspending an operator terminates a live impersonation session on its NEXT
+    # request. This per-request check is the operator-plane analogue of the per-request
+    # expiry check below — the session row can be perfectly valid and still deny because
+    # the operator behind it lost its operator-plane standing. `suspended?/2` is
+    # fail-closed (unreachable table → treat as suspended), so a rebuild that cannot
+    # confirm the operator is un-suspended denies.
+    susp_opts = if repo = Keyword.get(opts, :repo), do: [repo: repo], else: []
+
+    if Suspension.suspended?(operator_id, susp_opts) do
+      {:error, :operator_suspended}
+    else
+      case Sessions.active_session(operator_id, org_id, opts) do
+        %Session{} = session -> {:ok, build(session)}
+        nil -> {:error, :session_inactive}
+      end
     end
   end
 

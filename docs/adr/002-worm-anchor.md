@@ -132,6 +132,45 @@ The oracle's audit tier (`Samen.NoPlaintextPii.Tiers.AuditChain`, CI mode) asser
 carries only bounded-id/token/enum/hash/ciphertext columns — never a plaintext PII column —
 via the same allow-list + PII-name-heuristic used by the `AudEvent` tier.
 
+### 2.5 The `detail` / `reason` free-text is a NON-shreddable plaintext channel (F4.3)
+
+Everything the chain hashes is a bounded token/id/enum/timestamp EXCEPT one field: `detail`
+(the operator-authored `reason` + lifecycle token). This field is **plaintext metadata**, and
+it must be named explicitly as a channel the crypto-shred guarantee does **not** cover:
+
+- `detail` is stored plaintext on `aud_event.aud_detail`, `imp_impersonation_session`,
+  `rvr_reveal_request`, and is **hash-committed into the `aud_chain` payload** (§2.3). It is
+  therefore DELIBERATELY preserved through a subject crypto-shred: destroying a subject's DEK
+  (ADR-001) targets the vaulted PII and the optional per-subject ciphertext (§2.4), NOT this
+  plaintext column. If the shred *did* rewrite `detail`, it would break `verify_chain` (the
+  hash commits to it) — so the chain's immutability and the shred's completeness are in
+  tension precisely on this field, and immutability wins here by design.
+
+- Consequence for the doc's headline: *"The record that an event happened is preserved …;
+  who it was about becomes unrecoverable"* is TRUE for the vaulted subject PII and the
+  per-subject ciphertext, but it does **NOT** extend to whatever an operator freely typed into
+  a `reason`. A reason that names a person ("called Jane Doe re: her SSN") would survive a
+  shred. **This residue is named, not hidden.** The prior wording — "who it was about becomes
+  unrecoverable" — is qualified: it holds for the token/ciphertext channels, not for
+  operator-authored free text.
+
+- **Mitigation (preferred cheap fix + fail-closed belt):**
+  1. *Convention (load-bearing):* reasons name the ticket/dispute, not the subject. The
+     moduledocs of `Samen.Impersonation.Sessions`, `Samen.Reveal.Grants`, and
+     `Samen.AuditChain` / `Samen.AuditChain.Writer` state this and name the residue.
+  2. *Best-effort value-shape scan (belt):* `Samen.PiiReasonScan.check/2` runs
+     `Samen.PiiValueShape.classify_value/1` (email / SSN / phone shapes; the
+     space-separated-name shape is **excluded** because ordinary reasons have internal
+     spaces) at the write boundary of `Sessions.open/1`, `Grants.request/1`, and
+     `AuditChain.Writer.write/2`. The **fail-closed default is REJECT**: a reason/detail that
+     is *itself* a bare email/SSN/phone value shape is refused with
+     `{:error, {:pii_shaped_reason, shape}}` before any row lands (a `Logger.warning` is also
+     emitted). Reject-not-warn is chosen because a stored plaintext PII value in this channel
+     is exactly the leak a later shred cannot erase, so refusing it up front is the only
+     fail-closed posture. This is a **heuristic, not a taint proof** — it catches the obvious
+     pasted-email/SSN/phone mistake; it cannot prove a reason is PII-free, and it does not
+     gate on names.
+
 ---
 
 ## 3 · Decision — the WORM anchor
@@ -195,6 +234,10 @@ this window (the same "detection-latency RPO" honesty the plan states for bad co
   `verify_chain` + `verify_against_anchor` status), with zero cross-org leakage.
 - The chain survives crypto-shred: verification is over tokens + a ciphertext digest, so a
   post-shred chain still verifies while the subject's ciphertext is undecryptable bytes.
+- The `detail`/`reason` free-text is named as a NON-shreddable plaintext channel (§2.5): the
+  "who it was about becomes unrecoverable" guarantee covers the token/ciphertext channels, not
+  operator-authored free text. Mitigated by convention + a fail-closed value-shape reject
+  (`Samen.PiiReasonScan`) at the three write boundaries; documented residue, not a hidden gap.
 - The oracle covers this tier (`AuditChain` CI tier asserts tokens-only), honoring the doc's
   "the destruction oracle covers this tier too."
 - The wholesale-DB-rewrite attack is caught by the anchor comparison; the local-file WORM is

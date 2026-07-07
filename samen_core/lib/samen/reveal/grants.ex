@@ -19,6 +19,19 @@ defmodule Samen.Reveal.Grants do
     4. `AutoRevokeWorker` flips `revoked_at` at `expires_at` (reconciliation, not
        the safety mechanism).
 
+  ## The `reason` free-text is a NON-shreddable plaintext channel (F4.3)
+
+  The requestor-authored `reason` on a `RevealRequest` is **plaintext metadata**: it is
+  stored on `rvr_reveal_request` and copied into the `requested` audit `detail`. A subject
+  crypto-shred does NOT erase it (a DEK destruction cannot reach a plaintext column;
+  the audit chain deliberately preserves the detail token — ADR-002 §2.5). So the
+  "who it was about becomes unrecoverable" guarantee holds for the vaulted PII but NOT
+  for whatever a requestor freely typed here. `request/1` runs
+  `Samen.PiiReasonScan.check/2` (email/SSN/phone value-shape scan, fail-closed REJECT) at
+  the write boundary and refuses a PII-shaped reason with `{:error, {:pii_shaped_reason,
+  shape}}` before any row lands. Best-effort belt, not a taint proof; the load-bearing
+  control is the human convention "reasons name the ticket, not the person."
+
   ## No renew-in-place (clause (e))
 
   There is NO function here that mutates a grant's `expires_at`. `revoke/2` only
@@ -91,6 +104,17 @@ defmodule Samen.Reveal.Grants do
     r = Map.get(attrs, :repo, repo())
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
+    with :ok <- Samen.PiiReasonScan.check(attrs[:reason], "reveal-request reason") do
+      do_request(r, attrs, now)
+    end
+  end
+
+  # F4.3: the reveal-request `reason` is a NON-shreddable plaintext channel (ADR-002
+  # §2.5) — it lands in `rvr_reveal_request` and flows into the `requested` audit
+  # `detail`. Reject a reason that is *itself* an email/SSN/phone value shape BEFORE any
+  # write (fail-closed default), so subject PII never enters a channel a later
+  # crypto-shred cannot reach.
+  defp do_request(r, attrs, now) do
     changeset =
       %RevealRequest{}
       |> Ecto.Changeset.cast(

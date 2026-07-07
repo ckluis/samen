@@ -29,6 +29,21 @@ defmodule Samen.AuditChain do
   underlying event commit atomically — an event without a chain entry, or a chain
   entry without its event, never exists.
 
+  ## The `detail` field is a NON-shreddable plaintext channel (F4.3; ADR-002 §2.5)
+
+  Every hashed field EXCEPT `detail` is a bounded token/id/enum/timestamp. `detail` is
+  **operator-authored plaintext** (the reason + lifecycle token). It is hash-committed
+  into the chain payload (§2.3) and is therefore DELIBERATELY preserved through a subject
+  crypto-shred — destroying a subject's DEK leaves `detail` intact (the shred targets the
+  vaulted PII and the per-subject ciphertext, NOT this plaintext token). So the doc's
+  "who it was about becomes unrecoverable" is TRUE for the vaulted PII and the per-subject
+  ciphertext, but does NOT extend to whatever free text an operator typed into a reason
+  that flowed into `detail`. This is why `Samen.AuditChain.Writer` runs
+  `Samen.PiiReasonScan.check/2` (email/SSN/phone value-shape scan, fail-closed REJECT) on
+  `detail` at the write boundary — a best-effort belt that refuses a bare PII-shaped
+  detail before it enters the immutable chain. It is not a taint proof; the load-bearing
+  control is the human convention that reasons name the ticket, not the person.
+
   ## Reuses, never duplicates
 
   - The T2.2 `aud_event` append-only enforcement (role REVOKE + trigger) — the
