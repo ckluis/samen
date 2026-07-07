@@ -325,4 +325,55 @@ defmodule Demo.CrmScopePolicyMatrixTest do
 
     _ = opp_b
   end
+
+  # =========================================================================
+  # F3.2 same-org FK red path (cross-scope review): an org-A activity that
+  # references an org-B person must be REFUSED. Reading the foreign parent is
+  # already filtered to nil (OrgScope), but the dangling cross-tenant FK write
+  # was previously stored. The Samen.Policy.SameOrgFk change refuses it.
+  # =========================================================================
+
+  test "an org-A activity referencing an org-B person is REFUSED (same-org FK red path)" do
+    org_a = mk_org("xfk-a")
+    org_b = mk_org("xfk-b")
+    person_b = mk_person(org_b.id, "ForeignPerson")
+
+    result =
+      Activity
+      |> Ash.Changeset.for_create(:create, %{
+        type: :note,
+        org_id: org_a.id,
+        person_id: person_b.id
+      })
+      |> Ash.create(authorize?: false)
+
+    assert {:error, %Ash.Error.Invalid{errors: errors}} = result,
+           "org-A activity to org-B person must be refused, got: #{inspect(result)}"
+
+    messages =
+      Enum.map(errors, fn
+        %{message: msg} -> msg
+        e -> inspect(e)
+      end)
+
+    assert Enum.any?(messages, &(&1 =~ "cross-org FK")),
+           "Expected a cross-org FK refusal, got: #{inspect(messages)}"
+  end
+
+  test "a same-org activity referencing a same-org person SUCCEEDS (positive control for F3.2)" do
+    org = mk_org("xfk-ok")
+    person = mk_person(org.id, "SameOrgPerson")
+
+    result =
+      Activity
+      |> Ash.Changeset.for_create(:create, %{
+        type: :note,
+        org_id: org.id,
+        person_id: person.id
+      })
+      |> Ash.create(authorize?: false)
+
+    assert {:ok, act} = result, "same-org activity must succeed, got: #{inspect(result)}"
+    assert act.person_id == person.id
+  end
 end

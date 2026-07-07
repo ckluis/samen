@@ -119,6 +119,21 @@ on a write it authorizes only same-org rows. An org-less actor matches **no rows
   can never satisfy (blueprint `define_org`).
 - Fields aren't auto-selected: in tests, `Ash.Query.select([:id, :org_id, …])` to assert on the
   tenant boundary or on masked PII (vault fields load on demand).
+- **Same-org FK on every `belongs_to` (F3.2).** `OrgScope` guards a row's OWN `org_id` (reads +
+  writes to a foreign row), but it does NOT validate that a `belongs_to` FK on an otherwise-same-org
+  row points at a same-org target. A missing same-org-FK check let an org-A actor write a same-org
+  row whose FK referenced an org-B row — a dangling cross-tenant FK, and (in Marketing) a
+  suppression-list bypass. So **every tenant-plane resource with a `belongs_to` FK must add**:
+
+      changes do
+        change {Samen.Policy.SameOrgFk, relationships: [:parent_a, :parent_b]}
+      end
+
+  `Samen.Policy.SameOrgFk` loads only the target's `org_id` (bounded UUID, no PII) directly from the
+  target table — NOT via `Ash.read` (which `OrgScope` would filter, hiding the foreign target and
+  passing vacuously) — and refuses the write on a mismatch. Omit `relationships:` to check all
+  `belongs_to`. The red-path test: an org-A row referencing an org-B FK must be refused (see
+  `marketing_scope_policy_matrix_test.exs` + `crm_scope_policy_matrix_test.exs`).
 
 ---
 
@@ -168,9 +183,24 @@ end
   (the `Samen.Type.VaultField` type); plaintext only via the declared `reveal` action **under a
   grant**. The reveal action's `run/2` calls `Samen.Reveal.grant_checker().granted?(ctx)` (default
   deny) — do **not** call a bare `Samen.Reveal.granted?/1` (it does not exist).
-- The `no_plaintext_pii`, `pii_reads`, `pii_classify`, and `vault_declared` verifiers all enforce
-  this automatically once you declare the `pii do` block + run the migration. A 🔒 field you forget
-  to vault fails them (the red path).
+- Once you declare the `pii do` block + run the migration, the `no_plaintext_pii`, `pii_reads`,
+  `pii_classify`, `vault_declared`, and `vault_declared_parity` verifiers enforce the
+  *consequences* of that declaration (masked reads, no plaintext to sinks, no plain-typed column,
+  a declared route for every declared vault).
+- **Know precisely which check is authoritative for a forgotten free-text 🔒 field.** The gate
+  enforces vault *consequences*, not the *presence* of a `pii do` declaration in general. For a
+  🔒 field whose logical name IS in the C4 `pii_classify` heuristic token-list
+  (`email`/`ssn`/`dob`/`phone`/name-ish/…), forgetting to vault it *is* caught by `pii_classify`
+  (it flags the resulting plain-typed column). But for a **free-text 🔒 field whose logical name is
+  NOT in that token-list** (`body`, `rendered_body`, `signing_secret`), `pii_classify` does not
+  flag it, and the other resource-introspection verifiers key on the `pii do` block that no longer
+  exists — so a *de-vault* (dropping the route while the `pii_<abbrev>_<name>` column stays in the
+  DB) is caught by exactly two things: (1) the `vault_declared_parity` verifier (C6, review fix
+  F3.1), which reads the **DB truth** — every `^pii_[a-z]{3}_` column must have a matching declared
+  route, failing closed on the leftover column — and (2) the scope's hand-written
+  `*_vault_routing_test.exs` (the authoritative red path: it asserts each 🔒 field writes a `vt_*`
+  token and the plaintext appears nowhere). Ship both; do not assume a name-heuristic verifier
+  guards a free-text 🔒 field.
 
 ---
 
@@ -194,6 +224,18 @@ admin-gated writes — the tenant *bends* behavior by editing rows, never by for
 Author them exactly like any other scope resource (org-scope + `RoleAtLeast` on writes). Higher rungs
 (Tier-1 custom fields T3.8, Tier-2 custom objects T3.9) are separate mechanisms — a scope does not
 build them.
+
+**Content-edit vs Tier-0-transition divergence (documented exception).** The default write pattern is
+"all writes require a role floor" (`create/update/destroy` gated at `RoleAtLeast`). One deliberate
+exception exists and MUST be documented in the scope's moduledoc when used: **CMS `Page`/`Post`**
+authorize the default `:update` (a member editing draft content) at `OrgScope` only, while gating the
+*lifecycle transitions* `:publish`/`:archive` at admin+. This is the correct editorial RBAC (editors
+edit, admins publish), not drift — but because it diverges from the floor-on-all-writes norm, it is an
+**explicit choice recorded in `Samen.Scopes.Cms.Blueprint`'s moduledoc (F3.4)**. If your scope needs a
+similar member-level-edit / admin-level-transition split, document it the same way; otherwise keep the
+standard admin-gated split-read/split-write idiom (`policy action_type(:read)` then
+`policy action_type([:create, :update, :destroy])` — NOT a first policy that also lists the write
+action_types, which is redundant since Ash ANDs all matching policies).
 
 ---
 
@@ -254,6 +296,8 @@ Also run `mix compile --warnings-as-errors` and the full `mix test --warnings-as
 
 - [ ] `lib/samen/scopes/<scope>.ex` mount macro (copy identity.ex; expand aliases; resolve abbrevs to literals)
 - [ ] `lib/samen/scopes/<scope>/blueprint.ex` — one `define_*` per resource: `authorizers: [Ash.Policy.Authorizer]`, org-scope policy, RBAC where relevant, `pii do` for 🔒 fields
+- [ ] `change {Samen.Policy.SameOrgFk, relationships: […]}` on every resource with a `belongs_to` FK (F3.2 same-org FK guard) + an org-A→org-B FK red-path test
+- [ ] `mix samen.verify.vault_declared_parity` green — the DB-truth backstop for a de-vaulted free-text 🔒 field (F3.1); the authoritative removal red path is the scope's `*_vault_routing_test.exs`
 - [ ] `lib/samen/scopes/<scope>/audit.ex` (only if the scope audits) — writers over `aud_event`, never a new table
 - [ ] abbrevs reserved in `priv/abbrev_registry.json` (permanent, collision-free)
 - [ ] host domain module `use`s the scope; registered in both `:ash_domains` configs

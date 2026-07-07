@@ -2053,6 +2053,128 @@
     {
       "fields": [
         {
+          "column_name": "pff_description",
+          "logical_name": "description",
+          "type": "String"
+        },
+        {
+          "column_name": "pff_enabled",
+          "logical_name": "enabled",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "pff_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "pff_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pff_metadata",
+          "logical_name": "metadata",
+          "type": "Map"
+        },
+        {
+          "column_name": "pff_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "pff_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "pff_rollout_pct",
+          "logical_name": "rollout_pct",
+          "type": "Integer"
+        },
+        {
+          "column_name": "pff_stage",
+          "logical_name": "stage",
+          "type": "Atom"
+        },
+        {
+          "column_name": "pff_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.PrimitivesScope.FeatureFlag",
+      "table_name": "pff_feature_flag"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pfl_content_type",
+          "logical_name": "content_type",
+          "type": "String"
+        },
+        {
+          "column_name": "pfl_filename",
+          "logical_name": "filename",
+          "type": "String"
+        },
+        {
+          "column_name": "pfl_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "pfl_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pfl_metadata",
+          "logical_name": "metadata",
+          "type": "Map"
+        },
+        {
+          "column_name": "pfl_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "pfl_search_vector",
+          "logical_name": "search_vector",
+          "type": "String"
+        },
+        {
+          "column_name": "pfl_size_bytes",
+          "logical_name": "size_bytes",
+          "type": "Integer"
+        },
+        {
+          "column_name": "pfl_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "pfl_storage_key",
+          "logical_name": "storage_key",
+          "type": "String"
+        },
+        {
+          "column_name": "pfl_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pfl_uploaded_by_id",
+          "logical_name": "uploaded_by_id",
+          "type": "UUID"
+        }
+      ],
+      "resource": "Demo.PrimitivesScope.File",
+      "table_name": "pfl_file"
+    },
+    {
+      "fields": [
+        {
           "column_name": "pip_enabled",
           "logical_name": "enabled",
           "type": "Boolean"
@@ -2100,6 +2222,621 @@
       ],
       "resource": "Demo.CrmScope.Pipeline",
       "table_name": "pip_pipeline"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pii_pnt_rendered_body",
+          "logical_name": "rendered_body",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "pnt_channel",
+          "logical_name": "channel",
+          "type": "Atom"
+        },
+        {
+          "column_name": "pnt_event_type",
+          "logical_name": "event_type",
+          "type": "String"
+        },
+        {
+          "column_name": "pnt_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "pnt_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pnt_metadata",
+          "logical_name": "metadata",
+          "type": "Map"
+        },
+        {
+          "column_name": "pnt_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "pnt_read_at",
+          "logical_name": "read_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pnt_recipient_id",
+          "logical_name": "recipient_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "pnt_sent_at",
+          "logical_name": "sent_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pnt_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "pnt_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.PrimitivesScope.Notification",
+      "table_name": "pnt_notification"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "psh_description",
+          "logical_name": "description",
+          "type": "String"
+        },
+        {
+          "column_name": "psh_enabled",
+          "logical_name": "enabled",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "psh_field_name",
+          "logical_name": "field_name",
+          "type": "String"
+        },
+        {
+          "column_name": "psh_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "psh_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "psh_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "psh_resource_name",
+          "logical_name": "resource_name",
+          "type": "String"
+        },
+        {
+          "column_name": "psh_ts_config",
+          "logical_name": "ts_config",
+          "type": "String"
+        },
+        {
+          "column_name": "psh_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "psh_vector_column",
+          "logical_name": "vector_column",
+          "type": "String"
+        }
+      ],
+      "resource": "Demo.PrimitivesScope.SearchIndex",
+      "table_name": "psh_search_index"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pii_pwh_signing_secret",
+          "logical_name": "signing_secret",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "pwh_event_types",
+          "logical_name": "event_types",
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "pwh_failure_count",
+          "logical_name": "failure_count",
+          "type": "Integer"
+        },
+        {
+          "column_name": "pwh_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "pwh_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pwh_label",
+          "logical_name": "label",
+          "type": "String"
+        },
+        {
+          "column_name": "pwh_last_delivered_at",
+          "logical_name": "last_delivered_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pwh_metadata",
+          "logical_name": "metadata",
+          "type": "Map"
+        },
+        {
+          "column_name": "pwh_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "pwh_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "pwh_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pwh_url",
+          "logical_name": "url",
+          "type": "String"
+        }
+      ],
+      "resource": "Demo.PrimitivesScope.Webhook",
+      "table_name": "pwh_webhook"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pii_sag_email",
+          "logical_name": "email",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "sag_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "sag_external_id",
+          "logical_name": "external_id",
+          "type": "String"
+        },
+        {
+          "column_name": "sag_full_name",
+          "logical_name": "full_name",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "sag_handle",
+          "logical_name": "handle",
+          "type": "String"
+        },
+        {
+          "column_name": "sag_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "sag_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "sag_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "sag_role",
+          "logical_name": "role",
+          "type": "Atom"
+        },
+        {
+          "column_name": "sag_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "sag_timezone",
+          "logical_name": "timezone",
+          "type": "String"
+        },
+        {
+          "column_name": "sag_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.SupportScope.Agent",
+      "table_name": "sag_agent"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "scs_agent_id",
+          "logical_name": "agent_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "scs_channel",
+          "logical_name": "channel",
+          "type": "Atom"
+        },
+        {
+          "column_name": "scs_comments",
+          "logical_name": "comments",
+          "type": "String"
+        },
+        {
+          "column_name": "scs_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "scs_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "scs_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "scs_responded_at",
+          "logical_name": "responded_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "scs_score",
+          "logical_name": "score",
+          "type": "Integer"
+        },
+        {
+          "column_name": "scs_ticket_id",
+          "logical_name": "ticket_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "scs_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.SupportScope.Csat",
+      "table_name": "scs_csat"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "scv_channel",
+          "logical_name": "channel",
+          "type": "Atom"
+        },
+        {
+          "column_name": "scv_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "scv_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "scv_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "scv_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "scv_subject",
+          "logical_name": "subject",
+          "type": "String"
+        },
+        {
+          "column_name": "scv_ticket_id",
+          "logical_name": "ticket_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "scv_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.SupportScope.Conversation",
+      "table_name": "scv_conversation"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "smc_body_template",
+          "logical_name": "body_template",
+          "type": "String"
+        },
+        {
+          "column_name": "smc_category",
+          "logical_name": "category",
+          "type": "String"
+        },
+        {
+          "column_name": "smc_description",
+          "logical_name": "description",
+          "type": "String"
+        },
+        {
+          "column_name": "smc_enabled",
+          "logical_name": "enabled",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "smc_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "smc_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "smc_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "smc_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "smc_tags",
+          "logical_name": "tags",
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "smc_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.SupportScope.Macro",
+      "table_name": "smc_macro"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pii_smg_body",
+          "logical_name": "body",
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "smg_agent_id",
+          "logical_name": "agent_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "smg_attachments",
+          "logical_name": "attachments",
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "smg_conversation_id",
+          "logical_name": "conversation_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "smg_created_via",
+          "logical_name": "created_via",
+          "type": "Atom"
+        },
+        {
+          "column_name": "smg_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "smg_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "smg_message_type",
+          "logical_name": "message_type",
+          "type": "Atom"
+        },
+        {
+          "column_name": "smg_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "smg_sender_id",
+          "logical_name": "sender_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "smg_sender_type",
+          "logical_name": "sender_type",
+          "type": "Atom"
+        },
+        {
+          "column_name": "smg_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.SupportScope.Message",
+      "table_name": "smg_message"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "ssl_enabled",
+          "logical_name": "enabled",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "ssl_first_response_minutes",
+          "logical_name": "first_response_minutes",
+          "type": "Integer"
+        },
+        {
+          "column_name": "ssl_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "ssl_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ssl_label",
+          "logical_name": "label",
+          "type": "String"
+        },
+        {
+          "column_name": "ssl_name",
+          "logical_name": "name",
+          "type": "String"
+        },
+        {
+          "column_name": "ssl_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "ssl_priority",
+          "logical_name": "priority",
+          "type": "Atom"
+        },
+        {
+          "column_name": "ssl_resolve_minutes",
+          "logical_name": "resolve_minutes",
+          "type": "Integer"
+        },
+        {
+          "column_name": "ssl_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.SupportScope.Sla",
+      "table_name": "ssl_sla"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "stk_breached",
+          "logical_name": "breached",
+          "type": "Boolean"
+        },
+        {
+          "column_name": "stk_closed_at",
+          "logical_name": "closed_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "stk_custom",
+          "logical_name": "custom",
+          "type": "Map"
+        },
+        {
+          "column_name": "stk_external_id",
+          "logical_name": "external_id",
+          "type": "String"
+        },
+        {
+          "column_name": "stk_id",
+          "logical_name": "id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "stk_inserted_at",
+          "logical_name": "inserted_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "stk_org_id",
+          "logical_name": "org_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "stk_priority",
+          "logical_name": "priority",
+          "type": "Atom"
+        },
+        {
+          "column_name": "stk_resolved_at",
+          "logical_name": "resolved_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "stk_sla_breach_at",
+          "logical_name": "sla_breach_at",
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "stk_sla_id",
+          "logical_name": "sla_id",
+          "type": "UUID"
+        },
+        {
+          "column_name": "stk_status",
+          "logical_name": "status",
+          "type": "Atom"
+        },
+        {
+          "column_name": "stk_subject",
+          "logical_name": "subject",
+          "type": "String"
+        },
+        {
+          "column_name": "stk_tags",
+          "logical_name": "tags",
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "stk_updated_at",
+          "logical_name": "updated_at",
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.SupportScope.Ticket",
+      "table_name": "stk_ticket"
     },
     {
       "fields": [

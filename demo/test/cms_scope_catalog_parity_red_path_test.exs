@@ -62,84 +62,84 @@ defmodule Demo.CmsScopeCatalogParityRedPathTest do
   # =========================================================================
 
   test "deleting a catalog row causes catalog_parity to detect the ghost table (anti-tautology)" do
-    # Confirm cpg_page is currently catalogued.
-    assert Repo.get_by("tam_table", tam_table_name: "cpg_page") != nil,
-           "cpg_page must be in tam_table before the probe"
+    # Confirm cpg_page is currently catalogued (use raw SQL — schemaless queries need explicit select).
+    {:ok, %{rows: rows_before}} =
+      Repo.query("SELECT tam_table_name FROM tam_table WHERE tam_table_name = $1", ["cpg_page"])
+
+    assert rows_before != [], "cpg_page must be in tam_table before the probe"
 
     # Count fld_field rows before deletion.
-    field_count_before =
-      Repo.one(
-        from f in "fld_field",
-          where: f.fld_table_name == "cpg_page",
-          select: count(f.fld_column_name)
+    {:ok, %{rows: [[field_count_before]]}} =
+      Repo.query(
+        "SELECT COUNT(*) FROM fld_field WHERE fld_table_name = $1",
+        ["cpg_page"]
       )
 
     assert field_count_before > 0, "cpg_page must have field rows before probe"
 
     # --- SABOTAGE: delete the cpg_page catalog row ---
-    # We wrap in a savepoint so we can roll back after confirming the failure.
+    # We wrap in a transaction so we can roll back after confirming the failure.
     Repo.transaction(fn ->
-      {_, nil} =
-        Repo.delete_all(from t in "tam_table", where: t.tam_table_name == "cpg_page")
+      {:ok, _} =
+        Repo.query("DELETE FROM tam_table WHERE tam_table_name = $1", ["cpg_page"])
 
       # Verify deletion happened.
-      assert Repo.get_by("tam_table", tam_table_name: "cpg_page") == nil
+      {:ok, %{rows: rows_after_delete}} =
+        Repo.query("SELECT tam_table_name FROM tam_table WHERE tam_table_name = $1", ["cpg_page"])
+
+      assert rows_after_delete == [], "cpg_page should be removed from tam_table"
 
       # Now run catalog_parity (the Mix task reads from the DB directly).
-      # We simulate the parity check inline:
-      resources = [Demo.CmsScope.Page]
-      missing_catalog =
-        Enum.filter(resources, fn resource ->
-          table = AshPostgres.DataLayer.Info.table(resource)
-          Repo.get_by("tam_table", tam_table_name: table) == nil
-        end)
+      # We simulate the parity check inline using the Mix task check/1:
+      alias Mix.Tasks.Samen.Verify.CatalogParity
+      violations = CatalogParity.check(Demo.Repo)
 
       # The parity check should detect the missing catalog row.
-      assert length(missing_catalog) == 1,
+      refute violations == [],
              "Expected catalog_parity to detect missing cpg_page catalog row"
+
+      assert Enum.any?(violations, fn v ->
+               String.contains?(to_string(v), "cpg_page")
+             end),
+             "Expected a violation mentioning cpg_page, got: #{inspect(violations)}"
 
       # --- REVERT: roll back the deletion ---
       Repo.rollback(:probe_done)
     end)
 
     # After rollback, the catalog row is restored.
-    assert Repo.get_by("tam_table", tam_table_name: "cpg_page") != nil,
-           "cpg_page catalog row must be restored after probe rollback"
+    {:ok, %{rows: rows_restored}} =
+      Repo.query("SELECT tam_table_name FROM tam_table WHERE tam_table_name = $1", ["cpg_page"])
+
+    assert rows_restored != [], "cpg_page catalog row must be restored after probe rollback"
   end
 
   test "catalog_parity would detect orphaned fld_field rows (anti-tautology probe)" do
     # A ghost column (a fld_field row for a column that doesn't exist in the resource)
     # should be detected. Insert a fake column and verify it would be flagged.
     Repo.transaction(fn ->
-      # Insert a fake field row.
-      Repo.insert_all("fld_field", [
-        %{
-          fld_table_name: "cpg_page",
-          fld_column_name: "cpg_fake_ghost_column",
-          fld_logical_name: "fake_ghost_column",
-          fld_type: "String"
-        }
-      ])
-
-      # Simulate the ghost-column check.
-      resource_columns =
-        Demo.CmsScope.Page
-        |> Ash.Resource.Info.attributes()
-        |> Enum.map(fn attr ->
-          to_string(attr.source || attr.name)
-        end)
-
-      db_columns =
-        Repo.all(
-          from f in "fld_field",
-            where: f.fld_table_name == "cpg_page",
-            select: f.fld_column_name
+      # Insert a fake field row (use raw SQL — schemaless Ecto insert_all needs all columns).
+      {:ok, _} =
+        Repo.query(
+          "INSERT INTO fld_field (fld_table_name, fld_column_name, fld_logical_name, fld_type) " <>
+            "VALUES ($1, $2, $3, $4)",
+          ["cpg_page", "cpg_fake_ghost_column", "fake_ghost_column", "String"]
         )
 
-      orphans = db_columns -- resource_columns
+      # Simulate the ghost-column check using the Mix task.
+      alias Mix.Tasks.Samen.Verify.CatalogParity
+      violations = CatalogParity.check(Demo.Repo)
 
-      assert "cpg_fake_ghost_column" in orphans,
-             "catalog_parity should detect the ghost column cpg_fake_ghost_column"
+      # The parity check should detect the orphaned column.
+      refute violations == [],
+             "Expected catalog_parity to detect orphaned fld_field row for cpg_fake_ghost_column"
+
+      assert Enum.any?(violations, fn v ->
+               s = to_string(v)
+               String.contains?(s, "cpg_fake_ghost_column") or
+                 String.contains?(s, "cpg_page")
+             end),
+             "Expected a violation about cpg_fake_ghost_column or cpg_page, got: #{inspect(violations)}"
 
       Repo.rollback(:probe_done)
     end)

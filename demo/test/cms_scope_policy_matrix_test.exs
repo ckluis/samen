@@ -44,7 +44,7 @@ defmodule Demo.CmsScopePolicyMatrixTest do
     Samen.Scope.new(%{id: user.id, org_id: org_id, role: role})
   end
 
-  defp mk_page(org_id, title \\ "Test Page") do
+  defp mk_page(org_id, title) do
     {:ok, page} =
       Page
       |> Ash.Changeset.for_create(:create, %{
@@ -57,7 +57,7 @@ defmodule Demo.CmsScopePolicyMatrixTest do
     page
   end
 
-  defp mk_post(org_id, title \\ "Test Post") do
+  defp mk_post(org_id, title) do
     {:ok, post} =
       Post
       |> Ash.Changeset.for_create(:create, %{

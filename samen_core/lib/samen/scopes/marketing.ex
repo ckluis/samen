@@ -11,7 +11,7 @@ defmodule Samen.Scopes.Marketing do
 
   `subscriber🔒` is the only 🔒 object in this scope. It carries:
 
-    * `email` → vault `:pii_email` (scalar; column `msu_pii_email`)
+    * `email` → vault `:pii_email` (scalar; column `pii_msu_email`)
 
   All other resources carry only opaque IDs and bounded data — no subject identity.
 

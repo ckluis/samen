@@ -377,6 +377,11 @@ defmodule Samen.Scopes.Crm.Blueprint do
           defaults([:read, :destroy, create: :*, update: :*])
         end
 
+        # F3.2 same-org FK: an activity may only reference same-org parents.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:company, :person, :opportunity]})
+        end
+
         policies do
           policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
@@ -455,6 +460,11 @@ defmodule Samen.Scopes.Crm.Blueprint do
 
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+        end
+
+        # F3.2 same-org FK: an attachment may only reference same-org parents.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:company, :person, :opportunity]})
         end
 
         policies do

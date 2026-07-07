@@ -12,6 +12,7 @@
 #   samen.verify.migrations   (T2.4 expand down/0)
 #   samen.verify.sink_schema  (T2.7 J2 wide-event/span allow-list)
 #   samen.verify.metric_labels (T2.8 bounded-cardinality label-lint; Gate-2 F2.3)
+#   samen.verify.vault_declared_parity (F3.1 de-vault backstop; pii_* column ⇄ route)
 #
 # T1.9 acceptance: every verifier must pass on the demo.
 # Exit: 0 = all green, non-zero = first failure.
@@ -99,8 +100,18 @@ echo "    PASSED"
 #    use only bounded label dimensions. Fails on any raw org_id/actor_id/subject_id
 #    tag (unbounded Prometheus cardinality). This is the "CI label-lint" the T2.8
 #    acceptance names — now actually gated, not just unit-tested.
-echo "--- step 9/9: mix samen.verify.metric_labels (T2.8 bounded-cardinality labels)"
+echo "--- step 9/10: mix samen.verify.metric_labels (T2.8 bounded-cardinality labels)"
 mix samen.verify.metric_labels
+echo "    PASSED"
+
+# 10. C6 vault-declared-parity (Phase-3 review fix F3.1): every physical column
+#     matching the vault storage shape `pii_<abbrev>_<name>` must have a matching
+#     declared pii_attribute route. Fails closed on a DE-VAULTED free-text 🔒 field
+#     (pii_smg_body / pii_pnt_rendered_body / pii_pwh_signing_secret left in the DB
+#     while the resource dropped the vault route) — the exact gap C4 pii_classify
+#     misses because those logical names aren't in its heuristic token-list.
+echo "--- step 10/10: mix samen.verify.vault_declared_parity (F3.1 de-vault backstop)"
+mix samen.verify.vault_declared_parity
 echo "    PASSED"
 
 echo ""

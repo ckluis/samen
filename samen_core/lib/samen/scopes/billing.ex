@@ -20,8 +20,8 @@ defmodule Samen.Scopes.Billing do
 
   `customer🔒` is the only 🔒 object in this scope. It carries:
 
-    * `billing_name`  → vault `:pii_name`  (scalar; column `bcu_pii_billing_name`)
-    * `billing_email` → vault `:pii_email` (scalar; column `bcu_pii_billing_email`)
+    * `billing_name`  → vault `:pii_name`  (scalar; column `pii_bcu_billing_name`)
+    * `billing_email` → vault `:pii_email` (scalar; column `pii_bcu_billing_email`)
 
   All other resources carry only opaque IDs and bounded data — no subject identity.
 

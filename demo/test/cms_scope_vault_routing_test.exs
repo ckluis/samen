@@ -23,11 +23,9 @@ defmodule Demo.CmsScopeVaultRoutingTest do
   """
   use Demo.DataCase, async: false
 
-  alias Demo.CmsScope.{Page, Post, Block, Media, Navigation, SeoMeta, ContentVersion}
+  alias Demo.CmsScope.{Page, Post, SeoMeta}
   alias Demo.Identity.Org
   alias Samen.NonPii
-
-  import Ecto.Query
 
   defp mk_org(name) do
     {:ok, org} =
@@ -257,9 +255,10 @@ defmodule Demo.CmsScopeVaultRoutingTest do
     assert csm_detail["redacted"] >= 1
 
     # The DB column now holds the sentinel.
+    # Cast csm_org_id to text so Postgrex treats the UUID string param as text.
     %{rows: [[desc_after]]} =
       Repo.query!(
-        "SELECT csm_description FROM csm_seo_meta WHERE csm_org_id = $1",
+        "SELECT csm_description FROM csm_seo_meta WHERE csm_org_id::text = $1",
         [org.id]
       )
 

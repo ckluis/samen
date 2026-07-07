@@ -17,8 +17,8 @@ defmodule Samen.Scopes.Billing.Blueprint do
 
   | Resource | Field         | Vault      | Column type                        |
   |----------|---------------|------------|------------------------------------|
-  | customer | billing_name  | :pii_name  | scalar (column: bcu_pii_billing_name)  |
-  | customer | billing_email | :pii_email | scalar (column: bcu_pii_billing_email) |
+  | customer | billing_name  | :pii_name  | scalar (column: pii_bcu_billing_name)  |
+  | customer | billing_email | :pii_email | scalar (column: pii_bcu_billing_email) |
 
   Scalar `pii_attribute`s carry the `pii_` prefix per the scope-authoring guide §5.
   All other resources carry only opaque IDs and bounded data — no subject PII.
@@ -32,8 +32,9 @@ defmodule Samen.Scopes.Billing.Blueprint do
   ## Storage-name discipline
 
   Every column is `<abbrev>_<name>` (self-qualifying storage, injected by the Samen
-  base macro). PII scalar fields additionally carry the `pii_` prefix (total:
-  `<abbrev>_pii_<name>`). The public API/catalog only ever sees the logical name.
+  base macro). PII scalar fields carry the `pii_` prefix FIRST — the canonical shape
+  `pii_<abbrev>_<name>` the `MaterializePii` transformer emits (e.g. `pii_bcu_billing_name`).
+  The public API/catalog only ever sees the logical name.
 
   ## Sync adapter seam
 
@@ -91,7 +92,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
           vault(:pii_name)
           vault(:pii_email)
 
-          # Scalar PII: columns carry the pii_ prefix (bcu_pii_billing_name, bcu_pii_billing_email).
+          # Scalar PII: columns carry the pii_ prefix (pii_bcu_billing_name, pii_bcu_billing_email).
           pii_attribute(:billing_name, :string, vault: :pii_name)
           pii_attribute(:billing_email, :string, vault: :pii_email)
 
@@ -197,6 +198,11 @@ defmodule Samen.Scopes.Billing.Blueprint do
 
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+        end
+
+        # F3.2 same-org FK: a subscription may only reference a same-org customer/plan.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:customer, :plan]})
         end
 
         policies do
@@ -407,6 +413,11 @@ defmodule Samen.Scopes.Billing.Blueprint do
           defaults([:read, :destroy, create: :*, update: :*])
         end
 
+        # F3.2 same-org FK: an invoice may only reference a same-org customer/subscription.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:customer, :subscription]})
+        end
+
         policies do
           policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
@@ -488,6 +499,11 @@ defmodule Samen.Scopes.Billing.Blueprint do
 
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+        end
+
+        # F3.2 same-org FK: a payment may only reference a same-org invoice/customer.
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:invoice, :customer]})
         end
 
         policies do

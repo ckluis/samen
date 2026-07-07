@@ -9,7 +9,7 @@ defmodule Samen.Scopes.Marketing.Blueprint do
 
   | Resource   | Field | Vault      | Column type                        |
   |------------|-------|------------|------------------------------------|
-  | subscriber | email | :pii_email | scalar (column: msu_pii_email)     |
+  | subscriber | email | :pii_email | scalar (column: pii_msu_email)     |
 
   Scalar `pii_attribute`s carry the `pii_` prefix per the scope-authoring guide §5.
   All other resources carry only opaque IDs and bounded data — no subject PII.
@@ -36,8 +36,9 @@ defmodule Samen.Scopes.Marketing.Blueprint do
   ## Storage-name discipline
 
   Every column is `<abbrev>_<name>` (self-qualifying storage, injected by the Samen
-  base macro). The PII scalar field on Subscriber additionally carries the `pii_` prefix
-  (total: `msu_pii_email`). The public API/catalog only ever sees the logical name.
+  base macro). The PII scalar field on Subscriber carries the `pii_` prefix FIRST
+  (`pii_<abbrev>_<name>`, total: `pii_msu_email`) — the canonical shape the
+  `MaterializePii` transformer emits. The public API/catalog only ever sees the logical name.
   """
 
   # ---------------------------------------------------------------------------
@@ -182,7 +183,7 @@ defmodule Samen.Scopes.Marketing.Blueprint do
 
         pii do
           vault(:pii_email)
-          # Scalar PII: column carries the pii_ prefix (msu_pii_email).
+          # Scalar PII: column carries the pii_ prefix (pii_msu_email).
           pii_attribute(:email, :string, vault: :pii_email)
           reveal(:reveal_subscriber)
         end
@@ -381,31 +382,81 @@ defmodule Samen.Scopes.Marketing.Blueprint do
               subscriber_id = Ash.Changeset.get_argument(changeset, :subscriber_id)
               org_id = Ash.Changeset.get_argument(changeset, :org_id)
               repo = unquote(repo)
+              subscriber_mod = unquote(subscriber_mod)
 
-              # Check suppression: is there an active row in the suppression table
-              # for this (org_id, subscriber_id)? If so, refuse the send.
-              # The suppression table is always `msp_suppression` (Marketing scope abbrev msp).
-              suppressed? =
+              # F3.2 same-org FK: BEFORE the suppression query, confirm the
+              # referenced subscriber belongs to THIS send's org. Otherwise an
+              # org-A actor could enqueue a send to an org-B subscriber and bypass
+              # org B's suppression list (the send's suppression query only sees
+              # org A's suppression rows). We read only the subscriber's org_id
+              # (bounded UUID, no PII) directly from its table — NOT via Ash.read,
+              # so OrgScope does not hide the foreign target from this check. Column
+              # names come from resource introspection (not string-sliced).
+              sub_table = AshPostgres.DataLayer.Info.table(subscriber_mod)
+              sub_id_col = to_string(Ash.Resource.Info.attribute(subscriber_mod, :id).source)
+              sub_org_col = to_string(Ash.Resource.Info.attribute(subscriber_mod, :org_id).source)
+
+              subscriber_org_id =
                 case repo.query(
-                       "SELECT 1 FROM msp_suppression WHERE msp_org_id = $1 AND msp_subscriber_id = $2 AND msp_active = true LIMIT 1",
-                       [Ecto.UUID.dump!(org_id), Ecto.UUID.dump!(subscriber_id)]
+                       "SELECT #{sub_org_col} FROM #{sub_table} WHERE #{sub_id_col} = $1 LIMIT 1",
+                       [Ecto.UUID.dump!(subscriber_id)]
                      ) do
-                  {:ok, %{rows: [_ | _]}} -> true
-                  _ -> false
+                  {:ok, %{rows: [[org_bin]]}} when is_binary(org_bin) ->
+                    case Ecto.UUID.load(org_bin) do
+                      {:ok, uuid} -> uuid
+                      :error -> nil
+                    end
+
+                  _ ->
+                    nil
                 end
 
-              if suppressed? do
-                Ash.Changeset.add_error(changeset, field: :subscriber_id, message: "suppressed")
-              else
-                changeset
-                |> Ash.Changeset.change_attribute(:subscriber_id, subscriber_id)
-                |> Ash.Changeset.change_attribute(:org_id, org_id)
-                |> Ash.Changeset.change_attribute(:campaign_id, Ash.Changeset.get_argument(changeset, :campaign_id))
-                |> Ash.Changeset.change_attribute(:template_id, Ash.Changeset.get_argument(changeset, :template_id))
-                |> Ash.Changeset.change_attribute(:status, :queued)
-                |> Ash.Changeset.change_attribute(:queued_at, DateTime.utc_now())
+              cond do
+                is_nil(subscriber_org_id) ->
+                  Ash.Changeset.add_error(changeset,
+                    field: :subscriber_id,
+                    message: "cross-org FK: subscriber not found for this org (same-org required)"
+                  )
+
+                subscriber_org_id != org_id ->
+                  Ash.Changeset.add_error(changeset,
+                    field: :subscriber_id,
+                    message:
+                      "cross-org FK: subscriber belongs to a different org — a send may not " <>
+                        "reference another org's subscriber (bypasses their suppression list)"
+                  )
+
+                true ->
+                  send_checked(changeset, repo, org_id, subscriber_id)
               end
             end)
+          end
+        end
+
+        # Suppression check + write, run only after the same-org FK check passes.
+        defp send_checked(changeset, repo, org_id, subscriber_id) do
+          # Check suppression: is there an active row in the suppression table
+          # for this (org_id, subscriber_id)? If so, refuse the send.
+          # The suppression table is always `msp_suppression` (Marketing scope abbrev msp).
+          suppressed? =
+            case repo.query(
+                   "SELECT 1 FROM msp_suppression WHERE msp_org_id = $1 AND msp_subscriber_id = $2 AND msp_active = true LIMIT 1",
+                   [Ecto.UUID.dump!(org_id), Ecto.UUID.dump!(subscriber_id)]
+                 ) do
+              {:ok, %{rows: [_ | _]}} -> true
+              _ -> false
+            end
+
+          if suppressed? do
+            Ash.Changeset.add_error(changeset, field: :subscriber_id, message: "suppressed")
+          else
+            changeset
+            |> Ash.Changeset.change_attribute(:subscriber_id, subscriber_id)
+            |> Ash.Changeset.change_attribute(:org_id, org_id)
+            |> Ash.Changeset.change_attribute(:campaign_id, Ash.Changeset.get_argument(changeset, :campaign_id))
+            |> Ash.Changeset.change_attribute(:template_id, Ash.Changeset.get_argument(changeset, :template_id))
+            |> Ash.Changeset.change_attribute(:status, :queued)
+            |> Ash.Changeset.change_attribute(:queued_at, DateTime.utc_now())
           end
         end
 

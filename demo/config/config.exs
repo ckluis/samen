@@ -4,15 +4,20 @@ import Config
 # It uses samen_core as a path dep and exercises EVERY T1 feature.
 config :demo,
   ecto_repos: [Demo.Repo],
-  ash_domains: [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope]
+  ash_domains: [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.PrimitivesScope]
 
 # samen_core verifiers (C1/C2/C3/C4/C5) discover domains from
 # :samen_core :ash_domains. Register the demo's domains here so the
 # verifier tasks find the demo resources — including the mounted Identity
 # scope (T3.1), the CRM scope (T3.2), the Billing scope (T3.3), the
-# Marketing scope (T3.4), and the CMS scope (T3.5: resources catalogued in
-# HOST's catalog, scanned by host's UNCHANGED verifiers, per ADR-004).
-config :samen_core, :ash_domains, [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope]
+# Marketing scope (T3.4), the CMS scope (T3.5), the Support scope
+# (T3.6), and the Primitives scope (T3.7 — resources catalogued in HOST's
+# catalog, scanned by host's UNCHANGED verifiers, per ADR-004).
+config :samen_core, :ash_domains, [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.PrimitivesScope]
+
+# T3.6 SLA breach detection: configure the ticket resource for the Oban cron.
+config :samen_core, :support_sla_breach_ticket_resource, Demo.SupportScope.Ticket
+config :samen_core, :support_sla_ticket_abbrev, "stk"
 
 config :ash, disable_async?: true
 

@@ -231,9 +231,11 @@ defmodule Samen.NonPii do
     column = safe_ident!(e.column_name)
     subject_column = safe_ident!(e.subject_column)
 
+    # Cast subject_column to text to support both :text and :uuid subject columns
+    # without Postgrex needing to encode the subject_id as a UUID binary.
     sql =
       "SELECT count(*) FROM #{table} " <>
-        "WHERE #{subject_column} = $2 AND (#{column} IS DISTINCT FROM $1) AND #{column} IS NOT NULL"
+        "WHERE #{subject_column}::text = $2 AND (#{column} IS DISTINCT FROM $1) AND #{column} IS NOT NULL"
 
     %{rows: [[n]]} = Ecto.Adapters.SQL.query!(r, sql, [e.redaction, subject_id])
     n
@@ -245,6 +247,11 @@ defmodule Samen.NonPii do
 
   # Redact a single registered column for a subject. Uses a parameterized UPDATE:
   # identifiers validated, values bound.
+  #
+  # The WHERE clause casts both sides to text to support both `:text` and `:uuid`
+  # subject_column types. PostgreSQL accepts the comparison and Postgrex does not
+  # need to infer the parameter type from the column definition, avoiding the
+  # "expected a binary of 16 bytes" encode error for uuid-typed subject columns.
   defp redact_one(subject_id, %Entry{} = e, r) do
     table = safe_ident!(e.table_name)
     column = safe_ident!(e.column_name)
@@ -252,7 +259,7 @@ defmodule Samen.NonPii do
 
     sql =
       "UPDATE #{table} SET #{column} = $1 " <>
-        "WHERE #{subject_column} = $2 AND (#{column} IS DISTINCT FROM $1)"
+        "WHERE #{subject_column}::text = $2 AND (#{column} IS DISTINCT FROM $1)"
 
     %{num_rows: n} = Ecto.Adapters.SQL.query!(r, sql, [e.redaction, subject_id])
     n

@@ -12,7 +12,7 @@ defmodule Demo.CmsScopeRbacRedPathTest do
   """
   use Demo.DataCase, async: false
 
-  alias Demo.CmsScope.{Page, Post, Block, Media, Navigation, SeoMeta, ContentVersion}
+  alias Demo.CmsScope.{Page, Block, Media, Navigation, SeoMeta, ContentVersion}
   alias Demo.Identity.{Org, User}
 
   defp mk_org(name) do

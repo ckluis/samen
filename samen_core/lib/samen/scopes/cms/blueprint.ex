@@ -45,6 +45,19 @@ defmodule Samen.Scopes.Cms.Blueprint do
   Every status transition on `Page`/`Post` also appends a row to `ContentVersion`
   via the `create_version` action — making content changes auditable and reversible.
 
+  ## Intentional policy divergence — content :update is member-level (F3.4)
+
+  Most scopes gate ALL writes behind a role floor (`create/update/destroy` require
+  admin+). CMS `Page`/`Post` **deliberately diverge**: the default `:update` action
+  (a content edit — editing draft body/title) is authorized at `OrgScope` ONLY, so
+  any org member may edit content, while the *lifecycle* transitions
+  `:publish`/`:archive` (Tier-0 state changes with external visibility) DO require
+  admin+. This is the correct CMS RBAC shape — an editorial team edits drafts; only
+  an admin publishes. It is called out here (and in scope-authoring guide §7) so the
+  divergence is an **explicit, documented choice**, not silent policy drift. Every
+  other CMS write resource (`Block`, `Media`, `Navigation`, `SeoMeta`) follows the
+  standard admin-gated split-read/split-write idiom.
+
   ## ContentVersion — immutable append-only history
 
   `ContentVersion` has NO `:update` or `:destroy` default actions. Its only write
@@ -114,30 +127,49 @@ defmodule Samen.Scopes.Cms.Blueprint do
           defaults([:read, :destroy, create: :*, update: :*])
 
           # Publish: admin-gated. Sets status to :published and records published_at.
+          # require_atomic?: false forces non-bulk (row-by-row) execution so the
+          # Ash Policy Authorizer evaluates FilterChecks in-memory (not as SQL).
+          # Without this, AshPostgres attempts to include error(Placeholder) in the
+          # SQL WHERE clause for forbid_unless(FilterCheck) — unsupported by the
+          # data layer.
           update :publish do
+            require_atomic?(false)
             argument(:published_at, :utc_datetime, default: &DateTime.utc_now/0)
 
             change(set_attribute(:status, :published))
             change(set_attribute(:published_at, arg(:published_at)))
           end
 
-          # Archive.
+          # Archive (non-atomic for same reason as publish).
           update :archive do
+            require_atomic?(false)
             change(set_attribute(:status, :archived))
           end
         end
 
         policies do
-          # All CRUD: org-scoped (FilterCheck covers :read + data-write).
-          policy action_type([:read, :create, :update, :destroy]) do
+          # Read is only org-scoped (any member can read pages).
+          policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
           end
 
-          # Publish and archive additionally require admin+.
-          # OrgScope is already covered by the action_type block above.
-          # forbid_unless RoleAtLeast: if not admin, this block FORBIDS — which
-          # wins over any other block's authorize_if.
+          # Default create: org-scoped, any role.
+          policy action_type([:create, :destroy]) do
+            forbid_unless(Samen.Policy.OrgScope)
+            authorize_if(always())
+          end
+
+          # The default :update action (updating title, body, etc.) — any member.
+          policy action(:update) do
+            forbid_unless(Samen.Policy.OrgScope)
+            authorize_if(always())
+          end
+
+          # Publish and archive require admin+. With require_atomic?: false on the
+          # actions, policy checks run in-memory (not SQL), so forbid_unless(OrgScope)
+          # works correctly here.
           policy action([:publish, :archive]) do
+            forbid_unless(Samen.Policy.OrgScope)
             forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
             authorize_if(always())
           end
@@ -193,19 +225,31 @@ defmodule Samen.Scopes.Cms.Blueprint do
           defaults([:read, :destroy, create: :*, update: :*])
 
           update :publish do
+            require_atomic?(false)
             argument(:published_at, :utc_datetime, default: &DateTime.utc_now/0)
             change(set_attribute(:status, :published))
             change(set_attribute(:published_at, arg(:published_at)))
           end
 
           update :archive do
+            require_atomic?(false)
             change(set_attribute(:status, :archived))
           end
         end
 
         policies do
-          policy action_type([:read, :create, :update, :destroy]) do
+          policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
+          end
+
+          policy action_type([:create, :destroy]) do
+            forbid_unless(Samen.Policy.OrgScope)
+            authorize_if(always())
+          end
+
+          policy action(:update) do
+            forbid_unless(Samen.Policy.OrgScope)
+            authorize_if(always())
           end
 
           policy action([:publish, :archive]) do
@@ -270,7 +314,9 @@ defmodule Samen.Scopes.Cms.Blueprint do
         end
 
         policies do
-          policy action_type([:read, :create, :update, :destroy]) do
+          # Split read-only / write, matching the scope-authoring template idiom
+          # (F3.4): reads are org-scoped; writes additionally require admin+.
+          policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
           end
 
@@ -544,9 +590,11 @@ defmodule Samen.Scopes.Cms.Blueprint do
           defaults([:read])
 
           # The ONLY write: create_version. Called from Page/Post lifecycle or explicitly.
+          # org_id is injected by CoreAttributes but must be in the accept list for a
+          # named create action (Ash does not auto-accept injected attrs in named creates).
           create :create_version do
             accept([:subject_type, :subject_id, :content_snapshot, :status, :author_id,
-                    :version_number, :change_summary])
+                    :version_number, :change_summary, :org_id])
           end
         end
 

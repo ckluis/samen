@@ -347,6 +347,75 @@ defmodule Demo.MarketingScopePolicyMatrixTest do
   end
 
   # =========================================================================
+  # F3.2 same-org FK red path (cross-scope review): an org-A send referencing
+  # an org-B subscriber must be REFUSED — otherwise org A bypasses org B's
+  # suppression list (the send's suppression query only sees org A's rows).
+  # =========================================================================
+
+  test "an org-A send referencing an org-B subscriber is REFUSED (cross-org FK red path)" do
+    org_a = mk_org("xorg-fk-a")
+    org_b = mk_org("xorg-fk-b")
+
+    sub_b = mk_subscriber(org_b.id, "victim@orgb.example")
+
+    # Suppress org B's subscriber — org B does NOT want them to receive sends.
+    mk_suppression(org_b.id, sub_b.id)
+
+    # Org A tries to enqueue a send to org B's (suppressed) subscriber, using its
+    # OWN org_id (so the write itself is authorized). Without the same-org FK
+    # check, org A's suppression query would find nothing (org A has no suppression
+    # for the foreign subscriber) and the send would be queued — bypassing org B's
+    # suppression list. The same-org FK check must refuse this.
+    result =
+      Send
+      |> Ash.Changeset.for_create(:create_checked, %{
+        subscriber_id: sub_b.id,
+        org_id: org_a.id
+      })
+      |> Ash.create(authorize?: false)
+
+    assert {:error, %Ash.Error.Invalid{errors: errors}} = result,
+           "org-A send to org-B subscriber must be refused, got: #{inspect(result)}"
+
+    messages =
+      Enum.map(errors, fn
+        %{message: msg} -> msg
+        e -> inspect(e)
+      end)
+
+    assert Enum.any?(messages, &(&1 =~ "cross-org FK")),
+           "Expected a cross-org FK refusal, got: #{inspect(messages)}"
+
+    # And no send row must have been created for org A referencing the foreign sub.
+    import Ecto.Query
+
+    count =
+      Repo.aggregate(
+        from(s in "msn_send", where: s.msn_subscriber_id == ^Ecto.UUID.dump!(sub_b.id)),
+        :count
+      )
+
+    assert count == 0, "No send row may reference the foreign subscriber, found #{count}"
+  end
+
+  test "a same-org send after the FK check still SUCCEEDS (positive control for F3.2)" do
+    org = mk_org("xorg-fk-ok")
+    sub = mk_subscriber(org.id, "same-org@ok.example")
+
+    result =
+      Send
+      |> Ash.Changeset.for_create(:create_checked, %{
+        subscriber_id: sub.id,
+        org_id: org.id
+      })
+      |> Ash.create(authorize?: false)
+
+    assert {:ok, send_record} = result, "same-org send must succeed, got: #{inspect(result)}"
+    assert send_record.subscriber_id == sub.id
+    assert send_record.status == :queued
+  end
+
+  # =========================================================================
   # Smoke: segments, email_events, suppressions are all org-scoped.
   # =========================================================================
 

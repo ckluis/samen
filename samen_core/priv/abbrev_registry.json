@@ -47,6 +47,18 @@
     "cmd": "Demo.CmsScope.Media",
     "cnv": "Demo.CmsScope.Navigation",
     "csm": "Demo.CmsScope.SeoMeta",
-    "cvr": "Demo.CmsScope.ContentVersion"
+    "cvr": "Demo.CmsScope.ContentVersion",
+    "stk": "Demo.SupportScope.Ticket",
+    "scv": "Demo.SupportScope.Conversation",
+    "smg": "Demo.SupportScope.Message",
+    "sag": "Demo.SupportScope.Agent",
+    "ssl": "Demo.SupportScope.Sla",
+    "smc": "Demo.SupportScope.Macro",
+    "scs": "Demo.SupportScope.Csat",
+    "pnt": "Demo.PrimitivesScope.Notification",
+    "pfl": "Demo.PrimitivesScope.File",
+    "psh": "Demo.PrimitivesScope.SearchIndex",
+    "pwh": "Demo.PrimitivesScope.Webhook",
+    "pff": "Demo.PrimitivesScope.FeatureFlag"
   }
 }
