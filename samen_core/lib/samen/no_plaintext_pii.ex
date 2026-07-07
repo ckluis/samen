@@ -52,6 +52,10 @@ defmodule Samen.NoPlaintextPii do
     ObanJobs
   }
 
+  # T4.3: the hash-chain audit tier. Aliased under a distinct name to avoid colliding
+  # with the top-level `Samen.AuditChain` runtime module.
+  alias Samen.NoPlaintextPii.Tiers.AuditChain, as: AuditChainTier
+
   alias Samen.NoPlaintextPii.Tiers.PostShred
 
   @doc """
@@ -61,10 +65,21 @@ defmodule Samen.NoPlaintextPii do
   Phase-2 T2.9 appends `cdc_mirror` / `rollup` / `trace_sink` tier modules here
   (or passes them via `run(tiers: …)`).
   T3.13 / F2.1 adds `ObanJobs` — the `oban_jobs` token-only-args convention tier.
+  T4.3 adds `AuditChain` — the `aud_chain` hash-chain token-only tier.
   """
   @spec default_tiers() :: [module()]
   def default_tiers,
-    do: [VaultDeclarations, AuditRows, AudEvent, Rollup, Catalog, LogTelemetry, TraceSink, ObanJobs]
+    do: [
+      VaultDeclarations,
+      AuditRows,
+      AudEvent,
+      Rollup,
+      Catalog,
+      LogTelemetry,
+      TraceSink,
+      ObanJobs,
+      AuditChainTier
+    ]
 
   @doc """
   The **post-shred** tier roster (T2.9 — `--subject <uuid> --tiers all`).

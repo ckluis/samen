@@ -119,6 +119,11 @@ defmodule Samen.Impersonation.Sessions do
         # Reason-for-access is required (doc §control). Refuse before any write.
         {:error, :reason_required}
 
+      # T4.4 clause (d): a SUSPENDED operator (breadth-budget breach) cannot open an
+      # impersonation session — all reveal/operator paths deny while suspended.
+      Samen.OperatorPlane.Suspension.suspended?(operator_id, repo: r) ->
+        {:error, :operator_suspended}
+
       true ->
         do_open(r, operator_id, org_id, reason, attrs)
     end
@@ -342,7 +347,12 @@ defmodule Samen.Impersonation.Sessions do
   """
   @spec emit_event(module(), String.t(), map()) :: {:ok, term} | {:error, term}
   def emit_event(r, lifecycle, attrs) do
-    Samen.AuditEvent.insert(r, %{
+    # Emit to the append-only aud_event tier AND seal into the T4.3 tenant-readable
+    # hash chain (ADR-002). The impersonation event rides the TARGET ORG's chain, so a
+    # tenant reading their own chain sees who impersonated them and when — the doc's
+    # tenant-visible accountability, now tamper-evident. Tokens only.
+    Samen.AuditChain.Writer.write(r, %{
+      org_id: (attrs[:org_id] && to_string(attrs[:org_id])) || Samen.AuditChain.global_org(),
       event_type: "impersonation",
       # The target ORG is the subject of an impersonation event — a bounded UUID.
       subject_id: attrs[:org_id] && to_string(attrs[:org_id]),

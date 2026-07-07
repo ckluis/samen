@@ -75,6 +75,8 @@
     "agp": "SamenCore.Support.AggregateFixture.PiiProjection",
     "agv": "SamenCore.Support.AggregateFixture.VaultProjection",
     "agr": "SamenCore.Support.AggregateFixture.RelationshipProjection",
-    "agb": "SamenCore.Support.AggregateFixture.PiiBearingTarget"
+    "agb": "SamenCore.Support.AggregateFixture.PiiBearingTarget",
+    "aqp": "Samen.AggregatePrivacyVerifierTest.WithSpec",
+    "aqv": "Samen.AggregatePrivacyVerifierTest.WithoutSpec"
   }
 }

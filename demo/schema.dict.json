@@ -130,6 +130,11 @@
           "type": "Integer"
         },
         {
+          "column_name": "atq_distinct_priorities",
+          "logical_name": "distinct_priorities",
+          "type": "Integer"
+        },
+        {
           "column_name": "atq_id",
           "logical_name": "id",
           "type": "UUID"

@@ -336,5 +336,53 @@ defmodule Samen.VaultTest do
     end
   end
 
+  # =====================================================================
+  # F4.1 — reveal chokepoint binds the asserted subject to the token's REAL
+  # subject. A masked token for subject Y with a :subject_id opt for X (mismatch)
+  # must DENY :subject_mismatch, never leak Y's plaintext under X's audit.
+  # =====================================================================
+
+  describe "F4.1 subject-bind at the reveal chokepoint" do
+    test "matching :subject_id reveals (positive control)" do
+      subject_id = subj()
+      plaintext = "carol@bind.example"
+
+      {:ok, token} = Vault.store_field(subject_id, :pii_email, :emails, plaintext, @repo)
+      masked = Masked.new(token, :emails)
+
+      assert {:ok, ^plaintext} = Vault.reveal(masked, @repo, subject_id: subject_id)
+    end
+
+    test "RED PATH: mismatched :subject_id DENIES :subject_mismatch (no plaintext leak)" do
+      subject_a = subj()
+      subject_b = subj()
+      plaintext_a = "alice-SECRET@a.test"
+
+      # A's real vault row / token.
+      {:ok, token_a} = Vault.store_field(subject_a, :pii_email, :emails, plaintext_a, @repo)
+      masked_a = Masked.new(token_a, :emails)
+
+      # Caller asserts subject B (the audit/breadth would record B) but hands A's
+      # token. The chokepoint MUST deny — never return A's plaintext under B.
+      assert {:error, :subject_mismatch} =
+               Vault.reveal(masked_a, @repo, subject_id: subject_b)
+
+      # And the plaintext must NOT surface through the mismatched call in any form.
+      result = Vault.reveal(masked_a, @repo, subject_id: subject_b)
+      refute match?({:ok, _}, result)
+    end
+
+    test "absent :subject_id (raw internal caller) still reveals — no bind applied" do
+      subject_id = subj()
+      plaintext = "dave@raw.example"
+
+      {:ok, token} = Vault.store_field(subject_id, :pii_email, :emails, plaintext, @repo)
+      masked = Masked.new(token, :emails)
+
+      # No :subject_id opt → no assertion → internal callers (oracle scans) unaffected.
+      assert {:ok, ^plaintext} = Vault.reveal(masked, @repo)
+    end
+  end
+
   defp subj, do: "subj-vault-#{System.unique_integer([:positive])}"
 end

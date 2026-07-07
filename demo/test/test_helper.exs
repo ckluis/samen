@@ -24,4 +24,11 @@ Ecto.Migrator.run(Repo, :up, all: true)
 
 Ecto.Adapters.SQL.Sandbox.mode(Repo, :manual)
 
+# T4.6: the adversarial suite (test/adversarial/, tagged :adversarial) is EXCLUDED from
+# the default `mix test` run and driven as its OWN numbered CI step:
+#     mix test --only adversarial
+# `--only adversarial` re-includes it (ExUnit's --only overrides the exclude). This keeps
+# the default dogfood suite fast and the Phase-4 attack matrix a distinct, gateable step.
+ExUnit.configure(exclude: [:adversarial])
+
 ExUnit.start()

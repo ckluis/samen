@@ -109,11 +109,15 @@ defmodule Samen.Jobs do
 
     - `"*/10 * * * *"` → `Samen.Jobs.RollupRefreshWorker` (rollup heartbeat;
       T2.3 will replace with real AshOban triggers)
+    - `"*/5 * * * *"` → `Samen.Anchor.SealWorker` (T4.3 WORM-anchor seal cron; seals
+      every org's audit-chain head into the write-once store. The cadence bounds the
+      wholesale-rewrite detection window — ADR-002 §3.3.)
   """
   @spec default_crontab() :: [{String.t(), module()}]
   def default_crontab do
     [
-      {"*/10 * * * *", Samen.Jobs.RollupRefreshWorker}
+      {"*/10 * * * *", Samen.Jobs.RollupRefreshWorker},
+      {"*/5 * * * *", Samen.Anchor.SealWorker}
     ]
   end
 

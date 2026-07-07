@@ -31,6 +31,15 @@ defmodule Samen.Reveal.GrantSeamTest do
       do: raise("vault reached on a denied reveal — grant gate failed to fail closed")
   end
 
+  # A grant checker that approves everything — used to isolate the DOWNSTREAM
+  # vault subject-bind (F4.1): even with the grant satisfied for subject X, the
+  # real vault must deny when the masked token is really subject Y's.
+  defmodule ApproveAll do
+    @behaviour Samen.Reveal.Grant
+    @impl true
+    def granted?(_ctx), do: true
+  end
+
   setup do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
     Ecto.Adapters.SQL.Sandbox.mode(@repo, {:shared, self()})
@@ -97,6 +106,45 @@ defmodule Samen.Reveal.GrantSeamTest do
                subject_id: s,
                grant: Grants,
                vault: ExplodingVault
+             )
+  end
+
+  # F4.1 routine-path bind: a grant for subject X (approved) with a masked token
+  # that is REALLY subject Y's must deny at the vault chokepoint, never returning
+  # Y's plaintext under X's grant/audit. Uses the REAL Samen.Vault so the bind
+  # actually fires against a stored row.
+  test "RED PATH: grant for subject X but a masked token for subject Y DENIES :subject_mismatch" do
+    prior_kms = Application.get_env(:samen_core, :kms_adapter)
+    Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
+    on_exit(fn -> Application.put_env(:samen_core, :kms_adapter, prior_kms) end)
+
+    subject_x = subj()
+    subject_y = subj()
+
+    # Y's REAL vaulted secret + token.
+    {:ok, token_y} =
+      Samen.Vault.store_field(subject_y, :pii_email, :emails, "yankee-SECRET@y.test", @repo)
+
+    masked_y = Masked.new(token_y, :emails)
+
+    # The grant gate approves for subject X; the vault must still deny because the
+    # token is Y's. No plaintext for Y crosses the seam under X's grant.
+    assert {:error, :subject_mismatch} =
+             Reveal.reveal(actor(), masked_y, :reveal_email, @resource,
+               repo: @repo,
+               subject_id: subject_x,
+               grant: ApproveAll,
+               vault: Samen.Vault
+             )
+
+    # Positive control: with the token's REAL subject, the same real-vault reveal
+    # succeeds (the bind is not always-deny).
+    assert {:ok, "yankee-SECRET@y.test"} =
+             Reveal.reveal(actor(), masked_y, :reveal_email, @resource,
+               repo: @repo,
+               subject_id: subject_y,
+               grant: ApproveAll,
+               vault: Samen.Vault
              )
   end
 end

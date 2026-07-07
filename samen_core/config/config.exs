@@ -37,6 +37,32 @@ config :samen_core, :reveal_grant_repo, SamenCore.TestRepo
 # :reveal_grant_repo if unset. Host apps configure their own.
 config :samen_core, :impersonation_repo, SamenCore.TestRepo
 
+# The Ecto repo the T4.3 hash-chained audit (`aud_chain`) uses. Falls back to
+# :reveal_grant_repo if unset. Host apps configure their own.
+config :samen_core, :audit_chain_repo, SamenCore.TestRepo
+
+# T4.3 WORM anchor adapter. Defaults to the faithful local append-only-file adapter
+# (Samen.Anchor.LocalWorm). Production sets Samen.Anchor.S3ObjectLock + :anchor_s3_enabled
+# (ADR-002 §3.2 — the config-flagged, never-faked S3 Object Lock compliance-mode skeleton).
+config :samen_core, :anchor_adapter, Samen.Anchor.LocalWorm
+
+# T4.4 break-glass. The repo backing the operator-suspension flag + reveal ledger +
+# anchor-tracking (falls back to :impersonation_repo then :reveal_grant_repo).
+config :samen_core, :operator_suspension_repo, SamenCore.TestRepo
+
+# T4.4 breadth budget: N DISTINCT subjects revealed per rolling window before an
+# operator is auto-suspended (all reveal paths then deny, incl. break-glass).
+config :samen_core, :break_glass_breadth_budget, 25
+config :samen_core, :break_glass_breadth_window_seconds, 3600
+
+# T4.4 (R8): the locally-durable break-glass audit file path. In PRODUCTION this
+# MUST point at a PERSISTENT VOLUME mounted per operator node (see the T4.4 runbook,
+# docs/runbooks/break-glass.md) — the default tmp path is a dev/test convenience.
+# The [:samen, :break_glass, :unanchored] telemetry fires while entries here are
+# unanchored (the honest-residue monitor).
+config :samen_core, :break_glass_local_audit_path,
+  Path.join(System.tmp_dir!(), "samen_break_glass.local")
+
 # T2.3 rollup registry. A rollup is a small derived summary over the raw
 # append-only `aud_event` tier — dashboards read the rollup, never scan raw
 # events. The framework (Samen.Rollup.rebuild_all/1, RollupRefreshWorker cron),

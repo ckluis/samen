@@ -63,6 +63,25 @@ config :samen_core, :operator_plane,
 # AshPostgres repo first; this is the fallback for repo-less call sites.
 config :samen_core, :vault_repo, Demo.Repo
 
+# T4.5 aggregate-privacy floors + query-budget scaffold.
+#
+# k-anonymity minimum cohort + l-diversity minimum distinct. The samen_core defaults
+# are k=5 / l=2 (a sensible real-world floor). The demo's dogfood datasets are small
+# (2 tenants per tier, a handful of tickets), so a k=5 floor would suppress every
+# demo cohort and obscure what the tests demonstrate. The demo therefore uses a
+# small-but-non-trivial floor (k=2 / l=2): a count-of-one cohort still suppresses
+# (the load-bearing k-anon guarantee — one tenant's exact MRR / one ticket's status
+# is never released), and a homogeneous status cohort (all one priority) still
+# suppresses under l-diversity. Production hosts keep the k=5 default.
+config :samen_core, :k_anonymity_min_cohort, 2
+config :samen_core, :l_diversity_min_distinct, 2
+
+# The query-budget ledger (SCAFFOLD — accounting only, WARN-not-enforce; the
+# cross-query budget / DP enforcement is posture under construction, plan T6.6).
+config :samen_core, :query_budget_ledger_repo, Demo.Repo
+config :samen_core, :query_budget_warn_threshold, 50
+config :samen_core, :query_budget_window_seconds, 3600
+
 # Oban: T2.1 canonical queue taxonomy (consolidates T1.6 same-tx reveal enqueue).
 # Uses the full Samen.Jobs queue taxonomy per the T2.1 convention layer.
 # In production wire cron + pruner plugins; in test override with testing: :manual.

@@ -179,32 +179,56 @@ defmodule Samen.Vault do
 
   This is the **one** chokepoint. It:
     1. Looks up the vault row for the token.
-    2. Unwraps the subject's DEK via the KMS adapter (fails closed on shred /
+    2. **Binds the caller-asserted subject to the token's REAL subject** — when a
+       `:subject_id` opt is present (the accountability paths always thread it:
+       `Samen.BreakGlass.reveal/1`, `Samen.Reveal.reveal/5`), it MUST equal the
+       loaded `VaultRow.subject_id` or the reveal denies `{:error, :subject_mismatch}`
+       BEFORE any decrypt. This closes the F4.1 accountability-evasion: without it,
+       a caller could decrypt subject A's plaintext while the tamper-evident audit /
+       breadth budget recorded subject B. The bind is at the single plaintext
+       chokepoint, so every path through here is covered.
+    3. Unwraps the subject's DEK via the KMS adapter (fails closed on shred /
        outage).
-    3. Decrypts the ciphertext.
+    4. Decrypts the ciphertext.
 
-  Returns `{:ok, plaintext}` or `{:error, :shredded | :unavailable | :not_found}`.
+  Returns `{:ok, plaintext}` or
+  `{:error, :subject_mismatch | :shredded | :unavailable | :not_found}`.
   Post-shred and during a store outage it returns an error, never plaintext.
 
   `repo` is the Ecto repo to use for the vault row lookup. Must be provided.
+
+  Options:
+    * `:subject_id` — the subject the caller asserts this reveal is ABOUT. When
+      present it is bound to the token's real subject (see step 2). When absent
+      (raw internal callers, e.g. oracle scans), no bind is applied.
   """
   @spec reveal(Masked.t(), Ecto.Repo.t(), keyword()) ::
-          {:ok, binary()} | {:error, :shredded | :unavailable | :not_found | term}
-  def reveal(%Masked{token: token}, repo, _opts \\ []) do
-    reveal_token(token, repo)
+          {:ok, binary()}
+          | {:error, :subject_mismatch | :shredded | :unavailable | :not_found | term}
+  def reveal(%Masked{token: token}, repo, opts \\ []) do
+    reveal_token(token, repo, Keyword.get(opts, :subject_id))
   end
 
-  defp reveal_token(token, repo) do
+  defp reveal_token(token, repo, asserted_subject_id \\ nil) do
     case repo.get(VaultRow, token) do
       nil ->
         {:error, :not_found}
 
       %VaultRow{subject_id: subject_id, ciphertext: ciphertext} ->
-        with {:ok, dek} <- Kms.adapter().unwrap(subject_id) do
+        with :ok <- bind_subject(asserted_subject_id, subject_id),
+             {:ok, dek} <- Kms.adapter().unwrap(subject_id) do
           do_decrypt(dek, ciphertext)
         end
     end
   end
+
+  # F4.1 accountability bind: a caller-asserted subject MUST match the token's
+  # real subject. `nil` (no assertion) is allowed for internal/raw callers; a
+  # present-but-mismatched assertion fails closed BEFORE the DEK is touched, so
+  # no PII for the real subject is ever produced under a wrong subject's audit.
+  defp bind_subject(nil, _real), do: :ok
+  defp bind_subject(same, same), do: :ok
+  defp bind_subject(_asserted, _real), do: {:error, :subject_mismatch}
 
   # The ONLY call site of Crypto.decrypt/2 for a vault read. A second decrypt
   # path anywhere else is a structural violation caught by the C3 pii_reads verifier

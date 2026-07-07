@@ -278,6 +278,32 @@ defmodule Samen.AuditChain do
   # Anchor: seal + verify_against_anchor
   # ==========================================================================
 
+  @doc """
+  The distinct org_ids that have at least one chain entry (for the seal cron to
+  enumerate). Includes the reserved `"__global__"` partition if it has entries.
+  """
+  @spec org_ids(keyword()) :: [String.t()]
+  def org_ids(opts \\ []) do
+    r = Keyword.get(opts, :repo, repo())
+    r.all(from(e in Entry, distinct: true, select: e.org_id))
+  end
+
+  @doc """
+  Seal every org's chain head into the WORM anchor store (the cron tick). Returns
+  `{:ok, %{sealed: n, skipped: m}}`. A per-org anchor-store error is surfaced (fail
+  closed) rather than swallowed.
+  """
+  @spec seal_all(keyword()) :: {:ok, map()} | {:error, term}
+  def seal_all(opts \\ []) do
+    Enum.reduce_while(org_ids(opts), {:ok, %{sealed: 0, skipped: 0}}, fn org_id, {:ok, acc} ->
+      case seal(org_id, opts) do
+        {:ok, :nothing_to_seal} -> {:cont, {:ok, %{acc | skipped: acc.skipped + 1}}}
+        {:ok, _head} -> {:cont, {:ok, %{acc | sealed: acc.sealed + 1}}}
+        {:error, reason} -> {:halt, {:error, {org_id, reason}}}
+      end
+    end)
+  end
+
   @doc "The current head anchor `{org_id, seq, hash}` for the org (from the live DB), or :none."
   @spec current_head(String.t(), keyword()) :: {:ok, map() | :none}
   def current_head(org_id, opts \\ []) do

@@ -164,8 +164,38 @@ echo "    PASSED"
 #     reaching a PII-bearing resource), and (b) asserts via information_schema that
 #     each aggregate projection table physically contains no pii_ column. This is the
 #     "pii_ columns physically don't exist" claim asserted against the LIVE database.
-echo "--- step 15/15: mix samen.verify.no_pii_columns (C7 token-blind aggregate plane)"
+echo "--- step 15/16: mix samen.verify.no_pii_columns (C7 token-blind aggregate plane)"
 mix samen.verify.no_pii_columns
+echo "    PASSED"
+
+# 16. T4.5 aggregate-privacy floors gate: every aggregate-plane resource must declare a
+#     fail-closed cohort spec (aggregate_cohort_spec/0) so the k-anonymity + l-diversity
+#     floors are ENFORCEABLE on it. A new cross-tenant projection that forgot its cohort
+#     spec fails closed only at read time (:no_cohort_spec) — this turns "every aggregate
+#     cell is floor-protected" into a gated invariant. It gates the ENFORCED floor only;
+#     the cross-query budget / DP layer is posture under construction (plan T6.6) and is
+#     deliberately NOT gated here (the query-budget ledger is a WARN-not-enforce scaffold).
+echo "--- step 16/17: mix samen.verify.aggregate_privacy (T4.5 k-anon/l-div floor cohort specs)"
+mix samen.verify.aggregate_privacy
+echo "    PASSED"
+
+# 17. T4.6 ADVERSARIAL SUITE (test/adversarial/, tagged :adversarial). The consolidated
+#     Phase-4 attack matrix, run as durable CI: (1) impersonation bypass matrix — every
+#     egress (LiveView / JSON / webhook / CSV-iodata / logs / error messages) under an
+#     impersonation session shows ••••/absent; (2) reveal-grant abuse — self-approval
+#     (DB CHECK + policy), expired grant, renew-in-place, grant-row/audit-chain tamper,
+#     requestor-approver collusion (documented residue, ASSERTED audit-visible);
+#     (3) aggregate differencing + k-anon/l-div bypass (filters, includes, repeated
+#     queries); (4) audit tamper (edit/delete/rewrite vs chain + WORM anchor);
+#     (5) break-glass abuse (budget breach → auto-suspend, KMS-down bypass fails closed,
+#     local-entry tamper); (6) crypto-shred completeness against the CONTROL-PLANE tiers
+#     (aud_chain event survives post-shred, subject ciphertext undecryptable; the
+#     post-shred destruction oracle passes on a control-plane-seeded subject — this is
+#     the "extend the oracle run in CI" assertion). Every case carries a POSITIVE CONTROL
+#     so the denials are non-vacuous. Excluded from the default `mix test`; run here as
+#     its own gate step via `--only adversarial`.
+echo "--- step 17/17: mix test --only adversarial (T4.6 Phase-4 adversarial attack matrix)"
+mix test --only adversarial --warnings-as-errors
 echo "    PASSED"
 
 echo ""

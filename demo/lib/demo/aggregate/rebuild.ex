@@ -50,16 +50,20 @@ defmodule Demo.Aggregate.Rebuild do
             []
           )
 
-        # Cross-tenant support-queue depth by status. NO org filter.
+        # Cross-tenant support-queue depth by status. NO org filter. Also compute the
+        # l-diversity distinct-sensitive count: how many DISTINCT ticket PRIORITIES ride
+        # this status cohort (the sensitive dimension the demo proves — T4.5 clause (b)).
         %{num_rows: queue_rows} =
           Ecto.Adapters.SQL.query!(
             repo,
             """
-            INSERT INTO atq_ticket_queue_depth (atq_status, atq_depth, atq_refreshed_at)
+            INSERT INTO atq_ticket_queue_depth
+              (atq_status, atq_depth, atq_distinct_priorities, atq_refreshed_at)
             SELECT
-              t.stk_status        AS atq_status,
-              COUNT(*)::int       AS atq_depth,
-              now()               AS atq_refreshed_at
+              t.stk_status                        AS atq_status,
+              COUNT(*)::int                       AS atq_depth,
+              COUNT(DISTINCT t.stk_priority)::int AS atq_distinct_priorities,
+              now()                               AS atq_refreshed_at
             FROM stk_ticket t
             GROUP BY t.stk_status
             """,

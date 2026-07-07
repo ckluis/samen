@@ -105,6 +105,24 @@ defmodule Demo.Aggregate.MrrByTier do
       authorize_if(Samen.Policy.AggregateActorOnly)
     end
   end
+
+  @doc """
+  The T4.5 cohort spec: MRR-by-tier's cohort is the plan `tier`; the cohort SIZE
+  (for k-anonymity) is `tenant_count` — how many tenants are on this tier. The
+  RELEASABLE VALUE `mrr_cents` is suppressed when `tenant_count < k` (including a
+  count-of-one tier, which would let an operator read one tenant's exact revenue).
+  No l-diversity dimension here (MRR is a single sum per tier — the sensitive
+  dimension is proved on `TicketQueueDepth` via ticket priority).
+  """
+  def aggregate_cohort_spec do
+    %Samen.Aggregate.CohortSpec{
+      cohort_key_columns: [:tier],
+      cohort_count_column: :tenant_count,
+      distinct_sensitive_column: nil,
+      value_columns: [:mrr_cents],
+      sensitive_attribute: nil
+    }
+  end
 end
 
 defmodule Demo.Aggregate.TicketQueueDepth do
@@ -132,10 +150,14 @@ defmodule Demo.Aggregate.TicketQueueDepth do
   attributes do
     # Cross-tenant aggregate: NO single org (nullable, opt out of non-null injection).
     attribute(:org_id, :uuid, public?: true, allow_nil?: true)
-    # Ticket status (bounded enum). Non-PII.
+    # Ticket status (bounded enum) — the COHORT key. Non-PII.
     attribute(:status, :string, public?: true, allow_nil?: false)
-    # Number of tickets in this status across all tenants (a count). Non-PII.
+    # Number of tickets in this status across all tenants (the cohort SIZE — k-anon). Non-PII.
     attribute(:depth, :integer, public?: true, default: 0)
+    # Count of DISTINCT ticket PRIORITIES within this status cohort (the l-diversity
+    # distinct-sensitive count). A status where every ticket shares one priority
+    # (distinct_priorities == 1) is a homogeneous cohort and suppresses. Non-PII (a count).
+    attribute(:distinct_priorities, :integer, public?: true, default: 0)
     attribute(:refreshed_at, :utc_datetime, public?: true)
   end
 
@@ -147,5 +169,25 @@ defmodule Demo.Aggregate.TicketQueueDepth do
     policy always() do
       authorize_if(Samen.Policy.AggregateActorOnly)
     end
+  end
+
+  @doc """
+  The T4.5 cohort spec with a REAL sensitive dimension (T4.5 clause (b)). The cohort
+  is ticket `status`; the cohort SIZE (k-anonymity) is `depth`; the SENSITIVE
+  ATTRIBUTE is ticket **priority** (the doc's "e.g. plan tier or ticket category"
+  example), whose distinct-value count per cohort is `distinct_priorities`. A status
+  cohort with `depth < k` suppresses (k-anon); a status cohort with
+  `distinct_priorities < l` — every ticket in that status sharing one priority —
+  suppresses (l-diversity homogeneity). The RELEASABLE VALUE `depth` is what
+  suppression replaces.
+  """
+  def aggregate_cohort_spec do
+    %Samen.Aggregate.CohortSpec{
+      cohort_key_columns: [:status],
+      cohort_count_column: :depth,
+      distinct_sensitive_column: :distinct_priorities,
+      value_columns: [:depth],
+      sensitive_attribute: :ticket_priority
+    }
   end
 end

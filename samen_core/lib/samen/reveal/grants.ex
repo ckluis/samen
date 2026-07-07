@@ -342,7 +342,12 @@ defmodule Samen.Reveal.Grants do
 
   @impl Samen.Reveal.Grant
   def granted?(%Context{actor: actor, subject_id: subject_id}) when is_binary(subject_id) do
-    active?(actor, subject_id)
+    # T4.4 clause (d): a SUSPENDED operator (breadth-budget breach) is denied on
+    # EVERY reveal path, including the routine grant path — even a live grant does
+    # not authorize a suspended operator. suspended?/2 fails closed (treats an
+    # unreachable suspension table as suspended), so an ambient DB failure cannot
+    # silently disable the gate.
+    not Samen.OperatorPlane.Suspension.suspended?(actor) and active?(actor, subject_id)
   end
 
   # No subject scope in the context ⇒ cannot resolve a grant ⇒ deny (fail closed).
@@ -374,10 +379,15 @@ defmodule Samen.Reveal.Grants do
   def write_audit(r, attrs) do
     result = r.insert(audit_changeset(attrs))
 
-    # Also emit to the aud_event tier (T2.2 — grant lifecycle events are
-    # mirrored to the append-only event/audit tier carrying tokens only).
-    # The T2.2 migration ensures aud_event exists before this code runs.
-    aud_attrs = %{
+    # Also emit to the aud_event tier AND the T4.3 hash chain (grant lifecycle events
+    # are mirrored to the append-only event/audit tier carrying tokens only, and sealed
+    # into the tamper-evident, tenant-readable chain the operator cannot edit — ADR-002).
+    # The T2.2/T4.3 migrations ensure the tables exist before this code runs; the writer
+    # degrades gracefully (aud_event lands, chain skipped) if aud_chain is not deployed.
+    Samen.AuditChain.Writer.write(r, %{
+      # Reveal/grant events ride the subject's org chain when the caller supplies an
+      # org_id; otherwise the reserved "__global__" operator chain (ADR-002 §2.1).
+      org_id: attrs[:org_id] || attrs["org_id"] || Samen.AuditChain.global_org(),
       event_type: "grant_lifecycle",
       subject_id: attrs[:subject_id] || attrs["subject_id"],
       actor_id: attrs[:actor_id] || attrs["actor_id"],
@@ -387,9 +397,7 @@ defmodule Samen.Reveal.Grants do
         "event=#{attrs[:event] || attrs["event"]} " <>
           "#{(attrs[:detail] || attrs["detail"] || "") |> String.trim()}",
       occurred_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    }
-
-    Samen.AuditEvent.insert(r, aud_attrs)
+    })
 
     # The return value is always the primary rvl_reveal_audit result.
     result

@@ -90,13 +90,13 @@ defmodule Demo.AggregatePlaneTest do
     sub
   end
 
-  defp mk_ticket(org_id, status) do
+  defp mk_ticket(org_id, status, priority) do
     {:ok, t} =
       Demo.SupportScope.Ticket
       |> Ash.Changeset.for_create(:create, %{
         subject: "Ticket #{System.unique_integer([:positive])}",
         status: status,
-        priority: :normal,
+        priority: priority,
         org_id: org_id
       })
       |> Ash.create(authorize?: false)
@@ -105,11 +105,16 @@ defmodule Demo.AggregatePlaneTest do
   end
 
   # Seed two tenants on the SAME "Pro" tier (a cross-tenant aggregate), plus tickets.
+  #
+  # T4.5: the demo floor is k=2 / l=2 (demo config). To clear BOTH floors the `open`
+  # cohort must be >= 2 tickets (k-anon) AND span >= 2 distinct priorities (l-div).
+  # The `closed` cohort is deliberately a single ticket (a count-of-one that MUST
+  # suppress under k-anon — the load-bearing guarantee).
   defp seed_cross_tenant! do
     org_a = mk_org("Acme")
     org_b = mk_org("Globex")
 
-    # Both on a "Pro" plan priced at 5000 cents/mo.
+    # Both on a "Pro" plan priced at 5000 cents/mo (tenant_count = 2 >= k).
     plan_a = mk_plan(org_a.id, "Pro")
     plan_b = mk_plan(org_b.id, "Pro")
     mk_price(org_a.id, plan_a.id, 5000)
@@ -120,11 +125,13 @@ defmodule Demo.AggregatePlaneTest do
     mk_subscription(org_a.id, cust_a.id, plan_a.id)
     mk_subscription(org_b.id, cust_b.id, plan_b.id)
 
-    # Tickets across both tenants: 3 open, 1 closed (cross-tenant queue depth).
-    mk_ticket(org_a.id, :open)
-    mk_ticket(org_a.id, :open)
-    mk_ticket(org_b.id, :open)
-    mk_ticket(org_b.id, :closed)
+    # `open` cohort: 3 tickets across both tenants, spanning 2 distinct priorities
+    # (normal + high) → clears k=2 and l=2. `closed` cohort: 1 ticket → count-of-one,
+    # suppresses under k-anon.
+    mk_ticket(org_a.id, :open, :normal)
+    mk_ticket(org_a.id, :open, :high)
+    mk_ticket(org_b.id, :open, :normal)
+    mk_ticket(org_b.id, :closed, :normal)
 
     {:ok, _} = Demo.Aggregate.Rebuild.run(Demo.Repo)
     %{org_a: org_a, org_b: org_b}
@@ -146,14 +153,19 @@ defmodule Demo.AggregatePlaneTest do
     assert total == 10_000
   end
 
-  test "cross-tenant queue depth: the operator dashboard reads support-queue depth by status across ALL tenants" do
+  test "cross-tenant queue depth: the operator dashboard reads support-queue depth by status across ALL tenants (T4.5 floors applied)" do
     seed_cross_tenant!()
 
     assert {:ok, depths} = OperatorDashboard.queue_depths()
     by_status = Map.new(depths, &{&1.status, &1.depth})
 
+    # `open` clears both floors (depth 3 >= k=2; 2 distinct priorities >= l=2) → released.
     assert by_status["open"] == 3
-    assert by_status["closed"] == 1
+
+    # `closed` is a count-of-one cohort (depth 1 < k=2) → SUPPRESSED under k-anonymity.
+    # The dashboard NEVER returns the raw `1` (which would re-identify the single ticket's
+    # tenant/subject); it returns the fail-closed sentinel.
+    assert %Samen.Aggregate.Suppressed{reason: :k_anonymity} = by_status["closed"]
   end
 
   test "control (anti-tautology): the AGGREGATE ACTOR reads the aggregate domain (positive control for the denials below)" do

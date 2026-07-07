@@ -23,6 +23,11 @@ defmodule Samen.OperatorPlane.Actor do
       (the day-to-day support role).
     * `:operator_readonly`— read the operator CRM only; may NOT open impersonation
       sessions.
+    * `:operator_break_glass` — the SINGLE, named break-glass role (T4.4). The only
+      role `Samen.BreakGlass.authorized?/1` accepts. By convention there is exactly
+      one such role (not a per-scope grab-bag), so "who could break glass" is a
+      single small reviewable set. It may also impersonate (it is a superset
+      emergency role), but its distinguishing capability is the emergency reveal.
 
   These are deliberately NOT the tenant roles (`:owner/:admin/:member/:viewer`) — an
   operator is a different principal class. `may_impersonate?/1` gates who can open a
@@ -42,7 +47,8 @@ defmodule Samen.OperatorPlane.Actor do
   @enforce_keys [:id, :operator_role]
   defstruct [:id, :operator_role, kind: :operator]
 
-  @type operator_role :: :operator_admin | :operator_support | :operator_readonly
+  @type operator_role ::
+          :operator_admin | :operator_support | :operator_readonly | :operator_break_glass
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -50,7 +56,12 @@ defmodule Samen.OperatorPlane.Actor do
           kind: :operator
         }
 
-  @operator_roles [:operator_admin, :operator_support, :operator_readonly]
+  @operator_roles [
+    :operator_admin,
+    :operator_support,
+    :operator_readonly,
+    :operator_break_glass
+  ]
 
   @doc "The closed set of operator roles."
   @spec roles() :: [operator_role()]
@@ -79,7 +90,7 @@ defmodule Samen.OperatorPlane.Actor do
   """
   @spec may_impersonate?(t() | term()) :: boolean()
   def may_impersonate?(%__MODULE__{operator_role: role}),
-    do: role in [:operator_admin, :operator_support]
+    do: role in [:operator_admin, :operator_support, :operator_break_glass]
 
   def may_impersonate?(_), do: false
 

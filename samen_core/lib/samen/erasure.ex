@@ -75,6 +75,9 @@ defmodule Samen.Erasure do
   def shred(subject_id, opts \\ []) when is_binary(subject_id) do
     r = Keyword.get(opts, :repo) || default_repo()
     actor_id = Keyword.get(opts, :actor_id, "system:erasure")
+    # Optional: the subject's org, so the erasure event rides that org's T4.3 chain
+    # (ADR-002). Absent → the reserved "__global__" operator/system chain.
+    org_id = Keyword.get(opts, :org_id) || Samen.AuditChain.global_org()
 
     # Options forwarded to the rollup erasure policy (T2.3): `:specs` (override the
     # registry) and `:raw_retained?` (force the rebuild/suppress arm — tests use
@@ -88,7 +91,7 @@ defmodule Samen.Erasure do
     # attestation).
     case Kms.adapter().shred(subject_id) do
       {:ok, attestation} ->
-        seal_db_tiers(subject_id, attestation, :from_state, actor_id, r, rollup_opts)
+        seal_db_tiers(subject_id, attestation, :from_state, actor_id, org_id, r, rollup_opts)
 
       {:error, :absent} ->
         # Subject never had a key. Still redact any non_pii! rows and write a
@@ -103,7 +106,7 @@ defmodule Samen.Erasure do
           checked_at: DateTime.utc_now()
         }
 
-        seal_db_tiers(subject_id, absent_att, "absent", actor_id, r, rollup_opts)
+        seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts)
 
       {:error, reason} ->
         # Key store unreachable (outage) — FAIL CLOSED. No sentinel, no report,
@@ -115,7 +118,7 @@ defmodule Samen.Erasure do
   # STEP 2–5 in one transaction. `outcome_mode` is `:from_state` (derive from the
   # seal result — "shredded" on the first call that seals rows, "already_shredded"
   # on an idempotent later call) or a fixed string (e.g. "absent").
-  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, r, rollup_opts) do
+  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, org_id, r, rollup_opts) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     multi =
@@ -195,7 +198,12 @@ defmodule Samen.Erasure do
         %{count: redacted} = changes.redact_non_pii
         outcome = changes.report.outcome
 
-        Samen.AuditEvent.insert(repo, %{
+        # Emit to the aud_event tier AND seal into the T4.3 hash chain (ADR-002).
+        # Post-shred the erasure event survives on the tamper-evident chain (its hash
+        # is over tokens, not plaintext) while the subject stays unrecoverable — the
+        # doc's "immutable AND crypto-shreddable" resolution, proven by the shred test.
+        Samen.AuditChain.Writer.write(repo, %{
+          org_id: org_id,
           event_type: "erasure",
           subject_id: subject_id,
           actor_id: actor_id,
