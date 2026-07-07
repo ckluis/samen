@@ -31,8 +31,10 @@ defmodule Samen.Webhook do
     `Samen.Webhook.Signer`, set in the `Samen-Signature` HTTP header.
   * **Anti-replay** — the receiver-side `Signer.verify/4` helper rejects stale
     timestamps (default 5-minute window) EVEN if the HMAC is valid.
-  * **Allowlisted masked payload** — same T3.11 rules: catalog names only, PII
-    masked as `"••••"`, no storage names, no vault tokens.
+  * **Opt-IN allowlisted masked payload (F3.6)** — same T3.11 opt-in `show_fields`
+    allowlist the public API surface uses: a field absent from `show_fields` is
+    ABSENT from the payload (default not-exposed), including the Tier-1 `custom` bag;
+    catalog names only, PII masked as `"••••"`, no storage names, no vault tokens.
 
   ## Endpoint config (Primitives scope)
 

@@ -24,9 +24,14 @@ defmodule Samen.Webhook.DeliveryWorker do
   ## Per-event idempotency keys
 
   The job args include an `idempotency_key` (unique-per-event UUID). The Oban
-  `unique` option is set to `[fields: [:args], keys: ["idempotency_key"], period: 86_400]`
+  `unique` option is set to `[fields: [:args], keys: [:idempotency_key], period: 86_400]`
   (24-hour window). Redelivery of the same event (same idempotency_key) within 24
   hours is a no-op (`:ok` from the conflicting insert, job not enqueued again).
+
+  > Note: Oban (2.23) requires `:keys` to be a list of ATOMS — `keys: [:idempotency_key]`.
+  > The atom keys are matched against the JSON-encoded args at enqueue time. (The
+  > Gate-3 housekeeping note suggested a string form, but Oban rejects strings at
+  > compile time, so the atom form is authoritative — the moduledoc now matches it.)
 
   ## Payload allowlist
 

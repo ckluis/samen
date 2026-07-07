@@ -63,6 +63,7 @@
     "pwh": "Demo.PrimitivesScope.Webhook",
     "pff": "Demo.PrimitivesScope.FeatureFlag",
     "cea": "Core.Ctx.Activity",
-    "cei": "Core.Ctx.Invoice"
+    "cei": "Core.Ctx.Invoice",
+    "waw": "Demo.WebhookAllowlist.Widget"
   }
 }

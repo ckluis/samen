@@ -1,20 +1,54 @@
 defmodule Samen.Webhook.Payload do
   @moduledoc """
-  Webhook payload serialization under the T3.11 allowlist (doc §external-surface;
-  plan T3.13).
+  Webhook payload serialization under the T3.11 opt-in allowlist (doc
+  §external-surface, F3.6; plan T3.13).
 
-  Webhook payloads obey the SAME constraints as the public API (T3.11):
+  ## Opt-IN allowlist (F3.6)
 
-    * **Catalog names only** — never storage names (`cnt_*`, `pii_*`, `vt_*`) nor
-      vault routing internals.
-    * **Masked / absent PII** — `%Masked{}` values serialize as `"••••"` by the
-      existing `Masked` encoder; vault-routed fields absent without a reveal grant
-      serialize as ABSENT (omitted from the map entirely).
-    * **No plaintext PII** — the payload NEVER carries a raw decrypted PII value
-      unless the allowlist permits it AND a reveal grant is active.
-    * **Allowlist** — only fields in the resource's `public?: true` set that are
-      NOT vault-routed (or which are masked) are included. This is the same opt-in
-      allowlist the API serializer uses.
+  The doc (§external-surface, `:711`) is explicit that a resource's columns are
+  **not auto-published** to the API OR webhook surface. Each field is an explicit
+  opt-in into the public allowlist — "a field absent from that allowlist is absent
+  from the payload by omission; the default is not-exposed."
+
+  This serializer honors that mandate by reusing the **same `show_fields` allowlist
+  the public API surface uses** (AshJsonApi's `json_api do show_fields([…]) end`
+  block). A field is included ONLY IF its catalog name appears in the resource's
+  `show_fields`. This is the identical opt-in control `AshJsonApi` filters the API
+  payload through (`show_field?`), so the webhook surface mirrors the API surface
+  field-for-field.
+
+  Consequences of the opt-in design (verified by the F3.6 red-path tests):
+
+    * A `public?: true` attribute NOT named in `show_fields` (e.g. `org_id`,
+      `inserted_at`, `updated_at`, a plaintext `notes` column) is **ABSENT** by
+      omission — no pattern-matching required, no storage-name heuristic.
+    * The Tier-1 `:custom` jsonb bag is **ABSENT** unless explicitly allowlisted —
+      the bag is never auto-published, even when populated with data.
+    * A resource with NO `show_fields` (no AshJsonApi `json_api` block, or an empty
+      allowlist) produces an **empty `data` map** — fail-closed, nothing exposed.
+
+  ### Why `show_fields` (not a separate webhook-payload declaration)
+
+  Reusing `show_fields` composes best with the T3.11 code: (a) it is the SAME
+  allowlist the API serializer already enforces, so the webhook surface cannot
+  drift from the API surface; (b) `Samen.ApiContract` already resolves it
+  defensively (AshJsonApi is an *optional* dep of `samen_core` — only host apps like
+  `demo` carry it), so there is one canonical resolution path; (c) it keeps the
+  doc's "the json_api / webhook payload declaration names it" a SINGLE declaration
+  rather than two allowlists a host must keep in sync. A dedicated webhook-payload
+  field declaration would let the two surfaces diverge silently — the exact drift
+  Gate-3 F3.6 flagged.
+
+  ## Additional PII/storage constraints (defense in depth)
+
+  On top of the opt-in allowlist, allowlisted fields still obey:
+
+    * **Catalog names only** — the `show_fields` names are catalog names; a storage
+      name (`cnt_*`, `pii_*`, `vt_*`) is never allowlisted. A belt-and-suspenders
+      storage-name guard drops any such name that somehow reaches the serializer.
+    * **Masked / absent PII** — `%Masked{}` values serialize as `"••••"` (via the
+      `Masked` encoder); a vault-routed field absent without a reveal grant is
+      ABSENT. Plaintext in a PII-declared field is OMITTED (fail-closed).
 
   ## Build
 
@@ -27,9 +61,10 @@ defmodule Samen.Webhook.Payload do
         "event" => "invoice.created",          # bounded event type
         "id"    => "rndrec-uuid...",            # opaque resource record ID
         "type"  => "contact",                  # catalog resource type name
-        "data"  => %{                           # filtered public attributes
-          "display_name" => "Acme Corp",        # non-PII catalog name
-          "full_name"    => "••••"              # masked PII (Masked → "••••")
+        "data"  => %{                           # allowlisted public attributes
+          "display_name" => "Acme Corp",        # on show_fields; non-PII catalog name
+          "full_name"    => "••••"              # on show_fields; masked PII (Masked → "••••")
+          # (a public field NOT on show_fields is ABSENT by omission)
           # (PII absent if operator-plane with no grant)
         }
       }
@@ -85,18 +120,25 @@ defmodule Samen.Webhook.Payload do
   # ---------------------------------------------------------------------------
   # Private
 
+  # F3.6 — opt-IN allowlist. A field is serialized ONLY IF its catalog name is on
+  # the resource's `show_fields` allowlist (the same allowlist the public API surface
+  # uses). A field absent from `show_fields` — INCLUDING the Tier-1 `:custom` bag,
+  # `org_id`, `inserted_at`, `updated_at`, and any plaintext-at-rest column — is
+  # ABSENT from the payload by omission. No allowlist → empty `data` (fail-closed).
   defp build_data(resource, record, include_masked) do
+    allowlist = allowlisted_fields(resource)
     pii_attrs = pii_attr_names(resource)
 
     resource
     |> Ash.Resource.Info.attributes()
-    |> Enum.filter(fn attr -> attr.public? end)
+    |> Enum.filter(fn attr -> attr.public? and MapSet.member?(allowlist, attr.name) end)
     |> Enum.reduce(%{}, fn attr, acc ->
       name = to_string(attr.name)
       value = Map.get(record, attr.name)
 
       cond do
-        # Skip storage columns that are not catalog-name safe (abbrev_* or pii_*).
+        # Defense in depth: a storage-named field is never on a well-formed
+        # allowlist, but if one slips through we still drop it (catalog names only).
         storage_name?(name) ->
           acc
 
@@ -116,11 +158,34 @@ defmodule Samen.Webhook.Payload do
               acc
           end
 
-        # Normal non-PII public attribute.
+        # Normal non-PII public attribute that IS on the allowlist.
         true ->
           Map.put(acc, name, serialize_value(value))
       end
     end)
+  end
+
+  # The opt-in allowlist: the resource's AshJsonApi `show_fields` set (catalog
+  # names). Resolved defensively via `apply/3` because AshJsonApi is an OPTIONAL dep
+  # of samen_core (only host apps carry it) — mirrors `Samen.ApiContract.build_fields/1`.
+  # A resource with no AshJsonApi block, no `show_fields`, or an unresolvable
+  # allowlist yields an EMPTY set → the payload `data` is empty (fail-closed:
+  # nothing is auto-published).
+  defp allowlisted_fields(resource) do
+    info_mod = Module.concat(["AshJsonApi", "Resource", "Info"])
+
+    show_fields =
+      if Code.ensure_loaded?(info_mod) and function_exported?(info_mod, :show_fields, 1) do
+        try do
+          apply(info_mod, :show_fields, [resource]) || []
+        rescue
+          _ -> []
+        end
+      else
+        []
+      end
+
+    MapSet.new(show_fields)
   end
 
   defp pii_attr_names(resource) do
