@@ -17,12 +17,20 @@ defmodule Driftwood.Freight do
   `alias_resource` rename or a `reshape` mint storage, a relationship, or a
   validation, so the new nouns and the compliance gate are authored domain code.
   """
-  use Ash.Domain, validate_config_inclusion?: false
+  # F1 (Gate-5 carry) — the versioned public API surface over freight. `AshJsonApi.Domain`
+  # makes this domain routable (it generates the `json_api_match_route/2` dispatcher the
+  # AshJsonApi controller calls). Safe here exactly as in `Demo.Crm`: the Freight resources
+  # are top-level `defmodule`s (not nested in this module body), so the domain's `json_api/1`
+  # macro import does not collide with the resource-level `json_api/1` on Driver /
+  # DispatchEvent. Only Driver + DispatchEvent carry a resource `json_api` block.
+  use Ash.Domain, validate_config_inclusion?: false, extensions: [AshJsonApi.Domain]
 
   resources do
     resource(Driftwood.Freight.Driver)
     resource(Driftwood.Freight.Settlement)
     resource(Driftwood.Freight.DispatchEvent)
+    # F1 — the two-key-class credential the public API auth resolver reads (dak_api_key).
+    resource(Driftwood.Freight.ApiKey)
   end
 end
 
@@ -55,12 +63,49 @@ defmodule Driftwood.Freight.Driver do
     domain: Driftwood.Freight,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshJsonApi.Resource],
     abbrev: "drv",
     base: Samen.Fragments.CorePerson
 
   postgres do
     table("drv_driver")
     repo(Driftwood.Repo)
+  end
+
+  # F1 (Gate-5 carry) — the public API surface over the PII-bearing Driver.
+  #
+  # ALLOWLIST (opt-in, default not-exposed). `show_fields` is the load-bearing control:
+  # a field NOT named here is ABSENT from every payload (JSON:API + webhook), even via
+  # `?fields=`. The names are CATALOG names (`:cdl_number`, `:full_name`, `:cdl_state`) —
+  # NEVER storage names (`pii_drv_cdl_number`, `drv_full_name`). What marks
+  # `cdl_number`/`full_name` as PII is their vault routing (the `pii do` below), not any
+  # `pii_`/`drv_` prefix. Those vault fields serialize `••••` (masked) on the operator
+  # plane WITHOUT a grant they are ABSENT; on the tenant plane they read in CLEAR.
+  # Deliberately NOT allowlisted: `org_id` (internal routing — absent by omission) and
+  # `custom` (the Tier-1 bag — never auto-published).
+  json_api do
+    type("driver")
+    show_fields([
+      :id,
+      :cdl_state,
+      :cdl_expiry,
+      :medical_card_expiry,
+      :status,
+      :eld_provider,
+      :full_name,
+      :cdl_number
+    ])
+
+    # F3.7 — make the FILTER surface match the SERIALIZATION surface: a `?filter[org_id]`
+    # side channel over a de-allowlisted field is closed by turning derive_filter? off
+    # (cross-org is already defended by OrgScope; this closes the same-org residual).
+    derive_filter?(false)
+
+    routes do
+      base("/drivers")
+      get(:read)
+      index(:read)
+    end
   end
 
   attributes do
@@ -104,6 +149,15 @@ defmodule Driftwood.Freight.Driver do
   # F3.5 same-org FK: a driver may only reference a same-org carrier.
   changes do
     change({Samen.Policy.SameOrgFk, relationships: [:carrier]})
+  end
+
+  # F1 (Gate-5 carry) — the two-key-classes PII-resolution rule on all reads (the SAME
+  # `Samen.Api.PiiResolution` the tenant console F2 uses). Inert for plane-less internal
+  # reads (leaves `%Masked{}` → ••••); on the API a `:tenant` key reads its own org's
+  # CDL/name in CLEAR, and an `:operator` key sees `%Ash.ForbiddenField{}` (ABSENT)
+  # without a live reveal grant. One read path serves the UI, the API, and the webhook.
+  preparations do
+    prepare(Samen.Api.PiiResolution)
   end
 
   actions do
@@ -239,11 +293,22 @@ defmodule Driftwood.Freight.DispatchEvent do
     domain: Driftwood.Freight,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshJsonApi.Resource],
     abbrev: "dsp"
 
   postgres do
     table("dsp_dispatch_event")
     repo(Driftwood.Repo)
+  end
+
+  # F1 (Gate-5 carry) — a load-status event IS the subject of the `load.status` webhook
+  # (a dispatch's status: dispatched/in_transit/delivered/cancelled). This resource is
+  # non-PII, so its allowlisted payload proves the opt-in / storage-name / custom-bag
+  # controls on a freight event WITHOUT any decrypt: `status`, `dispatched_at`, and the
+  # FK ids are catalog names; `org_id` and the `custom` bag are ABSENT by omission.
+  json_api do
+    type("dispatch_event")
+    show_fields([:id, :status, :dispatched_at, :driver_id, :load_id])
   end
 
   attributes do
@@ -298,6 +363,84 @@ defmodule Driftwood.Freight.DispatchEvent do
   policies do
     policy action_type([:read, :create, :update, :destroy]) do
       authorize_if(Samen.Policy.OrgScope)
+    end
+  end
+end
+
+# ---------------------------------------------------------------------------
+# ApiKey — F1 (Gate-5 carry). The two-key-class credential the public `/api/v1` auth
+# resolver reads. Bound to ONE plane (:tenant | :operator) and its org. Mirrors the
+# Identity-scope ApiKey shape (samen_core blueprint) but is self-contained on the
+# freight vertical (no Identity mount — driftwood keeps its resource surface small).
+# ---------------------------------------------------------------------------
+defmodule Driftwood.Freight.ApiKey do
+  @moduledoc """
+  A scoped API credential (doc §external-surface "two key classes"). Bound to one plane
+  (`:tenant`/`:operator`) and its minting org. Its effective authority is `∩` the
+  minter's role — a key can never out-reach its actor (`Samen.Scope.ApiKey.authorized?/4`).
+
+  The `token_digest` column stores a SHA-256 digest of the key, never the key itself
+  (the raw key is shown once at mint and never persisted in clear). It is a one-way
+  digest — NOT PII, NOT vault-routed (a credential, not subject data), and `public?:
+  false` so it is never catalogued/rendered.
+
+  The `minter_user_id` is the id the built actor carries (so an audit of an API-driven
+  action attributes to a real minter, not a synthetic user). Org-scoped like every
+  tenant-plane resource.
+  """
+  use Samen.Resource,
+    otp_app: :driftwood,
+    domain: Driftwood.Freight,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
+    abbrev: "dak"
+
+  postgres do
+    table("dak_api_key")
+    repo(Driftwood.Repo)
+  end
+
+  attributes do
+    # SHA-256 digest of the key material. One-way; the raw key is never stored.
+    attribute(:token_digest, :string, public?: false, allow_nil?: false)
+
+    attribute(:plane, :atom,
+      public?: true,
+      allow_nil?: false,
+      default: :tenant,
+      constraints: [one_of: [:tenant, :operator]]
+    )
+
+    # Declared scopes as a bounded map: %{family => [:read,:write]}. Effective authority
+    # is the intersection with the minter's role at USE time.
+    attribute(:scopes, :map, public?: true, default: %{})
+
+    # The role of the minter — the actor ceiling this key inherits.
+    attribute(:minter_role, :atom,
+      public?: true,
+      constraints: [one_of: Samen.Scope.Role.all()]
+    )
+
+    # The minter user id the built actor carries (attribution). Non-PII opaque id.
+    attribute(:minter_user_id, :string, public?: true)
+
+    attribute(:revoked_at, :utc_datetime, public?: true)
+  end
+
+  actions do
+    defaults([:read, :destroy, create: :*, update: :*])
+  end
+
+  policies do
+    policy action_type(:read) do
+      authorize_if(Samen.Policy.OrgScope)
+    end
+
+    # Only admins+ may mint or revoke keys; org-scoped.
+    policy action_type([:create, :update, :destroy]) do
+      forbid_unless(Samen.Policy.OrgScope)
+      forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+      authorize_if(always())
     end
   end
 end

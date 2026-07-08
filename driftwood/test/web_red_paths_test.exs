@@ -211,4 +211,89 @@ defmodule Driftwood.WebRedPathsTest do
       assert socket.assigns.session_inactive == true
     end
   end
+
+  # ==========================================================================
+  # RED PATH 6 (Gate-5 F2) — the two-key-classes tenant-owner rule on FREIGHT.
+  #
+  # The doc (§external-surface :707): a TENANT reads its OWN org's PII in CLEAR per its
+  # own RBAC, with NO operator reveal grant. An OPERATOR (impersonating) stays masked
+  # (••••) absent a live grant. A CROSS-ORG tenant sees ZERO of the foreign org's rows.
+  #
+  # This is the FIX for the Gate-5 F2 fail-safe over-masking: the broker console used to
+  # mask its OWN drivers' CDL/name. It now unmasks them via the SHARED
+  # `Samen.Api.PiiResolution` resolver on the `:tenant` plane — while the operator plane
+  # keeps them masked through the SAME resolver.
+  # ==========================================================================
+
+  describe "F2 — tenant-owner reads own driver PII in clear; operator stays masked; cross-org denied" do
+    test "a TENANT broker sees its OWN driver's CDL + name in CLEAR in the console", %{scenario: s} do
+      scope = DriftwoodWeb.BrokerLive.broker_scope(s.org_id)
+      drivers = Reads.driver_roster(scope)
+
+      # Non-vacuous control: the read returned the real rows.
+      assert length(drivers) == 2
+
+      html =
+        render(DriftwoodWeb.BrokerLive, %{
+          no_org: false,
+          org_id: s.org_id,
+          panel: "roster",
+          summary: nil,
+          loads: [],
+          drivers: drivers,
+          settlements: []
+        })
+
+      # MUST render the tenant's OWN driver PII IN CLEAR (the F2 fix — was ••••).
+      assert html =~ "CDL-OK-", "tenant broker did not see its own driver's CDL in clear"
+      assert html =~ "Dana", "tenant broker did not see its own driver's name in clear"
+      # The vault token itself NEVER leaks (plaintext came through the decrypt chokepoint).
+      refute html =~ "vt_"
+    end
+
+    test "an OPERATOR impersonating the SAME org still sees •••• (operator plane masked)", %{scenario: s} do
+      op = Actor.new("op-f2-mask", :operator_support)
+      {:ok, _} = Impersonation.open(op, s.org_id, "F2: operator stays masked")
+
+      socket = DriftwoodWeb.OperatorImpersonationLive.load(empty_socket(), op.id, s.org_id)
+      html = render(DriftwoodWeb.OperatorImpersonationLive, socket.assigns)
+
+      # Real rows present (non-vacuous), PII masked, plaintext ABSENT — the operator
+      # plane is unchanged by the F2 tenant-plane fix.
+      assert length(socket.assigns.drivers) == 2
+      assert html =~ "••••"
+      refute html =~ "CDL-OK-"
+      refute html =~ "CDL-EXP-"
+      refute html =~ "Dana"
+      refute html =~ "vt_"
+    end
+
+    test "a CROSS-ORG tenant broker sees ZERO of another org's drivers (org-scope isolation)", %{scenario: _s} do
+      # A tenant broker scoped to a DIFFERENT org reads through the SAME path. OrgScope
+      # narrows the read to that org — the scenario org's drivers do not exist for it, so
+      # there is no PII to unmask (the tenant-owner rule never crosses the org boundary).
+      other_org = Ecto.UUID.generate()
+      other_scope = DriftwoodWeb.BrokerLive.broker_scope(other_org)
+      drivers = Reads.driver_roster(other_scope)
+
+      assert drivers == [], "a cross-org tenant broker read the scenario org's drivers"
+
+      html =
+        render(DriftwoodWeb.BrokerLive, %{
+          no_org: false,
+          org_id: other_org,
+          panel: "roster",
+          summary: nil,
+          loads: [],
+          drivers: drivers,
+          settlements: []
+        })
+
+      # No foreign-org driver PII — clear or masked — reaches a cross-org tenant.
+      refute html =~ "CDL-OK-"
+      refute html =~ "CDL-EXP-"
+      refute html =~ "Dana"
+      refute html =~ "Reed"
+    end
+  end
 end

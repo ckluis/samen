@@ -10,9 +10,13 @@ defmodule DriftwoodWeb.BrokerLive do
       lane. Non-PII.
     * `roster` — the DRIVER ROSTER (`Driftwood.Reads.driver_roster/1`) with the FMCSA
       status badge computed per driver (medical/CDL expiry + driver status). Driver name
-      + CDL number are vault-routed; on the tenant plane the broker's own scope has no
-      reveal grant here either, so they render `••••` — the roster shows FMCSA STATUS,
-      not driver PII.
+      + CDL number are vault-routed. F2 (Gate-5 carry): the broker scope carries
+      `plane: :tenant`, so the roster reads its OWN drivers' name + CDL number in CLEAR —
+      the doc's two-key-classes tenant-as-owner rule (§external-surface :707): a tenant
+      reads its own org's PII per its own RBAC with NO operator reveal grant. The vault
+      token itself never renders (plaintext comes through the single decrypt chokepoint).
+      The OPERATOR impersonation plane (`plane: :operator`) still renders `••••` — the
+      same shared `Samen.Api.PiiResolution` resolver, opposite plane.
     * `settlements` — the reshaped two-sided money (`Driftwood.Reads.settlements/1`):
       gross − advances − factoring_fee − claims = net_payable, with carryover.
 
@@ -64,10 +68,24 @@ defmodule DriftwoodWeb.BrokerLive do
     )
   end
 
-  # A tenant-member scope for the broker over their own org (no reveal grant).
+  # A tenant-member scope for the broker over their own org.
+  #
+  # F2 (Gate-5 carry): the actor carries `plane: :tenant`. This is the doc's
+  # (§external-surface :707) "two key classes" tenant-as-owner posture: a tenant reads
+  # its OWN org's PII in CLEAR per its own RBAC, with NO operator reveal grant (the
+  # reveal seam is operator-scoped; it does not sit between a tenant and its own
+  # records). `Driftwood.Reads.driver_roster/1` threads this scope through the SHARED
+  # tenant-plane resolver `Samen.Api.PiiResolution.resolve/4`, which — on the `:tenant`
+  # plane — unmasks the driver's vaulted `full_name`/`cdl_number` to plaintext through
+  # the single vault chokepoint. The OPERATOR impersonation scope carries
+  # `plane: :operator` + an `:impersonation` marker, so the SAME resolver keeps its PII
+  # `%Masked{}` (••••) — fixing today's fail-safe over-masking without opening the
+  # operator plane. OrgScope keys only on `org_id`, so `plane` does not affect isolation.
   @doc false
   def broker_scope(org_id) do
-    %Samen.Scope{actor: %{org_id: org_id, role: :member, kind: :tenant}}
+    %Samen.Scope{
+      actor: %{id: "broker:#{org_id}", org_id: org_id, role: :member, kind: :tenant, plane: :tenant}
+    }
   end
 
   defp panel(params), do: param(params, "panel") || "dashboard"

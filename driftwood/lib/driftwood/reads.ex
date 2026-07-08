@@ -45,12 +45,45 @@ defmodule Driftwood.Reads do
     ])
     |> Ash.Query.sort(inserted_at: :asc)
     |> Ash.read!(scope: scope)
+    |> resolve_pii(scope)
     |> Enum.map(fn d ->
       Map.put(d, :__fmcsa__, fmcsa_status(d))
     end)
   rescue
     _ -> []
   end
+
+  # F2 (Gate-5 carry) — the SHARED tenant-plane PII resolver.
+  #
+  # An Ash read returns vault-routed fields as `%Masked{}` (••••) for EVERY scope
+  # (fail-safe by default). `Samen.Api.PiiResolution.resolve/4` is the two-key-classes
+  # rule (doc §external-surface :707): on the `:tenant` plane it unmasks a driver's own
+  # `full_name`/`cdl_number` to PLAINTEXT (the tenant owns its drivers' PII, no operator
+  # reveal grant); on the `:operator` plane (the impersonation scope) it keeps the field
+  # `%Masked{}` — the operator plane stays masked. This is the SAME record-level resolver
+  # the public `/api/v1` egress uses (F1), so the console and the API cannot drift.
+  #
+  # An org-less / plane-less scope resolves to the default masked posture (no plane →
+  # ••••), so a broken/missing scope never leaks plaintext. Fail-closed on a decrypt
+  # error too (a failed vault read leaves the value masked, never raises a leak).
+  defp resolve_pii(records, scope) do
+    Samen.Api.PiiResolution.resolve(
+      records,
+      Driftwood.Freight.Driver,
+      actor_of(scope),
+      repo: Driftwood.Repo
+    )
+  rescue
+    # Any resolver failure MUST NOT downgrade to plaintext — return the records with
+    # the fields still masked (the read already produced %Masked{}).
+    _ -> records
+  end
+
+  # The plane-bearing actor map the resolver keys on. A `%Samen.Scope{}` carries it in
+  # `:actor`; a bare actor map is used as-is; anything else has no plane (masked).
+  defp actor_of(%Samen.Scope{actor: actor}), do: actor
+  defp actor_of(actor) when is_map(actor), do: actor
+  defp actor_of(_), do: %{}
 
   @doc """
   The LOAD BOARD for the given scope: Load (Opportunity alias) rows — name, value cents,

@@ -212,13 +212,23 @@ from the T5.* reports, never faked.
 - ✅ **F3** — guard the session-less `/operator/impersonate` path; render access-denied not a
   500; regression test added; CI green.
 
-**Carry-to-P6:**
-- **F1** — mount an AshJsonApi + webhook surface over `Driftwood.Freight` and add the
-  freight-specific external-surface red paths (CDL `••••` in a JSON payload; masked webhook
-  payload; tenant-key own-PII-in-clear; operator-key absent-without-grant on a driver).
-- **F2** — wire the tenant-plane `Samen.Api.PiiResolution` unmask into the broker console
-  reads so a tenant sees its OWN driver PII in clear per its RBAC (or ratify the stricter
-  over-masking posture explicitly in the design).
+**Carry-to-P6 — BOTH LANDED (P6 PRE, 2026-07-07; `driftwood/reports/P6-PRE-F1-F2.md`):**
+- ✅ **F1 (LANDED)** — Driftwood mounts a versioned AshJsonApi + webhook surface over
+  `Driftwood.Freight`: `/api/v1/drivers` (via `DriftwoodWeb.Api.{KeyAuthPlug,Router,
+  Endpoint}` forwarded from `DriftwoodWeb.Router`), the `Driftwood.Freight.ApiKey` (abbrev
+  `dak`) two-key-class credential, `Driftwood.Webhooks.{load_status,driver_updated}`, an
+  opt-in `show_fields` allowlist on Driver/DispatchEvent, and a committed non-empty
+  `api_contract.v1.json` wired into `ci.sh` step 13. Freight red paths in
+  `test/api_external_surface_test.exs` (CDL never plaintext in a JSON:API operator payload;
+  masked webhook payload; tenant-key own-PII-in-clear; operator-key absent-without-grant;
+  actor-less → zero rows), anti-tautology-flipped. Surfaced an honest P6 finding: the
+  `Samen.Webhook.Payload` storage-name heuristic false-positives on freight catalog names
+  (`cdl_number`/`cdl_state`/`eld_provider`) and drops them (over-strict, not a leak).
+- ✅ **F2 (LANDED)** — the broker scope carries `plane: :tenant`; `Driftwood.Reads.driver_
+  roster/1` threads it through `Samen.Api.PiiResolution.resolve/4` so a tenant sees its OWN
+  driver CDL/name IN CLEAR per its RBAC (no reveal grant); the operator impersonation plane
+  stays `••••` through the same resolver. Red paths in `test/web_red_paths_test.exs` RED
+  PATH 6 + `dogfood_walkthrough_test.exs` step 6, anti-tautology-flipped on both planes.
 - **P6 extraction-retro carries (already flagged in the T5.* reports):** the abbrev registry
   is global-to-samen_core not per-host (T5.2); the `aud_chain` migration is not
   auto-generated when a host mounts the operator plane (T5.4); rollup refresh is a plain

@@ -18,7 +18,8 @@ defmodule Mix.Tasks.Samen.Catalog.Dump do
               {
                 "column_name": "com_id",
                 "logical_name": "id",
-                "type": "UUID"
+                "type": "UUID",
+                "pii": false
               },
               ...
             ]
@@ -26,6 +27,22 @@ defmodule Mix.Tasks.Samen.Catalog.Dump do
           ...
         ]
       }
+
+  ## The `pii` flag (T6.3 — grounding-artifact sufficiency)
+
+  Every field carries a boolean `pii` flag so `schema.dict.json` is a **complete**
+  grounding artifact for an agent: it can read the whole model — every resource
+  (resource-qualified via `resource` + `table_name`), every field (both its
+  `logical_name` the agent writes against and its self-qualifying `column_name`),
+  AND whether that field is vault-routed PII — from ONE file, with no live DB and
+  no separate introspection call.
+
+  The flag keys on the **vault declaration** (`Samen.Pii.Info.vault_routed_columns/1`),
+  NOT on a `pii_` name prefix — so a composite field like `per_full_name` (no
+  `pii_` prefix but vault-routed) is correctly `"pii": true`, matching the same
+  declaration-not-name rule the `pii_reads` / `no_plaintext_pii` verifiers key on.
+  This is what lets an agent know a value must go through the vault + `:reveal`
+  path *before* it writes code that would otherwise fail `pii_reads` at build time.
 
   **Stable ordering** (byte-identical across two runs on the same codebase):
 
@@ -100,6 +117,7 @@ defmodule Mix.Tasks.Samen.Catalog.Dump do
       |> Enum.map(fn resource ->
         tam = Samen.Catalog.table(resource)
         flds = Samen.Catalog.fields(resource)
+        pii_columns = pii_column_set(resource)
 
         %{
           "table_name" => tam.table_name,
@@ -109,7 +127,8 @@ defmodule Mix.Tasks.Samen.Catalog.Dump do
               %{
                 "column_name" => f.column_name,
                 "logical_name" => f.logical_name,
-                "type" => f.type
+                "type" => f.type,
+                "pii" => MapSet.member?(pii_columns, f.column_name)
               }
             end)
         }
@@ -118,6 +137,19 @@ defmodule Mix.Tasks.Samen.Catalog.Dump do
       |> Enum.sort_by(& &1["table_name"])
 
     %{"tables" => tables}
+  end
+
+  # The set of physical storage column names that are vault-routed PII for this
+  # resource, keyed on the `pii do` DECLARATION (not a `pii_` name prefix). A
+  # non-Samen / non-PII resource contributes an empty set (fail-safe: absent =>
+  # not-PII is never claimed for a vault-routed field).
+  defp pii_column_set(resource) do
+    resource
+    |> Samen.Pii.Info.vault_routed_columns()
+    |> Enum.map(&to_string/1)
+    |> MapSet.new()
+  rescue
+    _ -> MapSet.new()
   end
 
   # Discover domain modules to introspect. Priority:

@@ -37,33 +37,42 @@ end
 
 defmodule Samen.Aggregate.QueryBudget do
   @moduledoc """
-  The **query-budget SCAFFOLD** — a ledger accounting every aggregate read against the
-  **cohort being queried** (and per-tenant in aggregate), NOT the requesting actor
-  (T4.5 clause (c); doc "Token-blind isn't inference-blind" honest edge).
+  The **query budget** — a ledger accounting every aggregate read against the **cohort
+  being queried** (and per-tenant in aggregate), NOT the requesting actor (T4.5 clause
+  (c) + T6.6; doc "Token-blind isn't inference-blind" honest edge).
 
-  ## Posture: SCAFFOLD, not enforcement (stated exactly as the doc does)
+  ## Posture: what is ENFORCED vs still under construction (stated exactly as the doc does)
 
-  The doc is precise about what is enforced today vs. under construction:
+  The doc's honesty is preserved carefully. There are TWO distinct layers here, and only
+  one is a formal proof:
+
+    * **ENFORCED today (T6.6)** — a configurable per-cohort (and global) **query-budget
+      DENIAL**. Once a cohort's read count within the rolling window reaches its budget,
+      `Samen.Aggregate.read_all/2` **suppresses** further reads of that cohort
+      (`%Samen.Aggregate.Suppressed{reason: :query_budget}`). This is a real,
+      cross-query control: it bounds the NUMBER of queries against a cohort over time,
+      which is the repeated-overlap / differencing lever the doc names. It is keyed
+      per-COHORT, so collusion (below) does not dodge it.
+
+    * **POSTURE under construction (still open — NOT claimed as solved)** — a FORMAL
+      differential-privacy composition guarantee. The budget above is a coarse,
+      deterministic counter ("N reads per cohort per window"), NOT an epsilon-budget with
+      a proven composition bound. The optional DP noise layer (`Samen.Aggregate.Dp`,
+      Laplace mechanism, opt-in) degrades under composition — every noisy answer spends
+      privacy, and we do NOT yet track a running epsilon-budget that DENIES once the
+      formal budget is spent. t-closeness (bounding a cohort's sensitive-value
+      distribution vs the overall) is likewise NOT implemented. Those remain the honest
+      research edge (see the T6.6 report and `Samen.Aggregate.Dp`).
 
   > We enforce the minimum-cohort / minimum-distinct floor today and treat the
   > cross-query budget / DP layer as posture under construction, not a solved proof —
   > and we name per-actor accounting as the wrong unit rather than implying it would hold.
 
-  So this module:
-
-    * **DOES**: record every aggregate read in a ledger, keyed by cohort (+ resource,
-      + a `"__aggregate__"` tenant scope for the cross-tenant plane). Compute per-cohort
-      read counts over a rolling window. **WARN** (log + telemetry) when a cohort's read
-      count crosses a configurable threshold. This is a real, running ledger — the
-      accounting the honest mitigation is built on.
-
-    * **DOES NOT**: enforce (no read is DENIED by the budget today), implement
-      cross-query suppression, differential-privacy noise, or t-closeness. Those are the
-      **posture-under-construction** research track (plan T6.6). A repeated / overlapping
-      / differencing query is recorded here and — today — still returns (subject to the
-      k-anon / l-diversity FLOORS, which ARE enforced by `Samen.Aggregate.Privacy`). The
-      full cross-query defence is deferred. This is stated in the T4.5 report with a
-      differencing test that documents exactly what happens today.
+  T4.5 shipped the ledger as accounting-only (WARN, never deny). T6.6 promotes it to an
+  **opt-in ENFORCING** budget (deny past a configurable per-cohort / global limit) WHILE
+  keeping the DP-composition guarantee explicitly open. The distinction matters: a
+  deterministic read-count budget is a real, honest cross-query control; it is not a
+  differential-privacy proof, and this moduledoc does not pretend it is.
 
   ## Why per-cohort, not per-actor (the wrong-unit claim, made real)
 
@@ -75,22 +84,29 @@ defmodule Samen.Aggregate.QueryBudget do
 
   The ledger key is `{resource, cohort_key, tenant_scope}` — the cohort being queried.
   Two colluding actors querying the SAME cohort accrue against the SAME ledger key: the
-  count keeps climbing regardless of which actor read it. (The T4.5 collusion test proves
-  this: two distinct actors reading the same cohort produce ONE growing per-cohort count,
-  not two independent per-actor budgets.) The `actor_id` column exists for forensics only
-  and is never the accounting unit — the `count/2` and `over_threshold?/2` predicates
-  ignore it.
+  count keeps climbing regardless of which actor read it, so the ENFORCING budget denies
+  both once the shared cohort budget is spent. (The T6.6 collusion test proves this: two
+  distinct actors reading the same cohort spend ONE per-cohort budget and the SECOND one
+  past the limit is suppressed — a per-actor budget would have let each spend a fresh
+  one.) The `actor_id` column exists for forensics only and is never the accounting unit —
+  the `count/2`, `over_threshold?/2`, and enforcement predicates ignore it.
 
   ## Configuration
 
       config :samen_core, :query_budget_ledger_repo, MyApp.Repo   # falls back to reveal/impersonation repo
       config :samen_core, :query_budget_warn_threshold, 50        # reads-per-cohort before a WARN (default 50)
       config :samen_core, :query_budget_window_seconds, 3600      # rolling window for the count (default 1h)
-      config :samen_core, :query_budget_enabled, true             # record reads (default true; recording only)
+      config :samen_core, :query_budget_enabled, true             # record reads (default true)
 
-  There is deliberately NO `enforce` config — enforcement is the T6.6 track, not a flag
-  we could flip and claim the defence. The warn threshold is the scaffold's teeth: it
-  surfaces a differencing/collusion pattern for a human, without pretending to stop it.
+      # T6.6 ENFORCEMENT (opt-in; default OFF so T4.5 accounting-only behaviour is preserved):
+      config :samen_core, :query_budget_enforce, true             # DENY past the budget (default false)
+      config :samen_core, :query_budget_per_cohort, 100           # max reads per cohort per window (default: warn threshold)
+      config :samen_core, :query_budget_global, 10_000            # max reads across ALL cohorts per window (nil = unlimited)
+
+  Enforcement is **opt-in**: with `:query_budget_enforce` unset/false, the ledger records
+  and WARNs exactly as T4.5 did (no read is denied). The doc's honesty is preserved either
+  way — the DP-composition guarantee is NOT claimed by flipping this flag; the flag turns
+  on a deterministic read-count budget, nothing more.
   """
 
   alias Samen.Aggregate.QueryLedgerRow
@@ -136,6 +152,47 @@ defmodule Samen.Aggregate.QueryBudget do
     case Application.get_env(:samen_core, :query_budget_window_seconds, @default_window_seconds) do
       n when is_integer(n) and n >= 1 -> n
       _ -> @default_window_seconds
+    end
+  end
+
+  @doc """
+  Is the ENFORCING budget on? (T6.6). Default `false` — so an unconfigured host keeps the
+  T4.5 accounting-only behaviour (record + WARN, never deny). `true` DENIES (suppresses)
+  a cohort read once its per-cohort (or the global) budget is spent within the window.
+
+  Config: `config :samen_core, :query_budget_enforce, true`.
+  """
+  @spec enforce?() :: boolean()
+  def enforce? do
+    Application.get_env(:samen_core, :query_budget_enforce, false) == true
+  end
+
+  @doc """
+  The per-cohort budget: the maximum number of reads a single cohort may receive within
+  the rolling window before further reads are DENIED (T6.6). Defaults to the WARN
+  threshold (so a host that set only the T4.5 threshold gets a sensible enforcing budget
+  once it flips `:query_budget_enforce`). Config:
+  `config :samen_core, :query_budget_per_cohort, N`.
+  """
+  @spec per_cohort_budget() :: pos_integer()
+  def per_cohort_budget do
+    case Application.get_env(:samen_core, :query_budget_per_cohort) do
+      n when is_integer(n) and n >= 1 -> n
+      _ -> warn_threshold()
+    end
+  end
+
+  @doc """
+  The global budget: the maximum number of aggregate reads across ALL cohorts (within a
+  tenant scope) per window before further reads are DENIED (T6.6). `nil` = unlimited
+  (only the per-cohort budget applies). The doc names "global / per-cohort" — this is the
+  global arm. Config: `config :samen_core, :query_budget_global, N` (or leave unset).
+  """
+  @spec global_budget() :: pos_integer() | nil
+  def global_budget do
+    case Application.get_env(:samen_core, :query_budget_global) do
+      n when is_integer(n) and n >= 1 -> n
+      _ -> nil
     end
   end
 
@@ -256,13 +313,95 @@ defmodule Samen.Aggregate.QueryBudget do
   @doc """
   Would this cohort be over the WARN threshold? A predicate for a monitor/dashboard.
   Returns `false`-safe (never raises the caller): a ledger error is treated as "not over"
-  because the budget does NOT gate reads — the floors do.
+  because the WARN threshold does NOT gate reads (only the ENFORCING budget does, and only
+  when `enforce?/0` is on).
   """
   @spec over_threshold?(map(), keyword()) :: boolean()
   def over_threshold?(key, opts \\ []) do
     count(key, opts) >= warn_threshold()
   rescue
     _ -> false
+  end
+
+  @doc """
+  The read count across ALL cohorts within a tenant scope in the window (the GLOBAL
+  accounting arm — actor-independent, cohort-independent). Used by the global budget.
+  """
+  @spec global_count(keyword()) :: non_neg_integer()
+  def global_count(opts \\ []) do
+    r = Keyword.get(opts, :repo, repo())
+    tenant_scope = Keyword.get(opts, :tenant_scope, @aggregate_scope)
+    since = DateTime.utc_now() |> DateTime.add(-window_seconds(), :second)
+
+    r.aggregate(
+      from(l in QueryLedgerRow,
+        where: l.tenant_scope == ^tenant_scope and l.read_at >= ^since
+      ),
+      :count
+    )
+  end
+
+  @doc """
+  The ENFORCEMENT decision (T6.6). Given a cohort key, decide whether the NEXT read of
+  that cohort must be DENIED (suppressed) because the per-cohort or global budget is
+  spent. This is checked AFTER the read is recorded (so the count reflects this read), the
+  same way a rate limiter counts the current request: the read that TAKES the count to the
+  limit is the last one served; the read that finds the count already `>= budget` is
+  denied.
+
+  Returns:
+    * `:ok` — enforcement is off, or the budget is not yet spent; serve the cohort.
+    * `{:deny, %{limit: budget, observed: count, scope: :per_cohort | :global}}` — the
+      budget is spent; the caller must suppress this cohort's value with
+      `Samen.Aggregate.Suppressed.query_budget/2`.
+
+  Per-COHORT, actor-independent (collusion-resistant): the count is `count/2`, which
+  ignores the actor. Two colluding actors on the same cohort accrue against one count, so
+  the second one past the budget is denied regardless of which actor issued it.
+
+  Fail-OPEN on a ledger error is deliberate here: the ENFORCING budget is the CROSS-QUERY
+  layer, layered ON TOP of the k-anon / l-diversity FLOORS which fail CLOSED independently.
+  A ledger outage must not take down the aggregate plane; the floors still protect every
+  single-query output. (A ledger error is logged; the read proceeds subject to the floors.)
+  """
+  @spec check(map(), keyword()) :: :ok | {:deny, map()}
+  def check(key, opts \\ []) do
+    if enforce?() do
+      do_check(key, opts)
+    else
+      :ok
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "[query_budget] enforcement check failed (fail-open; floors still enforce): #{inspect(e)}"
+      )
+
+      :ok
+  end
+
+  defp do_check(key, opts) do
+    per_cohort = per_cohort_budget()
+    cohort_count = count(key, opts)
+    tenant_scope = Map.get(key, :tenant_scope, @aggregate_scope)
+    global = global_budget()
+
+    cond do
+      cohort_count > per_cohort ->
+        {:deny, %{limit: per_cohort, observed: cohort_count, scope: :per_cohort}}
+
+      is_integer(global) ->
+        g_count = global_count(Keyword.put(opts, :tenant_scope, tenant_scope))
+
+        if g_count > global do
+          {:deny, %{limit: global, observed: g_count, scope: :global}}
+        else
+          :ok
+        end
+
+      true ->
+        :ok
+    end
   end
 
   defp to_name(mod) when is_atom(mod), do: inspect(mod)

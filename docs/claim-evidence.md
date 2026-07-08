@@ -66,10 +66,10 @@ app*; **MET (substrate)** if only ♻️; **CAVEAT** if 🟡; **GAP** if 🔴.
 
 | # | Claim (doc line) | Class | Driftwood evidence | Verdict |
 |---|---|---|---|---|
-| E1 | A B2B SaaS still ships a public API; `api_key`/`webhook` are inherited objects; the public API is AshJsonApi/AshGraphql over the SAME Ash resources the UI + operator plane use (:701) | ♻️ SUBSTRATE + 🔴/🟡 | **Proven in `demo`** (`demo/lib/demo_web/router.ex` forwards `/api/v1` to an AshJsonApi endpoint; `demo/test/api_*.exs`). **Driftwood mounts NO public JSON API** — `driftwood/api_contract.v1.json` has `"resources": []`; the `:api` router pipeline is defined but no route uses it. The `api_contract` verifier runs against an empty contract (`ci.sh` step 13). **This is a named residue** (`reports/T5.2.md` doc-parity residue: "No public JSON API is mounted in T5.2 … the tenant UI/API is T5.3"), but T5.3 also did not mount one. **So the external-surface claims below are NOT exercised on freight resources.** | **GAP on Driftwood** / MET (substrate) — see FINDING F1 |
-| E2 | Two key classes: a tenant key reads its OWN org's PII in CLEAR (no operator grant); an operator/cross-tenant key is masked-by-default, plaintext only under a live grant (:707) | ♻️ SUBSTRATE + 🟡 DEVIATION | **Proven in `demo`** (`demo/test/api_two_key_classes_test.exs`: tenant key reads own-org email/name plaintext; operator key sees vaulted fields ABSENT without a grant, plaintext with a live T1.6 grant). **In Driftwood the tenant-owner-sees-plaintext half is NOT realized:** the broker console masks its OWN drivers' CDL/name (`••••`) because `Driftwood.Reads` reads through Ash (which returns `%Masked{}`) and the LiveView never invokes the `Samen.Api.PiiResolution` tenant-plane unmask path. `test/cdl_vault_test.exs` confirms a normal Ash read returns `%Masked{}` for any scope. This is a **fail-SAFE deviation** (over-masking, not under-masking) named as an honest residue in `reports/T5.3.md`. The operator-plane half (masked-by-default, grant-gated) IS proven on freight (C2/C3 above). | **CAVEAT (deviation, fail-safe) — see FINDING F2** |
-| E3 | Serialization allowlist: columns not auto-published; a masked value serializes as `••••`; the payload exposes the catalog field name, never the physical storage name or vault; PII absent by omission is structural (:711) | ♻️ SUBSTRATE | Proven in `demo` (`api_serialization_boundary_test.exs`, `api_allowlist_test.exs`, `webhook_payload_allowlist_test.exs`). **Not exercised on a Driftwood driver CDL payload** (no API mounted — see E1). The `%Masked{}` type serializes to `••••` by omission across LiveView/CSV/log in Driftwood (C2), but the JSON-API/webhook egress on freight is untested. | **MET (substrate)** — see FINDING F1 |
-| E4 | Inbound API runs the SAME org-scope + RBAC + reveal-grant checks; outbound webhooks emit the SAME masked, catalogued payloads; `api_contract` verifier fails on an un-versioned structural break (:707, :730) | ♻️ SUBSTRATE + 🟡 RESIDUE | Proven in `demo` (`api_auth_red_path_test.exs`, `api_contract_verifier_test.exs`, `webhook_payload_allowlist_test.exs`). Driftwood's `api_contract --version v1` verifier runs (green, empty contract) so a future structural break is caught, but there is no Driftwood webhook/API payload test on freight. | **MET (substrate)** — see FINDING F1 |
+| E1 | A B2B SaaS still ships a public API; `api_key`/`webhook` are inherited objects; the public API is AshJsonApi/AshGraphql over the SAME Ash resources the UI + operator plane use (:701) | ✅ TEST (F1 landed P6) | **F1 (Gate-5 carry) LANDED:** Driftwood now mounts a versioned public JSON:API over `Driftwood.Freight` — `DriftwoodWeb.Router` forwards `/api/v1` → `DriftwoodWeb.Api.Endpoint` (`KeyAuthPlug` → `AshJsonApi.Router` over the SAME Ash Driver resource the UI/operator plane use). `Driftwood.Freight.ApiKey` (abbrev `dak`) is the inherited two-key-class credential. `api_contract.v1.json` now pins the Driver routes (`/api/v1/drivers`, `/drivers/:id`); `ci.sh` step 13 fails on any structural break. `test/api_external_surface_test.exs` (8 tests). | **MET (F1 landed)** |
+| E2 | Two key classes: a tenant key reads its OWN org's PII in CLEAR (no operator grant); an operator/cross-tenant key is masked-by-default, plaintext only under a live grant (:707) | ✅ TEST (F1+F2 landed P6) | **F1+F2 (Gate-5 carries) LANDED — both halves now realized on freight.** JSON:API (F1, `test/api_external_surface_test.exs`): a `:tenant` key reads its own org's driver CDL + name in CLEAR (no grant); a `:operator` key sees the vaulted CDL ABSENT without a grant, PLAINTEXT with a live distinct-party grant; a cross-org tenant key sees zero foreign rows. Broker CONSOLE (F2): the broker scope carries `plane: :tenant`; `Driftwood.Reads.driver_roster/1` threads it through `Samen.Api.PiiResolution.resolve/4` so the broker reads its OWN drivers' CDL/name in clear, while the OPERATOR impersonation scope (`plane: :operator`) keeps them `••••` — same resolver, opposite plane (`test/web_red_paths_test.exs` RED PATH 6, `dogfood_walkthrough_test.exs` step 6). Both anti-tautology-flipped (no-op resolver → tenant-clear fails; force-plane-tenant → operator-masked fails; reverted byte-identical). | **MET (F1+F2 landed)** |
+| E3 | Serialization allowlist: columns not auto-published; a masked value serializes as `••••`; the payload exposes the catalog field name, never the physical storage name or vault; PII absent by omission is structural (:711) | ✅ TEST (F1 landed P6) | **F1 LANDED on freight.** The Driver `json_api do show_fields([…]) end` allowlist is opt-in (default not-exposed): `org_id` + the `custom` bag are ABSENT by omission (`api_external_surface_test.exs`). The `driver.updated` webhook (`Driftwood.Webhooks`) serializes the masked composite `full_name` as `••••`, never plaintext, never a `vt_` token, never a storage name; the `load.status` webhook over DispatchEvent is catalog-named, opt-in, non-PII. **Honest P6 finding (in the test):** `Samen.Webhook.Payload`'s storage-name heuristic `~r/^[a-z]{3}_/` false-positives on freight CATALOG names (`cdl_number`, `cdl_state`, `eld_provider`) and DROPS them from the webhook body — over-strict (absent, never a leak); the JSON:API surface (AshJsonApi serializer + PiiResolution) renders CDL correctly. | **MET (F1 landed) + honest P6 finding** |
+| E4 | Inbound API runs the SAME org-scope + RBAC + reveal-grant checks; outbound webhooks emit the SAME masked, catalogued payloads; `api_contract` verifier fails on an un-versioned structural break (:707, :730) | ✅ TEST (F1 landed P6) | **F1 LANDED on freight.** Inbound: the JSON:API runs the Driver's OWN policy stack (OrgScope + the two-key-class plane rule) — a cross-org tenant key sees zero rows, an operator key is masked without a grant, an actor-less request sees zero rows (fail closed) (`api_external_surface_test.exs`). Outbound: `Driftwood.Webhooks.{load_status,driver_updated}` emit via the SAME `Samen.Webhook.Payload` (opt-in allowlist, `••••` masked PII, catalog names only). `api_contract --version v1` now diffs a NON-empty committed contract (Driver routes) so a structural break is caught (`ci.sh` step 13). | **MET (F1 landed)** |
 
 ---
 
@@ -77,7 +77,7 @@ app*; **MET (substrate)** if only ♻️; **CAVEAT** if 🟡; **GAP** if 🔴.
 
 | # | Claim / honest-edge (doc line) | Class | Driftwood evidence | Verdict |
 |---|---|---|---|---|
-| H1 | Token-blind ≠ inference-blind; k-anonymity is the floor; k-anon + l-diversity enforced TODAY; cross-query budget / DP is posture-under-construction, not a solved proof; per-actor accounting named as the wrong unit (:947, :906) | ✅ TEST + 🟡 RESIDUE | k=2/l=2 floors configured (`config/config.exs:83–84`) and enforced by `mix samen.verify.aggregate_privacy` (green, ci.sh step 16) + the read path (`Samen.Aggregate.read_all/2` → `%Suppressed{}`). Live Gate-5 probe V4: no cohort below k leaks. **The cross-query/DP budget is explicitly posture-under-construction** — a `aqb_query_ledger` scaffold exists (`migrations/…query_budget_ledger.exs`) but the differencing-attack budget is NOT a solved proof (matches the doc's own honesty). | **MET (floor) + honest posture** |
+| H1 | Token-blind ≠ inference-blind; k-anonymity is the floor; k-anon + l-diversity enforced TODAY; cross-query budget / DP is posture-under-construction, not a solved proof; per-actor accounting named as the wrong unit (:947, :906) | ✅ TEST + 🟡 RESIDUE | k=2/l=2 floors configured (`config/config.exs:83–84`) and enforced by `mix samen.verify.aggregate_privacy` (green, ci.sh step 16) + the read path (`Samen.Aggregate.read_all/2` → `%Suppressed{}`). Live Gate-5 probe V4: no cohort below k leaks. **T6.6 UPDATE (samen_core + demo):** the query budget is now **ENFORCING** (opt-in) — a per-cohort/global read budget DENIES (suppresses with `reason: :query_budget`) further reads once spent, keyed per-cohort so two colluding actors share ONE budget (`Samen.Aggregate.QueryBudget.check/2`; demo differencing suite proves the above-floor differencing residue is now BLOCKED when opted in). A calibrated Laplace **DP noise** layer (`Samen.Aggregate.Dp`, opt-in, configurable ε) exists and is distribution-tested. **STILL posture (named, not claimed):** the FORMAL DP composition guarantee (an ε-budget composed across queries) and t-closeness — the enforcing budget is a deterministic read-COUNT budget, NOT an ε-budget proof (`samen_core/reports/T6.6.md`). Both flags default OFF; Driftwood has not yet opted in (a vertical carry). | **MET (floor + enforcing budget) + honest DP posture** |
 | H2 | "Can't log it ⇒ can't see it" is a real availability cost; routine reveal fails closed if the audit sink / control-plane DB is unreachable; the KMS gets its own availability posture; a KMS partition denies decrypts, never resurrects a key or exposes plaintext (:951) | 🎯 GAME-DAY + ♻️ | T5.5 proves KMS-unavailability fails CLOSED: an empty key dir → `reveal` returns `{:error, :unavailable}` (`reports/T5.5.md` §T5.5(c)). Fail-closed reveal on an unreachable grant/suspension table is ♻️ substrate (`suspended?/2` defaults to "suspended"; `for_session/3` denies). | **MET** |
 | H3 | One substrate is one blast radius — engineered down (BEAM isolation, Oban SKIP LOCKED + per-queue limits, read replica, expand/contract + lock/statement_timeout + PITR with stated RPO/RTO) (:953) | 🎯 GAME-DAY + 🟡 RESIDUE | The bad-migration incident — "the highest-consequence incident we run" — is the T5.5 drill (both arms, production-sized, key-store exclusion). Oban is wired (`lib/driftwood/jobs/dispatch_worker.ex`, `AutoRevokeWorker`). **Read replica is not provisioned locally** (operator TODO); the drilled RTO numbers are local-sim floors, not the real Neon RTO (named honestly in `reports/T5.5.md`). | **MET (as local sim)** + CAVEAT |
 | H4 | Erasure of a `non_pii!` plaintext-at-rest column is by row-level deletion/redaction (not key-shred); the destruction oracle includes the registered-non_pii! set in its tier list (:927) | 🎯 GAME-DAY | Driftwood registers `drv_cdl_state`/`drv_cdl_expiry` via reviewed `non_pii!` (distinct reviewers; `pii_classify` fails without it — `reports/T5.2.md` OR-2). T5.4 oracle attests `registered_non_pii` redacted post-shred (`cdl_state → [REDACTED_NON_PII]`, `cdl_expiry → 1970-01-01` sentinel) (`reports/T5.4.md` §4). | **MET** |
@@ -98,38 +98,49 @@ app*; **MET (substrate)** if only ♻️; **CAVEAT** if 🟡; **GAP** if 🔴.
 
 ## G. FINDINGS (claims with a gap or a deviation on the running Driftwood app)
 
-### 🔴 F1 — Driftwood mounts NO public API/webhook surface; the external-surface guarantees are proven only in `demo`, never on freight PII
+### ✅ F1 (LANDED, P6) — Driftwood now mounts a versioned public API/webhook surface over freight; the external-surface guarantees are proven on freight PII
 
-The vision doc's **external-surface section** (E1–E4) is load-bearing: "a serious tenant
-owes integrations … Samen treats them as core." The full machinery — versioned
-AshJsonApi, webhooks, two-key classes, allowlist serialization, `api_contract` — is
-proven in `demo` (`demo/test/api_*.exs`, `webhook_payload_allowlist_test.exs`). **But
-Driftwood, the *reference vertical* the plan says "is where the guarantees stop being
-claims," mounts no API** (`api_contract.v1.json` = empty; `:api` pipeline defined but
-unused). So there is NO test proving a **driver's CDL is `••••` in a JSON-API payload**,
-NO test proving a **freight webhook emits a masked catalogued payload**, and NO test
-proving the **tenant-key-reads-own-PII-in-clear** rule on a freight resource.
-- **Impact:** the external-surface claims are MET at the *substrate* level but UNPROVEN on
-  the *reference vertical*. This is a real doc-parity gap for T5.6's mandate ("full
-  adversarial review of the RUNNING product").
-- **Honest-residue status:** partially named (`reports/T5.2.md` calls the empty contract a
-  residue) but framed as "deferred to T5.3" — T5.3 then also did not mount it. The residue
-  label exists, so this is a **CAVEAT, not an un-labeled invention** — but it should be an
-  explicit Gate-5 fix task, because "the reference vertical proves the API surface" is a
-  plausible reader expectation the current build does not meet.
+**RESOLVED (P6 PRE, this session).** Driftwood mounts a versioned public JSON:API +
+webhooks over `Driftwood.Freight`:
+- `DriftwoodWeb.Router` forwards `/api/v1` → `DriftwoodWeb.Api.Endpoint`
+  (`KeyAuthPlug` → `AshJsonApi.Router`) over the Driver resource (`/api/v1/drivers`).
+- `Driftwood.Freight.ApiKey` (abbrev `dak`, migration `20260708100000_freight_api_key.exs`,
+  catalogued in-tx) is the two-key-class credential the auth resolver reads.
+- The Driver carries a `json_api do show_fields([…]) end` opt-in allowlist +
+  `Samen.Api.PiiResolution` prep; DispatchEvent carries a non-PII allowlist for the
+  `load.status` webhook. `Driftwood.Webhooks.{load_status,driver_updated}` emit via the
+  shared `Samen.Webhook.Payload`.
+- The committed `api_contract.v1.json` pins the Driver routes/fields; `ci.sh` step 13
+  fails on a structural break.
+- Red paths (`test/api_external_surface_test.exs`, 8): CDL never plaintext in a JSON:API
+  operator payload; masked webhook payload (`••••`, no storage names, opt-in); tenant key
+  reads own-org CDL/name in clear; operator key CDL absent without a grant (plaintext with
+  a live grant — control); actor-less request → zero rows. Anti-tautology: forcing every
+  key to `plane: :tenant` flips the operator-absent path to leaking; reverted byte-identical.
+- **Honest P6 finding surfaced:** `Samen.Webhook.Payload`'s storage-name heuristic
+  `~r/^[a-z]{3}_/` false-positives on legitimate freight CATALOG names (`cdl_number`,
+  `cdl_state`, `eld_provider`) and drops them from the webhook body — over-strict (absent,
+  never a leak); flagged for the extraction retro (the heuristic should key on the
+  resource's declared storage prefix, not a blanket regex).
 
-### 🟡 F2 — The tenant-owner-sees-own-PII-in-clear rule is inverted in Driftwood's tenant UI (fail-SAFE deviation)
+### ✅ F2 (LANDED, P6) — The tenant-owner-sees-own-PII-in-clear rule is now realized in Driftwood's broker console
 
-Doc (:707): "a tenant key … reads that PII per the tenant's own RBAC, with no operator
-reveal grant involved." Demo proves it (`api_two_key_classes_test.exs`). **Driftwood's
-broker console masks its OWN drivers' CDL/name (`••••`)** because `Driftwood.Reads` reads
-through Ash (→ `%Masked{}`) and the LiveView never calls the tenant-plane
-`Samen.Api.PiiResolution` unmask path. `test/cdl_vault_test.exs` confirms a normal Ash
-read returns `%Masked{}` for ALL scopes.
-- **Impact:** a broker cannot see its own driver's CDL number in its own console without a
-  reveal grant — stricter than the doc, but **fail-safe** (over-masking, never
-  under-masking; no leak). Named as an honest residue in `reports/T5.3.md`.
-- **Severity:** low (posture, not a breach). Carry-to-P6 or accept as a stated posture.
+**RESOLVED (P6 PRE, this session).** The broker scope (`DriftwoodWeb.BrokerLive.broker_scope/1`)
+now carries `plane: :tenant`, and `Driftwood.Reads.driver_roster/1` threads it through
+`Samen.Api.PiiResolution.resolve/4` — the SAME resolver the F1 API egress uses. On the
+`:tenant` plane the broker reads its OWN drivers' CDL number + name in CLEAR (no operator
+reveal grant); the OPERATOR impersonation scope (`plane: :operator` + `:impersonation`
+marker) keeps them `%Masked{}` (`••••`) through the same resolver — the operator plane is
+untouched.
+- Red paths (`test/web_red_paths_test.exs` RED PATH 6): tenant broker sees its own driver's
+  CDL in clear; operator impersonating the same org still sees `••••`; a cross-org tenant
+  broker sees zero foreign-org drivers. `dogfood_walkthrough_test.exs` step 6 updated to the
+  corrected posture.
+- Anti-tautology (both planes, project-local scratch, reverted byte-identical): a no-op
+  resolver flips the tenant-clear path to failing; forcing every actor to `plane: :tenant`
+  flips the operator-masked path to leaking.
+- Fail-safe preserved: a plane-less/org-less scope resolves to the default masked posture;
+  a decrypt error leaves the value masked (never a leak).
 
 ### ✅ F3 (FIXED IN-PHASE) — `/operator/impersonate` with no `operator_id`/`org_id` params used to 500 instead of rendering the documented "access denied" state (availability defect; no PII leak)
 
@@ -166,12 +177,41 @@ before returning it when the operator id is nil.
 
 ---
 
-## H. Summary
+## H. Phase-6 doc-parity addendum (Gate 6, T6.7) — the foundry-readiness sections
 
-- **Every load-bearing claim** in §runs / §control / §data / §limits maps to a passing
-  Driftwood test, a game-day artifact, a substrate-inherited proof, or a **named honest
-  residue** — **no claim is left un-evidenced and un-labeled** except where called out as
-  FINDING F1/F3.
+The Gate-5 table above covers §runs / §control / §data / §external-surface / §limits on the
+*running Driftwood app*. Gate 6 extends the map to the vision-doc sections the foundry itself
+generalizes: **§llm** ("software an agent builds", :921–:923), the **foundry / Rule-of-Three**
+framing (:67, :957), the **ClickHouse/CDC power-up** (:625–:637), and the **aggregate
+output-privacy** posture (:906, :947). Each maps to a **passing test / eval**, a **generated
+artifact**, a **named honest residue**, or an **operator-TODO** — never faked. Evidence
+independently re-run this gate is marked ⟳.
+
+| # | Claim (doc line) | Class | Evidence | Verdict |
+|---|---|---|---|---|
+| **L1** | "Samen removes the blank page. Every object and field is in the catalog, so the agent grounds on a known model." (:921) | ✅ TEST | `schema.dict.json` on all 4 hosts is a committed, resource-qualified, PII-flagged dict (`mix samen.catalog.dump`, T6.3); each host's `ci.sh` drift-check confirms committed == code ⟳. `docs/guides/llm-grounding.md` documents the two-name identity model + the authoring loop. | **MET** |
+| **L2** | "a schema hallucination fails at compile time … a CI linter rejects any reference to a column that isn't catalogued — a hallucinated field doesn't compile" (:923) | ✅ TEST + real OS-exit proof | `agent_authoring_eval_test.exs` case 2 (T6.3): a hallucinated/uncatalogued column FAILS `catalog_parity` + `column_refs`, driven through a **real `System.cmd/3` child process** — `mix samen.verify.catalog_parity` EXITs **1** on the seeded column, **0** on the clean host (true `:erlang.halt(1)`). 13/13 eval green ⟳. | **MET** |
+| **L3** | "net-new PII … attribute :ssn, :string … is caught by mix samen.verify.pii_classify before it merges, or requires an explicit audited non_pii! override" (:923) | ✅ TEST | Eval case 3: a net-new plaintext `attribute :ssn, :string` FAILS `pii_classify` (exit 1). Case 5: a vault value logged outside `:reveal` FAILS `pii_reads`. Case 4: an unprefixed column FAILS `prefixes`. Case 6: a `belongs_to` with no `SameOrgFk` FAILS `same_org_fk`. Case 1 (a correct resource) PASSES — the non-vacuous positive control. Anti-tautology (T6.3): sabotaging `pii_classify.check` flips ONLY case 3 to uncaught, reverted byte-identical. | **MET** |
+| **L4** | The agent disambiguates by the resource-qualified catalog entry, not a bare field name; `pii` keyed on the vault DECLARATION not the `pii_` prefix (:923) | ✅ TEST | `catalog_test.exs` (+2, T6.3): the `pii` boolean keys on `Samen.Pii.Info.vault_routed_columns/1` — a composite `per_full_name`/`pat_full_name` (no `pii_` prefix) is correctly `pii:true`; an anti-vacuity guard asserts BOTH true and false appear. | **MET** |
+| **F0** | "the core extracted by the Rule of Three … pays from the third product on — not a foundry you build before you've shipped one" (:67, :957) | ✅ TEST + 🟡 RESIDUE | `docs/extraction-retro.md` (T6.1) applies the counting rule HONESTLY (demo + driftwood = 2, not 3); ONE extraction where the copy was byte-identical + security-critical (A4 aud_chain → `Samen.OperatorPlane.Migration`, 10 red-path tests + anti-tautology ⟳); everything else ADR'd (006/007) or backlogged with a trigger. **RESIDUE (honest, matches the doc):** the inheritance is measured on 2 self-built hosts; a 3rd *independently-motivated* vertical would sharpen several abstractions (A3/A5). Named, not oversold. | **MET (honest)** |
+| **F1r** | "build the 20%, inherit the 80%" — reuse thesis (:542) | ✅ MEASURED + calibrated | `pawchart/docs/reuse-measurement.md` (T6.2): **4 of 6 idioms at ZERO vertical code**; PII vault = 1 line; operator plane = 42 lines (one projection); ~96% inherited against the 4 families a clinic touches; **all 15 verifiers green on FIRST invocation** (zero verifier fixes) ⟳. **Calibrated honestly (the doc's own edge :542):** the *domain* 20% (the two nouns) stays authored real work — "you inherit INFRASTRUCTURE, not a domain model." | **MET (on the axis the doc claims)** |
+| **F2r** | Generators / installer — a builder can start a new SaaS on the substrate (plan T6.4; foundry framing) | ✅ TEST (red-path re-run) | `mix samen.gen.app` (T6.4). **Re-run independently this gate ⟳:** `--module Gate6probe --prefix zx --abbrev zxq` → the generated app's full 17-step `ci.sh` EXITs **0** on first run (correct-by-construction, incl. its own vault anti-tautology probe flip); the `--no-reserve-abbrevs` variant FAILS CLOSED at compile: `abbrev "zyc" … is not in the abbrev registry … Abbrevs are permanent and must be reserved`. Registry restored byte-identical, scratch apps removed. **Operator-TODO:** committing a generated app means committing the appended global-registry rows (N1 / ADR-006). | **MET** |
+| **P1** | "ClickHouse is a power-up, not a prerequisite … opt-in per product, default off … never read a 'current' value from the analytics tier" (:625, :635) | ✅ TEST + 🟡 RESIDUE | `Samen.Cdc` (T6.5): default OFF, pays nothing; `LocalPostgres` sim mirrors a token-blind projection into a second schema; `ClickHouse` skeleton (`ecto_ch`, config-flagged, fails closed unconnected); `read_current/3` ALWAYS raises + `mix samen.verify.never_read_current` AST lint (green/vacuous with the tier off ⟳). **RESIDUE:** real ClickPipes/`ecto_ch` wiring + a CI diff of the pipe allow-list are operator TODOs (`docs/cdc-analytics-tier.md`). | **MET (mechanism + sim)** + CAVEAT (real wiring = TODO) |
+| **P2** | "The token-only-downstream invariant is what makes the mirror safe … the CDC mirror … carries vault tokens, not plaintext PII" (:637) | ✅ TEST (re-run on freight) | `Samen.Cdc.Projection` excludes plaintext PII BY CONSTRUCTION; the oracle `cdc_mirror` tier does a real schema+content scan when on (RP-A/RP-B/RP-C fail closed, 12 tests + anti-tautology flip ⟳). **Red-teamed this gate against the real freight Driver:** `project/1` includes ZERO plaintext_pii columns; the vaulted `pii_drv_cdl_number`/`drv_full_name`/`drv_emails`/`drv_phones` classify as `:token` (safe vt_ FKs); `assert_no_plaintext!(Driver, :all)` REFUSES the naive mirror-everything request. | **MET** |
+| **A1** | "the aggregate plane enforces today a minimum-cohort and minimum-distinct floor (k-anonymity + l-diversity), and treats the cross-query / differencing defense … as posture under construction" (:906) | ✅ TEST + 🟡 RESIDUE | k=2 / l=2 floors enforced (fail-closed) — green across demo/driftwood/pawchart gates ⟳. **T6.6 promoted the query budget to ENFORCING** (opt-in): a per-COHORT/global read budget DENIES further reads once spent; two colluding actors on one cohort share ONE budget (the doc's "per-actor is the wrong unit" now an *enforced* outcome, `aggregate_differencing_test.exs` +4). **RESIDUE (named, matches doc):** the enforcing budget is a deterministic read-COUNT budget, NOT a formal ε-budget. | **MET (floor + enforcing budget)** |
+| **A2** | "a differential-privacy posture (calibrated noise composed across queries) … posture under construction, not a solved proof … t-closeness on the same track … per-actor accounting as the wrong unit" (:906, :947) | 🟡 POSTURE (honest) | `Samen.Aggregate.Dp` (T6.6): a distribution-tested Laplace mechanism (opt-in, configurable ε; empirical mean ≈ 0, variance ≈ 2b² over 20k draws). **The moduledoc is scrupulously honest — a single ε-release is NOT a system-level guarantee; composition (the averaging attack) and t-closeness stay explicitly OPEN.** There is deliberately NO flag that flips on a "formal DP guarantee." This is the doc's posture, carried faithfully — NOT an oversell. | **MET (mechanism shipped, posture honestly labeled)** |
+
+**No new oversell found.** Every Phase-6 claim maps to a runnable eval / generated artifact / red-teamed mechanism, with the two genuinely-open items (formal DP composition, t-closeness) named as posture-under-construction in exactly the doc's own words. The one place a builder must not be misled — the DP mechanism could imply a guarantee it lacks — is guarded by the moduledoc + the OFF-by-default flags + the A2 row above.
+
+---
+
+## I. Summary
+
+- **Every load-bearing claim** in §runs / §control / §data / §external-surface / §limits
+  (sections A–G) maps to a passing Driftwood test, a game-day artifact, a substrate-inherited
+  proof, or a **named honest residue** — and the **Phase-6 foundry sections** (§llm,
+  Rule-of-Three, CDC power-up, DP posture) are now mapped in **section H** (L1–L4, F0/F1r/F2r,
+  P1/P2, A1/A2). **No claim is left un-evidenced and un-labeled.** F1/F2/F3 are all resolved.
 - **On the RUNNING Driftwood app**, the core privacy/authz/crypto-audit guarantees HOLD
   under adversarial probing: cross-org isolation, masked impersonation, grant-gated reveal,
   structural aggregate mutual-exclusion, k-anon suppression, append-only tamper-evident

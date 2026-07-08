@@ -1,0 +1,838 @@
+{
+  "tables": [
+    {
+      "fields": [
+        {
+          "column_name": "own_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "own_emails",
+          "logical_name": "emails",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "own_full_name",
+          "logical_name": "full_name",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "own_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "own_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "own_job_title",
+          "logical_name": "job_title",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "own_marketing_opt_in",
+          "logical_name": "marketing_opt_in",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "own_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "own_phones",
+          "logical_name": "phones",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "own_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Clinic.Patient",
+      "table_name": "own_patient"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pag_clinic_count",
+          "logical_name": "clinic_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pag_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pag_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pag_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pag_pet_count",
+          "logical_name": "pet_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pag_refreshed_at",
+          "logical_name": "refreshed_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pag_species",
+          "logical_name": "species",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pag_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Aggregate.PatientVolumeBySpecies",
+      "table_name": "pag_patient_volume_by_species"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pbc_currency",
+          "logical_name": "currency",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pbc_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "pbc_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbc_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbc_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbc_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pbc_stripe_customer_id",
+          "logical_name": "stripe_customer_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pbc_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_pbc_billing_email",
+          "logical_name": "billing_email",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "pii_pbc_billing_name",
+          "logical_name": "billing_name",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "PawChart.Billing.Customer",
+      "table_name": "pbc_customer"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pbe_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "pbe_expires_at",
+          "logical_name": "expires_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbe_feature",
+          "logical_name": "feature",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pbe_granted",
+          "logical_name": "granted",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "pbe_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbe_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbe_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbe_plan_id",
+          "logical_name": "plan_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbe_subscription_id",
+          "logical_name": "subscription_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbe_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Billing.Entitlement",
+      "table_name": "pbe_entitlement"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pbi_amount_due_cents",
+          "logical_name": "amount_due_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pbi_amount_paid_cents",
+          "logical_name": "amount_paid_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pbi_currency",
+          "logical_name": "currency",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pbi_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "pbi_customer_id",
+          "logical_name": "customer_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbi_due_date",
+          "logical_name": "due_date",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbi_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbi_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbi_line_items",
+          "logical_name": "line_items",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
+        },
+        {
+          "column_name": "pbi_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbi_paid_at",
+          "logical_name": "paid_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbi_period_end",
+          "logical_name": "period_end",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbi_period_start",
+          "logical_name": "period_start",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbi_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pbi_stripe_invoice_id",
+          "logical_name": "stripe_invoice_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pbi_subscription_id",
+          "logical_name": "subscription_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbi_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Billing.Invoice",
+      "table_name": "pbi_invoice"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pbl_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "pbl_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pbl_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "pbl_features",
+          "logical_name": "features",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "pbl_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbl_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbl_interval",
+          "logical_name": "interval",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pbl_label",
+          "logical_name": "label",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pbl_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pbl_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbl_stripe_plan_id",
+          "logical_name": "stripe_plan_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pbl_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Billing.Plan",
+      "table_name": "pbl_plan"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pbs_cancel_at",
+          "logical_name": "cancel_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbs_cancelled_at",
+          "logical_name": "cancelled_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbs_current_period_end",
+          "logical_name": "current_period_end",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbs_current_period_start",
+          "logical_name": "current_period_start",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbs_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "pbs_customer_id",
+          "logical_name": "customer_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbs_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbs_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbs_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbs_plan_id",
+          "logical_name": "plan_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbs_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pbs_stripe_subscription_id",
+          "logical_name": "stripe_subscription_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pbs_trial_end",
+          "logical_name": "trial_end",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbs_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Billing.Subscription",
+      "table_name": "pbs_subscription"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pbu_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbu_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbu_metric",
+          "logical_name": "metric",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pbu_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbu_period_end",
+          "logical_name": "period_end",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbu_period_start",
+          "logical_name": "period_start",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbu_quantity",
+          "logical_name": "quantity",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pbu_reported_at",
+          "logical_name": "reported_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbu_subscription_id",
+          "logical_name": "subscription_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbu_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Billing.Usage",
+      "table_name": "pbu_usage"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pby_amount_cents",
+          "logical_name": "amount_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pby_currency",
+          "logical_name": "currency",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pby_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "pby_customer_id",
+          "logical_name": "customer_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pby_failure_code",
+          "logical_name": "failure_code",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pby_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pby_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pby_invoice_id",
+          "logical_name": "invoice_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pby_last4",
+          "logical_name": "last4",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pby_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pby_paid_at",
+          "logical_name": "paid_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pby_payment_method_type",
+          "logical_name": "payment_method_type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pby_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pby_stripe_payment_intent_id",
+          "logical_name": "stripe_payment_intent_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pby_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Billing.Payment",
+      "table_name": "pby_payment"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pet_breed",
+          "logical_name": "breed",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pet_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pet_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pet_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pet_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pet_owner_id",
+          "logical_name": "owner_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pet_species",
+          "logical_name": "species",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pet_temperament",
+          "logical_name": "temperament",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pet_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pet_weight_kg",
+          "logical_name": "weight_kg",
+          "pii": false,
+          "type": "Decimal"
+        },
+        {
+          "column_name": "pii_pet_microchip",
+          "logical_name": "microchip",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "PawChart.Clinic.Pet",
+      "table_name": "pet_pet"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "ppc_active",
+          "logical_name": "active",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "ppc_currency",
+          "logical_name": "currency",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ppc_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "ppc_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ppc_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ppc_interval",
+          "logical_name": "interval",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "ppc_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ppc_plan_id",
+          "logical_name": "plan_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ppc_stripe_price_id",
+          "logical_name": "stripe_price_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ppc_unit_amount_cents",
+          "logical_name": "unit_amount_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "ppc_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Billing.Price",
+      "table_name": "ppc_price"
+    }
+  ]
+}

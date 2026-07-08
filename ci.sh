@@ -70,5 +70,15 @@ echo "==> Running Driftwood CI gate (full 19-step verifier gate + crypto-shred g
 )
 echo "==> Driftwood CI gate: PASSED"
 
+# --- PawChart second-vertical thin slice gate (Phase 6, T6.2) ---
+echo ""
+echo "==> Running PawChart CI gate (full 17-step verifier gate + microchip anti-tautology probe)"
+(
+  cd "$REPO_ROOT/pawchart"
+  mix deps.get --quiet
+  MIX_ENV=test bash ci.sh
+)
+echo "==> PawChart CI gate: PASSED"
+
 echo ""
 echo "==> ROOT CI: ALL PASSED"

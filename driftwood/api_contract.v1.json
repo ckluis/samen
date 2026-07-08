@@ -1,4 +1,97 @@
 {
-  "resources": [],
+  "resources": [
+    {
+      "fields": [
+        {
+          "name": "dispatched_at",
+          "required": false,
+          "type": "Ash.Type.UtcDatetime"
+        },
+        {
+          "name": "driver_id",
+          "required": true,
+          "type": "Ash.Type.UUID"
+        },
+        {
+          "name": "id",
+          "required": true,
+          "type": "Ash.Type.UUID"
+        },
+        {
+          "name": "load_id",
+          "required": true,
+          "type": "Ash.Type.UUID"
+        },
+        {
+          "name": "status",
+          "required": false,
+          "type": "Ash.Type.Atom"
+        }
+      ],
+      "module": "Driftwood.Freight.DispatchEvent",
+      "routes": [],
+      "type": "dispatch_event"
+    },
+    {
+      "fields": [
+        {
+          "name": "cdl_expiry",
+          "required": false,
+          "type": "Ash.Type.String"
+        },
+        {
+          "name": "cdl_number",
+          "required": false,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "name": "cdl_state",
+          "required": false,
+          "type": "Ash.Type.String"
+        },
+        {
+          "name": "eld_provider",
+          "required": false,
+          "type": "Ash.Type.Atom"
+        },
+        {
+          "name": "full_name",
+          "required": false,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "name": "id",
+          "required": true,
+          "type": "Ash.Type.UUID"
+        },
+        {
+          "name": "medical_card_expiry",
+          "required": false,
+          "type": "Ash.Type.Date"
+        },
+        {
+          "name": "status",
+          "required": false,
+          "type": "Ash.Type.Atom"
+        }
+      ],
+      "module": "Driftwood.Freight.Driver",
+      "routes": [
+        {
+          "action": "read",
+          "method": "GET",
+          "path": "/drivers",
+          "required_args": []
+        },
+        {
+          "action": "read",
+          "method": "GET",
+          "path": "/drivers/:id",
+          "required_args": []
+        }
+      ],
+      "type": "driver"
+    }
+  ],
   "version": "v1"
 }

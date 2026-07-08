@@ -5,71 +5,85 @@
         {
           "column_name": "act_body",
           "logical_name": "body",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "act_company_id",
           "logical_name": "company_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "act_completed_at",
           "logical_name": "completed_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "act_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "act_due_at",
           "logical_name": "due_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "act_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "act_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "act_opportunity_id",
           "logical_name": "opportunity_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "act_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "act_person_id",
           "logical_name": "person_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "act_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "act_subject",
           "logical_name": "subject",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "act_type",
           "logical_name": "type",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "act_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -81,41 +95,49 @@
         {
           "column_name": "amr_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "amr_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "amr_mrr_cents",
           "logical_name": "mrr_cents",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "amr_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "amr_refreshed_at",
           "logical_name": "refreshed_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "amr_tenant_count",
           "logical_name": "tenant_count",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "amr_tier",
           "logical_name": "tier",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "amr_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -127,41 +149,49 @@
         {
           "column_name": "atq_depth",
           "logical_name": "depth",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "atq_distinct_priorities",
           "logical_name": "distinct_priorities",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "atq_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "atq_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "atq_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "atq_refreshed_at",
           "logical_name": "refreshed_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "atq_status",
           "logical_name": "status",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "atq_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -173,56 +203,67 @@
         {
           "column_name": "att_company_id",
           "logical_name": "company_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "att_content_type",
           "logical_name": "content_type",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "att_file_name",
           "logical_name": "file_name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "att_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "att_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "att_opportunity_id",
           "logical_name": "opportunity_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "att_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "att_person_id",
           "logical_name": "person_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "att_size_bytes",
           "logical_name": "size_bytes",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "att_storage_key",
           "logical_name": "storage_key",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "att_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -234,51 +275,61 @@
         {
           "column_name": "bcu_currency",
           "logical_name": "currency",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bcu_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "bcu_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bcu_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bcu_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bcu_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "bcu_stripe_customer_id",
           "logical_name": "stripe_customer_id",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bcu_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pii_bcu_billing_email",
           "logical_name": "billing_email",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "pii_bcu_billing_name",
           "logical_name": "billing_name",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         }
       ],
@@ -290,51 +341,61 @@
         {
           "column_name": "ben_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "ben_expires_at",
           "logical_name": "expires_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "ben_feature",
           "logical_name": "feature",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "ben_granted",
           "logical_name": "granted",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "ben_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "ben_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "ben_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "ben_plan_id",
           "logical_name": "plan_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "ben_subscription_id",
           "logical_name": "subscription_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "ben_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -346,86 +407,103 @@
         {
           "column_name": "bin_amount_due_cents",
           "logical_name": "amount_due_cents",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "bin_amount_paid_cents",
           "logical_name": "amount_paid_cents",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "bin_currency",
           "logical_name": "currency",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bin_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "bin_customer_id",
           "logical_name": "customer_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bin_due_date",
           "logical_name": "due_date",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bin_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bin_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bin_line_items",
           "logical_name": "line_items",
+          "pii": false,
           "type": "{:array, Ash.Type.Map}"
         },
         {
           "column_name": "bin_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bin_paid_at",
           "logical_name": "paid_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bin_period_end",
           "logical_name": "period_end",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bin_period_start",
           "logical_name": "period_start",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bin_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "bin_stripe_invoice_id",
           "logical_name": "stripe_invoice_id",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bin_subscription_id",
           "logical_name": "subscription_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bin_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -437,61 +515,73 @@
         {
           "column_name": "bpl_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "bpl_description",
           "logical_name": "description",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bpl_enabled",
           "logical_name": "enabled",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "bpl_features",
           "logical_name": "features",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "bpl_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bpl_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bpl_interval",
           "logical_name": "interval",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "bpl_label",
           "logical_name": "label",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bpl_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bpl_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bpl_stripe_plan_id",
           "logical_name": "stripe_plan_id",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bpl_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -503,56 +593,67 @@
         {
           "column_name": "bpr_active",
           "logical_name": "active",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "bpr_currency",
           "logical_name": "currency",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bpr_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "bpr_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bpr_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bpr_interval",
           "logical_name": "interval",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "bpr_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bpr_plan_id",
           "logical_name": "plan_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bpr_stripe_price_id",
           "logical_name": "stripe_price_id",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bpr_unit_amount_cents",
           "logical_name": "unit_amount_cents",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "bpr_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -564,76 +665,91 @@
         {
           "column_name": "bpy_amount_cents",
           "logical_name": "amount_cents",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "bpy_currency",
           "logical_name": "currency",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bpy_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "bpy_customer_id",
           "logical_name": "customer_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bpy_failure_code",
           "logical_name": "failure_code",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bpy_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bpy_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bpy_invoice_id",
           "logical_name": "invoice_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bpy_last4",
           "logical_name": "last4",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bpy_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bpy_paid_at",
           "logical_name": "paid_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bpy_payment_method_type",
           "logical_name": "payment_method_type",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "bpy_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "bpy_stripe_payment_intent_id",
           "logical_name": "stripe_payment_intent_id",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bpy_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -645,71 +761,85 @@
         {
           "column_name": "bsb_cancel_at",
           "logical_name": "cancel_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bsb_cancelled_at",
           "logical_name": "cancelled_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bsb_current_period_end",
           "logical_name": "current_period_end",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bsb_current_period_start",
           "logical_name": "current_period_start",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bsb_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "bsb_customer_id",
           "logical_name": "customer_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bsb_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bsb_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bsb_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bsb_plan_id",
           "logical_name": "plan_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bsb_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "bsb_stripe_subscription_id",
           "logical_name": "stripe_subscription_id",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "bsb_trial_end",
           "logical_name": "trial_end",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bsb_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -721,51 +851,61 @@
         {
           "column_name": "bus_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bus_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bus_metric",
           "logical_name": "metric",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "bus_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bus_period_end",
           "logical_name": "period_end",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bus_period_start",
           "logical_name": "period_start",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bus_quantity",
           "logical_name": "quantity",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "bus_reported_at",
           "logical_name": "reported_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "bus_subscription_id",
           "logical_name": "subscription_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "bus_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -777,51 +917,61 @@
         {
           "column_name": "cbl_block_type",
           "logical_name": "block_type",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "cbl_content",
           "logical_name": "content",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "cbl_enabled",
           "logical_name": "enabled",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "cbl_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cbl_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cbl_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cbl_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cbl_page_id",
           "logical_name": "page_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cbl_position",
           "logical_name": "position",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "cbl_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -833,51 +983,61 @@
         {
           "column_name": "cmd_alt_text",
           "logical_name": "alt_text",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cmd_content_type",
           "logical_name": "content_type",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cmd_file_name",
           "logical_name": "file_name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cmd_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cmd_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cmd_media_type",
           "logical_name": "media_type",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "cmd_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cmd_size_bytes",
           "logical_name": "size_bytes",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "cmd_storage_key",
           "logical_name": "storage_key",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cmd_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -889,56 +1049,67 @@
         {
           "column_name": "cmp_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "cmp_domain",
           "logical_name": "domain",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cmp_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cmp_industry",
           "logical_name": "industry",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cmp_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cmp_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cmp_notes",
           "logical_name": "notes",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cmp_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cmp_size",
           "logical_name": "size",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cmp_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cmp_website",
           "logical_name": "website",
+          "pii": false,
           "type": "String"
         }
       ],
@@ -950,46 +1121,55 @@
         {
           "column_name": "cnt_active",
           "logical_name": "active",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "cnt_display_name",
           "logical_name": "display_name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cnt_emails",
           "logical_name": "emails",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "cnt_full_name",
           "logical_name": "full_name",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "cnt_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cnt_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cnt_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cnt_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pii_cnt_dob",
           "logical_name": "dob",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         }
       ],
@@ -1001,51 +1181,61 @@
         {
           "column_name": "cnv_enabled",
           "logical_name": "enabled",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "cnv_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cnv_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cnv_label",
           "logical_name": "label",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cnv_nav_type",
           "logical_name": "nav_type",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "cnv_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cnv_position",
           "logical_name": "position",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "cnv_target",
           "logical_name": "target",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "cnv_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cnv_url",
           "logical_name": "url",
+          "pii": false,
           "type": "String"
         }
       ],
@@ -1057,51 +1247,61 @@
         {
           "column_name": "cpg_body",
           "logical_name": "body",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cpg_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "cpg_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cpg_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cpg_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cpg_published_at",
           "logical_name": "published_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cpg_slug",
           "logical_name": "slug",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cpg_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "cpg_title",
           "logical_name": "title",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cpg_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1113,56 +1313,67 @@
         {
           "column_name": "cpt_body",
           "logical_name": "body",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cpt_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "cpt_excerpt",
           "logical_name": "excerpt",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cpt_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cpt_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cpt_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cpt_published_at",
           "logical_name": "published_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cpt_slug",
           "logical_name": "slug",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cpt_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "cpt_title",
           "logical_name": "title",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cpt_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1174,66 +1385,79 @@
         {
           "column_name": "csm_canonical_url",
           "logical_name": "canonical_url",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "csm_description",
           "logical_name": "description",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "csm_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "csm_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "csm_meta_title",
           "logical_name": "meta_title",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "csm_no_follow",
           "logical_name": "no_follow",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "csm_no_index",
           "logical_name": "no_index",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "csm_og_description",
           "logical_name": "og_description",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "csm_og_title",
           "logical_name": "og_title",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "csm_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "csm_page_id",
           "logical_name": "page_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "csm_post_id",
           "logical_name": "post_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "csm_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1245,56 +1469,67 @@
         {
           "column_name": "cvr_author_id",
           "logical_name": "author_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cvr_change_summary",
           "logical_name": "change_summary",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cvr_content_snapshot",
           "logical_name": "content_snapshot",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "cvr_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cvr_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cvr_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cvr_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "cvr_subject_id",
           "logical_name": "subject_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "cvr_subject_type",
           "logical_name": "subject_type",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "cvr_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "cvr_version_number",
           "logical_name": "version_number",
+          "pii": false,
           "type": "Integer"
         }
       ],
@@ -1306,36 +1541,43 @@
         {
           "column_name": "ido_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "ido_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "ido_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "ido_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "ido_plan",
           "logical_name": "plan",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "ido_slug",
           "logical_name": "slug",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "ido_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1347,41 +1589,49 @@
         {
           "column_name": "inv_accept_token",
           "logical_name": "accept_token",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "inv_email",
           "logical_name": "email",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "inv_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "inv_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "inv_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "inv_role",
           "logical_name": "role",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "inv_status",
           "logical_name": "status",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "inv_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1393,41 +1643,49 @@
         {
           "column_name": "iro_enabled",
           "logical_name": "enabled",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "iro_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "iro_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "iro_label",
           "logical_name": "label",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "iro_name",
           "logical_name": "name",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "iro_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "iro_rank",
           "logical_name": "rank",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "iro_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1439,51 +1697,61 @@
         {
           "column_name": "key_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "key_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "key_membership_id",
           "logical_name": "membership_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "key_minter_role",
           "logical_name": "minter_role",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "key_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "key_plane",
           "logical_name": "plane",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "key_revoked_at",
           "logical_name": "revoked_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "key_scopes",
           "logical_name": "scopes",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "key_token_digest",
           "logical_name": "token_digest",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "key_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1495,36 +1763,43 @@
         {
           "column_name": "mbr_contact_id",
           "logical_name": "contact_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mbr_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mbr_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "mbr_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mbr_role",
           "logical_name": "role",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "mbr_status",
           "logical_name": "status",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "mbr_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1536,36 +1811,43 @@
         {
           "column_name": "mbs_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mbs_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "mbs_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mbs_role",
           "logical_name": "role",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "mbs_status",
           "logical_name": "status",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "mbs_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "mbs_user_id",
           "logical_name": "user_id",
+          "pii": false,
           "type": "UUID"
         }
       ],
@@ -1577,51 +1859,61 @@
         {
           "column_name": "mca_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "mca_description",
           "logical_name": "description",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "mca_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mca_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "mca_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "mca_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mca_scheduled_at",
           "logical_name": "scheduled_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "mca_sent_at",
           "logical_name": "sent_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "mca_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "mca_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1633,46 +1925,55 @@
         {
           "column_name": "mee_event_type",
           "logical_name": "event_type",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "mee_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mee_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "mee_metadata",
           "logical_name": "metadata",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "mee_occurred_at",
           "logical_name": "occurred_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "mee_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mee_send_id",
           "logical_name": "send_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mee_subscriber_id",
           "logical_name": "subscriber_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mee_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1684,46 +1985,55 @@
         {
           "column_name": "msg_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "msg_description",
           "logical_name": "description",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "msg_filter_criteria",
           "logical_name": "filter_criteria",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "msg_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "msg_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "msg_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "msg_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "msg_subscriber_count",
           "logical_name": "subscriber_count",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "msg_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1735,61 +2045,73 @@
         {
           "column_name": "msn_campaign_id",
           "logical_name": "campaign_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "msn_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "msn_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "msn_idempotency_key",
           "logical_name": "idempotency_key",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "msn_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "msn_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "msn_queued_at",
           "logical_name": "queued_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "msn_sent_at",
           "logical_name": "sent_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "msn_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "msn_subscriber_id",
           "logical_name": "subscriber_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "msn_template_id",
           "logical_name": "template_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "msn_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1801,46 +2123,55 @@
         {
           "column_name": "msp_active",
           "logical_name": "active",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "msp_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "msp_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "msp_notes",
           "logical_name": "notes",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "msp_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "msp_reason",
           "logical_name": "reason",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "msp_subscriber_id",
           "logical_name": "subscriber_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "msp_suppressed_at",
           "logical_name": "suppressed_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "msp_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1852,46 +2183,55 @@
         {
           "column_name": "msu_consent_at",
           "logical_name": "consent_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "msu_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "msu_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "msu_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "msu_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "msu_source",
           "logical_name": "source",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "msu_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "msu_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pii_msu_email",
           "logical_name": "email",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         }
       ],
@@ -1903,61 +2243,73 @@
         {
           "column_name": "mtp_body_html",
           "logical_name": "body_html",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "mtp_body_text",
           "logical_name": "body_text",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "mtp_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "mtp_enabled",
           "logical_name": "enabled",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "mtp_from_address",
           "logical_name": "from_address",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "mtp_from_name",
           "logical_name": "from_name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "mtp_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mtp_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "mtp_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "mtp_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "mtp_subject_line",
           "logical_name": "subject_line",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "mtp_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -1969,71 +2321,85 @@
         {
           "column_name": "opp_close_date",
           "logical_name": "close_date",
+          "pii": false,
           "type": "Date"
         },
         {
           "column_name": "opp_company_id",
           "logical_name": "company_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "opp_currency",
           "logical_name": "currency",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "opp_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "opp_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "opp_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "opp_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "opp_notes",
           "logical_name": "notes",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "opp_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "opp_pipeline_id",
           "logical_name": "pipeline_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "opp_probability",
           "logical_name": "probability",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "opp_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "opp_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "opp_value_cents",
           "logical_name": "value_cents",
+          "pii": false,
           "type": "Integer"
         }
       ],
@@ -2045,36 +2411,43 @@
         {
           "column_name": "org_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "org_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "org_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "org_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "org_plan",
           "logical_name": "plan",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "org_slug",
           "logical_name": "slug",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "org_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -2086,56 +2459,67 @@
         {
           "column_name": "per_company_id",
           "logical_name": "company_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "per_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "per_display_name",
           "logical_name": "display_name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "per_emails",
           "logical_name": "emails",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "per_full_name",
           "logical_name": "full_name",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "per_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "per_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "per_job_title",
           "logical_name": "job_title",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "per_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "per_phones",
           "logical_name": "phones",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "per_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -2147,51 +2531,61 @@
         {
           "column_name": "pff_description",
           "logical_name": "description",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "pff_enabled",
           "logical_name": "enabled",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "pff_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "pff_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pff_metadata",
           "logical_name": "metadata",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "pff_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "pff_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "pff_rollout_pct",
           "logical_name": "rollout_pct",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "pff_stage",
           "logical_name": "stage",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "pff_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -2203,61 +2597,73 @@
         {
           "column_name": "pfl_content_type",
           "logical_name": "content_type",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "pfl_filename",
           "logical_name": "filename",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "pfl_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "pfl_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pfl_metadata",
           "logical_name": "metadata",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "pfl_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "pfl_search_vector",
           "logical_name": "search_vector",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "pfl_size_bytes",
           "logical_name": "size_bytes",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "pfl_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "pfl_storage_key",
           "logical_name": "storage_key",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "pfl_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pfl_uploaded_by_id",
           "logical_name": "uploaded_by_id",
+          "pii": false,
           "type": "UUID"
         }
       ],
@@ -2269,46 +2675,55 @@
         {
           "column_name": "pip_enabled",
           "logical_name": "enabled",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "pip_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "pip_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pip_label",
           "logical_name": "label",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "pip_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "pip_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "pip_stage_order",
           "logical_name": "stage_order",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "pip_stage_type",
           "logical_name": "stage_type",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "pip_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -2320,61 +2735,73 @@
         {
           "column_name": "pii_pnt_rendered_body",
           "logical_name": "rendered_body",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "pnt_channel",
           "logical_name": "channel",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "pnt_event_type",
           "logical_name": "event_type",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "pnt_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "pnt_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pnt_metadata",
           "logical_name": "metadata",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "pnt_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "pnt_read_at",
           "logical_name": "read_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pnt_recipient_id",
           "logical_name": "recipient_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "pnt_sent_at",
           "logical_name": "sent_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pnt_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "pnt_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -2386,51 +2813,61 @@
         {
           "column_name": "psh_description",
           "logical_name": "description",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "psh_enabled",
           "logical_name": "enabled",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "psh_field_name",
           "logical_name": "field_name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "psh_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "psh_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "psh_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "psh_resource_name",
           "logical_name": "resource_name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "psh_ts_config",
           "logical_name": "ts_config",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "psh_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "psh_vector_column",
           "logical_name": "vector_column",
+          "pii": false,
           "type": "String"
         }
       ],
@@ -2442,61 +2879,73 @@
         {
           "column_name": "pii_pwh_signing_secret",
           "logical_name": "signing_secret",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "pwh_event_types",
           "logical_name": "event_types",
+          "pii": false,
           "type": "{:array, Ash.Type.String}"
         },
         {
           "column_name": "pwh_failure_count",
           "logical_name": "failure_count",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "pwh_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "pwh_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pwh_label",
           "logical_name": "label",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "pwh_last_delivered_at",
           "logical_name": "last_delivered_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pwh_metadata",
           "logical_name": "metadata",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "pwh_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "pwh_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "pwh_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pwh_url",
           "logical_name": "url",
+          "pii": false,
           "type": "String"
         }
       ],
@@ -2508,61 +2957,73 @@
         {
           "column_name": "pii_sag_email",
           "logical_name": "email",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "sag_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "sag_external_id",
           "logical_name": "external_id",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "sag_full_name",
           "logical_name": "full_name",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "sag_handle",
           "logical_name": "handle",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "sag_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "sag_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "sag_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "sag_role",
           "logical_name": "role",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "sag_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "sag_timezone",
           "logical_name": "timezone",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "sag_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -2574,51 +3035,61 @@
         {
           "column_name": "scs_agent_id",
           "logical_name": "agent_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "scs_channel",
           "logical_name": "channel",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "scs_comments",
           "logical_name": "comments",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "scs_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "scs_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "scs_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "scs_responded_at",
           "logical_name": "responded_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "scs_score",
           "logical_name": "score",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "scs_ticket_id",
           "logical_name": "ticket_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "scs_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -2630,41 +3101,49 @@
         {
           "column_name": "scv_channel",
           "logical_name": "channel",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "scv_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "scv_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "scv_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "scv_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "scv_subject",
           "logical_name": "subject",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "scv_ticket_id",
           "logical_name": "ticket_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "scv_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -2676,51 +3155,61 @@
         {
           "column_name": "smc_body_template",
           "logical_name": "body_template",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "smc_category",
           "logical_name": "category",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "smc_description",
           "logical_name": "description",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "smc_enabled",
           "logical_name": "enabled",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "smc_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "smc_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "smc_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "smc_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "smc_tags",
           "logical_name": "tags",
+          "pii": false,
           "type": "{:array, Ash.Type.String}"
         },
         {
           "column_name": "smc_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -2732,61 +3221,73 @@
         {
           "column_name": "pii_smg_body",
           "logical_name": "body",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "smg_agent_id",
           "logical_name": "agent_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "smg_attachments",
           "logical_name": "attachments",
+          "pii": false,
           "type": "{:array, Ash.Type.String}"
         },
         {
           "column_name": "smg_conversation_id",
           "logical_name": "conversation_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "smg_created_via",
           "logical_name": "created_via",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "smg_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "smg_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "smg_message_type",
           "logical_name": "message_type",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "smg_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "smg_sender_id",
           "logical_name": "sender_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "smg_sender_type",
           "logical_name": "sender_type",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "smg_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -2798,51 +3299,61 @@
         {
           "column_name": "ssl_enabled",
           "logical_name": "enabled",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "ssl_first_response_minutes",
           "logical_name": "first_response_minutes",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "ssl_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "ssl_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "ssl_label",
           "logical_name": "label",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "ssl_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "ssl_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "ssl_priority",
           "logical_name": "priority",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "ssl_resolve_minutes",
           "logical_name": "resolve_minutes",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "ssl_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -2854,76 +3365,91 @@
         {
           "column_name": "stk_breached",
           "logical_name": "breached",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "stk_closed_at",
           "logical_name": "closed_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "stk_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "stk_external_id",
           "logical_name": "external_id",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "stk_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "stk_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "stk_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "stk_priority",
           "logical_name": "priority",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "stk_resolved_at",
           "logical_name": "resolved_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "stk_sla_breach_at",
           "logical_name": "sla_breach_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "stk_sla_id",
           "logical_name": "sla_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "stk_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "stk_subject",
           "logical_name": "subject",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "stk_tags",
           "logical_name": "tags",
+          "pii": false,
           "type": "{:array, Ash.Type.String}"
         },
         {
           "column_name": "stk_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -2935,41 +3461,49 @@
         {
           "column_name": "usr_emails",
           "logical_name": "emails",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "usr_full_name",
           "logical_name": "full_name",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "usr_handle",
           "logical_name": "handle",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "usr_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "usr_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "usr_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "usr_status",
           "logical_name": "status",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "usr_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],

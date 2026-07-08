@@ -107,9 +107,12 @@ echo "--- step 12/20: mix samen.verify.tnt_boundary"
 mix samen.verify.tnt_boundary
 echo "    PASSED"
 
-# 13. C6 api_contract structural-break check (Driftwood mounts no public API in T5.2 —
-#     the tenant UI/API is T5.3 — so the v1 contract is empty; the verifier still runs
-#     to guarantee no un-versioned structural break slips in when it IS mounted).
+# 13. C6 api_contract structural-break check. F1 (Gate-5 carry): Driftwood now mounts a
+#     versioned public JSON:API over Driftwood.Freight (Driver at /api/v1/drivers, the
+#     two key classes, allowlist serialization, + a load.status/driver.updated webhook).
+#     The committed api_contract.v1.json pins the Driver routes + fields (cdl_number /
+#     full_name as vault fields); the verifier fails the build on any un-versioned
+#     structural break (a removed field / narrowed type / dropped route).
 echo "--- step 13/20: mix samen.verify.api_contract --version v1"
 mix samen.verify.api_contract --version v1 --snapshot "$DW_DIR/api_contract.v1.json"
 echo "    PASSED"
@@ -127,6 +130,15 @@ echo "    PASSED"
 # 16. T4.5 aggregate-privacy floors.
 echo "--- step 16/20: mix samen.verify.aggregate_privacy"
 mix samen.verify.aggregate_privacy
+echo "    PASSED"
+
+# 16b. T6.5 never-read-current lint. Driftwood does NOT opt into the CDC analytics
+#      tier (opt-in per product, default off), so the lint is vacuously satisfied
+#      here — but wiring it into the gate proves the guard travels with a real
+#      vertical and would fire the moment a product turned the mirror on and read a
+#      'current' value from it (doc line 635).
+echo "--- step 16b/20: mix samen.verify.never_read_current (CDC tier off — T6.5)"
+mix samen.verify.never_read_current
 echo "    PASSED"
 
 # 17. Default test suite (settlement property test, FMCSA gate red paths, CDL vault

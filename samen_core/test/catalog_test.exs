@@ -238,6 +238,59 @@ defmodule SamenCore.CatalogTest do
         assert Map.has_key?(field, "type"), "field must have type"
       end)
     end
+
+    # ----------------------------------------------------------------------
+    # T6.3 (part c) — schema.dict.json is a SUFFICIENT grounding artifact:
+    # every field carries a PII flag, resource-qualified, keyed on the vault
+    # DECLARATION (not a `pii_` name prefix). This is what lets an agent read
+    # the whole model — resource, field, and PII-ness — from ONE file.
+    # ----------------------------------------------------------------------
+    test "every field entry carries a boolean `pii` flag (grounding completeness)" do
+      resources = [
+        SamenCore.Support.Clinical.Patient,
+        SamenCore.Support.Crm.Contact
+      ]
+
+      dict = Mix.Tasks.Samen.Catalog.Dump.build_dict(resources)
+
+      all_fields = Enum.flat_map(dict["tables"], & &1["fields"])
+      assert all_fields != [], "dict must be non-trivial"
+
+      Enum.each(all_fields, fn field ->
+        assert Map.has_key?(field, "pii"), "every field must carry a `pii` flag"
+        assert is_boolean(field["pii"]), "`pii` must be a boolean, got: #{inspect(field["pii"])}"
+      end)
+    end
+
+    test "the `pii` flag keys on the vault DECLARATION for BOTH composite and scalar PII" do
+      # Patient declares composite PII (full_name/emails/phones → pat_ prefix, NO
+      # pii_ prefix) AND scalar PII (dob/mrn → pii_pat_ prefix). Both must be
+      # pii:true; non-PII columns (id/org_id/timestamps) must be pii:false.
+      dict = Mix.Tasks.Samen.Catalog.Dump.build_dict([SamenCore.Support.Clinical.Patient])
+      [table] = dict["tables"]
+
+      by_col = Map.new(table["fields"], fn f -> {f["column_name"], f["pii"]} end)
+
+      # Composite PII: carries the resource abbrev, NO pii_ prefix — still pii:true
+      # (proves the flag keys on the declaration, not the storage-name prefix).
+      assert by_col["pat_full_name"] == true, "composite PII pat_full_name must be pii:true"
+      assert by_col["pat_emails"] == true, "composite PII pat_emails must be pii:true"
+      assert by_col["pat_phones"] == true, "composite PII pat_phones must be pii:true"
+
+      # Scalar PII: carries the pii_ prefix.
+      assert by_col["pii_pat_dob"] == true, "scalar PII pii_pat_dob must be pii:true"
+      assert by_col["pii_pat_mrn"] == true, "scalar PII pii_pat_mrn must be pii:true"
+
+      # Non-PII infrastructure columns.
+      assert by_col["pat_id"] == false, "pat_id must be pii:false"
+      assert by_col["pat_org_id"] == false, "pat_org_id must be pii:false"
+
+      # ANTI-VACUITY: the flag is not a constant — the dict contains BOTH true and
+      # false, so a "pii:true everywhere" or "pii:false everywhere" bug is caught.
+      flags = Enum.map(table["fields"], & &1["pii"])
+      assert Enum.any?(flags, &(&1 == true)), "at least one field must be pii:true"
+      assert Enum.any?(flags, &(&1 == false)), "at least one field must be pii:false"
+    end
   end
 
   # ============================================================

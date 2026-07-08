@@ -76,11 +76,31 @@ config :samen_core, :vault_repo, Demo.Repo
 config :samen_core, :k_anonymity_min_cohort, 2
 config :samen_core, :l_diversity_min_distinct, 2
 
-# The query-budget ledger (SCAFFOLD — accounting only, WARN-not-enforce; the
-# cross-query budget / DP enforcement is posture under construction, plan T6.6).
+# The query-budget ledger. Accounting is always on (per-cohort, WARN-not-enforce).
 config :samen_core, :query_budget_ledger_repo, Demo.Repo
 config :samen_core, :query_budget_warn_threshold, 50
 config :samen_core, :query_budget_window_seconds, 3600
+
+# T6.6 — the ENFORCING cross-query budget is OPT-IN and stays OFF here by default, so the
+# demo's dashboard reads are never budget-denied in ordinary operation. The adversarial
+# differencing suite turns it ON per-test (with a small per-cohort budget) to prove that,
+# when enabled, a repeated/collusion read of an above-floor cohort is SUPPRESSED
+# (`reason: :query_budget`) — the cross-query defence the ledger could only RECORD in
+# T4.5. A production operator opts in with:
+#   config :samen_core, :query_budget_enforce, true
+#   config :samen_core, :query_budget_per_cohort, N   # reads/cohort/window before deny
+#   config :samen_core, :query_budget_global, M        # reads across all cohorts/window (optional)
+config :samen_core, :query_budget_enforce, false
+
+# T6.6 — the OPT-IN differential-privacy noise layer (Laplace mechanism, `Samen.Aggregate.Dp`)
+# is likewise OFF by default. Enabling it adds calibrated noise to released aggregate
+# counts. HONEST CAVEAT (see the Dp moduledoc + the T6.6 report): a single ε-DP release is
+# NOT a system-level DP guarantee — a formal ε-budget composed across queries is the
+# still-open research edge (t-closeness too). We ship the mechanism, not the composition
+# proof. Enable with:
+#   config :samen_core, :dp_enabled, true
+#   config :samen_core, :dp_epsilon, 1.0
+config :samen_core, :dp_enabled, false
 
 # Oban: T2.1 canonical queue taxonomy (consolidates T1.6 same-tx reveal enqueue).
 # Uses the full Samen.Jobs queue taxonomy per the T2.1 convention layer.

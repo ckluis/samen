@@ -29,6 +29,13 @@ defmodule DriftwoodWeb.Router do
     plug(:accepts, ["json"])
   end
 
+  # F1 (Gate-5 carry) — the versioned public API surface. `forward` sends `/api/v1/*` to
+  # the AshJsonApi endpoint (key-auth → the two key classes → the generated JSON:API
+  # router over `Driftwood.Freight`). The declared route `/drivers` is reached at
+  # `/api/v1/drivers` externally — the stable public contract (doc §external-surface
+  # "explicitly versioned, URL-namespaced, e.g. /api/v1").
+  forward("/api/v1", DriftwoodWeb.Api.Endpoint)
+
   scope "/", DriftwoodWeb do
     pipe_through(:browser)
 

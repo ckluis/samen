@@ -65,7 +65,13 @@ defmodule Driftwood.DogfoodWalkthroughTest do
     assert dash_html =~ "rollup-backed"
     assert dash_html =~ "net payable"
 
-    # --- 6. Broker ROSTER masks driver PII on the tenant plane too ---
+    # --- 6. Broker ROSTER reads its OWN drivers' PII in CLEAR (F2 tenant-owner rule) ---
+    # The doc's two-key-classes tenant-as-owner posture (§external-surface :707): a
+    # tenant reads its OWN org's PII in clear per its own RBAC, with NO operator reveal
+    # grant. `broker_scope/1` carries `plane: :tenant`; `driver_roster/1` threads it
+    # through `Samen.Api.PiiResolution.resolve/4`, which unmasks the driver's own CDL +
+    # name. (This fixes the Gate-5 F2 fail-safe over-masking — the broker used to see
+    # ••••.) The OPERATOR plane still masks (step 7).
     broker_scope = DriftwoodWeb.BrokerLive.broker_scope(a.org_id)
     drivers = Reads.driver_roster(broker_scope)
     assert length(drivers) == 2
@@ -81,9 +87,12 @@ defmodule Driftwood.DogfoodWalkthroughTest do
         settlements: []
       })
 
-    assert roster_html =~ "••••"
-    refute roster_html =~ "CDL-OK-"
-    refute roster_html =~ "Dana"
+    # The broker sees its OWN drivers' CDL number + name in CLEAR (no reveal grant).
+    assert roster_html =~ "CDL-OK-"
+    assert roster_html =~ "Dana"
+    # The vault token itself NEVER renders (plaintext came through the decrypt
+    # chokepoint, not the raw token).
+    refute roster_html =~ "vt_"
     # FMCSA badges: one OK (compliant), one BLOCKED (expired medical).
     assert roster_html =~ "OK"
     assert roster_html =~ "BLOCKED"

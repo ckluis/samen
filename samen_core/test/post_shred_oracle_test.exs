@@ -51,6 +51,7 @@ defmodule Samen.PostShredOracleTest do
       Samen.Kms.FileBacked.simulate_outage(false)
       Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
       Application.delete_env(:samen_core, :cdc_mirror_repo)
+      Application.delete_env(:samen_core, :cdc)
     end)
 
     :ok
@@ -510,16 +511,16 @@ defmodule Samen.PostShredOracleTest do
   # CDC-mirror stub
   # ======================================================================
 
-  describe "CDC-mirror STUB (Phase-6)" do
-    test "inactive by default: a pass with the Phase-6 seam" do
+  describe "CDC-mirror tier (T6.5 — opt-in, default off)" do
+    test "inactive by default: a pass stating the mirror is off" do
       subject_id = subj()
       findings = PostShred.CdcMirror.check(post_shred_context(subject_id))
       assert [%Finding{severity: :pass}] = findings
-      assert hd(findings).detail =~ "Phase-6"
+      assert hd(findings).detail =~ "not enabled"
     end
 
     @tag :red_path
-    test "a CONFIGURED-but-unscanned CDC mirror is a fail-closed gap (not a pass)" do
+    test "a legacy :cdc_mirror_repo without a :cdc adapter is a fail-closed gap (not a pass)" do
       subject_id = subj()
       Application.put_env(:samen_core, :cdc_mirror_repo, :some_clickhouse_repo)
 

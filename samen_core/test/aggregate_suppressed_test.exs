@@ -19,6 +19,23 @@ defmodule Samen.AggregateSuppressedTest do
     assert l.reason == :l_diversity
     assert l.l == 2
     assert l.observed == 1
+
+    # T6.6: the query-budget suppression reason (the enforcing cross-query budget).
+    b = Suppressed.query_budget(100, 101)
+    assert b.reason == :query_budget
+    assert b.limit == 100
+    assert b.observed == 101
+    # NEVER carries the withheld value — only the reason + budget params.
+    refute Map.has_key?(Map.from_struct(b), :value)
+  end
+
+  test "the query-budget sentinel renders as ⊘ / a marker in every path, no value leaked" do
+    b = Suppressed.query_budget(100, 101)
+    assert to_string(b) == "⊘"
+    assert inspect(b) =~ "query_budget"
+
+    json = Jason.encode!(%{mrr_cents: b})
+    assert Jason.decode!(json) == %{"mrr_cents" => %{"suppressed" => true, "reason" => "query_budget"}}
   end
 
   test "String.Chars renders the glyph, not a value" do

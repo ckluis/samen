@@ -14,11 +14,11 @@ defmodule Samen.Aggregate.Suppressed do
   (k-anonymity) or too homogeneous (l-diversity)** to release without re-identifying
   a subject.
 
-  A `Suppressed` value carries only the *reason* the cell was withheld (`:k_anonymity`
-  or `:l_diversity`) and the floor's parameters (`k` / `l` and the observed cohort
-  metric) — it **never carries the underlying value**. There is therefore no value to
-  leak by any serialization path. Rendering is `"⊘"` (the "suppressed" glyph)
-  everywhere:
+  A `Suppressed` value carries only the *reason* the cell was withheld (`:k_anonymity`,
+  `:l_diversity`, or `:query_budget`) and the floor's parameters (`k` / `l` and the
+  observed cohort metric, or the budget `limit` / observed `count`) — it **never carries
+  the underlying value**. There is therefore no value to leak by any serialization path.
+  Rendering is `"⊘"` (the "suppressed" glyph) everywhere:
 
     - `String.Chars` (`to_string/1`, interpolation) → `"⊘"`
     - `Inspect` (`inspect/1`, logger `~p`) → `#Suppressed<k_anonymity ⊘>`
@@ -44,14 +44,15 @@ defmodule Samen.Aggregate.Suppressed do
   @glyph "⊘"
 
   @enforce_keys [:reason]
-  defstruct reason: nil, k: nil, l: nil, observed: nil
+  defstruct reason: nil, k: nil, l: nil, observed: nil, limit: nil
 
-  @type reason :: :k_anonymity | :l_diversity
+  @type reason :: :k_anonymity | :l_diversity | :query_budget
   @type t :: %__MODULE__{
           reason: reason(),
           k: pos_integer() | nil,
           l: pos_integer() | nil,
-          observed: non_neg_integer() | nil
+          observed: non_neg_integer() | nil,
+          limit: pos_integer() | nil
         }
 
   @doc "The canonical suppression glyph."
@@ -75,6 +76,29 @@ defmodule Samen.Aggregate.Suppressed do
   @spec l_diversity(pos_integer(), non_neg_integer()) :: t()
   def l_diversity(l, observed) when is_integer(l) and is_integer(observed) do
     %__MODULE__{reason: :l_diversity, l: l, observed: observed}
+  end
+
+  @doc """
+  A query-budget suppression (T6.6 — the ENFORCING budget). The cohort's read count
+  within the rolling window reached the per-cohort budget `limit`, so further aggregate
+  reads on this cohort are DENIED (suppressed). `observed` is the read count at the point
+  the budget was hit.
+
+  This is the cross-query defence promoted from accounting-only (T4.5) to enforcing
+  (T6.6): keyed per-COHORT (not per-actor — the doc names per-actor as the wrong unit
+  against collusion), so two colluding actors querying the same cohort hit the SAME
+  budget. Unlike the k-anon / l-diversity FLOORS (which bound a SINGLE query's output),
+  this bounds the NUMBER of queries against a cohort over time — the differencing /
+  repeated-overlap defence.
+
+  Honest caveat (see `Samen.Aggregate.QueryBudget` moduledoc): the budget is a coarse,
+  deterministic cross-query control. It stops repeated hammering of a cohort; it does not
+  give a formal differential-privacy composition guarantee. That formal guarantee (an
+  epsilon-budget composed across queries) remains posture under construction.
+  """
+  @spec query_budget(pos_integer(), non_neg_integer()) :: t()
+  def query_budget(limit, observed) when is_integer(limit) and is_integer(observed) do
+    %__MODULE__{reason: :query_budget, limit: limit, observed: observed}
   end
 
   @doc "Is this value a suppressed aggregate cell? (structural guard for tests/callers)"

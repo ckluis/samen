@@ -3,6 +3,7 @@
   "abbrevs": {
     "drv": "Driftwood.Freight.Driver",
     "stl": "Driftwood.Freight.Settlement",
-    "dsp": "Driftwood.Freight.DispatchEvent"
+    "dsp": "Driftwood.Freight.DispatchEvent",
+    "dak": "Driftwood.Freight.ApiKey"
   }
 }

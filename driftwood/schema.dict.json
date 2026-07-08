@@ -5,46 +5,55 @@
         {
           "column_name": "dag_gross_cents",
           "logical_name": "gross_cents",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "dag_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "dag_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "dag_lane",
           "logical_name": "lane",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "dag_load_count",
           "logical_name": "load_count",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "dag_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "dag_refreshed_at",
           "logical_name": "refreshed_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "dag_tenant_count",
           "logical_name": "tenant_count",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "dag_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -54,83 +63,165 @@
     {
       "fields": [
         {
+          "column_name": "dak_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dak_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dak_minter_role",
+          "logical_name": "minter_role",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dak_minter_user_id",
+          "logical_name": "minter_user_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dak_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dak_plane",
+          "logical_name": "plane",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dak_revoked_at",
+          "logical_name": "revoked_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dak_scopes",
+          "logical_name": "scopes",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "dak_token_digest",
+          "logical_name": "token_digest",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dak_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Freight.ApiKey",
+      "table_name": "dak_api_key"
+    },
+    {
+      "fields": [
+        {
           "column_name": "drv_carrier_id",
           "logical_name": "carrier_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "drv_cdl_expiry",
           "logical_name": "cdl_expiry",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "drv_cdl_state",
           "logical_name": "cdl_state",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "drv_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "drv_eld_provider",
           "logical_name": "eld_provider",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "drv_emails",
           "logical_name": "emails",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "drv_full_name",
           "logical_name": "full_name",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "drv_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "drv_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "drv_job_title",
           "logical_name": "job_title",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "drv_medical_card_expiry",
           "logical_name": "medical_card_expiry",
+          "pii": false,
           "type": "Date"
         },
         {
           "column_name": "drv_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "drv_phones",
           "logical_name": "phones",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "drv_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "drv_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "pii_drv_cdl_number",
           "logical_name": "cdl_number",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         }
       ],
@@ -142,41 +233,49 @@
         {
           "column_name": "dsp_dispatched_at",
           "logical_name": "dispatched_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "dsp_driver_id",
           "logical_name": "driver_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "dsp_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "dsp_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "dsp_load_id",
           "logical_name": "load_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "dsp_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "dsp_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "dsp_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -188,41 +287,49 @@
         {
           "column_name": "dtq_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "dtq_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "dtq_mrr_cents",
           "logical_name": "mrr_cents",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "dtq_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "dtq_refreshed_at",
           "logical_name": "refreshed_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "dtq_tenant_count",
           "logical_name": "tenant_count",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "dtq_tier",
           "logical_name": "tier",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "dtq_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -234,71 +341,85 @@
         {
           "column_name": "fac_body",
           "logical_name": "body",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fac_company_id",
           "logical_name": "company_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fac_completed_at",
           "logical_name": "completed_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "fac_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "fac_due_at",
           "logical_name": "due_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "fac_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fac_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "fac_opportunity_id",
           "logical_name": "opportunity_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fac_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fac_person_id",
           "logical_name": "person_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fac_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "fac_subject",
           "logical_name": "subject",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fac_type",
           "logical_name": "type",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "fac_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -310,56 +431,67 @@
         {
           "column_name": "fat_company_id",
           "logical_name": "company_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fat_content_type",
           "logical_name": "content_type",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fat_file_name",
           "logical_name": "file_name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fat_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fat_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "fat_opportunity_id",
           "logical_name": "opportunity_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fat_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fat_person_id",
           "logical_name": "person_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fat_size_bytes",
           "logical_name": "size_bytes",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "fat_storage_key",
           "logical_name": "storage_key",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fat_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -371,56 +503,67 @@
         {
           "column_name": "fcm_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "fcm_domain",
           "logical_name": "domain",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fcm_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fcm_industry",
           "logical_name": "industry",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fcm_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "fcm_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fcm_notes",
           "logical_name": "notes",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fcm_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fcm_size",
           "logical_name": "size",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fcm_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "fcm_website",
           "logical_name": "website",
+          "pii": false,
           "type": "String"
         }
       ],
@@ -432,71 +575,85 @@
         {
           "column_name": "fop_close_date",
           "logical_name": "close_date",
+          "pii": false,
           "type": "Date"
         },
         {
           "column_name": "fop_company_id",
           "logical_name": "company_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fop_currency",
           "logical_name": "currency",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fop_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "fop_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fop_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "fop_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fop_notes",
           "logical_name": "notes",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fop_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fop_pipeline_id",
           "logical_name": "pipeline_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fop_probability",
           "logical_name": "probability",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "fop_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "fop_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "fop_value_cents",
           "logical_name": "value_cents",
+          "pii": false,
           "type": "Integer"
         }
       ],
@@ -508,46 +665,55 @@
         {
           "column_name": "fpp_enabled",
           "logical_name": "enabled",
+          "pii": false,
           "type": "Boolean"
         },
         {
           "column_name": "fpp_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fpp_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "fpp_label",
           "logical_name": "label",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fpp_name",
           "logical_name": "name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fpp_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fpp_stage_order",
           "logical_name": "stage_order",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "fpp_stage_type",
           "logical_name": "stage_type",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "fpp_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -559,56 +725,67 @@
         {
           "column_name": "fpr_company_id",
           "logical_name": "company_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fpr_custom",
           "logical_name": "custom",
+          "pii": false,
           "type": "Map"
         },
         {
           "column_name": "fpr_display_name",
           "logical_name": "display_name",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fpr_emails",
           "logical_name": "emails",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "fpr_full_name",
           "logical_name": "full_name",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "fpr_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fpr_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "fpr_job_title",
           "logical_name": "job_title",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "fpr_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "fpr_phones",
           "logical_name": "phones",
+          "pii": true,
           "type": "Samen.Type.VaultField"
         },
         {
           "column_name": "fpr_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],
@@ -620,71 +797,85 @@
         {
           "column_name": "stl_accessorial_cents",
           "logical_name": "accessorial_cents",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "stl_advances_cents",
           "logical_name": "advances_cents",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "stl_carrier_id",
           "logical_name": "carrier_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "stl_claim_deduction_cents",
           "logical_name": "claim_deduction_cents",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "stl_currency",
           "logical_name": "currency",
+          "pii": false,
           "type": "String"
         },
         {
           "column_name": "stl_factoring_rate_bps",
           "logical_name": "factoring_rate_bps",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "stl_fuel_surcharge_cents",
           "logical_name": "fuel_surcharge_cents",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "stl_id",
           "logical_name": "id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "stl_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
           "type": "UtcDatetime"
         },
         {
           "column_name": "stl_linehaul_cents",
           "logical_name": "linehaul_cents",
+          "pii": false,
           "type": "Integer"
         },
         {
           "column_name": "stl_load_id",
           "logical_name": "load_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "stl_org_id",
           "logical_name": "org_id",
+          "pii": false,
           "type": "UUID"
         },
         {
           "column_name": "stl_status",
           "logical_name": "status",
+          "pii": false,
           "type": "Atom"
         },
         {
           "column_name": "stl_updated_at",
           "logical_name": "updated_at",
+          "pii": false,
           "type": "UtcDatetime"
         }
       ],

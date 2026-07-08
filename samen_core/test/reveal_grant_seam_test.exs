@@ -116,7 +116,14 @@ defmodule Samen.Reveal.GrantSeamTest do
   test "RED PATH: grant for subject X but a masked token for subject Y DENIES :subject_mismatch" do
     prior_kms = Application.get_env(:samen_core, :kms_adapter)
     Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
-    on_exit(fn -> Application.put_env(:samen_core, :kms_adapter, prior_kms) end)
+    # Restore to a REAL adapter, never nil: if this test runs before any adapter is
+    # explicitly set, `prior_kms` is nil, and writing nil back overrides the
+    # `Kms.adapter/0` default (FileBacked), leaking `nil` into the global env and
+    # crashing a later test with `nil.attest/1`. Guard with `|| FileBacked` — the
+    # same pattern break_glass_test/wide_event_pseudonym_test already use.
+    on_exit(fn ->
+      Application.put_env(:samen_core, :kms_adapter, prior_kms || Samen.Kms.FileBacked)
+    end)
 
     subject_x = subj()
     subject_y = subj()

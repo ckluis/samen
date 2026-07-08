@@ -39,18 +39,23 @@ defmodule Samen.Aggregate do
   event rollups). Those are the two doc examples: "Cross-tenant views (MRR, queues)".
   Each reads a bounded projection (tier / count / cents) — never a subject.
 
-  ## Aggregate-privacy floors + query-budget ledger (T4.5)
+  ## Aggregate-privacy floors + query budget (T4.5 + T6.6)
 
   `read_all/2` is the ONLY read surface the token-blind aggregate actor can use, so it
-  is where the **output-privacy floors** are enforced and where the **query-budget
-  ledger** accounts every read — you cannot read a raw, unsuppressed aggregate value
+  is where the **output-privacy floors** are enforced and where the **query budget** is
+  accounted and (opt-in) enforced — you cannot read a raw, unsuppressed aggregate value
   "as the aggregate actor" through the domain, because this chokepoint routes every row
-  set through the floors before returning it:
+  set through the pipeline before returning it:
 
-    1. **Query-budget accounting (scaffold)** — every returned cohort is recorded in
-       `Samen.Aggregate.QueryBudget`, keyed by cohort (NOT by actor). WARN-not-enforce
-       (T4.5 clause (c)). Recording is best-effort — a ledger failure never fails a read
-       (the floors, not the budget, are the enforced defence).
+    1. **Query-budget accounting + enforcement** — every returned cohort is recorded in
+       `Samen.Aggregate.QueryBudget`, keyed by cohort (NOT by actor). By default this is
+       accounting-only (WARN-not-enforce, T4.5). When `:query_budget_enforce` is on
+       (T6.6), a cohort whose per-cohort (or the global) budget is spent within the window
+       has its value REPLACED by `%Samen.Aggregate.Suppressed{reason: :query_budget}` —
+       the CROSS-QUERY defence (repeated-overlap / differencing / collusion), keyed
+       per-cohort so two colluding actors share ONE budget. Recording is best-effort; the
+       enforcement CHECK fails open (the floors, which fail closed, are the independent
+       single-query defence).
 
     2. **k-anonymity + l-diversity floors (ENFORCED)** — the row set passes through
        `Samen.Aggregate.Privacy.apply/3` using the resource's `aggregate_cohort_spec/0`
@@ -61,12 +66,17 @@ defmodule Samen.Aggregate do
        `{:error, :no_cohort_spec}` — an aggregate cell whose cohort size cannot be
        established is not released.
 
+  Order matters: the budget is accounted+checked FIRST (it bounds how many QUERIES a
+  cohort may receive, independent of a single query's shape), then the floors run (they
+  bound a single query's OUTPUT). A cohort suppressed by the budget is not re-suppressed
+  by the floors — the FIRST suppression that fires (budget, then k-anon, then l-div) wins.
+
   A caller can pass `suppress: false` ONLY on internal control paths (the ledger rebuild
   reads its own raw rows) — the operator dashboard NEVER does; suppression is the default
   and the demo dashboard depends on it.
   """
 
-  alias Samen.Aggregate.{Actor, CohortSpec, Privacy, QueryBudget}
+  alias Samen.Aggregate.{Actor, CohortSpec, Dp, Privacy, QueryBudget, Suppressed}
 
   @doc """
   Read every row of an aggregate-plane resource with the singleton token-blind
@@ -88,9 +98,12 @@ defmodule Samen.Aggregate do
       (the enforced default; the operator dashboard relies on it). `false` is an
       internal control-path escape for callers that read their own raw rows (the ledger
       rebuild) — it does NOT route through the domain's operator-facing path.
-    * `:account` — record the read in the query-budget ledger (T4.5 clause (c)).
-      Defaults to `true`. `false` suppresses accounting for internal/no-op reads.
+    * `:account` — record the read in the query-budget ledger (T4.5 clause (c)) AND run
+      the opt-in enforcing budget check (T6.6). Defaults to `true`. `false` suppresses
+      both for internal/no-op reads.
     * `:k` / `:l` — override the floors (tests use this; production reads config).
+    * `:epsilon` / `:sensitivity` — override the opt-in DP noise parameters (T6.6; only
+      applied when `:dp_enabled` is on). Production reads `:dp_epsilon` from config.
   """
   @spec read_all(module(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def read_all(resource, opts \\ []) when is_atom(resource) do
@@ -101,15 +114,32 @@ defmodule Samen.Aggregate do
       case Ash.read(query, actor: actor, authorize?: true) do
         {:ok, rows} ->
           # The read passed the default-deny policy (so the actor IS the aggregate
-          # actor). Now route the rows through the T4.5 output-privacy pipeline:
-          # account every cohort (scaffold, per-cohort, never denies), then enforce the
-          # k-anon / l-diversity floors. Both keyed off the resource's cohort spec.
+          # actor). Now route the rows through the output-privacy pipeline:
+          # (1) account every cohort (per-cohort, never per-actor), then check the
+          #     ENFORCING budget (T6.6, opt-in) — a cohort past budget is suppressed;
+          # (2) enforce the k-anon / l-diversity FLOORS (T4.5) on what survives.
+          # Both keyed off the resource's cohort spec.
           spec = CohortSpec.spec_for(resource)
 
-          if Keyword.get(opts, :account, true), do: account_reads(resource, rows, spec, actor)
+          # Budget accounting + (opt-in) enforcement. Returns a map of cohort_key =>
+          # deny-info for cohorts the enforcing budget DENIES this read (empty when
+          # enforcement is off).
+          denied =
+            if Keyword.get(opts, :account, true) do
+              account_and_enforce(resource, rows, spec, actor)
+            else
+              %{}
+            end
 
           if Keyword.get(opts, :suppress, true) do
-            Privacy.apply(rows, spec, Keyword.take(opts, [:k, :l]))
+            case rows
+                 |> budget_suppress(spec, denied)
+                 |> Privacy.apply(spec, Keyword.take(opts, [:k, :l])) do
+              # DP noise (opt-in, T6.6) is applied LAST — only to value cells that
+              # survived suppression (a %Suppressed{} cell carries no number to noise).
+              {:ok, floored} -> {:ok, dp_noise(floored, spec, opts)}
+              {:error, reason} -> {:error, reason}
+            end
           else
             {:ok, rows}
           end
@@ -122,25 +152,101 @@ defmodule Samen.Aggregate do
     end
   end
 
-  # Account each returned cohort in the query-budget ledger, keyed by COHORT (not actor).
-  # Best-effort (QueryBudget.record/1 never raises the caller) — the ledger is a scaffold,
-  # the floors are the enforced defence. A nil cohort spec means no cohort key to account,
-  # so accounting is skipped (the floors still fail-close the read downstream).
-  defp account_reads(_resource, _rows, nil, _actor), do: :ok
+  # Account each returned cohort in the query-budget ledger, keyed by COHORT (not actor),
+  # then apply the (opt-in) ENFORCING budget check per cohort. Returns a MAP of
+  # cohort_key => deny-info (`%{limit:, observed:, scope:}`) for cohorts the budget DENIES
+  # (empty when enforcement is off — the T4.5 accounting-only path).
+  #
+  # Recording is best-effort (QueryBudget.record/1 never raises the caller). The
+  # enforcement check fails OPEN (QueryBudget.check/2 rescues to :ok) — the floors, which
+  # fail closed, are the independent single-query defence. A nil cohort spec means no
+  # cohort key: accounting is skipped and nothing is budget-denied (the floors still
+  # fail-close the read downstream via {:error, :no_cohort_spec}).
+  defp account_and_enforce(_resource, _rows, nil, _actor), do: %{}
 
-  defp account_reads(resource, rows, %CohortSpec{} = spec, actor) do
+  defp account_and_enforce(resource, rows, %CohortSpec{} = spec, actor) do
     actor_id = actor_id(actor)
 
-    Enum.each(rows, fn row ->
-      QueryBudget.record(%{
-        resource: resource,
-        cohort_key: cohort_key(row, spec),
-        cell_count: 1,
-        actor_id: actor_id
-      })
-    end)
+    Enum.reduce(rows, %{}, fn row, denied ->
+      ck = cohort_key(row, spec)
 
-    :ok
+      # Record FIRST (so the count reflects this read — a rate-limiter counts the current
+      # request), then check whether the budget is now spent for this cohort.
+      QueryBudget.record(%{resource: resource, cohort_key: ck, cell_count: 1, actor_id: actor_id})
+
+      case QueryBudget.check(%{resource: resource, cohort_key: ck}) do
+        {:deny, info} -> Map.put(denied, ck, info)
+        :ok -> denied
+      end
+    end)
+  end
+
+  # Replace the value columns of every budget-DENIED cohort row with a query-budget
+  # Suppressed sentinel, BEFORE the k-anon / l-diversity floors run. A row already
+  # budget-suppressed is left as-is by Privacy.apply (its value column is no longer a
+  # releasable number — the FIRST suppression wins). When `denied` is empty (enforcement
+  # off, or nothing over budget), this is an identity pass.
+  defp budget_suppress(rows, nil, _denied), do: rows
+  defp budget_suppress(rows, _spec, denied) when map_size(denied) == 0, do: rows
+
+  defp budget_suppress(rows, %CohortSpec{} = spec, denied) do
+    Enum.map(rows, fn row ->
+      ck = cohort_key(row, spec)
+
+      case Map.get(denied, ck) do
+        %{limit: limit, observed: observed} ->
+          replace_values(row, spec, Suppressed.query_budget(limit, observed))
+
+        nil ->
+          row
+      end
+    end)
+  end
+
+  # Replace every releasable value column with the given Suppressed sentinel (mirrors
+  # Privacy.replace_values — kept here so the budget layer does not reach into Privacy's
+  # internals). The metric columns are left intact (they justify the suppression).
+  defp replace_values(row, %CohortSpec{value_columns: value_columns}, %Suppressed{} = sup) do
+    Enum.reduce(value_columns, row, fn col, acc ->
+      cond do
+        Map.has_key?(acc, col) -> Map.put(acc, col, sup)
+        is_atom(col) and Map.has_key?(acc, Atom.to_string(col)) -> Map.put(acc, Atom.to_string(col), sup)
+        true -> acc
+      end
+    end)
+  end
+
+  # OPT-IN differential-privacy noise (T6.6). When `:dp_enabled` is off (default), this is
+  # the identity — the exact value passes through (the floors + budget are the enforced
+  # defences; DP is an ADDITIONAL layer). When on, add Laplace noise (`Samen.Aggregate.Dp`)
+  # to each surviving INTEGER value cell. A %Suppressed{} cell is skipped (no number to
+  # noise). NOTE (honest edge): this noises a single query; a formal ε-budget composed
+  # across queries is NOT implemented — see the Dp moduledoc. Only reached with a non-nil
+  # spec (Privacy.apply returns {:error, :no_cohort_spec} for nil, short-circuiting here).
+  defp dp_noise(rows, %CohortSpec{value_columns: value_columns}, opts) do
+    if Dp.enabled?() do
+      dp_opts = Keyword.take(opts, [:epsilon, :sensitivity])
+
+      Enum.map(rows, fn row ->
+        Enum.reduce(value_columns, row, fn col, acc ->
+          case fetch_col(acc, col) do
+            {key, v} when is_integer(v) -> Map.put(acc, key, Dp.maybe_noisy_count(v, dp_opts))
+            _ -> acc
+          end
+        end)
+      end)
+    else
+      rows
+    end
+  end
+
+  # Fetch a value column supporting atom or string keys; returns {actual_key, value}.
+  defp fetch_col(row, col) do
+    cond do
+      Map.has_key?(row, col) -> {col, Map.get(row, col)}
+      is_atom(col) and Map.has_key?(row, Atom.to_string(col)) -> {Atom.to_string(col), Map.get(row, Atom.to_string(col))}
+      true -> :error
+    end
   end
 
   # Build the cohort key string from the spec's cohort_key_columns, e.g. "tier=Pro".
