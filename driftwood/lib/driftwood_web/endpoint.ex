@@ -20,6 +20,12 @@ defmodule DriftwoodWeb.Endpoint do
 
   socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
 
+  # ADR-008: serve the Samen UI kit's static stylesheet from priv/static at /assets/…
+  # (so `priv/static/assets/samen_ui.css` is reachable at `/assets/samen_ui.css`). The
+  # `only: ["assets"]` scope confines Plug.Static to that one directory so it cannot
+  # shadow any app route. This is the sole static asset the dogfood serves.
+  plug(Plug.Static, at: "/", from: {:driftwood, "priv/static"}, only: ["assets"])
+
   plug(Plug.RequestId)
   plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint])
 

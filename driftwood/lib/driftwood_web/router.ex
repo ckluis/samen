@@ -45,5 +45,11 @@ defmodule DriftwoodWeb.Router do
     live("/broker", BrokerLive)
     live("/operator/impersonate", OperatorImpersonationLive)
     live("/operator/aggregate", OperatorDashboardLive)
+
+    # ADR-008: the Samen UI kit preview — a living catalog exercising every
+    # DriftwoodWeb.UIKit component (app shell, sidebar, topbar, button, tabs, data
+    # table, pill, progress, metric, mask-bar, token-blind bar), including masked
+    # cells that render `••••` through Phoenix.HTML.Safe (no reveal path on the page).
+    live("/ui-kit", UIKitLive)
   end
 end

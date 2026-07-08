@@ -33,6 +33,8 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   """
   use Phoenix.LiveView
 
+  import DriftwoodWeb.UIKit
+
   alias Samen.Impersonation
   alias Driftwood.Reads
 
@@ -106,78 +108,193 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   defp dollars(cents) when is_integer(cents), do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
   defp dollars(_), do: "$0.00"
 
+  # --- Presentation helpers (non-PII display only) --------------------------
+
+  # Load status → pill variant (violet for en-route/on_load, mut for open/booked, ...).
+  defp status_variant(s) when s in [:on_load, "on_load", :en_route, "en_route"], do: "info"
+  defp status_variant(s) when s in [:delivered, "delivered", :available, "available"], do: "ok"
+  defp status_variant(s) when s in [:out_of_service, "out_of_service", :terminated, "terminated"], do: "bad"
+  defp status_variant(_), do: "mut"
+
   @impl true
   def render(assigns) do
     ~H"""
     <div id="operator-impersonation">
-      <h1>Operator Console — Masked Impersonation (Driftwood tenant)</h1>
+      <.app_shell>
+        <:sidebar>
+          <.sidebar title="Driftwood Ops" subtitle="Operator control plane">
+            <:search>
+              <div class="search">
+                <svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
+                </svg>
+                Search tenants, drivers…
+                <span class="kbd">⌘K</span>
+              </div>
+            </:search>
 
-      <%= if @session_inactive do %>
-        <p id="session-state">access denied — no active impersonation session (expired or never opened).</p>
-      <% else %>
-        <div id="accountability">
-          <p id="banner">
-            Impersonating brokerage org {@org_id} as operator {@operator_id}. PII is masked (••••).
-          </p>
-          <%= if @session_info do %>
-            <p id="session-reason">Reason: {@session_info.reason}</p>
-            <p id="session-expiry">Expires: {@session_info.expires_at}</p>
-          <% end %>
-        </div>
+            <.nav_group label="Operator plane">
+              <.nav_item label="Tenants" href="/operator/aggregate" count="42">
+                <:icon>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /></svg>
+                </:icon>
+              </.nav_item>
+              <.nav_item label="Impersonation" href="/operator/impersonate" active dot>
+                <:icon>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3a9 9 0 1 0 9 9" /><path d="M12 7v5l3 2" /></svg>
+                </:icon>
+              </.nav_item>
+              <.nav_item label="Aggregate · MRR" href="/operator/aggregate">
+                <:icon>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9m6 10V5m6 14v-7" /></svg>
+                </:icon>
+              </.nav_item>
+            </.nav_group>
 
-        <h2>Driver roster (real data, PII masked ••••, FMCSA status visible)</h2>
-        <table id="driver-roster">
-          <thead>
-            <tr>
-              <th>Driver</th><th>CDL #</th><th>CDL state</th><th>CDL expiry</th>
-              <th>Status</th><th>FMCSA</th><th>Reveal</th>
-            </tr>
-          </thead>
-          <tbody>
-            <%= for d <- @drivers do %>
-              <tr class="driver-row" id={"driver-#{d.id}"}>
-                <td class="d-name">{d.full_name}</td>
-                <td class="d-cdl">{Map.get(@revealed, d.id) || d.cdl_number}</td>
-                <td class="d-cdl-state">{d.cdl_state}</td>
-                <td class="d-cdl-expiry">{d.cdl_expiry}</td>
-                <td class="d-status">{d.status}</td>
+            <.nav_group label="Viewing as tenant">
+              <.nav_item label="Loads" count={length(@loads)}>
+                <:icon>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13l5 5v5H3z" /><circle cx="7.5" cy="17.5" r="1.5" /><circle cx="17.5" cy="17.5" r="1.5" /></svg>
+                </:icon>
+              </.nav_item>
+              <.nav_item label="Drivers" active count={length(@drivers)}>
+                <:icon>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.2" /><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" /></svg>
+                </:icon>
+              </.nav_item>
+              <.nav_item label="Settlements">
+                <:icon>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+                </:icon>
+              </.nav_item>
+            </.nav_group>
+
+            <:footer>
+              <div class="foot">
+                <div class="av">CK</div>
+                <div class="m"><b>C. Kluis</b><span>operator · support role</span></div>
+              </div>
+            </:footer>
+          </.sidebar>
+        </:sidebar>
+
+        <.topbar
+          title="Driver roster"
+          crumbs={["Operator plane", "Impersonation", @org_id, "Drivers"]}
+        >
+          <:actions>
+            <.button>
+              <:icon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
+              </:icon>
+              Filter
+            </.button>
+          </:actions>
+        </.topbar>
+
+        <%= if @session_inactive do %>
+          <div class="wrap">
+            <div class="card" id="session-state" style="padding:22px 20px;color:var(--red)">
+              access denied — no active impersonation session (expired or never opened).
+            </div>
+          </div>
+        <% else %>
+          <.mask_bar chip={session_chip(@session_info)}>
+            <b>Masked impersonation.</b>
+            <span id="banner">
+              Impersonating brokerage org {@org_id} as operator {@operator_id}. PII is masked (••••).
+            </span>
+            Unmasking a subject needs a second-party reveal grant, is time-boxed, and is written to the tenant-readable audit log.
+            <span :if={@session_info} id="session-reason" style="display:none">Reason: {@session_info.reason}</span>
+            <span :if={@session_info} id="session-expiry" style="display:none">Expires: {@session_info.expires_at}</span>
+          </.mask_bar>
+
+          <div class="wrap">
+            <div class="gtitle">
+              <h3>Driver roster</h3><span class="n">{length(@drivers)}</span>
+              <span class="lane">· real tenant data, personal fields render ••••</span>
+            </div>
+
+            <.data_table>
+              <:head>
+                <th style="width:26%">Driver</th>
+                <th style="width:16%">CDL #</th>
+                <th style="width:12%">CDL state</th>
+                <th style="width:12%">CDL expiry</th>
+                <th style="width:12%">Status</th>
+                <th style="width:12%">FMCSA</th>
+                <th style="width:10%">Reveal</th>
+              </:head>
+
+              <tr :for={d <- @drivers} class="driver-row" id={"driver-#{d.id}"}>
+                <td>
+                  <div class="drv">
+                    <div class="av"></div>
+                    <span class="nm masked d-name">{d.full_name}</span>
+                  </div>
+                </td>
+                <td class="d-cdl"><span class="mono masked">{Map.get(@revealed, d.id) || d.cdl_number}</span></td>
+                <td class="d-cdl-state carrier">{d.cdl_state}</td>
+                <td class="d-cdl-expiry carrier">{d.cdl_expiry}</td>
+                <td class="d-status">
+                  <.pill variant={status_variant(d.status)}>{d.status}</.pill>
+                </td>
                 <td class="d-fmcsa">
                   <%= case d.__fmcsa__ do %>
-                    <% :ok -> %><span class="fmcsa-ok">OK</span>
+                    <% :ok -> %>
+                      <span class="fmcsa-ok"><.pill variant="ok">OK</.pill></span>
                     <% {:blocked, reasons} -> %>
-                      <span class="fmcsa-blocked">BLOCKED: {Enum.map_join(reasons, ", ", &Reads.reason_label/1)}</span>
+                      <span class="fmcsa-blocked">
+                        <.pill variant="bad">BLOCKED: {Enum.map_join(reasons, ", ", &Reads.reason_label/1)}</.pill>
+                      </span>
                   <% end %>
                 </td>
                 <td class="d-reveal">
                   <%= if Map.get(@revealed, d.id) do %>
-                    <span class="revealed">revealed (grant active)</span>
+                    <span class="revealed rev" style="color:var(--brand);border-color:#CFD5F6;background:var(--brand-wash)">
+                      <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
+                      revealed (grant active)
+                    </span>
                   <% else %>
-                    <button class="reveal-btn" phx-click="reveal" phx-value-driver={d.id}>Reveal CDL</button>
+                    <button class="reveal-btn rev" phx-click="reveal" phx-value-driver={d.id}>
+                      <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
+                      Reveal CDL
+                    </button>
                   <% end %>
                 </td>
               </tr>
-            <% end %>
-          </tbody>
-        </table>
+            </.data_table>
 
-        <h2>Load board (real data, non-PII)</h2>
-        <table id="load-board">
-          <thead><tr><th>Load</th><th>Lane</th><th>Value</th><th>Status</th></tr></thead>
-          <tbody>
-            <%= for l <- @loads do %>
-              <tr class="load-row">
-                <td class="l-name">{l.name}</td>
-                <td class="l-lane">{l.__lane__}</td>
-                <td class="l-value">{dollars(l.value_cents)}</td>
-                <td class="l-status">{l.status}</td>
+            <div class="gtitle">
+              <h3>Load board</h3><span class="n">{length(@loads)}</span>
+              <span class="lane">· non-PII operational data</span>
+            </div>
+
+            <.data_table>
+              <:head>
+                <th style="width:40%">Load</th>
+                <th style="width:24%">Lane</th>
+                <th style="width:18%">Value</th>
+                <th style="width:18%">Status</th>
+              </:head>
+
+              <tr :for={l <- @loads} class="load-row">
+                <td class="l-name"><span class="nm" style="color:#3a3b45;letter-spacing:normal">{l.name}</span></td>
+                <td class="l-lane"><span class="mono">{l.__lane__}</span></td>
+                <td class="l-value mono num">{dollars(l.value_cents)}</td>
+                <td class="l-status"><.pill variant={status_variant(l.status)}>{l.status}</.pill></td>
               </tr>
-            <% end %>
-          </tbody>
-        </table>
-      <% end %>
+            </.data_table>
+          </div>
+        <% end %>
+      </.app_shell>
     </div>
     """
   end
+
+  # The mask-bar chip: session TTL + reason if the accountability entry is present.
+  defp session_chip(nil), do: "no active grant"
+  defp session_chip(info), do: "session active · reason: #{info.reason}"
 
   # The reveal action: attempt to unmask ONE driver's CDL number via the second-party
   # grant path (Samen.Reveal.reveal/5). Denies (no state change, •••• stays) unless a

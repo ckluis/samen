@@ -27,6 +27,8 @@ defmodule DriftwoodWeb.BrokerLive do
   """
   use Phoenix.LiveView
 
+  import DriftwoodWeb.UIKit
+
   alias Driftwood.{BrokerRollup, Reads}
 
   @impl true
@@ -94,142 +96,354 @@ defmodule DriftwoodWeb.BrokerLive do
   defp dollars(cents) when is_integer(cents), do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
   defp dollars(_), do: "$0.00"
 
+  # Format a CLEARTEXT driver name for display (tenant plane owns its own PII). The
+  # vaulted `full_name` resolves to a JSON string (`{"first":"Dana","last":"Compliant"}`)
+  # on the `:tenant` plane; this parses it to `"Dana Compliant"`.
+  #
+  # MASKING INVARIANT (load-bearing): a `%Samen.Masked{}` is returned UNTOUCHED so it
+  # still renders `••••` via Phoenix.HTML.Safe. This helper never unwraps/inspects a
+  # Masked value — it only reshapes an already-resolved cleartext string. On the operator
+  # plane `full_name` is a `%Masked{}`, so this would pass it straight through, but the
+  # operator view does not call this — the broker (tenant) plane does.
+  defp driver_name(%Samen.Masked{} = masked), do: masked
+
+  defp driver_name(name) when is_binary(name) do
+    case Jason.decode(name) do
+      {:ok, %{"first" => first, "last" => last}} -> String.trim("#{first} #{last}")
+      _ -> name
+    end
+  end
+
+  defp driver_name(other), do: other
+
+  # Initials for a cleartext driver name (tenant plane owns its own PII).
+  defp initials(%Samen.Masked{}), do: "··"
+
+  defp initials(name) when is_binary(name) do
+    case driver_name(name) do
+      %Samen.Masked{} ->
+        "··"
+
+      formatted when is_binary(formatted) ->
+        formatted
+        |> String.split(~r/\s+/, trim: true)
+        |> Enum.take(2)
+        |> Enum.map_join("", &String.slice(&1, 0, 1))
+        |> String.upcase()
+    end
+  end
+
+  defp initials(_), do: "··"
+
+  # Load status → pill variant.
+  defp status_variant(s) when s in [:on_load, "on_load", :en_route, "en_route"], do: "info"
+  defp status_variant(s) when s in [:delivered, "delivered", :paid, "paid"], do: "ok"
+  defp status_variant(s) when s in [:open, "open", :needs_carrier, "needs_carrier"], do: "warn"
+  defp status_variant(s) when s in [:out_of_service, "out_of_service", :terminated, "terminated"], do: "bad"
+  defp status_variant(_), do: "mut"
+
   @impl true
   def render(assigns) do
     ~H"""
     <div id="broker-console">
-      <h1>Driftwood — Broker Console</h1>
+      <.app_shell>
+        <:sidebar>
+          <.sidebar
+            title="Blue Ridge Logistics"
+            subtitle="Freight brokerage"
+            logo="B"
+            logo_style="background:linear-gradient(150deg,#0E7C5A,#17A06E)"
+          >
+            <:search>
+              <div class="search">
+                <svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
+                </svg>
+                Search loads, carriers…
+                <span class="kbd">⌘K</span>
+              </div>
+            </:search>
 
-      <%= if @no_org do %>
-        <p id="no-org">No brokerage org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.</p>
-      <% else %>
-        <p id="org-banner">Brokerage org: {@org_id}</p>
-        <nav id="broker-nav">
-          <a href={"/broker?panel=dashboard&org=#{@org_id}"}>Dashboard</a>
-          <a href={"/broker?panel=loads&org=#{@org_id}"}>Load board</a>
-          <a href={"/broker?panel=roster&org=#{@org_id}"}>Driver roster</a>
-          <a href={"/broker?panel=settlements&org=#{@org_id}"}>Settlements</a>
-        </nav>
+            <.nav_group label="Operations">
+              <.nav_item label="Dispatch board" href={"/broker?panel=dashboard&org=#{@org_id}"} active={@panel == "dashboard"}>
+                <:icon>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></svg>
+                </:icon>
+              </.nav_item>
+              <.nav_item label="Loads" href={"/broker?panel=loads&org=#{@org_id}"} active={@panel == "loads"}>
+                <:icon>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13l5 5v5H3z" /><circle cx="7.5" cy="17.5" r="1.5" /><circle cx="17.5" cy="17.5" r="1.5" /></svg>
+                </:icon>
+              </.nav_item>
+              <.nav_item label="Drivers" href={"/broker?panel=roster&org=#{@org_id}"} active={@panel == "roster"}>
+                <:icon>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.2" /><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" /></svg>
+                </:icon>
+              </.nav_item>
+              <.nav_item label="Settlements" href={"/broker?panel=settlements&org=#{@org_id}"} active={@panel == "settlements"}>
+                <:icon>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+                </:icon>
+              </.nav_item>
+            </.nav_group>
 
-        <%= if @panel == "dashboard" do %>
-          <section id="dashboard">
-            <h2>Dashboard (rollup-backed — reads dbs_broker_summary, never raw scans)</h2>
-            <h3>Loads by status</h3>
-            <table id="load-summary">
-              <thead><tr><th>Status</th><th>Loads</th><th>Gross</th></tr></thead>
-              <tbody>
-                <%= for row <- (@summary && @summary.by_status) || [] do %>
-                  <tr class="summary-row">
-                    <td class="s-status">{row.status}</td>
-                    <td class="s-loads">{row.load_count}</td>
-                    <td class="s-gross">{dollars(row.gross_cents)}</td>
+            <:footer>
+              <div class="foot">
+                <div class="av" style="background:#D6E9DF;color:#1E7A45">RM</div>
+                <div class="m"><b>Rosa Medina</b><span>dispatcher</span></div>
+              </div>
+            </:footer>
+          </.sidebar>
+        </:sidebar>
+
+        <.topbar title={panel_title(@panel)} crumbs={["Blue Ridge Logistics", "Operations", panel_title(@panel)]}>
+          <:actions>
+            <.button>
+              <:icon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
+              </:icon>
+              Filter
+            </.button>
+            <.button variant="primary">
+              <:icon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M3 12h18" /></svg>
+              </:icon>
+              New load
+            </.button>
+          </:actions>
+        </.topbar>
+
+        <%= if @no_org do %>
+          <div class="wrap">
+            <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
+              No brokerage org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
+            </div>
+          </div>
+        <% else %>
+          <span id="org-banner" style="display:none">Brokerage org: {@org_id}</span>
+
+          <%= if @panel == "dashboard" do %>
+            {dashboard_metrics(assigns)}
+            <div class="wrap">
+              <div id="dashboard">
+                <div class="gtitle">
+                  <h3>Loads by status</h3>
+                  <span class="lane">· rollup-backed — reads dbs_broker_summary, never raw scans</span>
+                </div>
+                <.data_table>
+                  <:head>
+                    <th style="width:40%">Status</th>
+                    <th style="width:30%">Loads</th>
+                    <th style="width:30%">Gross</th>
+                  </:head>
+                  <tr :for={row <- (@summary && @summary.by_status) || []} class="summary-row">
+                    <td class="s-status"><.pill variant={status_variant(row.status)}>{row.status}</.pill></td>
+                    <td class="s-loads num">{row.load_count}</td>
+                    <td class="s-gross mono num">{dollars(row.gross_cents)}</td>
                   </tr>
-                <% end %>
-              </tbody>
-            </table>
-            <h3>Settlements</h3>
-            <%= if @summary && @summary.settlements do %>
-              <p id="settlement-summary">
-                {@summary.settlements.settlement_count} settlements —
-                net payable {dollars(@summary.settlements.net_payable_cents)}
-                (gross {dollars(@summary.settlements.gross_cents)})
-              </p>
-            <% else %>
-              <p id="settlement-summary">No settlements rolled up yet.</p>
-            <% end %>
-          </section>
-        <% end %>
+                </.data_table>
 
-        <%= if @panel == "loads" do %>
-          <section id="loads">
-            <h2>Load board</h2>
-            <table id="load-board">
-              <thead><tr><th>Load</th><th>Lane</th><th>Value</th><th>Status</th></tr></thead>
-              <tbody>
-                <%= for l <- @loads do %>
-                  <tr class="load-row">
-                    <td class="l-name">{l.name}</td>
-                    <td class="l-lane">{l.__lane__}</td>
-                    <td class="l-value">{dollars(l.value_cents)}</td>
-                    <td class="l-status">{l.status}</td>
+                <div class="gtitle"><h3>Settlements</h3></div>
+                <div class="settle">
+                  <div class="sh">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="1.9"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+                    <b>Settlement rollup</b><span class="tag">rollup-backed</span>
+                  </div>
+                  <%= if @summary && @summary.settlements do %>
+                    <div class="row"><span class="lab">Settlements</span><span class="val">{@summary.settlements.settlement_count}</span></div>
+                    <div class="row"><span class="lab">Gross</span><span class="val">{dollars(@summary.settlements.gross_cents)}</span></div>
+                    <div class="row net">
+                      <span class="lab">net payable</span>
+                      <span class="val" id="settlement-summary">{dollars(@summary.settlements.net_payable_cents)}</span>
+                    </div>
+                  <% else %>
+                    <div class="row"><span class="lab" id="settlement-summary">No settlements rolled up yet.</span></div>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+          <% end %>
+
+          <%= if @panel == "loads" do %>
+            <div class="wrap">
+              <div id="loads">
+                <div class="gtitle">
+                  <h3>Active loads</h3><span class="n">{length(@loads)}</span>
+                  <span class="lane">· your org — driver names in the clear</span>
+                </div>
+                <.data_table>
+                  <:head>
+                    <th style="width:34%">Load</th>
+                    <th style="width:26%">Lane</th>
+                    <th style="width:22%">Rate</th>
+                    <th style="width:18%">Status</th>
+                  </:head>
+                  <tr :for={l <- @loads} class="load-row">
+                    <td class="l-name"><span class="mono" style="color:#454652;font-weight:500">{l.name}</span></td>
+                    <td class="l-lane carrier">{l.__lane__}</td>
+                    <td class="l-value mono num">{dollars(l.value_cents)}</td>
+                    <td class="l-status"><.pill variant={status_variant(l.status)}>{l.status}</.pill></td>
                   </tr>
-                <% end %>
-              </tbody>
-            </table>
-          </section>
-        <% end %>
+                </.data_table>
+              </div>
+            </div>
+          <% end %>
 
-        <%= if @panel == "roster" do %>
-          <section id="roster">
-            <h2>Driver roster (FMCSA status)</h2>
-            <table id="driver-roster">
-              <thead>
-                <tr>
-                  <th>Driver</th><th>CDL #</th><th>CDL state</th><th>CDL expiry</th>
-                  <th>Medical expiry</th><th>Status</th><th>FMCSA</th><th>Dispatch</th>
-                </tr>
-              </thead>
-              <tbody>
-                <%= for d <- @drivers do %>
-                  <tr class="driver-row" id={"driver-#{d.id}"}>
-                    <td class="d-name">{d.full_name}</td>
-                    <td class="d-cdl">{d.cdl_number}</td>
-                    <td class="d-cdl-state">{d.cdl_state}</td>
-                    <td class="d-cdl-expiry">{d.cdl_expiry}</td>
-                    <td class="d-med-expiry">{d.medical_card_expiry}</td>
-                    <td class="d-status">{d.status}</td>
+          <%= if @panel == "roster" do %>
+            <div class="wrap">
+              <div id="roster">
+                <div class="gtitle">
+                  <h3>Driver roster</h3><span class="n">{length(@drivers)}</span>
+                  <span class="lane">· your org — driver names in the clear</span>
+                </div>
+                <.data_table>
+                  <:head>
+                    <th style="width:22%">Driver</th>
+                    <th style="width:14%">CDL #</th>
+                    <th style="width:10%">State</th>
+                    <th style="width:12%">CDL expiry</th>
+                    <th style="width:12%">Med card</th>
+                    <th style="width:10%">Status</th>
+                    <th style="width:10%">FMCSA</th>
+                    <th style="width:10%">Dispatch</th>
+                  </:head>
+                  <tr :for={d <- @drivers} class="driver-row" id={"driver-#{d.id}"}>
+                    <td>
+                      <div class="drv">
+                        <div class="av" style="background:#DDE7F5;color:#3B4CCA;font-size:10px;font-weight:600">{initials(d.full_name)}</div>
+                        <span class="nm d-name" style="color:#3a3b45;letter-spacing:normal">{driver_name(d.full_name)}</span>
+                      </div>
+                    </td>
+                    <td class="d-cdl"><span class="mono">{d.cdl_number}</span></td>
+                    <td class="d-cdl-state carrier">{d.cdl_state}</td>
+                    <td class="d-cdl-expiry carrier">{d.cdl_expiry}</td>
+                    <td class="d-med-expiry carrier">{d.medical_card_expiry}</td>
+                    <td class="d-status"><.pill variant={status_variant(d.status)}>{d.status}</.pill></td>
                     <td class="d-fmcsa">
                       <%= case d.__fmcsa__ do %>
                         <% :ok -> %>
-                          <span class="fmcsa-ok">OK</span>
+                          <span class="fmcsa-ok"><.pill variant="ok">OK</.pill></span>
                         <% {:blocked, reasons} -> %>
-                          <span class="fmcsa-blocked">BLOCKED: {Enum.map_join(reasons, ", ", &Reads.reason_label/1)}</span>
+                          <span class="fmcsa-blocked"><.pill variant="bad">BLOCKED: {Enum.map_join(reasons, ", ", &Reads.reason_label/1)}</.pill></span>
                       <% end %>
                     </td>
                     <td class="d-dispatch">
                       <%= if Reads.dispatchable?(d) do %>
-                        <button class="dispatch-btn" phx-click="dispatch" phx-value-driver={d.id}>Dispatch</button>
+                        <button class="dispatch-btn btn" phx-click="dispatch" phx-value-driver={d.id}>Dispatch</button>
                       <% else %>
-                        <button class="dispatch-btn" disabled>Dispatch (blocked)</button>
+                        <button class="dispatch-btn btn" disabled>Dispatch (blocked)</button>
                       <% end %>
                     </td>
                   </tr>
-                <% end %>
-              </tbody>
-            </table>
-          </section>
-        <% end %>
+                </.data_table>
+              </div>
+            </div>
+          <% end %>
 
-        <%= if @panel == "settlements" do %>
-          <section id="settlements">
-            <h2>Settlements (reshaped money: linehaul − advances − factoring − claims)</h2>
-            <table id="settlement-table">
-              <thead>
-                <tr>
-                  <th>Linehaul</th><th>Advances</th><th>Factoring fee</th>
-                  <th>Claims</th><th>Net payable</th><th>Carryover</th><th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                <%= for s <- @settlements do %>
-                  <tr class="settlement-row" id={"settlement-#{s.id}"}>
-                    <td class="st-linehaul">{dollars(s.linehaul_cents)}</td>
-                    <td class="st-advances">{dollars(s.advances_cents)}</td>
-                    <td class="st-factoring">{dollars(s.factoring_fee_cents)}</td>
-                    <td class="st-claims">{dollars(s.claim_deduction_cents)}</td>
-                    <td class="st-net">{dollars(s.net_payable_cents)}</td>
-                    <td class="st-carryover">{dollars(s.carryover_cents)}</td>
-                    <td class="st-status">{s.status}</td>
-                  </tr>
-                <% end %>
-              </tbody>
-            </table>
-          </section>
+          <%= if @panel == "settlements" do %>
+            <div class="wrap">
+              <div id="settlements">
+                <div class="split">
+                  <div>
+                    <div class="gtitle">
+                      <h3>Settlements</h3><span class="n">{length(@settlements)}</span>
+                      <span class="lane">· reshaped: linehaul − advances − factoring − claims</span>
+                    </div>
+                    <div id="settlement-table">
+                      <.data_table>
+                        <:head>
+                          <th>Linehaul</th>
+                          <th>Advances</th>
+                          <th>Factoring</th>
+                          <th>Claims</th>
+                          <th>Net payable</th>
+                          <th>Status</th>
+                        </:head>
+                        <tr :for={s <- @settlements} class="settlement-row" id={"settlement-#{s.id}"}>
+                          <td class="st-linehaul mono num">{dollars(s.linehaul_cents)}</td>
+                          <td class="st-advances mono num">{dollars(s.advances_cents)}</td>
+                          <td class="st-factoring mono num">{dollars(s.factoring_fee_cents)}</td>
+                          <td class="st-claims mono num">{dollars(s.claim_deduction_cents)}</td>
+                          <td class="st-net mono num" style="color:var(--green)">{dollars(s.net_payable_cents)}</td>
+                          <td class="st-carryover" style="display:none">{dollars(s.carryover_cents)}</td>
+                          <td class="st-status"><.pill variant={status_variant(s.status)}>{s.status}</.pill></td>
+                        </tr>
+                      </.data_table>
+                    </div>
+                  </div>
+
+                  <div :if={List.first(@settlements)}>
+                    <% s = List.first(@settlements) %>
+                    <div class="gtitle"><h3>Carrier settlement</h3></div>
+                    <div class="settle">
+                      <div class="sh">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" stroke-width="1.9"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+                        <b>Carrier settlement</b><span class="tag">reshaped</span>
+                      </div>
+                      <div class="row"><span class="lab">Linehaul</span><span class="val">{dollars(s.linehaul_cents)}</span></div>
+                      <div class="row neg"><span class="lab">Advances</span><span class="val">−{dollars(s.advances_cents)}</span></div>
+                      <div class="row neg"><span class="lab">Factoring</span><span class="val">−{dollars(s.factoring_fee_cents)}</span></div>
+                      <div class="row neg"><span class="lab">Claims</span><span class="val">−{dollars(s.claim_deduction_cents)}</span></div>
+                      <div class="row net"><span class="lab">Net payable</span><span class="val">{dollars(s.net_payable_cents)}</span></div>
+                      <div class="foot2">
+                        Kernel <span class="mono" style="color:var(--brand)">Invoice</span> reshaped to two-sided settlement via a bounded-context calculation — the vertical's money model, the substrate's audit &amp; vault underneath.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          <% end %>
         <% end %>
-      <% end %>
+      </.app_shell>
     </div>
     """
   end
+
+  # The dispatch-board metric cards (screen 3): derived from the rollup summary. Non-PII
+  # counts + cents only.
+  defp dashboard_metrics(assigns) do
+    ~H"""
+    <div class="metrics">
+      <.metric label="Loads (rolled up)" value={dashboard_load_count(@summary)}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13l5 5v5H3z" /></svg>
+        </:icon>
+      </.metric>
+      <.metric label="Load statuses" value={length((@summary && @summary.by_status) || [])} sub="distinct status buckets">
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3a9 9 0 1 0 9 9" /><path d="M12 7v5l3 2" /></svg>
+        </:icon>
+      </.metric>
+      <.metric label="Gross (rolled up)" value={dollars(dashboard_gross(@summary))} sub="load value">
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+        </:icon>
+      </.metric>
+      <.metric label="Net settlements" value={dashboard_net(@summary)} sub="after deductions">
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6L9 17l-5-5" /></svg>
+        </:icon>
+      </.metric>
+    </div>
+    """
+  end
+
+  defp dashboard_load_count(nil), do: 0
+  defp dashboard_load_count(summary), do: Enum.reduce(summary.by_status || [], 0, &(&1.load_count + &2))
+
+  defp dashboard_gross(nil), do: 0
+  defp dashboard_gross(summary), do: Enum.reduce(summary.by_status || [], 0, &(&1.gross_cents + &2))
+
+  defp dashboard_net(nil), do: "$0.00"
+  defp dashboard_net(%{settlements: nil}), do: "$0.00"
+  defp dashboard_net(%{settlements: s}), do: dollars(s.net_payable_cents)
+
+  defp panel_title("dashboard"), do: "Dispatch board"
+  defp panel_title("loads"), do: "Loads"
+  defp panel_title("roster"), do: "Drivers"
+  defp panel_title("settlements"), do: "Settlements"
+  defp panel_title(_), do: "Dispatch board"
 
   # The dispatch action guard on the tenant plane: even the phx-click path routes through
   # the FMCSA gate. The button for a blocked driver is disabled in the render, and this
