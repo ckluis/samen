@@ -50,8 +50,17 @@ defmodule DriftwoodWeb.CrmContactsLive do
     assign(socket,
       no_org: false,
       org_id: org_id,
-      contacts: CrmReads.contacts(scope)
+      contacts: CrmReads.contacts(scope),
+      company_names: company_name_map(scope)
     )
+  end
+
+  # id → company name, for the contacts' Company column. Own rescue so a
+  # company-read failure never blanks the contacts list.
+  defp company_name_map(scope) do
+    CrmReads.companies(scope) |> Map.new(fn c -> {c.id, c.name} end)
+  rescue
+    _ -> %{}
   end
 
   # A tenant-member scope for CRM contacts: plane: :tenant so the org reads its OWN
@@ -150,7 +159,7 @@ defmodule DriftwoodWeb.CrmContactsLive do
                   <td class="p-phone" style="font-size:12px;color:var(--muted)">
                     {render_phone(p.phones)}
                   </td>
-                  <td class="p-company" style="color:var(--muted)">{p.company_id && "—" || "—"}</td>
+                  <td class="p-company" style="color:var(--muted)">{(p.company_id && Map.get(Map.get(assigns, :company_names, %{}), p.company_id)) || "—"}</td>
                   <td class="p-title" style="color:var(--muted);font-size:12px">{p.job_title || "—"}</td>
                 </tr>
               </.data_table>
@@ -212,6 +221,16 @@ defmodule DriftwoodWeb.CrmContactsLive do
   # Render the first email from the emails list (a list of %{label, address} maps, OR %Masked{}).
   defp render_email(%Samen.Masked{} = masked), do: masked
 
+  defp render_email(%Samen.Type.Emails{entries: entries}), do: render_email(entries)
+
+  # Tenant plane: the resolver returns the composite as decrypted JSON text.
+  defp render_email(json) when is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, list} when is_list(list) -> render_email(list)
+      _ -> "—"
+    end
+  end
+
   defp render_email(emails) when is_list(emails) do
     case List.first(emails) do
       %{"address" => addr} -> addr
@@ -224,6 +243,16 @@ defmodule DriftwoodWeb.CrmContactsLive do
 
   # Render the first phone from the phones list (a list of %{label, number} maps, OR %Masked{}).
   defp render_phone(%Samen.Masked{} = masked), do: masked
+
+  defp render_phone(%Samen.Type.Phones{entries: entries}), do: render_phone(entries)
+
+  # Tenant plane: the resolver returns the composite as decrypted JSON text.
+  defp render_phone(json) when is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, list} when is_list(list) -> render_phone(list)
+      _ -> "—"
+    end
+  end
 
   defp render_phone(phones) when is_list(phones) do
     case List.first(phones) do

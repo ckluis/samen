@@ -167,6 +167,14 @@ defmodule Driftwood.CrmUiTest do
 
       # MUST NOT render the vault token (plaintext came through the decrypt chokepoint).
       refute html =~ "vt_"
+
+      # Regression (C1): the composite email/phone PII resolves to decrypted JSON
+      # text on the tenant plane — it must be decoded and shown in the clear, not "—".
+      assert html =~ ~r/[a-z.]+@[a-z.]+\.example/,
+             "tenant plane did not render a contact email in the clear (composite decode regressed)"
+
+      assert html =~ ~r/\d{3}-\d{4}/,
+             "tenant plane did not render a contact phone in the clear (composite decode regressed)"
     end
 
     test "OPERATOR/impersonation plane: the SAME contacts render •••• (no plaintext leak)", %{org_id: org_id} do
