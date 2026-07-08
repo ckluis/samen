@@ -501,6 +501,648 @@
     {
       "fields": [
         {
+          "column_name": "fbc_currency",
+          "logical_name": "currency",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fbc_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fbc_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbc_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbc_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbc_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fbc_stripe_customer_id",
+          "logical_name": "stripe_customer_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fbc_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_fbc_billing_email",
+          "logical_name": "billing_email",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "pii_fbc_billing_name",
+          "logical_name": "billing_name",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Driftwood.Billing.Customer",
+      "table_name": "fbc_customer"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fbe_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fbe_expires_at",
+          "logical_name": "expires_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbe_feature",
+          "logical_name": "feature",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fbe_granted",
+          "logical_name": "granted",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fbe_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbe_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbe_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbe_plan_id",
+          "logical_name": "plan_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbe_subscription_id",
+          "logical_name": "subscription_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbe_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Billing.Entitlement",
+      "table_name": "fbe_entitlement"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fbi_amount_due_cents",
+          "logical_name": "amount_due_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fbi_amount_paid_cents",
+          "logical_name": "amount_paid_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fbi_currency",
+          "logical_name": "currency",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fbi_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fbi_customer_id",
+          "logical_name": "customer_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbi_due_date",
+          "logical_name": "due_date",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbi_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbi_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbi_line_items",
+          "logical_name": "line_items",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
+        },
+        {
+          "column_name": "fbi_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbi_paid_at",
+          "logical_name": "paid_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbi_period_end",
+          "logical_name": "period_end",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbi_period_start",
+          "logical_name": "period_start",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbi_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fbi_stripe_invoice_id",
+          "logical_name": "stripe_invoice_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fbi_subscription_id",
+          "logical_name": "subscription_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbi_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Billing.Invoice",
+      "table_name": "fbi_invoice"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fbp_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fbp_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fbp_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fbp_features",
+          "logical_name": "features",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fbp_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbp_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbp_interval",
+          "logical_name": "interval",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fbp_label",
+          "logical_name": "label",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fbp_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fbp_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbp_stripe_plan_id",
+          "logical_name": "stripe_plan_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fbp_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Billing.Plan",
+      "table_name": "fbp_plan"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fbr_active",
+          "logical_name": "active",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fbr_currency",
+          "logical_name": "currency",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fbr_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fbr_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbr_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbr_interval",
+          "logical_name": "interval",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fbr_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbr_plan_id",
+          "logical_name": "plan_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbr_stripe_price_id",
+          "logical_name": "stripe_price_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fbr_unit_amount_cents",
+          "logical_name": "unit_amount_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fbr_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Billing.Price",
+      "table_name": "fbr_price"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fbs_cancel_at",
+          "logical_name": "cancel_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbs_cancelled_at",
+          "logical_name": "cancelled_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbs_current_period_end",
+          "logical_name": "current_period_end",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbs_current_period_start",
+          "logical_name": "current_period_start",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbs_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fbs_customer_id",
+          "logical_name": "customer_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbs_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbs_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbs_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbs_plan_id",
+          "logical_name": "plan_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbs_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fbs_stripe_subscription_id",
+          "logical_name": "stripe_subscription_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fbs_trial_end",
+          "logical_name": "trial_end",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbs_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Billing.Subscription",
+      "table_name": "fbs_subscription"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fbu_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbu_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbu_metric",
+          "logical_name": "metric",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fbu_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbu_period_end",
+          "logical_name": "period_end",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbu_period_start",
+          "logical_name": "period_start",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbu_quantity",
+          "logical_name": "quantity",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fbu_reported_at",
+          "logical_name": "reported_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbu_subscription_id",
+          "logical_name": "subscription_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbu_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Billing.Usage",
+      "table_name": "fbu_usage"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fby_amount_cents",
+          "logical_name": "amount_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fby_currency",
+          "logical_name": "currency",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fby_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fby_customer_id",
+          "logical_name": "customer_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fby_failure_code",
+          "logical_name": "failure_code",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fby_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fby_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fby_invoice_id",
+          "logical_name": "invoice_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fby_last4",
+          "logical_name": "last4",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fby_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fby_paid_at",
+          "logical_name": "paid_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fby_payment_method_type",
+          "logical_name": "payment_method_type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fby_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fby_stripe_payment_intent_id",
+          "logical_name": "stripe_payment_intent_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fby_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Billing.Payment",
+      "table_name": "fby_payment"
+    },
+    {
+      "fields": [
+        {
           "column_name": "fcm_custom",
           "logical_name": "custom",
           "pii": false,
@@ -791,6 +1433,510 @@
       ],
       "resource": "Driftwood.Crm.Person",
       "table_name": "fpr_person"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fsa_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fsa_external_id",
+          "logical_name": "external_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsa_full_name",
+          "logical_name": "full_name",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "fsa_handle",
+          "logical_name": "handle",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsa_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsa_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fsa_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsa_role",
+          "logical_name": "role",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fsa_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fsa_timezone",
+          "logical_name": "timezone",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsa_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_fsa_email",
+          "logical_name": "email",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Driftwood.Support.Agent",
+      "table_name": "fsa_agent"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fsc_channel",
+          "logical_name": "channel",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fsc_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsc_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fsc_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsc_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fsc_subject",
+          "logical_name": "subject",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsc_ticket_id",
+          "logical_name": "ticket_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsc_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Support.Conversation",
+      "table_name": "fsc_conversation"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fsk_breached",
+          "logical_name": "breached",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fsk_closed_at",
+          "logical_name": "closed_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fsk_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fsk_external_id",
+          "logical_name": "external_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsk_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsk_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fsk_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsk_priority",
+          "logical_name": "priority",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fsk_resolved_at",
+          "logical_name": "resolved_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fsk_sla_breach_at",
+          "logical_name": "sla_breach_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fsk_sla_id",
+          "logical_name": "sla_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsk_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fsk_subject",
+          "logical_name": "subject",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsk_tags",
+          "logical_name": "tags",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "fsk_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Support.Ticket",
+      "table_name": "fsk_ticket"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fsl_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fsl_first_response_minutes",
+          "logical_name": "first_response_minutes",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fsl_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsl_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fsl_label",
+          "logical_name": "label",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsl_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsl_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsl_priority",
+          "logical_name": "priority",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fsl_resolve_minutes",
+          "logical_name": "resolve_minutes",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fsl_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Support.Sla",
+      "table_name": "fsl_sla"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fsm_agent_id",
+          "logical_name": "agent_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsm_attachments",
+          "logical_name": "attachments",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "fsm_conversation_id",
+          "logical_name": "conversation_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsm_created_via",
+          "logical_name": "created_via",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fsm_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsm_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fsm_message_type",
+          "logical_name": "message_type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fsm_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsm_sender_id",
+          "logical_name": "sender_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsm_sender_type",
+          "logical_name": "sender_type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fsm_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_fsm_body",
+          "logical_name": "body",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Driftwood.Support.Message",
+      "table_name": "fsm_message"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fsn_body_template",
+          "logical_name": "body_template",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsn_category",
+          "logical_name": "category",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsn_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsn_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fsn_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsn_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fsn_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsn_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsn_tags",
+          "logical_name": "tags",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "fsn_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Support.Macro",
+      "table_name": "fsn_macro"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fss_agent_id",
+          "logical_name": "agent_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fss_channel",
+          "logical_name": "channel",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fss_comments",
+          "logical_name": "comments",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fss_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fss_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fss_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fss_responded_at",
+          "logical_name": "responded_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fss_score",
+          "logical_name": "score",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fss_ticket_id",
+          "logical_name": "ticket_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fss_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Support.Csat",
+      "table_name": "fss_csat"
     },
     {
       "fields": [

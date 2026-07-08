@@ -1,0 +1,4182 @@
+{
+  "version": "1.0",
+  "generated": "2026-07-08T13:59:04.185149Z",
+  "engine": {
+    "elixir": "ctags",
+    "elixir_script": "ctags"
+  },
+  "stats": {
+    "total_symbols": 463,
+    "files_indexed": 77
+  },
+  "symbols": [
+    {
+      "name": "AddOban",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260705010100_oban.exs",
+      "line": 1,
+      "end": 7,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.AddOban do$/",
+      "lines": 7
+    },
+    {
+      "name": "Aggregate",
+      "kind": "module",
+      "file": "lib/driftwood/aggregate.ex",
+      "line": 1,
+      "end": 52,
+      "signature": "/^defmodule Driftwood.Aggregate do$/",
+      "lines": 52
+    },
+    {
+      "name": "AggregateProjections",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260707150000_aggregate_projections.exs",
+      "line": 1,
+      "end": 134,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.AggregateProjections do$/",
+      "lines": 134
+    },
+    {
+      "name": "ApiCase",
+      "kind": "module",
+      "file": "test/support/api_case.ex",
+      "line": 1,
+      "end": 110,
+      "signature": "/^defmodule Driftwood.ApiCase do$/",
+      "lines": 110
+    },
+    {
+      "name": "ApiExternalSurfaceTest",
+      "kind": "module",
+      "file": "test/api_external_surface_test.exs",
+      "line": 1,
+      "end": 259,
+      "signature": "/^defmodule Driftwood.ApiExternalSurfaceTest do$/",
+      "lines": 259
+    },
+    {
+      "name": "ApiKey",
+      "kind": "module",
+      "file": "lib/driftwood/freight.ex",
+      "line": 376,
+      "end": 446,
+      "signature": "/^defmodule Driftwood.Freight.ApiKey do$/",
+      "lines": 71
+    },
+    {
+      "name": "Application",
+      "kind": "module",
+      "file": "lib/driftwood/application.ex",
+      "line": 1,
+      "end": 27,
+      "signature": "/^defmodule Driftwood.Application do$/",
+      "lines": 27
+    },
+    {
+      "name": "AshFunctions",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260705010000_ash_functions.exs",
+      "line": 1,
+      "end": 108,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.AshFunctions do$/",
+      "lines": 108
+    },
+    {
+      "name": "AttackMatrixTest",
+      "kind": "module",
+      "file": "test/adversarial/driftwood_attack_matrix_test.exs",
+      "line": 1,
+      "end": 134,
+      "signature": "/^defmodule Driftwood.Adversarial.AttackMatrixTest do$/",
+      "lines": 134
+    },
+    {
+      "name": "AudChain",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260707200000_aud_chain.exs",
+      "line": 1,
+      "end": 38,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.AudChain do$/",
+      "lines": 38
+    },
+    {
+      "name": "AudEvent",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260705020000_aud_event.exs",
+      "line": 1,
+      "end": 123,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.AudEvent do$/",
+      "lines": 123
+    },
+    {
+      "name": "Billing",
+      "kind": "module",
+      "file": "lib/driftwood/billing.ex",
+      "line": 1,
+      "end": 47,
+      "signature": "/^defmodule Driftwood.Billing do$/",
+      "lines": 47
+    },
+    {
+      "name": "BrokerLive",
+      "kind": "module",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 1,
+      "end": 479,
+      "signature": "/^defmodule DriftwoodWeb.BrokerLive do$/",
+      "lines": 479
+    },
+    {
+      "name": "BrokerRollup",
+      "kind": "module",
+      "file": "lib/driftwood/broker_rollup.ex",
+      "line": 1,
+      "end": 133,
+      "signature": "/^defmodule Driftwood.BrokerRollup do$/",
+      "lines": 133
+    },
+    {
+      "name": "BrokerSummary",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260707160000_broker_summary.exs",
+      "line": 1,
+      "end": 91,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.BrokerSummary do$/",
+      "lines": 91
+    },
+    {
+      "name": "CatalogTables",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260705015000_catalog_tables.exs",
+      "line": 1,
+      "end": 18,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.CatalogTables do$/",
+      "lines": 18
+    },
+    {
+      "name": "CdlVaultTest",
+      "kind": "module",
+      "file": "test/cdl_vault_test.exs",
+      "line": 1,
+      "end": 92,
+      "signature": "/^defmodule Driftwood.CdlVaultTest do$/",
+      "lines": 92
+    },
+    {
+      "name": "Context",
+      "kind": "module",
+      "file": "lib/driftwood/context.ex",
+      "line": 1,
+      "end": 134,
+      "signature": "/^defmodule Driftwood.Context do$/",
+      "lines": 134
+    },
+    {
+      "name": "ContextAliasesTest",
+      "kind": "module",
+      "file": "test/context_aliases_test.exs",
+      "line": 1,
+      "end": 86,
+      "signature": "/^defmodule Driftwood.ContextAliasesTest do$/",
+      "lines": 86
+    },
+    {
+      "name": "Crm",
+      "kind": "module",
+      "file": "lib/driftwood/crm.ex",
+      "line": 1,
+      "end": 47,
+      "signature": "/^defmodule Driftwood.Crm do$/",
+      "lines": 47
+    },
+    {
+      "name": "CrmCompaniesLive",
+      "kind": "module",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 1,
+      "end": 265,
+      "signature": "/^defmodule DriftwoodWeb.CrmCompaniesLive do$/",
+      "lines": 265
+    },
+    {
+      "name": "CrmContactsLive",
+      "kind": "module",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 1,
+      "end": 307,
+      "signature": "/^defmodule DriftwoodWeb.CrmContactsLive do$/",
+      "lines": 307
+    },
+    {
+      "name": "CrmPipelineLive",
+      "kind": "module",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 1,
+      "end": 271,
+      "signature": "/^defmodule DriftwoodWeb.CrmPipelineLive do$/",
+      "lines": 271
+    },
+    {
+      "name": "CrmReads",
+      "kind": "module",
+      "file": "lib/driftwood/crm_reads.ex",
+      "line": 1,
+      "end": 153,
+      "signature": "/^defmodule Driftwood.CrmReads do$/",
+      "lines": 153
+    },
+    {
+      "name": "CrmUiTest",
+      "kind": "module",
+      "file": "test/crm_ui_test.exs",
+      "line": 1,
+      "end": 263,
+      "signature": "/^defmodule Driftwood.CrmUiTest do$/",
+      "lines": 263
+    },
+    {
+      "name": "CrossOrgTest",
+      "kind": "module",
+      "file": "test/cross_org_test.exs",
+      "line": 1,
+      "end": 96,
+      "signature": "/^defmodule Driftwood.CrossOrgTest do$/",
+      "lines": 96
+    },
+    {
+      "name": "CryptoShredGameday",
+      "kind": "module",
+      "file": "lib/driftwood/crypto_shred_gameday.ex",
+      "line": 1,
+      "end": 276,
+      "signature": "/^defmodule Driftwood.CryptoShredGameday do$/",
+      "lines": 276
+    },
+    {
+      "name": "CryptoShredGamedayTest",
+      "kind": "module",
+      "file": "test/crypto_shred_gameday_test.exs",
+      "line": 1,
+      "end": 276,
+      "signature": "/^defmodule Driftwood.CryptoShredGamedayTest do$/",
+      "lines": 276
+    },
+    {
+      "name": "DataCase",
+      "kind": "module",
+      "file": "test/support/data_case.ex",
+      "line": 1,
+      "end": 20,
+      "signature": "/^defmodule Driftwood.DataCase do$/",
+      "lines": 20
+    },
+    {
+      "name": "DemoSeedsTest",
+      "kind": "module",
+      "file": "test/demo_seeds_test.exs",
+      "line": 1,
+      "end": 127,
+      "signature": "/^defmodule Driftwood.DemoSeedsTest do$/",
+      "lines": 127
+    },
+    {
+      "name": "DispatchEvent",
+      "kind": "module",
+      "file": "lib/driftwood/freight.ex",
+      "line": 277,
+      "end": 375,
+      "signature": "/^defmodule Driftwood.Freight.DispatchEvent do$/",
+      "lines": 99
+    },
+    {
+      "name": "DispatchWorker",
+      "kind": "module",
+      "file": "lib/driftwood/jobs/dispatch_worker.ex",
+      "line": 1,
+      "end": 76,
+      "signature": "/^defmodule Driftwood.Jobs.DispatchWorker do$/",
+      "lines": 76
+    },
+    {
+      "name": "DispatchWorkerTest",
+      "kind": "module",
+      "file": "test/dispatch_worker_test.exs",
+      "line": 1,
+      "end": 73,
+      "signature": "/^defmodule Driftwood.DispatchWorkerTest do$/",
+      "lines": 73
+    },
+    {
+      "name": "DogfoodScenario",
+      "kind": "module",
+      "file": "lib/driftwood/dogfood_scenario.ex",
+      "line": 1,
+      "end": 198,
+      "signature": "/^defmodule Driftwood.DogfoodScenario do$/",
+      "lines": 198
+    },
+    {
+      "name": "DogfoodWalkthroughTest",
+      "kind": "module",
+      "file": "test/dogfood_walkthrough_test.exs",
+      "line": 1,
+      "end": 170,
+      "signature": "/^defmodule Driftwood.DogfoodWalkthroughTest do$/",
+      "lines": 170
+    },
+    {
+      "name": "DriftwoodResources",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260707100000_driftwood_resources.exs",
+      "line": 1,
+      "end": 348,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.DriftwoodResources do$/",
+      "lines": 348
+    },
+    {
+      "name": "DrillDataset",
+      "kind": "module",
+      "file": "priv/drills/pitr_drill.exs",
+      "line": 90,
+      "end": 394,
+      "signature": "/^defmodule DrillDataset do$/",
+      "lines": 305
+    },
+    {
+      "name": "DrillExpandSettlementNote",
+      "kind": "module",
+      "file": "priv/drills/expand_migrations/20260707210000_drill_expand_settlement_note.exs",
+      "line": 1,
+      "end": 30,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.DrillExpandSettlementNote do$/",
+      "lines": 30
+    },
+    {
+      "name": "Driver",
+      "kind": "module",
+      "file": "lib/driftwood/freight.ex",
+      "line": 41,
+      "end": 202,
+      "signature": "/^defmodule Driftwood.Freight.Driver do$/",
+      "lines": 162
+    },
+    {
+      "name": "DriverLoadRollup",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260707190000_driver_load_rollup.exs",
+      "line": 1,
+      "end": 93,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.DriverLoadRollup do$/",
+      "lines": 93
+    },
+    {
+      "name": "Endpoint",
+      "kind": "module",
+      "file": "lib/driftwood_web/api/endpoint.ex",
+      "line": 1,
+      "end": 25,
+      "signature": "/^defmodule DriftwoodWeb.Api.Endpoint do$/",
+      "lines": 25
+    },
+    {
+      "name": "Endpoint",
+      "kind": "module",
+      "file": "lib/driftwood_web/endpoint.ex",
+      "line": 1,
+      "end": 42,
+      "signature": "/^defmodule DriftwoodWeb.Endpoint do$/",
+      "lines": 42
+    },
+    {
+      "name": "Erasure",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260705010400_erasure.exs",
+      "line": 1,
+      "end": 44,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.Erasure do$/",
+      "lines": 44
+    },
+    {
+      "name": "ErrorHTML",
+      "kind": "module",
+      "file": "lib/driftwood_web/error_html.ex",
+      "line": 1,
+      "end": 7,
+      "signature": "/^defmodule DriftwoodWeb.ErrorHTML do$/",
+      "lines": 7
+    },
+    {
+      "name": "FmcsaDispatchGate",
+      "kind": "module",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 1,
+      "end": 166,
+      "signature": "/^defmodule Driftwood.Policy.FmcsaDispatchGate do$/",
+      "lines": 166
+    },
+    {
+      "name": "FmcsaDispatchGateTest",
+      "kind": "module",
+      "file": "test/fmcsa_dispatch_gate_test.exs",
+      "line": 1,
+      "end": 161,
+      "signature": "/^defmodule Driftwood.FmcsaDispatchGateTest do$/",
+      "lines": 161
+    },
+    {
+      "name": "Freight",
+      "kind": "module",
+      "file": "lib/driftwood/freight.ex",
+      "line": 1,
+      "end": 40,
+      "signature": "/^defmodule Driftwood.Freight do$/",
+      "lines": 40
+    },
+    {
+      "name": "FreightApiKey",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260708100000_freight_api_key.exs",
+      "line": 1,
+      "end": 40,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.FreightApiKey do$/",
+      "lines": 40
+    },
+    {
+      "name": "KeyAuthPlug",
+      "kind": "module",
+      "file": "lib/driftwood_web/api/key_auth_plug.ex",
+      "line": 1,
+      "end": 112,
+      "signature": "/^defmodule DriftwoodWeb.Api.KeyAuthPlug do$/",
+      "lines": 112
+    },
+    {
+      "name": "Layouts",
+      "kind": "module",
+      "file": "lib/driftwood_web/layouts.ex",
+      "line": 1,
+      "end": 28,
+      "signature": "/^defmodule DriftwoodWeb.Layouts do$/",
+      "lines": 28
+    },
+    {
+      "name": "LoadVolumeByLane",
+      "kind": "module",
+      "file": "lib/driftwood/aggregate.ex",
+      "line": 53,
+      "end": 125,
+      "signature": "/^defmodule Driftwood.Aggregate.LoadVolumeByLane do$/",
+      "lines": 73
+    },
+    {
+      "name": "MigrationMeta",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260705110000_migration_meta.exs",
+      "line": 1,
+      "end": 21,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.MigrationMeta do$/",
+      "lines": 21
+    },
+    {
+      "name": "MixProject",
+      "kind": "module",
+      "file": "mix.exs",
+      "line": 1,
+      "end": 53,
+      "signature": "/^defmodule Driftwood.MixProject do$/",
+      "lines": 53
+    },
+    {
+      "name": "MountBillingSupportScopes",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260708110000_mount_billing_support_scopes.exs",
+      "line": 1,
+      "end": 541,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.MountBillingSupportScopes do$/",
+      "lines": 541
+    },
+    {
+      "name": "MrrByTier",
+      "kind": "module",
+      "file": "lib/driftwood/aggregate.ex",
+      "line": 126,
+      "end": 185,
+      "signature": "/^defmodule Driftwood.Aggregate.MrrByTier do$/",
+      "lines": 60
+    },
+    {
+      "name": "NonPiiSetup",
+      "kind": "module",
+      "file": "lib/driftwood/non_pii_setup.ex",
+      "line": 1,
+      "end": 55,
+      "signature": "/^defmodule Driftwood.NonPiiSetup do$/",
+      "lines": 55
+    },
+    {
+      "name": "OperatorDashboard",
+      "kind": "module",
+      "file": "lib/driftwood/operator_dashboard.ex",
+      "line": 1,
+      "end": 127,
+      "signature": "/^defmodule Driftwood.OperatorDashboard do$/",
+      "lines": 127
+    },
+    {
+      "name": "OperatorDashboardLive",
+      "kind": "module",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 1,
+      "end": 202,
+      "signature": "/^defmodule DriftwoodWeb.OperatorDashboardLive do$/",
+      "lines": 202
+    },
+    {
+      "name": "OperatorImpersonationLive",
+      "kind": "module",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 1,
+      "end": 320,
+      "signature": "/^defmodule DriftwoodWeb.OperatorImpersonationLive do$/",
+      "lines": 320
+    },
+    {
+      "name": "OperatorPlane",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260707170000_operator_plane.exs",
+      "line": 1,
+      "end": 90,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.OperatorPlane do$/",
+      "lines": 90
+    },
+    {
+      "name": "OperatorReveal",
+      "kind": "module",
+      "file": "lib/driftwood/operator_reveal.ex",
+      "line": 1,
+      "end": 57,
+      "signature": "/^defmodule Driftwood.OperatorReveal do$/",
+      "lines": 57
+    },
+    {
+      "name": "PageController",
+      "kind": "module",
+      "file": "lib/driftwood_web/page_controller.ex",
+      "line": 1,
+      "end": 31,
+      "signature": "/^defmodule DriftwoodWeb.PageController do$/",
+      "lines": 31
+    },
+    {
+      "name": "PitrGameday2Test",
+      "kind": "module",
+      "file": "test/pitr_gameday2_test.exs",
+      "line": 1,
+      "end": 80,
+      "signature": "/^defmodule Driftwood.PitrGameday2Test do$/",
+      "lines": 80
+    },
+    {
+      "name": "QueryBudgetLedger",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260707180000_query_budget_ledger.exs",
+      "line": 1,
+      "end": 80,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.QueryBudgetLedger do$/",
+      "lines": 80
+    },
+    {
+      "name": "Reads",
+      "kind": "module",
+      "file": "lib/driftwood/reads.ex",
+      "line": 1,
+      "end": 208,
+      "signature": "/^defmodule Driftwood.Reads do$/",
+      "lines": 208
+    },
+    {
+      "name": "Rebuild",
+      "kind": "module",
+      "file": "lib/driftwood/aggregate/rebuild.ex",
+      "line": 1,
+      "end": 79,
+      "signature": "/^defmodule Driftwood.Aggregate.Rebuild do$/",
+      "lines": 79
+    },
+    {
+      "name": "Repo",
+      "kind": "module",
+      "file": "lib/driftwood/repo.ex",
+      "line": 1,
+      "end": 14,
+      "signature": "/^defmodule Driftwood.Repo do$/",
+      "lines": 14
+    },
+    {
+      "name": "RevealGrants",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260705010300_reveal_grants.exs",
+      "line": 1,
+      "end": 64,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.RevealGrants do$/",
+      "lines": 64
+    },
+    {
+      "name": "Router",
+      "kind": "module",
+      "file": "lib/driftwood_web/api/router.ex",
+      "line": 1,
+      "end": 28,
+      "signature": "/^defmodule DriftwoodWeb.Api.Router do$/",
+      "lines": 28
+    },
+    {
+      "name": "Router",
+      "kind": "module",
+      "file": "lib/driftwood_web/router.ex",
+      "line": 1,
+      "end": 64,
+      "signature": "/^defmodule DriftwoodWeb.Router do$/",
+      "lines": 64
+    },
+    {
+      "name": "Seed",
+      "kind": "module",
+      "file": "lib/mix/tasks/driftwood.seed.ex",
+      "line": 1,
+      "end": 33,
+      "signature": "/^defmodule Mix.Tasks.Driftwood.Seed do$/",
+      "lines": 33
+    },
+    {
+      "name": "Seeds",
+      "kind": "module",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 1,
+      "end": 666,
+      "signature": "/^defmodule Driftwood.Seeds do$/",
+      "lines": 666
+    },
+    {
+      "name": "Settlement",
+      "kind": "module",
+      "file": "lib/driftwood/freight.ex",
+      "line": 203,
+      "end": 276,
+      "signature": "/^defmodule Driftwood.Freight.Settlement do$/",
+      "lines": 74
+    },
+    {
+      "name": "SettlementIntegrity",
+      "kind": "module",
+      "file": "lib/driftwood/pitr_gameday/settlement_integrity.ex",
+      "line": 1,
+      "end": 149,
+      "signature": "/^defmodule Driftwood.PitrGameday.SettlementIntegrity do$/",
+      "lines": 149
+    },
+    {
+      "name": "SettlementMathTest",
+      "kind": "module",
+      "file": "test/settlement_math_test.exs",
+      "line": 1,
+      "end": 199,
+      "signature": "/^defmodule Driftwood.SettlementMathTest do$/",
+      "lines": 199
+    },
+    {
+      "name": "Support",
+      "kind": "module",
+      "file": "lib/driftwood/support.ex",
+      "line": 1,
+      "end": 50,
+      "signature": "/^defmodule Driftwood.Support do$/",
+      "lines": 50
+    },
+    {
+      "name": "TntField",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260706070000_tnt_field.exs",
+      "line": 1,
+      "end": 23,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.TntField do$/",
+      "lines": 23
+    },
+    {
+      "name": "UIKit",
+      "kind": "module",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 1,
+      "end": 403,
+      "signature": "/^defmodule DriftwoodWeb.UIKit do$/",
+      "lines": 403
+    },
+    {
+      "name": "UIKitLive",
+      "kind": "module",
+      "file": "lib/driftwood_web/ui_kit_live.ex",
+      "line": 1,
+      "end": 206,
+      "signature": "/^defmodule DriftwoodWeb.UIKitLive do$/",
+      "lines": 206
+    },
+    {
+      "name": "UIKitTest",
+      "kind": "module",
+      "file": "test/ui_kit_test.exs",
+      "line": 1,
+      "end": 176,
+      "signature": "/^defmodule Driftwood.UIKitTest do$/",
+      "lines": 176
+    },
+    {
+      "name": "VaultTables",
+      "kind": "module",
+      "file": "priv/repo/migrations/20260705010200_vault_tables.exs",
+      "line": 1,
+      "end": 26,
+      "signature": "/^defmodule Driftwood.Repo.Migrations.VaultTables do$/",
+      "lines": 26
+    },
+    {
+      "name": "WebRedPathsTest",
+      "kind": "module",
+      "file": "test/web_red_paths_test.exs",
+      "line": 1,
+      "end": 299,
+      "signature": "/^defmodule Driftwood.WebRedPathsTest do$/",
+      "lines": 299
+    },
+    {
+      "name": "Webhooks",
+      "kind": "module",
+      "file": "lib/driftwood/webhooks.ex",
+      "line": 1,
+      "end": 48,
+      "signature": "/^defmodule Driftwood.Webhooks do$/",
+      "lines": 48
+    },
+    {
+      "name": "active_tenants",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 50,
+      "end": 50,
+      "signature": "/^  defp active_tenants(mrr) do$/",
+      "lines": 1
+    },
+    {
+      "name": "actor_of",
+      "kind": "function",
+      "file": "lib/driftwood/crm_reads.ex",
+      "line": 134,
+      "end": 134,
+      "signature": "/^  defp actor_of(%Samen.Scope{actor: actor}), do: actor$/",
+      "lines": 1
+    },
+    {
+      "name": "actor_of",
+      "kind": "function",
+      "file": "lib/driftwood/crm_reads.ex",
+      "line": 136,
+      "end": 136,
+      "signature": "/^  defp actor_of(_), do: %{}$/",
+      "lines": 1
+    },
+    {
+      "name": "actor_of",
+      "kind": "function",
+      "file": "lib/driftwood/crm_reads.ex",
+      "line": 135,
+      "end": 135,
+      "signature": "/^  defp actor_of(actor) when is_map(actor), do: actor$/",
+      "lines": 1
+    },
+    {
+      "name": "actor_of",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 84,
+      "end": 84,
+      "signature": "/^  defp actor_of(%Samen.Scope{actor: actor}), do: actor$/",
+      "lines": 1
+    },
+    {
+      "name": "actor_of",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 86,
+      "end": 86,
+      "signature": "/^  defp actor_of(_), do: %{}$/",
+      "lines": 1
+    },
+    {
+      "name": "actor_of",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 85,
+      "end": 85,
+      "signature": "/^  defp actor_of(actor) when is_map(actor), do: actor$/",
+      "lines": 1
+    },
+    {
+      "name": "aggregate_cohort_spec",
+      "kind": "function",
+      "file": "lib/driftwood/aggregate.ex",
+      "line": 115,
+      "end": 115,
+      "signature": "/^  def aggregate_cohort_spec do$/",
+      "lines": 1
+    },
+    {
+      "name": "aggregate_cohort_spec",
+      "kind": "function",
+      "file": "lib/driftwood/aggregate.ex",
+      "line": 176,
+      "end": 176,
+      "signature": "/^  def aggregate_cohort_spec do$/",
+      "lines": 1
+    },
+    {
+      "name": "aliases",
+      "kind": "function",
+      "file": "mix.exs",
+      "line": 50,
+      "end": 50,
+      "signature": "/^  defp aliases do$/",
+      "lines": 1
+    },
+    {
+      "name": "all_tiers",
+      "kind": "function",
+      "file": "test/crypto_shred_gameday_test.exs",
+      "line": 48,
+      "end": 48,
+      "signature": "/^  defp all_tiers(ctx),$/",
+      "lines": 1
+    },
+    {
+      "name": "api_get",
+      "kind": "function",
+      "file": "test/support/api_case.ex",
+      "line": 90,
+      "end": 90,
+      "signature": "/^  def api_get(path, key \\\\\\\\ nil) do$/",
+      "lines": 1
+    },
+    {
+      "name": "app_shell",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 63,
+      "end": 63,
+      "signature": "/^  def app_shell(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "application",
+      "kind": "function",
+      "file": "mix.exs",
+      "line": 22,
+      "end": 22,
+      "signature": "/^  def application do$/",
+      "lines": 1
+    },
+    {
+      "name": "assert_matches_reference",
+      "kind": "function",
+      "file": "test/settlement_math_test.exs",
+      "line": 68,
+      "end": 68,
+      "signature": "/^  defp assert_matches_reference(inputs) do$/",
+      "lines": 1
+    },
+    {
+      "name": "bearer_token",
+      "kind": "function",
+      "file": "lib/driftwood_web/api/key_auth_plug.ex",
+      "line": 68,
+      "end": 68,
+      "signature": "/^  defp bearer_token(conn) do$/",
+      "lines": 1
+    },
+    {
+      "name": "blue_ridge_org_id",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 71,
+      "end": 71,
+      "signature": "/^  def blue_ridge_org_id, do: @blue_ridge_org_id$/",
+      "lines": 1
+    },
+    {
+      "name": "broker_scope",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 87,
+      "end": 87,
+      "signature": "/^  def broker_scope(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "build",
+      "kind": "function",
+      "file": "lib/driftwood/dogfood_scenario.ex",
+      "line": 45,
+      "end": 45,
+      "signature": "/^  def build(opts \\\\\\\\ []) do$/",
+      "lines": 1
+    },
+    {
+      "name": "build_actor",
+      "kind": "function",
+      "file": "lib/driftwood_web/api/key_auth_plug.ex",
+      "line": 92,
+      "end": 92,
+      "signature": "/^  defp build_actor(key_row) do$/",
+      "lines": 1
+    },
+    {
+      "name": "build_fleet",
+      "kind": "function",
+      "file": "lib/driftwood/dogfood_scenario.ex",
+      "line": 29,
+      "end": 29,
+      "signature": "/^  def build_fleet(repo \\\\\\\\ Driftwood.Repo) do$/",
+      "lines": 1
+    },
+    {
+      "name": "button",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 195,
+      "end": 195,
+      "signature": "/^  def button(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "call",
+      "kind": "function",
+      "file": "lib/driftwood_web/api/key_auth_plug.ex",
+      "line": 53,
+      "end": 53,
+      "signature": "/^  def call(conn, _opts) do$/",
+      "lines": 1
+    },
+    {
+      "name": "carrier",
+      "kind": "function",
+      "file": "test/cross_org_test.exs",
+      "line": 17,
+      "end": 17,
+      "signature": "/^  defp carrier(org, name) do$/",
+      "lines": 1
+    },
+    {
+      "name": "carriers_per_tenant",
+      "kind": "function",
+      "file": "priv/drills/pitr_drill.exs",
+      "line": 95,
+      "end": 95,
+      "signature": "/^  def carriers_per_tenant, do: String.to_integer(System.get_env(\"DRILL_CARRIERS\") || \"40\")$/",
+      "lines": 1
+    },
+    {
+      "name": "cast_id",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 314,
+      "end": 314,
+      "signature": "/^  defp cast_id(socket, driver_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "catalog_down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707150000_aggregate_projections.exs",
+      "line": 124,
+      "end": 124,
+      "signature": "/^  defp catalog_down(table, fields) do$/",
+      "lines": 1
+    },
+    {
+      "name": "catalog_up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707150000_aggregate_projections.exs",
+      "line": 103,
+      "end": 103,
+      "signature": "/^  defp catalog_up(table, resource, fields) do$/",
+      "lines": 1
+    },
+    {
+      "name": "cell",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 34,
+      "end": 34,
+      "signature": "/^  defp cell(%Samen.Aggregate.Suppressed{}), do: \"\u2298\"$/",
+      "lines": 1
+    },
+    {
+      "name": "cell",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 36,
+      "end": 36,
+      "signature": "/^  defp cell(n) when is_integer(n), do: Integer.to_string(n)$/",
+      "lines": 1
+    },
+    {
+      "name": "cell",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 35,
+      "end": 35,
+      "signature": "/^  defp cell(nil), do: \"\u2298\"$/",
+      "lines": 1
+    },
+    {
+      "name": "change",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 39,
+      "end": 39,
+      "signature": "/^  def change(changeset, _opts, _context) do$/",
+      "lines": 1
+    },
+    {
+      "name": "change",
+      "kind": "function",
+      "file": "priv/drills/expand_migrations/20260707210000_drill_expand_settlement_note.exs",
+      "line": 26,
+      "end": 26,
+      "signature": "/^  def change do$/",
+      "lines": 1
+    },
+    {
+      "name": "check_cdl",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 187,
+      "end": 187,
+      "signature": "/^  defp check_cdl(reasons, %Date{} = expiry, today) do$/",
+      "lines": 1
+    },
+    {
+      "name": "check_cdl",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 185,
+      "end": 185,
+      "signature": "/^  defp check_cdl(reasons, nil, _today), do: [:cdl_missing_expiry | reasons]$/",
+      "lines": 1
+    },
+    {
+      "name": "check_cdl_expiry",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 106,
+      "end": 106,
+      "signature": "/^  defp check_cdl_expiry(errors, %Date{} = expiry, today) do$/",
+      "lines": 1
+    },
+    {
+      "name": "check_cdl_expiry",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 103,
+      "end": 103,
+      "signature": "/^  defp check_cdl_expiry(errors, nil, _today),$/",
+      "lines": 1
+    },
+    {
+      "name": "check_cdl_on_file",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 129,
+      "end": 129,
+      "signature": "/^  defp check_cdl_on_file(errors, changeset, driver_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "check_medical",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 181,
+      "end": 181,
+      "signature": "/^  defp check_medical(reasons, %Date{} = expiry, today) do$/",
+      "lines": 1
+    },
+    {
+      "name": "check_medical",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 179,
+      "end": 179,
+      "signature": "/^  defp check_medical(reasons, nil, _today), do: [:medical_missing | reasons]$/",
+      "lines": 1
+    },
+    {
+      "name": "check_medical_card",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 95,
+      "end": 95,
+      "signature": "/^  defp check_medical_card(errors, expiry, today) do$/",
+      "lines": 1
+    },
+    {
+      "name": "check_medical_card",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 92,
+      "end": 92,
+      "signature": "/^  defp check_medical_card(errors, nil, _today),$/",
+      "lines": 1
+    },
+    {
+      "name": "check_status",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 158,
+      "end": 158,
+      "signature": "/^  defp check_status(errors, _status), do: errors$/",
+      "lines": 1
+    },
+    {
+      "name": "check_status",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 152,
+      "end": 152,
+      "signature": "/^  defp check_status(errors, status) when status in [\"out_of_service\", :out_of_service],$/",
+      "lines": 1
+    },
+    {
+      "name": "check_status",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 155,
+      "end": 155,
+      "signature": "/^  defp check_status(errors, status) when status in [\"terminated\", :terminated],$/",
+      "lines": 1
+    },
+    {
+      "name": "check_status",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 197,
+      "end": 197,
+      "signature": "/^  defp check_status(reasons, _), do: reasons$/",
+      "lines": 1
+    },
+    {
+      "name": "check_status",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 191,
+      "end": 191,
+      "signature": "/^  defp check_status(reasons, s) when s in [:out_of_service, \"out_of_service\"],$/",
+      "lines": 1
+    },
+    {
+      "name": "check_status",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 194,
+      "end": 194,
+      "signature": "/^  defp check_status(reasons, s) when s in [:terminated, \"terminated\"],$/",
+      "lines": 1
+    },
+    {
+      "name": "clamp",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 312,
+      "end": 312,
+      "signature": "/^  defp clamp(_), do: 0$/",
+      "lines": 1
+    },
+    {
+      "name": "clamp",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 311,
+      "end": 311,
+      "signature": "/^  defp clamp(v) when is_integer(v), do: v |> max(0) |> min(100)$/",
+      "lines": 1
+    },
+    {
+      "name": "clamp_holds",
+      "kind": "function",
+      "file": "lib/driftwood/pitr_gameday/settlement_integrity.ex",
+      "line": 85,
+      "end": 85,
+      "signature": "/^  defp clamp_holds(repo) do$/",
+      "lines": 1
+    },
+    {
+      "name": "companies",
+      "kind": "function",
+      "file": "lib/driftwood/crm_reads.ex",
+      "line": 25,
+      "end": 25,
+      "signature": "/^  def companies(scope) do$/",
+      "lines": 1
+    },
+    {
+      "name": "company_initials",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 176,
+      "end": 176,
+      "signature": "/^  defp company_initials(name) do$/",
+      "lines": 1
+    },
+    {
+      "name": "company_initials",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 175,
+      "end": 175,
+      "signature": "/^  defp company_initials(nil), do: \"?\"$/",
+      "lines": 1
+    },
+    {
+      "name": "company_role",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 184,
+      "end": 184,
+      "signature": "/^  defp company_role(company) do$/",
+      "lines": 1
+    },
+    {
+      "name": "compliant_driver",
+      "kind": "function",
+      "file": "test/adversarial/driftwood_attack_matrix_test.exs",
+      "line": 24,
+      "end": 24,
+      "signature": "/^  defp compliant_driver(org) do$/",
+      "lines": 1
+    },
+    {
+      "name": "contact_initials",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 186,
+      "end": 186,
+      "signature": "/^  defp contact_initials(%Samen.Masked{}, _display_name), do: \"\u00b7\u00b7\"$/",
+      "lines": 1
+    },
+    {
+      "name": "contact_initials",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 210,
+      "end": 210,
+      "signature": "/^  defp contact_initials(_, _), do: \"??\"$/",
+      "lines": 1
+    },
+    {
+      "name": "contact_initials",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 188,
+      "end": 188,
+      "signature": "/^  defp contact_initials(name, _display_name) when is_binary(name) do$/",
+      "lines": 1
+    },
+    {
+      "name": "contact_initials",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 202,
+      "end": 202,
+      "signature": "/^  defp contact_initials(nil, display_name) when is_binary(display_name) do$/",
+      "lines": 1
+    },
+    {
+      "name": "contacts",
+      "kind": "function",
+      "file": "lib/driftwood/crm_reads.ex",
+      "line": 47,
+      "end": 47,
+      "signature": "/^  def contacts(scope) do$/",
+      "lines": 1
+    },
+    {
+      "name": "count",
+      "kind": "function",
+      "file": "test/demo_seeds_test.exs",
+      "line": 31,
+      "end": 31,
+      "signature": "/^  defp count(resource, org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "count",
+      "kind": "function",
+      "file": "test/dispatch_worker_test.exs",
+      "line": 41,
+      "end": 41,
+      "signature": "/^  defp count(load_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "count_resource",
+      "kind": "function",
+      "file": "lib/driftwood/crm_reads.ex",
+      "line": 138,
+      "end": 138,
+      "signature": "/^  defp count_resource(resource, scope) do$/",
+      "lines": 1
+    },
+    {
+      "name": "create_company",
+      "kind": "function",
+      "file": "lib/driftwood/crypto_shred_gameday.ex",
+      "line": 257,
+      "end": 257,
+      "signature": "/^  defp create_company(org_id, name, custom) do$/",
+      "lines": 1
+    },
+    {
+      "name": "create_company",
+      "kind": "function",
+      "file": "lib/driftwood/dogfood_scenario.ex",
+      "line": 137,
+      "end": 137,
+      "signature": "/^  defp create_company(org_id, name, custom) do$/",
+      "lines": 1
+    },
+    {
+      "name": "create_driver",
+      "kind": "function",
+      "file": "lib/driftwood/dogfood_scenario.ex",
+      "line": 144,
+      "end": 144,
+      "signature": "/^  defp create_driver(org_id, carrier_id, first, last, cdl, kw) do$/",
+      "lines": 1
+    },
+    {
+      "name": "create_driver",
+      "kind": "function",
+      "file": "test/cdl_vault_test.exs",
+      "line": 13,
+      "end": 13,
+      "signature": "/^  defp create_driver(cdl) do$/",
+      "lines": 1
+    },
+    {
+      "name": "create_load",
+      "kind": "function",
+      "file": "lib/driftwood/crypto_shred_gameday.ex",
+      "line": 265,
+      "end": 265,
+      "signature": "/^  defp create_load(org_id, name, value_cents, lane) do$/",
+      "lines": 1
+    },
+    {
+      "name": "create_load",
+      "kind": "function",
+      "file": "lib/driftwood/dogfood_scenario.ex",
+      "line": 160,
+      "end": 160,
+      "signature": "/^  defp create_load(org_id, name, value_cents, lane) do$/",
+      "lines": 1
+    },
+    {
+      "name": "create_settlement",
+      "kind": "function",
+      "file": "lib/driftwood/dogfood_scenario.ex",
+      "line": 179,
+      "end": 179,
+      "signature": "/^  defp create_settlement(org_id, carrier_id, load_id, kw) do$/",
+      "lines": 1
+    },
+    {
+      "name": "create_settlement",
+      "kind": "function",
+      "file": "test/settlement_math_test.exs",
+      "line": 53,
+      "end": 53,
+      "signature": "/^  defp create_settlement(inputs) do$/",
+      "lines": 1
+    },
+    {
+      "name": "crm_scope",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 55,
+      "end": 55,
+      "signature": "/^  def crm_scope(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "crm_scope",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 60,
+      "end": 60,
+      "signature": "/^  def crm_scope(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "crm_scope",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 65,
+      "end": 65,
+      "signature": "/^  def crm_scope(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "crm_sidebar",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 197,
+      "end": 197,
+      "signature": "/^  defp crm_sidebar(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "crm_sidebar",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 239,
+      "end": 239,
+      "signature": "/^  defp crm_sidebar(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "crm_sidebar",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 203,
+      "end": 203,
+      "signature": "/^  defp crm_sidebar(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "dashboard_gross",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 435,
+      "end": 435,
+      "signature": "/^  defp dashboard_gross(nil), do: 0$/",
+      "lines": 1
+    },
+    {
+      "name": "dashboard_gross",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 436,
+      "end": 436,
+      "signature": "/^  defp dashboard_gross(summary), do: Enum.reduce(summary.by_status || [], 0, &(&1.gross_cents + /",
+      "lines": 1
+    },
+    {
+      "name": "dashboard_load_count",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 432,
+      "end": 432,
+      "signature": "/^  defp dashboard_load_count(nil), do: 0$/",
+      "lines": 1
+    },
+    {
+      "name": "dashboard_load_count",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 433,
+      "end": 433,
+      "signature": "/^  defp dashboard_load_count(summary), do: Enum.reduce(summary.by_status || [], 0, &(&1.load_coun/",
+      "lines": 1
+    },
+    {
+      "name": "dashboard_metrics",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 405,
+      "end": 405,
+      "signature": "/^  defp dashboard_metrics(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "dashboard_net",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 439,
+      "end": 439,
+      "signature": "/^  defp dashboard_net(%{settlements: nil}), do: \"$0.00\"$/",
+      "lines": 1
+    },
+    {
+      "name": "dashboard_net",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 440,
+      "end": 440,
+      "signature": "/^  defp dashboard_net(%{settlements: s}), do: dollars(s.net_payable_cents)$/",
+      "lines": 1
+    },
+    {
+      "name": "dashboard_net",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 438,
+      "end": 438,
+      "signature": "/^  defp dashboard_net(nil), do: \"$0.00\"$/",
+      "lines": 1
+    },
+    {
+      "name": "data_table",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 247,
+      "end": 247,
+      "signature": "/^  def data_table(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "days",
+      "kind": "function",
+      "file": "test/fmcsa_dispatch_gate_test.exs",
+      "line": 18,
+      "end": 18,
+      "signature": "/^  defp days(n), do: Date.add(today(), n)$/",
+      "lines": 1
+    },
+    {
+      "name": "define_custom_fields",
+      "kind": "function",
+      "file": "lib/driftwood/crypto_shred_gameday.ex",
+      "line": 232,
+      "end": 232,
+      "signature": "/^  defp define_custom_fields(org_id, repo) do$/",
+      "lines": 1
+    },
+    {
+      "name": "define_custom_fields",
+      "kind": "function",
+      "file": "lib/driftwood/dogfood_scenario.ex",
+      "line": 109,
+      "end": 109,
+      "signature": "/^  defp define_custom_fields(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "define_custom_fields",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 250,
+      "end": 250,
+      "signature": "/^  defp define_custom_fields(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "demo_all",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 166,
+      "end": 166,
+      "signature": "/^  def demo_all(org_id \\\\\\\\ @blue_ridge_org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "denied",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 86,
+      "end": 86,
+      "signature": "/^  defp denied(socket, operator_id, org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "deps",
+      "kind": "function",
+      "file": "mix.exs",
+      "line": 32,
+      "end": 32,
+      "signature": "/^  defp deps do$/",
+      "lines": 1
+    },
+    {
+      "name": "dev_seed",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 196,
+      "end": 196,
+      "signature": "/^  def dev_seed do$/",
+      "lines": 1
+    },
+    {
+      "name": "digest",
+      "kind": "function",
+      "file": "lib/driftwood_web/api/key_auth_plug.ex",
+      "line": 43,
+      "end": 43,
+      "signature": "/^  def digest(raw) when is_binary(raw) do$/",
+      "lines": 1
+    },
+    {
+      "name": "dispatch",
+      "kind": "function",
+      "file": "lib/driftwood/dogfood_scenario.ex",
+      "line": 172,
+      "end": 172,
+      "signature": "/^  defp dispatch(org_id, driver_id, load_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "dispatch",
+      "kind": "function",
+      "file": "test/adversarial/driftwood_attack_matrix_test.exs",
+      "line": 66,
+      "end": 66,
+      "signature": "/^  defp dispatch(driver, load, org) do$/",
+      "lines": 1
+    },
+    {
+      "name": "dispatch",
+      "kind": "function",
+      "file": "test/fmcsa_dispatch_gate_test.exs",
+      "line": 48,
+      "end": 48,
+      "signature": "/^  defp dispatch(driver, load) do$/",
+      "lines": 1
+    },
+    {
+      "name": "dispatch_decision",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 469,
+      "end": 469,
+      "signature": "/^  def dispatch_decision(org_id, driver_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "dispatch_event_count",
+      "kind": "function",
+      "file": "test/fmcsa_dispatch_gate_test.exs",
+      "line": 59,
+      "end": 59,
+      "signature": "/^  defp dispatch_event_count(load_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "dispatchable?",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 166,
+      "end": 166,
+      "signature": "/^  def dispatchable?(driver), do: fmcsa_status(driver) == :ok$/",
+      "lines": 1
+    },
+    {
+      "name": "dollars",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 97,
+      "end": 97,
+      "signature": "/^  defp dollars(_), do: \"$0.00\"$/",
+      "lines": 1
+    },
+    {
+      "name": "dollars",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 96,
+      "end": 96,
+      "signature": "/^  defp dollars(cents) when is_integer(cents), do: \"$#{:erlang.float_to_binary(cents \\/ 100, deci/",
+      "lines": 1
+    },
+    {
+      "name": "dollars",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 194,
+      "end": 194,
+      "signature": "/^  defp dollars(_), do: \"$0.00\"$/",
+      "lines": 1
+    },
+    {
+      "name": "dollars",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 192,
+      "end": 192,
+      "signature": "/^  defp dollars(cents) when is_integer(cents),$/",
+      "lines": 1
+    },
+    {
+      "name": "dollars",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 200,
+      "end": 200,
+      "signature": "/^  defp dollars(_), do: \"$0.00\"$/",
+      "lines": 1
+    },
+    {
+      "name": "dollars",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 198,
+      "end": 198,
+      "signature": "/^  defp dollars(cents) when is_integer(cents),$/",
+      "lines": 1
+    },
+    {
+      "name": "dollars",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 32,
+      "end": 32,
+      "signature": "/^  defp dollars(_), do: \"$0.00\"$/",
+      "lines": 1
+    },
+    {
+      "name": "dollars",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 31,
+      "end": 31,
+      "signature": "/^  defp dollars(cents) when is_integer(cents), do: \"$#{:erlang.float_to_binary(cents \\/ 100, deci/",
+      "lines": 1
+    },
+    {
+      "name": "dollars",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 109,
+      "end": 109,
+      "signature": "/^  defp dollars(_), do: \"$0.00\"$/",
+      "lines": 1
+    },
+    {
+      "name": "dollars",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 108,
+      "end": 108,
+      "signature": "/^  defp dollars(cents) when is_integer(cents), do: \"$#{:erlang.float_to_binary(cents \\/ 100, deci/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705010000_ash_functions.exs",
+      "line": 103,
+      "end": 103,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705010100_oban.exs",
+      "line": 6,
+      "end": 6,
+      "signature": "/^  def down, do: Oban.Migrations.down()$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705010200_vault_tables.exs",
+      "line": 23,
+      "end": 23,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705010300_reveal_grants.exs",
+      "line": 58,
+      "end": 58,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705010400_erasure.exs",
+      "line": 38,
+      "end": 38,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705015000_catalog_tables.exs",
+      "line": 14,
+      "end": 14,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705020000_aud_event.exs",
+      "line": 106,
+      "end": 106,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705110000_migration_meta.exs",
+      "line": 18,
+      "end": 18,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260706070000_tnt_field.exs",
+      "line": 20,
+      "end": 20,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707100000_driftwood_resources.exs",
+      "line": 313,
+      "end": 313,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707150000_aggregate_projections.exs",
+      "line": 93,
+      "end": 93,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707160000_broker_summary.exs",
+      "line": 79,
+      "end": 79,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707170000_operator_plane.exs",
+      "line": 84,
+      "end": 84,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707180000_query_budget_ledger.exs",
+      "line": 68,
+      "end": 68,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707190000_driver_load_rollup.exs",
+      "line": 81,
+      "end": 81,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707200000_aud_chain.exs",
+      "line": 37,
+      "end": 37,
+      "signature": "/^  def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(@app_role)$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260708100000_freight_api_key.exs",
+      "line": 36,
+      "end": 36,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "down",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260708110000_mount_billing_support_scopes.exs",
+      "line": 490,
+      "end": 490,
+      "signature": "/^  def down do$/",
+      "lines": 1
+    },
+    {
+      "name": "driver",
+      "kind": "function",
+      "file": "test/dispatch_worker_test.exs",
+      "line": 13,
+      "end": 13,
+      "signature": "/^  defp driver(attrs) do$/",
+      "lines": 1
+    },
+    {
+      "name": "driver",
+      "kind": "function",
+      "file": "test/fmcsa_dispatch_gate_test.exs",
+      "line": 24,
+      "end": 24,
+      "signature": "/^  defp driver(attrs) do$/",
+      "lines": 1
+    },
+    {
+      "name": "driver_name",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 108,
+      "end": 108,
+      "signature": "/^  defp driver_name(%Samen.Masked{} = masked), do: masked$/",
+      "lines": 1
+    },
+    {
+      "name": "driver_name",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 110,
+      "end": 110,
+      "signature": "/^  defp driver_name(name) when is_binary(name) do$/",
+      "lines": 1
+    },
+    {
+      "name": "driver_name",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 117,
+      "end": 117,
+      "signature": "/^  defp driver_name(other), do: other$/",
+      "lines": 1
+    },
+    {
+      "name": "driver_roster",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 35,
+      "end": 35,
+      "signature": "/^  def driver_roster(scope) do$/",
+      "lines": 1
+    },
+    {
+      "name": "driver_updated",
+      "kind": "function",
+      "file": "lib/driftwood/webhooks.ex",
+      "line": 45,
+      "end": 45,
+      "signature": "/^  def driver_updated(driver) do$/",
+      "lines": 1
+    },
+    {
+      "name": "eld_providers",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 32,
+      "end": 32,
+      "signature": "/^  def eld_providers, do: @eld_providers$/",
+      "lines": 1
+    },
+    {
+      "name": "elixir_cross_check",
+      "kind": "function",
+      "file": "lib/driftwood/pitr_gameday/settlement_integrity.ex",
+      "line": 115,
+      "end": 115,
+      "signature": "/^  defp elixir_cross_check(repo) do$/",
+      "lines": 1
+    },
+    {
+      "name": "elixirc_paths",
+      "kind": "function",
+      "file": "mix.exs",
+      "line": 29,
+      "end": 29,
+      "signature": "/^  defp elixirc_paths(:test), do: [\"lib\", \"test\\/support\"]$/",
+      "lines": 1
+    },
+    {
+      "name": "elixirc_paths",
+      "kind": "function",
+      "file": "mix.exs",
+      "line": 30,
+      "end": 30,
+      "signature": "/^  defp elixirc_paths(_), do: [\"lib\"]$/",
+      "lines": 1
+    },
+    {
+      "name": "empty_socket",
+      "kind": "function",
+      "file": "test/dogfood_walkthrough_test.exs",
+      "line": 34,
+      "end": 34,
+      "signature": "/^  defp empty_socket, do: %Phoenix.LiveView.Socket{}$/",
+      "lines": 1
+    },
+    {
+      "name": "empty_socket",
+      "kind": "function",
+      "file": "test/web_red_paths_test.exs",
+      "line": 33,
+      "end": 33,
+      "signature": "/^  defp empty_socket, do: %Phoenix.LiveView.Socket{}$/",
+      "lines": 1
+    },
+    {
+      "name": "enqueue",
+      "kind": "function",
+      "file": "lib/driftwood/jobs/dispatch_worker.ex",
+      "line": 64,
+      "end": 64,
+      "signature": "/^  def enqueue(driver_id, load_id, org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "evaluate_gate",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 77,
+      "end": 77,
+      "signature": "/^  defp evaluate_gate(changeset, driver_id, driver) do$/",
+      "lines": 1
+    },
+    {
+      "name": "expired_driver",
+      "kind": "function",
+      "file": "test/adversarial/driftwood_attack_matrix_test.exs",
+      "line": 42,
+      "end": 42,
+      "signature": "/^  defp expired_driver(org) do$/",
+      "lines": 1
+    },
+    {
+      "name": "fetch!",
+      "kind": "function",
+      "file": "lib/driftwood/jobs/dispatch_worker.ex",
+      "line": 70,
+      "end": 70,
+      "signature": "/^  defp fetch!(args, key) do$/",
+      "lines": 1
+    },
+    {
+      "name": "fetch",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 106,
+      "end": 106,
+      "signature": "/^  defp fetch(params, session, key), do: Map.get(params, key) || Map.get(session, key)$/",
+      "lines": 1
+    },
+    {
+      "name": "fleet_seeded?",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 235,
+      "end": 235,
+      "signature": "/^  defp fleet_seeded?(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "fmcsa_status",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 149,
+      "end": 149,
+      "signature": "/^  def fmcsa_status(driver) do$/",
+      "lines": 1
+    },
+    {
+      "name": "full",
+      "kind": "test",
+      "file": "test/dogfood_walkthrough_test.exs",
+      "line": 38,
+      "end": 38,
+      "signature": "/^  test \"full dogfood: create \u2192 dispatch \u2192 settle \u2192 rollup \u2192 dashboard \u2192 impersonate ma/",
+      "lines": 1
+    },
+    {
+      "name": "generate",
+      "kind": "function",
+      "file": "priv/drills/pitr_drill.exs",
+      "line": 99,
+      "end": 99,
+      "signature": "/^  def generate(repo) do$/",
+      "lines": 1
+    },
+    {
+      "name": "handle_event",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 453,
+      "end": 453,
+      "signature": "/^  def handle_event(\"dispatch\", %{\"driver\" => driver_id}, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "handle_event",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 303,
+      "end": 303,
+      "signature": "/^  def handle_event(\"reveal\", %{\"driver\" => driver_id}, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "handle_params",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 43,
+      "end": 43,
+      "signature": "/^  def handle_params(params, _uri, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "handle_params",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 31,
+      "end": 31,
+      "signature": "/^  def handle_params(params, _uri, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "handle_params",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 37,
+      "end": 37,
+      "signature": "/^  def handle_params(params, _uri, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "handle_params",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 29,
+      "end": 29,
+      "signature": "/^  def handle_params(params, _uri, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "healthz",
+      "kind": "function",
+      "file": "lib/driftwood_web/page_controller.ex",
+      "line": 28,
+      "end": 28,
+      "signature": "/^  def healthz(conn, _params) do$/",
+      "lines": 1
+    },
+    {
+      "name": "index",
+      "kind": "function",
+      "file": "lib/driftwood_web/page_controller.ex",
+      "line": 12,
+      "end": 12,
+      "signature": "/^  def index(conn, _params) do$/",
+      "lines": 1
+    },
+    {
+      "name": "init",
+      "kind": "function",
+      "file": "lib/driftwood_web/api/key_auth_plug.ex",
+      "line": 50,
+      "end": 50,
+      "signature": "/^  def init(opts), do: opts$/",
+      "lines": 1
+    },
+    {
+      "name": "initials",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 120,
+      "end": 120,
+      "signature": "/^  defp initials(%Samen.Masked{}), do: \"\u00b7\u00b7\"$/",
+      "lines": 1
+    },
+    {
+      "name": "initials",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 136,
+      "end": 136,
+      "signature": "/^  defp initials(_), do: \"\u00b7\u00b7\"$/",
+      "lines": 1
+    },
+    {
+      "name": "initials",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 122,
+      "end": 122,
+      "signature": "/^  defp initials(name) when is_binary(name) do$/",
+      "lines": 1
+    },
+    {
+      "name": "insert_carriers",
+      "kind": "function",
+      "file": "priv/drills/pitr_drill.exs",
+      "line": 120,
+      "end": 120,
+      "signature": "/^  defp insert_carriers(repo, org_id, n) do$/",
+      "lines": 1
+    },
+    {
+      "name": "insert_loads",
+      "kind": "function",
+      "file": "priv/drills/pitr_drill.exs",
+      "line": 141,
+      "end": 141,
+      "signature": "/^  defp insert_loads(repo, org_id, n) do$/",
+      "lines": 1
+    },
+    {
+      "name": "insert_settlements",
+      "kind": "function",
+      "file": "priv/drills/pitr_drill.exs",
+      "line": 172,
+      "end": 172,
+      "signature": "/^  defp insert_settlements(repo, org_id, carrier_ids, load_ids) do$/",
+      "lines": 1
+    },
+    {
+      "name": "installed_extensions",
+      "kind": "function",
+      "file": "lib/driftwood/repo.ex",
+      "line": 7,
+      "end": 7,
+      "signature": "/^  def installed_extensions do$/",
+      "lines": 1
+    },
+    {
+      "name": "invoice_status",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 436,
+      "end": 436,
+      "signature": "/^  defp invoice_status(_idx), do: :void$/",
+      "lines": 1
+    },
+    {
+      "name": "invoice_status",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 434,
+      "end": 434,
+      "signature": "/^  defp invoice_status(idx) when rem(idx, 3) == 0, do: :open$/",
+      "lines": 1
+    },
+    {
+      "name": "invoice_status",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 435,
+      "end": 435,
+      "signature": "/^  defp invoice_status(idx) when rem(idx, 3) == 1, do: :open$/",
+      "lines": 1
+    },
+    {
+      "name": "iso",
+      "kind": "function",
+      "file": "test/fmcsa_dispatch_gate_test.exs",
+      "line": 19,
+      "end": 19,
+      "signature": "/^  defp iso(n), do: days(n) |> Date.to_iso8601()$/",
+      "lines": 1
+    },
+    {
+      "name": "json",
+      "kind": "function",
+      "file": "test/support/api_case.ex",
+      "line": 109,
+      "end": 109,
+      "signature": "/^  def json(conn), do: Jason.decode!(conn.resp_body)$/",
+      "lines": 1
+    },
+    {
+      "name": "load",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 37,
+      "end": 37,
+      "signature": "/^  def load(socket, nil) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 41,
+      "end": 41,
+      "signature": "/^  def load(socket, org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 43,
+      "end": 43,
+      "signature": "/^  def load(socket, nil) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 47,
+      "end": 47,
+      "signature": "/^  def load(socket, org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 35,
+      "end": 35,
+      "signature": "/^  def load(socket, nil) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 39,
+      "end": 39,
+      "signature": "/^  def load(socket, org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 25,
+      "end": 25,
+      "signature": "/^  def load(socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 63,
+      "end": 63,
+      "signature": "/^  def load(socket, operator_id, org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 58,
+      "end": 58,
+      "signature": "/^  def load(socket, operator_id, org_id)$/",
+      "lines": 1
+    },
+    {
+      "name": "load",
+      "kind": "function",
+      "file": "test/adversarial/driftwood_attack_matrix_test.exs",
+      "line": 60,
+      "end": 60,
+      "signature": "/^  defp load(org) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load",
+      "kind": "function",
+      "file": "test/dispatch_worker_test.exs",
+      "line": 29,
+      "end": 29,
+      "signature": "/^  defp load do$/",
+      "lines": 1
+    },
+    {
+      "name": "load",
+      "kind": "function",
+      "file": "test/fmcsa_dispatch_gate_test.exs",
+      "line": 40,
+      "end": 40,
+      "signature": "/^  defp load do$/",
+      "lines": 1
+    },
+    {
+      "name": "load_board",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 93,
+      "end": 93,
+      "signature": "/^  def load_board(scope) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load_driver",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 75,
+      "end": 75,
+      "signature": "/^  defp load_driver(_changeset, _driver_id), do: nil$/",
+      "lines": 1
+    },
+    {
+      "name": "load_driver",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 59,
+      "end": 59,
+      "signature": "/^  defp load_driver(changeset, driver_id) when is_binary(driver_id) or is_struct(driver_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load_panel",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 51,
+      "end": 51,
+      "signature": "/^  def load_panel(socket, _panel, nil) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load_panel",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 61,
+      "end": 61,
+      "signature": "/^  def load_panel(socket, panel, org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load_stages",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 35,
+      "end": 35,
+      "signature": "/^  def load_stages, do: @load_stages$/",
+      "lines": 1
+    },
+    {
+      "name": "load_status",
+      "kind": "function",
+      "file": "lib/driftwood/webhooks.ex",
+      "line": 33,
+      "end": 33,
+      "signature": "/^  def load_status(dispatch_event) do$/",
+      "lines": 1
+    },
+    {
+      "name": "load_volume",
+      "kind": "function",
+      "file": "lib/driftwood/operator_dashboard.ex",
+      "line": 51,
+      "end": 51,
+      "signature": "/^  def load_volume do$/",
+      "lines": 1
+    },
+    {
+      "name": "loadrow",
+      "kind": "function",
+      "file": "test/cross_org_test.exs",
+      "line": 23,
+      "end": 23,
+      "signature": "/^  defp loadrow(org, name) do$/",
+      "lines": 1
+    },
+    {
+      "name": "loads_per_tenant",
+      "kind": "function",
+      "file": "priv/drills/pitr_drill.exs",
+      "line": 96,
+      "end": 96,
+      "signature": "/^  def loads_per_tenant, do: String.to_integer(System.get_env(\"DRILL_LOADS\") || \"600\")$/",
+      "lines": 1
+    },
+    {
+      "name": "lookup_key",
+      "kind": "function",
+      "file": "lib/driftwood_web/api/key_auth_plug.ex",
+      "line": 75,
+      "end": 75,
+      "signature": "/^  defp lookup_key(raw) do$/",
+      "lines": 1
+    },
+    {
+      "name": "mask_bar",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 365,
+      "end": 365,
+      "signature": "/^  def mask_bar(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "masked_cdl",
+      "kind": "function",
+      "file": "lib/driftwood/operator_reveal.ex",
+      "line": 42,
+      "end": 42,
+      "signature": "/^  defp masked_cdl(driver_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "metric",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 332,
+      "end": 332,
+      "signature": "/^  def metric(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "metrics",
+      "kind": "function",
+      "file": "lib/driftwood/crm_reads.ex",
+      "line": 103,
+      "end": 103,
+      "signature": "/^  def metrics(scope) do$/",
+      "lines": 1
+    },
+    {
+      "name": "min_pg_version",
+      "kind": "function",
+      "file": "lib/driftwood/repo.ex",
+      "line": 11,
+      "end": 11,
+      "signature": "/^  def min_pg_version do$/",
+      "lines": 1
+    },
+    {
+      "name": "missing medical card REFUSES dispatch",
+      "kind": "test",
+      "file": "test/fmcsa_dispatch_gate_test.exs",
+      "line": 88,
+      "end": 88,
+      "signature": "/^  test \"missing medical card REFUSES dispatch\" do$/",
+      "lines": 1
+    },
+    {
+      "name": "mk_api_key",
+      "kind": "function",
+      "file": "test/support/api_case.ex",
+      "line": 61,
+      "end": 61,
+      "signature": "/^  def mk_api_key(org_id, opts \\\\\\\\ []) do$/",
+      "lines": 1
+    },
+    {
+      "name": "mk_driver",
+      "kind": "function",
+      "file": "test/support/api_case.ex",
+      "line": 38,
+      "end": 38,
+      "signature": "/^  def mk_driver(org_id, attrs \\\\\\\\ %{}) do$/",
+      "lines": 1
+    },
+    {
+      "name": "mk_org",
+      "kind": "function",
+      "file": "test/support/api_case.ex",
+      "line": 32,
+      "end": 32,
+      "signature": "/^  def mk_org, do: Ecto.UUID.generate()$/",
+      "lines": 1
+    },
+    {
+      "name": "money_cell",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 38,
+      "end": 38,
+      "signature": "/^  defp money_cell(%Samen.Aggregate.Suppressed{}), do: \"\u2298\"$/",
+      "lines": 1
+    },
+    {
+      "name": "money_cell",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 40,
+      "end": 40,
+      "signature": "/^  defp money_cell(n) when is_integer(n), do: \"$#{:erlang.float_to_binary(n \\/ 100, decimals: 2)}/",
+      "lines": 1
+    },
+    {
+      "name": "money_cell",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 39,
+      "end": 39,
+      "signature": "/^  defp money_cell(nil), do: \"\u2298\"$/",
+      "lines": 1
+    },
+    {
+      "name": "mount",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 35,
+      "end": 35,
+      "signature": "/^  def mount(params, _session, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "mount",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 25,
+      "end": 25,
+      "signature": "/^  def mount(params, _session, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "mount",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 31,
+      "end": 31,
+      "signature": "/^  def mount(params, _session, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "mount",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 23,
+      "end": 23,
+      "signature": "/^  def mount(params, _session, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "mount",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 20,
+      "end": 20,
+      "signature": "/^  def mount(_params, _session, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "mount",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 42,
+      "end": 42,
+      "signature": "/^  def mount(params, session, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "mount",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit_live.ex",
+      "line": 27,
+      "end": 27,
+      "signature": "/^  def mount(_params, _session, socket) do$/",
+      "lines": 1
+    },
+    {
+      "name": "mrr",
+      "kind": "function",
+      "file": "lib/driftwood/operator_dashboard.ex",
+      "line": 103,
+      "end": 103,
+      "signature": "/^  def mrr do$/",
+      "lines": 1
+    },
+    {
+      "name": "nav_group",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 116,
+      "end": 116,
+      "signature": "/^  def nav_group(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "nav_item",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 138,
+      "end": 138,
+      "signature": "/^  def nav_item(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "no_null_inputs",
+      "kind": "function",
+      "file": "lib/driftwood/pitr_gameday/settlement_integrity.ex",
+      "line": 63,
+      "end": 63,
+      "signature": "/^  defp no_null_inputs(repo) do$/",
+      "lines": 1
+    },
+    {
+      "name": "non_empty",
+      "kind": "function",
+      "file": "lib/driftwood/pitr_gameday/settlement_integrity.ex",
+      "line": 57,
+      "end": 57,
+      "signature": "/^  defp non_empty(repo) do$/",
+      "lines": 1
+    },
+    {
+      "name": "open_opportunities",
+      "kind": "function",
+      "file": "lib/driftwood/crm_reads.ex",
+      "line": 145,
+      "end": 145,
+      "signature": "/^  defp open_opportunities(scope) do$/",
+      "lines": 1
+    },
+    {
+      "name": "operator_scope",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 74,
+      "end": 74,
+      "signature": "/^  def operator_scope(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "oracle_env",
+      "kind": "function",
+      "file": "lib/driftwood/crypto_shred_gameday.ex",
+      "line": 222,
+      "end": 222,
+      "signature": "/^  defp oracle_env do$/",
+      "lines": 1
+    },
+    {
+      "name": "out_of_service driver REFUSES dispatch",
+      "kind": "test",
+      "file": "test/fmcsa_dispatch_gate_test.exs",
+      "line": 106,
+      "end": 106,
+      "signature": "/^  test \"out_of_service driver REFUSES dispatch\" do$/",
+      "lines": 1
+    },
+    {
+      "name": "panel",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 93,
+      "end": 93,
+      "signature": "/^  defp panel(params), do: param(params, \"panel\") || \"dashboard\"$/",
+      "lines": 1
+    },
+    {
+      "name": "panel_title",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 442,
+      "end": 442,
+      "signature": "/^  defp panel_title(\"dashboard\"), do: \"Dispatch board\"$/",
+      "lines": 1
+    },
+    {
+      "name": "panel_title",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 443,
+      "end": 443,
+      "signature": "/^  defp panel_title(\"loads\"), do: \"Loads\"$/",
+      "lines": 1
+    },
+    {
+      "name": "panel_title",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 444,
+      "end": 444,
+      "signature": "/^  defp panel_title(\"roster\"), do: \"Drivers\"$/",
+      "lines": 1
+    },
+    {
+      "name": "panel_title",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 445,
+      "end": 445,
+      "signature": "/^  defp panel_title(\"settlements\"), do: \"Settlements\"$/",
+      "lines": 1
+    },
+    {
+      "name": "panel_title",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 446,
+      "end": 446,
+      "signature": "/^  defp panel_title(_), do: \"Dispatch board\"$/",
+      "lines": 1
+    },
+    {
+      "name": "param",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 94,
+      "end": 94,
+      "signature": "/^  defp param(params, key), do: Map.get(params, key)$/",
+      "lines": 1
+    },
+    {
+      "name": "parse_iso",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 117,
+      "end": 117,
+      "signature": "/^  defp parse_iso(%Date{} = d), do: d$/",
+      "lines": 1
+    },
+    {
+      "name": "parse_iso",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 116,
+      "end": 116,
+      "signature": "/^  defp parse_iso(nil), do: nil$/",
+      "lines": 1
+    },
+    {
+      "name": "parse_iso",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 119,
+      "end": 119,
+      "signature": "/^  defp parse_iso(str) when is_binary(str) do$/",
+      "lines": 1
+    },
+    {
+      "name": "parse_iso",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 200,
+      "end": 200,
+      "signature": "/^  defp parse_iso(%Date{} = d), do: d$/",
+      "lines": 1
+    },
+    {
+      "name": "parse_iso",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 199,
+      "end": 199,
+      "signature": "/^  defp parse_iso(nil), do: nil$/",
+      "lines": 1
+    },
+    {
+      "name": "parse_iso",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 202,
+      "end": 202,
+      "signature": "/^  defp parse_iso(str) when is_binary(str) do$/",
+      "lines": 1
+    },
+    {
+      "name": "perform",
+      "kind": "function",
+      "file": "lib/driftwood/jobs/dispatch_worker.ex",
+      "line": 23,
+      "end": 23,
+      "signature": "/^  def perform(%Oban.Job{args: args}) do$/",
+      "lines": 1
+    },
+    {
+      "name": "pill",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 275,
+      "end": 275,
+      "signature": "/^  def pill(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "pipeline",
+      "kind": "function",
+      "file": "lib/driftwood/crm_reads.ex",
+      "line": 63,
+      "end": 63,
+      "signature": "/^  def pipeline(scope) do$/",
+      "lines": 1
+    },
+    {
+      "name": "pipeline_stage_ids",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 336,
+      "end": 336,
+      "signature": "/^  defp pipeline_stage_ids(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "post_ctx",
+      "kind": "function",
+      "file": "test/crypto_shred_gameday_test.exs",
+      "line": 39,
+      "end": 39,
+      "signature": "/^  defp post_ctx(subject, overrides \\\\\\\\ []) do$/",
+      "lines": 1
+    },
+    {
+      "name": "progress",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 298,
+      "end": 298,
+      "signature": "/^  def progress(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "project",
+      "kind": "function",
+      "file": "mix.exs",
+      "line": 9,
+      "end": 9,
+      "signature": "/^  def project do$/",
+      "lines": 1
+    },
+    {
+      "name": "reason_label",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 172,
+      "end": 172,
+      "signature": "/^  def reason_label(:cdl_expired), do: \"CDL expired\"$/",
+      "lines": 1
+    },
+    {
+      "name": "reason_label",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 171,
+      "end": 171,
+      "signature": "/^  def reason_label(:cdl_missing_expiry), do: \"CDL expiry missing\"$/",
+      "lines": 1
+    },
+    {
+      "name": "reason_label",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 170,
+      "end": 170,
+      "signature": "/^  def reason_label(:medical_expired), do: \"medical card expired\"$/",
+      "lines": 1
+    },
+    {
+      "name": "reason_label",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 169,
+      "end": 169,
+      "signature": "/^  def reason_label(:medical_missing), do: \"medical card missing\"$/",
+      "lines": 1
+    },
+    {
+      "name": "reason_label",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 173,
+      "end": 173,
+      "signature": "/^  def reason_label(:out_of_service), do: \"out of service\"$/",
+      "lines": 1
+    },
+    {
+      "name": "reason_label",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 174,
+      "end": 174,
+      "signature": "/^  def reason_label(:terminated), do: \"terminated\"$/",
+      "lines": 1
+    },
+    {
+      "name": "reason_label",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 175,
+      "end": 175,
+      "signature": "/^  def reason_label(other), do: to_string(other)$/",
+      "lines": 1
+    },
+    {
+      "name": "ref",
+      "kind": "function",
+      "file": "test/settlement_math_test.exs",
+      "line": 30,
+      "end": 30,
+      "signature": "/^  defp ref(inputs) do$/",
+      "lines": 1
+    },
+    {
+      "name": "register_all",
+      "kind": "function",
+      "file": "lib/driftwood/non_pii_setup.ex",
+      "line": 39,
+      "end": 39,
+      "signature": "/^  def register_all do$/",
+      "lines": 1
+    },
+    {
+      "name": "render",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 146,
+      "end": 146,
+      "signature": "/^  def render(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 68,
+      "end": 68,
+      "signature": "/^  def render(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 88,
+      "end": 88,
+      "signature": "/^  def render(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 78,
+      "end": 78,
+      "signature": "/^  def render(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render",
+      "kind": "function",
+      "file": "lib/driftwood_web/error_html.ex",
+      "line": 4,
+      "end": 4,
+      "signature": "/^  def render(template, _assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 57,
+      "end": 57,
+      "signature": "/^  def render(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 120,
+      "end": 120,
+      "signature": "/^  def render(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit_live.ex",
+      "line": 32,
+      "end": 32,
+      "signature": "/^  def render(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render",
+      "kind": "function",
+      "file": "test/crm_ui_test.exs",
+      "line": 34,
+      "end": 34,
+      "signature": "/^  defp render(mod, assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render",
+      "kind": "function",
+      "file": "test/dogfood_walkthrough_test.exs",
+      "line": 26,
+      "end": 26,
+      "signature": "/^  defp render(mod, assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render",
+      "kind": "function",
+      "file": "test/web_red_paths_test.exs",
+      "line": 25,
+      "end": 25,
+      "signature": "/^  defp render(mod, assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render_email",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 213,
+      "end": 213,
+      "signature": "/^  defp render_email(%Samen.Masked{} = masked), do: masked$/",
+      "lines": 1
+    },
+    {
+      "name": "render_email",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 223,
+      "end": 223,
+      "signature": "/^  defp render_email(_), do: \"\u2014\"$/",
+      "lines": 1
+    },
+    {
+      "name": "render_email",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 215,
+      "end": 215,
+      "signature": "/^  defp render_email(emails) when is_list(emails) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render_full_name",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 172,
+      "end": 172,
+      "signature": "/^  defp render_full_name(%Samen.Masked{} = masked, _display_name), do: masked$/",
+      "lines": 1
+    },
+    {
+      "name": "render_full_name",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 174,
+      "end": 174,
+      "signature": "/^  defp render_full_name(name, _display_name) when is_binary(name) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render_full_name",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 182,
+      "end": 182,
+      "signature": "/^  defp render_full_name(nil, _display_name), do: \"\u2014\"$/",
+      "lines": 1
+    },
+    {
+      "name": "render_full_name",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 181,
+      "end": 181,
+      "signature": "/^  defp render_full_name(nil, display_name) when is_binary(display_name), do: display_name$/",
+      "lines": 1
+    },
+    {
+      "name": "render_full_name",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 183,
+      "end": 183,
+      "signature": "/^  defp render_full_name(other, _display_name), do: other$/",
+      "lines": 1
+    },
+    {
+      "name": "render_heex",
+      "kind": "function",
+      "file": "test/ui_kit_test.exs",
+      "line": 29,
+      "end": 29,
+      "signature": "/^  defp render_heex(%Phoenix.LiveView.Rendered{} = rendered) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render_live",
+      "kind": "function",
+      "file": "test/ui_kit_test.exs",
+      "line": 20,
+      "end": 20,
+      "signature": "/^  defp render_live(mod, assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "render_phone",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 226,
+      "end": 226,
+      "signature": "/^  defp render_phone(%Samen.Masked{} = masked), do: masked$/",
+      "lines": 1
+    },
+    {
+      "name": "render_phone",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 236,
+      "end": 236,
+      "signature": "/^  defp render_phone(_), do: \"\u2014\"$/",
+      "lines": 1
+    },
+    {
+      "name": "render_phone",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_contacts_live.ex",
+      "line": 228,
+      "end": 228,
+      "signature": "/^  defp render_phone(phones) when is_list(phones) do$/",
+      "lines": 1
+    },
+    {
+      "name": "repo!",
+      "kind": "function",
+      "file": "lib/driftwood/policy/fmcsa_dispatch_gate.ex",
+      "line": 160,
+      "end": 160,
+      "signature": "/^  defp repo!(changeset) do$/",
+      "lines": 1
+    },
+    {
+      "name": "require_advances_column",
+      "kind": "function",
+      "file": "lib/driftwood/pitr_gameday/settlement_integrity.ex",
+      "line": 40,
+      "end": 40,
+      "signature": "/^  defp require_advances_column(repo) do$/",
+      "lines": 1
+    },
+    {
+      "name": "reshaped",
+      "kind": "function",
+      "file": "test/settlement_math_test.exs",
+      "line": 62,
+      "end": 62,
+      "signature": "/^  defp reshaped(id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "resolve_person_pii",
+      "kind": "function",
+      "file": "lib/driftwood/crm_reads.ex",
+      "line": 123,
+      "end": 123,
+      "signature": "/^  defp resolve_person_pii(records, scope) do$/",
+      "lines": 1
+    },
+    {
+      "name": "resolve_pii",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 69,
+      "end": 69,
+      "signature": "/^  defp resolve_pii(records, scope) do$/",
+      "lines": 1
+    },
+    {
+      "name": "restore",
+      "kind": "function",
+      "file": "test/api_external_surface_test.exs",
+      "line": 31,
+      "end": 31,
+      "signature": "/^  defp restore(nil), do: Application.delete_env(:samen_core, :reveal_grant)$/",
+      "lines": 1
+    },
+    {
+      "name": "restore",
+      "kind": "function",
+      "file": "test/api_external_surface_test.exs",
+      "line": 32,
+      "end": 32,
+      "signature": "/^  defp restore(v), do: Application.put_env(:samen_core, :reveal_grant, v)$/",
+      "lines": 1
+    },
+    {
+      "name": "reveal_cdl",
+      "kind": "function",
+      "file": "lib/driftwood/operator_reveal.ex",
+      "line": 24,
+      "end": 24,
+      "signature": "/^  def reveal_cdl(operator_id, driver_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "role_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 188,
+      "end": 188,
+      "signature": "/^  defp role_variant(\"carrier\"), do: \"info\"$/",
+      "lines": 1
+    },
+    {
+      "name": "role_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 189,
+      "end": 189,
+      "signature": "/^  defp role_variant(\"shipper\"), do: \"ok\"$/",
+      "lines": 1
+    },
+    {
+      "name": "role_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_companies_live.ex",
+      "line": 190,
+      "end": 190,
+      "signature": "/^  defp role_variant(_), do: \"mut\"$/",
+      "lines": 1
+    },
+    {
+      "name": "root",
+      "kind": "function",
+      "file": "lib/driftwood_web/layouts.ex",
+      "line": 9,
+      "end": 9,
+      "signature": "/^  def root(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "run",
+      "kind": "function",
+      "file": "lib/driftwood/aggregate/rebuild.ex",
+      "line": 25,
+      "end": 25,
+      "signature": "/^  def run(repo \\\\\\\\ Driftwood.Repo) do$/",
+      "lines": 1
+    },
+    {
+      "name": "run",
+      "kind": "function",
+      "file": "lib/driftwood/broker_rollup.ex",
+      "line": 27,
+      "end": 27,
+      "signature": "/^  def run(org_id, repo \\\\\\\\ Driftwood.Repo) do$/",
+      "lines": 1
+    },
+    {
+      "name": "run",
+      "kind": "function",
+      "file": "lib/driftwood/pitr_gameday/settlement_integrity.ex",
+      "line": 29,
+      "end": 29,
+      "signature": "/^  def run(repo) do$/",
+      "lines": 1
+    },
+    {
+      "name": "run",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 41,
+      "end": 41,
+      "signature": "/^  def run(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "run",
+      "kind": "function",
+      "file": "lib/mix/tasks/driftwood.seed.ex",
+      "line": 27,
+      "end": 27,
+      "signature": "/^  def run(_args) do$/",
+      "lines": 1
+    },
+    {
+      "name": "run",
+      "kind": "function",
+      "file": "test/dispatch_worker_test.exs",
+      "line": 35,
+      "end": 35,
+      "signature": "/^  defp run(driver, load) do$/",
+      "lines": 1
+    },
+    {
+      "name": "run_oracle_cli",
+      "kind": "function",
+      "file": "lib/driftwood/crypto_shred_gameday.ex",
+      "line": 193,
+      "end": 193,
+      "signature": "/^  def run_oracle_cli(driver_id, opts \\\\\\\\ []) do$/",
+      "lines": 1
+    },
+    {
+      "name": "scope",
+      "kind": "function",
+      "file": "test/cross_org_test.exs",
+      "line": 15,
+      "end": 15,
+      "signature": "/^  defp scope(org), do: %{org_id: org, role: :member}$/",
+      "lines": 1
+    },
+    {
+      "name": "seed_billing",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 348,
+      "end": 348,
+      "signature": "/^  defp seed_billing(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "seed_companies",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 267,
+      "end": 267,
+      "signature": "/^  defp seed_companies(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "seed_driver_across_tiers",
+      "kind": "function",
+      "file": "lib/driftwood/crypto_shred_gameday.ex",
+      "line": 73,
+      "end": 73,
+      "signature": "/^  def seed_driver_across_tiers(opts \\\\\\\\ []) do$/",
+      "lines": 1
+    },
+    {
+      "name": "seed_invoice",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 438,
+      "end": 438,
+      "signature": "/^  defp seed_invoice(org_id, actor, customer, sub, now, status, seq) do$/",
+      "lines": 1
+    },
+    {
+      "name": "seed_opportunities",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 304,
+      "end": 304,
+      "signature": "/^  defp seed_opportunities(org_id, companies) do$/",
+      "lines": 1
+    },
+    {
+      "name": "seed_people",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 282,
+      "end": 282,
+      "signature": "/^  defp seed_people(org_id, companies) do$/",
+      "lines": 1
+    },
+    {
+      "name": "seed_pipeline",
+      "kind": "function",
+      "file": "lib/driftwood/crypto_shred_gameday.ex",
+      "line": 244,
+      "end": 244,
+      "signature": "/^  defp seed_pipeline(org_id, actor) do$/",
+      "lines": 1
+    },
+    {
+      "name": "seed_pipeline",
+      "kind": "function",
+      "file": "lib/driftwood/dogfood_scenario.ex",
+      "line": 126,
+      "end": 126,
+      "signature": "/^  defp seed_pipeline(org_id, actor) do$/",
+      "lines": 1
+    },
+    {
+      "name": "seed_settlements",
+      "kind": "function",
+      "file": "test/pitr_gameday2_test.exs",
+      "line": 29,
+      "end": 29,
+      "signature": "/^  defp seed_settlements(n) do$/",
+      "lines": 1
+    },
+    {
+      "name": "seed_subscriptions_and_invoices",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 400,
+      "end": 400,
+      "signature": "/^  defp seed_subscriptions_and_invoices(org_id, plans, customers) do$/",
+      "lines": 1
+    },
+    {
+      "name": "seed_support",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 505,
+      "end": 505,
+      "signature": "/^  defp seed_support(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "seeded?",
+      "kind": "function",
+      "file": "lib/driftwood/seeds.ex",
+      "line": 226,
+      "end": 226,
+      "signature": "/^  defp seeded?(org_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "session_chip",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 297,
+      "end": 297,
+      "signature": "/^  defp session_chip(info), do: \"session active \u00b7 reason: #{info.reason}\"$/",
+      "lines": 1
+    },
+    {
+      "name": "session_chip",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 296,
+      "end": 296,
+      "signature": "/^  defp session_chip(nil), do: \"no active grant\"$/",
+      "lines": 1
+    },
+    {
+      "name": "session_info",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 100,
+      "end": 100,
+      "signature": "/^  defp session_info(org_id, operator_id) do$/",
+      "lines": 1
+    },
+    {
+      "name": "settlements",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 114,
+      "end": 114,
+      "signature": "/^  def settlements(scope) do$/",
+      "lines": 1
+    },
+    {
+      "name": "short",
+      "kind": "function",
+      "file": "lib/driftwood/dogfood_scenario.ex",
+      "line": 197,
+      "end": 197,
+      "signature": "/^  defp short, do: :erlang.unique_integer([:positive]) |> Integer.to_string()$/",
+      "lines": 1
+    },
+    {
+      "name": "sidebar",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 92,
+      "end": 92,
+      "signature": "/^  def sidebar(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "stage_value",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 182,
+      "end": 182,
+      "signature": "/^  defp stage_value(opps), do: Enum.reduce(opps, 0, &(&1.value_cents + &2))$/",
+      "lines": 1
+    },
+    {
+      "name": "stage_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 188,
+      "end": 188,
+      "signature": "/^  defp stage_variant(:lost), do: \"bad\"$/",
+      "lines": 1
+    },
+    {
+      "name": "stage_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 184,
+      "end": 184,
+      "signature": "/^  defp stage_variant(:open), do: \"info\"$/",
+      "lines": 1
+    },
+    {
+      "name": "stage_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 186,
+      "end": 186,
+      "signature": "/^  defp stage_variant(:proposal), do: \"info\"$/",
+      "lines": 1
+    },
+    {
+      "name": "stage_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 185,
+      "end": 185,
+      "signature": "/^  defp stage_variant(:qualified), do: \"warn\"$/",
+      "lines": 1
+    },
+    {
+      "name": "stage_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 187,
+      "end": 187,
+      "signature": "/^  defp stage_variant(:won), do: \"ok\"$/",
+      "lines": 1
+    },
+    {
+      "name": "stage_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 189,
+      "end": 189,
+      "signature": "/^  defp stage_variant(_), do: \"mut\"$/",
+      "lines": 1
+    },
+    {
+      "name": "start",
+      "kind": "function",
+      "file": "lib/driftwood/application.ex",
+      "line": 6,
+      "end": 6,
+      "signature": "/^  def start(_type, _args) do$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 143,
+      "end": 143,
+      "signature": "/^  defp status_variant(_), do: \"mut\"$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 140,
+      "end": 140,
+      "signature": "/^  defp status_variant(s) when s in [:delivered, \"delivered\", :paid, \"paid\"], do: \"ok\"$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 139,
+      "end": 139,
+      "signature": "/^  defp status_variant(s) when s in [:on_load, \"on_load\", :en_route, \"en_route\"], do: \"info\"$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 141,
+      "end": 141,
+      "signature": "/^  defp status_variant(s) when s in [:open, \"open\", :needs_carrier, \"needs_carrier\"], do: \"warn\"$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/broker_live.ex",
+      "line": 142,
+      "end": 142,
+      "signature": "/^  defp status_variant(s) when s in [:out_of_service, \"out_of_service\", :terminated, \"terminated\"/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 193,
+      "end": 193,
+      "signature": "/^  defp status_variant(:lost), do: \"bad\"$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 194,
+      "end": 194,
+      "signature": "/^  defp status_variant(:on_hold), do: \"warn\"$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 191,
+      "end": 191,
+      "signature": "/^  defp status_variant(:open), do: \"info\"$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 192,
+      "end": 192,
+      "signature": "/^  defp status_variant(:won), do: \"ok\"$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 196,
+      "end": 196,
+      "signature": "/^  defp status_variant(_), do: \"mut\"$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/crm_pipeline_live.ex",
+      "line": 195,
+      "end": 195,
+      "signature": "/^  defp status_variant(s) when is_binary(s), do: status_variant(String.to_atom(s))$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 117,
+      "end": 117,
+      "signature": "/^  defp status_variant(_), do: \"mut\"$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 115,
+      "end": 115,
+      "signature": "/^  defp status_variant(s) when s in [:delivered, \"delivered\", :available, \"available\"], do: \"ok\"$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 114,
+      "end": 114,
+      "signature": "/^  defp status_variant(s) when s in [:on_load, \"on_load\", :en_route, \"en_route\"], do: \"info\"$/",
+      "lines": 1
+    },
+    {
+      "name": "status_variant",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_impersonation_live.ex",
+      "line": 116,
+      "end": 116,
+      "signature": "/^  defp status_variant(s) when s in [:out_of_service, \"out_of_service\", :terminated, \"terminated\"/",
+      "lines": 1
+    },
+    {
+      "name": "summary",
+      "kind": "function",
+      "file": "lib/driftwood/broker_rollup.ex",
+      "line": 103,
+      "end": 103,
+      "signature": "/^  def summary(org_id, repo \\\\\\\\ Driftwood.Repo) do$/",
+      "lines": 1
+    },
+    {
+      "name": "suppressed_count",
+      "kind": "function",
+      "file": "lib/driftwood_web/operator_dashboard_live.ex",
+      "line": 43,
+      "end": 43,
+      "signature": "/^  defp suppressed_count(lv, mrr) do$/",
+      "lines": 1
+    },
+    {
+      "name": "tab",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 225,
+      "end": 225,
+      "signature": "/^  def tab(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "tabs",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 211,
+      "end": 211,
+      "signature": "/^  def tabs(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "tenants",
+      "kind": "function",
+      "file": "priv/drills/pitr_drill.exs",
+      "line": 94,
+      "end": 94,
+      "signature": "/^  def tenants, do: String.to_integer(System.get_env(\"DRILL_TENANTS\") || \"4\")$/",
+      "lines": 1
+    },
+    {
+      "name": "terminated driver REFUSES dispatch",
+      "kind": "test",
+      "file": "test/fmcsa_dispatch_gate_test.exs",
+      "line": 115,
+      "end": 115,
+      "signature": "/^  test \"terminated driver REFUSES dispatch\" do$/",
+      "lines": 1
+    },
+    {
+      "name": "the",
+      "kind": "test",
+      "file": "test/cdl_vault_test.exs",
+      "line": 31,
+      "end": 31,
+      "signature": "/^  test \"the domain row NEVER holds the plaintext CDL number (only a vt_ token)\" do$/",
+      "lines": 1
+    },
+    {
+      "name": "to_int",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 141,
+      "end": 141,
+      "signature": "/^  defp to_int(%Decimal{} = d), do: d |> Decimal.round(0) |> Decimal.to_integer()$/",
+      "lines": 1
+    },
+    {
+      "name": "to_int",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 140,
+      "end": 140,
+      "signature": "/^  defp to_int(f) when is_float(f), do: round(f)$/",
+      "lines": 1
+    },
+    {
+      "name": "to_int",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 139,
+      "end": 139,
+      "signature": "/^  defp to_int(i) when is_integer(i), do: i$/",
+      "lines": 1
+    },
+    {
+      "name": "to_int",
+      "kind": "function",
+      "file": "lib/driftwood/reads.ex",
+      "line": 138,
+      "end": 138,
+      "signature": "/^  defp to_int(nil), do: 0$/",
+      "lines": 1
+    },
+    {
+      "name": "to_int",
+      "kind": "function",
+      "file": "test/settlement_math_test.exs",
+      "line": 87,
+      "end": 87,
+      "signature": "/^  defp to_int(%Decimal{} = d), do: d |> Decimal.round(0) |> Decimal.to_integer()$/",
+      "lines": 1
+    },
+    {
+      "name": "to_int",
+      "kind": "function",
+      "file": "test/settlement_math_test.exs",
+      "line": 89,
+      "end": 89,
+      "signature": "/^  defp to_int(f) when is_float(f), do: round(f)$/",
+      "lines": 1
+    },
+    {
+      "name": "to_int",
+      "kind": "function",
+      "file": "test/settlement_math_test.exs",
+      "line": 88,
+      "end": 88,
+      "signature": "/^  defp to_int(i) when is_integer(i), do: i$/",
+      "lines": 1
+    },
+    {
+      "name": "today",
+      "kind": "function",
+      "file": "test/fmcsa_dispatch_gate_test.exs",
+      "line": 17,
+      "end": 17,
+      "signature": "/^  defp today, do: Date.utc_today()$/",
+      "lines": 1
+    },
+    {
+      "name": "token_blind_bar",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 390,
+      "end": 390,
+      "signature": "/^  def token_blind_bar(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "topbar",
+      "kind": "function",
+      "file": "lib/driftwood_web/ui_kit.ex",
+      "line": 162,
+      "end": 162,
+      "signature": "/^  def topbar(assigns) do$/",
+      "lines": 1
+    },
+    {
+      "name": "ts",
+      "kind": "function",
+      "file": "priv/drills/pitr_drill.exs",
+      "line": 214,
+      "end": 214,
+      "signature": "/^  defp ts, do: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second) |> NaiveDateTime.to_st/",
+      "lines": 1
+    },
+    {
+      "name": "unique",
+      "kind": "function",
+      "file": "lib/driftwood/crypto_shred_gameday.ex",
+      "line": 275,
+      "end": 275,
+      "signature": "/^  defp unique, do: :erlang.unique_integer([:positive]) |> Integer.to_string()$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705010000_ash_functions.exs",
+      "line": 5,
+      "end": 5,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705010100_oban.exs",
+      "line": 5,
+      "end": 5,
+      "signature": "/^  def up, do: Oban.Migrations.up()$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705010200_vault_tables.exs",
+      "line": 5,
+      "end": 5,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705010300_reveal_grants.exs",
+      "line": 5,
+      "end": 5,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705010400_erasure.exs",
+      "line": 5,
+      "end": 5,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705015000_catalog_tables.exs",
+      "line": 10,
+      "end": 10,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705020000_aud_event.exs",
+      "line": 29,
+      "end": 29,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260705110000_migration_meta.exs",
+      "line": 11,
+      "end": 11,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260706070000_tnt_field.exs",
+      "line": 16,
+      "end": 16,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707100000_driftwood_resources.exs",
+      "line": 24,
+      "end": 24,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707150000_aggregate_projections.exs",
+      "line": 51,
+      "end": 51,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707160000_broker_summary.exs",
+      "line": 38,
+      "end": 38,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707170000_operator_plane.exs",
+      "line": 16,
+      "end": 16,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707180000_query_budget_ledger.exs",
+      "line": 27,
+      "end": 27,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707190000_driver_load_rollup.exs",
+      "line": 40,
+      "end": 40,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260707200000_aud_chain.exs",
+      "line": 36,
+      "end": 36,
+      "signature": "/^  def up, do: Samen.OperatorPlane.Migration.create_aud_chain(@app_role)$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260708100000_freight_api_key.exs",
+      "line": 13,
+      "end": 13,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "up",
+      "kind": "function",
+      "file": "priv/repo/migrations/20260708110000_mount_billing_support_scopes.exs",
+      "line": 68,
+      "end": 68,
+      "signature": "/^  def up do$/",
+      "lines": 1
+    },
+    {
+      "name": "uuid",
+      "kind": "function",
+      "file": "lib/driftwood/dogfood_scenario.ex",
+      "line": 196,
+      "end": 196,
+      "signature": "/^  defp uuid, do: Ecto.UUID.generate()$/",
+      "lines": 1
+    },
+    {
+      "name": "uuid",
+      "kind": "function",
+      "file": "priv/drills/pitr_drill.exs",
+      "line": 213,
+      "end": 213,
+      "signature": "/^  defp uuid, do: Ecto.UUID.generate()$/",
+      "lines": 1
+    },
+    {
+      "name": "violation",
+      "kind": "function",
+      "file": "test/crypto_shred_gameday_test.exs",
+      "line": 45,
+      "end": 45,
+      "signature": "/^  defp violation(findings, subj),$/",
+      "lines": 1
+    },
+    {
+      "name": "worker DISCARDS an out_of_service driver",
+      "kind": "test",
+      "file": "test/dispatch_worker_test.exs",
+      "line": 65,
+      "end": 65,
+      "signature": "/^  test \"worker DISCARDS an out_of_service driver\" do$/",
+      "lines": 1
+    },
+    {
+      "name": "worker dispatches a compliant driver and writes the DispatchEvent",
+      "kind": "test",
+      "file": "test/dispatch_worker_test.exs",
+      "line": 48,
+      "end": 48,
+      "signature": "/^  test \"worker dispatches a compliant driver and writes the DispatchEvent\" do$/",
+      "lines": 1
+    }
+  ],
+  "file_hashes": {}
+}

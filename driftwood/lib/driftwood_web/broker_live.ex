@@ -90,6 +90,13 @@ defmodule DriftwoodWeb.BrokerLive do
     }
   end
 
+  # Map the current freight panel to the shared `module_nav/1` active key.
+  defp broker_active("dashboard"), do: :dashboard
+  defp broker_active("loads"), do: :loads
+  defp broker_active("roster"), do: :roster
+  defp broker_active("settlements"), do: :settlements
+  defp broker_active(_), do: :dashboard
+
   defp panel(params), do: param(params, "panel") || "dashboard"
   defp param(params, key), do: Map.get(params, key)
 
@@ -164,28 +171,7 @@ defmodule DriftwoodWeb.BrokerLive do
               </div>
             </:search>
 
-            <.nav_group label="Operations">
-              <.nav_item label="Dispatch board" href={"/broker?panel=dashboard&org=#{@org_id}"} active={@panel == "dashboard"}>
-                <:icon>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></svg>
-                </:icon>
-              </.nav_item>
-              <.nav_item label="Loads" href={"/broker?panel=loads&org=#{@org_id}"} active={@panel == "loads"}>
-                <:icon>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13l5 5v5H3z" /><circle cx="7.5" cy="17.5" r="1.5" /><circle cx="17.5" cy="17.5" r="1.5" /></svg>
-                </:icon>
-              </.nav_item>
-              <.nav_item label="Drivers" href={"/broker?panel=roster&org=#{@org_id}"} active={@panel == "roster"}>
-                <:icon>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.2" /><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" /></svg>
-                </:icon>
-              </.nav_item>
-              <.nav_item label="Settlements" href={"/broker?panel=settlements&org=#{@org_id}"} active={@panel == "settlements"}>
-                <:icon>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
-                </:icon>
-              </.nav_item>
-            </.nav_group>
+            <.module_nav org_id={@org_id} active={broker_active(@panel)} />
 
             <:footer>
               <div class="foot">

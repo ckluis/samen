@@ -1,0 +1,295 @@
+defmodule DriftwoodWeb.BillingInvoicesLive do
+  @moduledoc """
+  Billing / Invoices page — the inherited Billing domain rendered as real UI.
+
+  Reads `Driftwood.Billing.Invoice` through `Driftwood.BillingReads.invoices/1`.
+  The invoice itself carries NO PII — all fields are amounts, statuses, dates,
+  and opaque FKs. The customer's `billing_name` is PII (vault-routed scalar) and
+  is resolved through `Driftwood.BillingReads.customers/1` (called internally)
+  via `Samen.Api.PiiResolution`:
+
+    * TENANT plane (`plane: :tenant`): the org reads its OWN customers' names
+      in CLEAR — the tenant-as-owner rule (§external-surface :707).
+    * OPERATOR / impersonation plane (`plane: :operator`): the same field
+      renders `%Masked{}` → •••• via Phoenix.HTML.Safe.
+
+  The `__customer__` field on each invoice row is the pre-resolved customer
+  struct (a dumb render target).
+
+  ## MASKING INVARIANT
+
+  This LiveView NEVER calls `Samen.Vault.reveal/3`, NEVER pattern-matches a
+  vault token out of a `%Masked{}`, and NEVER introduces a "show plaintext"
+  code path. Plaintext only reaches a cell if `BillingReads.invoices/1` already
+  resolved it through the shared PiiResolution chokepoint.
+
+  ## Invoice status → pill variant
+
+  | status  | pill variant |
+  |---------|-------------|
+  | paid    | ok (green)  |
+  | open    | info (blue) |
+  | overdue | bad (red)   — computed: open + due_date in the past |
+  | draft   | mut (grey)  |
+  | void    | mut (grey)  |
+  """
+  use Phoenix.LiveView
+
+  import DriftwoodWeb.UIKit
+
+  alias Driftwood.BillingReads
+
+  @impl true
+  def mount(params, _session, socket) do
+    org_id = Map.get(params, "org")
+    {:ok, load(assign(socket, org_id: org_id), org_id)}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    org_id = Map.get(params, "org") || socket.assigns.org_id
+    {:noreply, load(assign(socket, org_id: org_id), org_id)}
+  end
+
+  @doc false
+  def load(socket, nil) do
+    assign(socket,
+      no_org: true,
+      org_id: nil,
+      invoices: [],
+      outstanding_cents: 0
+    )
+  end
+
+  def load(socket, org_id) do
+    scope = billing_scope(org_id)
+    invs = BillingReads.invoices(scope)
+
+    outstanding =
+      Enum.reduce(invs, 0, fn inv, acc ->
+        if inv.status in [:open, :draft] do
+          acc + (inv.amount_due_cents || 0)
+        else
+          acc
+        end
+      end)
+
+    assign(socket,
+      no_org: false,
+      org_id: org_id,
+      invoices: invs,
+      outstanding_cents: outstanding
+    )
+  end
+
+  # A tenant-member scope for billing reads: plane: :tenant.
+  @doc false
+  def billing_scope(org_id) do
+    %Samen.Scope{
+      actor: %{
+        id: "broker:#{org_id}",
+        org_id: org_id,
+        role: :member,
+        kind: :tenant,
+        plane: :tenant
+      }
+    }
+  end
+
+  # An OPERATOR impersonation scope — used in tests to assert masking.
+  @doc false
+  def operator_scope(org_id) do
+    %Samen.Scope{
+      actor: %{
+        id: "operator:impersonation",
+        org_id: org_id,
+        role: :member,
+        kind: :operator,
+        plane: :operator,
+        impersonation: %{session_id: "test-session"}
+      }
+    }
+  end
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <div id="billing-invoices">
+      <.app_shell>
+        <:sidebar>
+          {billing_sidebar(assigns)}
+        </:sidebar>
+
+        <.topbar title="Invoices" crumbs={["Blue Ridge Logistics", "Billing", "Invoices"]}>
+          <:actions>
+            <.button variant="primary">
+              <:icon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M12 3v18M3 12h18" />
+                </svg>
+              </:icon>
+              New invoice
+            </.button>
+          </:actions>
+        </.topbar>
+
+        <%= if @no_org do %>
+          <div class="wrap">
+            <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
+              No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
+            </div>
+          </div>
+        <% else %>
+          <span id="org-banner" style="display:none">Billing invoices org: {@org_id}</span>
+
+          <div class="metrics">
+            <.metric label="Total outstanding" value={dollars(@outstanding_cents)} sub="open invoices">
+              <:icon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M9 14l2 2 4-4" /><rect x="3" y="3" width="18" height="18" rx="2" />
+                </svg>
+              </:icon>
+            </.metric>
+            <.metric label="Invoices" value={length(@invoices)}>
+              <:icon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M9 12h6M9 16h6M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+                </svg>
+              </:icon>
+            </.metric>
+            <.metric label="Paid" value={Enum.count(@invoices, &(&1.status == :paid))}>
+              <:icon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <circle cx="12" cy="12" r="9" /><path d="M9 12l2 2 4-4" />
+                </svg>
+              </:icon>
+            </.metric>
+            <.metric label="Overdue" value={Enum.count(@invoices, &overdue?/1)}>
+              <:icon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M12 8v4M12 16h.01" /><circle cx="12" cy="12" r="9" />
+                </svg>
+              </:icon>
+            </.metric>
+          </div>
+
+          <div class="wrap">
+            <div id="invoices">
+              <div class="gtitle">
+                <h3>Invoices</h3>
+                <span class="n">{length(@invoices)}</span>
+                <span class="lane">· customer name via PiiResolution · your org in the clear</span>
+              </div>
+              <.data_table>
+                <:head>
+                  <th style="width:14%">Number</th>
+                  <th style="width:26%">Customer</th>
+                  <th style="width:16%">Amount</th>
+                  <th style="width:16%">Status</th>
+                  <th style="width:16%">Due date</th>
+                  <th style="width:12%">Paid</th>
+                </:head>
+                <tr :for={{inv, idx} <- Enum.with_index(@invoices)} class="invoice-row" id={"invoice-#{inv.id}"}>
+                  <td class="inv-number" style="font-size:12px;color:var(--muted);font-family:monospace">
+                    INV-{String.pad_leading(to_string(idx + 1001), 4, "0")}
+                  </td>
+                  <td class="inv-customer" style="font-weight:500;color:#3a3b45">
+                    {render_billing_name(inv.__customer__)}
+                  </td>
+                  <td class="inv-amount" style="font-weight:500;color:#3a3b45">
+                    {dollars(inv.amount_due_cents || 0)}
+                  </td>
+                  <td class="inv-status">
+                    <.pill variant={invoice_status_variant(inv)}>{invoice_status_label(inv)}</.pill>
+                  </td>
+                  <td class="inv-due" style="color:var(--muted);font-size:12px">
+                    {format_date(inv.due_date)}
+                  </td>
+                  <td class="inv-paid" style="color:var(--muted);font-size:12px">
+                    {if inv.status == :paid, do: dollars(inv.amount_paid_cents || 0), else: "—"}
+                  </td>
+                </tr>
+              </.data_table>
+            </div>
+          </div>
+        <% end %>
+      </.app_shell>
+    </div>
+    """
+  end
+
+  # -- helpers (MASKING INVARIANT) -------------------------------------------
+
+  defp render_billing_name(nil), do: "—"
+  defp render_billing_name(%{billing_name: %Samen.Masked{} = m}), do: m
+  defp render_billing_name(%{billing_name: name}) when is_binary(name), do: name
+  defp render_billing_name(_), do: "—"
+
+  # overdue? = open AND due_date is in the past.
+  def overdue?(%{status: :open, due_date: %DateTime{} = due}) do
+    DateTime.compare(due, DateTime.utc_now()) == :lt
+  end
+
+  def overdue?(_), do: false
+
+  # Invoice status with overdue computed from due_date.
+  defp invoice_status_label(inv) do
+    if overdue?(inv), do: "overdue", else: to_string(inv.status)
+  end
+
+  defp invoice_status_variant(inv) do
+    cond do
+      inv.status == :paid -> "ok"
+      overdue?(inv) -> "bad"
+      inv.status == :open -> "info"
+      true -> "mut"
+    end
+  end
+
+  defp dollars(cents) when is_integer(cents) do
+    "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
+  end
+
+  defp dollars(_), do: "$0.00"
+
+  defp format_date(nil), do: "—"
+
+  defp format_date(%DateTime{} = dt) do
+    "#{dt.year}-#{pad(dt.month)}-#{pad(dt.day)}"
+  end
+
+  defp format_date(_), do: "—"
+
+  defp pad(n), do: String.pad_leading(to_string(n), 2, "0")
+
+  # Shared Billing sidebar — active on the invoices page.
+  defp billing_sidebar(assigns) do
+    ~H"""
+    <.sidebar
+      title="Blue Ridge Logistics"
+      subtitle="Billing"
+      logo="B"
+      logo_style="background:linear-gradient(150deg,#5B21B6,#7C3AED)"
+    >
+      <:search>
+        <div class="search">
+          <svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
+          </svg>
+          Search customers, invoices…
+          <span class="kbd">⌘K</span>
+        </div>
+      </:search>
+
+      <.module_nav org_id={@org_id} active={:billing_invoices} />
+
+      <:footer>
+        <div class="foot">
+          <div class="av" style="background:#EDE9FE;color:#5B21B6">RM</div>
+          <div class="m"><b>Rosa Medina</b><span>dispatcher</span></div>
+        </div>
+      </:footer>
+    </.sidebar>
+    """
+  end
+end

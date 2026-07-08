@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "engines": {
+    "elixir": {
+      "primary": "ctags",
+      "lsp_cmd": null,
+      "fallback": "rg",
+      "last_resort": "rg"
+    },
+    "elixir_script": {
+      "primary": "ctags",
+      "lsp_cmd": null,
+      "fallback": "rg",
+      "last_resort": "rg"
+    }
+  },
+  "index_path": ".claude/codemunch/index.json",
+  "last_indexed": null,
+  "stats": {
+    "total_symbols": 0,
+    "files_indexed": 0
+  }
+}

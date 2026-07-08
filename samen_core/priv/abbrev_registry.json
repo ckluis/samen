@@ -100,6 +100,21 @@
     "pet": "PawChart.Clinic.Pet",
     "cpy": "SamenCore.Support.Crm.Company",
     "scs": "Demo.SupportScope.Csat",
-    "own": "PawChart.Clinic.Patient"
+    "own": "PawChart.Clinic.Patient",
+    "fbc": "Driftwood.Billing.Customer",
+    "fbs": "Driftwood.Billing.Subscription",
+    "fbp": "Driftwood.Billing.Plan",
+    "fbr": "Driftwood.Billing.Price",
+    "fbi": "Driftwood.Billing.Invoice",
+    "fby": "Driftwood.Billing.Payment",
+    "fbu": "Driftwood.Billing.Usage",
+    "fbe": "Driftwood.Billing.Entitlement",
+    "fsk": "Driftwood.Support.Ticket",
+    "fsc": "Driftwood.Support.Conversation",
+    "fsm": "Driftwood.Support.Message",
+    "fsa": "Driftwood.Support.Agent",
+    "fsl": "Driftwood.Support.Sla",
+    "fsn": "Driftwood.Support.Macro",
+    "fss": "Driftwood.Support.Csat"
   }
 }

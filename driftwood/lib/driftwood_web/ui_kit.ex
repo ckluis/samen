@@ -146,6 +146,98 @@ defmodule DriftwoodWeb.UIKit do
     """
   end
 
+  @doc """
+  The shared Driftwood module navigation — the single source of truth for the
+  "freight 20% + inherited 80%" story in the sidebar. Renders four `nav_group/1`s:
+
+    * **Operations** — the freight vertical (the 20% Driftwood builds).
+    * **CRM** / **Billing** / **Support** — the inherited universal scopes (the 80%
+      Driftwood inherits from the Samen foundry), each rendered as first-class UI.
+
+  Every page that has a sidebar renders THIS component, so all three inherited
+  modules are reachable from every module (including the `/broker` tenant console)
+  without typing URLs. The `active` attr highlights the current page; pass one of
+  `:dashboard | :loads | :roster | :settlements | :crm_companies | :crm_contacts |
+  :crm_pipeline | :billing_overview | :billing_invoices | :billing_plans |
+  :support_tickets` (or `nil` for no active item, e.g. a ticket detail page).
+
+  `org_id` is threaded into every `href` so navigation preserves the dogfood
+  `?org=` selector.
+  """
+  attr :org_id, :string, default: nil
+  attr :active, :atom, default: nil
+
+  def module_nav(assigns) do
+    ~H"""
+    <.nav_group label="Operations">
+      <.nav_item label="Dispatch board" href={"/broker?panel=dashboard&org=#{@org_id}"} active={@active == :dashboard}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Loads" href={"/broker?panel=loads&org=#{@org_id}"} active={@active == :loads}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13l5 5v5H3z" /><circle cx="7.5" cy="17.5" r="1.5" /><circle cx="17.5" cy="17.5" r="1.5" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Drivers" href={"/broker?panel=roster&org=#{@org_id}"} active={@active == :roster}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.2" /><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Settlements" href={"/broker?panel=settlements&org=#{@org_id}"} active={@active == :settlements}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+        </:icon>
+      </.nav_item>
+    </.nav_group>
+
+    <.nav_group label="CRM">
+      <.nav_item label="Companies" href={"/crm/companies?org=#{@org_id}"} active={@active == :crm_companies}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Contacts" href={"/crm/contacts?org=#{@org_id}"} active={@active == :crm_contacts}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.2" /><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Pipeline" href={"/crm/pipeline?org=#{@org_id}"} active={@active == :crm_pipeline}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3v18M12 6v15M19 9v12" /></svg>
+        </:icon>
+      </.nav_item>
+    </.nav_group>
+
+    <.nav_group label="Billing">
+      <.nav_item label="Customers" href={"/billing?org=#{@org_id}"} active={@active == :billing_overview}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Invoices" href={"/billing/invoices?org=#{@org_id}"} active={@active == :billing_invoices}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 2h9l5 5v15H6z" /><path d="M9 12h7M9 16h7M9 8h3" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Plans" href={"/billing/plans?org=#{@org_id}"} active={@active == :billing_plans}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 10h18" /></svg>
+        </:icon>
+      </.nav_item>
+    </.nav_group>
+
+    <.nav_group label="Support">
+      <.nav_item label="Tickets" href={"/support?org=#{@org_id}"} active={@active == :support_tickets}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+        </:icon>
+      </.nav_item>
+    </.nav_group>
+    """
+  end
+
   # ---------------------------------------------------------------------------
   # Topbar (breadcrumb + title + actions)
   # ---------------------------------------------------------------------------

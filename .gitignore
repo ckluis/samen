@@ -12,3 +12,4 @@ gate2_scratch/
 # committed. A real deploy uses AWS KMS (OPERATOR TODO). The test suite uses a
 # per-run tmp keystore (test_helper), so this only exists after `MIX_ENV=dev`.
 driftwood/priv/dev_keystore/
+.gstack/

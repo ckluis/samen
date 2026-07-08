@@ -167,4 +167,39 @@ defmodule Driftwood.DogfoodWalkthroughTest do
     refute agg_html =~ "Dana"
     refute agg_html =~ plaintext
   end
+
+  # The gate requires: the /broker tenant console sidebar must expose all three
+  # inherited universal scopes (CRM, Billing, Support) so the "freight 20% +
+  # inherited 80%" thesis is legible in navigation — reachable WITHOUT typing URLs.
+  test "the /broker tenant console sidebar exposes CRM, Billing, AND Support (thesis in nav)" do
+    org = "b1112d00-0000-4000-8000-000000000001"
+
+    html =
+      render(DriftwoodWeb.BrokerLive, %{
+        no_org: false,
+        org_id: org,
+        panel: "dashboard",
+        summary: nil,
+        loads: [],
+        drivers: [],
+        settlements: []
+      })
+
+    # The three inherited module groups are present in the broker sidebar…
+    assert html =~ "CRM"
+    assert html =~ "Billing"
+    assert html =~ "Support"
+    # …and each is reachable via a real href (no dead links).
+    assert html =~ ~s(href="/crm/companies?org=#{org}")
+    assert html =~ ~s(href="/crm/contacts?org=#{org}")
+    assert html =~ ~s(href="/crm/pipeline?org=#{org}")
+    assert html =~ ~s(href="/billing?org=#{org}")
+    assert html =~ ~s(href="/billing/invoices?org=#{org}")
+    assert html =~ ~s(href="/billing/plans?org=#{org}")
+    assert html =~ ~s(href="/support?org=#{org}")
+    # The freight vertical (the 20%) is still present alongside the inherited 80%.
+    # (`&` is HTML-escaped to `&amp;` in the rendered href.)
+    assert html =~ "Operations"
+    assert html =~ ~s(href="/broker?panel=loads&amp;org=#{org}")
+  end
 end

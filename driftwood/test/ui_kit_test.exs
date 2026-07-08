@@ -173,4 +173,60 @@ defmodule Driftwood.UIKitTest do
       assert html =~ ~s(class="sep")
     end
   end
+
+  describe "module_nav/1 — the shared '20% + 80%' sidebar navigation" do
+    @org "b1112d00-0000-4000-8000-000000000001"
+
+    defp module_nav_html(active) do
+      assigns = %{org: @org, active: active}
+
+      render_heex(~H"""
+      <.module_nav org_id={@org} active={@active} />
+      """)
+    end
+
+    test "renders ALL FOUR module groups (Operations + the inherited CRM/Billing/Support)" do
+      html = module_nav_html(nil)
+
+      # The freight 20% and the inherited 80% are BOTH legible in the sidebar.
+      assert html =~ "Operations"
+      assert html =~ "CRM"
+      assert html =~ "Billing"
+      assert html =~ "Support"
+    end
+
+    test "every inherited module is reachable via a resolvable href (no dead links)" do
+      html = module_nav_html(nil)
+
+      # Operations (freight vertical) — `&` is HTML-escaped to `&amp;` in the href.
+      assert html =~ ~s(href="/broker?panel=dashboard&amp;org=#{@org}")
+      assert html =~ ~s(href="/broker?panel=loads&amp;org=#{@org}")
+      assert html =~ ~s(href="/broker?panel=roster&amp;org=#{@org}")
+      assert html =~ ~s(href="/broker?panel=settlements&amp;org=#{@org}")
+      # CRM
+      assert html =~ ~s(href="/crm/companies?org=#{@org}")
+      assert html =~ ~s(href="/crm/contacts?org=#{@org}")
+      assert html =~ ~s(href="/crm/pipeline?org=#{@org}")
+      # Billing
+      assert html =~ ~s(href="/billing?org=#{@org}")
+      assert html =~ ~s(href="/billing/invoices?org=#{@org}")
+      assert html =~ ~s(href="/billing/plans?org=#{@org}")
+      # Support
+      assert html =~ ~s(href="/support?org=#{@org}")
+    end
+
+    test "the active key highlights exactly one item (.on) and org_id threads into hrefs" do
+      html = module_nav_html(:billing_invoices)
+
+      # The active nav item carries the `.on` class exactly once.
+      assert length(String.split(html, ~s(class="on")) ) - 1 == 1
+      # And it is the invoices link that is active (the anchor wraps the label).
+      assert html =~ ~r{<a href="/billing/invoices\?org=#{@org}" class="on">}
+    end
+
+    test "with active: nil (e.g. a ticket detail page) NO item is highlighted" do
+      html = module_nav_html(nil)
+      refute html =~ ~s(class="on")
+    end
+  end
 end

@@ -1,9 +1,24 @@
 {
-  "$comment": "PERMANENT abbrev registry for the Driftwood freight-brokerage vertical (Phase 5). Abbrevs are 3-letter lowercase, collision-checked, and NEVER recycled or changed once assigned. Driftwood keeps the CRM/Billing/Identity/Support/Primitives scope-DEFAULT abbrevs (DECISION AB, design §1.1) — the registry is per-app so there is no cross-app collision with demo. The vertical-authored resources take fresh abbrevs drv/stl/dsp.",
+  "$comment": "PERMANENT abbrev registry for the Driftwood freight-brokerage vertical (Phase 5). Abbrevs are 3-letter lowercase, collision-checked, and NEVER recycled or changed once assigned. The BUILT substrate reads ONE global registry (samen_core/priv/abbrev_registry.json via :code.priv_dir(:samen_core)); the scope-DEFAULT abbrevs (cmp/per/… for CRM, bcu/… for Billing, stk/… for Support) are already owned by the demo mount, so Driftwood mounts every scope with FRESH f-prefixed abbrevs to avoid the global-registry collision: CRM fcm/fpr/fpp/fop/fac/fat, Billing fbc/fbs/fbp/fbr/fbi/fby/fbu/fbe, Support fsk/fsc/fsm/fsa/fsl/fsn/fss. The vertical Freight resources take drv/stl/dsp/dak. This file mirrors those reserved rows for Driftwood bookkeeping; the global registry is the authoritative gate.",
   "abbrevs": {
     "drv": "Driftwood.Freight.Driver",
     "stl": "Driftwood.Freight.Settlement",
     "dsp": "Driftwood.Freight.DispatchEvent",
-    "dak": "Driftwood.Freight.ApiKey"
+    "dak": "Driftwood.Freight.ApiKey",
+    "fbc": "Driftwood.Billing.Customer",
+    "fbs": "Driftwood.Billing.Subscription",
+    "fbp": "Driftwood.Billing.Plan",
+    "fbr": "Driftwood.Billing.Price",
+    "fbi": "Driftwood.Billing.Invoice",
+    "fby": "Driftwood.Billing.Payment",
+    "fbu": "Driftwood.Billing.Usage",
+    "fbe": "Driftwood.Billing.Entitlement",
+    "fsk": "Driftwood.Support.Ticket",
+    "fsc": "Driftwood.Support.Conversation",
+    "fsm": "Driftwood.Support.Message",
+    "fsa": "Driftwood.Support.Agent",
+    "fsl": "Driftwood.Support.Sla",
+    "fsn": "Driftwood.Support.Macro",
+    "fss": "Driftwood.Support.Csat"
   }
 }

@@ -46,6 +46,32 @@ defmodule DriftwoodWeb.Router do
     live("/operator/impersonate", OperatorImpersonationLive)
     live("/operator/aggregate", OperatorDashboardLive)
 
+    # CRM module — the inherited universal CRM scope rendered as real UI.
+    # Three pages wired to Driftwood.Crm.* resources via Driftwood.CrmReads.
+    # PII on contacts (full_name / emails / phones) is plane-resolved:
+    #   - tenant plane: in the clear (org reads its own contacts)
+    #   - operator/impersonation plane: •••• (Samen.Api.PiiResolution, no reveal)
+    live("/crm/companies", CrmCompaniesLive)
+    live("/crm/contacts", CrmContactsLive)
+    live("/crm/pipeline", CrmPipelineLive)
+
+    # Billing module — the inherited universal Billing scope rendered as real UI.
+    # Three pages wired to Driftwood.Billing.* resources via Driftwood.BillingReads.
+    # PII on customers (billing_name / billing_email) is plane-resolved:
+    #   - tenant plane: in the clear (org reads its own customers)
+    #   - operator/impersonation plane: •••• (Samen.Api.PiiResolution, no reveal)
+    live("/billing", BillingLive)
+    live("/billing/invoices", BillingInvoicesLive)
+    live("/billing/plans", BillingPlansLive)
+
+    # Support module — the inherited universal Support (helpdesk) scope rendered as
+    # real UI. Two pages wired to Driftwood.Support.* resources via Driftwood.SupportReads.
+    # PII on agents (full_name / email) and message bodies is plane-resolved:
+    #   - tenant plane: in the clear (org reads its own agents / message bodies)
+    #   - operator/impersonation plane: •••• (Samen.Api.PiiResolution, no reveal)
+    live("/support", SupportLive)
+    live("/support/tickets/:id", SupportTicketLive)
+
     # ADR-008: the Samen UI kit preview — a living catalog exercising every
     # DriftwoodWeb.UIKit component (app shell, sidebar, topbar, button, tabs, data
     # table, pill, progress, metric, mask-bar, token-blind bar), including masked
