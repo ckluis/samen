@@ -173,22 +173,25 @@ defmodule Driftwood.ApiExternalSurfaceTest do
       assert data["full_name"] == "••••", "vaulted name must serialize as •••• in the webhook"
 
       # The vaulted CDL and its token NEVER appear as plaintext anywhere in the payload
-      # (fail-safe). NOTE (Gate-6 finding, F1): `Samen.Webhook.Payload`'s storage-name
-      # heuristic `~r/^[a-z]{3}_/` FALSE-POSITIVES on legitimate freight CATALOG names
-      # that happen to start with a 3-letter token + underscore — `cdl_number`,
-      # `cdl_state`, `cdl_expiry`, `eld_provider`. So it DROPS them from the webhook
-      # payload (absent, never plaintext). This is over-strict, not a leak: the field is
-      # gone by omission. The JSON:API surface (AshJsonApi's own serializer +
-      # PiiResolution, which does NOT use this heuristic) renders the CDL correctly
-      # (tenant clear / operator absent — red paths above). Logged as a P6 extraction-retro
-      # item: the heuristic should key on the resource's declared storage prefix, not a
-      # blanket 3-letter regex.
-      refute Map.has_key?(data, "cdl_number") and data["cdl_number"] not in [nil, "••••"],
-             "the CDL must never be plaintext in the webhook payload"
+      # (fail-safe). A6 FIX (Gate-6): `Samen.Webhook.Payload`'s storage-name guard now
+      # keys on the resource's DECLARED abbrev (`drv`), not a blanket `~r/^[a-z]{3}_/`
+      # regex. So the legitimate freight CATALOG names that merely START with a 3-letter
+      # token + underscore — `cdl_number`, `cdl_state`, `cdl_expiry`, `eld_provider` —
+      # now SURVIVE (they are NOT `drv_`/`pii_drv_`-prefixed storage names). The vaulted
+      # `cdl_number` survives as its masked `••••` (never plaintext, never a `vt_` token).
+      assert data["cdl_number"] == "••••",
+             "the vaulted CDL must survive as •••• (A6 fix — no longer dropped by the guard)"
 
       json = Jason.encode!(data)
       refute json =~ "CDL-", "no plaintext CDL in the webhook body"
       refute json =~ "vt_", "no vault token in the webhook body"
+
+      # A6 red path (1): the previously-dropped non-PII catalog names now SURVIVE under
+      # their catalog names (they are legitimately allowlisted; the guard no longer
+      # false-positives on the `cdl`/`eld` 3-letter prefixes).
+      assert data["cdl_state"] == "TX", "cdl_state (catalog name) must survive the guard"
+      assert data["cdl_expiry"] == "2027-01-01", "cdl_expiry (catalog name) must survive"
+      assert data["eld_provider"] == "samsara", "eld_provider (catalog name) must survive"
 
       # Non-vacuous positive control: an allowlisted non-PII field IS present under its
       # CATALOG name.
@@ -198,7 +201,7 @@ defmodule Driftwood.ApiExternalSurfaceTest do
       refute Map.has_key?(data, "org_id"), "org_id must be absent (opt-in allowlist)"
       refute Map.has_key?(data, "custom"), "the Tier-1 custom bag must be absent (opt-in)"
 
-      # Storage names NEVER appear as keys.
+      # Storage names NEVER appear as keys (the abbrev-prefixed physical columns).
       assert Enum.all?(Map.keys(data), fn k -> not String.starts_with?(k, "pii_") and not String.starts_with?(k, "drv_") end)
     end
 

@@ -46,6 +46,11 @@ defmodule Samen.Webhook.Payload do
     * **Catalog names only** — the `show_fields` names are catalog names; a storage
       name (`cnt_*`, `pii_*`, `vt_*`) is never allowlisted. A belt-and-suspenders
       storage-name guard drops any such name that somehow reaches the serializer.
+      The guard keys on the resource's **declared abbrev** (`Samen.Info.abbrev/1`):
+      a name is stripped only if it starts with THIS resource's `<abbrev>_` /
+      `pii_<abbrev>_` prefix (or the generic `pii_` storage-artifact prefix) — NOT a
+      blanket 3-letter regex, which false-positived on legitimate catalog names like
+      `cdl_number` (A6 fix).
     * **Masked / absent PII** — `%Masked{}` values serialize as `"••••"` (via the
       `Masked` encoder); a vault-routed field absent without a reveal grant is
       ABSENT. Plaintext in a PII-declared field is OMITTED (fail-closed).
@@ -128,6 +133,7 @@ defmodule Samen.Webhook.Payload do
   defp build_data(resource, record, include_masked) do
     allowlist = allowlisted_fields(resource)
     pii_attrs = pii_attr_names(resource)
+    abbrev = declared_abbrev(resource)
 
     resource
     |> Ash.Resource.Info.attributes()
@@ -139,7 +145,7 @@ defmodule Samen.Webhook.Payload do
       cond do
         # Defense in depth: a storage-named field is never on a well-formed
         # allowlist, but if one slips through we still drop it (catalog names only).
-        storage_name?(name) ->
+        storage_name?(name, abbrev) ->
           acc
 
         # PII attribute: Masked → "••••" or omit.
@@ -197,15 +203,44 @@ defmodule Samen.Webhook.Payload do
     _ -> MapSet.new()
   end
 
-  # A "storage name" is a bare storage column that leaked through public? — the
-  # abbrev_* naming convention. Non-PII attributes have catalog names (`:name`,
-  # `:status`, etc.), not storage names. We guard against a resource that
-  # mistakenly exposes a storage column by checking for 3-letter-prefix pattern.
-  defp storage_name?(name) do
-    # Storage columns follow the pattern "<abbrev>_<rest>" where abbrev is 3
-    # lower-case letters. Catalog names never start with a 3-letter abbrev prefix.
-    # We also block pii_ prefix explicitly.
-    Regex.match?(~r/^[a-z]{3}_/, name) or String.starts_with?(name, "pii_")
+  # The resource's DECLARED abbrev (the source of truth for its storage prefix),
+  # read back through the normal `samen` DSL surface. `nil` when the resource does
+  # not `use Samen.Resource` (e.g. a plain test struct or a foreign resource) — in
+  # which case only the generic `pii_` storage-artifact guard applies.
+  defp declared_abbrev(resource) do
+    Samen.Info.abbrev(resource)
+  rescue
+    _ -> nil
+  end
+
+  # A6 fix (Gate-6 / extraction-retro A6): a "storage name" is a bare storage
+  # column that leaked through `public?` — the `<abbrev>_<rest>` naming convention.
+  #
+  # The OLD guard used a blanket `~r/^[a-z]{3}_/` regex, which FALSE-POSITIVED on
+  # legitimate CATALOG names that merely START with a 3-letter token + underscore
+  # (`cdl_number`, `cdl_state`, `cdl_expiry`, `eld_provider`) and SILENTLY DROPPED
+  # them — over-strict (absent by omission, never a leak) but wrong: those catalog
+  # fields belong in the payload.
+  #
+  # A name is now treated as a storage name ONLY IF it starts with THIS resource's
+  # own registered abbrev prefix (`<abbrev>_`), its vault prefix (`pii_<abbrev>_`),
+  # or the generic `pii_` prefix (a genuine storage artifact regardless of abbrev).
+  # A catalog name is NEVER prefixed with its own resource's abbrev — the storage
+  # transformer prefixes PHYSICAL columns with `<abbrev>_`; the catalog name it maps
+  # from is the un-prefixed one. So `cdl_number` on the `drv` Driver survives, while
+  # a genuinely-leaked `drv_something` is still stripped.
+  #
+  # This is DEFENSE IN DEPTH only: the `show_fields` opt-in allowlist remains the
+  # primary gate — a field must be explicitly allowlisted (catalog name) to reach
+  # this check at all. When the abbrev is unknown (`nil`), only the `pii_` guard
+  # applies (fail-safe: we never invent a prefix that would over-drop a catalog name).
+  defp storage_name?(name, abbrev) do
+    abbrev_prefixed? =
+      is_binary(abbrev) and
+        (String.starts_with?(name, abbrev <> "_") or
+           String.starts_with?(name, "pii_" <> abbrev <> "_"))
+
+    abbrev_prefixed? or String.starts_with?(name, "pii_")
   end
 
   defp resource_type(resource) do

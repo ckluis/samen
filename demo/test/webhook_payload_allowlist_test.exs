@@ -171,6 +171,83 @@ defmodule Demo.WebhookPayloadAllowlistTest do
     end
   end
 
+  describe "A6 (Gate-6) — the storage-name guard keys on the DECLARED abbrev, not a blanket 3-letter regex" do
+    test "RED PATH 1 — a catalog name that starts with a 3-letter token+underscore SURVIVES" do
+      # `cdl_number` is a legitimate catalog name, allowlisted, that HAPPENS to start
+      # with a 3-letter token + underscore (`cdl_`). The OLD `~r/^[a-z]{3}_/` guard
+      # silently DROPPED it (the A6 false-positive). The abbrev-keyed guard (Widget's
+      # declared abbrev is `waw`, not `cdl`) must let it survive under its catalog name.
+      record = %{id: "waw-a6-1", display_name: "Widget", cdl_number: "CDL-12345"}
+
+      data = Payload.build("widget.created", Demo.WebhookAllowlist.Widget, record)["data"]
+
+      assert data["cdl_number"] == "CDL-12345",
+             "a catalog name starting with a 3-letter token+underscore must SURVIVE " <>
+               "(A6 fix — the guard keys on the resource's abbrev `waw`, not `cdl`)"
+
+      # Non-vacuous positive control: a plain allowlisted field is also present.
+      assert data["display_name"] == "Widget"
+    end
+
+    test "RED PATH 2 — a name starting with THIS resource's own abbrev (`waw_`) is STILL stripped" do
+      # `waw_leaked_col` is a genuine storage-name-shaped field: it starts with the
+      # resource's OWN declared abbrev (`waw`). Even though it was (mistakenly)
+      # allowlisted, the abbrev-keyed guard must STILL strip it — catalog names only.
+      record = %{
+        id: "waw-a6-2",
+        display_name: "Widget",
+        cdl_number: "CDL-999",
+        waw_leaked_col: "should_not_appear"
+      }
+
+      data = Payload.build("widget.created", Demo.WebhookAllowlist.Widget, record)["data"]
+
+      refute Map.has_key?(data, "waw_leaked_col"),
+             "a name starting with the resource's own abbrev prefix (`waw_`) is a storage " <>
+               "name and MUST be stripped even if allowlisted"
+
+      # Non-vacuous: the abbrev-shaped drop did NOT also drop the legit catalog name.
+      assert data["cdl_number"] == "CDL-999"
+      assert data["display_name"] == "Widget"
+    end
+
+    test "RED PATH 3 — the opt-in allowlist STILL governs (a non-allowlisted field is absent)" do
+      # A6 composes WITH the Phase-3 opt-in allowlist: `internal_label` is public but
+      # NOT allowlisted, so it is absent regardless of the storage-name guard.
+      record = %{
+        id: "waw-a6-3",
+        display_name: "Widget",
+        cdl_number: "CDL-1",
+        internal_label: "not_allowlisted"
+      }
+
+      data = Payload.build("widget.created", Demo.WebhookAllowlist.Widget, record)["data"]
+
+      refute Map.has_key?(data, "internal_label"),
+             "a non-allowlisted field is still absent — the opt-in allowlist is the primary gate"
+
+      assert data["cdl_number"] == "CDL-1"
+    end
+
+    test "RED PATH 4 — masked PII still serializes as •••• (composes with A6)" do
+      # A masked value on an allowlisted catalog field (whose name also trips the old
+      # 3-letter shape) still masks as •••• — the A6 fix does not disturb PII masking.
+      record = %{
+        id: "waw-a6-4",
+        display_name: "Widget",
+        cdl_number: %Masked{token: "vt_cdl_abc", label: :cdl_number}
+      }
+
+      data = Payload.build("widget.created", Demo.WebhookAllowlist.Widget, record)["data"]
+
+      assert data["cdl_number"] == "••••",
+             "a masked value on a surviving catalog field still serializes as •••• (never plaintext)"
+
+      json = Jason.encode!(data)
+      refute json =~ "vt_", "no vault token in the payload body"
+    end
+  end
+
   describe "F3.6 — no show_fields → empty data (fail-closed)" do
     test "a resource with an empty/absent allowlist auto-publishes NOTHING" do
       # Demo.Crm.Membership has no show_fields declared → allowlist is empty →

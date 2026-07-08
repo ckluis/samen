@@ -46,7 +46,16 @@ defmodule Demo.WebhookAllowlist.Widget do
     type("webhook_allowlist_widget")
     # OPT-IN allowlist — deliberately omits :custom, :internal_label, org_id,
     # inserted_at, updated_at.
-    show_fields([:id, :display_name])
+    #
+    # A6 fix fixtures:
+    #   * :cdl_number — a legitimate CATALOG name that HAPPENS to start with a
+    #     3-letter token + underscore (the exact A6 false-positive shape). It is
+    #     NOT prefixed with this resource's abbrev (`waw`), so the abbrev-keyed
+    #     storage-name guard must NOT strip it — it must SURVIVE.
+    #   * :waw_leaked_col — a name that DOES start with this resource's own declared
+    #     abbrev (`waw_`), i.e. a genuine storage-name-shaped leak. Even though it is
+    #     (mistakenly) allowlisted here, the guard must STILL strip it.
+    show_fields([:id, :display_name, :cdl_number, :waw_leaked_col])
   end
 
   attributes do
@@ -56,6 +65,13 @@ defmodule Demo.WebhookAllowlist.Widget do
     # Tier-1 custom bag — opt-in. Public but NOT on show_fields → must be ABSENT
     # even when populated.
     attribute(:custom, :map, public?: true)
+    # A6 red path (1): a catalog name starting with a 3-letter token + underscore.
+    # The OLD blanket `~r/^[a-z]{3}_/` guard false-positived and dropped it; the
+    # abbrev-keyed guard (prefix = `waw`) must let it survive.
+    attribute(:cdl_number, :string, public?: true)
+    # A6 red path (2): a name starting with THIS resource's own abbrev (`waw_`) —
+    # a genuine storage-name shape. Must STILL be stripped even if allowlisted.
+    attribute(:waw_leaked_col, :string, public?: true)
   end
 
   actions do
