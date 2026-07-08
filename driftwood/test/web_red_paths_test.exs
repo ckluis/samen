@@ -17,7 +17,7 @@ defmodule Driftwood.WebRedPathsTest do
   """
   use Driftwood.DataCase, async: false
 
-  alias Driftwood.{DogfoodScenario, Reads, OperatorDashboard, OperatorReveal}
+  alias Driftwood.{DogfoodScenario, Reads, OperatorReveal}
   alias Samen.OperatorPlane.Actor
   alias Samen.Impersonation
   alias Samen.Reveal.Grants
@@ -115,10 +115,12 @@ defmodule Driftwood.WebRedPathsTest do
 
   test "the token-blind aggregate view exposes NO PII (control: shows counts/MRR)", %{scenario: s} do
     {:ok, _} = Driftwood.Aggregate.Rebuild.run(Driftwood.Repo)
-    {:ok, lv} = OperatorDashboard.load_volume()
-    {:ok, mrr} = OperatorDashboard.mrr()
 
-    html = render(DriftwoodWeb.OperatorDashboardLive, %{load_volume: lv, mrr: mrr})
+    # ADR-009: the aggregate view is now the FRAMEWORK `Samen.Web.Operator.AggregateLive`,
+    # mounted over Driftwood's token-blind projection via the `aggregate_loader:` MFA
+    # (`Driftwood.OperatorAggregate.load/0`) — exactly what DriftwoodWeb.Router mounts. We
+    # render it through the driftwood aggregate mount, so this exercises the real path.
+    html = render_operator_aggregate()
 
     # MUST NOT contain any PII / mask / vault token / driver identity.
     refute html =~ "••••"
@@ -132,6 +134,31 @@ defmodule Driftwood.WebRedPathsTest do
     # lane cohort + a numeric total — so the "no PII" is the boundary, not an empty page.
     assert html =~ "IL-&gt;TX" or html =~ "IL->TX"
     assert html =~ "MRR"
+  end
+
+  # Render the framework operator-aggregate LiveView through Driftwood's aggregate mount
+  # (the same mount DriftwoodWeb.Router builds: the `Driftwood.OperatorAggregate.load/0`
+  # loader on the mount labels feeds the framework's token-blind chrome).
+  defp render_operator_aggregate do
+    mount =
+      Samen.Web.Mount.new(
+        :aggregate,
+        Driftwood.Aggregate,
+        Driftwood.Repo,
+        plane: Samen.Web.Plane.operator("driftwood-operator", nil),
+        labels: %{
+          operator_title: "Portfolio",
+          operator_workspace: "Driftwood Ops",
+          aggregate_loader: {Driftwood.OperatorAggregate, :load, []}
+        }
+      )
+
+    socket =
+      empty_socket()
+      |> Phoenix.Component.assign(:samen_mount, mount)
+      |> Samen.Web.Operator.AggregateLive.load()
+
+    render(Samen.Web.Operator.AggregateLive, socket.assigns)
   end
 
   # ==========================================================================

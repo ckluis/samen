@@ -1,22 +1,32 @@
 defmodule DriftwoodWeb.Router do
   @moduledoc """
-  The Driftwood host router (T5.3). Mounts the two planes as LiveViews over localhost:
+  The Driftwood host router (T5.3; rewired to the framework per ADR-009).
 
-    * TENANT plane — `/broker` (`DriftwoodWeb.BrokerLive`): the brokerage console
-      (rollup-backed dashboard, load board, driver roster w/ FMCSA status, settlements).
+  The inherited-80% product UI (CRM / Billing / Support + the operator aggregate) is no
+  longer driftwood-local: it is MOUNTED from `samen_web`. Driftwood supplies the three
+  host facts (namespace + repo) and the framework derives everything else:
+
+    * TENANT plane — the org acts over its OWN data (PII in the clear):
+      * `/broker` (`DriftwoodWeb.BrokerLive`) — the freight console (the vertical 20%).
+      * CRM / Billing / Support — mounted via `samen_module_routes` over the inherited
+        `Driftwood.{Crm,Billing,Support}` scope namespaces (`Samen.Web.{CRM,Billing,Support}`
+        LiveViews). PII on contacts / customers / agents / message bodies is plane-resolved
+        through `Samen.Api.PiiResolution`: tenant plane in the clear.
     * OPERATOR plane:
       * `/operator/impersonate` (`DriftwoodWeb.OperatorImpersonationLive`) — masked
-        impersonation over ONE tenant: real load board / driver roster, PII ••••, plus
-        the second-party reveal control.
-      * `/operator/aggregate` (`DriftwoodWeb.OperatorDashboardLive`) — the token-blind
-        cross-tenant load-volume / MRR dashboard (NO PII).
+        impersonation over ONE tenant's freight resources (PII ••••), plus the
+        second-party reveal control. Freight-shaped, so it stays driftwood-local.
+      * `/operator/aggregate` (`Samen.Web.Operator.AggregateLive`) — the framework
+        token-blind cross-tenant dashboard, fed Driftwood's MRR / load-volume projection
+        via the `aggregate_loader:` MFA on the mount labels (NO PII by construction).
 
-  `/` is a plain landing/health page (used for the boot curl check). `/healthz` returns
-  `ok`. The org/operator identity is passed as query params for the LOCAL dogfood — a
-  real deploy derives them from an authenticated session (see docs/driftwood-dogfood.md).
+  `/` is a plain landing/health page (the boot curl check). `/healthz` returns `ok`. The
+  org/operator identity is passed as query params for the LOCAL dogfood — a real deploy
+  derives them from an authenticated session (see docs/driftwood-dogfood.md).
   """
   use Phoenix.Router
   import Phoenix.LiveView.Router
+  import Samen.Web.Router
 
   pipeline :browser do
     plug(:accepts, ["html"])
@@ -42,40 +52,62 @@ defmodule DriftwoodWeb.Router do
     get("/", PageController, :index)
     get("/healthz", PageController, :healthz)
 
+    # The freight vertical 20% (stays driftwood-local — freight-shaped resources).
     live("/broker", BrokerLive)
     live("/operator/impersonate", OperatorImpersonationLive)
-    live("/operator/aggregate", OperatorDashboardLive)
+  end
 
-    # CRM module — the inherited universal CRM scope rendered as real UI.
-    # Three pages wired to Driftwood.Crm.* resources via Driftwood.CrmReads.
-    # PII on contacts (full_name / emails / phones) is plane-resolved:
-    #   - tenant plane: in the clear (org reads its own contacts)
-    #   - operator/impersonation plane: •••• (Samen.Api.PiiResolution, no reveal)
-    live("/crm/companies", CrmCompaniesLive)
-    live("/crm/contacts", CrmContactsLive)
-    live("/crm/pipeline", CrmPipelineLive)
+  # ADR-009 — the inherited-80% product UI, MOUNTED from samen_web. Three one-liners
+  # mount all 11 inherited CRM/Billing/Support pages over Driftwood's materialized scope
+  # resources (`Driftwood.Crm.*` / `Driftwood.Billing.*` / `Driftwood.Support.*`). The
+  # `Samen.Web.Mount` struct is built from the namespace + repo and threaded through a
+  # `live_session`; NO driftwood LiveView code renders these pages anymore.
+  #
+  # NOTE: a BARE `scope "/"` (no `DriftwoodWeb` alias) — the mounted LiveViews are the
+  # framework's OWN fully-qualified `Samen.Web.*` modules, so aliasing under `DriftwoodWeb`
+  # would (wrongly) resolve them to `DriftwoodWeb.Samen.Web.*`.
+  scope "/" do
+    pipe_through(:browser)
 
-    # Billing module — the inherited universal Billing scope rendered as real UI.
-    # Three pages wired to Driftwood.Billing.* resources via Driftwood.BillingReads.
-    # PII on customers (billing_name / billing_email) is plane-resolved:
-    #   - tenant plane: in the clear (org reads its own customers)
-    #   - operator/impersonation plane: •••• (Samen.Api.PiiResolution, no reveal)
-    live("/billing", BillingLive)
-    live("/billing/invoices", BillingInvoicesLive)
-    live("/billing/plans", BillingPlansLive)
+    samen_module_routes(:crm, Driftwood.Crm, repo: Driftwood.Repo)
+    samen_module_routes(:billing, Driftwood.Billing, repo: Driftwood.Repo)
+    samen_module_routes(:support, Driftwood.Support, repo: Driftwood.Repo)
+  end
 
-    # Support module — the inherited universal Support (helpdesk) scope rendered as
-    # real UI. Two pages wired to Driftwood.Support.* resources via Driftwood.SupportReads.
-    # PII on agents (full_name / email) and message bodies is plane-resolved:
-    #   - tenant plane: in the clear (org reads its own agents / message bodies)
-    #   - operator/impersonation plane: •••• (Samen.Api.PiiResolution, no reveal)
-    live("/support", SupportLive)
-    live("/support/tickets/:id", SupportTicketLive)
+  # ADR-009 §5.3(2) — the framework OPERATOR aggregate plane, mounted over Driftwood's
+  # token-blind aggregate projection. The aggregate PROJECTION is vertical-shaped (freight
+  # lanes / tiers), so — unlike CRM/Billing/Support — the host supplies its data via an
+  # `aggregate_loader:` MFA on the mount labels; the framework owns the token-blind chrome
+  # (banner + `⊘` suppression). This is a plain `live` under a `live_session` carrying the
+  # operator-plane mount (the aggregate has no `:crm/:billing/:support` route table).
+  # The session-safe mount for the operator aggregate plane. `namespace` points at
+  # Driftwood's aggregate domain; the token-blind projection is supplied by the
+  # `aggregate_loader:` MFA (Driftwood.OperatorAggregate.load/0) — mapping
+  # Driftwood.OperatorDashboard's MRR / load-volume into the framework's generic
+  # `%{metrics:, groups:}` shape. Labels carry the operator branding (data, not code).
+  # Built here (referencing only compiled external modules) so it is a plain session value.
+  @aggregate_mount Samen.Web.Mount.to_session(
+                     Samen.Web.Mount.new(
+                       :aggregate,
+                       Driftwood.Aggregate,
+                       Driftwood.Repo,
+                       plane: Samen.Web.Plane.operator("driftwood-operator", nil),
+                       labels: %{
+                         operator_title: "Portfolio",
+                         operator_workspace: "Driftwood Ops",
+                         aggregate_loader: {Driftwood.OperatorAggregate, :load, []}
+                       }
+                     )
+                   )
 
-    # ADR-008: the Samen UI kit preview — a living catalog exercising every
-    # DriftwoodWeb.UIKit component (app shell, sidebar, topbar, button, tabs, data
-    # table, pill, progress, metric, mask-bar, token-blind bar), including masked
-    # cells that render `••••` through Phoenix.HTML.Safe (no reveal path on the page).
-    live("/ui-kit", UIKitLive)
+  # BARE `scope "/"` (see the CRM/Billing/Support note above): the aggregate LiveView is
+  # the framework's fully-qualified module.
+  scope "/" do
+    pipe_through(:browser)
+
+    live_session :driftwood_operator_aggregate,
+      session: %{"samen_mount" => @aggregate_mount} do
+      live("/operator/aggregate", Samen.Web.Operator.AggregateLive)
+    end
   end
 end

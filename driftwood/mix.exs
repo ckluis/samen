@@ -32,6 +32,11 @@ defmodule Driftwood.MixProject do
   defp deps do
     [
       {:samen_core, path: "../samen_core"},
+      # ADR-009 — the framework UI library. Driftwood no longer forks the UI kit +
+      # CRM/Billing/Support LiveViews driftwood-local; it MOUNTS them from samen_web
+      # (Samen.UI components + Samen.Web.{CRM,Billing,Support} via the router macro), so
+      # the inherited-80% product surface travels at the framework level like the data.
+      {:samen_web, path: "../samen_web"},
       {:phoenix, "~> 1.7"},
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_html, "~> 4.1"},

@@ -6,13 +6,25 @@ import Config
 # VaccineLot custom object clinics author themselves.
 config :pawchart,
   ecto_repos: [PawChart.Repo],
-  ash_domains: [PawChart.Billing, PawChart.Clinic, PawChart.Aggregate]
+  ash_domains: [
+    PawChart.Crm,
+    PawChart.Billing,
+    PawChart.Support,
+    PawChart.Clinic,
+    PawChart.Aggregate
+  ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…) discover
 # domains from :samen_core :ash_domains. Register PawChart's domains so the gate scans
-# the mounted Billing scope + the vertical Clinical resources + the token-blind
-# aggregate plane.
-config :samen_core, :ash_domains, [PawChart.Billing, PawChart.Clinic, PawChart.Aggregate]
+# the mounted CRM/Billing/Support scopes + the vertical Clinical resources + the
+# token-blind aggregate plane.
+config :samen_core, :ash_domains, [
+  PawChart.Crm,
+  PawChart.Billing,
+  PawChart.Support,
+  PawChart.Clinic,
+  PawChart.Aggregate
+]
 
 config :ash, disable_async?: true
 
@@ -41,6 +53,20 @@ config :samen_core, :l_diversity_min_distinct, 2
 
 # The query-budget ledger repo (SCAFFOLD — accounting only, WARN-not-enforce).
 config :samen_core, :query_budget_ledger_repo, PawChart.Repo
+
+config :phoenix, :json_library, Jason
+
+# PawChartWeb.Endpoint — serves the tenant + operator LiveView planes (CRM/Billing/
+# Support modules mounted from samen_web + the clinical-vertical pages). Port 4032.
+config :pawchart, PawChartWeb.Endpoint,
+  adapter: Bandit.PhoenixAdapter,
+  url: [host: "localhost"],
+  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4032")],
+  secret_key_base: "pawchart_local_dogfood_secret_key_base_at_least_64_bytes_long_00000000",
+  live_view: [signing_salt: "pawchart_lv_salt_dogfood"],
+  render_errors: [formats: [html: PawChartWeb.ErrorHTML], layout: false],
+  pubsub_server: PawChart.PubSub,
+  server: false
 
 # Oban: the canonical queue taxonomy (reused verbatim from the substrate convention).
 config :samen_core, Oban,

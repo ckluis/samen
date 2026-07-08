@@ -15,8 +15,9 @@ defmodule DriftwoodWeb.Layouts do
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="csrf-token" content={Phoenix.Controller.get_csrf_token()} />
         <title>Driftwood</title>
-        <%!-- ADR-008: the shared Samen UI kit stylesheet (design tokens + component
-              classes). Served by the endpoint's Plug.Static from priv/static/assets. --%>
+        <%!-- ADR-009: the shared Samen UI kit stylesheet (design tokens + component
+              classes) served from the samen_web DEPENDENCY's priv via the endpoint's
+              scoped Plug.Static — driftwood no longer ships its own copy. --%>
         <link rel="stylesheet" href="/assets/samen_ui.css" />
       </head>
       <body>

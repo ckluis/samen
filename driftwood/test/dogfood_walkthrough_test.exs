@@ -156,8 +156,28 @@ defmodule Driftwood.DogfoodWalkthroughTest do
     assert lane.tenant_count == 2
     assert mrr.total_cents == 550_000
 
-    agg_html =
-      render(DriftwoodWeb.OperatorDashboardLive, %{load_volume: lv, mrr: mrr})
+    # ADR-009: the aggregate view is the FRAMEWORK Samen.Web.Operator.AggregateLive,
+    # mounted over Driftwood's token-blind projection (the `Driftwood.OperatorAggregate`
+    # loader on the mount labels — the same mount DriftwoodWeb.Router builds).
+    agg_mount =
+      Samen.Web.Mount.new(
+        :aggregate,
+        Driftwood.Aggregate,
+        Driftwood.Repo,
+        plane: Samen.Web.Plane.operator("driftwood-operator", nil),
+        labels: %{
+          operator_title: "Portfolio",
+          operator_workspace: "Driftwood Ops",
+          aggregate_loader: {Driftwood.OperatorAggregate, :load, []}
+        }
+      )
+
+    agg_socket =
+      empty_socket()
+      |> Phoenix.Component.assign(:samen_mount, agg_mount)
+      |> Samen.Web.Operator.AggregateLive.load()
+
+    agg_html = render(Samen.Web.Operator.AggregateLive, agg_socket.assigns)
 
     assert agg_html =~ "TX-&gt;CA" or agg_html =~ "TX->CA"
     assert agg_html =~ "$5500.00"

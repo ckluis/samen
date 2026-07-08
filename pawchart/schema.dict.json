@@ -833,6 +833,966 @@
       ],
       "resource": "PawChart.Billing.Price",
       "table_name": "ppc_price"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vca_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vca_domain",
+          "logical_name": "domain",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vca_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vca_industry",
+          "logical_name": "industry",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vca_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vca_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vca_notes",
+          "logical_name": "notes",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vca_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vca_size",
+          "logical_name": "size",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vca_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vca_website",
+          "logical_name": "website",
+          "pii": false,
+          "type": "String"
+        }
+      ],
+      "resource": "PawChart.Crm.Company",
+      "table_name": "vca_company"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vcb_company_id",
+          "logical_name": "company_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcb_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vcb_display_name",
+          "logical_name": "display_name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vcb_emails",
+          "logical_name": "emails",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "vcb_full_name",
+          "logical_name": "full_name",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "vcb_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcb_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vcb_job_title",
+          "logical_name": "job_title",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vcb_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcb_phones",
+          "logical_name": "phones",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "vcb_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Crm.Person",
+      "table_name": "vcb_person"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vcc_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "vcc_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcc_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vcc_label",
+          "logical_name": "label",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vcc_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vcc_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcc_stage_order",
+          "logical_name": "stage_order",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "vcc_stage_type",
+          "logical_name": "stage_type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vcc_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Crm.Pipeline",
+      "table_name": "vcc_pipeline"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vcd_close_date",
+          "logical_name": "close_date",
+          "pii": false,
+          "type": "Date"
+        },
+        {
+          "column_name": "vcd_company_id",
+          "logical_name": "company_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcd_currency",
+          "logical_name": "currency",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vcd_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vcd_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcd_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vcd_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vcd_notes",
+          "logical_name": "notes",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vcd_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcd_pipeline_id",
+          "logical_name": "pipeline_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcd_probability",
+          "logical_name": "probability",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "vcd_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vcd_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vcd_value_cents",
+          "logical_name": "value_cents",
+          "pii": false,
+          "type": "Integer"
+        }
+      ],
+      "resource": "PawChart.Crm.Opportunity",
+      "table_name": "vcd_opportunity"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vce_body",
+          "logical_name": "body",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vce_company_id",
+          "logical_name": "company_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vce_completed_at",
+          "logical_name": "completed_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vce_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vce_due_at",
+          "logical_name": "due_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vce_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vce_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vce_opportunity_id",
+          "logical_name": "opportunity_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vce_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vce_person_id",
+          "logical_name": "person_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vce_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vce_subject",
+          "logical_name": "subject",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vce_type",
+          "logical_name": "type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vce_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Crm.Activity",
+      "table_name": "vce_activity"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vcf_company_id",
+          "logical_name": "company_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcf_content_type",
+          "logical_name": "content_type",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vcf_file_name",
+          "logical_name": "file_name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vcf_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcf_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vcf_opportunity_id",
+          "logical_name": "opportunity_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcf_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcf_person_id",
+          "logical_name": "person_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vcf_size_bytes",
+          "logical_name": "size_bytes",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "vcf_storage_key",
+          "logical_name": "storage_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vcf_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Crm.Attachment",
+      "table_name": "vcf_attachment"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vsa_breached",
+          "logical_name": "breached",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "vsa_closed_at",
+          "logical_name": "closed_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vsa_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vsa_external_id",
+          "logical_name": "external_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsa_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsa_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vsa_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsa_priority",
+          "logical_name": "priority",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vsa_resolved_at",
+          "logical_name": "resolved_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vsa_sla_breach_at",
+          "logical_name": "sla_breach_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vsa_sla_id",
+          "logical_name": "sla_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsa_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vsa_subject",
+          "logical_name": "subject",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsa_tags",
+          "logical_name": "tags",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "vsa_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Support.Ticket",
+      "table_name": "vsa_ticket"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vsb_channel",
+          "logical_name": "channel",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vsb_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsb_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vsb_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsb_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vsb_subject",
+          "logical_name": "subject",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsb_ticket_id",
+          "logical_name": "ticket_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsb_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Support.Conversation",
+      "table_name": "vsb_conversation"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pii_vsc_body",
+          "logical_name": "body",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "vsc_agent_id",
+          "logical_name": "agent_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsc_attachments",
+          "logical_name": "attachments",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "vsc_conversation_id",
+          "logical_name": "conversation_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsc_created_via",
+          "logical_name": "created_via",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vsc_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsc_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vsc_message_type",
+          "logical_name": "message_type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vsc_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsc_sender_id",
+          "logical_name": "sender_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsc_sender_type",
+          "logical_name": "sender_type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vsc_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Support.Message",
+      "table_name": "vsc_message"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pii_vsd_email",
+          "logical_name": "email",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "vsd_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vsd_external_id",
+          "logical_name": "external_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsd_full_name",
+          "logical_name": "full_name",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "vsd_handle",
+          "logical_name": "handle",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsd_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsd_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vsd_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsd_role",
+          "logical_name": "role",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vsd_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vsd_timezone",
+          "logical_name": "timezone",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsd_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Support.Agent",
+      "table_name": "vsd_agent"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vse_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "vse_first_response_minutes",
+          "logical_name": "first_response_minutes",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "vse_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vse_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vse_label",
+          "logical_name": "label",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vse_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vse_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vse_priority",
+          "logical_name": "priority",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vse_resolve_minutes",
+          "logical_name": "resolve_minutes",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "vse_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Support.Sla",
+      "table_name": "vse_sla"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vsf_body_template",
+          "logical_name": "body_template",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsf_category",
+          "logical_name": "category",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsf_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsf_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "vsf_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsf_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vsf_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsf_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsf_tags",
+          "logical_name": "tags",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "vsf_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Support.Macro",
+      "table_name": "vsf_macro"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vsg_agent_id",
+          "logical_name": "agent_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsg_channel",
+          "logical_name": "channel",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vsg_comments",
+          "logical_name": "comments",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsg_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsg_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vsg_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsg_responded_at",
+          "logical_name": "responded_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vsg_score",
+          "logical_name": "score",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "vsg_ticket_id",
+          "logical_name": "ticket_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsg_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Support.Csat",
+      "table_name": "vsg_csat"
     }
   ]
 }

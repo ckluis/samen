@@ -1,21 +1,20 @@
 defmodule PawChart.MixProject do
   use Mix.Project
 
-  # PawChart — the Phase-6 SECOND-VERTICAL THIN SLICE (T6.2), the reuse-measurement
-  # probe. A vet-clinic SaaS on the Samen substrate, built as the vision doc's EASY
-  # ADDITIVE case (contrast with Driftwood's bounded-context reshape):
+  # PawChart — the Phase-6 SECOND-VERTICAL THIN SLICE (T6.2 → T6.3), the reuse-
+  # measurement probe. A vet-clinic SaaS on the Samen substrate:
   #
-  #   * MOUNTS the samen_core Billing scope AS-IS — plain subscriptions, NO reshape
-  #     (the additive contrast to Driftwood's settlement-netting reshape).
-  #   * AUTHORS two vertical resources: Patient (the human owner, composes CorePerson —
-  #     PII vault-routed) + Pet (the animal record; pii_pet_microchip scalar vault +
-  #     owner FK). The doc's "two PII subjects, one relationship" shape.
-  #   * DEFINES a Tier-2 VaccineLot custom object clinics author themselves (tnt_object).
+  #   * MOUNTS the samen_core Billing scope AS-IS — plain subscriptions, NO reshape.
+  #   * MOUNTS the samen_core CRM scope AS-IS — clinic contacts, referring vets, vendors.
+  #   * MOUNTS the samen_core Support scope AS-IS — clinics file tickets with the platform.
+  #   * MOUNTS the samen_web CRM/Billing/Support LiveView modules via samen_module_routes
+  #     (ADR-009) — the inherited-80% product UI at framework level.
+  #   * AUTHORS two vertical resources: Patient + Pet (the doc's "two PII subjects").
+  #   * DEFINES a Tier-2 VaccineLot custom object (tnt_object).
   #   * RUNS the FULL samen_core verifier gate in its own pawchart/ci.sh.
   #
-  # The point of this app is MEASUREMENT: docs/reuse-measurement.md quantifies
-  # inherited-vs-authored to validate (or honestly falsify) "build the 20%, inherit
-  # the 80%."
+  # REUSE MEASUREMENT: the mount line-count (see docs/mount-reuse-report.md) quantifies
+  # inherited-vs-authored: ~3 lines to inherit all three product modules in the router.
   def project do
     [
       app: :pawchart,
@@ -42,10 +41,19 @@ defmodule PawChart.MixProject do
   defp deps do
     [
       {:samen_core, path: "../samen_core"},
+      # ADR-009 — the framework UI library. PawChart mounts the inherited CRM/Billing/
+      # Support LiveViews from samen_web (3 lines in the router), so the entire
+      # inherited-80% product UI is framework-level, not per-vertical.
+      {:samen_web, path: "../samen_web"},
+      {:phoenix, "~> 1.7"},
+      {:phoenix_live_view, "~> 1.0"},
+      {:phoenix_html, "~> 4.1"},
+      # Bandit: the HTTP adapter behind PawChartWeb.Endpoint.
+      {:bandit, "~> 1.0"},
+      {:phoenix_pubsub, "~> 2.1"},
       {:jason, "~> 1.4"},
       {:stream_data, "~> 1.3"},
-      # simple_sat: the Ash policy authorizer's pure-Elixir SAT solver. Needed by the
-      # mounted Billing scope's OrgScope policies + the Patient/Pet OrgScope policies.
+      # simple_sat: the Ash policy authorizer's pure-Elixir SAT solver.
       {:simple_sat, "~> 0.1"}
     ]
   end

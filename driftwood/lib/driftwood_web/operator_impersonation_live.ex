@@ -33,7 +33,8 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   """
   use Phoenix.LiveView
 
-  import DriftwoodWeb.UIKit
+  # ADR-009 — the component kit is now framework-level (`Samen.UI`).
+  import Samen.UI
 
   alias Samen.Impersonation
   alias Driftwood.Reads

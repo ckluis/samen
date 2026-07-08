@@ -42,6 +42,15 @@ echo "==> Running samen_core tests"
 )
 echo "==> samen_core: PASSED"
 
+# --- samen_web framework UI library gate (ADR-009) ---
+echo ""
+echo "==> Running samen_web gate (compile --warnings-as-errors + two-plane render/masking suite)"
+(
+  cd "$REPO_ROOT/samen_web"
+  bash ci.sh
+)
+echo "==> samen_web gate: PASSED"
+
 # --- demo dogfood gate ---
 echo ""
 echo "==> Running demo dogfood tests"

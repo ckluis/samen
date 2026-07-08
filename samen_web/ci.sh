@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# samen_web/ci.sh — the framework UI library gate (ADR-009 §9).
+#
+#   1. mix compile --warnings-as-errors  (the lib + test-support host compile clean)
+#   2. mix test                          (component + Mount/Plane/Router unit tests +
+#                                         the two-plane render tests against the scratch
+#                                         samen_web_test DB — tenant clear / operator ••••
+#                                         / operator token-absent red path)
+#
+# The `mix test` alias runs `samen_web.test_setup` first (drop/create/migrate the scratch
+# DB), so this is a single self-contained gate. Exits non-zero on the first failure.
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$REPO_DIR"
+
+echo "==> samen_web: mix deps.get"
+mix deps.get --quiet
+
+echo "==> samen_web: compile --warnings-as-errors"
+MIX_ENV=test mix compile --warnings-as-errors
+
+echo "==> samen_web: test (component + two-plane render/masking suite)"
+MIX_ENV=test mix test --warnings-as-errors
+
+echo "==> samen_web: PASSED"
