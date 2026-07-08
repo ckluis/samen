@@ -39,7 +39,7 @@ defmodule Samen.Web.Mount do
   ]
 
   @type t :: %__MODULE__{
-          scope_kind: :crm | :billing | :support | :aggregate,
+          scope_kind: :crm | :billing | :support | :aggregate | :operator,
           namespace: module(),
           repo: module(),
           domain: module(),
@@ -110,6 +110,7 @@ defmodule Samen.Web.Mount do
   defp scope_kind("billing"), do: :billing
   defp scope_kind("support"), do: :support
   defp scope_kind("aggregate"), do: :aggregate
+  defp scope_kind("operator"), do: :operator
   defp scope_kind(k) when is_atom(k), do: k
 
   # Module atoms serialize as "Elixir.Driftwood.Crm". Host modules are COMPILED, so their

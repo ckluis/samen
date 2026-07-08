@@ -77,6 +77,23 @@ defmodule Samen.WebTest.DataCase do
     |> IO.iodata_to_binary()
   end
 
+  @doc """
+  Build a `Samen.Web.Mount` for the OPERATOR workspace (ADR-010) — `scope_kind: :operator`,
+  TENANT plane (the operator org over its own book of business, PII clear), with the
+  `operator_org_id` threaded on the labels so `Samen.Web.Operator.org_id/1` resolves it.
+  """
+  def build_operator_mount(operator_org_id, opts \\ []) do
+    labels = Keyword.get(opts, :labels, %{}) |> Map.put(:operator_org_id, operator_org_id)
+
+    Samen.Web.Mount.new(
+      :operator,
+      Samen.WebTest.Operator,
+      Samen.WebTest.Repo,
+      plane: Samen.Web.Plane.tenant(),
+      labels: labels
+    )
+  end
+
   defp namespace(:crm), do: Samen.WebTest.Crm
   defp namespace(:billing), do: Samen.WebTest.Billing
   defp namespace(:support), do: Samen.WebTest.Support

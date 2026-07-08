@@ -27,5 +27,6 @@ config :samen_web,
   ash_domains: [
     Samen.WebTest.Crm,
     Samen.WebTest.Billing,
-    Samen.WebTest.Support
+    Samen.WebTest.Support,
+    Samen.WebTest.Operator
   ]

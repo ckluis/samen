@@ -11,7 +11,8 @@ config :driftwood,
     Driftwood.Billing,
     Driftwood.Support,
     Driftwood.Freight,
-    Driftwood.Aggregate
+    Driftwood.Aggregate,
+    Driftwood.Operator
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…)
@@ -23,8 +24,15 @@ config :samen_core, :ash_domains, [
   Driftwood.Billing,
   Driftwood.Support,
   Driftwood.Freight,
-  Driftwood.Aggregate
+  Driftwood.Aggregate,
+  Driftwood.Operator
 ]
+
+# ADR-010 — the well-known OPERATOR org id (the SaaS company's own org). The operator
+# workspace (`/operator/accounts` · `/billing` · `/desk`) scopes to this org over its OWN book
+# of business (tenant orgs as accounts) on the TENANT plane (PII of the SaaS's own customers
+# CLEAR). `Samen.Web.Operator.org_id/1` resolves it: label → this app-env → single seeded row.
+config :driftwood, operator_org_id: "0f000000-0000-4000-8000-0000000000aa"
 
 config :ash, disable_async?: true
 

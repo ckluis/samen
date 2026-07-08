@@ -72,6 +72,88 @@ defmodule Samen.Web.Router do
     end
   end
 
+  @doc """
+  Mount the OPERATOR / SaaS-company control-plane workspace in ONE line (ADR-010 §7.2).
+
+  `namespace` is the host's OPERATOR namespace (a domain that mounted Identity + Billing +
+  Support blueprints — e.g. `Driftwood.Operator`). The macro builds ONE operator-plane mount
+  (`scope_kind: :operator`) carrying the operator org id in its labels, threads it through a
+  `live_session`, and declares all operator routes (Accounts · Platform billing · Desk).
+
+      import Samen.Web.Router
+
+      scope "/" do
+        pipe_through :browser
+        samen_operator_routes Driftwood.Operator, repo: Driftwood.Repo
+      end
+
+  ## The operator seat's PII plane is `:tenant` of the operator org, NOT `:operator`
+
+  ADR-010 §7.2 (load-bearing): the operator's OWN workspace reads the operator org over its OWN
+  book of business on the TENANT plane (clear). The word "operator" names the ORG/WORKSPACE; the
+  PII plane is `:tenant`. Only the drill-into-a-tenant action ("Open account") uses
+  `plane: :operator` (masked), via the existing `samen_module_routes ... plane: :operator`.
+
+  ## Options
+
+    * `:repo`            — REQUIRED. The host's Ecto repo.
+    * `:domain`          — the host Ash domain (default: `namespace`).
+    * `:operator_org_id` — the well-known operator org id (else resolved via app env or the
+      single seeded Org row — see `Samen.Web.Operator.org_id/1`).
+    * `:path`            — the mount path prefix (default `/operator`).
+    * `:labels`          — optional UI copy overrides (operator workspace title/glyph, etc.).
+    * `:include_aggregate` — also mount the `aggregate` page on THIS operator mount (default
+      `false`). A host that already wires its own token-blind aggregate (a vertical-shaped
+      projection via `aggregate_loader:`) mounts it separately and leaves this `false`, so the
+      route is not declared twice.
+    * `:session_name`    — override the `live_session` name (default `:samen_operator`).
+  """
+  defmacro samen_operator_routes(namespace, opts \\ []) do
+    path = Keyword.get(opts, :path, "/operator")
+    session_name = Keyword.get(opts, :session_name, :samen_operator)
+    include_aggregate = Keyword.get(opts, :include_aggregate, false)
+
+    quote bind_quoted: [
+            namespace: namespace,
+            opts: opts,
+            path: path,
+            session_name: session_name,
+            include_aggregate: include_aggregate
+          ] do
+      operator_labels =
+        (Keyword.get(opts, :labels) || %{})
+        |> Samen.Web.Router.__operator_labels__(Keyword.get(opts, :operator_org_id))
+
+      mount =
+        Samen.Web.Mount.new(
+          :operator,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          # The operator seat is the operator org over its OWN book of business — TENANT plane
+          # (clear). Crossing to a tenant's masked world is the explicit impersonation link.
+          plane: Samen.Web.Plane.tenant(),
+          labels: operator_labels
+        )
+
+      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        live("#{path}/accounts", Samen.Web.Operator.AccountsLive)
+        live("#{path}/billing", Samen.Web.Operator.PlatformBillingLive)
+        live("#{path}/desk", Samen.Web.Operator.DeskLive)
+
+        if include_aggregate do
+          live("#{path}/aggregate", Samen.Web.Operator.AggregateLive)
+        end
+      end
+    end
+  end
+
+  @doc false
+  def __operator_labels__(labels, nil), do: labels
+
+  def __operator_labels__(labels, operator_org_id),
+    do: Map.put(labels, :operator_org_id, operator_org_id)
+
   @doc false
   def __plane__(opts) do
     case Keyword.get(opts, :plane, :tenant) do

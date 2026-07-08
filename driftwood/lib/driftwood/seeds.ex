@@ -218,6 +218,12 @@ defmodule Driftwood.Seeds do
 
     {:ok, _agg} = Driftwood.Aggregate.Rebuild.run(Driftwood.Repo)
 
+    # ADR-010 — the OPERATOR org's book of business OVER the seeded tenant orgs: the SaaS
+    # company (Samen SaaS, Inc.) whose ACCOUNTS ARE these freight brokerages, each with a
+    # tenant-admin (PII the SaaS owns — CLEAR to the operator), a platform subscription, and
+    # tenant-filed desk tickets. Renders at `/operator/accounts` · `/billing` · `/desk`.
+    :ok = Driftwood.OperatorSeeds.seed()
+
     org_id
   end
 

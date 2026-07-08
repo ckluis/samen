@@ -110,4 +110,22 @@ defmodule DriftwoodWeb.Router do
       live("/operator/aggregate", Samen.Web.Operator.AggregateLive)
     end
   end
+
+  # ADR-010 — the OPERATOR / SaaS-company workspace, mounted from samen_web in ONE line over
+  # Driftwood's operator namespace (`Driftwood.Operator` — its FIRST Identity mount; accounts
+  # ARE tenant orgs). Accounts · Platform billing · Desk. The operator seat reads the operator
+  # org over its OWN book of business on the TENANT plane (the SaaS's own customers — the
+  # tenant-admins — CLEAR); drilling into a tenant ("Open account") is the existing masked
+  # impersonation path. `:include_aggregate false` — the token-blind aggregate is already
+  # mounted above with Driftwood's freight-shaped loader.
+  scope "/" do
+    pipe_through(:browser)
+
+    samen_operator_routes(Driftwood.Operator,
+      repo: Driftwood.Repo,
+      operator_org_id: "0f000000-0000-4000-8000-0000000000aa",
+      include_aggregate: false,
+      labels: %{operator_workspace: "Driftwood Ops", operator_glyph: "D"}
+    )
+  end
 end
