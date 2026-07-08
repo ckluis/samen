@@ -105,14 +105,14 @@ defmodule Samen.Web.CRM.ContactsLive do
                 </:head>
                 <tr :for={p <- @contacts} class="contact-row" id={"contact-#{p.id}"}>
                   <td class="p-name">
-                    <div style="display:flex;align-items:center;gap:8px">
+                    <a href={contact_path(@samen_mount, @org_id, p.id)} style="display:flex;align-items:center;gap:8px;text-decoration:none">
                       <div class="av" style="width:28px;height:28px;border-radius:50%;background:#DDE7F5;color:#3B4CCA;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">
                         {contact_initials(p.full_name, p.display_name)}
                       </div>
-                      <span class="p-full-name" style="font-weight:500;color:#3a3b45">
+                      <span class="p-full-name" style="font-weight:500;color:#3B4CCA">
                         {render_full_name(p.full_name, p.display_name)}
                       </span>
-                    </div>
+                    </a>
                   </td>
                   <td class="p-email" style="font-size:12px;color:var(--muted)">
                     {render_email(p.emails)}
@@ -139,6 +139,9 @@ defmodule Samen.Web.CRM.ContactsLive do
   # Phoenix.HTML.Safe. Only a plaintext string is reshaped.
 
   defp crumbs(mount, leaf), do: [Mount.label(mount, :crumb_root, "Workspace"), "CRM", leaf]
+
+  defp contact_path(mount, org_id, id),
+    do: "#{Mount.label(mount, :crm_path, "/crm")}/contacts/#{id}?org=#{org_id}"
 
   defp plane_note(%Mount{plane: %{kind: :operator}}), do: "operator plane · masked"
   defp plane_note(_), do: "your org in the clear"

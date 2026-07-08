@@ -2685,6 +2685,468 @@
     {
       "fields": [
         {
+          "column_name": "fmc_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fmc_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fmc_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmc_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fmc_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fmc_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmc_scheduled_at",
+          "logical_name": "scheduled_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fmc_sent_at",
+          "logical_name": "sent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fmc_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fmc_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Marketing.Campaign",
+      "table_name": "fmc_campaign"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fme_event_type",
+          "logical_name": "event_type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fme_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fme_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fme_metadata",
+          "logical_name": "metadata",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fme_occurred_at",
+          "logical_name": "occurred_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fme_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fme_send_id",
+          "logical_name": "send_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fme_subscriber_id",
+          "logical_name": "subscriber_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fme_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Marketing.EmailEvent",
+      "table_name": "fme_email_event"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fmg_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fmg_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fmg_filter_criteria",
+          "logical_name": "filter_criteria",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fmg_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmg_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fmg_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fmg_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmg_subscriber_count",
+          "logical_name": "subscriber_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fmg_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Marketing.Segment",
+      "table_name": "fmg_segment"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fmn_campaign_id",
+          "logical_name": "campaign_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmn_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fmn_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmn_idempotency_key",
+          "logical_name": "idempotency_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fmn_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fmn_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmn_queued_at",
+          "logical_name": "queued_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fmn_sent_at",
+          "logical_name": "sent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fmn_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fmn_subscriber_id",
+          "logical_name": "subscriber_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmn_template_id",
+          "logical_name": "template_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmn_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Marketing.Send",
+      "table_name": "fmn_send"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fmp_active",
+          "logical_name": "active",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fmp_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmp_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fmp_notes",
+          "logical_name": "notes",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fmp_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmp_reason",
+          "logical_name": "reason",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fmp_subscriber_id",
+          "logical_name": "subscriber_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmp_suppressed_at",
+          "logical_name": "suppressed_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fmp_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Marketing.Suppression",
+      "table_name": "fmp_suppression"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fms_consent_at",
+          "logical_name": "consent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fms_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fms_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fms_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fms_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fms_source",
+          "logical_name": "source",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fms_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fms_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_fms_email",
+          "logical_name": "email",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Driftwood.Marketing.Subscriber",
+      "table_name": "fms_subscriber"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fmt_body_html",
+          "logical_name": "body_html",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fmt_body_text",
+          "logical_name": "body_text",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fmt_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fmt_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fmt_from_address",
+          "logical_name": "from_address",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fmt_from_name",
+          "logical_name": "from_name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fmt_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmt_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fmt_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fmt_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fmt_subject_line",
+          "logical_name": "subject_line",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fmt_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Marketing.Template",
+      "table_name": "fmt_template"
+    },
+    {
+      "fields": [
+        {
           "column_name": "fop_close_date",
           "logical_name": "close_date",
           "pii": false,

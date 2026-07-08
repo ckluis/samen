@@ -49,7 +49,15 @@ defmodule Driftwood.DataCase do
           Samen.Web.Plane.tenant()
       end
 
-    Samen.Web.Mount.new(scope_kind, driftwood_namespace(scope_kind), Driftwood.Repo, plane: plane)
+    # The Marketing mount carries the CRM namespace on its labels (as the router does) so the
+    # Leads lens can derive a CRM-kind mount and read contacts by lifecycle_stage.
+    labels =
+      case scope_kind do
+        :marketing -> %{crm_namespace: Driftwood.Crm}
+        _ -> nil
+      end
+
+    Samen.Web.Mount.new(scope_kind, driftwood_namespace(scope_kind), Driftwood.Repo, plane: plane, labels: labels)
   end
 
   @doc """
@@ -75,4 +83,5 @@ defmodule Driftwood.DataCase do
   defp driftwood_namespace(:crm), do: Driftwood.Crm
   defp driftwood_namespace(:billing), do: Driftwood.Billing
   defp driftwood_namespace(:support), do: Driftwood.Support
+  defp driftwood_namespace(:marketing), do: Driftwood.Marketing
 end

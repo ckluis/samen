@@ -44,10 +44,147 @@ defmodule Samen.Web.CRM.Reads do
   """
   def contacts(mount, scope) do
     Mount.resource(mount, Person)
-    |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :display_name, :job_title, :company_id])
+    |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :display_name, :job_title, :company_id, :custom])
     |> Ash.Query.sort(display_name: :asc)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, Person, scope)
+  rescue
+    _ -> []
+  end
+
+  @doc """
+  Read a single CRM person (contact) by id for `scope`, with PII plane-resolved
+  (tenant clear / operator ••••). `{:ok, person}` or `:error`. **This is the new
+  PII surface** (ADR-011 §5 — the masking-test target).
+  """
+  def get_contact(mount, scope, id) do
+    result =
+      Mount.resource(mount, Person)
+      |> Ash.Query.ensure_selected([
+        :full_name,
+        :emails,
+        :phones,
+        :display_name,
+        :job_title,
+        :company_id,
+        :custom
+      ])
+      |> Ash.Query.filter(id == ^id)
+      |> Ash.read!(scope: scope)
+      |> resolve_pii(mount, Person, scope)
+
+    case result do
+      [person | _] -> {:ok, person}
+      [] -> :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  @doc "Read a single CRM company by id for `scope`. Non-PII. `{:ok, company}` or `:error`."
+  def get_company(mount, scope, id) do
+    result =
+      Mount.resource(mount, Company)
+      |> Ash.Query.ensure_selected([:name, :domain, :industry, :size, :website, :notes, :custom])
+      |> Ash.Query.filter(id == ^id)
+      |> Ash.read!(scope: scope)
+
+    case result do
+      [company | _] -> {:ok, company}
+      [] -> :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  @doc "Read this company's contacts (people) for `scope`, PII plane-resolved. Optional (ADR-011 §4.2)."
+  def contacts_for_company(mount, scope, company_id) do
+    Mount.resource(mount, Person)
+    |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :display_name, :job_title, :company_id])
+    |> Ash.Query.filter(company_id == ^company_id)
+    |> Ash.Query.sort(display_name: :asc)
+    |> Ash.read!(scope: scope)
+    |> resolve_pii(mount, Person, scope)
+  rescue
+    _ -> []
+  end
+
+  @doc "Read a person's activity stream, newest-first. Non-PII (opaque FKs + bounded fields)."
+  def activities_for_person(mount, scope, person_id) do
+    Mount.resource(mount, Activity)
+    |> Ash.Query.ensure_selected([:type, :subject, :body, :status, :due_at, :completed_at, :custom, :person_id, :company_id])
+    |> Ash.Query.filter(person_id == ^person_id)
+    |> Ash.Query.sort(inserted_at: :desc)
+    |> Ash.read!(scope: scope)
+  rescue
+    _ -> []
+  end
+
+  @doc "Read a company's activity stream, newest-first. Non-PII."
+  def activities_for_company(mount, scope, company_id) do
+    Mount.resource(mount, Activity)
+    |> Ash.Query.ensure_selected([:type, :subject, :body, :status, :due_at, :completed_at, :custom, :person_id, :company_id])
+    |> Ash.Query.filter(company_id == ^company_id)
+    |> Ash.Query.sort(inserted_at: :desc)
+    |> Ash.read!(scope: scope)
+  rescue
+    _ -> []
+  end
+
+  @doc """
+  Read a company's opportunities with its pipeline stage joined. Non-PII (ADR-011 §5).
+  Each row gets a `:__stage__` (the `Pipeline` row) for a stage pill.
+  """
+  def opportunities_for_company(mount, scope, company_id) do
+    opps =
+      Mount.resource(mount, Opportunity)
+      |> Ash.Query.ensure_selected([:name, :value_cents, :status, :pipeline_id, :company_id, :close_date])
+      |> Ash.Query.filter(company_id == ^company_id)
+      |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.read!(scope: scope)
+
+    stage_by_id =
+      Mount.resource(mount, Pipeline)
+      |> Ash.Query.ensure_selected([:name, :label, :stage_order])
+      |> Ash.read!(scope: scope)
+      |> Map.new(fn s -> {s.id, s} end)
+
+    Enum.map(opps, fn opp -> Map.put(opp, :__stage__, Map.get(stage_by_id, opp.pipeline_id)) end)
+  rescue
+    _ -> []
+  end
+
+  @doc """
+  Create an activity from the log-activity composer (ADR-011 §6.3). `attrs` carries
+  `type`, `subject`, `body`, one of `person_id`/`company_id`, `status`,
+  `completed_at`, and `org_id`. The write goes through Ash so OrgScope + the
+  `RoleAtLeast(:member)` gate + `SameOrgFk` (a cross-org FK is refused by the kernel)
+  all apply — this module adds NO policy of its own. `{:ok, activity}` or
+  `{:error, reason}`.
+  """
+  def create_activity(mount, scope, attrs) do
+    Mount.resource(mount, Activity)
+    |> Ash.Changeset.for_create(:create, attrs, scope: scope)
+    |> Ash.create()
+  end
+
+  @doc """
+  Read the CRM contacts that are LEADS — `person.custom["lifecycle_stage"]` in the given
+  bounded set (ADR-011 §8 prospecting lens). PII (name/email/phone) is plane-resolved
+  (tenant clear / operator ••••), same as `contacts/2`. `stages` is a list of stage strings
+  (default the early-funnel `["lead", "mql", "sql"]`). Filtered in Elixir over the resolved
+  rows because `lifecycle_stage` lives in the Tier-1 `custom` jsonb bag (no Tier-0 column).
+  """
+  def leads(mount, scope, stages \\ ~w(lead mql sql)) do
+    stage_set = MapSet.new(stages)
+
+    contacts(mount, scope)
+    |> Enum.filter(fn p ->
+      case p.custom do
+        %{"lifecycle_stage" => stage} when is_binary(stage) -> MapSet.member?(stage_set, stage)
+        _ -> false
+      end
+    end)
   rescue
     _ -> []
   end

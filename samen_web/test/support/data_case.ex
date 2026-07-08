@@ -41,7 +41,15 @@ defmodule Samen.WebTest.DataCase do
           Samen.Web.Plane.tenant()
       end
 
-    Samen.Web.Mount.new(scope_kind, namespace(scope_kind), Samen.WebTest.Repo, plane: plane)
+    # The Marketing mount carries the CRM namespace on its labels so the Leads lens
+    # (`Samen.Web.Marketing.LeadsLive`) can derive a CRM-kind mount and read contacts.
+    labels =
+      case scope_kind do
+        :marketing -> %{crm_namespace: Samen.WebTest.Crm}
+        _ -> nil
+      end
+
+    Samen.Web.Mount.new(scope_kind, namespace(scope_kind), Samen.WebTest.Repo, plane: plane, labels: labels)
   end
 
   @doc "The session map a framework LiveView expects (mimics the router's live_session)."
@@ -97,4 +105,5 @@ defmodule Samen.WebTest.DataCase do
   defp namespace(:crm), do: Samen.WebTest.Crm
   defp namespace(:billing), do: Samen.WebTest.Billing
   defp namespace(:support), do: Samen.WebTest.Support
+  defp namespace(:marketing), do: Samen.WebTest.Marketing
 end

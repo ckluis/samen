@@ -194,6 +194,7 @@ defmodule Samen.UI do
   attr :crm_path, :string, default: "/crm"
   attr :billing_path, :string, default: "/billing"
   attr :support_path, :string, default: "/support"
+  attr :marketing_path, :string, default: "/marketing"
   slot :extra
 
   def module_nav(assigns) do
@@ -240,6 +241,24 @@ defmodule Samen.UI do
       <.nav_item label="Tickets" href={"#{@support_path}?org=#{@org_id}"} active={@active == :support_tickets}>
         <:icon>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+        </:icon>
+      </.nav_item>
+    </.nav_group>
+
+    <.nav_group label="Marketing">
+      <.nav_item label="Campaigns" href={"#{@marketing_path}/campaigns?org=#{@org_id}"} active={@active == :marketing_campaigns}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l18-8-8 18-2-8-8-2z" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Segments" href={"#{@marketing_path}/segments?org=#{@org_id}"} active={@active == :marketing_segments}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="8" r="4" /><path d="M14 20a6 6 0 0 0-12 0" /><path d="M15 7h6M18 4v6" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Leads" href={"#{@marketing_path}/leads?org=#{@org_id}"} active={@active == :marketing_leads}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l6-6 4 4 8-8" /><path d="M17 7h4v4" /></svg>
         </:icon>
       </.nav_item>
     </.nav_group>
@@ -500,4 +519,252 @@ defmodule Samen.UI do
     </div>
     """
   end
+
+  # ---------------------------------------------------------------------------
+  # Activity timeline (ADR-011 §6.2) — pure presentational, host-agnostic
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  The activity timeline (ADR-011 §6.2). A vertical rail of typed activity entries —
+  each entry a per-type glyph (call · email · meeting · note · task), a `subject`
+  title, a `status` pill, a `who / when` line, and the `body` as wrapped text.
+
+  PURELY PRESENTATIONAL: it takes ALREADY-RESOLVED data (a list of plain maps) and
+  renders it. It NEVER reads a resource, NEVER touches the vault, and NEVER knows
+  about writes — the optional `:composer` slot lets a detail page drop a
+  log-activity form ABOVE the rail without the component knowing anything about the
+  write path. This makes it trivially unit-testable and inherited by every vertical
+  (a future account timeline can reuse it verbatim).
+
+  `entries` is a list of maps: `%{type, subject, body, status, at, who}` — `type` and
+  `status` are the bounded activity enums (atoms), `at` a `DateTime | nil`, `subject`
+  / `body` / `who` strings. A `%Samen.Masked{}` in any slot renders `••••` verbatim.
+  """
+  attr :entries, :list, required: true
+  attr :empty, :string, default: "No activity yet."
+  slot :composer
+
+  def timeline(assigns) do
+    ~H"""
+    <div class="tl">
+      <div :if={@composer != []} class="tl-composer">
+        {render_slot(@composer)}
+      </div>
+
+      <div :if={@entries == []} class="tl-empty" style="padding:22px 20px;color:var(--muted)">
+        {@empty}
+      </div>
+
+      <div :if={@entries != []} class="tl-rail">
+        <div :for={e <- @entries} class="tl-entry" id={timeline_entry_id(e)}>
+          <div class={"tl-glyph tl-#{timeline_type(e)}"} style="width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            {timeline_glyph(timeline_type(e))}
+          </div>
+          <div class="tl-body" style="flex:1;min-width:0">
+            <div class="tl-head" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px">
+              <span class="tl-type" style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.03em">{timeline_type_label(timeline_type(e))}</span>
+              <span class="tl-subject" style="font-weight:600;font-size:13px;color:#2a2b35">{Map.get(e, :subject) || "—"}</span>
+              <.pill variant={timeline_status_variant(Map.get(e, :status))}>{timeline_status_label(Map.get(e, :status))}</.pill>
+            </div>
+            <div :if={timeline_present?(Map.get(e, :body))} class="tl-text" style="font-size:13px;color:#3a3b45;line-height:1.55;white-space:pre-wrap;word-break:break-word;margin:2px 0 6px">
+              {Map.get(e, :body)}
+            </div>
+            <div class="tl-meta" style="font-size:11px;color:var(--muted)">
+              <span :if={timeline_present?(Map.get(e, :who))}>{Map.get(e, :who)} · </span>{timeline_dt(Map.get(e, :at))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # Timeline helpers (bounded enums; presentational only) ---------------------
+
+  defp timeline_entry_id(%{id: id}) when not is_nil(id), do: "tl-entry-#{id}"
+  defp timeline_entry_id(_), do: "tl-entry"
+
+  defp timeline_type(%{type: type}), do: type
+  defp timeline_type(_), do: :note
+
+  defp timeline_type_label(:call), do: "Call"
+  defp timeline_type_label(:email), do: "Email"
+  defp timeline_type_label(:meeting), do: "Meeting"
+  defp timeline_type_label(:note), do: "Note"
+  defp timeline_type_label(:task), do: "Task"
+  defp timeline_type_label(other), do: to_string(other || "note")
+
+  # Inline SVG glyphs matching the kit's stroke style (1.8 stroke, currentColor).
+  defp timeline_glyph(:call) do
+    Phoenix.HTML.raw(
+      ~s(<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.1-8.7A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/></svg>)
+    )
+  end
+
+  defp timeline_glyph(:email) do
+    Phoenix.HTML.raw(
+      ~s(<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>)
+    )
+  end
+
+  defp timeline_glyph(:meeting) do
+    Phoenix.HTML.raw(
+      ~s(<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>)
+    )
+  end
+
+  defp timeline_glyph(:note) do
+    Phoenix.HTML.raw(
+      ~s(<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 3h11l5 5v13H4z"/><path d="M9 12h7M9 16h5M9 8h3"/></svg>)
+    )
+  end
+
+  defp timeline_glyph(:task) do
+    Phoenix.HTML.raw(
+      ~s(<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6 9 17l-5-5"/></svg>)
+    )
+  end
+
+  defp timeline_glyph(_), do: timeline_glyph(:note)
+
+  defp timeline_status_variant(:completed), do: "ok"
+  defp timeline_status_variant(:pending), do: "warn"
+  defp timeline_status_variant(:cancelled), do: "mut"
+  defp timeline_status_variant(_), do: "mut"
+
+  defp timeline_status_label(:completed), do: "completed"
+  defp timeline_status_label(:pending), do: "pending"
+  defp timeline_status_label(:cancelled), do: "cancelled"
+  defp timeline_status_label(nil), do: "logged"
+  defp timeline_status_label(other), do: to_string(other)
+
+  defp timeline_present?(%Samen.Masked{}), do: true
+  defp timeline_present?(v) when is_binary(v), do: String.trim(v) != ""
+  defp timeline_present?(_), do: false
+
+  defp timeline_dt(%DateTime{} = dt),
+    do: "#{dt.year}-#{tl_pad(dt.month)}-#{tl_pad(dt.day)} #{tl_pad(dt.hour)}:#{tl_pad(dt.minute)} UTC"
+
+  defp timeline_dt(_), do: "—"
+
+  defp tl_pad(n), do: String.pad_leading(to_string(n), 2, "0")
+
+  # ---------------------------------------------------------------------------
+  # Lifecycle-stage pill (ADR-011 §8) — Tier-1 custom-field convention
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  A prospecting lifecycle-stage pill (ADR-011 §8). `stage` is the Tier-1
+  `person.custom["lifecycle_stage"]` value (a string in the bounded set
+  `lead → mql → sql → customer → churned`). A nil/unknown stage renders nothing —
+  a contact without a stage shows no pill. Purely presentational; the bounded set is
+  a framework convention a vertical can style via CSS.
+  """
+  attr :stage, :any, default: nil
+
+  def lifecycle_pill(assigns) do
+    ~H"""
+    <.pill :if={lifecycle_known?(@stage)} variant={lifecycle_variant(@stage)}>{lifecycle_label(@stage)}</.pill>
+    """
+  end
+
+  @doc "The bounded framework lifecycle stages (ADR-011 §8)."
+  def lifecycle_stages, do: ~w(lead mql sql customer churned)
+
+  defp lifecycle_known?(stage) when is_binary(stage), do: stage in lifecycle_stages()
+  defp lifecycle_known?(_), do: false
+
+  defp lifecycle_variant("lead"), do: "info"
+  defp lifecycle_variant("mql"), do: "info"
+  defp lifecycle_variant("sql"), do: "warn"
+  defp lifecycle_variant("customer"), do: "ok"
+  defp lifecycle_variant("churned"), do: "bad"
+  defp lifecycle_variant(_), do: "mut"
+
+  defp lifecycle_label("lead"), do: "Lead"
+  defp lifecycle_label("mql"), do: "MQL"
+  defp lifecycle_label("sql"), do: "SQL"
+  defp lifecycle_label("customer"), do: "Customer"
+  defp lifecycle_label("churned"), do: "Churned"
+  defp lifecycle_label(other), do: to_string(other)
+
+  # ---------------------------------------------------------------------------
+  # Social links (ADR-011 §9) — Tier-1 custom-field convention, non-PII
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Social handles as icon-links (ADR-011 §9). `custom` is the person's Tier-1 bag;
+  the recognized flat keys are `social_linkedin`, `social_twitter`, `social_github`
+  (each a URL/handle STRING — the kernel custom bag has no `:map` type, so social
+  handles are flat string fields, not a nested map). Unknown/blank keys render
+  nothing. Non-PII business-directory data (a public profile URL) — rendered on both
+  planes. Purely presentational; reads the bag it is handed, writes nothing.
+  """
+  attr :custom, :any, default: nil
+
+  def social_links(assigns) do
+    assigns = assign(assigns, :links, social_entries(assigns.custom))
+
+    ~H"""
+    <span :if={@links != []} class="social-links" style="display:inline-flex;align-items:center;gap:8px">
+      <a
+        :for={{network, url} <- @links}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        class={"social-#{network}"}
+        title={social_label(network)}
+        style="display:inline-flex;color:var(--muted)"
+      >
+        {social_glyph(network)}
+      </a>
+    </span>
+    """
+  end
+
+  @doc "The recognized social networks (bag key `social_<network>`)."
+  def social_networks, do: ~w(linkedin twitter github)
+
+  defp social_entries(custom) when is_map(custom) do
+    for network <- social_networks(),
+        url = social_url(Map.get(custom, "social_#{network}")),
+        url != nil,
+        do: {network, url}
+  end
+
+  defp social_entries(_), do: []
+
+  defp social_url(v) when is_binary(v) do
+    case String.trim(v) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp social_url(_), do: nil
+
+  defp social_label("linkedin"), do: "LinkedIn"
+  defp social_label("twitter"), do: "Twitter / X"
+  defp social_label("github"), do: "GitHub"
+  defp social_label(other), do: other
+
+  defp social_glyph("linkedin") do
+    Phoenix.HTML.raw(
+      ~s(<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 11v5M8 8v.01M12 16v-3a2 2 0 0 1 4 0v3M12 16v-5"/></svg>)
+    )
+  end
+
+  defp social_glyph("twitter") do
+    Phoenix.HTML.raw(
+      ~s(<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4l16 16M20 4 4 20"/></svg>)
+    )
+  end
+
+  defp social_glyph("github") do
+    Phoenix.HTML.raw(
+      ~s(<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.9a3.4 3.4 0 0 0-1-2.6c3-.3 6-1.5 6-6.6a5.1 5.1 0 0 0-1.4-3.5 4.8 4.8 0 0 0-.1-3.5s-1.1-.3-3.5 1.3a12 12 0 0 0-6 0C6.6 1.6 5.5 1.9 5.5 1.9a4.8 4.8 0 0 0-.1 3.5A5.1 5.1 0 0 0 4 8.9c0 5.1 3 6.3 6 6.6a3.4 3.4 0 0 0-1 2.6V22"/></svg>)
+    )
+  end
+
+  defp social_glyph(_), do: Phoenix.HTML.raw("")
 end

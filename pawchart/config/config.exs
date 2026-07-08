@@ -10,6 +10,7 @@ config :pawchart,
     PawChart.Crm,
     PawChart.Billing,
     PawChart.Support,
+    PawChart.Marketing,
     PawChart.Clinic,
     PawChart.Aggregate
   ]
@@ -22,6 +23,7 @@ config :samen_core, :ash_domains, [
   PawChart.Crm,
   PawChart.Billing,
   PawChart.Support,
+  PawChart.Marketing,
   PawChart.Clinic,
   PawChart.Aggregate
 ]

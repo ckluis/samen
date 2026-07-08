@@ -172,7 +172,8 @@ defmodule Driftwood.Seeds do
       :ok = define_custom_fields(org_id)
 
       companies = seed_companies(org_id)
-      seed_people(org_id, companies)
+      people = seed_people(org_id, companies)
+      seed_activities(org_id, people)
       seed_opportunities(org_id, companies)
 
       {plans, customers} = seed_billing(org_id)
@@ -182,6 +183,12 @@ defmodule Driftwood.Seeds do
 
       org_id
     end
+    |> tap(fn seeded_org ->
+      # Marketing (ADR-011 §7) is seeded with its OWN marker so it lands even when the
+      # inherited-scope guard above short-circuits an already-seeded org (a re-run after the
+      # Marketing mount shipped). Idempotent.
+      seed_marketing(seeded_org)
+    end)
   end
 
   @doc """
@@ -254,11 +261,18 @@ defmodule Driftwood.Seeds do
   # Company bag; `lane` rides the Opportunity bag. All non-PII. Idempotent
   # (define_field is on_conflict: :replace).
   defp define_custom_fields(org_id) do
+    # ADR-011 §8/§9: lifecycle_stage + social handles are Tier-1 custom-field conventions on
+    # the Person bag (`fpr_person`). Social handles are FLAT string keys (`social_<network>`)
+    # because the kernel custom bag has no `:map` type — each is a URL/handle string, non-PII
+    # (a public profile URL). lifecycle_stage is a bounded string set enforced at the UI layer.
     for {table, field} <- [
           {"fcm_company", "company_role"},
           {"fcm_company", "plan_tier"},
           {"fcm_company", "mrr_cents"},
-          {"fop_opportunity", "lane"}
+          {"fop_opportunity", "lane"},
+          {"fpr_person", "lifecycle_stage"},
+          {"fpr_person", "social_linkedin"},
+          {"fpr_person", "social_twitter"}
         ] do
       {:ok, _} =
         Samen.CustomFields.define_field(
@@ -285,9 +299,15 @@ defmodule Driftwood.Seeds do
     end
   end
 
+  # Lifecycle stages round-robined across the seeded people (ADR-011 §8 bounded set).
+  @lifecycle_cycle ~w(lead mql sql customer lead sql customer mql lead sql customer mql)
+
   defp seed_people(org_id, companies) do
-    for {company_name, first, last, title, email, phone} <- @people do
+    @people
+    |> Enum.with_index()
+    |> Enum.map(fn {{company_name, first, last, title, email, phone}, idx} ->
       company = Map.fetch!(companies, company_name)
+      handle = "#{String.downcase(first)}-#{String.downcase(last)}"
 
       Driftwood.Crm.Person
       |> Ash.Changeset.for_create(
@@ -299,12 +319,60 @@ defmodule Driftwood.Seeds do
           job_title: title,
           full_name: %Samen.Type.FullName{first: first, last: last},
           emails: [%{label: "work", address: email}],
-          phones: [%{label: "mobile", number: phone}]
+          phones: [%{label: "mobile", number: phone}],
+          # ADR-011 §8/§9 Tier-1 conventions: lifecycle stage + social handles (flat
+          # string keys; non-PII business-directory URLs — no whitespace, so they pass
+          # the custom-bag containment guard).
+          custom: %{
+            "lifecycle_stage" => Enum.at(@lifecycle_cycle, idx, "lead"),
+            "social_linkedin" => "https://linkedin.com/in/#{handle}",
+            "social_twitter" => "https://x.com/#{handle}"
+          }
         },
         authorize?: false
       )
       |> Ash.create!()
-    end
+    end)
+  end
+
+  # ADR-011 §6/§10.2: seed a handful of freight-flavored CheckCall activities per contact
+  # (Driftwood re-identifies Activity as CheckCall) so the timeline renders real data.
+  # A mix of note/call/email/meeting/task, all completed. Non-PII rows.
+  @activity_templates [
+    {:call, "Check call — ETA confirmed", "Driver on schedule; delivering within the appointment window."},
+    {:email, "Rate confirmation sent", "Sent the rate con for the next lane; awaiting signed copy."},
+    {:note, "Left voicemail", "No answer at the dock; left a callback number."},
+    {:meeting, "Quarterly business review", "Reviewed lane volume and on-time percentage for the quarter."},
+    {:task, "Follow up on detention", "Chase the detention paperwork before month-end billing."}
+  ]
+
+  defp seed_activities(org_id, people) do
+    people
+    |> Enum.with_index()
+    |> Enum.each(fn {person, p_idx} ->
+      # 3 activities per person, rotating through the templates for variety.
+      for offset <- 0..2 do
+        {type, subject, body} = Enum.at(@activity_templates, rem(p_idx + offset, length(@activity_templates)))
+
+        Driftwood.Crm.Activity
+        |> Ash.Changeset.for_create(
+          :create,
+          %{
+            org_id: org_id,
+            person_id: person.id,
+            company_id: person.company_id,
+            type: type,
+            subject: subject,
+            body: body,
+            status: :completed,
+            completed_at: DateTime.add(DateTime.utc_now(), -offset * 86_400, :second) |> DateTime.truncate(:second)
+          },
+          actor: %{org_id: org_id, role: :member},
+          authorize?: false
+        )
+        |> Ash.create!()
+      end
+    end)
   end
 
   defp seed_opportunities(org_id, companies) do
@@ -666,6 +734,138 @@ defmodule Driftwood.Seeds do
         |> Ash.create!()
       end
     end)
+
+    :ok
+  end
+
+  # -- Marketing (ADR-011 §7) --------------------------------------------------
+  #
+  # Seed a carrier-outreach campaign + template + segments + subscribers built from the seeded
+  # contacts' emails (vaulted on the subscriber row) + at least ONE suppression row, so the
+  # Marketing pages populate AND the "send refuses a suppressed subscriber" red path is
+  # provable in the dogfood. Subscriber email is 🔒 vault PII (clear on tenant / •••• on
+  # operator). `people` are the seeded CRM Person structs; the plaintext emails come from the
+  # `@people` catalog (the org owns its contacts' PII on the tenant plane).
+  defp seed_marketing(org_id) do
+    if marketing_seeded?(org_id) do
+      :ok
+    else
+      do_seed_marketing(org_id)
+    end
+  end
+
+  defp marketing_seeded?(org_id) do
+    actor = %{org_id: org_id, role: :admin, plane: :tenant, kind: :tenant}
+
+    Driftwood.Marketing.Campaign
+    |> Ash.Query.for_read(:read, %{}, actor: actor, authorize?: false)
+    |> Ash.Query.filter(org_id == ^org_id)
+    |> Ash.exists?(actor: actor, authorize?: false)
+  rescue
+    _ -> false
+  end
+
+  defp do_seed_marketing(org_id) do
+    admin = %{org_id: org_id, role: :admin, plane: :tenant, kind: :tenant}
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    _template =
+      Driftwood.Marketing.Template
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          name: "Carrier onboarding",
+          subject_line: "Partner with Blue Ridge Logistics on your next lane",
+          body_html: "<p>We have consistent freight on your lanes — let's talk rates.</p>",
+          from_name: "Blue Ridge Logistics",
+          from_address: "carriers@blueridgelogistics.example",
+          enabled: true
+        },
+        actor: admin,
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    # Subscribers from the seeded contacts' emails. The FIRST is deliverable (active); the LAST
+    # gets a suppression row (opted out) so the red path is demonstrable.
+    subscriber_emails =
+      @people
+      |> Enum.map(fn {_company, _first, _last, _title, email, _phone} -> email end)
+      |> Enum.take(6)
+
+    subscribers =
+      Enum.with_index(subscriber_emails)
+      |> Enum.map(fn {email, idx} ->
+        Driftwood.Marketing.Subscriber
+        |> Ash.Changeset.for_create(
+          :create,
+          %{
+            org_id: org_id,
+            email: email,
+            status: :active,
+            consent_at: now,
+            source: "crm"
+          },
+          authorize?: false
+        )
+        |> Ash.create!()
+        |> then(fn s -> {idx, s} end)
+      end)
+      |> Map.new()
+
+    active_count = map_size(subscribers)
+
+    # The SUPPRESSION row — the last seeded subscriber opted out. A send to it MUST refuse.
+    suppressed = Map.fetch!(subscribers, active_count - 1)
+
+    _suppression =
+      Driftwood.Marketing.Suppression
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          subscriber_id: suppressed.id,
+          reason: :unsubscribed,
+          active: true,
+          suppressed_at: now,
+          notes: "Opted out via the unsubscribe link"
+        },
+        actor: admin,
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    _segment =
+      Driftwood.Marketing.Segment
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          name: "Active carriers",
+          description: "Carriers who have opted in to lane offers",
+          filter_criteria: %{"status" => "active"},
+          subscriber_count: active_count
+        },
+        actor: admin,
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    _campaign =
+      Driftwood.Marketing.Campaign
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          name: "Q3 lane-offer outreach",
+          description: "Outreach to active carriers about consistent Q3 freight",
+          status: :draft
+        },
+        actor: admin,
+        authorize?: false
+      )
+      |> Ash.create!()
 
     :ok
   end

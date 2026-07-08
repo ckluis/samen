@@ -72,6 +72,14 @@ defmodule DriftwoodWeb.Router do
     samen_module_routes(:crm, Driftwood.Crm, repo: Driftwood.Repo)
     samen_module_routes(:billing, Driftwood.Billing, repo: Driftwood.Repo)
     samen_module_routes(:support, Driftwood.Support, repo: Driftwood.Repo)
+
+    # ADR-011 §7 — the Marketing / outreach surface (campaigns · segments · leads), mounted
+    # over Driftwood's materialized Marketing scope resources. The `:crm_namespace` label lets
+    # the Leads lens read CRM contacts by lifecycle_stage through the same PiiResolution seam.
+    samen_module_routes(:marketing, Driftwood.Marketing,
+      repo: Driftwood.Repo,
+      labels: %{crm_namespace: Driftwood.Crm}
+    )
   end
 
   # ADR-009 §5.3(2) — the framework OPERATOR aggregate plane, mounted over Driftwood's

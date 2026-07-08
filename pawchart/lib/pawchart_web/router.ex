@@ -81,5 +81,19 @@ defmodule PawChartWeb.Router do
         crumb_root: "PawChart"
       }
     )
+
+    # 4. Marketing — clinic outreach (wellness reminders, referral thank-yous). The SECOND
+    #    vertical's proof of the framework outreach/consent surface: mounts the samen_core
+    #    Marketing scope with ZERO PawChart LiveView code. The `:crm_namespace` label wires
+    #    the Leads lens over `PawChart.Crm.Person` (same posture as Driftwood).
+    samen_module_routes(:marketing, PawChart.Marketing,
+      repo: PawChart.Repo,
+      labels: %{
+        title: "Happy Paws Clinic",
+        glyph: "V",
+        crumb_root: "PawChart",
+        crm_namespace: PawChart.Crm
+      }
+    )
   end
 end

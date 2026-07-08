@@ -39,7 +39,7 @@ defmodule Samen.Web.Mount do
   ]
 
   @type t :: %__MODULE__{
-          scope_kind: :crm | :billing | :support | :aggregate | :operator,
+          scope_kind: :crm | :billing | :support | :marketing | :aggregate | :operator,
           namespace: module(),
           repo: module(),
           domain: module(),
@@ -109,6 +109,7 @@ defmodule Samen.Web.Mount do
   defp scope_kind("crm"), do: :crm
   defp scope_kind("billing"), do: :billing
   defp scope_kind("support"), do: :support
+  defp scope_kind("marketing"), do: :marketing
   defp scope_kind("aggregate"), do: :aggregate
   defp scope_kind("operator"), do: :operator
   defp scope_kind(k) when is_atom(k), do: k
@@ -129,7 +130,46 @@ defmodule Samen.Web.Mount do
   defp atomize_labels(labels) when is_map(labels),
     do: Map.new(labels, fn {k, v} -> {safe_label_key(k), v} end)
 
-  # Label keys are a bounded, framework-owned set — safe to atomize via existing atoms.
+  # The BOUNDED, framework-owned set of mount label keys. Materialized as compile-time
+  # atom literals HERE so they ALWAYS exist in the atom table in ANY deserializing
+  # process — independent of which LiveView happens to have loaded first.
+  #
+  # WHY THIS EXISTS (the cold-start bug): `from_session/1` runs in a fresh host LiveView
+  # `mount/3` process. `String.to_existing_atom("crm_namespace")` on a deserialized label
+  # key raised on a COLD BEAM, because `:crm_namespace` was only minted as a literal inside
+  # `LeadsLive` — so `/marketing/campaigns` 500'd until someone hit `/marketing/leads`
+  # first (load-order dependence). Referencing every framework label key as a literal in
+  # this always-loaded module removes the order dependence: the atoms are guaranteed
+  # resident before any `from_session` runs.
+  #
+  # This is a whitelist, NOT a `to_string`/mint: an unknown key (never a framework label,
+  # so cookie-injected garbage) still falls through to `String.to_existing_atom/1`, which
+  # rejects a never-compiled string rather than minting an atom from session input.
+  @label_keys ~w(
+    crm_namespace crm_path crm_logo_style
+    billing_logo_style support_path support_logo_style
+    marketing_path
+    crumb_root title glyph
+    operator_org_id operator_title operator_workspace operator_glyph
+    operator_initials operator_logo_style operator_role operator_user
+    aggregate_loader otp_app status
+    user_name user_role user_initials
+  )a
+
+  @label_key_strings Map.new(@label_keys, fn k -> {Atom.to_string(k), k} end)
+
+  @doc false
+  def label_keys, do: @label_keys
+
+  # Label keys are a bounded, framework-owned set — resolve via the whitelist so the atoms
+  # always exist regardless of load order; fall back to `to_existing_atom` for anything
+  # outside the set (rejects unknown cookie input rather than minting).
   defp safe_label_key(k) when is_atom(k), do: k
-  defp safe_label_key(k) when is_binary(k), do: String.to_existing_atom(k)
+
+  defp safe_label_key(k) when is_binary(k) do
+    case @label_key_strings do
+      %{^k => atom} -> atom
+      _ -> String.to_existing_atom(k)
+    end
+  end
 end

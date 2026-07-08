@@ -39,7 +39,7 @@ defmodule Samen.Web.Router do
     * `:session_name` — override the `live_session` name (default derived from kind+path).
   """
 
-  @doc "Mount a samen_web module (`:crm | :billing | :support`) under the host router scope."
+  @doc "Mount a samen_web module (`:crm | :billing | :support | :marketing`) under the host router scope."
   defmacro samen_module_routes(kind, namespace, opts \\ []) do
     kind = Macro.expand(kind, __CALLER__)
     path = Keyword.get(opts, :path, default_path(kind))
@@ -173,7 +173,9 @@ defmodule Samen.Web.Router do
   def __routes__(:crm, path) do
     [
       {"#{path}/companies", Samen.Web.CRM.CompaniesLive},
+      {"#{path}/companies/:id", Samen.Web.CRM.CompanyLive},
       {"#{path}/contacts", Samen.Web.CRM.ContactsLive},
+      {"#{path}/contacts/:id", Samen.Web.CRM.ContactLive},
       {"#{path}/pipeline", Samen.Web.CRM.PipelineLive}
     ]
   end
@@ -193,9 +195,22 @@ defmodule Samen.Web.Router do
     ]
   end
 
+  # ADR-011 §7 — the Marketing / outreach route table. Mounts the previously-unmounted
+  # Marketing scope's surfaces: a campaigns/sequences list, a compose+send campaign page,
+  # a segments/prospecting view, and a leads lens.
+  def __routes__(:marketing, path) do
+    [
+      {"#{path}/campaigns", Samen.Web.Marketing.CampaignsLive},
+      {"#{path}/campaigns/:id", Samen.Web.Marketing.CampaignLive},
+      {"#{path}/segments", Samen.Web.Marketing.SegmentsLive},
+      {"#{path}/leads", Samen.Web.Marketing.LeadsLive}
+    ]
+  end
+
   defp default_path(:crm), do: "/crm"
   defp default_path(:billing), do: "/billing"
   defp default_path(:support), do: "/support"
+  defp default_path(:marketing), do: "/marketing"
 
   defp session_name(kind, path) do
     :"samen_#{kind}_#{path |> String.replace(~r/[^a-zA-Z0-9]/, "_") |> String.trim("_")}"

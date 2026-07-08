@@ -10,6 +10,7 @@ config :driftwood,
     Driftwood.Crm,
     Driftwood.Billing,
     Driftwood.Support,
+    Driftwood.Marketing,
     Driftwood.Freight,
     Driftwood.Aggregate,
     Driftwood.Operator
@@ -23,6 +24,7 @@ config :samen_core, :ash_domains, [
   Driftwood.Crm,
   Driftwood.Billing,
   Driftwood.Support,
+  Driftwood.Marketing,
   Driftwood.Freight,
   Driftwood.Aggregate,
   Driftwood.Operator

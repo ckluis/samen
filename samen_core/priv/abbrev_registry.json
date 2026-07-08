@@ -1,5 +1,5 @@
 {
-  "$comment": "PERMANENT abbrev registry. Abbrevs are 3-letter lowercase, collision-checked, and NEVER recycled or changed once assigned to a resource — like a stock ticker. Adding a row is allowed; changing or removing a resource's abbrev, or reusing an abbrev for a second resource, fails compile (Samen.Verifiers.AbbrevRegistry). Keys are abbrevs; values are the fully-qualified resource module names that own them.",
+  "$comment": "PERMANENT abbrev registry. Abbrevs are 3-letter lowercase, collision-checked, and NEVER recycled or changed once assigned to a resource \u2014 like a stock ticker. Adding a row is allowed; changing or removing a resource's abbrev, or reusing an abbrev for a second resource, fails compile (Samen.Verifiers.AbbrevRegistry). Keys are abbrevs; values are the fully-qualified resource module names that own them.",
   "abbrevs": {
     "pff": "Demo.PrimitivesScope.FeatureFlag",
     "pag": "PawChart.Aggregate.PatientVolumeBySpecies",
@@ -191,6 +191,27 @@
     "dqg": "Driftwood.Operator.Agent",
     "dqm": "Driftwood.Operator.Message",
     "dqn": "Driftwood.Operator.Macro",
-    "dqs": "Driftwood.Operator.Csat"
+    "dqs": "Driftwood.Operator.Csat",
+    "fmc": "Driftwood.Marketing.Campaign",
+    "fmg": "Driftwood.Marketing.Segment",
+    "fms": "Driftwood.Marketing.Subscriber",
+    "fmt": "Driftwood.Marketing.Template",
+    "fmn": "Driftwood.Marketing.Send",
+    "fme": "Driftwood.Marketing.EmailEvent",
+    "fmp": "Driftwood.Marketing.Suppression",
+    "wmc": "Samen.WebTest.Marketing.Campaign",
+    "wmg": "Samen.WebTest.Marketing.Segment",
+    "wms": "Samen.WebTest.Marketing.Subscriber",
+    "wmt": "Samen.WebTest.Marketing.Template",
+    "wmn": "Samen.WebTest.Marketing.Send",
+    "wme": "Samen.WebTest.Marketing.EmailEvent",
+    "wmp": "Samen.WebTest.Marketing.Suppression",
+    "vmc": "PawChart.Marketing.Campaign",
+    "vmg": "PawChart.Marketing.Segment",
+    "vms": "PawChart.Marketing.Subscriber",
+    "vmt": "PawChart.Marketing.Template",
+    "vmn": "PawChart.Marketing.Send",
+    "vme": "PawChart.Marketing.EmailEvent",
+    "vmp": "PawChart.Marketing.Suppression"
   }
 }

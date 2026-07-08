@@ -132,12 +132,12 @@ defmodule Samen.Web.CRM.CompaniesLive do
                 </:head>
                 <tr :for={c <- @companies} class="company-row" id={"company-#{c.id}"}>
                   <td class="c-name">
-                    <div style="display:flex;align-items:center;gap:8px">
+                    <a href={company_path(@samen_mount, @org_id, c.id)} style="display:flex;align-items:center;gap:8px;text-decoration:none">
                       <div class="av" style="width:28px;height:28px;border-radius:6px;background:#E3EDF7;color:#3B4CCA;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">
                         {company_initials(c.name)}
                       </div>
-                      <span style="font-weight:500;color:#3a3b45">{c.name}</span>
-                    </div>
+                      <span style="font-weight:500;color:#3B4CCA">{c.name}</span>
+                    </a>
                   </td>
                   <td class="c-role">
                     <.pill variant={role_variant(company_role(c))}>{company_role(c)}</.pill>
@@ -160,6 +160,9 @@ defmodule Samen.Web.CRM.CompaniesLive do
   defp crumbs(mount, leaf) do
     [Mount.label(mount, :crumb_root, "Workspace"), "CRM", leaf]
   end
+
+  defp company_path(mount, org_id, id),
+    do: "#{Mount.label(mount, :crm_path, "/crm")}/companies/#{id}?org=#{org_id}"
 
   defp company_initials(nil), do: "?"
 

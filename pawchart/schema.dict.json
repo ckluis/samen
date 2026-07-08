@@ -1293,6 +1293,468 @@
     {
       "fields": [
         {
+          "column_name": "vmc_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vmc_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmc_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmc_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vmc_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmc_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmc_scheduled_at",
+          "logical_name": "scheduled_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vmc_sent_at",
+          "logical_name": "sent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vmc_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vmc_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Marketing.Campaign",
+      "table_name": "vmc_campaign"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vme_event_type",
+          "logical_name": "event_type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vme_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vme_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vme_metadata",
+          "logical_name": "metadata",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vme_occurred_at",
+          "logical_name": "occurred_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vme_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vme_send_id",
+          "logical_name": "send_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vme_subscriber_id",
+          "logical_name": "subscriber_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vme_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Marketing.EmailEvent",
+      "table_name": "vme_email_event"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vmg_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vmg_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmg_filter_criteria",
+          "logical_name": "filter_criteria",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vmg_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmg_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vmg_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmg_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmg_subscriber_count",
+          "logical_name": "subscriber_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "vmg_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Marketing.Segment",
+      "table_name": "vmg_segment"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vmn_campaign_id",
+          "logical_name": "campaign_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmn_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vmn_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmn_idempotency_key",
+          "logical_name": "idempotency_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmn_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vmn_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmn_queued_at",
+          "logical_name": "queued_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vmn_sent_at",
+          "logical_name": "sent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vmn_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vmn_subscriber_id",
+          "logical_name": "subscriber_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmn_template_id",
+          "logical_name": "template_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmn_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Marketing.Send",
+      "table_name": "vmn_send"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vmp_active",
+          "logical_name": "active",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "vmp_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmp_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vmp_notes",
+          "logical_name": "notes",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmp_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmp_reason",
+          "logical_name": "reason",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vmp_subscriber_id",
+          "logical_name": "subscriber_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmp_suppressed_at",
+          "logical_name": "suppressed_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vmp_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Marketing.Suppression",
+      "table_name": "vmp_suppression"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pii_vms_email",
+          "logical_name": "email",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "vms_consent_at",
+          "logical_name": "consent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vms_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vms_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vms_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vms_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vms_source",
+          "logical_name": "source",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vms_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vms_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Marketing.Subscriber",
+      "table_name": "vms_subscriber"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vmt_body_html",
+          "logical_name": "body_html",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmt_body_text",
+          "logical_name": "body_text",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmt_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vmt_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "vmt_from_address",
+          "logical_name": "from_address",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmt_from_name",
+          "logical_name": "from_name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmt_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmt_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vmt_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmt_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmt_subject_line",
+          "logical_name": "subject_line",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmt_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Marketing.Template",
+      "table_name": "vmt_template"
+    },
+    {
+      "fields": [
+        {
           "column_name": "vsa_breached",
           "logical_name": "breached",
           "pii": false,

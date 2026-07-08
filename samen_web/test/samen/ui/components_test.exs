@@ -110,4 +110,85 @@ defmodule Samen.UI.ComponentsTest do
     assert mb =~ ~s(class="mask-bar")
     assert mb =~ "TTL 10:00"
   end
+
+  # ==========================================================================
+  # ADR-011 §6.2 — the activity timeline component (pure, host-agnostic)
+  # ==========================================================================
+
+  test "timeline/1 renders typed entries with subject, body, status, and the who/when line" do
+    entries = [
+      %{
+        id: "a1",
+        type: :call,
+        subject: "Check call — ETA confirmed",
+        body: "Driver on schedule, delivering 14:00.",
+        status: :completed,
+        at: ~U[2026-07-08 13:00:00Z],
+        who: "dispatch"
+      },
+      %{id: "a2", type: :note, subject: "Left voicemail", body: nil, status: :pending, at: nil, who: nil}
+    ]
+
+    html = render_component(&Samen.UI.timeline/1, %{entries: entries, composer: []})
+
+    assert html =~ ~s(class="tl-rail")
+    assert html =~ "Check call — ETA confirmed"
+    assert html =~ "Driver on schedule"
+    assert html =~ "Left voicemail"
+    # Type label + status pill.
+    assert html =~ "Call"
+    assert html =~ ~s(class="pill ok")
+    # who/when line.
+    assert html =~ "dispatch"
+    assert html =~ "2026-07-08 13:00 UTC"
+    # Per-entry id from the entry.
+    assert html =~ "tl-entry-a1"
+  end
+
+  test "timeline/1 renders the empty state when there are no entries" do
+    html = render_component(&Samen.UI.timeline/1, %{entries: [], empty: "Nothing here.", composer: []})
+
+    assert html =~ ~s(class="tl-empty")
+    assert html =~ "Nothing here."
+    refute html =~ ~s(class="tl-rail")
+  end
+
+  test "timeline/1 slots a composer above the rail without knowing about writes" do
+    html =
+      render_component(&Samen.UI.timeline/1, %{
+        entries: [],
+        composer: [%{inner_block: fn _, _ -> Phoenix.HTML.raw(~s(<form id="the-composer"></form>)) end}]
+      })
+
+    assert html =~ ~s(class="tl-composer")
+    assert html =~ ~s(id="the-composer")
+  end
+
+  test "timeline/1 renders a %Masked{} entry field verbatim (•••• — no unmasking)" do
+    masked = %Samen.Masked{token: "vt_ignored", label: :pii_name}
+    entries = [%{id: "m1", type: :note, subject: masked, body: nil, status: :completed, at: nil, who: nil}]
+    html = render_component(&Samen.UI.timeline/1, %{entries: entries, composer: []})
+
+    assert html =~ "••••"
+  end
+
+  test "lifecycle_pill/1 renders a known stage and nothing for an unknown/nil stage" do
+    assert render_component(&Samen.UI.lifecycle_pill/1, %{stage: "lead"}) =~ "Lead"
+    assert render_component(&Samen.UI.lifecycle_pill/1, %{stage: "customer"}) =~ ~s(class="pill ok")
+    # Unknown/nil renders no pill.
+    refute render_component(&Samen.UI.lifecycle_pill/1, %{stage: "bogus"}) =~ ~s(class="pill)
+    refute render_component(&Samen.UI.lifecycle_pill/1, %{stage: nil}) =~ ~s(class="pill)
+  end
+
+  test "social_links/1 renders icon-links for known flat bag keys and nothing when absent" do
+    custom = %{"social_linkedin" => "https://linkedin.com/in/sofia", "social_github" => "https://github.com/sofia"}
+    html = render_component(&Samen.UI.social_links/1, %{custom: custom})
+
+    assert html =~ "https://linkedin.com/in/sofia"
+    assert html =~ "https://github.com/sofia"
+    assert html =~ ~s(class="social-linkedin")
+
+    # No bag → no links element.
+    refute render_component(&Samen.UI.social_links/1, %{custom: nil}) =~ ~s(class="social-links")
+  end
 end

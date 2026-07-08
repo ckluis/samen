@@ -19,6 +19,7 @@ defmodule Samen.Web.RouterTest do
       samen_module_routes(:crm, Some.Host.Crm, repo: Some.Host.Repo)
       samen_module_routes(:billing, Some.Host.Billing, repo: Some.Host.Repo)
       samen_module_routes(:support, Some.Host.Support, repo: Some.Host.Repo)
+      samen_module_routes(:marketing, Some.Host.Marketing, repo: Some.Host.Repo)
     end
   end
 
@@ -26,7 +27,9 @@ defmodule Samen.Web.RouterTest do
     routes = Samen.Web.Router.__routes__(:crm, "/crm")
 
     assert {"/crm/companies", Samen.Web.CRM.CompaniesLive} in routes
+    assert {"/crm/companies/:id", Samen.Web.CRM.CompanyLive} in routes
     assert {"/crm/contacts", Samen.Web.CRM.ContactsLive} in routes
+    assert {"/crm/contacts/:id", Samen.Web.CRM.ContactLive} in routes
     assert {"/crm/pipeline", Samen.Web.CRM.PipelineLive} in routes
   end
 
@@ -39,6 +42,14 @@ defmodule Samen.Web.RouterTest do
     support = Samen.Web.Router.__routes__(:support, "/support")
     assert {"/support", Samen.Web.Support.TicketsLive} in support
     assert {"/support/tickets/:id", Samen.Web.Support.TicketLive} in support
+  end
+
+  test "the Marketing route table maps the campaigns/segments/leads pages (ADR-011 §7)" do
+    marketing = Samen.Web.Router.__routes__(:marketing, "/marketing")
+    assert {"/marketing/campaigns", Samen.Web.Marketing.CampaignsLive} in marketing
+    assert {"/marketing/campaigns/:id", Samen.Web.Marketing.CampaignLive} in marketing
+    assert {"/marketing/segments", Samen.Web.Marketing.SegmentsLive} in marketing
+    assert {"/marketing/leads", Samen.Web.Marketing.LeadsLive} in marketing
   end
 
   test "__plane__/1 defaults to tenant and honors :operator" do
@@ -54,8 +65,14 @@ defmodule Samen.Web.RouterTest do
     paths = HostRouter.__routes__() |> Enum.map(& &1.path)
 
     assert "/crm/companies" in paths
+    assert "/crm/companies/:id" in paths
     assert "/crm/contacts" in paths
+    assert "/crm/contacts/:id" in paths
     assert "/billing" in paths
     assert "/support/tickets/:id" in paths
+    assert "/marketing/campaigns" in paths
+    assert "/marketing/campaigns/:id" in paths
+    assert "/marketing/segments" in paths
+    assert "/marketing/leads" in paths
   end
 end
