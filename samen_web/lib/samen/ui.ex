@@ -401,6 +401,83 @@ defmodule Samen.UI do
   end
 
   # ---------------------------------------------------------------------------
+  # Object-unfurl card (ADR-012 §4.4 — the crown jewel's renderer)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  The **object-unfurl card** — renders a `%Samen.Web.ObjectRef.Card{}` produced by
+  `Samen.Web.ObjectRef.resolve/3` (ADR-012 §4). Given a resolved card (or a resolver
+  `{:error, reason}`), it renders a compact live preview of a catalogued object.
+
+  ## Masking BY CONSTRUCTION (the crown-jewel invariant)
+
+  Every value on the card is the resolver's ALREADY-RESOLVED field — a plaintext string on the
+  tenant plane, a `%Masked{}` on the operator plane. This component renders each value
+  verbatim via `{...}`, so a `%Masked{}` renders `••••` through `Phoenix.HTML.Safe` (the
+  `Samen.Masked` impl). It has NO unmasking branch, never reveals through the kernel vault, and
+  never pulls a mask apart to read its inner value. The SAME card, resolved for two viewers,
+  therefore renders CLEAR for the owning tenant and `••••` for the operator with zero
+  per-viewer code here.
+
+  ## Error / not-available state (no leak)
+
+  Passed `{:error, :not_found}` / `:unknown_key` / `:forbidden`, it renders an INERT
+  "not available" chip — the same rendering for a nonexistent id and a cross-org id (no
+  existence oracle, no PII). A resolver failure NEVER downgrades to plaintext.
+  """
+  attr :card, :any, required: true, doc: "a %Samen.Web.ObjectRef.Card{} or {:error, reason}"
+
+  def object_card(%{card: {:error, reason}} = assigns) do
+    assigns = assign(assigns, :reason, reason)
+
+    ~H"""
+    <span class="obj-card obj-card-na" data-obj-error={to_string(@reason)}>
+      <span class="obj-na-icon">∅</span>
+      <span class="obj-na-text">Object not available</span>
+    </span>
+    """
+  end
+
+  def object_card(%{card: %Samen.Web.ObjectRef.Card{}} = assigns) do
+    ~H"""
+    <span class="obj-card" data-obj-key={@card.key} data-obj-id={@card.id}>
+      <span class="obj-card-avatar">{@card.icon || "•"}</span>
+      <span class="obj-card-body">
+        <span class="obj-card-kicker">{@card.subtitle || @card.key}</span>
+        <span class="obj-card-title">
+          <%= if @card.href do %>
+            <a href={@card.href} class="obj-card-link">{@card.title}</a>
+          <% else %>
+            {@card.title}
+          <% end %>
+        </span>
+        <span :if={@card.badges != []} class="obj-card-badges">
+          <.pill :for={{variant, label} <- @card.badges} variant={pill_variant(variant)}>{label}</.pill>
+        </span>
+        <span :if={@card.fields != []} class="obj-card-fields">
+          <span :for={{label, value} <- @card.fields} class="obj-card-field">
+            <span class="obj-card-field-label">{label}</span>
+            <span class="obj-card-field-value">{value}</span>
+          </span>
+        </span>
+      </span>
+    </span>
+    """
+  end
+
+  def object_card(assigns) do
+    ~H"""
+    <span class="obj-card obj-card-na"><span class="obj-na-text">Object not available</span></span>
+    """
+  end
+
+  # Card badge variants may arrive as atoms (from DefaultCard) or strings (from override
+  # cards). Normalize to the `.pill` variant vocabulary; anything unknown → "mut".
+  defp pill_variant(v) when v in ["ok", "warn", "bad", "info", "mut"], do: v
+  defp pill_variant(v) when is_atom(v), do: pill_variant(Atom.to_string(v))
+  defp pill_variant(_), do: "mut"
+
+  # ---------------------------------------------------------------------------
   # Progress bar
   # ---------------------------------------------------------------------------
 

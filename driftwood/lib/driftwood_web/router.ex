@@ -80,6 +80,41 @@ defmodule DriftwoodWeb.Router do
       repo: Driftwood.Repo,
       labels: %{crm_namespace: Driftwood.Crm}
     )
+
+    # ADR-012 — the FLAGSHIP cross-plane realtime CHAT, TENANT plane (the org's own chat
+    # console — bodies + participant identities in the clear). The `:object_cards` label
+    # registers Driftwood's bespoke `freight.driver` unfurl card (the vertical override seam);
+    # every OTHER catalogued resource (`crm.person`, `support.ticket`, …) unfurls via the
+    # framework default/first-class cards with zero cards written. `:pubsub` names the running
+    # PubSub server for the realtime path.
+    samen_chat_routes(:chat, Driftwood.Chat,
+      repo: Driftwood.Repo,
+      labels: %{
+        title: "Blue Ridge Logistics",
+        crumb_root: "Blue Ridge Logistics",
+        pubsub: Driftwood.PubSub,
+        object_cards: %{"freight.driver" => DriftwoodWeb.Chat.DriverCard}
+      }
+    )
+
+    # ADR-012 §6.3 — the SAME chat LiveViews on the OPERATOR-DESK plane. The SaaS operator
+    # drills into a tenant's cross-plane threads through the impersonation bridge (§2.3),
+    # carrying the tenant org_id (supplied by `?org=<tenant>` for the dogfood). Bodies +
+    # participant identities render `••••` unless the tenant has disclosed (the 3-state model).
+    # A tenant chat and a SaaS-desk chat are the SAME LiveViews on different planes.
+    samen_chat_routes(:chat, Driftwood.Chat,
+      repo: Driftwood.Repo,
+      plane: :operator,
+      operator_id: "driftwood-operator",
+      path: "/operator/desk-chat",
+      labels: %{
+        title: "Driftwood Ops",
+        crumb_root: "Driftwood Ops",
+        chat_path: "/operator/desk-chat",
+        pubsub: Driftwood.PubSub,
+        object_cards: %{"freight.driver" => DriftwoodWeb.Chat.DriverCard}
+      }
+    )
   end
 
   # ADR-009 §5.3(2) — the framework OPERATOR aggregate plane, mounted over Driftwood's

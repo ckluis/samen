@@ -129,6 +129,252 @@
     {
       "fields": [
         {
+          "column_name": "dcd_expose_identity_to_support",
+          "logical_name": "expose_identity_to_support",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "dcd_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dcd_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dcd_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dcd_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Chat.ChatDisclosureSetting",
+      "table_name": "dcd_disclosure_setting"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dcm_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dcm_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dcm_kind",
+          "logical_name": "kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dcm_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dcm_participant_id",
+          "logical_name": "participant_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dcm_refs",
+          "logical_name": "refs",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "dcm_sender_party",
+          "logical_name": "sender_party",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dcm_thread_id",
+          "logical_name": "thread_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dcm_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_dcm_body",
+          "logical_name": "body",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Driftwood.Chat.ChatMessage",
+      "table_name": "dcm_message"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dcp_full_name",
+          "logical_name": "full_name",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "dcp_handle",
+          "logical_name": "handle",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dcp_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dcp_identity_shared",
+          "logical_name": "identity_shared",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "dcp_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dcp_online_at",
+          "logical_name": "online_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dcp_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dcp_party",
+          "logical_name": "party",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dcp_principal_id",
+          "logical_name": "principal_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dcp_principal_kind",
+          "logical_name": "principal_kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dcp_role",
+          "logical_name": "role",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dcp_thread_id",
+          "logical_name": "thread_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dcp_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Chat.ChatParticipant",
+      "table_name": "dcp_participant"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dct_context_ref",
+          "logical_name": "context_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dct_disclosure_mode",
+          "logical_name": "disclosure_mode",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dct_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dct_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dct_kind",
+          "logical_name": "kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dct_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dct_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dct_subject",
+          "logical_name": "subject",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dct_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Chat.ChatThread",
+      "table_name": "dct_thread"
+    },
+    {
+      "fields": [
+        {
           "column_name": "dok_id",
           "logical_name": "id",
           "pii": false,

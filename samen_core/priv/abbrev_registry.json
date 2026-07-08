@@ -212,6 +212,14 @@
     "vmt": "PawChart.Marketing.Template",
     "vmn": "PawChart.Marketing.Send",
     "vme": "PawChart.Marketing.EmailEvent",
-    "vmp": "PawChart.Marketing.Suppression"
+    "vmp": "PawChart.Marketing.Suppression",
+    "wct": "Samen.WebTest.Chat.ChatThread",
+    "wcp": "Samen.WebTest.Chat.ChatParticipant",
+    "wcm": "Samen.WebTest.Chat.ChatMessage",
+    "wcd": "Samen.WebTest.Chat.ChatDisclosureSetting",
+    "dct": "Driftwood.Chat.ChatThread",
+    "dcp": "Driftwood.Chat.ChatParticipant",
+    "dcm": "Driftwood.Chat.ChatMessage",
+    "dcd": "Driftwood.Chat.ChatDisclosureSetting"
   }
 }

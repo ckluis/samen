@@ -14,9 +14,15 @@ defmodule Driftwood.Application do
     # The web plane (PubSub + Endpoint) starts whenever the repo runs (dev/prod). In
     # :test, start_repo? is false, so the web tree is off and the LiveViews are exercised
     # via render/1 + the dogfood test's direct load path (mirrors the demo's T4.1 slice).
+    # ADR-012 — the flagship chat needs the framework Presence server (who's-online/typing)
+    # alongside the PubSub server. Presence uses the host's PubSub, so it starts after it.
     web_children =
       if Application.get_env(:driftwood, :start_repo?, true) do
-        [{Phoenix.PubSub, name: Driftwood.PubSub}, DriftwoodWeb.Endpoint]
+        [
+          {Phoenix.PubSub, name: Driftwood.PubSub},
+          {Samen.Web.Chat.Presence, pubsub_server: Driftwood.PubSub},
+          DriftwoodWeb.Endpoint
+        ]
       else
         []
       end

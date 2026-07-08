@@ -148,6 +148,74 @@ defmodule Samen.Web.Router do
     end
   end
 
+  @doc """
+  Mount the FLAGSHIP cross-plane realtime CHAT (ADR-012 §6.3) — the `/chat` inbox + `/chat/:id`
+  room — over a host's materialized `Samen.Scopes.Chat` resources. A tenant chat and a
+  SaaS-desk chat are the SAME LiveViews on different planes.
+
+      import Samen.Web.Router
+
+      # TENANT plane — the org's own chat console.
+      samen_chat_routes :chat, Driftwood.Chat, repo: Driftwood.Repo
+
+      # SaaS-DESK plane — the operator drills into a tenant's cross-plane threads (masked),
+      # reaching them through the impersonation bridge carrying the tenant org_id (§2.3).
+      samen_chat_routes :chat, Driftwood.Chat,
+        repo: Driftwood.Repo,
+        plane: :operator,
+        target_org_id: tenant_org_id,
+        path: "/operator/desk-chat"
+
+  ## One-time host supervision-tree add
+
+  The realtime path needs a running `Phoenix.PubSub` (the host's — default `Driftwood.PubSub`,
+  overridable via a `:pubsub` label on the mount) and, for who's-online/typing, the framework
+  presence server. Add to the host's supervision tree:
+
+      {Phoenix.PubSub, name: Driftwood.PubSub},        # already present in a Phoenix app
+      {Samen.Web.Chat.Presence, pubsub_server: Driftwood.PubSub}
+
+  ## Options
+
+    * `:repo`            — REQUIRED. The host's Ecto repo.
+    * `:domain`          — the host Ash domain (default: `namespace`).
+    * `:plane`           — `:tenant` (default) or `:operator`.
+    * `:operator_id` / `:target_org_id` — for the operator-desk plane (§2.3).
+    * `:path`            — the mount path prefix (default `/chat`).
+    * `:labels`          — optional UI copy overrides + a `:pubsub`/`:presence`/`:object_cards`
+      seam (data on the mount).
+    * `:session_name`    — override the `live_session` name.
+  """
+  defmacro samen_chat_routes(kind, namespace, opts \\ []) do
+    kind = Macro.expand(kind, __CALLER__)
+    path = Keyword.get(opts, :path, "/chat")
+    session_name = Keyword.get(opts, :session_name, session_name(:chat, path))
+
+    quote bind_quoted: [
+            kind: kind,
+            namespace: namespace,
+            opts: opts,
+            path: path,
+            session_name: session_name
+          ] do
+      mount =
+        Samen.Web.Mount.new(
+          :chat,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          plane: Samen.Web.Router.__plane__(opts),
+          labels: Keyword.get(opts, :labels)
+        )
+
+      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        for {sub_path, module} <- Samen.Web.Router.__routes__(:chat, path) do
+          live(sub_path, module)
+        end
+      end
+    end
+  end
+
   @doc false
   def __operator_labels__(labels, nil), do: labels
 
@@ -207,10 +275,19 @@ defmodule Samen.Web.Router do
     ]
   end
 
+  # ADR-012 §6.3 — the flagship chat route table: the inbox + the realtime room.
+  def __routes__(:chat, path) do
+    [
+      {"#{path}", Samen.Web.Chat.ThreadsLive},
+      {"#{path}/:id", Samen.Web.Chat.ThreadLive}
+    ]
+  end
+
   defp default_path(:crm), do: "/crm"
   defp default_path(:billing), do: "/billing"
   defp default_path(:support), do: "/support"
   defp default_path(:marketing), do: "/marketing"
+  defp default_path(:chat), do: "/chat"
 
   defp session_name(kind, path) do
     :"samen_#{kind}_#{path |> String.replace(~r/[^a-zA-Z0-9]/, "_") |> String.trim("_")}"

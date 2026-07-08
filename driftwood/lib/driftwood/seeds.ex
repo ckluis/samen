@@ -188,6 +188,11 @@ defmodule Driftwood.Seeds do
       # inherited-scope guard above short-circuits an already-seeded org (a re-run after the
       # Marketing mount shipped). Idempotent.
       seed_marketing(seeded_org)
+
+      # Chat (ADR-012, the flagship) is seeded with its OWN marker too — one cross-plane thread
+      # (a tenant admin ↔ a SaaS agent) whose message pastes a `samen:crm.person:<id>` ref so
+      # object unfurl is provable in the LIVE app (tenant clear / operator ••••). Idempotent.
+      seed_chat(seeded_org)
     end)
   end
 
@@ -868,5 +873,135 @@ defmodule Driftwood.Seeds do
       |> Ash.create!()
 
     :ok
+  end
+
+  # ==========================================================================
+  # Chat (ADR-012, the FLAGSHIP) — one cross-plane thread with participants + a
+  # message that pastes a `samen:crm.person:<id>` ref so object unfurl is provable
+  # in the LIVE app (tenant clear / operator ••••). Idempotent (its own marker).
+  # ==========================================================================
+
+  defp seed_chat(org_id) do
+    if chat_seeded?(org_id) do
+      :ok
+    else
+      do_seed_chat(org_id)
+    end
+  end
+
+  defp chat_seeded?(org_id) do
+    actor = %{org_id: org_id, role: :admin, plane: :tenant, kind: :tenant}
+
+    Driftwood.Chat.ChatThread
+    |> Ash.Query.for_read(:read, %{}, actor: actor, authorize?: false)
+    |> Ash.Query.filter(org_id == ^org_id)
+    |> Ash.exists?(actor: actor, authorize?: false)
+  rescue
+    _ -> false
+  end
+
+  defp do_seed_chat(org_id) do
+    person = first_person(org_id)
+    driver = first_driver(org_id)
+
+    thread =
+      Driftwood.Chat.ChatThread
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          subject: "Rate confirmation for load BR-4471",
+          kind: :cross_plane,
+          status: :open,
+          disclosure_mode: :masked
+        },
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    tenant_participant =
+      Driftwood.Chat.ChatParticipant
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          thread_id: thread.id,
+          party: :tenant,
+          principal_kind: :user,
+          handle: "blueridge-dispatch",
+          role: :owner,
+          full_name: %Samen.Type.FullName{first: "Dana", last: "Whitfield"}
+        },
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    _operator_participant =
+      Driftwood.Chat.ChatParticipant
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          thread_id: thread.id,
+          party: :operator,
+          principal_kind: :operator_staff,
+          handle: "driftwood-support",
+          role: :member
+        },
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    # The message pastes a crm.person ref (and, if a driver exists, a freight.driver ref) so
+    # BOTH the framework first-class card AND the vertical override card unfurl per viewer.
+    refs =
+      [person && "samen:crm.person:#{person.id}", driver && "samen:freight.driver:#{driver.id}"]
+      |> Enum.reject(&is_nil/1)
+
+    body =
+      "Confirming the rate for BR-4471. Point of contact: " <>
+        (person && "samen:crm.person:#{person.id}" || "TBD") <>
+        (if(driver, do: " · assigned driver samen:freight.driver:#{driver.id}", else: ""))
+
+    _message =
+      Driftwood.Chat.ChatMessage
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          thread_id: thread.id,
+          participant_id: tenant_participant.id,
+          sender_party: :tenant,
+          kind: :message,
+          body: body,
+          refs: refs
+        },
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    :ok
+  end
+
+  defp first_person(org_id) do
+    Driftwood.Crm.Person
+    |> Ash.Query.filter(org_id == ^org_id)
+    |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(1)
+    |> Ash.read!(authorize?: false)
+    |> List.first()
+  rescue
+    _ -> nil
+  end
+
+  defp first_driver(org_id) do
+    Driftwood.Freight.Driver
+    |> Ash.Query.filter(org_id == ^org_id)
+    |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(1)
+    |> Ash.read!(authorize?: false)
+    |> List.first()
+  rescue
+    _ -> nil
   end
 end

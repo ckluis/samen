@@ -384,3 +384,65 @@ td.right { text-align: right; }
 .settle .row.net .lab { color: var(--ink); font-weight: 600; font-family: inherit; font-size: 13.5px; }
 .settle .row.net .val { font-weight: 700; font-size: 15px; color: var(--green); }
 .settle .foot2 { padding: 11px 18px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--faint); line-height: 1.5; }
+
+/* ---------------------------------------------------------------------------
+   Object-unfurl card (ADR-012 §4.4) — the masking-aware-per-viewer live card.
+   A %Masked{} value renders "••••" verbatim (no CSS knows or cares).
+   --------------------------------------------------------------------------- */
+.obj-card { display: inline-flex; gap: 10px; align-items: flex-start; max-width: 340px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
+  background: #FAFBFD; vertical-align: top; }
+.obj-card-avatar { flex: 0 0 auto; width: 28px; height: 28px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--green); color: #fff; font-weight: 700; font-size: 13px; }
+.obj-card-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.obj-card-kicker { font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--faint); font-weight: 600; }
+.obj-card-title { font-size: 13.5px; font-weight: 650; color: var(--ink); line-height: 1.25; }
+.obj-card-link { color: var(--ink); text-decoration: none; }
+.obj-card-link:hover { text-decoration: underline; }
+.obj-card-badges { display: inline-flex; gap: 5px; flex-wrap: wrap; margin-top: 2px; }
+.obj-card-fields { display: flex; flex-direction: column; gap: 1px; margin-top: 3px; }
+.obj-card-field { display: inline-flex; gap: 6px; font-size: 12px; }
+.obj-card-field-label { color: var(--faint); min-width: 52px; }
+.obj-card-field-value { color: var(--ink2, #475569); }
+.obj-card-na { background: #FBFBFB; border-style: dashed; align-items: center; color: var(--faint); }
+.obj-na-icon { font-size: 13px; }
+.obj-na-text { font-size: 12.5px; }
+
+/* ---------------------------------------------------------------------------
+   Cross-plane realtime chat (ADR-012 §6) — append-only. Masking-safe: every PII
+   value is the resolver's already-resolved field, so a %Masked{} renders •••• .
+   --------------------------------------------------------------------------- */
+.chat-layout { display: flex; gap: 18px; align-items: flex-start; }
+.chat-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.chat-aside { flex: 0 0 240px; }
+.chat-messages { display: flex; flex-direction: column; gap: 10px; }
+.chat-msg { background: #fff; border: 1px solid var(--line, #E7E9EE); border-radius: 10px;
+  padding: 10px 12px; max-width: 560px; }
+.chat-msg-mine { align-self: flex-end; background: #F3F8F5; }
+.chat-msg-head { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.chat-msg-handle { font-size: 12.5px; font-weight: 650; color: var(--ink); }
+.chat-msg-body { font-size: 13.5px; color: var(--ink2, #475569); line-height: 1.4; white-space: pre-wrap; }
+.chat-msg-unfurls { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.chat-composer { display: flex; gap: 8px; }
+.chat-composer input { flex: 1 1 auto; padding: 9px 11px; border: 1px solid var(--line, #E7E9EE);
+  border-radius: 8px; font-size: 13.5px; }
+.chat-roster { display: flex; flex-direction: column; gap: 6px; }
+.chat-roster-row { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.chat-roster-dot { width: 8px; height: 8px; border-radius: 50%; background: #CBD5E1; flex: 0 0 auto; }
+.chat-roster-dot.online { background: var(--green, #17A06E); }
+.chat-roster-handle { font-weight: 600; color: var(--ink); }
+.chat-identity-chip { font-size: 12px; color: var(--faint); }
+/* Inbox identity controls (ADR-012 §5 write side) — the tenant setting + new-conversation opt-in. */
+.chat-settings, .chat-new { padding: 16px 18px; }
+.chat-switch { display: flex; gap: 9px; align-items: center; font-size: 13px; color: var(--ink2, #475569); cursor: pointer; }
+.chat-switch input { width: 15px; height: 15px; flex: 0 0 auto; }
+.chat-new form { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.chat-new input[type="text"] { width: 100%; padding: 9px 11px; border: 1px solid var(--line, #E7E9EE);
+  border-radius: 8px; font-size: 13.5px; }
+.chat-flash { background: #F3F8F5; border: 1px solid var(--green, #17A06E); color: #14532d;
+  padding: 9px 13px; border-radius: 8px; font-size: 13px; margin-bottom: 14px; }
+.side-min { padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
+.side-min b { font-size: 14px; color: var(--ink); }
+.side-min span { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }

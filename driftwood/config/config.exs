@@ -13,7 +13,8 @@ config :driftwood,
     Driftwood.Marketing,
     Driftwood.Freight,
     Driftwood.Aggregate,
-    Driftwood.Operator
+    Driftwood.Operator,
+    Driftwood.Chat
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…)
@@ -27,7 +28,8 @@ config :samen_core, :ash_domains, [
   Driftwood.Marketing,
   Driftwood.Freight,
   Driftwood.Aggregate,
-  Driftwood.Operator
+  Driftwood.Operator,
+  Driftwood.Chat
 ]
 
 # ADR-010 — the well-known OPERATOR org id (the SaaS company's own org). The operator

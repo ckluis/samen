@@ -38,7 +38,24 @@ defmodule Samen.WebTest.Seeds do
   @active_subscriber_email "deliverable.plaintext@example.test"
   @suppressed_subscriber_email "optedout.plaintext@example.test"
 
+  # Distinctive Chat sentinels (ADR-012). The tenant participant's identity + the message body
+  # are 🔒 vault PII — a test asserts they are clear on tenant / absent (••••) on operator.
+  @tenant_participant_first "Cordelia"
+  @tenant_participant_last "Tenantsworth"
+  @tenant_participant_handle "blueridge-owner"
+  @second_tenant_first "Reginald"
+  @second_tenant_last "Secondparty"
+  @second_tenant_handle "blueridge-dispatch"
+  @operator_participant_handle "saas-agent-01"
+  @chat_message_body "Rate confirmation attached — CHAT-BODY-SENTINEL for load #4471."
+
   @doc "Sentinel accessors so tests reference the exact seeded PII strings."
+  def tenant_participant_full_name, do: "#{@tenant_participant_first} #{@tenant_participant_last}"
+  def tenant_participant_handle, do: @tenant_participant_handle
+  def second_tenant_full_name, do: "#{@second_tenant_first} #{@second_tenant_last}"
+  def second_tenant_handle, do: @second_tenant_handle
+  def operator_participant_handle, do: @operator_participant_handle
+  def chat_message_body, do: @chat_message_body
   def contact_full_name, do: "#{@contact_first} #{@contact_last}"
   def contact_email, do: @contact_email
   def contact_phone, do: @contact_phone
@@ -69,6 +86,145 @@ defmodule Samen.WebTest.Seeds do
     marketing = seed_marketing(org_id)
 
     %{org_id: org_id, crm: crm, billing: billing, support: support, marketing: marketing}
+  end
+
+  @doc """
+  Seed one CROSS-PLANE chat thread for `org_id` (ADR-012) — a tenant participant + a second
+  tenant participant + a SaaS-operator participant, and ONE message from the tenant that pastes
+  a `samen:crm.person:<person_id>` ref so unfurl is provable. `opts`:
+
+    * `:disclosure_mode`   — the thread's stored state (`:masked | :initiator_opt_in |
+      :tenant_wide`); default `:masked`. The 3-state identity test drives all three.
+    * `:initiator_shared`  — the first tenant participant's `identity_shared` (state 2);
+      default `false`.
+    * `:person_id`         — the CRM person id to reference in the message body (the unfurl
+      target); default nil (no ref).
+
+  Returns the seeded thread + participants + message. Writes go through Ash so the vault
+  routes the participant `full_name` + message `body` on write (clear at rest never happens).
+  """
+  def seed_chat(org_id, opts \\ []) do
+    disclosure_mode = Keyword.get(opts, :disclosure_mode, :masked)
+    initiator_shared = Keyword.get(opts, :initiator_shared, false)
+    person_id = Keyword.get(opts, :person_id)
+
+    thread =
+      Samen.WebTest.Chat.ChatThread
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          subject: "Rate confirmation for load #4471",
+          kind: :cross_plane,
+          status: :open,
+          disclosure_mode: disclosure_mode
+        },
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    tenant_participant =
+      Samen.WebTest.Chat.ChatParticipant
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          thread_id: thread.id,
+          party: :tenant,
+          principal_kind: :user,
+          handle: @tenant_participant_handle,
+          identity_shared: initiator_shared,
+          role: :owner,
+          full_name: %Samen.Type.FullName{
+            first: @tenant_participant_first,
+            last: @tenant_participant_last
+          }
+        },
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    second_tenant_participant =
+      Samen.WebTest.Chat.ChatParticipant
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          thread_id: thread.id,
+          party: :tenant,
+          principal_kind: :user,
+          handle: @second_tenant_handle,
+          identity_shared: false,
+          role: :member,
+          full_name: %Samen.Type.FullName{first: @second_tenant_first, last: @second_tenant_last}
+        },
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    operator_participant =
+      Samen.WebTest.Chat.ChatParticipant
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          thread_id: thread.id,
+          party: :operator,
+          principal_kind: :operator_staff,
+          handle: @operator_participant_handle,
+          role: :member
+        },
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    body =
+      case person_id do
+        nil -> @chat_message_body
+        id -> "#{@chat_message_body} See samen:crm.person:#{id}"
+      end
+
+    refs =
+      case person_id do
+        nil -> []
+        id -> ["samen:crm.person:#{id}"]
+      end
+
+    message =
+      Samen.WebTest.Chat.ChatMessage
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          thread_id: thread.id,
+          participant_id: tenant_participant.id,
+          sender_party: :tenant,
+          kind: :message,
+          body: body,
+          refs: refs
+        },
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    %{
+      thread: thread,
+      tenant_participant: tenant_participant,
+      second_tenant_participant: second_tenant_participant,
+      operator_participant: operator_participant,
+      message: message
+    }
+  end
+
+  @doc "Set the org's ChatDisclosureSetting (§5 state 3). `expose` toggles tenant-wide consent."
+  def seed_disclosure_setting(org_id, expose) do
+    Samen.WebTest.Chat.ChatDisclosureSetting
+    |> Ash.Changeset.for_create(
+      :create,
+      %{org_id: org_id, expose_identity_to_support: expose},
+      authorize?: false
+    )
+    |> Ash.create!()
   end
 
   # -- CRM ---------------------------------------------------------------------
