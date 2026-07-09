@@ -99,6 +99,7 @@ defmodule Samen.Web.CRMDetailRenderTest do
     socket =
       %Phoenix.LiveView.Socket{}
       |> Phoenix.Component.assign(:samen_mount, mount)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
       |> Samen.Web.CRM.ContactLive.load(org_id, contact_id)
       |> Phoenix.Component.assign(:active_tab, "activity")
 
@@ -140,6 +141,7 @@ defmodule Samen.Web.CRMDetailRenderTest do
     socket =
       %Phoenix.LiveView.Socket{}
       |> Phoenix.Component.assign(:samen_mount, mount)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
       |> Samen.Web.CRM.CompanyLive.load(org_id, company_id)
       |> Phoenix.Component.assign(:active_tab, "deals")
 
@@ -226,6 +228,7 @@ defmodule Samen.Web.CRMDetailRenderTest do
     socket =
       %Phoenix.LiveView.Socket{}
       |> Phoenix.Component.assign(:samen_mount, mount)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
       |> module.load(org_id, subject_id)
       |> Phoenix.Component.assign(:active_tab, "activity")
 

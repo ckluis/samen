@@ -17,8 +17,10 @@ defmodule Samen.Web.Live do
   test that mounts without the router) is tolerated by leaving `:samen_mount` unset — but
   the framework routes always populate it.
   """
-  def assign_mount(socket, %{"samen_mount" => raw}) when is_map(raw) do
-    assign(socket, :samen_mount, Samen.Web.Mount.from_session(raw))
+  def assign_mount(socket, %{"samen_mount" => raw} = session) when is_map(raw) do
+    socket
+    |> assign(:samen_mount, Samen.Web.Mount.from_session(raw))
+    |> assign(:samen_acting_as, Samen.Web.CurrentOrg.acting_as?(session))
   end
 
   def assign_mount(socket, _session), do: socket

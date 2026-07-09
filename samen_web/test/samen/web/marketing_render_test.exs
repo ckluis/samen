@@ -183,6 +183,7 @@ defmodule Samen.Web.MarketingRenderTest do
     socket =
       %Phoenix.LiveView.Socket{}
       |> Phoenix.Component.assign(:samen_mount, mount)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
       |> Samen.Web.Marketing.CampaignLive.load(org_id, campaign_id)
       |> Phoenix.Component.assign(:send_results, results)
       |> Phoenix.Component.assign(:notice, "Enqueued 0 send(s); 1 refused.")

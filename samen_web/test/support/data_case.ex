@@ -71,6 +71,7 @@ defmodule Samen.WebTest.DataCase do
     socket =
       %Phoenix.LiveView.Socket{}
       |> Phoenix.Component.assign(:samen_mount, mount)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
       |> then(&apply(module, :load, [&1 | load_args]))
 
     render_html(module, socket.assigns)

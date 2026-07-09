@@ -105,6 +105,57 @@ defmodule Samen.Web.CurrentOrgTest do
   end
 
   # ==========================================================================
+  # acting_as?/1 — the true "explicit act-as" signal (gates the banner)
+  # ==========================================================================
+
+  test "acting_as?/1: true only when the session carries an explicit samen_current_org" do
+    assert CurrentOrg.acting_as?(%{"samen_current_org" => "FROM-SESSION"})
+    # A plain tenant default-org visit (no session org) is NOT an act-as.
+    refute CurrentOrg.acting_as?(%{})
+    refute CurrentOrg.acting_as?(%{"samen_current_org" => "  "})
+    refute CurrentOrg.acting_as?(nil)
+  end
+
+  # ==========================================================================
+  # acting_as_banner/1 — shows the RESOLVED org name, ONLY during a real act-as
+  # ==========================================================================
+
+  test "acting_as_banner/1: renders the resolved org NAME (never an empty <b>) during an act-as" do
+    mount = crm_mount(%{org_directory: {__MODULE__, :dir_fixture, []}})
+    org_id = "11111111-0000-4000-8000-000000000001"
+    html = render_banner(%{mount: mount, org_id: org_id, acting_as: true})
+
+    assert html =~ "acting-as-bar"
+    assert html =~ "Summit Freight Partners"
+    # The empty-name bug: the <b> must NOT be empty.
+    refute html =~ "<b></b>"
+  end
+
+  test "acting_as_banner/1: hidden on a plain default-org visit (acting_as false)" do
+    mount = crm_mount(%{org_directory: {__MODULE__, :dir_fixture, []}})
+    org_id = "11111111-0000-4000-8000-000000000001"
+    html = render_banner(%{mount: mount, org_id: org_id, acting_as: false})
+
+    refute html =~ "acting-as-bar"
+  end
+
+  test "acting_as_banner/1: hidden on the operator plane even when acting_as is true" do
+    operator_plane = Samen.Web.Plane.operator("op-1", "11111111-0000-4000-8000-000000000001")
+    operator_mount = Mount.new(:crm, Samen.WebTest.Crm, Samen.WebTest.Repo, plane: operator_plane)
+    html = render_banner(%{mount: operator_mount, org_id: "any", acting_as: true})
+
+    refute html =~ "acting-as-bar"
+  end
+
+  defp render_banner(assigns) do
+    assigns
+    |> Map.put(:__changed__, %{})
+    |> CurrentOrg.acting_as_banner()
+    |> Phoenix.HTML.Safe.to_iodata()
+    |> IO.iodata_to_binary()
+  end
+
+  # ==========================================================================
   # return_path/1 — the switcher's same-module return target
   # ==========================================================================
 

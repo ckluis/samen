@@ -167,7 +167,7 @@ defmodule Samen.Web.CRM.CompanyLive do
           </:actions>
         </.topbar>
 
-        <.acting_as_banner mount={@samen_mount} org_id={@org_id} />
+        <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
         <%= if @no_org do %>
           <.no_org_card mount={@samen_mount} />

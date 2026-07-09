@@ -70,6 +70,7 @@ defmodule Driftwood.DataCase do
     socket =
       %Phoenix.LiveView.Socket{}
       |> Phoenix.Component.assign(:samen_mount, mount)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
       |> Phoenix.Component.assign(Enum.to_list(pre_assigns))
       |> then(&apply(module, :load, [&1 | load_args]))
 

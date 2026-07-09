@@ -87,6 +87,17 @@ defmodule Samen.Web.CurrentOrg do
   defp session_org(session) when is_map(session), do: present(Map.get(session, @session_key))
   defp session_org(_), do: nil
 
+  @doc """
+  Whether the session carries an EXPLICIT act-as current org (`samen_current_org`) — i.e. the
+  operator drilled in via the `SessionController` ("Open account →") or the workspace switcher.
+
+  This is the true "impersonation" signal: it is `false` for a plain tenant default-org visit
+  (the mount's `:default_org_id`, Blue Ridge in dev), so the "acting as" banner reads as a real
+  act-as rather than always-on chrome. Never raises; a non-map/absent session → `false`.
+  """
+  @spec acting_as?(map() | nil) :: boolean()
+  def acting_as?(session), do: session_org(session) != nil
+
   defp default_label(%Mount{} = mount), do: present(Mount.label(mount, :default_org_id, nil))
   defp default_label(_), do: nil
 
@@ -264,19 +275,28 @@ defmodule Samen.Web.CurrentOrg do
 
   attr :mount, Mount, default: nil
   attr :org_id, :string, default: nil
-  attr :name, :string, default: nil
+  attr :acting_as, :boolean, default: false
 
   @doc """
   The "acting as &lt;tenant&gt; · Return to Driftwood Ops" banner (ADR-013 §5.3). Renders on a
-  tenant-plane page whenever a session current org is in effect, giving the operator a clear way
-  back UP to the operator plane. Purely presentational; navigating away just returns to the
-  operator plane (which ignores the session current org — it is cross-tenant).
+  tenant-plane page ONLY during a real operator act-as (`acting_as: true` — an explicit
+  `samen_current_org` in the session, set by the `SessionController` via the operator "Open
+  account →" or the workspace switcher), NOT on a plain tenant default-org visit. Gives the
+  operator a clear way back UP to the operator plane. Purely presentational; navigating away
+  just returns to the operator plane (which ignores the session current org — it is cross-tenant).
+
+  The org NAME is resolved in the body from `mount` + `org_id`, so the banner always shows the
+  real current-org name (no empty `<b>`).
   """
   def acting_as_banner(assigns) do
-    assigns = assign_new(assigns, :name, fn -> name(assigns.mount, assigns.org_id) end)
+    assigns = assign(assigns, :name, name(assigns.mount, assigns.org_id))
 
     ~H"""
-    <div :if={tenant_plane?(@mount) and is_binary(@org_id)} class="acting-as-bar" id="acting-as-bar">
+    <div
+      :if={@acting_as and tenant_plane?(@mount) and is_binary(@org_id)}
+      class="acting-as-bar"
+      id="acting-as-bar"
+    >
       <span class="acting-as-tx">
         You are viewing <b>{@name}</b> (acting as tenant)
       </span>

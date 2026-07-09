@@ -60,6 +60,7 @@ defmodule Samen.Web.SupportRenderTest do
     socket =
       %Phoenix.LiveView.Socket{}
       |> Phoenix.Component.assign(:samen_mount, mount)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
       |> Samen.Web.Support.TicketLive.load(org_id, ticket_id)
       |> Phoenix.Component.assign(:active_tab, "details")
 
