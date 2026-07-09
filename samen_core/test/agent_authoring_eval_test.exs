@@ -85,6 +85,15 @@ defmodule SamenCore.AgentAuthoringEvalTest do
   @project_dir Path.expand("../", __DIR__)
   @scratch_root Path.join([__DIR__, "..", "tmp", "agent_eval_scratch"])
 
+  # ADR-015 (default-deny): `RevealPerson.:display_name` is a pre-existing benign-
+  # named freeform :string. Under default-deny it is flagged UNLESS it is in the
+  # committed baseline (a reviewed, pre-existing column — exactly what
+  # `schema.dict.json` records per §4.3). CASE 1 is the positive control ("a
+  # correctly-authored resource passes"), so we model the fixture's freeform column
+  # as baseline-covered — the correct-authorship state under the new rule. A NET-NEW
+  # freeform/PII column (CASE 3) is NOT in this baseline and still flags.
+  @correctly_authored_baseline MapSet.new([{"rvp_reveal_person", "rvp_display_name"}])
+
   # The scoring rubric: case_id => {label, owning_verifier, expected_exit}.
   @rubric %{
     1 => {"a correct new resource passes the whole gate", :gate, :exit_0},
@@ -119,8 +128,9 @@ defmodule SamenCore.AgentAuthoringEvalTest do
 
   describe "CASE 1 — a correctly-authored resource passes the gate (exit 0)" do
     test "pii_classify does NOT flag a resource whose PII is vault-routed" do
-      # RevealPerson vaults :emails; it has no plain-typed PII-named column.
-      violations = PiiClassify.check([RevealPerson])
+      # RevealPerson vaults :emails; its only freeform column (:display_name) is a
+      # reviewed, baseline-covered column (ADR-015 default-deny → baseline clears it).
+      violations = PiiClassify.check([RevealPerson], @correctly_authored_baseline)
 
       assert violations == [],
              "a correctly-vaulted PII resource must PASS pii_classify (exit 0), got: #{inspect(violations)}"
@@ -409,7 +419,7 @@ defmodule SamenCore.AgentAuthoringEvalTest do
 
   defp score_case(1) do
     # exit 0: correct resource passes every owning verifier.
-    pii_ok? = PiiClassify.check([RevealPerson]) == []
+    pii_ok? = PiiClassify.check([RevealPerson], @correctly_authored_baseline) == []
     fk_ok? = not Enum.any?(SameOrgFk.violations(domain: to_string(SameOrgFkFixture)), &(&1 =~ "Guarded"))
     parity_ok? = CatalogParity.check(TestRepo) == []
     prefixes_ok? = Prefixes.check(TestRepo) == []

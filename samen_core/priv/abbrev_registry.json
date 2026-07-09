@@ -1,6 +1,13 @@
 {
   "$comment": "PERMANENT abbrev registry. Abbrevs are 3-letter lowercase, collision-checked, and NEVER recycled or changed once assigned to a resource \u2014 like a stock ticker. Adding a row is allowed; changing or removing a resource's abbrev, or reusing an abbrev for a second resource, fails compile (Samen.Verifiers.AbbrevRegistry). Keys are abbrevs; values are the fully-qualified resource module names that own them.",
   "abbrevs": {
+    "sxc": "SamenCore.Support.SuppressionFixture.Campaign",
+    "sxg": "SamenCore.Support.SuppressionFixture.Segment",
+    "sxs": "SamenCore.Support.SuppressionFixture.Subscriber",
+    "sxt": "SamenCore.Support.SuppressionFixture.Template",
+    "sxn": "SamenCore.Support.SuppressionFixture.Send",
+    "sxe": "SamenCore.Support.SuppressionFixture.EmailEvent",
+    "sxp": "SamenCore.Support.SuppressionFixture.Suppression",
     "pff": "Demo.PrimitivesScope.FeatureFlag",
     "pag": "PawChart.Aggregate.PatientVolumeBySpecies",
     "iro": "Demo.Identity.Role",

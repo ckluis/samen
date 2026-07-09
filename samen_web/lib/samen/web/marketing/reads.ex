@@ -28,16 +28,18 @@ defmodule Samen.Web.Marketing.Reads do
 
   ## Consent / suppression enforcement (the load-bearing red path)
 
-  `enqueue_send/3` is the ONLY send path the outreach UI uses. It enforces suppression at the
-  FRAMEWORK layer via an Ash read of the host's own `Suppression` resource (works for ANY
-  host abbrev — the kernel `Send.:create_checked` suppression query hardcodes the demo-abbrev
-  `msp_suppression` table, so it is NOT reliable for a fresh-abbrev host mount; this
-  framework check is). A send to a suppressed or unsubscribed subscriber is REFUSED
-  (`{:error, :suppressed}` / `{:error, :unsubscribed}`) — no send row, no Oban job. Only when
-  the subscriber is deliverable does it (1) create the send via the kernel `:create_checked`
-  action (which layers the kernel's same-org-FK guard), and (2) enqueue the
-  `Samen.Scopes.Marketing.SendWorker` Oban job with TOKEN-ONLY args
-  (`send_id` / `org_id` / `subscriber_id` — never the email).
+  `enqueue_send/3` is the ONLY send path the outreach UI uses. Suppression is enforced by the
+  KERNEL `Send.:create_checked` action — an `OrgScope`-inheriting Ash read of THIS mount's own
+  `Suppression` resource (portable across any mount abbrev, ADR-014 §4). We no longer duplicate
+  the check here (the old framework `refuse_if_suppressed/3` existed only because the kernel
+  hardcoded the demo-abbrev `msp_suppression` table; that hardcode is gone). `create_send/3`
+  maps the kernel's suppression refusal back to `{:error, :suppressed}` so the UI still renders
+  "suppressed — skipped" per recipient. The consent/status gate (`refuse_if_undeliverable/3`)
+  stays — it is a distinct concern (an `:unsubscribed`/`:bounced` subscriber is undeliverable
+  even with no suppression row). A refused send writes no send row and enqueues no Oban job;
+  a delivered send (1) creates the send via `:create_checked` (which also layers the kernel's
+  same-org-FK guard), and (2) enqueues the `Samen.Scopes.Marketing.SendWorker` Oban job with
+  TOKEN-ONLY args (`send_id` / `org_id` / `subscriber_id` — never the email).
   """
 
   require Ash.Query
@@ -206,23 +208,23 @@ defmodule Samen.Web.Marketing.Reads do
 
   Order of enforcement (fail-closed):
 
-    1. **Suppression** — if an ACTIVE `Suppression` row exists for this subscriber, REFUSE
-       (`{:error, :suppressed}`). Queried via the host's own resource (any abbrev), NOT the
-       kernel's hardcoded `msp_suppression`.
-    2. **Consent / status** — if the subscriber is `:unsubscribed`, `:bounced`, or
+    1. **Consent / status** — if the subscriber is `:unsubscribed`, `:bounced`, or
        `:complained`, REFUSE (`{:error, :unsubscribed}` etc.). Only an `:active` subscriber
-       is deliverable.
-    3. **Create the send** via the kernel `Send.:create_checked` action (layers the kernel's
-       same-org-FK guard). The send row carries only opaque IDs — never the email.
-    4. **Enqueue** the `Samen.Scopes.Marketing.SendWorker` Oban job with TOKEN-ONLY args
+       is deliverable. (A distinct concern from suppression: a subscriber can be undeliverable
+       by status with no suppression row.)
+    2. **Create the send** via the kernel `Send.:create_checked` action. The kernel enforces
+       SUPPRESSION here (an `OrgScope`-inheriting Ash read of this mount's own `Suppression`
+       resource — portable across any abbrev, ADR-014 §4) and layers the same-org-FK guard.
+       A suppressed recipient is mapped back to `{:error, :suppressed}`. The send row carries
+       only opaque IDs — never the email.
+    3. **Enqueue** the `Samen.Scopes.Marketing.SendWorker` Oban job with TOKEN-ONLY args
        (`send_id` / `org_id` / `subscriber_id`).
 
   Returns `{:ok, send}` on success, or `{:error, reason}` (`:suppressed` / a status atom /
   `:not_found` / a changeset) on refusal.
   """
   def enqueue_send(mount, scope, %{subscriber_id: subscriber_id, org_id: org_id} = attrs) do
-    with :ok <- refuse_if_suppressed(mount, scope, subscriber_id),
-         :ok <- refuse_if_undeliverable(mount, scope, subscriber_id),
+    with :ok <- refuse_if_undeliverable(mount, scope, subscriber_id),
          {:ok, send} <- create_send(mount, scope, attrs) do
       enqueue_worker(mount, send, org_id, subscriber_id)
       {:ok, send}
@@ -312,22 +314,6 @@ defmodule Samen.Web.Marketing.Reads do
   # Private
   # ---------------------------------------------------------------------------
 
-  # Framework-level suppression check (host-abbrev-agnostic). An ACTIVE suppression row for
-  # this subscriber refuses the send. Fail-closed: a query error is treated as "cannot
-  # confirm deliverability" and refuses (never sends into an error).
-  defp refuse_if_suppressed(mount, scope, subscriber_id) do
-    suppressed? =
-      Mount.resource(mount, Suppression)
-      |> Ash.Query.ensure_selected([:active, :subscriber_id])
-      |> Ash.Query.filter(subscriber_id == ^subscriber_id and active == true)
-      |> Ash.read!(scope: scope)
-      |> Enum.any?()
-
-    if suppressed?, do: {:error, :suppressed}, else: :ok
-  rescue
-    _ -> {:error, :suppression_check_failed}
-  end
-
   # Consent/status gate: only an :active subscriber is deliverable.
   defp refuse_if_undeliverable(mount, scope, subscriber_id) do
     result =
@@ -346,8 +332,11 @@ defmodule Samen.Web.Marketing.Reads do
   end
 
   # Create the send row through the kernel's suppression-checked action (the only create
-  # path on Send). We pass the org_id + subscriber_id as arguments; the kernel layers its
-  # same-org-FK guard. The framework suppression check already ran above.
+  # path on Send). We pass the org_id + subscriber_id as arguments; the kernel enforces
+  # SUPPRESSION (portable Ash read on this mount's Suppression resource) and layers its
+  # same-org-FK guard. A suppressed recipient surfaces as a changeset error with the
+  # "suppressed" message — map it back to {:error, :suppressed} so the UI renders
+  # "suppressed — skipped" per recipient.
   defp create_send(mount, scope, attrs) do
     action_attrs = %{
       subscriber_id: attrs.subscriber_id,
@@ -359,7 +348,20 @@ defmodule Samen.Web.Marketing.Reads do
     Mount.resource(mount, Send)
     |> Ash.Changeset.for_create(:create_checked, action_attrs, scope: scope)
     |> Ash.create()
+    |> normalize_suppression_error()
   end
+
+  # The kernel refuses a suppressed send by adding a changeset error whose message is
+  # exactly "suppressed" (ADR-014 §4). Translate that back to the atom the UI matches on.
+  defp normalize_suppression_error({:error, %Ash.Error.Invalid{errors: errors}} = original) do
+    if Enum.any?(errors, &(Map.get(&1, :message) == "suppressed")) do
+      {:error, :suppressed}
+    else
+      original
+    end
+  end
+
+  defp normalize_suppression_error(other), do: other
 
   # Enqueue the send worker with TOKEN-ONLY args (no email). Best-effort: a missing Oban
   # (e.g. a pure render test) does not fail the send-row creation.

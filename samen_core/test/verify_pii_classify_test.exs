@@ -187,20 +187,63 @@ defmodule SamenCore.VerifyPiiClassifyTest do
            "Expected no :mrn violation for pat_patient (vault-routed), got: #{inspect(mrn_viol)}"
   end
 
-  test "GREEN PATH: PersonRecord :notes does NOT flag (not PII-named)" do
+  # ADR-015 §1 / harden H-2: a benign-named freeform string with no seed value
+  # (`:notes`, `:status`) USED to pass the heuristic silently — the single biggest
+  # claim-vs-mechanism gap. Under default-deny it now FLAGS (the old "safe name"
+  # green is deleted). This is the G3 inversion of the classifier default.
+  @tag :red_path
+  test "DEFAULT-DENY (ADR-015): PersonRecord :notes flags — benign name no longer passes" do
     violations = check_resource(PersonRecord)
     notes_viol = Enum.filter(violations, &String.contains?(&1, "notes"))
 
-    assert notes_viol == [],
-           "Expected no :notes violation (safe name), got: #{inspect(violations)}"
+    assert notes_viol != [],
+           "Expected :notes to FLAG under default-deny (benign-named freeform string), " <>
+             "got no violation: #{inspect(violations)}"
+
+    assert Enum.any?(notes_viol, &String.contains?(&1, "default-denied")),
+           "the reason must cite the default-deny mechanism, got: #{inspect(notes_viol)}"
   end
 
-  test "GREEN PATH: PersonRecord :status does NOT flag (not PII-named)" do
+  @tag :red_path
+  test "DEFAULT-DENY (ADR-015): PersonRecord :status flags — benign name no longer passes" do
     violations = check_resource(PersonRecord)
     status_viol = Enum.filter(violations, &String.contains?(&1, "status"))
 
-    assert status_viol == [],
-           "Expected no :status violation (safe name), got: #{inspect(violations)}"
+    assert status_viol != [],
+           "Expected :status to FLAG under default-deny (benign-named freeform string), " <>
+             "got no violation: #{inspect(violations)}"
+  end
+
+  # Non-vacuous companion: the same benign freeform column is CLEARED by a
+  # two-reviewer non_pii! override → no longer flags. Proves the default-deny is an
+  # opt-OUT surface with a working escape hatch, not an unconditional refusal.
+  @tag :registry
+  test "DEFAULT-DENY escape hatch: a two-reviewer non_pii! clearance clears :notes" do
+    table = AshPostgres.DataLayer.Info.table(PersonRecord)
+
+    notes_attr = Ash.Resource.Info.attributes(PersonRecord) |> Enum.find(&(&1.name == :notes))
+    notes_col = to_string(notes_attr.source || notes_attr.name)
+
+    {:ok, entry} =
+      NonPii.register(%{
+        table_name: table,
+        column_name: notes_col,
+        cleared_by: "alice@example.com",
+        reviewed_by: "bob@example.com",
+        reason: "free-text notes reviewed as non-PII operational commentary — two-reviewer sign-off.",
+        subject_column: "pcl_id",
+        repo: TestRepo
+      })
+
+    assert entry.cleared_by != entry.reviewed_by
+
+    registry_entries = NonPii.entries(repo: TestRepo)
+    violations = check_resource(PersonRecord, MapSet.new(), registry_entries)
+    notes_viol = Enum.filter(violations, &String.contains?(&1, notes_col))
+
+    assert notes_viol == [],
+           "Expected :notes NOT to flag after a two-reviewer non_pii! override, " <>
+             "got: #{inspect(violations)}"
   end
 
   # ==========================================================================
@@ -404,8 +447,11 @@ defmodule SamenCore.VerifyPiiClassifyTest do
       assert violations == []
     end
 
-    test "safe resources produce no violations" do
-      # PropFixture has :name, :label, :notes — none are PII-named.
+    # ADR-015: PropFixture's :name/:label/:notes are benign-named freeform strings.
+    # Under the OLD heuristic they passed (no PII-name hit); under default-deny they
+    # ALL flag until vault-routed or two-reviewer-cleared. The old "safe names → no
+    # violations" green is deleted (it was the H-2 silent-pass in miniature).
+    test "uncleared freeform columns all flag under default-deny (was: safe names pass)" do
       violations =
         Mix.Tasks.Samen.Verify.PiiClassify.check(
           [SamenCore.Support.PropFixture],
@@ -413,8 +459,34 @@ defmodule SamenCore.VerifyPiiClassifyTest do
           []
         )
 
+      for col <- ["prp_name", "prp_label", "prp_notes"] do
+        assert Enum.any?(violations, &String.contains?(&1, col)),
+               "Expected freeform #{col} to flag under default-deny, got: #{inspect(violations)}"
+      end
+    end
+
+    # Non-vacuous companion: with a baseline covering those columns (pre-existing
+    # reviewed columns), or after clearance, they no longer flag — proving the flag
+    # is gated by the allowlist, not unconditional.
+    test "baseline-covered freeform columns do not re-flag" do
+      table = AshPostgres.DataLayer.Info.table(SamenCore.Support.PropFixture)
+
+      baseline =
+        MapSet.new([
+          {table, "prp_name"},
+          {table, "prp_label"},
+          {table, "prp_notes"}
+        ])
+
+      violations =
+        Mix.Tasks.Samen.Verify.PiiClassify.check(
+          [SamenCore.Support.PropFixture],
+          baseline,
+          []
+        )
+
       assert violations == [],
-             "Expected no violations for PropFixture (safe names), got: #{inspect(violations)}"
+             "Expected baseline-covered freeform columns NOT to flag, got: #{inspect(violations)}"
     end
   end
 
@@ -422,8 +494,13 @@ defmodule SamenCore.VerifyPiiClassifyTest do
   # Exit-code layer (subprocess)
   # ==========================================================================
 
+  # ADR-015: PropDomain's PropFixture carries benign-named freeform strings
+  # (:name/:label/:notes). Under default-deny the task now EXITS 1 (they flag until
+  # cleared) — the old "exits 0 for benign names" green is inverted. This subprocess
+  # test proves the default-deny reaches the mix-task exit-code layer, not just the
+  # pure scanner.
   @tag :exit_code
-  test "mix task exits 0 for PropDomain (no PII-named columns)" do
+  test "mix task exits 1 for PropDomain (uncleared freeform columns default-deny)" do
     {output, exit_code} =
       System.cmd(
         "mix",
@@ -433,11 +510,11 @@ defmodule SamenCore.VerifyPiiClassifyTest do
         stderr_to_stdout: true
       )
 
-    assert exit_code == 0,
-           "Expected exit 0 for PropDomain, got #{exit_code}.\nOutput: #{output}"
+    assert exit_code == 1,
+           "Expected exit 1 for PropDomain under default-deny, got #{exit_code}.\nOutput: #{output}"
 
-    assert output =~ "OK",
-           "Expected OK banner, got: #{output}"
+    assert output =~ "default-denied",
+           "Expected the default-deny reason in output, got: #{output}"
   end
 
   @tag :exit_code

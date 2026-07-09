@@ -5,19 +5,37 @@ defmodule Samen.Cdc.Projection do
   rows").
 
   Given an Ash resource (or a raw `{table, columns}` spec), compute exactly the
-  set of columns that may be mirrored into the analytics tier. The rule:
+  set of columns that may be mirrored into the analytics tier.
+
+  ## Default-deny for freeform content (ADR-015 · G3)
+
+  The classifier is **default-deny for freeform content types**. A column mirrors
+  ONLY if it is on an explicit allowlist; the projection is an opt-*out* surface,
+  not an opt-*in* heuristic. The rule, in precedence order:
 
     * a **vault-routed** storage column carries a `vt_*` token → mirror it (kind
       `:token`);
-    * a structurally-non-PII scalar (bounded ID / enum / timestamp / number /
-      metadata, per `Samen.Pii.Classification`) → mirror it;
-    * a **plaintext PII** column → **REFUSE**. It is not projected, and
-      `assert_no_plaintext!/1` RAISES on it. A plaintext PII column in the CDC
-      projection is exactly the red path the oracle's `cdc_mirror` tier catches.
+    * a **freeform content** column (`:string`/`:ci_string`/`:text`/`:map`/`:jsonb`,
+      or any type NOT on the structural-safe allowlist) is **REFUSED** (kind
+      `:plaintext_pii`) UNLESS it carries a verifier-backed `non_pii!` clearance
+      (two distinct reviewers, `cleared_by != reviewed_by`) — in which case it
+      mirrors as a safe scalar. A benign-named freeform column with no seed value
+      (`drv_notes`, `owner_bio`) NO LONGER reaches the mirror by naming (ADR-015
+      §1, harden H-2);
+    * a **structural-safe scalar** (bounded ID / enum / timestamp / number / bool,
+      per `Samen.Pii.Classification`) → mirror it (kind `:bounded_id | :enum |
+      :timestamp | :number | :boolean`). This is the ONLY class that mirrors
+      without an explicit allowlist entry — and the over-block guard (RP-G3-3)
+      proves it is not swept up by the default-deny.
 
-  The classifier is the SAME mask-unknown-by-default oracle the C4/C5 verifiers use
-  (`Samen.NoPlaintextPii.Context.plaintext_pii_type?/1`) — an unknown/custom type
-  is treated as PII (fail safe), never waved into the mirror.
+  A **plaintext PII** column that is not cleared is not projected, and
+  `assert_no_plaintext!/1` RAISES on an explicit demand for it — exactly the red
+  path the oracle's `cdc_mirror` tier catches.
+
+  The classifier keys on the SAME mask-unknown-by-default oracle the C4/C5
+  verifiers use (`Samen.NoPlaintextPii.Context.plaintext_pii_type?/1`) — an
+  unknown/custom type is freeform → refused (fail safe), never waved into the
+  mirror by a `:metadata` fall-through.
 
   ## Why this is adapter-independent
 
@@ -30,6 +48,7 @@ defmodule Samen.Cdc.Projection do
 
   alias Samen.Pii.Info, as: PiiInfo
   alias Samen.NoPlaintextPii.Context
+  alias Samen.NonPii
 
   @typedoc "A projected column: `{column_name, kind}`."
   @type column :: {String.t(), atom()}
@@ -59,10 +78,10 @@ defmodule Samen.Cdc.Projection do
   you want a HARD failure on any plaintext PII column rather than a silent drop —
   the CDC pipeline and the oracle both assert.
   """
-  @spec project(module()) :: [column()]
-  def project(resource) do
+  @spec project(module(), keyword()) :: [column()]
+  def project(resource, opts \\ []) do
     resource
-    |> classify_columns()
+    |> classify_columns(opts)
     |> Enum.reject(fn {_col, kind} -> kind == :plaintext_pii end)
   end
 
@@ -82,9 +101,9 @@ defmodule Samen.Cdc.Projection do
   mirror ALL columns of this resource verbatim?" (false whenever it has any
   un-vaulted plaintext string).
   """
-  @spec assert_no_plaintext!(module(), [String.t()] | :all) :: :ok
-  def assert_no_plaintext!(resource, requested \\ :all) do
-    classified = classify_columns(resource)
+  @spec assert_no_plaintext!(module(), [String.t()] | :all, keyword()) :: :ok
+  def assert_no_plaintext!(resource, requested \\ :all, opts \\ []) do
+    classified = classify_columns(resource, opts)
     by_col = Map.new(classified)
 
     cols =
@@ -112,44 +131,76 @@ defmodule Samen.Cdc.Projection do
   Classify every physical column of `resource` into a projection kind:
 
     * `:token`        — a vault-routed storage column (holds a `vt_*` token);
-    * `:plaintext_pii`— a plaintext PII column (REFUSED from the mirror);
-    * `:bounded_id | :enum | :timestamp | :number | :metadata` — safe scalars.
+    * `:plaintext_pii`— a plaintext / freeform PII column (REFUSED from the mirror);
+    * `:bounded_id | :enum | :timestamp | :number | :boolean` — structural-safe
+      scalars, OR a freeform column that carries a two-reviewer `non_pii!` clearance.
 
   Exposed for the oracle + tests to inspect the full classification, including the
   refused columns.
+
+  Options:
+    * `:non_pii_entries` — inject the `non_pii!` registry entries (a list of
+      `%Samen.NonPii.Entry{}` or maps with `:table_name`/`:column_name`/`:cleared_by`/
+      `:reviewed_by`). Bypasses the DB registry lookup — used by tests. When absent,
+      the live `Samen.NonPii.entries/0` registry is consulted (fail-closed to `[]`).
   """
-  @spec classify_columns(module()) :: [column()]
-  def classify_columns(resource) do
+  @spec classify_columns(module(), keyword()) :: [column()]
+  def classify_columns(resource, opts \\ []) do
     table = table_name(resource)
     vault_routed = vault_routed_set(resource, table)
+    non_pii_cleared = non_pii_cleared_set(table, opts)
 
     resource
     |> Ash.Resource.Info.attributes()
     |> Enum.map(fn attr ->
       col = to_string(attr.source || attr.name)
-      kind = classify(col, attr.type, vault_routed)
+      kind = classify(col, attr.type, vault_routed, non_pii_cleared)
       {col, kind}
     end)
     |> Enum.sort_by(&elem(&1, 0))
   end
 
-  # A vault-routed storage column is a token by construction — always safe.
-  # Otherwise the DECLARED Ash type decides: plaintext-PII types are refused;
-  # everything the shared classifier calls non-PII is a safe scalar we bucket into
-  # a coarse projection kind (bounded_id / enum / timestamp / number / metadata).
-  defp classify(col, type, vault_routed) do
+  # Default-deny classifier (ADR-015 §2). Precedence:
+  #
+  #   1. vault-routed        -> :token   (a vt_* token by construction — always safe)
+  #   2. structural-safe     -> scalar_kind/1 (bounded_id/enum/timestamp/number/bool)
+  #      — the ONLY class that mirrors without an explicit allowlist entry.
+  #   3. freeform + cleared  -> scalar_kind/1 (the `non_pii!` two-reviewer allowlist)
+  #   4. everything else freeform -> :plaintext_pii  (DEFAULT DENY)
+  #
+  # Structural-safe is checked BEFORE the freeform refuse so IDs/enums/dates/
+  # numbers/bools are NEVER swept up by the default-deny (the RP-G3-3 over-block
+  # guard). Freeform types (string/text/map/jsonb + any unknown/custom type) reach
+  # step 3/4: they mirror ONLY with a distinct-two-reviewer `non_pii!` clearance,
+  # never by benign naming or a `:metadata` fall-through (harden H-2).
+  defp classify(col, type, vault_routed, non_pii_cleared) do
     cond do
       MapSet.member?(vault_routed, col) -> :token
-      Context.plaintext_pii_type?(type) -> :plaintext_pii
-      true -> scalar_kind(type)
+      structural_safe?(type) -> scalar_kind(type)
+      MapSet.member?(non_pii_cleared, col) -> scalar_kind(type)
+      true -> :plaintext_pii
     end
   end
 
+  # A type is structural-safe iff the shared mask-unknown-by-default classifier
+  # says it is NOT plaintext PII: bounded id (uuid), enum (atom), timestamp
+  # (utc/naive datetime, time), number (integer/float/decimal), boolean. Everything
+  # the classifier calls PII — string/ci_string/text/map/jsonb and every unknown or
+  # custom type — is FREEFORM and falls to the default-deny branch. Vault-routed
+  # token columns are handled earlier; a raw `VaultField` type is also non-PII here.
+  defp structural_safe?(type), do: not Context.plaintext_pii_type?(type)
+
+  # Bucket a structural-safe (or cleared-freeform) type into a coarse projection
+  # kind. `:metadata` is NO LONGER a default-allow fall-through — an unrecognized
+  # type never reaches here as freeform (default-deny caught it upstream); a
+  # `non_pii!`-cleared freeform string lands in `:metadata` as an explicitly-cleared
+  # safe scalar.
   defp scalar_kind(type) do
     short = type |> inspect() |> String.trim_leading("Ash.Type.") |> String.downcase()
 
     cond do
       String.contains?(short, "uuid") -> :bounded_id
+      String.contains?(short, "boolean") -> :boolean
       String.contains?(short, "atom") -> :enum
       String.contains?(short, "datetime") or String.contains?(short, "date") or
           String.contains?(short, "time") ->
@@ -173,5 +224,32 @@ defmodule Samen.Cdc.Projection do
     else
       MapSet.new()
     end
+  end
+
+  # The set of physical column names on `table` cleared by a VALID `non_pii!`
+  # override (distinct second reviewer, `cleared_by != reviewed_by`). Same
+  # distinct-party discipline the reveal grant + the C4 verifier enforce — a single
+  # actor cannot wave a freeform column into the mirror.
+  #
+  # Entries may be injected via `opts[:non_pii_entries]` (tests); otherwise the live
+  # `Samen.NonPii` registry is consulted, failing CLOSED to `[]` (no repo → no
+  # clearances → default-deny holds) rather than opening the projection.
+  defp non_pii_cleared_set(nil, _opts), do: MapSet.new()
+
+  defp non_pii_cleared_set(table, opts) do
+    (Keyword.get(opts, :non_pii_entries) || safe_registry_entries())
+    |> Enum.filter(fn e ->
+      to_string(e.table_name) == table and e.cleared_by != e.reviewed_by
+    end)
+    |> Enum.map(fn e -> to_string(e.column_name) end)
+    |> MapSet.new()
+  end
+
+  defp safe_registry_entries do
+    NonPii.entries()
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
   end
 end

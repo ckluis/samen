@@ -52,6 +52,17 @@ config :samen_core, :catalog_parity_allow_list, [
   {"pat_patient", "pat_subject_id"}
 ]
 
+# ADR-014 RP-D3 suppression fixture (test/support/suppression_fixture.ex) mounts the
+# Marketing scope under `sx*` abbrevs to prove the kernel suppression check is portable.
+# Its Subscriber declares the standard vault-routed `email` (column `pii_sxs_email`), so
+# the column is a real vault promise — but the fixture domain is deliberately NOT in
+# `:ash_domains` (kept out of the CI verifier/catalog sweeps), so `vault_declared_parity`
+# cannot discover the route. Allow-list the pair: the route IS declared, just not on a
+# registered domain. (catalog_parity is satisfied because catalog_sync catalogs it.)
+config :samen_core, :vault_declared_parity_allow_list, [
+  {"sxs_subscriber", "pii_sxs_email"}
+]
+
 # T2.6 OTel test config: use the pid exporter so tests receive spans as messages
 # and can assert on attributes inline. The simple processor sends spans
 # synchronously (no buffer) so spans are delivered before the test assertion.

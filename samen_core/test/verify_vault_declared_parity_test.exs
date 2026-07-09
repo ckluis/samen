@@ -44,13 +44,22 @@ defmodule SamenCore.VerifyVaultDeclaredParityTest do
     Task.routed_vault_columns(resources)
   end
 
+  # The configured allow-list (intentional pii_* columns whose route lives in a
+  # domain NOT registered in test `:ash_domains` — e.g. the RP-D3 suppression
+  # fixture's `sxs_subscriber.pii_sxs_email`). The real mix task loads this too.
+  defp allow_list do
+    :samen_core
+    |> Application.get_env(:vault_declared_parity_allow_list, [])
+    |> MapSet.new(fn {t, c} -> {t, c} end)
+  end
+
   # ============================================================
   # Green path: parity holds on the correctly-routed DB
   # ============================================================
 
   describe "green path" do
     test "clean DB: every pii_* column is declared-routed → no violations" do
-      violations = Task.check(TestRepo, routed())
+      violations = Task.check(TestRepo, routed(), allow_list())
 
       assert violations == [],
              "Expected no violations on a clean DB, got: #{inspect(violations)}"

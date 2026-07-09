@@ -20,8 +20,10 @@ defmodule Driftwood.NonPiiSetup do
   # non_pii columns are erased by row-level text redaction on a driver crypto-shred,
   # NOT key-shred. Both registered columns are TEXT-typed so the substrate's
   # text-redaction arm can overwrite the plaintext. `drv_medical_card_expiry` is a
-  # :date column that pii_classify does NOT flag (its name has no PII token), so it
-  # needs no clearance and is erased by row deletion with the driver.
+  # :date column with no clearance: under the ADR-015 default-deny flip it is
+  # grandfathered by the committed schema.dict.json baseline (it would flag as a
+  # NEW column), stays EXCLUDED from the CDC/aggregate projection (the A1 triage's
+  # conservative default), and is erased by row deletion with the driver.
   @columns [
     {"drv_driver", "drv_cdl_state", "[REDACTED_NON_PII]",
      "The CDL ISSUING STATE (a 2-letter US state code, e.g. 'TX'). Not subject-identifying " <>

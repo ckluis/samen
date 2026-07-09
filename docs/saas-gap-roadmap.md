@@ -106,6 +106,9 @@ vault-excluded CDC projection. Pure read/compute layers over already-governed da
 privacy-correct-by-construction moat.
 
 ### WS-C — "Truth & Trust" (G3 + G19 + G27 selections)
+> Carry from A1 gate (INFO-1): a host custom TYPE self-classifying `samen_pii_class/0 => :non_pii`
+> bypasses the two-reviewer `non_pii!` clearance discipline (single-party escape hatch,
+> `classification.ex:90`). No kernel type or vertical uses it today; close or reviewer-gate it here.
 Replace the non-PII heuristic with a real mechanism (default-deny freeform strings from the
 aggregate plane; explicit provable allowlist with verifier backing), DSAR self-serve export,
 retention admin. Small surface, protects the load-bearing claim.

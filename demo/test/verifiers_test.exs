@@ -110,12 +110,52 @@ defmodule Demo.VerifiersTest do
   # =========================================================================
 
   describe "C4 pii_classify" do
-    test "no unclassified PII-shaped columns in demo resources" do
+    # ADR-015 (A1): the classifier is default-deny for freeform content. Contact's
+    # dob/full_name/emails are vault-routed (cleared by construction); the Crm
+    # triage cleared the four bounded label strings via two-reviewer non_pii!
+    # (Demo.Crm.NonPiiSetup); org_name + cnt_display_name were deliberately LEFT
+    # EXCLUDED (conservative default — they stay out of the CDC mirror and re-flag
+    # if ever re-introduced as new columns).
+    test "default-deny + triage clearances classify demo Crm resources (ADR-015)" do
       resources = [Demo.Crm.Org, Demo.Crm.Membership, Demo.Crm.Contact]
-      violations = Mix.Tasks.Samen.Verify.PiiClassify.check(resources)
 
-      # The demo's Contact has dob declared as pii_attribute (cleared),
-      # full_name and emails too. display_name and active are non-PII.
+      # RED PATH (the ADR-015 flip): with NO baseline and NO clearances, EVERY
+      # freeform column flags — benign naming no longer reaches the mirror. This
+      # assertion FAILS if the classifier ever regresses to the name heuristic.
+      uncleared = Samen.PiiClassify.scan_resources(resources, MapSet.new(), [])
+      uncleared_cols = uncleared |> Enum.map(& &1.column_name) |> Enum.sort()
+
+      assert uncleared_cols == [
+               "cnt_display_name",
+               "mbr_role",
+               "mbr_status",
+               "org_name",
+               "org_plan",
+               "org_slug"
+             ],
+             "default-deny must flag every uncleared freeform Crm column, got: " <>
+               inspect(uncleared_cols)
+
+      # GREEN: with the A1 triage clearances registered, only the deliberately
+      # left-excluded columns still flag (they are NOT cleared and NOT mirrored).
+      :ok = Demo.Crm.NonPiiSetup.register_all()
+      entries = Samen.NonPii.entries()
+
+      remaining =
+        resources
+        |> Samen.PiiClassify.scan_resources(MapSet.new(), entries)
+        |> Enum.map(& &1.column_name)
+        |> Enum.sort()
+
+      assert remaining == ["cnt_display_name", "org_name"],
+             "expected only the left-excluded triage columns to flag, got: " <>
+               inspect(remaining)
+
+      # CI stance: the committed schema.dict.json baseline grandfathers the
+      # pre-flip columns, so the C4 gate stays green (AC-G3-4).
+      baseline = Samen.PiiClassify.load_baseline(Path.join(@project_dir, "schema.dict.json"))
+      violations = Mix.Tasks.Samen.Verify.PiiClassify.check(resources, baseline, entries)
+
       assert violations == [],
              "C4 pii_classify found unclassified PII: #{inspect(violations)}"
     end

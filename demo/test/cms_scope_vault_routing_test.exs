@@ -7,8 +7,9 @@ defmodule Demo.CmsScopeVaultRoutingTest do
 
     1. Proves NO vault tokens appear in CMS rows (all fields are plain, not
        vault-routed).
-    2. Proves the `pii_classify` heuristic does not flag any CMS column (no
-       PII-name-token hits).
+    2. Proves the `pii_classify` default-deny (ADR-015) flags uncleared freeform
+       CMS columns, and that the committed baseline / two-reviewer `non_pii!`
+       clearances are the ONLY ways a freeform column passes.
     3. Proves `csm_description` is classified as non-PII via the registry
        (the mask-unknown-by-default proof — D9).
     4. Proves the non-PII registration requires distinct reviewers (distinct-party
@@ -146,25 +147,45 @@ defmodule Demo.CmsScopeVaultRoutingTest do
   end
 
   # =========================================================================
-  # pii_classify does not flag CMS columns.
+  # pii_classify default-denies CMS freeform columns (ADR-015).
   # =========================================================================
 
-  test "pii_classify does not flag CMS page or post columns (non-PII name tokens)" do
-    # These column names are NOT in the PII name-token list in pii_classify.ex
-    # (ssn, dob, mrn, cdl, tax_id, email, phone, address, …). They should pass.
+  test "pii_classify default-denies uncleared CMS freeform columns; baseline + non_pii! clear (ADR-015)" do
+    # ADR-015 flip: a freeform CMS column with a benign name (title/body/slug/…)
+    # is NO LONGER waved through by the name-token heuristic. New + uncleared →
+    # it flags with a freeform default-deny reason. The committed schema.dict.json
+    # baseline grandfathers the pre-flip columns (CI stays green, AC-G3-4), and a
+    # two-reviewer non_pii! entry clears a column deliberately (csm_description).
     alias Samen.PiiClassify
 
-    non_pii_fields = [:title, :body, :slug, :excerpt, :description, :meta_title,
-                      :alt_text, :label, :url, :content, :og_title, :og_description,
-                      :canonical_url, :change_summary]
+    # RED PATH: with no baseline and no registry, every freeform Page column
+    # flags — including the benign-named ones the old heuristic passed silently.
+    flags = PiiClassify.scan_resource(Demo.CmsScope.Page, MapSet.new(), [])
+    flagged = Enum.map(flags, & &1.logical_name)
 
-    Enum.each(non_pii_fields, fn field_name ->
-      flags = PiiClassify.scan_resource(Demo.CmsScope.Page, MapSet.new(), [])
-      pii_flag_names = Enum.map(flags, & &1.logical_name)
-
-      refute field_name in pii_flag_names,
-             "pii_classify should NOT flag CMS field #{inspect(field_name)}"
+    Enum.each([:title, :body, :slug], fn field_name ->
+      assert field_name in flagged,
+             "default-deny must flag uncleared freeform CMS field #{inspect(field_name)}"
     end)
+
+    assert Enum.all?(flags, fn f ->
+             Enum.any?(f.reasons, &String.contains?(&1, "default-denied"))
+           end),
+           "every flag must carry the freeform default-deny reason"
+
+    # GREEN: the committed baseline grandfathers the pre-flip columns — the C4
+    # CI gate does not re-flag them.
+    baseline = PiiClassify.load_baseline(Path.expand("../schema.dict.json", __DIR__))
+    assert PiiClassify.scan_resource(Demo.CmsScope.Page, baseline, []) == []
+
+    # GREEN: a two-reviewer non_pii! clearance clears a column without the
+    # baseline (csm_description — the load-bearing D9 registration).
+    :ok = Demo.CmsScope.NonPiiSetup.register_all()
+    entries = Samen.NonPii.entries()
+
+    seo_flags = PiiClassify.scan_resource(Demo.CmsScope.SeoMeta, MapSet.new(), entries)
+    refute :description in Enum.map(seo_flags, & &1.logical_name),
+           "non_pii!-cleared csm_description must not flag"
   end
 
   # =========================================================================

@@ -217,6 +217,10 @@ defmodule Samen.Cdc.LocalPostgres do
   defp sql_type(:enum), do: "text"
   defp sql_type(:timestamp), do: "timestamptz"
   defp sql_type(:number), do: "numeric"
+  # A boolean mirrors as text: the CDC feed carries values as strings ("true"/
+  # "false"), matching how the token-blind row is projected. (ADR-015 gave boolean
+  # its own projection kind so it is no longer swept into the :metadata fall-through.)
+  defp sql_type(:boolean), do: "text"
   defp sql_type(:metadata), do: "text"
 
   defp maybe_comma(""), do: ""

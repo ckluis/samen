@@ -60,9 +60,11 @@ defmodule Demo.CmsScope.NonPiiSetup do
   discipline as reveal grants). The `pii_classify` verifier (C4) checks the registry
   at build time and fails the build on any flagged column without a valid registration.
 
-  None of the CMS free-text fields (`title`, `body`, `description`, `alt_text`,
-  `label`) are flagged by C4 because their names are not in the PII name-token list
-  (`ssn·dob·mrn·cdl·tax_id·email·phone·address·…`). However, we register
+  Under the ADR-015 default-deny flip, EVERY freeform CMS field (`title`, `body`,
+  `description`, `alt_text`, `label`) is flagged by C4 when new — benign naming no
+  longer passes. The pre-flip columns are grandfathered by the committed
+  `schema.dict.json` baseline (AC-G3-4) and remain EXCLUDED from the CDC/aggregate
+  projection (the conservative triage default). We register
   `csm_seo_meta.csm_description` explicitly because:
 
     1. "description" is a common free-text field that auditors flag in reviews.

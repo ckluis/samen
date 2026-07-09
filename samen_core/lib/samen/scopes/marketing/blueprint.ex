@@ -19,8 +19,10 @@ defmodule Samen.Scopes.Marketing.Blueprint do
   The `define_send` macro emits a `:create_checked` action (the only way to create a
   send row) that:
 
-  1. Looks up the subscriber's org and checks whether a `msp_suppression` row exists
-     for `(org_id, subscriber_id)`.
+  1. Looks up the subscriber's org and checks whether an active suppression row
+     exists for `(org_id, subscriber_id)`. The check is an `OrgScope`-inheriting Ash
+     read of THIS mount's own `Suppression` resource (no hardcoded table name), so it
+     is portable across mount abbrevs (ADR-014 §4, Invariant D2).
   2. If suppressed → returns `{:error, :suppressed}` without writing any row or
      enqueuing any job.
   3. If not suppressed → inserts the send row and enqueues an Oban job in the
@@ -297,7 +299,7 @@ defmodule Samen.Scopes.Marketing.Blueprint do
              subscriber_mod,
              campaign_mod,
              template_mod,
-             _suppression_mod
+             suppression_mod
            ) do
     quote do
       defmodule unquote(module) do
@@ -334,7 +336,9 @@ defmodule Samen.Scopes.Marketing.Blueprint do
           attribute(:status, :atom,
             public?: true,
             default: :queued,
-            constraints: [one_of: [:queued, :sending, :delivered, :bounced, :failed, :suppressed]]
+            constraints: [
+              one_of: [:queued, :sending, :delivered, :blocked, :bounced, :failed, :suppressed]
+            ]
           )
           attribute(:queued_at, :utc_datetime, public?: true)
           attribute(:sent_at, :utc_datetime, public?: true)
@@ -388,11 +392,13 @@ defmodule Samen.Scopes.Marketing.Blueprint do
             argument(:campaign_id, :uuid, allow_nil?: true)
             argument(:template_id, :uuid, allow_nil?: true)
 
-            change(fn changeset, _ctx ->
+            change(fn changeset, ctx ->
               subscriber_id = Ash.Changeset.get_argument(changeset, :subscriber_id)
               org_id = Ash.Changeset.get_argument(changeset, :org_id)
               repo = unquote(repo)
               subscriber_mod = unquote(subscriber_mod)
+              suppression_mod = unquote(suppression_mod)
+              actor = Map.get(ctx, :actor)
 
               # F3.2 same-org FK: BEFORE the suppression query, confirm the
               # referenced subscriber belongs to THIS send's org. Otherwise an
@@ -437,26 +443,108 @@ defmodule Samen.Scopes.Marketing.Blueprint do
                   )
 
                 true ->
-                  send_checked(changeset, repo, org_id, subscriber_id)
+                  send_checked(changeset, repo, org_id, subscriber_id, suppression_mod, actor)
               end
             end)
           end
         end
 
         # Suppression check + write, run only after the same-org FK check passes.
-        defp send_checked(changeset, repo, org_id, subscriber_id) do
-          # Check suppression: is there an active row in the suppression table
-          # for this (org_id, subscriber_id)? If so, refuse the send.
-          # The suppression table is always `msp_suppression` (Marketing scope abbrev msp).
-          suppressed? =
-            case repo.query(
-                   "SELECT 1 FROM msp_suppression WHERE msp_org_id = $1 AND msp_subscriber_id = $2 AND msp_active = true LIMIT 1",
-                   [Ecto.UUID.dump!(org_id), Ecto.UUID.dump!(subscriber_id)]
-                 ) do
-              {:ok, %{rows: [_ | _]}} -> true
-              _ -> false
-            end
+        #
+        # ADR-014 §4 (Invariant D2): the check queries the table owned by THIS
+        # blueprint's declared abbrev — no `msp` literal survives, so the mount
+        # portably enforces suppression under ANY abbrev (msp, wmp, xyz, …).
+        #
+        # Preferred form: an Ash read on the mounted Suppression resource, which
+        # inherits `OrgScope` (`record.org_id == actor.org_id`) — so the check is
+        # bounded to the send's own org by construction and needs no table string
+        # at all. The read is scoped to a minimal actor carrying THIS send's org_id
+        # (already proven equal to the caller's org by the same-org FK check above),
+        # so a cross-org suppression row is invisible exactly as it must be.
+        #
+        # Fall back to an abbrev-derived raw query ONLY if the Suppression resource
+        # is not an addressable Ash resource at this point — never to the literal.
+        # Both branches fail CLOSED (an unresolvable check refuses the send) so a
+        # broken mount can never silently bypass suppression.
+        defp send_checked(changeset, repo, org_id, subscriber_id, suppression_mod, actor) do
+          case suppressed?(suppression_mod, repo, org_id, subscriber_id, actor) do
+            {:error, reason} ->
+              # Fail closed: we could not confirm the subscriber is deliverable.
+              Ash.Changeset.add_error(changeset,
+                field: :subscriber_id,
+                message: "suppression check failed (#{inspect(reason)}) — send refused"
+              )
 
+            suppressed? ->
+              apply_suppression_result(changeset, org_id, subscriber_id, suppressed?)
+          end
+        end
+
+        # Returns true/false, or {:error, reason} when the check cannot be run
+        # (so the caller fails closed). Prefers an Ash read; abbrev-derived SQL is
+        # the reachability fallback.
+        defp suppressed?(suppression_mod, repo, org_id, subscriber_id, actor) do
+          if ash_resource?(suppression_mod) do
+            suppressed_via_ash(suppression_mod, org_id, subscriber_id, actor)
+          else
+            suppressed_via_abbrev_sql(suppression_mod, repo, org_id, subscriber_id)
+          end
+        end
+
+        defp ash_resource?(mod) do
+          Code.ensure_loaded?(mod) and Ash.Resource.Info.resource?(mod)
+        rescue
+          _ -> false
+        end
+
+        # Ash read on the Suppression resource. Scoped to a minimal actor carrying
+        # this send's org_id so `OrgScope` bounds the read to the send's own org.
+        # The filter is a plain keyword statement (`Ash.Query.do_filter/2`) — NOT the
+        # `filter/2` expr macro — so no macro hygiene games are needed inside this
+        # blueprint-generated module.
+        defp suppressed_via_ash(suppression_mod, org_id, subscriber_id, actor) do
+          scope_actor = suppression_actor(actor, org_id)
+
+          suppression_mod
+          |> Ash.Query.for_read(:read, %{}, actor: scope_actor, authorize?: true)
+          |> Ash.Query.do_filter(subscriber_id: subscriber_id, active: true)
+          |> Ash.exists?()
+        rescue
+          e -> {:error, e}
+        end
+
+        # Reuse the caller's actor when it already carries the send's org_id;
+        # otherwise mint a minimal map actor with the send's org_id (the same-org
+        # FK check already proved they are equal — this only covers a nil/absent
+        # actor, e.g. a direct kernel call in a test).
+        defp suppression_actor(%{org_id: aorg} = actor, org_id) when aorg == org_id, do: actor
+        defp suppression_actor(_actor, org_id), do: %{org_id: org_id}
+
+        # Fallback ONLY when the resource is not addressable: derive the table and
+        # columns from the resource's DECLARED abbrev (never a hardcoded literal).
+        defp suppressed_via_abbrev_sql(suppression_mod, repo, org_id, subscriber_id) do
+          case Samen.Info.abbrev(suppression_mod) do
+            abbrev when is_binary(abbrev) ->
+              table = "#{abbrev}_suppression"
+              org_col = "#{abbrev}_org_id"
+              sub_col = "#{abbrev}_subscriber_id"
+              act_col = "#{abbrev}_active"
+
+              case repo.query(
+                     "SELECT 1 FROM #{table} WHERE #{org_col} = $1 AND #{sub_col} = $2 AND #{act_col} = true LIMIT 1",
+                     [Ecto.UUID.dump!(org_id), Ecto.UUID.dump!(subscriber_id)]
+                   ) do
+                {:ok, %{rows: [_ | _]}} -> true
+                {:ok, _} -> false
+                {:error, reason} -> {:error, reason}
+              end
+
+            _ ->
+              {:error, :no_abbrev}
+          end
+        end
+
+        defp apply_suppression_result(changeset, org_id, subscriber_id, suppressed?) do
           if suppressed? do
             Ash.Changeset.add_error(changeset, field: :subscriber_id, message: "suppressed")
           else

@@ -1,9 +1,21 @@
 defmodule Samen.PiiClassify do
   @moduledoc """
-  Heuristic scanner for the `pii_classify` verifier (plan C4; T1.8c).
+  Scanner for the `pii_classify` verifier (plan C4; T1.8c; ADR-015 · G3).
 
-  Implements the two-axis heuristic specified in the vision doc §llm backstop
-  paragraph:
+  ## Default-deny for freeform content (ADR-015)
+
+  A **freeform content** column (`:string`/`:ci_string`/`:text`, and `:date`) is
+  flagged UNLESS it is baseline / vault-routed / `non_pii!`-cleared. The default
+  flips from *flag-on-heuristic-hit* to **flag-unless-cleared** — the same
+  default-deny the CDC projection enforces (`Samen.Cdc.Projection`). A benign-named
+  freeform column with no seed value (`notes`, `status`, `owner_bio`) NO LONGER
+  passes silently: it flags with a `freeform default-deny` reason, forcing a
+  vault-route or a two-reviewer `non_pii!` clearance (ADR-015 §1, harden H-2).
+
+  The two-axis heuristic still runs, but it is now **advisory** — it enriches the
+  reason string (e.g. "identifier-shape name: :ssn matches a PII pattern") so the
+  error message tells the reviewer WHY a column is likely genuine PII vs merely
+  freeform. It is no longer the gate.
 
     1. **Identifier-shape name**: the column's logical name matches a known PII
        identifier pattern (`ssn`, `dob`, `mrn`, `cdl`, `tax_id`, `email`,
@@ -14,10 +26,9 @@ defmodule Samen.PiiClassify do
        `:constraints` carry a value that looks like an email address, an SSN,
        or a phone number.
 
-  **Flag-on-hit, NOT assume-every-string-is-PII.** Only `:string` and `:date`
-  attributes that satisfy at least one axis get flagged. All other types pass
-  through without comment (type-level classification is `Samen.Pii.Classification`'s
-  job).
+  Only `:string`/`:ci_string`/`:date` freeform attributes are scanned; structural-
+  safe types (uuid/enum/timestamp/number/bool) pass through (type-level
+  classification is `Samen.Pii.Classification`'s job — they are never freeform).
 
   ## "New" semantics
 
@@ -140,9 +151,10 @@ defmodule Samen.PiiClassify do
 
   ## Returns
 
-  A list of `flag` maps — one per NEW plain-typed column that hits the heuristic
-  AND is neither vault-routed NOR covered by a valid `non_pii!` override.
-  An empty list means the resource passes.
+  A list of `flag` maps — one per NEW freeform column that is neither baseline,
+  vault-routed, NOR covered by a valid `non_pii!` override. Under default-deny
+  EVERY such column flags (the heuristic only enriches the reason). An empty list
+  means every freeform column on the resource is baseline / vaulted / cleared.
   """
   @spec scan_resource(module(), baseline_set(), [term()]) :: [flag()]
   def scan_resource(resource, baseline \\ MapSet.new(), registry_entries \\ []) do
@@ -166,24 +178,20 @@ defmodule Samen.PiiClassify do
       col = to_string(attr.source || attr.name)
       MapSet.member?(non_pii_cleared, col)
     end)
-    |> Enum.flat_map(fn attr ->
+    |> Enum.map(fn attr ->
       col = to_string(attr.source || attr.name)
-      reasons = flag_reasons(attr)
 
-      if reasons == [] do
-        []
-      else
-        [
-          %{
-            resource: resource,
-            table_name: table,
-            column_name: col,
-            logical_name: attr.name,
-            type: attr.type,
-            reasons: reasons
-          }
-        ]
-      end
+      # DEFAULT-DENY (ADR-015 §2): a freeform column that survived the baseline /
+      # vault-routed / non_pii!-cleared rejections above is flagged unconditionally.
+      # The two-axis heuristic is advisory — it only enriches the reason string.
+      %{
+        resource: resource,
+        table_name: table,
+        column_name: col,
+        logical_name: attr.name,
+        type: attr.type,
+        reasons: flag_reasons(attr)
+      }
     end)
   end
 
@@ -286,8 +294,16 @@ defmodule Samen.PiiClassify do
     |> MapSet.new()
   end
 
-  # Compute the flag reasons for an attribute (could be empty → no flag).
+  # Compute the flag reasons for a freeform attribute. Under default-deny (ADR-015)
+  # the base reason ALWAYS applies (the column is freeform + uncleared); the
+  # heuristic axes are appended as advisory enrichment when they hit, so the error
+  # message distinguishes "likely genuine PII by name/value" from "merely freeform".
   defp flag_reasons(attr) do
+    default_deny_reason =
+      "freeform content column :#{attr.name} (type #{inspect(attr.type)}) is " <>
+        "default-denied: excluded from the CDC/aggregate projection unless " <>
+        "vault-routed (pii_attribute) or cleared via a two-reviewer non_pii! override"
+
     name_reasons =
       if pii_name?(attr.name) do
         ["identifier-shape name: :#{attr.name} matches a PII pattern"]
@@ -297,7 +313,7 @@ defmodule Samen.PiiClassify do
 
     value_reasons = value_shape_reasons(attr)
 
-    name_reasons ++ value_reasons
+    [default_deny_reason] ++ name_reasons ++ value_reasons
   end
 
   # Inspect default values / constraints for PII-shaped sample values.

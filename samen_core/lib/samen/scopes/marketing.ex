@@ -21,7 +21,9 @@ defmodule Samen.Scopes.Marketing do
 
   The `Samen.Scopes.Marketing.Send` resource enforces consent/suppression at the
   action level: attempting to create a send whose subscriber_id appears in the
-  `msp_suppression` table (for the same org) returns `{:error, :suppressed}` — the
+  mount's `<abbrev>_suppression` table (for the same org — checked via an
+  OrgScope-inheriting Ash read on the mounted Suppression resource) returns
+  `{:error, :suppressed}` — the
   send row is never written and no Oban job is enqueued. This is the load-bearing
   red path for this scope.
 

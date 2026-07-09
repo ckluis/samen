@@ -25,6 +25,68 @@ defmodule Demo.Crm do
   end
 end
 
+defmodule Demo.Crm.NonPiiSetup do
+  @moduledoc """
+  ADR-015 (default-deny classifier) one-time triage clearances for the Crm domain.
+
+  Under default-deny, EVERY freeform (`:string`) column is excluded from the CDC
+  projection and flagged by `pii_classify` unless vault-routed or cleared via a
+  two-reviewer `non_pii!` registry entry. These are the Crm columns the A1 triage
+  consciously CLEARED — all four are bounded label strings that should arguably
+  have been enums (exactly the design's "genuinely-safe" example):
+
+  | Table          | Column     | Rationale                                        |
+  |----------------|------------|--------------------------------------------------|
+  | org_org        | org_slug   | Machine-shaped URL routing slug — account label  |
+  | org_org        | org_plan   | Bounded plan-tier label ("free"/…) — enum-shaped |
+  | mbr_membership | mbr_role   | Bounded role label ("member"/…) — enum-shaped    |
+  | mbr_membership | mbr_status | Bounded status label ("active"/…) — enum-shaped  |
+
+  Deliberately NOT cleared (left excluded from the mirror, the conservative
+  default): `org_org.org_name` (tenant-authored business name — may embed a
+  natural person's name for sole proprietors) and `cnt_contact.cnt_display_name`
+  (a person-derived display label — the H-2 example class). Both remain
+  plaintext in the app plane by prior design; they simply never mirror to the
+  analytics tier and re-flag if ever re-introduced as new columns.
+  """
+
+  @non_pii_columns [
+    {"org_org", "org_slug", "org_org_id",
+     "Machine-shaped URL routing slug for the tenant account — bounded charset, " <>
+       "derived label, not subject data. ADR-015 A1 triage."},
+    {"org_org", "org_plan", "org_org_id",
+     "Bounded plan-tier label (\"free\"/\"pro\") — a should-be-enum status string, " <>
+       "not subject data. ADR-015 A1 triage."},
+    {"mbr_membership", "mbr_role", "mbr_org_id",
+     "Bounded role label (\"member\"/\"admin\") — a should-be-enum status string, " <>
+       "not subject data. ADR-015 A1 triage."},
+    {"mbr_membership", "mbr_status", "mbr_org_id",
+     "Bounded membership status label (\"active\"/…) — a should-be-enum status " <>
+       "string, not subject data. ADR-015 A1 triage."}
+  ]
+
+  @doc "Register the Crm triage non-PII clearances. Idempotent."
+  def register_all do
+    Enum.each(@non_pii_columns, fn {table, column, subject_column, reason} ->
+      case Samen.NonPii.register(%{
+             table_name: table,
+             column_name: column,
+             cleared_by: "ADR-015-A1-triage-author",
+             reviewed_by: "ADR-015-A1-gate-reviewer",
+             reason: reason,
+             subject_column: subject_column,
+             redaction: "[REDACTED]"
+           }) do
+        {:ok, _} -> :ok
+        # Already registered (idempotent run)
+        {:error, _} -> :ok
+      end
+    end)
+
+    :ok
+  end
+end
+
 # ---------------------------------------------------------------------------
 # Org: the tenant anchor. A plain Samen resource (no PII).
 # ---------------------------------------------------------------------------
