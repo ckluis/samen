@@ -88,8 +88,9 @@ defmodule Driftwood.BillingUiTest do
       # Non-vacuous: subscription rows present.
       assert html =~ "subscription-row"
 
-      # "Acme Manufacturing Inc" is the first billing customer seeded.
-      assert html =~ "Acme", "tenant plane did not render billing_name in the clear"
+      # "Asheville Brewing Supply Inc" is the first billing customer seeded (the default
+      # Blue Ridge spec's first shipper).
+      assert html =~ "Asheville", "tenant plane did not render billing_name in the clear"
       refute html =~ "vt_"
     end
 
@@ -104,8 +105,8 @@ defmodule Driftwood.BillingUiTest do
       assert html =~ "••••", "operator/impersonation plane did not mask customer billing_name"
 
       # MUST NOT render any seeded plaintext billing names.
-      refute html =~ "Acme Manufacturing Inc", "operator plane leaked customer billing_name in plaintext"
-      refute html =~ "Harbor Foods", "operator plane leaked customer billing_name in plaintext"
+      refute html =~ "Asheville Brewing Supply Inc", "operator plane leaked customer billing_name in plaintext"
+      refute html =~ "Carolina Textile", "operator plane leaked customer billing_name in plaintext"
 
       refute html =~ "vt_"
     end
@@ -115,8 +116,8 @@ defmodule Driftwood.BillingUiTest do
       mount = driftwood_mount(:billing, plane: :tenant)
       html = render_framework(Billing.OverviewLive, mount, [other_org])
 
-      refute html =~ "Acme"
-      refute html =~ "Harbor Foods"
+      refute html =~ "Asheville"
+      refute html =~ "Carolina Textile"
       refute html =~ "vt_"
     end
   end

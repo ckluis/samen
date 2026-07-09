@@ -28,6 +28,18 @@ defmodule DriftwoodWeb.Router do
   import Phoenix.LiveView.Router
   import Samen.Web.Router
 
+  # ADR-013 §4.4 — the current-org data-on-the-mount labels shared by every tenant/shared mount:
+  #   :default_org_id — the sensible dev default (Blue Ridge Logistics), so a page with no ?org
+  #     renders a populated org (resolution step 3), never a dead-end;
+  #   :org_directory  — the `{mod,fun,args}` the framework switcher + name resolution read
+  #     (`Driftwood.Directory.orgs/0` → `[{tenant_org_id, name}]` over the operator accounts).
+  # A module attribute (not a function) so it is a compile-time literal usable inside the
+  # `samen_module_routes` macro expansion; both values are session-safe (a uuid + an MFA of atoms).
+  @current_org_labels %{
+    default_org_id: Driftwood.Seeds.blue_ridge_org_id(),
+    org_directory: {Driftwood.Directory, :orgs, []}
+  }
+
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
@@ -69,16 +81,25 @@ defmodule DriftwoodWeb.Router do
   scope "/" do
     pipe_through(:browser)
 
-    samen_module_routes(:crm, Driftwood.Crm, repo: Driftwood.Repo)
-    samen_module_routes(:billing, Driftwood.Billing, repo: Driftwood.Repo)
-    samen_module_routes(:support, Driftwood.Support, repo: Driftwood.Repo)
+    # ADR-013 §4.3 — the framework SESSION-write endpoint (`GET /session/org/:org_id`), the
+    # target of the workspace switcher + the operator "Open account →". Sets the session current
+    # org so tenant/shared navigation is sticky without a hand-typed UUID.
+    samen_session_routes()
+
+    # ADR-013 §4.4/§4.6 — the current-org data-on-the-mount seams every tenant/shared mount
+    # carries: `default_org_id` (dev default → Blue Ridge Logistics, so a page with no ?org
+    # renders a populated org, not a dead-end) + `org_directory` (the switcher list + the
+    # resolved tenant-name header, over `Driftwood.Directory.orgs/0`).
+    samen_module_routes(:crm, Driftwood.Crm, repo: Driftwood.Repo, labels: @current_org_labels)
+    samen_module_routes(:billing, Driftwood.Billing, repo: Driftwood.Repo, labels: @current_org_labels)
+    samen_module_routes(:support, Driftwood.Support, repo: Driftwood.Repo, labels: @current_org_labels)
 
     # ADR-011 §7 — the Marketing / outreach surface (campaigns · segments · leads), mounted
     # over Driftwood's materialized Marketing scope resources. The `:crm_namespace` label lets
     # the Leads lens read CRM contacts by lifecycle_stage through the same PiiResolution seam.
     samen_module_routes(:marketing, Driftwood.Marketing,
       repo: Driftwood.Repo,
-      labels: %{crm_namespace: Driftwood.Crm}
+      labels: Map.put(@current_org_labels, :crm_namespace, Driftwood.Crm)
     )
 
     # ADR-012 — the FLAGSHIP cross-plane realtime CHAT, TENANT plane (the org's own chat
@@ -89,12 +110,13 @@ defmodule DriftwoodWeb.Router do
     # PubSub server for the realtime path.
     samen_chat_routes(:chat, Driftwood.Chat,
       repo: Driftwood.Repo,
-      labels: %{
-        title: "Blue Ridge Logistics",
-        crumb_root: "Blue Ridge Logistics",
-        pubsub: Driftwood.PubSub,
-        object_cards: %{"freight.driver" => DriftwoodWeb.Chat.DriverCard}
-      }
+      labels:
+        Map.merge(@current_org_labels, %{
+          title: "Blue Ridge Logistics",
+          crumb_root: "Blue Ridge Logistics",
+          pubsub: Driftwood.PubSub,
+          object_cards: %{"freight.driver" => DriftwoodWeb.Chat.DriverCard}
+        })
     )
 
     # ADR-012 §6.3 — the SAME chat LiveViews on the OPERATOR-DESK plane. The SaaS operator
@@ -168,7 +190,15 @@ defmodule DriftwoodWeb.Router do
       repo: Driftwood.Repo,
       operator_org_id: "0f000000-0000-4000-8000-0000000000aa",
       include_aggregate: false,
-      labels: %{operator_workspace: "Driftwood Ops", operator_glyph: "D"}
+      # ADR-013 §5.2 — the operator Accounts "Open account →" two-grade drill-in:
+      #   :tenant_landing   — where act-as (clear) lands (the freight console),
+      #   :impersonate_path — the existing masked operator-plane impersonation surface.
+      labels: %{
+        operator_workspace: "Driftwood Ops",
+        operator_glyph: "D",
+        tenant_landing: "/broker",
+        impersonate_path: "/operator/impersonate"
+      }
     )
   end
 end

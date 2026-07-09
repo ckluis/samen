@@ -18,26 +18,29 @@ defmodule Samen.Web.Support.TicketLive do
 
   import Samen.UI
   import Samen.Web.Support.Live, only: [assign_mount: 2, support_sidebar: 1]
+  import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
+
+  alias Samen.Web.CurrentOrg
+  alias Samen.Web.Mount
 
   alias Samen.Web.Support.Reads
-  alias Samen.Web.Mount
 
   @impl true
   def mount(params, session, socket) do
     socket = assign_mount(socket, session)
-    org_id = Map.get(params, "org")
+    org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
     ticket_id = Map.get(params, "id")
 
-    {:ok, load(assign(socket, org_id: org_id, ticket_id: ticket_id, active_tab: "conversation"), org_id, ticket_id)}
+    {:ok, load(assign(socket, org_id: org_id, ticket_id: ticket_id, active_tab: "conversation", return_to: nil), org_id, ticket_id)}
   end
 
   @impl true
-  def handle_params(params, _uri, socket) do
+  def handle_params(params, uri, socket) do
     org_id = Map.get(params, "org") || socket.assigns.org_id
     ticket_id = Map.get(params, "id") || socket.assigns.ticket_id
     tab = Map.get(params, "tab") || "conversation"
 
-    {:noreply, load(assign(socket, org_id: org_id, ticket_id: ticket_id, active_tab: tab), org_id, ticket_id)}
+    {:noreply, load(assign(socket, org_id: org_id, ticket_id: ticket_id, active_tab: tab, return_to: return_path(uri)), org_id, ticket_id)}
   end
 
   @impl true
@@ -48,7 +51,10 @@ defmodule Samen.Web.Support.TicketLive do
   @doc false
   def load(socket, nil, _ticket_id) do
     current_tab = Map.get(socket.assigns, :active_tab, "conversation")
-    assign(socket, no_org: true, org_id: nil, ticket: nil, conversations: [], agents: [], active_tab: current_tab)
+
+    socket
+    |> ensure_return_to()
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, ticket: nil, conversations: [], agents: [], active_tab: current_tab)
   end
 
   def load(socket, org_id, ticket_id) do
@@ -72,7 +78,9 @@ defmodule Samen.Web.Support.TicketLive do
 
     current_tab = Map.get(socket.assigns, :active_tab, "conversation")
 
-    assign(socket,
+    socket
+    |> ensure_return_to()
+    |> assign(
       no_org: false,
       org_id: org_id,
       ticket: ticket,
@@ -82,16 +90,20 @@ defmodule Samen.Web.Support.TicketLive do
     )
   end
 
+  defp ensure_return_to(socket) do
+    if Map.has_key?(socket.assigns, :return_to), do: socket, else: assign(socket, return_to: nil)
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
     <div id="support-ticket">
       <.app_shell>
         <:sidebar>
-          <.support_sidebar mount={@samen_mount} org_id={@org_id} active={:support_tickets} />
+          <.support_sidebar mount={@samen_mount} org_id={@org_id} active={:support_tickets} return_to={@return_to} />
         </:sidebar>
 
-        <.topbar title={ticket_subject(@ticket)} crumbs={crumbs(@samen_mount, ticket_subject(@ticket))}>
+        <.topbar title={ticket_subject(@ticket)} crumbs={crumbs(@samen_mount, @org_id, ticket_subject(@ticket))}>
           <:actions>
             <.button>
               <:icon>
@@ -104,12 +116,10 @@ defmodule Samen.Web.Support.TicketLive do
           </:actions>
         </.topbar>
 
+        <.acting_as_banner mount={@samen_mount} org_id={@org_id} />
+
         <%= if @no_org do %>
-          <div class="wrap">
-            <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
-              No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
-            </div>
-          </div>
+          <.no_org_card mount={@samen_mount} />
         <% else %>
           <span id="org-banner" style="display:none">Support org: {@org_id}</span>
 
@@ -244,7 +254,7 @@ defmodule Samen.Web.Support.TicketLive do
 
   # -- helpers (MASKING INVARIANT) -------------------------------------------
 
-  defp crumbs(mount, leaf), do: [Mount.label(mount, :crumb_root, "Workspace"), "Support", "Inbox", leaf]
+  defp crumbs(mount, org_id, leaf), do: [CurrentOrg.name(mount, org_id), "Support", "Inbox", leaf]
 
   defp ticket_subject(nil), do: "Ticket"
   defp ticket_subject(%{subject: s}), do: s

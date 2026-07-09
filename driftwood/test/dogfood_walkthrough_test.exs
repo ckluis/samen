@@ -74,7 +74,8 @@ defmodule Driftwood.DogfoodWalkthroughTest do
     # ••••.) The OPERATOR plane still masks (step 7).
     broker_scope = DriftwoodWeb.BrokerLive.broker_scope(a.org_id)
     drivers = Reads.driver_roster(broker_scope)
-    assert length(drivers) == 2
+    # 3 drivers per org: compliant (OK), expiring-medical (still OK), expired-medical (BLOCKED).
+    assert length(drivers) == 3
 
     roster_html =
       render(DriftwoodWeb.BrokerLive, %{

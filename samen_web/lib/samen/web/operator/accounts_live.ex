@@ -136,14 +136,24 @@ defmodule Samen.Web.Operator.AccountsLive do
                       </div>
                       <div>
                         <span style="font-weight:500;color:#3a3b45">{a.name}</span>
-                        <a
-                          :if={a.tenant_org_id}
-                          class="open-account"
-                          href={"/crm/contacts?org=#{a.tenant_org_id}"}
-                          style="display:block;font-size:11px;color:var(--muted)"
-                        >
-                          Open account →
-                        </a>
+                        <div :if={a.tenant_org_id} style="display:flex;gap:10px;font-size:11px">
+                          <a
+                            class="open-account"
+                            href={open_account_href(@samen_mount, a.tenant_org_id)}
+                            style="color:#3B4CCA"
+                            title="Act as this tenant on the TENANT plane (clear) — fill out / QA the demo"
+                          >
+                            Open account →
+                          </a>
+                          <a
+                            class="impersonate-account"
+                            href={impersonate_href(@samen_mount, a.tenant_org_id)}
+                            style="color:var(--muted)"
+                            title="Impersonate on the OPERATOR plane (masked) — the support drill-in"
+                          >
+                            Impersonate (masked) →
+                          </a>
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -167,6 +177,24 @@ defmodule Samen.Web.Operator.AccountsLive do
       </.app_shell>
     </div>
     """
+  end
+
+  # -- entry helpers (ADR-013 §5.2 — two clean grades of drill-in) --------------
+
+  # (1) Act-as / CLEAR — set the session current org via the framework SessionController and
+  # land in the tenant's workspace on the TENANT plane. The tenant landing path is a mount
+  # label (`:tenant_landing`, default `/broker`) so a host lands you on its own home page.
+  defp open_account_href(mount, tenant_org_id) do
+    landing = Samen.Web.Mount.label(mount, :tenant_landing, "/broker")
+    "/session/org/#{tenant_org_id}?return_to=#{URI.encode_www_form(landing)}"
+  end
+
+  # (2) Impersonate / MASKED — the EXISTING operator-plane impersonation drill-in (ADR-009/010),
+  # a host-supplied path (`:impersonate_path` label, default `/operator/impersonate`) carrying
+  # the tenant org via `?org=`. The plane (not the session) is what masks.
+  defp impersonate_href(mount, tenant_org_id) do
+    path = Samen.Web.Mount.label(mount, :impersonate_path, "/operator/impersonate")
+    "#{path}?org=#{tenant_org_id}"
   end
 
   # -- helpers -----------------------------------------------------------------

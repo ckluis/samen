@@ -57,12 +57,12 @@ defmodule Driftwood.WebRedPathsTest do
     refute html =~ "Reed"
     refute html =~ "vt_"
 
-    # POSITIVE CONTROL (non-vacuous): the real non-PII data shape IS present — both
+    # POSITIVE CONTROL (non-vacuous): the real non-PII data shape IS present — all three
     # driver rows render, with FMCSA badges (so this isn't an empty page passing by
     # rendering nothing).
     assert html =~ "fmcsa-ok"
     assert html =~ "fmcsa-blocked"
-    assert length(socket.assigns.drivers) == 2
+    assert length(socket.assigns.drivers) == 3
   end
 
   # ==========================================================================
@@ -257,8 +257,8 @@ defmodule Driftwood.WebRedPathsTest do
       scope = DriftwoodWeb.BrokerLive.broker_scope(s.org_id)
       drivers = Reads.driver_roster(scope)
 
-      # Non-vacuous control: the read returned the real rows.
-      assert length(drivers) == 2
+      # Non-vacuous control: the read returned the real rows (3 seeded drivers per org).
+      assert length(drivers) == 3
 
       html =
         render(DriftwoodWeb.BrokerLive, %{
@@ -287,7 +287,7 @@ defmodule Driftwood.WebRedPathsTest do
 
       # Real rows present (non-vacuous), PII masked, plaintext ABSENT — the operator
       # plane is unchanged by the F2 tenant-plane fix.
-      assert length(socket.assigns.drivers) == 2
+      assert length(socket.assigns.drivers) == 3
       assert html =~ "••••"
       refute html =~ "CDL-OK-"
       refute html =~ "CDL-EXP-"

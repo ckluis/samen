@@ -156,6 +156,7 @@ defmodule Samen.Web.Mount do
     aggregate_loader otp_app status
     user_name user_role user_initials
     chat_path pubsub presence object_cards
+    default_org_id org_directory tenant_landing impersonate_path
   )a
 
   @label_key_strings Map.new(@label_keys, fn k -> {Atom.to_string(k), k} end)

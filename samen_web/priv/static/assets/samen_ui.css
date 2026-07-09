@@ -446,3 +446,55 @@ td.right { text-align: right; }
 .side-min { padding: 14px 16px; display: flex; flex-direction: column; gap: 2px; }
 .side-min b { font-size: 14px; color: var(--ink); }
 .side-min span { font-size: 11px; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; }
+
+/* Workspace switcher (ADR-013 §5.1) — the sidebar chevron becomes a real tenant picker.
+   Plain native <details> disclosure so it works on the dead render with no JS hook. */
+.ws-switcher { margin-left: auto; position: relative; }
+.ws-switcher > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 4px;
+  color: var(--faint); font-size: 12px; padding: 3px 6px; border-radius: 7px;
+  border: 1px solid transparent; user-select: none;
+}
+.ws-switcher > summary::-webkit-details-marker { display: none; }
+.ws-switcher > summary:hover { background: var(--card); border-color: var(--line2); color: var(--ink); }
+.ws-switcher-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.ws-switcher-chevron { font-size: 14px; line-height: 1; }
+.ws-switcher[open] > summary { background: var(--card); border-color: var(--line2); color: var(--ink); }
+.ws-switcher-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; min-width: 220px; z-index: 40;
+  background: #fff; border: 1px solid var(--line2); border-radius: 10px; padding: 6px;
+  box-shadow: 0 12px 30px rgba(20, 22, 30, 0.14);
+}
+.ws-switcher-group {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint);
+  padding: 6px 8px 4px;
+}
+.ws-switcher-item {
+  display: block; padding: 8px 10px; border-radius: 7px; font-size: 13px;
+  color: var(--ink); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ws-switcher-item:hover { background: var(--card); }
+.ws-switcher-item.on { background: #EEF1FC; color: #3B4CCA; font-weight: 600; }
+.ws-switcher-sep { height: 1px; background: var(--line); margin: 6px 4px; }
+.ws-switcher-ops { color: var(--muted); font-weight: 550; }
+
+/* Operator sidebar "act as a tenant →" launcher (ADR-013 §5.1 — the down path). */
+.op-act-as { padding: 8px 10px 4px; }
+.op-act-as .grp {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint);
+  padding: 4px 4px 6px;
+}
+.op-act-as .ws-switcher { margin-left: 0; }
+.op-act-as .ws-switcher > summary { border: 1px solid var(--line2); background: var(--card); justify-content: space-between; }
+.op-act-as .ws-switcher-name { max-width: 150px; }
+
+/* "You are viewing <tenant> · Return to Driftwood Ops" banner (ADR-013 §5.3). */
+.acting-as-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: #EEF1FC; border: 1px solid #C7CFF3; color: #2C378F;
+  padding: 9px 14px; border-radius: 10px; font-size: 13px; margin: 14px;
+}
+.acting-as-tx { flex: 1 1 auto; }
+.acting-as-tx b { font-weight: 650; }
+.acting-as-return { color: #3B4CCA; text-decoration: none; font-weight: 600; white-space: nowrap; }
+.acting-as-return:hover { text-decoration: underline; }

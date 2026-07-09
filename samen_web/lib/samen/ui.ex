@@ -106,6 +106,7 @@ defmodule Samen.UI do
   attr :subtitle, :string, default: nil
   attr :logo, :string, default: "S"
   attr :logo_style, :string, default: nil
+  slot :switcher
   slot :search
   slot :footer
   slot :inner_block, required: true
@@ -119,7 +120,11 @@ defmodule Samen.UI do
           <b>{@title}</b>
           <span :if={@subtitle}>{@subtitle}</span>
         </div>
-        <div class="col">⌄</div>
+        <%= if @switcher != [] do %>
+          {render_slot(@switcher)}
+        <% else %>
+          <div class="col">⌄</div>
+        <% end %>
       </div>
       {render_slot(@search)}
       {render_slot(@inner_block)}

@@ -11,6 +11,7 @@ defmodule Samen.Web.Operator.Live do
   use Phoenix.Component
 
   import Samen.UI
+  import Samen.Web.CurrentOrg, only: [switcher: 1]
 
   alias Samen.Web.Mount
 
@@ -63,6 +64,10 @@ defmodule Samen.Web.Operator.Live do
       </.nav_group>
 
       <:footer>
+        <div class="op-act-as" id="operator-act-as">
+          <div class="grp">Act as a tenant →</div>
+          <.switcher :if={@mount} mount={@mount} return_to="/broker" />
+        </div>
         <div class="foot">
           <div class="av" style="background:#DDE2F5;color:#3B4CCA">{label(@mount, :operator_initials, "OP")}</div>
           <div class="m">

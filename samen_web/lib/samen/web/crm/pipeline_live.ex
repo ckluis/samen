@@ -10,26 +10,31 @@ defmodule Samen.Web.CRM.PipelineLive do
 
   import Samen.UI
   import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1]
+  import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
+
+  alias Samen.Web.CurrentOrg
+  alias Samen.Web.Mount
 
   alias Samen.Web.CRM.Reads
-  alias Samen.Web.Mount
 
   @impl true
   def mount(params, session, socket) do
     socket = assign_mount(socket, session)
-    org_id = Map.get(params, "org")
+    org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
     {:ok, load(assign(socket, org_id: org_id), org_id)}
   end
 
   @impl true
-  def handle_params(params, _uri, socket) do
+  def handle_params(params, uri, socket) do
     org_id = Map.get(params, "org") || socket.assigns.org_id
-    {:noreply, load(assign(socket, org_id: org_id), org_id)}
+    {:noreply, load(assign(socket, org_id: org_id, return_to: return_path(uri)), org_id)}
   end
 
   @doc false
   def load(socket, nil) do
-    assign(socket, no_org: true, org_id: nil, stages: [], total_value_cents: 0, total_opps: 0)
+    socket
+    |> ensure_return_to()
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, stages: [], total_value_cents: 0, total_opps: 0)
   end
 
   def load(socket, org_id) do
@@ -45,7 +50,9 @@ defmodule Samen.Web.CRM.PipelineLive do
     total_opps =
       stages |> Enum.map(& &1.opportunities) |> Enum.map(&length/1) |> Enum.sum()
 
-    assign(socket,
+    socket
+    |> ensure_return_to()
+    |> assign(
       no_org: false,
       org_id: org_id,
       stages: stages,
@@ -54,16 +61,20 @@ defmodule Samen.Web.CRM.PipelineLive do
     )
   end
 
+  defp ensure_return_to(socket) do
+    if Map.has_key?(socket.assigns, :return_to), do: socket, else: assign(socket, return_to: nil)
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
     <div id="crm-pipeline">
       <.app_shell>
         <:sidebar>
-          <.crm_sidebar mount={@samen_mount} org_id={@org_id} active={:crm_pipeline} />
+          <.crm_sidebar mount={@samen_mount} org_id={@org_id} active={:crm_pipeline} return_to={@return_to} />
         </:sidebar>
 
-        <.topbar title="Pipeline" crumbs={crumbs(@samen_mount, "Pipeline")}>
+        <.topbar title="Pipeline" crumbs={crumbs(@samen_mount, @org_id, "Pipeline")}>
           <:actions>
             <.button variant="primary">
               <:icon>
@@ -76,12 +87,10 @@ defmodule Samen.Web.CRM.PipelineLive do
           </:actions>
         </.topbar>
 
+        <.acting_as_banner mount={@samen_mount} org_id={@org_id} />
+
         <%= if @no_org do %>
-          <div class="wrap">
-            <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
-              No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
-            </div>
-          </div>
+          <.no_org_card mount={@samen_mount} />
         <% else %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
@@ -159,7 +168,7 @@ defmodule Samen.Web.CRM.PipelineLive do
 
   # -- helpers -----------------------------------------------------------------
 
-  defp crumbs(mount, leaf), do: [Mount.label(mount, :crumb_root, "Workspace"), "CRM", leaf]
+  defp crumbs(mount, org_id, leaf), do: [CurrentOrg.name(mount, org_id), "CRM", leaf]
 
   defp stage_value(opps), do: Enum.reduce(opps, 0, &((&1.value_cents || 0) + &2))
 

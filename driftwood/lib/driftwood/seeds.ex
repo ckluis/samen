@@ -70,56 +70,93 @@ defmodule Driftwood.Seeds do
   @doc "The FIXED Blue Ridge Logistics tenant org id the dev seed populates."
   def blue_ridge_org_id, do: @blue_ridge_org_id
 
-  # ~8 CRM companies — carriers, shippers, and a factoring/broker partner.
-  @companies [
-    %{name: "Blue Ridge Carriers", role: "carrier"},
-    %{name: "Summit Line Haul", role: "carrier"},
-    %{name: "Cascade Freight Systems", role: "carrier"},
-    %{name: "Ironwood Trucking", role: "carrier"},
-    %{name: "Acme Manufacturing", role: "shipper"},
-    %{name: "Harbor Foods Distribution", role: "shipper"},
-    %{name: "Piedmont Steel Co", role: "shipper"},
-    %{name: "Riverbend Paper Mills", role: "shipper"}
+  # ADR-013 §8.1 — the FIVE named brokerages (fixed uuids so dev links + tests are stable),
+  # each fully populated across every module + plane. Varied name/lane/tier/MRR so the accounts
+  # table, Portfolio aggregate, and dunning surface look alive (mixed health, ≥2 per cohort).
+  #
+  # Each spec also carries the per-tenant BRANDING (task: "make it VARIED and realistic — different
+  # sizes/health/lanes so the operator dashboard tells a story"): `domain`, the brokerage's own
+  # `carriers`/`shippers`/`factoring` partner Company names, a `prefix` for its load/ticket numbers,
+  # its `origin`/`dest` cities + `equipment`, and a `size` band (small/mid/large — drives contact
+  # count & fleet size). All branded strings the CRM/Billing/Support/Marketing/Chat seeders derive
+  # from THIS spec, so an operator drilling into Summit sees Summit's carriers/contacts/emails —
+  # not a Blue-Ridge clone.
+  @brokerages [
+    %{
+      org_id: "b1112d00-0000-4000-8000-000000000001",
+      name: "Blue Ridge Logistics", lane: "TX->CA", tier: "growth", mrr_cents: 250_000,
+      domain: "blueridgelogistics.example", prefix: "BR", size: :mid,
+      origin: "Dallas", dest: "Los Angeles", equipment: "dry van",
+      carriers: ["Appalachian Freight Lines", "Smoky Mountain Trucking", "Piedmont Haulers"],
+      shippers: ["Asheville Brewing Supply", "Carolina Textile Mills", "Blue Ridge Bottling", "Tarheel Building Products"],
+      factoring: "Ridgeline Factoring Partners"
+    },
+    %{
+      org_id: "b1112d00-0000-4000-8000-000000000002",
+      name: "Summit Freight Partners", lane: "IL->GA", tier: "growth", mrr_cents: 300_000,
+      domain: "summitfreight.example", prefix: "SF", size: :mid,
+      origin: "Chicago", dest: "Atlanta", equipment: "reefer",
+      carriers: ["Great Lakes Line Haul", "Prairie State Carriers", "Windy City Transport"],
+      shippers: ["Midwest Cold Storage", "Peachtree Foods", "Lakeshore Packaging", "Dixie Beverage Co"],
+      factoring: "Summit Capital Factoring"
+    },
+    %{
+      org_id: "b1112d00-0000-4000-8000-000000000003",
+      name: "Gulf Stream Carriers", lane: "FL->NY", tier: "scale", mrr_cents: 480_000,
+      domain: "gulfstreamcarriers.example", prefix: "GS", size: :large,
+      origin: "Miami", dest: "Newark", equipment: "flatbed",
+      carriers: ["Everglades Transport", "Palmetto Line Haul", "Atlantic Coast Trucking", "Biscayne Freight Systems"],
+      shippers: ["Sunshine Produce Exchange", "Empire Steel Supply", "Coastal Marine Outfitters", "Hudson Valley Distributors"],
+      factoring: "Gulf Coast Factoring Group"
+    },
+    %{
+      org_id: "b1112d00-0000-4000-8000-000000000004",
+      name: "Cascade Freightways", lane: "WA->AZ", tier: "starter", mrr_cents: 120_000,
+      domain: "cascadefreightways.example", prefix: "CF", size: :small,
+      origin: "Seattle", dest: "Phoenix", equipment: "dry van",
+      carriers: ["Rainier Regional Carriers", "Columbia River Transport"],
+      shippers: ["Emerald City Roasters", "Desert Valley Produce", "Pacific Timber Products"],
+      factoring: "Evergreen Factoring"
+    },
+    %{
+      org_id: "b1112d00-0000-4000-8000-000000000005",
+      name: "Ironline Brokerage", lane: "OH->TX", tier: "scale", mrr_cents: 520_000,
+      domain: "ironlinebrokerage.example", prefix: "IL", size: :large,
+      origin: "Columbus", dest: "Houston", equipment: "flatbed",
+      carriers: ["Rust Belt Line Haul", "Buckeye Freight Systems", "Ohio Valley Trucking", "Great Plains Carriers"],
+      shippers: ["Midland Steel Works", "Lone Star Chemicals", "Rubber City Manufacturing", "Gulf Petro Supply"],
+      factoring: "Ironclad Capital Partners"
+    }
   ]
 
-  # ~12 people — dispatchers, carrier reps, shipper AP contacts — each with
-  # full_name/emails/phones so PII masking (tenant-clear vs operator-••••) is
-  # demonstrable on the inherited CRM page.
-  @people [
-    {"Blue Ridge Carriers", "Dana", "Whitfield", "dispatcher", "dana.whitfield@blueridgecarriers.example", "+1-865-555-0142"},
-    {"Blue Ridge Carriers", "Marcus", "Odell", "carrier rep", "marcus.odell@blueridgecarriers.example", "+1-865-555-0188"},
-    {"Summit Line Haul", "Priya", "Nair", "dispatcher", "priya.nair@summitlinehaul.example", "+1-704-555-0117"},
-    {"Summit Line Haul", "Cole", "Barrett", "carrier rep", "cole.barrett@summitlinehaul.example", "+1-704-555-0203"},
-    {"Cascade Freight Systems", "Yuki", "Tanaka", "dispatcher", "yuki.tanaka@cascadefreight.example", "+1-503-555-0166"},
-    {"Ironwood Trucking", "Rosa", "Delgado", "carrier rep", "rosa.delgado@ironwoodtrucking.example", "+1-615-555-0191"},
-    {"Acme Manufacturing", "Ellis", "Grant", "shipper contact", "ellis.grant@acmemfg.example", "+1-214-555-0124"},
-    {"Acme Manufacturing", "Nadia", "Osei", "AP clerk", "nadia.osei@acmemfg.example", "+1-214-555-0135"},
-    {"Harbor Foods Distribution", "Tomas", "Vela", "shipper contact", "tomas.vela@harborfoods.example", "+1-206-555-0158"},
-    {"Piedmont Steel Co", "Grace", "Lindqvist", "shipper contact", "grace.lindqvist@piedmontsteel.example", "+1-336-555-0172"},
-    {"Riverbend Paper Mills", "Owen", "Fitzgerald", "AP clerk", "owen.fitzgerald@riverbendpaper.example", "+1-828-555-0149"},
-    {"Riverbend Paper Mills", "Amara", "Boone", "shipper contact", "amara.boone@riverbendpaper.example", "+1-828-555-0153"}
-  ]
+  # Fallback spec for an org NOT in @brokerages (the *_ui_test / demo_seeds_test seed an arbitrary
+  # generated org id and still need branded-but-generic content). Keyed off Blue Ridge branding.
+  @default_spec List.first(@brokerages)
 
-  # ~6 opportunities (Loads) across the pipeline stages.
-  @opportunities [
-    {"BR-4471 Dallas -> Los Angeles dry van", 480_000, :open, "quoted"},
-    {"BR-4472 Houston -> Sacramento reefer", 620_000, :open, "booked"},
-    {"BR-4473 Atlanta -> Chicago dry van", 410_000, :open, "dispatched"},
-    {"BR-4474 Charlotte -> Newark flatbed", 535_000, :open, "in_transit"},
-    {"BR-4475 Memphis -> Denver reefer", 590_000, :won, "delivered"},
-    {"BR-4476 Nashville -> Phoenix dry van", 445_000, :won, "invoiced"}
-  ]
+  @doc "The FIVE seeded brokerage specs (ADR-013 §8.1). Consumed by the operator seed too."
+  def brokerages, do: @brokerages
 
-  # ~6 billing customers — the brokerage's shipper billing accounts, WITH
-  # billing_name/billing_email PII (scalar-vaulted).
-  @customers [
-    {"Acme Manufacturing", "Acme Manufacturing Inc", "ap@acmemfg.example", :active},
-    {"Harbor Foods Distribution", "Harbor Foods Distribution LLC", "billing@harborfoods.example", :active},
-    {"Piedmont Steel Co", "Piedmont Steel Co", "accounts@piedmontsteel.example", :active},
-    {"Riverbend Paper Mills", "Riverbend Paper Mills", "ap@riverbendpaper.example", :active},
-    {"Summit Line Haul", "Summit Line Haul (carrier settlement)", "settlements@summitlinehaul.example", :active},
-    {"Ironwood Trucking", "Ironwood Trucking (carrier settlement)", "pay@ironwoodtrucking.example", :inactive}
-  ]
+  @doc """
+  The brokerage spec for `org_id` — the matching `@brokerages` entry, or the Blue Ridge default
+  (so `demo_all/1` called on an arbitrary test org still produces branded, non-empty data).
+  """
+  def spec_for(org_id) do
+    Enum.find(@brokerages, @default_spec, &(&1.org_id == org_id))
+  end
+
+  # First names + surnames the per-tenant contact/agent generators draw from (deterministic by
+  # index so a re-seed is stable and NO two tenants share a contact roster — each tenant slices a
+  # different window of the pool via its org-derived offset).
+  @first_names ~w(Dana Marcus Priya Cole Yuki Rosa Ellis Nadia Tomas Grace Owen Amara Sofia Isaac
+                  Leah Desmond Yolanda Peter Bianca Warren Terrence Mei Andre Sasha Hiro Camille
+                  Dmitri Fatima Lucas Ingrid Rafael Nkechi Sven Priscilla Omar Renata)
+  @last_names ~w(Whitfield Odell Nair Barrett Tanaka Delgado Grant Osei Vela Lindqvist Fitzgerald
+                 Boone Marchetti Kowalski Nakamura Vlahos Reyes Lindholm Mercer Achebe Iyer Zhang
+                 Okonkwo Petrov Yamamoto Beaumont Sorensen Adeyemi Castellano Novak Bergstrom
+                 Haddad Montoya Okafor Farrell Delacroix)
+
+  # Per-tenant contact TITLES (round-robined so the CRM roster shows dispatchers, reps, AP, ops).
+  @contact_titles ["dispatcher", "carrier rep", "shipper contact", "AP clerk", "operations manager", "logistics coordinator"]
 
   # Billing plans (Tier-0 config): the brokerage's SaaS tiers.
   @plans [
@@ -128,26 +165,28 @@ defmodule Driftwood.Seeds do
     %{name: "scale", label: "Scale", price_cents: 79_900}
   ]
 
-  # ~10 support tickets — freight disputes, across statuses/priorities.
-  @tickets [
-    {"Detention charge on load BR-4471", :open, :high},
-    {"Missing BOL for BR-4473 delivery", :open, :urgent},
-    {"Carrier no-show — Summit Line Haul BR-4472", :pending, :urgent},
-    {"Reweigh dispute on BR-4474 flatbed", :pending, :normal},
-    {"Lumper fee reimbursement BR-4475", :open, :normal},
-    {"POD not received for BR-4476", :pending, :high},
-    {"Overcharge on fuel surcharge BR-4471", :open, :normal},
-    {"Damaged freight claim BR-4474", :on_hold, :high},
-    {"Late delivery penalty inquiry BR-4472", :resolved, :low},
-    {"Rate confirmation mismatch BR-4475", :resolved, :normal}
+  # Support agents (the tenant's OWN helpdesk staff): fixed handles + names, but the EMAIL is
+  # derived per-tenant from the spec domain (sofia.marchetti@summitfreight.example on Summit,
+  # …@blueridgelogistics on Blue Ridge). Internal staff, so names are stable across tenants —
+  # the tenant-facing VARIETY lives in the carriers/shippers/contacts/loads. {handle, first,
+  # last, role}.
+  @agent_slots [
+    {"claims-desk", "Sofia", "Marchetti", :supervisor},
+    {"dispatch-support", "Isaac", "Kowalski", :agent},
+    {"billing-support", "Leah", "Nakamura", :agent}
   ]
 
-  # 2-3 support agents WITH PII (full_name composite + email scalar, both vaulted).
-  @agents [
-    {"claims-desk", "Sofia", "Marchetti", "sofia.marchetti@blueridgelogistics.example", :supervisor},
-    {"dispatch-support", "Isaac", "Kowalski", "isaac.kowalski@blueridgelogistics.example", :agent},
-    {"billing-support", "Leah", "Nakamura", "leah.nakamura@blueridgelogistics.example", :agent}
-  ]
+  # ~8 CRM companies per tenant — DERIVED from the spec's own carriers + shippers + factoring
+  # partner (task: each tenant shows its OWN book, not a Blue-Ridge clone). FIXED shape (3
+  # carriers + 4 shippers + 1 factoring = 8) so the per-org count is uniform across tenants
+  # (the *_ui_test / demo_seeds_test assert 8); the variety is in the NAMES, not the count. A
+  # spec with fewer carriers/shippers cycles its list to fill the slots.
+  defp companies_for(spec) do
+    carriers = spec.carriers |> Stream.cycle() |> Enum.take(3) |> Enum.map(&%{name: &1, role: "carrier"})
+    shippers = spec.shippers |> Stream.cycle() |> Enum.take(4) |> Enum.map(&%{name: &1, role: "shipper"})
+    factoring = [%{name: spec.factoring, role: "factoring"}]
+    carriers ++ shippers ++ factoring
+  end
 
   @doc """
   Seed EVERYTHING for the inherited universal scopes (CRM · Billing · Support) for
@@ -166,20 +205,22 @@ defmodule Driftwood.Seeds do
   def demo_all(org_id \\ @blue_ridge_org_id) do
     :ok = Driftwood.NonPiiSetup.register_all()
 
+    spec = spec_for(org_id)
+
     if seeded?(org_id) do
       org_id
     else
       :ok = define_custom_fields(org_id)
 
-      companies = seed_companies(org_id)
-      people = seed_people(org_id, companies)
+      companies = seed_companies(org_id, spec)
+      people = seed_people(org_id, spec, companies)
       seed_activities(org_id, people)
-      seed_opportunities(org_id, companies)
+      seed_opportunities(org_id, spec, companies)
 
-      {plans, customers} = seed_billing(org_id)
+      {plans, customers} = seed_billing(org_id, spec)
       seed_subscriptions_and_invoices(org_id, plans, customers)
 
-      seed_support(org_id)
+      seed_support(org_id, spec)
 
       org_id
     end
@@ -187,56 +228,60 @@ defmodule Driftwood.Seeds do
       # Marketing (ADR-011 §7) is seeded with its OWN marker so it lands even when the
       # inherited-scope guard above short-circuits an already-seeded org (a re-run after the
       # Marketing mount shipped). Idempotent.
-      seed_marketing(seeded_org)
+      seed_marketing(seeded_org, spec)
 
-      # Chat (ADR-012, the flagship) is seeded with its OWN marker too — one cross-plane thread
-      # (a tenant admin ↔ a SaaS agent) whose message pastes a `samen:crm.person:<id>` ref so
-      # object unfurl is provable in the LIVE app (tenant clear / operator ••••). Idempotent.
-      seed_chat(seeded_org)
+      # Chat (ADR-012, the flagship) is seeded with its OWN marker too — 3 threads per tenant,
+      # including one cross-plane thread (a tenant admin ↔ a SaaS agent) whose message pastes a
+      # `samen:crm.person:<id>` ref so object unfurl is provable in the LIVE app (tenant clear /
+      # operator ••••). Idempotent.
+      seed_chat(seeded_org, spec)
     end)
   end
 
   @doc """
-  Full DEV seed for the fixed Blue Ridge Logistics org: builds the freight fleet
-  (carriers/shippers/drivers/loads/dispatch/settlement + broker rollup) via
-  `DogfoodScenario.build/1` on the fixed org, then layers the inherited-scope rows
-  (`demo_all/1`) on top, then rebuilds the cross-tenant aggregate (seeding a SECOND
-  org so the operator aggregate plane has >1 tenant/cohort). Returns the org id.
+  Full DEV seed (ADR-013 §8) — the FIVE named brokerages, each FULLY populated across every
+  module + plane. Per brokerage: the freight fleet (carriers/shippers/drivers/loads/dispatch/
+  settlement + broker rollup) via `DogfoodScenario.build/1`, then the inherited universal scopes
+  (CRM · Billing · Support · Marketing · Chat) via `demo_all/1`. Then the cross-tenant aggregate
+  is rebuilt (spanning all 5 orgs) and the OPERATOR org's book of business OVER all five is stood
+  up (`OperatorSeeds.seed/0` — accounts · platform billing · desk · leads). Returns the primary
+  (Blue Ridge Logistics) org id.
 
-  Safe to re-run: the freight fleet + inherited rows are each guarded by a marker.
+  Safe to re-run: the freight fleet + inherited rows are each guarded per-org by a marker, so a
+  re-run of `mix driftwood.seed` is idempotent.
   """
   def dev_seed do
-    org_id = @blue_ridge_org_id
+    for %{org_id: org_id} = spec <- @brokerages do
+      unless fleet_seeded?(org_id) do
+        Driftwood.DogfoodScenario.build(
+          org_id: org_id,
+          tier: spec.tier,
+          mrr_cents: spec.mrr_cents,
+          lane: spec.lane,
+          # The DogfoodScenario fleet carrier/shipper are DEDICATED names (an in-house asset fleet
+          # + a lead shipper) so they never duplicate demo_all's carriers/shippers.
+          carrier: "#{spec.name} Fleet Services",
+          shipper: "#{spec.origin} Regional Distribution",
+          origin: spec.origin,
+          dest: spec.dest,
+          equipment: spec.equipment,
+          prefix: spec.prefix
+        )
+      end
 
-    unless fleet_seeded?(org_id) do
-      Driftwood.DogfoodScenario.build(
-        org_id: org_id,
-        tier: "growth",
-        mrr_cents: 250_000,
-        lane: "TX->CA"
-      )
-
-      # A SECOND brokerage org so the token-blind cross-tenant aggregate plane has
-      # >1 tenant per cohort (k-anon floor). Freight-only; no inherited rows needed.
-      Driftwood.DogfoodScenario.build(
-        org_id: "b1112d00-0000-4000-8000-000000000002",
-        tier: "growth",
-        mrr_cents: 300_000,
-        lane: "TX->CA"
-      )
+      demo_all(org_id)
     end
-
-    demo_all(org_id)
 
     {:ok, _agg} = Driftwood.Aggregate.Rebuild.run(Driftwood.Repo)
 
-    # ADR-010 — the OPERATOR org's book of business OVER the seeded tenant orgs: the SaaS
-    # company (Samen SaaS, Inc.) whose ACCOUNTS ARE these freight brokerages, each with a
-    # tenant-admin (PII the SaaS owns — CLEAR to the operator), a platform subscription, and
-    # tenant-filed desk tickets. Renders at `/operator/accounts` · `/billing` · `/desk`.
+    # ADR-010/013 — the OPERATOR org's book of business OVER the seeded tenant orgs: the SaaS
+    # company (Samen SaaS, Inc.) whose ACCOUNTS ARE these five freight brokerages, each with a
+    # tenant-admin (PII the SaaS owns — CLEAR to the operator), a platform subscription (2 orgs
+    # past-due for dunning), tenant-filed desk tickets, and the operator's own not-yet-customer
+    # Leads. Renders at `/operator/accounts` · `/billing` · `/desk` · `/marketing/leads`.
     :ok = Driftwood.OperatorSeeds.seed()
 
-    org_id
+    @blue_ridge_org_id
   end
 
   # -- guards ----------------------------------------------------------------
@@ -289,8 +334,8 @@ defmodule Driftwood.Seeds do
     :ok
   end
 
-  defp seed_companies(org_id) do
-    for %{name: name, role: role} <- @companies, into: %{} do
+  defp seed_companies(org_id, spec) do
+    for %{name: name, role: role} <- companies_for(spec), into: %{} do
       company =
         Driftwood.Crm.Company
         |> Ash.Changeset.for_create(
@@ -307,12 +352,32 @@ defmodule Driftwood.Seeds do
   # Lifecycle stages round-robined across the seeded people (ADR-011 §8 bounded set).
   @lifecycle_cycle ~w(lead mql sql customer lead sql customer mql lead sql customer mql)
 
-  defp seed_people(org_id, companies) do
-    @people
-    |> Enum.with_index()
-    |> Enum.map(fn {{company_name, first, last, title, email, phone}, idx} ->
-      company = Map.fetch!(companies, company_name)
-      handle = "#{String.downcase(first)}-#{String.downcase(last)}"
+  # A per-org OFFSET into the name pools so NO two tenants share a contact roster (the operator
+  # drilling from Blue Ridge into Summit sees different people). Keyed off the brokerage's POSITION
+  # in @brokerages (× a stride) so each of the five gets a distinct, DETERMINISTIC window — and an
+  # org NOT in @brokerages (the *_ui_test / demo_seeds_test generated org) maps to position 0
+  # (Blue Ridge branding, offset 0 → "Dana Whitfield" first), keeping those tests stable.
+  defp name_offset(org_id) do
+    idx = Enum.find_index(@brokerages, &(&1.org_id == org_id)) || 0
+    idx * 7
+  end
+
+  # 12 people per tenant — carrier dispatchers/reps + shipper contacts/AP clerks, each attached to
+  # one of the tenant's own Companies, with a tenant-domain work email so PII masking is
+  # demonstrable AND the roster reads as THIS brokerage's book. Names sliced from the pool at the
+  # org offset so tenants don't collide. Deterministic (index-driven), so a re-seed is stable.
+  defp seed_people(org_id, spec, companies) do
+    company_list = Map.values(companies)
+    offset = name_offset(org_id)
+
+    for idx <- 0..11 do
+      first = Enum.at(@first_names, rem(offset + idx, length(@first_names)))
+      last = Enum.at(@last_names, rem(offset * 3 + idx * 5, length(@last_names)))
+      title = Enum.at(@contact_titles, rem(idx, length(@contact_titles)))
+      company = Enum.at(company_list, rem(idx, length(company_list)))
+      handle = "#{String.downcase(first)}.#{String.downcase(last)}"
+      email = "#{handle}@#{spec.domain}"
+      phone = "+1-#{200 + rem(offset, 700)}-555-#{String.pad_leading(Integer.to_string(100 + idx * 7), 4, "0")}"
 
       Driftwood.Crm.Person
       |> Ash.Changeset.for_create(
@@ -337,7 +402,7 @@ defmodule Driftwood.Seeds do
         authorize?: false
       )
       |> Ash.create!()
-    end)
+    end
   end
 
   # ADR-011 §6/§10.2: seed a handful of freight-flavored CheckCall activities per contact
@@ -380,18 +445,36 @@ defmodule Driftwood.Seeds do
     end)
   end
 
-  defp seed_opportunities(org_id, companies) do
-    stage_ids = pipeline_stage_ids(org_id)
-    # Round-robin opportunities across shipper companies.
-    shippers =
-      @companies
-      |> Enum.filter(&(&1.role == "shipper"))
-      |> Enum.map(&Map.fetch!(companies, &1.name))
+  # 6 loads (Opportunity) per tenant — DERIVED from the spec's lane/equipment/prefix, spanning the
+  # freight lifecycle stages AND the Opportunity status enum (open/won/lost/on_hold) so the load
+  # board + pipeline show status variety (task: "loads across statuses"). {load#, value, status,
+  # stage}.
+  @load_templates [
+    {1, 480_000, :open, "quoted"},
+    {2, 620_000, :open, "booked"},
+    {3, 410_000, :open, "dispatched"},
+    {4, 535_000, :on_hold, "in_transit"},
+    {5, 590_000, :won, "delivered"},
+    {6, 445_000, :lost, "quoted"}
+  ]
 
-    @opportunities
+  defp seed_opportunities(org_id, spec, companies) do
+    stage_ids = pipeline_stage_ids(org_id)
+    # Round-robin loads across the tenant's OWN shipper companies.
+    shippers =
+      companies
+      |> Map.values()
+      |> Enum.filter(fn c -> Map.get(c.custom || %{}, "company_role") == "shipper" end)
+
+    shippers = if shippers == [], do: Map.values(companies), else: shippers
+    base = 4400 + rem(name_offset(org_id), 500)
+
+    @load_templates
     |> Enum.with_index()
-    |> Enum.each(fn {{name, value, status, stage}, idx} ->
+    |> Enum.each(fn {{n, value, status, stage}, idx} ->
       company = Enum.at(shippers, rem(idx, length(shippers)))
+      load_no = "#{spec.prefix}-#{base + n}"
+      name = "#{load_no} #{spec.origin} -> #{spec.dest} #{spec.equipment}"
 
       Driftwood.Crm.Opportunity
       |> Ash.Changeset.for_create(
@@ -403,7 +486,7 @@ defmodule Driftwood.Seeds do
           status: status,
           company_id: company.id,
           pipeline_id: Map.get(stage_ids, stage),
-          custom: %{"lane" => "US"}
+          custom: %{"lane" => spec.lane}
         },
         actor: %{org_id: org_id, role: :member},
         authorize?: false
@@ -424,7 +507,39 @@ defmodule Driftwood.Seeds do
 
   # -- Billing builders ------------------------------------------------------
 
-  defp seed_billing(org_id) do
+  # 6 billing customers per tenant — the brokerage's OWN shipper billing accounts + a carrier
+  # settlement account, DERIVED from the spec so the tenant's Billing page reads as its own book
+  # (billing_name/billing_email are scalar-vaulted PII).
+  defp customers_for(spec) do
+    shippers = spec.shippers |> Stream.cycle() |> Enum.take(4)
+    carriers = spec.carriers |> Stream.cycle() |> Enum.take(2)
+
+    shipper_rows =
+      Enum.map(shippers, fn name ->
+        slug = billing_slug(name)
+        {name, "#{name} Inc", "ap@#{slug}.example", :active}
+      end)
+
+    carrier_rows =
+      carriers
+      |> Enum.with_index()
+      |> Enum.map(fn {name, idx} ->
+        slug = billing_slug(name)
+        status = if idx == 1, do: :inactive, else: :active
+        {name, "#{name} (carrier settlement)", "settlements@#{slug}.example", status}
+      end)
+
+    shipper_rows ++ carrier_rows
+  end
+
+  defp billing_slug(name) do
+    name
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "")
+    |> String.slice(0, 20)
+  end
+
+  defp seed_billing(org_id, spec) do
     plans =
       for %{name: name, label: label, price_cents: cents} <- @plans, into: %{} do
         plan =
@@ -457,7 +572,7 @@ defmodule Driftwood.Seeds do
       end
 
     customers =
-      for {_company_name, billing_name, billing_email, status} <- @customers do
+      for {_company_name, billing_name, billing_email, status} <- customers_for(spec) do
         Driftwood.Billing.Customer
         |> Ash.Changeset.for_create(
           :create,
@@ -581,7 +696,37 @@ defmodule Driftwood.Seeds do
 
   # -- Support builders ------------------------------------------------------
 
-  defp seed_support(org_id) do
+  # 3 support agents per tenant — the tenant's OWN helpdesk staff (fixed names, tenant-domain
+  # emails; both full_name + email are vaulted). {handle, first, last, email, role}.
+  defp agents_for(_org_id, spec) do
+    Enum.map(@agent_slots, fn {handle, first, last, role} ->
+      email = "#{String.downcase(first)}.#{String.downcase(last)}@#{spec.domain}"
+      {handle, first, last, email, role}
+    end)
+  end
+
+  # 10 support tickets per tenant — freight disputes across statuses/priorities, referencing THIS
+  # tenant's own load numbers + carriers. {subject, status, priority}.
+  defp tickets_for(org_id, spec) do
+    base = 4400 + rem(name_offset(org_id), 500)
+    load = fn n -> "#{spec.prefix}-#{base + n}" end
+    [c1, c2 | _] = spec.carriers |> Stream.cycle() |> Enum.take(2)
+
+    [
+      {"Detention charge on load #{load.(1)}", :open, :high},
+      {"Missing BOL for #{load.(3)} delivery", :open, :urgent},
+      {"Carrier no-show — #{c1} #{load.(2)}", :pending, :urgent},
+      {"Reweigh dispute on #{load.(4)} #{spec.equipment}", :pending, :normal},
+      {"Lumper fee reimbursement #{load.(5)}", :open, :normal},
+      {"POD not received for #{load.(6)}", :pending, :high},
+      {"Overcharge on fuel surcharge #{load.(1)}", :open, :normal},
+      {"Damaged freight claim #{load.(4)}", :on_hold, :high},
+      {"Late delivery penalty inquiry — #{c2} #{load.(2)}", :resolved, :low},
+      {"Rate confirmation mismatch #{load.(5)}", :resolved, :normal}
+    ]
+  end
+
+  defp seed_support(org_id, spec) do
     actor = %{org_id: org_id, role: :admin}
     member = %{org_id: org_id, role: :member}
     now = DateTime.utc_now() |> DateTime.truncate(:second)
@@ -623,9 +768,9 @@ defmodule Driftwood.Seeds do
     )
     |> Ash.create!()
 
-    # 2-3 agents WITH PII.
+    # 2-3 agents WITH PII (the tenant's own helpdesk staff — tenant-domain emails).
     agents =
-      for {handle, first, last, email, role} <- @agents do
+      for {handle, first, last, email, role} <- agents_for(org_id, spec) do
         Driftwood.Support.Agent
         |> Ash.Changeset.for_create(
           :create,
@@ -645,7 +790,7 @@ defmodule Driftwood.Seeds do
 
     [primary_agent | _] = agents
 
-    @tickets
+    tickets_for(org_id, spec)
     |> Enum.with_index()
     |> Enum.each(fn {{subject, status, priority}, idx} ->
       agent = Enum.at(agents, rem(idx, length(agents)))
@@ -751,11 +896,11 @@ defmodule Driftwood.Seeds do
   # provable in the dogfood. Subscriber email is 🔒 vault PII (clear on tenant / •••• on
   # operator). `people` are the seeded CRM Person structs; the plaintext emails come from the
   # `@people` catalog (the org owns its contacts' PII on the tenant plane).
-  defp seed_marketing(org_id) do
+  defp seed_marketing(org_id, spec) do
     if marketing_seeded?(org_id) do
       :ok
     else
-      do_seed_marketing(org_id)
+      do_seed_marketing(org_id, spec)
     end
   end
 
@@ -770,7 +915,7 @@ defmodule Driftwood.Seeds do
     _ -> false
   end
 
-  defp do_seed_marketing(org_id) do
+  defp do_seed_marketing(org_id, spec) do
     admin = %{org_id: org_id, role: :admin, plane: :tenant, kind: :tenant}
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
@@ -781,10 +926,10 @@ defmodule Driftwood.Seeds do
         %{
           org_id: org_id,
           name: "Carrier onboarding",
-          subject_line: "Partner with Blue Ridge Logistics on your next lane",
-          body_html: "<p>We have consistent freight on your lanes — let's talk rates.</p>",
-          from_name: "Blue Ridge Logistics",
-          from_address: "carriers@blueridgelogistics.example",
+          subject_line: "Partner with #{spec.name} on your next #{spec.lane} lane",
+          body_html: "<p>We have consistent #{spec.equipment} freight on the #{spec.origin}→#{spec.dest} lane — let's talk rates.</p>",
+          from_name: spec.name,
+          from_address: "carriers@#{spec.domain}",
           enabled: true
         },
         actor: admin,
@@ -792,12 +937,17 @@ defmodule Driftwood.Seeds do
       )
       |> Ash.create!()
 
-    # Subscribers from the seeded contacts' emails. The FIRST is deliverable (active); the LAST
-    # gets a suppression row (opted out) so the red path is demonstrable.
+    # Subscribers from THIS tenant's own carrier contacts (tenant-domain emails). The FIRST is
+    # deliverable (active); the LAST gets a suppression row (opted out) so the red path is
+    # demonstrable. Derived from the same name pool + domain as the CRM roster.
+    offset = name_offset(org_id)
+
     subscriber_emails =
-      @people
-      |> Enum.map(fn {_company, _first, _last, _title, email, _phone} -> email end)
-      |> Enum.take(6)
+      for idx <- 0..5 do
+        first = Enum.at(@first_names, rem(offset + idx, length(@first_names)))
+        last = Enum.at(@last_names, rem(offset * 3 + idx * 5, length(@last_names)))
+        "#{String.downcase(first)}.#{String.downcase(last)}@#{spec.domain}"
+      end
 
     subscribers =
       Enum.with_index(subscriber_emails)
@@ -876,16 +1026,18 @@ defmodule Driftwood.Seeds do
   end
 
   # ==========================================================================
-  # Chat (ADR-012, the FLAGSHIP) — one cross-plane thread with participants + a
-  # message that pastes a `samen:crm.person:<id>` ref so object unfurl is provable
-  # in the LIVE app (tenant clear / operator ••••). Idempotent (its own marker).
+  # Chat (ADR-012, the FLAGSHIP) — 3 threads per tenant (the brokerage → Driftwood support),
+  # including one CROSS-PLANE thread whose message pastes a `samen:crm.person:<id>` (+ a
+  # `samen:freight.driver:<id>`) ref so object unfurl is provable in the LIVE app (tenant clear /
+  # operator ••••). All spec-branded (subject references the tenant's own load number, the tenant
+  # participant handle is the tenant's slug). Idempotent (its own marker).
   # ==========================================================================
 
-  defp seed_chat(org_id) do
+  defp seed_chat(org_id, spec) do
     if chat_seeded?(org_id) do
       :ok
     else
-      do_seed_chat(org_id)
+      do_seed_chat(org_id, spec)
     end
   end
 
@@ -900,9 +1052,61 @@ defmodule Driftwood.Seeds do
     _ -> false
   end
 
-  defp do_seed_chat(org_id) do
+  defp do_seed_chat(org_id, spec) do
     person = first_person(org_id)
     driver = first_driver(org_id)
+    base = 4400 + rem(name_offset(org_id), 500)
+    load_no = "#{spec.prefix}-#{base + 1}"
+    tenant_handle = tenant_slug(spec) <> "-dispatch"
+
+    # THREAD 1 — the flagship CROSS-PLANE thread with the object-unfurl message (referencing THIS
+    # tenant's own contact + driver). Kept first so it is the marker + the unfurl demo.
+    refs =
+      [person && "samen:crm.person:#{person.id}", driver && "samen:freight.driver:#{driver.id}"]
+      |> Enum.reject(&is_nil/1)
+
+    body =
+      "Confirming the rate for #{load_no}. Point of contact: " <>
+        (person && "samen:crm.person:#{person.id}" || "TBD") <>
+        (if(driver, do: " · assigned driver samen:freight.driver:#{driver.id}", else: ""))
+
+    seed_thread(org_id, spec, tenant_handle,
+      subject: "Rate confirmation for load #{load_no}",
+      kind: :cross_plane,
+      disclosure_mode: :masked,
+      body: body,
+      refs: refs
+    )
+
+    # THREAD 2 — a billing question the brokerage filed with Driftwood support (cross-plane, no
+    # unfurl). Gives /chat a real inbox with more than one row per tenant.
+    seed_thread(org_id, spec, tenant_handle,
+      subject: "Question about our #{String.capitalize(spec.tier)} plan invoice",
+      kind: :cross_plane,
+      disclosure_mode: :masked,
+      body: "Our latest platform invoice looks higher than last month — can you break down the #{String.capitalize(spec.tier)}-tier line items?",
+      refs: []
+    )
+
+    # THREAD 3 — a tenant-internal onboarding thread, so the inbox shows a mix of thread kinds.
+    # No operator participant.
+    seed_thread(org_id, spec, tenant_handle,
+      subject: "Onboarding a new carrier on the #{spec.origin}→#{spec.dest} lane",
+      kind: :tenant_internal,
+      disclosure_mode: :tenant_wide,
+      body: "Adding #{List.first(spec.carriers)} to our #{spec.equipment} pool for the #{spec.lane} lane — what docs do you need?",
+      refs: [],
+      operator?: false
+    )
+
+    :ok
+  end
+
+  # Seed ONE chat thread: a tenant participant (+ optionally an operator participant) and one
+  # opening message. `opts`: `:subject`, `:kind`, `:disclosure_mode`, `:body`, `:refs`,
+  # `:operator?` (default true).
+  defp seed_thread(org_id, spec, tenant_handle, opts) do
+    operator? = Keyword.get(opts, :operator?, true)
 
     thread =
       Driftwood.Chat.ChatThread
@@ -910,10 +1114,10 @@ defmodule Driftwood.Seeds do
         :create,
         %{
           org_id: org_id,
-          subject: "Rate confirmation for load BR-4471",
-          kind: :cross_plane,
+          subject: Keyword.fetch!(opts, :subject),
+          kind: Keyword.fetch!(opts, :kind),
           status: :open,
-          disclosure_mode: :masked
+          disclosure_mode: Keyword.fetch!(opts, :disclosure_mode)
         },
         authorize?: false
       )
@@ -928,15 +1132,15 @@ defmodule Driftwood.Seeds do
           thread_id: thread.id,
           party: :tenant,
           principal_kind: :user,
-          handle: "blueridge-dispatch",
+          handle: tenant_handle,
           role: :owner,
-          full_name: %Samen.Type.FullName{first: "Dana", last: "Whitfield"}
+          full_name: %Samen.Type.FullName{first: "Dispatch", last: spec.name}
         },
         authorize?: false
       )
       |> Ash.create!()
 
-    _operator_participant =
+    if operator? do
       Driftwood.Chat.ChatParticipant
       |> Ash.Changeset.for_create(
         :create,
@@ -951,36 +1155,29 @@ defmodule Driftwood.Seeds do
         authorize?: false
       )
       |> Ash.create!()
+    end
 
-    # The message pastes a crm.person ref (and, if a driver exists, a freight.driver ref) so
-    # BOTH the framework first-class card AND the vertical override card unfurl per viewer.
-    refs =
-      [person && "samen:crm.person:#{person.id}", driver && "samen:freight.driver:#{driver.id}"]
-      |> Enum.reject(&is_nil/1)
+    Driftwood.Chat.ChatMessage
+    |> Ash.Changeset.for_create(
+      :create,
+      %{
+        org_id: org_id,
+        thread_id: thread.id,
+        participant_id: tenant_participant.id,
+        sender_party: :tenant,
+        kind: :message,
+        body: Keyword.fetch!(opts, :body),
+        refs: Keyword.get(opts, :refs, [])
+      },
+      authorize?: false
+    )
+    |> Ash.create!()
 
-    body =
-      "Confirming the rate for BR-4471. Point of contact: " <>
-        (person && "samen:crm.person:#{person.id}" || "TBD") <>
-        (if(driver, do: " · assigned driver samen:freight.driver:#{driver.id}", else: ""))
+    thread
+  end
 
-    _message =
-      Driftwood.Chat.ChatMessage
-      |> Ash.Changeset.for_create(
-        :create,
-        %{
-          org_id: org_id,
-          thread_id: thread.id,
-          participant_id: tenant_participant.id,
-          sender_party: :tenant,
-          kind: :message,
-          body: body,
-          refs: refs
-        },
-        authorize?: false
-      )
-      |> Ash.create!()
-
-    :ok
+  defp tenant_slug(spec) do
+    spec.domain |> String.split(".") |> List.first()
   end
 
   defp first_person(org_id) do

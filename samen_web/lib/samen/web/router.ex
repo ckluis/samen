@@ -216,6 +216,28 @@ defmodule Samen.Web.Router do
     end
   end
 
+  @doc """
+  Mount the framework SESSION endpoint that writes the current org (ADR-013 §4.3) in ONE line.
+
+      import Samen.Web.Router
+
+      scope "/" do
+        pipe_through :browser
+        samen_session_routes()
+      end
+
+  Declares `GET /session/org/:org_id` → `Samen.Web.SessionController.put_current_org/2`, the
+  target of the workspace switcher + the operator "Open account →" clear act-as. Every vertical
+  inherits the same durable current-org write. `:path` overrides the default `/session/org`.
+  """
+  defmacro samen_session_routes(opts \\ []) do
+    path = Keyword.get(opts, :path, "/session/org")
+
+    quote bind_quoted: [path: path] do
+      get("#{path}/:org_id", Samen.Web.SessionController, :put_current_org)
+    end
+  end
+
   @doc false
   def __operator_labels__(labels, nil), do: labels
 

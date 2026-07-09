@@ -33,6 +33,39 @@ defmodule Samen.Web.ChatLiveRenderTest do
     assert html =~ "Conversations"
   end
 
+  # ADR-013 §7 — the owner's exact complaint fixed: /chat lists threads by DEFAULT (no ?org),
+  # never "no org selected". `mount/3` resolves the current org from the mount's default label.
+  test "ThreadsLive inbox lists threads with NO ?org (resolves the mount default) — never a dead-end", %{org_id: org_id, chat: chat} do
+    mount =
+      Mount.new(:chat, Samen.WebTest.Chat, Samen.WebTest.Repo,
+        plane: Samen.Web.Plane.tenant(),
+        labels: %{title: "Blue Ridge Logistics", default_org_id: org_id}
+      )
+
+    # mount/3 with EMPTY params + session — the resolver must reach the default_org_id label.
+    session = %{"samen_mount" => Mount.to_session(mount)}
+    {:ok, socket} = ThreadsLive.mount(%{}, session, %Phoenix.LiveView.Socket{})
+
+    refute socket.assigns.no_org
+    assert socket.assigns.org_id == org_id
+
+    html = ThreadsLive.render(Map.put(socket.assigns, :__changed__, %{})) |> Phoenix.HTML.Safe.to_iodata() |> IO.iodata_to_binary()
+    assert html =~ chat.thread.subject
+    refute html =~ "No org selected"
+  end
+
+  # ADR-013 §4.6 — the chat header + crumb read the RESOLVED org name (fixes "Workspace").
+  test "ThreadsLive header/crumb show the resolved tenant name, not 'Workspace'", %{org_id: org_id} do
+    mount =
+      Mount.new(:chat, Samen.WebTest.Chat, Samen.WebTest.Repo,
+        plane: Samen.Web.Plane.tenant(),
+        labels: %{title: "Summit Freight Partners", default_org_id: org_id}
+      )
+
+    html = render_live(ThreadsLive, mount, [org_id])
+    assert html =~ "Summit Freight Partners"
+  end
+
   # -- the room, tenant plane (clear) ------------------------------------------
 
   test "ThreadLive room renders CLEAR body + CLEAR identity + a CLEAR unfurl card (tenant)", %{

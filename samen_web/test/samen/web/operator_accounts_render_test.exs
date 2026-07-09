@@ -48,13 +48,19 @@ defmodule Samen.Web.OperatorAccountsRenderTest do
     assert html =~ "at risk"
   end
 
-  test "each account carries the impersonation back-reference (Open account link)", %{seed: seed} do
+  test "each account offers the two-grade drill-in (ADR-013 §5.2 — act-as + impersonate)", %{seed: seed} do
     mount = build_operator_mount(seed.operator_org_id)
     html = render_live(Samen.Web.Operator.AccountsLive, mount, [])
 
+    # (1) "Open account →" = act-as / CLEAR — sets the session current org via the framework
+    # SessionController and lands in the tenant workspace (TENANT plane).
     assert html =~ "open-account"
-    # The link targets the tenant's downstream CRM by the tenant_org_id back-reference.
-    assert html =~ "/crm/contacts?org=#{seed.tenant_org_id}"
+    assert html =~ "/session/org/#{seed.tenant_org_id}?return_to="
+
+    # (2) "Impersonate (masked) →" = the existing operator-plane drill-in, carrying the tenant
+    # org via ?org= (the plane, not the session, is what masks).
+    assert html =~ "impersonate-account"
+    assert html =~ "/operator/impersonate?org=#{seed.tenant_org_id}"
   end
 
   test "no operator org resolved → the empty-state renders (no crash)", %{} do

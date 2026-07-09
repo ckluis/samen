@@ -13,34 +13,41 @@ defmodule Samen.Web.CRM.CompanyLive do
 
   import Samen.UI
   import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1]
+  import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
+
+  alias Samen.Web.CurrentOrg
+  alias Samen.Web.Mount
 
   alias Samen.Web.CRM.Reads
-  alias Samen.Web.Mount
 
   @activity_types ~w(note call email meeting task)
 
   @impl true
   def mount(params, session, socket) do
     socket = assign_mount(socket, session)
-    org_id = Map.get(params, "org")
+    org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
     company_id = Map.get(params, "id")
 
     {:ok,
      load(
-       assign(socket, org_id: org_id, company_id: company_id, active_tab: "overview", form_error: nil),
+       assign(socket, org_id: org_id, company_id: company_id, active_tab: "overview", form_error: nil, return_to: nil),
        org_id,
        company_id
      )}
   end
 
   @impl true
-  def handle_params(params, _uri, socket) do
+  def handle_params(params, uri, socket) do
     org_id = Map.get(params, "org") || socket.assigns.org_id
     company_id = Map.get(params, "id") || socket.assigns.company_id
     tab = Map.get(params, "tab") || "overview"
 
     {:noreply,
-     load(assign(socket, org_id: org_id, company_id: company_id, active_tab: tab), org_id, company_id)}
+     load(
+       assign(socket, org_id: org_id, company_id: company_id, active_tab: tab, return_to: return_path(uri)),
+       org_id,
+       company_id
+     )}
   end
 
   @impl true
@@ -79,8 +86,10 @@ defmodule Samen.Web.CRM.CompanyLive do
   def load(socket, nil, _company_id) do
     tab = Map.get(socket.assigns, :active_tab, "overview")
 
-    assign(socket,
-      no_org: true,
+    socket
+    |> ensure_return_to()
+    |> assign(
+      no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil),
       org_id: nil,
       company_id: nil,
       company: nil,
@@ -117,7 +126,9 @@ defmodule Samen.Web.CRM.CompanyLive do
 
     tab = Map.get(socket.assigns, :active_tab, "overview")
 
-    assign(socket,
+    socket
+    |> ensure_return_to()
+    |> assign(
       no_org: false,
       org_id: org_id,
       company_id: company_id,
@@ -130,16 +141,20 @@ defmodule Samen.Web.CRM.CompanyLive do
     )
   end
 
+  defp ensure_return_to(socket) do
+    if Map.has_key?(socket.assigns, :return_to), do: socket, else: assign(socket, return_to: nil)
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
     <div id="crm-company">
       <.app_shell>
         <:sidebar>
-          <.crm_sidebar mount={@samen_mount} org_id={@org_id} active={:crm_companies} />
+          <.crm_sidebar mount={@samen_mount} org_id={@org_id} active={:crm_companies} return_to={@return_to} />
         </:sidebar>
 
-        <.topbar title={company_name(@company)} crumbs={crumbs(@samen_mount, company_name(@company))}>
+        <.topbar title={company_name(@company)} crumbs={crumbs(@samen_mount, @org_id, company_name(@company))}>
           <:actions>
             <a href={companies_path(@samen_mount, @org_id)} class="btn" style="text-decoration:none">
               <span class="i">
@@ -152,12 +167,10 @@ defmodule Samen.Web.CRM.CompanyLive do
           </:actions>
         </.topbar>
 
+        <.acting_as_banner mount={@samen_mount} org_id={@org_id} />
+
         <%= if @no_org do %>
-          <div class="wrap">
-            <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
-              No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
-            </div>
-          </div>
+          <.no_org_card mount={@samen_mount} />
         <% else %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
@@ -313,7 +326,7 @@ defmodule Samen.Web.CRM.CompanyLive do
 
   # -- helpers -----------------------------------------------------------------
 
-  defp crumbs(mount, leaf), do: [Mount.label(mount, :crumb_root, "Workspace"), "CRM", "Companies", leaf]
+  defp crumbs(mount, org_id, leaf), do: [CurrentOrg.name(mount, org_id), "CRM", "Companies", leaf]
 
   defp composer?(%Mount{plane: %{kind: :operator}}), do: false
   defp composer?(_), do: true

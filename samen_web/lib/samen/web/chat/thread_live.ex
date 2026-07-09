@@ -28,12 +28,13 @@ defmodule Samen.Web.Chat.ThreadLive do
 
   alias Samen.Web.Chat
   alias Samen.Web.Chat.{Identity, PubSub, Reads}
+  alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
 
   @impl true
   def mount(params, session, socket) do
     socket = assign_mount(socket, session)
-    org_id = Map.get(params, "org")
+    org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
     thread_id = Map.get(params, "id")
 
     if connected?(socket) and is_binary(thread_id) do
@@ -138,13 +139,13 @@ defmodule Samen.Web.Chat.ThreadLive do
       <.app_shell>
         <:sidebar>
           <div class="side-min">
-            <b>{Mount.label(@samen_mount, :title, "Workspace")}</b>
+            <b>{CurrentOrg.name(@samen_mount, @org_id)}</b>
             <span>Chat</span>
           </div>
         </:sidebar>
 
         <%= if @no_thread do %>
-          <.topbar title="Chat" crumbs={[Mount.label(@samen_mount, :crumb_root, "Workspace"), "Chat"]} />
+          <.topbar title="Chat" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat"]} />
           <div class="wrap">
             <div class="card" id="no-thread" style="padding:22px 20px;color:var(--muted)">
               Conversation not available.
@@ -153,7 +154,7 @@ defmodule Samen.Web.Chat.ThreadLive do
         <% else %>
           <.topbar
             title={@thread.subject || "Conversation"}
-            crumbs={[Mount.label(@samen_mount, :crumb_root, "Workspace"), "Chat", @thread.subject || "Conversation"]}
+            crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat", @thread.subject || "Conversation"]}
           >
             <:actions>
               <span class="lane">{plane_note(@samen_mount)} · disclosure: {@thread.disclosure_mode}</span>

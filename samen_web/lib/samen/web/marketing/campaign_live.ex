@@ -25,29 +25,32 @@ defmodule Samen.Web.Marketing.CampaignLive do
 
   import Samen.UI
   import Samen.Web.Marketing.Live, only: [assign_mount: 2, marketing_sidebar: 1, marketing_path: 1, marketing_plane_note: 1]
+  import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
+
+  alias Samen.Web.CurrentOrg
+  alias Samen.Web.Mount
 
   alias Samen.Web.Marketing.Reads
-  alias Samen.Web.Mount
 
   @impl true
   def mount(params, session, socket) do
     socket = assign_mount(socket, session)
-    org_id = Map.get(params, "org")
+    org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
     campaign_id = Map.get(params, "id")
 
     {:ok,
      load(
-       assign(socket, org_id: org_id, campaign_id: campaign_id, send_results: nil, notice: nil),
+       assign(socket, org_id: org_id, campaign_id: campaign_id, send_results: nil, notice: nil, return_to: nil),
        org_id,
        campaign_id
      )}
   end
 
   @impl true
-  def handle_params(params, _uri, socket) do
+  def handle_params(params, uri, socket) do
     org_id = Map.get(params, "org") || socket.assigns.org_id
     campaign_id = Map.get(params, "id") || socket.assigns.campaign_id
-    {:noreply, load(assign(socket, org_id: org_id, campaign_id: campaign_id), org_id, campaign_id)}
+    {:noreply, load(assign(socket, org_id: org_id, campaign_id: campaign_id, return_to: return_path(uri)), org_id, campaign_id)}
   end
 
   # Send-to-segment (tenant plane only — the composer is hidden on the operator plane, so this
@@ -85,8 +88,10 @@ defmodule Samen.Web.Marketing.CampaignLive do
 
   @doc false
   def load(socket, nil, _campaign_id) do
-    assign(socket,
-      no_org: true,
+    socket
+    |> ensure_return_to()
+    |> assign(
+      no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil),
       org_id: nil,
       campaign_id: nil,
       campaign: nil,
@@ -120,7 +125,9 @@ defmodule Samen.Web.Marketing.CampaignLive do
         [] -> []
       end
 
-    assign(socket,
+    socket
+    |> ensure_return_to()
+    |> assign(
       no_org: false,
       org_id: org_id,
       campaign_id: campaign_id,
@@ -135,27 +142,29 @@ defmodule Samen.Web.Marketing.CampaignLive do
     )
   end
 
+  defp ensure_return_to(socket) do
+    if Map.has_key?(socket.assigns, :return_to), do: socket, else: assign(socket, return_to: nil)
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
     <div id="mkt-campaign">
       <.app_shell>
         <:sidebar>
-          <.marketing_sidebar mount={@samen_mount} org_id={@org_id} active={:marketing_campaigns} />
+          <.marketing_sidebar mount={@samen_mount} org_id={@org_id} active={:marketing_campaigns} return_to={@return_to} />
         </:sidebar>
 
-        <.topbar title={campaign_title(@campaign)} crumbs={crumbs(@samen_mount, campaign_title(@campaign))}>
+        <.topbar title={campaign_title(@campaign)} crumbs={crumbs(@samen_mount, @org_id, campaign_title(@campaign))}>
           <:actions>
             <a href={campaigns_path(@samen_mount, @org_id)} class="btn" style="text-decoration:none">Back to campaigns</a>
           </:actions>
         </.topbar>
 
+        <.acting_as_banner mount={@samen_mount} org_id={@org_id} />
+
         <%= if @no_org do %>
-          <div class="wrap">
-            <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
-              No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
-            </div>
-          </div>
+          <.no_org_card mount={@samen_mount} />
         <% else %>
           <span id="org-banner" style="display:none">Marketing org: {@org_id}</span>
 
@@ -264,7 +273,7 @@ defmodule Samen.Web.Marketing.CampaignLive do
   defp composer?(%Mount{plane: %{kind: :operator}}), do: false
   defp composer?(_), do: true
 
-  defp crumbs(mount, leaf), do: [Mount.label(mount, :crumb_root, "Workspace"), "Marketing", "Campaigns", leaf]
+  defp crumbs(mount, org_id, leaf), do: [CurrentOrg.name(mount, org_id), "Marketing", "Campaigns", leaf]
 
   defp campaigns_path(mount, org_id), do: "#{marketing_path(mount)}/campaigns?org=#{org_id}"
 

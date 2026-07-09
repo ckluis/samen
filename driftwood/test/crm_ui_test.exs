@@ -47,8 +47,9 @@ defmodule Driftwood.CrmUiTest do
     assert html =~ "<table>"
     assert html =~ ~s(class="card")
 
-    # Non-vacuous: Driftwood's seeded company appears through the framework page.
-    assert html =~ "Blue Ridge Carriers"
+    # Non-vacuous: Driftwood's seeded company appears through the framework page (a Blue Ridge
+    # carrier — the default spec's own book).
+    assert html =~ "Appalachian Freight Lines"
     assert html =~ "company-row"
 
     # Metric cards rendered.

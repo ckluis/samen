@@ -48,6 +48,16 @@ defmodule Driftwood.DogfoodScenario do
     mrr_cents = Keyword.get(opts, :mrr_cents, 250_000)
     lane = Keyword.get(opts, :lane, "TX->CA")
 
+    # Per-tenant BRANDING (defaults preserve the historical Blue-Ridge scenario for the no-option
+    # test callers; the dev seed passes the spec's own carrier/shipper/lane so each tenant's
+    # freight fleet reads as ITS OWN book — not a Blue-Ridge clone).
+    carrier_name = Keyword.get(opts, :carrier, "Blue Ridge Carriers")
+    shipper_name = Keyword.get(opts, :shipper, "Acme Manufacturing")
+    origin = Keyword.get(opts, :origin, "Dallas")
+    dest = Keyword.get(opts, :dest, "Los Angeles")
+    equipment = Keyword.get(opts, :equipment, "dry van")
+    prefix = Keyword.get(opts, :prefix, "BR")
+
     :ok = Driftwood.NonPiiSetup.register_all()
 
     actor = %{org_id: org_id, role: :admin}
@@ -60,22 +70,27 @@ defmodule Driftwood.DogfoodScenario do
     # Seed the Tier-0 load-lifecycle stages for this org.
     :ok = seed_pipeline(org_id, actor)
 
-    carrier = create_company(org_id, "Blue Ridge Carriers", %{
+    carrier = create_company(org_id, carrier_name, %{
       "company_role" => "carrier",
       "plan_tier" => tier,
       "mrr_cents" => Integer.to_string(mrr_cents)
     })
 
-    shipper = create_company(org_id, "Acme Manufacturing", %{"company_role" => "shipper"})
+    shipper = create_company(org_id, shipper_name, %{"company_role" => "shipper"})
 
     compliant = create_driver(org_id, carrier.id, "Dana", "Compliant", "CDL-OK-#{short()}",
       cdl_expiry_days: 365, medical_days: 180, status: :available)
 
+    # EXPIRING (task: valid/expiring/expired FMCSA) — medical card valid but expiring in 14 days.
+    # Still DISPATCHABLE (the gate blocks only on `< today`) but the driver board flags it amber.
+    _expiring = create_driver(org_id, carrier.id, "Casey", "Expiring", "CDL-EXP14-#{short()}",
+      cdl_expiry_days: 45, medical_days: 14, status: :available)
+
     blocked = create_driver(org_id, carrier.id, "Reed", "Expired", "CDL-EXP-#{short()}",
       cdl_expiry_days: 365, medical_days: -3, status: :available)
 
-    load1 = create_load(org_id, "Dallas -> Los Angeles dry van", 480_000, lane)
-    load2 = create_load(org_id, "Houston -> Sacramento reefer", 620_000, lane)
+    load1 = create_load(org_id, "#{prefix}-9001 #{origin} -> #{dest} #{equipment}", 480_000, lane, :open)
+    load2 = create_load(org_id, "#{prefix}-9002 #{origin} -> #{dest} #{equipment}", 620_000, lane, :open)
 
     # Dispatch the compliant driver onto load1 (the FMCSA gate passes).
     {:ok, dispatch} = dispatch(org_id, compliant.id, load1.id)
@@ -157,13 +172,13 @@ defmodule Driftwood.DogfoodScenario do
     |> Ash.create!()
   end
 
-  defp create_load(org_id, name, value_cents, lane) do
+  defp create_load(org_id, name, value_cents, lane, status) do
     Driftwood.Crm.Opportunity
     |> Ash.Changeset.for_create(:create, %{
         org_id: org_id,
         name: name,
         value_cents: value_cents,
-        status: :open,
+        status: status,
         custom: %{"lane" => lane}
       }, authorize?: false)
     |> Ash.create!()
