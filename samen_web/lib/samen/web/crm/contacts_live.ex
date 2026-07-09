@@ -12,6 +12,15 @@ defmodule Samen.Web.CRM.ContactsLive do
   The page renders whatever value the resolver returns. A `%Samen.Masked{}` renders `••••`
   via `Phoenix.HTML.Safe`. This LiveView NEVER calls `Samen.Vault.reveal/3`, NEVER unwraps a
   vault token out of a `%Masked{}`, and has NO "show plaintext" branch.
+
+  ## A2 retrofit — the contract smoke proof
+
+  This is the FIRST framework list on the `ListLive` + `list_view/1` contract (ADR-016
+  §2/§3): `use Samen.Web.ListLive` + a `%Page{}`-returning bounded read
+  (`Reads.contacts_page/3`) buys sort/filter/keyset-pagination/empty-state as KIT
+  DEFAULTS — this view carries NO `handle_event/3` for list ergonomics and NO unbounded
+  read. Both verticals inherit the retrofit through the `Samen.Web.Router.samen_crm`
+  mount at 0 vertical lines.
   """
   use Phoenix.LiveView
 
@@ -22,6 +31,13 @@ defmodule Samen.Web.CRM.ContactsLive do
   alias Samen.Web.CRM.Reads
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+
+  use Samen.Web.ListLive,
+    resource: Person,
+    reads: &Samen.Web.CRM.Reads.contacts_page/3,
+    sortable: [:display_name, :job_title],
+    filter_fields: [:display_name, :job_title],
+    default_sort: {:display_name, :asc}
 
   @impl true
   def mount(params, session, socket) do
@@ -40,7 +56,8 @@ defmodule Samen.Web.CRM.ContactsLive do
   def load(socket, nil) do
     socket
     |> default_return_to()
-    |> assign(no_org: no_org?(socket, nil), org_id: nil, contacts: [], company_names: %{})
+    |> assign(no_org: no_org?(socket, nil), org_id: nil, company_names: %{})
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
   end
 
   def load(socket, org_id) do
@@ -52,9 +69,9 @@ defmodule Samen.Web.CRM.ContactsLive do
     |> assign(
       no_org: false,
       org_id: org_id,
-      contacts: Reads.contacts(mount, scope),
       company_names: company_name_map(mount, scope)
     )
+    |> init_list(mount, scope)
   end
 
   defp no_org?(socket, org_id), do: CurrentOrg.no_org?(socket.assigns[:samen_mount], org_id)
@@ -101,21 +118,28 @@ defmodule Samen.Web.CRM.ContactsLive do
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
 
           <div class="wrap">
-            <div id="contacts">
+            <div id="contacts-panel">
               <div class="gtitle">
                 <h3>Contacts</h3>
-                <span class="n">{length(@contacts)}</span>
+                <span class="n">{length(@page.items)}</span>
                 <span class="lane">· name / email / phone via PiiResolution · {plane_note(@samen_mount)}</span>
               </div>
-              <.data_table>
+              <.list_view
+                id="contacts"
+                page={@page}
+                state={@list_state}
+                row_class="contact-row"
+                filter_placeholder="Filter contacts…"
+                empty_text="No contacts yet."
+              >
                 <:head>
-                  <th style="width:24%">Name</th>
-                  <th style="width:22%">Email</th>
-                  <th style="width:16%">Phone</th>
-                  <th style="width:22%">Company</th>
-                  <th style="width:16%">Title</th>
+                  <.sort_header field={:display_name} label="Name" sort={@list_state.sort} width="24%" />
+                  <th scope="col" style="width:22%">Email</th>
+                  <th scope="col" style="width:16%">Phone</th>
+                  <th scope="col" style="width:22%">Company</th>
+                  <.sort_header field={:job_title} label="Title" sort={@list_state.sort} width="16%" />
                 </:head>
-                <tr :for={p <- @contacts} class="contact-row" id={"contact-#{p.id}"}>
+                <:row :let={p}>
                   <td class="p-name">
                     <a href={contact_path(@samen_mount, @org_id, p.id)} style="display:flex;align-items:center;gap:8px;text-decoration:none">
                       <div class="av" style="width:28px;height:28px;border-radius:50%;background:#DDE7F5;color:#3B4CCA;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">
@@ -134,8 +158,8 @@ defmodule Samen.Web.CRM.ContactsLive do
                   </td>
                   <td class="p-company" style="color:var(--muted)">{(p.company_id && Map.get(@company_names, p.company_id)) || "—"}</td>
                   <td class="p-title" style="color:var(--muted);font-size:12px">{p.job_title || "—"}</td>
-                </tr>
-              </.data_table>
+                </:row>
+              </.list_view>
             </div>
           </div>
         <% end %>

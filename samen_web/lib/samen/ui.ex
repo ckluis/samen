@@ -53,6 +53,21 @@ defmodule Samen.UI do
     * `button/1`         — a `.btn` (default / `variant="primary"`)
     * `tabs/1` + `tab/1` — the underline tab bar
     * `data_table/1`     — `<table>` with a `:head` slot + inner rows
+    * `list_view/1`      — `data_table/1` + filter box + sort headers + keyset
+      pagination footer + bulk-select, as kit defaults (ADR-016; pairs with
+      `Samen.Web.ListLive`)
+    * `sort_header/1`    — a sortable `<th>` for `list_view/1`'s `:head` slot
+    * `empty_state/1`    — the standard zero-rows card (title/body/icon +
+      `:actions`/`:sample` slots); `list_view/1`'s default `:empty` (ADR-016 §5)
+    * `simple_form/1`    — the `AshPhoenix.Form`-backed form wrapper (ADR-016 §2;
+      `:let={f}` inner block + `:actions` slot; pairs with `form_field/1`)
+    * `form_field/1`     — one labelled input/select/textarea with inline errors +
+      `aria-describedby`/`aria-invalid` (AC-G1-9); a `%Masked{}` value renders a
+      READ-ONLY `••••` placeholder with NO `name` (it can never submit)
+    * `modal/1`          — accessible dialog (`role="dialog"`, focus trap,
+      escape/click-away close) hosting create/edit forms
+    * `delete_confirm/1` — the delete-confirm affordance (a danger button carrying
+      LiveView's `data-confirm` interlock)
     * `pill/1`           — a status pill (`variant` in ok|warn|bad|info|mut)
     * `progress/1`       — the `.prog` bar (`value` 0-100, `label`, `color`)
     * `metric/1`         — a metric card (`:label`, `:value`, optional delta/sub/spark)
@@ -380,6 +395,515 @@ defmodule Samen.UI do
         </tbody>
       </table>
     </div>
+    """
+  end
+
+  # ---------------------------------------------------------------------------
+  # List view (ADR-016 §2 — data_table + sort/filter/keyset-pagination/bulk as
+  # KIT DEFAULTS; every vertical inherits list ergonomics at ≈0 lines)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  The behaviour-bearing list primitive (ADR-016 §2, WS-A design §1.1): wraps
+  `data_table/1` and adds, as **kit defaults**, a debounced filter box
+  (`phx-change="filter"`), sortable headers (via `sort_header/1` in the `:head`
+  slot), a KEYSET pagination footer (`phx-click="paginate"`, prev/next — stable
+  under concurrent inserts, see `Samen.Web.Reads`), and an optional bulk-select
+  affordance (checkbox column + a bulk-action bar that appears when ≥ 1 row is
+  selected). Pairs with the `Samen.Web.ListLive` mixin, which owns every event
+  this component emits.
+
+  Attrs:
+
+    * `page`        — a `%Samen.Web.Page{}` (the bounded read's result)
+    * `state`       — a `%Samen.Web.ListState{}`; supplies `sort`/`filter`/
+      `selected`/prev-availability (each also individually overridable)
+    * `selectable`  — render the bulk-select checkbox column (default `false`)
+    * `bulk_actions`— `[%{name: "archive", label: "Archive"}]` rendered in the
+      default bulk bar (`phx-click="bulk"` with `phx-value-action`)
+    * `empty_text`  — the default zero-row copy, rendered as the title of the
+      default `empty_state/1` (ADR-016 §5 — every `list_view` adopter gets the
+      consistent empty state at zero cost; the `:empty` slot overrides it)
+
+  Slots: `:head` (the `<th>`s — use `sort_header/1` for sortable columns),
+  `:row` (`:let={item}` — the `<td>`s for one record), `:bulk_bar`
+  (`:let={selected}` — replaces the default bulk-action buttons), `:empty`.
+
+  ## Masking (LOAD-BEARING)
+
+  A row cell renders whatever the `:row` slot puts in it — an ALREADY-RESOLVED
+  value. A `%Samen.Masked{}` renders `••••` via `Phoenix.HTML.Safe`; this component
+  never stringifies, inspects, or unwraps a field value (rows are keyed by `id`
+  only, a non-PII opaque uuid). The kit adds no unmasking here.
+  """
+  attr :id, :string, default: "list"
+  attr :page, :any, required: true, doc: "a %Samen.Web.Page{}"
+  attr :state, :any, default: nil, doc: "a %Samen.Web.ListState{} (or nil)"
+  attr :filter, :string, default: nil
+  attr :selected, :any, default: nil, doc: "MapSet of selected row ids"
+  attr :selectable, :boolean, default: false
+  attr :row_class, :string, default: nil, doc: "extra class on each row <tr> (e.g. \"contact-row\")"
+  attr :bulk_actions, :list, default: []
+  attr :filter_placeholder, :string, default: "Filter…"
+  attr :empty_text, :string, default: "Nothing here yet."
+  slot :head, required: true
+  slot :row, required: true
+  slot :bulk_bar
+  slot :empty
+
+  def list_view(assigns) do
+    assigns =
+      assigns
+      |> assign(:filter, assigns.filter || list_state_get(assigns.state, :filter, ""))
+      |> assign(:selected, assigns.selected || list_state_get(assigns.state, :selected, MapSet.new()))
+      |> assign(:prev?, list_prev?(assigns.state, assigns.page))
+      |> assign(:row_class_attr, Enum.join(["list-row"] ++ List.wrap(assigns.row_class), " "))
+
+    ~H"""
+    <div class="list-view" id={@id}>
+      <div class="list-toolbar" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+        <form class="list-filter" phx-change="filter" phx-submit="filter" style="flex:0 0 auto">
+          <input
+            type="search"
+            name="filter"
+            value={@filter}
+            placeholder={@filter_placeholder}
+            phx-debounce="300"
+            autocomplete="off"
+            aria-label="Filter list"
+          />
+        </form>
+        <div
+          :if={@selectable and MapSet.size(@selected) > 0}
+          class="bulk-bar"
+          role="toolbar"
+          aria-label="Bulk actions"
+          style="display:flex;align-items:center;gap:8px"
+        >
+          <span class="bulk-count">{MapSet.size(@selected)} selected</span>
+          <%= if @bulk_bar != [] do %>
+            {render_slot(@bulk_bar, @selected)}
+          <% else %>
+            <.button :for={action <- @bulk_actions} phx-click="bulk" phx-value-action={bulk_action_name(action)}>
+              {bulk_action_label(action)}
+            </.button>
+          <% end %>
+        </div>
+      </div>
+
+      <%= if @page.items == [] do %>
+        <%= if @empty != [] do %>
+          {render_slot(@empty)}
+        <% else %>
+          <.empty_state class="list-empty" title={@empty_text} />
+        <% end %>
+      <% else %>
+        <.data_table>
+          <:head>
+            <th :if={@selectable} scope="col" class="list-select-col" style="width:28px">
+              <input
+                type="checkbox"
+                phx-click="select_all"
+                checked={list_all_selected?(@page.items, @selected)}
+                aria-label="Select all rows on this page"
+              />
+            </th>
+            {render_slot(@head)}
+          </:head>
+          <tr :for={item <- @page.items} class={@row_class_attr} id={"#{@id}-row-#{item.id}"}>
+            <td :if={@selectable} class="list-select-cell">
+              <input
+                type="checkbox"
+                phx-click="select"
+                phx-value-id={item.id}
+                checked={MapSet.member?(@selected, item.id)}
+                aria-label="Select row"
+              />
+            </td>
+            {render_slot(@row, item)}
+          </tr>
+        </.data_table>
+
+        <div class="list-footer" style="display:flex;align-items:center;gap:10px;margin-top:10px">
+          <.button phx-click="paginate" phx-value-dir="prev" disabled={not @prev?} aria-label="Previous page">
+            ‹ Prev
+          </.button>
+          <.button phx-click="paginate" phx-value-dir="next" disabled={not @page.has_more} aria-label="Next page">
+            Next ›
+          </.button>
+          <span class="list-page-size" style="color:var(--muted);font-size:12px">
+            page size {@page.page_size}
+          </span>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  @doc """
+  A sortable column header for `list_view/1`'s `:head` slot. Emits
+  `phx-click="sort"` with `phx-value-field` (the `Samen.Web.ListLive` mixin matches
+  it against the view's BOUNDED sortable list — client input never mints an atom).
+  Carries `scope="col"` + `aria-sort` (AC-G1-9).
+  """
+  attr :field, :atom, required: true
+  attr :label, :string, required: true
+  attr :sort, :any, default: nil, doc: "{field, :asc | :desc} — usually @list_state.sort"
+  attr :width, :string, default: nil
+
+  def sort_header(assigns) do
+    {active, dir} =
+      case assigns.sort do
+        {field, dir} when field == assigns.field -> {true, dir}
+        _ -> {false, nil}
+      end
+
+    assigns = assign(assigns, active: active, dir: dir)
+
+    ~H"""
+    <th
+      scope="col"
+      class={["sort-th", @active && "sorted"]}
+      style={@width && "width:#{@width}"}
+      aria-sort={sort_aria(@active, @dir)}
+    >
+      <button
+        type="button"
+        class="sort-btn"
+        phx-click="sort"
+        phx-value-field={Atom.to_string(@field)}
+        style="background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:4px"
+      >
+        {@label}
+        <span :if={@active} class="sort-dir" aria-hidden="true">{if @dir == :asc, do: "▲", else: "▼"}</span>
+      </button>
+    </th>
+    """
+  end
+
+  defp sort_aria(true, :asc), do: "ascending"
+  defp sort_aria(true, :desc), do: "descending"
+  defp sort_aria(_, _), do: nil
+
+  # list_view helpers — STATE plumbing only; these never touch a field value.
+
+  defp list_state_get(nil, _key, default), do: default
+  defp list_state_get(state, key, default), do: Map.get(state, key) || default
+
+  # Prev is available when the current page has a cursor (i.e. not the first page).
+  defp list_prev?(%{cursor_stack: stack}, _page) when is_list(stack), do: stack != []
+  defp list_prev?(_state, %{cursor: cursor}), do: cursor != nil
+  defp list_prev?(_state, _page), do: false
+
+  defp list_all_selected?([], _selected), do: false
+
+  defp list_all_selected?(items, selected),
+    do: Enum.all?(items, fn item -> MapSet.member?(selected, item.id) end)
+
+  defp bulk_action_name(%{name: name}), do: name
+  defp bulk_action_name(name) when is_binary(name), do: name
+
+  defp bulk_action_label(%{label: label}), do: label
+  defp bulk_action_label(%{name: name}), do: name
+  defp bulk_action_label(name) when is_binary(name), do: name
+
+  # ---------------------------------------------------------------------------
+  # Empty state (ADR-016 §5 / WS-A design §3.1 — the G5 primitive)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  The standard zero-rows empty state (ADR-016 §5, AC-G5-1 component half): an icon
+  glyph, a `title`, an optional `body`, and two slots — `:actions` (the primary CTA,
+  e.g. the "New …" button) and `:sample` (the optional "load sample data" affordance
+  that A5's guarded `SampleData.load/2` will feed). `list_view/1` renders this as its
+  default `:empty`, so every list that adopts the kit gets the consistent empty state
+  at zero extra cost.
+
+  Purely presentational — copy in, markup out. It renders no field values, so it has
+  no masking surface.
+  """
+  attr :title, :string, required: true
+  attr :body, :string, default: nil
+  attr :icon, :string, default: nil, doc: "a leading glyph (decorative, aria-hidden)"
+  attr :class, :any, default: nil
+
+  slot :actions, doc: "the primary call-to-action button(s)"
+  slot :sample, doc: "the optional load-sample-data affordance (ADR-016 §5)"
+
+  def empty_state(assigns) do
+    assigns =
+      assign(assigns, :class_attr, Enum.join(["card", "empty-state"] ++ List.wrap(assigns.class), " "))
+
+    ~H"""
+    <div
+      class={@class_attr}
+      style="padding:34px 24px;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center"
+    >
+      <div :if={@icon} class="empty-icon" aria-hidden="true" style="font-size:26px;line-height:1">{@icon}</div>
+      <h3 class="empty-title" style="margin:0;font-size:15px;font-weight:600">{@title}</h3>
+      <p :if={@body} class="empty-body" style="margin:0;color:var(--muted);font-size:13px;max-width:44ch">{@body}</p>
+      <div :if={@actions != []} class="empty-actions" style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        {render_slot(@actions)}
+      </div>
+      <div :if={@sample != []} class="empty-sample" style="margin-top:4px;font-size:12px;color:var(--muted)">
+        {render_slot(@sample)}
+      </div>
+    </div>
+    """
+  end
+
+  # ---------------------------------------------------------------------------
+  # Forms (ADR-016 §2 / WS-A design §1.1 — simple_form + form_field)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  The kit form wrapper (ADR-016 §2): an `AshPhoenix.Form`-backed `<form>` (any
+  `Phoenix.HTML.FormData` source works — `AshPhoenix.Form` is the framework
+  convention; A3's CRUD wiring hands one in). The inner block receives the form via
+  `:let={f}`; compose fields with `form_field/1` (which owns inline errors). The
+  `:actions` slot renders the submit/cancel row.
+
+  ## Masking (LOAD-BEARING — the write-form half of MC-1)
+
+  `simple_form` is a dumb container: it never reads, echoes, or serializes a field
+  VALUE itself — values render only through `form_field/1`, whose `%Samen.Masked{}`
+  branch emits a read-only `••••` placeholder with NO `name` attribute, so a vaulted
+  field on the operator/impersonation plane can never round-trip plaintext (or the
+  vault token) through this form. The Ash-write-path rejection (Invariant L1) lands
+  in A3; this component guarantees the RENDER half by construction.
+  """
+  attr :for, :any, required: true, doc: "an AshPhoenix.Form / %Phoenix.HTML.Form{} / FormData source"
+  attr :id, :string, default: nil
+  attr :as, :any, default: nil
+  attr :rest, :global, include: ~w(autocomplete method novalidate phx-submit phx-change phx-target phx-auto-recover)
+
+  slot :inner_block, required: true
+  slot :actions, doc: "the submit/cancel row (receives the form via :let)"
+
+  def simple_form(assigns) do
+    # Re-name the form only when `as` is SET — passing `as: nil` through would reset
+    # the name a caller already baked in via `to_form(..., as: ...)`.
+    assigns =
+      case assigns.as do
+        nil -> assigns
+        as -> assign(assigns, :for, to_form(assigns.for, as: as))
+      end
+
+    ~H"""
+    <.form :let={f} for={@for} id={@id} class="simple-form" {@rest}>
+      {render_slot(@inner_block, f)}
+      <div :if={@actions != []} class="form-actions" style="display:flex;align-items:center;gap:8px;margin-top:14px">
+        {render_slot(@actions, f)}
+      </div>
+    </.form>
+    """
+  end
+
+  @doc """
+  One labelled form field (ADR-016 §2, AC-G1-9): label + input/select/textarea +
+  inline errors. `field` is the `%Phoenix.HTML.FormField{}` from `simple_form/1`'s
+  `:let={f}` (`f[:name]`). Errors come from `field.errors` (populated by
+  `AshPhoenix.Form.validate/submit`) and render in a `field-errors` block wired to
+  the input via `aria-describedby` + `aria-invalid` — the AC-G1-2 inline-error path.
+
+  ## Masking (LOAD-BEARING — MC-1's render half)
+
+  A field whose CURRENT VALUE is a `%Samen.Masked{}` (a vaulted attribute resolved on
+  the operator/impersonation plane) renders a DISABLED, read-only input whose literal
+  value is `••••` and which carries **no `name` attribute** — it cannot submit
+  anything, so no operator-authored plaintext (and never the vault token) can enter
+  the params through this field. The component never unwraps, stringifies, or
+  inspects the `%Masked{}`; the requested `type` (textarea/select included) is
+  ignored on the masked branch — there is no editable-masked variant by construction.
+  """
+  attr :field, Phoenix.HTML.FormField, required: true
+  attr :label, :string, default: nil
+
+  attr :type, :string,
+    default: "text",
+    values: ~w(text email tel url password number date time datetime-local search hidden textarea select)
+
+  attr :options, :list, default: [], doc: "select options (`options_for_select/2` shapes)"
+  attr :prompt, :string, default: nil, doc: "select prompt option"
+  attr :rest, :global, include: ~w(placeholder autocomplete rows cols min max step required disabled readonly phx-debounce)
+
+  # MASKED branch (MC-1 render half): value is %Samen.Masked{} → a read-only ••••
+  # placeholder with NO name attr (nothing can submit) and NO token in the DOM. The
+  # match happens HERE, on the struct — the value itself is never rendered or unwrapped.
+  def form_field(%{field: %Phoenix.HTML.FormField{value: %Samen.Masked{}}} = assigns) do
+    ~H"""
+    <div class="field field-masked" style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px">
+      <label :if={@label} for={@field.id} class="field-label" style="font-size:12px;font-weight:600">{@label}</label>
+      <input
+        type="text"
+        id={@field.id}
+        value="••••"
+        disabled
+        readonly
+        data-masked
+        aria-disabled="true"
+        title="Masked on this plane"
+      />
+    </div>
+    """
+  end
+
+  def form_field(%{field: %Phoenix.HTML.FormField{} = field} = assigns) do
+    errors = Enum.map(field.errors, &translate_form_error/1)
+
+    assigns =
+      assigns
+      |> assign(:errors, errors)
+      |> assign(:error_id, if(errors != [], do: "#{field.id}-errors"))
+
+    ~H"""
+    <div
+      class={["field", @errors != [] && "field-invalid"]}
+      style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px"
+    >
+      <label :if={@label} for={@field.id} class="field-label" style="font-size:12px;font-weight:600">{@label}</label>
+      <%= case @type do %>
+        <% "textarea" -> %>
+          <textarea
+            id={@field.id}
+            name={@field.name}
+            aria-invalid={@errors != [] && "true"}
+            aria-describedby={@error_id}
+            {@rest}
+          >{Phoenix.HTML.Form.normalize_value("textarea", @field.value)}</textarea>
+        <% "select" -> %>
+          <select
+            id={@field.id}
+            name={@field.name}
+            aria-invalid={@errors != [] && "true"}
+            aria-describedby={@error_id}
+            {@rest}
+          >
+            <option :if={@prompt} value="">{@prompt}</option>
+            {Phoenix.HTML.Form.options_for_select(@options, @field.value)}
+          </select>
+        <% type -> %>
+          <input
+            type={type}
+            id={@field.id}
+            name={@field.name}
+            value={Phoenix.HTML.Form.normalize_value(type, @field.value)}
+            aria-invalid={@errors != [] && "true"}
+            aria-describedby={@error_id}
+            {@rest}
+          />
+      <% end %>
+      <div :if={@errors != []} class="field-errors" id={@error_id}>
+        <p :for={msg <- @errors} class="field-error" style="margin:0;color:var(--bad, #b91c1c);font-size:12px">{msg}</p>
+      </div>
+    </div>
+    """
+  end
+
+  # Interpolate `{msg, opts}` error tuples (the Phoenix/Ash error shape). This touches
+  # ERROR MESSAGES only — framework copy + bounded vars — never a field value.
+  defp translate_form_error({msg, opts}) when is_binary(msg) do
+    Enum.reduce(opts, msg, fn {key, value}, acc ->
+      String.replace(acc, "%{#{key}}", fn _ -> to_string(value) end)
+    end)
+  end
+
+  defp translate_form_error(msg) when is_binary(msg), do: msg
+
+  # ---------------------------------------------------------------------------
+  # Modal (ADR-016 §2 — role=dialog, focus trap, escape/click-away close)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  An accessible modal / slide-over container (ADR-016 §2, AC-G1-9): `role="dialog"` +
+  `aria-modal` + `aria-labelledby` (wired to the `title`), a FOCUS TRAP via
+  `Phoenix.Component.focus_wrap/1`, and close on Escape (`phx-window-keydown` +
+  `phx-key="escape"`), click-away (`phx-click-away`), or the ✕ button — each firing
+  `on_cancel` (an event name string or `Phoenix.LiveView.JS`; the hosting LiveView
+  owns it). Hosts create/edit `simple_form/1`s without a full-page nav.
+
+  Render it conditionally from the LiveView (`<.modal :if={@show_modal} …>`); the
+  content is the default inner block. Purely presentational — it renders no field
+  values itself, so masking rides on what the caller puts inside (a `form_field/1`
+  keeps its own masked branch).
+  """
+  attr :id, :string, required: true
+  attr :title, :string, default: nil
+  attr :on_cancel, :any, default: nil, doc: "event name (string) or JS command fired by escape/click-away/✕"
+
+  slot :inner_block, required: true
+
+  def modal(assigns) do
+    ~H"""
+    <div
+      id={@id}
+      class="modal-overlay"
+      phx-window-keydown={@on_cancel}
+      phx-key="escape"
+      style="position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(15,16,24,.45);padding:20px"
+    >
+      <.focus_wrap
+        id={"#{@id}-content"}
+        class="card modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={@title && "#{@id}-title"}
+        phx-click-away={@on_cancel}
+        style="background:#fff;min-width:340px;max-width:560px;width:100%;max-height:calc(100vh - 40px);overflow:auto;padding:18px 20px"
+      >
+        <div class="modal-head" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px">
+          <h2 :if={@title} id={"#{@id}-title"} class="modal-title" style="margin:0;font-size:15px;font-weight:650">{@title}</h2>
+          <button
+            type="button"
+            class="modal-close"
+            phx-click={@on_cancel}
+            aria-label="Close"
+            style="background:none;border:0;cursor:pointer;font-size:14px;color:var(--muted);margin-left:auto"
+          >
+            ✕
+          </button>
+        </div>
+        {render_slot(@inner_block)}
+      </.focus_wrap>
+    </div>
+    """
+  end
+
+  # ---------------------------------------------------------------------------
+  # Delete-confirm affordance (ADR-016 §2 — destructive actions are interlocked)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  The delete-confirm affordance: a danger-styled button carrying LiveView's built-in
+  `data-confirm` interlock — the client MUST confirm before the `phx-click` event
+  (pass `phx-click`/`phx-value-id`/`phx-target` via `:rest`) reaches the server, so a
+  destructive action is never one accidental click away. The label defaults to
+  "Delete" (override via the inner block).
+
+  Keep `message` to static framework copy — don't interpolate field values into it
+  (a `%Masked{}` does not belong in an HTML attribute).
+  """
+  attr :message, :string, default: "Delete this record? This cannot be undone."
+  attr :label, :string, default: "Delete"
+  attr :rest, :global, include: ~w(disabled form name value)
+
+  slot :inner_block
+
+  def delete_confirm(assigns) do
+    ~H"""
+    <button
+      type="button"
+      class="btn danger"
+      data-confirm={@message}
+      style="color:var(--bad, #b91c1c);border-color:var(--bad, #b91c1c)"
+      {@rest}
+    >
+      <%= if @inner_block != [] do %>
+        {render_slot(@inner_block)}
+      <% else %>
+        {@label}
+      <% end %>
+    </button>
     """
   end
 

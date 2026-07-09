@@ -53,6 +53,37 @@ defmodule Samen.Web.CRM.Reads do
   end
 
   @doc """
+  Read ONE keyset page of CRM contacts for `scope` — the A2 `ListLive` reads contract
+  (`(mount, scope, %ListState{}) -> %Page{}`, ADR-016 §3). Built on
+  `Samen.Web.Reads.page!/3`, so the read is BOUNDED BY CONSTRUCTION
+  (`limit(page_size + 1)`, hostile page sizes clamped) and keyset-stable under
+  concurrent inserts. PII (full_name/emails/phones) is plane-resolved through
+  `Samen.Api.PiiResolution` AFTER paging — tenant clear / operator `%Masked{}` (••••).
+
+  Sort/filter fields are bounded, NON-VAULTED attributes (`display_name`/`job_title`);
+  the vaulted columns are never sorted or filtered (see `Samen.Web.Reads` masking notes).
+  On any read error the page is EMPTY, never unbounded and never a plaintext downgrade.
+  """
+  def contacts_page(mount, scope, state) do
+    page =
+      Mount.resource(mount, Person)
+      |> Ash.Query.ensure_selected([
+        :full_name,
+        :emails,
+        :phones,
+        :display_name,
+        :job_title,
+        :company_id,
+        :custom
+      ])
+      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:display_name, :job_title])
+
+    %{page | items: resolve_pii(page.items, mount, Person, scope)}
+  rescue
+    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+  end
+
+  @doc """
   Read a single CRM person (contact) by id for `scope`, with PII plane-resolved
   (tenant clear / operator ••••). `{:ok, person}` or `:error`. **This is the new
   PII surface** (ADR-011 §5 — the masking-test target).

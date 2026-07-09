@@ -44,6 +44,9 @@ defmodule SamenWeb.MixProject do
       {:phoenix, "~> 1.7"},
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_html, "~> 4.1"},
+      # AshPhoenix.Form — the A2 form-primitive contract (ADR-016 §2): `simple_form/1`
+      # is `AshPhoenix.Form`-backed (create/edit + inline validation errors).
+      {:ash_phoenix, "~> 2.3"},
       {:jason, "~> 1.4"},
       # Test-support host deps (materialize the scope blueprints against a scratch repo):
       {:ash, "== 3.29.3"},
