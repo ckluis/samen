@@ -25,17 +25,45 @@ defmodule Samen.Web.CRM.Reads do
   """
 
   require Ash.Query
+  import Ash.Expr
 
   alias Samen.Web.Mount
 
-  @doc "Read all CRM companies for `scope` — non-PII; org-scoped by policy."
+  # A3 read-bounding (WS-A design §1.1 "read! elimination"): every non-page read on the
+  # CRM surfaces carries an explicit limit. Detail sub-lists (a company's contacts, a
+  # person's timeline, …) are bounded to the kit's hard page cap rather than paginated —
+  # they are single-parent fan-outs, not hot lists.
+  @detail_limit 200
+
+  @doc """
+  Read CRM companies for `scope` — non-PII; org-scoped by policy. BOUNDED to
+  `#{@detail_limit}` rows (A3 read-bounding); the Companies page itself reads through
+  the paginated `companies_page/3` — this remains only as the lookup read (e.g. the
+  contact form's company select / the contacts list's company-name map).
+  """
   def companies(mount, scope) do
     Mount.resource(mount, Company)
     |> Ash.Query.ensure_selected([:name, :industry, :size, :custom])
     |> Ash.Query.sort(name: :asc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
+  end
+
+  @doc """
+  Read ONE keyset page of CRM companies for `scope` — the `ListLive` reads contract
+  (`(mount, scope, %ListState{}) -> %Page{}`, ADR-016 §3), built on
+  `Samen.Web.Reads.page!/3` so the read is BOUNDED BY CONSTRUCTION. Company is
+  non-PII; sort/filter fields are bounded plain attributes. On any read error the
+  page is EMPTY — never unbounded.
+  """
+  def companies_page(mount, scope, state) do
+    Mount.resource(mount, Company)
+    |> Ash.Query.ensure_selected([:name, :domain, :industry, :size, :website, :custom])
+    |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :industry])
+  rescue
+    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
   end
 
   @doc """
@@ -46,6 +74,7 @@ defmodule Samen.Web.CRM.Reads do
     Mount.resource(mount, Person)
     |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :display_name, :job_title, :company_id, :custom])
     |> Ash.Query.sort(display_name: :asc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, Person, scope)
   rescue
@@ -101,6 +130,7 @@ defmodule Samen.Web.CRM.Reads do
         :custom
       ])
       |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
       |> resolve_pii(mount, Person, scope)
 
@@ -118,6 +148,7 @@ defmodule Samen.Web.CRM.Reads do
       Mount.resource(mount, Company)
       |> Ash.Query.ensure_selected([:name, :domain, :industry, :size, :website, :notes, :custom])
       |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
 
     case result do
@@ -134,6 +165,7 @@ defmodule Samen.Web.CRM.Reads do
     |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :display_name, :job_title, :company_id])
     |> Ash.Query.filter(company_id == ^company_id)
     |> Ash.Query.sort(display_name: :asc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, Person, scope)
   rescue
@@ -146,6 +178,7 @@ defmodule Samen.Web.CRM.Reads do
     |> Ash.Query.ensure_selected([:type, :subject, :body, :status, :due_at, :completed_at, :custom, :person_id, :company_id])
     |> Ash.Query.filter(person_id == ^person_id)
     |> Ash.Query.sort(inserted_at: :desc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
@@ -157,6 +190,7 @@ defmodule Samen.Web.CRM.Reads do
     |> Ash.Query.ensure_selected([:type, :subject, :body, :status, :due_at, :completed_at, :custom, :person_id, :company_id])
     |> Ash.Query.filter(company_id == ^company_id)
     |> Ash.Query.sort(inserted_at: :desc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
@@ -172,11 +206,13 @@ defmodule Samen.Web.CRM.Reads do
       |> Ash.Query.ensure_selected([:name, :value_cents, :status, :pipeline_id, :company_id, :close_date])
       |> Ash.Query.filter(company_id == ^company_id)
       |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.Query.limit(@detail_limit)
       |> Ash.read!(scope: scope)
 
     stage_by_id =
       Mount.resource(mount, Pipeline)
       |> Ash.Query.ensure_selected([:name, :label, :stage_order])
+      |> Ash.Query.limit(@detail_limit)
       |> Ash.read!(scope: scope)
       |> Map.new(fn s -> {s.id, s} end)
 
@@ -200,11 +236,36 @@ defmodule Samen.Web.CRM.Reads do
   end
 
   @doc """
+  Destroy one CRM person for `scope` (A3 CRUD wiring — the contacts delete). The write
+  goes through Ash so OrgScope applies (a cross-org id is not even fetched); this module
+  adds NO policy of its own. `:ok` or `{:error, reason}`.
+  """
+  def delete_contact(mount, scope, id), do: delete_record(mount, scope, Person, id)
+
+  @doc "Destroy one CRM company for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
+  def delete_company(mount, scope, id), do: delete_record(mount, scope, Company, id)
+
+  defp delete_record(mount, scope, name, id) do
+    record =
+      Mount.resource(mount, name)
+      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+
+    case record do
+      nil -> {:error, :not_found}
+      record -> Ash.destroy(record, scope: scope)
+    end
+  rescue
+    e -> {:error, e}
+  end
+
+  @doc """
   Read the CRM contacts that are LEADS — `person.custom["lifecycle_stage"]` in the given
   bounded set (ADR-011 §8 prospecting lens). PII (name/email/phone) is plane-resolved
   (tenant clear / operator ••••), same as `contacts/2`. `stages` is a list of stage strings
-  (default the early-funnel `["lead", "mql", "sql"]`). Filtered in Elixir over the resolved
-  rows because `lifecycle_stage` lives in the Tier-1 `custom` jsonb bag (no Tier-0 column).
+  (default the early-funnel `["lead", "mql", "sql"]`). BOUNDED via `contacts/2`'s limit;
+  the Leads page itself reads through the paginated `leads_page/3`.
   """
   def leads(mount, scope, stages \\ ~w(lead mql sql)) do
     stage_set = MapSet.new(stages)
@@ -220,18 +281,55 @@ defmodule Samen.Web.CRM.Reads do
     _ -> []
   end
 
-  @doc "Read CRM opportunities grouped by pipeline stage for `scope`. Non-PII."
+  @doc """
+  Read ONE keyset page of CRM LEADS for `scope` — the `ListLive` reads contract over the
+  early-funnel lens (A3: the Leads page's `read!` elimination). The lifecycle filter is
+  applied SERVER-SIDE on the Tier-1 `custom` jsonb bag (`get_path(custom,
+  ["lifecycle_stage"]) in stages`) BEFORE the keyset window, so the page is bounded by
+  construction AND complete (an Elixir post-filter over a limited read would drop rows).
+  PII (name/email/phone) is plane-resolved AFTER paging — tenant clear / operator
+  `%Masked{}` (••••). On any read error the page is EMPTY, never a plaintext downgrade.
+  """
+  def leads_page(mount, scope, state, stages \\ ~w(lead mql sql)) do
+    page =
+      Mount.resource(mount, Person)
+      |> Ash.Query.ensure_selected([
+        :full_name,
+        :emails,
+        :phones,
+        :display_name,
+        :job_title,
+        :company_id,
+        :custom
+      ])
+      |> Ash.Query.filter(expr(get_path(custom, ["lifecycle_stage"]) in ^stages))
+      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:display_name, :job_title])
+
+    %{page | items: resolve_pii(page.items, mount, Person, scope)}
+  rescue
+    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+  end
+
+  @doc """
+  Read CRM opportunities grouped by pipeline stage for `scope`. Non-PII. BOUNDED to
+  `#{@detail_limit}` rows per read (A3 read-bounding, AC-G1-5): the kanban board is a
+  grouped render, not a keyset list, so it takes the hard cap — an org with more open
+  opportunities than the cap sees the oldest `#{@detail_limit}` on the board, never an
+  unbounded row transfer.
+  """
   def pipeline(mount, scope) do
     opps =
       Mount.resource(mount, Opportunity)
       |> Ash.Query.ensure_selected([:name, :value_cents, :status, :pipeline_id, :company_id, :close_date])
       |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.Query.limit(@detail_limit)
       |> Ash.read!(scope: scope)
 
     stages =
       Mount.resource(mount, Pipeline)
       |> Ash.Query.ensure_selected([:name, :label, :stage_order])
       |> Ash.Query.sort(stage_order: :asc)
+      |> Ash.Query.limit(@detail_limit)
       |> Ash.read!(scope: scope)
 
     stage_by_id = Map.new(stages, fn s -> {s.id, s} end)
@@ -254,20 +352,21 @@ defmodule Samen.Web.CRM.Reads do
     _ -> []
   end
 
-  @doc "Non-PII count/sum metrics for the CRM summary cards."
+  @doc """
+  Non-PII count/sum metrics for the CRM summary cards. Computed as DB aggregates
+  (`Ash.count`/`Ash.sum`) — no row set is ever transferred, so the read is bounded by
+  construction (A3 read-bounding: this replaced an unbounded open-opportunities `read!`).
+  """
   def metrics(mount, scope) do
-    companies_count = count_resource(Mount.resource(mount, Company), scope)
-    contacts_count = count_resource(Mount.resource(mount, Person), scope)
-
-    opps = open_opportunities(mount, scope)
-    open_opps_count = length(opps)
-    pipeline_value_cents = Enum.reduce(opps, 0, &(&1.value_cents + &2))
+    open_opps_query =
+      Mount.resource(mount, Opportunity)
+      |> Ash.Query.filter(status == :open)
 
     %{
-      companies: companies_count,
-      contacts: contacts_count,
-      open_opps: open_opps_count,
-      pipeline_value_cents: pipeline_value_cents
+      companies: count_resource(Mount.resource(mount, Company), scope),
+      contacts: count_resource(Mount.resource(mount, Person), scope),
+      open_opps: count_resource(open_opps_query, scope),
+      pipeline_value_cents: sum_resource(open_opps_query, :value_cents, scope)
     }
   end
 
@@ -296,12 +395,9 @@ defmodule Samen.Web.CRM.Reads do
     _ -> 0
   end
 
-  defp open_opportunities(mount, scope) do
-    Mount.resource(mount, Opportunity)
-    |> Ash.Query.ensure_selected([:value_cents, :status])
-    |> Ash.Query.filter(status == :open)
-    |> Ash.read!(scope: scope)
+  defp sum_resource(query, field, scope) do
+    Ash.sum!(query, field, scope: scope) || 0
   rescue
-    _ -> []
+    _ -> 0
   end
 end

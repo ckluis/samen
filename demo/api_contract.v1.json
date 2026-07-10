@@ -36,13 +36,13 @@
       "module": "Demo.Crm.Contact",
       "routes": [
         {
-          "action": "read",
+          "action": "api_read",
           "method": "GET",
           "path": "/contacts",
           "required_args": []
         },
         {
-          "action": "read",
+          "action": "api_read",
           "method": "GET",
           "path": "/contacts/:id",
           "required_args": []

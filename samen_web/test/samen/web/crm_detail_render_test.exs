@@ -106,7 +106,9 @@ defmodule Samen.Web.CRMDetailRenderTest do
     params = %{"activity" => %{"type" => "call", "subject" => "COMPOSER-CREATED check call", "body" => "Logged from the composer."}}
     {:noreply, socket} = Samen.Web.CRM.ContactLive.handle_event("log_activity", params, socket)
 
-    assert socket.assigns.form_error == nil
+    # A3: the composer is the AshPhoenix.Form-backed kit form now — a successful submit
+    # assigns a FRESH form (no lingering errors), not a form_error string.
+    assert socket.assigns.activity_form.errors == []
     html = render_html(Samen.Web.CRM.ContactLive, socket.assigns)
     assert html =~ "COMPOSER-CREATED check call"
     assert html =~ "Logged from the composer."

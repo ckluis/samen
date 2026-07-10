@@ -14,6 +14,20 @@ defmodule Samen.Web.Billing.Live do
 
   defdelegate assign_mount(socket, session), to: Samen.Web.Live
 
+  @doc """
+  Whether write AFFORDANCES (New/Edit/Delete buttons, modals' submit paths) are
+  OFFERED on this mount — tenant plane only (the ADR-011 §6.3 posture, same as
+  `Samen.Web.CRM.Live.writable?/1`: an operator does not author into a tenant's data).
+
+  This is UX, not enforcement: the kernel enforces regardless (OrgScope + the admin
+  role gates on the Billing config writes; `Samen.Pii.WriteGuard` rejects an
+  operator-plane plaintext write to the vaulted Customer billing_name/billing_email
+  at the Ash write path — MC-1 / Invariant L1). Hiding the affordance never
+  substitutes for the write-path red-path tests.
+  """
+  def writable?(%Mount{plane: %{kind: :operator}}), do: false
+  def writable?(_), do: true
+
   attr :mount, Mount, required: true
   attr :org_id, :string, default: nil
   attr :active, :atom, default: nil

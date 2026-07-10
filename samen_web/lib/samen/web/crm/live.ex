@@ -17,6 +17,104 @@ defmodule Samen.Web.CRM.Live do
   @doc "Read the mount out of the session (see `Samen.Web.Live.assign_mount/2`)."
   defdelegate assign_mount(socket, session), to: Samen.Web.Live
 
+  @doc """
+  Whether write AFFORDANCES (New/Edit/Delete buttons, composers, modals' submit paths)
+  are OFFERED on this mount — tenant plane only (ADR-011 §6.3 posture: an operator does
+  not author into a tenant's data; the SAME rule the log-activity composer already used).
+
+  This is UX, not enforcement: the kernel enforces regardless (OrgScope + role gates on
+  every write; `Samen.Pii.WriteGuard` rejects an operator-plane plaintext write to any
+  vaulted attribute at the Ash write path — MC-1 / Invariant L1). Hiding the affordance
+  never substitutes for the write-path red-path tests.
+  """
+  def writable?(%Mount{plane: %{kind: :operator}}), do: false
+  def writable?(_), do: true
+
+  @doc """
+  The composite FULL-NAME form field for CRM person forms (🔒 PII — `full_name` is a
+  vault-routed `Samen.Type.FullName`).
+
+  ## Masking (LOAD-BEARING — MC-1 render half on the composite)
+
+  Dispatch is ON THE VALUE, exactly like the kit's `form_field/1`:
+
+    * value is `%Samen.Masked{}` (operator/impersonation plane) → delegate to
+      `form_field/1`, whose masked branch renders the read-only `••••` placeholder with
+      NO `name` attribute — nothing this field can submit, no token in the DOM.
+    * otherwise (tenant plane / a create form with no stored value) → TWO nested
+      sub-inputs (`…[full_name][first]` / `…[full_name][last]`) that submit the map
+      shape `Samen.Type.FullName.cast_input/2` accepts. The echoed values come from
+      `name_part/2`, which reads only a NON-masked struct/map/JSON-string — a
+      `%Samen.Masked{}` can never reach the editable branch by construction.
+  """
+  attr :field, Phoenix.HTML.FormField, required: true
+  attr :label, :string, default: "Full name"
+
+  def full_name_field(%{field: %Phoenix.HTML.FormField{value: %Samen.Masked{}}} = assigns) do
+    ~H"""
+    <Samen.UI.form_field field={@field} label={@label} />
+    """
+  end
+
+  def full_name_field(assigns) do
+    errors = Enum.map(assigns.field.errors, &interpolate_error/1)
+    assigns = assign(assigns, :errors, errors)
+
+    ~H"""
+    <div class={["field", "field-composite", @errors != [] && "field-invalid"]} style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px">
+      <span class="field-label" style="font-size:12px;font-weight:600">{@label}</span>
+      <div style="display:flex;gap:8px">
+        <input
+          type="text"
+          id={"#{@field.id}_first"}
+          name={"#{@field.name}[first]"}
+          value={name_part(@field.value, :first)}
+          placeholder="First"
+          aria-label="First name"
+          aria-invalid={@errors != [] && "true"}
+          style="flex:1"
+        />
+        <input
+          type="text"
+          id={"#{@field.id}_last"}
+          name={"#{@field.name}[last]"}
+          value={name_part(@field.value, :last)}
+          placeholder="Last"
+          aria-label="Last name"
+          aria-invalid={@errors != [] && "true"}
+          style="flex:1"
+        />
+      </div>
+      <div :if={@errors != []} class="field-errors">
+        <p :for={msg <- @errors} class="field-error" style="margin:0;color:var(--bad, #b91c1c);font-size:12px">{msg}</p>
+      </div>
+    </div>
+    """
+  end
+
+  # Read one part of a NON-masked full-name value: the cast struct (after validate),
+  # a raw map (nested params), the resolver's JSON string (tenant-plane read), or nil
+  # (create form). NEVER a %Samen.Masked{} — that shape dispatches to form_field/1 above.
+  defp name_part(%Samen.Type.FullName{} = v, part), do: Map.get(v, part)
+  defp name_part(%{} = m, part), do: Map.get(m, part) || Map.get(m, to_string(part))
+
+  defp name_part(json, part) when is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, %{} = m} -> Map.get(m, to_string(part))
+      _ -> nil
+    end
+  end
+
+  defp name_part(_, _), do: nil
+
+  defp interpolate_error({msg, opts}) when is_binary(msg) do
+    Enum.reduce(opts, msg, fn {key, value}, acc ->
+      String.replace(acc, "%{#{key}}", fn _ -> to_string(value) end)
+    end)
+  end
+
+  defp interpolate_error(msg) when is_binary(msg), do: msg
+
   attr :mount, Mount, required: true
   attr :org_id, :string, default: nil
   attr :active, :atom, default: nil

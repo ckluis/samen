@@ -24,11 +24,26 @@ defmodule Samen.Web.Operator.Reads do
   namespace (trusted framework read of its own book of business); the identity line is drawn on
   the PII-bearing joins (Users/Customers/Messages), which DO go through `OrgScope` +
   `PiiResolution` on the tenant plane. Reading a non-PII grouping row leaks nothing.
+
+  ## A3 read-bounding + sanctioned writes
+
+  The hot lists (Accounts, Desk) read through the paginated `accounts_page/3` /
+  `desk_page/3` (built on `Samen.Web.Reads.page!/3` — BOUNDED BY CONSTRUCTION); every
+  join/lookup read carries an explicit `limit(#{200})`. The write side exposes ONLY
+  domain-defined actions: the Org anchor create (account provisioning — always-authorized
+  by the identity blueprint's bootstrap policy) and the desk `Ticket` create/destroy
+  (member-gated). No account-org destroy is offered — see the write-side section note.
   """
 
   require Ash.Query
 
   alias Samen.Web.Mount
+
+  # A3 read-bounding (WS-A design §1.1 "read! elimination"): every join/lookup read on
+  # the operator surfaces carries an explicit limit — the kit's hard page cap. These are
+  # book-of-business fan-outs (admins per account, agents, price rows), not hot lists;
+  # the hot lists themselves read through the paginated `accounts_page/3` / `desk_page/3`.
+  @lookup_limit 200
 
   @doc """
   Assemble the operator's ACCOUNTS (ADR-010 §4a). Each account IS a tenant org
@@ -46,34 +61,92 @@ defmodule Samen.Web.Operator.Reads do
   rows in the operator namespace (`org_id == operator_org_id`, `id != operator_org_id`).
   """
   def accounts(mount, scope, operator_org_id) do
-    admins_by_account = admins_by_account(mount, scope)
-    subs_by_customer = subscriptions_by_customer(mount, scope)
-    customers_by_account = customers_by_account(mount, scope, operator_org_id)
-    tickets_by_account = open_ticket_counts(mount, scope)
+    joins = account_joins(mount, scope, operator_org_id)
 
     account_orgs(mount, operator_org_id)
-    |> Enum.map(fn org ->
-      tenant_org_id = org.slug
-      admins = Map.get(admins_by_account, tenant_org_id, [])
-      customer = Map.get(customers_by_account, tenant_org_id)
-      subscription = customer && Map.get(subs_by_customer, customer.id)
-
-      %{
-        id: org.id,
-        name: org.name,
-        plan: org.plan,
-        tenant_org_id: tenant_org_id,
-        __admins__: admins,
-        __customer__: customer,
-        __subscription__: subscription,
-        __mrr_cents__: (subscription && subscription.__mrr_cents__) || 0,
-        __seats__: length(admins),
-        __open_tickets__: Map.get(tickets_by_account, tenant_org_id, 0),
-        __health__: health(subscription)
-      }
-    end)
+    |> Enum.map(&account_row(&1, joins))
   rescue
     _ -> []
+  end
+
+  @doc """
+  Read ONE keyset page of the operator's ACCOUNTS — the A2 `ListLive` reads contract
+  (`(mount, scope, %ListState{}) -> %Page{}`, ADR-016 §3), the A3 retrofit of
+  `accounts/3`. The account `Org` rows are the same trusted non-PII grouping read as
+  `account_orgs/2` (`authorize?: false` with an explicit operator-namespace filter —
+  see the moduledoc; `OrgIsSelf` would return only the operator org's own row), routed
+  through `Samen.Web.Reads.page!/3` so the read is BOUNDED BY CONSTRUCTION
+  (`limit(page_size + 1)`, hostile page sizes clamped, keyset-stable).
+
+  The PII-bearing joins (tenant-admin name/email) resolve exactly as in `accounts/3`:
+  `OrgScope` + tenant-plane `PiiResolution` — CLEAR because the SaaS owns population
+  (1); this function adds no plaintext path. Sort/filter fields (`name`/`plan`) are
+  bounded non-PII attributes. On any read error the page is EMPTY, never unbounded.
+
+  The operator org id resolves from the mount (`Samen.Web.Operator.org_id/1`); with no
+  operator org the page is empty.
+  """
+  def accounts_page(mount, scope, state) do
+    case Samen.Web.Operator.org_id(mount) do
+      nil ->
+        empty_page(state)
+
+      operator_org_id ->
+        joins = account_joins(mount, scope, operator_org_id)
+
+        page =
+          Mount.resource(mount, Org)
+          |> Ash.Query.ensure_selected([:name, :slug, :plan, :org_id])
+          |> Ash.Query.filter(org_id == ^operator_org_id and id != ^operator_org_id)
+          |> Samen.Web.Reads.page!(state,
+            scope: scope,
+            authorize?: false,
+            filter_fields: [:name]
+          )
+
+        %{page | items: Enum.map(page.items, &account_row(&1, joins))}
+    end
+  rescue
+    _ -> empty_page(state)
+  end
+
+  # The per-account join maps (admins / subscription / customer / open desk tickets) —
+  # each underlying read is OrgScope'd + bounded (`@lookup_limit`).
+  defp account_joins(mount, scope, operator_org_id) do
+    %{
+      admins_by_account: admins_by_account(mount, scope),
+      subs_by_customer: subscriptions_by_customer(mount, scope),
+      customers_by_account: customers_by_account(mount, scope, operator_org_id),
+      tickets_by_account: open_ticket_counts(mount, scope)
+    }
+  end
+
+  defp account_row(org, joins) do
+    tenant_org_id = org.slug
+    admins = Map.get(joins.admins_by_account, tenant_org_id, [])
+    customer = Map.get(joins.customers_by_account, tenant_org_id)
+    subscription = customer && Map.get(joins.subs_by_customer, customer.id)
+
+    %{
+      id: org.id,
+      name: org.name,
+      plan: org.plan,
+      tenant_org_id: tenant_org_id,
+      __admins__: admins,
+      __customer__: customer,
+      __subscription__: subscription,
+      __mrr_cents__: (subscription && subscription.__mrr_cents__) || 0,
+      __seats__: length(admins),
+      __open_tickets__: Map.get(joins.tickets_by_account, tenant_org_id, 0),
+      __health__: health(subscription)
+    }
+  end
+
+  defp empty_page(state) do
+    %Samen.Web.Page{
+      items: [],
+      page_size: Samen.Web.Reads.bounded_page_size(state.page_size)
+    }
   end
 
   @doc """
@@ -114,33 +187,117 @@ defmodule Samen.Web.Operator.Reads do
   ride the Ticket columns. Returns a list of ticket maps.
   """
   def desk(mount, scope) do
-    users_by_id = users_by_id(mount, scope)
-    agents_by_id = agents_by_id(mount, scope)
-    agent_by_ticket = agent_by_ticket(mount, scope)
+    joins = desk_joins(mount, scope)
 
     Mount.resource(mount, Ticket)
     |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :tags, :custom])
     |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
-    |> Enum.map(fn ticket ->
-      requester_user_id = get_in(ticket.custom || %{}, ["requester_user_id"])
-      requester_org_id = get_in(ticket.custom || %{}, ["requester_org_id"])
-
-      %{
-        id: ticket.id,
-        subject: ticket.subject,
-        status: ticket.status,
-        priority: ticket.priority,
-        sla_breach_at: ticket.sla_breach_at,
-        breached: ticket.breached,
-        tags: ticket.tags,
-        __requester__: requester_user_id && Map.get(users_by_id, requester_user_id),
-        __requester_org_id__: requester_org_id,
-        __agent__: Map.get(agent_by_ticket, ticket.id) |> then(&(&1 && Map.get(agents_by_id, &1)))
-      }
-    end)
+    |> Enum.map(&desk_row(&1, joins))
   rescue
     _ -> []
+  end
+
+  @doc """
+  Read ONE keyset page of the SaaS help desk — the A2 `ListLive` reads contract, the
+  A3 retrofit of `desk/2`. The `Support.Ticket` read is OrgScope'd on the operator
+  org's tenant plane and routed through `Samen.Web.Reads.page!/3` (BOUNDED BY
+  CONSTRUCTION). Requester (tenant-admin) / agent joins resolve per plane through
+  `PiiResolution` exactly as `desk/2` — CLEAR, the SaaS's own people. Sort/filter
+  fields (`subject`/`status`/`priority`) are bounded non-vaulted ticket columns. On
+  any read error the page is EMPTY, never unbounded.
+  """
+  def desk_page(mount, scope, state) do
+    joins = desk_joins(mount, scope)
+
+    page =
+      Mount.resource(mount, Ticket)
+      |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :tags, :custom])
+      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:subject])
+
+    %{page | items: Enum.map(page.items, &desk_row(&1, joins))}
+  rescue
+    _ -> empty_page(state)
+  end
+
+  defp desk_joins(mount, scope) do
+    %{
+      users_by_id: users_by_id(mount, scope),
+      agents_by_id: agents_by_id(mount, scope),
+      agent_by_ticket: agent_by_ticket(mount, scope)
+    }
+  end
+
+  defp desk_row(ticket, joins) do
+    requester_user_id = get_in(ticket.custom || %{}, ["requester_user_id"])
+    requester_org_id = get_in(ticket.custom || %{}, ["requester_org_id"])
+
+    %{
+      id: ticket.id,
+      subject: ticket.subject,
+      status: ticket.status,
+      priority: ticket.priority,
+      sla_breach_at: ticket.sla_breach_at,
+      breached: ticket.breached,
+      tags: ticket.tags,
+      __requester__: requester_user_id && Map.get(joins.users_by_id, requester_user_id),
+      __requester_org_id__: requester_org_id,
+      __agent__:
+        Map.get(joins.agent_by_ticket, ticket.id)
+        |> then(&(&1 && Map.get(joins.agents_by_id, &1)))
+    }
+  end
+
+  @doc """
+  Non-PII desk header metrics as DB aggregates (`Ash.count`) — no row set transferred,
+  bounded by construction (A3: this replaced counts computed over the unbounded
+  `desk/2` list).
+  """
+  def desk_metrics(mount, scope) do
+    %{
+      open: count_tickets(mount, scope, &Ash.Query.filter(&1, status in [:open, :pending])),
+      breaching: count_tickets(mount, scope, &Ash.Query.filter(&1, breached == true)),
+      high: count_tickets(mount, scope, &Ash.Query.filter(&1, priority in [:urgent, :high]))
+    }
+  end
+
+  defp count_tickets(mount, scope, filter_fn) do
+    Mount.resource(mount, Ticket)
+    |> filter_fn.()
+    |> Ash.count!(scope: scope)
+  rescue
+    _ -> 0
+  end
+
+  # -- A3 write side (sanctioned domain actions only) ----------------------------
+  #
+  # The support blueprint defines `defaults([:read, :destroy, create: :*, update: :*])`
+  # member-gated; the identity blueprint's Org create is always-authorized (the anchor
+  # bootstrap). This module only exposes those. NO account-org destroy is offered: the
+  # Org anchor's destroy is `OrgIsSelf`-gated (an account row is another org's anchor),
+  # and the domain defines no operator offboarding action — wiring one would invent
+  # policy (WS-A design: only sanctioned actions).
+
+  @doc """
+  Destroy one desk ticket for `scope` (A3 CRUD wiring). The write goes through Ash so
+  OrgScope + `RoleAtLeast(:member)` apply — this module adds NO policy of its own.
+  FAIL-HONEST: a ticket with linked conversations is refused by the DB FK and the
+  refusal is returned, never swallowed. `:ok` or `{:error, reason}`.
+  """
+  def delete_ticket(mount, scope, id) do
+    record =
+      Mount.resource(mount, Ticket)
+      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+
+    case record do
+      nil -> {:error, :not_found}
+      record -> Ash.destroy(record, scope: scope)
+    end
+  rescue
+    e -> {:error, e}
   end
 
   @doc "Non-PII operator summary metrics for the Accounts page header."
@@ -166,6 +323,7 @@ defmodule Samen.Web.Operator.Reads do
     |> Ash.Query.ensure_selected([:name, :slug, :plan, :org_id])
     |> Ash.Query.filter(org_id == ^operator_org_id and id != ^operator_org_id)
     |> Ash.Query.sort(name: :asc)
+    |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(authorize?: false)
   rescue
     _ -> []
@@ -200,6 +358,7 @@ defmodule Samen.Web.Operator.Reads do
   defp memberships(mount, scope) do
     Mount.resource(mount, Membership)
     |> Ash.Query.ensure_selected([:role, :status, :user_id, :org_id])
+    |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
@@ -208,6 +367,7 @@ defmodule Samen.Web.Operator.Reads do
   defp users_by_id(mount, scope) do
     Mount.resource(mount, User)
     |> Ash.Query.ensure_selected([:handle, :status, :full_name, :emails])
+    |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, User, scope)
     |> Map.new(&{&1.id, &1})
@@ -227,6 +387,7 @@ defmodule Samen.Web.Operator.Reads do
     Mount.resource(mount, Subscription)
     |> Ash.Query.ensure_selected([:status, :customer_id, :plan_id, :current_period_end])
     |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> Enum.map(fn sub ->
       mrr = if sub.status == :active, do: Map.get(prices_by_plan, sub.plan_id, 0), else: 0
@@ -265,6 +426,7 @@ defmodule Samen.Web.Operator.Reads do
     Mount.resource(mount, Customer)
     |> Ash.Query.ensure_selected([:billing_name, :billing_email, :status, :currency, :custom])
     |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, Customer, scope)
   rescue
@@ -277,6 +439,7 @@ defmodule Samen.Web.Operator.Reads do
     Mount.resource(mount, Invoice)
     |> Ash.Query.ensure_selected([:status, :amount_due_cents, :amount_paid_cents, :currency, :due_date, :paid_at, :customer_id])
     |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> Enum.map(fn inv ->
       inv
@@ -290,6 +453,7 @@ defmodule Samen.Web.Operator.Reads do
   defp plans_by_id(mount, scope) do
     Mount.resource(mount, Plan)
     |> Ash.Query.ensure_selected([:name, :label, :interval])
+    |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> Map.new(&{&1.id, &1})
   rescue
@@ -300,6 +464,7 @@ defmodule Samen.Web.Operator.Reads do
     Mount.resource(mount, Price)
     |> Ash.Query.ensure_selected([:plan_id, :unit_amount_cents, :interval, :active])
     |> Ash.Query.filter(interval == :monthly and active == true)
+    |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> Map.new(&{&1.plan_id, &1.unit_amount_cents})
   rescue
@@ -311,6 +476,7 @@ defmodule Samen.Web.Operator.Reads do
   defp open_ticket_counts(mount, scope) do
     Mount.resource(mount, Ticket)
     |> Ash.Query.ensure_selected([:status, :custom])
+    |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> Enum.reduce(%{}, fn t, acc ->
       case get_in(t.custom || %{}, ["requester_org_id"]) do
@@ -328,6 +494,7 @@ defmodule Samen.Web.Operator.Reads do
   defp agents_by_id(mount, scope) do
     Mount.resource(mount, Agent)
     |> Ash.Query.ensure_selected([:handle, :status, :role, :full_name, :email])
+    |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, Agent, scope)
     |> Map.new(&{&1.id, &1})
@@ -340,11 +507,13 @@ defmodule Samen.Web.Operator.Reads do
     convs_by_ticket =
       Mount.resource(mount, Conversation)
       |> Ash.Query.ensure_selected([:ticket_id])
+      |> Ash.Query.limit(@lookup_limit)
       |> Ash.read!(scope: scope)
       |> Map.new(&{&1.id, &1.ticket_id})
 
     Mount.resource(mount, Message)
     |> Ash.Query.ensure_selected([:conversation_id, :agent_id, :sender_type])
+    |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> Enum.reduce(%{}, fn msg, acc ->
       ticket_id = Map.get(convs_by_ticket, msg.conversation_id)

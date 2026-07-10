@@ -220,8 +220,10 @@ defmodule Demo.Crm.Contact do
 
     routes do
       base("/contacts")
-      get(:read)
-      index(:read)
+      # Bind the public routes to the BOUNDED `:api_read` (keyset pagination, default_limit
+      # 50 / max_page_size 200) — the API is bounded by default (AC-G1-6 / RP-G1-6).
+      get(:api_read)
+      index(:api_read)
     end
   end
 
@@ -274,6 +276,24 @@ defmodule Demo.Crm.Contact do
 
   actions do
     defaults([:read, :destroy, create: :*, update: :*])
+
+    # BOUNDED-by-default API read (WS-A design §1.1, ADR-016 §3, AC-G1-6 / RP-G1-6): a
+    # SEPARATE read action the JSON:API `index`/`get` routes bind to, with keyset
+    # pagination — default_limit 50 / max_page_size 200 / paginate_by_default? true. An
+    # AshJsonApi index read with NO `page` params returns a BOUNDED page (never the full
+    # set); a `page[limit]` above max_page_size is CLAMPED, never honored. Kept DISTINCT
+    # from the plain `:read` so internal/UI callers (`Ash.read!`, and Samen.Web.Reads
+    # which supplies its OWN `limit`) keep returning a plain list — the API bound does not
+    # leak into the internal read semantics.
+    read :api_read do
+      pagination(
+        keyset?: true,
+        default_limit: 50,
+        max_page_size: 200,
+        required?: false,
+        paginate_by_default?: true
+      )
+    end
 
     # The declared reveal action. Called under a grant to expose plaintext.
     # In production this would load and return the plaintext fields; for the

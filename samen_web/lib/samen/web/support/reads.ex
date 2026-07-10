@@ -10,6 +10,21 @@ defmodule Samen.Web.Support.Reads do
 
   resolved through `Samen.Api.PiiResolution.resolve/4` (tenant CLEAR / operator ••••).
 
+  ## A3 read-bounding (WS-A design §1.1 "read! elimination")
+
+  The Ticket Inbox reads through the paginated `tickets_page/3` (built on
+  `Samen.Web.Reads.page!/3` — BOUNDED BY CONSTRUCTION); every remaining detail /
+  lookup read carries an explicit `limit(#{200})` (single-parent fan-outs, not hot
+  lists). Metrics are DB aggregates (`Ash.count`/`Ash.avg`) — no row set transferred.
+
+  ## A3 write side (sanctioned domain actions only)
+
+  The support blueprint defines `defaults([:read, :destroy, create: :*, update: :*])`;
+  this module only exposes those: ticket create/delete (member-gated by the kernel),
+  the bounded ticket STATUS update, and the message (reply) create — whose vaulted
+  `body` rides `Samen.Vault.Change` (MC-2) and is refused to an operator-plane actor
+  by `Samen.Pii.WriteGuard` (MC-1) at the Ash write path.
+
   ## MASKING INVARIANT
 
   Never calls `Samen.Vault.reveal/3`, never unwraps a `%Masked{}`, never has a
@@ -21,7 +36,22 @@ defmodule Samen.Web.Support.Reads do
 
   alias Samen.Web.Mount
 
-  @doc "Read all support tickets for `scope`, newest-first. Non-PII header."
+  # Bounded detail/lookup reads (a ticket's conversations, a conversation's messages,
+  # the agent join map). Single-parent fan-outs, not hot lists.
+  @detail_limit 200
+
+  # The blueprint's bounded status enum — client input is matched against THIS list,
+  # never atomized (`String.to_atom/1` on client input mints atoms).
+  @ticket_statuses [:open, :pending, :on_hold, :resolved, :closed]
+
+  @doc "The bounded ticket status set (the blueprint's `one_of` — the status select's options)."
+  def ticket_statuses, do: @ticket_statuses
+
+  @doc """
+  Read support tickets for `scope`, newest-first. Non-PII header. BOUNDED to
+  #{@detail_limit} rows (A3 read-bounding); the Ticket Inbox itself reads through the
+  paginated `tickets_page/3`.
+  """
   def tickets(mount, scope) do
     Mount.resource(mount, Ticket)
     |> Ash.Query.ensure_selected([
@@ -35,9 +65,35 @@ defmodule Samen.Web.Support.Reads do
       :sla_id
     ])
     |> Ash.Query.sort(inserted_at: :desc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
+  end
+
+  @doc """
+  Read ONE keyset page of support tickets for `scope` — the `ListLive` reads contract
+  (`(mount, scope, %ListState{}) -> %Page{}`, ADR-016 §3), built on
+  `Samen.Web.Reads.page!/3` so the read is BOUNDED BY CONSTRUCTION. The ticket header
+  is non-PII; sort/filter fields are bounded plain attributes (`subject` is freeform
+  ticket text but NOT vaulted — and it is default-denied from the CDC projection, see
+  the A1 classifier). On any read error the page is EMPTY — never unbounded.
+  """
+  def tickets_page(mount, scope, state) do
+    Mount.resource(mount, Ticket)
+    |> Ash.Query.ensure_selected([
+      :subject,
+      :status,
+      :priority,
+      :sla_breach_at,
+      :breached,
+      :resolved_at,
+      :tags,
+      :sla_id
+    ])
+    |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:subject])
+  rescue
+    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
   end
 
   @doc "Read a single ticket by id for `scope`. `{:ok, ticket}` or `:error`."
@@ -55,6 +111,7 @@ defmodule Samen.Web.Support.Reads do
         :sla_id
       ])
       |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
 
     case result do
@@ -65,13 +122,14 @@ defmodule Samen.Web.Support.Reads do
     _ -> :error
   end
 
-  @doc "Read conversations (+ PII-resolved messages) for a ticket."
+  @doc "Read conversations (+ PII-resolved messages) for a ticket. BOUNDED."
   def conversations_for_ticket(mount, scope, ticket_id) do
     convs =
       Mount.resource(mount, Conversation)
       |> Ash.Query.ensure_selected([:channel, :status, :subject, :ticket_id])
       |> Ash.Query.filter(ticket_id == ^ticket_id)
       |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.Query.limit(@detail_limit)
       |> Ash.read!(scope: scope)
 
     agents_map = agents_by_id(mount, scope)
@@ -84,7 +142,7 @@ defmodule Samen.Web.Support.Reads do
     _ -> []
   end
 
-  @doc "Read messages for a conversation with body PII-resolved and agent joined."
+  @doc "Read messages for a conversation with body PII-resolved and agent joined. BOUNDED."
   def messages_for_conversation(mount, scope, conversation_id, agents_map \\ nil) do
     msgs =
       Mount.resource(mount, Message)
@@ -99,6 +157,7 @@ defmodule Samen.Web.Support.Reads do
       ])
       |> Ash.Query.filter(conversation_id == ^conversation_id)
       |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.Query.limit(@detail_limit)
       |> Ash.read!(scope: scope)
       |> resolve_pii(mount, Message, scope)
 
@@ -112,11 +171,12 @@ defmodule Samen.Web.Support.Reads do
     _ -> []
   end
 
-  @doc "Read all support agents for `scope` with full_name/email PII-resolved."
+  @doc "Read support agents for `scope` with full_name/email PII-resolved. BOUNDED."
   def agents(mount, scope) do
     Mount.resource(mount, Agent)
     |> Ash.Query.ensure_selected([:handle, :status, :role, :full_name, :email, :timezone])
     |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, Agent, scope)
   rescue
@@ -128,17 +188,22 @@ defmodule Samen.Web.Support.Reads do
     agents(mount, scope) |> Map.new(&{&1.id, &1})
   end
 
-  @doc "Read all CSAT responses for `scope`. Non-PII."
+  @doc "Read CSAT responses for `scope`. Non-PII. BOUNDED to #{@detail_limit} rows."
   def csats(mount, scope) do
     Mount.resource(mount, Csat)
     |> Ash.Query.ensure_selected([:score, :comments, :channel, :responded_at, :ticket_id, :agent_id])
     |> Ash.Query.sort(responded_at: :desc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
   end
 
-  @doc "Non-PII support metrics (open_tickets, breaching_sla, solved_this_week, csat_avg)."
+  @doc """
+  Non-PII support metrics (open_tickets, breaching_sla, solved_this_week, csat_avg).
+  DB aggregates (`Ash.count`/`Ash.avg`) — no row set is ever transferred (A3
+  read-bounding: this replaced an unbounded CSAT `read!`).
+  """
   def metrics(mount, scope) do
     %{
       open_tickets: count_open_tickets(mount, scope),
@@ -146,6 +211,71 @@ defmodule Samen.Web.Support.Reads do
       solved_this_week: count_solved_this_week(mount, scope),
       csat_avg: avg_csat(mount, scope)
     }
+  end
+
+  # -- A3 write side (sanctioned defaults only) ----------------------------------
+
+  @doc """
+  Create a support message (the ticket REPLY / internal note composer). `attrs`
+  carries `conversation_id` (a server-side fact from the detail page, never client
+  input), `body` (🔒 vault-routed — MC-2 on the tenant plane; REFUSED to an
+  operator-plane actor by `Samen.Pii.WriteGuard`, MC-1), `sender_type`,
+  `message_type`, and `org_id`. The write goes through Ash so OrgScope + SameOrgFk
+  apply — this module adds NO policy of its own. `{:ok, message}` or `{:error, form}`.
+  """
+  def create_message(mount, scope, attrs) do
+    Mount.resource(mount, Message)
+    |> Ash.Changeset.for_create(:create, attrs, scope: scope)
+    |> Ash.create()
+  end
+
+  @doc """
+  Update a ticket's STATUS (the sanctioned `update: :*` — "ticket status" per the A3
+  wiring scope). `status` is a STRING matched against the bounded blueprint enum
+  (`ticket_statuses/0`) — client input never mints an atom; an unknown status is
+  refused as `{:error, :invalid_status}`. `{:ok, ticket}` or `{:error, reason}`.
+  """
+  def update_ticket_status(mount, scope, id, status) when is_binary(status) do
+    case Enum.find(@ticket_statuses, fn s -> Atom.to_string(s) == status end) do
+      nil -> {:error, :invalid_status}
+      bounded -> update_ticket_status(mount, scope, id, bounded)
+    end
+  end
+
+  def update_ticket_status(mount, scope, id, status) when status in @ticket_statuses do
+    record =
+      Mount.resource(mount, Ticket)
+      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+
+    case record do
+      nil ->
+        {:error, :not_found}
+
+      ticket ->
+        ticket
+        |> Ash.Changeset.for_update(:update, %{status: status}, scope: scope)
+        |> Ash.update()
+    end
+  rescue
+    e -> {:error, e}
+  end
+
+  @doc "Destroy one support ticket for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
+  def delete_ticket(mount, scope, id) do
+    record =
+      Mount.resource(mount, Ticket)
+      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+
+    case record do
+      nil -> {:error, :not_found}
+      ticket -> Ash.destroy(ticket, scope: scope)
+    end
+  rescue
+    e -> {:error, e}
   end
 
   # -- private -----------------------------------------------------------------
@@ -192,13 +322,10 @@ defmodule Samen.Web.Support.Reads do
   end
 
   defp avg_csat(mount, scope) do
-    case csats(mount, scope) do
-      [] ->
-        nil
-
-      scores ->
-        total = Enum.reduce(scores, 0, &((&1.score || 0) + &2))
-        Float.round(total / length(scores), 1)
+    case Ash.avg!(Mount.resource(mount, Csat), :score, scope: scope) do
+      nil -> nil
+      avg when is_float(avg) -> Float.round(avg, 1)
+      avg -> avg |> Decimal.to_float() |> Float.round(1)
     end
   rescue
     _ -> nil

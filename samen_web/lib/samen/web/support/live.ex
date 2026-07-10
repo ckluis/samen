@@ -13,6 +13,19 @@ defmodule Samen.Web.Support.Live do
 
   defdelegate assign_mount(socket, session), to: Samen.Web.Live
 
+  @doc """
+  Whether write AFFORDANCES (New ticket, the reply composer, status changes, Delete)
+  are OFFERED on this mount — tenant plane only (the ADR-011 §6.3 posture, same as
+  `Samen.Web.CRM.Live.writable?/1`).
+
+  This is UX, not enforcement: the kernel enforces regardless (OrgScope + RoleAtLeast
+  on every write; `Samen.Pii.WriteGuard` rejects an operator-plane plaintext write to
+  the vaulted `Message.body` at the Ash write path — MC-1 / Invariant L1). Hiding the
+  affordance never substitutes for the write-path red-path tests.
+  """
+  def writable?(%Mount{plane: %{kind: :operator}}), do: false
+  def writable?(_), do: true
+
   attr :mount, Mount, required: true
   attr :org_id, :string, default: nil
   attr :active, :atom, default: nil

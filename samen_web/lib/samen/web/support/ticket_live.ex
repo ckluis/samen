@@ -13,11 +13,28 @@ defmodule Samen.Web.Support.TicketLive do
   All plane-resolved by `Samen.Api.PiiResolution` (tenant CLEAR / operator ••••). This
   LiveView NEVER calls the vault or unwraps a `%Masked{}`; it renders whatever the resolver
   returned.
+
+  ## A3 write side — reply + status (AC-G1-1/2, MC-1/MC-2)
+
+  The sanctioned "ticket reply/status" writes:
+
+    * **Reply composer** — a `simple_form/1` over the Message create. `body` is
+      🔒 VAULT-ROUTED (a NEW PII write surface): the tenant's plaintext submits
+      through `Samen.Vault.Change` (MC-2); on the operator plane the composer is
+      absent (posture) AND the write itself is REJECTED by `Samen.Pii.WriteGuard`
+      at the Ash write path (MC-1 / RP-G1-7). `conversation_id` / `sender_type` /
+      `org_id` are server-side facts, never client input.
+    * **Status select** — the blueprint's `update: :*` on the ticket. The submitted
+      status is matched against the BOUNDED enum in `Reads.update_ticket_status/4`
+      (client input never mints an atom; garbage is refused).
+
+  Write affordances are offered on the tenant plane only
+  (`Samen.Web.Support.Live.writable?/1`); enforcement stays in the kernel.
   """
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.Support.Live, only: [assign_mount: 2, support_sidebar: 1]
+  import Samen.Web.Support.Live, only: [assign_mount: 2, support_sidebar: 1, writable?: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
@@ -48,6 +65,44 @@ defmodule Samen.Web.Support.TicketLive do
     {:noreply, assign(socket, active_tab: tab)}
   end
 
+  # -- A3 write events (reply + status) ----------------------------------------
+
+  def handle_event("validate_reply", %{"form" => params}, socket) do
+    form = AshPhoenix.Form.validate(socket.assigns.reply_form, reply_params(params, socket))
+    {:noreply, assign(socket, reply_form: form)}
+  end
+
+  # The reply submit. `conversation_id` / `sender_type` / `org_id` are server-side
+  # facts (reply_params/2) — never client input. On the tenant plane the vaulted
+  # `body` routes through the vault (MC-2); on the operator plane
+  # `Samen.Pii.WriteGuard` REJECTS the plaintext at the Ash write path (MC-1) and
+  # the error renders inline — this LiveView adds no policy of its own.
+  def handle_event("save_reply", %{"form" => params}, socket) do
+    case AshPhoenix.Form.submit(socket.assigns.reply_form, params: reply_params(params, socket)) do
+      {:ok, _message} ->
+        {:noreply, load(socket, socket.assigns.org_id, socket.assigns.ticket_id)}
+
+      {:error, form} ->
+        {:noreply, assign(socket, reply_form: form)}
+    end
+  end
+
+  # The sanctioned status change. The status STRING is matched against the bounded
+  # blueprint enum inside Reads.update_ticket_status/4 — garbage is refused, no atom
+  # is ever minted from client input.
+  def handle_event("set_status", %{"status" => status}, socket) do
+    %{samen_mount: mount, org_id: org_id, ticket_id: ticket_id} = socket.assigns
+    scope = Mount.scope(mount, org_id)
+
+    case Reads.update_ticket_status(mount, scope, ticket_id, status) do
+      {:ok, _ticket} ->
+        {:noreply, load(assign(socket, status_error: nil), org_id, ticket_id)}
+
+      {:error, _reason} ->
+        {:noreply, assign(socket, status_error: "Could not update the ticket status.")}
+    end
+  end
+
   @doc false
   def load(socket, nil, _ticket_id) do
     current_tab = Map.get(socket.assigns, :active_tab, "conversation")
@@ -55,6 +110,8 @@ defmodule Samen.Web.Support.TicketLive do
     socket
     |> ensure_return_to()
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, ticket: nil, conversations: [], agents: [], active_tab: current_tab)
+    |> assign(reply_form: nil)
+    |> assign_new(:status_error, fn -> nil end)
   end
 
   def load(socket, org_id, ticket_id) do
@@ -88,6 +145,33 @@ defmodule Samen.Web.Support.TicketLive do
       agents: agents,
       active_tab: current_tab
     )
+    |> assign(reply_form: new_reply_form(mount, scope, conversations))
+    |> assign_new(:status_error, fn -> nil end)
+  end
+
+  # The reply targets the LATEST conversation on the ticket — a server-side fact.
+  # No conversation → no composer (nil form).
+  defp new_reply_form(mount, scope, conversations) do
+    case List.last(conversations) do
+      nil ->
+        nil
+
+      _conv ->
+        Mount.resource(mount, Message)
+        |> AshPhoenix.Form.for_create(:create, scope: scope)
+        |> to_form()
+    end
+  end
+
+  # Server-side facts for the reply write — the client controls body + message_type
+  # only; the conversation binding, sender type, and org are the page's.
+  defp reply_params(params, socket) do
+    conv = List.last(socket.assigns.conversations)
+
+    params
+    |> Map.put("org_id", socket.assigns.org_id)
+    |> Map.put("conversation_id", conv && conv.id)
+    |> Map.put("sender_type", "agent")
   end
 
   defp ensure_return_to(socket) do
@@ -140,7 +224,21 @@ defmodule Samen.Web.Support.TicketLive do
                   <.pill variant={status_variant(@ticket.status)}>{status_label(@ticket.status)}</.pill>
                   <.pill variant={priority_variant(@ticket.priority)}>{priority_label(@ticket.priority)}</.pill>
                   {sla_badge(@ticket)}
+                  <form :if={writable?(@samen_mount)} id="ticket-status-form" phx-change="set_status" style="margin:0">
+                    <select name="status" aria-label="Set ticket status" style="font-size:12px">
+                      <option
+                        :for={status <- Reads.ticket_statuses()}
+                        value={Atom.to_string(status)}
+                        selected={@ticket.status == status}
+                      >
+                        {status_label(status)}
+                      </option>
+                    </select>
+                  </form>
                 </div>
+              </div>
+              <div :if={@status_error} class="card form-error" id="status-error" style="margin-top:8px;padding:10px 14px;color:var(--bad, #b91c1c);font-size:12px">
+                {@status_error}
               </div>
             </div>
 
@@ -191,6 +289,22 @@ defmodule Samen.Web.Support.TicketLive do
                     </div>
                   <% end %>
                 <% end %>
+
+                <div :if={writable?(@samen_mount) and @reply_form != nil} class="card" id="reply-composer" style="padding:16px 18px">
+                  <div class="gtitle" style="margin-bottom:10px"><h3>Reply <small style="font-weight:400;color:var(--muted)">(🔒 body is vault-routed PII)</small></h3></div>
+                  <.simple_form :let={f} for={@reply_form} id="reply-form" phx-change="validate_reply" phx-submit="save_reply">
+                    <.form_field field={f[:body]} label="Message (🔒 PII)" type="textarea" rows="3" placeholder="Write a reply…" />
+                    <.form_field
+                      field={f[:message_type]}
+                      label="Type"
+                      type="select"
+                      options={[{"reply", "reply"}, {"internal note", "note"}]}
+                    />
+                    <:actions>
+                      <.button variant="primary" type="submit">Send reply</.button>
+                    </:actions>
+                  </.simple_form>
+                </div>
               </div>
             <% else %>
               <div class="wrap" id="details-pane">

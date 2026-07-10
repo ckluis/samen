@@ -18,6 +18,17 @@ defmodule Samen.Web.Operator.Live do
   @doc "Read the mount out of the session (see `Samen.Web.Live.assign_mount/2`)."
   defdelegate assign_mount(socket, session), to: Samen.Web.Live
 
+  @doc """
+  Whether the operator workspace offers write AFFORDANCES on this mount (A3 posture,
+  same rule as the CRM/Billing/Support/Marketing `Live` modules): the operator's own
+  book-of-business workspace runs on the operator org's TENANT plane (ADR-010 §7.2) —
+  writable. A `plane: :operator` (impersonation) mount is read-only UI. This is
+  POSTURE only; the ENFORCEMENT is the kernel's (`OrgScope`, `RoleAtLeast`, and
+  `Samen.Pii.WriteGuard` at the Ash write path — MC-1).
+  """
+  def writable?(%Mount{plane: %{kind: :operator}}), do: false
+  def writable?(_), do: true
+
   attr :mount, Mount, default: nil
   attr :active, :atom, default: nil
 

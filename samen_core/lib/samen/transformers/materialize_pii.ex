@@ -88,8 +88,20 @@ defmodule Samen.Transformers.MaterializePii do
   end
 
   defp add_vault_change(dsl_state) do
+    # The plane-aware WRITE GUARD (WS-A design §1.2 MC-1 / ADR-016 Invariant L1) is
+    # injected FIRST so its `before_action` runs BEFORE `Samen.Vault.Change`'s — an
+    # operator-plane plaintext write to a vaulted attribute is refused before it can
+    # reach the vault store, so the DB is unchanged (RP-L1). The guard is a no-op on the
+    # tenant plane (the legitimate write surface) and on nil-plane internal/seed writes.
+    {:ok, guard} = Ash.Resource.Builder.build_change(Samen.Pii.WriteGuard)
     {:ok, change} = Ash.Resource.Builder.build_change(Samen.Vault.Change)
-    {:ok, Transformer.add_entity(dsl_state, [:changes], change)}
+
+    dsl_state =
+      dsl_state
+      |> Transformer.add_entity([:changes], guard)
+      |> Transformer.add_entity([:changes], change)
+
+    {:ok, dsl_state}
   end
 
   defp verify_vaults_declared(dsl_state, pii_attrs) do

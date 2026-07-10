@@ -81,8 +81,11 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
             routes do
               base("/orgs")
-              get(:read)
-              index(:read)
+              # Bounded-by-default API read (WS-A design §1.1, ADR-016 §3): keyset
+              # pagination, default_limit 50 / max_page_size 200 — a no-page-param index
+              # read returns a bounded page; an over-max page[limit] is clamped.
+              get(:api_read)
+              index(:api_read)
             end
           end
         end
@@ -121,6 +124,19 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+
+          # Bounded-by-default API read the JSON:API routes bind to (WS-A design §1.1,
+          # ADR-016 §3). Distinct from `:read` so internal `Ash.read!` callers keep
+          # getting a plain list; the API is bounded (keyset, default_limit 50, cap 200).
+          read :api_read do
+            pagination(
+              keyset?: true,
+              default_limit: 50,
+              max_page_size: 200,
+              required?: false,
+              paginate_by_default?: true
+            )
+          end
         end
 
         # Org is the tenant boundary itself. An actor may read/write only the org
@@ -167,8 +183,9 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
             routes do
               base("/users")
-              get(:read)
-              index(:read)
+              # Bounded-by-default API read (WS-A design §1.1, ADR-016 §3).
+              get(:api_read)
+              index(:api_read)
             end
           end
         end
@@ -227,6 +244,19 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+
+          # Bounded-by-default API read the JSON:API routes bind to (WS-A design §1.1,
+          # ADR-016 §3). PII on `:api_read` resolves per plane via the resource-level
+          # PiiResolution preparation, same as `:read`.
+          read :api_read do
+            pagination(
+              keyset?: true,
+              default_limit: 50,
+              max_page_size: 200,
+              required?: false,
+              paginate_by_default?: true
+            )
+          end
 
           # The declared reveal action (operator-plane plaintext under a grant).
           action :reveal_user, :map do
@@ -294,8 +324,9 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
             routes do
               base("/memberships")
-              get(:read)
-              index(:read)
+              # Bounded-by-default API read (WS-A design §1.1, ADR-016 §3).
+              get(:api_read)
+              index(:api_read)
             end
           end
         end
@@ -349,6 +380,18 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+
+          # Bounded-by-default API read the JSON:API routes bind to (WS-A design §1.1,
+          # ADR-016 §3). `action_type(:read)` policies below cover it.
+          read :api_read do
+            pagination(
+              keyset?: true,
+              default_limit: 50,
+              max_page_size: 200,
+              required?: false,
+              paginate_by_default?: true
+            )
+          end
         end
 
         policies do

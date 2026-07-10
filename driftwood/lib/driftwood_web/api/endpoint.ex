@@ -21,5 +21,9 @@ defmodule DriftwoodWeb.Api.Endpoint do
   use Plug.Builder
 
   plug(DriftwoodWeb.Api.KeyAuthPlug)
+  # Clamp page[limit] to max_page_size BEFORE AshJsonApi — works around the
+  # upstream Ash to_page raw-limit split leaking the keyset look-ahead row
+  # (see Samen.Web.Api.PageLimitClamp).
+  plug(Samen.Web.Api.PageLimitClamp)
   plug(DriftwoodWeb.Api.Router)
 end

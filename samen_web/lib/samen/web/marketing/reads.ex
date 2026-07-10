@@ -46,18 +46,62 @@ defmodule Samen.Web.Marketing.Reads do
 
   alias Samen.Web.Mount
 
+  # A3 read-bounding (WS-A design §1.1 "read! elimination"): every non-page read on the
+  # Marketing surfaces carries an explicit limit. Detail sub-lists (a campaign's sends,
+  # a compose page's templates/segments) are capped here; the LIST surfaces read through
+  # the keyset-paginated `*_page/3` fns below (bounded by construction via
+  # `Samen.Web.Reads.page!/3`).
+  @detail_limit 200
+
   # ---------------------------------------------------------------------------
   # Reads — campaigns / templates / segments / subscribers / events
   # ---------------------------------------------------------------------------
 
-  @doc "Read all Marketing campaigns for `scope`, newest-first. Non-PII; org-scoped by policy."
+  @doc """
+  Read Marketing campaigns for `scope`, newest-first, capped at `#{@detail_limit}` rows
+  (A3 read-bounding); the Campaigns page itself reads through the paginated
+  `campaigns_page/3` — this remains only as a lookup read. Non-PII.
+  """
   def campaigns(mount, scope) do
     Mount.resource(mount, Campaign)
     |> Ash.Query.ensure_selected([:name, :description, :status, :scheduled_at, :sent_at, :custom])
     |> Ash.Query.sort(inserted_at: :desc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
+  end
+
+  @doc """
+  Read ONE keyset page of Marketing campaigns for `scope` — the `ListLive` reads
+  contract (`(mount, scope, %ListState{}) -> %Page{}`, ADR-016 §3), built on
+  `Samen.Web.Reads.page!/3` so the read is BOUNDED BY CONSTRUCTION. Campaign is
+  non-PII; sort/filter fields are bounded plain attributes. Each page item carries a
+  `:send_count` (an `Ash.count` DB aggregate — no send row set is transferred), so
+  the count column stays fresh across pagination (it rides the SAME re-read every
+  list event runs). On any read error the page is EMPTY — never unbounded.
+  """
+  def campaigns_page(mount, scope, state) do
+    page =
+      Mount.resource(mount, Campaign)
+      |> Ash.Query.ensure_selected([:name, :description, :status, :scheduled_at, :sent_at, :custom])
+      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :description])
+
+    %{page | items: Enum.map(page.items, &Map.put(&1, :send_count, send_count(mount, scope, &1.id)))}
+  rescue
+    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
+  end
+
+  @doc """
+  Count the sends for a campaign — a DB aggregate (`Ash.count`), no row set
+  transferred (bounded by construction). `0` on any error.
+  """
+  def send_count(mount, scope, campaign_id) do
+    Mount.resource(mount, Send)
+    |> Ash.Query.filter(campaign_id == ^campaign_id)
+    |> Ash.count!(scope: scope)
+  rescue
+    _ -> 0
   end
 
   @doc "Read a single campaign by id. Non-PII. `{:ok, campaign}` or `:error`."
@@ -66,6 +110,7 @@ defmodule Samen.Web.Marketing.Reads do
       Mount.resource(mount, Campaign)
       |> Ash.Query.ensure_selected([:name, :description, :status, :scheduled_at, :sent_at, :custom])
       |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
 
     case result do
@@ -76,24 +121,45 @@ defmodule Samen.Web.Marketing.Reads do
     _ -> :error
   end
 
-  @doc "Read all enabled Marketing templates for `scope`. Non-PII."
+  @doc "Read enabled Marketing templates for `scope`, capped at `#{@detail_limit}` rows. Non-PII."
   def templates(mount, scope) do
     Mount.resource(mount, Template)
     |> Ash.Query.ensure_selected([:name, :subject_line, :body_html, :body_text, :from_name, :from_address, :enabled])
     |> Ash.Query.sort(name: :asc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
   end
 
-  @doc "Read all Marketing segments for `scope`. Non-PII (filter criteria are bounded jsonb)."
+  @doc """
+  Read Marketing segments for `scope`, capped at `#{@detail_limit}` rows (A3
+  read-bounding); the Segments page itself reads through the paginated
+  `segments_page/3` — this remains only as the compose-page lookup read (the
+  send-to-segment select). Non-PII (filter criteria are bounded jsonb).
+  """
   def segments(mount, scope) do
     Mount.resource(mount, Segment)
     |> Ash.Query.ensure_selected([:name, :description, :filter_criteria, :subscriber_count, :custom])
     |> Ash.Query.sort(name: :asc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
+  end
+
+  @doc """
+  Read ONE keyset page of Marketing segments for `scope` — the `ListLive` reads
+  contract, built on `Samen.Web.Reads.page!/3` so the read is BOUNDED BY
+  CONSTRUCTION. Segment is non-PII; sort/filter fields are bounded plain attributes.
+  On any read error the page is EMPTY — never unbounded.
+  """
+  def segments_page(mount, scope, state) do
+    Mount.resource(mount, Segment)
+    |> Ash.Query.ensure_selected([:name, :description, :filter_criteria, :subscriber_count, :custom])
+    |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :description])
+  rescue
+    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
   end
 
   @doc "Read a single segment by id. Non-PII. `{:ok, segment}` or `:error`."
@@ -102,6 +168,7 @@ defmodule Samen.Web.Marketing.Reads do
       Mount.resource(mount, Segment)
       |> Ash.Query.ensure_selected([:name, :description, :filter_criteria, :subscriber_count, :custom])
       |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
 
     case result do
@@ -120,10 +187,31 @@ defmodule Samen.Web.Marketing.Reads do
     Mount.resource(mount, Subscriber)
     |> Ash.Query.ensure_selected([:email, :status, :consent_at, :source, :custom])
     |> Ash.Query.sort(inserted_at: :desc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, Subscriber, scope)
   rescue
     _ -> []
+  end
+
+  @doc """
+  Read ONE keyset page of subscribers for `scope` — the bounded-reads contract
+  (`Samen.Web.Reads.page!/3`, limit by construction), with `email` (🔒 PII)
+  plane-resolved through `Samen.Api.PiiResolution` AFTER paging (tenant clear /
+  operator `%Masked{}` → ••••). Sort/filter fields are bounded NON-VAULTED
+  attributes only — the vaulted email column is never sorted or filtered (see
+  `Samen.Web.Reads` masking notes). On any read error the page is EMPTY — never
+  unbounded and never a plaintext downgrade.
+  """
+  def subscribers_page(mount, scope, state) do
+    page =
+      Mount.resource(mount, Subscriber)
+      |> Ash.Query.ensure_selected([:email, :status, :consent_at, :source, :custom])
+      |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:source])
+
+    %{page | items: resolve_pii(page.items, mount, Subscriber, scope)}
+  rescue
+    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
   end
 
   @doc """
@@ -139,6 +227,7 @@ defmodule Samen.Web.Marketing.Reads do
     |> Ash.Query.ensure_selected([:email, :status, :consent_at, :source, :custom])
     |> Ash.Query.filter(status == ^status)
     |> Ash.Query.sort(inserted_at: :desc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, Subscriber, scope)
   rescue
@@ -151,6 +240,7 @@ defmodule Samen.Web.Marketing.Reads do
       Mount.resource(mount, Send)
       |> Ash.Query.ensure_selected([:id, :campaign_id])
       |> Ash.Query.filter(campaign_id == ^campaign_id)
+      |> Ash.Query.limit(@detail_limit)
       |> Ash.read!(scope: scope)
       |> Enum.map(& &1.id)
 
@@ -161,6 +251,7 @@ defmodule Samen.Web.Marketing.Reads do
       |> Ash.Query.ensure_selected([:event_type, :occurred_at, :metadata, :send_id, :subscriber_id])
       |> Ash.Query.filter(send_id in ^send_ids)
       |> Ash.Query.sort(occurred_at: :desc)
+      |> Ash.Query.limit(@detail_limit)
       |> Ash.read!(scope: scope)
     end
   rescue
@@ -176,6 +267,7 @@ defmodule Samen.Web.Marketing.Reads do
     |> Ash.Query.ensure_selected([:status, :queued_at, :sent_at, :subscriber_id, :campaign_id])
     |> Ash.Query.filter(campaign_id == ^campaign_id)
     |> Ash.Query.sort(inserted_at: :desc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
@@ -187,14 +279,81 @@ defmodule Samen.Web.Marketing.Reads do
     |> Enum.frequencies_by(& &1.event_type)
   end
 
-  @doc "The active suppression rows for `scope` (opt-outs / bounces). Non-PII (opaque subscriber_id)."
+  @doc "The active suppression rows for `scope` (opt-outs / bounces), capped at `#{@detail_limit}` rows. Non-PII (opaque subscriber_id)."
   def suppressions(mount, scope) do
     Mount.resource(mount, Suppression)
     |> Ash.Query.ensure_selected([:reason, :active, :suppressed_at, :notes, :subscriber_id])
     |> Ash.Query.filter(active == true)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
+  end
+
+  @doc """
+  The subset of `subscriber_ids` that carry an ACTIVE suppression row, as a `MapSet`
+  (the Segments page's per-row "suppressed" flag). BOUNDED BY CONSTRUCTION: the read
+  is filtered to the given (already page-bounded) ids and limited to their count —
+  never a full-table suppression read. Non-PII (opaque ids only).
+  """
+  def suppressed_ids(_mount, _scope, []), do: MapSet.new()
+
+  def suppressed_ids(mount, scope, subscriber_ids) when is_list(subscriber_ids) do
+    Mount.resource(mount, Suppression)
+    |> Ash.Query.ensure_selected([:subscriber_id, :active])
+    |> Ash.Query.filter(active == true and subscriber_id in ^subscriber_ids)
+    |> Ash.Query.limit(length(subscriber_ids))
+    |> Ash.read!(scope: scope)
+    |> MapSet.new(& &1.subscriber_id)
+  rescue
+    _ -> MapSet.new()
+  end
+
+  # ---------------------------------------------------------------------------
+  # A3 CRUD — destroys for the list surfaces (creates go through AshPhoenix.Form)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  The tenant-ADMIN write scope for the kernel's admin-gated Marketing config writes
+  (Campaign / Segment / Template carry `RoleAtLeast :admin`; the mount's plane scope
+  is a `:member`, per `Samen.Web.Plane.scope/2`).
+
+  Same-org role elevation ONLY — the billing precedent
+  (`Samen.Web.Billing.Reads.write_scope/2`): the elevation PRESERVES every plane
+  marker (`plane`, `kind`, `impersonation`) from `Mount.scope/2`. An operator-plane
+  mount elevated here still carries `plane: :operator`, so `Samen.Pii.WriteGuard`
+  (MC-1 / Invariant L1) rejects a vaulted-PII write exactly as before — the elevation
+  raises RBAC rank, never the masking plane. `OrgScope` still confines the write to
+  `org_id`. Subscriber writes are member-gated and use the plain scope (and the
+  subscriber `email` vault path is unchanged — `add_subscriber/3`).
+  """
+  def write_scope(mount, org_id) do
+    %Samen.Scope{actor: actor} = Mount.scope(mount, org_id)
+    %Samen.Scope{actor: Map.put(actor, :role, :admin)}
+  end
+
+  @doc "Destroy one Marketing campaign for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
+  def delete_campaign(mount, scope, id), do: delete_record(mount, scope, Campaign, id)
+
+  @doc "Destroy one Marketing segment for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
+  def delete_segment(mount, scope, id), do: delete_record(mount, scope, Segment, id)
+
+  # FAIL-HONEST destroy (mirrors `Samen.Web.CRM.Reads.delete_record/4`): the kernel
+  # defines no cascade — a campaign with linked sends is refused by the DB (FK) and
+  # the refusal surfaces to the caller. The read is `limit(1)` (bounded).
+  defp delete_record(mount, scope, name, id) do
+    record =
+      Mount.resource(mount, name)
+      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+
+    case record do
+      nil -> {:error, :not_found}
+      record -> Ash.destroy(record, scope: scope)
+    end
+  rescue
+    e -> {:error, e}
   end
 
   # ---------------------------------------------------------------------------
@@ -242,6 +401,7 @@ defmodule Samen.Web.Marketing.Reads do
       Mount.resource(mount, Subscriber)
       |> Ash.Query.ensure_selected([:id, :status])
       |> Ash.Query.filter(status == ^audience_status(segment))
+      |> Ash.Query.limit(@detail_limit)
       |> Ash.read!(scope: scope)
       |> Enum.map(& &1.id)
 
@@ -320,6 +480,7 @@ defmodule Samen.Web.Marketing.Reads do
       Mount.resource(mount, Subscriber)
       |> Ash.Query.ensure_selected([:status])
       |> Ash.Query.filter(id == ^subscriber_id)
+      |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
 
     case result do

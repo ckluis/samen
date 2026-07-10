@@ -59,8 +59,23 @@ defmodule Samen.Web.Operator do
 
   Deliberately reuses `Plane.tenant()` — the exact tenant-plane actor ADR-009 already tests —
   so the identity-line clarity for population (1) is inherited verbatim, no new actor shape.
+
+  ## A3 plane-awareness (fail-MASKED, never fail-clear)
+
+  The framework router only ever mounts the operator workspace on the TENANT plane
+  (`samen_operator_routes`, §7.2) — the clause above is the whole story for every real
+  route. But the operator pages now render PII (the desk requester, the account admins)
+  AND carry write affordances, so a HAND-CRAFTED mount that carries `plane: :operator`
+  (an impersonation plane) must not silently fall back to the clear tenant plane: if the
+  mount says "operator plane", the scope IS the operator plane — `PiiResolution` masks
+  (`%Masked{}` → `••••`) and `Samen.Pii.WriteGuard` refuses vaulted writes. The odd
+  mount fails MASKED, never clear. This adds no new actor shape either — it is the
+  EXISTING ADR-009 operator-plane actor, built by the same `Plane.scope/2`.
   """
   @spec scope(Mount.t()) :: Samen.Scope.t()
+  def scope(%Mount{plane: %Plane{kind: :operator} = plane} = mount),
+    do: Plane.scope(plane, org_id(mount))
+
   def scope(%Mount{} = mount), do: Plane.scope(Plane.tenant(), org_id(mount))
 
   @doc """

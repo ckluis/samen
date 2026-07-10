@@ -18,6 +18,15 @@ defmodule Samen.Web.Marketing.LeadsLive do
 
   Names/emails render through `Samen.Web.CRM.Reads` → `PiiResolution`. A `%Masked{}` renders
   `••••` verbatim; this LiveView has no plaintext bypass.
+
+  ## A3 retrofit — ListLive over the bounded leads read
+
+  The lens rides the A2 kit contract: `use Samen.Web.ListLive` + the BOUNDED
+  `Samen.Web.CRM.Reads.leads_page/3` (lifecycle filter applied SERVER-SIDE before the
+  keyset window) buys sort/filter/pagination/empty-state as kit defaults — the old
+  unbounded `leads/2` read is gone from this surface. The lens is READ-ONLY by design:
+  the domain defines no lead-specific write action (leads ARE CRM people; their CRUD
+  lives on the CRM surfaces), so this page wires none.
   """
   use Phoenix.LiveView
 
@@ -25,9 +34,15 @@ defmodule Samen.Web.Marketing.LeadsLive do
   import Samen.Web.Marketing.Live, only: [assign_mount: 2, marketing_sidebar: 1, marketing_path: 1, marketing_plane_note: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
-  alias Samen.Web.CRM.Reads, as: CrmReads
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+
+  use Samen.Web.ListLive,
+    resource: Person,
+    reads: &Samen.Web.CRM.Reads.leads_page/3,
+    sortable: [:display_name, :job_title],
+    filter_fields: [:display_name, :job_title],
+    default_sort: {:display_name, :asc}
 
   @impl true
   def mount(params, session, socket) do
@@ -46,21 +61,22 @@ defmodule Samen.Web.Marketing.LeadsLive do
   def load(socket, nil) do
     socket
     |> ensure_return_to()
-    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, leads: [])
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil)
+    |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
   end
 
   def load(socket, org_id) do
     mount = socket.assigns.samen_mount
 
-    leads =
-      case crm_mount(mount) do
-        nil -> []
-        crm -> CrmReads.leads(crm, Mount.scope(crm, org_id))
-      end
+    socket = ensure_return_to(assign(socket, no_org: false, org_id: org_id))
 
-    socket
-    |> ensure_return_to()
-    |> assign(no_org: false, org_id: org_id, leads: leads)
+    # The bounded read runs on the DERIVED CRM mount (same repo + plane, CRM namespace),
+    # so PII resolves identically to the CRM pages. No :crm_namespace label → the lens
+    # stays inert (an empty page), exactly as before.
+    case crm_mount(mount) do
+      nil -> assign(socket, page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+      crm -> init_list(socket, crm, Mount.scope(crm, org_id))
+    end
   end
 
   defp ensure_return_to(socket) do
@@ -111,29 +127,30 @@ defmodule Samen.Web.Marketing.LeadsLive do
             <div id="leads">
               <div class="gtitle">
                 <h3>Leads</h3>
-                <span class="n">{length(@leads)}</span>
+                <span class="n">{length(@page.items)}</span>
                 <span class="lane">· lifecycle lead / mql / sql · name+email via PiiResolution · {marketing_plane_note(@samen_mount)}</span>
               </div>
-              <%= if @leads == [] do %>
-                <div class="card" style="padding:22px 20px;color:var(--muted)">
-                  No leads in the early funnel yet.
-                </div>
-              <% else %>
-                <.data_table>
-                  <:head>
-                    <th style="width:30%">Name</th>
-                    <th style="width:28%">Email</th>
-                    <th style="width:20%">Title</th>
-                    <th style="width:22%">Stage</th>
-                  </:head>
-                  <tr :for={p <- @leads} class="lead-row" id={"lead-#{p.id}"}>
-                    <td class="lead-name" style="font-weight:500">{render_full_name(p.full_name, p.display_name)}</td>
-                    <td class="lead-email" style="font-size:12px;color:var(--muted)">{render_email(p.emails)}</td>
-                    <td style="font-size:12px;color:var(--muted)">{p.job_title || "—"}</td>
-                    <td><.lifecycle_pill stage={lifecycle_stage(p)} /></td>
-                  </tr>
-                </.data_table>
-              <% end %>
+              <.list_view
+                id="leads-list"
+                page={@page}
+                state={@list_state}
+                row_class="lead-row"
+                filter_placeholder="Filter leads…"
+                empty_text="No leads in the early funnel yet."
+              >
+                <:head>
+                  <.sort_header field={:display_name} label="Name" sort={@list_state.sort} width="30%" />
+                  <th scope="col" style="width:28%">Email</th>
+                  <.sort_header field={:job_title} label="Title" sort={@list_state.sort} width="20%" />
+                  <th scope="col" style="width:22%">Stage</th>
+                </:head>
+                <:row :let={p}>
+                  <td class="lead-name" style="font-weight:500">{render_full_name(p.full_name, p.display_name)}</td>
+                  <td class="lead-email" style="font-size:12px;color:var(--muted)">{render_email(p.emails)}</td>
+                  <td style="font-size:12px;color:var(--muted)">{p.job_title || "—"}</td>
+                  <td><.lifecycle_pill stage={lifecycle_stage(p)} /></td>
+                </:row>
+              </.list_view>
             </div>
           </div>
         <% end %>

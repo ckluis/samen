@@ -21,11 +21,25 @@ defmodule Samen.Web.CRM.ContactsLive do
   DEFAULTS — this view carries NO `handle_event/3` for list ergonomics and NO unbounded
   read. Both verticals inherit the retrofit through the `Samen.Web.Router.samen_crm`
   mount at 0 vertical lines.
+
+  ## A3 write side — create + delete (AC-G1-1/2, MC-1/MC-2)
+
+  "New contact" opens a `modal/1` hosting an `AshPhoenix.Form`-backed `simple_form/1`
+  create; each row carries a `delete_confirm/1`. Write AFFORDANCES are offered on the
+  tenant plane only (`Samen.Web.CRM.Live.writable?/1` — the composer posture); the
+  ENFORCEMENT is the kernel's: OrgScope on every write and `Samen.Pii.WriteGuard`
+  rejecting an operator-plane plaintext write to the vaulted `full_name` at the Ash
+  write path (MC-1). The tenant's `full_name` submits through the vault write path —
+  the same `Samen.Vault.Change` chokepoint as seeds (MC-2); this LiveView never sees
+  a token and never unwraps a `%Masked{}`.
   """
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1]
+
+  import Samen.Web.CRM.Live,
+    only: [assign_mount: 2, crm_sidebar: 1, writable?: 1, full_name_field: 1]
+
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CRM.Reads
@@ -58,6 +72,8 @@ defmodule Samen.Web.CRM.ContactsLive do
     |> default_return_to()
     |> assign(no_org: no_org?(socket, nil), org_id: nil, company_names: %{})
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
+    |> assign(show_new: false, new_form: nil)
+    |> assign_new(:delete_error, fn -> nil end)
   end
 
   def load(socket, org_id) do
@@ -71,8 +87,70 @@ defmodule Samen.Web.CRM.ContactsLive do
       org_id: org_id,
       company_names: company_name_map(mount, scope)
     )
+    |> assign_new(:show_new, fn -> false end)
+    |> assign_new(:delete_error, fn -> nil end)
+    |> assign(new_form: new_contact_form(mount, scope))
     |> init_list(mount, scope)
   end
+
+  # -- A3 CRUD events (list events belong to the ListLive hook) -----------------
+
+  @impl true
+  def handle_event("new_contact", _params, socket) do
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    scope = Mount.scope(mount, org_id)
+    {:noreply, assign(socket, show_new: true, new_form: new_contact_form(mount, scope))}
+  end
+
+  def handle_event("cancel_new", _params, socket) do
+    {:noreply, assign(socket, show_new: false)}
+  end
+
+  def handle_event("validate_new", %{"form" => params}, socket) do
+    form = AshPhoenix.Form.validate(socket.assigns.new_form, with_org(params, socket))
+    {:noreply, assign(socket, new_form: form)}
+  end
+
+  # The create submit. `org_id` is the server-side fact, never client input. The vaulted
+  # `full_name` arrives as the nested `%{"first" => _, "last" => _}` map the composite
+  # type casts; on the tenant plane the write routes through the vault (MC-2), on the
+  # operator plane `Samen.Pii.WriteGuard` REJECTS it at the write path (MC-1) and the
+  # error renders inline — this LiveView adds no policy of its own.
+  def handle_event("save_new", %{"form" => params}, socket) do
+    case AshPhoenix.Form.submit(socket.assigns.new_form, params: with_org(params, socket)) do
+      {:ok, _person} ->
+        {:noreply, socket |> assign(show_new: false) |> load(socket.assigns.org_id)}
+
+      {:error, form} ->
+        {:noreply, assign(socket, new_form: form)}
+    end
+  end
+
+  # FAIL-HONEST delete: the kernel defines no cascade — a contact with linked
+  # activities is refused by the DB (FK) and the refusal is SURFACED on the page.
+  def handle_event("delete", %{"id" => id}, socket) do
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    scope = Mount.scope(mount, org_id)
+
+    case Reads.delete_contact(mount, scope, id) do
+      :ok ->
+        {:noreply, load(assign(socket, delete_error: nil), org_id)}
+
+      {:error, _reason} ->
+        {:noreply,
+         assign(socket,
+           delete_error: "Could not delete this contact — it still has linked records (activities)."
+         )}
+    end
+  end
+
+  defp new_contact_form(mount, scope) do
+    Mount.resource(mount, Person)
+    |> AshPhoenix.Form.for_create(:create, scope: scope)
+    |> to_form()
+  end
+
+  defp with_org(params, socket), do: Map.put(params, "org_id", socket.assigns.org_id)
 
   defp no_org?(socket, org_id), do: CurrentOrg.no_org?(socket.assigns[:samen_mount], org_id)
 
@@ -99,7 +177,7 @@ defmodule Samen.Web.CRM.ContactsLive do
 
         <.topbar title="Contacts" crumbs={crumbs(@samen_mount, @org_id, "Contacts")}>
           <:actions>
-            <.button variant="primary">
+            <.button :if={writable?(@samen_mount) and not @no_org} variant="primary" phx-click="new_contact" id="new-contact">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 3v18M3 12h18" />
@@ -116,6 +194,12 @@ defmodule Samen.Web.CRM.ContactsLive do
           <.no_org_card mount={@samen_mount} />
         <% else %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
+
+          <div :if={@delete_error} class="wrap" style="margin-bottom:0">
+            <div class="card form-error" id="delete-error" style="padding:10px 14px;color:var(--bad, #b91c1c);font-size:12px">
+              {@delete_error}
+            </div>
+          </div>
 
           <div class="wrap">
             <div id="contacts-panel">
@@ -134,10 +218,11 @@ defmodule Samen.Web.CRM.ContactsLive do
               >
                 <:head>
                   <.sort_header field={:display_name} label="Name" sort={@list_state.sort} width="24%" />
-                  <th scope="col" style="width:22%">Email</th>
-                  <th scope="col" style="width:16%">Phone</th>
-                  <th scope="col" style="width:22%">Company</th>
-                  <.sort_header field={:job_title} label="Title" sort={@list_state.sort} width="16%" />
+                  <th scope="col" style="width:20%">Email</th>
+                  <th scope="col" style="width:14%">Phone</th>
+                  <th scope="col" style="width:20%">Company</th>
+                  <.sort_header field={:job_title} label="Title" sort={@list_state.sort} width="14%" />
+                  <th :if={writable?(@samen_mount)} scope="col" style="width:8%"><span class="sr-only">Actions</span></th>
                 </:head>
                 <:row :let={p}>
                   <td class="p-name">
@@ -158,10 +243,32 @@ defmodule Samen.Web.CRM.ContactsLive do
                   </td>
                   <td class="p-company" style="color:var(--muted)">{(p.company_id && Map.get(@company_names, p.company_id)) || "—"}</td>
                   <td class="p-title" style="color:var(--muted);font-size:12px">{p.job_title || "—"}</td>
+                  <td :if={writable?(@samen_mount)} class="p-actions">
+                    <.delete_confirm phx-click="delete" phx-value-id={p.id} />
+                  </td>
                 </:row>
               </.list_view>
             </div>
           </div>
+
+          <.modal :if={@show_new and @new_form != nil and writable?(@samen_mount)} id="new-contact-modal" title="New contact" on_cancel="cancel_new">
+            <.simple_form :let={f} for={@new_form} id="new-contact-form" phx-change="validate_new" phx-submit="save_new">
+              <.full_name_field field={f[:full_name]} label="Full name (🔒 PII)" />
+              <.form_field field={f[:display_name]} label="Display name" />
+              <.form_field field={f[:job_title]} label="Job title" />
+              <.form_field
+                field={f[:company_id]}
+                label="Company"
+                type="select"
+                prompt="No company"
+                options={Enum.map(@company_names, fn {id, name} -> {name, id} end)}
+              />
+              <:actions>
+                <.button variant="primary" type="submit">Save contact</.button>
+                <.button type="button" phx-click="cancel_new">Cancel</.button>
+              </:actions>
+            </.simple_form>
+          </.modal>
         <% end %>
       </.app_shell>
     </div>

@@ -22,5 +22,9 @@ defmodule DemoWeb.Api.Endpoint do
   use Plug.Builder
 
   plug(DemoWeb.Api.KeyAuthPlug)
+  # Clamp page[limit] to max_page_size BEFORE AshJsonApi — works around the
+  # upstream Ash to_page raw-limit split leaking the keyset look-ahead row.
+  # Local mirror of Samen.Web.Api.PageLimitClamp (demo is samen_core-only).
+  plug(DemoWeb.Api.PageLimitClamp)
   plug(DemoWeb.Api.Router)
 end

@@ -24,11 +24,22 @@ defmodule Samen.Web.Chat.Reads do
 
   alias Samen.Web.Mount
 
-  @doc "Read all chat threads for `scope`, newest-first. Non-PII (subject/kind/status)."
+  # A3 read-bounding (WS-A design §1.1 "read! elimination", AC-G1-5): every chat read
+  # carries an explicit limit. The inbox and a thread's messages/participants are
+  # single-parent fan-outs bounded to the kit's hard page cap rather than paginated —
+  # an unbounded `.read!()` here was a deep-scan/row-transfer DoS bound (A3-GATE-1),
+  # not a masking hole (PII still resolves through `PiiResolution` per plane).
+  @detail_limit 200
+
+  @doc """
+  Read chat threads for `scope`, newest-first. Non-PII (subject/kind/status).
+  BOUNDED to `#{@detail_limit}` rows (A3 read-bounding).
+  """
   def threads(mount, scope) do
     Mount.resource(mount, ChatThread)
     |> Ash.Query.ensure_selected([:subject, :kind, :status, :disclosure_mode, :context_ref])
     |> Ash.Query.sort(inserted_at: :desc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
@@ -39,6 +50,7 @@ defmodule Samen.Web.Chat.Reads do
     Mount.resource(mount, ChatThread)
     |> Ash.Query.ensure_selected([:subject, :kind, :status, :disclosure_mode, :context_ref])
     |> Ash.Query.filter(id == ^id)
+    |> Ash.Query.limit(1)
     |> Ash.read!(scope: scope)
     |> case do
       [thread | _] -> {:ok, thread}
@@ -52,12 +64,15 @@ defmodule Samen.Web.Chat.Reads do
   Read a thread's messages for `scope`, oldest-first, with `body` PII plane-resolved
   (tenant clear / operator `••••`). The vaulted body is resolved through the shared
   chokepoint — this is the re-read the `handle_info` broadcast path calls per subscriber.
+  BOUNDED to `#{@detail_limit}` rows (A3 read-bounding); realtime appends arrive via the
+  per-id `get_message/3` re-read, so the cap bounds only the initial history transfer.
   """
   def messages(mount, scope, thread_id) do
     Mount.resource(mount, ChatMessage)
     |> Ash.Query.ensure_selected([:body, :sender_party, :kind, :refs, :participant_id, :thread_id])
     |> Ash.Query.filter(thread_id == ^thread_id)
     |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, ChatMessage, scope)
   rescue
@@ -74,6 +89,7 @@ defmodule Samen.Web.Chat.Reads do
     Mount.resource(mount, ChatMessage)
     |> Ash.Query.ensure_selected([:body, :sender_party, :kind, :refs, :participant_id, :thread_id])
     |> Ash.Query.filter(id == ^id)
+    |> Ash.Query.limit(1)
     |> Ash.read!(scope: scope)
     |> resolve_pii(mount, ChatMessage, scope)
     |> case do
@@ -90,6 +106,7 @@ defmodule Samen.Web.Chat.Reads do
   identity per the stored disclosure state (§5.1). This function returns the raw rows
   (`full_name` still `%Masked{}`); `Samen.Web.Chat.Identity.resolve_participant/4` does the
   plane-choice resolve. The non-PII `handle`/`party` are always present.
+  BOUNDED to `#{@detail_limit}` rows (A3 read-bounding).
   """
   def participants(mount, scope, thread_id) do
     Mount.resource(mount, ChatParticipant)
@@ -106,6 +123,7 @@ defmodule Samen.Web.Chat.Reads do
     ])
     |> Ash.Query.filter(thread_id == ^thread_id)
     |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
   rescue
     _ -> []
@@ -126,6 +144,7 @@ defmodule Samen.Web.Chat.Reads do
       :thread_id
     ])
     |> Ash.Query.filter(id == ^id)
+    |> Ash.Query.limit(1)
     |> Ash.read!(scope: scope)
     |> case do
       [participant | _] -> {:ok, participant}
@@ -137,11 +156,13 @@ defmodule Samen.Web.Chat.Reads do
 
   @doc """
   Read the org's `ChatDisclosureSetting` (§5 state 3). Returns the row or `nil` if none set
-  (the masked floor). Non-PII — a policy flag.
+  (the masked floor). Non-PII — a policy flag. BOUNDED to 1 row (A3 read-bounding — the
+  caller only ever takes the first row).
   """
   def disclosure_setting(mount, scope) do
     Mount.resource(mount, ChatDisclosureSetting)
     |> Ash.Query.ensure_selected([:expose_identity_to_support])
+    |> Ash.Query.limit(1)
     |> Ash.read!(scope: scope)
     |> List.first()
   rescue

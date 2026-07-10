@@ -17,6 +17,19 @@ defmodule Samen.Web.Marketing.Live do
   @doc "Read the mount out of the session (see `Samen.Web.Live.assign_mount/2`)."
   defdelegate assign_mount(socket, session), to: Samen.Web.Live
 
+  @doc """
+  Whether the Marketing surfaces should OFFER write affordances (A3 CRUD wiring —
+  mirrors `Samen.Web.CRM.Live.writable?/1`): tenant plane yes, operator/impersonation
+  plane no (the operator's Marketing lens is read-only posture).
+
+  This is UX, not enforcement: the kernel enforces regardless (OrgScope + role gates on
+  every write; `Samen.Pii.WriteGuard` rejects an operator-plane plaintext write to any
+  vaulted attribute — e.g. `Subscriber.email` — at the Ash write path, MC-1 /
+  Invariant L1). Hiding the affordance never substitutes for the write-path red paths.
+  """
+  def writable?(%Mount{plane: %{kind: :operator}}), do: false
+  def writable?(_), do: true
+
   attr :mount, Mount, required: true
   attr :org_id, :string, default: nil
   attr :active, :atom, default: nil

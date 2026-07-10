@@ -16,19 +16,34 @@ defmodule Samen.Web.CRM.ContactLive do
   "show plaintext" branch. It renders whatever the resolver returned — a `%Masked{}` renders
   `••••` via `Phoenix.HTML.Safe`. The masking helpers are copied in posture from
   `Samen.Web.CRM.ContactsLive` (render `%Masked{}` as-is; only reshape a plaintext string).
+
+  ## A3 write side — edit + delete + the kit-form composer (AC-G1-1/2, MC-1/MC-2)
+
+  "Edit contact" opens a `modal/1` hosting an `AshPhoenix.Form.for_update/3` over the
+  PLANE-RESOLVED record — so on the operator plane the vaulted `full_name` arrives as
+  `%Masked{}` and `full_name_field/1`/`form_field/1` render the read-only `••••`
+  placeholder with NO `name` attribute (nothing can submit). On the tenant plane the
+  name edits through nested first/last inputs that the composite `Samen.Type.FullName`
+  casts, and the write routes through the vault write path (MC-2). An operator-plane
+  plaintext write is REJECTED at the Ash write path by `Samen.Pii.WriteGuard` (MC-1) —
+  the modal's plane gating is UX, not the enforcement. The log-activity composer is the
+  A2 kit form now (`simple_form`/`form_field`, inline errors) — same tenant-plane-only
+  posture as before. Delete carries the `delete_confirm/1` interlock and navigates back
+  to the contacts list.
   """
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1]
+
+  import Samen.Web.CRM.Live,
+    only: [assign_mount: 2, crm_sidebar: 1, writable?: 1, full_name_field: 1]
+
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
 
   alias Samen.Web.CRM.Reads
-
-  @activity_types ~w(note call email meeting task)
 
   @impl true
   def mount(params, session, socket) do
@@ -38,7 +53,7 @@ defmodule Samen.Web.CRM.ContactLive do
 
     {:ok,
      load(
-       assign(socket, org_id: org_id, contact_id: contact_id, active_tab: "overview", form_error: nil, return_to: nil),
+       assign(socket, org_id: org_id, contact_id: contact_id, active_tab: "overview", return_to: nil),
        org_id,
        contact_id
      )}
@@ -63,33 +78,89 @@ defmodule Samen.Web.CRM.ContactLive do
     {:noreply, assign(socket, active_tab: tab)}
   end
 
-  # Log-activity composer (ADR-011 §6.3). Tenant plane only — the composer is not rendered on
-  # the operator plane, so this handler only runs there. Org-scoped write through Ash; the
-  # kernel enforces OrgScope + member gate + SameOrgFk. This LV adds no policy.
+  # Log-activity composer (ADR-011 §6.3), now the A2 kit form (AshPhoenix.Form-backed —
+  # AC-G1-2 inline errors). Tenant plane only in the UI; the write goes through Ash so
+  # OrgScope + the RoleAtLeast(:member) gate + SameOrgFk all apply — this LV adds NO
+  # policy. `person_id`/`org_id`/`status`/`completed_at` are server-side facts merged
+  # here, never client input.
+  def handle_event("validate_activity", %{"activity" => params}, socket) do
+    form = AshPhoenix.Form.validate(socket.assigns.activity_form, params)
+    {:noreply, assign(socket, activity_form: form)}
+  end
+
   def handle_event("log_activity", %{"activity" => params}, socket) do
     %{samen_mount: mount, org_id: org_id, contact_id: contact_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
 
-    attrs = %{
-      type: activity_type(params["type"]),
-      subject: nz(params["subject"]),
-      body: nz(params["body"]),
-      status: :completed,
-      completed_at: DateTime.utc_now() |> DateTime.truncate(:second),
-      person_id: contact_id,
-      org_id: org_id
-    }
+    params =
+      Map.merge(params, %{
+        "status" => "completed",
+        "completed_at" => DateTime.utc_now() |> DateTime.truncate(:second),
+        "person_id" => contact_id,
+        "org_id" => org_id
+      })
 
-    case Reads.create_activity(mount, scope, attrs) do
+    case AshPhoenix.Form.submit(socket.assigns.activity_form, params: params) do
       {:ok, _activity} ->
         {:noreply,
          assign(socket,
-           form_error: nil,
+           activity_form: activity_form(mount, scope),
            activities: Reads.activities_for_person(mount, scope, contact_id)
          )}
 
+      {:error, form} ->
+        {:noreply, assign(socket, activity_form: form)}
+    end
+  end
+
+  # -- A3 edit/delete (the write side of the PII detail surface) ---------------
+
+  def handle_event("edit_contact", _params, socket) do
+    %{samen_mount: mount, org_id: org_id, contact: contact} = socket.assigns
+    scope = Mount.scope(mount, org_id)
+    {:noreply, assign(socket, show_edit: true, edit_form: edit_form(contact, scope))}
+  end
+
+  def handle_event("cancel_edit", _params, socket) do
+    {:noreply, assign(socket, show_edit: false)}
+  end
+
+  def handle_event("validate_edit", %{"form" => params}, socket) do
+    form = AshPhoenix.Form.validate(socket.assigns.edit_form, params)
+    {:noreply, assign(socket, edit_form: form)}
+  end
+
+  # The edit submit. On the operator plane the masked `full_name` has NO input (the
+  # form_field masked branch), so it never appears in `params`; a hand-crafted plaintext
+  # write is REJECTED at the Ash write path by `Samen.Pii.WriteGuard` (MC-1) and renders
+  # as a form error — the DB is unchanged. Tenant writes route through the vault (MC-2).
+  def handle_event("save_edit", %{"form" => params}, socket) do
+    case AshPhoenix.Form.submit(socket.assigns.edit_form, params: params) do
+      {:ok, _person} ->
+        socket = assign(socket, show_edit: false)
+        {:noreply, load(socket, socket.assigns.org_id, socket.assigns.contact_id)}
+
+      {:error, form} ->
+        {:noreply, assign(socket, edit_form: form)}
+    end
+  end
+
+  # FAIL-HONEST delete: navigate away ONLY when the destroy actually happened. The
+  # kernel defines no cascade — a contact with linked activities is refused by the DB
+  # (FK) and the refusal is SURFACED, never a silent no-op that navigates anyway.
+  def handle_event("delete_contact", %{"id" => id}, socket) do
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    scope = Mount.scope(mount, org_id)
+
+    case Reads.delete_contact(mount, scope, id) do
+      :ok ->
+        {:noreply, push_navigate(socket, to: contacts_path(mount, org_id))}
+
       {:error, _reason} ->
-        {:noreply, assign(socket, form_error: "Could not log the activity. Check the fields and try again.")}
+        {:noreply,
+         assign(socket,
+           delete_error: "Could not delete this contact — it still has linked records (activities)."
+         )}
     end
   end
 
@@ -108,7 +179,10 @@ defmodule Samen.Web.CRM.ContactLive do
       activities: [],
       deals: [],
       active_tab: tab,
-      form_error: nil
+      show_edit: false,
+      edit_form: nil,
+      activity_form: nil,
+      delete_error: nil
     )
   end
 
@@ -147,8 +221,28 @@ defmodule Samen.Web.CRM.ContactLive do
       activities: activities,
       deals: deals,
       active_tab: tab,
-      form_error: Map.get(socket.assigns, :form_error)
+      edit_form: contact && edit_form(contact, scope),
+      activity_form: activity_form(mount, scope),
+      delete_error: nil
     )
+    |> assign_new(:show_edit, fn -> false end)
+  end
+
+  # The edit form is built over the PLANE-RESOLVED record (the same PiiResolution
+  # chokepoint every read surface uses): on the tenant plane `full_name` is the clear
+  # value, on the operator plane it is `%Masked{}` — which the form fields render as the
+  # read-only •••• placeholder. This module never unwraps a %Masked{} and never calls
+  # the vault.
+  defp edit_form(contact, scope) do
+    contact
+    |> AshPhoenix.Form.for_update(:update, scope: scope)
+    |> to_form()
+  end
+
+  defp activity_form(mount, scope) do
+    Mount.resource(mount, Activity)
+    |> AshPhoenix.Form.for_create(:create, scope: scope, as: "activity")
+    |> to_form()
   end
 
   defp ensure_return_to(socket) do
@@ -181,6 +275,16 @@ defmodule Samen.Web.CRM.ContactLive do
               </span>
               Back to contacts
             </a>
+            <.button :if={@contact != nil} phx-click="edit_contact" id="edit-contact">
+              Edit contact
+            </.button>
+            <.delete_confirm
+              :if={writable?(@samen_mount) and @contact != nil}
+              id="delete-contact"
+              message="Delete this contact? This cannot be undone."
+              phx-click="delete_contact"
+              phx-value-id={@contact && @contact.id}
+            />
           </:actions>
         </.topbar>
 
@@ -190,6 +294,12 @@ defmodule Samen.Web.CRM.ContactLive do
           <.no_org_card mount={@samen_mount} />
         <% else %>
           <span id="org-banner" style="display:none">CRM org: {@org_id}</span>
+
+          <div :if={@delete_error} class="wrap" style="margin-bottom:0">
+            <div class="card form-error" id="delete-error" style="padding:10px 14px;color:var(--bad, #b91c1c);font-size:12px">
+              {@delete_error}
+            </div>
+          </div>
 
           <%= if @contact == nil do %>
             <div class="wrap">
@@ -297,6 +407,26 @@ defmodule Samen.Web.CRM.ContactLive do
                   </div>
                 </div>
             <% end %>
+
+            <%!-- The edit modal renders on BOTH planes (AC-G1-7): on the operator plane the
+                 vaulted full_name arrives as %Masked{} and renders the read-only ••••
+                 placeholder with NO name attribute — masking is by construction of the
+                 value, never a plane branch here. Non-vaulted fields stay editable; the
+                 kernel (OrgScope + Samen.Pii.WriteGuard) enforces the write rules. --%>
+            <.modal :if={@show_edit and @edit_form != nil} id="edit-contact-modal" title="Edit contact" on_cancel="cancel_edit">
+              <.simple_form :let={f} for={@edit_form} id="edit-contact-form" phx-change="validate_edit" phx-submit="save_edit">
+                <%!-- display_name is deliberately NOT on this form: it is a non-vaulted
+                     attribute that duplicates the person's name, and echoing it into an
+                     editable input would leak the name on the operator plane (the A2
+                     ContactEditLive fixture set this posture). --%>
+                <.full_name_field field={f[:full_name]} label="Full name (🔒 PII)" />
+                <.form_field field={f[:job_title]} label="Job title" />
+                <:actions>
+                  <.button variant="primary" type="submit">Save contact</.button>
+                  <.button type="button" phx-click="cancel_edit">Cancel</.button>
+                </:actions>
+              </.simple_form>
+            </.modal>
           <% end %>
         <% end %>
       </.app_shell>
@@ -304,36 +434,26 @@ defmodule Samen.Web.CRM.ContactLive do
     """
   end
 
-  # The log-activity composer form (rendered in the timeline's :composer slot; tenant plane only).
+  # The log-activity composer (rendered in the timeline's :composer slot; tenant plane
+  # only) — the A2 kit form: AshPhoenix.Form-backed simple_form/form_field with inline
+  # errors (AC-G1-2). Activity fields are non-PII (bounded enum + free-text metadata).
   defp activity_composer(assigns) do
     ~H"""
-    <form id="log-activity-form" phx-submit="log_activity" style="padding:14px 16px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <select name="activity[type]" style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px">
-          <option value="note">Note</option>
-          <option value="call">Call</option>
-          <option value="email">Email</option>
-          <option value="meeting">Meeting</option>
-          <option value="task">Task</option>
-        </select>
-        <input
-          type="text"
-          name="activity[subject]"
-          placeholder="Subject (e.g. Check call — ETA confirmed)"
-          style="flex:1;min-width:200px;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px"
+    <div style="padding:14px 16px;border-bottom:1px solid var(--border)">
+      <.simple_form :let={f} for={@activity_form} id="log-activity-form" phx-change="validate_activity" phx-submit="log_activity">
+        <.form_field
+          field={f[:type]}
+          label="Type"
+          type="select"
+          options={[{"Note", "note"}, {"Call", "call"}, {"Email", "email"}, {"Meeting", "meeting"}, {"Task", "task"}]}
         />
-      </div>
-      <textarea
-        name="activity[body]"
-        placeholder="Details…"
-        rows="2"
-        style="padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;resize:vertical"
-      ></textarea>
-      <div :if={@form_error} class="form-error" style="color:var(--bad, #b91c1c);font-size:12px">{@form_error}</div>
-      <div>
-        <.button variant="primary" type="submit">Log activity</.button>
-      </div>
-    </form>
+        <.form_field field={f[:subject]} label="Subject" placeholder="Subject (e.g. Check call — ETA confirmed)" />
+        <.form_field field={f[:body]} label="Details" type="textarea" rows="2" placeholder="Details…" />
+        <:actions>
+          <.button variant="primary" type="submit">Log activity</.button>
+        </:actions>
+      </.simple_form>
+    </div>
     """
   end
 
@@ -381,13 +501,6 @@ defmodule Samen.Web.CRM.ContactLive do
 
   defp activity_author(%{custom: custom}) when is_map(custom), do: Map.get(custom, "author")
   defp activity_author(_), do: nil
-
-  defp activity_type(t) when t in @activity_types, do: String.to_existing_atom(t)
-  defp activity_type(_), do: :note
-
-  defp nz(nil), do: nil
-  defp nz(""), do: nil
-  defp nz(s) when is_binary(s), do: s
 
   defp stage_label(%{__stage__: %{label: label}}) when is_binary(label), do: label
   defp stage_label(%{__stage__: %{name: name}}) when is_binary(name), do: name

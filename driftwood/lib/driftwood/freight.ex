@@ -103,8 +103,11 @@ defmodule Driftwood.Freight.Driver do
 
     routes do
       base("/drivers")
-      get(:read)
-      index(:read)
+      # Bounded-by-default API read (WS-A design §1.1, ADR-016 §3): keyset pagination,
+      # default_limit 50 / max_page_size 200 — no-page index reads are bounded; an
+      # over-max page[limit] is clamped.
+      get(:api_read)
+      index(:api_read)
     end
   end
 
@@ -162,6 +165,18 @@ defmodule Driftwood.Freight.Driver do
 
   actions do
     defaults([:read, :destroy, create: :*, update: :*])
+
+    # Bounded-by-default API read the JSON:API routes bind to (WS-A design §1.1,
+    # ADR-016 §3). PII resolves per plane via the resource-level PiiResolution prep.
+    read :api_read do
+      pagination(
+        keyset?: true,
+        default_limit: 50,
+        max_page_size: 200,
+        required?: false,
+        paginate_by_default?: true
+      )
+    end
 
     action :reveal_driver, :map do
       argument(:actor_id, :string, allow_nil?: false)
