@@ -39,7 +39,15 @@ defmodule Samen.Web.Mount do
   ]
 
   @type t :: %__MODULE__{
-          scope_kind: :crm | :billing | :support | :marketing | :aggregate | :operator | :chat,
+          scope_kind:
+            :crm
+            | :billing
+            | :support
+            | :marketing
+            | :aggregate
+            | :operator
+            | :chat
+            | :notifications,
           namespace: module(),
           repo: module(),
           domain: module(),
@@ -113,6 +121,7 @@ defmodule Samen.Web.Mount do
   defp scope_kind("aggregate"), do: :aggregate
   defp scope_kind("operator"), do: :operator
   defp scope_kind("chat"), do: :chat
+  defp scope_kind("notifications"), do: :notifications
   defp scope_kind(k) when is_atom(k), do: k
 
   # Module atoms serialize as "Elixir.Driftwood.Crm". Host modules are COMPILED, so their
@@ -157,6 +166,7 @@ defmodule Samen.Web.Mount do
     user_name user_role user_initials
     chat_path pubsub presence object_cards
     default_org_id org_directory tenant_landing impersonate_path
+    recipient_id
   )a
 
   @label_key_strings Map.new(@label_keys, fn k -> {Atom.to_string(k), k} end)

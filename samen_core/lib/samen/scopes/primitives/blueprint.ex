@@ -171,6 +171,90 @@ defmodule Samen.Scopes.Primitives.Blueprint do
   end
 
   # ---------------------------------------------------------------------------
+  # NotificationPreference — per-recipient dispatch preferences (no PII). Org-scoped.
+  # One row per (recipient_id, event_type). The engine checks this BEFORE writing a
+  # Notification record: a suppressed (in_app_enabled=false) event type creates NO
+  # record — the red-path anti-tautology proof.
+  # ---------------------------------------------------------------------------
+  defmacro define_notification_preference(module, otp_app, domain, repo, abbrev) do
+    quote do
+      defmodule unquote(module) do
+        @moduledoc """
+        Primitives.NotificationPreference — per-recipient, per-event dispatch
+        preference (ADR-016 §2.3; WS-A design §2.3/§5).
+
+        One row per `(recipient_id, event_type)` pair. The
+        `Samen.Notifications.Engine` consults this BEFORE writing a `Notification`
+        record: when `in_app_enabled` is `false` for the event type, the engine
+        creates NO record and dispatches nothing (the suppressed-event red path).
+        `email_enabled` gates the email channel (opt-in for digests).
+
+        ## No PII by construction
+
+        Every column is a bounded ID, enum, boolean, or a map of bounded ints:
+
+          * `recipient_id` — opaque UUID (bounded reference, NOT subject PII)
+          * `event_type`   — bounded namespaced label (e.g. `"invoice.created"`)
+          * `in_app_enabled` / `email_enabled` — booleans (safe metrics)
+          * `quiet_hours`   — a map of bounded ints (`%{start: 22, end: 7}`) — no
+            free-text, no subject data
+
+        There is no `pii do` block: the resource carries no vault-routed field. This
+        is the "bounded id + enums + bools" row in the WS-A data-model table.
+        """
+        use Samen.Resource,
+          otp_app: unquote(otp_app),
+          domain: unquote(domain),
+          data_layer: AshPostgres.DataLayer,
+          authorizers: [Ash.Policy.Authorizer],
+          abbrev: unquote(abbrev)
+
+        postgres do
+          table("#{unquote(abbrev)}_notification_preference")
+          repo(unquote(repo))
+        end
+
+        attributes do
+          # Opaque ID for the recipient user/entity. NOT PII (bounded UUID).
+          attribute(:recipient_id, :uuid, public?: true, allow_nil?: false)
+
+          # The namespaced event type this preference governs (e.g. "invoice.created").
+          # Bounded label — not subject PII.
+          attribute(:event_type, :string, public?: true, allow_nil?: false)
+
+          # In-app dispatch gate. Default-ON: notifications appear in the inbox
+          # unless the recipient explicitly opts out for this event type.
+          attribute(:in_app_enabled, :boolean, public?: true, default: true)
+
+          # Email dispatch gate. Default-OFF (opt-in for email/digests per §2.3).
+          attribute(:email_enabled, :boolean, public?: true, default: false)
+
+          # Quiet-hours window as bounded ints (e.g. %{"start" => 22, "end" => 7}).
+          # No free-text; the scheduler that honors this is a fast-follow (§2.6).
+          attribute(:quiet_hours, :map, public?: true, default: %{})
+        end
+
+        actions do
+          defaults([:read, :destroy, create: :*, update: :*])
+        end
+
+        policies do
+          policy action_type(:read) do
+            authorize_if(Samen.Policy.OrgScope)
+          end
+
+          # A recipient manages their own preferences (member+); org-scoped.
+          policy action_type([:create, :update, :destroy]) do
+            forbid_unless(Samen.Policy.OrgScope)
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
+            authorize_if(always())
+          end
+        end
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # File — file record (no PII). Org-scoped.
   # Stores metadata + an opaque storage reference. The file content lives in
   # object storage (external); this is the governed catalog row.

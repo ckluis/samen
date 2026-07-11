@@ -31,6 +31,11 @@ defmodule Samen.Web.Operator.Live do
 
   attr :mount, Mount, default: nil
   attr :active, :atom, default: nil
+  attr :notifications_path, :string, default: "/notifications"
+
+  attr :notifications_unread, :any,
+    default: nil,
+    doc: "unread count feeding the Notifications nav badge (nil → unlit; AC-G2-7)"
 
   @doc "The operator control-plane sidebar — workspace header + the operator nav group."
   def operator_sidebar(assigns) do
@@ -70,6 +75,16 @@ defmodule Samen.Web.Operator.Live do
         <.nav_item label="Portfolio" href="/operator/aggregate" active={@active == :aggregate}>
           <:icon>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9m6 10V5m6 14v-7" /></svg>
+          </:icon>
+        </.nav_item>
+        <.nav_item
+          label="Notifications"
+          href={@notifications_path}
+          active={@active == :notifications}
+          count={@notifications_unread}
+        >
+          <:icon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
           </:icon>
         </.nav_item>
       </.nav_group>

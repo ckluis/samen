@@ -151,11 +151,38 @@ defmodule Samen.Scopes.Support.SlaBreachWorker do
       AND #{breached_col} = false
     """
 
-    case repo.query(update_sql, [id_bin]) do
+    # The `$1::uuid` cast makes Postgrex expect a 16-byte uuid binary — the
+    # `::text`-selected id string from the scan would raise a DBConnection
+    # EncodeError here (the flip NEVER landed against a real DB; the deeper half
+    # of the H-9 "silent state flip" finding, caught by the A4 source tests).
+    id_param =
+      case Ecto.UUID.dump(id_bin) do
+        {:ok, dumped} -> dumped
+        :error -> id_bin
+      end
+
+    case repo.query(update_sql, [id_param]) do
       {:ok, %{num_rows: n}} when n > 0 ->
         # Emit the audit event. Build a minimal ticket map for the audit writer.
         ticket = %{id: id_bin, org_id: org_id_bin, sla_breach_at: breach_at_str}
         Samen.Scopes.Support.Audit.ticket_breached(repo, ticket, breach_at_str)
+
+        # WS-A A4 event source (design §2.3; fixes H-9): the breach is no longer a
+        # SILENT state flip — it also notifies through the engine. Best-effort +
+        # preference-gated (emit/1 never aborts the flip; a suppressed "sla_breach"
+        # preference writes NO record — the red path). The request carries bounded
+        # ids + framework copy only; the ticket travels as an object REF
+        # ("samen:support.ticket:<id>"), never denormalized subject data. The
+        # recipient entity is the OWNING ORG (org-level system event).
+        Samen.Notifications.Engine.emit(%{
+          org_id: org_id_bin,
+          recipient_id: org_id_bin,
+          event_type: "sla_breach",
+          channel: :in_app,
+          rendered_body: "A support ticket breached its SLA (deadline #{breach_at_str}).",
+          subject_ref: "samen:support.ticket:#{id_bin}",
+          metadata: %{"ticket_id" => id_bin}
+        })
 
         Logger.info(
           "[SlaBreachWorker] marked ticket #{id_bin} as breached (breach_at=#{breach_at_str})"

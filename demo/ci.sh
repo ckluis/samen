@@ -39,6 +39,13 @@ echo "--- step 1/9: mix compile --warnings-as-errors"
 mix compile --warnings-as-errors
 echo "    PASSED"
 
+# 1a. Migrate (A4 gate P2: catalog_parity queries the live DB, so the gate must
+#     not depend on `mix test` having run first to apply pending migrations —
+#     a stale DB reports fresh tables as ghosts).
+echo "--- step 1a/9: mix ecto.migrate"
+mix ecto.migrate --quiet
+echo "    PASSED"
+
 # 1b. schema.dict.json drift check (Gate-1 F5 / plan B3).
 #     Regenerate into a temp file and diff against the committed copy.
 #     Fails CI if the schema has changed without updating the committed artifact.

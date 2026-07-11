@@ -75,6 +75,27 @@ defmodule Samen.Web.ObjectRef do
     |> Enum.uniq_by(fn %__MODULE__{key: k, id: i} -> {k, i} end)
   end
 
+  # A @mention: "@" + a participant HANDLE (the non-PII label participants carry by
+  # construction — never a full name/email). Handles are word-ish tokens.
+  @mention_rx ~r/@([a-zA-Z0-9][a-zA-Z0-9_.\-]*)/
+
+  @doc """
+  Parse every `@handle` MENTION out of `text`, in order, de-duplicated (WS-A design
+  §2.3 "chat mentions" — the same send-time plaintext parse as `parse/1`, run BEFORE
+  the body is vaulted). Returns the bare handle strings (no `@`). A handle is the
+  participant's NON-PII label, so a mention never carries subject PII; the caller
+  matches handles against the thread's participants and notifies through the engine.
+  """
+  @spec parse_mentions(String.t() | nil) :: [String.t()]
+  def parse_mentions(nil), do: []
+
+  def parse_mentions(text) when is_binary(text) do
+    @mention_rx
+    |> Regex.scan(text)
+    |> Enum.map(fn [_raw, handle] -> handle end)
+    |> Enum.uniq()
+  end
+
   @doc """
   Rebuild an `%ObjectRef{}` from a stored ref string (`ChatMessage.refs` entries) —
   `{:ok, ref}` or `:error` for a malformed string. The inverse of `to_string/1`.

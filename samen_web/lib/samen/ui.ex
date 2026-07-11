@@ -215,11 +215,30 @@ defmodule Samen.UI do
   attr :billing_path, :string, default: "/billing"
   attr :support_path, :string, default: "/support"
   attr :marketing_path, :string, default: "/marketing"
+  attr :notifications_path, :string, default: "/notifications"
+
+  attr :notifications_unread, :any,
+    default: nil,
+    doc: "unread count feeding the nav_item badge (nil → unlit; AC-G2-7)"
+
   slot :extra
 
   def module_nav(assigns) do
     ~H"""
     {render_slot(@extra)}
+
+    <.nav_group label="Inbox">
+      <.nav_item
+        label="Notifications"
+        href={"#{@notifications_path}?org=#{@org_id}"}
+        active={@active == :notifications}
+        count={@notifications_unread}
+      >
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
+        </:icon>
+      </.nav_item>
+    </.nav_group>
 
     <.nav_group label="CRM">
       <.nav_item label="Companies" href={"#{@crm_path}/companies?org=#{@org_id}"} active={@active == :crm_companies}>

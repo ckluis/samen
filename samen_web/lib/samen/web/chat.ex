@@ -185,11 +185,28 @@ defmodule Samen.Web.Chat do
   plaintext `body` and stored on `refs`. Returns `{:ok, message}` (already broadcast) or
   `{:error, reason}` (nothing broadcast). The broadcast is best-effort — a persisted message is
   never lost to a dead PubSub server.
+
+  ## Mentions (WS-A design §2.3 — the "chat_mention" event source)
+
+  `@handle` mentions are parsed from the PLAINTEXT body at send time (the same
+  pre-vault parse as refs, via `ObjectRef.parse_mentions/1`) and matched against the
+  thread's participants by their NON-PII handle. Each mentioned participant (never
+  the sender) gets a `"chat_mention"` notification through
+  `Samen.Notifications.Engine.emit/2` — BEST-EFFORT (a notify failure never fails
+  the post) and preference-gated (a recipient whose `NotificationPreference`
+  suppresses `"chat_mention"` gets NO record — the red path). The notification
+  carries bounded ids + the sender's handle only — never the message body (the body
+  is vaulted; copying it into another record would denormalize PII).
+
+  Options: `broadcast: false` skips PubSub (seeds); `notify: opts` forwards engine
+  seams (`:notification_module`/`:preference_module`/`:repo`/`:broadcaster`) — a
+  test/caller override; absent, the engine's app-config wiring applies.
   """
   @spec post_message(Mount.t(), Samen.Scope.t(), map(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def post_message(%Mount{} = mount, scope, attrs, opts \\ []) do
-    refs = attrs |> Map.get(:body) |> ObjectRef.parse() |> Enum.map(& &1.raw)
+    body = Map.get(attrs, :body)
+    refs = body |> ObjectRef.parse() |> Enum.map(& &1.raw)
     attrs = Map.put(attrs, :refs, refs)
 
     with {:ok, message} <-
@@ -197,6 +214,7 @@ defmodule Samen.Web.Chat do
            |> Ash.Changeset.for_create(:create, attrs, scope: scope)
            |> Ash.create() do
       maybe_broadcast(mount, message, opts)
+      notify_mentions(mount, scope, Map.get(attrs, :org_id), message, body, opts)
       {:ok, message}
     end
   end
@@ -253,6 +271,49 @@ defmodule Samen.Web.Chat do
       %{expose_identity_to_support: true} -> :tenant_wide
       _ -> :masked
     end
+  end
+
+  # WS-A A4 "chat_mention" source (design §2.3). Parse @handles from the PLAINTEXT
+  # body (pre-vault, like refs), match against the thread's participants (handle =
+  # the non-PII label), and notify each mentioned participant except the sender.
+  # Best-effort by construction: Engine.emit/2 never raises, and any participant
+  # read failure is swallowed here — the POSTED MESSAGE is the load-bearing write.
+  # `org_id` is the CALLER'S org (the created struct may deselect org_id).
+  defp notify_mentions(mount, scope, org_id, message, body, opts) do
+    case ObjectRef.parse_mentions(body) do
+      [] ->
+        :ok
+
+      mentions ->
+        notify_opts = Keyword.get(opts, :notify, [])
+        participants = Reads.participants(mount, scope, message.thread_id)
+        sender = Enum.find(participants, fn p -> p.id == message.participant_id end)
+        sender_handle = (sender && sender.handle) || "someone"
+
+        participants
+        |> Enum.filter(fn p -> p.handle in mentions and p.id != message.participant_id end)
+        |> Enum.each(fn p ->
+          Samen.Notifications.Engine.emit(
+            %{
+              org_id: org_id || org_id_of(scope),
+              recipient_id: p.id,
+              event_type: "chat_mention",
+              channel: :in_app,
+              # Non-PII copy: handles only — NEVER the vaulted message body.
+              rendered_body: "@#{sender_handle} mentioned you in a conversation.",
+              metadata: %{
+                "thread_id" => to_string(message.thread_id),
+                "message_id" => to_string(message.id)
+              }
+            },
+            notify_opts
+          )
+        end)
+
+        :ok
+    end
+  rescue
+    _ -> :ok
   end
 
   # Broadcast the id-only envelope unless the caller opted out (`broadcast: false`, e.g. a

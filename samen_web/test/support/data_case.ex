@@ -107,4 +107,5 @@ defmodule Samen.WebTest.DataCase do
   defp namespace(:billing), do: Samen.WebTest.Billing
   defp namespace(:support), do: Samen.WebTest.Support
   defp namespace(:marketing), do: Samen.WebTest.Marketing
+  defp namespace(:notifications), do: Samen.WebTest.Primitives
 end

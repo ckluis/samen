@@ -139,6 +139,7 @@ defmodule Samen.Scopes.Marketing.SendWorker do
 
   defp mark_failed(message, _reason, repo) do
     update_status(message, :failed, %{}, repo)
+    notify_send_event(message, "marketing.send.failed", "A marketing send failed to deliver.")
   end
 
   defp mark_blocked(message, repo) do
@@ -211,13 +212,37 @@ defmodule Samen.Scopes.Marketing.SendWorker do
 
   # Record an operator notification that a send was blocked. The kernel path is
   # the notification engine's record write (ADR-014 §6: the inbox render is web;
-  # the record is kernel). Until the engine (a sibling A1/A4 task) is wired, this
-  # is a structured warning log — an honest signal, not a silent swallow.
+  # the record is kernel) — WS-A A4 wires it: the blocked send now emits a
+  # "marketing.send.blocked" notification through Samen.Notifications.Engine.emit/1
+  # (best-effort: an unwired engine degrades to the structured warning log below —
+  # an honest signal, not a silent swallow; a suppressed preference writes NO
+  # record — the red path).
   defp notify_operator_blocked(message, _repo) do
     Logger.warning(
       "[SendWorker] OPERATOR ALERT: marketing send blocked (adapter unconfigured) " <>
         "send_id=#{message.send_id} org_id=#{message.org_id}"
     )
+
+    notify_send_event(
+      message,
+      "marketing.send.blocked",
+      "A marketing send was blocked: no delivery adapter is configured."
+    )
+  end
+
+  # WS-A A4 event source (design §2.3 "system events: send :blocked/:failed").
+  # Token-only request: bounded ids + framework copy — never a revealed email or
+  # any subscriber data. The recipient entity is the OWNING ORG (org-level system
+  # event); the engine's preference gate + best-effort contract apply.
+  defp notify_send_event(message, event_type, body) do
+    Samen.Notifications.Engine.emit(%{
+      org_id: message.org_id,
+      recipient_id: message.org_id,
+      event_type: event_type,
+      channel: :in_app,
+      rendered_body: body,
+      metadata: %{"send_id" => to_string(message.send_id)}
+    })
 
     :ok
   end

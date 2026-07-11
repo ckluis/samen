@@ -94,6 +94,7 @@
     "pbi": "PawChart.Billing.Invoice",
     "cei": "Core.Ctx.Invoice",
     "pnt": "Demo.PrimitivesScope.Notification",
+    "npr": "Demo.PrimitivesScope.NotificationPreference",
     "stl": "Driftwood.Freight.Settlement",
     "sfu": "SamenCore.Support.SameOrgFkFixture.Unguarded",
     "pbc": "PawChart.Billing.Customer",
@@ -227,6 +228,18 @@
     "dct": "Driftwood.Chat.ChatThread",
     "dcp": "Driftwood.Chat.ChatParticipant",
     "dcm": "Driftwood.Chat.ChatMessage",
-    "dcd": "Driftwood.Chat.ChatDisclosureSetting"
+    "dcd": "Driftwood.Chat.ChatDisclosureSetting",
+    "nen": "SamenCore.Support.NotificationFixture.Notification",
+    "nep": "SamenCore.Support.NotificationFixture.NotificationPreference",
+    "nef": "SamenCore.Support.NotificationFixture.File",
+    "nes": "SamenCore.Support.NotificationFixture.SearchIndex",
+    "nwh": "SamenCore.Support.NotificationFixture.Webhook",
+    "ngf": "SamenCore.Support.NotificationFixture.FeatureFlag",
+    "wnn": "Samen.WebTest.Primitives.Notification",
+    "wnp": "Samen.WebTest.Primitives.NotificationPreference",
+    "wnf": "Samen.WebTest.Primitives.File",
+    "wns": "Samen.WebTest.Primitives.SearchIndex",
+    "wnw": "Samen.WebTest.Primitives.Webhook",
+    "wng": "Samen.WebTest.Primitives.FeatureFlag"
   }
 }

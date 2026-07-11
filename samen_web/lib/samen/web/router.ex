@@ -217,6 +217,70 @@ defmodule Samen.Web.Router do
   end
 
   @doc """
+  Mount the framework NOTIFICATIONS INBOX (WS-A design §2.4; ADR-016 §4) — the
+  `/notifications` inbox every vertical inherits — in ONE line, on either plane.
+
+  `namespace` is the host's mounted PRIMITIVES namespace (the domain that `use`d
+  `Samen.Scopes.Primitives` — it materializes `Notification` + `NotificationPreference`,
+  e.g. `Demo.PrimitivesScope`).
+
+      import Samen.Web.Router
+
+      # TENANT plane — the org's own inbox (rendered_body clear).
+      samen_notifications_routes :notifications, Demo.PrimitivesScope, repo: Demo.Repo
+
+      # OPERATOR / impersonation plane — the SAME LiveView, masked (••••), reached
+      # through the impersonation bridge carrying the tenant org_id.
+      samen_notifications_routes :notifications, Demo.PrimitivesScope,
+        repo: Demo.Repo,
+        plane: :operator,
+        target_org_id: tenant_org_id,
+        path: "/operator/notifications"
+
+  Realtime needs a running `Phoenix.PubSub` (the host's — the mount's `:pubsub` label,
+  default `Driftwood.PubSub`) and the kernel engine wired to the web broadcaster:
+
+      config :samen_core, Samen.Notifications.Engine,
+        broadcaster: Samen.Web.Notifications.PubSubBroadcaster
+      config :samen_web, Samen.Web.Notifications.PubSubBroadcaster, pubsub: MyApp.PubSub
+
+  Options: as `samen_chat_routes/3` (`:repo` required; `:domain`, `:plane`,
+  `:operator_id`/`:target_org_id`, `:path` (default `/notifications`), `:labels`,
+  `:session_name`).
+  """
+  defmacro samen_notifications_routes(kind, namespace, opts \\ []) do
+    kind = Macro.expand(kind, __CALLER__)
+    path = Keyword.get(opts, :path, "/notifications")
+    session_name = Keyword.get(opts, :session_name, session_name(:notifications, path))
+
+    quote bind_quoted: [
+            kind: kind,
+            namespace: namespace,
+            opts: opts,
+            path: path,
+            session_name: session_name
+          ] do
+      _ = kind
+
+      mount =
+        Samen.Web.Mount.new(
+          :notifications,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          plane: Samen.Web.Router.__plane__(opts),
+          labels: Keyword.get(opts, :labels)
+        )
+
+      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        for {sub_path, module} <- Samen.Web.Router.__routes__(:notifications, path) do
+          live(sub_path, module)
+        end
+      end
+    end
+  end
+
+  @doc """
   Mount the framework SESSION endpoint that writes the current org (ADR-013 §4.3) in ONE line.
 
       import Samen.Web.Router
@@ -305,11 +369,20 @@ defmodule Samen.Web.Router do
     ]
   end
 
+  # WS-A A4 (ADR-016 §4) — the notifications inbox + settings route table.
+  def __routes__(:notifications, path) do
+    [
+      {"#{path}", Samen.Web.Notifications.InboxLive},
+      {"#{path}/settings", Samen.Web.Notifications.PreferencesLive}
+    ]
+  end
+
   defp default_path(:crm), do: "/crm"
   defp default_path(:billing), do: "/billing"
   defp default_path(:support), do: "/support"
   defp default_path(:marketing), do: "/marketing"
   defp default_path(:chat), do: "/chat"
+  defp default_path(:notifications), do: "/notifications"
 
   defp session_name(kind, path) do
     :"samen_#{kind}_#{path |> String.replace(~r/[^a-zA-Z0-9]/, "_") |> String.trim("_")}"

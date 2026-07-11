@@ -60,7 +60,17 @@ config :samen_core, :catalog_parity_allow_list, [
 # cannot discover the route. Allow-list the pair: the route IS declared, just not on a
 # registered domain. (catalog_parity is satisfied because catalog_sync catalogs it.)
 config :samen_core, :vault_declared_parity_allow_list, [
-  {"sxs_subscriber", "pii_sxs_email"}
+  {"sxs_subscriber", "pii_sxs_email"},
+  # WS-A A4 notifications engine fixture (test/support/notification_fixture.ex):
+  # Notification.rendered_body is vault-routed (column pii_nen_rendered_body) but the
+  # fixture domain is NOT in :ash_domains, so vault_declared_parity cannot discover
+  # the route. The route IS declared — allow-list the pair (same posture as sx*).
+  {"nen_notification", "pii_nen_rendered_body"},
+  # Same fixture, same posture: the Primitives blueprint's Webhook declares the
+  # vault-routed signing_secret (column pii_nwh_signing_secret), but the fixture
+  # domain is NOT in :ash_domains so vault_declared_parity cannot discover the
+  # route. The route IS declared — allow-list the pair.
+  {"nwh_webhook", "pii_nwh_signing_secret"}
 ]
 
 # T2.6 OTel test config: use the pid exporter so tests receive spans as messages

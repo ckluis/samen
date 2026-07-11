@@ -29,5 +29,6 @@ config :samen_web,
     Samen.WebTest.Billing,
     Samen.WebTest.Support,
     Samen.WebTest.Marketing,
-    Samen.WebTest.Operator
+    Samen.WebTest.Operator,
+    Samen.WebTest.Primitives
   ]

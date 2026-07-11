@@ -421,6 +421,19 @@ defmodule Samen.Scopes.Billing.Blueprint do
         # F3.2 same-org FK: an invoice may only reference a same-org customer/subscription.
         changes do
           change({Samen.Policy.SameOrgFk, relationships: [:customer, :subscription]})
+
+          # WS-A A4 event source (design §2.3 "invoice events"): a status TRANSITION
+          # to open/paid/void/uncollectible emits an in-app notification through
+          # Samen.Notifications.Engine.emit/1 — best-effort (an unwired engine or an
+          # engine error never aborts the invoice write) and preference-gated (a
+          # suppressed event type writes NO record). Bounded ids + framework copy
+          # only; the subject travels as an object REF, never denormalized data.
+          change(
+            {Samen.Notifications.StatusChange,
+             event_prefix: "invoice",
+             ref_key: "billing.invoice",
+             statuses: [:open, :paid, :void, :uncollectible]}
+          )
         end
 
         policies do

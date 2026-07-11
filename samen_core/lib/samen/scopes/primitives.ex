@@ -82,6 +82,7 @@ defmodule Samen.Scopes.Primitives do
   `samen_core/priv/abbrev_registry.json` under the HOST module name:
 
     * `Demo.PrimitivesScope.Notification` → `pnt`
+    * `Demo.PrimitivesScope.NotificationPreference` → `npr`
     * `Demo.PrimitivesScope.File`         → `pfl`
     * `Demo.PrimitivesScope.SearchIndex`  → `psh`
     * `Demo.PrimitivesScope.Webhook`      → `pwh`
@@ -92,6 +93,7 @@ defmodule Samen.Scopes.Primitives do
 
   @default_abbrevs %{
     notification: "pnt",
+    notification_preference: "npr",
     file: "pfl",
     search_index: "psh",
     webhook: "pwh",
@@ -112,6 +114,7 @@ defmodule Samen.Scopes.Primitives do
     abbrevs = resolve_abbrevs(Keyword.get(opts, :abbrevs), __CALLER__)
 
     notification_mod = Module.concat(namespace, Notification)
+    notification_preference_mod = Module.concat(namespace, NotificationPreference)
     file_mod = Module.concat(namespace, File)
     search_index_mod = Module.concat(namespace, SearchIndex)
     webhook_mod = Module.concat(namespace, Webhook)
@@ -120,9 +123,10 @@ defmodule Samen.Scopes.Primitives do
     quote do
       require Samen.Scopes.Primitives.Blueprint
 
-      # Register the five Primitives resources in the host domain.
+      # Register the Primitives resources in the host domain.
       resources do
         resource(unquote(notification_mod))
+        resource(unquote(notification_preference_mod))
         resource(unquote(file_mod))
         resource(unquote(search_index_mod))
         resource(unquote(webhook_mod))
@@ -136,6 +140,14 @@ defmodule Samen.Scopes.Primitives do
         unquote(domain),
         unquote(repo),
         unquote(abbrevs.notification)
+      )
+
+      Samen.Scopes.Primitives.Blueprint.define_notification_preference(
+        unquote(notification_preference_mod),
+        unquote(otp_app),
+        unquote(domain),
+        unquote(repo),
+        unquote(abbrevs.notification_preference)
       )
 
       Samen.Scopes.Primitives.Blueprint.define_file(
