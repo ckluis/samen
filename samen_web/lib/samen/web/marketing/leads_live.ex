@@ -137,6 +137,8 @@ defmodule Samen.Web.Marketing.LeadsLive do
                 row_class="lead-row"
                 filter_placeholder="Filter leads…"
                 empty_text="No leads in the early funnel yet."
+                empty_icon="➤"
+                empty_body="This lens surfaces contacts in the lead / MQL / SQL lifecycle stages — set a contact's lifecycle stage in CRM and it appears here."
               >
                 <:head>
                   <.sort_header field={:display_name} label="Name" sort={@list_state.sort} width="30%" />

@@ -192,7 +192,12 @@ defmodule Samen.Web.Operator.AccountsLive do
                 row_class="account-row"
                 filter_placeholder="Filter accounts…"
                 empty_text="No accounts yet."
+                empty_icon="▤"
+                empty_body="Accounts are the tenant orgs on your platform — create the first to open your book of business."
               >
+                <:empty_actions :if={writable?(@samen_mount)}>
+                  <.button variant="primary" phx-click="new_account" id="empty-new-account">New account</.button>
+                </:empty_actions>
                 <:head>
                   <.sort_header field={:name} label="Account" sort={@list_state.sort} width="24%" />
                   <th scope="col" style="width:22%">Primary contact</th>

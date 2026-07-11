@@ -92,7 +92,14 @@ defmodule Samen.Web.Operator.PlatformBillingLive do
                 <span class="n">{length(@billing.subscriptions)}</span>
                 <span class="lane">· each is a tenant's subscription TO the SaaS · customer in the clear</span>
               </div>
-              <.data_table>
+              <.empty_state
+                :if={@billing.subscriptions == []}
+                class="subscriptions-empty"
+                icon="↻"
+                title="No tenant subscriptions yet."
+                body="Each tenant's subscription to your platform appears here once billing is set up."
+              />
+              <.data_table :if={@billing.subscriptions != []}>
                 <:head>
                   <th style="width:30%">Customer (tenant)</th>
                   <th style="width:26%">Billing email</th>
@@ -122,7 +129,14 @@ defmodule Samen.Web.Operator.PlatformBillingLive do
                 <span class="n">{length(@billing.invoices)}</span>
                 <span class="lane">· invoices the SaaS issues tenants · past-due flagged</span>
               </div>
-              <.data_table>
+              <.empty_state
+                :if={@billing.invoices == []}
+                class="invoices-empty"
+                icon="☰"
+                title="No invoices yet."
+                body="Invoices you issue to tenants appear here, with past-due dunning flagged."
+              />
+              <.data_table :if={@billing.invoices != []}>
                 <:head>
                   <th style="width:34%">Customer (tenant)</th>
                   <th style="width:18%">Amount due</th>

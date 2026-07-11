@@ -29,7 +29,12 @@ defmodule Driftwood.OperatorSeeds do
     %{tenant_org_id: "b1112d00-0000-4000-8000-000000000002", name: "Summit Freight Partners", mrr: 300_000, health: :healthy, admin: {"Desmond", "Vlahos", "desmond.vlahos@summitfreight.example"}},
     %{tenant_org_id: "b1112d00-0000-4000-8000-000000000003", name: "Gulf Stream Carriers", mrr: 480_000, health: :at_risk, admin: {"Yolanda", "Reyes", "yolanda.reyes@gulfstream.example"}},
     %{tenant_org_id: "b1112d00-0000-4000-8000-000000000004", name: "Cascade Freightways", mrr: 120_000, health: :healthy, admin: {"Peter", "Lindholm", "peter.lindholm@cascadeway.example"}},
-    %{tenant_org_id: "b1112d00-0000-4000-8000-000000000005", name: "Ironline Brokerage", mrr: 520_000, health: :at_risk, admin: {"Nadia", "Farouk", "nadia.farouk@ironline.example"}}
+    %{tenant_org_id: "b1112d00-0000-4000-8000-000000000005", name: "Ironline Brokerage", mrr: 520_000, health: :at_risk, admin: {"Nadia", "Farouk", "nadia.farouk@ironline.example"}},
+    # WS-A A5 (demo coherence) — the JUST-ONBOARDED account: the operator relationship exists
+    # (account + admin + subscription), but the TENANT plane is deliberately EMPTY (no freight,
+    # CRM, billing, support, marketing, chat, or notification rows), so opening it demonstrates
+    # the framework FIRST-RUN checklist + kit empty states + the guarded sample-data offer.
+    %{tenant_org_id: "b1112d00-0000-4000-8000-000000000006", name: "Lakeline Freight Co", mrr: 120_000, health: :healthy, admin: {"Ingrid", "Bergstrom", "ingrid.bergstrom@lakelinefreight.example"}}
   ]
 
   # ADR-013 §8.3 — the operator's OWN CRM Leads/prospects (brokerages NOT yet customers), so the
@@ -47,10 +52,16 @@ defmodule Driftwood.OperatorSeeds do
   @doc "The well-known operator org id."
   def operator_org_id, do: @operator_org_id
 
-  @doc "Seed the operator book of business over the existing tenant orgs. Idempotent-ish."
+  @doc """
+  Seed the operator book of business over the existing tenant orgs. Idempotent AND
+  convergent: a fresh DB gets the full book; a re-run on an already-seeded DB seeds
+  only the accounts MISSING from `@accounts` (so adding a new account spec — e.g.
+  the just-onboarded EMPTY tenant Lakeline Freight Co — lands on the next
+  `mix driftwood.seed` without recreating the DB).
+  """
   def seed do
     if operator_org_seeded?() do
-      :ok
+      seed_missing_accounts()
     else
       seed_operator_org()
       agent = seed_agent()
@@ -64,6 +75,33 @@ defmodule Driftwood.OperatorSeeds do
 
       :ok
     end
+  end
+
+  # Re-run convergence: seed any @accounts entry whose account Org row is absent,
+  # reusing the existing desk agent.
+  defp seed_missing_accounts do
+    agent =
+      Op.Agent
+      |> Ash.Query.filter(org_id == ^@operator_org_id and handle == "pnakamura")
+      |> Ash.Query.limit(1)
+      |> Ash.read!(authorize?: false)
+      |> List.first()
+
+    for account <- @accounts, agent != nil, not account_seeded?(account.tenant_org_id) do
+      seed_account(account, agent)
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp account_seeded?(tenant_org_id) do
+    Op.Org
+    |> Ash.Query.filter(org_id == ^@operator_org_id and slug == ^tenant_org_id)
+    |> Ash.exists?(authorize?: false)
+  rescue
+    _ -> true
   end
 
   defp operator_org_seeded? do

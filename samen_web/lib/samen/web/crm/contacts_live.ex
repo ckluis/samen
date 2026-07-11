@@ -41,10 +41,13 @@ defmodule Samen.Web.CRM.ContactsLive do
     only: [assign_mount: 2, crm_sidebar: 1, writable?: 1, full_name_field: 1]
 
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
+  import Samen.Web.FirstRun, only: [first_run_card: 1]
 
   alias Samen.Web.CRM.Reads
   alias Samen.Web.CurrentOrg
+  alias Samen.Web.FirstRun
   alias Samen.Web.Mount
+  alias Samen.Web.SampleData
 
   use Samen.Web.ListLive,
     resource: Person,
@@ -72,8 +75,9 @@ defmodule Samen.Web.CRM.ContactsLive do
     |> default_return_to()
     |> assign(no_org: no_org?(socket, nil), org_id: nil, company_names: %{})
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
-    |> assign(show_new: false, new_form: nil)
+    |> assign(show_new: false, new_form: nil, first_run: false)
     |> assign_new(:delete_error, fn -> nil end)
+    |> assign_new(:sample_error, fn -> nil end)
   end
 
   def load(socket, org_id) do
@@ -85,10 +89,14 @@ defmodule Samen.Web.CRM.ContactsLive do
     |> assign(
       no_org: false,
       org_id: org_id,
-      company_names: company_name_map(mount, scope)
+      company_names: company_name_map(mount, scope),
+      # AC-G5-2: the tenant first-run checklist — zero rows across the CRM core
+      # resources. FALSE by construction on the operator plane (FirstRun).
+      first_run: FirstRun.first_run?(mount, org_id)
     )
     |> assign_new(:show_new, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
+    |> assign_new(:sample_error, fn -> nil end)
     |> assign(new_form: new_contact_form(mount, scope))
     |> init_list(mount, scope)
   end
@@ -123,6 +131,22 @@ defmodule Samen.Web.CRM.ContactsLive do
 
       {:error, form} ->
         {:noreply, assign(socket, new_form: form)}
+    end
+  end
+
+  # AC-G5-3: the in-app sample-data offer. ENFORCEMENT lives in SampleData.load/2
+  # (tenant plane only · disabled-in-prod-unless-flagged · idempotent · audited ·
+  # vault write path) — this handler only relays and re-reads. A refusal is
+  # SURFACED (fail-honest), never swallowed.
+  def handle_event("load_sample_data", _params, socket) do
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+
+    case SampleData.load(mount, org_id) do
+      {:ok, _} ->
+        {:noreply, load(assign(socket, sample_error: nil), org_id)}
+
+      {:error, _reason} ->
+        {:noreply, assign(socket, sample_error: "Sample data is not available here.")}
     end
   end
 
@@ -201,6 +225,20 @@ defmodule Samen.Web.CRM.ContactsLive do
             </div>
           </div>
 
+          <div :if={@sample_error} class="wrap" style="margin-bottom:0">
+            <div class="card form-error" id="sample-error" style="padding:10px 14px;color:var(--bad, #b91c1c);font-size:12px">
+              {@sample_error}
+            </div>
+          </div>
+
+          <div :if={@first_run and writable?(@samen_mount)} class="wrap" style="margin-bottom:0">
+            <.first_run_card
+              create_event="new_contact"
+              create_label="Add your first contact"
+              sample?={SampleData.offer?(@samen_mount)}
+            />
+          </div>
+
           <div class="wrap">
             <div id="contacts-panel">
               <div class="gtitle">
@@ -215,7 +253,15 @@ defmodule Samen.Web.CRM.ContactsLive do
                 row_class="contact-row"
                 filter_placeholder="Filter contacts…"
                 empty_text="No contacts yet."
+                empty_icon="◉"
+                empty_body="Contacts are your people book — names, emails, and phones, all vault-protected."
               >
+                <:empty_actions :if={writable?(@samen_mount)}>
+                  <.button variant="primary" phx-click="new_contact" id="empty-new-contact">New contact</.button>
+                </:empty_actions>
+                <:empty_sample :if={writable?(@samen_mount) and SampleData.offer?(@samen_mount)}>
+                  <.button phx-click="load_sample_data" id="load-sample-data">Load sample data</.button>
+                </:empty_sample>
                 <:head>
                   <.sort_header field={:display_name} label="Name" sort={@list_state.sort} width="24%" />
                   <th scope="col" style="width:20%">Email</th>

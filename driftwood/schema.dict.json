@@ -2931,6 +2931,150 @@
     {
       "fields": [
         {
+          "column_name": "fff_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fff_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fff_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fff_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fff_metadata",
+          "logical_name": "metadata",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fff_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fff_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fff_rollout_pct",
+          "logical_name": "rollout_pct",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fff_stage",
+          "logical_name": "stage",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fff_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Primitives.FeatureFlag",
+      "table_name": "fff_feature_flag"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "ffl_content_type",
+          "logical_name": "content_type",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ffl_filename",
+          "logical_name": "filename",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ffl_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ffl_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ffl_metadata",
+          "logical_name": "metadata",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "ffl_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ffl_search_vector",
+          "logical_name": "search_vector",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ffl_size_bytes",
+          "logical_name": "size_bytes",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "ffl_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "ffl_storage_key",
+          "logical_name": "storage_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ffl_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ffl_uploaded_by_id",
+          "logical_name": "uploaded_by_id",
+          "pii": false,
+          "type": "UUID"
+        }
+      ],
+      "resource": "Driftwood.Primitives.File",
+      "table_name": "ffl_file"
+    },
+    {
+      "fields": [
+        {
           "column_name": "fmc_custom",
           "logical_name": "custom",
           "pii": false,
@@ -3393,6 +3537,144 @@
     {
       "fields": [
         {
+          "column_name": "fnp_email_enabled",
+          "logical_name": "email_enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fnp_event_type",
+          "logical_name": "event_type",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fnp_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fnp_in_app_enabled",
+          "logical_name": "in_app_enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fnp_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fnp_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fnp_quiet_hours",
+          "logical_name": "quiet_hours",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fnp_recipient_id",
+          "logical_name": "recipient_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fnp_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Primitives.NotificationPreference",
+      "table_name": "fnp_notification_preference"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fnt_channel",
+          "logical_name": "channel",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fnt_event_type",
+          "logical_name": "event_type",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fnt_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fnt_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fnt_metadata",
+          "logical_name": "metadata",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fnt_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fnt_read_at",
+          "logical_name": "read_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fnt_recipient_id",
+          "logical_name": "recipient_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fnt_sent_at",
+          "logical_name": "sent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fnt_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fnt_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_fnt_rendered_body",
+          "logical_name": "rendered_body",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Driftwood.Primitives.Notification",
+      "table_name": "fnt_notification"
+    },
+    {
+      "fields": [
+        {
           "column_name": "fop_close_date",
           "logical_name": "close_date",
           "pii": false,
@@ -3743,6 +4025,72 @@
       ],
       "resource": "Driftwood.Support.Conversation",
       "table_name": "fsc_conversation"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fsh_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsh_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "fsh_field_name",
+          "logical_name": "field_name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsh_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsh_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fsh_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fsh_resource_name",
+          "logical_name": "resource_name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsh_ts_config",
+          "logical_name": "ts_config",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fsh_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fsh_vector_column",
+          "logical_name": "vector_column",
+          "pii": false,
+          "type": "String"
+        }
+      ],
+      "resource": "Driftwood.Primitives.SearchIndex",
+      "table_name": "fsh_search_index"
     },
     {
       "fields": [
@@ -4115,6 +4463,84 @@
       ],
       "resource": "Driftwood.Support.Csat",
       "table_name": "fss_csat"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fwh_event_types",
+          "logical_name": "event_types",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "fwh_failure_count",
+          "logical_name": "failure_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fwh_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fwh_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fwh_label",
+          "logical_name": "label",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fwh_last_delivered_at",
+          "logical_name": "last_delivered_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fwh_metadata",
+          "logical_name": "metadata",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fwh_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fwh_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fwh_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fwh_url",
+          "logical_name": "url",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pii_fwh_signing_secret",
+          "logical_name": "signing_secret",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Driftwood.Primitives.Webhook",
+      "table_name": "fwh_webhook"
     },
     {
       "fields": [

@@ -240,6 +240,18 @@
     "wnf": "Samen.WebTest.Primitives.File",
     "wns": "Samen.WebTest.Primitives.SearchIndex",
     "wnw": "Samen.WebTest.Primitives.Webhook",
-    "wng": "Samen.WebTest.Primitives.FeatureFlag"
+    "wng": "Samen.WebTest.Primitives.FeatureFlag",
+    "fnt": "Driftwood.Primitives.Notification",
+    "fnp": "Driftwood.Primitives.NotificationPreference",
+    "ffl": "Driftwood.Primitives.File",
+    "fsh": "Driftwood.Primitives.SearchIndex",
+    "fwh": "Driftwood.Primitives.Webhook",
+    "fff": "Driftwood.Primitives.FeatureFlag",
+    "vnt": "PawChart.Primitives.Notification",
+    "vnp": "PawChart.Primitives.NotificationPreference",
+    "vfl": "PawChart.Primitives.File",
+    "vsh": "PawChart.Primitives.SearchIndex",
+    "vwh": "PawChart.Primitives.Webhook",
+    "vff": "PawChart.Primitives.FeatureFlag"
   }
 }

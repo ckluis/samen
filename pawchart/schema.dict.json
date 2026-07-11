@@ -1293,6 +1293,150 @@
     {
       "fields": [
         {
+          "column_name": "vff_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vff_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "vff_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vff_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vff_metadata",
+          "logical_name": "metadata",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vff_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vff_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vff_rollout_pct",
+          "logical_name": "rollout_pct",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "vff_stage",
+          "logical_name": "stage",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vff_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Primitives.FeatureFlag",
+      "table_name": "vff_feature_flag"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vfl_content_type",
+          "logical_name": "content_type",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vfl_filename",
+          "logical_name": "filename",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vfl_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vfl_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vfl_metadata",
+          "logical_name": "metadata",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vfl_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vfl_search_vector",
+          "logical_name": "search_vector",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vfl_size_bytes",
+          "logical_name": "size_bytes",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "vfl_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vfl_storage_key",
+          "logical_name": "storage_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vfl_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vfl_uploaded_by_id",
+          "logical_name": "uploaded_by_id",
+          "pii": false,
+          "type": "UUID"
+        }
+      ],
+      "resource": "PawChart.Primitives.File",
+      "table_name": "vfl_file"
+    },
+    {
+      "fields": [
+        {
           "column_name": "vmc_custom",
           "logical_name": "custom",
           "pii": false,
@@ -1751,6 +1895,144 @@
       ],
       "resource": "PawChart.Marketing.Template",
       "table_name": "vmt_template"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vnp_email_enabled",
+          "logical_name": "email_enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "vnp_event_type",
+          "logical_name": "event_type",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vnp_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vnp_in_app_enabled",
+          "logical_name": "in_app_enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "vnp_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vnp_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vnp_quiet_hours",
+          "logical_name": "quiet_hours",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vnp_recipient_id",
+          "logical_name": "recipient_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vnp_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Primitives.NotificationPreference",
+      "table_name": "vnp_notification_preference"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pii_vnt_rendered_body",
+          "logical_name": "rendered_body",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "vnt_channel",
+          "logical_name": "channel",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vnt_event_type",
+          "logical_name": "event_type",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vnt_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vnt_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vnt_metadata",
+          "logical_name": "metadata",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vnt_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vnt_read_at",
+          "logical_name": "read_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vnt_recipient_id",
+          "logical_name": "recipient_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vnt_sent_at",
+          "logical_name": "sent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vnt_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vnt_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Primitives.Notification",
+      "table_name": "vnt_notification"
     },
     {
       "fields": [
@@ -2255,6 +2537,150 @@
       ],
       "resource": "PawChart.Support.Csat",
       "table_name": "vsg_csat"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "vsh_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsh_enabled",
+          "logical_name": "enabled",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "vsh_field_name",
+          "logical_name": "field_name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsh_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsh_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vsh_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vsh_resource_name",
+          "logical_name": "resource_name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsh_ts_config",
+          "logical_name": "ts_config",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vsh_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vsh_vector_column",
+          "logical_name": "vector_column",
+          "pii": false,
+          "type": "String"
+        }
+      ],
+      "resource": "PawChart.Primitives.SearchIndex",
+      "table_name": "vsh_search_index"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pii_vwh_signing_secret",
+          "logical_name": "signing_secret",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "vwh_event_types",
+          "logical_name": "event_types",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "vwh_failure_count",
+          "logical_name": "failure_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "vwh_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vwh_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vwh_label",
+          "logical_name": "label",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vwh_last_delivered_at",
+          "logical_name": "last_delivered_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vwh_metadata",
+          "logical_name": "metadata",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vwh_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vwh_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vwh_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vwh_url",
+          "logical_name": "url",
+          "pii": false,
+          "type": "String"
+        }
+      ],
+      "resource": "PawChart.Primitives.Webhook",
+      "table_name": "vwh_webhook"
     }
   ]
 }

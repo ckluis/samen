@@ -203,7 +203,12 @@ defmodule Samen.Web.Operator.DeskLive do
                 row_class="desk-ticket-row"
                 filter_placeholder="Filter tickets…"
                 empty_text="No tickets yet."
+                empty_icon="⚑"
+                empty_body="Desk tickets from your tenant accounts land here with SLA state."
               >
+                <:empty_actions :if={writable?(@samen_mount)}>
+                  <.button variant="primary" phx-click="new_ticket" id="empty-new-desk-ticket">New ticket</.button>
+                </:empty_actions>
                 <:head>
                   <.sort_header field={:subject} label="Subject" sort={@list_state.sort} width="28%" />
                   <th scope="col" style="width:20%">Requester (tenant-admin)</th>

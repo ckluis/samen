@@ -188,7 +188,12 @@ defmodule Samen.Web.Billing.PlansLive do
                 row_class="plan-row"
                 filter_placeholder="Filter plans…"
                 empty_text="No plans yet."
+                empty_icon="◫"
+                empty_body="Plans define what your customers can subscribe to."
               >
+                <:empty_actions :if={writable?(@samen_mount)}>
+                  <.button variant="primary" phx-click="new_plan" id="empty-new-plan">New plan</.button>
+                </:empty_actions>
                 <:head>
                   <.sort_header field={:name} label="Plan" sort={@list_state.sort} width="20%" />
                   <th scope="col" style="width:14%">Price</th>

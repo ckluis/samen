@@ -352,7 +352,12 @@ defmodule Samen.Web.CRM.ContactLive do
               <% "deals" -> %>
                 <div class="wrap" id="deals-pane">
                   <%= if @deals == [] do %>
-                    <div class="card" style="padding:22px 20px;color:var(--muted)">No deals linked to this contact's company yet.</div>
+                    <.empty_state
+                      class="deals-empty"
+                      icon="◇"
+                      title="No deals yet."
+                      body="Deals linked to this contact's company appear here — start one from the Pipeline."
+                    />
                   <% else %>
                     <.data_table>
                       <:head>

@@ -95,5 +95,19 @@ defmodule PawChartWeb.Router do
         crm_namespace: PawChart.Crm
       }
     )
+
+    # 5. Notifications (WS-A A4/A5) — the framework inbox (+ /notifications/settings),
+    #    mounted over PawChart's Primitives mount in ONE line. The sidebar
+    #    "Notifications" nav item the framework `module_nav/1` already renders now
+    #    resolves. Realtime rides `PawChart.PubSub` (id-only envelopes).
+    samen_notifications_routes(:notifications, PawChart.Primitives,
+      repo: PawChart.Repo,
+      labels: %{
+        title: "Happy Paws Clinic",
+        glyph: "V",
+        crumb_root: "PawChart",
+        pubsub: PawChart.PubSub
+      }
+    )
   end
 end

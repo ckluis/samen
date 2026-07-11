@@ -222,7 +222,12 @@ defmodule Samen.Web.CRM.CompaniesLive do
                 row_class="company-row"
                 filter_placeholder="Filter companies…"
                 empty_text="No companies yet."
+                empty_icon="▣"
+                empty_body="Companies group your contacts, deals, and activity in one place."
               >
+                <:empty_actions :if={writable?(@samen_mount)}>
+                  <.button variant="primary" phx-click="new_company" id="empty-new-company">New company</.button>
+                </:empty_actions>
                 <:head>
                   <.sort_header field={:name} label="Name" sort={@list_state.sort} width="30%" />
                   <th scope="col" style="width:16%">Type / Role</th>

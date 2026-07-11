@@ -214,7 +214,12 @@ defmodule Samen.Web.Marketing.SegmentsLive do
                 row_class="segment-row"
                 filter_placeholder="Filter segments…"
                 empty_text="No segments yet."
+                empty_icon="◔"
+                empty_body="Segments are the audiences your campaigns send to."
               >
+                <:empty_actions :if={writable?(@samen_mount)}>
+                  <.button variant="primary" phx-click="new_segment" id="empty-new-segment">New segment</.button>
+                </:empty_actions>
                 <:head>
                   <.sort_header field={:name} label="Segment" sort={@list_state.sort} width="30%" />
                   <.sort_header field={:subscriber_count} label="Subscribers" sort={@list_state.sort} width="18%" />
@@ -243,7 +248,12 @@ defmodule Samen.Web.Marketing.SegmentsLive do
                 <span class="lane">· email via PiiResolution · {marketing_plane_note(@samen_mount)}</span>
               </div>
               <%= if @sub_page.items == [] do %>
-                <.empty_state class="subscribers-empty" title="No subscribers yet." />
+                <.empty_state
+                  class="subscribers-empty"
+                  icon="◔"
+                  title="No subscribers yet."
+                  body="Subscribers you add to this segment appear here with status and source."
+                />
               <% else %>
                 <.data_table>
                   <:head>

@@ -18,6 +18,11 @@ config :samen_web, start_repo?: false
 
 config :samen_core, Oban, testing: :manual, plugins: false
 
+# A5 (AC-G5-3): the sample-data offer is FAIL-CLOSED by default (env defaults :prod,
+# enabled defaults false). The test host declares its env; the RP-G5-3 red path
+# overrides this at runtime to prove the prod-without-flag refusal.
+config :samen_web, Samen.Web.SampleData, env: :test
+
 # The test-support host domains exist only in :test (test/support). Register them under
 # :samen_web (for `mix ash.*` niceties) but NOT under :samen_core :ash_domains — the render
 # tests + PiiResolution reference resources by module directly, so samen_core does not need

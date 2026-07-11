@@ -230,7 +230,12 @@ defmodule Samen.Web.Billing.InvoicesLive do
                 row_class="invoice-row"
                 filter_placeholder="Filter invoices…"
                 empty_text="No invoices yet."
+                empty_icon="☰"
+                empty_body="Invoices you raise appear here with their status and totals."
               >
+                <:empty_actions :if={writable?(@samen_mount)}>
+                  <.button variant="primary" phx-click="new_invoice" id="empty-new-invoice">New invoice</.button>
+                </:empty_actions>
                 <:head>
                   <th scope="col" style="width:12%">Number</th>
                   <th scope="col" style="width:24%">Customer</th>

@@ -43,8 +43,12 @@ defmodule Mix.Tasks.Driftwood.Seed do
       )
     end
 
+    Mix.shell().info(
+      "  #{Driftwood.Seeds.empty_org_id()}  #{String.pad_trailing("Lakeline Freight Co", 24)} (just onboarded — EMPTY tenant: first-run + empty states)"
+    )
+
     Mix.shell().info("\nOperator org (Driftwood Ops / Samen SaaS, Inc.): #{Driftwood.OperatorSeeds.operator_org_id()}")
-    Mix.shell().info("Open: / (lands on the Driftwood Ops dashboard — all 5 accounts, no params).")
+    Mix.shell().info("Open: / (lands on the Driftwood Ops dashboard — all 6 accounts, no params).")
 
     org_id
   end

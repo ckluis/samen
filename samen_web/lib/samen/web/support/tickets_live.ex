@@ -223,7 +223,12 @@ defmodule Samen.Web.Support.TicketsLive do
                 row_class="ticket-row"
                 filter_placeholder="Filter tickets…"
                 empty_text="No tickets yet."
+                empty_icon="⚑"
+                empty_body="Support tickets from your customers land here with status and SLA state."
               >
+                <:empty_actions :if={writable?(@samen_mount)}>
+                  <.button variant="primary" phx-click="new_ticket" id="empty-new-ticket">New ticket</.button>
+                </:empty_actions>
                 <:head>
                   <.sort_header field={:subject} label="Subject" sort={@list_state.sort} width="30%" />
                   <.sort_header field={:status} label="Status" sort={@list_state.sort} width="12%" />

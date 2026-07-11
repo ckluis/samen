@@ -19,6 +19,12 @@
     "fsa": "Driftwood.Support.Agent",
     "fsl": "Driftwood.Support.Sla",
     "fsn": "Driftwood.Support.Macro",
-    "fss": "Driftwood.Support.Csat"
+    "fss": "Driftwood.Support.Csat",
+    "fnt": "Driftwood.Primitives.Notification",
+    "fnp": "Driftwood.Primitives.NotificationPreference",
+    "ffl": "Driftwood.Primitives.File",
+    "fsh": "Driftwood.Primitives.SearchIndex",
+    "fwh": "Driftwood.Primitives.Webhook",
+    "fff": "Driftwood.Primitives.FeatureFlag"
   }
 }

@@ -206,6 +206,8 @@ defmodule Samen.Web.Notifications.InboxLive do
                 row_class="notification-row"
                 filter_placeholder="Filter by event type…"
                 empty_text="No notifications yet."
+                empty_icon="✶"
+                empty_body="System events, mentions, and SLA alerts land here as they happen — nothing needs your attention yet."
               >
                 <:head>
                   <.sort_header field={:event_type} label="Event" sort={@list_state.sort} width="16%" />

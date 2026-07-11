@@ -121,9 +121,12 @@ defmodule Samen.Web.CRM.PipelineLive do
           <div class="wrap">
             <div id="pipeline">
               <%= if @stages == [] do %>
-                <div class="card" style="padding:22px 20px;color:var(--muted)">
-                  No pipeline stages with opportunities yet. Run seeds to populate.
-                </div>
+                <.empty_state
+                  class="pipeline-empty"
+                  icon="◇"
+                  title="No pipeline stages with opportunities yet."
+                  body="Stages appear here once your pipeline has opportunities in flight."
+                />
               <% else %>
                 <%= for %{stage: stage, opportunities: opps} <- @stages do %>
                   <div class="gtitle" id={"stage-#{stage.name}"}>

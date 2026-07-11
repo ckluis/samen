@@ -252,7 +252,12 @@ defmodule Samen.Web.Support.TicketLive do
             <%= if @active_tab == "conversation" do %>
               <div class="wrap" id="conversation-pane">
                 <%= if @conversations == [] do %>
-                  <div class="card" style="padding:22px 20px;color:var(--muted)">No conversation thread yet.</div>
+                  <.empty_state
+                    class="conversation-empty"
+                    icon="❝"
+                    title="No conversation thread yet."
+                    body="Replies to this ticket appear here as a threaded conversation."
+                  />
                 <% else %>
                   <%= for conv <- @conversations do %>
                     <div class="card" id={"conv-#{conv.id}"} style="margin-bottom:12px">

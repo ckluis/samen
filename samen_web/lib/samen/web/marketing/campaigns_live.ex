@@ -194,7 +194,12 @@ defmodule Samen.Web.Marketing.CampaignsLive do
                 row_class="campaign-row"
                 filter_placeholder="Filter campaigns…"
                 empty_text="No campaigns yet."
+                empty_icon="✉"
+                empty_body="Campaigns send to a segment through the fail-honest delivery engine."
               >
+                <:empty_actions :if={writable?(@samen_mount)}>
+                  <.button variant="primary" phx-click="new_campaign" id="empty-new-campaign">New campaign</.button>
+                </:empty_actions>
                 <:head>
                   <.sort_header field={:name} label="Campaign" sort={@list_state.sort} width="30%" />
                   <.sort_header field={:status} label="Status" sort={@list_state.sort} width="14%" />

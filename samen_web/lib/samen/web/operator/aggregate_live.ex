@@ -141,11 +141,13 @@ defmodule Samen.Web.Operator.AggregateLive do
             </.data_table>
           </div>
 
-          <div :if={@groups == []} class="card" style="padding:22px 20px;color:var(--muted)">
-            No aggregate projection wired. A host supplies its token-blind projection via
-            <code>aggregate_loader:</code> on the mount labels; the framework owns the
-            token-blind chrome (banner + <span class="mono">⊘</span> suppression).
-          </div>
+          <.empty_state
+            :if={@groups == []}
+            class="aggregate-empty"
+            icon="⊘"
+            title="No aggregate projection wired."
+            body="A host supplies its token-blind projection via aggregate_loader: on the mount labels; the framework owns the token-blind chrome (banner + suppression)."
+          />
         </div>
       </.app_shell>
     </div>

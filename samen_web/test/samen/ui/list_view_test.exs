@@ -145,6 +145,42 @@ defmodule Samen.UI.ListViewTest do
     assert html =~ "No records yet."
   end
 
+  test "empty_icon/empty_body + :empty_actions/:empty_sample forward into the default empty_state (A5 AC-G5-1)" do
+    html =
+      render_list(%{
+        page: page([]),
+        empty_text: "No records yet.",
+        empty_icon: "◉",
+        empty_body: "Add the first record to get started.",
+        empty_actions: [
+          %{inner_block: fn _, _ -> Phoenix.HTML.raw(~s(<button id="empty-cta">New record</button>)) end}
+        ],
+        empty_sample: [
+          %{inner_block: fn _, _ -> Phoenix.HTML.raw(~s(<button id="empty-sample">Load sample data</button>)) end}
+        ]
+      })
+
+    assert html =~ ~s(class="empty-icon")
+    assert html =~ "◉"
+    assert html =~ ~s(class="empty-body")
+    assert html =~ "Add the first record to get started."
+    assert html =~ ~s(class="empty-actions")
+    assert html =~ ~s(id="empty-cta")
+    assert html =~ ~s(class="empty-sample")
+    assert html =~ ~s(id="empty-sample")
+  end
+
+  test "RED PATH: without the forwards, the default empty_state renders NO icon / body / actions / sample" do
+    # Anti-tautology for the forwarding test above: the affordances come only from the
+    # caller's attrs/slots — the kit never invents a CTA on its own.
+    html = render_list(%{page: page([]), empty_text: "No records yet."})
+
+    refute html =~ ~s(class="empty-icon")
+    refute html =~ ~s(class="empty-body")
+    refute html =~ ~s(class="empty-actions")
+    refute html =~ ~s(class="empty-sample")
+  end
+
   # -- sort_header (AC-G1-3 + AC-G1-9 a11y) -------------------------------------
 
   test "sort_header emits the sort event with the field and carries scope/aria-sort" do

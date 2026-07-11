@@ -12,7 +12,8 @@ config :pawchart,
     PawChart.Support,
     PawChart.Marketing,
     PawChart.Clinic,
-    PawChart.Aggregate
+    PawChart.Aggregate,
+    PawChart.Primitives
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…) discover
@@ -25,8 +26,22 @@ config :samen_core, :ash_domains, [
   PawChart.Support,
   PawChart.Marketing,
   PawChart.Clinic,
-  PawChart.Aggregate
+  PawChart.Aggregate,
+  PawChart.Primitives
 ]
+
+# WS-A A4/A5 — the kernel notification ENGINE (`Samen.Notifications.Engine`) wired to
+# PawChart's mounted Primitives resources (the ADR-014 SendWorker config convention:
+# the kernel is mount-agnostic; the host names its concrete modules + repo). The
+# realtime broadcast rides the samen_web PubSub broadcaster over `PawChart.PubSub` —
+# id-only envelopes (Invariant N1); each inbox subscriber re-reads per its OWN scope.
+config :samen_core, Samen.Notifications.Engine,
+  notification_module: PawChart.Primitives.Notification,
+  preference_module: PawChart.Primitives.NotificationPreference,
+  repo: PawChart.Repo,
+  broadcaster: Samen.Web.Notifications.PubSubBroadcaster
+
+config :samen_web, Samen.Web.Notifications.PubSubBroadcaster, pubsub: PawChart.PubSub
 
 config :ash, disable_async?: true
 

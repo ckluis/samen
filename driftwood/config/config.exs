@@ -14,7 +14,8 @@ config :driftwood,
     Driftwood.Freight,
     Driftwood.Aggregate,
     Driftwood.Operator,
-    Driftwood.Chat
+    Driftwood.Chat,
+    Driftwood.Primitives
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…)
@@ -29,8 +30,23 @@ config :samen_core, :ash_domains, [
   Driftwood.Freight,
   Driftwood.Aggregate,
   Driftwood.Operator,
-  Driftwood.Chat
+  Driftwood.Chat,
+  Driftwood.Primitives
 ]
+
+# WS-A A4/A5 — the kernel notification ENGINE (`Samen.Notifications.Engine`) wired to
+# Driftwood's mounted Primitives resources (the ADR-014 SendWorker config convention:
+# the kernel is mount-agnostic; the host names its concrete modules + repo). The
+# realtime broadcast rides the samen_web PubSub broadcaster over `Driftwood.PubSub` —
+# id-only envelopes (Invariant N1); each inbox subscriber re-reads per its OWN scope,
+# so masking survives the realtime path by construction.
+config :samen_core, Samen.Notifications.Engine,
+  notification_module: Driftwood.Primitives.Notification,
+  preference_module: Driftwood.Primitives.NotificationPreference,
+  repo: Driftwood.Repo,
+  broadcaster: Samen.Web.Notifications.PubSubBroadcaster
+
+config :samen_web, Samen.Web.Notifications.PubSubBroadcaster, pubsub: Driftwood.PubSub
 
 # ADR-010 — the well-known OPERATOR org id (the SaaS company's own org). The operator
 # workspace (`/operator/accounts` · `/billing` · `/desk`) scopes to this org over its OWN book

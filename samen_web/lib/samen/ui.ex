@@ -443,10 +443,16 @@ defmodule Samen.UI do
     * `empty_text`  — the default zero-row copy, rendered as the title of the
       default `empty_state/1` (ADR-016 §5 — every `list_view` adopter gets the
       consistent empty state at zero cost; the `:empty` slot overrides it)
+    * `empty_icon` / `empty_body` — forwarded to the default `empty_state/1`
+      (WS-A design §3.1 / AC-G5-1: icon + message on every list's empty state)
 
   Slots: `:head` (the `<th>`s — use `sort_header/1` for sortable columns),
   `:row` (`:let={item}` — the `<td>`s for one record), `:bulk_bar`
-  (`:let={selected}` — replaces the default bulk-action buttons), `:empty`.
+  (`:let={selected}` — replaces the default bulk-action buttons), `:empty`,
+  `:empty_actions` (the surface's primary CREATE action, forwarded into the
+  default empty state's `:actions` — AC-G5-1's "wired CTA" half), and
+  `:empty_sample` (the load-sample-data affordance, forwarded into `:sample` —
+  the AC-G5-3 hook).
 
   ## Masking (LOAD-BEARING)
 
@@ -465,10 +471,14 @@ defmodule Samen.UI do
   attr :bulk_actions, :list, default: []
   attr :filter_placeholder, :string, default: "Filter…"
   attr :empty_text, :string, default: "Nothing here yet."
+  attr :empty_icon, :string, default: nil
+  attr :empty_body, :string, default: nil
   slot :head, required: true
   slot :row, required: true
   slot :bulk_bar
   slot :empty
+  slot :empty_actions, doc: "forwarded to the default empty_state's :actions (the create CTA)"
+  slot :empty_sample, doc: "forwarded to the default empty_state's :sample (load sample data)"
 
   def list_view(assigns) do
     assigns =
@@ -514,7 +524,10 @@ defmodule Samen.UI do
         <%= if @empty != [] do %>
           {render_slot(@empty)}
         <% else %>
-          <.empty_state class="list-empty" title={@empty_text} />
+          <.empty_state class="list-empty" title={@empty_text} body={@empty_body} icon={@empty_icon}>
+            <:actions :if={@empty_actions != []}>{render_slot(@empty_actions)}</:actions>
+            <:sample :if={@empty_sample != []}>{render_slot(@empty_sample)}</:sample>
+          </.empty_state>
         <% end %>
       <% else %>
         <.data_table>

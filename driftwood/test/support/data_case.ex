@@ -85,4 +85,5 @@ defmodule Driftwood.DataCase do
   defp driftwood_namespace(:billing), do: Driftwood.Billing
   defp driftwood_namespace(:support), do: Driftwood.Support
   defp driftwood_namespace(:marketing), do: Driftwood.Marketing
+  defp driftwood_namespace(:notifications), do: Driftwood.Primitives
 end

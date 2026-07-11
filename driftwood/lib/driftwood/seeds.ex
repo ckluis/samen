@@ -70,6 +70,15 @@ defmodule Driftwood.Seeds do
   @doc "The FIXED Blue Ridge Logistics tenant org id the dev seed populates."
   def blue_ridge_org_id, do: @blue_ridge_org_id
 
+  # WS-A A5 (demo coherence) — the JUST-ONBOARDED tenant org: an operator ACCOUNT exists
+  # (Lakeline Freight Co — seeded by `Driftwood.OperatorSeeds`), but the tenant plane is
+  # deliberately EMPTY, so opening it demonstrates the framework first-run checklist +
+  # kit empty states + the guarded sample-data offer. `dev_seed/0` seeds NOTHING for it.
+  @empty_org_id "b1112d00-0000-4000-8000-000000000006"
+
+  @doc "The deliberately-EMPTY (just-onboarded) tenant org id — first-run/empty-state demo."
+  def empty_org_id, do: @empty_org_id
+
   # ADR-013 §8.1 — the FIVE named brokerages (fixed uuids so dev links + tests are stable),
   # each fully populated across every module + plane. Varied name/lane/tier/MRR so the accounts
   # table, Portfolio aggregate, and dunning surface look alive (mixed health, ≥2 per cohort).
@@ -235,6 +244,13 @@ defmodule Driftwood.Seeds do
       # `samen:crm.person:<id>` ref so object unfurl is provable in the LIVE app (tenant clear /
       # operator ••••). Idempotent.
       seed_chat(seeded_org, spec)
+
+      # Notifications (WS-A A4/A5, demo coherence) — 3 curated ones per tenant through
+      # the REAL kernel engine (`Samen.Notifications.Engine.notify/1`: vault-routed body,
+      # audit, id-only broadcast), on TOP of the invoice.* notifications the wired kernel
+      # event sources already fired organically during the billing seed. One is marked
+      # read so the inbox shows a read/unread mix. Idempotent (own marker).
+      seed_notifications(seeded_org, spec)
     end)
   end
 
@@ -1174,6 +1190,99 @@ defmodule Driftwood.Seeds do
     |> Ash.create!()
 
     thread
+  end
+
+  # -- Notifications (WS-A A4/A5 — demo coherence) -----------------------------
+  #
+  # NOTE: the billing seeder above ALREADY produces notifications organically — the
+  # kernel's wired event sources (`Samen.Notifications.StatusChange`, config'd to
+  # `Driftwood.Primitives.Notification` in config.exs) fire on every seeded invoice
+  # state change. This seeder ADDS the three curated ones a live tenant would also
+  # see, through the SAME kernel engine (vault-routed body + audit + id-only
+  # broadcast): an SLA breach, a past-due invoice, and a chat mention whose
+  # `subject_ref` unfurls the tenant's own first contact (`samen:crm.person:<id>` →
+  # per-plane-masked object_card). The past-due one is marked READ so the inbox shows
+  # a read/unread mix. Idempotent (marker = the chat.mention event only THIS seeder
+  # writes — the organic invoice.* rows must not short-circuit it).
+  defp seed_notifications(org_id, spec) do
+    if notifications_seeded?(org_id) do
+      :ok
+    else
+      do_seed_notifications(org_id, spec)
+    end
+  end
+
+  defp notifications_seeded?(org_id) do
+    Driftwood.Primitives.Notification
+    |> Ash.Query.filter(org_id == ^org_id and event_type == "chat.mention")
+    |> Ash.exists?(authorize?: false)
+  rescue
+    _ -> false
+  end
+
+  defp do_seed_notifications(org_id, spec) do
+    person = first_person(org_id)
+    recipient_id = Ash.UUID.generate()
+    base = 4400 + rem(name_offset(org_id), 500)
+
+    engine_opts = [
+      notification_module: Driftwood.Primitives.Notification,
+      preference_module: Driftwood.Primitives.NotificationPreference,
+      repo: Driftwood.Repo
+    ]
+
+    {:ok, _} =
+      Samen.Notifications.Engine.notify(
+        %{
+          org_id: org_id,
+          recipient_id: recipient_id,
+          event_type: "sla.breach",
+          channel: :in_app,
+          rendered_body:
+            "SLA breached on \"Detention charge dispute — #{spec.prefix}-#{base + 2}\": " <>
+              "first response exceeded the 4h target."
+        },
+        engine_opts
+      )
+
+    {:ok, read_notification} =
+      Samen.Notifications.Engine.notify(
+        %{
+          org_id: org_id,
+          recipient_id: recipient_id,
+          event_type: "invoice.past_due",
+          channel: :in_app,
+          rendered_body:
+            "Invoice for the #{spec.lane} lane subscription is past due — " <>
+              "please review Billing → Invoices."
+        },
+        engine_opts
+      )
+
+    {:ok, _} =
+      Samen.Notifications.Engine.notify(
+        %{
+          org_id: org_id,
+          recipient_id: recipient_id,
+          event_type: "chat.mention",
+          channel: :in_app,
+          rendered_body:
+            "You were mentioned in \"Rate confirmation for load #{spec.prefix}-#{base + 1}\".",
+          subject_ref: person && "samen:crm.person:#{person.id}"
+        },
+        engine_opts
+      )
+
+    # Mark ONE read so the inbox shows a read/unread mix (badge = 2, not 3).
+    read_notification
+    |> Ash.Changeset.for_update(
+      :update,
+      %{read_at: DateTime.utc_now() |> DateTime.truncate(:second), status: :read},
+      authorize?: false
+    )
+    |> Ash.update!(authorize?: false)
+
+    :ok
   end
 
   defp tenant_slug(spec) do

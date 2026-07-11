@@ -102,6 +102,16 @@ defmodule DriftwoodWeb.Router do
       labels: Map.put(@current_org_labels, :crm_namespace, Driftwood.Crm)
     )
 
+    # WS-A A4/A5 — the framework NOTIFICATIONS inbox (+ /notifications/settings), mounted
+    # over Driftwood's Primitives mount (`Driftwood.Primitives.{Notification,
+    # NotificationPreference}`) in ONE line. The sidebar "Notifications" nav item the
+    # framework `module_nav/1` already renders now resolves (it was a dead link before this
+    # mount). Realtime rides `Driftwood.PubSub` (id-only envelopes; re-read-per-scope).
+    samen_notifications_routes(:notifications, Driftwood.Primitives,
+      repo: Driftwood.Repo,
+      labels: Map.put(@current_org_labels, :pubsub, Driftwood.PubSub)
+    )
+
     # ADR-012 — the FLAGSHIP cross-plane realtime CHAT, TENANT plane (the org's own chat
     # console — bodies + participant identities in the clear). The `:object_cards` label
     # registers Driftwood's bespoke `freight.driver` unfurl card (the vertical override seam);

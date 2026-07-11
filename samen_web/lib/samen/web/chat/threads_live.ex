@@ -198,7 +198,14 @@ defmodule Samen.Web.Chat.ThreadsLive do
                 <h3>Conversations</h3>
                 <span class="n">{length(@threads)}</span>
               </div>
-              <.data_table>
+              <.empty_state
+                :if={@threads == []}
+                class="threads-empty"
+                icon="❝"
+                title="No conversations yet."
+                body="Start a conversation above — it shows up here for both sides of the thread."
+              />
+              <.data_table :if={@threads != []}>
                 <:head>
                   <th style="width:50%">Subject</th>
                   <th style="width:20%">Kind</th>

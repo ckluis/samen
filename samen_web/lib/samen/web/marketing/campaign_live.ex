@@ -234,7 +234,12 @@ defmodule Samen.Web.Marketing.CampaignLive do
                 <span class="lane">· email via PiiResolution · {marketing_plane_note(@samen_mount)}</span>
               </div>
               <%= if @audience == [] do %>
-                <div class="card" style="padding:18px 20px;color:var(--muted)">No subscribers in the first segment yet.</div>
+                <.empty_state
+                  class="recipients-empty"
+                  icon="◔"
+                  title="No subscribers in the first segment yet."
+                  body="Add subscribers to the campaign's segment and they appear here as recipients."
+                />
               <% else %>
                 <.data_table>
                   <:head>

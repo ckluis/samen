@@ -227,7 +227,12 @@ defmodule Samen.Web.Billing.OverviewLive do
                 row_class="subscription-row"
                 filter_placeholder="Filter subscriptions…"
                 empty_text="No subscriptions yet."
+                empty_icon="↻"
+                empty_body="Subscriptions appear here once a customer is on a plan."
               >
+                <:empty_actions :if={writable?(@samen_mount)}>
+                  <.button variant="primary" phx-click="new_customer" id="empty-new-customer">New customer</.button>
+                </:empty_actions>
                 <:head>
                   <th scope="col" style="width:26%">Customer</th>
                   <th scope="col" style="width:16%">Plan</th>
