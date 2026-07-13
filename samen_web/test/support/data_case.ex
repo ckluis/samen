@@ -108,4 +108,5 @@ defmodule Samen.WebTest.DataCase do
   defp namespace(:support), do: Samen.WebTest.Support
   defp namespace(:marketing), do: Samen.WebTest.Marketing
   defp namespace(:notifications), do: Samen.WebTest.Primitives
+  defp namespace(:flags), do: Samen.WebTest.Primitives
 end

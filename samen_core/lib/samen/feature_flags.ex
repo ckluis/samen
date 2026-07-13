@@ -59,7 +59,13 @@ defmodule Samen.FeatureFlags do
 
   `subject` is a non-PII map (`%{org_id: ..., plan: ...}`) or a bare `org_id`
   binary. `opts` may carry `:flag_module` / `:repo` (DI seams; default to config)
-  and `:emit` (a 1-arity fn for the assignment seam — see `assignment_payload/3`).
+  and `:emit` (the assignment seam — see `assignment_payload/3`):
+
+    * a 1-arity fn — called with the payload (test/bespoke consumers);
+    * omitted — falls back to the CONFIGURED emitter, the B7 `track/1` wiring
+      point (`config :samen_core, Samen.FeatureFlags, emit: {Samen.Analytics,
+      :track}`); absent config, no emit;
+    * `false` — suppressed (the admin-preview path, `evaluate_config/4`).
   """
   @spec evaluate(String.t(), map() | String.t(), keyword()) :: Decision.t()
   def evaluate(flag_name, subject, opts \\ [])
@@ -87,6 +93,36 @@ defmodule Samen.FeatureFlags do
     # Belt: any unexpected error in evaluation is fail-SAFE, never fails open.
     e ->
       Logger.warning("[FeatureFlags] evaluate/2 raised, failing OFF: #{Exception.message(e)}")
+      Decision.off(:kill_switch)
+  end
+
+  @doc """
+  Evaluate a flag CONFIG directly — the cache-FREE preview path for the two-plane
+  flag admin (design §3.5 "evaluated state"; B6). Runs the SAME precedence pipeline
+  as `evaluate/2`, but the caller supplies the config map (e.g. built straight off
+  the `pff` row it is rendering), so an admin preview:
+
+    * never reads, warms, or poisons the shared ETS cache (the kill-switch staleness
+      bound stays owned by the WRITE path's `Cache.invalidate/1`), and
+    * never emits a `flag.assignment` event (`emit: false` unless the caller
+      explicitly overrides) — rendering an admin page is not an experiment exposure.
+
+  A `nil` config (unknown flag) is fail-SAFE OFF, exactly like `evaluate/2`.
+  """
+  @spec evaluate_config(String.t(), map() | nil, map() | String.t(), keyword()) :: Decision.t()
+  def evaluate_config(flag_name, config, subject, opts \\ [])
+
+  def evaluate_config(flag_name, config, org_id, opts) when is_binary(org_id),
+    do: evaluate_config(flag_name, config, %{org_id: org_id}, opts)
+
+  def evaluate_config(_flag_name, nil, _subject, _opts), do: Decision.off(:kill_switch)
+
+  def evaluate_config(flag_name, %{} = config, %{} = subject, opts) when is_binary(flag_name) do
+    opts = Keyword.put_new(opts, :emit, false)
+    decide(flag_name, config, subject, subject_key(subject), opts)
+  rescue
+    e ->
+      Logger.warning("[FeatureFlags] evaluate_config/4 raised, failing OFF: #{Exception.message(e)}")
       Decision.off(:kill_switch)
   end
 
@@ -232,10 +268,33 @@ defmodule Samen.FeatureFlags do
     }
   end
 
+  # The emit seam (design §3.4; AC-G6-8). Resolution: an explicit 1-arity fn wins;
+  # `emit: false` (the preview path) suppresses; otherwise the CONFIGURED emitter —
+  # the B7 track/1 wiring point — runs:
+  #
+  #     config :samen_core, Samen.FeatureFlags, emit: {Samen.Analytics, :track}
+  #
+  # so once B7's `track/1` lands, EVERY variant assignment flows into the `pae`
+  # product-analytics path with zero call-site changes.
   defp emit_assignment(flag_name, variant, subject, opts) do
-    case Keyword.get(opts, :emit) do
+    case Keyword.get(opts, :emit, :config) do
       fun when is_function(fun, 1) ->
         fun.(assignment_payload(flag_name, variant, subject))
+        :ok
+
+      :config ->
+        case configured_emitter() do
+          {mod, fun} when is_atom(mod) and is_atom(fun) ->
+            apply(mod, fun, [assignment_payload(flag_name, variant, subject)])
+            :ok
+
+          fun when is_function(fun, 1) ->
+            fun.(assignment_payload(flag_name, variant, subject))
+            :ok
+
+          _ ->
+            :ok
+        end
 
       _ ->
         :ok
@@ -243,6 +302,14 @@ defmodule Samen.FeatureFlags do
   rescue
     # The assignment seam is best-effort — it must never break evaluation.
     _ -> :ok
+  end
+
+  defp configured_emitter do
+    case Application.get_env(:samen_core, __MODULE__) do
+      opts when is_list(opts) -> Keyword.get(opts, :emit)
+      %{} = opts -> Map.get(opts, :emit)
+      _ -> nil
+    end
   end
 
   defp org_id_of(%{org_id: org_id}), do: org_id

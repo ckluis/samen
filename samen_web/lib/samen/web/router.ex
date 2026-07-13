@@ -144,6 +144,10 @@ defmodule Samen.Web.Router do
         live("#{path}/accounts/:id", Samen.Web.Operator.AccountDetailLive)
         live("#{path}/billing", Samen.Web.Operator.PlatformBillingLive)
         live("#{path}/revenue", Samen.Web.Operator.RevenueLive)
+        # The B6 platform flag admin (ADR-020 / AC-G6-7) — kill switch + ramp +
+        # targeting + per-org state; inherited at 0 vertical LOC. Wire the host's
+        # Primitives namespace via a `flags_namespace:` label to activate.
+        live("#{path}/flags", Samen.Web.Operator.FlagAdminLive)
         live("#{path}/desk", Samen.Web.Operator.DeskLive)
 
         if include_aggregate do
@@ -286,6 +290,66 @@ defmodule Samen.Web.Router do
   end
 
   @doc """
+  Mount the TENANT feature-flag admin (WS-B B6; ADR-020; design G6 §3.5) — the
+  `/flags` settings page where a tenant ADMIN toggles/ramps/targets their org's own
+  feature flags — in ONE line, on either plane.
+
+  `namespace` is the host's mounted PRIMITIVES namespace (the domain that `use`d
+  `Samen.Scopes.Primitives` — it materializes `FeatureFlag`, e.g.
+  `Demo.PrimitivesScope`, `Driftwood.Primitives`).
+
+      import Samen.Web.Router
+
+      # TENANT plane — the org's own flag settings (admin-gated writes).
+      samen_flags_routes :flags, Driftwood.Primitives, repo: Driftwood.Repo
+
+      # OPERATOR / impersonation plane — the SAME LiveView, read-only posture,
+      # reached through the impersonation bridge carrying the tenant org_id.
+      samen_flags_routes :flags, Driftwood.Primitives,
+        repo: Driftwood.Repo,
+        plane: :operator,
+        target_org_id: tenant_org_id,
+        path: "/operator/tenant-flags"
+
+  Writes are KERNEL-enforced (`OrgScope` + `RoleAtLeast :admin` + the
+  `NonPiiTargeting` write refusal); the UI posture is `writable?/1`. Options: as
+  `samen_notifications_routes/3` (`:repo` required; `:domain`, `:plane`,
+  `:operator_id`/`:target_org_id`, `:path` (default `/flags`), `:labels`,
+  `:session_name`).
+  """
+  defmacro samen_flags_routes(kind, namespace, opts \\ []) do
+    kind = Macro.expand(kind, __CALLER__)
+    path = Keyword.get(opts, :path, "/flags")
+    session_name = Keyword.get(opts, :session_name, session_name(:flags, path))
+
+    quote bind_quoted: [
+            kind: kind,
+            namespace: namespace,
+            opts: opts,
+            path: path,
+            session_name: session_name
+          ] do
+      _ = kind
+
+      mount =
+        Samen.Web.Mount.new(
+          :flags,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          plane: Samen.Web.Router.__plane__(opts),
+          labels: Keyword.get(opts, :labels)
+        )
+
+      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        for {sub_path, module} <- Samen.Web.Router.__routes__(:flags, path) do
+          live(sub_path, module)
+        end
+      end
+    end
+  end
+
+  @doc """
   Mount the framework SESSION endpoint that writes the current org (ADR-013 §4.3) in ONE line.
 
       import Samen.Web.Router
@@ -382,12 +446,20 @@ defmodule Samen.Web.Router do
     ]
   end
 
+  # WS-B B6 (ADR-020 §2 / design G6 §3.5) — the tenant flag-admin route table.
+  def __routes__(:flags, path) do
+    [
+      {"#{path}", Samen.Web.Flags.SettingsLive}
+    ]
+  end
+
   defp default_path(:crm), do: "/crm"
   defp default_path(:billing), do: "/billing"
   defp default_path(:support), do: "/support"
   defp default_path(:marketing), do: "/marketing"
   defp default_path(:chat), do: "/chat"
   defp default_path(:notifications), do: "/notifications"
+  defp default_path(:flags), do: "/flags"
 
   defp session_name(kind, path) do
     :"samen_#{kind}_#{path |> String.replace(~r/[^a-zA-Z0-9]/, "_") |> String.trim("_")}"

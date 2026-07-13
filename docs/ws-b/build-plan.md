@@ -136,6 +136,13 @@ B1→B2→B3 is the G7 chain (must serialize). B4 (G17) needs B1's `mov` for the
 - B4-P2-2: billing state `:unpaid` falls into the "unrecognized state" branch (band
   correctly capped, but explanation string doesn't flag it dunning-adjacent) — consider
   folding `:unpaid` into the dunning branch in the state map.
+- B6-N1: fold the B6 gate's foreign-id adversarial probes into a PERMANENT regression
+  test — drive toggle_flag/save_ramp/add_rule/kill_flag with a foreign org's flag id and
+  assert "Flag not found" + zero mutation (insurance against a refactor sourcing org_id
+  from event params instead of socket.assigns).
+- B6-N2: operator Re-enable uses toggle_flag (a flip, not idempotent) — a rapid
+  double-click after a kill flips back to disabled; consider an idempotent enable action
+  or interlock symmetry with the kill confirm.
 
 ---
 

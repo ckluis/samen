@@ -3189,10 +3189,22 @@
           "type": "Atom"
         },
         {
+          "column_name": "fff_target_rules",
+          "logical_name": "target_rules",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
+        },
+        {
           "column_name": "fff_updated_at",
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fff_variants",
+          "logical_name": "variants",
+          "pii": false,
+          "type": "Map"
         }
       ],
       "resource": "Driftwood.Primitives.FeatureFlag",

@@ -388,5 +388,69 @@ defmodule Samen.FeatureFlagsEngineTest do
       assert d.variant == nil
       refute_received {:assigned, _}
     end
+
+    # B6 UNIT 1 — the CONFIG-level emitter, the exact seam B7's track/1 plugs into:
+    #     config :samen_core, Samen.FeatureFlags, emit: {Samen.Analytics, :track}
+    # Zero call-site changes: every evaluate/2 with a variant assignment flows the
+    # bounded flag.assignment payload to the configured {mod, fun}.
+    test "the CONFIGURED emitter (B7 track/1 wiring point) receives the flag.assignment payload" do
+      Application.put_env(:samen_core, :flag_emit_probe, self())
+      Application.put_env(:samen_core, Samen.FeatureFlags, emit: {__MODULE__.EmitProbe, :track})
+
+      on_exit(fn ->
+        Application.delete_env(:samen_core, Samen.FeatureFlags)
+        Application.delete_env(:samen_core, :flag_emit_probe)
+      end)
+
+      opts = loader_opts(%{"exp" => cfg(rollout_pct: 100, variants: %{"a" => 50, "b" => 50})})
+
+      d = FeatureFlags.evaluate("exp", %{org_id: "org-cfg"}, opts)
+      assert d.on
+      assert d.variant in [:a, :b]
+
+      assert_received {:tracked, payload}
+
+      assert payload == %{
+               event: "flag.assignment",
+               flag_name: "exp",
+               variant: d.variant,
+               org_id: "org-cfg"
+             }
+    end
+
+    test "evaluate_config/4 (the admin PREVIEW path) matches evaluate/2 but NEVER emits, even with a configured emitter" do
+      Application.put_env(:samen_core, :flag_emit_probe, self())
+      Application.put_env(:samen_core, Samen.FeatureFlags, emit: {__MODULE__.EmitProbe, :track})
+
+      on_exit(fn ->
+        Application.delete_env(:samen_core, Samen.FeatureFlags)
+        Application.delete_env(:samen_core, :flag_emit_probe)
+      end)
+
+      config = cfg(rollout_pct: 100, variants: %{"a" => 50, "b" => 50})
+
+      # The preview decides without emitting…
+      preview = FeatureFlags.evaluate_config("exp", config, %{org_id: "org-prev"})
+      refute_received {:tracked, _}
+
+      # …and without touching the shared cache (a subsequent load still goes to the loader).
+      assert {:error, :not_warmed} = Cache.get("exp", loader: fn _ -> {:error, :not_warmed} end)
+
+      # Parity: the preview decision equals the cached-path decision (which DOES emit).
+      cached = FeatureFlags.evaluate("exp", %{org_id: "org-prev"}, loader_opts(%{"exp" => config}))
+      assert_received {:tracked, _}
+      assert preview == cached
+
+      # A nil config (unknown flag) previews fail-safe OFF.
+      assert %Decision{on: false, reason: :kill_switch} = FeatureFlags.evaluate_config("gone", nil, "org")
+    end
+  end
+
+  defmodule EmitProbe do
+    @moduledoc false
+    def track(payload) do
+      send(Application.get_env(:samen_core, :flag_emit_probe), {:tracked, payload})
+      :ok
+    end
   end
 end
