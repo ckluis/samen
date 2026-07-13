@@ -128,6 +128,15 @@ B1→B2→B3 is the G7 chain (must serialize). B4 (G17) needs B1's `mov` for the
 2. Full workstream adversarial re-gate: all suites + every ci.sh + full `mix samen.verify.*` chain + `--only adversarial` green; re-probe the 3-5 load-bearing cross-phase red-paths (reconciliation, flag stability, PII refusal, health masking, erasure) non-tautological with byte-exact restore + zero git residue (AC-X2). Write `docs/gate-ws-b.md`.
 **Gate:** workstream GO/NO-GO.
 
+**Carries into B9 (P2s deferred from phase gates, resolve or explicitly re-defer):**
+- B4-P2-1: `past_due` day-count computed from `utc_now` twice (Reads assembly vs render
+  `past_due_now?`) — a due-date crossing "now" between the two calls can momentarily
+  desync evidence flag and score. Hardening: thread the Reads-computed determination
+  through to the LiveView instead of recomputing.
+- B4-P2-2: billing state `:unpaid` falls into the "unrecognized state" branch (band
+  correctly capped, but explanation string doesn't flag it dunning-adjacent) — consider
+  folding `:unpaid` into the dunning branch in the state map.
+
 ---
 
 ## Estimated workflow-agent count

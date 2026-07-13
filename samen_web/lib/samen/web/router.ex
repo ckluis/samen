@@ -140,6 +140,8 @@ defmodule Samen.Web.Router do
 
       live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         live("#{path}/accounts", Samen.Web.Operator.AccountsLive)
+        # The B4 health drill-down (ADR-019 / AC-G17-4) — inherited at 0 vertical LOC.
+        live("#{path}/accounts/:id", Samen.Web.Operator.AccountDetailLive)
         live("#{path}/billing", Samen.Web.Operator.PlatformBillingLive)
         live("#{path}/revenue", Samen.Web.Operator.RevenueLive)
         live("#{path}/desk", Samen.Web.Operator.DeskLive)

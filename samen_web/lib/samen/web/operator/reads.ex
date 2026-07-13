@@ -38,6 +38,7 @@ defmodule Samen.Web.Operator.Reads do
   require Ash.Query
 
   alias Samen.Web.Mount
+  alias Samen.Web.Operator.HealthScore
 
   # A3 read-bounding (WS-A design §1.1 "read! elimination"): every join/lookup read on
   # the operator surfaces carries an explicit limit — the kit's hard page cap. These are
@@ -117,17 +118,25 @@ defmodule Samen.Web.Operator.Reads do
       admins_by_account: admins_by_account(mount, scope),
       subs_by_customer: subscriptions_by_customer(mount, scope),
       customers_by_account: customers_by_account(mount, scope, operator_org_id),
-      tickets_by_account: open_ticket_counts(mount, scope)
+      tickets_by_account: ticket_counts_by_account(mount, scope),
+      past_due_by_account: past_due_by_account(mount, scope)
     }
   end
 
+  # The assembled account row + its `%HealthScore.HealthBreakdown{}` (ADR-019). Every
+  # score input is a bounded count/enum/cent amount already on the row — the score is
+  # a pure fold over this map, never a second read. `__activity_days__` is the G12
+  # `pae` recency signal: nil (→ the `:unknown` activity factor, AC-G17-7) until G12
+  # emits — graceful, never faked.
   defp account_row(org, joins) do
     tenant_org_id = org.slug
     admins = Map.get(joins.admins_by_account, tenant_org_id, [])
     customer = Map.get(joins.customers_by_account, tenant_org_id)
     subscription = customer && Map.get(joins.subs_by_customer, customer.id)
+    tickets = Map.get(joins.tickets_by_account, tenant_org_id, %{open: 0, breaching: 0})
+    past_due = Map.get(joins.past_due_by_account, tenant_org_id, %{count: 0, amount_cents: 0, max_days_overdue: 0})
 
-    %{
+    row = %{
       id: org.id,
       name: org.name,
       plan: org.plan,
@@ -137,9 +146,13 @@ defmodule Samen.Web.Operator.Reads do
       __subscription__: subscription,
       __mrr_cents__: (subscription && subscription.__mrr_cents__) || 0,
       __seats__: length(admins),
-      __open_tickets__: Map.get(joins.tickets_by_account, tenant_org_id, 0),
-      __health__: health(subscription)
+      __open_tickets__: tickets.open,
+      __breaching_tickets__: tickets.breaching,
+      __past_due__: past_due,
+      __activity_days__: nil
     }
+
+    Map.put(row, :__health__, HealthScore.score(row))
   end
 
   defp empty_page(state) do
@@ -300,16 +313,79 @@ defmodule Samen.Web.Operator.Reads do
     e -> {:error, e}
   end
 
-  @doc "Non-PII operator summary metrics for the Accounts page header."
+  @doc "Non-PII operator summary metrics for the Accounts page header (bands per ADR-019)."
   def account_metrics(mount, scope, operator_org_id) do
     accounts = accounts(mount, scope, operator_org_id)
 
     %{
       accounts: length(accounts),
-      active: Enum.count(accounts, &(&1.__health__ == :healthy)),
-      at_risk: Enum.count(accounts, &(&1.__health__ == :at_risk)),
+      active: Enum.count(accounts, &(&1.__health__.band == :healthy)),
+      at_risk: Enum.count(accounts, &(&1.__health__.band in [:at_risk, :critical])),
       mrr_cents: Enum.reduce(accounts, 0, fn a, acc -> acc + a.__mrr_cents__ end)
     }
+  end
+
+  @doc """
+  Assemble ONE account's drill-down (WS-B / B4, AC-G17-4): the scored account row
+  (`%HealthScore.HealthBreakdown{}` on `__health__`), its `mov` movement timeline,
+  its desk tickets, and its invoices — the linked evidence behind each factor.
+
+  Every read is the EXISTING governed path: the account `Org` row is the same trusted
+  non-PII grouping read as `account_orgs/2` (explicit operator-namespace filter +
+  `limit(1)`); the `mov` timeline is an OrgScope'd, explicitly-bounded Ash read of
+  token-blind columns; tickets/invoices reuse the bounded `desk/2` / `invoices/2`
+  joins (requester PII resolves through `PiiResolution` per plane — CLEAR on the
+  operator's own tenant plane, `••••` on any odd operator-plane mount, AC-G17-5).
+
+  Returns `%{account:, movements:, tickets:, invoices:}` or `nil` (unknown account /
+  read error) — the LiveView renders "not found", never a crash.
+  """
+  def account_detail(mount, scope, operator_org_id, account_org_id) do
+    case find_account_org(mount, operator_org_id, account_org_id) do
+      nil ->
+        nil
+
+      org ->
+        row = account_row(org, account_joins(mount, scope, operator_org_id))
+        customer_id = row.__customer__ && row.__customer__.id
+
+        %{
+          account: row,
+          movements: movements_for_customer(mount, scope, customer_id),
+          tickets: desk(mount, scope) |> Enum.filter(&(&1.__requester_org_id__ == row.tenant_org_id)),
+          invoices: invoices(mount, scope) |> Enum.filter(&(&1.customer_id == customer_id))
+        }
+    end
+  rescue
+    _ -> nil
+  end
+
+  # The ONE account Org row — the same trusted non-PII grouping read as
+  # `account_orgs/2` (see the moduledoc), narrowed to one id, `limit(1)`.
+  defp find_account_org(mount, operator_org_id, account_org_id) do
+    Mount.resource(mount, Org)
+    |> Ash.Query.ensure_selected([:name, :slug, :plan, :org_id])
+    |> Ash.Query.filter(org_id == ^operator_org_id and id == ^account_org_id)
+    |> Ash.Query.limit(1)
+    |> Ash.read!(authorize?: false)
+    |> List.first()
+  rescue
+    _ -> nil
+  end
+
+  # The account's `mov` timeline (B1 ledger — token-blind ids/enums/cents/timestamps,
+  # AC-G7-3): OrgScope'd, newest first, explicitly bounded.
+  defp movements_for_customer(_mount, _scope, nil), do: []
+
+  defp movements_for_customer(mount, scope, customer_id) do
+    Mount.resource(mount, SubscriptionEvent)
+    |> Ash.Query.ensure_selected([:kind, :mrr_delta_cents, :mrr_before_cents, :mrr_after_cents, :occurred_at, :customer_id])
+    |> Ash.Query.filter(customer_id == ^customer_id)
+    |> Ash.Query.sort(occurred_at: :desc)
+    |> Ash.Query.limit(@lookup_limit)
+    |> Ash.read!(scope: scope)
+  rescue
+    _ -> []
   end
 
   # -- private: Identity --------------------------------------------------------
@@ -473,9 +549,11 @@ defmodule Samen.Web.Operator.Reads do
 
   # -- private: Support ---------------------------------------------------------
 
-  defp open_ticket_counts(mount, scope) do
+  # Per-account desk load: open (status open/pending) + SLA-breaching ticket counts —
+  # the support factor's bounded inputs (ADR-019). One pass over the bounded read.
+  defp ticket_counts_by_account(mount, scope) do
     Mount.resource(mount, Ticket)
-    |> Ash.Query.ensure_selected([:status, :custom])
+    |> Ash.Query.ensure_selected([:status, :breached, :custom])
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
     |> Enum.reduce(%{}, fn t, acc ->
@@ -484,11 +562,52 @@ defmodule Samen.Web.Operator.Reads do
           acc
 
         tid ->
-          if t.status in [:open, :pending], do: Map.update(acc, tid, 1, &(&1 + 1)), else: acc
+          acc
+          |> bump_count(tid, :open, t.status in [:open, :pending])
+          |> bump_count(tid, :breaching, t.breached == true)
       end
     end)
   rescue
     _ -> %{}
+  end
+
+  defp bump_count(acc, _tid, _key, false), do: acc
+
+  defp bump_count(acc, tid, key, true) do
+    Map.update(acc, tid, %{open: 0, breaching: 0} |> Map.put(key, 1), &Map.update!(&1, key, fn n -> n + 1 end))
+  end
+
+  # Per-account DUNNING evidence (the billing factor's inputs — the incoherence fix,
+  # AC-G17-2): count / amount / oldest-days-overdue of past-due invoices, grouped by
+  # the invoice customer's tenant_org_id back-reference. Reuses the bounded
+  # `invoices/2` read; day counts are computed HERE so the score stays clock-free.
+  defp past_due_by_account(mount, scope) do
+    now = DateTime.utc_now()
+
+    invoices(mount, scope)
+    |> Enum.filter(&past_due?(&1, now))
+    |> Enum.reduce(%{}, fn inv, acc ->
+      case get_in((inv.__customer__ && inv.__customer__.custom) || %{}, ["tenant_org_id"]) do
+        nil ->
+          acc
+
+        tid ->
+          days = div(max(DateTime.diff(now, inv.due_date), 0), 86_400)
+
+          Map.update(
+            acc,
+            tid,
+            %{count: 1, amount_cents: inv.amount_due_cents || 0, max_days_overdue: days},
+            fn pd ->
+              %{
+                count: pd.count + 1,
+                amount_cents: pd.amount_cents + (inv.amount_due_cents || 0),
+                max_days_overdue: max(pd.max_days_overdue, days)
+              }
+            end
+          )
+      end
+    end)
   end
 
   defp agents_by_id(mount, scope) do
@@ -551,11 +670,9 @@ defmodule Samen.Web.Operator.Reads do
 
   defp past_due?(_, _), do: false
 
-  # Health pill from subscription status (ADR-010 §4a minimal-viable).
-  defp health(nil), do: :unknown
-  defp health(%{status: :active}), do: :healthy
-  defp health(%{status: :past_due}), do: :at_risk
-  defp health(%{status: :cancelled}), do: :churned
-  defp health(%{status: :canceled}), do: :churned
-  defp health(_), do: :unknown
+  # NOTE (WS-B / B4): the old single-pill `health/1` (subscription status → pill,
+  # ADR-010 §4a minimal-viable) is GONE — it ignored past-due invoices (the
+  # gate-flagged health/dunning incoherence). `__health__` is now the composite
+  # `Samen.Web.Operator.HealthScore` breakdown (ADR-019), whose billing factor is
+  # dunning-aware by construction.
 end

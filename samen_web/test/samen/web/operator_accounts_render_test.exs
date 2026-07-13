@@ -35,7 +35,7 @@ defmodule Samen.Web.OperatorAccountsRenderTest do
     refute html =~ "••••"
   end
 
-  test "MRR + seats + health join from the operator Billing scope", %{seed: seed} do
+  test "MRR + seats + health join from the operator Billing scope (ADR-019 composite, dunning-coherent)", %{seed: seed} do
     mount = build_operator_mount(seed.operator_org_id)
     html = render_live(Samen.Web.Operator.AccountsLive, mount, [])
 
@@ -43,9 +43,18 @@ defmodule Samen.Web.OperatorAccountsRenderTest do
     assert html =~ "$499.00"
     # Platform-MRR metric card is present and non-zero.
     assert html =~ "Platform MRR"
-    # Health pills: account 1 (active) healthy, account 2 (past_due) at-risk.
-    assert html =~ "healthy"
-    assert html =~ "at risk"
+
+    # THE INCOHERENCE FIX (AC-G17-2, the gate-flagged case): EVERY seeded account
+    # carries a past-due invoice — including account 1, whose subscription is
+    # :active. The old status pill rendered it "healthy" while Billing showed
+    # dunning; the ADR-019 composite may not. The health pills carry band + score
+    # and NO healthy pill exists on the page.
+    assert html =~ ~r/>\s*at risk ·\s*\d+\s*</
+    refute html =~ ~r/>\s*healthy ·/
+
+    # The health pill IS the drill-down link (AC-G17-4).
+    assert html =~ "account-drill"
+    assert html =~ "/operator/accounts/"
   end
 
   test "each account offers the two-grade drill-in (ADR-013 §5.2 — act-as + impersonate)", %{seed: seed} do

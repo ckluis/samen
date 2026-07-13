@@ -155,14 +155,14 @@ defmodule Samen.Web.Operator.AccountsLive do
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="Healthy" value={@metrics && @metrics.active || 0} sub="active subscriptions">
+            <.metric label="Healthy" value={@metrics && @metrics.active || 0} sub="healthy band · dunning-coherent">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
               </:icon>
             </.metric>
-            <.metric label="At risk" value={@metrics && @metrics.at_risk || 0} sub="past-due / dunning">
+            <.metric label="At risk" value={@metrics && @metrics.at_risk || 0} sub="at-risk + critical bands">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                   <path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" />
@@ -244,7 +244,16 @@ defmodule Samen.Web.Operator.AccountsLive do
                   </td>
                   <td class="a-plan" style="color:var(--muted)">{a.plan || "—"}</td>
                   <td class="a-health">
-                    <.pill variant={health_variant(a.__health__)}>{health_label(a.__health__)}</.pill>
+                    <a
+                      class="account-drill"
+                      href={"/operator/accounts/#{a.id}"}
+                      title="Health drill-down — why this score (ADR-019)"
+                      style="text-decoration:none"
+                    >
+                      <.pill variant={health_variant(a.__health__.band)}>
+                        {health_label(a.__health__.band)} · {a.__health__.score}
+                      </.pill>
+                    </a>
                   </td>
                   <td class="a-seats" style="color:var(--muted)">{a.__seats__}</td>
                   <td class="a-mrr" style="color:var(--muted)">{dollars(a.__mrr_cents__)}</td>
@@ -305,13 +314,18 @@ defmodule Samen.Web.Operator.AccountsLive do
     |> String.upcase()
   end
 
+  # The ADR-019 composite bands (the old status-only pill is gone — it disagreed
+  # with dunning; `__health__` is now the `HealthScore` breakdown and the pill
+  # links to the drill-down that explains it).
   defp health_variant(:healthy), do: "ok"
+  defp health_variant(:watch), do: "info"
   defp health_variant(:at_risk), do: "warn"
-  defp health_variant(:churned), do: "bad"
+  defp health_variant(:critical), do: "bad"
   defp health_variant(_), do: "mut"
 
   defp health_label(:healthy), do: "healthy"
+  defp health_label(:watch), do: "watch"
   defp health_label(:at_risk), do: "at risk"
-  defp health_label(:churned), do: "churned"
+  defp health_label(:critical), do: "critical"
   defp health_label(_), do: "unknown"
 end
