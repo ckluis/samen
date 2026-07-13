@@ -67,6 +67,8 @@ defmodule Samen.Web.OperatorContextTest do
 
     assert "/operator/accounts" in paths
     assert "/operator/billing" in paths
+    # WS-B / B3: the revenue page is declared IN the macro — verticals inherit at 0 LOC.
+    assert "/operator/revenue" in paths
     assert "/operator/desk" in paths
     # aggregate is NOT mounted by default (a host usually wires its own vertical-shaped loader).
     refute "/operator/aggregate" in paths

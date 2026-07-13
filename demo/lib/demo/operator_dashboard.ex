@@ -74,6 +74,31 @@ defmodule Demo.OperatorDashboard do
   end
 
   @doc """
+  The framework `RevenueLive` cross-tenant MRR-by-plan loader (WS-B / B3, AC-G7-9) —
+  wired as `revenue_plan_loader: {Demo.OperatorDashboard, :revenue_plan_cohorts, []}`
+  on an operator mount's labels.
+
+  Reads ONLY through the token-blind `Samen.Aggregate.read_all/2` chokepoint, so the
+  T4.5 k-anonymity floor has ALREADY run when this function sees a row: a plan cohort
+  with `tenant_count < k` arrives with `mrr_cents` = `%Samen.Aggregate.Suppressed{}`
+  and is passed through UNTOUCHED (the framework renders it `⊘`; nothing here — or
+  downstream — un-suppresses). Returns `[%{plan:, tenant_count:, mrr_cents:}]`
+  (the `RevenueLive` plan-cohort shape); `[]` on read error, never a raw fallback.
+  """
+  @spec revenue_plan_cohorts() :: [map()]
+  def revenue_plan_cohorts do
+    case Samen.Aggregate.read_all(MrrByTier) do
+      {:ok, rows} ->
+        Enum.map(rows, fn r ->
+          %{plan: r.tier, tenant_count: r.tenant_count, mrr_cents: r.mrr_cents}
+        end)
+
+      {:error, _reason} ->
+        []
+    end
+  end
+
+  @doc """
   Cross-tenant support-queue depth by status. Returns `{:ok, [%{status, depth}]}` —
   read ONLY through the token-blind aggregate domain, with the T4.5 k-anonymity +
   l-diversity floors applied. A status cohort that is too small (`depth < k`) or too

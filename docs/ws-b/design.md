@@ -53,7 +53,7 @@ Attach a new kernel change `Samen.Billing.SubscriptionMovement` to `Billing.Subs
 
 ### 1.3 Decision — rollup rows, not live scan, for the waterfall (ADR-018)
 
-Movements over months = a rollup. Register a `RevenueRollup` (abbrev `mrr`, table `mrr_revenue_rollup`) as a **domain-sourced** `Samen.Rollup.Spec` — which forces the ADR-007 `:source` generalization decision. **ADR-018 decides: implement the `:source` dimension now** (WS-B is the "3rd vertical-shaped" trigger ADR-007 waited for — a movement-sum rollup differently shaped from settlement/subscription sums). The rollup recomputes per-period `{new, expansion, contraction, churn, reactivation}` sums from the `mov` ledger (a domain table), and the erasure arm recomputes subject-free after a subject's `mov` rows are shredded (post-shred the period sums simply lose that subject's deltas — subject-free by construction).
+Movements over months = a rollup. Register a revenue rollup (table `mrr_revenue_rollup` — as shipped in B2, a RAW table on the `rol` precedent: `mrr` is its column prefix, not a registry abbrev; no Ash resource fronts it) as a **domain-sourced** `Samen.Rollup.Spec` — which forces the ADR-007 `:source` generalization decision. **ADR-018 decides: implement the `:source` dimension now** (WS-B is the "3rd vertical-shaped" trigger ADR-007 waited for — a movement-sum rollup differently shaped from settlement/subscription sums). The rollup recomputes per-period `{new, expansion, contraction, churn, reactivation}` sums from the `mov` ledger (a domain table), and the erasure arm recomputes subject-free after a subject's `mov` rows are shredded (post-shred the period sums simply lose that subject's deltas — subject-free by construction).
 
 - Rollup grain: `(org_id, period_month, mov_kind)` → `sum(mov_mrr_delta_cents)`, `count`.
 - Read path: `Samen.Web.Operator.RevenueReads` marks itself `use Samen.Cdc.Analytics`-equivalent for the rollup table (a report module, never-read-current-clean since the rollup is Postgres-primary, not the CDC mirror — the analytics marker convention applies to the report, the rollup lives in the primary repo).
@@ -237,7 +237,7 @@ New kernel/aggregate resources (each an append-only `"abbrev": "Module"` row in 
 | Abbrev | Owner (demo reference host) | Role |
 |---|---|---|
 | `mov` | `Demo.BillingScope.SubscriptionEvent` | append-only subscription-change ledger (movement rows) |
-| `mrr` | `Demo.Aggregate.RevenueRollup` | domain-sourced revenue-movement rollup table |
+| — (`mrr` = column prefix only, NOT a registry row) | raw table `mrr_revenue_rollup` (shipped B2 per the `rol_daily_event_count` precedent — no Ash resource, no abbrev-registry row) | domain-sourced revenue-movement rollup table |
 | `hsc` | `Demo.Analytics.HealthScoreRollup` | (optional) materialized per-account health snapshot if score is rolled up rather than live-computed |
 | `ffa` | `Demo.PrimitivesScope.FlagAssignment` | (only if variant assignments persist beyond the `pae` event; else omit — assignment lives in `pae`) |
 | `pae` | `Demo.Analytics.ProductEvent` | governed product-analytics event ledger (token-blind) |

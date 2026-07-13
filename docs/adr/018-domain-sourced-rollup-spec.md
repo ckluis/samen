@@ -21,7 +21,7 @@ WS-B's `RevenueRollup` is exactly that trigger: a **movement-sum** rollup over t
 
 ## 2 · Decision
 
-**Implement the `:source` dimension on `Samen.Rollup.Spec` now, and register `RevenueRollup` (abbrev `mrr`) as a `source: :domain` spec.** Today's specs become explicitly `source: :aud_event` (unchanged behavior). A `source: :domain` spec:
+**Implement the `:source` dimension on `Samen.Rollup.Spec` now, and register the revenue rollup (table `mrr_revenue_rollup`) as a `source: :domain` spec.** As shipped, the rollup follows the `rol_daily_event_count` RAW-table precedent exactly: no Ash resource fronts it, and `mrr` is its COLUMN PREFIX, not an abbrev-registry row (only Ash resources take registry abbrevs — a raw rollup table is catalogued in `tam_table`/`fld_field` and allow-listed via the spec's `bounded_columns`). Today's specs become explicitly `source: :aud_event` (unchanged behavior). A `source: :domain` spec:
 
 - recomputes its `{delete_sql, insert_sql}` over domain tables (the `mov` ledger), grain `(org_id, period_month, mov_kind) → sum(mov_mrr_delta_cents), count`;
 - takes the erasure REBUILD arm that recomputes AFTER the subject's domain rows are erased — post-shred the subject's `mov` rows are already gone, so the recomputed period sums are subject-free by construction (exactly what `Driftwood.Aggregate.Rebuild` does manually today), with NO dependence on the `aud_event` `raw_retained?` check.

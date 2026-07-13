@@ -78,7 +78,9 @@ defmodule Samen.Web.Router do
   `namespace` is the host's OPERATOR namespace (a domain that mounted Identity + Billing +
   Support blueprints — e.g. `Driftwood.Operator`). The macro builds ONE operator-plane mount
   (`scope_kind: :operator`) carrying the operator org id in its labels, threads it through a
-  `live_session`, and declares all operator routes (Accounts · Platform billing · Desk).
+  `live_session`, and declares all operator routes (Accounts · Platform billing · Revenue ·
+  Desk) — a WS-B surface added here (e.g. Revenue, B3) is inherited by every vertical that
+  already calls the macro at 0 new LiveView lines (AC-X1).
 
       import Samen.Web.Router
 
@@ -139,6 +141,7 @@ defmodule Samen.Web.Router do
       live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         live("#{path}/accounts", Samen.Web.Operator.AccountsLive)
         live("#{path}/billing", Samen.Web.Operator.PlatformBillingLive)
+        live("#{path}/revenue", Samen.Web.Operator.RevenueLive)
         live("#{path}/desk", Samen.Web.Operator.DeskLive)
 
         if include_aggregate do

@@ -1,34 +1,22 @@
-defmodule Demo.Repo.Migrations.AddRevenueRollup do
+defmodule Samen.WebTest.Repo.Migrations.AddRevenueRollup do
   @moduledoc """
-  WS-B / Phase B2 (ADR-018): the DOMAIN-SOURCED revenue-movement rollup
-  (`mrr_revenue_rollup`) — a RAW rollup table on the `rol_daily_event_count`
-  precedent: NO Ash resource fronts it, and `mrr` is its COLUMN PREFIX, not an
-  abbrev-registry row (the `@resource` below is the tam_table catalog's logical
-  name, not a module). Grain
-  `(org_id, period_month, mov_kind) → sum(mrr_delta_cents), count`, recomputed from
-  the `mov` subscription-movement ledger (a DOMAIN table, ADR-017), NOT from
-  `aud_event`. This is the ADR-007 `:source :domain` generalization made real:
-  the erasure REBUILD arm deletes the subject's `mov` rows then recomputes this
-  rollup subject-free (AC-G7-7 — proven by the destruction oracle).
+  WS-B / Phase B3: the `mrr_revenue_rollup` RAW rollup table for the samen_web scratch
+  test DB — the SAME shape as the demo's B2 table (ADR-018), so the framework
+  `Samen.Web.Operator.RevenueReads` (which reads this table bounded, never a live
+  movement scan) has real rows to render in the operator revenue tests.
 
-  Catalogued in the SAME transaction (ADR-004 catalog-in-tx), mirroring the
-  `rol_daily_event_count` DDL shape.
+  The `rol_daily_event_count` precedent: a RAW table — NO Ash resource fronts it, NO
+  abbrev-registry row (`mrr` is the column prefix, not an abbrev). Catalogued in the
+  same transaction (ADR-004 catalog-in-tx) under the framework logical name, mirroring
+  the rol precedent's `Samen.Rollup.*` naming.
 
-  Token-blind by construction: every column is a bounded id (uuid), a period bucket
-  (date), a bounded enum (kind as text), a signed integer (cents), a count, a
-  boolean, or a timestamp — there is NO plaintext PII type. The `no_plaintext_pii`
-  Rollup CI tier asserts exactly that over the `bounded_columns` allow-list.
-
-    * `mrr_subject_column`/`mrr_suppressed` — a domain rollup is subject-free
-      aggregate by construction (its grain is period/kind, it carries NO per-subject
-      column), so the ADR-018 domain arm never uses these. They are OMITTED from the
-      spec (`subject_column: nil`); the erasure hook is the ledger-side
-      `subject_delete_sql`. `mrr_suppressed` is carried physically only so a future
-      operator-driven period suppression has a column, but no arm flips it today.
+  Token-blind by construction: every column is a bounded id, a period bucket, a
+  bounded enum (kind as text), a signed integer (cents), a count, a boolean, or a
+  timestamp — no plaintext PII type.
   """
   use Ecto.Migration
 
-  @resource "Demo.Aggregate.RevenueRollup"
+  @resource "Samen.Rollup.RevenueRollup"
   @table "mrr_revenue_rollup"
   @fields [
     {"mrr_id", "id", "UUID"},

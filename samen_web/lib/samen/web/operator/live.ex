@@ -1,8 +1,9 @@
 defmodule Samen.Web.Operator.Live do
   @moduledoc """
   Shared operator-workspace LiveView helpers: mount assignment (re-exported from
-  `Samen.Web.Live`) and the operator sidebar with the four-tab operator nav
-  (Accounts · Platform billing · Desk · Portfolio — ADR-010 §7.1).
+  `Samen.Web.Live`) and the operator sidebar with the operator nav
+  (Accounts · Platform billing · Revenue · Desk · Portfolio — ADR-010 §7.1; Revenue is
+  the WS-B / B3 G7 surface).
 
   The operator workspace is host-agnostic: its title/glyph come from `mount.labels` with
   neutral defaults, exactly as the CRM/Billing/Support sidebars (ADR-009). The nav is the
@@ -65,6 +66,11 @@ defmodule Samen.Web.Operator.Live do
         <.nav_item label="Platform billing" href="/operator/billing" active={@active == :billing}>
           <:icon>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+          </:icon>
+        </.nav_item>
+        <.nav_item label="Revenue" href="/operator/revenue" active={@active == :revenue}>
+          <:icon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 17l6-6 4 4 8-8" /><path d="M14 7h7v7" /></svg>
           </:icon>
         </.nav_item>
         <.nav_item label="Desk" href="/operator/desk" active={@active == :desk}>
