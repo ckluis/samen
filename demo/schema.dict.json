@@ -2745,10 +2745,22 @@
           "type": "Atom"
         },
         {
+          "column_name": "pff_target_rules",
+          "logical_name": "target_rules",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
+        },
+        {
           "column_name": "pff_updated_at",
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pff_variants",
+          "logical_name": "variants",
+          "pii": false,
+          "type": "Map"
         }
       ],
       "resource": "Demo.PrimitivesScope.FeatureFlag",

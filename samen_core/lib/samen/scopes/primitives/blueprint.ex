@@ -598,12 +598,38 @@ defmodule Samen.Scopes.Primitives.Blueprint do
             constraints: [one_of: [:beta, :ga, :deprecated, :archived]]
           )
 
+          # Targeting rules (bounded jsonb list). Each rule keys ONLY off governed
+          # NON-PII attributes (org_id, plan, tier, stage, role, region) — a rule
+          # keyed on a PII-classified attribute is REFUSED at write by the
+          # NonPiiTargeting validation (ADR-020 §2 decision 3; G6 RP-F3).
+          attribute(:target_rules, {:array, :map}, public?: true, default: [])
+
+          # Multivariate variants (bounded name→weight map) for the experiment seam
+          # (ADR-020 §7 / design §3.4). Empty for a plain on/off flag.
+          attribute(:variants, :map, public?: true, default: %{})
+
           # Opaque metadata for integration-specific flag config.
           attribute(:metadata, :map, public?: true, default: %{})
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          defaults([:read, :destroy])
+
+          create :create do
+            primary?(true)
+            accept(:*)
+            # RP-F3: refuse a target rule keyed on a PII-classified attribute
+            # (name/email/phone/…) at the WRITE boundary — by construction, a PII
+            # subject key can NEVER reach evaluate/2.
+            validate(Samen.FeatureFlags.NonPiiTargeting)
+          end
+
+          update :update do
+            primary?(true)
+            require_atomic?(false)
+            accept(:*)
+            validate(Samen.FeatureFlags.NonPiiTargeting)
+          end
         end
 
         policies do

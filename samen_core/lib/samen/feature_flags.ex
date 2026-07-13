@@ -1,0 +1,302 @@
+defmodule Samen.FeatureFlags do
+  @moduledoc """
+  The feature-flag evaluation engine (ADR-020; design G6 §3). A pure, deterministic
+  function over governed flag config + a NON-PII subject scope — the kernel rollout /
+  kill-switch / targeting lever every plane and every API/worker path uses. Web-dep
+  free: ETS + a GenServer cache, no Phoenix.
+
+  ## `evaluate/2`
+
+      Samen.FeatureFlags.evaluate("billing.invoice_pdf", %{org_id: org_id, plan: "pro"})
+      #=> %Samen.FeatureFlags.Decision{on: true, variant: nil, reason: :rollout_in}
+
+  The subject scope is a map of BOUNDED, NON-PII keys — `org_id` (the bucketing
+  subject), plus optional targeting keys (`plan`, `tier`, `stage`, `role`, `region`).
+  A bare `org_id` string is accepted as shorthand (`evaluate(flag, org_id)`).
+
+  ## Precedence (fixed, short-circuiting — ADR-020 §2, design §3.2)
+
+      kill-switch  >  explicit deny  >  explicit allow  >  targeting rules
+                   >  percentage bucket  >  default
+
+    1. **Kill switch** — `enabled == false` → OFF, `reason: :kill_switch`. The
+       incident lever; short-circuits everything. Fail-SAFE: a flag the engine
+       cannot CONFIRM on (cache/lookup error, unknown flag) is likewise OFF.
+    2. **Explicit deny** — a `then: "deny"` rule that matches → OFF, `reason: :deny`.
+    3. **Explicit allow** — a `then: "allow"` rule that matches → ON, `reason: :allow`.
+    4. **Targeting** — the first `then: "on"/"off"/<variant>` rule that matches
+       (non-PII keys only, enforced at write) → `reason: :targeted`.
+    5. **Percentage bucket** — deterministic `phash2({flag, subject}, 10_000)` bucket
+       `< rollout_pct` → ON `:rollout_in`, else OFF `:rollout_out`.
+    6. **Default** — no rule/rollout applied → the flag's default gate `:default`.
+
+  ## Determinism + monotonic ramp (RP-F1)
+
+  Bucketing is `:erlang.phash2({flag_name, subject_key}, 10_000) / 100.0`. Keying on
+  `{flag, subject}` makes the same `(flag, org)` bucket IDENTICALLY forever — raising
+  `rollout_pct` only ever ADDS orgs (off→on), never reshuffles — and makes different
+  flags bucket independently (no correlated exposure). `phash2` is deterministic
+  across processes and restarts; replacing it with `:rand` breaks the stability
+  property (the RP-F1 sabotage).
+
+  ## Cache (RP-F4 fail-safe)
+
+  Config is read from `Samen.FeatureFlags.Cache` (ETS). On ANY cache/lookup error the
+  engine returns OFF for a flag it cannot confirm ON — it NEVER fails open. The kill
+  switch bypasses cache staleness: `Cache.get/2` is write-through-invalidated on flag
+  write, and a disabled flag resolves OFF within one broadcast hop (design §3.3).
+  """
+
+  require Logger
+
+  alias Samen.FeatureFlags.{Cache, Decision, TargetRule}
+
+  @bucket_space 10_000
+
+  @doc """
+  Evaluate a flag for a subject scope. Returns a `%Decision{}`; always succeeds
+  (fail-SAFE — OFF on any error).
+
+  `subject` is a non-PII map (`%{org_id: ..., plan: ...}`) or a bare `org_id`
+  binary. `opts` may carry `:flag_module` / `:repo` (DI seams; default to config)
+  and `:emit` (a 1-arity fn for the assignment seam — see `assignment_payload/3`).
+  """
+  @spec evaluate(String.t(), map() | String.t(), keyword()) :: Decision.t()
+  def evaluate(flag_name, subject, opts \\ [])
+
+  def evaluate(flag_name, org_id, opts) when is_binary(org_id) do
+    evaluate(flag_name, %{org_id: org_id}, opts)
+  end
+
+  def evaluate(flag_name, %{} = subject, opts) when is_binary(flag_name) do
+    subject_key = subject_key(subject)
+
+    case Cache.get(flag_name, opts) do
+      {:ok, nil} ->
+        # Unknown flag — fail SAFE (cannot confirm ON).
+        Decision.off(:kill_switch)
+
+      {:ok, config} ->
+        decide(flag_name, config, subject, subject_key, opts)
+
+      {:error, _reason} ->
+        # RP-F4: cache unavailable / poisoned → OFF, never fails open.
+        Decision.off(:kill_switch)
+    end
+  rescue
+    # Belt: any unexpected error in evaluation is fail-SAFE, never fails open.
+    e ->
+      Logger.warning("[FeatureFlags] evaluate/2 raised, failing OFF: #{Exception.message(e)}")
+      Decision.off(:kill_switch)
+  end
+
+  # The bounded non-PII bucketing subject. org_id is the canonical subject; a caller
+  # may pass an explicit :subject_key (a per-org stable token) instead. NEVER a PII
+  # field (targeting keys are non-PII by construction; the subject key is an id).
+  defp subject_key(%{subject_key: key}) when not is_nil(key), do: to_string(key)
+  defp subject_key(%{org_id: org_id}) when not is_nil(org_id), do: to_string(org_id)
+  defp subject_key(_), do: ""
+
+  # ---------------------------------------------------------------------------
+  # The precedence pipeline (fixed order; short-circuits).
+  # ---------------------------------------------------------------------------
+
+  defp decide(flag_name, config, subject, subject_key, opts) do
+    cond do
+      # (1) KILL SWITCH — enabled == false short-circuits everything.
+      not truthy?(config[:enabled]) ->
+        Decision.off(:kill_switch)
+
+      true ->
+        rules = TargetRule.parse(config[:target_rules])
+        eval_targeting(flag_name, config, subject, subject_key, rules, opts)
+    end
+  end
+
+  defp eval_targeting(flag_name, config, subject, subject_key, rules, opts) do
+    # (2) explicit DENY beats (3) explicit ALLOW beats (4) targeting (first match).
+    denies = Enum.filter(rules, &(&1.then == :deny))
+    allows = Enum.filter(rules, &(&1.then == :allow))
+    targets = Enum.reject(rules, &(&1.then in [:deny, :allow]))
+
+    cond do
+      match = TargetRule.first_match(denies, subject) ->
+        TargetRule.decide(match)
+
+      match = TargetRule.first_match(allows, subject) ->
+        maybe_assign(flag_name, config, subject, subject_key, TargetRule.decide(match), opts)
+
+      match = TargetRule.first_match(targets, subject) ->
+        maybe_assign(flag_name, config, subject, subject_key, TargetRule.decide(match), opts)
+
+      true ->
+        # (5) percentage bucket, then (6) default.
+        eval_rollout(flag_name, config, subject, subject_key, opts)
+    end
+  end
+
+  defp eval_rollout(flag_name, config, subject, subject_key, opts) do
+    rollout = rollout_pct(config)
+
+    decision =
+      cond do
+        rollout >= 100 -> %Decision{on: true, reason: :default}
+        rollout <= 0 -> %Decision{on: false, reason: :rollout_out}
+        bucket(flag_name, subject_key) < rollout -> %Decision{on: true, reason: :rollout_in}
+        true -> %Decision{on: false, reason: :rollout_out}
+      end
+
+    maybe_assign(flag_name, config, subject, subject_key, decision, opts)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Deterministic bucketing (RP-F1 / RP-F2).
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  The deterministic subject bucket in `0.0..100.0` for `{flag_name, subject_key}`.
+  Org-stable (same inputs → same bucket forever, across processes and restarts) and
+  flag-independent. This is the load-bearing determinism RP-F1 sabotages.
+  """
+  @spec bucket(String.t(), String.t()) :: float()
+  def bucket(flag_name, subject_key) do
+    :erlang.phash2({flag_name, subject_key}, @bucket_space) / 100.0
+  end
+
+  # ---------------------------------------------------------------------------
+  # Variant assignment (weighted deterministic — the experiment seam, design §3.4).
+  # ---------------------------------------------------------------------------
+
+  # When ON and the flag has variants and no variant is already set, assign one
+  # deterministically (weighted bucketing on the SAME stable hash) and, if an :emit
+  # fn is supplied, emit the assignment payload. The emit CALL SITE to track/1 lands
+  # in B7; UNIT 1 asserts the assignment DECISION + payload.
+  defp maybe_assign(flag_name, config, subject, subject_key, %Decision{on: true} = decision, opts) do
+    variants = normalize_variants(config[:variants])
+
+    cond do
+      not is_nil(decision.variant) ->
+        decision
+
+      variants == [] ->
+        decision
+
+      true ->
+        variant = assign_variant(flag_name, subject_key, variants)
+        assigned = %{decision | variant: variant}
+        emit_assignment(flag_name, variant, subject, opts)
+        assigned
+    end
+  end
+
+  defp maybe_assign(_flag_name, _config, _subject, _subject_key, decision, _opts), do: decision
+
+  @doc """
+  Deterministically assign a variant by weighted bucketing on the stable hash.
+  Same `{flag, subject}` → same variant forever. `variants` is a list of
+  `{name_atom, weight_number}`.
+  """
+  @spec assign_variant(String.t(), String.t(), [{atom(), number()}]) :: atom()
+  def assign_variant(flag_name, subject_key, variants) do
+    total = variants |> Enum.map(&elem(&1, 1)) |> Enum.sum()
+    # Reuse the stable [0,100) bucket, scaled to the total weight.
+    point = bucket(flag_name, subject_key) / 100.0 * total
+
+    variants
+    |> Enum.reduce_while({point, nil}, fn {name, weight}, {remaining, _} ->
+      if remaining < weight do
+        {:halt, {remaining, name}}
+      else
+        {:cont, {remaining - weight, name}}
+      end
+    end)
+    |> case do
+      {_, nil} -> variants |> List.last() |> elem(0)
+      {_, name} -> name
+    end
+  end
+
+  @doc """
+  The bounded, NON-PII assignment payload emitted into the G12 product-analytics
+  path (design §3.4): `%{event: "flag.assignment", flag_name, variant, org_id}`. All
+  fields are config-defined names + a bounded org id — no subject PII. UNIT 1 builds
+  and asserts this payload; the `track/1` emit call site lands in B7.
+  """
+  @spec assignment_payload(String.t(), atom(), map() | String.t()) :: map()
+  def assignment_payload(flag_name, variant, subject) do
+    %{
+      event: "flag.assignment",
+      flag_name: flag_name,
+      variant: variant,
+      org_id: org_id_of(subject)
+    }
+  end
+
+  defp emit_assignment(flag_name, variant, subject, opts) do
+    case Keyword.get(opts, :emit) do
+      fun when is_function(fun, 1) ->
+        fun.(assignment_payload(flag_name, variant, subject))
+
+      _ ->
+        :ok
+    end
+  rescue
+    # The assignment seam is best-effort — it must never break evaluation.
+    _ -> :ok
+  end
+
+  defp org_id_of(%{org_id: org_id}), do: org_id
+  defp org_id_of(org_id) when is_binary(org_id), do: org_id
+  defp org_id_of(_), do: nil
+
+  # ---------------------------------------------------------------------------
+  # Config coercion helpers (config comes from ETS as a plain map).
+  # ---------------------------------------------------------------------------
+
+  defp truthy?(true), do: true
+  defp truthy?(_), do: false
+
+  defp rollout_pct(config) do
+    case config[:rollout_pct] do
+      n when is_integer(n) -> clamp(n)
+      n when is_float(n) -> clamp(trunc(n))
+      _ -> 0
+    end
+  end
+
+  defp clamp(n) when n < 0, do: 0
+  defp clamp(n) when n > 100, do: 100
+  defp clamp(n), do: n
+
+  # variants may arrive as %{"a" => 50, "b" => 50} (jsonb) or a keyword list.
+  # Normalize to a stable-ordered [{atom, number}] list.
+  defp normalize_variants(nil), do: []
+  defp normalize_variants(v) when v == %{}, do: []
+
+  defp normalize_variants(v) when is_map(v) do
+    v
+    |> Enum.map(fn {k, w} -> {to_atom(k), to_number(w)} end)
+    |> Enum.filter(fn {_k, w} -> w > 0 end)
+    |> Enum.sort_by(fn {k, _w} -> to_string(k) end)
+  end
+
+  defp normalize_variants(v) when is_list(v) do
+    v
+    |> Enum.map(fn {k, w} -> {to_atom(k), to_number(w)} end)
+    |> Enum.filter(fn {_k, w} -> w > 0 end)
+    |> Enum.sort_by(fn {k, _w} -> to_string(k) end)
+  end
+
+  defp normalize_variants(_), do: []
+
+  defp to_atom(k) when is_atom(k), do: k
+
+  defp to_atom(k) when is_binary(k) do
+    String.to_existing_atom(k)
+  rescue
+    ArgumentError -> String.to_atom(k)
+  end
+
+  defp to_number(w) when is_number(w), do: w
+  defp to_number(_), do: 0
+end
