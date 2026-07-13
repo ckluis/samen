@@ -51,11 +51,11 @@ op-todo (human operator task).
 
 | # | Gap (cluster) | Lens | Delta in one clause | Joy | Effort | Layer | Tier |
 |---|---|---|---|---|---|---|---|
-| G1 | **Real CRUD + list ergonomics** | end-user, harden | Most LiveViews read-only; no pagination/sort/filter/bulk anywhere incl. JSON:API (unbounded reads) | H | M | web+kernel | P0 |
-| G2 | **Delivery engine + notifications inbox** | end-user, harden, operator | Marketing send is a no-op stub; `Notification` resource has no inbox/engine/prefs; SLA breach is a silent state flip; kernel `Send.:create_checked` hardcodes `msp_suppression` | H | M | kernel+web | P0 |
-| G3 | **PII classifier: heuristic → mechanism** | harden | "Provably non-PII" is name/type heuristic + allowlist; freeform strings leak to the aggregate plane by naming | H (trust) | M | kernel | P0 |
+| G1 | **Real CRUD + list ergonomics** | end-user, harden | Most LiveViews read-only; no pagination/sort/filter/bulk anywhere incl. JSON:API (unbounded reads) | H | M | web+kernel | ✅ shipped (WS-A) |
+| G2 | **Delivery engine + notifications inbox** | end-user, harden, operator | Marketing send is a no-op stub; `Notification` resource has no inbox/engine/prefs; SLA breach is a silent state flip; kernel `Send.:create_checked` hardcodes `msp_suppression` | H | M | kernel+web | ✅ shipped (WS-A) |
+| G3 | **PII classifier: heuristic → mechanism** | harden | "Provably non-PII" is name/type heuristic + allowlist; freeform strings leak to the aggregate plane by naming | H (trust) | M | kernel | ✅ shipped (WS-A phase A1) |
 | G4 | **Generator catch-up (web/API/seed scaffolds)** | builder | gen.app emits headless data layer only; no resource/scope generators; JSON:API + seeds + observability wiring all hand-copied | H | M | gen | P0 |
-| G5 | **Onboarding + empty states + first-run** | end-user | Inconsistent empty states, no first-run, no in-app sample data | H | M | web | P1 |
+| G5 | **Onboarding + empty states + first-run** | end-user | Inconsistent empty states, no first-run, no in-app sample data | H | M | web | ✅ shipped (WS-A) |
 | G6 | **Feature-flag evaluation engine** | operator, harden | Flags are config rows nothing evaluates; no bucketing/targeting/rollout; experiments absent | H | S/M | kernel+web | P1 |
 | G7 | **Revenue analytics (MRR movements)** | operator | Snapshot MRR only; no movements/churn/cohorts/NRR | H | M | web | P1 |
 | G8 | **Tenant lifecycle admin** | operator | No provision/suspend/offboard/export/delete actions from the operator plane | H | M | web+kernel | P1 |
@@ -88,6 +88,7 @@ KMS+DynamoDB+S3-ObjectLock, ClickHouse ClickPipes activation, Stripe live keys, 
 ## Workstream candidates (gated, framework-first, one at a time)
 
 ### WS-A — "Product Reality" (G1 + G2 + G5, riders G3-adjacent masking tests) ← RECOMMENDED FIRST
+> **✅ SHIPPED 2026-07-13** — all 5 phases (A1–A5) gated GO; workstream-wide adversarial gate GO: `docs/gate-ws-a.md`.
 Turn the read-only demonstration into a product a tenant can actually use:
 real CRUD on every mounted LiveView (kit-level form/table primitives so verticals inherit),
 pagination/sort/filter/bulk as kit defaults + JSON:API `default_limit`, a real outbound email

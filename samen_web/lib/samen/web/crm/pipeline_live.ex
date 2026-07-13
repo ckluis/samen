@@ -74,18 +74,10 @@ defmodule Samen.Web.CRM.PipelineLive do
           <.crm_sidebar mount={@samen_mount} org_id={@org_id} active={:crm_pipeline} return_to={@return_to} />
         </:sidebar>
 
-        <.topbar title="Pipeline" crumbs={crumbs(@samen_mount, @org_id, "Pipeline")}>
-          <:actions>
-            <.button variant="primary">
-              <:icon>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                  <path d="M12 3v18M3 12h18" />
-                </svg>
-              </:icon>
-              New opportunity
-            </.button>
-          </:actions>
-        </.topbar>
+        <%!-- No create CTA: the pipeline is a read-only kanban LENS over opportunities
+             (no UI create flow exists). A primary button with no phx-click is the exact
+             decorative-CTA defect AC-G1-1 eliminates (gate WSA-GATE2-P2-01). --%>
+        <.topbar title="Pipeline" crumbs={crumbs(@samen_mount, @org_id, "Pipeline")} />
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 

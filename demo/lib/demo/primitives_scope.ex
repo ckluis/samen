@@ -71,6 +71,7 @@ defmodule Demo.PrimitivesScope.NonPiiSetup do
   | pff_feature_flag   | pff_name           | Flag name/identifier — not subject data            |
   | pff_feature_flag   | pff_description    | Description text — operator-authored               |
   | pnt_notification   | pnt_event_type     | Event type string — bounded label, not subject PII |
+  | npr_notification_preference | npr_event_type | Event type string — bounded label, not subject PII |
   """
 
   @non_pii_columns [
@@ -85,7 +86,8 @@ defmodule Demo.PrimitivesScope.NonPiiSetup do
     {"pwh_webhook", "pwh_label", "Operator-authored endpoint label — not subject identity. T3.7."},
     {"pff_feature_flag", "pff_name", "Flag name identifier — not subject data. T3.7."},
     {"pff_feature_flag", "pff_description", "Operator-authored flag description — not subject data. T3.7."},
-    {"pnt_notification", "pnt_event_type", "Event type string (bounded label, e.g. 'invoice.created') — not subject PII. T3.7."}
+    {"pnt_notification", "pnt_event_type", "Event type string (bounded label, e.g. 'invoice.created') — not subject PII. T3.7."},
+    {"npr_notification_preference", "npr_event_type", "Event type string (bounded namespaced label, e.g. 'invoice.created') that a per-recipient dispatch preference governs — not subject PII. A4 (notification-preference mount); two-reviewer non_pii! parity with pnt_event_type."}
   ]
 
   @doc "Register Primitives non-PII columns. Idempotent."

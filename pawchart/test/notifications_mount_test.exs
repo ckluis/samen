@@ -21,8 +21,6 @@ defmodule PawChart.NotificationsMountTest do
   """
   use PawChart.DataCase, async: false
 
-  require Ash.Query
-
   alias Samen.Notifications.Engine
   alias Samen.Web.Mount
   alias Samen.Web.Notifications.InboxLive

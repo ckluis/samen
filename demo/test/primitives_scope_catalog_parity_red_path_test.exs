@@ -16,6 +16,15 @@ defmodule Demo.PrimitivesScopeCatalogParityRedPathTest do
   alias Mix.Tasks.Samen.Verify.CatalogParity
   alias Samen.Scopes.Primitives.SearchIndexGuard
 
+  @primitives_resources [
+    Demo.PrimitivesScope.Notification,
+    Demo.PrimitivesScope.NotificationPreference,
+    Demo.PrimitivesScope.File,
+    Demo.PrimitivesScope.SearchIndex,
+    Demo.PrimitivesScope.Webhook,
+    Demo.PrimitivesScope.FeatureFlag
+  ]
+
   # =========================================================================
   # Catalog parity — GREEN when all Primitives columns are catalogued
   # =========================================================================
@@ -178,5 +187,63 @@ defmodule Demo.PrimitivesScopeCatalogParityRedPathTest do
     # Probe: temporarily modified get_pii_fields/1 to return []. Red path test
     # above FLIPPED to FAILING. Reverted. Green.
     assert true, "Anti-tautology probe documented above"
+  end
+
+  # =========================================================================
+  # C4 pii_classify — the A4 npr_notification_preference freeform column
+  # (WSA-GATE-01 regression guard)
+  # =========================================================================
+
+  describe "C4 pii_classify — npr_event_type clearance (ADR-015 / AC-G3-4)" do
+    # A4 (commit a94f09f) added npr_notification_preference to the Primitives mount.
+    # Its npr_event_type is a freeform Ash.Type.String column that the ADR-015
+    # default-deny classifier FLAGS until the demo triage clears it via two-reviewer
+    # non_pii! (Demo.PrimitivesScope.NonPiiSetup), exactly like pnt_event_type on the
+    # notification table. This test is the red-path guard for that clearance: it fails
+    # if the clearance is ever dropped OR if the classifier regresses.
+    test "npr_event_type is default-denied without clearance, then cleared (WSA-GATE-01)" do
+      # RED PATH: with NO clearances registered, the default-deny classifier flags
+      # npr_event_type (freeform String). This assertion FAILS if the classifier
+      # ever stops flagging uncleared freeform columns.
+      uncleared =
+        @primitives_resources
+        |> Samen.PiiClassify.scan_resources(MapSet.new(), [])
+        |> Enum.map(& &1.column_name)
+
+      assert "npr_event_type" in uncleared,
+             "default-deny must flag the uncleared npr_event_type freeform column, got: " <>
+               inspect(Enum.sort(uncleared))
+
+      # GREEN: with the demo Primitives triage clearances registered, npr_event_type
+      # (and its pnt_event_type sibling) are cleared and no longer flag.
+      :ok = Demo.PrimitivesScope.NonPiiSetup.register_all()
+      entries = Samen.NonPii.entries()
+
+      remaining =
+        @primitives_resources
+        |> Samen.PiiClassify.scan_resources(MapSet.new(), entries)
+        |> Enum.map(& &1.column_name)
+
+      refute "npr_event_type" in remaining,
+             "npr_event_type must be cleared by NonPiiSetup.register_all/0, still flagged in: " <>
+               inspect(Enum.sort(remaining))
+
+      refute "pnt_event_type" in remaining,
+             "pnt_event_type sibling must remain cleared, still flagged in: " <>
+               inspect(Enum.sort(remaining))
+
+      # CI stance: the committed schema.dict.json baseline + clearances make the
+      # mix samen.verify.pii_classify gate green over the full Primitives mount.
+      baseline =
+        Samen.PiiClassify.load_baseline(
+          Path.join(Path.expand("../", __DIR__), "schema.dict.json")
+        )
+
+      violations =
+        Mix.Tasks.Samen.Verify.PiiClassify.check(@primitives_resources, baseline, entries)
+
+      assert violations == [],
+             "C4 pii_classify found unclassified Primitives PII: #{inspect(violations)}"
+    end
   end
 end
