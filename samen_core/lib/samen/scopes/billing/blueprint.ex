@@ -144,7 +144,17 @@ defmodule Samen.Scopes.Billing.Blueprint do
   # Subscription — active/inactive billing subscription. Org-scoped. No PII.
   # Belongs to a customer + plan.
   # ---------------------------------------------------------------------------
-  defmacro define_subscription(module, otp_app, domain, repo, abbrev, customer_mod, plan_mod) do
+  defmacro define_subscription(
+             module,
+             otp_app,
+             domain,
+             repo,
+             abbrev,
+             customer_mod,
+             plan_mod,
+             event_mod,
+             price_mod
+           ) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -203,6 +213,19 @@ defmodule Samen.Scopes.Billing.Blueprint do
         # F3.2 same-org FK: a subscription may only reference a same-org customer/plan.
         changes do
           change({Samen.Policy.SameOrgFk, relationships: [:customer, :plan]})
+
+          # WS-B / G7 (ADR-017): the movement-capture seam. On every subscription
+          # create/update, append ONE bounded, non-PII `mov` row via the pure
+          # MovementClassifier — best-effort (an append failure NEVER aborts the
+          # subscription write; the state is load-bearing, the ledger rides along),
+          # exactly like the Invoice StatusChange seam. Verticals inherit emission
+          # at 0 LOC (the change is on the kernel blueprint).
+          change(
+            {Samen.Billing.SubscriptionMovement,
+             event_resource: unquote(event_mod),
+             plan_resource: unquote(plan_mod),
+             price_resource: unquote(price_mod)}
+          )
         end
 
         policies do
@@ -605,6 +628,148 @@ defmodule Samen.Scopes.Billing.Blueprint do
           policy action_type([:create, :update, :destroy]) do
             forbid_unless(Samen.Policy.OrgScope)
             forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
+            authorize_if(always())
+          end
+        end
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # SubscriptionEvent (`mov`) — the append-only subscription-movement ledger
+  # (WS-B / G7; ADR-017). One row per subscription create/update, appended by the
+  # `Samen.Billing.SubscriptionMovement` change. Token-blind by construction: every
+  # column is a bounded id / enum / integer / timestamp — NO PII. Org-scoped.
+  # Belongs (soft ref, id only) to a subscription/customer/plan.
+  # ---------------------------------------------------------------------------
+  defmacro define_subscription_event(module, otp_app, domain, repo, abbrev) do
+    quote do
+      defmodule unquote(module) do
+        @moduledoc """
+        Billing.SubscriptionEvent (`mov`) — the append-only subscription-movement
+        ledger (ADR-017; WS-B / G7 revenue analytics). One row is appended per
+        subscription create/update by `Samen.Billing.SubscriptionMovement`, carrying
+        the movement `kind` (new/expansion/contraction/churn/reactivation/noop), the
+        SIGNED `mrr_delta_cents`, and the `mrr_before_cents`/`mrr_after_cents` so the
+        ledger reconciles without a re-join to price history (Invariant R1).
+
+        ## Append-only
+
+        No `:update` / `:destroy` action is exposed — a movement is an immutable
+        historical fact. Rows shred via the standard rollup erasure arm (subject-keyed
+        on `customer_id`), never mutated in place.
+
+        ## No PII by construction
+
+        Every column is a bounded id (uuid ref), an enum, a signed integer, or a
+        timestamp — the same discipline as `Samen.WideEvent`. A name/email/freeform
+        string CANNOT enter a `mov` row; the resource carries no `pii do` block and no
+        plain string attribute. This is what lets `mov` mirror cleanly through the
+        vault-excluded CDC projection and feed cross-tenant revenue tiers under the
+        k-anon floors without a masking fork (ADR-017 §3).
+
+        Org-scoped: `OrgScope` read + admin-gated create (the change writes with
+        `authorize?: false` as a framework emit, like the notifications engine).
+        """
+        use Samen.Resource,
+          otp_app: unquote(otp_app),
+          domain: unquote(domain),
+          data_layer: AshPostgres.DataLayer,
+          authorizers: [Ash.Policy.Authorizer],
+          abbrev: unquote(abbrev)
+
+        postgres do
+          table("#{unquote(abbrev)}_subscription_event")
+          repo(unquote(repo))
+        end
+
+        attributes do
+          # Bounded soft refs (id only — NOT belongs_to, so a shredded/deleted
+          # subscription never blocks the immutable historical row). No FK cascade:
+          # the ledger outlives the mutable subscription row it describes.
+          attribute(:subscription_id, :uuid, public?: true, allow_nil?: false)
+          attribute(:customer_id, :uuid, public?: true)
+          attribute(:plan_id, :uuid, public?: true)
+          attribute(:from_plan_id, :uuid, public?: true)
+
+          # The classified movement kind (bounded enum — from MovementClassifier).
+          attribute(:kind, :atom,
+            public?: true,
+            allow_nil?: false,
+            constraints: [
+              one_of: [:new, :expansion, :contraction, :churn, :reactivation, :noop]
+            ]
+          )
+
+          # The reconciliation quantity: signed MRR delta + self-contained before/after.
+          attribute(:mrr_delta_cents, :integer, public?: true, allow_nil?: false, default: 0)
+          attribute(:mrr_before_cents, :integer, public?: true, allow_nil?: false, default: 0)
+          attribute(:mrr_after_cents, :integer, public?: true, allow_nil?: false, default: 0)
+
+          # The from/to status pair the movement was classified from (bounded enums —
+          # auditability of the classification without a re-derivation).
+          attribute(:from_status, :atom,
+            public?: true,
+            constraints: [
+              one_of: [:active, :inactive, :trialing, :past_due, :cancelled, :unpaid]
+            ]
+          )
+
+          attribute(:to_status, :atom,
+            public?: true,
+            constraints: [
+              one_of: [:active, :inactive, :trialing, :past_due, :cancelled, :unpaid]
+            ]
+          )
+
+          # The bounded reason for the movement (why the row exists).
+          attribute(:reason, :atom,
+            public?: true,
+            default: :status_change,
+            constraints: [
+              one_of: [:status_change, :price_change, :backfill_snapshot]
+            ]
+          )
+
+          attribute(:occurred_at, :utc_datetime, public?: true, allow_nil?: false)
+        end
+
+        actions do
+          # Append-only: read + a bounded create action ONLY. No update/destroy — a
+          # movement is an immutable fact. (Erasure shreds via the rollup arm, not a
+          # per-row destroy exposed to callers.)
+          defaults([:read])
+
+          create :append do
+            accept([
+              :subscription_id,
+              :customer_id,
+              :plan_id,
+              :from_plan_id,
+              :kind,
+              :mrr_delta_cents,
+              :mrr_before_cents,
+              :mrr_after_cents,
+              :from_status,
+              :to_status,
+              :reason,
+              :occurred_at,
+              :org_id
+            ])
+          end
+        end
+
+        policies do
+          policy action_type(:read) do
+            authorize_if(Samen.Policy.OrgScope)
+          end
+
+          # Append is admin-gated on the tenant plane; the framework change writes
+          # with authorize?: false (a system-emitted row, like the notifications
+          # engine), so this gate governs any DIRECT caller.
+          policy action_type(:create) do
+            forbid_unless(Samen.Policy.OrgScope)
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
             authorize_if(always())
           end
         end

@@ -46,7 +46,8 @@ defmodule Samen.WebTest.Operator do
       invoice: "wpi",
       payment: "wpy",
       usage: "wpu",
-      entitlement: "wpe"
+      entitlement: "wpe",
+      subscription_event: "wpv"
     }
 
   use Samen.Scopes.Support,

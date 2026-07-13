@@ -90,7 +90,9 @@ defmodule Samen.Gen.App do
       invoice: prefix <> "i",
       payment: prefix <> "y",
       usage: prefix <> "u",
-      entitlement: prefix <> "e"
+      entitlement: prefix <> "e",
+      # WS-B / G7 (ADR-017): the append-only subscription-movement ledger (`mov`).
+      subscription_event: prefix <> "v"
     }
 
     agg_abbrev = prefix <> "a"
@@ -263,7 +265,17 @@ defmodule Samen.Gen.App do
   # ------------------------------------------------------------------ helpers
 
   defp billing_resource_order,
-    do: [:customer, :subscription, :plan, :price, :invoice, :payment, :usage, :entitlement]
+    do: [
+      :customer,
+      :subscription,
+      :plan,
+      :price,
+      :invoice,
+      :payment,
+      :usage,
+      :entitlement,
+      :subscription_event
+    ]
 
   defp billing_module(:customer), do: "Customer"
   defp billing_module(:subscription), do: "Subscription"
@@ -273,6 +285,7 @@ defmodule Samen.Gen.App do
   defp billing_module(:payment), do: "Payment"
   defp billing_module(:usage), do: "Usage"
   defp billing_module(:entitlement), do: "Entitlement"
+  defp billing_module(:subscription_event), do: "SubscriptionEvent"
 
   @doc false
   # The template variable bindings. Every `<%= key %>` in a template is replaced by
@@ -299,7 +312,8 @@ defmodule Samen.Gen.App do
       "bi" => ba.invoice,
       "by" => ba.payment,
       "bu" => ba.usage,
-      "be" => ba.entitlement
+      "be" => ba.entitlement,
+      "bv" => ba.subscription_event
     }
   end
 

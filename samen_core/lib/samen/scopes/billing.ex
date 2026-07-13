@@ -86,7 +86,9 @@ defmodule Samen.Scopes.Billing do
     invoice: "bin",
     payment: "bpy",
     usage: "bus",
-    entitlement: "ben"
+    entitlement: "ben",
+    # WS-B / G7 (ADR-017): the append-only subscription-movement ledger.
+    subscription_event: "mov"
   }
 
   @doc false
@@ -112,6 +114,7 @@ defmodule Samen.Scopes.Billing do
     payment_mod = Module.concat(namespace, Payment)
     usage_mod = Module.concat(namespace, Usage)
     entitlement_mod = Module.concat(namespace, Entitlement)
+    subscription_event_mod = Module.concat(namespace, SubscriptionEvent)
 
     quote do
       require Samen.Scopes.Billing.Blueprint
@@ -126,6 +129,7 @@ defmodule Samen.Scopes.Billing do
         resource(unquote(payment_mod))
         resource(unquote(usage_mod))
         resource(unquote(entitlement_mod))
+        resource(unquote(subscription_event_mod))
       end
 
       # Materialize resource modules in the host namespace. Each is a normal Samen
@@ -146,7 +150,18 @@ defmodule Samen.Scopes.Billing do
         unquote(repo),
         unquote(abbrevs.subscription),
         unquote(customer_mod),
-        unquote(plan_mod)
+        unquote(plan_mod),
+        unquote(subscription_event_mod),
+        unquote(price_mod)
+      )
+
+      # WS-B / G7 (ADR-017): the append-only subscription-movement ledger (`mov`).
+      Samen.Scopes.Billing.Blueprint.define_subscription_event(
+        unquote(subscription_event_mod),
+        unquote(otp_app),
+        unquote(domain),
+        unquote(repo),
+        unquote(abbrevs.subscription_event)
       )
 
       Samen.Scopes.Billing.Blueprint.define_plan(

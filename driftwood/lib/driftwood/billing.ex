@@ -42,6 +42,7 @@ defmodule Driftwood.Billing do
       invoice: "fbi",
       payment: "fby",
       usage: "fbu",
-      entitlement: "fbe"
+      entitlement: "fbe",
+      subscription_event: "fbv"
     }
 end

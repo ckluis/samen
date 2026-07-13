@@ -260,7 +260,8 @@ defmodule Samen.Gen.Templates do
           invoice: "<%= bi %>",
           payment: "<%= by %>",
           usage: "<%= bu %>",
-          entitlement: "<%= be %>"
+          entitlement: "<%= be %>",
+          subscription_event: "<%= bv %>"
         }
     end
     """
@@ -898,7 +899,7 @@ defmodule Samen.Gen.Templates do
     ~S'''
     defmodule <%= module %>.Repo.Migrations.AppResources do
       @moduledoc """
-      Creates <%= module %>'s Billing scope (abbrevs <%= bc %>/<%= bs %>/<%= bl %>/<%= bp %>/<%= bi %>/<%= by %>/<%= bu %>/<%= be %>)
+      Creates <%= module %>'s Billing scope (abbrevs <%= bc %>/<%= bs %>/<%= bl %>/<%= bp %>/<%= bi %>/<%= by %>/<%= bu %>/<%= be %>/<%= bv %>)
       mounted AS-IS, the authored vertical table (<%= resource_table %> with the scalar vault
       field pii_<%= abbrev %>_secret), and the token-blind aggregate projection (<%= agg_table %>),
       and catalogs every resource in the SAME migration transaction (ADR-004 catalog-in-tx).
@@ -914,6 +915,7 @@ defmodule Samen.Gen.Templates do
         <%= module %>.Billing.Payment,
         <%= module %>.Billing.Usage,
         <%= module %>.Billing.Entitlement,
+        <%= module %>.Billing.SubscriptionEvent,
         <%= module %>.Vertical.Record,
         <%= module %>.Aggregate.RecordCountBySegment
       ]
@@ -1139,6 +1141,27 @@ defmodule Samen.Gen.Templates do
           add(:<%= be %>_updated_at, :utc_datetime, null: false)
         end
 
+        # ---- Subscription-movement ledger (`mov`; ADR-017) — append-only, no PII,
+        #      soft id refs (no FK: the immutable ledger outlives its subscription row) ----
+        create table(:<%= bv %>_subscription_event, primary_key: false) do
+          add(:<%= bv %>_subscription_id, :uuid, null: false)
+          add(:<%= bv %>_customer_id, :uuid)
+          add(:<%= bv %>_plan_id, :uuid)
+          add(:<%= bv %>_from_plan_id, :uuid)
+          add(:<%= bv %>_kind, :text, null: false)
+          add(:<%= bv %>_mrr_delta_cents, :integer, null: false, default: 0)
+          add(:<%= bv %>_mrr_before_cents, :integer, null: false, default: 0)
+          add(:<%= bv %>_mrr_after_cents, :integer, null: false, default: 0)
+          add(:<%= bv %>_from_status, :text)
+          add(:<%= bv %>_to_status, :text)
+          add(:<%= bv %>_reason, :text, default: "status_change")
+          add(:<%= bv %>_occurred_at, :utc_datetime, null: false)
+          add(:<%= bv %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+          add(:<%= bv %>_org_id, :uuid, null: false)
+          add(:<%= bv %>_inserted_at, :utc_datetime, null: false)
+          add(:<%= bv %>_updated_at, :utc_datetime, null: false)
+        end
+
         # ---- Authored vertical table (the "20%") ----
         create table(:<%= resource_table %>, primary_key: false) do
           # Scalar pii_ vault field → column pii_<%= abbrev %>_secret (vt_* token):
@@ -1172,6 +1195,8 @@ defmodule Samen.Gen.Templates do
 
         drop(table(:<%= agg_table %>))
         drop(table(:<%= resource_table %>))
+
+        drop(table(:<%= bv %>_subscription_event))
 
         drop(constraint(:<%= be %>_entitlement, "<%= be %>_entitlement_<%= be %>_plan_id_fkey"))
         drop(constraint(:<%= be %>_entitlement, "<%= be %>_entitlement_<%= be %>_subscription_id_fkey"))

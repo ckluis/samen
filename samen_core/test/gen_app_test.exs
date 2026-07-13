@@ -39,24 +39,30 @@ defmodule Samen.Gen.AppTest do
                invoice: "wgi",
                payment: "wgy",
                usage: "wgu",
-               entitlement: "wge"
+               entitlement: "wge",
+               # WS-B / G7 (ADR-017): the subscription-movement ledger (`mov`).
+               subscription_event: "wgv"
              }
 
       assert s.agg_abbrev == "wga"
       assert s.agg_table == "wga_record_count"
     end
 
-    test "reserved_pairs covers the 8 billing + aggregate + authored abbrevs (10 total)" do
+    test "reserved_pairs covers the 9 billing + aggregate + authored abbrevs (11 total)" do
       pairs = Gen.reserved_pairs(spec())
       abbrevs = Enum.map(pairs, &elem(&1, 0))
 
-      assert length(pairs) == 10
+      # 9 billing resources (incl. the `mov` subscription-movement ledger, ADR-017)
+      # + aggregate + authored = 11.
+      assert length(pairs) == 11
       assert "wid" in abbrevs
       assert "wga" in abbrevs
       assert "wgc" in abbrevs
+      assert "wgv" in abbrevs
       assert {"wid", "Widgetco.Vertical.Record"} in pairs
       assert {"wga", "Widgetco.Aggregate.RecordCountBySegment"} in pairs
       assert {"wgc", "Widgetco.Billing.Customer"} in pairs
+      assert {"wgv", "Widgetco.Billing.SubscriptionEvent"} in pairs
     end
   end
 
