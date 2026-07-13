@@ -89,6 +89,30 @@ defmodule Samen.RollupTest do
     end
   end
 
+  # --- (b') :domain-source helpers (the synthetic movx_ledger / mrx rollup) ---
+
+  defp seed_ledger(subject_id, org_id, kind, delta) do
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "INSERT INTO movx_ledger (movx_org_id, movx_subject_id, movx_kind, movx_delta_cents) VALUES ($1, $2, $3, $4)",
+      [Ecto.UUID.dump!(org_id), Ecto.UUID.dump!(subject_id), kind, delta]
+    )
+
+    :ok
+  end
+
+  defp mrx_delta(subject_id) do
+    %{rows: rows} =
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "SELECT COALESCE(SUM(mrx_delta_cents),0)::int FROM mrx_movement_rollup WHERE mrx_subject_id::text = $1",
+        [subject_id]
+      )
+
+    [[sum]] = rows
+    sum
+  end
+
   # ======================================================================
   # (a) FRAMEWORK — rebuild_all materialises the rollup from raw events
   # ======================================================================
@@ -248,6 +272,160 @@ defmodule Samen.RollupTest do
   end
 
   # ======================================================================
+  # (b') THE ERASURE POLICY — :domain source (ADR-018)
+  # ======================================================================
+
+  describe "(b') source: :domain — the ADR-018 domain-sourced REBUILD arm" do
+    # A synthetic domain ledger (`movx_ledger`) + a movement-sum rollup
+    # (`mrx_movement_rollup`) keyed on the subject id — the generalized shape the
+    # revenue rollup uses, proven here in the kernel over a scratch table so the
+    # :domain arm is exercised independently of the demo host wiring.
+    setup do
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "CREATE TABLE IF NOT EXISTS movx_ledger (" <>
+          "movx_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), " <>
+          "movx_org_id UUID, movx_subject_id UUID NOT NULL, " <>
+          "movx_kind TEXT NOT NULL, movx_delta_cents INTEGER NOT NULL DEFAULT 0)",
+        []
+      )
+
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "CREATE TABLE IF NOT EXISTS mrx_movement_rollup (" <>
+          "mrx_id UUID PRIMARY KEY DEFAULT gen_random_uuid(), " <>
+          "mrx_org_id UUID, mrx_subject_id UUID, mrx_kind TEXT, " <>
+          "mrx_delta_cents INTEGER NOT NULL DEFAULT 0, mrx_count INTEGER NOT NULL DEFAULT 0, " <>
+          "mrx_suppressed BOOLEAN NOT NULL DEFAULT FALSE, " <>
+          "mrx_refreshed_at TIMESTAMPTZ NOT NULL DEFAULT now())",
+        []
+      )
+
+      on_exit(fn ->
+        # The sandbox rolls back, but drop for hygiene under shared mode.
+        :ok
+      end)
+
+      spec =
+        Spec.from_config(%{
+          name: :movement_rollup,
+          source: :domain,
+          table: "mrx_movement_rollup",
+          subject_column: "mrx_subject_id",
+          suppressed_column: "mrx_suppressed",
+          subject_delete_sql: "DELETE FROM movx_ledger WHERE movx_subject_id::text = $1",
+          # Independent oracle residue-scan target (B2-P1) — kept separate from
+          # subject_delete_sql so a sabotaged delete hook cannot fool the scan.
+          domain_table: "movx_ledger",
+          domain_subject_column: "movx_subject_id",
+          bounded_columns:
+            ~w(mrx_id mrx_org_id mrx_subject_id mrx_kind mrx_delta_cents mrx_count mrx_suppressed mrx_refreshed_at),
+          rebuild_sql:
+            {"DELETE FROM mrx_movement_rollup",
+             """
+             INSERT INTO mrx_movement_rollup
+               (mrx_org_id, mrx_subject_id, mrx_kind, mrx_delta_cents, mrx_count, mrx_suppressed, mrx_refreshed_at)
+             SELECT movx_org_id, movx_subject_id, movx_kind,
+                    SUM(movx_delta_cents)::int, COUNT(*)::int, FALSE, now()
+             FROM movx_ledger
+             GROUP BY movx_org_id, movx_subject_id, movx_kind
+             """}
+        })
+
+      {:ok, spec: spec}
+    end
+
+    test "the domain spec builds fail-closed and refreshes from the domain table", %{spec: spec} do
+      assert spec.source == :domain
+      subject_id = uuid_subject()
+      org_id = Ecto.UUID.generate()
+      seed_ledger(subject_id, org_id, "new", 9_900)
+      seed_ledger(subject_id, org_id, "expansion", 1_000)
+
+      {:ok, n} = Rollup.refresh(Repo, spec)
+      assert n >= 1
+      # The rollup summarises the domain ledger, not aud_event.
+      assert mrx_delta(subject_id) == 10_900
+    end
+
+    test "AC-G7-7: post-shred domain REBUILD recomputes subject-free", %{spec: spec} do
+      subject_id = uuid_subject()
+      other_id = uuid_subject()
+      org_id = Ecto.UUID.generate()
+
+      # The subject needs a vault row so the real shred orchestration runs.
+      {:ok, _} = Vault.store_field(subject_id, :pii_email, :emails, "d@example.com", Repo)
+
+      seed_ledger(subject_id, org_id, "new", 9_900)
+      seed_ledger(subject_id, org_id, "expansion", 5_000)
+      seed_ledger(other_id, org_id, "new", 2_000)
+
+      {:ok, _} = Rollup.refresh(Repo, spec)
+      # Pre-shred: the subject's movement deltas are in the rollup.
+      assert mrx_delta(subject_id) == 14_900
+      assert mrx_delta(other_id) == 2_000
+
+      # Erase via the REAL orchestration, with ONLY the domain spec registered.
+      assert {:ok, %{report: report}} = Erasure.shred(subject_id, specs: [spec])
+
+      # The subject contributes 0 to the recomputed period sums — a real erasure
+      # across the domain ledger AND the derived rollup at once.
+      assert mrx_delta(subject_id) == 0,
+             "the domain REBUILD arm must recompute the subject out of the rollup"
+
+      # The domain ledger rows for the subject are physically gone.
+      %{rows: [[cnt]]} =
+        Ecto.Adapters.SQL.query!(
+          Repo,
+          "SELECT COUNT(*) FROM movx_ledger WHERE movx_subject_id::text = $1",
+          [subject_id]
+        )
+
+      assert cnt == 0
+
+      # The OTHER subject's deltas survive — erasure is surgical.
+      assert mrx_delta(other_id) == 2_000
+
+      # The report records the domain rebuild arm for the oracle (AC-G7-7 tier).
+      entry = Enum.find(report.tiers["rollups"], &(&1["rollup"] == "movement_rollup"))
+      assert entry["arm"] == "rebuild"
+      assert entry["source"] == "domain"
+      assert entry["rows_affected"] == 2
+    end
+
+    @tag :red_path
+    test "ANTI-TAUTOLOGY: a sabotaged recompute that STILL counts the subject leaves a re-identifying delta",
+         %{spec: spec} do
+      subject_id = uuid_subject()
+      org_id = Ecto.UUID.generate()
+      {:ok, _} = Vault.store_field(subject_id, :pii_email, :emails, "s@example.com", Repo)
+      seed_ledger(subject_id, org_id, "new", 9_900)
+
+      # SABOTAGE: a domain spec whose subject_delete_sql deletes NOTHING (a broken
+      # erasure hook — the classic "recompute still counts the subject" bug ADR-018
+      # §5 / AC-G7-7 forbids). The recompute then re-derives the subject's delta.
+      # (Keeps the $1 placeholder so the arm's parameter binding is unchanged — the
+      # bug is a mis-scoped predicate that never matches the subject, not a dropped
+      # parameter. `$1 IS NULL` is false for every real subject id, so nothing is
+      # deleted — the subject's ledger rows survive the "erasure".)
+      sabotaged = %{spec | subject_delete_sql: "DELETE FROM movx_ledger WHERE $1::text IS NULL"}
+
+      {:ok, _} = Rollup.refresh(Repo, sabotaged)
+      assert mrx_delta(subject_id) == 9_900
+
+      {:ok, %{report: _}} = Erasure.shred(subject_id, specs: [sabotaged])
+
+      # THE PROOF the arm is load-bearing: with a broken delete hook, the subject's
+      # 9900 delta SURVIVES the shred — a re-identifying residue. This is what the
+      # destruction oracle catches (AC-G7-7). The correct spec (prior test) drives it
+      # to 0; the sabotaged spec leaves it non-zero → the guarantee is NOT tautological.
+      assert mrx_delta(subject_id) == 9_900,
+             "a sabotaged (no-op) delete hook must leave the re-identifying delta — proving the " <>
+               "correct hook's subject-free recompute is load-bearing, not incidental"
+    end
+  end
+
+  # ======================================================================
   # (c) ORACLE TIER — Tiers.Rollup CI mode
   # ======================================================================
 
@@ -373,6 +551,64 @@ defmodule Samen.RollupTest do
           rebuild_sql: {"DELETE FROM rol_x", "SELECT 1"}
         })
       end
+    end
+
+    test "source: :domain requires a non-empty subject_delete_sql (fail closed)" do
+      assert_raise ArgumentError, ~r/source: :domain and MUST declare a non-empty/, fn ->
+        Spec.from_config(%{
+          name: :bad_domain,
+          source: :domain,
+          table: "mrx_x",
+          subject_column: "mrx_subject_id",
+          suppressed_column: "mrx_suppressed",
+          bounded_columns: ~w(mrx_subject_id mrx_suppressed),
+          rebuild_sql: {"DELETE FROM mrx_x", "SELECT 1"}
+          # subject_delete_sql omitted → fail closed.
+        })
+      end
+    end
+
+    test "source: :aud_event must NOT declare a subject_delete_sql (fail closed)" do
+      assert_raise ArgumentError, ~r/source: :aud_event and MUST NOT declare/, fn ->
+        Spec.from_config(%{
+          name: :bad_aud,
+          table: "rol_x",
+          subject_column: "rol_s",
+          suppressed_column: "rol_sup",
+          subject_delete_sql: "DELETE FROM whatever WHERE x = $1",
+          bounded_columns: ~w(rol_s rol_sup),
+          rebuild_sql: {"DELETE FROM rol_x", "SELECT 1"}
+        })
+      end
+    end
+
+    test "an unknown source is refused (fail closed)" do
+      assert_raise ArgumentError, ~r/:source must be one of/, fn ->
+        Spec.from_config(%{
+          name: :bad_source,
+          source: :clickhouse,
+          table: "rol_x",
+          subject_column: "rol_s",
+          suppressed_column: "rol_sup",
+          bounded_columns: ~w(rol_s rol_sup),
+          rebuild_sql: {"DELETE FROM rol_x", "SELECT 1"}
+        })
+      end
+    end
+
+    test "a legacy config without :source defaults to :aud_event (behavior unchanged)" do
+      spec =
+        Spec.from_config(%{
+          name: :legacy,
+          table: "rol_x",
+          subject_column: "rol_s",
+          suppressed_column: "rol_sup",
+          bounded_columns: ~w(rol_s rol_sup),
+          rebuild_sql: {"DELETE FROM rol_x", "SELECT 1"}
+        })
+
+      assert spec.source == :aud_event
+      assert spec.subject_delete_sql == nil
     end
 
     test "rebuild_sql must be a non-empty {delete, insert} pair" do

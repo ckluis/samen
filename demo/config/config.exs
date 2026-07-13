@@ -152,6 +152,46 @@ config :samen_core, :rollups, [
        WHERE aud_subject_id IS NOT NULL
        GROUP BY aud_occurred_at::date, aud_correlation_id, aud_subject_id::uuid
        """}
+  },
+  # WS-B / Phase B2 (ADR-018): the DOMAIN-SOURCED revenue-movement rollup
+  # (`mrr_revenue_rollup`). Grain (org_id, period_month, mov_kind) → sum(delta), count,
+  # recomputed from the `mov` subscription-movement ledger (a DOMAIN table, ADR-017),
+  # NOT from aud_event. `source: :domain` selects the ADR-018 REBUILD arm: on a
+  # subject shred the subject's `mov` rows are deleted (subject_delete_sql, keyed on
+  # mov_customer_id — the subject) then this rollup is recomputed subject-free. It is
+  # a subject-free aggregate BY CONSTRUCTION (period/kind grain, no per-subject
+  # column), so subject_column/suppressed_column are omitted — the erasure hook lives
+  # on the ledger side, not a rollup-table column (AC-G7-7 red-path proves it).
+  %{
+    name: :revenue_rollup,
+    source: :domain,
+    table: "mrr_revenue_rollup",
+    subject_delete_sql: "DELETE FROM mov_subscription_event WHERE mov_customer_id::text = $1",
+    # The post-shred oracle scans HERE for surviving subject rows, INDEPENDENTLY of
+    # subject_delete_sql (B2-P1): SELECT count(*) FROM mov_subscription_event
+    # WHERE mov_customer_id::text = $1. A sabotaged/no-op delete hook that leaves the
+    # subject's ledger rows is then caught as an oracle CONTENT violation, not merely
+    # missed by trusting the report's self-attested arm label.
+    domain_table: "mov_subscription_event",
+    domain_subject_column: "mov_customer_id",
+    bounded_columns:
+      ~w(mrr_id mrr_org_id mrr_period_month mrr_kind mrr_delta_cents mrr_count mrr_suppressed mrr_refreshed_at),
+    rebuild_sql:
+      {"DELETE FROM mrr_revenue_rollup",
+       """
+       INSERT INTO mrr_revenue_rollup
+         (mrr_org_id, mrr_period_month, mrr_kind, mrr_delta_cents, mrr_count, mrr_suppressed, mrr_refreshed_at)
+       SELECT
+         mov_org_id                              AS mrr_org_id,
+         date_trunc('month', mov_occurred_at)::date AS mrr_period_month,
+         mov_kind                                AS mrr_kind,
+         COALESCE(SUM(mov_mrr_delta_cents),0)::int AS mrr_delta_cents,
+         COUNT(*)::int                           AS mrr_count,
+         FALSE                                   AS mrr_suppressed,
+         now()                                   AS mrr_refreshed_at
+       FROM mov_subscription_event
+       GROUP BY mov_org_id, date_trunc('month', mov_occurred_at)::date, mov_kind
+       """}
   }
 ]
 

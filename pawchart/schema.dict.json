@@ -597,6 +597,108 @@
     {
       "fields": [
         {
+          "column_name": "pbv_customer_id",
+          "logical_name": "customer_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbv_from_plan_id",
+          "logical_name": "from_plan_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbv_from_status",
+          "logical_name": "from_status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pbv_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbv_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbv_kind",
+          "logical_name": "kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pbv_mrr_after_cents",
+          "logical_name": "mrr_after_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pbv_mrr_before_cents",
+          "logical_name": "mrr_before_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pbv_mrr_delta_cents",
+          "logical_name": "mrr_delta_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pbv_occurred_at",
+          "logical_name": "occurred_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbv_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbv_plan_id",
+          "logical_name": "plan_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbv_reason",
+          "logical_name": "reason",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pbv_subscription_id",
+          "logical_name": "subscription_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbv_to_status",
+          "logical_name": "to_status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pbv_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Billing.SubscriptionEvent",
+      "table_name": "pbv_subscription_event"
+    },
+    {
+      "fields": [
+        {
           "column_name": "pby_amount_cents",
           "logical_name": "amount_cents",
           "pii": false,

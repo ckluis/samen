@@ -18,11 +18,19 @@ defmodule Samen.NoPlaintextPii.Tiers.PostShred.DbContent do
       no replica in this deployment (pass-with-note); a `nil` replica in a
       `--tiers all` run is a **fail-closed gap** (we must scan the replica or be
       told it does not exist). A real streaming replica is an operator TODO.
-    * **rollup** — via the erasure report's per-rollup rebuild/suppress arm: every
-      registered rollup must have been governed (rebuilt subject-free or the
-      subject's derived rows suppressed). A registered rollup ABSENT from the report
-      is a fail-closed gap; a rollup that still carries an un-suppressed subject row
-      is a violation.
+    * **rollup** — TWO arms. (1) NAME: via the erasure report's per-rollup
+      rebuild/suppress arm, every registered rollup must have been governed (rebuilt
+      subject-free or the subject's derived rows suppressed). A registered rollup
+      ABSENT from the report is a fail-closed gap. (2) CONTENT (B2-P1): for every
+      `source: :domain` rollup, the tier ALSO scans the DOMAIN LEDGER directly
+      (`SELECT count(*) FROM <domain_table> WHERE <domain_subject_column>::text = $1`)
+      for surviving subject rows — INDEPENDENTLY of the report's self-attested arm
+      label and of the spec's `subject_delete_sql`. A sabotaged/no-op delete hook
+      that still emits an `arm=rebuild` report entry leaves the subject's ledger
+      residue (and its re-identifying delta in the recomputed rollup); this scan
+      turns that residue into a VIOLATION. This makes the oracle content-extended
+      over the mov/mrr domain tiers, not merely name-extended (ADR-018 §3/§5,
+      AC-G7-7).
     * **audit** — the append-only `aud_event` + reveal-lifecycle rows hold only
       tokens/enums/timestamps (the CI-mode schema tiers already prove this); the
       post-shred content check asserts no plaintext subject content is queryable
@@ -67,8 +75,9 @@ defmodule Samen.NoPlaintextPii.Tiers.PostShred.DbContent do
   @impl true
   def describe,
     do:
-      "post-shred DB-tier content scan (live·replica·rollup·audit·registered_non_pii): " <>
-        "no decryptable plaintext, no wrong-key-decryptable ciphertext, redaction ran"
+      "post-shred DB-tier content scan (live·replica·rollup[+domain-ledger residue]·audit·" <>
+        "registered_non_pii): no decryptable plaintext, no wrong-key-decryptable ciphertext, " <>
+        "no surviving :domain-rollup subject rows, redaction ran"
 
   @impl true
   def check(%Context{subject_id: nil}) do
@@ -241,34 +250,105 @@ defmodule Samen.NoPlaintextPii.Tiers.PostShred.DbContent do
 
       report ->
         governed = get_in(report.tiers, ["rollups"]) || []
-        registered = Enum.map(Samen.Rollup.specs(), &to_string(&1.name))
+        registered_specs = Samen.Rollup.specs()
+        registered = Enum.map(registered_specs, &to_string(&1.name))
         governed_names = Enum.map(governed, &(&1["rollup"]))
         missing = registered -- governed_names
 
-        cond do
-          missing != [] ->
-            [
-              Finding.violation(
-                @tier,
-                "rollup",
-                "registered rollup(s) #{Enum.join(missing, ", ")} ABSENT from the erasure " <>
-                  "report's rebuild-or-exclude arm for #{sid} — a derived aggregate that " <>
-                  "was not governed can resurrect the subject. Fail closed."
-              )
-            ]
+        # (1) NAME arm: every registered rollup must appear in the report's
+        # rebuild-or-exclude arm (an absent rollup is an ungoverned aggregate gap).
+        name_findings =
+          cond do
+            missing != [] ->
+              [
+                Finding.violation(
+                  @tier,
+                  "rollup",
+                  "registered rollup(s) #{Enum.join(missing, ", ")} ABSENT from the erasure " <>
+                    "report's rebuild-or-exclude arm for #{sid} — a derived aggregate that " <>
+                    "was not governed can resurrect the subject. Fail closed."
+                )
+              ]
 
-          true ->
-            arms = Enum.map_join(governed, ", ", &"#{&1["rollup"]}:#{&1["arm"]}")
+            true ->
+              arms = Enum.map_join(governed, ", ", &"#{&1["rollup"]}:#{&1["arm"]}")
 
-            [
-              Finding.pass(
-                @tier,
-                "rollup",
-                "every registered rollup governed by rebuild-or-exclude-on-erasure (#{arms})"
-              )
-            ]
-        end
+              [
+                Finding.pass(
+                  @tier,
+                  "rollup",
+                  "every registered rollup governed by rebuild-or-exclude-on-erasure (#{arms})"
+                )
+              ]
+          end
+
+        # (2) CONTENT arm (B2-P1 fix): for every source: :domain rollup, scan the
+        # DOMAIN LEDGER itself for surviving subject rows — INDEPENDENTLY of the
+        # report's self-attested arm label and of the spec's subject_delete_sql.
+        # A sabotaged/no-op delete hook that still emits an arm=rebuild report entry
+        # leaves the subject's ledger rows (and thus their re-identifying delta in the
+        # recomputed rollup); this scan turns that residue into an oracle VIOLATION,
+        # so the auditor-facing oracle is CONTENT-extended over mov/mrr, not merely
+        # NAME-extended (ADR-018 §3/§5, AC-G7-7, Samen.Rollup moduledoc claim).
+        domain_findings =
+          registered_specs
+          |> Enum.filter(&(&1.source == :domain))
+          |> Enum.flat_map(&domain_ledger_residue_finding(&1, sid, repo))
+
+        name_findings ++ domain_findings
     end
+  end
+
+  # For a :domain rollup, assert the erased subject has ZERO surviving rows in the
+  # domain ledger. Uses the spec's DECLARED `domain_table` + `domain_subject_column`
+  # (validated to be safe snake_case idents at Spec build time) — NOT the
+  # subject_delete_sql — so a mis-scoped/no-op erasure hook cannot also fool this
+  # scan. Surviving rows == the subject's ledger residue survived the shred → their
+  # delta re-materialises in the recomputed rollup → a re-identification leak.
+  defp domain_ledger_residue_finding(%Samen.Rollup.Spec{} = spec, sid, repo) do
+    subject = "rollup:#{spec.name}:domain_ledger"
+
+    sql =
+      "SELECT count(*) FROM #{spec.domain_table} WHERE #{spec.domain_subject_column}::text = $1"
+
+    %{rows: [[surviving]]} = repo.query!(sql, [sid])
+
+    if surviving == 0 do
+      [
+        Finding.pass(
+          @tier,
+          subject,
+          "domain-sourced rollup #{spec.name}: the erased subject has 0 surviving rows in " <>
+            "the #{spec.domain_table} ledger (#{spec.domain_subject_column}) — the domain " <>
+            "REBUILD arm's delete hook actually ran, so the recomputed rollup is subject-free " <>
+            "by construction (content-verified, not merely report-attested)."
+        )
+      ]
+    else
+      [
+        Finding.violation(
+          @tier,
+          subject,
+          "domain-sourced rollup #{spec.name}: #{surviving} row(s) for the erased subject " <>
+            "SURVIVE in the #{spec.domain_table} ledger (#{spec.domain_subject_column}) AFTER " <>
+            "the shred — the domain REBUILD arm's delete hook did NOT erase them, so their " <>
+            "re-identifying delta re-materialises in the recomputed rollup. The report may " <>
+            "self-attest arm=rebuild, but the ledger CONTENT proves the erasure did not take. " <>
+            "Fail closed (B2-P1 / AC-G7-7)."
+        )
+      ]
+    end
+  rescue
+    e ->
+      [
+        Finding.violation(
+          @tier,
+          "rollup:#{spec.name}:domain_ledger",
+          "could not scan the #{spec.domain_table} domain ledger for surviving subject rows " <>
+            "(#{Exception.message(e)}) — cannot confirm the :domain rollup is subject-free. " <>
+            "Fail closed."
+        )
+      ]
   end
 
   # ---------------------------------------------------------------------------

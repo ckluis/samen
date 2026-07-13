@@ -97,7 +97,80 @@ defmodule Demo.DestructionOracleTest do
       ["Renewal call notes", subject_id, Ecto.UUID.dump!(subject_id)]
     )
 
+    # WS-B / B2 (ADR-018): seed the subject's `mov` subscription-movement ledger rows
+    # (the DOMAIN source of the `mrr_revenue_rollup`). The subject is the CUSTOMER —
+    # `mov_customer_id = subject_id` — so the domain REBUILD arm's `subject_delete_sql`
+    # (keyed on mov_customer_id) erases exactly this subject's ledger rows. This proves
+    # crypto-shred stays true THROUGH the domain rollup (AC-G7-7): after the shred, the
+    # `mov` ledger AND the recomputed `mrr` rollup contain nothing re-identifying.
+    seed_mov(subject_id)
+
     {c, subject_id}
+  end
+
+  # Seed a subject's subscription-movement ledger: a :new + an :expansion in the same
+  # period (so the subject contributes a clear, re-identifiable delta to the rollup
+  # BEFORE the shred). Written as a direct insert (the `mov` :append action requires
+  # an Ash actor/org context; here we only need the physical rows the rollup sums).
+  defp seed_mov(subject_id) do
+    # Use the subject id as the mov org id so the rollup (grain: org/period/kind)
+    # isolates this subject's contribution to its own org partition — the helper can
+    # then sum `mrr_revenue_rollup WHERE mrr_org_id = subject_id` to observe the
+    # subject's delta appear pre-shred and vanish post-rebuild.
+    org_id = subject_id
+
+    for {kind, delta, before, aft} <- [
+          {"new", 9_900, 0, 9_900},
+          {"expansion", 5_000, 9_900, 14_900}
+        ] do
+      Repo.query!(
+        """
+        INSERT INTO mov_subscription_event
+          (mov_id, mov_org_id, mov_subscription_id, mov_customer_id, mov_plan_id,
+           mov_kind, mov_mrr_delta_cents, mov_mrr_before_cents, mov_mrr_after_cents,
+           mov_occurred_at, mov_inserted_at, mov_updated_at)
+        VALUES
+          (gen_random_uuid(), $1, gen_random_uuid(), $2, gen_random_uuid(),
+           $3, $4, $5, $6, now(), now(), now())
+        """,
+        [
+          Ecto.UUID.dump!(org_id),
+          Ecto.UUID.dump!(subject_id),
+          kind,
+          delta,
+          before,
+          aft
+        ]
+      )
+    end
+
+    :ok
+  end
+
+  # The subject's total delta currently materialised in the `mrr_revenue_rollup`
+  # (summed across periods/kinds for this subject's org). After a shred + rebuild the
+  # subject's mov rows are gone, so their deltas drop out of the recomputed rollup.
+  defp mov_rows(subject_id) do
+    %{rows: [[n]]} =
+      Repo.query!(
+        "SELECT COUNT(*) FROM mov_subscription_event WHERE mov_customer_id::text = $1",
+        [subject_id]
+      )
+
+    n
+  end
+
+  # The subject's total delta currently summed into `mrr_revenue_rollup` (its org
+  # partition — seed_mov keys the mov org on the subject id). Appears pre-shred,
+  # drops to 0 after the domain REBUILD arm recomputes subject-free.
+  defp subject_delta_in_rollup(subject_id) do
+    %{rows: [[sum]]} =
+      Repo.query!(
+        "SELECT COALESCE(SUM(mrr_delta_cents),0)::int FROM mrr_revenue_rollup WHERE mrr_org_id::text = $1",
+        [subject_id]
+      )
+
+    sum
   end
 
   defp ctx(subject_id, overrides \\ []) do
@@ -148,6 +221,61 @@ defmodule Demo.DestructionOracleTest do
       assert :kms_attestation in passed_tiers
       assert :trace_sink in passed_tiers
       assert :cdc_mirror in passed_tiers
+    end
+  end
+
+  # ======================================================================
+  # GREEN — crypto-shred stays true THROUGH the :domain rollup (ADR-018 / AC-G7-7)
+  # ======================================================================
+
+  describe "GREEN — the mov/mrr domain tiers are token-blind through rollup + shred" do
+    test "--tiers all traverses mov+mrr; post-shred they contain nothing re-identifying" do
+      {_c, subject_id} = seed_subject_across_tiers()
+
+      # Refresh BOTH rollups: the aud_event daily-count AND the DOMAIN-sourced
+      # revenue rollup (recomputed from the subject's `mov` ledger rows).
+      {:ok, results} = Samen.Rollup.rebuild_all(Repo)
+      assert Map.has_key?(results, :revenue_rollup),
+             "the :domain revenue_rollup must be in the registry the worker refreshes (AC-G7-6)"
+
+      # Pre-shred: the subject's mov rows exist and feed a re-identifiable delta into
+      # the mrr rollup (14_900 = 9_900 new + 5_000 expansion, one org/period).
+      assert mov_rows(subject_id) == 2
+      assert subject_delta_in_rollup(subject_id) == 14_900
+
+      # The one destruction that shreds every tier at once — including the domain arm.
+      assert {:ok, %{report: report}} = Erasure.shred(subject_id, repo: Repo)
+
+      # The oracle passes across ALL tiers (mov/mrr are token-blind by B1
+      # construction; the oracle proves it STAYS true through the domain rebuild).
+      findings = run_oracle(subject_id)
+      assert NoPlaintextPii.violations(findings) == [],
+             "the destruction oracle must PASS post-shred across mov/mrr, got:\n" <>
+               Enum.map_join(NoPlaintextPii.violations(findings), "\n", &Finding.format/1)
+
+      # B2-P1: the CONTENT scan affirmatively cleared the mov domain ledger (the
+      # oracle proved 0 surviving subject rows by scanning it, not by trusting the
+      # report's arm label). This is the pass the red-path above flips to a violation.
+      assert Enum.any?(
+               findings,
+               &(&1.tier == :db_content and &1.subject == "rollup:revenue_rollup:domain_ledger" and
+                   &1.severity == :pass)
+             ),
+             "the DbContent rollup sub-tier must AFFIRMATIVELY attest the mov ledger is " <>
+               "subject-free (content-verified) post-shred"
+
+      # The report records the DOMAIN rebuild arm for the revenue rollup (the oracle's
+      # rollup-tier witness — a registered rollup ABSENT from this list would be a gap).
+      revenue_entry = Enum.find(report.tiers["rollups"], &(&1["rollup"] == "revenue_rollup"))
+      assert revenue_entry["arm"] == "rebuild"
+      assert revenue_entry["source"] == "domain"
+      assert revenue_entry["rows_affected"] == 2
+
+      # Crypto-shred proof: the subject's `mov` ledger rows are physically gone, and
+      # the recomputed `mrr` rollup no longer carries their delta — nothing left to
+      # re-identify across the domain ledger OR the derived rollup.
+      assert mov_rows(subject_id) == 0
+      assert subject_delta_in_rollup(subject_id) == 0
     end
   end
 
@@ -212,6 +340,89 @@ defmodule Demo.DestructionOracleTest do
       findings = PostShred.KmsAttestation.check(ctx(subject_id))
       assert NoPlaintextPii.violations(findings) != []
       assert Enum.map_join(findings, "\n", &Finding.format/1) =~ ":absent == FAIL"
+    end
+
+    @tag :red_path
+    test "ADR-018 erasure red-path: a sabotaged domain arm that retains the subject's delta survives the shred" do
+      {_c, subject_id} = seed_subject_across_tiers()
+
+      # SABOTAGE: a revenue_rollup spec whose subject_delete_sql never matches the
+      # subject (a broken erasure hook — the "recompute still counts the subject" bug
+      # ADR-018 §5 / AC-G7-7 forbids). Keep the $1 placeholder ($1::text IS NULL is
+      # false for every real subject) so the arm's binding is unchanged — only the
+      # predicate is mis-scoped.
+      prior = Application.get_env(:samen_core, :rollups)
+
+      sabotaged_specs =
+        Enum.map(prior, fn spec ->
+          if Map.get(spec, :name) == :revenue_rollup do
+            Map.put(spec, :subject_delete_sql, "DELETE FROM mov_subscription_event WHERE $1::text IS NULL")
+          else
+            spec
+          end
+        end)
+
+      Application.put_env(:samen_core, :rollups, sabotaged_specs)
+
+      try do
+        {:ok, _} = Samen.Rollup.rebuild_all(Repo)
+        assert subject_delta_in_rollup(subject_id) == 14_900
+
+        {:ok, %{report: _}} = Erasure.shred(subject_id, repo: Repo)
+
+        # THE PROOF the domain arm is load-bearing: with a broken delete hook, the
+        # subject's mov rows survive AND their delta stays in the recomputed rollup —
+        # a re-identifying residue the destruction oracle must never permit. The
+        # correct spec (the GREEN test) drives both to 0; the sabotaged spec leaves
+        # them → the guarantee is NOT tautological.
+        assert mov_rows(subject_id) == 2,
+               "sabotaged (no-op) delete hook must leave the subject's mov rows — proving the erasure hook is load-bearing"
+
+        assert subject_delta_in_rollup(subject_id) == 14_900,
+               "sabotaged domain rebuild must leave the subject's re-identifying delta in the mrr rollup"
+
+        # B2-P1: and — critically — the AUDITOR-FACING ORACLE must EMIT A VIOLATION on
+        # this residue, not merely the direct SQL helpers above. The report will
+        # self-attest revenue_rollup arm=rebuild (the delete hook still ran, deleting
+        # 0 rows), but the DbContent rollup sub-tier scans the mov ledger directly and
+        # catches the 2 surviving subject rows. This is the "FAILS the oracle" bar
+        # ADR-018 §3/§5 + AC-G7-7 + the Samen.Rollup moduledoc all state — now met by
+        # the oracle, not just a probe helper.
+        findings = run_oracle(subject_id)
+        violations = NoPlaintextPii.violations(findings)
+
+        assert violations != [],
+               "a sabotaged :domain delete hook that leaves the subject's ledger residue must " <>
+                 "FAIL the destruction oracle (B2-P1), not pass silently"
+
+        assert Enum.any?(
+                 violations,
+                 &(&1.tier == :db_content and &1.subject == "rollup:revenue_rollup:domain_ledger")
+               ),
+               "the DbContent rollup sub-tier must flag the surviving mov_subscription_event " <>
+                 "subject rows as the violation, got:\n" <>
+                 Enum.map_join(violations, "\n", &Finding.format/1)
+      after
+        Application.put_env(:samen_core, :rollups, prior)
+      end
+    end
+
+    @tag :red_path
+    test "oracle CI tier: a plaintext PII column on the mrr rollup table FAILS the build" do
+      # A rollup is a derived aggregate dashboards read directly AND it survives
+      # crypto-shred — so a plaintext PII column on it is a leak the Rollup CI tier
+      # must catch. Add an offending column to the real mrr table and assert failure.
+      Repo.query!("ALTER TABLE mrr_revenue_rollup ADD COLUMN IF NOT EXISTS mrr_email TEXT", [])
+
+      try do
+        findings = Samen.NoPlaintextPii.Tiers.Rollup.check(ctx(Ash.UUID.generate()))
+        violations = Enum.filter(findings, &(&1.severity == :violation))
+
+        assert Enum.any?(violations, &(&1.subject == "mrr_revenue_rollup.mrr_email")),
+               "a plaintext PII column on the :domain revenue rollup must be a CI-mode violation, got: #{inspect(violations)}"
+      after
+        Repo.query!("ALTER TABLE mrr_revenue_rollup DROP COLUMN IF EXISTS mrr_email", [])
+      end
     end
 
     @tag :red_path

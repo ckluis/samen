@@ -1,6 +1,12 @@
 # ADR-018 — Implement the `:source :domain` rollup Spec dimension now (resolving the ADR-007 defer)
 
-- **Status:** Accepted (design; WS-B phase B2 implements). **Resolves the ADR-007 deferral.**
+- **Status:** Accepted — IMPLEMENTED (WS-B phase B2, UNIT 1). **Resolves the ADR-007 deferral.**
+  The `:source` dimension + `:subject_delete_sql` domain-erasure hook land on
+  `Samen.Rollup.Spec`; `revenue_rollup` (`mrr_revenue_rollup`) registers as the first
+  `source: :domain` spec (demo), sourced from the `mov` ledger; the destruction oracle
+  is extended to the mov/mrr tiers (`--tiers all` traverses them) and AC-G7-7's
+  erasure red-path is proven non-tautological (sabotaged no-op delete hook leaves the
+  subject's re-identifying delta → FAILS; correct hook drives it to 0).
 - **Date:** 2026-07-13
 - **Task:** WS-B / G7 — the revenue-movement rollup is a domain-table-sourced rollup, which the current `Samen.Rollup.Spec` (implicitly `source: :aud_event`) cannot express. ADR-007 deferred this generalization until a 3rd vertical confirmed the shape.
 - **Deciders:** opus (WS-B design), grounded in ADR-007 §3 (the deferred target design) and the live `Samen.Rollup` framework.
