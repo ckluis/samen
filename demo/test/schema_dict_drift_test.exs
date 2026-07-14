@@ -75,6 +75,29 @@ defmodule Demo.SchemaDictDriftTest do
       refute Enum.any?(block["fields"], & &1["pii"]),
              "mov ledger must be token-blind — no vault-routed PII fields"
     end
+
+    test "the committed dict carries the B9 ahb health-by-band aggregate block" do
+      # Cross-phase regression guard (WSB-GATE2-P1-01): the B9 carry unit added
+      # `Demo.Aggregate.HealthByBand` (`ahb_health_by_band`) + migration
+      # 20260714030000, but an early snapshot omitted it — the drift check went
+      # red because the committed dict was regenerated before this later
+      # resource was wired. Assert the block is present so a regen that drops it
+      # (or predates it) fails loudly here, not only at ci.sh step 1b.
+      tables = committed_dict()["tables"]
+
+      block = Enum.find(tables, &(&1["table_name"] == "ahb_health_by_band"))
+
+      assert block,
+             "ahb_health_by_band table block missing from committed dict — " <>
+               "regenerate with `MIX_ENV=test mix samen.catalog.dump --output schema.dict.json`"
+
+      assert block["resource"] == "Demo.Aggregate.HealthByBand"
+
+      column_names = Enum.map(block["fields"], & &1["column_name"])
+      assert "ahb_band" in column_names
+      assert "ahb_account_count" in column_names
+      assert "ahb_org_id" in column_names
+    end
   end
 
   describe "RED PATH — the drift check is not a tautology" do
@@ -94,6 +117,25 @@ defmodule Demo.SchemaDictDriftTest do
       refute mutated_json == committed_json,
              "a dict missing mov_subscription_event must NOT equal the committed " <>
                "dict — otherwise the drift check cannot catch a dropped resource"
+    end
+
+    test "a mutated dict (dropped ahb aggregate) does NOT match the committed file" do
+      # Anti-tautology for WSB-GATE2-P1-01: prove the drift check would catch the
+      # exact regression that occurred — a later resource (HealthByBand) absent
+      # from the dict. Drop the ahb block from a fresh dict and confirm it now
+      # diverges from the committed file. This is the tripwire that was silent
+      # while the block was genuinely missing from the committed snapshot.
+      mutated =
+        update_in(fresh_dict()["tables"], fn tables ->
+          Enum.reject(tables, &(&1["table_name"] == "ahb_health_by_band"))
+        end)
+
+      mutated_json = Jason.encode!(mutated, pretty: true) <> "\n"
+      committed_json = File.read!(@committed_path)
+
+      refute mutated_json == committed_json,
+             "a dict missing ahb_health_by_band must NOT equal the committed " <>
+               "dict — otherwise the drift check cannot catch a dropped aggregate"
     end
 
     test "a mutated dict (renamed column) does NOT match the committed file" do

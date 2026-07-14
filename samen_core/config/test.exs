@@ -6,7 +6,13 @@ config :samen_core, SamenCore.TestRepo,
   hostname: "localhost",
   database: "samen_core_test",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: 10
+  # pool_size 20 + queue slack: verify_vault_declared_parity opens direct
+  # Postgrex connections outside the sandbox for DDL; under an unlucky seed the
+  # concurrent checkout pressure hit the 4s queue timeout ~1-in-8 full runs
+  # (WS-B B9 gate F1). Not a correctness issue — headroom kills the flake.
+  pool_size: 20,
+  queue_target: 200,
+  queue_interval: 2_000
 
 config :logger, level: :warning
 

@@ -145,7 +145,9 @@ defmodule Samen.Web.Operator.FlagAdminLive do
   end
 
   def handle_event("enable_flag", %{"id" => id}, socket) do
-    {:noreply, mutate(socket, &Reads.toggle_flag(&1, &2, id))}
+    # Idempotent, the interlock symmetry with kill (B9 carry B6-N2): a rapid
+    # double-click after a kill re-enables ONCE — never a toggle back to disabled.
+    {:noreply, mutate(socket, fn fm, scope -> enable(fm, scope, id) end)}
   end
 
   def handle_event("edit_flag", %{"id" => id}, socket) do
@@ -196,6 +198,16 @@ defmodule Samen.Web.Operator.FlagAdminLive do
     case Reads.get_flag(flags_mount, scope, id) do
       nil -> {:error, "Flag not found."}
       %{enabled: false} = flag -> {:ok, flag}
+      _flag -> Reads.toggle_flag(flags_mount, scope, id)
+    end
+  end
+
+  # The idempotent twin (B6-N2): an ENABLED flag stays enabled regardless of how many
+  # times Re-enable fires — the raw toggle is never exposed as a UI event.
+  defp enable(flags_mount, scope, id) do
+    case Reads.get_flag(flags_mount, scope, id) do
+      nil -> {:error, "Flag not found."}
+      %{enabled: true} = flag -> {:ok, flag}
       _flag -> Reads.toggle_flag(flags_mount, scope, id)
     end
   end

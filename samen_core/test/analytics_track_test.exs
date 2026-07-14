@@ -138,6 +138,65 @@ defmodule Samen.AnalyticsTrackTest do
     end
   end
 
+  describe "the entity_ref gate (Gate 4 — REFUSAL SYMMETRY, B9 carry B7-P2-1)" do
+    # B7 shipped entity_ref with a silent scrub-to-nil (the rest of the row still
+    # wrote) — asymmetric with the prop-value gate. Fail-closed now: a PII-shaped /
+    # vault-token / structured entity_ref refuses the WHOLE event.
+    test "an email-shaped entity_ref REFUSES the whole event — never a silent scrub-to-nil" do
+      assert {:error, :pii_rejected} =
+               Analytics.track(%{
+                 org_id: "org-1",
+                 event_name: "record.created",
+                 entity_ref: "alice@example.com"
+               })
+    end
+
+    test "a space-separated-name-shaped entity_ref is refused" do
+      assert {:error, :pii_rejected} =
+               Analytics.track(%{
+                 org_id: "org-1",
+                 event_name: "record.created",
+                 entity_ref: "Alice Anderson"
+               })
+    end
+
+    test "a vault token (vt_*) entity_ref is refused — a laundered vaulted value must not ride token-shaped" do
+      assert {:error, :pii_rejected} =
+               Analytics.track(%{
+                 org_id: "org-1",
+                 event_name: "record.created",
+                 entity_ref: "vt_abc123deadbeef"
+               })
+    end
+
+    test "a structured entity_ref (map) is refused outright — an entity_ref is an opaque bounded scalar handle" do
+      assert {:error, :pii_rejected} =
+               Analytics.track(%{
+                 org_id: "org-1",
+                 event_name: "record.created",
+                 entity_ref: %{"email" => "alice@example.com"}
+               })
+    end
+
+    test "the discriminating pair: an opaque bounded ref is ACCEPTED (the over-block guard)" do
+      # The refusal discriminates — a legitimate opaque handle and a uuid both pass.
+      assert {:ok, :dropped} =
+               Analytics.track(%{org_id: "org-1", event_name: "record.created", entity_ref: "rec-42"})
+
+      assert {:ok, :dropped} =
+               Analytics.track(%{
+                 org_id: "org-1",
+                 event_name: "record.created",
+                 entity_ref: "018f3a2e-6f7c-7a9b-8c1d-2e3f4a5b6c7d"
+               })
+    end
+
+    test "an absent or empty entity_ref is fine (nil — accepted, nothing to classify)" do
+      assert {:ok, :dropped} = Analytics.track(%{org_id: "org-1", event_name: "record.created"})
+      assert {:ok, :dropped} = Analytics.track(%{org_id: "org-1", event_name: "record.created", entity_ref: ""})
+    end
+  end
+
   describe "AC-G12-2 anti-tautology — the classifier is load-bearing" do
     # Two payloads identical EXCEPT the prop value's PII shape: the PII-shaped one is
     # refused, the bounded one is accepted. A classifier that did nothing would accept

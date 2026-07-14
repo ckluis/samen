@@ -25,7 +25,7 @@ defmodule Samen.Analytics do
   unwired (no `pae` resource configured), or `{:error, reason}` when the payload is
   REFUSED — always a non-raising result the caller can ignore.
 
-  ## The three refusal gates (default-deny at every layer)
+  ## The four refusal gates (default-deny at every layer)
 
     1. **Unregistered event name** — `event_name` must be in `Samen.Analytics.Catalog`
        (a bounded enum, never freeform). An unknown name is refused
@@ -40,6 +40,10 @@ defmodule Samen.Analytics do
        `Samen.PiiValueShape`) OR that carries a `vt_*` vault token is refused
        (`{:error, :pii_rejected}`, logged). This is the exact H-2/A1 default-deny
        discipline at the capture boundary (ADR-021 §5).
+    4. **PII-shaped entity_ref** — the same value gate applied to `entity_ref`, with
+       REFUSAL SYMMETRY (B9 carry B7-P2-1): a PII-shaped / vault-token / structured
+       `entity_ref` refuses the WHOLE event (`{:error, :pii_rejected}`), never a
+       silent scrub-to-nil — fail-closed, like every other gate.
 
   ## `pae_actor_ref` — a per-subject HMAC pseudonym, never a raw id
 
@@ -87,8 +91,9 @@ defmodule Samen.Analytics do
     with {:ok, org_id} <- fetch_org_id(request),
          {:ok, name} <- fetch_event_name(request),
          {:ok, allowed_keys} <- Catalog.allowed_keys(name),
-         {:ok, props} <- validate_props(props_of(request, allowed_keys), allowed_keys) do
-      write(org_id, name, props, request)
+         {:ok, props} <- validate_props(props_of(request, allowed_keys), allowed_keys),
+         {:ok, entity_ref} <- validate_entity_ref(request) do
+      write(org_id, name, props, entity_ref, request)
     end
   rescue
     # Best-effort belt: capture NEVER raises into the caller (the primary write is
@@ -223,7 +228,7 @@ defmodule Samen.Analytics do
   # The write — best-effort, authorize?: false framework emit (the mov/Engine posture).
   # ---------------------------------------------------------------------------
 
-  defp write(org_id, name, props, request) do
+  defp write(org_id, name, props, entity_ref, request) do
     case product_event_resource() do
       nil ->
         # Unwired — inert until the host mounts the Analytics scope (by design).
@@ -241,7 +246,7 @@ defmodule Samen.Analytics do
           event_name: String.to_existing_atom(name),
           event_kind: Map.get(@kind_by_event, name),
           actor_ref: actor_ref(request),
-          entity_ref: entity_ref(request),
+          entity_ref: entity_ref,
           props: props,
           occurred_at: occurred_at(request)
         })
@@ -271,18 +276,42 @@ defmodule Samen.Analytics do
     _ -> nil
   end
 
-  # A bounded id/token of the entity the event is about. Refuse a PII-shaped value
-  # here too (an entity_ref is an opaque handle, never a name/email).
-  defp entity_ref(request) do
+  # Gate 4 — the entity_ref refusal (REFUSAL SYMMETRY with the prop-value gate;
+  # B9 carry B7-P2-1, fail-closed per the design ethos). An entity_ref is an opaque
+  # bounded id/token, never a name/email/vault token: a PII-shaped or vt_* value
+  # REFUSES the WHOLE event ({:error, :pii_rejected}, logged) — never a silent
+  # scrub-to-nil that persists the rest of the row. Non-binary scalars (atom/number)
+  # are stringified FIRST and pass the same shape gate; a structured value
+  # (map/list — a shape the bounded column cannot hold honestly) is refused outright.
+  defp validate_entity_ref(request) do
     case Map.get(request, :entity_ref) do
-      ref when is_binary(ref) and ref != "" ->
-        if Samen.PiiValueShape.pii_shaped_id?(ref) or vault_token?(ref), do: nil, else: ref
+      nil ->
+        {:ok, nil}
 
-      ref when not is_nil(ref) ->
-        to_string(ref)
+      "" ->
+        {:ok, nil}
 
-      _ ->
-        nil
+      ref when is_binary(ref) or is_atom(ref) or is_number(ref) ->
+        ref = to_string(ref)
+
+        if Samen.PiiValueShape.pii_shaped_id?(ref) or vault_token?(ref) do
+          Logger.warning(
+            "[Analytics] track/1 refused a PII-shaped entity_ref (:pii_rejected) — the " <>
+              "WHOLE event is dropped, never persisted (refusal symmetry, ADR-021 §5 / B7-P2-1)."
+          )
+
+          {:error, :pii_rejected}
+        else
+          {:ok, ref}
+        end
+
+      _structured ->
+        Logger.warning(
+          "[Analytics] track/1 refused a structured entity_ref (:pii_rejected) — an " <>
+            "entity_ref is an opaque bounded scalar handle (ADR-021 §5 / B7-P2-1)."
+        )
+
+        {:error, :pii_rejected}
     end
   end
 

@@ -128,28 +128,40 @@ B1→B2→B3 is the G7 chain (must serialize). B4 (G17) needs B1's `mov` for the
 2. Full workstream adversarial re-gate: all suites + every ci.sh + full `mix samen.verify.*` chain + `--only adversarial` green; re-probe the 3-5 load-bearing cross-phase red-paths (reconciliation, flag stability, PII refusal, health masking, erasure) non-tautological with byte-exact restore + zero git residue (AC-X2). Write `docs/gate-ws-b.md`.
 **Gate:** workstream GO/NO-GO.
 
-**Carries into B9 (P2s deferred from phase gates, resolve or explicitly re-defer):**
-- B4-P2-1: `past_due` day-count computed from `utc_now` twice (Reads assembly vs render
-  `past_due_now?`) — a due-date crossing "now" between the two calls can momentarily
-  desync evidence flag and score. Hardening: thread the Reads-computed determination
-  through to the LiveView instead of recomputing.
-- B4-P2-2: billing state `:unpaid` falls into the "unrecognized state" branch (band
-  correctly capped, but explanation string doesn't flag it dunning-adjacent) — consider
-  folding `:unpaid` into the dunning branch in the state map.
-- B6-N1: fold the B6 gate's foreign-id adversarial probes into a PERMANENT regression
-  test — drive toggle_flag/save_ramp/add_rule/kill_flag with a foreign org's flag id and
-  assert "Flag not found" + zero mutation (insurance against a refactor sourcing org_id
-  from event params instead of socket.assigns).
-- B6-N2: operator Re-enable uses toggle_flag (a flip, not idempotent) — a rapid
-  double-click after a kill flips back to disabled; consider an idempotent enable action
-  or interlock symmetry with the kill confirm.
-- B7-P2-1: a PII-shaped entity_ref is silently scrubbed to nil rather than refusing the
-  whole event (asymmetric with the prop-value gate; value never persists). Consider
-  refusal symmetry or document the scrub stance in ADR-021.
-- B8-P2-2: in samen_web test env the never_read_current lint is vacuous (CDC tier off),
-  so a future regression sourcing a live pae Ash scan into AnalyticsReads would not be
-  caught by that lint there — the zero-Ash-read posture rests on the reads AST lint +
-  render tests. Consider an env-independent assertion.
+**Carries into B9 (P2s deferred from phase gates) — ALL RESOLVED (B9 unit 2, 2026-07-14):**
+- ~~B4-P2-1~~ **RESOLVED**: `account_detail/4` captures ONE `DateTime.utc_now()` and threads
+  it through `account_joins/4` → `past_due_by_account/3` AND onto each invoice as
+  `__past_due__`; the LiveView renders that verbatim (`past_due_now?/1` deleted — no
+  second clock). Red-path: `operator_account_detail_render_test.exs` parks a due date 1s
+  ahead, loads, lets it cross "now", renders — no flag/score desync; fresh-read positive
+  control flips both together.
+- ~~B4-P2-2~~ **RESOLVED**: `:unpaid` folded into `HealthScore.dunning?/1`
+  (`in [:past_due, :unpaid]`) with a `dunning_explanation/2` that names the dunning
+  status; `:paused`-style states keep the honest "unrecognized state" catch-all.
+  Red-path + positive control in `operator_health_score_test.exs`; `:unpaid` added to the
+  property generator.
+- ~~B6-N1~~ **RESOLVED**: permanent foreign-id regression test in
+  `operator_flag_admin_test.exs` — Reads mutators (toggle/set_rollout/put_rules) AND UI
+  events (kill/enable/edit) driven with a foreign org's flag id all answer "Flag not
+  found." with ZERO mutation; own-flag positive control proves the refusal is the org
+  boundary, not a broken path.
+- ~~B6-N2~~ **RESOLVED**: `enable_flag` now routes through an idempotent `enable/3`
+  (the `kill/3` twin — an enabled flag stays enabled); the raw toggle is no longer
+  exposed as a UI event. Red-path: double-click enable after a kill stays ENABLED;
+  double-kill pinned idempotent too.
+- ~~B7-P2-1~~ **RESOLVED as REFUSAL (fail-closed per the design ethos)**: the silent
+  entity_ref scrub-to-nil is replaced by Gate 4 in `Samen.Analytics.track/1` — a
+  PII-shaped / vault-token / structured entity_ref refuses the WHOLE event
+  (`{:error, :pii_rejected}`, logged); non-binary scalars stringify through the same
+  gate. ADR-021 §5 records the decision (RP-A1 addendum). Red-paths in
+  `analytics_track_test.exs` (+ opaque-ref over-block twin) and
+  `demo/test/analytics_capture_test.exs` (zero rows persisted — no partial row).
+- ~~B8-P2-2~~ **RESOLVED**: env-independent SOURCE-level AST scan in
+  `samen_web/test/samen/web/operator_analytics_zero_ash_read_test.exs` — AnalyticsReads
+  contains ZERO Ash calls / `Mount.resource` resolutions, only the two `paf` rollup SQL
+  reads (non-vacuity floor), `use Samen.Cdc.Analytics` marker pinned; anti-tautology
+  fixture (a sneaked live pae `Ash.read!` scan) is FLAGGED. Complements — does not
+  replace — `never_read_current` where the CDC tier is on.
 
 ---
 

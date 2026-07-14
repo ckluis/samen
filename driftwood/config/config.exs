@@ -15,7 +15,8 @@ config :driftwood,
     Driftwood.Aggregate,
     Driftwood.Operator,
     Driftwood.Chat,
-    Driftwood.Primitives
+    Driftwood.Primitives,
+    Driftwood.Analytics
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…)
@@ -31,7 +32,8 @@ config :samen_core, :ash_domains, [
   Driftwood.Aggregate,
   Driftwood.Operator,
   Driftwood.Chat,
-  Driftwood.Primitives
+  Driftwood.Primitives,
+  Driftwood.Analytics
 ]
 
 # WS-A A4/A5 — the kernel notification ENGINE (`Samen.Notifications.Engine`) wired to
@@ -47,6 +49,12 @@ config :samen_core, Samen.Notifications.Engine,
   broadcaster: Samen.Web.Notifications.PubSubBroadcaster
 
 config :samen_web, Samen.Web.Notifications.PubSubBroadcaster, pubsub: Driftwood.PubSub
+
+# WS-B B9 (AC-X1) — the product-analytics capture emitter (ADR-021):
+#   * `Samen.Analytics.track/1` writes into Driftwood's `fae` ledger;
+#   * every flag-variant assignment (ADR-020 §3.4 seam) flows to `track/1`.
+config :samen_core, Samen.Analytics, product_event_resource: Driftwood.Analytics.ProductEvent
+config :samen_core, Samen.FeatureFlags, emit: {Samen.Analytics, :track}
 
 # ADR-010 — the well-known OPERATOR org id (the SaaS company's own org). The operator
 # workspace (`/operator/accounts` · `/billing` · `/desk`) scopes to this org over its OWN book
@@ -95,6 +103,104 @@ config :samen_core, :rollups, [
        WHERE aud_subject_id IS NOT NULL
          AND aud_event_type = 'dispatch'
        GROUP BY aud_occurred_at::date, aud_correlation_id, aud_subject_id::uuid
+       """}
+  },
+  # WS-B B9 (AC-X1) / ADR-018: the DOMAIN-SOURCED revenue-movement rollup
+  # (`mrr_revenue_rollup` — host-invariant table name, the demo B2 spec verbatim),
+  # recomputed from Driftwood's OPERATOR-book movement ledger
+  # (`dpv_subscription_event` — tenants' subscriptions to the SaaS, the operator
+  # cockpit's revenue semantic; the tenant-plane `fbv` ledger is the brokerage's own
+  # book and stays out of the cockpit rollup). Subject-free aggregate by
+  # construction (period/kind grain); the erasure hook is the ledger-side
+  # `subject_delete_sql` keyed on the movement's customer (AC-G7-7 stance).
+  %{
+    name: :revenue_rollup,
+    source: :domain,
+    table: "mrr_revenue_rollup",
+    subject_delete_sql: "DELETE FROM dpv_subscription_event WHERE dpv_customer_id::text = $1",
+    domain_table: "dpv_subscription_event",
+    domain_subject_column: "dpv_customer_id",
+    bounded_columns:
+      ~w(mrr_id mrr_org_id mrr_period_month mrr_kind mrr_delta_cents mrr_count mrr_suppressed mrr_refreshed_at),
+    rebuild_sql:
+      {"DELETE FROM mrr_revenue_rollup",
+       """
+       INSERT INTO mrr_revenue_rollup
+         (mrr_org_id, mrr_period_month, mrr_kind, mrr_delta_cents, mrr_count, mrr_suppressed, mrr_refreshed_at)
+       SELECT
+         dpv_org_id                              AS mrr_org_id,
+         date_trunc('month', dpv_occurred_at)::date AS mrr_period_month,
+         dpv_kind                                AS mrr_kind,
+         COALESCE(SUM(dpv_mrr_delta_cents),0)::int AS mrr_delta_cents,
+         COUNT(*)::int                           AS mrr_count,
+         FALSE                                   AS mrr_suppressed,
+         now()                                   AS mrr_refreshed_at
+       FROM dpv_subscription_event
+       GROUP BY dpv_org_id, date_trunc('month', dpv_occurred_at)::date, dpv_kind
+       """}
+  },
+  # WS-B B9 (AC-X1) / ADR-021: the DOMAIN-SOURCED funnel/retention rollup
+  # (`paf_product_event_rollup` — host-invariant table name, the demo B8 spec with
+  # Driftwood's `fae` ledger as source). Erasure stance per design §4.4: `fae` has
+  # NO subject column — `fae_actor_ref` is a per-subject HMAC pseudonym, so the
+  # load-bearing erasure is key destruction; the `subject_delete_sql` + residue
+  # scan key the pseudonym column against the RAW subject id and match zero rows
+  # BY CONSTRUCTION (they exist to catch a sabotaged track/1 leaking a raw id).
+  %{
+    name: :product_event_rollup,
+    source: :domain,
+    table: "paf_product_event_rollup",
+    subject_delete_sql: "DELETE FROM fae_product_event WHERE fae_actor_ref::text = $1",
+    domain_table: "fae_product_event",
+    domain_subject_column: "fae_actor_ref",
+    bounded_columns:
+      ~w(paf_id paf_org_id paf_kind paf_stage paf_cohort_week paf_week_offset paf_actor_count paf_suppressed paf_refreshed_at),
+    rebuild_sql:
+      {"DELETE FROM paf_product_event_rollup",
+       """
+       INSERT INTO paf_product_event_rollup
+         (paf_org_id, paf_kind, paf_stage, paf_cohort_week, paf_week_offset,
+          paf_actor_count, paf_suppressed, paf_refreshed_at)
+       SELECT
+         fae_org_id                                AS paf_org_id,
+         'funnel'                                  AS paf_kind,
+         CASE fae_event_name
+           WHEN 'session.signed_in'   THEN 'signup'
+           WHEN 'first_run.completed' THEN 'first_run'
+           ELSE 'first_record'
+         END                                       AS paf_stage,
+         NULL::date                                AS paf_cohort_week,
+         NULL::int                                 AS paf_week_offset,
+         COUNT(DISTINCT fae_actor_ref)::int        AS paf_actor_count,
+         FALSE                                     AS paf_suppressed,
+         now()                                     AS paf_refreshed_at
+       FROM fae_product_event
+       WHERE fae_event_name IN ('session.signed_in', 'first_run.completed', 'record.created')
+       GROUP BY fae_org_id, fae_event_name
+       UNION ALL
+       SELECT
+         a.fae_org_id                              AS paf_org_id,
+         'retention'                               AS paf_kind,
+         NULL::text                                AS paf_stage,
+         f.cohort_week                             AS paf_cohort_week,
+         ((date_trunc('week', a.fae_occurred_at)::date - f.cohort_week) / 7)::int
+                                                   AS paf_week_offset,
+         COUNT(DISTINCT a.fae_actor_ref)::int      AS paf_actor_count,
+         FALSE                                     AS paf_suppressed,
+         now()                                     AS paf_refreshed_at
+       FROM fae_product_event a
+       JOIN (
+         SELECT fae_org_id, fae_actor_ref,
+                date_trunc('week', MIN(fae_occurred_at))::date AS cohort_week
+         FROM fae_product_event
+         WHERE fae_actor_ref IS NOT NULL
+         GROUP BY fae_org_id, fae_actor_ref
+       ) f
+         ON f.fae_org_id = a.fae_org_id AND f.fae_actor_ref = a.fae_actor_ref
+       WHERE a.fae_actor_ref IS NOT NULL
+         AND ((date_trunc('week', a.fae_occurred_at)::date - f.cohort_week) / 7) BETWEEN 0 AND 4
+       GROUP BY a.fae_org_id, f.cohort_week,
+                ((date_trunc('week', a.fae_occurred_at)::date - f.cohort_week) / 7)
        """}
   }
 ]

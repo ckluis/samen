@@ -2247,6 +2247,72 @@
     {
       "fields": [
         {
+          "column_name": "fae_actor_ref",
+          "logical_name": "actor_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fae_entity_ref",
+          "logical_name": "entity_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fae_event_kind",
+          "logical_name": "event_kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fae_event_name",
+          "logical_name": "event_name",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fae_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fae_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fae_occurred_at",
+          "logical_name": "occurred_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fae_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fae_props",
+          "logical_name": "props",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fae_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Analytics.ProductEvent",
+      "table_name": "fae_product_event"
+    },
+    {
+      "fields": [
+        {
           "column_name": "fat_company_id",
           "logical_name": "company_id",
           "pii": false,

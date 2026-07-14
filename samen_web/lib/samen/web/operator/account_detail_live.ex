@@ -220,8 +220,8 @@ defmodule Samen.Web.Operator.AccountDetailLive do
                     <td class="i-due" style="color:var(--muted)">{dt(inv.due_date)}</td>
                     <td class="i-paid" style="color:var(--muted)">{dt(inv.paid_at)}</td>
                     <td class="i-dunning">
-                      <span :if={past_due_now?(inv)} class="dunning-flag" style="color:#B42318;font-weight:500">past due</span>
-                      <span :if={!past_due_now?(inv)} style="color:var(--muted)">—</span>
+                      <span :if={inv.__past_due__} class="dunning-flag" style="color:#B42318;font-weight:500">past due</span>
+                      <span :if={!inv.__past_due__} style="color:var(--muted)">—</span>
                     </td>
                   </tr>
                 </.data_table>
@@ -281,18 +281,16 @@ defmodule Samen.Web.Operator.AccountDetailLive do
   defp ticket_status_variant(:closed), do: "mut"
   defp ticket_status_variant(_), do: "mut"
 
+  # `__past_due__` is the Reads-computed determination (ONE `utc_now` per assembly,
+  # B9 carry B4-P2-1) — this LiveView renders it verbatim and never reads a clock,
+  # so the dunning flag can never desync from the score's dunning evidence.
   defp invoice_status_variant(inv) do
     cond do
-      past_due_now?(inv) -> "bad"
+      inv.__past_due__ -> "bad"
       inv.status == :paid -> "ok"
       true -> "mut"
     end
   end
-
-  defp past_due_now?(%{status: status, due_date: %DateTime{} = due}) when status in [:open, :draft],
-    do: DateTime.compare(due, DateTime.utc_now()) == :lt
-
-  defp past_due_now?(_), do: false
 
   defp dt(%DateTime{} = d), do: Calendar.strftime(d, "%Y-%m-%d")
   defp dt(_), do: "—"

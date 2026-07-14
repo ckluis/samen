@@ -184,6 +184,94 @@ defmodule Samen.Web.OperatorFlagAdminTest do
   end
 
   # ---------------------------------------------------------------------------
+  # B9 carry B6-N2 — Re-enable is IDEMPOTENT (interlock symmetry with kill)
+  # ---------------------------------------------------------------------------
+
+  test "RED-PATH (B6-N2): a rapid double-click on Re-enable after a kill leaves the flag ENABLED — never toggled back off; double-kill stays killed" do
+    op_org = seed_operator_org()
+    flag = seed_flag(op_org.id, name: "incident.recover")
+
+    socket = mount_socket(operator_mount(op_org.id))
+    socket = event(socket, "kill_flag", %{"id" => flag.id})
+    refute raw_flag(flag.id).enabled
+
+    # The rapid double-click: two enable_flag events in one breath. The OLD raw
+    # toggle flipped the second click back to disabled — the exact carried defect.
+    socket = event(socket, "enable_flag", %{"id" => flag.id})
+    assert raw_flag(flag.id).enabled
+
+    socket = event(socket, "enable_flag", %{"id" => flag.id})
+    assert socket.assigns.flag_error == nil
+
+    assert raw_flag(flag.id).enabled,
+           "the second click of a Re-enable double-click flipped the flag back off — enable must be idempotent (B6-N2)"
+
+    # The interlock symmetry: kill was already idempotent; pin it so the pair
+    # can never diverge again.
+    socket = event(socket, "kill_flag", %{"id" => flag.id})
+    socket = event(socket, "kill_flag", %{"id" => flag.id})
+    assert socket.assigns.flag_error == nil
+    refute raw_flag(flag.id).enabled
+  end
+
+  # ---------------------------------------------------------------------------
+  # B9 carry B6-N1 — the PERMANENT foreign-id regression probe (the B6 gate's
+  # adversarial probes, folded into the suite): every mutating path driven with a
+  # FOREIGN org's flag id answers "Flag not found." and mutates NOTHING —
+  # insurance against a refactor sourcing org_id from event params instead of
+  # socket.assigns.
+  # ---------------------------------------------------------------------------
+
+  test "FOREIGN-ID REGRESSION (B6-N1): toggle / kill / ramp / rules driven with another org's flag id — 'Flag not found.', ZERO mutation" do
+    op_org = seed_operator_org()
+    foreign_org_id = Ash.UUID.generate()
+
+    foreign =
+      seed_flag(foreign_org_id,
+        name: "foreign.crown_jewel",
+        enabled: true,
+        rollout_pct: 77,
+        target_rules: [%{"attribute" => "plan", "op" => "eq", "values" => ["pro"], "then" => "on"}]
+      )
+
+    mount = operator_mount(op_org.id)
+    socket = mount_socket(mount)
+    flags_mount = %{mount | namespace: Samen.WebTest.Primitives, scope_kind: :flags}
+    admin_scope = Reads.write_scope(mount, op_org.id)
+
+    # The Reads mutators (what save_ramp / add_rule / remove_rule ride) — the
+    # kernel OrgScope makes the foreign row invisible to the elevated ADMIN scope.
+    assert {:error, "Flag not found."} = Reads.toggle_flag(flags_mount, admin_scope, foreign.id)
+    assert {:error, "Flag not found."} = Reads.set_rollout(flags_mount, admin_scope, foreign.id, 0)
+    assert {:error, "Flag not found."} = Reads.put_rules(flags_mount, admin_scope, foreign.id, [])
+
+    # The UI events, foreign id in the event PARAMS (the refactor this insures
+    # against would trust exactly these params).
+    killed = event(socket, "kill_flag", %{"id" => foreign.id})
+    assert killed.assigns.flag_error == "Flag not found."
+
+    enabled = event(socket, "enable_flag", %{"id" => foreign.id})
+    assert enabled.assigns.flag_error == "Flag not found."
+
+    # edit_flag with a foreign id opens NO modal — so the modal-scoped mutators
+    # (save_ramp / add_rule) have no foreign flag to write through.
+    edited = event(socket, "edit_flag", %{"id" => foreign.id})
+    assert edited.assigns.edit_flag == nil
+
+    # ZERO MUTATION: the foreign flag is exactly as seeded.
+    after_probe = raw_flag(foreign.id)
+    assert after_probe.enabled == true
+    assert after_probe.rollout_pct == 77
+    assert [%{"attribute" => "plan"}] = after_probe.target_rules
+
+    # POSITIVE CONTROL (anti-tautology): the SAME calls against the operator's OWN
+    # flag id succeed — the refusal above is the org boundary, not a broken path.
+    own = seed_flag(op_org.id, name: "platform.own_flag", rollout_pct: 10)
+    assert {:ok, _} = Reads.set_rollout(flags_mount, admin_scope, own.id, 55)
+    assert raw_flag(own.id).rollout_pct == 55
+  end
+
+  # ---------------------------------------------------------------------------
   # Ramp + targeting + per-org evaluated state (the debugging modal)
   # ---------------------------------------------------------------------------
 

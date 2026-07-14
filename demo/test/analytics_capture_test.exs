@@ -109,6 +109,21 @@ defmodule Demo.AnalyticsCaptureTest do
 
       assert events(org_id) == [], "a refused PII payload must never reach pae"
     end
+
+    test "a PII-shaped entity_ref writes NO row (refusal symmetry, B9 carry B7-P2-1 — no partial row from a silent scrub)" do
+      org_id = Ash.UUID.generate()
+
+      assert {:error, :pii_rejected} =
+               Analytics.track(%{
+                 org_id: org_id,
+                 event_name: "record.created",
+                 entity_ref: "alice@example.com",
+                 props: %{"resource" => "crm.contact"}
+               })
+
+      # The OLD scrub persisted this row with entity_ref: nil. Fail-closed: nothing.
+      assert events(org_id) == [], "a refused entity_ref must refuse the WHOLE event, never persist a scrubbed row"
+    end
   end
 
   describe "AC-G12-3 — pae is token-blind by construction" do

@@ -93,6 +93,54 @@
     {
       "fields": [
         {
+          "column_name": "ahb_account_count",
+          "logical_name": "account_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "ahb_band",
+          "logical_name": "band",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ahb_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ahb_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ahb_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ahb_refreshed_at",
+          "logical_name": "refreshed_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ahb_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Aggregate.HealthByBand",
+      "table_name": "ahb_health_by_band"
+    },
+    {
+      "fields": [
+        {
           "column_name": "amr_id",
           "logical_name": "id",
           "pii": false,

@@ -123,6 +123,30 @@ defmodule Samen.Web.OperatorHealthScoreTest do
     assert b.band != :healthy
   end
 
+  test "RED-PATH (B9 carry B4-P2-2): an :unpaid subscription is DUNNING-adjacent — capped billing, an explanation that says so, never 'unrecognized state'" do
+    unpaid_row = row(%{__subscription__: %{status: :unpaid}})
+    b = HealthScore.score(unpaid_row)
+    billing = factor(b, :billing)
+
+    # :unpaid (dunning exhausted, the state PAST :past_due) is dunning, encoded.
+    assert HealthScore.dunning?(unpaid_row)
+    assert billing.value <= 0.5
+    assert HealthScore.factor_band(billing) != :healthy
+    assert b.band != :healthy
+
+    # The explanation FLAGS the dunning-adjacent status (the carried gap: the band
+    # was capped, but the string called it an unrecognized state).
+    assert billing.explanation =~ "in dunning"
+    assert billing.explanation =~ "subscription unpaid"
+    refute billing.explanation =~ "unrecognized"
+
+    # POSITIVE CONTROL (anti-tautology): a genuinely unmapped state still lands in
+    # the honest catch-all — the fold is for :unpaid, not a blanket rewording.
+    paused = factor(HealthScore.score(row(%{__subscription__: %{status: :paused}})), :billing)
+    assert paused.explanation =~ "unrecognized state"
+    refute paused.explanation =~ "in dunning"
+  end
+
   # -- AC-G17-3: explainable by construction ---------------------------------------
 
   test "every factor carries value / weight / contribution / non-empty explanation — no second computation needed" do
@@ -177,7 +201,7 @@ defmodule Samen.Web.OperatorHealthScoreTest do
 
   property "over the whole input space: score in 0..100, band bounded, breakdown sums to composite, deterministic, dunning never healthy" do
     check all(
-            status <- member_of([:active, :trialing, :past_due, :cancelled, :canceled, :paused, nil]),
+            status <- member_of([:active, :trialing, :past_due, :unpaid, :cancelled, :canceled, :paused, nil]),
             pd_count <- integer(0..8),
             pd_days <- integer(0..400),
             pd_amount <- integer(0..5_000_000),

@@ -150,6 +150,63 @@ defmodule Samen.Web.OperatorAccountDetailRenderTest do
     refute paid_row =~ "in dunning"
   end
 
+  # -- B9 carry B4-P2-1: ONE clock — the dunning flag can never desync from the score
+
+  test "RED-PATH (B4-P2-1): the invoice dunning flag is the READS-computed determination — a due date crossing 'now' between read and render cannot desync flag and score",
+       %{seed: seed, account: account} do
+    # Clear the seeded dunning, then park the current invoice's due date JUST ahead
+    # of "now": at READ time the account is current (no dunning evidence, billing
+    # healthy) — and one second later that due date has crossed the clock.
+    account.past_due_invoice
+    |> Ash.Changeset.for_update(:update, %{status: :paid}, authorize?: false)
+    |> Ash.update!()
+
+    account.invoice
+    |> Ash.Changeset.for_update(
+      :update,
+      %{due_date: DateTime.add(DateTime.utc_now(), 1, :second)},
+      authorize?: false
+    )
+    |> Ash.update!()
+
+    mount = build_operator_mount(seed.operator_org_id)
+
+    # Load (the read) WITHOUT rendering yet — the exact window the dual utc_now
+    # straddled (Reads assembly vs the old render-time `past_due_now?`).
+    socket =
+      %Phoenix.LiveView.Socket{}
+      |> Phoenix.Component.assign(:samen_mount, mount)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
+      |> Samen.Web.Operator.AccountDetailLive.load(account.account_org.id)
+
+    detail = socket.assigns.detail
+
+    # The determination is ON THE ROW, computed once by Reads: nothing past due.
+    assert detail.invoices != []
+    assert Enum.all?(detail.invoices, &(&1.__past_due__ == false))
+    billing = Enum.find(detail.account.__health__.factors, &(&1.name == :billing))
+    assert billing.explanation =~ "no past-due invoices"
+
+    # Let the due date CROSS "now" between the read and the render.
+    Process.sleep(1_200)
+
+    html = render_html(Samen.Web.Operator.AccountDetailLive, socket.assigns)
+
+    # The render trusts the READ-time determination — no second clock. The OLD
+    # code recomputed `DateTime.utc_now()` here and flagged "past due" beside a
+    # billing factor that said current: the momentary flag/score desync.
+    refute html =~ ~s(class="dunning-flag"),
+           "the render recomputed past-due from a second clock — flag/score desync (B4-P2-1)"
+
+    assert html =~ "no past-due invoices"
+
+    # POSITIVE CONTROL (anti-tautology): a FRESH read after the crossing sees the
+    # invoice past due — flag AND score flip together, from the same one clock.
+    fresh = detail_html(seed, account)
+    assert fresh =~ ~s(class="dunning-flag")
+    assert fresh =~ "in dunning"
+  end
+
   # -- AC-G17-5: masking — the odd operator-plane mount fails MASKED ---------------
 
   test "on a hand-crafted plane: :operator mount the PII evidence renders •••• and no vt_ token leaks; the score (not a PII surface) still renders",

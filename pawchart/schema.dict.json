@@ -939,6 +939,72 @@
     {
       "fields": [
         {
+          "column_name": "vae_actor_ref",
+          "logical_name": "actor_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vae_entity_ref",
+          "logical_name": "entity_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vae_event_kind",
+          "logical_name": "event_kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vae_event_name",
+          "logical_name": "event_name",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vae_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vae_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vae_occurred_at",
+          "logical_name": "occurred_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vae_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vae_props",
+          "logical_name": "props",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "vae_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Analytics.ProductEvent",
+      "table_name": "vae_product_event"
+    },
+    {
+      "fields": [
+        {
           "column_name": "vca_custom",
           "logical_name": "custom",
           "pii": false,
@@ -1449,10 +1515,22 @@
           "type": "Atom"
         },
         {
+          "column_name": "vff_target_rules",
+          "logical_name": "target_rules",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
+        },
+        {
           "column_name": "vff_updated_at",
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vff_variants",
+          "logical_name": "variants",
+          "pii": false,
+          "type": "Map"
         }
       ],
       "resource": "PawChart.Primitives.FeatureFlag",

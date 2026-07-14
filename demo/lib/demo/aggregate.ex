@@ -25,7 +25,13 @@ defmodule Demo.Aggregate do
       status. Columns: status (bounded enum), depth (int) — a count, never a
       subject.
 
-  These are the two doc examples: "Cross-tenant views (MRR, queues)". Both are
+    * `Demo.Aggregate.HealthByBand` (`ahb_health_by_band`) — cross-tenant account
+      count per health BAND ("how many accounts are at-risk across the fleet";
+      design §2.3, ADR-019 §5, AC-G17-6). Columns: band (bounded enum),
+      account_count (int) — a count, never a subject. The k-anon floor suppresses a
+      band with <5 accounts.
+
+  The first two are the doc examples: "Cross-tenant views (MRR, queues)". All three are
   `use Samen.Aggregate.Resource`, so the C7 `NoPiiColumns` verifier FAILS the build
   if either declares a `pii_attribute`, a vault, a `pii_`-shaped column, or a
   relationship reaching a PII-bearing resource. Their physical tables contain no
@@ -45,6 +51,7 @@ defmodule Demo.Aggregate do
   resources do
     resource(Demo.Aggregate.MrrByTier)
     resource(Demo.Aggregate.TicketQueueDepth)
+    resource(Demo.Aggregate.HealthByBand)
   end
 end
 
@@ -188,6 +195,83 @@ defmodule Demo.Aggregate.TicketQueueDepth do
       distinct_sensitive_column: :distinct_priorities,
       value_columns: [:depth],
       sensitive_attribute: :ticket_priority
+    }
+  end
+end
+
+defmodule Demo.Aggregate.HealthByBand do
+  @moduledoc """
+  Cross-tenant health-band distribution — "how many accounts are at-risk across the
+  fleet" (design §2.3 LOAD-BEARING; ADR-019 §5; build-plan B4 task 4; AC-G17-6). A
+  `use Samen.Aggregate.Resource` projection over the vault-excluded
+  `ahb_health_by_band` summary table.
+
+  Per-tenant health of the operator's OWN book is a TENANT-plane read (clear — the
+  SaaS owns it; `Samen.Web.Operator.Reads.account_metrics/3` is that own-book count,
+  floor-free by design). CROSS-tenant health — the portfolio distribution — is
+  aggregate-ONLY: it routes through this projection + `operator_aggregate` +
+  `aggregate_cohort_spec/0`, and every cell passes the k-anon floor. A health band
+  with fewer than `k` (=5 in production) accounts across the fleet renders
+  `%Suppressed{}` — the operator can never learn "there is exactly 1 critical
+  account" (which, joined with any side channel, re-identifies it).
+
+  Every column is bounded / non-PII: `band` (a health-band enum — `:healthy |
+  :watch | :at_risk | :critical`), `account_count` (a count). NO `pii_attribute`,
+  NO vault, NO relationship to a PII-bearing resource — the C7 verifier enforces
+  this at compile time. NO `org_id` filter: it spans ALL tenants.
+
+  No l-diversity dimension here: a per-band account count is a single count, with no
+  sensitive sub-attribute riding it (unlike `TicketQueueDepth`, whose priority is
+  the l-diversity dimension). k-anonymity alone is the floor.
+  """
+  use Samen.Aggregate.Resource,
+    otp_app: :demo,
+    domain: Demo.Aggregate,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
+    abbrev: "ahb"
+
+  postgres do
+    table("ahb_health_by_band")
+    repo(Demo.Repo)
+  end
+
+  attributes do
+    # Cross-tenant aggregate: NO single org (nullable, opt out of non-null injection).
+    attribute(:org_id, :uuid, public?: true, allow_nil?: true)
+    # The health band (bounded enum) — the COHORT key. Non-PII.
+    attribute(:band, :string, public?: true, allow_nil?: false)
+    # Number of accounts in this band across all tenants — the cohort SIZE (k-anon)
+    # AND the releasable value the floor suppresses. Non-PII (a count).
+    attribute(:account_count, :integer, public?: true, default: 0)
+    attribute(:refreshed_at, :utc_datetime, public?: true)
+  end
+
+  actions do
+    defaults([:read])
+  end
+
+  policies do
+    policy always() do
+      authorize_if(Samen.Policy.AggregateActorOnly)
+    end
+  end
+
+  @doc """
+  The T4.5 cohort spec (AC-G17-6): the cohort is the health `band`; the cohort SIZE
+  (for k-anonymity) is `account_count` — how many accounts fall in this band across
+  the fleet. The RELEASABLE VALUE `account_count` is suppressed when it is `< k`
+  (including a count-of-one band, which — joined with a side channel — would
+  re-identify the single at-risk/critical account). No l-diversity dimension (a
+  per-band account count carries no sensitive sub-attribute).
+  """
+  def aggregate_cohort_spec do
+    %Samen.Aggregate.CohortSpec{
+      cohort_key_columns: [:band],
+      cohort_count_column: :account_count,
+      distinct_sensitive_column: nil,
+      value_columns: [:account_count],
+      sensitive_attribute: nil
     }
   end
 end

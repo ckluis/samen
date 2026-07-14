@@ -12,7 +12,8 @@ defmodule Samen.Web.Operator.HealthScore do
 
     * **`:billing`** (40) — subscription state + DUNNING. This is the incoherence fix
       (AC-G17-2): the old pill mapped `status == :active` → healthy while Billing
-      showed past-due invoices. Here any past-due invoice (or a `:past_due` status)
+      showed past-due invoices. Here any past-due invoice (or a `:past_due` /
+      `:unpaid` status — the latter is dunning-exhausted, folded in per B4-P2-2)
       puts the account IN DUNNING and structurally CAPS the billing value at
       #{inspect(0.5)} (`@dunning_cap`) — below the factor's top band — scaled down
       further by days-overdue and invoice count. An account in dunning can NEVER
@@ -116,11 +117,15 @@ defmodule Samen.Web.Operator.HealthScore do
 
   @doc """
   Whether the row is IN DUNNING (the gate-flagged incoherence input): any past-due
-  invoice on the books, or a `:past_due` subscription status — the two signals must
-  agree with the rendered health, so EITHER puts the billing dimension under the cap.
+  invoice on the books, or a `:past_due` / `:unpaid` subscription status — the
+  signals must agree with the rendered health, so ANY of them puts the billing
+  dimension under the cap. `:unpaid` (dunning exhausted, subscription parked unpaid —
+  the Stripe lifecycle state PAST `:past_due`) is dunning-adjacent by definition; it
+  previously fell into the "unrecognized state" branch (band correctly capped, but
+  the explanation never flagged it) — folded here per the B9 carry (B4-P2-2).
   """
   def dunning?(row) when is_map(row) do
-    past_due(row).count > 0 or sub_status(row) == :past_due
+    past_due(row).count > 0 or sub_status(row) in [:past_due, :unpaid]
   end
 
   @doc """
@@ -177,10 +182,7 @@ defmodule Samen.Web.Operator.HealthScore do
           {0.0, "subscription cancelled — churned"}
 
         dunning?(row) ->
-          {dunning_value(pd),
-           "in dunning: #{pd.count} past-due invoice(s), #{cents(pd.amount_cents)} overdue, " <>
-             "oldest #{pd.max_days_overdue} day(s) past due — billing is capped below the top band " <>
-             "until every invoice clears (the dunning ceiling)"}
+          {dunning_value(pd), dunning_explanation(pd, sub_status(row))}
 
         sub_status(row) in [:active, :trialing] ->
           {1.0, "subscription #{sub_status(row)} and current — no past-due invoices"}
@@ -190,6 +192,18 @@ defmodule Samen.Web.Operator.HealthScore do
       end
 
     %Factor{name: :billing, weight: weight(:billing), value: clamp01(value), explanation: explanation}
+  end
+
+  # The dunning explanation, built from bounded inputs only (never PII). A dunning
+  # STATUS (`:past_due` / `:unpaid`) is named explicitly so a subscription parked
+  # `:unpaid` with zero visible invoice rows still reads as dunning, never as an
+  # unrecognized state (B4-P2-2).
+  defp dunning_explanation(pd, status) do
+    status_note = if status in [:past_due, :unpaid], do: "subscription #{status}; ", else: ""
+
+    "in dunning: #{status_note}#{pd.count} past-due invoice(s), #{cents(pd.amount_cents)} overdue, " <>
+      "oldest #{pd.max_days_overdue} day(s) past due — billing is capped below the top band " <>
+      "until every invoice clears (the dunning ceiling)"
   end
 
   # Dunning value: starts AT the cap and only goes down — 0.35 over 90 days of age,

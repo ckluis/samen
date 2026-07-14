@@ -112,14 +112,17 @@ defmodule Samen.Web.Operator.Reads do
   end
 
   # The per-account join maps (admins / subscription / customer / open desk tickets) —
-  # each underlying read is OrgScope'd + bounded (`@lookup_limit`).
-  defp account_joins(mount, scope, operator_org_id) do
+  # each underlying read is OrgScope'd + bounded (`@lookup_limit`). `now` is the ONE
+  # clock reading for the whole assembly (B9 carry B4-P2-1): every past-due
+  # determination downstream of these joins derives from it, so the evidence flag and
+  # the score can never straddle a due-date crossing between two `utc_now` calls.
+  defp account_joins(mount, scope, operator_org_id, now \\ DateTime.utc_now()) do
     %{
       admins_by_account: admins_by_account(mount, scope),
       subs_by_customer: subscriptions_by_customer(mount, scope),
       customers_by_account: customers_by_account(mount, scope, operator_org_id),
       tickets_by_account: ticket_counts_by_account(mount, scope),
-      past_due_by_account: past_due_by_account(mount, scope)
+      past_due_by_account: past_due_by_account(mount, scope, now)
     }
   end
 
@@ -337,6 +340,12 @@ defmodule Samen.Web.Operator.Reads do
   joins (requester PII resolves through `PiiResolution` per plane — CLEAR on the
   operator's own tenant plane, `••••` on any odd operator-plane mount, AC-G17-5).
 
+  ONE clock reading (B9 carry B4-P2-1): `now` is captured once here and threaded to
+  every past-due determination — the score's dunning evidence AND each invoice's
+  rendered `__past_due__` flag derive from the SAME instant, so a due date crossing
+  "now" mid-assembly can never desync the flag from the score. The LiveView renders
+  `__past_due__` verbatim and NEVER reads a clock.
+
   Returns `%{account:, movements:, tickets:, invoices:}` or `nil` (unknown account /
   read error) — the LiveView renders "not found", never a crash.
   """
@@ -346,14 +355,18 @@ defmodule Samen.Web.Operator.Reads do
         nil
 
       org ->
-        row = account_row(org, account_joins(mount, scope, operator_org_id))
+        now = DateTime.utc_now()
+        row = account_row(org, account_joins(mount, scope, operator_org_id, now))
         customer_id = row.__customer__ && row.__customer__.id
 
         %{
           account: row,
           movements: movements_for_customer(mount, scope, customer_id),
           tickets: desk(mount, scope) |> Enum.filter(&(&1.__requester_org_id__ == row.tenant_org_id)),
-          invoices: invoices(mount, scope) |> Enum.filter(&(&1.customer_id == customer_id))
+          invoices:
+            invoices(mount, scope)
+            |> Enum.filter(&(&1.customer_id == customer_id))
+            |> Enum.map(&Map.put(&1, :__past_due__, past_due?(&1, now)))
         }
     end
   rescue
@@ -581,9 +594,8 @@ defmodule Samen.Web.Operator.Reads do
   # AC-G17-2): count / amount / oldest-days-overdue of past-due invoices, grouped by
   # the invoice customer's tenant_org_id back-reference. Reuses the bounded
   # `invoices/2` read; day counts are computed HERE so the score stays clock-free.
-  defp past_due_by_account(mount, scope) do
-    now = DateTime.utc_now()
-
+  # `now` arrives from the caller (ONE reading per assembly — B9 carry B4-P2-1).
+  defp past_due_by_account(mount, scope, now) do
     invoices(mount, scope)
     |> Enum.filter(&past_due?(&1, now))
     |> Enum.reduce(%{}, fn inv, acc ->

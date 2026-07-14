@@ -68,6 +68,7 @@
     "cmd": "Demo.CmsScope.Media",
     "cpt": "Demo.CmsScope.Post",
     "amr": "Demo.Aggregate.MrrByTier",
+    "ahb": "Demo.Aggregate.HealthByBand",
     "cea": "Core.Ctx.Activity",
     "com": "SamenCore.Support.Crm.Contact",
     "cbl": "Demo.CmsScope.Block",
@@ -260,6 +261,8 @@
     "vsh": "PawChart.Primitives.SearchIndex",
     "vwh": "PawChart.Primitives.Webhook",
     "vff": "PawChart.Primitives.FeatureFlag",
-    "pae": "Demo.Analytics.ProductEvent"
+    "pae": "Demo.Analytics.ProductEvent",
+    "fae": "Driftwood.Analytics.ProductEvent",
+    "vae": "PawChart.Analytics.ProductEvent"
   }
 }

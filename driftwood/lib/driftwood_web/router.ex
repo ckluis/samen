@@ -207,7 +207,10 @@ defmodule DriftwoodWeb.Router do
         operator_workspace: "Driftwood Ops",
         operator_glyph: "D",
         tenant_landing: "/broker",
-        impersonate_path: "/operator/impersonate"
+        impersonate_path: "/operator/impersonate",
+        # WS-B B6/B9 — the FlagAdminLive namespace seam: the host's Primitives
+        # mount whose FeatureFlag rows the platform flag admin manages (AC-G6-7).
+        flags_namespace: Driftwood.Primitives
       }
     )
   end
