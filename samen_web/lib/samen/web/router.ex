@@ -148,6 +148,10 @@ defmodule Samen.Web.Router do
         # targeting + per-org state; inherited at 0 vertical LOC. Wire the host's
         # Primitives namespace via a `flags_namespace:` label to activate.
         live("#{path}/flags", Samen.Web.Operator.FlagAdminLive)
+        # The B8 product-analytics SEED read (ADR-021 / AC-G12-6) — the one funnel +
+        # 4-week retention curve over the paf rollup, cross-tenant under the k-anon
+        # floor; inherited at 0 vertical LOC.
+        live("#{path}/analytics", Samen.Web.Operator.AnalyticsLive)
         live("#{path}/desk", Samen.Web.Operator.DeskLive)
 
         if include_aggregate do

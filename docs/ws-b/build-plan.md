@@ -143,6 +143,13 @@ B1→B2→B3 is the G7 chain (must serialize). B4 (G17) needs B1's `mov` for the
 - B6-N2: operator Re-enable uses toggle_flag (a flip, not idempotent) — a rapid
   double-click after a kill flips back to disabled; consider an idempotent enable action
   or interlock symmetry with the kill confirm.
+- B7-P2-1: a PII-shaped entity_ref is silently scrubbed to nil rather than refusing the
+  whole event (asymmetric with the prop-value gate; value never persists). Consider
+  refusal symmetry or document the scrub stance in ADR-021.
+- B8-P2-2: in samen_web test env the never_read_current lint is vacuous (CDC tier off),
+  so a future regression sourcing a live pae Ash scan into AnalyticsReads would not be
+  caught by that lint there — the zero-Ash-read posture rests on the reads AST lint +
+  render tests. Consider an env-independent assertion.
 
 ---
 

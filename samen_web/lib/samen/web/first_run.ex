@@ -69,6 +69,53 @@ defmodule Samen.Web.FirstRun do
   end
 
   @doc """
+  The framework RECORD-CREATED choke point (WS-B / G12, design §4.2). A mounted create
+  surface calls this AFTER a successful create to emit the seed product events — so every
+  vertical inherits emission through the shared create path, never authoring an event:
+
+    * always emits `record.created` (bounded resource label + the new row's opaque id);
+    * emits `first_run.completed` too WHEN `was_first_run?` — i.e. the org was empty
+      across its core resources BEFORE this create, so this row is the empty→non-empty
+      transition that retires the first-run checklist (design §4.2).
+
+  `was_first_run?` MUST be captured with `first_run?/2` BEFORE the create (the resource is
+  non-empty afterwards). On the OPERATOR plane `first_run?/2` is `false` by construction,
+  so only `record.created` ever emits there.
+
+  Best-effort + token-blind: both emits ride through `Samen.Analytics.track/1`, which is
+  non-raising and refuses any PII-shaped value. A capture failure NEVER affects the create
+  that already succeeded. `resource` is a bounded label (a module/atom/short name), never a
+  field value; `subject_id` (optional) is pseudonymized to `pae_actor_ref` by `track/1`.
+  """
+  @spec emit_record_created(Mount.t(), String.t() | nil, boolean(), keyword()) :: :ok
+  def emit_record_created(mount, org_id, was_first_run?, opts \\ [])
+
+  def emit_record_created(%Mount{}, org_id, _was_first_run?, _opts)
+      when not is_binary(org_id) or org_id == "",
+      do: :ok
+
+  def emit_record_created(%Mount{} = mount, org_id, was_first_run?, opts) do
+    resource = Keyword.get(opts, :resource, mount.scope_kind)
+
+    _ =
+      Samen.Analytics.Sources.record_created(org_id, resource,
+        subject_id: Keyword.get(opts, :subject_id),
+        entity_ref: Keyword.get(opts, :entity_ref)
+      )
+
+    # The empty→non-empty transition retires the first-run checklist — emit it too.
+    # (Operator plane never reaches here as first-run: first_run?/2 is false there.)
+    if was_first_run? do
+      _ = Samen.Analytics.Sources.first_run_completed(org_id)
+    end
+
+    :ok
+  rescue
+    # Belt: the emit is best-effort — a capture path fault never touches the caller.
+    _ -> :ok
+  end
+
+  @doc """
   The tenant first-run checklist card (AC-G5-2) — the designed three steps:
 
     1. **Add your first …** — wired to the surface's create event (`create_event`).

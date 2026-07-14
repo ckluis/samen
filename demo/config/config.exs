@@ -4,7 +4,7 @@ import Config
 # It uses samen_core as a path dep and exercises EVERY T1 feature.
 config :demo,
   ecto_repos: [Demo.Repo],
-  ash_domains: [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.PrimitivesScope, Demo.Aggregate]
+  ash_domains: [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.PrimitivesScope, Demo.Analytics, Demo.Aggregate]
 
 # samen_core verifiers (C1/C2/C3/C4/C5) discover domains from
 # :samen_core :ash_domains. Register the demo's domains here so the
@@ -13,7 +13,14 @@ config :demo,
 # Marketing scope (T3.4), the CMS scope (T3.5), the Support scope
 # (T3.6), and the Primitives scope (T3.7 — resources catalogued in HOST's
 # catalog, scanned by host's UNCHANGED verifiers, per ADR-004).
-config :samen_core, :ash_domains, [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.PrimitivesScope, Demo.Aggregate]
+config :samen_core, :ash_domains, [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.PrimitivesScope, Demo.Analytics, Demo.Aggregate]
+
+# WS-B / Phase B7 (ADR-021): wire the product-analytics capture seam.
+#   * `Samen.Analytics.track/1` writes into the DEMO's `pae` ledger;
+#   * every feature-flag variant assignment (design §3.4) flows to `track/1` via the
+#     configured emitter — zero call-site changes (B5/B6 seam → B7 sink).
+config :samen_core, Samen.Analytics, product_event_resource: Demo.Analytics.ProductEvent
+config :samen_core, Samen.FeatureFlags, emit: {Samen.Analytics, :track}
 
 # T3.6 SLA breach detection: configure the ticket resource for the Oban cron.
 config :samen_core, :support_sla_breach_ticket_resource, Demo.SupportScope.Ticket
@@ -191,6 +198,81 @@ config :samen_core, :rollups, [
          now()                                   AS mrr_refreshed_at
        FROM mov_subscription_event
        GROUP BY mov_org_id, date_trunc('month', mov_occurred_at)::date, mov_kind
+       """}
+  },
+  # WS-B / Phase B8 (ADR-021): the DOMAIN-SOURCED funnel/retention rollup
+  # (`paf_product_event_rollup`) over the `pae` product-event ledger — the G12 SEED
+  # read's data source, on the `revenue_rollup` (B2/ADR-018) machinery exactly.
+  # TWO arms in one table: funnel rows (org, stage) for signup→first-run→first-record
+  # (a row exists iff the org reached the stage; actor_count = distinct pseudonyms,
+  # 0 for org-level events) and retention rows (org, cohort_week, week_offset 0..4)
+  # of distinct actors active N weeks after their first event. Bounded to the
+  # design's ONE funnel + 4-week curve — no paths, no DAU/MAU, no ClickHouse.
+  #
+  # ERASURE STANCE (design §4.4 — `pae` has NO subject column): `pae_actor_ref` is a
+  # per-subject HMAC pseudonym, so the LOAD-BEARING erasure is B7's key destruction
+  # (post-shred the pseudonym is unreconstructable; AC-G12-5) — the rollup's counts
+  # stay honest k-anonymous aggregate. The `subject_delete_sql` + oracle residue
+  # scan below key `pae_actor_ref` against the RAW subject id and match ZERO rows
+  # BY CONSTRUCTION (token-blind: the raw id never reaches `pae`). That zero IS the
+  # invariant they enforce: were a sabotaged `track/1` ever to leak a raw subject id
+  # into `pae_actor_ref`, the domain REBUILD arm deletes it on shred and the
+  # DbContent oracle's INDEPENDENT residue scan (B2-P1) flags any survivor.
+  %{
+    name: :product_event_rollup,
+    source: :domain,
+    table: "paf_product_event_rollup",
+    subject_delete_sql: "DELETE FROM pae_product_event WHERE pae_actor_ref::text = $1",
+    domain_table: "pae_product_event",
+    domain_subject_column: "pae_actor_ref",
+    bounded_columns:
+      ~w(paf_id paf_org_id paf_kind paf_stage paf_cohort_week paf_week_offset paf_actor_count paf_suppressed paf_refreshed_at),
+    rebuild_sql:
+      {"DELETE FROM paf_product_event_rollup",
+       """
+       INSERT INTO paf_product_event_rollup
+         (paf_org_id, paf_kind, paf_stage, paf_cohort_week, paf_week_offset,
+          paf_actor_count, paf_suppressed, paf_refreshed_at)
+       SELECT
+         pae_org_id                                AS paf_org_id,
+         'funnel'                                  AS paf_kind,
+         CASE pae_event_name
+           WHEN 'session.signed_in'   THEN 'signup'
+           WHEN 'first_run.completed' THEN 'first_run'
+           ELSE 'first_record'
+         END                                       AS paf_stage,
+         NULL::date                                AS paf_cohort_week,
+         NULL::int                                 AS paf_week_offset,
+         COUNT(DISTINCT pae_actor_ref)::int        AS paf_actor_count,
+         FALSE                                     AS paf_suppressed,
+         now()                                     AS paf_refreshed_at
+       FROM pae_product_event
+       WHERE pae_event_name IN ('session.signed_in', 'first_run.completed', 'record.created')
+       GROUP BY pae_org_id, pae_event_name
+       UNION ALL
+       SELECT
+         a.pae_org_id                              AS paf_org_id,
+         'retention'                               AS paf_kind,
+         NULL::text                                AS paf_stage,
+         f.cohort_week                             AS paf_cohort_week,
+         ((date_trunc('week', a.pae_occurred_at)::date - f.cohort_week) / 7)::int
+                                                   AS paf_week_offset,
+         COUNT(DISTINCT a.pae_actor_ref)::int      AS paf_actor_count,
+         FALSE                                     AS paf_suppressed,
+         now()                                     AS paf_refreshed_at
+       FROM pae_product_event a
+       JOIN (
+         SELECT pae_org_id, pae_actor_ref,
+                date_trunc('week', MIN(pae_occurred_at))::date AS cohort_week
+         FROM pae_product_event
+         WHERE pae_actor_ref IS NOT NULL
+         GROUP BY pae_org_id, pae_actor_ref
+       ) f
+         ON f.pae_org_id = a.pae_org_id AND f.pae_actor_ref = a.pae_actor_ref
+       WHERE a.pae_actor_ref IS NOT NULL
+         AND ((date_trunc('week', a.pae_occurred_at)::date - f.cohort_week) / 7) BETWEEN 0 AND 4
+       GROUP BY a.pae_org_id, f.cohort_week,
+                ((date_trunc('week', a.pae_occurred_at)::date - f.cohort_week) / 7)
        """}
   }
 ]

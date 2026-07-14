@@ -125,8 +125,19 @@ defmodule Samen.Web.CRM.ContactsLive do
   # operator plane `Samen.Pii.WriteGuard` REJECTS it at the write path (MC-1) and the
   # error renders inline — this LiveView adds no policy of its own.
   def handle_event("save_new", %{"form" => params}, socket) do
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    # WS-B / G12 (design §4.2): capture the first-run state BEFORE the create (the org is
+    # non-empty afterwards) so the framework choke point can emit the empty→non-empty
+    # `first_run.completed` alongside `record.created`. Best-effort — never affects the write.
+    was_first_run? = FirstRun.first_run?(mount, org_id)
+
     case AshPhoenix.Form.submit(socket.assigns.new_form, params: with_org(params, socket)) do
-      {:ok, _person} ->
+      {:ok, person} ->
+        FirstRun.emit_record_created(mount, org_id, was_first_run?,
+          resource: Person,
+          entity_ref: person.id
+        )
+
         {:noreply, socket |> assign(show_new: false) |> load(socket.assigns.org_id)}
 
       {:error, form} ->

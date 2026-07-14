@@ -29,6 +29,11 @@ defmodule Samen.Web.SessionController do
 
   @doc "Set the session current org to `:org_id` and redirect to a sanitized `return_to`."
   def put_current_org(conn, %{"org_id" => org_id} = params) do
+    # WS-B / G12 (design §4.2): the framework session choke point emits a bounded,
+    # token-blind `session.signed_in` product event — best-effort (a capture failure
+    # never affects the session write). Verticals inherit emission at 0 LOC.
+    _ = Samen.Analytics.Sources.session_signed_in(org_id)
+
     conn
     |> put_session(CurrentOrg.session_key(), org_id)
     |> redirect(to: safe_return(params["return_to"]))

@@ -378,6 +378,36 @@ defmodule Samen.FeatureFlagsEngineTest do
       assert d2.variant == d.variant
     end
 
+    # B7 — closes the B5 carry: a subject_key-only caller (a per-org stable token,
+    # NO :org_id key) must still yield an org-scoped assignment payload. Before the
+    # fix `assignment_payload` returned org_id: nil for these callers, orphaning the
+    # `flag.assignment` pae event off any org (design §3.4 requires a bounded org_id).
+    test "a subject_key-only subject yields the subject_key as the assignment org_id (B5 carry closed)" do
+      test_pid = self()
+      opts = loader_opts(%{"exp" => cfg(rollout_pct: 100, variants: %{"a" => 50, "b" => 50})})
+      opts = Keyword.put(opts, :emit, fn payload -> send(test_pid, {:assigned, payload}) end)
+
+      d = FeatureFlags.evaluate("exp", %{subject_key: "org-token-abc"}, opts)
+      assert d.on
+      assert d.variant in [:a, :b]
+
+      assert_received {:assigned, payload}
+      # The per-org stable subject_key stands in as the bounded org identity —
+      # NEVER nil (the carry bug), so the assignment event is org-scoped.
+      assert payload.org_id == "org-token-abc"
+      refute is_nil(payload.org_id)
+    end
+
+    test "an explicit :org_id still wins over :subject_key in the assignment payload" do
+      test_pid = self()
+      opts = loader_opts(%{"exp" => cfg(rollout_pct: 100, variants: %{"a" => 100})})
+      opts = Keyword.put(opts, :emit, fn payload -> send(test_pid, {:assigned, payload}) end)
+
+      _ = FeatureFlags.evaluate("exp", %{org_id: "org-real", subject_key: "tok"}, opts)
+      assert_received {:assigned, payload}
+      assert payload.org_id == "org-real"
+    end
+
     test "an OFF decision assigns no variant and emits nothing" do
       test_pid = self()
       opts = loader_opts(%{"exp" => cfg(enabled: false, variants: %{"a" => 100})})

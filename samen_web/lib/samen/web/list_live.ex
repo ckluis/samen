@@ -146,7 +146,9 @@ defmodule Samen.Web.ListLive do
   def handle_list_event("filter", params, socket) do
     %{state: state} = list_assigns(socket)
     filter = filter_param(params)
-    {:noreply, reread(socket, %{state | filter: filter, cursor: nil, cursor_stack: []})}
+    socket = reread(socket, %{state | filter: filter, cursor: nil, cursor_stack: []})
+    emit_search_used(socket, filter)
+    {:noreply, socket}
   end
 
   def handle_list_event("paginate", %{"dir" => "next"}, socket) do
@@ -227,6 +229,31 @@ defmodule Samen.Web.ListLive do
     |> Phoenix.Component.assign(:list_state, state)
     |> Phoenix.Component.assign(:page, %{page | prev_cursor: List.first(state.cursor_stack)})
   end
+
+  # The `search.used` framework choke point (WS-B / G12, design §4.2). Every list view
+  # that `use`s this mixin inherits emission at 0 LOC — a non-blank filter box query IS a
+  # search. Best-effort (a track failure never affects the re-read that already ran) and
+  # token-blind by construction: only the BOUNDED surface (the mount kind) + an integer
+  # result count travel — the query TEXT is NEVER forwarded (it is a freeform string the
+  # capture boundary would refuse; this source never even builds it). A blank filter (the
+  # "clear search" case) emits nothing.
+  defp emit_search_used(socket, filter) when is_binary(filter) and filter != "" do
+    ctx = socket.assigns[:samen_list_ctx]
+    org_id = socket.assigns[:org_id]
+
+    if is_binary(org_id) and org_id != "" and match?(%{mount: %{scope_kind: _}}, ctx) do
+      result_count = length(socket.assigns.page.items)
+
+      _ =
+        Samen.Analytics.Sources.search_used(org_id, ctx.mount.scope_kind,
+          result_count: result_count
+        )
+    end
+
+    :ok
+  end
+
+  defp emit_search_used(_socket, _filter), do: :ok
 
   defp assign_state(socket, state), do: Phoenix.Component.assign(socket, :list_state, state)
 

@@ -255,8 +255,18 @@ defmodule Samen.FeatureFlags do
   @doc """
   The bounded, NON-PII assignment payload emitted into the G12 product-analytics
   path (design §3.4): `%{event: "flag.assignment", flag_name, variant, org_id}`. All
-  fields are config-defined names + a bounded org id — no subject PII. UNIT 1 builds
-  and asserts this payload; the `track/1` emit call site lands in B7.
+  fields are config-defined names + a bounded org id — no subject PII.
+
+  ## Org resolution (closes the B5 carry — subject_key-only callers)
+
+  The `org_id` is resolved by `subject_org/1`: an explicit `:org_id` wins, else the
+  bucketing `subject_key` (design §3.2: "org_id OR a per-org stable token") stands
+  in — the SAME bounded, non-PII identity `track/1` scopes the `pae` row on. Before
+  this fix a `%{subject_key: token}`-only caller (a per-org token subject, no
+  `:org_id`) produced `org_id: nil`, orphaning the assignment `pae` event off any
+  org (design §3.4 requires `org_id` bounded/non-PII, never nil). A truly org-less
+  subject (`%{}`) still yields `nil` — an unscoped assignment `track/1` then drops
+  (an org-scoped ledger needs an org), never fabricates one.
   """
   @spec assignment_payload(String.t(), atom(), map() | String.t()) :: map()
   def assignment_payload(flag_name, variant, subject) do
@@ -264,9 +274,19 @@ defmodule Samen.FeatureFlags do
       event: "flag.assignment",
       flag_name: flag_name,
       variant: variant,
-      org_id: org_id_of(subject)
+      org_id: subject_org(subject)
     }
   end
+
+  # The bounded org identity for the assignment event. An explicit :org_id wins;
+  # otherwise the per-org stable :subject_key (design §3.2 — the bucketing subject
+  # IS "org_id or a per-org stable token") is the org identity. Both are the same
+  # non-PII bounded key `evaluate/2` buckets on. Falls to nil only for a subject
+  # carrying NEITHER (a genuinely org-less call), which the emit path then drops.
+  defp subject_org(%{org_id: org_id}) when not is_nil(org_id), do: to_string(org_id)
+  defp subject_org(%{subject_key: key}) when not is_nil(key), do: to_string(key)
+  defp subject_org(org_id) when is_binary(org_id), do: org_id
+  defp subject_org(_), do: nil
 
   # The emit seam (design §3.4; AC-G6-8). Resolution: an explicit 1-arity fn wins;
   # `emit: false` (the preview path) suppresses; otherwise the CONFIGURED emitter —
@@ -311,10 +331,6 @@ defmodule Samen.FeatureFlags do
       _ -> nil
     end
   end
-
-  defp org_id_of(%{org_id: org_id}), do: org_id
-  defp org_id_of(org_id) when is_binary(org_id), do: org_id
-  defp org_id_of(_), do: nil
 
   # ---------------------------------------------------------------------------
   # Config coercion helpers (config comes from ETS as a plain map).

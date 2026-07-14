@@ -241,6 +241,6 @@ New kernel/aggregate resources (each an append-only `"abbrev": "Module"` row in 
 | `hsc` | `Demo.Analytics.HealthScoreRollup` | (optional) materialized per-account health snapshot if score is rolled up rather than live-computed |
 | `ffa` | `Demo.PrimitivesScope.FlagAssignment` | (only if variant assignments persist beyond the `pae` event; else omit — assignment lives in `pae`) |
 | `pae` | `Demo.Analytics.ProductEvent` | governed product-analytics event ledger (token-blind) |
-| `paf` | `Demo.Analytics.ProductEventRollup` | funnel/retention rollup over `pae` |
+| — (`paf` = column prefix only, NOT a registry row) | raw table `paf_product_event_rollup` (shipped B8 per the `mrr_revenue_rollup`/B2 precedent — no Ash resource, no abbrev-registry row; tam_table logical name `Demo.Analytics.ProductEventRollup`) | funnel/retention rollup over `pae` |
 
 Verticals add fresh abbrevs when mounting (e.g. driftwood `d**`, pawchart `p**`), never reusing the demo prefixes — the ADR-006 append-only, one-owner-forever discipline. `hsc`/`ffa` are conditional (see §2.1 live-vs-rollup and §3.4 event-vs-resource); the design defaults to live health compute (no `hsc`) and event-only assignment (no `ffa`) unless a phase-time performance measurement forces materialization, in which case the abbrev is reserved then.

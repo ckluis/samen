@@ -58,6 +58,11 @@ defmodule Demo.DestructionOracleTest do
         repo: Repo
       })
 
+    # WS-B / B7 (ADR-021): register the `pae` token-blind clearances so the cdc_mirror
+    # oracle tier sees ALL of `pae`'s columns as projectable (AC-G12-3). These record
+    # `track/1`'s capture-time PII refusal at the physical tier.
+    :ok = Demo.Analytics.NonPiiSetup.register_all()
+
     :ok
   end
 
@@ -184,7 +189,15 @@ defmodule Demo.DestructionOracleTest do
         [
           mode: :post_shred,
           repo: Repo,
-          resources: [Demo.Crm.Org, Demo.Crm.Membership, Demo.Crm.Contact],
+          # WS-B / B7: `pae` joins the cdc_mirror schema-assertion tier. Because every
+          # `pae` column projects (token-blind by construction + the clearances), a
+          # non-projected physical column would be a violation here (AC-G12-3).
+          resources: [
+            Demo.Crm.Org,
+            Demo.Crm.Membership,
+            Demo.Crm.Contact,
+            Demo.Analytics.ProductEvent
+          ],
           subject_id: subject_id,
           replica: :none
         ] ++ overrides
@@ -276,6 +289,61 @@ defmodule Demo.DestructionOracleTest do
       # re-identify across the domain ledger OR the derived rollup.
       assert mov_rows(subject_id) == 0
       assert subject_delta_in_rollup(subject_id) == 0
+    end
+  end
+
+  # ======================================================================
+  # GREEN — the `pae` product-event tier (WS-B / B7; ADR-021 §4.4)
+  # ======================================================================
+
+  describe "GREEN — the pae ledger is token-blind + erasure-covered (AC-G12-3 / AC-G12-5)" do
+    test "the cdc_mirror schema tier asserts pae is token-blind (all columns project)" do
+      {_c, subject_id} = seed_subject_across_tiers()
+
+      # A pae row keyed on the subject's HMAC pseudonym (the actor_ref) + an org-scoped
+      # event — pae is org-scoped-only, no subject COLUMN.
+      {:ok, _} = Samen.Kms.adapter().generate_subject_key(subject_id)
+
+      {:ok, _pae} =
+        Samen.Analytics.track(%{
+          org_id: Ash.UUID.generate(),
+          event_name: "record.created",
+          subject_id: subject_id,
+          entity_ref: "rec-#{:erlang.unique_integer([:positive])}",
+          props: %{"resource" => "crm.contact"}
+        })
+
+      {:ok, _} = Erasure.shred(subject_id, repo: Repo)
+
+      findings = run_oracle(subject_id)
+
+      # The oracle is clean AND the cdc_mirror tier speaks positively (its schema
+      # assertion covers pae for free — a non-projected pae column would be a violation).
+      assert NoPlaintextPii.violations(findings) == [],
+             Enum.map_join(NoPlaintextPii.violations(findings), "\n", &Finding.format/1)
+
+      assert Enum.any?(findings, &(&1.tier == :cdc_mirror and &1.severity == :pass))
+    end
+
+    test "erasure for free: post-shred the pae actor_ref pseudonym unlinks (AC-G12-5)" do
+      org_id = Ash.UUID.generate()
+      subject_id = Ash.UUID.generate()
+      {:ok, _} = Samen.Kms.adapter().generate_subject_key(subject_id)
+
+      {:ok, pae} =
+        Samen.Analytics.track(%{org_id: org_id, event_name: "session.signed_in", subject_id: subject_id})
+
+      # Pre-shred: the stored actor_ref IS the subject's computable pseudonym.
+      assert {:ok, pseudonym} = Samen.WideEvent.for_subject(subject_id)
+      assert pae.actor_ref == pseudonym
+
+      {:ok, _} = Erasure.shred(subject_id, repo: Repo)
+
+      # Post-shred: the pseudonym is UNRECONSTRUCTABLE — the actor_ref is a dangling
+      # one-way handle whose key is gone, across live + mirror at once. pae is
+      # org-scoped-only (no subject column), so the KEY destruction IS the erasure —
+      # proven STRUCTURALLY, per ADR-021 §4.4.
+      assert {:error, :shredded} = Samen.WideEvent.for_subject(subject_id)
     end
   end
 
