@@ -62,8 +62,17 @@ end
 IO.puts("== anti-tautology probe: mix samen.gen.app generated-gate-passes ==")
 IO.puts("app module=#{module} prefix=#{prefix} abbrev=#{resource_abbrev}")
 
+# WS-D D2: the generator's default is now `--web` (ADR-022). THIS probe stays the
+# HEADLESS probe (AC-G4-10: `--headless` reproduces the original 26-file data-only output
+# and its gate still flips under sabotage). The web/boot probe is priv/gen_app_web_probe.exs.
 spec =
-  Gen.build_spec(module: module, prefix: prefix, abbrev: resource_abbrev, target: scratch_parent)
+  Gen.build_spec(
+    module: module,
+    prefix: prefix,
+    abbrev: resource_abbrev,
+    target: scratch_parent,
+    web: false
+  )
 
 try do
   Gen.validate!(spec)
