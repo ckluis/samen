@@ -1,29 +1,8 @@
 defmodule DriftwoodWeb.Layouts do
   @moduledoc """
-  The Driftwood root layout (T5.3). A minimal HTML shell wrapping the LiveView planes —
-  enough to serve real pages over HTTP for the boot/curl dogfood evidence. No asset
-  pipeline (this is a local dogfood; a real deploy would add esbuild/tailwind).
+  The Driftwood root layout — the shared Samen shell (WS-D D1.4, ADR-022).
+  The hand-authored HTML (T5.3) moved into `Samen.Web.Layouts`; this module
+  inherits it. Title defaults to "Driftwood" (derived from the module name).
   """
-  use Phoenix.Component
-
-  def root(assigns) do
-    ~H"""
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="csrf-token" content={Phoenix.Controller.get_csrf_token()} />
-        <title>Driftwood</title>
-        <%!-- ADR-009: the shared Samen UI kit stylesheet (design tokens + component
-              classes) served from the samen_web DEPENDENCY's priv via the endpoint's
-              scoped Plug.Static — driftwood no longer ships its own copy. --%>
-        <link rel="stylesheet" href="/assets/samen_ui.css" />
-      </head>
-      <body>
-        {@inner_content}
-      </body>
-    </html>
-    """
-  end
+  use Samen.Web.Layouts
 end

@@ -395,29 +395,30 @@ defmodule Driftwood.Seeds do
       email = "#{handle}@#{spec.domain}"
       phone = "+1-#{200 + rem(offset, 700)}-555-#{String.pad_leading(Integer.to_string(100 + idx * 7), 4, "0")}"
 
-      Driftwood.Crm.Person
-      |> Ash.Changeset.for_create(
-        :create,
-        %{
-          org_id: org_id,
-          company_id: company.id,
-          display_name: "#{first} #{last}",
-          job_title: title,
-          full_name: %Samen.Type.FullName{first: first, last: last},
-          emails: [%{label: "work", address: email}],
-          phones: [%{label: "mobile", number: phone}],
-          # ADR-011 §8/§9 Tier-1 conventions: lifecycle stage + social handles (flat
-          # string keys; non-PII business-directory URLs — no whitespace, so they pass
-          # the custom-bag containment guard).
-          custom: %{
-            "lifecycle_stage" => Enum.at(@lifecycle_cycle, idx, "lead"),
-            "social_linkedin" => "https://linkedin.com/in/#{handle}",
-            "social_twitter" => "https://x.com/#{handle}"
-          }
-        },
+      # PII (full_name/emails/phones) goes through Samen.Factory (WS-D D1.2) — the
+      # vault-aware create helper. Same real :create action + Samen.Vault.Change
+      # chokepoint as before; the factory is the extracted SampleData/Seeds idiom.
+      Samen.Factory.create!(
+        Driftwood.Crm.Person,
+        Map.merge(
+          %{
+            org_id: org_id,
+            company_id: company.id,
+            display_name: "#{first} #{last}",
+            job_title: title,
+            # ADR-011 §8/§9 Tier-1 conventions: lifecycle stage + social handles (flat
+            # string keys; non-PII business-directory URLs — no whitespace, so they pass
+            # the custom-bag containment guard).
+            custom: %{
+              "lifecycle_stage" => Enum.at(@lifecycle_cycle, idx, "lead"),
+              "social_linkedin" => "https://linkedin.com/in/#{handle}",
+              "social_twitter" => "https://x.com/#{handle}"
+            }
+          },
+          Samen.Factory.person(first, last, email: email, phone: phone)
+        ),
         authorize?: false
       )
-      |> Ash.create!()
     end
   end
 
@@ -785,23 +786,24 @@ defmodule Driftwood.Seeds do
     |> Ash.create!()
 
     # 2-3 agents WITH PII (the tenant's own helpdesk staff — tenant-domain emails).
+    # PII (full_name + scalar email) routes through Samen.Factory (WS-D D1.2).
     agents =
       for {handle, first, last, email, role} <- agents_for(org_id, spec) do
-        Driftwood.Support.Agent
-        |> Ash.Changeset.for_create(
-          :create,
-          %{
-            org_id: org_id,
-            handle: handle,
-            full_name: %Samen.Type.FullName{first: first, last: last},
-            email: email,
-            role: role,
-            status: :active,
-            timezone: "America/New_York"
-          },
+        Samen.Factory.create!(
+          Driftwood.Support.Agent,
+          Map.merge(
+            %{
+              org_id: org_id,
+              handle: handle,
+              email: email,
+              role: role,
+              status: :active,
+              timezone: "America/New_York"
+            },
+            Samen.Factory.person(first, last)
+          ),
           authorize?: false
         )
-        |> Ash.create!()
       end
 
     [primary_agent | _] = agents

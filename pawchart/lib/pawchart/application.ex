@@ -4,9 +4,14 @@ defmodule PawChart.Application do
 
   @impl true
   def start(_type, _args) do
+    # Observability plane (WS-D D1.1): OTel-Ecto with the un-forgettable
+    # db_statement: :disabled + metrics contention handlers, wired via the
+    # framework helper instead of hand-copied setup calls. Follows the repo:
+    # in :test start_repo? is false, so no Ecto telemetry exists to observe.
     repo_children =
       if Application.get_env(:pawchart, :start_repo?, true) do
-        [PawChart.Repo, {Oban, Application.fetch_env!(:samen_core, Oban)}]
+        Samen.Observability.child_specs(:pawchart) ++
+          [PawChart.Repo, {Oban, Application.fetch_env!(:samen_core, Oban)}]
       else
         []
       end

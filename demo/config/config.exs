@@ -278,8 +278,8 @@ config :samen_core, :rollups, [
 ]
 
 # T2.6 OTel: db_statement must be :disabled (asserted by the LogTelemetry tier).
-# The demo app calls OpentelemetryEcto.setup([:demo, :repo], db_statement: :disabled)
-# in Demo.Application.start/2 when OTel is configured.
+# Demo.Application.start/2 wires Samen.Observability.child_specs(:demo) (WS-D D1.1),
+# which owns the db_statement: :disabled default and raises if this key contradicts it.
 config :demo, :opentelemetry_ecto, db_statement: :disabled
 
 # OTel SDK: no exporter in dev/test (operators wire a real OTLP exporter in prod).
