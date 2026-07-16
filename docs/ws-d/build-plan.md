@@ -148,6 +148,15 @@ land before D9's cookbook documents it. Docs (D9) come late so they document shi
   wiring; gen.resource × abbrev allocator); all suites + every `ci.sh` green with exact counts; carries
   recorded. Deps: D11.1. AC: all. Model: **opus**.
 
+**Carries into D11 (P2s from phase gates — resolve, or fold into ADR-025 explicitly):**
+- D7/D8-P2-1: `Gen.Post.validate_resource!/2` reads the FLAT registry view and refuses
+  cross-host abbrevs that the allocator's `validate_host/4` would namespace fine (over-strict,
+  fails closed; cannot manifest while the committed registry has no `hosts` key). Route it
+  through `validate_host/4` so both paths share one rule — natural home: ADR-025.
+- D7/D8-P2-2: the refusal message attributes host-namespaced owners to "the global registry"
+  (wrong location, correct refusal) + the D8.1 ship report over-claimed 16 allocator tests
+  (actual 11). Fix message alongside P2-1; counts corrected here for the record.
+
 ---
 
 ## Model-routing summary

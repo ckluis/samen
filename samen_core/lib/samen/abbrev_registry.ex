@@ -16,6 +16,9 @@ defmodule Samen.AbbrevRegistry do
 
   ## Format
 
+  The **legacy / global** namespace (the shape the committed file uses today, 263
+  entries) is a flat `"abbrevs"` map — this is the cross-host collision net:
+
       {
         "abbrevs": {
           "com": "MyApp.Crm.Contact",
@@ -25,6 +28,34 @@ defmodule Samen.AbbrevRegistry do
 
   Keys are abbrevs (3-letter lowercase); values are the owning resource module's
   fully-qualified name.
+
+  ## Host-namespaced schema (ADR-023, ADR-006 Option B)
+
+  The schema optionally gains a `"hosts"` object keying `(host, abbrev) → owner`, so
+  two *different* apps may legitimately own the same physical 3-letter prefix (e.g.
+  `demo`'s `cmp` and `driftwood`'s `cmp` are distinct, both permanently owned):
+
+      {
+        "abbrevs": { … the global cross-host net … },
+        "hosts": {
+          "widgetco": { "wid": "Widgetco.Vertical.Widget" }
+        }
+      }
+
+  The `"hosts"` key is **optional** — a file without it (the committed 263-entry
+  registry) reads byte-identically. `load/0` returns the **flat global view** (the
+  union of `"abbrevs"` and every host namespace) so the compile-time verifier and every
+  existing reader keep working unchanged (the compat shim). Host-scoped reads/writes go
+  through `load_namespaced/1`, `owner/2`, and `validate_host/4`.
+
+  ## Bounded scope (ADR-023 §2 / §4)
+
+  WS-D D8 lands the **allocator** (`mix samen.abbrev.reserve`) + the **host-namespaced
+  schema it writes** + this **read-compat shim**. Fully partitioning the compile-time
+  verifier (`Samen.Verifiers.AbbrevRegistry`) + every reader to be host-aware is a
+  50+ file change (ADR-006 §3) and ships as the phased follow-on ADR-025 — the verifier
+  still reads the flattened global view here, which is correct because `"hosts"` is empty
+  in-tree today (no cross-host abbrev reuse committed yet).
 
   ## Invariants enforced by the verifier
 
@@ -62,9 +93,37 @@ defmodule Samen.AbbrevRegistry do
     load(@registry_path)
   end
 
-  @doc "Loads the registry from an explicit path (used in tests)."
+  @doc """
+  Loads the registry as a flat global `%{abbrev => owner}` map — the **compat shim**.
+
+  Returns the union of the legacy `"abbrevs"` map and every host namespace, so the
+  compile-time verifier and every existing flat reader keep working unchanged against
+  the host-namespaced schema. A file without a `"hosts"` key (the committed 263-entry
+  registry) reads byte-identically to before.
+  """
   @spec load(String.t()) :: %{optional(String.t()) => String.t()}
   def load(registry_path) do
+    %{global: global, hosts: hosts} = load_namespaced(registry_path)
+
+    # The global cross-host net wins on collision-report ordering, but the flattened
+    # view is only ambiguous if a host reused a global abbrev for a DIFFERENT owner —
+    # which validate_host/4 forbids at write time. Host entries fill in first, global
+    # (the authoritative net) overwrites, so the flat view stays stable + deterministic.
+    Enum.reduce(hosts, %{}, fn {_host, ns}, acc -> Map.merge(acc, ns) end)
+    |> Map.merge(global)
+  end
+
+  @doc """
+  Loads the registry preserving host namespacing (ADR-023). Returns
+  `%{global: %{abbrev => owner}, hosts: %{host => %{abbrev => owner}}}`.
+
+  The `"hosts"` key is optional; a legacy flat file yields `hosts: %{}`.
+  """
+  @spec load_namespaced() :: %{global: map(), hosts: map()}
+  def load_namespaced, do: load_namespaced(@registry_path)
+
+  @spec load_namespaced(String.t()) :: %{global: map(), hosts: map()}
+  def load_namespaced(registry_path) do
     case File.read(registry_path) do
       {:ok, contents} ->
         decode!(contents, registry_path)
@@ -81,14 +140,35 @@ defmodule Samen.AbbrevRegistry do
 
   defp decode!(contents, registry_path) do
     case Jason.decode(contents) do
-      {:ok, %{"abbrevs" => abbrevs}} when is_map(abbrevs) ->
-        abbrevs
+      {:ok, %{"abbrevs" => abbrevs} = obj} when is_map(abbrevs) ->
+        %{global: abbrevs, hosts: decode_hosts!(obj, registry_path)}
 
       {:ok, _other} ->
         raise "Samen abbrev registry at #{registry_path} must be a JSON object with an \"abbrevs\" map."
 
       {:error, %Jason.DecodeError{} = err} ->
         raise "Samen abbrev registry at #{registry_path} is not valid JSON: #{Exception.message(err)}"
+    end
+  end
+
+  defp decode_hosts!(obj, registry_path) do
+    case Map.get(obj, "hosts") do
+      nil ->
+        %{}
+
+      hosts when is_map(hosts) ->
+        Enum.each(hosts, fn {host, ns} ->
+          unless is_map(ns) do
+            raise "Samen abbrev registry at #{registry_path}: host namespace #{inspect(host)} " <>
+                    "must be a JSON object of abbrev → owner."
+          end
+        end)
+
+        hosts
+
+      _ ->
+        raise "Samen abbrev registry at #{registry_path}: the \"hosts\" key, if present, " <>
+                "must be a JSON object of host → {abbrev → owner}."
     end
   end
 
@@ -136,6 +216,68 @@ defmodule Samen.AbbrevRegistry do
            "not #{resource}. Abbrevs are permanent and never recycled — you cannot " <>
            "reuse an abbrev for a second resource, nor change a resource's abbrev. " <>
            "Pick a new, unused 3-letter abbrev."}
+
+      true ->
+        :ok
+    end
+  end
+
+  @doc """
+  Returns the owner registered for `abbrev` in `host`'s namespace (falling back to the
+  global namespace), or `nil`. Reads the committed registry.
+  """
+  @spec owner(String.t(), String.t()) :: String.t() | nil
+  def owner(host, abbrev) when is_binary(host) and is_binary(abbrev) do
+    %{global: global, hosts: hosts} = load_namespaced()
+
+    case get_in(hosts, [host, abbrev]) do
+      nil -> Map.get(global, abbrev)
+      found -> found
+    end
+  end
+
+  @doc """
+  Validates a host-scoped reservation of `abbrev` by `owner` in `host`, given a loaded
+  `%{global:, hosts:}` namespaced registry. Pure — no IO — so it is unit-testable and
+  reusable by the allocator.
+
+  Fails closed (never open) when:
+
+    * `abbrev` is not 3-letter lowercase;
+    * `abbrev` is registered to a **different** owner *within this host's namespace*
+      (per-host permanence — ADR-006 one-owner-forever, made host-scoped);
+    * `abbrev` is registered to a **different** owner in the **global** namespace
+      (the cross-host collision net — two hosts sharing physical infra cannot clash).
+
+  Returns `:ok` when the abbrev is unowned, or already owned by exactly this owner in
+  this host (idempotent re-reservation).
+  """
+  @spec validate_host(map(), String.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
+  def validate_host(%{global: global, hosts: hosts}, host, abbrev, owner)
+      when is_binary(host) and is_binary(abbrev) and is_binary(owner) do
+    host_ns = Map.get(hosts, host, %{})
+
+    cond do
+      not valid_shape?(abbrev) ->
+        {:error,
+         "abbrev #{inspect(abbrev)} for #{owner} is not 3 lowercase letters (^[a-z]{3}$). " <>
+           "Storage abbrevs are permanent, ticker-like identifiers."}
+
+      match?(existing when existing != owner and not is_nil(existing), Map.get(host_ns, abbrev)) ->
+        other = Map.fetch!(host_ns, abbrev)
+
+        {:error,
+         "abbrev #{inspect(abbrev)} is already owned by #{other} in host #{inspect(host)}, " <>
+           "not #{owner}. Abbrevs are permanent within a host and never recycled — pick a " <>
+           "new, unused 3-letter abbrev."}
+
+      match?(existing when existing != owner and not is_nil(existing), Map.get(global, abbrev)) ->
+        other = Map.fetch!(global, abbrev)
+
+        {:error,
+         "abbrev #{inspect(abbrev)} is already owned by #{other} in the GLOBAL cross-host net " <>
+           "(#{@registry_path}), not #{owner}. Two hosts sharing physical infrastructure cannot " <>
+           "silently clash on a 3-letter prefix — pick a new, unused abbrev."}
 
       true ->
         :ok

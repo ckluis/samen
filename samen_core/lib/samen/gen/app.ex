@@ -336,29 +336,19 @@ defmodule Samen.Gen.App do
   end
 
   @doc """
-  Append the app's reserved abbrevs to the GLOBAL registry
-  (`samen_core/priv/abbrev_registry.json`). Idempotent — rows already present with the
-  correct owner are left untouched. Preserves the `$comment` and pretty formatting.
+  Reserve the app's abbrevs via the ADR-023 allocator (`Samen.Abbrev.Allocator`), writing
+  into the app's HOST namespace (`s.otp_app`) in the registry
+  (`samen_core/priv/abbrev_registry.json`). Idempotent — a host+abbrev+owner already
+  present is a byte no-op; fail-closed on cross-owner collision within the host namespace
+  *or* the global cross-host net. Preserves the `$comment` and pretty formatting. The
+  legacy global `"abbrevs"` map is left byte-untouched (the allocator only writes host
+  namespaces).
   """
   def reserve_abbrevs!(%__MODULE__{} = s, path \\ AbbrevRegistry.path()) do
-    raw = File.read!(path)
-    decoded = Jason.decode!(raw)
+    for {abbrev, owner} <- reserved_pairs(s) do
+      Samen.Abbrev.Allocator.reserve!(to_string(s.otp_app), abbrev, owner, path)
+    end
 
-    abbrevs = Map.fetch!(decoded, "abbrevs")
-
-    new_abbrevs =
-      Enum.reduce(reserved_pairs(s), abbrevs, fn {abbrev, owner}, acc ->
-        case Map.get(acc, abbrev) do
-          nil -> Map.put(acc, abbrev, owner)
-          ^owner -> acc
-          other ->
-            raise ArgumentError,
-                  "cannot reserve #{inspect(abbrev)} for #{owner}: already owned by #{other}."
-        end
-      end)
-
-    updated = Map.put(decoded, "abbrevs", new_abbrevs)
-    File.write!(path, Jason.encode!(updated, pretty: true) <> "\n")
     :ok
   end
 

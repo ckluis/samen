@@ -61,6 +61,23 @@ echo "==> Running gen_app flagship probe (WS-D D6 / AC-X-1 — generate → ci.s
 )
 echo "==> gen_app flagship probe: PASSED"
 
+# --- gen_app tier: the POST-APP generator proof (WS-D D7a, AC-G4-7 / AC-G26-1/3) ---
+# The permanent proof for `mix samen.gen.scope` + `mix samen.gen.resource`: it generates a
+# fresh app, adds a SECOND scope + Tier-0 resource via the post-app generators, re-baselines
+# schema.dict.json, runs the app's FULL ci.sh (the whole verifier gate STILL green with the
+# new resource + the four emitted G26 red-path files green), runs the emitted per-resource
+# anti-tautology probe, then SABOTAGES a red-path mechanism (removes the resource's RoleAtLeast
+# admin gate) and proves the RBAC red path FLIPS + reverts byte-exact. Correct-by-construction,
+# ZERO hand-edits. Separate step (deps.get/compiles a scratch app + runs its ci.sh; ~80s; needs
+# local Postgres). Zero scratch residue; the committed abbrev registry is restored byte-exact.
+echo ""
+echo "==> Running gen_app post-app generator probe (WS-D D7a — gen.scope + gen.resource → ci.sh + 4 G26 files + sabotage)"
+(
+  cd "$REPO_ROOT/samen_core"
+  mix run priv/gen_post_probe.exs
+)
+echo "==> gen_app post-app generator probe: PASSED"
+
 # --- samen_web framework UI library gate (ADR-009) ---
 echo ""
 echo "==> Running samen_web gate (compile --warnings-as-errors + two-plane render/masking suite)"

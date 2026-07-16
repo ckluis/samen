@@ -228,20 +228,22 @@ defmodule Samen.Gen.AppTest do
       {:ok, path: path}
     end
 
-    test "appends every reserved abbrev and preserves the pre-existing rows + comment",
+    test "reserves every abbrev into the app HOST namespace (ADR-023), preserving the global net + comment",
          %{path: path} do
       :ok = Gen.reserve_abbrevs!(spec(), path)
 
       decoded = path |> File.read!() |> Jason.decode!()
 
       assert decoded["$comment"] == "PERMANENT registry."
-      # pre-existing row preserved
+      # legacy global net (cross-host) byte-untouched — the allocator writes host namespaces only.
       assert decoded["abbrevs"]["com"] == "X.Y"
-      # all 10 app abbrevs reserved to their owners
-      assert decoded["abbrevs"]["wid"] == "Widgetco.Vertical.Record"
-      assert decoded["abbrevs"]["wga"] == "Widgetco.Aggregate.RecordCountBySegment"
-      assert decoded["abbrevs"]["wgc"] == "Widgetco.Billing.Customer"
-      assert decoded["abbrevs"]["wge"] == "Widgetco.Billing.Entitlement"
+      refute Map.has_key?(decoded["abbrevs"], "wid")
+      # all app abbrevs reserved to their owners inside host "widgetco".
+      host = decoded["hosts"]["widgetco"]
+      assert host["wid"] == "Widgetco.Vertical.Record"
+      assert host["wga"] == "Widgetco.Aggregate.RecordCountBySegment"
+      assert host["wgc"] == "Widgetco.Billing.Customer"
+      assert host["wge"] == "Widgetco.Billing.Entitlement"
     end
 
     test "is idempotent: a second reservation is a no-op (no duplicates, no raise)",

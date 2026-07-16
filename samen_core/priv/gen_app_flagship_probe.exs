@@ -61,7 +61,11 @@ alias Samen.Gen.App, as: Gen
 # --- unique, collision-proof app identity (fresh abbrevs each run) ---------------------
 # First prefix letter "j": the j* abbrev space is unowned in the committed registry, and
 # the derived operator/primitives families (jo*/jp*/jq*/jn*) stay inside it.
-suffix = System.unique_integer([:positive]) |> Integer.to_string() |> String.slice(-2, 2)
+suffix =
+  System.unique_integer([:positive])
+  |> Integer.to_string()
+  |> String.pad_leading(2, "0")
+  |> String.slice(-2, 2)
 letters = for <<c <- suffix>>, do: rem(c - ?0, 26) + ?a
 [l1, l2] = letters
 # `f` is the one digit-derived (a..j) letter whose billing abbrev "j"<>"f"<>"l" = "jfl"
