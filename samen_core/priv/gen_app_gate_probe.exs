@@ -29,12 +29,16 @@ Mix.Task.run("compile")
 alias Samen.Gen.App, as: Gen
 
 # --- unique, collision-proof app identity (fresh abbrevs each run) ---------------------
+# First prefix letter "g": the g* abbrev space is unowned in the committed registry, so the
+# billing family (`g<l1>*`), aggregate (`g<l1>a`), and the resource abbrev all stay inside
+# it. The resource abbrev's SECOND letter is `z` (mirrors the web/flagship probes' `hz*`/
+# `jz*`) so it never collides with the derived billing family — a fixed leading letter that
+# escapes the `g` space (the old `p<l1><l2>` form) could land on pawchart's `pb*` family.
 suffix = System.unique_integer([:positive]) |> Integer.to_string() |> String.slice(-2, 2)
-# 2-letter prefix "g" + a digit-derived letter; abbrev "g" + two letters. Keep to [a-z].
 letters = for <<c <- suffix>>, do: rem(c - ?0, 26) + ?a
 [l1, l2] = letters
 prefix = <<?g, l1>>
-resource_abbrev = <<?p, l1, l2>>
+resource_abbrev = <<?g, ?z, l2>>
 module = "Genprobe" <> String.upcase(<<l1, l2>>)
 
 samen_core_root = Gen.default_target() |> Path.join("samen_core")

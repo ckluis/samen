@@ -82,6 +82,15 @@ defmodule Samen.Gen.AppTest do
     "test/record_api_test.exs"
   ]
 
+  # WS-D D4 (AC-G4-4): the seed emissions — a Samen.Factory-backed seeds module, the
+  # `<app>.seed` mix task, and the seed vault-routing red path. They ride with the full
+  # (web + api) default set (the running product), so they appear in files(true, true).
+  @seeds_paths [
+    "lib/<%= otp_app %>/seeds.ex",
+    "lib/mix/tasks/<%= otp_app %>.seed.ex",
+    "test/seeds_vault_test.exs"
+  ]
+
   describe "build_spec/1 derivation" do
     test "derives otp_app, app_dir, resource, billing abbrevs, and aggregate abbrev" do
       s = spec()
@@ -429,9 +438,9 @@ defmodule Samen.Gen.AppTest do
       end
     end
 
-    test "full file set = headless + web + the 5 api emissions, in order (AC-G4-2)" do
+    test "full file set = headless + web + the 5 api + the 3 seed emissions, in order (AC-G4-2/4)" do
       assert Enum.map(Samen.Gen.Templates.files(true, true), &elem(&1, 0)) ==
-               @headless_paths ++ @web_only_paths ++ @api_only_paths
+               @headless_paths ++ @web_only_paths ++ @api_only_paths ++ @seeds_paths
 
       # files/1 with web on defaults api on (the ADR-022 default pairing).
       assert Samen.Gen.Templates.files(true) == Samen.Gen.Templates.files(true, true)
@@ -442,6 +451,9 @@ defmodule Samen.Gen.AppTest do
       paths = Enum.map(web_only, &elem(&1, 0))
 
       for api_path <- @api_only_paths, do: refute(api_path in paths)
+      # The seeds ride with the full running product (they anchor on the API's data);
+      # the headless/web-only sets do NOT emit them.
+      for seed_path <- @seeds_paths, do: refute(seed_path in paths)
 
       {_, mix_t} = Enum.find(web_only, fn {p, _} -> p == "mix.exs" end)
       refute Gen.render(mix_t, Gen.bindings(spec(api: false))) =~ "ash_json_api"
@@ -592,6 +604,69 @@ defmodule Samen.Gen.AppTest do
       assert api_case =~ "Widgetco.Operator.ApiKey"
       assert api_case =~ "WidgetcoWeb.Api.KeyAuthPlug.digest(raw)"
       assert api_case =~ "WidgetcoWeb.Api.Endpoint.call"
+    end
+  end
+
+  describe "the seeds emission (WS-D D4 — vault-aware via Samen.Factory, AC-G4-4)" do
+    test "seeds.ex writes through Samen.Factory (the SampleData vault path), not raw Ash" do
+      seeds = rendered_api_files()["lib/widgetco/seeds.ex"]
+
+      # The load-bearing idiom: seeded PII routes through Samen.Factory.create!/3 (the
+      # same guarded create action a real tenant write takes) — NOT a hand-rolled
+      # Ash.Changeset that could skip the vault chokepoint.
+      assert seeds =~ "Samen.Factory.create!"
+      assert seeds =~ "Widgetco.Vertical.Record"
+      # The 🔒 secret is passed as an ordinary attr; the create action vault-routes it.
+      assert seeds =~ "secret:"
+      assert seeds =~ "def run"
+      # Anchored on the well-known operator org so the seeded rows are addressable.
+      assert seeds =~ "operator_org_id" or seeds =~ ~s{@org_id}
+    end
+
+    test "the <app>.seed mix task wraps Seeds.run/0 after starting the app" do
+      task = rendered_api_files()["lib/mix/tasks/widgetco.seed.ex"]
+
+      assert task =~ "defmodule Mix.Tasks.Widgetco.Seed"
+      assert task =~ ~s{@requirements ["app.start"]}
+      assert task =~ "Widgetco.Seeds.run()"
+    end
+
+    test "the gen'd seed vault-routing red path scans raw rows for seeded plaintext (AC-G4-4)" do
+      test_file = rendered_api_files()["test/seeds_vault_test.exs"]
+
+      # Runs the seeds, then a raw-SQL scan of the physical vault column — the token must
+      # be vt_*, and NO seeded plaintext may appear at rest (non-vacuous: it names the
+      # exact seeded secrets, so a vault-bypassing seed would flip it to fail).
+      assert test_file =~ "Widgetco.Seeds.run()"
+      assert test_file =~ ~s{"SELECT pii_wid_secret FROM wid_record}
+      assert test_file =~ ~s{String.starts_with?(raw, "vt_")}
+      assert test_file =~ "refute raw == plaintext"
+    end
+  end
+
+  describe "the observability wiring (WS-D D5 — un-forgettable db_statement, AC-G4-6)" do
+    test "application.ex splices Samen.Observability.child_specs/1 into the repo plane" do
+      # The running product wires observability via the framework helper (which OWNS the
+      # db_statement: :disabled default), byte-matching the pawchart reference — NOT
+      # hand-copied OpentelemetryEcto.setup calls.
+      app = rendered_api_files()["lib/widgetco/application.ex"]
+
+      assert app =~ "Samen.Observability.child_specs(:widgetco)"
+      refute app =~ "OpentelemetryEcto.setup"
+    end
+
+    test "config.exs sets the un-forgettable db_statement: :disabled + lists otel as a DIRECT dep" do
+      files = rendered_api_files()
+      config = files["config/config.exs"]
+      mix = files["mix.exs"]
+
+      # The config the no_plaintext_pii LogTelemetry tier asserts (config-level check).
+      assert config =~ "config :widgetco, :opentelemetry_ecto, db_statement: :disabled"
+
+      # opentelemetry_ecto is a DIRECT dep so the tier (which reads Mix.Project.config
+      # [:deps], not transitive apps) SEES the leak surface and arms the assertion —
+      # this is what makes the D6 db_statement sabotage non-vacuous.
+      assert mix =~ ~s({:opentelemetry_ecto, "~> 1.2"})
     end
   end
 end

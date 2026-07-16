@@ -42,6 +42,25 @@ echo "==> Running samen_core tests"
 )
 echo "==> samen_core: PASSED"
 
+# --- gen_app tier: the flagship generative proof (WS-D D6, AC-X-1) ---
+# The PERMANENT gen_app test tier (design.md §4). In ONE automated run it generates a
+# fresh app with the FULL running product (--web --api --seeds --observability), runs
+# its entire ci.sh (verifier gate + generated tests + all red-paths), seeds it via the
+# emitted `mix <app>.seed`, boots it and HTTP-probes /healthz + the framework LiveViews
+# + the bounded deny-by-default JSON:API, and drives TWO sabotages (API allowlist,
+# observability db_statement) that each flip the gate and revert byte-exact — proving the
+# generated gate is non-vacuous. Kept as a SEPARATE step (not folded into `mix test`)
+# because it deps.get/compiles a scratch app and runs its ci.sh five times (~100s); it
+# needs local Postgres. Zero scratch residue; the committed abbrev registry is restored
+# byte-exact on every exit path.
+echo ""
+echo "==> Running gen_app flagship probe (WS-D D6 / AC-X-1 — generate → ci.sh → seed → boot → 2 sabotages)"
+(
+  cd "$REPO_ROOT/samen_core"
+  mix run priv/gen_app_flagship_probe.exs
+)
+echo "==> gen_app flagship probe: PASSED"
+
 # --- samen_web framework UI library gate (ADR-009) ---
 echo ""
 echo "==> Running samen_web gate (compile --warnings-as-errors + two-plane render/masking suite)"

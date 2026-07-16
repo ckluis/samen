@@ -130,7 +130,16 @@ defmodule Samen.Gen.Templates do
       # The gen'd API red-path suite: bounded-by-default / clamp-to-cap / deny-by-default
       # allowlist (AC-G4-2 / AC-G4-3).
       {"test/support/api_case.ex", api_case_ex()},
-      {"test/record_api_test.exs", record_api_test()}
+      {"test/record_api_test.exs", record_api_test()},
+      # WS-D D4 seeds (`--seeds`, default ON): a Samen.Factory-backed seeds module +
+      # a `<app>.seed` mix task, vault-aware by construction — the seeded 🔒 secret
+      # routes through the vault chokepoint (raw domain row holds `vt_*`, plaintext
+      # nowhere). Mirrors pawchart's seeds.ex / pawchart.seed.ex shape.
+      {"lib/<%= otp_app %>/seeds.ex", seeds_ex()},
+      {"lib/mix/tasks/<%= otp_app %>.seed.ex", seed_task_ex()},
+      # WS-D D4 red path: the gen'd seed vault-routing test seeds through Factory and
+      # asserts the seeded plaintext secret is NOWHERE at rest (raw row holds `vt_*`).
+      {"test/seeds_vault_test.exs", seeds_vault_test()}
     ]
 
     base ++ api_new
@@ -1776,7 +1785,14 @@ defmodule Samen.Gen.Templates do
           {:stream_data, "~> 1.3"},
           # simple_sat: the Ash policy authorizer's pure-Elixir SAT solver, needed by the
           # mounted Billing scope's OrgScope policies + the authored resource's policies.
-          {:simple_sat, "~> 0.1"}
+          {:simple_sat, "~> 0.1"},
+          # WS-D D5 observability (ADR-022): opentelemetry_ecto is listed DIRECTLY (not
+          # relied on transitively) so the `no_plaintext_pii` LogTelemetry tier — which
+          # reads `Mix.Project.config[:deps]`, not transitive apps — SEES the OTel-Ecto
+          # leak surface and asserts `db_statement: :disabled` on it. Dropping that config
+          # then flips the gate (the D6 flagship sabotage). The API+SDK ride transitively
+          # from samen_core; only the Ecto integration must be a direct dep to arm the tier.
+          {:opentelemetry_ecto, "~> 1.2"}
         ]
       end
 
@@ -1858,6 +1874,14 @@ defmodule Samen.Gen.Templates do
 
     config :phoenix, :json_library, Jason
 
+    # WS-D D5 observability (ADR-022): OTel-Ecto records the SQL statement into trace
+    # spans by DEFAULT — on a Samen substrate that surface must be proven token-only, so
+    # `db_statement: :disabled` is categorical (the `no_plaintext_pii` LogTelemetry tier
+    # asserts it, config-level + live-handler). `Samen.Observability.child_specs/1` (wired
+    # in application.ex) OWNS this default and raises at build time if this key contradicts
+    # it. Removing this line flips the gate (the D6 flagship observability sabotage).
+    config :<%= otp_app %>, :opentelemetry_ecto, db_statement: :disabled
+
     # <%= module %>Web.Endpoint — LOCAL DEV/DOGFOOD constants (ADR-022: the endpoint is a
     # thin EMITTED file and the builder OWNS the port/secret_key_base/salts; a real
     # deployment replaces them via config/runtime.exs — the `--deploy` layer).
@@ -1920,10 +1944,14 @@ defmodule Samen.Gen.Templates do
 
       @impl true
       def start(_type, _args) do
-        # Repo + jobs plane. In :test start_repo? is false (the suite manages the repo).
+        # Observability plane (WS-D D1.1/D5): OTel-Ecto with the un-forgettable
+        # db_statement: :disabled + metrics contention handlers, wired via the
+        # framework helper instead of hand-copied setup calls. Follows the repo:
+        # in :test start_repo? is false, so no Ecto telemetry exists to observe.
         repo_children =
           if Application.get_env(:<%= otp_app %>, :start_repo?, true) do
-            [<%= module %>.Repo, {Oban, Application.fetch_env!(:samen_core, Oban)}]
+            Samen.Observability.child_specs(:<%= otp_app %>) ++
+              [<%= module %>.Repo, {Oban, Application.fetch_env!(:samen_core, Oban)}]
           else
             []
           end
@@ -3179,7 +3207,14 @@ defmodule Samen.Gen.Templates do
           {:stream_data, "~> 1.3"},
           # simple_sat: the Ash policy authorizer's pure-Elixir SAT solver, needed by the
           # mounted Billing scope's OrgScope policies + the authored resource's policies.
-          {:simple_sat, "~> 0.1"}
+          {:simple_sat, "~> 0.1"},
+          # WS-D D5 observability (ADR-022): opentelemetry_ecto is listed DIRECTLY (not
+          # relied on transitively) so the `no_plaintext_pii` LogTelemetry tier — which
+          # reads `Mix.Project.config[:deps]`, not transitive apps — SEES the OTel-Ecto
+          # leak surface and asserts `db_statement: :disabled` on it. Dropping that config
+          # then flips the gate (the D6 flagship sabotage). The API+SDK ride transitively
+          # from samen_core; only the Ecto integration must be a direct dep to arm the tier.
+          {:opentelemetry_ecto, "~> 1.2"}
         ]
       end
 
@@ -4060,6 +4095,150 @@ defmodule Samen.Gen.Templates do
 
     echo ""
     echo "==> <%= otp_app %> CI gate: ALL PASSED"
+    '''
+  end
+
+  # ------------------------------------------------------------------ seeds (D4)
+  defp seeds_ex do
+    ~S'''
+    defmodule <%= module %>.Seeds do
+      @moduledoc """
+      <%= module %> dev-data seeds (WS-D D4 / AC-G4-4), vault-aware BY CONSTRUCTION.
+
+      Seeds write through `Samen.Factory.create!/3` — the SAME `Ash.Changeset.for_create`
+      path a real tenant write takes — so every seeded 🔒 field routes through the
+      `Samen.Vault.Change` chokepoint: the domain row holds a `vt_*` token, `pii_vault`
+      holds the ciphertext, and a raw-SQL scan of the seeded rows finds NO plaintext. No
+      subject-key or reveal boilerplate. This is the shipped `Samen.Web.SampleData` idiom
+      as a runnable seed (matches pawchart's `PawChart.Seeds`).
+
+      Run via `mix <%= otp_app %>.seed` (which starts the app first).
+      """
+
+      alias <%= module %>.Vertical.Record
+
+      # A stable dev tenant org so the seeded rows are addressable on the LiveView URLs
+      # (`?org=<uuid>`) and the JSON:API (a tenant key minted for this org reads them).
+      @org_id "<%= operator_org_id %>"
+
+      @doc """
+      Seed the dev DB with a handful of `<%= module %>.Vertical.Record` rows for the
+      `#{@org_id}` tenant. The 🔒 `secret` field on each is vault-routed. Returns the org id.
+      """
+      @spec run() :: String.t()
+      def run do
+        for {name, segment, secret} <- records() do
+          Samen.Factory.create!(
+            Record,
+            %{org_id: @org_id, name: name, segment: segment, secret: secret},
+            authorize?: false
+          )
+        end
+
+        @org_id
+      end
+
+      @doc "The seed dataset — `{name, segment, 🔒 secret}` tuples."
+      def records do
+        [
+          {"Northwind Record", "alpha", "seed-secret-northwind-01"},
+          {"Contoso Record", "alpha", "seed-secret-contoso-02"},
+          {"Fabrikam Record", "beta", "seed-secret-fabrikam-03"}
+        ]
+      end
+
+      @doc "The dev tenant org id the seeds anchor on."
+      def org_id, do: @org_id
+    end
+    '''
+  end
+
+  defp seed_task_ex do
+    ~S'''
+    defmodule Mix.Tasks.<%= module %>.Seed do
+      @shortdoc "Seed the dev DB for <%= module %> (vault-aware, via Samen.Factory)"
+      @moduledoc """
+      Seed the <%= module %> DEV database with sample `Vertical.Record` rows so the
+      inherited pages + the `/api/v1` JSON:API render REAL data. Every seeded 🔒 field is
+      vault-routed (WS-D D4). Mirrors `mix pawchart.seed`.
+
+          MIX_ENV=dev mix <%= otp_app %>.seed
+
+      Prints the seeded org id; use `?org=<uuid>` on the LiveView URLs.
+      """
+      use Mix.Task
+
+      @requirements ["app.start"]
+
+      @impl Mix.Task
+      def run(_args) do
+        org_id = <%= module %>.Seeds.run()
+        Mix.shell().info("Seeded <%= module %> dev tenant org: #{org_id}")
+        Mix.shell().info("Open: /billing?org=#{org_id}")
+        Mix.shell().info("API:  GET /api/v1/records (Bearer <tenant api_key for #{org_id}>)")
+        org_id
+      end
+    end
+    '''
+  end
+
+  defp seeds_vault_test do
+    ~S'''
+    defmodule <%= module %>.SeedsVaultTest do
+      @moduledoc """
+      WS-D D4 red path (AC-G4-4): the seed idiom is vault-aware BY CONSTRUCTION.
+
+      `<%= module %>.Seeds.run/0` writes through `Samen.Factory` (the `SampleData` vault
+      path). This test runs the seeds, then scans the RAW domain rows and proves:
+
+        * every seeded 🔒 `secret` column holds a `vt_*` token, NOT the plaintext;
+        * NONE of the seeded plaintext secrets appear anywhere in the domain table.
+
+      Non-vacuity: the assertion names the EXACT plaintext strings the seeds wrote, so a
+      seed that skipped the vault (a raw column write) would leave the plaintext at rest
+      and flip this test to fail. Positive control: the token prefix `vt_` IS present.
+      """
+      use <%= module %>.DataCase, async: false
+
+      alias <%= module %>.Repo
+
+      test "seeded 🔒 secrets are vault-routed — plaintext nowhere at rest" do
+        org_id = <%= module %>.Seeds.run()
+        assert org_id == <%= module %>.Seeds.org_id()
+
+        seeded_plaintexts =
+          <%= module %>.Seeds.records() |> Enum.map(fn {_n, _s, secret} -> secret end)
+
+        # Raw scan of the physical vault column on the domain table for THIS org.
+        org_dumped = Ecto.UUID.dump!(org_id)
+
+        %{rows: rows} =
+          Ecto.Adapters.SQL.query!(
+            Repo,
+            "SELECT pii_<%= abbrev %>_secret FROM <%= resource_table %> " <>
+              "WHERE <%= abbrev %>_org_id = $1",
+            [org_dumped]
+          )
+
+        raw_secrets = Enum.map(rows, fn [raw] -> raw end)
+
+        assert length(raw_secrets) == length(seeded_plaintexts),
+               "expected #{length(seeded_plaintexts)} seeded rows, got #{length(raw_secrets)}"
+
+        # Every stored value is a vault token, and NO seeded plaintext leaked.
+        for raw <- raw_secrets do
+          assert is_binary(raw) and String.starts_with?(raw, "vt_"),
+                 "seeded secret column holds #{inspect(raw)}, expected a vt_* token — " <>
+                   "the seed bypassed the vault (AC-G4-4 violation)"
+
+          for plaintext <- seeded_plaintexts do
+            refute raw == plaintext,
+                   "seeded plaintext #{inspect(plaintext)} is at rest in the domain row " <>
+                     "(the seed did NOT route through the vault)"
+          end
+        end
+      end
+    end
     '''
   end
 
