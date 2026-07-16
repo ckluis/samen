@@ -126,12 +126,38 @@ resource/scope gen), zero-to-feature tutorial, gate-failure index, Fly/Neon depl
 Highest leverage once the surfaces being scaffolded (WS-A) are real — generating today's
 read-only patterns would scaffold the wrong thing.
 
-### WS-E — "Table Stakes UX" (G9 + G14 + G15 + G18 + G20)
+### WS-E — "Table Stakes UX" (G9 + G14 + G15 + G18 + G20) ← RECOMMENDED NEXT
 Search engine + ⌘K, files engine with storage adapter, CSV import/export mapper (mask-by-
 omission red-paths mandatory), self-serve settings, responsive pass.
 
 **Sequencing logic:** A → (C rider) → B → D → E, revisiting rank after each gate. D
 deliberately follows A so generators emit the *real* patterns.
+
+---
+
+## State after WS-A/B/D (2026-07-16) — the re-rank
+
+**Shipped: 11 gaps** (G1/G2/G3/G5 in WS-A · G6/G7/G17 + G12-seed in WS-B ·
+G4/G10/G16/G26 in WS-D). Every P0 is closed. The 2026-07-09 headline diagnosis above is
+now HISTORICAL: the surfaces are no longer demo-deep (gate-ws-a), the operator has a
+cockpit (gate-ws-b), and the generator emits a running product with permanent generative
+proof in root ci.sh (gate-ws-d). ~2,270 tests + three probes across the tree.
+
+**Remaining work, ranked:**
+1. **WS-E "Table Stakes UX"** (G9 search · G14 files · G15 import/export · G18 settings ·
+   G20 responsive) — the last planned workstream; closes the end-user P1s. Export and file
+   preview are two of the six flagged mask-by-omission PII surfaces — red-paths mandatory.
+2. **"Operator Cockpit v2"** (unassigned operator P1s: G8 tenant lifecycle · G11
+   status/SLA/alerting · G13 billing depth/Stripe sync · G17b health-activity fidelity) —
+   deepens WS-B; G13 has an operator-TODO half (live Stripe keys).
+3. **WS-C remnants + P2 sweep** (:non_pii self-classify escape hatch [A1 carry above] ·
+   G19 DSAR export/retention · G21 desk depth · G22 agent-grounding packaging · G23
+   feedback · G24 i18n · G25 a11y · G27 kernel residues · ADR-025 verifier host-partition).
+
+**Standing carries (do not lose):** SMTP/ESP adapter = operator TODO (framework side done,
+fail-honest) · Samen.Web.Api.PageLimitClamp until upstream Ash fixes the to_page raw-limit
+split · ADR-025 · demo `mk_agent` → Samen.Factory optional tightening · real
+Neon/AWS/ClickHouse/Fly drills = human operator.
 
 ---
 
