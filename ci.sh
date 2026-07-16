@@ -78,6 +78,26 @@ echo "==> Running gen_app post-app generator probe (WS-D D7a — gen.scope + gen
 )
 echo "==> gen_app post-app generator probe: PASSED"
 
+# --- gen_app tier: the DEPLOY proof (WS-D D10, AC-G16-1/2/3 — ADR-024 fail-honest) ---
+# The permanent proof for `mix samen.gen.app --deploy`: it generates a fresh --web --api
+# --deploy app, runs its FULL ci.sh (the deploy artifacts do NOT break the gate — AC-G16-1),
+# asserts the six deploy artifacts exist + fly.toml parses, then drives the load-bearing
+# fail-closed RED PATH: the emitted config/runtime.exs RAISES (naming the secret) on EACH
+# missing required secret (DATABASE_URL/SECRET_KEY_BASE/PHX_HOST/SAMEN_KMS_*) while staying
+# silent when all are set + in :dev — and a sabotage that makes the KMS read permissive
+# FLIPS the raise + reverts byte-exact (non-vacuity). Finally it asserts the runbook names
+# the four operator TODOs with no turnkey "fly deploy" claim (AC-G16-3). NO live Fly/Neon/KMS
+# call anywhere (ADR-024 — no live deploy execution). Separate step (deps.get/compiles a
+# scratch app + runs its ci.sh; ~75s; needs local Postgres). Zero scratch residue; the
+# committed abbrev registry is restored byte-exact.
+echo ""
+echo "==> Running gen_app deploy probe (WS-D D10 / AC-G16-1/2/3 — --deploy → ci.sh + fail-closed runtime + sabotage)"
+(
+  cd "$REPO_ROOT/samen_core"
+  mix run priv/gen_app_deploy_probe.exs
+)
+echo "==> gen_app deploy probe: PASSED"
+
 # --- samen_web framework UI library gate (ADR-009) ---
 echo ""
 echo "==> Running samen_web gate (compile --warnings-as-errors + two-plane render/masking suite)"

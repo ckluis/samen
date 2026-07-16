@@ -1,0 +1,384 @@
+# Gate-Failure Index
+
+*Error message → which verifier fired → what it means → the fix* (WS-D D9 / AC-G10-4), for
+every `samen.verify.*` verifier plus the gate's drift check. Every quoted error string below
+is lifted from the verifier's source, and `samen_core/test/doc_recipes_test.exs` asserts (a)
+every `samen_core/lib/mix/tasks/samen.verify.*.ex` task has an entry here and (b) each
+quoted load-bearing string still exists in the cited source — the index cannot drift from
+what the gate actually prints.
+
+**The shared failure shape.** Sixteen of the seventeen verifiers report through
+`Samen.Verifier.halt_if_violations/2` (`samen_core/lib/samen/verifier.ex`) and exit
+non-zero via `:erlang.halt(1)`:
+
+```text
+FAIL: <task name> found N violation(s):
+  • <violation>
+```
+
+On success each prints `<task name>: OK — no violations found.` Step numbers below are the
+generated app's 18-step `ci.sh` (emitted by `mix samen.gen.app`); Driftwood's 20-step and
+PawChart's 17-step gates run the same tiers in the same order.
+
+---
+
+## Step 1b — `schema.dict.json` drift check
+
+**Error** (from the emitted `ci.sh`, `samen_core/lib/samen/gen/templates.ex`):
+
+```text
+FAILED: schema.dict.json is stale — run 'mix samen.catalog.dump --output schema.dict.json' and commit.
+```
+
+**Meaning:** the committed schema dictionary no longer matches what `mix samen.catalog.dump`
+regenerates from the live catalog — you changed a resource/migration without re-baselining.
+**Fix:**
+
+```bash
+mix samen.catalog.dump --output schema.dict.json
+```
+
+and commit the result. (If you did NOT intend a schema change, the diff printed under the
+failure shows what drifted — revert that instead.)
+
+---
+
+## Step 2 — `mix samen.verify.catalog_parity`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.catalog_parity.ex`):
+
+```text
+uncatalogued column: <table>.<column>
+orphan fld_field row: <table>.<column>
+ghost table: <table> (resource <Module> not in tam_table)
+```
+
+**Meaning:** the physical DB and the `tam_table`/`fld_field` catalog disagree — a migration
+created a table/column without `catalog_sync`, or a catalog row outlived its DDL.
+**Fix:** every migration must `use Samen.Migration`, end `up/0` with
+`catalog_sync(@resources)` and start `down/0` with `catalog_sync_down(@resources)` — the
+catalog writes ride the same transaction as the DDL (scope-authoring guide §8). For an
+orphan row, remove it via the migration's down/`catalog_sync` pair, not by hand-editing.
+
+---
+
+## Step 3 — `mix samen.verify.prefixes`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.prefixes.ex`):
+
+```text
+unprefixed column: <table>.<column> [expected prefix: <abbrev>_, resource: <Module>]
+unprefixed fld_field row: <table>.<column> [expected prefix: <abbrev>_]
+```
+
+**Meaning:** a physical column (or its catalog row) does not carry the resource's reserved
+3-letter abbrev prefix — the global column-naming invariant that makes every storage name
+self-identifying.
+**Fix:** name the column `<abbrev>_<name>` in the migration (scalar vault fields:
+`pii_<abbrev>_<name>`). The abbrev is the one reserved for this resource in
+`samen_core/priv/abbrev_registry.json`; `mix samen.gen.resource` gets this right by
+construction.
+
+---
+
+## Step 4 — `mix samen.verify.pii_reads`
+
+**Errors** (`samen_core/lib/samen/pii_reads/harness.ex`):
+
+```text
+PII LEAK  <file>:<line>  <sink>(...) <- :<pii_field>  [outside :reveal, <Module>]
+PARSE ERR <file>:<line>  <message>
+```
+
+and the fail-closed refusal (`samen_core/lib/mix/tasks/samen.verify.pii_reads.ex`):
+
+```text
+FAIL: samen.verify.pii_reads refusing to run against an EMPTY PII registry (0 PII attributes discovered).
+```
+
+**Meaning:** source code passes a PII-declared attribute to a sink call (`Logger`,
+telemetry, inspect-into-string, …) outside a declared `:reveal` action — a plaintext leak
+path. `LAUNDERED …` lines are advisories only (never fail). The empty-registry refusal
+means no PII resources were discovered at all — a vacuous check would pass every leak, so it
+refuses instead of printing a misleading OK.
+**Fix:** route the value through the resource's declared `reveal` action (under a grant), or
+stop sinking it — log the bounded ID/token, not the field. For the refusal: configure
+`ash_domains` so your PII resources are discoverable.
+
+---
+
+## Step 5 — `mix samen.verify.pii_classify`
+
+**Error** (`samen_core/lib/samen/pii_classify.ex`):
+
+```text
+likely-PII column: <table>.<column> (<Module>, logical :<name>, type: :string) — <reasons>
+```
+
+**Meaning:** a NEW column (absent from the committed `schema.dict.json` baseline) is
+plain-typed but its logical name matches the PII heuristic token-list
+(email/ssn/dob/phone/name-ish/…) — you probably forgot the `pii do` vault declaration.
+**Fix:** either vault it (cookbook Recipe 5: `pii_attribute` + `pii_<abbrev>_` column) or,
+if it is genuinely not PII, register a reviewed `non_pii!` exemption. Then re-baseline with
+`mix samen.catalog.dump`.
+
+---
+
+## Step 6 — `mix samen.verify.no_plaintext_pii`
+
+**Errors** — violations print as `[<tier>] <subject> — <detail>` per surface tier
+(`domain_rows`, `aud_event`, `audit_chain`, `trace_sink`, `oban_jobs`, `rollup`, `catalog`,
+`log_telemetry`, `vault_declarations`; `samen_core/lib/samen/no_plaintext_pii/tier.ex`),
+e.g. a domain row holding plaintext where a `vt_*` token must be. Registered exemptions
+print as `[<tier>] EXEMPT (non_pii!): …` and do not fail. Mode misuse fails with
+(`samen_core/lib/mix/tasks/samen.verify.no_plaintext_pii.ex`):
+
+```text
+samen.verify.no_plaintext_pii post-shred mode requires `--tiers all` (got ...).
+```
+
+**Meaning:** the at-rest oracle found plaintext PII on a surface that must carry only
+tokens/bounded values — a write bypassed the `Samen.Vault.Change` chokepoint (raw SQL, a
+seed not going through `Samen.Factory`, an un-vaulted 🔒 field). A tier that cannot
+introspect its surface reports a violation too (never a silent pass).
+**Fix:** write through the resource action path (the vault chokepoint) — for seeds, use the
+`Samen.Factory.create!/3` idiom the generated `Seeds` module uses. If the flagged column is
+truly non-PII, register `non_pii!` (exempt-but-listed). In post-shred (game-day) mode,
+always pass `--tiers all` — a partial post-shred scan is not supported, fail-closed.
+
+---
+
+## Step 7 — `mix samen.verify.migrations`
+
+**Errors** (`samen_core/lib/samen/migration/down_check.ex`):
+
+```text
+<Module> (v<version>): down/0 FAILED — <exception>. Every :expand migration must ship a tested, reversible down/0 (doc §runs 2b).
+<Module> (v<version>): rolling down to v<n-1> did not roll back this expand (rolled ...) — check migration ordering / down/0.
+<Module> (v<version>): re-apply after down did not re-run this migration (re-applied ...) — down/0 is not a clean round trip.
+```
+
+plus config failures: `migrations path does not exist: <path>` and
+`no repo: pass --repo or set config :samen_core, :verify_repo`.
+**Meaning:** an `:expand`-phase migration's `down/0` is missing, raises, or is not a clean
+down→up round trip when exercised in a throwaway scratch DB (`<db>_downcheck_<rand>`).
+`:contract`-phase migrations are covered by PITR, not `down/0`, and are skipped.
+**Fix:** write the real reverse DDL in `down/0` (including `catalog_sync_down`), and keep
+expand migrations additive so the reverse is possible. Never mark an expand migration
+`:contract` just to dodge the check.
+
+---
+
+## Step 8 — `mix samen.verify.sink_schema`
+
+**Errors** (`samen_core/lib/samen/wide_event/schema.ex`):
+
+```text
+field :<name> is typed :string — a FORBIDDEN (name-carrier) type. Wide-event/span fields must be one of [...] (bounded ID / token / enum / number). ...
+enum field :<name> declares no closed `allowed:` set. ...
+```
+
+**Meaning:** the wide-event/span sink schema declares a field that could carry laundered
+plaintext PII into the trace sink — a `:string`/`:binary`/`:map` name-carrier, or an enum
+without a closed `allowed:` set.
+**Fix:** retype the field as a bounded ID, token, closed enum or number; if you need a
+label, make it a closed `allowed: [...]` enum. Free text never enters the sink schema.
+
+---
+
+## Step 9 — `mix samen.verify.metric_labels`
+
+**Error** (`samen_core/lib/mix/tasks/samen.verify.metric_labels.ex` — its own format, not
+the shared shape):
+
+```text
+[label-lint] FAIL:
+  - <Module>: "<metric.name>" uses forbidden tag :org_id
+Raw org_id/actor_id/subject_id labels cause unbounded Prometheus cardinality.
+Use bounded labels: action, route, result, tenant_tier.
+** (Mix) label-lint: forbidden metric tags found — exit 1
+```
+
+**Meaning:** a telemetry metric declares a raw per-entity tag (`org_id` / `actor_id` /
+`subject_id`) — unbounded Prometheus label cardinality.
+**Fix:** drop the tag or replace it with a bounded one (`action`, `route`, `result`,
+`tenant_tier`). Per-org analysis belongs in the analytics tier, not metric labels.
+
+---
+
+## Step 10 — `mix samen.verify.vault_declared_parity`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.vault_declared_parity.ex`):
+
+```text
+de-vaulted PII column: <table>.<column> matches the vault storage shape ...
+FAIL: samen.verify.vault_declared_parity discovered ZERO resources — cannot verify vault parity. ... A vacuous parity check must not pass (fail-closed).
+```
+
+**Meaning:** a physical `pii_<abbrev>_*` column exists in the DB with no matching `pii do`
+declared route on any resource — someone dropped the vault declaration while the column
+survived (the *de-vault* defect; this verifier reads DB truth, so it catches free-text 🔒
+fields the `pii_classify` heuristic cannot). The ZERO-resources refusal is the same
+fail-closed anti-vacuity stance as `pii_reads`.
+**Fix:** restore the `pii do` block (vault + `pii_attribute` + reveal), or if the field is
+being removed for real, drop the column in a proper contract-phase migration. For the
+refusal: fix `ash_domains` discovery.
+
+---
+
+## Step 11 — `mix samen.verify.tnt_catalog`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.tnt_catalog.ex`):
+
+```text
+orphan tnt_field: org=<org> table=<table> field=<field> (table not in tam_table)
+uncatalogued custom field: <table>.<key> (org=<org>, no tnt_field row)
+orphan custom-object field: org=<org> object=<key> field=<field> ...
+orphan tnt_record: org=<org> object=<key> (no tnt_object row)
+```
+
+**Meaning:** the Tier-1/Tier-2 tenant-malleability catalog (`tnt_*`) disagrees with reality
+— a jsonb bag carries a custom-field key with no `tnt_field` row, or `tnt_*` rows point at
+objects/tables that no longer exist.
+**Fix:** custom fields/objects are only ever created through the governed Tier-1/Tier-2
+write paths (which maintain `tnt_field`/`tnt_object` rows transactionally) — never write the
+jsonb bag or the `tnt_*` tables directly. Repair by replaying the governed path or removing
+the orphan through it.
+
+---
+
+## Step 12 — `mix samen.verify.tnt_boundary`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.tnt_boundary.ex`):
+
+```text
+system resource <Module> declares relationship <name> ...
+FK constraint <name> targets tenant-regime table <table> — no system ...
+```
+
+**Meaning:** a system-regime (operator-plane) resource or FK reaches across the two-plane
+boundary into a tenant-regime table — the planes must stay referentially separate.
+**Fix:** remove the cross-plane relationship/FK; cross-plane reads go through the sanctioned
+interfaces (impersonation, the token-blind aggregate plane), never a direct FK.
+
+---
+
+## Step 13 — `mix samen.verify.same_org_fk`
+
+**Error** (`samen_core/lib/mix/tasks/samen.verify.same_org_fk.ex`):
+
+```text
+<Module> declares belongs_to :<rel> → <Target> ... `change {Samen.Policy.SameOrgFk, relationships: [:<rel>, ...]}` — the scope-authoring guide §10 mandates a SameOrgFk guard on every org-scoped belongs_to FK (F3.5). ...
+```
+
+**Meaning:** a tenant-plane, org-scoped `belongs_to` FK has no `SameOrgFk` change guard — a
+write could store a dangling cross-org reference.
+**Fix:** add `change {Samen.Policy.SameOrgFk, relationships: [:<rel>]}` to the resource's
+create/update actions (exactly what the error message prints).
+
+---
+
+## Step 14 — `mix samen.verify.no_pii_columns`
+
+**Error** (`samen_core/lib/mix/tasks/samen.verify.no_pii_columns.ex`):
+
+```text
+aggregate-plane resource <Module> (table <table>) has physical column <col> matching the vault shape `pii_*`. ...
+```
+
+**Meaning:** the token-blind aggregate plane physically contains a vault-shaped column —
+the aggregate tier must not be able to *hold* PII, by schema.
+**Fix:** remove the column from the aggregate resource/migration; aggregates carry bounded
+cohort keys and numeric value columns only.
+
+---
+
+## Step 15 — `mix samen.verify.aggregate_privacy`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.aggregate_privacy.ex`):
+
+```text
+aggregate-plane resource <Module> declares no fail-closed cohort ... k-anonymity / l-diversity floors (T4.5) cannot be enforced without one — every ...
+aggregate-plane resource <Module>'s cohort spec has no cohort_count_column (k-anon needs a cohort size).
+aggregate-plane resource <Module>'s cohort spec has empty value_columns (nothing to suppress when a floor fires).
+```
+
+**Meaning:** an aggregate-plane resource is missing its cohort spec (or the spec is
+incomplete) — without a cohort count and value columns, the k-anonymity/l-diversity
+suppression floors cannot fire, so small cohorts could be re-identified.
+**Fix:** declare the full cohort spec on the aggregate resource: the cohort key, the
+`cohort_count_column`, and the `value_columns` to suppress when a floor fires (see the
+generated app's aggregate resource for the reference shape).
+
+---
+
+## Step 16 — `mix samen.verify.api_contract`
+
+**Errors** (`samen_core/lib/samen/api_contract.ex`,
+`samen_core/lib/mix/tasks/samen.verify.api_contract.ex`):
+
+```text
+route_dropped: <type> <METHOD> <path> was in the v1 contract but is no longer present — NOTE: semantic breaks ... are not caught by this structural diff ...
+field_removed: <type>.<field> was in the v1 contract but is no longer exposed — ...
+type_narrowed: <type>.<field> changed type from "<a>" to "<b>" — ...
+Snapshot file not found: <path>
+```
+
+**Meaning:** the live `/api/v1` contract structurally broke against the committed
+`api_contract.v1.json` — a route disappeared, an exposed field was dropped from
+`show_fields`, or a field's type narrowed. Additions do not fail; un-versioned removals do.
+**Fix:** if the break is intentional, version it consciously:
+
+```bash
+mix samen.verify.api_contract --version v1 --update
+```
+
+and commit the snapshot (reviewers see the break in the diff). Otherwise restore the
+route/field (cookbook Recipe 6). A missing snapshot means the app was never baselined — run
+the same `--update` once and commit.
+
+---
+
+## Step 18 — the anti-tautology probe
+
+Not a `samen.verify.*` task: `mix run priv/anti_tautology_probe.exs` sabotages a real
+mechanism (the generated app's vault path on `pii_<abbrev>_secret`) and FAILS if the gate
+does *not* flip — proving the verifiers above are non-vacuous. If it fails with the gate
+still green under sabotage, a verifier regressed: fix the verifier, not the probe.
+
+---
+
+## Off-gate verifiers
+
+These two `samen.verify.*` tasks are not steps of the generated 18-step gate but are part of
+the verifier suite (AC-G10-4 covers every task in `samen_core/lib/mix/tasks/`):
+
+### `mix samen.verify.column_refs`
+
+**Error** (`samen_core/lib/mix/tasks/samen.verify.column_refs.ex`):
+
+```text
+unknown storage column reference: <token> at <path>:<line>
+```
+
+**Meaning:** a freeform artifact (SQL fragment, projection, doc) references a physical
+column name that does not exist in the catalog — the anti-hallucination check for
+hand-written (or agent-written) storage references. Exercised by the samen_core suite
+(`catalog_test.exs`, the agent-authoring eval) rather than a fixed gate step.
+**Fix:** use the real abbrev-prefixed column name — introspect with `Samen.Catalog.fields/1`
+or read `schema.dict.json`; never guess storage names.
+
+### `mix samen.verify.never_read_current`
+
+**Error** (`samen_core/lib/samen/cdc/never_read_current.ex`):
+
+```text
+read (<fun>/…) against the CDC analytics repo in a module NOT marked `@cdc_analytics_read true` — never read a 'current' value from the analytics tier (doc line 635). If this is a report, mark the module; otherwise read live truth from the primary repo.
+```
+
+**Meaning:** code reads a "current" value from the CDC analytics tier — eventually-consistent
+analytics data must never be treated as live truth. With the CDC tier off (the default) the
+task prints `Nothing to lint — never-read-current is vacuously satisfied (tier default off)`
+and passes; Driftwood runs it as gate step 16b.
+**Fix:** read live truth from the primary repo; if the module genuinely is an analytics
+report, mark it `@cdc_analytics_read true` (an explicit, reviewable claim).

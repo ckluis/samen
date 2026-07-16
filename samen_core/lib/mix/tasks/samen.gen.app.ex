@@ -56,8 +56,16 @@ defmodule Mix.Tasks.Samen.Gen.App do
       `:api_read` on the authored resource, the API red-path tests, the `api_contract.v1.json`
       snapshot + ci.sh step). REQUIRES the web layer (the host router forwards `/api/v1`);
       `--no-web --api` fails closed.
+    * `--deploy` (default: OFF, WS-D D10 / ADR-024) — emit the FAIL-HONEST deploy layer:
+      `fly.toml`, `Dockerfile`, `rel/env.sh.eex`, `lib/<app>/release.ex`, a fail-CLOSED
+      `config/runtime.exs` (RAISES a named error on any missing `DATABASE_URL` /
+      `SECRET_KEY_BASE` / `PHX_HOST` / `SAMEN_KMS_*` secret rather than booting insecurely),
+      and a per-app `docs/runbooks/deploy.md` with an explicit operator-TODO block. These
+      artifacts compile/parse but do NOT claim a live deploy — real Fly/Neon/KMS accounts stay
+      operator work. REQUIRES the web layer (`--no-web --deploy` fails closed).
     * `--headless` — the escape hatch: all product layers off; reproduces the original
-      26-file data-only output exactly (AC-G4-10). Conflicts with an explicit `--web`/`--api`.
+      26-file data-only output exactly (AC-G4-10). Conflicts with an explicit
+      `--web`/`--api`/`--deploy`.
     * `--port` (optional, default 4050) — the dev HTTP port wired into the endpoint config.
     * `--no-reserve-abbrevs` — do NOT append the reserved abbrevs to
       `samen_core/priv/abbrev_registry.json`. Produces an app whose resource abbrev is
@@ -112,6 +120,7 @@ defmodule Mix.Tasks.Samen.Gen.App do
     compile: :boolean,
     web: :boolean,
     api: :boolean,
+    deploy: :boolean,
     headless: :boolean,
     port: :integer
   ]
@@ -141,11 +150,19 @@ defmodule Mix.Tasks.Samen.Gen.App do
       Mix.raise("mix samen.gen.app: --headless conflicts with an explicit --api")
     end
 
+    if headless? and Keyword.get(opts, :deploy) == true do
+      Mix.raise("mix samen.gen.app: --headless conflicts with an explicit --deploy")
+    end
+
     web? = if headless?, do: false, else: Keyword.get(opts, :web, true)
 
     # WS-D D3: the JSON:API layer follows the web layer by default (`--no-api` opts out;
     # `--api` without the web layer fails closed in Gen.validate!/1).
     api? = if headless?, do: false, else: Keyword.get(opts, :api, web?)
+
+    # WS-D D10 (ADR-024): the deploy layer is OPT-IN (default OFF). It requires the web
+    # layer — `--deploy` without the web layer fails closed in Gen.validate!/1.
+    deploy? = if headless?, do: false, else: Keyword.get(opts, :deploy, false)
 
     spec =
       Gen.build_spec(
@@ -155,6 +172,7 @@ defmodule Mix.Tasks.Samen.Gen.App do
         target: target,
         web: web?,
         api: api?,
+        deploy: deploy?,
         port: Keyword.get(opts, :port, 4050)
       )
 

@@ -23,6 +23,7 @@ defmodule Samen.Gen.AppTest do
       target: opts[:target] || "/tmp/samen_gen_test_target",
       web: web?,
       api: Keyword.get(opts, :api, web?),
+      deploy: Keyword.get(opts, :deploy, false),
       port: Keyword.get(opts, :port, 4050)
     )
   end
@@ -89,6 +90,18 @@ defmodule Samen.Gen.AppTest do
     "lib/<%= otp_app %>/seeds.ex",
     "lib/mix/tasks/<%= otp_app %>.seed.ex",
     "test/seeds_vault_test.exs"
+  ]
+
+  # WS-D D10 (AC-G16-1/2/3): the fail-honest deploy emissions (ADR-024). Appended on top of
+  # the web/api base; the `.gitignore` is a `[MOD]` swap (deploy variant), so it does NOT
+  # appear in this appended list.
+  @deploy_paths [
+    "fly.toml",
+    "lib/<%= otp_app %>/release.ex",
+    "Dockerfile",
+    "rel/env.sh.eex",
+    "config/runtime.exs",
+    "docs/runbooks/deploy.md"
   ]
 
   describe "build_spec/1 derivation" do
@@ -670,5 +683,199 @@ defmodule Samen.Gen.AppTest do
       # this is what makes the D6 db_statement sabotage non-vacuous.
       assert mix =~ ~s({:opentelemetry_ecto, "~> 1.2"})
     end
+  end
+
+  # ------------------------------------------------------------------ WS-D D10: --deploy
+  describe "the deploy flag (WS-D D10, ADR-024 — opt-in, fail-honest)" do
+    test "deploy? defaults OFF (opt-in — AC-G16 / ADR-024 §2.6)" do
+      assert spec().deploy? == false
+      assert spec(deploy: true).deploy? == true
+    end
+
+    test "red: --deploy WITHOUT the web layer fails closed (runtime.exs/fly.toml need the endpoint)" do
+      assert_raise ArgumentError, ~r/--deploy requires the web layer/, fn ->
+        Gen.validate_against!(spec(web: false, deploy: true), %{})
+      end
+    end
+
+    test "red: files(false, _, true) has NO clause — a deploy-without-web file set cannot exist" do
+      # apply/3 keeps the deliberately-invalid call out of the compiler's static type pass.
+      assert_raise FunctionClauseError, fn ->
+        apply(Samen.Gen.Templates, :files, [false, false, true])
+      end
+    end
+
+    test "full deploy set = headless + web + api + seeds + the 6 deploy emissions, in order (AC-G16-1)" do
+      assert Enum.map(Samen.Gen.Templates.files(true, true, true), &elem(&1, 0)) ==
+               @headless_paths ++ @web_only_paths ++ @api_only_paths ++ @seeds_paths ++
+                 @deploy_paths
+
+      # files/2 never emits the deploy layer (default OFF) — it equals files/3 with deploy? false.
+      assert Samen.Gen.Templates.files(true, true) == Samen.Gen.Templates.files(true, true, false)
+    end
+
+    test "deploy on a --no-api web app appends the deploy files onto the web-only base" do
+      paths = Enum.map(Samen.Gen.Templates.files(true, false, true), &elem(&1, 0))
+      assert paths == @headless_paths ++ @web_only_paths ++ @deploy_paths
+    end
+
+    test "the default set (no --deploy) emits NONE of the deploy files (red path)" do
+      paths = Enum.map(Samen.Gen.Templates.files(true, true, false), &elem(&1, 0))
+      for deploy_path <- @deploy_paths, do: refute(deploy_path in paths)
+    end
+  end
+
+  # The full deploy file set rendered with the default Widgetco spec (deploy ON).
+  defp rendered_deploy_files do
+    b = Gen.bindings(spec(deploy: true))
+
+    for {path, template} <- Samen.Gen.Templates.files(true, true, true), into: %{} do
+      {Gen.render(path, b), Gen.render(template, b)}
+    end
+  end
+
+  describe "config/runtime.exs is fail-closed (WS-D D10 / AC-G16-2)" do
+    setup do
+      %{runtime: rendered_deploy_files()["config/runtime.exs"]}
+    end
+
+    test "reads every required secret + the KMS env, gated to :prod", %{runtime: rt} do
+      assert rt =~ "if config_env() == :prod do"
+
+      for var <- ~w(DATABASE_URL SECRET_KEY_BASE PHX_HOST SAMEN_KMS_KEY_ID SAMEN_KMS_REGION) do
+        assert rt =~ var, "runtime.exs must read the required secret #{var}"
+      end
+    end
+
+    test "each secret is read through the fail-closed fetch_secret! (raises named on missing)",
+         %{runtime: rt} do
+      # The reader raises a NAMED error (the missing var interpolated) rather than a
+      # silent insecure boot — the ADR-024 boot-honest guarantee.
+      assert rt =~ "fetch_secret! = fn var, hint ->"
+      assert rt =~ ~s|raise|
+      assert rt =~ "is missing the required secret environment variable \#{var}"
+      # An EMPTY secret is treated as missing (also fail-closed).
+      assert rt =~ "is set but EMPTY"
+
+      # Every required secret is routed through fetch_secret! (no bare System.get_env
+      # fallback for a required one): the var name appears as the first arg of a
+      # `fetch_secret!.(` call (indentation-agnostic).
+      for var <- ~w(DATABASE_URL SECRET_KEY_BASE PHX_HOST SAMEN_KMS_KEY_ID SAMEN_KMS_REGION) do
+        assert Regex.match?(~r/fetch_secret!\.\(\s*"#{var}"/, rt),
+               "required secret #{var} must be read through the fail-closed fetch_secret!"
+      end
+    end
+
+    test "wires the prod KMS adapter from the SAMEN_KMS_* env (vault keystore)", %{runtime: rt} do
+      assert rt =~ "config :samen_core, :kms_adapter, Samen.Kms.AwsKmsDynamo"
+      assert rt =~ "config :samen_core, :aws_kms_dynamo_enabled, true"
+    end
+
+    test "NO insecure dev fallback (empty password / localhost) in the prod runtime", %{runtime: rt} do
+      refute rt =~ ~s(password: "")
+      refute rt =~ ~s(hostname: "localhost")
+    end
+  end
+
+  describe "fly.toml + Dockerfile + release (WS-D D10 / AC-G16-1)" do
+    setup do
+      %{files: rendered_deploy_files()}
+    end
+
+    test "fly.toml binds the endpoint port, the /healthz check, and a migrate release_command",
+         %{files: f} do
+      fly = f["fly.toml"]
+      # The endpoint port the web plane owns (default 4050).
+      assert fly =~ "internal_port = 4050"
+      assert fly =~ "[http_service]"
+      assert fly =~ "[[http_service.checks]]"
+      assert fly =~ ~s(path = "/healthz")
+      assert fly =~ "release_command"
+      assert fly =~ "Widgetco.Release.migrate"
+    end
+
+    test "fly.toml is structurally-valid TOML (parses into sections + key=value pairs)",
+         %{files: f} do
+      # A focused structural validator (no TOML dep): every non-blank, non-comment line is
+      # either a `[section]` / `[[array]]` header or a `key = value` pair; brackets balance.
+      # This is the ADR-024 proof bound ("fly.toml parses") without a live `fly` call.
+      assert toml_structurally_valid?(f["fly.toml"])
+    end
+
+    test "the release module runs migrations without Mix (release-safe)", %{files: f} do
+      rel = f["lib/widgetco/release.ex"]
+      assert rel =~ "defmodule Widgetco.Release do"
+      assert rel =~ "def migrate do"
+      assert rel =~ "Ecto.Migrator"
+      # No Mix at runtime.
+      refute rel =~ "Mix."
+    end
+
+    test "the Dockerfile is a two-stage mix release build over the monorepo context", %{files: f} do
+      docker = f["Dockerfile"]
+      assert docker =~ "AS builder"
+      assert docker =~ "mix release"
+      assert docker =~ "COPY samen_core"
+      assert docker =~ "COPY samen_web"
+      assert docker =~ ~s(CMD ["/app/bin/widgetco", "start"])
+    end
+  end
+
+  describe "docs/runbooks/deploy.md operator-TODO block (WS-D D10 / AC-G16-3)" do
+    setup do
+      %{runbook: rendered_deploy_files()["docs/runbooks/deploy.md"]}
+    end
+
+    test "has an explicit Operator TODO section", %{runbook: rb} do
+      assert rb =~ "## Operator TODO"
+    end
+
+    test "the Operator TODO names all four human prerequisites", %{runbook: rb} do
+      todo = rb |> String.split("## Operator TODO") |> List.last()
+      # Fly account, Neon project, KMS keys, OTLP exporter — the honest carries.
+      assert todo =~ ~r/Fly account/i
+      assert todo =~ ~r/Neon project/i
+      assert todo =~ ~r/KMS key/i
+      assert todo =~ ~r/OTLP exporter/i
+    end
+
+    test "documents Neon branch-per-env + the secrets checklist (incl. KMS + SECRET_KEY_BASE)",
+         %{runbook: rb} do
+      assert rb =~ ~r/branch-per-env/i
+      assert rb =~ "SECRET_KEY_BASE"
+      assert rb =~ "SAMEN_KMS_KEY_ID"
+      assert rb =~ "mix phx.gen.secret"
+    end
+
+    test "is honest — no aspirational turnkey 'just run fly deploy'", %{runbook: rb} do
+      refute rb =~ ~r/just run `fly deploy`/i
+      assert rb =~ "fail-honest"
+    end
+  end
+
+  # A minimal structural TOML validator for the deploy proof bound (no TOML dep in
+  # samen_core). Asserts: balanced brackets on header lines; every non-blank, non-comment
+  # line is a `[section]` / `[[array]]` header OR a `key = value` pair. Multi-line values
+  # aren't emitted by the fly.toml template, so a line-oriented check is sufficient + honest.
+  defp toml_structurally_valid?(toml) do
+    toml
+    |> String.split("\n")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == "" or String.starts_with?(&1, "#")))
+    |> Enum.all?(fn line ->
+      header? =
+        (String.starts_with?(line, "[") and String.ends_with?(line, "]")) and
+          balanced_brackets?(line)
+
+      kv? = Regex.match?(~r/\A\S+\s*=\s*.+\z/, line)
+
+      header? or kv?
+    end)
+  end
+
+  defp balanced_brackets?(line) do
+    opens = line |> String.graphemes() |> Enum.count(&(&1 == "["))
+    closes = line |> String.graphemes() |> Enum.count(&(&1 == "]"))
+    opens == closes and opens > 0
   end
 end

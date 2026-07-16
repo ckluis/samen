@@ -87,7 +87,10 @@ defmodule Samen.Gen.App do
     primitives_abbrevs: nil,
     operator_abbrevs: nil,
     # WS-D D3 (ADR-022): the public JSON:API layer — default ON with the web layer.
-    api?: true
+    api?: true,
+    # WS-D D10 (ADR-024): the fail-honest deploy layer — default OFF, opt-in via
+    # `--deploy` / `mix samen.gen.deploy`. Requires the web layer (fails closed otherwise).
+    deploy?: false
   ]
 
   @doc """
@@ -153,6 +156,9 @@ defmodule Samen.Gen.App do
     # WS-D D3 (ADR-022): the JSON:API layer defaults to the web flag (`--api` is ON with
     # `--web`, OFF under `--headless`). An explicit api-without-web fails in validate!/1.
     api? = Keyword.get(opts, :api, web?)
+    # WS-D D10 (ADR-024): the deploy layer is OPT-IN (default OFF). It requires the web
+    # layer; `deploy?: true, web?: false` fails closed in validate_against!/2.
+    deploy? = Keyword.get(opts, :deploy, false)
     port = Keyword.get(opts, :port, 4050)
 
     p1 = String.first(prefix)
@@ -220,6 +226,7 @@ defmodule Samen.Gen.App do
       agg_table: agg_table,
       web?: web?,
       api?: api?,
+      deploy?: deploy?,
       port: port,
       primitives_abbrevs: primitives_abbrevs,
       operator_abbrevs: operator_abbrevs
@@ -293,6 +300,15 @@ defmodule Samen.Gen.App do
       raise ArgumentError,
             "--api requires the web layer (the host router forwards /api/v1 to the API " <>
               "endpoint). Drop --no-web / --headless, or pass --no-api."
+    end
+
+    # WS-D D10 (ADR-024): the deploy layer's runtime.exs + fly.toml read PHX_HOST + the
+    # endpoint port the web plane owns — there is no deploy scaffold without the web layer.
+    if s.deploy? and not s.web? do
+      raise ArgumentError,
+            "--deploy requires the web layer (the emitted config/runtime.exs and fly.toml " <>
+              "read PHX_HOST and the endpoint port the web plane owns). Drop " <>
+              "--no-web / --headless."
     end
 
     unless Regex.match?(~r/\A[A-Z][A-Za-z0-9]*\z/, s.module) do
@@ -613,7 +629,7 @@ defmodule Samen.Gen.App do
 
   # ------------------------------------------------------------------ file set
   # {relative_path_template, contents_template}
-  defp files(%__MODULE__{web?: web?, api?: api?}) do
-    Samen.Gen.Templates.files(web?, api?)
+  defp files(%__MODULE__{web?: web?, api?: api?, deploy?: deploy?}) do
+    Samen.Gen.Templates.files(web?, api?, deploy?)
   end
 end

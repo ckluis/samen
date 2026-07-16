@@ -28,10 +28,30 @@ defmodule Samen.Gen.Templates do
   @doc "The full ordered file set. `web?`/`api?` gate the WS-D D2/D3 emissions (ADR-022)."
   def files(web? \\ false), do: files(web?, web?)
 
-  @doc "As `files/1`, with the api layer gated independently (WS-D D3)."
-  def files(web?, api?)
+  @doc """
+  As `files/1`, with the api layer gated independently (WS-D D3). `files/2` never emits
+  the deploy layer (WS-D D10 is opt-in, default OFF, ADR-024 §2.6) — it delegates to
+  `files/3` with `deploy?: false`.
+  """
+  def files(web?, api?), do: files(web?, api?, false)
 
-  def files(false, false) do
+  @doc """
+  As `files/2`, with the deploy layer gated independently (WS-D D10, ADR-024 — default
+  OFF, opt-in via `--deploy` / `mix samen.gen.deploy`). The deploy layer REQUIRES the web
+  layer (the emitted `config/runtime.exs`/`fly.toml` read `PHX_HOST` and the endpoint port
+  the web plane owns); `Samen.Gen.App.validate_against!/2` fails closed on `deploy?` without
+  `web?`, so there is deliberately NO `files(false, _, true)` clause.
+
+  The deploy emissions are FAIL-HONEST (ADR-024): structurally-correct `fly.toml` +
+  `Dockerfile` + release `rel/env.sh.eex` + a fail-CLOSED `config/runtime.exs` (raises a
+  named error on any missing required secret rather than booting insecurely) + a per-app
+  `docs/runbooks/deploy.md` whose operator-TODO block names what stays human (real Fly
+  account, real Neon project, real KMS keys, real OTLP exporter). They compile/parse but do
+  NOT claim a live deploy. All templates stay PLAIN STRINGS.
+  """
+  def files(web?, api?, deploy?)
+
+  def files(false, false, false) do
     [
       {"mix.exs", mix_exs()},
       {"config/config.exs", config_exs()},
@@ -66,7 +86,7 @@ defmodule Samen.Gen.Templates do
 
   # The RUNNING-product set (ADR-022 default): the headless set with the `[MOD]` templates
   # swapped for their web variants + the `[NEW]` web emissions spliced in.
-  def files(true, false) do
+  def files(true, false, false) do
     mods = %{
       "mix.exs" => mix_exs_web(),
       "config/config.exs" => config_exs_web(),
@@ -77,7 +97,7 @@ defmodule Samen.Gen.Templates do
     }
 
     base =
-      Enum.map(files(false, false), fn {path, template} ->
+      Enum.map(files(false, false, false), fn {path, template} ->
         {path, Map.get(mods, path, template)}
       end)
 
@@ -106,7 +126,7 @@ defmodule Samen.Gen.Templates do
   # `api_contract.v1.json` is NOT a template — it is dumped from the COMPILED app by
   # `Samen.Gen.App.compile_and_dump!/1` (`mix samen.verify.api_contract --update`), the
   # same way `schema.dict.json` is.
-  def files(true, true) do
+  def files(true, true, false) do
     mods = %{
       "mix.exs" => mix_exs_api(),
       "lib/<%= otp_app %>/vertical.ex" => vertical_ex_api(),
@@ -116,7 +136,7 @@ defmodule Samen.Gen.Templates do
     }
 
     base =
-      Enum.map(files(true, false), fn {path, template} ->
+      Enum.map(files(true, false, false), fn {path, template} ->
         {path, Map.get(mods, path, template)}
       end)
 
@@ -143,6 +163,50 @@ defmodule Samen.Gen.Templates do
     ]
 
     base ++ api_new
+  end
+
+  # The DEPLOY layer (WS-D D10, ADR-024 — opt-in, default OFF). Appends the fail-honest
+  # deploy artifacts on top of the web (`--no-api`) or full (`--api`) base. It swaps the
+  # `[MOD]` `.gitignore` (to ignore the release build output + the local dev keystore that
+  # `config/runtime.exs` never uses in prod) and adds the five `[NEW]` deploy emissions.
+  # There is NO `files(false, _, true)` clause — deploy-without-web fails closed in
+  # `Samen.Gen.App.validate_against!/2` (the runtime/fly.toml read the endpoint the web
+  # plane owns).
+  def files(true, api?, true) when is_boolean(api?) do
+    mods = %{
+      ".gitignore" => gitignore_deploy()
+    }
+
+    base =
+      Enum.map(files(true, api?, false), fn {path, template} ->
+        {path, Map.get(mods, path, template)}
+      end)
+
+    deploy_new = [
+      # Fly.io app manifest — app name, region, `[http_service]` on the endpoint port,
+      # a `/healthz` health check, and a `release_command` that runs migrations. Parses
+      # as valid TOML; NOT a claim of a live app (the operator's real Fly account is a TODO).
+      {"fly.toml", fly_toml()},
+      # The release-safe migrator `fly.toml`'s release_command runs. No Mix at runtime —
+      # loads the app + runs Ash/Ecto migrations via Ecto.Migrator.
+      {"lib/<%= otp_app %>/release.ex", release_ex()},
+      # The container image — a two-stage `mix release` build (elixir builder → slim
+      # runtime). Structurally correct; not `docker build`-proven in CI (ADR-024 proof bound).
+      {"Dockerfile", dockerfile()},
+      # The release env shim `mix release` sources — sets node name/cookie from env.
+      {"rel/env.sh.eex", rel_env_sh_eex()},
+      # The FAIL-CLOSED prod runtime config (ADR-024 / AC-G16-2): reads DATABASE_URL,
+      # SECRET_KEY_BASE, PHX_HOST + the KMS env (SAMEN_KMS_*) and RAISES a named error on
+      # any missing required secret rather than booting insecurely.
+      {"config/runtime.exs", runtime_exs()},
+      # The honest operator runbook (AC-G16-3): Neon branch-per-env provisioning, the
+      # secrets checklist (incl. KMS + SECRET_KEY_BASE generation), and an explicit
+      # OPERATOR-TODO block naming what stays human (Fly account, Neon project, KMS keys,
+      # OTLP exporter). No aspirational "just run `fly deploy`".
+      {"docs/runbooks/deploy.md", deploy_runbook()}
+    ]
+
+    base ++ deploy_new
   end
 
   # ------------------------------------------------------------------ mix.exs
@@ -4296,6 +4360,417 @@ defmodule Samen.Gen.Templates do
     Primitives mount (`<%= p_nt %>/<%= p_np %>/<%= p_fl %>/<%= p_sh %>/<%= p_wh %>/<%= p_ff %>`)
     and the operator namespace (`<%= o_org %>…/<%= o_cus %>…/<%= o_tick %>…` — the
     per-plane first-letter convention).
+    """
+  end
+
+  # ==================================================================== WS-D D10: --deploy
+  # FAIL-HONEST deploy artifacts (ADR-024). Structurally-correct + compile/parse, but they do
+  # NOT claim a live deploy: the fresh generation has no Fly account, no Neon project, and no
+  # KMS keys (those stay operator-TODO, named in the runbook). `config/runtime.exs` fails
+  # CLOSED — it raises a named error on any missing required secret rather than booting
+  # insecurely (AC-G16-2). All plain strings; no deploy tooling referenced at samen_core
+  # compile time.
+
+  # ------------------------------------------------------------------ .gitignore (deploy)
+  # The web `.gitignore` + the release build output (`mix release` writes under _build, but
+  # `rel/` overlays are also worth guarding) and an explicit note that runtime SECRETS are
+  # env-only (never a committed *.secret.exs) — matching the fail-closed runtime.
+  defp gitignore_deploy do
+    """
+    /_build/
+    /deps/
+    /cover/
+    /doc/
+    /.fetch
+    erl_crash.dump
+    *.ez
+    *.beam
+    /config/*.secret.exs
+    .elixir_ls/
+    /priv/dev_keystore/
+    # WS-D D10 (ADR-024): the mix release build output. Prod secrets are ENV-ONLY
+    # (DATABASE_URL / SECRET_KEY_BASE / SAMEN_KMS_* — see config/runtime.exs); never
+    # commit them to a *.secret.exs.
+    /_build/prod/
+    """
+  end
+
+  # ------------------------------------------------------------------ fly.toml
+  # A valid-TOML Fly.io manifest. app/primary_region are placeholders the operator sets
+  # (the runbook says so); `[http_service]` binds the endpoint port; the `[[http_service.checks]]`
+  # hits `/healthz` (the emitted page_controller liveness route); `[deploy] release_command`
+  # runs migrations via the release's eval. NOT a claim of a live app — see the runbook's
+  # OPERATOR-TODO block (real Fly account is human work).
+  defp fly_toml do
+    """
+    # <%= otp_app %> — Fly.io manifest (WS-D D10 / ADR-024). FAIL-HONEST scaffold:
+    # structurally correct, but NOT a live deploy. Before `fly deploy` the operator must
+    # complete docs/runbooks/deploy.md (real Fly account, `fly apps create`, the Neon
+    # DATABASE_URL + SECRET_KEY_BASE + SAMEN_KMS_* secrets). `config/runtime.exs` RAISES on
+    # a missing secret, so a half-configured app refuses to boot rather than come up
+    # insecure. Set `app` and `primary_region` to your real values.
+    app = "<%= otp_app %>"
+    primary_region = "iad"
+
+    [build]
+      dockerfile = "Dockerfile"
+
+    [deploy]
+      # Runs the app's migrations before the new release takes traffic. `<%= module %>.Release`
+      # is the release-safe migrator (config/runtime.exs is loaded; no Mix at runtime).
+      release_command = "/app/bin/<%= otp_app %> eval <%= module %>.Release.migrate"
+
+    [env]
+      PHX_HOST = "<%= otp_app %>.fly.dev"
+      PORT = "<%= http_port %>"
+
+    [http_service]
+      internal_port = <%= http_port %>
+      force_https = true
+      auto_stop_machines = "stop"
+      auto_start_machines = true
+      min_machines_running = 1
+
+      [[http_service.checks]]
+        interval = "15s"
+        timeout = "2s"
+        grace_period = "10s"
+        method = "get"
+        path = "/healthz"
+
+    [[vm]]
+      size = "shared-cpu-1x"
+      memory = "1gb"
+    """
+  end
+
+  # ------------------------------------------------------------------ Dockerfile
+  # A two-stage `mix release` build (elixir builder → slim debian runtime). Structurally
+  # correct per Elixir/Phoenix release conventions; NOT `docker build`-proven in CI
+  # (ADR-024 proof bound: compiles/parses + runtime raises + runbook names TODOs; no live
+  # deploy assertion). The generated app is a SIBLING of samen_core/samen_web via `path:`
+  # deps, so the build context note in the runbook explains the monorepo-root build.
+  defp dockerfile do
+    """
+    # <%= module %> — production image (WS-D D10 / ADR-024). Two-stage mix release build.
+    #
+    # NOTE: this app depends on samen_core (+ samen_web) via `{:_, path: "..."}`, so the
+    # Docker BUILD CONTEXT must be the monorepo root that contains samen_core/, samen_web/,
+    # and <%= otp_app %>/ — not the app dir alone. See docs/runbooks/deploy.md §"Build context".
+    # FAIL-HONEST: this Dockerfile is structurally correct but is NOT built in CI and does
+    # not imply a live image; the operator builds + pushes it (an OPERATOR-TODO in the runbook).
+
+    # Versions match the repo's gated toolchain (spikes/s00_smoke/VERSIONS.md) —
+    # keep in sync when the toolchain moves (D9/D10 gate P2).
+    ARG ELIXIR_VERSION=1.20.2
+    ARG OTP_VERSION=29.0
+    ARG DEBIAN_VERSION=bookworm-20250203-slim
+
+    ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
+    ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+
+    FROM ${BUILDER_IMAGE} AS builder
+
+    RUN apt-get update -y \\
+      && apt-get install -y build-essential git \\
+      && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+    WORKDIR /build
+
+    ENV MIX_ENV="prod"
+
+    RUN mix local.hex --force && mix local.rebar --force
+
+    # The path deps must be present in the build context (monorepo root).
+    COPY samen_core samen_core
+    COPY samen_web samen_web
+    COPY <%= otp_app %> <%= otp_app %>
+
+    WORKDIR /build/<%= otp_app %>
+
+    RUN mix deps.get --only prod
+    RUN mix deps.compile
+    RUN mix compile
+
+    # config/runtime.exs is evaluated at BOOT (not build) — it is copied into the release.
+    RUN mix release
+
+    # ---- runtime image ----
+    FROM ${RUNNER_IMAGE}
+
+    RUN apt-get update -y \\
+      && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates \\
+      && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+    RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
+    ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
+
+    WORKDIR /app
+    RUN chown nobody /app
+
+    ENV MIX_ENV="prod"
+
+    COPY --from=builder --chown=nobody:root /build/<%= otp_app %>/_build/prod/rel/<%= otp_app %> ./
+
+    USER nobody
+
+    CMD ["/app/bin/<%= otp_app %>", "start"]
+    """
+  end
+
+  # ------------------------------------------------------------------ rel/env.sh.eex
+  # The release env shim `mix release` sources on boot. Sets the node name + cookie from
+  # env (Fly injects FLY_APP_NAME / RELEASE_COOKIE). Structurally correct release convention.
+  defp rel_env_sh_eex do
+    """
+    #!/bin/sh
+    # <%= module %> release env (WS-D D10). Sourced by the release boot scripts.
+    # RELEASE_NODE / RELEASE_COOKIE let the running node be reachable + clustered; on Fly
+    # the platform injects FLY_APP_NAME and a RELEASE_COOKIE secret.
+    export RELEASE_DISTRIBUTION=name
+    export RELEASE_NODE="<%= otp_app %>@127.0.0.1"
+    """
+  end
+
+  # ------------------------------------------------------------------ config/runtime.exs
+  # FAIL-CLOSED prod runtime config (ADR-024 / AC-G16-2). Evaluated at BOOT (not compile),
+  # so it is the right place to read secrets. In :prod it reads DATABASE_URL, SECRET_KEY_BASE,
+  # PHX_HOST + the KMS env (SAMEN_KMS_KEY_ID / SAMEN_KMS_REGION) and RAISES a clear, NAMED
+  # error via `fetch_secret!/2` if any required secret is absent — a vaulted SaaS must fail
+  # closed on a missing KMS key or secret_key_base, never boot with an empty-password/localhost
+  # fallback (ADR-024 §2 "Boot with insecure defaults" rejected). Sabotaging the raise (making
+  # a required secret optional) flips the D10 deploy probe's red path.
+  defp runtime_exs do
+    """
+    import Config
+
+    # <%= module %> — production runtime configuration (WS-D D10 / ADR-024). Evaluated at
+    # BOOT, so this is where prod SECRETS are read. FAIL-CLOSED: `fetch_secret!/2` RAISES a
+    # named, actionable error on any missing required secret rather than booting a vaulted
+    # SaaS insecurely. There is NO localhost/empty-password fallback here (that is dev only).
+    #
+    # NOT a live-deploy claim: the operator must provide the real values (Neon DATABASE_URL,
+    # a generated SECRET_KEY_BASE, and the SAMEN_KMS_* keys). See docs/runbooks/deploy.md.
+
+    # Fail-closed secret reader: raises a clear, named error naming the missing env var and
+    # how to set it. This is the ADR-024 boot-honest guarantee — the app never comes up
+    # half-secure.
+    fetch_secret! = fn var, hint ->
+      case System.get_env(var) do
+        nil ->
+          raise \"\"\"
+          <%= module %> is missing the required secret environment variable \#{var}.
+
+          The app refuses to boot without it (fail-closed — a vaulted SaaS must never come
+          up half-secure). \#{hint}
+
+          See docs/runbooks/deploy.md for the full secrets checklist.
+          \"\"\"
+
+        "" ->
+          raise \"\"\"
+          <%= module %> required secret environment variable \#{var} is set but EMPTY.
+
+          An empty secret is treated as missing (fail-closed). \#{hint}
+          \"\"\"
+
+        value ->
+          value
+      end
+    end
+
+    if config_env() == :prod do
+      # --- database (Neon per-product; branch-per-env — see the runbook) -----------------
+      database_url =
+        fetch_secret!.(
+          "DATABASE_URL",
+          "Set it to your Neon connection string, e.g. " <>
+            "postgres://USER:PASS@HOST/<%= otp_app %>?sslmode=require"
+        )
+
+      maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
+
+      config :<%= otp_app %>, <%= module %>.Repo,
+        url: database_url,
+        pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+        socket_options: maybe_ipv6,
+        # Neon requires TLS; verify_none keeps the scaffold honest without shipping a CA
+        # bundle assumption (the runbook flags hardening verify_full as an operator step).
+        ssl: [verify: :verify_none]
+
+      # --- endpoint (PHX_HOST + SECRET_KEY_BASE) -----------------------------------------
+      secret_key_base =
+        fetch_secret!.(
+          "SECRET_KEY_BASE",
+          "Generate one with `mix phx.gen.secret` (a >=64-byte random string)."
+        )
+
+      host =
+        fetch_secret!.(
+          "PHX_HOST",
+          "Set it to the public hostname, e.g. <%= otp_app %>.fly.dev"
+        )
+
+      port = String.to_integer(System.get_env("PORT") || "<%= http_port %>")
+
+      config :<%= otp_app %>, <%= module %>Web.Endpoint,
+        url: [host: host, port: 443, scheme: "https"],
+        http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}, port: port],
+        secret_key_base: secret_key_base,
+        server: true
+
+      # --- KMS env (SAMEN_KMS_*) — the vault's crypto keystore, the single most-forgotten
+      # prod requirement for a vaulted app (ADR-024). Fail-closed on absence: the vault
+      # cannot wrap/unwrap DEKs without it, so booting without it would be a silent
+      # half-secure app. The AWS KMS + DynamoDB adapter (Samen.Kms.AwsKmsDynamo) is the
+      # prod store; enabling it requires these keys.
+      kms_key_id =
+        fetch_secret!.(
+          "SAMEN_KMS_KEY_ID",
+          "The AWS KMS key id/ARN that wraps per-subject DEKs (Samen.Kms.AwsKmsDynamo). " <>
+            "The vault cannot encrypt/decrypt PII without it."
+        )
+
+      kms_region =
+        fetch_secret!.(
+          "SAMEN_KMS_REGION",
+          "The AWS region of the KMS key + the wrapped-DEK DynamoDB table (PITR OFF)."
+        )
+
+      config :samen_core, :kms_adapter, Samen.Kms.AwsKmsDynamo
+      config :samen_core, :aws_kms_dynamo_enabled, true
+
+      config :samen_core, Samen.Kms.AwsKmsDynamo,
+        key_id: kms_key_id,
+        region: kms_region
+    end
+    """
+  end
+
+  # ------------------------------------------------------------------ lib/<app>/release.ex
+  # The release-safe migrator `fly.toml`'s `release_command` invokes (`<app> eval
+  # <module>.Release.migrate`). No Mix at runtime — it loads the app and runs the same
+  # `Ecto.Migrator.run(Repo, :up, all: true)` the ci_bootstrap uses, so a prod deploy
+  # applies the substrate + resource migrations before taking traffic.
+  defp release_ex do
+    """
+    defmodule <%= module %>.Release do
+      @moduledoc \"\"\"
+      Release tasks for <%= module %> (WS-D D10 / ADR-024). Invoked by the release binary
+      (`bin/<%= otp_app %> eval <%= module %>.Release.migrate`) — NO Mix at runtime.
+
+      `fly.toml`'s `release_command` calls `migrate/0` before a new release takes traffic.
+      \"\"\"
+      @app :<%= otp_app %>
+
+      def migrate do
+        load_app()
+
+        {:ok, _, _} =
+          Ecto.Migrator.with_repo(<%= module %>.Repo, fn repo ->
+            Ecto.Migrator.run(repo, :up, all: true)
+          end)
+      end
+
+      defp load_app do
+        Application.load(@app)
+      end
+    end
+    """
+  end
+
+  # ------------------------------------------------------------------ docs/runbooks/deploy.md
+  # The HONEST operator runbook (AC-G16-3). Neon branch-per-env provisioning, the secrets
+  # checklist (incl. KMS + SECRET_KEY_BASE generation), and an explicit OPERATOR-TODO block
+  # naming the four human prerequisites: real Fly account, real Neon project, real KMS keys,
+  # real OTLP exporter. The structural doc test asserts this block exists with all four named
+  # items (AC-G16-3). No aspirational "just run `fly deploy`".
+  defp deploy_runbook do
+    """
+    # Deploying <%= module %> (Fly.io + Neon)
+
+    Scaffolded by `mix samen.gen.app --deploy` (WS-D D10 / ADR-024). These artifacts are
+    **fail-honest**: structurally correct, but a fresh generation has NO Fly account, NO Neon
+    project, and NO KMS keys, so they do **not** claim a live deploy. `config/runtime.exs`
+    **fails closed** — the app RAISES on any missing required secret rather than booting a
+    vaulted SaaS half-secure. Everything below the "Operator TODO" line stays human work.
+
+    ## Emitted artifacts
+
+    | File | What it is |
+    |---|---|
+    | `fly.toml` | Fly manifest — `[http_service]` on port `<%= http_port %>`, `/healthz` check, a `release_command` running migrations. |
+    | `Dockerfile` | Two-stage `mix release` build. **Build context = the monorepo root** (see below). |
+    | `rel/env.sh.eex` | Release env shim (node name / cookie). |
+    | `config/runtime.exs` | **Fail-closed** prod config: reads `DATABASE_URL`, `SECRET_KEY_BASE`, `PHX_HOST`, `SAMEN_KMS_KEY_ID`, `SAMEN_KMS_REGION`; raises a named error on any missing one. |
+
+    ## Build context
+
+    <%= module %> depends on `samen_core` (and `samen_web`) via `{:_, path: "..."}`. The
+    Docker build therefore needs the **monorepo root** (the dir containing `samen_core/`,
+    `samen_web/`, and `<%= otp_app %>/`) as its build context, not the app dir alone:
+
+        fly deploy --dockerfile <%= otp_app %>/Dockerfile --config <%= otp_app %>/fly.toml .
+
+    run from the monorepo root (`.`).
+
+    ## Neon per-product database (branch-per-env)
+
+    Provision ONE Neon project per product, and use Neon **branches** for environments so
+    each env has an isolated copy that shares the parent's schema:
+
+    1. Create a Neon project for `<%= otp_app %>`.
+    2. Create a branch per environment: `main` (prod), `staging`, and ephemeral PR branches.
+       Each branch yields its own `DATABASE_URL`.
+    3. The connection string is your `DATABASE_URL` secret (below). Neon requires TLS
+       (`?sslmode=require`); `config/runtime.exs` sets `ssl: [verify: :verify_none]` — harden
+       to `verify_full` with a CA bundle as an operator step.
+    4. Migrations run automatically on deploy via `fly.toml`'s `release_command`.
+
+    ## Secrets checklist
+
+    Set every secret before the first deploy — `config/runtime.exs` RAISES (fail-closed) if
+    any is missing, naming the variable:
+
+    - [ ] `DATABASE_URL` — the Neon connection string (`postgres://…/<%= otp_app %>?sslmode=require`).
+    - [ ] `SECRET_KEY_BASE` — generate with `mix phx.gen.secret` (a ≥64-byte random string).
+    - [ ] `PHX_HOST` — the public hostname (e.g. `<%= otp_app %>.fly.dev`).
+    - [ ] `SAMEN_KMS_KEY_ID` — the AWS KMS key id/ARN that wraps per-subject DEKs. **The vault
+          cannot encrypt/decrypt PII without it** — the single most-forgotten prod requirement.
+    - [ ] `SAMEN_KMS_REGION` — the AWS region of the KMS key + the wrapped-DEK DynamoDB table.
+
+    Set them on Fly with:
+
+        fly secrets set DATABASE_URL=… SECRET_KEY_BASE=… PHX_HOST=… \\
+          SAMEN_KMS_KEY_ID=… SAMEN_KMS_REGION=…
+
+    ## Verify fail-closed (before you trust the deploy)
+
+    Boot the release with a required secret UNSET and confirm it REFUSES to start with a
+    named error (never a silent half-secure boot):
+
+        # missing SAMEN_KMS_KEY_ID → must raise naming SAMEN_KMS_KEY_ID
+        DATABASE_URL=… SECRET_KEY_BASE=… PHX_HOST=… SAMEN_KMS_REGION=… \\
+          /app/bin/<%= otp_app %> eval ":ok"
+
+    ## Operator TODO — the human prerequisites (NOT provided by this scaffold)
+
+    These are deliberately **not** automated (ADR-024 — no live deploy claim). The scaffold is
+    a fail-honest on-ramp, not a turnkey deploy. You must provide:
+
+    1. **A real Fly account + app** — sign up, `fly auth login`, `fly apps create <%= otp_app %>`,
+       and set `app`/`primary_region` in `fly.toml`. No Fly account exists in a fresh generation.
+    2. **A real Neon project + DATABASE_URL** — create the project + branches (above) and set
+       `DATABASE_URL`. No database is provisioned by this scaffold.
+    3. **Real KMS keys** — create the AWS KMS key + the wrapped-DEK DynamoDB table (PITR OFF,
+       per ADR-001) and set `SAMEN_KMS_KEY_ID` / `SAMEN_KMS_REGION`. The in-memory/file-backed
+       dev KMS adapters are NOT for production; the vault needs a real keystore.
+    4. **A real OTLP exporter** — the observability plane records token-only spans with
+       `db_statement: :disabled`, but the wide-event OTLP sink is operator-wired (it defaults
+       to `:none`). Point it at your real collector to see traces in production.
+
+    Until all four are done, `fly deploy` is not expected to yield a running app — and
+    `config/runtime.exs` will fail closed rather than pretend otherwise.
     """
   end
 end
