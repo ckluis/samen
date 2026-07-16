@@ -192,12 +192,24 @@ defmodule Samen.Gen.PostTest do
       end
     end
 
-    test "red: an abbrev owned by a DIFFERENT module is rejected (permanence)", %{dir: dir} do
+    test "red: an abbrev owned by a DIFFERENT module is rejected (host-scoped permanence)",
+         %{dir: dir} do
+      # The registry map is the app's OWN host namespace. A different owner there is the
+      # real permanence violation (ADR-006/ADR-025 D7/D8-P2-1: routed through
+      # validate_host/4). The refusal names the HOST namespace, not a blanket "global
+      # registry" (P2-2 message fix).
       registry = %{"wdg" => "Someone.Else.Owner"}
 
-      assert_raise ArgumentError, ~r/permanent and never/, fn ->
-        Post.validate_resource!(rspec(dir), registry)
-      end
+      err =
+        assert_raise ArgumentError, ~r/permanent within a host and never recycled/, fn ->
+          Post.validate_resource!(rspec(dir), registry)
+        end
+
+      # P2-2: the message attributes the owner to THIS host (widgetco), not "the global
+      # registry" — the location is now correct.
+      assert err.message =~ ~s(host "widgetco")
+      assert err.message =~ "Someone.Else.Owner"
+      refute err.message =~ "global registry"
     end
 
     test "green: an abbrev already owned by the SAME module is fine (idempotent)", %{dir: dir} do

@@ -48,8 +48,9 @@ defmodule Samen.Gen.Post do
 
   `validate!/1` refuses: a non-existent app dir, a scope/resource module that already
   exists in the app, a non-3-letter abbrev, an abbrev colliding with a DIFFERENT owner
-  in the global registry (permanence — ADR-006), and (for `gen.resource`) a target
-  scope domain that is not present in the app.
+  in the app's OWN host namespace or the global cross-host net (host-scoped permanence —
+  ADR-006/ADR-025, checked via `AbbrevRegistry.validate_host/4`), and (for
+  `gen.resource`) a target scope domain that is not present in the app.
   """
 
   alias Samen.Gen.App
@@ -176,6 +177,14 @@ defmodule Samen.Gen.Post do
   Fail-closed validation for a resource spec. Optionally pass a registry map
   (`validate_resource!/2`) to make the abbrev-collision rule unit-testable without
   touching the committed registry.
+
+  The registry map is the resource's OWN host namespace (`%{abbrev => owner}`) — the
+  same host (`s.otp_app`) the allocator (`reserve_abbrevs!/2`) writes into. The
+  abbrev-collision rule is routed through `AbbrevRegistry.validate_host/4` (ADR-025
+  D7/D8-P2-1) so validate and reserve share ONE rule and the refusal message names the
+  correct location (host namespace vs. GLOBAL cross-host net), not a blanket "global
+  registry". Because the committed registry has no `hosts` key yet, `load/0`'s flattened
+  view equals the legacy flat map, so `validate_resource!/1` is unchanged in behavior.
   """
   def validate_resource!(%ResourceSpec{} = s), do: validate_resource!(s, AbbrevRegistry.load())
 
@@ -207,19 +216,19 @@ defmodule Samen.Gen.Post do
             "resource #{s.resource_module} already exists (#{resource_file}). Refusing to overwrite."
     end
 
-    # ADR-006 permanence: an abbrev owned by a DIFFERENT module is never recycled.
-    case Map.get(registry, s.abbrev) do
-      nil ->
-        :ok
+    # ADR-006 permanence, host-scoped (ADR-025 D7/D8-P2-1): route the collision rule
+    # through `AbbrevRegistry.validate_host/4` so validate and the allocator's reserve
+    # share ONE rule. The passed `registry` IS this app's host namespace (the same host
+    # `s.otp_app` the reserve path writes into), so a cross-host abbrev the allocator
+    # would namespace fine is no longer refused, and the refusal message names the host
+    # namespace (not a blanket "global registry"). `validate_host/4` still fails closed
+    # on a different owner in this host OR in the global cross-host net.
+    host = to_string(s.otp_app)
+    namespaced = %{global: %{}, hosts: %{host => registry}}
 
-      owner when owner == s.resource_module ->
-        :ok
-
-      other ->
-        raise ArgumentError,
-              "abbrev #{inspect(s.abbrev)} is already reserved to #{other} in the global " <>
-                "registry (#{AbbrevRegistry.path()}). Abbrevs are permanent and never " <>
-                "recycled — pick a different --abbrev."
+    case AbbrevRegistry.validate_host(namespaced, host, s.abbrev, s.resource_module) do
+      :ok -> :ok
+      {:error, message} -> raise ArgumentError, message
     end
 
     :ok

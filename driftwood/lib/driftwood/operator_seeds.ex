@@ -134,20 +134,23 @@ defmodule Driftwood.OperatorSeeds do
   defp seed_agent do
     {first, last, email} = @agent
 
-    Op.Agent
-    |> Ash.Changeset.for_create(
-      :create,
-      %{
-        org_id: @operator_org_id,
-        handle: "pnakamura",
-        status: :active,
-        role: :agent,
-        full_name: %Samen.Type.FullName{first: first, last: last},
-        email: email
-      },
+    # WS-D D11.1: full_name is the vault-routed composite `Samen.Factory.person/3`
+    # builds; `email` is a scalar vaulted attribute (stays inline). Factory.create!
+    # owns the vault-aware create + physical-column red-path guard.
+    Samen.Factory.create!(
+      Op.Agent,
+      Map.merge(
+        %{
+          org_id: @operator_org_id,
+          handle: "pnakamura",
+          status: :active,
+          role: :agent,
+          email: email
+        },
+        Samen.Factory.person(first, last)
+      ),
       authorize?: false
     )
-    |> Ash.create!()
   end
 
   defp define_custom_fields do
@@ -178,20 +181,20 @@ defmodule Driftwood.OperatorSeeds do
       )
       |> Ash.create!()
 
+    # WS-D D11.1: vault-routed person PII (full_name + emails) via Samen.Factory.
     admin =
-      Op.User
-      |> Ash.Changeset.for_create(
-        :create,
-        %{
-          org_id: @operator_org_id,
-          handle: "acct:#{tid}",
-          status: "active",
-          full_name: %Samen.Type.FullName{first: af, last: al},
-          emails: [%{label: "work", address: ae}]
-        },
+      Samen.Factory.create!(
+        Op.User,
+        Map.merge(
+          %{
+            org_id: @operator_org_id,
+            handle: "acct:#{tid}",
+            status: "active"
+          },
+          Samen.Factory.person(af, al, email: ae)
+        ),
         authorize?: false
       )
-      |> Ash.create!()
 
     Op.Membership
     |> Ash.Changeset.for_create(
@@ -328,21 +331,22 @@ defmodule Driftwood.OperatorSeeds do
       |> Ash.create!()
 
     for {_prospect_co, first, last, email, stage} <- @leads do
-      Driftwood.Crm.Person
-      |> Ash.Changeset.for_create(
-        :create,
-        %{
-          org_id: @operator_org_id,
-          company_id: company.id,
-          display_name: "#{first} #{last}",
-          job_title: "VP Operations",
-          full_name: %Samen.Type.FullName{first: first, last: last},
-          emails: [%{label: "work", address: email}],
-          custom: %{"lifecycle_stage" => stage}
-        },
+      # WS-D D11.1: vault-routed person PII (full_name + emails) via Samen.Factory;
+      # the non-PII `custom` bag + scalars stay in the merged attrs map.
+      Samen.Factory.create!(
+        Driftwood.Crm.Person,
+        Map.merge(
+          %{
+            org_id: @operator_org_id,
+            company_id: company.id,
+            display_name: "#{first} #{last}",
+            job_title: "VP Operations",
+            custom: %{"lifecycle_stage" => stage}
+          },
+          Samen.Factory.person(first, last, email: email)
+        ),
         authorize?: false
       )
-      |> Ash.create!()
     end
 
     :ok

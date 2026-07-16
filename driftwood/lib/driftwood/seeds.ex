@@ -1141,22 +1141,25 @@ defmodule Driftwood.Seeds do
       )
       |> Ash.create!()
 
+    # WS-D D11.1: full_name is the vault-routed composite `Samen.Factory.person/3`
+    # builds; adopt the factory so the seeded participant PII takes the SampleData
+    # vault path and the physical-column red-path guard applies.
     tenant_participant =
-      Driftwood.Chat.ChatParticipant
-      |> Ash.Changeset.for_create(
-        :create,
-        %{
-          org_id: org_id,
-          thread_id: thread.id,
-          party: :tenant,
-          principal_kind: :user,
-          handle: tenant_handle,
-          role: :owner,
-          full_name: %Samen.Type.FullName{first: "Dispatch", last: spec.name}
-        },
+      Samen.Factory.create!(
+        Driftwood.Chat.ChatParticipant,
+        Map.merge(
+          %{
+            org_id: org_id,
+            thread_id: thread.id,
+            party: :tenant,
+            principal_kind: :user,
+            handle: tenant_handle,
+            role: :owner
+          },
+          Samen.Factory.person("Dispatch", spec.name)
+        ),
         authorize?: false
       )
-      |> Ash.create!()
 
     if operator? do
       Driftwood.Chat.ChatParticipant

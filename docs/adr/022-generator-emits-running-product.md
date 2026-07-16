@@ -65,7 +65,13 @@ verticals may adopt `Samen.Observability`/`Samen.Factory` to shed their own hand
 **Negative / accepted.** The generator's dependency surface grows (it now emits apps with
 phoenix/ash_json_api deps) and the CI probe gets slower (it compiles + boots a web app, not just a
 data layer). The generated app is bigger, so the "generated == reference byte-for-byte" drift guard
-(AC-G4-9) matters more and must be enforced by an LOC-parity assertion.
+(AC-G4-9) matters more. RESOLUTION (D11 gate WS-D-G1-P2-2): the numeric LOC-parity
+assertion named in build-plan D6.2 was superseded by STRUCTURAL drift-guard tests, which
+bind the guarantee more strongly than an LOC bound: gen_app_test asserts the emitted router
+mounts framework macros ONLY with zero authored LiveViews (:366), shell HTML is inherited
+never re-emitted (:400), and PageLimitClamp is inherited never re-emitted (:530/:552). A
+regression re-implementing framework code while still mounting the macros is caught by
+these; a pinned LOC number would only drift with legitimate template growth.
 
 **Neutral.** `--headless` preserves the existing narrow claim for callers that want only the data
 layer; no existing behavior is removed.

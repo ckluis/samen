@@ -144,21 +144,26 @@ defmodule PawChart.Seeds do
     for {company_name, first, last, title, email, phone} <- @people do
       company = Map.fetch!(companies, company_name)
 
-      PawChart.Crm.Person
-      |> Ash.Changeset.for_create(
-        :create,
-        %{
-          org_id: org_id,
-          company_id: company.id,
-          display_name: "#{first} #{last}",
-          job_title: title,
-          full_name: %Samen.Type.FullName{first: first, last: last},
-          emails: [%{label: "work", address: email}],
-          phones: [%{label: "direct", number: phone}]
-        },
+      # WS-D D11.1: the person-PII composite (full_name + emails/phones) and the
+      # vault-routed create are the SampleData idiom `Samen.Factory` extracts — adopt
+      # it so seeded PII takes the same vault path, no hand-rolled composite.
+      Samen.Factory.create!(
+        PawChart.Crm.Person,
+        Map.merge(
+          %{
+            org_id: org_id,
+            company_id: company.id,
+            display_name: "#{first} #{last}",
+            job_title: title
+          },
+          Samen.Factory.person(first, last,
+            email: email,
+            phone: phone,
+            phone_label: "direct"
+          )
+        ),
         authorize?: false
       )
-      |> Ash.create!()
     end
   end
 
@@ -375,21 +380,25 @@ defmodule PawChart.Seeds do
     # Agents WITH PII (full_name composite + email scalar, both vaulted).
     agents =
       for {handle, first, last, email, role} <- @agents do
-        PawChart.Support.Agent
-        |> Ash.Changeset.for_create(
-          :create,
-          %{
-            org_id: org_id,
-            handle: handle,
-            full_name: %Samen.Type.FullName{first: first, last: last},
-            email: email,
-            role: role,
-            status: :active,
-            timezone: "America/Los_Angeles"
-          },
+        # WS-D D11.1: full_name is the vault-routed composite `Samen.Factory.person/3`
+        # builds; `email` here is a scalar vaulted attribute (not the emails list), so it
+        # stays inline. `Factory.create!` still owns the vault-aware create + the
+        # physical-column red-path guard.
+        Samen.Factory.create!(
+          PawChart.Support.Agent,
+          Map.merge(
+            %{
+              org_id: org_id,
+              handle: handle,
+              email: email,
+              role: role,
+              status: :active,
+              timezone: "America/Los_Angeles"
+            },
+            Samen.Factory.person(first, last)
+          ),
           authorize?: false
         )
-        |> Ash.create!()
       end
 
     [primary_agent | _] = agents

@@ -54,19 +54,19 @@ op-todo (human operator task).
 | G1 | **Real CRUD + list ergonomics** | end-user, harden | Most LiveViews read-only; no pagination/sort/filter/bulk anywhere incl. JSON:API (unbounded reads) | H | M | web+kernel | ✅ shipped (WS-A) |
 | G2 | **Delivery engine + notifications inbox** | end-user, harden, operator | Marketing send is a no-op stub; `Notification` resource has no inbox/engine/prefs; SLA breach is a silent state flip; kernel `Send.:create_checked` hardcodes `msp_suppression` | H | M | kernel+web | ✅ shipped (WS-A) |
 | G3 | **PII classifier: heuristic → mechanism** | harden | "Provably non-PII" is name/type heuristic + allowlist; freeform strings leak to the aggregate plane by naming | H (trust) | M | kernel | ✅ shipped (WS-A phase A1) |
-| G4 | **Generator catch-up (web/API/seed scaffolds)** | builder | gen.app emits headless data layer only; no resource/scope generators; JSON:API + seeds + observability wiring all hand-copied | H | M | gen | P0 |
+| G4 | **Generator catch-up (web/API/seed scaffolds)** | builder | gen.app emits headless data layer only; no resource/scope generators; JSON:API + seeds + observability wiring all hand-copied | H | M | gen | ✅ shipped (WS-D) |
 | G5 | **Onboarding + empty states + first-run** | end-user | Inconsistent empty states, no first-run, no in-app sample data | H | M | web | ✅ shipped (WS-A) |
 | G6 | **Feature-flag evaluation engine** | operator, harden | Flags are config rows nothing evaluates; no bucketing/targeting/rollout; experiments absent | H | S/M | kernel+web | ✅ shipped (WS-B) |
 | G7 | **Revenue analytics (MRR movements)** | operator | Snapshot MRR only; no movements/churn/cohorts/NRR | H | M | web | ✅ shipped (WS-B) |
 | G8 | **Tenant lifecycle admin** | operator | No provision/suspend/offboard/export/delete actions from the operator plane | H | M | web+kernel | P1 |
 | G9 | **Global search** | end-user, harden | PII-safe index registry exists; zero search action / ⌘K / UI | H | M | kernel+web | P1 |
-| G10 | **Getting-started tutorial + cookbook + README** | builder | 3 reference guides, no zero-to-feature walkthrough, no gate-failure index | M-H | S | gen | P1 |
+| G10 | **Getting-started tutorial + cookbook + README** | builder | 3 reference guides, no zero-to-feature walkthrough, no gate-failure index | M-H | S | gen | ✅ shipped (WS-D) |
 | G11 | **Status/health/SLA + alerting** | operator | Metrics defined but unwired; bare `/healthz`; no status page/alerts/health dashboard | H | M | web+gen | P1 |
 | G12 | **Product analytics over CDC** | operator | No event capture/funnels/retention; vault-excluded CDC projection is an ideal unused feed — privacy-correct-by-construction moat | H | L | new (web) | ✅ seed shipped (WS-B) |
 | G13 | **Billing depth: Stripe sync + usage rating** | operator, harden | Stripe-mirror schema inert; SyncAdapter stub; no rating/proration/tax | M-H | L | kernel+op-todo | P1 |
 | G14 | **Files engine** | end-user, harden | Metadata resource only; no storage adapter/upload/preview | M/H | M | kernel+web | P1 |
 | G15 | **Import/export (CSV mapper)** | end-user | None at any granularity; catalog-as-data makes a generic mapper feasible; export = highest-risk mask-by-omission vector | M/H | M | web | P1 |
-| G16 | **Deploy story (Fly/Neon templates)** | builder | Zero deploy artifacts; all carried as operator TODOs | H | M | gen+op-todo | P1 |
+| G16 | **Deploy story (Fly/Neon templates)** | builder | Zero deploy artifacts; all carried as operator TODOs | H | M | gen+op-todo | ✅ shipped (WS-D) |
 | G17 | **Per-tenant health scores + drill-down** | operator | Health is a single subscription-status pill | M-H | S | web | ✅ shipped (WS-B) |
 | G17b | Fidelity follow-on (B9 gate F2): wire a pae-recency read into `__activity_days__` (currently hardcoded nil → activity factor always :unknown) + flag-adoption breadth into the adoption factor — pae now emits, the seam is ready | operator | — | M | S | web | P2 |
 | G18 | **Self-serve settings (profile/2FA/sessions/API keys)** | end-user | Models exist, no screens, no `/settings` route | M | M | web | P2 |
@@ -77,7 +77,7 @@ op-todo (human operator task).
 | G23 | **Product feedback → roadmap** | operator | Absent entirely | M | M | new | P2 |
 | G24 | **i18n / timezone / currency** | end-user | USD + UTC hardcoded, no gettext | M | M | web | P2 |
 | G25 | **A11y (kit-level)** | end-user | 3 aria/role/alt occurrences total; kit fix = fleet leverage | L-M | M | web | P2 |
-| G26 | **Test/red-path scaffolds for verticals** | builder | 4 mandated test files hand-copied per resource | M | M | gen | P2 |
+| G26 | **Test/red-path scaffolds for verticals** | builder | 4 mandated test files hand-copied per resource | M | M | gen | ✅ shipped (WS-D) |
 | G27 | **Misc kernel residues** | harden | Webhook A6 over-strict guard; rollup cron ADR-007; abbrev-registry tax ADR-006; Oban multi-node concurrency | L-M | S-M | kernel+op-todo | P2 |
 | G28 | **Operator RBAC granularity / backlog tooling** | operator | Closed role set fine for now; backlog = link out | L | M | web | P3 |
 
@@ -120,6 +120,7 @@ gate (it is kernel-scoped and independent) or immediately after. It must not wai
 workstreams.
 
 ### WS-D — "Builder Joy" (G4 + G10 + G16 + G26)
+> **✅ SHIPPED 2026-07-16** — all 11 phases (D1–D11) gated GO; workstream-wide adversarial gate GO: `docs/gate-ws-d.md`.
 Push the proven thin-mount patterns up into generators (web/API/seed/observability scaffolds,
 resource/scope gen), zero-to-feature tutorial, gate-failure index, Fly/Neon deploy templates.
 Highest leverage once the surfaces being scaffolded (WS-A) are real — generating today's
