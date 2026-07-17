@@ -253,10 +253,19 @@ defmodule Demo.PrimitivesScopeRbacRedPathTest do
     assert {:ok, _} = result
   end
 
-  test "member can create a file record (member+ gate for files)" do
+  test "member is admitted by the member+ gate on the file create action" do
     org = mk_org("rbac-pfl-member-ok")
     member = mk_actor(org.id, :member)
 
+    # This test proves the RBAC member+ gate ADMITS a member on the File `:create`
+    # action — distinct from the viewer case below, which is RBAC-denied (Forbidden).
+    # A `storage_key` is included so the create is a real member-shaped write, but a
+    # File row's storage_key can only be minted through the governed chokepoint
+    # (`Samen.Files.upload/3` — ADR-026 RP-FI-1 / AC-G14-2). Ash runs policy
+    # authorization BEFORE the `Samen.Files.ChokepointGuard` before_action, so a member
+    # that passes the gate is stopped by the governance guard (a storage_key error),
+    # NOT by authorization. The proof of admission is therefore the ABSENCE of a
+    # Forbidden error — the member cleared the gate.
     result =
       File
       |> Ash.Changeset.for_create(:create, %{
@@ -268,7 +277,12 @@ defmodule Demo.PrimitivesScopeRbacRedPathTest do
       })
       |> Ash.create(actor: member.actor, authorize?: true)
 
-    assert {:ok, _} = result
+    refute match?({:error, %Ash.Error.Forbidden{}}, result),
+           "member+ gate must ADMIT a member on the file create action (expected the " <>
+             "governed-chokepoint refusal, not an RBAC Forbidden), got: #{inspect(result)}"
+
+    assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.InvalidAttribute{field: :storage_key}]}} =
+             result
   end
 
   test "viewer cannot create file (member+ gate)" do

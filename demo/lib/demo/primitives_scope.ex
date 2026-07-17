@@ -195,18 +195,39 @@ defmodule Demo.PrimitivesScope.Smoke do
     |> Ash.create(authorize?: false)
   end
 
-  @doc "Create a file record."
+  @doc """
+  Create a governed file record and promote it to `:active`.
+
+  Routes through `Samen.Files.upload/3` — the ONLY sanctioned path that may mint a
+  `storage_key`-bearing File row (ADR-026 RP-FI-1 / AC-G14-2). A direct `Ash.create`
+  setting `storage_key` is refused by `Samen.Files.ChokepointGuard`. A fresh upload lands
+  `:quarantined` (fail-closed, RP-FI-3); it is promoted through the governed `promote/3`
+  scan gate (Noop scanner → `{:ok, :clean}`) so the smoke round-trip proves the full
+  upload → scan → promote lifecycle end-to-end.
+  """
   def mk_file(org_id) do
-    File
-    |> Ash.Changeset.for_create(:create, %{
-      filename: "invoice-#{:rand.uniform(9999)}.pdf",
-      content_type: "application/pdf",
-      size_bytes: 1024,
-      storage_key: "s3://bucket/invoices/#{Ash.UUID.generate()}",
-      status: :active,
-      org_id: org_id
-    })
-    |> Ash.create(authorize?: false)
+    scope = %{org_id: org_id}
+
+    opts = [
+      file_module: File,
+      repo: Demo.Repo,
+      scanner: Samen.Files.Scanner.Noop,
+      max_bytes: 26_214_400,
+      allowed_content_types: ~w(application/pdf image/png image/jpeg text/plain text/csv)
+    ]
+
+    with {:ok, quarantined} <-
+           Samen.Files.upload(
+             scope,
+             %{
+               filename: "invoice-#{:rand.uniform(9999)}.pdf",
+               content_type: "application/pdf",
+               binary: :binary.copy("x", 1024)
+             },
+             opts
+           ) do
+      Samen.Files.promote(scope, quarantined, opts)
+    end
   end
 
   @doc "Create a search index entry (filename — non-PII field)."

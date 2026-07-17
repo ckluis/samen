@@ -64,20 +64,39 @@ defmodule Demo.PrimitivesScopePolicyMatrixTest do
     n
   end
 
+  # Route through the governed chokepoint (`Samen.Files.upload/3`) — the ONLY path that
+  # may mint a `storage_key`-bearing File row (ADR-026 RP-FI-1 / AC-G14-2). A direct
+  # `Ash.create` setting `storage_key` is refused by `Samen.Files.ChokepointGuard`. The
+  # upload lands `:quarantined` (fail-closed, RP-FI-3); we promote it through the governed
+  # `promote/3` path (Noop scanner → `{:ok, :clean}`) so the fixture is `:active`.
   defp mk_file(org_id) do
-    {:ok, f} =
-      File
-      |> Ash.Changeset.for_create(:create, %{
-        filename: "file-#{:rand.uniform(9999)}.pdf",
-        content_type: "application/pdf",
-        size_bytes: 512,
-        storage_key: "s3://bucket/#{Ash.UUID.generate()}",
-        status: :active,
-        org_id: org_id
-      })
-      |> Ash.create(authorize?: false)
+    scope = %{org_id: org_id}
 
+    {:ok, quarantined} =
+      Samen.Files.upload(
+        scope,
+        %{
+          filename: "file-#{:rand.uniform(9999)}.pdf",
+          content_type: "application/pdf",
+          binary: :binary.copy("x", 512)
+        },
+        file_upload_opts()
+      )
+
+    {:ok, f} = Samen.Files.promote(scope, quarantined, file_upload_opts())
     f
+  end
+
+  # Files-engine seams for the governed upload/promote path. The Local storage adapter
+  # falls back to a temp root when none is configured, so no storage_config is needed.
+  defp file_upload_opts do
+    [
+      file_module: File,
+      repo: Demo.Repo,
+      scanner: Samen.Files.Scanner.Noop,
+      max_bytes: 26_214_400,
+      allowed_content_types: ~w(application/pdf image/png image/jpeg text/plain text/csv)
+    ]
   end
 
   defp mk_webhook(org_id) do

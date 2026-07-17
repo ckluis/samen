@@ -28,6 +28,7 @@ defmodule Samen.Scopes.Primitives.Audit do
   | `primitives.feature_flag.toggled`   | flag.id          | `"enabled=… name=…"`              |
   | `primitives.notification.sent`      | notification.id  | `"channel=… status=…"`             |
   | `primitives.file.uploaded`          | file.id          | `"status=…"`                       |
+  | `primitives.file.promoted`          | file.id          | `"scanner=… verdict=…"`            |
   """
 
   @doc """
@@ -113,6 +114,27 @@ defmodule Samen.Scopes.Primitives.Audit do
       actor_id: actor_id,
       correlation_id: file.org_id,
       detail: "primitives.file.uploaded status=#{Map.get(file, :status, :active)}"
+    })
+  end
+
+  @doc """
+  Emit a file promotion audit event (quarantine → active).
+
+  Only the scanner module (bounded) and its `verdict` (bounded enum) are in the detail.
+  The filename and storage_key are NOT in the audit row. Because auto-promotion via
+  `Samen.Files.Scanner.Noop` is an explicit operator opt-in, this row is the honest,
+  durable record that a file was cleared and by which scanner.
+  """
+  @spec file_promoted(module(), map(), String.t() | nil) :: {:ok, term()} | {:error, term()}
+  def file_promoted(repo, file, actor_id) do
+    Samen.AuditEvent.insert(repo, %{
+      event_type: "system",
+      subject_id: to_string(file.id),
+      actor_id: actor_id,
+      correlation_id: file.org_id,
+      detail:
+        "primitives.file.promoted scanner=#{inspect(Map.get(file, :scanner))} " <>
+          "verdict=#{Map.get(file, :verdict, :clean)}"
     })
   end
 end

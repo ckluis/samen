@@ -303,9 +303,14 @@ defmodule Samen.Scopes.Primitives.Blueprint do
           # cover it once registered.
           attribute(:storage_key, :string, public?: true, allow_nil?: false)
 
+          # Quarantine-by-default is fail-CLOSED (ADR-026 §2, decision 3): a freshly
+          # uploaded file is HELD, not trusted. The framework never asserts a file is
+          # clean it has not scanned — the honest default posture is `:quarantined`
+          # (not previewable/downloadable) until a `Samen.Files.Scanner` promotes it.
+          # Flipping this back to `:active` FAILS the fail-closed red-path (RP-FI-3).
           attribute(:status, :atom,
             public?: true,
-            default: :active,
+            default: :quarantined,
             constraints: [one_of: [:active, :archived, :deleted, :quarantined]]
           )
 
@@ -324,6 +329,21 @@ defmodule Samen.Scopes.Primitives.Blueprint do
 
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+        end
+
+        # ADR-026 §2 decision 2 / RP-FI-1 / AC-G14-2 — governed-by-construction. The
+        # public default `:create` AND `:update` both accept `storage_key` (`public?: true`),
+        # so WITHOUT this guard a direct `Ash.create` could mint — or a direct `Ash.update`
+        # could REPOINT — a `storage_key`-bearing row that skips size/type enforcement + the
+        # `file.uploaded` audit — an ungoverned file row. A create-only guard left an
+        # update-shaped hole (create a governed row, then `Ash.update` its `storage_key` to
+        # an arbitrary key). Registering on BOTH `:create` and `:update` makes the "no
+        # ungoverned file row" guarantee STRUCTURAL on every write: a create/update that
+        # sets/repoints a `storage_key` is REFUSED unless it came through
+        # `Samen.Files.upload/3` (which stamps the private chokepoint marker). Sabotaging
+        # the chokepoint — or narrowing this back to `on: [:create]` — FAILS RP-FI-1.
+        changes do
+          change(Samen.Files.ChokepointGuard, on: [:create, :update])
         end
 
         policies do
