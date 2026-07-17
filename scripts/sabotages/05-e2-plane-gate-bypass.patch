@@ -1,0 +1,27 @@
+# SABOTAGE: E2.3 gate sabotage — the byte-serve plane gate (RP-FI-4 / AC-G14-5).
+# Removes Samen.Web.Files.BytesController's operator-plane refusal: an impersonating
+# operator without a reveal grant is no longer 403'd away from a tenant's raw bytes
+# (bytes have no %Masked{} partial-reveal form, so this gate is the masking invariant).
+# APP: samen_web
+# TEST_FILES: test/samen/web/file_preview_masking_test.exs test/samen/web/files_surface_test.exs
+# MUST_FAIL: byte-serve is REFUSED (403)
+# MUST_FAIL: FLIPS 403 to a byte-exact 200 serve
+# MUST_FAIL: PLANE gate: operator-plane request returns 403
+# MUST_FAIL: the three refusals (quarantine / plane / scope) are each independent
+diff --git a/samen_web/lib/samen/web/files/bytes_controller.ex b/samen_web/lib/samen/web/files/bytes_controller.ex
+index c64d400..814e5c7 100644
+--- a/samen_web/lib/samen/web/files/bytes_controller.ex
++++ b/samen_web/lib/samen/web/files/bytes_controller.ex
+@@ -117,8 +117,10 @@ defmodule Samen.Web.Files.BytesController do
+     end
+   end
+ 
+-  defp operator_plane?(%Mount{plane: %{kind: :operator}}), do: true
+-  defp operator_plane?(_), do: false
++  # SABOTAGE (E2.3 gate, RP-FI-4): the byte-serve plane gate is removed — an
++  # impersonating operator is served a tenant's raw bytes (no %Masked{} partial
++  # reveal exists for bytes). The plane-gate red-path tests MUST fail with this.
++  defp operator_plane?(_mount), do: false
+ 
+   defp content_type(%{content_type: ct}) when is_binary(ct) and ct != "", do: ct
+   defp content_type(_), do: "application/octet-stream"

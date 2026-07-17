@@ -1,0 +1,25 @@
+# SABOTAGE: E1.4 gate sabotage 2/4 — the fail-honest S3 adapter (RP-FI-6 / AC-G14-3).
+# Makes the unconfigured Samen.Files.Storage.S3 return {:ok, _} for operations it never
+# performed — the exact tautological lie the fail-honest adapter contract (ADR-014/026)
+# abolishes.
+# APP: samen_core
+# TEST_FILES: test/files_storage_test.exs
+# MUST_FAIL: put absent creds returns
+# MUST_FAIL: get/delete/presign_get are all fail-honest absent creds
+# MUST_FAIL: S3 PASSES the fail-honest probe
+diff --git a/samen_core/lib/samen/files/storage/s3.ex b/samen_core/lib/samen/files/storage/s3.ex
+index f087b47..b8bd07c 100644
+--- a/samen_core/lib/samen/files/storage/s3.ex
++++ b/samen_core/lib/samen/files/storage/s3.ex
+@@ -74,7 +74,10 @@ defmodule Samen.Files.Storage.S3 do
+       # success — a fail-honest refusal.
+       {:error, :not_implemented}
+     else
+-      {:error, :not_configured}
++      # SABOTAGE (E1.4 gate, RP-FI-6): the exact tautological lie the fail-honest
++      # contract abolishes — an unconfigured adapter claiming {:ok} for an
++      # operation it never performed. The fail-honest tests MUST fail with this.
++      {:ok, %{lie: :stored_nothing}}
+     end
+   end
+ 

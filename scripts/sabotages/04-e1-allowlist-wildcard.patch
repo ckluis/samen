@@ -1,0 +1,23 @@
+# SABOTAGE: E1.4 gate sabotage 4/4 — the deny-by-default type allowlist (RP-FI-5 / AC-G14-6).
+# Makes Samen.Files.enforce/4 honor a literal "*" in allowed_content_types as
+# admit-everything — the allowlist is no longer exact-match, so deny-by-default can be
+# defeated by a wildcard string.
+# APP: samen_core
+# TEST_FILES: test/files_upload_test.exs
+# MUST_FAIL: widening the allowlist
+diff --git a/samen_core/lib/samen/files.ex b/samen_core/lib/samen/files.ex
+index 8b1cdee..c7b00ff 100644
+--- a/samen_core/lib/samen/files.ex
++++ b/samen_core/lib/samen/files.ex
+@@ -187,7 +187,10 @@ defmodule Samen.Files do
+       not is_binary(content_type) or content_type == "" ->
+         {:error, {:content_type_not_allowed, content_type}}
+ 
+-      content_type not in allowed ->
++      # SABOTAGE (E1.4 gate, RP-FI-5): a literal "*" in the allowlist now admits
++      # EVERY content type — deny-by-default defeated by a wildcard string. The
++      # exact-match allowlist red-path MUST fail with this applied.
++      content_type not in allowed and "*" not in allowed ->
+         {:error, {:content_type_not_allowed, content_type}}
+ 
+       size_bytes > max_bytes ->

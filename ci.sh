@@ -98,6 +98,22 @@ echo "==> Running gen_app deploy probe (WS-D D10 / AC-G16-1/2/3 — --deploy →
 )
 echo "==> gen_app deploy probe: PASSED"
 
+# --- WS-E sabotage harness (E2i.1) — permanent OPT-IN step (SAMEN_SABOTAGE=1) ---
+# Replays every shipped gate sabotage as a committed patch (scripts/sabotages/*.patch):
+# apply → targeted `mix test` MUST fail with the NAMED tests among the failures (the
+# flip) → revert → SHA-256 byte-exact restore, zero residue. Opt-in (unlike the
+# unconditional gen_app probes above) because it deliberately breaks the tree 5x and
+# re-runs DB-backed suites (~3-4 min): the default CI path stays green-only; phase
+# gates and E7.2 run it explicitly instead of re-deriving sabotages by hand.
+echo ""
+if [[ "${SAMEN_SABOTAGE:-0}" == "1" ]]; then
+  echo "==> Running sabotage harness (SAMEN_SABOTAGE=1 — every gate sabotage must flip + restore byte-exact)"
+  bash "$REPO_ROOT/scripts/sabotage.sh"
+  echo "==> sabotage harness: PASSED"
+else
+  echo "==> Skipping sabotage harness (opt-in: SAMEN_SABOTAGE=1 ./ci.sh replays all gate sabotages)"
+fi
+
 # --- samen_web framework UI library gate (ADR-009) ---
 echo ""
 echo "==> Running samen_web gate (compile --warnings-as-errors + two-plane render/masking suite)"

@@ -72,6 +72,15 @@ phase gates and E7.2 MUST consume these instead of re-deriving the rituals by ha
   helper** — `Samen.MaskingCase` (or samen_web equivalent) with per-plane green/red/sabotage
   assertion helpers, back-ported to the E2 preview tests as its first consumer; E3 export, E4
   search, E5 profile reuse it. Model: **opus**.
+  **DONE (shipped 2026-07-17).** All FIVE shipped sabotages landed as patches
+  (`scripts/sabotages/01..05`): E1's chokepoint-bypass, S3 fail-honest `{:ok}` lie,
+  quarantine-default `:active`, allowlist `*`; E2's byte-serve plane-gate bypass. Harness
+  `scripts/sabotage.sh` proves each flips its NAMED tests + restores SHA-256 byte-exact;
+  wired into root `ci.sh` as the opt-in `SAMEN_SABOTAGE=1` step (opt-in, unlike the
+  unconditional WS-D probes, because it breaks the tree 5x). `CLAUDE.md` at repo root.
+  `Samen.MaskingCase` in samen_core lib (sibling of `Samen.RedPath`/`Factory`), back-ported
+  into `file_preview_masking_test.exs` (12 tests green, names unchanged so the 05 patch
+  still binds). No recorded gaps — all four E1 sabotages reconstructed and proven.
 
 ## Phase E3 — CSV import/export (ADR-028)
 - **E3.1** `Samen.Web.Csv.export/3` — catalog-driven columns via `Catalog.fields/1`, keyset-paged via
@@ -168,6 +177,12 @@ phase gates and E7.2 MUST consume these instead of re-deriving the rituals by ha
   flagship probe or re-argue the by-construction join as sufficient.
 - **E2-P2 (gate, resolved):** AC-G14-7's real-vertical mount landed in driftwood (demo is API-only,
   no LiveView router) — KEPT as adoption per operator direction; E7.1 mounts the remaining verticals.
+- **E2i-P2 (build, recorded):** the sabotage harness asserts the flip on the TARGETED test
+  files named in each patch header (fast, named-test-exact), not a whole-app suite run per
+  patch; whole-suite green is separately guaranteed by the surrounding root `ci.sh`. Also:
+  driftwood's `gate_e2_files_e2e_test.exs` is not bound into patch 05 (the plane gate is
+  proven at its samen_web chokepoint by 4 named tests); bind it at E7.2 if the flagship
+  probe wants the vertical-mount flip too.
 - *(Further entries populated by later phase gates.)* Anticipated candidates by design analysis:
   - **E1/E2-P2 (likely):** whether `Local` storage's `/files/:id` byte-serve needs its own rate/size
     guard beyond the upload-time limit (a second read-path bound) — record + decide at E7 if a phase

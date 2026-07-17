@@ -1,0 +1,26 @@
+# SABOTAGE: E1.4 gate sabotage 1/4 — the governed-files chokepoint (RP-FI-1 / AC-G14-2).
+# Widens Samen.Files.ChokepointGuard so EVERY write is treated as governed: a direct
+# Ash.create minting a storage_key — or a direct Ash.update repointing one — now
+# SUCCEEDS, bypassing size/type enforcement and the file.uploaded audit.
+# APP: samen_core
+# TEST_FILES: test/files_upload_test.exs
+# MUST_FAIL: a direct Ash.create carrying a storage_key (bypassing upload/3) is REFUSED
+# MUST_FAIL: a direct Ash.update repointing storage_key (bypassing upload/3) is REFUSED
+diff --git a/samen_core/lib/samen/files/chokepoint_guard.ex b/samen_core/lib/samen/files/chokepoint_guard.ex
+index 745698a..5ff9f3b 100644
+--- a/samen_core/lib/samen/files/chokepoint_guard.ex
++++ b/samen_core/lib/samen/files/chokepoint_guard.ex
+@@ -93,9 +93,10 @@ defmodule Samen.Files.ChokepointGuard do
+ 
+   # The chokepoint marker is set by Samen.Files.upload/3 under context.private so a host/
+   # API caller cannot forge it via ordinary attributes.
+-  defp chokepoint?(changeset) do
+-    get_in(changeset.context, [:private, @marker_key]) == true
+-  end
++  # SABOTAGE (E1.4 gate, RP-FI-1): every write is treated as if it came through
++  # upload/3 — a direct Ash.create/Ash.update minting an ungoverned storage_key
++  # now SUCCEEDS. The RP-FI-1 red-path tests MUST fail with this applied.
++  defp chokepoint?(_changeset), do: true
+ 
+   # A "storage_key write" is a changeset that SETS/REPOINTS storage_key to a non-nil value —
+   # the ungoverned pointer. On an update, `fetch_change/2` returns `{:ok, value}` ONLY when

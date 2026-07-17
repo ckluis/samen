@@ -45,13 +45,17 @@ defmodule Samen.Web.FilePreviewMaskingTest do
   Reference: the WS-A notifications-inbox masking test
   (`notifications_masking_test.exs`) — the same tenant-clear ∧ operator-masked shape,
   the same `refute html =~ "vt_"` red-path scan, the same anti-tautology discipline.
+
+  FIRST CONSUMER of `Samen.MaskingCase` (WS-E E2i.1): the per-plane actor shape, the
+  resolution seam, and the green/red/sabotage assertions below come from the shared
+  helper — E3 export, E4 search, and E5 profile reuse the same helpers.
   """
   use Samen.WebTest.DataCase, async: false
+  use Samen.MaskingCase
 
   import Plug.Test
   import Plug.Conn
 
-  alias Samen.Api.PiiResolution
   alias Samen.Files
   alias Samen.Files.Storage.Local
   alias Samen.Masked
@@ -209,27 +213,16 @@ defmodule Samen.Web.FilePreviewMaskingTest do
   end
 
   # Read the record back on a plane, resolving the vault-routed field through the SAME
-  # seam Reads.get_file/3 uses. `grant` injects the reveal authority for the operator
-  # cases.
-  defp resolve_on_plane(record, plane, opts \\ []) do
-    actor =
-      case plane do
-        :tenant ->
-          %{plane: :tenant}
-
-        :operator ->
-          %{plane: :operator, impersonation: %{session_id: "op-session"}}
-      end
-
-    [resolved] =
-      PiiResolution.resolve(
-        [record],
-        NotificationResource,
-        actor,
-        Keyword.merge([repo: Samen.WebTest.Repo], opts)
-      )
-
-    resolved
+  # seam Reads.get_file/3 uses — via Samen.MaskingCase.resolve_on_plane/4 (the shared
+  # per-plane actor + PiiResolution seam). `grant` injects the reveal authority for the
+  # operator cases.
+  defp resolve_notification(record, plane, opts \\ []) do
+    resolve_on_plane(
+      record,
+      NotificationResource,
+      plane,
+      Keyword.merge([repo: Samen.WebTest.Repo], opts)
+    )
   end
 
   # ==========================================================================
@@ -242,38 +235,31 @@ defmodule Samen.Web.FilePreviewMaskingTest do
       org_id = Ash.UUID.generate()
       record = seed_vaulted_record(org_id)
 
-      resolved = resolve_on_plane(record, :tenant)
+      resolved = resolve_notification(record, :tenant)
 
       # The tenant owns its org's data → clear, no grant. NOT a %Masked{}.
-      assert resolved.rendered_body == @secret_body
-      refute match?(%Masked{}, resolved.rendered_body)
+      assert_plane_clear!(resolved.rendered_body, @secret_body)
     end
 
     test "OPERATOR-WITHOUT-GRANT resolves to %Masked{} — the •••• form, NEVER plaintext (RP-FI-4)" do
       org_id = Ash.UUID.generate()
       record = seed_vaulted_record(org_id)
 
-      resolved = resolve_on_plane(record, :operator, grant: DenyAllGrant)
+      resolved = resolve_notification(record, :operator, grant: DenyAllGrant)
 
       # Present-but-masked (impersonation UI posture): a %Masked{}, not omitted,
-      # not plaintext, not a raw token.
-      assert match?(%Masked{}, resolved.rendered_body)
-      refute resolved.rendered_body == @secret_body
-      # The %Masked{} renders •••• everywhere (String.Chars / Phoenix.HTML.Safe).
-      assert to_string(resolved.rendered_body) == "••••"
-      # The vault token is carried internally but NEVER rendered.
-      refute to_string(resolved.rendered_body) =~ "vt_"
+      # not plaintext, not a raw token — renders •••• everywhere, vt_ never rendered.
+      assert_plane_masked!(resolved.rendered_body, @secret_body)
     end
 
     test "OPERATOR-WITH-GRANT resolves CLEAR — the two-plane reveal rule (green half)" do
       org_id = Ash.UUID.generate()
       record = seed_vaulted_record(org_id)
 
-      resolved = resolve_on_plane(record, :operator, grant: AllowAllGrant)
+      resolved = resolve_notification(record, :operator, grant: AllowAllGrant)
 
       # A live reveal grant covering the subject → plaintext, same as any operator path.
-      assert resolved.rendered_body == @secret_body
-      refute match?(%Masked{}, resolved.rendered_body)
+      assert_plane_clear!(resolved.rendered_body, @secret_body)
     end
 
     test "ANTI-TAUTOLOGY: sabotaging the plane (operator→tenant) FLIPS •••• to plaintext" do
@@ -281,28 +267,25 @@ defmodule Samen.Web.FilePreviewMaskingTest do
       record = seed_vaulted_record(org_id)
 
       # As-designed: operator-without-grant → masked.
-      operator = resolve_on_plane(record, :operator, grant: DenyAllGrant)
-      assert match?(%Masked{}, operator.rendered_body)
+      operator = resolve_notification(record, :operator, grant: DenyAllGrant)
+      assert_plane_masked!(operator.rendered_body)
 
       # SABOTAGE: read the SAME record on the tenant plane (the resolver's only
       # difference is the actor's :plane). It flips to plaintext — proving the mask
       # is the RESOLVER's decision, not a blanket mask-everything.
-      sabotaged = resolve_on_plane(record, :tenant)
-      assert sabotaged.rendered_body == @secret_body
-      refute match?(%Masked{}, sabotaged.rendered_body)
+      sabotaged = resolve_notification(record, :tenant)
+      assert_plane_clear!(sabotaged.rendered_body, @secret_body)
     end
 
     test "BOTH directions on the SAME record — tenant clear ∧ operator masked (anti-tautology)" do
       org_id = Ash.UUID.generate()
       record = seed_vaulted_record(org_id)
 
-      tenant = resolve_on_plane(record, :tenant)
-      operator = resolve_on_plane(record, :operator, grant: DenyAllGrant)
+      tenant = resolve_notification(record, :tenant)
+      operator = resolve_notification(record, :operator, grant: DenyAllGrant)
 
       # Same record, same seam — the ONLY difference is masking.
-      assert tenant.rendered_body == @secret_body
-      refute operator.rendered_body == @secret_body
-      assert to_string(operator.rendered_body) == "••••"
+      assert_two_plane!(tenant.rendered_body, operator.rendered_body, @secret_body)
     end
 
     test "the vault-routed column stores a vt_ token at rest, never the plaintext (leak scan)" do
@@ -335,14 +318,9 @@ defmodule Samen.Web.FilePreviewMaskingTest do
 
       html = render_preview(masked, plane: :operator, target_org_id: org_id)
 
-      # The masked filename renders as the mask string.
-      assert html =~ "••••"
-      # The plaintext filename is ABSENT (the mask-by-omission red-path).
-      refute html =~ @secret_filename
-      refute html =~ "Jane"
-      refute html =~ "Doe"
-      # The vault token is NEVER in the DOM.
-      refute html =~ "vt_"
+      # The masked filename renders •••• ; the plaintext filename is ABSENT (the
+      # mask-by-omission red-path); the vault token is NEVER in the DOM.
+      assert_masked_dom!(html, [@secret_filename, "Jane", "Doe"])
       # Non-vacuous: this IS the preview page for THIS file (the metadata shell +
       # the file's own non-PII metadata rendered — the mask replaced ONLY the filename,
       # not the whole page).
@@ -372,13 +350,13 @@ defmodule Samen.Web.FilePreviewMaskingTest do
 
       # AS-DESIGNED: the resolver masked the filename → •••• , plaintext absent.
       masked_html = render_preview(mask_filename(file), plane: :operator, target_org_id: org_id)
-      refute masked_html =~ @secret_filename
+      assert_masked_dom!(masked_html, [@secret_filename])
 
       # SABOTAGE: a broken resolver leaves the vaulted filename in the CLEAR on the
       # operator plane. The render then leaks the plaintext — the mask scan FLIPS,
       # proving the "refute plaintext" assertion is refutable (not vacuously true).
       leaked_html = render_preview(file, plane: :operator, target_org_id: org_id)
-      assert leaked_html =~ @secret_filename
+      assert_leak_detected!(leaked_html, @secret_filename)
     end
   end
 

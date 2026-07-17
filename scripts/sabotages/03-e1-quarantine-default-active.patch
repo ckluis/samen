@@ -1,0 +1,26 @@
+# SABOTAGE: E1.4 gate sabotage 3/4 — quarantine-by-default (RP-FI-3 / AC-G14-4).
+# Flips the blueprint File.status default back to :active, so a fresh upload is
+# trusted (previewable/downloadable) without any scan — the fail-closed scanner
+# posture is defeated.
+# APP: samen_core
+# TEST_FILES: test/files_upload_test.exs test/files_scanner_test.exs
+# MUST_FAIL: a freshly uploaded file lands :quarantined, NOT :active
+# MUST_FAIL: a freshly uploaded file is :quarantined and NOT previewable
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+index 5a1147e..7617d64 100644
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -308,9 +308,12 @@ defmodule Samen.Scopes.Primitives.Blueprint do
+           # clean it has not scanned — the honest default posture is `:quarantined`
+           # (not previewable/downloadable) until a `Samen.Files.Scanner` promotes it.
+           # Flipping this back to `:active` FAILS the fail-closed red-path (RP-FI-3).
++          # SABOTAGE (E1.4 gate, RP-FI-3): quarantine-by-default flipped back to
++          # :active — a fresh upload is trusted unscanned. The fail-closed
++          # quarantine tests MUST fail with this applied.
+           attribute(:status, :atom,
+             public?: true,
+-            default: :quarantined,
++            default: :active,
+             constraints: [one_of: [:active, :archived, :deleted, :quarantined]]
+           )
+ 
