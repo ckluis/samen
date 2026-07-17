@@ -211,6 +211,30 @@ phase gates and E7.2 MUST consume these instead of re-deriving the rituals by ha
   - **E4-P2 (possible):** which existing resources beyond `File` get a tsvector trigger in WS-E vs.
     a documented follow-on (the design bounds it to registry-registered columns).
 
+- **E4-P2 (gate, recorded — the tsvector-trigger bound):** the E4 tsvector-populate trigger + GIN
+  functional index is shipped for the FRAMEWORK-OWNED searchable column ONLY — `File`
+  (`filename`/`content_type`, both non-PII) — and materialized in **driftwood** (the E4 gate vertical,
+  `20260717120000_file_search_tsvector.exs`: `ffl_file_search_vector_trg` + `ffl_file_search_gin_idx`).
+  demo + pawchart adopt the identical per-abbrev migration WHEN they mount search (documented follow-on;
+  not shipped now to avoid a 5-migration cross-app change for surfaces no demo/pawchart test exercises).
+  The kernel `Samen.Search` engine builds its tsvector at QUERY time from the registered NON-PII field
+  columns (`to_tsvector(config, coalesce(field₁,'') || …)`), so search is CORRECT on any registered
+  resource without a trigger/index — the trigger materializes `search_vector` for observability and the
+  functional GIN index backs the common File(filename+content_type) registration. A per-registration
+  index for other resources is a documented follow-on if a host registers them at scale.
+- **E4-P2 (gate, recorded — display_fields derivation):** `SearchIndex.metadata.display_fields` (the
+  bounded non-PII display allowlist) is DERIVED at query time from the registry's registered
+  `field_name`s for the resource — which are guaranteed non-PII by `SearchIndexGuard` at register time —
+  rather than adding a new `psh_display_fields` column across the 4 primitives-mounting apps + generator.
+  The `%Samen.Search.Result{}.display` map is exactly those guard-safe fields taken off the
+  PiiResolution-projected record (belt-and-suspenders: the full record is projected, the display subset
+  is non-PII by the guard). A richer per-resource display override (display fields BEYOND the searchable
+  ones — e.g. a File's `status`) needs the registry column and is a documented follow-on.
+- **E4-P2 (build, recorded — ⌘K keybinding):** the palette input is `autofocus`ed; the literal ⌘K
+  GLOBAL keyboard shortcut (focus-from-anywhere) needs a client JS hook (the samen_web asset pipeline
+  ships CSS + `phx-` bindings, no bespoke hooks). Deferred to E6's kit/asset pass or a documented host
+  hook; the search page + per-list `search_box` navigate to it without the shortcut.
+
 ---
 
 ## Model-routing summary

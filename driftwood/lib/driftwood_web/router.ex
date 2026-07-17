@@ -130,6 +130,16 @@ defmodule DriftwoodWeb.Router do
       labels: @current_org_labels
     )
 
+    # WS-E E4 (ADR-027) — the framework ⌘K SEARCH surface, mounted over Driftwood's
+    # Primitives mount (`Driftwood.Primitives.{File,SearchIndex}`) in ONE line. GATE
+    # PROBE (E4.4): the KERNEL `Samen.Search` engine returns ranked, org-scoped,
+    # per-plane-masked results over whatever the org registered in `SearchIndex` — zero
+    # authored search LiveViews.
+    samen_search_routes(:search, Driftwood.Primitives,
+      repo: Driftwood.Repo,
+      labels: @current_org_labels
+    )
+
     # ADR-012 — the FLAGSHIP cross-plane realtime CHAT, TENANT plane (the org's own chat
     # console — bodies + participant identities in the clear). The `:object_cards` label
     # registers Driftwood's bespoke `freight.driver` unfurl card (the vertical override seam);

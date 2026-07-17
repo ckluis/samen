@@ -305,6 +305,113 @@ defmodule Samen.UI do
   end
 
   # ---------------------------------------------------------------------------
+  # Search — ⌘K command palette + per-list search box (WS-E E4.3; ADR-027)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  The per-list SEARCH BOX that fills the sidebar `:search` slot (ADR-027 decision 4;
+  the placeholder the design flagged as fed by nothing). A tiny GET form that carries
+  the term (and current org) to the ⌘K search page — the same `Samen.Search` engine,
+  scoped to the mount. Purely a navigation affordance: no value is rendered here, so
+  there is no masking surface.
+
+    * `action`  — the search page path (default `/search`).
+    * `org_id`  — carried through so the target page resolves the same current org.
+    * `placeholder` — input copy (default shows the ⌘K hint).
+  """
+  attr :action, :string, default: "/search"
+  attr :org_id, :string, default: nil
+  attr :placeholder, :string, default: "Search…  ⌘K"
+
+  def search_box(assigns) do
+    ~H"""
+    <form class="search" method="get" action={@action} role="search">
+      <input
+        type="search"
+        name="q"
+        class="search-input"
+        placeholder={@placeholder}
+        autocomplete="off"
+        aria-label="Search"
+      />
+      <input :if={@org_id} type="hidden" name="org" value={@org_id} />
+    </form>
+    """
+  end
+
+  @doc """
+  The ⌘K COMMAND PALETTE (ADR-027 decision 4) — a single framework panel that renders
+  the ranked, org-scoped, per-plane-masked `%Samen.Search.Result{}`s from
+  `Samen.Search.query/3`. Every vertical mounts it via `samen_search_routes` at ≈0 LOC;
+  zero authored search LiveViews.
+
+  ## Masking posture (masking watch-list)
+
+  This component renders ONLY `result.display` — the bounded NON-PII allowlist the
+  engine already projected through the PII resolver. It never touches `result.record`'s
+  vaulted fields, never reveals a vaulted value, and never unwraps a masked value. The
+  masking guarantee lives at the query seam (the engine); this surface cannot
+  re-introduce a leak because it is handed only masked-safe display values.
+
+    * `id`          — DOM id (default `"cmdk"`).
+    * `q`           — the current term (echoed into the input).
+    * `results`     — a list of `%Samen.Search.Result{}`.
+    * `event`       — the LiveView event the debounced input fires (default `"search"`).
+    * `placeholder` — input copy.
+  """
+  attr :id, :string, default: "cmdk"
+  attr :q, :string, default: ""
+  attr :results, :list, default: []
+  attr :event, :string, default: "search"
+  attr :placeholder, :string, default: "Search everything…"
+
+  def command_palette(assigns) do
+    ~H"""
+    <div class="cmdk" id={@id}>
+      <form class="cmdk-form" phx-change={@event} phx-submit={@event} role="search">
+        <input
+          id={"#{@id}-input"}
+          type="search"
+          name="q"
+          class="cmdk-input"
+          value={@q}
+          placeholder={@placeholder}
+          autocomplete="off"
+          autofocus
+          phx-debounce="150"
+          aria-label="Search everything"
+        />
+      </form>
+
+      <ul class="cmdk-results" role="listbox">
+        <li :for={r <- @results} class="cmdk-hit" role="option">
+          <span class="cmdk-kind">{Samen.UI.humanize_resource(r.resource_name)}</span>
+          <span class="cmdk-label">{Samen.UI.palette_label(r.display)}</span>
+        </li>
+        <li :if={@q not in [nil, ""] and @results == []} class="cmdk-empty">No matches.</li>
+      </ul>
+    </div>
+    """
+  end
+
+  @doc false
+  # The last module segment of a result's resource name ("Driftwood.Primitives.File" → "File").
+  def humanize_resource(name) when is_binary(name), do: name |> String.split(".") |> List.last()
+  def humanize_resource(name), do: to_string(name)
+
+  @doc false
+  # Join the bounded NON-PII display values (already masked-safe) for a palette row.
+  def palette_label(display) when is_map(display) do
+    display
+    |> Map.values()
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join(" · ")
+  end
+
+  def palette_label(_), do: ""
+
+  # ---------------------------------------------------------------------------
   # Topbar (breadcrumb + title + actions)
   # ---------------------------------------------------------------------------
 

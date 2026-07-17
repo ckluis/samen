@@ -128,6 +128,7 @@ defmodule Samen.Web.Mount do
   defp scope_kind("flags"), do: :flags
   defp scope_kind("files"), do: :files
   defp scope_kind("csv"), do: :csv
+  defp scope_kind("search"), do: :search
   defp scope_kind(k) when is_atom(k), do: k
 
   # Module atoms serialize as "Elixir.Driftwood.Crm". Host modules are COMPILED, so their

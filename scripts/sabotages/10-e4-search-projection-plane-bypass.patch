@@ -1,0 +1,26 @@
+# SABOTAGE: E4.2 gate sabotage — the search result-projection masking seam
+# (RP-SE-2 / AC-G9-3). `Samen.Search.query/3` resolves every result row on the
+# TENANT plane regardless of the acting scope: an impersonating operator's ⌘K /
+# per-list search hit then carries the plaintext the UI renders as •••• (search
+# joining the mask-by-omission exfiltration channel the projection exists to
+# close). The per-plane search-masking red-paths MUST fail with this.
+# APP: samen_web
+# TEST_FILES: test/samen/web/search_masking_test.exs
+# MUST_FAIL: RED: an operator search of the tenant org masks full_name
+# MUST_FAIL: the plane is the gate
+diff --git a/samen_core/lib/samen/search.ex b/samen_core/lib/samen/search.ex
+index 0000000..1111111 100644
+--- a/samen_core/lib/samen/search.ex
++++ b/samen_core/lib/samen/search.ex
+@@ -168,7 +168,10 @@
+
+         # RP-SE-2: project EVERY row through PiiResolution on the actor's plane before
+         # it leaves the engine. The display allowlist is the registered non-PII fields.
+-        Samen.Api.PiiResolution.resolve(rows, resource, actor_of(scope), repo: repo)
++        # SABOTAGE (E4.2 gate, RP-SE-2): resolve every row on the TENANT plane
++        # regardless of the acting scope — an operator's search hit then carries the
++        # plaintext the UI masks. The search result-masking red-paths MUST fail here.
++        Samen.Api.PiiResolution.resolve(rows, resource, Map.put(actor_of(scope), :plane, :tenant), repo: repo)
+         |> Enum.map(fn record ->
+           %Result{
+             resource: resource,

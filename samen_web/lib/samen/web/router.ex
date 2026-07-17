@@ -497,6 +497,65 @@ defmodule Samen.Web.Router do
   end
 
   @doc """
+  Mount the framework SEARCH surface (WS-E E4.3; ADR-027) — the ⌘K search page over
+  the KERNEL `Samen.Search` engine — in ONE line, on either plane. Zero authored
+  search LiveViews per vertical.
+
+  `namespace` is the host's mounted namespace whose DOMAIN registered its searchable
+  resources in a `SearchIndex` (the domain that `use`d `Samen.Scopes.Primitives` — it
+  materializes `SearchIndex` + a searchable `File`, e.g. `Driftwood.Primitives`).
+
+      import Samen.Web.Router
+
+      # TENANT plane — the org's own search (results in the clear).
+      samen_search_routes :search, Driftwood.Primitives, repo: Driftwood.Repo
+
+      # OPERATOR / impersonation plane — the SAME page + engine; every result row's
+      # vaulted fields render `••••` per PiiResolution (AC-G9-3).
+      samen_search_routes :search, Driftwood.Primitives,
+        repo: Driftwood.Repo,
+        plane: :operator,
+        target_org_id: tenant_org_id,
+        path: "/operator/search"
+
+  The macro mounts `GET /<path>` → `Samen.Web.Search.SearchLive`. Options: as
+  `samen_files_routes/3` (`:repo` required; `:domain`, `:plane`,
+  `:operator_id`/`:target_org_id`, `:path` (default `/search`), `:labels`,
+  `:session_name`).
+  """
+  defmacro samen_search_routes(kind, namespace, opts \\ []) do
+    kind = Macro.expand(kind, __CALLER__)
+    path = Keyword.get(opts, :path, "/search")
+    session_name = Keyword.get(opts, :session_name, session_name(:search, path))
+
+    quote bind_quoted: [
+            kind: kind,
+            namespace: namespace,
+            opts: opts,
+            path: path,
+            session_name: session_name
+          ] do
+      _ = kind
+
+      mount =
+        Samen.Web.Mount.new(
+          :search,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          plane: Samen.Web.Router.__plane__(opts),
+          labels: Keyword.get(opts, :labels)
+        )
+
+      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        for {sub_path, module} <- Samen.Web.Router.__routes__(:search, path) do
+          live(sub_path, module)
+        end
+      end
+    end
+  end
+
+  @doc """
   Mount the framework SESSION endpoint that writes the current org (ADR-013 §4.3) in ONE line.
 
       import Samen.Web.Router
@@ -619,6 +678,13 @@ defmodule Samen.Web.Router do
     ]
   end
 
+  # WS-E E4.3 (ADR-027) — the ⌘K search surface route table: the one search page.
+  def __routes__(:search, path) do
+    [
+      {"#{path}", Samen.Web.Search.SearchLive}
+    ]
+  end
+
   defp default_path(:crm), do: "/crm"
   defp default_path(:billing), do: "/billing"
   defp default_path(:support), do: "/support"
@@ -626,6 +692,7 @@ defmodule Samen.Web.Router do
   defp default_path(:chat), do: "/chat"
   defp default_path(:notifications), do: "/notifications"
   defp default_path(:flags), do: "/flags"
+  defp default_path(:search), do: "/search"
 
   defp session_name(kind, path) do
     :"samen_#{kind}_#{path |> String.replace(~r/[^a-zA-Z0-9]/, "_") |> String.trim("_")}"
