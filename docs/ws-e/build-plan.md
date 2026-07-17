@@ -183,6 +183,25 @@ phase gates and E7.2 MUST consume these instead of re-deriving the rituals by ha
   driftwood's `gate_e2_files_e2e_test.exs` is not bound into patch 05 (the plane gate is
   proven at its samen_web chokepoint by 4 named tests); bind it at E7.2 if the flagship
   probe wants the vertical-mount flip too.
+- **E3-P2 (build, resolved — the E3.1 ship note):** CSV parse/serialize is HAND-ROLLED RFC 4180
+  (~40 lines in `Samen.Web.Csv`: quoting, escaped quotes, embedded commas/newlines, CRLF; LF-parse
+  tolerated) — no parser dependency to audit. No large-export cap added: export is keyset-paged
+  (`Reads.page!` clamps every page) so memory is bounded per page; a row-count cap / background
+  threshold is deferred to a real operator need — record at E7 if a gate flags it.
+- **E3-P2 (gate, recorded):** composite vault plaintext round-trips through the vault in its
+  JSON-SERIALIZED form — a tenant-plane export cell for `full_name` is the JSON object string
+  (`{"first":…,"last":…}`), which import decodes back through the governed cast. The cell is
+  faithful to the resolver's output; if E5's profile surface wants prettier composite rendering,
+  add a display serializer THERE (read-side), never a CSV-side unwrap.
+- **E3-P2 (gate, recorded):** the operator API-KEY posture (`%Ash.ForbiddenField{}` → empty cell,
+  mask-by-omission) is unit-covered in `Samen.Web.Csv.cell/1` but not route-exercised — the mounted
+  routes run browser sessions (impersonation posture → `••••`). The API-key CSV path does not exist
+  as a route today; if one is added (API export endpoint), bind the omission red-path then.
+- **E3-P2 (gate, recorded):** `ImportLive`'s consume→import event flow is engine-covered
+  (`Csv.import/3` red-paths) + render-covered (report/error/posture DOM), but the LiveView upload
+  consume itself is not driven end-to-end in test (no Endpoint boot in the samen_web harness — the
+  same posture as the E2 UploadLive tests). The driftwood E3 gate probe drives the mounted
+  ExportController end-to-end; import E2E-via-browser lands with E7.1's vertical sweep if wanted.
 - *(Further entries populated by later phase gates.)* Anticipated candidates by design analysis:
   - **E1/E2-P2 (likely):** whether `Local` storage's `/files/:id` byte-serve needs its own rate/size
     guard beyond the upload-time limit (a second read-path bound) — record + decide at E7 if a phase

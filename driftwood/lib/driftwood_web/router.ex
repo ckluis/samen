@@ -121,6 +121,15 @@ defmodule DriftwoodWeb.Router do
       labels: @current_org_labels
     )
 
+    # WS-E E3 (ADR-028) — the framework CSV surface (import LiveView + per-plane-masked
+    # export download), mounted over Driftwood's CRM domain in ONE line. GATE PROBE
+    # (E3.5): /csv/export/:resource + /csv/import/:resource resolve deny-by-default onto
+    # Driftwood.Crm's registered resources only.
+    samen_csv_routes(:csv, Driftwood.Crm,
+      repo: Driftwood.Repo,
+      labels: @current_org_labels
+    )
+
     # ADR-012 — the FLAGSHIP cross-plane realtime CHAT, TENANT plane (the org's own chat
     # console — bodies + participant identities in the clear). The `:object_cards` label
     # registers Driftwood's bespoke `freight.driver` unfurl card (the vertical override seam);

@@ -1,0 +1,30 @@
+# SABOTAGE: E3.5 gate sabotage — the export masking seam (RP-CSV-1 / AC-G15-2).
+# Samen.Web.Csv resolves every exported row on the TENANT plane regardless of the
+# acting scope: an impersonating operator's CSV download carries the plaintext the
+# UI renders as •••• (THE mask-by-omission exfiltration channel export exists to
+# close). The per-plane export masking red-paths MUST fail with this.
+# APP: samen_web
+# TEST_FILES: test/samen/web/csv_masking_test.exs test/samen/web/csv_surface_test.exs
+# MUST_FAIL: operator export cell is ••••
+# MUST_FAIL: the CSV cell EQUALS the UI value on the operator plane
+# MUST_FAIL: the SAME route serves the MASKED CSV
+diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
+index 094a4d9..48425cb 100644
+--- a/samen_web/lib/samen/web/csv.ex
++++ b/samen_web/lib/samen/web/csv.ex
+@@ -186,11 +186,14 @@ defmodule Samen.Web.Csv do
+ 
+     page = page(base, scope, state, cols)
+ 
++    # SABOTAGE (E3.5 gate, RP-CSV-1): export resolves every row on the TENANT
++    # plane regardless of the acting scope — an operator's CSV carries the
++    # plaintext the UI masks. The export masking red-paths MUST fail with this.
+     resolved =
+       Samen.Api.PiiResolution.resolve(
+         page.items,
+         resource,
+-        actor_of(scope),
++        Map.put(actor_of(scope), :plane, :tenant),
+         repo: Keyword.fetch!(opts, :repo)
+       )
+ 

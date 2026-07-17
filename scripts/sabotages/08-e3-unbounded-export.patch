@@ -1,0 +1,31 @@
+# SABOTAGE: E3.5 gate sabotage — the bounded export read (RP-CSV-3 / AC-G15-4).
+# Samen.Web.Csv.page/4 abandons Reads.page!/3 keyset pagination for a raw
+# UNBOUNDED Ash.read! of the full set (no limit, no cursor, no clamp) — the
+# read!-elimination failure mode export exists to prevent. The bounded-read
+# probe MUST fail with this.
+# APP: samen_web
+# TEST_FILES: test/samen/web/csv_test.exs
+# MUST_FAIL: the export read seam is BOUNDED
+diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
+index 094a4d9..1edb1eb 100644
+--- a/samen_web/lib/samen/web/csv.ex
++++ b/samen_web/lib/samen/web/csv.ex
+@@ -172,9 +172,15 @@ defmodule Samen.Web.Csv do
+   cursor-chained, page size clamped — unbounded by construction impossible.
+   """
+   def page(base, scope, %ListState{} = state, cols \\ []) do
+-    base
+-    |> Ash.Query.ensure_selected(cols)
+-    |> Reads.page!(state, scope: scope)
++    # SABOTAGE (E3.5 gate, RP-CSV-3): the keyset page is replaced with a raw
++    # UNBOUNDED Ash.read! of the full set — no limit, no cursor, no clamp. The
++    # bounded-read probe MUST fail with this.
++    items =
++      base
++      |> Ash.Query.ensure_selected(cols)
++      |> Ash.read!(scope: scope)
++
++    %Samen.Web.Page{items: items, page_size: state.page_size, has_more: false}
+   end
+ 
+   # -- export internals --------------------------------------------------------

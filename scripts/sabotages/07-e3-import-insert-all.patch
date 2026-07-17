@@ -1,0 +1,76 @@
+# SABOTAGE: E3.5 gate sabotage — the governed-import chokepoint (RP-CSV-2 / AC-G15-3).
+# Samen.Web.Csv.import bypasses the governed create action with a raw Ecto
+# insert_all straight into the physical table: WriteGuard and Vault.Change never
+# run, so imported PII lands as PLAINTEXT in the row (and the operator plane is no
+# longer refused). The vault-routing red-path MUST fail with this.
+# APP: samen_web
+# TEST_FILES: test/samen/web/csv_test.exs
+# MUST_FAIL: tenant import vault-routes PII
+# MUST_FAIL: operator import is refused ROW-BY-ROW
+diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
+index 094a4d9..5dfbf12 100644
+--- a/samen_web/lib/samen/web/csv.ex
++++ b/samen_web/lib/samen/web/csv.ex
+@@ -276,12 +276,12 @@ defmodule Samen.Web.Csv do
+       |> Map.new(fn {col, value} -> {col, decode_cell(value)} end)
+       |> Map.put(:org_id, scope_org_id(scope))
+ 
+-    # The scope goes into for_create/4 so the governed changes (WriteGuard,
+-    # Vault.Change) see the acting actor at BUILD time — the same call shape the
+-    # UI forms and Samen.Factory use.
+-    resource
+-    |> Ash.Changeset.for_create(action, attrs, scope: scope)
+-    |> Ash.create()
++    # SABOTAGE (E3.5 gate, RP-CSV-2): the governed create is bypassed with a raw
++    # insert_all — WriteGuard/Vault.Change never run, plaintext lands in the
++    # physical row. The vault-routing red-path MUST fail with this.
++    _ = action
++
++    sabotage_insert_all(resource, attrs)
+     |> case do
+       {:ok, _record} ->
+         %Report{report | created: report.created + 1}
+@@ -294,6 +294,43 @@ defmodule Samen.Web.Csv do
+     e -> %Report{report | errors: [%{row: n, error: Exception.message(e)} | report.errors]}
+   end
+ 
++  # SABOTAGE helper (RP-CSV-2): a raw Ecto insert_all straight into the physical
++  # table — no governed action, no WriteGuard, no Vault.Change.
++  defp sabotage_insert_all(resource, attrs) do
++    repo = AshPostgres.DataLayer.Info.repo(resource, :read)
++    table = AshPostgres.DataLayer.Info.table(resource)
++    now = DateTime.utc_now()
++
++    row =
++      attrs
++      |> Map.put(:id, Ash.UUID.generate())
++      |> Map.put(:inserted_at, now)
++      |> Map.put(:updated_at, now)
++      |> Map.new(fn {k, v} -> {sabotage_source(resource, k), sabotage_dump(v)} end)
++
++    {1, _} = repo.insert_all(table, [row])
++    {:ok, :sabotaged}
++  end
++
++  defp sabotage_source(resource, name) do
++    case Ash.Resource.Info.attribute(resource, name) do
++      %{source: source} when not is_nil(source) -> source
++      _ -> name
++    end
++  end
++
++  defp sabotage_dump(%DateTime{} = v), do: v
++  defp sabotage_dump(v) when is_map(v) or is_list(v), do: Jason.encode!(v)
++
++  defp sabotage_dump(v) when is_binary(v) do
++    case Ecto.UUID.dump(v) do
++      {:ok, bin} -> bin
++      :error -> v
++    end
++  end
++
++  defp sabotage_dump(v), do: v
++
+   # A cell that parses as a JSON object/array is a composite value (the export
+   # form of FullName/Emails/Phones/custom maps); anything else stays a string for
+   # the governed action's own cast.

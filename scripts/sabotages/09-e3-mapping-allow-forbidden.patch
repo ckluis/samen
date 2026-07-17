@@ -1,0 +1,28 @@
+# SABOTAGE: E3.5 gate sabotage — the fail-closed import mapping (RP-CSV-4 / AC-G15-5).
+# Samen.Web.Csv.validate_mapping accepts the FORBIDDEN columns (id/org_id/
+# inserted_at/updated_at): a hostile CSV can map org_id and aim rows at another
+# org instead of being rejected whole-file before any write. The bad-mapping
+# red-paths MUST fail with this.
+# APP: samen_web
+# TEST_FILES: test/samen/web/csv_test.exs
+# MUST_FAIL: a column mapped to org_id rejects the WHOLE file
+# MUST_FAIL: id and unknown/private columns are equally rejected
+diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
+index 094a4d9..0bf5c24 100644
+--- a/samen_web/lib/samen/web/csv.ex
++++ b/samen_web/lib/samen/web/csv.ex
+@@ -254,7 +254,13 @@ defmodule Samen.Web.Csv do
+       Enum.map(header, fn name ->
+         try do
+           atom = String.to_existing_atom(name)
+-          if atom in allowed, do: {:ok, atom}, else: {:bad, name}
++
++          # SABOTAGE (E3.5 gate, RP-CSV-4): the forbidden-column rejection is
++          # removed — a CSV may map id/org_id/timestamps, so a hostile file can
++          # aim a row at another org. The bad-mapping red-paths MUST fail with this.
++          if atom in allowed or atom in @forbidden_columns,
++            do: {:ok, atom},
++            else: {:bad, name}
+         rescue
+           ArgumentError -> {:bad, name}
+         end

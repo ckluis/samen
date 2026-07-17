@@ -429,6 +429,74 @@ defmodule Samen.Web.Router do
   end
 
   @doc """
+  Mount the framework CSV surface (WS-E E3.4; ADR-028) — the import LiveView and the
+  export download route — in ONE line, on either plane.
+
+  `namespace` is the host's mounted namespace whose DOMAIN's resources are servable
+  (deny-by-default: `/csv/*/:resource` resolves only onto that domain's registered
+  resources — `Samen.Web.Csv.resolve_resource/2`).
+
+      import Samen.Web.Router
+
+      # TENANT plane — export in the clear (own org), import via governed creates.
+      samen_csv_routes :csv, Demo.Crm, repo: Demo.Repo
+
+      # OPERATOR plane — the SAME routes; export cells render `••••` per
+      # PiiResolution (AC-G15-2), import is refused row-by-row by the kernel guards.
+      samen_csv_routes :csv, Demo.Crm,
+        repo: Demo.Repo,
+        plane: :operator,
+        target_org_id: tenant_org_id,
+        path: "/operator/csv"
+
+  The macro mounts:
+
+    * `GET /<path>/import/:resource` → `Samen.Web.Csv.ImportLive`
+    * `GET /<path>/export/:resource` → `Samen.Web.Csv.ExportController, :export`
+      (org-scoped, keyset-bounded, per-plane masked CSV download)
+
+  Options: as `samen_files_routes/3` (`:repo` required; `:domain`, `:plane`,
+  `:operator_id`/`:target_org_id`, `:path` (default `/csv`), `:labels`,
+  `:session_name`).
+  """
+  defmacro samen_csv_routes(kind, namespace, opts \\ []) do
+    kind = Macro.expand(kind, __CALLER__)
+    path = Keyword.get(opts, :path, "/csv")
+    session_name = Keyword.get(opts, :session_name, session_name(:csv, path))
+
+    quote bind_quoted: [
+            kind: kind,
+            namespace: namespace,
+            opts: opts,
+            path: path,
+            session_name: session_name
+          ] do
+      _ = kind
+
+      mount =
+        Samen.Web.Mount.new(
+          :csv,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          plane: Samen.Web.Router.__plane__(opts),
+          labels: Keyword.get(opts, :labels)
+        )
+
+      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        for {sub_path, module} <- Samen.Web.Router.__routes__(:csv, path) do
+          live(sub_path, module)
+        end
+      end
+
+      # The export download is a plain controller action — outside the live_session
+      # block. The host's :browser pipeline supplies the session plug so the mount
+      # and current-org are readable (same posture as the files byte-serve route).
+      get("#{path}/export/:resource", Samen.Web.Csv.ExportController, :export)
+    end
+  end
+
+  @doc """
   Mount the framework SESSION endpoint that writes the current org (ADR-013 §4.3) in ONE line.
 
       import Samen.Web.Router
@@ -539,6 +607,15 @@ defmodule Samen.Web.Router do
     [
       {"#{path}", Samen.Web.Files.UploadLive},
       {"#{path}/:id", Samen.Web.Files.PreviewLive}
+    ]
+  end
+
+  # WS-E E3.4 (ADR-028) — the CSV surface route table: the import LiveView.
+  # The export download (/csv/export/:resource → ExportController) is mounted
+  # separately in `samen_csv_routes/3` (a controller route, not a LiveView).
+  def __routes__(:csv, path) do
+    [
+      {"#{path}/import/:resource", Samen.Web.Csv.ImportLive}
     ]
   end
 
