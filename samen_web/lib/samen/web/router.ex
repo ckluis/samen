@@ -354,6 +354,81 @@ defmodule Samen.Web.Router do
   end
 
   @doc """
+  Mount the framework FILES surface (WS-E E2.1; ADR-026) — the upload + preview LiveViews
+  and the plane-gated `/files/:id` byte-serve route — in ONE line, on either plane.
+
+  `namespace` is the host's mounted PRIMITIVES namespace (the domain that `use`d
+  `Samen.Scopes.Primitives` — it materializes the `File` resource, e.g.
+  `Demo.PrimitivesScope`, `Driftwood.Primitives`).
+
+      import Samen.Web.Router
+
+      # TENANT plane — the org's own file surface (filenames in the clear; bytes serveable).
+      samen_files_routes :files, Demo.PrimitivesScope, repo: Demo.Repo
+
+      # OPERATOR / impersonation plane — the SAME LiveViews, filenames masked (••••),
+      # byte download refused (no partial-reveal for raw bytes). Reached through the
+      # impersonation bridge carrying the tenant org_id.
+      samen_files_routes :files, Demo.PrimitivesScope,
+        repo: Demo.Repo,
+        plane: :operator,
+        target_org_id: tenant_org_id,
+        path: "/operator/files"
+
+  The macro mounts:
+
+    * `GET  /<path>`      → `Samen.Web.Files.UploadLive`   (upload + file list)
+    * `GET  /<path>/:id`  → `Samen.Web.Files.PreviewLive`  (file metadata preview)
+    * `GET  /<path>/:id/bytes` → `Samen.Web.Files.BytesController, :serve`
+      (org-scoped, plane-gated, quarantine-refused byte delivery)
+
+  The LiveViews share a `live_session` carrying the mount. The `BytesController` route
+  is mounted outside the `live_session` block (it is a plain controller action, not a
+  LiveView); the host's `:browser` pipeline must include the session plug so the mount
+  and current-org are readable.
+
+  Options: as `samen_notifications_routes/3` (`:repo` required; `:domain`, `:plane`,
+  `:operator_id`/`:target_org_id`, `:path` (default `/files`), `:labels`,
+  `:session_name`).
+  """
+  defmacro samen_files_routes(kind, namespace, opts \\ []) do
+    kind = Macro.expand(kind, __CALLER__)
+    path = Keyword.get(opts, :path, "/files")
+    session_name = Keyword.get(opts, :session_name, session_name(:files, path))
+
+    quote bind_quoted: [
+            kind: kind,
+            namespace: namespace,
+            opts: opts,
+            path: path,
+            session_name: session_name
+          ] do
+      _ = kind
+
+      mount =
+        Samen.Web.Mount.new(
+          :files,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          plane: Samen.Web.Router.__plane__(opts),
+          labels: Keyword.get(opts, :labels)
+        )
+
+      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        for {sub_path, module} <- Samen.Web.Router.__routes__(:files, path) do
+          live(sub_path, module)
+        end
+      end
+
+      # The byte-serve route is a plain controller action — outside the live_session block.
+      # The host's :browser pipeline (which wraps this scope) supplies the session plug so
+      # the mount and current-org are readable in the controller.
+      get("#{path}/:id/bytes", Samen.Web.Files.BytesController, :serve)
+    end
+  end
+
+  @doc """
   Mount the framework SESSION endpoint that writes the current org (ADR-013 §4.3) in ONE line.
 
       import Samen.Web.Router
@@ -454,6 +529,16 @@ defmodule Samen.Web.Router do
   def __routes__(:flags, path) do
     [
       {"#{path}", Samen.Web.Flags.SettingsLive}
+    ]
+  end
+
+  # WS-E E2.1 (ADR-026) — the files surface route table: upload+list + preview.
+  # The byte-serve route (/files/:id/bytes → BytesController) is mounted separately
+  # in `samen_files_routes/3` (it is a controller route, not a LiveView).
+  def __routes__(:files, path) do
+    [
+      {"#{path}", Samen.Web.Files.UploadLive},
+      {"#{path}/:id", Samen.Web.Files.PreviewLive}
     ]
   end
 

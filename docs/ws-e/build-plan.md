@@ -57,6 +57,22 @@ mobile-usable in one pass.
 - **E2.3** *Phase E2 gate* — mount files in a vertical (≈0 LOC), upload→quarantine→preview end-to-end;
   re-run the E2.2 sabotage from clean; all `ci.sh` green. Deps: E2.1-E2.2. AC: AC-G14-5/7. Model: **opus**.
 
+## Phase E2i — One-time gate/agent automation (operator-ratified 2026-07-17, "convert domain knowledge to infra")
+*Inserted after E2 lands. One small serialized unit (+gate-less: verified by its own consumers). E3+
+phase gates and E7.2 MUST consume these instead of re-deriving the rituals by hand.*
+
+- **E2i.1** Three deliverables, one unit: (a) **sabotage harness** — committed sabotage patches for
+  every shipped gate sabotage (E1's four + E2's plane-gate) + `scripts/sabotage.sh` runner: apply
+  patch → `mix test` → assert the NAMED tests fail → restore → sha-check zero residue; wired as a
+  permanent opt-in CI step (like the WS-D generative probes). Later gates add their sabotages as
+  patches, run the harness, and spend judgment only on NEW vacuity hunting. (b) **`CLAUDE.md`** at
+  repo root (~60 lines): house conventions — fail-honest adapter contract, per-plane masking-test
+  pattern + reference tests, chokepoint/guard rules, abbrev-registry hands-off + SHA, suite/ci
+  commands, framework-first + ≈0-LOC vertical mounts, serialized-agent rule. (c) **masking-test
+  helper** — `Samen.MaskingCase` (or samen_web equivalent) with per-plane green/red/sabotage
+  assertion helpers, back-ported to the E2 preview tests as its first consumer; E3 export, E4
+  search, E5 profile reuse it. Model: **opus**.
+
 ## Phase E3 — CSV import/export (ADR-028)
 - **E3.1** `Samen.Web.Csv.export/3` — catalog-driven columns via `Catalog.fields/1`, keyset-paged via
   `Reads.page!/3`, **every cell through `PiiResolution` on the actor's plane**; CSV serialize (decide:
@@ -145,6 +161,13 @@ mobile-usable in one pass.
 - **E1-P2 (gate, recorded):** full-suite flake watch — 1 of 3 samen_core runs reported 1170/1171
   with no failure header (transient async/sandbox, OUTSIDE the async:false Files units which were
   42/42 across 3 runs). If it recurs in later phase gates, identify + stabilize the flaky async test.
+- **E2-P2 (gate, recorded):** the E2.2 vaulted-filename host is MODELED (a `%Masked{}` applied to a
+  real seeded File + the resolver seam proven separately on `Notification.rendered_body`), not
+  materialized as a DB resource — materializing one needs an `abbrev_registry.json` row the unit
+  forbids. At E7, either materialize it properly (registry row via the sanctioned allocator) in the
+  flagship probe or re-argue the by-construction join as sufficient.
+- **E2-P2 (gate, resolved):** AC-G14-7's real-vertical mount landed in driftwood (demo is API-only,
+  no LiveView router) — KEPT as adoption per operator direction; E7.1 mounts the remaining verticals.
 - *(Further entries populated by later phase gates.)* Anticipated candidates by design analysis:
   - **E1/E2-P2 (likely):** whether `Local` storage's `/files/:id` byte-serve needs its own rate/size
     guard beyond the upload-time limit (a second read-path bound) — record + decide at E7 if a phase

@@ -112,6 +112,15 @@ defmodule DriftwoodWeb.Router do
       labels: Map.put(@current_org_labels, :pubsub, Driftwood.PubSub)
     )
 
+    # WS-E E2 (ADR-026) — the framework FILES surface (upload + preview + plane-gated
+    # byte-serve), mounted over Driftwood's Primitives mount (`Driftwood.Primitives.File`)
+    # in ONE line. GATE PROBE (E2.3): mounted here to prove the ≈0-LOC macro mounts on a
+    # real host router + browser pipeline. Remove if not adopting the files surface.
+    samen_files_routes(:files, Driftwood.Primitives,
+      repo: Driftwood.Repo,
+      labels: @current_org_labels
+    )
+
     # ADR-012 — the FLAGSHIP cross-plane realtime CHAT, TENANT plane (the org's own chat
     # console — bodies + participant identities in the clear). The `:object_cards` label
     # registers Driftwood's bespoke `freight.driver` unfurl card (the vertical override seam);
