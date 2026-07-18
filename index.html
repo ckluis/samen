@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Samen — support your tenants without seeing their customers, on one substrate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper: #F6F5F2;
+    --card: #FDFCFA;
+    --ink: #1A1B22;
+    --muted: #5E5F6C;
+    --faint: #8C8D99;
+    --rule: #E4E2DC;
+    --accent: #3B4CCA;
+    --accent-deep: #2C3AA6;
+    --accent-wash: #EEF0FD;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --display: 'Fraunces', Georgia, serif;
+    --body: 'Inter', -apple-system, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  ::selection { background: var(--accent); color: #fff; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--paper); color: var(--ink); font-family: var(--body);
+    font-size: 17px; line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 28px; }
+  .measure { max-width: 62ch; }
+
+  nav { display: flex; align-items: baseline; justify-content: space-between; padding: 28px 0 26px; border-bottom: 1px solid var(--rule); }
+  .wordmark { font-family: var(--display); font-weight: 560; font-size: 22px; letter-spacing: -0.01em; }
+  .wordmark .dot { color: var(--accent); }
+  nav .tag { font-family: var(--mono); font-size: 12.5px; color: var(--faint); letter-spacing: 0.02em; }
+
+  .hero { padding: 96px 0 72px; }
+  .kicker { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--accent-deep); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 28px; }
+  h1 { font-family: var(--display); font-weight: 560; font-size: clamp(44px, 7vw, 76px); line-height: 1.04; letter-spacing: -0.022em; max-width: 15ch; }
+  h1 em { font-style: italic; font-weight: 400; color: var(--accent-deep); }
+  .hero .sub { margin-top: 32px; font-size: 20px; line-height: 1.6; color: var(--muted); max-width: 57ch; }
+  .hero .sub strong { color: var(--ink); font-weight: 600; }
+  .surfaces { margin-top: 44px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .surface-pill { font-family: var(--mono); font-size: 13px; padding: 7px 14px; border: 1px solid var(--rule); border-radius: 100px; background: var(--card); color: var(--muted); }
+  .surface-pill b { color: var(--ink); font-weight: 500; }
+  .surface-pill.lit { border-color: var(--accent); color: var(--accent-deep); background: var(--accent-wash); }
+
+  .fade { opacity: 0; transform: translateY(14px); animation: rise .7s cubic-bezier(.2,.6,.2,1) forwards; }
+  .d1 { animation-delay: .05s } .d2 { animation-delay: .15s } .d3 { animation-delay: .25s } .d4 { animation-delay: .35s }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .fade { animation: none; opacity: 1; transform: none; } }
+
+  section { padding: 84px 0; border-top: 1px solid var(--rule); }
+  .sec-label { font-family: var(--mono); font-size: 12.5px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-bottom: 20px; }
+  .sec-label::before { content: "— "; color: var(--accent); }
+  h2 { font-family: var(--display); font-weight: 560; font-size: clamp(30px, 4vw, 42px); line-height: 1.12; letter-spacing: -0.015em; max-width: 26ch; margin-bottom: 24px; }
+  h2 em { font-style: italic; font-weight: 400; color: var(--accent-deep); }
+  .prose p { color: var(--muted); margin-bottom: 18px; }
+  .prose p strong { color: var(--ink); font-weight: 600; }
+  .prose code { font-family: var(--mono); font-size: 14px; background: var(--accent-wash); padding: 2px 7px; border-radius: 5px; color: var(--accent-deep); }
+
+  .axioms { display: grid; grid-template-columns: 1fr 1fr; margin: 44px 0 36px; border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; background: var(--card); }
+  .axiom { padding: 34px 32px; }
+  .axiom + .axiom { border-left: 1px solid var(--rule); }
+  .axiom .who { font-family: var(--mono); font-size: 12.5px; color: var(--faint); margin-bottom: 14px; letter-spacing: 0.03em; }
+  .axiom .claim { font-family: var(--display); font-size: 23px; font-weight: 560; line-height: 1.3; letter-spacing: -0.01em; }
+  .resolution { border: 1px solid var(--accent); background: var(--accent-wash); border-radius: 14px; padding: 34px 36px; display: flex; gap: 22px; align-items: baseline; }
+  .resolution .mark { font-family: var(--display); font-style: italic; font-size: 30px; color: var(--accent); flex-shrink: 0; }
+  .resolution .claim { font-family: var(--display); font-size: clamp(22px, 2.6vw, 28px); font-weight: 560; line-height: 1.3; letter-spacing: -0.012em; color: var(--accent-deep); }
+  .resolution .claim span { color: var(--ink); }
+
+  .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 48px; }
+  .mode { background: var(--card); border: 1px solid var(--rule); border-radius: 14px; padding: 30px 28px; transition: border-color .2s; }
+  .mode:hover { border-color: var(--accent); }
+  .mode .flag { font-family: var(--mono); font-size: 12.5px; font-weight: 500; color: var(--accent-deep); background: var(--accent-wash); border-radius: 6px; padding: 4px 9px; display: inline-block; margin-bottom: 18px; }
+  .mode h3 { font-family: var(--display); font-size: 21px; font-weight: 560; margin-bottom: 10px; letter-spacing: -0.01em; }
+  .mode p { font-size: 15px; color: var(--muted); line-height: 1.6; }
+  .mode .fine { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--rule); font-family: var(--mono); font-size: 12px; color: var(--faint); }
+
+  /* six idioms grid */
+  .idioms { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 44px; }
+  .idiom { background: var(--card); border: 1px solid var(--rule); border-radius: 13px; padding: 24px 24px; }
+  .idiom .no { font-family: var(--mono); font-size: 12px; color: var(--accent); margin-bottom: 12px; letter-spacing: .04em; }
+  .idiom h3 { font-family: var(--display); font-size: 19px; font-weight: 560; letter-spacing: -0.01em; margin-bottom: 8px; }
+  .idiom p { font-size: 14px; color: var(--muted); line-height: 1.55; }
+  .idiom p code { font-family: var(--mono); font-size: 12.5px; background: var(--accent-wash); padding: 1px 5px; border-radius: 4px; color: var(--accent-deep); }
+
+  .mirror { margin-top: 48px; border: 1px solid var(--rule); border-radius: 14px; background: var(--card); overflow: hidden; }
+  .mirror-cols { display: grid; grid-template-columns: 1fr 56px 1fr; }
+  .mirror-side { padding: 30px 28px; }
+  .mirror-side .side-label { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-bottom: 18px; }
+  .mirror-box { border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; background: var(--paper); }
+  .mirror-box.same { border-color: var(--accent); background: var(--accent-wash); }
+  .mirror-box .bt { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+  .mirror-box .bs { font-size: 12.5px; color: var(--muted); }
+  .mirror-seam { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border-left: 1px dashed var(--rule); border-right: 1px dashed var(--rule); }
+  .mirror-seam span { writing-mode: vertical-rl; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-deep); }
+  .mirror-note { border-top: 1px dashed var(--rule); padding: 14px 28px; font-family: var(--mono); font-size: 12px; color: var(--faint); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+  .feature-grid { display: grid; grid-template-columns: 1fr 1.1fr; gap: 56px; align-items: start; margin-top: 12px; }
+  .codecard { background: #171826; border-radius: 14px; padding: 26px 26px 22px; color: #E5E6F2; font-family: var(--mono); font-size: 13.5px; line-height: 1.75; overflow-x: auto; }
+  .codecard .bar { display: flex; gap: 7px; margin-bottom: 18px; }
+  .codecard .bar i { width: 10px; height: 10px; border-radius: 50%; background: #33344E; }
+  .codecard .bar i:first-child { background: var(--accent); }
+  .codecard .cm { color: #7A7C9E; }
+  .codecard .kw { color: #9CA8FF; }
+  .codecard .str { color: #C6E29A; }
+  .codecard .fn { color: #F0EAD2; }
+  .codecard .pii { color: #E9A6C6; }
+  .fanout { margin-top: 22px; display: grid; gap: 10px; }
+  .fan { display: grid; grid-template-columns: 24px 150px 1fr; gap: 14px; align-items: baseline; background: var(--card); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 18px; }
+  .fan .arrow { color: var(--accent); font-family: var(--mono); font-weight: 500; }
+  .fan .to { font-family: var(--mono); font-size: 13px; font-weight: 500; }
+  .fan .what { font-size: 14px; color: var(--muted); }
+
+  /* composition ribbon */
+  .compose { margin-top: 12px; display: grid; grid-template-columns: 1fr 44px 1fr 1fr; gap: 0; align-items: stretch; border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; background: var(--card); }
+  .comp-col { padding: 24px 22px; }
+  .comp-col + .comp-col:not(.seam) { border-left: 1px solid var(--rule); }
+  .comp-col .cl { font-family: var(--mono); font-size: 11.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); margin-bottom: 6px; }
+  .comp-col .ct { font-family: var(--display); font-size: 18px; font-weight: 560; margin-bottom: 16px; letter-spacing: -0.01em; }
+  .comp-col .ct span { font-size: 12px; font-family: var(--mono); color: var(--faint); font-weight: 400; display: block; margin-top: 2px; }
+  .field { font-family: var(--mono); font-size: 12px; padding: 6px 0; border-top: 1px dashed var(--rule); color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+  .field:first-of-type { border-top: none; }
+  .field .tagf { color: var(--faint); font-size: 10.5px; }
+  .field.pii-f { color: var(--accent-deep); }
+  .field.pii-f .tagf { color: var(--accent); }
+  .field.add { color: var(--ink); background: var(--accent-wash); margin: 0 -8px; padding: 6px 8px; border-radius: 5px; border-top: none; }
+  .comp-seam { display: flex; align-items: center; justify-content: center; border-left: 1px solid var(--rule); }
+  .comp-seam span { writing-mode: vertical-rl; font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent-deep); }
+  .free-note { border-top: 1px solid var(--rule); padding: 14px 24px; font-size: 13px; color: var(--muted); background: var(--paper); }
+  .free-note b { color: var(--accent-deep); font-weight: 600; }
+
+  /* oracle tiers */
+  .tiers { margin-top: 44px; border: 1px solid var(--rule); border-radius: 14px; background: var(--card); overflow: hidden; }
+  .tiers-head { padding: 20px 26px; border-bottom: 1px solid var(--rule); display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .tiers-head b { font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--accent-deep); }
+  .tiers-head .cmd { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  .tiers-head .exit { margin-left: auto; font-family: var(--mono); font-size: 12px; color: #1E7A45; background: #E7F3EB; border: 1px solid #CBE7D5; border-radius: 6px; padding: 3px 10px; }
+  .tier-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .tier { padding: 18px 22px; border-top: 1px solid var(--rule); border-left: 1px solid var(--rule); }
+  .tier:nth-child(3n+1) { border-left: none; }
+  .tier .tn { font-family: var(--mono); font-size: 12.5px; font-weight: 500; display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .tier .tn::before { content: "✓"; color: #1E7A45; font-weight: 600; }
+  .tier .td { font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .tier.ext .tn::before { content: "◆"; color: var(--accent); }
+  .tiers-foot { padding: 14px 26px; border-top: 1px solid var(--rule); font-family: var(--mono); font-size: 12px; color: var(--faint); }
+
+  .deleted { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 44px; }
+  .gone { background: var(--card); border: 1px dashed var(--rule); border-radius: 12px; padding: 20px 22px; }
+  .gone .name { font-family: var(--mono); font-size: 14px; font-weight: 500; text-decoration: line-through; text-decoration-color: var(--accent); text-decoration-thickness: 1.5px; color: var(--faint); margin-bottom: 5px; }
+  .gone p { font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+  .gone p b { color: var(--accent-deep); font-weight: 500; font-family: var(--mono); font-size: 12.5px; }
+
+  /* reuse bars */
+  .reuse { margin-top: 8px; border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; background: var(--card); }
+  .reuse-row { display: grid; grid-template-columns: 210px 1fr 76px; gap: 18px; align-items: center; padding: 16px 24px; }
+  .reuse-row + .reuse-row { border-top: 1px solid var(--rule); }
+  .reuse-row .rn { font-family: var(--mono); font-size: 12.5px; font-weight: 500; }
+  .reuse-row .rn span { display: block; color: var(--faint); font-size: 11px; font-weight: 400; margin-top: 2px; }
+  .reuse-row .track { height: 8px; border-radius: 100px; background: var(--paper); position: relative; overflow: hidden; }
+  .reuse-row .barf { position: absolute; inset: 0 auto 0 0; border-radius: 100px; background: var(--accent); }
+  .reuse-row .barf.dim { background: var(--faint); }
+  .reuse-row .rv { font-family: var(--mono); font-size: 12.5px; text-align: right; color: var(--accent-deep); font-weight: 500; }
+  .reuse-note { padding: 15px 24px; border-top: 1px dashed var(--rule); font-family: var(--mono); font-size: 12px; color: var(--faint); line-height: 1.6; }
+
+  .stack { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 44px; }
+  .brick { background: var(--card); border: 1px solid var(--rule); border-radius: 12px; padding: 22px 24px; }
+  .brick .lib { font-family: var(--mono); font-size: 14px; font-weight: 500; margin-bottom: 6px; }
+  .brick p { font-size: 14px; color: var(--muted); line-height: 1.55; }
+  .brick .badge { float: right; font-family: var(--mono); font-size: 11px; color: var(--accent-deep); background: var(--accent-wash); border-radius: 5px; padding: 3px 8px; }
+  .brick .badge.dim { color: var(--faint); background: var(--paper); border: 1px dashed var(--rule); }
+
+  .honest { background: var(--card); border: 1px solid var(--rule); border-radius: 14px; padding: 34px 36px; margin-top: 44px; }
+  .honest .h-label { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-deep); margin-bottom: 16px; }
+  .honest ul { list-style: none; }
+  .honest li { padding: 10px 0 10px 26px; position: relative; color: var(--muted); font-size: 15px; }
+  .honest li + li { border-top: 1px dashed var(--rule); }
+  .honest li::before { content: "↳"; position: absolute; left: 0; color: var(--accent); font-family: var(--mono); }
+  .honest li strong { color: var(--ink); font-weight: 600; }
+
+  .cta { padding: 100px 0 110px; }
+  .cta h2 { max-width: 30ch; }
+  .cta .actions { margin-top: 36px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .btn { font-family: var(--mono); font-size: 14px; font-weight: 500; text-decoration: none; padding: 14px 26px; border-radius: 10px; transition: transform .15s, background .15s; display: inline-block; }
+  .btn-primary { background: var(--accent-deep); color: #fff; }
+  .btn-primary:hover { background: var(--accent); transform: translateY(-1px); }
+  .btn-ghost { border: 1px solid var(--rule); color: var(--ink); background: var(--card); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent-deep); }
+  footer { border-top: 1px solid var(--rule); padding: 26px 0 40px; display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+  footer span { font-family: var(--mono); font-size: 12px; color: var(--faint); }
+
+  /* ============================================================
+     EMBEDDED PRODUCT UI — scoped under .ui-frame, prefixed ui-
+     lifted faithfully from the approved mockups
+     ============================================================ */
+  .ui-shell { margin-top: 24px; position: relative; left: 50%; transform: translateX(-50%); width: min(1180px, calc(100vw - 40px)); }
+  .ui-caption { font-family: var(--mono); font-size: 12px; color: var(--faint); margin: 10px 2px 0; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .ui-caption b { color: var(--accent-deep); font-weight: 500; }
+  .ui-frame {
+    --uc-canvas:#F4F4F6; --uc-panel:#FBFBFC; --uc-card:#FFFFFF;
+    --uc-ink:#191A20; --uc-muted:#6A6B77; --uc-faint:#9A9BA6; --uc-line:#EBEBEF; --uc-line2:#E3E3E8;
+    --uc-brand:#3B4CCA; --uc-brand-wash:#EEF0FD;
+    --uc-red:#C4443B; --uc-red-wash:#FBECEA; --uc-amber:#9A6A15; --uc-amber-wash:#FBF1DE;
+    --uc-green:#1E7A45; --uc-green-wash:#E7F3EB; --uc-violet:#6D45C4; --uc-violet-wash:#F1ECFB;
+    background: var(--uc-canvas); border: 1px solid var(--rule); border-radius: 16px;
+    padding: 10px; overflow: hidden; box-shadow: 0 24px 60px -30px rgba(28,32,80,.28);
+    font-family: var(--body); color: var(--uc-ink); font-size: 14px; line-height: 1.45; letter-spacing: -0.006em;
+  }
+  .ui-frame .ui-app { display: grid; grid-template-columns: 232px 1fr; gap: 10px; }
+  .ui-frame .ui-side { background: var(--uc-panel); border: 1px solid var(--uc-line); border-radius: 12px; display: flex; flex-direction: column; padding: 13px 11px; overflow: hidden; }
+  .ui-frame .ui-ws { display: flex; align-items: center; gap: 10px; padding: 6px 6px 10px; }
+  .ui-frame .ui-logo { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(150deg,#3B4CCA,#5B6BE0); flex-shrink: 0; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 14px; box-shadow: 0 1px 2px rgba(20,25,90,.25); }
+  .ui-frame .ui-who b { display: block; font-weight: 600; font-size: 13px; letter-spacing: -0.01em; }
+  .ui-frame .ui-who span { display: block; font-size: 11px; color: var(--uc-faint); }
+  .ui-frame .ui-grp { font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--uc-faint); padding: 12px 8px 6px; }
+  .ui-frame .ui-nav { display: block; padding: 0; border-bottom: none; }
+  .ui-frame .ui-nav a { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 8px; color: var(--uc-muted); text-decoration: none; font-weight: 450; font-size: 13px; }
+  .ui-frame .ui-nav a .ui-i { width: 15px; height: 15px; flex-shrink: 0; color: var(--uc-faint); }
+  .ui-frame .ui-nav a.on { background: var(--uc-card); border: 1px solid var(--uc-line2); color: var(--uc-ink); font-weight: 550; }
+  .ui-frame .ui-nav a.on .ui-i { color: var(--uc-brand); }
+  .ui-frame .ui-nav a .ui-cnt { margin-left: auto; font-size: 11px; color: var(--uc-faint); font-family: var(--mono); }
+  .ui-frame .ui-nav a .ui-dot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; background: var(--uc-green); }
+  .ui-frame .ui-foot { margin-top: auto; padding: 10px 6px 4px; border-top: 1px solid var(--uc-line); display: flex; align-items: center; gap: 9px; }
+  .ui-frame .ui-av-s { width: 25px; height: 25px; border-radius: 50%; background: #DFE1EC; flex-shrink: 0; display: grid; place-items: center; font-size: 10.5px; font-weight: 600; color: #4A4C66; }
+  .ui-frame .ui-foot .ui-m b { display: block; font-size: 12px; font-weight: 550; }
+  .ui-frame .ui-foot .ui-m span { display: block; font-size: 10.5px; color: var(--uc-faint); }
+
+  .ui-frame .ui-main { background: var(--uc-card); border: 1px solid var(--uc-line); border-radius: 12px; overflow: hidden; }
+  .ui-frame .ui-top { padding: 20px 26px 0; }
+  .ui-frame .ui-crumb { display: flex; align-items: center; gap: 7px; color: var(--uc-faint); font-size: 12px; margin-bottom: 11px; flex-wrap: wrap; }
+  .ui-frame .ui-crumb .ui-sep { opacity: .5; }
+  .ui-frame .ui-head { display: flex; align-items: flex-start; gap: 16px; }
+  .ui-frame .ui-head h3 { font-size: 24px; font-weight: 650; letter-spacing: -0.025em; font-family: var(--body); }
+  .ui-frame .ui-actions { margin-left: auto; display: flex; gap: 8px; }
+  .ui-frame .ui-btn { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 9px; font-size: 12.5px; font-weight: 550; border: 1px solid var(--uc-line2); background: var(--uc-card); color: var(--uc-ink); letter-spacing: -0.01em; }
+  .ui-frame .ui-btn .ui-i { width: 14px; height: 14px; color: var(--uc-muted); }
+  .ui-frame .ui-btn.primary { background: #1B1C22; color: #fff; border-color: #1B1C22; }
+  .ui-frame .ui-btn.primary .ui-i { color: #fff; }
+
+  .ui-frame .ui-mask-bar { margin: 16px 26px 0; display: flex; align-items: center; gap: 12px; padding: 11px 15px; border-radius: 11px; background: var(--uc-brand-wash); border: 1px solid #DCE0FA; }
+  .ui-frame .ui-mask-bar .ui-ic { width: 30px; height: 30px; border-radius: 8px; background: #fff; border: 1px solid #DCE0FA; display: grid; place-items: center; color: var(--uc-brand); flex-shrink: 0; }
+  .ui-frame .ui-mask-bar .ui-tx { font-size: 12.5px; color: #37407A; line-height: 1.4; }
+  .ui-frame .ui-mask-bar .ui-tx b { font-weight: 650; color: #28306B; }
+  .ui-frame .ui-mask-bar .ui-chip { margin-left: auto; font-family: var(--mono); font-size: 11px; color: #37407A; background: #fff; border: 1px solid #DCE0FA; border-radius: 7px; padding: 5px 9px; white-space: nowrap; }
+  .ui-frame .ui-tb-bar { margin: 16px 26px 0; display: flex; align-items: center; gap: 12px; padding: 11px 15px; border-radius: 11px; background: var(--uc-green-wash); border: 1px solid #CBE7D5; }
+  .ui-frame .ui-tb-bar .ui-ic { width: 30px; height: 30px; border-radius: 8px; background: #fff; border: 1px solid #CBE7D5; display: grid; place-items: center; color: var(--uc-green); flex-shrink: 0; }
+  .ui-frame .ui-tb-bar .ui-tx { font-size: 12.5px; color: #215938; line-height: 1.4; }
+  .ui-frame .ui-tb-bar .ui-tx b { font-weight: 650; color: #164026; }
+  .ui-frame .ui-tb-bar .ui-chip { margin-left: auto; font-family: var(--mono); font-size: 11px; color: #215938; background: #fff; border: 1px solid #CBE7D5; border-radius: 7px; padding: 5px 9px; white-space: nowrap; }
+
+  .ui-frame .ui-tabs { display: flex; gap: 4px; padding: 16px 26px 0; border-bottom: 1px solid var(--uc-line); margin-top: 16px; }
+  .ui-frame .ui-tabs a { display: flex; align-items: center; gap: 7px; padding: 8px 11px 12px; color: var(--uc-muted); text-decoration: none; font-size: 13px; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .ui-frame .ui-tabs a .ui-i { width: 14px; height: 14px; }
+  .ui-frame .ui-tabs a.on { color: var(--uc-ink); font-weight: 600; border-bottom-color: var(--uc-ink); }
+
+  .ui-frame .ui-wrap { padding: 20px 26px 26px; }
+  .ui-frame .ui-gtitle { display: flex; align-items: center; gap: 9px; margin: 8px 2px 12px; }
+  .ui-frame .ui-gtitle h4 { font-size: 14px; font-weight: 600; letter-spacing: -0.01em; font-family: var(--body); }
+  .ui-frame .ui-gtitle .ui-n { font-size: 11px; font-weight: 600; color: var(--uc-muted); background: #F1F1F4; border-radius: 20px; padding: 2px 8px; }
+  .ui-frame .ui-gtitle .ui-lane { font-size: 12px; color: var(--uc-faint); }
+  .ui-frame .ui-card { border: 1px solid var(--uc-line2); border-radius: 12px; overflow: hidden; margin-bottom: 22px; background: var(--uc-card); }
+  .ui-frame table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .ui-frame td, .ui-frame th { overflow: hidden; text-overflow: ellipsis; }
+  .ui-frame thead th { text-align: left; font-size: 11px; font-weight: 550; color: var(--uc-faint); padding: 10px 15px; border-bottom: 1px solid var(--uc-line); letter-spacing: .01em; white-space: nowrap; }
+  .ui-frame tbody td { padding: 11px 15px; border-bottom: 1px solid var(--uc-line); font-size: 13px; vertical-align: middle; }
+  .ui-frame tbody tr:last-child td { border-bottom: none; }
+
+  .ui-frame .ui-drv { display: flex; align-items: center; gap: 11px; }
+  .ui-frame .ui-drv .ui-av { width: 27px; height: 27px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-size: 0; background: #E6E7EF; position: relative; }
+  .ui-frame .ui-drv .ui-av.mask::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: repeating-linear-gradient(115deg,#D3D5E4 0 5px,#DEE0EC 5px 10px); }
+  .ui-frame .ui-drv .ui-av.ini { font-size: 10px; font-weight: 600; }
+  .ui-frame .ui-nm { font-weight: 550; letter-spacing: .02em; color: #454652; }
+  .ui-frame .ui-mono { font-family: var(--mono); font-size: 12px; letter-spacing: .02em; }
+  .ui-frame .ui-masked { color: #8C8D99; letter-spacing: .12em; }
+  .ui-frame .ui-carrier { color: var(--uc-muted); }
+
+  .ui-frame .ui-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 550; padding: 3px 9px; border-radius: 100px; white-space: nowrap; line-height: 1.5; }
+  .ui-frame .ui-pill .ui-d { width: 6px; height: 6px; border-radius: 50%; }
+  .ui-frame .ui-pill.ok { background: var(--uc-green-wash); color: var(--uc-green); } .ui-frame .ui-pill.ok .ui-d { background: var(--uc-green); }
+  .ui-frame .ui-pill.warn { background: var(--uc-amber-wash); color: var(--uc-amber); } .ui-frame .ui-pill.warn .ui-d { background: var(--uc-amber); }
+  .ui-frame .ui-pill.bad { background: var(--uc-red-wash); color: var(--uc-red); } .ui-frame .ui-pill.bad .ui-d { background: var(--uc-red); }
+  .ui-frame .ui-pill.info { background: var(--uc-violet-wash); color: var(--uc-violet); } .ui-frame .ui-pill.info .ui-d { background: var(--uc-violet); }
+  .ui-frame .ui-pill.mut { background: #F1F1F4; color: var(--uc-muted); } .ui-frame .ui-pill.mut .ui-d { background: var(--uc-faint); }
+
+  .ui-frame .ui-prog { display: flex; align-items: center; gap: 9px; min-width: 92px; }
+  .ui-frame .ui-prog .ui-track { flex: 1; height: 5px; border-radius: 100px; background: #EDEDF1; overflow: hidden; }
+  .ui-frame .ui-prog .ui-fill { height: 100%; border-radius: 100px; }
+  .ui-frame .ui-prog .ui-pct { font-size: 12px; color: var(--uc-muted); font-variant-numeric: tabular-nums; width: 58px; text-align: right; }
+  .ui-frame .ui-rev { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--uc-brand); border: 1px solid #CFD5F6; border-radius: 7px; padding: 4px 8px; background: var(--uc-brand-wash); }
+  .ui-frame .ui-rev .ui-i { width: 12px; height: 12px; }
+  .ui-frame .ui-num { font-variant-numeric: tabular-nums; }
+
+  .ui-frame .ui-metrics { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; padding: 16px 26px 0; }
+  .ui-frame .ui-metric { border: 1px solid var(--uc-line2); border-radius: 12px; padding: 14px 16px; background: var(--uc-card); }
+  .ui-frame .ui-metric .ui-k { font-size: 11px; color: var(--uc-faint); font-weight: 500; display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .ui-frame .ui-metric .ui-k .ui-i { width: 13px; height: 13px; }
+  .ui-frame .ui-metric .ui-v { font-size: 23px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 7px; }
+  .ui-frame .ui-metric .ui-v .ui-delta { font-size: 11.5px; font-weight: 600; }
+  .ui-frame .ui-metric .ui-up { color: var(--uc-green); } .ui-frame .ui-metric .ui-down { color: var(--uc-red); }
+  .ui-frame .ui-metric .ui-spark { margin-top: 10px; display: flex; align-items: flex-end; gap: 3px; height: 22px; }
+  .ui-frame .ui-metric .ui-spark i { flex: 1; background: #E4E7FB; border-radius: 2px 2px 0 0; }
+  .ui-frame .ui-metric .ui-spark i.hi { background: var(--uc-brand); }
+  .ui-frame .ui-bar { display: flex; align-items: center; gap: 9px; min-width: 78px; }
+  .ui-frame .ui-bar .ui-track { flex: 1; height: 6px; border-radius: 100px; background: #EDEDF1; overflow: hidden; }
+  .ui-frame .ui-bar .ui-fill { height: 100%; border-radius: 100px; background: var(--uc-brand); }
+  .ui-frame .ui-supp { display: flex; align-items: center; gap: 9px; padding: 12px 15px; color: var(--uc-faint); font-size: 12px; font-style: italic; }
+  .ui-frame .ui-supp .ui-lk { width: 14px; height: 14px; flex-shrink: 0; }
+
+  .ui-frame .ui-split { display: grid; grid-template-columns: 1fr 300px; gap: 18px; align-items: start; }
+  .ui-frame .ui-settle { border: 1px solid var(--uc-line2); border-radius: 12px; background: var(--uc-card); overflow: hidden; }
+  .ui-frame .ui-settle .ui-sh { padding: 13px 16px; border-bottom: 1px solid var(--uc-line); display: flex; align-items: center; gap: 9px; }
+  .ui-frame .ui-settle .ui-sh b { font-size: 13.5px; font-weight: 600; }
+  .ui-frame .ui-settle .ui-sh .ui-tag { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--uc-brand); background: var(--uc-brand-wash); border: 1px solid #DCE0FA; border-radius: 6px; padding: 3px 7px; }
+  .ui-frame .ui-settle .ui-srow { display: flex; align-items: center; justify-content: space-between; padding: 9px 16px; font-size: 12.5px; }
+  .ui-frame .ui-settle .ui-srow .ui-lab { color: var(--uc-muted); }
+  .ui-frame .ui-settle .ui-srow .ui-lab i { font-style: normal; font-family: var(--mono); font-size: 10.5px; color: var(--uc-faint); margin-left: 6px; }
+  .ui-frame .ui-settle .ui-srow .ui-val { font-family: var(--mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .ui-frame .ui-settle .ui-srow.neg .ui-val { color: var(--uc-red); }
+  .ui-frame .ui-settle .ui-srow.net { border-top: 1px solid var(--uc-line); background: #FAFBFD; padding: 13px 16px; }
+  .ui-frame .ui-settle .ui-srow.net .ui-lab { color: var(--uc-ink); font-weight: 600; font-size: 13px; }
+  .ui-frame .ui-settle .ui-srow.net .ui-val { font-weight: 700; font-size: 14.5px; color: var(--uc-green); }
+  .ui-frame .ui-settle .ui-foot2 { padding: 11px 16px; border-top: 1px solid var(--uc-line); font-size: 11px; color: var(--uc-faint); line-height: 1.5; }
+  .ui-frame svg { display: block; }
+
+  /* ---- cross-plane chat + object unfurl (scoped, ui-chat- / ui-oc- prefixed) ---- */
+  .ui-frame .ui-chat-head { padding: 16px 22px; border-bottom: 1px solid var(--uc-line); display: flex; align-items: center; gap: 12px; }
+  .ui-frame .ui-chat-head .ui-ct b { font-size: 15px; font-weight: 650; letter-spacing: -0.015em; display: block; }
+  .ui-frame .ui-chat-head .ui-ct span { font-size: 11.5px; color: var(--uc-faint); }
+  .ui-frame .ui-chat-head .ui-ref { font-family: var(--mono); font-size: 10.5px; color: var(--uc-muted); background: #F1F1F4; border-radius: 6px; padding: 3px 8px; }
+  .ui-frame .ui-plane-chip { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; padding: 5px 11px; border-radius: 100px; white-space: nowrap; }
+  .ui-frame .ui-plane-chip.tenant { background: var(--uc-green-wash); color: var(--uc-green); border: 1px solid #CBE7D5; }
+  .ui-frame .ui-plane-chip.operator { background: var(--uc-brand-wash); color: var(--uc-brand); border: 1px solid #DCE0FA; }
+  .ui-frame .ui-plane-chip .ui-d { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .ui-frame .ui-thread { padding: 18px 22px; display: flex; flex-direction: column; gap: 16px; background: #FAFAFC; }
+  .ui-frame .ui-msg { display: flex; gap: 11px; align-items: flex-start; max-width: 92%; }
+  .ui-frame .ui-msg.me { flex-direction: row-reverse; align-self: flex-end; }
+  .ui-frame .ui-msg .ui-mav { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-size: 10.5px; font-weight: 650; }
+  .ui-frame .ui-msg .ui-mav.mask { background: repeating-linear-gradient(115deg,#D3D5E4 0 5px,#DEE0EC 5px 10px); color: transparent; }
+  .ui-frame .ui-mbody { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+  .ui-frame .ui-msg.me .ui-mbody { align-items: flex-end; }
+  .ui-frame .ui-mmeta { font-size: 11px; color: var(--uc-faint); display: flex; gap: 7px; align-items: center; }
+  .ui-frame .ui-mmeta b { font-weight: 600; color: #454652; }
+  .ui-frame .ui-mmeta .ui-hnd { font-family: var(--mono); font-size: 10.5px; }
+  .ui-frame .ui-mmeta .ui-idchip { font-family: var(--mono); font-size: 9.5px; padding: 1px 6px; border-radius: 5px; background: #F1F1F4; color: var(--uc-faint); letter-spacing: .04em; }
+  .ui-frame .ui-bubble { background: var(--uc-card); border: 1px solid var(--uc-line2); border-radius: 12px; padding: 10px 14px; font-size: 13.5px; line-height: 1.5; color: #2f3039; }
+  .ui-frame .ui-msg.me .ui-bubble { background: #1B1C22; color: #EDEEF6; border-color: #1B1C22; }
+  .ui-frame .ui-bubble.masked { color: #8C8D99; letter-spacing: .1em; }
+  .ui-frame .ui-bubble .ui-inref { font-family: var(--mono); font-size: 11.5px; color: var(--uc-brand); background: var(--uc-brand-wash); padding: 1px 5px; border-radius: 4px; }
+  .ui-frame .ui-msg.me .ui-bubble .ui-inref { color: #B9C2FF; background: #2A2C48; }
+
+  /* the unfurled object card — clear vs masked, per viewer */
+  .ui-frame .ui-oc { width: 320px; max-width: 100%; border: 1px solid var(--uc-line2); border-radius: 12px; background: var(--uc-card); overflow: hidden; box-shadow: 0 6px 18px -12px rgba(28,32,80,.22); }
+  .ui-frame .ui-oc-head { display: flex; align-items: center; gap: 10px; padding: 12px 14px 11px; border-bottom: 1px solid var(--uc-line); }
+  .ui-frame .ui-oc-ic { width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0; display: grid; place-items: center; color: #fff; }
+  .ui-frame .ui-oc-ic.person { background: linear-gradient(150deg,#3B4CCA,#5B6BE0); }
+  .ui-frame .ui-oc-ic.driver { background: linear-gradient(150deg,#0E7C5A,#17A06E); }
+  .ui-frame .ui-oc-tt b { display: block; font-size: 13.5px; font-weight: 650; letter-spacing: -0.01em; }
+  .ui-frame .ui-oc-tt b.masked { color: #8C8D99; letter-spacing: .1em; }
+  .ui-frame .ui-oc-tt span { display: block; font-family: var(--mono); font-size: 10px; color: var(--uc-faint); letter-spacing: .02em; margin-top: 1px; }
+  .ui-frame .ui-oc-body { padding: 4px 14px 12px; }
+  .ui-frame .ui-oc-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px dashed var(--uc-line); font-size: 12.5px; }
+  .ui-frame .ui-oc-row:first-child { border-top: none; }
+  .ui-frame .ui-oc-row .ui-k { color: var(--uc-faint); font-size: 11px; }
+  .ui-frame .ui-oc-row .ui-vv { font-weight: 500; color: #3a3b45; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 190px; }
+  .ui-frame .ui-oc-row .ui-vv.mono { font-family: var(--mono); font-size: 12px; }
+  .ui-frame .ui-oc-row .ui-vv.masked { color: #9A9BA6; letter-spacing: .12em; font-family: var(--mono); }
+  .ui-frame .ui-oc-row .ui-vv.clearpii { color: #28306B; }
+  .ui-frame .ui-oc-foot { padding: 9px 14px; border-top: 1px solid var(--uc-line); background: #FAFBFD; font-size: 10.5px; color: var(--uc-faint); display: flex; align-items: center; gap: 7px; }
+  .ui-frame .ui-oc-foot svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .ui-frame .ui-oc-foot.clear { color: var(--uc-green); }
+  .ui-frame .ui-oc-foot.masked { color: var(--uc-brand); }
+  .ui-frame .ui-composer { margin: 4px 0 0; padding: 12px 22px 16px; border-top: 1px solid var(--uc-line); display: flex; align-items: center; gap: 10px; background: var(--uc-card); }
+  .ui-frame .ui-composer .ui-inp { flex: 1; border: 1px solid var(--uc-line2); border-radius: 10px; padding: 9px 13px; font-size: 12.5px; color: var(--uc-muted); background: var(--uc-panel); }
+  .ui-frame .ui-composer .ui-send { width: 34px; height: 34px; border-radius: 9px; background: #1B1C22; display: grid; place-items: center; color: #fff; flex-shrink: 0; }
+  .ui-frame .ui-presence { display: flex; align-items: center; gap: 8px; padding: 9px 22px; border-top: 1px solid var(--uc-line); font-size: 11px; color: var(--uc-faint); background: var(--uc-panel); }
+  .ui-frame .ui-presence .ui-online { width: 6px; height: 6px; border-radius: 50%; background: var(--uc-green); }
+
+  /* two-up money-shot rig (tenant | operator) */
+  .moneyshot { margin-top: 24px; position: relative; left: 50%; transform: translateX(-50%); width: min(1180px, calc(100vw - 40px)); display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: start; }
+  .moneyshot .ms-col .ui-frame { box-shadow: 0 16px 44px -26px rgba(28,32,80,.30); }
+  .ms-tag { font-family: var(--mono); font-size: 11.5px; font-weight: 500; margin: 0 2px 9px; display: flex; align-items: center; gap: 8px; }
+  .ms-tag .ms-d { width: 8px; height: 8px; border-radius: 50%; }
+  .ms-tag.tenant { color: var(--uc-green); } .ms-tag.tenant .ms-d { background: var(--uc-green); }
+  .ms-tag.operator { color: var(--accent-deep); } .ms-tag.operator .ms-d { background: var(--accent-deep); }
+  .ms-tag b { color: var(--ink); font-weight: 600; }
+
+  /* the framework inheritance diagram (samen_web mount) */
+  .frameflow { margin-top: 44px; border: 1px solid var(--rule); border-radius: 14px; background: var(--card); overflow: hidden; }
+  .frameflow-lib { padding: 22px 26px; background: var(--accent-wash); border-bottom: 1px solid #DCE0FA; }
+  .frameflow-lib .fl-name { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--accent-deep); margin-bottom: 6px; }
+  .frameflow-lib .fl-desc { font-size: 13.5px; color: #37407A; line-height: 1.55; }
+  .frameflow-lib .fl-mods { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 7px; }
+  .frameflow-lib .fl-mod { font-family: var(--mono); font-size: 11px; background: #fff; border: 1px solid #DCE0FA; color: var(--accent-deep); border-radius: 6px; padding: 3px 9px; }
+  .frameflow-hosts { display: grid; grid-template-columns: 1fr 1fr; }
+  .frameflow-host { padding: 22px 26px; }
+  .frameflow-host + .frameflow-host { border-left: 1px solid var(--rule); }
+  .frameflow-host .fh-top { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .frameflow-host .fh-glyph { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 13px; flex-shrink: 0; }
+  .frameflow-host .fh-name { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+  .frameflow-host .fh-name span { display: block; font-size: 11px; font-weight: 400; color: var(--faint); }
+  .frameflow-host .fh-code { font-family: var(--mono); font-size: 12px; line-height: 1.7; color: var(--muted); background: var(--paper); border: 1px solid var(--rule); border-radius: 9px; padding: 12px 14px; overflow-x: auto; }
+  .frameflow-host .fh-code .k { color: var(--accent-deep); }
+  .frameflow-host .fh-code .c { color: var(--faint); }
+  .frameflow-host .fh-got { margin-top: 12px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .frameflow-host .fh-got b { color: var(--accent-deep); font-weight: 600; }
+  .frameflow-note { border-top: 1px solid var(--rule); padding: 14px 26px; font-family: var(--mono); font-size: 12px; color: var(--faint); background: var(--paper); }
+  .frameflow-note b { color: var(--accent-deep); }
+
+  @media (max-width: 900px) {
+    .moneyshot { grid-template-columns: 1fr; }
+    .frameflow-hosts { grid-template-columns: 1fr; }
+    .frameflow-host + .frameflow-host { border-left: none; border-top: 1px solid var(--rule); }
+    .ui-frame .ui-app { grid-template-columns: 1fr; }
+    .ui-frame .ui-side { display: none; }
+    .ui-frame .ui-split { grid-template-columns: 1fr; }
+    .ui-frame .ui-metrics { grid-template-columns: repeat(2,1fr); }
+  }
+  @media (max-width: 820px) {
+    .modes, .axioms, .feature-grid, .stack, .deleted, .idioms, .tier-grid { grid-template-columns: 1fr; }
+    .idioms { grid-template-columns: 1fr 1fr; }
+    .axiom + .axiom { border-left: none; border-top: 1px solid var(--rule); }
+    .mirror-cols { grid-template-columns: 1fr; }
+    .mirror-seam { flex-direction: row; padding: 10px 0; border: none; border-top: 1px dashed var(--rule); border-bottom: 1px dashed var(--rule); }
+    .mirror-seam span { writing-mode: horizontal-tb; }
+    .compose { grid-template-columns: 1fr; }
+    .comp-col + .comp-col:not(.seam) { border-left: none; border-top: 1px solid var(--rule); }
+    .comp-seam { display: none; }
+    .reuse-row { grid-template-columns: 1fr; gap: 8px; }
+    .tier:nth-child(3n+1) { border-left: 1px solid var(--rule); }
+    .hero { padding: 64px 0 56px; }
+    section { padding: 64px 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <nav>
+    <div class="wordmark">samen<span class="dot">.</span></div>
+    <div style="display:flex;align-items:baseline;gap:18px;flex-wrap:wrap">
+      <span class="tag">samen · dutch for "together" — the 80%, governed, once</span>
+      <a class="tag" href="https://github.com/ckluis/samen" style="color:var(--accent-deep);text-decoration:none">github.com/ckluis/samen ↗</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="kicker fade d1">A governed B2B-SaaS foundry — Elixir · Ash · Oban · one Postgres</div>
+    <h1 class="fade d2">Support your tenants <em>without ever seeing their customers.</em> On one substrate.</h1>
+    <p class="sub fade d3">Samen presets the boring 80% of every B2B SaaS — identity, CRM, billing, support, the operator control plane, and now <strong>the entire product UI</strong> — as <strong>six governed idioms applied uniformly to every object</strong>, on one Postgres per product. The product your tenants use and the control plane you run the business with are <strong>the same resources on the same substrate</strong>. The difference is the plane: on the tenant plane an owner reads their own people in the clear; on the operator plane the very same rows render <strong>••••</strong> — because masking is the field's normal value, not a view you remembered to add. The flagship makes it literal: <strong>realtime cross-plane chat</strong> where pasting any object id renders a live card that is <strong>masking-aware per viewer</strong> — the same message shows a clear contact card to the owning tenant and a <strong>••••</strong> card to the SaaS operator, with the non-PII fields still clear so support can actually help. This document describes what was <strong>built, gated GO, and tested</strong> — then hardened past the demo by four post-build workstreams (real CRUD, an operator cockpit, generator catch-up, and table-stakes UX), each adversarially gated GO, with every masking guarantee held by a standing <strong>15-patch sabotage harness</strong>. <strong>1,179 kernel tests · 598 framework · 454 demo · 110 freight · 49 vet</strong> — all warnings-as-errors, over a navigable 5-tenant demo, with a destruction oracle you can run.</p>
+    <div class="surfaces fade d4">
+      <span class="surface-pill"><b>one BEAM release</b> — web · workers · cron</span>
+      <span class="surface-pill"><b>one Postgres</b> — truth · queue · history · audit · vault</span>
+      <span class="surface-pill lit">one message, two truths — clear to the tenant, •••• to the operator</span>
+      <span class="surface-pill"><b>15 sabotages</b> — CI proves each guarantee's test fails when it's broken</span>
+    </div>
+  </header>
+
+  <section>
+    <div class="sec-label">The tension nobody resolved</div>
+    <h2>Every SaaS ships the same 80% — <em>and re-leaks PII through all of it</em></h2>
+    <p class="prose measure" style="color:var(--muted)">If you have shipped a second or third B2B SaaS, you have rebuilt the same eighty percent — identity, billing, CRM, email, support — a little worse each time, then rebuilt it <strong style="color:var(--ink)">again</strong> as the internal admin tooling nobody scoped. That stack gives you the 80% as six integration surfaces and six failure domains, with personal data smeared across all of them. And the two disciplines that actually keep customers — <strong style="color:var(--ink)">an operator who can support a tenant without seeing their PII</strong>, and an <strong style="color:var(--ink)">erasure you can prove</strong> — are exactly the ones a from-scratch stack gets last, if ever.</p>
+    <div class="axioms">
+      <div class="axiom">
+        <div class="who">The web-framework path — a bag of vendors</div>
+        <div class="claim">"Assemble the 80% from six SaaS vendors and glue. PII lands in each of them; the admin tool comes six months later."</div>
+      </div>
+      <div class="axiom">
+        <div class="who">The metadata-platform path — a config engine</div>
+        <div class="claim">"Model everything as generic records. Now nothing is typed, nothing is verified, and the PII discipline is a convention."</div>
+      </div>
+    </div>
+    <div class="resolution">
+      <div class="mark">∴</div>
+      <div class="claim">Samen presets the 80% as <span>typed, catalogued, PII-safe, malleable idioms on one Postgres — vault, audit, and the operator plane come with it, not after it. Engineering writes only the B2B problem.</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">The mechanism</div>
+    <h2>Six idioms, applied uniformly to <em>every object in every scope</em></h2>
+    <p class="prose measure" style="color:var(--muted)">Consistency is the whole product: it is what makes the substrate uniform enough for a human — or a model — to build on. Every resource in every scope (identity, CRM, billing, marketing, CMS, support, primitives) obeys the same six rules, injected by <strong>one base macro</strong>. Break one and the build fails closed. These six are not aspirations; each is a Spark transformer or verifier with a red-path test that must fail on violation.</p>
+    <div class="idioms">
+      <div class="idiom">
+        <div class="no">idiom 01</div>
+        <h3>Self-qualifying storage</h3>
+        <p>You write <code>attribute :name</code>; a compile-time transformer projects it to <code>com_name</code> in the DB, CDC, logs, and catalog. One stable column identity everywhere, no rename drift. Abbrevs are permanent, like a ticker.</p>
+      </div>
+      <div class="idiom">
+        <div class="no">idiom 02</div>
+        <h3>A machine catalog</h3>
+        <p>Every table and field lands in <code>tam_table</code> / <code>fld_field</code> — written <em>in the migration transaction</em>. A committed <code>schema.dict.json</code> is the ground an agent builds on: a reference to an uncatalogued column doesn't compile.</p>
+      </div>
+      <div class="idiom">
+        <div class="no">idiom 03</div>
+        <h3>The PII vault</h3>
+        <p>A <code>pii_attribute</code> routes to a per-subject-keyed vault; the row carries a token. Masking is the field's normal value — <code>%Masked{}</code> → <strong>••••</strong> across UI, JSON, CSV, logs, by omission. Erasure is crypto-shred.</p>
+      </div>
+      <div class="idiom">
+        <div class="no">idiom 04</div>
+        <h3>Postgres as the engine</h3>
+        <p>Truth, the Oban queue, cron, the append-only audit tier, rollups, and the vault are one database. LISTEN/NOTIFY, SKIP LOCKED, partitioning, transactional DDL — the infrastructure is queries, not services.</p>
+      </div>
+      <div class="idiom">
+        <div class="no">idiom 05</div>
+        <h3>A malleability ladder</h3>
+        <p>Tier-0 config rows, Tier-1 <code>jsonb</code> custom fields validated at write, Tier-2 tenant-defined objects, Tier-3 builder code-composition. Customization with the guarantees intact, degrading honestly as it climbs.</p>
+      </div>
+      <div class="idiom">
+        <div class="no">idiom 06</div>
+        <h3>Two planes, one core</h3>
+        <p>The operator plane is built from the <em>same</em> objects the tenant uses. Masked impersonation, second-party reveal grants, and a token-blind aggregate actor with no <code>pii_</code> columns at all — support and analytics without disclosure.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">Unique feature № 1 — composition</div>
+    <h2>Compose a core object in code. <em>Inherit every guarantee.</em></h2>
+    <div class="prose measure">
+        <p>Here is one core object — <code>person</code> — shown as the shipped CRM resource, then re-composed by a freight SaaS and a vet SaaS. This is Ash resource composition: a base macro folds a <strong>tableless fragment</strong> (<code>Samen.Fragments.CorePerson</code>) into one resource that compiles to <strong>one physical table</strong>, with normal PK/UNIQUE/FK. It is emphatically <em>not</em> Postgres <code>INHERITS</code> — that footgun (a parent UNIQUE that skips child rows, an FK that can't target the set) is never emitted. FKs target the composed table, never the fragment.</p>
+        <p>Everything not highlighted is injected by the base macro — and so are the guarantees. The storage convention, vault routing, masking, org-scope, audit, catalog parity, and crypto-shred come <strong>free on every column, including the new ones.</strong> One <code>pii_attribute</code> line buys the entire vault-plus-mask-plus-shred-plus-KMS chain.</p>
+        <p>Be precise about which 80% is free: the <strong>cross-cutting infrastructure</strong> — the idioms every column obeys — not the domain meaning of the noun. Driftwood's <code>Driver</code> and PawChart's <code>Patient</code> both compose <code>CorePerson</code> with <strong>zero vertical PII code</strong>; what a driver <em>is</em> stays authored. That is the calibrated deal, proven twice.</p>
+    </div>
+    <div class="compose">
+          <div class="comp-col">
+            <div class="cl">kernel · shipped</div>
+            <div class="ct">person<span>composes CorePerson</span></div>
+            <div class="field">per_id <span class="tagf">core · pk</span></div>
+            <div class="field pii-f">per_full_name <span class="tagf">→ pii_name</span></div>
+            <div class="field pii-f">per_emails <span class="tagf">→ pii_email</span></div>
+            <div class="field pii-f">per_phones <span class="tagf">→ pii_phone</span></div>
+            <div class="field">per_company_id <span class="tagf">FK</span></div>
+            <div class="field">per_custom <span class="tagf">Tier-1</span></div>
+            <div class="field">per_*_at <span class="tagf">audit</span></div>
+          </div>
+          <div class="comp-col seam comp-seam"><span>base macro folds it in</span></div>
+          <div class="comp-col">
+            <div class="cl">Driftwood · freight</div>
+            <div class="ct">driver<span>composes person</span></div>
+            <div class="field add pii-f">pii_drv_cdl_number <span class="tagf">→ vault</span></div>
+            <div class="field add">drv_cdl_state <span class="tagf">core</span></div>
+            <div class="field add">drv_medical_card_expiry <span class="tagf">core</span></div>
+            <div class="field add">drv_carrier_id <span class="tagf">FK → company</span></div>
+            <div class="field add">drv_eld_provider <span class="tagf">Tier-0</span></div>
+          </div>
+          <div class="comp-col">
+            <div class="cl">PawChart · vet</div>
+            <div class="ct">patient<span>composes person</span></div>
+            <div class="field add">pat_species <span class="tagf">core</span></div>
+            <div class="field add">pat_weight_kg <span class="tagf">core</span></div>
+            <div class="field add pii-f">pii_pet_microchip <span class="tagf">→ vault</span></div>
+            <div class="field add">pat_owner_id <span class="tagf">FK → owner</span></div>
+            <div class="field add">pat_temperament <span class="tagf">Tier-0</span></div>
+          </div>
+          <div class="free-note" style="grid-column:1/-1"><b>Free on every row, no code:</b> a catalog row the LLM grounds on · masking by default (<code style="font-family:var(--mono);font-size:12px">%Masked{}</code> → ••••) · <code style="font-family:var(--mono);font-size:12px">org_id</code> policy scope · audit trail · crypto-shred via the per-subject vault key, held in an external KMS outside the WAL/PITR surface.</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">Unique feature № 2 — the vault &amp; the destruction oracle</div>
+    <h2>Audit everything. <em>Forget anyone.</em> And prove it left every tier.</h2>
+    <div class="feature-grid">
+      <div class="prose">
+        <p>A <code>pii_attribute</code> value never lands as plaintext in a domain row. It lives in a <strong>mutable, per-subject-keyed vault</strong>; the row carries a <code>vt_</code> token, and every tier downstream — replicas, PITR history, CDC mirror, rollups, the audit chain — carries only that token or ciphertext. The per-subject key is <strong>not a Postgres row</strong>: it lives in an external KMS outside the WAL and backup surface, so a PITR restore resurrects <em>ciphertext, never the key</em>. Erasure is <strong>crypto-shredding</strong>: destroy one subject's key and their PII becomes permanently undecryptable across every tier at once — a key-destruction, not a copy-chase — while the history still replays perfectly.</p>
+        <p>The load-bearing artifact is the <strong>destruction oracle</strong>: <code>mix samen.verify.no_plaintext_pii --subject &lt;uuid&gt; --tiers all</code>, run as a <em>separate OS process</em> against a freshly-shredded driver. In the Driftwood crypto-shred game-day it <strong>exits 0 with 15 positive attestations</strong> — the reveal returns <code>{:error, :shredded}</code>, no vault row decrypts, the driver-keyed rollup was rebuilt driver-free (count → 0, no resurrection), and the redacted <code>non_pii!</code> columns carry sentinels. The oracle is the proof that erasure actually reached every place the data could hide.</p>
+        <p>One deliberate exception to "nothing hand-rolled": the vault's cipher is an <strong>authenticated envelope construction</strong> (a reviewed library, per-subject DEKs under a KMS master key), never a bespoke one — because a broken cipher still round-trips and a vault is exactly where "from scratch" stops being a virtue.</p>
+      </div>
+      <div>
+        <div class="codecard">
+          <div class="bar"><i></i><i></i><i></i></div>
+          <div><span class="cm"># the declaration — one line buys the whole chain</span></div>
+          <div><span class="kw">pii_attribute</span> <span class="pii">:cdl_number</span>, <span class="kw">:string</span>,</div>
+          <div>&nbsp;&nbsp;<span class="fn">vault:</span> <span class="pii">:pii_cdl</span>&nbsp;&nbsp;<span class="cm"># → vault · mask · shred · KMS</span></div>
+          <div>&nbsp;</div>
+          <div><span class="cm"># right-to-erasure — destroy the key, not the copies</span></div>
+          <div><span class="kw">Samen.Erasure</span>.<span class="fn">shred</span>(subject_id)</div>
+          <div><span class="cm"># reveal → {:error, :shredded} on every tier</span></div>
+          <div>&nbsp;</div>
+          <div><span class="cm"># the oracle — a separate OS process, exits 0</span></div>
+          <div>$ mix samen.verify.no_plaintext_pii \</div>
+          <div>&nbsp;&nbsp;<span class="str">--subject</span> &lt;uuid&gt; <span class="str">--tiers all</span></div>
+          <div><span class="cm"># → 15 attestations · key absent from every DB tier</span></div>
+        </div>
+        <div class="tiers" style="margin-top:22px">
+          <div class="tiers-head">
+            <b>no_plaintext_pii</b>
+            <span class="cmd">the destruction oracle · tiers it scans</span>
+            <span class="exit">EXIT 0 · 15✓</span>
+          </div>
+          <div class="tier-grid">
+            <div class="tier"><div class="tn">live</div><div class="td">domain rows carry tokens only — no key column on the vault</div></div>
+            <div class="tier"><div class="tn">replica</div><div class="td">physical replica inherits ciphertext + tokens</div></div>
+            <div class="tier"><div class="tn">rollup</div><div class="td">driver-keyed rollups rebuilt driver-free, or suppressed</div></div>
+            <div class="tier"><div class="tn">audit</div><div class="td">hash-chained aud_event / aud_chain — tokens, never plaintext</div></div>
+            <div class="tier ext"><div class="tn">pitr-history</div><div class="td">a restore brings back ciphertext — the key was never in the WAL</div></div>
+            <div class="tier ext"><div class="tn">kms-store</div><div class="td">external key store, PITR disabled — the system of record for shred</div></div>
+          </div>
+          <div class="tiers-foot">◆ = external to Postgres · the load-bearing exclusion · replica + real KMS/Neon = operator TODO, identical in the local sim</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">What it actually looks like — the operator plane</div>
+    <h2>Masked impersonation: <em>the operator sees the real UI, the PII renders ••••</em></h2>
+    <div class="prose measure">
+      <p>This is the product's thesis, on screen. An operator opens a tenant to work a support ticket and sees the tenant's <strong>real driver roster</strong> — real FMCSA badges, real settlement bars, real dispatch state — but every name and CDL renders <strong>••••</strong>, because the impersonation session carries <strong>no reveal grant</strong> and masking is the field type's normal value. There is no CSV, API, or log path that leaks by omission; the mask <em>is</em> the default. Unmasking one subject (bottom row) is <strong>second-party</strong>: the operator requests, a <em>distinct</em> party approves — enforced in policy and by a DB <code>CHECK (granted_by &lt;&gt; requestor_id)</code> — and the reveal is time-boxed, auto-revoked by an Oban job scheduled in the same transaction, and written to a hash-chained, tenant-readable log the operator cannot edit.</p>
+    </div>
+
+    <div class="ui-shell">
+      <div class="ui-frame">
+        <div class="ui-app">
+          <aside class="ui-side">
+            <div class="ui-ws">
+              <div class="ui-logo">S</div>
+              <div class="ui-who"><b>Driftwood Ops</b><span>Operator control plane</span></div>
+            </div>
+            <div class="ui-grp">Operator plane</div>
+            <nav class="ui-nav">
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>Tenants<span class="ui-cnt">42</span></a>
+              <a href="#" class="on"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/></svg>Impersonation<span class="ui-dot"></span></a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9m6 10V5m6 14v-7"/></svg>Aggregate · MRR</a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>Audit log</a>
+            </nav>
+            <div class="ui-grp">Viewing as · Blue Ridge Logistics</div>
+            <nav class="ui-nav">
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13l5 5v5H3z"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="17.5" cy="17.5" r="1.5"/></svg>Loads<span class="ui-cnt">18</span></a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/></svg>Carriers<span class="ui-cnt">11</span></a>
+              <a href="#" class="on"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg>Drivers<span class="ui-cnt">9</span></a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Settlements</a>
+            </nav>
+            <div class="ui-foot">
+              <div class="ui-av-s">CK</div>
+              <div class="ui-m"><b>C. Kluis</b><span>operator · support role</span></div>
+            </div>
+          </aside>
+          <main class="ui-main">
+            <div class="ui-top">
+              <div class="ui-crumb">Operator plane <span class="ui-sep">/</span> Impersonation <span class="ui-sep">/</span> Blue Ridge Logistics <span class="ui-sep">/</span> Drivers</div>
+              <div class="ui-head">
+                <h3>Driver roster</h3>
+                <div class="ui-actions">
+                  <button class="ui-btn"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Filter</button>
+                  <button class="ui-btn primary"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Request reveal</button>
+                </div>
+              </div>
+            </div>
+            <div class="ui-mask-bar">
+              <div class="ui-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+              <div class="ui-tx"><b>Masked impersonation.</b> You're viewing Blue Ridge Logistics as an operator — personal data renders <b>••••</b> by default. Unmasking a subject needs a second-party reveal grant, is time-boxed, and is written to the tenant-readable audit log.</div>
+              <div class="ui-chip">session 27m left · reason: ticket&nbsp;#7781</div>
+            </div>
+            <div class="ui-tabs">
+              <a href="#" class="on"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg>Roster</a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 12l2 2 4-4"/><rect x="3" y="4" width="18" height="16" rx="2"/></svg>FMCSA compliance</a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13l5 5v5H3z"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="17.5" cy="17.5" r="1.5"/></svg>Dispatch</a>
+            </div>
+            <div class="ui-wrap">
+              <div class="ui-gtitle"><h4>Midwest lane</h4><span class="ui-n">5</span><span class="ui-lane">· Chicago, IL → Columbus, OH corridor</span></div>
+              <div class="ui-card">
+                <table>
+                  <thead><tr><th style="width:24%">Driver</th><th style="width:17%">Carrier</th><th style="width:14%">CDL #</th><th style="width:14%">Med card</th><th style="width:13%">Dispatch</th><th style="width:18%">Settlement · wk</th></tr></thead>
+                  <tbody>
+                    <tr>
+                      <td><div class="ui-drv"><div class="ui-av mask"></div><span class="ui-nm ui-masked">••••••••••</span></div></td>
+                      <td class="ui-carrier">Lakeside Carriers</td>
+                      <td><span class="ui-mono ui-masked">••• •• ••••</span></td>
+                      <td><span class="ui-pill ok"><span class="ui-d"></span>Valid</span></td>
+                      <td><span class="ui-pill ok"><span class="ui-d"></span>Eligible</span></td>
+                      <td><div class="ui-prog"><div class="ui-track"><div class="ui-fill" style="width:74%;background:var(--uc-green)"></div></div><span class="ui-pct">$3,905</span></div></td>
+                    </tr>
+                    <tr>
+                      <td><div class="ui-drv"><div class="ui-av mask"></div><span class="ui-nm ui-masked">••••••••••••</span></div></td>
+                      <td class="ui-carrier">Lakeside Carriers</td>
+                      <td><span class="ui-mono ui-masked">••• •• ••••</span></td>
+                      <td><span class="ui-pill warn"><span class="ui-d"></span>Expires 30d</span></td>
+                      <td><span class="ui-pill ok"><span class="ui-d"></span>Eligible</span></td>
+                      <td><div class="ui-prog"><div class="ui-track"><div class="ui-fill" style="width:55%;background:var(--uc-green)"></div></div><span class="ui-pct">$2,870</span></div></td>
+                    </tr>
+                    <tr>
+                      <td><div class="ui-drv"><div class="ui-av mask"></div><span class="ui-nm ui-masked">•••••••</span></div></td>
+                      <td class="ui-carrier">Prairie Line LLC</td>
+                      <td><span class="ui-mono ui-masked">••• •• ••••</span></td>
+                      <td><span class="ui-pill ok"><span class="ui-d"></span>Valid</span></td>
+                      <td><span class="ui-pill info"><span class="ui-d"></span>En route</span></td>
+                      <td><div class="ui-prog"><div class="ui-track"><div class="ui-fill" style="width:33%;background:var(--uc-amber)"></div></div><span class="ui-pct">$1,740</span></div></td>
+                    </tr>
+                    <tr>
+                      <td><div class="ui-drv"><div class="ui-av mask"></div><span class="ui-nm ui-masked">•••••••••••</span></div></td>
+                      <td class="ui-carrier">Prairie Line LLC</td>
+                      <td><span class="ui-mono ui-masked">••• •• ••••</span></td>
+                      <td><span class="ui-pill mut"><span class="ui-d"></span>On file</span></td>
+                      <td><span class="ui-pill mut"><span class="ui-d"></span>Off duty</span></td>
+                      <td><div class="ui-prog"><div class="ui-track"><div class="ui-fill" style="width:0%;background:#D6D6DC"></div></div><span class="ui-pct">$0</span></div></td>
+                    </tr>
+                    <tr>
+                      <td><div class="ui-drv"><div class="ui-av ini" style="background:#DDE7F5"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#3B4CCA" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg></div><span class="ui-nm" style="color:#28306B">Marcus Vale</span></div></td>
+                      <td class="ui-carrier">Prairie Line LLC</td>
+                      <td><span class="ui-mono" style="color:#28306B">D4471-8820</span></td>
+                      <td><span class="ui-pill ok"><span class="ui-d"></span>Valid</span></td>
+                      <td><span class="ui-pill ok"><span class="ui-d"></span>Eligible</span></td>
+                      <td><div style="display:flex;align-items:center;gap:9px"><div class="ui-prog" style="min-width:auto;flex:1"><div class="ui-track"><div class="ui-fill" style="width:90%;background:var(--uc-green)"></div></div><span class="ui-pct">$4,980</span></div><span class="ui-rev"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>Revealed · 4m left</span></div></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+      <div class="ui-caption"><span><b>Operator plane · Driftwood</b> — masked impersonation over the real freight tenant</span><span>proof: web_red_paths_test.exs RP1/RP2 · DB CHECK rvg_distinct_party</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">The thesis, side by side — same rows, opposite planes</div>
+    <h2>The tenant reads its own people in the clear. <em>The operator never can.</em></h2>
+    <div class="prose measure">
+      <p>The two screens below are the whole argument. On the <strong>left</strong>, the tenant plane: Blue Ridge's own dispatcher sees driver names <em>in the clear</em>, because a tenant key reads its own org's PII with no operator grant. On the <strong>right</strong>, the token-blind aggregate plane the operator uses for portfolio MRR — an actor whose resources have <strong>no <code>pii_</code> column by construction</strong>, reading a vault-excluded projection. The two paths are <em>mutually exclusive</em>: the reveal function refuses the aggregate actor before any grant or vault check runs. Same substrate, same driver rows underneath — the plane decides what is knowable. Note the settlement card: the kernel's <code>Invoice</code> reshaped into a two-sided carrier settlement by a bounded-context calculation, the vertical's money model over the substrate's vault and audit.</p>
+    </div>
+
+    <div class="ui-shell">
+      <div class="ui-frame">
+        <div class="ui-app">
+          <aside class="ui-side">
+            <div class="ui-ws">
+              <div class="ui-logo" style="background:linear-gradient(150deg,#0E7C5A,#17A06E)">B</div>
+              <div class="ui-who"><b>Blue Ridge Logistics</b><span>Freight brokerage · tenant</span></div>
+            </div>
+            <div class="ui-grp">Operations</div>
+            <nav class="ui-nav">
+              <a href="#" class="on"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg>Dispatch board</a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13l5 5v5H3z"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="17.5" cy="17.5" r="1.5"/></svg>Loads<span class="ui-cnt">18</span></a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/></svg>Carriers<span class="ui-cnt">11</span></a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg>Drivers<span class="ui-cnt">9</span></a>
+            </nav>
+            <div class="ui-grp">Back office</div>
+            <nav class="ui-nav">
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/></svg>Billing</a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>Support</a>
+            </nav>
+            <div class="ui-foot">
+              <div class="ui-av-s" style="background:#D6E9DF;color:#1E7A45">RM</div>
+              <div class="ui-m"><b>Rosa Medina</b><span>dispatcher · tenant</span></div>
+            </div>
+          </aside>
+          <main class="ui-main">
+            <div class="ui-top">
+              <div class="ui-crumb">Blue Ridge Logistics <span class="ui-sep">/</span> Operations <span class="ui-sep">/</span> Dispatch board</div>
+              <div class="ui-head">
+                <h3>Dispatch board</h3>
+                <div class="ui-actions">
+                  <button class="ui-btn primary"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v18M3 12h18"/></svg>New load</button>
+                </div>
+              </div>
+            </div>
+            <div class="ui-mask-bar" style="background:var(--uc-green-wash);border-color:#CBE7D5">
+              <div class="ui-ic" style="border-color:#CBE7D5;color:var(--uc-green)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg></div>
+              <div class="ui-tx" style="color:#215938"><b style="color:#164026">Tenant plane · own-org PII in the clear.</b> Rosa reads her own drivers' names because a tenant key resolves its own org's PII with no operator grant — the same resolver, the opposite plane from the operator view above.</div>
+              <div class="ui-chip" style="color:#215938;border-color:#CBE7D5">plane: tenant · own-org</div>
+            </div>
+            <div class="ui-wrap">
+              <div class="ui-gtitle"><h4>Active loads</h4><span class="ui-n">5</span><span class="ui-lane">· your org — driver names in the clear</span></div>
+              <div class="ui-card">
+                <table>
+                  <thead><tr><th style="width:14%">Load #</th><th style="width:24%">Lane</th><th style="width:22%">Driver</th><th style="width:14%">Rate</th><th style="width:15%">Status</th><th style="width:11%">Margin</th></tr></thead>
+                  <tbody>
+                    <tr>
+                      <td><span class="ui-mono" style="color:#454652;font-weight:500">BR-4471</span></td>
+                      <td class="ui-carrier">Carthage, NY → Boston</td>
+                      <td><div class="ui-drv"><div class="ui-av ini" style="background:#DDE7F5;color:#3B4CCA">MV</div><span class="ui-nm" style="color:#3a3b45;letter-spacing:normal">Marcus Vale</span></div></td>
+                      <td class="ui-mono ui-num">$5,200</td>
+                      <td><span class="ui-pill info"><span class="ui-d"></span>En route</span></td>
+                      <td class="ui-mono ui-num" style="color:var(--uc-green)">$500</td>
+                    </tr>
+                    <tr>
+                      <td><span class="ui-mono" style="color:#454652;font-weight:500">BR-4472</span></td>
+                      <td class="ui-carrier">Boston → Providence</td>
+                      <td><div class="ui-drv"><div class="ui-av ini" style="background:#F5E1EC;color:#B4437E">DW</div><span class="ui-nm" style="color:#3a3b45;letter-spacing:normal">Dana Whitfield</span></div></td>
+                      <td class="ui-mono ui-num">$1,850</td>
+                      <td><span class="ui-pill ok"><span class="ui-d"></span>Delivered</span></td>
+                      <td class="ui-mono ui-num" style="color:var(--uc-green)">$210</td>
+                    </tr>
+                    <tr>
+                      <td><span class="ui-mono" style="color:#454652;font-weight:500">BR-4468</span></td>
+                      <td class="ui-carrier">Chicago → Columbus</td>
+                      <td><div class="ui-drv"><div class="ui-av ini" style="background:#E1EFF5;color:#2C7A9B">PA</div><span class="ui-nm" style="color:#3a3b45;letter-spacing:normal">Priya Anand</span></div></td>
+                      <td class="ui-mono ui-num">$3,905</td>
+                      <td><span class="ui-pill info"><span class="ui-d"></span>En route</span></td>
+                      <td class="ui-mono ui-num" style="color:var(--uc-green)">$430</td>
+                    </tr>
+                    <tr>
+                      <td><span class="ui-mono" style="color:#454652;font-weight:500">BR-4470</span></td>
+                      <td class="ui-carrier">Chicago → Detroit</td>
+                      <td><div class="ui-drv"><div class="ui-av ini" style="background:#EDE1F5;color:#6D45C4">CB</div><span class="ui-nm" style="color:#3a3b45;letter-spacing:normal">Cole Barrett</span></div></td>
+                      <td class="ui-mono ui-num">$2,740</td>
+                      <td><span class="ui-pill mut"><span class="ui-d"></span>Booked</span></td>
+                      <td class="ui-mono ui-num" style="color:var(--uc-green)">$305</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="ui-gtitle"><h4>Settlement · BR-4471</h4><span class="ui-lane">· kernel Invoice, reshaped</span></div>
+              <div class="ui-settle">
+                <div class="ui-sh"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3B4CCA" stroke-width="1.9"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg><b>Carrier settlement</b><span class="ui-tag">reshaped</span></div>
+                <div class="ui-srow"><span class="ui-lab">Linehaul</span><span class="ui-val">$5,200.00</span></div>
+                <div class="ui-srow neg"><span class="ui-lab">Advances <i>fuel</i></span><span class="ui-val">−$500.00</span></div>
+                <div class="ui-srow neg"><span class="ui-lab">Factoring <i>3.0%</i></span><span class="ui-val">−$156.00</span></div>
+                <div class="ui-srow neg"><span class="ui-lab">Claims</span><span class="ui-val">−$50.00</span></div>
+                <div class="ui-srow net"><span class="ui-lab">Net payable</span><span class="ui-val">$4,494.00</span></div>
+                <div class="ui-foot2">Kernel <span class="ui-mono" style="color:var(--uc-brand)">Invoice</span> reshaped to a two-sided settlement via a bounded-context calculation — proven to the cent + a 200-run property in settlement_math_test.exs.</div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+      <div class="ui-caption"><span><b>Tenant plane</b> — Blue Ridge reads its own drivers in the clear (plane: tenant)</span><span>proof: RED PATH 6 · PiiResolution.resolve/4 · anti-tautology flipped</span></div>
+    </div>
+
+    <div class="ui-shell" style="margin-top:26px">
+      <div class="ui-frame">
+        <div class="ui-app">
+          <aside class="ui-side">
+            <div class="ui-ws">
+              <div class="ui-logo">S</div>
+              <div class="ui-who"><b>Driftwood Ops</b><span>Operator control plane</span></div>
+            </div>
+            <div class="ui-grp">Operator plane</div>
+            <nav class="ui-nav">
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>Tenants<span class="ui-cnt">42</span></a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3 2"/></svg>Impersonation</a>
+              <a href="#" class="on"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9m6 10V5m6 14v-7"/></svg>Aggregate · MRR</a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>Audit log</a>
+            </nav>
+            <div class="ui-grp">Scopes</div>
+            <nav class="ui-nav">
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/></svg>Identity</a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M3 19c0-3 2.5-5 6-5s6 2 6 5"/></svg>CRM</a>
+              <a href="#"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/></svg>Billing</a>
+            </nav>
+            <div class="ui-foot">
+              <div class="ui-av-s">CK</div>
+              <div class="ui-m"><b>C. Kluis</b><span>operator · admin role</span></div>
+            </div>
+          </aside>
+          <main class="ui-main">
+            <div class="ui-top">
+              <div class="ui-crumb">Operator plane <span class="ui-sep">/</span> Aggregate <span class="ui-sep">/</span> Portfolio</div>
+              <div class="ui-head">
+                <h3>Portfolio</h3>
+                <div class="ui-actions">
+                  <button class="ui-btn"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg>Last 12 weeks</button>
+                </div>
+              </div>
+            </div>
+            <div class="ui-tb-bar">
+              <div class="ui-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 19V9m6 10V5m6 14v-7"/></svg></div>
+              <div class="ui-tx"><b>Token-blind aggregate plane.</b> This actor has <b>no pii_ column</b> in its domain by construction — it reads a vault-excluded projection. Cohorts below the k-anonymity floor (k ≥ 5) are suppressed; an enforcing query budget bounds cross-cohort differencing.</div>
+              <div class="ui-chip">no reveal path · k ≥ 5 · l-diversity</div>
+            </div>
+            <div class="ui-metrics">
+              <div class="ui-metric"><div class="ui-k"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Portfolio MRR</div><div class="ui-v"><span class="ui-num">$284,900</span><span class="ui-delta ui-up">+6.2%</span></div><div class="ui-spark"><i style="height:40%"></i><i style="height:52%"></i><i style="height:48%"></i><i style="height:63%"></i><i style="height:58%"></i><i style="height:71%"></i><i class="hi" style="height:80%"></i></div></div>
+              <div class="ui-metric"><div class="ui-k"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/></svg> Active tenants</div><div class="ui-v"><span class="ui-num">42</span><span class="ui-delta ui-up">+3</span></div><div class="ui-spark"><i style="height:55%"></i><i style="height:58%"></i><i style="height:60%"></i><i style="height:64%"></i><i style="height:70%"></i><i style="height:72%"></i><i class="hi" style="height:78%"></i></div></div>
+              <div class="ui-metric"><div class="ui-k"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13l5 5v5H3z"/></svg> Loads / wk</div><div class="ui-v"><span class="ui-num">1,418</span><span class="ui-delta ui-up">+11%</span></div><div class="ui-spark"><i style="height:30%"></i><i style="height:44%"></i><i style="height:52%"></i><i style="height:49%"></i><i style="height:66%"></i><i style="height:70%"></i><i class="hi" style="height:84%"></i></div></div>
+              <div class="ui-metric"><div class="ui-k"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6L9 17l-5-5"/></svg> Net settlements</div><div class="ui-v"><span class="ui-num">$1.92M</span><span class="ui-delta ui-down">−1.4%</span></div><div class="ui-spark"><i style="height:70%"></i><i style="height:64%"></i><i style="height:68%"></i><i style="height:58%"></i><i style="height:60%"></i><i style="height:55%"></i><i class="hi" style="height:52%"></i></div></div>
+            </div>
+            <div class="ui-wrap">
+              <div class="ui-gtitle"><h4>Tenants by MRR</h4><span class="ui-n">42</span><span class="ui-lane">· org-level aggregates only — no personal data</span></div>
+              <div class="ui-card">
+                <table>
+                  <thead><tr><th style="width:28%">Tenant org</th><th style="width:14%">Plan</th><th style="width:18%">MRR</th><th style="width:14%">Loads · wk</th><th style="width:12%">Drivers</th><th style="width:14%">Health</th></tr></thead>
+                  <tbody>
+                    <tr><td><div class="ui-drv"><div class="ui-av" style="background:#DFE6F6"></div><span class="ui-nm" style="color:#3a3b45;letter-spacing:normal">Blue Ridge Logistics</span></div></td><td class="ui-carrier">Scale</td><td class="ui-mono ui-num" style="font-size:13px">$18,400</td><td class="ui-num">126</td><td class="ui-num">31</td><td><div class="ui-bar"><div class="ui-track"><div class="ui-fill" style="width:88%"></div></div><span class="ui-pct">Healthy</span></div></td></tr>
+                    <tr><td><div class="ui-drv"><div class="ui-av" style="background:#E7E1F6"></div><span class="ui-nm" style="color:#3a3b45;letter-spacing:normal">Cascade Freight Co</span></div></td><td class="ui-carrier">Scale</td><td class="ui-mono ui-num" style="font-size:13px">$16,050</td><td class="ui-num">109</td><td class="ui-num">27</td><td><div class="ui-bar"><div class="ui-track"><div class="ui-fill" style="width:79%"></div></div><span class="ui-pct">Healthy</span></div></td></tr>
+                    <tr><td><div class="ui-drv"><div class="ui-av" style="background:#F6E6E1"></div><span class="ui-nm" style="color:#3a3b45;letter-spacing:normal">Sunbelt Carriers</span></div></td><td class="ui-carrier">Growth</td><td class="ui-mono ui-num" style="font-size:13px">$11,720</td><td class="ui-num">84</td><td class="ui-num">19</td><td><div class="ui-bar"><div class="ui-track"><div class="ui-fill" style="width:52%;background:var(--uc-amber)"></div></div><span class="ui-pct" style="color:var(--uc-amber)">At risk</span></div></td></tr>
+                    <tr><td><div class="ui-drv"><div class="ui-av" style="background:#E1F0E6"></div><span class="ui-nm" style="color:#3a3b45;letter-spacing:normal">Northwind Transit</span></div></td><td class="ui-carrier">Growth</td><td class="ui-mono ui-num" style="font-size:13px">$9,300</td><td class="ui-num">71</td><td class="ui-num">16</td><td><div class="ui-bar"><div class="ui-track"><div class="ui-fill" style="width:74%"></div></div><span class="ui-pct">Healthy</span></div></td></tr>
+                    <tr><td colspan="6" style="padding:0"><div class="ui-supp"><svg class="ui-lk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>3 tenants below the k-anonymity floor — suppressed from this cohort to prevent re-identification.</div></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+      <div class="ui-caption"><span><b>Operator plane · aggregate</b> — a token-blind actor, no pii_ columns, k-anon suppression</span><span>proof: C7 no_pii_columns · aggregate_actor_denied before any grant · aggregate_privacy floor</span></div>
+    </div>
+  </section>
+
+  <section id="flagship" style="background:linear-gradient(180deg,var(--accent-wash) 0%,transparent 40%)">
+    <div class="sec-label">The flagship — cross-plane chat with catalog-driven object unfurl</div>
+    <h2>One message, two truths. <em>The same card, clear to the tenant and •••• to the operator.</em></h2>
+    <div class="prose measure">
+      <p>This is the feature that is <strong>only possible on one substrate</strong>. Because the SaaS company and every tenant live on the same Postgres with shared, catalogued objects and Phoenix PubSub, realtime chat that spans the operator↔tenant boundary is near-free. And the crown jewel: pasting any Samen object id — <code>samen:&lt;resource&gt;:&lt;id&gt;</code> — into a message renders a live <strong>card that is masking-aware per viewer</strong>. The card is resolved through the viewer's <code>OrgScope</code> and <code>PiiResolution</code> for the viewer's plane, so the <em>same</em> message renders a clear card to the owning tenant and a <strong>••••</strong> card to the SaaS operator — <strong>with the non-PII fields still clear</strong> (title, CDL state, ELD provider, status) so support can actually help without seeing identity.</p>
+      <p>Realtime is safe by construction: the PubSub envelope is <strong>id-only</strong> — the body never transits PubSub. Each subscriber re-reads the message through <em>its own</em> scope, so a masked operator session cannot receive plaintext even by listening on the topic. The unfurl resolver is a <strong>composition of two unchanged kernel gates</strong> over the host's own resource — no code path reads a column directly, unwraps a <code>%Masked{}</code>, or calls <code>Vault.reveal</code>. And it is a genuine <strong>framework capability</strong>, not a chat trick: a catalog-driven default card renders <em>any</em> catalogued resource — a new vertical's new object unfurls the day it is catalogued, with zero card code. Identity is masked-by-default with a per-conversation opt-in and a tenant-wide disclosure override. Gated GO (ADR-012): the live operator DOM scanned <strong>0 leaks, 7× ••••</strong>.</p>
+    </div>
+
+    <div class="moneyshot">
+      <div class="ms-col">
+        <div class="ms-tag tenant"><span class="ms-d"></span><b>Blue Ridge (tenant)</b> — /chat/&lt;id&gt; · plane: tenant · own-org clear</div>
+        <div class="ui-frame">
+          <div class="ui-chat-head">
+            <div class="ui-oc-ic person" style="width:30px;height:30px;border-radius:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg></div>
+            <div class="ui-ct"><b>Rate confirmation for load BR-4471</b><span>cross-plane thread · owned by tenant</span></div>
+            <span class="ui-plane-chip tenant"><span class="ui-d"></span>tenant</span>
+          </div>
+          <div class="ui-thread">
+            <div class="ui-msg">
+              <div class="ui-mav" style="background:#DDE7F5;color:#28306B">CK</div>
+              <div class="ui-mbody">
+                <div class="ui-mmeta"><b>SaaS support</b><span class="ui-hnd">driftwood-desk</span><span>· 10:24</span></div>
+                <div class="ui-bubble">Confirming the rate on <span class="ui-inref">samen:crm.person:0f00…aa</span> and the assigned driver <span class="ui-inref">samen:freight.driver:0f00…cc</span> — both look good on our side.</div>
+              </div>
+            </div>
+            <div class="ui-msg me">
+              <div class="ui-mav" style="background:#F5E1EC;color:#B4437E">RM</div>
+              <div class="ui-mbody">
+                <div class="ui-mmeta"><b>Rosa Medina</b><span class="ui-hnd">blueridge-dispatch</span><span>· 10:26</span></div>
+                <div class="ui-bubble">Confirmed. Here's the contact + driver for BR-4471:</div>
+                <div class="ui-oc">
+                  <div class="ui-oc-head">
+                    <div class="ui-oc-ic person"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg></div>
+                    <div class="ui-oc-tt"><b>Dana Whitfield</b><span>samen:crm.person</span></div>
+                  </div>
+                  <div class="ui-oc-body">
+                    <div class="ui-oc-row"><span class="ui-k">Title</span><span class="ui-vv">Shipping dispatcher</span></div>
+                    <div class="ui-oc-row"><span class="ui-k">Email</span><span class="ui-vv mono clearpii">dana.whitfield@brl.example</span></div>
+                    <div class="ui-oc-row"><span class="ui-k">Lifecycle</span><span class="ui-vv"><span class="ui-pill info" style="font-size:11px"><span class="ui-d"></span>Customer</span></span></div>
+                  </div>
+                  <div class="ui-oc-foot clear"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>your org · resolved clear (tenant plane)</div>
+                </div>
+                <div class="ui-oc" style="margin-top:9px">
+                  <div class="ui-oc-head">
+                    <div class="ui-oc-ic driver"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 7h13l5 5v5H3z"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="17.5" cy="17.5" r="1.5"/></svg></div>
+                    <div class="ui-oc-tt"><b>Dana Compliant</b><span>samen:freight.driver</span></div>
+                  </div>
+                  <div class="ui-oc-body">
+                    <div class="ui-oc-row"><span class="ui-k">CDL #</span><span class="ui-vv mono clearpii">D4471-8820</span></div>
+                    <div class="ui-oc-row"><span class="ui-k">CDL state</span><span class="ui-vv">TX</span></div>
+                    <div class="ui-oc-row"><span class="ui-k">ELD</span><span class="ui-vv">samsara</span></div>
+                    <div class="ui-oc-row"><span class="ui-k">Status</span><span class="ui-vv"><span class="ui-pill ok" style="font-size:11px"><span class="ui-d"></span>Available</span></span></div>
+                  </div>
+                  <div class="ui-oc-foot clear"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>vertical override card · clear (tenant plane)</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="ui-presence"><span class="ui-online"></span>2 online · driftwood-desk is typing…</div>
+          <div class="ui-composer"><div class="ui-inp">Message… paste a samen: ref to unfurl an object</div><div class="ui-send"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg></div></div>
+        </div>
+      </div>
+
+      <div class="ms-col">
+        <div class="ms-tag operator"><span class="ms-d"></span><b>Driftwood Ops (operator)</b> — /operator/desk-chat/&lt;id&gt; · plane: operator · masked</div>
+        <div class="ui-frame">
+          <div class="ui-chat-head">
+            <div class="ui-oc-ic" style="width:30px;height:30px;border-radius:8px;background:linear-gradient(150deg,#3B4CCA,#5B6BE0)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+            <div class="ui-ct"><b>Rate confirmation for load BR-4471</b><span>same thread · reached via impersonation</span></div>
+            <span class="ui-plane-chip operator"><span class="ui-d"></span>operator · masked</span>
+          </div>
+          <div class="ui-thread">
+            <div class="ui-msg me">
+              <div class="ui-mav" style="background:#DDE7F5;color:#28306B">CK</div>
+              <div class="ui-mbody">
+                <div class="ui-mmeta"><b>You (SaaS support)</b><span class="ui-hnd">driftwood-desk</span><span>· 10:24</span></div>
+                <div class="ui-bubble">Confirming the rate on <span class="ui-inref">samen:crm.person:0f00…aa</span> and the assigned driver <span class="ui-inref">samen:freight.driver:0f00…cc</span> — both look good on our side.</div>
+              </div>
+            </div>
+            <div class="ui-msg">
+              <div class="ui-mav mask">RM</div>
+              <div class="ui-mbody">
+                <div class="ui-mmeta"><b>••••</b><span class="ui-hnd">blueridge-dispatch</span><span class="ui-idchip">identity ••••</span><span>· 10:26</span></div>
+                <div class="ui-bubble masked">•••• •••••••• •••• •• ••• •••••• ••• •••••• ••• •••••••</div>
+                <div class="ui-oc">
+                  <div class="ui-oc-head">
+                    <div class="ui-oc-ic person"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg></div>
+                    <div class="ui-oc-tt"><b class="masked">••••••••••••</b><span>samen:crm.person</span></div>
+                  </div>
+                  <div class="ui-oc-body">
+                    <div class="ui-oc-row"><span class="ui-k">Title</span><span class="ui-vv">Shipping dispatcher</span></div>
+                    <div class="ui-oc-row"><span class="ui-k">Email</span><span class="ui-vv masked">••••••••••••••</span></div>
+                    <div class="ui-oc-row"><span class="ui-k">Lifecycle</span><span class="ui-vv"><span class="ui-pill info" style="font-size:11px"><span class="ui-d"></span>Customer</span></span></div>
+                  </div>
+                  <div class="ui-oc-foot masked"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>tenant's customer · identity •••• · non-PII clear</div>
+                </div>
+                <div class="ui-oc" style="margin-top:9px">
+                  <div class="ui-oc-head">
+                    <div class="ui-oc-ic driver"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 7h13l5 5v5H3z"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="17.5" cy="17.5" r="1.5"/></svg></div>
+                    <div class="ui-oc-tt"><b class="masked">••••••••••••</b><span>samen:freight.driver</span></div>
+                  </div>
+                  <div class="ui-oc-body">
+                    <div class="ui-oc-row"><span class="ui-k">CDL #</span><span class="ui-vv masked">•••••••••</span></div>
+                    <div class="ui-oc-row"><span class="ui-k">CDL state</span><span class="ui-vv">TX</span></div>
+                    <div class="ui-oc-row"><span class="ui-k">ELD</span><span class="ui-vv">samsara</span></div>
+                    <div class="ui-oc-row"><span class="ui-k">Status</span><span class="ui-vv"><span class="ui-pill ok" style="font-size:11px"><span class="ui-d"></span>Available</span></span></div>
+                  </div>
+                  <div class="ui-oc-foot masked"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>same card · name/CDL •••• · state/ELD/status help support</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="ui-presence"><span class="ui-online"></span>2 online · blueridge-dispatch shown as handle only</div>
+          <div class="ui-composer"><div class="ui-inp">Message… (you never see the tenant's customer PII)</div><div class="ui-send"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="ui-caption" style="position:relative;left:50%;transform:translateX(-50%);width:min(1180px,calc(100vw - 40px))"><span><b>The money shot</b> — one thread, one message, one set of refs · rendered per viewer's plane, live in Driftwood on port 4041</span><span>proof: chat_unfurl_masking_test.exs · id-only PubSub envelope · operator DOM: 0 leaks · 7× ••••</span></div>
+
+    <div class="prose measure" style="margin-top:44px">
+      <p><strong>Why this levels up the framework, not just chat.</strong> <code>Samen.Web.ObjectRef</code> is a standalone module usable anywhere — a CRM detail page can unfurl a related object, an audit log can unfurl its subject, a notification can unfurl its target. Chat is the first <em>consumer</em>, not the owner. The card registry plus catalog-driven default is a reusable "render any catalogued object, masked-per-viewer" primitive — and cross-plane visibility itself is just the ADR-010 impersonation bridge reused: the thread is <strong>owned by the tenant org</strong>, and the SaaS participant reaches it carrying the target org_id, so <code>OrgScope</code> is satisfied for both parties with no new policy and no upward escalation. An operator whose impersonation session targets a different org sees the thread as <strong>zero rows</strong> — cross-plane access is a grant that expires, not a backdoor.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">Unique feature № 3 — the framework</div>
+    <h2>You inherit the UI too, <em>not just the schema.</em></h2>
+    <div class="prose measure">
+      <p>The reuse thesis had a hole: the inherited-80% <em>data</em> was framework-level, but the <em>product surface that renders it</em> was forked into one vertical. That has been closed. A new library, <code>samen_web</code>, now holds the <strong>entire product-UI layer</strong> — a 13-component kit plus the CRM, Billing, Support, Operator, Marketing, and Chat LiveViews — behind a <strong>Mount seam</strong> that derives each host's resources from the catalog's <code>Module.concat(namespace, Resource)</code> convention. A host supplies three facts (namespace · repo · plane); the framework derives the rest. No LiveView names a host module; no host copies a page.</p>
+      <p>The payoff is visual. <strong>PawChart</strong>, the vet vertical, had <em>no web layer at all</em>. It inherited the entire product UI — 3,284 lines of LiveViews, reads, and the component kit — through <strong>~3 router lines</strong>. The <em>same</em> <code>Samen.Web.CRM.ContactsLive</code> module renders freight contacts for Driftwood and clinic contacts for PawChart, byte-identical, each over its own data. And the two-plane masking travels with it by construction: the framework LiveViews resolve every PII field through the single <code>PiiResolution</code> chokepoint, so a component fix or a new inherited page ships to every vertical on a dep bump. Throughout, <strong>samen_core stayed web-dep-free — now 1,179 tests green</strong>; the web dependency lives only in <code>samen_web</code> (598 green).</p>
+    </div>
+    <div class="frameflow">
+      <div class="frameflow-lib">
+        <div class="fl-name">samen_web — the framework product-UI library</div>
+        <div class="fl-desc">One canonical definition of the inherited product surface, mounted thin by every host. The Mount struct carries the host's namespace/repo/plane; the router macro turns them into live pages. The masking invariant is <b>tested in the framework</b>, not in one vertical.</div>
+        <div class="fl-mods">
+          <span class="fl-mod">Samen.UI · 13 components</span>
+          <span class="fl-mod">Web.CRM.*</span>
+          <span class="fl-mod">Web.Billing.*</span>
+          <span class="fl-mod">Web.Support.*</span>
+          <span class="fl-mod">Web.Marketing.*</span>
+          <span class="fl-mod">Web.Operator.*</span>
+          <span class="fl-mod">Web.Chat.* + ObjectRef</span>
+          <span class="fl-mod">Web.{Mount,Plane,Router}</span>
+        </div>
+      </div>
+      <div class="frameflow-hosts">
+        <div class="frameflow-host">
+          <div class="fh-top">
+            <div class="fh-glyph" style="background:linear-gradient(150deg,#3B4CCA,#5B6BE0)">D</div>
+            <div class="fh-name">Driftwood<span>freight · mounts thin</span></div>
+          </div>
+          <div class="fh-code"><span class="c"># router.ex</span><br>samen_module_routes <span class="k">:crm</span>, Driftwood.Crm<br>samen_module_routes <span class="k">:billing</span>, Driftwood.Billing<br>samen_module_routes <span class="k">:support</span>, Driftwood.Support</div>
+          <div class="fh-got">Renders <b>freight</b> contacts/invoices/tickets over <code>Driftwood.*</code> resources. The freight dispatch board is the vertical 20%, still local.</div>
+        </div>
+        <div class="frameflow-host">
+          <div class="fh-top">
+            <div class="fh-glyph" style="background:linear-gradient(150deg,#0E7C5A,#17A06E)">V</div>
+            <div class="fh-name">PawChart<span>vet clinic · had no web layer</span></div>
+          </div>
+          <div class="fh-code"><span class="c"># router.ex — the whole UI, inherited</span><br>samen_module_routes <span class="k">:crm</span>, PawChart.Crm<br>samen_module_routes <span class="k">:billing</span>, PawChart.Billing<br>samen_module_routes <span class="k">:support</span>, PawChart.Support</div>
+          <div class="fh-got">Renders <b>clinic</b> contacts/invoices/tickets over <code>PawChart.*</code> — the <b>same modules</b>, zero UI code. Branded "Happy Paws Clinic", live at HTTP 200.</div>
+        </div>
+      </div>
+      <div class="frameflow-note"><b>The same module renders both verticals.</b> PawChart inherited 3,284 lines of product UI via 3 router lines · samen_core web-dep-free, 1,179 green · masking proven in the framework, not the host · gated GO (ADR-009).</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">Unique feature № 3b — the reuse thesis, measured</div>
+    <h2>Build the 20%. <em>Inherit the 80%.</em> On real numbers, honestly.</h2>
+    <div class="feature-grid">
+      <div class="prose">
+        <p>The bet is that the boring infrastructure is inherited near-total and only the domain stays authored — and the second vertical is where it stops being a claim. <strong>PawChart</strong>, a vet-clinic SaaS, was built as the reuse probe. It authored <strong>191 lines</strong> of real domain logic and sits on <strong>33,640 lines</strong> of substrate. Every one of the 15 verifiers returned green on its <em>first</em> invocation — no verifier fix, ever. Against the four families a clinic touches, it <strong>inherited ~96%</strong> of the code that makes them work.</p>
+        <p>The starkest leverage is at the point declarations: <code>pii_attribute :microchip</code> — <strong>one line</strong> — buys the ~1,900-line vault-mask-shred-KMS chain; <code>use Samen.Scopes.Billing</code> — <strong>17 lines</strong> — buys eight fully-policed, vaulted, catalogued billing resources; a <code>base:</code> option buys the folded core-person shape. <strong>Four of the six idioms applied with literally zero vertical code.</strong></p>
+        <p>The honest calibration, which the doc names and PawChart confirms: <strong>you inherit infrastructure, not a domain model.</strong> The 104 lines of clinic logic are real work — what a Pet is, that a microchip is a vaulted secret, that the owner is the messaged party. And PawChart was the <em>easy additive case</em>: it wrote zero <code>Samen.Context</code>, where Driftwood had to author an anti-corruption layer of renames plus a ~90-line settlement reshape. The 80% is inherited; the 20% is yours; the reshape tax is real when the vertical's language is genuinely new.</p>
+      </div>
+      <div>
+        <div class="reuse">
+          <div class="reuse-row"><div class="rn">PII vault<span>vault · mask · shred · KMS</span></div><div class="track"><div class="barf" style="width:99%"></div></div><div class="rv">1 line</div></div>
+          <div class="reuse-row"><div class="rn">CorePerson / base<span>folded person shape</span></div><div class="track"><div class="barf" style="width:100%"></div></div><div class="rv">0 lines</div></div>
+          <div class="reuse-row"><div class="rn">Billing scope<span>8 resources, mounted</span></div><div class="track"><div class="barf" style="width:98.6%"></div></div><div class="rv">17 lines</div></div>
+          <div class="reuse-row"><div class="rn">Tier-2 objects<span>VaccineLot, self-defined</span></div><div class="track"><div class="barf" style="width:100%"></div></div><div class="rv">0 lines</div></div>
+          <div class="reuse-row"><div class="rn">Operator plane<span>token-blind projection</span></div><div class="track"><div class="barf" style="width:96%"></div></div><div class="rv">42 lines</div></div>
+          <div class="reuse-row"><div class="rn">Domain (the 20%)<span>Patient + Pet — authored</span></div><div class="track"><div class="barf dim" style="width:20%"></div></div><div class="rv">104 lines</div></div>
+          <div class="reuse-note">~96% inherited against the 4 families a clinic touches · 15/15 verifiers green on first run · the domain 20% stays authored real work — that is the calibrated deal, not the oversell</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">Unique feature № 4 — the SaaS control plane</div>
+    <h2>The SaaS company is <em>itself an org</em> — and its accounts are the tenant orgs.</h2>
+    <div class="prose measure">
+      <p>Phase 2 turned the thesis on itself. The SaaS company runs the <em>same universal scopes</em> as any tenant — except its rows describe <strong>its book of business as a vendor</strong>. An operator dashboard lands over all tenants: <strong>Accounts</strong> (each account IS a tenant org, with its admins, plan, health, and MRR), <strong>Platform billing</strong> (each tenant's subscription <em>to the SaaS</em>, dunning, total platform MRR), a <strong>SaaS support desk</strong> (tickets tenants filed <em>with the SaaS</em>), and the token-blind aggregate portfolio. In the shipped 5-tenant demo you <strong>land on the operator dashboard</strong> and drill into any tenant — no typed UUIDs, no dead ends.</p>
+      <p>The identity line, stated precisely: a SaaS rep sees a <strong>tenant-admin's identity in the clear</strong> — that admin is the SaaS's <em>own</em> customer, its signup contact — while the tenant's <strong>end-customers stay masked</strong>, reachable only through impersonation plus a second-party reveal. And this is not new machinery: it is the pure <strong>composition of two kernel gates already tested</strong> — <code>OrgScope</code> (which rows) × <code>PiiResolution</code> (clear vs masked). Population (1) is clear because it is the operator org reading its own data on the <em>tenant</em> plane; population (2) is masked because reaching a downstream customer flips to the <em>operator</em> plane. Two populations, two ownership planes, separated by both a mount boundary and a plane boundary — belt and suspenders, both by construction.</p>
+    </div>
+    <div class="compose" style="grid-template-columns:1fr 44px 1fr">
+      <div class="comp-col">
+        <div class="cl">population 1 · the SaaS's own book</div>
+        <div class="ct">tenant-admin<span>operator org · tenant plane</span></div>
+        <div class="field">operator_org_id <span class="tagf">OrgScope → own rows</span></div>
+        <div class="field">plane: :tenant <span class="tagf">own-org, no grant</span></div>
+        <div class="field pii-f">admin name/email <span class="tagf">CLEAR ✓</span></div>
+        <div class="field add">account = tenant Org <span class="tagf">Identity.Org</span></div>
+        <div class="field add">subscription to SaaS <span class="tagf">Billing</span></div>
+        <div class="field add">desk ticket (tenant→SaaS) <span class="tagf">Support</span></div>
+      </div>
+      <div class="comp-col seam comp-seam"><span>× two kernel gates ×</span></div>
+      <div class="comp-col">
+        <div class="cl">population 2 · the tenant's downstream</div>
+        <div class="ct">end-customer<span>impersonation · operator plane</span></div>
+        <div class="field">tenant_org_id <span class="tagf">OrgScope → target rows</span></div>
+        <div class="field">plane: :operator <span class="tagf">impersonated</span></div>
+        <div class="field pii-f">contact name/email <span class="tagf">•••• MASKED</span></div>
+        <div class="field add">reachable via reveal <span class="tagf">2nd-party grant</span></div>
+        <div class="field add">vertical namespace <span class="tagf">separate mount</span></div>
+        <div class="field add">back-ref bridges once <span class="tagf">custom.tenant_org_id</span></div>
+      </div>
+      <div class="free-note" style="grid-column:1/-1"><b>No new masking code.</b> Live in Driftwood (ADR-010, gated GO): the operator's own surfaces show tenant-admins <code style="font-family:var(--mono);font-size:12px">Marlene Okafor</code> in the clear with <b>zero ••••</b>; drilling into that tenant's driver roster renders every CDL/name <code style="font-family:var(--mono);font-size:12px">••••</code> — same session, opposite plane. Pinned by <code style="font-family:var(--mono);font-size:12px">operator_identity_line_test.exs</code> incl. a cross-mount refusal (operator actor reading the vertical namespace returns zero rows).</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">Unique feature № 5 — the enriched CRM</div>
+    <h2>Rolodex → real CRM. <em>All inherited, framework-level.</em></h2>
+    <div class="prose measure">
+      <p>The CRM was three list pages — companies, contacts, pipeline. It is now a real CRM, and every enrichment landed in <code>samen_web</code> so both verticals inherit it: <strong>contact and company detail pages</strong> with tabs, an <strong>activity timeline</strong> over the existing <code>Activity</code> resource with a working log-activity composer, a lifecycle pill and social handles, and <strong>outreach</strong> — the Marketing scope mounted at last (campaigns · segments · leads) with <strong>consent and suppression enforced on every send</strong>. The realization that made it cheap: almost every resource already existed in the kernel, already PII-safe; the work was <em>surfacing</em>, not authoring. The one new PII surface — the contact detail header — ships with a masking test: tenant clear, operator <strong>••••</strong>, the log-activity composer hidden on the operator plane, no vault token in the DOM. The consent/suppression red path is fail-closed at the framework layer, wrapped <em>around</em> a known kernel <code>send_checked</code> residue — corrected without touching the kernel. Proven live on <strong>both</strong> Driftwood and the clinic (ADR-011, re-gated GO after a cold-start fix).</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">Unique feature № 6 — from demo-deep to shippable</div>
+    <h2>The demo became a SaaS you can run. <em>Four gated workstreams, all GO.</em></h2>
+    <div class="prose measure">
+      <p>A four-lens gap audit (2026-07-09) reached one verdict: the governance kernel was as deep as the gates claimed, but the product surfaces on top were <em>demo-deep</em> — read-only LiveViews, unwired buttons, stub adapters. Four <strong>framework-first</strong> workstreams closed it, each landing in <code>samen_web</code> or the kernel so every vertical inherits it on a dep bump, each adversarially <strong>gated GO</strong> against a mapped set of acceptance criteria, none touching the two-plane masking that was already proven.</p>
+    </div>
+    <div class="stack">
+      <div class="brick"><span class="badge">GO · 36 AC</span><div class="lib">WS-A — Product Reality</div><p>Real CRUD on every mounted LiveView (kit-level form/table primitives), pagination/sort/filter/bulk as kit defaults + bounded JSON:API reads, an operator <code style="font-family:var(--mono);font-size:12.5px">Pii.WriteGuard</code>, a <strong>fail-honest</strong> email adapter (never fake-<code style="font-family:var(--mono);font-size:12.5px">:delivered</code>), and a notifications inbox fed by a real delivery engine. The kernel <code style="font-family:var(--mono);font-size:12.5px">msp_suppression</code> hardcode and the CDC "non-PII" heuristic were fixed here too (default-deny).</p></div>
+      <div class="brick"><span class="badge">GO · 32 AC</span><div class="lib">WS-B — Operator Cockpit v1</div><p>An MRR movement ledger (waterfall · churn · cohorts), an <strong>explainable</strong> per-tenant health score with account drill-down, a feature-flag evaluation engine with deterministic targeting/rollout, and token-blind product-event analytics over the <em>vault-excluded</em> CDC projection — privacy-correct by construction, mounted at <strong>0 operator-surface LOC</strong> in both verticals.</p></div>
+      <div class="brick"><span class="badge">GO · 22 AC</span><div class="lib">WS-D — Builder Joy</div><p><code style="font-family:var(--mono);font-size:12.5px">mix samen.gen.app</code> now emits a <strong>running</strong> product — web + JSON:API + Factory-backed vault-aware seeds + observability, not a headless data layer. A flagship generative proof (generate → <code style="font-family:var(--mono);font-size:12.5px">ci.sh</code> green → boot → 200) is permanent in root CI, docs are command-verified, and deploy templates fail-honest on missing secrets.</p></div>
+      <div class="brick"><span class="badge">GO · 28 AC</span><div class="lib">WS-E — Table Stakes UX</div><p>A files engine with fail-closed <strong>quarantine</strong> + plane-gated byte-serve, CSV import/export with <strong>per-plane masked export</strong>, Search + global ⌘K, self-serve Settings (profile · sessions · digest-only API keys), and a responsive kit. The last of the six flagged mask-by-omission PII surfaces, all closed with per-plane red-paths.</p></div>
+    </div>
+    <div class="resolution" style="margin-top:36px">
+      <div class="mark">✓</div>
+      <div class="claim">The sabotage harness keeps every guarantee refutable: <span>15 committed sabotage patches (<code style="font-family:var(--mono);font-size:14px;background:#fff;color:var(--accent-deep)">scripts/sabotages/</code>) that CI applies one at a time — each proves its <em>named</em> guarantee's test actually FAILS when the guarantee is broken, then restores the tree byte-exact (SHA-256). A green test is only trusted once its red twin is proven un-fakeable. Run <code style="font-family:var(--mono);font-size:14px;background:#fff;color:var(--accent-deep)">SAMEN_SABOTAGE=1 ./ci.sh</code>.</span></div>
+    </div>
+    <p class="prose measure" style="margin-top:24px;font-family:var(--mono);font-size:12.5px;color:var(--faint)">Every masking/vault surface ships a green (plane resolves clear) · red (operator-without-grant renders ••••, never a <code style="font-family:var(--mono);font-size:12px">vt_</code> token) · sabotage (the mask is proven refutable) triple. Suites, all <code style="font-family:var(--mono);font-size:12px">--warnings-as-errors</code>: samen_core 1,179 · samen_web 598 · demo 454 · driftwood 110 · pawchart 49 — the final CI line is <code style="font-family:var(--mono);font-size:12px">ROOT CI: ALL PASSED</code>.</p>
+  </section>
+
+  <section>
+    <div class="sec-label">How it runs — and how the build stays honest</div>
+    <h2>One release, one Postgres — and a gate that <em>fails closed</em></h2>
+    <p class="prose measure" style="color:var(--muted)">One BEAM release runs web, workers, and cron; one Postgres is truth, queue, cron, history, audit, and the vault. A request mounts an <code>Ash.Scope</code> carrying actor + org_id; every read emits <code>WHERE com_org_id = $1</code> and runs its policy check — cross-org isolation is proven adversarially (org-A sees <em>zero</em> org-B rows). But the load-bearing discipline is the <strong>verifier gate</strong>: seventeen AST/Spark-checked verifiers, each shipped with a red-path test that must fail on violation, run in the same CI that runs the suites, the sabotage harness, and both game-days. Nothing merges that a verifier rejects.</p>
+    <div class="modes">
+      <div class="mode">
+        <span class="flag">admit</span>
+        <h3>The build fails closed</h3>
+        <p>catalog_parity, prefixes, pii_reads, pii_classify, no_plaintext_pii, no_pii_columns, api_contract — AST-checked, not grepped. Each exits non-zero on a violation. A hallucinated column, net-new plaintext PII, a leaked vault value: each <strong>fails the build</strong>, proven by the agent-authoring eval.</p>
+        <div class="fine">17 verifiers · red-path each · CI exit 0 = obeyed</div>
+      </div>
+      <div class="mode">
+        <span class="flag">enqueue</span>
+        <h3>Postgres is the engine</h3>
+        <p>Oban gives durable jobs, cron, and same-transaction enqueue over SKIP LOCKED with per-queue concurrency limits. The auto-revoke for a reveal grant is scheduled in the <em>same</em> transaction that writes it. The append-only <code>aud_event</code> tier is time-partitioned with BRIN on time.</p>
+        <div class="fine">queue · cron · audit · rollups — one DB</div>
+      </div>
+      <div class="mode">
+        <span class="flag">migrate</span>
+        <h3>Expand / contract, drilled</h3>
+        <p>Migrations expand-then-contract, never edit-in-place; every expand ships a tested <code>down/0</code>; <code>lock_timeout</code>/<code>statement_timeout</code> bound the blast. The bad-migration incident — the highest-consequence one — is a PITR game-day run on a production-sized dataset, both recovery arms.</p>
+        <div class="fine">reversible · timeout-bounded · PITR-drilled</div>
+      </div>
+    </div>
+    <div class="mirror">
+      <div class="mirror-cols">
+        <div class="mirror-side">
+          <div class="side-label">One BEAM release — web · workers · cron</div>
+          <div class="mirror-box same"><div class="bt">SAMEN RELEASE</div><div class="bs">Phoenix/LiveView · Ash resources · Oban workers · the reveal-grant + vault + mask stack · the 17-verifier gate + sabotage harness baked into CI</div></div>
+          <div class="mirror-box"><div class="bt">two planes, one core</div><div class="bs">the operator plane reads the SAME resources the tenant does — masking is the field's value, not a separate admin app</div></div>
+        </div>
+        <div class="mirror-seam"><span>the seam — the vault key</span></div>
+        <div class="mirror-side">
+          <div class="side-label">One Postgres — the whole stateful surface</div>
+          <div class="mirror-box same"><div class="bt">DOMAIN + INFRA</div><div class="bs">org-scoped rows (com_/drv_/per_) · oban_jobs · aud_event + aud_chain · rollups · the catalog (tam_table/fld_field)</div></div>
+          <div class="mirror-box"><div class="bt">pii_vault</div><div class="bs">ciphertext + tokens · the per-subject key lives OUTSIDE, in an external KMS — a restore brings back ciphertext, never the key</div></div>
+        </div>
+      </div>
+      <div class="mirror-note"><span>plaintext PII crosses the seam only through the one decrypt chokepoint — under a live grant</span><span>one substrate is one blast radius — engineered down, drilled, recoverable</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">Simplicity, measured in deletions</div>
+    <h2>Infrastructure you will never run</h2>
+    <p class="prose measure" style="color:var(--muted)">Every box below is a thing the from-scratch stack deploys, versions, secures, monitors, and pays for. In Samen each is a table, a query, a verifier, or the base macro's normal behavior — inside the one release and the one Postgres you already have. The last rows are the unusual ones: the compliance work most stacks bolt on at the end is the storage format here.</p>
+    <div class="deleted">
+      <div class="gone"><div class="name">Redis · broker · cron</div><p><b>→ postgres</b> — queues, pubsub, and schedules are Oban rows and NOTIFY, transactional with your data</p></div>
+      <div class="gone"><div class="name">Six SaaS vendors</div><p><b>→ the scopes</b> — identity, CRM, billing, marketing, CMS, support are inherited Ash domains, one object model</p></div>
+      <div class="gone"><div class="name">Internal admin tooling</div><p><b>→ the operator plane</b> — built from the same objects; accounts ARE tenant orgs, masked impersonation, not a second app six months later</p></div>
+      <div class="gone"><div class="name">A forked product UI per app</div><p><b>→ samen_web</b> — the component kit + every LiveView is inherited; PawChart got the whole UI in 3 router lines</p></div>
+      <div class="gone"><div class="name">A per-app object-preview service</div><p><b>→ ObjectRef</b> — the catalog renders any resource as a masking-aware card; new objects unfurl with zero card code</p></div>
+      <div class="gone"><div class="name">A PII-masking layer</div><p><b>→ the field type</b> — %Masked{} is the normal value; no CSV, API, or log path leaks by omission</p></div>
+      <div class="gone"><div class="name">An erasure runbook</div><p><b>→ crypto-shred</b> — destroy one key; the oracle proves the PII left every tier at once</p></div>
+      <div class="gone"><div class="name">A code-search / IDE indexer</div><p><b>→ the catalog</b> — schema.dict.json is ground an agent can't hallucinate off of</p></div>
+      <div class="gone"><div class="name">A WORM audit service</div><p><b>→ aud_chain</b> — a DB append-only trigger refuses UPDATE/DELETE; the hash chain detects tamper</p></div>
+      <div class="gone"><div class="name">A data-dictionary doc</div><p><b>→ in the migration</b> — tam_table/fld_field written in the same transaction as the DDL</p></div>
+      <div class="gone"><div class="name">An analytics warehouse</div><p><b>→ rollups (+ opt-in CDC)</b> — dashboards read the summary; ClickHouse is a power-up, default off</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">The host stack</div>
+    <h2>Boring on purpose — <em>Elixir where it's proven, Samen where it's new</em></h2>
+    <div class="stack">
+      <div class="brick"><span class="badge">exists</span><div class="lib">Ash 3.x + Spark</div><p>The resource-derivation engine and its compile-time DSL. The abbrev storage transformer, catalog extension, and PII vault are Spark transformers — the compiler is the first verifier. Pinned (Ash 3.29.3, spark 2.7.2).</p></div>
+      <div class="brick"><span class="badge">exists</span><div class="lib">Postgres + Oban</div><p>LISTEN/NOTIFY, SKIP LOCKED queues, partitioned history, transactional DDL. Queue, cron, audit, rollups, and the vault are one database. The distribution layer is a table.</p></div>
+      <div class="brick"><span class="badge">exists</span><div class="lib">Phoenix · LiveView · AshOban</div><p>The web plane and durable jobs. Both planes are LiveViews over the same Ash resources; the reveal auto-revoke is an AshOban job enqueued in the grant's transaction.</p></div>
+      <div class="brick"><span class="badge dim">prior art</span><div class="lib">Twenty · Ash · the Rule of Three</div><p>The composite-PII spec (re-implemented, not depended on), resource derivation, and the extract-the-third-product discipline. Credits and a spec, not runtime dependencies.</p></div>
+      <div class="brick"><span class="badge">samen</span><div class="lib">The base macro + fragments</div><p><code style="font-family:var(--mono);font-size:12.5px">use Samen.Resource</code>: injects the abbrev transformer, catalog, vault, org-scope, and audit; <code style="font-family:var(--mono);font-size:12.5px">base:</code> folds CorePerson into one table. One line per new column, every guarantee free.</p></div>
+      <div class="brick"><span class="badge">samen</span><div class="lib">The 17-verifier gate + sabotage harness</div><p>catalog_parity, prefixes, pii_reads, pii_classify, no_plaintext_pii, no_pii_columns, api_contract, aggregate_privacy — each fail-closed, each with a red path. 15 committed sabotage patches prove each named guarantee's test actually fails when broken. The type system the dynamic idioms must earn.</p></div>
+      <div class="brick"><span class="badge">samen</span><div class="lib">The vault + destruction oracle</div><p>Per-subject external-KMS keys, authenticated envelope crypto, %Masked{} by default, expiring second-party reveal grants, crypto-shred, and the oracle that attests erasure across every tier.</p></div>
+      <div class="brick"><span class="badge">samen</span><div class="lib">The two-plane control plane + generators</div><p>Masked impersonation, the token-blind aggregate actor, hash-chained tenant-readable audit + WORM anchor + break-glass, and <code style="font-family:var(--mono);font-size:12.5px">mix samen.gen.app</code> — one command to a gate-green vertical.</p></div>
+      <div class="brick"><span class="badge">samen</span><div class="lib">samen_web — the product-UI framework</div><p>The 13-component kit + the CRM/Billing/Support/Operator/Marketing/Chat LiveViews behind a Mount seam. <code style="font-family:var(--mono);font-size:12.5px">samen_module_routes</code> mounts a whole scope in ~3 lines; masking is tested in the framework. samen_core stays web-dep-free.</p></div>
+      <div class="brick"><span class="badge">samen</span><div class="lib">Cross-plane chat + ObjectRef unfurl</div><p>Realtime chat over an id-only PubSub envelope; <code style="font-family:var(--mono);font-size:12.5px">Samen.Web.ObjectRef.resolve/3</code> turns any <code style="font-family:var(--mono);font-size:12.5px">samen:</code> ref into a card masked per the viewer's plane — a framework primitive, not a chat trick.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-label">What we won't pretend</div>
+    <h2>The honest edges</h2>
+    <p class="prose measure" style="color:var(--muted)">Every claim above maps to a passing test, a game-day artifact, or a substrate-inherited proof in <code>docs/claim-evidence.md</code>. These are the places where the build corrected the vision, where a mechanism is proven in a local simulation and the real-cloud wiring is an operator TODO, or where a posture is deliberately named as under-construction. None is a breach; all are labeled.</p>
+    <div class="honest" style="margin-top:8px">
+      <div class="h-label">Named, not waved away</div>
+      <ul>
+        <li><strong>You inherit infrastructure, not a domain model — and the third product is where that bites.</strong> The vision oversold "inherit the 80%" if you read it as inheriting nouns. Measured on PawChart, the <em>infrastructure</em> 80% is near-totally inherited (0–1 lines per idiom), but every non-trivial vertical re-identifies the core nouns and reshapes billing — bounded-context translations, not additive extensions. The Rule-of-Three payoff is inherited plumbing plus a faster context to build, not a pre-shaped domain. And the reuse is measured on two self-built hosts, not three independently-motivated ones — the honest counting rule.</li>
+        <li><strong>The external KMS is real in mechanism, simulated in cloud.</strong> The load-bearing exclusion — the per-subject key lives outside the WAL/PITR surface — is proven identically by a <code>FileBacked</code> KMS adapter and the PITR drill (a <code>pg_dump</code> restore resurrects ciphertext; <code>reveal</code> returns <code>{:error, :unavailable}</code> against an empty key dir; the dump grepped clean of key material). Real AWS-KMS / Neon-PITR / S3-Object-Lock wiring and a physical read replica are operator TODOs — identical exclusion in the sim, but the real drill numbers aren't earned yet.</li>
+        <li><strong>The drilled RTO/RPO are local-sim floors.</strong> The bad-migration PITR game-day ran on a production-sized dataset with both recovery arms and hit its wall-clock targets — <em>in the local simulation</em>. The ≤30-min forward-fix / ≤2-h full-PITR numbers are targets pending the real Neon drill; <code>detection_ms</code> is a harness proxy for monitoring-driven detection latency, stated as such.</li>
+        <li><strong>Token-blind is not inference-blind.</strong> k-anonymity + l-diversity floors are enforced today, fail-closed. The cross-query differencing defense is now an <em>enforcing</em> per-cohort read budget (two colluding actors share one budget — "per-actor is the wrong unit," made real). But it is a deterministic read-count budget, <strong>not a formal ε-budget</strong>: a distribution-tested Laplace DP mechanism ships opt-in, yet formal DP composition and t-closeness stay posture-under-construction. There is deliberately no flag that claims a guarantee the math doesn't have.</li>
+        <li><strong>"Can't log it ⇒ can't see it" is a real availability cost.</strong> A routine reveal fails closed if the audit sink or KMS is unreachable — a KMS partition denies decrypts, never resurrects a key or exposes plaintext. Break-glass is a locally-durable, deferred-anchor hash chain on the operator node, reconciled into the WORM chain on reconnect; the mechanism is proven in the substrate, but a Fly persistent-volume posture and a freight-specific break-glass drill are carry items.</li>
+        <li><strong>One substrate is one blast radius.</strong> Truth, queue, cron, audit, and vault on one Postgres is a correlated failure six vendors couldn't have — the CFO objection, owned not dodged. It is engineered down (BEAM process isolation, Oban SKIP LOCKED + per-queue limits, a read replica for analytics, expand/contract + timeouts + PITR) and drilled — not removed. The read replica isn't provisioned locally yet.</li>
+        <li><strong>The abbrev registry gained a sanctioned allocator and a host-namespaced schema (WS-D / ADR-023).</strong> Allocation now runs only through <code>mix samen.abbrev.reserve</code> (driven by the <code>mix samen.gen.*</code> generators) against a host-partitioned registry — no more hand-editing rows, and a generated app reserves into its own host namespace, fail-closed and idempotent. The permanence ledger stays global by design (a ticker, not a read surface, no cross-vertical bleed); the one remaining deferral is the compile-time verifier's host-partition (ADR-025), which still reads the flattened global view — correct today, triggered only by the first legitimate cross-host prefix reuse.</li>
+        <li><strong>Tenant customization is best-effort above Tier-0.</strong> System resources are provable; Tier-1 <code>jsonb</code> fields are validated-at-write but not compile-checked, and Tier-2 custom objects are a deliberately minimal metadata model with a one-way boundary — not a workflow builder or a UI designer. The ladder degrades honestly as it climbs; we didn't let the metadata model become a second product.</li>
+        <li><strong>The webhook storage-name guard is over-strict.</strong> A defense-in-depth regex drops some legitimate freight catalog names (<code>cdl_number</code>) from webhook bodies — absent by omission, never a leak, but the JSON:API surface renders them correctly and the guard needs to key on the declared abbrev, not a blanket pattern. A named, carried fix (roadmap G27), not a hole.</li>
+        <li><strong>The kernel's Send suppression check — once hardcoded — is now abbrev-derived, fixed in the kernel (WS-A / ADR-014).</strong> The old <code>send_checked</code> path hardcoded the <code>msp_suppression</code> table, so a host mount's differently-named suppression table wouldn't be consulted. WS-A replaced the literal SQL with an Ash read on the mount's declared Suppression resource (abbrev-derived, inheriting <code>OrgScope</code>) — proven by a red-path test that mounts Marketing under a non-<code>msp</code> abbrev, adds an active suppression row, and confirms the send is REFUSED (no crash, no silent bypass). The framework's fail-closed consent/suppression wrapper remains as belt-and-suspenders. This residue, named in the original doc, is closed.</li>
+        <li><strong>The identity-disclosure path synthesizes a tenant-plane actor.</strong> The 3-state chat identity model implements disclosure as "resolve this one participant on the <em>tenant</em> plane instead of the operator plane," which means the disclose branch builds a tenant-plane actor map rather than deriving it from the live scope. This is legitimate and org-scope-confined — the branch only fires when stored <code>disclosure_mode</code>/<code>identity_shared</code> say so, never on operator request — but it is a synthesized-actor pattern flagged for future-reader awareness, not a bypass.</li>
+        <li><strong>Cosmetic label / nav residue in the demo.</strong> The "acting as" banner rendered an empty <code>&lt;b&gt;&lt;/b&gt;</code> because an <code>attr</code> default pre-empted its <code>assign_new</code> fallback — cosmetic only (the topbar/breadcrumb show the org name correctly); filed as a fix-forward. The operator "health" pill (derived from subscription status) and the billing "dunning" list (derived from invoice due dates) can read as inconsistent on the seed until "has a past-due invoice" folds into the at-risk signal. Neither affects scoping or masking; both are named polish items from the demo-coherence gate.</li>
+        <li><strong>The doc was a sales artifact; the code is the arbiter.</strong> Positioning claims from the vision (socket counts, CFO math) were never lowered into code. Where the doc asserted more than the build proves, this page tells the build's version — <code>docs/claim-evidence.md</code> maps every load-bearing claim to a test, a game-day, or a named residue, and no claim is left un-evidenced and un-labeled.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="cta" style="border-top:1px solid var(--rule)">
+    <div class="sec-label">The pitch, in one sentence</div>
+    <h2>Your identity, CRM, billing, support, PII vault, audit, the operator plane, <em>the product UI, and realtime cross-plane chat</em> are one governed object model on one Postgres — so engineering writes only the B2B problem, the compliance-grade parts come with it, and you can support your tenants without ever seeing their customers.</h2>
+    <div class="actions">
+      <a class="btn btn-primary" href="https://github.com/ckluis/samen">Browse the repo — github.com/ckluis/samen</a>
+      <a class="btn btn-ghost" href="https://github.com/ckluis/samen/blob/main/docs/claim-evidence.md">Read the claim-evidence map</a>
+    </div>
+  </section>
+
+  <footer>
+    <span>samen — dutch for "together": the 80% every SaaS rebuilds, governed once — two planes, one substrate, the same message clear to the tenant and •••• to the operator, the PII in a vault you can prove you shredded</span>
+    <span><a href="https://github.com/ckluis/samen" style="color:var(--accent-deep);text-decoration:none">github.com/ckluis/samen ↗</a> · elixir ⚡ ash ⚡ oban ⚡ one postgres</span>
+  </footer>
+</div>
+
+</body>
+</html>

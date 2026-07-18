@@ -110,7 +110,7 @@ defmodule SamenCore.MixProject do
     [
       name: "samen_core",
       files: ~w(lib priv mix.exs README.md),
-      licenses: ["Proprietary"]
+      licenses: ["MIT"]
     ]
   end
 end

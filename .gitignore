@@ -13,3 +13,10 @@ gate2_scratch/
 # per-run tmp keystore (test_helper), so this only exists after `MIX_ENV=dev`.
 driftwood/priv/dev_keystore/
 .gstack/
+
+# dev-only key material — never committed (public-release purge 2026-07-18)
+pawchart/priv/dev_keystore/
+
+# generated coverage output
+samen_core/cover/
+cover/
