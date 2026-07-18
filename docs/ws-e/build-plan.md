@@ -235,6 +235,37 @@ phase gates and E7.2 MUST consume these instead of re-deriving the rituals by ha
   ships CSS + `phx-` bindings, no bespoke hooks). Deferred to E6's kit/asset pass or a documented host
   hook; the search page + per-list `search_box` navigate to it without the shortcut.
 
+- **E5-P2 (build, recorded — the current-user seam):** auth is host-owned (ADR-029), so the settings
+  surfaces resolve "who am I" via `Samen.Web.Settings.Reads.current_user_id/3` — `?user=` param →
+  `session["samen_current_user"]` → `Mount.label(:current_user_id)` → `nil` (the honest "no user wired"
+  card), mirroring the notifications `:recipient_id` precedent. The framework never invents identity.
+  Two label keys added to `Samen.Web.Mount`'s whitelist (`current_user_id`, `current_membership_id`) so
+  they survive session round-trip on a cold BEAM.
+- **E5-P2 (build, recorded — composite reveal form):** revealed composite PII (`full_name`/`emails`)
+  arrives in its JSON-serialized vault form (the E3-P2 ship-note posture). `ProfileLive` DECODES it to
+  split first/last/email into editable inputs on the tenant plane; the operator plane renders the
+  `%Masked{}` read-only via the kit `form_field/1` (no `name` → cannot submit plaintext — the render
+  half of MC-1). No CSV-style unwrap on the write side; the governed `User` update re-casts the
+  composite map through `Vault.Change`.
+- **E5-P2 (build, recorded — token_digest write path):** `ApiKeys.mint/3` sets `token_digest` (a
+  `public?: false` attribute) via `force_change_attribute`, never as a public action input — the raw
+  key is never a changeset value and cannot be persisted. Mint is admin-gated by the existing `ApiKey`
+  create policy; the ApiKeysLive builds the acting scope from the current membership's role so the
+  policy sees the real minter authority. `effective_scopes/2` is the mint-time dual of
+  `Samen.Scope.ApiKey.authorized?/4`'s use-time ceiling (belt-and-suspenders: bounded at rest AND at use).
+- **E5-P2 (gate, recorded — Security sessions source):** the Security surface reads real impersonation
+  sessions via `Samen.Impersonation.Sessions.list_for_org/2` (`repo: mount.repo`), rescue-safe to `[]`.
+  The samen_web test host has no `imp_impersonation_session` table migrated, so the honesty/read-only
+  STRUCTURE (no `phx-click`/`phx-submit`; the "managed by your identity provider" affordance) is the
+  load-bearing RP-ST-4 proof, driven green. Bind a positive-sessions render at E7 on a host that
+  migrates the impersonation table.
+- **E5-P2 (gate, recorded — no Endpoint boot):** the three settings LiveViews' `handle_event` flows
+  (`save`/`mint`/`revoke`) are engine-covered (`Profile.update` + `ApiKeys.mint/revoke` per-plane
+  red-paths) + render-covered (per-plane DOM via the DataCase harness), but not driven through a booted
+  Endpoint — the same posture as the E2 UploadLive / E3 ImportLive tests. The driftwood E5 gate probe
+  (`gate_e5_settings_e2e_test.exs`) drives the engines end-to-end over the real `Driftwood.Operator`
+  Identity namespace.
+
 ---
 
 ## Model-routing summary

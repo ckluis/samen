@@ -1,0 +1,23 @@
+# SABOTAGE: E5.2 gate sabotage — API-key show-once/digest-only hygiene (RP-ST-2 /
+# AC-G18-3). `Samen.Web.Settings.ApiKeys.mint/3` stores the RAW key material in
+# `token_digest` instead of its SHA-256 digest — the DB now persists (and can leak)
+# the very key the UI promises is shown only once. The hygiene red-paths MUST fail.
+# APP: samen_web
+# TEST_FILES: test/samen/web/api_keys_hygiene_test.exs
+# MUST_FAIL: the row stores only its SHA-256 digest
+# MUST_FAIL: the raw key is NOWHERE in the persisted row
+diff --git a/samen_web/lib/samen/web/settings/api_keys.ex b/samen_web/lib/samen/web/settings/api_keys.ex
+index 0000000..1111111 100644
+--- a/samen_web/lib/samen/web/settings/api_keys.ex
++++ b/samen_web/lib/samen/web/settings/api_keys.ex
+@@ -96,7 +96,9 @@ defmodule Samen.Web.Settings.ApiKeys do
+ 
+     Mount.resource(mount, ApiKey)
+     |> Ash.Changeset.for_create(:create, attrs, scope: scope)
+-    |> Ash.Changeset.force_change_attribute(:token_digest, digest(raw))
++    # SABOTAGE (12-e5): store the RAW key in token_digest (the classic leak) instead
++    # of its SHA-256 digest — the DB now persists the very key material mint returns.
++    |> Ash.Changeset.force_change_attribute(:token_digest, raw)
+     |> Ash.create(scope: scope)
+     |> case do
+       {:ok, row} -> {:ok, raw, row}

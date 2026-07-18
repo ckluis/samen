@@ -111,4 +111,6 @@ defmodule Samen.WebTest.DataCase do
   defp namespace(:flags), do: Samen.WebTest.Primitives
   defp namespace(:files), do: Samen.WebTest.Primitives
   defp namespace(:csv), do: Samen.WebTest.Crm
+  # WS-E E5 settings — the Identity mount (User/ApiKey/Membership) is the operator host.
+  defp namespace(:settings), do: Samen.WebTest.Operator
 end

@@ -556,6 +556,75 @@ defmodule Samen.Web.Router do
   end
 
   @doc """
+  Mount the framework SELF-SERVE SETTINGS surface (WS-E E5; ADR-029) — Profile,
+  API keys, and a read-only Security view — in ONE line, on either plane. Zero
+  authored settings LiveViews per vertical.
+
+  `namespace` is the host's mounted IDENTITY namespace (the domain that `use`d
+  `Samen.Scopes.Identity` — it materializes `User` + `ApiKey` + `Membership`, e.g.
+  `Driftwood.Operator`, `Demo.Identity`).
+
+      import Samen.Web.Router
+
+      # TENANT plane — a user manages their OWN account (profile in the clear; mint keys).
+      samen_settings_routes :settings, Driftwood.Operator, repo: Driftwood.Repo
+
+      # OPERATOR / impersonation plane — the SAME LiveViews; the profile's vaulted fields
+      # render `••••` and a plaintext PII write is refused by WriteGuard; key mint/revoke
+      # are read-only.
+      samen_settings_routes :settings, Driftwood.Operator,
+        repo: Driftwood.Repo,
+        plane: :operator,
+        target_org_id: tenant_org_id,
+        path: "/operator/settings"
+
+  The macro mounts:
+
+    * `GET /<path>`             → `Samen.Web.Settings.ProfileLive`
+    * `GET /<path>/profile`     → `Samen.Web.Settings.ProfileLive`
+    * `GET /<path>/api-keys`    → `Samen.Web.Settings.ApiKeysLive`
+    * `GET /<path>/security`    → `Samen.Web.Settings.SecurityLive`
+
+  The current user is host-supplied (auth is host-owned): an explicit `?user=` param,
+  else `session["samen_current_user"]`, else `Mount.label(mount, :current_user_id)`.
+
+  Options: as `samen_files_routes/3` (`:repo` required; `:domain`, `:plane`,
+  `:operator_id`/`:target_org_id`, `:path` (default `/settings`), `:labels`,
+  `:session_name`).
+  """
+  defmacro samen_settings_routes(kind, namespace, opts \\ []) do
+    kind = Macro.expand(kind, __CALLER__)
+    path = Keyword.get(opts, :path, "/settings")
+    session_name = Keyword.get(opts, :session_name, session_name(:settings, path))
+
+    quote bind_quoted: [
+            kind: kind,
+            namespace: namespace,
+            opts: opts,
+            path: path,
+            session_name: session_name
+          ] do
+      _ = kind
+
+      mount =
+        Samen.Web.Mount.new(
+          :settings,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          plane: Samen.Web.Router.__plane__(opts),
+          labels: Keyword.get(opts, :labels)
+        )
+
+      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        for {sub_path, module} <- Samen.Web.Router.__routes__(:settings, path) do
+          live(sub_path, module)
+        end
+      end
+    end
+  end
+
+  @doc """
   Mount the framework SESSION endpoint that writes the current org (ADR-013 §4.3) in ONE line.
 
       import Samen.Web.Router
@@ -685,6 +754,17 @@ defmodule Samen.Web.Router do
     ]
   end
 
+  # WS-E E5 (ADR-029) — the self-serve settings route table: profile (the index),
+  # API keys, and the read-only security view. Three surfaces, one macro mount.
+  def __routes__(:settings, path) do
+    [
+      {"#{path}", Samen.Web.Settings.ProfileLive},
+      {"#{path}/profile", Samen.Web.Settings.ProfileLive},
+      {"#{path}/api-keys", Samen.Web.Settings.ApiKeysLive},
+      {"#{path}/security", Samen.Web.Settings.SecurityLive}
+    ]
+  end
+
   defp default_path(:crm), do: "/crm"
   defp default_path(:billing), do: "/billing"
   defp default_path(:support), do: "/support"
@@ -693,6 +773,7 @@ defmodule Samen.Web.Router do
   defp default_path(:notifications), do: "/notifications"
   defp default_path(:flags), do: "/flags"
   defp default_path(:search), do: "/search"
+  defp default_path(:settings), do: "/settings"
 
   defp session_name(kind, path) do
     :"samen_#{kind}_#{path |> String.replace(~r/[^a-zA-Z0-9]/, "_") |> String.trim("_")}"

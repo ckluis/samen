@@ -140,6 +140,17 @@ defmodule DriftwoodWeb.Router do
       labels: @current_org_labels
     )
 
+    # WS-E E5 (ADR-029) — the framework SELF-SERVE SETTINGS surface (Profile · API keys ·
+    # Security), mounted over Driftwood's Identity namespace (`Driftwood.Operator.{User,
+    # ApiKey,Membership}`) in ONE line. GATE PROBE (E5.4): the `samen_settings_routes`
+    # macro mounts all three surfaces at ≈0 authored LOC — profile self-edit routes
+    # through the vault chokepoint, API keys are show-once/digest-only, Security is
+    # read-only and honest about the host-auth boundary.
+    samen_settings_routes(:settings, Driftwood.Operator,
+      repo: Driftwood.Repo,
+      labels: @current_org_labels
+    )
+
     # ADR-012 — the FLAGSHIP cross-plane realtime CHAT, TENANT plane (the org's own chat
     # console — bodies + participant identities in the clear). The `:object_cards` label
     # registers Driftwood's bespoke `freight.driver` unfurl card (the vertical override seam);

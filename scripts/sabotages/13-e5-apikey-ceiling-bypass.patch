@@ -1,0 +1,29 @@
+# SABOTAGE: E5.2 gate sabotage — the API-key minter authority ceiling (RP-ST-3 /
+# AC-G18-4). `Samen.Web.Settings.ApiKeys.effective_scopes/2` returns the requested
+# scopes verbatim instead of intersecting them with the minter role ceiling — a
+# viewer-minted key escalates to write authority. The ceiling red-paths MUST fail.
+# APP: samen_web
+# TEST_FILES: test/samen/web/api_keys_hygiene_test.exs
+# MUST_FAIL: a viewer minter cannot grant write
+# MUST_FAIL: the STORED row carries only the ceiling-bounded scopes
+diff --git a/samen_web/lib/samen/web/settings/api_keys.ex b/samen_web/lib/samen/web/settings/api_keys.ex
+index 0000000..1111111 100644
+--- a/samen_web/lib/samen/web/settings/api_keys.ex
++++ b/samen_web/lib/samen/web/settings/api_keys.ex
+@@ -43,13 +43,10 @@ defmodule Samen.Web.Settings.ApiKeys do
+   """
+   @spec effective_scopes(map(), atom() | String.t() | nil) :: map()
+   def effective_scopes(requested, minter_role) when is_map(requested) do
+-    can_write = Role.at_least?(minter_role, :member)
+-    can_read = Role.at_least?(minter_role, :viewer)
+-
++    # SABOTAGE (13-e5): return the REQUESTED scopes verbatim, ignoring the minter role
++    # ceiling — a viewer-minted key then carries write authority it must never have.
++    _ = minter_role
+     requested
+-    |> Enum.map(fn {family, actions} -> {family, keep_actions(actions, can_read, can_write)} end)
+-    |> Enum.reject(fn {_family, kept} -> kept == [] end)
+-    |> Map.new()
+   end
+ 
+   def effective_scopes(_requested, _role), do: %{}

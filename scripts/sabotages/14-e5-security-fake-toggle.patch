@@ -1,0 +1,22 @@
+# SABOTAGE: E5.3 gate sabotage — the Security surface host-auth honesty (RP-ST-4 /
+# AC-G18-5). `Samen.Web.Settings.SecurityLive` grows a FAKE "revoke all sessions"
+# toggle (a phx-click) that claims to control host-owned auth the framework does not
+# own — the exact dishonesty the read-only-and-honest posture forbids. The honesty
+# structural red-path MUST fail with this.
+# APP: samen_web
+# TEST_FILES: test/samen/web/settings_surface_test.exs
+# MUST_FAIL: the surface has NO write control
+diff --git a/samen_web/lib/samen/web/settings/security_live.ex b/samen_web/lib/samen/web/settings/security_live.ex
+index 0000000..1111111 100644
+--- a/samen_web/lib/samen/web/settings/security_live.ex
++++ b/samen_web/lib/samen/web/settings/security_live.ex
+@@ -138,7 +138,8 @@ defmodule Samen.Web.Settings.SecurityLive do
+               <dl id="security-host-managed" style="margin-top:8px">
+                 <div :for={{item, note} <- @host_managed} class="host-managed-item" style="margin-bottom:8px">
+                   <dt style="font-weight:600">{item}</dt>
+-                  <dd style="color:var(--muted);margin:0">{note} <em>Managed by your identity provider.</em></dd>
++                  <dd style="color:var(--muted);margin:0">{note} <em>Managed by your identity provider.</em>
++                    <button type="button" phx-click="revoke_all_sessions">Revoke all sessions</button></dd>
+                 </div>
+               </dl>
+             </div>

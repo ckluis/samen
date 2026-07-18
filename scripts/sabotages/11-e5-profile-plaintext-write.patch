@@ -1,0 +1,25 @@
+# SABOTAGE: E5.1 gate sabotage — the profile self-edit vault chokepoint (RP-ST-1 /
+# AC-G18-2). `Samen.Web.Settings.Profile.update/4` drops the governed scope from the
+# self-edit, so the operator-plane actor never reaches the changeset and WriteGuard
+# cannot refuse an operator-authored plaintext PII write into the user's masked field.
+# The profile masking-watch-list red-path MUST fail with this.
+# APP: samen_web
+# TEST_FILES: test/samen/web/profile_masking_test.exs
+# MUST_FAIL: RED: an operator-impersonation plaintext PII write is REFUSED
+diff --git a/samen_web/lib/samen/web/settings/profile.ex b/samen_web/lib/samen/web/settings/profile.ex
+index 0000000..1111111 100644
+--- a/samen_web/lib/samen/web/settings/profile.ex
++++ b/samen_web/lib/samen/web/settings/profile.ex
+@@ -47,8 +47,10 @@ defmodule Samen.Web.Settings.Profile do
+   def update(mount, scope, user_id, attrs) when is_binary(user_id) and is_map(attrs) do
+     with {:ok, user} <- fetch_user(mount, scope, user_id) do
+       user
+-      |> Ash.Changeset.for_update(:update, sanitize(attrs), scope: scope)
+-      |> Ash.update(scope: scope)
++      # SABOTAGE (11-e5): drop the governed scope — the operator actor never reaches
++      # the changeset, so WriteGuard cannot refuse the operator plaintext PII write.
++      |> Ash.Changeset.for_update(:update, sanitize(attrs), authorize?: false)
++      |> Ash.update(authorize?: false)
+       |> case do
+         {:ok, updated} -> {:ok, updated}
+         {:error, error} -> {:error, error}

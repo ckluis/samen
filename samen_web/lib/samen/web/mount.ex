@@ -50,7 +50,9 @@ defmodule Samen.Web.Mount do
             | :notifications
             | :flags
             | :files
-            | :csv,
+            | :csv
+            | :search
+            | :settings,
           namespace: module(),
           repo: module(),
           domain: module(),
@@ -129,6 +131,7 @@ defmodule Samen.Web.Mount do
   defp scope_kind("files"), do: :files
   defp scope_kind("csv"), do: :csv
   defp scope_kind("search"), do: :search
+  defp scope_kind("settings"), do: :settings
   defp scope_kind(k) when is_atom(k), do: k
 
   # Module atoms serialize as "Elixir.Driftwood.Crm". Host modules are COMPILED, so their
@@ -175,6 +178,7 @@ defmodule Samen.Web.Mount do
     default_org_id org_directory tenant_landing impersonate_path
     recipient_id
     flags_namespace flags_path revenue_plan_loader
+    current_user_id current_membership_id
   )a
 
   @label_key_strings Map.new(@label_keys, fn k -> {Atom.to_string(k), k} end)
