@@ -23,6 +23,7 @@ defmodule Driftwood.GateE5SettingsE2ETest do
   alias Samen.Web.Router
   alias Samen.Web.Settings.ApiKeys
   alias Samen.Web.Settings.Profile
+  alias Samen.Web.Settings.SecurityLive
 
   alias Driftwood.Operator.Membership
   alias Driftwood.Operator.User
@@ -121,5 +122,42 @@ defmodule Driftwood.GateE5SettingsE2ETest do
 
     # The ceiling strips write for a viewer minter.
     assert ApiKeys.effective_scopes(%{all: [:read, :write]}, :viewer) == %{all: [:read]}
+  end
+
+  # WS-E E7.2 — resolves the E5-P2 carry ("bind a positive-sessions render at E7 on a
+  # host that migrates the impersonation table"). The samen_web test host has no
+  # `imp_impersonation_session` table, so E5.3 could only prove the read-only/honesty
+  # STRUCTURE against an EMPTY session list. Driftwood DOES migrate the table
+  # (`operator_plane.exs`) and configures `:impersonation_repo`, so here we seed a REAL
+  # governed session and prove SecurityLive renders it — the positive control that the
+  # empty-state RP-ST-4 test lacked. The surface stays read-only (no phx-click/submit).
+  test "Security page renders REAL impersonation sessions (positive control; E5-P2 carry resolved)" do
+    org_id = Ash.UUID.generate()
+
+    {:ok, session} =
+      Samen.Impersonation.Sessions.open(%{
+        operator_id: "gate-e7-operator",
+        org_id: org_id,
+        reason: "E7 gate positive-sessions accountability render",
+        repo: Driftwood.Repo
+      })
+
+    mount = Mount.new(:settings, Driftwood.Operator, Driftwood.Repo, plane: Plane.tenant())
+    html = render_framework(SecurityLive, mount, [org_id, nil])
+
+    # The real session row is rendered — operator id + reason present, in a session row.
+    assert html =~ "security-session-row"
+    assert html =~ "gate-e7-operator"
+    assert html =~ "E7 gate positive-sessions accountability render"
+    # The positive control: NOT the empty-state the samen_web host was limited to.
+    refute html =~ "No impersonation sessions recorded."
+
+    # Read-only + honest: no auth-mutating control was invented on this page (RP-ST-4).
+    refute html =~ "phx-click"
+    refute html =~ "phx-submit"
+    assert html =~ "managed by your identity provider"
+
+    # Sanity: the rendered session is the one we opened.
+    assert session.org_id == org_id
   end
 end

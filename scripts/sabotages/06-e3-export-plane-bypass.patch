@@ -4,10 +4,11 @@
 # UI renders as •••• (THE mask-by-omission exfiltration channel export exists to
 # close). The per-plane export masking red-paths MUST fail with this.
 # APP: samen_web
-# TEST_FILES: test/samen/web/csv_masking_test.exs test/samen/web/csv_surface_test.exs
+# TEST_FILES: test/samen/web/csv_masking_test.exs test/samen/web/csv_surface_test.exs test/samen/web/ws_e_flagship_probe_test.exs
 # MUST_FAIL: operator export cell is ••••
 # MUST_FAIL: the CSV cell EQUALS the UI value on the operator plane
 # MUST_FAIL: the SAME route serves the MASKED CSV
+# MUST_FAIL: flagship export: the operator CSV cell is the mask
 diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
 index 094a4d9..48425cb 100644
 --- a/samen_web/lib/samen/web/csv.ex

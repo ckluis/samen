@@ -5,9 +5,10 @@
 # joining the mask-by-omission exfiltration channel the projection exists to
 # close). The per-plane search-masking red-paths MUST fail with this.
 # APP: samen_web
-# TEST_FILES: test/samen/web/search_masking_test.exs
+# TEST_FILES: test/samen/web/search_masking_test.exs test/samen/web/ws_e_flagship_probe_test.exs
 # MUST_FAIL: RED: an operator search of the tenant org masks full_name
 # MUST_FAIL: the plane is the gate
+# MUST_FAIL: flagship search: the operator search hit masks full_name
 diff --git a/samen_core/lib/samen/search.ex b/samen_core/lib/samen/search.ex
 index 0000000..1111111 100644
 --- a/samen_core/lib/samen/search.ex

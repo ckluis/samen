@@ -59,19 +59,19 @@ op-todo (human operator task).
 | G6 | **Feature-flag evaluation engine** | operator, harden | Flags are config rows nothing evaluates; no bucketing/targeting/rollout; experiments absent | H | S/M | kernel+web | ✅ shipped (WS-B) |
 | G7 | **Revenue analytics (MRR movements)** | operator | Snapshot MRR only; no movements/churn/cohorts/NRR | H | M | web | ✅ shipped (WS-B) |
 | G8 | **Tenant lifecycle admin** | operator | No provision/suspend/offboard/export/delete actions from the operator plane | H | M | web+kernel | P1 |
-| G9 | **Global search** | end-user, harden | PII-safe index registry exists; zero search action / ⌘K / UI | H | M | kernel+web | P1 |
+| G9 | **Global search** | end-user, harden | PII-safe index registry exists; zero search action / ⌘K / UI | H | M | kernel+web | ✅ shipped (WS-E) |
 | G10 | **Getting-started tutorial + cookbook + README** | builder | 3 reference guides, no zero-to-feature walkthrough, no gate-failure index | M-H | S | gen | ✅ shipped (WS-D) |
 | G11 | **Status/health/SLA + alerting** | operator | Metrics defined but unwired; bare `/healthz`; no status page/alerts/health dashboard | H | M | web+gen | P1 |
 | G12 | **Product analytics over CDC** | operator | No event capture/funnels/retention; vault-excluded CDC projection is an ideal unused feed — privacy-correct-by-construction moat | H | L | new (web) | ✅ seed shipped (WS-B) |
 | G13 | **Billing depth: Stripe sync + usage rating** | operator, harden | Stripe-mirror schema inert; SyncAdapter stub; no rating/proration/tax | M-H | L | kernel+op-todo | P1 |
-| G14 | **Files engine** | end-user, harden | Metadata resource only; no storage adapter/upload/preview | M/H | M | kernel+web | P1 |
-| G15 | **Import/export (CSV mapper)** | end-user | None at any granularity; catalog-as-data makes a generic mapper feasible; export = highest-risk mask-by-omission vector | M/H | M | web | P1 |
+| G14 | **Files engine** | end-user, harden | Metadata resource only; no storage adapter/upload/preview | M/H | M | kernel+web | ✅ shipped (WS-E) |
+| G15 | **Import/export (CSV mapper)** | end-user | None at any granularity; catalog-as-data makes a generic mapper feasible; export = highest-risk mask-by-omission vector | M/H | M | web | ✅ shipped (WS-E) |
 | G16 | **Deploy story (Fly/Neon templates)** | builder | Zero deploy artifacts; all carried as operator TODOs | H | M | gen+op-todo | ✅ shipped (WS-D) |
 | G17 | **Per-tenant health scores + drill-down** | operator | Health is a single subscription-status pill | M-H | S | web | ✅ shipped (WS-B) |
 | G17b | Fidelity follow-on (B9 gate F2): wire a pae-recency read into `__activity_days__` (currently hardcoded nil → activity factor always :unknown) + flag-adoption breadth into the adoption factor — pae now emits, the seam is ready | operator | — | M | S | web | P2 |
-| G18 | **Self-serve settings (profile/2FA/sessions/API keys)** | end-user | Models exist, no screens, no `/settings` route | M | M | web | P2 |
+| G18 | **Self-serve settings (profile/2FA/sessions/API keys)** | end-user | Models exist, no screens, no `/settings` route | M | M | web | ✅ shipped (WS-E; 2FA/sessions host-owned by design) |
 | G19 | **DSAR self-serve + compliance reporting** | operator | Erasure/audit built; no DSAR export, retention admin, SOC2 evidence surface | M | M | web | P2 |
-| G20 | **Responsive/mobile + perf polish** | end-user | Zero `@media`; no `assign_async`/`stream`/skeletons | M/H | M | web | P2 |
+| G20 | **Responsive/mobile + perf polish** | end-user | Zero `@media`; no `assign_async`/`stream`/skeletons | M/H | M | web | ✅ shipped (WS-E; skeleton primitive, `assign_async` deferred) |
 | G21 | **Support desk depth (CSAT/macros/KB/routing)** | operator, harden | Desk only reads; SLA reporting absent | M | M | web | P2 |
 | G22 | **Agent-grounding packaging (MCP, json diagnostics, reusable eval)** | builder | Differentiator built but unpackaged for builders | M-H | M | gen | P2 |
 | G23 | **Product feedback → roadmap** | operator | Absent entirely | M | M | new | P2 |
@@ -126,12 +126,44 @@ resource/scope gen), zero-to-feature tutorial, gate-failure index, Fly/Neon depl
 Highest leverage once the surfaces being scaffolded (WS-A) are real — generating today's
 read-only patterns would scaffold the wrong thing.
 
-### WS-E — "Table Stakes UX" (G9 + G14 + G15 + G18 + G20) ← RECOMMENDED NEXT
+### WS-E — "Table Stakes UX" (G9 + G14 + G15 + G18 + G20)
+> **✅ SHIPPED 2026-07-18** — all 7 phases (E1–E7) gated GO; workstream-wide adversarial gate GO: `docs/gate-ws-e.md`.
 Search engine + ⌘K, files engine with storage adapter, CSV import/export mapper (mask-by-
 omission red-paths mandatory), self-serve settings, responsive pass.
 
 **Sequencing logic:** A → (C rider) → B → D → E, revisiting rank after each gate. D
 deliberately follows A so generators emit the *real* patterns.
+
+---
+
+## State after WS-A/B/D/E (2026-07-18) — the re-rank (all planned workstreams shipped)
+
+**Shipped: 16 gaps** (G1/G2/G3/G5 in WS-A · G6/G7/G17 + G12-seed in WS-B · G4/G10/G16/G26
+in WS-D · **G9/G14/G15/G18/G20 in WS-E**). **Every planned workstream (A/B/D/E) is now
+gated GO** — WS-E closed the end-user P1 table-stakes (search, files, CSV, settings,
+responsive). All six flagged mask-by-omission PII surfaces are now closed with per-plane
+red-paths: notifications inbox + CRUD forms (WS-A), **file preview + export + profile
+self-edit + search results (WS-E)** — the four WS-E surfaces bound into the standing
+`scripts/sabotage.sh` harness and re-flipped by the E7.2 flagship cross-surface probe.
+
+**Remaining work, ranked (no planned workstream left — these are the next-workstream candidates):**
+1. **"Operator Cockpit v2"** (unassigned operator P1s: G8 tenant lifecycle · G11
+   status/SLA/alerting · G13 billing depth/Stripe sync · G17b health-activity fidelity) —
+   deepens WS-B; G13 has an operator-TODO half (live Stripe keys). The highest-value
+   remaining cluster now that end-user table-stakes are done.
+2. **WS-C remnants + P2 sweep** (:non_pii self-classify escape hatch [A1 carry] · G19 DSAR
+   export/retention · G21 desk depth · G22 agent-grounding packaging · G23 feedback · G24
+   i18n · G25 a11y · G27 kernel residues · ADR-025 verifier host-partition).
+3. **WS-E follow-ons (documented, non-blocking):** real `Storage.S3` + `Scanner` impls
+   (operator-TODO, fail-honest skeletons shipped) · per-abbrev tsvector trigger/GIN index
+   for demo/pawchart search-at-scale · fleet-wide `assign_async`/`stream` perf rewrite
+   (skeleton primitive shipped) · pawchart Identity scope to unlock its settings mount ·
+   operator-plane search-box wiring.
+
+**Standing carries (do not lose):** SMTP/ESP adapter = operator TODO (fail-honest) ·
+Samen.Web.Api.PageLimitClamp until upstream Ash fixes the to_page raw-limit split · ADR-025 ·
+demo `mk_agent` → Samen.Factory optional tightening · real Neon/AWS/ClickHouse/Fly drills =
+human operator.
 
 ---
 

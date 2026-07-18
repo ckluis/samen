@@ -291,6 +291,51 @@ phase gates and E7.2 MUST consume these instead of re-deriving the rituals by ha
   documented follow-on to wire when the operator-plane search box gets its own action — recorded rather
   than forced, since operator search wiring is outside E6's responsive design scope.
 
+- **E7-P2 (gate, recorded — demo mounts NONE of the WS-E LiveView surfaces, by construction):** demo is
+  API-only — its `DemoWeb.Router` is a `Plug.Router` (forwards `/api/v1` to the AshJsonApi endpoint), with
+  NO Phoenix router, NO `:browser` pipeline, NO `live_session`. All five WS-E surfaces (files/CSV/search/
+  settings are LiveView + browser-pipeline; responsive is CSS over an HTML UI demo does not have) are
+  structurally un-mountable there — the same reason demo carried none of the notifications/chat/operator
+  LiveView mounts since WS-A (E2-P2 resolved: "demo is API-only, no LiveView router"). Demo's PII-masking
+  correctness rides its API surface (`PiiResolution` in the JSON:API path), covered by demo's own suite.
+  Not a gap: demo is the API-dogfood host, never a LiveView-adoption target.
+- **E7-P2 (gate, recorded — pawchart mounts files/CSV/search but NOT settings):** pawchart adopts three of
+  the four LiveView surfaces at ≈0 authored LOC (`samen_files_routes`/`samen_csv_routes`/`samen_search_routes`
+  over its existing `PawChart.Primitives`/`PawChart.Crm`; route-proofed in `samen_web_mount_test.exs`, +3
+  assertions). Settings is NOT mounted: `samen_settings_routes` requires a mounted IDENTITY namespace
+  (`User`/`ApiKey`/`Membership`) and pawchart materializes no `Samen.Scopes.Identity` scope (the clinic is a
+  single-tenant dogfood with no operator/account book). Mounting settings would first require materializing an
+  Identity scope — new abbrev-owning resources via the sanctioned allocator + migrations — which is well
+  beyond an ≈0-LOC adoption and outside E7.1's "mount EXISTING framework surfaces" scope. driftwood remains the
+  full-set reference host (all four LiveView surfaces + CSS-inherited responsive). Follow-on: if pawchart later
+  grows an Identity scope, `samen_settings_routes` mounts in one line.
+- **E7-P2 (gate, recorded — pawchart search rides the query-time tsvector, no trigger migration):** pawchart's
+  search mount ships WITHOUT the observability tsvector-trigger/GIN migration driftwood added at E4 — the kernel
+  `Samen.Search` engine builds its tsvector at QUERY time from registered NON-PII columns, so search is CORRECT
+  on `PawChart.Primitives.{File,SearchIndex}` without a trigger. The per-abbrev `vfl_file` trigger + functional
+  GIN index remain the documented E4-P2 follow-on (adopt when a host registers searchable resources at scale).
+- **E7-P2 (gate, recorded — the flagship S3 fail-honest flip is bound at samen_core, not cross-app):** the E7.2
+  flagship probe lives in samen_web and binds the FOUR samen_web PII-surface sabotages (05/06/10/11) into
+  `scripts/sabotage.sh` (each patch's header now names a flagship test so the harness flips it byte-exact). The
+  fifth AC-X-1 clause — fail-honest `S3.put` never `{:ok}` — is asserted green in the flagship but its HARNESS
+  FLIP stays bound to `02-e1-s3-fail-honest-lie` (`APP: samen_core`, `files_storage_test.exs`): the harness runs
+  one app per patch, so a samen_web flagship test cannot be listed under a samen_core patch. The S3 guarantee is
+  therefore doubly proven — green in the flagship, refutable in patch 02 — just not in the SAME harness step.
+- **E7-P2 (gate, recorded — the E2i vertical-mount flip carry, declined):** the E2i-P2 carry offered binding
+  driftwood's `gate_e2_files_e2e_test.exs` into patch 05 "if the flagship probe wants the vertical-mount flip
+  too". Declined: patch 05 is `APP: samen_web` and the harness is one-app-per-patch, so a driftwood test cannot
+  bind into it without a NEW driftwood-targeted patch that re-derives the SAME byte-serve flip already proven at
+  the samen_web chokepoint (file-preview masking + the flagship) — a re-derivation the sabotage discipline
+  forbids. The plane gate's load-bearing flip is bound at samen_web (now by TWO named files); the driftwood E2E
+  is a green mount-proof, not a second copy of the flip.
+- **E7-P2 (gate, RESOLVED — the E5 positive-sessions render carry):** the E5-P2 carry ("bind a positive-sessions
+  render at E7 on a host that migrates the impersonation table") is CLOSED. `gate_e5_settings_e2e_test.exs` now
+  opens a REAL governed `Samen.Impersonation.Sessions.open/1` session on Driftwood (which migrates
+  `imp_impersonation_session` + configures `:impersonation_repo`) and renders `SecurityLive`, asserting the
+  session row (operator id + reason) is present and the empty-state is ABSENT — the positive control the
+  samen_web host (no impersonation table) could not provide. The read-only/honesty structure (no
+  `phx-click`/`phx-submit`) is re-asserted on the populated render.
+
 ---
 
 ## Model-routing summary

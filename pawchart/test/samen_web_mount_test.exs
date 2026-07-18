@@ -345,5 +345,25 @@ defmodule PawChart.SamenWebMountTest do
       assert Enum.any?(routes, fn {_p, m} -> m == Samen.Web.Support.TicketsLive end)
       assert Enum.any?(routes, fn {_p, m} -> m == Samen.Web.Support.TicketLive end)
     end
+
+    # WS-E E7.1 — the framework end-user surfaces adopted at ≈0 authored LOC. PawChart's
+    # router mounts files/CSV/search via one macro each over its EXISTING Primitives/CRM
+    # namespaces (no PawChart LiveView/engine code). Settings is intentionally NOT mounted
+    # (no Identity namespace) — see the router note + docs/gate-ws-e.md.
+    test "samen_files_routes macro generates the files surface routes (E7.1 adoption)" do
+      routes = Samen.Web.Router.__routes__(:files, "/files")
+      assert Enum.any?(routes, fn {_p, m} -> m == Samen.Web.Files.UploadLive end)
+      assert Enum.any?(routes, fn {_p, m} -> m == Samen.Web.Files.PreviewLive end)
+    end
+
+    test "samen_csv_routes macro generates the CSV import route (E7.1 adoption)" do
+      routes = Samen.Web.Router.__routes__(:csv, "/csv")
+      assert Enum.any?(routes, fn {_p, m} -> m == Samen.Web.Csv.ImportLive end)
+    end
+
+    test "samen_search_routes macro generates the search route (E7.1 adoption)" do
+      routes = Samen.Web.Router.__routes__(:search, "/search")
+      assert Enum.any?(routes, fn {_p, m} -> m == Samen.Web.Search.SearchLive end)
+    end
   end
 end

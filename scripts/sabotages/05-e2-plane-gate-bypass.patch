@@ -3,11 +3,12 @@
 # operator without a reveal grant is no longer 403'd away from a tenant's raw bytes
 # (bytes have no %Masked{} partial-reveal form, so this gate is the masking invariant).
 # APP: samen_web
-# TEST_FILES: test/samen/web/file_preview_masking_test.exs test/samen/web/files_surface_test.exs
+# TEST_FILES: test/samen/web/file_preview_masking_test.exs test/samen/web/files_surface_test.exs test/samen/web/ws_e_flagship_probe_test.exs
 # MUST_FAIL: byte-serve is REFUSED (403)
 # MUST_FAIL: FLIPS 403 to a byte-exact 200 serve
 # MUST_FAIL: PLANE gate: operator-plane request returns 403
 # MUST_FAIL: the three refusals (quarantine / plane / scope) are each independent
+# MUST_FAIL: flagship files byte-serve: the operator plane is REFUSED 403
 diff --git a/samen_web/lib/samen/web/files/bytes_controller.ex b/samen_web/lib/samen/web/files/bytes_controller.ex
 index c64d400..814e5c7 100644
 --- a/samen_web/lib/samen/web/files/bytes_controller.ex

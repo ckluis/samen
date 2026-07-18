@@ -4,8 +4,9 @@
 # cannot refuse an operator-authored plaintext PII write into the user's masked field.
 # The profile masking-watch-list red-path MUST fail with this.
 # APP: samen_web
-# TEST_FILES: test/samen/web/profile_masking_test.exs
+# TEST_FILES: test/samen/web/profile_masking_test.exs test/samen/web/ws_e_flagship_probe_test.exs
 # MUST_FAIL: RED: an operator-impersonation plaintext PII write is REFUSED
+# MUST_FAIL: flagship profile: an operator plaintext self-edit is REFUSED
 diff --git a/samen_web/lib/samen/web/settings/profile.ex b/samen_web/lib/samen/web/settings/profile.ex
 index 0000000..1111111 100644
 --- a/samen_web/lib/samen/web/settings/profile.ex

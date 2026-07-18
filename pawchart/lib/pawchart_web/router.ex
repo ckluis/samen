@@ -109,5 +109,41 @@ defmodule PawChartWeb.Router do
         pubsub: PawChart.PubSub
       }
     )
+
+    # WS-E E7.1 — the framework end-user surfaces, mounted over PawChart's EXISTING
+    # namespaces at ≈0 authored LOC (the leverage guard, §3). Three one-liners; zero
+    # PawChart LiveView/engine code. The SECOND vertical's proof that files/search/CSV
+    # inherit framework-first exactly as CRM/Billing/Support did.
+
+    # 6. Files (ADR-026) — upload + preview + plane-gated byte-serve over PawChart's
+    #    Primitives mount (`PawChart.Primitives.File`, abbrev `vfl`).
+    samen_files_routes(:files, PawChart.Primitives,
+      repo: PawChart.Repo,
+      labels: %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"}
+    )
+
+    # 7. CSV (ADR-028) — per-plane-masked export + governed import over PawChart's CRM
+    #    domain (`/csv/*/:resource` resolves deny-by-default onto PawChart.Crm resources).
+    samen_csv_routes(:csv, PawChart.Crm,
+      repo: PawChart.Repo,
+      labels: %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"}
+    )
+
+    # 8. Search (ADR-027) — the ⌘K/per-list search page over the KERNEL `Samen.Search`
+    #    engine, mounted over `PawChart.Primitives.{File,SearchIndex}` (`vfl`/`vsh`). The
+    #    engine builds its tsvector at QUERY time from registered NON-PII columns, so
+    #    search is correct without the observability trigger migration (E4-P2 follow-on:
+    #    a per-abbrev `vfl_file` tsvector trigger/GIN index if a host registers at scale).
+    samen_search_routes(:search, PawChart.Primitives,
+      repo: PawChart.Repo,
+      labels: %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"}
+    )
+
+    # Settings (ADR-029) is NOT mounted here: `samen_settings_routes` requires a mounted
+    # IDENTITY namespace (`User`/`ApiKey`/`Membership`), and PawChart materializes no
+    # `Samen.Scopes.Identity` scope (it has no operator/account book — the clinic is a
+    # single-tenant dogfood). Mounting settings would require first materializing an
+    # Identity scope (new abbrev-owning resources via the sanctioned allocator), which is
+    # beyond an ≈0-LOC adoption. Recorded honestly in docs/gate-ws-e.md (E7.1 mount matrix).
   end
 end
