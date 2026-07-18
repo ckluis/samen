@@ -1,0 +1,26 @@
+# SABOTAGE: E6.3 gate sabotage — the responsive `list_view/1` LOADING render
+# contract (WS-E E6.2/E6.3; ADR-030; AC-G20-2 render seam). The `loading` state
+# must render the `skeleton/1` placeholder INSTEAD OF the record rows — records
+# (including any %Masked{} cells) are NOT painted mid-load. This sabotage makes
+# the loading branch ALSO paint the data rows (the "loading shows records" bug),
+# so a live cell marker leaks into the DOM while loading. The one refutable code
+# seam the CSS/kit responsive pass introduces; the value layer stays masking-safe
+# by construction (a %Masked{} still renders `••••`), so this binds the render
+# contract the responsive pass added.
+# APP: samen_web
+# TEST_FILES: test/samen/web/responsive_masking_test.exs
+# MUST_FAIL: loading-contract
+diff --git a/samen_web/lib/samen/ui.ex b/samen_web/lib/samen/ui.ex
+index cf63d48..183592c 100644
+--- a/samen_web/lib/samen/ui.ex
++++ b/samen_web/lib/samen/ui.ex
+@@ -674,6 +674,9 @@ defmodule Samen.UI do
+         <% @loading -> %>
+           <div class="card list-loading" style="padding:14px 16px">
+             <.skeleton rows={5} avatar />
++            <table><tbody>
++              <tr :for={item <- @page.items}>{render_slot(@row, item)}</tr>
++            </tbody></table>
+           </div>
+         <% @page.items == [] and @empty != [] -> %>
+           {render_slot(@empty)}

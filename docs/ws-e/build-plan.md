@@ -265,6 +265,31 @@ phase gates and E7.2 MUST consume these instead of re-deriving the rituals by ha
   Endpoint — the same posture as the E2 UploadLive / E3 ImportLive tests. The driftwood E5 gate probe
   (`gate_e5_settings_e2e_test.exs`) drives the engines end-to-end over the real `Driftwood.Operator`
   Identity namespace.
+- **E6-P2 (gate, recorded — responsive masking is value-blind by construction):** the E6 kit is
+  slot-based (`app_shell`/`sidebar`/`data_table`/`list_view`/`skeleton` take slots/opaque ids, never a
+  raw field value), and `%Samen.Masked{}` has a hardened `Inspect` (`#Masked<••••>`), so NO firing
+  plaintext-leak sabotage exists in the responsive pass — exactly the design claim ("the masking
+  invariant is in the value layer, not CSS"). The mask-SURVIVAL proof (`responsive_masking_test.exs`)
+  is therefore non-vacuous in-test via `Samen.MaskingCase` (`assert_masked_dom!` GREEN +
+  `assert_leak_detected!` refutable twin on a modeled broken resolver) plus a source-scope scan (the
+  responsive-touched kit carries no `Vault.reveal`/token-unwrap). The one refutable CODE seam E6 adds
+  is `list_view/1`'s `loading` render contract (skeleton INSTEAD OF record rows), bound to the committed
+  sabotage `scripts/sabotages/15-e6-list-loading-paints-rows.patch` (flips the `loading-contract` test,
+  byte-exact revert).
+- **E6-P2 (build, recorded — ⌘K global shortcut is an inline layout script, not an app.js hook):** the
+  E4 carry (global focus-from-anywhere ⌘K) shipped as a dependency-free inline `<script>` in the shared
+  root layout (`Samen.Web.Layouts.root/1`), because the samen_web asset pipeline is CSS-only (no
+  esbuild, so no LiveView JS hook). It focuses `#cmdk-input` → `[data-cmdk]` (the per-list `search_box`)
+  → else navigates the search form. Inherited by every host through the shared layout at ≈0 authored
+  LOC; carries a `nonce={assigns[:csp_nonce]}` so a host with CSP can nonce it. A host that later adds
+  a real esbuild bundle can move this to a `phx-hook` — recorded as an available upgrade, not required.
+- **E6-P2 (build, recorded — search_box wiring scope, the E4 carry b):** the framework `search_box`
+  was made a real drop-in (magnifier glyph + `⌘K` kbd + `data-cmdk`) and wired into the four TENANT
+  list-page sidebars that cleanly carry `@org_id` → `/search` (crm/support/marketing/billing). The two
+  OPERATOR sidebars (`operator/live`, `operator/aggregate_live`) keep their static `.search` placeholder:
+  their correct target is `/operator/search` with an operator target-org seam (not a bare `@org_id`), a
+  documented follow-on to wire when the operator-plane search box gets its own action — recorded rather
+  than forced, since operator search wiring is outside E6's responsive design scope.
 
 ---
 

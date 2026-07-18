@@ -498,3 +498,138 @@ td.right { text-align: right; }
 .acting-as-tx b { font-weight: 650; }
 .acting-as-return { color: #3B4CCA; text-decoration: none; font-weight: 600; white-space: nowrap; }
 .acting-as-return:hover { text-decoration: underline; }
+
+/* ===========================================================================
+ * WS-E E6 — Responsive kit pass (ADR-030) + shipped-surface styling.
+ *
+ * SCOPE (RP-RE-3 structural guard): this section is CSS-only. It restyles the
+ * shared kit — the `.app` shell, `.side` drawer, `.card`/table scroll, the ⌘K
+ * palette (`.cmdk*`), the per-list `search_box` (`.search`/`.search-input`),
+ * and the `skeleton/1` primitive. It NEVER touches value resolution: a
+ * %Samen.Masked{} renders `••••` at every breakpoint because masking lives in
+ * the value layer, not here (design §1.5 / AC-G20-2).
+ * ========================================================================= */
+
+/* --- ⌘K command palette (E4.3 surface — shipped without styling; dressed here) --- */
+.pane { padding: 22px 30px 30px; }
+.cmdk {
+  max-width: 640px; margin: 0 auto;
+  background: var(--card); border: 1px solid var(--line2);
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 10px 30px rgba(20, 22, 30, .08);
+}
+.cmdk-form { padding: 4px; border-bottom: 1px solid var(--line); }
+.cmdk-input {
+  width: 100%; border: 0; outline: none; background: transparent;
+  padding: 14px 16px; font-size: 15px; color: var(--ink);
+  font-family: inherit; letter-spacing: -0.01em;
+}
+.cmdk-input::placeholder { color: var(--faint); }
+.cmdk-results { list-style: none; max-height: 60vh; overflow-y: auto; }
+.cmdk-hit {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 16px; border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.cmdk-hit:last-child { border-bottom: none; }
+.cmdk-hit:hover { background: #FCFCFD; }
+.cmdk-kind {
+  flex: 0 0 auto; font-size: 10.5px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--brand);
+  background: var(--brand-wash); border: 1px solid #DCE0FA;
+  border-radius: 6px; padding: 3px 8px;
+}
+.cmdk-label { min-width: 0; font-size: 13.5px; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk-empty { padding: 22px 16px; color: var(--faint); font-size: 13px; text-align: center; }
+
+/* --- per-list search box (E4.3 / carry b): the .search slot as a real form --- */
+.search form, form.search { display: contents; }
+.search .search-input {
+  flex: 1 1 auto; min-width: 0; border: 0; outline: none;
+  background: transparent; font: inherit; font-size: 13px;
+  color: var(--ink); padding: 0;
+}
+.search .search-input::placeholder { color: var(--faint); }
+.search .i { width: 15px; height: 15px; flex-shrink: 0; color: var(--faint); }
+
+/* --- skeleton loading primitive (E6.2) + shimmer keyframes --- */
+@keyframes samen-shimmer {
+  0% { background-position: -320px 0; }
+  100% { background-position: 320px 0; }
+}
+.skeleton { display: flex; flex-direction: column; gap: 12px; padding: 8px 2px; }
+.skeleton-row { display: flex; align-items: center; gap: 12px; }
+.skeleton-line {
+  height: 12px; border-radius: 6px; flex: 1 1 auto;
+  background: linear-gradient(90deg, #EDEDF1 25%, #F5F5F8 50%, #EDEDF1 75%);
+  background-size: 640px 100%;
+  animation: samen-shimmer 1.3s ease-in-out infinite;
+}
+.skeleton-line.narrow { flex: 0 0 22%; }
+.skeleton-line.avatar { flex: 0 0 28px; height: 28px; border-radius: 50%; }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-line { animation: none; }
+}
+
+/* --- responsive data_table variant: bounded horizontal scroll (never clips a cell) --- */
+.table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* --- off-canvas sidebar drawer scaffold (kit affordance; pure-CSS checkbox toggle) --- */
+.nav-toggle-cb { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+.nav-hamburger {
+  display: none; position: fixed; top: 16px; left: 16px; z-index: 50;
+  width: 40px; height: 40px; border-radius: 10px; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line2);
+  align-items: center; justify-content: center; color: var(--ink);
+  box-shadow: 0 1px 3px rgba(20, 22, 30, .1);
+}
+.nav-hamburger .i { width: 18px; height: 18px; }
+.nav-scrim {
+  display: none; position: fixed; inset: 0; z-index: 44;
+  background: rgba(15, 16, 24, .38);
+}
+
+/* ---------------------------------------------------------------------------
+ * Breakpoint 1 — tablet (≤ 860px): the two-pane grid stays but tightens.
+ * ------------------------------------------------------------------------- */
+@media (max-width: 860px) {
+  .app { grid-template-columns: 216px 1fr; padding: 8px; gap: 8px; }
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+  .split { grid-template-columns: 1fr; }
+  .top, .wrap, .pane { padding-left: 20px; padding-right: 20px; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Breakpoint 2 — mobile (≤ 560px): single column; sidebar becomes an
+ * off-canvas drawer behind the hamburger; tables scroll; metrics stack.
+ * ------------------------------------------------------------------------- */
+@media (max-width: 560px) {
+  .app { grid-template-columns: 1fr; height: auto; min-height: 100vh; padding: 0; gap: 0; }
+  .main { border-radius: 0; border: none; }
+
+  /* Sidebar slides in from the left; hidden until the checkbox is toggled. */
+  .side {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 46;
+    width: 272px; max-width: 86vw; border-radius: 0;
+    transform: translateX(-104%);
+    transition: transform .22s ease;
+    box-shadow: 0 0 40px rgba(20, 22, 30, .18);
+  }
+  .nav-toggle-cb:checked ~ .side { transform: translateX(0); }
+  .nav-toggle-cb:checked ~ .nav-scrim { display: block; }
+  .nav-hamburger { display: inline-flex; }
+
+  /* Give the main pane room for the fixed hamburger. */
+  .top { padding-top: 66px; }
+
+  .metrics { grid-template-columns: 1fr; padding-left: 16px; padding-right: 16px; }
+  .top, .wrap, .pane { padding-left: 16px; padding-right: 16px; }
+  .head h1 { font-size: 22px; }
+  .mask-bar, .tb-bar, .tabs { margin-left: 16px; margin-right: 16px; }
+  .tabs { padding-left: 4px; padding-right: 4px; overflow-x: auto; }
+
+  /* Tables never clip: horizontal scroll inside their own container. */
+  .card { overflow-x: auto; }
+  .cmdk { margin: 0; box-shadow: none; }
+}

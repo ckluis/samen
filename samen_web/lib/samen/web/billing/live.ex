@@ -45,13 +45,7 @@ defmodule Samen.Web.Billing.Live do
         <.switcher mount={@mount} org_id={@org_id} return_to={@return_to} compact />
       </:switcher>
       <:search>
-        <div class="search">
-          <svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
-          </svg>
-          Search customers, invoices…
-          <span class="kbd">⌘K</span>
-        </div>
+        <.search_box org_id={@org_id} placeholder="Search customers, invoices…" />
       </:search>
 
       <.module_nav org_id={@org_id} active={@active} />

@@ -92,6 +92,17 @@ defmodule Samen.UI do
   @doc """
   The two-pane app shell: a `:sidebar` slot on the left, the default inner block
   (the `<main>`) on the right. Mirrors `.app > .side + .main` from the mockups.
+
+  ## Responsive drawer (WS-E E6.1, ADR-030 — CSS-only affordance)
+
+  The shell carries a hidden checkbox (`#samen-nav-toggle`) plus a hamburger
+  `<label>` and a scrim `<label>`. On desktop both labels are `display:none` and
+  the checkbox does nothing — the 252px grid is unchanged. At the mobile
+  breakpoint the sidebar becomes an off-canvas drawer that the hamburger opens
+  and the scrim closes, driven ENTIRELY by CSS `:checked ~` sibling rules (no JS
+  framework, no hook). The checkbox/labels are out-of-flow (fixed / display:none),
+  so the grid still sees exactly `.side` + `.main` as its two items. Purely
+  layout — it renders no field values, so it has no masking surface.
   """
   slot :sidebar, required: true
   slot :inner_block, required: true
@@ -99,7 +110,14 @@ defmodule Samen.UI do
   def app_shell(assigns) do
     ~H"""
     <div class="app">
+      <input type="checkbox" id="samen-nav-toggle" class="nav-toggle-cb" aria-hidden="true" tabindex="-1" />
+      <label for="samen-nav-toggle" class="nav-hamburger" aria-label="Toggle navigation menu">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </label>
       {render_slot(@sidebar)}
+      <label for="samen-nav-toggle" class="nav-scrim" aria-hidden="true"></label>
       <main class="main">
         {render_slot(@inner_block)}
       </main>
@@ -317,15 +335,24 @@ defmodule Samen.UI do
 
     * `action`  — the search page path (default `/search`).
     * `org_id`  — carried through so the target page resolves the same current org.
-    * `placeholder` — input copy (default shows the ⌘K hint).
+    * `placeholder` — input copy.
+
+  The input carries `data-cmdk` so the framework-global ⌘K shortcut (an inline
+  script in the shared root layout, WS-E E6 / ADR-027 carry) can focus it from
+  anywhere on a list page. It renders the leading magnifier glyph + a `⌘K` kbd
+  hint, so it is a visual drop-in for the old static `.search` placeholder. No
+  value is rendered here (it is a navigation affordance) — no masking surface.
   """
   attr :action, :string, default: "/search"
   attr :org_id, :string, default: nil
-  attr :placeholder, :string, default: "Search…  ⌘K"
+  attr :placeholder, :string, default: "Search…"
 
   def search_box(assigns) do
     ~H"""
     <form class="search" method="get" action={@action} role="search">
+      <svg class="i" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
+      </svg>
       <input
         type="search"
         name="q"
@@ -333,7 +360,9 @@ defmodule Samen.UI do
         placeholder={@placeholder}
         autocomplete="off"
         aria-label="Search"
+        data-cmdk
       />
+      <span class="kbd">⌘K</span>
       <input :if={@org_id} type="hidden" name="org" value={@org_id} />
     </form>
     """
@@ -505,6 +534,14 @@ defmodule Samen.UI do
   `<th>`s; the default inner block supplies the `<tbody>` rows (`<tr class="...">`).
   The kit does NOT interpret cell values — a row renders whatever the caller puts
   in it, so a `%Samen.Masked{}` cell shows `••••` via `Phoenix.HTML.Safe`.
+
+  ## Responsive variant (WS-E E6.1, ADR-030)
+
+  The `<table>` is wrapped in a `.table-scroll` container that, at the mobile
+  breakpoint, gives the table a bounded HORIZONTAL scroll instead of clipping or
+  reflowing cells. This is deliberately value-blind: it never reads, stringifies,
+  or reflows a cell VALUE (which would be the only way to disturb masking), so a
+  `%Samen.Masked{}` cell renders `••••` identically at every width (AC-G20-2).
   """
   slot :head, required: true
   slot :inner_block, required: true
@@ -512,14 +549,16 @@ defmodule Samen.UI do
   def data_table(assigns) do
     ~H"""
     <div class="card">
-      <table>
-        <thead>
-          <tr>{render_slot(@head)}</tr>
-        </thead>
-        <tbody>
-          {render_slot(@inner_block)}
-        </tbody>
-      </table>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>{render_slot(@head)}</tr>
+          </thead>
+          <tbody>
+            {render_slot(@inner_block)}
+          </tbody>
+        </table>
+      </div>
     </div>
     """
   end
@@ -571,6 +610,10 @@ defmodule Samen.UI do
   attr :id, :string, default: "list"
   attr :page, :any, required: true, doc: "a %Samen.Web.Page{}"
   attr :state, :any, default: nil, doc: "a %Samen.Web.ListState{} (or nil)"
+  attr :loading, :boolean,
+    default: false,
+    doc: "render the skeleton/1 placeholder instead of rows/empty (WS-E E6.2)"
+
   attr :filter, :string, default: nil
   attr :selected, :any, default: nil, doc: "MapSet of selected row ids"
   attr :selectable, :boolean, default: false
@@ -627,16 +670,19 @@ defmodule Samen.UI do
         </div>
       </div>
 
-      <%= if @page.items == [] do %>
-        <%= if @empty != [] do %>
+      <%= cond do %>
+        <% @loading -> %>
+          <div class="card list-loading" style="padding:14px 16px">
+            <.skeleton rows={5} avatar />
+          </div>
+        <% @page.items == [] and @empty != [] -> %>
           {render_slot(@empty)}
-        <% else %>
+        <% @page.items == [] -> %>
           <.empty_state class="list-empty" title={@empty_text} body={@empty_body} icon={@empty_icon}>
             <:actions :if={@empty_actions != []}>{render_slot(@empty_actions)}</:actions>
             <:sample :if={@empty_sample != []}>{render_slot(@empty_sample)}</:sample>
           </.empty_state>
-        <% end %>
-      <% else %>
+        <% true -> %>
         <.data_table>
           <:head>
             <th :if={@selectable} scope="col" class="list-select-col" style="width:28px">
@@ -786,6 +832,44 @@ defmodule Samen.UI do
       </div>
       <div :if={@sample != []} class="empty-sample" style="margin-top:4px;font-size:12px;color:var(--muted)">
         {render_slot(@sample)}
+      </div>
+    </div>
+    """
+  end
+
+  # ---------------------------------------------------------------------------
+  # Skeleton (WS-E E6.2, ADR-030 — the loading-placeholder primitive)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  A loading skeleton (WS-E E6.2): `rows` shimmer placeholder lines standing in for
+  content that has not loaded yet. `avatar` prepends a round avatar placeholder per
+  row (the list/table shape). Paired with the `samen-shimmer` keyframes in
+  `samen_ui.css`; honours `prefers-reduced-motion`.
+
+  PURELY PRESENTATIONAL — it renders NO data at all (abstract bars only), so it has
+  no masking surface and cannot leak a value it never receives. This ships the
+  primitive + wires it into `list_view/1`'s `loading` state; the fleet-wide
+  `assign_async` conversion of every list is explicitly DEFERRED (design §6,
+  decompose rule).
+  """
+  attr :rows, :integer, default: 5
+  attr :avatar, :boolean, default: false
+  attr :class, :any, default: nil
+
+  def skeleton(assigns) do
+    assigns =
+      assigns
+      |> assign(:count, max(assigns.rows, 1))
+      |> assign(:class_attr, Enum.join(["skeleton" | List.wrap(assigns.class)], " "))
+
+    ~H"""
+    <div class={@class_attr} role="status" aria-busy="true" aria-live="polite">
+      <span class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Loading…</span>
+      <div :for={_ <- 1..@count} class="skeleton-row" aria-hidden="true">
+        <div :if={@avatar} class="skeleton-line avatar"></div>
+        <div class="skeleton-line narrow"></div>
+        <div class="skeleton-line"></div>
       </div>
     </div>
     """

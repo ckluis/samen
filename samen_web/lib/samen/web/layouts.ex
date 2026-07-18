@@ -76,6 +76,25 @@ defmodule Samen.Web.Layouts do
       </head>
       <body>
         {@inner_content}
+        <%!--
+          WS-E E6 / ADR-027 carry — the GLOBAL ⌘K (Ctrl+K) keyboard shortcut.
+          The samen_web asset pipeline ships CSS only (no esbuild), so the palette's
+          focus-from-anywhere shortcut is a tiny dependency-free inline listener,
+          inherited by every host through this shared root layout at ≈0 authored LOC.
+          It focuses the ⌘K palette input (`#cmdk-input`) when present, else the
+          per-list `search_box` input (`[data-cmdk]`), else navigates to that box's
+          search form. Purely a focus/navigation affordance — it renders/reads no
+          value, so it cannot touch masking.
+        --%>
+        <script nonce={assigns[:csp_nonce]}>
+          document.addEventListener("keydown", function (e) {
+            if (!(e.metaKey || e.ctrlKey) || (e.key !== "k" && e.key !== "K")) return;
+            var el = document.getElementById("cmdk-input") || document.querySelector("input[data-cmdk]");
+            if (el) { e.preventDefault(); el.focus(); if (el.select) el.select(); return; }
+            var form = document.querySelector("form.search[action]");
+            if (form) { e.preventDefault(); form.submit(); }
+          });
+        </script>
       </body>
     </html>
     """
