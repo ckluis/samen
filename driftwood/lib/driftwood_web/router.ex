@@ -35,9 +35,19 @@ defmodule DriftwoodWeb.Router do
   #     (`Driftwood.Directory.orgs/0` → `[{tenant_org_id, name}]` over the operator accounts).
   # A module attribute (not a function) so it is a compile-time literal usable inside the
   # `samen_module_routes` macro expansion; both values are session-safe (a uuid + an MFA of atoms).
+  # F2 (ADR-031) — the launch AUTH gate seams every tenant/shared mount carries:
+  #   :authn          — `{:app_env, :driftwood, :auth_required?}`: OFF in dev/test (the
+  #     query-param convenience identity stays), ON in prod (the actor is derived only from
+  #     an authenticated session — see docs/launch-checklist.md).
+  #   :authorized_orgs — the membership seam `Samen.Web.CurrentOrg` calls to constrain the
+  #     tenant actor to the authenticated user's OWN orgs (`{mod, fun, args}`, user_id
+  #     appended). Driftwood's reference sources it from `Driftwood.Auth`; a real deploy
+  #     points it at `Identity.Membership` rows.
   @current_org_labels %{
     default_org_id: Driftwood.Seeds.blue_ridge_org_id(),
-    org_directory: {Driftwood.Directory, :orgs, []}
+    org_directory: {Driftwood.Directory, :orgs, []},
+    authn: {:app_env, :driftwood, :auth_required?},
+    authorized_orgs: {Driftwood.Auth, :authorized_org_ids, []}
   }
 
   pipeline :browser do
@@ -45,6 +55,10 @@ defmodule DriftwoodWeb.Router do
     plug(:fetch_session)
     plug(:put_root_layout, html: {DriftwoodWeb.Layouts, :root})
     plug(:protect_from_forgery)
+    # F2 (ADR-031) — the prod auth gate. NO-OP in dev/test (`:auth_required?` false: the
+    # query-param convenience identity stays); in prod it redirects unauthenticated requests
+    # to /login (auth + health routes exempted). Defense-in-depth over the CurrentOrg actor gate.
+    plug(DriftwoodWeb.Auth)
   end
 
   pipeline :api do
@@ -64,6 +78,13 @@ defmodule DriftwoodWeb.Router do
     get("/", PageController, :index)
     get("/healthz", PageController, :healthz)
     get("/readyz", PageController, :readyz)
+
+    # F2 (ADR-031) — the BYO-auth login/logout surface. The prod path derives the tenant
+    # actor from the session this login establishes (day-1 login exists); a production deploy
+    # swaps the verifier for phx.gen.auth or an IdP callback — the session seam is unchanged.
+    get("/login", AuthController, :new)
+    post("/login", AuthController, :create)
+    get("/logout", AuthController, :delete)
 
     # The freight vertical 20% (stays driftwood-local — freight-shaped resources).
     live("/broker", BrokerLive)

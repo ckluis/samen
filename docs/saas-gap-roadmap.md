@@ -211,6 +211,45 @@ Pre-publish honesty + public-repo hygiene pass. All five units shipped:
 
 ---
 
+## WS-F2 — Launchability On-Ramp (2026-07-20)
+
+Doc-scoped phase with ONE reference implementation: prove day-1 login exists and reframe the
+operator TODOs as a walkable launch gate. All four units shipped:
+
+1. **BYO-auth ADR + reference wiring (ADR-031).** The launch-blocking hole was
+   `Samen.Web.CurrentOrg.resolve/3` trusting `params["org"]` as identity. Chose a **minimal
+   session-auth verifier over phx.gen.auth** (phx.gen.auth forks a parallel password schema past
+   the vaulted `Identity.User`; the framework owns the *seam*, not the IdP). Shipped: framework
+   `Samen.Web.Auth` (the `"samen_current_user"` authenticated-principal seam, session-only) + a
+   fail-closed prod path in `CurrentOrg.resolve/3` (opt-in per mount via `:authn` +
+   `:authorized_orgs` labels; OFF by default so demo/pawchart/all existing tests are untouched).
+   Driftwood is the reference: `Driftwood.Auth` (PBKDF2 verifier, `:crypto`, no new dep, no
+   committed credential), `DriftwoodWeb.Auth` (runtime-gated module plug + login/logout session
+   helpers), `DriftwoodWeb.AuthController` (`/login` + `/logout`), router wires `:authn` to
+   `{:app_env, :driftwood, :auth_required?}`. Red-path: an unauthenticated prod request derives NO
+   actor; an authenticated user cannot act on a non-member org (`auth_prodpath_test.exs`, 13 tests).
+   Sabotage `17-f2-authn-actor-gate-bypass.patch` flips both prod-path RED tests.
+2. **First-real-launch checklist (`docs/launch-checklist.md`).** The operator TODOs reframed as a
+   top-to-bottom launch gate: auth (arm + BYO IdP), ESP, Stripe keys, KMS/secrets, deploy, drills —
+   each labeled BLOCKER/HONESTY/DRILL, each pointing at the fail-honest seam it backs.
+3. **BYO-ESP how-to (`docs/guides/byo-esp.md`).** How to implement `Samen.Delivery.Adapter` in the
+   HOST (gen_smtp or an HTTP ESP) without samen owning an adapter — the fail-honest boundary holds.
+4. **Tenant onboarding** — folded into ADR-031 §4 (provision org → user+membership → credential →
+   first login), not a separate build.
+
+**F2 carries (do not lose):**
+- **Operator-plane (SaaS-staff) auth** — F2 scoped to the TENANT actor. The `/operator/*` surfaces
+  still assume a trusted seat; gate them with the same `Samen.Web.Auth` principal seam before
+  exposing off-localhost.
+- **Membership-seam for production** — driftwood's `:authorized_orgs` sources from the credential
+  store (reference); point it at real `Identity.Membership` rows for prod (the authorization SoT).
+- **Actor role on the authenticated path** is still `:member` (not read from the membership row) —
+  enrich from `Membership.role` when operator-plane/tenant-admin distinctions are wired.
+- Auth is opt-in per mount and OFF by default; a real launch sets `:auth_required?` true in prod
+  config (see the checklist). The reference verifier is PBKDF2-over-config, NOT a production IdP.
+
+---
+
 ## State after WS-A/B/D (2026-07-16) — the re-rank
 
 **Shipped: 11 gaps** (G1/G2/G3/G5 in WS-A · G6/G7/G17 + G12-seed in WS-B ·

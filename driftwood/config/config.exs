@@ -64,6 +64,14 @@ config :driftwood, operator_org_id: "0f000000-0000-4000-8000-0000000000aa"
 
 config :ash, disable_async?: true
 
+# F2 (ADR-031) — the launch AUTH gate. Default OFF: dev/test keep the query-param convenience
+# identity (a `?org=<uuid>` is trusted, so the dogfood needs no login). A REAL launch sets this
+# `true` in a prod config so the tenant actor is derived ONLY from an authenticated session (see
+# docs/launch-checklist.md). `:auth_credentials` is empty by design — this PUBLIC repo commits no
+# working password; the operator provisions credentials (phx.gen.auth / IdP for real).
+config :driftwood, auth_required?: false
+config :driftwood, auth_credentials: %{}
+
 config :driftwood, Driftwood.Repo,
   migration_primary_key: [name: :id, type: :binary_id]
 

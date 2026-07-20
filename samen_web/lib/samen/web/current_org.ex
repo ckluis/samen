@@ -72,13 +72,82 @@ defmodule Samen.Web.CurrentOrg do
   Resolution order (first non-nil wins): param → session → mount default label → first listable
   org → `nil`. See the moduledoc. Never raises; a mount without a directory simply reaches the
   default label or `nil`.
+
+  ## The authenticated prod-path gate (F2 / ADR-031)
+
+  The order above is the DEV/dogfood convenience path: a `?org=<uuid>` is trusted as identity.
+  For a real launch that is an authentication hole — anyone could act as any org's member by
+  typing its id. When the mount opts into `authn` (a host label; driftwood wires it to a
+  runtime `:auth_required?` flag), `resolve/3` switches to the FAIL-CLOSED prod path:
+
+    1. the session MUST carry an authenticated principal (`Samen.Web.Auth.authenticated_user_id/1`,
+       set only by a real host login — never a query param); absent it → `nil` (NO actor);
+    2. the org is constrained to the principal's authorized set (the host-wired `:authorized_orgs`
+       seam — an `{mod, fun, args}` returning `[org_id, …]`); a `?org=`/session org OUTSIDE that
+       set never resolves — the viewer lands on their own first authorized org, never the target;
+    3. no principal, no seam, or an empty authorized set → `nil` (NO actor).
+
+  The security boundary is this actor-derivation step, not the `SessionController` write: even a
+  session carrying an unauthorized org yields no actor for it here. Dev/test keep the query-param
+  convenience unchanged (the gate is off unless the mount opts in).
   """
   @spec resolve(Mount.t() | nil, map(), map()) :: String.t() | nil
   def resolve(mount, params, session) do
-    param_org(params) ||
-      session_org(session) ||
-      default_label(mount) ||
-      first_listable_org_id(mount)
+    if authn_required?(mount) do
+      resolve_authorized(mount, params, session)
+    else
+      param_org(params) ||
+        session_org(session) ||
+        default_label(mount) ||
+        first_listable_org_id(mount)
+    end
+  end
+
+  # Whether this mount requires an authenticated session before it derives an actor. Off by
+  # default (dev/test convenience). A host opts in via the `:authn` label: `:required` (always
+  # on) or `{:app_env, app, key}` (runtime-flippable — driftwood points this at
+  # `:auth_required?`, false in dev/test, true in prod).
+  defp authn_required?(%Mount{} = mount) do
+    case Mount.label(mount, :authn, nil) do
+      :required ->
+        true
+
+      {:app_env, app, key} when is_atom(app) and is_atom(key) ->
+        !!Application.get_env(app, key, false)
+
+      _ ->
+        false
+    end
+  end
+
+  defp authn_required?(_), do: false
+
+  # The fail-closed prod path: an authenticated principal, constrained to its authorized orgs.
+  defp resolve_authorized(mount, params, session) do
+    with user_id when is_binary(user_id) <- Samen.Web.Auth.authenticated_user_id(session),
+         [_ | _] = authorized <- authorized_org_ids(mount, user_id) do
+      requested = param_org(params) || session_org(session)
+      if requested in authorized, do: requested, else: List.first(authorized)
+    else
+      _ -> nil
+    end
+  end
+
+  # The host-wired `:authorized_orgs` membership seam — `{mod, fun, args}`, called with the
+  # authenticated `user_id` appended, returning `[org_id, …]`. Absent/erroring → `[]` (deny).
+  defp authorized_org_ids(%Mount{} = mount, user_id) do
+    case Mount.label(mount, :authorized_orgs, nil) do
+      {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
+        case apply(mod, fun, args ++ [user_id]) do
+          list when is_list(list) -> Enum.filter(list, &is_binary/1)
+          _ -> []
+        end
+
+      _ ->
+        []
+    end
+  rescue
+    _ -> []
   end
 
   defp param_org(params) when is_map(params), do: present(Map.get(params, "org"))

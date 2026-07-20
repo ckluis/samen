@@ -179,6 +179,7 @@ defmodule Samen.Web.Mount do
     recipient_id
     flags_namespace flags_path revenue_plan_loader
     current_user_id current_membership_id
+    authn authorized_orgs
   )a
 
   @label_key_strings Map.new(@label_keys, fn k -> {Atom.to_string(k), k} end)
