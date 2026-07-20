@@ -150,7 +150,7 @@ defmodule Samen.Scopes.Marketing.Blueprint do
   # Subscriber — 🔒 PII: email (vault :pii_email). Org-scoped.
   # Tracks consent status and subscription status.
   # ---------------------------------------------------------------------------
-  defmacro define_subscriber(module, otp_app, domain, repo, abbrev) do
+  defmacro define_subscriber(module, otp_app, domain, repo, abbrev, consent_event_mod) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -159,6 +159,15 @@ defmodule Samen.Scopes.Marketing.Blueprint do
         `email` is vault-routed PII (masked by default; plaintext only via the declared
         reveal action under a grant). Org-scoped. Tracks consent status (opted-in /
         opted-out) and subscription status (active / unsubscribed / bounced).
+
+        ## Consent ledger (F3 Unit 1)
+
+        The `consent_at` column is a mutable CACHE of the opt-in timestamp. The SOURCE
+        OF TRUTH for consent is the append-only `ConsentEvent` ledger: on every
+        create/update, `Samen.Marketing.ConsentChange` appends a `:granted` / `:withdrawn`
+        row (best-effort, never aborts the write). Derive the current state via
+        `Samen.Marketing.Consent.state/3` — latest-event-wins, and it survives a subject
+        crypto-shred (the immutable ledger row outlives the vaulted email).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -188,6 +197,16 @@ defmodule Samen.Scopes.Marketing.Blueprint do
           # Scalar PII: column carries the pii_ prefix (pii_msu_email).
           pii_attribute(:email, :string, vault: :pii_email)
           reveal(:reveal_subscriber)
+        end
+
+        # F3 Unit 1: the consent-capture seam. On every create/update, append ONE
+        # bounded, non-PII ConsentEvent row per consent transition via
+        # `Samen.Marketing.ConsentChange` — best-effort (an append failure NEVER aborts
+        # the subscriber write; the subscriber state is load-bearing, the ledger rides
+        # along), exactly like the Billing SubscriptionMovement seam. Verticals inherit
+        # emission at 0 LOC (the change is on the kernel blueprint).
+        changes do
+          change({Samen.Marketing.ConsentChange, event_resource: unquote(consent_event_mod)})
         end
 
         actions do
@@ -689,8 +708,14 @@ defmodule Samen.Scopes.Marketing.Blueprint do
         end
 
         # F3.5 same-org FK: a suppression row may only reference a same-org subscriber.
+        # F3 (Unit 6 carry): `notes` is a TENANT free-text column (outside the vault's
+        # crypto-shred guarantee — docs/free-text-pii-residue.md). `Samen.Pii.FreeTextScan`
+        # is the write-boundary chokepoint: a note that is ITSELF a bare email/SSN/phone
+        # shape is REFUSED at `before_action` (fail-closed) before any row lands. Every
+        # marketing mount inherits this at 0 authored LOC (framework-first).
         changes do
           change({Samen.Policy.SameOrgFk, relationships: [:subscriber]})
+          change({Samen.Pii.FreeTextScan, fields: [:notes]})
         end
 
         actions do
@@ -703,6 +728,135 @@ defmodule Samen.Scopes.Marketing.Blueprint do
           end
 
           policy action_type([:create, :update, :destroy]) do
+            forbid_unless(Samen.Policy.OrgScope)
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
+            authorize_if(always())
+          end
+        end
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # ConsentEvent (`<abbrev>_consent_event`) — the append-only marketing-consent
+  # ledger (F3 Unit 1; modeled line-for-line on the `mov` subscription-movement
+  # ledger, Samen.Scopes.Billing.Blueprint.define_subscription_event / ADR-017).
+  # One row appended per consent transition by `Samen.Marketing.ConsentChange`.
+  # Token-blind by construction: every column is a bounded id / enum / string /
+  # timestamp — NO vaulted PII. Org-scoped. Soft ref (id only) to a subscriber.
+  # ---------------------------------------------------------------------------
+  defmacro define_consent_event(module, otp_app, domain, repo, abbrev) do
+    quote do
+      defmodule unquote(module) do
+        @moduledoc """
+        Marketing.ConsentEvent — the append-only marketing-consent ledger (F3 Unit 1).
+
+        One row is appended per consent transition by `Samen.Marketing.ConsentChange`,
+        carrying the `event` (`:granted` / `:withdrawn`), the `source`, the `purpose`,
+        and a `subject_hash` — a deterministic keyed pseudonym of the subject (the
+        trace-sink pattern, `Samen.WideEvent.for_subject/1`).
+
+        ## Consent state is DERIVED from this ledger
+
+        `Samen.Marketing.Consent.state/3` folds the subscriber's rows latest-event-wins
+        into `:granted | :withdrawn | :none`. This ledger is the SOURCE OF TRUTH for
+        consent; the mutable `consent_at` column on `Subscriber` is retained only as a
+        convenience cache (it can drift; the ledger cannot — it is append-only).
+
+        ## Suppression HASH survives erasure
+
+        `subject_hash` is computed at append time (while the subject's key still exists)
+        and stored as bytes. A subject crypto-shred (`Samen.Erasure.shred/2`) destroys
+        the subscriber's vaulted email but NEVER touches this immutable ledger row — so a
+        `:withdrawn` event, its `subject_hash`, and therefore the "do-not-contact" fact
+        remain honored after the PII is unrecoverable (mirrors the trace-sink pseudonym:
+        the stored handle outlives the key).
+
+        ## Append-only
+
+        No `:update` / `:destroy` action is exposed — a consent event is an immutable
+        historical fact. The row outlives the mutable subscriber it describes.
+
+        ## No PII by construction
+
+        Every column is a bounded id (uuid soft ref), an enum, a bounded string, a
+        keyed hash, or a timestamp — the same discipline as `mov` / `Samen.WideEvent`.
+        The resource carries no `pii do` block and no free-text plaintext column.
+
+        Org-scoped: `OrgScope` read + admin-gated append (the change writes with
+        `authorize?: false` as a framework emit, like the movement ledger).
+        """
+        use Samen.Resource,
+          otp_app: unquote(otp_app),
+          domain: unquote(domain),
+          data_layer: AshPostgres.DataLayer,
+          authorizers: [Ash.Policy.Authorizer],
+          abbrev: unquote(abbrev)
+
+        postgres do
+          table("#{unquote(abbrev)}_consent_event")
+          repo(unquote(repo))
+        end
+
+        attributes do
+          # Bounded soft ref (id only — NOT belongs_to, so a shredded/deleted
+          # subscriber never blocks the immutable historical row).
+          attribute(:subscriber_id, :uuid, public?: true, allow_nil?: false)
+
+          # The consent transition this row records (bounded enum).
+          attribute(:event, :atom,
+            public?: true,
+            allow_nil?: false,
+            constraints: [one_of: [:granted, :withdrawn]]
+          )
+
+          # Where the consent came from (bounded string — e.g. "signup", "import",
+          # "crm", "unsubscribe_link"). Not free-text subject content.
+          attribute(:source, :string, public?: true)
+
+          # Why the consent applies (bounded enum — the processing purpose).
+          attribute(:purpose, :atom,
+            public?: true,
+            default: :marketing,
+            constraints: [one_of: [:marketing, :transactional, :product_updates]]
+          )
+
+          # The erasure-surviving keyed pseudonym of the subject (trace-sink pattern).
+          # A one-way handle — NOT a raw id, NOT PII. Persists post-shred.
+          attribute(:subject_hash, :string, public?: true)
+
+          # Microsecond precision: makes latest-event-wins deterministic even for two
+          # transitions in the same wall-clock second.
+          attribute(:occurred_at, :utc_datetime_usec, public?: true, allow_nil?: false)
+        end
+
+        actions do
+          # Append-only: read + a bounded create action ONLY. No update/destroy — a
+          # consent event is an immutable fact.
+          defaults([:read])
+
+          create :append do
+            accept([
+              :subscriber_id,
+              :event,
+              :source,
+              :purpose,
+              :subject_hash,
+              :occurred_at,
+              :org_id
+            ])
+          end
+        end
+
+        policies do
+          policy action_type(:read) do
+            authorize_if(Samen.Policy.OrgScope)
+          end
+
+          # Append is admin-gated on the tenant plane; the framework change writes
+          # with authorize?: false (a system-emitted row), so this gate governs any
+          # DIRECT caller.
+          policy action_type(:create) do
             forbid_unless(Samen.Policy.OrgScope)
             forbid_unless({Samen.Policy.RoleAtLeast, role: :admin})
             authorize_if(always())

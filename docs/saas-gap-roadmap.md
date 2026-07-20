@@ -296,28 +296,35 @@ where the brief mandates, a committed sabotage patch replayed by `scripts/sabota
    (contain → scope via `AuditChain`/`Dsar.affected_subjects` → tokens-vs-plaintext assessment → notification
    guidance → remediation), `docs/free-text-pii-residue.md` (the non-shreddable free-text residue + controls).
 
-**F3 CARRIES (do not lose):**
+**F3 CARRIES (both CLOSED in F3b, 2026-07-20):**
 
-- **UNIT 1 — Append-only ConsentEvent ledger — NOT SHIPPED (carried).** The highest-effort unit: it needs a
-  NEW kernel resource on the Marketing scope (append-only, modeled EXACTLY on the `mov` ledger —
-  `Samen.Scopes.Billing.Blueprint.define_subscription_event` + `Samen.Billing.SubscriptionMovement` are the
-  line-for-line template) with events `granted`/`withdrawn` + `source` + `purpose`, consent state DERIVED from
-  the ledger (latest-event-wins) replacing the mutable `msu_consent_at` column (`marketing/blueprint.ex`
-  ~181-194), and a suppression HASH that survives erasure (mirror the trace-sink pseudonym: a deterministic
-  keyed hash of the subject so "do-not-contact" is honored after the PII is crypto-shredded). Deferred because
-  it requires: (a) abbrev allocation via `mix samen.abbrev.reserve` for EACH marketing host (demo/driftwood/
-  pawchart), (b) wiring the new resource into `Samen.Scopes.Marketing.__using__` + blueprint, (c) migrations in
-  demo/driftwood/pawchart + samen_web test-support, (d) a `Samen.Marketing.ConsentChange` on Subscriber. This
-  is a clean dedicated session (the mov template makes it mechanical); it is migration-heavy across every
-  marketing mount, so it was carried rather than half-shipped and left CI red. Sabotage to add: ledger
-  immutability (no update/destroy action; a patch adding a mutable consent update must fail an immutability test).
+- **UNIT 1 — Append-only ConsentEvent ledger — CLOSED (F3b).** Shipped as a NEW append-only kernel resource on
+  the Marketing scope (`Samen.Scopes.Marketing.Blueprint.define_consent_event`, modeled line-for-line on the
+  `mov` ledger `define_subscription_event`): events `granted`/`withdrawn` + `source` + bounded `purpose`, no
+  update/destroy action, no PII column. Consent state is DERIVED from the ledger (`Samen.Marketing.Consent.state/3`,
+  latest-event-wins, `occurred_at` at microsecond precision for a deterministic tiebreak) and is now the SOURCE
+  OF TRUTH; the mutable `consent_at`/`msu_consent_at` column is kept only as a documented cache (Subscriber
+  blueprint moduledoc). The erasure-surviving suppression HASH is `subject_hash` — the trace-sink pseudonym
+  (`Samen.WideEvent.for_subject/1`) computed at append time and stored on the immutable row, so a `:withdrawn`
+  verdict + its hash outlive a subject crypto-shred (proven by the erasure-survival test). Capture seam:
+  `Samen.Marketing.ConsentChange` on Subscriber (best-effort after_action, like `SubscriptionMovement`). Wired
+  into `Samen.Scopes.Marketing.__using__` + blueprint; abbrevs reserved via the sanctioned allocator per host
+  (`demo/mce · driftwood/fmv · pawchart/vmv · samen_web/wmv · samen_core-fixture/sxv`); migrations added in
+  demo/driftwood/pawchart + samen_web test-support + the samen_core suppression fixture. `refuse_if_undeliverable`
+  in `samen_web/.../marketing/reads.ex` gained a fail-closed `:consent_withdrawn` conjunct off the ledger.
+  Trio: `demo/test/marketing_consent_ledger_test.exs` (green append+derive · red append-only immutability · red
+  erasure-survival · no-PII). Sabotage `21-f3-consent-ledger-immutability.patch` (adds a mutable `:mutate_consent`
+  update action → flips the immutability test).
 
-- **UNIT 6 code half — pii_reason_scan over TENANT free-text at write — NOT SHIPPED (carried).**
-  `Samen.PiiReasonScan` already exists and is wired for OPERATOR-authored reasons (impersonation/reveal/audit
-  detail). Extending it to a TENANT free-text write path (e.g. benign-named freeform columns like `drv_notes`,
-  the H-2 residue) needs a concrete write chokepoint hook (`Samen.Pii.WriteGuard` or a per-resource change) and
-  was deferred with the residue documented instead (`docs/free-text-pii-residue.md`). The doc half of Unit 6
-  shipped; the runtime tenant-text scan is the carry.
+- **UNIT 6 code half — pii_reason_scan over TENANT free-text at write — CLOSED (F3b).** Shipped as a reusable
+  chokepoint change `Samen.Pii.FreeTextScan` (`fields:` opt) running `Samen.PiiReasonScan.check/2` fail-closed at
+  the write `before_action`; a tenant freeform value that is ITSELF a bare email/SSN/phone shape is refused
+  before any row lands (DB unchanged). Wired framework-first on the kernel Marketing `Suppression.notes` column,
+  so every marketing mount inherits the tenant free-text chokepoint at 0 authored LOC. Same blind spot as the
+  operator scan by design (prose-embedded PII + names remain a documented residue). Red-path:
+  `demo/test/marketing_free_text_pii_scan_red_path_test.exs` (green ordinary note · red email/phone refusal with
+  DB-unchanged control). Sabotage `22-f3-free-text-pii-scan-bypass.patch` (scan an empty string → flips the
+  red-path). `docs/free-text-pii-residue.md` updated (the F3 tenant scan is now shipped, not "being extended").
 
 ---
 

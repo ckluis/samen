@@ -28,6 +28,7 @@ defmodule SamenCore.Support.SuppressionFixture do
       template: "sxt",
       send: "sxn",
       email_event: "sxe",
-      suppression: "sxp"
+      suppression: "sxp",
+      consent_event: "sxv"
     }
 end

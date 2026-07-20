@@ -5,8 +5,8 @@ crypto-shred guarantee — operator-authored reason/detail fields, and tenant fr
 columns — and both are defended by a value-shape scan plus human convention, not by proof. This
 is a documented, bounded residue, not a solved problem.
 
-Code: `Samen.PiiReasonScan`, `Samen.PiiValueShape`, `Samen.Cdc.Projection` (ADR-015),
-`Samen.NonPii`. ADRs: ADR-002 §2.5 (operator reason/detail), ADR-015 (tenant freeform columns in
+Code: `Samen.PiiReasonScan`, `Samen.Pii.FreeTextScan` (tenant free-text write chokepoint, F3b),
+`Samen.PiiValueShape`, `Samen.Cdc.Projection` (ADR-015), `Samen.NonPii`. ADRs: ADR-002 §2.5 (operator reason/detail), ADR-015 (tenant freeform columns in
 the CDC/aggregate plane).
 
 ---
@@ -72,7 +72,7 @@ with different maturity:
   being written in the first place.
 
 ### Tenant freeform columns — `Samen.Cdc.Projection` default-deny (shipped, for the CDC/aggregate
-plane) + a runtime scan (being extended in F3)
+plane) + a runtime write-boundary scan (`Samen.Pii.FreeTextScan`, shipped F3b)
 
 - **Default-deny for CDC/aggregate mirroring (ADR-015, shipped).** A freeform column
   (`:string`/`:ci_string`/`:text`/`:map`/`:jsonb`) is classified `:plaintext_pii` and **excluded**
@@ -82,13 +82,17 @@ plane) + a runtime scan (being extended in F3)
   because nobody thought to flag it. It does **not** stop the column from existing, plaintext, in
   the primary Postgres table the tenant already owns — ADR-015 governs the CDC/aggregate mirror,
   not the live OLTP row.
-- **Runtime value-shape scan on tenant free-text (F3, being extended).** The same
-  `Samen.PiiValueShape`/`PiiReasonScan` machinery that guards operator reasons is being extended
-  to run at the write boundary of tenant freeform fields, as a belt-and-suspenders check atop
-  ADR-015's compile-time default-deny (ADR-015 §5 names this as the deferred WS-C item). Where
-  this lands in F3, it catches the same narrow case as the operator scan: a freeform value that is
-  *itself* a bare email/SSN/phone shape gets rejected or flagged at write time. It is the same
-  heuristic with the same blind spot (see below).
+- **Runtime value-shape scan on tenant free-text (F3b, shipped).** The same
+  `Samen.PiiValueShape`/`PiiReasonScan` machinery that guards operator reasons is now wired at the
+  write boundary of tenant freeform fields via `Samen.Pii.FreeTextScan` — a reusable
+  `Ash.Resource.Change` (`fields:` opt) that runs `Samen.PiiReasonScan.check/2` fail-closed in a
+  `before_action` and refuses a create/update whose named freeform value is *itself* a bare
+  email/SSN/phone shape (the DB is left unchanged), as a belt-and-suspenders check atop ADR-015's
+  compile-time default-deny (ADR-015 §5's deferred WS-C item). It is wired framework-first on the
+  kernel Marketing `Suppression.notes` column, so every marketing mount inherits the tenant
+  free-text chokepoint at 0 authored LOC; hosts attach it to any other freeform column the same
+  way (`change({Samen.Pii.FreeTextScan, fields: [:notes, ...]})`). It catches the same narrow case
+  as the operator scan — a value that is a bare PII shape — and has the same blind spot (see below).
 
 ## Residual risk
 

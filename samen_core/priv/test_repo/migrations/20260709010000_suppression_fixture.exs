@@ -19,7 +19,8 @@ defmodule SamenCore.TestRepo.Migrations.SuppressionFixture do
     SamenCore.Support.SuppressionFixture.Template,
     SamenCore.Support.SuppressionFixture.Send,
     SamenCore.Support.SuppressionFixture.EmailEvent,
-    SamenCore.Support.SuppressionFixture.Suppression
+    SamenCore.Support.SuppressionFixture.Suppression,
+    SamenCore.Support.SuppressionFixture.ConsentEvent
   ]
 
   def up do
@@ -183,11 +184,27 @@ defmodule SamenCore.TestRepo.Migrations.SuppressionFixture do
       add(:sxe_updated_at, :utc_datetime, null: false)
     end
 
+    # --- sxv_consent_event : append-only consent ledger (F3 Unit 1) ---
+    create table(:sxv_consent_event, primary_key: false) do
+      add(:sxv_subscriber_id, :uuid, null: false)
+      add(:sxv_event, :text, null: false)
+      add(:sxv_source, :text)
+      add(:sxv_purpose, :text, default: "marketing")
+      add(:sxv_subject_hash, :text)
+      add(:sxv_occurred_at, :utc_datetime_usec, null: false)
+      add(:sxv_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:sxv_org_id, :uuid, null: false)
+      add(:sxv_inserted_at, :utc_datetime, null: false)
+      add(:sxv_updated_at, :utc_datetime, null: false)
+    end
+
     catalog_sync(@resources)
   end
 
   def down do
     catalog_sync_down(@resources)
+
+    drop(table(:sxv_consent_event))
 
     drop(constraint(:sxe_email_event, "sxe_email_event_sxe_subscriber_id_fkey"))
     drop(constraint(:sxe_email_event, "sxe_email_event_sxe_send_id_fkey"))

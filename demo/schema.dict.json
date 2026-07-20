@@ -1983,6 +1983,72 @@
     {
       "fields": [
         {
+          "column_name": "mce_event",
+          "logical_name": "event",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "mce_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "mce_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "mce_occurred_at",
+          "logical_name": "occurred_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "mce_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "mce_purpose",
+          "logical_name": "purpose",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "mce_source",
+          "logical_name": "source",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "mce_subject_hash",
+          "logical_name": "subject_hash",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "mce_subscriber_id",
+          "logical_name": "subscriber_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "mce_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.MarketingScope.ConsentEvent",
+      "table_name": "mce_consent_event"
+    },
+    {
+      "fields": [
+        {
           "column_name": "mee_event_type",
           "logical_name": "event_type",
           "pii": false,

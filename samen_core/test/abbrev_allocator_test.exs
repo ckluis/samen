@@ -119,8 +119,9 @@ defmodule Samen.Abbrev.AllocatorTest do
 
     test "the COMMITTED registry is byte-untouched after all scratch reservations" do
       committed = File.read!(R.path())
-      assert byte_size(committed) == 12_067
-      assert map_size(R.load()) == 263
+      # 263 flat entries + the 5 F3 host-namespaced ConsentEvent reservations (ADR-023).
+      assert byte_size(committed) == 12_469
+      assert map_size(R.load()) == 268
     end
   end
 

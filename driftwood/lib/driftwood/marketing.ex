@@ -41,6 +41,7 @@ defmodule Driftwood.Marketing do
       template: "fmt",
       send: "fmn",
       email_event: "fme",
-      suppression: "fmp"
+      suppression: "fmp",
+      consent_event: "fmv"
     }
 end

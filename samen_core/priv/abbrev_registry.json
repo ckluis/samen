@@ -264,5 +264,22 @@
     "wmg": "Samen.WebTest.Marketing.Segment",
     "fmg": "Driftwood.Marketing.Segment",
     "dpc": "Driftwood.Operator.Customer"
+  },
+  "hosts": {
+    "demo": {
+      "mce": "Demo.MarketingScope.ConsentEvent"
+    },
+    "driftwood": {
+      "fmv": "Driftwood.Marketing.ConsentEvent"
+    },
+    "pawchart": {
+      "vmv": "PawChart.Marketing.ConsentEvent"
+    },
+    "samen_core": {
+      "sxv": "SamenCore.Support.SuppressionFixture.ConsentEvent"
+    },
+    "samen_web": {
+      "wmv": "Samen.WebTest.Marketing.ConsentEvent"
+    }
   }
 }

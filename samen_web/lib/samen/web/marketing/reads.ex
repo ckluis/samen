@@ -474,22 +474,45 @@ defmodule Samen.Web.Marketing.Reads do
   # Private
   # ---------------------------------------------------------------------------
 
-  # Consent/status gate: only an :active subscriber is deliverable.
+  # Consent/status gate: only an :active subscriber is deliverable, AND the append-only
+  # consent ledger must not have most-recently WITHDRAWN consent. The ledger check is the
+  # F3 Unit 1 conjunct: it is the SOURCE OF TRUTH for consent and, being outside the
+  # vault, a `:withdrawn` verdict survives a subject crypto-shred — so "do-not-contact"
+  # is honored even after the subscriber's PII is erased. Fail-closed: an unresolvable
+  # check refuses the send.
   defp refuse_if_undeliverable(mount, scope, subscriber_id) do
     result =
       Mount.resource(mount, Subscriber)
-      |> Ash.Query.ensure_selected([:status])
+      |> Ash.Query.ensure_selected([:status, :org_id])
       |> Ash.Query.filter(id == ^subscriber_id)
       |> Ash.Query.limit(1)
       |> Ash.read!(scope: scope)
 
     case result do
-      [%{status: :active} | _] -> :ok
-      [%{status: status} | _] -> {:error, status}
-      [] -> {:error, :not_found}
+      [%{status: :active, org_id: org_id} | _] ->
+        refuse_if_consent_withdrawn(mount, org_id, subscriber_id)
+
+      [%{status: status} | _] ->
+        {:error, status}
+
+      [] ->
+        {:error, :not_found}
     end
   rescue
     _ -> {:error, :deliverability_check_failed}
+  end
+
+  # Derive consent from the ledger (latest-event-wins). A most-recent :withdrawn refuses
+  # the send even when the subscriber row's mutable status is still :active.
+  defp refuse_if_consent_withdrawn(mount, org_id, subscriber_id) do
+    case Samen.Marketing.Consent.state(
+           Mount.resource(mount, ConsentEvent),
+           to_string(org_id),
+           to_string(subscriber_id)
+         ) do
+      :withdrawn -> {:error, :consent_withdrawn}
+      _ -> :ok
+    end
   end
 
   # Create the send row through the kernel's suppression-checked action (the only create

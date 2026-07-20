@@ -1,0 +1,22 @@
+# SABOTAGE: F3 Unit 1 gate sabotage — the append-only ConsentEvent ledger. A
+# mutable `:update` action (`:mutate_consent`) is added to the consent-event
+# resource, so a consent event is no longer an immutable historical fact — the
+# ledger could be rewritten in place. The immutability red-path MUST fail.
+# APP: demo
+# TEST_FILES: test/marketing_consent_ledger_test.exs
+# MUST_FAIL: the consent ledger exposes no update or destroy action (append-only immutability)
+diff --git a/samen_core/lib/samen/scopes/marketing/blueprint.ex b/samen_core/lib/samen/scopes/marketing/blueprint.ex
+--- a/samen_core/lib/samen/scopes/marketing/blueprint.ex	2026-07-20 10:07:00
++++ b/samen_core/lib/samen/scopes/marketing/blueprint.ex	2026-07-20 10:07:00
+@@ -835,6 +835,11 @@
+           # consent event is an immutable fact.
+           defaults([:read])
+ 
++          # SABOTAGE: a mutable update action breaks append-only immutability.
++          update :mutate_consent do
++            accept([:event])
++          end
++
+           create :append do
+             accept([
+               :subscriber_id,

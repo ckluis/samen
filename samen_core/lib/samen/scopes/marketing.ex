@@ -61,6 +61,7 @@ defmodule Samen.Scopes.Marketing do
     * `Demo.MarketingScope.Send`        — a single send event (campaign → subscriber)
     * `Demo.MarketingScope.EmailEvent`  — delivery/open/click/bounce/unsubscribe events
     * `Demo.MarketingScope.Suppression` — opt-out / bounce / unsubscribe suppression list
+    * `Demo.MarketingScope.ConsentEvent`— append-only consent ledger (F3 Unit 1)
 
   ## Abbrevs (permanent, registry-checked)
 
@@ -74,6 +75,7 @@ defmodule Samen.Scopes.Marketing do
     * `Demo.MarketingScope.Send`        → `msn`
     * `Demo.MarketingScope.EmailEvent`  → `mee`
     * `Demo.MarketingScope.Suppression` → `msp`
+    * `Demo.MarketingScope.ConsentEvent`→ `mce`
 
   The macro does NOT invent abbrevs. Defaults are provided for the demo mount.
   """
@@ -85,7 +87,8 @@ defmodule Samen.Scopes.Marketing do
     template: "mtp",
     send: "msn",
     email_event: "mee",
-    suppression: "msp"
+    suppression: "msp",
+    consent_event: "mce"
   }
 
   @doc false
@@ -110,6 +113,7 @@ defmodule Samen.Scopes.Marketing do
     send_mod = Module.concat(namespace, Send)
     email_event_mod = Module.concat(namespace, EmailEvent)
     suppression_mod = Module.concat(namespace, Suppression)
+    consent_event_mod = Module.concat(namespace, ConsentEvent)
 
     quote do
       require Samen.Scopes.Marketing.Blueprint
@@ -123,6 +127,7 @@ defmodule Samen.Scopes.Marketing do
         resource(unquote(send_mod))
         resource(unquote(email_event_mod))
         resource(unquote(suppression_mod))
+        resource(unquote(consent_event_mod))
       end
 
       # Materialize resource modules in the host namespace. Each is a normal Samen
@@ -149,7 +154,8 @@ defmodule Samen.Scopes.Marketing do
         unquote(otp_app),
         unquote(domain),
         unquote(repo),
-        unquote(abbrevs.subscriber)
+        unquote(abbrevs.subscriber),
+        unquote(consent_event_mod)
       )
 
       Samen.Scopes.Marketing.Blueprint.define_template(
@@ -189,6 +195,15 @@ defmodule Samen.Scopes.Marketing do
         unquote(repo),
         unquote(abbrevs.suppression),
         unquote(subscriber_mod)
+      )
+
+      # F3 Unit 1 (ADR-017-modeled): the append-only marketing-consent ledger.
+      Samen.Scopes.Marketing.Blueprint.define_consent_event(
+        unquote(consent_event_mod),
+        unquote(otp_app),
+        unquote(domain),
+        unquote(repo),
+        unquote(abbrevs.consent_event)
       )
     end
   end

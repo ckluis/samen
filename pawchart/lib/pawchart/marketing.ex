@@ -43,6 +43,7 @@ defmodule PawChart.Marketing do
       template: "vmt",
       send: "vmn",
       email_event: "vme",
-      suppression: "vmp"
+      suppression: "vmp",
+      consent_event: "vmv"
     }
 end

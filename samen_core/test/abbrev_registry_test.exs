@@ -120,12 +120,22 @@ defmodule Samen.AbbrevRegistryTest do
       path
     end
 
-    test "the COMMITTED registry has no host namespaces yet (byte-untouched, 263 flat entries)" do
+    test "the COMMITTED registry: 263 flat entries + the F3 consent-ledger host allocations" do
       %{global: global, hosts: hosts} = Reg.load_namespaced()
       assert map_size(global) == 263
-      assert hosts == %{}
-      # The compat shim's flat view equals the legacy map exactly.
-      assert map_size(Reg.load()) == 263
+
+      # F3 Unit 1: the ConsentEvent ledger reserved a host-namespaced abbrev per marketing
+      # mount via the sanctioned allocator (ADR-023 host-scoped reservations).
+      assert hosts == %{
+               "demo" => %{"mce" => "Demo.MarketingScope.ConsentEvent"},
+               "driftwood" => %{"fmv" => "Driftwood.Marketing.ConsentEvent"},
+               "pawchart" => %{"vmv" => "PawChart.Marketing.ConsentEvent"},
+               "samen_core" => %{"sxv" => "SamenCore.Support.SuppressionFixture.ConsentEvent"},
+               "samen_web" => %{"wmv" => "Samen.WebTest.Marketing.ConsentEvent"}
+             }
+
+      # The compat shim's flat view unions the global net with every host entry (263 + 5).
+      assert map_size(Reg.load()) == 268
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do

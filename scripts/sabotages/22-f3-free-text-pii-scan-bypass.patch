@@ -1,0 +1,20 @@
+# SABOTAGE: F3 Unit 6 gate sabotage — the tenant free-text write chokepoint.
+# `Samen.Pii.FreeTextScan` scans an EMPTY string instead of the written value, so
+# the value-shape check always returns :ok and a bare email/SSN/phone typed into a
+# tenant freeform column is written unrefused. The red-path MUST fail.
+# APP: demo
+# TEST_FILES: test/marketing_free_text_pii_scan_red_path_test.exs
+# MUST_FAIL: a bare email-shaped note is refused at the write path, DB unchanged
+# MUST_FAIL: a bare phone-shaped note is refused
+diff --git a/samen_core/lib/samen/pii/free_text_scan.ex b/samen_core/lib/samen/pii/free_text_scan.ex
+--- a/samen_core/lib/samen/pii/free_text_scan.ex	2026-07-20 10:07:00
++++ b/samen_core/lib/samen/pii/free_text_scan.ex	2026-07-20 10:07:00
+@@ -53,7 +53,7 @@
+   defp scan_field(changeset, field) do
+     case Ash.Changeset.fetch_change(changeset, field) do
+       {:ok, value} when is_binary(value) ->
+-        case Samen.PiiReasonScan.check(value, "tenant free-text (#{field})") do
++        case Samen.PiiReasonScan.check("", "tenant free-text (#{field})") do
+           :ok ->
+             changeset
+ 

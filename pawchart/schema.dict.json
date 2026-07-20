@@ -2079,6 +2079,72 @@
     {
       "fields": [
         {
+          "column_name": "vmv_event",
+          "logical_name": "event",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vmv_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmv_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vmv_occurred_at",
+          "logical_name": "occurred_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "vmv_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmv_purpose",
+          "logical_name": "purpose",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vmv_source",
+          "logical_name": "source",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmv_subject_hash",
+          "logical_name": "subject_hash",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "vmv_subscriber_id",
+          "logical_name": "subscriber_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "vmv_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Marketing.ConsentEvent",
+      "table_name": "vmv_consent_event"
+    },
+    {
+      "fields": [
+        {
           "column_name": "vnp_email_enabled",
           "logical_name": "email_enabled",
           "pii": false,

@@ -19,6 +19,7 @@ defmodule Samen.WebTest.Marketing do
       template: "wmt",
       send: "wmn",
       email_event: "wme",
-      suppression: "wmp"
+      suppression: "wmp",
+      consent_event: "wmv"
     }
 end
