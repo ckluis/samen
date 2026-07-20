@@ -6,6 +6,8 @@ defmodule Samen.WebTest.DataCase do
   """
   use ExUnit.CaseTemplate
 
+  import ExUnit.Assertions
+
   using do
     quote do
       alias Samen.WebTest.Repo
@@ -77,6 +79,53 @@ defmodule Samen.WebTest.DataCase do
     render_html(module, socket.assigns)
   end
 
+  @doc """
+  Thin MOUNT smoke (WS-F4 QA) — drive a framework LiveView through its REAL `mount/3`
+  lifecycle the way the router's `live_session` does, then `handle_params/3` (if the
+  module exports it), then `render/1`, and return the HTML string.
+
+  Unlike `render_live/3` (which assigns the mount struct directly and calls only
+  `load/*`), this exercises the full mount-time path a mounted route runs: the signed
+  session round-trip (`Mount.to_session` → `assign_mount` → `Mount.from_session`),
+  `Samen.Web.CurrentOrg.resolve/3` (the current-org seam), the initial `load`, AND
+  `handle_params` — the class of a documented past production 500 on mount. It asserts
+  the mount returns `{:ok, socket}` and the render yields a non-empty binary; a raise
+  anywhere in the lifecycle fails the smoke. `params` is the route params map (string
+  keys, e.g. `%{"org" => org_id}` or `%{"org" => org_id, "id" => id}`).
+  """
+  def mount_smoke(module, mount, params \\ %{}, extra_assigns \\ %{}) do
+    session = mount_session(mount)
+
+    {:ok, socket} =
+      case module.mount(params, session, %Phoenix.LiveView.Socket{}) do
+        {:ok, socket} -> {:ok, socket}
+        {:ok, socket, _opts} -> {:ok, socket}
+      end
+
+    socket =
+      if function_exported?(module, :handle_params, 3) do
+        {:noreply, socket} = module.handle_params(params, "http://localhost/smoke", socket)
+        socket
+      else
+        socket
+      end
+
+    # A LiveView using `allow_upload/3` reads runtime upload assigns in `render/1` that
+    # only the connected socket supplies (`:uploads` is reserved). The mount — the 500
+    # class this smoke guards — has already run; merge the caller's runtime-assign stub
+    # so the disconnected render matches what the live socket would carry.
+    assigns = Map.merge(Map.put(socket.assigns, :__changed__, %{}), extra_assigns)
+
+    html =
+      assigns
+      |> module.render()
+      |> Phoenix.HTML.Safe.to_iodata()
+      |> IO.iodata_to_binary()
+
+    assert byte_size(html) > 0
+    html
+  end
+
   @doc "Render a LiveView module's `render/1` for the given assigns to an HTML string."
   def render_html(module, assigns) do
     assigns
@@ -110,6 +159,8 @@ defmodule Samen.WebTest.DataCase do
   defp namespace(:notifications), do: Samen.WebTest.Primitives
   defp namespace(:flags), do: Samen.WebTest.Primitives
   defp namespace(:files), do: Samen.WebTest.Primitives
+  defp namespace(:search), do: Samen.WebTest.Primitives
+  defp namespace(:chat), do: Samen.WebTest.Chat
   defp namespace(:csv), do: Samen.WebTest.Crm
   # WS-E E5 settings — the Identity mount (User/ApiKey/Membership) is the operator host.
   defp namespace(:settings), do: Samen.WebTest.Operator

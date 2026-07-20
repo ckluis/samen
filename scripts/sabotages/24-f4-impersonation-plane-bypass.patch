@@ -1,0 +1,21 @@
+# SABOTAGE: F4 Unit 2 gate sabotage — the impersonation masking posture (T4.1).
+# `Samen.Api.PiiResolution` no longer keeps a vaulted field PRESENT-but-masked (••••)
+# under an impersonation session without a reveal grant — it reveals the plaintext, so
+# the operator sees the tenant's real PII in the clear. The samen_core impersonation
+# red-path MUST fail.
+# APP: samen_core
+# TEST_FILES: test/impersonation_masking_test.exs
+# MUST_FAIL: under impersonation WITHOUT a grant, a vaulted field is PRESENT-but-MASKED
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 4f16280..8c79712 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -137,7 +137,7 @@ defmodule Samen.Api.PiiResolution do
+           # REAL UI with the field PRESENT-but-masked (`••••`), NOT omitted. The API
+           # operator-KEY posture below is different — a cross-tenant key omits the field.
+           impersonated?(actor) ->
+-            masked
++            reveal_plaintext(masked, opts) || masked
+ 
+           # Operator API-KEY posture (T3.11; doc §external-surface: "a vaulted field is
+           # absent unless a reveal grant covers it"). No grant → ABSENT (the serializer

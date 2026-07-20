@@ -328,6 +328,58 @@ where the brief mandates, a committed sabotage patch replayed by `scripts/sabota
 
 ---
 
+## WS-F4 — Verification Honesty (QA) (2026-07-20)
+
+Test-honesty pass: close the gaps between what the suites CLAIM and what they PROVE. All five units shipped.
+
+1. **Thin mount smoke per framework LiveView (`samen_web/test/samen/web/mount_smoke_test.exs`, 1 data-driven
+   test over 34 surfaces).** ONE mount assertion per framework LiveView, driven through the REAL
+   `mount/3` + `handle_params/3` + `render/1` lifecycle a mounted `live_session` route runs — the signed-session
+   round-trip (`Mount.to_session`/`from_session`) + `CurrentOrg.resolve/3` + the initial load + render, the class
+   of a documented past production 500 that the existing isolated render/load tests skip. New
+   `Samen.WebTest.DataCase.mount_smoke/4` helper. Deliberately NOT an event sweep (declined — thin smoke only).
+   The host-local LiveViews (demo contact/operator-impersonation, driftwood broker/operator-impersonation) were
+   already mount-covered by existing dogfood/masked tests; the samen_web endpoint is intentionally OFF in :test
+   (application.ex), so `live/2`-through-a-running-endpoint is not the fleet convention — the mount-lifecycle
+   harness is.
+2. **Red-path twins for the 5 remaining green-only masking surfaces.** THREE render surfaces got an in-test
+   `assert_leak_detected!` anti-tautology twin (`use Samen.MaskingCase`): `notifications_masking`,
+   `chat_unfurl_masking`, `ui_masking` — proving the operator `refute … =~ plaintext/token` scans are refutable
+   (a clear/raw render leaks and IS caught). TWO fail-closed RESOLVER gates got committed sabotage patches:
+   `23-f4-operator-apikey-plane-bypass.patch` (APP pawchart — the operator API-KEY posture reveals instead of
+   omitting; flips `operator_plane_masking_test` "owner PII is ABSENT") and
+   `24-f4-impersonation-plane-bypass.patch` (APP samen_core — the impersonation posture reveals instead of
+   masking; flips `impersonation_masking_test` "PRESENT-but-MASKED"). Sabotage harness now 24 patches.
+3. **StreamData property tests.** `samen_core/test/search_tsquery_property_test.exs` (3: `Samen.Search.query/3`
+   never raises on arbitrary terms salted with tsquery operator chars — proves the `websearch_to_tsquery` choice
+   holds end-to-end vs raw `to_tsquery`) + `samen_web/test/samen/web/csv_property_test.exs` (6: RFC-4180
+   round-trip through the neutralization fixed point + the F1.4 formula-injection invariant — a round-tripped
+   cell never starts with a formula lead char unless numeric). Pattern ref: `abbrev_property_test.exs`.
+4. **Pool/queue headroom** added to `samen_web/config/test.exs` + `demo/config/test.exs` (pool_size 20 +
+   `queue_target: 200` / `queue_interval: 2_000`, mirroring `samen_core/config/test.exs` — kills seed-dependent
+   checkout-timeout flakes).
+5. **`ci-fast.sh` iteration tier** — spikes + samen_core + samen_web only (skips the 3 gen_app probes +
+   demo/vertical gates); documented at the top of the script + referenced in CLAUDE.md's Suites/CI section. NOT a
+   substitute for `./ci.sh` before a milestone.
+
+**F4 dep note:** `stream_data` added to `samen_web/mix.exs` (NOT `:test`-only — samen_core, a path dep, already
+brings it as a prod dep, so a `:test` restriction conflicts).
+
+**Suite totals after F4:** samen_core 1211 · samen_web 618 · demo 465 · driftwood 123 · pawchart 49. Sabotage
+harness: 24 patches.
+
+**F4 CARRIES (do not lose):**
+- **Host-local LiveView mount smoke is via existing dogfood/masked tests, not the new sweep** — if a host adds a
+  NEW bespoke LiveView (its own `load/*` arity), it needs its own mount assertion; the framework sweep only
+  covers `Samen.Web.Router.__routes__/2` surfaces.
+- **`mount_smoke/4` drives the mount LIFECYCLE, not the websocket transport** — samen_web has no Endpoint in
+  :test by design. If an Endpoint is ever booted in test (e.g. for a connected-upload or push-event assertion),
+  revisit whether a true `live/2` sweep should supersede the lifecycle harness.
+- **UploadLive is the one render special-case** — its `render/1` reads live-upload assigns a connected socket
+  supplies; the smoke passes a `%{upload_ref: :file_upload}` render-only stub (the mount itself is unmodified).
+
+---
+
 ## State after WS-A/B/D (2026-07-16) — the re-rank
 
 **Shipped: 11 gaps** (G1/G2/G3/G5 in WS-A · G6/G7/G17 + G12-seed in WS-B ·

@@ -9,6 +9,9 @@ verifiers, generators) · `samen_web` (framework UI library: LiveViews, Mount/Pl
 ## Suites / CI (local Postgres required)
 - Root gate: `./ci.sh` — spikes → samen_core → 3 gen_app probes → samen_web → demo →
   driftwood → pawchart. Takes minutes; must end `ROOT CI: ALL PASSED`.
+- Iteration tier: `./ci-fast.sh` — spikes → samen_core → samen_web ONLY (framework core,
+  skips the gen_app probes + demo/vertical gates). Fast inner-loop feedback; NOT a
+  substitute for `./ci.sh` before a milestone. Ends `CI-FAST: ALL PASSED`.
 - Per app: `cd samen_core && mix test` (test_helper owns DB lifecycle); `cd samen_web &&
   mix test` (alias sets up the scratch DB); verticals/demo: `MIX_ENV=test bash ci.sh`
   (full verifier gate). CI compiles with `--warnings-as-errors` — keep zero warnings.

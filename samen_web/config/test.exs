@@ -6,7 +6,13 @@ config :samen_web, Samen.WebTest.Repo,
   hostname: "localhost",
   database: "samen_web_test",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: 10
+  # pool_size 20 + queue slack (mirrors samen_core config/test.exs, WS-B B9 gate F1 /
+  # WS-F4 QA): the render suite fans out many concurrent DB-backed reads under the
+  # shared sandbox; the default 4s queue timeout could hit checkout pressure under an
+  # unlucky seed. Headroom kills the flake — not a correctness change.
+  pool_size: 20,
+  queue_target: 200,
+  queue_interval: 2_000
 
 config :logger, level: :warning
 

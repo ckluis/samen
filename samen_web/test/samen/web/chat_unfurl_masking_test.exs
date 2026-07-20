@@ -15,6 +15,7 @@ defmodule Samen.Web.ChatUnfurlMaskingTest do
   capability is reusable anywhere (chat is the first consumer, not the owner).
   """
   use Samen.WebTest.DataCase, async: false
+  use Samen.MaskingCase
 
   alias Samen.Web.Mount
   alias Samen.Web.ObjectRef
@@ -95,6 +96,21 @@ defmodule Samen.Web.ChatUnfurlMaskingTest do
     # DIFFERENT masking: clear title vs %Masked{} title.
     assert is_binary(tenant_card.title)
     assert match?(%Samen.Masked{}, operator_card.title)
+  end
+
+  test "ANTI-TAUTOLOGY: the operator card mask scan is REFUTABLE — the clear card render leaks and is caught",
+       %{org_id: org_id, ref: ref} do
+    # AS-DESIGNED: the operator card masks the title — the plaintext name is ABSENT.
+    op_mount = build_mount(:crm, plane: :operator, target_org_id: org_id)
+    {:ok, operator_card} = ObjectRef.resolve(op_mount, Mount.scope(op_mount, org_id), ref)
+    refute render_card(operator_card) =~ Seeds.contact_full_name()
+
+    # SABOTAGE MODEL: a resolver that failed to mask leaves the title in the CLEAR — which
+    # is exactly the tenant-plane card. `assert_leak_detected!` FLIPS on its render,
+    # proving the operator `refute ... =~ name` scan is refutable, not vacuous.
+    tenant_mount = build_mount(:crm, plane: :tenant)
+    {:ok, tenant_card} = ObjectRef.resolve(tenant_mount, Mount.scope(tenant_mount, org_id), ref)
+    assert_leak_detected!(render_card(tenant_card), Seeds.contact_full_name())
   end
 
   # ==========================================================================

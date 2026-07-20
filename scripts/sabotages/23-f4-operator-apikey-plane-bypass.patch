@@ -1,0 +1,21 @@
+# SABOTAGE: F4 Unit 2 gate sabotage — the operator API-KEY masking posture (T3.11).
+# `Samen.Api.PiiResolution` no longer OMITS a vaulted field for a cross-tenant operator
+# key without a reveal grant — it reveals the plaintext, so the human owner's PII leaks
+# on the operator plane instead of resolving to %Ash.ForbiddenField{} (absent). The
+# pawchart operator-plane red-path MUST fail.
+# APP: pawchart
+# TEST_FILES: test/operator_plane_masking_test.exs
+# MUST_FAIL: operator API-KEY actor (no grant) → owner PII is ABSENT
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 4f16280..a41571a 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -143,7 +143,7 @@ defmodule Samen.Api.PiiResolution do
+           # absent unless a reveal grant covers it"). No grant → ABSENT (the serializer
+           # omits %Ash.ForbiddenField{}).
+           true ->
+-            forbidden(label)
++            reveal_plaintext(masked, opts) || forbidden(label)
+         end
+ 
+       _ ->

@@ -6,6 +6,7 @@ defmodule Samen.UI.MaskingTest do
   no unmasking path — it renders whatever value it is handed.
   """
   use ExUnit.Case, async: true
+  use Samen.MaskingCase
 
   import Phoenix.LiveViewTest, only: [render_component: 2]
 
@@ -45,6 +46,15 @@ defmodule Samen.UI.MaskingTest do
     refute html =~ @token
   end
 
+  test "ANTI-TAUTOLOGY: the token-leak scan is REFUTABLE — a RAW value renders verbatim" do
+    # Every `refute html =~ @token` above passes because a %Masked{} renders •••• (never
+    # the token). But the kit renders WHATEVER value it is handed — so a broken resolver
+    # that handed the kit a raw token string (instead of wrapping PII in %Masked{}) WOULD
+    # leak. Prove it: hand `pill/1` the raw token and confirm the leak scan catches it.
+    html = render_component(&Samen.UI.pill/1, %{variant: "info", inner_block: raw_block()})
+    assert_leak_detected!(html, @token)
+  end
+
   test "the kit source CODE has no unmasking path (no Vault.reveal, no token unwrap)" do
     # Strip the moduledoc/prose (which legitimately DESCRIBES what the kit does NOT do) so we
     # scan the actual code body for a call to the vault or a token unwrap.
@@ -69,6 +79,11 @@ defmodule Samen.UI.MaskingTest do
 
   defp masked_block do
     [%{inner_block: fn _, _ -> @masked end}]
+  end
+
+  # A RAW token string (NOT a %Masked{}) — models a resolver that failed to wrap PII.
+  defp raw_block do
+    [%{inner_block: fn _, _ -> @token end}]
   end
 
   defp head_block do

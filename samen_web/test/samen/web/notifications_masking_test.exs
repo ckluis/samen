@@ -18,6 +18,7 @@ defmodule Samen.Web.NotificationsMaskingTest do
   regression can pass. Cross-org refs resolve to the inert chip (no existence oracle).
   """
   use Samen.WebTest.DataCase, async: false
+  use Samen.MaskingCase
 
   alias Samen.Notifications.Engine
   alias Samen.Web.Notifications.InboxLive
@@ -108,6 +109,23 @@ defmodule Samen.Web.NotificationsMaskingTest do
     assert tenant_html =~ Seeds.contact_full_name()
     refute operator_html =~ Seeds.contact_full_name()
     assert operator_html =~ "••••"
+  end
+
+  test "ANTI-TAUTOLOGY: the operator mask scan is REFUTABLE — a clear render leaks and is caught",
+       %{org_id: org_id} do
+    # AS-DESIGNED: the operator plane masks the body + the unfurled person card — the
+    # sentinels are ABSENT (the `refute operator_html =~ ...` scans above).
+    operator_html = render_inbox(org_id, plane: :operator, target_org_id: org_id)
+    refute operator_html =~ "MC3-BODY-SENTINEL"
+    refute operator_html =~ Seeds.contact_full_name()
+
+    # SABOTAGE MODEL: a resolver that failed to mask would render the SAME notification's
+    # body + person card in the CLEAR — which is precisely the tenant-plane render. The
+    # `assert_leak_detected!` scan FLIPS on it, proving the operator `refute` scans above
+    # are refutable (a real leak WOULD be caught), not vacuously true.
+    leaked_html = render_inbox(org_id, plane: :tenant)
+    assert_leak_detected!(leaked_html, "MC3-BODY-SENTINEL")
+    assert_leak_detected!(leaked_html, Seeds.contact_full_name())
   end
 
   # ==========================================================================
