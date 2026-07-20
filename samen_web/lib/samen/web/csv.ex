@@ -68,6 +68,11 @@ defmodule Samen.Web.Csv do
 
   @mask "••••"
 
+  # CSV formula-injection lead characters (WS-F1 / F1.4, OWASP "CSV Injection"): a cell
+  # whose FIRST character is one of these is one a spreadsheet may evaluate as a formula
+  # (`= + - @`) or use to shift the payload into an adjacent cell (a leading TAB/CR).
+  @formula_leads [?=, ?+, ?-, ?@, ?\t, ?\r]
+
   # Columns that may NEVER be exported as data or mapped by an import (AC-G15-5):
   # identity/tenancy/bookkeeping are the system's, not the CSV's.
   @forbidden_columns [:id, :org_id, :inserted_at, :updated_at]
@@ -321,7 +326,10 @@ defmodule Samen.Web.Csv do
   end
 
   defp escape(value) do
-    value = to_string(value)
+    # Formula-neutralize BEFORE RFC-4180 quoting, so every export cell is safe by
+    # construction: a live-formula lead is defanged to literal text at the one
+    # serialization chokepoint, then quoted as RFC-4180 requires.
+    value = value |> to_string() |> neutralize_formula()
 
     if String.contains?(value, [",", "\"", "\n", "\r"]) do
       "\"" <> String.replace(value, "\"", "\"\"") <> "\""
@@ -329,6 +337,18 @@ defmodule Samen.Web.Csv do
       value
     end
   end
+
+  # A cell whose first character can be evaluated by a spreadsheet is prefixed with a
+  # single quote so the app renders it as literal TEXT, not a formula. A cell that is a
+  # plain number (e.g. a legitimate negative amount `-5`) is EXEMPT so numeric columns
+  # stay numeric — `-2+3+cmd|'/C calc'!A1` is not a number, so it is still neutralized.
+  defp neutralize_formula(<<lead, _::binary>> = value) when lead in @formula_leads do
+    if numeric?(value), do: value, else: "'" <> value
+  end
+
+  defp neutralize_formula(value), do: value
+
+  defp numeric?(value), do: match?({_parsed, ""}, Float.parse(value))
 
   @doc """
   Parse an RFC-4180 CSV binary into a list of rows (each a list of string cells).

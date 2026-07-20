@@ -167,6 +167,50 @@ human operator.
 
 ---
 
+## WS-F1 — Honesty & Safety Smalls (2026-07-20)
+
+Pre-publish honesty + public-repo hygiene pass. All five units shipped:
+
+1. **Pitch honesty.** `index.html` + `docs/archive/samen-foundry.{html,txt}` claimed retiring
+   Clerk+Stripe while end-user auth is host-owned (ADR-029) and Stripe sync is a documented
+   Stub (`SyncAdapter.Stub` returns `{:ok, %{stub: true}}`). Softened every such instance to
+   "Samen **governs** the identity/billing you **bring**" (auth host-owned; billing a governed
+   Stripe-mirror with a host-owned sync adapter). Other consolidation claims (CRM/marketing/
+   CMS/support/analytics-CDC/Oban) are genuine and left intact.
+2. **/readyz readiness probe.** `/healthz` stays a static-200 liveness route; new
+   `Samen.Web.Readiness.check/1` (framework-first, samen_web) probes Repo `SELECT 1` + KMS
+   store (read-only `attest`) + Oban liveness and returns `{:ok|:error, per-component}`. Emitted
+   page-controller gained `readyz/2` (200/503); both gen router templates route `/readyz`; the
+   fly.toml traffic gate now rides `/readyz` (was `/healthz`). Verticals (driftwood, pawchart)
+   patched. Red-path test with per-component positive controls (`readiness_test.exs`, 4 tests).
+3. **Public-repo safety/candor.** `SECURITY.md` (private disclosure), GitHub private
+   vulnerability reporting **enabled via gh** (`{"enabled":true}`), repo description + 10 topics
+   set, README AI-authorship disclosure (every commit `Co-Authored-By: Claude`), `CHANGELOG.md`
+   prepared for v0.1.0.
+4. **CSV formula injection.** `Samen.Web.Csv.escape/1` now formula-neutralizes export cells
+   (`= + - @` / leading TAB/CR → single-quoted literal; plain negative numbers exempt) at the
+   serialization chokepoint. Red-path tests + sabotage patch `16-f1-csv-formula-injection.patch`.
+5. **Repo hygiene.** `index.html` declared canonical; the divergent long-form doc relocated to
+   `docs/archive/samen-foundry.{html,txt}` with an archived banner; README updated; 4 untracked
+   `erl_crash.dump` files deleted.
+
+**Deliberately DECLINED in F1 (do NOT build):**
+- **First-party Stripe/ESP adapters** — the fail-honest boundary holds (unconfigured stub
+  returns `{:error, :not_configured}` / labeled no-op, never a false success). Docs on-ramp
+  (implement the `SyncAdapter` behaviour / SMTP delivery adapter) instead of a shipped integration.
+- **CONTRIBUTING / Code of Conduct / GitHub-Actions CI** — internal-foundry lane; the adversarial
+  gate is the local `./ci.sh` + sabotage harness. Revisit only if outside contributors materialize.
+- **Full `handle_event` Endpoint sweep** — thin smoke only; a complete per-LiveView event audit
+  is out of F1's ≤half-day-unit scope.
+
+**F1 carries (do not lose):**
+- **v0.1.0 tag is an OPERATOR action.** F1 did NOT `git commit`/`git tag` (per brief). After the
+  operator commits the F1 work, tag `v0.1.0` (CHANGELOG.md [0.1.0] entry is ready and links the
+  release tag). Private-vulnerability-reporting + repo description/topics were applied live via gh
+  and need no commit.
+
+---
+
 ## State after WS-A/B/D (2026-07-16) — the re-rank
 
 **Shipped: 11 gaps** (G1/G2/G3/G5 in WS-A · G6/G7/G17 + G12-seed in WS-B ·

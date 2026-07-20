@@ -380,6 +380,8 @@ defmodule Samen.Gen.AppTest do
       assert router =~ "samen_session_routes()"
       assert router =~ "flags_namespace: Widgetco.Primitives"
       assert router =~ ~s{get("/healthz", PageController, :healthz)}
+      # F1.2 — the readiness route sits alongside liveness (Repo/KMS/Oban probe).
+      assert router =~ ~s{get("/readyz", PageController, :readyz)}
 
       # Zero authored LiveView modules: the ONLY module defined is the router itself,
       # and no live/2 route is declared outside the framework macros.
@@ -782,14 +784,17 @@ defmodule Samen.Gen.AppTest do
       %{files: rendered_deploy_files()}
     end
 
-    test "fly.toml binds the endpoint port, the /healthz check, and a migrate release_command",
+    test "fly.toml binds the endpoint port, the /readyz check, and a migrate release_command",
          %{files: f} do
       fly = f["fly.toml"]
       # The endpoint port the web plane owns (default 4050).
       assert fly =~ "internal_port = 4050"
       assert fly =~ "[http_service]"
       assert fly =~ "[[http_service.checks]]"
-      assert fly =~ ~s(path = "/healthz")
+      # F1.2: the traffic gate hits the READINESS probe, not the static-200 liveness route —
+      # a machine whose Postgres/KMS/Oban is down is drained, not sent traffic it can only 500.
+      assert fly =~ ~s(path = "/readyz")
+      refute fly =~ ~s(path = "/healthz")
       assert fly =~ "release_command"
       assert fly =~ "Widgetco.Release.migrate"
     end

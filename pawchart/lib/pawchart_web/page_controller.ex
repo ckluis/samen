@@ -3,7 +3,9 @@ defmodule PawChartWeb.PageController do
   The PawChart landing + health endpoints.
 
   `/` renders a plain HTML index linking the CRM/Billing/Support inherited modules
-  and the clinical vertical pages. `/healthz` returns `ok` (the liveness probe).
+  and the clinical vertical pages. `/healthz` returns `ok` (the LIVENESS probe).
+  `/readyz` is the READINESS probe (WS-F1 / F1.2) — 200 only when Postgres, the KMS
+  wrapped-DEK store, and Oban all answer (`Samen.Web.Readiness`), else 503.
   """
   use Phoenix.Controller, formats: [:html]
 
@@ -42,5 +44,21 @@ defmodule PawChartWeb.PageController do
 
   def healthz(conn, _params) do
     send_resp(conn, 200, "ok")
+  end
+
+  def readyz(conn, _params) do
+    case Samen.Web.Readiness.check(repo: PawChart.Repo) do
+      {:ok, _checks} ->
+        send_resp(conn, 200, "ready")
+
+      {:error, checks} ->
+        body =
+          Enum.map_join(checks, "\n", fn
+            {component, :ok} -> "#{component}: ok"
+            {component, {:error, _reason}} -> "#{component}: FAIL"
+          end)
+
+        send_resp(conn, 503, "not ready\n" <> body)
+    end
   end
 end

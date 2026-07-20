@@ -39,6 +39,7 @@ defmodule PawChartWeb.Router do
 
     get("/", PageController, :index)
     get("/healthz", PageController, :healthz)
+    get("/readyz", PageController, :readyz)
   end
 
   # ADR-009 — the inherited-80% product UI, MOUNTED from samen_web.

@@ -1,0 +1,31 @@
+# SABOTAGE: WS-F1 / F1.4 gate sabotage — CSV formula-injection neutralization (OWASP
+# "CSV Injection"). `Samen.Web.Csv.escape/1` must defang a cell whose first character a
+# spreadsheet may EVALUATE (`= + - @`, or a leading TAB/CR that shifts the payload into an
+# adjacent cell) to literal text at the serialization chokepoint — RFC-4180 quoting alone
+# does NOT stop evaluation. This sabotage strips the neutralization so a live-formula lead
+# reaches the export cell unescaped; the named red-path tests must FAIL while applied. The
+# positive-control test (safe cells + plain negative numbers unchanged) stays GREEN both
+# ways — proof the neutralization discriminates, not a blanket prefix (anti-tautology).
+# APP: samen_web
+# TEST_FILES: test/samen/web/csv_test.exs
+# MUST_FAIL: neutralizes every formula-injection lead char on export
+# MUST_FAIL: export path: a formula payload in a record field is neutralized
+diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
+index 849fbe4..3bbef8c 100644
+--- a/samen_web/lib/samen/web/csv.ex
++++ b/samen_web/lib/samen/web/csv.ex
+@@ -326,10 +326,10 @@ defmodule Samen.Web.Csv do
+   end
+
+   defp escape(value) do
+-    # Formula-neutralize BEFORE RFC-4180 quoting, so every export cell is safe by
+-    # construction: a live-formula lead is defanged to literal text at the one
+-    # serialization chokepoint, then quoted as RFC-4180 requires.
+-    value = value |> to_string() |> neutralize_formula()
++    # SABOTAGE (16): formula neutralization removed — RFC-4180 quoting ONLY. A live-formula
++    # lead (= + - @ TAB CR) now reaches the export cell unescaped (the exact CSV-injection
++    # bug F1.4 closes). The named red-path tests MUST fail while this is applied.
++    value = to_string(value)
+
+     if String.contains?(value, [",", "\"", "\n", "\r"]) do
+       "\"" <> String.replace(value, "\"", "\"\"") <> "\""

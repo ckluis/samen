@@ -2230,6 +2230,7 @@ defmodule Samen.Gen.Templates do
 
         get("/", PageController, :index)
         get("/healthz", PageController, :healthz)
+        get("/readyz", PageController, :readyz)
       end
 
       # The inherited product UI, MOUNTED from samen_web. BARE `scope "/"` (no
@@ -2293,7 +2294,11 @@ defmodule Samen.Gen.Templates do
       The <%= module %> landing + health endpoints (scaffolded by `mix samen.gen.app`).
 
       `/` renders a plain HTML index linking the inherited framework surfaces;
-      `/healthz` returns `ok` (the liveness probe).
+      `/healthz` returns `ok` (the LIVENESS probe — the BEAM is up).
+      `/readyz` is the READINESS probe — it returns 200 only when Postgres, the KMS
+      wrapped-DEK store, and Oban all answer (`Samen.Web.Readiness`), else 503. Fly's
+      `[[http_service.checks]]` gates traffic on `/readyz`, so a machine whose deps are
+      down is drained instead of being sent requests it can only 500.
       \"\"\"
       use Phoenix.Controller, formats: [:html]
 
@@ -2331,6 +2336,22 @@ defmodule Samen.Gen.Templates do
 
       def healthz(conn, _params) do
         send_resp(conn, 200, "ok")
+      end
+
+      def readyz(conn, _params) do
+        case Samen.Web.Readiness.check(repo: <%= module %>.Repo) do
+          {:ok, _checks} ->
+            send_resp(conn, 200, "ready")
+
+          {:error, checks} ->
+            body =
+              Enum.map_join(checks, "\\n", fn
+                {component, :ok} -> "\#{component}: ok"
+                {component, {:error, _reason}} -> "\#{component}: FAIL"
+              end)
+
+            send_resp(conn, 503, "not ready\\n" <> body)
+        end
       end
     end
     """
@@ -3493,6 +3514,7 @@ defmodule Samen.Gen.Templates do
 
         get("/", PageController, :index)
         get("/healthz", PageController, :healthz)
+        get("/readyz", PageController, :readyz)
       end
 
       # The inherited product UI, MOUNTED from samen_web. BARE `scope "/"` (no
@@ -4398,7 +4420,9 @@ defmodule Samen.Gen.Templates do
   # ------------------------------------------------------------------ fly.toml
   # A valid-TOML Fly.io manifest. app/primary_region are placeholders the operator sets
   # (the runbook says so); `[http_service]` binds the endpoint port; the `[[http_service.checks]]`
-  # hits `/healthz` (the emitted page_controller liveness route); `[deploy] release_command`
+  # hits `/readyz` (the emitted page_controller READINESS route — 200 only when Postgres, the
+  # KMS wrapped-DEK store, and Oban all answer; a static-200 `/healthz` would let Fly send
+  # traffic to a machine whose deps are down); `[deploy] release_command`
   # runs migrations via the release's eval. NOT a claim of a live app — see the runbook's
   # OPERATOR-TODO block (real Fly account is human work).
   defp fly_toml do
@@ -4436,7 +4460,8 @@ defmodule Samen.Gen.Templates do
         timeout = "2s"
         grace_period = "10s"
         method = "get"
-        path = "/healthz"
+        # READINESS, not liveness: 200 only when Postgres + KMS store + Oban all answer.
+        path = "/readyz"
 
     [[vm]]
       size = "shared-cpu-1x"

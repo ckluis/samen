@@ -86,6 +86,70 @@ defmodule Samen.Web.CsvTest do
   end
 
   # ==========================================================================
+  # CSV formula injection (WS-F1 / F1.4, OWASP "CSV Injection")
+  # RFC-4180 quoting alone does NOT stop a spreadsheet from EVALUATING a cell whose
+  # first character is `= + - @` (or a leading TAB/CR shifting the payload). Export
+  # cells must be defanged to literal text at the serialization chokepoint.
+  # ==========================================================================
+
+  # The single serialized field for a one-cell row, minus RFC-4180 quoting — so the
+  # assertion inspects exactly what a spreadsheet would first see (independent of parse).
+  defp exported_cell(payload) do
+    Csv.serialize([[payload]]) |> String.trim_trailing("\r\n") |> unquote_field()
+  end
+
+  defp unquote_field("\"" <> rest),
+    do: rest |> String.trim_trailing("\"") |> String.replace("\"\"", "\"")
+
+  defp unquote_field(field), do: field
+
+  describe "CSV formula-injection neutralization (WS-F1 / F1.4)" do
+    test "neutralizes every formula-injection lead char on export" do
+      payloads = [
+        "=SUM(A1:A9)",
+        "+1+1",
+        "-2+3+cmd",
+        "@SUM(1)",
+        "\tcmd",
+        "\rcmd",
+        "=cmd|'/C calc'!A1",
+        "=HYPERLINK(\"http://evil\",\"click\")"
+      ]
+
+      for payload <- payloads do
+        cell = exported_cell(payload)
+
+        assert String.starts_with?(cell, "'"),
+               "expected #{inspect(payload)} to be neutralized, got #{inspect(cell)}"
+
+        refute String.first(cell) in ["=", "+", "-", "@", "\t", "\r"],
+               "a live-formula lead leaked for #{inspect(payload)}: #{inspect(cell)}"
+      end
+    end
+
+    test "positive control: safe cells and plain negative numbers pass through verbatim" do
+      # Anti-tautology — the neutralization DISCRIMINATES; it is not a blanket prefix.
+      assert exported_cell("Acme") == "Acme"
+      assert exported_cell("-5") == "-5"
+      assert exported_cell("-42.5") == "-42.5"
+      assert exported_cell("0") == "0"
+    end
+
+    test "export path: a formula payload in a record field is neutralized in the CSV" do
+      org = Ash.UUID.generate()
+      seed_company!(tenant_scope(org), "=HYPERLINK(\"http://evil.test\",\"click\")")
+
+      csv = export!(Company, tenant_scope(org))
+      idx = column_index(csv, "name")
+      [row] = data_rows(csv)
+      cell = Enum.at(row, idx)
+
+      assert String.starts_with?(cell, "'")
+      refute String.starts_with?(cell, "=")
+    end
+  end
+
+  # ==========================================================================
   # AC-G15-1 — round-trip on TWO resources, zero per-resource CSV code
   # ==========================================================================
 

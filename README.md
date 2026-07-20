@@ -9,6 +9,10 @@ LLMs and tooling, and generators that emit a *running* product.
 It is a kernel (`samen_core`), a web framework layer (`samen_web`), a set of generators, and
 several vertical apps that exist to prove the substrate rather than to be shipped.
 
+> **Authorship.** Samen is an AI-authored codebase: every commit was written by Claude
+> (Anthropic's AI) under human direction and is marked `Co-Authored-By: Claude`. It is
+> reviewed and adversarially gated by a human operator, but the code is Claude's.
+
 ## The honest hero claim
 
 > **PII is masked by default. Reveal is grant-gated, second-party-approved, logged in a
@@ -168,7 +172,7 @@ command in this README and that tutorial is verified against the CI probes' exec
 | `driftwood/` | Reference vertical: freight — the deepest gate, including the crypto-shred game-day |
 | `pawchart/` | Reference vertical: veterinary — the thin-mount shape the generator emits |
 | `spikes/` | The mechanism spikes (s00–s07) that de-risked the kernel; still run by root `ci.sh` |
-| `docs/` | ADRs (`docs/adr/`), guides (`docs/guides/`), the gate reports (`docs/gate-*.md`), and the design doc (`samen-foundry.html`) |
+| `docs/` | ADRs (`docs/adr/`), guides (`docs/guides/`), the gate reports (`docs/gate-*.md`), the roadmap (`docs/saas-gap-roadmap.md`), and an archived long-form design variant (`docs/archive/samen-foundry.html`) |
 | `scripts/` | `sabotage.sh` + the 15 committed sabotage patches |
 | `ci.sh` | The root gate: everything above, in sequence, fail-fast |
 

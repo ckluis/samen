@@ -227,10 +227,10 @@ try do
     halt.(1, "FAIL (AC-G16-1): fly.toml is not structurally-valid TOML.")
   end
 
-  unless String.contains?(fly_toml, "/healthz") and
+  unless String.contains?(fly_toml, "/readyz") and
            String.contains?(fly_toml, "release_command") and
            String.contains?(fly_toml, "internal_port = #{http_port}") do
-    halt.(1, "FAIL (AC-G16-1): fly.toml lacks the /healthz check / release_command / endpoint port.")
+    halt.(1, "FAIL (AC-G16-1): fly.toml lacks the /readyz check / release_command / endpoint port.")
   end
 
   IO.puts("DEPLOY: all 6 deploy artifacts present; fly.toml parses (health check + release_command + port).")

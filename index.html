@@ -1190,7 +1190,7 @@
     <p class="prose measure" style="color:var(--muted)">Every box below is a thing the from-scratch stack deploys, versions, secures, monitors, and pays for. In Samen each is a table, a query, a verifier, or the base macro's normal behavior — inside the one release and the one Postgres you already have. The last rows are the unusual ones: the compliance work most stacks bolt on at the end is the storage format here.</p>
     <div class="deleted">
       <div class="gone"><div class="name">Redis · broker · cron</div><p><b>→ postgres</b> — queues, pubsub, and schedules are Oban rows and NOTIFY, transactional with your data</p></div>
-      <div class="gone"><div class="name">Six SaaS vendors</div><p><b>→ the scopes</b> — identity, CRM, billing, marketing, CMS, support are inherited Ash domains, one object model</p></div>
+      <div class="gone"><div class="name">Six SaaS surfaces</div><p><b>→ the scopes</b> — CRM, marketing, CMS, and support are inherited Ash domains; identity and billing are governed object models over the auth provider and Stripe you bring — one object model, not six integrations</p></div>
       <div class="gone"><div class="name">Internal admin tooling</div><p><b>→ the operator plane</b> — built from the same objects; accounts ARE tenant orgs, masked impersonation, not a second app six months later</p></div>
       <div class="gone"><div class="name">A forked product UI per app</div><p><b>→ samen_web</b> — the component kit + every LiveView is inherited; PawChart got the whole UI in 3 router lines</p></div>
       <div class="gone"><div class="name">A per-app object-preview service</div><p><b>→ ObjectRef</b> — the catalog renders any resource as a masking-aware card; new objects unfurl with zero card code</p></div>

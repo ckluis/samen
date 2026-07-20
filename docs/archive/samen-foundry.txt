@@ -1,4 +1,5 @@
-
+[ARCHIVED — superseded long-form variant. The canonical Samen design page is the repo-root
+index.html. This doc is kept for provenance and is no longer maintained. WS-F1 / F1.5.]
 
 Samen — build the 20%, inherit the 80%, run the whole company on it
 
@@ -274,7 +275,7 @@ For the CFO
 
  
  
-- Vendor consolidation, against the status quo you'd otherwise run. The named alternative — rebuilding the 80% on a web framework plus a developer-infra stack (managed PG + Upstash + Inngest + Clerk + Segment) — runs ~$2k–$8k/mo before it scales with seats, and that's just the bill, not the engineers patching those surfaces. Samen's base is one Neon Postgres + one app: ~$300–$1.5k/mo. You retire the assembled stack, not a vague "infra spend."
+- Vendor consolidation, against the status quo you'd otherwise run. The named alternative — rebuilding the 80% on a web framework plus a developer-infra stack (managed PG + Upstash + Inngest + Clerk + Segment) — runs ~$2k–$8k/mo before it scales with seats, and that's just the bill, not the engineers patching those surfaces. Samen's base is one Neon Postgres + one app: ~$300–$1.5k/mo. You retire most of that assembled stack — the identity provider and Stripe you still bring, but Samen governs the identity and billing you bring (auth stays host-owned; billing is a governed Stripe-mirror with a host-owned sync adapter) instead of adding two more integration surfaces to patch.
  
 - And the bigger line: the software you'd buy to run the company. The operator plane is a real account CRM, help desk, and lifecycle-email console built from the same objects — so you're not also paying per-seat for Salesforce / HubSpot to track your customers, Zendesk to support them, and a marketing-automation contract on top. That's the second 80% every SaaS buys and rebuilds as internal tooling — inherited here, not expensed per head.
  
@@ -293,7 +294,7 @@ For the CFO
  
 ∴
  
-Samen presets the universal 80% as governed, PII-safe, malleable idioms on a single Postgres — so engineering builds less, product ships its 20% faster, and finance retires both a vendor stack and a compliance liability.
+Samen presets the universal 80% as governed, PII-safe, malleable idioms on a single Postgres — so engineering builds less, product ships its 20% faster, and finance collapses most of a vendor stack (governing, not replacing, the identity and billing you bring) while retiring a compliance liability.
  
  
 

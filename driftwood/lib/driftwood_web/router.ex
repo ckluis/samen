@@ -63,6 +63,7 @@ defmodule DriftwoodWeb.Router do
 
     get("/", PageController, :index)
     get("/healthz", PageController, :healthz)
+    get("/readyz", PageController, :readyz)
 
     # The freight vertical 20% (stays driftwood-local — freight-shaped resources).
     live("/broker", BrokerLive)
