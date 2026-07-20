@@ -65,7 +65,10 @@ prefix = <<?j, l1>>
 app_abbrev = <<?j, ?z, l2>>
 # The gen'd RESOURCE abbrev "jw<l2>": `w` second letter keeps it clear of billing (j<l1>?),
 # aggregate (j<l1>a), primitives (jn?), operator (jo?/jp?/jq?), and the app abbrev (jz?).
-resource_abbrev = <<?j, ?w, l2>>
+# De-flake: l2=='h' would make "jwh", which collides with the primitives Webhook abbrev
+# (<p1>wh); remap that one case to an unreserved third letter (verified clear).
+resource_l2 = if l2 == ?h, do: ?z, else: l2
+resource_abbrev = <<?j, ?w, resource_l2>>
 module = "Genpost" <> String.upcase(<<l1, l2>>)
 
 http_port = 4880 + rem(System.unique_integer([:positive]), 90)
@@ -167,7 +170,9 @@ try do
       "--resource",
       "Widget",
       "--abbrev",
-      resource_abbrev
+      resource_abbrev,
+      # WS-D D7a `--live`: ALSO scaffold index/show/form LiveViews on `Samen.UI`.
+      "--live"
     ])
 
   if res_code != 0 do
@@ -205,6 +210,35 @@ try do
 
   IO.puts("D7a: gen.resource emitted #{module}.Crm.Widget + migration + four G26 files + probe.")
 
+  # --- 3b. --live: the three CRUD LiveViews + the mount-smoke test + router wiring -------
+  live_files = [
+    "lib/#{spec.otp_app}_web/crm/widget_index_live.ex",
+    "lib/#{spec.otp_app}_web/crm/widget_show_live.ex",
+    "lib/#{spec.otp_app}_web/crm/widget_form_live.ex"
+  ]
+
+  live_smoke_file = "test/crm_widget_live_smoke_test.exs"
+
+  for f <- live_files do
+    unless File.exists?(Path.join(app_dir, f)) do
+      halt.(1, "FAIL: gen.resource --live did not emit the LiveView #{f}.")
+    end
+  end
+
+  unless File.exists?(Path.join(app_dir, live_smoke_file)) do
+    halt.(1, "FAIL: gen.resource --live did not emit the mount-smoke test #{live_smoke_file}.")
+  end
+
+  # The four `live/3` routes must be wired into the generated app's router.
+  router_src = File.read!(Path.join(app_dir, "lib/#{spec.otp_app}_web/router.ex"))
+
+  unless router_src =~ "Crm.WidgetIndexLive" and router_src =~ "Crm.WidgetShowLive" and
+           router_src =~ "Crm.WidgetFormLive" do
+    halt.(1, "FAIL: gen.resource --live did not wire the CRUD live/3 routes into the router.")
+  end
+
+  IO.puts("D7a: gen.resource --live emitted index/show/form LiveViews + smoke test + router routes.")
+
   # --- 4. re-dump the drift baseline (includes the new table), then run FULL ci.sh -----
   # compile first so catalog.dump sees the new resource; then re-baseline schema.dict.json
   # (the human's "commit the baseline" step), then the app's own ci.sh migrates + gates.
@@ -234,18 +268,20 @@ try do
     halt.(1, "FAIL: ci.sh did NOT pass with the gen'd Crm.Widget resource — not correct-by-construction.")
   end
 
-  # The four G26 files must have RUN (not been silently skipped). ci.sh runs `mix test`;
-  # confirm the four test modules were loaded by re-running JUST them and asserting 0 failures.
+  # The four G26 files + the --live mount-smoke test must have RUN (not been silently
+  # skipped). ci.sh runs `mix test`; confirm the modules were loaded by re-running JUST
+  # them and asserting 0 failures.
   {t_out, t_code} =
-    mix.(app_dir, ["test" | four_files])
+    mix.(app_dir, ["test" | four_files ++ [live_smoke_file]])
 
   if t_code != 0 do
     IO.puts(t_out)
-    halt.(1, "FAIL: the four emitted G26 red-path test files did not pass on a focused run.")
+    halt.(1, "FAIL: the emitted G26 red-path + --live mount-smoke test files did not pass on a focused run.")
   end
 
   IO.puts("D7a: full ci.sh GREEN + the four G26 files pass (policy matrix, RBAC admin-gate,")
-  IO.puts("     vault routing, catalog-parity) — correct-by-construction, ZERO hand-edits.")
+  IO.puts("     vault routing, catalog-parity) + the --live index/show/form mount-smoke —")
+  IO.puts("     correct-by-construction, ZERO hand-edits.")
 
   # --- 5. the per-resource anti-tautology probe confirms non-vacuity -------------------
   {probe_out, probe_code} =
@@ -302,10 +338,11 @@ try do
 
   IO.puts("\nRESULT: POST-APP GENERATOR PROBE CONFIRMED (AC-G4-7 / AC-G26-1/3) —")
   IO.puts("`mix samen.gen.scope` + `mix samen.gen.resource` scaffolded a second scope+resource")
-  IO.puts("(Crm.Widget) correct-by-construction: it compiled, catalogued, reserved its abbrev,")
-  IO.puts("passed the full ci.sh with the four G26 red-path files green + the per-resource")
-  IO.puts("anti-tautology probe, and a red-path-mechanism sabotage flipped a red path and")
-  IO.puts("reverted byte-exact. Total probe runtime: #{Float.round(elapsed / 1000, 1)}s. Zero residue.")
+  IO.puts("(Crm.Widget --live) correct-by-construction: it compiled, catalogued, reserved its")
+  IO.puts("abbrev, emitted index/show/form LiveViews on Samen.UI wired into the router, passed")
+  IO.puts("the full ci.sh with the four G26 red-path files green + the --live mount-smoke +")
+  IO.puts("the per-resource anti-tautology probe, and a red-path-mechanism sabotage flipped a")
+  IO.puts("red path and reverted byte-exact. Total probe runtime: #{Float.round(elapsed / 1000, 1)}s. Zero residue.")
 
   cleanup.()
 rescue

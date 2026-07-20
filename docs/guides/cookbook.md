@@ -251,6 +251,247 @@ deliberately un-allowlisted (the tenant boundary is internal routing).
 
 ---
 
+## Recipe 7 — Scaffold CRUD screens with `--live`
+
+**Mechanism:** the `--live` switch on `mix samen.gen.resource`
+(`samen_core/lib/mix/tasks/samen.gen.resource.ex`), which emits index / show / form
+LiveViews on the `Samen.UI` kit + a mount-smoke test
+(`samen_core/lib/samen/gen/post_templates.ex`) and wires the `live/3` routes into the
+generated app's router (`samen_core/lib/samen/gen/post.ex`).
+**Verified against:** the permanent post-app generator probe
+(`samen_core/priv/gen_post_probe.exs`, a root `ci.sh` step), which now runs `--live`,
+asserts the three LiveViews + smoke test are emitted, that the generated app STILL
+compiles and its full gate stays green with the surfaces present, and that the
+index/show/form modules mount + render off a disconnected socket.
+
+By default `mix samen.gen.resource` lands a **headless** data layer — the resource,
+migration and the four G26 red-path tests, but no screens. Add `--live` and a builder
+gets **visible CRUD** instead: a list, a detail view and a create/edit form, all on the
+inherited kit (no bespoke markup, no per-vertical UI library). Requires a `--web` app
+(the surfaces mount on samen_web's `Samen.UI`).
+
+```bash
+mix samen.gen.resource --scope Crm --resource Widget --abbrev wdg --live
+```
+
+This emits, alongside the headless output, three LiveViews under the app's
+`lib/<app>_web/<scope>/` tree plus a smoke test under `test/`:
+
+* `widget_index_live.ex` — a kit `data_table` list with a `modal`/`simple_form` create
+  and a per-row `delete_confirm`;
+* `widget_show_live.ex` — a detail card;
+* `widget_form_live.ex` — one `simple_form` serving both create and edit;
+* `crm_widget_live_smoke_test.exs` — the mount-lifecycle smoke;
+
+and wires four routes into the router the same alias-relative way the generated app
+already mounts its browser surfaces:
+
+```elixir
+scope "/", HarborWeb do
+  pipe_through(:browser)
+
+  live("/crm/widget", Crm.WidgetIndexLive, :index)
+  live("/crm/widget/new", Crm.WidgetFormLive, :new)
+  live("/crm/widget/:id/edit", Crm.WidgetFormLive, :edit)
+  live("/crm/widget/:id", Crm.WidgetShowLive, :show)
+end
+```
+
+**Masking by construction.** Each screen reads through Ash under a `%Samen.Scope{}`
+carrying `plane: :tenant`, so the resource's read preparation
+(`prepare(Samen.Api.PiiResolution)`) resolves the 🔒 vault field per plane before the
+LiveView ever sees it. The surface renders the ALREADY-RESOLVED value — clear on the
+tenant plane, `••••` on the operator plane — so it **never hand-masks** and a `vt_*`
+token never reaches the DOM. On the form, the kit's `form_field/1` renders a vaulted
+value on the operator plane as a read-only `••••` with no `name` (it can never
+round-trip plaintext). This is the same `Samen.Api.PiiResolution` seam Recipe 5's tests
+pin, exercised end to end in the emitted mount-smoke test.
+
+---
+
+## Recipe 8 — Run a crypto-shred
+
+**Mechanism:** `Samen.Erasure.shred/2` (`samen_core/lib/samen/erasure.ex`) — the ONE entry
+point that erases a subject. It is a key-destruction job, not a copy-chasing job: destroying
+the subject's KMS key makes every one of their vaulted values undecryptable, across live,
+replica, backup/PITR, CDC mirror, rollup and audit tiers, at once.
+**Verified against:** `samen_core/test/erasure_test.exs` (the green/red-path suite),
+`driftwood/priv/gameday/crypto_shred_gameday.exs` (the real game-day script that runs `shred/2`
+against seeded subjects end-to-end), and `samen_core/lib/mix/tasks/samen.verify.no_plaintext_pii.ex`
+(the T2.9 post-shred destruction oracle).
+
+Trigger a shred for a subject — any resource's `id` that owns vaulted fields (a `User`, a CRM
+`Person`, a driver row) is a valid subject id:
+
+```elixir
+{:ok, %{attestation: attestation, report: report}} =
+  Samen.Erasure.shred(subject_id, repo: Harbor.Repo, actor_id: "operator:dpo")
+
+attestation.state       # :shredded — the KMS tombstone is positive
+report.outcome          # "shredded" (first call) | "already_shredded" (idempotent re-run)
+report.vault_rows_sealed
+```
+
+Under the hood (module doc, `erasure.ex:13`): the key is destroyed FIRST and outside the DB
+transaction (the key store is external — [ADR-001](../adr/001-key-hierarchy.md)); then, in
+ONE `Ecto.Multi`, every `pii_vault` row for the subject is stamped `state: "shredded"`,
+registered `non_pii!` plaintext columns are redacted, every registered rollup is rebuilt
+subject-free or has its derived row suppressed, and an `"erased"` audit row lands on the
+hash-chained lifecycle log. A second `shred/2` for the same subject is safe — it's idempotent
+by construction (see the moduledoc's "Idempotence" section).
+
+**Test it worked** two ways. Cheaply, in-process:
+
+```elixir
+Samen.Erasure.erased?(subject_id, repo: Harbor.Repo)   # => true
+```
+
+`erased?/2` requires ALL of: a positive `:shredded` KMS tombstone, the wrapped key material
+actually gone (not just tombstoned — defence in depth), and zero `"active"` vault rows for the
+subject. The stronger, tier-by-tier proof is the destruction oracle in post-shred mode — it
+scans domain rows, vault, `aud_event`, rollups, and the KMS store as a separate OS process and
+asserts none of them holds recoverable plaintext:
+
+```bash
+mix samen.verify.no_plaintext_pii --subject 3f2a9c10-0000-0000-0000-000000000000 --tiers all
+```
+
+`--tiers all` is the only value the task accepts (any other value is refused, fail-closed —
+see the task's moduledoc). Run it against a real shredded subject id from your app; the
+driftwood game-day script is the reference for wiring it into a repeatable drill.
+
+---
+
+## Recipe 9 — Write a sabotage patch
+
+**Mechanism:** the `scripts/sabotage.sh` discipline — a committed `.patch` per guarantee,
+applied → the named tests MUST fail → reverted with a SHA-256 byte-exact restore. This is how
+the repo proves a red-path test can actually fail (a test that cannot fail is treated as a
+bug) without re-deriving the sabotage by hand on every gate.
+**Verified against:** `scripts/sabotage.sh` (the harness itself) and
+`scripts/sabotages/16-f1-csv-formula-injection.patch` (a worked example — the CSV
+formula-injection neutralization sabotage).
+
+A sabotage patch lives at `scripts/sabotages/NN-<slug>.patch`, numbered sequentially. Find the
+next free number, make the breaking change directly in the tree, and capture it as a patch —
+these are manual authoring steps (crafting the adversarial change is a judgment call, not a
+scripted CI step), run locally as you write a new sabotage:
+
+```bash operator-todo
+ls scripts/sabotages/ | sort | tail -1
+git diff samen_web/lib/samen/web/csv.ex > scripts/sabotages/25-my-new-sabotage.patch
+```
+
+The patch is a normal `git diff` with three required `# KEY: value` header lines BEFORE the
+first `diff --git` (the harness's `meta()` helper reads them; `git apply` itself ignores
+everything before the diff, so the headers are metadata-only):
+
+```
+# SABOTAGE: one sentence — which guarantee this breaks and why the named tests must flip.
+# APP: samen_web
+# TEST_FILES: test/samen/web/csv_test.exs
+# MUST_FAIL: neutralizes every formula-injection lead char on export
+diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
+index 849fbe4..3bbef8c 100644
+--- a/samen_web/lib/samen/web/csv.ex
++++ b/samen_web/lib/samen/web/csv.ex
+@@ -326,10 +326,10 @@ defmodule Samen.Web.Csv do
+ ...
+```
+
+- **`APP`** — the app dir the harness `cd`s into before running tests (`samen_core` |
+  `samen_web` | …).
+- **`TEST_FILES`** — space-separated test files, relative to `APP`, that hold the tests your
+  sabotage must flip.
+- **`MUST_FAIL`** — one or more substrings of a test's full name (repeatable). Every one MUST
+  appear among the suite's failure headers when the patch is applied — not just "something
+  broke," the SPECIFIC guarantee's test.
+
+Hand-prepend the `# SABOTAGE:` / `# APP:` / `# TEST_FILES:` / `# MUST_FAIL:` header lines
+above the `diff --git` line in the captured patch, and revert your working-tree change (the
+patch IS the change now; the tree should go back to green). Prove it flips before committing
+it — `scripts/sabotage.sh` does all five steps for every committed patch: SHA-256 the touched
+files, apply, run `TEST_FILES` and assert the `MUST_FAIL` names are among the failures, revert,
+and re-SHA to confirm a byte-exact restore. Run it locally against your new patch, then run the
+whole committed suite (24 patches as of this writing) — both are opt-in (they deliberately
+break the tree and re-run DB-backed suites), so they're run explicitly, not by the default
+`bash ci.sh`:
+
+```bash operator-todo
+./scripts/sabotage.sh
+SAMEN_SABOTAGE=1 ./ci.sh
+```
+
+---
+
+## Recipe 10 — Mount surfaces in a fresh vertical (the ≈0-LOC pattern)
+
+**Mechanism:** the router-macro mount pattern — one line per surface, over a mount the app
+already authors. No per-vertical LiveView/engine code; the framework surface renders through
+`Samen.Web.Mount` + `Samen.Api.PiiResolution` exactly as CRM/Billing/Support do.
+**Verified against:** the "Surface → router macro → mount it needs" table in
+[`docs/guides/generators.md`](generators.md#mountable-surfaces--the---modules-menu)
+and the two shipped mounts that prove it: `driftwood/lib/driftwood_web/router.ex` and
+`pawchart/lib/pawchart_web/router.ex`.
+
+Scaffold a base app the normal way (Recipe-1-adjacent — the flagship 3-flag shape):
+
+```bash
+mix samen.gen.app --module Harbor --prefix hb --abbrev hrb
+```
+
+`mix samen.gen.app` also accepts a `--modules files,search,csv,settings` flag that mounts
+these same surfaces AND wires them into a navigation menu automatically (see generators.md);
+this recipe shows the underlying macro calls directly, for mounting a surface over a HAND-ROLLED
+router or a vertical the generator didn't scaffold this way.
+
+Each end-user surface needs a mount it can render over — Files/Search need a Primitives mount
+(materializes `File`/`SearchIndex`), CSV needs any domain with servable resources, Settings
+needs an Identity namespace. Once that mount exists, adding the surface is one macro call. This
+is PawChart's actual router (`pawchart/lib/pawchart_web/router.ex`) — the SECOND vertical's
+proof that these surfaces inherit framework-first, zero PawChart LiveView code:
+
+```elixir
+import Samen.Web.Router
+
+scope "/", PawChartWeb do
+  pipe_through(:browser)
+
+  # Files (ADR-026) — upload + preview + plane-gated byte-serve, over the Primitives mount.
+  samen_files_routes(:files, PawChart.Primitives,
+    repo: PawChart.Repo,
+    labels: %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"}
+  )
+
+  # CSV (ADR-028) — per-plane-masked export + governed import, over the CRM domain.
+  samen_csv_routes(:csv, PawChart.Crm,
+    repo: PawChart.Repo,
+    labels: %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"}
+  )
+
+  # Search (ADR-027) — the ⌘K / per-list search engine, over the Primitives mount.
+  samen_search_routes(:search, PawChart.Primitives,
+    repo: PawChart.Repo,
+    labels: %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"}
+  )
+end
+```
+
+Driftwood additionally mounts `samen_settings_routes` (over its `Driftwood.Operator` Identity
+namespace) and `samen_chat_routes` (over a materialized `Driftwood.Chat` scope plus a running
+`Samen.Web.Chat.Presence` in its supervision tree — the one surface that needs more than a
+mount, per generators.md's "why chat is not auto-mounted" note). Both routers cite the exact
+ADR each surface implements in a comment above the macro call — copy that convention: it's
+what lets a reader trace "why is this line here" back to the design record without asking.
+
+**Masking by construction, again.** None of these macros authors a masking branch. Files
+preview, CSV export cells, and search result projections all resolve through
+`Samen.Api.PiiResolution` exactly like the CRM/Billing/Support LiveViews (see
+[Two-plane + masking concepts](../concepts/two-plane-masking.md)) — mounting a surface never
+means re-deriving its masking guarantee.
+
+---
+
 *Every recipe above cites shipped code. If a cited task or macro disappears from the tree,
 `doc_recipes_test.exs` fails; if a fenced command stops being executed by CI,
 `doc_commands_test.exs` fails. That is the point.*

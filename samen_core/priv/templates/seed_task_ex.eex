@@ -1,0 +1,24 @@
+defmodule Mix.Tasks.<%= module %>.Seed do
+  @shortdoc "Seed the dev DB for <%= module %> (vault-aware, via Samen.Factory)"
+  @moduledoc """
+  Seed the <%= module %> DEV database with sample `Vertical.Record` rows so the
+  inherited pages + the `/api/v1` JSON:API render REAL data. Every seeded 🔒 field is
+  vault-routed (WS-D D4). Mirrors `mix pawchart.seed`.
+
+      MIX_ENV=dev mix <%= otp_app %>.seed
+
+  Prints the seeded org id; use `?org=<uuid>` on the LiveView URLs.
+  """
+  use Mix.Task
+
+  @requirements ["app.start"]
+
+  @impl Mix.Task
+  def run(_args) do
+    org_id = <%= module %>.Seeds.run()
+    Mix.shell().info("Seeded <%= module %> dev tenant org: #{org_id}")
+    Mix.shell().info("Open: /billing?org=#{org_id}")
+    Mix.shell().info("API:  GET /api/v1/records (Bearer <tenant api_key for #{org_id}>)")
+    org_id
+  end
+end

@@ -36,7 +36,13 @@ defmodule SamenCore.MixProject do
       deps: deps(),
       aliases: aliases(),
       description: "Samen foundry kernel: self-qualifying storage, machine catalog, PII vault.",
-      package: package()
+      package: package(),
+      # ExDoc — moduledoc coverage is ~100%; `mix docs` emits HTML API docs into `doc/`
+      # (gitignored, dev-only, never committed). `--warnings-as-errors` compile / CI are
+      # unaffected: ex_doc is `only: :dev, runtime: false`.
+      name: "samen_core",
+      source_url: "https://github.com/ckluis/samen",
+      docs: docs()
     ]
   end
 
@@ -95,7 +101,15 @@ defmodule SamenCore.MixProject do
       # it as an OPTIONAL dep (picosat_elixir or simple_sat); we choose simple_sat to
       # avoid a NIF/C toolchain requirement in this environment. No AWS/Neon here —
       # a pure-Elixir solver keeps the policy layer self-contained and CI-portable.
-      {:simple_sat, "~> 0.1"}
+      {:simple_sat, "~> 0.1"},
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      extras: ["README.md"]
     ]
   end
 

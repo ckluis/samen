@@ -142,7 +142,9 @@ defmodule Samen.Gen.Post do
       :resource_module,
       :abbrev,
       :table,
-      :migration_ts
+      :migration_ts,
+      # WS-D D7a `--live`: also scaffold index/show/form LiveViews on `Samen.UI`.
+      live?: false
     ]
   end
 
@@ -169,7 +171,8 @@ defmodule Samen.Gen.Post do
       resource_module: "#{scope_module}.#{resource}",
       abbrev: abbrev,
       table: "#{abbrev}_#{Macro.underscore(resource)}",
-      migration_ts: Keyword.get(opts, :migration_ts, next_migration_ts(app_dir))
+      migration_ts: Keyword.get(opts, :migration_ts, next_migration_ts(app_dir)),
+      live?: Keyword.get(opts, :live, false)
     }
   end
 
@@ -281,6 +284,35 @@ defmodule Samen.Gen.Post do
     end
 
     wire_resource_into_domain!(s)
+    if s.live?, do: write_resource_live!(s, b)
+    :ok
+  end
+
+  @doc """
+  Emit the three CRUD LiveViews (index/show/form) on the `Samen.UI` kit + a mount-smoke
+  test, and wire the four `live/3` routes into the generated app's router — the `--live`
+  half of `mix samen.gen.resource`. Correct-by-construction: the surfaces compile under
+  `--warnings-as-errors` and render off a disconnected socket; the 🔒 vault field resolves
+  through `Samen.Api.PiiResolution` on the actor's plane (never hand-masked).
+  """
+  def write_resource_live!(%ResourceSpec{} = s, bindings) do
+    web_dir = Path.join(["lib", "#{s.otp_app}_web", Macro.underscore(s.scope)])
+    stem = "#{Macro.underscore(s.resource)}"
+
+    live_files = [
+      {Path.join(web_dir, "#{stem}_index_live.ex"), Samen.Gen.PostTemplates.resource_index_live()},
+      {Path.join(web_dir, "#{stem}_show_live.ex"), Samen.Gen.PostTemplates.resource_show_live()},
+      {Path.join(web_dir, "#{stem}_form_live.ex"), Samen.Gen.PostTemplates.resource_form_live()},
+      {"test/#{test_stem(s)}_live_smoke_test.exs", Samen.Gen.PostTemplates.resource_live_smoke_test()}
+    ]
+
+    for {rel, template} <- live_files do
+      dest = Path.join(s.app_dir, rel)
+      File.mkdir_p!(Path.dirname(dest))
+      File.write!(dest, App.render(template, bindings))
+    end
+
+    wire_live_routes!(s)
     :ok
   end
 
@@ -317,7 +349,10 @@ defmodule Samen.Gen.Post do
       "resource_module" => s.resource_module,
       "abbrev" => s.abbrev,
       "table" => s.table,
-      "test_stem" => test_stem(s)
+      "test_stem" => test_stem(s),
+      # `--live` bindings: underscored path segments for the emitted LiveViews' routes.
+      "scope_path" => Macro.underscore(s.scope),
+      "resource_path" => Macro.underscore(s.resource)
     }
   end
 
@@ -444,6 +479,48 @@ defmodule Samen.Gen.Post do
         )
 
       File.write!(scope_file, updated)
+      :ok
+    end
+  end
+
+  # Wire the four `live/3` routes for the emitted CRUD LiveViews into the generated app's
+  # router — mirroring how the generated app already mounts its browser surfaces (the
+  # aliased `scope "/", <App>Web do … pipe_through(:browser)` block; `import
+  # Phoenix.LiveView.Router` is already present). The routes resolve alias-relative under
+  # the `<App>Web` scope, so `<Scope>.<Resource>IndexLive` → `<App>Web.<Scope>.<...>`.
+  # Idempotent (a route already present is left as-is). `/new` precedes `/:id` so the
+  # literal segment wins.
+  defp wire_live_routes!(%ResourceSpec{} = s) do
+    router = Path.join(s.app_dir, "lib/#{s.otp_app}_web/router.ex")
+    src = File.read!(router)
+
+    marker = "#{s.scope}.#{s.resource}IndexLive"
+
+    if String.contains?(src, marker) do
+      :ok
+    else
+      sp = Macro.underscore(s.scope)
+      rp = Macro.underscore(s.resource)
+
+      block =
+        "\n" <>
+          "    # mix samen.gen.resource --live — #{s.resource_module} CRUD screens on Samen.UI.\n" <>
+          "    live(\"/#{sp}/#{rp}\", #{s.scope}.#{s.resource}IndexLive, :index)\n" <>
+          "    live(\"/#{sp}/#{rp}/new\", #{s.scope}.#{s.resource}FormLive, :new)\n" <>
+          "    live(\"/#{sp}/#{rp}/:id/edit\", #{s.scope}.#{s.resource}FormLive, :edit)\n" <>
+          "    live(\"/#{sp}/#{rp}/:id\", #{s.scope}.#{s.resource}ShowLive, :show)\n"
+
+      # Insert just inside the aliased browser scope, right after its `pipe_through(:browser)`.
+      re = ~r/(scope\s+"\/",\s+#{Regex.escape(s.app_module)}Web do\n[ \t]*pipe_through\(:browser\)\n)/
+
+      unless Regex.match?(re, src) do
+        raise ArgumentError,
+              "could not find the aliased `scope \"/\", #{s.app_module}Web do` browser block " <>
+                "in #{router} to wire the --live routes into."
+      end
+
+      updated = Regex.replace(re, src, fn _whole, head -> head <> block end, global: false)
+      File.write!(router, updated)
       :ok
     end
   end

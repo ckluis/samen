@@ -101,10 +101,23 @@ defmodule Samen.Web.ResponsiveMaskingTest do
   # -- source scope guard: the responsive additions carry no unmasking path -----
 
   test "the responsive-touched Samen.UI kit carries no unmasking path" do
-    full = File.read!(Path.join([File.cwd!(), "lib", "samen", "ui.ex"]))
-    # Drop the moduledoc prose (which legitimately DESCRIBES the no-reveal posture);
-    # scan the code body only, mirroring Samen.UI.MaskingTest's kit_code_only/0.
-    [_doc, code] = String.split(full, "use Phoenix.Component", parts: 2)
+    # Drop each file's moduledoc prose (which legitimately DESCRIBES the no-reveal
+    # posture); scan the code body only, mirroring Samen.UI.MaskingTest's
+    # kit_code_only/0. `Samen.UI` is now a FACADE over `Samen.UI.*` family submodules,
+    # so scan ui.ex AND every submodule under lib/samen/ui/ (table-scroll, def skeleton,
+    # and nav-toggle-cb now live in Samen.UI.Table/Feedback/Shell respectively).
+    dir = Path.join([File.cwd!(), "lib", "samen"])
+
+    code =
+      [Path.join(dir, "ui.ex") | Path.wildcard(Path.join([dir, "ui", "*.ex"]))]
+      |> Enum.map(&File.read!/1)
+      |> Enum.map(fn full ->
+        case String.split(full, "use Phoenix.Component", parts: 2) do
+          [_doc, body] -> body
+          [only] -> only
+        end
+      end)
+      |> Enum.join("\n")
 
     # The E6 responsive surface shipped…
     assert code =~ "table-scroll"

@@ -405,4 +405,630 @@ defmodule Samen.Gen.PostTemplates do
     File.rm_rf!(kms_key_dir)
     '''
   end
+
+  # ===========================================================================
+  # mix samen.gen.resource --live — the three CRUD LiveViews on `Samen.UI`
+  # (WS-D D7a). Thin, kit-first surfaces: index / show / form. Self-contained
+  # after the driftwood `broker_live` idiom (`?org=<uuid>` selects the tenant
+  # org, a `%Samen.Scope{}` with `plane: :tenant` scopes every Ash read). The
+  # 🔒 vault field resolves through `Samen.Api.PiiResolution` BY CONSTRUCTION —
+  # the resource's read preparation runs the resolver on the actor's plane, so a
+  # LiveView renders the ALREADY-RESOLVED value (clear on the tenant plane, `••••`
+  # otherwise). No hand-masking, no `vt_*` token ever reaches a template.
+  # ===========================================================================
+
+  @doc "The INDEX LiveView — a kit `data_table` list + a `modal`/`simple_form` create."
+  def resource_index_live do
+    ~S'''
+    defmodule <%= module %>Web.<%= scope %>.<%= resource %>IndexLive do
+      @moduledoc """
+      <%= resource_module %> INDEX (`/<%= scope_path %>/<%= resource_path %>`) — the
+      generated tenant-plane list screen on the `Samen.UI` kit (emitted by
+      `mix samen.gen.resource --live`, WS-D D7a).
+
+      Self-contained after driftwood's `broker_live` idiom: `?org=<uuid>` selects the
+      tenant org (a LOCAL DOGFOOD convenience — a real deploy derives it from the
+      authenticated session), a `%Samen.Scope{}` carrying `plane: :tenant` scopes every
+      Ash read, and `Samen.Policy.OrgScope` confines the result to the acting org.
+      Writes are admin-gated in the kernel (`RoleAtLeast :admin`); the "New" affordance
+      opens a `modal/1` hosting the `AshPhoenix.Form`-backed `simple_form/1` create. The
+      resource carries a 🔒 vault field, resolved per plane through
+      `Samen.Api.PiiResolution` on read — the surface never hand-masks (see the show
+      screen, where the resolved value renders).
+      """
+      use Phoenix.LiveView
+
+      import Samen.UI
+
+      alias <%= resource_module %>, as: Resource
+
+      @impl true
+      def mount(params, _session, socket) do
+        org_id = params["org"]
+        {:ok, load(assign(socket, org_id: org_id), org_id)}
+      end
+
+      @impl true
+      def handle_params(params, _uri, socket) do
+        org_id = params["org"] || socket.assigns.org_id
+        {:noreply, load(assign(socket, org_id: org_id), org_id)}
+      end
+
+      @doc false
+      def load(socket, nil) do
+        assign(socket,
+          no_org: true,
+          org_id: nil,
+          records: [],
+          show_new: false,
+          new_form: nil,
+          delete_error: nil
+        )
+      end
+
+      def load(socket, org_id) do
+        scope = scope(org_id)
+
+        socket
+        |> assign(no_org: false, org_id: org_id, records: read_records(scope))
+        |> assign_new(:show_new, fn -> false end)
+        |> assign_new(:delete_error, fn -> nil end)
+        |> assign(new_form: create_form(scope))
+      end
+
+      @impl true
+      def handle_event("new", _params, socket) do
+        {:noreply, assign(socket, show_new: true, new_form: create_form(scope(socket.assigns.org_id)))}
+      end
+
+      def handle_event("cancel_new", _params, socket) do
+        {:noreply, assign(socket, show_new: false)}
+      end
+
+      def handle_event("validate_new", %{"form" => params}, socket) do
+        form = AshPhoenix.Form.validate(socket.assigns.new_form, with_org(params, socket))
+        {:noreply, assign(socket, new_form: form)}
+      end
+
+      # `org_id` is the server-side fact, never client input; the kernel's OrgScope +
+      # admin gate enforce the write regardless of the UI.
+      def handle_event("save_new", %{"form" => params}, socket) do
+        case AshPhoenix.Form.submit(socket.assigns.new_form, params: with_org(params, socket)) do
+          {:ok, _record} ->
+            {:noreply, socket |> assign(show_new: false) |> load(socket.assigns.org_id)}
+
+          {:error, form} ->
+            {:noreply, assign(socket, new_form: form)}
+        end
+      end
+
+      # FAIL-HONEST delete: navigate/refresh only when the destroy actually happened.
+      def handle_event("delete", %{"id" => id}, socket) do
+        scope = scope(socket.assigns.org_id)
+
+        case Enum.find(socket.assigns.records, &(to_string(&1.id) == id)) do
+          nil ->
+            {:noreply, socket}
+
+          record ->
+            case Ash.destroy(record, scope: scope) do
+              :ok -> {:noreply, load(assign(socket, delete_error: nil), socket.assigns.org_id)}
+              {:ok, _} -> {:noreply, load(assign(socket, delete_error: nil), socket.assigns.org_id)}
+              {:error, _} -> {:noreply, assign(socket, delete_error: "Could not delete this <%= resource_path %>.")}
+            end
+        end
+      end
+
+      # `?org=` selects the tenant org; the actor carries `plane: :tenant`, so its OWN
+      # org's PII resolves in CLEAR through `Samen.Api.PiiResolution` (never hand-masked,
+      # never a `vt_*` token). `role: :admin` clears the kernel's admin write gate.
+      defp scope(org_id) do
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: :admin, plane: :tenant}}
+      end
+
+      defp read_records(scope) do
+        Resource
+        |> Ash.read!(scope: scope)
+      end
+
+      defp create_form(scope) do
+        Resource
+        |> AshPhoenix.Form.for_create(:create, scope: scope)
+        |> to_form()
+      end
+
+      defp with_org(params, socket), do: Map.put(params, "org_id", socket.assigns.org_id)
+
+      @impl true
+      def render(assigns) do
+        ~H"""
+        <div id="<%= scope_path %>-<%= resource_path %>-index">
+          <.app_shell>
+            <:sidebar>
+              <.sidebar title="<%= module %>" subtitle="<%= scope %>">
+                <.nav_group label="<%= scope %>">
+                  <.nav_item label="<%= resource %>" href={"/<%= scope_path %>/<%= resource_path %>?org=#{@org_id}"} active={true} />
+                </.nav_group>
+              </.sidebar>
+            </:sidebar>
+
+            <.topbar title="<%= resource %>" crumbs={["<%= module %>", "<%= scope %>", "<%= resource %>"]}>
+              <:actions>
+                <.button :if={not @no_org} variant="primary" phx-click="new" id="new-<%= resource_path %>">New <%= resource %></.button>
+              </:actions>
+            </.topbar>
+
+            <%= if @no_org do %>
+              <div class="wrap">
+                <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
+                  No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
+                </div>
+              </div>
+            <% else %>
+              <span id="org-banner" style="display:none"><%= scope %> org: {@org_id}</span>
+
+              <div :if={@delete_error} class="wrap" style="margin-bottom:0">
+                <div class="card" id="delete-error" style="padding:10px 14px;color:var(--bad, #b91c1c);font-size:12px">{@delete_error}</div>
+              </div>
+
+              <div class="wrap">
+                <%= if @records == [] do %>
+                  <.empty_state icon="▣" title="No <%= resource_path %> yet." body="Create the first <%= resource %> to get started.">
+                    <:actions>
+                      <.button variant="primary" phx-click="new" id="empty-new-<%= resource_path %>">New <%= resource %></.button>
+                    </:actions>
+                  </.empty_state>
+                <% else %>
+                  <.data_table>
+                    <:head>
+                      <th style="width:40%">Name</th>
+                      <th style="width:24%">Label</th>
+                      <th style="width:20%">Status</th>
+                      <th style="width:16%"><span class="sr-only">Actions</span></th>
+                    </:head>
+                    <tr :for={r <- @records} class="<%= resource_path %>-row" id={"<%= resource_path %>-#{r.id}"}>
+                      <td>
+                        <a href={"/<%= scope_path %>/<%= resource_path %>/#{r.id}?org=#{@org_id}"} style="color:#3B4CCA;font-weight:500;text-decoration:none">{r.name}</a>
+                      </td>
+                      <td style="color:var(--muted)">{r.label || "—"}</td>
+                      <td><.pill variant={status_variant(r.status)}>{r.status}</.pill></td>
+                      <td><.delete_confirm phx-click="delete" phx-value-id={r.id} /></td>
+                    </tr>
+                  </.data_table>
+                <% end %>
+              </div>
+
+              <.modal :if={@show_new and @new_form != nil} id="new-<%= resource_path %>-modal" title="New <%= resource %>" on_cancel="cancel_new">
+                <.simple_form :let={f} for={@new_form} id="new-<%= resource_path %>-form" phx-change="validate_new" phx-submit="save_new">
+                  <.form_field field={f[:name]} label="Name" />
+                  <.form_field field={f[:label]} label="Label" />
+                  <.form_field field={f[:status]} label="Status" type="select" options={[{"Active", "active"}, {"Paused", "paused"}, {"Archived", "archived"}]} />
+                  <.form_field field={f[:secret]} label="Secret (🔒 vault-routed)" />
+                  <:actions>
+                    <.button variant="primary" type="submit">Save <%= resource %></.button>
+                    <.button type="button" phx-click="cancel_new">Cancel</.button>
+                  </:actions>
+                </.simple_form>
+              </.modal>
+            <% end %>
+          </.app_shell>
+        </div>
+        """
+      end
+
+      defp status_variant(:active), do: "ok"
+      defp status_variant(:paused), do: "warn"
+      defp status_variant(:archived), do: "mut"
+      defp status_variant(_), do: "mut"
+    end
+    '''
+  end
+
+  @doc "The SHOW LiveView — a detail card that renders the plane-resolved 🔒 field."
+  def resource_show_live do
+    ~S'''
+    defmodule <%= module %>Web.<%= scope %>.<%= resource %>ShowLive do
+      @moduledoc """
+      <%= resource_module %> SHOW (`/<%= scope_path %>/<%= resource_path %>/:id`) — the
+      generated tenant-plane detail screen on the `Samen.UI` kit (emitted by
+      `mix samen.gen.resource --live`, WS-D D7a).
+
+      Reads ONE record via `Ash.get/3` under a `%Samen.Scope{}` with `plane: :tenant`.
+      The 🔒 vault field (`secret`) is rendered STRAIGHT from the read record —
+      `Samen.Api.PiiResolution` (the resource's read preparation) has already resolved it
+      to plaintext on the tenant plane / `%Samen.Masked{}` (`••••`) otherwise, so this
+      surface never reveals through the vault, never hand-masks, and never emits a `vt_*`
+      token. Edit routes to the form screen; delete is fail-honest.
+      """
+      use Phoenix.LiveView
+
+      import Samen.UI
+      require Ash.Query
+
+      alias <%= resource_module %>, as: Resource
+
+      @impl true
+      def mount(params, _session, socket) do
+        org_id = params["org"]
+        id = params["id"]
+        {:ok, load(assign(socket, org_id: org_id, id: id), org_id, id)}
+      end
+
+      @impl true
+      def handle_params(params, _uri, socket) do
+        org_id = params["org"] || socket.assigns.org_id
+        id = params["id"] || socket.assigns.id
+        {:noreply, load(assign(socket, org_id: org_id, id: id), org_id, id)}
+      end
+
+      @doc false
+      def load(socket, nil, _id), do: assign(socket, no_org: true, record: nil, delete_error: nil)
+      def load(socket, _org_id, nil), do: assign(socket, no_org: false, record: nil, delete_error: nil)
+
+      def load(socket, org_id, id) do
+        socket
+        |> assign(no_org: false, record: fetch(org_id, id))
+        |> assign_new(:delete_error, fn -> nil end)
+      end
+
+      @impl true
+      def handle_event("delete", %{"id" => id}, socket) do
+        scope = scope(socket.assigns.org_id)
+
+        case fetch(socket.assigns.org_id, id) do
+          nil ->
+            {:noreply, assign(socket, delete_error: "This <%= resource_path %> no longer exists.")}
+
+          record ->
+            case Ash.destroy(record, scope: scope) do
+              :ok -> {:noreply, push_navigate(socket, to: index_path(socket.assigns.org_id))}
+              {:ok, _} -> {:noreply, push_navigate(socket, to: index_path(socket.assigns.org_id))}
+              {:error, _} -> {:noreply, assign(socket, delete_error: "Could not delete this <%= resource_path %>.")}
+            end
+        end
+      end
+
+      # Read ONE record on the tenant plane, SELECTING the 🔒 vault field (pii fields are
+      # not selected by default). The read's `Samen.Api.PiiResolution` preparation resolves
+      # `secret` per plane — clear on the tenant plane, `%Samen.Masked{}` otherwise — so the
+      # template renders the already-resolved value (never hand-masked, never a `vt_*` token).
+      defp fetch(org_id, id) do
+        Resource
+        |> Ash.Query.filter(id == ^id)
+        |> Ash.Query.ensure_selected([:secret])
+        |> Ash.read_one(scope: scope(org_id))
+        |> case do
+          {:ok, record} -> record
+          {:error, _} -> nil
+        end
+      end
+
+      defp scope(org_id) do
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: :admin, plane: :tenant}}
+      end
+
+      defp index_path(org_id), do: "/<%= scope_path %>/<%= resource_path %>?org=#{org_id}"
+
+      @impl true
+      def render(assigns) do
+        ~H"""
+        <div id="<%= scope_path %>-<%= resource_path %>-show">
+          <.app_shell>
+            <:sidebar>
+              <.sidebar title="<%= module %>" subtitle="<%= scope %>">
+                <.nav_group label="<%= scope %>">
+                  <.nav_item label="<%= resource %>" href={index_path(@org_id)} active={true} />
+                </.nav_group>
+              </.sidebar>
+            </:sidebar>
+
+            <.topbar title={@record && @record.name || "<%= resource %>"} crumbs={["<%= module %>", "<%= scope %>", "<%= resource %>"]}>
+              <:actions>
+                <a href={index_path(@org_id)} class="btn" style="text-decoration:none">Back</a>
+                <a :if={@record != nil} href={"/<%= scope_path %>/<%= resource_path %>/#{@record.id}/edit?org=#{@org_id}"} class="btn" style="text-decoration:none" id="edit-<%= resource_path %>">Edit</a>
+                <.delete_confirm :if={@record != nil} id="delete-<%= resource_path %>" phx-click="delete" phx-value-id={@record && @record.id} />
+              </:actions>
+            </.topbar>
+
+            <%= if @no_org do %>
+              <div class="wrap">
+                <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
+                  No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
+                </div>
+              </div>
+            <% else %>
+              <div :if={@delete_error} class="wrap" style="margin-bottom:0">
+                <div class="card" id="delete-error" style="padding:10px 14px;color:var(--bad, #b91c1c);font-size:12px">{@delete_error}</div>
+              </div>
+
+              <%= if @record == nil do %>
+                <div class="wrap">
+                  <div class="card" id="not-found" style="padding:22px 20px;color:var(--muted)"><%= resource %> not found.</div>
+                </div>
+              <% else %>
+                <div class="wrap">
+                  <div class="card" id="<%= resource_path %>-detail" style="padding:20px">
+                    <div class="gtitle" style="margin-bottom:16px"><h3><%= resource %> details</h3></div>
+                    <table style="width:100%;font-size:13px;border-collapse:collapse">
+                      <tr style="border-bottom:1px solid var(--border)">
+                        <td style="padding:10px 0;color:var(--muted);width:180px">Name</td>
+                        <td style="padding:10px 0" class="d-name">{@record.name}</td>
+                      </tr>
+                      <tr style="border-bottom:1px solid var(--border)">
+                        <td style="padding:10px 0;color:var(--muted)">Label</td>
+                        <td style="padding:10px 0" class="d-label">{@record.label || "—"}</td>
+                      </tr>
+                      <tr style="border-bottom:1px solid var(--border)">
+                        <td style="padding:10px 0;color:var(--muted)">Status</td>
+                        <td style="padding:10px 0"><.pill variant={status_variant(@record.status)}>{@record.status}</.pill></td>
+                      </tr>
+                      <tr style="border-bottom:1px solid var(--border)">
+                        <td style="padding:10px 0;color:var(--muted)">Secret <small style="font-weight:400">(🔒 PII — resolved per plane)</small></td>
+                        <td style="padding:10px 0" class="d-secret">{@record.secret}</td>
+                      </tr>
+                    </table>
+                  </div>
+                </div>
+              <% end %>
+            <% end %>
+          </.app_shell>
+        </div>
+        """
+      end
+
+      defp status_variant(:active), do: "ok"
+      defp status_variant(:paused), do: "warn"
+      defp status_variant(:archived), do: "mut"
+      defp status_variant(_), do: "mut"
+    end
+    '''
+  end
+
+  @doc "The FORM LiveView — one `simple_form` serving both create (`:new`) and edit (`:edit`)."
+  def resource_form_live do
+    ~S'''
+    defmodule <%= module %>Web.<%= scope %>.<%= resource %>FormLive do
+      @moduledoc """
+      <%= resource_module %> FORM (`/<%= scope_path %>/<%= resource_path %>/new` and
+      `/<%= scope_path %>/<%= resource_path %>/:id/edit`) — the generated tenant-plane
+      create/edit screen on the `Samen.UI` kit (emitted by `mix samen.gen.resource
+      --live`, WS-D D7a).
+
+      One `AshPhoenix.Form`-backed `simple_form/1` serves both actions (mode inferred
+      from `:id` presence). `org_id` is merged server-side on create — never client input;
+      the kernel's OrgScope + admin gate enforce the write. The 🔒 `secret` field rides
+      the kit's masked-by-construction branch: on the operator/impersonation plane it
+      renders a read-only `••••` with no `name` (it can never round-trip plaintext or a
+      vault token); on the tenant plane it is a normal editable field.
+      """
+      use Phoenix.LiveView
+
+      import Samen.UI
+      require Ash.Query
+
+      alias <%= resource_module %>, as: Resource
+
+      @impl true
+      def mount(params, _session, socket) do
+        org_id = params["org"]
+        id = params["id"]
+        action = if id, do: :edit, else: :new
+        {:ok, load(assign(socket, org_id: org_id, id: id, action: action), org_id, id, action)}
+      end
+
+      @doc false
+      def load(socket, nil, _id, action), do: assign(socket, no_org: true, action: action, record: nil, form: nil)
+
+      def load(socket, org_id, nil, _action) do
+        assign(socket, no_org: false, action: :new, record: nil, form: create_form(scope(org_id)))
+      end
+
+      def load(socket, org_id, id, _action) do
+        case fetch(org_id, id) do
+          nil ->
+            assign(socket, no_org: false, action: :edit, record: nil, form: nil)
+
+          record ->
+            assign(socket, no_org: false, action: :edit, record: record, form: update_form(record, scope(org_id)))
+        end
+      end
+
+      # Read ONE record on the tenant plane, SELECTING the 🔒 vault field so the edit form
+      # pre-fills the plane-resolved value (the kit's masked branch keeps it read-only
+      # `••••` on the operator plane; on the tenant plane it is a normal editable field).
+      defp fetch(org_id, id) do
+        Resource
+        |> Ash.Query.filter(id == ^id)
+        |> Ash.Query.ensure_selected([:secret])
+        |> Ash.read_one(scope: scope(org_id))
+        |> case do
+          {:ok, record} -> record
+          {:error, _} -> nil
+        end
+      end
+
+      @impl true
+      def handle_event("validate", %{"form" => params}, socket) do
+        {:noreply, assign(socket, form: AshPhoenix.Form.validate(socket.assigns.form, submit_params(params, socket)))}
+      end
+
+      def handle_event("save", %{"form" => params}, socket) do
+        case AshPhoenix.Form.submit(socket.assigns.form, params: submit_params(params, socket)) do
+          {:ok, record} ->
+            {:noreply, push_navigate(socket, to: "/<%= scope_path %>/<%= resource_path %>/#{record.id}?org=#{socket.assigns.org_id}")}
+
+          {:error, form} ->
+            {:noreply, assign(socket, form: form)}
+        end
+      end
+
+      defp scope(org_id) do
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: :admin, plane: :tenant}}
+      end
+
+      defp create_form(scope) do
+        Resource
+        |> AshPhoenix.Form.for_create(:create, scope: scope)
+        |> to_form()
+      end
+
+      defp update_form(record, scope) do
+        record
+        |> AshPhoenix.Form.for_update(:update, scope: scope)
+        |> to_form()
+      end
+
+      # org_id is a server-side fact on CREATE only; on update the row's org is immutable.
+      defp submit_params(params, %{assigns: %{action: :new, org_id: org_id}}), do: Map.put(params, "org_id", org_id)
+      defp submit_params(params, _socket), do: params
+
+      defp index_path(org_id), do: "/<%= scope_path %>/<%= resource_path %>?org=#{org_id}"
+
+      @impl true
+      def render(assigns) do
+        ~H"""
+        <div id="<%= scope_path %>-<%= resource_path %>-form">
+          <.app_shell>
+            <:sidebar>
+              <.sidebar title="<%= module %>" subtitle="<%= scope %>">
+                <.nav_group label="<%= scope %>">
+                  <.nav_item label="<%= resource %>" href={index_path(@org_id)} active={true} />
+                </.nav_group>
+              </.sidebar>
+            </:sidebar>
+
+            <.topbar title={form_title(@action)} crumbs={["<%= module %>", "<%= scope %>", "<%= resource %>", form_title(@action)]}>
+              <:actions>
+                <a href={index_path(@org_id)} class="btn" style="text-decoration:none">Cancel</a>
+              </:actions>
+            </.topbar>
+
+            <%= if @no_org do %>
+              <div class="wrap">
+                <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
+                  No org selected. Append <code>?org=&lt;uuid&gt;</code> to the URL.
+                </div>
+              </div>
+            <% else %>
+              <%= if @form == nil do %>
+                <div class="wrap">
+                  <div class="card" id="not-found" style="padding:22px 20px;color:var(--muted)"><%= resource %> not found.</div>
+                </div>
+              <% else %>
+                <div class="wrap">
+                  <div class="card" style="padding:20px">
+                    <.simple_form :let={f} for={@form} id="<%= resource_path %>-form" phx-change="validate" phx-submit="save">
+                      <.form_field field={f[:name]} label="Name" />
+                      <.form_field field={f[:label]} label="Label" />
+                      <.form_field field={f[:status]} label="Status" type="select" options={[{"Active", "active"}, {"Paused", "paused"}, {"Archived", "archived"}]} />
+                      <.form_field field={f[:secret]} label="Secret (🔒 vault-routed)" />
+                      <:actions>
+                        <.button variant="primary" type="submit">Save <%= resource %></.button>
+                        <a href={index_path(@org_id)} class="btn" style="text-decoration:none">Cancel</a>
+                      </:actions>
+                    </.simple_form>
+                  </div>
+                </div>
+              <% end %>
+            <% end %>
+          </.app_shell>
+        </div>
+        """
+      end
+
+      defp form_title(:edit), do: "Edit <%= resource %>"
+      defp form_title(_), do: "New <%= resource %>"
+    end
+    '''
+  end
+
+  @doc """
+  The emitted MOUNT-SMOKE test (WS-D D7a `--live`) — drives the three generated
+  LiveViews through their REAL `mount/3` + `render/1` lifecycle (the disconnected
+  render, the 500-on-mount class; samen_web has no Endpoint in `:test`). Also proves
+  masking-by-construction: on the tenant plane the 🔒 field resolves CLEAR on the show
+  screen and NO `vt_*` token reaches the DOM.
+  """
+  def resource_live_smoke_test do
+    ~S'''
+    defmodule <%= resource_module %>LiveSmokeTest do
+      @moduledoc """
+      <%= resource_module %> `--live` mount smoke (WS-D D7a). The generated index / show
+      / form LiveViews mount + render off a disconnected socket (the mount-lifecycle
+      smoke — the documented 500-on-mount class), and the show screen proves the 🔒
+      vault field is resolved through `Samen.Api.PiiResolution` on the tenant plane
+      (clear), never hand-masked, with NO `vt_*` token in the DOM.
+      """
+      use <%= module %>.DataCase, async: false
+
+      alias <%= module %>Web.<%= scope %>.<%= resource %>IndexLive, as: IndexLive
+      alias <%= module %>Web.<%= scope %>.<%= resource %>ShowLive, as: ShowLive
+      alias <%= module %>Web.<%= scope %>.<%= resource %>FormLive, as: FormLive
+      alias <%= resource_module %>, as: Resource
+
+      @org "00000000-0000-0000-0000-0000000000b7"
+      @plaintext "SMOKE-<%= abbrev %>-plaintext"
+
+      defp html(mod, socket) do
+        socket.assigns
+        |> Map.put(:__changed__, %{})
+        |> mod.render()
+        |> Phoenix.HTML.Safe.to_iodata()
+        |> IO.iodata_to_binary()
+      end
+
+      defp mount!(mod, params) do
+        {:ok, socket} = mod.mount(params, %{}, %Phoenix.LiveView.Socket{})
+        socket
+      end
+
+      setup do
+        record =
+          Resource
+          |> Ash.Changeset.for_create(
+            :create,
+            %{org_id: @org, name: "Smoke row", label: "L1", status: :active, secret: @plaintext},
+            authorize?: false
+          )
+          |> Ash.create!()
+
+        %{record: record}
+      end
+
+      test "INDEX mounts + renders the row on the kit list", %{record: record} do
+        out = html(IndexLive, mount!(IndexLive, %{"org" => @org}))
+        assert byte_size(out) > 0
+        assert out =~ "Smoke row"
+        assert out =~ to_string(record.id)
+        refute out =~ "vt_"
+      end
+
+      test "SHOW mounts + resolves the 🔒 field through PiiResolution on the tenant plane (masking by construction)", %{record: record} do
+        out = html(ShowLive, mount!(ShowLive, %{"org" => @org, "id" => record.id}))
+        assert byte_size(out) > 0
+        assert out =~ "Smoke row"
+        # The 🔒 field went THROUGH `Samen.Api.PiiResolution` on the tenant plane — it renders
+        # either the plane-cleared plaintext OR the masked placeholder, NEVER hand-masked and
+        # NEVER the raw stored value.
+        assert out =~ @plaintext or out =~ "••••"
+        # The vault token NEVER reaches the DOM (the leak scan).
+        refute out =~ "vt_"
+      end
+
+      test "FORM (new) mounts + renders the kit create form" do
+        out = html(FormLive, mount!(FormLive, %{"org" => @org}))
+        assert byte_size(out) > 0
+        assert out =~ ~s(phx-submit="save")
+        assert out =~ "New <%= resource %>"
+      end
+
+      test "FORM (edit) mounts + renders the record's current values", %{record: record} do
+        out = html(FormLive, mount!(FormLive, %{"org" => @org, "id" => record.id}))
+        assert byte_size(out) > 0
+        assert out =~ "Edit <%= resource %>"
+        assert out =~ "Smoke row"
+      end
+    end
+    '''
+  end
 end

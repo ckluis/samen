@@ -1,0 +1,327 @@
+defmodule Acme.Repo.Migrations.AppResources do
+  @moduledoc """
+  Creates Acme's Billing scope (abbrevs acc/acs/acl/acp/aci/acy/acu/ace/acv)
+  mounted AS-IS, the authored vertical table (acm_record with the scalar vault
+  field pii_acm_secret), and the token-blind aggregate projection (aca_record_count),
+  and catalogs every resource in the SAME migration transaction (ADR-004 catalog-in-tx).
+  """
+  use Samen.Migration
+
+  @resources [
+    Acme.Billing.Customer,
+    Acme.Billing.Subscription,
+    Acme.Billing.Plan,
+    Acme.Billing.Price,
+    Acme.Billing.Invoice,
+    Acme.Billing.Payment,
+    Acme.Billing.Usage,
+    Acme.Billing.Entitlement,
+    Acme.Billing.SubscriptionEvent,
+    Acme.Vertical.Record,
+    Acme.Aggregate.RecordCountBySegment
+  ]
+
+  def up do
+    # ---- Billing scope (Stripe-mirror shape) — mounted AS-IS ----
+    create table(:acc_customer, primary_key: false) do
+      add(:acc_stripe_customer_id, :text)
+      add(:acc_status, :text, default: "active")
+      add(:acc_currency, :text, default: "USD")
+      add(:acc_custom, :map, default: fragment("'{}'::jsonb"))
+      add(:pii_acc_billing_name, :text)
+      add(:pii_acc_billing_email, :text)
+      add(:acc_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:acc_org_id, :uuid, null: false)
+      add(:acc_inserted_at, :utc_datetime, null: false)
+      add(:acc_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:acl_plan, primary_key: false) do
+      add(:acl_name, :text, null: false)
+      add(:acl_label, :text)
+      add(:acl_description, :text)
+      add(:acl_stripe_plan_id, :text)
+      add(:acl_interval, :text, default: "monthly")
+      add(:acl_enabled, :boolean, default: true)
+      add(:acl_features, :map, default: fragment("'{}'::jsonb"))
+      add(:acl_custom, :map, default: fragment("'{}'::jsonb"))
+      add(:acl_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:acl_org_id, :uuid, null: false)
+      add(:acl_inserted_at, :utc_datetime, null: false)
+      add(:acl_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:acp_price, primary_key: false) do
+      add(:acp_stripe_price_id, :text)
+      add(:acp_unit_amount_cents, :integer, null: false)
+      add(:acp_currency, :text, null: false, default: "USD")
+      add(:acp_interval, :text, default: "monthly")
+      add(:acp_active, :boolean, default: true)
+      add(:acp_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :acp_plan_id,
+        references(:acl_plan,
+          column: :acl_id,
+          name: "acp_price_acp_plan_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:acp_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:acp_org_id, :uuid, null: false)
+      add(:acp_inserted_at, :utc_datetime, null: false)
+      add(:acp_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:acs_subscription, primary_key: false) do
+      add(:acs_stripe_subscription_id, :text)
+      add(:acs_status, :text, default: "active")
+      add(:acs_current_period_start, :utc_datetime)
+      add(:acs_current_period_end, :utc_datetime)
+      add(:acs_trial_end, :utc_datetime)
+      add(:acs_cancel_at, :utc_datetime)
+      add(:acs_cancelled_at, :utc_datetime)
+      add(:acs_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :acs_customer_id,
+        references(:acc_customer,
+          column: :acc_id,
+          name: "acs_subscription_acs_customer_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :acs_plan_id,
+        references(:acl_plan,
+          column: :acl_id,
+          name: "acs_subscription_acs_plan_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:acs_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:acs_org_id, :uuid, null: false)
+      add(:acs_inserted_at, :utc_datetime, null: false)
+      add(:acs_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:aci_invoice, primary_key: false) do
+      add(:aci_stripe_invoice_id, :text)
+      add(:aci_status, :text, default: "draft")
+      add(:aci_amount_due_cents, :integer, default: 0)
+      add(:aci_amount_paid_cents, :integer, default: 0)
+      add(:aci_currency, :text, default: "USD")
+      add(:aci_period_start, :utc_datetime)
+      add(:aci_period_end, :utc_datetime)
+      add(:aci_due_date, :utc_datetime)
+      add(:aci_paid_at, :utc_datetime)
+      add(:aci_line_items, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:aci_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :aci_customer_id,
+        references(:acc_customer,
+          column: :acc_id,
+          name: "aci_invoice_aci_customer_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :aci_subscription_id,
+        references(:acs_subscription,
+          column: :acs_id,
+          name: "aci_invoice_aci_subscription_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:aci_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aci_org_id, :uuid, null: false)
+      add(:aci_inserted_at, :utc_datetime, null: false)
+      add(:aci_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:acy_payment, primary_key: false) do
+      add(:acy_stripe_payment_intent_id, :text)
+      add(:acy_status, :text, default: "pending")
+      add(:acy_amount_cents, :integer, null: false)
+      add(:acy_currency, :text, default: "USD")
+      add(:acy_payment_method_type, :text, default: "card")
+      add(:acy_last4, :text)
+      add(:acy_paid_at, :utc_datetime)
+      add(:acy_failure_code, :text)
+      add(:acy_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :acy_invoice_id,
+        references(:aci_invoice,
+          column: :aci_id,
+          name: "acy_payment_acy_invoice_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :acy_customer_id,
+        references(:acc_customer,
+          column: :acc_id,
+          name: "acy_payment_acy_customer_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:acy_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:acy_org_id, :uuid, null: false)
+      add(:acy_inserted_at, :utc_datetime, null: false)
+      add(:acy_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:acu_usage, primary_key: false) do
+      add(:acu_metric, :text, null: false)
+      add(:acu_quantity, :integer, default: 0)
+      add(:acu_period_start, :utc_datetime)
+      add(:acu_period_end, :utc_datetime)
+      add(:acu_reported_at, :utc_datetime)
+
+      add(
+        :acu_subscription_id,
+        references(:acs_subscription,
+          column: :acs_id,
+          name: "acu_usage_acu_subscription_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:acu_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:acu_org_id, :uuid, null: false)
+      add(:acu_inserted_at, :utc_datetime, null: false)
+      add(:acu_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:ace_entitlement, primary_key: false) do
+      add(:ace_feature, :text, null: false)
+      add(:ace_granted, :boolean, default: true)
+      add(:ace_expires_at, :utc_datetime)
+      add(:ace_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :ace_subscription_id,
+        references(:acs_subscription,
+          column: :acs_id,
+          name: "ace_entitlement_ace_subscription_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :ace_plan_id,
+        references(:acl_plan,
+          column: :acl_id,
+          name: "ace_entitlement_ace_plan_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:ace_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:ace_org_id, :uuid, null: false)
+      add(:ace_inserted_at, :utc_datetime, null: false)
+      add(:ace_updated_at, :utc_datetime, null: false)
+    end
+
+    # ---- Subscription-movement ledger (`mov`; ADR-017) — append-only, no PII,
+    #      soft id refs (no FK: the immutable ledger outlives its subscription row) ----
+    create table(:acv_subscription_event, primary_key: false) do
+      add(:acv_subscription_id, :uuid, null: false)
+      add(:acv_customer_id, :uuid)
+      add(:acv_plan_id, :uuid)
+      add(:acv_from_plan_id, :uuid)
+      add(:acv_kind, :text, null: false)
+      add(:acv_mrr_delta_cents, :integer, null: false, default: 0)
+      add(:acv_mrr_before_cents, :integer, null: false, default: 0)
+      add(:acv_mrr_after_cents, :integer, null: false, default: 0)
+      add(:acv_from_status, :text)
+      add(:acv_to_status, :text)
+      add(:acv_reason, :text, default: "status_change")
+      add(:acv_occurred_at, :utc_datetime, null: false)
+      add(:acv_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:acv_org_id, :uuid, null: false)
+      add(:acv_inserted_at, :utc_datetime, null: false)
+      add(:acv_updated_at, :utc_datetime, null: false)
+    end
+
+    # ---- Authored vertical table (the "20%") ----
+    create table(:acm_record, primary_key: false) do
+      # Scalar pii_ vault field → column pii_acm_secret (vt_* token):
+      add(:pii_acm_secret, :text)
+      add(:acm_name, :text)
+      add(:acm_segment, :text)
+      add(:acm_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:acm_org_id, :uuid, null: false)
+      add(:acm_inserted_at, :utc_datetime, null: false)
+      add(:acm_updated_at, :utc_datetime, null: false)
+    end
+
+    # ---- Token-blind aggregate projection (no pii_ columns) ----
+    create table(:aca_record_count, primary_key: false) do
+      add(:aca_segment, :text, null: false)
+      add(:aca_tenant_count, :integer, default: 0)
+      add(:aca_record_count, :integer, default: 0)
+      add(:aca_refreshed_at, :utc_datetime)
+      add(:aca_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aca_org_id, :uuid)
+      add(:aca_inserted_at, :utc_datetime, null: false)
+      add(:aca_updated_at, :utc_datetime, null: false)
+    end
+
+    # ---- catalog every resource in THIS transaction ----
+    catalog_sync(@resources)
+  end
+
+  def down do
+    catalog_sync_down(@resources)
+
+    drop(table(:aca_record_count))
+    drop(table(:acm_record))
+
+    drop(table(:acv_subscription_event))
+
+    drop(constraint(:ace_entitlement, "ace_entitlement_ace_plan_id_fkey"))
+    drop(constraint(:ace_entitlement, "ace_entitlement_ace_subscription_id_fkey"))
+    drop(table(:ace_entitlement))
+
+    drop(constraint(:acu_usage, "acu_usage_acu_subscription_id_fkey"))
+    drop(table(:acu_usage))
+
+    drop(constraint(:acy_payment, "acy_payment_acy_customer_id_fkey"))
+    drop(constraint(:acy_payment, "acy_payment_acy_invoice_id_fkey"))
+    drop(table(:acy_payment))
+
+    drop(constraint(:aci_invoice, "aci_invoice_aci_subscription_id_fkey"))
+    drop(constraint(:aci_invoice, "aci_invoice_aci_customer_id_fkey"))
+    drop(table(:aci_invoice))
+
+    drop(constraint(:acs_subscription, "acs_subscription_acs_plan_id_fkey"))
+    drop(constraint(:acs_subscription, "acs_subscription_acs_customer_id_fkey"))
+    drop(table(:acs_subscription))
+
+    drop(constraint(:acp_price, "acp_price_acp_plan_id_fkey"))
+    drop(table(:acp_price))
+
+    drop(table(:acl_plan))
+    drop(table(:acc_customer))
+  end
+end

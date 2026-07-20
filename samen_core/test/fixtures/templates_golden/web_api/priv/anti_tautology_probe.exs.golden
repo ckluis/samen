@@ -1,0 +1,100 @@
+# Anti-tautology probe — the pii_acm_secret VAULT PATH (T6.4 generated red path).
+#
+# Guarantee under probe: the record vault round-trip (test/record_vault_test.exs) asserts
+# (a) the raw pii_acm_secret column holds an opaque `vt_` token, NOT the plaintext,
+# and (b) a normal Ash read returns %Samen.Masked{}. This probe SABOTAGES the on-disk
+# column with the plaintext and confirms the assertions FLIP to failing, then REVERTS and
+# confirms green — proving the assertions are bound to REAL on-disk vault behaviour.
+#
+# Run:  MIX_ENV=test mix run priv/anti_tautology_probe.exs
+# Exit: 0 only if the flip was confirmed AND the revert restored green. System.halt(1)
+#       otherwise — a probe that cannot flip is a tautology and must fail.
+
+alias Acme.Repo
+
+kms_key_dir =
+  Path.join(System.tmp_dir!(), "acme_probe_kms_#{System.system_time(:nanosecond)}")
+
+File.rm_rf!(kms_key_dir)
+Application.put_env(:samen_core, :kms_key_dir, kms_key_dir)
+
+_ = Ecto.Adapters.Postgres.storage_down(Repo.config())
+:ok = Ecto.Adapters.Postgres.storage_up(Repo.config())
+{:ok, _} = Repo.start_link()
+Ecto.Migrator.run(Repo, :up, all: true)
+
+org = "00000000-0000-0000-0000-0000000000c9"
+plaintext = "PROBE-acm-SECRET-985"
+
+record =
+  Acme.Vertical.Record
+  |> Ash.Changeset.for_create(
+    :create,
+    %{org_id: org, name: "ProbeRecord", segment: "alpha", secret: plaintext},
+    authorize?: false
+  )
+  |> Ash.create!()
+
+id_dumped = Ecto.UUID.dump!(to_string(record.id))
+
+raw_column = fn ->
+  %{rows: [[raw]]} =
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      "SELECT pii_acm_secret FROM acm_record WHERE acm_id = $1",
+      [id_dumped]
+    )
+
+  raw
+end
+
+assertions_hold? = fn ->
+  raw = raw_column.()
+  is_binary(raw) and raw != plaintext and String.starts_with?(raw, "vt_")
+end
+
+IO.puts("== anti-tautology probe: pii_acm_secret vault path ==")
+
+original_token = raw_column.()
+baseline = assertions_hold?.()
+IO.puts("baseline (real vault): raw=#{inspect(original_token)}")
+IO.puts("baseline assertions hold? #{baseline}")
+
+unless baseline do
+  IO.puts("FAIL: baseline did not hold — the vault path is broken, not a valid probe.")
+  System.halt(1)
+end
+
+Ecto.Adapters.SQL.query!(
+  Repo,
+  "UPDATE acm_record SET pii_acm_secret = $1 WHERE acm_id = $2",
+  [plaintext, id_dumped]
+)
+
+sabotaged = assertions_hold?.()
+IO.puts("\nsabotage (plaintext written to column): raw=#{inspect(raw_column.())}")
+IO.puts("sabotaged assertions hold? #{sabotaged}  (MUST be false — the flip)")
+
+if sabotaged do
+  IO.puts("FAIL: assertions STILL held with plaintext on disk — the test is a TAUTOLOGY.")
+  System.halt(1)
+end
+
+Ecto.Adapters.SQL.query!(
+  Repo,
+  "UPDATE acm_record SET pii_acm_secret = $1 WHERE acm_id = $2",
+  [original_token, id_dumped]
+)
+
+reverted = assertions_hold?.()
+IO.puts("\nrevert (real vault token restored): raw=#{inspect(raw_column.())}")
+IO.puts("reverted assertions hold? #{reverted}  (MUST be true — green again)")
+
+unless reverted do
+  IO.puts("FAIL: revert did not restore the guarantee.")
+  System.halt(1)
+end
+
+IO.puts("\nRESULT: PROBE CONFIRMED — the red-path assertions FLIPPED under sabotage and")
+IO.puts("recovered on revert. The acm_secret vault round-trip test is NON-vacuous.")
+File.rm_rf!(kms_key_dir)

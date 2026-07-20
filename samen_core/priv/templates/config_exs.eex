@@ -1,0 +1,56 @@
+import Config
+
+# <%= module %> — a Samen vertical scaffolded by `mix samen.gen.app`. Mounts the
+# samen_core Billing scope AS-IS, authors the vertical resource, and defines a
+# token-blind aggregate projection.
+config :<%= otp_app %>,
+  ecto_repos: [<%= module %>.Repo],
+  ash_domains: [<%= module %>.Billing, <%= module %>.Vertical, <%= module %>.Aggregate]
+
+# The samen_core verifiers discover domains from :samen_core :ash_domains. Register
+# this app's domains so the gate scans the mounted Billing scope + the vertical
+# resource + the token-blind aggregate plane.
+config :samen_core, :ash_domains, [
+  <%= module %>.Billing,
+  <%= module %>.Vertical,
+  <%= module %>.Aggregate
+]
+
+config :ash, disable_async?: true
+
+config :<%= otp_app %>, <%= module %>.Repo, migration_primary_key: [name: :id, type: :binary_id]
+
+# Reveal-grant + non_pii + verify + vault + tnt_record repos: wire this app's repo.
+config :samen_core, :reveal_grant, Samen.Reveal.Grants
+config :samen_core, :reveal_grant_repo, <%= module %>.Repo
+config :samen_core, :non_pii_repo, <%= module %>.Repo
+config :samen_core, :verify_repo, <%= module %>.Repo
+config :samen_core, :vault_repo, <%= module %>.Repo
+config :samen_core, :tnt_record_repo, <%= module %>.Repo
+
+# T4.5 aggregate-privacy floors. samen_core defaults are k=5/l=2; a fresh app's
+# dogfood datasets are small, so — exactly as demo/driftwood/pawchart — use a
+# small-but-non-trivial floor (k=2/l=2): a count-of-one cohort still suppresses.
+# Production hosts keep k=5.
+config :samen_core, :k_anonymity_min_cohort, 2
+config :samen_core, :l_diversity_min_distinct, 2
+
+# The query-budget ledger repo (SCAFFOLD — accounting only, WARN-not-enforce).
+config :samen_core, :query_budget_ledger_repo, <%= module %>.Repo
+
+# Oban: the canonical queue taxonomy (reused verbatim from the substrate convention).
+config :samen_core, Oban,
+  repo: <%= module %>.Repo,
+  queues: [
+    default: 10,
+    rollups: 2,
+    webhooks_out: 5,
+    erasure: 1,
+    maintenance: 1,
+    reveal: 5
+  ],
+  plugins: [
+    {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
+  ]
+
+import_config "#{config_env()}.exs"

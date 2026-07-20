@@ -1,0 +1,35 @@
+defmodule <%= module %>.Primitives do
+  @moduledoc """
+  <%= module %>'s Primitives domain — the samen_core Primitives scope blueprint
+  (ADR-004; `Samen.Scopes.Primitives`) mounted AS-IS, exactly as demo
+  (`Demo.PrimitivesScope`), driftwood (`Driftwood.Primitives`) and pawchart
+  (`PawChart.Primitives`) mount it.
+
+  This mount exists so the app INHERITS the framework notifications inbox
+  (`samen_notifications_routes` in the router — zero LiveView code) and the
+  FeatureFlag rows the operator flag admin manages (the `flags_namespace` label).
+
+  Fresh `<%= p_nt %>/<%= p_np %>/<%= p_fl %>/<%= p_sh %>/<%= p_wh %>/<%= p_ff %>` abbrevs,
+  reserved in the GLOBAL registry (samen_core/priv/abbrev_registry.json) by the
+  generator:
+
+    * `<%= p_nt %>` Notification (🔒 rendered_body → vault; `pii_<%= p_nt %>_rendered_body`)
+    * `<%= p_np %>` NotificationPreference (no PII — bounded id + enums + bools)
+    * `<%= p_fl %>`/`<%= p_sh %>`/`<%= p_wh %>`/`<%= p_ff %>` — File/SearchIndex/Webhook/
+      FeatureFlag (blueprint completeness; the flag rows back the operator flag admin)
+  """
+  use Ash.Domain, validate_config_inclusion?: false
+
+  use Samen.Scopes.Primitives,
+    otp_app: :<%= otp_app %>,
+    repo: <%= module %>.Repo,
+    namespace: <%= module %>.Primitives,
+    abbrevs: %{
+      notification: "<%= p_nt %>",
+      notification_preference: "<%= p_np %>",
+      file: "<%= p_fl %>",
+      search_index: "<%= p_sh %>",
+      webhook: "<%= p_wh %>",
+      feature_flag: "<%= p_ff %>"
+    }
+end

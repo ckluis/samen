@@ -1,0 +1,72 @@
+defmodule Acme.MixProject do
+  use Mix.Project
+
+  # Acme — a Samen vertical app scaffolded by `mix samen.gen.app` (T6.4 + WS-D D2/D3).
+  # Shaped like demo/driftwood/pawchart: mounts the samen_core Billing scope AS-IS,
+  # authors one vertical resource (Acme.Vertical.Record) with a pii_ scalar
+  # vault field, defines one token-blind aggregate projection, and runs the FULL
+  # samen_core verifier gate in its own ci.sh. With the web layer (ADR-022, default ON)
+  # it is a RUNNING product: the router mounts the inherited Billing / Notifications /
+  # Operator LiveViews from samen_web, and the public `/api/v1` JSON:API serves the
+  # authored resource behind a deny-by-default allowlist. Correct-by-construction:
+  # green on first `bash ci.sh`, booting on first `mix phx.server`.
+  def project do
+    [
+      app: :acme,
+      version: "0.1.0",
+      elixir: "~> 1.18",
+      elixirc_paths: elixirc_paths(Mix.env()),
+      consolidate_protocols: Mix.env() != :test,
+      start_permanent: Mix.env() == :prod,
+      deps: deps(),
+      aliases: aliases()
+    ]
+  end
+
+  def application do
+    [
+      extra_applications: [:logger],
+      mod: {Acme.Application, []}
+    ]
+  end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  defp deps do
+    [
+      {:samen_core, path: "../samen_core"},
+      # ADR-009 — the framework UI library. The router mounts the inherited
+      # Billing/Notifications/Operator LiveViews from samen_web, so the entire
+      # inherited product UI is framework-level, not per-vertical.
+      {:samen_web, path: "../samen_web"},
+      # `mix format`'s `import_deps` needs a DIRECT dep — pinned to the SAME exact
+      # versions samen_core/samen_web declare (see `mix_exs/0`).
+      {:ash, "== 3.29.3"},
+      {:ash_postgres, "== 2.10.0"},
+      {:phoenix, "~> 1.7"},
+      {:phoenix_live_view, "~> 1.0"},
+      {:phoenix_html, "~> 4.1"},
+      # Bandit: the HTTP adapter behind AcmeWeb.Endpoint.
+      {:bandit, "~> 1.0"},
+      {:phoenix_pubsub, "~> 2.1"},
+      # The public JSON:API surface (OD-6 — AshJsonApi ONLY): the generated
+      # `/api/v1` router + serializer over the SAME Ash resources the UI uses.
+      {:ash_json_api, "~> 1.7"},
+      {:jason, "~> 1.4"},
+      {:stream_data, "== 1.3.0"},
+      # simple_sat: the Ash policy authorizer's pure-Elixir SAT solver, needed by the
+      # mounted Billing scope's OrgScope policies + the authored resource's policies.
+      {:simple_sat, "~> 0.1"},
+      # WS-D D5 observability (ADR-022): opentelemetry_ecto is listed DIRECTLY (not
+      # relied on transitively) so the `no_plaintext_pii` LogTelemetry tier — which
+      # reads `Mix.Project.config[:deps]`, not transitive apps — SEES the OTel-Ecto
+      # leak surface and asserts `db_statement: :disabled` on it. Dropping that config
+      # then flips the gate (the D6 flagship sabotage). The API+SDK ride transitively
+      # from samen_core; only the Ecto integration must be a direct dep to arm the tier.
+      {:opentelemetry_ecto, "~> 1.2"}
+    ]
+  end
+
+  defp aliases, do: []
+end

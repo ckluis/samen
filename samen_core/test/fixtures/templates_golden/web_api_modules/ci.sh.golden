@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Acme CI gate — the FULL samen_core verifier gate, run against the mounted
+# Billing scope + the authored vertical resource (Acme.Vertical.Record) + the
+# token-blind aggregate plane + the public /api/v1 JSON:API contract (WS-D D3).
+# Scaffolded by `mix samen.gen.app` (T6.4) — correct-by-construction: green on first run.
+#
+# Exit: 0 = all green, non-zero = first failure.
+
+set -euo pipefail
+
+export MIX_ENV="${MIX_ENV:-test}"
+
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$APP_DIR"
+
+echo "==> acme CI gate: starting (MIX_ENV=$MIX_ENV)"
+
+echo "--- step 1/18: mix compile --warnings-as-errors"
+mix compile --warnings-as-errors
+echo "    PASSED"
+
+echo "--- step 1a/18: DB bootstrap (migrate)"
+mix run --no-start priv/ci_bootstrap.exs
+echo "    PASSED"
+
+echo "--- step 1b/18: schema.dict.json drift check"
+COMMITTED_DICT="$APP_DIR/schema.dict.json"
+FRESH_DICT="$(mktemp /tmp/acme_schema_dict_XXXXXX.json)"
+trap 'rm -f "$FRESH_DICT"' EXIT
+
+mix samen.catalog.dump --output "$FRESH_DICT"
+
+if ! diff -q "$COMMITTED_DICT" "$FRESH_DICT" > /dev/null 2>&1; then
+  echo "    FAILED: schema.dict.json is stale — run 'mix samen.catalog.dump --output schema.dict.json' and commit."
+  diff "$COMMITTED_DICT" "$FRESH_DICT" || true
+  exit 1
+fi
+echo "    PASSED (schema.dict.json matches regenerated output)"
+
+echo "--- step 2/18: mix samen.verify.catalog_parity"
+mix samen.verify.catalog_parity
+echo "    PASSED"
+
+echo "--- step 3/18: mix samen.verify.prefixes"
+mix samen.verify.prefixes
+echo "    PASSED"
+
+echo "--- step 4/18: mix samen.verify.pii_reads"
+mix samen.verify.pii_reads
+echo "    PASSED"
+
+echo "--- step 5/18: mix samen.verify.pii_classify"
+mix samen.verify.pii_classify --baseline "$COMMITTED_DICT"
+echo "    PASSED"
+
+echo "--- step 6/18: mix samen.verify.no_plaintext_pii"
+mix samen.verify.no_plaintext_pii
+echo "    PASSED"
+
+echo "--- step 7/18: mix samen.verify.migrations"
+mix samen.verify.migrations
+echo "    PASSED"
+
+echo "--- step 8/18: mix samen.verify.sink_schema"
+mix samen.verify.sink_schema
+echo "    PASSED"
+
+echo "--- step 9/18: mix samen.verify.metric_labels"
+mix samen.verify.metric_labels
+echo "    PASSED"
+
+echo "--- step 10/18: mix samen.verify.vault_declared_parity"
+mix samen.verify.vault_declared_parity
+echo "    PASSED"
+
+echo "--- step 11/18: mix samen.verify.tnt_catalog"
+mix samen.verify.tnt_catalog
+echo "    PASSED"
+
+echo "--- step 12/18: mix samen.verify.tnt_boundary"
+mix samen.verify.tnt_boundary
+echo "    PASSED"
+
+echo "--- step 13/18: mix samen.verify.same_org_fk"
+mix samen.verify.same_org_fk
+echo "    PASSED"
+
+echo "--- step 14/18: mix samen.verify.no_pii_columns"
+mix samen.verify.no_pii_columns
+echo "    PASSED"
+
+echo "--- step 15/18: mix samen.verify.aggregate_privacy"
+mix samen.verify.aggregate_privacy
+echo "    PASSED"
+
+# C6 api_contract structural-break check (WS-D D3): the committed api_contract.v1.json
+# pins the /api/v1 routes + the deny-by-default `show_fields` allowlist. Deleting an
+# exposed field / dropping a route is an UN-VERSIONED break — the gate flips.
+echo "--- step 16/18: mix samen.verify.api_contract --version v1"
+mix samen.verify.api_contract --version v1 --snapshot "$APP_DIR/api_contract.v1.json"
+echo "    PASSED"
+
+echo "--- step 17/18: mix test (default suite)"
+mix test --warnings-as-errors
+echo "    PASSED"
+
+echo "--- step 18/18: anti-tautology probe (pii_acm_secret vault path)"
+mix run priv/anti_tautology_probe.exs
+echo "    PASSED"
+
+echo ""
+echo "==> acme CI gate: ALL PASSED"

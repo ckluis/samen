@@ -22,7 +22,13 @@ defmodule SamenWeb.MixProject do
       consolidate_protocols: Mix.env() != :test,
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      aliases: aliases()
+      aliases: aliases(),
+      # ExDoc — moduledoc coverage is ~100%; `mix docs` emits HTML API docs into `doc/`
+      # (gitignored, dev-only, never committed). `--warnings-as-errors` compile / CI are
+      # unaffected: ex_doc is `only: :dev, runtime: false`.
+      name: "samen_web",
+      source_url: "https://github.com/ckluis/samen",
+      docs: docs()
     ]
   end
 
@@ -55,7 +61,15 @@ defmodule SamenWeb.MixProject do
       # StreamData — WS-F4 QA property tests for the RFC-4180 CSV round-trip +
       # formula-injection neutralization (`Samen.Web.Csv`). (samen_core, a path dep,
       # already brings stream_data as a prod dep, so it cannot be :test-only here.)
-      {:stream_data, "~> 1.3"}
+      {:stream_data, "== 1.3.0"},
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
+    ]
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      extras: ["README.md"]
     ]
   end
 

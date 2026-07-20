@@ -1,0 +1,65 @@
+defmodule <%= module %>Web.PageController do
+  @moduledoc """
+  The <%= module %> landing + health endpoints (scaffolded by `mix samen.gen.app`).
+
+  `/` renders a plain HTML index linking the inherited framework surfaces;
+  `/healthz` returns `ok` (the LIVENESS probe — the BEAM is up).
+  `/readyz` is the READINESS probe — it returns 200 only when Postgres, the KMS
+  wrapped-DEK store, and Oban all answer (`Samen.Web.Readiness`), else 503. Fly's
+  `[[http_service.checks]]` gates traffic on `/readyz`, so a machine whose deps are
+  down is drained instead of being sent requests it can only 500.
+  """
+  use Phoenix.Controller, formats: [:html]
+
+  import Plug.Conn
+
+  def index(conn, _params) do
+    html(conn, """
+    <!DOCTYPE html>
+    <html><head><title><%= module %> — a Samen vertical</title>
+    <style>body{font-family:system-ui;max-width:640px;margin:40px auto;padding:0 20px}
+    h1{margin-bottom:4px}p{color:#666;margin-top:0}ul{margin-top:20px}
+    li{margin:8px 0}a{color:#0e7c5a;text-decoration:none}a:hover{text-decoration:underline}
+    .note{font-size:13px;color:#888;margin-top:24px;border-top:1px solid #eee;padding-top:16px}</style>
+    </head>
+    <body>
+      <h1><%= module %></h1>
+      <p>A Samen vertical scaffolded by <code>mix samen.gen.app</code> — a running product,
+      correct-by-construction.</p>
+      <ul>
+        <li><strong>Inherited (samen_web mounts):</strong></li>
+        <li><a href="/billing">Billing → Overview</a></li>
+        <li><a href="/billing/invoices">Billing → Invoices</a></li>
+        <li><a href="/notifications">Notifications → Inbox</a></li>
+        <li><a href="/operator/accounts">Operator → Accounts</a></li>
+        <li><a href="/healthz">Health check</a></li>
+      </ul>
+      <div class="note">
+        Mount reuse: 1 <code>samen_module_routes</code> + 1 <code>samen_notifications_routes</code>
+        + 1 <code>samen_operator_routes</code> line mount every page above —
+        0 <%= module %> LiveView modules authored.
+      </div>
+    </body></html>
+    """)
+  end
+
+  def healthz(conn, _params) do
+    send_resp(conn, 200, "ok")
+  end
+
+  def readyz(conn, _params) do
+    case Samen.Web.Readiness.check(repo: <%= module %>.Repo) do
+      {:ok, _checks} ->
+        send_resp(conn, 200, "ready")
+
+      {:error, checks} ->
+        body =
+          Enum.map_join(checks, "\n", fn
+            {component, :ok} -> "#{component}: ok"
+            {component, {:error, _reason}} -> "#{component}: FAIL"
+          end)
+
+        send_resp(conn, 503, "not ready\n" <> body)
+    end
+  end
+end

@@ -341,4 +341,100 @@ defmodule Samen.Gen.PostTest do
       assert scope =~ ~r/resource\(Widgetco\.Crm\.Widget\)\n\s*resource\(Widgetco\.Crm\.Gadget\)/
     end
   end
+
+  describe "write_resource!/1 with live?: true (--live) emits CRUD LiveViews + wires routes" do
+    # A minimal router carrying the aliased browser scope the generated app ships, so
+    # wire_live_routes!/1 has the exact anchor it injects after.
+    defp fake_router!(dir) do
+      File.mkdir_p!(Path.join(dir, "lib/widgetco_web"))
+
+      File.write!(Path.join(dir, "lib/widgetco_web/router.ex"), """
+      defmodule WidgetcoWeb.Router do
+        use Phoenix.Router
+        import Phoenix.LiveView.Router
+        import Samen.Web.Router
+
+        pipeline :browser do
+          plug(:accepts, ["html"])
+        end
+
+        scope "/", WidgetcoWeb do
+          pipe_through(:browser)
+
+          get("/", PageController, :index)
+          get("/healthz", PageController, :healthz)
+          get("/readyz", PageController, :readyz)
+        end
+      end
+      """)
+    end
+
+    test "emits index/show/form LiveViews + a mount-smoke test, and wires the four live/3 routes" do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+      fake_router!(dir)
+
+      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", live: true)
+      assert r.live?
+      Post.write_resource!(r)
+
+      # The three CRUD LiveViews land under lib/<app>_web/<scope>/, on the Samen.UI kit.
+      idx = File.read!(Path.join(dir, "lib/widgetco_web/crm/widget_index_live.ex"))
+      assert idx =~ "defmodule WidgetcoWeb.Crm.WidgetIndexLive do"
+      assert idx =~ "import Samen.UI"
+      # Masking by construction: reads under a tenant-plane scope; the PII resolver
+      # (the resource preparation) resolves the vault field — never hand-masked here.
+      assert idx =~ "plane: :tenant"
+
+      show = File.read!(Path.join(dir, "lib/widgetco_web/crm/widget_show_live.ex"))
+      assert show =~ "defmodule WidgetcoWeb.Crm.WidgetShowLive do"
+      # The 🔒 field is rendered straight from the already-resolved read record.
+      assert show =~ "{@record.secret}"
+
+      form = File.read!(Path.join(dir, "lib/widgetco_web/crm/widget_form_live.ex"))
+      assert form =~ "defmodule WidgetcoWeb.Crm.WidgetFormLive do"
+      assert form =~ "AshPhoenix.Form.for_create"
+      assert form =~ "AshPhoenix.Form.for_update"
+
+      # The emitted mount-smoke test.
+      smoke = File.read!(Path.join(dir, "test/crm_widget_live_smoke_test.exs"))
+      assert smoke =~ "defmodule Widgetco.Crm.WidgetLiveSmokeTest do"
+      assert smoke =~ "use Widgetco.DataCase"
+
+      # The four live/3 routes wired into the aliased browser scope, /new before /:id.
+      router = File.read!(Path.join(dir, "lib/widgetco_web/router.ex"))
+      assert router =~ ~s|live("/crm/widget", Crm.WidgetIndexLive, :index)|
+      assert router =~ ~s|live("/crm/widget/new", Crm.WidgetFormLive, :new)|
+      assert router =~ ~s|live("/crm/widget/:id/edit", Crm.WidgetFormLive, :edit)|
+      assert router =~ ~s|live("/crm/widget/:id", Crm.WidgetShowLive, :show)|
+      assert router =~ ~r/live\("\/crm\/widget\/new".*\n.*live\("\/crm\/widget\/:id\/edit".*\n.*live\("\/crm\/widget\/:id"/
+    end
+
+    test "default (no --live) emits NO LiveViews and leaves the router untouched" do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+      fake_router!(dir)
+      before = File.read!(Path.join(dir, "lib/widgetco_web/router.ex"))
+
+      Post.write_resource!(Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg"))
+
+      refute File.exists?(Path.join(dir, "lib/widgetco_web/crm/widget_index_live.ex"))
+      refute File.exists?(Path.join(dir, "test/crm_widget_live_smoke_test.exs"))
+      assert File.read!(Path.join(dir, "lib/widgetco_web/router.ex")) == before
+    end
+
+    test "live route wiring is idempotent — a re-run does not double-insert" do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+      fake_router!(dir)
+
+      spec = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg", live: true)
+      Post.write_resource_live!(spec, Post.resource_bindings(spec))
+      Post.write_resource_live!(spec, Post.resource_bindings(spec))
+
+      router = File.read!(Path.join(dir, "lib/widgetco_web/router.ex"))
+      matches = router |> String.split(~s|live("/crm/widget", Crm.WidgetIndexLive, :index)|) |> length()
+      assert matches == 2, "expected exactly one index route, found #{matches - 1}"
+    end
+  end
 end

@@ -1,0 +1,24 @@
+# <%= module %>
+
+A Samen vertical app scaffolded by `mix samen.gen.app` (T6.4). It mounts the samen_core
+Billing scope AS-IS, authors one vertical resource (`<%= module %>.Vertical.Record`, abbrev
+`<%= abbrev %>`) with a scalar `pii_<%= abbrev %>_secret` vault field, and defines a
+token-blind aggregate projection.
+
+## Verifier gate
+
+    MIX_ENV=test bash ci.sh
+
+Runs the FULL samen_core verifier gate (catalog parity, prefixes, pii_reads, pii_classify,
+no_plaintext_pii, migrations, sink_schema, metric_labels, vault_declared_parity,
+tnt_catalog, tnt_boundary, same_org_fk, no_pii_columns, aggregate_privacy) + the default
+test suite + the anti-tautology probe on the vault path.
+
+This app is **correct-by-construction**: it passes its own gate on first run.
+
+## Abbrevs
+
+This app's storage abbrevs are permanently reserved in
+`<%= samen_core_path %>/priv/abbrev_registry.json` (the global registry): Billing scope
+(`<%= bc %>/<%= bs %>/<%= bl %>/<%= bp %>/<%= bi %>/<%= by %>/<%= bu %>/<%= be %>`), the
+authored resource (`<%= abbrev %>`), and the aggregate plane (`<%= agg_abbrev %>`).

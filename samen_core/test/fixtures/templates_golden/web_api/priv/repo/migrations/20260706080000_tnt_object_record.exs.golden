@@ -1,0 +1,14 @@
+defmodule Acme.Repo.Migrations.TntObjectRecord do
+  @moduledoc "Bootstrap the Tier-2 tables (tnt_object catalog + tnt_record store; T3.9)."
+  use Samen.Migration
+
+  def up do
+    create_tnt_object_table()
+    create_tnt_record_table()
+  end
+
+  def down do
+    drop(table(:tnt_record))
+    drop(table(:tnt_object))
+  end
+end

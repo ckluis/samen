@@ -194,8 +194,9 @@ defmodule Samen.Gen.DocRecipesTest do
     # shared failure shape (Samen.Verifier.halt_if_violations/2)
     {"samen_core/lib/samen/verifier.ex", "OK — no violations found."},
     {"samen_core/lib/samen/verifier.ex", ":erlang.halt(1)"},
-    # step 1b — emitted ci.sh drift check
-    {"samen_core/lib/samen/gen/templates.ex",
+    # step 1b — emitted ci.sh drift check. The emitter body lives as an externalized raw-text
+    # template (priv/templates/ci_sh.eex) read into Samen.Gen.Templates at compile time.
+    {"samen_core/priv/templates/ci_sh.eex",
      "FAILED: schema.dict.json is stale — run 'mix samen.catalog.dump --output schema.dict.json' and commit."},
     # catalog_parity
     {"samen_core/lib/mix/tasks/samen.verify.catalog_parity.ex", "uncatalogued column: "},

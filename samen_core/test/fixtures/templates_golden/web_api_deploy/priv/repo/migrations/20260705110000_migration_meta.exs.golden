@@ -1,0 +1,13 @@
+defmodule Acme.Repo.Migrations.MigrationMeta do
+  @moduledoc "T2.4: bootstrap the samen_migration_meta bake-window ledger."
+  use Ecto.Migration
+
+  def up do
+    execute(
+      Samen.Migration.Meta.create_table_sql(),
+      Samen.Migration.Meta.drop_table_sql()
+    )
+  end
+
+  def down, do: execute(Samen.Migration.Meta.drop_table_sql())
+end

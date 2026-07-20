@@ -1,0 +1,92 @@
+defmodule Acme.Vertical do
+  @moduledoc """
+  Acme's vertical-authored domain — the "20%" this app writes itself.
+
+  Ships ONE authored resource, `Acme.Vertical.Record`, a Tier-3 code
+  composition (`use Samen.Resource`, abbrev `acm`) that inherits the ENTIRE
+  substrate — abbrev storage, vault routing, masking, OrgScope, catalog parity, audit,
+  crypto-shred — with no vertical infrastructure code. It carries a SCALAR pii_ vault
+  field (`pii_acm_secret`) to exercise the vault/mask/reveal path end to end.
+  """
+  use Ash.Domain, validate_config_inclusion?: false
+
+  resources do
+    resource(Acme.Vertical.Record)
+  end
+end
+
+defmodule Acme.Vertical.Record do
+  @moduledoc """
+  The authored vertical record (abbrev `acm`), with:
+
+    * `pii_acm_secret` — a SCALAR pii_ vault field
+      (`pii_attribute :secret, :string, vault: :pii_secret`). Masked `••••` by default;
+      plaintext only via `:reveal_acm` under a distinct-party grant;
+      crypto-shreddable with the record. The column name is what the storage
+      transformer produces from the abbrev + the pii_ scalar rule.
+    * `name` / `segment` — plain non-PII columns (`segment` is the aggregate cohort key).
+    * OrgScope on every action.
+  """
+  use Samen.Resource,
+    otp_app: :acme,
+    domain: Acme.Vertical,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
+    abbrev: "acm"
+
+  postgres do
+    table("acm_record")
+    repo(Acme.Repo)
+  end
+
+  attributes do
+    attribute(:name, :string, public?: true)
+    attribute(:segment, :string, public?: true)
+  end
+
+  pii do
+    vault(:pii_secret)
+    pii_attribute(:secret, :string, vault: :pii_secret)
+    reveal(:reveal_acm)
+  end
+
+  # The inherited two-key-class PII-resolution rule on all reads.
+  preparations do
+    prepare(Samen.Api.PiiResolution)
+  end
+
+  actions do
+    defaults([:read, :destroy, create: :*, update: :*])
+
+    action :reveal_acm, :map do
+      argument(:actor_id, :string, allow_nil?: false)
+      argument(:subject_id, :string, allow_nil?: false)
+
+      run(fn input, _ctx ->
+        ctx = %Samen.Reveal.Context{
+          actor: input.arguments.actor_id,
+          subject_id: input.arguments.subject_id,
+          resource: __MODULE__,
+          action: :reveal_acm,
+          label: :secret
+        }
+
+        if Samen.Reveal.grant_checker().granted?(ctx) do
+          {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
+        else
+          {:error, :denied}
+        end
+      end)
+    end
+  end
+
+  policies do
+    policy action_type([:read, :create, :update, :destroy]) do
+      authorize_if(Samen.Policy.OrgScope)
+    end
+
+    policy action(:reveal_acm) do
+      authorize_if(always())
+    end
+  end
+end

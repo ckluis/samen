@@ -1,0 +1,50 @@
+defmodule AcmeWeb.HomeLive do
+  @moduledoc """
+  The Acme landing MENU (scaffolded by `mix samen.gen.app --modules`).
+
+  Surfaces the mounted framework surfaces as real NAVIGATION using the Samen UI kit
+  (`Samen.UI.app_shell`/`sidebar`/`module_nav`/`nav_group`/`nav_item`) — so a builder SEES
+  every mounted surface as a menu, not an orphaned route. The inherited Inbox/CRM/Billing/
+  Support/Marketing groups come from the framework `module_nav/1`; the `--modules` end-user
+  surfaces are the `:extra` "Product" group. Statically rendered (no per-request field
+  value), so it has no masking surface.
+  """
+  use Phoenix.LiveView
+  import Samen.UI
+
+  @impl Phoenix.LiveView
+  def mount(params, _session, socket) do
+    {:ok, assign(socket, org_id: params["org"])}
+  end
+
+  @impl Phoenix.LiveView
+  def render(assigns) do
+    ~H"""
+    <.app_shell>
+      <:sidebar>
+        <.sidebar title="Acme" subtitle="Samen vertical">
+          <.module_nav org_id={@org_id} active={nil}>
+            <:extra>
+              <.nav_group label="Product">
+                <.nav_item label="Files" href={"/files?org=#{@org_id}"} />
+                <.nav_item label="CSV import" href={"/csv/import/record?org=#{@org_id}"} />
+                <.nav_item label="Search" href={"/search?org=#{@org_id}"} />
+                <.nav_item label="Settings" href={"/settings?org=#{@org_id}"} />
+              </.nav_group>
+            </:extra>
+          </.module_nav>
+        </.sidebar>
+      </:sidebar>
+      <.topbar title="Acme" crumbs={["Home", "Menu"]} />
+      <div class="card" style="padding:18px 20px">
+        <p style="margin:0">
+          A Samen vertical scaffolded by <code>mix samen.gen.app --modules</code>. The
+          framework end-user surfaces in the sidebar <strong>Product</strong> group are
+          mounted from <code>samen_web</code> at ≈0 authored LOC and inherit the shared
+          Samen shell + masking by construction.
+        </p>
+      </div>
+    </.app_shell>
+    """
+  end
+end

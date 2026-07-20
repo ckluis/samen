@@ -24,6 +24,7 @@ defmodule Samen.Gen.AppTest do
       web: web?,
       api: Keyword.get(opts, :api, web?),
       deploy: Keyword.get(opts, :deploy, false),
+      modules: Keyword.get(opts, :modules),
       port: Keyword.get(opts, :port, 4050)
     )
   end
@@ -31,6 +32,7 @@ defmodule Samen.Gen.AppTest do
   # The original T6.4 data-only emission — the `--headless` contract (AC-G4-10).
   @headless_paths [
     "mix.exs",
+    ".formatter.exs",
     "config/config.exs",
     "config/dev.exs",
     "config/test.exs",
@@ -855,6 +857,98 @@ defmodule Samen.Gen.AppTest do
     test "is honest — no aspirational turnkey 'just run fly deploy'", %{runbook: rb} do
       refute rb =~ ~r/just run `fly deploy`/i
       assert rb =~ "fail-honest"
+    end
+  end
+
+  # ------------------------------------------------------------------ WS-E: --modules
+  describe "the --modules surface selection (WS-E)" do
+    defp rendered_router(spec) do
+      {_, t} = Enum.find(Samen.Gen.Templates.files(true, true, false), fn {p, _} -> p =~ "router" end)
+      Gen.render(t, Gen.bindings(spec))
+    end
+
+    test "default: no --modules is byte-safe (root route + metrics tail unchanged, no menu)" do
+      s = spec()
+      assert s.modules == []
+
+      b = Gen.bindings(s)
+      assert b["module_mounts"] == ""
+      assert b["menu_nav_items"] == ""
+      assert b["root_route"] == ~s{get("/", PageController, :index)}
+
+      router = rendered_router(s)
+      assert router =~ "\n    get(\"/\", PageController, :index)\n"
+      assert router =~ "\n    samen_metrics_route(name: :widgetco_prometheus)\n  end\n"
+      refute router =~ "HomeLive"
+      refute router =~ "samen_files_routes"
+      refute router =~ "--modules"
+    end
+
+    test "normalizes a comma-separated string into known surface atoms (order-stable, unique)" do
+      s = spec(modules: "settings, files ,files,search")
+      assert s.modules == [:settings, :files, :search]
+    end
+
+    test "validate: an unknown surface fails closed" do
+      s = spec(modules: "files,frobnicate")
+      assert_raise ArgumentError, ~r/unknown surface/, fn -> Gen.validate_against!(s, %{}) end
+    end
+
+    test "validate: --modules without the web layer fails closed" do
+      s = spec(web: false, api: false, modules: "files")
+      assert_raise ArgumentError, ~r/--modules requires the web layer/, fn ->
+        Gen.validate_against!(s, %{})
+      end
+    end
+
+    test "mounts the mountable surfaces over the app's existing mounts + swaps / to HomeLive" do
+      router = rendered_router(spec(modules: "files,search,csv,settings"))
+
+      assert router =~ "samen_files_routes(:files, Widgetco.Primitives, repo: Widgetco.Repo)"
+      assert router =~ "samen_search_routes(:search, Widgetco.Primitives, repo: Widgetco.Repo)"
+      assert router =~ "samen_csv_routes(:csv, Widgetco.Vertical, repo: Widgetco.Repo)"
+      assert router =~ "samen_settings_routes(:settings, Widgetco.Operator, repo: Widgetco.Repo)"
+      # The landing swaps to the Samen.UI menu LiveView (bare name — the scope aliases it).
+      assert router =~ ~s{live("/", HomeLive)}
+      refute router =~ ~s{get("/", PageController, :index)}
+    end
+
+    test "chat is documented-with-prerequisite, never half-mounted" do
+      router = rendered_router(spec(modules: "chat,files"))
+
+      # files still mounts for real...
+      assert router =~ "samen_files_routes(:files, Widgetco.Primitives"
+      # ...but chat is a prerequisite COMMENT, not a samen_chat_routes mount.
+      assert router =~ "chat requested but NOT auto-mounted"
+      assert router =~ "docs/guides/generators.md"
+      refute router =~ ~r/^\s*samen_chat_routes\(/m
+    end
+
+    test "a chat-only request mounts nothing and ships no menu landing (honest)" do
+      s = spec(modules: "chat")
+      router = rendered_router(s)
+
+      assert router =~ "chat requested but NOT auto-mounted"
+      # No mountable surface → the landing stays the plain PageController index.
+      assert router =~ ~s{get("/", PageController, :index)}
+      refute router =~ "HomeLive"
+      assert Gen.bindings(s)["menu_nav_items"] == ""
+    end
+
+    test "the HomeLive menu leans on the Samen.UI kit and lists the mounted surfaces" do
+      s = spec(modules: "files,search,settings")
+      home = Gen.render(Samen.Gen.Templates.home_live_ex(), Gen.bindings(s))
+
+      assert home =~ "defmodule WidgetcoWeb.HomeLive do"
+      assert home =~ "import Samen.UI"
+      assert home =~ "<.app_shell>"
+      assert home =~ "<.module_nav"
+      assert home =~ ~s{<.nav_group label="Product">}
+      assert home =~ ~s{<.nav_item label="Files"}
+      assert home =~ ~s{<.nav_item label="Search"}
+      assert home =~ ~s{<.nav_item label="Settings"}
+      # No CSV was selected here — the menu lists only what is mounted.
+      refute home =~ ~s{<.nav_item label="CSV import"}
     end
   end
 

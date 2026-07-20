@@ -37,6 +37,11 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
     * `--app-dir`  (optional) — the existing app root. Defaults to the current directory.
     * `--no-reserve-abbrevs` — do NOT append the abbrev to the registry (used by the
       red-path probe to prove the compile-time gate catches a missing reservation).
+    * `--live` — ALSO scaffold index / show / form LiveViews for the resource on the
+      `Samen.UI` kit (a builder gets visible CRUD screens, not just a headless data
+      layer). The four `live/3` routes are wired into the generated app's router; the
+      🔒 vault field resolves per plane through `Samen.Api.PiiResolution` (never
+      hand-masked). Requires a `--web` app (the surfaces mount on samen_web's kit).
   """
 
   use Mix.Task
@@ -48,7 +53,8 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
     resource: :string,
     abbrev: :string,
     app_dir: :string,
-    reserve_abbrevs: :boolean
+    reserve_abbrevs: :boolean,
+    live: :boolean
   ]
 
   @impl Mix.Task
@@ -60,13 +66,15 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
     abbrev = require_opt!(opts, :abbrev)
     app_dir = Keyword.get(opts, :app_dir) || File.cwd!()
     reserve? = Keyword.get(opts, :reserve_abbrevs, true)
+    live? = Keyword.get(opts, :live, false)
 
     spec =
       Post.build_resource_spec(
         app_dir: app_dir,
         scope: scope,
         resource: resource,
-        abbrev: abbrev
+        abbrev: abbrev,
+        live: live?
       )
 
     Post.validate_resource!(spec)
@@ -75,9 +83,16 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
 
     Post.write_resource!(spec)
 
+    live_note =
+      if live? do
+        " + index/show/form LiveViews (Samen.UI) wired into the router"
+      else
+        ""
+      end
+
     Mix.shell().info(
       "samen.gen.resource: wrote #{spec.resource_module} (table #{spec.table}), its migration, " <>
-        "and the four G26 test files. Run `mix ecto.migrate && mix test` to gate it green."
+        "and the four G26 test files#{live_note}. Run `mix ecto.migrate && mix test` to gate it green."
     )
 
     :ok

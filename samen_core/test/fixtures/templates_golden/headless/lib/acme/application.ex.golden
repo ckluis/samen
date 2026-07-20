@@ -1,0 +1,17 @@
+defmodule Acme.Application do
+  @moduledoc "Acme OTP application (scaffolded by mix samen.gen.app)."
+  use Application
+
+  @impl true
+  def start(_type, _args) do
+    children =
+      if Application.get_env(:acme, :start_repo?, true) do
+        [Acme.Repo, {Oban, Application.fetch_env!(:samen_core, Oban)}]
+      else
+        []
+      end
+
+    opts = [strategy: :one_for_one, name: Acme.Supervisor]
+    Supervisor.start_link(children, opts)
+  end
+end

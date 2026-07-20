@@ -1,0 +1,39 @@
+# <%= otp_app %> — Fly.io manifest (WS-D D10 / ADR-024). FAIL-HONEST scaffold:
+# structurally correct, but NOT a live deploy. Before `fly deploy` the operator must
+# complete docs/runbooks/deploy.md (real Fly account, `fly apps create`, the Neon
+# DATABASE_URL + SECRET_KEY_BASE + SAMEN_KMS_* secrets). `config/runtime.exs` RAISES on
+# a missing secret, so a half-configured app refuses to boot rather than come up
+# insecure. Set `app` and `primary_region` to your real values.
+app = "<%= otp_app %>"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # Runs the app's migrations before the new release takes traffic. `<%= module %>.Release`
+  # is the release-safe migrator (config/runtime.exs is loaded; no Mix at runtime).
+  release_command = "/app/bin/<%= otp_app %> eval <%= module %>.Release.migrate"
+
+[env]
+  PHX_HOST = "<%= otp_app %>.fly.dev"
+  PORT = "<%= http_port %>"
+
+[http_service]
+  internal_port = <%= http_port %>
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "10s"
+    method = "get"
+    # READINESS, not liveness: 200 only when Postgres + KMS store + Oban all answer.
+    path = "/readyz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

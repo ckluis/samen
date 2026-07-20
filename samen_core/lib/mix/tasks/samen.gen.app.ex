@@ -63,6 +63,20 @@ defmodule Mix.Tasks.Samen.Gen.App do
       and a per-app `docs/runbooks/deploy.md` with an explicit operator-TODO block. These
       artifacts compile/parse but do NOT claim a live deploy — real Fly/Neon/KMS accounts stay
       operator work. REQUIRES the web layer (`--no-web --deploy` fails closed).
+    * `--modules` (optional, default: none) — a comma-separated selection of the framework
+      END-USER surfaces to ALSO mount over the generated app's existing mounts, at ≈0
+      authored LOC (WS-E). Known surfaces: `files`, `search`, `csv`, `settings`, `chat`.
+      Passing e.g. `--modules files,search,settings` mounts those framework LiveViews AND
+      surfaces them as a real MENU (a `Samen.UI` app-shell landing at `/`, via
+      `<app>Web.HomeLive`). Each mountable surface mounts over a mount the app already
+      authors: `files`/`search` over the Primitives mount, `csv` over the authored
+      `Vertical` domain, `settings` over the `Operator` Identity namespace. `chat` is
+      RECOGNIZED but NOT auto-mounted — it needs a materialized `Samen.Scopes.Chat` mount
+      plus a `Samen.Web.Chat.Presence` server in the supervision tree, which is beyond an
+      ≈0-LOC adoption; requesting it emits a documented prerequisite comment in the router
+      (see the surface→macro table in `docs/guides/generators.md`) rather than half-mounting.
+      Requires the web layer (`--modules` with `--no-web`/`--headless` fails closed). Default
+      OFF: an app generated WITHOUT `--modules` is byte-for-byte unchanged.
     * `--headless` — the escape hatch: all product layers off; reproduces the original
       26-file data-only output exactly (AC-G4-10). Conflicts with an explicit
       `--web`/`--api`/`--deploy`.
@@ -122,6 +136,7 @@ defmodule Mix.Tasks.Samen.Gen.App do
     api: :boolean,
     deploy: :boolean,
     headless: :boolean,
+    modules: :string,
     port: :integer
   ]
 
@@ -154,6 +169,10 @@ defmodule Mix.Tasks.Samen.Gen.App do
       Mix.raise("mix samen.gen.app: --headless conflicts with an explicit --deploy")
     end
 
+    if headless? and Keyword.get(opts, :modules) not in [nil, ""] do
+      Mix.raise("mix samen.gen.app: --headless conflicts with --modules (surfaces need the web layer)")
+    end
+
     web? = if headless?, do: false, else: Keyword.get(opts, :web, true)
 
     # WS-D D3: the JSON:API layer follows the web layer by default (`--no-api` opts out;
@@ -173,10 +192,19 @@ defmodule Mix.Tasks.Samen.Gen.App do
         web: web?,
         api: api?,
         deploy: deploy?,
+        modules: Keyword.get(opts, :modules),
         port: Keyword.get(opts, :port, 4050)
       )
 
     Gen.validate!(spec)
+
+    if :chat in spec.modules do
+      Mix.shell().info(
+        "samen.gen.app: `chat` recognized but NOT auto-mounted (it needs a materialized " <>
+          "Samen.Scopes.Chat mount + a Samen.Web.Chat.Presence server). A prerequisite " <>
+          "comment was written into the router — see docs/guides/generators.md."
+      )
+    end
 
     if reserve?, do: Gen.reserve_abbrevs!(spec)
 

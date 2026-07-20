@@ -1,0 +1,15 @@
+/_build/
+/deps/
+/cover/
+/doc/
+/.fetch
+erl_crash.dump
+*.ez
+*.beam
+/config/*.secret.exs
+.elixir_ls/
+/priv/dev_keystore/
+# WS-D D10 (ADR-024): the mix release build output. Prod secrets are ENV-ONLY
+# (DATABASE_URL / SECRET_KEY_BASE / SAMEN_KMS_* — see config/runtime.exs); never
+# commit them to a *.secret.exs.
+/_build/prod/

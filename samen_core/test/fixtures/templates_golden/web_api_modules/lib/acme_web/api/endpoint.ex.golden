@@ -1,0 +1,29 @@
+defmodule AcmeWeb.Api.Endpoint do
+  @moduledoc """
+  The mounted public API entry point (WS-D D3). This is the plug pipeline the host
+  Phoenix router forwards `/api/v1` to:
+
+      forward "/api/v1", AcmeWeb.Api.Endpoint
+
+  Pipeline order:
+
+    1. `AcmeWeb.Api.KeyAuthPlug` — resolve the `Authorization: Bearer <key>`
+       into a plane-bearing actor (the two key classes), or set no actor (fail closed).
+    2. `Samen.Web.Api.PageLimitClamp` — clamp `page[limit]` to max_page_size BEFORE
+       AshJsonApi (the upstream Ash to_page raw-limit-split workaround). The CANONICAL
+       framework plug — samen_web is a dep, so it is inherited, never re-emitted.
+    3. `AcmeWeb.Api.Router` — the generated AshJsonApi router over the SAME
+       Ash resources. It runs the resources' own policy stack (OrgScope + RBAC) and
+       the `Samen.Api.PiiResolution` read preparation (the two-plane PII rule).
+
+  The operator-plane masking (vaulted field absent without a grant) is enforced at the
+  RECORD level by `Samen.Api.PiiResolution` (it sets forbidden fields to
+  `%Ash.ForbiddenField{}`, which the serializer omits) — not by a response rewrite.
+  The field is gone before the JSON is ever built ("absent by omission" is structural).
+  """
+  use Plug.Builder
+
+  plug(AcmeWeb.Api.KeyAuthPlug)
+  plug(Samen.Web.Api.PageLimitClamp)
+  plug(AcmeWeb.Api.Router)
+end

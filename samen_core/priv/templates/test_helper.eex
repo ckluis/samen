@@ -1,0 +1,17 @@
+# Fresh KMS keystore + migrated DB before the suite (mirrors ci_bootstrap).
+kms_key_dir =
+  Path.join(System.tmp_dir!(), "<%= otp_app %>_keystore_test_#{System.system_time(:nanosecond)}")
+
+File.rm_rf!(kms_key_dir)
+Application.put_env(:samen_core, :kms_key_dir, kms_key_dir)
+
+alias <%= module %>.Repo
+
+_ = Ecto.Adapters.Postgres.storage_down(Repo.config())
+:ok = Ecto.Adapters.Postgres.storage_up(Repo.config())
+
+{:ok, _} = Repo.start_link()
+Ecto.Migrator.run(Repo, :up, all: true)
+Ecto.Adapters.SQL.Sandbox.mode(Repo, :manual)
+
+ExUnit.start()

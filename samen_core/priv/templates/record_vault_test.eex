@@ -1,0 +1,59 @@
+defmodule <%= module %>.RecordVaultTest do
+  @moduledoc """
+  The GENERATED red path (T6.4): the authored resource's scalar vault field round-trip.
+
+  Asserts, against the LIVE DB, that:
+
+    * the raw `pii_<%= abbrev %>_secret` column holds an opaque `vt_` vault token, NOT the
+      plaintext (the leak the guarantee forbids), and
+    * a normal Ash read returns a `%Samen.Masked{}` (default-masked), not the plaintext.
+
+  The paired priv/anti_tautology_probe.exs proves these assertions are non-vacuous by
+  sabotaging the on-disk column and confirming the flip.
+  """
+  use <%= module %>.DataCase, async: false
+
+  require Ash.Query
+  alias <%= module %>.Vertical.Record
+
+  @org "00000000-0000-0000-0000-0000000000a1"
+  @plaintext "SECRET-<%= abbrev %>-42"
+
+  test "scalar pii_ field is vaulted on disk and masked on read" do
+    record =
+      Record
+      |> Ash.Changeset.for_create(
+        :create,
+        %{org_id: @org, name: "R1", segment: "alpha", secret: @plaintext},
+        authorize?: false
+      )
+      |> Ash.create!()
+
+    id_dumped = Ecto.UUID.dump!(to_string(record.id))
+
+    %{rows: [[raw]]} =
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "SELECT pii_<%= abbrev %>_secret FROM <%= resource_table %> WHERE <%= abbrev %>_id = $1",
+        [id_dumped]
+      )
+
+    # On disk: an opaque vault token, never the plaintext.
+    assert is_binary(raw)
+    refute raw == @plaintext
+    assert String.starts_with?(raw, "vt_")
+
+    # On read: default-masked (never the plaintext). The vault field must be
+    # explicitly selected (it is not loaded by default), then presents %Masked{}.
+    read_back =
+      Record
+      |> Ash.Query.filter(id == ^record.id)
+      |> Ash.Query.ensure_selected([:secret])
+      |> Ash.read_one!(authorize?: false)
+
+    assert match?(%Samen.Masked{}, read_back.secret),
+           "expected %Samen.Masked{}, got: \#{inspect(read_back.secret)}"
+
+    refute to_string(read_back.secret) == @plaintext
+  end
+end

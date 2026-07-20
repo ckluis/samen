@@ -185,6 +185,20 @@ defmodule Samen.Gen.DocCommands do
         evidence: [{:post_probe, ~s|"samen.gen.resource"|}]
       },
       %{
+        # WS-D D7a `--live`: the resource generator ALSO scaffolds index/show/form
+        # LiveViews. The post-app probe executes exactly this shape (the trailing
+        # boolean `--live` carries no value, so the flag-pair matcher above cannot
+        # cover it — this dedicated rule pins the shape the probe runs).
+        id: :gen_resource_live,
+        match: fn argv ->
+          match?(
+            ["mix", "samen.gen.resource", "--scope", _, "--resource", _, "--abbrev", _, "--live"],
+            argv
+          )
+        end,
+        evidence: [{:post_probe, ~s|"--live"|}]
+      },
+      %{
         id: :ci_sh,
         match: fn argv -> argv == ["bash", "ci.sh"] end,
         evidence: ci_sh_evidence
@@ -262,6 +276,24 @@ defmodule Samen.Gen.DocCommands do
             argv |> Enum.drop(2) |> Enum.all?(&(not String.starts_with?(&1, "--")))
         end,
         evidence: [{:post_probe, ~s|mix.(app_dir, ["test"|}]
+      },
+      %{
+        # The T2.9 destruction oracle in post-shred mode (cookbook Recipe 8 — crypto-shred):
+        # `--tiers all` is the ONLY value the task accepts (the shape is pinned in the task's
+        # own moduledoc/flag-parsing, not asserted by a CI probe — no probe has a real
+        # erased subject to run this against). Evidence proves the flag contract is real,
+        # not invented; a doc drifting to a different flag shape (e.g. a partial `--tiers`
+        # value) fails to match and falls to the aspirational red path.
+        id: :verify_no_plaintext_pii_post_shred,
+        match: fn argv ->
+          match?(
+            ["mix", "samen.verify.no_plaintext_pii", "--subject", _, "--tiers", "all"],
+            argv
+          )
+        end,
+        evidence: [
+          {:no_plaintext_pii_task, "post-shred mode requires `--tiers all` (got "}
+        ]
       }
     ]
   end

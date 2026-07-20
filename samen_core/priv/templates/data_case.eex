@@ -1,0 +1,17 @@
+defmodule <%= module %>.DataCase do
+  @moduledoc "ExUnit case template for database-backed <%= module %> tests."
+  use ExUnit.CaseTemplate
+
+  using do
+    quote do
+      alias <%= module %>.Repo
+      import <%= module %>.DataCase
+    end
+  end
+
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(<%= module %>.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(<%= module %>.Repo, {:shared, self()})
+    :ok
+  end
+end

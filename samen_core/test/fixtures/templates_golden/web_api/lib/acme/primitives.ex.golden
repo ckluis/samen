@@ -1,0 +1,35 @@
+defmodule Acme.Primitives do
+  @moduledoc """
+  Acme's Primitives domain — the samen_core Primitives scope blueprint
+  (ADR-004; `Samen.Scopes.Primitives`) mounted AS-IS, exactly as demo
+  (`Demo.PrimitivesScope`), driftwood (`Driftwood.Primitives`) and pawchart
+  (`PawChart.Primitives`) mount it.
+
+  This mount exists so the app INHERITS the framework notifications inbox
+  (`samen_notifications_routes` in the router — zero LiveView code) and the
+  FeatureFlag rows the operator flag admin manages (the `flags_namespace` label).
+
+  Fresh `ant/anp/afl/ash/awh/aff` abbrevs,
+  reserved in the GLOBAL registry (samen_core/priv/abbrev_registry.json) by the
+  generator:
+
+    * `ant` Notification (🔒 rendered_body → vault; `pii_ant_rendered_body`)
+    * `anp` NotificationPreference (no PII — bounded id + enums + bools)
+    * `afl`/`ash`/`awh`/`aff` — File/SearchIndex/Webhook/
+      FeatureFlag (blueprint completeness; the flag rows back the operator flag admin)
+  """
+  use Ash.Domain, validate_config_inclusion?: false
+
+  use Samen.Scopes.Primitives,
+    otp_app: :acme,
+    repo: Acme.Repo,
+    namespace: Acme.Primitives,
+    abbrevs: %{
+      notification: "ant",
+      notification_preference: "anp",
+      file: "afl",
+      search_index: "ash",
+      webhook: "awh",
+      feature_flag: "aff"
+    }
+end

@@ -1,0 +1,42 @@
+defmodule <%= module %>Web.Endpoint do
+  @moduledoc """
+  The <%= module %> Phoenix Endpoint — serves the tenant + operator LiveView planes
+  over localhost. Mirrors pawchart/driftwood (ADR-009).
+
+  THIN and EMITTED, not macro-hidden (ADR-022): the builder owns the session key,
+  signing salt, secret_key_base and port. The values wired here + in config are LOCAL
+  DEV/DOGFOOD constants — a real deployment replaces them (config/runtime.exs).
+  """
+  use Phoenix.Endpoint, otp_app: :<%= otp_app %>
+
+  @session_options [
+    store: :cookie,
+    key: "_<%= otp_app %>_key",
+    signing_salt: "<%= otp_app %>_sess_salt",
+    same_site: "Lax"
+  ]
+
+  socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
+
+  # ADR-009: serve the Samen UI kit's stylesheet from the samen_web DEPENDENCY's priv
+  # at `/assets/samen_ui.css`. Same file as every vertical — zero duplication.
+  plug(Plug.Static,
+    at: "/assets",
+    from: {:samen_web, "priv/static/assets"},
+    only: ~w(samen_ui.css)
+  )
+
+  plug(Plug.RequestId)
+  plug(Plug.Telemetry, event_prefix: [:phoenix, :endpoint])
+
+  plug(Plug.Parsers,
+    parsers: [:urlencoded, :multipart, :json],
+    pass: ["*/*"],
+    json_decoder: Phoenix.json_library()
+  )
+
+  plug(Plug.MethodOverride)
+  plug(Plug.Head)
+  plug(Plug.Session, @session_options)
+  plug(<%= module %>Web.Router)
+end

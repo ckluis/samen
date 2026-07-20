@@ -442,6 +442,106 @@ harness: 24 patches.
 
 ---
 
+## WS-F6 — Builder Leverage (2026-07-20)
+
+The largest F-phase: close the builder-DX scaffolding gap and pay down the two god-files. All nine
+units shipped (no new fail-closed SECURITY guarantee → no new sabotage patch; the harness stays at 24 —
+but sabotage #15 was REFRESHED, see Unit 7).
+
+1. **`mix samen.gen.resource --live` (the DX red flag — done first).** The resource generator now emits
+   index/show/form LiveViews on the `Samen.UI` kit (pattern extracted from `driftwood/.../broker_live.ex`),
+   wired into the generated app's router alias block (idempotent, fail-closed on a missing anchor). Masking
+   by construction: each screen reads through Ash under a `plane: :tenant` scope; the 🔒 field resolves via
+   the resource's `prepare(Samen.Api.PiiResolution)` BEFORE the LiveView sees it (no hand-mask, no `vt_*`).
+   `Samen.Gen.Post` + `post_templates.ex` gained the emitters (`resource_{index,show,form}_live` + a mount
+   smoke test); `gen_post_probe.exs` now passes `--live` and asserts emission + wiring + the generated app's
+   ci.sh green + smoke. Cookbook Recipe 7. Also de-flaked the probe's resource-abbrev derivation (`jwh`
+   collided with the primitives Webhook abbrev ~1/10 runs → remapped).
+
+2. **`mix samen.gen.app --modules` mount menu + surface→macro table.** New `--modules chat,files,search,…`
+   selection. `files`/`search` mount over `<App>.Primitives`, `csv` over the authored `Vertical`, `settings`
+   over `Operator` — all ≈0 authored LOC. `chat` is documented-with-prerequisite (needs a materialized
+   `Samen.Scopes.Chat` mount + a `Chat.Presence` server the generated app doesn't author) — NOT half-mounted:
+   requesting it writes a prerequisite comment + prints a notice. The menu is real: with a mountable surface
+   selected, `/` becomes `<App>Web.HomeLive` (`Samen.UI` `app_shell`+`module_nav`, a "Product" nav_group of
+   the mounted surfaces). Surface→macro table in `docs/guides/generators.md`. `gen_app_flagship_probe.exs`
+   generates with `--modules files,search,csv,settings` + asserts routes serve + menu renders. Off-by-default
+   safe (no `--modules` output byte-identical to before). En route it fixed a genuine latent bug: framework
+   `Samen.Web.Files.UploadLive.render/1` read `@upload_ref` as an assign mount never set (500 on first JS-less
+   paint) — one-line masking-neutral fix in mount.
+
+3. **`.formatter.exs` in generated apps.** New emitter (headless: `import_deps: [:ash, :ash_postgres]`; web adds
+   `:phoenix`; api adds `:ash_json_api`). Required making `ash`/`ash_postgres` DIRECT deps in the gen mix.exs
+   templates (mix format's `import_deps` only resolves direct deps) — pinned to the exact versions the SoT
+   already uses. Also single-lined a config line so `mix format --check-formatted` passes on the generated tree.
+
+4. **Upgrade/distribution ADR — DECIDED.** `docs/adr/033-in-monorepo-distribution-constraint.md`: Samen stays an
+   explicit in-monorepo path-dep framework (verticals + every generated app resolve `samen_core`/`samen_web`
+   via computed relative `path:`; `--target` only chooses WHERE the app dir sits, the dep always climbs back to
+   this checkout). Hex + git-subtree REJECTED for now. Named revisit trigger: first external builder needing an
+   app outside the tree / a second independent consumer / the `ash`/`ash_postgres` `==` pins loosening (those
+   exact pins are the Hex precondition). Pointer added in `docs/guides/generators.md`.
+
+5. **Docs bundle.** `docs/README.md` front-door index; `docs/adr/README.md` one-line-per-ADR index (all 33);
+   ExDoc live for samen_core + samen_web (`{:ex_doc, "~> 0.34", only: :dev}` + `docs:` config; `mix docs` emits
+   `doc/` HTML, gitignored; created `samen_web/README.md`); `docs/concepts/two-plane-masking.md` (the reader-facing
+   two-plane + `Samen.Api.PiiResolution` + `%Samen.Masked{}` explainer, extracted from ADR-009/010); cookbook
+   Recipes 8–10 (run a crypto-shred · write a sabotage patch · mount surfaces in a fresh vertical); the
+   doc-command extractor extended over the new docs (+ a `no_plaintext_pii` rule; Recipe 9's manual sabotage
+   commands stamped `bash operator-todo`).
+
+6. **`templates.ex` externalized: 4979 → 710 LOC.** 55 big emitters moved to `samen_core/priv/templates/*.eex`,
+   read at COMPILE TIME via `@external_resource` + `File.read!` (embedded in the BEAM; the tiny non-EEx
+   `render/2` substitution engine is UNTOUCHED, so literal `<%= %>` HEEx in the templates still passes through).
+   Behavior-identical, PROVEN by a new byte-parity oracle (`test/templates_parity_test.exs` + 212 golden
+   fixtures across headless/web/web+api/web+api+deploy/`--modules`). All 3 gen probes green.
+
+7. **`ui.ex` split: 1599 → 156 LOC.** 36 components split into 8 `Samen.UI.*` submodules
+   (`ui/{shell,nav,table,form,overlay,feedback,object,helpers}.ex`); `Samen.UI` is now a 34-`defdelegate`
+   facade — ZERO call-site churn across the 48+ `import Samen.UI` sites. Safe because Phoenix applies
+   `attr … default:` in the CALLEE (empirically confirmed), so a delegate renders identically; only call-site
+   attr-typo validation is lost (no warning, so `--warnings-as-errors` stays green). 623 samen_web tests green;
+   demo/driftwood/pawchart compile zero-warning. **Regression owned + fixed:** the split moved `list_view/1` out
+   of `ui.ex`, so sabotage `15-e6-list-loading-paints-rows.patch` (authored against `ui.ex:674`) no longer
+   applied → **refreshed against `samen_web/lib/samen/ui/table.ex`**; verified apply → flips `loading-contract`
+   → reverts byte-exact (SHA identical). Two source-scanner guard tests that hard-coded the single-file `ui.ex`
+   assumption were widened to scan the whole `ui/` tree (intent strengthened, not weakened).
+
+8. **`ci.sh` parallelized: 366.57s → 331.78s (~9.5%, default path).** The four independent gates (samen_web ·
+   demo tests+CI · driftwood · pawchart) now run CONCURRENTLY behind explicit per-gate exit-code collection
+   (a backgrounded failure does NOT trip `set -e`; each PID is `wait`ed + checked, per-app logs captured, ANY
+   failure aborts before `ROOT CI: ALL PASSED`). The 3 gen probes + sabotage harness stay SEQUENTIAL (they share
+   + byte-exact-restore the abbrev registry / patch the same apps). Failure-path proven (scratch harness + a
+   real sabotage-abort). Also fixed a demo adversarial load-order flake surfaced by the higher concurrency
+   (`Code.ensure_loaded(RevealAudit)` — faithful, not weakened). The win is Amdahl-bounded by the sequential
+   prefix (spikes + samen_core + 3 gen probes ≈ 250s+), which Unit 8(B) below would attack.
+
+9. **Dep pins aligned fleet-wide.** Sole genuine drift: `stream_data` `~> 1.3` → `== 1.3.0` (samen_web, demo,
+   driftwood, pawchart, + all 3 gen templates), matching the samen_core SoT; golden fixtures regenerated via
+   the sanctioned `SAMEN_UPDATE_GOLDEN=1` path. NO mix.lock re-resolution anywhere (every app already locked at
+   1.3.0). `ash`/`ash_postgres`/`ecto_sql`/`oban`/Phoenix-family verified already consistent.
+
+**F6 CARRIES (do not lose):**
+- **Unit 8(B) — shared deps/_build across the 3 gen probes (execution-ready).** Each probe generates a
+  DIFFERENTLY-configured scratch app and recompiles ash/ash_postgres/phoenix from scratch (~the sequential
+  prefix's cost). CARRIED, not forced: a shared `_build` across differently-configured apps risks a spurious
+  PASS masking a failure. Spec: warm `_build/test/lib/{ash,ash_postgres,ash_json_api,phoenix,…}` ONCE into an
+  absolute cache dir OUTSIDE each probe's scratch, export `MIX_DEPS_PATH`/`MIX_BUILD_ROOT` into every probe
+  subprocess (`compile_and_dump!` + the generated ci.sh + the boot `mix run`), keep each probe's byte-exact
+  registry restore + `File.rm_rf!` scratch cleanup untouched; ACCEPTANCE = all 3 probes green + registry
+  byte-exact. This is the remaining lever on the ci.sh wall-clock.
+- **Unit 2 — `chat` via `--modules` needs a materialized `Samen.Scopes.Chat` mount + a `Chat.Presence` server**
+  the generated app doesn't author; it's documented-with-prerequisite in the surface→macro table. Auto-mounting
+  it is a future gen unit (emit the chat scope mount + presence child).
+- **ADR-033 Hex trigger** (above) — the exact `ash`/`ash_postgres` pins are the deliberate in-monorepo
+  reproducibility choice AND the Hex precondition; revisit on the named trigger.
+
+**Suite totals after F6:** samen_core 1235 · samen_web 623 · demo 465 · driftwood 123 · pawchart 49. Sabotage
+harness: 24 patches (sabotage #15 refreshed for the ui.ex→ui/table.ex path move). templates.ex 4979→710 LOC ·
+ui.ex 1599→156 LOC. ci.sh 366.57s→331.78s.
+
+---
+
 ## State after WS-A/B/D (2026-07-16) — the re-rank
 
 **Shipped: 11 gaps** (G1/G2/G3/G5 in WS-A · G6/G7/G17 + G12-seed in WS-B ·

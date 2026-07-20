@@ -1,0 +1,67 @@
+defmodule <%= module %>.Aggregate do
+  @moduledoc """
+  <%= module %>'s token-blind aggregate plane (doc §control "Cross-tenant views run on
+  a separate token-blind actor"). The SEPARATE, DEFAULT-DENY Ash domain whose only
+  admissible actor is the singleton `Samen.Aggregate.Actor`. Inherited machinery — this
+  app writes no aggregate infrastructure, only the projection.
+  """
+  use Ash.Domain, validate_config_inclusion?: false
+
+  resources do
+    resource(<%= module %>.Aggregate.RecordCountBySegment)
+  end
+end
+
+defmodule <%= module %>.Aggregate.RecordCountBySegment do
+  @moduledoc """
+  Cross-tenant RECORD COUNT by segment. A `use Samen.Aggregate.Resource` projection
+  over the vault-excluded `<%= agg_table %>` summary table. Every column is bounded /
+  non-PII: `segment` (a coarse bucket, NOT a subject), `tenant_count` (cohort size for
+  k-anon), `record_count` (a count). NO pii_attribute, NO vault, NO PII relationship —
+  the C7 verifier enforces this at compile time. Cross-tenant (no org boundary).
+  """
+  use Samen.Aggregate.Resource,
+    otp_app: :<%= otp_app %>,
+    domain: <%= module %>.Aggregate,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
+    abbrev: "<%= agg_abbrev %>"
+
+  postgres do
+    table("<%= agg_table %>")
+    repo(<%= module %>.Repo)
+  end
+
+  attributes do
+    attribute(:org_id, :uuid, public?: true, allow_nil?: true)
+    attribute(:segment, :string, public?: true, allow_nil?: false)
+    attribute(:tenant_count, :integer, public?: true, default: 0)
+    attribute(:record_count, :integer, public?: true, default: 0)
+    attribute(:refreshed_at, :utc_datetime, public?: true)
+  end
+
+  actions do
+    defaults([:read])
+  end
+
+  # DEFAULT DENY. Only the token-blind aggregate actor is admitted. No fallthrough.
+  policies do
+    policy always() do
+      authorize_if(Samen.Policy.AggregateActorOnly)
+    end
+  end
+
+  @doc """
+  The T4.5 cohort spec: the segment cohort's SIZE (k-anonymity) is `tenant_count`. The
+  RELEASABLE value `record_count` is suppressed when `tenant_count < k`.
+  """
+  def aggregate_cohort_spec do
+    %Samen.Aggregate.CohortSpec{
+      cohort_key_columns: [:segment],
+      cohort_count_column: :tenant_count,
+      distinct_sensitive_column: nil,
+      value_columns: [:record_count],
+      sensitive_attribute: nil
+    }
+  end
+end

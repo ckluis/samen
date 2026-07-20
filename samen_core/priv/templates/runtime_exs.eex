@@ -1,0 +1,115 @@
+import Config
+
+# <%= module %> — production runtime configuration (WS-D D10 / ADR-024). Evaluated at
+# BOOT, so this is where prod SECRETS are read. FAIL-CLOSED: `fetch_secret!/2` RAISES a
+# named, actionable error on any missing required secret rather than booting a vaulted
+# SaaS insecurely. There is NO localhost/empty-password fallback here (that is dev only).
+#
+# NOT a live-deploy claim: the operator must provide the real values (Neon DATABASE_URL,
+# a generated SECRET_KEY_BASE, and the SAMEN_KMS_* keys). See docs/runbooks/deploy.md.
+
+# Fail-closed secret reader: raises a clear, named error naming the missing env var and
+# how to set it. This is the ADR-024 boot-honest guarantee — the app never comes up
+# half-secure.
+fetch_secret! = fn var, hint ->
+  case System.get_env(var) do
+    nil ->
+      raise """
+      <%= module %> is missing the required secret environment variable #{var}.
+
+      The app refuses to boot without it (fail-closed — a vaulted SaaS must never come
+      up half-secure). #{hint}
+
+      See docs/runbooks/deploy.md for the full secrets checklist.
+      """
+
+    "" ->
+      raise """
+      <%= module %> required secret environment variable #{var} is set but EMPTY.
+
+      An empty secret is treated as missing (fail-closed). #{hint}
+      """
+
+    value ->
+      value
+  end
+end
+
+if config_env() == :prod do
+  # --- database (Neon per-product; branch-per-env — see the runbook) -----------------
+  database_url =
+    fetch_secret!.(
+      "DATABASE_URL",
+      "Set it to your Neon connection string, e.g. " <>
+        "postgres://USER:PASS@HOST/<%= otp_app %>?sslmode=require"
+    )
+
+  maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
+
+  config :<%= otp_app %>, <%= module %>.Repo,
+    url: database_url,
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+    socket_options: maybe_ipv6,
+    # Neon requires TLS; verify_none keeps the scaffold honest without shipping a CA
+    # bundle assumption (the runbook flags hardening verify_full as an operator step).
+    ssl: [verify: :verify_none]
+
+  # --- endpoint (PHX_HOST + SECRET_KEY_BASE) -----------------------------------------
+  secret_key_base =
+    fetch_secret!.(
+      "SECRET_KEY_BASE",
+      "Generate one with `mix phx.gen.secret` (a >=64-byte random string)."
+    )
+
+  host =
+    fetch_secret!.(
+      "PHX_HOST",
+      "Set it to the public hostname, e.g. <%= otp_app %>.fly.dev"
+    )
+
+  port = String.to_integer(System.get_env("PORT") || "<%= http_port %>")
+
+  config :<%= otp_app %>, <%= module %>Web.Endpoint,
+    url: [host: host, port: 443, scheme: "https"],
+    http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}, port: port],
+    secret_key_base: secret_key_base,
+    server: true
+
+  # --- KMS env (SAMEN_KMS_*) — the vault's crypto keystore, the single most-forgotten
+  # prod requirement for a vaulted app (ADR-024). Fail-closed on absence: the vault
+  # cannot wrap/unwrap DEKs without it, so booting without it would be a silent
+  # half-secure app. The AWS KMS + DynamoDB adapter (Samen.Kms.AwsKmsDynamo) is the
+  # prod store; enabling it requires these keys.
+  kms_key_id =
+    fetch_secret!.(
+      "SAMEN_KMS_KEY_ID",
+      "The AWS KMS key id/ARN that wraps per-subject DEKs (Samen.Kms.AwsKmsDynamo). " <>
+        "The vault cannot encrypt/decrypt PII without it."
+    )
+
+  kms_region =
+    fetch_secret!.(
+      "SAMEN_KMS_REGION",
+      "The AWS region of the KMS key + the wrapped-DEK DynamoDB table (PITR OFF)."
+    )
+
+  config :samen_core, :kms_adapter, Samen.Kms.AwsKmsDynamo
+  config :samen_core, :aws_kms_dynamo_enabled, true
+
+  config :samen_core, Samen.Kms.AwsKmsDynamo,
+    key_id: kms_key_id,
+    region: kms_region
+
+  # --- metrics egress (WS-F5 F5.1) — OFF unless SAMEN_METRICS_ENABLED is truthy ---
+  # When on, Samen.Observability starts a Prometheus reporter (:<%= otp_app %>_prometheus)
+  # over Samen.Metrics.definitions/0 and the framework `GET /metrics` route serves it.
+  # Bounded-cardinality labels only (mix samen.verify.metric_labels) — no org/actor id
+  # ever becomes a series label. Scrape it over Fly's PRIVATE network, not the public
+  # internet (it is on the app port; front it with an internal-only scrape config).
+  if System.get_env("SAMEN_METRICS_ENABLED") in ~w(true 1) do
+    config :<%= otp_app %>, Samen.Observability,
+      metrics_egress?: true,
+      prometheus_reporter: TelemetryMetricsPrometheus.Core,
+      prometheus_name: :<%= otp_app %>_prometheus
+  end
+end

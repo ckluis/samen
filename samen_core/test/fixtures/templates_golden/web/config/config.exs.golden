@@ -1,0 +1,106 @@
+import Config
+
+# Acme — a Samen vertical scaffolded by `mix samen.gen.app`. Mounts the
+# samen_core Billing scope AS-IS, authors the vertical resource, defines a
+# token-blind aggregate projection, and (WS-D D2 / ADR-022) mounts the Primitives
+# scope + the ADR-010 operator namespace behind the samen_web framework UI.
+config :acme,
+  ecto_repos: [Acme.Repo],
+  ash_domains: [
+    Acme.Billing,
+    Acme.Vertical,
+    Acme.Aggregate,
+    Acme.Primitives,
+    Acme.Operator
+  ]
+
+# The samen_core verifiers discover domains from :samen_core :ash_domains. Register
+# this app's domains so the gate scans the mounted Billing scope + the vertical
+# resource + the token-blind aggregate + the Primitives mount + the operator plane.
+config :samen_core, :ash_domains, [
+  Acme.Billing,
+  Acme.Vertical,
+  Acme.Aggregate,
+  Acme.Primitives,
+  Acme.Operator
+]
+
+config :ash, disable_async?: true
+
+config :acme, Acme.Repo, migration_primary_key: [name: :id, type: :binary_id]
+
+# Reveal-grant + non_pii + verify + vault + tnt_record repos: wire this app's repo.
+config :samen_core, :reveal_grant, Samen.Reveal.Grants
+config :samen_core, :reveal_grant_repo, Acme.Repo
+config :samen_core, :non_pii_repo, Acme.Repo
+config :samen_core, :verify_repo, Acme.Repo
+config :samen_core, :vault_repo, Acme.Repo
+config :samen_core, :tnt_record_repo, Acme.Repo
+
+# T4.5 aggregate-privacy floors. samen_core defaults are k=5/l=2; a fresh app's
+# dogfood datasets are small, so — exactly as demo/driftwood/pawchart — use a
+# small-but-non-trivial floor (k=2/l=2): a count-of-one cohort still suppresses.
+# Production hosts keep k=5.
+config :samen_core, :k_anonymity_min_cohort, 2
+config :samen_core, :l_diversity_min_distinct, 2
+
+# The query-budget ledger repo (SCAFFOLD — accounting only, WARN-not-enforce).
+config :samen_core, :query_budget_ledger_repo, Acme.Repo
+
+# ADR-010: the well-known operator org id — `Samen.Web.Operator.org_id/1` resolution
+# step 2 reads it from this app env. The operator workspace reads the operator org's
+# OWN book of business on the TENANT plane (clear); seeds anchor rows on this id.
+config :acme, :operator_org_id, "0f000000-0000-4000-8000-0000000000aa"
+
+# WS-A A4/A5 — the kernel notification ENGINE wired to this app's Primitives mount
+# (the ADR-014 SendWorker config convention: the kernel is mount-agnostic; the host
+# names its concrete modules + repo). Realtime rides the samen_web PubSub broadcaster
+# over `Acme.PubSub` — id-only envelopes; each inbox subscriber re-reads per
+# its OWN scope.
+config :samen_core, Samen.Notifications.Engine,
+  notification_module: Acme.Primitives.Notification,
+  preference_module: Acme.Primitives.NotificationPreference,
+  repo: Acme.Repo,
+  broadcaster: Samen.Web.Notifications.PubSubBroadcaster
+
+config :samen_web, Samen.Web.Notifications.PubSubBroadcaster, pubsub: Acme.PubSub
+
+config :phoenix, :json_library, Jason
+
+# WS-D D5 observability (ADR-022): OTel-Ecto records the SQL statement into trace
+# spans by DEFAULT — on a Samen substrate that surface must be proven token-only, so
+# `db_statement: :disabled` is categorical (the `no_plaintext_pii` LogTelemetry tier
+# asserts it, config-level + live-handler). `Samen.Observability.child_specs/1` (wired
+# in application.ex) OWNS this default and raises at build time if this key contradicts
+# it. Removing this line flips the gate (the D6 flagship observability sabotage).
+config :acme, :opentelemetry_ecto, db_statement: :disabled
+
+# AcmeWeb.Endpoint — LOCAL DEV/DOGFOOD constants (ADR-022: the endpoint is a
+# thin EMITTED file and the builder OWNS the port/secret_key_base/salts; a real
+# deployment replaces them via config/runtime.exs — the `--deploy` layer).
+config :acme, AcmeWeb.Endpoint,
+  adapter: Bandit.PhoenixAdapter,
+  url: [host: "localhost"],
+  http: [ip: {127, 0, 0, 1}, port: String.to_integer(System.get_env("PORT") || "4050")],
+  secret_key_base: "acme_local_dogfood_secret_key_base_0000000000000000000000000000000000000",
+  live_view: [signing_salt: "acme_lv_salt_dogfood"],
+  render_errors: [formats: [html: AcmeWeb.ErrorHTML], layout: false],
+  pubsub_server: Acme.PubSub,
+  server: false
+
+# Oban: the canonical queue taxonomy (reused verbatim from the substrate convention).
+config :samen_core, Oban,
+  repo: Acme.Repo,
+  queues: [
+    default: 10,
+    rollups: 2,
+    webhooks_out: 5,
+    erasure: 1,
+    maintenance: 1,
+    reveal: 5
+  ],
+  plugins: [
+    {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
+  ]
+
+import_config "#{config_env()}.exs"

@@ -52,7 +52,7 @@ defmodule PawChart.MixProject do
       {:bandit, "~> 1.0"},
       {:phoenix_pubsub, "~> 2.1"},
       {:jason, "~> 1.4"},
-      {:stream_data, "~> 1.3"},
+      {:stream_data, "== 1.3.0"},
       # simple_sat: the Ash policy authorizer's pure-Elixir SAT solver.
       {:simple_sat, "~> 0.1"}
     ]

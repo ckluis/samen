@@ -20,3 +20,7 @@ pawchart/priv/dev_keystore/
 # generated coverage output
 samen_core/cover/
 cover/
+
+# ExDoc HTML output (mix docs) — dev-only, never committed
+samen_core/doc/
+samen_web/doc/

@@ -1,0 +1,17 @@
+defmodule Acme.DataCase do
+  @moduledoc "ExUnit case template for database-backed Acme tests."
+  use ExUnit.CaseTemplate
+
+  using do
+    quote do
+      alias Acme.Repo
+      import Acme.DataCase
+    end
+  end
+
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Acme.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(Acme.Repo, {:shared, self()})
+    :ok
+  end
+end

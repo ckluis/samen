@@ -1,0 +1,17 @@
+defmodule <%= module %>.Application do
+  @moduledoc "<%= module %> OTP application (scaffolded by mix samen.gen.app)."
+  use Application
+
+  @impl true
+  def start(_type, _args) do
+    children =
+      if Application.get_env(:<%= otp_app %>, :start_repo?, true) do
+        [<%= module %>.Repo, {Oban, Application.fetch_env!(:samen_core, Oban)}]
+      else
+        []
+      end
+
+    opts = [strategy: :one_for_one, name: <%= module %>.Supervisor]
+    Supervisor.start_link(children, opts)
+  end
+end

@@ -1,0 +1,29 @@
+defmodule AcmeWeb.Api.Router do
+  @moduledoc """
+  The public JSON:API router (WS-D D3; OD-6 — AshJsonApi ONLY).
+
+  This is the generated AshJsonApi router over the SAME Ash resources the LiveView UI
+  and the operator plane use — one write path, one policy stack, one catalog (doc
+  §external-surface). It is URL-versioned: the top-level router forwards `/api/v1` to
+  this pipeline (see `AcmeWeb.Api.Endpoint`), so every route here lives under
+  `/api/v1` (`/api/v1/records`, `/api/v1/records/:id`).
+
+  ## Governed both ways
+
+  Inbound requests carry a plane-bearing actor set by `AcmeWeb.Api.KeyAuthPlug`
+  (the api_key → actor resolver), so the SAME Ash policies (OrgScope + RBAC) run for an
+  API request as for a UI request, and the SAME `Samen.Api.PiiResolution` egress rule
+  applies. The router itself is a thin AshJsonApi plug; the authorization is the
+  resources' own policy stack.
+
+  ## Allowlist serialization
+
+  Field exposure is opt-in per resource (`json_api do show_fields … end`). A field
+  absent from a resource's allowlist is absent from every payload — including the
+  vault field (`secret`) and a newly added storage column (default not-exposed). See
+  the resource `json_api` block (Acme.Vertical.Record).
+  """
+  use AshJsonApi.Router,
+    domains: [Acme.Vertical],
+    prefix: "/api/v1"
+end

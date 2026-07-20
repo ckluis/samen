@@ -1,0 +1,64 @@
+defmodule Acme.Repo.Migrations.RevealGrants do
+  @moduledoc "T1.6 reveal-grant tables."
+  use Ecto.Migration
+
+  def up do
+    create table(:rvq_reveal_request, primary_key: false) do
+      add(:rvq_id, :uuid, primary_key: true, null: false, default: fragment("gen_random_uuid()"))
+      add(:rvq_subject_id, :string, null: false)
+      add(:rvq_requestor_id, :string, null: false)
+      add(:rvq_reason, :text, null: false)
+      add(:rvq_resource, :text)
+      add(:rvq_action, :text)
+      add(:rvq_status, :text, null: false, default: "pending")
+      timestamps(type: :utc_datetime_usec, inserted_at: :rvq_inserted_at, updated_at: :rvq_updated_at)
+    end
+
+    create(index(:rvq_reveal_request, [:rvq_subject_id]))
+    create(index(:rvq_reveal_request, [:rvq_requestor_id]))
+
+    create table(:rvg_reveal_grant, primary_key: false) do
+      add(:rvg_id, :uuid, primary_key: true, null: false, default: fragment("gen_random_uuid()"))
+      add(:rvg_request_id, :uuid, null: false)
+      add(:rvg_subject_id, :string, null: false)
+      add(:rvg_requestor_id, :string, null: false)
+      add(:rvg_granted_by, :string, null: false)
+      add(:rvg_reason, :text, null: false)
+      add(:rvg_resource, :text)
+      add(:rvg_action, :text)
+      add(:rvg_expires_at, :utc_datetime_usec, null: false)
+      add(:rvg_revoked_at, :utc_datetime_usec)
+      timestamps(type: :utc_datetime_usec, inserted_at: :rvg_inserted_at, updated_at: :rvg_updated_at)
+    end
+
+    create(
+      constraint(:rvg_reveal_grant, :rvg_distinct_party,
+        check: "rvg_granted_by <> rvg_requestor_id"
+      )
+    )
+
+    create(index(:rvg_reveal_grant, [:rvg_subject_id]))
+    create(index(:rvg_reveal_grant, [:rvg_requestor_id]))
+    create(index(:rvg_reveal_grant, [:rvg_request_id]))
+
+    create table(:rvl_reveal_audit, primary_key: false) do
+      add(:rvl_id, :uuid, primary_key: true, null: false, default: fragment("gen_random_uuid()"))
+      add(:rvl_event, :text, null: false)
+      add(:rvl_subject_id, :string, null: false)
+      add(:rvl_actor_id, :string)
+      add(:rvl_request_id, :uuid)
+      add(:rvl_grant_id, :uuid)
+      add(:rvl_detail, :text)
+      add(:rvl_recorded_at, :utc_datetime_usec, null: false, default: fragment("now()"))
+    end
+
+    create(index(:rvl_reveal_audit, [:rvl_subject_id]))
+  end
+
+  def down do
+    drop(table(:rvl_reveal_audit))
+    drop(constraint(:rvg_reveal_grant, :rvg_distinct_party))
+    drop(table(:rvg_reveal_grant))
+    drop(table(:rvq_reveal_request))
+  end
+end

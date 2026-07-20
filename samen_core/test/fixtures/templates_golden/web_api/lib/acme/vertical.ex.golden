@@ -1,0 +1,153 @@
+defmodule Acme.Vertical do
+  @moduledoc """
+  Acme's vertical-authored domain — the "20%" this app writes itself.
+
+  Ships ONE authored resource, `Acme.Vertical.Record`, a Tier-3 code
+  composition (`use Samen.Resource`, abbrev `acm`) that inherits the ENTIRE
+  substrate — abbrev storage, vault routing, masking, OrgScope, catalog parity, audit,
+  crypto-shred — with no vertical infrastructure code. It carries a SCALAR pii_ vault
+  field (`pii_acm_secret`) to exercise the vault/mask/reveal path end to end.
+
+  WS-D D3 — `AshJsonApi.Domain` makes this domain routable (it generates the
+  `json_api_match_route/2` dispatcher the AshJsonApi controller calls): the public
+  `/api/v1` surface serves Record behind its deny-by-default `json_api` allowlist.
+  """
+  use Ash.Domain, validate_config_inclusion?: false, extensions: [AshJsonApi.Domain]
+
+  resources do
+    resource(Acme.Vertical.Record)
+  end
+end
+
+defmodule Acme.Vertical.Record do
+  @moduledoc """
+  The authored vertical record (abbrev `acm`), with:
+
+    * `pii_acm_secret` — a SCALAR pii_ vault field
+      (`pii_attribute :secret, :string, vault: :pii_secret`). Masked `••••` by default;
+      plaintext only via `:reveal_acm` under a distinct-party grant;
+      crypto-shreddable with the record. The column name is what the storage
+      transformer produces from the abbrev + the pii_ scalar rule.
+    * `name` / `segment` — plain non-PII columns (`segment` is the aggregate cohort key).
+    * OrgScope on every action.
+    * a public JSON:API surface (WS-D D3) behind a DENY-BY-DEFAULT allowlist bound to
+      the BOUNDED `:api_read`.
+  """
+  use Samen.Resource,
+    otp_app: :acme,
+    domain: Acme.Vertical,
+    data_layer: AshPostgres.DataLayer,
+    authorizers: [Ash.Policy.Authorizer],
+    extensions: [AshJsonApi.Resource],
+    abbrev: "acm"
+
+  postgres do
+    table("acm_record")
+    repo(Acme.Repo)
+  end
+
+  # WS-D D3 — the public API surface over the authored resource (the demo Contact /
+  # driftwood Driver idiom).
+  #
+  # ALLOWLIST (opt-in, default not-exposed). `show_fields` is the load-bearing
+  # control: a field NOT named here is ABSENT from every payload, even via `?fields=`
+  # (AshJsonApi filters the final field set through `show_field?`, which requires
+  # `field in show_fields`). The names are CATALOG names (`:name`, `:segment`) —
+  # never storage names (`acm_name`, `pii_acm_secret`).
+  #
+  # Deliberately NOT allowlisted:
+  #   * `secret` — the vault field. A PII field enters the public payload only by a
+  #     CONSCIOUS builder opt-in (add it to `show_fields`; it then serializes per
+  #     plane via `Samen.Api.PiiResolution` — tenant clear, operator masked/absent).
+  #     The gen'd red-path test proves it is absent by omission.
+  #   * `org_id` — the tenant boundary (internal routing, absent by omission).
+  json_api do
+    type("record")
+    show_fields([:id, :name, :segment])
+
+    # F3.7 — make the FILTER surface match the SERIALIZATION surface: AshJsonApi
+    # derives `?filter[…]` from ALL public attributes by default — including one kept
+    # OFF `show_fields` (a hit/miss side channel over a de-allowlisted field).
+    # Turning `derive_filter?` off closes it; cross-org is already defended by
+    # OrgScope's FilterCheck. (SORT needs no flag: AshJsonApi validates `?sort=`
+    # against `show_field?/2` already.)
+    derive_filter?(false)
+
+    routes do
+      base("/records")
+      # Bind the public routes to the BOUNDED `:api_read` (keyset pagination,
+      # default_limit 50 / max_page_size 200) — the API is bounded by default
+      # (WS-A design §1.1, ADR-016 §3).
+      get(:api_read)
+      index(:api_read)
+    end
+  end
+
+  attributes do
+    attribute(:name, :string, public?: true)
+    attribute(:segment, :string, public?: true)
+  end
+
+  pii do
+    vault(:pii_secret)
+    pii_attribute(:secret, :string, vault: :pii_secret)
+    reveal(:reveal_acm)
+  end
+
+  # The inherited two-key-class PII-resolution rule on all reads.
+  preparations do
+    prepare(Samen.Api.PiiResolution)
+  end
+
+  actions do
+    defaults([:read, :destroy, create: :*, update: :*])
+
+    # BOUNDED-by-default API read (WS-A design §1.1, ADR-016 §3): a SEPARATE read
+    # action the JSON:API `index`/`get` routes bind to, with keyset pagination —
+    # default_limit 50 / max_page_size 200 / paginate_by_default? true. A no-page
+    # index read returns a BOUNDED page (never the full set); a `page[limit]` above
+    # max_page_size is CLAMPED (`Samen.Web.Api.PageLimitClamp` in the endpoint),
+    # never honored. Kept DISTINCT from the plain `:read` so internal callers keep
+    # returning a plain list — the API bound does not leak into internal reads.
+    read :api_read do
+      pagination(
+        keyset?: true,
+        default_limit: 50,
+        max_page_size: 200,
+        required?: false,
+        paginate_by_default?: true
+      )
+    end
+
+    action :reveal_acm, :map do
+      argument(:actor_id, :string, allow_nil?: false)
+      argument(:subject_id, :string, allow_nil?: false)
+
+      run(fn input, _ctx ->
+        ctx = %Samen.Reveal.Context{
+          actor: input.arguments.actor_id,
+          subject_id: input.arguments.subject_id,
+          resource: __MODULE__,
+          action: :reveal_acm,
+          label: :secret
+        }
+
+        if Samen.Reveal.grant_checker().granted?(ctx) do
+          {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
+        else
+          {:error, :denied}
+        end
+      end)
+    end
+  end
+
+  policies do
+    policy action_type([:read, :create, :update, :destroy]) do
+      authorize_if(Samen.Policy.OrgScope)
+    end
+
+    policy action(:reveal_acm) do
+      authorize_if(always())
+    end
+  end
+end

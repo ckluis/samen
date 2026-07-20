@@ -1,0 +1,102 @@
+# Deploying Acme (Fly.io + Neon)
+
+Scaffolded by `mix samen.gen.app --deploy` (WS-D D10 / ADR-024). These artifacts are
+**fail-honest**: structurally correct, but a fresh generation has NO Fly account, NO Neon
+project, and NO KMS keys, so they do **not** claim a live deploy. `config/runtime.exs`
+**fails closed** — the app RAISES on any missing required secret rather than booting a
+vaulted SaaS half-secure. Everything below the "Operator TODO" line stays human work.
+
+## Emitted artifacts
+
+| File | What it is |
+|---|---|
+| `fly.toml` | Fly manifest — `[http_service]` on port `4050`, `/healthz` check, a `release_command` running migrations. |
+| `Dockerfile` | Two-stage `mix release` build. **Build context = the monorepo root** (see below). |
+| `rel/env.sh.eex` | Release env shim (node name / cookie). |
+| `config/runtime.exs` | **Fail-closed** prod config: reads `DATABASE_URL`, `SECRET_KEY_BASE`, `PHX_HOST`, `SAMEN_KMS_KEY_ID`, `SAMEN_KMS_REGION`; raises a named error on any missing one. |
+
+## Build context
+
+Acme depends on `samen_core` (and `samen_web`) via `{:_, path: "..."}`. The
+Docker build therefore needs the **monorepo root** (the dir containing `samen_core/`,
+`samen_web/`, and `acme/`) as its build context, not the app dir alone:
+
+    fly deploy --dockerfile acme/Dockerfile --config acme/fly.toml .
+
+run from the monorepo root (`.`).
+
+## Neon per-product database (branch-per-env)
+
+Provision ONE Neon project per product, and use Neon **branches** for environments so
+each env has an isolated copy that shares the parent's schema:
+
+1. Create a Neon project for `acme`.
+2. Create a branch per environment: `main` (prod), `staging`, and ephemeral PR branches.
+   Each branch yields its own `DATABASE_URL`.
+3. The connection string is your `DATABASE_URL` secret (below). Neon requires TLS
+   (`?sslmode=require`); `config/runtime.exs` sets `ssl: [verify: :verify_none]` — harden
+   to `verify_full` with a CA bundle as an operator step.
+4. Migrations run automatically on deploy via `fly.toml`'s `release_command`.
+
+## Secrets checklist
+
+Set every secret before the first deploy — `config/runtime.exs` RAISES (fail-closed) if
+any is missing, naming the variable:
+
+- [ ] `DATABASE_URL` — the Neon connection string (`postgres://…/acme?sslmode=require`).
+- [ ] `SECRET_KEY_BASE` — generate with `mix phx.gen.secret` (a ≥64-byte random string).
+- [ ] `PHX_HOST` — the public hostname (e.g. `acme.fly.dev`).
+- [ ] `SAMEN_KMS_KEY_ID` — the AWS KMS key id/ARN that wraps per-subject DEKs. **The vault
+      cannot encrypt/decrypt PII without it** — the single most-forgotten prod requirement.
+- [ ] `SAMEN_KMS_REGION` — the AWS region of the KMS key + the wrapped-DEK DynamoDB table.
+
+Set them on Fly with:
+
+    fly secrets set DATABASE_URL=… SECRET_KEY_BASE=… PHX_HOST=… \
+      SAMEN_KMS_KEY_ID=… SAMEN_KMS_REGION=…
+
+## Metrics egress (optional — WS-F5 F5.1)
+
+Prometheus scraping is **OFF by default**. To turn it on, set one env var:
+
+    fly secrets set SAMEN_METRICS_ENABLED=true
+
+Then `config/runtime.exs` starts a Prometheus reporter (`:acme_prometheus`)
+over `Samen.Metrics.definitions/0` and the framework `GET /metrics` route serves the
+text exposition. With the flag UNSET the route returns `404` and nothing is exported —
+the default is a true no-op.
+
+- **Bounded cardinality only.** `mix samen.verify.metric_labels` fails the build if any
+  metric carries a raw `org_id`/`actor_id`/`subject_id` label — no per-tenant series.
+- **`/metrics` is on the app port.** Scrape it over Fly's **private** network (an
+  internal scrape config / a Grafana Agent sidecar), NOT the public internet — do not
+  add it to a public `[[http_service]]`. Front it with allow-listing if it must be
+  reachable off the private net.
+
+## Verify fail-closed (before you trust the deploy)
+
+Boot the release with a required secret UNSET and confirm it REFUSES to start with a
+named error (never a silent half-secure boot):
+
+    # missing SAMEN_KMS_KEY_ID → must raise naming SAMEN_KMS_KEY_ID
+    DATABASE_URL=… SECRET_KEY_BASE=… PHX_HOST=… SAMEN_KMS_REGION=… \
+      /app/bin/acme eval ":ok"
+
+## Operator TODO — the human prerequisites (NOT provided by this scaffold)
+
+These are deliberately **not** automated (ADR-024 — no live deploy claim). The scaffold is
+a fail-honest on-ramp, not a turnkey deploy. You must provide:
+
+1. **A real Fly account + app** — sign up, `fly auth login`, `fly apps create acme`,
+   and set `app`/`primary_region` in `fly.toml`. No Fly account exists in a fresh generation.
+2. **A real Neon project + DATABASE_URL** — create the project + branches (above) and set
+   `DATABASE_URL`. No database is provisioned by this scaffold.
+3. **Real KMS keys** — create the AWS KMS key + the wrapped-DEK DynamoDB table (PITR OFF,
+   per ADR-001) and set `SAMEN_KMS_KEY_ID` / `SAMEN_KMS_REGION`. The in-memory/file-backed
+   dev KMS adapters are NOT for production; the vault needs a real keystore.
+4. **A real OTLP exporter** — the observability plane records token-only spans with
+   `db_statement: :disabled`, but the wide-event OTLP sink is operator-wired (it defaults
+   to `:none`). Point it at your real collector to see traces in production.
+
+Until all four are done, `fly deploy` is not expected to yield a running app — and
+`config/runtime.exs` will fail closed rather than pretend otherwise.

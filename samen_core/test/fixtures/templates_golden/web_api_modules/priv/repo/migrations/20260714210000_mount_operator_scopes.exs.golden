@@ -1,0 +1,617 @@
+defmodule Acme.Repo.Migrations.MountOperatorScopes do
+  @moduledoc """
+  Mounts the OPERATOR namespace (ADR-010 §8.2) into the host's one Postgres: a SECOND
+  mount of Identity + Billing + Support whose rows describe the SaaS company's OWN
+  book of business — its tenant-org ACCOUNTS, their tenant-ADMINS (PII the SaaS owns,
+  CLEAR), each tenant's subscription-to-the-SaaS (incl. the ADR-017 movement ledger),
+  and the tickets tenants file WITH the SaaS. Mirrors driftwood's
+  `mount_operator_scopes`. Catalogued in the SAME transaction (ADR-004 catalog-in-tx).
+
+  PII columns hold vault `vt_*` tokens (plaintext never lands here):
+    * `aou_user.aou_full_name` / `.aou_emails`
+    * `apc_customer.pii_apc_billing_name` / `.pii_apc_billing_email`
+    * `aqg_agent.aqg_full_name` / `.pii_aqg_email`,
+      `aqm_message.pii_aqm_body`
+  """
+  use Samen.Migration
+
+  @resources [
+    # Identity (operator: accounts + admins)
+    Acme.Operator.Org,
+    Acme.Operator.User,
+    Acme.Operator.Membership,
+    Acme.Operator.Role,
+    Acme.Operator.ApiKey,
+    Acme.Operator.Invitation,
+    # Billing (operator: tenant subscriptions-to-the-SaaS + the movement ledger)
+    Acme.Operator.Customer,
+    Acme.Operator.Subscription,
+    Acme.Operator.Plan,
+    Acme.Operator.Price,
+    Acme.Operator.Invoice,
+    Acme.Operator.Payment,
+    Acme.Operator.Usage,
+    Acme.Operator.Entitlement,
+    Acme.Operator.SubscriptionEvent,
+    # Support (operator: tenant-filed desk tickets)
+    Acme.Operator.Sla,
+    Acme.Operator.Ticket,
+    Acme.Operator.Conversation,
+    Acme.Operator.Agent,
+    Acme.Operator.Message,
+    Acme.Operator.Macro,
+    Acme.Operator.Csat
+  ]
+
+  def up do
+    # =====================================================================
+    # IDENTITY — accounts (Org) + admins (User) + membership + role/key/invite
+    # =====================================================================
+
+    # --- aoo_org : the tenant anchor. Here: an ACCOUNT (a tenant org
+    #     mirrored). The slug carries the tenant_org_id back-reference (Bridge-B). ---
+    create table(:aoo_org, primary_key: false) do
+      add(:aoo_name, :text, null: false)
+      add(:aoo_slug, :text)
+      add(:aoo_plan, :text, default: "free")
+      add(:aoo_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aoo_org_id, :uuid)
+      add(:aoo_inserted_at, :utc_datetime, null: false)
+      add(:aoo_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- aou_user : the tenant-ADMIN 🔒 (full_name/emails vault-routed) ---
+    create table(:aou_user, primary_key: false) do
+      add(:aou_handle, :text)
+      add(:aou_status, :text, default: "active")
+      add(:aou_full_name, :text)
+      add(:aou_emails, :text)
+      add(:aou_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aou_org_id, :uuid, null: false)
+      add(:aou_inserted_at, :utc_datetime, null: false)
+      add(:aou_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- aom_membership : (user, org, role) ---
+    create table(:aom_membership, primary_key: false) do
+      add(:aom_role, :text, default: "member")
+      add(:aom_status, :text, default: "active")
+
+      add(
+        :aom_user_id,
+        references(:aou_user,
+          column: :aou_id,
+          name: "aom_membership_aom_user_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:aom_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aom_org_id, :uuid, null: false)
+      add(:aom_inserted_at, :utc_datetime, null: false)
+      add(:aom_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- aor_role : Tier-0 config rows (per-org role catalog) ---
+    create table(:aor_role, primary_key: false) do
+      add(:aor_name, :text, null: false)
+      add(:aor_label, :text)
+      add(:aor_rank, :integer, null: false)
+      add(:aor_enabled, :boolean, default: true)
+      add(:aor_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aor_org_id, :uuid, null: false)
+      add(:aor_inserted_at, :utc_datetime, null: false)
+      add(:aor_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- aok_api_key : scoped credential (two planes) ---
+    create table(:aok_api_key, primary_key: false) do
+      add(:aok_token_digest, :text, null: false)
+      add(:aok_plane, :text, null: false, default: "tenant")
+      add(:aok_scopes, :map, default: fragment("'{}'::jsonb"))
+      add(:aok_minter_role, :text)
+      add(:aok_revoked_at, :utc_datetime)
+      # F3.4 — bounded API-key expiry (deny-on-read) + last-use observability.
+      add(:aok_expires_at, :utc_datetime)
+      add(:aok_last_used_at, :utc_datetime)
+
+      add(
+        :aok_membership_id,
+        references(:aom_membership,
+          column: :aom_id,
+          name: "aok_api_key_aok_membership_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:aok_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aok_org_id, :uuid, null: false)
+      add(:aok_inserted_at, :utc_datetime, null: false)
+      add(:aok_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- aon_invitation : a pending invite 🔒 (email vault-routed) ---
+    create table(:aon_invitation, primary_key: false) do
+      add(:aon_role, :text, default: "member")
+      add(:aon_status, :text, default: "pending")
+      add(:aon_accept_token, :text)
+      add(:aon_email, :text)
+      add(:aon_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aon_org_id, :uuid, null: false)
+      add(:aon_inserted_at, :utc_datetime, null: false)
+      add(:aon_updated_at, :utc_datetime, null: false)
+    end
+
+    # =====================================================================
+    # BILLING — each tenant's subscription TO the SaaS
+    # =====================================================================
+
+    create table(:apc_customer, primary_key: false) do
+      add(:apc_stripe_customer_id, :text)
+      add(:apc_status, :text, default: "active")
+      add(:apc_currency, :text, default: "USD")
+      add(:apc_custom, :map, default: fragment("'{}'::jsonb"))
+      add(:pii_apc_billing_name, :text)
+      add(:pii_apc_billing_email, :text)
+      add(:apc_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:apc_org_id, :uuid, null: false)
+      add(:apc_inserted_at, :utc_datetime, null: false)
+      add(:apc_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:app_plan, primary_key: false) do
+      add(:app_name, :text, null: false)
+      add(:app_label, :text)
+      add(:app_description, :text)
+      add(:app_stripe_plan_id, :text)
+      add(:app_interval, :text, default: "monthly")
+      add(:app_enabled, :boolean, default: true)
+      add(:app_features, :map, default: fragment("'{}'::jsonb"))
+      add(:app_custom, :map, default: fragment("'{}'::jsonb"))
+      add(:app_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:app_org_id, :uuid, null: false)
+      add(:app_inserted_at, :utc_datetime, null: false)
+      add(:app_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:apr_price, primary_key: false) do
+      add(:apr_stripe_price_id, :text)
+      add(:apr_unit_amount_cents, :integer, null: false)
+      add(:apr_currency, :text, null: false, default: "USD")
+      add(:apr_interval, :text, default: "monthly")
+      add(:apr_active, :boolean, default: true)
+      add(:apr_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :apr_plan_id,
+        references(:app_plan,
+          column: :app_id,
+          name: "apr_price_apr_plan_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:apr_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:apr_org_id, :uuid, null: false)
+      add(:apr_inserted_at, :utc_datetime, null: false)
+      add(:apr_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:aps_subscription, primary_key: false) do
+      add(:aps_stripe_subscription_id, :text)
+      add(:aps_status, :text, default: "active")
+      add(:aps_current_period_start, :utc_datetime)
+      add(:aps_current_period_end, :utc_datetime)
+      add(:aps_trial_end, :utc_datetime)
+      add(:aps_cancel_at, :utc_datetime)
+      add(:aps_cancelled_at, :utc_datetime)
+      add(:aps_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :aps_customer_id,
+        references(:apc_customer,
+          column: :apc_id,
+          name: "aps_subscription_aps_customer_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :aps_plan_id,
+        references(:app_plan,
+          column: :app_id,
+          name: "aps_subscription_aps_plan_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:aps_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aps_org_id, :uuid, null: false)
+      add(:aps_inserted_at, :utc_datetime, null: false)
+      add(:aps_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:api_invoice, primary_key: false) do
+      add(:api_stripe_invoice_id, :text)
+      add(:api_status, :text, default: "draft")
+      add(:api_amount_due_cents, :integer, default: 0)
+      add(:api_amount_paid_cents, :integer, default: 0)
+      add(:api_currency, :text, default: "USD")
+      add(:api_period_start, :utc_datetime)
+      add(:api_period_end, :utc_datetime)
+      add(:api_due_date, :utc_datetime)
+      add(:api_paid_at, :utc_datetime)
+      add(:api_line_items, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:api_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :api_customer_id,
+        references(:apc_customer,
+          column: :apc_id,
+          name: "api_invoice_api_customer_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :api_subscription_id,
+        references(:aps_subscription,
+          column: :aps_id,
+          name: "api_invoice_api_subscription_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:api_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:api_org_id, :uuid, null: false)
+      add(:api_inserted_at, :utc_datetime, null: false)
+      add(:api_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:apy_payment, primary_key: false) do
+      add(:apy_stripe_payment_intent_id, :text)
+      add(:apy_status, :text, default: "pending")
+      add(:apy_amount_cents, :integer, null: false)
+      add(:apy_currency, :text, default: "USD")
+      add(:apy_payment_method_type, :text, default: "card")
+      add(:apy_last4, :text)
+      add(:apy_paid_at, :utc_datetime)
+      add(:apy_failure_code, :text)
+      add(:apy_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :apy_invoice_id,
+        references(:api_invoice,
+          column: :api_id,
+          name: "apy_payment_apy_invoice_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :apy_customer_id,
+        references(:apc_customer,
+          column: :apc_id,
+          name: "apy_payment_apy_customer_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:apy_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:apy_org_id, :uuid, null: false)
+      add(:apy_inserted_at, :utc_datetime, null: false)
+      add(:apy_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:apu_usage, primary_key: false) do
+      add(:apu_metric, :text, null: false)
+      add(:apu_quantity, :integer, default: 0)
+      add(:apu_period_start, :utc_datetime)
+      add(:apu_period_end, :utc_datetime)
+      add(:apu_reported_at, :utc_datetime)
+
+      add(
+        :apu_subscription_id,
+        references(:aps_subscription,
+          column: :aps_id,
+          name: "apu_usage_apu_subscription_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:apu_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:apu_org_id, :uuid, null: false)
+      add(:apu_inserted_at, :utc_datetime, null: false)
+      add(:apu_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:ape_entitlement, primary_key: false) do
+      add(:ape_feature, :text, null: false)
+      add(:ape_granted, :boolean, default: true)
+      add(:ape_expires_at, :utc_datetime)
+      add(:ape_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :ape_subscription_id,
+        references(:aps_subscription,
+          column: :aps_id,
+          name: "ape_entitlement_ape_subscription_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :ape_plan_id,
+        references(:app_plan,
+          column: :app_id,
+          name: "ape_entitlement_ape_plan_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:ape_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:ape_org_id, :uuid, null: false)
+      add(:ape_inserted_at, :utc_datetime, null: false)
+      add(:ape_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- Subscription-movement ledger (`mov`; ADR-017) — append-only, no PII,
+    #     soft id refs (no FK: the immutable ledger outlives its subscription row) ---
+    create table(:apv_subscription_event, primary_key: false) do
+      add(:apv_subscription_id, :uuid, null: false)
+      add(:apv_customer_id, :uuid)
+      add(:apv_plan_id, :uuid)
+      add(:apv_from_plan_id, :uuid)
+      add(:apv_kind, :text, null: false)
+      add(:apv_mrr_delta_cents, :integer, null: false, default: 0)
+      add(:apv_mrr_before_cents, :integer, null: false, default: 0)
+      add(:apv_mrr_after_cents, :integer, null: false, default: 0)
+      add(:apv_from_status, :text)
+      add(:apv_to_status, :text)
+      add(:apv_reason, :text, default: "status_change")
+      add(:apv_occurred_at, :utc_datetime, null: false)
+      add(:apv_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:apv_org_id, :uuid, null: false)
+      add(:apv_inserted_at, :utc_datetime, null: false)
+      add(:apv_updated_at, :utc_datetime, null: false)
+    end
+
+    # =====================================================================
+    # SUPPORT — the SaaS help desk (tenants file tickets WITH the SaaS)
+    # =====================================================================
+
+    create table(:aql_sla, primary_key: false) do
+      add(:aql_name, :text, null: false)
+      add(:aql_label, :text)
+      add(:aql_first_response_minutes, :integer, default: 60)
+      add(:aql_resolve_minutes, :integer, default: 480)
+      add(:aql_priority, :text, default: "normal")
+      add(:aql_enabled, :boolean, default: true)
+      add(:aql_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aql_org_id, :uuid, null: false)
+      add(:aql_inserted_at, :utc_datetime, null: false)
+      add(:aql_updated_at, :utc_datetime, null: false)
+    end
+
+    # The ticket's custom bag carries the requester back-references
+    # (`requester_org_id` → account Org, `requester_user_id` → tenant-admin User).
+    create table(:aqk_ticket, primary_key: false) do
+      add(:aqk_subject, :text, null: false)
+      add(:aqk_status, :text, default: "open")
+      add(:aqk_priority, :text, default: "normal")
+      add(:aqk_sla_breach_at, :utc_datetime)
+      add(:aqk_breached, :boolean, default: false, null: false)
+      add(:aqk_resolved_at, :utc_datetime)
+      add(:aqk_closed_at, :utc_datetime)
+      add(:aqk_tags, {:array, :text}, default: [])
+      add(:aqk_custom, :map, default: fragment("'{}'::jsonb"))
+      add(:aqk_external_id, :text)
+
+      add(
+        :aqk_sla_id,
+        references(:aql_sla,
+          column: :aql_id,
+          name: "aqk_ticket_aqk_sla_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:aqk_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aqk_org_id, :uuid, null: false)
+      add(:aqk_inserted_at, :utc_datetime, null: false)
+      add(:aqk_updated_at, :utc_datetime, null: false)
+    end
+
+    create(
+      index(:aqk_ticket, [:aqk_sla_breach_at, :aqk_breached],
+        name: "aqk_ticket_sla_breach_idx",
+        where: "aqk_sla_breach_at IS NOT NULL AND aqk_breached = false"
+      )
+    )
+
+    create table(:aqc_conversation, primary_key: false) do
+      add(:aqc_channel, :text, default: "email")
+      add(:aqc_status, :text, default: "open")
+      add(:aqc_subject, :text)
+
+      add(
+        :aqc_ticket_id,
+        references(:aqk_ticket,
+          column: :aqk_id,
+          name: "aqc_conversation_aqc_ticket_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(:aqc_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aqc_org_id, :uuid, null: false)
+      add(:aqc_inserted_at, :utc_datetime, null: false)
+      add(:aqc_updated_at, :utc_datetime, null: false)
+    end
+
+    # The SaaS support AGENT 🔒 (the SaaS's own employee — CLEAR on its own plane).
+    create table(:aqg_agent, primary_key: false) do
+      add(:aqg_handle, :text)
+      add(:aqg_status, :text, default: "active")
+      add(:aqg_role, :text, default: "agent")
+      add(:aqg_external_id, :text)
+      add(:aqg_timezone, :text)
+      add(:aqg_custom, :map, default: fragment("'{}'::jsonb"))
+      add(:aqg_full_name, :text)
+      add(:pii_aqg_email, :text)
+      add(:aqg_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aqg_org_id, :uuid, null: false)
+      add(:aqg_inserted_at, :utc_datetime, null: false)
+      add(:aqg_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:aqm_message, primary_key: false) do
+      add(:aqm_sender_type, :text, default: "customer")
+      add(:aqm_sender_id, :uuid)
+      add(:aqm_message_type, :text, default: "reply")
+      add(:aqm_attachments, {:array, :text}, default: [])
+      add(:aqm_created_via, :text, default: "web")
+      add(:pii_aqm_body, :text)
+
+      add(
+        :aqm_conversation_id,
+        references(:aqc_conversation,
+          column: :aqc_id,
+          name: "aqm_message_aqm_conversation_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(
+        :aqm_agent_id,
+        references(:aqg_agent,
+          column: :aqg_id,
+          name: "aqm_message_aqm_agent_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:aqm_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aqm_org_id, :uuid, null: false)
+      add(:aqm_inserted_at, :utc_datetime, null: false)
+      add(:aqm_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:aqn_macro, primary_key: false) do
+      add(:aqn_name, :text, null: false)
+      add(:aqn_description, :text)
+      add(:aqn_body_template, :text)
+      add(:aqn_tags, {:array, :text}, default: [])
+      add(:aqn_enabled, :boolean, default: true)
+      add(:aqn_category, :text)
+      add(:aqn_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aqn_org_id, :uuid, null: false)
+      add(:aqn_inserted_at, :utc_datetime, null: false)
+      add(:aqn_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:aqs_csat, primary_key: false) do
+      add(:aqs_score, :integer, null: false)
+      add(:aqs_comments, :text)
+      add(:aqs_channel, :text, default: "email")
+      add(:aqs_responded_at, :utc_datetime)
+
+      add(
+        :aqs_ticket_id,
+        references(:aqk_ticket,
+          column: :aqk_id,
+          name: "aqs_csat_aqs_ticket_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(
+        :aqs_agent_id,
+        references(:aqg_agent,
+          column: :aqg_id,
+          name: "aqs_csat_aqs_agent_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:aqs_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aqs_org_id, :uuid, null: false)
+      add(:aqs_inserted_at, :utc_datetime, null: false)
+      add(:aqs_updated_at, :utc_datetime, null: false)
+    end
+
+    catalog_sync(@resources)
+  end
+
+  def down do
+    catalog_sync_down(@resources)
+
+    # --- Support (reverse FK order) ---
+    drop(constraint(:aqs_csat, "aqs_csat_aqs_agent_id_fkey"))
+    drop(constraint(:aqs_csat, "aqs_csat_aqs_ticket_id_fkey"))
+    drop(table(:aqs_csat))
+    drop(table(:aqn_macro))
+    drop(constraint(:aqm_message, "aqm_message_aqm_agent_id_fkey"))
+    drop(constraint(:aqm_message, "aqm_message_aqm_conversation_id_fkey"))
+    drop(table(:aqm_message))
+    drop(table(:aqg_agent))
+    drop(constraint(:aqc_conversation, "aqc_conversation_aqc_ticket_id_fkey"))
+    drop(table(:aqc_conversation))
+    drop(index(:aqk_ticket, [:aqk_sla_breach_at, :aqk_breached], name: "aqk_ticket_sla_breach_idx"))
+    drop(constraint(:aqk_ticket, "aqk_ticket_aqk_sla_id_fkey"))
+    drop(table(:aqk_ticket))
+    drop(table(:aql_sla))
+
+    # --- Billing (reverse FK order; ledger has no FKs) ---
+    drop(table(:apv_subscription_event))
+    drop(constraint(:ape_entitlement, "ape_entitlement_ape_plan_id_fkey"))
+    drop(constraint(:ape_entitlement, "ape_entitlement_ape_subscription_id_fkey"))
+    drop(table(:ape_entitlement))
+    drop(constraint(:apu_usage, "apu_usage_apu_subscription_id_fkey"))
+    drop(table(:apu_usage))
+    drop(constraint(:apy_payment, "apy_payment_apy_customer_id_fkey"))
+    drop(constraint(:apy_payment, "apy_payment_apy_invoice_id_fkey"))
+    drop(table(:apy_payment))
+    drop(constraint(:api_invoice, "api_invoice_api_subscription_id_fkey"))
+    drop(constraint(:api_invoice, "api_invoice_api_customer_id_fkey"))
+    drop(table(:api_invoice))
+    drop(constraint(:aps_subscription, "aps_subscription_aps_plan_id_fkey"))
+    drop(constraint(:aps_subscription, "aps_subscription_aps_customer_id_fkey"))
+    drop(table(:aps_subscription))
+    drop(constraint(:apr_price, "apr_price_apr_plan_id_fkey"))
+    drop(table(:apr_price))
+    drop(table(:app_plan))
+    drop(table(:apc_customer))
+
+    # --- Identity (reverse FK order) ---
+    drop(constraint(:aok_api_key, "aok_api_key_aok_membership_id_fkey"))
+    drop(table(:aok_api_key))
+    drop(table(:aon_invitation))
+    drop(table(:aor_role))
+    drop(constraint(:aom_membership, "aom_membership_aom_user_id_fkey"))
+    drop(table(:aom_membership))
+    drop(table(:aou_user))
+    drop(table(:aoo_org))
+  end
+end

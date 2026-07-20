@@ -1,0 +1,63 @@
+defmodule <%= module %>.Operator do
+  @moduledoc """
+  <%= module %>'s OPERATOR namespace (ADR-010 §8.1) — a SECOND mount of the Identity +
+  Billing + Support blueprints, alongside the vertical's own tenant mounts. Its rows
+  describe the SaaS company's OWN book of business as a vendor: its tenant-org ACCOUNTS
+  (`Identity.Org`), those accounts' tenant-ADMINS (`Identity.User` — PII the SaaS OWNS,
+  CLEAR to the operator on its own tenant plane), each tenant's subscription-to-the-SaaS
+  (`Billing`), and the tickets tenants file WITH the SaaS (`Support`). Mirrors
+  `Driftwood.Operator` — the shipped reference.
+
+  The operator workspace is mounted in the router by ONE `samen_operator_routes` line;
+  the well-known operator org id lives in config (`:operator_org_id`).
+
+  Fresh `<%= o_org %>*`-family abbrevs (Identity `<%= prefix %>→o`, Billing `→p`,
+  Support `→q` — the driftwood per-plane convention), reserved append-only in the
+  GLOBAL registry by the generator. No samen_core code changed — only data-file rows
+  (ADR-006).
+  """
+  use Ash.Domain, validate_config_inclusion?: false
+
+  use Samen.Scopes.Identity,
+    otp_app: :<%= otp_app %>,
+    repo: <%= module %>.Repo,
+    namespace: <%= module %>.Operator,
+    abbrevs: %{
+      org: "<%= o_org %>",
+      user: "<%= o_user %>",
+      membership: "<%= o_mem %>",
+      role: "<%= o_role %>",
+      api_key: "<%= o_key %>",
+      invitation: "<%= o_invite %>"
+    }
+
+  use Samen.Scopes.Billing,
+    otp_app: :<%= otp_app %>,
+    repo: <%= module %>.Repo,
+    namespace: <%= module %>.Operator,
+    abbrevs: %{
+      customer: "<%= o_cus %>",
+      subscription: "<%= o_sub %>",
+      plan: "<%= o_plan %>",
+      price: "<%= o_price %>",
+      invoice: "<%= o_invoice %>",
+      payment: "<%= o_pay %>",
+      usage: "<%= o_usage %>",
+      entitlement: "<%= o_ent %>",
+      subscription_event: "<%= o_sev %>"
+    }
+
+  use Samen.Scopes.Support,
+    otp_app: :<%= otp_app %>,
+    repo: <%= module %>.Repo,
+    namespace: <%= module %>.Operator,
+    abbrevs: %{
+      ticket: "<%= o_tick %>",
+      conversation: "<%= o_conv %>",
+      message: "<%= o_msg %>",
+      agent: "<%= o_agent %>",
+      sla: "<%= o_sla %>",
+      macro: "<%= o_macro %>",
+      csat: "<%= o_csat %>"
+    }
+end

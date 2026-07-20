@@ -90,8 +90,31 @@ defmodule Samen.Gen.App do
     api?: true,
     # WS-D D10 (ADR-024): the fail-honest deploy layer — default OFF, opt-in via
     # `--deploy` / `mix samen.gen.deploy`. Requires the web layer (fails closed otherwise).
-    deploy?: false
+    deploy?: false,
+    # WS-E: the selected framework END-USER surfaces to ALSO mount (`--modules`), as a list
+    # of atoms from `@known_modules`. Default `[]` — OFF-by-default: an app generated WITHOUT
+    # `--modules` is byte-for-byte unchanged. The mountable ones mount over mounts the app
+    # already authors; `chat` is documented-not-mounted (needs a Chat scope + Presence).
+    modules: []
   ]
+
+  # The framework end-user surfaces `--modules` recognizes (WS-E router macros).
+  @known_modules [:chat, :files, :csv, :search, :settings]
+
+  # The subset the generated app can mount at ≈0 authored LOC over its EXISTING mounts:
+  #   * files/search — over the Primitives mount (`File` + `SearchIndex` materialized)
+  #   * csv          — over the authored `Vertical` domain (deny-by-default resource resolve)
+  #   * settings     — over the `Operator` Identity namespace (`User`/`ApiKey`/`Membership`)
+  # `chat` is NOT here: it needs a materialized `Samen.Scopes.Chat` mount + a running
+  # `Samen.Web.Chat.Presence` — a prerequisite the generated app does not author (documented
+  # in docs/guides/generators.md, emitted as a router prerequisite comment, never half-mounted).
+  @mountable_modules [:files, :csv, :search, :settings]
+
+  @doc "The framework surfaces `--modules` recognizes (`chat`/`files`/`csv`/`search`/`settings`)."
+  def known_modules, do: @known_modules
+
+  @doc "The subset of `known_modules/0` the generated app mounts at ≈0 LOC (all but `chat`)."
+  def mountable_modules, do: @mountable_modules
 
   @doc """
   The default parent directory a generated app is created under: the parent of the
@@ -159,6 +182,10 @@ defmodule Samen.Gen.App do
     # WS-D D10 (ADR-024): the deploy layer is OPT-IN (default OFF). It requires the web
     # layer; `deploy?: true, web?: false` fails closed in validate_against!/2.
     deploy? = Keyword.get(opts, :deploy, false)
+    # WS-E: the selected end-user surfaces. Accepts a comma-separated STRING (the CLI form),
+    # a list of atoms/strings, or nil/"" → []. Membership is checked fail-closed in
+    # `validate_against!/2` (an unknown surface raises there, the testable guardrail).
+    modules = normalize_modules(Keyword.get(opts, :modules))
     port = Keyword.get(opts, :port, 4050)
 
     p1 = String.first(prefix)
@@ -227,10 +254,42 @@ defmodule Samen.Gen.App do
       web?: web?,
       api?: api?,
       deploy?: deploy?,
+      modules: modules,
       port: port,
       primitives_abbrevs: primitives_abbrevs,
       operator_abbrevs: operator_abbrevs
     }
+  end
+
+  # Normalize the `--modules` value to a list of atoms. A comma-separated string is the CLI
+  # form; a list (atoms or strings) is accepted for programmatic callers; nil/"" → []. The
+  # mapping is whitelist-first (known surface names → their atoms) so arbitrary CLI text does
+  # not mint atoms; an unrecognized token is kept as an atom so `validate_against!/2` reports
+  # it fail-closed (the single, unit-testable guardrail).
+  defp normalize_modules(nil), do: []
+  defp normalize_modules(""), do: []
+
+  defp normalize_modules(value) when is_binary(value) do
+    value
+    |> String.split(",", trim: true)
+    |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&to_module_atom/1)
+    |> Enum.uniq()
+  end
+
+  defp normalize_modules(value) when is_list(value) do
+    value
+    |> Enum.map(fn
+      atom when is_atom(atom) -> atom
+      str when is_binary(str) -> to_module_atom(String.downcase(String.trim(str)))
+    end)
+    |> Enum.uniq()
+  end
+
+  defp to_module_atom(str) do
+    Enum.find(@known_modules, fn known -> Atom.to_string(known) == str end) ||
+      String.to_atom(str)
   end
 
   @doc """
@@ -309,6 +368,23 @@ defmodule Samen.Gen.App do
             "--deploy requires the web layer (the emitted config/runtime.exs and fly.toml " <>
               "read PHX_HOST and the endpoint port the web plane owns). Drop " <>
               "--no-web / --headless."
+    end
+
+    # WS-E: `--modules` mounts framework LiveViews over the web layer's mounts — no web,
+    # no surfaces. And every requested surface must be a KNOWN one (fail closed on typos).
+    if s.modules != [] and not s.web? do
+      raise ArgumentError,
+            "--modules requires the web layer (the surfaces are mounted over the app's " <>
+              "Primitives/Vertical/Operator mounts). Drop --no-web / --headless."
+    end
+
+    unknown = s.modules -- @known_modules
+
+    unless unknown == [] do
+      raise ArgumentError,
+            "--modules has unknown surface(s): #{inspect(unknown)}. Known surfaces are " <>
+              "#{inspect(@known_modules)} (mountable at ≈0 LOC: #{inspect(@mountable_modules)}; " <>
+              "`chat` is documented-with-prerequisite, not auto-mounted)."
     end
 
     unless Regex.match?(~r/\A[A-Z][A-Za-z0-9]*\z/, s.module) do
@@ -576,9 +652,108 @@ defmodule Samen.Gen.App do
       "o_agent" => oa.agent,
       "o_sla" => oa.sla,
       "o_macro" => oa.macro,
-      "o_csat" => oa.csat
+      "o_csat" => oa.csat,
+      # WS-E `--modules` seams. Each is "" for a default (no-`--modules`) app, so the
+      # rendered router/landing are byte-for-byte unchanged; they carry content only when a
+      # surface is selected. Values are computed with `s.module` interpolated DIRECTLY (never
+      # via a nested `<%= module %>`) so `render/2`'s single substitution pass is exact.
+      "module_mounts" => module_mounts_binding(s),
+      "root_route" => root_route_binding(s),
+      "menu_nav_items" => menu_nav_items_binding(s)
     }
   end
+
+  # --------------------------------------------------------------- WS-E `--modules` seams
+
+  # True when the app should ship the `Samen.UI` menu landing (`HomeLive` at `/`): the web
+  # layer is on AND at least one MOUNTABLE surface was selected (a `chat`-only request mounts
+  # nothing, so no menu is emitted).
+  defp home?(%__MODULE__{web?: web?, modules: mods}),
+    do: web? and Enum.any?(mods, &(&1 in @mountable_modules))
+
+  defp selected_mountable(%__MODULE__{modules: mods}),
+    do: Enum.filter(@mountable_modules, &(&1 in mods))
+
+  # The `<%= module_mounts %>` router block: the framework surface macro calls (files/search
+  # over Primitives, csv over Vertical, settings over Operator), plus — when `chat` was
+  # requested — a documented prerequisite comment (NOT a mount). "" when nothing was selected.
+  defp module_mounts_binding(%__MODULE__{modules: []}), do: ""
+
+  defp module_mounts_binding(%__MODULE__{module: mod} = s) do
+    mounts = Enum.map(selected_mountable(s), &mount_line(&1, mod))
+    chat = if :chat in s.modules, do: [chat_prerequisite_comment(mod)], else: []
+
+    body = mounts ++ chat
+
+    case body do
+      [] ->
+        ""
+
+      lines ->
+        joined = Enum.map_join(s.modules, ",", &Atom.to_string/1)
+
+        "\n\n" <>
+          "    # --- Selected end-user surfaces (--modules #{joined}) — WS-E framework\n" <>
+          "    #     macros, mounted over this app's existing mounts at ≈0 authored LOC.\n" <>
+          Enum.join(lines, "\n")
+    end
+  end
+
+  defp mount_line(:files, mod),
+    do: "    samen_files_routes(:files, #{mod}.Primitives, repo: #{mod}.Repo)"
+
+  defp mount_line(:search, mod),
+    do: "    samen_search_routes(:search, #{mod}.Primitives, repo: #{mod}.Repo)"
+
+  defp mount_line(:csv, mod),
+    do: "    samen_csv_routes(:csv, #{mod}.Vertical, repo: #{mod}.Repo)"
+
+  defp mount_line(:settings, mod),
+    do: "    samen_settings_routes(:settings, #{mod}.Operator, repo: #{mod}.Repo)"
+
+  defp chat_prerequisite_comment(mod) do
+    "    # chat requested but NOT auto-mounted (≈0-LOC adoption not possible): it needs a\n" <>
+      "    # materialized Samen.Scopes.Chat mount + {Samen.Web.Chat.Presence, pubsub_server:\n" <>
+      "    # #{mod}.PubSub} in the supervision tree. After authoring those, mount it with\n" <>
+      "    #   samen_chat_routes(:chat, #{mod}.Chat, repo: #{mod}.Repo, labels: %{pubsub: #{mod}.PubSub})\n" <>
+      "    # See docs/guides/generators.md → \"Mountable surfaces\"."
+  end
+
+  # The `<%= root_route %>` seam: swap `/` to the `Samen.UI` menu landing (`HomeLive`) when a
+  # mountable surface is selected; otherwise the DEFAULT plain PageController index (byte-exact
+  # to today — the off-by-default guarantee).
+  # NB: the `/` route lives inside `scope "/", <App>Web do`, which ALIASES the scope — so the
+  # LiveView is named RELATIVE to `<App>Web` (a fully-qualified `<App>Web.HomeLive` would
+  # double-prefix to `<App>Web.<App>Web.HomeLive`). Same reason `PageController` is bare here.
+  defp root_route_binding(%__MODULE__{} = s) do
+    if home?(s) do
+      ~s|live("/", HomeLive)|
+    else
+      ~s|get("/", PageController, :index)|
+    end
+  end
+
+  # The `<%= menu_nav_items %>` seam: the `Samen.UI.nav_item`s for the `:extra` "Product" nav
+  # group in `HomeLive` (only emitted when `home?/1`). "" otherwise. The `\#{@org_id}` is a
+  # LITERAL HEEx interpolation preserved into the emitted template (escaped so it is not
+  # interpolated here at generation time).
+  defp menu_nav_items_binding(%__MODULE__{} = s) do
+    s
+    |> selected_mountable()
+    |> Enum.map_join("\n", &nav_item_line/1)
+  end
+
+  defp nav_item_line(:files),
+    do: ~s(                <.nav_item label="Files" href={"/files?org=\#{@org_id}"} />)
+
+  defp nav_item_line(:search),
+    do: ~s(                <.nav_item label="Search" href={"/search?org=\#{@org_id}"} />)
+
+  defp nav_item_line(:csv),
+    do: ~s(                <.nav_item label="CSV import" href={"/csv/import/record?org=\#{@org_id}"} />)
+
+  defp nav_item_line(:settings),
+    do: ~s(                <.nav_item label="Settings" href={"/settings?org=\#{@org_id}"} />)
 
   @doc """
   The relative path from the generated app dir to the samen_core SOURCE root, used for the
@@ -629,7 +804,16 @@ defmodule Samen.Gen.App do
 
   # ------------------------------------------------------------------ file set
   # {relative_path_template, contents_template}
-  defp files(%__MODULE__{web?: web?, api?: api?, deploy?: deploy?}) do
-    Samen.Gen.Templates.files(web?, api?, deploy?)
+  defp files(%__MODULE__{web?: web?, api?: api?, deploy?: deploy?} = s) do
+    base = Samen.Gen.Templates.files(web?, api?, deploy?)
+
+    # WS-E: the `Samen.UI` menu landing rides ONLY when a mountable surface was selected —
+    # so a default (no-`--modules`) app emits the exact same file set as today. Appended (not
+    # threaded through Templates.files/3) so the file-set unit tests stay byte-exact.
+    if home?(s) do
+      base ++ [{"lib/<%= otp_app %>_web/home_live.ex", Samen.Gen.Templates.home_live_ex()}]
+    else
+      base
+    end
   end
 end

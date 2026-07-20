@@ -1,0 +1,51 @@
+# Acme
+
+A Samen vertical app scaffolded by `mix samen.gen.app` (T6.4 + WS-D D2/D3 / ADR-022). It
+mounts the samen_core Billing scope AS-IS, authors one vertical resource
+(`Acme.Vertical.Record`, abbrev `acm`) with a scalar
+`pii_acm_secret` vault field, defines a token-blind aggregate projection,
+and ships a RUNNING web product: the router mounts the inherited Billing pages, the
+notifications inbox and the ADR-010 operator workspace from samen_web — zero authored
+LiveView modules — plus the public `/api/v1` JSON:API over the authored resource.
+
+## Run it
+
+    mix deps.get
+    MIX_ENV=dev mix ecto.create && MIX_ENV=dev mix ecto.migrate
+    mix phx.server
+
+Then open http://localhost:4050 — the landing page links every inherited
+surface; `/healthz` is the liveness probe.
+
+## The public API (`/api/v1`)
+
+`GET /api/v1/records` (JSON:API) — key-authed (`Authorization: Bearer <api_key>`, the
+two key classes over the operator Identity mount), BOUNDED by default (keyset
+pagination, default_limit 50 / max_page_size 200 — an over-max `page[limit]` is
+CLAMPED by the inherited `Samen.Web.Api.PageLimitClamp`), and DENY-BY-DEFAULT
+serialized: a field absent from the resource's `json_api show_fields` allowlist is
+absent from every payload (the vault field `secret` and `org_id` are deliberately not
+allowlisted). The committed `api_contract.v1.json` pins the contract; the gate's
+`samen.verify.api_contract` step fails on un-versioned structural breaks.
+
+## Verifier gate
+
+    MIX_ENV=test bash ci.sh
+
+Runs the FULL samen_core verifier gate (catalog parity, prefixes, pii_reads, pii_classify,
+no_plaintext_pii, migrations, sink_schema, metric_labels, vault_declared_parity,
+tnt_catalog, tnt_boundary, same_org_fk, no_pii_columns, aggregate_privacy, api_contract)
++ the default test suite (incl. the gen'd API bounded/clamp/allowlist red paths) + the
+anti-tautology probe on the vault path.
+
+This app is **correct-by-construction**: it passes its own gate on first run.
+
+## Abbrevs
+
+This app's storage abbrevs are permanently reserved in
+`../samen_core/priv/abbrev_registry.json` (the global registry): Billing scope
+(`acc/acs/acl/acp/aci/acy/acu/ace`), the
+authored resource (`acm`), the aggregate plane (`aca`), the
+Primitives mount (`ant/anp/afl/ash/awh/aff`)
+and the operator namespace (`aoo…/apc…/aqk…` — the
+per-plane first-letter convention).

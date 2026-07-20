@@ -1,0 +1,63 @@
+defmodule Acme.Operator do
+  @moduledoc """
+  Acme's OPERATOR namespace (ADR-010 §8.1) — a SECOND mount of the Identity +
+  Billing + Support blueprints, alongside the vertical's own tenant mounts. Its rows
+  describe the SaaS company's OWN book of business as a vendor: its tenant-org ACCOUNTS
+  (`Identity.Org`), those accounts' tenant-ADMINS (`Identity.User` — PII the SaaS OWNS,
+  CLEAR to the operator on its own tenant plane), each tenant's subscription-to-the-SaaS
+  (`Billing`), and the tickets tenants file WITH the SaaS (`Support`). Mirrors
+  `Driftwood.Operator` — the shipped reference.
+
+  The operator workspace is mounted in the router by ONE `samen_operator_routes` line;
+  the well-known operator org id lives in config (`:operator_org_id`).
+
+  Fresh `aoo*`-family abbrevs (Identity `ac→o`, Billing `→p`,
+  Support `→q` — the driftwood per-plane convention), reserved append-only in the
+  GLOBAL registry by the generator. No samen_core code changed — only data-file rows
+  (ADR-006).
+  """
+  use Ash.Domain, validate_config_inclusion?: false
+
+  use Samen.Scopes.Identity,
+    otp_app: :acme,
+    repo: Acme.Repo,
+    namespace: Acme.Operator,
+    abbrevs: %{
+      org: "aoo",
+      user: "aou",
+      membership: "aom",
+      role: "aor",
+      api_key: "aok",
+      invitation: "aon"
+    }
+
+  use Samen.Scopes.Billing,
+    otp_app: :acme,
+    repo: Acme.Repo,
+    namespace: Acme.Operator,
+    abbrevs: %{
+      customer: "apc",
+      subscription: "aps",
+      plan: "app",
+      price: "apr",
+      invoice: "api",
+      payment: "apy",
+      usage: "apu",
+      entitlement: "ape",
+      subscription_event: "apv"
+    }
+
+  use Samen.Scopes.Support,
+    otp_app: :acme,
+    repo: Acme.Repo,
+    namespace: Acme.Operator,
+    abbrevs: %{
+      ticket: "aqk",
+      conversation: "aqc",
+      message: "aqm",
+      agent: "aqg",
+      sla: "aql",
+      macro: "aqn",
+      csat: "aqs"
+    }
+end

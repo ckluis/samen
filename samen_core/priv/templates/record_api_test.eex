@@ -1,0 +1,149 @@
+defmodule <%= module %>.RecordApiTest do
+  @moduledoc """
+  The GENERATED API red paths (WS-D D3 — AC-G4-2 / AC-G4-3):
+
+    * BOUNDED by default — an index read with NO page params returns ≤ default_limit
+      (50), never the full set (the `:api_read` keyset pagination);
+    * CLAMPED at the cap — a hostile `page[limit]` above max_page_size (200) returns
+      EXACTLY the cap (the `Samen.Web.Api.PageLimitClamp` e2e pattern);
+    * DENY-BY-DEFAULT allowlist — a field absent from `show_fields` (the vault field
+      `secret` lives ON the resource but NOT on the allowlist; `org_id` likewise) is
+      ABSENT from every payload, even via `?fields=`; positive controls prove the
+      allowlisted fields DO appear (absence is a real omission, not an empty payload).
+
+  Anti-tautology posture: the pagination tests seed MORE rows than the probed limit,
+  so "bounded"/"clamped" hold over a genuinely larger dataset.
+  """
+  use <%= module %>.ApiCase, async: false
+
+  # A storage-name pattern the public payload must never leak: the abbrev-prefixed
+  # column names and the vault prefixes/tokens the doc says the public schema hides.
+  @storage_name_patterns [
+    ~r/\b<%= abbrev %>_/,
+    ~r/\bpii_/,
+    ~r/\bvt_/
+  ]
+
+  describe "bounded-by-default pagination (the RP-G1-6 pattern)" do
+    # Must exceed max_page_size (200) so the clamp test exercises the cap boundary —
+    # with fewer rows than the cap, a raised/removed cap is unobservable.
+    @seed 210
+
+    setup do
+      org = mk_org()
+      for i <- 1..@seed, do: mk_record(org, %{name: "R#{i}"})
+      {raw, _key} = mk_api_key(org, plane: :tenant)
+      {:ok, org: org, key: raw, seed: @seed}
+    end
+
+    test "an index read with NO page params is BOUNDED by default_limit (never the full set)",
+         %{key: key, seed: seed} do
+      conn = api_get("/records", key)
+      assert conn.status == 200
+
+      data = json(conn)["data"]
+
+      # Non-vacuity: we seeded MORE than the default page, so a bounded read must
+      # return FEWER than the seeded count.
+      assert seed > 50
+
+      assert length(data) <= 50,
+             "an unbounded index read returned #{length(data)} rows — the " <>
+               "default_limit did not bound the read. It must return at most 50."
+
+      assert length(data) == 50,
+             "default_limit 50 should fill the first page from #{seed} rows"
+    end
+
+    test "page[limit] ABOVE max_page_size returns EXACTLY the cap (PageLimitClamp e2e)",
+         %{key: key, seed: seed} do
+      conn = api_get("/records?page[limit]=10000", key)
+
+      # Non-vacuity: the dataset exceeds the cap, so a clamped page is exactly the
+      # cap — a raised/removed cap (or a dropped clamp plug) would observably return
+      # more.
+      assert seed > 200
+      assert conn.status == 200
+
+      data = json(conn)["data"]
+
+      assert length(data) == 200,
+             "page[limit]=10000 returned #{length(data)} rows — expected exactly the " <>
+               "max_page_size cap (200) over a #{seed}-row dataset."
+    end
+
+    test "an explicit small page[limit] is honored (positive control — pagination is live)",
+         %{key: key} do
+      conn = api_get("/records?page[limit]=5", key)
+      assert conn.status == 200
+      assert length(json(conn)["data"]) == 5
+    end
+  end
+
+  describe "deny-by-default allowlist (AC-G4-3)" do
+    setup do
+      org = mk_org()
+      secret = "SECRET-<%= abbrev %>-#{System.unique_integer([:positive])}"
+      record = mk_record(org, %{name: "Visible One", segment: "alpha", secret: secret})
+      {raw, _key} = mk_api_key(org, plane: :tenant)
+      {:ok, org: org, key: raw, record: record, secret: secret}
+    end
+
+    test "a payload exposes ONLY the allowlisted catalog fields — the un-allowlisted vault field is ABSENT",
+         %{key: key, org: org, secret: secret} do
+      conn = api_get("/records", key)
+      assert conn.status == 200
+      %{"data" => [record | _]} = json(conn)
+
+      attrs = record["attributes"]
+
+      # Positive control: the allowlisted non-PII fields ARE present (not vacuous).
+      assert Map.has_key?(attrs, "name")
+      assert Map.has_key?(attrs, "segment")
+      assert attrs["name"] == "Visible One"
+
+      # `type` is the catalog name, never the storage table (`<%= resource_table %>`).
+      assert record["type"] == "record"
+
+      # THE RED PATH: `secret` is a field ON the resource but NOT in `show_fields` —
+      # absent by omission, and its plaintext value appears nowhere in the body.
+      refute Map.has_key?(attrs, "secret"),
+             "un-allowlisted vault field `secret` appeared in the API payload"
+
+      refute conn.resp_body =~ secret, "the vault plaintext leaked into the payload"
+
+      # `org_id` is a PUBLIC Ash attribute (CoreAttributes injects it). Without
+      # `show_fields` it WOULD appear. It is deliberately NOT allowlisted → absent.
+      refute Map.has_key?(attrs, "org_id"),
+             "un-allowlisted public attribute `org_id` appeared in the API payload"
+
+      refute conn.resp_body =~ org, "the org_id value leaked into the payload"
+
+      # The whole payload carries no storage/vault name anywhere.
+      for pattern <- @storage_name_patterns do
+        refute Regex.match?(pattern, conn.resp_body),
+               "storage name #{inspect(pattern)} leaked into the API payload"
+      end
+    end
+
+    test "the ?fields= query param cannot force an un-allowlisted field to appear",
+         %{key: key, secret: secret} do
+      # A caller asks for `secret` explicitly. `show_fields` is the SCHEMA-level
+      # allowlist, so `?fields=` can NEVER widen past it. AshJsonApi fails closed:
+      # either it REJECTS the request naming an un-shown field (4xx), or it returns
+      # 200 with the field absent. Both outcomes prove the plaintext never escapes.
+      conn = api_get("/records?fields[record]=secret,name", key)
+
+      if conn.status == 200 do
+        %{"data" => [record | _]} = json(conn)
+
+        refute Map.has_key?(record["attributes"], "secret"),
+               "?fields= forced the un-allowlisted vault field to appear"
+      else
+        assert conn.status in 400..499
+      end
+
+      refute conn.resp_body =~ secret, "the vault plaintext leaked via ?fields="
+    end
+  end
+end

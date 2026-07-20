@@ -1,0 +1,170 @@
+defmodule <%= module %>.Repo.Migrations.MountPrimitivesScope do
+  @moduledoc """
+  Mounts the Primitives scope tables (`<%= module %>.Primitives`, abbrevs
+  `<%= p_nt %>/<%= p_np %>/<%= p_fl %>/<%= p_sh %>/<%= p_wh %>/<%= p_ff %>`) and catalogs
+  them in the SAME migration transaction (ADR-004 catalog-in-tx). Mirrors pawchart's
+  `mount_primitives_scope` (with the B5 flag-engine fields included — target_rules +
+  variants land directly on the flag table).
+
+  Load-bearing tables for the inherited web surfaces:
+
+    * `<%= p_nt %>_notification` — 🔒 PII: rendered_body (vault token;
+      `pii_<%= p_nt %>_rendered_body`) — the notifications inbox
+    * `<%= p_ff %>_feature_flag` — the flag rows the operator flag admin manages
+  """
+  use Samen.Migration
+
+  @resources [
+    <%= module %>.Primitives.Notification,
+    <%= module %>.Primitives.NotificationPreference,
+    <%= module %>.Primitives.File,
+    <%= module %>.Primitives.SearchIndex,
+    <%= module %>.Primitives.Webhook,
+    <%= module %>.Primitives.FeatureFlag
+  ]
+
+  def up do
+    # --- <%= p_nt %>_notification : 🔒 PII: rendered_body ---
+    create table(:<%= p_nt %>_notification, primary_key: false) do
+      add(:<%= p_nt %>_recipient_id, :uuid, null: false)
+      add(:<%= p_nt %>_channel, :text, default: "in_app")
+      add(:<%= p_nt %>_event_type, :text, null: false)
+      add(:<%= p_nt %>_status, :text, default: "pending")
+      add(:<%= p_nt %>_sent_at, :utc_datetime)
+      add(:<%= p_nt %>_read_at, :utc_datetime)
+      add(:<%= p_nt %>_metadata, :map, default: fragment("'{}'::jsonb"))
+      add(:pii_<%= p_nt %>_rendered_body, :text)
+      add(:<%= p_nt %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= p_nt %>_org_id, :uuid, null: false)
+      add(:<%= p_nt %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= p_nt %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create(
+      index(:<%= p_nt %>_notification, [:<%= p_nt %>_recipient_id, :<%= p_nt %>_org_id],
+        name: "<%= p_nt %>_notification_recipient_org_idx"
+      )
+    )
+
+    create(
+      index(:<%= p_nt %>_notification, [:<%= p_nt %>_status, :<%= p_nt %>_org_id],
+        name: "<%= p_nt %>_notification_status_org_idx"
+      )
+    )
+
+    # --- <%= p_np %>_notification_preference : per-recipient dispatch prefs (no PII) ---
+    create table(:<%= p_np %>_notification_preference, primary_key: false) do
+      add(:<%= p_np %>_recipient_id, :uuid, null: false)
+      add(:<%= p_np %>_event_type, :text, null: false)
+      add(:<%= p_np %>_in_app_enabled, :boolean, default: true)
+      add(:<%= p_np %>_email_enabled, :boolean, default: false)
+      add(:<%= p_np %>_quiet_hours, :map, default: fragment("'{}'::jsonb"))
+      add(:<%= p_np %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= p_np %>_org_id, :uuid, null: false)
+      add(:<%= p_np %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= p_np %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create(
+      index(:<%= p_np %>_notification_preference, [:<%= p_np %>_recipient_id, :<%= p_np %>_event_type, :<%= p_np %>_org_id],
+        name: "<%= p_np %>_notification_preference_recipient_event_org_idx",
+        unique: true
+      )
+    )
+
+    # --- <%= p_fl %>_file ---
+    create table(:<%= p_fl %>_file, primary_key: false) do
+      add(:<%= p_fl %>_filename, :text, null: false)
+      add(:<%= p_fl %>_content_type, :text)
+      add(:<%= p_fl %>_size_bytes, :integer)
+      add(:<%= p_fl %>_storage_key, :text, null: false)
+      add(:<%= p_fl %>_status, :text, default: "active")
+      add(:<%= p_fl %>_uploaded_by_id, :uuid)
+      add(:<%= p_fl %>_metadata, :map, default: fragment("'{}'::jsonb"))
+      add(:<%= p_fl %>_search_vector, :text)
+      add(:<%= p_fl %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= p_fl %>_org_id, :uuid, null: false)
+      add(:<%= p_fl %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= p_fl %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- <%= p_sh %>_search_index ---
+    create table(:<%= p_sh %>_search_index, primary_key: false) do
+      add(:<%= p_sh %>_resource_name, :text, null: false)
+      add(:<%= p_sh %>_field_name, :text, null: false)
+      add(:<%= p_sh %>_vector_column, :text, null: false)
+      add(:<%= p_sh %>_description, :text)
+      add(:<%= p_sh %>_enabled, :boolean, default: true)
+      add(:<%= p_sh %>_ts_config, :text, default: "english")
+      add(:<%= p_sh %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= p_sh %>_org_id, :uuid, null: false)
+      add(:<%= p_sh %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= p_sh %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- <%= p_wh %>_webhook : 🔒 PII: signing_secret ---
+    create table(:<%= p_wh %>_webhook, primary_key: false) do
+      add(:<%= p_wh %>_url, :text, null: false)
+      add(:<%= p_wh %>_label, :text)
+      add(:<%= p_wh %>_event_types, {:array, :text}, default: [])
+      add(:<%= p_wh %>_status, :text, default: "active")
+      add(:<%= p_wh %>_failure_count, :integer, default: 0)
+      add(:<%= p_wh %>_last_delivered_at, :utc_datetime)
+      add(:<%= p_wh %>_metadata, :map, default: fragment("'{}'::jsonb"))
+      add(:pii_<%= p_wh %>_signing_secret, :text)
+      add(:<%= p_wh %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= p_wh %>_org_id, :uuid, null: false)
+      add(:<%= p_wh %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= p_wh %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- <%= p_ff %>_feature_flag (incl. the B5 engine fields: target_rules/variants) ---
+    create table(:<%= p_ff %>_feature_flag, primary_key: false) do
+      add(:<%= p_ff %>_name, :text, null: false)
+      add(:<%= p_ff %>_description, :text)
+      add(:<%= p_ff %>_enabled, :boolean, default: false)
+      add(:<%= p_ff %>_rollout_pct, :integer, default: 100)
+      add(:<%= p_ff %>_stage, :text, default: "beta")
+      add(:<%= p_ff %>_metadata, :map, default: fragment("'{}'::jsonb"))
+      add(:<%= p_ff %>_target_rules, :map, default: fragment("'[]'::jsonb"))
+      add(:<%= p_ff %>_variants, :map, default: fragment("'{}'::jsonb"))
+      add(:<%= p_ff %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= p_ff %>_org_id, :uuid, null: false)
+      add(:<%= p_ff %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= p_ff %>_updated_at, :utc_datetime, null: false)
+    end
+
+    catalog_sync(@resources)
+  end
+
+  def down do
+    catalog_sync_down(@resources)
+
+    drop(table(:<%= p_ff %>_feature_flag))
+    drop(table(:<%= p_wh %>_webhook))
+    drop(table(:<%= p_sh %>_search_index))
+    drop(table(:<%= p_fl %>_file))
+
+    drop(
+      index(:<%= p_np %>_notification_preference, [:<%= p_np %>_recipient_id, :<%= p_np %>_event_type, :<%= p_np %>_org_id],
+        name: "<%= p_np %>_notification_preference_recipient_event_org_idx"
+      )
+    )
+
+    drop(table(:<%= p_np %>_notification_preference))
+
+    drop(
+      index(:<%= p_nt %>_notification, [:<%= p_nt %>_status, :<%= p_nt %>_org_id],
+        name: "<%= p_nt %>_notification_status_org_idx"
+      )
+    )
+
+    drop(
+      index(:<%= p_nt %>_notification, [:<%= p_nt %>_recipient_id, :<%= p_nt %>_org_id],
+        name: "<%= p_nt %>_notification_recipient_org_idx"
+      )
+    )
+
+    drop(table(:<%= p_nt %>_notification))
+  end
+end

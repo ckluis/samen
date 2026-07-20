@@ -1,0 +1,327 @@
+defmodule <%= module %>.Repo.Migrations.AppResources do
+  @moduledoc """
+  Creates <%= module %>'s Billing scope (abbrevs <%= bc %>/<%= bs %>/<%= bl %>/<%= bp %>/<%= bi %>/<%= by %>/<%= bu %>/<%= be %>/<%= bv %>)
+  mounted AS-IS, the authored vertical table (<%= resource_table %> with the scalar vault
+  field pii_<%= abbrev %>_secret), and the token-blind aggregate projection (<%= agg_table %>),
+  and catalogs every resource in the SAME migration transaction (ADR-004 catalog-in-tx).
+  """
+  use Samen.Migration
+
+  @resources [
+    <%= module %>.Billing.Customer,
+    <%= module %>.Billing.Subscription,
+    <%= module %>.Billing.Plan,
+    <%= module %>.Billing.Price,
+    <%= module %>.Billing.Invoice,
+    <%= module %>.Billing.Payment,
+    <%= module %>.Billing.Usage,
+    <%= module %>.Billing.Entitlement,
+    <%= module %>.Billing.SubscriptionEvent,
+    <%= module %>.Vertical.Record,
+    <%= module %>.Aggregate.RecordCountBySegment
+  ]
+
+  def up do
+    # ---- Billing scope (Stripe-mirror shape) — mounted AS-IS ----
+    create table(:<%= bc %>_customer, primary_key: false) do
+      add(:<%= bc %>_stripe_customer_id, :text)
+      add(:<%= bc %>_status, :text, default: "active")
+      add(:<%= bc %>_currency, :text, default: "USD")
+      add(:<%= bc %>_custom, :map, default: fragment("'{}'::jsonb"))
+      add(:pii_<%= bc %>_billing_name, :text)
+      add(:pii_<%= bc %>_billing_email, :text)
+      add(:<%= bc %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= bc %>_org_id, :uuid, null: false)
+      add(:<%= bc %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= bc %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= bl %>_plan, primary_key: false) do
+      add(:<%= bl %>_name, :text, null: false)
+      add(:<%= bl %>_label, :text)
+      add(:<%= bl %>_description, :text)
+      add(:<%= bl %>_stripe_plan_id, :text)
+      add(:<%= bl %>_interval, :text, default: "monthly")
+      add(:<%= bl %>_enabled, :boolean, default: true)
+      add(:<%= bl %>_features, :map, default: fragment("'{}'::jsonb"))
+      add(:<%= bl %>_custom, :map, default: fragment("'{}'::jsonb"))
+      add(:<%= bl %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= bl %>_org_id, :uuid, null: false)
+      add(:<%= bl %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= bl %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= bp %>_price, primary_key: false) do
+      add(:<%= bp %>_stripe_price_id, :text)
+      add(:<%= bp %>_unit_amount_cents, :integer, null: false)
+      add(:<%= bp %>_currency, :text, null: false, default: "USD")
+      add(:<%= bp %>_interval, :text, default: "monthly")
+      add(:<%= bp %>_active, :boolean, default: true)
+      add(:<%= bp %>_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :<%= bp %>_plan_id,
+        references(:<%= bl %>_plan,
+          column: :<%= bl %>_id,
+          name: "<%= bp %>_price_<%= bp %>_plan_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= bp %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= bp %>_org_id, :uuid, null: false)
+      add(:<%= bp %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= bp %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= bs %>_subscription, primary_key: false) do
+      add(:<%= bs %>_stripe_subscription_id, :text)
+      add(:<%= bs %>_status, :text, default: "active")
+      add(:<%= bs %>_current_period_start, :utc_datetime)
+      add(:<%= bs %>_current_period_end, :utc_datetime)
+      add(:<%= bs %>_trial_end, :utc_datetime)
+      add(:<%= bs %>_cancel_at, :utc_datetime)
+      add(:<%= bs %>_cancelled_at, :utc_datetime)
+      add(:<%= bs %>_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :<%= bs %>_customer_id,
+        references(:<%= bc %>_customer,
+          column: :<%= bc %>_id,
+          name: "<%= bs %>_subscription_<%= bs %>_customer_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :<%= bs %>_plan_id,
+        references(:<%= bl %>_plan,
+          column: :<%= bl %>_id,
+          name: "<%= bs %>_subscription_<%= bs %>_plan_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= bs %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= bs %>_org_id, :uuid, null: false)
+      add(:<%= bs %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= bs %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= bi %>_invoice, primary_key: false) do
+      add(:<%= bi %>_stripe_invoice_id, :text)
+      add(:<%= bi %>_status, :text, default: "draft")
+      add(:<%= bi %>_amount_due_cents, :integer, default: 0)
+      add(:<%= bi %>_amount_paid_cents, :integer, default: 0)
+      add(:<%= bi %>_currency, :text, default: "USD")
+      add(:<%= bi %>_period_start, :utc_datetime)
+      add(:<%= bi %>_period_end, :utc_datetime)
+      add(:<%= bi %>_due_date, :utc_datetime)
+      add(:<%= bi %>_paid_at, :utc_datetime)
+      add(:<%= bi %>_line_items, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:<%= bi %>_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :<%= bi %>_customer_id,
+        references(:<%= bc %>_customer,
+          column: :<%= bc %>_id,
+          name: "<%= bi %>_invoice_<%= bi %>_customer_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :<%= bi %>_subscription_id,
+        references(:<%= bs %>_subscription,
+          column: :<%= bs %>_id,
+          name: "<%= bi %>_invoice_<%= bi %>_subscription_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= bi %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= bi %>_org_id, :uuid, null: false)
+      add(:<%= bi %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= bi %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= by %>_payment, primary_key: false) do
+      add(:<%= by %>_stripe_payment_intent_id, :text)
+      add(:<%= by %>_status, :text, default: "pending")
+      add(:<%= by %>_amount_cents, :integer, null: false)
+      add(:<%= by %>_currency, :text, default: "USD")
+      add(:<%= by %>_payment_method_type, :text, default: "card")
+      add(:<%= by %>_last4, :text)
+      add(:<%= by %>_paid_at, :utc_datetime)
+      add(:<%= by %>_failure_code, :text)
+      add(:<%= by %>_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :<%= by %>_invoice_id,
+        references(:<%= bi %>_invoice,
+          column: :<%= bi %>_id,
+          name: "<%= by %>_payment_<%= by %>_invoice_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :<%= by %>_customer_id,
+        references(:<%= bc %>_customer,
+          column: :<%= bc %>_id,
+          name: "<%= by %>_payment_<%= by %>_customer_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= by %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= by %>_org_id, :uuid, null: false)
+      add(:<%= by %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= by %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= bu %>_usage, primary_key: false) do
+      add(:<%= bu %>_metric, :text, null: false)
+      add(:<%= bu %>_quantity, :integer, default: 0)
+      add(:<%= bu %>_period_start, :utc_datetime)
+      add(:<%= bu %>_period_end, :utc_datetime)
+      add(:<%= bu %>_reported_at, :utc_datetime)
+
+      add(
+        :<%= bu %>_subscription_id,
+        references(:<%= bs %>_subscription,
+          column: :<%= bs %>_id,
+          name: "<%= bu %>_usage_<%= bu %>_subscription_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= bu %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= bu %>_org_id, :uuid, null: false)
+      add(:<%= bu %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= bu %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= be %>_entitlement, primary_key: false) do
+      add(:<%= be %>_feature, :text, null: false)
+      add(:<%= be %>_granted, :boolean, default: true)
+      add(:<%= be %>_expires_at, :utc_datetime)
+      add(:<%= be %>_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :<%= be %>_subscription_id,
+        references(:<%= bs %>_subscription,
+          column: :<%= bs %>_id,
+          name: "<%= be %>_entitlement_<%= be %>_subscription_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :<%= be %>_plan_id,
+        references(:<%= bl %>_plan,
+          column: :<%= bl %>_id,
+          name: "<%= be %>_entitlement_<%= be %>_plan_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= be %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= be %>_org_id, :uuid, null: false)
+      add(:<%= be %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= be %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # ---- Subscription-movement ledger (`mov`; ADR-017) — append-only, no PII,
+    #      soft id refs (no FK: the immutable ledger outlives its subscription row) ----
+    create table(:<%= bv %>_subscription_event, primary_key: false) do
+      add(:<%= bv %>_subscription_id, :uuid, null: false)
+      add(:<%= bv %>_customer_id, :uuid)
+      add(:<%= bv %>_plan_id, :uuid)
+      add(:<%= bv %>_from_plan_id, :uuid)
+      add(:<%= bv %>_kind, :text, null: false)
+      add(:<%= bv %>_mrr_delta_cents, :integer, null: false, default: 0)
+      add(:<%= bv %>_mrr_before_cents, :integer, null: false, default: 0)
+      add(:<%= bv %>_mrr_after_cents, :integer, null: false, default: 0)
+      add(:<%= bv %>_from_status, :text)
+      add(:<%= bv %>_to_status, :text)
+      add(:<%= bv %>_reason, :text, default: "status_change")
+      add(:<%= bv %>_occurred_at, :utc_datetime, null: false)
+      add(:<%= bv %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= bv %>_org_id, :uuid, null: false)
+      add(:<%= bv %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= bv %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # ---- Authored vertical table (the "20%") ----
+    create table(:<%= resource_table %>, primary_key: false) do
+      # Scalar pii_ vault field → column pii_<%= abbrev %>_secret (vt_* token):
+      add(:pii_<%= abbrev %>_secret, :text)
+      add(:<%= abbrev %>_name, :text)
+      add(:<%= abbrev %>_segment, :text)
+      add(:<%= abbrev %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= abbrev %>_org_id, :uuid, null: false)
+      add(:<%= abbrev %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= abbrev %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # ---- Token-blind aggregate projection (no pii_ columns) ----
+    create table(:<%= agg_table %>, primary_key: false) do
+      add(:<%= agg_abbrev %>_segment, :text, null: false)
+      add(:<%= agg_abbrev %>_tenant_count, :integer, default: 0)
+      add(:<%= agg_abbrev %>_record_count, :integer, default: 0)
+      add(:<%= agg_abbrev %>_refreshed_at, :utc_datetime)
+      add(:<%= agg_abbrev %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= agg_abbrev %>_org_id, :uuid)
+      add(:<%= agg_abbrev %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= agg_abbrev %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # ---- catalog every resource in THIS transaction ----
+    catalog_sync(@resources)
+  end
+
+  def down do
+    catalog_sync_down(@resources)
+
+    drop(table(:<%= agg_table %>))
+    drop(table(:<%= resource_table %>))
+
+    drop(table(:<%= bv %>_subscription_event))
+
+    drop(constraint(:<%= be %>_entitlement, "<%= be %>_entitlement_<%= be %>_plan_id_fkey"))
+    drop(constraint(:<%= be %>_entitlement, "<%= be %>_entitlement_<%= be %>_subscription_id_fkey"))
+    drop(table(:<%= be %>_entitlement))
+
+    drop(constraint(:<%= bu %>_usage, "<%= bu %>_usage_<%= bu %>_subscription_id_fkey"))
+    drop(table(:<%= bu %>_usage))
+
+    drop(constraint(:<%= by %>_payment, "<%= by %>_payment_<%= by %>_customer_id_fkey"))
+    drop(constraint(:<%= by %>_payment, "<%= by %>_payment_<%= by %>_invoice_id_fkey"))
+    drop(table(:<%= by %>_payment))
+
+    drop(constraint(:<%= bi %>_invoice, "<%= bi %>_invoice_<%= bi %>_subscription_id_fkey"))
+    drop(constraint(:<%= bi %>_invoice, "<%= bi %>_invoice_<%= bi %>_customer_id_fkey"))
+    drop(table(:<%= bi %>_invoice))
+
+    drop(constraint(:<%= bs %>_subscription, "<%= bs %>_subscription_<%= bs %>_plan_id_fkey"))
+    drop(constraint(:<%= bs %>_subscription, "<%= bs %>_subscription_<%= bs %>_customer_id_fkey"))
+    drop(table(:<%= bs %>_subscription))
+
+    drop(constraint(:<%= bp %>_price, "<%= bp %>_price_<%= bp %>_plan_id_fkey"))
+    drop(table(:<%= bp %>_price))
+
+    drop(table(:<%= bl %>_plan))
+    drop(table(:<%= bc %>_customer))
+  end
+end

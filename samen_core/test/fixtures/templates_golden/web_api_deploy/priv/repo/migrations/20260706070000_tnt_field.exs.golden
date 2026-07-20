@@ -1,0 +1,7 @@
+defmodule Acme.Repo.Migrations.TntField do
+  @moduledoc "Bootstrap the tnt_field table — the Tier-1 tenant custom-field catalog (T3.8)."
+  use Samen.Migration
+
+  def up, do: create_tnt_field_table()
+  def down, do: drop(table(:tnt_field))
+end

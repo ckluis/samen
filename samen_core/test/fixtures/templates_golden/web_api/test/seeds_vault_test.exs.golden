@@ -1,0 +1,55 @@
+defmodule Acme.SeedsVaultTest do
+  @moduledoc """
+  WS-D D4 red path (AC-G4-4): the seed idiom is vault-aware BY CONSTRUCTION.
+
+  `Acme.Seeds.run/0` writes through `Samen.Factory` (the `SampleData` vault
+  path). This test runs the seeds, then scans the RAW domain rows and proves:
+
+    * every seeded 🔒 `secret` column holds a `vt_*` token, NOT the plaintext;
+    * NONE of the seeded plaintext secrets appear anywhere in the domain table.
+
+  Non-vacuity: the assertion names the EXACT plaintext strings the seeds wrote, so a
+  seed that skipped the vault (a raw column write) would leave the plaintext at rest
+  and flip this test to fail. Positive control: the token prefix `vt_` IS present.
+  """
+  use Acme.DataCase, async: false
+
+  alias Acme.Repo
+
+  test "seeded 🔒 secrets are vault-routed — plaintext nowhere at rest" do
+    org_id = Acme.Seeds.run()
+    assert org_id == Acme.Seeds.org_id()
+
+    seeded_plaintexts =
+      Acme.Seeds.records() |> Enum.map(fn {_n, _s, secret} -> secret end)
+
+    # Raw scan of the physical vault column on the domain table for THIS org.
+    org_dumped = Ecto.UUID.dump!(org_id)
+
+    %{rows: rows} =
+      Ecto.Adapters.SQL.query!(
+        Repo,
+        "SELECT pii_acm_secret FROM acm_record " <>
+          "WHERE acm_org_id = $1",
+        [org_dumped]
+      )
+
+    raw_secrets = Enum.map(rows, fn [raw] -> raw end)
+
+    assert length(raw_secrets) == length(seeded_plaintexts),
+           "expected #{length(seeded_plaintexts)} seeded rows, got #{length(raw_secrets)}"
+
+    # Every stored value is a vault token, and NO seeded plaintext leaked.
+    for raw <- raw_secrets do
+      assert is_binary(raw) and String.starts_with?(raw, "vt_"),
+             "seeded secret column holds #{inspect(raw)}, expected a vt_* token — " <>
+               "the seed bypassed the vault (AC-G4-4 violation)"
+
+      for plaintext <- seeded_plaintexts do
+        refute raw == plaintext,
+               "seeded plaintext #{inspect(plaintext)} is at rest in the domain row " <>
+                 "(the seed did NOT route through the vault)"
+      end
+    end
+  end
+end

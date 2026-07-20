@@ -1,0 +1,49 @@
+defmodule <%= module %>.Seeds do
+  @moduledoc """
+  <%= module %> dev-data seeds (WS-D D4 / AC-G4-4), vault-aware BY CONSTRUCTION.
+
+  Seeds write through `Samen.Factory.create!/3` — the SAME `Ash.Changeset.for_create`
+  path a real tenant write takes — so every seeded 🔒 field routes through the
+  `Samen.Vault.Change` chokepoint: the domain row holds a `vt_*` token, `pii_vault`
+  holds the ciphertext, and a raw-SQL scan of the seeded rows finds NO plaintext. No
+  subject-key or reveal boilerplate. This is the shipped `Samen.Web.SampleData` idiom
+  as a runnable seed (matches pawchart's `PawChart.Seeds`).
+
+  Run via `mix <%= otp_app %>.seed` (which starts the app first).
+  """
+
+  alias <%= module %>.Vertical.Record
+
+  # A stable dev tenant org so the seeded rows are addressable on the LiveView URLs
+  # (`?org=<uuid>`) and the JSON:API (a tenant key minted for this org reads them).
+  @org_id "<%= operator_org_id %>"
+
+  @doc """
+  Seed the dev DB with a handful of `<%= module %>.Vertical.Record` rows for the
+  `#{@org_id}` tenant. The 🔒 `secret` field on each is vault-routed. Returns the org id.
+  """
+  @spec run() :: String.t()
+  def run do
+    for {name, segment, secret} <- records() do
+      Samen.Factory.create!(
+        Record,
+        %{org_id: @org_id, name: name, segment: segment, secret: secret},
+        authorize?: false
+      )
+    end
+
+    @org_id
+  end
+
+  @doc "The seed dataset — `{name, segment, 🔒 secret}` tuples."
+  def records do
+    [
+      {"Northwind Record", "alpha", "seed-secret-northwind-01"},
+      {"Contoso Record", "alpha", "seed-secret-contoso-02"},
+      {"Fabrikam Record", "beta", "seed-secret-fabrikam-03"}
+    ]
+  end
+
+  @doc "The dev tenant org id the seeds anchor on."
+  def org_id, do: @org_id
+end

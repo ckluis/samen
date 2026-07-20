@@ -8,7 +8,9 @@
 # binds the claim to real behaviour, end to end, in ONE automated run:
 #
 #   1. GENERATE a fresh app with the FULL running product (web + api + seeds + observability,
-#      all default-ON) into a project-local scratch dir, using FRESH registry-safe abbrevs.
+#      all default-ON) PLUS `--modules files,search,csv,settings` (WS-E: the four ≈0-LOC
+#      framework end-user surfaces + the Samen.UI menu landing), into a project-local scratch
+#      dir, using FRESH registry-safe abbrevs.
 #   2. deps.get + `mix compile --warnings-as-errors` (via Gen.compile_and_dump!/1, which also
 #      dumps the schema.dict + api_contract.v1.json baselines) — ZERO hand-edits.
 #   3. Run the generated app's FULL ci.sh — the entire verifier gate (18 steps incl.
@@ -26,6 +28,8 @@
 #        * /notifications?org=…  → 200                (the WS-A inbox)
 #        * /operator/accounts    → 200                (the ADR-010 operator plane)
 #        * /assets/samen_ui.css  → 200                (the UI kit via samen_web priv)
+#        * /files · /search · /settings · /csv/import/record → 200  (WS-E --modules surfaces)
+#        * /                     → the Samen.UI HomeLive MENU listing every mounted surface
 #        * /api/v1/records       → key-less FAIL-CLOSED (no leak); tenant key → 200 with data;
 #          the un-allowlisted vault secret + org boundary NEVER appear (deny-by-default).
 #   6. TWO SABOTAGES binding the new surfaces to real correctness (non-vacuity):
@@ -121,6 +125,14 @@ end
 IO.puts("== WS-D D6 FLAGSHIP probe (AC-X-1): --web --api --seeds --observability ==")
 IO.puts("app module=#{module} prefix=#{prefix} abbrev=#{resource_abbrev} port=#{http_port}")
 
+# WS-E `--modules`: mount the four ≈0-LOC framework end-user surfaces (files/search/csv over
+# Primitives/Vertical, settings over the Operator Identity namespace) AND surface them as a
+# menu (the Samen.UI HomeLive landing). This binds the `--modules` selection to real behaviour:
+# the mounted routes must serve, and the menu must render — with the full ci.sh still green and
+# a byte-exact registry afterward. (`chat` is deliberately omitted: it is documented-with-
+# prerequisite, not auto-mounted — proven by the unit suite, not this boot probe.)
+selected_modules = "files,search,csv,settings"
+
 spec =
   Gen.build_spec(
     module: module,
@@ -129,6 +141,7 @@ spec =
     target: scratch_parent,
     web: true,
     api: true,
+    modules: selected_modules,
     port: http_port
   )
 
@@ -280,6 +293,25 @@ try do
   check.("/notifications?org=#{org}", nil)
   check.("/operator/accounts", nil)
   check.("/assets/samen_ui.css", nil)
+
+  # --- WS-E `--modules`: the four mounted surface routes serve (dead-render 200) -----------
+  check.("/files?org=#{org}", nil)
+  check.("/search?org=#{org}", nil)
+  check.("/settings?org=#{org}", nil)
+  check.("/csv/import/record?org=#{org}", nil)
+
+  # --- WS-E `--modules`: the MENU renders — the Samen.UI HomeLive landing at `/` lists the
+  #     mounted surfaces as real navigation (the "undocumented as a menu" fix). -------------
+  {menu_code, menu_body} = get.("/")
+  menu_labels = ["Files", "Search", "Settings", "CSV import", "Product"]
+
+  if menu_code == 200 and Enum.all?(menu_labels, &String.contains?(menu_body, &1)) do
+    IO.puts("FLAGSHIP: GET / → 200 Samen.UI menu (HomeLive) lists every mounted surface")
+  else
+    IO.puts("FLAGSHIP FAIL: GET / did not render the --modules menu (code " <> Integer.to_string(menu_code) <> ")")
+    IO.puts(String.slice(menu_body, 0, 2000))
+    System.halt(1)
+  end
 
   # --- The public JSON:API: key-less fail-closed, tenant key serves, deny-by-default ---
   api_org = Ecto.UUID.generate()

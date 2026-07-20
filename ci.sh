@@ -114,52 +114,98 @@ else
   echo "==> Skipping sabotage harness (opt-in: SAMEN_SABOTAGE=1 ./ci.sh replays all gate sabotages)"
 fi
 
-# --- samen_web framework UI library gate (ADR-009) ---
+# --- Independent app/framework gates — RUN CONCURRENTLY (10-core box) -----------------
+# The four vertical/framework gates below are independent (own apps, own test DBs —
+# samen_web_test / demo_test / driftwood_test / pawchart_test — own _build) so they run
+# in PARALLEL to cut wall-clock. HAZARD GUARD: everything above this point (spikes,
+# samen_core, the 3 registry-mutating gen probes, and the opt-in sabotage harness — which
+# patches samen_core/samen_web/demo/pawchart source) is SEQUENTIAL and has already fully
+# completed; nothing below touches the shared abbrev_registry.json or patches source, so
+# concurrency here is race-free.
+#
+# CORRECTNESS CONTRACT (do NOT weaken): a backgrounded command that fails does NOT trip
+# `set -e`. Each gate's stdout+stderr is captured to its own log; each background PID's exit
+# code is collected explicitly with `wait <pid>`; if ANY gate failed we dump its log, print
+# which one, and `exit 1` — never reaching the ALL PASSED line. Each gate's own
+# `==> ... : PASSED` marker(s) print ONLY after that gate's exit code is confirmed 0.
+
 echo ""
-echo "==> Running samen_web gate (compile --warnings-as-errors + two-plane render/masking suite)"
-(
+echo "==> Running app gates CONCURRENTLY: samen_web · demo · driftwood · pawchart"
+
+GATE_LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/samen_ci_gates.XXXXXX")"
+
+# --- samen_web framework UI library gate (ADR-009) ---
+gate_samen_web() {
   cd "$REPO_ROOT/samen_web"
   bash ci.sh
-)
-echo "==> samen_web gate: PASSED"
+}
 
-# --- demo dogfood gate ---
-echo ""
-echo "==> Running demo dogfood tests"
-(
+# --- demo dogfood gate: warnings-as-errors test suite + the 5-verifier CI gate ---
+gate_demo() {
   cd "$REPO_ROOT/demo"
   mix deps.get --quiet
   mix test --warnings-as-errors
-)
-echo "==> demo tests: PASSED"
-
-echo ""
-echo "==> Running demo CI gate (5 verifiers)"
-(
-  cd "$REPO_ROOT/demo"
   MIX_ENV=test bash ci.sh
-)
-echo "==> demo CI gate: PASSED"
+}
 
 # --- Driftwood reference-vertical gate (Phase 5, T5.2) ---
-echo ""
-echo "==> Running Driftwood CI gate (full 19-step verifier gate + crypto-shred game-day)"
-(
+gate_driftwood() {
   cd "$REPO_ROOT/driftwood"
   mix deps.get --quiet
   MIX_ENV=test bash ci.sh
-)
-echo "==> Driftwood CI gate: PASSED"
+}
 
 # --- PawChart second-vertical thin slice gate (Phase 6, T6.2) ---
-echo ""
-echo "==> Running PawChart CI gate (full 17-step verifier gate + microchip anti-tautology probe)"
-(
+gate_pawchart() {
   cd "$REPO_ROOT/pawchart"
   mix deps.get --quiet
   MIX_ENV=test bash ci.sh
+}
+
+# Gate registry: name | function | PASSED marker line(s) to emit on success.
+gate_names=(samen_web demo driftwood pawchart)
+gate_fns=(gate_samen_web gate_demo gate_driftwood gate_pawchart)
+gate_markers=(
+  "==> samen_web gate: PASSED"
+  $'==> demo tests: PASSED\n==> demo CI gate: PASSED'
+  "==> Driftwood CI gate: PASSED"
+  "==> PawChart CI gate: PASSED"
 )
-echo "==> PawChart CI gate: PASSED"
+
+# Launch all four in the background, each redirected to its own per-app log.
+gate_pids=()
+gate_logs=()
+for i in "${!gate_names[@]}"; do
+  log="$GATE_LOG_DIR/${gate_names[$i]}.log"
+  gate_logs+=("$log")
+  "${gate_fns[$i]}" >"$log" 2>&1 &
+  gate_pids+=("$!")
+done
+
+# Collect each background job's exit code EXPLICITLY (set -e will not catch a bg failure).
+gate_failed=0
+for i in "${!gate_names[@]}"; do
+  if wait "${gate_pids[$i]}"; then
+    printf '%s\n' "${gate_markers[$i]}"
+  else
+    code=$?
+    gate_failed=1
+    echo ""
+    echo "==> ${gate_names[$i]} gate: FAILED (exit $code)"
+    echo "==> ----- begin ${gate_names[$i]} log (${gate_logs[$i]}) -----"
+    cat "${gate_logs[$i]}"
+    echo "==> ----- end ${gate_names[$i]} log -----"
+  fi
+done
+
+if [[ "$gate_failed" != 0 ]]; then
+  echo ""
+  echo "==> ROOT CI: FAILED — one or more app gates failed (logs in $GATE_LOG_DIR). NOT all passed."
+  exit 1
+fi
+
+# All four gates confirmed exit 0 — logs no longer needed.
+rm -rf "$GATE_LOG_DIR"
 
 echo ""
 echo "==> ROOT CI: ALL PASSED"

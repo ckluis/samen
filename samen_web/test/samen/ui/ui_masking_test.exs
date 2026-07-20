@@ -67,12 +67,22 @@ defmodule Samen.UI.MaskingTest do
     refute code =~ ".token"
   end
 
-  # The lib source with the leading @moduledoc heredoc removed (everything before
-  # `use Phoenix.Component` is doc/prose).
+  # The kit source with each file's leading @moduledoc heredoc removed (everything
+  # before `use Phoenix.Component` is doc/prose). The kit is now a `Samen.UI` FACADE
+  # over `Samen.UI.*` family submodules, so this scans ui.ex AND every submodule under
+  # lib/samen/ui/ — the code-body scope guard follows the code wherever it lives.
   defp kit_code_only do
-    src = File.read!(Path.join([File.cwd!(), "lib", "samen", "ui.ex"]))
-    [_doc, code] = String.split(src, "use Phoenix.Component", parts: 2)
-    code
+    dir = Path.join([File.cwd!(), "lib", "samen"])
+
+    [Path.join(dir, "ui.ex") | Path.wildcard(Path.join([dir, "ui", "*.ex"]))]
+    |> Enum.map(&File.read!/1)
+    |> Enum.map(fn src ->
+      case String.split(src, "use Phoenix.Component", parts: 2) do
+        [_doc, code] -> code
+        [only] -> only
+      end
+    end)
+    |> Enum.join("\n")
   end
 
   # -- slot builders (a %Masked{} inner block) --------------------------------

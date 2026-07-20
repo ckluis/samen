@@ -35,7 +35,15 @@ defmodule Samen.Gen.DocCommandsTest do
     {"README.md", Path.join(@repo_root, "README.md")},
     {"docs/guides/getting-started.md", Path.join(@repo_root, "docs/guides/getting-started.md")},
     {"docs/guides/cookbook.md", Path.join(@repo_root, "docs/guides/cookbook.md")},
-    {"docs/guides/gate-failures.md", Path.join(@repo_root, "docs/guides/gate-failures.md")}
+    {"docs/guides/gate-failures.md", Path.join(@repo_root, "docs/guides/gate-failures.md")},
+    # DOCS bundle unit additions — brought under the extractor so they can't go silently
+    # uncovered. Both are index/explainer docs (no `bash`/`sh`/`shell`/`console` fences at
+    # the time of writing), so `extract/2` returns [] for them and `verify/2` is trivially
+    # green; adding them here means a FUTURE fenced command in either doc is checked, not
+    # silently skipped.
+    {"docs/README.md", Path.join(@repo_root, "docs/README.md")},
+    {"docs/concepts/two-plane-masking.md",
+     Path.join(@repo_root, "docs/concepts/two-plane-masking.md")}
   ]
 
   # The sources that EXECUTE the documented commands (see DocCommands.rules/0).
@@ -44,13 +52,27 @@ defmodule Samen.Gen.DocCommandsTest do
     post_probe: Path.join(@core_root, "priv/gen_post_probe.exs"),
     gen_app_task: Path.join(@core_root, "lib/mix/tasks/samen.gen.app.ex"),
     gen_engine: Path.join(@core_root, "lib/samen/gen/app.ex"),
-    templates: Path.join(@core_root, "lib/samen/gen/templates.ex")
+    templates: Path.join(@core_root, "lib/samen/gen/templates.ex"),
+    no_plaintext_pii_task:
+      Path.join(@core_root, "lib/mix/tasks/samen.verify.no_plaintext_pii.ex")
   }
 
   defp docs, do: for({name, path} <- @doc_paths, do: {name, File.read!(path)})
 
-  defp sources,
-    do: Map.new(@source_paths, fn {key, path} -> {key, File.read!(path)} end)
+  defp sources do
+    base = Map.new(@source_paths, fn {key, path} -> {key, File.read!(path)} end)
+
+    # The big `Samen.Gen.Templates` emitter bodies are externalized to `priv/templates/*.eex`
+    # (raw-text templates read into the module at compile time). They are still part of what
+    # the generator emits + CI executes, so the `:templates` corpus = the module source PLUS
+    # its externalized bodies. Evidence strings living in a `.eex` body count as covered.
+    eex_bodies =
+      Path.join(@core_root, "priv/templates/*.eex")
+      |> Path.wildcard()
+      |> Enum.map_join("\n", &File.read!/1)
+
+    Map.update!(base, :templates, &(&1 <> "\n" <> eex_bodies))
+  end
 
   defp extracted do
     Enum.flat_map(docs(), fn {name, md} -> DocCommands.extract(name, md) end)

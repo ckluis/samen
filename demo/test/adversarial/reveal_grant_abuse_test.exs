@@ -327,6 +327,11 @@ defmodule Demo.Adversarial.RevealGrantAbuseTest do
 
   # A tiny guard so RevealAudit is referenced (compile-time alias hygiene).
   test "the reveal audit schema is the tenant-readable trail" do
+    # Force the module to load before probing its exports: `function_exported?/3`
+    # returns false for a not-yet-loaded module, so under a concurrent/async run this
+    # assertion was order-dependent. Loading first makes it deterministic without
+    # weakening what it proves (RevealAudit is a schema exporting __schema__/1).
+    assert {:module, RevealAudit} = Code.ensure_loaded(RevealAudit)
     assert function_exported?(RevealAudit, :__schema__, 1)
   end
 end

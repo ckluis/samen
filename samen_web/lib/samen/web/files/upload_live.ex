@@ -69,7 +69,11 @@ defmodule Samen.Web.Files.UploadLive do
 
     socket =
       socket
-      |> assign(org_id: org_id, upload_result: nil, upload_error: nil)
+      # `upload_ref` is a CONSTANT the render reads (`@uploads[@upload_ref]`); assign it in
+      # mount so the DISCONNECTED dead render (a JS-less host — the generated app ships no
+      # asset pipeline, ADR-022) resolves it instead of raising `key :upload_ref not found`.
+      # `@uploads` itself is supplied by `allow_upload/3` below on both the dead + live renders.
+      |> assign(org_id: org_id, upload_result: nil, upload_error: nil, upload_ref: @upload_ref)
       |> allow_upload(@upload_ref,
         accept: :any,
         max_entries: 1,

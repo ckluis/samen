@@ -1,0 +1,138 @@
+defmodule <%= module %>.ApiCase do
+  @moduledoc """
+  Test helpers for the public JSON:API (WS-D D3). Seeds org-scoped records + api_keys
+  (the two classes, minted through the operator Identity mount) and drives the
+  `<%= module %>Web.Api.Endpoint` pipeline (key-auth → page-limit clamp → AshJsonApi
+  router) via `Plug.Test`.
+
+  Requests are driven with the FULL `/api/v1/…` request path (the AshJsonApi router
+  carries `prefix: "/api/v1"` and matches on the request path), so the versioned
+  external contract a tenant integrates against is exercised end-to-end.
+  """
+  use ExUnit.CaseTemplate
+
+  using do
+    quote do
+      import Plug.Conn
+      import Plug.Test
+      import <%= module %>.ApiCase
+    end
+  end
+
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(<%= module %>.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(<%= module %>.Repo, {:shared, self()})
+    :ok
+  end
+
+  # --- seeding -------------------------------------------------------------
+
+  def mk_org, do: Ecto.UUID.generate()
+
+  @doc """
+  Seed an authored Record in `org_id`. `secret` defaults to a recognizable plaintext
+  so the masked/absent assertions are unambiguous.
+  """
+  def mk_record(org_id, attrs \\ %{}) do
+    base = %{
+      org_id: org_id,
+      name: Map.get(attrs, :name, "Record"),
+      segment: Map.get(attrs, :segment, "alpha"),
+      secret: Map.get(attrs, :secret, "SECRET-CLEAR-#{System.unique_integer([:positive])}")
+    }
+
+    {:ok, record} =
+      <%= module %>.Vertical.Record
+      |> Ash.Changeset.for_create(:create, base)
+      |> Ash.create(authorize?: false)
+
+    record
+  end
+
+  def mk_user(org_id, handle) do
+    {:ok, user} =
+      <%= module %>.Operator.User
+      |> Ash.Changeset.for_create(:create, %{
+        handle: handle,
+        org_id: org_id,
+        full_name: %{first: handle, last: "L"},
+        emails: ["#{handle}@example.com"]
+      })
+      |> Ash.create(authorize?: false)
+
+    user
+  end
+
+  def mk_membership(org_id, user_id, role \\ :admin) do
+    {:ok, mbr} =
+      <%= module %>.Operator.Membership
+      |> Ash.Changeset.for_create(:create, %{role: role, org_id: org_id, user_id: user_id})
+      |> Ash.create(authorize?: false)
+
+    mbr
+  end
+
+  @doc """
+  Mint an api_key and return `{raw_key, key_row}`. `plane` is `:tenant | :operator`.
+  Creates a backing user + membership in `org_id` so the auth resolver can load the
+  minter's org boundary.
+  """
+  def mk_api_key(org_id, opts \\ []) do
+    plane = Keyword.get(opts, :plane, :tenant)
+    minter_role = Keyword.get(opts, :minter_role, :admin)
+    scopes = Keyword.get(opts, :scopes, %{"vertical" => ["read"]})
+
+    user = mk_user(org_id, "keymaster-#{System.unique_integer([:positive])}")
+    mbr = mk_membership(org_id, user.id, minter_role)
+
+    raw = "sk_" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
+    digest = <%= module %>Web.Api.KeyAuthPlug.digest(raw)
+
+    {:ok, key} =
+      <%= module %>.Operator.ApiKey
+      |> Ash.Changeset.for_create(:create, %{
+        plane: plane,
+        scopes: scopes,
+        minter_role: minter_role,
+        org_id: org_id,
+        membership_id: mbr.id
+      })
+      # token_digest is public?: false (a credential digest, not tenant input), so it
+      # is not accepted by `create: :*`. Force-change it as the mint step would.
+      |> Ash.Changeset.force_change_attribute(:token_digest, digest)
+      |> Ash.create(authorize?: false)
+
+    {raw, key}
+  end
+
+  # --- driving -------------------------------------------------------------
+
+  @doc """
+  GET the versioned public API at `/api/v1<path>` (JSON:API), optionally with a bearer
+  `key`. Drives the `<%= module %>Web.Api.Endpoint` pipeline.
+  """
+  def api_get(path, key \\ nil) do
+    conn =
+      Plug.Test.conn(:get, "/api/v1" <> path)
+      |> Plug.Conn.put_req_header("accept", "application/vnd.api+json")
+
+    conn =
+      if key,
+        do: Plug.Conn.put_req_header(conn, "authorization", "Bearer " <> key),
+        else: conn
+
+    # Simulate the host router's `forward("/api/v1", …)`: it STRIPS the `/api/v1`
+    # prefix into `script_name` before the AshJsonApi endpoint sees the request, so
+    # the AshJsonApi router (prefix "/api/v1") matches the declared route
+    # (`/records`). `Plug.Test.conn` has already split the query string off
+    # `path_info`, so dropping the first two segments is query-safe. This exercises
+    # the SAME endpoint pipeline (key-auth → clamp → AshJsonApi) a real forwarded
+    # request hits; `request_path` still carries the full `/api/v1/…` contract.
+    conn = %{conn | script_name: ["api", "v1"], path_info: Enum.drop(conn.path_info, 2)}
+
+    <%= module %>Web.Api.Endpoint.call(conn, <%= module %>Web.Api.Endpoint.init([]))
+  end
+
+  @doc "Decode a JSON:API response body to a map."
+  def json(conn), do: Jason.decode!(conn.resp_body)
+end

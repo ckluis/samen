@@ -77,7 +77,8 @@ Two apps are the substrate; three are proof; one command spins up new ones.
   call at roughly zero authored LOC.
 
 The full design story lives in [index.html](index.html) (open it in
-a browser) and in the 30 ADRs under [docs/adr/](docs/adr/).
+a browser) and in the 33 ADRs under [docs/adr/](docs/adr/) (indexed in
+[docs/adr/README.md](docs/adr/README.md)).
 
 ## The verification story
 
@@ -178,6 +179,7 @@ command in this README and that tutorial is verified against the CI probes' exec
 
 ## Docs
 
+- [Docs index](docs/README.md) — the front door to everything under `docs/`, grouped
 - [Getting started — zero to first feature](docs/guides/getting-started.md)
 - [Cookbook](docs/guides/cookbook.md) — task recipes
 - [Gate-failure index](docs/guides/gate-failures.md) — what each gate step means when it goes red

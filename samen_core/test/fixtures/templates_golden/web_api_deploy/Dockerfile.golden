@@ -1,0 +1,63 @@
+# Acme — production image (WS-D D10 / ADR-024). Two-stage mix release build.
+#
+# NOTE: this app depends on samen_core (+ samen_web) via `{:_, path: "..."}`, so the
+# Docker BUILD CONTEXT must be the monorepo root that contains samen_core/, samen_web/,
+# and acme/ — not the app dir alone. See docs/runbooks/deploy.md §"Build context".
+# FAIL-HONEST: this Dockerfile is structurally correct but is NOT built in CI and does
+# not imply a live image; the operator builds + pushes it (an OPERATOR-TODO in the runbook).
+
+# Versions match the repo's gated toolchain (spikes/s00_smoke/VERSIONS.md) —
+# keep in sync when the toolchain moves (D9/D10 gate P2).
+ARG ELIXIR_VERSION=1.20.2
+ARG OTP_VERSION=29.0
+ARG DEBIAN_VERSION=bookworm-20250203-slim
+
+ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
+ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+
+FROM ${BUILDER_IMAGE} AS builder
+
+RUN apt-get update -y \
+  && apt-get install -y build-essential git \
+  && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+WORKDIR /build
+
+ENV MIX_ENV="prod"
+
+RUN mix local.hex --force && mix local.rebar --force
+
+# The path deps must be present in the build context (monorepo root).
+COPY samen_core samen_core
+COPY samen_web samen_web
+COPY acme acme
+
+WORKDIR /build/acme
+
+RUN mix deps.get --only prod
+RUN mix deps.compile
+RUN mix compile
+
+# config/runtime.exs is evaluated at BOOT (not build) — it is copied into the release.
+RUN mix release
+
+# ---- runtime image ----
+FROM ${RUNNER_IMAGE}
+
+RUN apt-get update -y \
+  && apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates \
+  && apt-get clean && rm -f /var/lib/apt/lists/*_*
+
+RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
+ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
+
+WORKDIR /app
+RUN chown nobody /app
+
+ENV MIX_ENV="prod"
+
+COPY --from=builder --chown=nobody:root /build/acme/_build/prod/rel/acme ./
+
+USER nobody
+
+CMD ["/app/bin/acme", "start"]

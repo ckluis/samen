@@ -46,7 +46,7 @@ defmodule Driftwood.MixProject do
       {:bandit, "~> 1.0"},
       {:phoenix_pubsub, "~> 2.1"},
       {:jason, "~> 1.4"},
-      {:stream_data, "~> 1.3"},
+      {:stream_data, "== 1.3.0"},
       {:simple_sat, "~> 0.1"},
       {:ash_json_api, "~> 1.7"}
     ]

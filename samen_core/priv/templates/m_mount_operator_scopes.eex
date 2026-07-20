@@ -1,0 +1,617 @@
+defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
+  @moduledoc """
+  Mounts the OPERATOR namespace (ADR-010 §8.2) into the host's one Postgres: a SECOND
+  mount of Identity + Billing + Support whose rows describe the SaaS company's OWN
+  book of business — its tenant-org ACCOUNTS, their tenant-ADMINS (PII the SaaS owns,
+  CLEAR), each tenant's subscription-to-the-SaaS (incl. the ADR-017 movement ledger),
+  and the tickets tenants file WITH the SaaS. Mirrors driftwood's
+  `mount_operator_scopes`. Catalogued in the SAME transaction (ADR-004 catalog-in-tx).
+
+  PII columns hold vault `vt_*` tokens (plaintext never lands here):
+    * `<%= o_user %>_user.<%= o_user %>_full_name` / `.<%= o_user %>_emails`
+    * `<%= o_cus %>_customer.pii_<%= o_cus %>_billing_name` / `.pii_<%= o_cus %>_billing_email`
+    * `<%= o_agent %>_agent.<%= o_agent %>_full_name` / `.pii_<%= o_agent %>_email`,
+      `<%= o_msg %>_message.pii_<%= o_msg %>_body`
+  """
+  use Samen.Migration
+
+  @resources [
+    # Identity (operator: accounts + admins)
+    <%= module %>.Operator.Org,
+    <%= module %>.Operator.User,
+    <%= module %>.Operator.Membership,
+    <%= module %>.Operator.Role,
+    <%= module %>.Operator.ApiKey,
+    <%= module %>.Operator.Invitation,
+    # Billing (operator: tenant subscriptions-to-the-SaaS + the movement ledger)
+    <%= module %>.Operator.Customer,
+    <%= module %>.Operator.Subscription,
+    <%= module %>.Operator.Plan,
+    <%= module %>.Operator.Price,
+    <%= module %>.Operator.Invoice,
+    <%= module %>.Operator.Payment,
+    <%= module %>.Operator.Usage,
+    <%= module %>.Operator.Entitlement,
+    <%= module %>.Operator.SubscriptionEvent,
+    # Support (operator: tenant-filed desk tickets)
+    <%= module %>.Operator.Sla,
+    <%= module %>.Operator.Ticket,
+    <%= module %>.Operator.Conversation,
+    <%= module %>.Operator.Agent,
+    <%= module %>.Operator.Message,
+    <%= module %>.Operator.Macro,
+    <%= module %>.Operator.Csat
+  ]
+
+  def up do
+    # =====================================================================
+    # IDENTITY — accounts (Org) + admins (User) + membership + role/key/invite
+    # =====================================================================
+
+    # --- <%= o_org %>_org : the tenant anchor. Here: an ACCOUNT (a tenant org
+    #     mirrored). The slug carries the tenant_org_id back-reference (Bridge-B). ---
+    create table(:<%= o_org %>_org, primary_key: false) do
+      add(:<%= o_org %>_name, :text, null: false)
+      add(:<%= o_org %>_slug, :text)
+      add(:<%= o_org %>_plan, :text, default: "free")
+      add(:<%= o_org %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_org %>_org_id, :uuid)
+      add(:<%= o_org %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_org %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- <%= o_user %>_user : the tenant-ADMIN 🔒 (full_name/emails vault-routed) ---
+    create table(:<%= o_user %>_user, primary_key: false) do
+      add(:<%= o_user %>_handle, :text)
+      add(:<%= o_user %>_status, :text, default: "active")
+      add(:<%= o_user %>_full_name, :text)
+      add(:<%= o_user %>_emails, :text)
+      add(:<%= o_user %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_user %>_org_id, :uuid, null: false)
+      add(:<%= o_user %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_user %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- <%= o_mem %>_membership : (user, org, role) ---
+    create table(:<%= o_mem %>_membership, primary_key: false) do
+      add(:<%= o_mem %>_role, :text, default: "member")
+      add(:<%= o_mem %>_status, :text, default: "active")
+
+      add(
+        :<%= o_mem %>_user_id,
+        references(:<%= o_user %>_user,
+          column: :<%= o_user %>_id,
+          name: "<%= o_mem %>_membership_<%= o_mem %>_user_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_mem %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_mem %>_org_id, :uuid, null: false)
+      add(:<%= o_mem %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_mem %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- <%= o_role %>_role : Tier-0 config rows (per-org role catalog) ---
+    create table(:<%= o_role %>_role, primary_key: false) do
+      add(:<%= o_role %>_name, :text, null: false)
+      add(:<%= o_role %>_label, :text)
+      add(:<%= o_role %>_rank, :integer, null: false)
+      add(:<%= o_role %>_enabled, :boolean, default: true)
+      add(:<%= o_role %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_role %>_org_id, :uuid, null: false)
+      add(:<%= o_role %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_role %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- <%= o_key %>_api_key : scoped credential (two planes) ---
+    create table(:<%= o_key %>_api_key, primary_key: false) do
+      add(:<%= o_key %>_token_digest, :text, null: false)
+      add(:<%= o_key %>_plane, :text, null: false, default: "tenant")
+      add(:<%= o_key %>_scopes, :map, default: fragment("'{}'::jsonb"))
+      add(:<%= o_key %>_minter_role, :text)
+      add(:<%= o_key %>_revoked_at, :utc_datetime)
+      # F3.4 — bounded API-key expiry (deny-on-read) + last-use observability.
+      add(:<%= o_key %>_expires_at, :utc_datetime)
+      add(:<%= o_key %>_last_used_at, :utc_datetime)
+
+      add(
+        :<%= o_key %>_membership_id,
+        references(:<%= o_mem %>_membership,
+          column: :<%= o_mem %>_id,
+          name: "<%= o_key %>_api_key_<%= o_key %>_membership_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_key %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_key %>_org_id, :uuid, null: false)
+      add(:<%= o_key %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_key %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- <%= o_invite %>_invitation : a pending invite 🔒 (email vault-routed) ---
+    create table(:<%= o_invite %>_invitation, primary_key: false) do
+      add(:<%= o_invite %>_role, :text, default: "member")
+      add(:<%= o_invite %>_status, :text, default: "pending")
+      add(:<%= o_invite %>_accept_token, :text)
+      add(:<%= o_invite %>_email, :text)
+      add(:<%= o_invite %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_invite %>_org_id, :uuid, null: false)
+      add(:<%= o_invite %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_invite %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # =====================================================================
+    # BILLING — each tenant's subscription TO the SaaS
+    # =====================================================================
+
+    create table(:<%= o_cus %>_customer, primary_key: false) do
+      add(:<%= o_cus %>_stripe_customer_id, :text)
+      add(:<%= o_cus %>_status, :text, default: "active")
+      add(:<%= o_cus %>_currency, :text, default: "USD")
+      add(:<%= o_cus %>_custom, :map, default: fragment("'{}'::jsonb"))
+      add(:pii_<%= o_cus %>_billing_name, :text)
+      add(:pii_<%= o_cus %>_billing_email, :text)
+      add(:<%= o_cus %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_cus %>_org_id, :uuid, null: false)
+      add(:<%= o_cus %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_cus %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= o_plan %>_plan, primary_key: false) do
+      add(:<%= o_plan %>_name, :text, null: false)
+      add(:<%= o_plan %>_label, :text)
+      add(:<%= o_plan %>_description, :text)
+      add(:<%= o_plan %>_stripe_plan_id, :text)
+      add(:<%= o_plan %>_interval, :text, default: "monthly")
+      add(:<%= o_plan %>_enabled, :boolean, default: true)
+      add(:<%= o_plan %>_features, :map, default: fragment("'{}'::jsonb"))
+      add(:<%= o_plan %>_custom, :map, default: fragment("'{}'::jsonb"))
+      add(:<%= o_plan %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_plan %>_org_id, :uuid, null: false)
+      add(:<%= o_plan %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_plan %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= o_price %>_price, primary_key: false) do
+      add(:<%= o_price %>_stripe_price_id, :text)
+      add(:<%= o_price %>_unit_amount_cents, :integer, null: false)
+      add(:<%= o_price %>_currency, :text, null: false, default: "USD")
+      add(:<%= o_price %>_interval, :text, default: "monthly")
+      add(:<%= o_price %>_active, :boolean, default: true)
+      add(:<%= o_price %>_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :<%= o_price %>_plan_id,
+        references(:<%= o_plan %>_plan,
+          column: :<%= o_plan %>_id,
+          name: "<%= o_price %>_price_<%= o_price %>_plan_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_price %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_price %>_org_id, :uuid, null: false)
+      add(:<%= o_price %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_price %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= o_sub %>_subscription, primary_key: false) do
+      add(:<%= o_sub %>_stripe_subscription_id, :text)
+      add(:<%= o_sub %>_status, :text, default: "active")
+      add(:<%= o_sub %>_current_period_start, :utc_datetime)
+      add(:<%= o_sub %>_current_period_end, :utc_datetime)
+      add(:<%= o_sub %>_trial_end, :utc_datetime)
+      add(:<%= o_sub %>_cancel_at, :utc_datetime)
+      add(:<%= o_sub %>_cancelled_at, :utc_datetime)
+      add(:<%= o_sub %>_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :<%= o_sub %>_customer_id,
+        references(:<%= o_cus %>_customer,
+          column: :<%= o_cus %>_id,
+          name: "<%= o_sub %>_subscription_<%= o_sub %>_customer_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :<%= o_sub %>_plan_id,
+        references(:<%= o_plan %>_plan,
+          column: :<%= o_plan %>_id,
+          name: "<%= o_sub %>_subscription_<%= o_sub %>_plan_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_sub %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_sub %>_org_id, :uuid, null: false)
+      add(:<%= o_sub %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_sub %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= o_invoice %>_invoice, primary_key: false) do
+      add(:<%= o_invoice %>_stripe_invoice_id, :text)
+      add(:<%= o_invoice %>_status, :text, default: "draft")
+      add(:<%= o_invoice %>_amount_due_cents, :integer, default: 0)
+      add(:<%= o_invoice %>_amount_paid_cents, :integer, default: 0)
+      add(:<%= o_invoice %>_currency, :text, default: "USD")
+      add(:<%= o_invoice %>_period_start, :utc_datetime)
+      add(:<%= o_invoice %>_period_end, :utc_datetime)
+      add(:<%= o_invoice %>_due_date, :utc_datetime)
+      add(:<%= o_invoice %>_paid_at, :utc_datetime)
+      add(:<%= o_invoice %>_line_items, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:<%= o_invoice %>_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :<%= o_invoice %>_customer_id,
+        references(:<%= o_cus %>_customer,
+          column: :<%= o_cus %>_id,
+          name: "<%= o_invoice %>_invoice_<%= o_invoice %>_customer_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :<%= o_invoice %>_subscription_id,
+        references(:<%= o_sub %>_subscription,
+          column: :<%= o_sub %>_id,
+          name: "<%= o_invoice %>_invoice_<%= o_invoice %>_subscription_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_invoice %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_invoice %>_org_id, :uuid, null: false)
+      add(:<%= o_invoice %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_invoice %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= o_pay %>_payment, primary_key: false) do
+      add(:<%= o_pay %>_stripe_payment_intent_id, :text)
+      add(:<%= o_pay %>_status, :text, default: "pending")
+      add(:<%= o_pay %>_amount_cents, :integer, null: false)
+      add(:<%= o_pay %>_currency, :text, default: "USD")
+      add(:<%= o_pay %>_payment_method_type, :text, default: "card")
+      add(:<%= o_pay %>_last4, :text)
+      add(:<%= o_pay %>_paid_at, :utc_datetime)
+      add(:<%= o_pay %>_failure_code, :text)
+      add(:<%= o_pay %>_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :<%= o_pay %>_invoice_id,
+        references(:<%= o_invoice %>_invoice,
+          column: :<%= o_invoice %>_id,
+          name: "<%= o_pay %>_payment_<%= o_pay %>_invoice_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :<%= o_pay %>_customer_id,
+        references(:<%= o_cus %>_customer,
+          column: :<%= o_cus %>_id,
+          name: "<%= o_pay %>_payment_<%= o_pay %>_customer_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_pay %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_pay %>_org_id, :uuid, null: false)
+      add(:<%= o_pay %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_pay %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= o_usage %>_usage, primary_key: false) do
+      add(:<%= o_usage %>_metric, :text, null: false)
+      add(:<%= o_usage %>_quantity, :integer, default: 0)
+      add(:<%= o_usage %>_period_start, :utc_datetime)
+      add(:<%= o_usage %>_period_end, :utc_datetime)
+      add(:<%= o_usage %>_reported_at, :utc_datetime)
+
+      add(
+        :<%= o_usage %>_subscription_id,
+        references(:<%= o_sub %>_subscription,
+          column: :<%= o_sub %>_id,
+          name: "<%= o_usage %>_usage_<%= o_usage %>_subscription_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_usage %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_usage %>_org_id, :uuid, null: false)
+      add(:<%= o_usage %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_usage %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= o_ent %>_entitlement, primary_key: false) do
+      add(:<%= o_ent %>_feature, :text, null: false)
+      add(:<%= o_ent %>_granted, :boolean, default: true)
+      add(:<%= o_ent %>_expires_at, :utc_datetime)
+      add(:<%= o_ent %>_custom, :map, default: fragment("'{}'::jsonb"))
+
+      add(
+        :<%= o_ent %>_subscription_id,
+        references(:<%= o_sub %>_subscription,
+          column: :<%= o_sub %>_id,
+          name: "<%= o_ent %>_entitlement_<%= o_ent %>_subscription_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(
+        :<%= o_ent %>_plan_id,
+        references(:<%= o_plan %>_plan,
+          column: :<%= o_plan %>_id,
+          name: "<%= o_ent %>_entitlement_<%= o_ent %>_plan_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_ent %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_ent %>_org_id, :uuid, null: false)
+      add(:<%= o_ent %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_ent %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- Subscription-movement ledger (`mov`; ADR-017) — append-only, no PII,
+    #     soft id refs (no FK: the immutable ledger outlives its subscription row) ---
+    create table(:<%= o_sev %>_subscription_event, primary_key: false) do
+      add(:<%= o_sev %>_subscription_id, :uuid, null: false)
+      add(:<%= o_sev %>_customer_id, :uuid)
+      add(:<%= o_sev %>_plan_id, :uuid)
+      add(:<%= o_sev %>_from_plan_id, :uuid)
+      add(:<%= o_sev %>_kind, :text, null: false)
+      add(:<%= o_sev %>_mrr_delta_cents, :integer, null: false, default: 0)
+      add(:<%= o_sev %>_mrr_before_cents, :integer, null: false, default: 0)
+      add(:<%= o_sev %>_mrr_after_cents, :integer, null: false, default: 0)
+      add(:<%= o_sev %>_from_status, :text)
+      add(:<%= o_sev %>_to_status, :text)
+      add(:<%= o_sev %>_reason, :text, default: "status_change")
+      add(:<%= o_sev %>_occurred_at, :utc_datetime, null: false)
+      add(:<%= o_sev %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_sev %>_org_id, :uuid, null: false)
+      add(:<%= o_sev %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_sev %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # =====================================================================
+    # SUPPORT — the SaaS help desk (tenants file tickets WITH the SaaS)
+    # =====================================================================
+
+    create table(:<%= o_sla %>_sla, primary_key: false) do
+      add(:<%= o_sla %>_name, :text, null: false)
+      add(:<%= o_sla %>_label, :text)
+      add(:<%= o_sla %>_first_response_minutes, :integer, default: 60)
+      add(:<%= o_sla %>_resolve_minutes, :integer, default: 480)
+      add(:<%= o_sla %>_priority, :text, default: "normal")
+      add(:<%= o_sla %>_enabled, :boolean, default: true)
+      add(:<%= o_sla %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_sla %>_org_id, :uuid, null: false)
+      add(:<%= o_sla %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_sla %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # The ticket's custom bag carries the requester back-references
+    # (`requester_org_id` → account Org, `requester_user_id` → tenant-admin User).
+    create table(:<%= o_tick %>_ticket, primary_key: false) do
+      add(:<%= o_tick %>_subject, :text, null: false)
+      add(:<%= o_tick %>_status, :text, default: "open")
+      add(:<%= o_tick %>_priority, :text, default: "normal")
+      add(:<%= o_tick %>_sla_breach_at, :utc_datetime)
+      add(:<%= o_tick %>_breached, :boolean, default: false, null: false)
+      add(:<%= o_tick %>_resolved_at, :utc_datetime)
+      add(:<%= o_tick %>_closed_at, :utc_datetime)
+      add(:<%= o_tick %>_tags, {:array, :text}, default: [])
+      add(:<%= o_tick %>_custom, :map, default: fragment("'{}'::jsonb"))
+      add(:<%= o_tick %>_external_id, :text)
+
+      add(
+        :<%= o_tick %>_sla_id,
+        references(:<%= o_sla %>_sla,
+          column: :<%= o_sla %>_id,
+          name: "<%= o_tick %>_ticket_<%= o_tick %>_sla_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_tick %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_tick %>_org_id, :uuid, null: false)
+      add(:<%= o_tick %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_tick %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create(
+      index(:<%= o_tick %>_ticket, [:<%= o_tick %>_sla_breach_at, :<%= o_tick %>_breached],
+        name: "<%= o_tick %>_ticket_sla_breach_idx",
+        where: "<%= o_tick %>_sla_breach_at IS NOT NULL AND <%= o_tick %>_breached = false"
+      )
+    )
+
+    create table(:<%= o_conv %>_conversation, primary_key: false) do
+      add(:<%= o_conv %>_channel, :text, default: "email")
+      add(:<%= o_conv %>_status, :text, default: "open")
+      add(:<%= o_conv %>_subject, :text)
+
+      add(
+        :<%= o_conv %>_ticket_id,
+        references(:<%= o_tick %>_ticket,
+          column: :<%= o_tick %>_id,
+          name: "<%= o_conv %>_conversation_<%= o_conv %>_ticket_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(:<%= o_conv %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_conv %>_org_id, :uuid, null: false)
+      add(:<%= o_conv %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_conv %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # The SaaS support AGENT 🔒 (the SaaS's own employee — CLEAR on its own plane).
+    create table(:<%= o_agent %>_agent, primary_key: false) do
+      add(:<%= o_agent %>_handle, :text)
+      add(:<%= o_agent %>_status, :text, default: "active")
+      add(:<%= o_agent %>_role, :text, default: "agent")
+      add(:<%= o_agent %>_external_id, :text)
+      add(:<%= o_agent %>_timezone, :text)
+      add(:<%= o_agent %>_custom, :map, default: fragment("'{}'::jsonb"))
+      add(:<%= o_agent %>_full_name, :text)
+      add(:pii_<%= o_agent %>_email, :text)
+      add(:<%= o_agent %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_agent %>_org_id, :uuid, null: false)
+      add(:<%= o_agent %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_agent %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= o_msg %>_message, primary_key: false) do
+      add(:<%= o_msg %>_sender_type, :text, default: "customer")
+      add(:<%= o_msg %>_sender_id, :uuid)
+      add(:<%= o_msg %>_message_type, :text, default: "reply")
+      add(:<%= o_msg %>_attachments, {:array, :text}, default: [])
+      add(:<%= o_msg %>_created_via, :text, default: "web")
+      add(:pii_<%= o_msg %>_body, :text)
+
+      add(
+        :<%= o_msg %>_conversation_id,
+        references(:<%= o_conv %>_conversation,
+          column: :<%= o_conv %>_id,
+          name: "<%= o_msg %>_message_<%= o_msg %>_conversation_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(
+        :<%= o_msg %>_agent_id,
+        references(:<%= o_agent %>_agent,
+          column: :<%= o_agent %>_id,
+          name: "<%= o_msg %>_message_<%= o_msg %>_agent_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_msg %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_msg %>_org_id, :uuid, null: false)
+      add(:<%= o_msg %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_msg %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= o_macro %>_macro, primary_key: false) do
+      add(:<%= o_macro %>_name, :text, null: false)
+      add(:<%= o_macro %>_description, :text)
+      add(:<%= o_macro %>_body_template, :text)
+      add(:<%= o_macro %>_tags, {:array, :text}, default: [])
+      add(:<%= o_macro %>_enabled, :boolean, default: true)
+      add(:<%= o_macro %>_category, :text)
+      add(:<%= o_macro %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_macro %>_org_id, :uuid, null: false)
+      add(:<%= o_macro %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_macro %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create table(:<%= o_csat %>_csat, primary_key: false) do
+      add(:<%= o_csat %>_score, :integer, null: false)
+      add(:<%= o_csat %>_comments, :text)
+      add(:<%= o_csat %>_channel, :text, default: "email")
+      add(:<%= o_csat %>_responded_at, :utc_datetime)
+
+      add(
+        :<%= o_csat %>_ticket_id,
+        references(:<%= o_tick %>_ticket,
+          column: :<%= o_tick %>_id,
+          name: "<%= o_csat %>_csat_<%= o_csat %>_ticket_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(
+        :<%= o_csat %>_agent_id,
+        references(:<%= o_agent %>_agent,
+          column: :<%= o_agent %>_id,
+          name: "<%= o_csat %>_csat_<%= o_csat %>_agent_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_csat %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_csat %>_org_id, :uuid, null: false)
+      add(:<%= o_csat %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_csat %>_updated_at, :utc_datetime, null: false)
+    end
+
+    catalog_sync(@resources)
+  end
+
+  def down do
+    catalog_sync_down(@resources)
+
+    # --- Support (reverse FK order) ---
+    drop(constraint(:<%= o_csat %>_csat, "<%= o_csat %>_csat_<%= o_csat %>_agent_id_fkey"))
+    drop(constraint(:<%= o_csat %>_csat, "<%= o_csat %>_csat_<%= o_csat %>_ticket_id_fkey"))
+    drop(table(:<%= o_csat %>_csat))
+    drop(table(:<%= o_macro %>_macro))
+    drop(constraint(:<%= o_msg %>_message, "<%= o_msg %>_message_<%= o_msg %>_agent_id_fkey"))
+    drop(constraint(:<%= o_msg %>_message, "<%= o_msg %>_message_<%= o_msg %>_conversation_id_fkey"))
+    drop(table(:<%= o_msg %>_message))
+    drop(table(:<%= o_agent %>_agent))
+    drop(constraint(:<%= o_conv %>_conversation, "<%= o_conv %>_conversation_<%= o_conv %>_ticket_id_fkey"))
+    drop(table(:<%= o_conv %>_conversation))
+    drop(index(:<%= o_tick %>_ticket, [:<%= o_tick %>_sla_breach_at, :<%= o_tick %>_breached], name: "<%= o_tick %>_ticket_sla_breach_idx"))
+    drop(constraint(:<%= o_tick %>_ticket, "<%= o_tick %>_ticket_<%= o_tick %>_sla_id_fkey"))
+    drop(table(:<%= o_tick %>_ticket))
+    drop(table(:<%= o_sla %>_sla))
+
+    # --- Billing (reverse FK order; ledger has no FKs) ---
+    drop(table(:<%= o_sev %>_subscription_event))
+    drop(constraint(:<%= o_ent %>_entitlement, "<%= o_ent %>_entitlement_<%= o_ent %>_plan_id_fkey"))
+    drop(constraint(:<%= o_ent %>_entitlement, "<%= o_ent %>_entitlement_<%= o_ent %>_subscription_id_fkey"))
+    drop(table(:<%= o_ent %>_entitlement))
+    drop(constraint(:<%= o_usage %>_usage, "<%= o_usage %>_usage_<%= o_usage %>_subscription_id_fkey"))
+    drop(table(:<%= o_usage %>_usage))
+    drop(constraint(:<%= o_pay %>_payment, "<%= o_pay %>_payment_<%= o_pay %>_customer_id_fkey"))
+    drop(constraint(:<%= o_pay %>_payment, "<%= o_pay %>_payment_<%= o_pay %>_invoice_id_fkey"))
+    drop(table(:<%= o_pay %>_payment))
+    drop(constraint(:<%= o_invoice %>_invoice, "<%= o_invoice %>_invoice_<%= o_invoice %>_subscription_id_fkey"))
+    drop(constraint(:<%= o_invoice %>_invoice, "<%= o_invoice %>_invoice_<%= o_invoice %>_customer_id_fkey"))
+    drop(table(:<%= o_invoice %>_invoice))
+    drop(constraint(:<%= o_sub %>_subscription, "<%= o_sub %>_subscription_<%= o_sub %>_plan_id_fkey"))
+    drop(constraint(:<%= o_sub %>_subscription, "<%= o_sub %>_subscription_<%= o_sub %>_customer_id_fkey"))
+    drop(table(:<%= o_sub %>_subscription))
+    drop(constraint(:<%= o_price %>_price, "<%= o_price %>_price_<%= o_price %>_plan_id_fkey"))
+    drop(table(:<%= o_price %>_price))
+    drop(table(:<%= o_plan %>_plan))
+    drop(table(:<%= o_cus %>_customer))
+
+    # --- Identity (reverse FK order) ---
+    drop(constraint(:<%= o_key %>_api_key, "<%= o_key %>_api_key_<%= o_key %>_membership_id_fkey"))
+    drop(table(:<%= o_key %>_api_key))
+    drop(table(:<%= o_invite %>_invitation))
+    drop(table(:<%= o_role %>_role))
+    drop(constraint(:<%= o_mem %>_membership, "<%= o_mem %>_membership_<%= o_mem %>_user_id_fkey"))
+    drop(table(:<%= o_mem %>_membership))
+    drop(table(:<%= o_user %>_user))
+    drop(table(:<%= o_org %>_org))
+  end
+end

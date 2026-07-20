@@ -1,0 +1,93 @@
+defmodule AcmeWeb.Router do
+  @moduledoc """
+  The Acme host router (ADR-009 reuse proof, scaffolded by `mix samen.gen.app`).
+
+  The ENTIRE product UI is MOUNTED from samen_web via `Samen.Web.Router` macros —
+  zero Acme LiveView modules authored:
+
+    * `samen_module_routes(:billing, ...)` — the authored scope's inherited pages
+      (overview / invoices / plans),
+    * `samen_notifications_routes(...)` — the framework notifications inbox
+      (+ /notifications/settings) over the Primitives mount,
+    * `samen_operator_routes(...)` — the ADR-010 operator workspace (accounts ·
+      platform billing · revenue · flags · analytics · desk) over the operator
+      namespace; the `flags_namespace` label activates the flag admin over this
+      app's FeatureFlag rows,
+    * `samen_session_routes()` — the ADR-013 current-org session write (the
+      workspace switcher + the operator "Open account →" target).
+
+  The public JSON:API (WS-D D3) is FORWARDED to `AcmeWeb.Api.Endpoint`
+  under the versioned `/api/v1` namespace.
+  """
+  use Phoenix.Router
+  import Phoenix.LiveView.Router
+  import Samen.Web.Router
+
+  pipeline :browser do
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    plug(:put_root_layout, html: {AcmeWeb.Layouts, :root})
+    plug(:protect_from_forgery)
+  end
+
+  # WS-D D3 — the versioned public API surface. `forward` sends `/api/v1/*` to the
+  # AshJsonApi endpoint (key-auth → page-limit clamp → the generated JSON:API router
+  # over `Acme.Vertical`). The declared route `/records` is reached at
+  # `/api/v1/records` externally — the stable public contract (doc §external-surface
+  # "explicitly versioned, URL-namespaced, e.g. /api/v1").
+  forward("/api/v1", AcmeWeb.Api.Endpoint)
+
+  scope "/", AcmeWeb do
+    pipe_through(:browser)
+
+    get("/", PageController, :index)
+    get("/healthz", PageController, :healthz)
+    get("/readyz", PageController, :readyz)
+  end
+
+  # The inherited product UI, MOUNTED from samen_web. BARE `scope "/"` (no
+  # `AcmeWeb` alias): the mounted LiveViews are the framework's own
+  # `Samen.Web.*` modules — aliasing under `AcmeWeb` would wrongly resolve them.
+  scope "/" do
+    pipe_through(:browser)
+
+    # ADR-013 §4.3 — the framework SESSION-write endpoint (`GET /session/org/:org_id`).
+    samen_session_routes()
+
+    # 1. Billing — the mounted samen_core Billing scope's inherited pages.
+    samen_module_routes(:billing, Acme.Billing, repo: Acme.Repo)
+
+    # 2. Notifications (WS-A A4/A5) — the framework inbox (+ /notifications/settings),
+    #    mounted over the Primitives mount in ONE line. Realtime rides
+    #    `Acme.PubSub` (id-only envelopes).
+    samen_notifications_routes(:notifications, Acme.Primitives,
+      repo: Acme.Repo,
+      labels: %{pubsub: Acme.PubSub}
+    )
+
+    # 3. Metrics egress (WS-F5 F5.1) — the framework `GET /metrics` Prometheus
+    #    scrape endpoint over `Samen.Metrics.definitions/0`. OFF by default: the
+    #    route self-gates to 404 until `metrics_egress?` is set (see
+    #    config/runtime.exs → SAMEN_METRICS_ENABLED). Name matches the reporter
+    #    Samen.Observability starts (`:acme_prometheus`).
+    samen_metrics_route(name: :acme_prometheus)
+  end
+
+  # ADR-010 — the OPERATOR / SaaS-company workspace, mounted in ONE line over the
+  # operator namespace (accounts ARE tenant orgs). The operator seat reads the
+  # operator org's OWN book of business on the TENANT plane (clear); drilling into
+  # a tenant is the existing masked impersonation path.
+  scope "/" do
+    pipe_through(:browser)
+
+    samen_operator_routes(Acme.Operator,
+      repo: Acme.Repo,
+      labels: %{
+        operator_workspace: "Acme Ops",
+        # WS-B B6 — the FlagAdminLive namespace seam: the Primitives mount whose
+        # FeatureFlag rows the platform flag admin manages.
+        flags_namespace: Acme.Primitives
+      }
+    )
+  end
+end

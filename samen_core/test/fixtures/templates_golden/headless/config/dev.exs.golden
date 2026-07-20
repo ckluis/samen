@@ -1,0 +1,10 @@
+import Config
+
+config :acme, Acme.Repo,
+  username: System.get_env("USER") || "postgres",
+  password: "",
+  hostname: "localhost",
+  database: "acme_dev",
+  pool_size: 10
+
+config :logger, level: :info

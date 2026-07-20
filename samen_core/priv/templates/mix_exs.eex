@@ -1,0 +1,52 @@
+defmodule <%= module %>.MixProject do
+  use Mix.Project
+
+  # <%= module %> — a Samen vertical app scaffolded by `mix samen.gen.app` (T6.4).
+  # Shaped like demo/driftwood/pawchart: mounts the samen_core Billing scope AS-IS,
+  # authors one vertical resource (<%= module %>.Vertical.Record) with a pii_ scalar
+  # vault field, defines one token-blind aggregate projection, and runs the FULL
+  # samen_core verifier gate in its own ci.sh. Correct-by-construction: green on
+  # first `bash ci.sh`.
+  def project do
+    [
+      app: :<%= otp_app %>,
+      version: "0.1.0",
+      elixir: "~> 1.18",
+      elixirc_paths: elixirc_paths(Mix.env()),
+      consolidate_protocols: Mix.env() != :test,
+      start_permanent: Mix.env() == :prod,
+      deps: deps(),
+      aliases: aliases()
+    ]
+  end
+
+  def application do
+    [
+      extra_applications: [:logger],
+      mod: {<%= module %>.Application, []}
+    ]
+  end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  defp deps do
+    [
+      {:samen_core, path: "<%= samen_core_path %>"},
+      # `mix format`'s `import_deps` (.formatter.exs) only resolves a DIRECT dep —
+      # `ash`/`ash_postgres` otherwise ride transitively via samen_core. Pinned to the
+      # SAME exact versions the framework kernel declares, so this app's authored DSL
+      # (`postgres do ... end`, `attributes do ... end`, `pii do ... end`) formats
+      # correctly without a second resolution of either package.
+      {:ash, "== 3.29.3"},
+      {:ash_postgres, "== 2.10.0"},
+      {:jason, "~> 1.4"},
+      {:stream_data, "== 1.3.0"},
+      # simple_sat: the Ash policy authorizer's pure-Elixir SAT solver, needed by the
+      # mounted Billing scope's OrgScope policies + the authored resource's policies.
+      {:simple_sat, "~> 0.1"}
+    ]
+  end
+
+  defp aliases, do: []
+end

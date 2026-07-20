@@ -7,14 +7,17 @@
 # seam the CSS/kit responsive pass introduces; the value layer stays masking-safe
 # by construction (a %Masked{} still renders `••••`), so this binds the render
 # contract the responsive pass added.
+#
+# F6 UNIT 7 NOTE: `list_view/1` moved from the monolithic `samen_web/lib/samen/ui.ex`
+# into the split `Samen.UI.Table` submodule (`samen_web/lib/samen/ui/table.ex`) behind
+# the stable `Samen.UI` facade. The sabotage seam is identical; only the file path moved.
 # APP: samen_web
 # TEST_FILES: test/samen/web/responsive_masking_test.exs
 # MUST_FAIL: loading-contract
-diff --git a/samen_web/lib/samen/ui.ex b/samen_web/lib/samen/ui.ex
-index cf63d48..183592c 100644
---- a/samen_web/lib/samen/ui.ex
-+++ b/samen_web/lib/samen/ui.ex
-@@ -674,6 +674,9 @@ defmodule Samen.UI do
+diff --git a/samen_web/lib/samen/ui/table.ex b/samen_web/lib/samen/ui/table.ex
+--- a/samen_web/lib/samen/ui/table.ex
++++ b/samen_web/lib/samen/ui/table.ex
+@@ -161,6 +161,9 @@
          <% @loading -> %>
            <div class="card list-loading" style="padding:14px 16px">
              <.skeleton rows={5} avatar />

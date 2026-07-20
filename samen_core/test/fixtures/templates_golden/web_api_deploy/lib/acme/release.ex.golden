@@ -1,0 +1,22 @@
+defmodule Acme.Release do
+  @moduledoc """
+  Release tasks for Acme (WS-D D10 / ADR-024). Invoked by the release binary
+  (`bin/acme eval Acme.Release.migrate`) — NO Mix at runtime.
+
+  `fly.toml`'s `release_command` calls `migrate/0` before a new release takes traffic.
+  """
+  @app :acme
+
+  def migrate do
+    load_app()
+
+    {:ok, _, _} =
+      Ecto.Migrator.with_repo(Acme.Repo, fn repo ->
+        Ecto.Migrator.run(repo, :up, all: true)
+      end)
+  end
+
+  defp load_app do
+    Application.load(@app)
+  end
+end

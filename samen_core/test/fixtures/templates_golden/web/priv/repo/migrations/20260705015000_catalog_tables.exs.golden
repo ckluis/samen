@@ -1,0 +1,14 @@
+defmodule Acme.Repo.Migrations.CatalogTables do
+  @moduledoc """
+  Bootstraps the catalog tables (tam_table / fld_field) BEFORE any migration that calls
+  catalog_sync/1 (aud_event, app_resources).
+  """
+  use Samen.Migration
+
+  def up, do: create_catalog_tables()
+
+  def down do
+    drop(table(:fld_field))
+    drop(table(:tam_table))
+  end
+end

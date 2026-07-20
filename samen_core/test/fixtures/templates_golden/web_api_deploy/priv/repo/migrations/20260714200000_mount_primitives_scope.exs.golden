@@ -1,0 +1,170 @@
+defmodule Acme.Repo.Migrations.MountPrimitivesScope do
+  @moduledoc """
+  Mounts the Primitives scope tables (`Acme.Primitives`, abbrevs
+  `ant/anp/afl/ash/awh/aff`) and catalogs
+  them in the SAME migration transaction (ADR-004 catalog-in-tx). Mirrors pawchart's
+  `mount_primitives_scope` (with the B5 flag-engine fields included — target_rules +
+  variants land directly on the flag table).
+
+  Load-bearing tables for the inherited web surfaces:
+
+    * `ant_notification` — 🔒 PII: rendered_body (vault token;
+      `pii_ant_rendered_body`) — the notifications inbox
+    * `aff_feature_flag` — the flag rows the operator flag admin manages
+  """
+  use Samen.Migration
+
+  @resources [
+    Acme.Primitives.Notification,
+    Acme.Primitives.NotificationPreference,
+    Acme.Primitives.File,
+    Acme.Primitives.SearchIndex,
+    Acme.Primitives.Webhook,
+    Acme.Primitives.FeatureFlag
+  ]
+
+  def up do
+    # --- ant_notification : 🔒 PII: rendered_body ---
+    create table(:ant_notification, primary_key: false) do
+      add(:ant_recipient_id, :uuid, null: false)
+      add(:ant_channel, :text, default: "in_app")
+      add(:ant_event_type, :text, null: false)
+      add(:ant_status, :text, default: "pending")
+      add(:ant_sent_at, :utc_datetime)
+      add(:ant_read_at, :utc_datetime)
+      add(:ant_metadata, :map, default: fragment("'{}'::jsonb"))
+      add(:pii_ant_rendered_body, :text)
+      add(:ant_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:ant_org_id, :uuid, null: false)
+      add(:ant_inserted_at, :utc_datetime, null: false)
+      add(:ant_updated_at, :utc_datetime, null: false)
+    end
+
+    create(
+      index(:ant_notification, [:ant_recipient_id, :ant_org_id],
+        name: "ant_notification_recipient_org_idx"
+      )
+    )
+
+    create(
+      index(:ant_notification, [:ant_status, :ant_org_id],
+        name: "ant_notification_status_org_idx"
+      )
+    )
+
+    # --- anp_notification_preference : per-recipient dispatch prefs (no PII) ---
+    create table(:anp_notification_preference, primary_key: false) do
+      add(:anp_recipient_id, :uuid, null: false)
+      add(:anp_event_type, :text, null: false)
+      add(:anp_in_app_enabled, :boolean, default: true)
+      add(:anp_email_enabled, :boolean, default: false)
+      add(:anp_quiet_hours, :map, default: fragment("'{}'::jsonb"))
+      add(:anp_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:anp_org_id, :uuid, null: false)
+      add(:anp_inserted_at, :utc_datetime, null: false)
+      add(:anp_updated_at, :utc_datetime, null: false)
+    end
+
+    create(
+      index(:anp_notification_preference, [:anp_recipient_id, :anp_event_type, :anp_org_id],
+        name: "anp_notification_preference_recipient_event_org_idx",
+        unique: true
+      )
+    )
+
+    # --- afl_file ---
+    create table(:afl_file, primary_key: false) do
+      add(:afl_filename, :text, null: false)
+      add(:afl_content_type, :text)
+      add(:afl_size_bytes, :integer)
+      add(:afl_storage_key, :text, null: false)
+      add(:afl_status, :text, default: "active")
+      add(:afl_uploaded_by_id, :uuid)
+      add(:afl_metadata, :map, default: fragment("'{}'::jsonb"))
+      add(:afl_search_vector, :text)
+      add(:afl_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:afl_org_id, :uuid, null: false)
+      add(:afl_inserted_at, :utc_datetime, null: false)
+      add(:afl_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- ash_search_index ---
+    create table(:ash_search_index, primary_key: false) do
+      add(:ash_resource_name, :text, null: false)
+      add(:ash_field_name, :text, null: false)
+      add(:ash_vector_column, :text, null: false)
+      add(:ash_description, :text)
+      add(:ash_enabled, :boolean, default: true)
+      add(:ash_ts_config, :text, default: "english")
+      add(:ash_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:ash_org_id, :uuid, null: false)
+      add(:ash_inserted_at, :utc_datetime, null: false)
+      add(:ash_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- awh_webhook : 🔒 PII: signing_secret ---
+    create table(:awh_webhook, primary_key: false) do
+      add(:awh_url, :text, null: false)
+      add(:awh_label, :text)
+      add(:awh_event_types, {:array, :text}, default: [])
+      add(:awh_status, :text, default: "active")
+      add(:awh_failure_count, :integer, default: 0)
+      add(:awh_last_delivered_at, :utc_datetime)
+      add(:awh_metadata, :map, default: fragment("'{}'::jsonb"))
+      add(:pii_awh_signing_secret, :text)
+      add(:awh_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:awh_org_id, :uuid, null: false)
+      add(:awh_inserted_at, :utc_datetime, null: false)
+      add(:awh_updated_at, :utc_datetime, null: false)
+    end
+
+    # --- aff_feature_flag (incl. the B5 engine fields: target_rules/variants) ---
+    create table(:aff_feature_flag, primary_key: false) do
+      add(:aff_name, :text, null: false)
+      add(:aff_description, :text)
+      add(:aff_enabled, :boolean, default: false)
+      add(:aff_rollout_pct, :integer, default: 100)
+      add(:aff_stage, :text, default: "beta")
+      add(:aff_metadata, :map, default: fragment("'{}'::jsonb"))
+      add(:aff_target_rules, :map, default: fragment("'[]'::jsonb"))
+      add(:aff_variants, :map, default: fragment("'{}'::jsonb"))
+      add(:aff_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aff_org_id, :uuid, null: false)
+      add(:aff_inserted_at, :utc_datetime, null: false)
+      add(:aff_updated_at, :utc_datetime, null: false)
+    end
+
+    catalog_sync(@resources)
+  end
+
+  def down do
+    catalog_sync_down(@resources)
+
+    drop(table(:aff_feature_flag))
+    drop(table(:awh_webhook))
+    drop(table(:ash_search_index))
+    drop(table(:afl_file))
+
+    drop(
+      index(:anp_notification_preference, [:anp_recipient_id, :anp_event_type, :anp_org_id],
+        name: "anp_notification_preference_recipient_event_org_idx"
+      )
+    )
+
+    drop(table(:anp_notification_preference))
+
+    drop(
+      index(:ant_notification, [:ant_status, :ant_org_id],
+        name: "ant_notification_status_org_idx"
+      )
+    )
+
+    drop(
+      index(:ant_notification, [:ant_recipient_id, :ant_org_id],
+        name: "ant_notification_recipient_org_idx"
+      )
+    )
+
+    drop(table(:ant_notification))
+  end
+end

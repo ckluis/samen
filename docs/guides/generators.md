@@ -34,6 +34,7 @@ mix samen.gen.app --module Widgetco --prefix wg --abbrev wid
 | `--prefix` | yes | **2-letter** app prefix; derives the 8 Billing abbrevs (`<p>c/<p>s/<p>l/<p>p/<p>i/<p>y/<p>u/<p>e`) + the aggregate abbrev (`<p>a`) |
 | `--abbrev` | yes | **3-letter** abbrev for the authored vertical resource |
 | `--target` | no | parent dir the app is created under (default: parent of the `samen_core` source root, so the app is a sibling and `path:` resolves) |
+| `--modules` | no | comma-separated framework END-USER surfaces to ALSO mount + surface as a menu (WS-E): `files`, `search`, `csv`, `settings` (mountable at ≈0 LOC), `chat` (documented-with-prerequisite). See [Mountable surfaces](#mountable-surfaces--the---modules-menu). OFF by default — omitting it leaves the output byte-for-byte unchanged. |
 | `--no-reserve-abbrevs` | no | do **not** append the abbrevs to the registry — produces an app that fails compile fail-closed (the red-path fixture) |
 | `--no-compile` | no | emit files only; skip the compile + schema-dict dump post-steps |
 
@@ -59,6 +60,10 @@ for a direct sibling; deeper `../../samen_core` if nested), containing:
   ci.sh                      # the FULL verifier gate, wired to the app
 ```
 
+> This path-dep-in-monorepo model is a stated design decision, not an accident — see
+> [ADR-033](../adr/033-in-monorepo-distribution-constraint.md) for why Hex publishing and
+> vendoring are deferred, and the trigger that would change it.
+
 ### The one scope mount, one authored resource, one aggregate
 
 - **Scope mount (AS-IS):** `use Samen.Scopes.Billing` expands into the eight host-owned
@@ -71,6 +76,64 @@ for a direct sibling; deeper `../../samen_core` if nested), containing:
   — a cross-tenant projection with a fail-closed `aggregate_cohort_spec/0`, no `pii_` columns,
   default-deny to the token-blind actor. Present so the `no_pii_columns` (C7) and
   `aggregate_privacy` (T4.5) gate steps scan a real aggregate.
+
+## Mountable surfaces — the `--modules` menu
+
+By default a generated app mounts Billing, Notifications, Metrics, the ADR-010 Operator
+workspace, and the session-write endpoint (see the router moduledoc). The framework ALSO
+ships router macros for a set of end-user surfaces (files / search / CSV / settings / chat)
+that previously "existed but shipped unmounted and undocumented as a menu." `--modules`
+selects which of these to ALSO mount over the generated app's existing mounts, at ≈0
+authored LOC, AND surfaces them as a real navigation **menu** — a `Samen.UI` app-shell
+landing (`<App>Web.HomeLive`) that replaces `/`, rendering `module_nav` with the selected
+surfaces in an `:extra` "Product" nav group. Omit `--modules` and none of this appears (the
+output is byte-for-byte identical to today).
+
+### Surface → router macro → mount it needs → mounted by `--modules`?
+
+| surface | router macro | mount / scope it needs | in the generated app | `--modules` mounts it? |
+|---|---|---|---|---|
+| `files` | `samen_files_routes/3` | a **Primitives** mount (materializes `File`) + a `:browser` session pipe (byte-serve route) | ✅ `<App>.Primitives` | **Yes** — over `<App>.Primitives` |
+| `search` | `samen_search_routes/3` | a **Primitives** mount (materializes `File` + `SearchIndex`) | ✅ `<App>.Primitives` | **Yes** — over `<App>.Primitives` |
+| `csv` | `samen_csv_routes/3` | a **domain** whose registered resources are servable (deny-by-default `resolve_resource`) | ✅ `<App>.Vertical` (the authored `Record`) | **Yes** — over `<App>.Vertical` |
+| `settings` | `samen_settings_routes/3` | an **Identity** namespace (materializes `User` / `ApiKey` / `Membership`) | ✅ `<App>.Operator` (an `Samen.Scopes.Identity` mount) | **Yes** — over `<App>.Operator` |
+| `chat` | `samen_chat_routes/3` | a materialized **`Samen.Scopes.Chat`** mount **and** a running `Samen.Web.Chat.Presence` server in the supervision tree (+ PubSub) | ❌ not authored (no Chat scope, no Presence child) | **No** — documented-with-prerequisite (see below) |
+| — notifications | `samen_notifications_routes/3` | Primitives (`Notification`) | ✅ | mounted by DEFAULT (not via `--modules`) |
+| — billing | `samen_module_routes(:billing, …)` | the authored Billing scope | ✅ | mounted by DEFAULT (not via `--modules`) |
+| — operator | `samen_operator_routes/2` | the Operator namespace (Identity + Billing + Support) | ✅ | mounted by DEFAULT (not via `--modules`) |
+
+The four mountable surfaces each mount over a mount the generated app **already authors** —
+exactly the `samen_notifications_routes` idiom (mount over the Primitives mount). They are
+plain `:browser`-pipe LiveViews (plus files' byte-serve and csv's export controller routes),
+so they render dead HTML and inherit per-plane masking by construction — no per-app code.
+
+### Why `chat` is not auto-mounted (the honest gap)
+
+`samen_chat_routes/3` mounts over a host's **materialized `Samen.Scopes.Chat` resources**,
+and its realtime path REQUIRES a running `{Samen.Web.Chat.Presence, pubsub_server: …}` in the
+supervision tree. The generated app authors neither (it mounts Billing + Primitives +
+Operator, not a Chat scope, and its `application.ex` starts PubSub but no Presence server).
+Auto-mounting chat would therefore be a half-mount that fails to boot — so `--modules chat`
+does **not** emit a `samen_chat_routes` call. Instead it writes a **prerequisite comment**
+into the router naming exactly what to author first (a `Samen.Scopes.Chat` mount + the
+Presence child) and the one line to add afterward:
+
+```elixir
+samen_chat_routes(:chat, <App>.Chat, repo: <App>.Repo, labels: %{pubsub: <App>.PubSub})
+```
+
+(Driftwood is the reference: it mounts chat because it materializes `Driftwood.Chat` and adds
+`Samen.Web.Chat.Presence` to its supervision tree — see `driftwood/lib/driftwood_web/router.ex`.)
+
+### Usage
+
+```bash
+# mount files + search + settings, and surface them as a menu at /
+mix samen.gen.app --module Widgetco --prefix wg --abbrev wid --modules files,search,settings
+```
+
+An unknown surface name, or `--modules` with `--no-web`/`--headless`, fails closed in
+`Samen.Gen.App.validate!/1`.
 
 ## The global abbrev registry (the deliberate coupling)
 
