@@ -138,8 +138,18 @@ defmodule Samen.Web.Csv do
       base = Keyword.get(opts, :query, resource)
 
       rows = export_rows(base, resource, scope, cols, page_size, opts, nil, [])
+      # WS-F5 F5.2 — row-count histogram sample through the bounded Samen.Metrics
+      # machinery (`samen.csv.export.row_count`). The count is a measurement; the only
+      # tag is the bounded `:result`. Best-effort — never fails an export.
+      emit_export_telemetry(length(rows))
       {:ok, serialize([Enum.map(cols, &to_string/1) | rows])}
     end
+  end
+
+  defp emit_export_telemetry(row_count) do
+    :telemetry.execute([:samen, :csv, :export, :stop], %{row_count: row_count}, %{result: :ok})
+  rescue
+    _ -> :ok
   end
 
   @doc """

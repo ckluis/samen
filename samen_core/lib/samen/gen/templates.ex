@@ -1856,7 +1856,13 @@ defmodule Samen.Gen.Templates do
           # leak surface and asserts `db_statement: :disabled` on it. Dropping that config
           # then flips the gate (the D6 flagship sabotage). The API+SDK ride transitively
           # from samen_core; only the Ecto integration must be a direct dep to arm the tier.
-          {:opentelemetry_ecto, "~> 1.2"}
+          {:opentelemetry_ecto, "~> 1.2"},
+          # WS-F5 F5.1 metrics egress: the Prometheus reporter for the bounded
+          # Samen.Metrics.definitions/0. OFF by default (metrics_egress? flag, set from
+          # SAMEN_METRICS_ENABLED in config/runtime.exs); the dep is listed so a prod
+          # host that flips the flag has a real reporter. Samen.Observability starts it;
+          # the framework `samen_metrics_route/1` serves `GET /metrics` (else 404).
+          {:telemetry_metrics_prometheus_core, "~> 1.1"}
         ]
       end
 
@@ -2252,6 +2258,13 @@ defmodule Samen.Gen.Templates do
           repo: <%= module %>.Repo,
           labels: %{pubsub: <%= module %>.PubSub}
         )
+
+        # 3. Metrics egress (WS-F5 F5.1) — the framework `GET /metrics` Prometheus
+        #    scrape endpoint over `Samen.Metrics.definitions/0`. OFF by default: the
+        #    route self-gates to 404 until `metrics_egress?` is set (see
+        #    config/runtime.exs → SAMEN_METRICS_ENABLED). Name matches the reporter
+        #    Samen.Observability starts (`:<%= otp_app %>_prometheus`).
+        samen_metrics_route(name: :<%= otp_app %>_prometheus)
       end
 
       # ADR-010 — the OPERATOR / SaaS-company workspace, mounted in ONE line over the
@@ -3539,6 +3552,13 @@ defmodule Samen.Gen.Templates do
           repo: <%= module %>.Repo,
           labels: %{pubsub: <%= module %>.PubSub}
         )
+
+        # 3. Metrics egress (WS-F5 F5.1) — the framework `GET /metrics` Prometheus
+        #    scrape endpoint over `Samen.Metrics.definitions/0`. OFF by default: the
+        #    route self-gates to 404 until `metrics_egress?` is set (see
+        #    config/runtime.exs → SAMEN_METRICS_ENABLED). Name matches the reporter
+        #    Samen.Observability starts (`:<%= otp_app %>_prometheus`).
+        samen_metrics_route(name: :<%= otp_app %>_prometheus)
       end
 
       # ADR-010 — the OPERATOR / SaaS-company workspace, mounted in ONE line over the
@@ -4671,6 +4691,19 @@ defmodule Samen.Gen.Templates do
       config :samen_core, Samen.Kms.AwsKmsDynamo,
         key_id: kms_key_id,
         region: kms_region
+
+      # --- metrics egress (WS-F5 F5.1) — OFF unless SAMEN_METRICS_ENABLED is truthy ---
+      # When on, Samen.Observability starts a Prometheus reporter (:<%= otp_app %>_prometheus)
+      # over Samen.Metrics.definitions/0 and the framework `GET /metrics` route serves it.
+      # Bounded-cardinality labels only (mix samen.verify.metric_labels) — no org/actor id
+      # ever becomes a series label. Scrape it over Fly's PRIVATE network, not the public
+      # internet (it is on the app port; front it with an internal-only scrape config).
+      if System.get_env("SAMEN_METRICS_ENABLED") in ~w(true 1) do
+        config :<%= otp_app %>, Samen.Observability,
+          metrics_egress?: true,
+          prometheus_reporter: TelemetryMetricsPrometheus.Core,
+          prometheus_name: :<%= otp_app %>_prometheus
+      end
     end
     """
   end
@@ -4771,6 +4804,24 @@ defmodule Samen.Gen.Templates do
 
         fly secrets set DATABASE_URL=… SECRET_KEY_BASE=… PHX_HOST=… \\
           SAMEN_KMS_KEY_ID=… SAMEN_KMS_REGION=…
+
+    ## Metrics egress (optional — WS-F5 F5.1)
+
+    Prometheus scraping is **OFF by default**. To turn it on, set one env var:
+
+        fly secrets set SAMEN_METRICS_ENABLED=true
+
+    Then `config/runtime.exs` starts a Prometheus reporter (`:<%= otp_app %>_prometheus`)
+    over `Samen.Metrics.definitions/0` and the framework `GET /metrics` route serves the
+    text exposition. With the flag UNSET the route returns `404` and nothing is exported —
+    the default is a true no-op.
+
+    - **Bounded cardinality only.** `mix samen.verify.metric_labels` fails the build if any
+      metric carries a raw `org_id`/`actor_id`/`subject_id` label — no per-tenant series.
+    - **`/metrics` is on the app port.** Scrape it over Fly's **private** network (an
+      internal scrape config / a Grafana Agent sidecar), NOT the public internet — do not
+      add it to a public `[[http_service]]`. Front it with allow-listing if it must be
+      reachable off the private net.
 
     ## Verify fail-closed (before you trust the deploy)
 

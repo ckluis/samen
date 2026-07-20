@@ -158,18 +158,35 @@ defmodule Samen.Files do
         # allowlisted AND the size is within bound.
         with :ok <- enforce(content_type, byte_size(binary), allowed, max_bytes) do
           key = opt(opts, :key) || generate_key(org_id, filename)
-          store_and_create(storage, storage_config, key, binary, %{
-            file_mod: file_mod,
-            repo: repo,
-            org_id: org_id,
-            actor_id: actor_id,
-            filename: filename,
-            content_type: content_type,
-            size_bytes: byte_size(binary)
-          })
+
+          result =
+            store_and_create(storage, storage_config, key, binary, %{
+              file_mod: file_mod,
+              repo: repo,
+              org_id: org_id,
+              actor_id: actor_id,
+              filename: filename,
+              content_type: content_type,
+              size_bytes: byte_size(binary)
+            })
+
+          emit_upload_telemetry(result, byte_size(binary))
+          result
         end
     end
   end
+
+  # WS-F5 F5.2 — a byte-size histogram sample on a stored upload, through the same
+  # bounded Samen.Metrics machinery (`samen.files.upload.byte_size`). Bytes are a
+  # measurement, never a label; the only tag is the bounded `:result`. Best-effort:
+  # an observability emit never fails an upload.
+  defp emit_upload_telemetry({:ok, _file}, byte_size) do
+    :telemetry.execute([:samen, :files, :upload, :stop], %{byte_size: byte_size}, %{result: :ok})
+  rescue
+    _ -> :ok
+  end
+
+  defp emit_upload_telemetry(_other, _byte_size), do: :ok
 
   @doc """
   Deny-by-default size/type gate (RP-FI-5). Returns `:ok` only when `content_type` is

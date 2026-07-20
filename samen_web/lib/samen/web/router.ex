@@ -646,6 +646,44 @@ defmodule Samen.Web.Router do
     end
   end
 
+  @doc """
+  Mount the framework Prometheus scrape endpoint (WS-F5 F5.1) — `GET /metrics` — in ONE
+  line. Every vertical + generated app exposes the SAME `/metrics` surface at ~0 LOC.
+
+      import Samen.Web.Router
+
+      scope "/" do
+        pipe_through :browser
+        samen_metrics_route(name: :driftwood_prometheus)
+      end
+
+  `name` is the registered name of the Prometheus reporter `Samen.Observability` starts
+  when the host's `metrics_egress?` flag is on (default `:\#{otp_app}_prometheus`). The
+  route self-gates: with egress OFF (the default) the reporter is not running and the
+  endpoint returns `404` — no dep is required to COMPILE this line, only to serve real
+  metrics (see `Samen.Web.MetricsController`).
+
+  Options:
+    * `:name`     — the reporter's registered name (REQUIRED; must match the
+      `prometheus_name` `Samen.Observability` was configured with).
+    * `:reporter` — the reporter module (default
+      `Samen.Web.MetricsController.default_reporter/0`, i.e.
+      `TelemetryMetricsPrometheus.Core`).
+    * `:path`     — the route path (default `/metrics`).
+  """
+  defmacro samen_metrics_route(opts \\ []) do
+    path = Keyword.get(opts, :path, "/metrics")
+    name_ast = Keyword.fetch!(opts, :name)
+    reporter_ast =
+      Keyword.get(opts, :reporter, quote(do: Samen.Web.MetricsController.default_reporter()))
+
+    quote do
+      get(unquote(path), Samen.Web.MetricsController, :scrape,
+        private: %{samen_metrics: %{reporter: unquote(reporter_ast), name: unquote(name_ast)}}
+      )
+    end
+  end
+
   @doc false
   def __operator_labels__(labels, nil), do: labels
 

@@ -380,6 +380,68 @@ harness: 24 patches.
 
 ---
 
+## WS-F5 — Ops Reality (2026-07-20)
+
+Turn the observability/ops story from "defined but unwired" into a real operator surface. All six units shipped
+(no new fail-closed SECURITY guarantee → no new sabotage patch; the harness stays at 24).
+
+1. **Metrics egress (framework-first, OFF by default).** `Samen.Metrics.definitions/0` was defined but unreported.
+   `Samen.Observability.child_specs/2` now starts a Prometheus reporter child behind a `metrics_egress?` flag
+   (resolved from opts or `config :otp_app, Samen.Observability`), reporter module + name injectable (default
+   `TelemetryMetricsPrometheus.Core` / `:\#{otp_app}_prometheus`). NO new dep in samen_core/samen_web/verticals —
+   the reporter is a runtime `{reporter, arg}` value, so the tree compiles without the package; FAIL-HONEST: flag
+   ON + reporter not loadable RAISES (never a metrics-on app exporting nothing). The `/metrics` HTTP surface is a
+   framework `Samen.Web.MetricsController` (resolves the reporter via runtime `apply` → 200 when running, 404 when
+   off — never a fake empty 200), mounted by a new `samen_metrics_route/1` router macro. Gen templates wired:
+   `mix_exs_web` adds `{:telemetry_metrics_prometheus_core, "~> 1.1"}` (generated apps are real deployables),
+   `runtime.exs` maps `SAMEN_METRICS_ENABLED` → the config flag, both gen routers add `samen_metrics_route(...)`,
+   deploy runbook documents it (scrape over the PRIVATE net, not public). Verticals adopt the macro at 1 line each
+   (driftwood/pawchart routers) as the leverage proof. Tests: `metrics_egress_test.exs` (8 — flag-off byte-identical
+   child list + ON via opts/config + fail-honest RED) + `metrics_controller_test.exs` (4, samen_web).
+2. **WS-E surface telemetry** through the same bounded machinery, three new `Samen.Metrics.definitions/0` series:
+   `samen.files.upload.byte_size` (emitted by `Samen.Files.upload/3`, tag `result`), `samen.search.query.duration`
+   (emitted by `Samen.Search.query/3`, no unbounded term label), `samen.csv.export.row_count` (emitted by
+   `Samen.Web.Csv.export/3`, tag `result`). All best-effort (an emit never fails the operation). Tests:
+   `files_upload_test.exs` (+2, incl. a rejected-upload-emits-nothing twin), `search_telemetry_test.exs` (2),
+   `csv_test.exs` (+1). Label-lint (`mix samen.verify.metric_labels`) stays green (bounded tags only).
+3. **`docs/runbooks/alerts.md`** — the page-a-human catalog: Oban backlog (`samen.oban.job.queue_time` + per-queue
+   backlog; erasure/reveal governance-critical), discarded jobs, seal-lag (`[:samen,:audit_chain,:verify]` recency +
+   `[:samen,:break_glass,:unanchored]` age; page on any `[:samen,:audit_chain,:tamper]`), KMS error rate, plus
+   `/readyz` + pool saturation. Warn/page thresholds + first-response steps; links breach/break-glass/beam-introspection.
+4. **`docs/runbooks/secrets-rotation.md`** — DATABASE_URL / SECRET_KEY_BASE / KMS (`SAMEN_KMS_KEY_ID`/`REGION`, the
+   careful DEK-rewrap case) / webhook HMAC (vaulted per-webhook `pii_*_signing_secret` re-mint, not an env var).
+   Fail-closed rule: never unset before the replacement is set + confirmed.
+5. **`docs/runbooks/rollback.md`** — bad-RELEASE (code/config) rollback, DISTINCT from data recovery: Fly release
+   rollback + the migration hazard (release_command migrates before traffic → a code rollback does not undo a
+   destructive migration → escalate to `pitr-gameday.md`, linked not duplicated) + post-rollback verification.
+6. **`scripts/fleet-status.sh`** — per-product required-secret drift check. Required set = the fail-closed baseline
+   (DATABASE_URL/SECRET_KEY_BASE/PHX_HOST/SAMEN_KMS_KEY_ID/SAMEN_KMS_REGION) ∪ each product's own
+   `config/*.exs` env references. Reports SET/EMPTY/MISSING per key + optional SAMEN_METRICS_ENABLED; exit 1 on any
+   required missing (`--warn-only` for advisory). **NEVER prints a secret VALUE** (values read only inside a `-z`
+   test). bash 3.2-compatible (no associative arrays).
+
+**F5 CARRIES (do not lose):**
+- **`/metrics` port is NOT public.** The endpoint rides the app port and is only served when egress is ON. Scrape it
+  over Fly's PRIVATE network (internal scrape config / Grafana Agent sidecar) — do NOT add it to a public
+  `[[http_service]]`. The deploy runbook says so; a real prod host must honor it.
+- **Metrics egress reporter dep is on the HOST, not the framework.** samen_core/samen_web/verticals carry NO
+  reporter dep (runtime-resolved). A vertical or generated app that flips `metrics_egress?: true` MUST add
+  `{:telemetry_metrics_prometheus_core, "~> 1.1"}` (or its own reporter) to deps — else `child_specs/2` fail-honest
+  raises. Generated apps already get the dep via the gen template.
+- **The `/metrics` route on the verticals is ADOPTED but egress-OFF** — driftwood/pawchart mount `samen_metrics_route`
+  (proving reuse) but ship no reporter dep + flag off, so the route 404s until an operator enables it. Demo is
+  API-only (no browser router) and does not mount it.
+- **fleet-status.sh required set is the gen-template contract + config grep**, since the verticals have no prod
+  `runtime.exs` (they are local/dogfood). A product that grows a prod runtime with new `fetch_secret!` keys is
+  picked up automatically by the config grep.
+- **No new sabotage patch** — F5 adds observability + docs + a script, not a fail-closed security gate. The
+  fail-honest metrics-egress raise ships a green+RED test pair (not a committed sabotage). Harness stays 24.
+
+**Suite totals after F5:** samen_core 1223 · samen_web 623 · demo 465 · driftwood 123 · pawchart 49. Sabotage
+harness: 24 patches.
+
+---
+
 ## State after WS-A/B/D (2026-07-16) — the re-rank
 
 **Shipped: 11 gaps** (G1/G2/G3/G5 in WS-A · G6/G7/G17 + G12-seed in WS-B ·

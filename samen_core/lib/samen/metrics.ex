@@ -166,6 +166,12 @@ defmodule Samen.Metrics do
       `action` (worker module), `result`
     - `samen.oban.job.queue_time` — histogram of time an Oban job spent waiting in
       the queue (contention signal), tagged by `action`
+    - `samen.files.upload.byte_size` — histogram of uploaded file sizes in bytes
+      (WS-F5 F5.2), tagged by `result`; emitted by `Samen.Files.upload/3`
+    - `samen.search.query.duration` — histogram of full-text search latency
+      (WS-F5 F5.2), no per-row tags; emitted by `Samen.Search.query/3`
+    - `samen.csv.export.row_count` — histogram of rows in a CSV export (WS-F5 F5.2),
+      tagged by `result`; emitted by `Samen.Web.Csv.export/3`
   """
   @spec definitions() :: [Telemetry.Metrics.t()]
   def definitions do
@@ -226,6 +232,38 @@ defmodule Samen.Metrics do
         unit: {:native, :millisecond},
         tags: [:action],
         description: "Oban job queue wait time — pool/scheduler contention signal"
+      ),
+
+      # WS-F5 F5.2 — WS-E surface telemetry through this same bounded machinery.
+
+      # File upload size — bounded tag: result. Emitted by Samen.Files.upload/3.
+      distribution(
+        "samen.files.upload.byte_size",
+        event_name: [:samen, :files, :upload, :stop],
+        measurement: :byte_size,
+        unit: :byte,
+        tags: [:result],
+        description: "Uploaded file size in bytes (bounded label: result)"
+      ),
+
+      # Search query latency — no per-row tags (a search term is unbounded and never
+      # a label). Emitted by Samen.Search.query/3.
+      distribution(
+        "samen.search.query.duration",
+        event_name: [:samen, :search, :query, :stop],
+        measurement: :duration,
+        unit: {:native, :millisecond},
+        tags: [],
+        description: "Full-text search query latency (no unbounded term label)"
+      ),
+
+      # CSV export row count — bounded tag: result. Emitted by Samen.Web.Csv.export/3.
+      distribution(
+        "samen.csv.export.row_count",
+        event_name: [:samen, :csv, :export, :stop],
+        measurement: :row_count,
+        tags: [:result],
+        description: "Rows emitted by a CSV export (bounded label: result)"
       )
     ]
   end

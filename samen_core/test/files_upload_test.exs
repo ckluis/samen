@@ -426,4 +426,52 @@ defmodule Samen.FilesTest do
       {:error, :enoent} -> true
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # WS-F5 F5.2 · byte-size telemetry (samen.files.upload.byte_size)
+
+  describe "upload/3 — byte-size telemetry (WS-F5 F5.2)" do
+    test "a stored upload emits [:samen, :files, :upload, :stop] with the byte size", ctx do
+      handler = {:files_telemetry, System.unique_integer([:positive])}
+      test_pid = self()
+
+      :telemetry.attach(
+        handler,
+        [:samen, :files, :upload, :stop],
+        fn _event, measurements, metadata, _ ->
+          send(test_pid, {:files_upload_telemetry, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      binary = "measure my bytes exactly"
+      assert {:ok, _file} = Files.upload(scope(), payload(%{binary: binary}), base_opts(ctx))
+
+      assert_receive {:files_upload_telemetry, measurements, metadata}
+      assert measurements.byte_size == byte_size(binary)
+      assert metadata.result == :ok
+    end
+
+    test "a REJECTED upload emits NO telemetry (the sample keys on a stored upload)", ctx do
+      handler = {:files_telemetry_reject, System.unique_integer([:positive])}
+      test_pid = self()
+
+      :telemetry.attach(
+        handler,
+        [:samen, :files, :upload, :stop],
+        fn _e, m, meta, _ -> send(test_pid, {:files_upload_telemetry, m, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      # A non-allowlisted type is refused BEFORE storage — no stored upload, no sample.
+      assert {:error, {:content_type_not_allowed, _}} =
+               Files.upload(scope(), payload(%{content_type: "application/x-evil"}), base_opts(ctx))
+
+      refute_receive {:files_upload_telemetry, _, _}
+    end
+  end
 end

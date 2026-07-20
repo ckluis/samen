@@ -108,6 +108,13 @@ defmodule DriftwoodWeb.Router do
     # org so tenant/shared navigation is sticky without a hand-typed UUID.
     samen_session_routes()
 
+    # WS-F5 F5.1 — the framework `GET /metrics` Prometheus scrape endpoint over
+    # `Samen.Metrics.definitions/0`, mounted in ONE line (leverage proof). OFF by
+    # default: the route self-gates to 404 until an operator sets metrics_egress?
+    # (config) + adds a reporter dep. Reporter name matches Samen.Observability's
+    # default (`:driftwood_prometheus`).
+    samen_metrics_route(name: :driftwood_prometheus)
+
     # ADR-013 §4.4/§4.6 — the current-org data-on-the-mount seams every tenant/shared mount
     # carries: `default_org_id` (dev default → Blue Ridge Logistics, so a page with no ?org
     # renders a populated org, not a dead-end) + `org_directory` (the switcher list + the

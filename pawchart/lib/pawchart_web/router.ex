@@ -50,6 +50,12 @@ defmodule PawChartWeb.Router do
   scope "/" do
     pipe_through(:browser)
 
+    # WS-F5 F5.1 — the framework `GET /metrics` Prometheus scrape endpoint over
+    # `Samen.Metrics.definitions/0`, mounted in ONE line (leverage proof). OFF by
+    # default: self-gates to 404 until an operator sets metrics_egress? + adds a
+    # reporter dep. Reporter name matches Samen.Observability's default.
+    samen_metrics_route(name: :pawchart_prometheus)
+
     # 1. CRM — clinic contacts, referring vets, labs, vendors.
     samen_module_routes(:crm, PawChart.Crm,
       repo: PawChart.Repo,

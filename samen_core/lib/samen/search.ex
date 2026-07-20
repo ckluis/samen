@@ -101,25 +101,45 @@ defmodule Samen.Search do
         []
 
       normalized ->
-        resources = Keyword.get(opts, :resources, [])
-        index_mod = Keyword.fetch!(opts, :search_index)
-        repo = Keyword.fetch!(opts, :repo)
-        limit = Keyword.get(opts, :limit, @default_limit)
-        per = Keyword.get(opts, :per_resource_limit, limit)
-
-        by_resource =
-          index_mod
-          |> read_registry(scope)
-          |> Enum.group_by(& &1.resource_name)
-
-        resources
-        |> Enum.flat_map(fn resource ->
-          entries = Map.get(by_resource, resource_key(resource), [])
-          search_one(resource, entries, normalized, scope, repo, per)
-        end)
-        |> Enum.sort_by(& &1.rank, :desc)
-        |> Enum.take(limit)
+        # WS-F5 F5.2 — time the query and emit a latency sample through the bounded
+        # Samen.Metrics machinery (`samen.search.query.duration`). The term is NEVER a
+        # label (unbounded); only the duration + a bounded result_count are measured.
+        t0 = System.monotonic_time()
+        results = run_query(scope, normalized, opts)
+        emit_query_telemetry(System.monotonic_time() - t0, length(results))
+        results
     end
+  end
+
+  defp run_query(scope, normalized, opts) do
+    resources = Keyword.get(opts, :resources, [])
+    index_mod = Keyword.fetch!(opts, :search_index)
+    repo = Keyword.fetch!(opts, :repo)
+    limit = Keyword.get(opts, :limit, @default_limit)
+    per = Keyword.get(opts, :per_resource_limit, limit)
+
+    by_resource =
+      index_mod
+      |> read_registry(scope)
+      |> Enum.group_by(& &1.resource_name)
+
+    resources
+    |> Enum.flat_map(fn resource ->
+      entries = Map.get(by_resource, resource_key(resource), [])
+      search_one(resource, entries, normalized, scope, repo, per)
+    end)
+    |> Enum.sort_by(& &1.rank, :desc)
+    |> Enum.take(limit)
+  end
+
+  defp emit_query_telemetry(duration, result_count) do
+    :telemetry.execute(
+      [:samen, :search, :query, :stop],
+      %{duration: duration, result_count: result_count},
+      %{}
+    )
+  rescue
+    _ -> :ok
   end
 
   # -- one resource ------------------------------------------------------------

@@ -378,4 +378,38 @@ defmodule Samen.Web.CsvTest do
                Person |> Ash.read!(scope: tenant_scope(org_a)) |> Enum.map(& &1.display_name)
     end
   end
+
+  # ==========================================================================
+  # WS-F5 F5.2 · row-count telemetry (samen.csv.export.row_count)
+  # ==========================================================================
+
+  describe "export/3 — row-count telemetry (WS-F5 F5.2)" do
+    test "an export emits [:samen, :csv, :export, :stop] with the row count" do
+      handler = {:csv_telemetry, System.unique_integer([:positive])}
+      test_pid = self()
+
+      :telemetry.attach(
+        handler,
+        [:samen, :csv, :export, :stop],
+        fn _e, measurements, metadata, _ ->
+          send(test_pid, {:csv_export_telemetry, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      org = Ash.UUID.generate()
+      scope = tenant_scope(org)
+      seed_company!(scope, "Alpha")
+      seed_company!(scope, "Bravo")
+      seed_company!(scope, "Charlie")
+
+      _csv = export!(Company, scope)
+
+      assert_receive {:csv_export_telemetry, measurements, metadata}
+      assert measurements.row_count == 3
+      assert metadata.result == :ok
+    end
+  end
 end
