@@ -122,15 +122,18 @@ defmodule Samen.Web.Operator.Reads do
       subs_by_customer: subscriptions_by_customer(mount, scope),
       customers_by_account: customers_by_account(mount, scope, operator_org_id),
       tickets_by_account: ticket_counts_by_account(mount, scope),
-      past_due_by_account: past_due_by_account(mount, scope, now)
+      past_due_by_account: past_due_by_account(mount, scope, now),
+      activity_by_account: activity_by_account(now)
     }
   end
 
   # The assembled account row + its `%HealthScore.HealthBreakdown{}` (ADR-019). Every
   # score input is a bounded count/enum/cent amount already on the row — the score is
   # a pure fold over this map, never a second read. `__activity_days__` is the G12
-  # `pae` recency signal: nil (→ the `:unknown` activity factor, AC-G17-7) until G12
-  # emits — graceful, never faked.
+  # `pae` recency signal wired into the `:activity` factor (G17b): the whole-days age
+  # of this account's most-recent `pae` event (a non-negative integer), or nil (→ the
+  # `:unknown` activity factor, AC-G17-7) when the account has no `pae` events yet OR
+  # no ProductEvent resource is wired — graceful degradation, never a faked number.
   defp account_row(org, joins) do
     tenant_org_id = org.slug
     admins = Map.get(joins.admins_by_account, tenant_org_id, [])
@@ -152,7 +155,7 @@ defmodule Samen.Web.Operator.Reads do
       __open_tickets__: tickets.open,
       __breaching_tickets__: tickets.breaching,
       __past_due__: past_due,
-      __activity_days__: nil
+      __activity_days__: Map.get(joins.activity_by_account, tenant_org_id)
     }
 
     Map.put(row, :__health__, HealthScore.score(row))
@@ -620,6 +623,66 @@ defmodule Samen.Web.Operator.Reads do
           )
       end
     end)
+  end
+
+  # -- private: Analytics (pae recency → the health :activity factor, G17b) ------
+
+  # The account's product-activity RECENCY signal — the G17b wire-up that feeds the
+  # health score's `:activity` factor (`Samen.Web.Operator.HealthScore.activity_factor/1`:
+  # ≤7d → 1.0, ≤30d → 0.7, ≤90d → 0.35, else 0.1; absent → `:unknown`, weights
+  # renormalize). For each tenant org, the WHOLE-DAYS age of its most-recent `pae`
+  # (`Analytics.ProductEvent`, ADR-021) event vs the threaded `now` — a non-negative
+  # integer, mapped by the account's `tenant_org_id` (the `pae` `org_id` IS the tenant
+  # org). nil (→ `:unknown`) ONLY when the account has no `pae` events yet OR no
+  # ProductEvent resource is wired — graceful, never a faked number.
+  #
+  # Resolved via the FRAMEWORK config seam (`Samen.Analytics.product_event_resource/0`),
+  # NOT `Mount.resource/2`: the Analytics scope materializes in its OWN namespace
+  # (`Demo.Analytics.ProductEvent`), decoupled from the operator's Identity mount — the
+  # very seam the `track/1` emit + cross-tenant `AnalyticsReads` rollup use to reach
+  # `pae` across scopes. Unconfigured (samen_web's own default) → the read is inert
+  # (`%{}`), exactly the pre-G17b nil behaviour.
+  #
+  # BOUNDED BY CONSTRUCTION: one row per org (`DISTINCT ON (org_id)` via Ash
+  # `distinct/2` + `distinct_sort/2`, latest `occurred_at` first), hard-capped at
+  # `@lookup_limit`. Reads ONLY `[:org_id, :occurred_at]` — a token-blind timestamp, NO
+  # PII (`pae` carries no subject identity column by construction; `pae_actor_ref` is
+  # never touched). `authorize?: false` reads the operator's OWN book cross-account (the
+  # same trusted non-PII grouping posture as `account_orgs/2` and the cross-tenant
+  # `AnalyticsReads` rollup); the day count is computed HERE so the score stays
+  # clock-free (one `now` per assembly — B9 carry B4-P2-1). Any read failure degrades
+  # to `%{}` — it can never empty out the surrounding page.
+  defp activity_by_account(now) do
+    case Samen.Analytics.product_event_resource() do
+      nil -> %{}
+      resource -> latest_activity_days(resource, now)
+    end
+  rescue
+    _ -> %{}
+  end
+
+  defp latest_activity_days(resource, now) do
+    resource
+    |> Ash.Query.ensure_selected([:org_id, :occurred_at])
+    |> Ash.Query.distinct([:org_id])
+    |> Ash.Query.distinct_sort(occurred_at: :desc)
+    |> Ash.Query.limit(@lookup_limit)
+    |> Ash.read!(authorize?: false)
+    |> Enum.reduce(%{}, fn ev, acc ->
+      case ev.occurred_at do
+        %DateTime{} = at -> Map.put(acc, ev.org_id, activity_days(at, now))
+        _ -> acc
+      end
+    end)
+  rescue
+    _ -> %{}
+  end
+
+  # Whole days between an event timestamp and `now` — non-negative (a future-stamped
+  # row clamps to 0, never a negative age), the exact shape the score's activity bands
+  # expect.
+  defp activity_days(occurred_at, now) do
+    div(max(DateTime.diff(now, occurred_at), 0), 86_400)
   end
 
   defp agents_by_id(mount, scope) do

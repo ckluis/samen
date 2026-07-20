@@ -81,6 +81,12 @@ reading all 33.
 | [032](032-data-residency-us-only.md) | Data residency: US-only, documented (no per-tenant region selection) | Document (no code change) that the single-Postgres-per-host model is US-only with no per-tenant region selection, and name what a real multi-region story would require. |
 | [033](033-in-monorepo-distribution-constraint.md) | Framework distribution stays path-dep-in-monorepo; Hex publishing deferred to a stated trigger | Keep framework distribution as `path:` deps inside the monorepo; defer Hex publishing until a stated trigger, since every consumer today resolves the framework via a path dep. |
 
+## Hardening (F7)
+
+| # | Title | Decision |
+|---|---|---|
+| [034](034-nonpii-type-selfclassify-reviewer-gate.md) | The type-level `:non_pii` self-classification is reviewer-gated (two distinct parties) | Honor a host type's `:non_pii` self-classification only behind a valid two-distinct-party clearance (`Samen.NonPii.TypeClearance`, a pure config allowlist); an ungoverned/self-reviewed one falls through to the mask-unknown-by-default PII result — closing the single-party escape hatch, symmetric with the per-column `non_pii!` gate. |
+
 ---
 
 33 ADRs total. All are `Status: Accepted` except ADR-025 (`Proposed (deferred)`). If you add a

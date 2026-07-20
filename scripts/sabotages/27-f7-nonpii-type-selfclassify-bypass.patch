@@ -1,0 +1,24 @@
+# SABOTAGE: F7 unit 5 gate sabotage — the type-level :non_pii self-classify escape hatch (ADR-034).
+# `Samen.Pii.Classification.classify/1` once again honors a host type's
+# `samen_pii_class/0 => :non_pii` self-classification UNGOVERNED — dropping the
+# two-distinct-party `Samen.NonPii.TypeClearance.cleared?/1` gate. A single party
+# can now wave a whole type out of masking (plaintext, unmasked), reopening the
+# single-party escape hatch the mask-unknown-by-default keystone exists to prevent.
+# The samen_core type-clearance red-path MUST fail.
+# APP: samen_core
+# TEST_FILES: test/pii_type_clearance_test.exs
+# MUST_FAIL: RED: an ungoverned :non_pii self-classifying type classifies :pii (hole closed)
+# MUST_FAIL: RED: a SELF-REVIEW clearance (cleared_by == reviewed_by) does NOT honor :non_pii
+diff --git a/samen_core/lib/samen/pii/classification.ex b/samen_core/lib/samen/pii/classification.ex
+index 18e75a7..cc97ce9 100644
+--- a/samen_core/lib/samen/pii/classification.ex
++++ b/samen_core/lib/samen/pii/classification.ex
+@@ -109,7 +109,7 @@ defmodule Samen.Pii.Classification do
+       # (2) type self-classifies :non_pii — opting a whole type OUT of masking.
+       # Honored ONLY behind a valid two-distinct-party clearance (ADR-034);
+       # otherwise it falls through to the mask-unknown-by-default PII result.
+-      self_class(module) == :non_pii and Samen.NonPii.TypeClearance.cleared?(module) ->
++      self_class(module) == :non_pii ->
+         :non_pii
+
+       # (3) a known non-PII scalar primitive

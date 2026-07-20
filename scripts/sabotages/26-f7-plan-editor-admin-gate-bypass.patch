@@ -1,0 +1,25 @@
+# SABOTAGE: F7 unit 3 (G13) gate sabotage — the plan-editor feature-key ALLOWLIST
+# (the load-bearing NEW web seam). `Samen.Web.Billing.Reads.validate_feature_attrs/1`
+# flips its allowlist predicate to allow-all: `Enum.find/2` never matches an unknown
+# key, so an arbitrary/forbidden feature key sails INTO a plan's `features` entitlement
+# map (Ash does NOT guard plain-`:map` keys — this gate is the only thing keeping the
+# map bounded). The editor's fail-closed feature red-paths MUST fail.
+# APP: samen_web
+# TEST_FILES: test/samen/web/billing_plan_editor_test.exs
+# MUST_FAIL: an unknown feature key in a plan's features map is REFUSED on create
+# MUST_FAIL: an unknown feature key is REFUSED on update
+diff --git a/samen_web/lib/samen/web/billing/reads.ex b/samen_web/lib/samen/web/billing/reads.ex
+index 0000000..1111111 100644
+--- a/samen_web/lib/samen/web/billing/reads.ex
++++ b/samen_web/lib/samen/web/billing/reads.ex
+@@ -412,7 +412,9 @@ defmodule Samen.Web.Billing.Reads do
+         {:ok, attrs}
+
+       {:ok, features} when is_map(features) ->
+-        case Enum.find(Map.keys(features), &(not valid_feature_key?(&1))) do
++        # SABOTAGE (26-f7): the feature-key allowlist is flipped to allow-all — the
++        # predicate never matches, so an unknown key sails into the plan features map.
++        case Enum.find(Map.keys(features), fn _ -> false end) do
+           nil -> {:ok, attrs}
+           bad -> {:error, {:invalid_feature, to_string(bad)}}
+         end

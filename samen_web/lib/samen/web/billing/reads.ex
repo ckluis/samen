@@ -42,6 +42,17 @@ defmodule Samen.Web.Billing.Reads do
   # Bounded lookup reads (form selects, join maps). Single-org fan-outs, not hot lists.
   @detail_limit 200
 
+  # The bounded feature-key allowlist — the single source of truth for the plan +
+  # entitlement editor's FAIL-CLOSED feature validation. Mirrors, by construction, the
+  # Entitlement `feature` one_of AND the intended Plan `features` map keys (blueprint
+  # §Entitlement / §Plan). The Entitlement resource's one_of is the KERNEL suspenders
+  # (Ash refuses an out-of-set atom); the Plan `features` attribute is a plain `:map`,
+  # so Ash does NOT guard its keys — this allowlist is the load-bearing web seam that
+  # keeps arbitrary keys out of a plan's entitlement map (proven refutable by
+  # scripts/sabotages/26-f7-plan-editor-admin-gate-bypass.patch).
+  @feature_keys ~w(basic advanced_reporting api_access custom_domains sso audit_log
+                   priority_support unlimited_seats custom_metric)a
+
   @doc """
   Read billing customers for `scope` with billing_name/billing_email plane-resolved.
   BOUNDED to #{@detail_limit} rows (A3 read-bounding) — this is the lookup read (the
@@ -295,7 +306,221 @@ defmodule Samen.Web.Billing.Reads do
     e -> {:error, e}
   end
 
+  @doc """
+  The bounded feature-key allowlist (the Entitlement `feature` one_of + the intended
+  Plan `features` map keys). The editor UI reads this to render its feature checkboxes;
+  the write side validates every feature against it (fail-closed). Single source of truth.
+  """
+  def feature_keys, do: @feature_keys
+
+  @doc """
+  Read the Tier-0 feature entitlements for `scope` (non-PII config rows). BOUNDED to
+  #{@detail_limit} rows. On any read error the list is EMPTY.
+  """
+  def entitlements(mount, scope) do
+    Mount.resource(mount, Entitlement)
+    |> Ash.Query.ensure_selected([:feature, :granted, :expires_at, :subscription_id, :plan_id])
+    |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@detail_limit)
+    |> Ash.read!(scope: scope)
+  rescue
+    _ -> []
+  end
+
+  @doc """
+  Create a billing Plan through the sanctioned `create: :*` action. Admin-gated by the
+  kernel (`RoleAtLeast :admin`) — pass an admin write scope (`write_scope/2`); this
+  module adds NO policy of its own. The `features` entitlement map is FAIL-CLOSED
+  validated against `feature_keys/0`: an unknown key is REFUSED and NOTHING is written
+  (Ash does not guard plain-`:map` keys, so this is the load-bearing seam). `{:ok, plan}`
+  or `{:error, reason}`.
+  """
+  def create_plan(mount, scope, attrs) do
+    with {:ok, attrs} <- validate_feature_attrs(attrs) do
+      Mount.resource(mount, Plan)
+      |> Ash.Changeset.for_create(:create, attrs, scope: scope)
+      |> Ash.create()
+    end
+  rescue
+    e -> {:error, e}
+  end
+
+  @doc """
+  Update a billing Plan (name/label/description/interval/enabled and the `features`
+  entitlement map) through the sanctioned `update: :*` action. Admin-gated; the
+  `features` map is FAIL-CLOSED validated exactly as in `create_plan/4`. `{:ok, plan}`
+  or `{:error, reason}`.
+  """
+  def update_plan(mount, scope, id, attrs) do
+    with {:ok, attrs} <- validate_feature_attrs(attrs) do
+      update_record(mount, scope, Plan, id, attrs)
+    end
+  rescue
+    e -> {:error, e}
+  end
+
+  @doc "Create a Price for a plan through the sanctioned `create: :*` action (admin-gated)."
+  def create_price(mount, scope, attrs) do
+    Mount.resource(mount, Price)
+    |> Ash.Changeset.for_create(:create, attrs, scope: scope)
+    |> Ash.create()
+  rescue
+    e -> {:error, e}
+  end
+
+  @doc "Update a Price through the sanctioned `update: :*` action (admin-gated)."
+  def update_price(mount, scope, id, attrs), do: update_record(mount, scope, Price, id, attrs)
+
+  @doc """
+  Grant a bounded feature Entitlement on a subscription through the sanctioned
+  create/update action. Admin-gated (`write_scope/2`). The `feature` is FAIL-CLOSED
+  validated against `feature_keys/0` (belt; the resource's `feature` one_of is the
+  kernel suspenders). Idempotent per subscription+feature: an existing row is flipped
+  to granted (`update: :*`), otherwise a new row is created. `attrs` keys (atom or
+  string): `subscription_id` (required), `feature` (required), `plan_id`, `expires_at`.
+  `{:ok, entitlement}` or `{:error, reason}`.
+  """
+  def grant_entitlement(mount, scope, attrs) do
+    with {:ok, feature} <- validate_feature(fetch(attrs, :feature)) do
+      set_entitlement(mount, scope, attrs, feature, true)
+    end
+  rescue
+    e -> {:error, e}
+  end
+
+  @doc """
+  Revoke a feature Entitlement on a subscription — flips `granted` to false through the
+  sanctioned `update: :*` action (admin-gated). Same fail-closed feature validation.
+  `{:ok, entitlement}` or `{:error, reason}`.
+  """
+  def revoke_entitlement(mount, scope, attrs) do
+    with {:ok, feature} <- validate_feature(fetch(attrs, :feature)) do
+      set_entitlement(mount, scope, attrs, feature, false)
+    end
+  rescue
+    e -> {:error, e}
+  end
+
   # -- private -----------------------------------------------------------------
+
+  # FAIL-CLOSED plan-features validation (the load-bearing web seam — Ash does not
+  # guard plain-`:map` keys). Missing `features` → attrs unchanged; an unknown key →
+  # refuse with `{:error, {:invalid_feature, key}}` so NOTHING is written.
+  defp validate_feature_attrs(attrs) do
+    case fetch_features(attrs) do
+      :none ->
+        {:ok, attrs}
+
+      {:ok, features} when is_map(features) ->
+        case Enum.find(Map.keys(features), &(not valid_feature_key?(&1))) do
+          nil -> {:ok, attrs}
+          bad -> {:error, {:invalid_feature, to_string(bad)}}
+        end
+
+      {:ok, _} ->
+        {:error, :invalid_features}
+    end
+  end
+
+  defp fetch_features(attrs) when is_map(attrs) do
+    cond do
+      Map.has_key?(attrs, :features) -> {:ok, Map.get(attrs, :features)}
+      Map.has_key?(attrs, "features") -> {:ok, Map.get(attrs, "features")}
+      true -> :none
+    end
+  end
+
+  defp fetch_features(_), do: :none
+
+  defp valid_feature_key?(key) when is_atom(key), do: key in @feature_keys
+
+  defp valid_feature_key?(key) when is_binary(key),
+    do: Enum.any?(@feature_keys, &(Atom.to_string(&1) == key))
+
+  defp valid_feature_key?(_), do: false
+
+  # FAIL-CLOSED single-feature validation. Returns the canonical atom on success. An
+  # out-of-set / missing feature is refused BEFORE any write.
+  defp validate_feature(nil), do: {:error, :missing_feature}
+
+  defp validate_feature(feature) when is_atom(feature) do
+    if feature in @feature_keys, do: {:ok, feature}, else: {:error, {:invalid_feature, feature}}
+  end
+
+  defp validate_feature(feature) when is_binary(feature) do
+    case Enum.find(@feature_keys, &(Atom.to_string(&1) == feature)) do
+      nil -> {:error, {:invalid_feature, feature}}
+      atom -> {:ok, atom}
+    end
+  end
+
+  defp validate_feature(other), do: {:error, {:invalid_feature, other}}
+
+  defp set_entitlement(mount, scope, attrs, feature, granted) do
+    sub_id = fetch(attrs, :subscription_id)
+
+    existing =
+      Mount.resource(mount, Entitlement)
+      |> Ash.Query.filter(subscription_id == ^sub_id and feature == ^feature)
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+
+    mutable =
+      %{granted: granted}
+      |> maybe_put(:plan_id, fetch(attrs, :plan_id))
+      |> maybe_put(:expires_at, fetch(attrs, :expires_at))
+
+    case existing do
+      nil ->
+        create_attrs =
+          mutable
+          |> Map.put(:feature, feature)
+          |> Map.put(:subscription_id, sub_id)
+          |> Map.put(:org_id, fetch(attrs, :org_id) || scope_org(scope))
+
+        Mount.resource(mount, Entitlement)
+        |> Ash.Changeset.for_create(:create, create_attrs, scope: scope)
+        |> Ash.create()
+
+      ent ->
+        ent
+        |> Ash.Changeset.for_update(:update, mutable, scope: scope)
+        |> Ash.update()
+    end
+  end
+
+  # Read-then-update through the sanctioned `update: :*` action (admin-gated by the
+  # kernel; the read is member-visible but the update policy holds).
+  defp update_record(mount, scope, name, id, attrs) do
+    record =
+      Mount.resource(mount, name)
+      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+
+    case record do
+      nil ->
+        {:error, :not_found}
+
+      record ->
+        record
+        |> Ash.Changeset.for_update(:update, attrs, scope: scope)
+        |> Ash.update()
+    end
+  rescue
+    e -> {:error, e}
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp fetch(attrs, key) when is_map(attrs),
+    do: Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key))
+
+  defp fetch(_, _), do: nil
+
+  defp scope_org(%Samen.Scope{actor: %{org_id: org}}), do: org
+  defp scope_org(_), do: nil
 
   defp delete_record(mount, scope, name, id) do
     record =

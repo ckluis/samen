@@ -86,7 +86,7 @@ This is the point of the repo, not a footnote: **every guarantee ships with a gr
 red-path proof, and a sabotage that proves the test can actually fail.** A test that cannot
 fail is treated as a bug.
 
-- **Committed sabotage harness.** `scripts/sabotage.sh` replays **15 committed sabotage
+- **Committed sabotage harness.** `scripts/sabotage.sh` replays **28 committed sabotage
   patches** (`scripts/sabotages/*.patch`). For each: SHA-256 the touched files → apply the
   patch → the *named* tests **must** fail (not "something broke") → revert → verify a
   byte-exact restore. Run it with:
@@ -95,7 +95,7 @@ fail is treated as a bug.
   SAMEN_SABOTAGE=1 ./ci.sh
   ```
 
-  It is opt-in because it deliberately breaks the tree 15 times and re-runs DB-backed
+  It is opt-in because it deliberately breaks the tree 28 times and re-runs DB-backed
   suites; the default CI path stays green-only. Later gates add a new `.patch` rather than
   re-deriving sabotages by hand.
 - **Destruction oracle for crypto-shred.** `mix samen.verify.no_plaintext_pii` runs as a
@@ -107,20 +107,20 @@ fail is treated as a bug.
   routes, and drives sabotages against the generated gate to prove it is non-vacuous.
 - **AC-mapped gate reports.** Every workstream's adversarial gate is written up in `docs/`
   (`gate-ws-*.md`, `gate-*.md`): each acceptance criterion mapped to a named covering test,
-  suite counts reproduced, sabotages re-flipped. The newest are
-  [docs/gate-ws-e.md](docs/gate-ws-e.md) and [docs/gate-ws-d.md](docs/gate-ws-d.md).
+  suite counts reproduced, sabotages re-flipped. The newest is the full F1–F7 burn-down gate
+  [docs/gate-burndown.md](docs/gate-burndown.md) (see also [docs/gate-ws-e.md](docs/gate-ws-e.md)).
 
-Suite totals (reproduced in the WS-E gate with `SAMEN_SABOTAGE=1 ./ci.sh`, all
+Suite totals (reproduced in the F1–F7 burn-down gate with `SAMEN_SABOTAGE=1 ./ci.sh`, all
 `--warnings-as-errors` clean):
 
 | Suite | Passing |
 |---|---|
-| `samen_core` | 1179 |
-| `samen_web` | 598 |
-| `demo` | 454 |
-| `driftwood` | 110 |
+| `samen_core` | 1285 |
+| `samen_web` | 647 |
+| `demo` | 465 |
+| `driftwood` | 123 |
 | `pawchart` | 49 |
-| sabotage harness | 15/15 sabotages flipped their named tests; byte-exact restores |
+| sabotage harness | 28/28 sabotages flipped their named tests; byte-exact restores |
 
 ## Getting started
 
@@ -174,7 +174,7 @@ command in this README and that tutorial is verified against the CI probes' exec
 | `pawchart/` | Reference vertical: veterinary — the thin-mount shape the generator emits |
 | `spikes/` | The mechanism spikes (s00–s07) that de-risked the kernel; still run by root `ci.sh` |
 | `docs/` | ADRs (`docs/adr/`), guides (`docs/guides/`), the gate reports (`docs/gate-*.md`), the roadmap (`docs/saas-gap-roadmap.md`), and an archived long-form design variant (`docs/archive/samen-foundry.html`) |
-| `scripts/` | `sabotage.sh` + the 15 committed sabotage patches |
+| `scripts/` | `sabotage.sh` + the 28 committed sabotage patches |
 | `ci.sh` | The root gate: everything above, in sequence, fail-fast |
 
 ## Docs

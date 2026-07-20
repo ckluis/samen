@@ -20,6 +20,7 @@ defmodule Demo.SupportScopePolicyMatrixTest do
 
   alias Demo.SupportScope.{Ticket, Conversation, Message, Agent, Sla, Macro, Csat}
   alias Demo.Identity.{Org, User}
+  alias Samen.Factory
 
   # --- helpers ---------------------------------------------------------------
 
@@ -91,19 +92,26 @@ defmodule Demo.SupportScopePolicyMatrixTest do
   end
 
   defp mk_agent(org_id) do
-    {:ok, a} =
-      Agent
-      |> Ash.Changeset.for_create(:create, %{
-        handle: "agent-#{:rand.uniform(999_999)}",
-        full_name: %Samen.Type.FullName{first: "Dana", last: "Support"},
-        email: "dana-#{:rand.uniform(999_999)}@support.example",
-        status: :active,
-        role: :agent,
-        org_id: org_id
-      })
-      |> Ash.create(authorize?: false)
-
-    a
+    # Routed through the governed Samen.Factory chokepoint (Samen.Pii.WriteGuard /
+    # Samen.Vault.Change) instead of a raw Ash.create — same guarantee a real
+    # tenant write gets. Agent.email is a SCALAR pii_attribute (not the composite
+    # `emails` list `Factory.person/3`'s `:email` option builds — see
+    # samen_core/lib/samen/scopes/support/blueprint.ex `define_agent/5`), so only
+    # `full_name` comes from `person/2`; `email` is passed as a plain attr.
+    Factory.create!(
+      Agent,
+      Map.merge(
+        Factory.person("Dana", "Support"),
+        %{
+          handle: "agent-#{:rand.uniform(999_999)}",
+          email: "dana-#{:rand.uniform(999_999)}@support.example",
+          status: :active,
+          role: :agent,
+          org_id: org_id
+        }
+      ),
+      authorize?: false
+    )
   end
 
   defp mk_message(org_id, conversation_id) do

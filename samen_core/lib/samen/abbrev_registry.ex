@@ -54,8 +54,15 @@ defmodule Samen.AbbrevRegistry do
   schema it writes** + this **read-compat shim**. Fully partitioning the compile-time
   verifier (`Samen.Verifiers.AbbrevRegistry`) + every reader to be host-aware is a
   50+ file change (ADR-006 §3) and ships as the phased follow-on ADR-025 — the verifier
-  still reads the flattened global view here, which is correct because `"hosts"` is empty
-  in-tree today (no cross-host abbrev reuse committed yet).
+  still reads the flattened global view here, which is correct **while the flattening is
+  lossless**. `"hosts"` is no longer empty in-tree — it carries a handful of
+  non-conflicting host allocations (the F3 consent-ledger abbrevs, one per host, all
+  distinct) — but every host abbrev still resolves to exactly one owner across all
+  namespaces, so the flat union equals the intended view. A fail-closed **tripwire** now
+  enforces that invariant: `flatten_conflicts/1` detects any abbrev owned by two
+  namespaces with different owners, and `load/0` RAISES (naming ADR-025) the day a real
+  cross-host prefix reuse lands — turning ADR-025's latent risk into a loud,
+  self-enforcing gate rather than a silent false-positive.
 
   ## Invariants enforced by the verifier
 
@@ -103,12 +110,22 @@ defmodule Samen.AbbrevRegistry do
   """
   @spec load(String.t()) :: %{optional(String.t()) => String.t()}
   def load(registry_path) do
-    %{global: global, hosts: hosts} = load_namespaced(registry_path)
+    namespaced = load_namespaced(registry_path)
 
-    # The global cross-host net wins on collision-report ordering, but the flattened
-    # view is only ambiguous if a host reused a global abbrev for a DIFFERENT owner —
-    # which validate_host/4 forbids at write time. Host entries fill in first, global
-    # (the authoritative net) overwrites, so the flat view stays stable + deterministic.
+    # ADR-025 fail-closed tripwire. The flattened view is lossless ONLY while no abbrev
+    # is owned by two namespaces with different owners. The day a real cross-host prefix
+    # reuse lands (or a host owner disagrees with the global net), flattening would
+    # silently drop/override an owner and the flattened-view verifier would false-positive
+    # a collision on the other resource. Refuse to compile instead — see flatten_conflicts/1.
+    case flatten_conflicts(namespaced) do
+      [] -> flatten(namespaced)
+      conflicts -> raise flatten_conflict_message(conflicts, registry_path)
+    end
+  end
+
+  # The lossless flatten: host entries fill in first, the authoritative global net
+  # overwrites. Only called once flatten_conflicts/1 has proven the view is unambiguous.
+  defp flatten(%{global: global, hosts: hosts}) do
     Enum.reduce(hosts, %{}, fn {_host, ns}, acc -> Map.merge(acc, ns) end)
     |> Map.merge(global)
   end
@@ -171,6 +188,78 @@ defmodule Samen.AbbrevRegistry do
                 "must be a JSON object of host → {abbrev → owner}."
     end
   end
+
+  @doc """
+  Detects a **lossy flattening** in a namespaced registry — the ADR-025 tripwire
+  condition. Pure (no IO), cheap (single pass), safe on the hot compile path.
+
+  Returns the list of abbrevs whose flattened owner is **ambiguous**: the SAME abbrev
+  is owned, with DIFFERENT owners, across more than one namespace. That covers both
+  lossy cases exactly:
+
+    * **(a) cross-host reuse** — two hosts own the same abbrev for distinct resources; and
+    * **(b) host-vs-global mismatch** — a host owns an abbrev whose owner differs from the
+      global map's owner for that abbrev.
+
+  When this is empty the flattened compat view (`load/0`) is lossless and the
+  flattened-view verifier (`Samen.Verifiers.AbbrevRegistry`) is still correct. When it is
+  non-empty, `load/0` fails closed (raises) rather than silently picking one owner — the
+  deferred host-partition (ADR-025) must now land. Same-owner reuse of an abbrev across
+  namespaces is NOT a conflict (flattening is lossless), so it is not reported.
+
+  Each entry is `%{abbrev: abbrev, owners: [{source, owner}, …]}` where `source` is the
+  host name (string) or `:global`, sorted for stable output.
+  """
+  @spec flatten_conflicts(%{global: map(), hosts: map()}) :: [
+          %{abbrev: String.t(), owners: [{String.t() | :global, String.t()}]}
+        ]
+  def flatten_conflicts(%{global: global, hosts: hosts})
+      when is_map(global) and is_map(hosts) do
+    host_sources =
+      Enum.flat_map(hosts, fn {host, ns} ->
+        Enum.map(ns, fn {abbrev, owner} -> {abbrev, {host, owner}} end)
+      end)
+
+    global_sources = Enum.map(global, fn {abbrev, owner} -> {abbrev, {:global, owner}} end)
+
+    (host_sources ++ global_sources)
+    |> Enum.group_by(fn {abbrev, _src_owner} -> abbrev end, fn {_abbrev, src_owner} -> src_owner end)
+    |> Enum.filter(fn {_abbrev, src_owners} ->
+      src_owners |> Enum.map(fn {_src, owner} -> owner end) |> Enum.uniq() |> length() > 1
+    end)
+    |> Enum.map(fn {abbrev, src_owners} -> %{abbrev: abbrev, owners: Enum.sort(src_owners)} end)
+    |> Enum.sort_by(& &1.abbrev)
+  end
+
+  defp flatten_conflict_message(conflicts, registry_path) do
+    details =
+      conflicts
+      |> Enum.map_join("\n", fn %{abbrev: abbrev, owners: owners} ->
+        competing =
+          Enum.map_join(owners, ", ", fn {src, owner} -> "#{source_label(src)} → #{owner}" end)
+
+        "  #{inspect(abbrev)}: #{competing}"
+      end)
+
+    """
+    Samen abbrev registry at #{registry_path} has a LOSSY FLATTENING: an abbrev is owned \
+    by more than one namespace with DIFFERENT owners. The flattened compat view \
+    (Samen.AbbrevRegistry.load/0) can keep only ONE owner, so it would silently drop the \
+    other and the flattened-view verifier (Samen.Verifiers.AbbrevRegistry) would \
+    false-positive a collision on the dropped resource. This is the ADR-025 trigger — the \
+    first legitimate cross-host prefix reuse (or a host-vs-global owner disagreement) has \
+    landed. The deferred abbrev verifier host-partition MUST now be implemented (see \
+    docs/adr/025-abbrev-verifier-host-partition-followon.md): validate each resource against \
+    its OWN host namespace (validate_host/4) instead of the flattened union. Refusing to \
+    compile (fail-closed).
+
+    Conflicting abbrevs (abbrev: competing owners):
+    #{details}
+    """
+  end
+
+  defp source_label(:global), do: "global net"
+  defp source_label(host), do: "host #{inspect(host)}"
 
   @doc """
   Returns the owner module name (string) registered for `abbrev`, or `nil`.

@@ -1,0 +1,24 @@
+# SABOTAGE: F7 slice gate sabotage — the ADR-025 flatten-conflict tripwire (build-integrity).
+# `Samen.AbbrevRegistry.flatten_conflicts/1` no longer detects a 2-way lossy flattening
+# (the real-world "first legitimate cross-host prefix reuse" case: the same abbrev owned by
+# two namespaces with distinct owners). The `> 1` distinct-owner test is weakened to `> 2`,
+# so a cross-host reuse (and a host-vs-global mismatch) go UNDETECTED, the compat shim's
+# `load/0` silently picks one owner instead of failing closed, and the flattened-view
+# verifier would false-positive on the shadowed resource. The samen_core tripwire red-paths
+# MUST fail.
+# APP: samen_core
+# TEST_FILES: test/abbrev_flatten_conflict_test.exs
+# MUST_FAIL: RAISES fail-closed with a message naming ADR-025
+# MUST_FAIL: reports the shadowed abbrev with its competing owners
+diff --git a/samen_core/lib/samen/abbrev_registry.ex b/samen_core/lib/samen/abbrev_registry.ex
+--- a/samen_core/lib/samen/abbrev_registry.ex
++++ b/samen_core/lib/samen/abbrev_registry.ex
+@@ -225,7 +225,7 @@ defmodule Samen.AbbrevRegistry do
+     (host_sources ++ global_sources)
+     |> Enum.group_by(fn {abbrev, _src_owner} -> abbrev end, fn {_abbrev, src_owner} -> src_owner end)
+     |> Enum.filter(fn {_abbrev, src_owners} ->
+-      src_owners |> Enum.map(fn {_src, owner} -> owner end) |> Enum.uniq() |> length() > 1
++      src_owners |> Enum.map(fn {_src, owner} -> owner end) |> Enum.uniq() |> length() > 2
+     end)
+     |> Enum.map(fn {abbrev, src_owners} -> %{abbrev: abbrev, owners: Enum.sort(src_owners)} end)
+     |> Enum.sort_by(& &1.abbrev)

@@ -150,15 +150,17 @@ defmodule Samen.AbbrevRegistryTest do
       end
     end
 
-    test "load/1 (compat shim) flattens host namespaces into the global view" do
+    test "load/1 (compat shim) RAISES fail-closed on a cross-host flatten conflict (ADR-025 tripwire)" do
+      # ns_file! reuses "wid" across two hosts for DISTINCT owners — flattening would
+      # silently drop one owner, so load/0 fails closed instead of picking a winner.
       path = ns_file!()
 
       try do
-        flat = Reg.load(path)
-        # global net + both hosts' entries all present in the flat union.
-        assert flat["com"] == "MyApp.Crm.Contact"
-        # Flattened: last-writer (global) wins for a collision; "wid" resolves to a host entry.
-        assert flat["wid"] in ["Widgetco.Vertical.Widget", "Acme.Vertical.Gadget"]
+        assert_raise RuntimeError, ~r/LOSSY FLATTENING/, fn -> Reg.load(path) end
+        # ...but the namespaced read stays non-raising: the allocator's path is unaffected.
+        assert %{hosts: h} = Reg.load_namespaced(path)
+        assert get_in(h, ["widgetco", "wid"]) == "Widgetco.Vertical.Widget"
+        assert get_in(h, ["acme", "wid"]) == "Acme.Vertical.Gadget"
       after
         File.rm(path)
       end

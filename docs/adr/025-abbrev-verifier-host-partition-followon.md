@@ -17,16 +17,23 @@ ADR-023 shipped, **bounded**, in WS-D D8:
 - `gen.app` / `gen.scope` / `gen.resource` reserve paths now route through the allocator into the
   app's host namespace (no hand-edit of `abbrev_registry.json`).
 
-The committed registry (263 entries) is **byte-untouched** — no `"hosts"` key exists in-tree yet, so
-the flattened view equals the legacy map exactly.
+The committed registry's legacy global `"abbrevs"` map (263 entries) is **byte-untouched** — the
+allocator only ever writes host namespaces. A `"hosts"` object now exists in-tree, carrying five
+non-conflicting allocations (the F3 consent-ledger abbrevs — one per host: `demo`/`mce`,
+`driftwood`/`fmv`, `pawchart`/`vmv`, `samen_core`/`sxv`, `samen_web`/`wmv`), each a distinct abbrev
+reserved via the sanctioned allocator. Because every host abbrev resolves to exactly one owner across
+all namespaces, the flattened view (263 + 5 = 268 entries) is still **lossless** and the
+flattened-view verifier is still correct. There is currently **zero** cross-host abbrev reuse and
+**zero** host-vs-global owner mismatch.
 
 ## 2. What is deferred here (the 50+ file partition ADR-006 §3 named)
 
 Fully making the ownership ledger host-*aware end-to-end* (not just host-namespaced at write time):
 
 1. **`Samen.Verifiers.AbbrevRegistry` host-partition.** The compile-time verifier currently reads the
-   flattened global view via `AbbrevRegistry.load/0`. It is *correct today* because `"hosts"` is empty
-   in-tree — every committed resource still resolves through the legacy global map. Once two hosts
+   flattened global view via `AbbrevRegistry.load/0`. It is *correct today* because the flattening is
+   **lossless** — `"hosts"` carries only non-conflicting allocations, so every committed resource still
+   resolves to exactly one owner across all namespaces (a tripwire, below, now enforces this). Once two hosts
    legitimately reuse a physical prefix (the whole point of Option B), the verifier must validate a
    resource against **its own host's namespace** (`validate_host/4`) rather than the flattened union,
    so a legitimate cross-host reuse compiles and an intra-host recycle still fails. This requires
@@ -50,3 +57,32 @@ record so the follow-on is tracked, not lost.
 Land ADR-025 when the **first legitimate cross-host prefix reuse** is committed (two hosts owning the
 same 3-letter abbrev for distinct resources) — at that moment the flattened-view verifier would
 false-positive a collision, and the host-partition becomes load-bearing rather than cosmetic.
+
+## 5. F7 slice shipped — the fail-closed flatten-conflict tripwire
+
+The full 50+-file partition (§2) **remains deferred**. What shipped in F7 is the safe bounded slice
+that makes the deferral *self-enforcing* rather than a silent latent risk:
+
+- **`Samen.AbbrevRegistry.flatten_conflicts/1`** — a pure, cheap (single-pass, no IO), hot-path-safe
+  guard that returns every abbrev owned by more than one namespace with *different* owners, i.e.
+  exactly the condition under which the flattened view is ambiguous: (a) cross-host reuse (two hosts,
+  same abbrev, distinct owners) or (b) a host-vs-global owner mismatch. Same-owner reuse is not a
+  conflict (flattening stays lossless), so it is not reported.
+- **`load/0`/`load/1` fail closed.** The flattened compat shim now calls `flatten_conflicts/1` and
+  **raises** — with a message naming this ADR — when a conflict exists, instead of silently picking one
+  owner. Because the compile-time verifier (`Samen.Verifiers.AbbrevRegistry`) loads through `load/0`,
+  the build fails closed the day a real cross-host reuse lands, forcing the §2 partition to be
+  implemented rather than false-positiving on the shadowed resource.
+- **The allocator is unaffected.** The tripwire lives in the *flattened* read only. The allocator's
+  host-aware path (`load_namespaced/1` → `validate_host/4`, and `reserve!/4`'s direct file read) never
+  flattens, so it still reads and reserves a fresh non-conflicting abbrev normally. A lossy flattening
+  is a flattened-view problem, not a namespaced-view problem.
+- **No behavior change today.** The committed registry has zero flatten-conflicts (263 global + 5
+  distinct host allocations), so `load/0` returns the 268-entry union unchanged and the whole suite +
+  every gen probe stays green.
+
+Proofs: `samen_core/test/abbrev_flatten_conflict_test.exs` (green: committed registry has zero
+conflicts, load returns the union, allocator still reserves; red: synthetic cross-host reuse and
+host-vs-global mismatch both report a conflict and make `load/0` raise; positive control: the same
+registry minus the conflict does not raise). Sabotage:
+`scripts/sabotages/28-f7-abbrev-flatten-conflict-tripwire.patch`.

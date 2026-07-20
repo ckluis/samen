@@ -1,0 +1,26 @@
+# SABOTAGE: F7 G11 gate — the fail-honest lifecycle-email delivery boundary (RP-D1).
+# Makes the lifecycle EmailWorker's decision fall an UNCONFIGURED adapter in a
+# non-:test env back to the LocalSink and fake a "sent" lifecycle email it never
+# dispatched — the exact Invariant D1 lie the fail-honest adapter contract
+# (ADR-014) abolishes, carried to the transactional lifecycle-email path.
+# APP: samen_core
+# TEST_FILES: test/delivery_lifecycle_test.exs
+# MUST_FAIL: RP-D1: nil adapter in a non-:test env is BLOCKED, never sent
+# MUST_FAIL: no branch routes an unconfigured adapter to :deliver in any non-test env
+# MUST_FAIL: LocalSink is NEVER the fallback in a non-:test env
+# MUST_FAIL: RP-D1 (integration): NO adapter at all in non-:test env → blocked, not :ok
+diff --git a/samen_core/lib/samen/delivery/lifecycle/email_worker.ex b/samen_core/lib/samen/delivery/lifecycle/email_worker.ex
+--- a/samen_core/lib/samen/delivery/lifecycle/email_worker.ex
++++ b/samen_core/lib/samen/delivery/lifecycle/email_worker.ex
+@@ -144,7 +144,10 @@
+   @spec decide(module() | nil, map(), atom()) ::
+           {:blocked, :adapter_unconfigured} | {:deliver, module(), map()}
+   def decide(nil, _config, :test), do: {:deliver, Samen.Delivery.LocalSink, %{}}
+-  def decide(nil, _config, _env), do: {:blocked, :adapter_unconfigured}
++  # SABOTAGE (F7 G11 gate, RP-D1): the exact D1 lie — an unconfigured adapter in a
++  # non-:test env falling back to the LocalSink and faking a "sent" lifecycle email
++  # it never dispatched. The fail-honest RP-D1 tests MUST fail with this.
++  def decide(nil, _config, _env), do: {:deliver, Samen.Delivery.LocalSink, %{}}
+
+   def decide(adapter, config, _env) when is_atom(adapter) do
+     if adapter.configured?(config) do

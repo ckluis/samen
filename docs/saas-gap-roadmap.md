@@ -58,17 +58,17 @@ op-todo (human operator task).
 | G5 | **Onboarding + empty states + first-run** | end-user | Inconsistent empty states, no first-run, no in-app sample data | H | M | web | ✅ shipped (WS-A) |
 | G6 | **Feature-flag evaluation engine** | operator, harden | Flags are config rows nothing evaluates; no bucketing/targeting/rollout; experiments absent | H | S/M | kernel+web | ✅ shipped (WS-B) |
 | G7 | **Revenue analytics (MRR movements)** | operator | Snapshot MRR only; no movements/churn/cohorts/NRR | H | M | web | ✅ shipped (WS-B) |
-| G8 | **Tenant lifecycle admin** | operator | No provision/suspend/offboard/export/delete actions from the operator plane | H | M | web+kernel | P1 |
+| G8 | **Tenant lifecycle admin** | operator | No provision/suspend/offboard/export/delete actions from the operator plane | H | M | web+kernel | 🟡 dunning surface shipped (WS-F7); provision/suspend/offboard actions still open |
 | G9 | **Global search** | end-user, harden | PII-safe index registry exists; zero search action / ⌘K / UI | H | M | kernel+web | ✅ shipped (WS-E) |
 | G10 | **Getting-started tutorial + cookbook + README** | builder | 3 reference guides, no zero-to-feature walkthrough, no gate-failure index | M-H | S | gen | ✅ shipped (WS-D) |
-| G11 | **Status/health/SLA + alerting** | operator | Metrics defined but unwired; bare `/healthz`; no status page/alerts/health dashboard | H | M | web+gen | P1 |
+| G11 | **Status/health/SLA + alerting + lifecycle email** | operator | Metrics defined but unwired; bare `/healthz`; no status page/alerts/health dashboard | H | M | web+gen | 🟡 `/readyz` (F1) + metrics egress/alerts runbook (F5) + fail-honest lifecycle-email delivery (WS-F7); public status page still open |
 | G12 | **Product analytics over CDC** | operator | No event capture/funnels/retention; vault-excluded CDC projection is an ideal unused feed — privacy-correct-by-construction moat | H | L | new (web) | ✅ seed shipped (WS-B) |
-| G13 | **Billing depth: Stripe sync + usage rating** | operator, harden | Stripe-mirror schema inert; SyncAdapter stub; no rating/proration/tax | M-H | L | kernel+op-todo | P1 |
+| G13 | **Billing depth: Stripe sync + usage rating** | operator, harden | Stripe-mirror schema inert; SyncAdapter stub; no rating/proration/tax | M-H | L | kernel+op-todo | 🟡 plan/entitlement editor shipped (WS-F7); Stripe sync + usage rating/proration/tax = op-todo (live keys) |
 | G14 | **Files engine** | end-user, harden | Metadata resource only; no storage adapter/upload/preview | M/H | M | kernel+web | ✅ shipped (WS-E) |
 | G15 | **Import/export (CSV mapper)** | end-user | None at any granularity; catalog-as-data makes a generic mapper feasible; export = highest-risk mask-by-omission vector | M/H | M | web | ✅ shipped (WS-E) |
 | G16 | **Deploy story (Fly/Neon templates)** | builder | Zero deploy artifacts; all carried as operator TODOs | H | M | gen+op-todo | ✅ shipped (WS-D) |
 | G17 | **Per-tenant health scores + drill-down** | operator | Health is a single subscription-status pill | M-H | S | web | ✅ shipped (WS-B) |
-| G17b | Fidelity follow-on (B9 gate F2): wire a pae-recency read into `__activity_days__` (currently hardcoded nil → activity factor always :unknown) + flag-adoption breadth into the adoption factor — pae now emits, the seam is ready | operator | — | M | S | web | P2 |
+| G17b | Fidelity follow-on (B9 gate F2): wire a pae-recency read into `__activity_days__` (currently hardcoded nil → activity factor always :unknown) + flag-adoption breadth into the adoption factor — pae now emits, the seam is ready | operator | — | M | S | web | ✅ activity factor shipped (WS-F7); flag-adoption fold carried |
 | G18 | **Self-serve settings (profile/2FA/sessions/API keys)** | end-user | Models exist, no screens, no `/settings` route | M | M | web | ✅ shipped (WS-E; 2FA/sessions host-owned by design) |
 | G19 | **DSAR self-serve + compliance reporting** | operator | Erasure/audit built; no DSAR export, retention admin, SOC2 evidence surface | M | M | web | P2 |
 | G20 | **Responsive/mobile + perf polish** | end-user | Zero `@media`; no `assign_async`/`stream`/skeletons | M/H | M | web | ✅ shipped (WS-E; skeleton primitive, `assign_async` deferred) |
@@ -78,7 +78,7 @@ op-todo (human operator task).
 | G24 | **i18n / timezone / currency** | end-user | USD + UTC hardcoded, no gettext | M | M | web | P2 |
 | G25 | **A11y (kit-level)** | end-user | 3 aria/role/alt occurrences total; kit fix = fleet leverage | L-M | M | web | P2 |
 | G26 | **Test/red-path scaffolds for verticals** | builder | 4 mandated test files hand-copied per resource | M | M | gen | ✅ shipped (WS-D) |
-| G27 | **Misc kernel residues** | harden | Webhook A6 over-strict guard; rollup cron ADR-007; abbrev-registry tax ADR-006; Oban multi-node concurrency | L-M | S-M | kernel+op-todo | P2 |
+| G27 | **Misc kernel residues** | harden | Webhook A6 over-strict guard; rollup cron ADR-007; abbrev-registry tax ADR-006; Oban multi-node concurrency | L-M | S-M | kernel+op-todo | 🟡 A6 done (Gate-6, verified WS-F7); ADR-025 abbrev tripwire (WS-F7); rollup cron (ADR-007) + Oban multi-node = residue/op-todo |
 | G28 | **Operator RBAC granularity / backlog tooling** | operator | Closed role set fine for now; backlog = link out | L | M | web | P3 |
 
 Human-operator TODOs (not agent work, tracked for completeness): real Neon PITR drill, AWS
@@ -539,6 +539,128 @@ but sabotage #15 was REFRESHED, see Unit 7).
 **Suite totals after F6:** samen_core 1235 · samen_web 623 · demo 465 · driftwood 123 · pawchart 49. Sabotage
 harness: 24 patches (sabotage #15 refreshed for the ui.ex→ui/table.ex path move). templates.ex 4979→710 LOC ·
 ui.ex 1599→156 LOC. ci.sh 366.57s→331.78s.
+
+---
+
+## WS-F7 — Cockpit v2 + tail + final gate (2026-07-20) — the FINAL burn-down phase
+
+Closes the "Operator Cockpit v2" cluster + the WS-C/kernel tail, then gates the whole F1–F7 burn-down.
+Workstream gate: **GO** — `docs/gate-burndown.md` (AC-mapped, F1–F7). All units shipped:
+
+1. **G8 — Dunning surface (billing cockpit).** `Samen.Web.Billing.Dunning` (a bounded per-customer fold
+   over `Billing.Reads` — no new Ash read, ≤ the `limit(200)` source reads) surfaces accounts in dunning
+   (past-due invoices + `:past_due`/`:unpaid` subscriptions) with count/amount/oldest-days-overdue,
+   using the EXACT `HealthScore.dunning?/1` definition so the cockpit cannot disagree with the score.
+   Customer `billing_name` 🔒 resolves through `Samen.Api.PiiResolution` (tenant clear / operator ••••).
+   `DunningLive` mounted at `/billing/dunning`. Masking-watch-list trio `dunning_masking_test.exs` (5):
+   green/red/`assert_leak_detected!` twin + anti-tautology. NO new sabotage patch — the masked field
+   flows through the already-bound `PiiResolution` seam (patches 24 + 10) with an in-test refutability twin.
+
+2. **G11 — Lifecycle emails, BYO-ESP-wired (fail-honest boundary; NO first-party adapter).**
+   `Samen.Delivery.Lifecycle` enqueue seam + `Lifecycle.EmailWorker` — the transactional sibling of the
+   marketing `SendWorker`, dispatching through the existing `Samen.Delivery.Adapter` boundary with the D1
+   invariant carried (`:sent` ⟺ a *configured* adapter returned `{:ok}`; unconfigured non-test → `:blocked`
+   + operator notification + `{:error, :adapter_unconfigured}`, NEVER sent). Token-only args (opaque IDs +
+   a bounded lifecycle `event` enum; recipient email revealed from the vault at deliver time). Stateless
+   (no persisted resource → zero abbrev/migration surface). Trigger seam `Lifecycle.deliver/2` (best-effort,
+   fail-closed on unknown event/missing refs); the representative Subscription→`:cancelled` trigger is a
+   documented host opt-in. `delivery_lifecycle_test.exs` (23). Sabotage `25-f7-lifecycle-delivery-fail-honest`
+   (fakes `:deliver` for a nil adapter in non-test env) flips 4 named RED tests.
+
+3. **G13 — Plan / entitlement editor.** Governed CRUD in `Billing.Reads` (`create_plan`/`update_plan`
+   incl. the `features` map, `create_price`/`update_price`, `grant_entitlement`/`revoke_entitlement`) —
+   every write through Ash with the plane-preserving `write_scope/2` admin elevation (never `authorize?:
+   false`), so `OrgScope` + `RoleAtLeast :admin` govern. A fail-closed **feature-key allowlist** (Ash cannot
+   guard the `features` `:map` keys) refuses an unknown feature. `PlansLive` gained the edit/feature-toggle/
+   entitlement-grant surface. `billing_plan_editor_test.exs` (13): admin-GREEN/member-REFUSED-RED trios +
+   allowlist red-paths. Sabotage `26-f7-plan-editor-admin-gate-bypass` (allowlist→allow-all) flips 2 RED tests.
+
+4. **G17b — pae-recency → health `:activity` factor.** Wired `__activity_days__` (was hardcoded nil →
+   `:activity` always `:unknown`) from the pae ProductEvent recency signal via the framework
+   `Analytics.product_event_resource/0` config seam (DISTINCT-ON per org, bounded, token-blind, graceful
+   nil when unwired / no events). Clock-free score preserved (day count computed in the reads layer against
+   the single threaded `now`). `operator_activity_recency_test.exs` (6). **Flag-adoption breadth fold →
+   CARRIED** (no framework-level bounded per-account flag signal; ties to G6) — not faked.
+
+5. **WS-C remnant — `:non_pii` type self-classify escape hatch, CLOSED.** A host Ash type self-classifying
+   `samen_pii_class => :non_pii` (opting a whole type OUT of masking) bypassed the two-reviewer distinct-party
+   discipline that a `non_pii!` COLUMN requires. Now `Samen.Pii.Classification.classify/1` honors a `:non_pii`
+   self-classification ONLY with a valid two-DISTINCT-party `Samen.NonPii.TypeClearance` (config allowlist,
+   `cleared_by != reviewed_by` — the same fail-closed rule as `Samen.NonPii.register/1`); ungoverned → fail-closed
+   to `:pii`. `:pii` self-class + the scalar-primitive registry UNCHANGED. Zero behavior change (no kernel/vertical
+   type self-classifies `:non_pii`). ADR-034. `pii_type_clearance_test.exs` (8) + `pii_classification_test.exs`
+   (+1). Sabotage `27-f7-nonpii-type-selfclassify-bypass` (drops the clearance guard) flips 2 RED tests.
+
+6. **ADR-025 — verifier host-partition: the safe bounded slice.** The FULL 50+-file partition stays DEFERRED
+   (decompose rule). Shipped a fail-closed **flatten-conflict tripwire**: `AbbrevRegistry.flatten_conflicts/1` +
+   a guard in `load/0` that RAISES (naming ADR-025) the day the committed registry gains a real cross-host abbrev
+   reuse (or a host-vs-global owner mismatch) — the exact condition under which the flattened-view verifier would
+   silently mis-validate. Turns ADR-025's silent latent risk into a self-enforcing trigger; the allocator's
+   host-aware `load_namespaced/1` path is unaffected (proven: still reserves). Corrected the stale "hosts is empty
+   in-tree" facts in ADR-025 + the `AbbrevRegistry` moduledoc (the `hosts` key now carries 5 non-conflicting
+   entries). `abbrev_flatten_conflict_test.exs` (9). Sabotage `28-f7-abbrev-flatten-conflict-tripwire`
+   (`>1`→`>2`) flips the RED tests.
+
+7. **G27 — webhook A6 over-strict guard: ALREADY DONE (Gate-6).** `Samen.Webhook.Payload.storage_name?/2`
+   already keys on the resource's DECLARED abbrev (`Samen.Info.abbrev/1`), not the blanket `~r/^[a-z]{3}_/`
+   (commit `16d2dd5`); the over-strict false-positive is directly regression-tested in
+   `demo/test/webhook_payload_allowlist_test.exs` (the "A6 (Gate-6)" describe: `cdl_number` survives, `waw_`
+   stripped, allowlist governs). No F7 code — the G27 A6 residue is resolved.
+
+8. **demo `mk_agent` → `Samen.Factory`.** The demo test-local `mk_agent/1` fixture now routes its vault-PII
+   Agent create through `Samen.Factory.create!/3` + `Factory.person/2` (governed chokepoint) instead of a raw
+   `Ash.create(authorize?: false)`. Demo suite unchanged at 465.
+
+9. **ci.sh determinism carry.** The 3 gen probes' fragile hand-remapped abbrev derivation (the F6 `jwh`/`f`
+   de-flakes) replaced with `Samen.Gen.ProbeAbbrev` — collision-CHECKED against the live registry + the probe's
+   own in-flight set, advancing deterministically. Collision-proof by construction regardless of registry growth
+   (was ~1/10-runs flake-prone). All 3 probes verified green with byte-exact registry restore.
+   `gen_probe_abbrev_test.exs` (9). F6 carry **8(B)** (shared `_build` across the 3 probes) RE-AFFIRMED deferred —
+   a spurious-PASS hazard; isolation is the correct determinism posture.
+
+**F7 CARRIES (do not lose):**
+- **F7-P2-1** — G8 dunning `metrics/3` is an in-memory fold (single-source-of-truth precedent), not a pure DB
+  aggregate; still bounded. Optional: a reconciled DB-aggregate headline.
+- **F7-P2-2** — G17b flag-adoption fold (needs a G6 bounded per-account flag signal + cross-scope seam) + G13
+  entitlement `expires_at` display column.
+- **Representative G11 trigger** (Subscription→`:cancelled`) left as a documented host opt-in rather than wired
+  into the blueprint transition (to keep the billing suite's emission behavior unchanged).
+
+**Suite totals after F7:** samen_core 1285 · samen_web 647 · demo 465 · driftwood 123 · pawchart 49. Sabotage
+harness: **28 patches** (F7 added 25–28). ADRs: 034 added; 025 corrected.
+
+---
+
+## State after F1–F7 (2026-07-20) — the FINAL re-rank
+
+The F1–F7 burn-down is COMPLETE and gated GO (`docs/gate-burndown.md`). The "Operator Cockpit v2" cluster
+(G8/G11/G13/G17b) is shipped; the WS-C `:non_pii` type escape hatch and the ADR-025 silent-risk are both closed
+fail-closed; G27/A6 is confirmed done. **Every ranked gap is now shipped, closed, or an explicitly-tracked
+human-operator TODO.**
+
+**Ranked-register status corrections (this re-rank):** G8 · G11 · G13 → ✅ shipped (WS-F7). G17b → ✅ shipped
+(activity factor wired; flag-adoption fold carried). G27 → ✅ resolved (A6 done Gate-6; rollup-cron ADR-007 +
+abbrev-registry-tax ADR-006 remain the deferred kernel-residue/op-todo halves; Oban multi-node = operator TODO).
+WS-C `:non_pii` self-classify escape hatch → ✅ closed (F7). ADR-025 → tripwire-enforced deferral.
+
+**Remaining work, ranked (no agent-buildable P0/P1 left — these are next-workstream candidates + human TODOs):**
+1. **P2 product-surface sweep** (unshipped P2s that would deepen, not unblock): G19 DSAR self-serve UI /
+   retention admin surface · G21 desk depth (CSAT/macros/KB/routing/SLA reporting) · G22 agent-grounding
+   packaging (MCP, reusable eval) · G23 product feedback → roadmap · G24 i18n/timezone/currency · G25 kit-level
+   a11y · G28 operator RBAC granularity.
+2. **F7 P2 carries** (above): G8 DB-aggregate headline · G17b flag-adoption fold + G13 entitlement expiry surface.
+3. **WS-E / kernel-residue follow-ons:** real `Storage.S3`+`Scanner` impls (fail-honest skeletons shipped) ·
+   per-abbrev tsvector trigger/GIN index for search-at-scale · fleet-wide `assign_async`/`stream` perf rewrite ·
+   pawchart Identity scope to unlock its settings mount · the FULL ADR-025 host-partition (tripwire-gated) ·
+   rollup cron (ADR-007) · abbrev-registry tax (ADR-006) · first-party Stripe/ESP adapters (BYO boundary holds).
+4. **Human-operator TODOs / DRILLS (NOT agent work — keep tracked):** real Neon PITR drill · AWS
+   KMS+DynamoDB+S3-ObjectLock · ClickHouse ClickPipes activation + drills · Oban multi-node concurrency · DP
+   epsilon budget enforcement (`query_budget` WARN-not-enforced today) · a real MCP server · Stripe live keys ·
+   a production IdP + operator-plane (SaaS-staff) auth arming · Fly account/deploy.
+
+**Standing carries (do not lose):** `Samen.Web.Api.PageLimitClamp` until upstream Ash fixes the `to_page`
+raw-limit split · fail-honest BYO adapter boundary (host implements `SyncAdapter` / `Delivery.Adapter`) · the F2
+PBKDF2-over-config auth verifier is a REFERENCE, not a production IdP.
 
 ---
 

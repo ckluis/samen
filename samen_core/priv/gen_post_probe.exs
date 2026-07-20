@@ -50,26 +50,29 @@ Mix.Task.run("compile")
 
 alias Samen.Gen.App, as: Gen
 
-# --- unique, collision-proof identities (fresh abbrevs each run) ------------------------
-# Prefix family "j" (unowned; derived operator/primitives families jo*/jp*/jq*/jn* stay
-# inside it — the flagship convention).
-suffix =
-  System.unique_integer([:positive])
-  |> Integer.to_string()
-  |> String.pad_leading(2, "0")
-  |> String.slice(-2, 2)
-letters = for <<c <- suffix>>, do: rem(c - ?0, 26) + ?a
-[l1, l2] = letters
-l1 = if l1 == ?f, do: ?k, else: l1
-prefix = <<?j, l1>>
-app_abbrev = <<?j, ?z, l2>>
-# The gen'd RESOURCE abbrev "jw<l2>": `w` second letter keeps it clear of billing (j<l1>?),
-# aggregate (j<l1>a), primitives (jn?), operator (jo?/jp?/jq?), and the app abbrev (jz?).
-# De-flake: l2=='h' would make "jwh", which collides with the primitives Webhook abbrev
-# (<p1>wh); remap that one case to an unreserved third letter (verified clear).
-resource_l2 = if l2 == ?h, do: ?z, else: l2
-resource_abbrev = <<?j, ?w, resource_l2>>
-module = "Genpost" <> String.upcase(<<l1, l2>>)
+# --- unique, COLLISION-CHECKED identities (fresh each run, collision-proof by construction)
+# Delegated to `Samen.Gen.ProbeAbbrev.app_identity/5`: it searches the prefix + abbrev space
+# (seeded fresh each run for the unique-scratch property) for an identity whose ENTIRE derived
+# reserved set — billing + aggregate + the authored resource + the web Primitives/Operator
+# families — is clear of the committed registry (`Samen.AbbrevRegistry.load/0`, the flattened
+# global collision oracle) AND internally distinct, PLUS a second `resource_abbrev` (the
+# `gen.resource` abbrev) clear of the registry, that family AND the app abbrev — advancing
+# deterministically to the next candidate on ANY collision. This can never clash no matter how
+# the committed registry grows; the old fixed-`j*` derivation + hand-remapped collisions
+# (`jwh`/`jfl`) could, and twice DID, flake ci.sh. See Samen.Gen.ProbeAbbrev.
+identity =
+  Samen.Gen.ProbeAbbrev.app_identity(
+    "Genpost",
+    [web: true, api: true, target: "."],
+    Samen.AbbrevRegistry.load(),
+    System.unique_integer([:positive]),
+    extra_resource?: true
+  )
+
+module = identity.module
+prefix = identity.prefix
+app_abbrev = identity.abbrev
+resource_abbrev = identity.resource_abbrev
 
 http_port = 4880 + rem(System.unique_integer([:positive]), 90)
 

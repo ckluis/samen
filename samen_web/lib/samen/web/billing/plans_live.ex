@@ -55,6 +55,8 @@ defmodule Samen.Web.Billing.PlansLive do
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, prices_by_plan: %{})
     |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
     |> assign(show_new: false, new_form: nil)
+    |> assign(show_edit: false, edit_form: nil, edit_plan_id: nil)
+    |> assign(show_ents: false, subscriptions: [], entitlements: [])
     |> assign_new(:delete_error, fn -> nil end)
   end
 
@@ -65,9 +67,14 @@ defmodule Samen.Web.Billing.PlansLive do
     socket
     |> ensure_return_to()
     |> assign(no_org: false, org_id: org_id, prices_by_plan: Reads.prices_by_plan(mount, scope))
+    |> assign(subscriptions: Reads.subscriptions(mount, scope), entitlements: Reads.entitlements(mount, scope))
     |> assign_new(:show_new, fn -> false end)
+    |> assign_new(:show_edit, fn -> false end)
+    |> assign_new(:edit_plan_id, fn -> nil end)
+    |> assign_new(:show_ents, fn -> false end)
     |> assign_new(:delete_error, fn -> nil end)
     |> assign(new_form: new_plan_form(mount, org_id))
+    |> assign_new(:edit_form, fn -> nil end)
     |> init_list(mount, scope)
   end
 
@@ -97,6 +104,85 @@ defmodule Samen.Web.Billing.PlansLive do
 
       {:error, form} ->
         {:noreply, assign(socket, new_form: form)}
+    end
+  end
+
+  # -- Edit plan (name/label/description/interval) — sanctioned update: :* ------
+
+  def handle_event("edit_plan", %{"id" => id}, socket) do
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+
+    case find_plan(socket, id) do
+      nil -> {:noreply, socket}
+      plan -> {:noreply, assign(socket, show_edit: true, edit_plan_id: id, edit_form: edit_plan_form(mount, org_id, plan))}
+    end
+  end
+
+  def handle_event("cancel_edit", _params, socket) do
+    {:noreply, assign(socket, show_edit: false, edit_plan_id: nil)}
+  end
+
+  def handle_event("validate_edit", %{"form" => params}, socket) do
+    {:noreply, assign(socket, edit_form: AshPhoenix.Form.validate(socket.assigns.edit_form, params))}
+  end
+
+  def handle_event("save_edit", %{"form" => params}, socket) do
+    case AshPhoenix.Form.submit(socket.assigns.edit_form, params: params) do
+      {:ok, _plan} ->
+        {:noreply, socket |> assign(show_edit: false, edit_plan_id: nil) |> load(socket.assigns.org_id)}
+
+      {:error, form} ->
+        {:noreply, assign(socket, edit_form: form)}
+    end
+  end
+
+  # Feature-map editing — each checkbox flips ONE bounded feature key in the plan's
+  # `features` entitlement map via the sanctioned update: :* (fail-closed validated in
+  # `Reads.update_plan/4`). Immediate persist keeps the map the source of truth.
+  def handle_event("toggle_feature", %{"id" => id, "feature" => feature}, socket) do
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    current = normalize_features(find_plan(socket, id))
+
+    features =
+      if Map.has_key?(current, feature),
+        do: Map.delete(current, feature),
+        else: Map.put(current, feature, true)
+
+    case Reads.update_plan(mount, Reads.write_scope(mount, org_id), id, %{features: features}) do
+      {:ok, _plan} ->
+        socket = load(assign(socket, delete_error: nil), org_id)
+        {:noreply, assign(socket, edit_form: edit_plan_form(mount, org_id, find_plan(socket, id)), edit_plan_id: id, show_edit: true)}
+
+      {:error, _} ->
+        {:noreply, assign(socket, delete_error: "Could not update plan features.")}
+    end
+  end
+
+  # -- Entitlement grant / revoke (per-subscription, bounded feature) ----------
+
+  def handle_event("open_ents", _params, socket), do: {:noreply, assign(socket, show_ents: true)}
+  def handle_event("cancel_ents", _params, socket), do: {:noreply, assign(socket, show_ents: false)}
+
+  def handle_event("grant_ent", %{"subscription_id" => sub, "feature" => feature} = params, socket) do
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+
+    attrs =
+      %{"subscription_id" => sub, "feature" => feature, "org_id" => org_id}
+      |> put_expires(params["expires_at"])
+
+    case Reads.grant_entitlement(mount, Reads.write_scope(mount, org_id), attrs) do
+      {:ok, _ent} -> {:noreply, load(assign(socket, delete_error: nil), org_id)}
+      {:error, _} -> {:noreply, assign(socket, delete_error: "Could not grant this entitlement.")}
+    end
+  end
+
+  def handle_event("revoke_ent", %{"subscription_id" => sub, "feature" => feature}, socket) do
+    %{samen_mount: mount, org_id: org_id} = socket.assigns
+    attrs = %{"subscription_id" => sub, "feature" => feature}
+
+    case Reads.revoke_entitlement(mount, Reads.write_scope(mount, org_id), attrs) do
+      {:ok, _ent} -> {:noreply, load(assign(socket, delete_error: nil), org_id)}
+      {:error, _} -> {:noreply, assign(socket, delete_error: "Could not revoke this entitlement.")}
     end
   end
 
@@ -133,6 +219,24 @@ defmodule Samen.Web.Billing.PlansLive do
     |> to_form()
   end
 
+  defp edit_plan_form(_mount, _org_id, nil), do: nil
+
+  defp edit_plan_form(mount, org_id, plan) do
+    plan
+    |> AshPhoenix.Form.for_update(:update, scope: Reads.write_scope(mount, org_id))
+    |> to_form()
+  end
+
+  defp find_plan(socket, id), do: Enum.find(socket.assigns.page.items, &(&1.id == id))
+
+  defp normalize_features(%{features: features}) when is_map(features),
+    do: Map.new(features, fn {k, v} -> {to_string(k), v} end)
+
+  defp normalize_features(_), do: %{}
+
+  defp put_expires(attrs, exp) when exp in [nil, ""], do: attrs
+  defp put_expires(attrs, exp), do: Map.put(attrs, "expires_at", exp)
+
   defp with_org(params, socket), do: Map.put(params, "org_id", socket.assigns.org_id)
 
   defp ensure_return_to(socket) do
@@ -150,6 +254,9 @@ defmodule Samen.Web.Billing.PlansLive do
 
         <.topbar title="Plans" crumbs={crumbs(@samen_mount, @org_id, "Plans")}>
           <:actions>
+            <.button :if={writable?(@samen_mount) and not @no_org} phx-click="open_ents" id="manage-entitlements">
+              Entitlements
+            </.button>
             <.button :if={writable?(@samen_mount) and not @no_org} variant="primary" phx-click="new_plan" id="new-plan">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -234,6 +341,7 @@ defmodule Samen.Web.Billing.PlansLive do
                   </td>
                   <td :if={writable?(@samen_mount)} class="plan-actions">
                     <div style="display:flex;gap:6px;align-items:center">
+                      <.button phx-click="edit_plan" phx-value-id={plan.id} class="edit-plan">Edit</.button>
                       <.button phx-click="toggle_plan" phx-value-id={plan.id}>
                         {if plan.enabled, do: "Disable", else: "Enable"}
                       </.button>
@@ -262,11 +370,93 @@ defmodule Samen.Web.Billing.PlansLive do
               </:actions>
             </.simple_form>
           </.modal>
+
+          <.modal
+            :if={@show_edit and @edit_form != nil and writable?(@samen_mount)}
+            id="edit-plan-modal"
+            title="Edit plan"
+            on_cancel="cancel_edit"
+          >
+            <.simple_form :let={f} for={@edit_form} id="edit-plan-form" phx-change="validate_edit" phx-submit="save_edit">
+              <.form_field field={f[:name]} label="Name" />
+              <.form_field field={f[:label]} label="Label" />
+              <.form_field field={f[:description]} label="Description" />
+              <.form_field
+                field={f[:interval]}
+                label="Interval"
+                type="select"
+                options={[{"monthly", "monthly"}, {"annual", "annual"}, {"weekly", "weekly"}, {"daily", "daily"}, {"one-time", "one_time"}]}
+              />
+              <:actions>
+                <.button variant="primary" type="submit">Save changes</.button>
+                <.button type="button" phx-click="cancel_edit">Cancel</.button>
+              </:actions>
+            </.simple_form>
+
+            <div id="edit-plan-features" style="margin-top:14px;border-top:1px solid #E5E7EB;padding-top:12px">
+              <div style="font-size:12px;font-weight:600;margin-bottom:8px">Entitlements (feature map)</div>
+              <% features = normalize_features(find_plan(assigns_socket(assigns), @edit_plan_id)) %>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                <label :for={feat <- Reads.feature_keys()} style="display:flex;align-items:center;gap:5px;font-size:12px;color:#374151">
+                  <input
+                    type="checkbox"
+                    checked={Map.has_key?(features, to_string(feat))}
+                    phx-click="toggle_feature"
+                    phx-value-id={@edit_plan_id}
+                    phx-value-feature={to_string(feat)}
+                    data-feature={to_string(feat)}
+                  />
+                  {humanize_feature(feat)}
+                </label>
+              </div>
+            </div>
+          </.modal>
+
+          <.modal :if={@show_ents and writable?(@samen_mount)} id="entitlements-modal" title="Subscription entitlements" on_cancel="cancel_ents">
+            <%= if @subscriptions == [] do %>
+              <p style="font-size:12px;color:var(--muted)">No subscriptions to entitle yet.</p>
+            <% else %>
+              <form id="grant-entitlement-form" phx-submit="grant_ent" style="display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-bottom:14px">
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:12px">
+                  Subscription
+                  <select name="subscription_id" required>
+                    <option :for={sub <- @subscriptions} value={sub.id}>{subscription_label(sub)}</option>
+                  </select>
+                </label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:12px">
+                  Feature
+                  <select name="feature" required>
+                    <option :for={feat <- Reads.feature_keys()} value={to_string(feat)}>{humanize_feature(feat)}</option>
+                  </select>
+                </label>
+                <label style="display:flex;flex-direction:column;gap:3px;font-size:12px">
+                  Expires
+                  <input type="date" name="expires_at" />
+                </label>
+                <.button variant="primary" type="submit" id="grant-entitlement">Grant</.button>
+              </form>
+
+              <div id="entitlements-list">
+                <div style="font-size:12px;font-weight:600;margin-bottom:6px">Granted entitlements</div>
+                <p :if={granted_entitlements(@entitlements) == []} style="font-size:12px;color:var(--muted)">None granted yet.</p>
+                <div :for={ent <- granted_entitlements(@entitlements)} class="entitlement-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px">
+                  <span style="font-weight:600">{humanize_feature(ent.feature)}</span>
+                  <span style="color:var(--muted)">· {subscription_label_for(@subscriptions, ent.subscription_id)}</span>
+                  <.button phx-click="revoke_ent" phx-value-subscription_id={ent.subscription_id} phx-value-feature={to_string(ent.feature)} class="revoke-ent">Revoke</.button>
+                </div>
+              </div>
+            <% end %>
+          </.modal>
         <% end %>
       </.app_shell>
     </div>
     """
   end
+
+  # `assigns` in a ~H block is the assigns map; the render helpers below need the page
+  # items to resolve the plan being edited. A tiny shim keeps `find_plan/2` reusable
+  # from both handle_event (socket) and render (assigns).
+  defp assigns_socket(assigns), do: %{assigns: assigns}
 
   # -- helpers -----------------------------------------------------------------
 
@@ -281,6 +471,24 @@ defmodule Samen.Web.Billing.PlansLive do
   defp interval_label(:daily), do: "daily"
   defp interval_label(:one_time), do: "one-time"
   defp interval_label(other), do: to_string(other)
+
+  defp granted_entitlements(entitlements) when is_list(entitlements),
+    do: Enum.filter(entitlements, & &1.granted)
+
+  defp granted_entitlements(_), do: []
+
+  defp subscription_label(sub) do
+    plan = Map.get(sub, :__plan__)
+    plan_name = (plan && (plan.label || plan.name)) || "plan"
+    "#{plan_name} · #{String.slice(sub.id, 0, 8)}"
+  end
+
+  defp subscription_label_for(subscriptions, sub_id) do
+    case Enum.find(subscriptions, &(&1.id == sub_id)) do
+      nil -> String.slice(sub_id || "", 0, 8)
+      sub -> subscription_label(sub)
+    end
+  end
 
   defp plan_features(%{features: features}) when is_map(features) and map_size(features) > 0 do
     features |> Map.keys() |> Enum.map(&humanize_feature/1) |> Enum.sort()

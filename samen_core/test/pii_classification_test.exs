@@ -45,18 +45,26 @@ defmodule Samen.PiiClassificationTest do
     end
   end
 
-  test "a host custom type may self-classify via samen_pii_class/0" do
-    defmodule NonPiiSelf do
-      def samen_pii_class, do: :non_pii
-    end
-
+  test "a host custom type self-classifying :pii is always honored (opt INTO protection)" do
     defmodule PiiSelf do
       def samen_pii_class, do: :pii
     end
 
-    assert Classification.classify(NonPiiSelf) == :non_pii
-    assert Classification.classified?(NonPiiSelf)
     assert Classification.classify(PiiSelf) == :pii
+    assert Classification.classified?(PiiSelf)
+  end
+
+  test "an UNGOVERNED :non_pii self-classification falls to :pii (fail-closed; ADR-034)" do
+    # Opting a whole type OUT of masking is reviewer-gated. Without a valid
+    # two-distinct-party clearance in Samen.NonPii.TypeClearance, a :non_pii
+    # self-classification is NOT honored — it masks (PII), same as an unknown type.
+    # The GOVERNED opt-out (with a clearance) is proven in Samen.PiiTypeClearanceTest.
+    defmodule NonPiiSelfUngoverned do
+      def samen_pii_class, do: :non_pii
+    end
+
+    assert Classification.classify(NonPiiSelfUngoverned) == :pii
+    refute Classification.classified?(NonPiiSelfUngoverned)
   end
 
   # ==========================================================================
@@ -85,14 +93,16 @@ defmodule Samen.PiiClassificationTest do
     end
   end
 
-  test "a custom type that self-classifies :non_pii is trusted (the opt-OUT lever)" do
-    # This proves the ONLY way to make an otherwise-unknown type plain is an
-    # explicit self-classification (a reviewer decision), never an accident.
-    defmodule ExplicitlyCleared do
+  test "the ONLY way to make an unknown type plain is a GOVERNED :non_pii opt-out" do
+    # A bare :non_pii self-classification is no longer enough on its own — it must
+    # be cleared by two distinct parties (ADR-034). Absent the clearance the type
+    # masks. This keeps the opt-OUT lever a deliberate, reviewed decision, never an
+    # accident — and now never a SINGLE-party one either.
+    defmodule SelfClassOnly do
       def samen_pii_class, do: :non_pii
     end
 
-    assert Classification.classify(ExplicitlyCleared) == :non_pii
+    assert Classification.classify(SelfClassOnly) == :pii
   end
 
   # ==========================================================================

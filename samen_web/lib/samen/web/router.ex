@@ -720,6 +720,7 @@ defmodule Samen.Web.Router do
     [
       {"#{path}", Samen.Web.Billing.OverviewLive},
       {"#{path}/invoices", Samen.Web.Billing.InvoicesLive},
+      {"#{path}/dunning", Samen.Web.Billing.DunningLive},
       {"#{path}/plans", Samen.Web.Billing.PlansLive}
     ]
   end

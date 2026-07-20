@@ -31,6 +31,24 @@ defmodule Samen.Pii.Classification do
   `:non_pii`); this is how the composite types opt in and how a host application's
   custom type can declare its own class without editing this module.
 
+  ## The `:non_pii` self-classification is reviewer-gated (ADR-034)
+
+  Self-classifying `:pii` opts a type *into* protection and is always honored — no
+  gate. Self-classifying `:non_pii` opts a whole type *out* of masking (every
+  column plaintext/unmasked) and is the dangerous direction: left ungoverned it is
+  a **single-party escape hatch** — one developer could wave an entire type out of
+  the mask-unknown-by-default keystone with no second reviewer, while opting a
+  single *column* out already demands the two-distinct-party `non_pii!` clearance
+  (`Samen.NonPii.register/1`, which fails closed on `cleared_by == reviewed_by`).
+
+  So a type's `:non_pii` self-classification is honored **only** when the type
+  module carries a valid, two-distinct-party clearance in
+  `Samen.NonPii.TypeClearance` (a config allowlist — `classify/1` is hot/pure and
+  must never hit the DB). An ungoverned or self-reviewed `:non_pii`
+  self-classification falls through to the **PII default** (masked) — fail-closed,
+  the same safe direction the keystone already picks for unknown types. This makes
+  opting a type out exactly as hard as opting a column out: two distinct parties.
+
   ## Relationship to the verifiers
 
   This registry is the *classification oracle* the C4 `pii_classify` verifier
@@ -83,18 +101,23 @@ defmodule Samen.Pii.Classification do
     module = resolve(type)
 
     cond do
-      # (1) type self-classifies (composite PII types + host custom types)
+      # (1) type self-classifies :pii (composite PII types + host custom types) —
+      # opting INTO protection is always honored, no gate.
       self_class(module) == :pii ->
         :pii
 
-      self_class(module) == :non_pii ->
+      # (2) type self-classifies :non_pii — opting a whole type OUT of masking.
+      # Honored ONLY behind a valid two-distinct-party clearance (ADR-034);
+      # otherwise it falls through to the mask-unknown-by-default PII result.
+      self_class(module) == :non_pii and Samen.NonPii.TypeClearance.cleared?(module) ->
         :non_pii
 
-      # (2) a known non-PII scalar primitive
+      # (3) a known non-PII scalar primitive
       is_atom(module) and MapSet.member?(@non_pii_scalars, module) ->
         :non_pii
 
-      # (3) MASK-UNKNOWN-BY-DEFAULT — everything else is PII.
+      # (4) MASK-UNKNOWN-BY-DEFAULT — everything else is PII. This is also where an
+      # UNGOVERNED :non_pii self-classification lands (fail-closed → treated as PII).
       true ->
         :pii
     end
@@ -115,8 +138,21 @@ defmodule Samen.Pii.Classification do
   def classified?(type) do
     module = resolve(type)
 
-    not is_nil(self_class(module)) or
-      (is_atom(module) and MapSet.member?(@non_pii_scalars, module))
+    case self_class(module) do
+      # Self-classifying :pii is always an explicit classification.
+      :pii ->
+        true
+
+      # A :non_pii self-classification counts as "classified" ONLY when it is
+      # governed by a valid clearance (ADR-034). An ungoverned one is treated
+      # exactly like an unknown type: it falls through to the PII default, so it
+      # is NOT explicitly classified.
+      :non_pii ->
+        Samen.NonPii.TypeClearance.cleared?(module)
+
+      nil ->
+        is_atom(module) and MapSet.member?(@non_pii_scalars, module)
+    end
   end
 
   # Resolve a short type name to its Ash type module. Unknown short names and
