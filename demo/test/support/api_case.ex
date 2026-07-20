@@ -94,7 +94,10 @@ defmodule Demo.ApiCase do
         scopes: scopes,
         minter_role: minter_role,
         org_id: org_id,
-        membership_id: mbr.id
+        membership_id: mbr.id,
+        # F3.4 — an explicit expiry may be passed (e.g. a past time to mint an
+        # already-expired key for the deny-on-read red path). `nil` = non-expiring.
+        expires_at: Keyword.get(opts, :expires_at)
       })
       # token_digest is public?: false (a credential digest, not tenant input), so it
       # is not accepted by `create: :*`. Force-change it as the mint step would.

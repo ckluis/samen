@@ -1,0 +1,19 @@
+# SABOTAGE: F3.3 gate sabotage — the DSAR two-plane split. `Samen.Dsar` masks NOTHING
+# on the operator plane (`masked?(:operator, _)` → false), so an operator export
+# WITHOUT a reveal grant dumps the subject's plaintext across the plane boundary — the
+# exact cross-plane leak the bundle must never produce. The plane red-path MUST fail.
+# APP: samen_core
+# TEST_FILES: test/dsar_export_test.exs
+# MUST_FAIL: every value is •••• — NEVER plaintext, NEVER a token/ciphertext in the bundle
+diff --git a/samen_core/lib/samen/dsar.ex b/samen_core/lib/samen/dsar.ex
+--- a/samen_core/lib/samen/dsar.ex	2026-07-20 09:21:17
++++ b/samen_core/lib/samen/dsar.ex	2026-07-20 09:21:17
+@@ -97,7 +97,7 @@
+   # The masking decision — the two-plane rule (mirrors Samen.Scope.ApiKey.masking_for).
+   # Fail closed: an unknown plane masks.
+   defp masked?(:tenant, _grant?), do: false
+-  defp masked?(:operator, grant?), do: not grant?
++  defp masked?(:operator, _grant?), do: false
+   defp masked?(_plane, _grant?), do: true
+ 
+   # Walk the subject's ACTIVE vault rows → plane-correct field entries. NEVER emits a

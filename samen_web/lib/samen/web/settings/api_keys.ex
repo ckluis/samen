@@ -25,6 +25,7 @@ defmodule Samen.Web.Settings.ApiKeys do
 
   require Ash.Query
 
+  alias Samen.Scope.ApiKey, as: ApiKeyScope
   alias Samen.Scope.Role
   alias Samen.Web.Mount
 
@@ -71,6 +72,9 @@ defmodule Samen.Web.Settings.ApiKeys do
     * `:minter_role`   — REQUIRED. The minting membership's role.
     * `:plane`         — `:tenant` (default) or `:operator`.
     * `:scopes`        — requested `%{family => [:read | :write]}` (default `%{}`).
+    * `:expires_at`    — requested hard expiry. ALWAYS bounded into `(now, now + max_ttl]`
+      via `Samen.Scope.ApiKey.bounded_expiry/2`; `nil` (the default) mints at
+      `now + default_ttl`. A key is never minted unbounded (F3.4).
 
   Returns `{:ok, raw, key_row}` — `raw` shown once, `key_row` stores only the digest —
   or `{:error, reason}`.
@@ -80,6 +84,12 @@ defmodule Samen.Web.Settings.ApiKeys do
     minter_role = Keyword.fetch!(opts, :minter_role)
     plane = Keyword.get(opts, :plane, :tenant)
     requested = Keyword.get(opts, :scopes, %{})
+
+    # F3.4 — every key is bounded. A requested expiry is clamped into the window; a
+    # missing one defaults to now + default_ttl. Never unbounded.
+    expires_at =
+      ApiKeyScope.bounded_expiry(Keyword.get(opts, :expires_at))
+      |> DateTime.truncate(:second)
 
     raw = generate_raw()
 
@@ -91,7 +101,8 @@ defmodule Samen.Web.Settings.ApiKeys do
       scopes: effective_scopes(requested, minter_role),
       minter_role: minter_role,
       membership_id: membership_id,
-      org_id: scope_org_id(scope)
+      org_id: scope_org_id(scope),
+      expires_at: expires_at
     }
 
     Mount.resource(mount, ApiKey)
@@ -118,6 +129,8 @@ defmodule Samen.Web.Settings.ApiKeys do
       :scopes,
       :minter_role,
       :revoked_at,
+      :expires_at,
+      :last_used_at,
       :inserted_at,
       :org_id,
       :id
@@ -164,8 +177,12 @@ defmodule Samen.Web.Settings.ApiKeys do
       scopes: row.scopes || %{},
       minter_role: row.minter_role,
       revoked_at: row.revoked_at,
+      expires_at: Map.get(row, :expires_at),
+      last_used_at: Map.get(row, :last_used_at),
       inserted_at: Map.get(row, :inserted_at),
-      revoked?: not is_nil(row.revoked_at)
+      revoked?: not is_nil(row.revoked_at),
+      # F3.4 — a stale/dead-key hygiene flag for the settings surface.
+      expired?: ApiKeyScope.expired?(%{expires_at: Map.get(row, :expires_at)}, DateTime.utc_now())
     }
   end
 

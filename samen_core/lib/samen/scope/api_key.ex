@@ -48,8 +48,28 @@ defmodule Samen.Scope.ApiKey do
           # declared scopes: %{resource_family => [:read, :write]}
           scopes: %{optional(atom() | String.t()) => [action()]},
           # the role of the membership that minted this key (the actor ceiling)
-          minter_role: atom() | String.t() | nil
+          minter_role: atom() | String.t() | nil,
+          # OPTIONAL bounded expiry — a hard time ceiling on the key's life (F3.4).
+          # `nil` (a legacy key minted before the expiry gate) is treated as
+          # non-expiring by the pure predicate; the DEFAULT minter never mints one
+          # (mint clamps to `bounded_expiry/2`), and the deny-on-read query filters
+          # on this column so an expired row is never even resolved to an actor.
+          expires_at: DateTime.t() | nil
         }
+
+  # F3.4 bounded-expiry policy. Every freshly minted key carries a hard time
+  # ceiling; an unbounded (never-expiring) key is the exact posture the gate
+  # refuses. Documented defaults — override per deployment via app config if needed.
+  @default_ttl_seconds 90 * 24 * 60 * 60
+  @max_ttl_seconds 365 * 24 * 60 * 60
+
+  @doc "The documented default key lifetime in seconds (90 days) when none is requested."
+  @spec default_ttl_seconds() :: pos_integer()
+  def default_ttl_seconds, do: @default_ttl_seconds
+
+  @doc "The documented hard ceiling on a key lifetime in seconds (365 days). Requests above it clamp down."
+  @spec max_ttl_seconds() :: pos_integer()
+  def max_ttl_seconds, do: @max_ttl_seconds
 
   @doc """
   Effective authority: can this key perform `action` on `family` in `org_id`?
@@ -70,14 +90,68 @@ defmodule Samen.Scope.ApiKey do
   This is the mechanism behind the `api_key cannot out-reach its actor` red path.
   """
   @spec authorized?(key(), action(), atom() | String.t(), String.t()) :: boolean()
-  def authorized?(key, action, family, org_id)
+  def authorized?(key, action, family, org_id),
+    do: authorized?(key, action, family, org_id, DateTime.utc_now())
+
+  @doc """
+  As `authorized?/4`, with an explicit `now` — the time gate (F3.4). Adds a fourth,
+  fail-closed conjunct to the org/scope/ceiling gates: the key must NOT be expired.
+  An expired key authorizes NOTHING regardless of its declared scopes or org match
+  (defence-in-depth over the deny-on-read query, which never resolves an expired row).
+  """
+  @spec authorized?(key(), action(), atom() | String.t(), String.t(), DateTime.t()) :: boolean()
+  def authorized?(key, action, family, org_id, now)
       when action in [:read, :write] and is_binary(org_id) do
-    org_match?(key, org_id) and
+    not expired?(key, now) and
+      org_match?(key, org_id) and
       declares?(key, action, family) and
       within_actor_ceiling?(key, action)
   end
 
-  def authorized?(_key, _action, _family, _org_id), do: false
+  def authorized?(_key, _action, _family, _org_id, _now), do: false
+
+  @doc """
+  Is this key past its bounded expiry at `now`? (F3.4 deny-on-read predicate.)
+
+  `true` iff the key carries an `expires_at` that is at or before `now` (an expiry
+  timestamp is a hard ceiling — the instant it is reached the key is dead). A key
+  with NO `expires_at` (a legacy pre-gate row) is not expired by this pure predicate;
+  the minter never produces one, so this only relaxes for rows that predate the gate.
+  """
+  @spec expired?(key(), DateTime.t()) :: boolean()
+  def expired?(key, now \\ DateTime.utc_now())
+
+  def expired?(%{expires_at: %DateTime{} = expires_at}, now),
+    do: DateTime.compare(expires_at, now) != :gt
+
+  def expired?(_key, _now), do: false
+
+  @doc """
+  Clamp a requested expiry into the bounded window `(now, now + max_ttl]` (F3.4).
+
+    * `nil`                → `now + default_ttl` (the documented default; a key is
+      NEVER minted unbounded).
+    * a time beyond the max → `now + max_ttl` (the hard ceiling; requests can't buy
+      an arbitrarily long-lived credential).
+    * a time at/​before `now` → `now + default_ttl` (an already-dead key can't be minted).
+    * otherwise             → the requested time.
+
+  Always returns a `DateTime` strictly after `now` — the minted key is always bounded.
+  """
+  @spec bounded_expiry(DateTime.t() | nil, DateTime.t()) :: DateTime.t()
+  def bounded_expiry(requested, now \\ DateTime.utc_now())
+
+  def bounded_expiry(nil, now), do: DateTime.add(now, @default_ttl_seconds, :second)
+
+  def bounded_expiry(%DateTime{} = requested, now) do
+    ceiling = DateTime.add(now, @max_ttl_seconds, :second)
+
+    cond do
+      DateTime.compare(requested, now) != :gt -> DateTime.add(now, @default_ttl_seconds, :second)
+      DateTime.compare(requested, ceiling) == :gt -> ceiling
+      true -> requested
+    end
+  end
 
   @doc """
   The two-plane masking rule (doc §external-surface). Given a key, does a vaulted

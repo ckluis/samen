@@ -148,6 +148,64 @@ defmodule Samen.Web.ApiKeysHygieneTest do
   end
 
   # ==========================================================================
+  # F3.4 — bounded expiry at mint + safe-view exposure
+  # ==========================================================================
+
+  describe "minted keys are ALWAYS bounded (F3.4)" do
+    test "a key minted with no requested expiry defaults to now + default_ttl — never unbounded" do
+      org_id = Ash.UUID.generate()
+      {user, membership} = seed_membership!(org_id)
+
+      {:ok, _raw, row} =
+        ApiKeys.mint(mount(), admin_scope(user.id, org_id),
+          membership_id: membership.id,
+          minter_role: :admin,
+          scopes: %{all: [:read]}
+        )
+
+      refute is_nil(row.expires_at), "a minted key must carry a bounded expiry"
+      # ~90 days out (the documented default), within a generous window.
+      secs = DateTime.diff(row.expires_at, DateTime.utc_now(), :second)
+      assert secs > Samen.Scope.ApiKey.default_ttl_seconds() - 120
+      assert secs <= Samen.Scope.ApiKey.default_ttl_seconds() + 5
+    end
+
+    test "a requested expiry beyond the max ceiling clamps DOWN to now + max_ttl" do
+      org_id = Ash.UUID.generate()
+      {user, membership} = seed_membership!(org_id)
+
+      requested = DateTime.utc_now() |> DateTime.add(Samen.Scope.ApiKey.max_ttl_seconds() * 5, :second)
+
+      {:ok, _raw, row} =
+        ApiKeys.mint(mount(), admin_scope(user.id, org_id),
+          membership_id: membership.id,
+          minter_role: :admin,
+          scopes: %{all: [:read]},
+          expires_at: requested
+        )
+
+      secs = DateTime.diff(row.expires_at, DateTime.utc_now(), :second)
+      assert secs <= Samen.Scope.ApiKey.max_ttl_seconds() + 5
+      assert secs > Samen.Scope.ApiKey.max_ttl_seconds() - 120
+    end
+
+    test "list/2 surfaces expires_at + last_used_at + an expired? hygiene flag" do
+      org_id = Ash.UUID.generate()
+      {user, membership} = seed_membership!(org_id)
+      scope = admin_scope(user.id, org_id)
+
+      {:ok, _raw, _row} =
+        ApiKeys.mint(mount(), scope, membership_id: membership.id, minter_role: :admin, scopes: %{all: [:read]})
+
+      [view | _] = ApiKeys.list(mount(), scope)
+      assert Map.has_key?(view, :expires_at)
+      assert Map.has_key?(view, :last_used_at)
+      # A freshly minted, default-TTL key is not expired.
+      refute view.expired?
+    end
+  end
+
+  # ==========================================================================
   # Revoke
   # ==========================================================================
 

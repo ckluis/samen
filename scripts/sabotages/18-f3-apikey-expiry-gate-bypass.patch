@@ -1,0 +1,22 @@
+# SABOTAGE: F3.4 gate sabotage — the bounded API-key expiry (deny-on-read /
+# use-time) gate. `Samen.Scope.ApiKey.authorized?/5` DROPS the `not expired?(key,
+# now)` conjunct, so an EXPIRED key authorizes exactly as a live one would. The
+# expiry red-path MUST fail (an expired key must authorize NOTHING).
+# APP: samen_core
+# TEST_FILES: test/scope_api_key_expiry_test.exs
+# MUST_FAIL: an EXPIRED key authorizes NOTHING even with matching org/scope/ceiling
+diff --git a/samen_core/lib/samen/scope/api_key.ex b/samen_core/lib/samen/scope/api_key.ex
+--- a/samen_core/lib/samen/scope/api_key.ex	2026-07-20 09:07:46
++++ b/samen_core/lib/samen/scope/api_key.ex	2026-07-20 09:07:40
+@@ -102,8 +102,9 @@
+   @spec authorized?(key(), action(), atom() | String.t(), String.t(), DateTime.t()) :: boolean()
+   def authorized?(key, action, family, org_id, now)
+       when action in [:read, :write] and is_binary(org_id) do
+-    not expired?(key, now) and
+-      org_match?(key, org_id) and
++    _ = now
++
++    org_match?(key, org_id) and
+       declares?(key, action, family) and
+       within_actor_ceiling?(key, action)
+   end

@@ -62,6 +62,9 @@ defmodule DemoWeb.Api.KeyAuthPlug do
     with {:ok, raw} <- bearer_token(conn),
          {:ok, key_row} <- lookup_key(raw),
          {:ok, actor} <- build_actor(key_row) do
+      # F3.4 — best-effort last-use stamp (never gates auth, never aborts the request).
+      touch_last_used(key_row)
+
       conn
       |> Ash.PlugHelpers.set_actor(actor)
       # Stash the actor on a private assign too so the masking layer can read the
@@ -84,19 +87,40 @@ defmodule DemoWeb.Api.KeyAuthPlug do
 
   defp lookup_key(raw) do
     digest = digest(raw)
+    now = DateTime.utc_now()
 
     # Look up the api_key row by digest, unauthorized (this IS the auth step — the
     # key row lookup cannot itself require an actor). A revoked key (revoked_at set)
-    # is rejected.
+    # is rejected. F3.4 DENY-ON-READ: an EXPIRED key (expires_at <= now) is likewise
+    # never resolved — the row is filtered out at the query, so no actor is built and
+    # the request fails closed at the org-scope nil-org branch (defence-in-depth with
+    # `Samen.Scope.ApiKey.authorized?/5`, which also refuses an expired key at use).
     Demo.Identity.ApiKey
     |> Ash.Query.filter(token_digest == ^digest)
     |> Ash.Query.filter(is_nil(revoked_at))
+    |> Ash.Query.filter(is_nil(expires_at) or expires_at > ^now)
     |> Ash.read_one(authorize?: false)
     |> case do
       {:ok, nil} -> :error
       {:ok, key_row} -> {:ok, key_row}
       {:error, _} -> :error
     end
+  end
+
+  # F3.4 — stamp last_used_at via the least-privilege `:mark_used` action. Best-effort:
+  # a failure here NEVER affects the resolved actor or the request outcome.
+  defp touch_last_used(key_row) do
+    key_row
+    |> Ash.Changeset.for_update(:mark_used, %{
+      last_used_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
+    |> Ash.update(authorize?: false)
+
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   defp build_actor(key_row) do
@@ -117,7 +141,10 @@ defmodule DemoWeb.Api.KeyAuthPlug do
           org_id: org_id,
           plane: key_row.plane,
           scopes: key_row.scopes || %{},
-          minter_role: key_row.minter_role
+          minter_role: key_row.minter_role,
+          # F3.4 — carry expiry so the use-time gate can also refuse an expired key
+          # (defence-in-depth over the deny-on-read query).
+          expires_at: Map.get(key_row, :expires_at)
         }
 
         actor = %{

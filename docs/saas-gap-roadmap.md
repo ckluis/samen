@@ -250,6 +250,77 @@ operator TODOs as a walkable launch gate. All four units shipped:
 
 ---
 
+## WS-F3 — Trust & Lifecycle (privacy + security) (2026-07-20)
+
+Privacy/security lifecycle depth. Units shipped this phase (each guarantee ships green/red +,
+where the brief mandates, a committed sabotage patch replayed by `scripts/sabotage.sh`):
+
+4. **Bounded API-key expiry (deny-on-read) + last_used_at (F3.4).** `key_api_key` gained
+   `expires_at` (a hard ceiling — never unbounded; `Samen.Scope.ApiKey.bounded_expiry/2` clamps
+   every mint into `(now, now+max_ttl]`, default 90d / max 365d) + `last_used_at`. The demo auth
+   plug DENIES-ON-READ (`expires_at > now` filter → an expired key never resolves to an actor) and
+   best-effort stamps `last_used_at` via a least-privilege `:mark_used` action; `Samen.Scope.ApiKey`
+   gained an `expired?/2` predicate + a fail-closed expiry conjunct in `authorized?/5`; the samen_web
+   settings `mint/3` bounds expiry and `list/2` surfaces expires_at/last_used_at/`expired?`. Migrations:
+   demo `key_api_key`, driftwood `dok_api_key`, samen_web `wok_api_key`. Trio: `scope_api_key_expiry_test`
+   (11, samen_core) + `api_key_expiry_red_path_test` (3, demo deny-on-read) + hygiene additions (3, samen_web).
+   Sabotage `18-f3-apikey-expiry-gate-bypass.patch` (drops the expiry conjunct) flips the deny red-path.
+
+5. **Break-glass reconciliation + audit-chain verify sweep on the default crontab (F3.5).**
+   `Samen.Jobs.default_crontab/0` now also mounts `Samen.AuditChain.VerifyWorker` (`*/15`, re-verifies
+   every org's live hash chain, emits `[:samen, :audit_chain, :verify]` + per-tamper
+   `[:samen, :audit_chain, :tamper]`) and `Samen.BreakGlass.ReconcileWorker` (`*/10`, anchors
+   node-local deferred break-glass entries + emits `[:samen, :break_glass, :unanchored]`). New
+   `AuditChain.verify_all/1`. Test: `audit_chain_verify_sweep_test` (5, incl. RED tamper-detected +
+   telemetry). (No sabotage mandated for this wiring unit.)
+
+2. **Per-scope retention / TTL config + worker (F3.2).** New `Samen.Retention` (spec-driven, framework-first
+   — a host registers `%Samen.Retention.Spec{}` via `:samen_core, :retention_specs`), `Samen.Retention.Spec`,
+   `Samen.Retention.SweepWorker` (nightly `0 3 * * *`). `action: :shred` crypto-shreds each expired row's
+   subject via `Samen.Erasure`; `:delete` prunes. Fail-closed cutoff: a non-positive/nil TTL is REFUSED
+   (never "sweep the whole table"). Documented defaults (`default_ttl_seconds/0`: files 365d · messages 180d ·
+   tickets 365d · subscribers 730d). Trio: `retention_sweep_test` (9). Sabotage
+   `19-f3-retention-does-not-fire.patch` (reports rows swept but skips the destroy) flips the sweep red-path.
+
+3. **DSAR export + breach-scope enumerator (F3.3 / F3.6).** New `Samen.Dsar.export_subject/2` — the read
+   mirror of `Samen.Erasure`: walks the subject's `pii_vault` rows + audit-chain trail into a structured
+   plane-correct bundle and records a `dsar_export` event on the subject's chain. TWO-PLANE split with no
+   cross-plane leakage: tenant plane → plaintext; operator plane → `••••` unless `grant?: true`; the bundle
+   never carries a token/ciphertext. `Samen.Dsar.affected_subjects/2` enumerates distinct subjects over the
+   audit chain in a time window (the breach-notification runbook's scope tool). Trio: `dsar_export_test` (4,
+   incl. operator-masked red-path + serialized-bundle no-leak assertion + with-grant positive control).
+   Sabotage `20-f3-dsar-plane-bypass.patch` (masks nothing on the operator plane) flips the plane red-path.
+
+6. **Docs + residency ADR + breach runbook (F3.6, partial).** `docs/adr/032-data-residency-us-only.md`
+   (US-only, documented; no per-tenant region selection today), `docs/runbooks/breach-notification.md`
+   (contain → scope via `AuditChain`/`Dsar.affected_subjects` → tokens-vs-plaintext assessment → notification
+   guidance → remediation), `docs/free-text-pii-residue.md` (the non-shreddable free-text residue + controls).
+
+**F3 CARRIES (do not lose):**
+
+- **UNIT 1 — Append-only ConsentEvent ledger — NOT SHIPPED (carried).** The highest-effort unit: it needs a
+  NEW kernel resource on the Marketing scope (append-only, modeled EXACTLY on the `mov` ledger —
+  `Samen.Scopes.Billing.Blueprint.define_subscription_event` + `Samen.Billing.SubscriptionMovement` are the
+  line-for-line template) with events `granted`/`withdrawn` + `source` + `purpose`, consent state DERIVED from
+  the ledger (latest-event-wins) replacing the mutable `msu_consent_at` column (`marketing/blueprint.ex`
+  ~181-194), and a suppression HASH that survives erasure (mirror the trace-sink pseudonym: a deterministic
+  keyed hash of the subject so "do-not-contact" is honored after the PII is crypto-shredded). Deferred because
+  it requires: (a) abbrev allocation via `mix samen.abbrev.reserve` for EACH marketing host (demo/driftwood/
+  pawchart), (b) wiring the new resource into `Samen.Scopes.Marketing.__using__` + blueprint, (c) migrations in
+  demo/driftwood/pawchart + samen_web test-support, (d) a `Samen.Marketing.ConsentChange` on Subscriber. This
+  is a clean dedicated session (the mov template makes it mechanical); it is migration-heavy across every
+  marketing mount, so it was carried rather than half-shipped and left CI red. Sabotage to add: ledger
+  immutability (no update/destroy action; a patch adding a mutable consent update must fail an immutability test).
+
+- **UNIT 6 code half — pii_reason_scan over TENANT free-text at write — NOT SHIPPED (carried).**
+  `Samen.PiiReasonScan` already exists and is wired for OPERATOR-authored reasons (impersonation/reveal/audit
+  detail). Extending it to a TENANT free-text write path (e.g. benign-named freeform columns like `drv_notes`,
+  the H-2 residue) needs a concrete write chokepoint hook (`Samen.Pii.WriteGuard` or a per-resource change) and
+  was deferred with the residue documented instead (`docs/free-text-pii-residue.md`). The doc half of Unit 6
+  shipped; the runtime tenant-text scan is the carry.
+
+---
+
 ## State after WS-A/B/D (2026-07-16) — the re-rank
 
 **Shipped: 11 gaps** (G1/G2/G3/G5 in WS-A · G6/G7/G17 + G12-seed in WS-B ·

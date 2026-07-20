@@ -112,12 +112,26 @@ defmodule Samen.Jobs do
     - `"*/5 * * * *"` → `Samen.Anchor.SealWorker` (T4.3 WORM-anchor seal cron; seals
       every org's audit-chain head into the write-once store. The cadence bounds the
       wholesale-rewrite detection window — ADR-002 §3.3.)
+    - `"*/15 * * * *"` → `Samen.AuditChain.VerifyWorker` (F3.5 integrity sweep;
+      re-verifies every org's live hash chain and emits `[:samen, :audit_chain, :verify]`
+      / `[:samen, :audit_chain, :tamper]` telemetry — continuous tamper detection, not
+      only at the next external anchor comparison).
+    - `"*/10 * * * *"` → `Samen.BreakGlass.ReconcileWorker` (F3.5 break-glass
+      reconciliation; anchors operator-node-local deferred break-glass entries back into
+      the central chain and emits `[:samen, :break_glass, :unanchored]` — closes the
+      honest-residue window on a cadence instead of only by a manual call).
+    - `"0 3 * * *"` → `Samen.Retention.SweepWorker` (F3.2 per-scope retention; nightly
+      shreds/prunes host-registered data classes past their configured TTL. No-op until a
+      host sets `:samen_core, :retention_specs`.)
   """
   @spec default_crontab() :: [{String.t(), module()}]
   def default_crontab do
     [
       {"*/10 * * * *", Samen.Jobs.RollupRefreshWorker},
-      {"*/5 * * * *", Samen.Anchor.SealWorker}
+      {"*/5 * * * *", Samen.Anchor.SealWorker},
+      {"*/15 * * * *", Samen.AuditChain.VerifyWorker},
+      {"*/10 * * * *", Samen.BreakGlass.ReconcileWorker},
+      {"0 3 * * *", Samen.Retention.SweepWorker}
     ]
   end
 

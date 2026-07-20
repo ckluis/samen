@@ -289,6 +289,55 @@ defmodule Samen.AuditChain do
     }
   end
 
+  @doc """
+  Verify EVERY org's hash chain (the scheduled integrity sweep — F3.5). For each
+  org with entries, re-runs `verify_chain/2`; a failure is a detected tamper
+  (seq gap / broken link / hash mismatch).
+
+  Emits telemetry so a monitor/alert can observe the sweep without parsing logs:
+
+    * `[:samen, :audit_chain, :verify]` — measurements
+      `%{orgs: t, verified: n, failed: f}` once per sweep (the load-bearing "the
+      sweep ran and here is the tamper count" signal; `failed == 0` is the healthy
+      steady state a downstream can also alert on the ABSENCE of);
+    * `[:samen, :audit_chain, :tamper]` — measurement `%{seq: seq}`, metadata
+      `%{org_id, reason}` — one per FAILED org (the actionable alert).
+
+  Returns `%{orgs: t, verified: n, failed: [{org_id, {reason, seq}}]}`. Pure over
+  the DB read — the worker is a thin wrapper so the sweep is unit-testable.
+  """
+  @spec verify_all(keyword()) :: %{orgs: non_neg_integer(), verified: non_neg_integer(), failed: [{String.t(), {atom(), non_neg_integer()}}]}
+  def verify_all(opts \\ []) do
+    orgs = org_ids(opts)
+
+    failed =
+      Enum.reduce(orgs, [], fn org_id, acc ->
+        case verify_chain(org_id, opts) do
+          {:ok, _summary} ->
+            acc
+
+          {:error, {reason, seq}} ->
+            :telemetry.execute(
+              [:samen, :audit_chain, :tamper],
+              %{seq: seq},
+              %{org_id: org_id, reason: reason}
+            )
+
+            [{org_id, {reason, seq}} | acc]
+        end
+      end)
+
+    summary = %{orgs: length(orgs), verified: length(orgs) - length(failed), failed: Enum.reverse(failed)}
+
+    :telemetry.execute(
+      [:samen, :audit_chain, :verify],
+      %{orgs: summary.orgs, verified: summary.verified, failed: length(failed)},
+      %{}
+    )
+
+    summary
+  end
+
   # ==========================================================================
   # Anchor: seal + verify_against_anchor
   # ==========================================================================

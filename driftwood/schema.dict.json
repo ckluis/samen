@@ -375,6 +375,12 @@
     {
       "fields": [
         {
+          "column_name": "dok_expires_at",
+          "logical_name": "expires_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
           "column_name": "dok_id",
           "logical_name": "id",
           "pii": false,
@@ -383,6 +389,12 @@
         {
           "column_name": "dok_inserted_at",
           "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dok_last_used_at",
+          "logical_name": "last_used_at",
           "pii": false,
           "type": "UtcDatetime"
         },

@@ -2663,6 +2663,9 @@ defmodule Samen.Gen.Templates do
           add(:<%= o_key %>_scopes, :map, default: fragment("'{}'::jsonb"))
           add(:<%= o_key %>_minter_role, :text)
           add(:<%= o_key %>_revoked_at, :utc_datetime)
+          # F3.4 — bounded API-key expiry (deny-on-read) + last-use observability.
+          add(:<%= o_key %>_expires_at, :utc_datetime)
+          add(:<%= o_key %>_last_used_at, :utc_datetime)
 
           add(
             :<%= o_key %>_membership_id,

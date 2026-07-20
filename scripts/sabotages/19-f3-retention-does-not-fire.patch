@@ -1,0 +1,21 @@
+# SABOTAGE: F3.2 gate sabotage — the retention sweep REPORTS rows as swept but
+# never actually deletes them (`Samen.Retention` :delete arm drops the
+# `Ash.destroy!` call). Retention claims success while an over-TTL row survives —
+# the exact "fake ok" the fail-honest contract forbids. The retention red-path MUST
+# fail (an over-TTL row must be gone; a fresher row retained).
+# APP: samen_core
+# TEST_FILES: test/retention_sweep_test.exs
+# MUST_FAIL: a row OLDER than the TTL is swept; a fresher row is RETAINED (positive control)
+diff --git a/samen_core/lib/samen/retention.ex b/samen_core/lib/samen/retention.ex
+--- a/samen_core/lib/samen/retention.ex	2026-07-20 09:17:33
++++ b/samen_core/lib/samen/retention.ex	2026-07-20 09:17:33
+@@ -110,8 +110,7 @@
+       expired_query(spec, wall)
+       |> Ash.read!(authorize?: false)
+ 
+-    Enum.reduce(expired, 0, fn row, acc ->
+-      Ash.destroy!(row, authorize?: false)
++    Enum.reduce(expired, 0, fn _row, acc ->
+       acc + 1
+     end)
+   rescue

@@ -524,6 +524,17 @@ defmodule Samen.Scopes.Identity.Blueprint do
           )
 
           attribute(:revoked_at, :utc_datetime, public?: true)
+
+          # F3.4 — bounded expiry (deny-on-read). Every minted key carries a hard
+          # time ceiling (`Samen.Scope.ApiKey.bounded_expiry/2`); the auth lookup
+          # filters `expires_at > now` so an expired row is never resolved to an
+          # actor. `nil` is a legacy pre-gate row (non-expiring predicate); the
+          # minter never produces one.
+          attribute(:expires_at, :utc_datetime, public?: true)
+
+          # F3.4 — last-use observability. Best-effort stamped by the auth path on a
+          # successful resolve; supports stale-key hygiene reporting. Never gates auth.
+          attribute(:last_used_at, :utc_datetime, public?: true)
         end
 
         relationships do
@@ -541,6 +552,15 @@ defmodule Samen.Scopes.Identity.Blueprint do
 
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
+
+          # F3.4 — least-privilege touch action: the auth path stamps ONLY
+          # `last_used_at` (never expiry/scopes/plane), best-effort, authorize?: false.
+          # Non-atomic: the inherited SameOrgFk change can't run atomically (it reads
+          # the related row); this touch is best-effort off the hot path regardless.
+          update :mark_used do
+            accept([:last_used_at])
+            require_atomic?(false)
+          end
         end
 
         policies do
