@@ -499,7 +499,9 @@ defmodule Driftwood.Seeds do
         %{
           org_id: org_id,
           name: name,
-          value_cents: value,
+          # ADR-036 §4.5(5): value_cents/currency dropped by the H1 Money
+          # migration — construct the Money value directly.
+          value: Samen.Type.Money.from_cents(value, :USD),
           status: status,
           company_id: company.id,
           pipeline_id: Map.get(stage_ids, stage),
@@ -575,8 +577,9 @@ defmodule Driftwood.Seeds do
           %{
             org_id: org_id,
             plan_id: plan.id,
-            unit_amount_cents: cents,
-            currency: "USD",
+            # ADR-036 §4.5(5): unit_amount_cents/currency dropped by the H1 Money
+            # migration — construct the Money value directly.
+            unit_amount: Samen.Type.Money.from_cents(cents, :USD),
             interval: :monthly,
             active: true
           },

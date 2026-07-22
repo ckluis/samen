@@ -123,13 +123,26 @@ defmodule Samen.Web.CurrentOrg do
   defp authn_required?(_), do: false
 
   # The fail-closed prod path: an authenticated principal, constrained to its authorized orgs.
+  #
+  # Two principal shapes are tried, in order (ADR-035 §5 A4's CurrentOrg paragraph — the
+  # `:authorized_orgs` seam now ALSO sources from the framework spine's real Membership rows,
+  # not just the ADR-031 legacy BYO-auth seam):
+  #
+  #   1. LEGACY (`samen_current_user` session key) — the host-wired `:authorized_orgs`
+  #      `{mod, fun, args}` MFA, UNCHANGED (`authorized_org_ids/2` below). Every existing
+  #      BYO-auth host (driftwood's `Driftwood.Auth`) keeps working exactly as before.
+  #   2. SPINE (`samen_session_token`) — `Samen.Web.Auth.resolve_principal/2` resolves the
+  #      credential, then `Samen.Auth.OrgActor.authorized_org_ids/2` derives the authorized set
+  #      from the credential's linked `Identity.User` rows DIRECTLY off this mount's own
+  #      materialized Identity resources (no host MFA needed — the mount's namespace IS the
+  #      Identity mount for `:auth`/`:settings`-kind scopes).
   defp resolve_authorized(mount, params, session) do
     with user_id when is_binary(user_id) <- Samen.Web.Auth.authenticated_user_id(session),
          [_ | _] = authorized <- authorized_org_ids(mount, user_id) do
       requested = param_org(params) || session_org(session)
       if requested in authorized, do: requested, else: List.first(authorized)
     else
-      _ -> nil
+      _ -> resolve_spine_authorized(mount, params, session)
     end
   end
 
@@ -149,6 +162,63 @@ defmodule Samen.Web.CurrentOrg do
   rescue
     _ -> []
   end
+
+  defp resolve_spine_authorized(mount, params, session) do
+    with {:ok, credential_id} <- spine_credential_id(mount, session),
+         [_ | _] = authorized <- spine_authorized_org_ids(mount, credential_id) do
+      requested = param_org(params) || session_org(session)
+      if requested in authorized, do: requested, else: List.first(authorized)
+    else
+      _ -> nil
+    end
+  end
+
+  defp spine_credential_id(%Mount{} = mount, session) do
+    session_mod = Mount.resource(mount, Session)
+
+    case Samen.Web.Auth.resolve_principal(session, %{session: session_mod}) do
+      {:ok, %{credential_id: credential_id}} -> {:ok, credential_id}
+      _ -> :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  defp spine_credential_id(_mount, _session), do: :error
+
+  defp spine_authorized_org_ids(%Mount{} = mount, credential_id) do
+    mods = %{user: Mount.resource(mount, User), membership: Mount.resource(mount, Membership)}
+    Samen.Auth.OrgActor.authorized_org_ids(mods, credential_id)
+  rescue
+    _ -> []
+  end
+
+  @doc """
+  ADR-035 §5 A4/A5 (the CurrentOrg paragraph; T05 binding addendum) — resolve
+  a SPINE credential to a per-org ACTOR map (`Samen.Scope`-actor-shaped:
+  `id`/`org_id`/`role`/`kind`/`plane`), constrained to a REAL `Membership` row
+  — "closing the ADR-031 carry" (the actor's role is READ from the
+  Membership, never hardcoded `:member`). `nil` when `credential_id` holds no
+  `User`+`Membership` in `org_id` (the RED path: a credential with no
+  membership in org X cannot resolve an actor there — `Samen.Auth.OrgActor`).
+  """
+  @spec resolve_actor(Mount.t() | nil, String.t(), String.t()) :: map() | nil
+  def resolve_actor(%Mount{} = mount, credential_id, org_id)
+      when is_binary(credential_id) and is_binary(org_id) do
+    mods = %{user: Mount.resource(mount, User), membership: Mount.resource(mount, Membership)}
+
+    case Samen.Auth.OrgActor.resolve(mods, credential_id, org_id) do
+      {:ok, %{user_id: user_id, role: role, org_id: resolved_org_id}} ->
+        %{id: user_id, org_id: resolved_org_id, role: role, kind: :tenant, plane: :tenant}
+
+      :error ->
+        nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  def resolve_actor(_mount, _credential_id, _org_id), do: nil
 
   defp param_org(params) when is_map(params), do: present(Map.get(params, "org"))
   defp param_org(_), do: nil

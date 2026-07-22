@@ -14,14 +14,34 @@ defmodule <%= module %>Web.Router do
       namespace; the `flags_namespace` label activates the flag admin over this
       app's FeatureFlag rows,
     * `samen_session_routes()` — the ADR-013 current-org session write (the
-      workspace switcher + the operator "Open account →" target).
+      workspace switcher + the operator "Open account →" target),
+    * `samen_auth_routes(...)` — the ADR-035 §5 IDENTITY-SPINE pre-actor surfaces
+      (signup A1 · verify A2 · reset A3 · login A4 · 2fa A7 · invite A5), over
+      this app's sole Identity mount (`<%= module %>.Operator`),
+    * `samen_onboarding_routes(...)` — the ADR-035 §5 A8 first-run wizard
+      (org-naming · plan-selection honest empty state · teammate invite).
 
   The public JSON:API (WS-D D3) is FORWARDED to `<%= module %>Web.Api.Endpoint`
   under the versioned `/api/v1` namespace.
+
+  Every tenant/shared mount carries the `@current_org_labels` seam, whose
+  `:authn` label (`{:app_env, :<%= otp_app %>, :auth_required?}`) is the
+  prod-safety gate: OFF in dev/test (the query-param convenience identity stays),
+  ON in prod (the actor is derived only from an authenticated session — see
+  `Samen.Web.CurrentOrg`). Flipping `config :<%= otp_app %>, :auth_required?`
+  to `true` closes the spoofable `?org=`/`?user=` URL-param resolution path.
   """
   use Phoenix.Router
   import Phoenix.LiveView.Router
   import Samen.Web.Router
+
+  # ADR-031/ADR-035 — the current-org data-on-the-mount labels shared by every
+  # tenant/shared mount. `:authn` is the launch AUTH gate (the driftwood
+  # convention): `{:app_env, :<%= otp_app %>, :auth_required?}` — false in
+  # dev/test (query-param convenience), true in prod (session-derived actor
+  # only). A module attribute (compile-time literal) so it is usable inside the
+  # framework route-macro expansions; the value is session-safe (an MFA of atoms).
+  @current_org_labels %{authn: {:app_env, :<%= otp_app %>, :auth_required?}}
 
   pipeline :browser do
     plug(:accepts, ["html"])
@@ -54,15 +74,30 @@ defmodule <%= module %>Web.Router do
     # ADR-013 §4.3 — the framework SESSION-write endpoint (`GET /session/org/:org_id`).
     samen_session_routes()
 
-    # 1. Billing — the mounted samen_core Billing scope's inherited pages.
-    samen_module_routes(:billing, <%= module %>.Billing, repo: <%= module %>.Repo)
+    # ADR-035 §5 A1–A5/A7 — the IDENTITY-SPINE pre-actor auth surfaces
+    # (signup → verify → reset → login → 2fa → invite), mounted over this app's
+    # sole Identity mount (`<%= module %>.Operator`) in ONE line. Pre-actor
+    # public (no plane/org data). The generated app is the first host to serve
+    # the full framework auth path with zero hand-edits (A9).
+    samen_auth_routes(namespace: <%= module %>.Operator, repo: <%= module %>.Repo)
+
+    # ADR-035 §5 A8 — the FIRST-RUN onboarding wizard (`GET /onboarding`):
+    # org-naming, plan-selection (the honest "no plans configured" empty state —
+    # no `:plan_labels` hook wired until the host adds billing, INV-4), teammate
+    # invite (T05's real Invite flow). Same Identity mount as the auth spine.
+    samen_onboarding_routes(<%= module %>.Operator, repo: <%= module %>.Repo)
+
+    # 1. Billing — the mounted samen_core Billing scope's inherited pages. Carries
+    #    the `@current_org_labels` seam so the `:authn` prod gate governs actor
+    #    resolution (query-param convenience in dev/test; session-only in prod).
+    samen_module_routes(:billing, <%= module %>.Billing, repo: <%= module %>.Repo, labels: @current_org_labels)
 
     # 2. Notifications (WS-A A4/A5) — the framework inbox (+ /notifications/settings),
     #    mounted over the Primitives mount in ONE line. Realtime rides
     #    `<%= module %>.PubSub` (id-only envelopes).
     samen_notifications_routes(:notifications, <%= module %>.Primitives,
       repo: <%= module %>.Repo,
-      labels: %{pubsub: <%= module %>.PubSub}
+      labels: Map.put(@current_org_labels, :pubsub, <%= module %>.PubSub)
     )
 
     # 3. Metrics egress (WS-F5 F5.1) — the framework `GET /metrics` Prometheus

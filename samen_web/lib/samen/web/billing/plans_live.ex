@@ -463,7 +463,7 @@ defmodule Samen.Web.Billing.PlansLive do
   defp crumbs(mount, org_id, leaf), do: [CurrentOrg.name(mount, org_id), "Billing", leaf]
 
   defp primary_price([]), do: "—"
-  defp primary_price([price | _]), do: dollars(price.unit_amount_cents)
+  defp primary_price([price | _]), do: dollars(price.unit_amount)
 
   defp interval_label(:monthly), do: "monthly"
   defp interval_label(:annual), do: "annual"
@@ -510,6 +510,9 @@ defmodule Samen.Web.Billing.PlansLive do
   defp plan_fg("scale"), do: "#7C3AED"
   defp plan_fg(_), do: "#6B7280"
 
+  # ADR-036 §4.5(3): unit_amount is the Money composite now — a plain integer
+  # cents count is no longer the sole call shape (dollars(price.unit_amount)).
+  defp dollars(%Money{} = money), do: dollars(Samen.Type.Money.cents(money))
   defp dollars(cents) when is_integer(cents),
     do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
 

@@ -267,19 +267,34 @@
   },
   "hosts": {
     "demo": {
-      "mce": "Demo.MarketingScope.ConsentEvent"
+      "atk": "Demo.Identity.AuthToken",
+      "crd": "Demo.Identity.Credential",
+      "mce": "Demo.MarketingScope.ConsentEvent",
+      "ses": "Demo.Identity.Session",
+      "uid": "Demo.Identity.UserIdentity"
     },
     "driftwood": {
+      "doc": "Driftwood.Operator.Credential",
+      "doi": "Driftwood.Operator.UserIdentity",
+      "dos": "Driftwood.Operator.Session",
+      "dot": "Driftwood.Operator.AuthToken",
       "fmv": "Driftwood.Marketing.ConsentEvent"
     },
     "pawchart": {
       "vmv": "PawChart.Marketing.ConsentEvent"
     },
     "samen_core": {
+      "sro": "SamenCore.Support.RichTypes.OrgFixture",
+      "srp": "SamenCore.Support.RichTypes.PersonalFixture",
       "sxv": "SamenCore.Support.SuppressionFixture.ConsentEvent"
     },
     "samen_web": {
-      "wmv": "Samen.WebTest.Marketing.ConsentEvent"
+      "rti": "Samen.WebTest.RichTypes.Item",
+      "wmv": "Samen.WebTest.Marketing.ConsentEvent",
+      "woc": "Samen.WebTest.Operator.Credential",
+      "woi": "Samen.WebTest.Operator.UserIdentity",
+      "wos": "Samen.WebTest.Operator.Session",
+      "wot": "Samen.WebTest.Operator.AuthToken"
     }
   }
 }

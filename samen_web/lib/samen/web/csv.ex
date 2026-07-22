@@ -209,7 +209,11 @@ defmodule Samen.Web.Csv do
         repo: Keyword.fetch!(opts, :repo)
       )
 
-    row_values = Enum.map(resolved, fn record -> Enum.map(cols, &cell(Map.get(record, &1))) end)
+    row_values =
+      Enum.map(resolved, fn record ->
+        Enum.map(cols, fn col -> cell_for_column(Map.get(record, col), resource, col) end)
+      end)
+
     acc = acc ++ row_values
 
     if page.has_more do
@@ -233,10 +237,56 @@ defmodule Samen.Web.Csv do
   defp cell(nil), do: ""
   defp cell(%Samen.Masked{}), do: @mask
   defp cell(%Ash.ForbiddenField{}), do: ""
+  # ADR-036 D5/H7 (Money row): the canonical CSV cell is ISO-4217 "CUR 12.34" —
+  # a currency code, a space, and the plain decimal amount (no thousands grouping,
+  # so `decode_cell/1` → the governed action's `cast_input` parses it losslessly
+  # via AshMoney's `{currency, amount}` tuple form below).
+  defp cell(%Money{amount: amount, currency: currency}) do
+    "#{currency} #{Decimal.to_string(amount, :normal)}"
+  end
+
+  # ADR-036 D5/H7 (Percent/Score rows): the canonical CSV cell for either bounded
+  # decimal scalar is the plain decimal string ("42.5" / "87") — no thousands
+  # grouping, so `decode_cell/1` → the governed action's `cast_input` parses it
+  # losslessly. Without this clause a bare %Decimal{} would fall through to the
+  # generic map/JSON branch below (it is a struct) and mis-serialize as a JSON
+  # object of its internal coef/exp/sign fields.
+  defp cell(%Decimal{} = value), do: Decimal.to_string(value, :normal)
+
   defp cell(value) when is_binary(value), do: value
   defp cell(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
   defp cell(value) when is_map(value) or is_list(value), do: value |> compact() |> Jason.encode!()
   defp cell(value), do: to_string(value)
+
+  # ADR-036 D5/H7 (Duration row): the canonical CSV cell is ISO-8601 (`"PT5400S"`).
+  # `Samen.Type.Duration`'s Ash VALUE is a bare non-negative integer (seconds) — no
+  # wrapper struct the way Money/Percent/Score have — so `cell/1` alone cannot tell
+  # "this integer is a Duration" from any other plain integer column by shape. This
+  # thin wrapper checks the COLUMN'S declared Ash type before falling to the
+  # value-shape dispatch every other cell already uses; every non-Duration column
+  # (including every other integer-valued attribute) is byte-identical to `cell/1`.
+  # `decode_cell/1` needs NO matching change: `Samen.Type.Duration.cast_input/2`
+  # already accepts an ISO-8601 string directly (and bare seconds too, for the
+  # pre-T15 fixtures/imports that still write one).
+  defp cell_for_column(seconds, resource, col) when is_integer(seconds) do
+    case attr_type(resource, col) do
+      Samen.Type.Duration -> duration_iso8601(seconds)
+      _ -> cell(seconds)
+    end
+  end
+
+  defp cell_for_column(value, _resource, _col), do: cell(value)
+
+  defp attr_type(resource, col) do
+    case Ash.Resource.Info.attribute(resource, col) do
+      %{type: type} -> type
+      _ -> nil
+    end
+  end
+
+  defp duration_iso8601(seconds) when is_integer(seconds) and seconds >= 0 do
+    [second: seconds] |> Duration.new!() |> Duration.to_iso8601()
+  end
 
   defp compact(%_{} = struct), do: struct |> Map.from_struct() |> compact()
 

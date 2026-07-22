@@ -331,7 +331,7 @@ defmodule Samen.Web.CRM.CompanyLive do
                         <td style="font-weight:500;color:#3a3b45">{opp.name}</td>
                         <td style="color:var(--muted)">{stage_label(opp)}</td>
                         <td><.pill variant={opp_status_variant(opp.status)}>{opp.status}</.pill></td>
-                        <td style="color:var(--muted)">{dollars(opp.value_cents)}</td>
+                        <td style="color:var(--muted)">{dollars(opp.value)}</td>
                       </tr>
                     </.data_table>
                   <% end %>
@@ -482,6 +482,8 @@ defmodule Samen.Web.CRM.CompanyLive do
   defp opp_status_variant(:on_hold), do: "warn"
   defp opp_status_variant(_), do: "mut"
 
+  # ADR-036 §4.5(3): opp.value is now the Money composite (dollars(opp.value)).
+  defp dollars(%Money{} = money), do: dollars(Samen.Type.Money.cents(money))
   defp dollars(cents) when is_integer(cents),
     do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
 

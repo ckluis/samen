@@ -52,7 +52,8 @@ defmodule Demo.SubscriptionMovementLedgerTest do
       |> Ash.Changeset.for_create(:create, %{
         org_id: org_id,
         plan_id: plan_id,
-        unit_amount_cents: cents,
+        # ADR-036 §4.5: unit_amount_cents/currency dropped by the H1 Money migration.
+        unit_amount: Samen.Type.Money.from_cents(cents, :USD),
         interval: :monthly,
         active: true
       })

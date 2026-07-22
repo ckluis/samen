@@ -61,8 +61,8 @@ defmodule PawChart.DogfoodWalkthroughTest do
       PawChart.Billing.Customer
       |> Ash.Changeset.for_create(:create, %{
         org_id: @org,
-        billing_name: %{first: "Happy", last: "Paws"},
-        billing_email: ["billing@happypaws.example.com"]
+        billing_name: "Happy Paws Veterinary Clinic LLC",
+        billing_email: "billing@happypaws.example.com"
       })
       |> Ash.create!(authorize?: false)
 

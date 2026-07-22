@@ -86,13 +86,14 @@ defmodule Driftwood.Reads do
   defp actor_of(_), do: %{}
 
   @doc """
-  The LOAD BOARD for the given scope: Load (Opportunity alias) rows — name, value cents,
-  status, close date, lane (from the custom bag). Non-PII throughout; reads through the
-  scope's org boundary.
+  The LOAD BOARD for the given scope: Load (Opportunity alias) rows — name, value
+  (ADR-036 H1: the Money composite, formerly value_cents/currency), status, close
+  date, lane (from the custom bag). Non-PII throughout; reads through the scope's
+  org boundary.
   """
   def load_board(scope) do
     Driftwood.Crm.Opportunity
-    |> Ash.Query.ensure_selected([:name, :value_cents, :currency, :status, :close_date, :custom])
+    |> Ash.Query.ensure_selected([:name, :value, :status, :close_date, :custom])
     |> Ash.Query.sort(inserted_at: :asc)
     |> Ash.read!(scope: scope)
     |> Enum.map(fn l ->

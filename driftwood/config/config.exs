@@ -1,5 +1,11 @@
 import Config
 
+# ADR-036 D1 / ADR-037 §5.2: AshMoney/ex_money wiring (CRM Opportunity / Billing
+# Price Money attributes, tenant + operator billing mounts). No FX feature — the
+# background exchange-rate poller stays off.
+config :ash, :known_types, [AshMoney.Types.Money]
+config :ex_money, auto_start_exchange_rate_service: false
+
 # Driftwood — the Phase-5 freight-brokerage reference vertical (T5.2).
 # Mounts the samen_core CRM scope, composes the vertical Freight resources
 # (Driver / Settlement / DispatchEvent) and lays Driftwood.Context over the

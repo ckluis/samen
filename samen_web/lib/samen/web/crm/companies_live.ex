@@ -197,7 +197,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
             </.metric>
             <.metric
               label="Pipeline value"
-              value={dollars((@metrics && @metrics.pipeline_value_cents) || 0)}
+              value={dollars((@metrics && @metrics.pipeline_value) || 0)}
               sub="open opportunities"
             >
               <:icon>
@@ -305,6 +305,8 @@ defmodule Samen.Web.CRM.CompaniesLive do
   defp role_variant("shipper"), do: "ok"
   defp role_variant(_), do: "mut"
 
+  # ADR-036 §4.5(3): the CRM pipeline-value metric is now a Money composite sum.
+  defp dollars(%Money{} = money), do: dollars(Samen.Type.Money.cents(money))
   defp dollars(cents) when is_integer(cents),
     do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
 

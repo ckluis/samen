@@ -1,5 +1,11 @@
 import Config
 
+# ADR-036 D1 / ADR-037 §5.2: AshMoney/ex_money wiring (CRM Opportunity / Billing
+# Price Money attributes). No FX feature — the background exchange-rate poller
+# stays off.
+config :ash, :known_types, [AshMoney.Types.Money]
+config :ex_money, auto_start_exchange_rate_service: false
+
 # PawChart — the Phase-6 second-vertical thin slice (T6.2), the reuse-measurement
 # probe. MOUNTS the samen_core Billing scope AS-IS (plain subscriptions, NO reshape),
 # AUTHORS the vertical Clinical resources (Patient / Pet), and DEFINES a Tier-2

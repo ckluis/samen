@@ -375,6 +375,138 @@
     {
       "fields": [
         {
+          "column_name": "doc_email_bidx",
+          "logical_name": "email_bidx",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "doc_hash_scheme",
+          "logical_name": "hash_scheme",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "doc_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "doc_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "doc_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "doc_password_hash",
+          "logical_name": "password_hash",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "doc_totp_enabled_at",
+          "logical_name": "totp_enabled_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "doc_totp_last_verified_at",
+          "logical_name": "totp_last_verified_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "doc_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "doc_verified_at",
+          "logical_name": "verified_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_doc_recovery_codes",
+          "logical_name": "recovery_codes",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "pii_doc_totp_secret",
+          "logical_name": "totp_secret",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Driftwood.Operator.Credential",
+      "table_name": "doc_credential"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "doi_credential_id",
+          "logical_name": "credential_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "doi_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "doi_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "doi_linked_at",
+          "logical_name": "linked_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "doi_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "doi_provider",
+          "logical_name": "provider",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "doi_provider_uid",
+          "logical_name": "provider_uid",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "doi_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Operator.UserIdentity",
+      "table_name": "doi_user_identity"
+    },
+    {
+      "fields": [
+        {
           "column_name": "dok_expires_at",
           "logical_name": "expires_at",
           "pii": false,
@@ -501,16 +633,28 @@
     {
       "fields": [
         {
-          "column_name": "don_accept_token",
-          "logical_name": "accept_token",
+          "column_name": "don_accepted_at",
+          "logical_name": "accepted_at",
           "pii": false,
-          "type": "String"
+          "type": "UtcDatetime"
         },
         {
           "column_name": "don_email",
           "logical_name": "email",
           "pii": true,
           "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "don_email_bidx",
+          "logical_name": "email_bidx",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "don_expires_at",
+          "logical_name": "expires_at",
+          "pii": false,
+          "type": "UtcDatetime"
         },
         {
           "column_name": "don_id",
@@ -531,6 +675,12 @@
           "type": "UUID"
         },
         {
+          "column_name": "don_revoked_at",
+          "logical_name": "revoked_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
           "column_name": "don_role",
           "logical_name": "role",
           "pii": false,
@@ -539,6 +689,12 @@
         {
           "column_name": "don_status",
           "logical_name": "status",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "don_token_digest",
+          "logical_name": "token_digest",
           "pii": false,
           "type": "String"
         },
@@ -567,10 +723,22 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "doo_max_concurrent_sessions",
+          "logical_name": "max_concurrent_sessions",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
           "column_name": "doo_name",
           "logical_name": "name",
           "pii": false,
           "type": "String"
+        },
+        {
+          "column_name": "doo_onboarded_at",
+          "logical_name": "onboarded_at",
+          "pii": false,
+          "type": "UtcDatetime"
         },
         {
           "column_name": "doo_org_id",
@@ -656,6 +824,144 @@
     },
     {
       "fields": [
+        {
+          "column_name": "dos_credential_id",
+          "logical_name": "credential_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dos_device_label",
+          "logical_name": "device_label",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dos_expires_at",
+          "logical_name": "expires_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dos_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dos_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dos_last_seen_at",
+          "logical_name": "last_seen_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dos_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dos_revoked_at",
+          "logical_name": "revoked_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dos_token_digest",
+          "logical_name": "token_digest",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dos_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Operator.Session",
+      "table_name": "dos_session"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dot_consumed_at",
+          "logical_name": "consumed_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dot_context",
+          "logical_name": "context",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dot_credential_id",
+          "logical_name": "credential_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dot_expires_at",
+          "logical_name": "expires_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dot_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dot_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dot_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dot_sent_to_bidx",
+          "logical_name": "sent_to_bidx",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dot_token_digest",
+          "logical_name": "token_digest",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dot_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Operator.AuthToken",
+      "table_name": "dot_auth_token"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dou_credential_id",
+          "logical_name": "credential_id",
+          "pii": false,
+          "type": "UUID"
+        },
         {
           "column_name": "dou_emails",
           "logical_name": "emails",
@@ -1035,12 +1341,6 @@
           "type": "Boolean"
         },
         {
-          "column_name": "dpr_currency",
-          "logical_name": "currency",
-          "pii": false,
-          "type": "String"
-        },
-        {
           "column_name": "dpr_custom",
           "logical_name": "custom",
           "pii": false,
@@ -1083,10 +1383,10 @@
           "type": "String"
         },
         {
-          "column_name": "dpr_unit_amount_cents",
-          "logical_name": "unit_amount_cents",
+          "column_name": "dpr_unit_amount",
+          "logical_name": "unit_amount",
           "pii": false,
-          "type": "Integer"
+          "type": "Samen.Type.Money"
         },
         {
           "column_name": "dpr_updated_at",
@@ -2721,12 +3021,6 @@
           "type": "Boolean"
         },
         {
-          "column_name": "fbr_currency",
-          "logical_name": "currency",
-          "pii": false,
-          "type": "String"
-        },
-        {
           "column_name": "fbr_custom",
           "logical_name": "custom",
           "pii": false,
@@ -2769,10 +3063,10 @@
           "type": "String"
         },
         {
-          "column_name": "fbr_unit_amount_cents",
-          "logical_name": "unit_amount_cents",
+          "column_name": "fbr_unit_amount",
+          "logical_name": "unit_amount",
           "pii": false,
-          "type": "Integer"
+          "type": "Samen.Type.Money"
         },
         {
           "column_name": "fbr_updated_at",
@@ -4047,12 +4341,6 @@
           "type": "UUID"
         },
         {
-          "column_name": "fop_currency",
-          "logical_name": "currency",
-          "pii": false,
-          "type": "String"
-        },
-        {
           "column_name": "fop_custom",
           "logical_name": "custom",
           "pii": false,
@@ -4113,10 +4401,10 @@
           "type": "UtcDatetime"
         },
         {
-          "column_name": "fop_value_cents",
-          "logical_name": "value_cents",
+          "column_name": "fop_value",
+          "logical_name": "value",
           "pii": false,
-          "type": "Integer"
+          "type": "Samen.Type.Money"
         }
       ],
       "resource": "Driftwood.Crm.Opportunity",

@@ -109,9 +109,38 @@ defmodule Samen.ContextTest do
           Ecto.UUID.dump!(act.id)
         ])
 
-      assert String.starts_with?(stored, "vt_")
+      # The column holds ONLY a canonical vault token — structurally proving no
+      # plaintext (nor any fragment of it) leaked. ROOT-CAUSE FIX (T102, a distinct
+      # flake class from the outage/property ones): a digit-substring refute like
+      # `refute stored =~ "123"` is UNSOUND here — "123" is all hex, so it appears
+      # by chance inside the random `vt_<hex>` token even when nothing leaked (a
+      # ci-fast run produced "vt_390a62127551234f72c840a2e068ed18", tripping that
+      # refute; the randomness is `:crypto.strong_rand_bytes`, independent of the
+      # ExUnit seed). The exact-token-shape assertion is the sound, deterministic
+      # masking check (the RedPathVaultScanTest pattern) and is strictly stronger:
+      # a plaintext-appended leak still fails it.
+      assert stored =~ ~r/^vt_[0-9a-f]{32}$/
       refute stored =~ "Jane"
-      refute stored =~ "123"
+    end
+
+    # DETERMINISTIC regression for the T102 hex-collision flake class: proves the
+    # token-shape masking assertion is BOTH sound (a valid token that happens to
+    # contain a plaintext digit-fragment is correctly NOT flagged) and non-vacuous
+    # (a real plaintext-appended leak IS flagged). Uses the exact token a live
+    # ci-fast run generated, so it needs no DB and no seed.
+    test "T102: token-shape masking check is sound against hex-substring collision" do
+      colliding = "vt_390a62127551234f72c840a2e068ed18"
+
+      # The token embeds "123" purely by chance in its random hex — this is what
+      # made the old `refute _ =~ "123"` flaky.
+      assert colliding =~ "123"
+
+      # SOUND check: a canonical token passes (no plaintext leaked)...
+      assert colliding =~ ~r/^vt_[0-9a-f]{32}$/
+
+      # ...and it is NOT vacuous: a token with plaintext appended (a real leak)
+      # fails the exact-shape assertion.
+      refute colliding <> "Jane Doe SSN 123" =~ ~r/^vt_[0-9a-f]{32}$/
     end
 
     test "org-scope still filters an aliased read (cross-org invisible)" do

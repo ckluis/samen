@@ -89,7 +89,7 @@ defmodule Samen.Erasure do
     # act. It is the ONLY thing that can make the guarantee fail closed (if the
     # key store is unreachable we must NOT proceed and NOT fabricate an
     # attestation).
-    case Kms.adapter().shred(subject_id) do
+    case Kms.shred(subject_id) do
       {:ok, attestation} ->
         seal_db_tiers(subject_id, attestation, :from_state, actor_id, org_id, r, rollup_opts)
 

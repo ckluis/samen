@@ -258,8 +258,11 @@ defmodule Samen.Scopes.Crm.Blueprint do
 
         attributes do
           attribute(:name, :string, public?: true, allow_nil?: false)
-          attribute(:value_cents, :integer, public?: true, default: 0)
-          attribute(:currency, :string, public?: true, default: "USD")
+          # ADR-036 H1/D7: the paired `value_cents :integer` + `currency :string`
+          # convention is replaced by ONE Money composite attribute (destructive,
+          # pre-1.0, single data-copy migration — no deprecation window; T12).
+          # Default $0.00 USD mirrors the prior pair's `default: 0` / `default: "USD"`.
+          attribute(:value, Samen.Type.Money, public?: true, default: {Money, :new!, [:USD, 0]})
           attribute(:probability, :integer, public?: true, default: 0)
           attribute(:status, :atom,
             public?: true,

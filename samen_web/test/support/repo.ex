@@ -10,7 +10,12 @@ defmodule Samen.WebTest.Repo do
     adapter: Ecto.Adapters.Postgres,
     warn_on_missing_ash_functions?: false
 
-  def installed_extensions, do: ["uuid-ossp", "citext"]
+  def installed_extensions do
+    # AshMoney.AshPostgresExtension (ADR-036 D1/D7; ADR-037 §5.2): installs the
+    # money_with_currency composite type the mounted CRM Opportunity / Billing
+    # Price Money attributes need.
+    ["uuid-ossp", "citext", AshMoney.AshPostgresExtension]
+  end
 
   def min_pg_version, do: %Version{major: 14, minor: 0, patch: 0}
 end

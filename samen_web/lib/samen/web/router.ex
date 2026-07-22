@@ -584,13 +584,23 @@ defmodule Samen.Web.Router do
     * `GET /<path>/profile`     → `Samen.Web.Settings.ProfileLive`
     * `GET /<path>/api-keys`    → `Samen.Web.Settings.ApiKeysLive`
     * `GET /<path>/security`    → `Samen.Web.Settings.SecurityLive`
+    * `GET /<path>/invitations` → `Samen.Web.Settings.InvitationsLive` (ADR-035 §5 A5)
 
   The current user is host-supplied (auth is host-owned): an explicit `?user=` param,
   else `session["samen_current_user"]`, else `Mount.label(mount, :current_user_id)`.
 
   Options: as `samen_files_routes/3` (`:repo` required; `:domain`, `:plane`,
   `:operator_id`/`:target_org_id`, `:path` (default `/settings`), `:labels`,
-  `:session_name`).
+  `:session_name`), plus `:spine_sessions` (ADR-035 §4.3, default `false`) — the
+  EXPLICIT opt-in that flips the Security surface from its honest "managed by
+  your identity provider" placeholders to the real session list + revoke
+  controls once the host's `namespace` actually mounts the framework spine's
+  `Identity.Session` (never inferred from compilation alone — see
+  `Samen.Web.Settings.SecurityLive`), plus `:spine_totp` (ADR-035 §5 A7, default
+  `false`) — the EXPLICIT opt-in that mounts `/settings/security/2fa` →
+  `Samen.Web.Auth.TotpEnrollLive` and flips SecurityLive's 2FA placeholder to a
+  real enrollment link (wire it only when `namespace` mounts the spine's
+  `Credential`; never inferred, same posture as `:spine_sessions`).
   """
   defmacro samen_settings_routes(kind, namespace, opts \\ []) do
     kind = Macro.expand(kind, __CALLER__)
@@ -606,6 +616,29 @@ defmodule Samen.Web.Router do
           ] do
       _ = kind
 
+      # ADR-035 §4.3 — `settings_path` lets SecurityLive build the revoke-form
+      # `action=` URLs without hardcoding this macro's mount path; `spine_sessions`
+      # is the EXPLICIT opt-in (default false) that flips SecurityLive from its
+      # honest "managed by your identity provider" placeholders to the real
+      # session list + revoke controls (RP-ST-4's honesty inversion, ADR-035
+      # §4.3 — real ONLY when a host deliberately turns this on, never inferred
+      # from whether `Identity.Session` happens to be compiled in the mount).
+      # ADR-035 §5 A7 — `spine_totp` (default false) is the EXPLICIT opt-in that
+      # flips SecurityLive's "Two-factor authentication — managed by your identity
+      # provider" placeholder into a REAL enrollment affordance AND mounts the
+      # `/settings/security/2fa` → `TotpEnrollLive` route. A host wires this ONLY
+      # when its `namespace` actually mounts the framework Identity spine's
+      # `Credential` (TOTP columns) — never inferred from compilation (the SAME
+      # honesty posture as `spine_sessions`). Absent it, this surface is
+      # byte-for-byte unchanged (the `settings_surface_test.exs` RP-ST-4 default).
+      spine_totp = Keyword.get(opts, :spine_totp, false)
+
+      labels =
+        (Keyword.get(opts, :labels) || %{})
+        |> Map.put(:settings_path, path)
+        |> Map.put(:spine_sessions, Keyword.get(opts, :spine_sessions, false))
+        |> Map.put(:spine_totp, spine_totp)
+
       mount =
         Samen.Web.Mount.new(
           :settings,
@@ -613,15 +646,263 @@ defmodule Samen.Web.Router do
           Keyword.fetch!(opts, :repo),
           domain: Keyword.get(opts, :domain, namespace),
           plane: Samen.Web.Router.__plane__(opts),
-          labels: Keyword.get(opts, :labels)
+          labels: labels
         )
 
       live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:settings, path) do
           live(sub_path, module)
         end
+
+        # ADR-035 §5 A7 — the self-service TOTP-enrollment surface. Mounted ONLY
+        # under the `spine_totp` opt-in (a host with the Identity spine): a
+        # tenant-plane LiveView over the same `:settings` mount whose namespace
+        # materializes `Credential`/`User`. Before this route TotpEnrollLive had
+        # NO HTTP mount anywhere — 2FA was fail-closed but unreachable in prod.
+        if spine_totp do
+          live("#{path}/security/2fa", Samen.Web.Auth.TotpEnrollLive)
+        end
+      end
+
+      # ADR-035 §4.3/§5 A4 — Settings/Security's session revoke controls. A
+      # LiveView cannot set a cookie mid-mount, so these two POSTs go through
+      # `Samen.Web.Auth.SessionController` (the SessionController precedent).
+      # Live ONLY when `namespace` mounts the framework spine's `Identity.Session`
+      # — a settings namespace that does not is unaffected (the routes exist but
+      # 404/error only if actually hit, exactly as honest as SecurityLive's own
+      # "managed by your identity provider" fallback when the spine isn't there).
+      post("#{path}/security/sessions/:id/revoke", Samen.Web.Auth.SessionController, :revoke,
+        private: %{samen_mount: mount}
+      )
+
+      post("#{path}/security/sessions/revoke_others", Samen.Web.Auth.SessionController, :revoke_others,
+        private: %{samen_mount: mount}
+      )
+    end
+  end
+
+  @doc """
+  Mount the framework IDENTITY-SPINE pre-actor auth surfaces — self-serve
+  registration (A1), email verification (A2), and password reset (A3) — in
+  ONE line:
+
+      import Samen.Web.Router
+
+      scope "/" do
+        pipe_through :browser
+        samen_auth_routes namespace: Demo.Identity, repo: Demo.Repo
+      end
+
+  Declares:
+
+    * `GET /signup`        → `Samen.Web.Auth.RegistrationLive` (ADR-035 §5 A1)
+    * `GET /verify/:token` → `Samen.Web.Auth.ConfirmLive` (ADR-035 §5 A2)
+    * `GET /reset`         → `Samen.Web.Auth.ResetRequestLive` (ADR-035 §5 A3)
+    * `GET /reset/:token`  → `Samen.Web.Auth.ResetLive` (ADR-035 §5 A3)
+    * `GET /login`         → `Samen.Web.Auth.LoginLive` (ADR-035 §5 A4)
+    * `POST /login`        → `Samen.Web.Auth.SessionController.create/2` (ADR-035 §5 A4)
+    * `GET /2fa`           → `Samen.Web.Auth.TotpChallengeLive` (ADR-035 §5 A7 — the
+      second-factor interstitial; only reached when `create/2` finds
+      `Credential.totp_enabled_at` set)
+    * `POST /2fa`          → `Samen.Web.Auth.SessionController.verify_totp/2` (ADR-035 §5 A7)
+    * `GET /logout`        → `Samen.Web.Auth.SessionController.delete/2` (ADR-035 §5 A4)
+    * `GET /invite/:token` → `Samen.Web.Auth.InviteAcceptLive` (ADR-035 §5 A5)
+
+  ## Optional OIDC (ADR-035 §5 A6)
+
+  Pass `oidc: [:google]` to additionally mount the OPTIONAL OIDC endpoints:
+
+    * `GET /auth/oidc/:provider`          → `Samen.Web.Auth.OidcController.request/2`
+    * `GET /auth/oidc/:provider/callback` → `Samen.Web.Auth.OidcController.callback/2`
+
+  An ABSENT/empty `oidc:` emits NEITHER route (the module-absent contract). IdP
+  credentials come from app config (`config :samen_web, Samen.Web.Auth.Oidc,
+  providers: %{google: [client_id: ..., client_secret: ..., signup: true]}`); an
+  unconfigured provider fail-honests `{:error, :not_configured}` (never a dead
+  button). `oidc_config:` is an optional compile-time literal override (tests) and
+  `oidc_path:` overrides the `/auth/oidc` prefix.
+
+  **Pre-actor public** (ADR-035 §6): no `plane:`/`operator_id:` options — none
+  of these surfaces render org data. `:namespace` is the host's Identity
+  mount (the SAME namespace `use Samen.Scopes.Identity, namespace: ...`
+  materialized `Org`/`Credential`/`User`/`Membership`/`AuthToken`/`Session`/
+  `Invitation` into); `:repo` is required. `:signup_path`/`:verify_path`/
+  `:reset_path`/`:login_path`/`:logout_path`/`:invite_path`/`:totp_path`
+  override the defaults (`/signup`, `/verify`, `/reset`, `/login`, `/logout`,
+  `/invite`, `/2fa`) independently; `:path` (legacy, T02) is still honored as
+  the signup path override alone.
+  """
+  defmacro samen_auth_routes(opts \\ []) do
+    signup_path = Keyword.get(opts, :signup_path, Keyword.get(opts, :path, "/signup"))
+    verify_path = Keyword.get(opts, :verify_path, "/verify")
+    reset_path = Keyword.get(opts, :reset_path, "/reset")
+    login_path = Keyword.get(opts, :login_path, "/login")
+    logout_path = Keyword.get(opts, :logout_path, "/logout")
+    invite_path = Keyword.get(opts, :invite_path, "/invite")
+    # ADR-035 §5 A7 — the 2FA interstitial, mounted UNCONDITIONALLY like
+    # `/login` (never opt-in): a host with no credential ever enrolling 2FA
+    # simply never reaches it (`SessionController.create/2` only redirects
+    # here when `Credential.totp_enabled_at` is set).
+    totp_path = Keyword.get(opts, :totp_path, "/2fa")
+    session_name = Keyword.get(opts, :session_name, session_name(:auth, signup_path))
+
+    # ADR-035 §5 A6 — the OPTIONAL OIDC module. `oidc:` names the enabled
+    # providers (e.g. `oidc: [:google]`); an EMPTY/ABSENT list emits NO
+    # `/auth/oidc` routes at all (the module-absent contract, done-criterion 2).
+    # `oidc_config` is an OPTIONAL compile-time literal override handed to the
+    # controller (mainly the test stub); `nil` → the controller falls back to
+    # app env (`config :samen_web, Samen.Web.Auth.Oidc, providers: %{...}`).
+    oidc_enabled? = Keyword.get(opts, :oidc, []) != []
+    oidc_config = Keyword.get(opts, :oidc_config)
+    oidc_base = Keyword.get(opts, :oidc_path, "/auth/oidc")
+
+    quote bind_quoted: [
+            opts: opts,
+            signup_path: signup_path,
+            verify_path: verify_path,
+            reset_path: reset_path,
+            login_path: login_path,
+            logout_path: logout_path,
+            invite_path: invite_path,
+            totp_path: totp_path,
+            session_name: session_name,
+            oidc_enabled?: oidc_enabled?,
+            oidc_config: oidc_config,
+            oidc_base: oidc_base
+          ] do
+      mount =
+        Samen.Web.Mount.new(
+          :auth,
+          Keyword.fetch!(opts, :namespace),
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, Keyword.fetch!(opts, :namespace)),
+          labels: %{login_path: login_path, totp_path: totp_path}
+        )
+
+      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        live(signup_path, Samen.Web.Auth.RegistrationLive)
+        live("#{verify_path}/:token", Samen.Web.Auth.ConfirmLive)
+        live(reset_path, Samen.Web.Auth.ResetRequestLive)
+        live("#{reset_path}/:token", Samen.Web.Auth.ResetLive)
+        live(login_path, Samen.Web.Auth.LoginLive)
+        live(totp_path, Samen.Web.Auth.TotpChallengeLive)
+        live("#{invite_path}/:token", Samen.Web.Auth.InviteAcceptLive)
+      end
+
+      # ADR-035 §5 A4/A7 — sign-in/out/2fa-verify are plain controller writes
+      # (a LiveView cannot set a cookie mid-mount): `private: %{samen_mount:
+      # ..., samen_login_path: ..., samen_totp_path: ...}` gives the
+      # controller the SAME per-host parameterization the live_session above
+      # carries, without a hardcoded host module (the `samen_module_routes`
+      # pattern, for a Plug route).
+      post(login_path, Samen.Web.Auth.SessionController, :create,
+        private: %{samen_mount: mount, samen_login_path: login_path, samen_totp_path: totp_path}
+      )
+
+      post(totp_path, Samen.Web.Auth.SessionController, :verify_totp,
+        private: %{samen_mount: mount, samen_login_path: login_path, samen_totp_path: totp_path}
+      )
+
+      get(logout_path, Samen.Web.Auth.SessionController, :delete,
+        private: %{samen_mount: mount, samen_login_path: login_path, samen_totp_path: totp_path}
+      )
+
+      # ADR-035 §5 A6 — the OPTIONAL OIDC request + callback endpoints, emitted
+      # ONLY when `oidc:` named ≥1 provider. A host that did not opt in has NONE
+      # of these routes (the module-absent probe). Plain controller routes (the
+      # flow is cookie/session writes on real HTTP responses — the
+      # SessionController precedent); `private:` carries the same per-host mount +
+      # the OIDC provider config, so the controller never hardcodes a host module.
+      if oidc_enabled? do
+        get("#{oidc_base}/:provider/callback", Samen.Web.Auth.OidcController, :callback,
+          private: %{
+            samen_mount: mount,
+            samen_login_path: login_path,
+            samen_oidc_config: oidc_config
+          }
+        )
+
+        get("#{oidc_base}/:provider", Samen.Web.Auth.OidcController, :request,
+          private: %{
+            samen_mount: mount,
+            samen_login_path: login_path,
+            samen_oidc_config: oidc_config
+          }
+        )
       end
     end
+  end
+
+  @doc """
+  Mount the framework ONBOARDING WIZARD (ADR-035 §5 A8; spec §WS-A A8) —
+  `GET /onboarding` → `Samen.Web.Onboarding.WizardLive` — in ONE line:
+
+      import Samen.Web.Router
+
+      scope "/" do
+        pipe_through :browser
+        samen_onboarding_routes Demo.Identity, repo: Demo.Repo
+      end
+
+  `namespace`/`:repo` are the SAME Identity mount `samen_auth_routes`/
+  `samen_settings_routes` use (the mount rides the `:settings` scope_kind —
+  the `samen_settings_routes`/T05 `InvitationsLive` precedent: the wizard
+  reads/writes `Org` + embeds the invite step over the SAME materialized
+  Identity resources, no new scope_kind needed). Tenant plane (ADR-035 §6 —
+  own-org writes only).
+
+  ## Options
+
+    * `:repo`         — REQUIRED. The host's Ecto repo.
+    * `:domain`        — the host Ash domain (default: `namespace`).
+    * `:path`          — the mount path (default `/onboarding`).
+    * `:plan_labels`   — OPTIONAL `{mod, fun, args}` — the WS-B billing
+      hookup point (ADR-035 §5 A8/§7 INV-4). Called as `apply(mod, fun, args
+      ++ [org_id])`, expected to return `[%{key:, label:}, ...]`. ABSENT →
+      the wizard's plan-selection step renders the HONEST "no plans
+      configured" empty state — never a fabricated plan list.
+    * `:labels`        — optional additional UI copy overrides, merged under
+      `:plan_labels`.
+  """
+  defmacro samen_onboarding_routes(namespace, opts \\ []) do
+    path = Keyword.get(opts, :path, "/onboarding")
+    session_name = Keyword.get(opts, :session_name, session_name(:onboarding, path))
+
+    quote bind_quoted: [namespace: namespace, opts: opts, path: path, session_name: session_name] do
+      labels =
+        (Keyword.get(opts, :labels) || %{})
+        |> Map.put(:plan_labels, Keyword.get(opts, :plan_labels))
+
+      mount =
+        Samen.Web.Mount.new(
+          :settings,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          labels: labels
+        )
+
+      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        live(path, Samen.Web.Onboarding.WizardLive)
+      end
+    end
+  end
+
+  @doc false
+  # ADR-035 §5 A6 — the OIDC route table the `samen_auth_routes` macro emits, as a
+  # pure function so the module-absent contract is directly unit-testable: an
+  # EMPTY provider list yields NO routes (done-criterion 2), a non-empty one
+  # yields the request + callback endpoints. `providers` is the `oidc:` opt.
+  def __oidc_routes__(providers, base \\ "/auth/oidc")
+
+  def __oidc_routes__([], _base), do: []
+  def __oidc_routes__(nil, _base), do: []
+
+  def __oidc_routes__(providers, base) when is_list(providers) do
+    [
+      {"#{base}/:provider/callback", Samen.Web.Auth.OidcController, :callback},
+      {"#{base}/:provider", Samen.Web.Auth.OidcController, :request}
+    ]
   end
 
   @doc """
@@ -800,7 +1081,8 @@ defmodule Samen.Web.Router do
       {"#{path}", Samen.Web.Settings.ProfileLive},
       {"#{path}/profile", Samen.Web.Settings.ProfileLive},
       {"#{path}/api-keys", Samen.Web.Settings.ApiKeysLive},
-      {"#{path}/security", Samen.Web.Settings.SecurityLive}
+      {"#{path}/security", Samen.Web.Settings.SecurityLive},
+      {"#{path}/invitations", Samen.Web.Settings.InvitationsLive}
     ]
   end
 

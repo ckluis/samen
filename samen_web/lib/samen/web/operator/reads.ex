@@ -352,13 +352,17 @@ defmodule Samen.Web.Operator.Reads do
   Returns `%{account:, movements:, tickets:, invoices:}` or `nil` (unknown account /
   read error) — the LiveView renders "not found", never a crash.
   """
-  def account_detail(mount, scope, operator_org_id, account_org_id) do
+  def account_detail(mount, scope, operator_org_id, account_org_id, opts \\ []) do
     case find_account_org(mount, operator_org_id, account_org_id) do
       nil ->
         nil
 
       org ->
-        now = DateTime.utc_now()
+        # ONE clock reading, captured once per assembly (B9 carry B4-P2-1). Defaults to
+        # `DateTime.utc_now/0` in production; tests pin it via `:now` (the sanctioned
+        # clock-injection opt — same pattern as `Samen.Retention`/`Samen.BreakGlass.Budget`)
+        # so the not-yet-due boundary is deterministic instead of a wall-clock margin.
+        now = Keyword.get(opts, :now, DateTime.utc_now())
         row = account_row(org, account_joins(mount, scope, operator_org_id, now))
         customer_id = row.__customer__ && row.__customer__.id
 
@@ -552,13 +556,15 @@ defmodule Samen.Web.Operator.Reads do
     _ -> %{}
   end
 
+  # ADR-036 §4.5(3): unit_amount_cents was dropped by the H1 Money migration;
+  # unit_amount is now the money_with_currency composite — extract minor units.
   defp monthly_prices_by_plan(mount, scope) do
     Mount.resource(mount, Price)
-    |> Ash.Query.ensure_selected([:plan_id, :unit_amount_cents, :interval, :active])
+    |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval, :active])
     |> Ash.Query.filter(interval == :monthly and active == true)
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
-    |> Map.new(&{&1.plan_id, &1.unit_amount_cents})
+    |> Map.new(&{&1.plan_id, Samen.Type.Money.cents(&1.unit_amount)})
   rescue
     _ -> %{}
   end

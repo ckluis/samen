@@ -119,9 +119,14 @@ defmodule Samen.Abbrev.AllocatorTest do
 
     test "the COMMITTED registry is byte-untouched after all scratch reservations" do
       committed = File.read!(R.path())
-      # 263 flat entries + the 5 F3 host-namespaced ConsentEvent reservations (ADR-023).
-      assert byte_size(committed) == 12_469
-      assert map_size(R.load()) == 268
+      # 263 flat entries + the 5 F3 host-namespaced ConsentEvent reservations (ADR-023) +
+      # the 6 ADR-035 T02 Identity.Credential/AuthToken host reservations + the 3 ADR-035
+      # T03 Identity.Session host reservations + the 3 ADR-035 T06
+      # Identity.UserIdentity host reservations + 3 concurrent, unrelated in-flight
+      # rich-types fixture reservations (2 samen_core, not authored by T02/T03/T06; 1
+      # samen_web — T15's own `rti` round-trip matrix fixture, ADR-036 H7).
+      assert byte_size(committed) == 13_171
+      assert map_size(R.load()) == 283
     end
   end
 

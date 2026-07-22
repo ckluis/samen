@@ -54,6 +54,7 @@ defmodule Samen.Gen.Post do
   """
 
   alias Samen.Gen.App
+  alias Samen.Gen.FieldTypeMenu
   alias Samen.AbbrevRegistry
 
   # ===========================================================================
@@ -144,19 +145,26 @@ defmodule Samen.Gen.Post do
       :table,
       :migration_ts,
       # WS-D D7a `--live`: also scaffold index/show/form LiveViews on `Samen.UI`.
-      live?: false
+      live?: false,
+      # ADR-036 H7 (T15): the `pii do` vault field's LOGICAL type, one of
+      # `Samen.Gen.FieldTypeMenu.menu/0`. Defaults to "string" — byte-identical to
+      # pre-T15 output when `--field-type` is omitted.
+      field_type: "string"
     ]
   end
 
   @doc """
   Build a resource spec. `opts`: `:app_dir`, `:scope` (the target scope base name),
-  `:resource` (the resource base name, e.g. `Widget`), `:abbrev` (3 lowercase letters).
+  `:resource` (the resource base name, e.g. `Widget`), `:abbrev` (3 lowercase letters),
+  `:field_type` (optional — one of `Samen.Gen.FieldTypeMenu.menu/0`, default `"string"`;
+  ADR-036 H7/T15's full type menu for the ONE scalar `pii do` vault field).
   """
   def build_resource_spec(opts) do
     app_dir = Keyword.fetch!(opts, :app_dir) |> Path.expand()
     scope = Keyword.fetch!(opts, :scope) |> to_string()
     resource = Keyword.fetch!(opts, :resource) |> to_string()
     abbrev = Keyword.fetch!(opts, :abbrev) |> to_string() |> String.downcase()
+    field_type = Keyword.get(opts, :field_type, "string") |> to_string()
     {app_module, otp_app} = read_app_identity!(app_dir)
 
     scope_module = "#{app_module}.#{scope}"
@@ -172,7 +180,8 @@ defmodule Samen.Gen.Post do
       abbrev: abbrev,
       table: "#{abbrev}_#{Macro.underscore(resource)}",
       migration_ts: Keyword.get(opts, :migration_ts, next_migration_ts(app_dir)),
-      live?: Keyword.get(opts, :live, false)
+      live?: Keyword.get(opts, :live, false),
+      field_type: field_type
     }
   end
 
@@ -203,6 +212,15 @@ defmodule Samen.Gen.Post do
 
     unless Regex.match?(~r/\A[a-z]{3}\z/, s.abbrev) do
       raise ArgumentError, "--abbrev must be exactly 3 lowercase letters (got #{inspect(s.abbrev)})"
+    end
+
+    # ADR-036 H7 (T15) — closed-world: an unknown --field-type is refused, not
+    # silently defaulted (the same fail-closed discipline `Samen.CustomFields`
+    # applies to its own type menu).
+    unless Samen.Gen.FieldTypeMenu.valid?(s.field_type) do
+      raise ArgumentError,
+            "--field-type must be one of #{inspect(Samen.Gen.FieldTypeMenu.menu())} " <>
+              "(got #{inspect(s.field_type)})"
     end
 
     # The target scope must already be a registered domain in the app (gen.scope first).
@@ -352,7 +370,19 @@ defmodule Samen.Gen.Post do
       "test_stem" => test_stem(s),
       # `--live` bindings: underscored path segments for the emitted LiveViews' routes.
       "scope_path" => Macro.underscore(s.scope),
-      "resource_path" => Macro.underscore(s.resource)
+      "resource_path" => Macro.underscore(s.resource),
+      # ADR-036 H7 (T15) — the `pii do` vault field's menu-selected type + its
+      # type-appropriate sample literals (Samen.Gen.FieldTypeMenu; "string" is
+      # byte-identical to pre-T15 output).
+      "field_type" => s.field_type,
+      "field_ash_type" => FieldTypeMenu.ash_type(s.field_type),
+      "field_dynamic_sample" => FieldTypeMenu.dynamic_sample(s.field_type, s.abbrev),
+      "field_vault_sample" => FieldTypeMenu.vault_sample(s.field_type, s.abbrev),
+      "field_vault_plaintext" => FieldTypeMenu.vault_plaintext(s.field_type, s.abbrev),
+      # attempt-2 fix: the migration's physical column name must match
+      # MaterializePii's OWN scalar-vs-composite routing (D4) — see
+      # FieldTypeMenu's moduledoc "T15 attempt-1 defect" note.
+      "field_vault_column" => FieldTypeMenu.vault_column(s.field_type, s.abbrev)
     }
   end
 

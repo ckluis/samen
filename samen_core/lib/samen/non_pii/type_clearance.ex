@@ -52,12 +52,82 @@ defmodule Samen.NonPii.TypeClearance do
 
   @config_key :non_pii_type_clearances
 
+  # The foundry-SHIPPED clearance manifest (ADR-036 D1/D5): entries samen_core
+  # itself carries, honored in EVERY host application with no per-host config
+  # required (unlike a host's own `config :samen_core, :non_pii_type_clearances`,
+  # which only that host's OWN config.exs would see — a library's config.exs is not
+  # loaded by a dependent app). Two distinct, named parties per entry — the same
+  # governed-opt-out discipline `valid_clearance_for?/2` enforces for host-supplied
+  # entries below. `Samen.Type.Money` (H1) is the first: money is categorically
+  # non-PII (a deal value / a price a tenant sets, not a subject's own data).
+  @shipped_clearances [
+    %{
+      type: Samen.Type.Money,
+      cleared_by: "fable (T12 orchestrator)",
+      reviewed_by: "T11 (ADR-036 WS-H design review)",
+      reason:
+        "categorically non-PII financial scalar (a deal value / a tenant's price point, " <>
+          "never a subject's own data); PII-shaped uses would route to the vault per " <>
+          "ADR-036 D3, not through this type"
+    },
+    # ADR-036 D2/D5 (T13): the H2 bounded-scalar family and H3's URL — each a
+    # categorically non-PII measurement/enum/link scalar. PII-shaped uses (e.g. a
+    # personal-profile URL, ADR-036 §3 H3 caveat) route to the vault via
+    # pii_attribute, never through a bare plaintext column of these types.
+    %{
+      type: Samen.Type.Percent,
+      cleared_by: "fable (T13 orchestrator)",
+      reviewed_by: "T11 (ADR-036 WS-H design review)",
+      reason:
+        "categorically non-PII measurement scalar (a completion rate / a discount " <>
+          "percentage, never a subject's own data); PII-shaped uses route to the vault " <>
+          "per ADR-036 D3, not through this type"
+    },
+    %{
+      type: Samen.Type.Score,
+      cleared_by: "fable (T13 orchestrator)",
+      reviewed_by: "T11 (ADR-036 WS-H design review)",
+      reason:
+        "categorically non-PII measurement scalar (a health/lead score, an NPS rating, " <>
+          "never a subject's own data); PII-shaped uses route to the vault per " <>
+          "ADR-036 D3, not through this type"
+    },
+    %{
+      type: Samen.Type.Duration,
+      cleared_by: "fable (T13 orchestrator)",
+      reviewed_by: "T11 (ADR-036 WS-H design review)",
+      reason:
+        "categorically non-PII measurement scalar (an SLA window, a task estimate, " <>
+          "never a subject's own data); PII-shaped uses route to the vault per " <>
+          "ADR-036 D3, not through this type"
+    },
+    %{
+      type: Samen.Type.Priority,
+      cleared_by: "fable (T13 orchestrator)",
+      reviewed_by: "T11 (ADR-036 WS-H design review)",
+      reason:
+        "categorically non-PII ordered-enum scalar (a ticket/deal priority, never a " <>
+          "subject's own data); PII-shaped uses route to the vault per ADR-036 D3, not " <>
+          "through this type"
+    },
+    %{
+      type: Samen.Type.URL,
+      cleared_by: "fable (T13 orchestrator)",
+      reviewed_by: "T11 (ADR-036 WS-H design review)",
+      reason:
+        "categorically non-PII link scalar (a marketing site / docs / webhook target, " <>
+          "never a subject's own data) BY DEFAULT; a personal-identifying (profile) URL " <>
+          "is the ADR-036 §3 H3 caveat and routes to the vault via pii_attribute, not " <>
+          "through a bare plaintext column of this type"
+    }
+  ]
+
   @doc """
   Is `module` cleared to honor its `:non_pii` self-classification?
 
-  Returns `true` iff the app config carries at least one valid, two-distinct-party
-  clearance naming `module`. Fail-closed for everything else (no config, malformed
-  entry, self-review, non-module argument).
+  Returns `true` iff the shipped manifest or the app config carries at least one
+  valid, two-distinct-party clearance naming `module`. Fail-closed for everything
+  else (no config, malformed entry, self-review, non-module argument).
   """
   @spec cleared?(module()) :: boolean()
   def cleared?(module) when is_atom(module) and not is_nil(module) do
@@ -67,14 +137,16 @@ defmodule Samen.NonPii.TypeClearance do
   def cleared?(_), do: false
 
   @doc """
-  The configured clearance entries (raw, unfiltered). A single map is wrapped into
-  a list so a host that configures one clearance without a surrounding list still
-  works. Defaults to `[]` when unconfigured.
+  The clearance entries in effect: the foundry-shipped manifest (`@shipped_clearances`)
+  followed by the configured entries (`config :samen_core, :non_pii_type_clearances`).
+  A single map is wrapped into a list so a host that configures one clearance without
+  a surrounding list still works. Configured entries default to `[]` when unconfigured.
   """
   @spec clearances() :: [term()]
   def clearances do
-    Application.get_env(:samen_core, @config_key, [])
-    |> List.wrap()
+    @shipped_clearances ++
+      (Application.get_env(:samen_core, @config_key, [])
+       |> List.wrap())
   end
 
   defp valid_clearance_for?(%{} = clearance, module) do

@@ -1,5 +1,11 @@
 import Config
 
+# ADR-036 D1 / ADR-037 §5.2: AshMoney/ex_money wiring (CRM Opportunity / Billing
+# Price Money attributes). No FX feature — the background exchange-rate poller
+# stays off.
+config :ash, :known_types, [AshMoney.Types.Money]
+config :ex_money, auto_start_exchange_rate_service: false
+
 # Demo is a contact-manager dogfood app (T1.9).
 # It uses samen_core as a path dep and exercises EVERY T1 feature.
 config :demo,
@@ -25,6 +31,20 @@ config :samen_core, Samen.FeatureFlags, emit: {Samen.Analytics, :track}
 # T3.6 SLA breach detection: configure the ticket resource for the Oban cron.
 config :samen_core, :support_sla_breach_ticket_resource, Demo.SupportScope.Ticket
 config :samen_core, :support_sla_ticket_abbrev, "stk"
+
+# WS-A A4/A5 / ADR-035 §5 A10 — the kernel notification ENGINE wired to the demo's
+# mounted Primitives resources (the ADR-014 SendWorker config convention: the kernel
+# is mount-agnostic; the host names its concrete modules + repo). WITHOUT this,
+# every source event (auth-lifecycle A10 fan-out included) best-effort NO-OPs with
+# `{:error, :no_notification_module}` — so the demo, a proof host, must wire it to
+# match driftwood. No `:broadcaster` is set: the demo has no samen_web PubSub server,
+# so dispatch defaults to `Samen.Notifications.LogBroadcaster` (samen_core) — the
+# Notification RECORD still lands (the dispatch that matters), the realtime broadcast
+# is a web concern the API-only demo does not run.
+config :samen_core, Samen.Notifications.Engine,
+  notification_module: Demo.PrimitivesScope.Notification,
+  preference_module: Demo.PrimitivesScope.NotificationPreference,
+  repo: Demo.Repo
 
 config :ash, disable_async?: true
 

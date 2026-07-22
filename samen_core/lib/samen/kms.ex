@@ -76,6 +76,17 @@ defmodule Samen.Kms do
           checked_at: DateTime.t()
         }
 
+  @typedoc """
+  A RESERVED SYNTHETIC subject — a KMS-purpose key, not a real PII subject (ADR-035
+  §4.1). `"sys:bidx"` provisions `k_bidx`, the org-independent HMAC key the blind-index
+  email lookup is keyed under, through the ordinary `generate_subject_key/1` +
+  `unwrap/1` callbacks (no new behaviour callback, no adapter change). Reserved
+  subjects are permanently EXCLUDED from erasure sweeps and the destruction oracle:
+  shredding one would break a shared mechanism (every login lookup), not destroy one
+  subject's data. See `reserved_subject?/1` and `shred/1` below.
+  """
+  @type reserved_subject :: subject_id
+
   # --- wrap hierarchy ---
   @callback generate_subject_key(subject_id) :: {:ok, wrapped :: ciphertext} | {:error, term}
   @callback unwrap(subject_id) :: {:ok, dek :: plaintext} | {:error, :shredded | :unavailable | term}
@@ -131,5 +142,42 @@ defmodule Samen.Kms do
   @spec adapter() :: module()
   def adapter do
     Application.get_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
+  end
+
+  # ADR-035 §4.1 — the reserved synthetic subject set. Currently exactly one:
+  # "sys:bidx", the blind-index HMAC purpose key (Samen.Auth.BlindIndex). Adding a
+  # future reserved subject is a one-line append here — every caller routes through
+  # `shred/1` below, so the refusal is structural, not per-caller discipline.
+  @reserved_subjects MapSet.new(["sys:bidx"])
+
+  @doc """
+  Whether `subject_id` is a RESERVED SYNTHETIC subject (ADR-035 §4.1) — a KMS-purpose
+  key, never a real PII subject. `"sys:bidx"` is the blind-index HMAC key; it is
+  provisioned like any other subject (`generate_subject_key/1` / `unwrap/1`) but is
+  never a valid `shred/1` target (see below).
+  """
+  @spec reserved_subject?(subject_id) :: boolean()
+  def reserved_subject?(subject_id) when is_binary(subject_id),
+    do: MapSet.member?(@reserved_subjects, subject_id)
+
+  def reserved_subject?(_), do: false
+
+  @doc """
+  The GOVERNED shred chokepoint (ADR-035 §4.1). Refuses a reserved synthetic subject
+  BEFORE delegating to the configured adapter, so no caller — the erasure
+  orchestrator, the destruction oracle, an ad-hoc script — can shred `"sys:bidx"` by
+  construction: shredding it would break every login lookup, not erase one subject.
+  Every other subject delegates unchanged to `adapter().shred/1`.
+
+  `Samen.Vault.shred/1` and `Samen.Erasure.shred/2` both ride this chokepoint (they no
+  longer call `adapter().shred/1` directly) — this is the ONE place the refusal lives.
+  """
+  @spec shred(subject_id) :: {:ok, attestation} | {:error, :reserved_subject | term}
+  def shred(subject_id) do
+    if reserved_subject?(subject_id) do
+      {:error, :reserved_subject}
+    else
+      adapter().shred(subject_id)
+    end
   end
 end

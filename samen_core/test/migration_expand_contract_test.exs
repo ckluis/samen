@@ -62,6 +62,37 @@ defmodule Samen.MigrationExpandContractTest do
   end
 
   # ---------------------------------------------------------------------------
+  # (b') Raw diagnostic connections connect synchronously (flake F regression, T105)
+  # ---------------------------------------------------------------------------
+
+  describe "raw diagnostic connections are synchronously established (flake F, T105)" do
+    test "start opts carry sync_connect, so the first query never races the async connect" do
+      opts = raw_conn_opts()
+
+      # Posture guard (RED-on-revert): remove `sync_connect: true` from the raw-conn opts
+      # builder and this assertion is red. The class of raw-connection tests (vault/catalog/
+      # prefixes/no-plaintext/agent-authoring/operator-plane migration) shared one race —
+      # start_link connects asynchronously, so an immediate query could be dropped from the
+      # checkout queue under suite load ("connection not available … dropped from queue").
+      assert Keyword.get(opts, :sync_connect) == true,
+             "raw diagnostic conns must block start_link until connected (flake F, T105)"
+
+      # Behavioral proof (not a tautology): with sync_connect the connection is ready the
+      # instant start_link returns, so a query under a HOSTILE 1ms checkout window still
+      # serves. Reverting the fix (async connect) drops this checkout — the exact failure
+      # observed at verify_vault_declared_parity_test:235 / this file's lock-abort test.
+      {:ok, conn} = Postgrex.start_link(opts)
+
+      try do
+        assert %Postgrex.Result{rows: [[1]]} =
+                 Postgrex.query!(conn, "SELECT 1", [], queue_target: 1, queue_interval: 1)
+      after
+        GenServer.stop(conn)
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # (b) Live blocking-lock: aborts fast at ~5s (RED PATH + anti-tautology)
   # ---------------------------------------------------------------------------
 
@@ -408,19 +439,25 @@ defmodule Samen.MigrationExpandContractTest do
 
   # --- raw (non-sandbox) Postgrex connections for the live-lock test ---
 
-  defp start_raw_conns do
+  # Raw (non-sandbox) Postgrex connection opts. `sync_connect: true` blocks start_link
+  # until the socket is established so the first query never races the async connect under
+  # accumulated suite load (flake F, T105) — the sanctioned structural fix, not a margin.
+  defp raw_conn_opts do
     base = Repo.config()
 
-    conn_opts = [
+    [
       hostname: Keyword.get(base, :hostname, "localhost"),
       username: Keyword.get(base, :username),
       password: Keyword.get(base, :password, ""),
       database: Keyword.fetch!(base, :database),
-      pool_size: 1
+      pool_size: 1,
+      sync_connect: true
     ]
+  end
 
-    {:ok, a} = Postgrex.start_link(conn_opts)
-    {:ok, b} = Postgrex.start_link(conn_opts)
+  defp start_raw_conns do
+    {:ok, a} = Postgrex.start_link(raw_conn_opts())
+    {:ok, b} = Postgrex.start_link(raw_conn_opts())
     {a, b}
   end
 

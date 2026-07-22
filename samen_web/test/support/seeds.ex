@@ -285,7 +285,8 @@ defmodule Samen.WebTest.Seeds do
         %{
           org_id: org_id,
           name: "Chicago → Dallas dry van",
-          value_cents: 250_000,
+          # ADR-036 §4.5(5): value_cents/currency dropped by the H1 Money migration.
+          value: Samen.Type.Money.from_cents(250_000, :USD),
           status: :open,
           company_id: company.id,
           pipeline_id: stage.id
@@ -337,8 +338,8 @@ defmodule Samen.WebTest.Seeds do
         %{
           org_id: org_id,
           plan_id: plan.id,
-          unit_amount_cents: 29_900,
-          currency: "USD",
+          # ADR-036 §4.5(5): unit_amount_cents/currency dropped by the H1 Money migration.
+          unit_amount: Samen.Type.Money.from_cents(29_900, :USD),
           interval: :monthly,
           active: true
         },

@@ -8,7 +8,8 @@ defmodule Demo.Aggregate.Rebuild do
   bounded, non-PII summary columns (tier / status / band enums + counts + a cents
   number) into the vault-excluded projection tables. It never touches a `pii_`
   column — the source columns it reads (`bsb_status`, `bpl_name`,
-  `bpr_unit_amount_cents`, `stk_status`, `bin_status`, `bin_due_date`) are all
+  `bpr_unit_amount` (ADR-036 H1: the money_with_currency composite, formerly
+  `bpr_unit_amount_cents`), `stk_status`, `bin_status`, `bin_due_date`) are all
   non-PII, and the destination tables have no `pii_` columns (the C7 verifier + `mix
   samen.verify.no_pii_columns` enforce this).
 
@@ -61,16 +62,21 @@ defmodule Demo.Aggregate.Rebuild do
         # Cross-tenant MRR by tier: for each plan tier (bpl_name), count distinct
         # orgs on an ACTIVE subscription to a plan of that tier, and sum the plan's
         # monthly price cents. NO org filter — this spans every tenant.
+        #
+        # ADR-036 §4.5(2): bpr_unit_amount_cents was dropped by the H1 Money
+        # migration; bpr_unit_amount is now the money_with_currency composite —
+        # sum its minor units directly ((composite).amount * 100), never re-widen
+        # to a paired column.
         %{num_rows: mrr_rows} =
           Ecto.Adapters.SQL.query!(
             repo,
             """
             INSERT INTO amr_mrr_by_tier (amr_tier, amr_tenant_count, amr_mrr_cents, amr_refreshed_at)
             SELECT
-              p.bpl_name                                         AS amr_tier,
-              COUNT(DISTINCT s.bsb_org_id)::int                  AS amr_tenant_count,
-              COALESCE(SUM(pr.bpr_unit_amount_cents), 0)::int    AS amr_mrr_cents,
-              now()                                              AS amr_refreshed_at
+              p.bpl_name                                                AS amr_tier,
+              COUNT(DISTINCT s.bsb_org_id)::int                         AS amr_tenant_count,
+              COALESCE(SUM((pr.bpr_unit_amount).amount * 100), 0)::int  AS amr_mrr_cents,
+              now()                                                     AS amr_refreshed_at
             FROM bsb_subscription s
             JOIN bpl_plan p ON p.bpl_id = s.bsb_plan_id
             LEFT JOIN bpr_price pr ON pr.bpr_plan_id = p.bpl_id AND pr.bpr_active = TRUE

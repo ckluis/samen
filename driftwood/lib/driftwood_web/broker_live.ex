@@ -94,6 +94,8 @@ defmodule DriftwoodWeb.BrokerLive do
   defp panel(params), do: param(params, "panel") || "dashboard"
   defp param(params, key), do: Map.get(params, key)
 
+  # ADR-036 §4.5(4): l.value is now the Money composite (dollars(l.value)).
+  defp dollars(%Money{} = money), do: dollars(Samen.Type.Money.cents(money))
   defp dollars(cents) when is_integer(cents), do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
   defp dollars(_), do: "$0.00"
 
@@ -289,7 +291,7 @@ defmodule DriftwoodWeb.BrokerLive do
                   <tr :for={l <- @loads} class="load-row">
                     <td class="l-name"><span class="mono" style="color:#454652;font-weight:500">{l.name}</span></td>
                     <td class="l-lane carrier">{l.__lane__}</td>
-                    <td class="l-value mono num">{dollars(l.value_cents)}</td>
+                    <td class="l-value mono num">{dollars(l.value)}</td>
                     <td class="l-status"><.pill variant={status_variant(l.status)}>{l.status}</.pill></td>
                   </tr>
                 </.data_table>

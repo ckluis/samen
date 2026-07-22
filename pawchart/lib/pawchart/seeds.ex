@@ -221,7 +221,8 @@ defmodule PawChart.Seeds do
       %{
         org_id: org_id,
         name: "Valley Animal Hospital — Pro Plan Upsell",
-        value_cents: 119_800,
+        # ADR-036 §4.5(5): value_cents/currency dropped by the H1 Money migration.
+        value: Samen.Type.Money.from_cents(119_800, :USD),
         status: :open,
         company_id: company.id,
         pipeline_id: stage && stage.id
@@ -261,8 +262,8 @@ defmodule PawChart.Seeds do
         %{
           org_id: org_id,
           plan_id: plan.id,
-          unit_amount_cents: 9_900,
-          currency: "USD",
+          # ADR-036 §4.5(5): unit_amount_cents/currency dropped by the H1 Money migration.
+          unit_amount: Samen.Type.Money.from_cents(9_900, :USD),
           interval: :monthly,
           active: true
         },

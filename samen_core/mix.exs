@@ -102,6 +102,15 @@ defmodule SamenCore.MixProject do
       # avoid a NIF/C toolchain requirement in this environment. No AWS/Neon here —
       # a pure-Elixir solver keeps the policy layer self-contained and CI-portable.
       {:simple_sat, "~> 0.1"},
+      # ash_money (ADR-037 §5.2 ADOPT; ADR-036 D1): Samen.Type.Money wraps
+      # AshMoney.Types.Money — samen owns the catalog/type-menu NAME, the package
+      # owns currency arithmetic/rounding/SQL-aggregation + the Postgres composite
+      # `money_with_currency` extension (AshMoney.AshPostgresExtension). ex_money is
+      # the underlying %Money{} value/currency library; ex_money_sql provides the
+      # Ecto/Postgrex type + SQL operators the extension installs.
+      {:ash_money, "~> 0.2.6"},
+      {:ex_money, "~> 6.0"},
+      {:ex_money_sql, "~> 2.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end

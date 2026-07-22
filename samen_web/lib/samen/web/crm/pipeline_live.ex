@@ -42,10 +42,12 @@ defmodule Samen.Web.CRM.PipelineLive do
     scope = Mount.scope(mount, org_id)
     stages = Reads.pipeline(mount, scope)
 
+    # ADR-036 §4.5(3): value_cents was dropped by the H1 Money migration; opp.value
+    # is now the Money composite — accumulate over its minor units.
     total_value_cents =
       stages
       |> Enum.flat_map(& &1.opportunities)
-      |> Enum.reduce(0, fn opp, acc -> acc + (opp.value_cents || 0) end)
+      |> Enum.reduce(0, fn opp, acc -> acc + Samen.Type.Money.cents(opp.value) end)
 
     total_opps =
       stages |> Enum.map(& &1.opportunities) |> Enum.map(&length/1) |> Enum.sum()
@@ -139,7 +141,7 @@ defmodule Samen.Web.CRM.PipelineLive do
                       <td class="opp-name">
                         <span class="mono" style="color:#454652;font-weight:500">{opp.name}</span>
                       </td>
-                      <td class="opp-value mono num">{dollars(opp.value_cents)}</td>
+                      <td class="opp-value mono num">{dollars(opp.value)}</td>
                       <td class="opp-status">
                         <.pill variant={status_variant(opp.status)}>{opp.status}</.pill>
                       </td>
@@ -147,7 +149,7 @@ defmodule Samen.Web.CRM.PipelineLive do
                         {opp.close_date || "—"}
                       </td>
                       <td class="opp-currency" style="color:var(--muted);font-size:12px">
-                        {Map.get(opp, :currency) || "USD"}
+                        {(opp.value && opp.value.currency) || "USD"}
                       </td>
                     </tr>
                   </.data_table>
@@ -165,7 +167,7 @@ defmodule Samen.Web.CRM.PipelineLive do
 
   defp crumbs(mount, org_id, leaf), do: [CurrentOrg.name(mount, org_id), "CRM", leaf]
 
-  defp stage_value(opps), do: Enum.reduce(opps, 0, &((&1.value_cents || 0) + &2))
+  defp stage_value(opps), do: Enum.reduce(opps, 0, &(Samen.Type.Money.cents(&1.value) + &2))
 
   defp stage_variant(:open), do: "info"
   defp stage_variant(:qualified), do: "warn"
@@ -181,6 +183,8 @@ defmodule Samen.Web.CRM.PipelineLive do
   defp status_variant(s) when is_binary(s), do: status_variant(String.to_atom(s))
   defp status_variant(_), do: "mut"
 
+  # ADR-036 §4.5(3): opp.value is now the Money composite (dollars(opp.value)).
+  defp dollars(%Money{} = money), do: dollars(Samen.Type.Money.cents(money))
   defp dollars(cents) when is_integer(cents),
     do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
 

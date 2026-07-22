@@ -143,7 +143,13 @@ defmodule Samen.FactoryTest do
       refute row =~ "ada.lovelace"
       refute row =~ "MRN-FCT-SECRET-9"
       refute row =~ "555 0199"
-      refute row =~ "1912"
+      # Refute the FULL dob plaintext, not the bare year. ROOT-CAUSE FIX (T102
+      # hex-collision flake class): "1912" is all hex and collides by chance with
+      # the random vt_<hex> tokens (and UUIDs) that `to_jsonb(t)` embeds in the
+      # row, a seed-independent false positive. The full "1912-06-23" carries
+      # non-hex separators, so it cannot false-positive while still catching a real
+      # plaintext leak of the vaulted dob (~D[1912-06-23]).
+      refute row =~ "1912-06-23"
     end
   end
 

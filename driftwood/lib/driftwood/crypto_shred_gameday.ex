@@ -262,11 +262,19 @@ defmodule Driftwood.CryptoShredGameday do
     |> Ash.create!()
   end
 
+  # ADR-036 §4.5(5): value_cents/currency dropped by the H1 Money migration —
+  # construct the Money value directly.
   defp create_load(org_id, name, value_cents, lane) do
     Driftwood.Crm.Opportunity
     |> Ash.Changeset.for_create(
       :create,
-      %{org_id: org_id, name: name, value_cents: value_cents, status: :open, custom: %{"lane" => lane}},
+      %{
+        org_id: org_id,
+        name: name,
+        value: Samen.Type.Money.from_cents(value_cents, :USD),
+        status: :open,
+        custom: %{"lane" => lane}
+      },
       authorize?: false
     )
     |> Ash.create!()

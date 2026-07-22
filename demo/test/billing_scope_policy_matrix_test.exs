@@ -244,8 +244,8 @@ defmodule Demo.BillingScopePolicyMatrixTest do
       |> Ash.Changeset.for_create(:create, %{
         org_id: org.id,
         plan_id: plan.id,
-        unit_amount_cents: 2900,
-        currency: "USD",
+        # ADR-036 §4.5: unit_amount_cents/currency dropped by the H1 Money migration.
+        unit_amount: Samen.Type.Money.from_cents(2900, :USD),
         interval: :monthly
       })
       |> Ash.create(actor: member_scope.actor, authorize?: true)
@@ -258,13 +258,12 @@ defmodule Demo.BillingScopePolicyMatrixTest do
              |> Ash.Changeset.for_create(:create, %{
                org_id: org.id,
                plan_id: plan.id,
-               unit_amount_cents: 2900,
-               currency: "USD",
+               unit_amount: Samen.Type.Money.from_cents(2900, :USD),
                interval: :monthly
              })
              |> Ash.create(actor: admin_scope.actor, authorize?: true)
 
-    assert price.unit_amount_cents == 2900
+    assert Samen.Type.Money.cents(price.unit_amount) == 2900
     _ = member_scope
   end
 

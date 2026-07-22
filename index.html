@@ -455,6 +455,7 @@
       <span class="surface-pill"><b>one BEAM release</b> — web · workers · cron</span>
       <span class="surface-pill"><b>one Postgres</b> — truth · queue · history · audit · vault</span>
       <span class="surface-pill lit">one message, two truths — clear to the tenant, •••• to the operator</span>
+      <span class="surface-pill"><b>self-serve identity spine</b> — signup · verify · reset · sessions · invites · OIDC + TOTP step-up · 2FA · onboarding, generator-emitted</span>
       <span class="surface-pill"><b>28 sabotages</b> — CI proves each guarantee's test fails when it's broken</span>
     </div>
   </header>
@@ -507,7 +508,7 @@
       <div class="idiom">
         <div class="no">idiom 05</div>
         <h3>A malleability ladder</h3>
-        <p>Tier-0 config rows, Tier-1 <code>jsonb</code> custom fields validated at write, Tier-2 tenant-defined objects, Tier-3 builder code-composition. Customization with the guarantees intact, degrading honestly as it climbs.</p>
+        <p>Tier-0 config rows, Tier-1 <code>jsonb</code> custom fields validated at write, Tier-2 tenant-defined objects, Tier-3 builder code-composition. Customization with the guarantees intact, degrading honestly as it climbs. Fields are <strong>rich declared types</strong> — Money, Percent, Score, Duration, Priority, URL, Email, Phone, Address — and the vault write path re-runs each type's <code>cast_input</code>, so a value is validated and normalized <em>before</em> it is tokenized, not after.</p>
       </div>
       <div class="idiom">
         <div class="no">idiom 06</div>

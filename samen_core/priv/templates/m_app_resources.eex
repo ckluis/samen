@@ -22,6 +22,14 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
   ]
 
   def up do
+    # ADR-036 H1/D7: money_with_currency is the AshMoney.AshPostgresExtension
+    # composite type <%= bp %>_unit_amount (below) is stored as. Idempotent-per-DB
+    # (this is the app's first migration to need it); a host that adds further
+    # Money columns later installs the extension's full operator/aggregate set via
+    # `AshMoney.AshPostgresExtension` in its repo's `installed_extensions/0` +
+    # `mix ash_postgres.generate_migrations`.
+    execute("CREATE TYPE public.money_with_currency AS (currency_code varchar, amount numeric);")
+
     # ---- Billing scope (Stripe-mirror shape) — mounted AS-IS ----
     create table(:<%= bc %>_customer, primary_key: false) do
       add(:<%= bc %>_stripe_customer_id, :text)
@@ -53,8 +61,10 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
 
     create table(:<%= bp %>_price, primary_key: false) do
       add(:<%= bp %>_stripe_price_id, :text)
-      add(:<%= bp %>_unit_amount_cents, :integer, null: false)
-      add(:<%= bp %>_currency, :text, null: false, default: "USD")
+      # ADR-036 H1/D7: one money_with_currency composite column, not a paired
+      # _cents/currency convention (AshMoney.AshPostgresExtension below installs
+      # the type).
+      add(:<%= bp %>_unit_amount, :money_with_currency, null: false)
       add(:<%= bp %>_interval, :text, default: "monthly")
       add(:<%= bp %>_active, :boolean, default: true)
       add(:<%= bp %>_custom, :map, default: fragment("'{}'::jsonb"))

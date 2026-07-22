@@ -5,7 +5,10 @@ defmodule Demo.Repo do
     warn_on_missing_ash_functions?: false
 
   def installed_extensions do
-    ["uuid-ossp", "citext"]
+    # AshMoney.AshPostgresExtension (ADR-036 D1/D7; ADR-037 §5.2): installs the
+    # money_with_currency composite type + +/sum/min/max/avg SQL operators the
+    # CRM Opportunity / Billing Price Money migration depends on.
+    ["uuid-ossp", "citext", AshMoney.AshPostgresExtension]
   end
 
   def min_pg_version do

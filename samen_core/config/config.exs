@@ -12,6 +12,7 @@ config :samen_core,
     SamenCore.Support.PropDomain,
     SamenCore.Support.PiiClassifyDomain,
     SamenCore.Support.CustomFields,
+    SamenCore.Support.RichTypes,
     Samen.CustomObjects.Domain,
     # T3.10 bounded-context DSL toy KERNEL domain (aliased/reshaped by Ctx.Toy).
     Core.Ctx
@@ -24,6 +25,16 @@ config :samen_core,
 config :samen_core, :tnt_record_repo, SamenCore.TestRepo
 
 config :ash, disable_async?: true
+
+# ADR-036 D1/ADR-037 §5.2: AshMoney/ex_money wiring. `known_types` lets Ash's
+# operator-overload expr evaluation (sum/compare in calculations) recognize the
+# wrapped type transitively; `auto_start_exchange_rate_service: false` is a
+# deliberate no-op — samen_core/hosts never do live currency conversion, only
+# same-currency arithmetic (ADR-036 D1 "Money is not PII", no FX feature), so the
+# background exchange-rate poller (which would otherwise try a network call at
+# boot) stays off.
+config :ash, :known_types, [AshMoney.Types.Money]
+config :ex_money, auto_start_exchange_rate_service: false
 
 # AshPostgres migration primary key shape (matches the S0.2/S0.3 spike convention:
 # binary_id named :id — the abbrev transformer then prefixes it per-resource).

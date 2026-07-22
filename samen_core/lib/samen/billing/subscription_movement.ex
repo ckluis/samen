@@ -161,13 +161,16 @@ defmodule Samen.Billing.SubscriptionMovement do
   # Monthly active prices keyed by plan_id, for this org — the MRR source.
   defp monthly_prices_by_plan(nil, _org_id), do: %{}
 
+  # ADR-036 §4.5(1): Price.unit_amount_cents is now the Money attribute
+  # Price.unit_amount — select it and extract minor units via
+  # Samen.Type.Money.cents/1 so the downstream mrr_delta_cents math is unchanged.
   defp monthly_prices_by_plan(price_resource, org_id) do
     price_resource
-    |> Ash.Query.ensure_selected([:plan_id, :unit_amount_cents, :interval, :active, :org_id])
+    |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval, :active, :org_id])
     |> Ash.Query.filter(org_id == ^org_id)
     |> Ash.Query.filter(interval == :monthly and active == true)
     |> Ash.read!(authorize?: false)
-    |> Map.new(&{&1.plan_id, &1.unit_amount_cents})
+    |> Map.new(&{&1.plan_id, Samen.Type.Money.cents(&1.unit_amount)})
   rescue
     _ -> %{}
   end

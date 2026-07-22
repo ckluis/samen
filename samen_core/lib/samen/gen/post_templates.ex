@@ -57,8 +57,9 @@ defmodule Samen.Gen.PostTemplates do
       Malleability ladder (scope-authoring §7): org-scoped reads
       (`Samen.Policy.OrgScope`), **admin-gated writes** (`Samen.Policy.RoleAtLeast`,
       role `:admin` — the bounded-enum + admin-gated Tier-0 shape), a bounded-enum
-      `status`, plain non-PII label columns, and ONE scalar `pii do` vault field
-      (`pii_<%= abbrev %>_secret`) so the whole vault/mask/reveal path is exercised.
+      `status`, plain non-PII label columns, and ONE `pii do` vault field
+      (`<%= field_vault_column %>`, logical type `<%= field_ash_type %>`) so the
+      whole vault/mask/reveal path is exercised.
       Inherits the ENTIRE substrate (abbrev storage, vault routing, masking, OrgScope,
       catalog parity, audit, crypto-shred) via `use Samen.Resource` — zero vertical
       infrastructure code.
@@ -90,7 +91,7 @@ defmodule Samen.Gen.PostTemplates do
 
       pii do
         vault(:pii_secret)
-        pii_attribute(:secret, :string, vault: :pii_secret)
+        pii_attribute(:secret, <%= field_ash_type %>, vault: :pii_secret)
         reveal(:reveal_<%= abbrev %>)
       end
 
@@ -158,9 +159,18 @@ defmodule Samen.Gen.PostTemplates do
     defmodule <%= module %>.Repo.Migrations.Add<%= resource %> do
       @moduledoc """
       Creates <%= module %>'s authored `<%= resource %>` table (<%= table %>, abbrev
-      `<%= abbrev %>`, scalar vault field pii_<%= abbrev %>_secret) and catalogs it in
+      `<%= abbrev %>`, vault field `<%= field_vault_column %>`) and catalogs it in
       the SAME migration transaction (ADR-004 catalog-in-tx). Emitted by
       `mix samen.gen.resource` (WS-D D7a).
+
+      ADR-036 H7 (T15): the vault column's NAME follows
+      `Samen.Transformers.MaterializePii`'s scalar-vs-composite routing
+      (`Samen.Gen.FieldTypeMenu.vault_column/2`) — `pii_<%= abbrev %>_secret` for
+      a scalar `--field-type` (the default `:string` and every H1-H3 scalar), or
+      `<%= abbrev %>_secret` (no `pii_` prefix) for a composite PII type
+      (`Samen.Type.Address`, H4) — matching the SAME convention
+      `FullName`/`Emails`/`Phones` use. This resource's `--field-type` is
+      `<%= field_type %>`.
       """
       use Samen.Migration
 
@@ -170,8 +180,8 @@ defmodule Samen.Gen.PostTemplates do
 
       def up do
         create table(:<%= table %>, primary_key: false) do
-          # Scalar pii_ vault field → column pii_<%= abbrev %>_secret (vt_* token):
-          add(:pii_<%= abbrev %>_secret, :text)
+          # 🔒 vault field (vt_* token) → column <%= field_vault_column %>:
+          add(:<%= field_vault_column %>, :text)
           add(:<%= abbrev %>_name, :text, null: false)
           add(:<%= abbrev %>_label, :text)
           add(:<%= abbrev %>_status, :text, default: "active")
@@ -228,7 +238,7 @@ defmodule Samen.Gen.PostTemplates do
             name: "row-#{n}",
             label: "L#{n}",
             status: :active,
-            secret: "SECRET-<%= abbrev %>-#{n}"
+            secret: <%= field_dynamic_sample %>
           }
         end,
         update: {:update, %{label: "changed"}},
@@ -267,7 +277,7 @@ defmodule Samen.Gen.PostTemplates do
         attrs: fn org_id ->
           n = System.unique_integer([:positive])
           %{org_id: org_id, name: "gate-#{n}", label: "L#{n}", status: :active,
-            secret: "SECRET-<%= abbrev %>-#{n}"}
+            secret: <%= field_dynamic_sample %>}
         end
       )
     end
@@ -294,10 +304,10 @@ defmodule Samen.Gen.PostTemplates do
         resource: Resource,
         org: Org,
         fields: [:secret],
-        plaintexts: ["VAULT-PLAINTEXT-<%= abbrev %>-hunt"],
+        plaintexts: ["<%= field_vault_plaintext %>"],
         attrs: fn org_id ->
           %{org_id: org_id, name: "vault-row", status: :active,
-            secret: "VAULT-PLAINTEXT-<%= abbrev %>-hunt"}
+            secret: <%= field_vault_sample %>}
         end
       )
     end
@@ -764,7 +774,7 @@ defmodule Samen.Gen.PostTemplates do
                       </tr>
                       <tr style="border-bottom:1px solid var(--border)">
                         <td style="padding:10px 0;color:var(--muted)">Secret <small style="font-weight:400">(🔒 PII — resolved per plane)</small></td>
-                        <td style="padding:10px 0" class="d-secret">{@record.secret}</td>
+                        <td style="padding:10px 0" class="d-secret">{render_secret(@record.secret)}</td>
                       </tr>
                     </table>
                   </div>
@@ -780,6 +790,16 @@ defmodule Samen.Gen.PostTemplates do
       defp status_variant(:paused), do: "warn"
       defp status_variant(:archived), do: "mut"
       defp status_variant(_), do: "mut"
+
+      # ADR-036 H7 (T15): the 🔒 field's plane-resolved value can be `%Samen.Masked{}`
+      # (already Phoenix.HTML.Safe — "••••"), a plain string (URL/email/phone/nil),
+      # or — for the H1/H2/H4 menu types — a struct/Decimal (Money/Address/Percent/
+      # Score) Phoenix.HTML.Safe has no built-in impl for. `inspect/1` renders any of
+      # those safely as text (never raises); binaries/Masked pass through untouched.
+      defp render_secret(nil), do: ""
+      defp render_secret(%Samen.Masked{} = m), do: m
+      defp render_secret(v) when is_binary(v), do: v
+      defp render_secret(v), do: inspect(v)
     end
     '''
   end

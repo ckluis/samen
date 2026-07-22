@@ -52,6 +52,14 @@ config :samen_core, :query_budget_ledger_repo, Acme.Repo
 # OWN book of business on the TENANT plane (clear); seeds anchor rows on this id.
 config :acme, :operator_org_id, "0f000000-0000-4000-8000-0000000000aa"
 
+# ADR-031/ADR-035 — the launch AUTH gate (the driftwood convention). The router's
+# tenant/shared mounts carry `authn: {:app_env, :acme, :auth_required?}`;
+# with this FALSE (dev/test) `Samen.Web.CurrentOrg` keeps the query-param convenience
+# identity (a spoofable `?org=`/`?user=`), and with it TRUE (a production deploy sets
+# it — see the endpoint/runtime notes) the current org/actor is derived ONLY from an
+# authenticated session, so `?org=`/`?user=` can never resolve an arbitrary tenant.
+config :acme, auth_required?: false
+
 # WS-A A4/A5 — the kernel notification ENGINE wired to this app's Primitives mount
 # (the ADR-014 SendWorker config convention: the kernel is mount-agnostic; the host
 # names its concrete modules + repo). Realtime rides the samen_web PubSub broadcaster

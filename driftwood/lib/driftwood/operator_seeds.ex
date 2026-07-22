@@ -222,7 +222,8 @@ defmodule Driftwood.OperatorSeeds do
     Op.Price
     |> Ash.Changeset.for_create(
       :create,
-      %{org_id: @operator_org_id, plan_id: plan.id, unit_amount_cents: mrr, currency: "USD", interval: :monthly, active: true},
+      # ADR-036 §4.5(5): unit_amount_cents/currency dropped by the H1 Money migration.
+      %{org_id: @operator_org_id, plan_id: plan.id, unit_amount: Samen.Type.Money.from_cents(mrr, :USD), interval: :monthly, active: true},
       actor: %{org_id: @operator_org_id, role: :admin},
       authorize?: false
     )

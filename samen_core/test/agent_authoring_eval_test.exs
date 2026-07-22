@@ -507,7 +507,9 @@ defmodule SamenCore.AgentAuthoringEvalTest do
         :default_prefix
       ])
 
-    {:ok, conn} = Postgrex.start_link(raw_config)
+    # sync_connect: block start_link until the socket is established so the first query
+    # never races the async connect under accumulated suite load (flake F, T105).
+    {:ok, conn} = Postgrex.start_link(Keyword.put(raw_config, :sync_connect, true))
 
     try do
       fun.(conn)

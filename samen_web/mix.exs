@@ -54,6 +54,22 @@ defmodule SamenWeb.MixProject do
       # is `AshPhoenix.Form`-backed (create/edit + inline validation errors).
       {:ash_phoenix, "~> 2.3"},
       {:jason, "~> 1.4"},
+      # ADR-035 §5 A6/§7 — the OPTIONAL OIDC module's protocol library (Google the
+      # reference IdP). A protocol implementation, NOT a vendor SDK — what
+      # ash_authentication itself uses. Its HTTP client (`req`) + JWT (`jose`) deps
+      # are all OPTIONAL: assent compiles standalone, and `Samen.Web.Auth.Oidc`
+      # resolves the strategy lazily behind `Code.ensure_loaded?/1`, so an app that
+      # never enables OIDC (or has not wired a live IdP) simply fail-honests
+      # `{:error, :not_configured}` — the module-absent / unconfigured contract.
+      {:assent, "~> 0.3"},
+      # ADR-035 §5 A7/§7 — the 2FA/TOTP module's protocol library (RFC 6238):
+      # secret generation, `otpauth://` provisioning URIs, and time-window code
+      # comparison. Pure OTP `:crypto` under the hood, no transitive HTTP/JWT
+      # deps (unlike `assent`) — `Samen.Web.Auth.Totp` is the ONLY caller
+      # (INV-4: `samen_core` never references it; the kernel-side atomic
+      # DB mutation in `Samen.Identity.Totp` takes the validity decision as an
+      # injected pure function instead).
+      {:nimble_totp, "~> 1.0"},
       # Test-support host deps (materialize the scope blueprints against a scratch repo):
       {:ash, "== 3.29.3"},
       {:ash_postgres, "== 2.10.0"},

@@ -164,4 +164,7 @@ defmodule Samen.WebTest.DataCase do
   defp namespace(:csv), do: Samen.WebTest.Crm
   # WS-E E5 settings — the Identity mount (User/ApiKey/Membership) is the operator host.
   defp namespace(:settings), do: Samen.WebTest.Operator
+  # ADR-035 — the pre-actor auth surfaces ride the SAME Identity mount as settings
+  # (Credential/AuthToken/Org/User/Membership all live under Operator in this test host).
+  defp namespace(:auth), do: Samen.WebTest.Operator
 end

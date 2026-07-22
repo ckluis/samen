@@ -217,6 +217,24 @@ defmodule Samen.Gen.App do
           role: p1 <> "or",
           api_key: p1 <> "ok",
           invitation: p1 <> "on",
+          # ADR-035 (T02x integration) — the identity spine's two org-less resources.
+          # Prefix-derived (`<p1>oc`/`<p1>ot`), NEVER `Samen.Scopes.Identity`'s literal
+          # `crd`/`atk` defaults: those two are ALREADY permanently owned in the committed
+          # registry (`hosts.demo.crd`/`hosts.demo.atk`), so falling back to them on every
+          # generated app would collide on the first run. `do*`/`wo*`'s shipped `doc`/`dot`
+          # and `woc`/`wot` prove the `<p1>o` + first-letter-of-resource shape.
+          credential: p1 <> "oc",
+          auth_token: p1 <> "ot",
+          # T06x (this integration pass) — the identity spine's other two org-less
+          # resources (T04's Session, T06's UserIdentity). Prefix-derived
+          # (`<p1>os`/`<p1>oi`), NEVER `Samen.Scopes.Identity`'s literal `ses`/`uid`
+          # defaults: those two are ALREADY permanently owned in the committed
+          # registry (`hosts.demo.ses`/`hosts.demo.uid`), so falling back to them on
+          # every generated app would collide on the first run — the exact "ses" is
+          # registered to Demo.Identity.Session collision this fixes. `do*`/`wo*`'s
+          # shipped `dos`/`doi` and `wos`/`woi` prove the `<p1>o` + first-letter shape.
+          session: p1 <> "os",
+          user_identity: p1 <> "oi",
           # Billing — each tenant's subscription TO the SaaS
           customer: p1 <> "pc",
           subscription: p1 <> "ps",
@@ -535,6 +553,10 @@ defmodule Samen.Gen.App do
       :role,
       :api_key,
       :invitation,
+      :credential,
+      :auth_token,
+      :session,
+      :user_identity,
       :customer,
       :subscription,
       :plan,
@@ -559,6 +581,10 @@ defmodule Samen.Gen.App do
   defp operator_module(:role), do: "Role"
   defp operator_module(:api_key), do: "ApiKey"
   defp operator_module(:invitation), do: "Invitation"
+  defp operator_module(:credential), do: "Credential"
+  defp operator_module(:auth_token), do: "AuthToken"
+  defp operator_module(:session), do: "Session"
+  defp operator_module(:user_identity), do: "UserIdentity"
   defp operator_module(:customer), do: "Customer"
   defp operator_module(:subscription), do: "Subscription"
   defp operator_module(:plan), do: "Plan"
@@ -637,6 +663,10 @@ defmodule Samen.Gen.App do
       "o_role" => oa.role,
       "o_key" => oa.api_key,
       "o_invite" => oa.invitation,
+      "o_cred" => oa.credential,
+      "o_atok" => oa.auth_token,
+      "o_sess" => oa.session,
+      "o_uid" => oa.user_identity,
       "o_cus" => oa.customer,
       "o_sub" => oa.subscription,
       "o_plan" => oa.plan,
@@ -699,17 +729,29 @@ defmodule Samen.Gen.App do
     end
   end
 
+  # Each mountable surface carries the `@current_org_labels` seam (the `:authn`
+  # prod gate — see the router template) so a generated prod app never resolves an
+  # arbitrary org/user via `?org=`/`?user=`. The settings mount ALSO opts into
+  # `spine_totp: true`: this app mounts the framework Identity spine, so its
+  # `/settings/security` surface exposes the REAL TOTP-enrollment route
+  # (`/settings/security/2fa`) instead of the honest "managed by your identity
+  # provider" placeholder — 2FA is reachable, not dormant (Addendum 2).
   defp mount_line(:files, mod),
-    do: "    samen_files_routes(:files, #{mod}.Primitives, repo: #{mod}.Repo)"
+    do: "    samen_files_routes(:files, #{mod}.Primitives, repo: #{mod}.Repo, labels: @current_org_labels)"
 
   defp mount_line(:search, mod),
-    do: "    samen_search_routes(:search, #{mod}.Primitives, repo: #{mod}.Repo)"
+    do: "    samen_search_routes(:search, #{mod}.Primitives, repo: #{mod}.Repo, labels: @current_org_labels)"
 
   defp mount_line(:csv, mod),
-    do: "    samen_csv_routes(:csv, #{mod}.Vertical, repo: #{mod}.Repo)"
+    do: "    samen_csv_routes(:csv, #{mod}.Vertical, repo: #{mod}.Repo, labels: @current_org_labels)"
 
   defp mount_line(:settings, mod),
-    do: "    samen_settings_routes(:settings, #{mod}.Operator, repo: #{mod}.Repo)"
+    do:
+      "    samen_settings_routes(:settings, #{mod}.Operator,\n" <>
+        "      repo: #{mod}.Repo,\n" <>
+        "      labels: @current_org_labels,\n" <>
+        "      spine_totp: true\n" <>
+        "    )"
 
   defp chat_prerequisite_comment(mod) do
     "    # chat requested but NOT auto-mounted (≈0-LOC adoption not possible): it needs a\n" <>

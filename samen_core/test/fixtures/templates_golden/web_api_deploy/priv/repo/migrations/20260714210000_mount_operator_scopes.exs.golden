@@ -23,6 +23,13 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     Acme.Operator.Role,
     Acme.Operator.ApiKey,
     Acme.Operator.Invitation,
+    # ADR-035 — the identity spine's two org-less resources (T02x integration).
+    Acme.Operator.Credential,
+    Acme.Operator.AuthToken,
+    # ADR-035 §3.1/§4.3, §5 A6 — the identity spine's other two org-less resources
+    # (T04's Session, T06's UserIdentity; T06x integration).
+    Acme.Operator.Session,
+    Acme.Operator.UserIdentity,
     # Billing (operator: tenant subscriptions-to-the-SaaS + the movement ledger)
     Acme.Operator.Customer,
     Acme.Operator.Subscription,
@@ -54,6 +61,12 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aoo_name, :text, null: false)
       add(:aoo_slug, :text)
       add(:aoo_plan, :text, default: "free")
+      # ADR-035 §4.3/§5 A4 (spec-questions c3, T04) — the OPTIONAL org-level
+      # concurrent-session cap; nil = unlimited (the default).
+      add(:aoo_max_concurrent_sessions, :integer)
+      # ADR-035 §5 A8 (T08) — set once the first-run onboarding wizard completes
+      # (`Samen.Web.Onboarding.complete!/3`); nil until then (`needed?/3` reads it).
+      add(:aoo_onboarded_at, :utc_datetime)
       add(:aoo_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:aoo_org_id, :uuid)
       add(:aoo_inserted_at, :utc_datetime, null: false)
@@ -132,16 +145,150 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aok_updated_at, :utc_datetime, null: false)
     end
 
-    # --- aon_invitation : a pending invite 🔒 (email vault-routed) ---
+    # --- aon_invitation : a pending invite 🔒 (email vault-routed).
+    #     ADR-035 §4.1/§4.2/§5 A5 (T05 hardening): `token_digest` (SHA-256 digest at
+    #     rest, the ApiKey precedent) + `email_bidx` (the §4.1 non-reversible keyed-HMAC
+    #     lookup — accept-time credential matching never needs a vault reveal) +
+    #     `expires_at`/`accepted_at`/`revoked_at` (the 4-state lifecycle's terminal
+    #     timestamps). Mirrors demo/driftwood's `harden_identity_invitation` shape,
+    #     emitted directly (fresh app — no rename dance needed). ---
     create table(:aon_invitation, primary_key: false) do
       add(:aon_role, :text, default: "member")
       add(:aon_status, :text, default: "pending")
-      add(:aon_accept_token, :text)
+      add(:aon_token_digest, :text)
+      add(:aon_email_bidx, :text)
+      add(:aon_expires_at, :utc_datetime)
+      add(:aon_accepted_at, :utc_datetime)
+      add(:aon_revoked_at, :utc_datetime)
       add(:aon_email, :text)
       add(:aon_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:aon_org_id, :uuid, null: false)
       add(:aon_inserted_at, :utc_datetime, null: false)
       add(:aon_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:aon_invitation, [:aon_token_digest]))
+
+    # --- aoc_credential : THE authentication principal (org-less; ADR-035). ---
+    create table(:aoc_credential, primary_key: false) do
+      add(:aoc_email_bidx, :text, null: false)
+      add(:aoc_password_hash, :text)
+      add(:aoc_hash_scheme, :text)
+      add(:aoc_verified_at, :utc_datetime)
+      # ADR-035 §5 A7 (T07) — the TOTP 2FA columns the Identity Credential blueprint
+      # declares. `pii_<abbrev>_totp_secret`/`pii_<abbrev>_recovery_codes` are 🔒
+      # vault-routed (`:pii_secret` — `text` holding a `vt_*` token only, INV-1; the
+      # scalar `pii_attribute` `pii_<abbrev>_<name>` storage prefix); the two
+      # `*_totp_*_at` timestamps are plain non-PII. Without these four columns the
+      # generated app has schema drift the moment TotpEnrollLive enrolls (the
+      # driftwood `add_credential_totp_fields` migration, folded into this create).
+      add(:pii_aoc_totp_secret, :text)
+      add(:pii_aoc_recovery_codes, :text)
+      add(:aoc_totp_enabled_at, :utc_datetime)
+      add(:aoc_totp_last_verified_at, :utc_datetime)
+      add(:aoc_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aoc_org_id, :uuid)
+      add(:aoc_inserted_at, :utc_datetime, null: false)
+      add(:aoc_updated_at, :utc_datetime, null: false)
+    end
+
+    # ADR-035 §4.1 — the global "one account per email" invariant.
+    create(unique_index(:aoc_credential, [:aoc_email_bidx]))
+
+    # --- aot_auth_token : single-use, expiring, hashed-at-rest emailed secrets. ---
+    create table(:aot_auth_token, primary_key: false) do
+      add(:aot_token_digest, :text, null: false)
+      add(:aot_context, :text, null: false)
+      add(:aot_sent_to_bidx, :text)
+      add(:aot_expires_at, :utc_datetime, null: false)
+      add(:aot_consumed_at, :utc_datetime)
+
+      add(
+        :aot_credential_id,
+        references(:aoc_credential,
+          column: :aoc_id,
+          name: "aot_auth_token_aot_credential_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(:aot_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aot_org_id, :uuid)
+      add(:aot_inserted_at, :utc_datetime, null: false)
+      add(:aot_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:aot_auth_token, [:aot_token_digest]))
+
+    # --- aos_session : a revocable, DB-backed login session (org-less;
+    #     ADR-035 §3.1/§4.3, T04). No PII: device_label is a bounded browser/OS-family
+    #     string (never the raw user-agent, never an IP); token_digest is the SHA-256
+    #     digest of the raw session token (the ApiKey token_digest precedent) — never
+    #     vault-routed, never allowlisted. ---
+    create table(:aos_session, primary_key: false) do
+      add(:aos_token_digest, :text, null: false)
+      add(:aos_last_seen_at, :utc_datetime)
+      add(:aos_expires_at, :utc_datetime, null: false)
+      add(:aos_revoked_at, :utc_datetime)
+      add(:aos_device_label, :text)
+
+      add(
+        :aos_credential_id,
+        references(:aoc_credential,
+          column: :aoc_id,
+          name: "aos_session_aos_credential_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(:aos_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aos_org_id, :uuid)
+      # ADR-035 §4.3 A4 (T104) — microsecond precision so the concurrent-session
+      # cap eviction sorts a total order (same-second sign-ins get a sub-second
+      # creation key); mirrors the Identity.Session blueprint's usec inserted_at.
+      add(:aos_inserted_at, :utc_datetime_usec, null: false)
+      add(:aos_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:aos_session, [:aos_token_digest]))
+
+    # --- aoi_user_identity : the SSO link (org-less; ADR-035 §3.1/§5 A6, T06) —
+    #     binds an external IdP subject (provider + opaque provider_uid) to a Credential.
+    #     No PII: provider is a bounded name and provider_uid is an IdP-scoped opaque
+    #     handle — the IdP-asserted email is used only transiently for a bidx lookup at
+    #     link time and, on JIT signup, vaulted on the aou_user row; it is
+    #     NEVER persisted on this table (INV-1). ---
+    create table(:aoi_user_identity, primary_key: false) do
+      add(:aoi_provider, :text, null: false)
+      add(:aoi_provider_uid, :text, null: false)
+      add(:aoi_linked_at, :utc_datetime, null: false)
+
+      add(
+        :aoi_credential_id,
+        references(:aoc_credential,
+          column: :aoc_id,
+          name: "aoi_user_identity_aoi_credential_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(:aoi_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aoi_org_id, :uuid)
+      add(:aoi_inserted_at, :utc_datetime, null: false)
+      add(:aoi_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:aoi_user_identity, [:aoi_provider, :aoi_provider_uid]))
+
+    # ADR-035 §3.1 — additive, nullable FK on the already-created aou_user table.
+    alter table(:aou_user) do
+      add(:aou_credential_id, :uuid)
     end
 
     # =====================================================================
@@ -178,8 +325,9 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
 
     create table(:apr_price, primary_key: false) do
       add(:apr_stripe_price_id, :text)
-      add(:apr_unit_amount_cents, :integer, null: false)
-      add(:apr_currency, :text, null: false, default: "USD")
+      # ADR-036 H1/D7: one money_with_currency composite column (the type was
+      # installed by the app_resources migration this one runs after).
+      add(:apr_unit_amount, :money_with_currency, null: false)
       add(:apr_interval, :text, default: "monthly")
       add(:apr_active, :boolean, default: true)
       add(:apr_custom, :map, default: fragment("'{}'::jsonb"))
@@ -605,6 +753,17 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     drop(table(:apc_customer))
 
     # --- Identity (reverse FK order) ---
+    alter table(:aou_user) do
+      remove(:aou_credential_id)
+    end
+
+    drop(constraint(:aoi_user_identity, "aoi_user_identity_aoi_credential_id_fkey"))
+    drop(table(:aoi_user_identity))
+    drop(constraint(:aos_session, "aos_session_aos_credential_id_fkey"))
+    drop(table(:aos_session))
+    drop(constraint(:aot_auth_token, "aot_auth_token_aot_credential_id_fkey"))
+    drop(table(:aot_auth_token))
+    drop(table(:aoc_credential))
     drop(constraint(:aok_api_key, "aok_api_key_aok_membership_id_fkey"))
     drop(table(:aok_api_key))
     drop(table(:aon_invitation))

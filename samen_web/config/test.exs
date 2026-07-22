@@ -41,5 +41,6 @@ config :samen_web,
     Samen.WebTest.Support,
     Samen.WebTest.Marketing,
     Samen.WebTest.Operator,
-    Samen.WebTest.Primitives
+    Samen.WebTest.Primitives,
+    Samen.WebTest.RichTypes
   ]

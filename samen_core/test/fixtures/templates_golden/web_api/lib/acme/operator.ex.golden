@@ -28,7 +28,11 @@ defmodule Acme.Operator do
       membership: "aom",
       role: "aor",
       api_key: "aok",
-      invitation: "aon"
+      invitation: "aon",
+      credential: "aoc",
+      auth_token: "aot",
+      session: "aos",
+      user_identity: "aoi"
     }
 
   use Samen.Scopes.Billing,

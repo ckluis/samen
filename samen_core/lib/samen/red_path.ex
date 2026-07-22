@@ -66,6 +66,12 @@ defmodule Samen.RedPath do
 
   @orgless_actor %{id: "nobody", org_id: nil, role: :member}
 
+  # `Samen.Vault.generate_token/0` is EXACTLY `"vt_" <> (16 random bytes,
+  # lowercase-hex-encoded)` = `"vt_" <> 32 lowercase hex chars. A structural match
+  # against this shape is a deterministic, zero-false-positive way to confirm a
+  # vaulted column holds a real token (attempt-4 fix — see `assert_vault_routed!/5`).
+  @vault_token_format ~r/^vt_[0-9a-f]{32}$/
+
   defmacro __using__(opts) do
     quote do
       use ExUnitProperties
@@ -629,9 +635,18 @@ defmodule Samen.RedPath do
   @doc """
   Raw-row vault-routing assertions for one record (the file-3 core):
 
-    * each checked 🔒 field's PHYSICAL column holds a `vt_*` token;
-    * none of `plaintexts` appears in the token columns, the WHOLE raw row,
-      or any `pii_vault` ciphertext for the subject;
+    * each checked 🔒 field's PHYSICAL column holds a value matching the exact
+      `vt_[0-9a-f]{32}` token shape (`Samen.Vault.generate_token/0`) — a
+      STRUCTURAL assertion (attempt-4: not a loose `"vt_"` prefix check, which
+      under-checked — `"vt_myemail@example.com"` would have passed it);
+    * none of `plaintexts` appears in the WHOLE raw row OUTSIDE the resource's
+      structural identity columns (the primary key + any UUID-typed attribute,
+      e.g. `org_id` — always framework-generated, never user-authored, so
+      excluding them from this substring scan loses no genuine detection
+      power) or the checked fields' OWN token columns (already covered,
+      deterministically, by the structural assertion above);
+    * none of `plaintexts` appears in any `pii_vault` ciphertext for the
+      subject;
     * at least one vault row per checked field exists, each with binary
       ciphertext.
 
@@ -661,23 +676,66 @@ defmodule Samen.RedPath do
     pk = (pk_attr && (pk_attr.source || pk_attr.name)) || :id
     pk_value = Ecto.UUID.dump!(record_id)
 
-    # Each 🔒 field's raw domain column holds a vt_* token, never plaintext.
+    # Each 🔒 field's raw domain column holds a vt_* token, never plaintext — asserted
+    # STRUCTURALLY (attempt-4 fix), not by a loose prefix check. `Samen.Vault.
+    # generate_token/0` is EXACTLY `"vt_" <> (16 random bytes, lowercase-hex-encoded)`
+    # = `"vt_" <> 32 lowercase hex chars — so a value that is NOT that exact shape can
+    # never be a real token, and this regex is a DETERMINISTIC, zero-false-positive
+    # leak detector for this column (no substring scan needed here at all — see the
+    # replaced `refute value =~ plaintext` below).
+    #
+    # The loose `String.starts_with?(value, "vt_")` this replaces UNDER-checked: a
+    # leaked plaintext shaped like `"vt_myemail@example.com"` would have PASSED it —
+    # a real (narrow) gap, not just a residual-flake concern. The strict format
+    # assertion is a net STRENGTHENING, not merely a flake fix.
     Enum.each(checked, fn field ->
       %{rows: [[value]]} =
         repo.query!("SELECT #{field.storage_name} FROM #{table} WHERE #{pk} = $1", [pk_value])
 
-      assert is_binary(value) and String.starts_with?(value, "vt_"),
-             "expected #{table}.#{field.storage_name} to hold a vt_* token, got: #{inspect(value)}"
-
-      Enum.each(plaintexts, fn plaintext ->
-        refute value =~ plaintext,
-               "plaintext #{inspect(plaintext)} found in #{table}.#{field.storage_name}"
-      end)
+      assert is_binary(value) and value =~ @vault_token_format,
+             "expected #{table}.#{field.storage_name} to hold a vt_[0-9a-f]{32} token, " <>
+               "got: #{inspect(value)}"
     end)
 
-    # The plaintext appears NOWHERE in the whole raw row.
-    %{rows: [row_values]} = repo.query!("SELECT * FROM #{table} WHERE #{pk} = $1", [pk_value])
-    row_text = row_values |> Enum.map(&inspect/1) |> Enum.join(" ")
+    # The plaintext appears NOWHERE ELSE in the whole raw row — scanned columns
+    # EXCLUDE (a) the resource's structural identity columns (the primary key +
+    # every UUID-typed attribute, e.g. `org_id`) and (b) every CHECKED field's own
+    # token column (already verified structurally above, immediately before this).
+    #
+    # (a) Identity columns hold framework-generated random identifiers, never
+    # user-authored content, so excluding them loses no genuine detection power (a
+    # real PII leak is never plausibly an id/org_id value).
+    # (b) The token columns are excluded here because they are ALREADY covered by
+    # the strict `@vault_token_format` structural assertion above — a NON-token
+    # value there (a real leak) is caught deterministically by that regex, so this
+    # substring scan would only ever contribute a FALSE positive (random hex
+    # coincidentally matching a short marker), never a true one, for those columns.
+    # Every other column (name/label/status/timestamps/…) stays scanned.
+    #
+    # Root cause this guards against (found live, ADR-036 T15 attempts 3-4): a raw
+    # (non-Ecto-schema) `SELECT *` decodes a Postgres `uuid` column as a 16-byte
+    # Elixir BINARY, and `inspect/1` on that renders a comma-separated DECIMAL
+    # BYTE LIST (`<<98, 100, 39, ...>>`) — and separately, a `vt_*` token is a
+    # genuinely random 32-hex-char string — either way, a short numeric
+    # `plaintexts` marker (e.g. a bounded 0-100 scalar) has a real, non-negligible
+    # per-run chance of coincidentally matching a random byte/hex-char run, a FALSE
+    # "leak" on a column that never held the secret at all. Reproduced empirically
+    # (`plaintext "100" found in the raw ... row`, the byte value 100 inside a
+    # random `org_id` UUID) before the attempt-3 identity-column fix; the token
+    # column carried the SAME class of risk, closed here (attempt-4).
+    identity_columns = identity_column_names(resource)
+    token_columns = MapSet.new(checked, & &1.storage_name |> to_string())
+    excluded_columns = MapSet.union(identity_columns, token_columns)
+
+    %{columns: columns, rows: [row_values]} =
+      repo.query!("SELECT * FROM #{table} WHERE #{pk} = $1", [pk_value])
+
+    row_text =
+      columns
+      |> Enum.zip(row_values)
+      |> Enum.reject(fn {column, _value} -> MapSet.member?(excluded_columns, column) end)
+      |> Enum.map(fn {_column, value} -> inspect(value) end)
+      |> Enum.join(" ")
 
     Enum.each(plaintexts, fn plaintext ->
       refute row_text =~ plaintext,
@@ -703,6 +761,26 @@ defmodule Samen.RedPath do
 
     :ok
   end
+
+  # The resource's structural identity columns — the primary key + every
+  # UUID-typed attribute (covers `org_id` and any other UUID foreign key) — by
+  # PHYSICAL column name. These hold framework-generated random identifiers
+  # (never user-authored content), so `assert_vault_routed!/5`'s whole-row
+  # plaintext scan excludes them: zero genuine detection power lost, and the
+  # ONLY source of false-positive collision (Postgrex's raw-binary UUID
+  # decoding, see the caller's comment) removed entirely.
+  @spec identity_column_names(module()) :: MapSet.t(String.t())
+  defp identity_column_names(resource) do
+    resource
+    |> Ash.Resource.Info.attributes()
+    |> Enum.filter(&(&1.primary_key? || uuid_type?(&1.type)))
+    |> Enum.map(&to_string(&1.source || &1.name))
+    |> MapSet.new()
+  end
+
+  defp uuid_type?(Ash.Type.UUID), do: true
+  defp uuid_type?(Ash.Type.UUIDv7), do: true
+  defp uuid_type?(_other), do: false
 
   # A short, unique-enough label for generated test names (multiple macro
   # invocations per module must not collide on test names).

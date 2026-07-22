@@ -203,7 +203,7 @@ defmodule Samen.Web.CRM.Reads do
   def opportunities_for_company(mount, scope, company_id) do
     opps =
       Mount.resource(mount, Opportunity)
-      |> Ash.Query.ensure_selected([:name, :value_cents, :status, :pipeline_id, :company_id, :close_date])
+      |> Ash.Query.ensure_selected([:name, :value, :status, :pipeline_id, :company_id, :close_date])
       |> Ash.Query.filter(company_id == ^company_id)
       |> Ash.Query.sort(inserted_at: :asc)
       |> Ash.Query.limit(@detail_limit)
@@ -320,7 +320,7 @@ defmodule Samen.Web.CRM.Reads do
   def pipeline(mount, scope) do
     opps =
       Mount.resource(mount, Opportunity)
-      |> Ash.Query.ensure_selected([:name, :value_cents, :status, :pipeline_id, :company_id, :close_date])
+      |> Ash.Query.ensure_selected([:name, :value, :status, :pipeline_id, :company_id, :close_date])
       |> Ash.Query.sort(inserted_at: :asc)
       |> Ash.Query.limit(@detail_limit)
       |> Ash.read!(scope: scope)
@@ -366,7 +366,9 @@ defmodule Samen.Web.CRM.Reads do
       companies: count_resource(Mount.resource(mount, Company), scope),
       contacts: count_resource(Mount.resource(mount, Person), scope),
       open_opps: count_resource(open_opps_query, scope),
-      pipeline_value_cents: sum_resource(open_opps_query, :value_cents, scope)
+      # ADR-036 §4.5(3): value_cents was dropped by the H1 Money migration;
+      # :value sums as a Money composite via ash_money's Postgres sum aggregate.
+      pipeline_value: sum_resource(open_opps_query, :value, scope)
     }
   end
 

@@ -31,7 +31,11 @@ defmodule Samen.WebTest.Operator do
       membership: "wom",
       role: "wor",
       api_key: "wok",
-      invitation: "won"
+      invitation: "won",
+      credential: "woc",
+      auth_token: "wot",
+      session: "wos",
+      user_identity: "woi"
     }
 
   use Samen.Scopes.Billing,

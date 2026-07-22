@@ -402,6 +402,215 @@ try do
   end
 
   IO.puts("FLAGSHIP: /api/v1/records payload omits the un-allowlisted secret/org_id (deny-by-default)")
+
+  # =========================================================================
+  # A9 — the FULL AUTH SPINE, emitted by `mix samen.gen.app` with ZERO hand-edits
+  # (spec A9 + T10 addenda 1-4). The generated app is the FIRST host to serve the
+  # entire framework auth path. This drives the DOMAIN flow (signup -> verify ->
+  # invite) end to end over the generated `#{module}.Operator` Identity mount AND
+  # asserts every auth surface is reachable over real HTTP.
+  # =========================================================================
+
+  # The invite step dispatches through the fail-honest `Samen.Delivery.AuthMailer`
+  # chokepoint. samen_core is compiled as a path dep here, so its compiled-in
+  # delivery env is not necessarily `:test` — set it EXPLICITLY (the house
+  # convention every auth test follows) so the mailer CAPTURES via
+  # `Samen.Delivery.LocalSink` (returning `{:ok, receipt}`) instead of the
+  # unconfigured-adapter fail-honest `{:error, :adapter_unconfigured}`.
+  Application.put_env(:samen_core, :delivery_env, :test)
+
+  reg_mods = %{
+    org: #{module}.Operator.Org,
+    credential: #{module}.Operator.Credential,
+    user: #{module}.Operator.User,
+    membership: #{module}.Operator.Membership,
+    auth_token: #{module}.Operator.AuthToken,
+    repo: #{module}.Repo
+  }
+
+  reg_attrs = fn ->
+    n = System.unique_integer([:positive])
+
+    %{
+      org_name: "Flagship Org \#{n}",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "flagship-\#{n}@example.test",
+      password: "correct horse battery staple"
+    }
+  end
+
+  # --- SIGNUP (A1): creates Org + Credential + User + owner Membership atomically ---
+  inviter_attrs = reg_attrs.()
+
+  {:ok, inviter} = Samen.Identity.Register.register(inviter_attrs, reg_mods)
+
+  unless inviter.status == :registered and inviter.membership.role == :owner and
+           is_binary(inviter.org.id) and is_binary(inviter.user.id) do
+    IO.puts("FLAGSHIP FAIL: signup did not create org/user/owner-membership")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: signup (A1) created org+user+owner-membership atomically")
+
+  # --- Addendum 4: the auth notification actually LANDS (engine wired, not a no-op) ---
+  require Ash.Query
+
+  signup_notifications =
+    #{module}.Primitives.Notification
+    |> Ash.Query.filter(org_id == ^inviter.org.id)
+    |> Ash.Query.filter(recipient_id == ^inviter.user.id)
+    |> Ash.Query.filter(event_type == "auth.signup")
+    |> Ash.Query.ensure_selected([:id, :event_type, :org_id, :recipient_id])
+    |> Ash.read!(authorize?: false)
+
+  if signup_notifications == [] do
+    IO.puts("FLAGSHIP FAIL: no auth.signup notification landed — Notifications.Engine is not " <>
+              "wired (config :samen_core, Samen.Notifications.Engine) and the A10 fan-out no-op'd")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: Addendum 4 — auth.signup notification LANDED (engine wired, fan-out dispatched)")
+
+  # --- VERIFY (A2): the email-verify token round-trips (single-use) ---
+  confirm_mods = %{
+    credential: #{module}.Operator.Credential,
+    auth_token: #{module}.Operator.AuthToken,
+    user: #{module}.Operator.User,
+    repo: #{module}.Repo
+  }
+
+  case Samen.Identity.Confirm.consume(inviter.raw_verify_token, confirm_mods) do
+    {:ok, _} -> :ok
+    other ->
+      IO.puts("FLAGSHIP FAIL: email-verify token did not round-trip: \#{inspect(other)}")
+      System.halt(1)
+  end
+
+  # Single-use: a SECOND consume of the SAME token must now fail (proves it was consumed).
+  case Samen.Identity.Confirm.consume(inviter.raw_verify_token, confirm_mods) do
+    {:error, _} -> :ok
+    other ->
+      IO.puts("FLAGSHIP FAIL: verify token was NOT single-use (second consume: \#{inspect(other)})")
+      System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: verify (A2) token round-tripped + is single-use")
+
+  # --- INVITE (A5): an invite lands a Membership in the INVITING org ---
+  invitee_attrs = reg_attrs.()
+  {:ok, invitee} = Samen.Identity.Register.register(invitee_attrs, reg_mods)
+
+  invite_mods = %{
+    invitation: #{module}.Operator.Invitation,
+    credential: #{module}.Operator.Credential,
+    user: #{module}.Operator.User,
+    membership: #{module}.Operator.Membership,
+    repo: #{module}.Repo
+  }
+
+  inviter_scope = %Samen.Scope{
+    actor: %{
+      id: inviter.user.id,
+      org_id: inviter.org.id,
+      role: :owner,
+      verified?: true,
+      kind: :tenant,
+      plane: :tenant
+    }
+  }
+
+  {:ok, _invitation, raw_invite_token} =
+    Samen.Identity.Invite.create(invite_mods, inviter_scope, %{email: invitee_attrs.email, role: :member})
+
+  memberships_before =
+    #{module}.Operator.Membership
+    |> Ash.Query.filter(org_id == ^inviter.org.id)
+    |> Ash.count!(authorize?: false)
+
+  case Samen.Identity.Invite.accept(invite_mods, raw_invite_token) do
+    {:ok, _joined} -> :ok
+    other ->
+      IO.puts("FLAGSHIP FAIL: invite accept did not land a membership: \#{inspect(other)}")
+      System.halt(1)
+  end
+
+  memberships_after =
+    #{module}.Operator.Membership
+    |> Ash.Query.filter(org_id == ^inviter.org.id)
+    |> Ash.count!(authorize?: false)
+
+  unless memberships_after == memberships_before + 1 do
+    IO.puts("FLAGSHIP FAIL: invite accept did not add a membership to the inviting org " <>
+              "(before \#{memberships_before}, after \#{memberships_after})")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: invite (A5) accept landed a membership in the inviting org")
+
+  # --- A8 first-run wizard: OFFERED for the fresh org; plan hook is the HONEST empty state ---
+  onboard_mount = Samen.Web.Mount.new(:settings, #{module}.Operator, #{module}.Repo, labels: %{})
+
+  unless Samen.Web.Onboarding.needed?(onboard_mount, inviter_scope, inviter.org.id) do
+    IO.puts("FLAGSHIP FAIL: the A8 onboarding wizard is not offered for a fresh org")
+    System.halt(1)
+  end
+
+  # INV-4: with NO :plan_labels hook wired (the default generated app has no billing
+  # plan source), plan selection is the fail-honest :not_configured empty state — never
+  # a fabricated plan list.
+  unless Samen.Web.Onboarding.plan_choices(onboard_mount, inviter.org.id) == :not_configured do
+    IO.puts("FLAGSHIP FAIL: onboarding plan hook did not render the honest empty state " <>
+              "(a plan list was fabricated with no :plan_labels wired)")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: A8 wizard offered + plan hook is the honest :not_configured empty state (INV-4)")
+
+  # --- Addendum 3: the :authn prod gate closes the spoofable ?org= URL-param path ---
+  # Built EXACTLY as the generated router's billing mount is (labels: @current_org_labels).
+  authn_mount =
+    Samen.Web.Mount.new(:billing, #{module}.Billing, #{module}.Repo,
+      labels: %{authn: {:app_env, :#{otp_app}, :auth_required?}}
+    )
+
+  arbitrary_org = Ecto.UUID.generate()
+
+  # Positive control (dev/test default: auth_required? false) — the query param resolves.
+  Application.put_env(:#{otp_app}, :auth_required?, false)
+
+  unless Samen.Web.CurrentOrg.resolve(authn_mount, %{"org" => arbitrary_org}, %{}) == arbitrary_org do
+    IO.puts("FLAGSHIP FAIL: with auth off, the ?org= param did not resolve (control broken)")
+    System.halt(1)
+  end
+
+  # The FIX (prod: auth_required? true) — an UNAUTHENTICATED request can NOT resolve an
+  # arbitrary org via ?org=; the spoofable path is closed (nil, not the arbitrary org).
+  Application.put_env(:#{otp_app}, :auth_required?, true)
+  spoofed = Samen.Web.CurrentOrg.resolve(authn_mount, %{"org" => arbitrary_org}, %{})
+  Application.put_env(:#{otp_app}, :auth_required?, false)
+
+  if spoofed == arbitrary_org do
+    IO.puts("FLAGSHIP FAIL: Addendum 3 — with auth_required? TRUE an unauthenticated ?org= " <>
+              "STILL resolved an arbitrary org (\#{inspect(spoofed)}) — the prod gate is a TAUTOLOGY")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: Addendum 3 — :authn prod gate closes the spoofable ?org= URL-param path")
+
+  # --- Every auth surface is reachable over real HTTP (zero hand-edits) ---
+  check.("/signup", "Create your account")
+  check.("/login", nil)
+  check.("/onboarding?org=#{org}", nil)
+  check.("/onboarding?org=\#{inviter.org.id}&user=\#{inviter.user.id}", nil)
+  # Settings/Security (mounted via --modules settings, spine_totp on) + the 2FA-enroll
+  # route that had NO HTTP mount before Addendum 2 (2FA was unreachable in prod).
+  check.("/settings/security?org=\#{inviter.org.id}&user=\#{inviter.user.id}", nil)
+  check.("/settings/security/2fa?credential_id=\#{inviter.credential.id}", "auth-totp-enroll")
+
+  IO.puts("FLAGSHIP: auth spine reachable over HTTP — /signup /login /onboarding " <>
+            "/settings/security /settings/security/2fa (Addendum 2: 2FA-enroll route live)")
+
   IO.puts("FLAGSHIP: ALL ROUTES 200")
   """
 

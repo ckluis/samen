@@ -873,12 +873,6 @@
           "type": "Boolean"
         },
         {
-          "column_name": "ppc_currency",
-          "logical_name": "currency",
-          "pii": false,
-          "type": "String"
-        },
-        {
           "column_name": "ppc_custom",
           "logical_name": "custom",
           "pii": false,
@@ -921,10 +915,10 @@
           "type": "String"
         },
         {
-          "column_name": "ppc_unit_amount_cents",
-          "logical_name": "unit_amount_cents",
+          "column_name": "ppc_unit_amount",
+          "logical_name": "unit_amount",
           "pii": false,
-          "type": "Integer"
+          "type": "Samen.Type.Money"
         },
         {
           "column_name": "ppc_updated_at",
@@ -1221,12 +1215,6 @@
           "type": "UUID"
         },
         {
-          "column_name": "vcd_currency",
-          "logical_name": "currency",
-          "pii": false,
-          "type": "String"
-        },
-        {
           "column_name": "vcd_custom",
           "logical_name": "custom",
           "pii": false,
@@ -1287,10 +1275,10 @@
           "type": "UtcDatetime"
         },
         {
-          "column_name": "vcd_value_cents",
-          "logical_name": "value_cents",
+          "column_name": "vcd_value",
+          "logical_name": "value",
           "pii": false,
-          "type": "Integer"
+          "type": "Samen.Type.Money"
         }
       ],
       "resource": "PawChart.Crm.Opportunity",

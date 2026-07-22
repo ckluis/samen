@@ -52,7 +52,8 @@ defmodule Samen.Web.Mount do
             | :files
             | :csv
             | :search
-            | :settings,
+            | :settings
+            | :auth,
           namespace: module(),
           repo: module(),
           domain: module(),
@@ -132,6 +133,9 @@ defmodule Samen.Web.Mount do
   defp scope_kind("csv"), do: :csv
   defp scope_kind("search"), do: :search
   defp scope_kind("settings"), do: :settings
+  # ADR-035 — the pre-actor identity-spine surfaces (signup/login/verify/reset/…,
+  # §6 "pre-actor public" plane row). No org actor exists yet at this scope.
+  defp scope_kind("auth"), do: :auth
   defp scope_kind(k) when is_atom(k), do: k
 
   # Module atoms serialize as "Elixir.Driftwood.Crm". Host modules are COMPILED, so their
@@ -180,6 +184,8 @@ defmodule Samen.Web.Mount do
     flags_namespace flags_path revenue_plan_loader
     current_user_id current_membership_id
     authn authorized_orgs
+    login_path spine_sessions
+    settings_path plan_labels
   )a
 
   @label_key_strings Map.new(@label_keys, fn k -> {Atom.to_string(k), k} end)

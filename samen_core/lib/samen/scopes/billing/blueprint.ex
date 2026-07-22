@@ -334,8 +334,12 @@ defmodule Samen.Scopes.Billing.Blueprint do
 
         attributes do
           attribute(:stripe_price_id, :string, public?: true)
-          attribute(:unit_amount_cents, :integer, public?: true, allow_nil?: false)
-          attribute(:currency, :string, public?: true, allow_nil?: false, default: "USD")
+          # ADR-036 H1/D7: the paired `unit_amount_cents :integer` + `currency :string`
+          # convention is replaced by ONE Money composite attribute (destructive,
+          # pre-1.0, single data-copy migration — no deprecation window; T12). No
+          # default (matches the prior `unit_amount_cents`'s no-default, allow_nil?:
+          # false — a price must always be set explicitly, currency included).
+          attribute(:unit_amount, Samen.Type.Money, public?: true, allow_nil?: false)
           attribute(:interval, :atom,
             public?: true,
             default: :monthly,

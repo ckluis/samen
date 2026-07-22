@@ -106,6 +106,8 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
 
   defp fetch(params, session, key), do: Map.get(params, key) || Map.get(session, key)
 
+  # ADR-036 §4.5(4): l.value is now the Money composite (dollars(l.value)).
+  defp dollars(%Money{} = money), do: dollars(Samen.Type.Money.cents(money))
   defp dollars(cents) when is_integer(cents), do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
   defp dollars(_), do: "$0.00"
 
@@ -282,7 +284,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
               <tr :for={l <- @loads} class="load-row">
                 <td class="l-name"><span class="nm" style="color:#3a3b45;letter-spacing:normal">{l.name}</span></td>
                 <td class="l-lane"><span class="mono">{l.__lane__}</span></td>
-                <td class="l-value mono num">{dollars(l.value_cents)}</td>
+                <td class="l-value mono num">{dollars(l.value)}</td>
                 <td class="l-status"><.pill variant={status_variant(l.status)}>{l.status}</.pill></td>
               </tr>
             </.data_table>

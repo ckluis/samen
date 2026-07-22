@@ -224,3 +224,49 @@ independently re-run this gate is marked ⟳.
   residue → **carry-to-P6** fix task. **F2** (tenant-owner sees own PII masked, inverting
   the two-key-classes rule) is a **fail-safe** deviation (over-masking) and a stated posture
   → carry-to-P6 or accept.
+
+---
+
+## J. Phase 1 (BATON) — WS-A identity spine + WS-H rich types (INV-6)
+
+Added by the Phase-1 gate (T16, 2026-07-22). Everything below is **complete + verified** at
+the authoritative full-root level: `./ci.sh` passed twice consecutively (`ROOT CI: ALL PASSED`,
+seeds 611057/182579 and 201315/306140, zero re-rolls). Each claim cites its proof artifact
+(INV-6: a claim without a proof artifact is not allowed). Honest scope: this is the identity
+*spine* + rich types — billing, live email delivery, and AI features are later phases. The
+one deliberately-deferred auth-hardening item (rate-limiting, T103) is named in row A-DEFER.
+
+### WS-A — self-serve identity spine (generator-emitted, zero-hand-edit)
+
+| Req | Claim | Class | Evidence | Verdict |
+|---|---|---|---|---|
+| A1 | Self-serve registration creates Org+User+Membership atomically, credential PII vaulted | ✅ TEST | `samen_core/test/auth/{blind_index,hasher}_test.exs`; gen-app flagship probe "signup (A1) created org+user+owner-membership atomically" (root `ci.sh`) | **MET** |
+| A2 | Email verification token round-trips and is single-use | ✅ TEST | `samen_web/test/samen/web/auth/confirm_test.exs`; `samen_core/test/policy/verified_test.exs`; flagship "verify (A2) token round-tripped + is single-use" | **MET** |
+| A3 | Password reset token loop (no account-existence timing oracle) | ✅ TEST | `samen_web/test/samen/web/auth/confirm_test.exs`; `samen_core/test/delivery_auth_mailer_test.exs` (fail-honest AuthMailer — `:blocked`, never fake `:delivered`) | **MET** |
+| A4 | Session management: remember-me, listing, revocation, policy; deterministic org-cap eviction (oldest-first) | ✅ TEST | `samen_web/test/samen/web/auth/session_test.exs`; `samen_core/test/auth/device_label_test.exs` (usec `inserted_at` + `{inserted_at,id}` strict order — the T104 fix) | **MET** |
+| A5 | Team invitation lifecycle: invite → accept → membership in the inviting org | ✅ TEST | `samen_web/test/samen/web/auth/invitation_test.exs`; flagship "invite (A5) accept landed a membership" | **MET** |
+| A6 | OIDC login (Google reference; SAML seam) **honors TOTP** — federated login steps up through /2fa | ✅ TEST | `samen_web/test/samen/web/auth/oidc_test.exs`; **`samen_web/test/samen/web/auth/oidc_totp_stepup_test.exs`** (T100 red tests — closes an account-takeover 2FA-bypass; zero Session until second factor) | **MET** |
+| A7 | TOTP 2FA + vaulted recovery codes; enrollment reachable over a **production HTTP route** | ✅ TEST + LIVE PROBE | `samen_web/test/samen/web/auth/totp_test.exs`; `router.ex:663` mounts `live(".../security/2fa", TotpEnrollLive)`; flagship `GET /settings/security/2fa → 200` | **MET** |
+| A8 | Onboarding wizard scaffold (first-run seam) with honest `:not_configured` empty state | ✅ TEST | `samen_web/test/samen/web/auth/onboarding_test.exs`; flagship "A8 wizard offered + plan hook is the honest :not_configured empty state (INV-4)" | **MET** |
+| A9 | `mix samen.gen.app` emits the full auth spine with zero hand-edits | ✅ TEST | `samen_core/test/gen_app_test.exs`; the gen-app flagship probe IS the AC-X-1 proof (permanent root `ci.sh` step) | **MET** |
+| A10 | Auth events → notifications + audit/CDC; login-family taxonomy (login/login_failed/logout/session_revoked/sessions_revoked_all) | ✅ TEST | `samen_web/test/samen/web/auth/auth_events_test.exs` (T09); `samen_web/test/samen/web/auth/login_events_test.exs` (T101 — `subject_id` always set); `Samen.Notifications.Engine` wired on demo + generated hosts (`demo/config/config.exs:44`; flagship "engine wired, fan-out dispatched") | **MET** |
+| A-DEFER | **Auth-surface rate-limiting + bounded `login_failed` audit (T103, ADR-035 §4.5 / ADR-037 §5.14)** | 🟡 RESIDUE | **Deliberately deferred to early Phase 2 behind T17's ingress-limit ADR.** The brute-force / credential-stuffing control is NOT yet wired — the identity spine is complete, its rate-limit hardening is not. Named so no claim implies the auth story is finished. | **DEFERRED (named)** |
+
+### WS-H — rich-type foundation + vault-write validation
+
+| Req | Claim | Class | Evidence | Verdict |
+|---|---|---|---|---|
+| H1 | `Samen.Type.Money` (ash_money/ex_money) + Opportunity/Price migration | ✅ TEST | `samen_core/test/type/money_test.exs`; `samen_web/test/samen/web/csv_money_test.exs` | **MET** |
+| H2 | Scalar types Percent / Score / Duration / Priority | ✅ TEST | `samen_core/test/type/{percent,score,duration,priority}_test.exs` | **MET** |
+| H3 | Contact scalar types URL / EmailAddress / PhoneNumber (cast + normalize) | ✅ TEST | `samen_core/test/type/{url,email_address,phone_number}_test.exs` | **MET** |
+| H4 | Address composite type | ✅ TEST | `samen_core/test/type/address_test.exs`; migration `20260721180000_rich_types_address_dob.exs` | **MET** |
+| H5 | `pii_address` / `pii_dob` vault classes | ✅ TEST | `samen_core/test/type/address_test.exs` + the rich-types-address-dob migration | **MET** |
+| H6 | Custom-field types over the rich menu | ✅ TEST | `samen_core/test/custom_fields_rich_types_test.exs`; `samen_core/test/red_path_vault_scan_test.exs` | **MET** |
+| H7 | `gen.resource` full type menu | ✅ TEST | `samen_core/test/gen_post_test.exs` (post-app generator probe D7a, root `ci.sh`) | **MET** |
+| H-D3 | **Vault write path re-runs declared-type `cast_input` (ADR-036 D3)** — vaulted Email/Phone/URL validated + normalized on input; garbage refused, never echoed | ✅ TEST | `samen_core/test/vault/vault_cast_validation_test.exs` (T99). Scalar-only by design; composites are a documented ADR-036 §10 follow-up | **MET (scalar); composites deferred** |
+
+**Security defects caught-and-fixed by adversarial verification (Phase 1):** OIDC account-takeover
+2FA-bypass (T100), account-existence timing oracle (T03), vault write-validation gap (T99),
+loose-prefix leak-detection under-check (T102), and the session-cap eviction ordering **production
+bug** (T104). Each fixed in-phase with a RED-on-revert proof. Full accounting:
+`_orch/tasks/T16/work/phase-1-report.md`.

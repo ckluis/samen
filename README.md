@@ -48,8 +48,13 @@ grant that a second party approved and the tenant can audit.
 | **Crypto-shred erasure** — deleting a subject's key material makes their vaulted PII unrecoverable across every tier (erasure = key destruction, not row scrubbing) | `samen_core/test/{erasure,shred_key_material,post_shred_oracle}_test.exs`; driftwood's crypto-shred game-day + the destruction oracle in its `ci.sh` |
 | **Two planes** — every app runs a tenant plane and an operator plane, both masked by default, mounted from the framework | `samen_web`'s two-plane render/masking suite; the `/operator/*` routes HTTP-probed on every generated app |
 | **The proof is generative** — `mix samen.gen.app` emits a running product that passes its full 18-step verifier gate, seeds vault-aware, boots, and serves every mounted route, with zero hand-edits | `samen_core/priv/gen_app_flagship_probe.exs` + `priv/gen_post_probe.exs`, permanent steps of the root `ci.sh` (need local Postgres) |
+| **Self-serve identity spine** — registration (Org+User+Membership atomic, credential PII vaulted), email verification, password reset, sessions (remember-me / listing / revocation / deterministic org-cap eviction), team invites, OIDC that **honors TOTP step-up**, TOTP 2FA + vaulted recovery codes, an onboarding wizard, and login-family auth events → notifications/audit — **emitted by the generator with zero hand-edits** | `samen_web/test/samen/web/auth/*_test.exs` (`confirm`/`session`/`invitation`/`oidc`/`oidc_totp_stepup`/`totp`/`onboarding`/`auth_events`/`login_events`); `samen_core/test/auth/*`; the flagship probe's HTTP-probed `/signup /login /onboarding /settings/security/2fa` |
+| **Rich declared types** — Money, Percent, Score, Duration, Priority, URL, Email, Phone, Address (+ `pii_address`/`pii_dob` vault classes); the vault write path re-runs each type's `cast_input` so vaulted values are validated + normalized on input | `samen_core/test/type/*_test.exs`; `samen_core/test/vault/vault_cast_validation_test.exs` |
 
-Full mapping: [docs/claim-evidence.md](docs/claim-evidence.md).
+Full mapping: [docs/claim-evidence.md](docs/claim-evidence.md) (Phase-1 identity spine + rich
+types are section J). **Honest scope:** the identity spine is complete and verified; its
+**auth-surface rate-limiting is a named early-Phase-2 item** (not yet wired), and live email
+delivery / billing / AI are later phases.
 
 ## Architecture
 
@@ -61,7 +66,9 @@ Two apps are the substrate; three are proof; one command spins up new ones.
   audit log, the `samen.verify.*` verifier tiers, and the generators
   (`mix samen.gen.app` / `gen.scope` / `gen.resource`).
 - **`samen_web` — the UI kit and product surfaces.** Router mount macros for the tenant and
-  operator planes, masked rendering, and the mountable product surfaces: CRM, Billing,
+  operator planes, masked rendering, the **self-serve identity spine** (signup / login /
+  email verification / password reset / sessions / team invites / OIDC with TOTP step-up /
+  TOTP 2FA enrollment / onboarding wizard), and the mountable product surfaces: CRM, Billing,
   Support desk, Marketing, Files, CSV import/export, Search (⌘K command palette), Settings,
   notifications inbox, and cross-plane chat. Verticals inherit these by mounting them; they
   do not re-implement them.

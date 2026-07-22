@@ -218,7 +218,12 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
     |> Keyword.get(:adapter)
   end
 
-  defp adapter_config do
+  # Public (not private) — `Samen.Delivery.AuthMailer` (T03) reuses this
+  # EXACT config resolution so an auth-token email rides the SAME configured
+  # adapter a host wired for lifecycle mail, with the SAME marketing-adapter
+  # fallback.
+  @doc false
+  def adapter_config do
     case Application.get_env(:samen_core, __MODULE__, []) |> Keyword.get(:adapter) do
       nil ->
         # Fell back to the marketing adapter → use its config too.

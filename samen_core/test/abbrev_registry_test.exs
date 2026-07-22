@@ -120,22 +120,51 @@ defmodule Samen.AbbrevRegistryTest do
       path
     end
 
-    test "the COMMITTED registry: 263 flat entries + the F3 consent-ledger host allocations" do
+    test "the COMMITTED registry: 263 flat entries + the F3 consent-ledger + ADR-035 Identity host allocations" do
       %{global: global, hosts: hosts} = Reg.load_namespaced()
       assert map_size(global) == 263
 
       # F3 Unit 1: the ConsentEvent ledger reserved a host-namespaced abbrev per marketing
-      # mount via the sanctioned allocator (ADR-023 host-scoped reservations).
+      # mount via the sanctioned allocator (ADR-023 host-scoped reservations). ADR-035 T02
+      # adds the Identity.Credential/AuthToken abbrevs (crd/atk, doc/dot, woc/wot) the same
+      # way; T03 adds Identity.Session (ses/dos/wos); T06 adds Identity.UserIdentity
+      # (uid/doi/woi — the A6 SSO link). `samen_core`'s `sro`/`srp` rows belong
+      # to a concurrent, unrelated in-flight rich-types task (not authored by T03/T06).
+      # `samen_web`'s `rti` row is T15's own round-trip matrix fixture
+      # (`Samen.WebTest.RichTypes.Item`, ADR-036 H7 done-criteria 3/4).
       assert hosts == %{
-               "demo" => %{"mce" => "Demo.MarketingScope.ConsentEvent"},
-               "driftwood" => %{"fmv" => "Driftwood.Marketing.ConsentEvent"},
+               "demo" => %{
+                 "mce" => "Demo.MarketingScope.ConsentEvent",
+                 "atk" => "Demo.Identity.AuthToken",
+                 "crd" => "Demo.Identity.Credential",
+                 "ses" => "Demo.Identity.Session",
+                 "uid" => "Demo.Identity.UserIdentity"
+               },
+               "driftwood" => %{
+                 "fmv" => "Driftwood.Marketing.ConsentEvent",
+                 "doc" => "Driftwood.Operator.Credential",
+                 "dot" => "Driftwood.Operator.AuthToken",
+                 "dos" => "Driftwood.Operator.Session",
+                 "doi" => "Driftwood.Operator.UserIdentity"
+               },
                "pawchart" => %{"vmv" => "PawChart.Marketing.ConsentEvent"},
-               "samen_core" => %{"sxv" => "SamenCore.Support.SuppressionFixture.ConsentEvent"},
-               "samen_web" => %{"wmv" => "Samen.WebTest.Marketing.ConsentEvent"}
+               "samen_core" => %{
+                 "sxv" => "SamenCore.Support.SuppressionFixture.ConsentEvent",
+                 "sro" => "SamenCore.Support.RichTypes.OrgFixture",
+                 "srp" => "SamenCore.Support.RichTypes.PersonalFixture"
+               },
+               "samen_web" => %{
+                 "wmv" => "Samen.WebTest.Marketing.ConsentEvent",
+                 "woc" => "Samen.WebTest.Operator.Credential",
+                 "wot" => "Samen.WebTest.Operator.AuthToken",
+                 "wos" => "Samen.WebTest.Operator.Session",
+                 "woi" => "Samen.WebTest.Operator.UserIdentity",
+                 "rti" => "Samen.WebTest.RichTypes.Item"
+               }
              }
 
-      # The compat shim's flat view unions the global net with every host entry (263 + 5).
-      assert map_size(Reg.load()) == 268
+      # The compat shim's flat view unions the global net with every host entry (263 + 20).
+      assert map_size(Reg.load()) == 283
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do

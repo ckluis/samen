@@ -149,13 +149,14 @@ defmodule Samen.Gen.AppTest do
       assert {"wgv", "Widgetco.Billing.SubscriptionEvent"} in pairs
     end
 
-    test "web (default) reserved_pairs adds the 6 Primitives + 22 operator abbrevs (39)" do
+    test "web (default) reserved_pairs adds the 6 Primitives + 26 operator abbrevs (43)" do
       pairs = Gen.reserved_pairs(spec())
       abbrevs = Enum.map(pairs, &elem(&1, 0))
 
-      # 11 headless + 6 Primitives + 22 operator (Identity 6 + Billing 9 + Support 7) = 39.
-      assert length(pairs) == 39
-      assert length(Enum.uniq(abbrevs)) == 39
+      # 11 headless + 6 Primitives + 26 operator (Identity 10 [incl. ADR-035's
+      # Credential/AuthToken/Session/UserIdentity] + Billing 9 + Support 7) = 43.
+      assert length(pairs) == 43
+      assert length(Enum.uniq(abbrevs)) == 43
 
       # Primitives — <p1> + the blueprint suffix (the samen_web test-host convention).
       assert {"wnt", "Widgetco.Primitives.Notification"} in pairs
@@ -165,6 +166,15 @@ defmodule Samen.Gen.AppTest do
       # Operator — <p1> + o/p/q + the per-resource letter (the driftwood convention).
       assert {"woo", "Widgetco.Operator.Org"} in pairs
       assert {"wou", "Widgetco.Operator.User"} in pairs
+      # ADR-035 (T02x integration) — prefix-derived, NEVER the `crd`/`atk` literal
+      # defaults (those are permanently owned by `hosts.demo` in the committed registry).
+      assert {"woc", "Widgetco.Operator.Credential"} in pairs
+      assert {"wot", "Widgetco.Operator.AuthToken"} in pairs
+      # T06x (this integration pass) — prefix-derived, NEVER the `ses`/`uid` literal
+      # defaults (also permanently owned by `hosts.demo` in the committed registry) —
+      # the exact "ses" is registered to Demo.Identity.Session collision this fixes.
+      assert {"wos", "Widgetco.Operator.Session"} in pairs
+      assert {"woi", "Widgetco.Operator.UserIdentity"} in pairs
       assert {"wpc", "Widgetco.Operator.Customer"} in pairs
       assert {"wpv", "Widgetco.Operator.SubscriptionEvent"} in pairs
       assert {"wqk", "Widgetco.Operator.Ticket"} in pairs
@@ -376,11 +386,21 @@ defmodule Samen.Gen.AppTest do
       # The design's default mount set: the authored scope + notifications + the
       # operator plane (+ the session write), via Samen.Web.Router macros.
       assert router =~ "import Samen.Web.Router"
-      assert router =~ "samen_module_routes(:billing, Widgetco.Billing, repo: Widgetco.Repo)"
+      assert router =~ "samen_module_routes(:billing, Widgetco.Billing, repo: Widgetco.Repo, labels: @current_org_labels)"
       assert router =~ "samen_notifications_routes(:notifications, Widgetco.Primitives,"
       assert router =~ "samen_operator_routes(Widgetco.Operator,"
       assert router =~ "samen_session_routes()"
       assert router =~ "flags_namespace: Widgetco.Primitives"
+
+      # A9 (T10) — the FULL auth spine is emitted by DEFAULT: the ADR-035 §5 identity
+      # surfaces (signup→verify→invite) + the A8 first-run onboarding wizard, over the
+      # app's sole Identity mount (`Widgetco.Operator`), zero hand-edits.
+      assert router =~ "samen_auth_routes(namespace: Widgetco.Operator, repo: Widgetco.Repo)"
+      assert router =~ "samen_onboarding_routes(Widgetco.Operator, repo: Widgetco.Repo)"
+
+      # Addendum 3 — the `:authn` prod-safety gate is wired on every tenant mount by
+      # default, so a generated prod app never resolves an arbitrary org via `?org=`.
+      assert router =~ "@current_org_labels %{authn: {:app_env, :widgetco, :auth_required?}}"
       assert router =~ ~s{get("/healthz", PageController, :healthz)}
       # F1.2 — the readiness route sits alongside liveness (Repo/KMS/Oban probe).
       assert router =~ ~s{get("/readyz", PageController, :readyz)}
@@ -904,10 +924,14 @@ defmodule Samen.Gen.AppTest do
     test "mounts the mountable surfaces over the app's existing mounts + swaps / to HomeLive" do
       router = rendered_router(spec(modules: "files,search,csv,settings"))
 
-      assert router =~ "samen_files_routes(:files, Widgetco.Primitives, repo: Widgetco.Repo)"
-      assert router =~ "samen_search_routes(:search, Widgetco.Primitives, repo: Widgetco.Repo)"
-      assert router =~ "samen_csv_routes(:csv, Widgetco.Vertical, repo: Widgetco.Repo)"
-      assert router =~ "samen_settings_routes(:settings, Widgetco.Operator, repo: Widgetco.Repo)"
+      # Each mountable surface carries the `@current_org_labels` (:authn prod gate) seam;
+      # settings ALSO opts into `spine_totp: true` so its Security surface exposes the
+      # real TOTP-enroll route (Addenda 2 & 3).
+      assert router =~ "samen_files_routes(:files, Widgetco.Primitives, repo: Widgetco.Repo, labels: @current_org_labels)"
+      assert router =~ "samen_search_routes(:search, Widgetco.Primitives, repo: Widgetco.Repo, labels: @current_org_labels)"
+      assert router =~ "samen_csv_routes(:csv, Widgetco.Vertical, repo: Widgetco.Repo, labels: @current_org_labels)"
+      assert router =~ "samen_settings_routes(:settings, Widgetco.Operator,"
+      assert router =~ "spine_totp: true"
       # The landing swaps to the Samen.UI menu LiveView (bare name — the scope aliases it).
       assert router =~ ~s{live("/", HomeLive)}
       refute router =~ ~s{get("/", PageController, :index)}

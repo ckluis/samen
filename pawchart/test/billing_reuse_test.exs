@@ -27,8 +27,8 @@ defmodule PawChart.BillingReuseTest do
       PawChart.Billing.Customer
       |> Ash.Changeset.for_create(:create, %{
         org_id: @org,
-        billing_name: %{first: "Claire", last: "Clinic"},
-        billing_email: ["ap@happypaws.example.com"]
+        billing_name: "Happy Paws Veterinary Clinic LLC",
+        billing_email: "ap@happypaws.example.com"
       })
       |> Ash.create!(authorize?: false)
 
@@ -42,8 +42,8 @@ defmodule PawChart.BillingReuseTest do
       |> Ash.Changeset.for_create(:create, %{
         org_id: @org,
         plan_id: plan.id,
-        unit_amount_cents: 9900,
-        currency: "USD"
+        # ADR-036 §4.5: unit_amount_cents/currency dropped by the H1 Money migration.
+        unit_amount: Samen.Type.Money.from_cents(9900, :USD)
       })
       |> Ash.create!(authorize?: false)
 
@@ -67,8 +67,8 @@ defmodule PawChart.BillingReuseTest do
       PawChart.Billing.Customer
       |> Ash.Changeset.for_create(:create, %{
         org_id: @org,
-        billing_name: %{first: "Vault", last: "Test"},
-        billing_email: ["secret@clinic.example.com"]
+        billing_name: "Vault Test Clinic",
+        billing_email: "secret@clinic.example.com"
       })
       |> Ash.create!(authorize?: false)
 
@@ -96,7 +96,7 @@ defmodule PawChart.BillingReuseTest do
   test "the inherited entitlement helper answers a feature gate for the clinic's plan" do
     customer =
       PawChart.Billing.Customer
-      |> Ash.Changeset.for_create(:create, %{org_id: @org, billing_name: %{first: "E", last: "H"}})
+      |> Ash.Changeset.for_create(:create, %{org_id: @org, billing_name: "Entitlement Helper Clinic"})
       |> Ash.create!(authorize?: false)
 
     plan =

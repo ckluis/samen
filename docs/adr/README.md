@@ -87,8 +87,16 @@ reading all 33.
 |---|---|---|
 | [034](034-nonpii-type-selfclassify-reviewer-gate.md) | The type-level `:non_pii` self-classification is reviewer-gated (two distinct parties) | Honor a host type's `:non_pii` self-classification only behind a valid two-distinct-party clearance (`Samen.NonPii.TypeClearance`, a pure config allowlist); an ungoverned/self-reviewed one falls through to the mask-unknown-by-default PII result — closing the single-party escape hatch, symmetric with the per-column `non_pii!` gate. |
 
+## SaaS-readiness ecosystem + rich types (WS-H) + identity spine (WS-A)
+
+| # | Title | Decision |
+|---|---|---|
+| [ADR-035](ADR-035-identity-spine.md) | Identity spine architecture: the WS-A A1–A10 contracts | Consumes ADR-037 §5.1 (AshAuthentication REJECT) → hand-built spine on the existing seams: org-less `Identity.Credential` principal + Session/AuthToken/UserIdentity resources, HMAC blind-index email lookup (no plaintext email at rest; `k_bidx` = reserved Kms subject `sys:bidx`, shred-refused), hashed single-use tokens, DB-backed revocable sessions (tenant-plane only), PBKDF2-SHA256 behind `Samen.Auth.Hasher`, assent/nimble_totp/ash_rate_limiter placed in `samen_web` only — `samen_core/mix.exs` untouched. |
+| [ADR-037](ADR-037-ash-ecosystem-adoption.md) | Ash-ecosystem adoption evaluation (operator directive M6) | One ADOPT/REJECT verdict per Ash package against INV-1/INV-3/maturity/cost: ADOPT ash_money, ash_archival, ash_paper_trail, reactor, ash_state_machine, ash_oban, ash_rate_limiter (narrow), usage_rules (dev); REJECT ash_authentication, ash_events, ash_ai, ash_geo, ash_csv, ash_double_entry, ash_admin — no verdict weakens a masking claim or removes a verifier tier. |
+| [ADR-036](ADR-036-rich-types.md) | Rich property types: the H1–H7 `Ash.Type` contracts, AshMoney-backed `Money`, destructive cents→composite migration | `Samen.Type.Money` wraps `AshMoney.Types.Money` (samen name in catalog, package semantics); non-PII types (Money/Percent/Score/Duration/Priority/URL) self-classify `:non_pii` behind a two-party `TypeClearance`; email/phone stay PII-by-default (personal→vault, org-contact→per-column clearance); Address is a PII composite (`pii_address`); H1 migrates Opportunity + Price via one pre-1.0 destructive data-copy migration per resource (implements ADR-037 §5.2). |
+
 ---
 
-33 ADRs total. All are `Status: Accepted` except ADR-025 (`Proposed (deferred)`). If you add a
+37 ADRs total. All are `Status: Accepted` except ADR-025 (`Proposed (deferred)`). If you add a
 new one, append a row here in the same pass (`docs/guides/cookbook.md`'s claim-evidence
 discipline applies to this index too — keep it honest, not aspirational).

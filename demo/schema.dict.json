@@ -195,6 +195,72 @@
     {
       "fields": [
         {
+          "column_name": "atk_consumed_at",
+          "logical_name": "consumed_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "atk_context",
+          "logical_name": "context",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "atk_credential_id",
+          "logical_name": "credential_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "atk_expires_at",
+          "logical_name": "expires_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "atk_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "atk_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "atk_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "atk_sent_to_bidx",
+          "logical_name": "sent_to_bidx",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "atk_token_digest",
+          "logical_name": "token_digest",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "atk_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Identity.AuthToken",
+      "table_name": "atk_auth_token"
+    },
+    {
+      "fields": [
+        {
           "column_name": "atq_depth",
           "logical_name": "depth",
           "pii": false,
@@ -645,12 +711,6 @@
           "type": "Boolean"
         },
         {
-          "column_name": "bpr_currency",
-          "logical_name": "currency",
-          "pii": false,
-          "type": "String"
-        },
-        {
           "column_name": "bpr_custom",
           "logical_name": "custom",
           "pii": false,
@@ -693,10 +753,10 @@
           "type": "String"
         },
         {
-          "column_name": "bpr_unit_amount_cents",
-          "logical_name": "unit_amount_cents",
+          "column_name": "bpr_unit_amount",
+          "logical_name": "unit_amount",
           "pii": false,
-          "type": "Integer"
+          "type": "Samen.Type.Money"
         },
         {
           "column_name": "bpr_updated_at",
@@ -1431,6 +1491,84 @@
     {
       "fields": [
         {
+          "column_name": "crd_email_bidx",
+          "logical_name": "email_bidx",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "crd_hash_scheme",
+          "logical_name": "hash_scheme",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "crd_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "crd_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "crd_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "crd_password_hash",
+          "logical_name": "password_hash",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "crd_totp_enabled_at",
+          "logical_name": "totp_enabled_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "crd_totp_last_verified_at",
+          "logical_name": "totp_last_verified_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "crd_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "crd_verified_at",
+          "logical_name": "verified_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_crd_recovery_codes",
+          "logical_name": "recovery_codes",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "pii_crd_totp_secret",
+          "logical_name": "totp_secret",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Demo.Identity.Credential",
+      "table_name": "crd_credential"
+    },
+    {
+      "fields": [
+        {
           "column_name": "csm_canonical_url",
           "logical_name": "canonical_url",
           "pii": false,
@@ -1599,10 +1737,22 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "ido_max_concurrent_sessions",
+          "logical_name": "max_concurrent_sessions",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
           "column_name": "ido_name",
           "logical_name": "name",
           "pii": false,
           "type": "String"
+        },
+        {
+          "column_name": "ido_onboarded_at",
+          "logical_name": "onboarded_at",
+          "pii": false,
+          "type": "UtcDatetime"
         },
         {
           "column_name": "ido_org_id",
@@ -1635,16 +1785,28 @@
     {
       "fields": [
         {
-          "column_name": "inv_accept_token",
-          "logical_name": "accept_token",
+          "column_name": "inv_accepted_at",
+          "logical_name": "accepted_at",
           "pii": false,
-          "type": "String"
+          "type": "UtcDatetime"
         },
         {
           "column_name": "inv_email",
           "logical_name": "email",
           "pii": true,
           "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "inv_email_bidx",
+          "logical_name": "email_bidx",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "inv_expires_at",
+          "logical_name": "expires_at",
+          "pii": false,
+          "type": "UtcDatetime"
         },
         {
           "column_name": "inv_id",
@@ -1665,6 +1827,12 @@
           "type": "UUID"
         },
         {
+          "column_name": "inv_revoked_at",
+          "logical_name": "revoked_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
           "column_name": "inv_role",
           "logical_name": "role",
           "pii": false,
@@ -1673,6 +1841,12 @@
         {
           "column_name": "inv_status",
           "logical_name": "status",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "inv_token_digest",
+          "logical_name": "token_digest",
           "pii": false,
           "type": "String"
         },
@@ -2619,12 +2793,6 @@
           "type": "UUID"
         },
         {
-          "column_name": "opp_currency",
-          "logical_name": "currency",
-          "pii": false,
-          "type": "String"
-        },
-        {
           "column_name": "opp_custom",
           "logical_name": "custom",
           "pii": false,
@@ -2685,10 +2853,10 @@
           "type": "UtcDatetime"
         },
         {
-          "column_name": "opp_value_cents",
-          "logical_name": "value_cents",
+          "column_name": "opp_value",
+          "logical_name": "value",
           "pii": false,
-          "type": "Integer"
+          "type": "Samen.Type.Money"
         }
       ],
       "resource": "Demo.CrmScope.Opportunity",
@@ -3519,6 +3687,72 @@
     {
       "fields": [
         {
+          "column_name": "ses_credential_id",
+          "logical_name": "credential_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ses_device_label",
+          "logical_name": "device_label",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ses_expires_at",
+          "logical_name": "expires_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ses_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ses_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "ses_last_seen_at",
+          "logical_name": "last_seen_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ses_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ses_revoked_at",
+          "logical_name": "revoked_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ses_token_digest",
+          "logical_name": "token_digest",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ses_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Identity.Session",
+      "table_name": "ses_session"
+    },
+    {
+      "fields": [
+        {
           "column_name": "smc_body_template",
           "logical_name": "body_template",
           "pii": false,
@@ -3824,6 +4058,66 @@
     },
     {
       "fields": [
+        {
+          "column_name": "uid_credential_id",
+          "logical_name": "credential_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "uid_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "uid_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "uid_linked_at",
+          "logical_name": "linked_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "uid_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "uid_provider",
+          "logical_name": "provider",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "uid_provider_uid",
+          "logical_name": "provider_uid",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "uid_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Identity.UserIdentity",
+      "table_name": "uid_user_identity"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "usr_credential_id",
+          "logical_name": "credential_id",
+          "pii": false,
+          "type": "UUID"
+        },
         {
           "column_name": "usr_emails",
           "logical_name": "emails",

@@ -1,5 +1,11 @@
 import Config
 
+# ADR-036 D1 / ADR-037 §5.2: AshMoney/ex_money wiring — the mounted test-support
+# CRM Opportunity / Billing Price Money attributes. No FX feature — the background
+# exchange-rate poller stays off.
+config :ash, :known_types, [AshMoney.Types.Money]
+config :ex_money, auto_start_exchange_rate_service: false
+
 # samen_web is a LIBRARY — in a host app the host owns this config. These entries
 # exist ONLY for the standalone test-support host (Samen.WebTest.*), so the framework
 # render tests can materialize real scope resources + exercise PiiResolution against a

@@ -207,9 +207,13 @@ defmodule Samen.Web.Billing.Reads do
 
   @doc "plan_id → [price] map (non-PII config rows, BOUNDED) for joining prices to a plan page."
   def prices_by_plan(mount, scope) do
+    # ADR-036 §4.5(3): unit_amount_cents/currency were dropped by the H1 Money
+    # migration; unit_amount is now the money_with_currency composite (sortable
+    # via Postgres's default composite comparison — same-currency price lists
+    # degenerate to an amount sort, as this call site always assumed).
     Mount.resource(mount, Price)
-    |> Ash.Query.ensure_selected([:plan_id, :unit_amount_cents, :currency, :interval, :active])
-    |> Ash.Query.sort(unit_amount_cents: :asc)
+    |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval, :active])
+    |> Ash.Query.sort(unit_amount: :asc)
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
     |> Enum.group_by(& &1.plan_id)
@@ -581,8 +585,11 @@ defmodule Samen.Web.Billing.Reads do
   # The price read is a bounded config read (≤ @detail_limit rows); the sub side is a
   # DB COUNT per plan — no subscription row set is ever transferred.
   defp compute_mrr(mount, scope) do
+    # ADR-036 §4.5(3): unit_amount_cents was dropped by the H1 Money migration;
+    # unit_amount is now the money_with_currency composite — extract minor units
+    # via Samen.Type.Money.cents/1, keeping the integer-cents accumulator unchanged.
     Mount.resource(mount, Price)
-    |> Ash.Query.ensure_selected([:plan_id, :unit_amount_cents, :interval])
+    |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval])
     |> Ash.Query.filter(interval == :monthly and active == true)
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
@@ -592,7 +599,7 @@ defmodule Samen.Web.Billing.Reads do
         |> Ash.Query.filter(status == :active and plan_id == ^price.plan_id)
         |> count_resource(scope)
 
-      acc + subs_on_plan * (price.unit_amount_cents || 0)
+      acc + subs_on_plan * Samen.Type.Money.cents(price.unit_amount)
     end)
   rescue
     _ -> 0

@@ -39,7 +39,7 @@ defmodule Demo.OperatorPlaneTest do
       Demo.BillingScope.Customer
       |> Ash.Changeset.for_create(:create, %{
         org_id: org_id,
-        billing_name: %{first: "Bill", last: "Payer"},
+        billing_name: "Bill Payer",
         billing_email: "billing@example.com"
       })
       |> Ash.create(authorize?: false)

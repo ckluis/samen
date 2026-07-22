@@ -36,7 +36,11 @@ defmodule Driftwood.Operator do
       membership: "dom",
       role: "dor",
       api_key: "dok",
-      invitation: "don"
+      invitation: "don",
+      credential: "doc",
+      auth_token: "dot",
+      session: "dos",
+      user_identity: "doi"
     }
 
   use Samen.Scopes.Billing,
