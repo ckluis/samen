@@ -144,6 +144,12 @@ defmodule Samen.Web.Billing.Reads do
   on `Samen.Web.Reads.page!/3` (BOUNDED BY CONSTRUCTION). The invoice carries no PII;
   the joined customer's billing_name is plane-resolved AFTER paging (tenant clear /
   operator ••••). On any read error the page is EMPTY.
+
+  Selects the T22/B4+B6 tax + hosted-link fields alongside the existing amount/status
+  columns — `tax_amount_cents`/`tax_lines` mirror verbatim (nil/[] when the provider
+  computed no tax, never a fabricated `0`); `hosted_invoice_url`/`hosted_receipt_url`
+  are the provider's hosted pages (rendered TENANT-SIDE ONLY, ADR-038 §3.5 — see
+  `Samen.Web.Billing.InvoicesLive`'s render).
   """
   def invoices_page(mount, scope, state) do
     page =
@@ -156,7 +162,10 @@ defmodule Samen.Web.Billing.Reads do
         :due_date,
         :paid_at,
         :customer_id,
-        :subscription_id
+        :subscription_id,
+        :tax_amount_cents,
+        :hosted_invoice_url,
+        :hosted_receipt_url
       ])
       |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:currency])
 
@@ -205,14 +214,22 @@ defmodule Samen.Web.Billing.Reads do
     _ -> []
   end
 
-  @doc "plan_id → [price] map (non-PII config rows, BOUNDED) for joining prices to a plan page."
+  @doc """
+  plan_id → [price] map (non-PII config rows, BOUNDED) for joining prices to a plan page.
+
+  Selects `:provider_price_ref` alongside the display fields — T26/B10 needs it as the
+  `price_ref` a checkout session names (ADR-038 §3.1 `create_checkout_session`); the
+  attribute is the SAME T18-documented opaque vendor cross-reference `provider_customer_ref`
+  already is (non-PII, public?: true on the Price blueprint), referenced under its
+  CURRENT name per the billing-blueprint collision-group rule (T106 owns the rename).
+  """
   def prices_by_plan(mount, scope) do
     # ADR-036 §4.5(3): unit_amount_cents/currency were dropped by the H1 Money
     # migration; unit_amount is now the money_with_currency composite (sortable
     # via Postgres's default composite comparison — same-currency price lists
     # degenerate to an amount sort, as this call site always assumed).
     Mount.resource(mount, Price)
-    |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval, :active])
+    |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval, :active, :provider_price_ref])
     |> Ash.Query.sort(unit_amount: :asc)
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)

@@ -15,6 +15,7 @@ defmodule Samen.Web.Auth.ResetRequestLive do
 
   alias Samen.Identity.Reset
   alias Samen.Web.Mount
+  alias Samen.Web.RateLimit
 
   @impl true
   def mount(_params, session, socket) do
@@ -30,20 +31,43 @@ defmodule Samen.Web.Auth.ResetRequestLive do
   @impl true
   def handle_event("request_reset", %{"reset" => %{"email" => email}}, socket) do
     mount = socket.assigns.samen_mount
+    email = String.trim(email)
 
-    # The uniform response is the whole point (no account-existence oracle) —
-    # `Reset.request/2`'s only distinguishable outcome is an honestly-blocked
-    # Delivery chokepoint, which still shows the SAME generic copy (a caller
-    # never renders "blocked" to a pre-actor visitor; that's an
-    # operator-facing signal, not a public one).
-    _ = Reset.request(String.trim(email), mods(mount))
+    # ADR-035 §4.5 / ADR-038 §6.3 — token-request brute-force control (T103): 3/15min
+    # per `email_bidx` (a non-reversible HMAC, ADR-035 §4.1 — never the plaintext email).
+    # Keyed on the email the caller SUPPLIED, so it bumps identically whether or not an
+    # account exists (no existence oracle — the same posture as the uniform copy below).
+    case reset_rate_limit(email) do
+      {:error, :rate_limited} ->
+        {:noreply,
+         assign(socket,
+           form: blank_form(),
+           requested?: true,
+           flash_ok: "Too many reset requests. Please wait a few minutes before trying again."
+         )}
 
-    {:noreply,
-     assign(socket,
-       form: blank_form(),
-       requested?: true,
-       flash_ok: "If that email has an account, check your inbox for a reset link."
-     )}
+      :ok ->
+        # The uniform response is the whole point (no account-existence oracle) —
+        # `Reset.request/2`'s only distinguishable outcome is an honestly-blocked
+        # Delivery chokepoint, which still shows the SAME generic copy (a caller
+        # never renders "blocked" to a pre-actor visitor; that's an
+        # operator-facing signal, not a public one).
+        _ = Reset.request(email, mods(mount))
+
+        {:noreply,
+         assign(socket,
+           form: blank_form(),
+           requested?: true,
+           flash_ok: "If that email has an account, check your inbox for a reset link."
+         )}
+    end
+  end
+
+  defp reset_rate_limit(email) do
+    case Samen.Auth.BlindIndex.compute(email) do
+      {:ok, bidx} -> RateLimit.check(:token_request_account, :email_bidx, bidx)
+      _ -> :ok
+    end
   end
 
   defp mods(%Mount{} = mount) do

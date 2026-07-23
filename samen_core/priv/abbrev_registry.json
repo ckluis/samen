@@ -284,6 +284,8 @@
       "vmv": "PawChart.Marketing.ConsentEvent"
     },
     "samen_core": {
+      "spc": "SamenCore.Support.PanFixture.CleanProjection",
+      "spd": "SamenCore.Support.PanFixture.DirtyProjection",
       "sro": "SamenCore.Support.RichTypes.OrgFixture",
       "srp": "SamenCore.Support.RichTypes.PersonalFixture",
       "sxv": "SamenCore.Support.SuppressionFixture.ConsentEvent"

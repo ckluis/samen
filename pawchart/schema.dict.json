@@ -153,16 +153,16 @@
           "type": "UUID"
         },
         {
+          "column_name": "pbc_provider_customer_ref",
+          "logical_name": "provider_customer_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "pbc_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
-        },
-        {
-          "column_name": "pbc_stripe_customer_id",
-          "logical_name": "stripe_customer_id",
-          "pii": false,
-          "type": "String"
         },
         {
           "column_name": "pbc_updated_at",
@@ -291,6 +291,18 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "pbi_hosted_invoice_url",
+          "logical_name": "hosted_invoice_url",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "pbi_hosted_receipt_url",
+          "logical_name": "hosted_receipt_url",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "pbi_id",
           "logical_name": "id",
           "pii": false,
@@ -301,6 +313,12 @@
           "logical_name": "inserted_at",
           "pii": false,
           "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbi_last_event_id",
+          "logical_name": "last_event_id",
+          "pii": false,
+          "type": "String"
         },
         {
           "column_name": "pbi_line_items",
@@ -333,22 +351,34 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "pbi_provider_invoice_ref",
+          "logical_name": "provider_invoice_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "pbi_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
         },
         {
-          "column_name": "pbi_stripe_invoice_id",
-          "logical_name": "stripe_invoice_id",
-          "pii": false,
-          "type": "String"
-        },
-        {
           "column_name": "pbi_subscription_id",
           "logical_name": "subscription_id",
           "pii": false,
           "type": "UUID"
+        },
+        {
+          "column_name": "pbi_tax_amount_cents",
+          "logical_name": "tax_amount_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pbi_tax_lines",
+          "logical_name": "tax_lines",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
         },
         {
           "column_name": "pbi_updated_at",
@@ -423,8 +453,8 @@
           "type": "UUID"
         },
         {
-          "column_name": "pbl_stripe_plan_id",
-          "logical_name": "stripe_plan_id",
+          "column_name": "pbl_provider_plan_ref",
+          "logical_name": "provider_plan_ref",
           "pii": false,
           "type": "String"
         },
@@ -501,16 +531,16 @@
           "type": "UUID"
         },
         {
+          "column_name": "pbs_provider_subscription_ref",
+          "logical_name": "provider_subscription_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "pbs_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
-        },
-        {
-          "column_name": "pbs_stripe_subscription_id",
-          "logical_name": "stripe_subscription_id",
-          "pii": false,
-          "type": "String"
         },
         {
           "column_name": "pbs_trial_end",
@@ -771,16 +801,16 @@
           "type": "Atom"
         },
         {
+          "column_name": "pby_provider_payment_ref",
+          "logical_name": "provider_payment_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "pby_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
-        },
-        {
-          "column_name": "pby_stripe_payment_intent_id",
-          "logical_name": "stripe_payment_intent_id",
-          "pii": false,
-          "type": "String"
         },
         {
           "column_name": "pby_updated_at",
@@ -909,8 +939,8 @@
           "type": "UUID"
         },
         {
-          "column_name": "ppc_stripe_price_id",
-          "logical_name": "stripe_price_id",
+          "column_name": "ppc_provider_price_ref",
+          "logical_name": "provider_price_ref",
           "pii": false,
           "type": "String"
         },
@@ -1827,6 +1857,12 @@
           "type": "UUID"
         },
         {
+          "column_name": "vmn_provider_message_id",
+          "logical_name": "provider_message_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "vmn_queued_at",
           "logical_name": "queued_at",
           "pii": false,
@@ -2132,6 +2168,24 @@
     },
     {
       "fields": [
+        {
+          "column_name": "vnp_digest_cadence",
+          "logical_name": "digest_cadence",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "vnp_digest_last_sent_at",
+          "logical_name": "digest_last_sent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "vnp_digest_timezone",
+          "logical_name": "digest_timezone",
+          "pii": false,
+          "type": "String"
+        },
         {
           "column_name": "vnp_email_enabled",
           "logical_name": "email_enabled",

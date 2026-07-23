@@ -36,6 +36,7 @@ defmodule Samen.Delivery.AuthMailer do
 
   require Logger
 
+  alias Samen.Delivery.Chokepoint
   alias Samen.Delivery.Lifecycle.EmailWorker
   alias Samen.Delivery.Message
 
@@ -77,17 +78,29 @@ defmodule Samen.Delivery.AuthMailer do
       template_id: to_string(context)
     }
 
-    case EmailWorker.decide(EmailWorker.resolve_adapter(), EmailWorker.adapter_config(), EmailWorker.env()) do
-      {:blocked, reason} ->
+    case Chokepoint.send(message,
+           fallback_adapter: EmailWorker.resolve_adapter(),
+           fallback_config: EmailWorker.adapter_config(),
+           env: EmailWorker.env()
+         ) do
+      {:error, :adapter_unconfigured} = err ->
         Logger.warning(
           "[AuthMailer] OPERATOR ALERT: auth token email BLOCKED (adapter unconfigured) " <>
             "context=#{context} subscriber_id=#{subscriber_id}"
         )
 
-        {:error, reason}
+        err
 
-      {:deliver, adapter, config} ->
-        adapter.deliver(message, config)
+      {:error, :suppressed} = err ->
+        Logger.warning(
+          "[AuthMailer] auth token email SUPPRESSED at the delivery chokepoint " <>
+            "context=#{context} subscriber_id=#{subscriber_id}"
+        )
+
+        err
+
+      other ->
+        other
     end
   end
 end

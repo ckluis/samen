@@ -417,16 +417,16 @@
           "type": "UUID"
         },
         {
+          "column_name": "bcu_provider_customer_ref",
+          "logical_name": "provider_customer_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "bcu_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
-        },
-        {
-          "column_name": "bcu_stripe_customer_id",
-          "logical_name": "stripe_customer_id",
-          "pii": false,
-          "type": "String"
         },
         {
           "column_name": "bcu_updated_at",
@@ -555,6 +555,18 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "bin_hosted_invoice_url",
+          "logical_name": "hosted_invoice_url",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "bin_hosted_receipt_url",
+          "logical_name": "hosted_receipt_url",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "bin_id",
           "logical_name": "id",
           "pii": false,
@@ -565,6 +577,12 @@
           "logical_name": "inserted_at",
           "pii": false,
           "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bin_last_event_id",
+          "logical_name": "last_event_id",
+          "pii": false,
+          "type": "String"
         },
         {
           "column_name": "bin_line_items",
@@ -597,22 +615,34 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "bin_provider_invoice_ref",
+          "logical_name": "provider_invoice_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "bin_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
         },
         {
-          "column_name": "bin_stripe_invoice_id",
-          "logical_name": "stripe_invoice_id",
-          "pii": false,
-          "type": "String"
-        },
-        {
           "column_name": "bin_subscription_id",
           "logical_name": "subscription_id",
           "pii": false,
           "type": "UUID"
+        },
+        {
+          "column_name": "bin_tax_amount_cents",
+          "logical_name": "tax_amount_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "bin_tax_lines",
+          "logical_name": "tax_lines",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
         },
         {
           "column_name": "bin_updated_at",
@@ -687,8 +717,8 @@
           "type": "UUID"
         },
         {
-          "column_name": "bpl_stripe_plan_id",
-          "logical_name": "stripe_plan_id",
+          "column_name": "bpl_provider_plan_ref",
+          "logical_name": "provider_plan_ref",
           "pii": false,
           "type": "String"
         },
@@ -747,8 +777,8 @@
           "type": "UUID"
         },
         {
-          "column_name": "bpr_stripe_price_id",
-          "logical_name": "stripe_price_id",
+          "column_name": "bpr_provider_price_ref",
+          "logical_name": "provider_price_ref",
           "pii": false,
           "type": "String"
         },
@@ -843,16 +873,16 @@
           "type": "Atom"
         },
         {
+          "column_name": "bpy_provider_payment_ref",
+          "logical_name": "provider_payment_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "bpy_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
-        },
-        {
-          "column_name": "bpy_stripe_payment_intent_id",
-          "logical_name": "stripe_payment_intent_id",
-          "pii": false,
-          "type": "String"
         },
         {
           "column_name": "bpy_updated_at",
@@ -927,16 +957,16 @@
           "type": "UUID"
         },
         {
+          "column_name": "bsb_provider_subscription_ref",
+          "logical_name": "provider_subscription_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "bsb_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
-        },
-        {
-          "column_name": "bsb_stripe_subscription_id",
-          "logical_name": "stripe_subscription_id",
-          "pii": false,
-          "type": "String"
         },
         {
           "column_name": "bsb_trial_end",
@@ -2481,6 +2511,12 @@
           "type": "UUID"
         },
         {
+          "column_name": "msn_provider_message_id",
+          "logical_name": "provider_message_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "msn_queued_at",
           "logical_name": "queued_at",
           "pii": false,
@@ -2720,6 +2756,24 @@
     },
     {
       "fields": [
+        {
+          "column_name": "npr_digest_cadence",
+          "logical_name": "digest_cadence",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "npr_digest_last_sent_at",
+          "logical_name": "digest_last_sent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "npr_digest_timezone",
+          "logical_name": "digest_timezone",
+          "pii": false,
+          "type": "String"
+        },
         {
           "column_name": "npr_email_enabled",
           "logical_name": "email_enabled",

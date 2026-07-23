@@ -118,6 +118,12 @@ echo "--- step 14/17: mix samen.verify.no_pii_columns"
 mix samen.verify.no_pii_columns
 echo "    PASSED"
 
+# 14b. B5 no_pan_columns (ADR-038 §3.5; T23) — no resource/table ANYWHERE (every
+#      plane, not just aggregate) may carry a PAN/CVC-shaped column.
+echo "--- step 14b/17: mix samen.verify.no_pan_columns"
+mix samen.verify.no_pan_columns
+echo "    PASSED"
+
 # 15. T4.5 aggregate-privacy floors.
 echo "--- step 15/17: mix samen.verify.aggregate_privacy"
 mix samen.verify.aggregate_privacy

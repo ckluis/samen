@@ -124,9 +124,11 @@ defmodule Samen.Abbrev.AllocatorTest do
       # T03 Identity.Session host reservations + the 3 ADR-035 T06
       # Identity.UserIdentity host reservations + 3 concurrent, unrelated in-flight
       # rich-types fixture reservations (2 samen_core, not authored by T02/T03/T06; 1
-      # samen_web — T15's own `rti` round-trip matrix fixture, ADR-036 H7).
-      assert byte_size(committed) == 13_171
-      assert map_size(R.load()) == 283
+      # samen_web — T15's own `rti` round-trip matrix fixture, ADR-036 H7) + 2 T23
+      # samen_core host reservations (`spc`/`spd` — the no-PAN verifier's red-path
+      # compile fixtures, ADR-038 §3.5 B5).
+      assert byte_size(committed) == 13_293
+      assert map_size(R.load()) == 285
     end
   end
 

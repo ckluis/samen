@@ -15,8 +15,9 @@ defmodule Samen.Webhook.Signer do
 
       Samen-Signature: t=<timestamp>,v1=<hex_signature>
 
-  This is the same shape as Stripe's webhook signature scheme — widely understood
-  by receiver libraries and easy to replay-protect.
+  This is the same shape used by common vendor webhook signature schemes (an
+  HMAC over `timestamp.body`, with the timestamp carried in the header) — widely
+  understood by receiver libraries and easy to replay-protect.
 
   ## Verifying (inbound / receiver side)
 

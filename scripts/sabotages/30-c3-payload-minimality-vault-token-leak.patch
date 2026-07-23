@@ -1,0 +1,29 @@
+# SABOTAGE: C3 (T29) gate — the provider-payload minimality assertion (INV-1).
+# `Samen.Delivery.RenderedEmail.provider_payload/1` runs the fail-closed guard on
+# the clean whitelist payload but then SILENTLY attaches the recipient's own vault
+# token ref (`vt_*`) to the ESP request under a non-whitelisted `:vault_ref` key —
+# a vault token + an extra field on the wire, the exact breach the payload-
+# minimality assertion exists to catch (a vt_ token reaching the ESP leaks the
+# vault scheme AND hands the vendor a reference it cannot use). The named payload-
+# minimality test MUST fail with this; the guard test stays green (the guard still
+# refuses a masked operator payload), and the patch reverts SHA-256 byte-exact.
+# APP: samen_core
+# TEST_FILES: test/delivery/pii_rendering_test.exs
+# MUST_FAIL: the provider payload carries ONLY the ADR-whitelisted fields
+diff --git a/samen_core/lib/samen/delivery/rendered_email.ex b/samen_core/lib/samen/delivery/rendered_email.ex
+--- a/samen_core/lib/samen/delivery/rendered_email.ex
++++ b/samen_core/lib/samen/delivery/rendered_email.ex
+@@ -100,5 +100,10 @@
+   def provider_payload(%__MODULE__{} = rendered) do
+     payload = Map.take(Map.from_struct(rendered), @provider_payload_fields)
+     :ok = assert_sendable!(payload)
+-    payload
++    # SABOTAGE (C3 payload-minimality): the fail-closed guard still runs on the
++    # clean whitelist payload, but the recipient's OWN vault token ref is then
++    # silently attached to the ESP request — a vt_ token + a non-whitelisted key
++    # on the wire, the exact breach the minimality assertion exists to catch. The
++    # payload-minimality test MUST fail with this (and revert byte-exact).
++    Map.put(payload, :vault_ref, rendered.vault_token_ref)
+   end
+
+   @doc """

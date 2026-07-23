@@ -5,13 +5,28 @@ defmodule Samen.Scopes.Billing.Blueprint do
   Objects: `customer🔒 · subscription · plan · price · invoice · payment · usage · entitlement`
   (doc §"The inherited 80%" scope table).
 
-  ## Shape — Stripe-mirror
+  ## Shape — provider-mirror
 
-  The Billing scope is modelled as a **Stripe-mirror shape**: the eight objects map to
-  Stripe's Customer / Subscription / Plan / Price / Invoice / PaymentIntent /
-  UsageRecord / Entitlement surface. No live Stripe calls happen in the resources —
-  that is the concern of the host's `SyncAdapter` implementation. The mirror shape is
-  the internal, governed representation.
+  The Billing scope is modelled as a **provider-mirror shape**: the eight objects map
+  to a hosted billing provider's Customer / Subscription / Plan / Price / Invoice /
+  PaymentIntent / UsageRecord / Entitlement surface. No live provider calls happen in
+  the resources — that is the concern of the `Samen.Billing.Provider` adapter
+  (ADR-038 §3), implemented in a separate, first-party-but-separate adapter package.
+  The mirror shape is the internal, governed representation.
+
+  ## External-reference naming (ADR-038 §3.5 + T106 addendum)
+
+  Each provider-mirror resource carries ONE opaque external-reference attribute in the
+  vendor-neutral `provider_<object>_ref` shape (`provider_customer_ref`,
+  `provider_subscription_ref`, `provider_plan_ref`, `provider_price_ref`,
+  `provider_invoice_ref`, `provider_payment_ref`). These are the sole cross-references
+  to whatever billing provider a host wires; the value is opaque and NOT PII (the
+  provider generates it — it never names or identifies a natural person by itself).
+  The former vendor-branded names were renamed under T106 (INV-4 ratchet 24→0):
+  `samen_core/lib` now carries ZERO vendor strings and the
+  `test/billing_vendor_free_test.exs` probe asserts a strict zero (no carve-out).
+  The `provider_subscription_ref` column carries a DB-unique fence (T106 decision (e);
+  the checkout-seeded + lifecycle mirror idempotency guard) in each host migration.
 
   ## PII map (🔒)
 
@@ -36,16 +51,17 @@ defmodule Samen.Scopes.Billing.Blueprint do
   `pii_<abbrev>_<name>` the `MaterializePii` transformer emits (e.g. `pii_bcu_billing_name`).
   The public API/catalog only ever sees the logical name.
 
-  ## Sync adapter seam
+  ## Provider seam
 
-  Host applications that want to sync with Stripe implement the
-  `Samen.Scopes.Billing.SyncAdapter` behaviour. The resource layer here is the
-  governed internal mirror; the sync adapter is an opt-in host concern.
+  Adapter packages that want to sync with an external billing provider implement
+  the `Samen.Billing.Provider` behaviour (ADR-038 §3). The resource layer here is
+  the governed internal mirror; the provider is a separate, opt-in adapter package
+  — never a dependency of `samen_core` itself (INV-4).
   """
 
   # ---------------------------------------------------------------------------
   # Customer — 🔒 PII: billing_name (vault :pii_name), billing_email (vault :pii_email).
-  # Org-scoped. A Stripe-mirror customer record.
+  # Org-scoped. A provider-mirror customer record.
   # ---------------------------------------------------------------------------
   defmacro define_customer(module, otp_app, domain, repo, abbrev) do
     quote do
@@ -56,9 +72,9 @@ defmodule Samen.Scopes.Billing.Blueprint do
         `billing_name` and `billing_email` are vault-routed PII (masked by default;
         plaintext only via the declared reveal action under a grant). Org-scoped.
 
-        Maps to Stripe Customer. The Stripe customer ID (`stripe_customer_id`) is an
-        opaque external reference — NOT PII, NOT vault-routed (it is a vendor ID, not
-        subject identity data).
+        Maps to the billing provider's Customer. The provider customer ref
+        (`provider_customer_ref`) is an opaque external reference — NOT PII, NOT
+        vault-routed (it is a vendor reference, not subject identity data).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -73,10 +89,10 @@ defmodule Samen.Scopes.Billing.Blueprint do
         end
 
         attributes do
-          # Opaque Stripe vendor ID. Not PII (it is a vendor reference, not a subject
-          # identity field). Non-pii! by design: Stripe generates it, it never names
-          # or identifies a natural person by itself.
-          attribute(:stripe_customer_id, :string, public?: true)
+          # Opaque provider vendor ref. Not PII (it is a vendor reference, not a subject
+          # identity field). Non-pii! by design: the provider generates it, it never
+          # names or identifies a natural person by itself.
+          attribute(:provider_customer_ref, :string, public?: true)
           attribute(:status, :atom,
             public?: true,
             default: :active,
@@ -161,8 +177,9 @@ defmodule Samen.Scopes.Billing.Blueprint do
         Billing.Subscription — an active billing subscription (doc scope table
         `subscription`). Tied to a customer and a plan. Org-scoped. No PII.
 
-        Maps to Stripe Subscription. `stripe_subscription_id` is an opaque vendor
-        reference, not PII.
+        Maps to the billing provider's Subscription. `provider_subscription_ref` is an
+        opaque vendor reference, not PII. It carries a DB-unique fence (T106 decision
+        (e)) in each host migration — the mirror idempotency guard.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -177,7 +194,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
         end
 
         attributes do
-          attribute(:stripe_subscription_id, :string, public?: true)
+          attribute(:provider_subscription_ref, :string, public?: true)
           attribute(:status, :atom,
             public?: true,
             default: :active,
@@ -256,7 +273,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
         Tenants set up their plan catalog (Free / Pro / Enterprise) without forking
         the product. Admin-gated writes. Org-scoped.
 
-        Maps to Stripe Plan / Product. `stripe_plan_id` is an opaque vendor reference.
+        Maps to the billing provider's Plan/Product. `provider_plan_ref` is an opaque vendor reference.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -274,7 +291,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
           attribute(:name, :string, public?: true, allow_nil?: false)
           attribute(:label, :string, public?: true)
           attribute(:description, :string, public?: true)
-          attribute(:stripe_plan_id, :string, public?: true)
+          attribute(:provider_plan_ref, :string, public?: true)
           attribute(:interval, :atom,
             public?: true,
             default: :monthly,
@@ -318,7 +335,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
         point per plan per org (e.g. $29/mo for Pro Monthly, $290/yr for Pro Annual).
         Admin-gated writes. Org-scoped.
 
-        Maps to Stripe Price. `stripe_price_id` is an opaque vendor reference.
+        Maps to the billing provider's Price. `provider_price_ref` is an opaque vendor reference.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -333,7 +350,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
         end
 
         attributes do
-          attribute(:stripe_price_id, :string, public?: true)
+          attribute(:provider_price_ref, :string, public?: true)
           # ADR-036 H1/D7: the paired `unit_amount_cents :integer` + `currency :string`
           # convention is replaced by ONE Money composite attribute (destructive,
           # pre-1.0, single data-copy migration — no deprecation window; T12). No
@@ -393,7 +410,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
         customer and subscription. Line items stored as a bounded jsonb map.
         Org-scoped. No PII (customer references are opaque IDs).
 
-        Maps to Stripe Invoice. `stripe_invoice_id` is an opaque vendor reference.
+        Maps to the billing provider's Invoice. `provider_invoice_ref` is an opaque vendor reference.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -408,7 +425,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
         end
 
         attributes do
-          attribute(:stripe_invoice_id, :string, public?: true)
+          attribute(:provider_invoice_ref, :string, public?: true)
           attribute(:status, :atom,
             public?: true,
             default: :draft,
@@ -423,6 +440,29 @@ defmodule Samen.Scopes.Billing.Blueprint do
           attribute(:paid_at, :utc_datetime, public?: true)
           # Line items as bounded jsonb: [%{description:, amount_cents:, quantity:}]
           attribute(:line_items, {:array, :map}, public?: true, default: [])
+          # B4/B6 (T22; ADR-038 §3.5) — tax mirror, fail-honest (ADR-014 shape applied
+          # to tax): `nil` means the provider genuinely computed no tax for this
+          # invoice (automatic tax not enabled / not applicable) — NEVER a fabricated
+          # `0`. Only an authoritative fetch that returns an explicit tax figure (which
+          # may itself be zero, e.g. a fully-exempt line) ever populates this column.
+          # Mirrored verbatim from the provider's snapshot; never computed here.
+          attribute(:tax_amount_cents, :integer, public?: true)
+          # Itemized tax breakdown lines (bounded jsonb), mirrored verbatim:
+          # [%{"amount_cents" =>, "display_name" =>, "percentage" =>, "jurisdiction" =>}].
+          # Empty when the provider computed no per-line tax breakdown (fail-honest —
+          # an empty list, never invented line items).
+          attribute(:tax_lines, {:array, :map}, public?: true, default: [])
+          # B6 (T22) — the provider's HOSTED invoice/receipt pages (tenant-facing
+          # links only; no PDF mirroring, ADR-038 §3.5). Absent until the invoice is
+          # finalized; nil is the honest "not yet available", never a placeholder URL.
+          attribute(:hosted_invoice_url, :string, public?: true)
+          attribute(:hosted_receipt_url, :string, public?: true)
+          # T22 mirror-write idempotency marker (the applied event's id) — an
+          # internal bookkeeping field, NOT the Tier-1 `custom` bag (that engine is
+          # a closed-world, org-declared field set; this is a framework-owned
+          # column, the same opaque-reference shape as this resource's other
+          # provider-reference attribute above).
+          attribute(:last_event_id, :string, public?: true)
           # Tier-1 custom bag.
           attribute(:custom, :map, public?: true)
         end
@@ -488,9 +528,9 @@ defmodule Samen.Scopes.Billing.Blueprint do
         Billing.Payment — a payment record (doc scope table `payment`). Linked to an
         invoice and a customer. Org-scoped. No PII.
 
-        Maps to Stripe PaymentIntent. `stripe_payment_intent_id` is an opaque vendor
-        reference. Card/bank details are NEVER stored here — those live in Stripe's
-        vault. This record carries only amounts, status, and opaque IDs.
+        Maps to the billing provider's PaymentIntent. `provider_payment_ref` is an
+        opaque vendor reference. Card/bank details are NEVER stored here — those live in
+        the provider's vault. This record carries only amounts, status, and opaque IDs.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -505,7 +545,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
         end
 
         attributes do
-          attribute(:stripe_payment_intent_id, :string, public?: true)
+          attribute(:provider_payment_ref, :string, public?: true)
           attribute(:status, :atom,
             public?: true,
             default: :pending,
@@ -576,7 +616,7 @@ defmodule Samen.Scopes.Billing.Blueprint do
         Billing.Usage — metered usage for a subscription (doc scope table `usage`).
         One row per metric per billing window per subscription. Org-scoped. No PII.
 
-        Maps to Stripe UsageRecord. Used to track seat-count, API calls, storage, etc.
+        Maps to the billing provider's UsageRecord. Used to track seat-count, API calls, storage, etc.
         for usage-based billing plans.
         """
         use Samen.Resource,

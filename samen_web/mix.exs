@@ -34,7 +34,10 @@ defmodule SamenWeb.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger],
+      # ADR-038 §6.1 — supervise the Hammer rate-limit backend (a stable ETS-table owner
+      # so per-account/per-IP counters survive across requests). samen_web-only (INV-4).
+      mod: {Samen.Web.Application, []}
     ]
   end
 
@@ -70,6 +73,16 @@ defmodule SamenWeb.MixProject do
       # DB mutation in `Samen.Identity.Totp` takes the validity decision as an
       # injected pure function instead).
       {:nimble_totp, "~> 1.0"},
+      # ADR-035 §4.5 / ADR-037 §5.14 / ADR-038 §6 — auth-surface + webhook-ingress
+      # rate limiting (narrow ADOPT: auth + webhook ingress only). `ash_rate_limiter`
+      # is PINNED == 1.0.0 (the retired-2.0.0 mishap, ADR-037 §5.14); Hammer `~> 7.0`
+      # is the multi-node counter backend behind `Samen.Web.RateLimit`. These live in
+      # `samen_web` ONLY — `samen_core/mix.exs` gains ZERO rate-limiter deps (INV-4).
+      # The package's resource-level `rate_limit` DSL and Change/Preparation hooks are
+      # DELIBERATELY NOT USED (they would compile limits into core resources); the dep
+      # is present per the narrow-ADOPT contract, enforcement is the manual-plug seam.
+      {:ash_rate_limiter, "== 1.0.0"},
+      {:hammer, "~> 7.0"},
       # Test-support host deps (materialize the scope blueprints against a scratch repo):
       {:ash, "== 3.29.3"},
       {:ash_postgres, "== 2.10.0"},

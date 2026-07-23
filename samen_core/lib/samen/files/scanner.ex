@@ -29,7 +29,7 @@ defmodule Samen.Files.Scanner do
     * `{:error, reason}` — the scan could not run (adapter not configured, backend
       down, …). This is fail-closed: a scan that could not run NEVER promotes.
 
-  The load-bearing rule (mirrors the `Samen.Delivery.Adapter` fail-honest contract,
+  The load-bearing rule (mirrors the `Samen.Delivery.Provider` fail-honest contract,
   ADR-014): a scanner that did not actually clear a file must NEVER return
   `{:ok, :clean}`. `Reject` — the default — returns `{:ok, :held}` precisely because it
   is not a real scanner; returning `{:ok, :clean}` from a non-scanning default would be

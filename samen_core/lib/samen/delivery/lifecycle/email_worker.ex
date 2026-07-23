@@ -2,8 +2,9 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
   @moduledoc """
   Oban worker for **transactional lifecycle emails** — welcome/onboarding,
   trial-ending, payment-failed/dunning, subscription-cancelled — dispatched
-  THROUGH the existing `Samen.Delivery.Adapter` boundary, **fail-honest**
-  (ADR-014 §3). This is the transactional-email sibling of
+  THROUGH the existing `Samen.Delivery.Provider` boundary (ADR-038 §4.2 rename
+  of the ADR-014 `Samen.Delivery.Adapter` contract), **fail-honest** (ADR-014
+  §3). This is the transactional-email sibling of
   `Samen.Scopes.Marketing.SendWorker`: same Invariant D1 discipline, same
   env-dependent adapter resolution, same token-only job args — but for
   event-triggered lifecycle mail rather than bulk marketing sends.
@@ -26,14 +27,14 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
     * `template_id`   — opaque UUID (nilable)
     * `event`         — the bounded lifecycle-event enum (see `events/0`): one of
       `"welcome" | "onboarding" | "trial_ending" | "payment_failed" |
-      "subscription_cancelled"`
+      "payment_recovered" | "subscription_cancelled"`
 
   Recipient email is revealed from the vault at `deliver/2` time under a grant
   (the BYO adapter's governed read) — never in job args, never in a receipt.
 
   ## Fail-honest delivery (Invariant D1 carried to the lifecycle path)
 
-  `perform/1` realizes `Samen.Delivery.Adapter` with three honest outcomes,
+  `perform/1` realizes `Samen.Delivery.Provider` with three honest outcomes,
   mirroring the marketing worker:
 
     1. **No configured adapter, non-`:test` env** → `:blocked` (NOT `:sent`): an
@@ -73,7 +74,7 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
 
   require Logger
 
-  alias Samen.Delivery.Message
+  alias Samen.Delivery.{Chokepoint, Message}
 
   # Captured at compile time so the runtime never consults Mix (unavailable in
   # releases). Overridable at runtime via :delivery_env for tests / staging.
@@ -82,8 +83,9 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
   # The bounded lifecycle-event enum. A job whose `event` is not in this list is
   # malformed and DISCARDED (fail-closed) — never delivered. Kept small and
   # namespaced; a host adds events by extending this list in a framework change,
-  # not by smuggling free text through args.
-  @events ~w(welcome onboarding trial_ending payment_failed subscription_cancelled)
+  # not by smuggling free text through args. `payment_recovered` (T24/B7) is the
+  # dunning-recovery counterpart to the pre-existing `payment_failed`.
+  @events ~w(welcome onboarding trial_ending payment_failed payment_recovered subscription_cancelled)
 
   @doc "The bounded set of recognised lifecycle events (string enum)."
   @spec events() :: [String.t()]
@@ -109,13 +111,26 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
         with {:ok, message} <- Message.from_args(args) do
           event = to_string(event)
 
-          case decide(resolve_adapter(), adapter_config(), env()) do
-            {:blocked, reason} ->
-              mark_blocked(message, event)
-              {:error, reason}
+          case Chokepoint.send(message,
+                 fallback_adapter: resolve_adapter(),
+                 fallback_config: adapter_config(),
+                 env: env()
+               ) do
+            {:ok, receipt} ->
+              log_sent(message, event, receipt)
+              :ok
 
-            {:deliver, adapter, config} ->
-              run_deliver(adapter, message, event, config)
+            {:error, :suppressed} ->
+              mark_suppressed(message, event)
+              {:error, :suppressed}
+
+            {:error, :adapter_unconfigured} = err ->
+              mark_blocked(message, event)
+              err
+
+            {:error, reason} = err ->
+              log_failed(message, event, reason)
+              err
           end
         else
           {:error, :missing_send_id} ->
@@ -125,56 +140,55 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
   end
 
   @doc """
-  Pure fail-honest decision (ADR-014 §3), kernel-testable in isolation and
-  structurally identical to `Samen.Scopes.Marketing.SendWorker.decide/3`.
-
-  Given the resolved `adapter` (module or nil), its `config`, and the active
-  `env`, returns either:
-
-    * `{:blocked, :adapter_unconfigured}` — no adapter, or the adapter's
-      `configured?/1` is false, in a non-`:test` env. The caller MUST treat this
-      as `:blocked` and NEVER `:sent`.
-    * `{:deliver, adapter, config}` — route to `adapter.deliver/2`.
-
-  In `:test` env a `nil` adapter resolves to `Samen.Delivery.LocalSink` (honest
-  capture). In any other env a `nil`/unconfigured adapter is fail-honest
-  `:blocked` — the sink is NEVER a prod fallback (a prod lifecycle email
-  "delivered" to a log is the exact lie ADR-014 forbids).
+  Pure fail-honest decision (ADR-014 §3) — DELEGATES to the single chokepoint
+  (`Samen.Delivery.Chokepoint.decide/3`, ADR-038 §4.3/T28) so this is no longer a
+  second copy of the logic (`Samen.Scopes.Marketing.SendWorker.decide/3` is the
+  same delegate). Kept as a public function (same name/arity) so existing
+  callers/tests are unaffected by the T28 chokepoint consolidation.
   """
   @spec decide(module() | nil, map(), atom()) ::
           {:blocked, :adapter_unconfigured} | {:deliver, module(), map()}
-  def decide(nil, _config, :test), do: {:deliver, Samen.Delivery.LocalSink, %{}}
-  def decide(nil, _config, _env), do: {:blocked, :adapter_unconfigured}
-
-  def decide(adapter, config, _env) when is_atom(adapter) do
-    if adapter.configured?(config) do
-      {:deliver, adapter, config}
-    else
-      {:blocked, :adapter_unconfigured}
-    end
-  end
+  defdelegate decide(adapter, config, env), to: Chokepoint
 
   # ---------------------------------------------------------------------------
   # Side effects
 
-  defp run_deliver(adapter, message, event, config) do
-    case adapter.deliver(message, config) do
-      {:ok, _receipt} ->
-        Logger.info(
-          "[Lifecycle.EmailWorker] sent event=#{event} send_id=#{message.send_id} " <>
-            "org_id=#{message.org_id}"
-        )
+  defp log_sent(message, event, _receipt) do
+    Logger.info(
+      "[Lifecycle.EmailWorker] sent event=#{event} send_id=#{message.send_id} " <>
+        "org_id=#{message.org_id}"
+    )
+  end
 
-        :ok
+  defp log_failed(message, event, reason) do
+    Logger.warning(
+      "[Lifecycle.EmailWorker] delivery FAILED event=#{event} send_id=#{message.send_id} " <>
+        "reason=#{inspect(reason)}"
+    )
+  end
 
-      {:error, reason} ->
-        Logger.warning(
-          "[Lifecycle.EmailWorker] delivery FAILED event=#{event} send_id=#{message.send_id} " <>
-            "reason=#{inspect(reason)}"
-        )
+  # Suppressed AT the chokepoint (spec C2) — never reaches the provider. Distinct
+  # from :adapter_unconfigured (blocked): the adapter WAS configured, the
+  # recipient was refused. Best-effort operator signal, same degrade-to-log
+  # posture as mark_blocked/2.
+  defp mark_suppressed(message, event) do
+    Logger.warning(
+      "[Lifecycle.EmailWorker] lifecycle email SUPPRESSED at the delivery chokepoint " <>
+        "event=#{event} send_id=#{message.send_id} org_id=#{message.org_id}"
+    )
 
-        {:error, reason}
+    if is_binary(message.org_id) do
+      Samen.Notifications.Engine.emit(%{
+        org_id: message.org_id,
+        recipient_id: message.org_id,
+        event_type: "lifecycle.email.suppressed",
+        channel: :in_app,
+        rendered_body: "A lifecycle email was refused: recipient is suppressed.",
+        metadata: %{"send_id" => to_string(message.send_id), "lifecycle_event" => event}
+      })
     end
+
+    :ok
   end
 
   # Blocked lifecycle email: emit an operator-visible signal (a warning log +

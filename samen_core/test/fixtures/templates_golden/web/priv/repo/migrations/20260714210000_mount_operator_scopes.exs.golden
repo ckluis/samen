@@ -296,7 +296,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     # =====================================================================
 
     create table(:apc_customer, primary_key: false) do
-      add(:apc_stripe_customer_id, :text)
+      add(:apc_provider_customer_ref, :text)
       add(:apc_status, :text, default: "active")
       add(:apc_currency, :text, default: "USD")
       add(:apc_custom, :map, default: fragment("'{}'::jsonb"))
@@ -312,7 +312,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:app_name, :text, null: false)
       add(:app_label, :text)
       add(:app_description, :text)
-      add(:app_stripe_plan_id, :text)
+      add(:app_provider_plan_ref, :text)
       add(:app_interval, :text, default: "monthly")
       add(:app_enabled, :boolean, default: true)
       add(:app_features, :map, default: fragment("'{}'::jsonb"))
@@ -324,7 +324,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     end
 
     create table(:apr_price, primary_key: false) do
-      add(:apr_stripe_price_id, :text)
+      add(:apr_provider_price_ref, :text)
       # ADR-036 H1/D7: one money_with_currency composite column (the type was
       # installed by the app_resources migration this one runs after).
       add(:apr_unit_amount, :money_with_currency, null: false)
@@ -349,7 +349,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     end
 
     create table(:aps_subscription, primary_key: false) do
-      add(:aps_stripe_subscription_id, :text)
+      add(:aps_provider_subscription_ref, :text)
       add(:aps_status, :text, default: "active")
       add(:aps_current_period_start, :utc_datetime)
       add(:aps_current_period_end, :utc_datetime)
@@ -384,8 +384,11 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aps_updated_at, :utc_datetime, null: false)
     end
 
+    # T106 decision (e): DB-unique-fence on the provider-subscription-ref (mirror idempotency).
+    create(unique_index(:aps_subscription, [:aps_provider_subscription_ref], name: "aps_subscription_provider_ref_index"))
+
     create table(:api_invoice, primary_key: false) do
-      add(:api_stripe_invoice_id, :text)
+      add(:api_provider_invoice_ref, :text)
       add(:api_status, :text, default: "draft")
       add(:api_amount_due_cents, :integer, default: 0)
       add(:api_amount_paid_cents, :integer, default: 0)
@@ -395,6 +398,11 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:api_due_date, :utc_datetime)
       add(:api_paid_at, :utc_datetime)
       add(:api_line_items, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:api_tax_amount_cents, :integer)
+      add(:api_tax_lines, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:api_hosted_invoice_url, :text)
+      add(:api_hosted_receipt_url, :text)
+      add(:api_last_event_id, :text)
       add(:api_custom, :map, default: fragment("'{}'::jsonb"))
 
       add(
@@ -424,7 +432,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     end
 
     create table(:apy_payment, primary_key: false) do
-      add(:apy_stripe_payment_intent_id, :text)
+      add(:apy_provider_payment_ref, :text)
       add(:apy_status, :text, default: "pending")
       add(:apy_amount_cents, :integer, null: false)
       add(:apy_currency, :text, default: "USD")

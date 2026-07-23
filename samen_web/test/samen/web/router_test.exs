@@ -38,6 +38,7 @@ defmodule Samen.Web.RouterTest do
     assert {"/billing", Samen.Web.Billing.OverviewLive} in billing
     assert {"/billing/invoices", Samen.Web.Billing.InvoicesLive} in billing
     assert {"/billing/plans", Samen.Web.Billing.PlansLive} in billing
+    assert {"/billing/settings", Samen.Web.Billing.SettingsLive} in billing
 
     support = Samen.Web.Router.__routes__(:support, "/support")
     assert {"/support", Samen.Web.Support.TicketsLive} in support

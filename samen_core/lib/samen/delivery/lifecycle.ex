@@ -6,8 +6,10 @@ defmodule Samen.Delivery.Lifecycle do
   bounded event (welcome/onboarding/trial-ending/payment-failed/
   subscription-cancelled) addressed to an existing subscriber/customer ref. The
   actual dispatch is `Samen.Delivery.Lifecycle.EmailWorker`, which routes through
-  the fail-honest `Samen.Delivery.Adapter` boundary — no first-party ESP ships;
-  the host BYOs the adapter (`docs/guides/byo-esp.md`).
+  the fail-honest `Samen.Delivery.Provider` boundary (ADR-038 §4.2 rename of the
+  ADR-014 `Samen.Delivery.Adapter` contract) — a host may BYO its own adapter
+  (`docs/guides/byo-esp.md`) or select one of the first-party-but-separate ESP
+  adapter packages (ADR-038 §8).
 
   ## Best-effort by contract (rides alongside a primary write)
 

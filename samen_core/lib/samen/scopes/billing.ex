@@ -7,14 +7,16 @@ defmodule Samen.Scopes.Billing do
   host's Ash domain expands into eight host-owned resources in the host's namespace
   — each a normal `use Samen.Resource` with the host's `otp_app`, `repo`, and `domain`.
 
-  ## Stripe-mirror shape
+  ## Provider-mirror shape
 
-  Billing is modelled as a **Stripe-mirror shape**: the eight objects map directly to
-  Stripe's Customer / Subscription / Plan / Price / Invoice / PaymentIntent /
-  UsageRecord / Entitlement surface. **No live Stripe calls are made here** — this is
-  the internal mirror. Synchronization with an external Stripe account is the concern
-  of the `Samen.Scopes.Billing.SyncAdapter` behaviour, which host applications
-  implement (or use the built-in `Samen.Scopes.Billing.SyncAdapter.Stub`).
+  Billing is modelled as a **provider-mirror shape**: the eight objects map directly
+  to a hosted billing provider's Customer / Subscription / Plan / Price / Invoice /
+  PaymentIntent / UsageRecord / Entitlement surface. **No live provider calls are
+  made here** — this is the internal mirror. Synchronization with the external
+  provider is the concern of the `Samen.Billing.Provider` behaviour (ADR-038 §3),
+  which a separate, first-party-but-separate adapter package implements; core
+  tests select the honest `Samen.Billing.FakeProvider` double instead of a live
+  vendor.
 
   ## PII — customer🔒
 
@@ -57,7 +59,7 @@ defmodule Samen.Scopes.Billing do
     * `Demo.BillingScope.Plan`         — Tier-0: a billing plan config row
     * `Demo.BillingScope.Price`        — Tier-0: a price point for a plan
     * `Demo.BillingScope.Invoice`      — a billing invoice (lines as jsonb)
-    * `Demo.BillingScope.Payment`      — a payment record (Stripe-mirror)
+    * `Demo.BillingScope.Payment`      — a payment record (provider-mirror)
     * `Demo.BillingScope.Usage`        — metered usage for a subscription
     * `Demo.BillingScope.Entitlement`  — feature entitlement for a subscription
 

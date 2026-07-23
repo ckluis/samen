@@ -41,7 +41,7 @@ defmodule Samen.Web.NotificationsSourcesTest do
   # An adapter that IS configured but fails delivery — the "marketing.send.failed"
   # trigger (fail-honest path 3, ADR-014).
   defmodule FailingAdapter do
-    @behaviour Samen.Delivery.Adapter
+    use Samen.Delivery.Provider
     @impl true
     def configured?(_config), do: true
     @impl true

@@ -24,9 +24,9 @@ defmodule Samen.AbbrevFlattenConflictTest do
       assert Reg.flatten_conflicts(Reg.load_namespaced()) == []
     end
 
-    test "load/0 does not raise and returns the full lossless union (263 global + 20 host)" do
+    test "load/0 does not raise and returns the full lossless union (263 global + 22 host)" do
       flat = Reg.load()
-      assert map_size(flat) == 283
+      assert map_size(flat) == 285
       # A global entry and a host entry both survive the (lossless) flatten.
       assert flat["com"] == "SamenCore.Support.Crm.Contact"
       assert flat["mce"] == "Demo.MarketingScope.ConsentEvent"

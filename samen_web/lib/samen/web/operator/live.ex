@@ -88,6 +88,11 @@ defmodule Samen.Web.Operator.Live do
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 21V4" /><path d="M4 4h12l-2 4 2 4H4" /></svg>
           </:icon>
         </.nav_item>
+        <.nav_item label="Webhook DLQ" href="/operator/webhooks" active={@active == :webhooks}>
+          <:icon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v6m0 0 3-3m-3 3L9 5" /><path d="M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7" /></svg>
+          </:icon>
+        </.nav_item>
         <.nav_item label="Portfolio" href="/operator/aggregate" active={@active == :aggregate}>
           <:icon>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9m6 10V5m6 14v-7" /></svg>

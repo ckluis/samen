@@ -319,25 +319,60 @@ defmodule Demo.BillingScopeRbacRedPathTest do
   end
 
   # =========================================================================
-  # SyncAdapter stub — verify callbacks are invokable without live Stripe.
+  # Samen.Billing.FakeProvider (ADR-038 §3.6/§7.2) — verify callbacks are
+  # invokable without a live billing provider. Supersedes the deleted
+  # Samen.Scopes.Billing.SyncAdapter.Stub, which always returned a fake
+  # {:ok, %{stub: true}} regardless of configuration — the exact tautological
+  # lie ADR-014/ADR-038 forbid. FakeProvider is honest: unconfigured refuses,
+  # configured genuinely records + returns fake-tagged data.
   # =========================================================================
 
-  test "SyncAdapter.Stub records calls and returns {:ok, _} without live Stripe" do
-    alias Samen.Scopes.Billing.SyncAdapter.Stub
+  test "FakeProvider unconfigured refuses every callback (fail-honest, no live provider)" do
+    alias Samen.Billing.FakeProvider
 
-    Stub.reset()
+    FakeProvider.reset()
+    refute FakeProvider.configured?(%{})
 
-    {:ok, _} = Stub.sync_customer(%{id: "c1", org_id: "o1", status: :active, stripe_customer_id: nil}, [])
-    {:ok, _} = Stub.sync_subscription(%{id: "s1", org_id: "o1", customer_id: "c1", plan_id: nil, status: :active, stripe_subscription_id: nil}, [])
-    {:ok, _} = Stub.sync_invoice(%{id: "i1", org_id: "o1", customer_id: "c1", stripe_invoice_id: nil, amount_due_cents: 1000}, [])
-    {:ok, _} = Stub.cancel_subscription("s1", [])
+    assert {:error, :not_configured} =
+             FakeProvider.create_checkout_session(%{org_id: "o1", plan_id: "p1"}, %{})
 
-    calls = Stub.calls()
+    assert {:error, :not_configured} =
+             FakeProvider.cancel_subscription("s1", [], %{})
+
+    assert {:error, :not_configured} =
+             FakeProvider.change_subscription("s1", %{plan_id: "p2"}, %{})
+
+    assert {:error, :not_configured} =
+             FakeProvider.fetch_object(:invoice, "i1", %{})
+
+    # No call was recorded as successful while unconfigured.
+    assert FakeProvider.calls() == []
+  end
+
+  test "FakeProvider configured records calls and returns fake-tagged (not live-provider) data" do
+    alias Samen.Billing.FakeProvider
+
+    FakeProvider.reset()
+    config = %{configured: true}
+
+    {:ok, %{fake: true}} =
+      FakeProvider.create_checkout_session(%{org_id: "o1", plan_id: "p1"}, config)
+
+    {:ok, %{fake: true}} =
+      FakeProvider.fetch_object(:subscription, "s1", config)
+
+    {:ok, %{fake: true}} =
+      FakeProvider.change_subscription("s1", %{plan_id: "p2"}, config)
+
+    {:ok, %{status: :cancelled, fake: true}} =
+      FakeProvider.cancel_subscription("s1", [], config)
+
+    calls = FakeProvider.calls()
     assert length(calls) == 4
 
-    assert Enum.any?(calls, fn {cb, _} -> cb == :sync_customer end)
-    assert Enum.any?(calls, fn {cb, _} -> cb == :sync_subscription end)
-    assert Enum.any?(calls, fn {cb, _} -> cb == :sync_invoice end)
+    assert Enum.any?(calls, fn {cb, _} -> cb == :create_checkout_session end)
+    assert Enum.any?(calls, fn {cb, _} -> cb == :fetch_object end)
+    assert Enum.any?(calls, fn {cb, _} -> cb == :change_subscription end)
     assert Enum.any?(calls, fn {cb, _} -> cb == :cancel_subscription end)
   end
 end

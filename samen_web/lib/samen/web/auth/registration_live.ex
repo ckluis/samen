@@ -23,10 +23,15 @@ defmodule Samen.Web.Auth.RegistrationLive do
 
   alias Samen.Identity.Register
   alias Samen.Web.Mount
+  alias Samen.Web.RateLimit
 
   @impl true
   def mount(_params, session, socket) do
-    socket = Samen.Web.Live.assign_mount(socket, session)
+    socket =
+      socket
+      |> Samen.Web.Live.assign_mount(session)
+      |> assign(:samen_client_ip, Samen.Web.Live.client_ip(socket))
+
     {:ok, load(socket)}
   end
 
@@ -39,6 +44,24 @@ defmodule Samen.Web.Auth.RegistrationLive do
   def handle_event("register", %{"registration" => params}, socket) do
     mount = socket.assigns.samen_mount
 
+    # ADR-035 §4.5 / ADR-038 §6.3 — registration brute-force control (T103): 5/hr per IP
+    # (registration has no account key — a pre-actor visitor has no account yet). Over
+    # the limit → the SAME generic interstitial error, no account-existence signal.
+    case RateLimit.check(:registration_ip, :ip, socket.assigns[:samen_client_ip] || "unknown") do
+      {:error, :rate_limited} ->
+        {:noreply,
+         assign(socket,
+           form: to_form(params, as: :registration),
+           error: "Too many sign-up attempts from your network. Please wait a few minutes and try again.",
+           flash_ok: nil
+         )}
+
+      :ok ->
+        register(socket, mount, params)
+    end
+  end
+
+  defp register(socket, mount, params) do
     attrs = %{
       org_name: trim(Map.get(params, "org_name")),
       first_name: trim(Map.get(params, "first_name")),

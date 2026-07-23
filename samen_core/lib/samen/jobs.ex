@@ -14,6 +14,7 @@ defmodule Samen.Jobs do
       default          |        10          | general-purpose; catch-all
       rollups          |         2          | AshOban rollup/matview refresh (T2.3)
       webhooks_out     |         5          | outbound webhook delivery (T3.13)
+      webhooks_in      |         5          | inbound webhook processing (B9; ADR-038 §5.2)
       erasure          |         1          | crypto-shred orchestration (T1.7/T2.9)
       maintenance      |         1          | partition detach, vacuum, pruning (T2.2)
       reveal           |         5          | reveal-grant auto-revoke (T1.6 D6)
@@ -93,6 +94,7 @@ defmodule Samen.Jobs do
       default: 10,
       rollups: 2,
       webhooks_out: 5,
+      webhooks_in: 5,
       erasure: 1,
       maintenance: 1,
       reveal: 5

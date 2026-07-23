@@ -1,0 +1,29 @@
+{
+  "id": "sub_lifecycle",
+  "object": "subscription",
+  "customer": "cus_lifecycle",
+  "status": "active",
+  "current_period_start": 1782518400,
+  "current_period_end": 1785196800,
+  "cancel_at": null,
+  "canceled_at": null,
+  "trial_end": null,
+  "currency": "usd",
+  "items": {
+    "object": "list",
+    "data": [
+      { "id": "si_basic", "price": { "id": "price_basic", "unit_amount": 1900, "currency": "usd" } }
+    ]
+  },
+  "latest_invoice": {
+    "id": "in_downgraded",
+    "currency": "usd",
+    "lines": {
+      "object": "list",
+      "data": [
+        { "amount": -3200, "proration": true, "description": "Unused time on Pro" },
+        { "amount": 1358, "proration": true, "description": "Remaining time on Basic" }
+      ]
+    }
+  }
+}

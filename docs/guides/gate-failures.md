@@ -293,6 +293,23 @@ cohort keys and numeric value columns only.
 
 ---
 
+## Step 14b — `mix samen.verify.no_pan_columns`
+
+**Error** (`samen_core/lib/mix/tasks/samen.verify.no_pan_columns.ex`):
+
+```text
+resource <Module> declares attribute <attr>, which is PAN/CVC-shaped. No samen resource may EVER store a raw card number or a card security code (ADR-038 §3.5 B5 no-PAN invariant) ...
+resource <Module> (table <table>) has PHYSICAL column <col> that is PAN/CVC-shaped. ...
+```
+
+**Meaning:** a resource (any plane) or a live table carries a column shaped like a raw card
+number (PAN) or a card security code (CVC/CVV) — card-on-file must live exclusively in the
+hosted billing provider's own vault (ADR-038 §3.5 B5); samen never stores a PAN.
+**Fix:** remove/rename the attribute. Non-PAN display metadata (`brand`, `last4`,
+`exp_month`, `exp_year`) is explicitly allowed and never flagged.
+
+---
+
 ## Step 15 — `mix samen.verify.aggregate_privacy`
 
 **Errors** (`samen_core/lib/mix/tasks/samen.verify.aggregate_privacy.ex`):

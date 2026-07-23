@@ -363,6 +363,14 @@ defmodule Samen.Scopes.Marketing.Blueprint do
           attribute(:sent_at, :utc_datetime, public?: true)
           attribute(:idempotency_key, :string, public?: true)
           attribute(:custom, :map, public?: true)
+
+          # ADR-038 §4.1 (T28/C2): the provider's own message id, when it returns
+          # one — the token-blind join key T30's deliverability-webhook
+          # reconciliation matches bounce/complaint/open/click events against
+          # (provider_message_id -> send receipt -> subscriber ref, NEVER by
+          # email address). Nilable: a blocked/suppressed/failed send never gets
+          # one. Not PII (an opaque vendor-minted string).
+          attribute(:provider_message_id, :string, public?: true)
         end
 
         relationships do

@@ -39,6 +39,12 @@ defmodule Samen.Extension do
       change.
     * `Samen.Transformers.AbbrevStorage` — rewrites every attribute `:source` to
       `<abbrev>_<name>`.
+    * `Samen.Transformers.NoPanColumns` — the HARD compile-time abort for the B5
+      no-PAN invariant (ADR-038 §3.5; T23): a resource declaring a PAN/CVC-shaped
+      attribute does not compile, in any plane, in any host. Pairs with the
+      `Samen.Verifiers.NoPanColumns` verifier below (same rule; the transformer's
+      `{:error, _}` is what reliably aborts the build in this Ash/Spark version —
+      see `Samen.Aggregate.NoPiiTransformer` for the precedent).
 
   ## Verifiers
 
@@ -49,6 +55,12 @@ defmodule Samen.Extension do
       a system resource declaring a relationship to `Samen.CustomObjects.Record`
       (`tnt_record`) fails compile. The tenant regime references OUT to system rows
       as validated opaque IDs, never the reverse.
+    * `Samen.Verifiers.NoPanColumns` — enforces the B5 no-PAN invariant (ADR-038
+      §3.5; T23): NO resource, in ANY plane, in ANY host, may declare an attribute
+      shaped like a raw card number (PAN) or a card security code (CVC/CVV). Wired
+      here (the base extension, not just the aggregate one) because card-on-file
+      is a structural, plane-independent, forever invariant — samen never stores a
+      PAN, full stop.
   """
   use Spark.Dsl.Extension,
     sections: [
@@ -72,10 +84,12 @@ defmodule Samen.Extension do
     transformers: [
       Samen.Transformers.CoreAttributes,
       Samen.Transformers.MaterializeCustomFields,
-      Samen.Transformers.AbbrevStorage
+      Samen.Transformers.AbbrevStorage,
+      Samen.Transformers.NoPanColumns
     ],
     verifiers: [
       Samen.Verifiers.AbbrevRegistry,
-      Samen.Verifiers.TntBoundary
+      Samen.Verifiers.TntBoundary,
+      Samen.Verifiers.NoPanColumns
     ]
 end

@@ -38,7 +38,7 @@ defmodule Demo.Repo.Migrations.AddBillingScope do
   def up do
     # --- bcu_customer : a billing customer 🔒 (billing_name/billing_email vault-routed) ---
     create table(:bcu_customer, primary_key: false) do
-      add(:bcu_stripe_customer_id, :text)
+      add(:bcu_provider_customer_ref, :text)
       add(:bcu_status, :text, default: "active")
       add(:bcu_currency, :text, default: "USD")
       add(:bcu_custom, :map, default: fragment("'{}'::jsonb"))
@@ -56,7 +56,7 @@ defmodule Demo.Repo.Migrations.AddBillingScope do
       add(:bpl_name, :text, null: false)
       add(:bpl_label, :text)
       add(:bpl_description, :text)
-      add(:bpl_stripe_plan_id, :text)
+      add(:bpl_provider_plan_ref, :text)
       add(:bpl_interval, :text, default: "monthly")
       add(:bpl_enabled, :boolean, default: true)
       add(:bpl_features, :map, default: fragment("'{}'::jsonb"))
@@ -69,7 +69,7 @@ defmodule Demo.Repo.Migrations.AddBillingScope do
 
     # --- bpr_price : Tier-0 config rows (price per plan) ---
     create table(:bpr_price, primary_key: false) do
-      add(:bpr_stripe_price_id, :text)
+      add(:bpr_provider_price_ref, :text)
       add(:bpr_unit_amount_cents, :integer, null: false)
       add(:bpr_currency, :text, null: false, default: "USD")
       add(:bpr_interval, :text, default: "monthly")
@@ -94,7 +94,7 @@ defmodule Demo.Repo.Migrations.AddBillingScope do
 
     # --- bsb_subscription : an active billing subscription ---
     create table(:bsb_subscription, primary_key: false) do
-      add(:bsb_stripe_subscription_id, :text)
+      add(:bsb_provider_subscription_ref, :text)
       add(:bsb_status, :text, default: "active")
       add(:bsb_current_period_start, :utc_datetime)
       add(:bsb_current_period_end, :utc_datetime)
@@ -129,9 +129,15 @@ defmodule Demo.Repo.Migrations.AddBillingScope do
       add(:bsb_updated_at, :utc_datetime, null: false)
     end
 
+    # T106 decision (e): DB-unique-fence on the provider-subscription-ref — the
+    # idempotency guard for the checkout-seeded + lifecycle mirror convergence
+    # (ADR-038 addendum). Nullable column, so local rows with no provider ref are
+    # unconstrained (Postgres allows multiple NULLs); non-null provider refs collide.
+    create(unique_index(:bsb_subscription, [:bsb_provider_subscription_ref], name: "bsb_subscription_provider_ref_index"))
+
     # --- bin_invoice : a billing invoice ---
     create table(:bin_invoice, primary_key: false) do
-      add(:bin_stripe_invoice_id, :text)
+      add(:bin_provider_invoice_ref, :text)
       add(:bin_status, :text, default: "draft")
       add(:bin_amount_due_cents, :integer, default: 0)
       add(:bin_amount_paid_cents, :integer, default: 0)
@@ -171,7 +177,7 @@ defmodule Demo.Repo.Migrations.AddBillingScope do
 
     # --- bpy_payment : a payment record (no raw card data) ---
     create table(:bpy_payment, primary_key: false) do
-      add(:bpy_stripe_payment_intent_id, :text)
+      add(:bpy_provider_payment_ref, :text)
       add(:bpy_status, :text, default: "pending")
       add(:bpy_amount_cents, :integer, null: false)
       add(:bpy_currency, :text, default: "USD")

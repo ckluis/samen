@@ -131,7 +131,9 @@ defmodule Samen.AbbrevRegistryTest do
       # (uid/doi/woi — the A6 SSO link). `samen_core`'s `sro`/`srp` rows belong
       # to a concurrent, unrelated in-flight rich-types task (not authored by T03/T06).
       # `samen_web`'s `rti` row is T15's own round-trip matrix fixture
-      # (`Samen.WebTest.RichTypes.Item`, ADR-036 H7 done-criteria 3/4).
+      # (`Samen.WebTest.RichTypes.Item`, ADR-036 H7 done-criteria 3/4). `samen_core`'s
+      # `spc`/`spd` rows are T23's no-PAN verifier red-path compile fixtures (ADR-038
+      # §3.5 B5).
       assert hosts == %{
                "demo" => %{
                  "mce" => "Demo.MarketingScope.ConsentEvent",
@@ -151,7 +153,9 @@ defmodule Samen.AbbrevRegistryTest do
                "samen_core" => %{
                  "sxv" => "SamenCore.Support.SuppressionFixture.ConsentEvent",
                  "sro" => "SamenCore.Support.RichTypes.OrgFixture",
-                 "srp" => "SamenCore.Support.RichTypes.PersonalFixture"
+                 "srp" => "SamenCore.Support.RichTypes.PersonalFixture",
+                 "spc" => "SamenCore.Support.PanFixture.CleanProjection",
+                 "spd" => "SamenCore.Support.PanFixture.DirtyProjection"
                },
                "samen_web" => %{
                  "wmv" => "Samen.WebTest.Marketing.ConsentEvent",
@@ -163,8 +167,8 @@ defmodule Samen.AbbrevRegistryTest do
                }
              }
 
-      # The compat shim's flat view unions the global net with every host entry (263 + 20).
-      assert map_size(Reg.load()) == 283
+      # The compat shim's flat view unions the global net with every host entry (263 + 22).
+      assert map_size(Reg.load()) == 285
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do

@@ -14,7 +14,7 @@ defmodule Samen.Delivery.AuthMailerTest do
   alias Samen.Delivery.Message
 
   defmodule OkAdapter do
-    @behaviour Samen.Delivery.Adapter
+    use Samen.Delivery.Provider
     @impl true
     def configured?(_config), do: true
     @impl true
@@ -22,7 +22,7 @@ defmodule Samen.Delivery.AuthMailerTest do
   end
 
   defmodule UnconfiguredAdapter do
-    @behaviour Samen.Delivery.Adapter
+    use Samen.Delivery.Provider
     @impl true
     def configured?(_config), do: false
     @impl true

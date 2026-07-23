@@ -146,7 +146,7 @@ defmodule Samen.WebTest.Repo.Migrations.MountOperatorScopes do
     # =========================================================================
 
     create table(:wpc_customer, primary_key: false) do
-      add(:wpc_stripe_customer_id, :text)
+      add(:wpc_provider_customer_ref, :text)
       add(:wpc_status, :text, default: "active")
       add(:wpc_currency, :text, default: "USD")
       add(:wpc_custom, :map, default: fragment("'{}'::jsonb"))
@@ -162,7 +162,7 @@ defmodule Samen.WebTest.Repo.Migrations.MountOperatorScopes do
       add(:wpp_name, :text, null: false)
       add(:wpp_label, :text)
       add(:wpp_description, :text)
-      add(:wpp_stripe_plan_id, :text)
+      add(:wpp_provider_plan_ref, :text)
       add(:wpp_interval, :text, default: "monthly")
       add(:wpp_enabled, :boolean, default: true)
       add(:wpp_features, :map, default: fragment("'{}'::jsonb"))
@@ -174,7 +174,7 @@ defmodule Samen.WebTest.Repo.Migrations.MountOperatorScopes do
     end
 
     create table(:wpr_price, primary_key: false) do
-      add(:wpr_stripe_price_id, :text)
+      add(:wpr_provider_price_ref, :text)
       add(:wpr_unit_amount_cents, :integer, null: false)
       add(:wpr_currency, :text, null: false, default: "USD")
       add(:wpr_interval, :text, default: "monthly")
@@ -198,7 +198,7 @@ defmodule Samen.WebTest.Repo.Migrations.MountOperatorScopes do
     end
 
     create table(:wps_subscription, primary_key: false) do
-      add(:wps_stripe_subscription_id, :text)
+      add(:wps_provider_subscription_ref, :text)
       add(:wps_status, :text, default: "active")
       add(:wps_current_period_start, :utc_datetime)
       add(:wps_current_period_end, :utc_datetime)
@@ -233,8 +233,14 @@ defmodule Samen.WebTest.Repo.Migrations.MountOperatorScopes do
       add(:wps_updated_at, :utc_datetime, null: false)
     end
 
+    # T106 decision (e): DB-unique-fence on the provider-subscription-ref — the
+    # idempotency guard for the checkout-seeded + lifecycle mirror convergence
+    # (ADR-038 addendum). Nullable column, so local rows with no provider ref are
+    # unconstrained (Postgres allows multiple NULLs); non-null provider refs collide.
+    create(unique_index(:wps_subscription, [:wps_provider_subscription_ref], name: "wps_subscription_provider_ref_index"))
+
     create table(:wpi_invoice, primary_key: false) do
-      add(:wpi_stripe_invoice_id, :text)
+      add(:wpi_provider_invoice_ref, :text)
       add(:wpi_status, :text, default: "draft")
       add(:wpi_amount_due_cents, :integer, default: 0)
       add(:wpi_amount_paid_cents, :integer, default: 0)
@@ -273,7 +279,7 @@ defmodule Samen.WebTest.Repo.Migrations.MountOperatorScopes do
     end
 
     create table(:wpy_payment, primary_key: false) do
-      add(:wpy_stripe_payment_intent_id, :text)
+      add(:wpy_provider_payment_ref, :text)
       add(:wpy_status, :text, default: "pending")
       add(:wpy_amount_cents, :integer, null: false)
       add(:wpy_currency, :text, default: "USD")

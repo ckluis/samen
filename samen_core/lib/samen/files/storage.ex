@@ -15,7 +15,7 @@ defmodule Samen.Files.Storage do
 
   ## The fail-honest contract
 
-  This is the same load-bearing rule the `Samen.Delivery.Adapter` (ADR-014) shipped:
+  This is the same load-bearing rule the `Samen.Delivery.Provider` (ADR-014/ADR-038) shipped:
   an adapter that is not configured must NEVER return `{:ok, _}` for an operation it
   did not actually perform. For storage that means `put/3` on an unconfigured
   adapter MUST return `{:error, reason}` and MUST NOT return `{:ok, _}` — a stub

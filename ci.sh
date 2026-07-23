@@ -42,6 +42,81 @@ echo "==> Running samen_core tests"
 )
 echo "==> samen_core: PASSED"
 
+# --- samen_stripe adapter package gate (ADR-038 §8.1, T18/B1) ---
+# The first-party-but-separate Stripe billing adapter (skeleton): path-deps on
+# samen_core ONLY (never samen_web), owns its own vendor HTTP client dep (req),
+# and runs its own standalone suite. Wired here (root gate) rather than
+# ci-fast.sh, matching the demo/driftwood/pawchart precedent — ci-fast.sh stays
+# framework-only (spikes/samen_core/samen_web). samen_core itself never
+# references this package (INV-4; proved by samen_core's own
+# billing_vendor_free_test.exs above, which already ran).
+echo ""
+echo "==> Running samen_stripe tests (ADR-038 B1 skeleton — standalone, samen_core path-dep only)"
+(
+  cd "$REPO_ROOT/samen_stripe"
+  mix deps.get --quiet
+  mix test --warnings-as-errors
+)
+echo "==> samen_stripe: PASSED"
+
+# --- samen_postmark adapter package gate (ADR-038 §4/§8.1, T27/C1) ---
+# The first-party-but-separate, INBOUND-CAPABLE reference delivery adapter:
+# path-deps on samen_core ONLY (never samen_web), owns its own vendor HTTP
+# client dep (req), runs its own standalone suite INCLUDING the shared
+# Samen.Delivery.ProviderConformanceCase harness (samen_core, ADR-038 §4.5) —
+# the same harness samen_ses/samen_resend (T94/T95) will cite unchanged.
+# samen_core itself never references this package (INV-4; proved by
+# samen_core's own delivery_vendor_free_test.exs above, which already ran).
+echo ""
+echo "==> Running samen_postmark tests (ADR-038 C1 reference adapter — standalone, samen_core path-dep only)"
+(
+  cd "$REPO_ROOT/samen_postmark"
+  mix deps.get --quiet
+  mix test --warnings-as-errors
+)
+echo "==> samen_postmark: PASSED"
+
+# --- samen_ses adapter package gate (ADR-038 §4/§8.1, T94/C1) ---
+# The first-party-but-separate SECOND reference delivery adapter (M1 ruling):
+# path-deps on samen_core ONLY (never samen_web), owns its own vendor HTTP
+# client dep (req) + AWS SigV4 signing dep (aws_signature, ADR-038 §8.2), runs
+# its own standalone suite INCLUDING the shared
+# Samen.Delivery.ProviderConformanceCase harness (samen_core, ADR-038 §4.5) —
+# UNCHANGED, same harness samen_postmark/samen_resend (T27/T95) run. NOT
+# inbound-capable (ADR-038 §4.5 adapter split). samen_core itself never
+# references this package (INV-4; proved by samen_core's own
+# delivery_vendor_free_test.exs above, which already ran, plus the scoped
+# SamenSes/aws/amazonses grep the T94 gate runs — ADR-038 §8.3).
+echo ""
+echo "==> Running samen_ses tests (ADR-038 C1 second reference adapter — standalone, samen_core path-dep only)"
+(
+  cd "$REPO_ROOT/samen_ses"
+  mix deps.get --quiet
+  mix test --warnings-as-errors
+)
+echo "==> samen_ses: PASSED"
+
+# --- samen_resend adapter package gate (ADR-038 §4/§8.1, T95/C1) ---
+# The first-party-but-separate THIRD reference delivery adapter (M1 ruling):
+# path-deps on samen_core ONLY (never samen_web), owns its own vendor HTTP
+# client dep (req) — no extra signing dep needed, HMAC-SHA256 for the
+# Svix-style webhook scheme is served natively by Erlang/OTP's :crypto — and
+# runs its own standalone suite INCLUDING the shared
+# Samen.Delivery.ProviderConformanceCase harness (samen_core, ADR-038 §4.5) —
+# UNCHANGED, same harness samen_postmark/samen_ses (T27/T94) run. NOT
+# inbound-capable (ADR-038 §4.5 adapter split). samen_core itself never
+# references this package (INV-4; proved by samen_core's own
+# delivery_vendor_free_test.exs above, which already ran, plus the scoped
+# Resend-module/`:resend`-dep-atom grep the T95 gate runs — ADR-038 §8.3).
+echo ""
+echo "==> Running samen_resend tests (ADR-038 C1 third reference adapter — standalone, samen_core path-dep only)"
+(
+  cd "$REPO_ROOT/samen_resend"
+  mix deps.get --quiet
+  mix test --warnings-as-errors
+)
+echo "==> samen_resend: PASSED"
+
 # --- gen_app tier: the flagship generative proof (WS-D D6, AC-X-1) ---
 # The PERMANENT gen_app test tier (design.md §4). In ONE automated run it generates a
 # fresh app with the FULL running product (--web --api --seeds --observability), runs

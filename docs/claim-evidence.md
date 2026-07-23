@@ -270,3 +270,74 @@ one deliberately-deferred auth-hardening item (rate-limiting, T103) is named in 
 loose-prefix leak-detection under-check (T102), and the session-cap eviction ordering **production
 bug** (T104). Each fixed in-phase with a RED-on-revert proof. Full accounting:
 `_orch/tasks/T16/work/phase-1-report.md`.
+
+---
+
+## K. Phase 2 (BATON) — WS-B Stripe billing + WS-C ESP delivery + auth rate-limiting (INV-6)
+
+Added by the Phase-2 gate (T31, 2026-07-23). Everything below is **complete + verified** at
+the authoritative full-root level: `./ci.sh` passed **twice consecutively** (`ROOT CI: ALL
+PASSED`, EXIT:0, zero re-rolls; INV-3 determinism), and the **INV-4 adapters-absent probe**
+holds — with `samen_stripe/` + `samen_postmark/` + `samen_ses/` + `samen_resend/` all removed,
+`samen_core` (1718 passed) and `samen_web` (935 passed) still go green, so core+web carry
+**zero vendor deps**. Each claim cites its green test artifact **and the lane that produced it**.
+
+**Honest scope / lanes.** Everything in CI runs on the **keyless lane**: billing dispatch is
+proven against `Samen.Billing.FakeProvider` / `Fake*Mirror` (hermetic, call-recording) and the
+`samen_stripe` adapter against **injected-transport cassettes** (lane-0, no network); ESP
+delivery is proven against fixtures + injected capture transports. **Production persistence is
+FAKE-backed in Phase 2** — the Ash-backed mirrors exist but their host wiring + `si_` item-ref
+resolution is **deferred to T108** (see below). **No host wires a live provider** — every
+generated app boots with billing/ESP **unconfigured** and honestly renders the
+`:not_configured` empty state. Live lanes exist but are **documented-and-not-CI**:
+`STRIPE_TEST_KEY` (Stripe test-mode), `SAMEN_POSTMARK_SMOKE=1` / `mix samen.smoke.postmark`
+(real Postmark API), and `SAMEN_ESP_LIVE=1` / `mix samen.smoke.{ses,resend}` (real SES/Resend).
+
+### WS-B — Stripe billing adapter (fail-honest, vendor-free core)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| B1 | Billing behaviour (`Samen.Billing.Provider`, ADR-038 §3.1) + honest `FakeProvider`; `samen_stripe` skeleton is fail-honest (unconfigured→`:not_configured`, unwired→`:not_implemented`, never a fake `:ok`); tautological `SyncAdapter`/`Stub` deleted | ✅ TEST · keyless | `samen_core/test/billing_provider_test.exs`; `samen_stripe/test/skeleton_test.exs` (84 passed, standalone); `samen_core/test/billing_vendor_free_test.exs` (INV-4 ratchet, closed to 0 by T106) | **MET** — `_orch/verify/T18-verdict.json` |
+| B2 | Hosted checkout: org-scoped success/cancel URLs FORCED, metadata-only (no PII, INV-1 snapshot), reconcile via the T19 dispatch on a separate `:billing_checkout_mirror` slot | ✅ TEST · keyless | `samen_core/test/billing_checkout_test.exs`; `samen_web/test/samen/billing/checkout_reconcile_test.exs`; `samen_stripe/test/checkout_test.exs` | **MET** — `T20-verdict.json` |
+| B3 | Subscription lifecycle sync: fetch-on-event convergence (never trusts payload), idempotent (`last_event_id`), **out-of-order stale events discarded** (`occurred_at` watermark, `:lt`→`:stale`) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/billing_reconciler_test.exs`; `samen_stripe/test/lifecycle_sync_test.exs`; **`scripts/sabotages/29-b3-subscription-ordering-guard-drop.patch`** flips the named out-of-order tests, reverts byte-exact | **MET** — `T21-verdict.json` |
+| B4 | Invoice mirror + tax fields: tax **mirrored exactly**, never a fabricated `0` (nil/`[]` passed verbatim when the provider computed none) — proven adapter→mirror→UI | ✅ TEST · keyless | `samen_core/test/billing_invoice_test.exs`; `samen_web/test/samen/billing/invoice_reconcile_test.exs`; `samen_stripe/test/invoice_mirror_test.exs`; `docs/guides/stripe-tax.md` | **MET** — `T22-verdict.json` |
+| B5 | Payment methods via **Stripe-hosted surfaces only** — no card fields; a base-wired `NoPanColumns` verifier+transformer **hard-aborts compile** on any PAN-shaped column | ✅ TEST + compile-time verifier · keyless | `samen_core/test/billing_payment_method_test.exs`; `samen_core/test/no_pan_columns_red_path_test.exs`; `samen_stripe/test/payment_method_test.exs`; `mix samen.verify.no_pan_columns` (in every app `ci.sh`) | **MET** — `T23-verdict.json` |
+| B6 | Hosted invoice/receipt links, **gated OFF on the operator plane** (INV-2 masked-read `writable?/1`) — raw URLs/link text refuted on the operator render | ✅ TEST · keyless | `samen_web/test/samen/web/billing_invoice_tax_links_test.exs` (operator-plane refute-assertions) | **MET** — `T22-verdict.json` |
+| B7 | Dunning: grace-until-period-end on `:invoice_payment_failed`, recover on `:invoice_paid`; **symmetric watermark guard** so a stale failure can't re-clip a recovered customer (the attempt-1 money bug, FIXED) | ✅ TEST · keyless | `samen_core/test/billing_dunning_test.exs` ("out-of-order guard" block, RED-on-revert); `samen_stripe/test/dunning_test.exs` | **MET (attempt 2)** — `T24-verdict.json` |
+| B8 | Usage-based metered reporting: one idempotent batch, **never marks reported on `{:error,_}`** (no double-charge / no data-loss), fail-honest `configured?/1` gate before any HTTP | ✅ TEST · keyless | `samen_core/test/billing_usage_reporter_test.exs`; `samen_stripe/test/usage_test.exs` (HTTP-500 + `:econnrefused` both leave rows pending, retry reuses keys) | **MET** — `T25-verdict.json` |
+| B9 | Webhook ingress security: signature **fail-closed** (no-sig/wrong-secret/body-swap/future-ts → 400, raw bytes preserved), replay DB-unique-index-arbitrated, oversize→413, DLQ + operator view, rate-limited | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_web/test/samen/web/webhook_security_test.exs`; `samen_stripe/test/webhook_security_test.exs`; **`scripts/sabotages/25-b9-webhook-signature-bypass.patch`** neuters the constant-time compare → 2 named red-paths fail, revert byte-exact | **MET** — `T19-verdict.json` |
+| B10 | Billing settings page: composes B2/B4/B5 verbatim; **honest `:not_configured` empty state** with **zero fake affordances** (no plan card / checkout button / `$0.00` when unwired), emitted by the generator with zero hand-edits | ✅ TEST + LIVE PROBE · keyless | `samen_web/test/samen/web/billing_settings_live_test.exs`; the gen-app flagship probe asserts `GET /billing/settings → 200` + the exact not-configured copy (root `ci.sh`) | **MET** — `T26-verdict.json` |
+
+### WS-C — ESP delivery adapters (behaviour + conformance + three vendors)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| C1 | ESP `Samen.Delivery.Provider` behaviour + a **shared, non-vacuous conformance harness**, satisfied by **all THREE adapters** — Postmark (Basic-Auth), SES (SNS RSA + SigV4), Resend (Svix HMAC) (M1 ruling: one contract, three vendors) | ✅ TEST · keyless | Harness `samen_core/lib/samen/delivery/provider_conformance_case.ex` (self-test `.../delivery_provider_conformance_case_test.exs`, non-vacuity proven by a toy adapter); `samen_postmark/test/conformance_test.exs` (38), `samen_ses/test/conformance_test.exs` (48), `samen_resend/test/conformance_test.exs` (43); vendor-freeness `samen_core/test/delivery_vendor_free_test.exs` (postmark **+ SES + Resend distinctive-token bans, T31 #5**) | **MET** — `T27`/`T94`/`T95-verdict.json` |
+| C2 | Outbound send has a **single chokepoint** (`Samen.Delivery.Chokepoint` is the sole caller of `deliver/2`); suppression fail-closed + uniform across all 4 families; no fake-ok | ✅ TEST · keyless | `samen_core/test/delivery/lifecycle_send_test.exs` (full-repo grep + anti-tautology twin) | **MET** — `T28-verdict.json` |
+| C3 | PII-safe rendering: every PII field resolves **through `Samen.Api.PiiResolution` on the actor's plane**; payload whitelist is **fail-closed** (raises on `%Masked{}` / `vt_`); at-rest record is body-free; a **non-skippable deliver-leak conformance gate** binds every adapter | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/delivery/pii_rendering_test.exs`; `samen_core/test/delivery/deliver_leak_gate_test.exs` (LeakyProvider caught / CleanProvider passes); **`scripts/sabotages/30-c3-payload-minimality-vault-token-leak.patch`** leaks `vault_token_ref` → minimality test flips, revert byte-exact | **MET (attempt 2)** — `T29-verdict.json` |
+| C4 | Deliverability: bounce/complaint match a real send receipt → kernel `EmailEvent`/`Suppression` rows; a bounced address is **refused at the chokepoint**; open/click **default-OFF** behind an org flag + per-recipient consent | ✅ TEST · keyless | `samen_core/test/delivery/deliverability_test.exs` (provider-agnostic); adapter shape proofs `samen_{postmark,ses,resend}/test/deliverability_test.exs` | **MET** — `T30-verdict.json` |
+| C8 | Notification digests: one masked send per due cadence (daily/weekly/off, per-user), timezone-aware (fixed-offset, no tzdata dep), time-travel tested, reuses the C3 masked-render 3-proof | ✅ TEST · keyless | `samen_core/test/delivery/digest_test.exs` | **MET** — `T30-verdict.json` |
+
+### Cross-cutting Phase-2 hardening
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| T103 | Auth-surface rate-limiting (the A-DEFER item from Phase 1): sign-in / 2FA / registration / reset limited via the shared `Samen.Web.RateLimit` seam (Hammer ETS); keys are **bidx/credential/IP, never plaintext email**; bounded `login_failed` audit (edge row, O(windows) not O(N)) | ✅ TEST · keyless | `samen_web/test/samen/web/auth/rate_limit_test.exs` (every bypass axis — IP-rotate, account-rotate, casing-split, 2FA-brute, missed-surface — reproduced and LIMITED) | **MET** — `T103-verdict.json` |
+| T106 | INV-4 vendor-ref rename ratchet **24→0**: `stripe_*_id` blueprint attrs renamed to neutral `provider_*_ref` across blueprint + 6 host migrations + goldens; ADR-038-A records the 5 billing-persistence decisions T108 implements | ✅ TEST · keyless | `samen_core/test/billing_vendor_free_test.exs` (carve-out CLOSED to 0, floor kept refutable via a `count_occurrences` self-test); `docs/adr/ADR-038-A-billing-persistence-architecture.md` | **MET** — `T106-verdict.json` |
+
+**Security defects caught-and-fixed by adversarial verification (Phase 2):** the T19 webhook
+**metadata-redaction** leak (P2), the T29 **deliver-seam** goodwill hole (P1 — now enforced by a
+non-skippable conformance gate), the T24 **dunning out-of-order** money bug (P1 — a stale failure
+re-clipping a recovered customer's entitlement, fixed with a symmetric watermark guard), and the
+SNS (T94) / Svix (T95) **signature-forgery** suites (all forgeries rejected). Plus the T23
+**deadlock-and-recovery**: two orphaned `./ci.sh` process trees from a prior session were mutating
+the shared registry + holding stale DB locks — killed, cleared, registry restored byte-exact.
+Full accounting: `_orch/tasks/T31/work/gate-report.md`.
+
+**Deferred (named, not vanished):** production Ash-backed billing mirrors + `si_` resolution
+(**T108**, blocked on T106, gates at T49); durable `Samen.Identity.LoginFailure` resource
+(**T109** — ETS count is restart-ephemeral, the durable audit edge rows survive; gates at T49);
+`ci.sh` gen_app-probe interrupt-safety (**T107** — registry corruption on kill); and the T30
+`Suppression`/`ProviderSelection`/`MarketingReceiptLookup` stores that ship **unwired into any
+host `config.exs`** (fail-OPEN when unconfigured; nothing sends in prod — keyless). Lesser P2/P3
+notes are enumerated in the gate report.

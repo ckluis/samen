@@ -107,6 +107,7 @@ defmodule Samen.Web.Auth.SessionController do
   alias Samen.Web.Auth.Totp
   alias Samen.Web.Auth.TotpStepUp
   alias Samen.Web.Mount
+  alias Samen.Web.RateLimit
 
   @default_return "/"
 
@@ -136,16 +137,28 @@ defmodule Samen.Web.Auth.SessionController do
     password = login_params["password"] || ""
     remember? = login_params["remember_me"] in ["true", "on", "1"]
 
-    case SignIn.authenticate(email, password, sign_in_mods(mount)) do
-      {:ok, %{totp_enabled_at: enabled_at} = credential} when not is_nil(enabled_at) ->
-        start_totp_challenge(conn, mount, credential, remember?, params["return_to"])
+    # ADR-035 §4.5 / ADR-038 §6.3 — the brute-force / enumeration control (T103).
+    # Two INDEPENDENT keys: per-IP (100/hr) AND per-account bidx (10/min). The check
+    # runs BEFORE authenticate and is CONSTANT-SHAPE for a known vs unknown account
+    # (an `email_bidx` HMAC + two counter bumps, identical either way), so it adds no
+    # enumeration timing signal on top of `SignIn.authenticate/3`'s own dummy-verify
+    # parity (ADR-035 §4.4). Over-limit → a generic 429, the same for any caller.
+    case rate_limit_signin(conn, email) do
+      :ok ->
+        case SignIn.authenticate(email, password, sign_in_mods(mount)) do
+          {:ok, %{totp_enabled_at: enabled_at} = credential} when not is_nil(enabled_at) ->
+            start_totp_challenge(conn, mount, credential, remember?, params["return_to"])
 
-      {:ok, credential} ->
-        finish_login(conn, mount, credential.id, remember?, params["return_to"])
+          {:ok, credential} ->
+            finish_login(conn, mount, credential.id, remember?, params["return_to"])
 
-      _ ->
-        audit_login_failed(mount, email)
-        redirect(conn, to: "#{login_path(conn)}?error=1")
+          _ ->
+            audit_login_failed(mount, email)
+            redirect(conn, to: "#{login_path(conn)}?error=1")
+        end
+
+      {:error, :rate_limited} ->
+        rate_limited(conn)
     end
   end
 
@@ -186,6 +199,20 @@ defmodule Samen.Web.Auth.SessionController do
   # nothing was attempted against a real account there, only a stale
   # interstitial.
   defp complete_second_factor(conn, mount, credential_id, digest, code) do
+    # ADR-035 §4.5 / ADR-038 §6.3 — TOTP-verify brute-force control (T103): 5/min per
+    # credential id (a UUID, non-PII). Keyed on the ALREADY-resolved pending credential,
+    # so a stale/absent interstitial (handled by `verify_totp/2` before this is reached)
+    # is never charged against a real account's budget. Over-limit → generic 429.
+    case RateLimit.check(:totp_verify_credential, :credential, to_string(credential_id)) do
+      {:error, :rate_limited} ->
+        rate_limited(conn)
+
+      :ok ->
+        complete_second_factor_verified(conn, mount, credential_id, digest, code)
+    end
+  end
+
+  defp complete_second_factor_verified(conn, mount, credential_id, digest, code) do
     with {:ok, method} <- verify_second_factor(mount, credential_id, code),
          {:ok, _consumed} <- TokenConsume.consume_once(Mount.resource(mount, AuthToken), digest, :totp_pending) do
       if method == :recovery do
@@ -210,7 +237,15 @@ defmodule Samen.Web.Auth.SessionController do
       finish_login(conn, mount, credential_id, remember?, return_to)
     else
       _ ->
-        Audit.auth_event(mount.repo, event: "auth.login_failed", subject_id: credential_id, actor_id: credential_id)
+        # ADR-035 §5 taxonomy / ADR-038 §6.4 (T103) — BOUNDED audit: bump the bidx/
+        # credential-keyed failure counter every attempt, but append the `aud_event`
+        # row only on the window EDGE (first failure), so a wrong-code brute force
+        # against one credential does NOT grow the audit partition per attempt. The
+        # detail stays the fixed token-blind string (T101), subject_id set.
+        if login_failed_edge?(:credential, to_string(credential_id)) do
+          Audit.auth_event(mount.repo, event: "auth.login_failed", subject_id: credential_id, actor_id: credential_id)
+        end
+
         redirect(conn, to: "#{totp_path(conn)}?error=1")
     end
   end
@@ -376,15 +411,41 @@ defmodule Samen.Web.Auth.SessionController do
   # anything new" holds. The audit `detail` is left at `Audit.auth_event/2`'s
   # own default (`"identity.auth.login_failed"`, a fixed string) — never the
   # attempted email — token-blind by construction either way.
+  #
+  # ADR-035 §5 taxonomy / ADR-038 §6.4 (T103) — BOUNDED replacement for the former
+  # per-attempt row: every failed attempt bumps a bidx-keyed FAILURE counter (non-PII —
+  # the `email_bidx` HMAC, never the plaintext email), but an `aud_event` row is appended
+  # only on the window EDGE (the first failure of the window). So N ≫ limit brute-force
+  # attempts against one account produce O(windows) audit rows, not O(N) — the audit
+  # partition no longer grows unboundedly under brute force. The edge row keeps the
+  # token-blind default detail (T101's per-kind findability holds: subject_id is still set
+  # when the email resolves, so the row is findable via `Samen.AuditEvent.for_subject/2`).
   defp audit_login_failed(mount, email) do
+    edge? = login_failed_edge?(:email_bidx, login_failed_bidx(email))
+
     case lookup_credential_id_for_audit(mount, email) do
       {:ok, credential_id} ->
-        Audit.auth_event(mount.repo, event: "auth.login_failed", subject_id: credential_id, actor_id: credential_id)
+        if edge?,
+          do: Audit.auth_event(mount.repo, event: "auth.login_failed", subject_id: credential_id, actor_id: credential_id)
 
       :error ->
-        Audit.auth_event(mount.repo, event: "auth.login_failed")
+        if edge?, do: Audit.auth_event(mount.repo, event: "auth.login_failed")
     end
   end
+
+  # The `email_bidx` (ADR-035 §4.1) is the non-PII failure-counter key; an email that
+  # cannot produce a bidx falls back to a fixed non-PII sentinel (still bounded).
+  defp login_failed_bidx(email) do
+    case Samen.Auth.BlindIndex.compute(email) do
+      {:ok, bidx} -> bidx
+      _ -> "unknown"
+    end
+  end
+
+  # A window EDGE = the FIRST failure of the window for this key: the failure counter's
+  # new value is 1. Bumps every attempt (so the bidx-keyed counter tracks the burst);
+  # returns true only on the edge, gating the bounded `aud_event` append.
+  defp login_failed_edge?(kind, value), do: RateLimit.bump(:login_failed_audit, kind, value) == 1
 
   defp lookup_credential_id_for_audit(mount, email) do
     with {:ok, bidx} <- Samen.Auth.BlindIndex.compute(email) do
@@ -477,6 +538,40 @@ defmodule Samen.Web.Auth.SessionController do
   defp maybe_remember(conn, _false, _raw_token), do: conn
 
   defp login_path(conn), do: conn.private[:samen_login_path] || "/login"
+
+  # ADR-035 §4.5 / ADR-038 §6.3 — sign-in rate limit: per-IP (100/hr) THEN per-account
+  # bidx (10/min), both independent. Per-IP first so an account-rotating attacker from
+  # one IP is caught by the IP budget; a resolvable email is additionally caught per
+  # account when an IP-rotating attacker hammers ONE account. Both counters increment on
+  # every attempt regardless of whether the account exists (no existence oracle).
+  defp rate_limit_signin(conn, email) do
+    with :ok <- RateLimit.check(:signin_ip, :ip, remote_ip(conn)) do
+      signin_account_check(email)
+    end
+  end
+
+  # Constant-shape by construction: `email_bidx` is computed for ANY well-formed email
+  # (known or not), so the per-account bucket is bumped identically. A malformed email
+  # that cannot produce a bidx skips the account axis (still covered by the per-IP axis)
+  # — that is an email-VALIDITY branch, never an account-EXISTENCE branch.
+  defp signin_account_check(email) do
+    case Samen.Auth.BlindIndex.compute(email) do
+      {:ok, bidx} -> RateLimit.check(:signin_account, :email_bidx, bidx)
+      _ -> :ok
+    end
+  end
+
+  defp remote_ip(%Plug.Conn{remote_ip: ip}) when is_tuple(ip), do: ip |> :inet.ntoa() |> to_string()
+  defp remote_ip(_), do: "unknown"
+
+  # The over-limit response (ADR-035 §4.5 "429 or interstitial"): a bare 429, identical
+  # for every caller — carries no account/enumeration signal.
+  defp rate_limited(conn) do
+    conn
+    |> put_resp_content_type("text/plain")
+    |> send_resp(429, "rate_limited")
+    |> halt()
+  end
 
   defp trim(v) when is_binary(v), do: String.trim(v)
   defp trim(_), do: ""

@@ -1,9 +1,14 @@
-defmodule Samen.Delivery.AdapterTest do
+defmodule Samen.Delivery.ProviderTest do
   @moduledoc """
-  ADR-014 delivery adapter contract + fail-honest SendWorker semantics.
+  ADR-014/ADR-038 §4 delivery PROVIDER contract + fail-honest SendWorker
+  semantics. `Samen.Delivery.Adapter` is RENAMED/FINALIZED to
+  `Samen.Delivery.Provider` (ADR-038 §4.2) — same two callbacks, same
+  Invariant D1, PLUS the webhook/inbound/capability surface (proven in
+  `delivery_provider_behaviour_test.exs` and the samen_postmark conformance
+  suite); this file keeps the ORIGINAL AC-G2 coverage green under the new name.
 
   AC coverage:
-    * AC-G2-1 — `Samen.Delivery.Adapter` behaviour + `LocalSink` + `Smtp`/`Api`
+    * AC-G2-1 — `Samen.Delivery.Provider` behaviour + `LocalSink` + `Smtp`/`Api`
       skeleton exist; `configured?/1` gates real dispatch.
     * AC-G2-2 (RP — the fail-honest proof) — with NO adapter configured in a
       non-`:test` env, a send is `:blocked` (NOT `:delivered`) and the job errors.
@@ -17,12 +22,12 @@ defmodule Samen.Delivery.AdapterTest do
   """
   use ExUnit.Case, async: false
 
-  alias Samen.Delivery.{Adapter, Api, LocalSink, Message, Smtp}
+  alias Samen.Delivery.{Api, LocalSink, Message, Provider, Smtp}
   alias Samen.Scopes.Marketing.SendWorker
 
   # A configured, always-succeeding adapter (for the anti-tautology green).
   defmodule OkAdapter do
-    @behaviour Adapter
+    use Provider
     @impl true
     def configured?(_config), do: true
     @impl true
@@ -31,7 +36,7 @@ defmodule Samen.Delivery.AdapterTest do
 
   # A configured adapter that fails dispatch (for RP-D2).
   defmodule ErrAdapter do
-    @behaviour Adapter
+    use Provider
     @impl true
     def configured?(_config), do: true
     @impl true
@@ -40,7 +45,7 @@ defmodule Samen.Delivery.AdapterTest do
 
   # An adapter whose configured?/1 is false (creds absent) — must NOT be delivered.
   defmodule UnconfiguredAdapter do
-    @behaviour Adapter
+    use Provider
     @impl true
     def configured?(_config), do: false
     @impl true
@@ -60,10 +65,18 @@ defmodule Samen.Delivery.AdapterTest do
   # AC-G2-1 — the contract + shipped adapters exist and configured?/1 gates.
 
   describe "AC-G2-1: adapter behaviour + shipped adapters" do
-    test "Adapter defines configured?/1 and deliver/2 callbacks" do
-      callbacks = Adapter.behaviour_info(:callbacks)
+    test "Provider defines configured?/1 and deliver/2 callbacks (+ the ADR-038 additions)" do
+      callbacks = Provider.behaviour_info(:callbacks)
       assert {:configured?, 1} in callbacks
       assert {:deliver, 2} in callbacks
+      assert {:capabilities, 0} in callbacks
+      assert {:verify_and_parse_event, 3} in callbacks
+      assert {:parse_inbound, 3} in callbacks
+      assert {:redact_payload, 1} in callbacks
+    end
+
+    test "Samen.Delivery.Adapter no longer exists (ADR-038 §4.2 supersession)" do
+      refute Code.ensure_loaded?(Samen.Delivery.Adapter)
     end
 
     test "LocalSink is configured? and returns an HONEST sink receipt (captured, not delivered)" do

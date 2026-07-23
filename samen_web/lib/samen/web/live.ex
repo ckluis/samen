@@ -24,4 +24,31 @@ defmodule Samen.Web.Live do
   end
 
   def assign_mount(socket, _session), do: socket
+
+  @doc """
+  The client IP for a LiveView surface, for per-IP rate limiting (ADR-038 §6.3; T103).
+
+  Reads `:peer_data` from `get_connect_info/2` — available on the CONNECTED socket when
+  the host endpoint declares `connect_info: [:peer_data]` on its live socket (the submit
+  that a rate limit guards fires over the connected socket). When it is unavailable
+  (disconnected dead render, or a host that did not opt into `:peer_data`), it returns
+  `"unknown"`: the per-IP limit then degrades to a single shared bucket — a STRICTER
+  (global) bound, never a weaker one, so the brute-force control fails safe.
+  """
+  def client_ip(socket) do
+    case peer_data(socket) do
+      %{address: address} when is_tuple(address) -> address |> :inet.ntoa() |> to_string()
+      _ -> "unknown"
+    end
+  end
+
+  # `get_connect_info/2` raises outside the mount lifecycle (e.g. a unit test that calls
+  # `mount/3` on a synthetic socket) and returns nil on a disconnected dead render or a
+  # host that did not opt into `:peer_data`. Either way we want the safe `"unknown"`
+  # fallback (a stricter, global per-IP bucket), never a crash.
+  defp peer_data(socket) do
+    Phoenix.LiveView.get_connect_info(socket, :peer_data)
+  rescue
+    _ -> nil
+  end
 end

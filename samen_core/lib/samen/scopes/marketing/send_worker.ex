@@ -24,7 +24,8 @@ defmodule Samen.Scopes.Marketing.SendWorker do
   ## Fail-honest delivery (ADR-014 — the load-bearing change)
 
   There is NO no-op stub that marks unconfigured sends as `:delivered`. Instead
-  `perform/1` realizes `Samen.Delivery.Adapter` with three honest outcomes:
+  `perform/1` realizes `Samen.Delivery.Provider` (ADR-038 §4.2 — the ADR-014
+  `Samen.Delivery.Adapter` contract, finalized and renamed) with three honest outcomes:
 
     1. **No configured adapter, non-`:test` env** → the send is set to `:blocked`
        (NOT `:delivered`), an audit event `marketing.send.blocked` is emitted, an
@@ -61,7 +62,7 @@ defmodule Samen.Scopes.Marketing.SendWorker do
 
   require Logger
 
-  alias Samen.Delivery.Message
+  alias Samen.Delivery.{Chokepoint, Message}
 
   # Captured at compile time so the runtime never consults Mix (unavailable in
   # releases). Overridable at runtime via :delivery_env for tests / staging.
@@ -72,13 +73,26 @@ defmodule Samen.Scopes.Marketing.SendWorker do
     with {:ok, message} <- Message.from_args(args) do
       repo = resolve_repo(args)
 
-      case decide(resolve_adapter(), adapter_config(), env()) do
-        {:blocked, reason} ->
-          mark_blocked(message, repo)
-          {:error, reason}
+      case Chokepoint.send(message,
+             fallback_adapter: resolve_adapter(),
+             fallback_config: adapter_config(),
+             env: env()
+           ) do
+        {:ok, receipt} ->
+          mark_delivered(message, receipt, repo)
+          :ok
 
-        {:deliver, adapter, config} ->
-          run_deliver(adapter, message, config, repo)
+        {:error, :suppressed} ->
+          mark_suppressed(message, repo)
+          {:error, :suppressed}
+
+        {:error, :adapter_unconfigured} = err ->
+          mark_blocked(message, repo)
+          err
+
+        {:error, reason} = err ->
+          mark_failed(message, reason, repo)
+          err
       end
     else
       {:error, :missing_send_id} ->
@@ -89,53 +103,42 @@ defmodule Samen.Scopes.Marketing.SendWorker do
   end
 
   @doc """
-  Pure fail-honest decision (ADR-014 §3), kernel-testable in isolation.
-
-  Given the resolved `adapter` (module or nil), its `config`, and the active
-  `env`, returns either:
-
-    * `{:blocked, :adapter_unconfigured}` — no adapter, or the adapter's
-      `configured?/1` is false, in a non-`:test` env. This is the fail-honest
-      path: the caller MUST set the send to `:blocked` and NEVER `:delivered`.
-    * `{:deliver, adapter, config}` — route to `adapter.deliver/2`.
-
-  In `:test` env a `nil` adapter resolves to `Samen.Delivery.LocalSink` (an honest
-  captured-not-delivered), so test happy paths need no wiring. In any other env a
-  `nil` (or unconfigured) adapter is fail-honest `:blocked` — the sink is NEVER a
-  prod fallback (a prod send "delivered" to a log is the exact lie ADR-014
-  forbids).
+  Pure fail-honest decision (ADR-014 §3) — DELEGATES to the single chokepoint
+  (`Samen.Delivery.Chokepoint.decide/3`, ADR-038 §4.3/T28) so this is no longer a
+  second copy of the logic. Kept as a public function (same name/arity) so
+  existing callers/tests are unaffected by the T28 chokepoint consolidation.
   """
   @spec decide(module() | nil, map(), atom()) ::
           {:blocked, :adapter_unconfigured} | {:deliver, module(), map()}
-  def decide(nil, _config, :test), do: {:deliver, Samen.Delivery.LocalSink, %{}}
-  def decide(nil, _config, _env), do: {:blocked, :adapter_unconfigured}
-
-  def decide(adapter, config, _env) when is_atom(adapter) do
-    if adapter.configured?(config) do
-      {:deliver, adapter, config}
-    else
-      {:blocked, :adapter_unconfigured}
-    end
-  end
+  defdelegate decide(adapter, config, env), to: Chokepoint
 
   # ---------------------------------------------------------------------------
   # Side effects (injectable / graceful-degradation seams)
 
-  defp run_deliver(adapter, message, config, repo) do
-    case adapter.deliver(message, config) do
-      {:ok, receipt} ->
-        mark_delivered(message, receipt, repo)
-        :ok
+  defp mark_delivered(message, receipt, repo) do
+    update_status(
+      message,
+      :delivered,
+      %{
+        sent_at: DateTime.utc_now() |> DateTime.truncate(:second),
+        custom: %{receipt: sanitize_receipt(receipt)}
+      }
+      |> put_provider_message_id(receipt),
+      repo
+    )
+  end
 
-      {:error, reason} ->
-        mark_failed(message, reason, repo)
-        {:error, reason}
+  # ADR-038 §4.1: the receipt's `:provider_message_id` (the token-blind join key
+  # T30's deliverability reconciliation needs) is persisted onto the Send row's
+  # OWN column — not just buried in the `custom` receipt copy.
+  defp put_provider_message_id(extra, receipt) when is_map(receipt) do
+    case Map.get(receipt, :provider_message_id) do
+      nil -> extra
+      id -> Map.put(extra, :provider_message_id, to_string(id))
     end
   end
 
-  defp mark_delivered(message, receipt, repo) do
-    update_status(message, :delivered, %{sent_at: DateTime.utc_now(), custom: %{receipt: sanitize_receipt(receipt)}}, repo)
-  end
+  defp put_provider_message_id(extra, _receipt), do: extra
 
   defp mark_failed(message, _reason, repo) do
     update_status(message, :failed, %{}, repo)
@@ -146,6 +149,21 @@ defmodule Samen.Scopes.Marketing.SendWorker do
     update_status(message, :blocked, %{}, repo)
     emit_blocked_audit(message, repo)
     notify_operator_blocked(message, repo)
+  end
+
+  # Suppressed AT DELIVER TIME (spec C2; distinct from the create-time
+  # `:create_checked` suppression check on the Send resource itself — this is the
+  # chokepoint's OWN net, catching a subscriber suppressed AFTER the send was
+  # already queued). Never calls the provider; the row is marked `:suppressed`
+  # using the SAME status the create-time check already declares in the schema.
+  defp mark_suppressed(message, repo) do
+    update_status(message, :suppressed, %{}, repo)
+
+    notify_send_event(
+      message,
+      "marketing.send.suppressed",
+      "A marketing send was refused at the delivery chokepoint: recipient suppressed."
+    )
   end
 
   # Update the send row's status. Uses the send-resource module the host wires via
@@ -250,7 +268,15 @@ defmodule Samen.Scopes.Marketing.SendWorker do
   # Keep only token-safe receipt fields in the persisted `custom` map (never a
   # revealed email; adapters return opaque receipt tokens).
   defp sanitize_receipt(receipt) when is_map(receipt) do
-    Map.take(receipt, [:sink, :adapter, :send_id, :captured_at, :provider_id, :message_id])
+    Map.take(receipt, [
+      :sink,
+      :adapter,
+      :send_id,
+      :captured_at,
+      :provider_id,
+      :message_id,
+      :provider_message_id
+    ])
     |> Map.new(fn {k, v} -> {to_string(k), to_string_safe(v)} end)
   end
 

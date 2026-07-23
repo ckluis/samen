@@ -50,11 +50,19 @@ grant that a second party approved and the tenant can audit.
 | **The proof is generative** — `mix samen.gen.app` emits a running product that passes its full 18-step verifier gate, seeds vault-aware, boots, and serves every mounted route, with zero hand-edits | `samen_core/priv/gen_app_flagship_probe.exs` + `priv/gen_post_probe.exs`, permanent steps of the root `ci.sh` (need local Postgres) |
 | **Self-serve identity spine** — registration (Org+User+Membership atomic, credential PII vaulted), email verification, password reset, sessions (remember-me / listing / revocation / deterministic org-cap eviction), team invites, OIDC that **honors TOTP step-up**, TOTP 2FA + vaulted recovery codes, an onboarding wizard, and login-family auth events → notifications/audit — **emitted by the generator with zero hand-edits** | `samen_web/test/samen/web/auth/*_test.exs` (`confirm`/`session`/`invitation`/`oidc`/`oidc_totp_stepup`/`totp`/`onboarding`/`auth_events`/`login_events`); `samen_core/test/auth/*`; the flagship probe's HTTP-probed `/signup /login /onboarding /settings/security/2fa` |
 | **Rich declared types** — Money, Percent, Score, Duration, Priority, URL, Email, Phone, Address (+ `pii_address`/`pii_dob` vault classes); the vault write path re-runs each type's `cast_input` so vaulted values are validated + normalized on input | `samen_core/test/type/*_test.exs`; `samen_core/test/vault/vault_cast_validation_test.exs` |
+| **Stripe billing as a fail-honest, vendor-free adapter** — hosted checkout, subscription lifecycle sync (fetch-on-event, idempotent, out-of-order-safe), invoice + tax mirroring, hosted-only payment methods (no PAN column can even compile), dunning, metered usage, a signature-fail-closed webhook ingress with DLQ, and a billing settings page with an honest `:not_configured` empty state. The `samen_core` kernel names **zero** Stripe strings; the adapter lives in a sibling `samen_stripe/` package | `samen_core/test/billing_*_test.exs`; `samen_stripe/test/*` (standalone); `scripts/sabotages/{25-b9,29-b3}-*.patch`; **kernel stays vendor-free** — with the four adapter packages deleted, `samen_core` + `samen_web` still pass |
+| **ESP email delivery behind one behaviour, three vendors** — a shared, non-vacuous conformance harness satisfied by **Postmark, SES, and Resend** (Basic-Auth / SNS-RSA / Svix-HMAC); a single send chokepoint; PII-safe rendering that resolves through the vault plane with a fail-closed, non-skippable no-leak gate; deliverability (bounce/complaint → suppression) and masked notification digests | `samen_core/lib/samen/delivery/provider_conformance_case.ex`; `samen_core/test/delivery_*` + `test/delivery/*`; `samen_{postmark,ses,resend}/test/conformance_test.exs`; `scripts/sabotages/30-c3-*.patch` |
+| **Auth-surface rate-limiting + bounded `login_failed`** — sign-in / 2FA / registration / reset limited via one shared seam; keys are HMAC-bidx / credential / IP, **never plaintext email**; the brute-force audit signal is a bounded edge row, not O(N) | `samen_web/test/samen/web/auth/rate_limit_test.exs` |
 
 Full mapping: [docs/claim-evidence.md](docs/claim-evidence.md) (Phase-1 identity spine + rich
-types are section J). **Honest scope:** the identity spine is complete and verified; its
-**auth-surface rate-limiting is a named early-Phase-2 item** (not yet wired), and live email
-delivery / billing / AI are later phases.
+types are section J; Phase-2 billing + ESP + rate-limiting are **section K**). **Honest scope:**
+the identity spine, its auth-surface rate-limiting, and the Stripe/ESP adapters are complete and
+verified — **but everything runs on the keyless lane.** Billing/ESP dispatch is proven against
+hermetic fakes + injected-transport cassettes; **no host wires a live provider** (every generated
+app boots with billing/ESP unconfigured and honestly says so), production persistence is
+fake-backed with the Ash-backed mirrors' host-wiring **deferred to T108**, and the live lanes
+(`STRIPE_TEST_KEY`, `SAMEN_POSTMARK_SMOKE`, `SAMEN_ESP_LIVE`) are documented-but-not-CI. AI is a
+later phase.
 
 ## Architecture
 

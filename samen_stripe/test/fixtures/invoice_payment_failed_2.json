@@ -1,0 +1,29 @@
+{
+  "id": "in_dunning_1",
+  "object": "invoice",
+  "customer": "cus_dunning_1",
+  "subscription": "sub_dunning_1",
+  "status": "open",
+  "amount_due": 5000,
+  "amount_paid": 0,
+  "currency": "usd",
+  "period_start": 1782000000,
+  "period_end": 1784600000,
+  "due_date": 1782100000,
+  "attempt_count": 2,
+  "next_payment_attempt": 1783000000,
+  "status_transitions": {
+    "paid_at": null
+  },
+  "lines": {
+    "data": [
+      {
+        "description": "Pro plan — dunning fixture",
+        "amount": 5000,
+        "quantity": 1
+      }
+    ]
+  },
+  "hosted_invoice_url": "https://invoice.stripe.com/i/acct_test/in_dunning_1",
+  "charge": null
+}

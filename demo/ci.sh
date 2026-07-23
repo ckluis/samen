@@ -175,6 +175,17 @@ echo "--- step 15/16: mix samen.verify.no_pii_columns (C7 token-blind aggregate 
 mix samen.verify.no_pii_columns
 echo "    PASSED"
 
+# 15b. B5 no_pan_columns (ADR-038 §3.5; T23): NO resource/table ANYWHERE (not just the
+#      aggregate plane — every plane) may carry a PAN/CVC-shaped column. Whole-app
+#      backstop to the compile-time NoPanColumns verifier+transformer (base-wired into
+#      EVERY Samen resource): (a) re-runs the shape rule on every resource in every
+#      configured domain, (b) asserts via information_schema that every resource's
+#      physical table carries no PAN/CVC-shaped column — the "no PAN column ANYWHERE"
+#      claim asserted against the LIVE database.
+echo "--- step 15b/16: mix samen.verify.no_pan_columns (B5 no-PAN invariant)"
+mix samen.verify.no_pan_columns
+echo "    PASSED"
+
 # 16. T4.5 aggregate-privacy floors gate: every aggregate-plane resource must declare a
 #     fail-closed cohort spec (aggregate_cohort_spec/0) so the k-anonymity + l-diversity
 #     floors are ENFORCEABLE on it. A new cross-tenant projection that forgot its cohort

@@ -296,7 +296,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     # =====================================================================
 
     create table(:<%= o_cus %>_customer, primary_key: false) do
-      add(:<%= o_cus %>_stripe_customer_id, :text)
+      add(:<%= o_cus %>_provider_customer_ref, :text)
       add(:<%= o_cus %>_status, :text, default: "active")
       add(:<%= o_cus %>_currency, :text, default: "USD")
       add(:<%= o_cus %>_custom, :map, default: fragment("'{}'::jsonb"))
@@ -312,7 +312,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_plan %>_name, :text, null: false)
       add(:<%= o_plan %>_label, :text)
       add(:<%= o_plan %>_description, :text)
-      add(:<%= o_plan %>_stripe_plan_id, :text)
+      add(:<%= o_plan %>_provider_plan_ref, :text)
       add(:<%= o_plan %>_interval, :text, default: "monthly")
       add(:<%= o_plan %>_enabled, :boolean, default: true)
       add(:<%= o_plan %>_features, :map, default: fragment("'{}'::jsonb"))
@@ -324,7 +324,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     end
 
     create table(:<%= o_price %>_price, primary_key: false) do
-      add(:<%= o_price %>_stripe_price_id, :text)
+      add(:<%= o_price %>_provider_price_ref, :text)
       # ADR-036 H1/D7: one money_with_currency composite column (the type was
       # installed by the app_resources migration this one runs after).
       add(:<%= o_price %>_unit_amount, :money_with_currency, null: false)
@@ -349,7 +349,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     end
 
     create table(:<%= o_sub %>_subscription, primary_key: false) do
-      add(:<%= o_sub %>_stripe_subscription_id, :text)
+      add(:<%= o_sub %>_provider_subscription_ref, :text)
       add(:<%= o_sub %>_status, :text, default: "active")
       add(:<%= o_sub %>_current_period_start, :utc_datetime)
       add(:<%= o_sub %>_current_period_end, :utc_datetime)
@@ -384,8 +384,11 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_sub %>_updated_at, :utc_datetime, null: false)
     end
 
+    # T106 decision (e): DB-unique-fence on the provider-subscription-ref (mirror idempotency).
+    create(unique_index(:<%= o_sub %>_subscription, [:<%= o_sub %>_provider_subscription_ref], name: "<%= o_sub %>_subscription_provider_ref_index"))
+
     create table(:<%= o_invoice %>_invoice, primary_key: false) do
-      add(:<%= o_invoice %>_stripe_invoice_id, :text)
+      add(:<%= o_invoice %>_provider_invoice_ref, :text)
       add(:<%= o_invoice %>_status, :text, default: "draft")
       add(:<%= o_invoice %>_amount_due_cents, :integer, default: 0)
       add(:<%= o_invoice %>_amount_paid_cents, :integer, default: 0)
@@ -395,6 +398,11 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_invoice %>_due_date, :utc_datetime)
       add(:<%= o_invoice %>_paid_at, :utc_datetime)
       add(:<%= o_invoice %>_line_items, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:<%= o_invoice %>_tax_amount_cents, :integer)
+      add(:<%= o_invoice %>_tax_lines, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:<%= o_invoice %>_hosted_invoice_url, :text)
+      add(:<%= o_invoice %>_hosted_receipt_url, :text)
+      add(:<%= o_invoice %>_last_event_id, :text)
       add(:<%= o_invoice %>_custom, :map, default: fragment("'{}'::jsonb"))
 
       add(
@@ -424,7 +432,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     end
 
     create table(:<%= o_pay %>_payment, primary_key: false) do
-      add(:<%= o_pay %>_stripe_payment_intent_id, :text)
+      add(:<%= o_pay %>_provider_payment_ref, :text)
       add(:<%= o_pay %>_status, :text, default: "pending")
       add(:<%= o_pay %>_amount_cents, :integer, null: false)
       add(:<%= o_pay %>_currency, :text, default: "USD")

@@ -5,7 +5,8 @@ defmodule Samen.Delivery.LifecycleTest do
   The lifecycle worker (`Samen.Delivery.Lifecycle.EmailWorker`) is the
   transactional sibling of `Samen.Scopes.Marketing.SendWorker`: it dispatches
   event-triggered lifecycle mail (welcome/onboarding/trial-ending/payment-failed/
-  subscription-cancelled) through the SAME `Samen.Delivery.Adapter` boundary under
+  subscription-cancelled) through the SAME `Samen.Delivery.Provider` boundary
+  (ADR-038 §4.2 rename of the ADR-014 `Samen.Delivery.Adapter` contract) under
   the SAME Invariant D1.
 
   AC coverage:
@@ -22,13 +23,13 @@ defmodule Samen.Delivery.LifecycleTest do
   """
   use ExUnit.Case, async: false
 
-  alias Samen.Delivery.{Adapter, LocalSink, Message}
+  alias Samen.Delivery.{LocalSink, Message, Provider}
   alias Samen.Delivery.Lifecycle
   alias Samen.Delivery.Lifecycle.EmailWorker
 
   # A configured, always-succeeding adapter (anti-tautology green).
   defmodule OkAdapter do
-    @behaviour Adapter
+    use Provider
     @impl true
     def configured?(_config), do: true
     @impl true
@@ -37,7 +38,7 @@ defmodule Samen.Delivery.LifecycleTest do
 
   # A configured adapter that fails dispatch (RP-D2).
   defmodule ErrAdapter do
-    @behaviour Adapter
+    use Provider
     @impl true
     def configured?(_config), do: true
     @impl true
@@ -46,7 +47,7 @@ defmodule Samen.Delivery.LifecycleTest do
 
   # An adapter whose configured?/1 is false (creds absent) — must NOT be sent.
   defmodule UnconfiguredAdapter do
-    @behaviour Adapter
+    use Provider
     @impl true
     def configured?(_config), do: false
     @impl true
@@ -97,7 +98,7 @@ defmodule Samen.Delivery.LifecycleTest do
   describe "lifecycle event enum (token-only)" do
     test "events/0 is the bounded lifecycle set" do
       assert EmailWorker.events() ==
-               ~w(welcome onboarding trial_ending payment_failed subscription_cancelled)
+               ~w(welcome onboarding trial_ending payment_failed payment_recovered subscription_cancelled)
     end
 
     test "valid_event?/1 accepts recognised events (string or atom), rejects free text" do

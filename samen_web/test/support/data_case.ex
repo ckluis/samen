@@ -19,6 +19,10 @@ defmodule Samen.WebTest.DataCase do
   setup do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Samen.WebTest.Repo)
     Ecto.Adapters.SQL.Sandbox.mode(Samen.WebTest.Repo, {:shared, self()})
+    # The rate-limit counters (Samen.Web.RateLimit / Hammer ETS) are a GLOBAL table,
+    # not sandboxed — clear them per test so auth-surface limits (T103) never leak
+    # across tests (e.g. repeated `/signup` submits sharing the per-IP bucket).
+    Samen.Web.RateLimit.reset()
     :ok
   end
 

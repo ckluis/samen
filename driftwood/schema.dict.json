@@ -1047,16 +1047,16 @@
           "type": "UUID"
         },
         {
+          "column_name": "dpc_provider_customer_ref",
+          "logical_name": "provider_customer_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "dpc_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
-        },
-        {
-          "column_name": "dpc_stripe_customer_id",
-          "logical_name": "stripe_customer_id",
-          "pii": false,
-          "type": "String"
         },
         {
           "column_name": "dpc_updated_at",
@@ -1185,6 +1185,18 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "dpi_hosted_invoice_url",
+          "logical_name": "hosted_invoice_url",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dpi_hosted_receipt_url",
+          "logical_name": "hosted_receipt_url",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "dpi_id",
           "logical_name": "id",
           "pii": false,
@@ -1195,6 +1207,12 @@
           "logical_name": "inserted_at",
           "pii": false,
           "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dpi_last_event_id",
+          "logical_name": "last_event_id",
+          "pii": false,
+          "type": "String"
         },
         {
           "column_name": "dpi_line_items",
@@ -1227,22 +1245,34 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "dpi_provider_invoice_ref",
+          "logical_name": "provider_invoice_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "dpi_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
         },
         {
-          "column_name": "dpi_stripe_invoice_id",
-          "logical_name": "stripe_invoice_id",
-          "pii": false,
-          "type": "String"
-        },
-        {
           "column_name": "dpi_subscription_id",
           "logical_name": "subscription_id",
           "pii": false,
           "type": "UUID"
+        },
+        {
+          "column_name": "dpi_tax_amount_cents",
+          "logical_name": "tax_amount_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "dpi_tax_lines",
+          "logical_name": "tax_lines",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
         },
         {
           "column_name": "dpi_updated_at",
@@ -1317,8 +1347,8 @@
           "type": "UUID"
         },
         {
-          "column_name": "dpp_stripe_plan_id",
-          "logical_name": "stripe_plan_id",
+          "column_name": "dpp_provider_plan_ref",
+          "logical_name": "provider_plan_ref",
           "pii": false,
           "type": "String"
         },
@@ -1377,8 +1407,8 @@
           "type": "UUID"
         },
         {
-          "column_name": "dpr_stripe_price_id",
-          "logical_name": "stripe_price_id",
+          "column_name": "dpr_provider_price_ref",
+          "logical_name": "provider_price_ref",
           "pii": false,
           "type": "String"
         },
@@ -1461,16 +1491,16 @@
           "type": "UUID"
         },
         {
+          "column_name": "dps_provider_subscription_ref",
+          "logical_name": "provider_subscription_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "dps_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
-        },
-        {
-          "column_name": "dps_stripe_subscription_id",
-          "logical_name": "stripe_subscription_id",
-          "pii": false,
-          "type": "String"
         },
         {
           "column_name": "dps_trial_end",
@@ -1731,16 +1761,16 @@
           "type": "Atom"
         },
         {
+          "column_name": "dpy_provider_payment_ref",
+          "logical_name": "provider_payment_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "dpy_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
-        },
-        {
-          "column_name": "dpy_stripe_payment_intent_id",
-          "logical_name": "stripe_payment_intent_id",
-          "pii": false,
-          "type": "String"
         },
         {
           "column_name": "dpy_updated_at",
@@ -2727,16 +2757,16 @@
           "type": "UUID"
         },
         {
+          "column_name": "fbc_provider_customer_ref",
+          "logical_name": "provider_customer_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "fbc_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
-        },
-        {
-          "column_name": "fbc_stripe_customer_id",
-          "logical_name": "stripe_customer_id",
-          "pii": false,
-          "type": "String"
         },
         {
           "column_name": "fbc_updated_at",
@@ -2865,6 +2895,18 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "fbi_hosted_invoice_url",
+          "logical_name": "hosted_invoice_url",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fbi_hosted_receipt_url",
+          "logical_name": "hosted_receipt_url",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "fbi_id",
           "logical_name": "id",
           "pii": false,
@@ -2875,6 +2917,12 @@
           "logical_name": "inserted_at",
           "pii": false,
           "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbi_last_event_id",
+          "logical_name": "last_event_id",
+          "pii": false,
+          "type": "String"
         },
         {
           "column_name": "fbi_line_items",
@@ -2907,22 +2955,34 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "fbi_provider_invoice_ref",
+          "logical_name": "provider_invoice_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "fbi_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
         },
         {
-          "column_name": "fbi_stripe_invoice_id",
-          "logical_name": "stripe_invoice_id",
-          "pii": false,
-          "type": "String"
-        },
-        {
           "column_name": "fbi_subscription_id",
           "logical_name": "subscription_id",
           "pii": false,
           "type": "UUID"
+        },
+        {
+          "column_name": "fbi_tax_amount_cents",
+          "logical_name": "tax_amount_cents",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fbi_tax_lines",
+          "logical_name": "tax_lines",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
         },
         {
           "column_name": "fbi_updated_at",
@@ -2997,8 +3057,8 @@
           "type": "UUID"
         },
         {
-          "column_name": "fbp_stripe_plan_id",
-          "logical_name": "stripe_plan_id",
+          "column_name": "fbp_provider_plan_ref",
+          "logical_name": "provider_plan_ref",
           "pii": false,
           "type": "String"
         },
@@ -3057,8 +3117,8 @@
           "type": "UUID"
         },
         {
-          "column_name": "fbr_stripe_price_id",
-          "logical_name": "stripe_price_id",
+          "column_name": "fbr_provider_price_ref",
+          "logical_name": "provider_price_ref",
           "pii": false,
           "type": "String"
         },
@@ -3141,16 +3201,16 @@
           "type": "UUID"
         },
         {
+          "column_name": "fbs_provider_subscription_ref",
+          "logical_name": "provider_subscription_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "fbs_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
-        },
-        {
-          "column_name": "fbs_stripe_subscription_id",
-          "logical_name": "stripe_subscription_id",
-          "pii": false,
-          "type": "String"
         },
         {
           "column_name": "fbs_trial_end",
@@ -3411,16 +3471,16 @@
           "type": "Atom"
         },
         {
+          "column_name": "fby_provider_payment_ref",
+          "logical_name": "provider_payment_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "fby_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
-        },
-        {
-          "column_name": "fby_stripe_payment_intent_id",
-          "logical_name": "stripe_payment_intent_id",
-          "pii": false,
-          "type": "String"
         },
         {
           "column_name": "fby_updated_at",
@@ -3885,6 +3945,12 @@
           "type": "UUID"
         },
         {
+          "column_name": "fmn_provider_message_id",
+          "logical_name": "provider_message_id",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "fmn_queued_at",
           "logical_name": "queued_at",
           "pii": false,
@@ -4190,6 +4256,24 @@
     },
     {
       "fields": [
+        {
+          "column_name": "fnp_digest_cadence",
+          "logical_name": "digest_cadence",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fnp_digest_last_sent_at",
+          "logical_name": "digest_last_sent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fnp_digest_timezone",
+          "logical_name": "digest_timezone",
+          "pii": false,
+          "type": "String"
+        },
         {
           "column_name": "fnp_email_enabled",
           "logical_name": "email_enabled",

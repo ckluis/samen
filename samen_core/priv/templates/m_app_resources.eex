@@ -32,7 +32,7 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
 
     # ---- Billing scope (Stripe-mirror shape) — mounted AS-IS ----
     create table(:<%= bc %>_customer, primary_key: false) do
-      add(:<%= bc %>_stripe_customer_id, :text)
+      add(:<%= bc %>_provider_customer_ref, :text)
       add(:<%= bc %>_status, :text, default: "active")
       add(:<%= bc %>_currency, :text, default: "USD")
       add(:<%= bc %>_custom, :map, default: fragment("'{}'::jsonb"))
@@ -48,7 +48,7 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
       add(:<%= bl %>_name, :text, null: false)
       add(:<%= bl %>_label, :text)
       add(:<%= bl %>_description, :text)
-      add(:<%= bl %>_stripe_plan_id, :text)
+      add(:<%= bl %>_provider_plan_ref, :text)
       add(:<%= bl %>_interval, :text, default: "monthly")
       add(:<%= bl %>_enabled, :boolean, default: true)
       add(:<%= bl %>_features, :map, default: fragment("'{}'::jsonb"))
@@ -60,7 +60,7 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
     end
 
     create table(:<%= bp %>_price, primary_key: false) do
-      add(:<%= bp %>_stripe_price_id, :text)
+      add(:<%= bp %>_provider_price_ref, :text)
       # ADR-036 H1/D7: one money_with_currency composite column, not a paired
       # _cents/currency convention (AshMoney.AshPostgresExtension below installs
       # the type).
@@ -86,7 +86,7 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
     end
 
     create table(:<%= bs %>_subscription, primary_key: false) do
-      add(:<%= bs %>_stripe_subscription_id, :text)
+      add(:<%= bs %>_provider_subscription_ref, :text)
       add(:<%= bs %>_status, :text, default: "active")
       add(:<%= bs %>_current_period_start, :utc_datetime)
       add(:<%= bs %>_current_period_end, :utc_datetime)
@@ -121,8 +121,11 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
       add(:<%= bs %>_updated_at, :utc_datetime, null: false)
     end
 
+    # T106 decision (e): DB-unique-fence on the provider-subscription-ref (mirror idempotency).
+    create(unique_index(:<%= bs %>_subscription, [:<%= bs %>_provider_subscription_ref], name: "<%= bs %>_subscription_provider_ref_index"))
+
     create table(:<%= bi %>_invoice, primary_key: false) do
-      add(:<%= bi %>_stripe_invoice_id, :text)
+      add(:<%= bi %>_provider_invoice_ref, :text)
       add(:<%= bi %>_status, :text, default: "draft")
       add(:<%= bi %>_amount_due_cents, :integer, default: 0)
       add(:<%= bi %>_amount_paid_cents, :integer, default: 0)
@@ -132,6 +135,11 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
       add(:<%= bi %>_due_date, :utc_datetime)
       add(:<%= bi %>_paid_at, :utc_datetime)
       add(:<%= bi %>_line_items, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:<%= bi %>_tax_amount_cents, :integer)
+      add(:<%= bi %>_tax_lines, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:<%= bi %>_hosted_invoice_url, :text)
+      add(:<%= bi %>_hosted_receipt_url, :text)
+      add(:<%= bi %>_last_event_id, :text)
       add(:<%= bi %>_custom, :map, default: fragment("'{}'::jsonb"))
 
       add(
@@ -161,7 +169,7 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
     end
 
     create table(:<%= by %>_payment, primary_key: false) do
-      add(:<%= by %>_stripe_payment_intent_id, :text)
+      add(:<%= by %>_provider_payment_ref, :text)
       add(:<%= by %>_status, :text, default: "pending")
       add(:<%= by %>_amount_cents, :integer, null: false)
       add(:<%= by %>_currency, :text, default: "USD")

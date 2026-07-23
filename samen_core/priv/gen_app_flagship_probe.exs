@@ -292,6 +292,16 @@ try do
   check.("/healthz", "ok")
   check.("/", "#{module}")
   check.("/billing?org=#{org}", nil)
+
+  # B10/T26 — the billing SETTINGS page, EMITTED by gen.app with zero hand-edits (the
+  # route flows automatically through the already-templated `samen_module_routes(:billing,
+  # ...)` line, via samen_web's own `__routes__(:billing, path)` route table — no
+  # router_ex.eex change needed). This generated app never wires `:billing_provider`
+  # (no default gen.app config slot for it, same posture as the onboarding wizard's
+  # `:plan_labels` hook), so the page MUST render the honest "bring your billing" empty
+  # state (ADR-038 §3.5 B10) — the exact copy, asserted here, not just a 200.
+  check.("/billing/settings?org=#{org}", "No billing provider is configured for this workspace")
+
   check.("/notifications?org=#{org}", nil)
   check.("/operator/accounts", nil)
   check.("/assets/samen_ui.css", nil)

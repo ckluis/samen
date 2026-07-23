@@ -153,11 +153,53 @@ defmodule Samen.Web.Router do
         # floor; inherited at 0 vertical LOC.
         live("#{path}/analytics", Samen.Web.Operator.AnalyticsLive)
         live("#{path}/desk", Samen.Web.Operator.DeskLive)
+        # The B9 webhook DLQ (ADR-038 §5.5) — failed/unprocessable ingress envelopes,
+        # listed TOKEN-BLIND (provider · kind · event id · timestamps · attempt count ·
+        # error summary + the already-redacted payload; no PII, no vault tokens). Replay
+        # + resolve operator actions. Inherited at 0 vertical LOC.
+        live("#{path}/webhooks", Samen.Web.Operator.WebhookDlqLive)
 
         if include_aggregate do
           live("#{path}/aggregate", Samen.Web.Operator.AggregateLive)
         end
       end
+    end
+  end
+
+  @doc """
+  Mount the SHARED webhook ingress (ADR-038 §5.1; B9) — `POST /webhooks/:provider` — in
+  ONE line. Vendor-generic: the provider module + config are resolved from HOST config
+  at runtime (`config :samen_web, Samen.Web.Webhook, providers: %{...}, repo: ...`), so
+  the route stays vendor-free (INV-4). Billing (Stripe) and delivery (ESP) webhooks share
+  this one endpoint.
+
+      import Samen.Web.Router
+
+      scope "/" do
+        pipe_through :webhook_ingress   # a pipeline running Plug.Parsers with the
+                                        # Samen.Web.Webhook.RawBodyReader body reader
+        samen_webhook_routes()
+      end
+
+  ## One-time host endpoint add (raw-body capture)
+
+  Signature verification needs the exact signed bytes, so the endpoint MUST cache the
+  raw body BEFORE `Plug.Parsers` decodes it:
+
+      plug Plug.Parsers,
+        parsers: [:urlencoded, :json],
+        body_reader: {Samen.Web.Webhook.RawBodyReader, :read_body, []},
+        json_decoder: Jason
+
+  ## Options
+
+    * `:path` — the ingress path prefix (default `/webhooks`).
+  """
+  defmacro samen_webhook_routes(opts \\ []) do
+    path = Keyword.get(opts, :path, "/webhooks")
+
+    quote bind_quoted: [path: path] do
+      post("#{path}/:provider", Samen.Web.Webhook.IngressController, :create)
     end
   end
 
@@ -1002,7 +1044,13 @@ defmodule Samen.Web.Router do
       {"#{path}", Samen.Web.Billing.OverviewLive},
       {"#{path}/invoices", Samen.Web.Billing.InvoicesLive},
       {"#{path}/dunning", Samen.Web.Billing.DunningLive},
-      {"#{path}/plans", Samen.Web.Billing.PlansLive}
+      {"#{path}/plans", Samen.Web.Billing.PlansLive},
+      # B10/T26 — the billing SETTINGS page: plan picker + T23 hosted payment-method
+      # portal + T22 invoice history when `Samen.Billing.Provider.configured?/1` is
+      # true, the honest "bring your billing" empty state when false. Inherited by
+      # every host that already calls `samen_module_routes(:billing, ...)` — zero
+      # template/gen.app changes needed (ADR-038 §3.5 B10).
+      {"#{path}/settings", Samen.Web.Billing.SettingsLive}
     ]
   end
 

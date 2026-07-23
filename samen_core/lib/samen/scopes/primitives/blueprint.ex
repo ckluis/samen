@@ -189,15 +189,40 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         creates NO record and dispatches nothing (the suppressed-event red path).
         `email_enabled` gates the email channel (opt-in for digests).
 
+        ## Digest cadence (C8, T30) — `digest_cadence` / `digest_timezone`
+
+        A DIGEST preference is not naturally per-`event_type` (it batches
+        UNREAD notifications across every type into one periodic email), so it
+        rides a RESERVED sentinel row: `event_type == "__digest__"` — one extra
+        row per recipient, not a new resource/abbrev (keeps the C8 schema
+        change to two columns on an already-generated-per-mount resource,
+        rather than a brand-new per-tenant Ash resource + registry
+        allocation). `Samen.Notifications.Digest` is the sole reader/writer of
+        that sentinel row; every OTHER `(recipient_id, event_type)` row is
+        unaffected (both columns default identically everywhere, so an
+        existing non-digest preference row is indistinguishable from before).
+
+          * `digest_cadence` — `off | daily | weekly` (default `daily`, c11)
+          * `digest_timezone` — an IANA tz database name (default `"Etc/UTC"`)
+            — "timezone-aware from existing user prefs" (c11): THIS preference
+            resource is samen's existing per-user prefs row; there is no
+            separate `Identity.User` timezone field to thread through.
+          * `digest_last_sent_at` — nilable UTC timestamp; the due-check
+            watermark `Samen.Notifications.Digest` reads/advances so a cadence
+            fires at most once per period (never re-derived from send history).
+
         ## No PII by construction
 
         Every column is a bounded ID, enum, boolean, or a map of bounded ints:
 
           * `recipient_id` — opaque UUID (bounded reference, NOT subject PII)
-          * `event_type`   — bounded namespaced label (e.g. `"invoice.created"`)
+          * `event_type`   — bounded namespaced label (e.g. `"invoice.created"`,
+            or the reserved `"__digest__"` sentinel)
           * `in_app_enabled` / `email_enabled` — booleans (safe metrics)
           * `quiet_hours`   — a map of bounded ints (`%{start: 22, end: 7}`) — no
             free-text, no subject data
+          * `digest_cadence` — bounded enum (`off | daily | weekly`)
+          * `digest_timezone` — an IANA tz name (bounded catalog string, not PII)
 
         There is no `pii do` block: the resource carries no vault-routed field. This
         is the "bounded id + enums + bools" row in the WS-A data-model table.
@@ -232,6 +257,20 @@ defmodule Samen.Scopes.Primitives.Blueprint do
           # Quiet-hours window as bounded ints (e.g. %{"start" => 22, "end" => 7}).
           # No free-text; the scheduler that honors this is a fast-follow (§2.6).
           attribute(:quiet_hours, :map, public?: true, default: %{})
+
+          # C8/T30 digest cadence — read on the RESERVED event_type == "__digest__"
+          # sentinel row only (see moduledoc). Default :daily (c11).
+          attribute(:digest_cadence, :atom,
+            public?: true,
+            default: :daily,
+            constraints: [one_of: [:off, :daily, :weekly]]
+          )
+
+          # C8/T30 — IANA tz name (e.g. "America/New_York"). Default UTC.
+          attribute(:digest_timezone, :string, public?: true, default: "Etc/UTC")
+
+          # C8/T30 — the due-check watermark (nilable; nil = never sent).
+          attribute(:digest_last_sent_at, :utc_datetime, public?: true)
         end
 
         actions do
