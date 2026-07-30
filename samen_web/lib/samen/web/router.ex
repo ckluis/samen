@@ -165,6 +165,19 @@ defmodule Samen.Web.Router do
         # 0 vertical LOC; token-blind by construction (no PII column exists on
         # either resource it reads).
         live("#{path}/automation/:org_id", Samen.Web.Operator.AutomationHealthLive)
+        # The R2/T114 per-tenant deliverability drill-down (dogfood-report.md R3 —
+        # P4's "why didn't this tenant get their email?" job-test) — the T28/T30
+        # delivery/suppression store, scoped to ONE tenant org at a time (the
+        # route param), reached from the account drill-down's "Deliverability →"
+        # link and from the webhook DLQ's org column. Inherited at 0 vertical LOC.
+        live("#{path}/deliverability/:org_id", Samen.Web.Operator.DeliverabilityLive)
+        # The R3/T115 operator activity/audit feed (dogfood-report.md R4 — P4's
+        # "what changed in org X in the last 24h?" job-test) — the aud_chain
+        # governance tier (incl. T38's impersonation-write rows) merged with
+        # T119's versioned change-log, scoped to ONE tenant org at a time (the
+        # route param), reached from the account drill-down's "Activity →"
+        # link. Inherited at 0 vertical LOC.
+        live("#{path}/activity/:org_id", Samen.Web.Operator.ActivityLive)
 
         if include_aggregate do
           live("#{path}/aggregate", Samen.Web.Operator.AggregateLive)

@@ -107,6 +107,27 @@ defmodule Samen.Delivery.Suppression do
     )
   end
 
+  @doc """
+  The operator per-tenant suppression LIST (R2, T114): every currently-suppressed
+  `subscriber_id` for `org_id`, most-recently-suppressed first, bounded. Answers
+  "who is suppressed, and why" for one tenant — the other half of the "why didn't
+  this tenant get their email" read (`Samen.Delivery.EmailEvent.list_for_org/3` is
+  the event-history half). No PII column exists here (see moduledoc); resolving
+  "who" from `subscriber_id` is the caller's job, through `PiiResolution`.
+  """
+  @spec list_for_org(module(), String.t(), keyword()) :: [t()]
+  def list_for_org(repo, org_id, opts \\ []) when is_atom(repo) do
+    limit = Keyword.get(opts, :limit, 200)
+
+    repo.all(
+      from(s in __MODULE__,
+        where: s.org_id == ^org_id,
+        order_by: [desc: s.inserted_at],
+        limit: ^limit
+      )
+    )
+  end
+
   @doc "Lift a suppression (operator/manual action). Idempotent — a no-op if absent."
   @spec lift(module(), String.t(), String.t()) :: :ok
   def lift(repo, org_id, subscriber_id) when is_atom(repo) do

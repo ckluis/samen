@@ -1,16 +1,27 @@
 defmodule Samen.Scopes.ChatScopeArchivalLeakRedPathTest do
   @moduledoc """
-  E6 soft-delete adoption for the Chat scope (ADR-040 §5.9, T37e): `ChatThread`
-  flips `archivable true` and is the cascade PARENT of
+  E6 soft-delete adoption for the Chat scope (ADR-040 §5.9, T37e; reconciled
+  T125): `ChatThread` flips `archivable true` and is the cascade PARENT of
   `thread ▸cascade participant ▸cascade message` (§5.4) — mirroring the CMS
   `page ▸cascade block` precedent (T37b) this scope's cascade modules
   (`Samen.Scopes.Chat.CascadeArchive`/`CascadeRestore`) explicitly reuse the shape
-  of. `ChatParticipant`/`ChatMessage` are ALSO `archivable true` (substrate only —
-  the cascade needs something to set/match/restore), but per the roster's ¶
-  footnote ("has NO independent archive: it cascades with its thread only") both
-  carry an explicit `policy action([:archive, :restore]) do forbid_if(always())
-  end` — proven directly below (§5.4-policy). `ChatDisclosureSetting` stays
-  excluded (a live per-org config row — delete is delete).
+  of. `ChatParticipant`/`ChatMessage` are ALSO `archivable true` (carrying the
+  archival substrate the cascade needs to set/match/restore).
+
+  **T125 (ADR-040 §5.4/§5.9 reconciled, posture A — INDEPENDENT-ARCHIVABLE
+  CHILDREN EVERYWHERE):** `ChatMessage` is now an ORDINARY independently-
+  archivable resource — an authorized (org-scoped) actor MAY archive/restore it
+  directly, proven below (§5.4 T125), while the thread's cascade still sweeps
+  every still-live message unchanged. `ChatParticipant` is the roster's ONE
+  documented exception (§5.9 ¶) and KEEPS its `forbid_if(always())` lock — it is
+  the cross-plane grant carrier, a resource-specific reason orthogonal to this
+  reconciliation — proven directly below (§5.4 ¶, unchanged from T37e).
+  (Pre-T125, BOTH `ChatParticipant` and `ChatMessage` were cascade-locked; the
+  T37f verifier flagged the cross-scope inconsistency this created against CMS's
+  `Block` — `_orch/verify/T37f-verdict.json` finding F3 — and T125 relaxed
+  `ChatMessage` to the default while preserving `ChatParticipant`'s own lock.)
+  `ChatDisclosureSetting` stays excluded (a live per-org config row — delete is
+  delete).
 
   §5.3: no `unique_index` exists on `wct_thread` / `wcp_participant` / `wcm_message`
   today (confirmed by inspecting `20260708160000_mount_chat_scope` — zero
@@ -200,9 +211,9 @@ defmodule Samen.Scopes.ChatScopeArchivalLeakRedPathTest do
     end
   end
 
-  # ── §5.4-policy: participant/message have NO independent archive for a real actor ─
+  # ── §5.4 ¶ — Participant KEEPS its cascade-only lock (T125 preserved exception) ─
 
-  describe "§5.4 ¶ — an actor-driven :archive/:restore on Participant/Message is refused" do
+  describe "§5.4 ¶ — an actor-driven :archive/:restore on Participant is refused (preserved exception, unchanged by T125)" do
     test "a real org-scoped member actor cannot call :archive on a Participant directly" do
       org = mk_org()
       thread = mk_thread(org)
@@ -217,27 +228,120 @@ defmodule Samen.Scopes.ChatScopeArchivalLeakRedPathTest do
       assert {:error, %Ash.Error.Forbidden{}} = result
     end
 
-    test "a real org-scoped member actor cannot call :archive on a Message directly" do
+    test "the SAME actor CAN archive the Thread itself (CONTROL — proves the forbid above is Participant-specific, not a blanket deny)" do
+      org = mk_org()
+      thread = mk_thread(org)
+      actor = %{org_id: org, role: :member}
+
+      assert {:ok, _} = Samen.Archival.archive(thread, actor: actor)
+    end
+  end
+
+  # ── §5.4 (T125, posture A): Message is now independently archivable ────────
+
+  describe "§5.4 (T125) — an authorized actor CAN independently archive/restore a Message" do
+    test "a real org-scoped member actor archives a Message directly (RED: hidden from default read; ASSERT: restore returns it)" do
       org = mk_org()
       thread = mk_thread(org)
       participant = mk_participant(org, thread.id)
       message = mk_message(org, thread.id, participant.id)
       actor = %{org_id: org, role: :member}
 
-      result =
-        message
-        |> Ash.Changeset.for_destroy(:archive, %{}, actor: actor)
-        |> Ash.destroy(actor: actor)
+      assert {:ok, archived} = Samen.Archival.archive(message, actor: actor)
 
-      assert {:error, %Ash.Error.Forbidden{}} = result
+      refute MapSet.member?(live_ids(ChatMessage, org), message.id)
+      assert MapSet.member?(archived_ids(ChatMessage, org), message.id)
+
+      assert {:ok, _restored} = Samen.Archival.restore(archived, actor: actor)
+      assert MapSet.member?(live_ids(ChatMessage, org), message.id)
     end
 
-    test "the SAME actor CAN archive the Thread itself (CONTROL — proves the forbid above is Participant/Message-specific, not a blanket deny)" do
+    test "a cross-org actor cannot archive a Message it does not own (CONTROL — org-scoped, not a blanket allow)" do
       org = mk_org()
+      other_org = mk_org()
       thread = mk_thread(org)
+      participant = mk_participant(org, thread.id)
+      message = mk_message(org, thread.id, participant.id)
+      cross_org_actor = %{org_id: other_org, role: :member}
+
+      result =
+        message
+        |> Ash.Changeset.for_destroy(:archive, %{}, actor: cross_org_actor)
+        |> Ash.destroy(actor: cross_org_actor)
+
+      assert {:error, %Ash.Error.Forbidden{}} = result
+      assert MapSet.member?(live_ids(ChatMessage, org), message.id)
+    end
+  end
+
+  describe "§5.4 (T125) — independent archivability coexists with an unchanged parent cascade (regression)" do
+    test "the SAME actor can independently archive one message AND still cascade-archive the thread for the rest" do
+      org = mk_org()
+      thread = mk_thread(org, "Regression")
+      participant = mk_participant(org, thread.id)
+      independent_message = mk_message(org, thread.id, participant.id, "independent")
+      cascaded_message = mk_message(org, thread.id, participant.id, "cascaded")
       actor = %{org_id: org, role: :member}
 
+      # Actor independently archives ONE message directly (T125).
+      assert {:ok, _} = Samen.Archival.archive(independent_message, actor: actor)
+
+      # The thread cascade STILL works unchanged — archiving the thread
+      # cascades the still-live sibling message (§5.4 mechanics untouched by
+      # the T125 policy reconciliation).
       assert {:ok, _} = Samen.Archival.archive(thread, actor: actor)
+
+      refute MapSet.member?(live_ids(ChatMessage, org), independent_message.id)
+      refute MapSet.member?(live_ids(ChatMessage, org), cascaded_message.id)
+      assert MapSet.member?(archived_ids(ChatMessage, org), independent_message.id)
+      assert MapSet.member?(archived_ids(ChatMessage, org), cascaded_message.id)
+    end
+  end
+
+  # ── §5.4 (T125) restore-match: a message archived independently under a
+  # STILL-LIVE thread stays archived after that SAME thread later cascade-
+  # archives + restores (the CMS-`Block`-shaped case, exercised here via a
+  # REAL actor instead of `authorize?: false`, now that a Message is
+  # independently-archivable) ─────────────────────────────────────────────
+
+  describe "§5.4 (T125) — a Message archived independently (by a real actor) under a STILL-LIVE thread stays archived across that thread's later cascade-archive + restore" do
+    test "independently-archived message excluded from the restore match (RED); the cascaded sibling restores with the thread (CONTROL)" do
+      org = mk_org()
+      thread = mk_thread(org, "Independent Sibling")
+      actor = %{org_id: org, role: :member}
+
+      participant = mk_participant(org, thread.id)
+      independently_archived_message = mk_message(org, thread.id, participant.id, "independent")
+      cascaded_message = mk_message(org, thread.id, participant.id, "cascaded")
+
+      # The actor archives the FIRST message independently (T125), at its own
+      # instant, while the thread is still live.
+      {:ok, _} = Samen.Archival.archive(independently_archived_message, actor: actor)
+
+      # Force a distinct instant with a >1s sleep (belt-and-suspenders on top
+      # of T124's microsecond fix).
+      Process.sleep(1_100)
+
+      # Now archive the thread — cascades ONLY the still-live cascaded_message;
+      # the independently-archived one is already hidden from the default
+      # read the cascade sweep queries, so it is left at its own instant.
+      {:ok, archived_thread} = Samen.Archival.archive(thread, actor: actor)
+
+      cascaded_before = archived_record(ChatMessage, cascaded_message.id)
+      independent_before = archived_record(ChatMessage, independently_archived_message.id)
+
+      assert cascaded_before.archived_at == archived_thread.archived_at
+      refute independent_before.archived_at == archived_thread.archived_at
+
+      {:ok, _restored_thread} = Samen.Archival.restore(archived_thread, actor: actor)
+
+      # CONTROL: the cascade-archived message came back with the thread.
+      assert MapSet.member?(live_ids(ChatMessage, org), cascaded_message.id)
+      # RED: the independently-archived message did NOT — different instant,
+      # not part of the cascade set (ADR-040 §5.4: "a child independently
+      # archived earlier stays archived").
+      refute MapSet.member?(live_ids(ChatMessage, org), independently_archived_message.id)
+      assert MapSet.member?(archived_ids(ChatMessage, org), independently_archived_message.id)
     end
   end
 

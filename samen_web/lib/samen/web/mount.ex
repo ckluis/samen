@@ -185,7 +185,7 @@ defmodule Samen.Web.Mount do
     aggregate_loader otp_app status
     user_name user_role user_initials
     chat_path pubsub presence object_cards
-    default_org_id org_directory tenant_landing impersonate_path
+    default_org_id org_directory tenant_landing impersonate_path seed_command
     recipient_id
     flags_namespace flags_path revenue_plan_loader
     automation_path

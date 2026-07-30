@@ -300,6 +300,21 @@ refs — so the sweep is small; the probe proves it either way).
   without the parent): Ticket → Conversation → Message; chat Thread → Message; CMS
   Page → Block. Cascade uses `archive_related`, sets children's `archived_at` to the
   **same instant** as the parent, and pairs with a notification where user-visible.
+- **Composition-cascade children are independently-archivable BY DEFAULT** (binding,
+  T125): a `▸cascade` roster arrow declares that archiving the parent sweeps the child
+  too — it does **not**, by itself, imply the child is locked to cascade-only. An
+  authorized actor MAY also archive/restore a composition-cascade child directly,
+  subject to that child's own normal policy, exactly like any other archivable resource
+  (CMS's `Block` is the canonical example). This is what makes the next bullet
+  non-vacuous. A child MAY be marked cascade-only (no independent archive) only via an
+  explicit, individually-documented, resource-specific exception in §5.9 (today: exactly
+  one — `chat.participant`, the cross-plane grant carrier). No other reading of the
+  roster syntax (comma vs. no comma, single-hop vs. multi-hop, etc.) implies a lock;
+  §5.9's exclusion table + per-resource ¶ footnotes are the ONLY source of truth for
+  which children are cascade-only. (Before T125, `chat.message` and
+  `support.conversation`/`support.message` were mistakenly cascade-locked under a
+  misreading of the roster's comma punctuation — see
+  `_orch/verify/T37f-verdict.json` finding F3 — and have been reconciled to the default.)
 - **Restore of a cascade parent restores exactly the children whose `archived_at` equals
   the parent's** (the same-instant match) — a child independently archived earlier stays
   archived. Restore conflicts on any member abort the restore transaction honestly.
@@ -352,6 +367,17 @@ source), **(A)** auth/governance material (revocation/expiry/deactivation are th
 lifecycles — ADR-035's domain; deferred with a revisit trigger: a member-offboarding
 feature).
 
+**Composition-cascade child-archivability posture (T125, canonical, binding):**
+EVERY composition-cascade child in the roster below (every resource named after a `▸cascade`
+arrow) is **independently-archivable BY DEFAULT** — an authorized actor may archive/restore
+it directly, in addition to it being swept by its parent's cascade (§5.4). The table's `▸`
+syntax alone (comma-separated or not, single-hop or multi-hop) draws **no** distinction on
+this axis. The **only** cascade-locked (no-independent-archive) child in the entire roster is
+**`chat.participant`**, marked by the ¶ footnote below, for its own resource-specific reason
+(cross-plane grant-carrier retirement) — every other cascade child (`cms.block`,
+`chat.message`, `support.conversation`, `support.message`) is independently-archivable,
+exactly like CMS's `block` always was.
+
 | Scope | Archivable | Excluded (class) |
 |---|---|---|
 | analytics | — | product_event (L) |
@@ -373,9 +399,14 @@ the delivery chokepoint independent of archival state (red test, T37).
 archive/restore actions must be guard-sanctioned in the same change (integration duty,
 T36-piloted or the primitives sweep item).
 ¶ `chat.participant` is thread membership + the cross-plane grant carrier 🔒 (ADR-012
-§2.2) — a composition child with no independent archive: it cascades with its thread, so
-archiving a thread also retires its cross-plane grants from default reads on both planes;
-the vaulted `full_name` stays tokenized like any archived 🔒 row (§5.1).
+§2.2) — the ONE documented exception to the composition-cascade independent-archivability
+default above: it has NO independent archive (a `forbid_if(always())` policy lock refuses
+any actor-driven `:archive`/`:restore`; it cascades with its thread only), because
+archiving a thread must also retire its cross-plane grants from default reads on both
+planes, and only the cascade's `authorize?: false` internal call may do that. The vaulted
+`full_name` stays tokenized like any archived 🔒 row (§5.1). `chat.message` — the OTHER
+cascade child in the same roster row — carries no such exception and is
+independently-archivable like every other composition-cascade child (T125).
 
 **T37 decomposes into serialized, mechanical sub-items** (the decompose-cross-cutting
 rule; each ≤10 files, buildable from the roster row alone):

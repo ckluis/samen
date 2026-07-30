@@ -46,7 +46,8 @@ defmodule Samen.Scopes.Chat.Blueprint do
   existing impersonation bridge carrying the tenant `org_id`, so `OrgScope` is satisfied for
   BOTH parties with NO new policy. The grant is checked against the live actor at render.
 
-  ## Soft-delete adoption (ADR-040 §5.9, T37e) — `thread ▸cascade participant ▸cascade message`
+  ## Soft-delete adoption (ADR-040 §5.9, T37e; reconciled T125) — `thread ▸cascade participant
+  ## ▸cascade message`
 
   `ChatThread` is `archivable: true` and is the roster's cascade PARENT: archiving a thread
   cascades to archive its `ChatParticipant`s AND `ChatMessage`s at the SAME instant
@@ -60,17 +61,25 @@ defmodule Samen.Scopes.Chat.Blueprint do
   (the `archived_at` column, the default-read exclusion, the `:archive`/`:restore`/`:archived`
   actions the cascade modules invoke) must exist on both for the cascade to have anything to
   set/match/restore, exactly as CMS's `Block` carries its own full substrate as the cascade
-  TARGET of `page ▸cascade block`. The roster's ¶ footnote — "`chat.participant` ... has NO
-  independent archive: it cascades with its thread only" — is enforced ONE LEVEL UP from the
-  substrate, at POLICY: both resources carry an explicit
-  `policy action([:archive, :restore]) do forbid_if(always()) end` (the same "reachable ONLY
-  via the internal `authorize?: false` cascade call; any actor-based attempt is refused"
-  posture `Samen.Scopes.Identity.Blueprint`'s pre-actor `:accept`/`:expire` transitions use) —
-  a THREAD-level actor-driven archive/restore is possible; a PARTICIPANT/MESSAGE-level one is
-  refused for any real actor and reachable only through the cascade's `authorize?: false`
-  internal calls (which bypass policy checks entirely, same as every other cascade in this
-  foundry). This is stricter than CMS's `Block`, which explicitly PERMITS actor-driven
-  independent archiving — a deliberate scope difference the roster draws, not an oversight.
+  TARGET of `page ▸cascade block`.
+
+  **POSTURE (T125, ADR-040 §5.4/§5.9 reconciled — INDEPENDENT-ARCHIVABLE CHILDREN
+  EVERYWHERE):** `ChatMessage` is an ORDINARY independently-archivable composition child, same
+  as CMS's `Block` — an authorized (org-scoped) actor CAN archive/restore a message directly,
+  and the thread's cascade still sweeps every still-live message at parent-archive time; a
+  message archived independently stays archived across a later thread restore (the
+  same-instant match, §5.4). `ChatParticipant` is the ONE documented exception (§5.9 ¶): it
+  is the cross-plane grant carrier, so it KEEPS its own, resource-specific
+  `policy action([:archive, :restore]) do forbid_if(always()) end` (archiving a participant
+  must retire its grants; only the thread's `authorize?: false` cascade may do that) — the same
+  "reachable ONLY via the internal cascade call; any actor-based attempt is refused" posture
+  `Samen.Scopes.Identity.Blueprint`'s pre-actor `:accept`/`:expire` transitions use.
+  `ChatMessage` carries NO such lock — its policy is the plain `OrgScope`-only default,
+  matching `ChatThread`/CMS `Block`'s independent-archivability posture. (Pre-T125, this
+  scope locked BOTH `ChatParticipant` and `ChatMessage`; T125 reconciled the cross-scope
+  inconsistency the T37f verifier flagged — see `_orch/verify/T37f-verdict.json` finding
+  F3 and ADR-040 §5.4/§5.9 — by relaxing `ChatMessage` to match CMS's default, while
+  preserving `ChatParticipant`'s lock for its own, orthogonal, grant-carrier reason.)
   """
 
   # ---------------------------------------------------------------------------
@@ -350,15 +359,21 @@ defmodule Samen.Scopes.Chat.Blueprint do
         the body is vaulted) so unfurl never re-parses ciphertext (§4.2). Opaque strings; not
         PII. `sender_party` is denormalized (`:tenant | :operator`) for cheap broadcast render.
 
-        ## Soft-delete (ADR-040 §5.9, T37e) — cascade child, NO independent archive
+        ## Soft-delete (ADR-040 §5.9, T37e; reconciled T125) — cascade child,
+        ## INDEPENDENTLY-ARCHIVABLE (posture A)
 
-        Archivable (substrate only) — same shape as `ChatParticipant`: carries `archived_at` +
-        the `:archive`/`:restore`/`:archived` actions so the thread's cascade
-        (`Samen.Scopes.Chat.CascadeArchive`/`CascadeRestore`) has something to set/match/
-        restore, but the `policies` block below `forbid_if(always())`s any actor-driven
-        `:archive`/`:restore` — reachable only via the thread cascade's `authorize?: false`
-        internal calls (§5.4 ¶ footnote: composition children have no independent archive).
-        An archived message keeps its `body` 🔒 vault token and masks by plane exactly like a
+        Archivable — carries `archived_at` + the `:archive`/`:restore`/`:archived` actions.
+        The thread's cascade (`Samen.Scopes.Chat.CascadeArchive`/`CascadeRestore`) still
+        sweeps every still-live message at thread-archive time (same-instant), but — per
+        T125's reconciliation of ADR-040 §5.4/§5.9 — a `ChatMessage` is ALSO an ORDINARY
+        independently-archivable resource: an authorized (org-scoped) actor may call
+        `:archive`/`:restore` on it directly, exactly like CMS's `Block`. A message archived
+        independently stays archived across a later thread restore (the same-instant match,
+        §5.4) — this is now the SAME posture as `ChatParticipant` was NOT: unlike
+        `ChatParticipant` (the cross-plane grant carrier, which keeps its own
+        `forbid_if(always())` lock for a resource-specific reason — see
+        `Samen.Scopes.Chat.Blueprint` moduledoc), `ChatMessage` carries no such lock. An
+        archived message keeps its `body` 🔒 vault token and masks by plane exactly like a
         live row (§5.1) — trash, not erasure.
         """
         use Samen.Resource,
@@ -445,14 +460,16 @@ defmodule Samen.Scopes.Chat.Blueprint do
         end
 
         policies do
+          # T125 (ADR-040 §5.4/§5.9 reconciled, posture A): NO
+          # `forbid_if(always())` lock here — a ChatMessage is an ordinary,
+          # independently-archivable composition child, matching CMS's
+          # `Block`. `:archive`/`:restore` are `:destroy`/`:update`-typed, so
+          # they are already covered by the broad `action_type` policy above
+          # (OrgScope-gated, any org member) — no separate policy needed.
+          # Contrast `ChatParticipant`, which KEEPS its own lock (the
+          # cross-plane grant-carrier exception, §5.9 ¶).
           policy action_type([:read, :create, :update, :destroy]) do
             authorize_if(Samen.Policy.OrgScope)
-          end
-
-          # No independent archive (§5.4 ¶ footnote) — see ChatParticipant's
-          # identical policy for the full rationale.
-          policy action([:archive, :restore]) do
-            forbid_if(always())
           end
 
           policy action(:reveal_message) do

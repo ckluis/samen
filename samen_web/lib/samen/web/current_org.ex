@@ -361,7 +361,13 @@ defmodule Samen.Web.CurrentOrg do
   @doc """
   The WORKSPACE SWITCHER (ADR-013 §5.1). Renders the current org's name + a chevron; clicking
   opens a native `<details>` dropdown listing every tenant org from `list_orgs/1` plus a pinned
-  "Driftwood Ops" entry (return to the operator plane).
+  operator-plane entry (return to the operator plane).
+
+  The operator-plane entry's LABEL is derived from the mount (`operator_label/1` — the host's
+  `:operator_workspace` label, neutral `"Operator"` default), NEVER a hardcoded vertical name
+  (P9-F2): driftwood renders "Driftwood Ops", pawchart/uxwalk/any gen.app render THEIR own
+  operator-plane name (or the neutral default) — the shared switcher no longer mislabels every
+  non-driftwood host's boundary with the reference vertical's brand.
 
   Each tenant row links to `GET /session/org/<org_id>?return_to=<path>` (the framework
   `SessionController`), which writes the session current org and redirects back to the same
@@ -377,6 +383,7 @@ defmodule Samen.Web.CurrentOrg do
       assigns
       |> assign(:orgs, list_orgs(assigns.mount))
       |> assign(:current_name, name(assigns.mount, assigns.org_id))
+      |> assign(:operator_label, operator_label(assigns.mount))
       |> assign_new(:return_to, fn -> nil end)
       |> assign_new(:compact, fn -> false end)
 
@@ -398,7 +405,7 @@ defmodule Samen.Web.CurrentOrg do
         </a>
         <div class="ws-switcher-sep"></div>
         <a class="ws-switcher-item ws-switcher-ops" href="/operator/accounts" role="menuitem">
-          ← Driftwood Ops (operator)
+          ← {@operator_label} (operator)
         </a>
       </div>
     </details>
@@ -415,33 +422,148 @@ defmodule Samen.Web.CurrentOrg do
   attr :mount, Mount, default: nil
   attr :org_id, :string, default: nil
   attr :acting_as, :boolean, default: false
+  attr :operator_actor, :boolean, default: false
 
   @doc """
-  The "acting as &lt;tenant&gt; · Return to Driftwood Ops" banner (ADR-013 §5.3). Renders on a
-  tenant-plane page ONLY during a real operator act-as (`acting_as: true` — an explicit
-  `samen_current_org` in the session, set by the `SessionController` via the operator "Open
-  account →" or the workspace switcher), NOT on a plain tenant default-org visit. Gives the
-  operator a clear way back UP to the operator plane. Purely presentational; navigating away
-  just returns to the operator plane (which ignores the session current org — it is cross-tenant).
+  The PLANE-LEGIBILITY BADGE (T116, P9-F3) — the persistent chrome element that makes the
+  current plane + org legible on EVERY shared samen_web surface. Rendered once per page at the
+  top of the main pane (via `acting_as_banner/1`, which every tenant/shared LiveView already
+  calls with `mount`/`org_id`/`acting_as`, so all hosts inherit it at ≈0 authored LOC).
 
-  The org NAME is resolved in the body from `mount` + `org_id`, so the banner always shows the
-  real current-org name (no empty `<b>`).
+  It answers the two questions a person on any surface must be able to answer from the screen —
+  WHICH plane am I on, and WHOSE org am I viewing — in one of three states:
+
+    * **tenant plane** (the default; the previously UNLABELLED plane) — a tenant-glyph badge
+      reading the RESOLVED org name + "Tenant plane · in the clear" (`data-plane="tenant"`).
+      This is the marker that also makes an operator's silent O→T crossing legible: whatever
+      tenant mount they land on (e.g. the operator-nav Notifications mislink, AMB-1/P5-F1) now
+      announces "Tenant plane · <org> · in the clear" on arrival.
+    * **operator plane** (masked) — an operator SHIELD-glyph badge reading the operator
+      workspace name + "Operator plane · masked" (`data-plane="operator"`). Detected by the
+      mount's `:operator`/`:aggregate` scope OR an operator `plane.kind`, so it fires on the
+      operator's own book of business (ADR-010: operator scope on the tenant PII plane) too.
+    * **operator ACTING AS a tenant** (the dangerous O→T crossing, `acting_as: true` on a
+      tenant plane) — a strong-styled CROSSING marker (`data-crossing="true"`, the operator
+      shield glyph, id `acting-as-bar`): "You are viewing <org> (acting as tenant)" + a
+      "Return to <operator>" link UP to the operator plane. This is the human-facing
+      counterpart to the T115/T38 impersonation-write audit — the crossing is VISIBLE, not
+      silent. Removing this marker is a legibility regression the tests refute.
+
+  GLYPH DISCIPLINE: exactly two glyphs across all planes — a document/org glyph for the tenant
+  plane and a SHIELD glyph for operator presence (operator plane + the acting-as crossing) —
+  so tenant vs operator chrome is visually distinguishable even where the sidebar glyph LETTER
+  collides (uxwalk's pixel-identical blue "S", P9-F1). The badge derives colour from
+  `data-plane` (CSS), so the distinction survives even a colour-blind read via the glyph shape.
+
+  Masking: presentational only — it renders the org DISPLAY name (non-secret) + static plane
+  copy. It reads no vault-routed field and carries the same masking guarantees as the page it
+  wraps (CLAUDE.md plane discipline; `Samen.Api.PiiResolution` untouched).
   """
-  def acting_as_banner(assigns) do
-    assigns = assign(assigns, :name, name(assigns.mount, assigns.org_id))
+  def plane_badge(assigns) do
+    mount = assigns[:mount]
+    plane = badge_plane(mount)
+
+    assigns =
+      assigns
+      |> assign(:plane, plane)
+      |> assign(:org_name, name(mount, assigns[:org_id]))
+      |> assign(:operator_label, operator_label(mount))
+      |> assign(:crossing?, crossing?(assigns, plane))
 
     ~H"""
     <div
-      :if={@acting_as and tenant_plane?(@mount) and is_binary(@org_id)}
-      class="acting-as-bar"
+      :if={@crossing?}
+      class="plane-badge plane-crossing acting-as-bar"
       id="acting-as-bar"
+      data-plane="tenant"
+      data-crossing="true"
     >
-      <span class="acting-as-tx">
-        You are viewing <b>{@name}</b> (acting as tenant)
+      <span class="pb-glyph-wrap" aria-hidden="true">
+        <svg class="pb-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l7 3v5c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6z" /><rect x="9" y="11" width="6" height="5" rx="1" /><path d="M10.5 11V9.5a1.5 1.5 0 0 1 3 0V11" /></svg>
       </span>
-      <a class="acting-as-return" href="/operator/accounts">Return to Driftwood Ops →</a>
+      <span class="acting-as-tx">
+        You are viewing <b>{@org_name}</b> (acting as tenant)
+      </span>
+      <a class="acting-as-return" href="/operator/accounts">Return to {@operator_label} →</a>
+    </div>
+
+    <div
+      :if={not @crossing? and @plane == :operator}
+      class="plane-badge plane-operator"
+      id="plane-badge"
+      data-plane="operator"
+      data-crossing="false"
+    >
+      <span class="pb-glyph-wrap" aria-hidden="true">
+        <svg class="pb-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l7 3v5c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6z" /><rect x="9" y="11" width="6" height="5" rx="1" /><path d="M10.5 11V9.5a1.5 1.5 0 0 1 3 0V11" /></svg>
+      </span>
+      <span class="pb-name"><b>{@operator_label}</b></span>
+      <span class="pb-pill">Operator plane · masked</span>
+    </div>
+
+    <div
+      :if={not @crossing? and @plane == :tenant}
+      class="plane-badge plane-tenant"
+      id="plane-badge"
+      data-plane="tenant"
+      data-crossing="false"
+    >
+      <span class="pb-glyph-wrap" aria-hidden="true">
+        <svg class="pb-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="18" rx="1.5" /><path d="M8 7h3M13 7h3M8 11h3M13 11h3M8 15h3M13 15h3" /></svg>
+      </span>
+      <span class="pb-name"><b>{@org_name}</b></span>
+      <span class="pb-pill">Tenant plane · in the clear</span>
     </div>
     """
+  end
+
+  @doc """
+  Backwards-compatible entry point for the ≈44 tenant/shared LiveViews that already call
+  `<.acting_as_banner mount org_id acting_as />` at the top of their main pane. Delegates to
+  `plane_badge/1` — the same three-state plane-legibility badge — so every host inherits the
+  persistent tenant/operator plane label AND the acting-as crossing marker with no per-surface
+  or per-vertical edit. (Pre-T116 this rendered ONLY the act-as crossing bar; T116 makes the
+  tenant/operator plane badge persistent while preserving the exact `acting-as-bar` crossing
+  contract.)
+  """
+  def acting_as_banner(assigns), do: plane_badge(assigns)
+
+  # The operator-plane workspace DISPLAY name for the shared cross-plane affordances (switcher
+  # return link, acting-as crossing return, no-org card), read from the host's mount label —
+  # NEVER a hardcoded vertical brand (P9-F2). Neutral `"Operator"` default so a host that wires
+  # nothing still labels its boundary honestly rather than mislabelling it "Driftwood Ops".
+  defp operator_label(%Mount{} = mount), do: Mount.label(mount, :operator_workspace, "Operator")
+  defp operator_label(_), do: "Operator"
+
+  # The host's seed command hint for the no-org card, from the mount label (e.g. driftwood wires
+  # "mix driftwood.seed"). `nil` (the default) → a generic, vertical-neutral seed instruction
+  # with no host-specific mix task named.
+  defp seed_command(%Mount{} = mount), do: Mount.label(mount, :seed_command, nil)
+  defp seed_command(_), do: nil
+
+  # Which plane the badge speaks for. An operator/aggregate SCOPE (the operator's own book of
+  # business — tenant PII plane per ADR-010) OR an operator PLANE (masked impersonation) both
+  # read as the operator plane; everything else is the tenant plane.
+  defp badge_plane(%Mount{plane: %{kind: :operator}}), do: :operator
+  defp badge_plane(%Mount{scope_kind: k}) when k in [:operator, :aggregate], do: :operator
+  defp badge_plane(%Mount{}), do: :tenant
+  defp badge_plane(_), do: :tenant
+
+  # Whether to render the operator→tenant CROSSING marker (T116 attempt 2, defense-in-depth).
+  # DERIVED FROM ACTOR CONTEXT, not solely the `samen_current_org` breadcrumb: an OPERATOR actor
+  # rendering a TENANT surface IS a crossing and MUST be marked — regardless of whether the
+  # sticky act-as session key happens to be set. So a FUTURE mislink that lands an authenticated
+  # operator on a tenant surface can never recreate a SILENT crossing (a plain `data-plane=tenant`
+  # badge byte-identical to a real tenant). Fires on EITHER signal:
+  #   * `operator_actor` — the caller identified an operator principal on this tenant surface, OR
+  #   * `acting_as`      — the governed `/session/org/` act-as write set the current org.
+  # Only on the TENANT plane with a resolved org (an operator-plane mount self-labels as operator;
+  # the crossing marker is the tenant-surface concern). The reachable-via-UI guarantee in dev —
+  # where a bare tenant mount carries NO operator identity — is the STRUCTURAL BAR: operator
+  # chrome offers no bare-tenant link, so the only operator→tenant path is the governed act-as.
+  defp crossing?(assigns, plane) do
+    (!!assigns[:acting_as] or !!assigns[:operator_actor]) and plane == :tenant and
+      is_binary(assigns[:org_id])
   end
 
   attr :mount, Mount, default: nil
@@ -451,24 +573,30 @@ defmodule Samen.Web.CurrentOrg do
   `?org=<uuid>`" dead-end. Shown only when no org resolves AND the directory is empty: a
   *seed-state* message, not a *type-a-UUID* instruction, with a link back to the operator
   dashboard. It never appears once seeded.
+
+  De-hardcoded (P9-F2): the seed command + the operator-plane return label are derived from the
+  mount (`:seed_command` / `:operator_workspace` labels), so a non-driftwood host (pawchart,
+  any gen.app) no longer shows "run `mix driftwood.seed`" / "Back to Driftwood Ops" in its own
+  empty state. Absent a `:seed_command` label the copy is vertical-neutral (no mix task named).
   """
   def no_org_card(assigns) do
+    assigns =
+      assigns
+      |> assign(:operator_label, operator_label(assigns[:mount]))
+      |> assign(:seed_command, seed_command(assigns[:mount]))
+
     ~H"""
     <div class="wrap">
       <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
         <div style="font-weight:600;color:#2a2b35;margin-bottom:6px">No tenant accounts yet</div>
         <p style="margin:0 0 10px">
-          Seed the demo to populate the workspaces — run <code>mix driftwood.seed</code>.
+          Seed the demo to populate the workspaces<span :if={@seed_command}> — run <code>{@seed_command}</code></span>.
         </p>
         <a href="/operator/accounts" style="color:#3B4CCA;text-decoration:none">
-          ← Back to Driftwood Ops
+          ← Back to {@operator_label}
         </a>
       </div>
     </div>
     """
   end
-
-  defp tenant_plane?(%Mount{plane: %{kind: :operator}}), do: false
-  defp tenant_plane?(%Mount{}), do: true
-  defp tenant_plane?(_), do: false
 end

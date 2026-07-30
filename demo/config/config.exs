@@ -33,6 +33,14 @@ config :samen_core, Samen.FeatureFlags, emit: {Samen.Analytics, :track}
 config :samen_core, :support_sla_breach_ticket_resource, Demo.SupportScope.Ticket
 config :samen_core, :support_sla_ticket_abbrev, "stk"
 
+# T122: the `add_tag` automation action's generic F4 Tag/Tagging config seam
+# (mirrors `:support_sla_breach_ticket_resource`'s shape) — declares which
+# subject resources `add_tag` targets via the generic mechanism, mapped to the
+# host's `Tags.Tagging` module. Without this entry, `add_tag` against a Ticket
+# would fall through to the retired array-attribute seam and honestly no-op
+# with `{:error, :no_tag_surface}` (Ticket dropped its `tags` column, T46).
+config :samen_core, :tags_scope_resources, %{Demo.SupportScope.Ticket => Demo.Tags.Tagging}
+
 # WS-A A4/A5 / ADR-035 §5 A10 — the kernel notification ENGINE wired to the demo's
 # mounted Primitives resources (the ADR-014 SendWorker config convention: the kernel
 # is mount-agnostic; the host names its concrete modules + repo). WITHOUT this,

@@ -43,11 +43,17 @@ defmodule DriftwoodWeb.Router do
   #     tenant actor to the authenticated user's OWN orgs (`{mod, fun, args}`, user_id
   #     appended). Driftwood's reference sources it from `Driftwood.Auth`; a real deploy
   #     points it at `Identity.Membership` rows.
+  # T116/P9-F2 — the operator-plane label the SHARED cross-plane chrome (workspace switcher
+  # return link, acting-as crossing marker, no-org card) derives instead of the old hardcoded
+  # "Driftwood Ops"/"mix driftwood.seed" framework leak. Data on the mount, not code: driftwood
+  # keeps its own boundary names; every other host now labels its OWN boundary (neutral default).
   @current_org_labels %{
     default_org_id: Driftwood.Seeds.blue_ridge_org_id(),
     org_directory: {Driftwood.Directory, :orgs, []},
     authn: {:app_env, :driftwood, :auth_required?},
-    authorized_orgs: {Driftwood.Auth, :authorized_org_ids, []}
+    authorized_orgs: {Driftwood.Auth, :authorized_org_ids, []},
+    operator_workspace: "Driftwood Ops",
+    seed_command: "mix driftwood.seed"
   }
 
   pipeline :browser do

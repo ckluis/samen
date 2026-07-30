@@ -78,11 +78,27 @@ defmodule Samen.Web.Operator.AccountDetailLive do
           <:actions>
             <a
               :if={@account_id}
+              href={"/operator/deliverability/#{@account_id}"}
+              id="account-deliverability-link"
+              style="font-size:12px;color:#3B4CCA;margin-right:14px"
+            >
+              Deliverability →
+            </a>
+            <a
+              :if={@account_id}
               href={"/operator/automation/#{@account_id}"}
               id="account-automation-health-link"
               style="font-size:12px;color:#3B4CCA;margin-right:14px"
             >
               Automation health →
+            </a>
+            <a
+              :if={@account_id}
+              href={"/operator/activity/#{@account_id}"}
+              id="account-activity-link"
+              style="font-size:12px;color:#3B4CCA;margin-right:14px"
+            >
+              Activity →
             </a>
             <a href="/operator/accounts" id="back-to-accounts" style="font-size:12px;color:#3B4CCA">← Accounts</a>
           </:actions>

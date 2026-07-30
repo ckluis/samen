@@ -153,6 +153,7 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
                   <th>Status</th>
                   <th>Provider</th>
                   <th>Domain</th>
+                  <th>Org</th>
                   <th>Kind</th>
                   <th>Event id</th>
                   <th>Occurred</th>
@@ -165,6 +166,12 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
                   <td class="d-status"><span class={"pill pill-#{e.status}"}>{e.status}</span></td>
                   <td class="d-provider">{e.provider}</td>
                   <td class="d-domain">{e.domain}</td>
+                  <td class="d-org">
+                    <a :if={e.org_id} href={"/operator/deliverability/#{e.org_id}"} class="mono" style="font-size:11px;color:#3B4CCA">
+                      {short_org(e.org_id)}
+                    </a>
+                    <span :if={!e.org_id} style="color:var(--muted)">—</span>
+                  </td>
                   <td class="d-kind">{e.kind}</td>
                   <td class="d-event-id mono">{e.event_id}</td>
                   <td class="d-occurred" style="color:var(--muted)">{ts(e.occurred_at)}</td>
@@ -206,6 +213,13 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
   defp ts(nil), do: "—"
   defp ts(%DateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M")
   defp ts(other), do: to_string(other)
+
+  # T114/R5: the org column was stored but unsurfaced (`whk_event.org_id`, nilable
+  # until an envelope is processed). A bounded, non-PII id fragment — never the
+  # tenant's PII — cross-links to the per-tenant deliverability drill-down. Only
+  # ever called from the `:if={e.org_id}` branch (a nil org_id renders the "—"
+  # placeholder directly in the template instead), so there is no `nil` clause here.
+  defp short_org(id), do: "#{String.slice(to_string(id), 0, 8)}…"
 
   # The payload is already redacted at ingress — render it verbatim as pretty JSON.
   defp payload_json(payload) when is_map(payload) do

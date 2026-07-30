@@ -26,20 +26,22 @@ defmodule Samen.Scopes.Support.CascadeRestore do
   this buys — the scope's leak red test exercises this directly with two
   tickets whose cascades collide in the same second).
 
-  ## Why "independently archived, stays archived" looks different for this scope
+  ## "Independently archived, stays archived" (T125, posture A)
 
-  Because `Conversation`/`Message` are archived ONLY via this cascade (the
-  `forbid_if(always())` policy lock on their `:archive`/`:restore` actions —
-  see `Samen.Scopes.Support.Blueprint` moduledocs), there is no way to construct
-  a conversation/message that is "independently archived, at a different instant,
-  under the SAME still-live ticket" — every conversation/message under a given
-  ticket is always in lockstep with that ticket's own `archived_at` (unlike CMS's
-  `Block`, which explicitly permits actor-driven independent archiving, so a page
-  restore can leave a genuinely independently-archived sibling block behind under
-  the SAME page). The "independently archived, stays archived" contract still
-  holds — and is still meaningfully tested — via a DIFFERENT ticket's
-  cascade-archived conversation/message, which this restore's `ticket_id`/
-  `conversation_id` scoping structurally can never touch.
+  As of T125 (ADR-040 §5.4/§5.9 reconciled), `Conversation`/`Message` carry no
+  `forbid_if(always())` lock — an authorized actor CAN archive either directly,
+  independent of the ticket's cascade (see `Samen.Scopes.Support.Blueprint`
+  moduledocs). So, exactly like CMS's `Block`, it is now possible to construct a
+  conversation/message that is "independently archived, at a different instant,
+  under the SAME still-live ticket": this restore's dual `ticket_id`/
+  `conversation_id` id-scope AND `archived_at` instant-equality match excludes
+  it precisely because its `archived_at` does not equal the ticket's own cascade
+  instant — the id-scope alone would NOT be enough to exclude it here (unlike the
+  cross-ticket case below, where id-scope alone already suffices). The contract
+  is ALSO still exercised, as before, via a DIFFERENT ticket's cascade-archived
+  conversation/message, which this restore's `ticket_id`/`conversation_id`
+  scoping structurally can never touch regardless of any timestamp collision —
+  both cases are covered by the scope's test suite.
 
   Runs inside the parent `:restore` action's transaction. A `:restore_conflict` on
   any matched member aborts the WHOLE transaction (the parent restore included) —

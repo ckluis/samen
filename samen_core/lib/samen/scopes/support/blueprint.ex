@@ -112,8 +112,8 @@ defmodule Samen.Scopes.Support.Blueprint do
         key — `"support.ticket"` on driftwood/pawchart/samen_web,
         `"support_scope.ticket"` on demo).
 
-        ## Soft-delete (ADR-040 §5.9, T37f) — the cascade PARENT of `ticket
-        ▸cascade conversation ▸cascade message`
+        ## Soft-delete (ADR-040 §5.9, T37f; reconciled T125) — the cascade PARENT of
+        ## `ticket ▸cascade conversation ▸cascade message`
 
         Archivable — and the roster's cascade PARENT (§5.4, the ADR's own canonical
         worked example): archiving a ticket cascades to archive its `Conversation`s
@@ -124,12 +124,22 @@ defmodule Samen.Scopes.Support.Blueprint do
         so the cascade sweeps conversations by `ticket_id` and then messages by
         `conversation_id` under those same conversations); restoring a ticket
         restores exactly the same-instant-archived members
-        (`Samen.Scopes.Support.CascadeRestore`). Per the roster's syntax (no
-        internal commas in `ticket ▸cascade conversation ▸cascade message`,
-        matching chat's `thread ▸cascade participant ▸cascade message` shape, unlike
-        CMS's comma-separated `page ▸cascade block`), `Conversation` and `Message`
-        carry NO independent archive — see their own moduledocs for the
-        `forbid_if(always())` policy lock.
+        (`Samen.Scopes.Support.CascadeRestore`).
+
+        **POSTURE (T125, ADR-040 §5.4/§5.9 reconciled — INDEPENDENT-ARCHIVABLE
+        CHILDREN EVERYWHERE):** `Conversation` and `Message` are ORDINARY
+        independently-archivable composition children, same as CMS's `Block` — an
+        authorized (org-scoped, role >= member) actor CAN archive/restore either
+        directly, and the ticket's cascade still sweeps every still-live
+        conversation/message at ticket-archive time. (Pre-T125, this scope read the
+        roster's `▸cascade` arrows — with no internal comma, superficially unlike
+        CMS's comma-separated `page ▸cascade block` — as implying a cascade-only
+        lock; the T37f verifier adjudicated that reading a misreading of pure list
+        punctuation, see `_orch/verify/T37f-verdict.json` finding F3, and ADR-040
+        §5.4/§5.9 now states the default explicitly: composition-cascade children
+        are independently-archivable unless individually footnoted, and
+        `conversation`/`message` carry no such footnote.) See `Conversation`'s and
+        `Message`'s own moduledocs.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -235,22 +245,26 @@ defmodule Samen.Scopes.Support.Blueprint do
         `conversation`). Groups a sequence of messages. Org-scoped. No PII in the
         conversation record itself — message bodies carry the 🔒 PII.
 
-        ## Soft-delete (ADR-040 §5.9, T37f) — cascade child, NO independent archive
+        ## Soft-delete (ADR-040 §5.9, T37f; reconciled T125) — cascade child,
+        ## INDEPENDENTLY-ARCHIVABLE (posture A)
 
-        Archivable (substrate only — carries `archived_at` + the `:archive`/
-        `:restore`/`:archived` actions so `Samen.Scopes.Support.CascadeArchive`/
-        `CascadeRestore` (declared on `Ticket`) have something to set/match/
-        restore), and also the cascade PARENT one level down for `Message`
-        (`conversation ▸cascade message`). Per the roster's syntax (`ticket
-        ▸cascade conversation ▸cascade message`, no internal commas — the same
-        shape as chat's `thread ▸cascade participant ▸cascade message`, NOT CMS's
-        comma-separated `page ▸cascade block`), a conversation is meaningless
-        without its ticket: the `policies` block below `forbid_if(always())`s any
-        actor-driven `:archive`/`:restore` — the ONLY path that ever archives/
-        restores a conversation is the ticket's cascade, which runs
-        `authorize?: false` (bypassing policy checks entirely, same as every other
-        cascade in this foundry) — mirroring `Samen.Scopes.Chat.Blueprint`'s
-        `ChatParticipant`/`ChatMessage` posture exactly.
+        Archivable — carries `archived_at` + the `:archive`/`:restore`/`:archived`
+        actions so `Samen.Scopes.Support.CascadeArchive`/`CascadeRestore` (declared on
+        `Ticket`) have something to set/match/restore, and also the cascade PARENT one
+        level down for `Message` (`conversation ▸cascade message`). Per T125's
+        reconciliation of ADR-040 §5.4/§5.9 (posture A — independent-archivable
+        children everywhere, matching CMS), a `Conversation` is ALSO an ORDINARY
+        independently-archivable resource: an authorized (org-scoped, role >= member)
+        actor may call `:archive`/`:restore` on it directly — no
+        `forbid_if(always())` lock. The ticket's cascade
+        (`Samen.Scopes.Support.CascadeArchive`/`CascadeRestore`, `authorize?: false`)
+        still sweeps every still-live conversation at ticket-archive time
+        (same-instant); a conversation archived independently stays archived across a
+        later ticket restore (the same-instant match, §5.4) — this is the SAME
+        posture CMS's `Block` has always had, and the SAME posture chat's `ChatMessage`
+        was reconciled to under T125 (chat's `ChatParticipant` is the ADR's ONE
+        documented exception — the cross-plane grant carrier — and is unaffected by
+        this reconciliation).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -312,25 +326,17 @@ defmodule Samen.Scopes.Support.Blueprint do
             authorize_if(Samen.Policy.OrgScope)
           end
 
+          # T125 (ADR-040 §5.4/§5.9 reconciled, posture A): NO
+          # `forbid_if(always())` lock here — a Conversation is an ordinary,
+          # independently-archivable composition child, matching CMS's `Block`
+          # and chat's `ChatMessage`. `:archive`/`:restore` are
+          # `:destroy`/`:update`-typed, so they are already covered by this
+          # broad `action_type` policy (OrgScope + role >= member) — no
+          # separate policy needed.
           policy action_type([:create, :update, :destroy]) do
             forbid_unless(Samen.Policy.OrgScope)
             forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
             authorize_if(always())
-          end
-
-          # No independent archive (§5.4, cascade-only per the roster's no-comma
-          # syntax): reachable ONLY via the ticket's `authorize?: false` cascade
-          # calls (`Samen.Scopes.Support.CascadeArchive`/`CascadeRestore`); any
-          # actor-based attempt is refused — the same "pre-actor / system
-          # transition" posture `Samen.Scopes.Chat.Blueprint`'s `ChatParticipant`/
-          # `ChatMessage` use (itself mirroring `Samen.Scopes.Identity.Blueprint`'s
-          # pre-actor `:accept`/`:expire`). Placed AFTER the broad `action_type`
-          # policy above so BOTH policies match `:archive`/`:restore` (they are
-          # `:destroy`/`:update`-typed) — Ash requires every matching policy to
-          # authorize, so this one alone forbidding is enough to close the
-          # actor-driven path regardless of ordering.
-          policy action([:archive, :restore]) do
-            forbid_if(always())
           end
         end
       end
@@ -355,19 +361,18 @@ defmodule Samen.Scopes.Support.Blueprint do
         single ciphertext blob — see the blueprint moduledoc for the tension between
         free-text and composite vault routing). Org-scoped.
 
-        ## Soft-delete (ADR-040 §5.9, T37f) — cascade child, NO independent archive
+        ## Soft-delete (ADR-040 §5.9, T37f; reconciled T125) — cascade child,
+        ## INDEPENDENTLY-ARCHIVABLE (posture A)
 
-        Archivable (substrate only — same shape as `Conversation`): carries
-        `archived_at` + the `:archive`/`:restore`/`:archived` actions so the
-        ticket's cascade (`Samen.Scopes.Support.CascadeArchive`/`CascadeRestore`)
-        has something to set/match/restore, but the `policies` block below
-        `forbid_if(always())`s any actor-driven `:archive`/`:restore` — reachable
-        only via the cascade's `authorize?: false` internal calls (§5.4: `ticket
-        ▸cascade conversation ▸cascade message` has no internal commas — a
-        composition child, not an independently-listed roster item, mirroring
-        `Samen.Scopes.Chat.Blueprint`'s `ChatMessage`). An archived message keeps
-        its `body` 🔒 vault token and masks by plane exactly like a live row
-        (§5.1) — trash, not erasure.
+        Archivable — same shape as `Conversation`: carries `archived_at` + the
+        `:archive`/`:restore`/`:archived` actions so the ticket's cascade
+        (`Samen.Scopes.Support.CascadeArchive`/`CascadeRestore`) has something to
+        set/match/restore. Per T125's reconciliation of ADR-040 §5.4/§5.9 (posture
+        A), a `Message` is ALSO an ORDINARY independently-archivable resource: an
+        authorized (org-scoped) actor may call `:archive`/`:restore` on it directly
+        — no `forbid_if(always())` lock, matching CMS's `Block` and chat's
+        `ChatMessage`. An archived message keeps its `body` 🔒 vault token and masks
+        by plane exactly like a live row (§5.1) — trash, not erasure.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -458,14 +463,13 @@ defmodule Samen.Scopes.Support.Blueprint do
         end
 
         policies do
+          # T125 (ADR-040 §5.4/§5.9 reconciled, posture A): NO
+          # `forbid_if(always())` lock here — a Message is an ordinary,
+          # independently-archivable composition child. `:archive`/`:restore`
+          # are already covered by this broad `action_type` policy
+          # (OrgScope-gated) — no separate policy needed.
           policy action_type([:read, :create, :update, :destroy]) do
             authorize_if(Samen.Policy.OrgScope)
-          end
-
-          # No independent archive (§5.4) — see Conversation's identical policy
-          # for the full rationale.
-          policy action([:archive, :restore]) do
-            forbid_if(always())
           end
 
           policy action(:reveal_message) do

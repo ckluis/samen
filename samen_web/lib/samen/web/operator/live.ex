@@ -32,13 +32,23 @@ defmodule Samen.Web.Operator.Live do
 
   attr :mount, Mount, default: nil
   attr :active, :atom, default: nil
-  attr :notifications_path, :string, default: "/notifications"
 
-  attr :notifications_unread, :any,
-    default: nil,
-    doc: "unread count feeding the Notifications nav badge (nil → unlit; AC-G2-7)"
+  @doc """
+  The operator control-plane sidebar — workspace header + the operator nav group.
 
-  @doc "The operator control-plane sidebar — workspace header + the operator nav group."
+  INVARIANT (T116 P9-F2/AMB-1, attempt 2): every operator-chrome nav link stays on the
+  operator plane (`/operator/*`); the ONLY operator→tenant affordance is the GOVERNED
+  "Act as a tenant →" switcher in the footer, which routes through `/session/org/<id>`
+  (the `SessionController` write) so the crossing sets the acting-as context and trips the
+  `plane_badge` crossing marker. NO operator nav link may target a BARE tenant-plane surface
+  (`/notifications`, `/crm`, `/billing`, …): a raw operator→tenant link is the silent-crossing
+  bug the verifier reproduced (an operator landing on a tenant inbox with `data-plane=tenant`
+  and NO `#acting-as-bar`, byte-identical to a real tenant). The prior `Notifications` item
+  linked to bare `/notifications` and is REMOVED — the operator plane mounts no notifications
+  surface (no `/operator/notifications` route, no `active: :notifications` LiveView), so it was
+  a vestigial mislink, not a feature. `operator_sidebar_link_invariant_test.exs` proves the bar
+  (a bare-tenant href fails the test).
+  """
   def operator_sidebar(assigns) do
     ~H"""
     <.sidebar
@@ -93,24 +103,24 @@ defmodule Samen.Web.Operator.Live do
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v6m0 0 3-3m-3 3L9 5" /><path d="M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7" /></svg>
           </:icon>
         </.nav_item>
+        <.nav_item label="Deliverability" href="/operator/accounts" active={@active == :deliverability}>
+          <:icon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z" /><path d="m4 6 8 7 8-7" /></svg>
+          </:icon>
+        </.nav_item>
         <.nav_item label="Automation" href="/operator/accounts" active={@active == :automation}>
           <:icon>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" /><circle cx="12" cy="12" r="3" /></svg>
           </:icon>
         </.nav_item>
+        <.nav_item label="Activity" href="/operator/accounts" active={@active == :activity}>
+          <:icon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" /></svg>
+          </:icon>
+        </.nav_item>
         <.nav_item label="Portfolio" href="/operator/aggregate" active={@active == :aggregate}>
           <:icon>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9m6 10V5m6 14v-7" /></svg>
-          </:icon>
-        </.nav_item>
-        <.nav_item
-          label="Notifications"
-          href={@notifications_path}
-          active={@active == :notifications}
-          count={@notifications_unread}
-        >
-          <:icon>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
           </:icon>
         </.nav_item>
       </.nav_group>

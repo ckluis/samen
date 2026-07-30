@@ -180,6 +180,12 @@ defmodule Samen.Webhook.Event do
   The operator DLQ listing (ADR-038 §5.5): `:dead` first, then recent envelopes,
   most-recent first, bounded. Token-blind by construction — every column returned
   is a bounded id/enum/timestamp/count or the already-redacted payload.
+
+  T114/R5 fix: the case fragment maps `dead -> 0`, everything else `-> 1`; ORDER
+  must be `asc` on that column so `0` (dead) sorts before `1` (else) — the
+  previous `desc` inverted this (desc sorts `1` before `0`, putting dead rows
+  LAST, contradicting this very docstring). The tiebreak (`desc: e.inserted_at`,
+  most-recent first) is a SEPARATE `order_by` term, unaffected by the fix.
   """
   @spec list_for_operator(module(), keyword()) :: [t()]
   def list_for_operator(repo, opts \\ []) when is_atom(repo) do
@@ -188,7 +194,7 @@ defmodule Samen.Webhook.Event do
     repo.all(
       from(e in __MODULE__,
         order_by: [
-          desc: fragment("case when ? = 'dead' then 0 else 1 end", e.status),
+          asc: fragment("case when ? = 'dead' then 0 else 1 end", e.status),
           desc: e.inserted_at
         ],
         limit: ^limit

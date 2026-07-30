@@ -4,10 +4,13 @@ defmodule Samen.Scopes.ChatRetentionRosterTest do
   T37 adoption sweep after T36 + T37a–f all shipped DONE+CONFIRMED). Chat is the
   `samen_web` rider on T37e's primitives item (ADR-040 §5.9's "primitives+chat" row):
   `ChatThread` (cascade parent) plus `ChatParticipant`/`ChatMessage` (cascade
-  children, substrate-only — see `chat_scope_archival_leak_red_path_test.exs` for
-  their `forbid_if(always())` direct-archive lock, which does NOT gate the
-  `:destroy_permanently`/`:archived` actions retention rides) all flip
-  `archivable: true`. This file closes the roster-coverage gap
+  children) all flip `archivable: true`. `ChatParticipant` carries its own
+  `forbid_if(always())` direct-archive lock (the cross-plane grant-carrier
+  exception, §5.9 ¶, unaffected by T125); `ChatMessage` does NOT — as of T125
+  (ADR-040 §5.4/§5.9 reconciled, posture A) it is independently-archivable, same
+  as `ChatThread` — see `chat_scope_archival_leak_red_path_test.exs`. Neither
+  lock, where it exists, gates the `:destroy_permanently`/`:archived` actions
+  retention rides. This file closes the roster-coverage gap
   `demo/test/retention_archived_roster_test.exs` leaves open — demo does not mount
   the Chat scope.
 

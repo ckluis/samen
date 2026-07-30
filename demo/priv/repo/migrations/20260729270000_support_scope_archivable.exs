@@ -18,10 +18,11 @@ defmodule Demo.Repo.Migrations.SupportScopeArchivable do
   worked composition-cascade example): archiving a ticket cascades to archive its
   conversations AND their messages at the same instant
   (`Samen.Scopes.Support.CascadeArchive`); restoring a ticket restores exactly
-  the same-instant-archived members (`Samen.Scopes.Support.CascadeRestore`).
-  Conversation/message carry no independent archive (actor-driven `:archive`/
-  `:restore` policy-locked to `forbid_if(always())`) — reachable only via the
-  ticket's cascade.
+  the same-instant-archived members (`Samen.Scopes.Support.CascadeRestore`). As
+  of T125 (ADR-040 §5.4/§5.9 reconciled, posture A), conversation/message are
+  ALSO independently-archivable — an authorized actor may `:archive`/`:restore`
+  either directly, in addition to the ticket's cascade sweeping every still-live
+  member (matching CMS's `block`; see `Samen.Scopes.Support.Blueprint`).
 
   Additive columns on already-catalogued resources → `catalog_sync/2`'s `only:`
   scoping, so `down` removes exactly these six `fld_field` rows.

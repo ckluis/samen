@@ -125,6 +125,29 @@ defmodule Samen.Delivery.EmailEvent do
     )
   end
 
+  @doc """
+  The operator per-tenant delivery TIMELINE (R2, T114): every event recorded for
+  `org_id` across ALL subscribers, most-recent first, bounded. This is the "why
+  didn't this tenant get their email" read — an operator drilling into ONE tenant
+  org sees its whole delivery history (delivered/bounce/complaint/open/click), not
+  just one subscriber's. Token-blind by construction (no PII column on this
+  schema); a caller resolving "who" from `subscriber_id` does so through
+  `Samen.Api.PiiResolution` against whatever family resource the id belongs to —
+  never here.
+  """
+  @spec list_for_org(module(), String.t(), keyword()) :: [t()]
+  def list_for_org(repo, org_id, opts \\ []) when is_atom(repo) do
+    limit = Keyword.get(opts, :limit, 200)
+
+    repo.all(
+      from(e in __MODULE__,
+        where: e.org_id == ^org_id,
+        order_by: [desc: e.occurred_at],
+        limit: ^limit
+      )
+    )
+  end
+
   defp normalize(attrs), do: Map.new(attrs, fn {k, v} -> {to_atom(k), v} end)
 
   defp to_atom(k) when is_atom(k), do: k

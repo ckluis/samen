@@ -29,11 +29,14 @@ defmodule Samen.Scopes.Chat.CascadeArchive do
        is attached to — cascaded participants/messages would silently skip the
        `record_archived` audit event and the idempotence guard.
 
-  Both `ChatParticipant` and `ChatMessage` are `archivable: true` (substrate only — their
-  `:archive`/`:restore` actions are policy-locked to `forbid_if(always())` for any real
-  actor; see `Samen.Scopes.Chat.Blueprint` moduledoc), so routing each cascaded member
-  through its own `:archive` action here — with `authorize?: false`, the ONLY way to reach
-  it — keeps the audit trail complete while honoring the "no independent archive" contract.
+  Both `ChatParticipant` and `ChatMessage` are `archivable: true`. `ChatParticipant`'s
+  `:archive`/`:restore` actions are policy-locked to `forbid_if(always())` for any real actor
+  (the cross-plane grant-carrier exception, §5.9 ¶); `ChatMessage` carries NO such lock as of
+  T125 (ADR-040 §5.4/§5.9 reconciled, posture A) — an authorized actor may also archive a
+  message directly. Either way, this change routes each cascaded member through its own
+  `:archive` action with `authorize?: false` (bypassing policy entirely, same as every other
+  cascade in this foundry) so the cascade path itself never depends on — and is never blocked
+  by — either resource's actor-facing policy, keeping the audit trail complete regardless.
 
   Runs inside the parent `:archive` action's transaction (nested `Ash`/`Ecto.Repo.transaction`
   calls in the same process reuse the outer transaction), so a failure here rolls back the

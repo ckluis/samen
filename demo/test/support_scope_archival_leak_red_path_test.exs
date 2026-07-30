@@ -7,31 +7,33 @@ defmodule Demo.SupportScopeArchivalLeakRedPathTest do
   (§5.4, the ADR's own canonical worked example of a composition cascade).
   `csat` stays excluded (L — ledger) and is left untouched.
 
-  `Conversation`/`Message` are ALSO `archivable true` (substrate only — the
-  cascade needs something to set/match/restore), but per the roster's syntax
-  (`ticket ▸cascade conversation ▸cascade message` has NO internal commas — the
-  same shape as chat's `thread ▸cascade participant ▸cascade message`, T37e,
-  unlike CMS's comma-separated `page ▸cascade block`, T37b, which explicitly
-  permits independent block archiving) both carry an explicit
-  `policy action([:archive, :restore]) do forbid_if(always()) end` — proven
-  directly below (§5.4-policy). The ONLY path that ever archives/restores a
-  conversation or message is the ticket's cascade
-  (`Samen.Scopes.Support.CascadeArchive`/`CascadeRestore`), which runs
-  `authorize?: false`.
+  `Conversation`/`Message` are ALSO `archivable true` (carrying the archival
+  substrate the cascade needs to set/match/restore), and — as of **T125**
+  (ADR-040 §5.4/§5.9 reconciled, posture A: INDEPENDENT-ARCHIVABLE CHILDREN
+  EVERYWHERE) — neither carries a `forbid_if(always())` lock any more: BOTH are
+  ORDINARY independently-archivable resources, exactly like CMS's `Block`
+  (T37b). An authorized (org-scoped, role >= member) actor MAY archive/restore
+  a Conversation or Message directly, proven below (§5.4 T125). The ticket's
+  cascade (`Samen.Scopes.Support.CascadeArchive`/`CascadeRestore`, which runs
+  `authorize?: false` internally) STILL sweeps every still-live conversation/
+  message at ticket-archive time — the two mechanisms are orthogonal (§5.4).
+  (Pre-T125, both resources WERE cascade-locked under a misreading of the
+  roster's punctuation — `_orch/verify/T37f-verdict.json` finding F3 — which
+  this task reconciled; see `docs/adr/ADR-040-lifecycle-substrate.md` §5.4/§5.9.)
 
-  Unlike CMS's `Block` (which permits independent archiving, so a genuinely
-  independent same-parent, different-instant sibling is constructible under the
-  SAME live page) and unlike chat's `Participant`/`Message` (single-hop: FKed
-  DIRECTLY to their cascade parent), support's cascade is TWO-HOP — `message` has
-  no `ticket_id` column at all, only `conversation_id` — and BOTH children are
-  cascade-locked, so there is no way to construct a conversation/message
-  archived independently, at a different instant, under a still-live SAME
-  ticket. The "independently archived, stays archived" contract (§5.4) is
-  therefore proven via a DIFFERENT ticket's cascade-archived conversation/
-  message (structurally, never reachable by another ticket's restore query,
-  which filters by BOTH `ticket_id`/`conversation_id` scope AND `archived_at`
-  instant — see the two describe blocks below, including the true same-wall-
-  clock-second collision case).
+  Support's cascade is TWO-HOP — `message` has no `ticket_id` column at all,
+  only `conversation_id` — unlike CMS's single-hop `page ▸cascade block` and
+  chat's single-hop `thread ▸cascade {participant, message}`. Because
+  Conversation/Message are now independently-archivable, the "independently
+  archived, stays archived" contract (§5.4) is constructible and proven BOTH
+  ways: (a) a conversation/message archived independently under a STILL-LIVE
+  SAME ticket (the CMS-`Block`-shaped case, now possible here too — see "a
+  conversation archived independently under a STILL-LIVE ticket" below), and
+  (b) a DIFFERENT ticket's cascade-archived conversation/message (structurally
+  never reachable by another ticket's restore query, which filters by BOTH
+  `ticket_id`/`conversation_id` scope AND `archived_at` instant — see the
+  two-ticket describe blocks below, including the true same-wall-clock-second
+  collision case).
 
   §5.3: no `unique_index` exists on any of `stk_ticket` / `scv_conversation` /
   `smg_message` / `sag_agent` / `ssl_sla` / `smc_macro` today (confirmed by
@@ -351,44 +353,145 @@ defmodule Demo.SupportScopeArchivalLeakRedPathTest do
     end
   end
 
-  # ── §5.4-policy: conversation/message have NO independent archive for a real actor ─
+  # ── §5.4 (T125, posture A): Conversation/Message are now independently archivable ─
 
-  describe "§5.4 ¶ — an actor-driven :archive/:restore on Conversation/Message is refused" do
-    test "a real org-scoped member actor cannot call :archive on a Conversation directly" do
+  describe "§5.4 (T125) — an authorized actor CAN independently archive/restore a Conversation" do
+    test "a real org-scoped member actor archives a Conversation directly (RED: hidden from default read; ASSERT: restore returns it)" do
       org = mk_org()
       ticket = mk_ticket(org)
       conversation = mk_conversation(org, ticket.id)
       actor = %{org_id: org, role: :member}
 
-      result =
-        conversation
-        |> Ash.Changeset.for_destroy(:archive, %{}, actor: actor)
-        |> Ash.destroy(actor: actor)
+      assert {:ok, archived} = Samen.Archival.archive(conversation, actor: actor)
 
-      assert {:error, %Ash.Error.Forbidden{}} = result
+      refute MapSet.member?(live_ids(Conversation, org), conversation.id)
+      assert MapSet.member?(archived_ids(Conversation, org), conversation.id)
+
+      assert {:ok, _restored} = Samen.Archival.restore(archived, actor: actor)
+      assert MapSet.member?(live_ids(Conversation, org), conversation.id)
     end
 
-    test "a real org-scoped member actor cannot call :archive on a Message directly" do
+    test "a cross-org actor cannot archive a Conversation it does not own (CONTROL — org-scoped, not a blanket allow)" do
+      org = mk_org()
+      other_org = mk_org()
+      ticket = mk_ticket(org)
+      conversation = mk_conversation(org, ticket.id)
+      cross_org_actor = %{org_id: other_org, role: :member}
+
+      result =
+        conversation
+        |> Ash.Changeset.for_destroy(:archive, %{}, actor: cross_org_actor)
+        |> Ash.destroy(actor: cross_org_actor)
+
+      assert {:error, %Ash.Error.Forbidden{}} = result
+      assert MapSet.member?(live_ids(Conversation, org), conversation.id)
+    end
+  end
+
+  describe "§5.4 (T125) — an authorized actor CAN independently archive/restore a Message" do
+    test "a real org-scoped member actor archives a Message directly (RED: hidden from default read; ASSERT: restore returns it)" do
       org = mk_org()
       ticket = mk_ticket(org)
       conversation = mk_conversation(org, ticket.id)
       message = mk_message(org, conversation.id)
       actor = %{org_id: org, role: :member}
 
-      result =
-        message
-        |> Ash.Changeset.for_destroy(:archive, %{}, actor: actor)
-        |> Ash.destroy(actor: actor)
+      assert {:ok, archived} = Samen.Archival.archive(message, actor: actor)
 
-      assert {:error, %Ash.Error.Forbidden{}} = result
+      refute MapSet.member?(live_ids(Message, org), message.id)
+      assert MapSet.member?(archived_ids(Message, org), message.id)
+
+      assert {:ok, _restored} = Samen.Archival.restore(archived, actor: actor)
+      assert MapSet.member?(live_ids(Message, org), message.id)
     end
 
-    test "the SAME actor CAN archive the Ticket itself (CONTROL — proves the forbid above is Conversation/Message-specific, not a blanket deny)" do
+    test "a cross-org actor cannot archive a Message it does not own (CONTROL — org-scoped, not a blanket allow)" do
       org = mk_org()
+      other_org = mk_org()
       ticket = mk_ticket(org)
+      conversation = mk_conversation(org, ticket.id)
+      message = mk_message(org, conversation.id)
+      cross_org_actor = %{org_id: other_org, role: :member}
+
+      result =
+        message
+        |> Ash.Changeset.for_destroy(:archive, %{}, actor: cross_org_actor)
+        |> Ash.destroy(actor: cross_org_actor)
+
+      assert {:error, %Ash.Error.Forbidden{}} = result
+      assert MapSet.member?(live_ids(Message, org), message.id)
+    end
+  end
+
+  describe "§5.4 (T125) — independent archivability coexists with an unchanged parent cascade (regression)" do
+    test "the SAME actor can independently archive one conversation AND still cascade-archive the ticket for the rest" do
+      org = mk_org()
+      ticket = mk_ticket(org, "Regression")
+      independent_conv = mk_conversation(org, ticket.id, "independent")
+      cascaded_conv = mk_conversation(org, ticket.id, "cascaded")
       actor = %{org_id: org, role: :member}
 
+      # Actor independently archives ONE conversation directly (T125).
+      assert {:ok, _} = Samen.Archival.archive(independent_conv, actor: actor)
+
+      # The ticket cascade STILL works unchanged — archiving the ticket
+      # cascades the still-live sibling conversation (§5.4 mechanics untouched
+      # by the T125 policy reconciliation).
       assert {:ok, _} = Samen.Archival.archive(ticket, actor: actor)
+
+      refute MapSet.member?(live_ids(Conversation, org), independent_conv.id)
+      refute MapSet.member?(live_ids(Conversation, org), cascaded_conv.id)
+      assert MapSet.member?(archived_ids(Conversation, org), independent_conv.id)
+      assert MapSet.member?(archived_ids(Conversation, org), cascaded_conv.id)
+
+      # CONTROL: the same actor can still archive the Ticket itself — proves
+      # independent-archive capability is additive, not a replacement for the
+      # parent's own archivability.
+    end
+  end
+
+  # ── §5.4 (T125) restore-match: a conversation archived independently under a
+  # STILL-LIVE ticket stays archived after that SAME ticket later cascade-
+  # archives + restores (the CMS-`Block`-shaped case, only constructible now
+  # that Conversation is independently-archivable) ──────────────────────────
+
+  describe "§5.4 (T125) — a Conversation archived independently under a STILL-LIVE ticket stays archived across that ticket's later cascade-archive + restore" do
+    test "independently-archived conversation excluded from the restore match (RED); the cascaded sibling restores with the ticket (CONTROL)" do
+      org = mk_org()
+      ticket = mk_ticket(org, "Independent Sibling")
+      actor = %{org_id: org, role: :member}
+
+      independently_archived_conv = mk_conversation(org, ticket.id, "independent")
+      cascaded_conv = mk_conversation(org, ticket.id, "cascaded")
+
+      # The actor archives the FIRST conversation independently (T125), at its
+      # own instant, while the ticket is still live.
+      {:ok, _} = Samen.Archival.archive(independently_archived_conv, actor: actor)
+
+      # Force a distinct instant with a >1s sleep (belt-and-suspenders on top
+      # of T124's microsecond fix).
+      Process.sleep(1_100)
+
+      # Now archive the ticket — cascades ONLY the still-live cascaded_conv;
+      # the independently-archived one is already hidden from the default
+      # read the cascade sweep queries, so it is left at its own instant.
+      {:ok, archived_ticket} = Samen.Archival.archive(ticket, actor: actor)
+
+      cascaded_before = archived_record(Conversation, cascaded_conv.id)
+      independent_before = archived_record(Conversation, independently_archived_conv.id)
+
+      assert cascaded_before.archived_at == archived_ticket.archived_at
+      refute independent_before.archived_at == archived_ticket.archived_at
+
+      {:ok, _restored_ticket} = Samen.Archival.restore(archived_ticket, actor: actor)
+
+      # CONTROL: the cascade-archived conversation came back with the ticket.
+      assert MapSet.member?(live_ids(Conversation, org), cascaded_conv.id)
+      # RED: the independently-archived conversation did NOT — different
+      # instant, not part of the cascade set (ADR-040 §5.4: "a child
+      # independently archived earlier stays archived").
+      refute MapSet.member?(live_ids(Conversation, org), independently_archived_conv.id)
+      assert MapSet.member?(archived_ids(Conversation, org), independently_archived_conv.id)
     end
   end
 

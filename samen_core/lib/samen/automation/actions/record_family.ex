@@ -183,33 +183,81 @@ end
 
 defmodule Samen.Automation.Actions.AddTag do
   @moduledoc """
-  ADR-039 §5.2 #5 / §5.4 — `add_tag`: appends a bounded tag string to the
-  SUBJECT's `tags` array attribute where the catalog has one. Targets a
-  DESIGNED SEAM, not a stub: a resource with no `tags` attribute returns the
-  honest `{:error, :no_tag_surface}` — never a fake success.
+  ADR-039 §5.2 #5 / §5.4 — `add_tag`: attaches a bounded tag string to the
+  SUBJECT record. `add_tag`'s external config contract (`%{"tag" => tag_string}`)
+  is F4-stable and UNCHANGED by T122 (ADR-039 §5.2 #5) — only the resolution of
+  "where a tag lives" branches on the subject's resource.
 
-  ## F4/T46 status (a scope note, not a stub)
+  ## T122 — rewired onto the generic F4 Tag/Tagging mechanism (shipped)
 
-  F4 shipped the generic `Samen.Scopes.Tags` `Tag`/`Tagging` resource and
-  migrated `Support.Ticket`'s bespoke `tags` array OFF this seam onto the
-  generic mechanism (`MigrateTicketTagsToTagScope`) — so `add_tag` against a
-  Ticket now honestly returns `{:error, :no_tag_surface}` (Ticket no longer
-  declares a `tags` attribute at all). Re-pointing THIS action's write path at
-  a Tagging create (so `add_tag` keeps working against Ticket, and gains every
-  OTHER Tag-scope-eligible resource) is deliberately left as documented
-  follow-up work, decomposed out of T46 per the standing "decompose
-  cross-cutting changes" convention — it requires a per-host
-  `:tags_scope_resources` config seam (mirroring
-  `:support_sla_breach_ticket_resource`) threaded through the automation
-  engine, which no host currently configures. `add_tag`'s config contract
-  (`tag` string) is unaffected and stays F4-stable by design; only the
-  resolution of "where a tag lives" changes when that follow-up lands. The
-  `SamenCore.Support.AutomationFixture.Target` fixture (a standalone `tags`
-  array surface, deliberately decoupled from Support.Ticket) continues to
-  exercise the CURRENT array-attribute mechanism unaffected by T46.
+  Two branches, picked per subject resource:
+
+    1. **`:tags_scope_resources`-declared resource** (config seam, host-owned,
+       mirrors `:support_sla_breach_ticket_resource`'s shape —
+       `config :samen_core, :tags_scope_resources, %{MyHost.SupportScope.Ticket
+       => MyHost.Tags.Tagging}`): the tag is resolved/find-or-created as a real
+       `Samen.Scopes.Tags` `Tag` row in the SUBJECT'S OWN org (`ctx.org_id` —
+       never subject-interpolated, mirroring `MutateRecord`'s create-mode
+       `org_id` rule) and attached via a governed `Tagging` create, anchored at
+       `subject_key = Samen.ObjectKey.key_for(subject_resource)` /
+       `subject_id = record.id` — the SAME key format
+       `Samen.Web.ObjectRef.Catalog.key_for/1` derives (they now share ONE
+       implementation, `Samen.ObjectKey.key_for/1`), so a Tag attached by a
+       workflow and a Tag attached via the samen_web UI
+       (`Samen.Web.Tags.attach/5`) are queryable back through the SAME read
+       helpers (`Samen.Web.Tags.names_for/4` et al). `Support.Ticket` is wired
+       into this branch on every host that declares it (e.g. demo's
+       `Demo.SupportScope.Ticket => Demo.Tags.Tagging`) — `add_tag` against a
+       Ticket now creates a real, queryable Tagging instead of the old
+       `{:error, :no_tag_surface}`.
+    2. **Everything else (the F4/T40 array-attribute seam, unchanged)**: the
+       ORIGINAL designed seam — a resource declaring a public `tags` array
+       attribute (the `SamenCore.Support.AutomationFixture.Target` fixture,
+       deliberately decoupled from Support.Ticket) — a resource with neither a
+       `:tags_scope_resources` entry NOR a `tags` array attribute returns the
+       honest `{:error, :no_tag_surface}`, exactly as before — never a fake
+       success.
+
+  ## Org-scope (no hand-rolled second check)
+
+  The Tag-scope branch rides TWO already-governed, already-tested mechanisms —
+  no new scope-check code:
+
+    * the SUBJECT is read via `Support.fetch_subject/1`, which authorizes as
+      `ctx.actor` against the subject resource's OWN `Samen.Policy.OrgScope`
+      read policy — a cross-org `record_id` never resolves (an honest
+      `{:error, :not_found}`/`{:error, :unauthorized}`, never an orphaned
+      write, exactly mirroring the guarantee `Samen.Web.ObjectRef.resolve/3`'s
+      `load_scoped/3` gives `Samen.Web.Tags.attach/5`);
+    * the Tag/Tagging WRITES are governed `Ash.create`s (`Support.governed_create/3`,
+      `actor: ctx.actor`) against the `Tag`/`Tagging` resources' OWN
+      `Samen.Policy.OrgScope` + `RoleAtLeast(member)` create policies (the SAME
+      policies `attach/5`'s writes are gated by) — `org_id` is always
+      `ctx.org_id` (the run's own org), never subject-derived, so a workflow
+      cannot mint a Tag/Tagging in another org even if it wanted to.
+
+  ## INV-1
+
+  `Tagging` is structurally closed to `id/org_id/inserted_at/updated_at/tag_id/
+  subject_key/subject_id` (`Samen.Scopes.Tags.Blueprint` moduledoc) — no
+  attribute exists that could carry a copy of the subject's vault fields.
+  `add_tag`'s own return shape stays `%{kind: :add_tag, record_id: _, tag: _}` —
+  bounded ids/enums only, exactly as before.
+
+  ## Idempotency
+
+  Both the Tag find-or-create and the Tagging create are find-THEN-create (with
+  a re-find fallback on a write conflict) — repeating `add_tag` with the SAME
+  tag string against the SAME subject reuses the existing Tag row (org+name)
+  and does not create a duplicate Tagging (mirrors the Tag's own live
+  `(org_id, name)` uniqueness and the Tagging's own `(tag_id, subject_key,
+  subject_id)` uniqueness — the same invariants T46's migration idempotency
+  proof already established).
   """
 
   @behaviour Samen.Automation.Action
+
+  require Ash.Query
 
   alias Samen.Automation.Actions.Support
   alias Samen.Automation.Context
@@ -227,17 +275,9 @@ defmodule Samen.Automation.Actions.AddTag do
   @impl true
   def run(%{"tag" => tag}, %Context{} = ctx) when is_binary(tag) and tag != "" do
     with {:ok, record} <- Support.fetch_subject(ctx) do
-      case tag_surface(record) do
-        {:ok, current} ->
-          new_tags = Enum.uniq(current ++ [tag])
-
-          case Support.governed_update(record, %{tags: new_tags}, ctx) do
-            {:ok, updated} -> {:ok, %{kind: :add_tag, record_id: to_string(updated.id), tag: tag}}
-            {:error, reason} -> {:error, reason}
-          end
-
-        :error ->
-          {:error, :no_tag_surface}
+      case tags_scope_tagging_resource(record.__struct__) do
+        {:ok, tagging_resource} -> run_tags_scope(record, tagging_resource, tag, ctx)
+        :error -> run_array_attribute(record, tag, ctx)
       end
     end
   end
@@ -246,6 +286,128 @@ defmodule Samen.Automation.Actions.AddTag do
 
   @impl true
   def undo(_config, _meta, _ctx), do: :ok
+
+  # -- branch 1 (T122): the generic F4 Tag/Tagging mechanism -------------------
+
+  # The `:tags_scope_resources` config seam — per-host declaration of which
+  # subject resources `add_tag` targets via the generic mechanism, mapped to
+  # the host's `Tags.Tagging` module (mirrors `:support_sla_breach_ticket_resource`).
+  # No entry ⇒ falls through to the array-attribute branch (`:error`).
+  defp tags_scope_tagging_resource(resource) do
+    :samen_core
+    |> Application.get_env(:tags_scope_resources, %{})
+    |> Map.get(resource)
+    |> case do
+      nil -> :error
+      tagging_resource -> {:ok, tagging_resource}
+    end
+  end
+
+  defp run_tags_scope(record, tagging_resource, tag, ctx) do
+    with {:ok, tag_mod} <- tag_module_for(tagging_resource),
+         {:ok, tag_row} <- find_or_create_tag(tag_mod, tag, ctx) do
+      subject_key = Samen.ObjectKey.key_for(record.__struct__)
+      subject_id = to_string(record.id)
+
+      case find_or_create_tagging(tagging_resource, tag_row.id, subject_key, subject_id, ctx) do
+        {:ok, _tagging} -> {:ok, %{kind: :add_tag, record_id: subject_id, tag: tag}}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  # The Tag module rides the Tagging resource's OWN `belongs_to :tag` relationship
+  # (materialized together by the same `Samen.Scopes.Tags` blueprint call) — never a
+  # second config entry, never guessed.
+  defp tag_module_for(tagging_resource) do
+    case Ash.Resource.Info.relationship(tagging_resource, :tag) do
+      %{type: :belongs_to, destination: tag_mod} -> {:ok, tag_mod}
+      _ -> {:error, :invalid_tag_scope_config}
+    end
+  end
+
+  defp find_or_create_tag(tag_mod, name, ctx) do
+    case find_tag_row(tag_mod, name, ctx) do
+      {:ok, tag} ->
+        {:ok, tag}
+
+      :error ->
+        case Support.governed_create(tag_mod, %{name: name, org_id: ctx.org_id}, ctx) do
+          {:ok, tag} -> {:ok, tag}
+          # A concurrent writer may have created the same (org, name) Tag
+          # between the find and the create (unique-index conflict) — re-find
+          # once before surfacing a genuine failure (idempotency, not a raise).
+          {:error, _reason} -> retry_or_error(fn -> find_tag_row(tag_mod, name, ctx) end, :tag_create_failed)
+        end
+    end
+  end
+
+  defp find_tag_row(tag_mod, name, %Context{actor: actor}) do
+    tag_mod
+    |> Ash.Query.filter(name == ^name)
+    |> Ash.read(actor: actor)
+    |> first_row()
+  end
+
+  defp find_or_create_tagging(tagging_resource, tag_id, subject_key, subject_id, ctx) do
+    case find_tagging_row(tagging_resource, tag_id, subject_key, subject_id, ctx) do
+      {:ok, tagging} ->
+        {:ok, tagging}
+
+      :error ->
+        attrs = %{tag_id: tag_id, subject_key: subject_key, subject_id: subject_id, org_id: ctx.org_id}
+
+        case Support.governed_create(tagging_resource, attrs, ctx) do
+          {:ok, tagging} ->
+            {:ok, tagging}
+
+          {:error, _reason} ->
+            retry_or_error(
+              fn -> find_tagging_row(tagging_resource, tag_id, subject_key, subject_id, ctx) end,
+              :tagging_create_failed
+            )
+        end
+    end
+  end
+
+  defp find_tagging_row(tagging_resource, tag_id, subject_key, subject_id, %Context{actor: actor}) do
+    tagging_resource
+    |> Ash.Query.filter(tag_id == ^tag_id and subject_key == ^subject_key and subject_id == ^subject_id)
+    |> Ash.read(actor: actor)
+    |> first_row()
+  end
+
+  defp retry_or_error(retry_fun, error_kind) do
+    case retry_fun.() do
+      {:ok, row} -> {:ok, row}
+      :error -> {:error, error_kind}
+    end
+  end
+
+  # `:error` for zero rows OR a read failure — both fall through to "does not
+  # exist yet" for the find-or-create callers above. Governed (`actor: ctx.actor`
+  # — the SAME already-tested actor-passing convention
+  # `Support.governed_update/create` use; no new authorization path).
+  defp first_row({:ok, [row | _]}), do: {:ok, row}
+  defp first_row({:ok, []}), do: :error
+  defp first_row({:error, _reason}), do: :error
+
+  # -- branch 2 (unchanged, F4/T40): the array-attribute seam ------------------
+
+  defp run_array_attribute(record, tag, ctx) do
+    case tag_surface(record) do
+      {:ok, current} ->
+        new_tags = Enum.uniq(current ++ [tag])
+
+        case Support.governed_update(record, %{tags: new_tags}, ctx) do
+          {:ok, updated} -> {:ok, %{kind: :add_tag, record_id: to_string(updated.id), tag: tag}}
+          {:error, reason} -> {:error, reason}
+        end
+
+      :error ->
+        {:error, :no_tag_surface}
+    end
+  end
 
   # A "tag surface" is a resource declaring a public `tags` attribute typed as
   # an array of strings (the Ticket precedent, ADR-039 §5.4). A resource with no

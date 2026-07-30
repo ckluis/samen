@@ -488,15 +488,45 @@ td.right { text-align: right; }
 .op-act-as .ws-switcher > summary { border: 1px solid var(--line2); background: var(--card); justify-content: space-between; }
 .op-act-as .ws-switcher-name { max-width: 150px; }
 
-/* "You are viewing <tenant> · Return to Driftwood Ops" banner (ADR-013 §5.3). */
-.acting-as-bar {
+/* T116 / P9-F3 — the PLANE-LEGIBILITY BADGE. A persistent chrome element at the top of every
+ * shared main pane that answers "which plane / whose org." Glyph discipline: a doc/org glyph
+ * for the tenant plane, a SHIELD glyph for operator presence (operator plane + acting-as
+ * crossing) — so the two planes are distinguishable by SHAPE, not only colour, even where the
+ * sidebar glyph LETTER collides (uxwalk's pixel-identical "S", P9-F1). Colour is driven by
+ * [data-plane]/[data-crossing]. */
+.plane-badge {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 13px; border-radius: 10px; font-size: 13px; margin: 14px;
+  border: 1px solid transparent;
+}
+.plane-badge .pb-glyph-wrap { display: inline-flex; flex: 0 0 auto; }
+.plane-badge .pb-glyph { width: 17px; height: 17px; }
+.plane-badge .pb-name { flex: 1 1 auto; }
+.plane-badge .pb-name b { font-weight: 650; }
+.plane-badge .pb-pill {
+  flex: 0 0 auto; font-size: 11px; font-weight: 600; letter-spacing: .01em;
+  padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+}
+
+/* Tenant plane — calm green (data in the clear, you're on your own org). */
+.plane-badge.plane-tenant { background: #EBF7F0; border-color: #BFE3CF; color: #1E7A45; }
+.plane-badge.plane-tenant .pb-pill { background: #D6EFE0; color: #146138; }
+
+/* Operator plane — indigo (masked, cross-tenant SaaS staff). */
+.plane-badge.plane-operator { background: #EEF1FC; border-color: #C7CFF3; color: #2C378F; }
+.plane-badge.plane-operator .pb-pill { background: #DBE1F8; color: #26307C; }
+
+/* "You are viewing <tenant> · Return to <operator>" crossing marker (ADR-013 §5.3, T116). The
+ * dangerous operator→tenant crossing — amber, strong, unmistakable. Keeps the `.acting-as-bar`
+ * contract for backwards compatibility. */
+.plane-badge.plane-crossing, .acting-as-bar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  background: #EEF1FC; border: 1px solid #C7CFF3; color: #2C378F;
+  background: #FDF3E3; border: 1px solid #F0D28C; color: #8A5A11;
   padding: 9px 14px; border-radius: 10px; font-size: 13px; margin: 14px;
 }
 .acting-as-tx { flex: 1 1 auto; }
 .acting-as-tx b { font-weight: 650; }
-.acting-as-return { color: #3B4CCA; text-decoration: none; font-weight: 600; white-space: nowrap; }
+.acting-as-return { color: #B4690E; text-decoration: none; font-weight: 600; white-space: nowrap; }
 .acting-as-return:hover { text-decoration: underline; }
 
 /* ===========================================================================

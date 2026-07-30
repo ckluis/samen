@@ -30,14 +30,15 @@ defmodule Samen.Web.ObjectRef.Catalog do
   @doc """
   The catalog key for a resource MODULE — its last two module segments, lowercased and dotted.
   `Driftwood.Crm.Person -> "crm.person"`, `Driftwood.Support.Ticket -> "support.ticket"`.
+
+  Delegates to `Samen.ObjectKey.key_for/1` (T122) — the pure derivation now lives in
+  samen_core so `Samen.Automation.Actions.AddTag` can derive the SAME key without
+  samen_core depending on samen_web. This module stays the source of the REVERSE
+  direction (`resource_for/2`, key -> module), which genuinely needs the host's
+  `Samen.Web.Mount` namespace and cannot move.
   """
   @spec key_for(module()) :: String.t()
-  def key_for(resource) when is_atom(resource) do
-    resource
-    |> Module.split()
-    |> Enum.take(-2)
-    |> Enum.map_join(".", &Macro.underscore/1)
-  end
+  def key_for(resource) when is_atom(resource), do: Samen.ObjectKey.key_for(resource)
 
   @doc """
   Resolve a ref key to a resource module FOR THIS MOUNT (derive-from-namespace).

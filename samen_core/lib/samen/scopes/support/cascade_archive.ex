@@ -41,12 +41,15 @@ defmodule Samen.Scopes.Support.CascadeArchive do
        would silently skip the `record_archived` audit event and the idempotence
        guard.
 
-  Both `Conversation` and `Message` are `archivable: true` (substrate only —
-  their `:archive`/`:restore` actions are policy-locked to `forbid_if(always())`
-  for any real actor; see `Samen.Scopes.Support.Blueprint` moduledocs), so routing
-  each cascaded member through its own `:archive` action here — with
-  `authorize?: false`, the ONLY way to reach it — keeps the audit trail complete
-  while honoring the "no independent archive" contract.
+  Both `Conversation` and `Message` are `archivable: true`, and — as of T125
+  (ADR-040 §5.4/§5.9 reconciled, posture A) — neither carries a
+  `forbid_if(always())` lock: both are ordinary independently-archivable
+  resources (an authorized actor may also archive either directly; see
+  `Samen.Scopes.Support.Blueprint` moduledocs). This change routes each cascaded
+  member through its own `:archive` action with `authorize?: false` (bypassing
+  policy entirely, same as every other cascade in this foundry) regardless, so
+  the cascade path never depends on either resource's actor-facing policy and
+  the audit trail stays complete.
 
   Runs inside the parent `:archive` action's transaction (nested `Ash`/
   `Ecto.Repo.transaction` calls in the same process reuse the outer transaction),
@@ -109,9 +112,15 @@ defmodule Samen.Scopes.Support.CascadeArchive do
   end
 
   # Sweeps messages by `conversation_id in [...]`, scoped to EXACTLY the
-  # conversations just archived above (the only conversations a live ticket can
-  # have — see the blueprint moduledocs: conversation/message are cascade-only,
-  # so every conversation under a currently-live ticket is itself live).
+  # conversations just archived above in THIS sweep — i.e. the conversations
+  # that were still LIVE under this ticket a moment ago (`live_conversations/2`
+  # reads through the default, archived-excluding preparation). As of T125,
+  # Conversation is independently-archivable, so a live ticket CAN also have
+  # already-archived conversations — those are correctly excluded from
+  # `live_conversations/2`'s result and therefore never re-swept here (they
+  # keep their own, earlier `archived_at`, per §5.4's independent-archive
+  # contract), leaving only the conversations this ticket-archive itself just
+  # cascaded into.
   defp archive_live_messages(_resource, [], _instant), do: :ok
 
   defp archive_live_messages(resource, conversation_ids, instant) do
