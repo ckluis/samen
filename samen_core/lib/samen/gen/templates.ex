@@ -47,6 +47,8 @@ defmodule Samen.Gen.Templates do
   @api_key_auth_plug_ex File.read!(Path.join(@templates_dir, "api_key_auth_plug_ex.eex"))
   @external_resource Path.join(@templates_dir, "api_router_ex.eex")
   @api_router_ex File.read!(Path.join(@templates_dir, "api_router_ex.eex"))
+  @external_resource Path.join(@templates_dir, "approvals_ex.eex")
+  @approvals_ex File.read!(Path.join(@templates_dir, "approvals_ex.eex"))
   @external_resource Path.join(@templates_dir, "application_ex.eex")
   @application_ex File.read!(Path.join(@templates_dir, "application_ex.eex"))
   @external_resource Path.join(@templates_dir, "application_ex_web.eex")
@@ -81,6 +83,8 @@ defmodule Samen.Gen.Templates do
   @home_live_ex File.read!(Path.join(@templates_dir, "home_live_ex.eex"))
   @external_resource Path.join(@templates_dir, "m_app_resources.eex")
   @m_app_resources File.read!(Path.join(@templates_dir, "m_app_resources.eex"))
+  @external_resource Path.join(@templates_dir, "m_approvals.eex")
+  @m_approvals File.read!(Path.join(@templates_dir, "m_approvals.eex"))
   @external_resource Path.join(@templates_dir, "m_ash_functions.eex")
   @m_ash_functions File.read!(Path.join(@templates_dir, "m_ash_functions.eex"))
   @external_resource Path.join(@templates_dir, "m_aud_event.eex")
@@ -184,6 +188,7 @@ defmodule Samen.Gen.Templates do
       {"lib/<%= otp_app %>/billing.ex", billing_ex()},
       {"lib/<%= otp_app %>/vertical.ex", vertical_ex()},
       {"lib/<%= otp_app %>/aggregate.ex", aggregate_ex()},
+      {"lib/<%= otp_app %>/approvals.ex", approvals_ex()},
       {"priv/repo/migrations/20260705010000_ash_functions.exs", m_ash_functions()},
       {"priv/repo/migrations/20260705010100_oban.exs", m_oban()},
       {"priv/repo/migrations/20260705010200_vault_tables.exs", m_vault()},
@@ -195,6 +200,7 @@ defmodule Samen.Gen.Templates do
       {"priv/repo/migrations/20260706070000_tnt_field.exs", m_tnt_field()},
       {"priv/repo/migrations/20260706080000_tnt_object_record.exs", m_tnt_object_record()},
       {"priv/repo/migrations/20260709100000_app_resources.exs", m_app_resources()},
+      {"priv/repo/migrations/20260709150000_add_approvals.exs", m_approvals()},
       {"priv/ci_bootstrap.exs", ci_bootstrap()},
       {"priv/anti_tautology_probe.exs", anti_tautology_probe()},
       {"test/test_helper.exs", test_helper()},
@@ -378,6 +384,11 @@ defmodule Samen.Gen.Templates do
   # ------------------------------------------------------------------ lib
   defp application_ex, do: @application_ex
 
+  # T37h — the per-app Approvals engine client (ADR-040 §4.7/T35, folded into
+  # `mix samen.gen.app` so a generated app's reveal-approve routes through
+  # `Samen.Approvals`, not the pre-T35 inline fallback).
+  defp approvals_ex, do: @approvals_ex
+
   defp repo_ex do
     """
     defmodule <%= module %>.Repo do
@@ -442,6 +453,7 @@ defmodule Samen.Gen.Templates do
   defp m_tnt_object_record, do: @m_tnt_object_record
 
   defp m_app_resources, do: @m_app_resources
+  defp m_approvals, do: @m_approvals
 
   # ------------------------------------------------------------------ priv scripts
   defp ci_bootstrap, do: @ci_bootstrap

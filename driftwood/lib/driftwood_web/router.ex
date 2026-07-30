@@ -169,6 +169,18 @@ defmodule DriftwoodWeb.Router do
       labels: @current_org_labels
     )
 
+    # ADR-039 §12 done-criterion 4 / T118 — the tenant AUTOMATION (workflow)
+    # builder, mounted over Driftwood's Automation domain (`Driftwood.Automation`,
+    # T39/T118's first vertical adoption) in ONE line. Tenant plane ONLY — the
+    # macro accepts no `:plane` option (INV-2; see
+    # `Samen.Web.Router.samen_automation_routes/3`'s moduledoc). The operator-plane
+    # counterpart (run log + kill-switch) is the separate, already-mounted
+    # `Samen.Web.Operator.AutomationHealthLive` above (`samen_operator_routes/2`).
+    samen_automation_routes(:automation, Driftwood.Automation,
+      repo: Driftwood.Repo,
+      labels: @current_org_labels
+    )
+
     # WS-E E5 (ADR-029) — the framework SELF-SERVE SETTINGS surface (Profile · API keys ·
     # Security), mounted over Driftwood's Identity namespace (`Driftwood.Operator.{User,
     # ApiKey,Membership}`) in ONE line. GATE PROBE (E5.4): the `samen_settings_routes`

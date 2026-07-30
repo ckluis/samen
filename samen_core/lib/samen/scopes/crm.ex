@@ -44,8 +44,12 @@ defmodule Samen.Scopes.Crm do
     * `Demo.Crm.Person`      — a CRM contact 🔒 (name/emails/phones vault-routed)
     * `Demo.Crm.Pipeline`    — Tier-0 config rows (deal-stage catalog per org)
     * `Demo.Crm.Opportunity` — a deal linked to a company + pipeline stage
-    * `Demo.Crm.Activity`    — a call/email/meeting/note linked to any CRM object
     * `Demo.Crm.Attachment`  — a file reference linked to any CRM object
+
+  The former `Demo.Crm.Activity` (call/email/meeting/note) was destructively
+  migrated into the canonical Work-scope `Task` and removed (ADR-041 §5, ruling
+  M5). The CRM detail timeline now reads `Samen.Scopes.Work.Task` through the
+  generic `(subject_key, subject_id)` object-ref anchor.
 
   ## Abbrevs (permanent, registry-checked)
 
@@ -56,18 +60,23 @@ defmodule Samen.Scopes.Crm do
     * `Demo.Crm.Person`      → `per`
     * `Demo.Crm.Pipeline`    → `pip`
     * `Demo.Crm.Opportunity` → `opp`
-    * `Demo.Crm.Activity`    → `act`
     * `Demo.Crm.Attachment`  → `att`
+
+  The `act` reservation (former `Activity`) is RETIRED-in-place (ADR-041 §5.6):
+  abbrevs are never recycled and the registry is HANDS-OFF, so the orphaned `act`
+  row is retained as an inert retired reservation — not deleted.
 
   The macro does NOT invent abbrevs. Defaults are provided for the demo mount.
   """
 
+  # `activity: "act"` was REMOVED (ADR-041 §5, ruling M5) — the CRM Activity resource
+  # was migrated into the canonical Work-scope Task and dropped. The `act` registry row
+  # is retired-in-place, never recycled (§5.6); this map no longer mints an Activity.
   @default_abbrevs %{
     company: "cmp",
     person: "per",
     pipeline: "pip",
     opportunity: "opp",
-    activity: "act",
     attachment: "att"
   }
 
@@ -88,19 +97,18 @@ defmodule Samen.Scopes.Crm do
     person_mod = Module.concat(namespace, Person)
     pipeline_mod = Module.concat(namespace, Pipeline)
     opportunity_mod = Module.concat(namespace, Opportunity)
-    activity_mod = Module.concat(namespace, Activity)
     attachment_mod = Module.concat(namespace, Attachment)
 
     quote do
       require Samen.Scopes.Crm.Blueprint
 
-      # Register the six CRM resources in the host domain.
+      # Register the five CRM resources in the host domain (Activity removed —
+      # ADR-041 §5, migrated into the canonical Work-scope Task).
       resources do
         resource(unquote(company_mod))
         resource(unquote(person_mod))
         resource(unquote(pipeline_mod))
         resource(unquote(opportunity_mod))
-        resource(unquote(activity_mod))
         resource(unquote(attachment_mod))
       end
 
@@ -140,16 +148,8 @@ defmodule Samen.Scopes.Crm do
         unquote(pipeline_mod)
       )
 
-      Samen.Scopes.Crm.Blueprint.define_activity(
-        unquote(activity_mod),
-        unquote(otp_app),
-        unquote(domain),
-        unquote(repo),
-        unquote(abbrevs.activity),
-        unquote(company_mod),
-        unquote(person_mod),
-        unquote(opportunity_mod)
-      )
+      # define_activity REMOVED (ADR-041 §5, ruling M5) — Activity migrated into the
+      # canonical Work-scope Task (`Samen.Scopes.Work.Task`) and dropped by T97.
 
       Samen.Scopes.Crm.Blueprint.define_attachment(
         unquote(attachment_mod),

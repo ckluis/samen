@@ -69,7 +69,7 @@ defmodule Samen.Gen.PostTemplates do
         domain: <%= scope_module %>,
         data_layer: AshPostgres.DataLayer,
         authorizers: [Ash.Policy.Authorizer],
-        abbrev: "<%= abbrev %>"
+        abbrev: "<%= abbrev %>"<%= archivable_opt %>
 
       postgres do
         table("<%= table %>")
@@ -188,7 +188,7 @@ defmodule Samen.Gen.PostTemplates do
           add(:<%= abbrev %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
           add(:<%= abbrev %>_org_id, :uuid, null: false)
           add(:<%= abbrev %>_inserted_at, :utc_datetime, null: false)
-          add(:<%= abbrev %>_updated_at, :utc_datetime, null: false)
+          add(:<%= abbrev %>_updated_at, :utc_datetime, null: false)<%= archived_at_migration_line %>
         end
 
         # ---- catalog the resource in THIS transaction ----
@@ -427,6 +427,82 @@ defmodule Samen.Gen.PostTemplates do
   # otherwise). No hand-masking, no `vt_*` token ever reaches a template.
   # ===========================================================================
 
+  # ===========================================================================
+  # `--live --archivable` (ADR-040 §5.8, T37h) — the generated index LiveView's
+  # restore + archived-filter affordance. Pre-resolved snippets (Elixir string
+  # interpolation for `resource_path`, never a literal `<%= key %>` left for the
+  # OUTER single-pass `<%= key %>` engine to maybe-catch on a later binding — map
+  # iteration order over `Samen.Gen.App.render/2`'s bindings is not guaranteed).
+  # `false` clauses reproduce the exact pre-T37h plain-delete behavior.
+  # ===========================================================================
+
+  @doc false
+  def archivable_live_events(false, _resource_path), do: ""
+
+  def archivable_live_events(true, resource_path) do
+    "\n" <>
+      "      def handle_event(\"toggle_archived\", _params, socket) do\n" <>
+      "        show_archived = not Map.get(socket.assigns, :show_archived, false)\n" <>
+      "        {:noreply, socket |> assign(show_archived: show_archived) |> load(socket.assigns.org_id)}\n" <>
+      "      end\n" <>
+      "\n" <>
+      "      # FAIL-HONEST restore: navigate/refresh only when the restore actually happened.\n" <>
+      "      def handle_event(\"restore\", %{\"id\" => id}, socket) do\n" <>
+      "        scope = scope(socket.assigns.org_id)\n" <>
+      "\n" <>
+      "        case Enum.find(socket.assigns.records, &(to_string(&1.id) == id)) do\n" <>
+      "          nil ->\n" <>
+      "            {:noreply, socket}\n" <>
+      "\n" <>
+      "          record ->\n" <>
+      "            case Samen.Archival.restore(record, scope: scope) do\n" <>
+      "              {:ok, _} -> {:noreply, load(assign(socket, delete_error: nil), socket.assigns.org_id)}\n" <>
+      "              {:error, _} -> {:noreply, assign(socket, delete_error: \"Could not restore this #{resource_path}.\")}\n" <>
+      "            end\n" <>
+      "        end\n" <>
+      "      end"
+  end
+
+  @doc false
+  def archivable_live_toggle_button(false, _resource_path), do: ""
+
+  def archivable_live_toggle_button(true, resource_path) do
+    "<.button :if={not @no_org} phx-click=\"toggle_archived\" id=\"toggle-archived-#{resource_path}\">" <>
+      "{if @show_archived, do: \"Hide archived\", else: \"Show archived\"}</.button>"
+  end
+
+  @doc false
+  def archivable_live_row_action(false, _resource_path),
+    do: ~s(<.delete_confirm phx-click="delete" phx-value-id={r.id} />)
+
+  def archivable_live_row_action(true, resource_path) do
+    "<%= if r.archived_at do %>" <>
+      "<.pill variant=\"mut\">archived</.pill> " <>
+      "<.button phx-click=\"restore\" phx-value-id={r.id} class=\"restore-#{resource_path}\">Restore</.button>" <>
+      "<% else %><.delete_confirm phx-click=\"delete\" phx-value-id={r.id} /><% end %>"
+  end
+
+  @doc false
+  def archivable_read_records_fn(false) do
+    "defp read_records(scope, _show_archived?) do\n" <>
+      "        Resource\n" <>
+      "        |> Ash.read!(scope: scope)\n" <>
+      "      end"
+  end
+
+  def archivable_read_records_fn(true) do
+    "defp read_records(scope, true) do\n" <>
+      "        Resource\n" <>
+      "        |> Ash.Query.for_read(:archived)\n" <>
+      "        |> Ash.read!(scope: scope)\n" <>
+      "      end\n" <>
+      "\n" <>
+      "      defp read_records(scope, false) do\n" <>
+      "        Resource\n" <>
+      "        |> Ash.read!(scope: scope)\n" <>
+      "      end"
+  end
+
   @doc "The INDEX LiveView — a kit `data_table` list + a `modal`/`simple_form` create."
   def resource_index_live do
     ~S'''
@@ -474,13 +550,20 @@ defmodule Samen.Gen.PostTemplates do
           new_form: nil,
           delete_error: nil
         )
+        |> assign_new(:show_archived, fn -> false end)
       end
 
       def load(socket, org_id) do
         scope = scope(org_id)
+        show_archived = Map.get(socket.assigns, :show_archived, false)
 
         socket
-        |> assign(no_org: false, org_id: org_id, records: read_records(scope))
+        |> assign(
+          no_org: false,
+          org_id: org_id,
+          show_archived: show_archived,
+          records: read_records(scope, show_archived)
+        )
         |> assign_new(:show_new, fn -> false end)
         |> assign_new(:delete_error, fn -> nil end)
         |> assign(new_form: create_form(scope))
@@ -528,7 +611,7 @@ defmodule Samen.Gen.PostTemplates do
             end
         end
       end
-
+      <%= archivable_live_events %>
       # `?org=` selects the tenant org; the actor carries `plane: :tenant`, so its OWN
       # org's PII resolves in CLEAR through `Samen.Api.PiiResolution` (never hand-masked,
       # never a `vt_*` token). `role: :admin` clears the kernel's admin write gate.
@@ -536,10 +619,7 @@ defmodule Samen.Gen.PostTemplates do
         %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: :admin, plane: :tenant}}
       end
 
-      defp read_records(scope) do
-        Resource
-        |> Ash.read!(scope: scope)
-      end
+      <%= archivable_read_records_fn %>
 
       defp create_form(scope) do
         Resource
@@ -564,6 +644,7 @@ defmodule Samen.Gen.PostTemplates do
 
             <.topbar title="<%= resource %>" crumbs={["<%= module %>", "<%= scope %>", "<%= resource %>"]}>
               <:actions>
+                <%= archivable_live_toggle_button %>
                 <.button :if={not @no_org} variant="primary" phx-click="new" id="new-<%= resource_path %>">New <%= resource %></.button>
               </:actions>
             </.topbar>
@@ -602,7 +683,7 @@ defmodule Samen.Gen.PostTemplates do
                       </td>
                       <td style="color:var(--muted)">{r.label || "—"}</td>
                       <td><.pill variant={status_variant(r.status)}>{r.status}</.pill></td>
-                      <td><.delete_confirm phx-click="delete" phx-value-id={r.id} /></td>
+                      <td><%= archivable_live_row_action %></td>
                     </tr>
                   </.data_table>
                 <% end %>

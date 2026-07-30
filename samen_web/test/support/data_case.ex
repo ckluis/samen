@@ -159,6 +159,7 @@ defmodule Samen.WebTest.DataCase do
   defp namespace(:crm), do: Samen.WebTest.Crm
   defp namespace(:billing), do: Samen.WebTest.Billing
   defp namespace(:support), do: Samen.WebTest.Support
+  defp namespace(:work), do: Samen.WebTest.Work
   defp namespace(:marketing), do: Samen.WebTest.Marketing
   defp namespace(:notifications), do: Samen.WebTest.Primitives
   defp namespace(:flags), do: Samen.WebTest.Primitives
@@ -171,4 +172,8 @@ defmodule Samen.WebTest.DataCase do
   # ADR-035 — the pre-actor auth surfaces ride the SAME Identity mount as settings
   # (Credential/AuthToken/Org/User/Membership all live under Operator in this test host).
   defp namespace(:auth), do: Samen.WebTest.Operator
+  # T118 (ADR-039 §12 done-criterion 4) — the tenant automation builder rides the
+  # SAME `Samen.WebTest.Automation` direct mount T42's health-view test already uses
+  # (test/support/automation.ex) — `Workflow` is the resource this surface touches.
+  defp namespace(:automation), do: Samen.WebTest.Automation
 end

@@ -51,6 +51,16 @@
 # `:code.priv_dir(:samen_core)` at ITS compile time), and the physical file is restored from
 # the scratch copy on exit. The scratch copy is the source of truth for the restore.
 #
+# T107 (interrupt hardening): both the scratch app dir and the registry snapshot are now
+# created via real OS `mktemp`/`mktemp -d` (unique-per-run, collision-immune by construction
+# — a pre-planted stray file with a colliding-shaped name cannot break the run, unlike the
+# old nanosecond-timestamp naming). A `:sigterm` trap (`System.trap_signal/3`) runs `cleanup.()`
+# for defense-in-depth when this probe is invoked directly (outside ci.sh). NOTE: `:sigint` is
+# NOT trappable inside the BEAM (`System.trap_signal/3` has no :sigint clause) — the
+# AUTHORITATIVE interrupt backstop for both SIGINT and SIGTERM is the OS-level snapshot+trap
+# wrapper in root `ci.sh` (`run_gen_probe`), which restores the registry byte-exact regardless
+# of whether this process gets a chance to run its own cleanup at all.
+#
 # Run:  cd samen_core && mix run priv/gen_app_flagship_probe.exs
 # Exit: 0 only if the FULL running product generated with zero hand-edits, its ci.sh passed,
 #       it seeded + booted + served every route, and BOTH sabotages flipped the gate and
@@ -86,17 +96,25 @@ resource_abbrev = identity.abbrev
 http_port = 4990 + rem(System.unique_integer([:positive]), 90)
 
 samen_core_root = Gen.default_target() |> Path.join("samen_core")
-scratch_parent = Path.join([samen_core_root, "..", "_gen_flagship_scratch"]) |> Path.expand()
+scratch_root = Path.expand(Path.join(samen_core_root, ".."))
 
-File.rm_rf!(scratch_parent)
-File.mkdir_p!(scratch_parent)
+# T107: real `mktemp -d` — atomic, collision-immune, unique per run (was a fixed
+# `_gen_flagship_scratch` name; two concurrent/orphaned runs of this probe could clash).
+{scratch_parent_out, 0} =
+  System.cmd("mktemp", ["-d", Path.join(scratch_root, "_gen_flagship_scratch.XXXXXX")])
+
+scratch_parent = String.trim(scratch_parent_out)
 
 # --- REGISTRY SAFETY: snapshot the committed registry to a scratch/tmp copy FIRST -----
 registry_path = Samen.AbbrevRegistry.path()
 registry_pristine = File.read!(registry_path)
 
-registry_scratch =
-  Path.join(System.tmp_dir!(), "flagship_registry_pristine_#{System.system_time(:nanosecond)}.json")
+# T107: real `mktemp` (was a nanosecond-timestamp name) — atomically-created, guaranteed
+# non-colliding even against a pre-planted stray file with the same naming shape.
+{registry_scratch_out, 0} =
+  System.cmd("mktemp", [Path.join(System.tmp_dir!(), "flagship_registry_pristine.XXXXXX")])
+
+registry_scratch = String.trim(registry_scratch_out)
 
 File.write!(registry_scratch, registry_pristine)
 
@@ -122,6 +140,19 @@ halt = fn code, msg ->
   IO.puts(msg)
   cleanup.()
   System.halt(code)
+end
+
+# T107: SIGTERM defense-in-depth for standalone invocation (outside ci.sh). `:sigint` has
+# no trap clause inside the BEAM — see the T107 note above the REGISTRY SAFETY section.
+# SAMEN_T107_DISABLE_INNER_TRAP=1 skips installing this trap — used ONLY by
+# scripts/interrupt_probe_test.sh's negative control, to isolate proof of the OUTER
+# ci.sh-level trap (scripts/gen_probe_guard.sh) without this inner layer masking it.
+if System.get_env("SAMEN_T107_DISABLE_INNER_TRAP") != "1" do
+  System.trap_signal(:sigterm, :t107_flagship_probe_sigterm, fn ->
+    IO.puts("\nFATAL: SIGTERM received — restoring registry from snapshot before exit.")
+    cleanup.()
+    System.halt(143)
+  end)
 end
 
 IO.puts("== WS-D D6 FLAGSHIP probe (AC-X-1): --web --api --seeds --observability ==")
@@ -329,7 +360,7 @@ try do
   api_org = Ecto.UUID.generate()
   api_secret = "SECRET-FLAGSHIP-\#{System.unique_integer([:positive])}"
 
-  {:ok, _record} =
+  {:ok, flagship_record} =
     #{module}.Vertical.Record
     |> Ash.Changeset.for_create(:create, %{
       org_id: api_org,
@@ -338,6 +369,82 @@ try do
       secret: api_secret
     })
     |> Ash.create(authorize?: false)
+
+  # --- T37h (ADR-040 §5.8): the default-archivable Vertical.Record — archive → hidden
+  #     from the default read → restore → visible again, on THIS generated app's real DB.
+  {:ok, flagship_archived} = Samen.Archival.archive(flagship_record, authorize?: false)
+
+  if flagship_archived.archived_at == nil do
+    IO.puts("FLAGSHIP FAIL: Samen.Archival.archive/2 did not set archived_at on Vertical.Record")
+    System.halt(1)
+  end
+
+  if Enum.any?(Ash.read!(#{module}.Vertical.Record, authorize?: false), &(&1.id == flagship_record.id)) do
+    IO.puts("FLAGSHIP FAIL: archived Vertical.Record is STILL visible in the default read")
+    System.halt(1)
+  end
+
+  {:ok, flagship_restored} = Samen.Archival.restore(flagship_archived, authorize?: false)
+
+  if flagship_restored.archived_at != nil do
+    IO.puts("FLAGSHIP FAIL: Samen.Archival.restore/2 did not clear archived_at")
+    System.halt(1)
+  end
+
+  unless Enum.any?(Ash.read!(#{module}.Vertical.Record, authorize?: false), &(&1.id == flagship_record.id)) do
+    IO.puts("FLAGSHIP FAIL: restored Vertical.Record is not visible again in the default read")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: §5.8 archive -> hidden -> restore -> visible again on the default-archivable Vertical.Record")
+
+  # --- T37h (gen-approval-golden fold-in): reveal-approve routes THROUGH Samen.Approvals,
+  #     NOT the pre-T35 inline fallback — `mix samen.gen.app` now wires
+  #     `config :samen_core, Samen.Approvals` + emits `lib/#{otp_app}/approvals.ex` +
+  #     its migration, closing the T35 verifier's non-fatal note. Proof: Grants.request/1's
+  #     dual-write opens a REAL pii_reveal Approval row (an unwired host would silently
+  #     no-op there — `open_engine_approval/1` rescues to `:ok`), and Grants.approve/2
+  #     transitions that SAME row to :approved (the inline fallback never touches it —
+  #     a host stuck on the fallback would leave it :pending forever).
+  reveal_subject = "flagship-subject-\#{System.unique_integer([:positive])}"
+  reveal_requestor = "flagship-requestor-\#{System.unique_integer([:positive])}"
+  reveal_granter = "flagship-granter-\#{System.unique_integer([:positive])}"
+
+  baseline_approvals = length(Ash.read!(#{module}.Approvals.Approval, authorize?: false))
+
+  {:ok, reveal_req} =
+    Samen.Reveal.Grants.request(%{
+      subject_id: reveal_subject,
+      requestor_id: reveal_requestor,
+      reason: "flagship-probe-audit-review"
+    })
+
+  after_request_approvals = length(Ash.read!(#{module}.Approvals.Approval, authorize?: false))
+
+  if after_request_approvals != baseline_approvals + 1 do
+    IO.puts("FLAGSHIP FAIL: Grants.request/1 did not open a pii_reveal Approval through " <>
+              "Samen.Approvals (baseline \#{baseline_approvals}, after \#{after_request_approvals}) " <>
+              "— reveal-approve is on the pre-T35 inline fallback, not the engine.")
+    System.halt(1)
+  end
+
+  {:ok, _reveal_grant} = Samen.Reveal.Grants.approve(reveal_req, %{granted_by: reveal_granter})
+
+  approval_row =
+    #{module}.Approvals.Approval
+    |> Ash.read!(authorize?: false)
+    |> Enum.find(&(&1.requested_by == reveal_requestor))
+
+  if approval_row == nil or approval_row.state != :approved do
+    IO.puts("FLAGSHIP FAIL: the pii_reveal Approval row did not transition to :approved via " <>
+              "Grants.approve/2 (found \#{inspect(approval_row && approval_row.state)}) — " <>
+              "reveal-approve did NOT route through Samen.Approvals.")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: T37h reveal-approve routes THROUGH Samen.Approvals (Approval opened by " <>
+            "Grants.request/1, approved -> :approved by Grants.approve/2) — not the pre-T35 " <>
+            "inline fallback.")
 
   {:ok, api_user} =
     #{module}.Operator.User

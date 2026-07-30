@@ -71,9 +71,9 @@ defmodule Samen.Web.Auth.AuthEventsTest do
   alias Samen.Identity.Invite
   alias Samen.Identity.Register
   alias Samen.Web.Auth
+  alias Samen.Web.Auth.AccountController
   alias Samen.Web.Auth.ConfirmLive
   alias Samen.Web.Auth.OidcController
-  alias Samen.Web.Auth.ResetLive
   alias Samen.Web.Auth.SessionController
   alias Samen.Web.Auth.Totp
   alias Samen.Web.Auth.TotpEnrollLive
@@ -575,7 +575,11 @@ defmodule Samen.Web.Auth.AuthEventsTest do
       session = mount_session(mount())
 
       {:ok, socket} = ConfirmLive.mount(%{"token" => result.raw_verify_token}, session, %Phoenix.LiveView.Socket{})
-      assert socket.assigns.verified?
+      # T126 — the dead-render consume now REDIRECTS to the ?verified=1 status
+      # flag (the double-mount guard). The consume itself still fired on this
+      # mount, proven by the audit + notify assertions below.
+      assert {:redirect, %{to: to}} = socket.redirected
+      assert to =~ "verified=1"
 
       assert_notified!(user.id, "auth.email_verified")
       assert_audited!(result.credential.id, "identity.email_verified")
@@ -587,18 +591,24 @@ defmodule Samen.Web.Auth.AuthEventsTest do
   # ===========================================================================
 
   describe "ADR-035 A10 — auth.password_reset (closes T03's notify half)" do
-    test "notified + audited on a real PUT /reset/:token consume" do
+    test "notified + audited on a real POST /reset/:token consume (T110 no-JS controller fallback)" do
       result = register!()
       user = user_for!(result.credential.id)
       {:ok, _auth_token, raw_token} = TokenMint.mint(AuthToken, result.credential.id, :password_reset, nil, 3600)
 
-      session = mount_session(mount())
-      {:ok, socket} = ResetLive.mount(%{"token" => raw_token}, session, %Phoenix.LiveView.Socket{})
+      # T110 — the real `Reset.consume/3` (and its audit + notify fan-out) runs
+      # in `AccountController.reset/2`, the no-JS POST fallback the browser hits
+      # (the LiveView `handle_event` now only arms `phx-trigger-action`).
+      conn =
+        session_conn(:post, "/reset/#{raw_token}")
+        |> put_private(:samen_mount, mount())
+        |> put_private(:samen_reset_path, "/reset")
+        |> AccountController.reset(%{"token" => raw_token, "reset" => %{"password" => "a whole new passphrase"}})
 
-      {:noreply, socket} =
-        ResetLive.handle_event("reset", %{"reset" => %{"password" => "a whole new passphrase"}}, socket)
-
-      assert socket.assigns.reset?
+      # Success redirects back with the NON-secret flag — never the new password.
+      location = get_resp_header(conn, "location") |> List.first()
+      assert location =~ "reset=1"
+      refute location =~ "passphrase"
 
       assert_notified!(user.id, "auth.password_reset")
       assert_audited!(result.credential.id, "identity.password_reset")

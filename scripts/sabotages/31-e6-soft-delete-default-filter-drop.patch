@@ -1,0 +1,24 @@
+# SABOTAGE: E6 soft-delete gate (ADR-040 §5.2/§5.5, ADR-037 §5.3, T36) — the default read filter.
+# E6 is implemented ON ash_archival; the default `is_nil(archived_at)` read filter is its
+# FilterArchived preparation. Samen's `archivable true` sugar excludes ONLY the `:archived`
+# trash read from that filter. This sabotage widens the exclusion to cover the primary
+# `:read`, so archived rows LEAK into default reads/list — proving the filter application is
+# load-bearing (ADR-037 §5.3 documented leak surface).
+# APP: samen_core
+# TEST_FILES: test/soft_delete_test.exs
+# MUST_FAIL: archive removes from default read
+# MUST_FAIL: the DEFAULT destroy is now SOFT
+diff --git a/samen_core/lib/samen/resource.ex b/samen_core/lib/samen/resource.ex
+--- a/samen_core/lib/samen/resource.ex
++++ b/samen_core/lib/samen/resource.ex
+@@ -159,7 +159,9 @@ defmodule Samen.Resource do
+         # Preparation variant (ADR-037 §5.3): base_filter? stays the package default
+         # (false) so :restore is possible. The trash read shows archived rows; the
+         # terminal destroy stays a real hard delete.
+-        exclude_read_actions([:archived])
++        # SABOTAGE (T36 E6): the default :read is excluded from ash_archival's
++        # FilterArchived, so archived rows LEAK into default reads/list. Named tests MUST fail.
++        exclude_read_actions([:archived, :read])
+         exclude_destroy_actions([:destroy_permanently])
+       end
+     end

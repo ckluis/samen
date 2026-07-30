@@ -143,7 +143,7 @@ defmodule Samen.Web.Auth.SessionController do
     # (an `email_bidx` HMAC + two counter bumps, identical either way), so it adds no
     # enumeration timing signal on top of `SignIn.authenticate/3`'s own dummy-verify
     # parity (ADR-035 §4.4). Over-limit → a generic 429, the same for any caller.
-    case rate_limit_signin(conn, email) do
+    case rate_limit_signin(conn, mount, email) do
       :ok ->
         case SignIn.authenticate(email, password, sign_in_mods(mount)) do
           {:ok, %{totp_enabled_at: enabled_at} = credential} when not is_nil(enabled_at) ->
@@ -245,6 +245,16 @@ defmodule Samen.Web.Auth.SessionController do
         if login_failed_edge?(:credential, to_string(credential_id)) do
           Audit.auth_event(mount.repo, event: "auth.login_failed", subject_id: credential_id, actor_id: credential_id)
         end
+
+        # ADR-038 §6.4 (T109) — durable bump for the credential-keyed axis, same
+        # cadence as the ETS counter above, independent of the O(windows)-bounded
+        # audit-edge decision (see `Samen.Identity.LoginFailure`'s moduledoc).
+        Samen.Identity.LoginFailure.bump!(
+          Mount.resource(mount, LoginFailure),
+          :credential,
+          to_string(credential_id),
+          login_failed_window_seconds()
+        )
 
         redirect(conn, to: "#{totp_path(conn)}?error=1")
     end
@@ -381,6 +391,10 @@ defmodule Samen.Web.Auth.SessionController do
         # is `—` for `auth.login`).
         Audit.auth_event(mount.repo, event: "auth.login", subject_id: credential_id, actor_id: credential_id)
 
+        # ADR-038 §6.4 (T109) — "successful login -> reset": clear the durable
+        # brute-force signal for BOTH key axes now that a real session minted.
+        reset_login_failures(mount, credential_id)
+
         conn
         |> configure_session(renew: true)
         |> Auth.put_session_token(raw_token)
@@ -421,7 +435,21 @@ defmodule Samen.Web.Auth.SessionController do
   # token-blind default detail (T101's per-kind findability holds: subject_id is still set
   # when the email resolves, so the row is findable via `Samen.AuditEvent.for_subject/2`).
   defp audit_login_failed(mount, email) do
-    edge? = login_failed_edge?(:email_bidx, login_failed_bidx(email))
+    bidx = login_failed_bidx(email)
+    edge? = login_failed_edge?(:email_bidx, bidx)
+
+    # ADR-038 §6.4 (T109) — durable bump: every failed attempt (the SAME cadence
+    # as the ETS counter above), independent of the O(windows)-bounded audit-edge
+    # decision — the durable count tracks every attempt exactly like T103's ETS
+    # counter does, so it survives a restart (see `Samen.Identity.LoginFailure`'s
+    # moduledoc). `bidx` is the non-reversible HMAC even for an unresolvable
+    # email (never the plaintext), so this adds no new PII surface.
+    Samen.Identity.LoginFailure.bump!(
+      Mount.resource(mount, LoginFailure),
+      :email_bidx,
+      bidx,
+      login_failed_window_seconds()
+    )
 
     case lookup_credential_id_for_audit(mount, email) do
       {:ok, credential_id} ->
@@ -431,6 +459,41 @@ defmodule Samen.Web.Auth.SessionController do
       :error ->
         if edge?, do: Audit.auth_event(mount.repo, event: "auth.login_failed")
     end
+  end
+
+  # ADR-038 §6.4 (T109) — "successful login -> reset": clears BOTH durable key
+  # axes for this credential (the password-path `email_bidx` key AND the
+  # 2FA-path `credential` key) the instant a real session mints. Independent of
+  # T103's ETS behavior (which merely lets a window lapse) — a genuine login
+  # always fully clears the durable brute-force signal.
+  defp reset_login_failures(mount, credential_id) do
+    login_failure_mod = Mount.resource(mount, LoginFailure)
+    Samen.Identity.LoginFailure.reset!(login_failure_mod, :credential, to_string(credential_id))
+
+    case lookup_email_bidx(mount, credential_id) do
+      {:ok, bidx} -> Samen.Identity.LoginFailure.reset!(login_failure_mod, :email_bidx, bidx)
+      :error -> :ok
+    end
+  end
+
+  defp lookup_email_bidx(mount, credential_id) do
+    Mount.resource(mount, Credential)
+    |> Ash.Query.filter(id == ^credential_id)
+    |> Ash.Query.select([:email_bidx])
+    |> Ash.Query.limit(1)
+    |> Ash.read!(authorize?: false)
+    |> case do
+      [%{email_bidx: bidx}] -> {:ok, bidx}
+      _ -> :error
+    end
+  end
+
+  # The bounded audit-edge counter's own window (900s / 15min, `login_failed_audit`
+  # in `Samen.Web.RateLimit`'s `@default_limits`) doubles as the durable resource's
+  # window — ONE source of truth, never a duplicated literal.
+  defp login_failed_window_seconds do
+    {_limit, window_ms} = RateLimit.limit_for(:login_failed_audit)
+    div(window_ms, 1000)
   end
 
   # The `email_bidx` (ADR-035 §4.1) is the non-PII failure-counter key; an email that
@@ -544,9 +607,9 @@ defmodule Samen.Web.Auth.SessionController do
   # one IP is caught by the IP budget; a resolvable email is additionally caught per
   # account when an IP-rotating attacker hammers ONE account. Both counters increment on
   # every attempt regardless of whether the account exists (no existence oracle).
-  defp rate_limit_signin(conn, email) do
+  defp rate_limit_signin(conn, mount, email) do
     with :ok <- RateLimit.check(:signin_ip, :ip, remote_ip(conn)) do
-      signin_account_check(email)
+      signin_account_check(mount, email)
     end
   end
 
@@ -554,10 +617,40 @@ defmodule Samen.Web.Auth.SessionController do
   # (known or not), so the per-account bucket is bumped identically. A malformed email
   # that cannot produce a bidx skips the account axis (still covered by the per-IP axis)
   # — that is an email-VALIDITY branch, never an account-EXISTENCE branch.
-  defp signin_account_check(email) do
+  defp signin_account_check(mount, email) do
     case Samen.Auth.BlindIndex.compute(email) do
-      {:ok, bidx} -> RateLimit.check(:signin_account, :email_bidx, bidx)
-      _ -> :ok
+      {:ok, bidx} ->
+        with :ok <- RateLimit.check(:signin_account, :email_bidx, bidx) do
+          durable_signin_check(mount, bidx)
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  # ADR-038 §6.4 (T109) — the restart-survival re-check, ADDITIONAL to (never in
+  # place of) the ETS check above. `Samen.Web.RateLimit`'s ETS table is wiped by a
+  # node restart, which alone would silently hand a still-locked-out attacker a
+  # fresh budget; this durable re-check refuses the SAME `email_bidx` key while
+  # its durable window is still live and already at/over the SAME `:signin_account`
+  # limit, so the lockout survives a restart. This can only make the gate STRICTER
+  # than the ETS check alone (it runs strictly after an `:ok` from RateLimit.check),
+  # never weaker — T103's rate-limiting policy is never loosened.
+  defp durable_signin_check(mount, bidx) do
+    {limit, _window_ms} = RateLimit.limit_for(:signin_account)
+    window_seconds = login_failed_window_seconds()
+
+    if Samen.Identity.LoginFailure.over_limit?(
+         Mount.resource(mount, LoginFailure),
+         :email_bidx,
+         bidx,
+         limit,
+         window_seconds
+       ) do
+      {:error, :rate_limited}
+    else
+      :ok
     end
   end
 

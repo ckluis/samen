@@ -81,6 +81,8 @@ defmodule Samen.Gen.App do
     # derived aggregate abbrev / table
     :agg_abbrev,
     :agg_table,
+    # T37h — the per-app Approvals engine client's abbrev (ADR-040 §4.7/T35 fold-in)
+    :approval_abbrev,
     # WS-D D2 (ADR-022): the web layer — flag + derived web-plane abbrevs + port
     web?: true,
     port: 4050,
@@ -173,6 +175,11 @@ defmodule Samen.Gen.App do
     agg_abbrev = prefix <> "a"
     agg_table = "#{agg_abbrev}_record_count"
 
+    # T37h — the per-app Approval resource's abbrev (ADR-040 §4.7/T35 fold-in). `z` is
+    # unused by the prefix-derived billing (c/s/l/p/i/y/u/e/v) or aggregate (a) suffix
+    # letters, so `<prefix>z` cannot collide with either family.
+    approval_abbrev = prefix <> "z"
+
     # WS-D D2 (ADR-022): the web layer is ON by default; `--headless` (web: false)
     # reproduces the original data-only output exactly.
     web? = Keyword.get(opts, :web, true)
@@ -235,6 +242,13 @@ defmodule Samen.Gen.App do
           # shipped `dos`/`doi` and `wos`/`woi` prove the `<p1>o` + first-letter shape.
           session: p1 <> "os",
           user_identity: p1 <> "oi",
+          # ADR-038 §6.4 (T109) — the durable brute-force failure counter.
+          # Prefix-derived (`<p1>ol`), NEVER `Samen.Scopes.Identity`'s literal
+          # `dil` default: that is ALREADY permanently owned in the committed
+          # registry (`hosts.demo.dil`), so falling back to it on every
+          # generated app would collide on the first run — the same reasoning
+          # `credential`/`auth_token`/`session`/`user_identity` document above.
+          login_failure: p1 <> "ol",
           # Billing — each tenant's subscription TO the SaaS
           customer: p1 <> "pc",
           subscription: p1 <> "ps",
@@ -269,6 +283,7 @@ defmodule Samen.Gen.App do
       billing_abbrevs: billing_abbrevs,
       agg_abbrev: agg_abbrev,
       agg_table: agg_table,
+      approval_abbrev: approval_abbrev,
       web?: web?,
       api?: api?,
       deploy?: deploy?,
@@ -326,7 +341,8 @@ defmodule Samen.Gen.App do
       billing ++
         [
           {s.agg_abbrev, "#{s.module}.Aggregate.RecordCountBySegment"},
-          {s.abbrev, s.resource_module}
+          {s.abbrev, s.resource_module},
+          {s.approval_abbrev, "#{s.module}.Approvals.Approval"}
         ]
 
     if s.web? do
@@ -557,6 +573,7 @@ defmodule Samen.Gen.App do
       :auth_token,
       :session,
       :user_identity,
+      :login_failure,
       :customer,
       :subscription,
       :plan,
@@ -585,6 +602,7 @@ defmodule Samen.Gen.App do
   defp operator_module(:auth_token), do: "AuthToken"
   defp operator_module(:session), do: "Session"
   defp operator_module(:user_identity), do: "UserIdentity"
+  defp operator_module(:login_failure), do: "LoginFailure"
   defp operator_module(:customer), do: "Customer"
   defp operator_module(:subscription), do: "Subscription"
   defp operator_module(:plan), do: "Plan"
@@ -620,6 +638,7 @@ defmodule Samen.Gen.App do
       "resource_table" => s.resource_table,
       "agg_abbrev" => s.agg_abbrev,
       "agg_table" => s.agg_table,
+      "approval_abbrev" => s.approval_abbrev,
       "bc" => ba.customer,
       "bs" => ba.subscription,
       "bl" => ba.plan,
@@ -667,6 +686,7 @@ defmodule Samen.Gen.App do
       "o_atok" => oa.auth_token,
       "o_sess" => oa.session,
       "o_uid" => oa.user_identity,
+      "o_lgf" => oa.login_failure,
       "o_cus" => oa.customer,
       "o_sub" => oa.subscription,
       "o_plan" => oa.plan,

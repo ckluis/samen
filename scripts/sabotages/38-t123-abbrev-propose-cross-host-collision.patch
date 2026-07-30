@@ -1,0 +1,25 @@
+# SABOTAGE: T123 gate sabotage — the abbrev allocator's cross-host collision guard
+# (build-integrity). `Samen.Abbrev.Allocator.propose/3`'s `free?` closure is reverted to
+# its pre-T123 HOST-BLIND shape: it inspects only the CALLING host's own namespace
+# (`host_ns`) + the legacy flat `global` map, never any OTHER host's namespace. That is
+# exactly the bug that let propose auto-hand-back an abbrev already owned by a different
+# host for a different module (T44-T47; T47 persisted it and tripped
+# flatten_conflicts/1's fail-closed "LOSSY FLATTENING" raise, breaking every
+# `use Samen.Resource` compile). With the union check neutralized, propose again returns
+# the cross-host-owned "xyz", so the T123 red-paths MUST fail.
+# APP: samen_core
+# TEST_FILES: test/abbrev_allocator_cross_host_test.exs
+# MUST_FAIL: propose for host A skips host B's "xyz" and picks a fresh abbrev
+# MUST_FAIL: the pre-T123 host-blind check WOULD have returned the colliding "xyz"
+diff --git a/samen_core/lib/samen/abbrev/allocator.ex b/samen_core/lib/samen/abbrev/allocator.ex
+--- a/samen_core/lib/samen/abbrev/allocator.ex
++++ b/samen_core/lib/samen/abbrev/allocator.ex
+@@ -78,7 +78,7 @@ defmodule Samen.Abbrev.Allocator do
+     # auto-hand-back an abbrev already owned by a different host for an unrelated module
+     # (T44-T47; T47 persisted it and tripped flatten_conflicts/1's fail-closed raise,
+     # breaking every `use Samen.Resource` compile — see moduledoc, ADR-023, ADR-025).
+-    free? = fn abbrev -> Enum.all?(owners_of(ns, abbrev), &(&1 == owner)) end
++    free? = fn abbrev -> Enum.all?(Enum.reject([Map.get(host_ns, abbrev), Map.get(global, abbrev)], &is_nil/1), &(&1 == owner)) end
+
+     candidates = candidate_stream(owner)
+

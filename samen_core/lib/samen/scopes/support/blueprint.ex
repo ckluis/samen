@@ -86,7 +86,7 @@ defmodule Samen.Scopes.Support.Blueprint do
   # Ticket — the top-level support ticket. Org-scoped. No PII.
   # Carries an SLA deadline (`sla_breach_at`) set at create time.
   # ---------------------------------------------------------------------------
-  defmacro define_ticket(module, otp_app, domain, repo, abbrev, sla_mod) do
+  defmacro define_ticket(module, otp_app, domain, repo, abbrev, sla_mod, conversation_mod) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -97,13 +97,47 @@ defmodule Samen.Scopes.Support.Blueprint do
         Carries `sla_breach_at` (the computed SLA deadline) and `breached`
         (set to `true` by the `Samen.Scopes.Support.SlaBreachWorker` cron when
         the deadline passes). Linked to an optional `Sla` config row.
+
+        ## Tags (F4/T46 — migrated off this resource)
+
+        Ticket previously carried a bespoke `tags` (`{:array, :string}`) column.
+        F4/T46 migrated every existing ticket's tags to the generic
+        `Samen.Scopes.Tags` `Tag`/`Tagging` mechanism (org-scoped, polymorphic,
+        archivable Tag) and DROPPED this column
+        (`MigrateTicketTagsToTagScope` — a contract-phase, zero-drop, set-based
+        copy; see that migration's moduledoc). Reading a ticket's tags now goes
+        through `Samen.Web.Support.Reads.ticket_tag_names/3` /
+        `Samen.Web.Tags.names_for/4`, anchored by `subject_key =
+        Samen.Web.ObjectRef.Catalog.key_for(Ticket)` (each host's OWN derived
+        key — `"support.ticket"` on driftwood/pawchart/samen_web,
+        `"support_scope.ticket"` on demo).
+
+        ## Soft-delete (ADR-040 §5.9, T37f) — the cascade PARENT of `ticket
+        ▸cascade conversation ▸cascade message`
+
+        Archivable — and the roster's cascade PARENT (§5.4, the ADR's own canonical
+        worked example): archiving a ticket cascades to archive its `Conversation`s
+        AND their `Message`s at the SAME instant
+        (`Samen.Scopes.Support.CascadeArchive`, mirroring `Samen.Scopes.Cms.
+        CascadeArchive`/`Samen.Scopes.Chat.CascadeArchive`, generalized one level
+        deeper: ticket → conversation is direct, conversation → message is direct,
+        so the cascade sweeps conversations by `ticket_id` and then messages by
+        `conversation_id` under those same conversations); restoring a ticket
+        restores exactly the same-instant-archived members
+        (`Samen.Scopes.Support.CascadeRestore`). Per the roster's syntax (no
+        internal commas in `ticket ▸cascade conversation ▸cascade message`,
+        matching chat's `thread ▸cascade participant ▸cascade message` shape, unlike
+        CMS's comma-separated `page ▸cascade block`), `Conversation` and `Message`
+        carry NO independent archive — see their own moduledocs for the
+        `forbid_if(always())` policy lock.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_ticket")
@@ -129,7 +163,6 @@ defmodule Samen.Scopes.Support.Blueprint do
           attribute(:breached, :boolean, public?: true, default: false)
           attribute(:resolved_at, :utc_datetime, public?: true)
           attribute(:closed_at, :utc_datetime, public?: true)
-          attribute(:tags, {:array, :string}, public?: true, default: [])
           attribute(:custom, :map, public?: true)
           # Opaque external ID (Zendesk-style integration reference). Not PII.
           attribute(:external_id, :string, public?: true)
@@ -141,11 +174,34 @@ defmodule Samen.Scopes.Support.Blueprint do
             attribute_type(:uuid)
             allow_nil?(true)
           end
+
+          # The ticket ▸cascade conversation composition (§5.4). Inverse of
+          # Conversation's `belongs_to :ticket`. Used by
+          # `Samen.Scopes.Support.CascadeArchive`/`CascadeRestore` to resolve the
+          # Conversation resource module, and by the scope's §5.5 relationship-load
+          # leak red test.
+          has_many :conversations, unquote(conversation_mod) do
+            public?(true)
+            destination_attribute(:ticket_id)
+          end
         end
 
         # F3.5 same-org FK: a ticket may only reference a same-org sla.
         changes do
           change({Samen.Policy.SameOrgFk, relationships: [:sla]})
+
+          # Ticket ▸ {Conversation, Message} same-instant cascade (§5.4). See
+          # `Samen.Scopes.Support.CascadeArchive`/`CascadeRestore` moduledocs for why
+          # this scope does not use ash_archival's `archive_related` DSL option
+          # directly (timestamp exactness + audit completeness — mirrors
+          # `Samen.Scopes.Cms.CascadeArchive`/`Samen.Scopes.Chat.CascadeArchive`).
+          #
+          # `on:` defaults to `[:create, :update]` (Ash omits `:destroy` by default).
+          # `:archive` IS a `:destroy`-type action, so CascadeArchive needs
+          # `on: [:destroy]` explicitly or it silently never runs. CascadeRestore's
+          # `:restore` is `:update`-typed, already covered by the default.
+          change(Samen.Scopes.Support.CascadeArchive, on: [:destroy])
+          change(Samen.Scopes.Support.CascadeRestore)
         end
 
         actions do
@@ -171,20 +227,38 @@ defmodule Samen.Scopes.Support.Blueprint do
   # Conversation — a thread attached to a ticket. Org-scoped. No PII.
   # A ticket may have multiple conversations (internal/external channels).
   # ---------------------------------------------------------------------------
-  defmacro define_conversation(module, otp_app, domain, repo, abbrev, ticket_mod) do
+  defmacro define_conversation(module, otp_app, domain, repo, abbrev, ticket_mod, message_mod) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
         Support.Conversation — a conversation thread on a ticket (doc scope table
         `conversation`). Groups a sequence of messages. Org-scoped. No PII in the
         conversation record itself — message bodies carry the 🔒 PII.
+
+        ## Soft-delete (ADR-040 §5.9, T37f) — cascade child, NO independent archive
+
+        Archivable (substrate only — carries `archived_at` + the `:archive`/
+        `:restore`/`:archived` actions so `Samen.Scopes.Support.CascadeArchive`/
+        `CascadeRestore` (declared on `Ticket`) have something to set/match/
+        restore), and also the cascade PARENT one level down for `Message`
+        (`conversation ▸cascade message`). Per the roster's syntax (`ticket
+        ▸cascade conversation ▸cascade message`, no internal commas — the same
+        shape as chat's `thread ▸cascade participant ▸cascade message`, NOT CMS's
+        comma-separated `page ▸cascade block`), a conversation is meaningless
+        without its ticket: the `policies` block below `forbid_if(always())`s any
+        actor-driven `:archive`/`:restore` — the ONLY path that ever archives/
+        restores a conversation is the ticket's cascade, which runs
+        `authorize?: false` (bypassing policy checks entirely, same as every other
+        cascade in this foundry) — mirroring `Samen.Scopes.Chat.Blueprint`'s
+        `ChatParticipant`/`ChatMessage` posture exactly.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_conversation")
@@ -212,6 +286,16 @@ defmodule Samen.Scopes.Support.Blueprint do
             attribute_type(:uuid)
             allow_nil?(false)
           end
+
+          # The conversation ▸cascade message composition (§5.4), one level down
+          # from the ticket ▸cascade conversation cascade. Inverse of Message's
+          # `belongs_to :conversation`. Used by
+          # `Samen.Scopes.Support.CascadeArchive`/`CascadeRestore` to resolve the
+          # Message resource module.
+          has_many :messages, unquote(message_mod) do
+            public?(true)
+            destination_attribute(:conversation_id)
+          end
         end
 
         actions do
@@ -232,6 +316,21 @@ defmodule Samen.Scopes.Support.Blueprint do
             forbid_unless(Samen.Policy.OrgScope)
             forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
             authorize_if(always())
+          end
+
+          # No independent archive (§5.4, cascade-only per the roster's no-comma
+          # syntax): reachable ONLY via the ticket's `authorize?: false` cascade
+          # calls (`Samen.Scopes.Support.CascadeArchive`/`CascadeRestore`); any
+          # actor-based attempt is refused — the same "pre-actor / system
+          # transition" posture `Samen.Scopes.Chat.Blueprint`'s `ChatParticipant`/
+          # `ChatMessage` use (itself mirroring `Samen.Scopes.Identity.Blueprint`'s
+          # pre-actor `:accept`/`:expire`). Placed AFTER the broad `action_type`
+          # policy above so BOTH policies match `:archive`/`:restore` (they are
+          # `:destroy`/`:update`-typed) — Ash requires every matching policy to
+          # authorize, so this one alone forbidding is enough to close the
+          # actor-driven path regardless of ordering.
+          policy action([:archive, :restore]) do
+            forbid_if(always())
           end
         end
       end
@@ -255,13 +354,28 @@ defmodule Samen.Scopes.Support.Blueprint do
         declared reveal action under a grant). The body is a free-text field (a
         single ciphertext blob — see the blueprint moduledoc for the tension between
         free-text and composite vault routing). Org-scoped.
+
+        ## Soft-delete (ADR-040 §5.9, T37f) — cascade child, NO independent archive
+
+        Archivable (substrate only — same shape as `Conversation`): carries
+        `archived_at` + the `:archive`/`:restore`/`:archived` actions so the
+        ticket's cascade (`Samen.Scopes.Support.CascadeArchive`/`CascadeRestore`)
+        has something to set/match/restore, but the `policies` block below
+        `forbid_if(always())`s any actor-driven `:archive`/`:restore` — reachable
+        only via the cascade's `authorize?: false` internal calls (§5.4: `ticket
+        ▸cascade conversation ▸cascade message` has no internal commas — a
+        composition child, not an independently-listed roster item, mirroring
+        `Samen.Scopes.Chat.Blueprint`'s `ChatMessage`). An archived message keeps
+        its `body` 🔒 vault token and masks by plane exactly like a live row
+        (§5.1) — trash, not erasure.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_message")
@@ -348,6 +462,12 @@ defmodule Samen.Scopes.Support.Blueprint do
             authorize_if(Samen.Policy.OrgScope)
           end
 
+          # No independent archive (§5.4) — see Conversation's identical policy
+          # for the full rationale.
+          policy action([:archive, :restore]) do
+            forbid_if(always())
+          end
+
           policy action(:reveal_message) do
             authorize_if(always())
           end
@@ -370,13 +490,25 @@ defmodule Samen.Scopes.Support.Blueprint do
         default; plaintext only via the declared reveal action under a grant). Org-scoped.
         Carries a bounded `role` (`:agent` / `:admin` / `:supervisor`), a `status`, and
         an opaque `external_id` for helpdesk integrations.
+
+        ## Soft-delete (ADR-040 §5.9, T37f)
+
+        Archivable — a standalone roster item (no cascade arrow in the roster: `agent,
+        sla, macro` are plain comma-separated entries, unlike the `ticket ▸cascade
+        conversation ▸cascade message` chain). No cascade to/from any other resource:
+        archiving an agent leaves `Message.agent`/`Csat.agent` references live but
+        pointing at a hidden row (§5.4 default: no cascade) — an archived agent keeps
+        its vaulted `full_name`/`email` tokens and masks by plane exactly like a live
+        row (§5.1); the operator/support UI shows the "archived agent" affordance
+        (T37h). This is the roster's named masking-on-archived target (INV-1).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_agent")
@@ -468,13 +600,21 @@ defmodule Samen.Scopes.Support.Blueprint do
         host sets `stk_sla_breach_at = inserted_at + resolve_minutes`. The
         `Samen.Scopes.Support.SlaBreachWorker` cron fires every minute and marks
         breached tickets.
+
+        ## Soft-delete (ADR-040 §5.9, T37f)
+
+        Archivable — a standalone roster item, no cascade. Archiving an SLA policy
+        leaves any `Ticket.sla` reference live but pointing at a hidden row (§5.4
+        default: no cascade) — new tickets simply cannot select an archived SLA
+        policy; existing tickets keep their `sla_id` FK untouched.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_sla")
@@ -534,13 +674,22 @@ defmodule Samen.Scopes.Support.Blueprint do
         (authored content, not subject identity). A host that uses macro bodies as
         templates for message sends must ensure the expanded body routes through the
         vault (the message body is 🔒).
+
+        ## Soft-delete (ADR-040 §5.9, T37f)
+
+        Archivable — a standalone roster item, no cascade. Archiving a macro simply
+        removes it from the agent-facing canned-response picker; no other resource
+        references a macro by FK, so there is nothing for it to leak via relationship
+        load or aggregate (a documented, honest scope note — same class as
+        primitives' `File`/`Webhook`/`FeatureFlag`, T37e).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_macro")

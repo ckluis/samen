@@ -41,6 +41,7 @@ defmodule Samen.Gen.AppTest do
     "lib/<%= otp_app %>/billing.ex",
     "lib/<%= otp_app %>/vertical.ex",
     "lib/<%= otp_app %>/aggregate.ex",
+    "lib/<%= otp_app %>/approvals.ex",
     "priv/repo/migrations/20260705010000_ash_functions.exs",
     "priv/repo/migrations/20260705010100_oban.exs",
     "priv/repo/migrations/20260705010200_vault_tables.exs",
@@ -52,6 +53,7 @@ defmodule Samen.Gen.AppTest do
     "priv/repo/migrations/20260706070000_tnt_field.exs",
     "priv/repo/migrations/20260706080000_tnt_object_record.exs",
     "priv/repo/migrations/20260709100000_app_resources.exs",
+    "priv/repo/migrations/20260709150000_add_approvals.exs",
     "priv/ci_bootstrap.exs",
     "priv/anti_tautology_probe.exs",
     "test/test_helper.exs",
@@ -132,31 +134,34 @@ defmodule Samen.Gen.AppTest do
       assert s.agg_table == "wga_record_count"
     end
 
-    test "headless reserved_pairs covers the 9 billing + aggregate + authored abbrevs (11)" do
+    test "headless reserved_pairs covers the 9 billing + aggregate + authored + approvals abbrevs (12)" do
       pairs = Gen.reserved_pairs(spec(web: false))
       abbrevs = Enum.map(pairs, &elem(&1, 0))
 
       # 9 billing resources (incl. the `mov` subscription-movement ledger, ADR-017)
-      # + aggregate + authored = 11.
-      assert length(pairs) == 11
+      # + aggregate + authored + approvals (T37h) = 12.
+      assert length(pairs) == 12
       assert "wid" in abbrevs
       assert "wga" in abbrevs
       assert "wgc" in abbrevs
       assert "wgv" in abbrevs
+      assert "wgz" in abbrevs
       assert {"wid", "Widgetco.Vertical.Record"} in pairs
       assert {"wga", "Widgetco.Aggregate.RecordCountBySegment"} in pairs
       assert {"wgc", "Widgetco.Billing.Customer"} in pairs
       assert {"wgv", "Widgetco.Billing.SubscriptionEvent"} in pairs
+      assert {"wgz", "Widgetco.Approvals.Approval"} in pairs
     end
 
-    test "web (default) reserved_pairs adds the 6 Primitives + 26 operator abbrevs (43)" do
+    test "web (default) reserved_pairs adds the 6 Primitives + 27 operator abbrevs (45)" do
       pairs = Gen.reserved_pairs(spec())
       abbrevs = Enum.map(pairs, &elem(&1, 0))
 
-      # 11 headless + 6 Primitives + 26 operator (Identity 10 [incl. ADR-035's
-      # Credential/AuthToken/Session/UserIdentity] + Billing 9 + Support 7) = 43.
-      assert length(pairs) == 43
-      assert length(Enum.uniq(abbrevs)) == 43
+      # 12 headless (incl. T37h's approvals abbrev) + 6 Primitives + 27 operator
+      # (Identity 11 [incl. ADR-035's Credential/AuthToken/Session/UserIdentity and
+      # ADR-038 §6.4's LoginFailure, T109] + Billing 9 + Support 7) = 45.
+      assert length(pairs) == 45
+      assert length(Enum.uniq(abbrevs)) == 45
 
       # Primitives — <p1> + the blueprint suffix (the samen_web test-host convention).
       assert {"wnt", "Widgetco.Primitives.Notification"} in pairs
@@ -175,6 +180,9 @@ defmodule Samen.Gen.AppTest do
       # the exact "ses" is registered to Demo.Identity.Session collision this fixes.
       assert {"wos", "Widgetco.Operator.Session"} in pairs
       assert {"woi", "Widgetco.Operator.UserIdentity"} in pairs
+      # ADR-038 §6.4 (T109) — prefix-derived, NEVER the `dil` literal default
+      # (permanently owned by `hosts.demo` in the committed registry).
+      assert {"wol", "Widgetco.Operator.LoginFailure"} in pairs
       assert {"wpc", "Widgetco.Operator.Customer"} in pairs
       assert {"wpv", "Widgetco.Operator.SubscriptionEvent"} in pairs
       assert {"wqk", "Widgetco.Operator.Ticket"} in pairs
@@ -401,6 +409,16 @@ defmodule Samen.Gen.AppTest do
       # Addendum 3 — the `:authn` prod-safety gate is wired on every tenant mount by
       # default, so a generated prod app never resolves an arbitrary org via `?org=`.
       assert router =~ "@current_org_labels %{authn: {:app_env, :widgetco, :auth_required?}}"
+
+      # T117 (P9-F1 fix) — the OPERATOR control plane is conn-gated in prod. The generated
+      # router declares the `:require_authenticated_operator` pipeline over `Samen.Web.AuthGate`
+      # and pipes the operator scope through it (NOT the bare `:browser` pipeline), so a deployed
+      # prod app redirects an anonymous `/operator/*` request to `/login`. Mirrors driftwood's
+      # `plug(DriftwoodWeb.Auth)` house gate, scoped to the operator plane.
+      assert router =~ "pipeline :require_authenticated_operator do"
+      assert router =~ "plug(Samen.Web.AuthGate, otp_app: :widgetco)"
+      assert router =~ "pipe_through([:browser, :require_authenticated_operator])"
+
       assert router =~ ~s{get("/healthz", PageController, :healthz)}
       # F1.2 — the readiness route sits alongside liveness (Repo/KMS/Oban probe).
       assert router =~ ~s{get("/readyz", PageController, :readyz)}

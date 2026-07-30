@@ -541,6 +541,19 @@ defmodule Samen.Web.Auth.TotpTest do
   # 9. Samen.Web.Auth.TotpEnrollLive
   # ===========================================================================
 
+  # A real host router mounting the settings surface WITH `spine_totp` — proves
+  # the paired POST enroll routes are emitted (T110). Fails to compile if the
+  # macro is broken.
+  defmodule EnrollRouter do
+    use Phoenix.Router
+    import Phoenix.LiveView.Router
+    import Samen.Web.Router
+
+    scope "/" do
+      samen_settings_routes(:settings, Samen.WebTest.Operator, repo: Samen.WebTest.Repo, spine_totp: true)
+    end
+  end
+
   describe "Samen.Web.Auth.TotpEnrollLive" do
     test "mount generates a fresh secret + provisioning URI, not yet enrolled" do
       mount = build_mount(:auth)
@@ -550,6 +563,32 @@ defmodule Samen.Web.Auth.TotpTest do
       refute socket.assigns.enrolled?
       assert is_binary(socket.assigns.raw_secret)
       assert socket.assigns.provisioning_uri =~ "otpauth://totp/"
+    end
+
+    test "T110: the confirm form renders method=post with the secret in the body (the TOTP code never a GET-URL leak)" do
+      mount = build_mount(:auth)
+      session = mount_session(mount)
+      {:ok, socket} = TotpEnrollLive.mount(%{"credential_id" => Ash.UUID.generate()}, session, %Phoenix.LiveView.Socket{})
+
+      html = render_html(TotpEnrollLive, socket.assigns)
+
+      # The confirm form tag must be a real POST with an action — else a no-JS
+      # native submit is a GET that puts `totp_enroll[code]=…` in the URL.
+      assert [tag] = Regex.run(~r/<form[^>]*\bid="totp-enroll-confirm-form"[^>]*>/, html)
+      assert tag =~ ~s(method="post")
+      assert tag =~ ~r/action="[^"]+\/security\/2fa"/
+      # The enrollment secret rides the POST body (a hidden field), not the URL.
+      assert html =~ ~s(name="totp_secret")
+    end
+
+    test "T110: samen_settings_routes(spine_totp: true) pairs POST /security/2fa with the GET enroll LiveView" do
+      routes = EnrollRouter.__routes__()
+
+      assert Enum.any?(routes, &(&1.verb == :post and &1.path == "/settings/security/2fa")),
+             "expected the POST enroll fallback route, found none"
+
+      assert Enum.any?(routes, &(&1.verb == :get and &1.path == "/settings/security/2fa")),
+             "expected the paired GET enroll LiveView route"
     end
 
     test "confirming with the CORRECT code enrolls and shows recovery codes once" do

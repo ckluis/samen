@@ -32,8 +32,7 @@ defmodule Samen.Web.Auth.RateLimitTest do
   alias Samen.AuditEvent
   alias Samen.Identity.Register
   alias Samen.Web.Auth
-  alias Samen.Web.Auth.RegistrationLive
-  alias Samen.Web.Auth.ResetRequestLive
+  alias Samen.Web.Auth.AccountController
   alias Samen.Web.Auth.SessionController
   alias Samen.Web.Auth.Totp
   alias Samen.Web.Mount
@@ -384,13 +383,22 @@ defmodule Samen.Web.Auth.RateLimitTest do
     outcome(conn)
   end
 
-  # -- registration (LiveView) -------------------------------------------------
+  # -- registration (controller — T110: the rate limit moved to the
+  # no-JS POST fallback, the authoritative enforcement point a no-JS submit
+  # hits; the LiveView's `handle_event` no longer enforces) --------------------
 
-  defp live_session, do: %{"samen_mount" => Mount.to_session(mount())}
+  # A FIXED per-IP source so every attempt in one table row accumulates the same
+  # `:registration_ip` bucket (registration keys per-IP, not per-account).
+  @registration_ip {198, 51, 100, 7}
+
+  defp registration_conn do
+    session_conn(:post, "/signup")
+    |> Map.put(:remote_ip, @registration_ip)
+    |> put_private(:samen_mount, mount())
+    |> put_private(:samen_signup_path, "/signup")
+  end
 
   defp registration_outcome do
-    {:ok, socket} = RegistrationLive.mount(%{}, live_session(), %Phoenix.LiveView.Socket{})
-
     params = %{
       "org_name" => "RL #{System.unique_integer([:positive])}",
       "first_name" => "Ada",
@@ -399,18 +407,22 @@ defmodule Samen.Web.Auth.RateLimitTest do
       "password" => "correct horse battery staple"
     }
 
-    {:noreply, socket} = RegistrationLive.handle_event("register", %{"registration" => params}, socket)
-    if too_many?(socket.assigns[:error]), do: :refused, else: :allowed
+    conn = AccountController.register(registration_conn(), %{"registration" => params})
+    if location(conn) =~ "error=rate_limited", do: :refused, else: :allowed
   end
 
-  # -- reset-request (LiveView) ------------------------------------------------
+  # -- reset-request (controller) ----------------------------------------------
+
+  defp reset_request_conn do
+    session_conn(:post, "/reset")
+    |> put_private(:samen_mount, mount())
+    |> put_private(:samen_reset_path, "/reset")
+  end
 
   defp reset_request_outcome(email) do
-    {:ok, socket} = ResetRequestLive.mount(%{}, live_session(), %Phoenix.LiveView.Socket{})
-    {:noreply, socket} = ResetRequestLive.handle_event("request_reset", %{"reset" => %{"email" => email}}, socket)
-    if too_many?(socket.assigns[:flash_ok]), do: :refused, else: :allowed
+    conn = AccountController.request_reset(reset_request_conn(), %{"reset" => %{"email" => email}})
+    # Uniform no-oracle redirect either way; the limiter is observable via the
+    # `?throttled=1` flag (keyed on the supplied email — no existence signal).
+    if location(conn) =~ "throttled", do: :refused, else: :allowed
   end
-
-  defp too_many?(nil), do: false
-  defp too_many?(msg) when is_binary(msg), do: msg =~ "Too many"
 end

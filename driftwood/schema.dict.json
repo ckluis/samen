@@ -165,6 +165,12 @@
     {
       "fields": [
         {
+          "column_name": "dcm_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "dcm_id",
           "logical_name": "id",
           "pii": false,
@@ -230,6 +236,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "dcp_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "dcp_full_name",
           "logical_name": "full_name",
@@ -315,6 +327,12 @@
     {
       "fields": [
         {
+          "column_name": "dct_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "dct_context_ref",
           "logical_name": "context_ref",
           "pii": false,
@@ -371,6 +389,198 @@
       ],
       "resource": "Driftwood.Chat.ChatThread",
       "table_name": "dct_thread"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "des_chain",
+          "logical_name": "chain",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
+        },
+        {
+          "column_name": "des_current_step",
+          "logical_name": "current_step",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "des_deadline_at",
+          "logical_name": "deadline_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "des_dedupe_key",
+          "logical_name": "dedupe_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "des_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "des_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "des_kind",
+          "logical_name": "kind",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "des_next_action_at",
+          "logical_name": "next_action_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "des_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "des_resolved_at",
+          "logical_name": "resolved_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "des_state",
+          "logical_name": "state",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "des_subject_ref",
+          "logical_name": "subject_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "des_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Automation.Escalation",
+      "table_name": "des_escalation"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dls_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dls_company_name",
+          "logical_name": "company_name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dls_converted_at",
+          "logical_name": "converted_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dls_converted_opportunity_id",
+          "logical_name": "converted_opportunity_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dls_converted_person_id",
+          "logical_name": "converted_person_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dls_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "dls_emails",
+          "logical_name": "emails",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "dls_full_name",
+          "logical_name": "full_name",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "dls_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dls_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dls_notes",
+          "logical_name": "notes",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dls_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dls_phones",
+          "logical_name": "phones",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "dls_source",
+          "logical_name": "source",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dls_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dls_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dls_value",
+          "logical_name": "value",
+          "pii": false,
+          "type": "Samen.Type.Money"
+        }
+      ],
+      "resource": "Driftwood.SalesOps.Lead",
+      "table_name": "dls_lead"
     },
     {
       "fields": [
@@ -581,6 +791,66 @@
       ],
       "resource": "Driftwood.Operator.ApiKey",
       "table_name": "dok_api_key"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dol_failure_count",
+          "logical_name": "failure_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "dol_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dol_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dol_key_kind",
+          "logical_name": "key_kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dol_key_value",
+          "logical_name": "key_value",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dol_last_failed_at",
+          "logical_name": "last_failed_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dol_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dol_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dol_window_started_at",
+          "logical_name": "window_started_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        }
+      ],
+      "resource": "Driftwood.Operator.LoginFailure",
+      "table_name": "dol_login_failure"
     },
     {
       "fields": [
@@ -1287,6 +1557,12 @@
     {
       "fields": [
         {
+          "column_name": "dpp_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "dpp_custom",
           "logical_name": "custom",
           "pii": false,
@@ -1369,6 +1645,12 @@
           "logical_name": "active",
           "pii": false,
           "type": "Boolean"
+        },
+        {
+          "column_name": "dpr_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
         },
         {
           "column_name": "dpr_custom",
@@ -1644,7 +1926,7 @@
           "column_name": "dpv_occurred_at",
           "logical_name": "occurred_at",
           "pii": false,
-          "type": "UtcDatetime"
+          "type": "UtcDatetimeUsec"
         },
         {
           "column_name": "dpv_org_id",
@@ -1785,6 +2067,12 @@
     {
       "fields": [
         {
+          "column_name": "dqc_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "dqc_channel",
           "logical_name": "channel",
           "pii": false,
@@ -1838,6 +2126,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "dqg_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "dqg_custom",
           "logical_name": "custom",
@@ -1917,6 +2211,12 @@
     {
       "fields": [
         {
+          "column_name": "dqk_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "dqk_breached",
           "logical_name": "breached",
           "pii": false,
@@ -1995,12 +2295,6 @@
           "type": "String"
         },
         {
-          "column_name": "dqk_tags",
-          "logical_name": "tags",
-          "pii": false,
-          "type": "{:array, Ash.Type.String}"
-        },
-        {
           "column_name": "dqk_updated_at",
           "logical_name": "updated_at",
           "pii": false,
@@ -2012,6 +2306,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "dql_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "dql_enabled",
           "logical_name": "enabled",
@@ -2085,6 +2385,12 @@
           "type": "UUID"
         },
         {
+          "column_name": "dqm_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "dqm_attachments",
           "logical_name": "attachments",
           "pii": false,
@@ -2156,6 +2462,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "dqn_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "dqn_body_template",
           "logical_name": "body_template",
@@ -2285,6 +2597,174 @@
       ],
       "resource": "Driftwood.Operator.Csat",
       "table_name": "dqs_csat"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "drm_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "drm_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "drm_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "drm_recipient_id",
+          "logical_name": "recipient_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "drm_remind_at",
+          "logical_name": "remind_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "drm_sent_at",
+          "logical_name": "sent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "drm_source",
+          "logical_name": "source",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "drm_state",
+          "logical_name": "state",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "drm_subject_ref",
+          "logical_name": "subject_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "drm_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_drm_note",
+          "logical_name": "note",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Driftwood.Automation.Reminder",
+      "table_name": "drm_reminder"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dru_depth",
+          "logical_name": "depth",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "dru_dispatch_key",
+          "logical_name": "dispatch_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dru_duration_ms",
+          "logical_name": "duration_ms",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "dru_error_kind",
+          "logical_name": "error_kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dru_finished_at",
+          "logical_name": "finished_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dru_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dru_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dru_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dru_outcome",
+          "logical_name": "outcome",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
+        },
+        {
+          "column_name": "dru_started_at",
+          "logical_name": "started_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dru_state",
+          "logical_name": "state",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dru_subject_ref",
+          "logical_name": "subject_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dru_trigger_kind",
+          "logical_name": "trigger_kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dru_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dru_workflow_id",
+          "logical_name": "workflow_id",
+          "pii": false,
+          "type": "UUID"
+        }
+      ],
+      "resource": "Driftwood.Automation.Run",
+      "table_name": "dru_run"
     },
     {
       "fields": [
@@ -2499,92 +2979,362 @@
     {
       "fields": [
         {
-          "column_name": "fac_body",
-          "logical_name": "body",
+          "column_name": "dvs_archived_at",
+          "logical_name": "archived_at",
           "pii": false,
-          "type": "String"
+          "type": "UtcDatetimeUsec"
         },
         {
-          "column_name": "fac_company_id",
-          "logical_name": "company_id",
-          "pii": false,
-          "type": "UUID"
+          "column_name": "dvs_contact_emails",
+          "logical_name": "contact_emails",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
         },
         {
-          "column_name": "fac_completed_at",
-          "logical_name": "completed_at",
-          "pii": false,
-          "type": "UtcDatetime"
+          "column_name": "dvs_contact_name",
+          "logical_name": "contact_name",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
         },
         {
-          "column_name": "fac_custom",
+          "column_name": "dvs_contact_phones",
+          "logical_name": "contact_phones",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "dvs_custom",
           "logical_name": "custom",
           "pii": false,
           "type": "Map"
         },
         {
-          "column_name": "fac_due_at",
-          "logical_name": "due_at",
-          "pii": false,
-          "type": "UtcDatetime"
-        },
-        {
-          "column_name": "fac_id",
+          "column_name": "dvs_id",
           "logical_name": "id",
           "pii": false,
           "type": "UUID"
         },
         {
-          "column_name": "fac_inserted_at",
+          "column_name": "dvs_inserted_at",
           "logical_name": "inserted_at",
           "pii": false,
           "type": "UtcDatetime"
         },
         {
-          "column_name": "fac_opportunity_id",
-          "logical_name": "opportunity_id",
+          "column_name": "dvs_name",
+          "logical_name": "name",
           "pii": false,
-          "type": "UUID"
+          "type": "String"
         },
         {
-          "column_name": "fac_org_id",
+          "column_name": "dvs_notes",
+          "logical_name": "notes",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dvs_org_id",
           "logical_name": "org_id",
           "pii": false,
           "type": "UUID"
         },
         {
-          "column_name": "fac_person_id",
-          "logical_name": "person_id",
-          "pii": false,
-          "type": "UUID"
-        },
-        {
-          "column_name": "fac_status",
+          "column_name": "dvs_status",
           "logical_name": "status",
           "pii": false,
           "type": "Atom"
         },
         {
-          "column_name": "fac_subject",
-          "logical_name": "subject",
+          "column_name": "dvs_updated_at",
+          "logical_name": "updated_at",
           "pii": false,
-          "type": "String"
+          "type": "UtcDatetime"
         },
         {
-          "column_name": "fac_type",
-          "logical_name": "type",
+          "column_name": "dvs_website",
+          "logical_name": "website",
+          "pii": false,
+          "type": "String"
+        }
+      ],
+      "resource": "Driftwood.SalesOps.Vendor",
+      "table_name": "dvs_vendor"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dwf_actions",
+          "logical_name": "actions",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
+        },
+        {
+          "column_name": "dwf_conditions",
+          "logical_name": "conditions",
+          "pii": false,
+          "type": "{:array, Ash.Type.Map}"
+        },
+        {
+          "column_name": "dwf_disabled_by_operator_at",
+          "logical_name": "disabled_by_operator_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dwf_disabled_reason",
+          "logical_name": "disabled_reason",
           "pii": false,
           "type": "Atom"
         },
         {
-          "column_name": "fac_updated_at",
+          "column_name": "dwf_event",
+          "logical_name": "event",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dwf_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dwf_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dwf_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dwf_next_fire_at",
+          "logical_name": "next_fire_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dwf_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dwf_owner_id",
+          "logical_name": "owner_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dwf_resource_key",
+          "logical_name": "resource_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dwf_schedule_cron",
+          "logical_name": "schedule_cron",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dwf_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dwf_trigger_kind",
+          "logical_name": "trigger_kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dwf_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dwf_webhook_secret",
+          "logical_name": "webhook_secret",
+          "pii": false,
+          "type": "String"
+        }
+      ],
+      "resource": "Driftwood.Automation.Workflow",
+      "table_name": "dwf_workflow"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dwp_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dwp_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dwp_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dwp_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dwp_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dwp_owner_id",
+          "logical_name": "owner_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dwp_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dwp_updated_at",
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
         }
       ],
-      "resource": "Driftwood.Crm.Activity",
-      "table_name": "fac_activity"
+      "resource": "Driftwood.Work.Project",
+      "table_name": "dwp_project"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dwt_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dwt_body",
+          "logical_name": "body",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dwt_completed_at",
+          "logical_name": "completed_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dwt_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "dwt_due_at",
+          "logical_name": "due_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dwt_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dwt_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dwt_kind",
+          "logical_name": "kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dwt_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dwt_owner_id",
+          "logical_name": "owner_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dwt_parent_id",
+          "logical_name": "parent_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dwt_priority",
+          "logical_name": "priority",
+          "pii": false,
+          "type": "Samen.Type.Priority"
+        },
+        {
+          "column_name": "dwt_project_id",
+          "logical_name": "project_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dwt_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dwt_subject_id",
+          "logical_name": "subject_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dwt_subject_key",
+          "logical_name": "subject_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dwt_title",
+          "logical_name": "title",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dwt_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Work.Task",
+      "table_name": "dwt_task"
     },
     {
       "fields": [
@@ -2654,6 +3404,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "fat_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "fat_company_id",
           "logical_name": "company_id",
@@ -2997,6 +3753,12 @@
     {
       "fields": [
         {
+          "column_name": "fbp_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "fbp_custom",
           "logical_name": "custom",
           "pii": false,
@@ -3079,6 +3841,12 @@
           "logical_name": "active",
           "pii": false,
           "type": "Boolean"
+        },
+        {
+          "column_name": "fbr_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
         },
         {
           "column_name": "fbr_custom",
@@ -3354,7 +4122,7 @@
           "column_name": "fbv_occurred_at",
           "logical_name": "occurred_at",
           "pii": false,
-          "type": "UtcDatetime"
+          "type": "UtcDatetimeUsec"
         },
         {
           "column_name": "fbv_org_id",
@@ -3495,6 +4263,114 @@
     {
       "fields": [
         {
+          "column_name": "fce_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "fce_attendees",
+          "logical_name": "attendees",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "fce_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fce_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fce_ends_at",
+          "logical_name": "ends_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "fce_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fce_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fce_kind",
+          "logical_name": "kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fce_location",
+          "logical_name": "location",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fce_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fce_owner_id",
+          "logical_name": "owner_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fce_recurrence",
+          "logical_name": "recurrence",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fce_starts_at",
+          "logical_name": "starts_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "fce_timezone",
+          "logical_name": "timezone",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fce_title",
+          "logical_name": "title",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fce_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Calendar.Event",
+      "table_name": "fce_event"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fcm_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "fcm_custom",
           "logical_name": "custom",
           "pii": false,
@@ -3566,6 +4442,162 @@
     },
     {
       "fields": [
+        {
+          "column_name": "fdd_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "fdd_body",
+          "logical_name": "body",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fdd_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fdd_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fdd_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fdd_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fdd_owner_id",
+          "logical_name": "owner_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fdd_subject_id",
+          "logical_name": "subject_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fdd_subject_key",
+          "logical_name": "subject_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fdd_title",
+          "logical_name": "title",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fdd_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_fdd_secure_body",
+          "logical_name": "secure_body",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Driftwood.Docs.Doc",
+      "table_name": "fdd_doc"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fdn_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "fdn_body",
+          "logical_name": "body",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fdn_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "fdn_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fdn_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fdn_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fdn_owner_id",
+          "logical_name": "owner_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fdn_subject_id",
+          "logical_name": "subject_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fdn_subject_key",
+          "logical_name": "subject_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fdn_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_fdn_secure_body",
+          "logical_name": "secure_body",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Driftwood.Docs.Note",
+      "table_name": "fdn_note"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fff_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "fff_description",
           "logical_name": "description",
@@ -3645,6 +4677,12 @@
     {
       "fields": [
         {
+          "column_name": "ffl_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "ffl_content_type",
           "logical_name": "content_type",
           "pii": false,
@@ -3722,6 +4760,60 @@
     },
     {
       "fields": [
+        {
+          "column_name": "fll_address",
+          "logical_name": "address",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "fll_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "fll_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fll_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fll_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "fll_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fll_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Locations.Location",
+      "table_name": "fll_location"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fmc_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "fmc_custom",
           "logical_name": "custom",
@@ -3848,6 +4940,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "fmg_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "fmg_custom",
           "logical_name": "custom",
@@ -4053,6 +5151,12 @@
     {
       "fields": [
         {
+          "column_name": "fms_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "fms_consent_at",
           "logical_name": "consent_at",
           "pii": false,
@@ -4112,6 +5216,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "fmt_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "fmt_body_html",
           "logical_name": "body_html",
@@ -4413,6 +5523,12 @@
     {
       "fields": [
         {
+          "column_name": "fop_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "fop_close_date",
           "logical_name": "close_date",
           "pii": false,
@@ -4497,6 +5613,12 @@
     {
       "fields": [
         {
+          "column_name": "fpp_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "fpp_enabled",
           "logical_name": "enabled",
           "pii": false,
@@ -4556,6 +5678,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "fpr_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "fpr_company_id",
           "logical_name": "company_id",
@@ -4628,6 +5756,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "fsa_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "fsa_custom",
           "logical_name": "custom",
@@ -4706,6 +5840,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "fsc_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "fsc_channel",
           "logical_name": "channel",
@@ -4827,6 +5967,12 @@
     {
       "fields": [
         {
+          "column_name": "fsk_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "fsk_breached",
           "logical_name": "breached",
           "pii": false,
@@ -4905,12 +6051,6 @@
           "type": "String"
         },
         {
-          "column_name": "fsk_tags",
-          "logical_name": "tags",
-          "pii": false,
-          "type": "{:array, Ash.Type.String}"
-        },
-        {
           "column_name": "fsk_updated_at",
           "logical_name": "updated_at",
           "pii": false,
@@ -4922,6 +6062,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "fsl_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "fsl_enabled",
           "logical_name": "enabled",
@@ -4995,6 +6141,12 @@
           "type": "UUID"
         },
         {
+          "column_name": "fsm_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "fsm_attachments",
           "logical_name": "attachments",
           "pii": false,
@@ -5066,6 +6218,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "fsn_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "fsn_body_template",
           "logical_name": "body_template",
@@ -5198,6 +6356,60 @@
     },
     {
       "fields": [
+        {
+          "column_name": "ftt_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "ftt_color",
+          "logical_name": "color",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "ftt_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ftt_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ftt_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ftt_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ftt_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Tags.Tag",
+      "table_name": "ftt_tag"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fwh_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "fwh_event_types",
           "logical_name": "event_types",
@@ -5363,6 +6575,54 @@
       ],
       "resource": "Driftwood.Freight.Settlement",
       "table_name": "stl_settlement"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "tft_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "tft_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "tft_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "tft_subject_id",
+          "logical_name": "subject_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "tft_subject_key",
+          "logical_name": "subject_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "tft_tag_id",
+          "logical_name": "tag_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "tft_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Tags.Tagging",
+      "table_name": "tft_tagging"
     }
   ]
 }

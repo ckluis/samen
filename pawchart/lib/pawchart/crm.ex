@@ -2,7 +2,7 @@ defmodule PawChart.Crm do
   @moduledoc """
   PawChart's CRM domain — the samen_core CRM scope MOUNTED AS-IS for the vet vertical.
 
-  One `use Samen.Scopes.Crm` expands into six host-owned CRM resources in `PawChart.Crm.*`:
+  One `use Samen.Scopes.Crm` expands into five host-owned CRM resources in `PawChart.Crm.*`:
 
     * `PawChart.Crm.Company`     — the vet clinic's CRM company rows (referring vets, labs,
       insurance companies, pet-supply vendors). Non-PII name/industry/size.
@@ -12,8 +12,11 @@ defmodule PawChart.Crm do
     * `PawChart.Crm.Pipeline`    — the clinic's sales/onboarding pipeline stages. Tier-0
       config rows per org.
     * `PawChart.Crm.Opportunity` — the clinic's pipeline deals/prospects.
-    * `PawChart.Crm.Activity`    — call-logs, follow-ups against the pipeline.
     * `PawChart.Crm.Attachment`  — file attachments (referral letters, insurance forms).
+
+  The former `PawChart.Crm.Activity` (call-logs, follow-ups) was destructively migrated
+  into the canonical Work-scope `Task` and removed (ADR-041 §5, ruling M5) — a clinic
+  follow-up is now a Work Task anchored to the CRM object via `(subject_key, subject_id)`.
 
   ## Why this mounts cleanly (the additive proof)
 
@@ -40,7 +43,6 @@ defmodule PawChart.Crm do
       person: "vcb",
       pipeline: "vcc",
       opportunity: "vcd",
-      activity: "vce",
       attachment: "vcf"
     }
 end

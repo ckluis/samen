@@ -57,6 +57,7 @@ defmodule Acme.Repo.Migrations.AppResources do
       add(:acl_org_id, :uuid, null: false)
       add(:acl_inserted_at, :utc_datetime, null: false)
       add(:acl_updated_at, :utc_datetime, null: false)
+      add(:acl_archived_at, :utc_datetime_usec)
     end
 
     create table(:acp_price, primary_key: false) do
@@ -83,6 +84,7 @@ defmodule Acme.Repo.Migrations.AppResources do
       add(:acp_org_id, :uuid, null: false)
       add(:acp_inserted_at, :utc_datetime, null: false)
       add(:acp_updated_at, :utc_datetime, null: false)
+      add(:acp_archived_at, :utc_datetime_usec)
     end
 
     create table(:acs_subscription, primary_key: false) do
@@ -291,6 +293,7 @@ defmodule Acme.Repo.Migrations.AppResources do
       add(:acm_org_id, :uuid, null: false)
       add(:acm_inserted_at, :utc_datetime, null: false)
       add(:acm_updated_at, :utc_datetime, null: false)
+      add(:acm_archived_at, :utc_datetime_usec)
     end
 
     # ---- Token-blind aggregate projection (no pii_ columns) ----

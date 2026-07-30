@@ -32,7 +32,8 @@ defmodule <%= module %>.Operator do
       credential: "<%= o_cred %>",
       auth_token: "<%= o_atok %>",
       session: "<%= o_sess %>",
-      user_identity: "<%= o_uid %>"
+      user_identity: "<%= o_uid %>",
+      login_failure: "<%= o_lgf %>"
     }
 
   use Samen.Scopes.Billing,

@@ -20,15 +20,24 @@ defmodule DriftwoodWeb.Endpoint do
 
   socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
 
-  # ADR-009: serve the Samen UI kit's stylesheet from the samen_web DEPENDENCY's priv
-  # (not a driftwood-local copy) at `/assets/samen_ui.css`. `from: {:samen_web, ...}`
-  # resolves via `:code.priv_dir(:samen_web)`, so driftwood + pawchart both link the
-  # identical stylesheet shipped inside the framework lib. `only: ~w(samen_ui.css)`
-  # confines Plug.Static to that one file so it cannot shadow any app route.
+  # ADR-009 + ADR-042 C3: serve the samen_web UI kit stylesheet AND the vendored Phoenix
+  # LiveView JS client at `/assets/*`, all from dependency priv (never a driftwood-local
+  # copy). `from: {:samen_web, ...}` / `{:phoenix, ...}` / `{:phoenix_live_view, ...}`
+  # resolve via `:code.priv_dir/1`; serving the framework bundles from the deps' OWN priv
+  # makes client/server version skew structurally impossible. Each clause is a scoped
+  # `only:` allowlist (no directory-wide exposure) so nothing can shadow an app route.
+  plug(Plug.Static, at: "/assets", from: {:phoenix, "priv/static"}, only: ~w(phoenix.min.js))
+
+  plug(Plug.Static,
+    at: "/assets",
+    from: {:phoenix_live_view, "priv/static"},
+    only: ~w(phoenix_live_view.min.js)
+  )
+
   plug(Plug.Static,
     at: "/assets",
     from: {:samen_web, "priv/static/assets"},
-    only: ~w(samen_ui.css)
+    only: ~w(samen_ui.css app.js)
   )
 
   plug(Plug.RequestId)

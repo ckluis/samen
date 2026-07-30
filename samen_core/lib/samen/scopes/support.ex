@@ -147,7 +147,8 @@ defmodule Samen.Scopes.Support do
         unquote(domain),
         unquote(repo),
         unquote(abbrevs.ticket),
-        unquote(sla_mod)
+        unquote(sla_mod),
+        unquote(conversation_mod)
       )
 
       Samen.Scopes.Support.Blueprint.define_conversation(
@@ -156,7 +157,8 @@ defmodule Samen.Scopes.Support do
         unquote(domain),
         unquote(repo),
         unquote(abbrevs.conversation),
-        unquote(ticket_mod)
+        unquote(ticket_mod),
+        unquote(message_mod)
       )
 
       Samen.Scopes.Support.Blueprint.define_agent(

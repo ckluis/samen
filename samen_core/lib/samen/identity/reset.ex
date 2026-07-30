@@ -112,7 +112,7 @@ defmodule Samen.Identity.Reset do
   end
 
   defp mint_and_dispatch(mods, credential, bidx) do
-    with {:ok, _auth_token, _raw_token} <-
+    with {:ok, _auth_token, raw_token} <-
            TokenMint.mint(mods.auth_token, credential.id, :password_reset, bidx, @password_reset_ttl_seconds) do
       Audit.auth_event(mods.repo,
         event: "password_reset_requested",
@@ -120,7 +120,11 @@ defmodule Samen.Identity.Reset do
         actor_id: credential.id
       )
 
-      case AuthMailer.dispatch(:password_reset, credential_id: credential.id) do
+      # The raw token is threaded into `AuthMailer.dispatch/2`, which renders it
+      # into the email body's `/reset/:token` link (F1/T111) — never logged nor
+      # returned (the public contract is the uniform `{:ok, :sent}`; the token
+      # lives only on this stack and in the transient delivery content).
+      case AuthMailer.dispatch(:password_reset, credential_id: credential.id, raw_token: raw_token) do
         {:ok, _receipt} -> {:ok, :sent}
         {:error, reason} -> {:error, reason}
       end

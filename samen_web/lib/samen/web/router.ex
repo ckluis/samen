@@ -158,6 +158,13 @@ defmodule Samen.Web.Router do
         # error summary + the already-redacted payload; no PII, no vault tokens). Replay
         # + resolve operator actions. Inherited at 0 vertical LOC.
         live("#{path}/webhooks", Samen.Web.Operator.WebhookDlqLive)
+        # The E8 automation observability surface (ADR-039 §8.3/§8.4; T42) —
+        # run log + per-workflow health aggregates + the operator kill-switch,
+        # scoped to ONE tenant org at a time (the route param), reached from
+        # the account drill-down's "Automation health →" link. Inherited at
+        # 0 vertical LOC; token-blind by construction (no PII column exists on
+        # either resource it reads).
+        live("#{path}/automation/:org_id", Samen.Web.Operator.AutomationHealthLive)
 
         if include_aggregate do
           live("#{path}/aggregate", Samen.Web.Operator.AggregateLive)
@@ -539,6 +546,56 @@ defmodule Samen.Web.Router do
   end
 
   @doc """
+  Mount the framework `.ics` (iCalendar) export surface (F2; spec §F2/§F8 c8) —
+  ONE line, on either plane. `namespace` is the host's mounted Calendar-scope
+  namespace (`use Samen.Scopes.Calendar, namespace: ...` — its materialized
+  `Event` resource is derived by the ADR-004 convention, same as every other
+  `Samen.Web.Mount` consumer; unlike `samen_csv_routes` there is no `:resource`
+  route segment — a Calendar mount serves exactly one resource).
+
+      import Samen.Web.Router
+
+      # TENANT plane — attendee lines in the clear (own org).
+      samen_ics_routes :ics, Driftwood.Calendar, repo: Driftwood.Repo
+
+      # OPERATOR plane — the SAME route shape, attendee lines masked per
+      # PiiResolution (INV-1).
+      samen_ics_routes :ics, Driftwood.Calendar,
+        repo: Driftwood.Repo,
+        plane: :operator,
+        target_org_id: tenant_org_id,
+        path: "/operator/calendar.ics"
+
+  Mounts `GET <path>` (default `/calendar.ics`) → `Samen.Web.Ics.ExportController,
+  :export` (org-scoped, keyset-bounded, per-plane masked `text/calendar`
+  download). Options: as `samen_csv_routes/3` (`:repo` required; `:domain`,
+  `:plane`, `:operator_id`/`:target_org_id`, `:path`, `:labels`).
+  """
+  defmacro samen_ics_routes(kind, namespace, opts \\ []) do
+    kind = Macro.expand(kind, __CALLER__)
+    path = Keyword.get(opts, :path, "/calendar.ics")
+
+    quote bind_quoted: [kind: kind, namespace: namespace, opts: opts, path: path] do
+      _ = kind
+
+      mount =
+        Samen.Web.Mount.new(
+          :ics,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          plane: Samen.Web.Router.__plane__(opts),
+          labels: Keyword.get(opts, :labels)
+        )
+
+      # A plain controller action — no LiveView needed (there is no import UI
+      # for ICS, only a download). Same session/mount-assign posture as the
+      # CSV export route and the files byte-serve route.
+      get(path, Samen.Web.Ics.ExportController, :export, assigns: %{samen_mount: mount})
+    end
+  end
+
+  @doc """
   Mount the framework SEARCH surface (WS-E E4.3; ADR-027) — the ⌘K search page over
   the KERNEL `Samen.Search` engine — in ONE line, on either plane. Zero authored
   search LiveViews per vertical.
@@ -591,6 +648,78 @@ defmodule Samen.Web.Router do
 
       live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:search, path) do
+          live(sub_path, module)
+        end
+      end
+    end
+  end
+
+  @doc """
+  Mount the tenant-plane AUTOMATION (workflow) BUILDER (ADR-039 §12 done-criterion 4
+  UI half; T118) — `/automation`, list + author/edit workflows over a host's
+  materialized Automation scope (`use Samen.Scopes.Automation`, T39) — in ONE line.
+
+  `namespace` is the host's mounted AUTOMATION namespace (the domain that `use`d
+  `Samen.Scopes.Automation` — it materializes `Workflow` (+ `Reminder`/`Escalation`/
+  `Run`, unused by this surface), e.g. `Driftwood.Automation`).
+
+      import Samen.Web.Router
+
+      samen_automation_routes :automation, Driftwood.Automation, repo: Driftwood.Repo
+
+  ## TENANT PLANE ONLY (INV-2 — no `:plane` option)
+
+  Unlike its sibling macros, this one does NOT accept a `:plane`/`:operator_id`/
+  `:target_org_id` option — the mount is ALWAYS `Samen.Web.Plane.tenant()`. Automation
+  is a tenant-AUTHORED surface (T39's done-criterion 4: "builder renders on tenant
+  plane only"); the operator-plane counterpart is the SEPARATE, already-shipped
+  `Samen.Web.Operator.AutomationHealthLive` (T42, cross-org run log + kill-switch,
+  mounted via `samen_operator_routes/2`). There is structurally no code path to mount
+  this builder on the operator plane.
+
+  Every mutating affordance (create/edit a workflow, pause/resume, manual "Run now")
+  runs through the SAME governed `Workflow` actions T39 shipped: the write-time
+  `Samen.Automation.NonPiiPredicates` oracle refuses a vault/plaintext-PII condition
+  key or action interpolation (INV-1) and the condition-key picker is sourced LIVE
+  from `NonPiiPredicates.eligible_names/1` — never a hardcoded/second field list.
+  Pause/resume writes the tenant `status` switch (`:draft | :active | :paused`, the
+  SAME kill-switch column family T39/T42 read); it does NOT touch the operator-only
+  `disabled_by_operator_at`/`disabled_reason` columns (T42's cross-org emergency stop).
+
+  ADR-042 Class B: the workflow list renders real server HTML with JS off; authoring
+  (save/pause/run-now) are `phx-click`/`phx-submit` writes that may need the socket.
+
+  Options: as `samen_flags_routes/3`, minus `:plane`/`:operator_id`/`:target_org_id`
+  (`:repo` required; `:domain`, `:path` (default `/automation`), `:labels`,
+  `:session_name`).
+  """
+  defmacro samen_automation_routes(kind, namespace, opts \\ []) do
+    kind = Macro.expand(kind, __CALLER__)
+    path = Keyword.get(opts, :path, "/automation")
+    session_name = Keyword.get(opts, :session_name, session_name(:automation, path))
+
+    quote bind_quoted: [
+            kind: kind,
+            namespace: namespace,
+            opts: opts,
+            path: path,
+            session_name: session_name
+          ] do
+      _ = kind
+
+      mount =
+        Samen.Web.Mount.new(
+          :automation,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          # INV-2 — always tenant plane; see moduledoc (no :plane option exists here).
+          plane: Samen.Web.Plane.tenant(),
+          labels: Keyword.get(opts, :labels)
+        )
+
+      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        for {sub_path, module} <- Samen.Web.Router.__routes__(:automation, path) do
           live(sub_path, module)
         end
       end
@@ -720,6 +849,26 @@ defmodule Samen.Web.Router do
       post("#{path}/security/sessions/revoke_others", Samen.Web.Auth.SessionController, :revoke_others,
         private: %{samen_mount: mount}
       )
+
+      # ADR-035 §5 A7 + T110 — the no-JS POST fallbacks for TOTP enrollment,
+      # emitted ONLY under `spine_totp` (paired with the GET enroll LiveView
+      # above). Samen ships no client JS, so the enroll confirm form's native
+      # submit was a GET that would leak the 6-digit TOTP code into the URL;
+      # `Samen.Web.Auth.TotpEnrollController` gives it a real POST (code in the
+      # body) and hands one-time recovery codes back via flash, never a URL.
+      if spine_totp do
+        post("#{path}/security/2fa", Samen.Web.Auth.TotpEnrollController, :confirm,
+          private: %{samen_mount: mount, samen_totp_enroll_path: "#{path}/security/2fa"}
+        )
+
+        post("#{path}/security/2fa/recovery_codes", Samen.Web.Auth.TotpEnrollController, :regenerate,
+          private: %{samen_mount: mount, samen_totp_enroll_path: "#{path}/security/2fa"}
+        )
+
+        post("#{path}/security/2fa/disable", Samen.Web.Auth.TotpEnrollController, :disable,
+          private: %{samen_mount: mount, samen_totp_enroll_path: "#{path}/security/2fa"}
+        )
+      end
     end
   end
 
@@ -749,6 +898,15 @@ defmodule Samen.Web.Router do
     * `POST /2fa`          → `Samen.Web.Auth.SessionController.verify_totp/2` (ADR-035 §5 A7)
     * `GET /logout`        → `Samen.Web.Auth.SessionController.delete/2` (ADR-035 §5 A4)
     * `GET /invite/:token` → `Samen.Web.Auth.InviteAcceptLive` (ADR-035 §5 A5)
+
+  The no-JS HTTP POST fallbacks (T110 — Samen ships no client JS, so every
+  `phx-submit`-only form must have a real `method="post"` action or its native
+  submit leaks credentials into the URL as a GET):
+
+    * `POST /signup`        → `Samen.Web.Auth.AccountController.register/2` (A1)
+    * `POST /reset`         → `Samen.Web.Auth.AccountController.request_reset/2` (A3)
+    * `POST /reset/:token`  → `Samen.Web.Auth.AccountController.reset/2` (A3)
+    * `POST /invite/:token` → `Samen.Web.Auth.AccountController.accept_invite/2` (A5)
 
   ## Optional OIDC (ADR-035 §5 A6)
 
@@ -818,7 +976,20 @@ defmodule Samen.Web.Router do
           Keyword.fetch!(opts, :namespace),
           Keyword.fetch!(opts, :repo),
           domain: Keyword.get(opts, :domain, Keyword.fetch!(opts, :namespace)),
-          labels: %{login_path: login_path, totp_path: totp_path}
+          # T110 — the pre-actor LiveViews resolve their real `<form action=>`
+          # off these labels so a host-overridden path stays consistent between
+          # the GET `live(...)` and the paired POST controller route.
+          labels: %{
+            login_path: login_path,
+            totp_path: totp_path,
+            signup_path: signup_path,
+            reset_path: reset_path,
+            invite_path: invite_path,
+            # T126 — `ConfirmLive` rebuilds its own `/verify/:token` path off this
+            # label to redirect to the `?verified=1`/`?error=` status flag after
+            # the single-use consume (the double-mount guard).
+            verify_path: verify_path
+          }
         )
 
       live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
@@ -847,6 +1018,35 @@ defmodule Samen.Web.Router do
 
       get(logout_path, Samen.Web.Auth.SessionController, :delete,
         private: %{samen_mount: mount, samen_login_path: login_path, samen_totp_path: totp_path}
+      )
+
+      # ADR-035 §5 A1/A3/A5 + T110 — the no-JS HTTP POST fallbacks for the
+      # PRE-ACTOR identity LiveViews. Since ADR-042 the LiveView client ships, so
+      # with JS these forms enhance in place; but this spine is Class A (ADR-042
+      # §5) — its controller-POST fallback is a BINDING no-JS floor, so every
+      # `phx-submit` form also degrades to a native HTML submit. Registration's
+      # native submit was a **GET** — it leaked the plaintext password into the
+      # URL query string (T110 escalation). Each POST below pairs a real
+      # controller WRITE with the matching GET `live(...)` above, EXACTLY as
+      # `login`/`2fa` already pair with `SessionController`, so every credential
+      # (and the new/reset/invite password) rides the POST body, never the URL.
+      # `Samen.Web.Auth.AccountController` re-runs the mutation server-side and
+      # enforces the ADR-038 §6.3 rate limits at this authoritative site (a
+      # no-JS POST bypasses the LiveView's inline guard entirely).
+      post(signup_path, Samen.Web.Auth.AccountController, :register,
+        private: %{samen_mount: mount, samen_signup_path: signup_path}
+      )
+
+      post(reset_path, Samen.Web.Auth.AccountController, :request_reset,
+        private: %{samen_mount: mount, samen_reset_path: reset_path}
+      )
+
+      post("#{reset_path}/:token", Samen.Web.Auth.AccountController, :reset,
+        private: %{samen_mount: mount, samen_reset_path: reset_path}
+      )
+
+      post("#{invite_path}/:token", Samen.Web.Auth.AccountController, :accept_invite,
+        private: %{samen_mount: mount, samen_invite_path: invite_path}
       )
 
       # ADR-035 §5 A6 — the OPTIONAL OIDC request + callback endpoints, emitted
@@ -927,6 +1127,28 @@ defmodule Samen.Web.Router do
       live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         live(path, Samen.Web.Onboarding.WizardLive)
       end
+
+      # T110 — no-JS HTTP POST fallbacks for the wizard's Continue / Send-invite
+      # / Finish actions (Samen ships no client JS, so the `phx-submit`/`phx-click`
+      # controls are inert in a real browser — persona F2). Skip needs NO route:
+      # it is a plain GET `<.link patch>` to the next step. Each write redirects
+      # back to `GET #{path}?...&step=<next>`. `Samen.Web.Onboarding.WizardController`
+      # reconstructs the SAME own-org actor scope WizardLive builds.
+      post("#{path}/name_org", Samen.Web.Onboarding.WizardController, :name_org,
+        private: %{samen_mount: mount, samen_onboarding_path: path}
+      )
+
+      post("#{path}/plan", Samen.Web.Onboarding.WizardController, :select_plan,
+        private: %{samen_mount: mount, samen_onboarding_path: path}
+      )
+
+      post("#{path}/invite", Samen.Web.Onboarding.WizardController, :invite,
+        private: %{samen_mount: mount, samen_onboarding_path: path}
+      )
+
+      post("#{path}/finish", Samen.Web.Onboarding.WizardController, :finish,
+        private: %{samen_mount: mount, samen_onboarding_path: path}
+      )
     end
   end
 
@@ -1061,6 +1283,18 @@ defmodule Samen.Web.Router do
     ]
   end
 
+  # F1 / ADR-041 §3 (T43) — the Work scope route table: the task inbox (list/detail)
+  # + the project list. Mirrors :support's shape (mount via `samen_module_routes
+  # :work, HostNamespace, repo: ...` — there is no bespoke `samen_work_routes` macro,
+  # same as :support/:crm/:billing use the generic macro, not a per-kind one).
+  def __routes__(:work, path) do
+    [
+      {"#{path}", Samen.Web.Work.TasksLive},
+      {"#{path}/tasks/:id", Samen.Web.Work.TaskLive},
+      {"#{path}/projects", Samen.Web.Work.ProjectsLive}
+    ]
+  end
+
   # ADR-011 §7 — the Marketing / outreach route table. Mounts the previously-unmounted
   # Marketing scope's surfaces: a campaigns/sequences list, a compose+send campaign page,
   # a segments/prospecting view, and a leads lens.
@@ -1134,15 +1368,27 @@ defmodule Samen.Web.Router do
     ]
   end
 
+  # T118 (ADR-039 §12) — the tenant-plane automation builder route table: ONE
+  # LiveView, list + author/edit + pause/resume + manual run, all in one page
+  # (the `Samen.Web.Flags.SettingsLive` shape — a list with an edit-modal, not a
+  # separate list/detail pair).
+  def __routes__(:automation, path) do
+    [
+      {"#{path}", Samen.Web.Automation.BuilderLive}
+    ]
+  end
+
   defp default_path(:crm), do: "/crm"
   defp default_path(:billing), do: "/billing"
   defp default_path(:support), do: "/support"
+  defp default_path(:work), do: "/work"
   defp default_path(:marketing), do: "/marketing"
   defp default_path(:chat), do: "/chat"
   defp default_path(:notifications), do: "/notifications"
   defp default_path(:flags), do: "/flags"
   defp default_path(:search), do: "/search"
   defp default_path(:settings), do: "/settings"
+  defp default_path(:automation), do: "/automation"
 
   defp session_name(kind, path) do
     :"samen_#{kind}_#{path |> String.replace(~r/[^a-zA-Z0-9]/, "_") |> String.trim("_")}"

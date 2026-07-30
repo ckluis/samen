@@ -1,0 +1,42 @@
+# SABOTAGE: T126 — the ConfirmLive double-mount consume guard (P0, T113-caused).
+# Since ADR-042 the LiveSocket client ships, so `GET /verify/:token` mounts TWICE
+# in a browser: the disconnected (dead) HTTP render, then the connected socket
+# join. `Samen.Web.Auth.ConfirmLive` consumes a single-use `:email_verify` token
+# ON MOUNT. Pre-T126 it consumed on EVERY mount: the dead render consumed the
+# token (success) and the connected re-mount re-consumed the now-spent token
+# (`{:error, :invalid_token}`) — the connected render is authoritative, so a real
+# user saw a FALSE "Couldn't verify this link" even though the account WAS
+# verified server-side (the T49 dogfood re-walk regression). The T126 fix runs
+# the consume EXACTLY ONCE on the dead render, then redirects to a NON-secret
+# `?verified=1` / `?error=invalid_token` status flag — so no socket connects to
+# `/verify/:token` and the connected mount never re-consumes.
+#
+# This sabotage removes the redirect guard: consume-and-render on EVERY mount
+# (the exact pre-fix regression). The named regression test — which asserts the
+# dead mount REDIRECTS to `?verified=1` (never renders the token clause inline) —
+# MUST fail. Revert restores the guard byte-exact.
+#
+# APP: samen_web
+# TEST_FILES: test/samen/web/auth/confirm_test.exs
+# MUST_FAIL: REGRESSION (T126): the dead+connected double-mount verifies EXACTLY ONCE
+diff --git a/samen_web/lib/samen/web/auth/confirm_live.ex b/samen_web/lib/samen/web/auth/confirm_live.ex
+--- a/samen_web/lib/samen/web/auth/confirm_live.ex
++++ b/samen_web/lib/samen/web/auth/confirm_live.ex
+@@ -55,14 +55,8 @@ defmodule Samen.Web.Auth.ConfirmLive do
+   def mount(%{"token" => token}, session, socket) do
+     socket = Samen.Web.Live.assign_mount(socket, session)
+     mount = socket.assigns.samen_mount
+
+-    # The ONE mutating consume, on the dead render only, then redirect to the
+-    # status flag (see moduledoc "Double-mount guard").
+-    flag =
+-      case Confirm.consume(token, mods(mount)) do
+-        {:ok, _} -> "verified=1"
+-        {:error, :invalid_token} -> "error=invalid_token"
+-      end
+-
+-    {:ok, redirect(socket, to: "#{verify_action(mount, token)}?#{flag}")}
++    # SABOTAGE (T126): double-mount guard removed — consume-and-render on every mount.
++    result = Confirm.consume(token, mods(mount))
++    {:ok, assign(socket, verified?: match?({:ok, _}, result), error: nil)}
+   end

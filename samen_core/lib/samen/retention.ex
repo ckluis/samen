@@ -36,8 +36,37 @@ defmodule Samen.Retention do
   ## Documented defaults
 
   `default_ttl_seconds/0` gives the recommended per-class defaults a host starts from
-  (files 365d · messages 180d · tickets 365d · subscribers 730d). They are DEFAULTS,
-  not enforced values — a host sets its own retention in config; these document intent.
+  (files 365d · messages 180d · tickets 365d · subscribers 730d · archived 90d). They
+  are DEFAULTS, not enforced values — a host sets its own retention in config; these
+  document intent.
+
+  ## E6 (soft-delete) retention interplay (ADR-040 §5.6)
+
+  `Spec` gains no new fields for archivable resources — the existing `timestamp_field`
+  seam carries the convention: `timestamp_field: :archived_at` means "purge N days
+  after archive." Live rows have a NULL `archived_at` and never match the `<=` cutoff
+  comparison — fail-safe by SQL semantics, with no special-casing needed. Two duties
+  this module owns for every such spec:
+
+    * **Archived-inclusive reads.** An archivable resource's DEFAULT read excludes
+      archived rows (`Samen.Archival`/ash_archival's `FilterArchived`) — exactly the
+      rows a retention sweep must see. `expired_query/2` detects an archivable
+      resource (`Samen.Info.archivable?/1`) and reads through
+      `Samen.Archival.archived_query/1` (the `:archived` include-path) instead of the
+      resource's default read.
+    * **`:delete` rides `:destroy_permanently`.** On an archivable resource the
+      PRIMARY `:destroy` action is now SOFT (it archives, ADR-040 §5.2) — a bare
+      `Ash.destroy!/2` would silently re-archive an already-archived row instead of
+      purging it. A `:delete` spec on an archivable resource therefore invokes the
+      resource's `:destroy_permanently` action explicitly (never the soft path, never
+      a bare Ecto delete) — the terminal hard-delete `:shred`/erasure already use
+      untouched (§5.1).
+
+  `archived_count/2` and `archivable_specs/2` are the two new surfaces this ADR asks
+  for: a point-in-time "N archived items" count (pure metadata — never PII, INV-1: it
+  is an integer from `Ash.count!/2`, never selects/decrypts a vaulted field), and a
+  catalog-driven spec builder so a host (or a test) never hand-lists the archivable
+  roster — see their docs below.
   """
 
   require Ash.Query
@@ -54,8 +83,70 @@ defmodule Samen.Retention do
       files: 365 * day,
       messages: 180 * day,
       tickets: 365 * day,
-      subscribers: 730 * day
+      subscribers: 730 * day,
+      # "purge N days after archive" (ADR-040 §5.6) — the trash-retention default for
+      # any `archivable: true` resource's `timestamp_field: :archived_at` spec.
+      archived: 90 * day
     }
+  end
+
+  @doc """
+  Count of currently-archived rows for `resource` — the archived-count surface
+  (ADR-040 §5.6/§5.9: "an operator/tenant can see N archived items"). Reads through
+  the archived-inclusive `:archived` path (`Samen.Archival.archived_query/1`, scoped
+  to `not is_nil(archived_at)`), so this is the same set a trash view or the sweep
+  itself would purge from.
+
+  A non-archivable resource always reports `0` (nothing can be archived).
+
+  INV-1: this is metadata, never PII — `Ash.count!/2` never selects or decrypts a
+  vaulted field, so the count cannot leak a masked value regardless of the caller's
+  vault/KMS availability. `opts` are forwarded to `Ash.count!/2` (e.g. `scope:` /
+  `authorize?:` for a tenant/operator-facing surface — the internal sweep call below
+  passes `authorize?: false` like its other internal reads, matching the existing
+  house convention for framework-internal sweep reads).
+  """
+  @spec archived_count(module(), keyword()) :: non_neg_integer()
+  def archived_count(resource, opts \\ []) do
+    if Samen.Info.archivable?(resource) do
+      resource |> Samen.Archival.archived_query() |> Ash.count!(opts)
+    else
+      0
+    end
+  end
+
+  @doc """
+  Build one `Retention.Spec` per archivable resource found by walking `domains`
+  (`Samen.Catalog.resource_modules/1` filtered through `Samen.Info.archivable?/1`) —
+  never a hand-maintained resource list, so this cannot silently drift as scopes flip
+  `archivable: true` (ADR-040 §5.6's binding done-criterion: "assert via
+  `Samen.Info.archivable?/1` enumeration, not a hand-maintained list").
+
+  Every generated spec rides the binding convention: `timestamp_field: :archived_at`
+  ("purge N days after archive"). `ttl_seconds` (default
+  `default_ttl_seconds().archived`) and `action` (default `:delete`, rides
+  `:destroy_permanently` per the moduledoc above; pass `action: :shred` for a
+  subject-bearing resource-class subset) are host-tunable — no new host-config shape,
+  per §5.6's own text ("`Spec` gains no new fields").
+  """
+  @spec archivable_specs([module()] | module(), keyword()) :: [Spec.t()]
+  def archivable_specs(domains, opts \\ []) do
+    ttl_seconds = Keyword.get(opts, :ttl_seconds, default_ttl_seconds().archived)
+    action = Keyword.get(opts, :action, :delete)
+    subject_field = Keyword.get(opts, :subject_field, :id)
+
+    domains
+    |> Samen.Catalog.resource_modules()
+    |> Enum.filter(&Samen.Info.archivable?/1)
+    |> Enum.map(fn resource ->
+      %Spec{
+        resource: resource,
+        ttl_seconds: ttl_seconds,
+        action: action,
+        timestamp_field: :archived_at,
+        subject_field: subject_field
+      }
+    end)
   end
 
   @doc "The retention cutoff wall for a TTL at `now`: rows at/before this instant are expired."
@@ -65,16 +156,29 @@ defmodule Samen.Retention do
   end
 
   @doc """
-  Sweep every spec. Returns `%{swept: total, by_spec: [%{resource, action, swept}]}`.
+  Sweep every spec. Returns `%{swept: total, archived: total_archived, by_spec:
+  [%{resource, action, swept, archived}]}`.
 
   `opts`:
     * `:now`  — the sweep instant (defaults to `DateTime.utc_now/0`; tests pin it).
     * `:repo` — forwarded to the shred path (`Samen.Erasure.shred/2`).
 
   A spec with an invalid TTL is skipped (fail-closed) and contributes `swept: 0`.
-  Emits `[:samen, :retention, :sweep]` telemetry with `%{swept: total, specs: n}`.
+
+  `archived` (per-spec and the top-level total) is the DISTINCT archived-row count
+  taken after this spec's pass (`archived_count/2`, ADR-040 §5.6 "T37 c2") — never
+  conflated with `swept` (the rows this pass actually purged/shredded): `archived` is
+  "how many archived rows remain right now" (0 for a non-archivable resource), the
+  same "N archived items" surface a trash view would show.
+
+  Emits `[:samen, :retention, :sweep]` telemetry with `%{swept: total, specs: n,
+  archived: archived_total}`.
   """
-  @spec sweep([Spec.t()], keyword()) :: %{swept: non_neg_integer(), by_spec: [map()]}
+  @spec sweep([Spec.t()], keyword()) :: %{
+          swept: non_neg_integer(),
+          archived: non_neg_integer(),
+          by_spec: [map()]
+        }
   def sweep(specs, opts \\ []) when is_list(specs) do
     now = Keyword.get(opts, :now, DateTime.utc_now())
 
@@ -82,14 +186,20 @@ defmodule Samen.Retention do
       Enum.map(specs, fn spec ->
         spec = Spec.normalize(spec)
         swept = sweep_one(spec, now, opts)
-        %{resource: spec.resource, action: spec.action, swept: swept}
+        archived = archived_count(spec.resource, authorize?: false)
+        %{resource: spec.resource, action: spec.action, swept: swept, archived: archived}
       end)
 
     total = Enum.reduce(by_spec, 0, &(&1.swept + &2))
+    archived_total = Enum.reduce(by_spec, 0, &(&1.archived + &2))
 
-    :telemetry.execute([:samen, :retention, :sweep], %{swept: total, specs: length(specs)}, %{})
+    :telemetry.execute(
+      [:samen, :retention, :sweep],
+      %{swept: total, specs: length(specs), archived: archived_total},
+      %{}
+    )
 
-    %{swept: total, by_spec: by_spec}
+    %{swept: total, archived: archived_total, by_spec: by_spec}
   end
 
   # A single spec. Refuse an invalid TTL (fail-closed — never sweep the whole table).
@@ -105,13 +215,14 @@ defmodule Samen.Retention do
 
   defp sweep_one(%Spec{action: :delete} = spec, now, _opts) do
     wall = cutoff(spec.ttl_seconds, now)
+    destroy_opts = terminal_destroy_opts(spec.resource)
 
     expired =
       expired_query(spec, wall)
       |> Ash.read!(authorize?: false)
 
     Enum.reduce(expired, 0, fn row, acc ->
-      Ash.destroy!(row, authorize?: false)
+      Ash.destroy!(row, destroy_opts)
       acc + 1
     end)
   rescue
@@ -148,8 +259,42 @@ defmodule Samen.Retention do
 
   # Rows whose retention timestamp is at/before the wall — the expired set. The field
   # is dynamic (a spec may retain on :inserted_at, :closed_at, :last_activity_at, …).
+  #
+  # ADR-040 §5.6: an archivable resource's DEFAULT read excludes archived rows (the
+  # `Samen.Archival`/ash_archival `FilterArchived` preparation) — exactly the rows
+  # retention must see (a `timestamp_field: :archived_at` spec can never match
+  # anything through the default read: live rows have NULL archived_at, archived rows
+  # are filtered out). Read through the archived-inclusive `:archived` path instead
+  # (`Samen.Archival.archived_query/1`) so purge candidates are actually visible. This
+  # is strictly more permissive, never less safe: a live row's `archived_at` is still
+  # NULL under this base query and still never matches `<=` (fail-safe by SQL
+  # semantics, unchanged).
   defp expired_query(%Spec{resource: resource, timestamp_field: field}, wall) do
     require Ash.Query
-    Ash.Query.filter(resource, ^Ash.Expr.ref(field) <= ^wall)
+
+    base =
+      if Samen.Info.archivable?(resource) do
+        Samen.Archival.archived_query(resource)
+      else
+        resource
+      end
+
+    Ash.Query.filter(base, ^Ash.Expr.ref(field) <= ^wall)
+  end
+
+  # §5.6: on an archivable resource the PRIMARY `:destroy` is now SOFT (ADR-040 §5.2 —
+  # a plain destroy archives). A bare `Ash.destroy!/2` in the `:delete` sweep would
+  # therefore silently re-archive an already-archived row (a no-op against the very
+  # row retention is supposed to purge) instead of actually removing it. Retention's
+  # `:delete` action rides the terminal `:destroy_permanently` action explicitly on an
+  # archivable resource — never the soft path, never a bare Ecto delete. A
+  # non-archivable resource is unaffected: it has no `:destroy_permanently` action and
+  # its primary `:destroy` is already a real hard delete (unchanged behavior).
+  defp terminal_destroy_opts(resource) do
+    if Samen.Info.archivable?(resource) do
+      [action: :destroy_permanently, authorize?: false]
+    else
+      [authorize?: false]
+    end
   end
 end

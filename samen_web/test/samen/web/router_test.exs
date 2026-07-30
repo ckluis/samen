@@ -76,4 +76,52 @@ defmodule Samen.Web.RouterTest do
     assert "/marketing/segments" in paths
     assert "/marketing/leads" in paths
   end
+
+  # T118 (ADR-039 §12 done-criterion 4) — the tenant automation builder macro.
+  # A real host router that mounts it via ONE macro call — if the macro is broken,
+  # THIS MODULE FAILS TO COMPILE, the same expansion proof `HostRouter` gives crm/
+  # billing/support/marketing above.
+  defmodule AutomationHostRouter do
+    use Phoenix.Router
+    import Phoenix.LiveView.Router
+    import Samen.Web.Router
+
+    scope "/" do
+      samen_automation_routes(:automation, Some.Host.Automation, repo: Some.Host.Repo)
+    end
+  end
+
+  test "the automation route table maps ONE builder page (list + author/edit modal)" do
+    routes = Samen.Web.Router.__routes__(:automation, "/automation")
+    assert routes == [{"/automation", Samen.Web.Automation.BuilderLive}]
+  end
+
+  test "the automation host router compiled and registered the builder route" do
+    paths = AutomationHostRouter.__routes__() |> Enum.map(& &1.path)
+    assert "/automation" in paths
+  end
+
+  test "samen_automation_routes/3 accepts NO :plane option — the mount is always tenant (INV-2)" do
+    # Unlike samen_flags_routes/samen_files_routes/etc, this macro's expansion (see
+    # its definition) hardcodes `plane: Samen.Web.Plane.tenant()` — it never reads a
+    # `:plane` opt at all. Passing one is simply ignored (no compile error, no
+    # runtime branch reads it), which is itself the INV-2 proof: there is no code
+    # path in this macro that could ever produce an operator-plane mount.
+    defmodule AutomationOperatorAttemptRouter do
+      use Phoenix.Router
+      import Phoenix.LiveView.Router
+      import Samen.Web.Router
+
+      scope "/" do
+        samen_automation_routes(:automation, Some.Host.Automation,
+          repo: Some.Host.Repo,
+          plane: :operator,
+          target_org_id: "ignored"
+        )
+      end
+    end
+
+    paths = AutomationOperatorAttemptRouter.__routes__() |> Enum.map(& &1.path)
+    assert "/automation" in paths
+  end
 end

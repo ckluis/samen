@@ -117,6 +117,12 @@ echo "==> Running samen_resend tests (ADR-038 C1 third reference adapter — sta
 )
 echo "==> samen_resend: PASSED"
 
+# --- T107: interrupt-safe wrapper for the registry-mutating gen_app probes ------------
+# See scripts/gen_probe_guard.sh for the full rationale (recurring Phase-2 failure,
+# SIGINT non-trappability inside the BEAM, etc.) — sourced here so this exact code is
+# also what scripts/interrupt_probe_test.sh (the T107 interrupt-proof harness) exercises.
+source "$REPO_ROOT/scripts/gen_probe_guard.sh"
+
 # --- gen_app tier: the flagship generative proof (WS-D D6, AC-X-1) ---
 # The PERMANENT gen_app test tier (design.md §4). In ONE automated run it generates a
 # fresh app with the FULL running product (--web --api --seeds --observability), runs
@@ -128,13 +134,8 @@ echo "==> samen_resend: PASSED"
 # because it deps.get/compiles a scratch app and runs its ci.sh five times (~100s); it
 # needs local Postgres. Zero scratch residue; the committed abbrev registry is restored
 # byte-exact on every exit path.
-echo ""
-echo "==> Running gen_app flagship probe (WS-D D6 / AC-X-1 — generate → ci.sh → seed → boot → 2 sabotages)"
-(
-  cd "$REPO_ROOT/samen_core"
-  mix run priv/gen_app_flagship_probe.exs
-)
-echo "==> gen_app flagship probe: PASSED"
+run_gen_probe "priv/gen_app_flagship_probe.exs" \
+  "gen_app flagship probe (WS-D D6 / AC-X-1 — generate → ci.sh → seed → boot → 2 sabotages)"
 
 # --- gen_app tier: the POST-APP generator proof (WS-D D7a, AC-G4-7 / AC-G26-1/3) ---
 # The permanent proof for `mix samen.gen.scope` + `mix samen.gen.resource`: it generates a
@@ -145,13 +146,8 @@ echo "==> gen_app flagship probe: PASSED"
 # admin gate) and proves the RBAC red path FLIPS + reverts byte-exact. Correct-by-construction,
 # ZERO hand-edits. Separate step (deps.get/compiles a scratch app + runs its ci.sh; ~80s; needs
 # local Postgres). Zero scratch residue; the committed abbrev registry is restored byte-exact.
-echo ""
-echo "==> Running gen_app post-app generator probe (WS-D D7a — gen.scope + gen.resource → ci.sh + 4 G26 files + sabotage)"
-(
-  cd "$REPO_ROOT/samen_core"
-  mix run priv/gen_post_probe.exs
-)
-echo "==> gen_app post-app generator probe: PASSED"
+run_gen_probe "priv/gen_post_probe.exs" \
+  "gen_app post-app generator probe (WS-D D7a — gen.scope + gen.resource → ci.sh + 4 G26 files + sabotage)"
 
 # --- gen_app tier: the DEPLOY proof (WS-D D10, AC-G16-1/2/3 — ADR-024 fail-honest) ---
 # The permanent proof for `mix samen.gen.app --deploy`: it generates a fresh --web --api
@@ -165,13 +161,8 @@ echo "==> gen_app post-app generator probe: PASSED"
 # call anywhere (ADR-024 — no live deploy execution). Separate step (deps.get/compiles a
 # scratch app + runs its ci.sh; ~75s; needs local Postgres). Zero scratch residue; the
 # committed abbrev registry is restored byte-exact.
-echo ""
-echo "==> Running gen_app deploy probe (WS-D D10 / AC-G16-1/2/3 — --deploy → ci.sh + fail-closed runtime + sabotage)"
-(
-  cd "$REPO_ROOT/samen_core"
-  mix run priv/gen_app_deploy_probe.exs
-)
-echo "==> gen_app deploy probe: PASSED"
+run_gen_probe "priv/gen_app_deploy_probe.exs" \
+  "gen_app deploy probe (WS-D D10 / AC-G16-1/2/3 — --deploy → ci.sh + fail-closed runtime + sabotage)"
 
 # --- WS-E sabotage harness (E2i.1) — permanent OPT-IN step (SAMEN_SABOTAGE=1) ---
 # Replays every shipped gate sabotage as a committed patch (scripts/sabotages/*.patch):

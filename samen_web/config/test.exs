@@ -39,8 +39,11 @@ config :samen_web,
     Samen.WebTest.Crm,
     Samen.WebTest.Billing,
     Samen.WebTest.Support,
+    Samen.WebTest.Work,
+    Samen.WebTest.Calendar,
     Samen.WebTest.Marketing,
     Samen.WebTest.Operator,
     Samen.WebTest.Primitives,
-    Samen.WebTest.RichTypes
+    Samen.WebTest.RichTypes,
+    Samen.WebTest.Automation
   ]

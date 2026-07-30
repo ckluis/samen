@@ -441,17 +441,20 @@ defmodule Driftwood.Seeds do
       for offset <- 0..2 do
         {type, subject, body} = Enum.at(@activity_templates, rem(p_idx + offset, length(@activity_templates)))
 
-        Driftwood.Crm.Activity
+        # ADR-041 §5: the CRM Activity is now the canonical Work-scope Task, anchored to
+        # the CRM object via the generic `(subject_key, subject_id)` object-ref (crm.person),
+        # with the full CRM ref set preserved in custom.crm_refs (zero data drop).
+        Driftwood.Work.Task
         |> Ash.Changeset.for_create(
           :create,
           %{
             org_id: org_id,
-            person_id: person.id,
-            company_id: person.company_id,
-            type: type,
-            subject: subject,
+            kind: type,
+            title: subject,
             body: body,
             status: :completed,
+            subject_key: "crm.person",
+            subject_id: person.id,
             completed_at: DateTime.add(DateTime.utc_now(), -offset * 86_400, :second) |> DateTime.truncate(:second)
           },
           actor: %{org_id: org_id, role: :member},
@@ -830,8 +833,7 @@ defmodule Driftwood.Seeds do
             priority: priority,
             sla_id: sla.id,
             sla_breach_at: DateTime.add(now, sla.resolve_minutes * 60, :second),
-            resolved_at: resolved_at,
-            tags: ["freight-dispute"]
+            resolved_at: resolved_at
           },
           actor: member,
           authorize?: false

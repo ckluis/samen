@@ -82,6 +82,18 @@ defmodule Samen.Billing.Dunning do
   `expires_at` — see `Samen.Billing.Mirror`'s moduledoc), and a best-effort
   `:payment_recovered` lifecycle email is enqueued the same way.
 
+  ## E5 escalation client (ADR-039 §7.4 — T41 adoption seam)
+
+  `reconcile/2` and `recover/2` keep every line above VERBATIM. They ADDITIONALLY
+  ride `Samen.Automation.Escalate.open/2` (`kind: "dunning"`, `dedupe_key:
+  provider_invoice_id`, `deadline_at:` the grace boundary/`period_end`) on open/
+  advance, and `Escalate.resolve/3` (`{org_id, "dunning", provider_invoice_id}`,
+  `:resolved`) on recovery. Best-effort, same posture as the existing lifecycle
+  email: never re-decides, never aborts the case/entitlement write above, and is
+  skipped (not attempted) when no `org_id` is available (a bare invoice webhook
+  carries none of its own — see below) — mirrors this module's own
+  "notification is side-effect-only, never gates the outcome" discipline.
+
   ## Org resolution for notifications (an honest, host-injectable seam)
 
   A bare invoice webhook carries no `org_id` of its own (ingress happens before
@@ -186,6 +198,7 @@ defmodule Samen.Billing.Dunning do
         {:ok, applied} ->
           apply_grace(opts, subscription_id, grace_until)
           notify(opts, :payment_failed, refs, subscription_id)
+          escalate_open(opts, invoice_id, refs, grace_until)
           {:ok, :applied, applied}
 
         {:error, reason} ->
@@ -274,6 +287,7 @@ defmodule Samen.Billing.Dunning do
       {:ok, applied} ->
         apply_active(opts, subscription_id)
         notify(opts, :payment_recovered, refs, subscription_id)
+        escalate_resolve(opts, invoice_id)
         {:ok, :recovered, applied}
 
       {:error, reason} ->
@@ -319,6 +333,48 @@ defmodule Samen.Billing.Dunning do
     end
 
     :ok
+  rescue
+    _ -> :ok
+  end
+
+  # ---------------------------------------------------------------------------
+  # E5 escalation client (ADR-039 §7.4) — best-effort, rides alongside the
+  # case/entitlement write above, NEVER affects the returned outcome (the SAME
+  # posture as `notify/4`). Skipped (not attempted) with no `org_id` — a bare
+  # invoice webhook carries none of its own (see moduledoc "Org resolution").
+
+  defp escalate_open(_opts, _invoice_id, _refs, nil), do: :ok
+
+  defp escalate_open(opts, invoice_id, _refs, grace_until) do
+    case Keyword.get(opts, :org_id) do
+      nil ->
+        :ok
+
+      org_id ->
+        Samen.Automation.Escalate.open(%{
+          org_id: org_id,
+          kind: "dunning",
+          dedupe_key: invoice_id,
+          subject_ref: "samen:billing.invoice:#{invoice_id}",
+          deadline_at: grace_until,
+          chain: nil
+        })
+
+        :ok
+    end
+  rescue
+    _ -> :ok
+  end
+
+  defp escalate_resolve(opts, invoice_id) do
+    case Keyword.get(opts, :org_id) do
+      nil ->
+        :ok
+
+      org_id ->
+        Samen.Automation.Escalate.resolve({org_id, "dunning", invoice_id}, :resolved)
+        :ok
+    end
   rescue
     _ -> :ok
   end

@@ -17,7 +17,6 @@ defmodule Samen.WebTest.Crm do
       person: "swp",
       pipeline: "swi",
       opportunity: "swo",
-      activity: "swa",
       attachment: "swt"
     }
 end

@@ -133,7 +133,9 @@ defmodule Demo.CmsScopeVaultRoutingTest do
       "cmd_media",
       "cnv_navigation",
       "csm_seo_meta",
-      "cvr_content_version"
+      "cpg_page_versions",
+      "cpt_post_versions",
+      "cbl_block_versions"
     ]
 
     Enum.each(cms_tables, fn table ->

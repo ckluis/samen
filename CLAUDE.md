@@ -51,7 +51,12 @@ tests: `samen_web/test/samen/web/file_preview_masking_test.exs` (first consumer)
 ## Abbrev registry — HANDS-OFF
 NEVER add/edit rows in any `priv/abbrev_registry.json` by hand. Allocation goes through the
 sanctioned allocator only (`mix samen.abbrev.reserve`, driven by `mix samen.gen.*`; ADR-023).
-Any probe/script touching the registry must restore it SHA-256 byte-exact on every exit path.
+Any probe/script touching the registry must restore it SHA-256 byte-exact on every exit path
+— INCLUDING an OS-level interrupt (SIGINT/SIGTERM), not just normal/error returns (T107).
+Enforced by `ci.sh`'s `run_gen_probe` wrapper around the three `samen_core/priv/gen_*_probe.exs`
+invocations: it snapshots the registry to a `mktemp`'d file before each probe and restores +
+SHA-256-verifies it in a trap covering SIGINT/SIGTERM/ERR/EXIT, independent of whether the
+probe itself gets to run its own cleanup (SIGINT is not trappable inside the BEAM at all).
 
 ## Framework-first, ≈0-LOC vertical mounts
 Features live in samen_core/samen_web; verticals adopt via one router/macro call

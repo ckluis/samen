@@ -26,13 +26,19 @@ defmodule <%= module %>.Vertical.Record do
       transformer produces from the abbrev + the pii_ scalar rule.
     * `name` / `segment` — plain non-PII columns (`segment` is the aggregate cohort key).
     * OrgScope on every action.
+    * `archivable: true` (ADR-040 §5.8, T37h) — the authored vertical resource is
+      soft-deletable by default: the E6 substrate (`archived_at`, `:archive`/
+      `:restore`/`:archived`, the default-read exclusion) with zero authored code.
+      A plain "delete" of a Record archives it (hidden from default reads, still
+      restorable) rather than a hard DB delete.
   """
   use Samen.Resource,
     otp_app: :<%= otp_app %>,
     domain: <%= module %>.Vertical,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
-    abbrev: "<%= abbrev %>"
+    abbrev: "<%= abbrev %>",
+    archivable: true
 
   postgres do
     table("<%= resource_table %>")

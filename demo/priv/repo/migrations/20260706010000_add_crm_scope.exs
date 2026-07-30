@@ -28,7 +28,6 @@ defmodule Demo.Repo.Migrations.AddCrmScope do
     Demo.CrmScope.Person,
     Demo.CrmScope.Pipeline,
     Demo.CrmScope.Opportunity,
-    Demo.CrmScope.Activity,
     Demo.CrmScope.Attachment
   ]
 
@@ -127,51 +126,9 @@ defmodule Demo.Repo.Migrations.AddCrmScope do
       add(:opp_updated_at, :utc_datetime, null: false)
     end
 
-    # --- act_activity : a CRM activity (call/email/meeting/note) ---
-    create table(:act_activity, primary_key: false) do
-      add(:act_type, :text, null: false)
-      add(:act_subject, :text)
-      add(:act_body, :text)
-      add(:act_status, :text, default: "pending")
-      add(:act_due_at, :utc_datetime)
-      add(:act_completed_at, :utc_datetime)
-      add(:act_custom, :map, default: fragment("'{}'::jsonb"))
-
-      add(
-        :act_company_id,
-        references(:cmp_company,
-          column: :cmp_id,
-          name: "act_activity_act_company_id_fkey",
-          type: :uuid,
-          prefix: "public"
-        )
-      )
-
-      add(
-        :act_person_id,
-        references(:per_person,
-          column: :per_id,
-          name: "act_activity_act_person_id_fkey",
-          type: :uuid,
-          prefix: "public"
-        )
-      )
-
-      add(
-        :act_opportunity_id,
-        references(:opp_opportunity,
-          column: :opp_id,
-          name: "act_activity_act_opportunity_id_fkey",
-          type: :uuid,
-          prefix: "public"
-        )
-      )
-
-      add(:act_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
-      add(:act_org_id, :uuid, null: false)
-      add(:act_inserted_at, :utc_datetime, null: false)
-      add(:act_updated_at, :utc_datetime, null: false)
-    end
+    # --- act_activity : REMOVED (ADR-041 §5, ruling M5) — the CRM Activity was migrated
+    # into the canonical Work-scope Task (see the `migrate_activity_to_task` contract
+    # migration) and its resource removed, so this scope no longer creates the table. ---
 
     # --- att_attachment : a file reference linked to any CRM object ---
     create table(:att_attachment, primary_key: false) do
@@ -228,11 +185,6 @@ defmodule Demo.Repo.Migrations.AddCrmScope do
     drop(constraint(:att_attachment, "att_attachment_att_person_id_fkey"))
     drop(constraint(:att_attachment, "att_attachment_att_company_id_fkey"))
     drop(table(:att_attachment))
-
-    drop(constraint(:act_activity, "act_activity_act_opportunity_id_fkey"))
-    drop(constraint(:act_activity, "act_activity_act_person_id_fkey"))
-    drop(constraint(:act_activity, "act_activity_act_company_id_fkey"))
-    drop(table(:act_activity))
 
     drop(constraint(:opp_opportunity, "opp_opportunity_opp_pipeline_id_fkey"))
     drop(constraint(:opp_opportunity, "opp_opportunity_opp_company_id_fkey"))

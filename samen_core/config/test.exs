@@ -76,8 +76,62 @@ config :samen_core, :vault_declared_parity_allow_list, [
   # vault-routed signing_secret (column pii_nwh_signing_secret), but the fixture
   # domain is NOT in :ash_domains so vault_declared_parity cannot discover the
   # route. The route IS declared — allow-list the pair.
-  {"nwh_webhook", "pii_nwh_signing_secret"}
+  {"nwh_webhook", "pii_nwh_signing_secret"},
+  # T39 automation fixture (test/support/automation_fixture.ex): the Subject trigger
+  # source declares a vault-routed email (column pii_asj_email) so the c2 red-path can
+  # prove a condition on it is refused. The fixture domain is NOT in :ash_domains, so
+  # vault_declared_parity cannot discover the route — allow-list the pair.
+  {"asj_subject", "pii_asj_email"},
+  # T34 E3 approvals fixture (test/support/approvals_fixture.ex): the Document Gate-client
+  # declares a vault-routed secret (column pii_apd_secret) so the INV-1 no-persisted-inputs
+  # proof is non-vacuous. The fixture domain is NOT in :ash_domains — allow-list the pair.
+  {"apd_document", "pii_apd_secret"},
+  # T41 E4 reminder (test/support/automation_fixture.ex, the SAME AutomationFixture
+  # domain T39 mounts): Reminder.note is vault-routed (column pii_arm_note) so the
+  # per-plane masking 3-proof is non-vacuous. The fixture domain is NOT in
+  # :ash_domains — allow-list the pair.
+  {"arm_reminder", "pii_arm_note"},
+  # T40 E2 action-library fixture (test/support/automation_fixture.ex, the SAME
+  # AutomationFixture domain T39/T41 mount): Target.email is vault-routed
+  # (column pii_sat_email) so the webhook snapshot assert's negative control
+  # (a vault field named in `include` still never reaches the payload) is
+  # non-vacuous. The fixture domain is NOT in :ash_domains — allow-list the pair.
+  {"sat_target", "pii_sat_email"},
+  # T45 F3 (Docs scope, test/support/docs_fixture.ex): Doc.secure_body /
+  # Note.secure_body are vault-routed (columns pii_sdd_secure_body /
+  # pii_sdn_secure_body — the "PII-classified routes to vault" path, see
+  # Samen.Scopes.Docs.Blueprint) so the INV-1 masking three-proof is
+  # non-vacuous. The fixture domain is NOT in :ash_domains — allow-list the pair.
+  {"sdd_doc", "pii_sdd_secure_body"},
+  {"sdn_note", "pii_sdn_secure_body"}
 ]
+
+# T34 E3 approve/reject engine (ADR-040 §4). The host-wired seam: the Approval resource +
+# its repo. samen_core wires the TestRepo fixture; hosts configure their own (T35).
+config :samen_core, Samen.Approvals,
+  approval_resource: SamenCore.Support.ApprovalsFixture.Approval,
+  repo: SamenCore.TestRepo
+
+# The kind registry (§4.4): `kind => {plane, handler}`. Gate-guarded action kinds route to
+# the generic `Samen.Approvals.Gate` handler (re-invokes the action as the requester); the
+# Face-1 "test:*" kinds drive the handler-registry proofs (the reveal grant becomes exactly
+# this shape of client in T35). Unregistered kinds are refused at write.
+config :samen_core, Samen.Approvals.Registry,
+  kinds: %{
+    (Atom.to_string(SamenCore.Support.ApprovalsFixture.Document) <> ":publish") =>
+      {:tenant, Samen.Approvals.Gate},
+    (Atom.to_string(SamenCore.Support.ApprovalsFixture.Document) <> ":lock") =>
+      {:tenant, Samen.Approvals.Gate},
+    "test:note" => {:tenant, SamenCore.Support.ApprovalsFixture.NoteHandler},
+    "test:boom" => {:tenant, SamenCore.Support.ApprovalsFixture.BoomHandler},
+    # An OPERATOR-plane kind (the reveal "pii_reveal" shape): its rows carry org_id NULL
+    # and are structurally invisible to every tenant actor (the cross-org read red test).
+    "test:op" => {:operator, SamenCore.Support.ApprovalsFixture.NoteHandler},
+    # T35 §4.7: reveal grants are a REAL client of this shape (not just the "test:op"
+    # rehearsal above) — samen_core's own reveal test suite runs against the SAME
+    # ApprovalsFixture.Approval + TestRepo wiring configured above.
+    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler}
+  }
 
 # T2.6 OTel test config: use the pid exporter so tests receive spans as messages
 # and can assert on attributes inline. The simple processor sends spans

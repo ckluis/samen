@@ -508,3 +508,69 @@ nobody (the same disjoint-key property T07's verifier confirmed for the password
 T100 red test proves the federated attacker — linked IdP identity but no TOTP code — obtains
 zero usable session and lands on `/2fa`; the positive control proves the factor completes to
 exactly one session via `finish_login`; the non-TOTP control proves unchanged OIDC login.
+
+## 11 · Addendum (T110) — the pre-actor arc is browser-real with NO JavaScript: every credential form has a POST fallback, no credential ever in a URL
+
+- **Status:** Accepted addendum (2026-07-23). **Task:** T110 (phase 3), an ESCALATED
+  security fix filed directly from the WS-UX Persona-1 dogfood walk
+  (`_orch/ux/persona-1-org-owner.md` F1/F2/F8).
+
+### 11.1 The gap
+
+Samen ships **zero client `<script>`** by design (the CSS-only / no-esbuild posture,
+`Samen.Web.Layouts`), so in a REAL browser the LiveView socket never connects and every
+`phx-submit`-only form degrades to its native HTML submit. §5 A4 (login) + §10 already solve
+this — `LoginLive`'s form carries a real `action` + `method="post"` and the router pairs a
+`post(...)` controller route with the GET LiveView — but that precedent was applied ONLY to
+A4/A7-verify. A1 (`/signup`), A3 (`/reset`, `/reset/:token`), A5 (`/invite/:token`), the A8
+onboarding wizard, and A7 ENROLLMENT were left `phx`-only. Worst case (F1): `/signup`'s
+native submit defaulted to **GET**, putting the plaintext **password in the URL query
+string** (`?registration[password]=…`) — browser history, access logs, `Referer`. Server-side
+LiveView tests passed throughout (they simulate the socket), so the gate was green while a
+real human hit a wall at the first screen.
+
+### 11.2 The rule (generic — binds every current and future auth surface)
+
+**No credential may ever appear in a URL / query string.** Every form carrying a password,
+TOTP code, recovery code, or a reset/invite/verify token IN ITS BODY MUST submit via a real
+`method="post"` to a paired controller action — in BOTH the JS-connected and no-JS-fallback
+paths. A verify/reset/invite token that is legitimately PART of the url PATH
+(`GET /reset/:token`, `/invite/:token`) is how the token arrives and is unchanged; the
+objection is a credential appearing as a side effect of a SUBMIT.
+
+Concretely, each pre-actor GET `live(...)` now pairs with a `post(...)` controller route in
+`samen_auth_routes/1` (mirroring the login/2fa pairing): `POST /signup`, `POST /reset`,
+`POST /reset/:token`, `POST /invite/:token` → `Samen.Web.Auth.AccountController`. The A8
+onboarding wizard pairs its writes (`name_org`/`select_plan`/`invite`/`finish`) with
+`Samen.Web.Onboarding.WizardController` under `samen_onboarding_routes/2` (Skip is a plain
+GET `<.link patch>` — navigation, no write). A7 enrollment pairs
+`POST /settings/security/2fa{,/recovery_codes,/disable}` → `Samen.Web.Auth.TotpEnrollController`
+under `samen_settings_routes/3`'s existing `spine_totp` gate.
+
+### 11.3 Mechanism (reuse, not duplication)
+
+The controller — never the LiveView — is the AUTHORITATIVE mutation + rate-limit site (a
+no-JS POST bypasses the LiveView entirely, so the ADR-038 §6.3 limits `:registration_ip` /
+`:token_request_account` are enforced in `AccountController`, not only in the LiveView's
+inline guard). The LiveView's `phx-submit` does a cheap inline password-length check for the
+JS UX, then arms `phx-trigger-action` to fire the SAME real POST — the exact `LoginLive`
+pattern (§10). Status flows back as NON-secret query flags (`?registered=1`,
+`?error=weak_password`, `?reset=1`, `?joined=1`, onboarding `&step=`), never a credential.
+The no-account-existence-oracle discipline (A1/A3) is preserved: register + request-reset
+return the SAME redirect whether or not the account exists. One-time recovery codes (A7),
+which cannot ride a redirect URL, are handed back via the Phoenix FLASH (a signed, single-use,
+same-user channel — never a URL).
+
+Because every auth surface lives in `samen_web` and verticals/generated apps adopt it via the
+router macros at ≈0 authored LOC (the framework-first rule), fixing the macros + LiveViews
+fixes every already-generated and future app with zero template/vertical hand-edits (the
+`templates_golden` goldens pin only the macro-CALL lines).
+
+### 11.4 The regression invariant (INV-3)
+
+`account_controller_test.exs` proves, with a POSITIVE CONTROL (the pre-fix `phx-submit`-only
+shape is FLAGGED, so the check is not a tautology): (a) each pre-actor arc form renders
+`method="post"` + a real `action`; (b) `samen_auth_routes` emits the paired `post(...)`
+routes; (c) each controller performs the real mutation and redirects with only non-secret
+flags — the submitted password/token is NEVER in the redirect Location. `totp_test.exs` adds
+the same POST-form + route-pairing proof for A7 enrollment.

@@ -3,7 +3,7 @@ defmodule Samen.Scopes.Cms.Audit do
   CMS scope audit writers — thin wrappers around the T2.2 `aud_event` tier.
 
   Per the scope-authoring guide §6: a scope **never defines its own audit table**.
-  CMS audit-worthy events (publish, archive, content version created) call
+  CMS audit-worthy lifecycle events (publish, archive) call
   `Samen.AuditEvent.insert/2` with **token-only** rows (bounded IDs + operator
   tokens, never subject PII). The `AudEvent` tier's `no_plaintext_pii` enforcement
   guarantees this automatically.
@@ -14,11 +14,16 @@ defmodule Samen.Scopes.Cms.Audit do
     * `:cms_page_archived`    — a page transitioned to :archived
     * `:cms_post_published`   — a post transitioned to :published
     * `:cms_post_archived`    — a post transitioned to :archived
-    * `:cms_content_versioned` — a content version row was created
 
-  All events carry `org_id`, `actor_id`, and `subject_id` (the page/post/version
-  UUID) as opaque IDs. `detail` carries a bounded enum (the event type + status
-  transition) — never free text or authored content.
+  All events carry `org_id`, `actor_id`, and `subject_id` (the page/post UUID) as
+  opaque IDs. `detail` carries a bounded enum (the event type + status transition) —
+  never free text or authored content.
+
+  Content *versioning* is NOT a governance event here: it is the E7 audit-on-write
+  tier (`versioned: :snapshot` → `<Resource>.Version` rows, ADR-040 §6.5). The former
+  `:cms_content_versioned` event was retired with the bespoke ContentVersion (T119) —
+  the four audit tiers stay disjoint (§7.4), so a content version is not also mirrored
+  into the governance `aud_event` hash-chain.
   """
 
   @doc """
@@ -33,8 +38,7 @@ defmodule Samen.Scopes.Cms.Audit do
       :cms_page_published,
       :cms_page_archived,
       :cms_post_published,
-      :cms_post_archived,
-      :cms_content_versioned
+      :cms_post_archived
     ]
 
     if event_type not in valid_event_types do

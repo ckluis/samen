@@ -28,6 +28,8 @@ defmodule Samen.Web.Auth.InvitationTest do
 
   alias Samen.Auth.SessionCreate
   alias Samen.Auth.TokenMint
+  alias Samen.Delivery.Lifecycle.EmailWorker
+  alias Samen.Delivery.Message
   alias Samen.Identity.Invite
   alias Samen.Identity.Register
   alias Samen.Web.Auth
@@ -42,6 +44,29 @@ defmodule Samen.Web.Auth.InvitationTest do
   alias Samen.WebTest.Operator.Org
   alias Samen.WebTest.Operator.Session
   alias Samen.WebTest.Operator.User
+
+  # F2 (T111) delivery adapters. `CapturingAdapter` records the exact `%Message{}`
+  # + config the invite dispatch built (proving the org_id reaching the delivery
+  # path is a LOADED binary, never `%Ash.NotLoaded{}`). `RaisingAdapter` injects a
+  # genuine dispatch crash so the caller-side rescue is exercised for real.
+  defmodule CapturingAdapter do
+    use Samen.Delivery.Provider
+    @impl true
+    def configured?(_config), do: true
+    @impl true
+    def deliver(%Message{} = message, config) do
+      send(self(), {:t111_invite_captured, message, config})
+      {:ok, %{provider_message_id: "captured-#{message.send_id}"}}
+    end
+  end
+
+  defmodule RaisingAdapter do
+    use Samen.Delivery.Provider
+    @impl true
+    def configured?(_config), do: true
+    @impl true
+    def deliver(%Message{}, _config), do: raise("injected delivery crash (T111 F2)")
+  end
 
   # See confirm_test.exs/reset_test.exs/session_test.exs — `Samen.Delivery.AuthMailer`
   # resolves its env the SAME way `Samen.Delivery.Lifecycle.EmailWorker` does; the
@@ -425,4 +450,147 @@ defmodule Samen.Web.Auth.InvitationTest do
       assert CurrentOrg.resolve(mount, %{"org" => solo.org.id}, session) == nil
     end
   end
+
+  # ===========================================================================
+  # 6. F2 (T111) — invite dispatch is fail-honest: a dispatch crash is NEVER
+  #    reclassified as success, and the happy path passes a LOADED org_id.
+  # ===========================================================================
+
+  describe "F2 (T111): invite dispatch fail-honesty" do
+    setup do
+      prev_email = Application.get_env(:samen_core, EmailWorker)
+      prev_provider = Application.get_env(:samen_core, :delivery_provider)
+      prev_env = Application.get_env(:samen_core, :delivery_env)
+
+      # A configured adapter in a non-:test env is what forces the real send
+      # (LocalSink is only the :test fallback). Clear any provider-selection
+      # override so the per-worker fallback adapter is the one that runs.
+      Application.delete_env(:samen_core, :delivery_provider)
+      Application.put_env(:samen_core, :delivery_env, :prod)
+
+      on_exit(fn ->
+        if prev_email,
+          do: Application.put_env(:samen_core, EmailWorker, prev_email),
+          else: Application.delete_env(:samen_core, EmailWorker)
+
+        if prev_provider,
+          do: Application.put_env(:samen_core, :delivery_provider, prev_provider),
+          else: Application.delete_env(:samen_core, :delivery_provider)
+
+        if prev_env,
+          do: Application.put_env(:samen_core, :delivery_env, prev_env),
+          else: Application.delete_env(:samen_core, :delivery_env)
+      end)
+
+      :ok
+    end
+
+    test "RED: a genuine dispatch crash surfaces as {:error, _} — NEVER a silent {:ok, ...} (fail-honest)" do
+      Application.put_env(:samen_core, EmailWorker, adapter: RaisingAdapter, adapter_config: %{})
+
+      inviter = register!()
+      email = unique_email()
+
+      result = Invite.create(invite_mods(), owner_scope(inviter), %{email: email, role: :member})
+
+      # The dispatch RAISED — the caller must see an honest failure, never success.
+      assert {:error, _reason} = result
+      refute match?({:ok, _invitation, _raw}, result)
+
+      # The invitation row itself was still genuinely created (row creation is not
+      # regressed — only the swallowed-crash-as-success lie is fixed).
+      {:ok, bidx} = Samen.Auth.BlindIndex.compute(email)
+
+      row =
+        Invitation
+        |> Ash.Query.filter(email_bidx == ^bidx)
+        |> Ash.Query.select([:id, :status, :org_id])
+        |> Ash.read!(authorize?: false)
+        |> List.first()
+
+      refute is_nil(row)
+      assert row.status == "pending"
+    end
+
+    test "POSITIVE CONTROL: the happy path passes a LOADED org_id (never Ash.NotLoaded) and succeeds end-to-end" do
+      Application.put_env(:samen_core, EmailWorker, adapter: CapturingAdapter, adapter_config: %{})
+
+      inviter = register!()
+
+      assert {:ok, invitation, raw_token} =
+               Invite.create(invite_mods(), owner_scope(inviter), %{email: unique_email(), role: :member})
+
+      assert invitation.status == "pending"
+      assert is_binary(raw_token)
+
+      # The org_id that reached the delivery path is a real loaded binary — the
+      # inviting org's id — NOT an %Ash.NotLoaded{} (which crashed String.Chars
+      # in the delivery log line pre-fix, F2).
+      assert_receive {:t111_invite_captured, %Message{} = message, _config}, 1_000
+      assert is_binary(message.org_id)
+      assert message.org_id == inviter.org.id
+      refute match?(%Ash.NotLoaded{}, message.org_id)
+    end
+  end
+
+  # ===========================================================================
+  # 7. T126 — InviteAcceptLive auto-accept: the connected-mount double-consume
+  #    REGRESSION (P0, T113-caused; same root cause as ConfirmLive).
+  # ===========================================================================
+
+  describe "Samen.Web.Auth.InviteAcceptLive — auto-accept double-mount (T126)" do
+    alias Samen.Web.Auth.InviteAcceptLive
+
+    test "REGRESSION (T126): an existing-credential auto-accept consumes ONCE on the dead render and redirects to ?joined=1 — the connected re-mount reads the flag, never re-accepting into a false 'already accepted'" do
+      inviter = register!()
+      invitee = register!()
+
+      {:ok, invitation, raw_token} =
+        Invite.create(invite_mods(), owner_scope(inviter), %{email: invitee.email, role: :member})
+
+      mount = build_mount(:auth)
+      session = mount_session(mount)
+
+      # (1) DEAD render mount at /invite/:token — the atomic single-use accept
+      # runs here and REDIRECTS to ?joined=1 (the guard). Pre-T126 this rendered
+      # inline and the connected re-mount re-accepted the spent invite into a
+      # false "already accepted".
+      {:ok, dead} = InviteAcceptLive.mount(%{"token" => raw_token}, session, %Phoenix.LiveView.Socket{})
+      assert invite_redirect_to(dead) =~ "joined=1"
+
+      # Exactly one accept happened — the row is now terminal "accepted".
+      assert reread_invitation(invitation.id).status == "accepted"
+
+      # (2) The CONNECTED mount lands on the redirect target (?joined=1), NOT the
+      # bare token — it renders SUCCESS and runs NO second accept.
+      joined_html = mount_smoke(InviteAcceptLive, mount, %{"token" => raw_token, "joined" => "1"})
+      assert joined_html =~ "You're in"
+      refute joined_html =~ "already been accepted"
+      refute joined_html =~ "Couldn't accept"
+    end
+
+    test "SECURITY (T126): a genuinely reused invite link (second, separate click) still fails as already-accepted — single-use preserved" do
+      inviter = register!()
+      invitee = register!()
+      {:ok, _invitation, raw_token} = Invite.create(invite_mods(), owner_scope(inviter), %{email: invitee.email})
+
+      mount = build_mount(:auth)
+      session = mount_session(mount)
+
+      {:ok, first} = InviteAcceptLive.mount(%{"token" => raw_token}, session, %Phoenix.LiveView.Socket{})
+      assert invite_redirect_to(first) =~ "joined=1"
+
+      # A second, separate click is a distinct request — the non-mutating preview
+      # now sees the accepted row and the mount renders the terminal
+      # "already accepted", never a second join.
+      html = mount_smoke(InviteAcceptLive, mount, %{"token" => raw_token})
+      assert html =~ "already been accepted"
+    end
+  end
+
+  defp invite_redirect_to(%Phoenix.LiveView.Socket{redirected: {:redirect, %{to: to}}}), do: to
+  defp invite_redirect_to(%Phoenix.LiveView.Socket{redirected: {:live, _, %{to: to}}}), do: to
+
+  defp invite_redirect_to(%Phoenix.LiveView.Socket{redirected: other}),
+    do: flunk("expected a redirect, got: #{inspect(other)}")
 end

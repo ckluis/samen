@@ -1,0 +1,34 @@
+# SABOTAGE: ADR-041 §11 / §6.1 — the CRM timeline custom.crm_refs OR-match is load-bearing.
+#
+# T97 destructively migrated CRM Activity into the canonical Work Task. A multi-anchored
+# Activity (linked to BOTH a contact and a deal) becomes a Task whose PRIMARY subject anchor
+# is one object (by precedence) while the FULL ref set survives in custom.crm_refs. The CRM
+# detail timeline read (Samen.Web.CRM.Reads.activities_for_company/3) therefore OR-matches
+# `subject_key/subject_id == crm.company` OR `custom.crm_refs.company_id == company_id`, so a
+# Task primary-anchored to the contact still appears in the COMPANY timeline — the
+# both-timelines preservation guarantee (§6.1). Without the crm_refs OR-branch that timeline
+# entry silently disappears for every migrated multi-anchored Activity.
+#
+# This sabotage strips the crm_refs OR-branch from activities_for_company/3. The named test —
+# which raw-inserts a crm.person-anchored Task whose company link lives ONLY in crm_refs and
+# asserts it appears in BOTH timelines (with the company's own primary-anchored activity as
+# the positive control) — MUST fail (the company-timeline assertion). Revert restores the
+# branch byte-exact.
+#
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_detail_render_test.exs
+# MUST_FAIL: MULTI-ANCHOR
+diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+--- a/samen_web/lib/samen/web/crm/reads.ex
++++ b/samen_web/lib/samen/web/crm/reads.ex
+@@ -208,9 +208,6 @@ def activities_for_company(mount, scope, company_id) do
+     work_task_resource(mount)
+     |> Ash.Query.ensure_selected(@timeline_fields)
+-    |> Ash.Query.filter(
+-      (subject_key == "crm.company" and subject_id == ^company_id) or
+-        get_path(custom, ["crm_refs", "company_id"]) == ^company_id
+-    )
++    |> Ash.Query.filter(subject_key == "crm.company" and subject_id == ^company_id)
+     |> Ash.Query.sort(inserted_at: :desc)
+     |> Ash.Query.limit(@detail_limit)
+     |> Ash.read!(scope: scope)

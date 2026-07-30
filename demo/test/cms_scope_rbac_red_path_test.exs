@@ -6,13 +6,14 @@ defmodule Demo.CmsScopeRbacRedPathTest do
     * escalation denied (member cannot create blocks/media/navigation — admin-gated)
     * positive controls (an admin CAN write to admin-gated resources)
     * the pure Samen.Scope.Role decision functions (no DB)
-    * ContentVersion append-only invariant checked at the resource schema level
+    * E7 content history: a member's allowed content edit records a version (versioning
+      is a side effect of the tracked write, not a separately role-gated action)
     * non-PII classification: csm_description is deliberately registered as non-PII
       with distinct reviewers (mask-unknown-by-default proof)
   """
   use Demo.DataCase, async: false
 
-  alias Demo.CmsScope.{Page, Block, Media, Navigation, SeoMeta, ContentVersion}
+  alias Demo.CmsScope.{Page, Block, Media, Navigation, SeoMeta}
   alias Demo.Identity.{Org, User}
 
   defp mk_org(name) do
@@ -154,28 +155,32 @@ defmodule Demo.CmsScopeRbacRedPathTest do
   end
 
   # =========================================================================
-  # ContentVersion: member cannot create (admin-gated).
+  # E7 content history (ADR-040 §6.5, T119): content versions are recorded
+  # AUTOMATICALLY by the E7 mechanism on any tracked write — they are NOT a
+  # user-invoked, role-gated create (the retired ContentVersion's `:create_version`
+  # was admin-gated; there is no such user action now). A member who edits content
+  # they are allowed to edit records a version as a side effect — the RBAC gate is on
+  # the CONTENT action (publish/mark_archived are admin-gated), not on versioning.
   # =========================================================================
 
-  test "member cannot create a content version (admin-gated)" do
+  test "a member's allowed content edit records a version (versioning is not separately role-gated)" do
     org = mk_org("rbac-ver-member")
     member = mk_actor(org.id, :member)
     page = mk_page(org.id)
 
-    result =
-      ContentVersion
-      |> Ash.Changeset.for_create(:create_version, %{
-        subject_type: "page",
-        subject_id: page.id,
-        content_snapshot: %{"title" => "Member", "body" => "v1"},
-        status: :draft,
-        author_id: org.id,
-        version_number: 1,
-        org_id: org.id
-      })
-      |> Ash.create(actor: member.actor, authorize?: true)
+    # A member may edit draft content (the CMS member-level :update, F3.4). This
+    # records a Block/Page.Version automatically; there is no separate version RBAC.
+    assert {:ok, _} =
+             page
+             |> Ash.Changeset.for_update(:update, %{body: "member edit"})
+             |> Ash.update(actor: member.actor, authorize?: true)
 
-    assert {:error, %Ash.Error.Forbidden{}} = result
+    {:ok, versions} =
+      Demo.CmsScope.Page.Version
+      |> Ash.Query.select([:id, :version_source_id])
+      |> Ash.read(actor: member.actor, authorize?: true)
+
+    assert Enum.any?(versions, &(&1.version_source_id == page.id))
   end
 
   # =========================================================================

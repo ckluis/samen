@@ -297,15 +297,23 @@ defmodule Samen.WebTest.Seeds do
       |> Ash.create!()
 
     # A handful of activities on the seeded person + company so the timeline is
-    # non-vacuous (ADR-011 §12.1/§12.6). Non-PII rows (opaque FKs + free text).
+    # non-vacuous (ADR-011 §12.1/§12.6). ADR-041 §5: the CRM Activity is now the
+    # canonical Work-scope Task, anchored to the CRM object via the generic
+    # `(subject_key, subject_id)` object-ref. Two person-anchored (call/note), one
+    # company-anchored (meeting). No PII. (custom.crm_refs is a MIGRATION-only
+    # preservation bag written by raw SQL — new single-anchor tasks need only the
+    # primary anchor; the Tier-1 custom bag rejects unregistered keys on an Ash write.)
     activities =
       [
-        %{type: :call, subject: @activity_call_subject, body: @activity_call_body, person_id: person.id},
-        %{type: :note, subject: @activity_note_subject, body: "Sent rate sheet.", person_id: person.id},
-        %{type: :meeting, subject: "QBR scheduled", body: nil, company_id: company.id}
+        %{kind: :call, title: @activity_call_subject, body: @activity_call_body,
+          subject_key: "crm.person", subject_id: person.id},
+        %{kind: :note, title: @activity_note_subject, body: "Sent rate sheet.",
+          subject_key: "crm.person", subject_id: person.id},
+        %{kind: :meeting, title: "QBR scheduled", body: nil,
+          subject_key: "crm.company", subject_id: company.id}
       ]
       |> Enum.map(fn attrs ->
-        Samen.WebTest.Crm.Activity
+        Samen.WebTest.Work.Task
         |> Ash.Changeset.for_create(
           :create,
           Map.merge(%{org_id: org_id, status: :completed, completed_at: DateTime.utc_now() |> DateTime.truncate(:second)}, attrs),
@@ -422,8 +430,7 @@ defmodule Samen.WebTest.Seeds do
           subject: "Missing rate confirmation",
           status: :open,
           priority: :high,
-          sla_id: sla.id,
-          tags: ["billing"]
+          sla_id: sla.id
         },
         actor: %{org_id: org_id, role: :member},
         authorize?: false

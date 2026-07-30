@@ -41,6 +41,7 @@ defmodule Samen.Identity.Invite do
   alias Samen.Scopes.Identity.Notify
 
   require Ash.Query
+  require Logger
 
   @invite_ttl_seconds 14 * 24 * 60 * 60
 
@@ -97,7 +98,12 @@ defmodule Samen.Identity.Invite do
             actor_id: actor_id(scope)
           )
 
-          dispatch(invitation, raw_token)
+          # Pass the KNOWN, already-resolved org_id (the SAME value written to
+          # `create_attrs[:org_id]`), NOT `invitation.org_id` — a core column
+          # (`Samen.Transformers.CoreAttributes`) that is `%Ash.NotLoaded{}` on
+          # the freshly-created struct and would crash `String.Chars` in the
+          # delivery log line (F2/T111).
+          dispatch(invitation, raw_token, scope_org_id(scope))
 
         {:error, reason} ->
           {:error, reason}
@@ -105,18 +111,28 @@ defmodule Samen.Identity.Invite do
     end
   end
 
-  defp dispatch(invitation, raw_token) do
-    case AuthMailer.dispatch(:invite, invitation_id: invitation.id, org_id: invitation.org_id) do
+  defp dispatch(invitation, raw_token, org_id) do
+    case AuthMailer.dispatch(:invite,
+           invitation_id: invitation.id,
+           org_id: org_id,
+           raw_token: raw_token
+         ) do
       {:ok, _receipt} -> {:ok, invitation, raw_token}
       {:error, reason} -> {:error, reason}
     end
   rescue
-    _ ->
-      # `mods.repo` may not equal the AuthMailer chokepoint's configured repo
-      # in every host — dispatch failures are surfaced, never silently eaten,
-      # but a raise here must not orphan an already-persisted invitation row
-      # into an unhandled crash.
-      {:ok, invitation, raw_token}
+    e ->
+      # An already-persisted invitation row must not orphan the caller in an
+      # unhandled crash — BUT a dispatch failure is a FAILURE, never faked to
+      # success. ADR-014's fail-honest invariant ("never returns `{:ok, _}` for
+      # work it did not do"), applied caller-side: surface an honest
+      # `{:error, _}`, logged — NEVER `{:ok, invitation, raw_token}` (F2/T111).
+      Logger.error(
+        "[Invite] invite email dispatch RAISED for invitation_id=#{invitation.id}: " <>
+          Exception.message(e)
+      )
+
+      {:error, {:dispatch_crashed, Exception.message(e)}}
   end
 
   # ---------------------------------------------------------------------------

@@ -47,6 +47,17 @@ defmodule <%= module %>Web.Router do
     plug(:protect_from_forgery)
   end
 
+  # T117/ADR-031 — the OPERATOR control-plane auth gate. `Samen.Web.AuthGate` is a NO-OP in
+  # dev/test (`:auth_required?` false — the query-param convenience identity stays) and, in
+  # prod, redirects any UNAUTHENTICATED request to `/login` before the SaaS-internal operator
+  # surfaces render. The tenant/shared mounts are already gated by the `:authn` seam through
+  # `Samen.Web.CurrentOrg`, but the operator mount derives its scope from the well-known
+  # operator org id (NOT CurrentOrg), so it needs this conn-level gate — the driftwood
+  # `plug(DriftwoodWeb.Auth)` house pattern, scoped to the operator plane.
+  pipeline :require_authenticated_operator do
+    plug(Samen.Web.AuthGate, otp_app: :<%= otp_app %>)
+  end
+
   scope "/", <%= module %>Web do
     pipe_through(:browser)
 
@@ -103,7 +114,7 @@ defmodule <%= module %>Web.Router do
   # operator org's OWN book of business on the TENANT plane (clear); drilling into
   # a tenant is the existing masked impersonation path.
   scope "/" do
-    pipe_through(:browser)
+    pipe_through([:browser, :require_authenticated_operator])
 
     samen_operator_routes(<%= module %>.Operator,
       repo: <%= module %>.Repo,

@@ -30,6 +30,8 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     # (T04's Session, T06's UserIdentity; T06x integration).
     Acme.Operator.Session,
     Acme.Operator.UserIdentity,
+    # ADR-038 §6.4 (T109) — the durable brute-force failure counter.
+    Acme.Operator.LoginFailure,
     # Billing (operator: tenant subscriptions-to-the-SaaS + the movement ledger)
     Acme.Operator.Customer,
     Acme.Operator.Subscription,
@@ -286,6 +288,25 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
 
     create(unique_index(:aoi_user_identity, [:aoi_provider, :aoi_provider_uid]))
 
+    # --- aol_login_failure : the DURABLE brute-force failure counter (org-less;
+    #     ADR-038 §6.4, T109). One row per (key_kind, key_value) — key_value is a
+    #     non-reversible email_bidx HMAC or an opaque credential UUID, never PII. Makes
+    #     the T103-shaped bounded login_failed signal survive a node restart. ---
+    create table(:aol_login_failure, primary_key: false) do
+      add(:aol_key_kind, :text, null: false)
+      add(:aol_key_value, :text, null: false)
+      add(:aol_failure_count, :integer, null: false, default: 1)
+      add(:aol_window_started_at, :utc_datetime_usec, null: false)
+      add(:aol_last_failed_at, :utc_datetime_usec, null: false)
+
+      add(:aol_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aol_org_id, :uuid)
+      add(:aol_inserted_at, :utc_datetime, null: false)
+      add(:aol_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:aol_login_failure, [:aol_key_kind, :aol_key_value]))
+
     # ADR-035 §3.1 — additive, nullable FK on the already-created aou_user table.
     alter table(:aou_user) do
       add(:aou_credential_id, :uuid)
@@ -321,6 +342,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:app_org_id, :uuid, null: false)
       add(:app_inserted_at, :utc_datetime, null: false)
       add(:app_updated_at, :utc_datetime, null: false)
+      add(:app_archived_at, :utc_datetime_usec)
     end
 
     create table(:apr_price, primary_key: false) do
@@ -346,6 +368,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:apr_org_id, :uuid, null: false)
       add(:apr_inserted_at, :utc_datetime, null: false)
       add(:apr_updated_at, :utc_datetime, null: false)
+      add(:apr_archived_at, :utc_datetime_usec)
     end
 
     create table(:aps_subscription, primary_key: false) do
@@ -559,6 +582,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aql_org_id, :uuid, null: false)
       add(:aql_inserted_at, :utc_datetime, null: false)
       add(:aql_updated_at, :utc_datetime, null: false)
+      add(:aql_archived_at, :utc_datetime_usec)
     end
 
     # The ticket's custom bag carries the requester back-references
@@ -571,7 +595,6 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqk_breached, :boolean, default: false, null: false)
       add(:aqk_resolved_at, :utc_datetime)
       add(:aqk_closed_at, :utc_datetime)
-      add(:aqk_tags, {:array, :text}, default: [])
       add(:aqk_custom, :map, default: fragment("'{}'::jsonb"))
       add(:aqk_external_id, :text)
 
@@ -589,6 +612,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqk_org_id, :uuid, null: false)
       add(:aqk_inserted_at, :utc_datetime, null: false)
       add(:aqk_updated_at, :utc_datetime, null: false)
+      add(:aqk_archived_at, :utc_datetime_usec)
     end
 
     create(
@@ -618,6 +642,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqc_org_id, :uuid, null: false)
       add(:aqc_inserted_at, :utc_datetime, null: false)
       add(:aqc_updated_at, :utc_datetime, null: false)
+      add(:aqc_archived_at, :utc_datetime_usec)
     end
 
     # The SaaS support AGENT 🔒 (the SaaS's own employee — CLEAR on its own plane).
@@ -634,6 +659,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqg_org_id, :uuid, null: false)
       add(:aqg_inserted_at, :utc_datetime, null: false)
       add(:aqg_updated_at, :utc_datetime, null: false)
+      add(:aqg_archived_at, :utc_datetime_usec)
     end
 
     create table(:aqm_message, primary_key: false) do
@@ -669,6 +695,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqm_org_id, :uuid, null: false)
       add(:aqm_inserted_at, :utc_datetime, null: false)
       add(:aqm_updated_at, :utc_datetime, null: false)
+      add(:aqm_archived_at, :utc_datetime_usec)
     end
 
     create table(:aqn_macro, primary_key: false) do
@@ -682,6 +709,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqn_org_id, :uuid, null: false)
       add(:aqn_inserted_at, :utc_datetime, null: false)
       add(:aqn_updated_at, :utc_datetime, null: false)
+      add(:aqn_archived_at, :utc_datetime_usec)
     end
 
     create table(:aqs_csat, primary_key: false) do
@@ -765,6 +793,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       remove(:aou_credential_id)
     end
 
+    drop(table(:aol_login_failure))
     drop(constraint(:aoi_user_identity, "aoi_user_identity_aoi_credential_id_fkey"))
     drop(table(:aoi_user_identity))
     drop(constraint(:aos_session, "aos_session_aos_credential_id_fkey"))

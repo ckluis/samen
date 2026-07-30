@@ -19,10 +19,24 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   ## Reveal (T1.6 second-party grant, end-to-end)
 
   Below the roster is a per-driver reveal control. When a DISTINCT second party has
-  approved a reveal grant for `(operator, driver)`, the operator can unmask THAT ONE
-  driver's CDL number end-to-end via `Samen.Reveal.reveal/5` (the single decrypt
-  chokepoint). Without an approving grant it denies — `••••` stays. The dogfood /
-  adversarial tests drive both the granted and ungranted paths.
+  approved a reveal grant for `(operator, driver)`, the operator can unmask that driver's
+  vaulted PII end-to-end via `Samen.Reveal.reveal/5` (the single decrypt chokepoint).
+  Without an approving grant it denies — `••••` stays. The dogfood / adversarial tests
+  drive both the granted and ungranted paths.
+
+  ## Reveal-window legibility + honest scope (R-P6; persona-6 findings P6-F1/F2/F3/F5)
+
+  A reveal grant is **subject-wide**, not field-narrow: `Samen.Reveal.Grants.active?/3`
+  keys on `(subject_id, requestor_id)` with no field filter, so an active grant authorizes
+  resolving the WHOLE subject record — the driver's NAME as well as the CDL number, and it
+  resolves them **passively on any roster load** (no click needed). The UI therefore states
+  the true scope: the control reads "Reveal driver record" (not "Reveal CDL"), and while a
+  window is open a visible banner announces it, names the approver (`granted_by`), shows the
+  expiry + a live countdown, and every already-resolved row reads "revealed" regardless of
+  whether it was unmasked by a click or by the passive grant-gated read. The per-second
+  `:tick` recomputes the open windows and, the instant one expires, reloads the roster so
+  the value re-masks mid-session (closing the P6-F5 "stale plaintext until reload" residual)
+  — a fresh mount already re-masked correctly; this closes it live too.
 
   ## Mount contract
 
@@ -39,10 +53,16 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   alias Samen.Impersonation
   alias Driftwood.Reads
 
+  # A live reveal window is time-boxed; the countdown + mid-session re-mask ride a
+  # per-second server tick (no JS — ADR-042 progressive enhancement). Only a connected
+  # LiveView ticks; the first (static) mount and the render-only tests do not.
+  @tick_ms 1000
+
   @impl true
   def mount(params, session, socket) do
     operator_id = fetch(params, session, "operator_id")
     org_id = fetch(params, session, "org_id")
+    if connected?(socket), do: schedule_tick()
     {:ok, load(socket, operator_id, org_id)}
   end
 
@@ -64,6 +84,8 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   def load(socket, operator_id, org_id) do
     case Impersonation.scope(operator_id, org_id) do
       {:ok, scope} ->
+        now = DateTime.utc_now()
+
         assign(socket,
           impersonating: true,
           session_inactive: false,
@@ -72,6 +94,8 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
           drivers: Reads.driver_roster(scope),
           loads: Reads.load_board(scope),
           revealed: %{},
+          now: now,
+          reveal_windows: reveal_windows(operator_id, now),
           session_info: session_info(org_id, operator_id)
         )
 
@@ -93,6 +117,8 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
       drivers: [],
       loads: [],
       revealed: %{},
+      now: DateTime.utc_now(),
+      reveal_windows: [],
       session_info: nil
     )
   end
@@ -103,6 +129,18 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
     |> Impersonation.list_for_org()
     |> Enum.find(fn e -> e.operator_id == operator_id and e.active? end)
   end
+
+  # The ACTIVE reveal windows this operator holds — who approved, until when. Read-only
+  # accountability projection over `Samen.Reveal.Grants` (does NOT change the reveal gate).
+  defp reveal_windows(operator_id, now) when is_binary(operator_id) do
+    Samen.Reveal.Grants.active_windows(operator_id, repo: Driftwood.Repo, now: now)
+  rescue
+    _ -> []
+  end
+
+  defp reveal_windows(_operator_id, _now), do: []
+
+  defp schedule_tick, do: Process.send_after(self(), :tick, @tick_ms)
 
   defp fetch(params, session, key), do: Map.get(params, key) || Map.get(session, key)
 
@@ -208,9 +246,26 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
               Impersonating brokerage org {@org_id} as operator {@operator_id}. PII is masked (••••).
             </span>
             Unmasking a subject needs a second-party reveal grant, is time-boxed, and is written to the tenant-readable audit log.
-            <span :if={@session_info} id="session-reason" style="display:none">Reason: {@session_info.reason}</span>
-            <span :if={@session_info} id="session-expiry" style="display:none">Expires: {@session_info.expires_at}</span>
+            <span :if={@session_info} id="session-reason" class="acct">Reason: {@session_info.reason}</span>
+            <span :if={@session_info} id="session-expiry" class="acct">Session expires: {@session_info.expires_at}</span>
           </.mask_bar>
+
+    <%!-- R-P6: a privileged reveal window is legible while OPEN — who approved it, when it
+          expires, a live countdown, and the HONEST subject-wide scope (name + CDL, not just
+          the CDL). Absent when no window is open (the ungranted masked-only view). --%>
+          <div :if={@reveal_windows != []} id="reveal-window-banner" class="reveal-window-open"
+               style="margin:0 20px 14px;padding:12px 16px;border:1px solid #C9A227;border-radius:10px;background:#FFF8E1;color:#6B5200">
+            <b>⚠ Privileged reveal window OPEN.</b>
+            A second-party grant is unmasking the FULL subject record (driver name AND CDL number — reveal is subject-wide, not field-narrow) for {length(@reveal_windows)} subject(s):
+            <ul style="margin:8px 0 0;padding-left:18px">
+              <li :for={w <- @reveal_windows} class="reveal-window-entry">
+                subject <span class="mono">{w.subject_id}</span>
+                · <span class="approved-by">approved by <b>{w.granted_by}</b></span>
+                · expires <span class="expires-at">{clock(w.expires_at)}</span>
+                · <span class="countdown">{countdown(w.expires_at, @now)} left</span>
+              </li>
+            </ul>
+          </div>
 
           <div class="wrap">
             <div class="gtitle">
@@ -233,7 +288,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
                 <td>
                   <div class="drv">
                     <div class="av"></div>
-                    <span class="nm masked d-name">{d.full_name}</span>
+                    <span class="nm masked d-name">{fmt_name(d.full_name)}</span>
                   </div>
                 </td>
                 <td class="d-cdl"><span class="mono masked">{Map.get(@revealed, d.id) || d.cdl_number}</span></td>
@@ -253,15 +308,18 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
                   <% end %>
                 </td>
                 <td class="d-reveal">
-                  <%= if Map.get(@revealed, d.id) do %>
+                  <%= if row_revealed?(@revealed, @reveal_windows, d) do %>
                     <span class="revealed rev" style="color:var(--brand);border-color:#CFD5F6;background:var(--brand-wash)">
                       <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
-                      revealed (grant active)
+                      revealed · record open
+                      <span :if={window_for(@reveal_windows, d.id)} class="row-countdown">
+                        (expires {clock(window_for(@reveal_windows, d.id).expires_at)} · {countdown(window_for(@reveal_windows, d.id).expires_at, @now)})
+                      </span>
                     </span>
                   <% else %>
-                    <button class="reveal-btn rev" phx-click="reveal" phx-value-driver={d.id}>
+                    <button class="reveal-btn rev" phx-click="reveal" phx-value-driver={d.id} title="Reveals the FULL subject record (name + CDL) — a reveal grant is subject-wide">
                       <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
-                      Reveal CDL
+                      Reveal driver record
                     </button>
                   <% end %>
                 </td>
@@ -320,4 +378,63 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
       d -> d.id
     end
   end
+
+  # Per-second tick (connected sessions only): advance the countdown clock and recompute
+  # the open windows. The moment a window CLOSES (its grant expired), reload the roster so
+  # the value re-masks live — closing the P6-F5 residual where a revealed value lingered in
+  # the socket assign until the next full mount.
+  @impl true
+  def handle_info(:tick, socket) do
+    schedule_tick()
+    %{operator_id: operator_id, org_id: org_id} = socket.assigns
+    now = DateTime.utc_now()
+    windows = reveal_windows(operator_id, now)
+
+    socket =
+      if length(windows) < length(socket.assigns.reveal_windows) do
+        # A window just expired — full reload re-masks the roster + drops stale reveals.
+        load(socket, operator_id, org_id)
+      else
+        assign(socket, now: now, reveal_windows: windows)
+      end
+
+    {:noreply, socket}
+  end
+
+  # --- Reveal-window legibility helpers (R-P6) ------------------------------
+
+  # Is this subject inside an OPEN reveal window right now? Returns the window map or nil.
+  defp window_for(reveal_windows, subject_id) do
+    sid = to_string(subject_id)
+    Enum.find(reveal_windows, fn w -> to_string(w.subject_id) == sid end)
+  end
+
+  # Actual resolution state of a row, independent of HOW it resolved (click vs passive
+  # grant-gated read): a value that is NOT a %Samen.Masked{} is already plaintext.
+  defp resolved?(%Samen.Masked{}), do: false
+  defp resolved?(_), do: true
+
+  # A row is "revealed" if it was clicked (@revealed), OR the value already resolved to
+  # plaintext on the passive path, OR the subject sits in an open window (P6-F3: the
+  # indicator reflects state, not just the click handler).
+  defp row_revealed?(revealed, reveal_windows, d) do
+    Map.get(revealed, d.id) != nil or resolved?(d.cdl_number) or
+      window_for(reveal_windows, d.id) != nil
+  end
+
+  # Human-readable countdown to expiry, e.g. "4m 32s". Never negative.
+  defp countdown(expires_at, now) do
+    secs = max(DateTime.diff(expires_at, now, :second), 0)
+    "#{div(secs, 60)}m #{rem(secs, 60)}s"
+  end
+
+  defp clock(%DateTime{} = dt), do: Calendar.strftime(dt, "%H:%M:%S UTC")
+  defp clock(_), do: "—"
+
+  # P6-F6: the resolved composite name renders as a map — format it "First Last" for
+  # humans. A masked value (%Samen.Masked{}) is returned untouched so it still renders ••••.
+  defp fmt_name(%Samen.Masked{} = m), do: m
+  defp fmt_name(%{"first" => f, "last" => l}), do: "#{f} #{l}"
+  defp fmt_name(%{first: f, last: l}), do: "#{f} #{l}"
+  defp fmt_name(other), do: other
 end

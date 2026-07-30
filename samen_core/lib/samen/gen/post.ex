@@ -55,6 +55,7 @@ defmodule Samen.Gen.Post do
 
   alias Samen.Gen.App
   alias Samen.Gen.FieldTypeMenu
+  alias Samen.Gen.PostTemplates
   alias Samen.AbbrevRegistry
 
   # ===========================================================================
@@ -149,7 +150,11 @@ defmodule Samen.Gen.Post do
       # ADR-036 H7 (T15): the `pii do` vault field's LOGICAL type, one of
       # `Samen.Gen.FieldTypeMenu.menu/0`. Defaults to "string" — byte-identical to
       # pre-T15 output when `--field-type` is omitted.
-      field_type: "string"
+      field_type: "string",
+      # ADR-040 §5.8 (T37h) `--archivable`: emit the resource with `archivable: true`
+      # (full E6 soft-delete substrate) + the migration's `archived_at` column.
+      # Defaults to `false` — byte-identical to pre-T37h output when omitted.
+      archivable?: false
     ]
   end
 
@@ -181,7 +186,8 @@ defmodule Samen.Gen.Post do
       table: "#{abbrev}_#{Macro.underscore(resource)}",
       migration_ts: Keyword.get(opts, :migration_ts, next_migration_ts(app_dir)),
       live?: Keyword.get(opts, :live, false),
-      field_type: field_type
+      field_type: field_type,
+      archivable?: Keyword.get(opts, :archivable, false)
     }
   end
 
@@ -382,7 +388,29 @@ defmodule Samen.Gen.Post do
       # attempt-2 fix: the migration's physical column name must match
       # MaterializePii's OWN scalar-vs-composite routing (D4) — see
       # FieldTypeMenu's moduledoc "T15 attempt-1 defect" note.
-      "field_vault_column" => FieldTypeMenu.vault_column(s.field_type, s.abbrev)
+      "field_vault_column" => FieldTypeMenu.vault_column(s.field_type, s.abbrev),
+      # ADR-040 §5.8 (T37h) `--archivable`: pre-resolved (not re-templated) insertion
+      # strings so the tiny `<%= key %>` engine (single-pass, no conditionals) can emit
+      # the E6 substrate ONLY when requested — "" leaves pre-T37h output byte-identical.
+      "archivable_opt" => if(s.archivable?, do: ",\n        archivable: true", else: ""),
+      "archived_at_migration_line" =>
+        if(s.archivable?,
+          do: "\n          add(:#{s.abbrev}_archived_at, :utc_datetime_usec)",
+          else: ""
+        ),
+      # `--live --archivable`: the generated index LiveView's restore + archived-filter
+      # affordance (§5.8's UI clause) — empty/plain-delete when not archivable, so a
+      # plain `--live` resource keeps its pre-T37h behavior. Resolved with the CONCRETE
+      # `resource_path` now (Elixir string interpolation), never left as a literal
+      # `<%= key %>` for the outer single-pass engine to (maybe) catch on a later key —
+      # the substitution order over a map is not guaranteed.
+      "archivable_live_events" =>
+        PostTemplates.archivable_live_events(s.archivable?, Macro.underscore(s.resource)),
+      "archivable_live_toggle_button" =>
+        PostTemplates.archivable_live_toggle_button(s.archivable?, Macro.underscore(s.resource)),
+      "archivable_live_row_action" =>
+        PostTemplates.archivable_live_row_action(s.archivable?, Macro.underscore(s.resource)),
+      "archivable_read_records_fn" => PostTemplates.archivable_read_records_fn(s.archivable?)
     }
   end
 

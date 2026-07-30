@@ -61,11 +61,51 @@ defmodule Samen.Web.Onboarding.WizardLive do
     org_id = Map.get(params, "org") || socket.assigns.org_id
     user_id = Map.get(params, "user") || socket.assigns.user_id
 
-    {:noreply,
-     socket
-     |> assign(return_to: return_path(uri))
-     |> load(org_id, user_id)}
+    socket =
+      socket
+      # T110 — a no-JS Skip is a plain GET `<.link patch>` and each Continue POST
+      # redirects back with `&step=<next>`, so the STEP is URL-driven on the
+      # no-JS path. When absent (the JS `phx-submit` path, which assigns step
+      # in-place) the existing socket step stands — both postures coexist.
+      |> assign(onboarding_path: onboarding_path(uri))
+      |> assign(return_to: return_path(uri))
+      |> load(org_id, user_id)
+      |> maybe_put_step(params)
+      |> maybe_put_flags(params)
+
+    {:noreply, socket}
   end
+
+  defp maybe_put_step(socket, params) do
+    case parse_step(Map.get(params, "step")) do
+      nil -> socket
+      step -> assign(socket, step: step)
+    end
+  end
+
+  defp parse_step("org"), do: :org
+  defp parse_step("plan"), do: :plan
+  defp parse_step("invite"), do: :invite
+  defp parse_step(_), do: nil
+
+  # The NON-secret status flags `Samen.Web.Onboarding.WizardController` redirects
+  # back with after a no-JS POST (no credential ever rides these).
+  defp maybe_put_flags(socket, params) do
+    socket
+    |> then(fn s -> if params["invited"] == "1", do: assign(s, invited?: true), else: s end)
+    |> then(fn s -> if params["invite_error"] == "1", do: assign(s, invite_error: invite_refused_copy()), else: s end)
+    |> then(fn s -> if params["error"] == "1", do: assign(s, org_error: "Could not save — try again."), else: s end)
+  end
+
+  defp onboarding_path(uri) do
+    case URI.parse(uri).path do
+      nil -> "/onboarding"
+      path -> path
+    end
+  end
+
+  defp invite_refused_copy,
+    do: "Invite refused (admin role required, verified account required, or the invited role outranks yours)."
 
   @doc false
   def load(socket, org_id, user_id) do
@@ -113,9 +153,10 @@ defmodule Samen.Web.Onboarding.WizardLive do
     end
   end
 
-  def handle_event("skip_org", _params, socket) do
-    {:noreply, assign(socket, step: :plan)}
-  end
+  # NOTE (T110): the old `skip_org`/`skip_plan` `phx-click` handlers are gone —
+  # Skip is now a plain GET `<.link patch>` to the next step (works no-JS, F2),
+  # handled by `handle_params/3`'s `&step=` reading. Advancing a step never
+  # writes, so a Skip needs no server event at all.
 
   # -- step 2: plan selection (the WS-B hook) ----------------------------------
 
@@ -126,10 +167,6 @@ defmodule Samen.Web.Onboarding.WizardLive do
       {:ok, _org} -> {:noreply, socket |> assign(step: :invite) |> load(org_id, user_id)}
       {:error, _reason} -> {:noreply, assign(socket, org_error: "Could not save the plan selection.")}
     end
-  end
-
-  def handle_event("skip_plan", _params, socket) do
-    {:noreply, assign(socket, step: :invite)}
   end
 
   # -- step 3: teammate invite (the A5 surface, embedded) ----------------------
@@ -216,6 +253,8 @@ defmodule Samen.Web.Onboarding.WizardLive do
       |> assign_new(:org_error, fn -> nil end)
       |> assign_new(:invite_error, fn -> nil end)
       |> assign_new(:invited_raw_token, fn -> nil end)
+      |> assign_new(:invited?, fn -> false end)
+      |> assign_new(:onboarding_path, fn -> "/onboarding" end)
       |> assign_new(:samen_acting_as, fn -> false end)
 
     ~H"""
@@ -238,11 +277,22 @@ defmodule Samen.Web.Onboarding.WizardLive do
 
             <div :if={@step == :org} id="onboarding-step-org">
               <p :if={@org_error} id="onboarding-org-error" style="color:#B91C1C">{@org_error}</p>
-              <.simple_form for={@org_form} id="onboarding-org-form" phx-submit="name_org">
+              <.simple_form
+                for={@org_form}
+                id="onboarding-org-form"
+                action={"#{@onboarding_path}/name_org"}
+                method="post"
+                phx-submit="name_org"
+              >
+                <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+                <input type="hidden" name="org_id" value={@org_id} />
+                <input type="hidden" name="user_id" value={@user_id} />
                 <.form_field field={@org_form[:name]} label="Workspace name" required />
                 <:actions>
                   <.button type="submit" variant="primary" id="onboarding-org-submit">Continue</.button>
-                  <button type="button" phx-click="skip_org" id="onboarding-org-skip" class="btn">Skip</button>
+                  <.link patch={step_link(@onboarding_path, @org_id, @user_id, "plan")} id="onboarding-org-skip" class="btn">
+                    Skip
+                  </.link>
                 </:actions>
               </.simple_form>
             </div>
@@ -251,7 +301,16 @@ defmodule Samen.Web.Onboarding.WizardLive do
               <p :if={@org_error} id="onboarding-plan-error" style="color:#B91C1C">{@org_error}</p>
               <%= case @plan_choices do %>
                 <% {:ok, choices} -> %>
-                  <form id="onboarding-plan-form" phx-submit="select_plan" style="margin-bottom:12px">
+                  <form
+                    id="onboarding-plan-form"
+                    action={"#{@onboarding_path}/plan"}
+                    method="post"
+                    phx-submit="select_plan"
+                    style="margin-bottom:12px"
+                  >
+                    <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+                    <input type="hidden" name="org_id" value={@org_id} />
+                    <input type="hidden" name="user_id" value={@user_id} />
                     <fieldset style="border:0;padding:0">
                       <legend style="font-weight:600;font-size:13px">Choose a plan</legend>
                       <div :for={c <- choices} style="margin:6px 0">
@@ -266,16 +325,30 @@ defmodule Samen.Web.Onboarding.WizardLive do
                 <% :not_configured -> %>
                   <p id="onboarding-plan-empty" style="color:var(--muted)">{Onboarding.no_plans_copy()}</p>
               <% end %>
-              <button type="button" phx-click="skip_plan" id="onboarding-plan-skip" class="btn">Skip</button>
+              <.link patch={step_link(@onboarding_path, @org_id, @user_id, "invite")} id="onboarding-plan-skip" class="btn">
+                Skip
+              </.link>
             </div>
 
             <div :if={@step == :invite} id="onboarding-step-invite">
               <p :if={@invited_raw_token} id="onboarding-invite-sent" style="color:#15803D">
                 Invite sent — copy this link (shown once): <code>/invite/{@invited_raw_token}</code>
               </p>
+              <p :if={@invited? and is_nil(@invited_raw_token)} id="onboarding-invite-sent" style="color:#15803D">
+                Invite sent — we've emailed them a link to join.
+              </p>
               <p :if={@invite_error} id="onboarding-invite-error" style="color:#B91C1C">{@invite_error}</p>
 
-              <form id="onboarding-invite-form" phx-submit="invite" style="margin-bottom:16px">
+              <form
+                id="onboarding-invite-form"
+                action={"#{@onboarding_path}/invite"}
+                method="post"
+                phx-submit="invite"
+                style="margin-bottom:16px"
+              >
+                <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+                <input type="hidden" name="org_id" value={@org_id} />
+                <input type="hidden" name="user_id" value={@user_id} />
                 <fieldset style="border:0;padding:0">
                   <legend style="font-weight:600;font-size:13px">Invite a teammate</legend>
                   <input type="email" name="invitation[email]" placeholder="teammate@example.com" required id="onboarding-invite-email" />
@@ -288,11 +361,19 @@ defmodule Samen.Web.Onboarding.WizardLive do
                 </fieldset>
               </form>
 
-              <.button type="button" phx-click="finish" variant="primary" id="onboarding-finish">Finish setup</.button>
+              <form action={"#{@onboarding_path}/finish"} method="post" phx-submit="finish" id="onboarding-finish-form">
+                <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+                <input type="hidden" name="org_id" value={@org_id} />
+                <input type="hidden" name="user_id" value={@user_id} />
+                <.button type="submit" variant="primary" id="onboarding-finish">Finish setup</.button>
+              </form>
             </div>
           </div>
       <% end %>
     </div>
     """
   end
+
+  defp step_link(path, org_id, user_id, step),
+    do: "#{path}?org=#{org_id}&user=#{user_id}&step=#{step}"
 end

@@ -50,6 +50,14 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
       (`pii_attribute` always vault-routes regardless of its declared logical type) —
       only the resource's declared type + the four generated G26 test files' sample
       values change per entry.
+    * `--archivable` (optional, ADR-040 §5.8, T37h) — emit the resource with
+      `archivable: true` on its `use Samen.Resource` call, so it gets the FULL E6
+      soft-delete substrate (`archived_at`, `:archive`/`:restore`/`:archived`
+      actions, the default-read exclusion) with ZERO hand-edits: the migration also
+      emits the `<abbrev>_archived_at` column. Defaults to `false` — byte-identical
+      to pre-T37h output when omitted. With `--live`, the generated index LiveView
+      also gains a restore action + an archived-filter toggle (§5.8's UI clause,
+      inherited by any `--live --archivable` resource — never per-vertical hand-wiring).
   """
 
   use Mix.Task
@@ -63,7 +71,8 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
     app_dir: :string,
     reserve_abbrevs: :boolean,
     live: :boolean,
-    field_type: :string
+    field_type: :string,
+    archivable: :boolean
   ]
 
   @impl Mix.Task
@@ -77,6 +86,7 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
     reserve? = Keyword.get(opts, :reserve_abbrevs, true)
     live? = Keyword.get(opts, :live, false)
     field_type = Keyword.get(opts, :field_type, "string")
+    archivable? = Keyword.get(opts, :archivable, false)
 
     spec =
       Post.build_resource_spec(
@@ -85,7 +95,8 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
         resource: resource,
         abbrev: abbrev,
         live: live?,
-        field_type: field_type
+        field_type: field_type,
+        archivable: archivable?
       )
 
     Post.validate_resource!(spec)

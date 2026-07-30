@@ -193,10 +193,21 @@ defmodule Samen.Web.Billing.Reads do
   built on `Samen.Web.Reads.page!/3` (BOUNDED BY CONSTRUCTION). Plans are non-PII
   Tier-0 config rows; sort/filter fields are bounded plain attributes. On any read
   error the page is EMPTY.
+
+  ADR-040 §5.8 (T37h) — `state.show_archived` (the `Samen.Web.ListLive` archived-
+  filter toggle) switches the base query to the `:archived` read (Plan IS
+  `archivable: true`, T37a). `Samen.Archival.OnlyArchived` backs that read — it is a
+  TRASH view (archived rows ONLY), not a union with the live set — so the toggle is
+  "View: live | archived", a filter switch, matching the substrate's own trash/
+  restore convention (§5.2). `false` (the default) is the plain default read —
+  byte-identical to pre-T37h behavior.
   """
   def plans_page(mount, scope, state) do
-    Mount.resource(mount, Plan)
-    |> Ash.Query.ensure_selected([:name, :label, :description, :interval, :enabled, :features])
+    base = Mount.resource(mount, Plan)
+    base = if state.show_archived, do: Ash.Query.for_read(base, :archived), else: base
+
+    base
+    |> Ash.Query.ensure_selected([:name, :label, :description, :interval, :enabled, :features, :archived_at])
     |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :label])
   rescue
     _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
@@ -292,6 +303,15 @@ defmodule Samen.Web.Billing.Reads do
     %Samen.Scope{actor: actor} = Mount.scope(mount, org_id)
     %Samen.Scope{actor: Map.put(actor, :role, :admin)}
   end
+
+  @doc """
+  Elevate an EXISTING scope to `:admin` (same transform as `write_scope/2`, minus the
+  redundant `Mount.scope/2` re-derivation — for a caller that already holds a scope).
+  ADR-040 §5.8 (T37h): `Samen.Web.ListLive`'s `restore` event passes this as its
+  `:write_scope` elevator — Plan writes are `RoleAtLeast :admin`-gated (billing
+  blueprint), stricter than the plain list `scope` reads use.
+  """
+  def elevate_to_admin(%Samen.Scope{actor: actor} = scope), do: %{scope | actor: Map.put(actor, :role, :admin)}
 
   @doc "Destroy one billing plan for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
   def delete_plan(mount, scope, id), do: delete_record(mount, scope, Plan, id)

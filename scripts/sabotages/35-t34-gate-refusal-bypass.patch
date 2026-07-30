@@ -1,0 +1,25 @@
+# SABOTAGE: T34 E3 approve/reject engine — the Gate refusal (ADR-040 §4.4, Face 2).
+# A Gate-guarded action ("any action can require approval") invoked WITHOUT an approval in
+# context MUST abort the write and open (or return) a pending Approval, failing honest with
+# {:error, %Samen.Approvals.ApprovalRequired{}} carrying the approval id. This sabotage adds
+# a first, always-matching change/3 clause that returns the changeset untouched — so a gated
+# action executes UNGATED, with no approval opened. The named RED tests MUST fail (the gated
+# publish/lock now succeed instead of returning :approval_required), proving the two-party
+# gate is a real mechanism, not a tautology. The engine's Face-1 / distinct-party / audit
+# paths are unaffected — this isolates the Face-2 Gate refusal.
+# APP: samen_core
+# TEST_FILES: test/approvals/engine_test.exs
+# MUST_FAIL: publish: request opens a pending approval
+# MUST_FAIL: lock: a DIFFERENT gated action type
+--- a/samen_core/lib/samen/approvals/gate.ex
++++ b/samen_core/lib/samen/approvals/gate.ex
+@@ -38,6 +38,9 @@
+   # ==========================================================================
+ 
+   @impl Ash.Resource.Change
++  # SABOTAGE: bypass the Gate refusal — a gated action executes WITHOUT any approval.
++  def change(changeset, _opts, _context) when 1 == 1, do: changeset
++
+   def change(changeset, opts, context) do
+     if approved_context?(changeset) do
+       # A one-shot approved re-invocation (from on_approve/2) — let the transition run.

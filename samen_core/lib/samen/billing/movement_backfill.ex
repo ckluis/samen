@@ -62,7 +62,10 @@ defmodule Samen.Billing.MovementBackfill do
     subscription_resource = Keyword.fetch!(opts, :subscription_resource)
     event_resource = Keyword.fetch!(opts, :event_resource)
     price_resource = Keyword.fetch!(opts, :price_resource)
-    as_of = Keyword.get(opts, :as_of, DateTime.utc_now()) |> DateTime.truncate(:second)
+    # T121: keep microsecond resolution on `occurred_at` (the ledger column is now
+    # `:utc_datetime_usec`) so backfilled rows share the movement ledger's strict
+    # total-order guarantee; truncating to :second would re-introduce tied keys.
+    as_of = Keyword.get(opts, :as_of, DateTime.utc_now())
 
     prices_by_plan = monthly_prices_by_plan(price_resource, org_id)
     active = active_subscriptions(subscription_resource, org_id)

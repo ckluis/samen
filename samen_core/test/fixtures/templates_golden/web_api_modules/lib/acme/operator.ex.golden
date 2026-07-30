@@ -32,7 +32,8 @@ defmodule Acme.Operator do
       credential: "aoc",
       auth_token: "aot",
       session: "aos",
-      user_identity: "aoi"
+      user_identity: "aoi",
+      login_failure: "aol"
     }
 
   use Samen.Scopes.Billing,

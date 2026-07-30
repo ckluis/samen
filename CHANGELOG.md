@@ -8,6 +8,12 @@ All notable changes to Samen are recorded here. The format follows
 
 ### Added
 
+- **Canonical Work scope — `Project` + the self-referential `Task`** (ADR-041 §3, F1): a new
+  `Samen.Scopes.Work` blueprint ships one canonical Work item (`kind`/`title`/`body`/`status`/
+  `priority`/`due_at`/`completed_at`, a generic CRM-agnostic `(subject_key, subject_id)`
+  object-ref anchor, `custom`, `owner_id`, and the self-referential `parent_id` Subtask tree
+  with cycle refusal), archivable with a subtree cascade. Every vertical inherits Project +
+  Task at ≈0 authored LOC; no PII (the scope's catalog PII map is empty).
 - **Tier-1 custom fields gain five new bounded types** (ADR-036 H6): `money`, `url`, `phone`,
   `email`, `address` join `Samen.CustomFields`'s existing `string`/`integer`/`number`/
   `boolean`/`date`/`enum` set, reusing the matching `Samen.Type.*` module's own cast/
@@ -29,6 +35,54 @@ All notable changes to Samen are recorded here. The format follows
   value is a bare integer (no wrapper struct), so the cell serializer now consults the
   column's declared Ash type before falling back to the generic value-shape dispatch every
   other cell already used.
+- **E7 audit-on-write — the `versioned` blueprint opt-in** (ADR-040 §6, T119): a resource
+  declares `use Samen.Resource, versioned: true` (mode `:changes_only`, the default) or
+  `versioned: :snapshot` and ash_paper_trail (ADR-037 §5.4 ADOPT) generates a governed
+  `<Resource>.Version` recording every create/update/destroy as an attributable, token-only
+  diff. The generated version resource gets FULL samen governance (INV-3, §6.2): an
+  allocator-owned abbrev injected into its `samen do abbrev end` section at build time (the
+  first auto-allocated abbrev on a generated resource; registry stays HANDS-OFF), prefixed
+  columns, a mirrored `org_id`, OrgScope policies, catalog registration, and the
+  `no_plaintext_pii` roster. INV-1 holds by construction: a vault-routed (🔒) attribute
+  versions as its `vt_*` token, NEVER plaintext, for BOTH `:changes_only` and the full-row
+  `:snapshot` reconstruction (`store_action_inputs?` is `false` forever; `:full_diff` is
+  refused substrate-wide). The four audit tiers stay disjoint (§7.4): a versioned +
+  impersonated write produces BOTH a Version row (E7) and a separate §6.6 `impersonation_write`
+  governance `aud_event` — never one row serving both (the impersonation-write audit no-ops on
+  version resources).
+
+### Removed
+
+- **BREAKING (pre-1.0): the CMS `ContentVersion` resource is retired** (ADR-040 §6.5, T119).
+  The bespoke `content_version` ledger (`define_content_version`, the `<abbrev>_content_version`
+  table, the admin-gated `:create_version` action) is removed in favor of E7 audit-on-write:
+  CMS `Page`/`Post`/`Block` now declare `versioned: :snapshot`, so ash_paper_trail records a
+  full-row `<Resource>.Version` snapshot on EVERY tracked write (create/update/publish/
+  mark_archived/archive/restore) — fixing the long-standing gap where status transitions
+  promised a version but only `set_attribute`'d (nothing ever appended a `ContentVersion` row).
+  Content history now reads `Demo.CmsScope.{Page,Post,Block}.Version`; demo's `:create_version`
+  smoke/test call sites are rewired to assert the automatic version rows. Zero data drop: the
+  ledger held only dev/fixture data (no lifecycle hook ever wrote it, no production host mounts
+  the CMS scope), so a clean drop/create produces the paper_trail-backed shape — the historical
+  `add_cms_scope` migration no longer creates the table, and a guarded, idempotent
+  `DROP TABLE IF EXISTS` + catalog cleanup (T97 move-then-drop convention) sweeps any lingering
+  dev DB. The retired `cvr` abbrev stays in the registry (never recycled — permanence). PITR
+  is not needed (no data).
+- **BREAKING (pre-1.0): the CRM `Activity` resource is removed** (ADR-041 §5, operator ruling
+  M5). `Activity` (call/email/meeting/note) was **destructively migrated into the canonical
+  Work-scope `Task`** and its table dropped on every host (`act_activity`/`fac_activity`/
+  `vce_activity`/`swa_activity` → `<work>_task`). A contract-phase, idempotent, per-host
+  `INSERT … ON CONFLICT DO NOTHING` + `DROP TABLE` copies **every** Activity field onto Task
+  field-for-field (§5.1) with **zero data drop**: `type→kind`, `subject→title`, body/status/
+  due_at/completed_at/custom/id/org_id/timestamps verbatim; the ≤3 CRM foreign keys collapse to
+  the primary subject anchor by precedence (`opportunity ▸ person ▸ company`) **and** the full
+  non-null ref set is preserved in `custom.crm_refs`. The CRM detail timeline + composer now
+  read/write the Work `Task` through the object-ref anchor (OR-matching `custom.crm_refs`), so a
+  user sees the identical event stream. Cross-org protection moves from the belongs-to
+  `SameOrgFk` to the org-scoped `Samen.Web.ObjectRef.resolve` write boundary — a cross-org
+  reference is now **inert** (unresolvable) rather than a `SameOrgFk` validation error.
+  Driftwood's `CheckCall` ubiquitous-language alias now re-identifies `Driftwood.Work.Task`.
+  PITR is the production control for the contract phase (no `down/0` round-trip).
 
 ### Changed
 

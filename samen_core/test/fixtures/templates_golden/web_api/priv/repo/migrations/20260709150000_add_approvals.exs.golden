@@ -1,0 +1,88 @@
+defmodule Acme.Repo.Migrations.AddApprovals do
+  @moduledoc """
+  T35 §4.7 / T37h — materializes the T34 E3 `Approval` resource
+  (`Samen.Approvals.Blueprint`) on this app's own repo: `acz_approval`,
+  abbrev `acz` (allocator-reserved).
+
+  This app is `Samen.Reveal.Grants`' engine client for the `"pii_reveal"` kind
+  (`Samen.Reveal.ApprovalHandler`; registered in `config/config.exs`) — this is the
+  table `Grants.approve/2` now writes through via `Samen.Approvals`, closing the T35
+  non-fatal note (a generated app's reveal-approve previously took the fail-safe
+  INLINE path, never the T34 engine, because no `pii_reveal` approvals module was
+  wired). Shape mirrors `demo/priv/repo/migrations/20260728180000_add_approvals.exs`
+  (the T35 in-tree reference) — no AshOban expiry-scan index (this resource carries
+  no `:expire` action — see `Samen.Approvals.Blueprint` moduledoc for why).
+  """
+  use Samen.Migration
+
+  @resources [Acme.Approvals.Approval]
+
+  def up do
+    create table(:acz_approval, primary_key: false) do
+      # NULL = plane-global governance approval (reveal); non-NULL = tenant-plane (§4.1).
+      add(:acz_org_id, :uuid)
+      add(:acz_kind, :text, null: false)
+      add(:acz_subject_ref, :text, null: false)
+      add(:acz_requested_by, :text, null: false)
+      add(:acz_decided_by, :text)
+      add(:acz_reason, :text)
+      add(:acz_deadline_at, :utc_datetime_usec)
+      add(:acz_requested_at, :utc_datetime_usec)
+      add(:acz_decided_at, :utc_datetime_usec)
+      add(:acz_state, :text, null: false, default: "pending")
+      add(:acz_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:acz_inserted_at, :utc_datetime, null: false)
+      add(:acz_updated_at, :utc_datetime, null: false)
+    end
+
+    # Distinct-party DB CHECK — the rvg_distinct_party twin (§4.2 layer 2), carrying the
+    # T34-F1 tightening: a DECIDED row (approved | rejected) MUST carry a non-NULL approver.
+    create(
+      constraint(:acz_approval, :acz_distinct_party,
+        check: """
+        (acz_decided_by IS NULL OR acz_decided_by <> acz_requested_by)
+        AND (acz_state NOT IN ('approved', 'rejected') OR acz_decided_by IS NOT NULL)
+        """
+      )
+    )
+
+    create(
+      unique_index(:acz_approval, [:acz_org_id, :acz_kind, :acz_subject_ref],
+        where: "acz_state = 'pending' AND acz_org_id IS NOT NULL",
+        name: "acz_approval_pending_tenant_idx"
+      )
+    )
+
+    create(
+      unique_index(:acz_approval, [:acz_kind, :acz_subject_ref],
+        where: "acz_state = 'pending' AND acz_org_id IS NULL",
+        name: "acz_approval_pending_global_idx"
+      )
+    )
+
+    create(index(:acz_approval, [:acz_org_id], name: "acz_approval_org_idx"))
+
+    catalog_sync(@resources)
+  end
+
+  def down do
+    catalog_sync_down(@resources)
+
+    drop(index(:acz_approval, [:acz_org_id], name: "acz_approval_org_idx"))
+
+    drop(
+      unique_index(:acz_approval, [:acz_kind, :acz_subject_ref],
+        name: "acz_approval_pending_global_idx"
+      )
+    )
+
+    drop(
+      unique_index(:acz_approval, [:acz_org_id, :acz_kind, :acz_subject_ref],
+        name: "acz_approval_pending_tenant_idx"
+      )
+    )
+
+    drop(constraint(:acz_approval, :acz_distinct_party))
+    drop(table(:acz_approval))
+  end
+end

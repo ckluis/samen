@@ -93,7 +93,7 @@ defmodule Samen.Web.CRMDetailRenderTest do
   # (c) The LOG-ACTIVITY composer creates an activity + it shows in the timeline
   # ==========================================================================
 
-  test "log_activity creates a <ns>.Activity and it appears in the re-rendered timeline", %{org_id: org_id, contact_id: contact_id} do
+  test "log_activity creates a canonical Work Task (anchored to the contact) and it appears in the re-rendered timeline", %{org_id: org_id, contact_id: contact_id} do
     mount = build_mount(:crm, plane: :tenant)
 
     socket =
@@ -103,7 +103,9 @@ defmodule Samen.Web.CRMDetailRenderTest do
       |> Samen.Web.CRM.ContactLive.load(org_id, contact_id)
       |> Phoenix.Component.assign(:active_tab, "activity")
 
-    params = %{"activity" => %{"type" => "call", "subject" => "COMPOSER-CREATED check call", "body" => "Logged from the composer."}}
+    # ADR-041 §6.1: the composer form now writes a Work Task — the fields are the Task
+    # names (kind/title/body), the LiveView merges the crm.person subject anchor.
+    params = %{"activity" => %{"kind" => "call", "title" => "COMPOSER-CREATED check call", "body" => "Logged from the composer."}}
     {:noreply, socket} = Samen.Web.CRM.ContactLive.handle_event("log_activity", params, socket)
 
     # A3: the composer is the AshPhoenix.Form-backed kit form now — a successful submit
@@ -188,19 +190,56 @@ defmodule Samen.Web.CRMDetailRenderTest do
     mount = build_mount(:crm)
     scope = Mount.scope(mount, org_id)
 
+    # Task.title carries the former Activity.subject (ADR-041 §5.1).
     acts = Reads.activities_for_person(mount, scope, contact_id)
-    subjects = Enum.map(acts, & &1.subject)
+    subjects = Enum.map(acts, & &1.title)
     assert Seeds.activity_call_subject() in subjects
     assert Seeds.activity_note_subject() in subjects
     # The company-only activity is NOT in the person stream.
     refute "QBR scheduled" in subjects
   end
 
-  test "Reads.create_activity respects OrgScope + SameOrgFk — a cross-org person FK is REFUSED", %{org_id: org_id} do
+  test "MULTI-ANCHOR (§6.1): a migrated Task whose company link lives ONLY in custom.crm_refs appears in BOTH the contact and company timelines",
+       %{org_id: org_id, contact_id: contact_id, company_id: company_id} do
+    # A Task primary-anchored to the CONTACT (crm.person) whose COMPANY link survives ONLY in
+    # custom.crm_refs — the multi-anchored migrated-Activity shape (ADR-041 §6.1). Raw-inserted
+    # because the Tier-1 custom-bag guard refuses an Ash-written crm_refs; this is exactly the
+    # shape the raw-SQL migration produces for an Activity linked to both a contact and a deal.
+    seed_multi_anchor_task!(org_id, contact_id, company_id, "MULTI-ANCHOR-SENTINEL")
+
     mount = build_mount(:crm)
     scope = Mount.scope(mount, org_id)
 
-    # A person id from a DIFFERENT org — the kernel SameOrgFk change must refuse it.
+    person_titles = Reads.activities_for_person(mount, scope, contact_id) |> Enum.map(& &1.title)
+    company_titles = Reads.activities_for_company(mount, scope, company_id) |> Enum.map(& &1.title)
+
+    # It appears in the CONTACT timeline (via the subject anchor) …
+    assert "MULTI-ANCHOR-SENTINEL" in person_titles
+    # … AND in the COMPANY timeline — which matches SOLELY via the custom.crm_refs OR-branch
+    # (its subject_key is crm.person, not crm.company). Dropping that branch (the §11 sabotage,
+    # scripts/sabotages/34-*) removes it here → this named test FAILS. Refutable by construction.
+    assert "MULTI-ANCHOR-SENTINEL" in company_titles
+
+    # POSITIVE CONTROL (anti-tautology): the company's OWN primary-anchored seeded activity
+    # still shows, so the company read is non-vacuous independent of the crm_refs branch.
+    assert "QBR scheduled" in company_titles
+  end
+
+  test "Reads.create_activity anchors a same-org contact (positive control) but a cross-org reference is INERT — refused (ADR-041 §6.1)", %{org_id: org_id, contact_id: contact_id} do
+    mount = build_mount(:crm)
+    scope = Mount.scope(mount, org_id)
+
+    # POSITIVE CONTROL (anti-tautology): a SAME-ORG person reference resolves through the
+    # org-scoped ObjectRef and the Work Task is created + anchored.
+    ok_attrs = %{type: :note, subject: "same-org attach", status: :completed, person_id: contact_id, org_id: org_id}
+    assert {:ok, task} = Reads.create_activity(mount, scope, ok_attrs)
+    assert task.subject_key == "crm.person"
+    assert task.subject_id == contact_id
+
+    # RED PATH: a person id from a DIFFERENT org. Task's subject is a generic object-ref,
+    # NOT a belongs_to — so SameOrgFk cannot target it; instead the org-scoped
+    # `Samen.Web.ObjectRef.resolve/3` narrows the read to the actor's org, so the cross-org
+    # id is unresolvable → the create refuses to anchor (INERT by construction, ADR-041 §6.1).
     other_org = Ash.UUID.generate()
 
     foreign_person =
@@ -224,6 +263,31 @@ defmodule Samen.Web.CRMDetailRenderTest do
   end
 
   # -- helpers -----------------------------------------------------------------
+
+  # Raw-insert a Work Task carrying custom.crm_refs (the migration-only preservation bag —
+  # an Ash write is refused by the Tier-1 custom-bag guard, so migrated multi-anchor rows
+  # only ever arrive via raw SQL, which is what this reproduces). Primary anchor = crm.person;
+  # the company link lives ONLY in crm_refs, so the company timeline must OR-match it.
+  defp seed_multi_anchor_task!(org_id, person_id, company_id, title) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_naive()
+
+    Repo.query!(
+      """
+      INSERT INTO wwt_task
+        (wwt_id, wwt_org_id, wwt_kind, wwt_title, wwt_status, wwt_priority,
+         wwt_subject_key, wwt_subject_id, wwt_custom, wwt_inserted_at, wwt_updated_at)
+      VALUES ($1, $2, 'note', $3, 'completed', 20, 'crm.person', $4, $5, $6, $6)
+      """,
+      [
+        Ecto.UUID.dump!(Ash.UUID.generate()),
+        Ecto.UUID.dump!(org_id),
+        title,
+        Ecto.UUID.dump!(person_id),
+        %{"crm_refs" => %{"person_id" => person_id, "company_id" => company_id}},
+        now
+      ]
+    )
+  end
 
   # Load, flip to the Activity tab, render (mirrors the ticket-detail Details-tab rig).
   defp render_activity_tab(module, mount, org_id, subject_id) do

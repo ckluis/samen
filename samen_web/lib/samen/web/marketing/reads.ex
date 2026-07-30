@@ -338,9 +338,12 @@ defmodule Samen.Web.Marketing.Reads do
   @doc "Destroy one Marketing segment for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
   def delete_segment(mount, scope, id), do: delete_record(mount, scope, Segment, id)
 
-  # FAIL-HONEST destroy (mirrors `Samen.Web.CRM.Reads.delete_record/4`): the kernel
-  # defines no cascade — a campaign with linked sends is refused by the DB (FK) and
-  # the refusal surfaces to the caller. The read is `limit(1)` (bounded).
+  # FAIL-HONEST destroy (mirrors `Samen.Web.CRM.Reads.delete_record/4`). ADR-040
+  # §5.9 (T37d): Campaign/Segment adopted E6 soft-delete (`archivable true`) — the
+  # default `:destroy` is now a soft archive (an UPDATE), so a linked `send` row
+  # can no longer FK-refuse it (§5.4: no cascade declared; `send` is not itself
+  # archivable). Any OTHER destroy failure (e.g. a policy denial) still surfaces
+  # honestly to the caller. The read is `limit(1)` (bounded).
   defp delete_record(mount, scope, name, id) do
     record =
       Mount.resource(mount, name)

@@ -341,3 +341,99 @@ Full accounting: `_orch/tasks/T31/work/gate-report.md`.
 `Suppression`/`ProviderSelection`/`MarketingReceiptLookup` stores that ship **unwired into any
 host `config.exs`** (fail-OPEN when unconfigured; nothing sends in prod — keyless). Lesser P2/P3
 notes are enumerated in the gate report.
+
+---
+
+## L. Phase 3 (BATON) — WS-E lifecycle/automation + WS-F work objects + LiveView client (INV-6)
+
+Added by the Phase-3 gate (T49, 2026-07-29). Everything below is **complete + verified** at the
+authoritative full-root level: `./ci.sh` passed **twice consecutively** (`ROOT CI: ALL PASSED`,
+EXIT:0, distinct seeds, zero re-rolls; INV-3 determinism). The two known/suspected flake surfaces
+were watched and both stayed green — the demo `SubscriptionMovementLedgerTest` (root-caused +
+fixed by T121) and `reveal_grant_property_test.exs` (the noisy `[warning] Missed notifications`
+lines it emits are benign Ash runtime logging inside the test transaction, not a failing
+assertion). Each claim cites its green artifact **and** its `_orch/verify/T*-verdict.json`.
+
+**Honest scope.** Phase 3 delivers the automation engine, the lifecycle substrate (approvals /
+soft-delete / audit-on-write / versioning), the WS-F work objects, and — per operator ruling R1a
+(2026-07-27) — **reverses the no-JS/CSS-only posture** by wiring a real LiveView client (ADR-042).
+Progressive enhancement is preserved: reads and the auth arc still work JS-off (Class-A floor).
+Everything still runs on the **keyless lane** (no live billing/ESP/AI provider). The M5 CRM
+Activity→Task migration is **destructive and executed** (the Activity table/resource is gone).
+
+### WS-E — automation engine (ADR-039)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| E1 | Workflow/Automation resource + trigger/condition engine: event + schedule triggers, predicates keyed **only on NonPii-eligible attributes** (a PII-keyed predicate is refused, red + control); PII-leak oracle + kill-switch; runs on `ash_oban` | ✅ TEST · keyless | `samen_core/test/automation/*` (workflow/trigger/predicate); ADR-039 | **MET** — `T39-verdict.json` |
+| E1-UI | Tenant-plane automation **builder LiveView** + `samen_automation_routes()` mounting at ≈0 host LOC; a workflow is authorable end-to-end via `phx-click` over the T113 client; only NonPii-eligible attributes offered as condition keys (INV-1) | ✅ TEST · keyless | `samen_web/test/samen/web/automation/*` builder tests; ADR-039 §12 / ADR-042 Class-B | **MET** — `T118-verdict.json` |
+| E2 | Action library (8 actions) — one green test per action incl. email-via-C1 + webhook; escalate/reminder actions invoke the real T41 primitives (module probe, no stub) | ✅ TEST · keyless | `samen_core/test/automation/action_*` (per-action) | **MET** — `T40-verdict.json` |
+| E4/E5 | Reminder scheduler + escalation primitive (+ SLA / dunning clients): reminder-at-T, escalation chain, SLA-breach + dunning invoke the primitive (client tests) | ✅ TEST · keyless | `samen_core/test/automation/{reminder,escalation}_*` | **MET** — `T41-verdict.json` |
+| E8 | Automation observability: fired/skipped/failed run log, operator health view (token-blind), kill-switch (red + control) | ✅ TEST · keyless | `samen_core/test/automation/observability_*`; operator health view tests | **MET** — `T42-verdict.json` |
+
+### WS-E — lifecycle substrate (ADR-040)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| E3 | Generalized approve/reject engine (ADR-040 §4): requester≠approver **DB CHECK** (red + control); any action can require approval (hook proven). Reveal grants are now an **engine client** — all existing reveal/grant tests stay green | ✅ TEST · keyless | `samen_core/test/{approvals,reveal_grants}_*`; DB-CHECK red-path | **MET** — `T34`/`T35-verdict.json` |
+| E6 | Soft-delete **blueprint-wide** (ADR-040 §5) via `use Samen.Resource, archivable: true` on `ash_archival`: archive hides from default reads (red) + restore (green), policy-aware filters, crypto-shred path unchanged. Adopted across every scope — billing / cms / crm / marketing / primitives+chat / support — with composition-cascade + independent-restore honesty; retention integration + archived-count sweep | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/lifecycle/*`; per-scope archival + leak-red tests (T37a–f); retention sweep (T37g); UI affordance + `gen --archivable` + catalog adoption probe (T37h) | **MET** — `T36`/`T37a-h-verdict.json` |
+| E6-fix | `archived_at` is **microsecond** (`:utc_datetime_usec`), not second-granularity — closes the same-second cascade **mis-restore** (a child independently archived in the same wall-clock second as a cascade parent is no longer resurrected). Substrate-wide grep + regenerated host migrations + same-second regression test | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/lib/samen/transformers/archivable_attribute.ex`; CMS Page▸Block same-second regression test (RED pre-fix) | **MET** — `T124-verdict.json` |
+| E7 | Audit-on-write (ADR-040 §6): change-log records actor/diff/timestamp; hash-chain tests untouched-green; four audit tiers **disjoint**. **P7-F1 (impersonation)**: impersonation-context writes are the **mandatory first client** (not opt-in) — single/bulk create/update/**destroy**/destroy_permanently + archive/restore all emit an attributable, **value-free (INV-1)**, in-transaction fail-closed audit row; an impersonated write **without** an audit row is impossible | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/audit/*`; impersonation-write red-path + bulk_destroy coverage; sabotage 33 (6 RED) | **MET** — `T38-verdict.json` (P7-F1 closed) |
+| E7-ver | General `versioned` opt-in (ADR-040 §6.2) on `ash_paper_trail`: a `versioned true` pilot logs versions (control: non-opted resource writes none); vaulted-field diffs are **token-only** incl. `:snapshot` over a vault attribute (INV-1 red + sabotage twin); `store_action_inputs?` FALSE. CMS **ContentVersion retired** across demo/driftwood/pawchart (destructive pre-1.0 break, §6.5, zero-drop) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/audit/versioned_*`; ContentVersion-retirement migration; CHANGELOG | **MET** — `T119-verdict.json` |
+
+### WS-F — work objects (canonical Task + calendar/docs/tag/location/vendor/lead)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| F1 | **Canonical Work Task + Project + Subtask** (ADR-041): Task schema matches the ADR field-for-field (`kind` mirrors the old Activity `type` enum; plain-atom `status`; self-referential `parent_id` subtree, cycle-refused). **M5 destructive migration EXECUTED** — the CRM `Activity` table + resource + catalog entry are **GONE**, CRM timelines/CDC ride the Task, multi-anchor timeline preserved in `custom.crm_refs`, zero data loss | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/lib/samen/scopes/work/blueprint.ex`; `2026…_migrate_activity_to_task.exs` (all four hosts, `MigrateActivityToTask.up/0` via Ecto.Migrator); sabotage 34 | **MET** — `T43`/`T96`/`T97-verdict.json` (M5 confirmed) |
+| F2 | **Calendar** scope: Event/Meeting + recurrence + ICS export; attendees vaulted (MaskingCase 3-proof); a valid `VCALENDAR` endpoint masked per plane | ✅ TEST · keyless | `samen_core/test/scopes/calendar/*`; ICS-export masking 3-proof | **MET** — `T44-verdict.json` |
+| F3 | **Docs** scope: Doc + Note attachable via object-ref; PII-classified body vaulted; attach test on two host resources | ✅ TEST · keyless | `samen_core/test/scopes/docs/*` | **MET** — `T45-verdict.json` |
+| F4 | **Tag** resource + polymorphic taggings; Ticket's bespoke `tags` array **migrated** onto the generic scope with an equivalence assert, old column dropped | ✅ TEST · keyless | `samen_core/test/scopes/tag/*`; Ticket tags-array migration | **MET** — `T46-verdict.json` |
+| F5 | **Location** resource on the `Address` type; `pii_address` MaskingCase 3-proof | ✅ TEST · keyless | `samen_core/test/scopes/location/*` | **MET** — `T47-verdict.json` |
+| F6/F7 | **Vendor** resource + **Sales Lead** with a conversion action; `lead ≠ subscriber` schema probe; convert → Contact/Opportunity | ✅ TEST · keyless | `samen_core/test/scopes/{vendor,lead}/*` | **MET** — `T48-verdict.json` |
+
+### Client runtime — LiveView adoption (ADR-042, operator ruling R1a)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| UX-R1 | The shared root layout ships a **real LiveSocket/app.js bundle** inherited by every host + gen.app parity — a representative `phx-click` write (reveal / dispatch) now **mutates + re-renders browser-real** (headless Chromium). **Progressive enhancement preserved**: JS-off auth arc still completes (Class-A floor). Socket masking-leak probe clean (no `vt_`/plaintext to a no-grant operator); masking watch-list unmodified-green | ✅ BROWSER-REAL + 🧨 SABOTAGE · keyless | ADR-042; headless-browser regression (3 assets 200, liveSocket connect, `phx-click='reveal'` round-trip); sabotage 32 | **MET** — `T113-verdict.json` |
+
+### Security defects caught-and-fixed by adversarial verification (Phase 3 — dogfood escalations)
+
+Four dogfood-walk escalations were fixed **in-phase** and are closed by the gate:
+
+| Esc | Defect (persona walk) | Fix + proof | Verdict |
+|---|---|---|---|
+| **P1-F1/F2** | **T110** — first-run auth arc was LiveView-only/browser-inert; the broken native-GET fallback **leaked the plaintext password into the URL query string** | Auth forms flip get→post; password moves to POST body (proven live, capture sink); onboarding + invite-accept work JS-off; regression red-on-old-form | **CLOSED** — `T110-verdict.json` |
+| **P11-F3/F1/F2** | **T111** — a recipient `display_name` carrying `<script>` rendered **executable (stored-XSS)** in outbound HTML mail; AuthMailer never rendered content (empty verify/reset/invite emails); invite dispatch swallowed an `Ash.NotLoaded` crash as success | Template fields **html-escaped** to inert text; auth emails carry real working links; invite dispatch **fail-honest** (`{:error,_}`, never fake `{:ok}`) | **CLOSED** — `T111-verdict.json` |
+| **P9-F1** | **T117** — generated-app **operator routes shipped with no prod auth gate**: a deployed app exposed `/operator/*` to anonymous visitors | Generator + `samen_operator_routes` macro emit a real prod-active `:authn` gate (dev/test no-op preserved): anonymous → 302/401 to login, authenticated operator → allowed; LiveView websocket back-door closed; sabotage-refutable | **CLOSED** — `T117-verdict.json` |
+| **P7-F1** | **T38** — impersonation had session-level attribution but **per-mutation attribution was zero** (an impersonated tenant write left only a bare `updated_at`) | Impersonation-context writes are the mandatory first audit-on-write client incl. `bulk_destroy`; impersonated write without an audit row is impossible (red + control + sabotage) | **CLOSED** — `T38-verdict.json` |
+
+### Infra hardening (INV-class, filed off Phase-3 incidents)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| T107 | `ci.sh` gen_app probes restore `abbrev_registry.json` **byte-exact on ALL exit paths** incl. SIGINT/SIGTERM (registry corruption on interrupt was observed 4+ times in Phase 2) | ✅ TEST · keyless | interrupt harness (SIGTERM mid-mutation → SHA-256 byte-exact, zero scratch); `ci.sh` `run_gen_probe` trap | **MET** — `T107-verdict.json` |
+| T123 | Abbrev allocator `propose` checks the **union of ALL host namespaces** (not just own-host + flat global) — it can no longer hand back an abbrev already owned by a different host (root cause of the T44–T47 cross-host collisions + the T47 build-break). Refuses accidental cross-host different-owner reservation **at write time**; ADR-025 same-owner reuse preserved behind explicit opt-in | ✅ TEST + 🧨 SABOTAGE · keyless | RED-path proposer test + anti-tautology; sabotage 39; committed registry byte-untouched | **MET** — `T123-verdict.json` |
+| T121 | The pre-existing flaky demo `SubscriptionMovementLedgerTest` root-caused at the ordering level (non-total `sort` tiebreak) and fixed with a **total-order** tiebreaker (occurred_at-usec + id belt), RED-on-revert guard — no retry/sleep/margin band-aid | ✅ TEST · keyless | `demo/test/…/subscription_movement_ledger_test.exs`; 450+ iterations 0-fail | **MET** — `T121-verdict.json` |
+
+### Deferred / operator-scheduled (named, not vanished)
+
+Per the T103/T107 naming precedent, the following are **honestly open** and NOT claimed done:
+
+- **T108** — production Ash-backed billing mirrors + `si_` resolution: **DEFERRED until a live
+  billing provider is actually wired** (operator ruling 2026-07-23). Under the keyless posture
+  nothing sends in prod; the capability is proven against fakes (T106 / ADR-038-A). The T49→T108
+  gate edge was removed by that ruling.
+- **T114 / T115 / T116** — operator delivery/suppression surface, operator audit/activity UI over
+  `aud_event` + T38 rows, and the plane-legibility system: operator-approved **additive** backlog,
+  scheduled by the operator rather than auto-built (deliberately NOT gating T49).
+- **T122** — rewire the T40 `add_tag` action onto the generic T46 Tag/Tagging: a functional
+  **enhancement** (`add_tag` already degrades cleanly to `{:error, :no_tag_surface}` on a Ticket
+  after T46 dropped the array column, not broken), non-gating.
+- **T125** — reconcile E6 composition-cascade child-archivability posture across scopes (CMS blocks
+  independent vs chat/support children cascade-locked): a **spec/product-semantics** reconciliation
+  (each scope is internally correct; the lock is the safe over-restrictive direction, never a leak),
+  non-gating — awaits an explicit operator posture decision (A/B/C).
+
+Full accounting: `_orch/tasks/T49/work/gate-report.md`.

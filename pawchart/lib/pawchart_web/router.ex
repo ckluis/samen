@@ -89,6 +89,17 @@ defmodule PawChartWeb.Router do
       }
     )
 
+    # 3b. Work (F1 / ADR-041 §3, T43) — internal follow-up/reminder tasks (task
+    #     inbox/detail + project list). Zero CRM contact.
+    samen_module_routes(:work, PawChart.Work,
+      repo: PawChart.Repo,
+      labels: %{
+        title: "Happy Paws Clinic",
+        glyph: "V",
+        crumb_root: "PawChart"
+      }
+    )
+
     # 4. Marketing — clinic outreach (wellness reminders, referral thank-yous). The SECOND
     #    vertical's proof of the framework outreach/consent surface: mounts the samen_core
     #    Marketing scope with ZERO PawChart LiveView code. The `:crm_namespace` label wires
@@ -135,6 +146,10 @@ defmodule PawChartWeb.Router do
       repo: PawChart.Repo,
       labels: %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"}
     )
+
+    # 7a. ICS (F2, spec §F2/§F8 c8) — per-plane-masked `.ics` calendar export over
+    #     PawChart's Calendar domain (`PawChart.Calendar.Event`, abbrev `pce`).
+    samen_ics_routes(:ics, PawChart.Calendar, repo: PawChart.Repo)
 
     # 8. Search (ADR-027) — the ⌘K/per-list search page over the KERNEL `Samen.Search`
     #    engine, mounted over `PawChart.Primitives.{File,SearchIndex}` (`vfl`/`vsh`). The

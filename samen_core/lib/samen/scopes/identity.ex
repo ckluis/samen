@@ -40,6 +40,9 @@ defmodule Samen.Scopes.Identity do
     * `Demo.Identity.UserIdentity` — ADR-035 §3.1/§5 A6: the SSO link (org-less;
       belongs_to Credential); binds an external IdP subject (`provider` +
       opaque `provider_uid`) to a Credential (the optional OIDC module, T06)
+    * `Demo.Identity.LoginFailure` — ADR-038 §6.4: the durable brute-force
+      failure counter (org-less; one row per `email_bidx`/`credential` key);
+      makes T103's bounded `login_failed` signal survive a node restart (T109)
 
   ## Abbrevs (permanent, registry-checked)
 
@@ -58,6 +61,7 @@ defmodule Samen.Scopes.Identity do
     * `Demo.Identity.AuthToken`  → `atk` (ADR-035 §4.2)
     * `Demo.Identity.Session`    → `ses` (ADR-035 §3.1/§4.3)
     * `Demo.Identity.UserIdentity` → `uid` (ADR-035 §3.1/§5 A6)
+    * `Demo.Identity.LoginFailure` → `dil` (ADR-038 §6.4; T109)
 
   The macro does NOT invent abbrevs — the host passes them so the host owns the
   registry entry. Defaults are provided for the demo mount.
@@ -87,7 +91,9 @@ defmodule Samen.Scopes.Identity do
     credential: "crd",
     auth_token: "atk",
     session: "ses",
-    user_identity: "uid"
+    user_identity: "uid",
+    # ADR-038 §6.4 (T109) — the durable brute-force failure counter.
+    login_failure: "dil"
   }
 
   @doc false
@@ -124,13 +130,15 @@ defmodule Samen.Scopes.Identity do
     auth_token_mod = Module.concat(namespace, AuthToken)
     session_mod = Module.concat(namespace, Session)
     user_identity_mod = Module.concat(namespace, UserIdentity)
+    login_failure_mod = Module.concat(namespace, LoginFailure)
 
     quote do
       require Samen.Scopes.Identity.Blueprint
 
-      # Register the ten Identity resources in the host domain (ADR-035 §3.1
+      # Register the eleven Identity resources in the host domain (ADR-035 §3.1
       # adds Credential + AuthToken to the original six; T03 adds Session; T06
-      # adds UserIdentity, the A6 SSO link).
+      # adds UserIdentity, the A6 SSO link; T109 adds LoginFailure, the ADR-038
+      # §6.4 durable brute-force counter).
       resources do
         resource(unquote(org_mod))
         resource(unquote(user_mod))
@@ -142,6 +150,7 @@ defmodule Samen.Scopes.Identity do
         resource(unquote(auth_token_mod))
         resource(unquote(session_mod))
         resource(unquote(user_identity_mod))
+        resource(unquote(login_failure_mod))
       end
 
       # Materialize the resource modules in the host namespace. Each is a normal
@@ -234,6 +243,14 @@ defmodule Samen.Scopes.Identity do
         unquote(repo),
         unquote(abbrevs.user_identity),
         unquote(credential_mod)
+      )
+
+      Samen.Scopes.Identity.Blueprint.define_login_failure(
+        unquote(login_failure_mod),
+        unquote(otp_app),
+        unquote(domain),
+        unquote(repo),
+        unquote(abbrevs.login_failure)
       )
     end
   end

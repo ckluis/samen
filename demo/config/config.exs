@@ -10,16 +10,17 @@ config :ex_money, auto_start_exchange_rate_service: false
 # It uses samen_core as a path dep and exercises EVERY T1 feature.
 config :demo,
   ecto_repos: [Demo.Repo],
-  ash_domains: [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.PrimitivesScope, Demo.Analytics, Demo.Aggregate]
+  ash_domains: [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.WorkScope, Demo.CalendarScope, Demo.DocsScope, Demo.Tags, Demo.LocationsScope, Demo.SalesOps, Demo.PrimitivesScope, Demo.Analytics, Demo.Aggregate]
 
 # samen_core verifiers (C1/C2/C3/C4/C5) discover domains from
 # :samen_core :ash_domains. Register the demo's domains here so the
 # verifier tasks find the demo resources — including the mounted Identity
 # scope (T3.1), the CRM scope (T3.2), the Billing scope (T3.3), the
 # Marketing scope (T3.4), the CMS scope (T3.5), the Support scope
-# (T3.6), and the Primitives scope (T3.7 — resources catalogued in HOST's
-# catalog, scanned by host's UNCHANGED verifiers, per ADR-004).
-config :samen_core, :ash_domains, [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.PrimitivesScope, Demo.Analytics, Demo.Aggregate]
+# (T3.6), the Primitives scope (T3.7 — resources catalogued in HOST's
+# catalog, scanned by host's UNCHANGED verifiers, per ADR-004), and the
+# SalesOps scope (F6+F7, T48 — Vendor + Lead, converting into Demo.CrmScope).
+config :samen_core, :ash_domains, [Demo.Crm, Demo.Identity, Demo.CrmScope, Demo.BillingScope, Demo.MarketingScope, Demo.CmsScope, Demo.SupportScope, Demo.WorkScope, Demo.CalendarScope, Demo.DocsScope, Demo.Tags, Demo.LocationsScope, Demo.SalesOps, Demo.PrimitivesScope, Demo.Analytics, Demo.Aggregate]
 
 # WS-B / Phase B7 (ADR-021): wire the product-analytics capture seam.
 #   * `Samen.Analytics.track/1` writes into the DEMO's `pae` ledger;
@@ -72,6 +73,19 @@ config :samen_core, :reveal_grant, Samen.Reveal.Grants
 config :samen_core, :reveal_grant_repo, Demo.Repo
 config :samen_core, :non_pii_repo, Demo.Repo
 config :samen_core, :verify_repo, Demo.Repo
+
+# T35 §4.7: reveal grants are a CLIENT of the T34 E3 approve/reject engine. Demo's own
+# Approval resource (Samen.Approvals.Blueprint.define_approval/5, demo/lib/demo/approvals.ex)
+# + the "pii_reveal" kind registered to Samen.Reveal.ApprovalHandler — Grants.approve/2
+# now routes its happy path through Samen.Approvals on this host.
+config :samen_core, Samen.Approvals,
+  approval_resource: Demo.Approvals.Approval,
+  repo: Demo.Repo
+
+config :samen_core, Samen.Approvals.Registry,
+  kinds: %{
+    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler}
+  }
 
 # T4.1 masked impersonation: the repo backing impersonation sessions + the operator
 # plane resource map (accounts ARE tenant orgs — Identity Org joined to Billing

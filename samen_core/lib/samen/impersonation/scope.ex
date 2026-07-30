@@ -130,6 +130,12 @@ defmodule Samen.Impersonation.Scope do
   end
 
   defp build(%Session{} = session) do
+    marker = %{
+      operator_id: session.operator_id,
+      org_id: to_string(session.org_id),
+      session_id: session.id
+    }
+
     %Samen.Scope{
       actor: %{
         # The operator's id — a mutation under impersonation attributes to the operator.
@@ -143,12 +149,16 @@ defmodule Samen.Impersonation.Scope do
         # unless a live reveal grant covers the subject (T3.11 PiiResolution).
         plane: :operator,
         # The marker proving this scope is impersonated (a plain member scope lacks it).
-        impersonation: %{
-          operator_id: session.operator_id,
-          org_id: to_string(session.org_id),
-          session_id: session.id
-        }
-      }
+        impersonation: marker
+      },
+      # ALSO carry the marker in the scope's SHARED CONTEXT (P7-F1 / ADR-040 §6.6) as a
+      # defensive fallback. Ash threads `%Samen.Scope{}.context` as shared action context
+      # (Ash.Scope.ToOpts get_context/1). The primary marker channel is the actor (read
+      # from the change `Context.actor` = opts[:actor], reliable per record for every
+      # action type including bulk_destroy now that the audit change is registered
+      # `on: [:create, :update, :destroy]`); this shared-context copy is a belt-and-braces
+      # secondary source for `Samen.Audit.ImpersonationWrite`.
+      context: %{samen_impersonation: marker}
     }
   end
 

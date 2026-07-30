@@ -76,6 +76,14 @@ defmodule Samen.Web.Operator.AccountDetailLive do
           crumbs={["Operator plane", "Accounts", (@detail && @detail.account.name) || "—"]}
         >
           <:actions>
+            <a
+              :if={@account_id}
+              href={"/operator/automation/#{@account_id}"}
+              id="account-automation-health-link"
+              style="font-size:12px;color:#3B4CCA;margin-right:14px"
+            >
+              Automation health →
+            </a>
             <a href="/operator/accounts" id="back-to-accounts" style="font-size:12px;color:#3B4CCA">← Accounts</a>
           </:actions>
         </.topbar>

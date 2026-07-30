@@ -53,7 +53,8 @@ defmodule Samen.Web.Mount do
             | :csv
             | :search
             | :settings
-            | :auth,
+            | :auth
+            | :automation,
           namespace: module(),
           repo: module(),
           domain: module(),
@@ -123,6 +124,8 @@ defmodule Samen.Web.Mount do
   defp scope_kind("crm"), do: :crm
   defp scope_kind("billing"), do: :billing
   defp scope_kind("support"), do: :support
+  # F1 / ADR-041 §3 (T43) — the Work scope (Project + the canonical Task).
+  defp scope_kind("work"), do: :work
   defp scope_kind("marketing"), do: :marketing
   defp scope_kind("aggregate"), do: :aggregate
   defp scope_kind("operator"), do: :operator
@@ -136,6 +139,9 @@ defmodule Samen.Web.Mount do
   # ADR-035 — the pre-actor identity-spine surfaces (signup/login/verify/reset/…,
   # §6 "pre-actor public" plane row). No org actor exists yet at this scope.
   defp scope_kind("auth"), do: :auth
+  # T118 (ADR-039 §12 done-criterion 4 UI half) — the tenant-plane automation
+  # (workflow) builder mount.
+  defp scope_kind("automation"), do: :automation
   defp scope_kind(k) when is_atom(k), do: k
 
   # Module atoms serialize as "Elixir.Driftwood.Crm". Host modules are COMPILED, so their
@@ -182,6 +188,7 @@ defmodule Samen.Web.Mount do
     default_org_id org_directory tenant_landing impersonate_path
     recipient_id
     flags_namespace flags_path revenue_plan_loader
+    automation_path
     current_user_id current_membership_id
     authn authorized_orgs
     login_path spine_sessions

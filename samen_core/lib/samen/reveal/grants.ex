@@ -141,8 +141,30 @@ defmodule Samen.Reveal.Grants do
         detail: req.reason
       })
 
+      # T35 §4.7: additionally open a `pii_reveal` Approval through the T34 engine —
+      # dual truth, per the ADR. The `RevealRequest` row (just written above) STAYS the
+      # domain intent record; this is a best-effort parallel governance record so an
+      # approval surface can see the pending decision even before `approve/2` is called.
+      # Never blocks/fails the reveal request itself: an unwired host, an unregistered
+      # kind, or any other engine hiccup here must not regress `request/1`'s pre-T35
+      # contract (RevealRequest write + `requested` audit, unconditionally).
+      open_engine_approval(req)
+
       {:ok, req}
     end
+  end
+
+  defp open_engine_approval(%RevealRequest{} = req) do
+    Samen.Approvals.request(%{
+      org_id: nil,
+      kind: "pii_reveal",
+      subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
+      requested_by: req.requestor_id
+    })
+
+    :ok
+  rescue
+    _ -> :ok
   end
 
   # ==========================================================================
@@ -188,7 +210,7 @@ defmodule Samen.Reveal.Grants do
 
       {:error, :self_approval}
     else
-      do_approve(req, granted_by, opts, r)
+      route_through_engine(req, granted_by, opts, r)
     end
   end
 
@@ -201,7 +223,57 @@ defmodule Samen.Reveal.Grants do
     end
   end
 
-  defp do_approve(req, granted_by, opts, r) do
+  # ==========================================================================
+  # T35 §4.7 — route the happy path through the T34 approvals engine.
+  # ==========================================================================
+
+  # Opens (fetches-or-creates, idempotent) the `pii_reveal` Approval for this request and
+  # decides it through `Samen.Approvals.approve/3`. The registered handler
+  # (`Samen.Reveal.ApprovalHandler`) runs `do_approve/4` (below) INSIDE the engine's
+  # decision transaction, so the T34 guarantees (exactly-once by state machine,
+  # distinct-party incl. the T34-F1 null-approver refusal, same-tx handler+audit) now
+  # apply to reveal. `window_minutes` is NOT persisted on the approval row (§4.4,
+  # no-persisted-inputs) — it rides the synchronous `opts` keyword list into `ctx.opts`,
+  # the same call-time value the pre-T35 inline path always used.
+  #
+  # An UNWIRED host (`{:error, :no_approvals_module}`, e.g. no `pii_reveal` registration
+  # yet — the per-host sweep residual, ADR-040 §4.7 item 4) falls back to the ORIGINAL
+  # inline `do_approve/4` call, preserving exact pre-migration behavior rather than
+  # regressing a host that has not adopted the engine. Reveal's own distinct-party
+  # enforcement (policy above + the `rvg_distinct_party` DB CHECK) still fully applies on
+  # that fallback path — "unwired" never means "single-party grant slips through", it
+  # only means the T34-specific guarantees (exactly-once machine, T34-F1) are not yet
+  # layered on top for that host.
+  defp route_through_engine(req, granted_by, opts, r) do
+    approval_attrs = %{
+      org_id: nil,
+      kind: "pii_reveal",
+      subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
+      requested_by: req.requestor_id
+    }
+
+    engine_opts = [window_minutes: Map.get(opts, :window_minutes, default_window_minutes())]
+
+    with {:ok, approval} <- Samen.Approvals.request(approval_attrs),
+         {:ok, _decided, meta} <- Samen.Approvals.approve(approval.id, granted_by, engine_opts) do
+      {:ok, r.get!(RevealGrant, meta.grant_id)}
+    else
+      {:error, :no_approvals_module} ->
+        do_approve(req, granted_by, opts, r)
+
+      {:error, _reason} = err ->
+        err
+    end
+  end
+
+  @doc false
+  # Public (not private) so `Samen.Reveal.ApprovalHandler.on_approve/2` — the registered
+  # T34 engine handler for kind "pii_reveal" — can invoke this EXACT Multi body inside the
+  # engine's decision transaction (§4.7 item 2). Behavior is UNCHANGED from the pre-T35
+  # inline call: same grant insert + `granted` audit + same-tx auto-revoke enqueue.
+  @spec do_approve(RevealRequest.t(), term(), map(), module()) ::
+          {:ok, RevealGrant.t()} | {:error, term()}
+  def do_approve(req, granted_by, opts, r) do
     window = Map.get(opts, :window_minutes, default_window_minutes())
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
     expires_at = DateTime.add(now, window * 60, :second)
@@ -301,6 +373,45 @@ defmodule Samen.Reveal.Grants do
       )
 
     r.exists?(query)
+  end
+
+  @doc """
+  List the ACTIVE reveal windows this actor currently holds AS THE REQUESTOR — the
+  legibility data for the R-P6 reveal-window UI (who approved, when it expires).
+
+  This is a READ-ONLY accountability projection: it applies the SAME gate as
+  `active?/3` (requestor-bound, distinct-party, unrevoked, `expires_at > now`) and returns
+  the grant facts `%{subject_id, granted_by, expires_at}` instead of a boolean. It does
+  NOT change enforcement — `active?/3` remains the authorization chokepoint; this only
+  surfaces the already-recorded grant so a human can SEE that a privileged window is open,
+  by whom, and until when.
+
+  Note the honest scope: a reveal grant is SUBJECT-WIDE (keyed on `subject_id` +
+  `requestor_id`, no field filter), so an open window authorizes resolving the whole
+  subject record, not a single field — the UI copy must say so.
+  """
+  @spec active_windows(term(), keyword()) :: [
+          %{subject_id: String.t(), granted_by: String.t(), expires_at: DateTime.t()}
+        ]
+  def active_windows(actor, opts \\ []) do
+    r = Keyword.get(opts, :repo, repo())
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    requestor_id = actor_id(actor)
+
+    r.all(
+      from(g in RevealGrant,
+        where:
+          g.requestor_id == ^requestor_id and
+            g.granted_by != g.requestor_id and
+            is_nil(g.revoked_at) and
+            g.expires_at > ^now,
+        select: %{
+          subject_id: g.subject_id,
+          granted_by: g.granted_by,
+          expires_at: g.expires_at
+        }
+      )
+    )
   end
 
   # ==========================================================================

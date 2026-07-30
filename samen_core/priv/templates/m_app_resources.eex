@@ -57,6 +57,7 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
       add(:<%= bl %>_org_id, :uuid, null: false)
       add(:<%= bl %>_inserted_at, :utc_datetime, null: false)
       add(:<%= bl %>_updated_at, :utc_datetime, null: false)
+      add(:<%= bl %>_archived_at, :utc_datetime_usec)
     end
 
     create table(:<%= bp %>_price, primary_key: false) do
@@ -83,6 +84,7 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
       add(:<%= bp %>_org_id, :uuid, null: false)
       add(:<%= bp %>_inserted_at, :utc_datetime, null: false)
       add(:<%= bp %>_updated_at, :utc_datetime, null: false)
+      add(:<%= bp %>_archived_at, :utc_datetime_usec)
     end
 
     create table(:<%= bs %>_subscription, primary_key: false) do
@@ -291,6 +293,7 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
       add(:<%= abbrev %>_org_id, :uuid, null: false)
       add(:<%= abbrev %>_inserted_at, :utc_datetime, null: false)
       add(:<%= abbrev %>_updated_at, :utc_datetime, null: false)
+      add(:<%= abbrev %>_archived_at, :utc_datetime_usec)
     end
 
     # ---- Token-blind aggregate projection (no pii_ columns) ----

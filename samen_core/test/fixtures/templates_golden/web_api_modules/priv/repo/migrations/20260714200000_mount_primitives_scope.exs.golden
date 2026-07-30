@@ -85,6 +85,8 @@ defmodule Acme.Repo.Migrations.MountPrimitivesScope do
       add(:afl_uploaded_by_id, :uuid)
       add(:afl_metadata, :map, default: fragment("'{}'::jsonb"))
       add(:afl_search_vector, :text)
+      # ADR-040 §5.9 (T37e) — file is archivable: true.
+      add(:afl_archived_at, :utc_datetime_usec)
       add(:afl_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:afl_org_id, :uuid, null: false)
       add(:afl_inserted_at, :utc_datetime, null: false)
@@ -115,6 +117,8 @@ defmodule Acme.Repo.Migrations.MountPrimitivesScope do
       add(:awh_last_delivered_at, :utc_datetime)
       add(:awh_metadata, :map, default: fragment("'{}'::jsonb"))
       add(:pii_awh_signing_secret, :text)
+      # ADR-040 §5.9 (T37e) — webhook is archivable: true.
+      add(:awh_archived_at, :utc_datetime_usec)
       add(:awh_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:awh_org_id, :uuid, null: false)
       add(:awh_inserted_at, :utc_datetime, null: false)
@@ -131,6 +135,8 @@ defmodule Acme.Repo.Migrations.MountPrimitivesScope do
       add(:aff_metadata, :map, default: fragment("'{}'::jsonb"))
       add(:aff_target_rules, :map, default: fragment("'[]'::jsonb"))
       add(:aff_variants, :map, default: fragment("'{}'::jsonb"))
+      # ADR-040 §5.9 (T37e) — feature_flag is archivable: true.
+      add(:aff_archived_at, :utc_datetime_usec)
       add(:aff_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:aff_org_id, :uuid, null: false)
       add(:aff_inserted_at, :utc_datetime, null: false)

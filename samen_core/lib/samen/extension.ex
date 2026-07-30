@@ -77,6 +77,39 @@ defmodule Samen.Extension do
             doc:
               "The resource's permanent 3-letter lowercase storage abbrev " <>
                 "(e.g. \"com\"). Usually set via `use Samen.Resource, abbrev:`."
+          ],
+          archivable: [
+            type: :boolean,
+            required: false,
+            default: false,
+            doc:
+              "When true, attaches the E6 soft-delete substrate (ADR-040 §5): " <>
+                "an `<abbrev>_archived_at` timestamp (NULL = live), a default read " <>
+                "filter that EXCLUDES archived rows, a soft primary `:destroy`, and " <>
+                "explicit `:archive` / `:restore` / `:archived` / `:destroy_permanently` " <>
+                "actions. Usually set via `use Samen.Resource, archivable: true`."
+          ],
+          versioned: [
+            type: :boolean,
+            required: false,
+            default: false,
+            doc:
+              "When true, attaches the E7 audit-on-write substrate (ADR-040 §6): " <>
+                "ash_paper_trail generates a governed `<Resource>.Version` resource " <>
+                "recording every create/update/destroy as an attributable, token-only " <>
+                "diff. Usually set via `use Samen.Resource, versioned: true` " <>
+                "(or `versioned: :snapshot`). See `versioned_mode`."
+          ],
+          versioned_mode: [
+            type: {:one_of, [:changes_only, :snapshot]},
+            required: false,
+            default: :changes_only,
+            doc:
+              "The ash_paper_trail `change_tracking_mode` for a `versioned` resource " <>
+                "(ADR-040 §6.3(5)): `:changes_only` (default — diff keys + new values, " <>
+                "atomic-safe, smallest surface) or `:snapshot` (full prior-row " <>
+                "reconstruction; CMS content, §6.5). `:full_diff` is refused " <>
+                "substrate-wide (it forces `require_atomic? false`)."
           ]
         ]
       }
@@ -84,6 +117,24 @@ defmodule Samen.Extension do
     transformers: [
       Samen.Transformers.CoreAttributes,
       Samen.Transformers.MaterializeCustomFields,
+      # ArchivableAttribute injects the ash_archival `archived_at` column as an
+      # abbrev-PREFIXED, select-by-default attribute (the ADR-037 §5.3 C2(a) integration
+      # duty): it runs BEFORE AbbrevStorage (so `<abbrev>_archived_at` is prefixed) and
+      # BEFORE ash_archival's SetupArchival (whose own `add_new_attribute` then no-ops).
+      # The soft-destroy rewrite + default read filter come from ash_archival, not here.
+      Samen.Transformers.ArchivableAttribute,
+      # ImpersonationAudit adds the P7-F1 impersonation-write audit change
+      # (Samen.Audit.ImpersonationWrite) to EVERY resource as a global change (ADR-040
+      # §6.6): an in-transaction, bulk-safe, fail-closed audit that fires on any write
+      # whose actor carries the :impersonation marker, REGARDLESS of the resource's
+      # `versioned`/E7 opt-in. A no-op for non-impersonated writes.
+      Samen.Transformers.ImpersonationAudit,
+      # VersionedSelect adds Samen.Versioning.SelectForVersion to any `versioned true`
+      # resource (ADR-040 §6): a change that loads the write result's attributes so
+      # ash_paper_trail can build its diff (vault fields as vt_* tokens, INV-1). A no-op
+      # otherwise. Via a transformer (not the `versioned` DSL) so it composes with a
+      # resource that already declares its own `changes` block (e.g. CMS Page's cascade).
+      Samen.Transformers.VersionedSelect,
       Samen.Transformers.AbbrevStorage,
       Samen.Transformers.NoPanColumns
     ],

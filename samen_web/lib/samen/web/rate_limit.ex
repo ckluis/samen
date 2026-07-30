@@ -149,7 +149,15 @@ defmodule Samen.Web.RateLimit do
   # non-PII probe (done-criterion 2) greps + inspects at runtime.
   defp bucket(surface, kind, value), do: "#{surface}:#{kind}:#{value}"
 
-  defp limit_for(surface) do
+  @doc """
+  The configured `{limit, window_ms}` for `surface` (config override or the
+  compiled default). Public so callers needing the SAME numbers the ETS check
+  enforces — e.g. `Samen.Identity.LoginFailure.over_limit?/5`'s durable,
+  restart-survival re-check (ADR-038 §6.4; T109) — never hardcode a second copy
+  that could drift from this module's own `@default_limits`.
+  """
+  @spec limit_for(atom()) :: {pos_integer(), pos_integer()}
+  def limit_for(surface) do
     config = Application.get_env(:samen_web, __MODULE__, [])
     limits = Keyword.get(config, :limits, %{})
     Map.get(limits, surface) || Map.fetch!(@default_limits, surface)

@@ -275,7 +275,15 @@ defmodule Samen.Notifications.Digest do
     plural = if count == 1, do: "", else: "s"
 
     lines_text = counts |> Enum.map(fn {type, n} -> "  - #{type}: #{n}" end) |> Enum.join("\n")
-    lines_html = counts |> Enum.map_join("", fn {type, n} -> "<li>#{type}: #{n}</li>" end)
+
+    # HTML body: every recipient/tenant-derived value (name, to) AND the
+    # event_type strings are escaped through the sanctioned `Phoenix.HTML.Safe`
+    # seam (`Rendering.html_safe/1`) — the SAME protocol `%Samen.Masked{}`
+    # implements, so plaintext is entity-encoded (F3 XSS fix, T111) and a masked
+    # value still renders `••••`. Counts are integers (no escaping needed).
+    lines_html =
+      counts
+      |> Enum.map_join("", fn {type, n} -> "<li>#{Rendering.html_safe(type)}: #{n}</li>" end)
 
     subject = "Your digest: #{count} update#{plural}"
 
@@ -285,8 +293,8 @@ defmodule Samen.Notifications.Digest do
         "You have #{count} unread notification#{plural}:\n#{lines_text}\n"
 
     html_body =
-      "<p>Hello #{name},</p>" <>
-        "<p>This message was sent to #{to}.</p>" <>
+      "<p>Hello #{Rendering.html_safe(name)},</p>" <>
+        "<p>This message was sent to #{Rendering.html_safe(to)}.</p>" <>
         "<p>You have #{count} unread notification#{plural}:</p><ul>#{lines_html}</ul>"
 
     {subject, text_body, html_body}

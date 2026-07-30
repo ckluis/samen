@@ -3,96 +3,6 @@
     {
       "fields": [
         {
-          "column_name": "act_body",
-          "logical_name": "body",
-          "pii": false,
-          "type": "String"
-        },
-        {
-          "column_name": "act_company_id",
-          "logical_name": "company_id",
-          "pii": false,
-          "type": "UUID"
-        },
-        {
-          "column_name": "act_completed_at",
-          "logical_name": "completed_at",
-          "pii": false,
-          "type": "UtcDatetime"
-        },
-        {
-          "column_name": "act_custom",
-          "logical_name": "custom",
-          "pii": false,
-          "type": "Map"
-        },
-        {
-          "column_name": "act_due_at",
-          "logical_name": "due_at",
-          "pii": false,
-          "type": "UtcDatetime"
-        },
-        {
-          "column_name": "act_id",
-          "logical_name": "id",
-          "pii": false,
-          "type": "UUID"
-        },
-        {
-          "column_name": "act_inserted_at",
-          "logical_name": "inserted_at",
-          "pii": false,
-          "type": "UtcDatetime"
-        },
-        {
-          "column_name": "act_opportunity_id",
-          "logical_name": "opportunity_id",
-          "pii": false,
-          "type": "UUID"
-        },
-        {
-          "column_name": "act_org_id",
-          "logical_name": "org_id",
-          "pii": false,
-          "type": "UUID"
-        },
-        {
-          "column_name": "act_person_id",
-          "logical_name": "person_id",
-          "pii": false,
-          "type": "UUID"
-        },
-        {
-          "column_name": "act_status",
-          "logical_name": "status",
-          "pii": false,
-          "type": "Atom"
-        },
-        {
-          "column_name": "act_subject",
-          "logical_name": "subject",
-          "pii": false,
-          "type": "String"
-        },
-        {
-          "column_name": "act_type",
-          "logical_name": "type",
-          "pii": false,
-          "type": "Atom"
-        },
-        {
-          "column_name": "act_updated_at",
-          "logical_name": "updated_at",
-          "pii": false,
-          "type": "UtcDatetime"
-        }
-      ],
-      "resource": "Demo.CrmScope.Activity",
-      "table_name": "act_activity"
-    },
-    {
-      "fields": [
-        {
           "column_name": "ahb_account_count",
           "logical_name": "account_count",
           "pii": false,
@@ -314,6 +224,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "att_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "att_company_id",
           "logical_name": "company_id",
@@ -657,6 +573,12 @@
     {
       "fields": [
         {
+          "column_name": "bpl_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "bpl_custom",
           "logical_name": "custom",
           "pii": false,
@@ -739,6 +661,12 @@
           "logical_name": "active",
           "pii": false,
           "type": "Boolean"
+        },
+        {
+          "column_name": "bpr_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
         },
         {
           "column_name": "bpr_custom",
@@ -1053,6 +981,12 @@
     {
       "fields": [
         {
+          "column_name": "cbl_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "cbl_block_type",
           "logical_name": "block_type",
           "pii": false,
@@ -1119,10 +1053,76 @@
     {
       "fields": [
         {
+          "column_name": "cbv_changes",
+          "logical_name": "changes",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "cbv_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "cbv_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cbv_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "cbv_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cbv_version_action_type",
+          "logical_name": "version_action_type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "cbv_version_inserted_at",
+          "logical_name": "version_inserted_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "cbv_version_source_id",
+          "logical_name": "version_source_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "cbv_version_updated_at",
+          "logical_name": "version_updated_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        }
+      ],
+      "resource": "Demo.CmsScope.Block.Version",
+      "table_name": "cbl_block_versions"
+    },
+    {
+      "fields": [
+        {
           "column_name": "cmd_alt_text",
           "logical_name": "alt_text",
           "pii": false,
           "type": "String"
+        },
+        {
+          "column_name": "cmd_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
         },
         {
           "column_name": "cmd_content_type",
@@ -1184,6 +1184,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "cmp_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "cmp_custom",
           "logical_name": "custom",
@@ -1317,6 +1323,12 @@
     {
       "fields": [
         {
+          "column_name": "cnv_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "cnv_enabled",
           "logical_name": "enabled",
           "pii": false,
@@ -1383,6 +1395,12 @@
     {
       "fields": [
         {
+          "column_name": "cpg_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "cpg_body",
           "logical_name": "body",
           "pii": false,
@@ -1448,6 +1466,72 @@
     },
     {
       "fields": [
+        {
+          "column_name": "cpv_changes",
+          "logical_name": "changes",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "cpv_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "cpv_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cpv_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "cpv_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cpv_version_action_type",
+          "logical_name": "version_action_type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "cpv_version_inserted_at",
+          "logical_name": "version_inserted_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "cpv_version_source_id",
+          "logical_name": "version_source_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "cpv_version_updated_at",
+          "logical_name": "version_updated_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        }
+      ],
+      "resource": "Demo.CmsScope.Page.Version",
+      "table_name": "cpg_page_versions"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "cpt_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "cpt_body",
           "logical_name": "body",
@@ -1517,6 +1601,66 @@
       ],
       "resource": "Demo.CmsScope.Post",
       "table_name": "cpt_post"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "cvp_changes",
+          "logical_name": "changes",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "cvp_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "cvp_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cvp_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "cvp_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cvp_version_action_type",
+          "logical_name": "version_action_type",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "cvp_version_inserted_at",
+          "logical_name": "version_inserted_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "cvp_version_source_id",
+          "logical_name": "version_source_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "cvp_version_updated_at",
+          "logical_name": "version_updated_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        }
+      ],
+      "resource": "Demo.CmsScope.Post.Version",
+      "table_name": "cpt_post_versions"
     },
     {
       "fields": [
@@ -1598,6 +1742,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "csm_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "csm_canonical_url",
           "logical_name": "canonical_url",
@@ -1683,74 +1833,602 @@
     {
       "fields": [
         {
-          "column_name": "cvr_author_id",
-          "logical_name": "author_id",
+          "column_name": "dce_archived_at",
+          "logical_name": "archived_at",
           "pii": false,
-          "type": "UUID"
+          "type": "UtcDatetimeUsec"
         },
         {
-          "column_name": "cvr_change_summary",
-          "logical_name": "change_summary",
-          "pii": false,
-          "type": "String"
+          "column_name": "dce_attendees",
+          "logical_name": "attendees",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
         },
         {
-          "column_name": "cvr_content_snapshot",
-          "logical_name": "content_snapshot",
+          "column_name": "dce_custom",
+          "logical_name": "custom",
           "pii": false,
           "type": "Map"
         },
         {
-          "column_name": "cvr_id",
+          "column_name": "dce_description",
+          "logical_name": "description",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dce_ends_at",
+          "logical_name": "ends_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dce_id",
           "logical_name": "id",
           "pii": false,
           "type": "UUID"
         },
         {
-          "column_name": "cvr_inserted_at",
+          "column_name": "dce_inserted_at",
           "logical_name": "inserted_at",
           "pii": false,
           "type": "UtcDatetime"
         },
         {
-          "column_name": "cvr_org_id",
+          "column_name": "dce_kind",
+          "logical_name": "kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dce_location",
+          "logical_name": "location",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dce_org_id",
           "logical_name": "org_id",
           "pii": false,
           "type": "UUID"
         },
         {
-          "column_name": "cvr_status",
-          "logical_name": "status",
+          "column_name": "dce_owner_id",
+          "logical_name": "owner_id",
           "pii": false,
-          "type": "Atom"
+          "type": "UUID"
         },
         {
-          "column_name": "cvr_subject_id",
+          "column_name": "dce_recurrence",
+          "logical_name": "recurrence",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "dce_starts_at",
+          "logical_name": "starts_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dce_timezone",
+          "logical_name": "timezone",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dce_title",
+          "logical_name": "title",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dce_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.CalendarScope.Event",
+      "table_name": "dce_event"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "ddd_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "ddd_body",
+          "logical_name": "body",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ddd_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "ddd_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ddd_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ddd_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ddd_owner_id",
+          "logical_name": "owner_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ddd_subject_id",
           "logical_name": "subject_id",
           "pii": false,
           "type": "UUID"
         },
         {
-          "column_name": "cvr_subject_type",
-          "logical_name": "subject_type",
+          "column_name": "ddd_subject_key",
+          "logical_name": "subject_key",
           "pii": false,
           "type": "String"
         },
         {
-          "column_name": "cvr_updated_at",
+          "column_name": "ddd_title",
+          "logical_name": "title",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ddd_updated_at",
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
         },
         {
-          "column_name": "cvr_version_number",
-          "logical_name": "version_number",
-          "pii": false,
-          "type": "Integer"
+          "column_name": "pii_ddd_secure_body",
+          "logical_name": "secure_body",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
         }
       ],
-      "resource": "Demo.CmsScope.ContentVersion",
-      "table_name": "cvr_content_version"
+      "resource": "Demo.DocsScope.Doc",
+      "table_name": "ddd_doc"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "ddn_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "ddn_body",
+          "logical_name": "body",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ddn_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "ddn_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ddn_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "ddn_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ddn_owner_id",
+          "logical_name": "owner_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ddn_subject_id",
+          "logical_name": "subject_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "ddn_subject_key",
+          "logical_name": "subject_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "ddn_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pii_ddn_secure_body",
+          "logical_name": "secure_body",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        }
+      ],
+      "resource": "Demo.DocsScope.Note",
+      "table_name": "ddn_note"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dil_failure_count",
+          "logical_name": "failure_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "dil_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dil_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dil_key_kind",
+          "logical_name": "key_kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dil_key_value",
+          "logical_name": "key_value",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dil_last_failed_at",
+          "logical_name": "last_failed_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dil_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dil_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dil_window_started_at",
+          "logical_name": "window_started_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        }
+      ],
+      "resource": "Demo.Identity.LoginFailure",
+      "table_name": "dil_login_failure"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dll_address",
+          "logical_name": "address",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "dll_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dll_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dll_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dll_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dll_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dll_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.LocationsScope.Location",
+      "table_name": "dll_location"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dsl_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dsl_company_name",
+          "logical_name": "company_name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dsl_converted_at",
+          "logical_name": "converted_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dsl_converted_opportunity_id",
+          "logical_name": "converted_opportunity_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsl_converted_person_id",
+          "logical_name": "converted_person_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsl_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "dsl_emails",
+          "logical_name": "emails",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "dsl_full_name",
+          "logical_name": "full_name",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "dsl_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsl_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dsl_notes",
+          "logical_name": "notes",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dsl_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsl_phones",
+          "logical_name": "phones",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "dsl_source",
+          "logical_name": "source",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dsl_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dsl_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dsl_value",
+          "logical_name": "value",
+          "pii": false,
+          "type": "Samen.Type.Money"
+        }
+      ],
+      "resource": "Demo.SalesOps.Lead",
+      "table_name": "dsl_lead"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dsv_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dsv_contact_emails",
+          "logical_name": "contact_emails",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "dsv_contact_name",
+          "logical_name": "contact_name",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "dsv_contact_phones",
+          "logical_name": "contact_phones",
+          "pii": true,
+          "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "dsv_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "dsv_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsv_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dsv_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dsv_notes",
+          "logical_name": "notes",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dsv_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsv_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dsv_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dsv_website",
+          "logical_name": "website",
+          "pii": false,
+          "type": "String"
+        }
+      ],
+      "resource": "Demo.SalesOps.Vendor",
+      "table_name": "dsv_vendor"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dtt_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dtt_color",
+          "logical_name": "color",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dtt_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dtt_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dtt_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dtt_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dtt_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Tags.Tag",
+      "table_name": "dtt_tag"
     },
     {
       "fields": [
@@ -2121,6 +2799,12 @@
     {
       "fields": [
         {
+          "column_name": "mca_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "mca_custom",
           "logical_name": "custom",
           "pii": false,
@@ -2370,7 +3054,7 @@
           "column_name": "mov_occurred_at",
           "logical_name": "occurred_at",
           "pii": false,
-          "type": "UtcDatetime"
+          "type": "UtcDatetimeUsec"
         },
         {
           "column_name": "mov_org_id",
@@ -2414,6 +3098,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "msg_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "msg_custom",
           "logical_name": "custom",
@@ -2619,6 +3309,12 @@
     {
       "fields": [
         {
+          "column_name": "msu_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "msu_consent_at",
           "logical_name": "consent_at",
           "pii": false,
@@ -2678,6 +3374,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "mtp_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "mtp_body_html",
           "logical_name": "body_html",
@@ -2834,6 +3536,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "opp_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "opp_close_date",
           "logical_name": "close_date",
@@ -3033,6 +3741,12 @@
     {
       "fields": [
         {
+          "column_name": "per_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "per_company_id",
           "logical_name": "company_id",
           "pii": false,
@@ -3104,6 +3818,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "pff_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "pff_description",
           "logical_name": "description",
@@ -3183,6 +3903,12 @@
     {
       "fields": [
         {
+          "column_name": "pfl_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "pfl_content_type",
           "logical_name": "content_type",
           "pii": false,
@@ -3260,6 +3986,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "pip_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "pip_enabled",
           "logical_name": "enabled",
@@ -3471,6 +4203,12 @@
           "type": "Samen.Type.VaultField"
         },
         {
+          "column_name": "pwh_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "pwh_event_types",
           "logical_name": "event_types",
           "pii": false,
@@ -3547,6 +4285,12 @@
           "logical_name": "email",
           "pii": true,
           "type": "Samen.Type.VaultField"
+        },
+        {
+          "column_name": "sag_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
         },
         {
           "column_name": "sag_custom",
@@ -3687,6 +4431,12 @@
     {
       "fields": [
         {
+          "column_name": "scv_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "scv_channel",
           "logical_name": "channel",
           "pii": false,
@@ -3807,6 +4557,12 @@
     {
       "fields": [
         {
+          "column_name": "smc_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "smc_body_template",
           "logical_name": "body_template",
           "pii": false,
@@ -3885,6 +4641,12 @@
           "type": "UUID"
         },
         {
+          "column_name": "smg_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "smg_attachments",
           "logical_name": "attachments",
           "pii": false,
@@ -3951,6 +4713,12 @@
     {
       "fields": [
         {
+          "column_name": "ssl_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
           "column_name": "ssl_enabled",
           "logical_name": "enabled",
           "pii": false,
@@ -4016,6 +4784,12 @@
     },
     {
       "fields": [
+        {
+          "column_name": "stk_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
         {
           "column_name": "stk_breached",
           "logical_name": "breached",
@@ -4095,12 +4869,6 @@
           "type": "String"
         },
         {
-          "column_name": "stk_tags",
-          "logical_name": "tags",
-          "pii": false,
-          "type": "{:array, Ash.Type.String}"
-        },
-        {
           "column_name": "stk_updated_at",
           "logical_name": "updated_at",
           "pii": false,
@@ -4109,6 +4877,54 @@
       ],
       "resource": "Demo.SupportScope.Ticket",
       "table_name": "stk_ticket"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "tdt_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "tdt_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "tdt_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "tdt_subject_id",
+          "logical_name": "subject_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "tdt_subject_key",
+          "logical_name": "subject_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "tdt_tag_id",
+          "logical_name": "tag_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "tdt_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.Tags.Tagging",
+      "table_name": "tdt_tagging"
     },
     {
       "fields": [
@@ -4223,6 +5039,174 @@
       ],
       "resource": "Demo.Identity.User",
       "table_name": "usr_user"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "wpj_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "wpj_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "wpj_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "wpj_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "wpj_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "wpj_owner_id",
+          "logical_name": "owner_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "wpj_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "wpj_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.WorkScope.Project",
+      "table_name": "wpj_project"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "wtk_archived_at",
+          "logical_name": "archived_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "wtk_body",
+          "logical_name": "body",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "wtk_completed_at",
+          "logical_name": "completed_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "wtk_custom",
+          "logical_name": "custom",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "wtk_due_at",
+          "logical_name": "due_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "wtk_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "wtk_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "wtk_kind",
+          "logical_name": "kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "wtk_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "wtk_owner_id",
+          "logical_name": "owner_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "wtk_parent_id",
+          "logical_name": "parent_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "wtk_priority",
+          "logical_name": "priority",
+          "pii": false,
+          "type": "Samen.Type.Priority"
+        },
+        {
+          "column_name": "wtk_project_id",
+          "logical_name": "project_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "wtk_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "wtk_subject_id",
+          "logical_name": "subject_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "wtk_subject_key",
+          "logical_name": "subject_key",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "wtk_title",
+          "logical_name": "title",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "wtk_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.WorkScope.Task",
+      "table_name": "wtk_task"
     }
   ]
 }

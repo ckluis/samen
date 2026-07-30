@@ -309,24 +309,44 @@ defmodule Samen.Web.Auth.ResetTest do
   # ===========================================================================
 
   describe "Samen.Web.Auth.ResetRequestLive" do
-    test "renders the request form and shows the generic confirmation on submit" do
+    test "renders the request form with a REAL method=post action, and reads the ?requested=1 flag (T110)" do
       mount = build_mount(:auth)
       session = mount_session(mount)
       {:ok, socket} = ResetRequestLive.mount(%{}, session, %Phoenix.LiveView.Socket{})
 
       html = render_html(ResetRequestLive, socket.assigns)
       assert html =~ "reset-request-form"
+      assert html =~ ~s(method="post")
+      assert html =~ ~s(action="/reset")
 
-      {:noreply, socket} =
+      # JS path: submit arms the browser POST to the controller.
+      {:noreply, armed} =
         ResetRequestLive.handle_event("request_reset", %{"reset" => %{"email" => unique_email()}}, socket)
 
-      assert socket.assigns.requested?
-      assert socket.assigns.flash_ok =~ "check your inbox"
+      assert armed.assigns.trigger_submit
+
+      # The controller redirects back with the uniform no-oracle flag; the
+      # LiveView surfaces the generic "check your inbox" copy from it.
+      {:noreply, done} = ResetRequestLive.handle_params(%{"requested" => "1"}, "http://localhost/reset", socket)
+      assert done.assigns.requested?
+      assert done.assigns.flash_ok =~ "check your inbox"
     end
   end
 
   describe "Samen.Web.Auth.ResetLive" do
-    test "a strong password reset renders the sessions-signed-out confirmation" do
+    test "the form carries a real method=post action to /reset/:token (password in body, token in path — T110)" do
+      result = register!()
+      raw_token = raw_reset_token!(result)
+
+      mount = build_mount(:auth)
+      html = mount_smoke(ResetLive, mount, %{"token" => raw_token})
+
+      assert html =~ ~s(method="post")
+      assert html =~ ~s(action="/reset/#{raw_token}")
+      assert html =~ ~s(type="password")
+    end
+
+    test "a strong password arms the real POST (the consume runs in the controller); ?reset=1 shows the confirmation" do
       result = register!()
       raw_token = raw_reset_token!(result)
 
@@ -334,14 +354,18 @@ defmodule Samen.Web.Auth.ResetTest do
       session = mount_session(mount)
       {:ok, socket} = ResetLive.mount(%{"token" => raw_token}, session, %Phoenix.LiveView.Socket{})
 
-      {:noreply, socket} =
+      {:noreply, armed} =
         ResetLive.handle_event("reset", %{"reset" => %{"password" => "a brand new strong password"}}, socket)
 
-      assert socket.assigns.reset?
-      assert socket.assigns.flash_ok =~ "signed out"
+      assert armed.assigns.trigger_submit
+      refute armed.assigns.reset?
+
+      {:noreply, done} = ResetLive.handle_params(%{"reset" => "1"}, "http://localhost/reset/#{raw_token}", socket)
+      assert done.assigns.reset?
+      assert done.assigns.flash_ok =~ "signed out"
     end
 
-    test "a weak password shows the rejection without an account-existence oracle" do
+    test "a weak password shows the inline rejection and does NOT arm the POST (no oracle)" do
       result = register!()
       raw_token = raw_reset_token!(result)
 
@@ -353,6 +377,7 @@ defmodule Samen.Web.Auth.ResetTest do
         ResetLive.handle_event("reset", %{"reset" => %{"password" => "short"}}, socket)
 
       refute socket.assigns.reset?
+      refute socket.assigns.trigger_submit
       assert socket.assigns.error =~ "Password"
     end
   end

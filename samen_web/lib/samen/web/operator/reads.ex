@@ -209,7 +209,7 @@ defmodule Samen.Web.Operator.Reads do
     joins = desk_joins(mount, scope)
 
     Mount.resource(mount, Ticket)
-    |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :tags, :custom])
+    |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :custom])
     |> Ash.Query.sort(inserted_at: :asc)
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
@@ -232,7 +232,7 @@ defmodule Samen.Web.Operator.Reads do
 
     page =
       Mount.resource(mount, Ticket)
-      |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :tags, :custom])
+      |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :custom])
       |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:subject])
 
     %{page | items: Enum.map(page.items, &desk_row(&1, joins))}
@@ -244,8 +244,19 @@ defmodule Samen.Web.Operator.Reads do
     %{
       users_by_id: users_by_id(mount, scope),
       agents_by_id: agents_by_id(mount, scope),
-      agent_by_ticket: agent_by_ticket(mount, scope)
+      agent_by_ticket: agent_by_ticket(mount, scope),
+      tags_by_ticket: tags_by_ticket(mount, scope)
     }
+  end
+
+  # F4/T46: the generic-Tag-backed read equivalent of the former `Ticket.tags`
+  # array column — batched (one query for every desk ticket, not N+1),
+  # mirroring `agent_by_ticket/2`'s "read everything up to the lookup limit,
+  # bucket by key" shape. Derives the ticket's object-ref key host-agnostically
+  # (matches whatever `MigrateTicketTagsToTagScope` anchored on this host).
+  defp tags_by_ticket(mount, scope) do
+    subject_key = Samen.Web.ObjectRef.Catalog.key_for(Mount.resource(mount, Ticket))
+    Samen.Web.Tags.names_by_subject_key(mount, scope, subject_key, @lookup_limit)
   end
 
   defp desk_row(ticket, joins) do
@@ -259,7 +270,7 @@ defmodule Samen.Web.Operator.Reads do
       priority: ticket.priority,
       sla_breach_at: ticket.sla_breach_at,
       breached: ticket.breached,
-      tags: ticket.tags,
+      tags: Map.get(joins.tags_by_ticket, ticket.id, []),
       __requester__: requester_user_id && Map.get(joins.users_by_id, requester_user_id),
       __requester_org_id__: requester_org_id,
       __agent__:
@@ -299,10 +310,15 @@ defmodule Samen.Web.Operator.Reads do
   # policy (WS-A design: only sanctioned actions).
 
   @doc """
-  Destroy one desk ticket for `scope` (A3 CRUD wiring). The write goes through Ash so
+  Archive one desk ticket for `scope` (A3 CRUD wiring). The write goes through Ash so
   OrgScope + `RoleAtLeast(:member)` apply — this module adds NO policy of its own.
-  FAIL-HONEST: a ticket with linked conversations is refused by the DB FK and the
-  refusal is returned, never swallowed. `:ok` or `{:error, reason}`.
+
+  ADR-040 §5.9/T37f: `Ticket` is `archivable true` and the cascade PARENT of `ticket
+  ▸cascade conversation ▸cascade message` (§5.4). Routes through the explicit `:archive`
+  action (not the plain default destroy) so the cascade engages — see
+  `Samen.Web.Support.Reads.delete_ticket/3`'s identical moduledoc for the full rationale.
+  A ticket with linked conversations/messages is no longer refused — it archives, and its
+  conversations/messages archive with it at the same instant. `:ok` or `{:error, reason}`.
   """
   def delete_ticket(mount, scope, id) do
     record =
@@ -313,7 +329,7 @@ defmodule Samen.Web.Operator.Reads do
 
     case record do
       nil -> {:error, :not_found}
-      record -> Ash.destroy(record, scope: scope)
+      record -> Ash.destroy(record, action: :archive, scope: scope)
     end
   rescue
     e -> {:error, e}
@@ -401,7 +417,10 @@ defmodule Samen.Web.Operator.Reads do
     Mount.resource(mount, SubscriptionEvent)
     |> Ash.Query.ensure_selected([:kind, :mrr_delta_cents, :mrr_before_cents, :mrr_after_cents, :occurred_at, :customer_id])
     |> Ash.Query.filter(customer_id == ^customer_id)
-    |> Ash.Query.sort(occurred_at: :desc)
+    # T121: `id` belt makes this a STRICT TOTAL ORDER (not merely deterministic-in-
+    # practice) — two mov rows sharing an `occurred_at` instant resolve to ONE defined
+    # order regardless of timestamp precision, mirroring the ledger read's tiebreak.
+    |> Ash.Query.sort(occurred_at: :desc, id: :desc)
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
   rescue

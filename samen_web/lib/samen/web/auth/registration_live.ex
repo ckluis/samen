@@ -16,103 +16,97 @@ defmodule Samen.Web.Auth.RegistrationLive do
   Sending the verify email through the Delivery chokepoint (A2) is a later
   task's contract — this surface mints the AuthToken row (inside the SAME
   transaction) but does not itself dispatch mail.
+
+  ## No-JS HTTP fallback (T110)
+
+  Since ADR-042 the LiveView client ships, so with JS this form enhances in
+  place and the socket connects; but signup is Class A (ADR-042 §5), so its
+  controller-POST fallback is a BINDING no-JS floor. The form therefore carries a
+  REAL `action="/signup"` + `method="post"` (the `LoginLive`/`SessionController`
+  precedent), so a no-JS browser POSTs to
+  `Samen.Web.Auth.AccountController.register/2` — the password
+  rides the POST body, never a GET query string. When JS IS connected,
+  `phx-submit="register"` does a cheap inline password-length check for UX and,
+  on success, arms `phx-trigger-action` to fire that SAME real POST (the
+  authoritative rate-limit + `Register.register/2` mutation lives in the
+  controller, the ONE enforcement point a no-JS submit also hits). Status flows
+  back as NON-secret query flags (`?registered=1`, `?error=weak_password`,
+  `?error=rate_limited`) read in `handle_params/3` — never a credential.
   """
   use Phoenix.LiveView
 
   import Samen.UI
 
-  alias Samen.Identity.Register
+  alias Samen.Auth.PasswordPolicy
   alias Samen.Web.Mount
-  alias Samen.Web.RateLimit
 
   @impl true
   def mount(_params, session, socket) do
-    socket =
-      socket
-      |> Samen.Web.Live.assign_mount(session)
-      |> assign(:samen_client_ip, Samen.Web.Live.client_ip(socket))
-
+    socket = Samen.Web.Live.assign_mount(socket, session)
     {:ok, load(socket)}
   end
 
   @doc false
   def load(socket) do
-    assign(socket, form: blank_form(), flash_ok: nil, error: nil, registered?: false)
+    assign(socket, form: blank_form(), flash_ok: nil, error: nil, registered?: false, trigger_submit: false)
   end
 
   @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply, apply_status(socket, params)}
+  end
+
+  # T110 — the controller redirects back here with a NON-secret status flag; a
+  # weak-password retry is re-shown for the caller to fix (no credential is ever
+  # echoed into these params).
+  defp apply_status(socket, %{"registered" => "1"}) do
+    assign(socket,
+      registered?: true,
+      error: nil,
+      flash_ok: "Check your inbox to verify your email and finish setting up your account."
+    )
+  end
+
+  defp apply_status(socket, %{"error" => "weak_password"}) do
+    assign(socket, error: "Password must be at least #{PasswordPolicy.min_length()} characters.", flash_ok: nil)
+  end
+
+  defp apply_status(socket, %{"error" => "rate_limited"}) do
+    assign(socket,
+      error: "Too many sign-up attempts from your network. Please wait a few minutes and try again.",
+      flash_ok: nil
+    )
+  end
+
+  defp apply_status(socket, %{"error" => _}) do
+    assign(socket, error: "Something went wrong. Please try again.", flash_ok: nil)
+  end
+
+  defp apply_status(socket, _params), do: socket
+
+  @impl true
   def handle_event("register", %{"registration" => params}, socket) do
-    mount = socket.assigns.samen_mount
-
-    # ADR-035 §4.5 / ADR-038 §6.3 — registration brute-force control (T103): 5/hr per IP
-    # (registration has no account key — a pre-actor visitor has no account yet). Over
-    # the limit → the SAME generic interstitial error, no account-existence signal.
-    case RateLimit.check(:registration_ip, :ip, socket.assigns[:samen_client_ip] || "unknown") do
-      {:error, :rate_limited} ->
-        {:noreply,
-         assign(socket,
-           form: to_form(params, as: :registration),
-           error: "Too many sign-up attempts from your network. Please wait a few minutes and try again.",
-           flash_ok: nil
-         )}
-
+    # JS-connected path only: a cheap inline password-length check for UX, then
+    # arm the real POST. The AUTHORITATIVE rate-limit + `Register.register/2`
+    # (and the same weak-password rejection, re-derived server-side) run in
+    # `Samen.Web.Auth.AccountController.register/2`, which a no-JS submit hits
+    # directly — so this handler never mutates and never enforces on its own.
+    case PasswordPolicy.validate(Map.get(params, "password") || "") do
       :ok ->
-        register(socket, mount, params)
-    end
-  end
+        {:noreply, assign(socket, form: to_form(params, as: :registration), error: nil, trigger_submit: true)}
 
-  defp register(socket, mount, params) do
-    attrs = %{
-      org_name: trim(Map.get(params, "org_name")),
-      first_name: trim(Map.get(params, "first_name")),
-      last_name: trim(Map.get(params, "last_name")),
-      email: trim(Map.get(params, "email")),
-      password: Map.get(params, "password") || ""
-    }
-
-    case Register.register(attrs, mods(mount)) do
-      {:ok, %{status: status}} when status in [:registered, :duplicate] ->
-        {:noreply,
-         assign(socket,
-           form: blank_form(),
-           error: nil,
-           registered?: true,
-           flash_ok: "Check your inbox to verify your email and finish setting up your account."
-         )}
-
-      {:error, :weak_password} ->
+      {:error, _weak} ->
         {:noreply,
          assign(socket,
            form: to_form(params, as: :registration),
-           error: "Password must be at least #{Samen.Auth.PasswordPolicy.min_length()} characters.",
-           flash_ok: nil
-         )}
-
-      {:error, _reason} ->
-        {:noreply,
-         assign(socket,
-           form: to_form(params, as: :registration),
-           error: "Something went wrong. Please try again.",
-           flash_ok: nil
+           error: "Password must be at least #{PasswordPolicy.min_length()} characters.",
+           flash_ok: nil,
+           trigger_submit: false
          )}
     end
   end
 
-  # The eight Identity resources a `use Samen.Scopes.Identity` mount materializes
-  # (ADR-004: `Module.concat(namespace, Name)`) — only the five Register needs.
-  defp mods(%Mount{} = mount) do
-    %{
-      org: Mount.resource(mount, Org),
-      credential: Mount.resource(mount, Credential),
-      user: Mount.resource(mount, User),
-      membership: Mount.resource(mount, Membership),
-      auth_token: Mount.resource(mount, AuthToken),
-      repo: mount.repo
-    }
-  end
-
-  defp trim(v) when is_binary(v), do: String.trim(v)
-  defp trim(_), do: nil
+  defp registration_action(%Mount{} = mount), do: Mount.label(mount, :signup_path, "/signup")
 
   defp blank_form, do: to_form(%{}, as: :registration)
 
@@ -133,8 +127,13 @@ defmodule Samen.Web.Auth.RegistrationLive do
           :if={not @registered?}
           for={@form}
           id="registration-form"
+          action={registration_action(@samen_mount)}
+          method="post"
           phx-submit="register"
+          phx-trigger-action={@trigger_submit}
         >
+          <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+
           <.form_field field={@form[:org_name]} label="Company / org name" required />
           <.form_field field={@form[:first_name]} label="First name" />
           <.form_field field={@form[:last_name]} label="Last name" />

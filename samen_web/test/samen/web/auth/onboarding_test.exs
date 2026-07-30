@@ -113,6 +113,16 @@ defmodule Samen.Web.Auth.OnboardingTest do
     socket
   end
 
+  # T110 — Skip is no longer a `phx-click` event; it is a plain GET
+  # `<.link patch>` to the next step (works no-JS, F2). Navigating there advances
+  # the step via `handle_params/3`'s `&step=` reading and WRITES NOTHING — this
+  # helper drives that same step-navigation the Skip link performs.
+  defp goto(socket, step) when is_atom(step) do
+    params = %{"step" => Atom.to_string(step), "org" => socket.assigns.org_id, "user" => socket.assigns.user_id}
+    {:noreply, socket} = WizardLive.handle_params(params, "http://localhost/onboarding", socket)
+    socket
+  end
+
   defp reread_org(id) do
     Org
     |> Ash.Query.filter(id == ^id)
@@ -218,7 +228,7 @@ defmodule Samen.Web.Auth.OnboardingTest do
 
     test "SKIP: skipping step 1 advances to step 2 WITHOUT writing" do
       reg = register!()
-      socket = mount_socket(reg.org.id, reg.user.id) |> event("skip_org")
+      socket = mount_socket(reg.org.id, reg.user.id) |> goto(:plan)
 
       assert socket.assigns.step == :plan
       assert reread_org(reg.org.id).name == reg.org.name
@@ -232,7 +242,7 @@ defmodule Samen.Web.Auth.OnboardingTest do
   describe "WizardLive — plan-selection step" do
     test "GREEN (fail-honest default): the exact empty-state copy renders, no fake plan list" do
       reg = register!()
-      socket = mount_socket(reg.org.id, reg.user.id) |> event("skip_org")
+      socket = mount_socket(reg.org.id, reg.user.id) |> goto(:plan)
 
       html = html(socket)
       assert html =~ ~s(id="onboarding-plan-empty")
@@ -242,7 +252,7 @@ defmodule Samen.Web.Auth.OnboardingTest do
 
     test "POSITIVE CONTROL: a wired :plan_labels hook renders REAL choices, not the empty state" do
       reg = register!()
-      socket = mount_socket(plan_mount(), reg.org.id, reg.user.id) |> event("skip_org")
+      socket = mount_socket(plan_mount(), reg.org.id, reg.user.id) |> goto(:plan)
 
       html = html(socket)
       assert html =~ ~s(id="onboarding-plan-form")
@@ -257,7 +267,7 @@ defmodule Samen.Web.Auth.OnboardingTest do
 
       socket =
         mount_socket(plan_mount(), reg.org.id, reg.user.id)
-        |> event("skip_org")
+        |> goto(:plan)
         |> event("select_plan", %{"plan" => %{"key" => "growth"}})
 
       assert socket.assigns.step == :invite
@@ -269,8 +279,8 @@ defmodule Samen.Web.Auth.OnboardingTest do
 
       socket =
         mount_socket(reg.org.id, reg.user.id)
-        |> event("skip_org")
-        |> event("skip_plan")
+        |> goto(:plan)
+        |> goto(:invite)
 
       assert socket.assigns.step == :invite
       assert reread_org(reg.org.id).plan == "free"
@@ -288,8 +298,8 @@ defmodule Samen.Web.Auth.OnboardingTest do
 
       socket =
         mount_socket(reg.org.id, reg.user.id)
-        |> event("skip_org")
-        |> event("skip_plan")
+        |> goto(:plan)
+        |> goto(:invite)
         |> event("invite", %{"invitation" => %{"email" => email, "role" => "member"}})
 
       refute socket.assigns.invite_error
@@ -310,8 +320,8 @@ defmodule Samen.Web.Auth.OnboardingTest do
 
       socket =
         mount_socket(reg.org.id, reg.user.id)
-        |> event("skip_org")
-        |> event("skip_plan")
+        |> goto(:plan)
+        |> goto(:invite)
         |> event("finish")
 
       assert socket.assigns.complete?
@@ -343,8 +353,8 @@ defmodule Samen.Web.Auth.OnboardingTest do
 
       socket =
         mount_socket(reg.org.id, reg.user.id)
-        |> event("skip_org")
-        |> event("skip_plan")
+        |> goto(:plan)
+        |> goto(:invite)
         |> event("finish")
 
       html_now = html(socket)

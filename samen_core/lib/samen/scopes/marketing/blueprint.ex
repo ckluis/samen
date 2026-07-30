@@ -14,6 +14,32 @@ defmodule Samen.Scopes.Marketing.Blueprint do
   Scalar `pii_attribute`s carry the `pii_` prefix per the scope-authoring guide §5.
   All other resources carry only opaque IDs and bounded data — no subject PII.
 
+  ## E6 soft-delete adoption (ADR-040 §5.9, T37d)
+
+  `campaign`, `segment`, `subscriber` 🔒, and `template` all carry `archivable: true`
+  — the §5.9 roster row for this scope. `send`, `email_event`, `suppression`, and
+  `consent_event` are explicitly EXCLUDED (all four are (L) append-only ledgers,
+  except `suppression`, whose exclusion is absolute and non-negotiable: "a hidden
+  suppression row is a compliance leak"). No composition cascade is declared for
+  Marketing (§5.4): archiving any of the four adopted resources leaves `send`/
+  `email_event`/`suppression` rows untouched.
+
+  ### The suppression-unaffected duty (§5.9 footnote ‡, binding)
+
+  Archiving a `subscriber` never touches suppression state. Suppression is enforced
+  at TWO independent layers, and archival has zero bearing on either:
+
+    1. **Create-time** — `Send.:create_checked` queries THIS mount's own
+       `Suppression` resource (`<abbrev>_suppression`) directly; it is not archivable
+       and is never touched by a subscriber's archive/restore.
+    2. **Deliver-time (the C2 chokepoint)** — `Samen.Delivery.Chokepoint.suppressed?/2`
+       consults the family-agnostic kernel `dlv_suppression` store
+       (`Samen.Delivery.Suppression`, via `Samen.Delivery.SuppressionCheck`), keyed
+       on `(org_id, subscriber_id)` — a plain Ecto schema with NO relationship to
+       the Ash `Subscriber` resource at all, so an archive/restore on `Subscriber`
+       cannot reach it by construction. Archiving a suppressed subscriber does NOT
+       lift the suppression; restoring one does NOT lift it either (T37d red test).
+
   ## Suppression enforcement
 
   The `define_send` macro emits a `:create_checked` action (the only way to create a
@@ -52,13 +78,19 @@ defmodule Samen.Scopes.Marketing.Blueprint do
         @moduledoc """
         Marketing.Campaign — a marketing campaign (doc scope table `campaign`).
         Org-scoped. No PII.
+
+        ADR-040 §5.9 roster (T37d): `campaign` adopts E6 soft-delete
+        (`archivable true`). No cascade declared for Marketing (§5.4) — archiving a
+        campaign leaves its linked `send` rows live (no PII on this resource, so
+        INV-1 masking is not applicable here).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_campaign")
@@ -106,13 +138,22 @@ defmodule Samen.Scopes.Marketing.Blueprint do
         @moduledoc """
         Marketing.Segment — an audience segment (doc scope table `segment`).
         Filter criteria are stored as a jsonb map. Org-scoped. No PII.
+
+        ADR-040 §5.9 roster (T37d): `segment` adopts E6 soft-delete
+        (`archivable true`). No cascade declared for Marketing (§5.4). No PII on
+        this resource. No other resource in this scope holds a relationship TO a
+        segment (segments are a filter-criteria bag, not a referenced FK target) —
+        the §5.5 relationship/aggregate leak duty therefore does not structurally
+        apply here; its own default-read exclusion is proven directly (c1 round
+        trip, T37d).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_segment")
@@ -168,13 +209,30 @@ defmodule Samen.Scopes.Marketing.Blueprint do
         row (best-effort, never aborts the write). Derive the current state via
         `Samen.Marketing.Consent.state/3` — latest-event-wins, and it survives a subject
         crypto-shred (the immutable ledger row outlives the vaulted email).
+
+        ## E6 soft-delete adoption (ADR-040 §5.9, T37d)
+
+        `subscriber` adopts E6 soft-delete (`archivable true`) — the §5.9 roster's
+        `‡`-footnoted row. INV-1: an archived subscriber keeps its vault token and
+        still masks on every plane exactly like a live row (trash, not erasure).
+        No cascade declared for Marketing (§5.4) — archiving a subscriber leaves its
+        `send`/`email_event`/`suppression` rows live and untouched.
+
+        **The suppression-unaffected duty (binding):** archiving/restoring a
+        subscriber has ZERO effect on suppression state, at either enforcement
+        layer (`Send.:create_checked`'s own-mount `Suppression` read, and the C2
+        `Samen.Delivery.Chokepoint` kernel `dlv_suppression` store) — suppression is
+        a fact about deliverability, archival is a fact about visibility; the two
+        are orthogonal by construction (see `Samen.Scopes.Marketing`'s moduledoc and
+        the T37d red test).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_subscriber")
@@ -258,13 +316,18 @@ defmodule Samen.Scopes.Marketing.Blueprint do
         Marketing.Template — Tier-0 config rows (doc scope table `template`). One row
         per reusable email template per org (subject_line + body_html). Org-scoped;
         admin-gated writes.
+
+        ADR-040 §5.9 roster (T37d): `template` adopts E6 soft-delete
+        (`archivable true`). No cascade declared for Marketing (§5.4) — archiving a
+        template leaves its linked `send` rows live (no PII on this resource).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_template")
@@ -683,6 +746,14 @@ defmodule Samen.Scopes.Marketing.Blueprint do
 
         Org-scoped. No PII (the subscriber_id is an opaque UUID FK — the PII lives in
         the vault on the subscriber row).
+
+        ## NEVER archivable (ADR-040 §5.9, absolute — T37d)
+
+        `suppression` is EXPLICITLY excluded from E6 soft-delete adoption: "a hidden
+        suppression row is a compliance leak." Do NOT add `archivable: true` here —
+        this exclusion is absolute, not a judgment call. Archiving/restoring a
+        `subscriber` must never touch this table either (the T37d suppression-
+        unaffected red test).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),

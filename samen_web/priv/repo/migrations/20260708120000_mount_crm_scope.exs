@@ -12,7 +12,6 @@ defmodule Samen.WebTest.Repo.Migrations.MountCrmScope do
     Samen.WebTest.Crm.Person,
     Samen.WebTest.Crm.Pipeline,
     Samen.WebTest.Crm.Opportunity,
-    Samen.WebTest.Crm.Activity,
     Samen.WebTest.Crm.Attachment
   ]
 
@@ -108,51 +107,9 @@ defmodule Samen.WebTest.Repo.Migrations.MountCrmScope do
       add(:swo_updated_at, :utc_datetime, null: false)
     end
 
-    # --- swa_activity : the CHECK-CALL event stream (re-identified via the Context) ---
-    create table(:swa_activity, primary_key: false) do
-      add(:swa_type, :text, null: false)
-      add(:swa_subject, :text)
-      add(:swa_body, :text)
-      add(:swa_status, :text, default: "pending")
-      add(:swa_due_at, :utc_datetime)
-      add(:swa_completed_at, :utc_datetime)
-      add(:swa_custom, :map, default: fragment("'{}'::jsonb"))
-
-      add(
-        :swa_company_id,
-        references(:swc_company,
-          column: :swc_id,
-          name: "swa_activity_swa_company_id_fkey",
-          type: :uuid,
-          prefix: "public"
-        )
-      )
-
-      add(
-        :swa_person_id,
-        references(:swp_person,
-          column: :swp_id,
-          name: "swa_activity_swa_person_id_fkey",
-          type: :uuid,
-          prefix: "public"
-        )
-      )
-
-      add(
-        :swa_opportunity_id,
-        references(:swo_opportunity,
-          column: :swo_id,
-          name: "swa_activity_swa_opportunity_id_fkey",
-          type: :uuid,
-          prefix: "public"
-        )
-      )
-
-      add(:swa_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
-      add(:swa_org_id, :uuid, null: false)
-      add(:swa_inserted_at, :utc_datetime, null: false)
-      add(:swa_updated_at, :utc_datetime, null: false)
-    end
+    # --- swa_activity : REMOVED (ADR-041 §5, ruling M5) — the CRM Activity was migrated
+    # into the canonical Work-scope Task (see the `migrate_activity_to_task` contract
+    # migration) and its resource removed, so this mount no longer creates the table. ---
 
     # --- swt_attachment : rate cons, BOLs, PODs (file refs) ---
     create table(:swt_attachment, primary_key: false) do
@@ -207,11 +164,6 @@ defmodule Samen.WebTest.Repo.Migrations.MountCrmScope do
     drop(constraint(:swt_attachment, "swt_attachment_swt_person_id_fkey"))
     drop(constraint(:swt_attachment, "swt_attachment_swt_company_id_fkey"))
     drop(table(:swt_attachment))
-
-    drop(constraint(:swa_activity, "swa_activity_swa_opportunity_id_fkey"))
-    drop(constraint(:swa_activity, "swa_activity_swa_person_id_fkey"))
-    drop(constraint(:swa_activity, "swa_activity_swa_company_id_fkey"))
-    drop(table(:swa_activity))
 
     drop(constraint(:swo_opportunity, "swo_opportunity_swo_pipeline_id_fkey"))
     drop(constraint(:swo_opportunity, "swo_opportunity_swo_company_id_fkey"))

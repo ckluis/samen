@@ -44,6 +44,19 @@ defmodule Samen.Scopes.Billing.Blueprint do
   one row per plan/price per org. Tenants set up their billing catalog without forking
   the product. Admin-gated writes.
 
+  ## Soft-delete adoption (ADR-040 §5.9, T37a)
+
+  `Plan` and `Price` are the billing scope's `archivable` roster row — `archivable: true`
+  (T36's `use Samen.Resource, archivable: true` convention, backed by ash_archival) gives
+  both `:archive`/`:restore`/`:archived` + a default-read filter that hides archived rows,
+  including through relationship loads and aggregates from `Subscription`/`Entitlement`
+  (§5.5's standing leak-red-test duty; proven in `billing_scope_archival_leak_red_path_test.exs`).
+  `customer`/`subscription`/`invoice`/`payment`/`usage`/`entitlement`/`subscription_event`
+  are excluded per §5.9 (provider mirrors, derived state, or append-only ledgers) and stay
+  hard-delete-only. No cascades declared (§5.4) — archiving `plan` leaves its `price`/
+  `subscription`/`entitlement` rows live. Neither resource carries a vault-routed field, so
+  INV-1 masking-on-archive is not applicable to this scope's adoption.
+
   ## Storage-name discipline
 
   Every column is `<abbrev>_<name>` (self-qualifying storage, injected by the Samen
@@ -274,13 +287,19 @@ defmodule Samen.Scopes.Billing.Blueprint do
         the product. Admin-gated writes. Org-scoped.
 
         Maps to the billing provider's Plan/Product. `provider_plan_ref` is an opaque vendor reference.
+
+        ADR-040 §5.9 roster: `plan` adopts E6 soft-delete (`archivable true`). No
+        cascades declared for billing (§5.4) — Plan archives independently of its
+        Price/Subscription/Entitlement consumers, which stay live (no PII on this
+        resource, so INV-1 masking is not applicable here).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_plan")
@@ -336,13 +355,18 @@ defmodule Samen.Scopes.Billing.Blueprint do
         Admin-gated writes. Org-scoped.
 
         Maps to the billing provider's Price. `provider_price_ref` is an opaque vendor reference.
+
+        ADR-040 §5.9 roster: `price` adopts E6 soft-delete (`archivable true`). No
+        cascades declared for billing (§5.4) — Price archives independently of its
+        parent Plan (no PII on this resource, so INV-1 masking is not applicable here).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_price")
@@ -775,7 +799,18 @@ defmodule Samen.Scopes.Billing.Blueprint do
             ]
           )
 
-          attribute(:occurred_at, :utc_datetime, public?: true, allow_nil?: false)
+          # MICROSECOND precision (T121): the movement ledger is a REVENUE-reconciliation
+          # ledger whose read guarantees a total, chronological order. Second-precision
+          # `:utc_datetime` collapses every movement written inside the same wall-clock
+          # second to ONE tied sort key (rapid lifecycle transitions — new → upgrade →
+          # downgrade → cancel → reactivate — all land in the same second), leaving the
+          # `sort(inserted_at, occurred_at)` read with NO discriminating key and Postgres
+          # free to return an ARBITRARY permutation of the tied group. `id` is a random
+          # UUIDv4 (not time-ordered), so it cannot recover chronology. Microsecond
+          # `occurred_at` gives each append a distinct business-time instant, so the
+          # ledger read is a strict total order that respects real chronology. (Mirrors
+          # the T104 session-eviction fix: widen the ordering timestamp to usec.)
+          attribute(:occurred_at, :utc_datetime_usec, public?: true, allow_nil?: false)
         end
 
         actions do

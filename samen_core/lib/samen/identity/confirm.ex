@@ -90,12 +90,14 @@ defmodule Samen.Identity.Confirm do
   end
 
   defp mint_and_dispatch(mods, credential, bidx) do
-    with {:ok, _auth_token, _raw_token} <-
+    with {:ok, _auth_token, raw_token} <-
            TokenMint.mint(mods.auth_token, credential.id, :email_verify, bidx, @email_verify_ttl_seconds) do
-      # The raw token lives only in the email body (never logged, never
-      # returned from this function — `resend/2`'s public contract is the
-      # uniform `{:ok, :sent}`).
-      case AuthMailer.dispatch(:email_verify, credential_id: credential.id) do
+      # The raw token is threaded into `AuthMailer.dispatch/2`, which renders it
+      # into the email body's `/verify/:token` link (F1/T111) — it is never
+      # logged nor returned from this function (`resend/2`'s public contract is
+      # the uniform `{:ok, :sent}`; the token exists only on this stack and in
+      # the transient, non-persisted delivery content AuthMailer builds).
+      case AuthMailer.dispatch(:email_verify, credential_id: credential.id, raw_token: raw_token) do
         {:ok, _receipt} -> {:ok, :sent}
         {:error, reason} -> {:error, reason}
       end

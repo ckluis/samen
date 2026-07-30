@@ -329,7 +329,6 @@ defmodule Samen.WebTest.Operator.Seeds do
             status: :open,
             priority: priority,
             sla_id: sla.id,
-            tags: ["platform"],
             custom: %{
               "requester_org_id" => tenant_org_id,
               "requester_user_id" => admin.id

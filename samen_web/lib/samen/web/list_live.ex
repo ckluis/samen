@@ -10,6 +10,14 @@ defmodule Samen.Web.ListLive do
         sortable: [:display_name, :job_title],
         filter_fields: [:display_name]
 
+  `restore` (ADR-040 §5.8, T37h) additionally accepts `:write_scope` — a 1-arity
+  `(scope) -> scope` elevator, default identity. Most resources' writes are gated the
+  SAME as their reads (CRM `Person`: `RoleAtLeast :member` — the plain list `scope`
+  already qualifies); a resource with a STRICTER write gate (Billing `Plan`:
+  `RoleAtLeast :admin`) passes its own elevator (e.g.
+  `write_scope: &Samen.Web.Billing.Reads.elevate_to_admin/1`) — the SAME elevation its
+  other hand-authored write events (`new_plan`/`toggle_plan`/`delete`) already apply.
+
       def load(socket, org_id) do
         socket |> assign(org_id: org_id) |> init_list(mount, scope)
       end
@@ -42,6 +50,21 @@ defmodule Samen.Web.ListLive do
     * `"select_all"` — toggles the CURRENT PAGE's rows in the selection set.
     * `"bulk"`       — `%{"action" => a}`; calls the view's `handle_bulk/3`
       (overridable; default no-op), then clears the selection and re-reads.
+    * `"toggle_archived"` — no params; flips `%ListState{}.show_archived` (resets
+      to the first page) and re-reads (ADR-040 §5.8, T37h). The caller's `reads/3`
+      decides what the flag MEANS — conventionally a filter SWITCH (live rows when
+      `false`, the `:archived` trash-only read when `true`; `Samen.Archival`'s
+      `:archived` read is archived rows ONLY, not a union with the live set) — the
+      mixin only carries the state, never issues an archived-aware query itself, so
+      a `reads/3` that ignores the flag is unaffected (byte-identical to pre-T37h
+      behavior).
+    * `"restore"`    — `%{"id" => id}`; FAIL-HONEST: finds `id` among the CURRENT
+      page's items and, only when `config.resource` is `Samen.Info.archivable?/1`,
+      calls `Samen.Archival.restore/2` on it (scoped, never `authorize?: false`),
+      then re-reads on success. A non-archivable resource, or an id not on the
+      current page, is a no-op — never a crash (T37h; no per-vertical hand-wiring:
+      any view riding this mixin inherits `restore` "for free" the moment its
+      resource is archivable and its `reads/3` surfaces archived rows).
 
   ## Masking posture
 
@@ -55,7 +78,7 @@ defmodule Samen.Web.ListLive do
   alias Samen.Web.Reads
 
   @hook_id :samen_list_live
-  @events ~w(sort filter paginate select select_all bulk)
+  @events ~w(sort filter paginate select select_all bulk toggle_archived restore)
 
   defmacro __using__(opts) do
     quote do
@@ -91,7 +114,10 @@ defmodule Samen.Web.ListLive do
       sortable: sortable,
       filter_fields: Keyword.get(opts, :filter_fields, []),
       default_sort: Keyword.get(opts, :default_sort, {hd(sortable), :asc}),
-      page_size: Reads.bounded_page_size(Keyword.get(opts, :page_size, Reads.default_page_size()))
+      page_size: Reads.bounded_page_size(Keyword.get(opts, :page_size, Reads.default_page_size())),
+      # ADR-040 §5.8 (T37h) — `restore`'s write-scope elevator (1-arity `scope -> scope`,
+      # default identity). See moduledoc.
+      write_scope: Keyword.get(opts, :write_scope, & &1)
     }
   end
 
@@ -210,6 +236,43 @@ defmodule Samen.Web.ListLive do
     {:noreply, reread(socket, state)}
   end
 
+  # ADR-040 §5.8 (T37h) — the archived-filter toggle. Resets to the first page (the
+  # underlying result SET changes shape when archived rows join/leave it, so a stale
+  # cursor from the other filter state would be meaningless).
+  def handle_list_event("toggle_archived", _params, socket) do
+    %{state: state} = list_assigns(socket)
+
+    state = %{state | show_archived: not state.show_archived, cursor: nil, cursor_stack: []}
+    {:noreply, reread(socket, state)}
+  end
+
+  # ADR-040 §5.8 (T37h) — FAIL-HONEST restore: only a resource that is actually
+  # `Samen.Info.archivable?/1` is touched (a non-archivable resource's `restore` is a
+  # structural no-op, never a crash — the same "the write only fires when it can
+  # succeed" posture `handle_list_event/3`'s other clauses already carry). The record
+  # must be on the CURRENT page (never an unbounded lookup) — the same "only what
+  # `reads/3` already surfaced" discipline `select`/`select_all` use.
+  #
+  # `config.resource` is a HOST-AGNOSTIC name (e.g. `Plan`, unaliased — samen_web is
+  # mounted by demo/driftwood/pawchart, each with its OWN concrete `<Namespace>.Plan`
+  # module; the framework cannot know which at compile time). Every OTHER consumer
+  # resolves it the same way: `Samen.Web.Mount.resource(mount, config.resource)`
+  # (`Module.concat/2` — see `Reads.plans_page/3`'s `Mount.resource(mount, Plan)`) —
+  # `Samen.Info.archivable?/1` must run on THAT resolved module, never the bare name.
+  def handle_list_event("restore", %{"id" => id}, socket) do
+    %{mount: mount, scope: scope, config: config, state: state} = list_assigns(socket)
+    resource = config.resource && Samen.Web.Mount.resource(mount, config.resource)
+
+    if resource && Samen.Info.archivable?(resource) do
+      case Enum.find(socket.assigns.page.items, &(to_string(&1.id) == id)) do
+        nil -> {:noreply, socket}
+        record -> restore_and_reread(record, config.write_scope.(scope), state, socket)
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
   def handle_list_event(_event, _params, socket), do: {:noreply, socket}
 
   @doc "The list events this mixin owns (the hook halts exactly these)."
@@ -254,6 +317,18 @@ defmodule Samen.Web.ListLive do
   end
 
   defp emit_search_used(_socket, _filter), do: :ok
+
+  # Scoped restore (never `authorize?: false` — the actor's own write policy governs,
+  # same as every other mixin-triggered write). On success, re-read (the row leaves
+  # the archived set / rejoins the live set, so the current page must reflect that).
+  # On failure (e.g. `{:error, :restore_conflict}` — a live row now claims the unique
+  # slot, §5.3), the socket is left as-is; the row still shows archived, honest.
+  defp restore_and_reread(record, scope, state, socket) do
+    case Samen.Archival.restore(record, scope: scope) do
+      {:ok, _restored} -> {:noreply, reread(socket, state)}
+      {:error, _reason} -> {:noreply, socket}
+    end
+  end
 
   defp assign_state(socket, state), do: Phoenix.Component.assign(socket, :list_state, state)
 

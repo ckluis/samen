@@ -2,7 +2,7 @@ defmodule Driftwood.Crm do
   @moduledoc """
   Driftwood's CRM domain — mounted from the samen_core CRM scope blueprint
   (ADR-004; T3.2), exactly as `demo/` mounts it. One `use Samen.Scopes.Crm`
-  expands into six host-owned resources in `Driftwood.Crm.*`:
+  expands into five host-owned resources in `Driftwood.Crm.*`:
 
     * `Driftwood.Crm.Company`     — the freight COMPANY row. Under `Driftwood.Context`
       it is re-identified as **Carrier** AND **Shipper** (two `alias_resource`
@@ -13,9 +13,13 @@ defmodule Driftwood.Crm do
     * `Driftwood.Crm.Pipeline`    — the Load-lifecycle stages (Tier-0 config rows).
     * `Driftwood.Crm.Opportunity` — re-identified as **Load** (`alias_resource`,
       DECISION L) — the freight load/shipment being brokered.
-    * `Driftwood.Crm.Activity`    — re-identified as **CheckCall** (DECISION A) — the
-      routine check-call / load-status event stream.
     * `Driftwood.Crm.Attachment`  — rate confirmations, BOLs, PODs (file refs).
+
+  The former `Driftwood.Crm.Activity` was destructively migrated into the canonical
+  Work-scope `Task` and removed (ADR-041 §5, ruling M5). Its DECISION-A **CheckCall**
+  re-identification now aliases `Driftwood.Work.Task` (the migration destination) —
+  the routine check-call / load-status event stream is a Work Task anchored to the
+  load/carrier via the generic `(subject_key, subject_id)` object-ref.
 
   ## Abbrev allocation (DECISION AB + the built-substrate reality)
 
@@ -41,7 +45,6 @@ defmodule Driftwood.Crm do
       person: "fpr",
       pipeline: "fpp",
       opportunity: "fop",
-      activity: "fac",
       attachment: "fat"
     }
 end

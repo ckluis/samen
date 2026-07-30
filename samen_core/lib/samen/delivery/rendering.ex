@@ -128,12 +128,104 @@ defmodule Samen.Delivery.Rendering do
         "You are receiving it because of activity on your account.\n"
 
     html_body =
-      "<p>Hello #{name},</p>" <>
-        "<p>This message was sent to #{to}.</p>" <>
+      "<p>Hello #{html_safe(name)},</p>" <>
+        "<p>This message was sent to #{html_safe(to)}.</p>" <>
         "<p>You are receiving it because of activity on your account.</p>"
 
     {subject, text_body, html_body}
   end
+
+  @doc """
+  HTML-escape a recipient/tenant-derived value for safe interpolation into an
+  email **HTML body**, via the framework's sanctioned `Phoenix.HTML.Safe`
+  mechanism — the SAME protocol `%Samen.Masked{}` already implements
+  (`Samen.Masked`'s `defimpl Phoenix.HTML.Safe`). Consequences, both load-bearing:
+
+    * a **plaintext** value on the send plane has every HTML-meaningful character
+      (`<`, `>`, `&`, `"`, `'`) entity-encoded, so a `display_name`/`org_name`
+      like `O'Brien <script>…</script>` becomes inert text, never executable
+      markup (F3 stored-XSS fix, T111);
+    * a **`%Samen.Masked{}`** value on an operator-preview plane routes through
+      the Masked impl and renders `••••` (never a `vt_` token, never
+      double-escaped) — the masking discipline is preserved unchanged.
+
+  Escaping belongs on HTML bodies ONLY. A **text body** is not HTML — escaping
+  `<` there would corrupt a legitimate plain-text name — so text bodies keep
+  plain `String.Chars` interpolation (which still renders `%Masked{}` as `••••`).
+  """
+  @spec html_safe(term()) :: String.t()
+  def html_safe(value) do
+    value
+    |> Phoenix.HTML.Safe.to_iodata()
+    |> IO.iodata_to_binary()
+  end
+
+  # The T110 route segment each auth context links to: `GET /verify/:token`,
+  # `GET /reset/:token`, `GET /invite/:token` (the token legitimately rides IN
+  # the URL path — that is how it arrives; a credential/password never does).
+  @auth_link_segments %{email_verify: "verify", password_reset: "reset", invite: "invite"}
+
+  @doc """
+  Build the recipient-facing CONTENT (subject + text body + html body) for an
+  auth-lifecycle token email (`:email_verify` / `:password_reset` / `:invite`),
+  carrying the actionable link to the correct T110 route (`/verify/:token`,
+  `/reset/:token`, `/invite/:token`) (F1, T111).
+
+  The raw token rides IN the URL path (that is how it arrives at the browser
+  route — the objection is a credential/password appearing in a URL, never a
+  bearer token that IS the URL's subject). The link is escaped through
+  `html_safe/1` for the HTML body's `href`; the text body carries the bare URL.
+  `:base_url` (opt, or `config :samen_core, Samen.Delivery.AuthMailer, base_url:`)
+  prefixes the link; absent, the link is a site-relative path (`/verify/<token>`).
+
+  Returns `{subject, text_body, html_body}` — the SAME shape every
+  `Samen.Delivery.Rendering` template function returns, so it threads through the
+  send path identically.
+  """
+  @spec auth_content(atom(), String.t(), keyword()) :: {String.t(), String.t(), String.t()}
+  def auth_content(context, raw_token, opts \\ [])
+      when is_map_key(@auth_link_segments, context) and is_binary(raw_token) do
+    base_url = opts |> Keyword.get(:base_url) |> normalize_base_url()
+    link = "#{base_url}/#{Map.fetch!(@auth_link_segments, context)}/#{raw_token}"
+    {subject, intro, cta} = auth_copy(context)
+
+    text_body =
+      intro <>
+        "\n\n" <>
+        cta <>
+        ":\n" <>
+        link <>
+        "\n\n" <>
+        "If you did not request this, you can safely ignore this email.\n"
+
+    html_body =
+      "<p>#{intro}</p>" <>
+        "<p><a href=\"#{html_safe(link)}\">#{cta}</a></p>" <>
+        "<p>If the button above does not work, copy and paste this link into your " <>
+        "browser:<br>#{html_safe(link)}</p>" <>
+        "<p>If you did not request this, you can safely ignore this email.</p>"
+
+    {subject, text_body, html_body}
+  end
+
+  defp auth_copy(:email_verify),
+    do:
+      {"Verify your email address",
+       "Confirm your email address to finish setting up your account.", "Verify email address"}
+
+  defp auth_copy(:password_reset),
+    do:
+      {"Reset your password", "We received a request to reset your password.",
+       "Reset your password"}
+
+  defp auth_copy(:invite),
+    do:
+      {"You've been invited to join a team",
+       "You've been invited to join a team. Accept the invitation to get started.",
+       "Accept invitation"}
+
+  defp normalize_base_url(nil), do: ""
+  defp normalize_base_url(url) when is_binary(url), do: String.trim_trailing(url, "/")
 
   # Only the resolver-relevant opts flow to PiiResolution.resolve/4.
   defp resolve_opts(opts), do: Keyword.take(opts, [:repo, :vault, :grant])

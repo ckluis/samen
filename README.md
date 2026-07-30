@@ -53,9 +53,14 @@ grant that a second party approved and the tenant can audit.
 | **Stripe billing as a fail-honest, vendor-free adapter** — hosted checkout, subscription lifecycle sync (fetch-on-event, idempotent, out-of-order-safe), invoice + tax mirroring, hosted-only payment methods (no PAN column can even compile), dunning, metered usage, a signature-fail-closed webhook ingress with DLQ, and a billing settings page with an honest `:not_configured` empty state. The `samen_core` kernel names **zero** Stripe strings; the adapter lives in a sibling `samen_stripe/` package | `samen_core/test/billing_*_test.exs`; `samen_stripe/test/*` (standalone); `scripts/sabotages/{25-b9,29-b3}-*.patch`; **kernel stays vendor-free** — with the four adapter packages deleted, `samen_core` + `samen_web` still pass |
 | **ESP email delivery behind one behaviour, three vendors** — a shared, non-vacuous conformance harness satisfied by **Postmark, SES, and Resend** (Basic-Auth / SNS-RSA / Svix-HMAC); a single send chokepoint; PII-safe rendering that resolves through the vault plane with a fail-closed, non-skippable no-leak gate; deliverability (bounce/complaint → suppression) and masked notification digests | `samen_core/lib/samen/delivery/provider_conformance_case.ex`; `samen_core/test/delivery_*` + `test/delivery/*`; `samen_{postmark,ses,resend}/test/conformance_test.exs`; `scripts/sabotages/30-c3-*.patch` |
 | **Auth-surface rate-limiting + bounded `login_failed`** — sign-in / 2FA / registration / reset limited via one shared seam; keys are HMAC-bidx / credential / IP, **never plaintext email**; the brute-force audit signal is a bounded edge row, not O(N) | `samen_web/test/samen/web/auth/rate_limit_test.exs` |
+| **Automation engine** — event/schedule-triggered workflows with conditions keyed **only on non-PII attributes**, an 8-action library (email-via-C1, webhook, reminder, escalate, …), reminder/escalation primitives, and a token-blind operator health view + kill-switch. Authorable end-to-end in a tenant-plane builder LiveView | `samen_core/test/automation/*`; `samen_web/test/samen/web/automation/*` (ADR-039) |
+| **Lifecycle substrate** — a generalized approve/reject engine (requester≠approver DB CHECK; reveal grants are a client), blueprint-wide **soft-delete/archival** on `ash_archival` with composition-cascade + microsecond `archived_at`, and **audit-on-write** where impersonation-context writes are the mandatory first client (an impersonated write with no audit row is impossible) plus a `versioned` opt-in on `ash_paper_trail` with token-only vaulted diffs | `samen_core/test/{approvals,lifecycle,audit}/*`; sabotages 32–34 (ADR-040) |
+| **Canonical work objects** — a canonical Work Task/Project/Subtask (the CRM `Activity` table was **destructively migrated** into it and removed), Calendar (recurrence + masked ICS), Docs, polymorphic Tags, Location, Vendor, and Sales Lead — all archival + vault-aware from birth | `samen_core/lib/samen/scopes/work/*`; `samen_core/test/scopes/*` (ADR-041) |
+| **LiveView client with progressive enhancement** — a real LiveSocket bundle in the shared root layout (inherited by every host + gen.app) makes `phx-click` writes browser-real, proven in headless Chromium; the auth arc still completes **JS-off** (Class-A floor), and the socket carries no `vt_`/plaintext to a no-grant operator | `T113` headless-browser regression; sabotage 32 (ADR-042) |
 
 Full mapping: [docs/claim-evidence.md](docs/claim-evidence.md) (Phase-1 identity spine + rich
-types are section J; Phase-2 billing + ESP + rate-limiting are **section K**). **Honest scope:**
+types are section J; Phase-2 billing + ESP + rate-limiting are section K; Phase-3 automation +
+lifecycle substrate + work objects + the LiveView client are **section L**). **Honest scope:**
 the identity spine, its auth-surface rate-limiting, and the Stripe/ESP adapters are complete and
 verified — **but everything runs on the keyless lane.** Billing/ESP dispatch is proven against
 hermetic fakes + injected-transport cassettes; **no host wires a live provider** (every generated
@@ -92,7 +97,7 @@ Two apps are the substrate; three are proof; one command spins up new ones.
   call at roughly zero authored LOC.
 
 The full design story lives in [index.html](index.html) (open it in
-a browser) and in the 33 ADRs under [docs/adr/](docs/adr/) (indexed in
+a browser) and in the 42 ADRs under [docs/adr/](docs/adr/) (indexed in
 [docs/adr/README.md](docs/adr/README.md)).
 
 ## The verification story

@@ -249,21 +249,93 @@ defmodule Samen.Web.Auth.ConfirmTest do
   # ===========================================================================
 
   describe "Samen.Web.Auth.ConfirmLive" do
-    test "a VALID token renders the verified confirmation" do
+    test "a VALID token consumes ONCE on the dead render, then redirects to ?verified=1" do
       result = register!()
       mount = build_mount(:auth)
-      html = mount_smoke(ConfirmLive, mount, %{"token" => result.raw_verify_token})
+      session = mount_session(mount)
+
+      {:ok, dead} = ConfirmLive.mount(%{"token" => result.raw_verify_token}, session, %Phoenix.LiveView.Socket{})
+
+      # The mutating consume ran here (dead render) and the credential IS verified...
+      refute is_nil(reread_credential(result.credential.id).verified_at)
+      # ...and the dead render REDIRECTS to the non-secret success flag rather than
+      # rendering — so no socket connects to /verify/:token and no re-consume fires.
+      assert redirect_to(dead) =~ "verified=1"
+      refute redirect_to(dead) =~ "error"
+    end
+
+    test "the ?verified=1 flag render shows the verified confirmation — no consume" do
+      mount = build_mount(:auth)
+      html = mount_smoke(ConfirmLive, mount, %{"verified" => "1"})
 
       assert html =~ "Email verified"
       assert html =~ "confirm-ok"
     end
 
-    test "an INVALID token renders the generic error, without an account-existence oracle" do
+    test "an INVALID token redirects to ?error=invalid_token; the flag render is the generic no-oracle error" do
       mount = build_mount(:auth)
-      html = mount_smoke(ConfirmLive, mount, %{"token" => "totally-bogus-token"})
+      session = mount_session(mount)
 
+      {:ok, dead} = ConfirmLive.mount(%{"token" => "totally-bogus-token"}, session, %Phoenix.LiveView.Socket{})
+      assert redirect_to(dead) =~ "error=invalid_token"
+
+      html = mount_smoke(ConfirmLive, mount, %{"error" => "invalid_token"})
       assert html =~ "confirm-error-title"
       assert html =~ "invalid or has expired"
     end
+
+    # =========================================================================
+    # T126 — the connected-mount double-consume REGRESSION (P0, T113-caused).
+    # =========================================================================
+    test "REGRESSION (T126): the dead+connected double-mount verifies EXACTLY ONCE — the connected re-mount reads the flag, never re-consuming into a false failure" do
+      result = register!()
+      mount = build_mount(:auth)
+      session = mount_session(mount)
+      token_params = %{"token" => result.raw_verify_token}
+
+      # (1) DEAD render mount at /verify/:token — the single-use consume runs here
+      # and REDIRECTS to ?verified=1 (the guard). Pre-T126 this rendered inline and
+      # the connected mount below re-consumed the spent token into a false failure.
+      {:ok, dead} = ConfirmLive.mount(token_params, session, %Phoenix.LiveView.Socket{})
+      assert redirect_to(dead) =~ "verified=1"
+
+      # Exactly ONE consume happened: the credential is verified AND the token is
+      # now spent (a fresh consume of the SAME raw token fails — single-use held).
+      assert reread_credential(result.credential.id).verified_at
+      assert {:error, :invalid_token} = Confirm.consume(result.raw_verify_token, confirm_mods())
+
+      # (2) The CONNECTED mount lands on the redirect target (the flag), NOT the
+      # token — it renders SUCCESS and runs NO consume. Under the pre-T126 code the
+      # connected mount re-ran the token clause → second consume → :invalid_token →
+      # the false "Couldn't verify this link" the dogfood re-walk reproduced.
+      connected_html = mount_smoke(ConfirmLive, mount, %{"verified" => "1"})
+      assert connected_html =~ "Email verified"
+      refute connected_html =~ "Couldn't verify"
+    end
+
+    test "SECURITY (T126): a genuinely REUSED token (a second, separate click) still FAILS — single-use is not weakened into reusable" do
+      result = register!()
+      mount = build_mount(:auth)
+      session = mount_session(mount)
+      token_params = %{"token" => result.raw_verify_token}
+
+      # First click → verified.
+      {:ok, first} = ConfirmLive.mount(token_params, session, %Phoenix.LiveView.Socket{})
+      assert redirect_to(first) =~ "verified=1"
+
+      # A genuine SECOND, separate click of the same link is a distinct request —
+      # its consume legitimately fails and the user is sent to the error flag, NOT
+      # a second false success. (The dedupe is ONLY the same-request dead+connected
+      # double-mount, never across separate requests.)
+      {:ok, second} = ConfirmLive.mount(token_params, session, %Phoenix.LiveView.Socket{})
+      assert redirect_to(second) =~ "error=invalid_token"
+      refute redirect_to(second) =~ "verified=1"
+    end
   end
+
+  # A `redirect/2`'d socket carries its target in `socket.redirected`
+  # (`{:redirect, %{to: ...}}` for the disconnected/302 render).
+  defp redirect_to(%Phoenix.LiveView.Socket{redirected: {:redirect, %{to: to}}}), do: to
+  defp redirect_to(%Phoenix.LiveView.Socket{redirected: {:live, _, %{to: to}}}), do: to
+  defp redirect_to(%Phoenix.LiveView.Socket{redirected: other}), do: flunk("expected a redirect, got: #{inspect(other)}")
 end

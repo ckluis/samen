@@ -1,0 +1,33 @@
+# SABOTAGE: T42 - the RunWorker kill re-check (ADR-039 section 8.4, the
+# "already-queued" half of the two-switch kill-switch double-check).
+# DispatchWorker's own filter (status active AND disabled_by_operator_at IS
+# NULL) refuses to ENQUEUE a run for a killed/paused workflow, but ADR-039
+# section 8.4 requires a SECOND check at RunWorker start - "killed-while-queued
+# work... finalize skipped/:killed, never silently dropped" - because a
+# workflow can be killed AFTER a run for it is already queued (the race the
+# dispatch-time filter alone cannot close). This patch neutralizes
+# Samen.Automation.RunWorker.kill_switch/1 to always :ok, so an already-queued
+# run of a killed workflow now FIRES instead of finalizing :skipped/:killed.
+# The named red test - which enqueues a RunWorker job DIRECTLY for an
+# operator-killed workflow (bypassing DispatchWorker, exactly the T39 F5
+# methodology) and asserts the run finalizes :skipped/:killed - MUST fail.
+#
+# APP: samen_core
+# TEST_FILES: test/automation/observability_test.exs
+# MUST_FAIL: an already-queued run of a killed workflow finalizes :skipped/:killed
+diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
+--- a/samen_core/lib/samen/automation/run_worker.ex
++++ b/samen_core/lib/samen/automation/run_worker.ex
+@@ -107,9 +107,9 @@ defmodule Samen.Automation.RunWorker do
+     e -> {:error, e}
+   end
+
+-  # ADR-039 §8.4 double-check: active AND not operator-killed.
+-  defp kill_switch(%{status: :active, disabled_by_operator_at: nil}), do: :ok
+-  defp kill_switch(_wf), do: {:skip, :killed}
++  # SABOTAGE (T42): the already-queued-half re-check is bypassed - every run
++  # now proceeds regardless of the operator kill-switch (ADR-039 section 8.4).
++  defp kill_switch(_wf), do: :ok
+
+   defp owner_actor(%{owner_id: nil}), do: {:skip, :owner_unavailable}
+

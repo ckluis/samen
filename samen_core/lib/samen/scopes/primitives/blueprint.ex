@@ -65,6 +65,16 @@ defmodule Samen.Scopes.Primitives.Blueprint do
   Every column is `<abbrev>_<name>`. Scalar PII fields carry the `pii_` prefix
   (e.g. `pii_pnt_rendered_body`, `pii_pwh_signing_secret`). The public catalog sees
   only logical names.
+
+  ## Soft-delete adoption (ADR-040 §5.9, T37e)
+
+  `file`, `webhook`, `feature_flag` are `archivable: true`. `approval` (a separate
+  blueprint, `Samen.Approvals.Blueprint`) is explicitly NOT archivable per the
+  roster (its own decision-record state machine, T34) — untouched by this task.
+  `notification` (L — ledger; retention owns feed pruning), `notification_preference`
+  (settings row), and `search_index` (M — derived; follows its source) stay excluded.
+  No declared cascade for this scope (§5.4 default no-cascade — none of the three
+  adopted resources is a composition parent/child of another primitives resource).
   """
 
   # ---------------------------------------------------------------------------
@@ -313,13 +323,41 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         doc's sense — not flagged 🔒). If a host's filenames ARE PII (e.g. a medical
         scan named after the patient), the host must vault them via a bounded-context
         override. The base resource does not vault filename.
+
+        ## Soft-delete (ADR-040 §5.9, T37e + T37h)
+
+        Archivable. No collision with the pre-existing content-status `status` enum
+        (which merely carries an `:archived` VALUE for a different, quarantine/
+        promotion-flow concept) — File declares no hand-authored `:archive`/
+        `:restore`/`:archived` action of its own, so the E6 substrate's actions
+        attach cleanly.
+
+        `Samen.Files.ChokepointGuard` is registered `on: [:create, :update,
+        :destroy]` (T37h widened it from `[:create, :update]` — ADR-040 §5.9
+        footnote §, the guard-sanction duty T36/T37e left open). It only refuses a
+        changeset that SETS/repoints `storage_key` (`sets_storage_key?/1`): the
+        substrate's `:archive` (`destroy`-typed) and `:destroy_permanently`
+        (`destroy`-typed) actions, and its `:restore` action (`update`-typed,
+        `Samen.Archival.Restore` — `set_attribute(archived_at, nil)` only), never
+        touch `storage_key`, so all three pass the guard's structural refusal
+        UNCONDITIONALLY (proven, not assumed — `test/files_upload_test.exs`'s
+        "archive/restore sanction" describe block). Widening the registration to
+        `:destroy` closes the theoretical destroy-shaped twin of the update-shaped
+        hole this guard's own moduledoc describes: previously a `:destroy`-typed
+        action never even reached the guard (action-type filtered out), so archive/
+        restore/destroy_permanently were "safe" only because no `:destroy`-typed
+        action on this resource accepts `storage_key` as input — now they are
+        SANCTIONED (structurally evaluated and ALLOWED), the same governed-by-
+        construction posture create/update already had, not a convention nobody
+        checks.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_file")
@@ -376,13 +414,21 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         # could REPOINT — a `storage_key`-bearing row that skips size/type enforcement + the
         # `file.uploaded` audit — an ungoverned file row. A create-only guard left an
         # update-shaped hole (create a governed row, then `Ash.update` its `storage_key` to
-        # an arbitrary key). Registering on BOTH `:create` and `:update` makes the "no
-        # ungoverned file row" guarantee STRUCTURAL on every write: a create/update that
-        # sets/repoints a `storage_key` is REFUSED unless it came through
-        # `Samen.Files.upload/3` (which stamps the private chokepoint marker). Sabotaging
-        # the chokepoint — or narrowing this back to `on: [:create]` — FAILS RP-FI-1.
+        # an arbitrary key). Registering on `:create`/`:update`/`:destroy` makes the "no
+        # ungoverned file row" guarantee STRUCTURAL on every write REGARDLESS of action
+        # type: a create/update/destroy that sets/repoints a `storage_key` is REFUSED
+        # unless it came through `Samen.Files.upload/3` (which stamps the private
+        # chokepoint marker). `:destroy` (T37h, ADR-040 §5.9 footnote §) is the E6
+        # archive/restore sanction: the soft `:destroy`/`:archive`/`:destroy_permanently`
+        # actions are `destroy`-typed and none of them touch `storage_key`, so this
+        # widening is a pure closed-world tightening — it does not change observable
+        # behavior for archive/restore, only makes their pass-through STRUCTURAL rather
+        # than an accident of action-type filtering. Sabotaging the chokepoint — or
+        # narrowing this back to `on: [:create, :update]` — FAILS RP-FI-1 (create/update)
+        # and the T37h archive-sanction red path (a forged `storage_key` on a `:destroy`-
+        # typed changeset would then slip through unrefused).
         changes do
-          change(Samen.Files.ChokepointGuard, on: [:create, :update])
+          change(Samen.Files.ChokepointGuard, on: [:create, :update, :destroy])
         end
 
         policies do
@@ -516,13 +562,22 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         Outbound events are Oban-backed: at-least-once, capped exponential backoff,
         DLQ, per-event idempotency keys, HMAC body + timestamp signing (anti-replay).
         The `status` tracks delivery posture (`:active`, `:paused`, `:failed`).
+
+        ## Soft-delete (ADR-040 §5.9, T37e)
+
+        Archivable. No declared cascade (§5.4 default no-cascade — a webhook
+        endpoint is a standalone Tier-0 config row). No action-name collision:
+        no hand-authored `:archive`/`:restore`/`:archived` action exists on this
+        resource. Archived rows keep their vaulted `signing_secret` token (trash,
+        not erasure, §5.1) and mask by plane exactly like a live row.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_webhook")
@@ -624,13 +679,22 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         Global flags (org_id nil / system-level) are an operator-plane concern handled
         outside the tenant policy. The base resource is org-scoped for tenant-plane
         use; system-level flags use `authorize?: false` in operator contexts.
+
+        ## Soft-delete (ADR-040 §5.9, T37e)
+
+        Archivable. No declared cascade (§5.4 default no-cascade — a feature flag
+        is a standalone Tier-0 config row). No action-name collision: the custom
+        `:create`/`:update` actions here are named `:create`/`:update` (not
+        `:archive`/`:restore`/`:archived`), so the E6 substrate's reserved names
+        attach without a rename. No PII.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_feature_flag")

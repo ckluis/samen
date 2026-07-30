@@ -1248,4 +1248,101 @@ defmodule Samen.Scopes.Identity.Blueprint do
       end
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # LoginFailure — ADR-038 §6.4 (T109): the DURABLE brute-force failure counter.
+  # Org-less (keyed on a non-PII bidx/credential-id, never an org actor). Default-deny
+  # policies, same posture as Credential/AuthToken/Session/UserIdentity: reachable ONLY
+  # through `Samen.Identity.LoginFailure`'s governed bump!/reset!/count functions and
+  # the retention sweep's `:destroy`, never actor CRUD.
+  # ---------------------------------------------------------------------------
+  defmacro define_login_failure(module, otp_app, domain, repo, abbrev) do
+    quote do
+      defmodule unquote(module) do
+        @moduledoc """
+        Identity.LoginFailure — the DURABLE brute-force failure counter (doc scope
+        table `login_failure`; ADR-038 §6.4). ONE row per `(key_kind, key_value)` —
+        `key_value` is either an `email_bidx` (non-reversible keyed-HMAC, ADR-035
+        §4.1) or a credential id (UUID) — mirroring the two independent axes
+        `Samen.Web.RateLimit`'s bounded `login_failed_audit` counter already bumps
+        (T103): the sign-in password path keys on `email_bidx`; the post-2FA-pending
+        wrong-code path keys on the already-resolved `credential` id. No IP, no PII,
+        no per-attempt rows — a single upserted row per key tracks
+        `failure_count`/`window_started_at`/`last_failed_at`.
+
+        This row is what makes T103's brute-force SIGNAL survive a node restart: the
+        real-time throttle (`Samen.Web.RateLimit`'s Hammer/ETS counter — §6.1's
+        swappable thin backend) still gates the hot path, but every failed attempt
+        ALSO writes through to this durable table
+        (`Samen.Identity.LoginFailure.bump!/4`) and a successful login resets it
+        (`reset!/3`) — so a restart that wipes the ETS table does not erase the
+        accumulated brute-force count, and `Samen.Web.RateLimit`'s sign-in check
+        additionally consults this durable row so a still-locked-out attacker stays
+        locked out across a restart (see `Samen.Identity.LoginFailure.over_limit?/5`
+        and `Samen.Web.Auth.SessionController`'s wiring).
+
+        Default-deny policies (the Credential/AuthToken/Session/UserIdentity
+        precedent): no actor-reachable read/write for ANY actor. Reachable only
+        through `Samen.Identity.LoginFailure`'s governed functions (`authorize?:
+        false` internal calls, like every other engine in this spine) and the
+        `Samen.Retention` sweep's `:destroy` (30-day idle prune, keyed on
+        `last_failed_at`).
+
+        See `Samen.Identity.LoginFailure`'s moduledoc for why the WRITE path (bump!/
+        reset!) is raw parametrized SQL rather than Ash changesets — a deliberate,
+        documented mechanism choice (the `Samen.Webhook.Event` precedent, ADR-038
+        §5.3), not a chokepoint bypass: this resource carries no PII, so none of the
+        vault/PII write guards apply regardless.
+        """
+        use Samen.Resource,
+          otp_app: unquote(otp_app),
+          domain: unquote(domain),
+          data_layer: AshPostgres.DataLayer,
+          authorizers: [Ash.Policy.Authorizer],
+          abbrev: unquote(abbrev)
+
+        postgres do
+          table("#{unquote(abbrev)}_login_failure")
+          repo(unquote(repo))
+        end
+
+        attributes do
+          # Org-less anchor, same reasoning as Credential/AuthToken/Session above.
+          attribute(:org_id, :uuid, public?: false, allow_nil?: true)
+
+          # Bounded key-kind enum — the two independent axes T103 already bumps
+          # (ADR-038 §6.2/§6.4). Never a plaintext identifier either way.
+          attribute(:key_kind, :atom,
+            public?: false,
+            allow_nil?: false,
+            constraints: [one_of: [:email_bidx, :credential]]
+          )
+
+          # The non-reversible bidx OR a credential id (as a string) — never PII.
+          attribute(:key_value, :string, public?: false, allow_nil?: false)
+
+          attribute(:failure_count, :integer, public?: false, allow_nil?: false, default: 1)
+
+          attribute(:window_started_at, :utc_datetime_usec, public?: false, allow_nil?: false)
+
+          attribute(:last_failed_at, :utc_datetime_usec, public?: false, allow_nil?: false)
+        end
+
+        actions do
+          defaults([:read, :destroy, create: :*, update: :*])
+        end
+
+        policies do
+          # No actor-reachable read/write for ANY actor — same posture as
+          # Credential/AuthToken/Session/UserIdentity. `Samen.Identity.LoginFailure`'s
+          # bump!/reset!/count functions and the retention sweep operate with
+          # `authorize?: false` (or bypass Ash's authorizer entirely via raw SQL,
+          # which never runs through this policy at all).
+          policy always() do
+            forbid_if(always())
+          end
+        end
+      end
+    end
+  end
 end

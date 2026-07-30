@@ -43,6 +43,16 @@
 # physical registry (unavoidable — the generated code reads `:code.priv_dir(:samen_core)` at
 # ITS compile time), and the physical file is restored from the scratch copy on exit.
 #
+# T107 (interrupt hardening): both the scratch app dir and the registry snapshot are now
+# created via real OS `mktemp`/`mktemp -d` (unique-per-run, collision-immune by construction
+# — a pre-planted stray file with a colliding-shaped name cannot break the run, unlike the
+# old nanosecond-timestamp naming). A `:sigterm` trap (`System.trap_signal/3`) runs `cleanup.()`
+# for defense-in-depth when this probe is invoked directly (outside ci.sh). NOTE: `:sigint` is
+# NOT trappable inside the BEAM (`System.trap_signal/3` has no :sigint clause) — the
+# AUTHORITATIVE interrupt backstop for both SIGINT and SIGTERM is the OS-level snapshot+trap
+# wrapper in root `ci.sh` (`run_gen_probe`), which restores the registry byte-exact regardless
+# of whether this process gets a chance to run its own cleanup at all.
+#
 # Run:  cd samen_core && mix run priv/gen_app_deploy_probe.exs
 # Exit: 0 only if the --deploy app generated with zero hand-edits, passed its full ci.sh
 #       with the deploy layer present, its fly.toml parsed, its runtime.exs raised (naming
@@ -79,17 +89,25 @@ resource_abbrev = identity.abbrev
 http_port = 4790 + rem(System.unique_integer([:positive]), 90)
 
 samen_core_root = Gen.default_target() |> Path.join("samen_core")
-scratch_parent = Path.join([samen_core_root, "..", "_gen_deploy_scratch"]) |> Path.expand()
+scratch_root = Path.expand(Path.join(samen_core_root, ".."))
 
-File.rm_rf!(scratch_parent)
-File.mkdir_p!(scratch_parent)
+# T107: real `mktemp -d` — atomic, collision-immune, unique per run (was a fixed
+# `_gen_deploy_scratch` name; two concurrent/orphaned runs of this probe could clash).
+{scratch_parent_out, 0} =
+  System.cmd("mktemp", ["-d", Path.join(scratch_root, "_gen_deploy_scratch.XXXXXX")])
+
+scratch_parent = String.trim(scratch_parent_out)
 
 # --- REGISTRY SAFETY: snapshot the committed registry FIRST ----------------------------
 registry_path = Samen.AbbrevRegistry.path()
 registry_pristine = File.read!(registry_path)
 
-registry_scratch =
-  Path.join(System.tmp_dir!(), "gen_deploy_registry_pristine_#{System.system_time(:nanosecond)}.json")
+# T107: real `mktemp` (was a nanosecond-timestamp name) — atomically-created, guaranteed
+# non-colliding even against a pre-planted stray file with the same naming shape.
+{registry_scratch_out, 0} =
+  System.cmd("mktemp", [Path.join(System.tmp_dir!(), "gen_deploy_registry_pristine.XXXXXX")])
+
+registry_scratch = String.trim(registry_scratch_out)
 
 File.write!(registry_scratch, registry_pristine)
 
@@ -114,6 +132,19 @@ halt = fn code, msg ->
   IO.puts(msg)
   cleanup.()
   System.halt(code)
+end
+
+# T107: SIGTERM defense-in-depth for standalone invocation (outside ci.sh). `:sigint` has
+# no trap clause inside the BEAM — see the T107 note above the REGISTRY SAFETY section.
+# SAMEN_T107_DISABLE_INNER_TRAP=1 skips installing this trap — used ONLY by
+# scripts/interrupt_probe_test.sh's negative control, to isolate proof of the OUTER
+# ci.sh-level trap (scripts/gen_probe_guard.sh) without this inner layer masking it.
+if System.get_env("SAMEN_T107_DISABLE_INNER_TRAP") != "1" do
+  System.trap_signal(:sigterm, :t107_deploy_probe_sigterm, fn ->
+    IO.puts("\nFATAL: SIGTERM received — restoring registry from snapshot before exit.")
+    cleanup.()
+    System.halt(143)
+  end)
 end
 
 # A minimal structural TOML validator (the ADR-024 proof bound — "fly.toml parses" without

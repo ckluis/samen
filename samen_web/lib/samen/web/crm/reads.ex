@@ -28,12 +28,17 @@ defmodule Samen.Web.CRM.Reads do
   import Ash.Expr
 
   alias Samen.Web.Mount
+  alias Samen.Web.ObjectRef
 
   # A3 read-bounding (WS-A design §1.1 "read! elimination"): every non-page read on the
   # CRM surfaces carries an explicit limit. Detail sub-lists (a company's contacts, a
   # person's timeline, …) are bounded to the kit's hard page cap rather than paginated —
   # they are single-parent fan-outs, not hot lists.
   @detail_limit 200
+
+  # The Work Task fields the CRM detail timeline projects onto its entry map (ADR-041 §6.1:
+  # kind → :type, title → :subject, completed_at||inserted_at → :at, custom["author"] → :who).
+  @timeline_fields [:kind, :title, :body, :status, :due_at, :completed_at, :custom, :subject_key, :subject_id]
 
   @doc """
   Read CRM companies for `scope` — non-PII; org-scoped by policy. BOUNDED to
@@ -92,10 +97,23 @@ defmodule Samen.Web.CRM.Reads do
   Sort/filter fields are bounded, NON-VAULTED attributes (`display_name`/`job_title`);
   the vaulted columns are never sorted or filtered (see `Samen.Web.Reads` masking notes).
   On any read error the page is EMPTY, never unbounded and never a plaintext downgrade.
+
+  ADR-040 §5.8 (T37h) — `state.show_archived` (the `Samen.Web.ListLive` archived-
+  filter toggle) switches to the `:archived` read (Person IS `archivable: true`,
+  T37c) — a TRASH view (`Samen.Archival.OnlyArchived`; archived rows ONLY, not a
+  union with the live set): "View: live | archived", a filter switch. Masking is
+  UNCHANGED either way: `resolve_pii/4` still runs on every item AFTER paging, so an
+  archived Person's `full_name`/`emails`/`phones` resolve through
+  `Samen.Api.PiiResolution` on the actor's plane exactly like a live row's — clear on
+  tenant, `%Masked{}` (••••) on operator-without-grant. Archiving never bypasses the
+  resolver.
   """
   def contacts_page(mount, scope, state) do
+    base = Mount.resource(mount, Person)
+    base = if state.show_archived, do: Ash.Query.for_read(base, :archived), else: base
+
     page =
-      Mount.resource(mount, Person)
+      base
       |> Ash.Query.ensure_selected([
         :full_name,
         :emails,
@@ -103,7 +121,8 @@ defmodule Samen.Web.CRM.Reads do
         :display_name,
         :job_title,
         :company_id,
-        :custom
+        :custom,
+        :archived_at
       ])
       |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:display_name, :job_title])
 
@@ -172,11 +191,23 @@ defmodule Samen.Web.CRM.Reads do
     _ -> []
   end
 
-  @doc "Read a person's activity stream, newest-first. Non-PII (opaque FKs + bounded fields)."
+  @doc """
+  Read a person's activity timeline, newest-first. Non-PII (bounded fields + an
+  object-ref anchor). ADR-041 §6.1: the CRM Activity was migrated into the canonical
+  Work-scope `Task`; this reads Task filtered by the generic `(subject_key, subject_id)`
+  anchor for `crm.person` **OR** the preserved multi-anchor set in
+  `custom.crm_refs.person_id` — so a task that a migrated multi-anchored Activity
+  produced still appears in BOTH the person and company timelines (zero timeline loss).
+  """
   def activities_for_person(mount, scope, person_id) do
-    Mount.resource(mount, Activity)
-    |> Ash.Query.ensure_selected([:type, :subject, :body, :status, :due_at, :completed_at, :custom, :person_id, :company_id])
-    |> Ash.Query.filter(person_id == ^person_id)
+    person_id = to_string(person_id)
+
+    work_task_resource(mount)
+    |> Ash.Query.ensure_selected(@timeline_fields)
+    |> Ash.Query.filter(
+      (subject_key == "crm.person" and subject_id == ^person_id) or
+        get_path(custom, ["crm_refs", "person_id"]) == ^person_id
+    )
     |> Ash.Query.sort(inserted_at: :desc)
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
@@ -184,11 +215,16 @@ defmodule Samen.Web.CRM.Reads do
     _ -> []
   end
 
-  @doc "Read a company's activity stream, newest-first. Non-PII."
+  @doc "Read a company's activity timeline, newest-first (Work `Task`, anchored to `crm.company`). Non-PII."
   def activities_for_company(mount, scope, company_id) do
-    Mount.resource(mount, Activity)
-    |> Ash.Query.ensure_selected([:type, :subject, :body, :status, :due_at, :completed_at, :custom, :person_id, :company_id])
-    |> Ash.Query.filter(company_id == ^company_id)
+    company_id = to_string(company_id)
+
+    work_task_resource(mount)
+    |> Ash.Query.ensure_selected(@timeline_fields)
+    |> Ash.Query.filter(
+      (subject_key == "crm.company" and subject_id == ^company_id) or
+        get_path(custom, ["crm_refs", "company_id"]) == ^company_id
+    )
     |> Ash.Query.sort(inserted_at: :desc)
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
@@ -222,17 +258,41 @@ defmodule Samen.Web.CRM.Reads do
   end
 
   @doc """
-  Create an activity from the log-activity composer (ADR-011 §6.3). `attrs` carries
-  `type`, `subject`, `body`, one of `person_id`/`company_id`, `status`,
-  `completed_at`, and `org_id`. The write goes through Ash so OrgScope + the
-  `RoleAtLeast(:member)` gate + `SameOrgFk` (a cross-org FK is refused by the kernel)
-  all apply — this module adds NO policy of its own. `{:ok, activity}` or
-  `{:error, reason}`.
+  Log an activity as a canonical Work `Task` (ADR-041 §5/§6.1 — Activity migrated into
+  Task). `attrs` carries the composer fields (`type`/`subject`/`body`, or their Task
+  names `kind`/`title`), one of `person_id`/`company_id`/`opportunity_id`, `status`,
+  `completed_at`, and `org_id`.
+
+  ## Cross-org enforcement (the SameOrgFk replacement, ADR-041 §6.1)
+
+  Task's subject is a generic `(subject_key, subject_id)` pointer, NOT a `belongs_to` —
+  so `SameOrgFk` cannot target it. The invariant is instead enforced at the WRITE
+  boundary by the **org-scoped `Samen.Web.ObjectRef.resolve/3`**: the CRM subject ref is
+  resolved with the viewer's scope, so a cross-org id returns `{:error, :not_found}`
+  (`OrgScope` narrows the read to the actor's org) and the task is never anchored to
+  another org's object — INERT by construction, not a SameOrgFk validation error. The
+  Task create then rides the standard OrgScope + `RoleAtLeast(:member)` gate (this module
+  adds NO policy of its own). `{:ok, task}` or `{:error, reason}`.
   """
   def create_activity(mount, scope, attrs) do
-    Mount.resource(mount, Activity)
-    |> Ash.Changeset.for_create(:create, attrs, scope: scope)
-    |> Ash.create()
+    with {:ok, {subject_key, subject_id}} <- resolve_crm_subject(mount, scope, attrs),
+         task_mod when is_atom(task_mod) and not is_nil(task_mod) <- work_task_resource(mount) do
+      # NOTE: custom.crm_refs is a MIGRATION-only preservation bag (written by the raw-SQL
+      # migrate_activity_to_task migration, which bypasses the Tier-1 custom-bag guard). A
+      # new single-anchor task carries only the primary `(subject_key, subject_id)` anchor —
+      # writing an unregistered `crm_refs` key through Ash is refused by the custom-bag guard.
+      task_attrs =
+        attrs
+        |> activity_to_task_attrs()
+        |> Map.merge(%{subject_key: subject_key, subject_id: subject_id})
+
+      task_mod
+      |> Ash.Changeset.for_create(:create, task_attrs, scope: scope)
+      |> Ash.create()
+    else
+      nil -> {:error, :work_scope_unavailable}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc """
@@ -370,6 +430,84 @@ defmodule Samen.Web.CRM.Reads do
       # :value sums as a Money composite via ash_money's Postgres sum aggregate.
       pipeline_value: sum_resource(open_opps_query, :value, scope)
     }
+  end
+
+  # -- Work-scope bridge (ADR-041 §6.1) ----------------------------------------
+
+  @doc """
+  Derive the host's Work `Task` resource module from a CRM `mount` (the CRM timeline is
+  a client of the Work scope, ADR-041 §6.1). The Work scope mounts under the SAME host
+  root as the CRM scope; hosts name the domain `<Root>.Work` (driftwood/pawchart/test
+  host) or `<Root>.WorkScope` (demo). Try both segments and pick the one that is a live
+  Ash resource — CRM-agnostic and host-agnostic, no CRM FK, no hardcoded host module.
+  One Postgres + one org/plane per host, so the CRM mount's scope reads/writes Work
+  identically. Returns the module, or `nil` if no Work scope is mounted for this host.
+  """
+  @spec work_task_resource(Mount.t()) :: module() | nil
+  def work_task_resource(%Mount{namespace: ns}) do
+    root = ns |> Module.split() |> Enum.drop(-1)
+
+    Enum.find_value(["Work", "WorkScope"], fn seg ->
+      mod = Module.concat(root ++ [seg, "Task"])
+      if work_resource?(mod), do: mod
+    end)
+  end
+
+  defp work_resource?(mod) do
+    Code.ensure_loaded?(mod) and function_exported?(mod, :spark_is, 0) and
+      Ash.Resource.Info.resource?(mod)
+  rescue
+    _ -> false
+  end
+
+  # Resolve the CRM subject anchor (precedence opportunity ▸ person ▸ company, ADR-041
+  # §5.1) THROUGH the org-scoped ObjectRef resolve so a cross-org id is inert
+  # (`{:error, :not_found}`), never anchored. No subject id → an anchorless task.
+  defp resolve_crm_subject(mount, scope, attrs) do
+    case crm_anchor(attrs) do
+      nil ->
+        {:ok, {nil, nil}}
+
+      {key, id} ->
+        ref = %ObjectRef{key: key, id: to_string(id), raw: ObjectRef.to_string(key, to_string(id))}
+
+        case ObjectRef.resolve(mount, scope, ref) do
+          {:ok, _card} -> {:ok, {key, to_string(id)}}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  # The primary CRM anchor from the composer attrs, by ADR-041 §5.1 precedence.
+  defp crm_anchor(attrs) do
+    cond do
+      (id = fetch_attr(attrs, :opportunity_id)) && id != "" -> {"crm.opportunity", id}
+      (id = fetch_attr(attrs, :person_id)) && id != "" -> {"crm.person", id}
+      (id = fetch_attr(attrs, :company_id)) && id != "" -> {"crm.company", id}
+      true -> nil
+    end
+  end
+
+  # Map the composer's activity attrs onto Task attrs (ADR-041 §5.1): type→kind,
+  # subject→title, verbatim body/status/due_at/completed_at/org_id. Accepts either the
+  # legacy activity names or the Task names; drops the CRM FK keys (they become the
+  # anchor + crm_refs). Atom-keyed (the Reads API / tests pass an atom map).
+  defp activity_to_task_attrs(attrs) do
+    %{
+      kind: fetch_attr(attrs, :kind) || fetch_attr(attrs, :type),
+      title: fetch_attr(attrs, :title) || fetch_attr(attrs, :subject),
+      body: fetch_attr(attrs, :body),
+      status: fetch_attr(attrs, :status),
+      due_at: fetch_attr(attrs, :due_at),
+      completed_at: fetch_attr(attrs, :completed_at),
+      org_id: fetch_attr(attrs, :org_id)
+    }
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Map.new()
+  end
+
+  defp fetch_attr(attrs, key) when is_atom(key) do
+    Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key))
   end
 
   # -- private -----------------------------------------------------------------

@@ -3,8 +3,9 @@ defmodule Demo.CmsScope do
   The Demo host's CMS domain — mounted from the `samen_core` CMS scope
   blueprint (ADR-004; T3.5).
 
-  One `use Samen.Scopes.Cms` expands into seven host-owned resources
-  (`Demo.CmsScope.{Page,Post,Block,Media,Navigation,SeoMeta,ContentVersion}`),
+  One `use Samen.Scopes.Cms` expands into six host-owned resources
+  (`Demo.CmsScope.{Page,Post,Block,Media,Navigation,SeoMeta}`) plus the three
+  generated E7 `<Resource>.Version` resources for Page/Post/Block (ADR-040 §6.5),
   each a normal `use Samen.Resource` in the DEMO's `otp_app`/`repo`, so:
 
     * their columns are catalogued in the DEMO's `tam_table`/`fld_field`
@@ -24,18 +25,18 @@ defmodule Demo.CmsScope do
   mask-unknown-by-default discipline was applied — the field was consciously
   evaluated and cleared, not silently assumed safe.
 
-  ## Content versioning
+  ## Content versioning (E7 audit-on-write, ADR-040 §6.5, T119)
 
-  `ContentVersion` is append-only (no :update/:destroy actions). Page and Post
-  publish/archive actions are expected to call
-  `Demo.CmsScope.ContentVersion.create_version/2` explicitly to record immutable
-  snapshots. See `Samen.Scopes.Cms.Blueprint.define_content_version/5`.
+  Page/Post/Block are `versioned: :snapshot`: every tracked write records a full-row
+  `<Resource>.Version` snapshot automatically (ash_paper_trail). The bespoke
+  `ContentVersion` ledger was RETIRED — history is read from `Demo.CmsScope.Page.Version`
+  et al. No caller records versions explicitly; versioning is by construction.
 
   ## Smoke usage (T3.5 acceptance: "thin smoke usage per scope proves host-mounting works")
 
   The `Demo.CmsScope.Smoke` module (below) exercises one round-trip per resource —
-  a page, a post, a block, a media asset, a navigation item, seo_meta, and a content
-  version — confirming the host-mount and the immutable-history mechanism work
+  a page, a post, a block, a media asset, a navigation item, and seo_meta — confirming
+  the host-mount and (for the versioned resources) the automatic-history mechanism work
   end-to-end against a real Postgres DB.
   """
   use Ash.Domain, validate_config_inclusion?: false
@@ -115,11 +116,11 @@ defmodule Demo.CmsScope.Smoke do
     * host-mounting works (resources exist, compile, have the right namespace)
     * the org-scope policy is wired (cross-org invisibility)
     * the draft→publish workflow works (admin can publish; member cannot)
-    * ContentVersion is append-only (no :update/:destroy)
+    * E7 `versioned` records history automatically (Page/Post/Block → <Resource>.Version)
     * non-PII classification is registered (csm_description)
   """
 
-  alias Demo.CmsScope.{Page, Post, Block, Media, Navigation, SeoMeta, ContentVersion}
+  alias Demo.CmsScope.{Page, Post, Block, Media, Navigation, SeoMeta}
 
   @doc "Create a page in the given org. authorize?: false for seeding."
   def mk_page(org_id, title \\ "Test Page") do
@@ -195,22 +196,6 @@ defmodule Demo.CmsScope.Smoke do
       canonical_url: "https://demo.example/pages/test",
       org_id: org_id,
       page_id: page_id
-    })
-    |> Ash.create(authorize?: false)
-  end
-
-  @doc "Create a content version (append-only)."
-  def mk_content_version(org_id, page_id) do
-    ContentVersion
-    |> Ash.Changeset.for_create(:create_version, %{
-      subject_type: "page",
-      subject_id: page_id,
-      content_snapshot: %{"title" => "Test Page", "body" => "v1 content"},
-      status: :draft,
-      author_id: org_id,
-      version_number: 1,
-      change_summary: "Initial draft",
-      org_id: org_id
     })
     |> Ash.create(authorize?: false)
   end

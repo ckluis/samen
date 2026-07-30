@@ -107,8 +107,13 @@ defmodule Samen.Web.CRM.CompaniesLive do
     end
   end
 
-  # FAIL-HONEST delete: the kernel defines no cascade — a company with linked
-  # people/deals/activities is refused by the DB (FK) and the refusal is SURFACED.
+  # ADR-040 §5.9/T37c: `Company` is `archivable true`, so `Reads.delete_company/3`'s
+  # `Ash.destroy/2` now rides the default SOFT destroy (T36) — this sets
+  # `archived_at` rather than removing the row, dropping it out of the default
+  # (archived-excluding) bounded read below. No cascade is declared for CRM
+  # (§5.4), so linked people/deals/attachments are untouched and the destroy is
+  # never refused on their account; any `{:error, _}` here is a genuine failure
+  # (e.g. an authorization denial), not the old FK-refusal case.
   def handle_event("delete", %{"id" => id}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
@@ -118,11 +123,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
         {:noreply, load(assign(socket, delete_error: nil), org_id)}
 
       {:error, _reason} ->
-        {:noreply,
-         assign(socket,
-           delete_error:
-             "Could not delete this company — it still has linked records (contacts, deals, or activities)."
-         )}
+        {:noreply, assign(socket, delete_error: "Could not delete this company.")}
     end
   end
 

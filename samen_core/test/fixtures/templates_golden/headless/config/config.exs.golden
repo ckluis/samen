@@ -28,6 +28,21 @@ config :samen_core, :verify_repo, Acme.Repo
 config :samen_core, :vault_repo, Acme.Repo
 config :samen_core, :tnt_record_repo, Acme.Repo
 
+# T35 §4.7 / T37h: reveal grants are a CLIENT of the T34 E3 approve/reject engine.
+# This app's own Approval resource (Samen.Approvals.Blueprint.define_approval/5,
+# lib/acme/approvals.ex) + the "pii_reveal" kind registered to
+# Samen.Reveal.ApprovalHandler — Grants.approve/2 now routes its happy path through
+# Samen.Approvals, not the pre-T35 inline fallback (the T35 non-fatal note this
+# fold-in closes).
+config :samen_core, Samen.Approvals,
+  approval_resource: Acme.Approvals.Approval,
+  repo: Acme.Repo
+
+config :samen_core, Samen.Approvals.Registry,
+  kinds: %{
+    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler}
+  }
+
 # T4.5 aggregate-privacy floors. samen_core defaults are k=5/l=2; a fresh app's
 # dogfood datasets are small, so — exactly as demo/driftwood/pawchart — use a
 # small-but-non-trivial floor (k=2/l=2): a count-of-one cohort still suppresses.

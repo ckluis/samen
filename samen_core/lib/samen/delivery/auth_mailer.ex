@@ -24,14 +24,20 @@ defmodule Samen.Delivery.AuthMailer do
   host that has wired ONE delivery adapter gets auth mail through it for
   free, with the exact same `:blocked` semantics.
 
-  The raw token and the recipient address are NEVER threaded into any
-  persisted struct here — they live only on the caller's stack, embedded into
-  the actual email body by whichever adapter eventually does real dispatch
-  (an operator TODO; `Smtp`/`Api` are skeletons that return
-  `{:error, :not_implemented}`/`{:error, :not_configured}` regardless of
-  message shape today, so no path exists yet from an auth token to a
-  genuinely delivered email in a non-test env — captured by `LocalSink` in
-  test, honestly blocked everywhere else, exactly per the task contract).
+  The raw token is NEVER threaded into any PERSISTED struct here: the
+  token-only `%Message{}` (what gets logged/persisted to a delivery record)
+  stays token/PII-free. The raw token lives only on the caller's stack and in
+  the transient, non-persisted delivery CONTENT this module renders through
+  `Samen.Delivery.Rendering.auth_content/3` (subject + text/html body + the
+  actionable `/verify|/reset|/invite` link, F1/T111) and threads onto the send
+  config — the SAME seam `Samen.Notifications.Digest` uses to carry rendered
+  digest content: `LocalSink` captures it in test, a real adapter consumes it
+  in prod. `Smtp`/`Api` are still skeletons returning
+  `{:error, :not_implemented}`/`{:error, :not_configured}`, so no genuinely
+  delivered email exists yet in a non-test env — captured by `LocalSink` in
+  test, honestly blocked everywhere else, exactly per the task contract. A
+  caller that does not thread a `:raw_token` gets a bare send (no content) —
+  never a crash.
   """
 
   require Logger
@@ -39,6 +45,7 @@ defmodule Samen.Delivery.AuthMailer do
   alias Samen.Delivery.Chokepoint
   alias Samen.Delivery.Lifecycle.EmailWorker
   alias Samen.Delivery.Message
+  alias Samen.Delivery.Rendering
 
   @contexts [:email_verify, :password_reset, :invite]
 
@@ -58,6 +65,14 @@ defmodule Samen.Delivery.AuthMailer do
       (REQUIRED for `:invite` — an invite has no Credential yet; the
       recipient is resolved from the invitation row at real-send time, the
       SAME "reveal at send" discipline every other Delivery consumer uses)
+    * `:raw_token` — the freshly-minted raw auth token. When present, this
+      module renders real content (subject + text/html body + the actionable
+      `/verify|/reset|/invite` link) via `Samen.Delivery.Rendering.auth_content/3`
+      and threads it onto the send config. When absent, the send carries no
+      rendered content (bare token-only envelope) — never a crash.
+    * `:base_url` — optional link prefix (falls back to
+      `config :samen_core, Samen.Delivery.AuthMailer, base_url:`, then a
+      site-relative path).
 
   Returns `{:ok, receipt}` (a `LocalSink` capture in `:test`, or a genuinely
   configured adapter's receipt) or `{:error, :adapter_unconfigured | reason}`
@@ -80,7 +95,7 @@ defmodule Samen.Delivery.AuthMailer do
 
     case Chokepoint.send(message,
            fallback_adapter: EmailWorker.resolve_adapter(),
-           fallback_config: EmailWorker.adapter_config(),
+           fallback_config: dispatch_config(context, opts),
            env: EmailWorker.env()
          ) do
       {:error, :adapter_unconfigured} = err ->
@@ -102,5 +117,30 @@ defmodule Samen.Delivery.AuthMailer do
       other ->
         other
     end
+  end
+
+  # The rendered auth-email content rides on the send config the SAME way
+  # `Samen.Notifications.Digest` threads its digest content — merged ONTO the
+  # configured adapter's config (`LocalSink` captures it in test; a real adapter
+  # consumes it in prod). Built ONLY when a `:raw_token` is threaded through; a
+  # tokenless caller gets the bare adapter config (no content, no crash).
+  defp dispatch_config(context, opts) do
+    base = EmailWorker.adapter_config() || %{}
+
+    case Keyword.get(opts, :raw_token) do
+      token when is_binary(token) ->
+        {subject, text_body, html_body} =
+          Rendering.auth_content(context, token, base_url: base_url(opts))
+
+        Map.merge(base, %{subject: subject, text_body: text_body, html_body: html_body})
+
+      _ ->
+        base
+    end
+  end
+
+  defp base_url(opts) do
+    Keyword.get(opts, :base_url) ||
+      Application.get_env(:samen_core, __MODULE__, [])[:base_url] || ""
   end
 end

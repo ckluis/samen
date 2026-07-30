@@ -133,29 +133,186 @@ defmodule Samen.AbbrevRegistryTest do
       # `samen_web`'s `rti` row is T15's own round-trip matrix fixture
       # (`Samen.WebTest.RichTypes.Item`, ADR-036 H7 done-criteria 3/4). `samen_core`'s
       # `spc`/`spd` rows are T23's no-PAN verifier red-path compile fixtures (ADR-038
-      # §3.5 B5).
+      # §3.5 B5). T43 (F1, ADR-041 §3) adds the Work scope's Project/Task abbrevs per
+      # host: demo's defaults (wpj/wtk), samen_core's fresh in-tree test-fixture pair
+      # (spw/stw), and driftwood/pawchart's allocator-proposed fresh pairs
+      # (dwp/dwt, pwp/pwt).
       assert hosts == %{
                "demo" => %{
                  "mce" => "Demo.MarketingScope.ConsentEvent",
                  "atk" => "Demo.Identity.AuthToken",
                  "crd" => "Demo.Identity.Credential",
                  "ses" => "Demo.Identity.Session",
-                 "uid" => "Demo.Identity.UserIdentity"
+                 "uid" => "Demo.Identity.UserIdentity",
+                 "wpj" => "Demo.WorkScope.Project",
+                 "wtk" => "Demo.WorkScope.Task",
+                 # T35 §4.7: the per-host materialization of the E3 Approval resource for
+                 # the reveal-grant engine client (ADR-040 §4.7), allocator-reserved.
+                 "daa" => "Demo.Approvals.Approval",
+                 # T44 F2 (Calendar scope): the demo host's Event abbrev, allocator-proposed.
+                 "dce" => "Demo.CalendarScope.Event",
+                 # T45 F3 (Docs scope): the demo host's Doc/Note abbrevs, allocator-proposed.
+                 "ddd" => "Demo.DocsScope.Doc",
+                 "ddn" => "Demo.DocsScope.Note",
+                 # T46 F4 (Tags scope): the demo host's Tag/Tagging abbrevs, allocator-proposed.
+                 "dtt" => "Demo.Tags.Tag",
+                 "tdt" => "Demo.Tags.Tagging",
+                 # T47 F5 (Locations scope): the demo host's Location abbrev, allocator-proposed.
+                 "dll" => "Demo.LocationsScope.Location",
+                 # T48 F6+F7 (SalesOps scope): the demo host's Vendor/Lead abbrevs, allocator-proposed.
+                 "dsv" => "Demo.SalesOps.Vendor",
+                 "dsl" => "Demo.SalesOps.Lead",
+                 # T109 (ADR-038 §6.4): the demo host's durable brute-force
+                 # failure-counter abbrev, allocator-proposed.
+                 "dil" => "Demo.Identity.LoginFailure",
+                 # T119 (ADR-040 §6.5): the E7 `versioned` CMS Version resources —
+                 # ash_paper_trail-generated `Page/Post/Block.Version`, allocator-proposed.
+                 "cpv" => "Demo.CmsScope.Page.Version",
+                 "cvp" => "Demo.CmsScope.Post.Version",
+                 "cbv" => "Demo.CmsScope.Block.Version"
                },
                "driftwood" => %{
                  "fmv" => "Driftwood.Marketing.ConsentEvent",
                  "doc" => "Driftwood.Operator.Credential",
                  "dot" => "Driftwood.Operator.AuthToken",
                  "dos" => "Driftwood.Operator.Session",
-                 "doi" => "Driftwood.Operator.UserIdentity"
+                 "doi" => "Driftwood.Operator.UserIdentity",
+                 "dwp" => "Driftwood.Work.Project",
+                 "dwt" => "Driftwood.Work.Task",
+                 # T35 §4.7: same as demo's `daa` above — Driftwood's per-host Approval
+                 # resource (fresh f-prefixed abbrev per Driftwood's own collision-avoidance
+                 # convention, see driftwood/priv/abbrev_registry.json's own comment).
+                 "fap" => "Driftwood.Approvals.Approval",
+                 # T44 F2 (Calendar scope): `dce` collided with demo's own proposed abbrev
+                 # (both hosts start with "d" — the deterministic proposer is host-name-
+                 # blind to OTHER host sections), so Driftwood's Event mount took a fresh
+                 # `fce` (allocator-proposed, explicit) instead.
+                 "fce" => "Driftwood.Calendar.Event",
+                 # T45 F3 (Docs scope): `ddd`/`ddn` collided with demo's own proposed
+                 # abbrevs (the deterministic proposer derives from the owner's LAST
+                 # module segments, host-name-blind — same collision class as `dce`
+                 # above), so Driftwood's Doc/Note mount took fresh `fdd`/`fdn`
+                 # (allocator-reserved, explicit, same f-prefix convention as `fap`/`fce`).
+                 "fdd" => "Driftwood.Docs.Doc",
+                 "fdn" => "Driftwood.Docs.Note",
+                 # T46 F4 (Tags scope): `dtt`/`tdt` collided with demo's own proposed
+                 # abbrevs (the same host-name-blind proposer class as `dce`/`fdd`
+                 # above), so Driftwood's Tag/Tagging mount took fresh `ftt`/`tft`
+                 # (allocator-reserved, explicit, same f-prefix convention).
+                 "ftt" => "Driftwood.Tags.Tag",
+                 "tft" => "Driftwood.Tags.Tagging",
+                 # T47 F5 (Locations scope): `dll` collided with demo's own proposed
+                 # abbrev (the same host-name-blind proposer class as `dce`/`fdd`/`dtt`
+                 # above) — this collision was caught only AFTER the accidental `dll`
+                 # write had already persisted (unlike T44/T45/T46, which caught it
+                 # pre-write); the orphan was repaired as a sanctioned incident-repair
+                 # (not a hand-allocation, see _orch/tasks/T47/work/progress.md), and
+                 # Driftwood's Location mount took fresh `fll` (allocator-reserved,
+                 # explicit, same f-prefix convention).
+                 "fll" => "Driftwood.Locations.Location",
+                 # T48 F6+F7 (SalesOps scope): the driftwood host's Vendor/Lead abbrevs,
+                 # allocator-proposed — no cross-host collision this time (T123's
+                 # hardened proposer union-checks every host namespace up front).
+                 "dvs" => "Driftwood.SalesOps.Vendor",
+                 "dls" => "Driftwood.SalesOps.Lead",
+                 # T109 (ADR-038 §6.4): the driftwood operator mount's durable
+                 # brute-force failure-counter abbrev, allocator-proposed.
+                 "dol" => "Driftwood.Operator.LoginFailure",
+                 # T118 (ADR-039 §12 done-criterion 4): driftwood's FIRST vertical
+                 # adoption of the Automation scope (`use Samen.Scopes.Automation`,
+                 # the `Samen.Web.Automation.BuilderLive` browser-real proof host).
+                 # The scope's built-in defaults (`awf`/`arm`/`aes`/`sar`) were
+                 # already claimed by samen_core's OWN AutomationFixture test rows
+                 # (a global-net collision) — fresh "d"-prefixed abbrevs reserved
+                 # explicitly instead (`mix samen.abbrev.reserve --host driftwood
+                 # --owner Driftwood.Automation.Workflow --abbrev dwf`, and so on).
+                 "dwf" => "Driftwood.Automation.Workflow",
+                 "drm" => "Driftwood.Automation.Reminder",
+                 "des" => "Driftwood.Automation.Escalation",
+                 "dru" => "Driftwood.Automation.Run"
                },
-               "pawchart" => %{"vmv" => "PawChart.Marketing.ConsentEvent"},
+               "pawchart" => %{
+                 "vmv" => "PawChart.Marketing.ConsentEvent",
+                 "pwp" => "PawChart.Work.Project",
+                 "pwt" => "PawChart.Work.Task",
+                 # T44 F2 (Calendar scope): the pawchart host's Event abbrev, allocator-proposed.
+                 "pce" => "PawChart.Calendar.Event",
+                 # T45 F3 (Docs scope): the pawchart host's Doc/Note abbrevs, allocator-proposed.
+                 "pdd" => "PawChart.Docs.Doc",
+                 "pdn" => "PawChart.Docs.Note",
+                 # T46 F4 (Tags scope): the pawchart host's Tag/Tagging abbrevs, allocator-proposed.
+                 "ptt" => "PawChart.Tags.Tag",
+                 "tpt" => "PawChart.Tags.Tagging",
+                 # T47 F5 (Locations scope): the pawchart host's Location abbrev,
+                 # allocator-proposed.
+                 "pll" => "PawChart.Locations.Location",
+                 # T48 F6+F7 (SalesOps scope): the pawchart host's Vendor/Lead abbrevs, allocator-proposed.
+                 "psv" => "PawChart.SalesOps.Vendor",
+                 "psl" => "PawChart.SalesOps.Lead"
+               },
                "samen_core" => %{
                  "sxv" => "SamenCore.Support.SuppressionFixture.ConsentEvent",
                  "sro" => "SamenCore.Support.RichTypes.OrgFixture",
                  "srp" => "SamenCore.Support.RichTypes.PersonalFixture",
                  "spc" => "SamenCore.Support.PanFixture.CleanProjection",
-                 "spd" => "SamenCore.Support.PanFixture.DirtyProjection"
+                 "spd" => "SamenCore.Support.PanFixture.DirtyProjection",
+                 # T36 E6 soft-delete pilots (ADR-040 §5): the archivable Widget (plain,
+                 # partial unique index) + Person (vaulted) fixtures, allocator-reserved.
+                 "arv" => "SamenCore.Support.Archivable.Widget",
+                 "avf" => "SamenCore.Support.Archivable.Person",
+                 # T39 E1 automation engine (ADR-039): the Workflow resource + the
+                 # Subject trigger-source fixture, allocator-reserved.
+                 "awf" => "SamenCore.Support.AutomationFixture.Workflow",
+                 "asj" => "SamenCore.Support.AutomationFixture.Subject",
+                 # T43 F1 (ADR-041 §3): the in-tree Work scope fixture pilot.
+                 "spw" => "SamenCore.Support.WorkFixture.Project",
+                 "stw" => "SamenCore.Support.WorkFixture.Task",
+                 # T34 E3 generalized approve/reject engine (ADR-040 §4): the Approval
+                 # state-bearing resource + the Document reference-client (two gated
+                 # actions) fixtures, allocator-reserved. Materialized in samen_core's
+                 # TestRepo only; the per-host primitives materialization is T35's sweep.
+                 "apv" => "SamenCore.Support.ApprovalsFixture.Approval",
+                 "apd" => "SamenCore.Support.ApprovalsFixture.Document",
+                 # T41 E4/E5 reminder + escalation (ADR-039 §6/§7): the Reminder +
+                 # Escalation resources, materialized in the SAME AutomationFixture
+                 # domain T39 mounts, allocator-reserved.
+                 "arm" => "SamenCore.Support.AutomationFixture.Reminder",
+                 "aes" => "SamenCore.Support.AutomationFixture.Escalation",
+                 # T40 E2 action library (ADR-039 §5): a second trigger-source
+                 # fixture (owner_id/tags surfaces the record-mutation family
+                 # needs), materialized in the SAME AutomationFixture domain,
+                 # allocator-reserved.
+                 "sat" => "SamenCore.Support.AutomationFixture.Target",
+                 # T42 E8 run log (ADR-039 §8.1): the Run resource, materialized
+                 # in the SAME AutomationFixture domain, allocator-reserved.
+                 "sar" => "SamenCore.Support.AutomationFixture.Run",
+                 # T44 F2 (Calendar scope): the in-tree Calendar scope fixture pilot.
+                 "sce" => "SamenCore.Support.CalendarFixture.Event",
+                 # T45 F3 (Docs scope): the in-tree Docs scope fixture pilot.
+                 "sdd" => "SamenCore.Support.DocsFixture.Doc",
+                 "sdn" => "SamenCore.Support.DocsFixture.Note",
+                 # T46 F4 (Tags scope): the in-tree Tags scope fixture pilot.
+                 "stt" => "SamenCore.Support.TagsFixture.Tag",
+                 "tst" => "SamenCore.Support.TagsFixture.Tagging",
+                 # T47 F5 (Locations scope): the in-tree Locations scope fixture pilot.
+                 "sll" => "SamenCore.Support.LocationsFixture.Location",
+                 # T48 F6+F7 (SalesOps scope): the in-tree SalesOps scope fixture pilot,
+                 # PLUS a fresh in-tree `Samen.Scopes.Crm` mount (the Lead-conversion
+                 # TARGET — a real CRM Person/Opportunity, not a stand-in).
+                 "scc" => "SamenCore.Support.CrmScopeFixture.Company",
+                 "scp" => "SamenCore.Support.CrmScopeFixture.Person",
+                 "csp" => "SamenCore.Support.CrmScopeFixture.Pipeline",
+                 "sco" => "SamenCore.Support.CrmScopeFixture.Opportunity",
+                 "sca" => "SamenCore.Support.CrmScopeFixture.Attachment",
+                 "ssv" => "SamenCore.Support.SalesOpsFixture.Vendor",
+                 "sls" => "SamenCore.Support.SalesOpsFixture.Lead",
+                 # T119 (ADR-040 §6): the E7 `versioned` in-tree pilots — a
+                 # :changes_only Contact and a :snapshot Snapshot (both fold Core.Person),
+                 # plus their generated `.Version` resources, allocator-proposed.
+                 "svc" => "SamenCore.Support.Versioning.Contact",
+                 "vcv" => "SamenCore.Support.Versioning.Contact.Version",
+                 "svs" => "SamenCore.Support.Versioning.Snapshot",
+                 "vsv" => "SamenCore.Support.Versioning.Snapshot.Version"
                },
                "samen_web" => %{
                  "wmv" => "Samen.WebTest.Marketing.ConsentEvent",
@@ -163,12 +320,65 @@ defmodule Samen.AbbrevRegistryTest do
                  "wot" => "Samen.WebTest.Operator.AuthToken",
                  "wos" => "Samen.WebTest.Operator.Session",
                  "woi" => "Samen.WebTest.Operator.UserIdentity",
-                 "rti" => "Samen.WebTest.RichTypes.Item"
+                 "rti" => "Samen.WebTest.RichTypes.Item",
+                 "wwp" => "Samen.WebTest.Work.Project",
+                 "wwt" => "Samen.WebTest.Work.Task",
+                 # T41 E5 escalation primitive (ADR-039 §7): the samen_web test
+                 # host's direct Escalation-only mount (test/support/automation.ex),
+                 # needed for the SLA-breach client proof (notifications_sources_test.exs).
+                 "wes" => "Samen.WebTest.Automation.Escalation",
+                 # T42 E8 observability (ADR-039 §8): the same test host's direct
+                 # Workflow + Run mount, needed for the operator health-view LiveView
+                 # test (automation_health_live_test.exs).
+                 "wwa" => "Samen.WebTest.Automation.Workflow",
+                 "war" => "Samen.WebTest.Automation.Run",
+                 # T44 F2 (Calendar scope): the samen_web test host's Event abbrev,
+                 # allocator-proposed (used by the ICS export masking test fixture).
+                 "wce" => "Samen.WebTest.Calendar.Event",
+                 # T45 F3 (Docs scope): the samen_web test host's Doc/Note abbrevs,
+                 # allocator-proposed (used by the Docs masking + object-ref attach
+                 # test fixture).
+                 "wdd" => "Samen.WebTest.Docs.Doc",
+                 "wdn" => "Samen.WebTest.Docs.Note",
+                 # T46 F4 (Tags scope): the samen_web test host's Tag/Tagging abbrevs,
+                 # allocator-proposed (used by the Tags org-scope attach + Ticket-tags
+                 # migration test fixtures).
+                 "wtt" => "Samen.WebTest.Tags.Tag",
+                 "twt" => "Samen.WebTest.Tags.Tagging",
+                 # T109 (ADR-038 §6.4): the samen_web test host's durable
+                 # brute-force failure-counter abbrev, allocator-proposed.
+                 "wol" => "Samen.WebTest.Operator.LoginFailure"
                }
              }
 
-      # The compat shim's flat view unions the global net with every host entry (263 + 22).
-      assert map_size(Reg.load()) == 285
+      # The compat shim's flat view unions the global net with every host entry
+      # (263 global + 26 host + 10 T43 Work-scope host allocations + 2 T34 Approvals
+      # samen_core host allocations + 2 T35 §4.7 per-host Approval materializations
+      # (demo `daa`, driftwood `fap`) + 2 T41 samen_core host allocations (`arm`/`aes`)
+      # + 1 T41 samen_web host allocation (`wes`) + 1 T40 samen_core host allocation
+      # (`sat`) + 3 T42 host allocations (`sar` samen_core; `wwa`/`war` samen_web) +
+      # 5 T44 Calendar-scope host allocations (`dce` demo; `fce` driftwood; `pce`
+      # pawchart; `sce` samen_core; `wce` samen_web) + 10 T45 Docs-scope host
+      # allocations (`ddd`/`ddn` demo; `fdd`/`fdn` driftwood; `pdd`/`pdn` pawchart;
+      # `sdd`/`sdn` samen_core; `wdd`/`wdn` samen_web) + 10 T46 Tags-scope host
+      # allocations (`dtt`/`tdt` demo; `ftt`/`tft` driftwood; `ptt`/`tpt` pawchart;
+      # `stt`/`tst` samen_core; `wtt`/`twt` samen_web) + 4 T47 F5 Locations-scope
+      # host allocations (`dll` demo; `fll` driftwood — `dll` collided with demo's
+      # proposal, same "d"-prefix class as `dce`/`fdd`/`ftt`; `pll` pawchart; `sll`
+      # samen_core — no samen_web mount, Locations has no web-specific feature) +
+      # 13 T48 F6+F7 SalesOps-scope host allocations (`scc`/`scp`/`csp`/`sco`/`sca`
+      # samen_core — the real `Samen.Scopes.Crm` mount backing the samen_core
+      # Lead-conversion fixture; `ssv`/`sls` samen_core; `dsv`/`dsl` demo; `dvs`/
+      # `dls` driftwood; `psv`/`psl` pawchart)
+      # = 352) + 3 T109 (ADR-038 §6.4) host reservations — the durable brute-force
+      # failure counter (`dil` demo; `dol` driftwood operator; `wol` samen_web
+      # test host), allocator-proposed = 355; +7 in T119 (E7 versioned: samen_core
+      # svc/vcv/svs/vsv fixtures + demo cpv/cvp/cbv CMS Version resources) = 362;
+      # +4 in T118 (ADR-039 §12 done-criterion 4) — driftwood's first vertical
+      # Automation-scope mount (`dwf`/`drm`/`des`/`dru` — the scope's built-in
+      # defaults were already claimed by samen_core's own AutomationFixture rows,
+      # a global-net collision, so fresh abbrevs were reserved) = 366.
+      assert map_size(Reg.load()) == 366
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do
@@ -231,9 +441,25 @@ defmodule Samen.AbbrevRegistryTest do
       assert reason =~ "never recycled"
     end
 
-    test "validate_host: SAME abbrev in a DIFFERENT host is allowed (Option B namespacing)" do
+    test "validate_host: SAME abbrev in a DIFFERENT host for a DIFFERENT owner is REFUSED by default (T123)" do
       ns = %{global: %{}, hosts: %{"widgetco" => %{"wid" => "Widgetco.Vertical.Widget"}}}
-      assert Reg.validate_host(ns, "acme", "wid", "Acme.Vertical.Gadget") == :ok
+      assert {:error, reason} = Reg.validate_host(ns, "acme", "wid", "Acme.Vertical.Gadget")
+      assert reason =~ ~s(already owned by Widgetco.Vertical.Widget in host "widgetco")
+      assert reason =~ "DIFFERENT module in a DIFFERENT host"
+      assert reason =~ "allow_cross_host_reuse: true"
+    end
+
+    test "validate_host: DELIBERATE Option-B cross-host reuse is allowed behind the explicit override (T123)" do
+      ns = %{global: %{}, hosts: %{"widgetco" => %{"wid" => "Widgetco.Vertical.Widget"}}}
+
+      assert Reg.validate_host(ns, "acme", "wid", "Acme.Vertical.Gadget",
+               allow_cross_host_reuse: true
+             ) == :ok
+    end
+
+    test "validate_host: cross-host SAME-owner reuse is OK without any override (idempotent, not a collision)" do
+      ns = %{global: %{}, hosts: %{"widgetco" => %{"wid" => "Shared.Widget"}}}
+      assert Reg.validate_host(ns, "acme", "wid", "Shared.Widget") == :ok
     end
 
     test "validate_host: global cross-host net still refuses a clash on the legacy map" do

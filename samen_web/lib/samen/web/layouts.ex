@@ -26,8 +26,19 @@ defmodule Samen.Web.Layouts do
 
   The shell is intentionally minimal: viewport + CSRF meta, the shared Samen UI kit
   stylesheet served from the samen_web dependency's priv via the host endpoint's scoped
-  `Plug.Static` (ADR-009), and `@inner_content`. No asset pipeline — a real deploy would
-  add esbuild/tailwind in the host app, not here.
+  `Plug.Static` (ADR-009), the three Phoenix LiveView client `<script>` tags (ADR-042 C1),
+  and `@inner_content`.
+
+  ## Client runtime (ADR-042)
+
+  This layout wires the Phoenix LiveView JS client for EVERY host at zero authored LOC
+  per host — the same framework-first inheritance as `samen_ui.css`. There is still no
+  node/esbuild/tailwind toolchain: the client is three vendored static files served via
+  the host endpoint's scoped `Plug.Static` — `phoenix.min.js` + `phoenix_live_view.min.js`
+  (from the deps' own `priv/static`, so client/server versions cannot skew) and a
+  ~30-line hand-authored `app.js` (samen_web's priv), which connects the LiveSocket and
+  carries the relocated ⌘K listener. Masking is unaffected: `app.js` is a transport shim
+  that resolves no value (ADR-042 §6 / C6). See `docs/adr/ADR-042-liveview-client-adoption.md`.
   """
   use Phoenix.Component
 
@@ -73,28 +84,21 @@ defmodule Samen.Web.Layouts do
         <title>{@samen_layout_title}</title>
         <%!-- ADR-009: the shared Samen UI kit stylesheet from the samen_web dep's priv. --%>
         <link rel="stylesheet" href="/assets/samen_ui.css" />
+        <%!--
+          ADR-042 C1 — the Phoenix LiveView JS client: three vendored static bundles,
+          served from the deps' + samen_web's priv via the host endpoint's scoped
+          `Plug.Static` (ADR-042 §3). `defer` so they execute in DOM order after parse;
+          each rides the existing `csp_nonce` seam (C7 — dormant-but-ready, as no host
+          emits a CSP header today). `app.js` (C2) connects the LiveSocket and carries
+          the relocated ⌘K listener; it is a transport shim that resolves no value, so
+          masking stays server-rendered (C6 / §6). Inherited by every host at ≈0 LOC.
+        --%>
+        <script defer nonce={assigns[:csp_nonce]} src="/assets/phoenix.min.js"></script>
+        <script defer nonce={assigns[:csp_nonce]} src="/assets/phoenix_live_view.min.js"></script>
+        <script defer nonce={assigns[:csp_nonce]} src="/assets/app.js"></script>
       </head>
       <body>
         {@inner_content}
-        <%!--
-          WS-E E6 / ADR-027 carry — the GLOBAL ⌘K (Ctrl+K) keyboard shortcut.
-          The samen_web asset pipeline ships CSS only (no esbuild), so the palette's
-          focus-from-anywhere shortcut is a tiny dependency-free inline listener,
-          inherited by every host through this shared root layout at ≈0 authored LOC.
-          It focuses the ⌘K palette input (`#cmdk-input`) when present, else the
-          per-list `search_box` input (`[data-cmdk]`), else navigates to that box's
-          search form. Purely a focus/navigation affordance — it renders/reads no
-          value, so it cannot touch masking.
-        --%>
-        <script nonce={assigns[:csp_nonce]}>
-          document.addEventListener("keydown", function (e) {
-            if (!(e.metaKey || e.ctrlKey) || (e.key !== "k" && e.key !== "K")) return;
-            var el = document.getElementById("cmdk-input") || document.querySelector("input[data-cmdk]");
-            if (el) { e.preventDefault(); el.focus(); if (el.select) el.select(); return; }
-            var form = document.querySelector("form.search[action]");
-            if (form) { e.preventDefault(); form.submit(); }
-          });
-        </script>
       </body>
     </html>
     """

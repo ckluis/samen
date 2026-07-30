@@ -16,13 +16,20 @@ config :driftwood,
     Driftwood.Crm,
     Driftwood.Billing,
     Driftwood.Support,
+    Driftwood.Work,
+    Driftwood.Calendar,
+    Driftwood.Docs,
+    Driftwood.Tags,
+    Driftwood.Locations,
+    Driftwood.SalesOps,
     Driftwood.Marketing,
     Driftwood.Freight,
     Driftwood.Aggregate,
     Driftwood.Operator,
     Driftwood.Chat,
     Driftwood.Primitives,
-    Driftwood.Analytics
+    Driftwood.Analytics,
+    Driftwood.Automation
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…)
@@ -33,13 +40,20 @@ config :samen_core, :ash_domains, [
   Driftwood.Crm,
   Driftwood.Billing,
   Driftwood.Support,
+  Driftwood.Work,
+  Driftwood.Calendar,
+  Driftwood.Docs,
+  Driftwood.Tags,
+  Driftwood.Locations,
+  Driftwood.SalesOps,
   Driftwood.Marketing,
   Driftwood.Freight,
   Driftwood.Aggregate,
   Driftwood.Operator,
   Driftwood.Chat,
   Driftwood.Primitives,
-  Driftwood.Analytics
+  Driftwood.Analytics,
+  Driftwood.Automation
 ]
 
 # WS-A A4/A5 — the kernel notification ENGINE (`Samen.Notifications.Engine`) wired to
@@ -226,6 +240,20 @@ config :samen_core, :non_pii_repo, Driftwood.Repo
 config :samen_core, :verify_repo, Driftwood.Repo
 config :samen_core, :vault_repo, Driftwood.Repo
 
+# T35 §4.7: reveal grants are a CLIENT of the T34 E3 approve/reject engine. Driftwood's
+# own Approval resource (Samen.Approvals.Blueprint.define_approval/5,
+# driftwood/lib/driftwood/approvals.ex) + the "pii_reveal" kind registered to
+# Samen.Reveal.ApprovalHandler — Grants.approve/2 now routes its happy path through
+# Samen.Approvals on this host.
+config :samen_core, Samen.Approvals,
+  approval_resource: Driftwood.Approvals.Approval,
+  repo: Driftwood.Repo
+
+config :samen_core, Samen.Approvals.Registry,
+  kinds: %{
+    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler}
+  }
+
 # The FMCSA dispatch gate reads the CDL vault-token PRESENCE (not plaintext) via a
 # bounded repo query on the pii_vault table (design §4 / OR-7). It needs the repo.
 config :driftwood, :vault_repo, Driftwood.Repo
@@ -272,10 +300,27 @@ config :samen_core, Oban,
     webhooks_out: 5,
     erasure: 1,
     maintenance: 1,
-    reveal: 5
+    reveal: 5,
+    # ADR-039 §4.1/§6.3/§7.3 (T39/T41/T118) — the E1 dispatch/run queue + the E4/E5
+    # timer fan-out queue (a different load shape than rule dispatch, so its own
+    # queue per the blueprint's own moduledoc). Registered so a workflow's manual
+    # "Run now" (T118's builder) and the schedule/reminder/escalation AshOban
+    # triggers actually drain, not just sit `available` forever.
+    automation: 3,
+    automation_timers: 2
   ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
   ]
+
+# ADR-039 §3.2 (T118) — the E1 engine's host-wired seam (the
+# `Samen.Notifications.Engine` convention: config-resolved, opts override). The
+# tenant automation builder (`Samen.Web.Automation.Reads`) never actually relies
+# on this — it always passes explicit `workflow_module:`/`repo:` opts derived
+# from the mount (opts win over config) — this line exists for host-level
+# completeness (a future EventCapture-driven resource_event trigger needs it).
+config :samen_core, Samen.Automation,
+  workflow_module: Driftwood.Automation.Workflow,
+  repo: Driftwood.Repo
 
 import_config "#{config_env()}.exs"

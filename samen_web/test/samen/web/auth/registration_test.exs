@@ -355,7 +355,20 @@ defmodule Samen.Web.Auth.RegistrationTest do
       assert html =~ "registration-submit"
     end
 
-    test "submitting valid params registers and shows the generic confirmation" do
+    test "the rendered form carries a REAL method=post action (no native GET password leak — T110)" do
+      mount = build_mount(:auth)
+      html = mount_smoke(RegistrationLive, mount)
+
+      # The escalation (persona F1): without these attrs a no-JS browser submits
+      # a native GET, putting `registration[password]=…` in the URL. The form
+      # MUST declare a real POST action so the credential rides the body.
+      assert html =~ ~s(method="post")
+      assert html =~ ~s(action="/signup")
+      # And a password field is present (so the assertion is not vacuous).
+      assert html =~ ~s(type="password")
+    end
+
+    test "submitting valid params arms the real browser POST (phx-trigger-action), never registering inline — T110" do
       mount = build_mount(:auth)
       session = mount_session(mount)
       {:ok, socket} = RegistrationLive.mount(%{}, session, %Phoenix.LiveView.Socket{})
@@ -371,17 +384,17 @@ defmodule Samen.Web.Auth.RegistrationTest do
       {:noreply, socket} =
         RegistrationLive.handle_event("register", %{"registration" => params}, socket)
 
-      assert socket.assigns.registered?
-      assert socket.assigns.flash_ok =~ "Check your inbox"
+      # The JS path validates inline then ARMS the real browser POST to
+      # `AccountController.register/2`; the LiveView itself never mutates (single
+      # authority — a no-JS submit hits that SAME controller). The real
+      # registration is proven end-to-end in account_controller_test.exs.
+      assert socket.assigns.trigger_submit
       assert socket.assigns.error == nil
-
-      html = render_html(RegistrationLive, socket.assigns)
-      assert html =~ "Check your inbox"
-      # Registration was real: the Org exists.
-      assert find_org_by_name(params["org_name"]) != []
+      refute socket.assigns.registered?
+      assert find_org_by_name(params["org_name"]) == []
     end
 
-    test "submitting a weak password shows the rejection, WITHOUT the account-existence oracle wording" do
+    test "submitting a weak password shows the inline rejection and does NOT arm the POST (no oracle wording)" do
       mount = build_mount(:auth)
       session = mount_session(mount)
       {:ok, socket} = RegistrationLive.mount(%{}, session, %Phoenix.LiveView.Socket{})
@@ -398,6 +411,7 @@ defmodule Samen.Web.Auth.RegistrationTest do
         RegistrationLive.handle_event("register", %{"registration" => params}, socket)
 
       refute socket.assigns.registered?
+      refute socket.assigns.trigger_submit
       assert socket.assigns.error =~ "Password"
       assert find_org_by_name(params["org_name"]) == []
     end

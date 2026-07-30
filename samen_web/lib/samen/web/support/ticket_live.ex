@@ -109,7 +109,7 @@ defmodule Samen.Web.Support.TicketLive do
 
     socket
     |> ensure_return_to()
-    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, ticket: nil, conversations: [], agents: [], active_tab: current_tab)
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, ticket: nil, ticket_tags: [], conversations: [], agents: [], active_tab: current_tab)
     |> assign(reply_form: nil)
     |> assign_new(:status_error, fn -> nil end)
   end
@@ -118,7 +118,7 @@ defmodule Samen.Web.Support.TicketLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
-    {ticket, conversations, agents} =
+    {ticket, ticket_tags, conversations, agents} =
       if ticket_id do
         t =
           case Reads.get_ticket(mount, scope, ticket_id) do
@@ -126,11 +126,12 @@ defmodule Samen.Web.Support.TicketLive do
             :error -> nil
           end
 
+        tags = if t, do: Reads.ticket_tag_names(mount, scope, ticket_id), else: []
         convs = if t, do: Reads.conversations_for_ticket(mount, scope, ticket_id), else: []
         ags = Reads.agents(mount, scope)
-        {t, convs, ags}
+        {t, tags, convs, ags}
       else
-        {nil, [], []}
+        {nil, [], [], []}
       end
 
     current_tab = Map.get(socket.assigns, :active_tab, "conversation")
@@ -141,6 +142,7 @@ defmodule Samen.Web.Support.TicketLive do
       no_org: false,
       org_id: org_id,
       ticket: ticket,
+      ticket_tags: ticket_tags,
       conversations: conversations,
       agents: agents,
       active_tab: current_tab
@@ -338,7 +340,7 @@ defmodule Samen.Web.Support.TicketLive do
                     </tr>
                     <tr style="border-bottom:1px solid var(--border)">
                       <td style="padding:10px 0;color:var(--muted)">Tags</td>
-                      <td style="padding:10px 0;font-size:12px;color:var(--muted)">{tags_label(@ticket.tags)}</td>
+                      <td style="padding:10px 0;font-size:12px;color:var(--muted)">{tags_label(@ticket_tags)}</td>
                     </tr>
                   </table>
 

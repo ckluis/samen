@@ -10,12 +10,24 @@ defmodule Samen.Web.Auth.ResetLive do
   token (it can be retried against the same link); an invalid/expired/
   already-used token renders the SAME generic message RegistrationLive's
   weak-password path never leaks into an account-existence oracle.
+
+  ## No-JS HTTP fallback (T110)
+
+  The reset `:token` is legitimately PART of the URL path (`/reset/:token` —
+  that's how the link arrives), but the NEW PASSWORD must never be. The form
+  carries a REAL `action="/reset/:token"` + `method="post"` so a no-JS browser
+  POSTs the password in the BODY to `Samen.Web.Auth.AccountController.reset/2`
+  (never a GET query string). On the JS path, `phx-submit` does a cheap inline
+  password-length check for UX, then arms `phx-trigger-action` to fire that
+  SAME POST — the authoritative `Reset.consume/3` mutation lives in the
+  controller. Status returns as `?reset=1` / `?error=weak_password` /
+  `?error=invalid_token`, read in `handle_params/3`.
   """
   use Phoenix.LiveView
 
   import Samen.UI
 
-  alias Samen.Identity.Reset
+  alias Samen.Auth.PasswordPolicy
   alias Samen.Web.Mount
 
   @impl true
@@ -26,55 +38,53 @@ defmodule Samen.Web.Auth.ResetLive do
 
   @doc false
   def load(socket, token) do
-    assign(socket, token: token, form: blank_form(), error: nil, flash_ok: nil, reset?: false)
+    assign(socket, token: token, form: blank_form(), error: nil, flash_ok: nil, reset?: false, trigger_submit: false)
   end
 
   @impl true
-  def handle_event("reset", %{"reset" => %{"password" => password}}, socket) do
-    mount = socket.assigns.samen_mount
+  def handle_params(%{"reset" => "1"}, _uri, socket) do
+    {:noreply,
+     assign(socket,
+       reset?: true,
+       error: nil,
+       flash_ok: "Your password has been reset. Every other session was signed out — sign in again."
+     )}
+  end
 
-    case Reset.consume(socket.assigns.token, password, mods(mount)) do
-      {:ok, _credential} ->
+  def handle_params(%{"error" => "weak_password"}, _uri, socket) do
+    {:noreply, assign(socket, error: "Password must be at least #{PasswordPolicy.min_length()} characters.")}
+  end
+
+  def handle_params(%{"error" => "invalid_token"}, _uri, socket) do
+    {:noreply, assign(socket, error: "This link is invalid or has expired.")}
+  end
+
+  def handle_params(%{"error" => _}, _uri, socket) do
+    {:noreply, assign(socket, error: "Something went wrong. Please try again.")}
+  end
+
+  def handle_params(_params, _uri, socket), do: {:noreply, socket}
+
+  @impl true
+  def handle_event("reset", %{"reset" => %{"password" => password}} = params, socket) do
+    # JS-connected path: inline password-length check for UX, then arm the real
+    # POST. The authoritative `Reset.consume/3` runs in
+    # `Samen.Web.Auth.AccountController.reset/2`, which a no-JS submit hits.
+    case PasswordPolicy.validate(password) do
+      :ok ->
+        {:noreply, assign(socket, form: to_form(params["reset"], as: :reset), error: nil, trigger_submit: true)}
+
+      {:error, _weak} ->
         {:noreply,
          assign(socket,
-           form: blank_form(),
-           error: nil,
-           reset?: true,
-           flash_ok: "Your password has been reset. Every other session was signed out — sign in again."
+           error: "Password must be at least #{PasswordPolicy.min_length()} characters.",
+           flash_ok: nil,
+           trigger_submit: false
          )}
-
-      {:error, :weak_password} ->
-        {:noreply,
-         assign(socket,
-           error: "Password must be at least #{Samen.Auth.PasswordPolicy.min_length()} characters.",
-           flash_ok: nil
-         )}
-
-      {:error, :invalid_token} ->
-        {:noreply,
-         assign(socket,
-           error: "This link is invalid or has expired.",
-           flash_ok: nil
-         )}
-
-      {:error, _reason} ->
-        {:noreply, assign(socket, error: "Something went wrong. Please try again.", flash_ok: nil)}
     end
   end
 
-  defp mods(%Mount{} = mount) do
-    %{
-      credential: Mount.resource(mount, Credential),
-      auth_token: Mount.resource(mount, AuthToken),
-      session: Mount.resource(mount, Session),
-      # ADR-035 §5 A10 (T09) — optional notify seam (`Samen.Identity.Reset`'s
-      # `mods[:user]`): wires the real `GET/PUT /reset/:token` surface to the
-      # security-notice notification, in addition to the existing
-      # `password_reset` audit.
-      user: Mount.resource(mount, User),
-      repo: mount.repo
-    }
-  end
+  defp reset_action(%Mount{} = mount, token), do: "#{Mount.label(mount, :reset_path, "/reset")}/#{token}"
 
   defp blank_form, do: to_form(%{}, as: :reset)
 
@@ -90,7 +100,17 @@ defmodule Samen.Web.Auth.ResetLive do
         <p :if={@flash_ok} id="reset-ok" style="color:#15803D;margin:8px 0">{@flash_ok}</p>
         <p :if={@error} id="reset-error" style="color:#B91C1C;margin:8px 0">{@error}</p>
 
-        <.simple_form :if={not @reset?} for={@form} id="reset-form" phx-submit="reset">
+        <.simple_form
+          :if={not @reset?}
+          for={@form}
+          id="reset-form"
+          action={reset_action(@samen_mount, @token)}
+          method="post"
+          phx-submit="reset"
+          phx-trigger-action={@trigger_submit}
+        >
+          <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+
           <.form_field field={@form[:password]} label="New password" type="password" required />
 
           <:actions>

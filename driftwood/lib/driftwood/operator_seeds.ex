@@ -378,7 +378,6 @@ defmodule Driftwood.OperatorSeeds do
             status: :open,
             priority: priority,
             sla_id: sla.id,
-            tags: ["platform"],
             custom: %{"requester_org_id" => tid, "requester_user_id" => admin.id}
           },
           actor: %{org_id: @operator_org_id, role: :member},

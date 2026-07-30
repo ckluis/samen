@@ -92,16 +92,22 @@ defmodule Samen.Web.CRM.ContactLive do
     %{samen_mount: mount, org_id: org_id, contact_id: contact_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
 
+    # ADR-041 §6.1: the composer now writes a canonical Work Task anchored to this
+    # (same-org, OrgScope-loaded) contact via the generic `(subject_key, subject_id)`
+    # object-ref — NOT a CRM FK. Server-side facts, never client input. (custom.crm_refs
+    # is a migration-only preservation bag; a new single-anchor task needs only the
+    # primary anchor, and the Tier-1 custom bag rejects unregistered keys on an Ash write.)
     params =
       Map.merge(params, %{
         "status" => "completed",
         "completed_at" => DateTime.utc_now() |> DateTime.truncate(:second),
-        "person_id" => contact_id,
+        "subject_key" => "crm.person",
+        "subject_id" => contact_id,
         "org_id" => org_id
       })
 
     case AshPhoenix.Form.submit(socket.assigns.activity_form, params: params) do
-      {:ok, _activity} ->
+      {:ok, _task} ->
         {:noreply,
          assign(socket,
            activity_form: activity_form(mount, scope),
@@ -145,9 +151,13 @@ defmodule Samen.Web.CRM.ContactLive do
     end
   end
 
-  # FAIL-HONEST delete: navigate away ONLY when the destroy actually happened. The
-  # kernel defines no cascade — a contact with linked activities is refused by the DB
-  # (FK) and the refusal is SURFACED, never a silent no-op that navigates anyway.
+  # ADR-040 §5.9/T37c: `Person` is `archivable true`, so `Reads.delete_contact/3`'s
+  # `Ash.destroy/2` now rides the default SOFT destroy (T36) — this sets
+  # `archived_at` rather than removing the row (INV-1: the archived row still
+  # masks its vault fields per plane, unchanged by this handler). No cascade is
+  # declared for CRM (§5.4), so linked attachments are untouched and the destroy
+  # is never refused on their account; any `{:error, _}` here is a genuine
+  # failure (e.g. an authorization denial), not the old FK-refusal case.
   def handle_event("delete_contact", %{"id" => id}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
@@ -157,10 +167,7 @@ defmodule Samen.Web.CRM.ContactLive do
         {:noreply, push_navigate(socket, to: contacts_path(mount, org_id))}
 
       {:error, _reason} ->
-        {:noreply,
-         assign(socket,
-           delete_error: "Could not delete this contact — it still has linked records (activities)."
-         )}
+        {:noreply, assign(socket, delete_error: "Could not delete this contact.")}
     end
   end
 
@@ -239,8 +246,11 @@ defmodule Samen.Web.CRM.ContactLive do
     |> to_form()
   end
 
+  # The log-activity composer writes a canonical Work Task (ADR-041 §6.1) — the CRM
+  # timeline is a client of the Work scope through the generic object-ref anchor. The
+  # Task resource is derived from this CRM mount's host root (Reads.work_task_resource/1).
   defp activity_form(mount, scope) do
-    Mount.resource(mount, Activity)
+    Reads.work_task_resource(mount)
     |> AshPhoenix.Form.for_create(:create, scope: scope, as: "activity")
     |> to_form()
   end
@@ -447,12 +457,12 @@ defmodule Samen.Web.CRM.ContactLive do
     <div style="padding:14px 16px;border-bottom:1px solid var(--border)">
       <.simple_form :let={f} for={@activity_form} id="log-activity-form" phx-change="validate_activity" phx-submit="log_activity">
         <.form_field
-          field={f[:type]}
+          field={f[:kind]}
           label="Type"
           type="select"
           options={[{"Note", "note"}, {"Call", "call"}, {"Email", "email"}, {"Meeting", "meeting"}, {"Task", "task"}]}
         />
-        <.form_field field={f[:subject]} label="Subject" placeholder="Subject (e.g. Check call — ETA confirmed)" />
+        <.form_field field={f[:title]} label="Subject" placeholder="Subject (e.g. Check call — ETA confirmed)" />
         <.form_field field={f[:body]} label="Details" type="textarea" rows="2" placeholder="Details…" />
         <:actions>
           <.button variant="primary" type="submit">Log activity</.button>
@@ -490,22 +500,26 @@ defmodule Samen.Web.CRM.ContactLive do
   defp to_title(str) when is_binary(str), do: str
   defp to_title(_), do: "Contact"
 
-  defp timeline_entries(activities) do
-    Enum.map(activities, fn a ->
+  # Project the migrated/created Work Task onto the EXISTING timeline entry keys
+  # (ADR-041 §6.1): task.kind → :type (drives the glyph via object.ex:206), task.title →
+  # :subject, task.completed_at || inserted_at → :at, custom["author"] → :who. The
+  # presentational `Samen.UI.Object.timeline/1` is UNCHANGED — same output shape.
+  defp timeline_entries(tasks) do
+    Enum.map(tasks, fn t ->
       %{
-        id: a.id,
-        type: a.type,
-        subject: a.subject,
-        body: a.body,
-        status: a.status,
-        at: a.completed_at || Map.get(a, :inserted_at),
-        who: activity_author(a)
+        id: t.id,
+        type: t.kind,
+        subject: t.title,
+        body: t.body,
+        status: t.status,
+        at: t.completed_at || Map.get(t, :inserted_at),
+        who: task_author(t)
       }
     end)
   end
 
-  defp activity_author(%{custom: custom}) when is_map(custom), do: Map.get(custom, "author")
-  defp activity_author(_), do: nil
+  defp task_author(%{custom: custom}) when is_map(custom), do: Map.get(custom, "author")
+  defp task_author(_), do: nil
 
   defp stage_label(%{__stage__: %{label: label}}) when is_binary(label), do: label
   defp stage_label(%{__stage__: %{name: name}}) when is_binary(name), do: name

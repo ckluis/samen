@@ -202,4 +202,101 @@ defmodule Samen.Web.CRMContactsCrudTest do
     # never rejected (tautology) the operator red path above would fail instead.
     assert person_count(org_id) == 1
   end
+
+  # ---------------------------------------------------------------------------
+  # T37h (ADR-040 §5.8) — archive/restore/archived-filter toggle, generated "for
+  # free" by `Samen.Web.ListLive` (the SAME framework mixin `Samen.Web.Billing.
+  # PlansLive` uses — no per-vertical hand-wiring here beyond one `Reads.contacts_page/3`
+  # line honoring `state.show_archived`, per that module's own moduledoc). Doubles as
+  # the INV-1 UI proof: an archived Person's vault fields still mask on the operator
+  # plane through the SAME `Samen.Api.PiiResolution` path a live row uses.
+  # ---------------------------------------------------------------------------
+
+  alias Samen.Web.ListLive
+
+  defp list_event(socket, name, params) do
+    {:noreply, socket} = ListLive.handle_list_event(name, params, socket)
+    socket
+  end
+
+  defp archived_person(id) do
+    Samen.WebTest.Crm.Person
+    |> Ash.Query.for_read(:archived)
+    |> Ash.read!(authorize?: false)
+    |> Enum.find(&(&1.id == id))
+  end
+
+  describe "T37h — archive → hidden → toggle shows it (trash view) → restore → visible again" do
+    test "an archived contact is hidden by default, appears in the toggled trash view with Restore (not Edit/Delete), and restore returns it to the live view" do
+      org_id = Ash.UUID.generate()
+
+      {:ok, person} =
+        Samen.WebTest.Crm.Person
+        |> Ash.Changeset.for_create(
+          :create,
+          %{org_id: org_id, full_name: %{first: "Trash", last: "Bound"}, display_name: "Trash Bound"},
+          authorize?: false
+        )
+        |> Ash.create()
+
+      socket = mount_socket(org_id) |> event("delete", %{"id" => person.id})
+      assert archived_person(person.id).archived_at
+      refute html(socket) =~ ~s(phx-value-id="#{person.id}")
+
+      # Toggle ON: `Reads.contacts_page/3` switches to the `:archived` trash-only read.
+      socket = list_event(socket, "toggle_archived", %{})
+      assert socket.assigns.list_state.show_archived
+      rendered = html(socket)
+      assert rendered =~ ~s(phx-value-id="#{person.id}")
+      assert rendered =~ "archived"
+      assert rendered =~ ~s(phx-click="restore" phx-value-id="#{person.id}")
+      refute rendered =~ ~s(phx-click="delete" phx-value-id="#{person.id}")
+
+      # Restore — Person is only RoleAtLeast :member-gated (no elevation needed,
+      # unlike Plan), so the plain list scope suffices (write_scope defaults identity).
+      socket = list_event(socket, "restore", %{"id" => person.id})
+      refute Ash.get!(Samen.WebTest.Crm.Person, person.id, authorize?: false).archived_at
+
+      # Gone from the trash view (graduated back to live) …
+      refute html(socket) =~ ~s(phx-value-id="#{person.id}")
+
+      # … and back on the default (live) view with the normal delete affordance.
+      socket = list_event(socket, "toggle_archived", %{})
+      rendered = html(socket)
+      assert rendered =~ ~s(phx-click="delete" phx-value-id="#{person.id}")
+      refute rendered =~ ~s(phx-click="restore" phx-value-id="#{person.id}")
+    end
+
+    test "INV-1: an archived contact's PII still masks on the operator plane (••••, no vault token) in the toggled trash view" do
+      %{org_id: org_id} = Seeds.seed_all()
+
+      tenant_socket = mount_socket(org_id)
+      [seeded] = tenant_socket.assigns.page.items
+      _ = event(tenant_socket, "delete", %{"id" => seeded.id})
+      assert archived_person(seeded.id).archived_at
+
+      operator_socket =
+        mount_socket(org_id, plane: :operator, target_org_id: org_id)
+        |> list_event("toggle_archived", %{})
+
+      # Non-vacuous: the archived row IS present in the operator's trash view (the
+      # row's `<tr id="contacts-row-...">` is unconditional — the write-affordance
+      # `<td>` restore/delete are `writable?`-gated and absent for operator, same
+      # posture as every other write on this page, unrelated to whether the ROW
+      # itself renders).
+      assert Enum.any?(operator_socket.assigns.page.items, &(&1.id == seeded.id))
+      rendered = html(operator_socket)
+      assert rendered =~ ~s(id="contacts-row-#{seeded.id}")
+      refute rendered =~ ~s(phx-click="restore")
+      refute rendered =~ ~s(phx-click="delete")
+
+      # Masked, never plaintext, never a raw vault token — archiving never bypasses
+      # Samen.Api.PiiResolution (the read-side resolver runs identically on the
+      # `:archived` query, same as any other read).
+      assert rendered =~ "••••"
+      refute rendered =~ Seeds.contact_full_name()
+      refute rendered =~ Seeds.contact_email()
+      refute rendered =~ "vt_"
+    end
+  end
 end

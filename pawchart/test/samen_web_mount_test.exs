@@ -280,8 +280,7 @@ defmodule PawChart.SamenWebMountTest do
             status: :open,
             priority: :high,
             sla_id: sla.id,
-            sla_breach_at: DateTime.add(now, sla.resolve_minutes * 60, :second),
-            tags: ["clinic-support"]
+            sla_breach_at: DateTime.add(now, sla.resolve_minutes * 60, :second)
           },
           actor: member,
           authorize?: false

@@ -57,6 +57,30 @@ defmodule Samen.Web.Auth.TotpEnrollLive do
   def load(socket, params) do
     credential_id = params["credential_id"] || socket.assigns[:samen_credential_id]
     mount = socket.assigns.samen_mount
+
+    cond do
+      # T110 — the no-JS POST confirm/regenerate redirected back here after
+      # enrolling; render the "enabled" state and the ONE-TIME recovery codes
+      # (handed over via flash — never a URL). `?error=1` re-shows the setup form
+      # with the generic failure copy; `?disabled=1` (and the default) show setup.
+      params["enrolled"] == "1" ->
+        assign(socket,
+          credential_id: credential_id,
+          raw_secret: nil,
+          provisioning_uri: nil,
+          confirm_form: to_form(%{}, as: :totp_enroll),
+          error: nil,
+          enrolled?: true,
+          recovery_codes: flash_recovery_codes(socket)
+        )
+
+      true ->
+        error = if params["error"] == "1", do: "That code didn't verify — try the current code from your app.", else: nil
+        setup(socket, credential_id, mount, error)
+    end
+  end
+
+  defp setup(socket, credential_id, mount, error) do
     raw_secret = Totp.generate_secret()
 
     assign(socket,
@@ -64,10 +88,22 @@ defmodule Samen.Web.Auth.TotpEnrollLive do
       raw_secret: raw_secret,
       provisioning_uri: Totp.provisioning_uri(raw_secret, enroll_label(credential_id), issuer(mount)),
       confirm_form: to_form(%{}, as: :totp_enroll),
-      error: nil,
+      error: error,
       enrolled?: false,
       recovery_codes: nil
     )
+  end
+
+  # One-time recovery codes handed over by `TotpEnrollController` via flash (a
+  # signed, same-user, single-use channel — never a URL). Read defensively: a
+  # directly-constructed test socket carries no `:flash` assign.
+  defp flash_recovery_codes(socket) do
+    with %{} = flash <- socket.assigns[:flash],
+         joined when is_binary(joined) and joined != "" <- Phoenix.Flash.get(flash, :totp_recovery_codes) do
+      String.split(joined, "\n")
+    else
+      _ -> nil
+    end
   end
 
   @impl true
@@ -140,6 +176,10 @@ defmodule Samen.Web.Auth.TotpEnrollLive do
     :ok
   end
 
+  # T110 — the real `<form action=>` for the no-JS enroll POST, built off the
+  # settings mount path (host-overridable) so it matches the paired POST route.
+  defp enroll_action(%Mount{} = mount), do: "#{Mount.label(mount, :settings_path, "/settings")}/security/2fa"
+
   defp enroll_label(nil), do: "Samen"
   defp enroll_label(credential_id), do: "Samen:#{credential_id}"
 
@@ -165,7 +205,15 @@ defmodule Samen.Web.Auth.TotpEnrollLive do
           </p>
           <p id="totp-enroll-secret" style="font-family:monospace">{@raw_secret |> Base.encode32(padding: false)}</p>
 
-          <.simple_form for={@confirm_form} id="totp-enroll-confirm-form" phx-submit="confirm">
+          <.simple_form
+            for={@confirm_form}
+            id="totp-enroll-confirm-form"
+            action={enroll_action(@samen_mount)}
+            method="post"
+            phx-submit="confirm"
+          >
+            <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+            <input type="hidden" name="totp_secret" value={Base.encode32(@raw_secret, padding: false)} />
             <.form_field field={@confirm_form[:code]} label="Enter the current code to confirm" type="text" required />
             <:actions>
               <.button type="submit" variant="primary" id="totp-enroll-confirm">Confirm and enable</.button>
@@ -188,12 +236,14 @@ defmodule Samen.Web.Auth.TotpEnrollLive do
             </ul>
           </div>
 
-          <button type="button" phx-click="regenerate_recovery_codes" id="totp-regenerate-codes" class="btn">
-            Regenerate recovery codes
-          </button>
-          <button type="button" phx-click="disable" id="totp-disable" class="btn">
-            Disable two-factor authentication
-          </button>
+          <form action={"#{enroll_action(@samen_mount)}/recovery_codes"} method="post" phx-submit="regenerate_recovery_codes" style="display:inline">
+            <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+            <button type="submit" id="totp-regenerate-codes" class="btn">Regenerate recovery codes</button>
+          </form>
+          <form action={"#{enroll_action(@samen_mount)}/disable"} method="post" phx-submit="disable" style="display:inline">
+            <input type="hidden" name="_csrf_token" value={Phoenix.Controller.get_csrf_token()} />
+            <button type="submit" id="totp-disable" class="btn">Disable two-factor authentication</button>
+          </form>
         </div>
       </div>
     </div>

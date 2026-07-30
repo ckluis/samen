@@ -13,13 +13,14 @@ defmodule Demo.CmsScopePolicyMatrixTest do
     * admin-gate on publish (draft→publish workflow);
     * member cannot publish (RBAC red path);
     * Tier-0 config rows (Navigation) — admin-gated writes;
-    * ContentVersion is append-only (no :update/:destroy actions);
+    * E7 content history (`versioned: :snapshot`) — a page/post/block write records a
+      `<Resource>.Version` row automatically, org-scoped and cross-org invisible;
     * PII — no vault-routed PII in this scope (all fields non-PII).
   """
   use Demo.DataCase, async: false
   use ExUnitProperties
 
-  alias Demo.CmsScope.{Page, Post, Block, Media, Navigation, SeoMeta, ContentVersion}
+  alias Demo.CmsScope.{Page, Post, Block, Media, Navigation, SeoMeta}
   alias Demo.Identity.{Org, User}
 
   # --- helpers ---------------------------------------------------------------
@@ -83,20 +84,11 @@ defmodule Demo.CmsScopePolicyMatrixTest do
     nav
   end
 
-  defp mk_content_version(org_id, page_id, version_number \\ 1) do
-    {:ok, version} =
-      ContentVersion
-      |> Ash.Changeset.for_create(:create_version, %{
-        subject_type: "page",
-        subject_id: page_id,
-        content_snapshot: %{"title" => "Draft", "body" => "v#{version_number}"},
-        status: :draft,
-        author_id: org_id,
-        version_number: version_number,
-        org_id: org_id
-      })
-      |> Ash.create(authorize?: false)
-    version
+  # Read the E7 version rows for an org (tenant-plane, org-scoped read).
+  defp page_versions(actor) do
+    Page.Version
+    |> Ash.Query.select([:id, :version_source_id, :org_id])
+    |> Ash.read(actor: actor, authorize?: true)
   end
 
   # =========================================================================
@@ -244,27 +236,32 @@ defmodule Demo.CmsScopePolicyMatrixTest do
     assert {:error, %Ash.Error.Forbidden{}} = result
   end
 
-  test "an admin can archive a page" do
+  # NOTE: `:archive` was renamed to `:mark_archived` (T37b, ADR-040 §5.9) — the
+  # E6 soft-delete substrate now owns the `:archive` name (a real soft-destroy,
+  # `archived_at`). This is the pre-existing content-status transition
+  # (`status` -> `:archived`), unrelated to soft-delete; see
+  # `Samen.Scopes.Cms.Blueprint` moduledoc "The `:archive` name collision".
+  test "an admin can mark a page's content-status archived" do
     org = mk_org("cms-archive")
     admin_scope = mk_actor(org.id, :admin)
     page = mk_page(org.id, "To Archive")
 
     assert {:ok, archived} =
              page
-             |> Ash.Changeset.for_update(:archive, %{})
+             |> Ash.Changeset.for_update(:mark_archived, %{})
              |> Ash.update(actor: admin_scope.actor, authorize?: true)
 
     assert archived.status == :archived
   end
 
-  test "a member cannot archive a page (admin-gate RBAC red path)" do
+  test "a member cannot mark a page's content-status archived (admin-gate RBAC red path)" do
     org = mk_org("cms-member-archive")
     member_scope = mk_actor(org.id, :member)
     page = mk_page(org.id, "To Archive By Member")
 
     result =
       page
-      |> Ash.Changeset.for_update(:archive, %{})
+      |> Ash.Changeset.for_update(:mark_archived, %{})
       |> Ash.update(actor: member_scope.actor, authorize?: true)
 
     assert {:error, %Ash.Error.Forbidden{}} = result
@@ -351,72 +348,58 @@ defmodule Demo.CmsScopePolicyMatrixTest do
   end
 
   # =========================================================================
-  # ContentVersion: append-only. No :update or :destroy actions.
+  # E7 content history (ADR-040 §6.5, T119): `versioned: :snapshot` replaces the
+  # retired bespoke ContentVersion. A page/post/block write records a
+  # `<Resource>.Version` row AUTOMATICALLY — no caller invokes it — and version
+  # history is OrgScope-bounded (§6.2).
   # =========================================================================
 
-  test "content versions are org-scoped and readable" do
+  test "a page write records a Page.Version row automatically (E7), read org-scoped" do
     org = mk_org("cms-version-read")
     admin_scope = mk_actor(org.id, :admin)
     page = mk_page(org.id, "Versioned Page")
-    _version = mk_content_version(org.id, page.id)
 
-    query = ContentVersion |> Ash.Query.select([:id, :subject_id, :version_number])
-    {:ok, versions} = Ash.read(query, actor: admin_scope.actor, authorize?: true)
+    # No manual create_version call — E7 versioned the create by construction.
+    {:ok, versions} = page_versions(admin_scope.actor)
     assert length(versions) >= 1
-    assert hd(versions).subject_id == page.id
+    assert Enum.any?(versions, &(&1.version_source_id == page.id))
   end
 
-  test "content versions are cross-org invisible" do
+  test "an update records a second version (full-row :snapshot), history accrues" do
+    org = mk_org("cms-version-accrue")
+    admin_scope = mk_actor(org.id, :admin)
+    page = mk_page(org.id, "Accruing Page")
+
+    page
+    |> Ash.Changeset.for_update(:update, %{body: "edited body"})
+    |> Ash.update!(authorize?: false)
+
+    {:ok, versions} = page_versions(admin_scope.actor)
+    mine = Enum.filter(versions, &(&1.version_source_id == page.id))
+    assert length(mine) == 2, "create + update each recorded a Page.Version snapshot"
+  end
+
+  test "Page.Version history is cross-org invisible (§6.2 OrgScope)" do
     org_a = mk_org("cms-ver-xa")
     org_b = mk_org("cms-ver-xb")
     scope_a = mk_actor(org_a.id, :admin)
-    page_b = mk_page(org_b.id, "B Page")
-    mk_content_version(org_b.id, page_b.id)
+    _page_b = mk_page(org_b.id, "B Page")
 
-    query = ContentVersion |> Ash.Query.select([:id, :org_id])
-    {:ok, seen} = Ash.read(query, actor: scope_a.actor, authorize?: true)
+    {:ok, seen} = page_versions(scope_a.actor)
     seen_orgs = seen |> Enum.map(& &1.org_id) |> Enum.uniq()
-    refute org_b.id in seen_orgs
+    refute org_b.id in seen_orgs, "operator of org A must not see org B's version rows"
   end
 
-  test "ContentVersion has NO :update action (immutable history — red path)" do
-    # The resource should have no :update action by design.
-    actions = Ash.Resource.Info.actions(ContentVersion)
-    action_names = Enum.map(actions, & &1.name)
-
-    # There must be NO :update action (immutable append-only history).
-    refute :update in action_names,
-           "ContentVersion must NOT have an :update action — it is immutable history"
-  end
-
-  test "ContentVersion has NO :destroy action (immutable history — red path)" do
-    actions = Ash.Resource.Info.actions(ContentVersion)
-    action_names = Enum.map(actions, & &1.name)
-
-    refute :destroy in action_names,
-           "ContentVersion must NOT have a :destroy action — it is immutable history"
-  end
-
-  test "ContentVersion can be created (append-only write works)" do
-    org = mk_org("cms-ver-create")
+  test "the archive (:archive) of a page is itself a recorded version (§6.4)" do
+    org = mk_org("cms-ver-archive")
     admin_scope = mk_actor(org.id, :admin)
-    page = mk_page(org.id, "Version Test Page")
+    page = mk_page(org.id, "To Archive")
 
-    assert {:ok, version} =
-             ContentVersion
-             |> Ash.Changeset.for_create(:create_version, %{
-               subject_type: "page",
-               subject_id: page.id,
-               content_snapshot: %{"title" => "Test", "body" => "v1"},
-               status: :draft,
-               author_id: org.id,
-               version_number: 1,
-               org_id: org.id
-             })
-             |> Ash.create(actor: admin_scope.actor, authorize?: true)
+    {:ok, _} = Samen.Archival.archive(page, actor: admin_scope.actor)
 
-    assert version.subject_id == page.id
-    assert version.version_number == 1
+    {:ok, versions} = page_versions(admin_scope.actor)
+    mine = Enum.filter(versions, &(&1.version_source_id == page.id))
+    assert length(mine) >= 2, "create + archive each recorded a Page.Version snapshot"
   end
 
   # =========================================================================

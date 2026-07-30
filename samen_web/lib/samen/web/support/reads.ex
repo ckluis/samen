@@ -61,7 +61,6 @@ defmodule Samen.Web.Support.Reads do
       :sla_breach_at,
       :breached,
       :resolved_at,
-      :tags,
       :sla_id
     ])
     |> Ash.Query.sort(inserted_at: :desc)
@@ -88,7 +87,6 @@ defmodule Samen.Web.Support.Reads do
       :sla_breach_at,
       :breached,
       :resolved_at,
-      :tags,
       :sla_id
     ])
     |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:subject])
@@ -107,7 +105,6 @@ defmodule Samen.Web.Support.Reads do
         :sla_breach_at,
         :breached,
         :resolved_at,
-        :tags,
         :sla_id
       ])
       |> Ash.Query.filter(id == ^id)
@@ -120,6 +117,20 @@ defmodule Samen.Web.Support.Reads do
     end
   rescue
     _ -> :error
+  end
+
+  @doc """
+  Read tag NAMES for one ticket (F4/T46 — the generic-Tag-backed read
+  equivalent of the former `Ticket.tags` array column). Derives the ticket's
+  object-ref key via `ObjectRef.Catalog.key_for/1` (host-agnostic — matches
+  whatever the host's `MigrateTicketTagsToTagScope` migration anchored, e.g.
+  `"support.ticket"` on driftwood/pawchart/samen_web, `"support_scope.ticket"`
+  on demo) and looks up `Samen.Web.Tags.names_for/4`. Fails safe to `[]` if the
+  host has not mounted the Tags scope — never raises.
+  """
+  def ticket_tag_names(mount, scope, ticket_id) do
+    subject_key = Samen.Web.ObjectRef.Catalog.key_for(Mount.resource(mount, Ticket))
+    Samen.Web.Tags.names_for(mount, scope, subject_key, ticket_id)
   end
 
   @doc "Read conversations (+ PII-resolved messages) for a ticket. BOUNDED."
@@ -262,7 +273,20 @@ defmodule Samen.Web.Support.Reads do
     e -> {:error, e}
   end
 
-  @doc "Destroy one support ticket for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
+  @doc """
+  Archive one support ticket for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`.
+
+  ADR-040 §5.9/T37f: `Ticket` is `archivable true` and the cascade PARENT of `ticket
+  ▸cascade conversation ▸cascade message` (§5.4). Routes through the explicit `:archive`
+  action (not the plain default destroy) so the cascade engages —
+  `Samen.Scopes.Support.CascadeArchive` self-guards on the `:archive` action name
+  specifically (mirroring `Samen.Scopes.Cms.CascadeArchive`'s convention: the plain soft
+  destroy does NOT cascade, only the explicit audited `:archive` does). A ticket with
+  linked conversations/messages is therefore no longer refused — it archives, and its
+  conversations/messages archive with it at the same instant, dropping all of them out of
+  their default (archived-excluding) bounded reads. Any `{:error, _}` here is a genuine
+  failure (e.g. an authorization denial), not the old FK-refusal case.
+  """
   def delete_ticket(mount, scope, id) do
     record =
       Mount.resource(mount, Ticket)
@@ -272,7 +296,7 @@ defmodule Samen.Web.Support.Reads do
 
     case record do
       nil -> {:error, :not_found}
-      ticket -> Ash.destroy(ticket, scope: scope)
+      ticket -> Ash.destroy(ticket, action: :archive, scope: scope)
     end
   rescue
     e -> {:error, e}

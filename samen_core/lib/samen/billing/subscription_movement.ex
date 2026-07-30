@@ -204,7 +204,12 @@ defmodule Samen.Billing.SubscriptionMovement do
       from_status: status_of(before_state),
       to_status: status_of(after_state),
       reason: Keyword.get(extra, :reason, :status_change),
-      occurred_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      # T121: microsecond `occurred_at` (NOT truncated to :second) so movements
+      # appended within the same wall-clock second carry distinct business-time
+      # instants — the ledger read (`occurred_at` ordering) is then a strict total
+      # order that respects chronology. Truncating here would collapse a rapid
+      # lifecycle's movements to one tied key and re-introduce the non-total sort.
+      occurred_at: DateTime.utc_now()
     })
     |> Ash.create!(authorize?: false)
 

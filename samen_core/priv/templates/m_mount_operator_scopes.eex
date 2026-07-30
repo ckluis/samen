@@ -30,6 +30,8 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     # (T04's Session, T06's UserIdentity; T06x integration).
     <%= module %>.Operator.Session,
     <%= module %>.Operator.UserIdentity,
+    # ADR-038 §6.4 (T109) — the durable brute-force failure counter.
+    <%= module %>.Operator.LoginFailure,
     # Billing (operator: tenant subscriptions-to-the-SaaS + the movement ledger)
     <%= module %>.Operator.Customer,
     <%= module %>.Operator.Subscription,
@@ -286,6 +288,25 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
 
     create(unique_index(:<%= o_uid %>_user_identity, [:<%= o_uid %>_provider, :<%= o_uid %>_provider_uid]))
 
+    # --- <%= o_lgf %>_login_failure : the DURABLE brute-force failure counter (org-less;
+    #     ADR-038 §6.4, T109). One row per (key_kind, key_value) — key_value is a
+    #     non-reversible email_bidx HMAC or an opaque credential UUID, never PII. Makes
+    #     the T103-shaped bounded login_failed signal survive a node restart. ---
+    create table(:<%= o_lgf %>_login_failure, primary_key: false) do
+      add(:<%= o_lgf %>_key_kind, :text, null: false)
+      add(:<%= o_lgf %>_key_value, :text, null: false)
+      add(:<%= o_lgf %>_failure_count, :integer, null: false, default: 1)
+      add(:<%= o_lgf %>_window_started_at, :utc_datetime_usec, null: false)
+      add(:<%= o_lgf %>_last_failed_at, :utc_datetime_usec, null: false)
+
+      add(:<%= o_lgf %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_lgf %>_org_id, :uuid)
+      add(:<%= o_lgf %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_lgf %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:<%= o_lgf %>_login_failure, [:<%= o_lgf %>_key_kind, :<%= o_lgf %>_key_value]))
+
     # ADR-035 §3.1 — additive, nullable FK on the already-created <%= o_user %>_user table.
     alter table(:<%= o_user %>_user) do
       add(:<%= o_user %>_credential_id, :uuid)
@@ -321,6 +342,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_plan %>_org_id, :uuid, null: false)
       add(:<%= o_plan %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_plan %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_plan %>_archived_at, :utc_datetime_usec)
     end
 
     create table(:<%= o_price %>_price, primary_key: false) do
@@ -346,6 +368,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_price %>_org_id, :uuid, null: false)
       add(:<%= o_price %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_price %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_price %>_archived_at, :utc_datetime_usec)
     end
 
     create table(:<%= o_sub %>_subscription, primary_key: false) do
@@ -559,6 +582,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_sla %>_org_id, :uuid, null: false)
       add(:<%= o_sla %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_sla %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_sla %>_archived_at, :utc_datetime_usec)
     end
 
     # The ticket's custom bag carries the requester back-references
@@ -571,7 +595,6 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_tick %>_breached, :boolean, default: false, null: false)
       add(:<%= o_tick %>_resolved_at, :utc_datetime)
       add(:<%= o_tick %>_closed_at, :utc_datetime)
-      add(:<%= o_tick %>_tags, {:array, :text}, default: [])
       add(:<%= o_tick %>_custom, :map, default: fragment("'{}'::jsonb"))
       add(:<%= o_tick %>_external_id, :text)
 
@@ -589,6 +612,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_tick %>_org_id, :uuid, null: false)
       add(:<%= o_tick %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_tick %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_tick %>_archived_at, :utc_datetime_usec)
     end
 
     create(
@@ -618,6 +642,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_conv %>_org_id, :uuid, null: false)
       add(:<%= o_conv %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_conv %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_conv %>_archived_at, :utc_datetime_usec)
     end
 
     # The SaaS support AGENT 🔒 (the SaaS's own employee — CLEAR on its own plane).
@@ -634,6 +659,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_agent %>_org_id, :uuid, null: false)
       add(:<%= o_agent %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_agent %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_agent %>_archived_at, :utc_datetime_usec)
     end
 
     create table(:<%= o_msg %>_message, primary_key: false) do
@@ -669,6 +695,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_msg %>_org_id, :uuid, null: false)
       add(:<%= o_msg %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_msg %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_msg %>_archived_at, :utc_datetime_usec)
     end
 
     create table(:<%= o_macro %>_macro, primary_key: false) do
@@ -682,6 +709,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_macro %>_org_id, :uuid, null: false)
       add(:<%= o_macro %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_macro %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_macro %>_archived_at, :utc_datetime_usec)
     end
 
     create table(:<%= o_csat %>_csat, primary_key: false) do
@@ -765,6 +793,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       remove(:<%= o_user %>_credential_id)
     end
 
+    drop(table(:<%= o_lgf %>_login_failure))
     drop(constraint(:<%= o_uid %>_user_identity, "<%= o_uid %>_user_identity_<%= o_uid %>_credential_id_fkey"))
     drop(table(:<%= o_uid %>_user_identity))
     drop(constraint(:<%= o_sess %>_session, "<%= o_sess %>_session_<%= o_sess %>_credential_id_fkey"))
