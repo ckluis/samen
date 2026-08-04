@@ -28,7 +28,8 @@ defmodule Samen.Web.Operator.Reads do
   ## A3 read-bounding + sanctioned writes
 
   The hot lists (Accounts, Desk) read through the paginated `accounts_page/3` /
-  `desk_page/3` (built on `Samen.Web.Reads.page!/3` — BOUNDED BY CONSTRUCTION); every
+  `desk_page/3` (Accounts on the T127 cross-tenant `Samen.Web.Reads.page_operator!/3`, Desk on
+  the org-scoped `Samen.Web.Reads.page!/3` — both BOUNDED BY CONSTRUCTION); every
   join/lookup read carries an explicit `limit(#{200})`. The write side exposes ONLY
   domain-defined actions: the Org anchor create (account provisioning — always-authorized
   by the identity blueprint's bootstrap policy) and the desk `Ticket` create/destroy
@@ -74,10 +75,13 @@ defmodule Samen.Web.Operator.Reads do
   Read ONE keyset page of the operator's ACCOUNTS — the A2 `ListLive` reads contract
   (`(mount, scope, %ListState{}) -> %Page{}`, ADR-016 §3), the A3 retrofit of
   `accounts/3`. The account `Org` rows are the same trusted non-PII grouping read as
-  `account_orgs/2` (`authorize?: false` with an explicit operator-namespace filter —
-  see the moduledoc; `OrgIsSelf` would return only the operator org's own row), routed
-  through `Samen.Web.Reads.page!/3` so the read is BOUNDED BY CONSTRUCTION
-  (`limit(page_size + 1)`, hostile page sizes clamped, keyset-stable).
+  `account_orgs/2` (a DELIBERATE operator-plane cross-tenant read — see the moduledoc;
+  `OrgIsSelf` would return only the operator org's own row), routed through
+  `Samen.Web.Reads.page_operator!/3` (the T127 sanctioned cross-tenant page path), which
+  PINS the read to the operator namespace BY CONSTRUCTION (`account_scope: operator_org_id`
+  → `filter(org_id == ^operator_org_id)`, so it can never span all orgs) and is BOUNDED BY
+  CONSTRUCTION (`limit(page_size + 1)`, hostile page sizes clamped, keyset-stable). A bare
+  `page!/3` `authorize?: false` is refused; the cross-tenant intent is named here instead.
 
   The PII-bearing joins (tenant-admin name/email) resolve exactly as in `accounts/3`:
   `OrgScope` + tenant-plane `PiiResolution` — CLEAR because the SaaS owns population
@@ -98,10 +102,10 @@ defmodule Samen.Web.Operator.Reads do
         page =
           Mount.resource(mount, Org)
           |> Ash.Query.ensure_selected([:name, :slug, :plan, :org_id])
-          |> Ash.Query.filter(org_id == ^operator_org_id and id != ^operator_org_id)
-          |> Samen.Web.Reads.page!(state,
+          |> Ash.Query.filter(id != ^operator_org_id)
+          |> Samen.Web.Reads.page_operator!(state,
             scope: scope,
-            authorize?: false,
+            account_scope: operator_org_id,
             filter_fields: [:name]
           )
 

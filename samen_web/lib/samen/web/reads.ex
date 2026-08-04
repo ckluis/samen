@@ -312,24 +312,85 @@ defmodule Samen.Web.Reads do
   The caller may post-process `page.items` (e.g. `Samen.Api.PiiResolution`) — the
   page struct never touches field values itself.
 
-  `opts` — `:scope` (required) plus `build/3` options, and optionally:
+  ## Org-scope is ON — no caller opt disables it (the T127 boundary)
 
-    * `:authorize?` — passed through to `Ash.read!/2` when present. ONLY for reads
-      that are already sanctioned as trusted framework reads of non-PII grouping rows
-      (e.g. the operator's account `Org` rows, ADR-010 §6 — `OrgIsSelf` would return
-      only the reader's own row). The BOUND is unaffected: the limit is applied by
-      `build/3` regardless of authorization, so an `authorize?: false` page is still
-      bounded by construction.
+  These resources isolate via the `Samen.Policy.OrgScope` POLICY only (no attribute
+  multitenancy), so `authorize?: false` would be OrgScope OFF — a silent read across ALL orgs.
+  `page!/3` therefore does NOT accept an `:authorize?` opt: passing one RAISES `ArgumentError`
+  (loud at the call in dev/test, never a silent cross-org leak in prod). A DELIBERATE
+  operator-plane CROSS-TENANT read (the operator control-plane's own account `Org` book,
+  ADR-010 §6 — where `OrgIsSelf`/`OrgScope` would return only the operator's own row) uses the
+  sibling `page_operator!/3`, which NAMES that intent and PINS the read to a single operator
+  namespace BY CONSTRUCTION. So an unfiltered all-orgs read is structurally impossible from
+  either function — the cross-tenant path must be deliberately, visibly opted into and is always
+  narrowed (see `reads_page_test.exs` "authorize?: false is REFUSED" + "pinned cross-tenant").
+
+  `opts` — `:scope` (required) plus `build/3` options.
   """
   def page!(query, %ListState{} = state, opts) do
+    if Keyword.has_key?(opts, :authorize?) do
+      raise ArgumentError,
+            "page!/3 does not accept :authorize? — these resources isolate via the OrgScope " <>
+              "POLICY only, so authorize?: false would disable the org boundary and silently " <>
+              "read ACROSS ALL orgs (the T127 latent P0). For a DELIBERATE operator-plane " <>
+              "cross-tenant read (the operator's own account namespace), use " <>
+              "Samen.Web.Reads.page_operator!/3, which pins the read to a single operator org " <>
+              "by construction. There is no unfiltered authorize?: false path."
+    end
+
+    page_read!(query, state, opts, scope: Keyword.fetch!(opts, :scope))
+  end
+
+  @doc """
+  Read one keyset page for a DELIBERATE operator-plane CROSS-TENANT read — the operator
+  control-plane's own account `Org` book (ADR-010 §6), where the account rows are OTHER `Org`
+  rows in the operator namespace and the `OrgIsSelf`/`OrgScope` policy would return only the
+  operator's own row. This is the ONE sanctioned `authorize?: false` LIST read; unlike a bare
+  `page!/3` authorize?:false (which is refused), this function NAMES its cross-tenant intent at
+  the call site, so it can never be reached by accident.
+
+  ## Safe by construction — the read is PINNED, never all-orgs
+
+  `:account_scope` (the operator org id) is REQUIRED, and the read is PINNED to it
+  (`filter(org_id == ^account_scope)`) HERE, inside the primitive, BEFORE the bounded keyset
+  build. So even with OrgScope disabled the read can NEVER span all orgs — it is confined to the
+  one named operator namespace. There is NO code path that disables OrgScope without also
+  applying this pin (a nil `:account_scope` is refused), so an accidental all-orgs read is
+  impossible. PII is unaffected: `Org` carries no vault-routed field (name/slug/plan only,
+  ADR-010 §8.3); the PII-bearing joins the operator layer assembles still resolve through
+  `OrgScope` + `PiiResolution` on the tenant plane.
+
+  `opts` — `:scope` (required), `:account_scope` (REQUIRED — the operator org id the read is
+  pinned to; a nil pin is refused) plus `build/3` options.
+  """
+  def page_operator!(query, %ListState{} = state, opts) do
+    scope = Keyword.fetch!(opts, :scope)
+    account_scope = Keyword.fetch!(opts, :account_scope)
+
+    if is_nil(account_scope) do
+      raise ArgumentError,
+            "page_operator!/3 :account_scope must be a non-nil operator org id — it PINS the " <>
+              "cross-tenant read to one operator namespace so it can never span all orgs. A nil " <>
+              "pin would narrow to nothing while implying the read is scoped; pass the " <>
+              "operator org id (T127)."
+    end
+
+    # DELIBERATE operator-plane cross-tenant read (OrgScope disabled via authorize?: false) —
+    # PINNED to the operator namespace by construction (org_id == account_scope), applied BEFORE
+    # the bounded build, so the read is confined to one org and can never fan across all orgs.
+    pinned = Ash.Query.do_filter(Ash.Query.new(query), expr(^ref(:org_id) == ^account_scope))
+
+    page_read!(pinned, state, opts, scope: scope, authorize?: false)
+  end
+
+  # The shared bounded-page assembly for `page!/3` (org-scoped) and `page_operator!/3` (pinned
+  # cross-tenant). `read_opts` is the FULLY-FORMED read authorization: `page!/3` never sets
+  # `authorize?`, so OrgScope is on; `page_operator!/3` sets `authorize?: false` ONLY after
+  # pinning the query to one operator namespace. The BOUND is identical either way — `build/3`
+  # applies `limit(page_size + 1)` regardless of authorization.
+  defp page_read!(query, %ListState{} = state, opts, read_opts) do
     size = bounded_page_size(state.page_size)
     sort = state.sort || {:id, :asc}
-
-    read_opts =
-      case Keyword.fetch(opts, :authorize?) do
-        {:ok, authorize?} -> [scope: Keyword.fetch!(opts, :scope), authorize?: authorize?]
-        :error -> [scope: Keyword.fetch!(opts, :scope)]
-      end
 
     records = query |> build(state, opts) |> Ash.read!(read_opts)
 

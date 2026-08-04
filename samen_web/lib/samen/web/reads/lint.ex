@@ -23,9 +23,9 @@ defmodule Samen.Web.Reads.Lint do
 
     * `Ash.Query.limit(...)` — the explicit cap (`@detail_limit` / `@lookup_limit` /
       `limit(1)` single-id reads);
-    * `Samen.Web.Reads.page!(...)` or `Samen.Web.Reads.build(...)` (any alias ending in
-      `Reads`) — the keyset builder, which applies `limit(page_size + 1)` by
-      construction.
+    * `Samen.Web.Reads.page!(...)`, `Samen.Web.Reads.page_operator!(...)`, or
+      `Samen.Web.Reads.build(...)` (any alias ending in `Reads`) — the keyset builder, which
+      applies `limit(page_size + 1)` by construction.
 
   Aggregate reads (`Ash.count!`/`Ash.sum!`/`Ash.aggregate`) transfer a scalar, never a
   row set — they are bounded by construction and not flagged.
@@ -46,7 +46,7 @@ defmodule Samen.Web.Reads.Lint do
   alias Samen.Web.Reads.UnboundedReadError
 
   @read_funs [:read!, :read, :read_one!, :read_one, :stream!]
-  @bound_funs [:page!, :build]
+  @bound_funs [:page!, :page_operator!, :build]
 
   @doc """
   The reads modules under lint: every `reads.ex` beneath `lib/samen/web/` in the
