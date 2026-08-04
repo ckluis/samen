@@ -375,6 +375,7 @@
       "wos": "Samen.WebTest.Operator.Session",
       "wot": "Samen.WebTest.Operator.AuthToken",
       "wtt": "Samen.WebTest.Tags.Tag",
+      "wvs": "Samen.WebTest.Views.SavedView",
       "wwa": "Samen.WebTest.Automation.Workflow",
       "wwp": "Samen.WebTest.Work.Project",
       "wwt": "Samen.WebTest.Work.Task"

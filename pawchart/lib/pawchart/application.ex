@@ -11,7 +11,12 @@ defmodule PawChart.Application do
     repo_children =
       if Application.get_env(:pawchart, :start_repo?, true) do
         Samen.Observability.child_specs(:pawchart) ++
-          [PawChart.Repo, {Oban, Application.fetch_env!(:samen_core, Oban)}]
+          [
+            PawChart.Repo,
+            # T128: install the canonical Samen cron (default_crontab/0) at boot so the
+            # audit-partition roll-forward runs by default. No-op under test (plugins: false).
+            {Oban, Samen.Jobs.install_default_cron(Application.fetch_env!(:samen_core, Oban))}
+          ]
       else
         []
       end

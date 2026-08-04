@@ -132,6 +132,49 @@ defmodule Samen.Web.CRM.Reads do
   end
 
   @doc """
+  Read ONE keyset page of CRM contacts as a GALLERY page (G5, WS-G — the FIRST client of
+  `Samen.UI.gallery/1`). The SAME bounded, PII-resolved `%Samen.Web.Page{}` as
+  `contacts_page/3`, but sorted by `:id` (ASC) so the keyset cursor is a single NON-PII opaque
+  uuid — serializable as the gallery's no-JS `?after=<id>` link (`display_name` would leak into
+  the URL; `id` never does). `after_id` is the `?after=` param (`nil` = the first page); it
+  becomes the keyset cursor `{after_id}`. Built on `Samen.Web.Reads.page!/3`, so the read is
+  BOUNDED BY CONSTRUCTION and keyset-stable under concurrent inserts. PII
+  (full_name/emails/phones) is plane-resolved AFTER paging — tenant clear / operator
+  `%Masked{}` (••••). On any read error the page is EMPTY, never unbounded, never a plaintext
+  downgrade.
+
+  `opts`:
+
+    * `:page_size` — the gallery card-page size (default `12`; clamped by `page!/3`).
+  """
+  def contacts_gallery(mount, scope, after_id, opts \\ []) do
+    size = Samen.Web.Reads.bounded_page_size(Keyword.get(opts, :page_size, 12))
+    cursor = if after_id in [nil, ""], do: nil, else: {after_id}
+    state = %Samen.Web.ListState{sort: {:id, :asc}, cursor: cursor, page_size: size}
+
+    page =
+      Mount.resource(mount, Person)
+      |> Ash.Query.ensure_selected([
+        :full_name,
+        :emails,
+        :phones,
+        :display_name,
+        :job_title,
+        :company_id,
+        :custom
+      ])
+      |> Samen.Web.Reads.page!(state, scope: scope)
+
+    %{page | items: resolve_pii(page.items, mount, Person, scope)}
+  rescue
+    _ ->
+      %Samen.Web.Page{
+        items: [],
+        page_size: Samen.Web.Reads.bounded_page_size(Keyword.get(opts, :page_size, 12))
+      }
+  end
+
+  @doc """
   Read a single CRM person (contact) by id for `scope`, with PII plane-resolved
   (tenant clear / operator ••••). `{:ok, person}` or `:error`. **This is the new
   PII surface** (ADR-011 §5 — the masking-test target).
@@ -412,6 +455,124 @@ defmodule Samen.Web.CRM.Reads do
     _ -> []
   end
 
+  # The non-PII Opportunity fields a pipeline card renders.
+  @opp_card_fields [:name, :value, :status, :pipeline_id, :company_id, :close_date]
+
+  @doc """
+  Build the CRM Pipeline KANBAN board (T51, G1 — the FIRST client of the generic
+  `Samen.Web.Reads.group_by!/3`, T50). Groups Opportunities by their `:pipeline_id` stage
+  into an ORDERED, per-column-BOUNDED `%Samen.Web.Board{}` whose columns are the org's
+  Pipeline stages in `stage_order`.
+
+  This is the THIN vertical wiring: it reads the stage config rows (org-scoped, bounded)
+  to name the ordered `{pipeline_id, stage_label}` columns, then delegates ALL grouping,
+  per-column bounding, exact counts, and org-scoping to `group_by!/3` — it re-implements
+  none of that. Opportunities are NON-PII (no vault field on a card), so no PII resolution
+  is needed; the board never plaintext-downgrades regardless.
+
+  Returns `%{board: %Board{}, stages: [stage]}` — `stages` lets the caller render a
+  stage-type pill in the column header (thin, header-only metadata). On any read error the
+  board is EMPTY (`groups: []`), never an unbounded read.
+
+  `opts`:
+
+    * `:per_group_limit` — per-column card cap forwarded to `group_by!/3` (default the
+      framework group cap). The board is bounded by construction either way.
+  """
+  def pipeline_board(mount, scope, opts \\ []) do
+    cap = Keyword.get(opts, :per_group_limit, Samen.Web.Reads.default_group_cap())
+
+    stages =
+      Mount.resource(mount, Pipeline)
+      |> Ash.Query.ensure_selected([:name, :label, :stage_order, :stage_type])
+      |> Ash.Query.sort(stage_order: :asc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+
+    columns = Enum.map(stages, fn s -> {s.id, s.label || s.name} end)
+
+    board =
+      Mount.resource(mount, Opportunity)
+      |> Ash.Query.ensure_selected(@opp_card_fields)
+      |> Samen.Web.Reads.group_by!(:pipeline_id,
+        scope: scope,
+        groups: columns,
+        per_group_limit: cap,
+        row_sort: {:id, :asc}
+      )
+
+    %{board: board, stages: stages}
+  rescue
+    _ -> %{board: %Samen.Web.Board{groups: [], group_field: :pipeline_id}, stages: []}
+  end
+
+  @doc """
+  Build the CRM opportunity CALENDAR board (T52, G2 — the FIRST client of the generic
+  `Samen.Web.Reads.calendar_by_day!/3`). Windows Opportunities by their `:close_date` into an
+  ORDERED, per-DAY-BOUNDED `%Samen.Web.Board{}` (one day-keyed column per calendar day of the
+  month), for rendering through `Samen.UI.calendar/1`.
+
+  This is the THIN vertical wiring: it names the resource (`Opportunity`), the date facet
+  (`:close_date`), and the month window, then delegates ALL windowing, per-day bounding, exact
+  counts, org-scoping, and the vault-field refusal to `calendar_by_day!/3` — it re-implements
+  none of that. Opportunities are NON-PII (no vault field on an event), so no PII resolution
+  is needed; the board never plaintext-downgrades regardless.
+
+  `month` is any `Date` in the month to render. On any read error the board is EMPTY
+  (`groups: []`), never an unbounded read.
+
+  `opts`:
+
+    * `:per_group_limit` — per-DAY event cap forwarded to `calendar_by_day!/3` (default the
+      framework calendar cap). The calendar is bounded by construction either way.
+  """
+  def opportunity_calendar(mount, scope, month, opts \\ []) do
+    cap = Keyword.get(opts, :per_group_limit, Samen.Web.Reads.default_calendar_cap())
+
+    board =
+      Mount.resource(mount, Opportunity)
+      |> Ash.Query.ensure_selected(@opp_card_fields)
+      |> Samen.Web.Reads.calendar_by_day!(:close_date,
+        scope: scope,
+        month: month,
+        per_group_limit: cap,
+        row_sort: {:id, :asc}
+      )
+
+    %{board: board, month: Samen.UI.Calendar.first_of_month(month)}
+  rescue
+    _ -> %{board: %Samen.Web.Board{groups: [], group_field: :close_date}, month: Samen.UI.Calendar.first_of_month(month)}
+  end
+
+  @doc """
+  Read the NEXT keyset page of Opportunities for ONE pipeline stage column — the board's
+  per-column "load more" (T51, AC constraint (e)). `stage_key` is the column's `pipeline_id`
+  (a string; `""` or `nil` = the uncategorized/`NULL`-stage column); `cursor` is the
+  `%Board.Group{}`'s `next_cursor` (the keyset position after its last loaded card).
+
+  Built on `Samen.Web.Reads.page!/3`, so the read is BOUNDED BY CONSTRUCTION and org-scoped
+  (OrgScope narrows to the actor's org — a forged cross-org `stage_key` matches nothing).
+  Same `{:id, :asc}` sort as `pipeline_board/3`, so the cursor lines up. On any read error
+  the page is EMPTY, never unbounded. Returns a `%Samen.Web.Page{}`.
+  """
+  def pipeline_stage_page(mount, scope, stage_key, cursor, opts \\ []) do
+    size = Keyword.get(opts, :per_group_limit, Samen.Web.Reads.default_group_cap())
+    state = %Samen.Web.ListState{cursor: cursor, sort: {:id, :asc}, page_size: size}
+
+    Mount.resource(mount, Opportunity)
+    |> Ash.Query.ensure_selected(@opp_card_fields)
+    |> stage_filter(stage_key)
+    |> Samen.Web.Reads.page!(state, scope: scope)
+  rescue
+    _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(nil)}
+  end
+
+  defp stage_filter(query, key) when key in [nil, ""],
+    do: Ash.Query.filter(query, is_nil(pipeline_id))
+
+  defp stage_filter(query, key),
+    do: Ash.Query.filter(query, pipeline_id == ^key)
+
   @doc """
   Non-PII count/sum metrics for the CRM summary cards. Computed as DB aggregates
   (`Ash.count`/`Ash.sum`) — no row set is ever transferred, so the read is bounded by
@@ -430,6 +591,125 @@ defmodule Samen.Web.CRM.Reads do
       # :value sums as a Money composite via ash_money's Postgres sum aggregate.
       pipeline_value: sum_resource(open_opps_query, :value, scope)
     }
+  end
+
+  @doc """
+  Total pipeline value (minor units) across ALL of the org's opportunities, as a DB `sum`
+  aggregate — no row transfer, bounded by construction. Powers the pipeline header's value
+  metric without loading the (per-column-capped) board rows. `0` on any error.
+  """
+  def pipeline_value_cents(mount, scope) do
+    case Ash.sum!(Mount.resource(mount, Opportunity), :value, scope: scope) do
+      %Money{} = money -> Samen.Type.Money.cents(money)
+      _ -> 0
+    end
+  rescue
+    _ -> 0
+  end
+
+  # The bounded Opportunity status domain (blueprint `one_of`) → dashboard slice labels.
+  @opp_statuses [{:open, "Open"}, {:won, "Won"}, {:lost, "Lost"}, {:on_hold, "On hold"}]
+
+  @doc """
+  Build the CRM DASHBOARD aggregates (T56, G8 — the FIRST client of the generic
+  `Samen.Web.Reads.aggregate_by!/3` + `time_series!/3`). Returns a map of `%Samen.Web.Series{}`
+  for the dashboard tiles plus the reused stat metrics — ALL org-scoped, DB-computed (no row
+  transfer), and bounded:
+
+    * `:value_by_stage` — pipeline `value` SUMMED per stage (a bar breakdown; `{:sum, :value}`
+      over `:pipeline_id`, slices = the org's ordered stages).
+    * `:by_status` — opportunity COUNT per status (a pie; `:count` over `:status`, the bounded
+      status enum as slices).
+    * `:closing_over_time` — opportunity COUNT bucketed by `:close_date` month over the window
+      (a line series; bounded buckets).
+    * `:stats` — the reused `metrics/2` (companies/contacts/open_opps/pipeline_value) stat tiles.
+
+  This is the THIN vertical wiring: it names the resource (`Opportunity`), the facets
+  (`:pipeline_id` / `:status` / `:close_date`) and the measures, then delegates ALL discovery,
+  per-slice SQL aggregation, org-scoping, bucket bounding, and the vault-field refusals to the
+  framework primitives — it re-implements none of that. Opportunities are NON-PII (no vault
+  field), so the aggregated facets are non-secret by construction (verified in the tests
+  against the vaulted `Person.full_name` anchor). On any read error a tile is an EMPTY series,
+  never an unbounded read.
+
+  `opts`:
+
+    * `:months` — the trailing window length for `:closing_over_time` (default `6`).
+    * `:today` — the window anchor `Date` (default `Date.utc_today/0`).
+  """
+  def crm_dashboard(mount, scope, opts \\ []) do
+    stages =
+      Mount.resource(mount, Pipeline)
+      |> Ash.Query.ensure_selected([:name, :label, :stage_order])
+      |> Ash.Query.sort(stage_order: :asc)
+      |> Ash.Query.limit(@detail_limit)
+      |> Ash.read!(scope: scope)
+
+    stage_cols = Enum.map(stages, fn s -> {s.id, s.label || s.name} end)
+
+    months = Keyword.get(opts, :months, 6)
+    today = Keyword.get(opts, :today, Date.utc_today())
+    range_start = today |> Date.beginning_of_month() |> add_months(-(months - 1))
+    range_end = today |> Date.beginning_of_month() |> add_months(1)
+
+    %{
+      value_by_stage: value_by_stage(mount, scope, stage_cols),
+      by_status: opportunities_by_status(mount, scope),
+      closing_over_time: opportunities_over_time(mount, scope, range_start, range_end),
+      stats: metrics(mount, scope)
+    }
+  end
+
+  @doc """
+  Pipeline `value` SUMMED per stage as a bounded `%Samen.Web.Series{}` (a DB `sum` per slice,
+  org-scoped) — the dashboard's bar breakdown. `stage_cols` are the ordered `{pipeline_id,
+  label}` slices. EMPTY series on any error.
+  """
+  def value_by_stage(mount, scope, stage_cols) do
+    Mount.resource(mount, Opportunity)
+    |> Samen.Web.Reads.aggregate_by!(:pipeline_id,
+      scope: scope,
+      measure: {:sum, :value},
+      groups: stage_cols
+    )
+  rescue
+    _ -> %Samen.Web.Series{points: [], measure: {:sum, :value}, dimension: :pipeline_id}
+  end
+
+  @doc """
+  Opportunity COUNT per status as a bounded `%Samen.Web.Series{}` (a DB `count` per slice,
+  org-scoped) — the dashboard's pie. Slices are the bounded status enum. EMPTY on any error.
+  """
+  def opportunities_by_status(mount, scope) do
+    Mount.resource(mount, Opportunity)
+    |> Samen.Web.Reads.aggregate_by!(:status, scope: scope, groups: @opp_statuses)
+  rescue
+    _ -> %Samen.Web.Series{points: [], measure: :count, dimension: :status}
+  end
+
+  @doc """
+  Opportunity COUNT bucketed by `:close_date` month over `[range_start, range_end)` as a bounded
+  `%Samen.Web.Series{}` (one DB `count` per month bucket, org-scoped) — the dashboard's line.
+  EMPTY on any error.
+  """
+  def opportunities_over_time(mount, scope, range_start, range_end) do
+    Mount.resource(mount, Opportunity)
+    |> Samen.Web.Reads.time_series!(:close_date,
+      scope: scope,
+      range_start: range_start,
+      range_end: range_end,
+      unit: :month
+    )
+  rescue
+    _ -> %Samen.Web.Series{points: [], measure: :count, dimension: :bucket}
+  end
+
+  defp add_months(%Date{year: y, month: m, day: d}, n) do
+    total = y * 12 + (m - 1) + n
+    ny = div(total, 12)
+    nm = rem(total, 12) + 1
+    last = Date.days_in_month(%Date{year: ny, month: nm, day: 1})
+    Date.new!(ny, nm, min(d, last))
   end
 
   # -- Work-scope bridge (ADR-041 §6.1) ----------------------------------------

@@ -622,6 +622,17 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       )
     )
 
+    # T60: the chat offline-escalation dedupe backstop — a partial-unique index makes a
+    # CONCURRENT double-escalation of the same chat impossible (one ticket per chat). This
+    # is emitted for EVERY generated app so the framework guarantee is inherited, not
+    # demo-only. Partial (external_id IS NOT NULL) so normal tickets are unconstrained.
+    create(
+      unique_index(:aqk_ticket, [:aqk_org_id, :aqk_external_id],
+        name: "aqk_ticket_chat_dedupe_idx",
+        where: "aqk_external_id IS NOT NULL"
+      )
+    )
+
     create table(:aqc_conversation, primary_key: false) do
       add(:aqc_channel, :text, default: "email")
       add(:aqc_status, :text, default: "open")
@@ -762,6 +773,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     drop(table(:aqg_agent))
     drop(constraint(:aqc_conversation, "aqc_conversation_aqc_ticket_id_fkey"))
     drop(table(:aqc_conversation))
+    drop(index(:aqk_ticket, [:aqk_org_id, :aqk_external_id], name: "aqk_ticket_chat_dedupe_idx"))
     drop(index(:aqk_ticket, [:aqk_sla_breach_at, :aqk_breached], name: "aqk_ticket_sla_breach_idx"))
     drop(constraint(:aqk_ticket, "aqk_ticket_aqk_sla_id_fkey"))
     drop(table(:aqk_ticket))

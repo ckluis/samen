@@ -1270,7 +1270,10 @@ defmodule Samen.Web.Router do
       {"#{path}/companies/:id", Samen.Web.CRM.CompanyLive},
       {"#{path}/contacts", Samen.Web.CRM.ContactsLive},
       {"#{path}/contacts/:id", Samen.Web.CRM.ContactLive},
-      {"#{path}/pipeline", Samen.Web.CRM.PipelineLive}
+      {"#{path}/gallery", Samen.Web.CRM.ContactsGalleryLive},
+      {"#{path}/pipeline", Samen.Web.CRM.PipelineLive},
+      {"#{path}/calendar", Samen.Web.CRM.CalendarLive},
+      {"#{path}/dashboard", Samen.Web.CRM.DashboardLive}
     ]
   end
 
@@ -1304,7 +1307,9 @@ defmodule Samen.Web.Router do
     [
       {"#{path}", Samen.Web.Work.TasksLive},
       {"#{path}/tasks/:id", Samen.Web.Work.TaskLive},
-      {"#{path}/projects", Samen.Web.Work.ProjectsLive}
+      {"#{path}/projects", Samen.Web.Work.ProjectsLive},
+      {"#{path}/timeline", Samen.Web.Work.TimelineLive},
+      {"#{path}/tree", Samen.Web.Work.TaskTreeLive}
     ]
   end
 

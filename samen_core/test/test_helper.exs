@@ -24,6 +24,13 @@ _ = Ecto.Adapters.Postgres.storage_down(TestRepo.config())
 {:ok, _} = TestRepo.start_link()
 Ecto.Migrator.run(TestRepo, :up, all: true)
 
+# The `aud_event` migration creates only the FIXED launch-month (July 2026) partition; the daily
+# `Samen.AuditEvent.PartitionManager` Oban job that rolls partitions forward in production never
+# runs under the test harness. Ensure the CURRENT + upcoming months' partitions so audit-writing
+# tests never hit "no partition of relation aud_event" once the wall clock rolls past the launch
+# month (forward-safe; the ensure is idempotent).
+Samen.AuditEvent.PartitionManager.ensure_upcoming_partitions(TestRepo, Date.utc_today(), 2)
+
 # Start Oban (T1.6 same-tx reveal-grant auto-revoke) after the repo is up and
 # migrated. In :manual testing mode (config/test.exs) queues do not auto-execute:
 # `Oban.insert` writes the job row (so same-tx enqueue + rollback are observable)

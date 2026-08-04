@@ -437,3 +437,89 @@ Per the T103/T107 naming precedent, the following are **honestly open** and NOT 
   non-gating — awaits an explicit operator posture decision (A/B/C).
 
 Full accounting: `_orch/tasks/T49/work/gate-report.md`.
+
+---
+
+## M. Phase 4 (BATON) — WS-G views + WS-C comms (INV-6)
+
+Added by the Phase-4 gate (T62, 2026-08-03). Everything below is **complete + verified** at the
+authoritative full-root level: `./ci.sh` passed **twice consecutively** (`ROOT CI: ALL PASSED`,
+EXIT:0, distinct seeds, zero re-rolls; INV-3 determinism). The Phase-3 `reveal_grant` clock-property
+flake is **NOW FIXED** (T129 removed the mint-pipeline/Oban/wall-clock path from
+`reveal_grant_property_test.exs`, so it no longer needs watching) — the one remaining watched flake
+surface is the `samen_web` **RateLimitTest**. Each claim cites its green artifact **and** its
+`_orch/verify/T*-verdict.json`.
+
+**Honest scope.** Phase 4 delivers the WS-G reusable view kit (group-by primitive → kanban /
+calendar / gantt / gallery+tree / map / charts+dashboard / clone / saved views) and the WS-C
+comms surface (inbound-email→ticket / chat offline-escalation / chat attachments+masked search),
+plus two infra hardenings. Everything still runs on the **keyless lane** (no live billing/ESP/AI
+provider). **The G7 map (T55) has NO production adopter yet** — there is no geo-bearing resource
+in any host (ADR-037 §5.10 REJECTs `ash_geo`/PostGIS for a zero-spec requirement; T47 Location
+uses the H4 `Address` composite with no geometry column). The component + read are genuinely
+**functional and framework-ready** — exercised against a REAL CRM `Person` resource with REAL DB
+seeds (not mocks) — but the "framework-ready-awaiting-adopter" posture is stated so no row implies
+a live geo product. Three deferred/latent follow-ups are **filed** (named, not vanished):
+**T127** (`Samen.Web.Reads.page!/3` `authorize?:false`-drops-OrgScope hardening — safe today, all
+current callers narrow explicitly; latent for a future caller), **T130** (`storage_key`
+file-clone alias — re-tokenize/ref-count the file blob when file-level erasure lands), **T131**
+(remove the global Google-Fonts `@import` from `samen_ui.css` — the framework's own no-external-CDN
+invariant). All three are logged in `_orch/plan/backlog.yaml` (phase 4).
+
+### WS-G — reusable view kit
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| G4 | Generic `group_by!/3` read primitive: ordered group discovery + per-group **bounded** rows (`limit(cap+1)`) + **exact** per-group count aggregate; **org-scope is UNCONDITIONAL** — no `:authorize?` opt reaches any of the 3 reads (the attempt-1 cross-org bleed, where `authorize?:false` dropped OrgScope and leaked count cardinality, is **closed by construction**); a vault-routed group field is refused (`MaskedGroupKeyError`, no plaintext) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_web/test/samen/web/reads_group_by_test.exs` (6, incl. the "NO caller opt disables scoping" boundary test — RED on re-forwarding `:authorize?`, count 7 leak; restored byte-exact) | **MET (attempt 2)** — `T50-verdict.json` (page!/3 latent → T127) |
+| G1 | Reusable `Samen.UI.board/1` kanban renders a `%Samen.Web.Board{}` as ordered columns (label + exact count + per-column-bounded cards + legible +N-more w/ optional `phx-click`); CRM `PipelineLive` is the first client and **re-implements no grouping/bounding/org-scoping** (delegates to G4). **Move genuinely deferred** (no raw `update` in the board path — only a governed seam, asserted). Opportunity **genuinely non-PII** (grep-confirmed no vault/`pii` block → no masking needed, real discriminator). No-JS floor + the load-more **second query re-scopes** (forged cross-org stage key → no rows) | ✅ TEST · keyless | `samen_web/test/.../crm_pipeline_board_test.exs` (ORG-SCOPE / LOAD-MORE org-scoped / BOUNDING / non-PII) + `board_component_test.exs` | **MET** — `T51-verdict.json` (framework-wide `:authn`-off dev `?org=` caveat, NOT a T51 defect — prod must run `:authn`) |
+| G2 | Calendar view: client `?month=` **bounded** (garbage/5-digit-year/inverted → current month, no crash; a >62d or inverted window is structurally **unreachable** from client input); reads are **DB-windowed per day** (window filter + per-day equality + org-scope + per-cell `LIMIT` all pushed into SQL, not load-then-filter); per-cell cap + **exact** +N; org-scope holds (2-org, disjoint); `close_date` non-vaulted, a vaulted date facet refused; no-JS `<a href=?month=…>` GET prev/next | ✅ TEST · keyless | `samen_web/test/.../reads_calendar_test.exs` + `crm_calendar_test.exs` (12) | **MET** — `T52-verdict.json` |
+| G3 | Gantt/timeline view: overlap predicate **boundary-correct** on all 7 positions; null-end / inverted-end **sane** (`max(width,0)`, point, clamped `left`, no negative width / no crash); **DB-bounded** (overlap predicate + `LIMIT cap+1` compiled into SQL; 200 out-of-window rows never loaded); `?from=` is a **fixed 28-day** forward window (no over-wide/inverted reachable; primitive-level >372d/inverted raise); per-lane cap + exact count; **vaulted axis refused** (`MaskedGroupKeyError`); single-lane **cross-org org-scoped** (sabotage-refutable) | ✅ TEST + 🧨 SABOTAGE · keyless | `reads_timeline_test.exs` (10) + `gantt_component_test.exs` (7) + `work_timeline_test.exs` (5); single-lane `authorize?:false` sabotage leaks count 8, restored byte-exact | **MET** — `T53-verdict.json` |
+| G5+G6 | **Gallery** (keyset-bounded page walk, **non-PII opaque uuid** cursor via `:id` sort, MaskingCase **3-proof** render, org-scope refutable, forged `?after` cross-org matches nothing) + **Tree** (cycle-safe on self-parent / A↔B / long cycles — terminates fast, with **defense-in-depth** depth+node budgets as an independent guarantee; org-scope enforced + refutable at **EVERY level**; per-level cap + exact child count; vault parent-field refused) | ✅ TEST + 🧨 SABOTAGE · keyless | `gallery_component`/`tree_component`/`reads_tree`/`contacts_gallery`(`_masking`)/`task_tree` (36); cycle-check, org-scope, and plane-flip sabotages all restored byte-exact | **MET** — `T54-verdict.json` |
+| G7 | Map view: self-contained **inline Natural-Earth SVG** basemap — **ZERO external host/CDN** in the rendered DOM (no `<script>`/remote `<img>`/`url()`); bring-your-tiles seam **fail-honest** (nil/blank/attribution-only/garbage → `{:error,:not_configured}`, no hardcoded host; host names its own `{z}/{x}/{y}`); `geo_markers!/2` **org-scoped** (unconditional, sabotage leaks a foreign site → restored); a **vaulted coordinate refused** (`MaskedCoordinateError`); label masking 3-proof; **DB-bounded** `limit(cap+1)` at query level (100k rows can't OOM the DOM). **HONEST: framework-ready, NO production adopter** — exercised against a real CRM `Person` resource with real seeds, not mocks | ✅ TEST + 🧨 SABOTAGE · keyless | `map_component_test.exs` (24, incl. "NO EXTERNAL CDN") + `geo_tiles_test.exs` + `reads_geo_test.exs`; org-scope + coord-refusal sabotages restored byte-exact | **MET (framework-ready, no adopter)** — `T55-verdict.json` (global Google-Fonts `@import`, pre-existing, not in map DOM → T131) |
+| G8 | Tenant chart/dashboard components: measures are **DB-level** `Ash.count!/sum!/avg!` on an unset (`limit/offset/sort`) query; org-scope **unconditional** (no `:authorize?` opt); a vaulted **dimension OR measure** is refused (`MaskedGroupKeyError`/`MaskedMeasureError`) — the sole real PII guarantee. **HONEST: `:collapse_below` is NOT k-anonymity** — it folds small-cohort **labels** into an **arithmetic-remainder "Other"** tail for legibility only (a lone folded cohort is recoverable by subtraction); docs corrected to state "EXPLICITLY NOT k-anonymity" (the prior oversold `:min_cell` naming resolved) | ✅ TEST · keyless | `series.ex`/`dashboard_live.ex` aggregate tests; full `min_cell`→`collapse_below` rename grep-clean; docs-truthful re-check | **MET (attempt 2)** — `T56-verdict.json` |
+| G9 | Duplicate/clone with vault re-tokenization: `Samen.Clone.clone/3` re-tokenizes vault PII into a **fresh per-subject DEK/tokens** (new PK ⇒ new subject_id ⇒ fresh `pii_vault` rows; feeds resolved plaintext, never a token); **independence proven BOTH directions through the REAL Erasure engine** (erase source → clone still resolves; erase clone → source still resolves; tokens differ, subjects disjoint); **no plaintext/token leak** to the caller (vault field returns `NotLoaded`); operator-without-grant refused at resolve, tenant control succeeds, operator-plane plaintext write blocked at `WriteGuard`; cross-org refused; audit row token-only | ✅ TEST + 🧨 SABOTAGE · keyless | `clone_test.exs` (10); `scripts/sabotages/43-g9-clone-token-sharing.patch` flips all 4 MUST_FAIL (cross-record bleed observed), reverts byte-exact | **MET** — `T57-verdict.json` (`storage_key` shallow file-alias, non-exploitable today → T130) |
+| G10 | Saved views (per-user persisted list state): **per-user isolation** (real user id via `owner_scope/2`; `OwnerOnly` + `OrgScope` AND'd; another user in the same org gets `[]`/`:not_found`; owner-spoof create refused); **restore from an UNTRUSTED blob is safe** (`org_id` override ignored — scope re-applied from the actor; non-whitelisted fields dropped; **no dynamic atom creation**; injected SQL survives inert as a parameterized `contains`; oversized `page_size` clamped); a filter/sort ref to a **vaulted field is REFUSED at serialize** (`{:vaulted_field,_}`, no PII in the blob); masking **preserved on restore** (3-proof); all **10** view types round-trip | ✅ TEST + 🧨 SABOTAGE · keyless | `saved_views_test.exs` + `saved_views_masking_test.exs` (23); OwnerOnly/OrgScope/non_vaulted sabotages restored byte-exact; registry = one **sanctioned allocator-shaped** append (`wvs`), byte-exact | **MET** — `T58-verdict.json` |
+
+### WS-C — comms surface
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| C5 | Inbound-email → ticket: **`org_id` is un-spoofable** — a required `@enforce_keys` field on the host-supplied `Inbound.Config`, **never** derived from `To`/`From`/subject/`In-Reply-To`/plus-address; forged `In-Reply-To`/subject-token/plus-address (alone and combined at an org-B ticket) all open a **NEW ticket in the actor org**, never attach cross-org (sabotage dropping the org filter → cross-org FAIL, and a **3rd DB-level FK guard** also fires); **mail-loop prevention** (`Auto-Submitted`/`Precedence`/`X-Auto-Response-Suppress`/system-localparts/own-address suppress, case+whitespace-normalized, `max_inbound_per_thread` cap — 8-msg autoresponder loop → 0 tickets); stored-XSS **inert at rest** + HEEx-escaped; PII body + sender **vaulted** (3-proof); malformed/3MB-oversized **safe** (byte-capped, UTF-8-boundary-safe, no crash); **fail-honest** (unconfigured adapter → `:not_configured`, never a fabricated ticket); attachments via the `upload/3` chokepoint (`:quarantined`) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core` inbound suites (23) + `demo` inbound test (11) + `samen_postmark` (8); cross-org-filter and `plain_text/1` sabotages restored byte-exact | **MET** — `T59-verdict.json` |
+| C6 | Chat offline-escalation: the partial-unique dedupe index on `(org_id, external_id) WHERE external_id IS NOT NULL` **now travels with the framework for EVERY Support-Ticket adopter** — blueprint `custom_indexes` is the declarative single-source, the operator-mount gen template **emits it + a down-drop**, all **4 goldens carry it**, and the byte-golden parity test renders the template LIVE and matches (no drift); demo/driftwood/pawchart each ship a migration; **live-verified UNIQUE+PARTIAL on driftwood** (a raw-SQL duplicate REJECTED while two NULLs insert freely); **atomic** (TOCTOU race blocked); the escalation email is gated on the create-**winner**. **NOTE (honest): the index is now framework-emitted for every adopter** — the attempt-2 "only demo had it" gap is closed | ✅ TEST + 🧨 SABOTAGE · keyless | `support_chat_escalation_test.exs` (core 13 / demo gate 9) + `templates_parity_test.exs` (byte-golden + content-guard) + `driftwood/test/support_chat_escalation_index_test.exs`; parity-content and migration-disable sabotages restored byte-exact | **MET (attempt 3)** — `T60-verdict.json` |
+| C7 | Chat attachments + masked search: the match oracle runs over the **plane-RESOLVED** value — an operator-without-grant body resolves to `%Masked{}` (structurally **unmatchable**, not a `vt_` string), and **present-vs-absent is indistinguishable** (secret-in-org vs clean-org both return `[]`, identical shape; searching the literal `vt_` also `[]`); the body is **NEVER tsvector-indexed** (`SearchIndexGuard` refuses a PII column — sabotage-refutable — ciphertext at rest, never a blind-index copy); search **org-scoped** (sabotage-refutable); bounded ≤200 keyset window (**perf, not security**); attachments via the `upload/3` chokepoint (`:quarantined` fail-closed, cross-org `[]`, direct `storage_key` mint refused); XSS-safe snippets + filenames | ✅ TEST + 🧨 SABOTAGE · keyless | `chat_search_masking_test.exs` (9) + `chat_attachments_test.exs` (7); index-guard, org-scope, and resolve-plane sabotages restored byte-exact | **MET** — `T61-verdict.json` |
+
+### Infra hardening (INV-class, filed off Phase-4 verification)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| T128 | Prod `aud_event` partition **auto-roll cron**: the baseline defect is **real** — an audit write to a month with NO partition **RAISES** `Postgrex.Error` (silent prod audit-write loss); `ensure_upcoming_partitions/3` + the cron worker `perform/1` create the needed partition so the future-dated write **succeeds**; **idempotent + data-safe** (`CREATE TABLE IF NOT EXISTS … PARTITION OF` + `duplicate_table` rescue, **never DROP/DETACH** on the cron path, a seeded row survives a re-run); **GENERATED-APP PRODUCTION inheritance is REAL, not test-only** — a running Oban started with the generated-app prod-shaped config (`plugins:[Pruner]`) through `install_default_cron` registers `{"0 1 * * *", Samen.AuditEvent.PartitionManager}` in its **live Cron plugin**; tripwire sabotage-refutable | ✅ TEST + 🧨 SABOTAGE · keyless | `aud_event_test.exs` + `jobs_queue_taxonomy_test.exs` (40); removing the crontab entry flips 3 tests RED, `jobs.ex` restored byte-exact | **MET** — `T128-verdict.json` |
+| T129 | `reveal_grant` flake **determinism fix**: `reveal_grant_property_test.exs` no longer calls the mint pipeline / Ash-engine / Oban / wall-clock path (the old `[warning] Missed notifications` source — a **test-env SQL-Sandbox artifact**, NOT a latent prod fragility); the two **security-load-bearing** clauses (clock-vs-expiry, requestor-binding) **remain refutable** (each sabotage flips the fixed test RED); the fix **GUTTED NOTHING** (coverage byte-identical to the original, proven by parity; the other 3 clauses have dedicated coverage elsewhere incl. the real `rvg_distinct_party` DB CHECK); determinism **empirically demonstrated** (0 failures across seeds 1..40 `--warnings-as-errors`, `--repeat-until-failure 80`). **Result: `reveal_grant` no longer needs watching** | ✅ TEST + 🧨 SABOTAGE · keyless | `reveal_grant_property_test.exs` + `rvg_check_probe_test.exs` (removed after); `grants.ex` restored byte-exact post-sabotage AND post-ci | **MET** — `T129-verdict.json` |
+
+**Security defects caught-and-fixed by adversarial verification (Phase 4):** the **T50 attempt-1
+cross-org group-by bleed** (`authorize?:false` dropped OrgScope on all 3 read paths — leaked count
+cardinality `2+5=7`; closed **by construction** in attempt-2, page!/3's shared contract filed as
+the T127 latent hardening); the **T60 attempt-2 framework-first gap** (the chat-escalation dedupe
+index shipped only on `demo`, not on every adopter — closed in attempt-3 via the declarative
+blueprint `custom_indexes` single-source + template emission + byte-golden parity); and the
+**T56 oversold-naming** (`:min_cell` → `:collapse_below`, docs corrected to state it is NOT
+k-anonymity). Each closed in-phase with a RED-on-revert / sabotage-refutable proof.
+
+**Deferred / latent (named, not vanished)** — logged in `_orch/plan/backlog.yaml` (phase 4):
+
+- **T127** — `Samen.Web.Reads.page!/3` lets `authorize?:false` drop OrgScope (policy-only isolation,
+  no attribute multitenancy): **safe today** (all current `authorize?:false` callers pass an explicit
+  scope-derived org filter), **latent** for any future caller — make the boundary safe-by-construction
+  or loud. Same dev-posture class as the framework-wide `:authn`-off `?org=` caveat.
+- **T130** — `Samen.Clone.clone/3` copies `storage_key` verbatim, so a clone + its source share one
+  file blob (the same aliasing shape vault re-tokenization prevents, applied to files):
+  **non-exploitable today** (the Erasure engine never touches files; no `Storage.delete` caller
+  exists), documented as a deliberate shallow re-link. When file-level erasure lands, re-tokenize /
+  duplicate / ref-count the blob so clone + source are independent on the file substrate too.
+- **T131** — `samen_ui.css` carries a global Google-Fonts `@import` (a framework-wide external-CDN
+  fetch on every page, pre-existing, **not** in the map component's DOM): contradicts the codebase's
+  own no-external-CDN invariant. Self-host the font (vendor the woff2, like the Natural-Earth asset)
+  or fall back to a system stack, and extend T55's no-CDN grep to the global stylesheet.
+
+Plus the **G7 map (T55) framework-ready-no-adopter** posture above (no geo-bearing resource per
+ADR-037 §5.10). Full accounting: the per-task `_orch/verify/T*-verdict.json` cited above +
+`_orch/tasks/T62/status.json`.

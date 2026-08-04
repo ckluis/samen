@@ -184,8 +184,11 @@ defmodule Samen.Abbrev.AllocatorTest do
       # defaults were already claimed by samen_core's own AutomationFixture rows,
       # a global-net collision, so fresh abbrevs were reserved) → 366, growing the
       # file to 17_051 bytes.
-      assert byte_size(committed) == 17_051
-      assert map_size(R.load()) == 366
+      # +1 T58 (G10 saved views): the samen_web test host's SavedView abbrev (`wvs` —
+      # `Samen.WebTest.Views.SavedView`, the Views scope mount), allocator-proposed → 367,
+      # growing the file to 17_097 bytes.
+      assert byte_size(committed) == 17_097
+      assert map_size(R.load()) == 367
     end
   end
 

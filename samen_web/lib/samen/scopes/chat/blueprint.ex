@@ -405,6 +405,15 @@ defmodule Samen.Scopes.Chat.Blueprint do
 
           # The parsed object refs found in `body` at send time (opaque). Not PII.
           attribute(:refs, {:array, :string}, public?: true, default: [])
+
+          # Attachment storage_keys (T61 / C7). Opaque governed pointers minted ONLY by
+          # `Samen.Files.upload/3` (the chokepoint) and stored here via
+          # `Samen.Scopes.Chat.Attachments` — never a raw `storage_key` write. Not PII
+          # (an opaque key, never a personal identifier). The referenced File rows land
+          # `:quarantined` (fail-closed) and become viewable only after a clean scan; the
+          # File itself is org-scoped, so an attachment on org A's message is unreachable
+          # from org B (the File's own `OrgScope` read policy).
+          attribute(:attachments, {:array, :string}, public?: true, default: [])
         end
 
         pii do

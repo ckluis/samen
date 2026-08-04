@@ -366,6 +366,13 @@ try do
   # this script IS the only writer, no ExUnit concurrency to guard against here).
   {:ok, _} = #{module}.Repo.start_link()
 
+  # The archive step below writes an `aud_event` row (archival audit). The generated app's
+  # migration creates only the FIXED launch-month partition; the daily PartitionManager Oban job
+  # that rolls partitions forward is not running under this bare `mix run`, so the current month's
+  # partition may be absent. Provision current + upcoming months up front (forward-safe/idempotent
+  # — exactly what the daily job does), else the archive audit hits "no partition of aud_event".
+  Samen.AuditEvent.PartitionManager.ensure_upcoming_partitions(#{module}.Repo, Date.utc_today(), 2)
+
   alias #{module}.Crm.Widget
   org_id = Ash.UUID.generate()
 

@@ -11,7 +11,13 @@ defmodule <%= module %>.Application do
     repo_children =
       if Application.get_env(:<%= otp_app %>, :start_repo?, true) do
         Samen.Observability.child_specs(:<%= otp_app %>) ++
-          [<%= module %>.Repo, {Oban, Application.fetch_env!(:samen_core, Oban)}]
+          [
+            <%= module %>.Repo,
+            # T128: install the canonical Samen cron (default_crontab/0) at boot — modules
+            # are loaded here, so the audit-partition roll-forward + the rest of the periodic
+            # schedule run by default with no host action. No-op under test (plugins: false).
+            {Oban, Samen.Jobs.install_default_cron(Application.fetch_env!(:samen_core, Oban))}
+          ]
       else
         []
       end

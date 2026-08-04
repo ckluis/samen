@@ -100,7 +100,7 @@ defmodule Samen.UI.Nav do
   Attrs:
 
     * `org_id`   — threaded into every href so navigation preserves the `?org=` selector.
-    * `active`   — one of `:crm_companies | :crm_contacts | :crm_pipeline |
+    * `active`   — one of `:crm_companies | :crm_contacts | :crm_pipeline | :crm_calendar |
       :billing_overview | :billing_invoices | :billing_dunning | :billing_plans |
       :support_tickets` (or `nil`).
     * `crm_path` / `billing_path` / `support_path` — the mount path prefix per module
@@ -156,6 +156,11 @@ defmodule Samen.UI.Nav do
       <.nav_item label="Pipeline" href={"#{@crm_path}/pipeline?org=#{@org_id}"} active={@active == :crm_pipeline}>
         <:icon>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3v18M12 6v15M19 9v12" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Calendar" href={"#{@crm_path}/calendar?org=#{@org_id}"} active={@active == :crm_calendar}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4" /></svg>
         </:icon>
       </.nav_item>
     </.nav_group>

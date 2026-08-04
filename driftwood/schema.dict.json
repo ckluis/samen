@@ -171,6 +171,12 @@
           "type": "UtcDatetimeUsec"
         },
         {
+          "column_name": "dcm_attachments",
+          "logical_name": "attachments",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
           "column_name": "dcm_id",
           "logical_name": "id",
           "pii": false,

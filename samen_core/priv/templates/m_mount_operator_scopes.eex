@@ -622,6 +622,17 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       )
     )
 
+    # T60: the chat offline-escalation dedupe backstop — a partial-unique index makes a
+    # CONCURRENT double-escalation of the same chat impossible (one ticket per chat). This
+    # is emitted for EVERY generated app so the framework guarantee is inherited, not
+    # demo-only. Partial (external_id IS NOT NULL) so normal tickets are unconstrained.
+    create(
+      unique_index(:<%= o_tick %>_ticket, [:<%= o_tick %>_org_id, :<%= o_tick %>_external_id],
+        name: "<%= o_tick %>_ticket_chat_dedupe_idx",
+        where: "<%= o_tick %>_external_id IS NOT NULL"
+      )
+    )
+
     create table(:<%= o_conv %>_conversation, primary_key: false) do
       add(:<%= o_conv %>_channel, :text, default: "email")
       add(:<%= o_conv %>_status, :text, default: "open")
@@ -762,6 +773,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     drop(table(:<%= o_agent %>_agent))
     drop(constraint(:<%= o_conv %>_conversation, "<%= o_conv %>_conversation_<%= o_conv %>_ticket_id_fkey"))
     drop(table(:<%= o_conv %>_conversation))
+    drop(index(:<%= o_tick %>_ticket, [:<%= o_tick %>_org_id, :<%= o_tick %>_external_id], name: "<%= o_tick %>_ticket_chat_dedupe_idx"))
     drop(index(:<%= o_tick %>_ticket, [:<%= o_tick %>_sla_breach_at, :<%= o_tick %>_breached], name: "<%= o_tick %>_ticket_sla_breach_idx"))
     drop(constraint(:<%= o_tick %>_ticket, "<%= o_tick %>_ticket_<%= o_tick %>_sla_id_fkey"))
     drop(table(:<%= o_tick %>_ticket))

@@ -124,4 +124,30 @@ defmodule Samen.Gen.TemplatesParityTest do
     assert MapSet.difference(golden_keys, actual_keys) |> MapSet.to_list() == [],
            "orphaned golden fixtures (an emitter was removed/renamed without re-capture)"
   end
+
+  # T60 framework-first guard: EVERY generated app's operator-mount migration must EMIT the
+  # chat offline-escalation dedupe partial-unique index. This is stronger than the byte-golden
+  # (which would silently accept a regenerated index-less golden): if a future template edit
+  # drops the index and re-captures, THIS content assertion fails — so the leverage guarantee
+  # (generated apps inherit the concurrent-double-escalation backstop) cannot silently regress.
+  test "every generated operator-mount migration EMITS the chat-escalation dedupe partial-unique index (T60)" do
+    goldens =
+      Path.wildcard(Path.join(@golden_root, "*/priv/repo/migrations/*mount_operator_scopes.exs.golden"))
+
+    assert goldens != [], "no operator-mount goldens found — regenerate with SAMEN_UPDATE_GOLDEN=1"
+
+    for g <- goldens do
+      src = File.read!(g)
+      rel = Path.relative_to(g, @golden_root)
+
+      assert src =~ ~r/create\(\s*unique_index\(:\w+_ticket, \[:\w+_org_id, :\w+_external_id\]/,
+             "operator-mount golden #{rel} is MISSING the chat-escalation dedupe UNIQUE index"
+
+      assert src =~ ~r/\w+_ticket_chat_dedupe_idx/,
+             "operator-mount golden #{rel} is missing the dedupe index NAME"
+
+      assert src =~ ~r/where: "\w+_external_id IS NOT NULL"/,
+             "operator-mount golden #{rel} dedupe index is not PARTIAL (external_id IS NOT NULL)"
+    end
+  end
 end

@@ -347,7 +347,10 @@ defmodule Samen.AbbrevRegistryTest do
                  "twt" => "Samen.WebTest.Tags.Tagging",
                  # T109 (ADR-038 §6.4): the samen_web test host's durable
                  # brute-force failure-counter abbrev, allocator-proposed.
-                 "wol" => "Samen.WebTest.Operator.LoginFailure"
+                 "wol" => "Samen.WebTest.Operator.LoginFailure",
+                 # T58 (G10 saved views): the samen_web test host's SavedView abbrev
+                 # (the Views scope mount, `Samen.WebTest.Views`), allocator-proposed.
+                 "wvs" => "Samen.WebTest.Views.SavedView"
                }
              }
 
@@ -377,8 +380,9 @@ defmodule Samen.AbbrevRegistryTest do
       # +4 in T118 (ADR-039 §12 done-criterion 4) — driftwood's first vertical
       # Automation-scope mount (`dwf`/`drm`/`des`/`dru` — the scope's built-in
       # defaults were already claimed by samen_core's own AutomationFixture rows,
-      # a global-net collision, so fresh abbrevs were reserved) = 366.
-      assert map_size(Reg.load()) == 366
+      # a global-net collision, so fresh abbrevs were reserved) = 366; +1 in T58
+      # (G10 saved views) — the samen_web test host's `wvs` (Views.SavedView) = 367.
+      assert map_size(Reg.load()) == 367
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do

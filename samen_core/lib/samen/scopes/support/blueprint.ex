@@ -152,6 +152,36 @@ defmodule Samen.Scopes.Support.Blueprint do
         postgres do
           table("#{unquote(abbrev)}_ticket")
           repo(unquote(repo))
+
+          # T60: the atomic dedupe backstop for chat offline-escalation — a partial-
+          # unique index on `(org_id, external_id) WHERE external_id IS NOT NULL`. It
+          # makes a CONCURRENT double-escalation of the SAME chat structurally
+          # impossible: exactly one insert wins; the loser's insert raises this named
+          # constraint, which `unique_index_names/1` (below, abbrev-parameterised so it
+          # covers EVERY host uniformly) maps to a clean `{:error, _}` (NOT a raw
+          # Postgrex abort, NOT a fabricated success) so the capability re-reads the
+          # winner and returns `:already_escalated`. NORMAL inbound/support tickets carry
+          # `external_id == nil` and are UNCONSTRAINED by the partial predicate — no
+          # regression to the T59 inbound flow.
+          #
+          # `custom_indexes` is the FRAMEWORK-LEVEL declaration of this index (single
+          # source of truth). NB: this foundry emits schema as hand-written/templated DDL
+          # via `Samen.Migration` (NOT `ash_postgres.generate_migrations`), so the index
+          # is REALISED for every adopter by the framework-controlled operator-mount
+          # template (`priv/templates/m_mount_operator_scopes.eex` — every generated app)
+          # plus each existing host's migration (demo/driftwood/pawchart). The name here,
+          # the template, `unique_index_names`, and each migration are kept identical.
+          custom_indexes do
+            index([:org_id, :external_id],
+              unique: true,
+              name: "#{unquote(abbrev)}_ticket_chat_dedupe_idx",
+              where: "#{unquote(abbrev)}_external_id IS NOT NULL"
+            )
+          end
+
+          unique_index_names([
+            {[:org_id, :external_id], "#{unquote(abbrev)}_ticket_chat_dedupe_idx"}
+          ])
         end
 
         attributes do

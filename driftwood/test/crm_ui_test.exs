@@ -68,7 +68,10 @@ defmodule Driftwood.CrmUiTest do
     html = render_framework(CRM.PipelineLive, mount, [org_id])
 
     assert html =~ ~s(class="app")
-    assert html =~ "<table>"
+    # T51: the pipeline is now the generic grouped-columns board (Samen.UI.board/1),
+    # not a per-stage <table> — stage columns with opportunity cards.
+    assert html =~ ~s(class="board")
+    assert html =~ ~s(class="bcard")
     # The seeded opportunity/load name (BR-44 lane) appears.
     assert html =~ "BR-44"
     assert html =~ "Pipeline value"

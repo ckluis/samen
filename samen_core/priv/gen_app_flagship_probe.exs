@@ -249,6 +249,14 @@ try do
 
   {:ok, _} = Application.ensure_all_started(:#{otp_app})
 
+  # The generated app's `aud_event` migration creates only the FIXED launch-month partition; in a
+  # real deployment the daily `Samen.AuditEvent.PartitionManager` Oban job rolls partitions
+  # forward, but on a FRESH boot before that job's first run (or when the wall clock is already
+  # past the launch month) the current month's partition is absent — so the boot+archive probe's
+  # audit write would hit "no partition of relation aud_event". Provision the current + upcoming
+  # months up front, exactly what the daily job does (forward-safe; the ensure is idempotent).
+  Samen.AuditEvent.PartitionManager.ensure_upcoming_partitions(#{module}.Repo, Date.utc_today(), 2)
+
   # `mix run` prunes unused-OTP-app code paths; restore inets for the HTTP client.
   Mix.ensure_application!(:inets)
   {:ok, _} = Application.ensure_all_started(:inets)

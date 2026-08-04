@@ -125,6 +125,16 @@ defmodule Samen.Jobs do
     - `"0 3 * * *"` → `Samen.Retention.SweepWorker` (F3.2 per-scope retention; nightly
       shreds/prunes host-registered data classes past their configured TTL. No-op until a
       host sets `:samen_core, :retention_specs`.)
+    - `"0 1 * * *"` → `Samen.AuditEvent.PartitionManager` (T128 audit-partition roll-forward;
+      daily at 01:00 ensures the current + next N monthly `aud_event` partitions exist
+      before rows arrive. WITHOUT this cron, production audit writes FAIL once the wall
+      clock crosses the latest migration-seeded partition boundary — a silent audit-trail
+      write-failure / data-loss on a compliance surface. The job is idempotent
+      (`CREATE TABLE IF NOT EXISTS`), bounded (fixed `months_ahead` lookahead, default 2 →
+      3 partitions/run), and DATA-SAFE — it never drops/detaches a partition or rewrites
+      existing data. The daily cadence with a 2-month lookahead means even a long run of
+      missed executions cannot open a partition gap. `aud_event` is the only partitioned
+      table, so this single entry covers the whole partition surface.)
   """
   @spec default_crontab() :: [{String.t(), module()}]
   def default_crontab do
@@ -133,8 +143,64 @@ defmodule Samen.Jobs do
       {"*/5 * * * *", Samen.Anchor.SealWorker},
       {"*/15 * * * *", Samen.AuditChain.VerifyWorker},
       {"*/10 * * * *", Samen.BreakGlass.ReconcileWorker},
-      {"0 3 * * *", Samen.Retention.SweepWorker}
+      {"0 3 * * *", Samen.Retention.SweepWorker},
+      {"0 1 * * *", Samen.AuditEvent.PartitionManager}
     ]
+  end
+
+  @doc """
+  Install the canonical Samen cron plugin (`default_crontab/0`) into an Oban
+  child-spec option list, unless cron is disabled or the host already wired its own.
+
+  This is the framework-first adoption seam for periodic jobs: a generated app's
+  `application.ex` starts Oban with
+
+      {Oban, Samen.Jobs.install_default_cron(Application.fetch_env!(:samen_core, Oban))}
+
+  so EVERY generated app inherits the canonical schedule — including the
+  `Samen.AuditEvent.PartitionManager` audit-partition roll-forward (T128) — with no
+  host action. `default_crontab/0` is the single source of truth; nothing re-lists the
+  entries per app.
+
+  Why not in `config.exs`: product config is evaluated before framework modules are
+  loaded, so `default_crontab/0` cannot be called there. `application.ex` `start/2`
+  runs after code loading, which is why the plugin is assembled here.
+
+  Rules (order-independent, idempotent):
+
+    * `plugins: false` (the test-env convention: `testing: :manual, plugins: false`) —
+      returned unchanged, so tests never schedule cron.
+    * a host that already declared an `Oban.Plugins.Cron` plugin — returned unchanged,
+      so an explicit host schedule always wins (no double-scheduling).
+    * otherwise — prepend `{Oban.Plugins.Cron, crontab: default_crontab()}`, preserving
+      any existing plugins (e.g. the `Oban.Plugins.Pruner`).
+  """
+  @spec install_default_cron(keyword()) :: keyword()
+  def install_default_cron(oban_opts) when is_list(oban_opts) do
+    case Keyword.fetch(oban_opts, :plugins) do
+      {:ok, false} ->
+        oban_opts
+
+      {:ok, plugins} when is_list(plugins) ->
+        if cron_plugin?(plugins) do
+          oban_opts
+        else
+          Keyword.put(oban_opts, :plugins, [default_cron_plugin() | plugins])
+        end
+
+      _ ->
+        Keyword.put(oban_opts, :plugins, [default_cron_plugin()])
+    end
+  end
+
+  defp default_cron_plugin, do: {Oban.Plugins.Cron, crontab: default_crontab()}
+
+  defp cron_plugin?(plugins) do
+    Enum.any?(plugins, fn
+      Oban.Plugins.Cron -> true
+      {Oban.Plugins.Cron, _opts} -> true
+      _ -> false
+    end)
   end
 
   @doc """

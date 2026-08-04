@@ -36,6 +36,17 @@ defmodule Mix.Tasks.SamenWeb.TestSetup do
     Ecto.Migrator.run(repo, migrations_path(), :up, all: true)
     Logger.configure(level: prev_level)
 
+    # The `aud_event` migration creates only the FIXED launch-month (July 2026) partition; in
+    # production the daily `Samen.AuditEvent.PartitionManager` Oban job rolls partitions forward,
+    # but that job never runs under the render-test harness. Ensure the CURRENT + upcoming months'
+    # partitions exist so audit-writing tests never hit "no partition of relation aud_event" once
+    # the wall clock rolls past the launch month (forward-safe; the ensure is idempotent).
+    Module.concat([Samen.AuditEvent, PartitionManager]).ensure_upcoming_partitions(
+      repo,
+      Date.utc_today(),
+      2
+    )
+
     :ok
   end
 

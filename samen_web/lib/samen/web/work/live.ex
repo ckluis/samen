@@ -56,6 +56,16 @@ defmodule Samen.Web.Work.Live do
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /></svg>
           </:icon>
         </.nav_item>
+        <.nav_item label="Timeline" href={"#{work_path(@mount)}/timeline?org=#{@org_id}"} active={@active == :work_timeline}>
+          <:icon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h13M3 12h9M3 18h15" /></svg>
+          </:icon>
+        </.nav_item>
+        <.nav_item label="Tree" href={"#{work_path(@mount)}/tree?org=#{@org_id}"} active={@active == :work_tree}>
+          <:icon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 4v6a2 2 0 002 2h4M5 12v4a2 2 0 002 2h4" /><rect x="11" y="3" width="8" height="4" rx="1" /><rect x="11" y="10" width="8" height="4" rx="1" /><rect x="11" y="16" width="8" height="4" rx="1" /></svg>
+          </:icon>
+        </.nav_item>
       </.nav_group>
 
       <:footer>
