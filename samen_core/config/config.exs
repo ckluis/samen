@@ -15,7 +15,12 @@ config :samen_core,
     SamenCore.Support.RichTypes,
     Samen.CustomObjects.Domain,
     # T3.10 bounded-context DSL toy KERNEL domain (aliased/reshaped by Ctx.Toy).
-    Core.Ctx
+    Core.Ctx,
+    # T68 (ADR-043 §7.5): the D3 versioned Prompt resource. Real kernel infra (the
+    # Samen.CustomObjects.Domain precedent) — registered here so samen_core's OWN
+    # test/dev suite can exercise it against SamenCore.TestRepo with a real migration.
+    # Host apps mount it by adding Samen.AI.Domain to THEIR OWN :ash_domains.
+    Samen.AI.Domain
   ]
 
 # T3.9 Tier-2 custom objects: the repo backing the `tnt_record` Ash resource +
@@ -23,6 +28,17 @@ config :samen_core,
 # to :vault_repo in the runtime API. Compile-time here because the Record
 # resource's `postgres do repo(...) end` reads it via compile_env.
 config :samen_core, :tnt_record_repo, SamenCore.TestRepo
+
+# T68 (ADR-043 §7.5): the repo backing the `Samen.AI.Prompt` Ash resource (the
+# `:tnt_record_repo` precedent above). Host apps configure their own. Compile-time
+# here because the Prompt resource's `postgres do repo(...) end` reads it via
+# compile_env.
+config :samen_core, :samen_ai_prompt_repo, SamenCore.TestRepo
+
+# T70 (ADR-043 §6.3): the repo backing the `Samen.AI.SupportReplyDraft` Ash resource (the
+# `:samen_ai_prompt_repo` precedent above). Host apps configure their own. Compile-time here
+# because the resource's `postgres do repo(...) end` reads it via compile_env.
+config :samen_core, :samen_ai_support_reply_draft_repo, SamenCore.TestRepo
 
 config :ash, disable_async?: true
 

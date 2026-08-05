@@ -110,6 +110,24 @@ defmodule Samen.Extension do
                 "atomic-safe, smallest surface) or `:snapshot` (full prior-row " <>
                 "reconstruction; CMS content, §6.5). `:full_diff` is refused " <>
                 "substrate-wide (it forces `require_atomic? false`)."
+          ],
+          embeddable: [
+            type: {:list, :atom},
+            required: false,
+            default: [],
+            doc:
+              "The DECLARED embeddable fields (ADR-043 §7.2, D3/T67): the logical " <>
+                "attribute names whose plain-text values may enter vector space for " <>
+                "semantic search. DENY-BY-DEFAULT — a field is embeddable ONLY if listed " <>
+                "here. A vault-routed (🔒) field listed here FAILS COMPILE " <>
+                "(`Samen.Verifiers.EmbeddableNoPii`): a vector persists beyond any reveal " <>
+                "grant and is invertible, so a vaulted value must NEVER enter vector space " <>
+                "(grants never unlock embedding). Usually set via " <>
+                "`use Samen.Resource, embeddable: [:notes]`; the base macro injects the " <>
+                "`embeddable_fields/0` seam the `ai_prompt_masking` verifier + the embeddings " <>
+                "plane read. NOTE (operator responsibility, §7.2): declaring a NON-vault " <>
+                "free-text field embeddable can carry user-typed PII permanently into vector " <>
+                "space — the cross-check keys on CLASSIFICATION, not content."
           ]
         ]
       }
@@ -141,6 +159,12 @@ defmodule Samen.Extension do
     verifiers: [
       Samen.Verifiers.AbbrevRegistry,
       Samen.Verifiers.TntBoundary,
-      Samen.Verifiers.NoPanColumns
+      Samen.Verifiers.NoPanColumns,
+      # ADR-043 §7.2 (D3/T67): a vault-routed field declared `embeddable` via the
+      # `samen` section FAILS COMPILE — the by-construction "structurally un-embeddable"
+      # layer (the TntBoundary precedent: a Spark verifier reliably aborts a
+      # `use Samen.Resource` build). Inert unless `embeddable` is non-empty AND names a
+      # 🔒 field, so it is a no-op for every existing resource.
+      Samen.Verifiers.EmbeddableNoPii
     ]
 end

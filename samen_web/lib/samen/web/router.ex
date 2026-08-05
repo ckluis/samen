@@ -1242,6 +1242,43 @@ defmodule Samen.Web.Router do
     end
   end
 
+  @doc """
+  Mount the D4 MCP server (ADR-043 §9; T69) — the `browse` / `search` / `drafts` /
+  `action-proposals` tool surface for external agents — over an HTTP + SSE endpoint, in ONE
+  line (INV-5). A bare `forward` (no `pipe_through`), so it carries NO browser session/CSRF:
+  auth is the per-operator bearer token the `:actor_resolver` seam resolves (§9).
+
+      import Samen.Web.Router
+
+      samen_mcp_route(
+        actor_resolver: {MyWeb.Api.KeyAuthPlug, :resolve_scope, []},
+        tool_opts: [domains: [MyApp.Crm], repo: MyApp.Repo,
+                    approval_resource: MyApp.Primitives.Approval,
+                    kinds: MyApp.approval_kinds()]
+      )
+
+  Every tool response is EG4 egress masked by the chokepoint `:mcp` scrub in `Samen.AI.Mcp`
+  (masked vault fields, no `vt_*` tokens, org-scoped); grants never unlock `:mcp`; and
+  action-proposals never execute — they open a T34 approval for a human.
+
+  ## Options
+
+    * `:actor_resolver` — REQUIRED. A `{module, function, args}` MFA (or 1-arity fun) taking
+      the RAW bearer token and returning `{:ok, scope}` or anything else (⇒ 401).
+    * `:tool_opts` — the host wiring threaded to `Samen.AI.Mcp.handle_rpc/3`
+      (`:domains`/`:resources`/`:repo`/`:approval_resource`/`:kinds`). A kw list, a 0-arity
+      fun, or an `{m, f, a}` MFA (resolved per request).
+    * `:path` — the mount path (default `/mcp`).
+  """
+  defmacro samen_mcp_route(opts \\ []) do
+    path = Keyword.get(opts, :path, "/mcp")
+    plug_opts = Keyword.take(opts, [:actor_resolver, :tool_opts])
+
+    quote do
+      forward(unquote(path), Samen.Web.AI.McpPlug, unquote(plug_opts))
+    end
+  end
+
   @doc false
   def __operator_labels__(labels, nil), do: labels
 

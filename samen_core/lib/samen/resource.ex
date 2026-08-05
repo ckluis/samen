@@ -70,6 +70,11 @@ defmodule Samen.Resource do
     {abbrev, opts} = Keyword.pop(opts, :abbrev)
     {archivable, opts} = Keyword.pop(opts, :archivable, false)
     {versioned_opt, opts} = Keyword.pop(opts, :versioned, false)
+    # D3/T67 (ADR-043 §7.2): the DENY-BY-DEFAULT embeddable-field declaration. A list of
+    # logical attribute names whose plain-text values may enter vector space. Refused at
+    # compile time for a vault-routed field (`Samen.Verifiers.EmbeddableNoPii`).
+    {embeddable, opts} = Keyword.pop(opts, :embeddable, [])
+    embeddable = normalize_embeddable!(embeddable, __CALLER__)
     {base, ash_opts} = Keyword.pop(opts, :base)
 
     # E7 audit-on-write (ADR-040 §6): `versioned: true | :changes_only | :snapshot`.
@@ -122,10 +127,28 @@ defmodule Samen.Resource do
         archivable(unquote(archivable))
         versioned(unquote(versioned?))
         versioned_mode(unquote(versioned_mode))
+        embeddable(unquote(embeddable))
       end
 
       unquote(archival_dsl)
       unquote(versioned_dsl)
+      unquote(embeddable_seam(embeddable))
+    end
+  end
+
+  # D3/T67 (ADR-043 §7.2): inject the `embeddable_fields/0` seam ONLY for a resource that
+  # declares embeddable fields (keeps the injection off every other resource — zero blast
+  # radius). It is a thin reader of the `samen` section (the single source of truth), so the
+  # `ai_prompt_masking` verifier's `resource.embeddable_fields()` call + the embeddings plane
+  # both bind to the DECLARATION. A resource with no declaration exposes no seam (the verifier
+  # treats an absent seam as "no embeddable fields", green-and-real).
+  defp embeddable_seam([]), do: nil
+
+  defp embeddable_seam(_fields) do
+    quote do
+      @doc "The declared embeddable fields (ADR-043 §7.2) — reads the `samen` section."
+      @spec embeddable_fields() :: [atom()]
+      def embeddable_fields, do: Samen.Info.embeddable_fields(__MODULE__)
     end
   end
 
@@ -252,6 +275,27 @@ defmodule Samen.Resource do
           ":snapshot (ADR-040 §6). `:full_diff` is refused substrate-wide (it forces " <>
           "`require_atomic? false`). Got: #{inspect(other)}"
     }
+  end
+
+  # D3/T67 (ADR-043 §7.2): the `embeddable:` opt must be a (possibly empty) list of atoms —
+  # logical attribute names. Validated caller-side so a malformed value points at the
+  # resource's own `use` line; the vault-routed refusal is the compile-time
+  # `Samen.Verifiers.EmbeddableNoPii` (it needs the fully-built `pii do` section).
+  defp normalize_embeddable!(nil, _caller), do: []
+
+  defp normalize_embeddable!(fields, caller) do
+    unless is_list(fields) and Enum.all?(fields, &is_atom/1) do
+      raise %CompileError{
+        file: caller.file,
+        line: caller.line,
+        description:
+          "use Samen.Resource, embeddable: expects a list of logical attribute-name atoms " <>
+            "(e.g. `embeddable: [:notes, :description]`), the fields whose plain-text values " <>
+            "may enter vector space (ADR-043 §7.2, deny-by-default). Got: #{inspect(fields)}"
+      }
+    end
+
+    fields
   end
 
   # E6 soft-delete DSL (ADR-040 §5.2/§5.9, ADR-037 §5.3, T36). `archivable: true`

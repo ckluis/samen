@@ -110,47 +110,14 @@ defmodule Mix.Tasks.Samen.Catalog.Dump do
 
   Separated for testability — callers can pass resource module lists directly
   and compare the structure without touching the filesystem.
+
+  DELEGATES to `Samen.AI.Catalog.dict/1` (ADR-043 §8 / T66 — the D9 runtime
+  catalog): the CLI artifact and the runtime catalog served to the AI plane are
+  the SAME function call, not two implementations kept in sync by discipline —
+  this is what makes RP-AI-8 ("runtime catalog == mix samen.catalog.dump,
+  normalized diff empty") true by construction rather than by convention.
   """
-  def build_dict(resources) do
-    tables =
-      resources
-      |> Enum.map(fn resource ->
-        tam = Samen.Catalog.table(resource)
-        flds = Samen.Catalog.fields(resource)
-        pii_columns = pii_column_set(resource)
-
-        %{
-          "table_name" => tam.table_name,
-          "resource" => tam.resource,
-          "fields" =>
-            Enum.map(flds, fn f ->
-              %{
-                "column_name" => f.column_name,
-                "logical_name" => f.logical_name,
-                "type" => f.type,
-                "pii" => MapSet.member?(pii_columns, f.column_name)
-              }
-            end)
-        }
-      end)
-      # Stable sort: tables by table_name; fields already sorted in Samen.Catalog.fields/1
-      |> Enum.sort_by(& &1["table_name"])
-
-    %{"tables" => tables}
-  end
-
-  # The set of physical storage column names that are vault-routed PII for this
-  # resource, keyed on the `pii do` DECLARATION (not a `pii_` name prefix). A
-  # non-Samen / non-PII resource contributes an empty set (fail-safe: absent =>
-  # not-PII is never claimed for a vault-routed field).
-  defp pii_column_set(resource) do
-    resource
-    |> Samen.Pii.Info.vault_routed_columns()
-    |> Enum.map(&to_string/1)
-    |> MapSet.new()
-  rescue
-    _ -> MapSet.new()
-  end
+  def build_dict(resources), do: Samen.AI.Catalog.dict(resources)
 
   # Discover domain modules to introspect. Priority:
   #   1. --domain CLI args (explicit)

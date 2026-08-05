@@ -95,10 +95,20 @@ defmodule Samen.Api.PiiResolution do
   Resolve the vault-routed fields on a list of records for `actor`.
 
   Options:
-    * `:repo`   — REQUIRED. The Ecto repo backing the vault (for decrypt).
+    * `:repo`   — REQUIRED for a plaintext path (decrypt). The masked (default) path needs
+      no repo — it never touches the vault.
     * `:vault`  — the vault module (defaults to `Samen.Vault`; injectable for tests).
     * `:grant`  — override the grant checker module (defaults to
       `Samen.Reveal.grant_checker()`; injectable for tests).
+    * `:egress` — when `true`, use the **AI-egress** resolution (ADR-043 §3.2/§6.1): every
+      vault-routed field is `%Masked{}` (`••••`) on EVERY plane (masked-by-default, stricter
+      than the tenant own-org-clear read), PRESENT never absent. Default `false` (the ordinary
+      UI/API serialization rule above).
+    * `:grant_egress?` — egress-mode-only host opt-in (ADR-043 §6.1, default `false`): when
+      `true` AND a live reveal grant covers subject+label, egress resolves plaintext into the
+      (ephemeral, `:complete`) payload — the one deliberately-permitted PII egress to the
+      third-party provider. The caller (`Samen.AI.Chokepoint`) passes it ONLY for `:complete`,
+      never `:embed`/`:mcp` (persisted/external egress — grants never apply, INV-7).
 
   Returns the records with each vault field set to its plane-correct value:
   plaintext (tenant own-org / operator-with-grant), `%Masked{}` (default), or
@@ -121,6 +131,40 @@ defmodule Samen.Api.PiiResolution do
 
   # Only a %Masked{} value is subject to plane resolution — a nil field stays nil.
   defp resolve_field(%Masked{} = masked, label, plane, record, resource, reveal_action, actor, opts) do
+    # AI-egress mode (ADR-043 §3.2 step 1 / §6.1, the T65 chokepoint resolver). Egress is a
+    # DIFFERENT trust boundary than a UI render: a UI renders to the data owner, an AI call
+    # transmits to a third-party provider. So egress mode is masked-but-present on EVERY plane
+    # (stricter than the tenant own-org-clear posture) — a vaulted field stays `%Masked{}`
+    # (`••••`) regardless of plane, with exactly one exception: plaintext under a LIVE reveal
+    # grant AND the host's `grant_plaintext_egress` opt-in (threaded here as `:grant_egress?`,
+    # default off; the caller — `Samen.AI.Chokepoint` — passes it only for `:complete`, never
+    # for `:embed`/`:mcp` per INV-7's persisted-egress rule). Never `%Ash.ForbiddenField{}`
+    # (absence): egress wants the field PRESENT-but-`••••`, not vanished.
+    if Keyword.get(opts, :egress, false) do
+      resolve_egress(masked, label, record, resource, reveal_action, actor, opts)
+    else
+      resolve_render(masked, label, plane, record, resource, reveal_action, actor, opts)
+    end
+  end
+
+  defp resolve_field(other, _label, _plane, _record, _resource, _reveal_action, _actor, _opts),
+    do: other
+
+  # The AI-egress resolution (ADR-043 §6.1). Default masked-but-present; plaintext ONLY when
+  # BOTH the host opt-in (`:grant_egress?`) is on AND a live reveal grant covers subject+label
+  # — the same grant model/authority/audit as the operator-UI reveal, but the destination is
+  # the third-party provider. Fail-safe: a decrypt failure keeps `%Masked{}`, never raises.
+  defp resolve_egress(masked, label, record, resource, reveal_action, actor, opts) do
+    if Keyword.get(opts, :grant_egress?, false) and
+         operator_granted?(record, label, resource, reveal_action, actor, opts) do
+      reveal_plaintext(masked, opts) || masked
+    else
+      masked
+    end
+  end
+
+  # The original per-plane serialization resolution (unchanged — the UI/API/webhook rule).
+  defp resolve_render(masked, label, plane, record, resource, reveal_action, actor, opts) do
     case plane do
       :tenant ->
         # Tenant owns its own org's PII → clear, no grant. Fail closed on shred/KMS:
@@ -151,9 +195,6 @@ defmodule Samen.Api.PiiResolution do
         masked
     end
   end
-
-  defp resolve_field(other, _label, _plane, _record, _resource, _reveal_action, _actor, _opts),
-    do: other
 
   defp plane_of(actor) when is_map(actor), do: Map.get(actor, :plane)
   defp plane_of(_), do: nil

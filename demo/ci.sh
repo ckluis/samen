@@ -193,8 +193,17 @@ echo "    PASSED"
 #     cell is floor-protected" into a gated invariant. It gates the ENFORCED floor only;
 #     the cross-query budget / DP layer is posture under construction (plan T6.6) and is
 #     deliberately NOT gated here (the query-budget ledger is a WARN-not-enforce scaffold).
-echo "--- step 16/17: mix samen.verify.aggregate_privacy (T4.5 k-anon/l-div floor cohort specs)"
+echo "--- step 16/18: mix samen.verify.aggregate_privacy (T4.5 k-anon/l-div floor cohort specs)"
 mix samen.verify.aggregate_privacy
+echo "    PASSED"
+
+# 16b. ADR-043 §3.4 (T65) ai_prompt_masking — the STRUCTURAL half of the INV-7 (no-PII-egress)
+#      gate: (b) no vault-routed field is embeddable (grants never unlock embedding, §7.2),
+#      (c) no managed Prompt template body embeds a `vt_` vault token (§7.5). The RUNTIME half
+#      (the permanent canary red-team across EG1–EG6, RP-AI-9/10) runs under samen_core's
+#      `mix test` gate. Both are sabotage-refutable (scripts/sabotages/44-*).
+echo "--- step 17/18: mix samen.verify.ai_prompt_masking (T65 INV-7 no-PII-egress structural gate)"
+mix samen.verify.ai_prompt_masking
 echo "    PASSED"
 
 # 17. T4.6 ADVERSARIAL SUITE (test/adversarial/, tagged :adversarial). The consolidated
@@ -212,7 +221,7 @@ echo "    PASSED"
 #     the "extend the oracle run in CI" assertion). Every case carries a POSITIVE CONTROL
 #     so the denials are non-vacuous. Excluded from the default `mix test`; run here as
 #     its own gate step via `--only adversarial`.
-echo "--- step 17/17: mix test --only adversarial (T4.6 Phase-4 adversarial attack matrix)"
+echo "--- step 18/18: mix test --only adversarial (T4.6 Phase-4 adversarial attack matrix)"
 mix test --only adversarial --warnings-as-errors
 echo "    PASSED"
 

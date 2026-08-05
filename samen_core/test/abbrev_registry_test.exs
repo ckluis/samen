@@ -251,6 +251,15 @@ defmodule Samen.AbbrevRegistryTest do
                  "psl" => "PawChart.SalesOps.Lead"
                },
                "samen_core" => %{
+                 # T67 (ADR-043 §7 D3): the embeddings positive-control fixture.
+                 "emb" => "SamenCore.Support.EmbeddingsDomain.Article",
+                 # T68 (ADR-043 §7.5 D3): the versioned Prompt resource.
+                 "aip" => "Samen.AI.Prompt",
+                 # T70 (ADR-043 §6.3 D5): the AI support-operator draft resource.
+                 "sas" => "Samen.AI.SupportReplyDraft",
+                 # T71 (ADR-043 §6.4 D6/D7): the D7 analytics anti-tautology test fixture
+                 # (a self-contained, freshly-compiled `use Samen.Aggregate.Resource`).
+                 "aac" => "SamenCore.Support.AnalyticsFixture.CleanAggregate",
                  "sxv" => "SamenCore.Support.SuppressionFixture.ConsentEvent",
                  "sro" => "SamenCore.Support.RichTypes.OrgFixture",
                  "srp" => "SamenCore.Support.RichTypes.PersonalFixture",
@@ -381,8 +390,13 @@ defmodule Samen.AbbrevRegistryTest do
       # Automation-scope mount (`dwf`/`drm`/`des`/`dru` — the scope's built-in
       # defaults were already claimed by samen_core's own AutomationFixture rows,
       # a global-net collision, so fresh abbrevs were reserved) = 366; +1 in T58
-      # (G10 saved views) — the samen_web test host's `wvs` (Views.SavedView) = 367.
-      assert map_size(Reg.load()) == 367
+      # (G10 saved views) — the samen_web test host's `wvs` (Views.SavedView) = 367;
+      # +1 in T67 (ADR-043 §7 D3) — samen_core host's `emb` (EmbeddingsDomain.Article) = 368.
+      # +1 in T68 (ADR-043 §7.5 D3) — samen_core host's `aip` (Samen.AI.Prompt) = 369.
+      # +1 in T70 (ADR-043 §6.3 D5) — samen_core host's `sas` (Samen.AI.SupportReplyDraft) = 370.
+      # +1 in T71 (ADR-043 §6.4 D6/D7) — samen_core host's `aac`
+      # (SamenCore.Support.AnalyticsFixture.CleanAggregate) = 371.
+      assert map_size(Reg.load()) == 371
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do

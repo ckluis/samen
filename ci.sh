@@ -42,6 +42,35 @@ echo "==> Running samen_core tests"
 )
 echo "==> samen_core: PASSED"
 
+# --- AI runtime eval + mask-leak red-team tier (ADR-043 §10 / D8, T72) -----------------
+# The PERMANENT D8 CI tier — a keyless, deterministic runtime eval of the AI plane, wired
+# as a first-class ROOT-gate step (like the samen_core suite / the demo verifier gate) so a
+# mask leak or an eval regression FAILS THE ROOT GATE. Two standing gates run here:
+#   (1) the mask-leak RED-TEAM (RP-AI-7, ADR-043 §10.2) — full-DB vault CANARY seeding
+#       (real Factory vault writes, two orgs) fired through EVERY AI egress surface (the six
+#       T68 verbs, the T69 MCP tools, the T70 support operator, the T71 CRM + analytics
+#       surfaces, the T67 embeddings plane) asserting ZERO canary plaintext + ZERO vt_ token
+#       reaches ANY egress class EG1–EG6 (provider recording, vector store, captured logs,
+#       telemetry events, rendered errors, MCP responses, persisted drafts) — plus cross-org
+#       isolation and the §3.2a multi-turn expired-grant re-mask (RP-AI-10);
+#   (2) the grounding-context EVAL (ADR-043 §10.1) — the committed ≥20-case corpus asserted
+#       at the AUTHORITATIVE ≥90% context-assembly bar (an assembly-not-fidelity bar, §10).
+# Keyless (Provider.Fake / Embedder.Deterministic) + deterministic — no flake, because a
+# flaky permanent gate is a real red; SAMEN_AI_LIVE=1 is the sole live lane, never in CI.
+# Sabotage-refutable at the TIER level (scripts/sabotages/53-*): a value-layer mask leak
+# flips the NAMED EG1 red-team test in this exact `mix test test/ai_eval/` run, proving the
+# TIER fails, not merely a unit test. samen_core's own `mix test` above also loads these
+# files (test/ai_eval/); this step re-runs them as the named, legible D8 tier so a leak is
+# attributable to the AI plane. NOT wired into the generated-app ci_sh.eex template (that
+# cross-cutting generator change is decomposed out — backlog T134).
+echo ""
+echo "==> Running AI runtime eval + mask-leak red-team tier (ADR-043 D8 / §10 — T72)"
+(
+  cd "$REPO_ROOT/samen_core"
+  mix test --warnings-as-errors test/ai_eval/
+)
+echo "==> AI eval tier: PASSED"
+
 # --- samen_stripe adapter package gate (ADR-038 §8.1, T18/B1) ---
 # The first-party-but-separate Stripe billing adapter (skeleton): path-deps on
 # samen_core ONLY (never samen_web), owns its own vendor HTTP client dep (req),
@@ -116,6 +145,24 @@ echo "==> Running samen_resend tests (ADR-038 C1 third reference adapter — sta
   mix test --warnings-as-errors
 )
 echo "==> samen_resend: PASSED"
+
+# --- samen_anthropic AI-provider adapter package gate (ADR-043 §5.1, T64/D1) ---
+# The first-party-but-separate reference AI-provider adapter: path-deps on samen_core
+# ONLY (never samen_web — the samen_stripe/samen_postmark §8.1 layout precedent), owns
+# its own vendor HTTP client dep (req, used ONLY on the SAMEN_AI_LIVE=1 live lane), and
+# runs its own standalone suite. KEYLESS/fail-honest (ADR-043 §4; ADR-014/024/026):
+# unconfigured complete/2 -> {:error, :not_configured} (never a fake ok); the request-
+# shaping/response-parsing pipeline is proven through an injected fixture transport so
+# `mix test` makes ZERO live LLM calls. samen_core itself never references this package
+# (INV-4; proved by samen_core's own Samen.AI.VendorFreeTest, which already ran above).
+echo ""
+echo "==> Running samen_anthropic tests (ADR-043 D1 reference AI adapter — standalone, samen_core path-dep only)"
+(
+  cd "$REPO_ROOT/samen_anthropic"
+  mix deps.get --quiet
+  mix test --warnings-as-errors
+)
+echo "==> samen_anthropic: PASSED"
 
 # --- T107: interrupt-safe wrapper for the registry-mutating gen_app probes ------------
 # See scripts/gen_probe_guard.sh for the full rationale (recurring Phase-2 failure,

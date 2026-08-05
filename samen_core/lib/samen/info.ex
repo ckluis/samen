@@ -53,4 +53,20 @@ defmodule Samen.Info do
   def versioned_mode(resource) do
     Spark.Dsl.Extension.get_opt(resource, [:samen], :versioned_mode, :changes_only)
   end
+
+  @doc """
+  Returns the resource's DECLARED embeddable fields (ADR-043 §7.2, D3/T67) — the logical
+  attribute names whose plain-text values may enter vector space for semantic search.
+
+  Deny-by-default: `[]` unless the resource declared `embeddable [...]` (usually via
+  `use Samen.Resource, embeddable: [:notes]`). A vault-routed (🔒) field can never appear
+  here — `Samen.Verifiers.EmbeddableNoPii` fails the build if one is declared embeddable, and
+  the `ai_prompt_masking` verifier's (b) cross-check is the ci.sh backstop. This is the source
+  of truth the base macro's injected `embeddable_fields/0` seam reads, and the
+  `Samen.AI.Embeddings` plane consults to decide what to embed.
+  """
+  @spec embeddable_fields(Spark.Dsl.t() | module()) :: [atom()]
+  def embeddable_fields(resource) do
+    Spark.Dsl.Extension.get_opt(resource, [:samen], :embeddable, [])
+  end
 end

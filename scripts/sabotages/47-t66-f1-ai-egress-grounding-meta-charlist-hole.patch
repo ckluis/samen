@@ -1,0 +1,26 @@
+# SABOTAGE: D9 (T66-F1 fix-round) gate sabotage — re-opens the charlist-rendering hole in
+# the grounding/meta scrub. `Samen.AI.Chokepoint.safe_metadata?/1`'s list clause SHOULD be
+# leaf-for-leaf at least as strict as `safe_segment?/1`'s own list clause, which carries a
+# `charlist_sentinel?/1` check (a charlist's ELEMENTS are all safe integers, but its
+# RENDERING can carry the `vt_*` sentinel — `~c"vt_aaa…"`). This sabotage drops that check
+# from `safe_metadata?/1`'s list clause, so a `vt_*`-rendering charlist nested inside
+# `:grounding`/`:meta` (e.g. `grounding: %{sample: ~c"vt_aaa…"}`) seals and egresses to the
+# provider verbatim — the exact hole a delta-re-verify found one field over from T65-F8.
+# APP: samen_core
+# TEST_FILES: test/ai/ai_prompt_masking_test.exs
+# MUST_FAIL: a vt_* CHARLIST leaf in :grounding/:meta is refused (T66-F1 fix-round close)
+diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+--- a/samen_core/lib/samen/ai/chokepoint.ex	2026-08-04 10:38:05
++++ b/samen_core/lib/samen/ai/chokepoint.ex	2026-08-04 10:38:20
+@@ -468,7 +468,10 @@
+   # least as strict as the segment scrub, per the moduledoc's own "delegates to
+   # `safe_segment?/1` verbatim" claim.
+   defp safe_metadata?(seg) when is_list(seg) do
+-    Enum.all?(seg, &safe_metadata?/1) and not charlist_sentinel?(seg)
++    # SABOTAGE (T66-F1 fix-round close): drop the charlist-rendering sentinel scan. A
++    # charlist's ELEMENTS are all safe integers, so a naive per-element scan calls a
++    # `vt_*`-rendering charlist "safe" — the exact hole the fix-round closed.
++    Enum.all?(seg, &safe_metadata?/1)
+   end
+ 
+   # A bounded label atom (`:table`, `:accounts`, `true`/`false`/`nil` — all atoms in Elixir)

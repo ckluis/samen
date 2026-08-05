@@ -130,7 +130,11 @@ config :samen_core, Samen.Approvals.Registry,
     # T35 §4.7: reveal grants are a REAL client of this shape (not just the "test:op"
     # rehearsal above) — samen_core's own reveal test suite runs against the SAME
     # ApprovalsFixture.Approval + TestRepo wiring configured above.
-    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler}
+    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler},
+    # T70 (ADR-043 §6.3 D5): the AI support operator's human-gated send. Operator plane;
+    # the ReplyHandler sends via Samen.Delivery.Chokepoint.send/2 ONLY on a distinct-human
+    # approve — the AI service principal is never a decider (distinct-party enforced).
+    "ai_support_reply" => {:operator, Samen.AI.SupportOperator.ReplyHandler}
   }
 
 # T2.6 OTel test config: use the pid exporter so tests receive spans as messages

@@ -187,8 +187,20 @@ defmodule Samen.Abbrev.AllocatorTest do
       # +1 T58 (G10 saved views): the samen_web test host's SavedView abbrev (`wvs` —
       # `Samen.WebTest.Views.SavedView`, the Views scope mount), allocator-proposed → 367,
       # growing the file to 17_097 bytes.
-      assert byte_size(committed) == 17_097
-      assert map_size(R.load()) == 367
+      # +1 T67 (ADR-043 §7 D3): the embeddings positive-control fixture's `emb`
+      # (`SamenCore.Support.EmbeddingsDomain.Article`, allocator-reserved under host
+      # `samen_core`) → 368, growing the file to 17_156 bytes.
+      # +1 T68 (ADR-043 §7.5 D3): the versioned Prompt resource's `aip`
+      # (`Samen.AI.Prompt`, allocator-reserved under host `samen_core`) → 369,
+      # growing the file to 17_188 bytes.
+      # +1 T70 (ADR-043 §6.3 D5): the AI support-operator draft resource's `sas`
+      # (`Samen.AI.SupportReplyDraft`, allocator-reserved under host `samen_core`) → 370,
+      # growing the file to 17_231 bytes.
+      # +1 T71 (ADR-043 §6.4 D6/D7): the D7 analytics anti-tautology test fixture's `aac`
+      # (`SamenCore.Support.AnalyticsFixture.CleanAggregate`, allocator-reserved under host
+      # `samen_core`) → 371, growing the file to 17_297 bytes.
+      assert byte_size(committed) == 17_297
+      assert map_size(R.load()) == 371
     end
   end
 

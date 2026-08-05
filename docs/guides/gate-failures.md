@@ -399,3 +399,29 @@ task prints `Nothing to lint — never-read-current is vacuously satisfied (tier
 and passes; Driftwood runs it as gate step 16b.
 **Fix:** read live truth from the primary repo; if the module genuinely is an analytics
 report, mark it `@cdc_analytics_read true` (an explicit, reviewable claim).
+
+### `mix samen.verify.ai_prompt_masking`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex`):
+
+```text
+<Module>: embeddable field <field> is vault-routed (🔒) — a vault-routed value must never enter vector space (grants never unlock embedding; ADR-043 §7.2). ...
+<Module>: Prompt template <name> body contains a `vt_` vault-token sentinel — a committed template must never embed a raw vault FK token (ADR-043 §7.5).
+```
+
+**Meaning:** the D2 INV-7 (no-PII-egress) STRUCTURAL gate (ADR-043 §3.4, T65) — the
+persisted-egress backstops: (b) a resource declared a vault-routed field embeddable (a vector
+outlives any grant and is invertible, so vault values must never enter vector space — grants
+never unlock embedding), or (c) a managed Prompt template body embeds a raw `vt_` vault token.
+The RUNTIME half — the permanent canary red-team firing a PII canary through every egress class
+EG1–EG6 (prompt, tool args, embedding, MCP, grounding, and the EG6 log/telemetry/error shadow),
+RP-AI-9/10 — runs under `samen_core`'s `mix test` gate
+(`samen_core/test/ai/ai_prompt_masking_test.exs`), sabotage-refutable via
+`scripts/sabotages/44-d2-ai-egress-history-remask-bypass.patch` (the §3.2a per-turn history
+re-mask) and `scripts/sabotages/45-t65-ai-egress-scrub-shape-blind-tuple-hole.patch` (the
+§3.2 step-3 scrub ALLOWLIST — re-opening the tuple/keyword/map shape hole egresses a raw
+`vt_*` token wrapped in EG2 tool args). Wired as
+a demo/vertical `ci.sh` step (the root gate runs demo's `ci.sh`).
+**Fix:** drop the vault-routed field from the embeddable set (or de-vault it); remove the raw
+`vt_` token from the Prompt template body — a template must reference values by binding, resolved
++masked at egress by `Samen.AI.Chokepoint`, never embed a raw token.
