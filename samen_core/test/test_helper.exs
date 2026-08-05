@@ -22,6 +22,28 @@ _ = Ecto.Adapters.Postgres.storage_down(TestRepo.config())
 :ok = Ecto.Adapters.Postgres.storage_up(TestRepo.config())
 
 {:ok, _} = TestRepo.start_link()
+
+# T140: friendlier pgvector pre-check. The AI-embeddings migration (ADR-043 §7.1/M3) runs
+# `CREATE EXTENSION vector`, which otherwise fails with an opaque "could not open extension
+# control file .../vector.control" error on a server without pgvector. Fail early with a
+# clear, actionable message instead. `pg_available_extensions` lists what CAN be installed
+# (i.e. the control file is present) — the exact prerequisite the migration needs.
+case TestRepo.query("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'") do
+  {:ok, %{num_rows: n}} when n >= 1 ->
+    :ok
+
+  _ ->
+    IO.puts(:stderr, [
+      "\n",
+      "pgvector (CREATE EXTENSION vector) not installed — see ADR-043 §7.1.\n",
+      "The samen_core AI-embeddings migration hard-requires the Postgres `vector` extension.\n",
+      "Install it (e.g. `brew install pgvector`, or build 0.8.0 from source against your pg\n",
+      "major) on the server backing SamenCore.TestRepo, then re-run.\n"
+    ])
+
+    System.halt(1)
+end
+
 Ecto.Migrator.run(TestRepo, :up, all: true)
 
 # The `aud_event` migration creates only the FIXED launch-month (July 2026) partition; the daily

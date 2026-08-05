@@ -1261,22 +1261,58 @@ defmodule Samen.Web.Router do
   (masked vault fields, no `vt_*` tokens, org-scoped); grants never unlock `:mcp`; and
   action-proposals never execute — they open a T34 approval for a human.
 
+  ## `:actor_resolver` is MANDATORY — safe-by-construction (T142)
+
+  There is **no insecure default**: `samen_mcp_route/1` REFUSES TO COMPILE (raises
+  `ArgumentError` at macro expansion) unless `:actor_resolver` is wired. This is deliberate —
+  the resolver IS the bearer-credential check, so an adopter can never accidentally ship a
+  mount that authenticates nobody. (Even were the raise bypassed, the plug's
+  `resolve_actor(nil, _)` still 401s every request — fail-closed at both layers.)
+
+  A vertical adopter's resolver MUST be **constant-time and org-scoped**: compare the
+  presented bearer token against the STORED per-operator token DIGEST via
+  `Plug.Crypto.secure_compare/2` over SHA-256 (never `==` on the raw token — a byte-by-byte
+  `==` is a timing oracle), and return a `%Samen.Scope{}` whose `org_id`/plane come from THAT
+  token's owner so `Samen.AI.Mcp`'s hard org filter isolates tenants. The demo/driftwood
+  `KeyAuthPlug.digest` lookup is the reference shape. Every adopter that mounts this MUST ship
+  an end-to-end auth test over the live HTTP path: unauth ⇒ 401, forged ⇒ 401, and an
+  org-A token cannot reach org-B data (ADR-043 §9; the T142 vertical-adoption contract).
+
   ## Options
 
-    * `:actor_resolver` — REQUIRED. A `{module, function, args}` MFA (or 1-arity fun) taking
-      the RAW bearer token and returning `{:ok, scope}` or anything else (⇒ 401).
+    * `:actor_resolver` — **REQUIRED** (compile-time enforced). A `{module, function, args}`
+      MFA (or 1-arity fun) taking the RAW bearer token and returning `{:ok, scope}` or
+      anything else (⇒ 401). See the constant-time requirement above.
     * `:tool_opts` — the host wiring threaded to `Samen.AI.Mcp.handle_rpc/3`
       (`:domains`/`:resources`/`:repo`/`:approval_resource`/`:kinds`). A kw list, a 0-arity
       fun, or an `{m, f, a}` MFA (resolved per request).
     * `:path` — the mount path (default `/mcp`).
   """
   defmacro samen_mcp_route(opts \\ []) do
+    __require_actor_resolver__!(opts)
     path = Keyword.get(opts, :path, "/mcp")
     plug_opts = Keyword.take(opts, [:actor_resolver, :tool_opts])
 
     quote do
       forward(unquote(path), Samen.Web.AI.McpPlug, unquote(plug_opts))
     end
+  end
+
+  @doc false
+  # T142: refuse (at compile time) to mount an MCP route with no `:actor_resolver` — the
+  # seam that authenticates the bearer token. No insecure default; an adopter must wire a
+  # real constant-time, org-scoped resolver (see the macro moduledoc). Called from the macro
+  # body (expansion time), so a missing resolver fails the BUILD, not a runtime request.
+  def __require_actor_resolver__!(opts) do
+    unless Keyword.keyword?(opts) and Keyword.has_key?(opts, :actor_resolver) do
+      raise ArgumentError,
+            "samen_mcp_route/1 requires an :actor_resolver — the per-operator bearer-token " <>
+              "check. There is no insecure default: wire a constant-time, org-scoped resolver " <>
+              "(Plug.Crypto.secure_compare over a stored SHA-256 digest; see " <>
+              "Samen.Web.Router.samen_mcp_route/1 docs) before mounting. Got: #{inspect(opts)}"
+    end
+
+    :ok
   end
 
   @doc false

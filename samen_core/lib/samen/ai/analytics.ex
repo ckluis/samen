@@ -49,15 +49,35 @@ defmodule Samen.AI.Analytics do
   context" class §3.2 step 2 describes, and the chokepoint's `vt_`/shape scrub (step 3)
   still runs over it like any other segment.
 
-  ## `scope` is the CALLER's scope, used ONLY for the narration call
+  ## Caller-authorization gate (T144) — platform/operator capability required
 
-  `scope` is forwarded to `Samen.AI.complete/4` (via `Samen.AI.Verbs.run/4`) for grounding
-  metadata on the completion — it is **NOT** used to read the aggregate. The aggregate
-  read always runs as the singleton token-blind aggregate actor
-  (`Samen.Aggregate.actor/0`, the default `Samen.Aggregate.read_all/2` uses), never the
-  caller's own tenant/operator scope — the two-plane mutual exclusion (T4.2/ADR-019): a
-  tenant actor cannot borrow the aggregate actor's cross-tenant reach through this module,
-  and the aggregate actor never borrows the caller's org.
+  The aggregate read runs as the singleton token-blind aggregate actor
+  (`Samen.Aggregate.actor/0`), whose reach is CROSS-TENANT. That is powerful even though
+  it is PII-free: an AUTHORIZED caller DOES receive cross-tenant aggregate TOTALS (e.g.
+  every tenant's MRR by tier), k-anon/l-diversity-floored so no individual record's value
+  surfaces — but the totals themselves are real cross-tenant business data. So `ask/4`
+  gates on a **platform/operator capability** BEFORE any row is read (deny-by-default):
+
+    * a **platform/operator-plane** caller (`Samen.OperatorPlane.Actor`, or a scope/actor
+      marked `plane: :operator` / `kind: :operator` that is NOT an impersonation-into-a-single-
+      tenant session) is authorized for the cross-tenant read;
+    * every other caller — a tenant member, an impersonation session (operator scoped INTO
+      one tenant org), an unrecognized actor — is refused `{:error, :unauthorized}` fail-closed
+      before the resource plane is even checked.
+
+  The prior moduledoc claim that "a tenant actor cannot borrow the aggregate actor's
+  cross-tenant reach through this module" was imprecise: the read always ran as the aggregate
+  actor regardless of caller, so an UNGATED tenant caller WOULD have received cross-tenant
+  floored data. The true property is now enforced, not merely asserted.
+
+  ## `scope` is used for authz + the narration call (NOT to read the aggregate)
+
+  Beyond the authz gate above, `scope` is forwarded to `Samen.AI.complete/4` (via
+  `Samen.AI.Verbs.run/4`) for grounding metadata on the completion — it is **NOT** used to
+  read the aggregate. The aggregate read always runs as the singleton token-blind aggregate
+  actor (`Samen.Aggregate.actor/0`, the default `Samen.Aggregate.read_all/2` uses), never the
+  caller's own scope — the two-plane mutual exclusion (T4.2/ADR-019): the aggregate actor
+  never borrows the caller's org, and the caller reaches it only through this gated seam.
   """
 
   alias Samen.Aggregate
@@ -85,14 +105,39 @@ defmodule Samen.AI.Analytics do
   @spec ask(term(), module(), String.t(), keyword()) ::
           {:ok, Samen.AI.Completion.t()} | {:error, term()}
   def ask(scope, resource, question, opts \\ []) when is_atom(resource) and is_binary(question) do
-    read_opts = Keyword.take(opts, [:query, :k, :l])
-    verb = Keyword.get(opts, :verb, :analyze)
-    verb_opts = Keyword.drop(opts, [:query, :k, :l, :verb])
+    # T144: deny-by-default caller-authz gate BEFORE any row is read. Only a platform/operator
+    # capability may run the cross-tenant aggregate read; everyone else is refused fail-closed
+    # (an unauthorized caller never even learns whether `resource` is an aggregate plane).
+    if platform_caller?(scope) do
+      read_opts = Keyword.take(opts, [:query, :k, :l])
+      verb = Keyword.get(opts, :verb, :analyze)
+      verb_opts = Keyword.drop(opts, [:query, :k, :l, :verb])
 
-    with {:ok, rows} <- Aggregate.read_all(resource, read_opts) do
-      Verbs.run(verb, scope, render(question, resource, rows), verb_opts)
+      with {:ok, rows} <- Aggregate.read_all(resource, read_opts) do
+        Verbs.run(verb, scope, render(question, resource, rows), verb_opts)
+      end
+    else
+      {:error, :unauthorized}
     end
   end
+
+  # The platform/operator capability check (T144). A cross-tenant aggregate read is a
+  # platform-plane operation: authorized ONLY for a true operator-plane actor. An
+  # impersonation session (an operator scoped INTO one tenant org — it carries the
+  # `:impersonation` marker and a tenant `org_id`) is NOT platform-wide reach and is refused,
+  # as is any tenant member or unrecognized actor. `nil` role/plane fails closed.
+  defp platform_caller?(scope), do: scope |> caller_actor() |> platform_actor?()
+
+  defp caller_actor(%Samen.Scope{actor: actor}), do: actor
+  defp caller_actor(actor), do: actor
+
+  # An impersonation-into-a-tenant session is tenant-scoped, NOT platform reach — refuse it
+  # even though it rides the operator plane (checked first, before the plane/kind clauses).
+  defp platform_actor?(%{impersonation: %{session_id: _}}), do: false
+  defp platform_actor?(%Samen.OperatorPlane.Actor{}), do: true
+  defp platform_actor?(%{kind: :operator}), do: true
+  defp platform_actor?(%{plane: :operator}), do: true
+  defp platform_actor?(_), do: false
 
   # Render the question + the (already-suppressed) aggregate rows as free text. A
   # %Suppressed{} cell renders its glyph ("⊘") via String.Chars — never the withheld

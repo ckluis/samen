@@ -224,12 +224,10 @@ defmodule Samen.AI.SupportOperator do
   # --- 4. enqueue for HUMAN approval (opens a PENDING approval; sends NOTHING) -------------
 
   defp open_approval(org, draft, attrs, opts) do
-    # Ensure the send/reject handler module is loaded before an approval it will decide is
-    # opened: the engine detects the OPTIONAL `on_reject/2` via `function_exported?/3`, which
-    # returns false for a not-yet-loaded module (this handler is the first E3 client to define
-    # `on_reject`, so lazy loading would otherwise silently skip the reject-discards path).
-    Code.ensure_loaded(Samen.AI.SupportOperator.ReplyHandler)
-
+    # T143: the T70 `Code.ensure_loaded/1` band-aid is GONE — the approvals ENGINE now
+    # resolves the OPTIONAL `on_reject/2` via `Code.ensure_loaded?/1` before
+    # `function_exported?/3` (`Samen.Approvals.exports?/3`), so a lazily-loaded handler's
+    # reject-discards path can no longer be silently skipped. No client-side preload needed.
     Approvals.request(
       %{
         org_id: org,

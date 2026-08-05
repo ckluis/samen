@@ -37,7 +37,7 @@ defmodule DriftwoodWeb.Endpoint do
   plug(Plug.Static,
     at: "/assets",
     from: {:samen_web, "priv/static/assets"},
-    only: ~w(samen_ui.css app.js)
+    only: ~w(samen_ui.css app.js fonts)
   )
 
   plug(Plug.RequestId)

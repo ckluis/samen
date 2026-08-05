@@ -155,8 +155,13 @@ defmodule Samen.Api.PiiResolution do
   # — the same grant model/authority/audit as the operator-UI reveal, but the destination is
   # the third-party provider. Fail-safe: a decrypt failure keeps `%Masked{}`, never raises.
   defp resolve_egress(masked, label, record, resource, reveal_action, actor, opts) do
+    # T137: require a LITERAL `true` from the grant checker (same strictness as
+    # `Samen.AI.Chokepoint.granted?/2` and `Samen.Reveal.granted?/2`). A host-injected grant
+    # checker is adversarial input: one returning a truthy NON-true verdict (`:yes`, a map, a
+    # PID, …) must NOT admit plaintext into the egress payload by accident. Anything but `true`
+    # keeps the value masked (`••••`) — fail-closed, no plaintext egress.
     if Keyword.get(opts, :grant_egress?, false) and
-         operator_granted?(record, label, resource, reveal_action, actor, opts) do
+         operator_granted?(record, label, resource, reveal_action, actor, opts) === true do
       reveal_plaintext(masked, opts) || masked
     else
       masked

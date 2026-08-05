@@ -20,6 +20,8 @@ defmodule Samen.Web.RouterTest do
       samen_module_routes(:billing, Some.Host.Billing, repo: Some.Host.Repo)
       samen_module_routes(:support, Some.Host.Support, repo: Some.Host.Repo)
       samen_module_routes(:marketing, Some.Host.Marketing, repo: Some.Host.Repo)
+      # T142: mounting WITH an :actor_resolver compiles (the safe-by-construction happy path).
+      samen_mcp_route(actor_resolver: {Some.Host.KeyAuthPlug, :resolve_scope, []})
     end
   end
 
@@ -75,6 +77,39 @@ defmodule Samen.Web.RouterTest do
     assert "/marketing/campaigns/:id" in paths
     assert "/marketing/segments" in paths
     assert "/marketing/leads" in paths
+    # T142: the MCP route mounted WITH a resolver (in HostRouter above) registered its forward.
+    assert "/mcp" in paths
+  end
+
+  # T142 — samen_mcp_route is safe-by-construction: no :actor_resolver ⇒ compile-time refusal.
+  describe "T142: samen_mcp_route requires an :actor_resolver (no insecure default)" do
+    test "the guard refuses opts with no :actor_resolver and accepts opts with one" do
+      assert_raise ArgumentError, ~r/actor_resolver/, fn ->
+        Samen.Web.Router.__require_actor_resolver__!([])
+      end
+
+      assert_raise ArgumentError, ~r/actor_resolver/, fn ->
+        Samen.Web.Router.__require_actor_resolver__!(path: "/mcp", tool_opts: [])
+      end
+
+      assert :ok =
+               Samen.Web.Router.__require_actor_resolver__!(
+                 actor_resolver: {Some.Host.KeyAuthPlug, :resolve_scope, []}
+               )
+    end
+
+    test "mounting samen_mcp_route/1 with NO :actor_resolver RAISES at macro expansion (won't compile)" do
+      assert_raise ArgumentError, ~r/actor_resolver/, fn ->
+        defmodule McpNoResolverProbeRouter do
+          use Phoenix.Router
+          import Samen.Web.Router
+
+          scope "/" do
+            samen_mcp_route()
+          end
+        end
+      end
+    end
   end
 
   # T118 (ADR-039 §12 done-criterion 4) — the tenant automation builder macro.

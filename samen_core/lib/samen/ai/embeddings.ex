@@ -99,7 +99,7 @@ defmodule Samen.AI.Embeddings do
   def embed_field(scope, resource, source_id, field, text, opts) when is_atom(field) do
     with {:ok, org_id} <- org_id_from(scope, opts),
          :ok <- assert_embeddable(resource, field),
-         {embedder, config} <- embedder_for(opts),
+         {:ok, {embedder, config}} <- embedder_for(opts),
          {:ok, [vector]} <- Chokepoint.embed(embedder, config, [text], chokepoint_opts(opts)) do
       store_vector(repo_for(opts), org_id, resource, source_id, field, vector)
       {:ok, vector}
@@ -119,7 +119,7 @@ defmodule Samen.AI.Embeddings do
   def search(scope, query, opts \\ []) do
     with {:ok, org_id} <- org_id(scope),
          normalized when normalized != "" <- normalize_query(query),
-         {embedder, config} <- embedder_for(opts) do
+         {:ok, {embedder, config}} <- embedder_for(opts) do
       # Embed the QUERY through the same chokepoint + embedder as the documents (identical
       # projection ⇒ a self-query lands at distance 0). Free-text query keystrokes are the
       # user's own input (§3.2 step-2 consent boundary); the scrub still refuses a `vt_*` token.
@@ -163,14 +163,21 @@ defmodule Samen.AI.Embeddings do
 
   # --- embedder resolution (the Samen.AI.provider_for/2 mirror, embeddings lane) ------------
 
+  # T141 (fail-honest sentinel): return a TAGGED `{:ok, {module, config}}` / `{:error, reason}`
+  # so an unwired-prod resolution short-circuits the `with` in `embed_field/6`/`search/3`
+  # instead of being destructured — the pre-fix `{embedder, config} <- embedder_for(opts)`
+  # matched a bare `{:error, :not_configured}` tuple as `embedder=:error, config=:not_configured`
+  # and dispatched to a bogus `:error` provider, surfacing `{:error, {:provider_error, :error}}`
+  # rather than the ADR-014/M9 contract's `{:error, :not_configured}`. The `:env_reader` opt is
+  # the test-only seam (mirrors `Samen.AI`'s T66-F2 pattern) — never set outside a test.
   defp embedder_for(opts) do
     case Keyword.get(opts, :embedder) || configured_embedder() do
-      {module, config} when is_atom(module) and is_map(config) -> {module, config}
-      _ -> unwired_embedder(Samen.AI.resolved_env())
+      {module, config} when is_atom(module) and is_map(config) -> {:ok, {module, config}}
+      _ -> unwired_embedder(Samen.AI.resolved_env(Keyword.get(opts, :env_reader, &Mix.env/0)))
     end
   end
 
-  defp unwired_embedder(:test), do: {Embedder.Deterministic, %{}}
+  defp unwired_embedder(:test), do: {:ok, {Embedder.Deterministic, %{}}}
   defp unwired_embedder(_env), do: {:error, :not_configured}
 
   defp configured_embedder do

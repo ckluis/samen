@@ -94,6 +94,10 @@ defmodule Samen.Support.Inbound.Threading do
   end
 
   defp read_one(query, %Config{actor: nil}) do
+    # authz-scope: no-actor (system ingestion) ticket lookup — the sole caller
+    # (load_ticket/2) filters `id == ^id and org_id == ^config.org_id`, so both the PK
+    # and the org pin live at the call site; org_id is host-authoritative routing,
+    # never from the untrusted email (T132).
     case Ash.read_one(query, authorize?: false) do
       {:ok, record} -> record
       _ -> nil

@@ -26,6 +26,35 @@ defmodule Samen.AI.MaskedPayload do
   produces the sealed `segments` from raw bindings (resolve → assemble → scrub) is T65
   (`Samen.AI.Chokepoint`'s resolve/scrub internals); T64's `seal/3` is the skeleton mint.
 
+  ## Forge-resistance is NOT added — accepted-risk within the single-mint model (T138)
+
+  A hand-forged `%MaskedPayload{}` carrying a `vt_*` string in a field is trusted uninspected
+  by the chokepoint scrub allowlist (`safe_segment?/1`/`safe_metadata?/1` return `true` for a
+  nested `%MaskedPayload{}`, since only `seal/3` is supposed to mint one). T138 evaluated
+  adding a provenance guard (a per-VM/per-boot nonce, or an opaque tag stamped at `seal/3`
+  mint time and re-checked at provider dispatch) so a payload not minted here would refuse.
+
+  **Decision: no provenance guard — documented accepted-risk.** Any in-VM secret a forger
+  could NOT read would have to live somewhere the forger's own code cannot reach; but a party
+  able to construct `%MaskedPayload{}` in `lib/` already has arbitrary code execution in the
+  same BEAM, so it can read any `:persistent_term`/module-attribute/process nonce and stamp a
+  forgery identically. A provenance guard would therefore be **security theater against the
+  in-VM threat** (it stops nothing an AST-clean forger cannot trivially defeat) while adding a
+  fragile, always-on hot-path check to every dispatch. It buys no real boundary beyond what
+  the single-mint discipline already gives.
+
+  The REAL enforcement of single-mint is `Samen.AI.ChokepointAntiBypassProbeTest`
+  (`test/chokepoint_anti_bypass_probe_test.exs`), the CI AST scan that flags a `MaskedPayload`
+  construction (literal OR dynamic — `struct/2`, `struct!/2`, `%{__struct__: …}`, …) anywhere
+  outside `Samen.AI.Chokepoint`. That, plus the provider clause-refusal (a raw string/map
+  cannot reach a provider at all), is the shipped trust model: no in-repo code path lets an
+  UNTRUSTED (external) caller construct a `%MaskedPayload{}` — every construction site is
+  first-party `lib/` code the probe scans. The residual (runtime-computed metaprogramming
+  beyond static AST detection, by code that already runs in-VM) is the same honest residual
+  the moduledoc above names for single-mint. If a future code path ever lets an untrusted
+  caller construct one, revisit this — a provenance tag becomes worth its cost only once the
+  forger is OUTSIDE the VM's trust boundary.
+
   ## Inspect-redaction (EG6 — ADR-043 §3.2b, RP-AI-9)
 
   The observability shadow of an AI call is an egress path (log sinks are routinely

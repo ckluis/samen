@@ -13,8 +13,8 @@
 #      dir, using FRESH registry-safe abbrevs.
 #   2. deps.get + `mix compile --warnings-as-errors` (via Gen.compile_and_dump!/1, which also
 #      dumps the schema.dict + api_contract.v1.json baselines) — ZERO hand-edits.
-#   3. Run the generated app's FULL ci.sh — the entire verifier gate (18 steps incl.
-#      api_contract), the generated test suite (incl. the gen'd red-paths: record_vault,
+#   3. Run the generated app's FULL ci.sh — the entire verifier gate (19 steps incl.
+#      api_contract + ai_prompt_masking), the generated test suite (incl. the gen'd red-paths: record_vault,
 #      the bounded/clamp/allowlist API red paths, the seeds vault-routing red path), and the
 #      per-resource anti-tautology probe. It must PASS (exit 0).
 #   4. SEED it via the emitted `mix <app>.seed` task, and confirm the seeds ran (the task
@@ -214,7 +214,7 @@ try do
     halt.(1, "FAIL: the generated app is missing the seeds vault-routing red path (D4).")
   end
 
-  IO.puts("FLAGSHIP: full ci.sh green — verifier gate (18 steps incl. api_contract) + gen'd")
+  IO.puts("FLAGSHIP: full ci.sh green — verifier gate (19 steps incl. api_contract + ai_prompt_masking) + gen'd")
   IO.puts("          test suite (record_vault, API bounded/clamp/allowlist, seeds vault) + probe.")
 
   # --- 2. SEED via the emitted `mix <app>.seed`, then BOOT + HTTP-probe ----------------

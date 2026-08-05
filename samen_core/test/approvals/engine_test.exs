@@ -432,6 +432,54 @@ defmodule Samen.Approvals.EngineTest do
   end
 
   # ==========================================================================
+  # T143 — the engine loads a handler module before probing its OPTIONAL on_reject/2.
+  # ==========================================================================
+
+  test "T143: a handler's optional on_reject/2 fires even when the module was NOT pre-loaded" do
+    handler = SamenCore.Support.ApprovalsFixture.RejectRecordingHandler
+    kinds = %{"test:t143_reject" => {:tenant, handler}}
+
+    o = org()
+    doc = document(o)
+
+    {:ok, approval} =
+      Approvals.request(
+        %{
+          org_id: o,
+          kind: "test:t143_reject",
+          subject_ref: "samen:apd:#{doc.id}",
+          requested_by: Ecto.UUID.generate()
+        },
+        kinds: kinds
+      )
+
+    # Register the probe, then UNLOAD the handler right before the reject — simulating the
+    # non-embedded runtime where the reject is processed before any path loaded the handler.
+    # `function_exported?/3` alone would then return false and the engine would SILENTLY SKIP
+    # on_reject; the engine's `Code.ensure_loaded?/1` guard (T143) must reload + invoke it.
+    Process.register(self(), :samen_t143_reject_probe)
+    on_exit(fn -> safe_unregister(:samen_t143_reject_probe) end)
+
+    :code.purge(handler)
+    _ = :code.delete(handler)
+    :code.purge(handler)
+
+    refute function_exported?(handler, :on_reject, 2),
+           "precondition: the handler must be UNLOADED so function_exported?/3 alone returns false"
+
+    assert {:ok, _rejected} = Approvals.reject(approval.id, Ecto.UUID.generate(), kinds: kinds)
+
+    assert_receive {:on_reject_invoked, _}, 2000
+    assert Code.ensure_loaded?(handler), "the engine should have loaded the handler module"
+  end
+
+  defp safe_unregister(name) do
+    Process.unregister(name)
+  rescue
+    _ -> :ok
+  end
+
+  # ==========================================================================
   # No-persisted-inputs / INV-1 — the approval row holds NO plaintext PII / vt_* token.
   # ==========================================================================
 

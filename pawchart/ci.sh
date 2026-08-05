@@ -129,6 +129,15 @@ echo "--- step 15/17: mix samen.verify.aggregate_privacy"
 mix samen.verify.aggregate_privacy
 echo "    PASSED"
 
+# 15b. ai_prompt_masking (ADR-043 §3.4, T65 INV-7 no-PII-egress structural gate; T134):
+#      (b) no vault-routed field is embeddable (grants never unlock embedding, §7.2);
+#      (c) no managed Prompt template body embeds a `vt_` vault token (§7.5). The masker
+#      (Samen.AI.Chokepoint) is framework code Pawchart inherits at runtime — this step
+#      re-verifies Pawchart's OWN AI surface / vault resources in its own gate.
+echo "--- step 15b/17: mix samen.verify.ai_prompt_masking (INV-7 no-PII-egress structural gate)"
+mix samen.verify.ai_prompt_masking
+echo "    PASSED"
+
 # 16. Default test suite (the four red paths + Billing reuse + dogfood walkthrough).
 echo "--- step 16/17: mix test (default suite)"
 mix test --warnings-as-errors

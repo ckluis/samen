@@ -7,14 +7,14 @@
 # TEST_FILES: test/retention_sweep_test.exs
 # MUST_FAIL: a row OLDER than the TTL is swept; a fresher row is RETAINED (positive control)
 diff --git a/samen_core/lib/samen/retention.ex b/samen_core/lib/samen/retention.ex
---- a/samen_core/lib/samen/retention.ex	2026-07-20 09:17:33
-+++ b/samen_core/lib/samen/retention.ex	2026-07-20 09:17:33
-@@ -110,8 +110,7 @@
+--- a/samen_core/lib/samen/retention.ex
++++ b/samen_core/lib/samen/retention.ex
+@@ -221,8 +221,7 @@
        expired_query(spec, wall)
        |> Ash.read!(authorize?: false)
  
 -    Enum.reduce(expired, 0, fn row, acc ->
--      Ash.destroy!(row, authorize?: false)
+-      Ash.destroy!(row, destroy_opts)
 +    Enum.reduce(expired, 0, fn _row, acc ->
        acc + 1
      end)

@@ -15,15 +15,15 @@ cd "$APP_DIR"
 
 echo "==> acme CI gate: starting (MIX_ENV=$MIX_ENV)"
 
-echo "--- step 1/17: mix compile --warnings-as-errors"
+echo "--- step 1/18: mix compile --warnings-as-errors"
 mix compile --warnings-as-errors
 echo "    PASSED"
 
-echo "--- step 1a/17: DB bootstrap (migrate)"
+echo "--- step 1a/18: DB bootstrap (migrate)"
 mix run --no-start priv/ci_bootstrap.exs
 echo "    PASSED"
 
-echo "--- step 1b/17: schema.dict.json drift check"
+echo "--- step 1b/18: schema.dict.json drift check"
 COMMITTED_DICT="$APP_DIR/schema.dict.json"
 FRESH_DICT="$(mktemp /tmp/acme_schema_dict_XXXXXX.json)"
 trap 'rm -f "$FRESH_DICT"' EXIT
@@ -37,67 +37,75 @@ if ! diff -q "$COMMITTED_DICT" "$FRESH_DICT" > /dev/null 2>&1; then
 fi
 echo "    PASSED (schema.dict.json matches regenerated output)"
 
-echo "--- step 2/17: mix samen.verify.catalog_parity"
+echo "--- step 2/18: mix samen.verify.catalog_parity"
 mix samen.verify.catalog_parity
 echo "    PASSED"
 
-echo "--- step 3/17: mix samen.verify.prefixes"
+echo "--- step 3/18: mix samen.verify.prefixes"
 mix samen.verify.prefixes
 echo "    PASSED"
 
-echo "--- step 4/17: mix samen.verify.pii_reads"
+echo "--- step 4/18: mix samen.verify.pii_reads"
 mix samen.verify.pii_reads
 echo "    PASSED"
 
-echo "--- step 5/17: mix samen.verify.pii_classify"
+echo "--- step 5/18: mix samen.verify.pii_classify"
 mix samen.verify.pii_classify --baseline "$COMMITTED_DICT"
 echo "    PASSED"
 
-echo "--- step 6/17: mix samen.verify.no_plaintext_pii"
+echo "--- step 6/18: mix samen.verify.no_plaintext_pii"
 mix samen.verify.no_plaintext_pii
 echo "    PASSED"
 
-echo "--- step 7/17: mix samen.verify.migrations"
+echo "--- step 7/18: mix samen.verify.migrations"
 mix samen.verify.migrations
 echo "    PASSED"
 
-echo "--- step 8/17: mix samen.verify.sink_schema"
+echo "--- step 8/18: mix samen.verify.sink_schema"
 mix samen.verify.sink_schema
 echo "    PASSED"
 
-echo "--- step 9/17: mix samen.verify.metric_labels"
+echo "--- step 9/18: mix samen.verify.metric_labels"
 mix samen.verify.metric_labels
 echo "    PASSED"
 
-echo "--- step 10/17: mix samen.verify.vault_declared_parity"
+echo "--- step 10/18: mix samen.verify.vault_declared_parity"
 mix samen.verify.vault_declared_parity
 echo "    PASSED"
 
-echo "--- step 11/17: mix samen.verify.tnt_catalog"
+echo "--- step 11/18: mix samen.verify.tnt_catalog"
 mix samen.verify.tnt_catalog
 echo "    PASSED"
 
-echo "--- step 12/17: mix samen.verify.tnt_boundary"
+echo "--- step 12/18: mix samen.verify.tnt_boundary"
 mix samen.verify.tnt_boundary
 echo "    PASSED"
 
-echo "--- step 13/17: mix samen.verify.same_org_fk"
+echo "--- step 13/18: mix samen.verify.same_org_fk"
 mix samen.verify.same_org_fk
 echo "    PASSED"
 
-echo "--- step 14/17: mix samen.verify.no_pii_columns"
+echo "--- step 14/18: mix samen.verify.no_pii_columns"
 mix samen.verify.no_pii_columns
 echo "    PASSED"
 
-echo "--- step 15/17: mix samen.verify.aggregate_privacy"
+echo "--- step 15/18: mix samen.verify.aggregate_privacy"
 mix samen.verify.aggregate_privacy
 echo "    PASSED"
 
-echo "--- step 16/17: mix test (default suite)"
+# ai_prompt_masking (ADR-043 §3.4, T65 INV-7 no-PII-egress structural gate): (b) no
+# vault-routed field is embeddable (grants never unlock embedding, §7.2); (c) no managed
+# Prompt template body embeds a `vt_` vault token (§7.5). This app inherits the runtime
+# masker (Samen.AI.Chokepoint) but must re-verify its OWN AI surface / vault resources.
+echo "--- step 16/18: mix samen.verify.ai_prompt_masking (INV-7 no-PII-egress structural gate)"
+mix samen.verify.ai_prompt_masking
+echo "    PASSED"
+
+echo "--- step 17/18: mix test (default suite)"
 mix test --warnings-as-errors
 echo "    PASSED"
 
-echo "--- step 17/17: anti-tautology probe (pii_acm_secret vault path)"
+echo "--- step 18/18: anti-tautology probe (pii_acm_secret vault path)"
 mix run priv/anti_tautology_probe.exs
 echo "    PASSED"
 

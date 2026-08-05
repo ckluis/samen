@@ -219,6 +219,9 @@ defmodule Samen.Retention do
 
     expired =
       expired_query(spec, wall)
+      # authz-scope: system retention sweep — cross-org BY DESIGN (purges EVERY tenant's
+      # rows past the TTL cutoff, narrowed by expired_query/2's timestamp filter); runs
+      # under no tenant actor, selects no vault field. Cannot be org_id-pinned (T132).
       |> Ash.read!(authorize?: false)
 
     Enum.reduce(expired, 0, fn row, acc ->
@@ -237,6 +240,9 @@ defmodule Samen.Retention do
 
     subjects =
       expired_query(spec, wall)
+      # authz-scope: system retention sweep (shred path) — cross-org BY DESIGN (every
+      # tenant's expired subject rows, narrowed by expired_query/2's TTL filter); no
+      # tenant actor. Cannot be org_id-pinned (T132).
       |> Ash.read!(authorize?: false)
       |> Enum.map(&Map.get(&1, spec.subject_field))
       |> Enum.reject(&is_nil/1)

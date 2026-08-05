@@ -147,6 +147,15 @@ echo "--- step 16b/20: mix samen.verify.never_read_current (CDC tier off — T6.
 mix samen.verify.never_read_current
 echo "    PASSED"
 
+# 16c. ai_prompt_masking (ADR-043 §3.4, T65 INV-7 no-PII-egress structural gate; T134):
+#      (b) no vault-routed field is embeddable (grants never unlock embedding, §7.2);
+#      (c) no managed Prompt template body embeds a `vt_` vault token (§7.5). The masker
+#      (Samen.AI.Chokepoint) is framework code Driftwood inherits at runtime — this step
+#      re-verifies Driftwood's OWN AI surface / vault resources in its own gate.
+echo "--- step 16c/20: mix samen.verify.ai_prompt_masking (INV-7 no-PII-egress structural gate)"
+mix samen.verify.ai_prompt_masking
+echo "    PASSED"
+
 # 17. Default test suite (settlement property test, FMCSA gate red paths, CDL vault
 #     round-trip, cross-org denial, dispatch worker).
 echo "--- step 17/20: mix test (default suite)"

@@ -349,6 +349,32 @@ defmodule SamenCore.Support.ApprovalsFixture.BoomHandler do
   end
 end
 
+defmodule SamenCore.Support.ApprovalsFixture.RejectRecordingHandler do
+  @moduledoc """
+  A Face-1 handler that DEFINES the OPTIONAL `on_reject/2` (T143). On reject it messages a
+  test-registered probe process — so a test can prove the engine actually invokes `on_reject`
+  even when this module was NOT pre-loaded (the `Code.ensure_loaded?/1`-before-
+  `function_exported?/3` guarantee the engine now owns). Registered only via opts `:kinds`
+  (never config), so nothing loads it ambiently.
+  """
+  @behaviour Samen.Approvals.Handler
+
+  @probe :samen_t143_reject_probe
+
+  @impl true
+  def on_approve(_approval, _ctx), do: {:ok, %{}}
+
+  @impl true
+  def on_reject(_approval, _ctx) do
+    case Process.whereis(@probe) do
+      nil -> :ok
+      pid -> send(pid, {:on_reject_invoked, self()})
+    end
+
+    :ok
+  end
+end
+
 defmodule SamenCore.Support.ApprovalsFixture do
   @moduledoc """
   Kernel fixture domain for the T34 E3 approve/reject engine. Materializes the `Approval`

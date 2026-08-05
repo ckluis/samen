@@ -124,6 +124,10 @@ defmodule Samen.Web.Operator do
     Mount.resource(mount, Org)
     |> Ash.Query.sort(inserted_at: :asc)
     |> Ash.Query.limit(1)
+    # authz-scope: operator-namespace anchor bootstrap — this read DISCOVERS the
+    # operator org id, so it cannot be org_id-pinned (chicken-and-egg); the operator
+    # namespace holds exactly one Org by seed invariant, `limit(1)` takes that anchor,
+    # Org carries no PII. Operator plane only (T132).
     |> Ash.read!(authorize?: false)
     |> case do
       [%{id: id} | _] -> id

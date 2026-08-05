@@ -25,9 +25,12 @@ defmodule Samen.UI do
       plug Plug.Static,
         at: "/assets",
         from: {:samen_web, "priv/static/assets"},
-        only: ~w(samen_ui.css)
+        only: ~w(samen_ui.css app.js fonts)
 
   `from: {:samen_web, "priv/static/assets"}` resolves via `:code.priv_dir(:samen_web)`.
+  The `fonts` entry serves the self-hosted `@font-face` woff2 (T133) same-origin at
+  `/assets/fonts/*.woff2`, so the stylesheet references them by `url()` (small, cached
+  independently) instead of base64-inlining them — still ZERO external CDN.
   See `Samen.UI.stylesheet_path/0` for the on-disk path (documented serving helper).
 
   ## Masking invariant (LOAD-BEARING)

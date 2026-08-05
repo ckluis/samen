@@ -192,6 +192,33 @@ defmodule Samen.AI.EmbeddingsTest do
   end
 
   # ---------------------------------------------------------------------------------------
+  describe "T141 — an UNWIRED embedder outside :test is fail-honest {:error, :not_configured}" do
+    # The ADR-014/M9 fail-honest contract: an unconfigured embedder in a prod/non-test env
+    # returns EXACTLY {:error, :not_configured} — never {:error, {:provider_error, :error}}
+    # (the pre-fix sentinel, from destructuring the error tuple as a {module, config} pair),
+    # never a raise, never a faked {:ok}. Injected via the :env_reader opt (the T66-F2 seam),
+    # so the CI :test env (which resolves the deterministic embedder) does not mask it.
+    test "embed_field/6 with the env forced to :prod returns {:error, :not_configured}" do
+      s = scope(Ash.UUID.generate())
+      id = Ash.UUID.generate()
+
+      # :body IS a declared, non-vault embeddable field of Article — so the resolution reaches
+      # the embedder seam (not refused earlier by the deny-by-default allowlist).
+      assert {:error, :not_configured} =
+               Embeddings.embed_field(s, Article, id, :body, "some body text",
+                 Keyword.merge(opts(), env_reader: fn -> :prod end)
+               )
+    end
+
+    test "search/3 with the env forced to :prod returns {:error, :not_configured}" do
+      s = scope(Ash.UUID.generate())
+
+      assert {:error, :not_configured} =
+               Embeddings.search(s, "any query", Keyword.merge(opts(), env_reader: fn -> :prod end))
+    end
+  end
+
+  # ---------------------------------------------------------------------------------------
   describe "keyless embedder — deterministic + fail-honest" do
     test "the deterministic embedder is stable, fixed-dimension, and content-sensitive" do
       v1 = Embedder.Deterministic.vector("the quick brown fox")

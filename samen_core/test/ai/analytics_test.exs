@@ -64,8 +64,31 @@ defmodule Samen.AI.AnalyticsTest do
     :code.delete(mod)
   end
 
+  # A PLATFORM/operator-plane caller — the only capability authorized for the cross-tenant
+  # aggregate read (T144). Used by the resource-plane tests below (they must pass the authz
+  # gate to reach the aggregate-plane check).
   defp scope(org) do
+    %Samen.Scope{actor: %{id: Ash.UUID.generate(), org_id: org, role: :member, plane: :operator}}
+  end
+
+  # A TENANT-plane caller — NOT authorized for the cross-tenant aggregate read.
+  defp tenant_scope(org) do
     %Samen.Scope{actor: %{id: Ash.UUID.generate(), org_id: org, role: :member, plane: :tenant}}
+  end
+
+  # An impersonation session: an operator scoped INTO one tenant org (carries the
+  # `:impersonation` marker). Rides the operator plane but is tenant-scoped, NOT platform
+  # reach — so it too is refused the cross-tenant read (T144).
+  defp impersonation_scope(org) do
+    %Samen.Scope{
+      actor: %{
+        id: Ash.UUID.generate(),
+        org_id: org,
+        role: :member,
+        plane: :operator,
+        impersonation: %{session_id: "op-session"}
+      }
+    }
   end
 
   describe "RED: Samen.AI.Analytics.ask/4 refuses a non-aggregate (PII-bearing) resource" do
@@ -77,6 +100,27 @@ defmodule Samen.AI.AnalyticsTest do
     test "non-vacuity: the refused resource DOES carry vault-routed columns" do
       assert Samen.Pii.Info.vault_routed_columns(Person) != []
       refute Samen.Aggregate.Info.aggregate_plane?(Person)
+    end
+  end
+
+  describe "T144: caller-authz gate — the cross-tenant aggregate read requires a platform capability" do
+    test "a tenant (non-platform) caller is refused :unauthorized BEFORE any read" do
+      assert {:error, :unauthorized} =
+               Analytics.ask(tenant_scope(Ash.UUID.generate()), Person, "how many contacts?")
+    end
+
+    test "an impersonation session (operator scoped INTO one tenant) is refused :unauthorized" do
+      assert {:error, :unauthorized} =
+               Analytics.ask(impersonation_scope(Ash.UUID.generate()), Person, "how many contacts?")
+    end
+
+    test "a platform/operator caller PASSES the authz gate (reaching the resource-plane check)" do
+      # Person is a PII resource → refused for being non-aggregate. That refusal (rather than
+      # :unauthorized) PROVES the platform caller passed the authz gate — an unauthorized caller
+      # never reaches the resource-plane check. This is the non-vacuous positive control for the
+      # tenant/impersonation refusals above.
+      assert {:error, :not_aggregate_resource} =
+               Analytics.ask(scope(Ash.UUID.generate()), Person, "how many contacts?")
     end
   end
 

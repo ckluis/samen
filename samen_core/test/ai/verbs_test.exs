@@ -14,6 +14,17 @@ defmodule Samen.AI.VerbsVaultStubFixture do
   def reveal(%Samen.Masked{}, _repo, _opts), do: {:ok, "canary-verb-4f3e2d@leak.example"}
 end
 
+defmodule Samen.AI.VerbsTruthyGrantFixture do
+  @moduledoc """
+  Test grant checker returning a TRUTHY NON-`true` verdict (`:yes`) — a non-conforming checker
+  (T137). `Samen.Api.PiiResolution.resolve_egress/7` must require a LITERAL `true`, so this
+  verdict must NOT admit plaintext into the egress payload.
+  """
+  @behaviour Samen.Reveal.Grant
+  @impl true
+  def granted?(_context), do: :yes
+end
+
 defmodule Samen.AI.VerbsTest do
   @moduledoc """
   T68 (ADR-043 §7.5) — the six intelligence verbs (Summarize, Extract, Classify, Generate,
@@ -202,6 +213,32 @@ defmodule Samen.AI.VerbsTest do
                )
 
       assert recorded_text() =~ @canary
+    end
+
+    test "T137: a TRUTHY-NON-true grant verdict (:yes) does NOT admit plaintext, stays masked",
+         %{rec: rec} do
+      # Same path as the positive control above, but the grant checker returns `:yes` (truthy,
+      # not the literal `true`). resolve_egress/7 must refuse it — the field stays `••••`, the
+      # canary never egresses. This flips if resolve_egress accepts any truthy verdict again.
+      assert {:ok, %Completion{}} =
+               Samen.AI.Verbs.Summarize.run(scope(Ash.UUID.generate()), "summarize the account",
+                 actor: op_actor(),
+                 bindings: [{[rec], @res}],
+                 grant_egress?: true,
+                 grant: Samen.AI.VerbsTruthyGrantFixture,
+                 vault: Samen.AI.VerbsVaultStubFixture,
+                 repo: :fake_repo
+               )
+
+      recorded = recorded_text()
+
+      refute recorded =~ @canary,
+             "a truthy-non-true grant verdict must NOT egress plaintext (resolve_egress requires a literal true)"
+
+      refute recorded =~ "vt_"
+
+      assert recorded =~ Samen.Masked.mask(),
+             "the vault field must remain present-but-masked when the grant verdict is not a literal true"
     end
   end
 

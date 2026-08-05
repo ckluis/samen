@@ -42,6 +42,15 @@ config :samen_core, :samen_ai_support_reply_draft_repo, SamenCore.TestRepo
 
 config :ash, disable_async?: true
 
+# T145: quiet Ash's benign `[warning] Missed N notifications` runtime log noise. The AI
+# plane opens an E3 approval (Samen.AI.SupportOperator.draft_reply) outside a
+# notification-collecting Ash transaction, so Ash's default `:warn` posture logs a missed-
+# notification line into ci.sh output. No real notification is dropped (the approvals engine
+# and reveal-grant auto-revoke drive their side effects via explicit repo transactions +
+# Oban, not Ash resource notifications), so ignoring is honest cosmetic cleanup, not
+# swallowing a live signal.
+config :ash, :missed_notifications, :ignore
+
 # ADR-036 D1/ADR-037 §5.2: AshMoney/ex_money wiring. `known_types` lets Ash's
 # operator-overload expr evaluation (sum/compare in calculations) recognize the
 # wrapped type transitively; `auto_start_exchange_rate_service: false` is a

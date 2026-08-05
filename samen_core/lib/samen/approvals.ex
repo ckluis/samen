@@ -219,7 +219,7 @@ defmodule Samen.Approvals do
   defp run_handler(handler, approval, decided_by, :reject, repo, opts) do
     ctx = %{approval: approval, actor: decided_by, repo: repo, opts: opts}
 
-    if function_exported?(handler, :on_reject, 2) do
+    if exports?(handler, :on_reject, 2) do
       case handler.on_reject(approval, ctx) do
         :ok -> {:ok, %{}}
         {:error, _} = err -> err
@@ -228,6 +228,18 @@ defmodule Samen.Approvals do
     else
       {:ok, %{}}
     end
+  end
+
+  # T143: resolve an OPTIONAL handler callback fail-closed against lazy module loading.
+  # `function_exported?/3` does NOT auto-load a module and returns `false` for one not yet
+  # loaded — so a handler's optional `on_reject/2` could be SILENTLY SKIPPED (a rejected
+  # draft left un-discarded) in a non-embedded/interactive runtime where the reject is
+  # processed before any path loaded the handler. `Code.ensure_loaded?/1` forces the load
+  # first, so detection reflects what the module ACTUALLY defines — not load order. (This
+  # replaces the T70 `Code.ensure_loaded/1` band-aid every future on_reject client would
+  # otherwise have to remember: the ENGINE now owns the guarantee.)
+  defp exports?(module, fun, arity) do
+    Code.ensure_loaded?(module) and function_exported?(module, fun, arity)
   end
 
   # ==========================================================================

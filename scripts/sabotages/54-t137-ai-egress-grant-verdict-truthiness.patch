@@ -1,0 +1,26 @@
+# SABOTAGE: T137 (ADR-043 §6.1 / §3.2) gate sabotage — grant-verdict truthiness on the AI
+# egress binding path. Weakens `Samen.Api.PiiResolution.resolve_egress/7` back to accepting ANY
+# truthy grant-checker verdict (drops the `=== true` literal-true strictness the chokepoint's
+# history check + `granted?/2` already require). A host-injected grant checker is adversarial
+# input: one returning a TRUTHY-NON-true verdict (`:yes`, a map, a PID, …) would then admit
+# grant-plaintext into the egress payload by accident — an INV-7 no-PII-egress breach. This
+# flips the NAMED T137 verbs test, whose grant checker returns `:yes`: with the strictness gone,
+# the vault-routed canary egresses to the fake provider recording (its `refute recorded =~
+# @canary` fails, and its `assert recorded =~ mask()` positive control loses the mask). The
+# `true`-returning positive control in the same file still passes (the sabotage only re-opens
+# the truthy-non-true hole), so the flip is non-vacuous. Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/ai/verbs_test.exs
+# MUST_FAIL: TRUTHY-NON-true grant verdict
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -161,7 +161,7 @@ defmodule Samen.Api.PiiResolution do
+     # PID, …) must NOT admit plaintext into the egress payload by accident. Anything but `true`
+     # keeps the value masked (`••••`) — fail-closed, no plaintext egress.
+     if Keyword.get(opts, :grant_egress?, false) and
+-         operator_granted?(record, label, resource, reveal_action, actor, opts) === true do
++         operator_granted?(record, label, resource, reveal_action, actor, opts) do
+       reveal_plaintext(masked, opts) || masked
+     else
+       masked

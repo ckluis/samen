@@ -624,15 +624,19 @@ defmodule Samen.Gen.AppTest do
       assert plug =~ "_ -> conn"
     end
 
-    test "ci.sh gains the api_contract step (18 steps) and README documents the API" do
+    test "ci.sh gains the api_contract + ai_prompt_masking steps (19 steps) and README documents the API" do
       files = rendered_api_files()
       ci = files["ci.sh"]
 
-      assert ci =~ "step 16/18: mix samen.verify.api_contract --version v1"
+      assert ci =~ "step 16/19: mix samen.verify.api_contract --version v1"
       assert ci =~ ~s{--snapshot "$APP_DIR/api_contract.v1.json"}
-      assert ci =~ "step 17/18: mix test"
-      assert ci =~ "step 18/18: anti-tautology probe"
-      refute ci =~ "/17:"
+      # T134: the app re-verifies its OWN AI surface / vault resources (last verify.* step,
+      # mirroring demo/ci.sh) — inserted between api_contract and the default suite.
+      assert ci =~ "step 17/19: mix samen.verify.ai_prompt_masking"
+      assert ci =~ "step 18/19: mix test"
+      assert ci =~ "step 19/19: anti-tautology probe"
+      # Not the headless template (which totals /18: after T134 renumber).
+      refute ci =~ "/18:"
 
       readme = files["README.md"]
       assert readme =~ "/api/v1"

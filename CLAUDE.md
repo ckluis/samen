@@ -6,7 +6,13 @@ verifiers, generators) · `samen_web` (framework UI library: LiveViews, Mount/Pl
 `spikes/` (frozen mechanism spikes). Design records live in `docs/adr/` + per-workstream
 `docs/ws-*/{design,build-plan}.md` — consult the ADR before changing anything it governs.
 
-## Suites / CI (local Postgres required)
+## Suites / CI (local Postgres + pgvector required)
+- Prerequisite: a local Postgres server WITH the `pgvector` extension installed (`CREATE
+  EXTENSION vector`) — the samen_core AI-embeddings migration hard-requires it (ADR-043
+  §7.1/M3; `docs/adr/ADR-043-ai-plane.md`). Install via `brew install pgvector` (or build
+  0.8.0 from source against your pg major when no bottle exists). Without it, `./ci.sh`
+  fails the samen_core suite at setup with a clear "pgvector not installed" guard message
+  (`samen_core/test/test_helper.exs`), not an opaque `CREATE EXTENSION` error.
 - Root gate: `./ci.sh` — spikes → samen_core → 3 gen_app probes → samen_web → demo →
   driftwood → pawchart. Takes minutes; must end `ROOT CI: ALL PASSED`.
 - Iteration tier: `./ci-fast.sh` — spikes → samen_core → samen_web ONLY (framework core,

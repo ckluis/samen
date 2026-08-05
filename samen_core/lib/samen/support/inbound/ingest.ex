@@ -365,6 +365,10 @@ defmodule Samen.Support.Inbound.Ingest do
   end
 
   defp read_one(query, _config) do
+    # authz-scope: generic ticket/conversation lookup helper — every caller builds
+    # `query` with an explicit `org_id == ^config.org_id` filter (dedup + thread reads
+    # above), so the org pin lives at the call site; org_id is host-authoritative
+    # routing config, never from the untrusted inbound email (T132).
     case Ash.read_one(query, authorize?: false) do
       {:ok, record} -> record
       _ -> nil

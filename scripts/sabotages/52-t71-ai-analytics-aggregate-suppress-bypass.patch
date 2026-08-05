@@ -18,18 +18,20 @@
 # `Samen.Aggregate.read_all/2` directly, never through `Samen.AI.Analytics`) is
 # UNAFFECTED by this patch — confirming the floor itself is intact and the LEAK is
 # specifically in the analytics wrapper's read-options plumbing, not the floor.
+# NOTE: the T144 caller-authz gate (`platform_caller?(scope)`) now precedes this read;
+# it is left intact — the sabotage re-drops ONLY the `suppress:` floor at the read call.
 # APP: demo
 # TEST_FILES: test/ai_analytics_test.exs
 # MUST_FAIL: a count-of-one tier's TRUE revenue never reaches the AI narration payload
 diff --git a/samen_core/lib/samen/ai/analytics.ex b/samen_core/lib/samen/ai/analytics.ex
 --- a/samen_core/lib/samen/ai/analytics.ex
 +++ b/samen_core/lib/samen/ai/analytics.ex
-@@ -85,7 +85,7 @@
-   @spec ask(term(), module(), String.t(), keyword()) ::
-           {:ok, Samen.AI.Completion.t()} | {:error, term()}
-   def ask(scope, resource, question, opts \\ []) when is_atom(resource) and is_binary(question) do
--    read_opts = Keyword.take(opts, [:query, :k, :l])
-+    read_opts = Keyword.take(opts, [:query, :k, :l]) ++ [suppress: false]
-     verb = Keyword.get(opts, :verb, :analyze)
-     verb_opts = Keyword.drop(opts, [:query, :k, :l, :verb])
-
+@@ -109,7 +109,7 @@
+     # capability may run the cross-tenant aggregate read; everyone else is refused fail-closed
+     # (an unauthorized caller never even learns whether `resource` is an aggregate plane).
+     if platform_caller?(scope) do
+-      read_opts = Keyword.take(opts, [:query, :k, :l])
++      read_opts = Keyword.take(opts, [:query, :k, :l]) ++ [suppress: false]
+       verb = Keyword.get(opts, :verb, :analyze)
+       verb_opts = Keyword.drop(opts, [:query, :k, :l, :verb])
+ 

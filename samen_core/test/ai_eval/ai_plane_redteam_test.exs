@@ -270,8 +270,11 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
     test "ask over a PII-bearing resource is refused BEFORE any read (non-vacuous)", %{org_a: org} do
       # The one being refused genuinely carries vault-routed columns — the refusal protects
       # something real. (The full narration-over-suppressed-rows path is demo/test/ai_analytics_test.exs.)
+      # An operator/platform caller passes the T144 caller-authz gate so the refusal proven here
+      # is the RESOURCE-plane (schema-purity) refusal, not the authz refusal (covered in
+      # test/ai/analytics_test.exs).
       assert {:error, :not_aggregate_resource} =
-               Analytics.ask(scope(org), Person, "how many contacts do we have?")
+               Analytics.ask(scope(org, :operator), Person, "how many contacts do we have?")
 
       assert Samen.Pii.Info.vault_routed_columns(Person) != []
     end
