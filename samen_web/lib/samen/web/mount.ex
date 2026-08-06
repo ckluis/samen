@@ -182,6 +182,7 @@ defmodule Samen.Web.Mount do
     crumb_root title glyph
     operator_org_id operator_title operator_workspace operator_glyph
     operator_initials operator_logo_style operator_role operator_user
+    operator_authority
     aggregate_loader otp_app status
     user_name user_role user_initials
     chat_path pubsub presence object_cards

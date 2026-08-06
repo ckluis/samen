@@ -156,6 +156,30 @@ defmodule Samen.WebTest.DataCase do
     )
   end
 
+  @doc """
+  T150 — open a REAL `Samen.Impersonation` session for `(operator_id, org_id)` in the scratch
+  host repo (the `imp_impersonation_session` table this repo now carries), so an operator
+  per-tenant drill-in's deny-on-read gate (`Samen.Web.Operator.Impersonation.gate/2`) sees an
+  ACTIVE session. Returns the session struct. Uses `:operator_admin` (may impersonate).
+  """
+  def open_impersonation!(operator_id, org_id, reason \\ "T150 gate test — ticket #4242") do
+    {:ok, session} =
+      Samen.Impersonation.open(
+        %Samen.OperatorPlane.Actor{id: operator_id, operator_role: :operator_admin},
+        org_id,
+        reason
+      )
+
+    session
+  end
+
+  @doc "Assign the operator identity a drill-in gate resolves (`:samen_operator_id`/`:samen_operator_role`)."
+  def with_operator_identity(socket, operator_id, role \\ :operator_admin) do
+    socket
+    |> Phoenix.Component.assign(:samen_operator_id, operator_id)
+    |> Phoenix.Component.assign(:samen_operator_role, role)
+  end
+
   defp namespace(:crm), do: Samen.WebTest.Crm
   defp namespace(:billing), do: Samen.WebTest.Billing
   defp namespace(:support), do: Samen.WebTest.Support

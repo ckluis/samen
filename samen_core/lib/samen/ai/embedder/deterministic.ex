@@ -62,6 +62,9 @@ defmodule Samen.AI.Embedder.Deterministic do
     {:error, :not_implemented}
   end
 
+  @impl Samen.AI.Provider
+  def simulated?, do: true
+
   @doc """
   Embed a single already-scrubbed segment to a `dim/0`-length unit vector. Public so the
   `Samen.AI.Embeddings` plane can embed a query string the same way it embedded documents

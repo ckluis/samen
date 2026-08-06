@@ -224,6 +224,84 @@ defmodule Samen.Delivery.Rendering do
        "You've been invited to join a team. Accept the invitation to get started.",
        "Accept invitation"}
 
+  # The bounded lifecycle-event enum this module can render CONTENT for — the SAME
+  # set `Samen.Delivery.Lifecycle.EmailWorker.events/0` dispatches. Kept here so the
+  # per-EVENT copy lives with the other framework email templates (T151).
+  @lifecycle_events ~w(welcome onboarding trial_ending payment_failed payment_recovered subscription_cancelled)
+
+  @doc "The bounded set of lifecycle events `lifecycle_content/1` renders copy for."
+  @spec lifecycle_events() :: [String.t()]
+  def lifecycle_events, do: @lifecycle_events
+
+  @doc """
+  Build the recipient-facing CONTENT (subject + text body + html body) for a
+  transactional **lifecycle** email — one of the six bounded events (T151). This is
+  the lifecycle sibling of `auth_content/3`: `Samen.Delivery.Lifecycle.EmailWorker`
+  merges it onto the send config so each of the six events reaches the ESP with its
+  OWN distinct, appropriate subject+body — NOT the single static `adapter_config()`
+  map that made every event (and, before a host set `:subject`, the literal
+  `(rendering pending …)` placeholder) identical.
+
+  The copy is generic framework transactional copy — it carries NO recipient PII
+  (the recipient address is resolved downstream at `deliver/2` time via the vault
+  reveal path, the token-only convention `EmailWorker` already follows), so unlike
+  `render_for_send/4` there is no vault field to resolve here. That is why the
+  token-only lifecycle/auth workers use this static-content seam rather than the
+  recipient-loading `render_for_send/4` path `Samen.Notifications.Digest` uses.
+
+  Returns `{subject, text_body, html_body}` — the SAME shape every
+  `Samen.Delivery.Rendering` template function returns, so it threads through the
+  send path identically.
+  """
+  @spec lifecycle_content(String.t() | atom()) :: {String.t(), String.t(), String.t()}
+  def lifecycle_content(event) when is_atom(event) and not is_nil(event),
+    do: lifecycle_content(Atom.to_string(event))
+
+  def lifecycle_content(event) when is_binary(event) and event in @lifecycle_events do
+    {subject, intro, detail} = lifecycle_copy(event)
+
+    text_body = intro <> "\n\n" <> detail <> "\n"
+
+    # `intro`/`detail` are static framework copy (compile-time constants, no PII), so
+    # — exactly like `auth_content/3` — they interpolate raw; only recipient/tenant-
+    # derived values would need `html_safe/1`, and none appear in this static copy.
+    html_body = "<p>#{intro}</p><p>#{detail}</p>"
+
+    {subject, text_body, html_body}
+  end
+
+  defp lifecycle_copy("welcome"),
+    do:
+      {"Welcome to your new account", "Welcome — your account is ready to use.",
+       "You can sign in any time to get started. We're glad to have you on board."}
+
+  defp lifecycle_copy("onboarding"),
+    do:
+      {"Finish setting up your account", "Let's finish getting your account set up.",
+       "A few quick steps will help you get the most out of your account."}
+
+  defp lifecycle_copy("trial_ending"),
+    do:
+      {"Your trial is ending soon", "Your free trial is ending soon.",
+       "Add a payment method to keep your account active without interruption."}
+
+  defp lifecycle_copy("payment_failed"),
+    do:
+      {"Action needed: we couldn't process your payment",
+       "We were unable to process your most recent payment.",
+       "Please update your payment details to avoid any interruption to your account."}
+
+  defp lifecycle_copy("payment_recovered"),
+    do:
+      {"Your payment went through",
+       "Good news — your most recent payment was processed successfully.",
+       "Your account is fully active and no further action is needed."}
+
+  defp lifecycle_copy("subscription_cancelled"),
+    do:
+      {"Your subscription has been cancelled", "Your subscription has been cancelled.",
+       "You'll keep access until the end of your current billing period. We're sorry to see you go."}
+
   defp normalize_base_url(nil), do: ""
   defp normalize_base_url(url) when is_binary(url), do: String.trim_trailing(url, "/")
 

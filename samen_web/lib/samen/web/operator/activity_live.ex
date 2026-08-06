@@ -24,13 +24,15 @@ defmodule Samen.Web.Operator.ActivityLive do
   this screen must be able to see the feed is NOT a complete org governance
   change-log without reading source or a status doc.
 
-  ## Read-only (done-criterion 4)
+  ## Read-only feed (done-criterion 4) + the T150 open-session affordance
 
-  This LiveView defines no `handle_event/3` clause and renders no
-  `phx-click`/`phx-submit`/form affordance anywhere — it is a pure reader. The
-  only navigation is plain `<a href>` window-selector links (24h / 7d / 30d),
-  which work identically with or without the LiveView client wired (ADR-042
-  Class B), consistent with the platform's browser-dead-JS posture (dogfood B1).
+  The feed itself is a pure reader — the only feed navigation is plain `<a href>`
+  window-selector links (24h / 7d / 30d), which work identically with or without the
+  LiveView client wired (ADR-042 Class B). The ONE `phx-submit` on this page is the
+  T150 open-session affordance rendered EXCLUSIVELY on the deny state (no active
+  impersonation session): a per-tenant activity drill-in requires a real, reason-
+  required `Samen.Impersonation` session so the access lands in the tenant's ledger.
+  Once a session is open the feed renders and no form is shown.
 
   ## Masking (INV-1)
 
@@ -54,10 +56,15 @@ defmodule Samen.Web.Operator.ActivityLive do
   import Samen.Web.Operator.Live
 
   alias Samen.Web.Operator.ActivityReads
+  alias Samen.Web.Operator.Impersonation
 
   @impl true
   def mount(params, session, socket) do
-    socket = assign_mount(socket, session)
+    socket =
+      socket
+      |> assign_mount(session)
+      |> Impersonation.assign_identity(session, params)
+
     {:ok, load(socket, Map.get(params, "org_id"), window_hours_param(params))}
   end
 
@@ -66,6 +73,21 @@ defmodule Samen.Web.Operator.ActivityLive do
     org_id = Map.get(params, "org_id") || socket.assigns[:org_id]
     {:noreply, load(socket, org_id, window_hours_param(params))}
   end
+
+  @impl true
+  def handle_event("open_session", %{"reason" => reason}, socket) do
+    org_id = socket.assigns[:org_id]
+
+    case Impersonation.open_from_socket(socket, org_id, reason) do
+      {:ok, _session} -> {:noreply, load(socket, org_id, socket.assigns[:window_hours_param])}
+      {:error, reason} -> {:noreply, assign(socket, open_error: open_error_copy(reason))}
+    end
+  end
+
+  defp open_error_copy(:reason_required), do: "A reason for access is required."
+  defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."
+  defp open_error_copy({:pii_shaped_reason, _}), do: "The reason must name the ticket, not the person."
+  defp open_error_copy(_), do: "The impersonation session could not be opened."
 
   defp window_hours_param(params), do: Map.get(params, "window_hours")
 
@@ -80,18 +102,27 @@ defmodule Samen.Web.Operator.ActivityLive do
   def load(socket, org_id, window_hours, opts \\ []) do
     mount = socket.assigns[:samen_mount]
 
-    feed =
-      case Keyword.fetch(opts, :feed) do
-        {:ok, override} ->
-          override
+    case Keyword.fetch(opts, :feed) do
+      {:ok, override} ->
+        # `:feed` injection seam (masking sabotage-twin) — bypasses the session gate; it is
+        # exercising the DOM-scan refutability, not the T150 gate.
+        assign(socket, org_id: org_id, window_hours_param: window_hours, feed: override, impersonation: :active, open_error: nil)
 
-        :error ->
-          if mount && org_id do
-            ActivityReads.activity(mount, org_id, Keyword.put(opts, :window_hours, window_hours))
-          end
-      end
+      :error ->
+        cond do
+          is_nil(mount) or is_nil(org_id) ->
+            assign(socket, org_id: org_id, window_hours_param: window_hours, feed: nil, impersonation: :none, open_error: nil)
 
-    assign(socket, org_id: org_id, window_hours_param: window_hours, feed: feed)
+          # T150 — deny-on-read: a per-tenant activity drill-in requires a real impersonation
+          # session for the target org (accountability), else no feed + the open affordance.
+          Impersonation.gate(socket.assigns[:samen_operator_id], org_id) == :denied ->
+            assign(socket, org_id: org_id, window_hours_param: window_hours, feed: nil, impersonation: :denied, open_error: nil)
+
+          true ->
+            feed = ActivityReads.activity(mount, org_id, Keyword.put(opts, :window_hours, window_hours))
+            assign(socket, org_id: org_id, window_hours_param: window_hours, feed: feed, impersonation: :active, open_error: nil)
+        end
+    end
   end
 
   @impl true
@@ -110,6 +141,29 @@ defmodule Samen.Web.Operator.ActivityLive do
         </.topbar>
 
         <%= cond do %>
+          <% @impersonation == :denied -> %>
+            <div class="wrap">
+              <div class="card" id="impersonation-required" style="padding:22px 20px">
+                <div style="color:var(--red);font-weight:600" id="no-session">
+                  Access denied — no active impersonation session for this tenant.
+                </div>
+                <p style="color:var(--muted);margin:10px 0 14px;font-size:13px">
+                  Reading one tenant's activity/audit feed is a per-tenant drill-in: it requires a
+                  short-TTL, reason-required impersonation session, recorded in the tenant's ledger.
+                </p>
+                <div :if={@open_error} id="open-error" style="color:#B42318;font-size:12px;margin-bottom:8px">
+                  {@open_error}
+                </div>
+                <form phx-submit="open_session" id="open-session-form" style="display:flex;gap:8px;align-items:flex-start">
+                  <input type="text" name="reason" id="session-reason-input"
+                    placeholder="Reason (e.g. ticket #1234: what changed?)"
+                    style="flex:1;padding:8px 10px;border:1px solid #D0D5DD;border-radius:8px;font-size:13px" />
+                  <button type="submit" id="start-session-btn" style="padding:8px 14px;border-radius:8px;background:#3B4CCA;color:#fff;font-size:13px">
+                    Start session
+                  </button>
+                </form>
+              </div>
+            </div>
           <% is_nil(@org_id) or is_nil(@feed) -> %>
             <div class="wrap">
               <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">

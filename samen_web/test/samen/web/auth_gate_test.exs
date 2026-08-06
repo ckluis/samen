@@ -7,13 +7,16 @@ defmodule Samen.Web.AuthGateTest do
   flags · …) to anonymous visitors.
 
   Paired red/control per `Samen.RedPath` (anti-tautology):
-    * RED     — armed prod, ANONYMOUS `/operator/accounts` → 302 redirect to `/login` + halted.
-    * CONTROL — armed prod, AUTHENTICATED operator → passes through untouched (proves the RED
-      assertion can fail; a gate that halted everyone would be a tautology).
+    * RED (anon)     — armed prod, ANONYMOUS `/operator/accounts` → 302 redirect to `/login` + halted.
+    * RED (non-op)   — armed prod, an AUTHENTICATED TENANT user (no operator role) → 302 + halted
+      (T146: the plug now enforces operator ROLE, not just authentication).
+    * CONTROL — armed prod, AUTHENTICATED OPERATOR (host `:operator_authority` returns a role) →
+      passes through untouched (proves the RED assertions can fail; a gate that halted everyone
+      would be a tautology).
     * dev/test no-op — disarmed, anonymous passes (the sanctioned query-param convenience posture).
 
   SABOTAGE-REFUTABLE: neutralize `AuthGate.call/2` (e.g. make it always return `conn`) and the RED
-  test fails (no 302, no `location` header) while the CONTROL stays green — the pre-fix ungated
+  tests fail (no 302, no `location` header) while the CONTROL stays green — the pre-fix ungated
   shape is exactly what this asserts against. Mirrors `driftwood/test/auth_prodpath_test.exs`.
   """
   use ExUnit.Case, async: false
@@ -28,13 +31,29 @@ defmodule Samen.Web.AuthGateTest do
   @otp_app :samen_web
   @opts AuthGate.init(otp_app: @otp_app)
 
+  @operator_user "operator-user-1"
+  @tenant_user "tenant-user-9"
+
+  # A host `:operator_authority` resolver: the single seeded operator user holds
+  # `:operator_admin`; everyone else (a tenant user, anonymous nil) is NOT an operator.
+  def resolve_operator_role(@operator_user), do: :operator_admin
+  def resolve_operator_role(_), do: nil
+
   setup do
     prev = Application.get_env(@otp_app, :auth_required?)
+    prev_authority = Application.get_env(@otp_app, :operator_authority)
+
+    Application.put_env(@otp_app, :operator_authority, {__MODULE__, :resolve_operator_role, []})
 
     on_exit(fn ->
       case prev do
         nil -> Application.delete_env(@otp_app, :auth_required?)
         val -> Application.put_env(@otp_app, :auth_required?, val)
+      end
+
+      case prev_authority do
+        nil -> Application.delete_env(@otp_app, :operator_authority)
+        val -> Application.put_env(@otp_app, :operator_authority, val)
       end
     end)
 
@@ -57,6 +76,21 @@ defmodule Samen.Web.AuthGateTest do
       assert get_resp_header(conn, "location") == ["/login"]
     end
 
+    test "RED (T146) — an AUTHENTICATED TENANT user without operator role is redirected + halted" do
+      arm!()
+
+      # A real authenticated principal (the SAME session seam a host login writes) — but the
+      # host `:operator_authority` resolver returns nil for a tenant user: NOT an operator.
+      conn =
+        operator_conn(%{})
+        |> Samen.Web.Auth.put_current_user(@tenant_user)
+        |> AuthGate.call(@opts)
+
+      assert conn.halted, "an authenticated tenant user must NOT reach the operator plane"
+      assert conn.status == 302
+      assert get_resp_header(conn, "location") == ["/login"]
+    end
+
     test "CONTROL — an AUTHENTICATED operator passes through (not halted, no redirect)" do
       arm!()
 
@@ -64,7 +98,8 @@ defmodule Samen.Web.AuthGateTest do
         operator_conn(%{})
         # The real session seam a host login writes (`Samen.Web.Auth.put_current_user/2`),
         # the SAME key `authenticated_user_id/1` + `CurrentOrg` read — never a query param.
-        |> Samen.Web.Auth.put_current_user("operator-user-1")
+        # The host `:operator_authority` resolver returns `:operator_admin` for this principal.
+        |> Samen.Web.Auth.put_current_user(@operator_user)
         |> AuthGate.call(@opts)
 
       refute conn.halted

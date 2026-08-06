@@ -96,6 +96,7 @@ defmodule Samen.AI.Chokepoint do
   red-team (more adversarial cases + full-DB canary seeding); T65 establishes the tier.
   """
 
+  alias Samen.AI.Completion
   alias Samen.AI.MaskedPayload
   alias Samen.Api.PiiResolution
   alias Samen.Pii.Info
@@ -138,7 +139,8 @@ defmodule Samen.AI.Chokepoint do
     * `:grounding` (metadata map) and `:meta` (bounded dispatch metadata).
   """
   @spec seal(MaskedPayload.kind(), [term()] | term(), keyword()) ::
-          {:ok, MaskedPayload.t()} | {:error, :pii_egress_refused}
+          {:ok, MaskedPayload.t()}
+          | {:error, :pii_egress_refused | :invalid_grounding_shape}
   def seal(kind, segments, opts \\ []) when kind in [:complete, :embed, :mcp] do
     grounding = Keyword.get(opts, :grounding, %{})
     meta = Keyword.get(opts, :meta, %{})
@@ -337,6 +339,11 @@ defmodule Samen.AI.Chokepoint do
   rescue
     e -> {:error, normalize_error(e, provider)}
   else
+    # Stamp `:simulated` BY CONSTRUCTION from the dispatched provider (T152) — the ONE
+    # provider-invocation site is the honest place to decide it, never the completion
+    # `:text`. A keyless/deterministic double declares itself simulated via the optional
+    # `simulated?/0` callback; a live adapter that omits it is treated as live (`false`).
+    {:ok, %Completion{} = c} -> {:ok, %{c | simulated: simulated_provider?(provider)}}
     {:ok, _} = ok -> ok
     {:error, reason} -> {:error, normalize_error(reason, provider)}
     other -> {:error, normalize_error(other, provider)}
@@ -358,6 +365,18 @@ defmodule Samen.AI.Chokepoint do
   # `{:provider_error, provider}`.
   defp normalize_error(reason, _provider) when is_atom(reason), do: reason
   defp normalize_error(_reason, provider), do: {:provider_error, provider}
+
+  # Is the dispatched provider a SIMULATED (keyless/deterministic) double? (T152.) Read the
+  # provider's OWN optional `simulated?/0` declaration — a provider that omits it is LIVE
+  # (fail-honest default: only an explicitly-simulated provider is stamped `true`). Wrapped
+  # so a provider whose `simulated?/0` raises can never turn a successful completion into a
+  # crash — it degrades to `false` (the same EG6-safe posture as the dispatch itself).
+  defp simulated_provider?(provider) do
+    Code.ensure_loaded?(provider) and function_exported?(provider, :simulated?, 0) and
+      provider.simulated?() == true
+  rescue
+    _ -> false
+  end
 
   # --- steps 3+4: assemble + the scrub (fail-CLOSED by ALLOWLIST) -------------------------
 
@@ -436,6 +455,29 @@ defmodule Samen.AI.Chokepoint do
   # shipped test already uses) — atoms are allowed here (unlike in `segments`, where an atom
   # is not provably safe because a segment is never legitimately an atom).
   #
+  # `nil` / `[]` are the natural "no grounding" — a caller who has nothing to ground with
+  # (e.g. `grounding: []`, the empty default before a host wires a catalog) is NOT attempting a
+  # PII egress, so accept them as empty rather than crying wolf with the `:pii_egress_refused`
+  # SECURITY error. Matched ABOVE the scalar/map clauses so an empty list is "no metadata"
+  # (there are no leaves to scan), never a shape error.
+  defp scrub_metadata(nil), do: :ok
+  defp scrub_metadata([]), do: :ok
+
+  # A NON-map, NON-empty scalar/list (`grounding: "x"`, `42`, `:atom`, `~c"…"`, `["a"]`) does not
+  # match the documented `%Samen.AI.MaskedPayload{}` contract ("a map keyed by bounded label
+  # atoms"). That is a SHAPE problem, not a leak — return a DISTINCT `:invalid_grounding_shape`
+  # so a caller is not misled into a PII-leak investigation over a wrong-typed field. This does
+  # NOT weaken the scrub: the value still runs through `unsafe_metadata?/1` first, so a
+  # `vt_*`/`%Masked{}` sentinel smuggled in as a bare term (e.g. a top-level `~c"vt_…"` charlist)
+  # STILL refuses `:pii_egress_refused` — the SECURITY refusal wins over the shape error, and the
+  # T65-F8 / T66-F1 red-team legs (sabotages 46/47) stay refutable here.
+  defp scrub_metadata(value)
+       when is_binary(value) or is_number(value) or is_atom(value) or is_list(value) do
+    if unsafe_metadata?(value), do: @refusal, else: {:error, :invalid_grounding_shape}
+  rescue
+    _ -> @refusal
+  end
+
   # T66-F1 fix-round (delta-verifier finding): the TOP-LEVEL value must itself be a map — a
   # non-map `:grounding`/`:meta` (a bare string, a charlist, a number, …) does not match the
   # documented contract, so it refuses fail-closed here rather than falling through to

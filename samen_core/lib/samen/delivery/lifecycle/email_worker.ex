@@ -74,7 +74,7 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
 
   require Logger
 
-  alias Samen.Delivery.{Chokepoint, Message}
+  alias Samen.Delivery.{Chokepoint, Message, Rendering}
 
   # Captured at compile time so the runtime never consults Mix (unavailable in
   # releases). Overridable at runtime via :delivery_env for tests / staging.
@@ -113,7 +113,7 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
 
           case Chokepoint.send(message,
                  fallback_adapter: resolve_adapter(),
-                 fallback_config: adapter_config(),
+                 fallback_config: render_config(event),
                  env: env()
                ) do
             {:ok, receipt} ->
@@ -253,5 +253,28 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
   @doc false
   def env do
     Application.get_env(:samen_core, :delivery_env, @compiled_env)
+  end
+
+  # The C3 render seam (T151): each of the six bounded events gets its OWN distinct
+  # subject/body, rendered through `Samen.Delivery.Rendering.lifecycle_content/1` and
+  # MERGED onto the adapter config BEFORE `Chokepoint.send/2` — the SAME way
+  # `Samen.Delivery.AuthMailer.dispatch_config/2` threads `Rendering.auth_content/3`
+  # onto the send config for auth-token mail (the token-only sibling of this worker),
+  # and the SAME way `Samen.Notifications.Digest` threads its rendered digest content.
+  #
+  # This closes the dogfood bug where all six events shared one static `adapter_config()`
+  # map, so a wired ESP emitted the literal `(rendering pending — template none)` /
+  # `(rendering pending — ADR-038 C3/T29)` fallback (or every event arrived identical).
+  # The copy is generic framework transactional text with NO recipient PII — the
+  # recipient address is still resolved downstream at `deliver/2` time via the vault
+  # reveal path (token-only convention), so unlike `Digest` there is no recipient
+  # record to load here and no vault field to resolve; the wire-level INV-1 masking gate
+  # (the `Samen.Delivery.ProviderConformanceCase` deliver-leak gate every adapter passes)
+  # is untouched and still guards egress.
+  defp render_config(event) do
+    {subject, text_body, html_body} = Rendering.lifecycle_content(event)
+
+    adapter_config()
+    |> Map.merge(%{subject: subject, text_body: text_body, html_body: html_body})
   end
 end

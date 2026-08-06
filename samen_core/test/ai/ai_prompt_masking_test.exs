@@ -223,20 +223,52 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
       assert payload.grounding == %{sample: ~c"accounts"}
     end
 
-    test "a non-map :grounding/:meta value is refused fail-closed (the documented map contract)" do
+    test "T147(b): a BENIGN non-map :grounding/:meta is a SHAPE error, not the security refusal" do
       # `%Samen.AI.MaskedPayload{}` docs `:grounding`/`:meta` as "a map keyed by bounded label
-      # atoms" — a bare string/number/charlist at the TOP level does not match that contract,
-      # so it refuses rather than silently sealing under the scalar leaf rules (which exist to
-      # scan values *inside* a map, not to bless a non-map top-level payload field).
+      # atoms". A wrong-TYPE (but leak-free) value is a SHAPE problem, not a PII egress — it must
+      # NOT masquerade as `:pii_egress_refused` (which implies a leak the operator must chase).
+      # It returns the DISTINCT `:invalid_grounding_shape` and still reaches no provider.
       for bogus <- ["a bare string", 42, ~c"accounts", :an_atom, ["a", "list"]] do
         assert Chokepoint.complete(Provider.Fake, %{}, :complete, ["ok"], grounding: bogus) ==
-                 {:error, :pii_egress_refused},
-               "a non-map :grounding value must refuse: #{inspect(bogus)}"
+                 {:error, :invalid_grounding_shape},
+               "a benign non-map :grounding value must be a shape error, not a leak error: #{inspect(bogus)}"
 
         assert Chokepoint.complete(Provider.Fake, %{}, :complete, ["ok"], meta: bogus) ==
-                 {:error, :pii_egress_refused},
-               "a non-map :meta value must refuse: #{inspect(bogus)}"
+                 {:error, :invalid_grounding_shape},
+               "a benign non-map :meta value must be a shape error, not a leak error: #{inspect(bogus)}"
       end
+
+      assert Provider.Fake.sent_payloads() == []
+    end
+
+    test "T147(b): nil / [] :grounding/:meta is accepted as 'no grounding' (not refused)" do
+      # The natural "no grounding" default. It must SEAL and reach the provider — a `grounding: []`
+      # is not a leak, not a shape error; it is simply empty. (Non-vacuous: asserts the {:ok}.)
+      for empty <- [nil, []] do
+        assert {:ok, %Completion{}} =
+                 Chokepoint.complete(Provider.Fake, %{}, :complete, ["ok"], grounding: empty),
+               "an empty :grounding (#{inspect(empty)}) must seal, not refuse"
+
+        assert {:ok, %Completion{}} =
+                 Chokepoint.complete(Provider.Fake, %{}, :complete, ["ok"], meta: empty),
+               "an empty :meta (#{inspect(empty)}) must seal, not refuse"
+      end
+    end
+
+    test "T147(b): the SHAPE relaxation does NOT weaken the scrub — a vt_* bare/map term still refuses" do
+      # Security wins over the shape error: a `vt_*` sentinel smuggled in as a BARE top-level
+      # charlist, or anywhere inside a MAP, STILL refuses `:pii_egress_refused` and reaches no
+      # provider. (Guards the T147(b) change from silently downgrading a real leak to a shape error.)
+      vt_charlist = ~c"vt_aaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+      assert Chokepoint.complete(Provider.Fake, %{}, :complete, ["ok"], grounding: vt_charlist) ==
+               {:error, :pii_egress_refused},
+             "a bare vt_* charlist grounding is a LEAK, not a mere shape error"
+
+      assert Chokepoint.complete(Provider.Fake, %{}, :complete, ["ok"],
+               grounding: %{table: "vt_aaa…", sample: @canary}
+             ) == {:error, :pii_egress_refused},
+             "a vt_* inside a MAP grounding still refuses as a leak"
 
       assert Provider.Fake.sent_payloads() == []
     end

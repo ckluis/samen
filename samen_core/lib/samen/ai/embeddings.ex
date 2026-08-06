@@ -27,6 +27,13 @@ defmodule Samen.AI.Embeddings do
        faked vector). A host wires a real embeddings provider via
        `config :samen_core, Samen.AI, embedder: {Module, config}`.
 
+       > **Keyless ranking is by HASH distance, not meaning (T152, honest framing).** The
+       > deterministic embedder is a stable bag-of-tokens hash projection — a self-query lands
+       > at distance 0 and shared tokens rank nearer, but there is NO semantic quality
+       > (synonyms/paraphrase do not rank closer). Meaningful semantic ranking needs a LIVE
+       > embedder (wire one + `SAMEN_AI_LIVE=1`). This is the inherent keyless limitation, not
+       > a bug — see `Samen.AI.Embedder.Deterministic` and `docs/guides/ai-quickstart.md`.
+
   ## Routes through the chokepoint (never a raw embedder call)
 
   `embed_field/6` seals its input via `Samen.AI.Chokepoint.embed/4` — the ONE
@@ -46,20 +53,35 @@ defmodule Samen.AI.Embeddings do
   alias Samen.Pii.Info
 
   defmodule Hit do
-    @moduledoc "One ranked semantic-search hit (org-scoped; carries no source plaintext)."
+    @moduledoc """
+    One ranked semantic-search hit (org-scoped). Self-describing: `:snippet` is a bounded
+    excerpt of the matched field's value (T152) so a caller sees WHAT matched without a
+    second fetch. The snippet is masking-safe by construction — an embedded field is
+    non-vault by deny-by-default (`Samen.AI.Embeddings.assert_embeddable/2`), so it carries
+    no 🔒/`%Samen.Masked{}`/`vt_*` value; `snippet_of/1` additionally stores `nil` for
+    anything that is not a `vt_`-free binary. `:snippet` is `nil` for a row embedded before
+    the snippet column existed (never a fabricated excerpt).
+    """
     @enforce_keys [:source_resource, :source_id, :field, :distance]
-    defstruct [:source_resource, :source_id, :field, :distance]
+    defstruct [:source_resource, :source_id, :field, :distance, :snippet]
 
     @type t :: %__MODULE__{
             source_resource: String.t(),
             source_id: String.t(),
             field: String.t(),
-            distance: float()
+            distance: float(),
+            snippet: String.t() | nil
           }
   end
 
   @table "aie_embedding"
   @default_limit 20
+  # Bounded excerpt length for the self-describing Hit snippet (T152). Long enough to be
+  # legible, short enough that the vector index stays a lean derived store.
+  @snippet_limit 240
+  # The vault FK-token sentinel (`vt_*`). `snippet_of/1` refuses to store any snippet carrying
+  # it — a belt to the deny-by-default brace (an embedded field is non-vault by construction).
+  @vt_sentinel "vt_"
 
   @doc """
   Embed every DECLARED embeddable field of `record` (a struct of `resource`) and store one
@@ -101,7 +123,10 @@ defmodule Samen.AI.Embeddings do
          :ok <- assert_embeddable(resource, field),
          {:ok, {embedder, config}} <- embedder_for(opts),
          {:ok, [vector]} <- Chokepoint.embed(embedder, config, [text], chokepoint_opts(opts)) do
-      store_vector(repo_for(opts), org_id, resource, source_id, field, vector)
+      # `text` already passed `assert_embeddable/2` (declared embeddable AND non-vault), so it
+      # is non-PII by construction; `snippet_of/1` is the belt (stores only a `vt_`-free
+      # binary excerpt, `nil` otherwise) — the Hit is self-describing, masking-safe (T152).
+      store_vector(repo_for(opts), org_id, resource, source_id, field, vector, snippet_of(text))
       {:ok, vector}
     else
       {:error, _} = err -> err
@@ -137,7 +162,14 @@ defmodule Samen.AI.Embeddings do
   # --- deny-by-default allowlist ------------------------------------------------------------
 
   defp declared_embeddable_fields(resource) do
-    if function_exported?(resource, :embeddable_fields, 0) do
+    # `Code.ensure_loaded?/1` FIRST — mirrors `Samen.AI.resolved_env/1` and the T143
+    # `Samen.Approvals.exports?/3` pattern. Without it, `function_exported?/3` reports `false`
+    # for a not-yet-loaded resource module, collapsing the deny-by-default allowlist to `[]`
+    # so `assert_embeddable/2` wrongly returns `{:error, :field_not_embeddable}` for a
+    # genuinely-declared embeddable field (masking the ADR-014 `{:error, :not_configured}`
+    # contract). Forcing the load makes detection reflect what the module ACTUALLY defines,
+    # not load order. Fail-closed either way, but now honest.
+    if Code.ensure_loaded?(resource) and function_exported?(resource, :embeddable_fields, 0) do
       resource.embeddable_fields() |> List.wrap()
     else
       []
@@ -156,9 +188,18 @@ defmodule Samen.AI.Embeddings do
   end
 
   defp vault_routed?(resource, field) do
-    pii = safe(fn -> Enum.map(Info.pii_attributes(resource), & &1.name) end, [])
-    routed = safe(fn -> Info.vault_routed_columns(resource) end, [])
-    field in pii or field in routed
+    # Force the load FIRST (same guard as `declared_embeddable_fields/1`): the `Info.*`
+    # introspection below reads the compiled Spark DSL, so on a not-yet-loaded module it would
+    # raise `UndefinedFunctionError` and `safe/2` would swallow it to `[]` — a fail-OPEN
+    # result (a vault-routed field read as NOT routed). If the module can't be loaded at all we
+    # cannot prove the field is safe, so fail-CLOSED (treat as vault-routed).
+    if Code.ensure_loaded?(resource) do
+      pii = safe(fn -> Enum.map(Info.pii_attributes(resource), & &1.name) end, [])
+      routed = safe(fn -> Info.vault_routed_columns(resource) end, [])
+      field in pii or field in routed
+    else
+      true
+    end
   end
 
   # --- embedder resolution (the Samen.AI.provider_for/2 mirror, embeddings lane) ------------
@@ -193,16 +234,17 @@ defmodule Samen.AI.Embeddings do
 
   # --- storage (raw SQL; pgvector `::vector` text cast, dependency-free) --------------------
 
-  defp store_vector(repo, org_id, resource, source_id, field, vector) do
+  defp store_vector(repo, org_id, resource, source_id, field, vector, snippet) do
     now = NaiveDateTime.utc_now()
 
     sql = """
     INSERT INTO #{@table}
-      (aie_org_id, aie_source_resource, aie_source_id, aie_field, aie_embedding,
+      (aie_org_id, aie_source_resource, aie_source_id, aie_field, aie_embedding, aie_snippet,
        aie_inserted_at, aie_updated_at)
-    VALUES ($1::text::uuid, $2, $3, $4, $5::text::vector, $6, $6)
+    VALUES ($1::text::uuid, $2, $3, $4, $5::text::vector, $6, $7, $7)
     ON CONFLICT (aie_org_id, aie_source_resource, aie_source_id, aie_field)
-    DO UPDATE SET aie_embedding = EXCLUDED.aie_embedding, aie_updated_at = EXCLUDED.aie_updated_at
+    DO UPDATE SET aie_embedding = EXCLUDED.aie_embedding, aie_snippet = EXCLUDED.aie_snippet,
+                  aie_updated_at = EXCLUDED.aie_updated_at
     """
 
     params = [
@@ -211,6 +253,7 @@ defmodule Samen.AI.Embeddings do
       to_string(source_id),
       Atom.to_string(field),
       encode_vector(vector),
+      snippet,
       now
     ]
 
@@ -218,9 +261,27 @@ defmodule Samen.AI.Embeddings do
     :ok
   end
 
+  # A bounded, masking-safe excerpt of the matched field's value (T152). Only a `vt_`-free
+  # binary yields a snippet — a `%Samen.Masked{}`, a `vt_*`-bearing string, or any non-binary
+  # value stores `nil` (never surface a token / masked / non-plaintext shape in a Hit). Since
+  # `assert_embeddable/2` already guarantees the field is non-vault, this is the belt to that
+  # brace, not the primary gate. Whitespace is collapsed so the excerpt is single-line-legible.
+  defp snippet_of(text) when is_binary(text) do
+    if String.contains?(text, @vt_sentinel) do
+      nil
+    else
+      text |> String.replace(~r/\s+/u, " ") |> String.trim() |> binary_slice_safe(@snippet_limit)
+    end
+  end
+
+  defp snippet_of(_), do: nil
+
+  defp binary_slice_safe(s, limit) when byte_size(s) <= limit, do: s
+  defp binary_slice_safe(s, limit), do: String.slice(s, 0, limit)
+
   defp knn(repo, org_id, qvec, limit) do
     sql = """
-    SELECT aie_source_resource, aie_source_id, aie_field,
+    SELECT aie_source_resource, aie_source_id, aie_field, aie_snippet,
            aie_embedding <-> $2::text::vector AS distance
     FROM #{@table}
     WHERE aie_org_id = $1::text::uuid
@@ -230,8 +291,14 @@ defmodule Samen.AI.Embeddings do
 
     case repo.query(sql, [org_id, encode_vector(qvec), limit]) do
       {:ok, %{rows: rows}} ->
-        Enum.map(rows, fn [res, sid, field, dist] ->
-          %Hit{source_resource: res, source_id: sid, field: field, distance: to_float(dist)}
+        Enum.map(rows, fn [res, sid, field, snippet, dist] ->
+          %Hit{
+            source_resource: res,
+            source_id: sid,
+            field: field,
+            snippet: snippet,
+            distance: to_float(dist)
+          }
         end)
 
       {:error, _} ->

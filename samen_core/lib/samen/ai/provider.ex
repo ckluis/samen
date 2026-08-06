@@ -59,4 +59,20 @@ defmodule Samen.AI.Provider do
   """
   @callback embed(Samen.AI.MaskedPayload.t(), config :: map()) ::
               {:ok, [[float()]]} | {:error, :not_configured | term()}
+
+  @doc """
+  OPTIONAL: does this provider produce SIMULATED output (a keyless/deterministic test
+  double), rather than a live model result? (ADR-043 §4 keyless posture; T152.)
+
+  A provider that omits this callback is treated as **live** (`false`) — the fail-honest
+  default: only a provider that explicitly declares itself simulated is stamped
+  `simulated: true`. `Samen.AI.Chokepoint` reads this at the single provider-invocation
+  site and stamps `%Samen.AI.Completion{simulated:}` **by construction** — a UI never has
+  to parse the legacy `"fake-completion:"` text prefix to know a result is fake.
+  `Samen.AI.Provider.Fake` and `Samen.AI.Embedder.Deterministic` return `true`; a live
+  reference adapter leaves it unimplemented (⇒ `false`), keeping core vendor-free (INV-4).
+  """
+  @callback simulated?() :: boolean()
+
+  @optional_callbacks simulated?: 0
 end

@@ -242,6 +242,32 @@ defmodule Samen.Billing.DunningTest do
       assert entitled?(ent, DateTime.add(@period_end, -3600, :second))
       refute entitled?(ent, DateTime.add(@period_end, 3600, :second))
     end
+
+    test "T151: a nil period_end does NOT grant INDEFINITE entitlement (bounded grace)" do
+      dref = FakeDunningMirror.new()
+      mref = FakeMirror.new()
+      FakeMirror.seed_entitlement(mref, @sub_id, :advanced_reporting)
+
+      # A malformed/partial snapshot: payment failed, but period_end is absent (nil).
+      # Pre-fix this mirrored `{:grace_until, nil}` → NULL expires_at → entitled forever.
+      Dunning.reconcile(
+        event(:invoice_payment_failed, refs()),
+        opts(dref, mref, snap(%{period_end: nil}))
+      )
+
+      [ent] = FakeMirror.list_entitlements(mref, @sub_id)
+
+      # The invariant: expires_at is BOUNDED (never NULL), so it is NOT indefinite.
+      refute is_nil(ent.expires_at),
+             "a nil period_end must NOT produce a NULL expires_at (indefinite entitlement)"
+
+      # And the bounded grace really does end — far in the future the customer is NOT entitled.
+      refute entitled?(ent, DateTime.add(DateTime.utc_now(), 365 * 86_400, :second)),
+             "a nil-period_end failed payment must never grant open-ended entitlement"
+
+      # Non-vacuous: the grace is still a real, near-term window (entitled right now).
+      assert entitled?(ent, DateTime.utc_now())
+    end
   end
 
   # ---------------------------------------------------------------------------

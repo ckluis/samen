@@ -92,6 +92,15 @@ config :ash, disable_async?: true
 config :driftwood, auth_required?: false
 config :driftwood, auth_credentials: %{}
 
+# T146 — the OPERATOR-ROLE authority resolver `Samen.Web.AuthGate` reads at the conn level (the
+# `:require_authenticated_operator` pipeline every `/operator/*` scope pipes through). Called with
+# the authenticated principal id; returns an operator role (`Samen.OperatorPlane.Actor.roles/0`)
+# or `nil` (NOT an operator → refused). `Driftwood.Auth.operator_role/1` resolves a configured
+# `:operator_roster` in prod, with a dev-only `:operator_admin` grant while `:auth_required?` is
+# false. Empty by design in this PUBLIC repo — a real launch provisions the operator roster.
+config :driftwood, :operator_authority, {Driftwood.Auth, :operator_role, []}
+config :driftwood, :operator_roster, %{}
+
 config :driftwood, Driftwood.Repo,
   migration_primary_key: [name: :id, type: :binary_id]
 

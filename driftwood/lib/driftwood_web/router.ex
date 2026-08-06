@@ -71,6 +71,21 @@ defmodule DriftwoodWeb.Router do
     plug(:accepts, ["json"])
   end
 
+  # T146 — the OPERATOR control-plane authz pipeline. `Samen.Web.AuthGate` (armed by
+  # `:auth_required?`) verifies the authenticated principal actually HOLDS operator authority
+  # via the `:operator_authority` resolver (`config :driftwood, :operator_authority`), redirecting
+  # any non-operator (a plain tenant user, anonymous) to /login BEFORE any operator surface
+  # renders. This is the conn-level twin of the `Samen.Web.Operator.Authz` on_mount the operator
+  # MACRO carries — and, unlike the macro's on_mount, it gates EVERY route in a scope piped
+  # through it, INCLUDING operator surfaces mounted OUTSIDE `samen_operator_routes/2` (the
+  # aggregate, the freight-shaped impersonation console, the operator desk-chat). Every
+  # `/operator/*` scope below pipes `[:browser, :require_authenticated_operator]`, so no operator
+  # surface is reachable by a tenant user. Driftwood's own reference gate (the driftwood
+  # `DriftwoodWeb.Auth` plug on `:browser`) authenticates ONLY; this adds the ROLE check.
+  pipeline :require_authenticated_operator do
+    plug(Samen.Web.AuthGate, otp_app: :driftwood)
+  end
+
   # F1 (Gate-5 carry) — the versioned public API surface. `forward` sends `/api/v1/*` to
   # the AshJsonApi endpoint (key-auth → the two key classes → the generated JSON:API
   # router over `Driftwood.Freight`). The declared route `/drivers` is reached at
@@ -85,16 +100,21 @@ defmodule DriftwoodWeb.Router do
     get("/healthz", PageController, :healthz)
     get("/readyz", PageController, :readyz)
 
-    # F2 (ADR-031) — the BYO-auth login/logout surface. The prod path derives the tenant
-    # actor from the session this login establishes (day-1 login exists); a production deploy
-    # swaps the verifier for phx.gen.auth or an IdP callback — the session seam is unchanged.
-    get("/login", AuthController, :new)
-    post("/login", AuthController, :create)
-    get("/logout", AuthController, :delete)
+    # T148 — the BYO-auth login/logout surface is NO LONGER driftwood-local. The framework
+    # IDENTITY SPINE (`samen_auth_routes` in the bare tenant scope below) now OWNS `/login` +
+    # `/logout` (the generated golden-app pattern — `samen_core/.../router.ex.golden`), so
+    # signup → verify → login → onboarding is ONE coherent framework flow over
+    # `Driftwood.Operator`'s Ash Identity resources. `DriftwoodWeb.AuthController` +
+    # `Driftwood.Auth`'s verifier remain the BYO REFERENCE (Driftwood.Auth is still the
+    # `operator_role`/`authorized_org_ids` seam), but no route points at the controller — the
+    # framework `Samen.Web.Auth.SessionController` is the login write. The `DriftwoodWeb.Auth`
+    # prod gate still redirects unauthenticated tenants to `/login` (now the framework LoginLive).
 
     # The freight vertical 20% (stays driftwood-local — freight-shaped resources).
     live("/broker", BrokerLive)
-    live("/operator/impersonate", OperatorImpersonationLive)
+    # NOTE (T146): `/operator/impersonate` was moved OUT of this bare `:browser` scope into the
+    # operator-authz scope below — it is an OPERATOR surface and must be role-gated, not merely
+    # authenticated. Mounting it here (authentication only) was the verifier-found bypass.
   end
 
   # ADR-009 — the inherited-80% product UI, MOUNTED from samen_web. Three one-liners
@@ -113,6 +133,23 @@ defmodule DriftwoodWeb.Router do
     # target of the workspace switcher + the operator "Open account →". Sets the session current
     # org so tenant/shared navigation is sticky without a hand-typed UUID.
     samen_session_routes()
+
+    # T148 / ADR-035 §5 A1–A5/A7 — the framework IDENTITY-SPINE pre-actor auth surfaces
+    # (signup → verify → reset → login → 2fa → invite), mounted over Driftwood's sole Identity
+    # mount (`Driftwood.Operator`) in ONE line — EXACTLY the generated golden router pattern
+    # (`samen_auth_routes(namespace: Acme.Operator, repo: Acme.Repo)`). Pre-actor PUBLIC (no
+    # plane/org data). These are TENANT-plane surfaces, NOT operator — they stay OUT of the
+    # `:require_authenticated_operator` scopes below. The pre-actor paths (`/signup`, `/verify/:t`,
+    # `/reset[/:t]`, `/2fa`, `/invite/:t`) are exempted from the `DriftwoodWeb.Auth` prod gate
+    # (see its `@exempt_*`), so a NEW user can reach signup/verify even when auth is armed.
+    samen_auth_routes(namespace: Driftwood.Operator, repo: Driftwood.Repo)
+
+    # T148 / ADR-035 §5 A8 — the FIRST-RUN onboarding wizard (`GET /onboarding`): org-naming,
+    # plan-selection (the honest "no plans configured" empty state — no `:plan_labels` wired
+    # until billing self-serve), and the T05 teammate-invite step. Same Identity mount as the
+    # auth spine (golden: `samen_onboarding_routes(Acme.Operator, repo: Acme.Repo)`). Post-login
+    # (needs an actor), so it is deliberately NOT gate-exempt — a signed-in session passes.
+    samen_onboarding_routes(Driftwood.Operator, repo: Driftwood.Repo)
 
     # WS-F5 F5.1 — the framework `GET /metrics` Prometheus scrape endpoint over
     # `Samen.Metrics.definitions/0`, mounted in ONE line (leverage proof). OFF by
@@ -215,24 +252,9 @@ defmodule DriftwoodWeb.Router do
         })
     )
 
-    # ADR-012 §6.3 — the SAME chat LiveViews on the OPERATOR-DESK plane. The SaaS operator
-    # drills into a tenant's cross-plane threads through the impersonation bridge (§2.3),
-    # carrying the tenant org_id (supplied by `?org=<tenant>` for the dogfood). Bodies +
-    # participant identities render `••••` unless the tenant has disclosed (the 3-state model).
-    # A tenant chat and a SaaS-desk chat are the SAME LiveViews on different planes.
-    samen_chat_routes(:chat, Driftwood.Chat,
-      repo: Driftwood.Repo,
-      plane: :operator,
-      operator_id: "driftwood-operator",
-      path: "/operator/desk-chat",
-      labels: %{
-        title: "Driftwood Ops",
-        crumb_root: "Driftwood Ops",
-        chat_path: "/operator/desk-chat",
-        pubsub: Driftwood.PubSub,
-        object_cards: %{"freight.driver" => DriftwoodWeb.Chat.DriverCard}
-      }
-    )
+    # NOTE (T146): the OPERATOR-DESK chat (`/operator/desk-chat`) was moved OUT of this bare
+    # `:browser` (tenant) scope into the operator-authz scope below — it is an operator surface
+    # (masked cross-plane threads) and must be role-gated, not merely authenticated.
   end
 
   # ADR-009 §5.3(2) — the framework OPERATOR aggregate plane, mounted over Driftwood's
@@ -256,17 +278,41 @@ defmodule DriftwoodWeb.Router do
                        labels: %{
                          operator_title: "Portfolio",
                          operator_workspace: "Driftwood Ops",
+                         # T146 — the operator-ROLE authority seam, so the aggregate is gated by
+                         # the `Samen.Web.Operator.Authz` on_mount (below) IN ADDITION TO the
+                         # conn-level AuthGate pipeline — defense-in-depth for the real leak
+                         # (operator-confidential cross-tenant MRR / load-volume aggregates).
+                         operator_authority: {Driftwood.Auth, :operator_role, []},
                          aggregate_loader: {Driftwood.OperatorAggregate, :load, []}
                        }
                      )
                    )
 
+  # T146 (round 3) — the session-safe mount for the operator IMPERSONATION live_session. Its
+  # ONLY load-bearing job is to carry the `:operator_authority` seam so the
+  # `Samen.Web.Operator.Authz` `:require_operator` on_mount can resolve operator authority on the
+  # WEBSOCKET mount (the conn pipeline gates only the HTTP dead-render). Without its OWN named
+  # live_session, `/operator/impersonate` fell into the SHARED `:default` session alongside the
+  # tenant `/broker` route — a tenant holding a `/broker` socket could `live_redirect` in with no
+  # gate running. `OperatorImpersonationLive` reads operator_id/org_id from params/session and
+  # ignores this mount; it is present solely for the authz hook.
+  @impersonate_mount Samen.Web.Mount.to_session(
+                       Samen.Web.Mount.new(
+                         :operator,
+                         Driftwood.Operator,
+                         Driftwood.Repo,
+                         plane: Samen.Web.Plane.tenant(),
+                         labels: %{operator_authority: {Driftwood.Auth, :operator_role, []}}
+                       )
+                     )
+
   # BARE `scope "/"` (see the CRM/Billing/Support note above): the aggregate LiveView is
   # the framework's fully-qualified module.
   scope "/" do
-    pipe_through(:browser)
+    pipe_through([:browser, :require_authenticated_operator])
 
     live_session :driftwood_operator_aggregate,
+      on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
       session: %{"samen_mount" => @aggregate_mount} do
       live("/operator/aggregate", Samen.Web.Operator.AggregateLive)
     end
@@ -280,7 +326,7 @@ defmodule DriftwoodWeb.Router do
   # impersonation path. `:include_aggregate false` — the token-blind aggregate is already
   # mounted above with Driftwood's freight-shaped loader.
   scope "/" do
-    pipe_through(:browser)
+    pipe_through([:browser, :require_authenticated_operator])
 
     samen_operator_routes(Driftwood.Operator,
       repo: Driftwood.Repo,
@@ -294,9 +340,68 @@ defmodule DriftwoodWeb.Router do
         operator_glyph: "D",
         tenant_landing: "/broker",
         impersonate_path: "/operator/impersonate",
+        # T146 — the operator-ROLE authority seam. The `Samen.Web.Operator.Authz` on_mount
+        # derives operator authority from the AUTHENTICATED SESSION PRINCIPAL via this MFA
+        # (the principal id is appended) and FAILS CLOSED for any non-operator, so a plain
+        # tenant-user session can never reach `/operator/*`. Reference resolver: a configured
+        # operator roster in prod; a dev-only `:operator_admin` grant while auth is disarmed.
+        operator_authority: {Driftwood.Auth, :operator_role, []},
         # WS-B B6/B9 — the FlagAdminLive namespace seam: the host's Primitives
         # mount whose FeatureFlag rows the platform flag admin manages (AC-G6-7).
-        flags_namespace: Driftwood.Primitives
+        flags_namespace: Driftwood.Primitives,
+        # T149 B2b — the aggregate-plane projection the operator AnalyticsLive "ask" box
+        # narrates over via `Samen.AI.Analytics.ask/4` (cross-tenant MRR by tier, k-anon
+        # floored, no PII column by construction). Absent it, the ask box fail-honests.
+        analytics_ask_resource: Driftwood.Aggregate.MrrByTier
+      }
+    )
+  end
+
+  # T146 — the driftwood-LOCAL operator surfaces, RELOCATED here from the bare `:browser`
+  # scopes above so they ride the operator-authz pipeline (conn-level operator-ROLE gate). Both
+  # are OPERATOR surfaces; before T146 they piped `:browser` only (authentication), so a plain
+  # tenant user reached them (the verifier bypass). Aliased under `DriftwoodWeb` because
+  # `OperatorImpersonationLive` is a driftwood-local LiveView.
+  scope "/", DriftwoodWeb do
+    pipe_through([:browser, :require_authenticated_operator])
+
+    # T146 (round 3) — the freight-shaped masked impersonation console + second-party reveal
+    # control (ADR-009/010), in its OWN named live_session carrying the operator-ROLE on_mount.
+    # A bare `live/2` here would fall into the SHARED `:default` live_session (alongside the
+    # tenant `/broker` route), letting a tenant with a `/broker` socket `live_redirect` in over
+    # the websocket with NO gate running (the conn pipeline gates only the HTTP dead-render). The
+    # `on_mount` + the `@impersonate_mount`'s `:operator_authority` label close that live-nav
+    # vector; a tenant is refused on the socket mount exactly as on HTTP.
+    live_session :driftwood_operator_impersonate,
+      on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
+      session: %{"samen_mount" => @impersonate_mount} do
+      live("/operator/impersonate", OperatorImpersonationLive)
+    end
+  end
+
+  # The operator-DESK chat (masked cross-plane threads, ADR-012 §6.3). BARE `scope "/"` (the
+  # mounted LiveViews are the framework's fully-qualified `Samen.Web.*` modules — see the note
+  # on the tenant-mount scope above), piped through the operator-authz pipeline.
+  scope "/" do
+    pipe_through([:browser, :require_authenticated_operator])
+
+    samen_chat_routes(:chat, Driftwood.Chat,
+      repo: Driftwood.Repo,
+      plane: :operator,
+      operator_id: "driftwood-operator",
+      path: "/operator/desk-chat",
+      # T146 (round 3) — belt-and-suspenders: the operator-ROLE on_mount runs on the WEBSOCKET
+      # mount too (this chat already gets its OWN named live_session via the macro, so no tenant
+      # route shares it; the on_mount makes the authz explicit rather than relying on
+      # session-name isolation alone). `:operator_authority` on the labels lets it resolve.
+      on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
+      labels: %{
+        title: "Driftwood Ops",
+        crumb_root: "Driftwood Ops",
+        chat_path: "/operator/desk-chat",
+        operator_authority: {Driftwood.Auth, :operator_role, []},
+        pubsub: Driftwood.PubSub,
+        object_cards: %{"freight.driver" => DriftwoodWeb.Chat.DriverCard}
       }
     )
   end

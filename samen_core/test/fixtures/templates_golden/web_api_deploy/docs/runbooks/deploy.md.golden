@@ -100,3 +100,13 @@ a fail-honest on-ramp, not a turnkey deploy. You must provide:
 
 Until all four are done, `fly deploy` is not expected to yield a running app — and
 `config/runtime.exs` will fail closed rather than pretend otherwise.
+
+**Operator-plane authority (T146).** The generated `:operator_authority` seam
+(`config :acme, :operator_authority, ...` + the operator mount label) ships a
+NAMED dev-only default (`Samen.Web.Operator.Authz.dev_operator_role/2`) that grants operator
+access while `:auth_required?` is false and refuses everyone once armed for prod. Before you
+set `auth_required?: true`, REPLACE it with a resolver over your real operator roster /
+`Membership` rows — `{mod, fun, args}` returning an operator role
+(`Samen.OperatorPlane.Actor.roles/0`) or `nil`. It is fail-closed: leave it unset in prod and NO
+principal reaches `/operator/*`; a plain tenant user never holds an operator role, so the
+control plane (cross-tenant accounts/billing/MRR) stays refused to tenants by construction.

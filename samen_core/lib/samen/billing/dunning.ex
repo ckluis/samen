@@ -110,6 +110,12 @@ defmodule Samen.Billing.Dunning do
   alias Samen.Billing.ProviderEvent
   alias Samen.Delivery.Lifecycle
 
+  # Bounded fallback grace window when a provider snapshot omits `period_end` (T151).
+  # Deliberately conservative: long enough to tolerate a transient provider data gap
+  # without instantly locking out a paying customer, short enough that a malformed
+  # failed-payment snapshot can NEVER grant open-ended entitlement. 7 days.
+  @nil_period_end_grace_seconds 7 * 24 * 60 * 60
+
   @type opts :: [
           provider: module(),
           provider_config: map(),
@@ -301,6 +307,21 @@ defmodule Samen.Billing.Dunning do
   # watermark/last_event_id bookkeeping)
 
   defp apply_grace(_opts, nil, _grace_until), do: :ok
+
+  # T151 (defense-in-depth): the grace boundary is normally MIRRORED VERBATIM from the
+  # provider snapshot's `period_end` (the already-paid-through date). A well-behaved
+  # provider always sends it, but a malformed/partial snapshot could omit it (`nil`).
+  # Passing that `nil` straight
+  # through as `{:grace_until, nil}` sets the entitlement's `expires_at` to NULL — and
+  # `Samen.Scopes.Billing.Entitlement.entitled_direct?/4` reads a NULL `expires_at` as
+  # entitled INDEFINITELY. So a FAILED payment would grant PERMANENT access (strictly worse
+  # than no dunning at all). Guard the nil: NEVER grant unbounded grace on a payment
+  # failure — clip to a BOUNDED default window from now. Bounded, never NULL, so a nil
+  # `period_end` can no longer read as indefinite entitlement.
+  defp apply_grace(opts, subscription_id, nil) do
+    bounded = DateTime.add(DateTime.utc_now(), @nil_period_end_grace_seconds, :second)
+    apply_grace(opts, subscription_id, bounded)
+  end
 
   defp apply_grace(opts, subscription_id, grace_until) do
     mirror = Keyword.fetch!(opts, :mirror)

@@ -44,6 +44,31 @@ defmodule Samen.AI do
 
   alias Samen.AI.Chokepoint
 
+  @configuration_hint """
+  No AI provider is wired, so Samen.AI is fail-honest ({:error, :not_configured}). To wire a \
+  real provider, add to your host config (e.g. config/runtime.exs):
+
+      config :samen_core, Samen.AI,
+        provider: {MyProvider, %{api_key: System.get_env("MY_PROVIDER_API_KEY")}}
+
+  (MyProvider is your host's Samen.AI.Provider adapter package — the reference adapter and \
+  its concrete config one-liner are documented in docs/guides/ai-quickstart.md.) Keyless (no \
+  config) resolves to the deterministic Samen.AI.Provider.Fake in :test only (CI lane); any \
+  other env stays {:error, :not_configured}. Try `mix samen.ai.smoke`.\
+  """
+
+  @doc """
+  A human-facing pointer to the provider-config one-liner (T152 DX). The machine-readable
+  fail-honest return of `complete/4`/`embed/3`/`search/3` is UNCHANGED — still the bare
+  `{:error, :not_configured}` atom the contract (ADR-014/024/026, T141) and the sabotage
+  harness depend on. This hint is a SEPARATE, additive guidance path: it never appears in
+  the error term, it only tells a builder WHERE the fix lives (the reference-adapter config
+  documented in `docs/guides/ai-quickstart.md`) so `:not_configured` stops being a dead end.
+  Kept vendor-free (INV-4) — it names no adapter package, only the generic config shape.
+  """
+  @spec configuration_hint() :: String.t()
+  def configuration_hint, do: @configuration_hint
+
   # Governs the unwired-provider fallback: only `:test` degrades to the Fake — everything
   # else (including a bare release runtime) is fail-honest `{:error, :not_configured}`.
   #

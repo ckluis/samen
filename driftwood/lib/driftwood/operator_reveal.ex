@@ -67,4 +67,34 @@ defmodule Driftwood.OperatorReveal do
   rescue
     _ -> {:error, :not_found}
   end
+
+  @doc """
+  REQUEST a second-party reveal grant for a driver (T149 B5 — the missing entry point). This
+  is the REQUEST side of the EXISTING reveal-grant lifecycle (`Samen.Reveal.Grants.request/1`):
+  it files a `RevealRequest` (subject = the driver, requestor = the operator, a bounded reason)
+  and opens a PENDING `pii_reveal` approval — it GRANTS NOTHING on its own. A DISTINCT second
+  party must then `approve/2` (distinct-party enforced at the policy layer AND the
+  `rvg_distinct_party` DB CHECK), which mints a TIME-BOXED grant (default
+  `Samen.Reveal.Grants.default_window_minutes/0` minutes). Only THEN does `reveal_cdl/2` unmask.
+
+  The reveal machinery is NOT rebuilt here — this wires the request entry point the operator
+  console lacked. Returns `{:ok, %RevealRequest{}}` or `{:error, reason}` (incl.
+  `{:error, {:pii_shaped_reason, _}}` when the reason is itself a PII value shape — the reason
+  must name the ticket, not the person).
+  """
+  @spec request_reveal(binary(), binary(), String.t()) ::
+          {:ok, Samen.Reveal.RevealRequest.t()} | {:error, term()}
+  def request_reveal(operator_id, driver_id, reason)
+      when is_binary(operator_id) and is_binary(driver_id) and is_binary(reason) do
+    Samen.Reveal.Grants.request(%{
+      subject_id: to_string(driver_id),
+      requestor_id: to_string(operator_id),
+      reason: reason,
+      resource: Driftwood.Freight.Driver,
+      action: :reveal_driver,
+      repo: Driftwood.Repo
+    })
+  end
+
+  def request_reveal(_operator_id, _driver_id, _reason), do: {:error, :invalid_request}
 end

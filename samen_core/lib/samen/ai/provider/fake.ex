@@ -53,6 +53,9 @@ defmodule Samen.AI.Provider.Fake do
   end
 
   @impl Samen.AI.Provider
+  def simulated?, do: true
+
+  @impl Samen.AI.Provider
   def embed(%MaskedPayload{} = payload, config) when is_map(config) do
     record(:embed, payload)
 

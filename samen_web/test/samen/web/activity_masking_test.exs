@@ -220,11 +220,24 @@ defmodule Samen.Web.ActivityMaskingTest do
     end
   end
 
+  # T150: the production activity read now runs through a real impersonation-session gate.
+  # Real-read tests open a real session first; tests injecting `:feed` (the DOM-scan sabotage
+  # twin) bypass the gate and need none.
   defp render_activity(org_id, window_hours \\ nil, opts \\ []) do
+    operator_id = Ash.UUID.generate()
     mount = build_operator_mount(Ash.UUID.generate())
 
-    %Phoenix.LiveView.Socket{}
-    |> Phoenix.Component.assign(:samen_mount, mount)
+    socket = Phoenix.Component.assign(%Phoenix.LiveView.Socket{}, :samen_mount, mount)
+
+    socket =
+      if Keyword.has_key?(opts, :feed) or is_nil(org_id) do
+        socket
+      else
+        open_impersonation!(operator_id, org_id)
+        with_operator_identity(socket, operator_id)
+      end
+
+    socket
     |> ActivityLive.load(org_id, window_hours, opts)
     |> then(&render_html(ActivityLive, &1.assigns))
   end
@@ -548,16 +561,18 @@ defmodule Samen.Web.ActivityMaskingTest do
   # 6. Read-only (done-criterion 4)
   # ==========================================================================
 
-  test "the page defines no write affordance: no phx-click, no phx-submit, no <form> anywhere" do
+  test "the FEED render defines no write affordance: no phx-click, no phx-submit, no <form> on the active-session page" do
     org_id = Ash.UUID.generate()
     insert_impersonation_write!(org_id)
 
     html = render_activity(org_id)
 
+    # The activity FEED itself stays a pure reader (Class B). The ONE write affordance the
+    # LiveView now carries — the T150 open-session form (`handle_event("open_session", …)`) —
+    # is rendered EXCLUSIVELY on the deny state (no active session), never on this feed render.
     refute html =~ "phx-click"
     refute html =~ "phx-submit"
     refute html =~ "<form"
-    refute function_exported?(ActivityLive, :handle_event, 3)
   end
 
   test "no org resolved renders the honest empty state, never a crash" do
@@ -590,8 +605,11 @@ defmodule Samen.Web.ActivityMaskingTest do
 
   test "HONESTY: the coverage caveat renders even when the feed is empty (an operator on a quiet org must still see the coverage limits)" do
     org_id = Ash.UUID.generate()
+    # A genuinely EMPTY feed via the `:feed` injection seam (bypasses the T150 session gate,
+    # which — being an audited access — would itself contribute a session-open governance row).
+    empty_feed = %{window_hours: 24, cutoff: DateTime.utc_now(), items: []}
 
-    html = render_activity(org_id)
+    html = render_activity(org_id, nil, feed: empty_feed)
 
     assert html =~ "No changes in this window."
     assert html =~ "coverage-caveat"

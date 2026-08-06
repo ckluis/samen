@@ -1,0 +1,56 @@
+# SABOTAGE: T146 (dogfood W3-E1, SECURITY-HIGH) gate sabotage — defeats the operator control-plane
+# ROLE authorization in ALL THREE places T146 wired it:
+#   (1) `Samen.Web.Operator.Authz.validate_role/1` fail-closed catch-all: nil -> :operator_admin
+#       (the by-construction on_mount now admits any principal on the WEBSOCKET/HTTP LiveView mount);
+#   (2) `Samen.Web.AuthGate.operator_role/2` fail-closed catch-all: nil -> :operator_admin
+#       (the conn-level pipeline now admits any authenticated principal);
+#   (3) driftwood's `/operator/impersonate` live_session: REMOVES the `require_operator` on_mount
+#       (the round-3 live-nav gate), so the router no longer carries the hook there.
+# With (1)+(2) a plain authenticated TENANT user again reaches every /operator/* surface — the
+# accounts/billing console (cross-tenant admin email + org + MRR in the clear) AND the surfaces
+# mounted OUTSIDE samen_operator_routes/2 (the portfolio AGGREGATE's operator-confidential
+# MRR/volume, the impersonation console, the operator desk-chat). (3) additionally strips the
+# impersonate live-nav authz so the introspection guard for the round-3 fix flips. The POSITIVE
+# CONTROLs (a genuine rostered operator) stay green (they validated to a real role either way),
+# so the flip is non-vacuous. Keeping each clause (vs deleting the guard) avoids orphaning
+# helpers. Reverts byte-exact (all three files).
+# APP: driftwood
+# TEST_FILES: test/operator_authz_test.exs
+# MUST_FAIL: RED: tenant-user GET /operator/accounts is redirected to /login
+# MUST_FAIL: RED: tenant-user GET /operator/aggregate is refused
+# MUST_FAIL: /operator/impersonate is in its OWN named operator live_session
+diff --git a/samen_web/lib/samen/web/operator/authz.ex b/samen_web/lib/samen/web/operator/authz.ex
+--- a/samen_web/lib/samen/web/operator/authz.ex
++++ b/samen_web/lib/samen/web/operator/authz.ex
+@@ -125,7 +125,7 @@ defmodule Samen.Web.Operator.Authz do
+   defp authority_mfa(%Mount{} = mount), do: Mount.label(mount, :operator_authority, nil)
+
+   defp validate_role(role) when role in @roles, do: role
+-  defp validate_role(_), do: nil
++  defp validate_role(_), do: :operator_admin
+
+   defp login_path(%Mount{} = mount), do: Mount.label(mount, :login_path, @default_login_path)
+ end
+diff --git a/samen_web/lib/samen/web/auth_gate.ex b/samen_web/lib/samen/web/auth_gate.ex
+--- a/samen_web/lib/samen/web/auth_gate.ex
++++ b/samen_web/lib/samen/web/auth_gate.ex
+@@ -87,7 +87,7 @@ defmodule Samen.Web.AuthGate do
+       {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
+         case apply(mod, fun, args ++ [principal_id]) do
+           role when role in @roles -> role
+-          _ -> nil
++          _ -> :operator_admin
+         end
+
+       _ ->
+diff --git a/driftwood/lib/driftwood_web/router.ex b/driftwood/lib/driftwood_web/router.ex
+--- a/driftwood/lib/driftwood_web/router.ex
++++ b/driftwood/lib/driftwood_web/router.ex
+@@ -349,7 +349,6 @@ defmodule DriftwoodWeb.Router do
+     # `on_mount` + the `@impersonate_mount`'s `:operator_authority` label close that live-nav
+     # vector; a tenant is refused on the socket mount exactly as on HTTP.
+     live_session :driftwood_operator_impersonate,
+-      on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
+       session: %{"samen_mount" => @impersonate_mount} do
+       live("/operator/impersonate", OperatorImpersonationLive)
+     end

@@ -339,6 +339,149 @@ defmodule Samen.Web.Operator.Reads do
     e -> {:error, e}
   end
 
+  @doc """
+  Assemble ONE desk ticket's DETAIL (T149 B1): the ticket row (`desk_row/2` shape —
+  requester tenant-admin + handling agent PII resolved per plane, CLEAR on the operator's
+  own tenant plane) PLUS its conversation threads with each message's body resolved through
+  `PiiResolution` on the scope's plane (clear own-org; `••••` on an operator-plane mount) —
+  NEVER unwraps a `%Masked{}`, NO plaintext branch. Returns the enriched row (with
+  `:__conversations__`) or `nil` (unknown ticket / read error) — the LiveView renders
+  "not found", never a crash. Every read is OrgScope'd + explicitly bounded.
+  """
+  def ticket_detail(mount, scope, ticket_id) do
+    ticket =
+      Mount.resource(mount, Ticket)
+      |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :custom])
+      |> Ash.Query.filter(id == ^ticket_id)
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+
+    case ticket do
+      nil ->
+        nil
+
+      ticket ->
+        ticket
+        |> desk_row(desk_joins(mount, scope))
+        |> Map.put(:__conversations__, conversation_threads(mount, scope, ticket_id))
+    end
+  rescue
+    _ -> nil
+  end
+
+  @doc """
+  Post an operator REPLY to a desk ticket (T149 B1 — the missing resolve affordance). The
+  reply is a `Support.Message` (sender_type `:agent`, `:reply`) created through the SAME
+  governed domain action the seeds/support engine use — so OrgScope + `RoleAtLeast(:member)`
+  gate the write and the `body` is VAULT-routed by `Samen.Vault.Change` at the write boundary
+  (this module adds NO policy, mints no plaintext column). Finds-or-creates the ticket's
+  conversation (a fresh ticket has none). `org_id` is the server-side operator-org fact (never
+  client input), threaded from the LiveView. Returns `:ok` or `{:error, reason}`.
+  """
+  def post_reply(mount, scope, org_id, ticket_id, body) when is_binary(body) do
+    with {:ok, conversation_id} <- ensure_conversation(mount, scope, org_id, ticket_id),
+         {:ok, _message} <- create_reply(mount, scope, org_id, conversation_id, body) do
+      :ok
+    end
+  rescue
+    e -> {:error, e}
+  end
+
+  # The ticket's conversation threads, each with its messages' bodies resolved per plane.
+  defp conversation_threads(mount, scope, ticket_id) do
+    agents = agents_by_id(mount, scope)
+
+    Mount.resource(mount, Conversation)
+    |> Ash.Query.ensure_selected([:channel, :status, :subject, :ticket_id])
+    |> Ash.Query.filter(ticket_id == ^ticket_id)
+    |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@lookup_limit)
+    |> Ash.read!(scope: scope)
+    |> Enum.map(fn conv ->
+      %{
+        id: conv.id,
+        channel: conv.channel,
+        status: conv.status,
+        subject: conv.subject,
+        messages: messages_for_conversation(mount, scope, conv.id, agents)
+      }
+    end)
+  rescue
+    _ -> []
+  end
+
+  # Messages on ONE conversation, oldest first, `body` resolved through PiiResolution on the
+  # scope's plane — CLEAR on the operator's own tenant plane, `%Masked{}` (→ ••••) on an
+  # operator-plane mount. NEVER unwraps.
+  defp messages_for_conversation(mount, scope, conversation_id, agents) do
+    Mount.resource(mount, Message)
+    |> Ash.Query.ensure_selected([:sender_type, :message_type, :agent_id, :conversation_id, :body, :created_via])
+    |> Ash.Query.filter(conversation_id == ^conversation_id)
+    |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@lookup_limit)
+    |> Ash.read!(scope: scope)
+    |> resolve_pii(mount, Message, scope)
+    |> Enum.map(fn m ->
+      %{
+        id: m.id,
+        sender_type: m.sender_type,
+        message_type: m.message_type,
+        body: m.body,
+        created_via: m.created_via,
+        __agent__: m.agent_id && Map.get(agents, m.agent_id)
+      }
+    end)
+  rescue
+    _ -> []
+  end
+
+  # Find the ticket's first conversation, or create one (a fresh ticket has none). Governed
+  # create (`scope:` → OrgScope + RoleAtLeast(:member)); no LiveView policy.
+  defp ensure_conversation(mount, scope, org_id, ticket_id) do
+    existing =
+      Mount.resource(mount, Conversation)
+      |> Ash.Query.ensure_selected([:ticket_id])
+      |> Ash.Query.filter(ticket_id == ^ticket_id)
+      |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+
+    case existing do
+      %{id: id} ->
+        {:ok, id}
+
+      _ ->
+        Mount.resource(mount, Conversation)
+        |> Ash.Changeset.for_create(
+          :create,
+          %{org_id: org_id, ticket_id: ticket_id, channel: :internal, status: :open, subject: "Operator reply"},
+          scope: scope
+        )
+        |> Ash.create()
+        |> case do
+          {:ok, conv} -> {:ok, conv.id}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp create_reply(mount, scope, org_id, conversation_id, body) do
+    Mount.resource(mount, Message)
+    |> Ash.Changeset.for_create(
+      :create,
+      %{
+        org_id: org_id,
+        conversation_id: conversation_id,
+        sender_type: :agent,
+        message_type: :reply,
+        body: body,
+        created_via: :web
+      },
+      scope: scope
+    )
+    |> Ash.create()
+  end
+
   @doc "Non-PII operator summary metrics for the Accounts page header (bands per ADR-019)."
   def account_metrics(mount, scope, operator_org_id) do
     accounts = accounts(mount, scope, operator_org_id)

@@ -52,10 +52,15 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
   alias Samen.OperatorPlane.Actor
   alias Samen.Web.Mount
   alias Samen.Web.Operator
+  alias Samen.Web.Operator.Impersonation
 
   @impl true
   def mount(params, session, socket) do
-    socket = assign_mount(socket, session)
+    socket =
+      socket
+      |> assign_mount(session)
+      |> Impersonation.assign_identity(session, params)
+
     {:ok, load(socket, Map.get(params, "org_id"))}
   end
 
@@ -74,38 +79,80 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
       is_nil(operator_org_id) ->
         assign(socket,
           no_org: true,
+          impersonation: :none,
           target_org_id: target_org_id,
           operator: nil,
           summary: [],
           runs: [],
-          action_error: nil
+          action_error: nil,
+          session_info: nil,
+          open_error: nil
         )
 
       is_nil(target_org_id) ->
         assign(socket,
           no_org: false,
+          impersonation: :none,
           target_org_id: nil,
           operator: operator,
           summary: [],
           runs: [],
-          action_error: nil
+          action_error: nil,
+          session_info: nil,
+          open_error: nil
         )
 
       true ->
-        assign(socket,
-          no_org: false,
-          target_org_id: target_org_id,
-          operator: operator,
-          summary: fetch_summary(operator, target_org_id),
-          runs: fetch_runs(operator, target_org_id),
-          action_error: nil
-        )
+        # T150 — a per-tenant automation drill-in requires a REAL impersonation session for
+        # the target org (accountability: an operator inspecting/killing ONE tenant's workflows
+        # is recorded in that tenant's ledger). Deny-on-read when there is none.
+        case Impersonation.gate(socket.assigns[:samen_operator_id], target_org_id) do
+          {:ok, _actor, info} ->
+            assign(socket,
+              no_org: false,
+              impersonation: :active,
+              target_org_id: target_org_id,
+              operator: operator,
+              summary: fetch_summary(operator, target_org_id),
+              runs: fetch_runs(operator, target_org_id),
+              action_error: nil,
+              session_info: info,
+              open_error: nil
+            )
+
+          :denied ->
+            assign(socket,
+              no_org: false,
+              impersonation: :denied,
+              target_org_id: target_org_id,
+              operator: operator,
+              summary: [],
+              runs: [],
+              action_error: nil,
+              session_info: nil,
+              open_error: nil
+            )
+        end
     end
   end
 
   @impl true
+  def handle_event("open_session", %{"reason" => reason}, socket) do
+    target_org_id = socket.assigns[:target_org_id]
+
+    case Impersonation.open_from_socket(socket, target_org_id, reason) do
+      {:ok, _session} -> {:noreply, load(socket, target_org_id)}
+      {:error, reason} -> {:noreply, assign(socket, open_error: open_error_copy(reason))}
+    end
+  end
+
   def handle_event("kill", %{"id" => workflow_id}, socket), do: switch(socket, :kill, workflow_id)
   def handle_event("rearm", %{"id" => workflow_id}, socket), do: switch(socket, :rearm, workflow_id)
+
+  defp open_error_copy(:reason_required), do: "A reason for access is required."
+  defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."
+  defp open_error_copy({:pii_shaped_reason, _}), do: "The reason must name the ticket, not the person."
+  defp open_error_copy(_), do: "The impersonation session could not be opened."
 
   defp switch(socket, action, workflow_id) do
     operator = socket.assigns[:operator]
@@ -210,7 +257,35 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
                 Open an account (Operator plane → Accounts) and follow "Automation health →"
                 to inspect a tenant's workflows.
               </div>
+            <% @impersonation == :denied -> %>
+              <div class="card" id="impersonation-required" style="padding:22px 20px">
+                <div style="color:var(--red);font-weight:600" id="no-session">
+                  Access denied — no active impersonation session for this tenant.
+                </div>
+                <p style="color:var(--muted);margin:10px 0 14px;font-size:13px">
+                  Inspecting (and killing) one tenant's workflows is a per-tenant drill-in: it
+                  requires a short-TTL, reason-required impersonation session, recorded in the
+                  tenant's audit ledger.
+                </p>
+                <div :if={@open_error} id="open-error" style="color:#B42318;font-size:12px;margin-bottom:8px">
+                  {@open_error}
+                </div>
+                <form phx-submit="open_session" id="open-session-form" style="display:flex;gap:8px;align-items:flex-start">
+                  <input type="text" name="reason" id="session-reason-input"
+                    placeholder="Reason (e.g. ticket #1234: runaway workflow)"
+                    style="flex:1;padding:8px 10px;border:1px solid #D0D5DD;border-radius:8px;font-size:13px" />
+                  <button type="submit" id="start-session-btn" style="padding:8px 14px;border-radius:8px;background:#3B4CCA;color:#fff;font-size:13px">
+                    Start session
+                  </button>
+                </form>
+              </div>
             <% true -> %>
+              <div :if={@session_info} id="session-accountability" class="card" style="padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--muted)">
+                <b style="color:inherit">Impersonation session.</b>
+                operator <span class="mono">{@session_info.operator_id}</span>
+                · reason: <span id="session-reason">{@session_info.reason}</span>
+                · expires <span id="session-expiry">{@session_info.expires_at}</span>
+              </div>
               <.token_blind_bar chip="run log + health are bounded ids/enums only · no vault token">
                 <b>Token-blind observability.</b>
                 The run log carries only ids, enums, timestamps, and a bounded per-action

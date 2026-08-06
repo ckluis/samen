@@ -79,6 +79,38 @@ defmodule Driftwood.Auth do
 
   def authorized_org_ids(_), do: []
 
+  @operator_roles [:operator_admin, :operator_support, :operator_readonly, :operator_break_glass]
+
+  @doc """
+  T146 — the OPERATOR-ROLE authority seam (`Samen.Web.Operator.Authz` / `Samen.Web.AuthGate`).
+
+  Returns the operator role the authenticated `principal_id` holds, or `nil` (NOT an operator —
+  fail CLOSED). Wired on the operator mount as
+  `operator_authority: {Driftwood.Auth, :operator_role, []}` (the principal id is appended by the
+  framework). Resolution:
+
+    1. the configured operator ROSTER (`config :driftwood, :operator_roster, %{user_id => role}`)
+       — a production deploy provisions this (or swaps this for real operator `Membership` rows),
+       exactly as `authorized_org_ids/1` maps to tenant membership;
+    2. else, ONLY while `:auth_required?` is false (dev/test), a dev convenience grant of
+       `:operator_admin` so the local dogfood operator console works without a login. The instant
+       the app is armed for prod (`config :driftwood, auth_required?: true`) this dev grant is
+       gone and a principal absent from the roster is refused — the T146 exploit stays CLOSED.
+  """
+  @spec operator_role(String.t() | nil) :: atom() | nil
+  def operator_role(principal_id) do
+    roster = Application.get_env(:driftwood, :operator_roster, %{})
+
+    case is_binary(principal_id) && Map.get(roster, principal_id) do
+      role when role in @operator_roles ->
+        role
+
+      _ ->
+        # Dev/test convenience ONLY (unmistakably gated on the prod-arming flag being off).
+        if Application.get_env(:driftwood, :auth_required?, false), do: nil, else: :operator_admin
+    end
+  end
+
   defp org_ids(rec) do
     case Map.get(rec, :org_ids, []) do
       list when is_list(list) -> Enum.filter(list, &is_binary/1)

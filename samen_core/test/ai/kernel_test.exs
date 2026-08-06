@@ -99,6 +99,38 @@ defmodule Samen.AI.KernelTest do
       {:ok, c} = AI.complete(:scope, "different prompt", %{})
       refute c.text == a.text
     end
+
+    test "a Fake completion is stamped simulated: true BY CONSTRUCTION (T152)" do
+      # The flag is set at the chokepoint from the dispatched provider's `simulated?/0`, NOT
+      # parsed from the text — so a UI can render an honest 'simulated' badge.
+      assert {:ok, %Completion{simulated: true, provider: :fake}} =
+               AI.complete(:scope, "summarize the account", %{})
+
+      # A raw provider double that DOES declare itself simulated stamps true; a hypothetical
+      # live provider (no simulated?/0) would leave the struct default false.
+      assert Provider.Fake.simulated?() == true
+      refute function_exported?(Samen.AI.Provider, :simulated?, 0)
+    end
+  end
+
+  # --------------------------------------------------------------------------------------
+  # configuration_hint/0 — actionable :not_configured DX (T152), WITHOUT changing the atom
+
+  describe "configuration_hint/0 (T152 — additive guidance, error term unchanged)" do
+    test "the error term is STILL the bare atom (contract + sabotage depend on it)" do
+      assert {:error, :not_configured} = AI.provider_for([], :prod)
+    end
+
+    test "the hint names the provider config path + the quickstart (vendor-free, INV-4)" do
+      hint = AI.configuration_hint()
+      assert is_binary(hint)
+      assert hint =~ "config :samen_core, Samen.AI"
+      assert hint =~ "provider:"
+      assert hint =~ "ai-quickstart"
+      # Vendor-free: the hint in core names no adapter package (the concrete one lives in the
+      # guide) — the same INV-4 discipline `Samen.AI.VendorFreeTest` enforces over lib.
+      refute hint =~ "anthropic", "configuration_hint must stay vendor-free (INV-4)"
+    end
   end
 
   # --------------------------------------------------------------------------------------

@@ -9,10 +9,10 @@
 diff --git a/samen_core/lib/samen/retention.ex b/samen_core/lib/samen/retention.ex
 --- a/samen_core/lib/samen/retention.ex
 +++ b/samen_core/lib/samen/retention.ex
-@@ -221,8 +221,7 @@
-       expired_query(spec, wall)
+@@ -224,8 +224,7 @@
+       # under no tenant actor, selects no vault field. Cannot be org_id-pinned (T132).
        |> Ash.read!(authorize?: false)
- 
+
 -    Enum.reduce(expired, 0, fn row, acc ->
 -      Ash.destroy!(row, destroy_opts)
 +    Enum.reduce(expired, 0, fn _row, acc ->

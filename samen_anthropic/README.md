@@ -22,6 +22,16 @@ T64/D1). Implements `Samen.AI.Provider` for Anthropic's Messages API.
     config :samen_core, Samen.AI,
       provider: {SamenAnthropic.Provider, %{api_key: System.get_env("ANTHROPIC_API_KEY")}}
 
+That one line is the whole opt-in. `Samen.AI.configuration_hint/0` prints it at runtime when a
+call returns `{:error, :not_configured}`.
+
+## Quickstart (keyless fake → one real result)
+
+See `docs/guides/ai-quickstart.md`. TL;DR:
+
+    mix samen.ai.smoke                       # keyless: deterministic fake, labeled SIMULATED
+    SAMEN_AI_LIVE=1 mix samen.ai.smoke ...   # with a key: one REAL completion (never in CI)
+
 ## Tests
 
     mix test

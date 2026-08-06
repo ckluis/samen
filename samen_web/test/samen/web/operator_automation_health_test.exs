@@ -51,7 +51,7 @@ defmodule Samen.Web.OperatorAutomationHealthTest do
     wf = create_workflow!(org, owner)
     run = open_and_finalize!(org, wf, :succeeded, nil)
 
-    html = render_live(AutomationHealthLive, operator_mount(org), [org])
+    html = render_gated(org)
 
     assert html =~ wf.name
     assert html =~ "succeeded"
@@ -112,7 +112,7 @@ defmodule Samen.Web.OperatorAutomationHealthTest do
     # (`Samen.Automation.RunRecord.bounded_outcomes/1`'s allowlist).
     _run = open_and_finalize!(org, wf, :failed, :suppressed)
 
-    html = render_live(AutomationHealthLive, operator_mount(org), [org])
+    html = render_gated(org)
 
     refute html =~ wf.webhook_secret
     refute html =~ ~r/\bvt_/
@@ -144,7 +144,7 @@ defmodule Samen.Web.OperatorAutomationHealthTest do
       )
       |> Ash.create(authorize?: false)
 
-    html = render_live(AutomationHealthLive, operator_mount(org), [org])
+    html = render_gated(org)
 
     assert html =~ "leak-canary-secret-token",
            "the scan must be able to detect a leak in subject_ref, else the red-path assertion is vacuous"
@@ -157,12 +157,21 @@ defmodule Samen.Web.OperatorAutomationHealthTest do
     build_operator_mount(operator_org_id)
   end
 
+  # T150: the per-tenant automation drill-in now requires a REAL impersonation session for the
+  # target org (deny-on-read). Open one (operator seat id == the mount's operator_org_id ==
+  # `target_org_id` in this harness), assign the operator identity the gate resolves, then load.
   defp mount_socket(target_org_id) do
+    open_impersonation!(target_org_id, target_org_id)
+
     %Phoenix.LiveView.Socket{}
     |> Phoenix.Component.assign(:samen_mount, operator_mount(target_org_id))
     |> Phoenix.Component.assign(:samen_acting_as, false)
+    |> with_operator_identity(target_org_id)
     |> AutomationHealthLive.load(target_org_id)
   end
+
+  # Disconnected render THROUGH an active session (the Class B / no-leak reads).
+  defp render_gated(org), do: html(mount_socket(org))
 
   defp html(socket), do: render_html(AutomationHealthLive, socket.assigns)
 

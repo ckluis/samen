@@ -103,21 +103,18 @@ defmodule Samen.Web.Operator.Live do
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v6m0 0 3-3m-3 3L9 5" /><path d="M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7" /></svg>
           </:icon>
         </.nav_item>
-        <.nav_item label="Deliverability" href="/operator/accounts" active={@active == :deliverability}>
-          <:icon>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h16v16H4z" /><path d="m4 6 8 7 8-7" /></svg>
-          </:icon>
-        </.nav_item>
-        <.nav_item label="Automation" href="/operator/accounts" active={@active == :automation}>
-          <:icon>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8" /><circle cx="12" cy="12" r="3" /></svg>
-          </:icon>
-        </.nav_item>
-        <.nav_item label="Activity" href="/operator/accounts" active={@active == :activity}>
-          <:icon>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 3" /></svg>
-          </:icon>
-        </.nav_item>
+        <%!--
+          T149 P1 — the Deliverability / Automation / Activity items are REMOVED from the
+          top-level operator nav. Each is a per-TENANT drill-in (`/operator/deliverability/:org_id`,
+          `/operator/automation/:org_id`, `/operator/activity/:org_id`) with NO top-level index
+          route — they are reached by drilling into a SPECIFIC account (the account drill-down's
+          "Deliverability → / Automation health → / Activity →" links). Their prior top-level
+          `href="/operator/accounts"` dumped the operator on the Accounts page while marking the
+          WRONG nav item active — a mislink, not a feature (exactly the vestigial "Notifications"
+          mislink the moduledoc above already removed). `operator_sidebar_link_invariant_test.exs`
+          proves no bare-tenant/off-plane href remains; there is no `active: :deliverability |
+          :automation | :activity` case here because no top-level surface exists to be active.
+        --%>
         <.nav_item label="Portfolio" href="/operator/aggregate" active={@active == :aggregate}>
           <:icon>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9m6 10V5m6 14v-7" /></svg>

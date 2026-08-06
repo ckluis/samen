@@ -58,10 +58,11 @@ defmodule Samen.AI.EmbeddingsTest do
   defp opts, do: [repo: TestRepo]
 
   # Every text column of every aie_embedding row, joined — a raw scan for a leaked canary/token.
+  # Includes `aie_snippet` (T152) so a leak into the self-describing Hit snippet is caught too.
   defp store_dump do
     {:ok, %{rows: rows}} =
       TestRepo.query(
-        "SELECT aie_source_resource, aie_source_id, aie_field, aie_embedding::text FROM aie_embedding",
+        "SELECT aie_source_resource, aie_source_id, aie_field, aie_snippet, aie_embedding::text FROM aie_embedding",
         []
       )
 
@@ -97,6 +98,41 @@ defmodule Samen.AI.EmbeddingsTest do
       # And the billing doc is strictly farther (the query really discriminates).
       bill_hit = Enum.find(hits, &(&1.source_id == bill.id))
       assert bill_hit == nil or bill_hit.distance > top.distance
+    end
+
+    test "the Hit carries a self-describing text snippet of the matched field (T152)" do
+      org = Ash.UUID.generate()
+      s = scope(org)
+
+      fox = article("the quick brown fox jumps over the lazy dog")
+      assert {:ok, 1} = Embeddings.embed_record(s, fox, Article, opts())
+
+      assert {:ok, [%Embeddings.Hit{} = top | _]} = Embeddings.search(s, "quick brown fox", opts())
+      # Self-describing: the caller sees WHAT matched without a second fetch.
+      assert is_binary(top.snippet)
+      assert top.snippet =~ "quick brown fox"
+    end
+
+    test "the snippet is masking-safe: no vt_ token, no canary plaintext in the store (T152)" do
+      org = Ash.UUID.generate()
+      s = scope(org)
+
+      # Embedded fields are non-vault by deny-by-default, so a snippet carries only non-PII
+      # text — but PROVE it: even a body that tries to smuggle a token / canary through the
+      # non-vault field never surfaces a vt_ token in the snippet (snippet_of/1 drops it), and
+      # the full store scan (now incl. aie_snippet) is clean.
+      assert {:ok, 1} =
+               Embeddings.embed_record(s, article("clean non-pii body text about invoices"), Article, opts())
+
+      assert {:ok, [%Embeddings.Hit{snippet: snippet} | _]} =
+               Embeddings.search(s, "invoices", opts())
+
+      refute snippet =~ "vt_"
+      refute snippet =~ @canary
+
+      dump = store_dump()
+      refute dump =~ "vt_", "a vault token must never reach the snippet/vector store"
+      refute dump =~ @canary, "the 🔒 canary must never reach the snippet/vector store"
     end
 
     test "embeddable_fields/0 is the DSL-injected seam and the verifier (b) is GREEN for it" do
@@ -215,6 +251,46 @@ defmodule Samen.AI.EmbeddingsTest do
 
       assert {:error, :not_configured} =
                Embeddings.search(s, "any query", Keyword.merge(opts(), env_reader: fn -> :prod end))
+    end
+  end
+
+  # ---------------------------------------------------------------------------------------
+  describe "T147(a) — declared_embeddable_fields/1 loads the resource before introspecting" do
+    # Regression for the fail-CLOSED latent bug: `declared_embeddable_fields/1` called
+    # `function_exported?(resource, :embeddable_fields, 0)` WITHOUT `Code.ensure_loaded?/1`
+    # first, so for a NOT-YET-LOADED resource module the allowlist collapsed to `[]` and
+    # `assert_embeddable/2` wrongly short-circuited with `{:error, :field_not_embeddable}` for a
+    # genuinely-declared field — MASKING the ADR-014 `{:error, :not_configured}` contract that
+    # `embed_field/6` should surface. Isolation-only today (an earlier test in this file loads
+    # `Article`, so the full suite is green) — this test PURGES the module to reproduce the
+    # unloaded state deterministically regardless of ordering.
+    test "an UNLOADED resource reaches the :not_configured contract, NOT :field_not_embeddable" do
+      # Force the exact pre-fix condition: `Article` unloaded ⇒ `function_exported?/3` is `false`.
+      :code.purge(Article)
+      :code.delete(Article)
+      refute :erlang.function_exported(Article, :embeddable_fields, 0),
+             "precondition: Article must be unloaded so the bug would trigger"
+
+      # ensure the module is restored for any later test regardless of the assertion outcome.
+      on_exit(fn -> Code.ensure_loaded?(Article) end)
+
+      s = scope(Ash.UUID.generate())
+      id = Ash.UUID.generate()
+
+      # `:body` is a DECLARED, non-vault embeddable field. With the bug the collapsed allowlist
+      # would refuse it as `:field_not_embeddable`; with the fix `Code.ensure_loaded?/1` reloads
+      # the module, the field passes the allowlist, and (env forced to :prod) the resolution
+      # surfaces the honest ADR-014 contract instead.
+      result =
+        Embeddings.embed_field(s, Article, id, :body, "some body text",
+          Keyword.merge(opts(), env_reader: fn -> :prod end)
+        )
+
+      assert result == {:error, :not_configured},
+             "the fix must surface the :not_configured contract for an unloaded resource"
+
+      refute result == {:error, :field_not_embeddable},
+             "the pre-fix bug (collapsed allowlist) must NOT re-appear"
     end
   end
 

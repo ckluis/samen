@@ -92,11 +92,26 @@ defmodule Samen.Web.DeliverabilityMaskingTest do
     %{org: org, user: user, event: event, suppression: suppression}
   end
 
+  # T150: the production drill-in read now runs through a real impersonation-session gate.
+  # For the grant-driven masking tests (which inject `:grant`, not `:actor`), open a real
+  # session so the gate passes; the injected grant still drives clear-vs-•••• through
+  # `PiiResolution`. The anti-tautology test injects `:actor` directly (the resolved-actor
+  # seam) and bypasses the gate — no session needed there.
   defp render_deliverability(org_id, opts) do
+    operator_id = Ecto.UUID.generate()
     mount = build_operator_mount(Ecto.UUID.generate())
 
-    %Phoenix.LiveView.Socket{}
-    |> Phoenix.Component.assign(:samen_mount, mount)
+    socket = Phoenix.Component.assign(%Phoenix.LiveView.Socket{}, :samen_mount, mount)
+
+    socket =
+      if Keyword.has_key?(opts, :actor) do
+        socket
+      else
+        open_impersonation!(operator_id, org_id)
+        with_operator_identity(socket, operator_id)
+      end
+
+    socket
     |> DeliverabilityLive.load(org_id, opts)
     |> then(&render_html(DeliverabilityLive, &1.assigns))
   end

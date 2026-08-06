@@ -130,6 +130,12 @@ defmodule <%= module %>Web.Router do
       repo: <%= module %>.Repo,
       labels: %{
         operator_workspace: "<%= module %> Ops",
+        # T146 — the operator-ROLE authority seam. `Samen.Web.Operator.Authz`'s on_mount derives
+        # operator authority from the AUTHENTICATED SESSION PRINCIPAL via this MFA (fail CLOSED
+        # for any non-operator), so a plain tenant-user session cannot reach `/operator/*`. The
+        # generated default is a NAMED dev-only grant (see config/config.exs `:operator_authority`);
+        # a real deploy points this at your operator roster / `Membership` rows.
+        operator_authority: {Samen.Web.Operator.Authz, :dev_operator_role, [:<%= otp_app %>]},
         # WS-B B6 — the FlagAdminLive namespace seam: the Primitives mount whose
         # FeatureFlag rows the platform flag admin manages.
         flags_namespace: <%= module %>.Primitives

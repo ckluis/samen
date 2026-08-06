@@ -45,10 +45,15 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
   import Samen.Web.Operator.Live
 
   alias Samen.Web.Operator.DeliverabilityReads
+  alias Samen.Web.Operator.Impersonation
 
   @impl true
   def mount(params, session, socket) do
-    socket = assign_mount(socket, session)
+    socket =
+      socket
+      |> assign_mount(session)
+      |> Impersonation.assign_identity(session, params)
+
     {:ok, load(socket, Map.get(params, "org_id"))}
   end
 
@@ -57,20 +62,60 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
     {:noreply, load(socket, Map.get(params, "org_id") || socket.assigns[:org_id])}
   end
 
+  # T150 — the open-session-with-reason affordance the denied state renders. Opens a REAL
+  # `Samen.Impersonation` session (reason required, same-tx audit + auto-expire, tenant-visible
+  # ledger) for the acting operator over this target org, then re-renders masked.
+  @impl true
+  def handle_event("open_session", %{"reason" => reason}, socket) do
+    org_id = socket.assigns[:org_id]
+
+    case Impersonation.open_from_socket(socket, org_id, reason) do
+      {:ok, _session} ->
+        {:noreply, load(socket, org_id)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, open_error: open_error_copy(reason))}
+    end
+  end
+
+  defp open_error_copy(:reason_required), do: "A reason for access is required."
+  defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."
+  defp open_error_copy({:pii_shaped_reason, _}), do: "The reason must name the ticket, not the person (no email/SSN/phone)."
+  defp open_error_copy(_), do: "The impersonation session could not be opened."
+
   @doc false
   # `opts` carries the sanctioned `:actor`/`:grant`/`:repo` test-injection seam
   # (mirrors `AccountDetailLive.load/3`'s `:now` clock-injection opt) — production
-  # mount/handle_params pass none, so the REAL configured actor/grant checker decide.
+  # mount/handle_params pass none.
+  #
+  # T150 — the deny-on-read GATE: production reads a SPECIFIC tenant's masked delivery
+  # state ONLY through a real `Samen.Impersonation` session. With no active session the page
+  # DENIES (no detail, no PII) and renders the open-session affordance; with one, the actor is
+  # the REAL impersonation-scope actor (`plane: :operator` + the REAL session id) so PII masks
+  # `••••` by default. A caller injecting `:actor` (the masking gate tests) supplies the
+  # already-resolved actor and bypasses the session gate — it is exercising `PiiResolution`,
+  # not this gate.
   def load(socket, org_id, opts \\ []) do
     mount = socket.assigns[:samen_mount]
 
-    detail =
-      if mount && org_id do
-        actor = Keyword.get(opts, :actor, DeliverabilityReads.operator_actor())
-        DeliverabilityReads.deliverability(mount, actor, org_id, opts)
-      end
+    cond do
+      is_nil(mount) or is_nil(org_id) ->
+        assign(socket, org_id: org_id, detail: nil, impersonation: :none, session_info: nil, open_error: nil)
 
-    assign(socket, org_id: org_id, detail: detail)
+      Keyword.has_key?(opts, :actor) ->
+        detail = DeliverabilityReads.deliverability(mount, Keyword.fetch!(opts, :actor), org_id, opts)
+        assign(socket, org_id: org_id, detail: detail, impersonation: :active, session_info: nil, open_error: nil)
+
+      true ->
+        case Impersonation.gate(socket.assigns[:samen_operator_id], org_id) do
+          {:ok, actor, info} ->
+            detail = DeliverabilityReads.deliverability(mount, actor, org_id, opts)
+            assign(socket, org_id: org_id, detail: detail, impersonation: :active, session_info: info, open_error: nil)
+
+          :denied ->
+            assign(socket, org_id: org_id, detail: nil, impersonation: :denied, session_info: nil, open_error: nil)
+        end
+    end
   end
 
   @impl true
@@ -89,6 +134,34 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
         </.topbar>
 
         <%= cond do %>
+          <% @impersonation == :denied -> %>
+            <div class="wrap">
+              <div class="card" id="impersonation-required" style="padding:22px 20px">
+                <div style="color:var(--red);font-weight:600" id="no-session">
+                  Access denied — no active impersonation session for this tenant.
+                </div>
+                <p style="color:var(--muted);margin:10px 0 14px;font-size:13px">
+                  Viewing a specific tenant's deliverability is a per-tenant drill-in: it requires a
+                  short-TTL, reason-required <b>impersonation session</b>, recorded in the tenant's
+                  audit ledger (who / when / why). Start one below.
+                </p>
+                <div :if={@open_error} id="open-error" style="color:#B42318;font-size:12px;margin-bottom:8px">
+                  {@open_error}
+                </div>
+                <form phx-submit="open_session" id="open-session-form" style="display:flex;gap:8px;align-items:flex-start">
+                  <input
+                    type="text"
+                    name="reason"
+                    id="session-reason-input"
+                    placeholder="Reason (e.g. ticket #1234: bounce investigation)"
+                    style="flex:1;padding:8px 10px;border:1px solid #D0D5DD;border-radius:8px;font-size:13px"
+                  />
+                  <button type="submit" id="start-session-btn" style="padding:8px 14px;border-radius:8px;background:#3B4CCA;color:#fff;font-size:13px">
+                    Start session (masked)
+                  </button>
+                </form>
+              </div>
+            </div>
           <% is_nil(@org_id) or is_nil(@detail) -> %>
             <div class="wrap">
               <div class="card" id="no-org" style="padding:22px 20px;color:var(--muted)">
@@ -97,6 +170,13 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
             </div>
           <% true -> %>
             <div class="wrap">
+              <div :if={@session_info} id="session-accountability" class="card" style="padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--muted)">
+                <b style="color:inherit">Masked impersonation session.</b>
+                operator <span class="mono">{@session_info.operator_id}</span>
+                · reason: <span id="session-reason">{@session_info.reason}</span>
+                · expires <span id="session-expiry">{@session_info.expires_at}</span>
+                — recorded in this tenant's audit ledger.
+              </div>
               <.token_blind_bar chip="subscriber ids only · recipient resolves per plane">
                 <b>Why didn't this tenant get their email?</b>
                 Check suppression first — a suppressed recipient is refused BEFORE the

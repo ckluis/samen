@@ -23,19 +23,29 @@ defmodule DriftwoodWeb.Auth do
   alias Samen.Web.Auth, as: WebAuth
   alias Samen.Web.CurrentOrg
 
-  # Reachable without a session (else the gate would loop redirecting to /login).
-  @exempt ~w(/login /logout /healthz /readyz)
+  # Reachable WITHOUT a session (else the gate would loop, or a NEW user could never sign up /
+  # verify / reset). T148: the framework IDENTITY-SPINE pre-actor surfaces (`samen_auth_routes`)
+  # join `/login`/`/logout` here — they are PUBLIC by design (pre-actor, no plane/org data). The
+  # token routes (`/verify/:t`, `/reset/:t`, `/invite/:t`, OIDC callback) match by PREFIX.
+  # `/onboarding` is deliberately NOT exempt: it needs an actor, and a post-login session passes.
+  @exempt_exact ~w(/login /logout /healthz /readyz /signup /reset /2fa)
+  @exempt_prefixes ~w(/verify/ /reset/ /invite/ /auth/oidc/)
 
   @impl Plug
   def init(opts), do: opts
 
   @impl Plug
   def call(conn, _opts) do
-    if conn.request_path in @exempt do
+    if exempt?(conn.request_path) do
       conn
     else
       require_authenticated_user(conn, [])
     end
+  end
+
+  # Public pre-actor paths (exact) + the token/callback families (prefix).
+  defp exempt?(path) do
+    path in @exempt_exact or Enum.any?(@exempt_prefixes, &String.starts_with?(path, &1))
   end
 
   @doc "Whether the prod auth gate is armed (runtime flag; false in dev/test)."

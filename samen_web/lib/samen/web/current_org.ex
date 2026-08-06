@@ -341,6 +341,18 @@ defmodule Samen.Web.CurrentOrg do
   def name(%Mount{} = mount, _org_id), do: Mount.label(mount, :title, "Workspace")
   def name(_, _), do: "Workspace"
 
+  # T150 F3 — the tenant DISPLAY name for `org_id` ONLY when it resolves to a real directory
+  # row, else `nil` (never the mount-title fallback `name/2` uses). Lets the operator-plane
+  # badge name the tenant it is viewing and fall back to the operator label otherwise.
+  defp viewing_tenant_name(%Mount{} = mount, org_id) when is_binary(org_id) do
+    case List.keyfind(list_orgs(mount), org_id, 0) do
+      {^org_id, display} when is_binary(display) and display != "" -> display
+      _ -> nil
+    end
+  end
+
+  defp viewing_tenant_name(_, _), do: nil
+
   @doc """
   Whether the page should render the seed-state empty card: no org resolved AND the directory is
   empty (an unseeded DB). A resolved org, or a non-empty directory, is never a dead-end.
@@ -467,6 +479,11 @@ defmodule Samen.Web.CurrentOrg do
       assigns
       |> assign(:plane, plane)
       |> assign(:org_name, name(mount, assigns[:org_id]))
+      # T150 F3 — the tenant DISPLAY name resolved from the directory, or nil when the
+      # target org does not resolve to a real tenant. Distinct from `org_name` (which falls
+      # back to the mount title) so the operator badge can name the tenant it is VIEWING and
+      # fall back to the operator label only when no tenant is genuinely resolved.
+      |> assign(:viewing_tenant, viewing_tenant_name(mount, assigns[:org_id]))
       |> assign(:operator_label, operator_label(mount))
       |> assign(:crossing?, crossing?(assigns, plane))
 
@@ -497,8 +514,17 @@ defmodule Samen.Web.CurrentOrg do
       <span class="pb-glyph-wrap" aria-hidden="true">
         <svg class="pb-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l7 3v5c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6z" /><rect x="9" y="11" width="6" height="5" rx="1" /><path d="M10.5 11V9.5a1.5 1.5 0 0 1 3 0V11" /></svg>
       </span>
-      <span class="pb-name"><b>{@operator_label}</b></span>
-      <span class="pb-pill">Operator plane · masked</span>
+      <%!--
+        T150 F3: the operator-plane badge names the TENANT being VIEWED (the resolved org
+        name), not the operator workspace — an operator looking at "•••• masked" data must see
+        WHOSE house they are in. Falls back to the operator label only when no target tenant is
+        resolved (e.g. the cross-tenant desk with no current org). The `{operator_label}` still
+        anchors the plane via the return-context pill.
+      --%>
+      <span class="pb-name"><b>{@viewing_tenant || @operator_label}</b></span>
+      <span class="pb-pill">
+        <%= if @viewing_tenant do %>Operator plane · viewing tenant · masked<% else %>Operator plane · masked<% end %>
+      </span>
     </div>
 
     <div

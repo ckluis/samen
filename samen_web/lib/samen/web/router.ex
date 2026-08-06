@@ -86,8 +86,20 @@ defmodule Samen.Web.Router do
 
       scope "/" do
         pipe_through :browser
-        samen_operator_routes Driftwood.Operator, repo: Driftwood.Repo
+        samen_operator_routes Driftwood.Operator,
+          repo: Driftwood.Repo,
+          labels: %{operator_authority: {MyApp.Auth, :operator_role, []}}
       end
+
+  ## Operator-ROLE authorization (T146 — fail CLOSED, by construction)
+
+  Every route this macro declares mounts through an `on_mount`
+  (`{Samen.Web.Operator.Authz, :require_operator}`) that derives operator authority from the
+  AUTHENTICATED SESSION PRINCIPAL — via the host's `:operator_authority` seam (below) — and
+  FAILS CLOSED (redirect to `/login`, renders nothing) for any principal that is NOT an operator.
+  A plain authenticated TENANT user therefore cannot reach `/operator/*`. The authority is NEVER
+  fabricated from the mount. A host that wires no `:operator_authority` gets NO operator access
+  (deny-by-default). See `Samen.Web.Operator.Authz`.
 
   ## The operator seat's PII plane is `:tenant` of the operator org, NOT `:operator`
 
@@ -102,6 +114,12 @@ defmodule Samen.Web.Router do
     * `:domain`          — the host Ash domain (default: `namespace`).
     * `:operator_org_id` — the well-known operator org id (else resolved via app env or the
       single seeded Org row — see `Samen.Web.Operator.org_id/1`).
+    * `:operator_authority` — the operator-ROLE seam (T146): an `{mod, fun, args}` MFA called
+      with the authenticated principal id APPENDED, returning an operator role
+      (`Samen.OperatorPlane.Actor.roles/0`) or `nil`. ABSENT → deny-by-default (no operator
+      access). See `Samen.Web.Operator.Authz`; a dev-only default is
+      `{Samen.Web.Operator.Authz, :dev_operator_role, [otp_app]}`.
+    * `:login_path` — where a non-operator principal is redirected (default `"/login"`).
     * `:path`            — the mount path prefix (default `/operator`).
     * `:labels`          — optional UI copy overrides (operator workspace title/glyph, etc.).
     * `:include_aggregate` — also mount the `aggregate` page on THIS operator mount (default
@@ -138,7 +156,14 @@ defmodule Samen.Web.Router do
           labels: operator_labels
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      # T146 — the operator-ROLE authorization hook. Every operator route mounts through this
+      # `on_mount`, which derives operator authority from the AUTHENTICATED SESSION PRINCIPAL via
+      # the host `:operator_authority` seam and FAILS CLOSED (redirect to /login, renders nothing)
+      # for any principal that is not an operator. A plain tenant-user session cannot reach ANY
+      # `/operator/*` surface. See `Samen.Web.Operator.Authz`.
+      live_session session_name,
+        on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         live("#{path}/accounts", Samen.Web.Operator.AccountsLive)
         # The B4 health drill-down (ADR-019 / AC-G17-4) — inherited at 0 vertical LOC.
         live("#{path}/accounts/:id", Samen.Web.Operator.AccountDetailLive)
@@ -153,6 +178,13 @@ defmodule Samen.Web.Router do
         # floor; inherited at 0 vertical LOC.
         live("#{path}/analytics", Samen.Web.Operator.AnalyticsLive)
         live("#{path}/desk", Samen.Web.Operator.DeskLive)
+        # T149 B1 — the ticket DETAIL + conversation + reply surface (the missing "resolve a
+        # ticket" affordance; DeskLive was list+create+delete only). Rides the SAME operator
+        # live_session, so the `{Samen.Web.Operator.Authz, :require_operator}` on_mount gates it
+        # (a tenant-user session can never reach it). Reads the operator org's OWN desk on the
+        # TENANT plane (the SaaS's own book of business — NOT a per-tenant impersonation drill-in,
+        # so not T150-session-gated); a reply posts through the governed `Support.Message` create.
+        live("#{path}/desk/:id", Samen.Web.Operator.DeskDetailLive)
         # The B9 webhook DLQ (ADR-038 §5.5) — failed/unprocessable ingress envelopes,
         # listed TOKEN-BLIND (provider · kind · event id · timestamps · attempt count ·
         # error summary + the already-redacted payload; no PII, no vault tokens). Replay
@@ -260,6 +292,10 @@ defmodule Samen.Web.Router do
     * `:labels`          — optional UI copy overrides + a `:pubsub`/`:presence`/`:object_cards`
       seam (data on the mount).
     * `:session_name`    — override the `live_session` name.
+    * `:on_mount`        — OPTIONAL `on_mount` hooks for this chat `live_session` (default `[]`).
+      An OPERATOR-plane chat mount (the operator desk-chat) passes
+      `[{Samen.Web.Operator.Authz, :require_operator}]` (with an `:operator_authority` label) so
+      the operator-ROLE gate runs on the WEBSOCKET mount, not just the HTTP dead-render (T146).
   """
   defmacro samen_chat_routes(kind, namespace, opts \\ []) do
     kind = Macro.expand(kind, __CALLER__)
@@ -283,7 +319,15 @@ defmodule Samen.Web.Router do
           labels: Keyword.get(opts, :labels)
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      # T146 — an OPTIONAL `:on_mount` (default `[]`, a no-op for every existing caller). A host
+      # mounting the chat LiveViews on the OPERATOR plane (`plane: :operator`, e.g. the operator
+      # desk-chat) passes `on_mount: [{Samen.Web.Operator.Authz, :require_operator}]` so the
+      # operator-ROLE authz gate runs on the WEBSOCKET mount too (the conn pipeline gates only the
+      # HTTP dead-render; same-live_session live-nav is gated only by on_mount). Requires an
+      # `:operator_authority` label on the mount. Tenant-plane chat passes nothing → unchanged.
+      live_session session_name,
+        on_mount: Keyword.get(opts, :on_mount, []),
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:chat, path) do
           live(sub_path, module)
         end
