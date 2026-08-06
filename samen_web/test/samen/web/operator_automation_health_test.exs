@@ -102,6 +102,35 @@ defmodule Samen.Web.OperatorAutomationHealthTest do
     assert Enum.any?(events, &(&1.correlation_id == org))
   end
 
+  test "T154 — a kill/rearm WRITE is DENIED without an active session (deny-on-write, crafted phx-click)" do
+    org = Ash.UUID.generate()
+    owner = Ash.UUID.generate()
+    wf = create_workflow!(org, owner)
+
+    # A socket with an operator identity but NO impersonation session for this org — the state an
+    # attacker crafting a `phx-click` on the denied page has (the kill button is not even rendered).
+    socket =
+      %Phoenix.LiveView.Socket{}
+      |> Phoenix.Component.assign(:samen_mount, operator_mount(org))
+      |> Phoenix.Component.assign(:samen_acting_as, false)
+      |> with_operator_identity(org)
+      |> AutomationHealthLive.load(org)
+
+    assert socket.assigns.impersonation == :denied
+
+    # Fire the crafted kill anyway — the write handler must re-consult the gate and REFUSE.
+    socket = event(socket, "kill", %{"id" => to_string(wf.id)})
+
+    assert socket.assigns.impersonation == :denied
+    refute reload_workflow!(wf.id).disabled_by_operator_at
+
+    # Positive control: once a session is opened, the SAME kill writes (round-trip covered above).
+    open_impersonation!(org, org)
+    socket = AutomationHealthLive.load(socket, org)
+    _socket = event(socket, "kill", %{"id" => to_string(wf.id)})
+    assert reload_workflow!(wf.id).disabled_by_operator_at
+  end
+
   test "no PII / vault token / webhook secret ever renders in the health page (INV-1 red-path proof)" do
     org = Ash.UUID.generate()
     owner = Ash.UUID.generate()

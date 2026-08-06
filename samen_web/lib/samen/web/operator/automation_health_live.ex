@@ -155,17 +155,31 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
   defp open_error_copy(_), do: "The impersonation session could not be opened."
 
   defp switch(socket, action, workflow_id) do
-    operator = socket.assigns[:operator]
     target_org_id = socket.assigns[:target_org_id]
 
-    result = if action == :kill, do: Health.kill(operator, workflow_id), else: Health.rearm(operator, workflow_id)
-
-    case result do
-      {:ok, _wf} ->
+    # T154 — a kill/rearm WRITE on a SPECIFIC tenant's workflow now requires an ACTIVE, audited
+    # impersonation session for that org (deny-on-WRITE), the same accountability floor T150 put
+    # on the read path — so the emergency-stop lands in the tenant's ledger, not just the audit
+    # log. Deny-on-write independently of the rendered button: the write handler is reachable via
+    # a crafted `phx-click` on the `:denied` state, so the gate is re-consulted HERE, not trusted
+    # from the last render. Belt-and-suspenders: `Health.may_manage?` role gate + the `aud_event`
+    # audit still apply on the allowed path (authorized + attributable AND ledger-recorded).
+    case Impersonation.gate(socket.assigns[:samen_operator_id], target_org_id) do
+      :denied ->
         {:noreply, load(socket, target_org_id)}
 
-      {:error, reason} ->
-        {:noreply, assign(socket, action_error: error_copy(reason))}
+      {:ok, _actor, _info} ->
+        operator = socket.assigns[:operator]
+
+        result = if action == :kill, do: Health.kill(operator, workflow_id), else: Health.rearm(operator, workflow_id)
+
+        case result do
+          {:ok, _wf} ->
+            {:noreply, load(socket, target_org_id)}
+
+          {:error, reason} ->
+            {:noreply, assign(socket, action_error: error_copy(reason))}
+        end
     end
   end
 

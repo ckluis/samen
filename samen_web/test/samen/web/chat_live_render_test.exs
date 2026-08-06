@@ -91,6 +91,10 @@ defmodule Samen.Web.ChatLiveRenderTest do
     org_id: org_id,
     chat: chat
   } do
+    # T153 — the operator desk-chat room is a per-tenant drill-in: it now requires a real,
+    # audited impersonation session for this org (deny-on-read). Open one (keyed on the plane's
+    # operator id "op-1"); the content then resolves masked, as before.
+    open_impersonation!("op-1", org_id)
     mount = chat_mount(plane: :operator, target_org_id: org_id)
     html = render_live(ThreadLive, mount, [org_id, chat.thread.id])
 
@@ -124,6 +128,8 @@ defmodule Samen.Web.ChatLiveRenderTest do
   end
 
   test "handle_info re-reads a broadcast message per plane (operator → ••••)", %{org_id: org_id, chat: chat} do
+    # T153 — an active session is required for the operator room to load its content.
+    open_impersonation!("op-1", org_id)
     mount = chat_mount(plane: :operator, target_org_id: org_id)
     socket = build_socket(ThreadLive, mount, [org_id, chat.thread.id])
 
@@ -153,6 +159,78 @@ defmodule Samen.Web.ChatLiveRenderTest do
 
     {:noreply, socket} = ThreadLive.handle_info({:chat_message, other_envelope}, socket)
     assert length(socket.assigns.messages) == before
+  end
+
+  # -- T153: the operator desk-chat impersonation-session gate -----------------
+  # The operator desk-chat (`plane: :operator`) reaches ONE tenant's chat. Viewing that tenant's
+  # conversation content is a per-tenant drill-in → it now requires a real, audited
+  # `Samen.Impersonation` session for the resolved org (deny-on-read), keyed on the plane's
+  # operator id. The shared TENANT-plane chat is UNAFFECTED (never gated). Same gate/2 chokepoint
+  # as the deliverability/automation/activity drill-ins (T150), so sabotage 57 flips these too.
+
+  test "T153 DENIED without a session — the operator ROOM shows NO content + offers the open-session form", %{
+    org_id: org_id,
+    chat: chat
+  } do
+    mount = chat_mount(plane: :operator, target_org_id: org_id)
+    # No session opened.
+    html = render_live(ThreadLive, mount, [org_id, chat.thread.id])
+
+    assert html =~ "no active impersonation session"
+    assert html =~ "open-session-form"
+    assert html =~ ~s(phx-submit="open_session")
+    # No tenant chat CONTENT (masked or otherwise) leaks on the deny state.
+    refute html =~ "CHAT-BODY-SENTINEL"
+    refute html =~ Seeds.tenant_participant_handle()
+  end
+
+  test "T153 DENIED without a session — the operator INBOX shows NO threads + offers the open-session form", %{
+    org_id: org_id,
+    chat: chat
+  } do
+    mount = chat_mount(plane: :operator, target_org_id: org_id)
+    html = render_live(ThreadsLive, mount, [org_id])
+
+    assert html =~ "no active impersonation session"
+    assert html =~ "open-session-form"
+    refute html =~ chat.thread.subject
+    refute html =~ "thread-row"
+  end
+
+  test "T153 WITH a session — the operator ROOM renders masked AND the access is RECORDED in the tenant ledger", %{
+    org_id: org_id,
+    chat: chat
+  } do
+    reason = "ticket #5150: chat dispute review"
+    open_impersonation!("op-1", org_id, reason)
+
+    mount = chat_mount(plane: :operator, target_org_id: org_id)
+    html = render_live(ThreadLive, mount, [org_id, chat.thread.id])
+
+    # Content resolves — masked by construction (operator plane, no grant).
+    refute html =~ "CHAT-BODY-SENTINEL"
+    assert html =~ "••••"
+    refute html =~ "no active impersonation session"
+    # The accountability line names the session (who/why/expiry).
+    assert html =~ "session-accountability"
+    assert html =~ reason
+
+    # The tenant-visible ledger shows who / why / active — the honesty gap SecurityLive promised.
+    ledger = Samen.Impersonation.list_for_org(org_id)
+    assert Enum.any?(ledger, &(&1.operator_id == "op-1" and &1.reason == reason and &1.active?))
+  end
+
+  test "T153 positive control — the TENANT plane room is UNAFFECTED (renders clear, no session needed)", %{
+    org_id: org_id,
+    chat: chat
+  } do
+    mount = chat_mount(plane: :tenant)
+    # No session anywhere — the tenant plane is never gated.
+    html = render_live(ThreadLive, mount, [org_id, chat.thread.id])
+
+    assert html =~ "CHAT-BODY-SENTINEL"
+    refute html =~ "no active impersonation session"
+    refute html =~ "open-session-form"
   end
 
   # -- helpers -----------------------------------------------------------------

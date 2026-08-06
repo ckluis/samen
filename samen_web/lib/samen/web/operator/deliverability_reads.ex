@@ -117,17 +117,4 @@ defmodule Samen.Web.Operator.DeliverabilityReads do
   rescue
     _ -> nil
   end
-
-  @doc """
-  The canonical actor for THIS surface — see the moduledoc. `operator_id` is
-  carried on the marker for future audit correlation (unused by the grant check
-  today, mirrors `Samen.Impersonation.Scope`'s marker shape).
-  """
-  @spec operator_actor(String.t() | nil) :: map()
-  def operator_actor(operator_id \\ nil) do
-    %{
-      plane: :operator,
-      impersonation: %{session_id: "operator-deliverability", operator_id: operator_id}
-    }
-  end
 end

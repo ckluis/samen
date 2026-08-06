@@ -8,10 +8,19 @@
 # NO tenant-ledger entry. The masking still holds (operator plane), so this is purely the
 # accountability/honesty hole T150 closed. The POSITIVE CONTROL (a genuinely-opened session) stays
 # green — it validated to `{:ok, ...}` either way — so the flip is non-vacuous. Reverts byte-exact.
+#
+# T153/T154 EXTENSION: the operator desk-chat (chat_live_render_test) and the automation kill/rearm
+# WRITE path (operator_automation_health_test) route their new accountability requirement through
+# this SAME gate/2 no-session branch. Defeating it here therefore also lets the desk-chat render a
+# tenant's chat with no session AND lets a crafted kill phx-click write with no session — so those
+# surface tests flip too (added below), proving the extension is guarded by the same chokepoint.
 # APP: samen_web
-# TEST_FILES: test/samen/web/operator_impersonation_gate_test.exs
+# TEST_FILES: test/samen/web/operator_impersonation_gate_test.exs test/samen/web/chat_live_render_test.exs test/samen/web/operator_automation_health_test.exs
 # MUST_FAIL: a per-tenant drill-in is DENIED with no active session
 # MUST_FAIL: a CLOSED session re-denies
+# MUST_FAIL: the operator ROOM shows NO content
+# MUST_FAIL: the operator INBOX shows NO threads
+# MUST_FAIL: a kill/rearm WRITE is DENIED without an active session
 diff --git a/samen_web/lib/samen/web/operator/impersonation.ex b/samen_web/lib/samen/web/operator/impersonation.ex
 index 8ef89d0..3f07076 100644
 --- a/samen_web/lib/samen/web/operator/impersonation.ex

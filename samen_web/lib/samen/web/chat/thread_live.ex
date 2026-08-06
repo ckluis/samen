@@ -30,10 +30,15 @@ defmodule Samen.Web.Chat.ThreadLive do
   alias Samen.Web.Chat.{Identity, PubSub, Reads}
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.Operator.Impersonation
 
   @impl true
   def mount(params, session, socket) do
-    socket = assign_mount(socket, session)
+    socket =
+      socket
+      |> assign_mount(session)
+      |> maybe_assign_operator_identity(session, params)
+
     org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
     thread_id = Map.get(params, "id")
 
@@ -57,27 +62,67 @@ defmodule Samen.Web.Chat.ThreadLive do
 
   def load(socket, org_id, thread_id) do
     mount = socket.assigns.samen_mount
-    scope = Mount.scope(mount, org_id)
 
-    case Reads.get_thread(mount, scope, thread_id) do
-      {:ok, thread} ->
-        participants = Reads.participants(mount, scope, thread_id)
-        resolved_participants = Identity.resolve_participants(mount, scope, thread, participants)
-        messages = Reads.messages(mount, scope, thread_id)
+    # T153 — the room is tenant chat CONTENT (message bodies + participant identities). On the
+    # OPERATOR desk-chat plane, resolving a SPECIFIC tenant's conversation is the per-tenant
+    # drill-in: it now requires a real, audited `Samen.Impersonation` session for THIS org
+    # (deny-on-read), same accountability gate the other drill-ins carry (T150). Tenant: not gated.
+    case gate(socket, mount, org_id) do
+      :denied ->
+        socket
+        |> assign_empty()
+        |> assign(org_id: org_id, thread_id: thread_id, impersonation: :denied, session_info: nil, open_error: nil)
 
-        assign(socket,
-          no_thread: false,
-          org_id: org_id,
-          thread_id: thread_id,
-          thread: thread,
-          participants: resolved_participants,
-          handles: handle_map(participants),
-          messages: attach_cards(mount, scope, messages),
-          composer: ""
-        )
+      {:ok, session_info} ->
+        scope = Mount.scope(mount, org_id)
 
-      :error ->
-        assign_empty(socket)
+        case Reads.get_thread(mount, scope, thread_id) do
+          {:ok, thread} ->
+            participants = Reads.participants(mount, scope, thread_id)
+            resolved_participants = Identity.resolve_participants(mount, scope, thread, participants)
+            messages = Reads.messages(mount, scope, thread_id)
+
+            assign(socket,
+              no_thread: false,
+              org_id: org_id,
+              thread_id: thread_id,
+              thread: thread,
+              participants: resolved_participants,
+              handles: handle_map(participants),
+              messages: attach_cards(mount, scope, messages),
+              composer: "",
+              impersonation: ok_state(mount),
+              session_info: session_info,
+              open_error: nil
+            )
+
+          :error ->
+            assign(assign_empty(socket), org_id: org_id, thread_id: thread_id)
+        end
+    end
+  end
+
+  # The gate for the shared chat room: TENANT plane never gated (`{:ok, nil}`); OPERATOR plane
+  # consults `Samen.Web.Operator.Impersonation.gate/2` keyed on the RESOLVED tenant org.
+  defp gate(socket, mount, org_id) do
+    if operator_plane?(mount) do
+      case Impersonation.gate(gate_operator_id(socket), org_id) do
+        {:ok, _actor, info} -> {:ok, info}
+        :denied -> :denied
+      end
+    else
+      {:ok, nil}
+    end
+  end
+
+  defp ok_state(mount), do: if(operator_plane?(mount), do: :active, else: :tenant)
+
+  # T153 — on the OPERATOR desk-chat plane, resolve the acting operator identity the gate keys on.
+  defp maybe_assign_operator_identity(socket, session, params) do
+    if operator_plane?(socket.assigns[:samen_mount]) do
+      Impersonation.assign_identity(socket, session, params)
+    else
+      socket
     end
   end
 
@@ -108,6 +153,21 @@ defmodule Samen.Web.Chat.ThreadLive do
   end
 
   def handle_event("send", _params, socket), do: {:noreply, socket}
+
+  # T153 — the open-session-with-reason affordance the OPERATOR denied state renders.
+  def handle_event("open_session", %{"reason" => reason}, socket) do
+    org_id = socket.assigns[:org_id]
+
+    case Impersonation.open(gate_operator_id(socket), socket.assigns[:samen_operator_role], org_id, reason) do
+      {:ok, _session} -> {:noreply, load(socket, org_id, socket.assigns[:thread_id])}
+      {:error, why} -> {:noreply, assign(socket, open_error: open_error_copy(why))}
+    end
+  end
+
+  defp open_error_copy(:reason_required), do: "A reason for access is required."
+  defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."
+  defp open_error_copy({:pii_shaped_reason, _}), do: "The reason must name the ticket, not the person."
+  defp open_error_copy(_), do: "The impersonation session could not be opened."
 
   # ---------------------------------------------------------------------------
   # REALTIME — the id-only broadcast re-read per THIS viewer's plane (§3.2)
@@ -144,24 +204,64 @@ defmodule Samen.Web.Chat.ThreadLive do
           </div>
         </:sidebar>
 
-        <%= if @no_thread do %>
-          <.topbar title="Chat" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat"]} />
-          <div class="wrap">
-            <div class="card" id="no-thread" style="padding:22px 20px;color:var(--muted)">
-              Conversation not available.
+        <%= cond do %>
+          <% @impersonation == :denied -> %>
+            <.topbar title="Chat" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat"]} />
+            <div class="wrap">
+              <div class="card" id="impersonation-required" style="padding:22px 20px">
+                <div style="color:var(--red);font-weight:600" id="no-session">
+                  Access denied — no active impersonation session for this tenant.
+                </div>
+                <p style="color:var(--muted);margin:10px 0 14px;font-size:13px">
+                  Reading a specific tenant's conversation is a per-tenant drill-in: it requires a
+                  short-TTL, reason-required <b>impersonation session</b>, recorded in the tenant's
+                  audit ledger (who / when / why). Start one below — the conversation still renders masked.
+                </p>
+                <div :if={@open_error} id="open-error" style="color:#B42318;font-size:12px;margin-bottom:8px">
+                  {@open_error}
+                </div>
+                <form phx-submit="open_session" id="open-session-form" style="display:flex;gap:8px;align-items:flex-start">
+                  <input
+                    type="text"
+                    name="reason"
+                    id="session-reason-input"
+                    placeholder="Reason (e.g. ticket #1234: dispatch dispute)"
+                    style="flex:1;padding:8px 10px;border:1px solid #D0D5DD;border-radius:8px;font-size:13px"
+                  />
+                  <button type="submit" id="start-session-btn" style="padding:8px 14px;border-radius:8px;background:#3B4CCA;color:#fff;font-size:13px">
+                    Start session (masked)
+                  </button>
+                </form>
+              </div>
             </div>
-          </div>
-        <% else %>
-          <.topbar
-            title={@thread.subject || "Conversation"}
-            crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat", @thread.subject || "Conversation"]}
-          >
-            <:actions>
-              <span class="lane">{plane_note(@samen_mount)} · disclosure: {@thread.disclosure_mode}</span>
-            </:actions>
-          </.topbar>
+          <% @no_thread -> %>
+            <.topbar title="Chat" crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat"]} />
+            <div class="wrap">
+              <div class="card" id="no-thread" style="padding:22px 20px;color:var(--muted)">
+                Conversation not available.
+              </div>
+            </div>
+          <% true -> %>
+            <.topbar
+              title={@thread.subject || "Conversation"}
+              crumbs={[CurrentOrg.name(@samen_mount, @org_id), "Chat", @thread.subject || "Conversation"]}
+            >
+              <:actions>
+                <span class="lane">{plane_note(@samen_mount)} · disclosure: {@thread.disclosure_mode}</span>
+              </:actions>
+            </.topbar>
 
-          <div class="wrap chat-layout">
+            <div :if={@session_info} id="session-accountability" class="wrap" style="padding-bottom:0">
+              <div class="card" style="padding:10px 14px;font-size:12px;color:var(--muted)">
+                <b style="color:inherit">Masked impersonation session.</b>
+                operator <span class="mono">{@session_info.operator_id}</span>
+                · reason: <span id="session-reason">{@session_info.reason}</span>
+                · expires <span id="session-expiry">{@session_info.expires_at}</span>
+                — recorded in this tenant's audit ledger.
+              </div>
+            </div>
+
+            <div class="wrap chat-layout">
             <div class="chat-main">
               <div id="chat-messages" class="chat-messages">
                 <.chat_message
@@ -199,9 +299,26 @@ defmodule Samen.Web.Chat.ThreadLive do
       participants: [],
       handles: %{},
       messages: [],
-      composer: ""
+      composer: "",
+      impersonation: :none,
+      session_info: nil,
+      open_error: nil
     )
   end
+
+  # T153 gate plumbing (see `Samen.Web.Chat.ThreadsLive` for the identity-resolution note).
+  defp operator_plane?(%Mount{plane: %{kind: :operator}}), do: true
+  defp operator_plane?(_), do: false
+
+  defp gate_operator_id(socket) do
+    present(socket.assigns[:samen_operator_id]) || plane_operator_id(socket.assigns[:samen_mount])
+  end
+
+  defp plane_operator_id(%Mount{plane: %{operator_id: id}}), do: id
+  defp plane_operator_id(_), do: nil
+
+  defp present(v) when is_binary(v), do: if(String.trim(v) == "", do: nil, else: v)
+  defp present(_), do: nil
 
   # Attach per-viewer unfurl cards to each loaded message (first render).
   defp attach_cards(mount, scope, messages) do
