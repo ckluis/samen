@@ -408,6 +408,7 @@
       "wcb": "Samen.WebTest.Cms.Block",
       "cpw": "Samen.WebTest.Cms.Post",
       "wdd": "Samen.WebTest.Docs.Doc",
+      "woa": "Samen.WebTest.OperatorScope.Assignment",
       "wos": "Samen.WebTest.Operator.Session",
       "cvb": "Samen.WebTest.Cms.Block.Version",
       "wdn": "Samen.WebTest.Docs.Note",

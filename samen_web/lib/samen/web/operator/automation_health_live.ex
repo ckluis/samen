@@ -103,10 +103,11 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
         )
 
       true ->
-        # T150 — a per-tenant automation drill-in requires a REAL impersonation session for
-        # the target org (accountability: an operator inspecting/killing ONE tenant's workflows
-        # is recorded in that tenant's ledger). Deny-on-read when there is none.
-        case Impersonation.gate(socket.assigns[:samen_operator_id], target_org_id) do
+        # R-B scope conjunct + T150 — a per-tenant automation drill-in requires the account be
+        # in the operator's scope (§16.4a, checked before the reason form) AND a REAL
+        # impersonation session for the target org (accountability: an operator inspecting/killing
+        # ONE tenant's workflows is recorded in that tenant's ledger). Deny-on-read when missing.
+        case Impersonation.gate_socket(socket, socket.assigns[:samen_operator_id], target_org_id) do
           {:ok, _actor, info} ->
             assign(socket,
               no_org: false,
@@ -117,6 +118,19 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
               runs: fetch_runs(operator, target_org_id),
               action_error: nil,
               session_info: info,
+              open_error: nil
+            )
+
+          :out_of_scope ->
+            assign(socket,
+              no_org: false,
+              impersonation: :out_of_scope,
+              target_org_id: target_org_id,
+              operator: operator,
+              summary: [],
+              runs: [],
+              action_error: nil,
+              session_info: nil,
               open_error: nil
             )
 
@@ -164,8 +178,11 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
     # a crafted `phx-click` on the `:denied` state, so the gate is re-consulted HERE, not trusted
     # from the last render. Belt-and-suspenders: `Health.may_manage?` role gate + the `aud_event`
     # audit still apply on the allowed path (authorized + attributable AND ledger-recorded).
-    case Impersonation.gate(socket.assigns[:samen_operator_id], target_org_id) do
-      :denied ->
+    # The scope conjunct (§16.4a) re-composes on the WRITE path too: a scoped-out operator
+    # (:out_of_scope) is refused the kill/rearm exactly like a session-less one (:denied) —
+    # scope subtracts on writes as on reads.
+    case Impersonation.gate_socket(socket, socket.assigns[:samen_operator_id], target_org_id) do
+      denied when denied in [:denied, :out_of_scope] ->
         {:noreply, load(socket, target_org_id)}
 
       {:ok, _actor, _info} ->
@@ -270,6 +287,16 @@ defmodule Samen.Web.Operator.AutomationHealthLive do
               <div class="card" id="no-target-org" style="padding:22px 20px;color:var(--muted)">
                 Open an account (Operator plane → Accounts) and follow "Automation health →"
                 to inspect a tenant's workflows.
+              </div>
+            <% @impersonation == :out_of_scope -> %>
+              <div class="card" id="out-of-scope" style="padding:22px 20px">
+                <div style="color:var(--red);font-weight:600" id="not-in-scope">
+                  This account is not in your scope.
+                </div>
+                <p style="color:var(--muted);margin:10px 0 0;font-size:13px">
+                  Your operator assignment does not cover this tenant, so its automation health is
+                  not available to you and no impersonation session can be opened for it.
+                </p>
               </div>
             <% @impersonation == :denied -> %>
               <div class="card" id="impersonation-required" style="padding:22px 20px">

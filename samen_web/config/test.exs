@@ -54,3 +54,17 @@ config :samen_web,
     Samen.WebTest.RichTypes,
     Samen.WebTest.Automation
   ]
+
+# T84b / P8 (phase6-punchlist) — `mix samen.verify.fleet_wire`'s closed-catalog
+# MEMBERSHIP check (Samen.Fleet.Report.Catalogs, Samen.Fleet.Report.Schema.validate/2)
+# needs a REAL declared catalog to smoke-check against — a fixture, not production
+# vocabulary. Declaring it here has NO effect on any other fleet test: the ingest
+# HTTP path (Samen.Web.Fleet.{Ingress,CockpitIngress}) calls Schema.validate/1
+# (the 1-arg default, catalogs: %{}), and Samen.Fleet.Report.build/1's own default
+# emits empty checks/oban/mrr_by_tier/activity_counts lists, so no existing fleet
+# test payload carries a catalog-shaped value this config could reject.
+config :samen_web, :fleet_wire_catalogs,
+  closed_check_catalog: ~w(db_reachable redis_reachable queue_healthy),
+  closed_plan_tier_catalog: ~w(free pro enterprise),
+  closed_app_queue_catalog: ~w(mailers webhooks reports),
+  closed_audit_taxonomy_catalog: ~w(login logout org_update billing_update)

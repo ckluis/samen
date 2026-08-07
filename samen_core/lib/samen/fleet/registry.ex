@@ -82,30 +82,38 @@ defmodule Samen.Fleet.Registry do
   """
   @spec issue_probe_credential(module(), String.t(), term()) :: {:ok, map()} | {:error, term()}
   def issue_probe_credential(ns, app_id, actor) do
-    key_version = next_key_version(ns, app_id, actor)
-    raw_secret = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+    res = credential_res(ns)
 
-    with {:ok, credential} <-
-           credential_res(ns)
-           |> Ash.Changeset.for_create(
-             :create,
-             %{
-               app_id: app_id,
-               key_version: key_version,
-               kind: :shared_secret,
-               capability: :fleet_probe,
-               activated_at: DateTime.utc_now()
-             },
-             actor: actor
-           )
-           |> Ash.create(),
-         {:ok, wrapped} <- wrap_secret(credential_subject(app_id, credential.id), raw_secret),
-         {:ok, updated} <-
-           credential
-           |> Ash.Changeset.for_update(:update, %{secret_ciphertext: wrapped}, actor: actor)
-           |> Ash.update() do
-      {:ok, %{credential: updated, raw_secret: raw_secret}}
-    end
+    # P9 (ADR-044 §4.5) — the `key_version` counter is ATOMIC: a transaction-scoped Postgres
+    # advisory lock keyed on (table, app_id) serializes the read-max-then-insert against a
+    # concurrent issue/rotate, so two callers can never mint the SAME key_version (double-issue).
+    # The lock is released at tx end; it is session-re-entrant so it never self-deadlocks.
+    with_counter_lock(res, {res, :key_version, app_id}, fn ->
+      key_version = next_key_version(ns, app_id, actor)
+      raw_secret = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+
+      with {:ok, credential} <-
+             res
+             |> Ash.Changeset.for_create(
+               :create,
+               %{
+                 app_id: app_id,
+                 key_version: key_version,
+                 kind: :shared_secret,
+                 capability: :fleet_probe,
+                 activated_at: DateTime.utc_now()
+               },
+               actor: actor
+             )
+             |> Ash.create(),
+           {:ok, wrapped} <- wrap_secret(credential_subject(app_id, credential.id), raw_secret),
+           {:ok, updated} <-
+             credential
+             |> Ash.Changeset.for_update(:update, %{secret_ciphertext: wrapped}, actor: actor)
+             |> Ash.update() do
+        {:ok, %{credential: updated, raw_secret: raw_secret}}
+      end
+    end)
   end
 
   @doc """
@@ -467,21 +475,127 @@ defmodule Samen.Fleet.Registry do
   # Directives (§4.1 storage only — §7 fan-out engine is T84's)
   # ---------------------------------------------------------------------------
 
+  @doc """
+  List published directives, newest first — the J4 cockpit's own read (§7.4
+  drift disclosure: `applied` / `pending (published N, applied M)` /
+  `unreachable`, compared against each app's reported
+  `flags.applied_fleet_revision`).
+  """
+  @spec list_directives(module(), term()) :: {:ok, [map()]} | {:error, term()}
+  def list_directives(ns, actor) do
+    case directive_res(ns) |> Ash.Query.sort(fleet_revision: :desc) |> Ash.read(actor: actor) do
+      {:ok, directives} -> {:ok, directives}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc "The current published `fleet_revision` (0 when no directive has ever been published)."
+  @spec current_fleet_revision(module(), term()) :: integer()
+  def current_fleet_revision(ns, actor) do
+    case list_directives(ns, actor) do
+      {:ok, [%{fleet_revision: rev} | _]} -> rev
+      _ -> 0
+    end
+  end
+
   @spec record_directive(module(), map(), term()) :: {:ok, map()} | {:error, term()}
   def record_directive(ns, %{target: target, payload: payload}, actor) do
-    directive_res(ns)
-    |> Ash.Changeset.for_create(
-      :create,
-      %{
-        fleet_revision: next_fleet_revision(ns, actor),
+    res = directive_res(ns)
+
+    # P9 (ADR-044 §4.5) — the monotonic `fleet_revision` counter is ATOMIC: a transaction-scoped
+    # advisory lock keyed on the directive table serializes the read-max-then-insert, so two
+    # concurrent publishes can never mint the SAME revision (double-issue).
+    result =
+      with_counter_lock(res, {res, :fleet_revision}, fn ->
+        res
+        |> Ash.Changeset.for_create(
+          :create,
+          %{
+            fleet_revision: next_fleet_revision(ns, actor),
+            target: target,
+            payload: payload,
+            published_by: actor_id(actor),
+            published_at: DateTime.utc_now()
+          },
+          actor: actor
+        )
+        |> Ash.create()
+      end)
+
+    # P10 (ADR-044 §4.6a) — every directive push is AUDITED per app with the publishing
+    # identity: a `:directive_published` attention entry carries who/which-revision/target, so a
+    # push (including a forged mode-A one that DID land a row) is visible with its accountable
+    # operator id, not silent.
+    with {:ok, directive} <- result do
+      Samen.Fleet.Attention.raise_entry(:directive_published, directive_key(target), %{
+        published_by: directive.published_by,
+        fleet_revision: directive.fleet_revision,
         target: target,
-        payload: payload,
-        published_by: actor_id(actor),
-        published_at: DateTime.utc_now()
-      },
-      actor: actor
-    )
-    |> Ash.create()
+        published_at: directive.published_at
+      })
+    end
+
+    result
+  end
+
+  @doc """
+  P10 (ADR-044 §4.6a) — provenance check for the directive APPLY path (T84b's fan-out engine
+  calls this): does a cockpit-side `flt_directive` row exist for `fleet_revision`? A directive
+  ARRIVING at an app with **no matching cockpit row at that revision** is a forged push — it
+  raises an `attention: :incident` entry carrying the app + claimed revision, so the forgery is
+  VISIBLE, not silent (§4.6a). Returns `:ok` when the revision is genuine, `{:error, :forged}`
+  (and raises the incident) when it is not. Fail-closed: any read error is treated as forged.
+  """
+  @spec verify_directive_provenance(module(), String.t(), integer(), term()) ::
+          :ok | {:error, :forged}
+  def verify_directive_provenance(ns, app_id, fleet_revision, actor)
+      when is_binary(app_id) and is_integer(fleet_revision) do
+    genuine? =
+      case directive_res(ns) |> Ash.read(actor: actor) do
+        {:ok, directives} -> Enum.any?(directives, &(&1.fleet_revision == fleet_revision))
+        _ -> false
+      end
+
+    if genuine? do
+      :ok
+    else
+      Samen.Fleet.Attention.raise_entry(:incident, app_id, %{
+        reason: :directive_provenance_mismatch,
+        fleet_revision: fleet_revision
+      })
+
+      {:error, :forged}
+    end
+  rescue
+    _ ->
+      Samen.Fleet.Attention.raise_entry(:incident, app_id, %{
+        reason: :directive_provenance_error,
+        fleet_revision: fleet_revision
+      })
+
+      {:error, :forged}
+  end
+
+  # The app-level attention key for a directive: its target app_id, or "all" for a fleet-wide push.
+  defp directive_key(%{app_id: app_id}) when is_binary(app_id), do: app_id
+  defp directive_key(%{"app_id" => app_id}) when is_binary(app_id), do: app_id
+  defp directive_key(_target), do: "all"
+
+  # P9 — hold a transaction-scoped Postgres advisory lock across a read-max-then-insert counter
+  # mint, so the max+1 can never race. `lock_parts` hashes to the 64-bit lock key; the lock is
+  # DB-global (works across BEAM nodes) and released at tx commit/rollback. A `{:error, _}` from
+  # `fun` commits the (empty) tx harmlessly; only a raise rolls back.
+  defp with_counter_lock(resource, lock_parts, fun) do
+    repo = AshPostgres.DataLayer.Info.repo(resource, :mutate)
+    key = :erlang.phash2(lock_parts)
+
+    case repo.transaction(fn ->
+           Ecto.Adapters.SQL.query!(repo, "SELECT pg_advisory_xact_lock($1)", [key])
+           fun.()
+         end) do
+      {:ok, result} -> result
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp next_fleet_revision(ns, actor) do

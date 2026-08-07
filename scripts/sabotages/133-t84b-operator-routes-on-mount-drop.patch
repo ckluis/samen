@@ -1,0 +1,23 @@
+# SABOTAGE: T84b (ADR-044 s6.3, RP-J-12 - the T146-rounds-2/3 regression class, made
+# refutable). samen_operator_routes/2's live_session carries the ONE on_mount hook
+# ({Samen.Web.Operator.Authz, :require_operator}) that gates EVERY route declared inside it -
+# accounts/billing/revenue/flags/webhooks/desk/deliverability/automation/activity AND every
+# fleet-cockpit route. Dropping the on_mount option re-opens the exact hole T146 was built to
+# close: a plain authenticated tenant session can reach ANY /operator/* surface, fleet included,
+# un-gated. This is a single-macro sabotage precisely because the ADR names it as the load-
+# bearing property - one macro, one hook, every route inherits it or none do.
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_cockpit_authz_test.exs
+# MUST_FAIL: GREEN: the real router — every /operator/* live route is gated, including every fleet route
+diff --git a/samen_web/lib/samen/web/router.ex b/samen_web/lib/samen/web/router.ex
+index 483607e..d117a38 100644
+--- a/samen_web/lib/samen/web/router.ex
++++ b/samen_web/lib/samen/web/router.ex
+@@ -191,7 +191,6 @@ defmodule Samen.Web.Router do
+       # for any principal that is not an operator. A plain tenant-user session cannot reach ANY
+       # `/operator/*` surface. See `Samen.Web.Operator.Authz`.
+       live_session session_name,
+-        on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
+         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+         live("#{path}/accounts", Samen.Web.Operator.AccountsLive)
+         # The B4 health drill-down (ADR-019 / AC-G17-4) — inherited at 0 vertical LOC.

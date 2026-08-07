@@ -425,3 +425,40 @@ a demo/vertical `ci.sh` step (the root gate runs demo's `ci.sh`).
 **Fix:** drop the vault-routed field from the embeddable set (or de-vault it); remove the raw
 `vt_` token from the Prompt template body — a template must reference values by binding, resolved
 +masked at egress by `Samen.AI.Chokepoint`, never embed a raw token.
+
+### `mix samen.verify.fleet_wire`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.fleet_wire.ex`):
+
+```text
+field type <type> is not a member of Samen.WideEvent.Schema.bounded_types/0 ... — the fleet wire must never widen the inherited discipline
+Samen.Fleet.Report.Schema.bounded_types/0 [...] is NOT a subset of Samen.WideEvent.Schema.bounded_types/0 [...]
+<host> declares <sentinel> in :fleet_wire_catalogs but the list is empty or malformed ...
+P8 smoke-check FAILED for <sentinel>: a label (...) that is NOT a member of the declared closed catalog [...] was ACCEPTED by Schema.validate/2 ...
+route <VERB> <PATH> is mounted on <Router> but is NOT in Samen.Fleet.RouteTable.declared/0 (ADR-044 §4.4a) — an undeclared fleet route was added.
+Samen.Fleet.RouteTable.declared/0 promises <VERB> <PATH> but <Router> does not mount it.
+```
+
+**Meaning:** ADR-044 §5.2 point 4 / §5.2b's "closed member list" premise (WS-J J2,
+T84b) — three independent checks: (1) RP-J-4, the `FleetReport` wire's four-class
+type discipline (`Samen.Fleet.Report.Schema.class_discipline_violations/0` — no
+field of a text-carrying class can exist, so a PII value has nowhere to land) and
+that the schema never WIDENS the inherited `Samen.WideEvent.Schema.bounded_types/0`
+discipline; (2) P8 (`phase6-punchlist.md`) — a host that declares
+`:fleet_wire_catalogs` (`Samen.Fleet.Report.Catalogs`) for one of the four closed-
+catalog sentinels (`checks[].name` / `mrr_by_tier[].tier` / `oban[].queue` /
+`activity_counts[].event_kind`) gets a LIVE smoke-check proving
+`Samen.Fleet.Report.Schema.validate/2` actually REJECTS an out-of-catalog label,
+not merely shape-checks it — an empty/malformed declared catalog fails outright; a
+host that has not adopted cohort/catalog data at all is untouched (opt-in); (3)
+RP-J-4b, the route-surface cross-check against `Samen.Fleet.RouteTable.declared/0`
+(ADR-044 §4.4a + §5.3's tier-2 resolve routes) — only runs with `--router
+MyAppWeb.Router`, skipped (not a violation) otherwise. Not wired into any
+generated-app gate step (fleet cohorts are opt-in, ADR-044 §5.3); a host that
+adopts the fleet wire runs it directly (`mix samen.verify.fleet_wire`), and
+`samen_web/ci.sh` runs it against the framework's own test fixtures.
+**Fix:** for (1), remove/replace the offending field type with one of
+`:opaque_id`/`:token`/`:enum`/`:number`; for (2), populate the declared catalog
+with the real per-vertical member list (or remove the empty declaration); for (3),
+mount the missing route via `samen_fleet_routes`/`samen_operator_routes(...,
+fleet_cockpit: true)`, or remove the undeclared one.

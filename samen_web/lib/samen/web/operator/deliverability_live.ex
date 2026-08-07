@@ -107,10 +107,13 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
         assign(socket, org_id: org_id, detail: detail, impersonation: :active, session_info: nil, open_error: nil)
 
       true ->
-        case Impersonation.gate(socket.assigns[:samen_operator_id], org_id) do
+        case Impersonation.gate_socket(socket, socket.assigns[:samen_operator_id], org_id) do
           {:ok, actor, info} ->
             detail = DeliverabilityReads.deliverability(mount, actor, org_id, opts)
             assign(socket, org_id: org_id, detail: detail, impersonation: :active, session_info: info, open_error: nil)
+
+          :out_of_scope ->
+            assign(socket, org_id: org_id, detail: nil, impersonation: :out_of_scope, session_info: nil, open_error: nil)
 
           :denied ->
             assign(socket, org_id: org_id, detail: nil, impersonation: :denied, session_info: nil, open_error: nil)
@@ -134,6 +137,19 @@ defmodule Samen.Web.Operator.DeliverabilityLive do
         </.topbar>
 
         <%= cond do %>
+          <% @impersonation == :out_of_scope -> %>
+            <div class="wrap">
+              <div class="card" id="out-of-scope" style="padding:22px 20px">
+                <div style="color:var(--red);font-weight:600" id="not-in-scope">
+                  This account is not in your scope.
+                </div>
+                <p style="color:var(--muted);margin:10px 0 0;font-size:13px">
+                  Your operator assignment does not cover this tenant, so its deliverability is not
+                  available to you and no impersonation session can be opened for it. Ask an
+                  operator-admin to assign this account if you need access.
+                </p>
+              </div>
+            </div>
           <% @impersonation == :denied -> %>
             <div class="wrap">
               <div class="card" id="impersonation-required" style="padding:22px 20px">

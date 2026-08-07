@@ -22,20 +22,20 @@
 # MUST_FAIL: the operator INBOX shows NO threads
 # MUST_FAIL: a kill/rearm WRITE is DENIED without an active session
 diff --git a/samen_web/lib/samen/web/operator/impersonation.ex b/samen_web/lib/samen/web/operator/impersonation.ex
-index 8ef89d0..3f07076 100644
+index 817938e..09164c1 100644
 --- a/samen_web/lib/samen/web/operator/impersonation.ex
 +++ b/samen_web/lib/samen/web/operator/impersonation.ex
-@@ -112,7 +112,12 @@ defmodule Samen.Web.Operator.Impersonation do
-         {:ok, actor, active_entry(operator_id, org_id)}
+@@ -145,7 +145,12 @@ defmodule Samen.Web.Operator.Impersonation do
+           {:ok, actor, active_entry(operator_id, org_id)}
  
-       {:error, _reason} ->
--        :denied
-+        # SABOTAGE (T150): fabricate operator-plane access with NO real imp_impersonation_session
-+        # row (the exact pre-T150 synthetic-marker lie) instead of denying, so a per-tenant
-+        # drill-in renders a specific tenant's masked data with no session and no ledger entry.
-+        {:ok,
-+         %{id: operator_id, org_id: org_id, role: :member, kind: :operator, plane: :operator,
-+           impersonation: %{session_id: nil}}, nil}
+         {:error, _reason} ->
+-          :denied
++          # SABOTAGE (T150): fabricate operator-plane access with NO real imp_impersonation_session
++          # row (the exact pre-T150 synthetic-marker lie) instead of denying, so a per-tenant
++          # drill-in renders a specific tenant's masked data with no session and no ledger entry.
++          {:ok,
++           %{id: operator_id, org_id: org_id, role: :member, kind: :operator, plane: :operator,
++             impersonation: %{session_id: nil}}, nil}
+       end
      end
    rescue
-     _ -> :denied

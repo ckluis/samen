@@ -1,0 +1,22 @@
+# SABOTAGE: T84b (ADR-044 s7.3, RP-J-8b - the row the first draft's ranked ladder got wrong).
+# Samen.Fleet.Directive.Precedence.local_off?/2's rollout_pct <= 0 clause is what makes
+# "fleet is a one-way OFF authority" hold even when a local operator disabled a flag via
+# rollout_pct: 0 rather than the kill switch. Dropping it means a fleet directive with
+# rollout_pct: 100 SILENTLY RE-ENABLES a flag a local operator zeroed out during an incident -
+# exactly the hole this predicate exists to close. Positive control: local KILL
+# (enabled: false) still correctly forces local_off? true (untouched clause).
+# APP: samen_core
+# TEST_FILES: test/fleet_directive_precedence_test.exs
+# MUST_FAIL: local rollout_pct: 0 beats fleet rollout_pct: 100 (the case the ranked ladder got wrong)
+diff --git a/samen_core/lib/samen/fleet/directive/precedence.ex b/samen_core/lib/samen/fleet/directive/precedence.ex
+index 630d4f4..ee4bec5 100644
+--- a/samen_core/lib/samen/fleet/directive/precedence.ex
++++ b/samen_core/lib/samen/fleet/directive/precedence.ex
+@@ -69,7 +69,6 @@ defmodule Samen.Fleet.Directive.Precedence do
+   @spec local_off?(local_config(), map()) :: boolean()
+   def local_off?(local_config, subject) when is_map(local_config) and is_map(subject) do
+     not truthy?(get(local_config, :enabled)) or
+-      rollout_pct(local_config) <= 0 or
+       local_rule_off?(local_config, subject)
+   end
+ 

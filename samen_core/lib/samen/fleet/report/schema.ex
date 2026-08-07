@@ -273,17 +273,36 @@ defmodule Samen.Fleet.Report.Schema do
   the wire / out of `flt_report.payload` jsonb) against this schema. Returns `:ok`
   or `{:error, reasons}` — a non-empty list of violation strings. Never raises: a
   malformed payload is data, not a crash.
+
+  ## `catalogs` (P8, ADR-044 §5.2b / phase6-punchlist P8) — closed-catalog MEMBERSHIP
+
+  A "catalog" field (`checks`/`mrr_by_tier`/`oban`/`activity_counts` item enum keys —
+  declared with a SENTINEL `allowed: :closed_check_catalog` etc., not a literal list,
+  because the real member vocabulary is per-vertical) is bounded to the
+  `^[a-z][a-z0-9_]{0,39}$` SHAPE unconditionally (rejects any PII shape). That shape
+  bound is NOT a closed member-list check — `"totally_made_up_queue_9"` passes shape
+  but was never declared by any host. `catalogs` closes the gap: an OPTIONAL
+  `%{sentinel_atom => [String.t()]}` map (see `Samen.Fleet.Report.Catalogs`) — when a
+  sentinel's closed list is SUPPLIED, membership is enforced (a shape-valid-but-
+  undeclared label is now REJECTED, not merely shape-checked); a sentinel with no
+  entry in `catalogs` falls back to the shape-only stopgap (so a host that has not
+  yet adopted per-vertical catalogs, or a caller validating without one, keeps the
+  EXACT pre-P8 behaviour — this is purely additive). `mix samen.verify.fleet_wire`
+  is the BUILD-TIME backstop that a host adopting cohort/catalog data must declare
+  non-empty catalogs at all, so "closed member list" stops being aspirational.
   """
-  @spec validate(map()) :: :ok | {:error, [String.t()]}
-  def validate(payload) when is_map(payload) do
+  @spec validate(map(), %{atom() => [String.t()]}) :: :ok | {:error, [String.t()]}
+  def validate(payload, catalogs \\ %{})
+
+  def validate(payload, catalogs) when is_map(payload) and is_map(catalogs) do
     top_errors =
       Enum.flat_map(@top_level_fields, fn {name, type, opts} ->
-        validate_field(payload, Atom.to_string(name), name, type, opts)
+        validate_field(payload, Atom.to_string(name), name, type, opts, catalogs)
       end)
 
     list_errors =
       Enum.flat_map(@list_fields, fn {name, opts} ->
-        validate_list(payload, name, opts)
+        validate_list(payload, name, opts, catalogs)
       end)
 
     unknown_key_errors = unknown_key_errors(payload)
@@ -294,9 +313,9 @@ defmodule Samen.Fleet.Report.Schema do
     end
   end
 
-  def validate(_non_map), do: {:error, ["payload must be a map"]}
+  def validate(_non_map, _catalogs), do: {:error, ["payload must be a map"]}
 
-  defp validate_field(payload, key, name, type, opts) do
+  defp validate_field(payload, key, name, type, opts, catalogs) do
     optional? = Keyword.get(opts, :optional, false)
 
     case Map.fetch(payload, key) do
@@ -304,11 +323,11 @@ defmodule Samen.Fleet.Report.Schema do
         if optional?, do: [], else: ["missing required field #{inspect(name)}"]
 
       {:ok, value} ->
-        validate_value(name, type, value, opts)
+        validate_value(name, type, value, opts, catalogs)
     end
   end
 
-  defp validate_value(name, :number, value, opts) do
+  defp validate_value(name, :number, value, opts, _catalogs) do
     case Keyword.get(opts, :range) do
       {lo, hi} when is_integer(value) and value >= lo and value <= hi ->
         []
@@ -321,7 +340,7 @@ defmodule Samen.Fleet.Report.Schema do
     end
   end
 
-  defp validate_value(name, :enum, value, opts) do
+  defp validate_value(name, :enum, value, opts, catalogs) do
     case Keyword.get(opts, :allowed) do
       allowed when is_list(allowed) ->
         atom_value = safe_to_atom(value)
@@ -333,29 +352,33 @@ defmodule Samen.Fleet.Report.Schema do
         end
 
       # A closed CATALOG enum (checks/mrr_by_tier/oban/activity_counts item keys) —
-      # the actual closed member list is declared at the vertical level (T84).
-      # BLOCKER-2 fix (fix round, ATK-6/INV-2): T82's registry-layer validator
-      # previously accepted `is_binary(value) or is_atom(value)` here — i.e.
-      # ANY string/atom, unbounded — which is exactly the free-text hole
-      # ADR-044 §5.2 says cannot exist ("there is no trusted string"). It now
-      # enforces a REAL bound: a catalog label must match the same shape every
-      # bounded label in this codebase uses (mirrors the abbrev/flag-name
-      # class: lowercase, digits, underscore, max 40 chars, starting with a
-      # letter) — `^[a-z][a-z0-9_]{0,39}$`. This cannot hold an email, a name,
-      # an address, or any PII shape (no `@`, no spaces, no uppercase, no
-      # unicode, bounded length). Not a full closed-membership check (that is
-      # T84's `mix samen.verify.fleet_wire`, resolving the real catalog per
-      # vertical) — a STOPGAP bound that closes the unbounded-text hole today.
-      _catalog_sentinel ->
-        if catalog_label?(value) do
-          []
-        else
-          ["#{inspect(name)} = #{inspect(value)} is not a bounded catalog label (^[a-z][a-z0-9_]{0,39}$)"]
+      # the actual closed member list is per-vertical (§5.2b). BLOCKER-2 fix (fix
+      # round, ATK-6/INV-2): the SHAPE bound `^[a-z][a-z0-9_]{0,39}$` is enforced
+      # unconditionally (rejects any PII shape — no `@`, no spaces, no uppercase,
+      # no unicode, bounded length). P8 (phase6-punchlist): when `catalogs` (passed
+      # by the caller — the ingest path, `mix samen.verify.fleet_wire`'s own tests,
+      # or a host that has declared its `:fleet_wire_catalogs`) supplies a NON-EMPTY
+      # member list for this sentinel, MEMBERSHIP is enforced too — a shape-valid
+      # but never-declared label (e.g. a typo'd queue name) is now REJECTED, not
+      # merely shape-checked. No entry for this sentinel in `catalogs` ⇒ the
+      # shape-only stopgap (unchanged pre-P8 behaviour) — additive, never a
+      # regression for a caller that passes no catalogs.
+      catalog_sentinel ->
+        cond do
+          not catalog_label?(value) ->
+            ["#{inspect(name)} = #{inspect(value)} is not a bounded catalog label (^[a-z][a-z0-9_]{0,39}$)"]
+
+          (members = Map.get(catalogs, catalog_sentinel)) not in [nil, []] and
+              to_string(value) not in members ->
+            ["#{inspect(name)} = #{inspect(value)} is not a member of the declared closed catalog #{inspect(catalog_sentinel)} #{inspect(members)}"]
+
+          true ->
+            []
         end
     end
   end
 
-  defp validate_value(name, :opaque_id, value, opts) do
+  defp validate_value(name, :opaque_id, value, opts, _catalogs) do
     case Keyword.get(opts, :form) do
       {:uuid_v4} ->
         if is_binary(value) and uuid_v4?(value),
@@ -372,7 +395,7 @@ defmodule Samen.Fleet.Report.Schema do
     end
   end
 
-  defp validate_value(name, :token, value, opts) do
+  defp validate_value(name, :token, value, opts, _catalogs) do
     case Keyword.get(opts, :form) do
       {:hex, len} ->
         if is_binary(value) and hex_of_length?(value, len),
@@ -384,7 +407,7 @@ defmodule Samen.Fleet.Report.Schema do
     end
   end
 
-  defp validate_list(payload, name, opts) do
+  defp validate_list(payload, name, opts, catalogs) do
     key = Atom.to_string(name)
     max_len = Keyword.fetch!(opts, :max_len)
     item_fields = Keyword.fetch!(opts, :fields)
@@ -402,7 +425,7 @@ defmodule Samen.Fleet.Report.Schema do
         item_errors =
           items
           |> Enum.with_index()
-          |> Enum.flat_map(fn {item, idx} -> validate_item(name, idx, item, item_fields) end)
+          |> Enum.flat_map(fn {item, idx} -> validate_item(name, idx, item, item_fields, catalogs) end)
 
         len_errors ++ item_errors
 
@@ -411,7 +434,7 @@ defmodule Samen.Fleet.Report.Schema do
     end
   end
 
-  defp validate_item(list_name, idx, item, item_fields) when is_map(item) do
+  defp validate_item(list_name, idx, item, item_fields, catalogs) when is_map(item) do
     Enum.flat_map(item_fields, fn {name, type, opts} ->
       key = Atom.to_string(name)
       suppressible? = Keyword.get(opts, :suppressible, false)
@@ -424,13 +447,13 @@ defmodule Samen.Fleet.Report.Schema do
           validate_suppressed(list_name, idx, name, sup)
 
         {:ok, value} ->
-          validate_value(name, type, value, opts)
+          validate_value(name, type, value, opts, catalogs)
           |> Enum.map(&"#{inspect(list_name)}[#{idx}].#{&1}")
       end
     end)
   end
 
-  defp validate_item(list_name, idx, _other, _fields),
+  defp validate_item(list_name, idx, _other, _fields, _catalogs),
     do: ["#{inspect(list_name)}[#{idx}] must be a map"]
 
   defp validate_suppressed(list_name, idx, field_name, sup) do
@@ -445,7 +468,7 @@ defmodule Samen.Fleet.Report.Schema do
           :error when name == :reason -> ["suppressed reason missing"]
           :error -> []
           {:ok, nil} when nilable? -> []
-          {:ok, value} -> validate_value(name, type, value, opts)
+          {:ok, value} -> validate_value(name, type, value, opts, %{})
         end
       end)
 

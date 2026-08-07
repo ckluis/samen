@@ -409,6 +409,10 @@ defmodule Samen.AbbrevRegistryTest do
                  "wfe" => "Samen.WebTest.Fleet.EnrollmentToken",
                  "wfr" => "Samen.WebTest.Fleet.Report",
                  "wfd" => "Samen.WebTest.Fleet.Directive",
+                 # T84 (ADR-044 §16.5 #1, ruling R-A): the samen_web test host's mount of the
+                 # operator-account ASSIGNMENT blueprint (`Samen.Fleet.Assignment`), the data
+                 # source `scope_of/2` reads. Allocator-proposed.
+                 "woa" => "Samen.WebTest.OperatorScope.Assignment",
                  # T78 (spec §I5 helpdesk KB + composer suggestion + deflection): the
                  # samen_web test host's FIRST materialization of the CMS scope
                  # (`Samen.WebTest.Cms`), allocator-proposed. The KB article reuses
@@ -503,7 +507,9 @@ defmodule Samen.AbbrevRegistryTest do
       # on EVERY existing Support host (each needed its own fresh allocator-
       # proposed abbrev): `dsc` (demo), `dcs`/`dco` (driftwood tenant/operator),
       # `psc` (pawchart), `scw`/`wco` (samen_web test tenant/operator) = 404.
-      assert map_size(Reg.load()) == 404
+      # +1 T84 (ADR-044 §16.5 #1): samen_web test host's `woa`
+      # (Samen.WebTest.OperatorScope.Assignment) = 405.
+      assert map_size(Reg.load()) == 405
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do

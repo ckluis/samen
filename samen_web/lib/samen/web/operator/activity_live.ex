@@ -113,14 +113,21 @@ defmodule Samen.Web.Operator.ActivityLive do
           is_nil(mount) or is_nil(org_id) ->
             assign(socket, org_id: org_id, window_hours_param: window_hours, feed: nil, impersonation: :none, open_error: nil)
 
-          # T150 — deny-on-read: a per-tenant activity drill-in requires a real impersonation
-          # session for the target org (accountability), else no feed + the open affordance.
-          Impersonation.gate(socket.assigns[:samen_operator_id], org_id) == :denied ->
-            assign(socket, org_id: org_id, window_hours_param: window_hours, feed: nil, impersonation: :denied, open_error: nil)
-
           true ->
-            feed = ActivityReads.activity(mount, org_id, Keyword.put(opts, :window_hours, window_hours))
-            assign(socket, org_id: org_id, window_hours_param: window_hours, feed: feed, impersonation: :active, open_error: nil)
+            # R-B scope conjunct + T150 deny-on-read: a per-tenant activity drill-in requires
+            # the account be in the operator's scope (§16.4a) AND a real impersonation session
+            # for the target org (accountability). Scope is checked BEFORE the reason form.
+            case Impersonation.gate_socket(socket, socket.assigns[:samen_operator_id], org_id) do
+              :out_of_scope ->
+                assign(socket, org_id: org_id, window_hours_param: window_hours, feed: nil, impersonation: :out_of_scope, open_error: nil)
+
+              :denied ->
+                assign(socket, org_id: org_id, window_hours_param: window_hours, feed: nil, impersonation: :denied, open_error: nil)
+
+              {:ok, _actor, _info} ->
+                feed = ActivityReads.activity(mount, org_id, Keyword.put(opts, :window_hours, window_hours))
+                assign(socket, org_id: org_id, window_hours_param: window_hours, feed: feed, impersonation: :active, open_error: nil)
+            end
         end
     end
   end
@@ -141,6 +148,18 @@ defmodule Samen.Web.Operator.ActivityLive do
         </.topbar>
 
         <%= cond do %>
+          <% @impersonation == :out_of_scope -> %>
+            <div class="wrap">
+              <div class="card" id="out-of-scope" style="padding:22px 20px">
+                <div style="color:var(--red);font-weight:600" id="not-in-scope">
+                  This account is not in your scope.
+                </div>
+                <p style="color:var(--muted);margin:10px 0 0;font-size:13px">
+                  Your operator assignment does not cover this tenant, so its activity is not
+                  available to you and no impersonation session can be opened for it.
+                </p>
+              </div>
+            </div>
           <% @impersonation == :denied -> %>
             <div class="wrap">
               <div class="card" id="impersonation-required" style="padding:22px 20px">

@@ -23,4 +23,12 @@ MIX_ENV=test mix compile --warnings-as-errors
 echo "==> samen_web: test (component + two-plane render/masking suite)"
 MIX_ENV=test mix test --warnings-as-errors
 
+# T84b / P8 (phase6-punchlist) — mix samen.verify.fleet_wire, beside aggregate_privacy /
+# no_pii_columns in the verticals' own gates: RP-J-4 (wire class discipline), RP-J-4b
+# (route surface cross-checked against the REAL Samen.WebTest.FleetCockpitRouter,
+# fleet_cockpit: true), and P8 (closed-catalog MEMBERSHIP, live-smoke-checked against
+# the :fleet_wire_catalogs fixture declared in config/test.exs).
+echo "==> samen_web: mix samen.verify.fleet_wire (RP-J-4 / RP-J-4b / P8)"
+MIX_ENV=test mix samen.verify.fleet_wire --host samen_web --router Samen.WebTest.FleetCockpitRouter
+
 echo "==> samen_web: PASSED"

@@ -1,0 +1,23 @@
+# SABOTAGE: T84b (ADR-044 s16.1/s16.2/s16.3, RP-J-14). FleetDetailLive.cohort_rows/7 computes
+# each row's display `name` from Samen.Fleet.Resolution.resolve/3's returned map ONLY - a handle
+# absent from that map (out of scope) must render masked, never fall back to showing the raw
+# handle in the name slot. Falling back to the handle when unresolved defeats mask-by-omission:
+# an out-of-scope viewer now sees the handle rendered as if it were the tenant's name. Positive
+# control: an ACTUALLY resolved name (present in `resolved`) still renders correctly (the `||`
+# only engages on the omitted/nil case), so in-scope rendering is untouched.
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_detail_scope_mask_test.exs
+# MUST_FAIL: RED: a :none-scope viewer (fleet+app role, no account scope) sees NEITHER name nor handle
+diff --git a/samen_web/lib/samen/web/operator/fleet_detail_live.ex b/samen_web/lib/samen/web/operator/fleet_detail_live.ex
+index 169af14..3710866 100644
+--- a/samen_web/lib/samen/web/operator/fleet_detail_live.ex
++++ b/samen_web/lib/samen/web/operator/fleet_detail_live.ex
+@@ -99,7 +99,7 @@ defmodule Samen.Web.Operator.FleetDetailLive do
+     |> Enum.filter(&is_map/1)
+     |> Enum.map(fn item ->
+       handle = item["handle"]
+-      name = in_scope? && is_binary(handle) && Map.get(resolved, handle)
++      name = in_scope? && is_binary(handle) && (Map.get(resolved, handle) || handle)
+ 
+       %{
+         handle: handle,

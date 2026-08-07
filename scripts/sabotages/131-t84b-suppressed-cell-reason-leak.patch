@@ -1,0 +1,22 @@
+# SABOTAGE: T84b (RP-J-7 consumption, ADR-044 s5.2b). A k-anon-suppressed cohort cell
+# (%{"suppressed"=>true, ...}) must render ONLY the opaque "⊘" glyph - never any of the
+# wire-carried Suppressed struct detail (reason/k/l/observed/limit), which would leak internal
+# floor/threshold information about the suppression to the operator. Interpolating the
+# suppression "reason" into the rendered cell defeats that: the k-anon floor's internal detail
+# now reaches the cockpit render. Positive control: a genuinely non-suppressed numeric value
+# still renders correctly (untouched fallback clause).
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_detail_scope_mask_test.exs
+# MUST_FAIL: a %Suppressed{}-shaped cohort cell renders '⊘', never the underlying wire value
+diff --git a/samen_web/lib/samen/web/operator/fleet_detail_live.ex b/samen_web/lib/samen/web/operator/fleet_detail_live.ex
+index 169af14..3990b6e 100644
+--- a/samen_web/lib/samen/web/operator/fleet_detail_live.ex
++++ b/samen_web/lib/samen/web/operator/fleet_detail_live.ex
+@@ -203,6 +203,6 @@ defmodule Samen.Web.Operator.FleetDetailLive do
+     |> Enum.map_join(" · ", fn {k, v} -> "#{k}: #{suppressed_or(v)}" end)
+   end
+ 
+-  defp suppressed_or(%{"suppressed" => true}), do: "⊘"
++  defp suppressed_or(%{"suppressed" => true, "reason" => reason}), do: "⊘ (#{reason})"
+   defp suppressed_or(v), do: to_string(v)
+ end

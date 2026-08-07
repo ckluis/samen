@@ -104,6 +104,17 @@ defmodule Samen.Web.Operator.Live do
           </:icon>
         </.nav_item>
         <%!--
+          WS-J fleet cockpit (ADR-044, T84b) — a TOP-LEVEL tier-1/2 platform surface (unlike
+          Deliverability/Automation/Activity below, which are per-tenant drill-ins with no
+          top-level index). Rendered ONLY on a `fleet_cockpit: true` mount (§6.3's `roles[:fleet]`
+          gate runs inside `FleetLive` itself; this nav item is chrome, not the gate).
+        --%>
+        <.nav_item :if={Mount.label(@mount, :fleet_cockpit, false)} label="Fleet" href="/operator/fleet" active={@active == :fleet}>
+          <:icon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
+          </:icon>
+        </.nav_item>
+        <%!--
           T149 P1 — the Deliverability / Automation / Activity items are REMOVED from the
           top-level operator nav. Each is a per-TENANT drill-in (`/operator/deliverability/:org_id`,
           `/operator/automation/:org_id`, `/operator/activity/:org_id`) with NO top-level index

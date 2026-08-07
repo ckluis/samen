@@ -6,12 +6,15 @@
 # TEST_FILES: test/fleet/resolution_test.exs
 # MUST_FAIL: an unrecognized tuple
 diff --git a/samen_core/lib/samen/fleet/resolution.ex b/samen_core/lib/samen/fleet/resolution.ex
+index 842ceb6..599748a 100644
 --- a/samen_core/lib/samen/fleet/resolution.ex
 +++ b/samen_core/lib/samen/fleet/resolution.ex
-@@ -79,5 +79,5 @@
+@@ -79,7 +79,7 @@ defmodule Samen.Fleet.Resolution do
      if Enum.all?(set, &is_binary/1), do: {:accounts, set}, else: :none
    end
  
 -  def validate_scope(_), do: :none
 +  def validate_scope(other), do: other
- end
+ 
+   # ===========================================================================
+   # T84 — the REAL reader over the assignment resource (ruling R-A, §16.5 #1)

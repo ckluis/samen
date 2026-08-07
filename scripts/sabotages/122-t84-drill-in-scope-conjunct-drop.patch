@@ -1,0 +1,30 @@
+# SABOTAGE: T84 (ADR-044 s16.4a, ruling R-B / RP-J-16). The per-tenant drill-in gate composes
+# the R-B ACCOUNT-SCOPE conjunct: Samen.Web.Operator.Impersonation.scope_denied?/3 denies a
+# scoped-out operator (:out_of_scope) BEFORE the reason form, in addition to the T146 role and
+# T150 session conjuncts. Dropping the conjunct (forcing it false) lets a scoped-out operator
+# walk into any drill-in - visibility strictly weaker than access, the incoherence R-B closes.
+# The positive controls (:all admin, in-scope operator) stay green, so the flip is non-vacuous.
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_scope_gate_test.exs
+# MUST_FAIL: is :out_of_scope on EVERY drill-in
+# MUST_FAIL: a scoped-out account stays :out_of_scope
+diff --git a/samen_web/lib/samen/web/operator/impersonation.ex b/samen_web/lib/samen/web/operator/impersonation.ex
+index 817938e..05b411d 100644
+--- a/samen_web/lib/samen/web/operator/impersonation.ex
++++ b/samen_web/lib/samen/web/operator/impersonation.ex
+@@ -185,11 +185,10 @@ defmodule Samen.Web.Operator.Impersonation do
+   # (the no-lockout / fleet-independent property, §16.4a). `scope_of/2` itself fails closed to
+   # `:none` on any error, so a wired-but-erroring seam denies (mask-by-omission).
+   defp scope_denied?(otp_app, operator_id, org_id) when is_atom(otp_app) and not is_nil(otp_app) do
+-    Samen.Fleet.Resolution.configured?(otp_app) and
+-      not Samen.Fleet.Resolution.in_scope?(
+-        Samen.Fleet.Resolution.scope_of(otp_app, operator_id),
+-        org_id
+-      )
++    # SABOTAGE (T84 R-B): drop the account-scope conjunct - never deny on scope, so a
++    # scoped-out operator walks into any drill-in (visibility weaker than access).
++    _ = {otp_app, operator_id, org_id}
++    false
+   end
+ 
+   defp scope_denied?(_otp_app, _operator_id, _org_id), do: false

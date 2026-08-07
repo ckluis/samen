@@ -65,6 +65,13 @@ defmodule Samen.Web.Chat.ThreadsLive do
     # real, audited `Samen.Impersonation` session for THIS org (deny-on-read), same accountability
     # gate the deliverability/automation/activity drill-ins carry (T150). Tenant plane: not gated.
     case gate(socket, mount, org_id) do
+      :out_of_scope ->
+        socket
+        |> ensure_flash()
+        |> ensure_return_to()
+        |> assign(no_org: false, org_id: org_id, threads: [], expose_identity: false)
+        |> assign(impersonation: :out_of_scope, session_info: nil, open_error: nil)
+
       :denied ->
         socket
         |> ensure_flash()
@@ -94,8 +101,9 @@ defmodule Samen.Web.Chat.ThreadsLive do
   # the chat scope/masking is built from the mount, not the gate actor.
   defp gate(socket, mount, org_id) do
     if operator_plane?(mount) do
-      case Impersonation.gate(gate_operator_id(socket), org_id) do
+      case Impersonation.gate_socket(socket, gate_operator_id(socket), org_id) do
         {:ok, _actor, info} -> {:ok, info}
+        :out_of_scope -> :out_of_scope
         :denied -> :denied
       end
     else
@@ -183,10 +191,17 @@ defmodule Samen.Web.Chat.ThreadsLive do
   @impl true
   def handle_event("open_session", %{"reason" => reason}, socket) do
     org_id = socket.assigns[:org_id]
+    operator_id = gate_operator_id(socket)
 
-    case Impersonation.open(gate_operator_id(socket), socket.assigns[:samen_operator_role], org_id, reason) do
-      {:ok, _session} -> {:noreply, load(socket, org_id)}
-      {:error, why} -> {:noreply, assign(socket, open_error: open_error_copy(why))}
+    # R-B: a scoped-out operator can never mint a session (§16.4a) — refuse before open. Inert
+    # when no product scope is configured.
+    if Impersonation.scope_ok?(socket, operator_id, org_id) do
+      case Impersonation.open(operator_id, socket.assigns[:samen_operator_role], org_id, reason) do
+        {:ok, _session} -> {:noreply, load(socket, org_id)}
+        {:error, why} -> {:noreply, assign(socket, open_error: open_error_copy(why))}
+      end
+    else
+      {:noreply, load(socket, org_id)}
     end
   end
 
@@ -216,7 +231,20 @@ defmodule Samen.Web.Chat.ThreadsLive do
 
         <.acting_as_banner mount={@samen_mount} org_id={@org_id} acting_as={@samen_acting_as} />
 
-        <%= if @impersonation == :denied do %>
+        <%= cond do %>
+          <% @impersonation == :out_of_scope -> %>
+            <div class="wrap">
+              <div class="card" id="out-of-scope" style="padding:22px 20px">
+                <div style="color:var(--red);font-weight:600" id="not-in-scope">
+                  This account is not in your scope.
+                </div>
+                <p style="color:var(--muted);margin:10px 0 0;font-size:13px">
+                  Your operator assignment does not cover this tenant, so its conversations are not
+                  available to you and no impersonation session can be opened for it.
+                </p>
+              </div>
+            </div>
+          <% @impersonation == :denied -> %>
           <div class="wrap">
             <div class="card" id="impersonation-required" style="padding:22px 20px">
               <div style="color:var(--red);font-weight:600" id="no-session">
@@ -244,7 +272,7 @@ defmodule Samen.Web.Chat.ThreadsLive do
               </form>
             </div>
           </div>
-        <% else %>
+          <% true -> %>
           <%= if @no_org do %>
             <.no_org_card mount={@samen_mount} />
           <% else %>

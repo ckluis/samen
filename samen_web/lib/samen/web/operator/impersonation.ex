@@ -94,31 +94,105 @@ defmodule Samen.Web.Operator.Impersonation do
   The deny-on-read GATE for a per-tenant drill-in. Returns:
 
     * `{:ok, actor, session_info}` — an ACTIVE, unexpired, un-suspended impersonation session
-      exists for `(operator_id, org_id)`. `actor` is the REAL impersonation-scope actor
-      (`plane: :operator` + the REAL `session_id` marker, member-equivalent role, NO reveal
-      grant → PII resolves `••••` by default). `session_info` is the tenant-ledger entry
-      (who/why/expiry) for the active session, for the accountability line.
-    * `:denied` — no active session (never opened / closed / expired mid-flight / operator
-      suspended), a nil operator/org, or an unreachable impersonation repo. Fail closed.
+      exists for `(operator_id, org_id)` AND (when a product scope is configured) the account
+      is IN the operator's scope. `actor` is the REAL impersonation-scope actor (`plane:
+      :operator` + the REAL `session_id` marker, member-equivalent role, NO reveal grant → PII
+      resolves `••••` by default). `session_info` is the tenant-ledger entry (who/why/expiry).
+    * `:out_of_scope` — the R-B account-scope conjunct FAILED (§16.4a): the product wires a
+      `:fleet_resolution` seam and `org_id ∉ scope_of(principal, app)`. Checked BEFORE the T150
+      session, so a scoped-out operator is denied at the door and NEVER offered the
+      open-session-with-reason form — opening a session must never be a way to *discover* you
+      lack scope. The caller renders "this account is not in your scope", not the reason form.
+    * `:denied` — in scope (or scope inert) but no active session (never opened / closed /
+      expired mid-flight / operator suspended), a nil operator/org, or an unreachable repo.
+      Fail closed. The caller renders the open-session-with-reason form.
 
-  Rebuild this on EVERY request (mount + handle_params) so an expired session denies
-  mid-flight — the kernel checks expiry per request, not per open.
+  ## The R-B scope conjunct (ADR-044 §16.4a — the drill-in door)
+
+  `may_drill_in? := T146 role AND (org_id ∈ scope_of/2) AND T150 session` — three ADDITIVE
+  conjuncts, scope ADDED never substituting. T146 is enforced upstream (the `:require_operator`
+  `on_mount` + the drill-in's own role check); this gate composes the SCOPE and T150 conjuncts.
+
+  The scope test is KEYLESS `org_id` membership (`Samen.Fleet.Resolution.in_scope?/2`): the URL
+  already carries the `org_id` and `scope_of/2` returns `org_id`s — no wire handle, no
+  `fleet_subject_key` HMAC (that is the cockpit-side path only, §16.2).
+
+  **`gate/3` is fleet-independent + no-lockout.** The scope conjunct engages ONLY when the
+  product has a `:fleet_resolution` seam configured (`Resolution.configured?/1`). A product with
+  NO seam — no fleet, a separately-deployed fleet, or a product that never adopted scoping —
+  gets the pre-Amendment behaviour exactly (T146 + T150 only): `:all`-equivalent, never
+  locked out of its OWN drill-ins. Cross-origin fleet unavailability is NOT a scope answer and
+  never reaches this product-local gate (§16.2 boxed note). `gate/2` is `gate/3` with `nil`
+  `otp_app` → scope permanently inert (the unchanged legacy call).
+
+  Rebuild this on EVERY request (mount + handle_params) so an expired session — or a revoked
+  assignment — denies mid-flight; the kernel + the scope seam are both re-read per request.
   """
   @spec gate(String.t() | nil, String.t() | nil) ::
-          {:ok, map(), map() | nil} | :denied
-  def gate(operator_id, org_id) when is_binary(operator_id) and is_binary(org_id) do
-    case Samen.Impersonation.scope(operator_id, org_id) do
-      {:ok, %Samen.Scope{actor: actor}} ->
-        {:ok, actor, active_entry(operator_id, org_id)}
+          {:ok, map(), map() | nil} | :denied | :out_of_scope
+  def gate(operator_id, org_id), do: gate(operator_id, org_id, nil)
 
-      {:error, _reason} ->
-        :denied
+  @spec gate(String.t() | nil, String.t() | nil, atom() | nil) ::
+          {:ok, map(), map() | nil} | :denied | :out_of_scope
+  def gate(operator_id, org_id, otp_app) when is_binary(operator_id) and is_binary(org_id) do
+    # R-B scope conjunct FIRST (§16.4a ordering: scope before the reason form). When no
+    # product scope is configured the conjunct is inert (no-lockout) and this is `false`.
+    if scope_denied?(otp_app, operator_id, org_id) do
+      :out_of_scope
+    else
+      case Samen.Impersonation.scope(operator_id, org_id) do
+        {:ok, %Samen.Scope{actor: actor}} ->
+          {:ok, actor, active_entry(operator_id, org_id)}
+
+        {:error, _reason} ->
+          :denied
+      end
     end
   rescue
     _ -> :denied
   end
 
-  def gate(_operator_id, _org_id), do: :denied
+  def gate(_operator_id, _org_id, _otp_app), do: :denied
+
+  @doc """
+  `gate/3` with `otp_app` derived from the drill-in socket's mount (`Samen.Web.Operator.otp_app/1`)
+  — the call every per-tenant drill-in LiveView uses so the R-B scope conjunct engages for the
+  product the mount belongs to. Inert (identical to the pre-Amendment `gate/2`) for any product
+  that wires no `:fleet_resolution` seam.
+  """
+  @spec gate_socket(Phoenix.LiveView.Socket.t(), String.t() | nil, String.t() | nil) ::
+          {:ok, map(), map() | nil} | :denied | :out_of_scope
+  def gate_socket(socket, operator_id, org_id) do
+    gate(operator_id, org_id, Operator.otp_app(socket.assigns[:samen_mount]))
+  end
+
+  @doc """
+  Is `(operator_id, org_id)` within the operator's account scope for this drill-in socket's
+  product? `true` when the account is in scope OR no product scope is configured (inert /
+  no-lockout). The R-B pre-check a drill-in open handler consults so a scoped-out open is
+  refused before a session row is minted — independent of whether the open path keys on the
+  same operator id as the gate.
+  """
+  @spec scope_ok?(Phoenix.LiveView.Socket.t(), String.t() | nil, String.t() | nil) :: boolean()
+  def scope_ok?(socket, operator_id, org_id) when is_binary(operator_id) and is_binary(org_id) do
+    not scope_denied?(Operator.otp_app(socket.assigns[:samen_mount]), operator_id, org_id)
+  end
+
+  def scope_ok?(_socket, _operator_id, _org_id), do: true
+
+  # The R-B scope conjunct: the product wires a `:fleet_resolution` seam AND the account is
+  # NOT in the operator's scope. Inert (`false`) whenever no seam is configured for `otp_app`
+  # (the no-lockout / fleet-independent property, §16.4a). `scope_of/2` itself fails closed to
+  # `:none` on any error, so a wired-but-erroring seam denies (mask-by-omission).
+  defp scope_denied?(otp_app, operator_id, org_id) when is_atom(otp_app) and not is_nil(otp_app) do
+    Samen.Fleet.Resolution.configured?(otp_app) and
+      not Samen.Fleet.Resolution.in_scope?(
+        Samen.Fleet.Resolution.scope_of(otp_app, operator_id),
+        org_id
+      )
+  end
+
+  defp scope_denied?(_otp_app, _operator_id, _org_id), do: false
 
   @doc """
   Open an impersonation session for `(operator_id, org_id)` WITH A REQUIRED `reason` — the
@@ -142,11 +216,25 @@ defmodule Samen.Web.Operator.Impersonation do
   @doc """
   Open a session directly from a drill-in socket (its `:samen_operator_id` /
   `:samen_operator_role` / `:org_id` assigns) — the `handle_event("open_session", …)` helper.
+
+  Belt-and-suspenders on the R-B scope conjunct: even though a scoped-out operator is never
+  SHOWN the reason form (the gate returns `:out_of_scope` first), the `open_session` event is
+  reachable via a crafted `phx-submit`, so scope is RE-CHECKED here — a scoped-out open is
+  refused `{:error, :out_of_scope}` and no session row is ever minted (§16.4a: scope subtracts,
+  never adds; opening a session is not a way to acquire scope). Inert when no product scope is
+  configured (no-lockout).
   """
   @spec open_from_socket(Phoenix.LiveView.Socket.t(), String.t() | nil, String.t()) ::
           {:ok, Samen.Impersonation.Session.t()} | {:error, term}
   def open_from_socket(socket, org_id, reason) do
-    open(socket.assigns[:samen_operator_id], socket.assigns[:samen_operator_role], org_id, reason)
+    operator_id = socket.assigns[:samen_operator_id]
+    otp_app = Operator.otp_app(socket.assigns[:samen_mount])
+
+    if is_binary(operator_id) and is_binary(org_id) and scope_denied?(otp_app, operator_id, org_id) do
+      {:error, :out_of_scope}
+    else
+      open(operator_id, socket.assigns[:samen_operator_role], org_id, reason)
+    end
   end
 
   @doc "The tenant-visible impersonation ledger for `org_id` (who/why/expiry). Delegates to the kernel."

@@ -126,23 +126,52 @@ defmodule Samen.Web.Router do
       `false`). A host that already wires its own token-blind aggregate (a vertical-shaped
       projection via `aggregate_loader:`) mounts it separately and leaves this `false`, so the
       route is not declared twice.
+    * `:fleet_cockpit` — mount the WS-J fleet cockpit (ADR-044 §5/§7/§9, T84b) on THIS operator
+      mount (default `false`): `/fleet` (tier-1 platform aggregates + the merged T156 cross-
+      tenant health surfaces), `/fleet/:app_id` (tier-2 cohort rows), `/fleet/directives` (J4
+      flag/announcement publish), `/fleet/register` (J1 register/enroll). Rides the SAME
+      `live_session` as every other operator route, so it inherits the T146 `:require_operator`
+      `on_mount` gate (RP-J-12) — there is no separate fleet auth hook to forget. A further
+      `roles[:fleet]` check (ADR-044 §6.3, the J3 args-carrier) runs INSIDE each fleet LiveView's
+      own `mount/3` (role-gated, not session-gated — §5.4's tier-1/2 ladder).
+    * `:fleet_namespace` — the `Samen.Fleet.Scope`-mounted Ash domain the cockpit reads
+      (`Samen.Fleet.read/2`'s `namespace:` opt) — required when `:fleet_cockpit` is `true` and
+      the host's `:fleet` mode is `:manual`/`:heartbeat`; irrelevant (and harmless) for the
+      zero-config `:embedded` default (§8.1).
     * `:session_name`    — override the `live_session` name (default `:samen_operator`).
+
+  ## The tier-2 deep-link RESOLVE routes (always mounted, ADR-044 §5.3)
+
+  `GET #{"{path}"}/deliverability/resolve`, `.../automation/resolve`, `.../activity/resolve` —
+  the handle→org_id lookup a cockpit's tier-2 deep link lands on — are mounted UNCONDITIONALLY
+  (not gated by `:fleet_cockpit`), because ANY product with the drill-in family already mounted
+  can be a resolve TARGET regardless of whether it also hosts a cockpit. Handle resolution is
+  NOT tier-3 access (§16.4a) — it runs behind the SAME T146 `on_mount` this macro always
+  attaches, then redirects to the canonical `:org_id` drill-in, which composes the FULL
+  T146+scope+T150 gate exactly as it does for any other arrival (`Samen.Web.Operator.
+  Impersonation.gate_socket/3`, wired by T84a).
   """
   defmacro samen_operator_routes(namespace, opts \\ []) do
     path = Keyword.get(opts, :path, "/operator")
     session_name = Keyword.get(opts, :session_name, :samen_operator)
     include_aggregate = Keyword.get(opts, :include_aggregate, false)
+    fleet_cockpit = Keyword.get(opts, :fleet_cockpit, false)
+    fleet_namespace = Keyword.get(opts, :fleet_namespace)
 
     quote bind_quoted: [
             namespace: namespace,
             opts: opts,
             path: path,
             session_name: session_name,
-            include_aggregate: include_aggregate
+            include_aggregate: include_aggregate,
+            fleet_cockpit: fleet_cockpit,
+            fleet_namespace: fleet_namespace
           ] do
       operator_labels =
         (Keyword.get(opts, :labels) || %{})
         |> Samen.Web.Router.__operator_labels__(Keyword.get(opts, :operator_org_id))
+        |> Samen.Web.Router.__fleet_namespace_label__(fleet_namespace)
+        |> Samen.Web.Router.__fleet_cockpit_label__(fleet_cockpit)
 
       mount =
         Samen.Web.Mount.new(
@@ -196,23 +225,46 @@ defmodule Samen.Web.Router do
         # the account drill-down's "Automation health →" link. Inherited at
         # 0 vertical LOC; token-blind by construction (no PII column exists on
         # either resource it reads).
+        #
+        # The ADR-044 §5.3 tier-2 deep-link RESOLVE route (T84b) — a STATIC segment that
+        # MUST be declared BEFORE its sibling dynamic `:org_id` route: Phoenix's router
+        # dispatches in DECLARATION ORDER, so a dynamic segment declared first would
+        # capture "resolve" as `org_id` and this literal route would never be reached.
+        # Handle resolution is NOT tier-3 access (§16.4a) — it redirects to the canonical
+        # `:org_id` route right below, which is where the full T146+scope+T150 gate
+        # actually runs (unchanged, T84a-wired).
+        live("#{path}/automation/resolve", Samen.Web.Operator.FleetResolveLive, :automation)
         live("#{path}/automation/:org_id", Samen.Web.Operator.AutomationHealthLive)
         # The R2/T114 per-tenant deliverability drill-down (dogfood-report.md R3 —
         # P4's "why didn't this tenant get their email?" job-test) — the T28/T30
         # delivery/suppression store, scoped to ONE tenant org at a time (the
         # route param), reached from the account drill-down's "Deliverability →"
         # link and from the webhook DLQ's org column. Inherited at 0 vertical LOC.
+        # (Resolve route declared first — see the automation family's comment above.)
+        live("#{path}/deliverability/resolve", Samen.Web.Operator.FleetResolveLive, :deliverability)
         live("#{path}/deliverability/:org_id", Samen.Web.Operator.DeliverabilityLive)
         # The R3/T115 operator activity/audit feed (dogfood-report.md R4 — P4's
         # "what changed in org X in the last 24h?" job-test) — the aud_chain
         # governance tier (incl. T38's impersonation-write rows) merged with
         # T119's versioned change-log, scoped to ONE tenant org at a time (the
         # route param), reached from the account drill-down's "Activity →"
-        # link. Inherited at 0 vertical LOC.
+        # link. Inherited at 0 vertical LOC. (Resolve route declared first — see above.)
+        live("#{path}/activity/resolve", Samen.Web.Operator.FleetResolveLive, :activity)
         live("#{path}/activity/:org_id", Samen.Web.Operator.ActivityLive)
 
         if include_aggregate do
           live("#{path}/aggregate", Samen.Web.Operator.AggregateLive)
+        end
+
+        # WS-J fleet cockpit (ADR-044 §5/§7/§9, T84b) — opt-in via `fleet_cockpit: true`.
+        # Rides this SAME live_session, so RP-J-12 ("no un-gated path") is a property of
+        # the macro itself: every route declared here, cockpit or not, carries the
+        # `:require_operator` on_mount — there is no separate branch that could omit it.
+        if fleet_cockpit do
+          live("#{path}/fleet", Samen.Web.Operator.FleetLive)
+          live("#{path}/fleet/directives", Samen.Web.Operator.FleetDirectivesLive)
+          live("#{path}/fleet/register", Samen.Web.Operator.FleetRegisterLive)
+          live("#{path}/fleet/:app_id", Samen.Web.Operator.FleetDetailLive)
         end
       end
     end
@@ -1436,6 +1488,14 @@ defmodule Samen.Web.Router do
 
   def __operator_labels__(labels, operator_org_id),
     do: Map.put(labels, :operator_org_id, operator_org_id)
+
+  @doc false
+  def __fleet_namespace_label__(labels, nil), do: labels
+  def __fleet_namespace_label__(labels, fleet_namespace), do: Map.put(labels, :fleet_namespace, fleet_namespace)
+
+  @doc false
+  def __fleet_cockpit_label__(labels, false), do: labels
+  def __fleet_cockpit_label__(labels, true), do: Map.put(labels, :fleet_cockpit, true)
 
   @doc false
   def __plane__(opts) do

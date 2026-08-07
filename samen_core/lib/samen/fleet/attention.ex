@@ -14,13 +14,18 @@ defmodule Samen.Fleet.Attention do
 
   @table __MODULE__
 
-  @type entry :: %{kind: atom(), key: String.t(), at: DateTime.t()}
+  @type entry :: %{kind: atom(), key: String.t(), at: DateTime.t(), detail: map()}
 
-  @doc "Raise an attention entry of `kind` for `key` (e.g. an app_id / kid)."
-  @spec raise_entry(atom(), String.t()) :: :ok
-  def raise_entry(kind, key) when is_atom(kind) and is_binary(key) do
+  @doc """
+  Raise an attention entry of `kind` for `key` (e.g. an app_id / kid), with an optional
+  `detail` map (P10, ADR-044 §4.6) carrying the accountable identity — e.g. the operator id
+  that published a directive, or the `fleet_revision`/target of a forged push. Kept in the
+  entry so the cockpit renders *who* alongside *what*, not just a bare signal.
+  """
+  @spec raise_entry(atom(), String.t(), map()) :: :ok
+  def raise_entry(kind, key, detail \\ %{}) when is_atom(kind) and is_binary(key) and is_map(detail) do
     ensure_started()
-    :ets.insert(@table, {{kind, key}, DateTime.utc_now()})
+    :ets.insert(@table, {{kind, key}, DateTime.utc_now(), detail})
     :ok
   end
 
@@ -30,7 +35,7 @@ defmodule Samen.Fleet.Attention do
     ensure_started()
 
     :ets.tab2list(@table)
-    |> Enum.map(fn {{k, key}, at} -> %{kind: k, key: key, at: at} end)
+    |> Enum.map(fn {{k, key}, at, detail} -> %{kind: k, key: key, at: at, detail: detail} end)
     |> Enum.filter(fn entry -> is_nil(kind) or entry.kind == kind end)
   end
 

@@ -6,22 +6,22 @@
 # unbounded -- exactly the live-reproduced hole (an email+card-number string
 # in checks[].name, and 3000-char blobs in activity_counts[].event_kind,
 # both validated :ok).
+# REGENERATED (T84b): P8 restructured the catalog_sentinel clause from an if/else into a
+# cond (adding real closed-catalog MEMBERSHIP alongside shape) -- the sabotage target line
+# shifted. Same guarantee, same intent (unbounded is_binary/is_atom fallback), retargeted.
 # APP: samen_core
 # TEST_FILES: test/fleet_report_schema_test.exs
 # MUST_FAIL: RED: checks[].name carrying PII/free text is rejected
 diff --git a/samen_core/lib/samen/fleet/report/schema.ex b/samen_core/lib/samen/fleet/report/schema.ex
+index ab9b6f8..0c0b1f9 100644
 --- a/samen_core/lib/samen/fleet/report/schema.ex
 +++ b/samen_core/lib/samen/fleet/report/schema.ex
-@@ -336,10 +336,10 @@
-       # T84's `mix samen.verify.fleet_wire`, resolving the real catalog per
-       # vertical) — a STOPGAP bound that closes the unbounded-text hole today.
-       _catalog_sentinel ->
--        if catalog_label?(value) do
-+        if is_binary(value) or is_atom(value) do
-           []
-         else
--          ["#{inspect(name)} = #{inspect(value)} is not a bounded catalog label (^[a-z][a-z0-9_]{0,39}$)"]
-+          ["#{inspect(name)} must be a bounded enum label"]
-         end
-     end
-   end
+@@ -365,7 +365,7 @@ defmodule Samen.Fleet.Report.Schema do
+       # regression for a caller that passes no catalogs.
+       catalog_sentinel ->
+         cond do
+-          not catalog_label?(value) ->
++          not (is_binary(value) or is_atom(value)) ->
+             ["#{inspect(name)} = #{inspect(value)} is not a bounded catalog label (^[a-z][a-z0-9_]{0,39}$)"]
+ 
+           (members = Map.get(catalogs, catalog_sentinel)) not in [nil, []] and

@@ -185,6 +185,10 @@ defmodule Samen.Web.Mount do
   # authorization + name-resolution seams (Samen.Fleet.Authz / Samen.Fleet.Resolution). MUST be
   # whitelisted or a cockpit mount's fleet label is silently dropped at from_session/1 and the gate
   # reads nil (fail-open-LOOKING, not loud) — round-trip pinned by mount_fleet_label_test.exs.
+  #
+  # `fleet_namespace` (T84b, ADR-044 §9.2): the `flags_namespace`-shaped seam carrying the
+  # `Samen.Fleet.Scope`-mounted Ash domain a `fleet_cockpit: true` operator mount reads via
+  # `Samen.Fleet.read/2` — set by `samen_operator_routes(..., fleet_namespace: MyApp.Fleet)`.
   @label_keys ~w(
     crm_namespace crm_path crm_logo_style
     billing_logo_style support_path support_logo_style
@@ -206,6 +210,7 @@ defmodule Samen.Web.Mount do
     login_path spine_sessions
     settings_path plan_labels
     kb_namespace kb_path
+    fleet_namespace fleet_cockpit
   )a
 
   @label_key_strings Map.new(@label_keys, fn k -> {Atom.to_string(k), k} end)
