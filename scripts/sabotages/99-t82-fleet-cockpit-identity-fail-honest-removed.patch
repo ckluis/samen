@@ -1,0 +1,22 @@
+# SABOTAGE: T82 fix-round cockpit_identity fail-honest MED
+# (Samen.Files.Storage.S3 / Samen.Delivery.Smtp class). Bypasses the
+# :fleet_local_credential configuration check entirely, so
+# Samen.Fleet.Registry.cockpit_identity/1 ALWAYS mints/persists into
+# whatever the default (non-durable) LocalCredential impl is, even when
+# no host has explicitly opted in — reintroducing the silent-identity-
+# regeneration-on-restart failure mode.
+# APP: samen_core
+# TEST_FILES: test/fleet_registry_test.exs
+# MUST_FAIL: RED: refuses rather than silently minting a non-durable identity when :fleet_local_credential is unset
+diff --git a/samen_core/lib/samen/fleet/registry.ex b/samen_core/lib/samen/fleet/registry.ex
+--- a/samen_core/lib/samen/fleet/registry.ex
++++ b/samen_core/lib/samen/fleet/registry.ex
+@@ -326,7 +326,7 @@
+   """
+   @spec cockpit_identity(module()) :: {:ok, {binary(), binary()}} | {:error, :not_configured}
+   def cockpit_identity(ns) do
+-    case Application.get_env(:samen_core, :fleet_local_credential) do
++    case :always_configured do
+       nil ->
+         {:error, :not_configured}
+ 

@@ -1,0 +1,28 @@
+# SABOTAGE: T82 RP-J-10 (ADR-044 §4.7/§11, the ADR-014 fail-honest class) — the
+# `GET /fleet/health` unconfigured path (no local fleet credential at all) now
+# returns `{:ok, %Report{}}`-shaped 200 JSON instead of `503` empty, exactly the
+# named mutation: "return {:ok, %Report{}} from the unconfigured path and the
+# named test must fail (the ADR-014 class, per
+# samen_core/test/files_storage_test.exs)". A stub that claims success for work
+# it did not do is the exact lie CLAUDE.md's fail-honest rule forbids.
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_ingress_test.exs
+# MUST_FAIL: RP-J-10: no local credential configured -> 503, empty body
+diff --git a/samen_web/lib/samen/web/fleet/ingress.ex b/samen_web/lib/samen/web/fleet/ingress.ex
+--- a/samen_web/lib/samen/web/fleet/ingress.ex
++++ b/samen_web/lib/samen/web/fleet/ingress.ex
+@@ -23,8 +23,13 @@
+ 
+     case LocalCredential.fetch(host) do
+       {:error, :not_configured} ->
+-        respond(conn, 503, "")
++        report = Samen.Fleet.Report.build(app_id: "11111111-1111-4111-8111-111111111111")
+ 
++        conn
++        |> put_resp_content_type("application/json")
++        |> send_resp(200, Jason.encode!(Samen.Fleet.Report.to_wire(report)))
++        |> halt()
++
+       {:ok, credential} ->
+         raw_body = ""
+ 

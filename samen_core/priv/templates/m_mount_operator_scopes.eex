@@ -49,7 +49,9 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     <%= module %>.Operator.Agent,
     <%= module %>.Operator.Message,
     <%= module %>.Operator.Macro,
-    <%= module %>.Operator.Csat
+    <%= module %>.Operator.Csat,
+    # I6 (T79) — the CSAT request→response loop's single-use survey link.
+    <%= module %>.Operator.CsatSurveyToken
   ]
 
   def up do
@@ -756,6 +758,42 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_csat %>_updated_at, :utc_datetime, null: false)
     end
 
+    # I6 (T79) — the CSAT request→response loop's single-use survey link.
+    create table(:<%= o_csat_token %>_csat_survey_token, primary_key: false) do
+      add(:<%= o_csat_token %>_token_digest, :text, null: false)
+      add(:<%= o_csat_token %>_expires_at, :utc_datetime, null: false)
+      add(:<%= o_csat_token %>_consumed_at, :utc_datetime)
+      add(:<%= o_csat_token %>_sent_at, :utc_datetime)
+
+      add(
+        :<%= o_csat_token %>_ticket_id,
+        references(:<%= o_tick %>_ticket,
+          column: :<%= o_tick %>_id,
+          name: "<%= o_csat_token %>_csat_survey_token_<%= o_csat_token %>_ticket_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(
+        :<%= o_csat_token %>_agent_id,
+        references(:<%= o_agent %>_agent,
+          column: :<%= o_agent %>_id,
+          name: "<%= o_csat_token %>_csat_survey_token_<%= o_csat_token %>_agent_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_csat_token %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_csat_token %>_org_id, :uuid, null: false)
+      add(:<%= o_csat_token %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_csat_token %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create(index(:<%= o_csat_token %>_csat_survey_token, [:<%= o_csat_token %>_token_digest], name: "<%= o_csat_token %>_csat_survey_token_digest_idx"))
+
     catalog_sync(@resources)
   end
 
@@ -763,6 +801,10 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     catalog_sync_down(@resources)
 
     # --- Support (reverse FK order) ---
+    drop(index(:<%= o_csat_token %>_csat_survey_token, [:<%= o_csat_token %>_token_digest], name: "<%= o_csat_token %>_csat_survey_token_digest_idx"))
+    drop(constraint(:<%= o_csat_token %>_csat_survey_token, "<%= o_csat_token %>_csat_survey_token_<%= o_csat_token %>_agent_id_fkey"))
+    drop(constraint(:<%= o_csat_token %>_csat_survey_token, "<%= o_csat_token %>_csat_survey_token_<%= o_csat_token %>_ticket_id_fkey"))
+    drop(table(:<%= o_csat_token %>_csat_survey_token))
     drop(constraint(:<%= o_csat %>_csat, "<%= o_csat %>_csat_<%= o_csat %>_agent_id_fkey"))
     drop(constraint(:<%= o_csat %>_csat, "<%= o_csat %>_csat_<%= o_csat %>_ticket_id_fkey"))
     drop(table(:<%= o_csat %>_csat))

@@ -47,7 +47,7 @@ defmodule Driftwood.OperatorAuthzTest do
     # PROD posture: the gate is ARMED (the exact configuration the exploit was reproduced under).
     Application.put_env(:driftwood, :auth_required?, true)
     # The genuine operator's authority (a production deploy provisions this / swaps it for real
-    # operator Membership rows — see Driftwood.Auth.operator_role/1).
+    # operator Membership rows — see Driftwood.Auth.operator_role/2).
     Application.put_env(:driftwood, :operator_roster, %{@operator_user => :operator_admin})
 
     # Seed the operator book of business so the leaked PII/MRR is actually present to leak.

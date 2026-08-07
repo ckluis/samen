@@ -54,6 +54,13 @@ fail() {
   exit 1
 }
 
+# T75 closing round: a fast header preflight (milliseconds, no git apply, no
+# mix test) — checks EVERY patch's APP/TEST_FILES/MUST_FAIL headers up front,
+# by name, before any patch is applied. Without this, a single patch missing
+# a header (patch 67 shipped this way once) aborts the main loop mid-way and
+# every patch after it silently never runs at all.
+"$REPO_ROOT/scripts/sabotage_lint.sh" || fail "header preflight failed (see above) — no patch was applied"
+
 meta() { # meta <patch> <key> -> values, one per line
   sed -n "s/^# $2: //p" "$1"
 }

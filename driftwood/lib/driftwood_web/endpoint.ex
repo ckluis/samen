@@ -46,7 +46,13 @@ defmodule DriftwoodWeb.Endpoint do
   plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
-    json_decoder: Phoenix.json_library()
+    json_decoder: Phoenix.json_library(),
+    # ADR-044 (T82 fix round): required for POST /fleet/directive's signature
+    # verification (Samen.Web.Fleet.Ingress needs the EXACT signed bytes,
+    # which Plug.Parsers otherwise discards after decoding). Same body_reader
+    # every samen_webhook_routes/1 host wires; harmless for every other route
+    # (it only caches bytes alongside the normal parse).
+    body_reader: {Samen.Web.Webhook.RawBodyReader, :read_body, []}
   )
 
   plug(Plug.MethodOverride)

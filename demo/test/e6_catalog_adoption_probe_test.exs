@@ -122,7 +122,14 @@ defmodule Demo.E6CatalogAdoptionProbeTest do
     {Demo.SupportScope, Demo.SupportScope.Agent, :archivable},
     {Demo.SupportScope, Demo.SupportScope.Sla, :archivable},
     {Demo.SupportScope, Demo.SupportScope.Macro, :archivable},
-    {Demo.SupportScope, Demo.SupportScope.Csat, {:excluded, :ledger}}
+    {Demo.SupportScope, Demo.SupportScope.Csat, {:excluded, :ledger}},
+    # T79 (spec §I6): a single-use, expiring, hashed-at-rest secret — the SAME
+    # posture as `Identity.AuthToken`/`Identity.Session` above (`:auth` class),
+    # not a soft-deletable roster item. Reachable only through
+    # `Samen.Scopes.Support.CsatSurvey`'s governed mint/preview/respond
+    # functions; a consumed/expired token is a dead row, not something an
+    # actor archives/restores.
+    {Demo.SupportScope, Demo.SupportScope.CsatSurveyToken, {:excluded, :auth}}
   ]
 
   @scanned_domains [

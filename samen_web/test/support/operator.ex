@@ -66,6 +66,7 @@ defmodule Samen.WebTest.Operator do
       agent: "wqg",
       sla: "wql",
       macro: "wqn",
-      csat: "wqs"
+      csat: "wqs",
+      csat_survey_token: "wco"
     }
 end

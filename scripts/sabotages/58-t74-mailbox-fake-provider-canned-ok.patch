@@ -1,0 +1,34 @@
+# SABOTAGE: T74 (spec §I1 CRM two-way email sync) gate sabotage — defeats the MAILBOX seam's
+# FAIL-HONEST adapter contract (ADR-014/024/026). `Samen.Mailbox.FakeProvider.guarded/4` is the
+# single chokepoint every network-touching callback (connect/disconnect/fetch/send/parse_push)
+# routes through: with no credentials it returns `{:error, :not_configured}` and does NOTHING.
+# This patch drops the `configured?/1` check and runs the ok-branch unconditionally — the exact
+# canned-`{:ok, _}`-for-work-it-did-not-do lie the contract abolishes. An unconfigured mailbox
+# would then report a successful connect, a successful (empty) fetch, and a fake send receipt,
+# so "no provider wired" and "connected, nothing new" become indistinguishable. The CONFIGURED
+# positive controls stay green (they were already taking the ok-branch), so the flip is
+# non-vacuous. Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/mailbox_provider_test.exs
+# MUST_FAIL: EVERY network-touching callback returns {:error, :not_configured}
+# MUST_FAIL: it records NO calls and returns NO fake data when unconfigured
+diff --git a/samen_core/lib/samen/mailbox/fake_provider.ex b/samen_core/lib/samen/mailbox/fake_provider.ex
+--- a/samen_core/lib/samen/mailbox/fake_provider.ex
++++ b/samen_core/lib/samen/mailbox/fake_provider.ex
+@@ -157,13 +157,9 @@
+   # ---------------------------------------------------------------------------
+   # Private
+ 
+-  defp guarded(callback, args, config, ok_fun) do
+-    if configured?(config) do
+-      record_call(callback, args)
+-      ok_fun.()
+-    else
+-      {:error, :not_configured}
+-    end
++  defp guarded(callback, args, _config, ok_fun) do
++    record_call(callback, args)
++    ok_fun.()
+   end
+ 
+   defp record_call(callback, args),

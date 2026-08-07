@@ -1,0 +1,23 @@
+# SABOTAGE: T74 fix round (spec §I1 CRM two-way email sync) — flips the mailbox dedupe check from
+# FAIL-CLOSED back to fail-OPEN. `Samen.Mailbox.Sync.duplicate?/2` is the ONLY thing standing
+# between a re-fetched provider page and a duplicated, customer-visible conversation on a CRM
+# timeline. It answers `{:error, reason}` when the lookup itself raises, and `sync/2` then ABORTS
+# the batch without advancing the cursor. This patch rescues to `{:ok, false}` — "I could not
+# check" silently becomes "not a duplicate", so any transient DB blip re-posts the whole page onto
+# a tenant's contact and company timelines. The happy-path idempotency test stays green (its
+# lookup succeeds), so only the explicit unavailable-lookup control flips. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/mailbox_sync_test.exs
+# MUST_FAIL: FAIL-CLOSED: an unavailable dedupe LOOKUP aborts the batch instead of re-posting
+diff --git a/samen_core/lib/samen/mailbox/sync.ex b/samen_core/lib/samen/mailbox/sync.ex
+--- a/samen_core/lib/samen/mailbox/sync.ex
++++ b/samen_core/lib/samen/mailbox/sync.ex
+@@ -232,7 +232,7 @@
+ 
+     {:ok, hit?}
+   rescue
+-    e -> {:error, Exception.message(e)}
++    _ -> {:ok, false}
+   end
+ 
+   # Primary anchor precedence: person ▸ company (matching ADR-041 §5.1's CRM

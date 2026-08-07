@@ -1,0 +1,27 @@
+# SABOTAGE: T82 fix-round BLOCKER-2, hole (b) (ADR-044 §5.2/INV-2, ATK-6).
+# Reverts the closed-catalog fields (checks[].name, mrr_by_tier[].tier,
+# oban[].queue, activity_counts[].event_kind, cohorts' activity[].event_kind)
+# from a bounded ^[a-z][a-z0-9_]{0,39}$ label check back to the pre-fix
+# is_binary(value) or is_atom(value) fall-through -- i.e. ANY string/atom,
+# unbounded -- exactly the live-reproduced hole (an email+card-number string
+# in checks[].name, and 3000-char blobs in activity_counts[].event_kind,
+# both validated :ok).
+# APP: samen_core
+# TEST_FILES: test/fleet_report_schema_test.exs
+# MUST_FAIL: RED: checks[].name carrying PII/free text is rejected
+diff --git a/samen_core/lib/samen/fleet/report/schema.ex b/samen_core/lib/samen/fleet/report/schema.ex
+--- a/samen_core/lib/samen/fleet/report/schema.ex
++++ b/samen_core/lib/samen/fleet/report/schema.ex
+@@ -336,10 +336,10 @@
+       # T84's `mix samen.verify.fleet_wire`, resolving the real catalog per
+       # vertical) — a STOPGAP bound that closes the unbounded-text hole today.
+       _catalog_sentinel ->
+-        if catalog_label?(value) do
++        if is_binary(value) or is_atom(value) do
+           []
+         else
+-          ["#{inspect(name)} = #{inspect(value)} is not a bounded catalog label (^[a-z][a-z0-9_]{0,39}$)"]
++          ["#{inspect(name)} must be a bounded enum label"]
+         end
+     end
+   end

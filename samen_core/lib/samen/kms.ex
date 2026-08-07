@@ -144,21 +144,32 @@ defmodule Samen.Kms do
     Application.get_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
   end
 
-  # ADR-035 §4.1 — the reserved synthetic subject set. Currently exactly one:
-  # "sys:bidx", the blind-index HMAC purpose key (Samen.Auth.BlindIndex). Adding a
-  # future reserved subject is a one-line append here — every caller routes through
-  # `shred/1` below, so the refusal is structural, not per-caller discipline.
+  # ADR-035 §4.1 — the reserved synthetic subject set. "sys:bidx" is the blind-index
+  # HMAC purpose key (Samen.Auth.BlindIndex). Adding a future FIXED reserved subject
+  # is a one-line append here — every caller routes through `shred/1` below, so the
+  # refusal is structural, not per-caller discipline.
   @reserved_subjects MapSet.new(["sys:bidx"])
+
+  # ADR-044 §16.2 (T82) — the fleet's PER-PRODUCT `fleet_subject_key(app_id)` HMAC
+  # purpose keys, one per registered app, namespaced "flt:subject:<app_id>". Same
+  # class as "sys:bidx": a purpose key gating a shared per-product mechanism (every
+  # tenant's fleet_handle in that product), never a real PII subject — shredding one
+  # would break the whole product's handle relation, not destroy one subject's data.
+  # A PREFIX match (not a fixed set) because app_id is per-app, not enumerable here.
+  @reserved_subject_prefixes ["flt:subject:"]
 
   @doc """
   Whether `subject_id` is a RESERVED SYNTHETIC subject (ADR-035 §4.1) — a KMS-purpose
-  key, never a real PII subject. `"sys:bidx"` is the blind-index HMAC key; it is
-  provisioned like any other subject (`generate_subject_key/1` / `unwrap/1`) but is
-  never a valid `shred/1` target (see below).
+  key, never a real PII subject. `"sys:bidx"` is the blind-index HMAC key; every
+  `"flt:subject:<app_id>"` id (ADR-044 §16.2) is a per-product fleet-handle HMAC key.
+  Both are provisioned like any other subject (`generate_subject_key/1` / `unwrap/1`)
+  but are never a valid `shred/1` target (see below).
   """
   @spec reserved_subject?(subject_id) :: boolean()
-  def reserved_subject?(subject_id) when is_binary(subject_id),
-    do: MapSet.member?(@reserved_subjects, subject_id)
+  def reserved_subject?(subject_id) when is_binary(subject_id) do
+    MapSet.member?(@reserved_subjects, subject_id) or
+      Enum.any?(@reserved_subject_prefixes, &String.starts_with?(subject_id, &1))
+  end
 
   def reserved_subject?(_), do: false
 

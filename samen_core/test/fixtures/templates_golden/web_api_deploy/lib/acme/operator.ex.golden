@@ -63,6 +63,7 @@ defmodule Acme.Operator do
       agent: "aqg",
       sla: "aql",
       macro: "aqn",
-      csat: "aqs"
+      csat: "aqs",
+      csat_survey_token: "aqt"
     }
 end

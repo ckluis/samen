@@ -86,7 +86,17 @@ defmodule Samen.Scopes.Support.Blueprint do
   # Ticket — the top-level support ticket. Org-scoped. No PII.
   # Carries an SLA deadline (`sla_breach_at`) set at create time.
   # ---------------------------------------------------------------------------
-  defmacro define_ticket(module, otp_app, domain, repo, abbrev, sla_mod, conversation_mod) do
+  defmacro define_ticket(
+             module,
+             otp_app,
+             domain,
+             repo,
+             abbrev,
+             sla_mod,
+             conversation_mod,
+             csat_survey_token_mod,
+             csat_mod
+           ) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -242,6 +252,19 @@ defmodule Samen.Scopes.Support.Blueprint do
           # `:restore` is `:update`-typed, already covered by the default.
           change(Samen.Scopes.Support.CascadeArchive, on: [:destroy])
           change(Samen.Scopes.Support.CascadeRestore)
+
+          # I6 (spec §I6, T79) — CSAT loop trigger: a ticket transitioning INTO
+          # `:resolved` sets `resolved_at` (part of THIS atomic write — closes a
+          # pre-existing gap, `resolved_at` was never actually set by any
+          # sanctioned write path before this task) and, best-effort AFTER the
+          # write's transaction commits, mints + dispatches a CSAT survey. See
+          # `Samen.Scopes.Support.CsatSurveyDispatch` moduledoc for why the send
+          # rides `after_transaction` (never `after_action`, which runs INSIDE
+          # the transaction and would hold it open across a real network send).
+          change(
+            {Samen.Scopes.Support.CsatSurveyDispatch,
+             csat_survey_token: unquote(csat_survey_token_mod), csat: unquote(csat_mod)}
+          )
         end
 
         actions do
@@ -844,6 +867,124 @@ defmodule Samen.Scopes.Support.Blueprint do
             forbid_unless(Samen.Policy.OrgScope)
             forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
             authorize_if(always())
+          end
+        end
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # CsatSurveyToken — I6 (spec §I6, T79): the single-use, expiring, hashed-at-
+  # rest secret that closes the CSAT loop's request→response half. Org-scoped
+  # (unlike Identity.AuthToken, which is org-less — a CSAT survey is always
+  # about ONE org's ticket). Mirrors AuthToken's ADR-035 §4.2 shape
+  # (token_digest / expires_at / consumed_at, default-deny policy, one atomic
+  # `:consume` action) rather than inventing a new single-use-token mechanism —
+  # see `Samen.Scopes.Support.CsatSurvey` moduledoc for why `Samen.Auth.
+  # TokenConsume` itself isn't reused verbatim (it's hardcoded to AuthToken's
+  # `context`-enum shape).
+  # ---------------------------------------------------------------------------
+  defmacro define_csat_survey_token(module, otp_app, domain, repo, abbrev, ticket_mod, agent_mod) do
+    quote do
+      defmodule unquote(module) do
+        @moduledoc """
+        Support.CsatSurveyToken — a single-use, expiring, hashed-at-rest CSAT
+        survey link (I6, T79). No PII: the token itself is an opaque 256-bit
+        secret; `ticket`/`agent` are opaque refs. `sent_at` is set ONLY when
+        `Samen.Delivery.Chokepoint.send/2` genuinely returns `{:ok, _}` — NEVER
+        optimistically at mint time (fail-honest: a blocked/suppressed send
+        leaves `sent_at` nil, an honest "minted, not confirmed sent" state, so
+        an operator inspecting this table can tell a genuinely-delivered survey
+        from one that never left the chokepoint).
+
+        Default-deny policy (same posture as `Identity.AuthToken`) — reachable
+        ONLY through `Samen.Scopes.Support.CsatSurvey`'s governed
+        mint/preview/respond functions, never a raw Ash bypass policy.
+        """
+        use Samen.Resource,
+          otp_app: unquote(otp_app),
+          domain: unquote(domain),
+          data_layer: AshPostgres.DataLayer,
+          authorizers: [Ash.Policy.Authorizer],
+          abbrev: unquote(abbrev)
+
+        postgres do
+          table("#{unquote(abbrev)}_csat_survey_token")
+          repo(unquote(repo))
+        end
+
+        attributes do
+          # SHA-256 digest of the 32-random-byte raw token (`Samen.Auth.
+          # TokenMint.digest/1`). One-way; the raw token is never stored — it
+          # exists only in the transient, non-persisted email content
+          # `Samen.Scopes.Support.CsatSurvey.send_survey/3` renders.
+          attribute(:token_digest, :string, public?: false, allow_nil?: false)
+          attribute(:expires_at, :utc_datetime, public?: false, allow_nil?: false)
+          attribute(:consumed_at, :utc_datetime, public?: false, allow_nil?: true)
+          attribute(:sent_at, :utc_datetime, public?: false, allow_nil?: true)
+        end
+
+        relationships do
+          belongs_to :ticket, unquote(ticket_mod) do
+            public?(false)
+            attribute_type(:uuid)
+            allow_nil?(false)
+          end
+
+          belongs_to :agent, unquote(agent_mod) do
+            public?(false)
+            attribute_type(:uuid)
+            allow_nil?(true)
+          end
+        end
+
+        # F3.5 same-org FK: a survey token may only reference a same-org
+        # ticket/agent. Scoped to `:create` ONLY (`on: [:create]`) — `:consume`/
+        # `:mark_sent` never touch `ticket_id`/`agent_id` (SameOrgFk would be a
+        # runtime no-op for them per its own `fk_being_written?/2` guard), but
+        # leaving it resource-wide would make BOTH actions fail Ash's static
+        # `require_atomic?` check (SameOrgFk's read-then-compare shape cannot be
+        # proven atomic-compatible), which collides with the `strategy:
+        # [:atomic]` `Ash.bulk_update!/4` call `Samen.Scopes.Support.CsatSurvey`
+        # forces on `:consume` (the single-use-consume discipline's whole
+        # point).
+        changes do
+          change({Samen.Policy.SameOrgFk, relationships: [:ticket, :agent]}, on: [:create])
+        end
+
+        actions do
+          defaults([:read, :destroy, create: :*, update: :*])
+
+          # The ONE atomic single-use consume action (mirrors `Identity.
+          # AuthToken`'s `:consume`) — `accept []`, the caller supplies
+          # `consumed_at` as an argument, force-set via `set_attribute`, never
+          # accepted as raw changeset input. Called ONLY through
+          # `Samen.Scopes.Support.CsatSurvey`'s own atomic
+          # `Ash.bulk_update!/4` + `strategy: [:atomic]` consume (the SAME
+          # single-`UPDATE...WHERE...RETURNING` discipline `Samen.Auth.
+          # TokenConsume` uses, hand-fitted to this resource's columns).
+          update :consume do
+            accept([])
+            argument(:consumed_at, :utc_datetime, allow_nil?: false)
+            change(set_attribute(:consumed_at, arg(:consumed_at)))
+          end
+
+          # Set ONLY after a genuine `{:ok, _}` from the delivery chokepoint —
+          # see the moduledoc's fail-honest `sent_at` note.
+          update :mark_sent do
+            accept([])
+            argument(:sent_at, :utc_datetime, allow_nil?: false)
+            change(set_attribute(:sent_at, arg(:sent_at)))
+          end
+        end
+
+        policies do
+          # Same posture as Identity.AuthToken: no actor-reachable read/write.
+          # The governed `Samen.Scopes.Support.CsatSurvey` module calls in with
+          # `authorize?: false` — a public LiveView NEVER touches this
+          # resource's Ash actions directly.
+          policy always() do
+            forbid_if(always())
           end
         end
       end

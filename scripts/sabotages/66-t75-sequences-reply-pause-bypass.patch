@@ -1,0 +1,22 @@
+# SABOTAGE: T75 (spec §I2 reply-detection pause) — the due-scan pipeline
+# (`Samen.Sequences.handle_due/3`) ignores a genuine "yes, this contact replied"
+# answer from `Samen.Sequences.ReplyCheck` and queues the next step anyway. The
+# reply-detection pause is the load-bearing guarantee this patch removes: a
+# contact who has already replied keeps receiving further sequence steps.
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: a reply pauses enrollment A; a no-reply control (same org) proceeds to completion
+diff --git a/samen_core/lib/samen/sequences.ex b/samen_core/lib/samen/sequences.ex
+index 51117ea..4cd3541 100644
+--- a/samen_core/lib/samen/sequences.ex
++++ b/samen_core/lib/samen/sequences.ex
+@@ -208,8 +208,7 @@ defmodule Samen.Sequences do
+ 
+     case ReplyCheck.replied_since?(enrollment.org_id, enrollment.person_id, cutoff) do
+       {:ok, true} ->
+-        transition(enrollment, %{status: :paused, paused_reason: :replied, next_send_at: nil})
+-        :ok
++        queue_step_send(enrollment, sequence_mod, step_send_mod)
+ 
+       {:ok, false} ->
+         queue_step_send(enrollment, sequence_mod, step_send_mod)

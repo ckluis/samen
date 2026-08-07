@@ -1,0 +1,25 @@
+# SABOTAGE: T76 fix round 1, MED-2 — drops the `Enum.reject(&(&1.key == other))` step from
+# `activity_leaderboard/3`, leaving the primitive's own bounded-tail `Other` sentinel
+# (`Samen.Web.Reads.other_key/0`, `:__other__`) eligible to rank alongside real owners. Because
+# ranking sorts by count DESCENDING, the Other slice's arithmetic-remainder value — which can
+# legitimately exceed any single real owner's count once discovery is capped — can rank FIRST:
+# a fabricated "member" (the sentinel atom, not an actual owner_id) topping the leaderboard.
+# Orgs whose activity is fully discovered (no Other tail ever materializes) stay green — exactly
+# why the named test forces discovery capping via a small `discovery_limit: 2` against 4 real
+# owners, engineered so the Other remainder (2) strictly exceeds each real owner's count (1).
+# Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_reporting_test.exs
+# MUST_FAIL: MED-2 FIX: the Other tail sentinel can NEVER appear as a leaderboard row, even when its arithmetic value would outrank every real owner
+diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+--- a/samen_web/lib/samen/web/crm/reads.ex
++++ b/samen_web/lib/samen/web/crm/reads.ex
+@@ -850,8 +850,7 @@
+         # Rank the FULL discovered pool (never the Other sentinel — MED-2) BEFORE truncating to
+         # the display count — this ordering is the whole MED-1 fix: cap comes AFTER rank.
+         ranked =
+           series.points
+-          |> Enum.reject(&(&1.key == other))
+           |> Enum.sort_by(&(-&1.value))
+
+         shown = Enum.take(ranked, top)

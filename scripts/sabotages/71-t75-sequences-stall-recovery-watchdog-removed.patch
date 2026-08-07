@@ -1,0 +1,26 @@
+# SABOTAGE: T75 fix round MED-2 — reverts the in-flight WATCHDOG fix.
+# `Samen.Sequences.queue_step_send/3` goes back to clearing `next_send_at` to
+# `nil` while a send is in flight, exactly the pre-fix-round PERMANENT SILENT
+# STALL: if the worker never gets to run (crash, discard, vanished job), the
+# enrollment stays `:active` with `next_send_at: nil` — unselectable by the
+# AshOban `where` clause FOREVER, with no log and no recovery path.
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: the enrollment is NEVER unselectable (next_send_at stays non-nil) and self-heals with NO duplicate StepSend row
+diff --git a/samen_core/lib/samen/sequences.ex b/samen_core/lib/samen/sequences.ex
+index a62c4a7..777a5dd 100644
+--- a/samen_core/lib/samen/sequences.ex
++++ b/samen_core/lib/samen/sequences.ex
+@@ -229,11 +229,7 @@ defmodule Samen.Sequences do
+       else
+         case find_or_create_step_send(step_send_mod, enrollment) do
+           {:ok, send_row} ->
+-            # In-flight: a WATCHDOG next_send_at (MED-2 — NEVER nil) so a
+-            # stalled/crashed worker still gets re-selected + retried by the
+-            # next due-scan cycle. current_step stays put — it only advances
+-            # once resolve_outcome/3 sees a genuine chokepoint outcome.
+-            transition(enrollment, %{next_send_at: in_future(@in_flight_watchdog_seconds, :seconds)})
++            transition(enrollment, %{next_send_at: nil})
+             enqueue_send(enrollment, send_row)
+
+           {:error, reason} ->

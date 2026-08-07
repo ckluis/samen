@@ -1,0 +1,27 @@
+# SABOTAGE: T77 fix round 1, MED-2 (spec §I4 "unfair advantage") — reverts
+# `Samen.Web.AccountHealth.billing_snapshot/2`'s `subscription_status` from the WORST
+# status across EVERY subscription this org holds (`worst_subscription_status/1`) back to
+# the PRE-fix-round-1 "primary" selection: prefer the FIRST active/trialing subscription
+# found, else the last one — i.e. cherry-pick the BEST-looking subscription and ignore
+# every sibling's status entirely. An org with one healthy subscription and one genuinely
+# past_due sibling (no invoice rows needed — the SUBSCRIPTION status alone is dunning-
+# worthy) would render "the worst subscription state on file is 'active' — current, no
+# past-due invoices anywhere in the book" — literally false, and the exact bug the delta
+# verdict's MED-2 finding identified ("an org with active+past_due subs renders billing
+# 1.0 + 'no past-due invoices'"). Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_account_health_test.exs
+# MUST_FAIL: snapshot/2 WORST-OF-N (fix round 1, MED-2): an active sub + a sibling past_due sub reports the WORST status, never the best one
+# MUST_FAIL: FIRST-CLIENT WORST-OF-N (fix round 1, MED-2): CompanyLive never claims the book is current when a sibling subscription is past due
+diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web/account_health.ex
+--- a/samen_web/lib/samen/web/account_health.ex
++++ b/samen_web/lib/samen/web/account_health.ex
+@@ -383,7 +383,7 @@ defmodule Samen.Web.AccountHealth do
+       active_subs: metrics.active_subs,
+       # Fix round 1, MED-2 — the WORST status across EVERY subscription this org
+       # holds, never a cherry-picked "primary" (best) one.
+-      subscription_status: worst_subscription_status(subs),
++      subscription_status: (Enum.find(subs, &(&1.status in [:active, :trialing])) || List.last(subs)) |> then(&(&1 && &1.status)),
+       past_due: past_due_summary(invoices, now)
+     }
+   rescue

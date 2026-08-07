@@ -256,6 +256,78 @@ defmodule Samen.Web.Router do
   end
 
   @doc """
+  Mount the **reporting side** of the fleet (ADR-044 §3.2/§4.4a/§9.1, WS-J J1) —
+  `GET /fleet/health` + `POST /fleet/directive`. Every product mounts this,
+  INCLUDING a fleet cockpit (§9.2: "two lines to report"). ≈0-LOC adoption:
+
+      import Samen.Web.Router
+
+      samen_fleet_routes(otp_app: :my_app)
+
+  The `POST /fleet/directive` receiver needs the exact signed bytes, so the
+  host's endpoint must wire the SAME raw-body reader the webhook ingress uses:
+
+      plug Plug.Parsers,
+        parsers: [:urlencoded, :json],
+        body_reader: {Samen.Web.Webhook.RawBodyReader, :read_body, []},
+        json_decoder: Jason
+
+  ## Options
+
+    * `:otp_app` — required. The `Application.get_env(otp_app, ...)`
+      namespace `Samen.Fleet.mode/1` and `Samen.Fleet.LocalCredential` read.
+    * `:path` — the route path prefix (default `/fleet`).
+  """
+  defmacro samen_fleet_routes(opts) do
+    otp_app = Keyword.fetch!(opts, :otp_app)
+    path = Keyword.get(opts, :path, "/fleet")
+
+    quote bind_quoted: [otp_app: otp_app, path: path] do
+      fleet_opts = [otp_app: otp_app]
+
+      get("#{path}/health", Samen.Web.FleetController, :health, private: %{samen_fleet: fleet_opts})
+
+      post("#{path}/directive", Samen.Web.FleetController, :directive,
+        private: %{samen_fleet: fleet_opts}
+      )
+    end
+  end
+
+  @doc """
+  Mount the **cockpit-side ingest** of the fleet (ADR-044 §4.4a, WS-J J1) —
+  `POST /fleet/enroll` + `POST /fleet/heartbeat`. Only a fleet COCKPIT mounts
+  this (§3.1). ≈0-LOC adoption on whichever product hosts the cockpit:
+
+      import Samen.Web.Router
+
+      samen_fleet_ingest_routes(namespace: MyApp.Fleet)
+
+  `namespace` is a `Samen.Fleet.Scope`-mounted Ash domain (see that module).
+  Needs the SAME raw-body reader `samen_fleet_routes/1` documents.
+
+  ## Options
+
+    * `:namespace` — required. The Ash domain `Samen.Fleet.Registry` operates over.
+    * `:path` — the route path prefix (default `/fleet`).
+  """
+  defmacro samen_fleet_ingest_routes(opts) do
+    namespace = Keyword.fetch!(opts, :namespace)
+    path = Keyword.get(opts, :path, "/fleet")
+
+    quote bind_quoted: [namespace: namespace, path: path] do
+      fleet_ingest_opts = [namespace: namespace]
+
+      post("#{path}/enroll", Samen.Web.FleetIngressController, :enroll,
+        private: %{samen_fleet_ingest: fleet_ingest_opts}
+      )
+
+      post("#{path}/heartbeat", Samen.Web.FleetIngressController, :heartbeat,
+        private: %{samen_fleet_ingest: fleet_ingest_opts}
+      )
+    end
+  end
+
+  @doc """
   Mount the FLAGSHIP cross-plane realtime CHAT (ADR-012 §6.3) — the `/chat` inbox + `/chat/:id`
   room — over a host's materialized `Samen.Scopes.Chat` resources. A tenant chat and a
   SaaS-desk chat are the SAME LiveViews on different planes.
@@ -1390,7 +1462,9 @@ defmodule Samen.Web.Router do
       {"#{path}/gallery", Samen.Web.CRM.ContactsGalleryLive},
       {"#{path}/pipeline", Samen.Web.CRM.PipelineLive},
       {"#{path}/calendar", Samen.Web.CRM.CalendarLive},
-      {"#{path}/dashboard", Samen.Web.CRM.DashboardLive}
+      {"#{path}/dashboard", Samen.Web.CRM.DashboardLive},
+      # T74 §I1 — the two-way email-sync connect seam + its HONEST empty state.
+      {"#{path}/mailbox", Samen.Web.CRM.MailboxLive}
     ]
   end
 
@@ -1412,7 +1486,46 @@ defmodule Samen.Web.Router do
   def __routes__(:support, path) do
     [
       {"#{path}", Samen.Web.Support.TicketsLive},
-      {"#{path}/tickets/:id", Samen.Web.Support.TicketLive}
+      {"#{path}/tickets/:id", Samen.Web.Support.TicketLive},
+      # T78 (spec §I5) — the agent-facing KB surface (browse/author articles, list +
+      # edit-modal — the `Samen.Web.Flags.SettingsLive` single-page shape). Reads
+      # the host's CMS namespace via the `:kb_namespace` mount label (the
+      # `flags_namespace`/`crm_namespace` sibling-mount seam); the honest "KB not
+      # adopted" empty state renders when a host hasn't wired the label.
+      {"#{path}/kb", Samen.Web.Support.KbLive}
+    ]
+  end
+
+  # T78 (spec §I5) — the UNAUTHENTICATED tenant-portal route table: KB browse +
+  # search (self-serve deflection) + a draft-ticket form that surfaces matching
+  # articles BEFORE submit. Mounted DIRECTLY at the host's CMS namespace (no
+  # Support needed — the portal never touches `Ticket`). A host wires this in a
+  # PUBLIC router scope (no auth pipeline/on_mount), the same posture as
+  # `samen_auth_routes` — never `samen_operator_routes`'s auth-gated one:
+  #
+  #     scope "/", DriftwoodWeb do
+  #       pipe_through :browser
+  #       samen_module_routes :kb, Driftwood.Cms, repo: Driftwood.Repo, path: "/portal"
+  #     end
+  def __routes__(:kb, path) do
+    [
+      {"#{path}/:org", Samen.Web.Support.PortalKbLive}
+    ]
+  end
+
+  # T79 (spec §I6) — the UNAUTHENTICATED CSAT survey-response route table:
+  # a single-use tokenized link (`GET /support/csat/:token`) mounted DIRECTLY
+  # at the host's Support namespace (the token match IS the entire
+  # authorization surface — org/ticket are derived FROM it, never a URL/
+  # session org param). Mounted the SAME public posture as `:kb`:
+  #
+  #     scope "/", DriftwoodWeb do
+  #       pipe_through :browser
+  #       samen_module_routes :csat, Driftwood.Support, repo: Driftwood.Repo
+  #     end
+  def __routes__(:csat, path) do
+    [
+      {"#{path}/:token", Samen.Web.Support.CsatRespondLive}
     ]
   end
 
@@ -1524,6 +1637,10 @@ defmodule Samen.Web.Router do
   defp default_path(:search), do: "/search"
   defp default_path(:settings), do: "/settings"
   defp default_path(:automation), do: "/automation"
+  # T78 (spec §I5) — the unauthenticated tenant-portal path.
+  defp default_path(:kb), do: "/portal"
+  # T79 (spec §I6) — the unauthenticated CSAT survey-response path.
+  defp default_path(:csat), do: "/support/csat"
 
   defp session_name(kind, path) do
     :"samen_#{kind}_#{path |> String.replace(~r/[^a-zA-Z0-9]/, "_") |> String.trim("_")}"

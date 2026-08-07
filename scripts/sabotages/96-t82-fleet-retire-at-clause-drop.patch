@@ -1,0 +1,20 @@
+# SABOTAGE: T82 fix-round UNPINNED-INVARIANT (ii) (ADR-044 §4.5 'both
+# accepted until retire_at' / §4.6 matrix row 'retired key version -> 401,
+# control: inside overlap window -> 204'). Removes the not_nil_and_passed?
+# retire_at cond clause from Registry.lookup_current_heartbeat_credential/4,
+# so a RETIRED key version is accepted indefinitely (no rotation overlap
+# window enforcement at all).
+# APP: samen_core
+# TEST_FILES: test/fleet_registry_test.exs
+# MUST_FAIL: UNPINNED-INVARIANT (ii): a RETIRED key version is rejected on the next heartbeat, in-window one still works — red + control
+diff --git a/samen_core/lib/samen/fleet/registry.ex b/samen_core/lib/samen/fleet/registry.ex
+--- a/samen_core/lib/samen/fleet/registry.ex
++++ b/samen_core/lib/samen/fleet/registry.ex
+@@ -374,7 +374,6 @@
+     case Ash.read(query, authorize?: false) do
+       {:ok, [credential]} ->
+         cond do
+-          not_nil_and_passed?(credential.retire_at) -> {:error, :retired}
+           true -> {:ok, credential}
+         end
+ 

@@ -159,6 +159,39 @@ defmodule Samen.AI.Embeddings do
     end
   end
 
+  @doc """
+  Whether the CURRENTLY RESOLVED embedder for `search/3` / `embed_field/6` self-declares as
+  simulated (T78, mirroring T152's `%Samen.AI.Completion{simulated:}` mechanism —
+  `Samen.AI.Chokepoint`'s private `simulated_provider?/1`, duplicated here because it is the
+  embeddings lane's own resolution, not the completion lane's). `Samen.AI.Embedder.
+  Deterministic` (the keyless `:test`-only fallback, `unwired_embedder/1` above) self-declares
+  `true` via the optional `Samen.AI.Provider.simulated?/0` callback; a live adapter that omits
+  the callback is treated as LIVE (`false`, fail-honest default). A caller (a KB-suggestion
+  panel, say) uses this to render an honest "simulated ranking" badge next to `search/3` hits
+  instead of presenting keyless hash-distance ranking as if it were real semantic search.
+
+  `{:error, :not_configured}` when unwired outside `:test` — nothing to ask (the caller already
+  has `search/3`'s own `{:error, :not_configured}` to render the honest not-configured state).
+  """
+  @spec embedder_simulated?(keyword()) :: {:ok, boolean()} | {:error, :not_configured}
+  def embedder_simulated?(opts \\ []) do
+    case embedder_for(opts) do
+      {:ok, {module, _config}} -> {:ok, simulated_provider?(module)}
+      {:error, _} = err -> err
+    end
+  end
+
+  # Mirrors `Samen.AI.Chokepoint`'s private `simulated_provider?/1` exactly (T152's mechanism):
+  # a provider that OMITS the optional callback is LIVE by default (fail-honest — never claim a
+  # real provider is simulated, never claim a keyless one is real). Wrapped so a provider whose
+  # `simulated?/0` raises can never crash the caller.
+  defp simulated_provider?(provider) do
+    Code.ensure_loaded?(provider) and function_exported?(provider, :simulated?, 0) and
+      provider.simulated?() == true
+  rescue
+    _ -> false
+  end
+
   # --- deny-by-default allowlist ------------------------------------------------------------
 
   defp declared_embeddable_fields(resource) do

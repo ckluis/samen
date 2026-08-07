@@ -1597,6 +1597,12 @@
           "logical_name": "updated_at",
           "pii": false,
           "type": "UtcDatetime"
+        },
+        {
+          "column_name": "cpt_visibility",
+          "logical_name": "visibility",
+          "pii": false,
+          "type": "Atom"
         }
       ],
       "resource": "Demo.CmsScope.Post",
@@ -2189,6 +2195,72 @@
       ],
       "resource": "Demo.LocationsScope.Location",
       "table_name": "dll_location"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "dsc_agent_id",
+          "logical_name": "agent_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsc_consumed_at",
+          "logical_name": "consumed_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dsc_expires_at",
+          "logical_name": "expires_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dsc_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsc_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dsc_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsc_sent_at",
+          "logical_name": "sent_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dsc_ticket_id",
+          "logical_name": "ticket_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dsc_token_digest",
+          "logical_name": "token_digest",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "dsc_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.SupportScope.CsatSurveyToken",
+      "table_name": "dsc_csat_survey_token"
     },
     {
       "fields": [

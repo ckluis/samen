@@ -199,8 +199,57 @@ defmodule Samen.Abbrev.AllocatorTest do
       # +1 T71 (ADR-043 §6.4 D6/D7): the D7 analytics anti-tautology test fixture's `aac`
       # (`SamenCore.Support.AnalyticsFixture.CleanAggregate`, allocator-reserved under host
       # `samen_core`) → 371, growing the file to 17_297 bytes.
-      assert byte_size(committed) == 17_297
-      assert map_size(R.load()) == 371
+      # +2 T74 (spec §I1 CRM two-way email sync): the samen_web test host's Mailbox
+      # scope mount — `mwc` (`Samen.WebTest.Mailbox.Connection`) and `wmm`
+      # (`Samen.WebTest.Mailbox.MailMessage`), both allocator-reserved under host
+      # `samen_web` → 373, growing the file to 17_396 bytes.
+      # +5 T75 (spec §I2 CRM sequences actually send): the samen_core host's new
+      # Outreach scope fixture (`sos`/`soe`/`sso` — Sequence/Enrollment/StepSend)
+      # plus a second samen_core-level materialization of the T74 Mailbox scope
+      # (`scm`/`smm` — Connection/MailMessage, so the reply-detection test reads
+      # REAL Mailbox.MailMessage rows rather than a third inbound path), all
+      # allocator-reserved under host `samen_core` → 378, growing the file to
+      # 17_696 bytes.
+      # +1 T76 fix round 1 (LOW-1, INV-2 anti-tautology positive control): the
+      # samen_web test host's `wcr` (`Samen.Web.CRMReportingTest.RealAggregateFixture`,
+      # a genuine `use Samen.Aggregate.Resource` module defined in
+      # crm_reporting_test.exs), allocator-reserved under host `samen_web` → 379,
+      # growing the file to 17_760 bytes.
+      # +5 T82 (ADR-044 §4.1, WS-J J1): the samen_core host's fleet registry
+      # blueprint fixture (`SamenCore.Support.FleetFixture`) — `sfa`/`sfc`/`sfe`/
+      # `sfr`/`sfd` (App/Credential/EnrollmentToken/Report/Directive), all
+      # allocator-proposed under host `samen_core` → 384, growing the file to
+      # 18_043 bytes.
+      # +5 T82: the samen_web host's fleet registry HTTP-layer test fixture
+      # (`Samen.WebTest.Fleet`) — `wfa`/`wfc`/`wfe`/`wfr`/`wfd`, allocator-proposed
+      # under host `samen_web` → 389, growing the file to 18_271 bytes.
+      # +6 T78 (spec §I5 helpdesk KB + composer suggestion + deflection): the
+      # samen_web test host's FIRST materialization of the CMS scope
+      # (`Samen.WebTest.Cms`) — `cwp`/`cpw`/`wcb`/`cwm`/`wcn`/`wcs`
+      # (Page/Post/Block/Media/Navigation/SeoMeta), allocator-proposed under host
+      # `samen_web` → 395, growing the file to 18_516 bytes. Only the base six
+      # CMS resources needed reservation here — no NEW article resource: the KB
+      # article IS `Cms.Post` (a `visibility` attribute distinguishes public vs
+      # internal), per the "no parallel article resource" done-criterion.
+      # +3 T78: the E7 `versioned: :snapshot` generated Version resources for
+      # Page/Post/Block on the same fixture — `pcv`/`pvc`/`cvb`
+      # (Cms.Page.Version/Post.Version/Block.Version), allocator-reserved under
+      # host `samen_web` (`AshPaperTrail`'s `CreateVersionResource` transformer
+      # fails compile fail-closed until each is reserved) → 398, growing the file
+      # to 18_658 bytes.
+      # +6 T79 (spec §I6 macros composer palette + CSAT loop closed): the new
+      # `CsatSurveyToken` resource (I6's single-use survey-link token) added to
+      # the Support scope blueprint — mounted on EVERY existing Support host, so
+      # each needed its own fresh allocator-proposed abbrev: `dsc`
+      # (Demo.SupportScope.CsatSurveyToken), `dcs`
+      # (Driftwood.Support.CsatSurveyToken), `dco`
+      # (Driftwood.Operator.CsatSurveyToken), `psc`
+      # (PawChart.Support.CsatSurveyToken), `scw`
+      # (Samen.WebTest.Support.CsatSurveyToken), `wco`
+      # (Samen.WebTest.Operator.CsatSurveyToken) → 404, growing the file to
+      # 18_967 bytes.
+      assert byte_size(committed) == 18_967
+      assert map_size(R.load()) == 404
     end
   end
 

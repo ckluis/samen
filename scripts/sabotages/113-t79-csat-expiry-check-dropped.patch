@@ -1,0 +1,27 @@
+# SABOTAGE: T79 (spec §I6 macros composer palette + CSAT loop closed) — the
+# TOKEN-EXPIRY guarantee on `Samen.Scopes.Support.CsatSurvey.preview/2` (the
+# public redemption page's non-mutating pre-check, `Samen.Web.Support.
+# CsatRespondLive.mount/3`'s only call). This sabotage drops the `expires_at >
+# ^now` conjunct (and the now-unused `now` binding), so an EXPIRED survey
+# token (past its 30-day TTL) still previews as VALID — a customer following
+# a stale link mailed months ago would see the live score form instead of the
+# honest "no longer valid" message. The time-travel guarantee (done-criterion
+# 2's "end-to-end, time-travel").
+# APP: samen_web
+# TEST_FILES: test/samen/web/support_csat_test.exs
+# MUST_FAIL: TIME-TRAVEL: an expired token is honestly invalid
+# APPLY: patch -p1 --no-backup-if-mismatch < scripts/sabotages/113-t79-csat-expiry-check-dropped.patch
+--- a/samen_core/lib/samen/scopes/support/csat_survey.ex
++++ b/samen_core/lib/samen/scopes/support/csat_survey.ex
+@@ -124,10 +124,9 @@
+   @spec preview(mods(), String.t()) :: {:ok, map()} | {:error, :invalid_token}
+   def preview(%{} = mods, raw_token) when is_binary(raw_token) do
+     digest = TokenMint.digest(raw_token)
+-    now = DateTime.utc_now()
+ 
+     mods.csat_survey_token
+-    |> Ash.Query.filter(token_digest == ^digest and is_nil(consumed_at) and expires_at > ^now)
++    |> Ash.Query.filter(token_digest == ^digest and is_nil(consumed_at))
+     |> Ash.Query.ensure_selected([:id, :org_id, :ticket_id, :agent_id, :expires_at, :consumed_at])
+     |> Ash.Query.limit(1)
+     |> Ash.read!(authorize?: false)

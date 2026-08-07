@@ -67,6 +67,16 @@ defmodule Samen.Web.RateLimit do
     # Webhook ingress (ADR-038 §6.3; T19).
     webhook_ingress: {1000, 60_000},
     webhook_bad_sig: {60, 60_000},
+    # Fleet ingress (ADR-044 §4.4a; T82). `:fleet_enroll`/`:fleet_heartbeat` are the
+    # PRE-crypto flood gates (checked/incremented BEFORE credential lookup, keyed on
+    # the presented `kid`/IP whether or not it resolves — the 429-as-existence-oracle
+    # mitigation: byte-identical for known and unknown `kid`). `:fleet_heartbeat_bad_sig`
+    # is the SEPARATE, much smaller bucket signature-INVALID traffic against one `kid`
+    # consumes — so it can never burn that app's real heartbeat budget (the
+    # starvation-DoS mitigation).
+    fleet_enroll: {60, 60_000},
+    fleet_heartbeat: {120, 60_000},
+    fleet_heartbeat_bad_sig: {10, 60_000},
     # Bounded `auth.login_failed` audit counter (ADR-035 §5 taxonomy / ADR-038 §6.4;
     # T103). NOT a rate limit — a bidx-keyed FAILURE counter: every failed attempt bumps
     # it, but the append-only `aud_event` row is emitted only on a window EDGE (the first

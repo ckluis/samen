@@ -36,7 +36,14 @@ defmodule Samen.Web.CRM.ContactLive do
   import Samen.UI
 
   import Samen.Web.CRM.Live,
-    only: [assign_mount: 2, crm_sidebar: 1, writable?: 1, full_name_field: 1]
+    only: [
+      assign_mount: 2,
+      crm_sidebar: 1,
+      writable?: 1,
+      full_name_field: 1,
+      mail_timeline_entries: 1,
+      merge_timeline: 2
+    ]
 
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
@@ -184,6 +191,7 @@ defmodule Samen.Web.CRM.ContactLive do
       contact: nil,
       company_name: nil,
       activities: [],
+      mail: [],
       deals: [],
       active_tab: tab,
       show_edit: false,
@@ -205,14 +213,17 @@ defmodule Samen.Web.CRM.ContactLive do
         end
       end
 
-    {activities, deals, company_name} =
+    {activities, mail, deals, company_name} =
       if contact do
         acts = Reads.activities_for_person(mount, scope, contact_id)
+        # T74 §I1: synced mailbox messages (both directions) share this timeline.
+        # `[]` when no Mailbox scope is mounted — the honest absence.
+        mail = Reads.mail_for_person(mount, scope, contact_id)
         d = if contact.company_id, do: Reads.opportunities_for_company(mount, scope, contact.company_id), else: []
         name = contact.company_id && company_name(mount, scope, contact.company_id)
-        {acts, d, name}
+        {acts, mail, d, name}
       else
-        {[], [], nil}
+        {[], [], [], nil}
       end
 
     tab = Map.get(socket.assigns, :active_tab, "overview")
@@ -226,6 +237,7 @@ defmodule Samen.Web.CRM.ContactLive do
       contact: contact,
       company_name: company_name,
       activities: activities,
+      mail: mail,
       deals: deals,
       active_tab: tab,
       edit_form: contact && edit_form(contact, scope),
@@ -352,7 +364,10 @@ defmodule Samen.Web.CRM.ContactLive do
               <% "activity" -> %>
                 <div class="wrap" id="activity-pane">
                   <div class="card" style="padding:8px 4px 12px">
-                    <.timeline entries={timeline_entries(@activities)} empty="No activity yet — log the first call or note below.">
+                    <.timeline
+                      entries={merge_timeline(timeline_entries(@activities), mail_timeline_entries(@mail))}
+                      empty="No activity yet — log the first call or note below."
+                    >
                       <:composer :if={composer?(@samen_mount)}>
                         {activity_composer(assigns)}
                       </:composer>

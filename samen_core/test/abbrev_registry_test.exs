@@ -169,7 +169,11 @@ defmodule Samen.AbbrevRegistryTest do
                  # ash_paper_trail-generated `Page/Post/Block.Version`, allocator-proposed.
                  "cpv" => "Demo.CmsScope.Page.Version",
                  "cvp" => "Demo.CmsScope.Post.Version",
-                 "cbv" => "Demo.CmsScope.Block.Version"
+                 "cbv" => "Demo.CmsScope.Block.Version",
+                 # T79 (spec §I6 macros composer palette + CSAT loop closed): the
+                 # new `CsatSurveyToken` resource (I6's single-use CSAT
+                 # survey-response link), allocator-proposed.
+                 "dsc" => "Demo.SupportScope.CsatSurveyToken"
                },
                "driftwood" => %{
                  "fmv" => "Driftwood.Marketing.ConsentEvent",
@@ -229,7 +233,13 @@ defmodule Samen.AbbrevRegistryTest do
                  "dwf" => "Driftwood.Automation.Workflow",
                  "drm" => "Driftwood.Automation.Reminder",
                  "des" => "Driftwood.Automation.Escalation",
-                 "dru" => "Driftwood.Automation.Run"
+                 "dru" => "Driftwood.Automation.Run",
+                 # T79 (spec §I6): the new `CsatSurveyToken` resource — driftwood's
+                 # TENANT Support mount, allocator-proposed.
+                 "dcs" => "Driftwood.Support.CsatSurveyToken",
+                 # T79: the operator-book sibling — driftwood's OPERATOR Support
+                 # mount (ADR-010 §8.1), allocator-proposed.
+                 "dco" => "Driftwood.Operator.CsatSurveyToken"
                },
                "pawchart" => %{
                  "vmv" => "PawChart.Marketing.ConsentEvent",
@@ -248,9 +258,23 @@ defmodule Samen.AbbrevRegistryTest do
                  "pll" => "PawChart.Locations.Location",
                  # T48 F6+F7 (SalesOps scope): the pawchart host's Vendor/Lead abbrevs, allocator-proposed.
                  "psv" => "PawChart.SalesOps.Vendor",
-                 "psl" => "PawChart.SalesOps.Lead"
+                 "psl" => "PawChart.SalesOps.Lead",
+                 # T79 (spec §I6): the new `CsatSurveyToken` resource — pawchart's
+                 # Support mount, allocator-proposed.
+                 "psc" => "PawChart.Support.CsatSurveyToken"
                },
                "samen_core" => %{
+                 # T75 (spec §I2 CRM sequences actually send): the new Outreach
+                 # scope's samen_core-level fixture (Sequence/Enrollment/StepSend)
+                 # plus a SECOND materialization of the existing T74 Mailbox scope
+                 # (Connection/MailMessage) so the reply-detection test can prove
+                 # it reads REAL Mailbox.MailMessage rows without a third inbound
+                 # path, all allocator-reserved under host `samen_core`.
+                 "sos" => "SamenCore.Support.OutreachFixture.Sequence",
+                 "soe" => "SamenCore.Support.OutreachFixture.Enrollment",
+                 "sso" => "SamenCore.Support.OutreachFixture.StepSend",
+                 "scm" => "SamenCore.Support.MailboxFixture.Connection",
+                 "smm" => "SamenCore.Support.MailboxFixture.MailMessage",
                  # T67 (ADR-043 §7 D3): the embeddings positive-control fixture.
                  "emb" => "SamenCore.Support.EmbeddingsDomain.Article",
                  # T68 (ADR-043 §7.5 D3): the versioned Prompt resource.
@@ -321,7 +345,15 @@ defmodule Samen.AbbrevRegistryTest do
                  "svc" => "SamenCore.Support.Versioning.Contact",
                  "vcv" => "SamenCore.Support.Versioning.Contact.Version",
                  "svs" => "SamenCore.Support.Versioning.Snapshot",
-                 "vsv" => "SamenCore.Support.Versioning.Snapshot.Version"
+                 "vsv" => "SamenCore.Support.Versioning.Snapshot.Version",
+                 # T82 (ADR-044 §4.1, WS-J J1): the fleet registry blueprint's
+                 # samen_core test fixture mount (`SamenCore.Support.FleetFixture`)
+                 # — the five `flt_*` resources, allocator-proposed.
+                 "sfa" => "SamenCore.Support.FleetFixture.App",
+                 "sfc" => "SamenCore.Support.FleetFixture.Credential",
+                 "sfe" => "SamenCore.Support.FleetFixture.EnrollmentToken",
+                 "sfr" => "SamenCore.Support.FleetFixture.Report",
+                 "sfd" => "SamenCore.Support.FleetFixture.Directive"
                },
                "samen_web" => %{
                  "wmv" => "Samen.WebTest.Marketing.ConsentEvent",
@@ -359,7 +391,49 @@ defmodule Samen.AbbrevRegistryTest do
                  "wol" => "Samen.WebTest.Operator.LoginFailure",
                  # T58 (G10 saved views): the samen_web test host's SavedView abbrev
                  # (the Views scope mount, `Samen.WebTest.Views`), allocator-proposed.
-                 "wvs" => "Samen.WebTest.Views.SavedView"
+                 "wvs" => "Samen.WebTest.Views.SavedView",
+                 # T74 (spec §I1 CRM two-way email sync): the samen_web test host's
+                 # Mailbox.Connection / Mailbox.MailMessage abbrevs — the reference
+                 # adopter of the new `Samen.Scopes.Mailbox`, allocator-proposed.
+                 "mwc" => "Samen.WebTest.Mailbox.Connection",
+                 "wmm" => "Samen.WebTest.Mailbox.MailMessage",
+                 # T76 fix round 1 (LOW-1, INV-2 anti-tautology positive control): a real
+                 # `use Samen.Aggregate.Resource` module defined in
+                 # crm_reporting_test.exs, allocator-proposed.
+                 "wcr" => "Samen.Web.CRMReportingTest.RealAggregateFixture",
+                 # T82 (ADR-044 §4.1, WS-J J1): the samen_web test host's fleet
+                 # registry HTTP-layer test fixture (`Samen.WebTest.Fleet`),
+                 # allocator-proposed.
+                 "wfa" => "Samen.WebTest.Fleet.App",
+                 "wfc" => "Samen.WebTest.Fleet.Credential",
+                 "wfe" => "Samen.WebTest.Fleet.EnrollmentToken",
+                 "wfr" => "Samen.WebTest.Fleet.Report",
+                 "wfd" => "Samen.WebTest.Fleet.Directive",
+                 # T78 (spec §I5 helpdesk KB + composer suggestion + deflection): the
+                 # samen_web test host's FIRST materialization of the CMS scope
+                 # (`Samen.WebTest.Cms`), allocator-proposed. The KB article reuses
+                 # `Cms.Post` (a `visibility` attribute distinguishes public vs
+                 # internal) — no new article resource, but the shared blueprint
+                 # mounts all six CMS resources as a unit.
+                 "cwp" => "Samen.WebTest.Cms.Page",
+                 "cpw" => "Samen.WebTest.Cms.Post",
+                 "wcb" => "Samen.WebTest.Cms.Block",
+                 "cwm" => "Samen.WebTest.Cms.Media",
+                 "wcn" => "Samen.WebTest.Cms.Navigation",
+                 "wcs" => "Samen.WebTest.Cms.SeoMeta",
+                 # T78: the E7 `versioned: :snapshot` generated Version resources
+                 # for Page/Post/Block on the same fixture, allocator-reserved
+                 # (AshPaperTrail's CreateVersionResource transformer fails
+                 # compile fail-closed until each is reserved).
+                 "pcv" => "Samen.WebTest.Cms.Page.Version",
+                 "pvc" => "Samen.WebTest.Cms.Post.Version",
+                 "cvb" => "Samen.WebTest.Cms.Block.Version",
+                 # T79 (spec §I6): the new `CsatSurveyToken` resource — the
+                 # samen_web test host's TENANT Support mount, allocator-proposed.
+                 "scw" => "Samen.WebTest.Support.CsatSurveyToken",
+                 # T79: the operator-book sibling — the samen_web test host's
+                 # OPERATOR Support mount (ADR-010 §8.2), allocator-proposed.
+                 "wco" => "Samen.WebTest.Operator.CsatSurveyToken"
                }
              }
 
@@ -396,7 +470,40 @@ defmodule Samen.AbbrevRegistryTest do
       # +1 in T70 (ADR-043 §6.3 D5) — samen_core host's `sas` (Samen.AI.SupportReplyDraft) = 370.
       # +1 in T71 (ADR-043 §6.4 D6/D7) — samen_core host's `aac`
       # (SamenCore.Support.AnalyticsFixture.CleanAggregate) = 371.
-      assert map_size(Reg.load()) == 371
+      # +2 in T74 (spec §I1 CRM two-way email sync) — the samen_web test host's
+      # `mwc`/`wmm` (Mailbox.Connection / Mailbox.MailMessage, the reference adopter
+      # of the new Mailbox scope), both allocator-reserved under the samen_web host
+      # namespace = 373.
+      # +5 in T75 (spec §I2 CRM sequences actually send) — the samen_core host's
+      # `sos`/`soe`/`sso` (OutreachFixture.Sequence/Enrollment/StepSend, the new
+      # Outreach scope's samen_core-level fixture) and `scm`/`smm`
+      # (MailboxFixture.Connection/MailMessage — a SECOND materialization of the
+      # existing T74 Mailbox scope, mounted in samen_core so the reply-detection
+      # test proves it reads REAL Mailbox.MailMessage rows, never a third inbound
+      # path), all allocator-reserved under the samen_core host namespace = 378.
+      # +1 in T76 fix round 1 (LOW-1, INV-2 anti-tautology positive control) — the
+      # samen_web test host's `wcr` (`Samen.Web.CRMReportingTest.RealAggregateFixture`,
+      # a genuine `use Samen.Aggregate.Resource` module defined in
+      # crm_reporting_test.exs), allocator-reserved under the samen_web host
+      # namespace = 379.
+      # +5 in T82 (ADR-044 §4.1, WS-J J1) — the samen_core host's fleet registry
+      # blueprint fixture (`SamenCore.Support.FleetFixture`), allocator-proposed
+      # = 384.
+      # +5 in T82 — the samen_web host's fleet registry HTTP-layer test fixture
+      # (`Samen.WebTest.Fleet`), allocator-proposed = 389.
+      # +6 in T78 (spec §I5 helpdesk KB + composer suggestion + deflection) — the
+      # samen_web test host's FIRST CMS scope mount (`Samen.WebTest.Cms`) —
+      # `cwp`/`cpw`/`wcb`/`cwm`/`wcn`/`wcs` (Page/Post/Block/Media/Navigation/
+      # SeoMeta), allocator-proposed under the samen_web host namespace = 395.
+      # +3 in T78 — the E7 `versioned: :snapshot` generated Version resources
+      # `pcv`/`pvc`/`cvb` (Page.Version/Post.Version/Block.Version), allocator-
+      # reserved under the samen_web host namespace = 398.
+      # +6 in T79 (spec §I6 macros composer palette + CSAT loop closed) — the new
+      # `CsatSurveyToken` resource added to the Support scope blueprint, mounted
+      # on EVERY existing Support host (each needed its own fresh allocator-
+      # proposed abbrev): `dsc` (demo), `dcs`/`dco` (driftwood tenant/operator),
+      # `psc` (pawchart), `scw`/`wco` (samen_web test tenant/operator) = 404.
+      assert map_size(Reg.load()) == 404
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do

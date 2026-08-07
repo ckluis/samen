@@ -1,0 +1,23 @@
+# SABOTAGE: T76 (spec §I3 CRM reporting) — inverts the sort direction in
+# `Samen.Web.CRM.Reads.activity_leaderboard/3`'s ranking step, from `-&1.value` (DESCENDING
+# by count — rank 1 is the member with the MOST activity) to `&1.value` (ASCENDING — rank 1
+# would be the member with the LEAST activity, or zero). A "leaderboard" that ranks the
+# LEAST-active member first is exactly backwards — done-criterion 1 requires ranks to match
+# hand-computed expected values EXACTLY, and this patch flips every multi-owner leaderboard's
+# rank order. A single-owner org stays green (there is nothing to mis-order). REGENERATED T76
+# fix round 1 (MED-1 rewrite split this pipe: rank-then-cap now happens in two steps, `ranked`
+# then `shown`/`rows` — same sort call, same guarantee, context shifted). Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_reporting_test.exs
+# MUST_FAIL: activity_leaderboard ranks owners by CRM-anchored activity COUNT, descending, EXACT ranks
+diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+--- a/samen_web/lib/samen/web/crm/reads.ex
++++ b/samen_web/lib/samen/web/crm/reads.ex
+@@ -852,6 +852,6 @@
+         ranked =
+           series.points
+           |> Enum.reject(&(&1.key == other))
+-          |> Enum.sort_by(&(-&1.value))
++          |> Enum.sort_by(&(&1.value))
+
+         shown = Enum.take(ranked, top)

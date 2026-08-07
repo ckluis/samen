@@ -56,6 +56,17 @@ defmodule PawChartWeb.Router do
     # reporter dep. Reporter name matches Samen.Observability's default.
     samen_metrics_route(name: :pawchart_prometheus)
 
+    # ADR-044 §3.2/§9.2 (T82 fix round — the ADR §9.3 row (a) two-vertical proof:
+    # "driftwood AND pawchart each mount samen_fleet_routes(), build a report from
+    # their own substrate, and GET /fleet/health returns a schema-valid,
+    # correctly-signed FleetReport for each"). Mode A/B reporting-side routes,
+    # zero-config by default (:embedded honesty floor, J5). §9.3's own note that
+    # pawchart lacks the operator plane (T157) does NOT block this: this macro
+    # is a plain controller pipeline with no operator-plane dependency (§9.3),
+    # so pawchart can report without mounting the operator plane at all. See
+    # `pawchart/test/fleet_wire_test.exs`.
+    samen_fleet_routes(otp_app: :pawchart)
+
     # 1. CRM — clinic contacts, referring vets, labs, vendors.
     samen_module_routes(:crm, PawChart.Crm,
       repo: PawChart.Repo,

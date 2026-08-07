@@ -1,0 +1,29 @@
+# SABOTAGE: T76 fix round 1, MED-1 regression — swaps `activity_leaderboard/3`'s discovery
+# bound from `discovery_limit` (default `Samen.Web.Reads.max_agg_points/0` = 100, a large
+# ranking pool) back to `top` (default `Samen.Web.Reads.default_agg_points/0` = 12, the small
+# DISPLAY count) — reintroducing the exact bug the independent verifier live-repro'd: discovery
+# ASC-sorts candidate owners by uuid and truncates to the cap BEFORE anyone ranks by count, so
+# an org's single most-active member can be silently ABSENT from their own leaderboard whenever
+# their uuid happens to sort late (the verifier's repro: 13 owners, a 99-activity/~80%-of-org
+# top performer whose uuid sorts last vanishes; rank 1 shows a 1-activity owner instead). This
+# patch does NOT touch the shared `aggregate_by!/3` primitive or any other G8 tile — it only
+# collapses `activity_leaderboard/3`'s OWN two-cap design back into one small cap, which is
+# exactly the aggravating bug: cap-then-rank instead of rank-then-cap. Orgs with <= 12 distinct
+# owners stay green (nothing to truncate either way) — exactly why the named test seeds 13.
+# Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_reporting_test.exs
+# MUST_FAIL: MED-1 FIX: the true top performer surfaces at rank 1 even when their uuid sorts LAST among all discovered owners; the display cap is DISCLOSED
+# MUST_FAIL: MED-1 FIX rendered: DashboardLive discloses the cap honestly (never a silently-truncated table)
+diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+--- a/samen_web/lib/samen/web/crm/reads.ex
++++ b/samen_web/lib/samen/web/crm/reads.ex
+@@ -843,7 +843,7 @@
+           task_mod
+           |> Ash.Query.new()
+           |> Ash.Query.filter(not is_nil(owner_id) and subject_key in ^@crm_subject_keys)
+-          |> Samen.Web.Reads.aggregate_by!(:owner_id, scope: scope, max_points: discovery_limit)
++          |> Samen.Web.Reads.aggregate_by!(:owner_id, scope: scope, max_points: top)
+
+         other = Samen.Web.Reads.other_key()
+

@@ -30,6 +30,23 @@ defmodule Samen.Web.CRM.DashboardLive do
 
   The dashboard grid, every stat tile, and every chart's SVG geometry + data table are all in
   the server-rendered DOM — legible with JS off, no external charting CDN.
+
+  ## T76/I3 — conversion, win-rate, activity leaderboard
+
+  Three more G8 tiles, ALL built on the same `Samen.Web.CRM.Reads.crm_dashboard/3` call (no
+  extra round trip): `:rates` (`pipeline_rates/2` — win-rate on a CLOSED-deals basis, conversion
+  on an ALL-CREATED basis; see that function's doc for why the two denominators intentionally
+  differ) rendered as two more `metric/1` tiles, and `:leaderboard`
+  (`activity_leaderboard/3` — org members ranked by CRM-anchored activity volume) rendered via
+  `data_table/1`. Both rates are `nil` (rendered "—") rather than a fabricated `0%` when their
+  denominator is zero (honest-empty), and BOTH tiles disclose their raw denominator alongside
+  the percentage (fix round 1, LOW-3 — symmetric disclosure). The leaderboard's `owner_id` is a
+  plain, structurally non-vaulted uuid (`Task.owner_id` — see `activity_leaderboard/3`'s doc);
+  this tile renders it directly and never calls `Samen.Api.PiiResolution` — there is no vault
+  field on this path. `activity_leaderboard/3` ranks BEFORE capping (fix round 1, MED-1) — this
+  tile renders the `:capped`/`:hidden_owners`/`:hidden_count` disclosure whenever it binds,
+  mirroring `Samen.UI.Map`'s `geo-map-capped` idiom (a visible `data-capped="true"` paragraph,
+  not a silently-truncated table).
   """
   use Phoenix.LiveView
 
@@ -46,7 +63,10 @@ defmodule Samen.Web.CRM.DashboardLive do
     value_by_stage: %Series{points: [], measure: {:sum, :value}, dimension: :pipeline_id},
     by_status: %Series{points: [], measure: :count, dimension: :status},
     closing_over_time: %Series{points: [], measure: :count, dimension: :bucket},
-    stats: %{companies: 0, contacts: 0, open_opps: 0, pipeline_value: nil}
+    stats: %{companies: 0, contacts: 0, open_opps: 0, pipeline_value: nil},
+    # T76/I3 — honest-empty defaults: nil rates (never a fabricated 0%), an empty leaderboard.
+    rates: %{win_rate: nil, conversion_rate: nil, won: 0, lost: 0, open: 0, on_hold: 0},
+    leaderboard: %{rows: [], capped: false, shown: 0, hidden_owners: 0, hidden_count: 0}
   }
 
   @impl true
@@ -116,6 +136,17 @@ defmodule Samen.Web.CRM.DashboardLive do
               <.metric label="Value" value={dollars(@dash.stats.pipeline_value)} sub="open pipeline" />
             </:tile>
 
+            <%!-- T76/I3 — win-rate (closed-deals basis) + conversion-rate (all-created basis).
+                 See Samen.Web.CRM.Reads.pipeline_rates/2 for the two denominators; a nil rate
+                 (no closed/no created deals yet) renders "—", never a fabricated 0%. Fix round
+                 1 LOW-3: both tiles disclose their raw denominator, symmetrically. --%>
+            <:tile title="Win rate">
+              <.metric label="Win rate" value={pct(@dash.rates.win_rate)} sub={"#{@dash.rates.won} won / #{@dash.rates.won + @dash.rates.lost} closed"} />
+            </:tile>
+            <:tile title="Conversion rate">
+              <.metric label="Conversion" value={pct(@dash.rates.conversion_rate)} sub={"#{@dash.rates.won} won / #{@dash.rates.won + @dash.rates.lost + @dash.rates.open + @dash.rates.on_hold} created"} />
+            </:tile>
+
             <:tile title="Pipeline value by stage" span={2}>
               <.bar_chart id="dash-value-by-stage" series={@dash.value_by_stage} format={&money_cents/1} />
             </:tile>
@@ -126,6 +157,38 @@ defmodule Samen.Web.CRM.DashboardLive do
 
             <:tile title="Closing over time" span={2}>
               <.line_chart id="dash-closing-over-time" series={@dash.closing_over_time} />
+            </:tile>
+
+            <%!-- T76/I3 — activity leaderboard: org members ranked by CRM-anchored activity
+                 volume (Samen.Web.CRM.Reads.activity_leaderboard/3). owner_id is a plain,
+                 structurally non-vaulted uuid (see that function's doc) — rendered directly,
+                 never resolved through the vault. Fix round 1 MED-1: ranked BEFORE capped, so
+                 the true top performer always appears; the cap — when it binds — is DISCLOSED
+                 (mirrors Samen.UI.Map's geo-map-capped idiom), never silently swallowed. --%>
+            <:tile title="Activity leaderboard" span={2}>
+              <div id="dash-leaderboard">
+                <%= if @dash.leaderboard.rows == [] do %>
+                  <p class="chart-empty">No activity yet</p>
+                <% else %>
+                  <.data_table>
+                    <:head>
+                      <th>Rank</th>
+                      <th>Owner</th>
+                      <th>Activities</th>
+                    </:head>
+                    <tr :for={row <- @dash.leaderboard.rows} id={"lb-row-#{row.rank}"} data-owner-id={row.owner_id}>
+                      <td>{row.rank}</td>
+                      <td class="ov-name">{owner_label(row.owner_id)}</td>
+                      <td>{row.count}</td>
+                    </tr>
+                  </.data_table>
+                  <p :if={@dash.leaderboard.capped} class="chart-empty" data-capped="true">
+                    Showing the top {@dash.leaderboard.shown} members —
+                    {hidden_owners_text(@dash.leaderboard.hidden_owners)} more member(s),
+                    {@dash.leaderboard.hidden_count} more activities not shown.
+                  </p>
+                <% end %>
+              </div>
             </:tile>
           </.dashboard>
         <% end %>
@@ -150,4 +213,25 @@ defmodule Samen.Web.CRM.DashboardLive do
     do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
 
   defp dollars_cents(_), do: "$0.00"
+
+  # T76/I3 — a rate is a fraction 0.0..1.0 or nil (honest-empty: no closed/created deals
+  # yet). nil renders "—", never a fabricated "0.0%".
+  defp pct(nil), do: "—"
+  defp pct(rate) when is_float(rate) or is_integer(rate),
+    do: "#{:erlang.float_to_binary(rate * 100 / 1, decimals: 1)}%"
+
+  defp pct(_), do: "—"
+
+  # T76/I3 — the leaderboard's owner label. `owner_id` is a plain, non-vaulted uuid (see
+  # `Samen.Web.CRM.Reads.activity_leaderboard/3`'s doc) — there is no name to resolve, so
+  # this renders a short, stable, non-secret id chip. NEVER calls PiiResolution/reveal.
+  defp owner_label(nil), do: "—"
+  defp owner_label(owner_id) when is_binary(owner_id), do: "Member " <> String.slice(owner_id, 0, 8)
+  defp owner_label(other), do: to_string(other)
+
+  # T76/I3 fix round 1 (MED-1) — `hidden_owners` is EXACT when the discovery pool was NOT
+  # capped (the common case), `nil` (honest-unknown, mirrors geo_markers!/3's capped_count
+  # idiom) when it WAS. Never renders a fabricated number either way.
+  defp hidden_owners_text(nil), do: "some"
+  defp hidden_owners_text(n) when is_integer(n), do: to_string(n)
 end

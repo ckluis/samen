@@ -49,7 +49,9 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     Acme.Operator.Agent,
     Acme.Operator.Message,
     Acme.Operator.Macro,
-    Acme.Operator.Csat
+    Acme.Operator.Csat,
+    # I6 (T79) — the CSAT request→response loop's single-use survey link.
+    Acme.Operator.CsatSurveyToken
   ]
 
   def up do
@@ -756,6 +758,42 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqs_updated_at, :utc_datetime, null: false)
     end
 
+    # I6 (T79) — the CSAT request→response loop's single-use survey link.
+    create table(:aqt_csat_survey_token, primary_key: false) do
+      add(:aqt_token_digest, :text, null: false)
+      add(:aqt_expires_at, :utc_datetime, null: false)
+      add(:aqt_consumed_at, :utc_datetime)
+      add(:aqt_sent_at, :utc_datetime)
+
+      add(
+        :aqt_ticket_id,
+        references(:aqk_ticket,
+          column: :aqk_id,
+          name: "aqt_csat_survey_token_aqt_ticket_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(
+        :aqt_agent_id,
+        references(:aqg_agent,
+          column: :aqg_id,
+          name: "aqt_csat_survey_token_aqt_agent_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:aqt_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aqt_org_id, :uuid, null: false)
+      add(:aqt_inserted_at, :utc_datetime, null: false)
+      add(:aqt_updated_at, :utc_datetime, null: false)
+    end
+
+    create(index(:aqt_csat_survey_token, [:aqt_token_digest], name: "aqt_csat_survey_token_digest_idx"))
+
     catalog_sync(@resources)
   end
 
@@ -763,6 +801,10 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     catalog_sync_down(@resources)
 
     # --- Support (reverse FK order) ---
+    drop(index(:aqt_csat_survey_token, [:aqt_token_digest], name: "aqt_csat_survey_token_digest_idx"))
+    drop(constraint(:aqt_csat_survey_token, "aqt_csat_survey_token_aqt_agent_id_fkey"))
+    drop(constraint(:aqt_csat_survey_token, "aqt_csat_survey_token_aqt_ticket_id_fkey"))
+    drop(table(:aqt_csat_survey_token))
     drop(constraint(:aqs_csat, "aqs_csat_aqs_agent_id_fkey"))
     drop(constraint(:aqs_csat, "aqs_csat_aqs_ticket_id_fkey"))
     drop(table(:aqs_csat))

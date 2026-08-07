@@ -118,6 +118,13 @@ defmodule AcmeWeb.Router do
     #    Samen.Observability starts (`:acme_prometheus`).
     samen_metrics_route(name: :acme_prometheus)
 
+    # ADR-044 §9.2 (J5 zero-config honesty) — the framework fleet reporting-side
+    # routes (`GET /fleet/health`, `POST /fleet/directive`). Zero-config by
+    # default (`:embedded` mode: one honest self-row, no credential, no
+    # network) — this is what makes the J5 zero-config probe pass without the
+    # generated app knowing what a fleet is.
+    samen_fleet_routes(otp_app: :acme)
+
     # --- Selected end-user surfaces (--modules files,search,csv,settings,chat) — WS-E framework
     #     macros, mounted over this app's existing mounts at ≈0 authored LOC.
     samen_files_routes(:files, Acme.Primitives, repo: Acme.Repo, labels: @current_org_labels)

@@ -45,6 +45,7 @@ defmodule Driftwood.Support do
       agent: "fsa",
       sla: "fsl",
       macro: "fsn",
-      csat: "fss"
+      csat: "fss",
+      csat_survey_token: "dcs"
     }
 end

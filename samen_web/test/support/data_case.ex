@@ -49,9 +49,13 @@ defmodule Samen.WebTest.DataCase do
 
     # The Marketing mount carries the CRM namespace on its labels so the Leads lens
     # (`Samen.Web.Marketing.LeadsLive`) can derive a CRM-kind mount and read contacts.
+    # T78 (spec §I5): the Support mount carries the CMS namespace (`kb_namespace`, the
+    # `flags_namespace`/`crm_namespace` sibling-mount seam) so the agent-facing KB
+    # surface can derive a `:cms`-kind mount and read/author `Post` (the KB article).
     labels =
       case scope_kind do
         :marketing -> %{crm_namespace: Samen.WebTest.Crm}
+        :support -> %{kb_namespace: Samen.WebTest.Cms}
         _ -> nil
       end
 
@@ -200,4 +204,7 @@ defmodule Samen.WebTest.DataCase do
   # SAME `Samen.WebTest.Automation` direct mount T42's health-view test already uses
   # (test/support/automation.ex) — `Workflow` is the resource this surface touches.
   defp namespace(:automation), do: Samen.WebTest.Automation
+  # T78 (spec §I5) — the public portal mount kind: points DIRECTLY at the CMS
+  # namespace (no Support needed — the portal browses/deflects on `Post` alone).
+  defp namespace(:kb), do: Samen.WebTest.Cms
 end

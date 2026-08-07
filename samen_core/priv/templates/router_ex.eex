@@ -106,7 +106,14 @@ defmodule <%= module %>Web.Router do
     #    route self-gates to 404 until `metrics_egress?` is set (see
     #    config/runtime.exs → SAMEN_METRICS_ENABLED). Name matches the reporter
     #    Samen.Observability starts (`:<%= otp_app %>_prometheus`).
-    samen_metrics_route(name: :<%= otp_app %>_prometheus)<%= module_mounts %>
+    samen_metrics_route(name: :<%= otp_app %>_prometheus)
+
+    # ADR-044 §9.2 (J5 zero-config honesty) — the framework fleet reporting-side
+    # routes (`GET /fleet/health`, `POST /fleet/directive`). Zero-config by
+    # default (`:embedded` mode: one honest self-row, no credential, no
+    # network) — this is what makes the J5 zero-config probe pass without the
+    # generated app knowing what a fleet is.
+    samen_fleet_routes(otp_app: :<%= otp_app %>)<%= module_mounts %>
   end
 
   # ADR-010 — the OPERATOR / SaaS-company workspace, mounted in ONE line over the

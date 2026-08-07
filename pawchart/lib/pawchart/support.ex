@@ -43,6 +43,7 @@ defmodule PawChart.Support do
       agent: "vsd",
       sla: "vse",
       macro: "vsf",
-      csat: "vsg"
+      csat: "vsg",
+      csat_survey_token: "psc"
     }
 end

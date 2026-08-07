@@ -71,6 +71,7 @@ defmodule Driftwood.Operator do
       agent: "dqg",
       sla: "dql",
       macro: "dqn",
-      csat: "dqs"
+      csat: "dqs",
+      csat_survey_token: "dco"
     }
 end

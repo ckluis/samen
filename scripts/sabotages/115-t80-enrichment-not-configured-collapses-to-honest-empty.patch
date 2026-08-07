@@ -1,0 +1,27 @@
+# SABOTAGE: T80 (spec §I8 external enrichment provider seam) gate sabotage — collapses the
+# NOT-CONFIGURED vs HONEST-EMPTY distinction the fail-honest contract requires to stay separate
+# (ADR-014/024/026; docs/guides/enrichment-seam.md "Honest Absence"). `Samen.Enrichment.enrich/2`
+# must return `{:error, :not_configured}` when the provider is not ready — DISTINCT from
+# `{:ok, %{}}`, which means "the provider actually ran and genuinely found nothing." This patch
+# changes the facade's unconfigured branch to return `{:ok, %{}}` instead — a caller can no
+# longer tell "the enrichment provider never ran" from "the provider ran and the external source
+# had no data for this record," which is exactly the lie a UI surface would render as a fully
+# looked-up-but-empty profile for a provider that was never even wired up. The CONFIGURED branch
+# is untouched (still delegates to the provider), so genuinely-configured green paths (seeded
+# and honest-empty-while-configured) stay green — the flip is non-vacuous, isolating only the
+# unconfigured-collapse guarantee. Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/enrichment_test.exs
+# MUST_FAIL: unconfigured provider returns {:error, :not_configured}
+diff --git a/samen_core/lib/samen/enrichment.ex b/samen_core/lib/samen/enrichment.ex
+--- a/samen_core/lib/samen/enrichment.ex
++++ b/samen_core/lib/samen/enrichment.ex
+@@ -17,7 +17,7 @@
+     if provider_mod.configured?(config) do
+       provider_mod.enrich(subject_type, subject_id, config)
+     else
+-      {:error, :not_configured}
++      {:ok, %{}}
+     end
+   end
+

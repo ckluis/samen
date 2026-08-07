@@ -1,0 +1,51 @@
+# SABOTAGE: T80 (spec §I8 external enrichment provider seam) gate sabotage — defeats
+# CAPABILITY GATING (ADR-014/024/026 shape). `Samen.Enrichment.Provider.enrich/3`'s contract
+# requires `{:error, :not_implemented}` — DISTINCT from `{:error, :not_configured}` — when the
+# adapter has not declared the capability the subject type requires (`:person_enrich` /
+# `:company_enrich`, per `capabilities/0`). `Samen.Enrichment.FakeProvider.enrich/3` is the ONE
+# place this is enforced (the facade never inspects `capabilities/0` itself — see
+# scripts/sabotages/114-t80-enrichment-facade-configured-guard-removed.patch and
+# 115-t80-enrichment-not-configured-collapses-to-honest-empty.patch, which sabotage the OTHER
+# two guarantees at the facade layer instead). This patch drops the `required_capability in
+# capabilities()` check and calls `guarded/4` unconditionally — a configured provider with ZERO
+# declared capabilities would now happily "enrich" a subject it explicitly never claimed to
+# support, exactly the undeclared-capability lie the contract forbids. The CONFIGURED-with-
+# capability-declared green paths (seeded Person/Company enrich) are untouched (they already
+# passed the now-removed check), so the flip is non-vacuous — it isolates only the capability
+# gate. Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/enrichment_test.exs
+# MUST_FAIL: fake provider refuses enrich when capability not declared
+diff --git a/samen_core/lib/samen/enrichment/fake_provider.ex b/samen_core/lib/samen/enrichment/fake_provider.ex
+--- a/samen_core/lib/samen/enrichment/fake_provider.ex
++++ b/samen_core/lib/samen/enrichment/fake_provider.ex
+@@ -41,22 +41,18 @@
+
+   @impl true
+   def enrich(subject_type, subject_id, config) when subject_type in [:person, :company] do
+-    required_capability = case subject_type do
++    _required_capability = case subject_type do
+       :person -> :person_enrich
+       :company -> :company_enrich
+     end
+
+-    if required_capability in capabilities() do
+-      guarded(:enrich, %{subject_type: subject_type, subject_id: subject_id}, config, fn ->
+-        data = Process.get(@data_key, %{})
+-        key = {subject_type, subject_id}
+-        enriched = Map.get(data, key, %{})
++    guarded(:enrich, %{subject_type: subject_type, subject_id: subject_id}, config, fn ->
++      data = Process.get(@data_key, %{})
++      key = {subject_type, subject_id}
++      enriched = Map.get(data, key, %{})
+
+-        {:ok, enriched}
+-      end)
+-    else
+-      {:error, :not_implemented}
+-    end
++      {:ok, enriched}
++    end)
+   end
+
+   @impl true

@@ -56,6 +56,10 @@ defmodule Samen.Web.MountSmokeTest do
       # Support
       {"support/tickets", Support.TicketsLive, build_mount(:support), %{"org" => org}},
       {"support/ticket", Support.TicketLive, build_mount(:support), %{"org" => org, "id" => t.support.ticket.id}},
+      # T78 (spec §I5) — the agent-facing KB (`:kb_namespace` sibling-mount seam) and
+      # the UNAUTHENTICATED portal (`:kb`-kind mount, no session-derived actor at all).
+      {"support/kb", Support.KbLive, build_mount(:support), %{"org" => org}},
+      {"portal/kb", Support.PortalKbLive, build_mount(:kb), %{"org" => org}},
       # Marketing (ADR-011)
       {"marketing/campaigns", Marketing.CampaignsLive, build_mount(:marketing), %{"org" => org}},
       {"marketing/segments", Marketing.SegmentsLive, build_mount(:marketing), %{"org" => org}},

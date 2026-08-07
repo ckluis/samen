@@ -266,7 +266,9 @@ defmodule Samen.Gen.App do
           agent: p1 <> "qg",
           sla: p1 <> "ql",
           macro: p1 <> "qn",
-          csat: p1 <> "qs"
+          csat: p1 <> "qs",
+          # I6 (T79) — the CSAT request→response loop's single-use survey link.
+          csat_survey_token: p1 <> "qt"
         }
       end
 
@@ -589,7 +591,8 @@ defmodule Samen.Gen.App do
       :agent,
       :sla,
       :macro,
-      :csat
+      :csat,
+      :csat_survey_token
     ]
 
   defp operator_module(:org), do: "Org"
@@ -619,6 +622,7 @@ defmodule Samen.Gen.App do
   defp operator_module(:sla), do: "Sla"
   defp operator_module(:macro), do: "Macro"
   defp operator_module(:csat), do: "Csat"
+  defp operator_module(:csat_survey_token), do: "CsatSurveyToken"
 
   @doc false
   # The template variable bindings. Every `<%= key %>` in a template is replaced by
@@ -703,6 +707,7 @@ defmodule Samen.Gen.App do
       "o_sla" => oa.sla,
       "o_macro" => oa.macro,
       "o_csat" => oa.csat,
+      "o_csat_token" => oa.csat_survey_token,
       # WS-E `--modules` seams. Each is "" for a default (no-`--modules`) app, so the
       # rendered router/landing are byte-for-byte unchanged; they carry content only when a
       # surface is selected. Values are computed with `s.module` interpolated DIRECTLY (never

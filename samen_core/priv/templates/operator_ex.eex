@@ -63,6 +63,7 @@ defmodule <%= module %>.Operator do
       agent: "<%= o_agent %>",
       sla: "<%= o_sla %>",
       macro: "<%= o_macro %>",
-      csat: "<%= o_csat %>"
+      csat: "<%= o_csat %>",
+      csat_survey_token: "<%= o_csat_token %>"
     }
 end

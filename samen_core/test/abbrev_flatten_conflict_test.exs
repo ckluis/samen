@@ -24,7 +24,7 @@ defmodule Samen.AbbrevFlattenConflictTest do
       assert Reg.flatten_conflicts(Reg.load_namespaced()) == []
     end
 
-    test "load/0 does not raise and returns the full lossless union (263 global + 95 host)" do
+    test "load/0 does not raise and returns the full lossless union (263 global + 141 host)" do
       flat = Reg.load()
       # + 3 T109 (ADR-038 §6.4) host reservations (dil/dol/wol — the durable
       # brute-force failure counter, allocator-proposed) = 355; +7 in T119 = 362;
@@ -36,7 +36,30 @@ defmodule Samen.AbbrevFlattenConflictTest do
       # +1 T71 (ADR-043 §6.4 D6/D7): samen_core host's `aac`
       # (SamenCore.Support.AnalyticsFixture.CleanAggregate, the D7 anti-tautology test
       # fixture) = 371.
-      assert map_size(flat) == 371
+      # +2 T74 (spec §I1): the samen_web test host's Mailbox scope mount — `mwc`
+      # (Mailbox.Connection) and `wmm` (Mailbox.MailMessage) = 373.
+      # +5 T75 (spec §I2): the samen_core host's Outreach scope fixture
+      # (`sos`/`soe`/`sso`) plus a second samen_core Mailbox materialization
+      # (`scm`/`smm`) = 378.
+      # +1 T76 fix round 1 (LOW-1): the samen_web test host's `wcr`
+      # (CRMReportingTest.RealAggregateFixture, the INV-2 anti-tautology positive
+      # control) = 379.
+      # +5 T82 (ADR-044 §4.1, WS-J J1): the samen_core host's fleet registry
+      # fixture (`SamenCore.Support.FleetFixture`) — `sfa`/`sfc`/`sfe`/`sfr`/`sfd`
+      # (App/Credential/EnrollmentToken/Report/Directive) = 384.
+      # +5 T82: the samen_web host's fleet registry HTTP-layer test fixture
+      # (`Samen.WebTest.Fleet`) — `wfa`/`wfc`/`wfe`/`wfr`/`wfd` = 389.
+      # +6 T78 (spec §I5): the samen_web test host's first CMS scope mount
+      # (`Samen.WebTest.Cms`) — `cwp`/`cpw`/`wcb`/`cwm`/`wcn`/`wcs`
+      # (Page/Post/Block/Media/Navigation/SeoMeta) = 395. The KB article reuses
+      # `Cms.Post` (no new article resource) — only the six base CMS resources
+      # needed a first-ever reservation for the samen_web test host.
+      # +3 T78: the E7 `versioned: :snapshot` generated Version resources —
+      # `pcv`/`pvc`/`cvb` (Page.Version/Post.Version/Block.Version) = 398.
+      # +6 T79 (spec §I6): the new `CsatSurveyToken` resource mounted on every
+      # existing Support host — `dsc`/`dcs`/`dco`/`psc`/`scw`/`wco` (demo,
+      # driftwood tenant+operator, pawchart, samen_web test tenant+operator) = 404.
+      assert map_size(flat) == 404
       # A global entry and a host entry both survive the (lossless) flatten.
       assert flat["com"] == "SamenCore.Support.Crm.Contact"
       assert flat["mce"] == "Demo.MarketingScope.ConsentEvent"

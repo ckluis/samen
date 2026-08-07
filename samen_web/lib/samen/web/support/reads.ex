@@ -211,6 +211,79 @@ defmodule Samen.Web.Support.Reads do
   end
 
   @doc """
+  I6 (spec §I6, T79) — the CSAT response for ONE ticket, if any (the ticket
+  detail page's "somewhere honest" landing spot — see `csats/2` for the
+  org-wide list). `nil` when no response has been recorded yet (honest empty,
+  never a fabricated score). Org-scoped via `scope` — a cross-org `ticket_id`
+  yields `nil`, never another org's response (no existence oracle).
+  """
+  def csat_for_ticket(mount, scope, ticket_id) do
+    Mount.resource(mount, Csat)
+    |> Ash.Query.ensure_selected([:score, :comments, :channel, :responded_at, :ticket_id, :agent_id])
+    |> Ash.Query.filter(ticket_id == ^ticket_id)
+    |> Ash.Query.sort(responded_at: :desc)
+    |> Ash.Query.limit(1)
+    |> Ash.read_one!(scope: scope)
+  rescue
+    _ -> nil
+  end
+
+  @doc """
+  I6 (spec §I6, T79) — read org-scoped, ENABLED macros for the composer
+  palette (Tier-0 config rows, `Sla`'s own sibling). Non-PII (the blueprint's
+  own `body_template` non-PII classification). BOUNDED to #{@detail_limit}
+  rows, sorted by name. Honest empty (`[]`) when the org has none — never
+  fabricated.
+  """
+  def macros(mount, scope) do
+    Mount.resource(mount, Macro)
+    |> Ash.Query.filter(enabled == true)
+    |> Ash.Query.ensure_selected([:name, :description, :body_template, :tags, :category])
+    |> Ash.Query.sort(name: :asc)
+    |> Ash.Query.limit(@detail_limit)
+    |> Ash.read!(scope: scope)
+  rescue
+    _ -> []
+  end
+
+  # The macro composer palette's ONE placeholder: `{{agent_name}}`. `agents`
+  # is `Reads.agents/2`'s ALREADY plane-resolved list (tenant CLEAR / operator
+  # `%Masked{}`) — substitution never itself calls the vault or PiiResolution;
+  # it just interpolates whatever the resolver already returned, via
+  # `String.Chars` (a `%Masked{}` renders `••••` automatically — the SAME
+  # convention `Samen.Delivery.Rendering.default_template/1` documents: "the
+  # mask is the field's normal value, not a special case here"). `agents`
+  # picks the FIRST loaded agent as "the" agent — a documented judgment call
+  # (this framework has no per-agent login/session concept to derive a
+  # "current agent" from, the same substrate limit `T76`'s CRM leaderboard
+  # tile flagged for `owner_id` display identity).
+  @doc """
+  Expand `macro.body_template`'s `{{agent_name}}` placeholder (if present)
+  against `agents` (a `Reads.agents/2`-shaped, ALREADY plane-resolved list —
+  masking-safe by construction, no new vault call). Absent macro/agents ⇒ the
+  template returned unexpanded (never crashes on `nil`).
+  """
+  def expand_macro(%{body_template: template}, agents) when is_binary(template) do
+    String.replace(template, "{{agent_name}}", agent_name_placeholder(agents))
+  end
+
+  def expand_macro(_macro, _agents), do: ""
+
+  defp agent_name_placeholder([%{full_name: full_name} | _]), do: to_string(render_agent_name_for_macro(full_name))
+  defp agent_name_placeholder(_), do: "our team"
+
+  defp render_agent_name_for_macro(%Samen.Masked{} = m), do: m
+  defp render_agent_name_for_macro(name) when is_binary(name), do: decode_macro_full_name(name) || name
+  defp render_agent_name_for_macro(_), do: "our team"
+
+  defp decode_macro_full_name(name) when is_binary(name) do
+    case Jason.decode(name) do
+      {:ok, %{"first" => first, "last" => last}} -> String.trim("#{first} #{last}")
+      _ -> nil
+    end
+  end
+
+  @doc """
   Non-PII support metrics (open_tickets, breaching_sla, solved_this_week, csat_avg).
   DB aggregates (`Ash.count`/`Ash.avg`) — no row set is ever transferred (A3
   read-bounding: this replaced an unbounded CSAT `read!`).

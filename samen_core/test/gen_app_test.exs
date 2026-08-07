@@ -153,15 +153,17 @@ defmodule Samen.Gen.AppTest do
       assert {"wgz", "Widgetco.Approvals.Approval"} in pairs
     end
 
-    test "web (default) reserved_pairs adds the 6 Primitives + 27 operator abbrevs (45)" do
+    test "web (default) reserved_pairs adds the 6 Primitives + 28 operator abbrevs (46)" do
       pairs = Gen.reserved_pairs(spec())
       abbrevs = Enum.map(pairs, &elem(&1, 0))
 
-      # 12 headless (incl. T37h's approvals abbrev) + 6 Primitives + 27 operator
+      # 12 headless (incl. T37h's approvals abbrev) + 6 Primitives + 28 operator
       # (Identity 11 [incl. ADR-035's Credential/AuthToken/Session/UserIdentity and
-      # ADR-038 §6.4's LoginFailure, T109] + Billing 9 + Support 7) = 45.
-      assert length(pairs) == 45
-      assert length(Enum.uniq(abbrevs)) == 45
+      # ADR-038 §6.4's LoginFailure, T109] + Billing 9 + Support 8 [T79/I6 added
+      # `csat_survey_token`, the CSAT request→response loop's single-use survey
+      # link]) = 46.
+      assert length(pairs) == 46
+      assert length(Enum.uniq(abbrevs)) == 46
 
       # Primitives — <p1> + the blueprint suffix (the samen_web test-host convention).
       assert {"wnt", "Widgetco.Primitives.Notification"} in pairs
@@ -187,6 +189,8 @@ defmodule Samen.Gen.AppTest do
       assert {"wpv", "Widgetco.Operator.SubscriptionEvent"} in pairs
       assert {"wqk", "Widgetco.Operator.Ticket"} in pairs
       assert {"wqs", "Widgetco.Operator.Csat"} in pairs
+      # T79 (spec §I6) — the CSAT request→response loop's single-use survey link.
+      assert {"wqt", "Widgetco.Operator.CsatSurveyToken"} in pairs
     end
 
     test "web derivation fails closed on an internal collision (prefix ending in o/p/q)" do
@@ -454,6 +458,7 @@ defmodule Samen.Gen.AppTest do
       assert b["o_org"] == "woo"
       assert b["o_sev"] == "wpv"
       assert b["o_csat"] == "wqs"
+      assert b["o_csat_token"] == "wqt"
 
       # Headless bindings carry NO web keys (the substitution engine stays exact).
       hb = Gen.bindings(spec(web: false))
@@ -920,7 +925,11 @@ defmodule Samen.Gen.AppTest do
 
       router = rendered_router(s)
       assert router =~ "\n    get(\"/\", PageController, :index)\n"
-      assert router =~ "\n    samen_metrics_route(name: :widgetco_prometheus)\n  end\n"
+      assert router =~ "\n    samen_metrics_route(name: :widgetco_prometheus)\n"
+      # ADR-044 §9.2 (T82 fix round, WS-J J1/J5): the fleet reporting-side
+      # routes are now the tail of this scope's ≈0-LOC leverage list — mounted
+      # unconditionally (zero config), regardless of --modules.
+      assert router =~ "\n    samen_fleet_routes(otp_app: :widgetco)\n  end\n"
       refute router =~ "HomeLive"
       refute router =~ "samen_files_routes"
       refute router =~ "--modules"

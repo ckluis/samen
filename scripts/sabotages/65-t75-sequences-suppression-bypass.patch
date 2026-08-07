@@ -1,0 +1,29 @@
+# SABOTAGE: T75 (spec §I2 CRM sequences actually send) — flips a suppressed step's
+# outcome from `:suppressed` to `:delivered`. `Samen.Sequences.SendWorker.deliver/4`
+# is the ONE place a sequence step's C2 chokepoint outcome is turned into a
+# `StepSend` status; this patch makes the `{:error, :suppressed}` branch behave
+# EXACTLY like the `{:ok, receipt}` branch — marking the row `:delivered` and
+# advancing the enrollment via the SUCCESS path — the exact "fake an :ok for work
+# that did not happen" lie ADR-014 forbids. The suppressed recipient never actually
+# receives anything (Chokepoint.send/2 already refused before adapter.deliver/2),
+# but the row now claims otherwise and the enrollment is no longer stopped.
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: a suppressed recipient's step NEVER reaches the provider; the enrollment stops for good
+diff --git a/samen_core/lib/samen/sequences/send_worker.ex b/samen_core/lib/samen/sequences/send_worker.ex
+index 0feb351..a18f7fa 100644
+--- a/samen_core/lib/samen/sequences/send_worker.ex
++++ b/samen_core/lib/samen/sequences/send_worker.ex
+@@ -147,9 +147,9 @@ defmodule Samen.Sequences.SendWorker do
+         Sequences.resolve_outcome(enrollment, sequence, {:ok, receipt})
+         :ok
+ 
+-      {:error, :suppressed} = err ->
+-        mark(send_row, :suppressed, cfg)
+-        Sequences.resolve_outcome(enrollment, sequence, err)
++      {:error, :suppressed} ->
++        mark(send_row, :delivered, cfg, sent_at: now())
++        Sequences.resolve_outcome(enrollment, sequence, {:ok, %{}})
+         :ok
+ 
+       {:error, :adapter_unconfigured} = err ->

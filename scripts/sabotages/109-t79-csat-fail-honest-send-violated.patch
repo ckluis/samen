@@ -1,0 +1,23 @@
+# SABOTAGE: T79 (spec §I6 macros composer palette + CSAT loop closed) — the
+# fail-honest CSAT send guarantee (ADR-014 Invariant D1, mirrored onto
+# `Samen.Scopes.Support.CsatSurvey.send_survey/3`): `sent_at` must be set IFF the
+# delivery chokepoint genuinely returned `{:ok, _}`. This sabotage calls
+# `mark_sent/1` in the `:adapter_unconfigured` (BLOCKED) branch too — the exact
+# lie ADR-014 forbids: a survey that was NEVER actually dispatched (no delivery
+# adapter configured) would be recorded as sent, so an operator inspecting the
+# token table could not distinguish a genuinely-delivered survey from one that
+# silently never left the chokepoint.
+# APP: samen_web
+# TEST_FILES: test/samen/web/support_csat_test.exs
+# MUST_FAIL: no delivery adapter configured -> honestly BLOCKED, never a fake sent
+# APPLY: patch -p1 --no-backup-if-mismatch < scripts/sabotages/109-t79-csat-fail-honest-send-violated.patch
+--- a/samen_core/lib/samen/scopes/support/csat_survey.ex
++++ b/samen_core/lib/samen/scopes/support/csat_survey.ex
+@@ -211,6 +211,7 @@
+             "ticket_id=#{ticket.id}"
+         )
+ 
++        mark_sent(token_row)
+         {:ok, :blocked}
+ 
+       {:error, reason} ->

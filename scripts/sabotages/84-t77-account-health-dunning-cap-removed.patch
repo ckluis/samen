@@ -1,0 +1,32 @@
+# SABOTAGE: T77 (spec §I4 "unfair advantage") — REGENERATED fix round 1 (context shifted:
+# the wording rewrite + worst-of-N comment above this cond clause). Health-formula
+# integrity: removes the `dunning?(status, pd) -> {dunning_value(pd),
+# dunning_explanation(pd, status)}` clause from `Samen.Web.AccountHealth`'s billing factor
+# `cond`. Without it, a book with ANY number of past-due subscriptions/invoices, at ANY
+# overdue age, falls straight through to the `status in [:active, :trialing] -> {1.0, ...}`
+# branch — the exact health/dunning incoherence `Samen.Web.Operator.HealthScore`
+# (WS-B/ADR-019) was built to fix, reintroduced independently in this module's own
+# (deliberately separate) formula. A book in deep dunning (max-cap-eligible: 90+ days
+# overdue) would score a PERFECT billing dimension (1.0) and the composite would read
+# "healthy" instead of "at risk" — precisely the lie a health score exists to prevent, AND
+# (fix round 1) the same bug the WORST-OF-N fix closed at the status-selection layer would
+# be reopened at the SCORING layer even with the correct worst status selected. Reverts
+# byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_account_health_test.exs
+# MUST_FAIL: score/1: DUNNING CEILING caps the billing value even at max cap-eligible overdue age
+# MUST_FAIL: snapshot/2: DUNNING wiring — a real past-due invoice caps the billing dimension end-to-end
+# MUST_FAIL: snapshot/2 WORST-OF-N (fix round 1, MED-2): an active sub + a sibling past_due sub reports the WORST status, never the best one
+diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web/account_health.ex
+--- a/samen_web/lib/samen/web/account_health.ex
++++ b/samen_web/lib/samen/web/account_health.ex
+@@ -297,9 +297,6 @@ defmodule Samen.Web.AccountHealth do
+         status in [:cancelled, :canceled] ->
+           {0.0, "at least one customer subscription is cancelled — treat as churn risk in this book"}
+ 
+-        dunning?(status, pd) ->
+-          {dunning_value(pd), dunning_explanation(pd, status)}
+-
+         status in [:active, :trialing] ->
+           {1.0, "the worst subscription state on file is '#{status}' — current, no past-due invoices anywhere in the book"}
+ 

@@ -1,0 +1,28 @@
+# SABOTAGE: T76 (spec §I3 CRM reporting) — defeats the HONEST-EMPTY floor on
+# `Samen.Web.CRM.Reads.pipeline_rates/2`. `rate/2`'s zero-denominator clause returns `nil`
+# (an org with no closed deals has no win_rate; an org with no opportunities has no
+# conversion_rate) — the caller renders `nil` as "—", never a number. This patch swaps the
+# zero-denominator clause to `0.0`, fabricating "0% win rate" / "0% conversion" for an org
+# that has decided NO deals yet (or created none at all) — the exact "no data → honest
+# zero/empty rendering, never fabricated demo numbers" lie the T76 task guards against. A
+# tenant reading a fresh org's dashboard would see "Win rate: 0.0%" (reading as "we lose
+# every deal") instead of the honest "—" (reading as "no deals decided yet"). Single-org
+# fixtures with real closed deals stay green (division proceeds identically either way) —
+# only the zero-denominator edge, which the named tests target directly, flips. Reverts
+# byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_reporting_test.exs
+# MUST_FAIL: HONEST EMPTY: an org with NO opportunities gets nil for both rates (never a fabricated 0%)
+# MUST_FAIL: HONEST EMPTY (partial): an org with OPEN deals but ZERO closed deals gets nil win_rate but a real (zero) conversion_rate
+diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+--- a/samen_web/lib/samen/web/crm/reads.ex
++++ b/samen_web/lib/samen/web/crm/reads.ex
+@@ -745,7 +745,7 @@
+     _ -> %{win_rate: nil, conversion_rate: nil, won: 0, lost: 0, open: 0, on_hold: 0}
+   end
+
+-  defp rate(_won, 0), do: nil
++  defp rate(_won, 0), do: 0.0
+   defp rate(won, total), do: won / total
+
+   defp round_count(n) when is_integer(n), do: n

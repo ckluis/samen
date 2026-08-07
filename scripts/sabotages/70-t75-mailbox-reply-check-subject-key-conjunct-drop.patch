@@ -1,0 +1,22 @@
+# SABOTAGE: T75 fix round MED-1 — drops the `subject_key == "crm.person"`
+# conjunct from `Samen.Sequences.MailboxReplyCheck.replied_since?/3`'s filter.
+# Also UNPINNED before this fix round. Without it, an inbound message anchored
+# to a DIFFERENT object (e.g. `"crm.company"`) whose `subject_id` merely
+# happens to equal a contact's `person_id` would incorrectly pause that
+# contact's sequence — a reply that was never actually from them.
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: an INBOUND message under a DIFFERENT subject_key does NOT pause the sequence (subject_key conjunct pinned)
+diff --git a/samen_core/lib/samen/sequences/mailbox_reply_check.ex b/samen_core/lib/samen/sequences/mailbox_reply_check.ex
+index 5c76fd5..1542b6e 100644
+--- a/samen_core/lib/samen/sequences/mailbox_reply_check.ex
++++ b/samen_core/lib/samen/sequences/mailbox_reply_check.ex
+@@ -48,7 +48,7 @@ defmodule Samen.Sequences.MailboxReplyCheck do
+         resource
+         |> Ash.Query.new()
+         |> Ash.Query.filter(
+-          org_id == ^org_id and subject_key == "crm.person" and subject_id == ^person_id and
++          org_id == ^org_id and subject_id == ^person_id and
+             direction == :inbound and occurred_at >= ^since
+         )
+         |> Ash.Query.limit(1)

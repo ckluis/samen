@@ -1,3 +1,42 @@
+defmodule Samen.Scopes.Cms.PublicPostFilter do
+  @moduledoc """
+  The `Post.:read_public` preparation (T78, spec §I5) — bakes the tenant-portal's
+  read scope into the query itself: `org_id == the caller's :org_id argument AND
+  status == :published AND visibility == :public`. A SEPARATE TOP-LEVEL module
+  (NOT inlined as `expr(...)` inside `Samen.Scopes.Cms.Blueprint.define_post/5`'s
+  `quote do` body, and NOT nested inside `Blueprint`'s own `do...end` — Elixir's
+  lexical `defmodule` nesting would then prefix its real name with
+  `Samen.Scopes.Cms.Blueprint.`, silently breaking the `prepare(...)` reference
+  below) — an inline `expr` inside the blueprint's quote is hygiene-captured to
+  the Blueprint module's own compile context (`undefined variable "org_id"`),
+  the exact bug class the Identity blueprint's `OrgIsSelf` moduledoc warns about
+  ("an inline `expr(id == …)` here would be hygiene-captured inside the
+  blueprint's quote"). This module compiles once, normally, outside any macro
+  expansion, so `Ash.Query.filter/2`'s own `expr`-equivalent macro sees real
+  field references — no hygiene issue.
+
+  Every `:read_public` caller is UNAUTHENTICATED (no actor at all — the portal
+  has no session), so this filter is the ENTIRE authorization surface for the
+  action (paired with a `bypass` policy, not a `policy`, on the resource — see
+  `Post`'s `policies do` block in `Samen.Scopes.Cms.Blueprint.define_post/5`).
+  It cannot be relaxed by a caller's own query: `Ash.Query.filter/2` composes
+  with AND, it never replaces a prior filter.
+  """
+  use Ash.Resource.Preparation
+
+  require Ash.Query
+
+  @impl true
+  def prepare(query, _opts, _context) do
+    org_id = Ash.Query.get_argument(query, :org_id)
+
+    Ash.Query.filter(
+      query,
+      org_id == ^org_id and status == :published and visibility == :public
+    )
+  end
+end
+
 defmodule Samen.Scopes.Cms.Blueprint do
   @moduledoc """
   Resource-definition macros for the CMS scope (T3.5; ADR-004 blueprint).
@@ -312,6 +351,31 @@ defmodule Samen.Scopes.Cms.Blueprint do
         relationship-load leak red test). The pre-existing content-status
         transition is `:mark_archived` (renamed from `:archive` — see
         `Samen.Scopes.Cms.Blueprint` moduledoc).
+
+        ## `visibility` — the helpdesk knowledge-base reuse seam (T78, spec §I5)
+
+        `Post` doubles as the helpdesk KB article resource ("no parallel article
+        resource" done-criterion): `visibility` (`:internal | :public`, default
+        `:internal`) distinguishes an agent-only article from one deflectable to
+        the unauthenticated tenant portal. A post is portal-visible ONLY when
+        BOTH `status == :published` AND `visibility == :public` — the `:read_public`
+        action below bakes both conditions into its action-level `filter` (never
+        removable by a caller's own query, unlike a policy-level FilterCheck a
+        second matching policy could weaken) plus an explicit `org_id` argument
+        (the portal has no authenticated actor to scope by). An internal article
+        (any status) stays reachable ONLY through the default org-scoped `:read`
+        (agents), never through `:read_public`.
+
+        `embeddable: [:title, :body]` (ADR-043 §7.2, D3) opts every Post into the
+        AI-plane semantic-search index (`Samen.AI.Embeddings`) — the retrieval
+        mechanism for composer suggestion + deflection. Both fields are already
+        classified non-PII (authored content, see the blueprint moduledoc), so
+        the deny-by-default embeddable allowlist is satisfied honestly. The
+        vector index is CANDIDATE RETRIEVAL ONLY — every consumer re-verifies a
+        hit's source record against the caller's own scoped read action
+        (`:read_public` for the portal, the default `:read` for agents) before
+        ever rendering it, so a stale/over-broad vector can never surface
+        content the reader is not otherwise authorized to see.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -320,7 +384,8 @@ defmodule Samen.Scopes.Cms.Blueprint do
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev),
           archivable: true,
-          versioned: :snapshot
+          versioned: :snapshot,
+          embeddable: [:title, :body]
 
         postgres do
           table("#{unquote(abbrev)}_post")
@@ -339,6 +404,12 @@ defmodule Samen.Scopes.Cms.Blueprint do
           )
           attribute(:published_at, :utc_datetime, public?: true)
           attribute(:custom, :map, public?: true)
+          # T78 (spec §I5) — the KB reuse seam. See moduledoc.
+          attribute(:visibility, :atom,
+            public?: true,
+            default: :internal,
+            constraints: [one_of: [:internal, :public]]
+          )
         end
 
         actions do
@@ -358,9 +429,48 @@ defmodule Samen.Scopes.Cms.Blueprint do
             require_atomic?(false)
             change(set_attribute(:status, :archived))
           end
+
+          # T78 (spec §I5) — the UNAUTHENTICATED tenant-portal read. `org_id` is
+          # an explicit argument (never an actor — the portal has no session),
+          # and BOTH the published-status and public-visibility conditions are
+          # baked into the action's own preparation filter (composed with AND,
+          # never overridable by a caller's query). `Samen.Scopes.Cms.
+          # PublicPostFilter` (a plain top-level module, not inlined here) is
+          # the fix for the inline-`expr` hygiene-capture bug the Identity
+          # blueprint's `OrgIsSelf` moduledoc already documents: an `expr(...)`
+          # written directly inside THIS macro's `quote do` is hygiene-captured
+          # to `Samen.Scopes.Cms.Blueprint`'s own context, not the generated
+          # resource's — `undefined variable "org_id"` at compile time. See
+          # moduledoc.
+          read :read_public do
+            argument(:org_id, :uuid, allow_nil?: false)
+            prepare(Samen.Scopes.Cms.PublicPostFilter)
+          end
         end
 
         policies do
+          # T78 (spec §I5) — `:read_public` has NO actor (the unauthenticated
+          # portal). A `bypass` (not a `policy`) is REQUIRED, and MUST be
+          # declared BEFORE the generic `policy action_type(:read)` block below
+          # (the `Samen.Scopes.Automation.Blueprint` `:dispatch_due`/`:scan_due`
+          # precedent — Ash's policy engine evaluates top-to-bottom and a
+          # regular `policy` block that FAILS can decide the whole request
+          # forbidden before a LATER bypass is ever reached; declared first, the
+          # bypass's own PASS short-circuits immediately, skipping every policy
+          # below it entirely — verified live: declaring this bypass AFTER the
+          # generic read policy left `:read_public` permanently forbidden
+          # despite the bypass matching). `:read_public` is still
+          # `action_type(:read)`, so the generic read policy would otherwise
+          # ALSO match and AND its actor-derived `OrgScope` filter in — an
+          # actor-less caller would then see ZERO rows regardless of the
+          # action's own filter, silently defeating the portal. Safe because
+          # the action's own baked-in preparation filter (`PublicPostFilter`,
+          # above) already does 100% of the scoping — `always()` here grants
+          # nothing beyond what that filter allows.
+          bypass action(:read_public) do
+            authorize_if(always())
+          end
+
           policy action_type(:read) do
             authorize_if(Samen.Policy.OrgScope)
           end

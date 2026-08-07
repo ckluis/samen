@@ -302,6 +302,60 @@ defmodule Samen.Delivery.Rendering do
       {"Your subscription has been cancelled", "Your subscription has been cancelled.",
        "You'll keep access until the end of your current billing period. We're sorry to see you go."}
 
+  # I6 (spec §I6, T79) — the CSAT survey link's route segment: `GET
+  # /support/csat/:token` (`samen_module_routes :csat, Host.Support, repo:
+  # ..., path: "/support/csat"`).
+  @csat_survey_segment "support/csat"
+
+  @doc """
+  Build the recipient-facing CONTENT (subject + text body + html body) for a
+  CSAT survey email (I6, T79) — the sibling of `auth_content/3` for the
+  Support scope's single-use, tokenized survey-response link. The raw token
+  rides IN the URL path exactly like `auth_content/3`'s `/verify/:token` (a
+  bearer token that IS the URL's subject, never a credential/password) — the
+  SAME sanctioned exception to "never put secrets in a URL" ADR-035 §4.2
+  already established.
+
+  Content carries NO recipient PII (generic framework copy, like
+  `lifecycle_content/1`) — there is no vault field to resolve here (unlike
+  `render_for_send/4`'s recipient-loading path); the Support scope has no
+  modeled customer-contact resource to reveal from at all (a documented,
+  honest substrate boundary — see `Samen.Scopes.Support.CsatSurvey`
+  moduledoc). `:base_url` (opt, or `config :samen_core,
+  Samen.Delivery.AuthMailer, base_url:`) prefixes the link; absent, the link
+  is a site-relative path (`/support/csat/<token>`).
+
+  Returns `{subject, text_body, html_body}` — the SAME shape every
+  `Samen.Delivery.Rendering` template function returns.
+  """
+  @spec csat_survey_content(String.t(), keyword()) :: {String.t(), String.t(), String.t()}
+  def csat_survey_content(raw_token, opts \\ []) when is_binary(raw_token) do
+    base_url = opts |> Keyword.get(:base_url) |> normalize_base_url()
+    link = "#{base_url}/#{@csat_survey_segment}/#{raw_token}"
+
+    subject = "How did we do?"
+    intro = "Your support ticket was recently resolved. We'd love to hear how it went."
+    cta = "Rate your experience"
+
+    text_body =
+      intro <>
+        "\n\n" <>
+        cta <>
+        ":\n" <>
+        link <>
+        "\n\n" <>
+        "This link is single-use and expires in 30 days.\n"
+
+    html_body =
+      "<p>#{intro}</p>" <>
+        "<p><a href=\"#{html_safe(link)}\">#{cta}</a></p>" <>
+        "<p>If the button above does not work, copy and paste this link into your " <>
+        "browser:<br>#{html_safe(link)}</p>" <>
+        "<p>This link is single-use and expires in 30 days.</p>"
+
+    {subject, text_body, html_body}
+  end
+
   defp normalize_base_url(nil), do: ""
   defp normalize_base_url(url) when is_binary(url), do: String.trim_trailing(url, "/")
 

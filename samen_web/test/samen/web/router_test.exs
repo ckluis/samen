@@ -20,6 +20,16 @@ defmodule Samen.Web.RouterTest do
       samen_module_routes(:billing, Some.Host.Billing, repo: Some.Host.Repo)
       samen_module_routes(:support, Some.Host.Support, repo: Some.Host.Repo)
       samen_module_routes(:marketing, Some.Host.Marketing, repo: Some.Host.Repo)
+      # T78 (spec §I5) — the UNAUTHENTICATED tenant-portal mount, in the SAME public
+      # scope as everything else here (this test proves only that the macro expands;
+      # a real host places `:kb` in a scope with no auth pipeline, same as
+      # `samen_auth_routes`).
+      samen_module_routes(:kb, Some.Host.Cms, repo: Some.Host.Repo, path: "/portal")
+      # T79 (spec §I6) — the UNAUTHENTICATED CSAT survey-response mount, SAME
+      # public-scope posture as `:kb` above (this test proves only that the
+      # macro expands; a real host places `:csat` in a scope with no auth
+      # pipeline).
+      samen_module_routes(:csat, Some.Host.Support, repo: Some.Host.Repo)
       # T142: mounting WITH an :actor_resolver compiles (the safe-by-construction happy path).
       samen_mcp_route(actor_resolver: {Some.Host.KeyAuthPlug, :resolve_scope, []})
     end
@@ -45,6 +55,18 @@ defmodule Samen.Web.RouterTest do
     support = Samen.Web.Router.__routes__(:support, "/support")
     assert {"/support", Samen.Web.Support.TicketsLive} in support
     assert {"/support/tickets/:id", Samen.Web.Support.TicketLive} in support
+    # T78 (spec §I5) — the agent-facing KB, mounted alongside tickets on the Support kind.
+    assert {"/support/kb", Samen.Web.Support.KbLive} in support
+  end
+
+  test "the KB (portal) route table maps the unauthenticated tenant-portal page (T78, spec §I5)" do
+    kb = Samen.Web.Router.__routes__(:kb, "/portal")
+    assert {"/portal/:org", Samen.Web.Support.PortalKbLive} in kb
+  end
+
+  test "the CSAT route table maps the unauthenticated survey-response page (T79, spec §I6)" do
+    csat = Samen.Web.Router.__routes__(:csat, "/support/csat")
+    assert {"/support/csat/:token", Samen.Web.Support.CsatRespondLive} in csat
   end
 
   test "the Marketing route table maps the campaigns/segments/leads pages (ADR-011 §7)" do
@@ -77,6 +99,10 @@ defmodule Samen.Web.RouterTest do
     assert "/marketing/campaigns/:id" in paths
     assert "/marketing/segments" in paths
     assert "/marketing/leads" in paths
+    # T78 (spec §I5) — the unauthenticated portal route registered from the same macro.
+    assert "/portal/:org" in paths
+    # T79 (spec §I6) — the unauthenticated CSAT survey-response route.
+    assert "/support/csat/:token" in paths
     # T142: the MCP route mounted WITH a resolver (in HostRouter above) registered its forward.
     assert "/mcp" in paths
   end

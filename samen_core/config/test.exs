@@ -103,7 +103,19 @@ config :samen_core, :vault_declared_parity_allow_list, [
   # Samen.Scopes.Docs.Blueprint) so the INV-1 masking three-proof is
   # non-vacuous. The fixture domain is NOT in :ash_domains — allow-list the pair.
   {"sdd_doc", "pii_sdd_secure_body"},
-  {"sdn_note", "pii_sdn_secure_body"}
+  {"sdn_note", "pii_sdn_secure_body"},
+  # T75 (spec §I2 CRM sequences): a SECOND materialization of the T74 Mailbox
+  # scope (test/support/mailbox_fixture.ex) so the sequence reply-detection
+  # test can prove Samen.Sequences.MailboxReplyCheck reads REAL MailMessage
+  # rows. Connection.address / MailMessage.{subject,body,counterparty_address}
+  # are vault-routed (columns pii_scm_address / pii_smm_subject / pii_smm_body /
+  # pii_smm_counterparty_address) but this fixture domain is NOT in
+  # :ash_domains — allow-list the pairs (same posture as every other fixture
+  # above).
+  {"scm_connection", "pii_scm_address"},
+  {"smm_mail_message", "pii_smm_subject"},
+  {"smm_mail_message", "pii_smm_body"},
+  {"smm_mail_message", "pii_smm_counterparty_address"}
 ]
 
 # T34 E3 approve/reject engine (ADR-040 §4). The host-wired seam: the Approval resource +
@@ -143,3 +155,10 @@ config :samen_core, Samen.Approvals.Registry,
 config :opentelemetry,
   span_processor: :simple,
   traces_exporter: {:otel_exporter_pid, self()}
+
+# T82 fix round (fail-honest MED): Samen.Fleet.Registry.cockpit_identity/1 now
+# refuses (fail-honest) unless a host EXPLICITLY configures
+# :fleet_local_credential. This test suite opts into the reference (non-durable
+# in-process) implementation explicitly — the same way Samen.Delivery.FakeProvider
+# is explicitly wired rather than silently defaulted to.
+config :samen_core, :fleet_local_credential, Samen.Fleet.LocalCredential.Agent

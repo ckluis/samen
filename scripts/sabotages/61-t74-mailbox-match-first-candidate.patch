@@ -1,0 +1,24 @@
+# SABOTAGE: T74 (spec §I1 CRM two-way email sync) gate sabotage — defeats the VAULTED-ADDRESS
+# CRM match. `Samen.Mailbox.Match.person_for_address/2` is the only place a synced message is
+# bound to a CRM record: it resolves each candidate person's vault-routed `emails` through
+# `Samen.Api.PiiResolution` (tenant plane) and matches on the NORMALIZED address. This patch
+# keeps the resolution but drops the address COMPARISON — any person who has an email at all
+# now matches, so every message, from anyone, threads onto whichever contact the org-scoped
+# read happened to return first. That is a cross-contact data-exposure bug wearing a working
+# feature's clothes: the happy-path "it threaded onto the right person" assertions still pass,
+# which is precisely why the REFUTABLE unknown-sender control exists. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/mailbox_sync_test.exs
+# MUST_FAIL: REFUTABLE: a message from an UNKNOWN address is recorded but anchored to NOTHING
+diff --git a/samen_core/lib/samen/mailbox/match.ex b/samen_core/lib/samen/mailbox/match.ex
+--- a/samen_core/lib/samen/mailbox/match.ex
++++ b/samen_core/lib/samen/mailbox/match.ex
+@@ -103,7 +103,7 @@
+       norm ->
+         config
+         |> candidate_people()
+-        |> Enum.find(fn person -> norm in resolved_addresses(person) end)
++        |> Enum.find(fn person -> is_binary(norm) and resolved_addresses(person) != [] end)
+     end
+   end
+ 

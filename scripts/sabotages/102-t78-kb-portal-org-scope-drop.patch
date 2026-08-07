@@ -1,0 +1,27 @@
+# SABOTAGE: T78 (spec §I5 helpdesk knowledge base + composer suggestion + deflection) —
+# drops the `org_id == ^org_id` conjunct from `Samen.Scopes.Cms.PublicPostFilter.prepare/3`,
+# the ENTIRE authorization surface for `Post.:read_public` (the unauthenticated tenant-
+# portal read — the action carries a `bypass` on the resource, not a `policy`, so this
+# preparation filter is the only thing standing between an anonymous visitor and every
+# org's public+published articles). Without the org conjunct, `/portal/:org_a` returns
+# EVERY org's public+published KB articles — a direct cross-tenant content leak on an
+# UNAUTHENTICATED surface. The org_id ARGUMENT is still accepted (no compile break), it
+# is simply never applied. This is the T74-T77 "drop-the-filter-must-flip-a-named-test"
+# org-scope pin, generalized to a derived read action instead of a resource policy.
+# APP: samen_web
+# TEST_FILES: test/samen/scopes/cms_kb_scope_test.exs test/samen/web/portal_kb_live_test.exs
+# MUST_FAIL: org A's portal read shows ONLY org A's public article, never org B's
+# MUST_FAIL: org B's portal read shows its OWN article, not org A's (both sides proven live)
+# MUST_FAIL: org A's portal never shows org B's public article, browse OR deflect
+diff --git a/samen_core/lib/samen/scopes/cms/blueprint.ex b/samen_core/lib/samen/scopes/cms/blueprint.ex
+--- a/samen_core/lib/samen/scopes/cms/blueprint.ex
++++ b/samen_core/lib/samen/scopes/cms/blueprint.ex
+@@ -32,7 +32,7 @@ defmodule Samen.Scopes.Cms.PublicPostFilter do
+
+     Ash.Query.filter(
+       query,
+-      org_id == ^org_id and status == :published and visibility == :public
++      status == :published and visibility == :public
+     )
+   end
+ end

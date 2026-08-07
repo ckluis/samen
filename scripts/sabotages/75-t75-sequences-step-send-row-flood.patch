@@ -1,0 +1,22 @@
+# SABOTAGE: T75 fix round MED-5 (the OTHER half — no unbounded rows) — reverts
+# `queue_step_send/3` to blindly `create_step_send/2` on every cycle instead
+# of `find_or_create_step_send/2`'s REUSE. A permanently `:blocked` enrollment
+# (no ESP configured) inserts a BRAND NEW `StepSend` row on every retry cycle
+# — ~288/day/enrollment at the real 5-minute backoff cadence, unbounded,
+# tenant-readable — instead of updating the ONE row for that step in place.
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: an unconfigured adapter in a non-:test delivery env yields StepSend.status == :blocked, never :delivered
+diff --git a/samen_core/lib/samen/sequences.ex b/samen_core/lib/samen/sequences.ex
+index a62c4a7..50ae6e6 100644
+--- a/samen_core/lib/samen/sequences.ex
++++ b/samen_core/lib/samen/sequences.ex
+@@ -227,7 +227,7 @@ defmodule Samen.Sequences do
+         # enrollment) — complete honestly rather than looping forever.
+         transition(enrollment, %{status: :completed, next_send_at: nil, completed_at: now()})
+       else
+-        case find_or_create_step_send(step_send_mod, enrollment) do
++        case create_step_send(step_send_mod, enrollment) do
+           {:ok, send_row} ->
+             # In-flight: a WATCHDOG next_send_at (MED-2 — NEVER nil) so a
+             # stalled/crashed worker still gets re-selected + retried by the

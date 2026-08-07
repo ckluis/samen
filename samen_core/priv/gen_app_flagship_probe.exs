@@ -261,6 +261,28 @@ try do
   Mix.ensure_application!(:inets)
   {:ok, _} = Application.ensure_all_started(:inets)
 
+  # --- ADR-044 §9.3(d)/§9.2 (T82 fix round, WS-J J5) — the ZERO-CONFIG fleet
+  # honesty proof, IN-PROCESS (the "gen_app zero-config probe" ADR §9.3 binds
+  # to T82 by name). A freshly generated app, with NO fleet config anywhere in
+  # this boot, must default to `:embedded` mode and read back exactly one
+  # honest self-row, zero DB/network dependency. This is the SUBSTRATE half of
+  # J5's zero-config claim; the "cockpit renders it" half needs
+  # /operator/fleet, which is T84's (not built yet) — tracked, not silently
+  # skipped. ----------------------------------------------------------------
+  unless Samen.Fleet.mode(:#{otp_app}) == :embedded do
+    IO.puts("FLAGSHIP FAIL: Samen.Fleet.mode(:#{otp_app}) != :embedded with zero fleet config — \#{inspect(Samen.Fleet.mode(:#{otp_app}))}")
+    System.halt(1)
+  end
+
+  case Samen.Fleet.read(:#{otp_app}) do
+    {:ok, %{rows: [_row], reporting: 1, total: 1}} ->
+      IO.puts("FLAGSHIP: Samen.Fleet.mode(:#{otp_app}) == :embedded, read/2 -> exactly one honest self-row, zero config")
+
+    other ->
+      IO.puts("FLAGSHIP FAIL: Samen.Fleet.read(:#{otp_app}) did not return exactly one honest self-row — \#{inspect(other)}")
+      System.halt(1)
+  end
+
   # --- SEED via the app's Seeds module (the exact call `mix #{otp_app}.seed` makes) ----
   seed_org = #{module}.Seeds.run()
 

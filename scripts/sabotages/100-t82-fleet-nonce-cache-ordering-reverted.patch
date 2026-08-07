@@ -1,0 +1,34 @@
+# SABOTAGE: T82 fix-round nonce-cache ordering MED (ATK-7). Reverts
+# Samen.Web.Fleet.Ingress.verify_inbound/3 to consume the anti-replay
+# nonce BEFORE signature verification, so an entirely unauthenticated
+# request (any garbage signature) writes a NonceCache row for the
+# {kid, nonce} pair — letting an attacker who knows only a victim's kid
+# burn/poison a nonce a legitimate request would later present, on an
+# unrate-limited route.
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_ingress_test.exs
+# MUST_FAIL: fix round MED (ATK-7): an UNAUTHENTICATED request never consumes the anti-replay nonce budget
+diff --git a/samen_web/lib/samen/web/fleet/ingress.ex b/samen_web/lib/samen/web/fleet/ingress.ex
+--- a/samen_web/lib/samen/web/fleet/ingress.ex
++++ b/samen_web/lib/samen/web/fleet/ingress.ex
+@@ -102,7 +102,8 @@
+   defp verify_inbound(conn, credential, raw_body) do
+     with {:ok, header} <- fetch_auth_header(conn),
+          {:ok, fields} <- Crypto.parse_header(header),
+-         true <- Crypto.fresh_timestamp?(fields.ts) || {:error, :stale_timestamp} do
++         true <- Crypto.fresh_timestamp?(fields.ts) || {:error, :stale_timestamp},
++         :ok <- Samen.Fleet.NonceCache.check_and_put(fields.kid, fields.nonce) do
+       signing_input =
+         Crypto.signing_input(
+           conn.method,
+@@ -112,9 +113,7 @@
+           Crypto.body_digest(raw_body)
+         )
+ 
+-      with :ok <- verify_signature(credential, signing_input, fields.sig) do
+-        Samen.Fleet.NonceCache.check_and_put(fields.kid, fields.nonce)
+-      end
++      verify_signature(credential, signing_input, fields.sig)
+     else
+       {:error, reason} -> {:error, reason}
+     end

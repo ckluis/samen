@@ -21,12 +21,14 @@ defmodule Samen.Web.CRM.CompanyLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1, writable?: 1]
+  import Samen.Web.CRM.Live,
+    only: [assign_mount: 2, crm_sidebar: 1, writable?: 1, mail_timeline_entries: 1, merge_timeline: 2]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
 
+  alias Samen.Web.AccountHealth
   alias Samen.Web.CRM.Reads
 
   @impl true
@@ -162,12 +164,14 @@ defmodule Samen.Web.CRM.CompanyLive do
       company: nil,
       contacts: [],
       activities: [],
+      mail: [],
       deals: [],
       active_tab: tab,
       show_edit: false,
       edit_form: nil,
       activity_form: nil,
-      delete_error: nil
+      delete_error: nil,
+      account_health: nil
     )
   end
 
@@ -183,18 +187,29 @@ defmodule Samen.Web.CRM.CompanyLive do
         end
       end
 
-    {activities, deals, contacts} =
+    {activities, mail, deals, contacts} =
       if company do
         {
           Reads.activities_for_company(mount, scope, company_id),
+          # T74 §I1: synced mailbox messages (both directions) share this timeline.
+          # `[]` when no Mailbox scope is mounted — the honest absence.
+          Reads.mail_for_company(mount, scope, company_id),
           Reads.opportunities_for_company(mount, scope, company_id),
           Reads.contacts_for_company(mount, scope, company_id)
         }
       else
-        {[], [], []}
+        {[], [], [], []}
       end
 
     tab = Map.get(socket.assigns, :active_tab, "overview")
+
+    # T77 (spec §I4) — this org's live PORTFOLIO MRR/health/support-load snapshot
+    # (totals across the org's ENTIRE own customer/support book — billing + support,
+    # whichever the host has mounted; honest absence otherwise), rendered inline on the
+    # account/company header regardless of which company is open — see
+    # `Samen.Web.AccountHealth`'s moduledoc (fix round 1) for why this is portfolio-wide,
+    # not per-company. `nil` when no org is resolved (handled by the other `load/3` clause).
+    account_health = AccountHealth.snapshot(mount, scope)
 
     socket
     |> ensure_return_to()
@@ -205,11 +220,13 @@ defmodule Samen.Web.CRM.CompanyLive do
       company: company,
       contacts: contacts,
       activities: activities,
+      mail: mail,
       deals: deals,
       active_tab: tab,
       edit_form: company && edit_form(company, scope),
       activity_form: activity_form(mount, scope),
-      delete_error: nil
+      delete_error: nil,
+      account_health: account_health
     )
     |> assign_new(:show_edit, fn -> false end)
   end
@@ -299,6 +316,41 @@ defmodule Samen.Web.CRM.CompanyLive do
               </div>
             </div>
 
+            <div class="wrap" style="margin-bottom:0;padding-top:10px" id="account-health-panel">
+              <div class="metrics">
+                <div id="account-mrr">
+                  <.metric label="Total MRR — all customers" value={account_mrr_value(@account_health)} sub={account_mrr_sub(@account_health)}>
+                    <:icon>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                      </svg>
+                    </:icon>
+                  </.metric>
+                </div>
+                <div id="account-health-score">
+                  <.metric label="Portfolio health" value={account_health_value(@account_health)} sub={account_health_sub(@account_health)}>
+                    <:icon>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                      </svg>
+                    </:icon>
+                  </.metric>
+                </div>
+                <div id="account-support-load">
+                  <.metric label="Open support tickets — all customers" value={account_support_value(@account_health)} sub={account_support_sub(@account_health)}>
+                    <:icon>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                      </svg>
+                    </:icon>
+                  </.metric>
+                </div>
+              </div>
+              <div class="lane" id="account-health-disclosure" style="font-size:11px;color:var(--muted);padding:4px 2px 0">
+                org-wide totals across this org's ENTIRE customer &amp; support book (spec §I4) — NOT this specific company's numbers; per-company attribution needs a CRM-account-to-billing-customer link the substrate does not have yet (a separate, follow-on task)
+              </div>
+            </div>
+
             <div class="wrap" style="margin-bottom:0;padding-top:8px">
               <.tabs>
                 <.tab label="Overview" href={"?org=#{@org_id}&tab=overview"} active={@active_tab == "overview"} />
@@ -311,7 +363,10 @@ defmodule Samen.Web.CRM.CompanyLive do
               <% "activity" -> %>
                 <div class="wrap" id="activity-pane">
                   <div class="card" style="padding:8px 4px 12px">
-                    <.timeline entries={timeline_entries(@activities)} empty="No activity yet — log the first call or note below.">
+                    <.timeline
+                      entries={merge_timeline(timeline_entries(@activities), mail_timeline_entries(@mail))}
+                      empty="No activity yet — log the first call or note below."
+                    >
                       <:composer :if={composer?(@samen_mount)}>
                         {activity_composer(assigns)}
                       </:composer>
@@ -462,6 +517,57 @@ defmodule Samen.Web.CRM.CompanyLive do
 
   defp company_role(%{custom: custom}) when is_map(custom), do: Map.get(custom, "company_role")
   defp company_role(_), do: nil
+
+  # -- T77 (spec §I4) portfolio-health panel renderers --------------------------
+  #
+  # PORTFOLIO totals across this org's ENTIRE customer/support book — see
+  # `Samen.Web.AccountHealth`'s moduledoc (fix round 1: the original "org's own
+  # platform subscription" framing was refuted on the facts and corrected). Every
+  # label/sub-copy below says "all customers"/"across the book" so nobody reads these
+  # tiles as this-specific-company's numbers.
+  #
+  # Honest-absence discipline: `billing_available?`/`support_available?` false means
+  # EITHER the scope is not MOUNTED for this host, OR the underlying read genuinely
+  # FAILED (fix round 1, MED-3 — see `AccountHealth.billing_snapshot/2`'s canary read)
+  # — rendered "—", NEVER a fabricated `$0.00` or `0`. When a scope IS mounted and the
+  # read genuinely SUCCEEDS with nothing in it, the real zero renders (a true DB
+  # aggregate, not a fabrication).
+
+  defp account_mrr_value(%{billing_available?: false}), do: "—"
+  defp account_mrr_value(%{mrr_cents: cents}), do: dollars(cents)
+  defp account_mrr_value(_), do: "—"
+
+  defp account_mrr_sub(%{billing_available?: false}), do: "billing not configured for this app"
+  defp account_mrr_sub(%{subscription_status: nil}), do: "no subscriptions on file across this org's customers"
+
+  defp account_mrr_sub(%{subscription_status: status, active_subs: n}),
+    do: "#{n} active subscription(s) · worst status in book: #{status}"
+
+  defp account_mrr_sub(_), do: "—"
+
+  defp account_health_value(%{health: nil}), do: "—"
+  defp account_health_value(%{health: %AccountHealth{score: nil}}), do: "—"
+  defp account_health_value(%{health: %AccountHealth{score: score}}), do: "#{score} / 100"
+  defp account_health_value(_), do: "—"
+
+  defp account_health_sub(%{health: nil}), do: "no billing or support signal available"
+  defp account_health_sub(%{health: %AccountHealth{band: band}}), do: health_band_label(band)
+  defp account_health_sub(_), do: "no billing or support signal available"
+
+  defp health_band_label(:healthy), do: "healthy"
+  defp health_band_label(:watch), do: "watch"
+  defp health_band_label(:at_risk), do: "at risk"
+  defp health_band_label(:critical), do: "critical"
+  defp health_band_label(_), do: "no signal"
+
+  defp account_support_value(%{support_available?: false}), do: "—"
+  defp account_support_value(%{open_tickets: n}) when is_integer(n), do: n
+  defp account_support_value(_), do: "—"
+
+  defp account_support_sub(%{support_available?: false}), do: "support not configured for this app"
+  defp account_support_sub(%{breaching_sla: 0}), do: "none breaching SLA, across all customers"
+  defp account_support_sub(%{breaching_sla: n}) when is_integer(n), do: "#{n} breaching SLA, across all customers"
+  defp account_support_sub(_), do: "—"
 
   # Project the Work Task onto the EXISTING timeline entry keys (ADR-041 §6.1):
   # kind → :type, title → :subject, completed_at||inserted_at → :at. The presentational

@@ -1,0 +1,25 @@
+# SABOTAGE: T77 (spec §I4 "unfair advantage") — honest-MRR-absence: `snapshot/2` hardcodes
+# `billing_available?: true` and falls back `mrr_cents` to a fabricated `0` whenever the
+# Billing scope is NOT mounted for this host at all — exactly the lie CLAUDE.md's
+# fail-honest rule (and this task's own instruction: "no billing configured -> honest
+# absence, never $0 fabricated as fact") exists to forbid. A caller (the CRM account panel)
+# can no longer distinguish "this app never wired billing" from "this org genuinely pays
+# nothing" — both would render "$0.00" instead of "—"/"billing not configured". Reverts
+# byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_account_health_test.exs
+# MUST_FAIL: snapshot/2: a host with NO Billing/Support siblings gets honest absence, never a fabricated $0/0
+diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web/account_health.ex
+--- a/samen_web/lib/samen/web/account_health.ex
++++ b/samen_web/lib/samen/web/account_health.ex
+@@ -122,8 +122,8 @@ defmodule Samen.Web.AccountHealth do
+     support = support_snapshot(sibling_mount(mount, :support, ["Support", "SupportScope"], Ticket), scope)
+ 
+     %{
+-      billing_available?: billing != nil,
+-      mrr_cents: billing && billing.mrr_cents,
++      billing_available?: true,
++      mrr_cents: (billing && billing.mrr_cents) || 0,
+       active_subs: billing && billing.active_subs,
+       subscription_status: billing && billing.subscription_status,
+       past_due: billing && billing.past_due,

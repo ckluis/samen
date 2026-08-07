@@ -1,0 +1,19 @@
+# SABOTAGE: T83 J3 (ADR-044 §6.2/§6.3a #4). Driftwood.Auth.operator_role/2 must gate on
+# app_scope == :driftwood (this host is the authority for :driftwood ONLY). Inverting the
+# guard (!= -> ==) resolves a role for FOREIGN product scopes and denies driftwood's own —
+# a cross-product role granted by omission, the exact §6.3a #4 landmine.
+# APP: driftwood
+# TEST_FILES: test/operator_cross_product_scope_test.exs
+# MUST_FAIL: operator_role(:driftwood, user) resolves the role
+diff --git a/driftwood/lib/driftwood/auth.ex b/driftwood/lib/driftwood/auth.ex
+--- a/driftwood/lib/driftwood/auth.ex
++++ b/driftwood/lib/driftwood/auth.ex
+@@ -107,7 +107,7 @@
+   @spec operator_role(atom(), String.t() | nil) :: atom() | nil
+   def operator_role(app_scope, principal_id) when is_atom(app_scope) do
+     # (0) Per-product isolation: driftwood is the authority for :driftwood ONLY.
+-    if app_scope != :driftwood do
++    if app_scope == :driftwood do
+       nil
+     else
+       roster = Application.get_env(:driftwood, :operator_roster, %{})

@@ -95,11 +95,25 @@ config :driftwood, auth_credentials: %{}
 # T146 — the OPERATOR-ROLE authority resolver `Samen.Web.AuthGate` reads at the conn level (the
 # `:require_authenticated_operator` pipeline every `/operator/*` scope pipes through). Called with
 # the authenticated principal id; returns an operator role (`Samen.OperatorPlane.Actor.roles/0`)
-# or `nil` (NOT an operator → refused). `Driftwood.Auth.operator_role/1` resolves a configured
+# or `nil` (NOT an operator → refused). `Driftwood.Auth.operator_role/2` resolves a configured
 # `:operator_roster` in prod, with a dev-only `:operator_admin` grant while `:auth_required?` is
-# false. Empty by design in this PUBLIC repo — a real launch provisions the operator roster.
-config :driftwood, :operator_authority, {Driftwood.Auth, :operator_role, []}
+# false. The `[:driftwood]` args list is the J3 PRODUCT-SCOPE carrier (ADR-044 §6.2/§6.3a #4) —
+# a role granted here confers scope ONLY on :driftwood. Empty by design in this PUBLIC repo — a
+# real launch provisions the operator roster.
+config :driftwood, :operator_authority, {Driftwood.Auth, :operator_role, [:driftwood]}
 config :driftwood, :operator_roster, %{}
+
+# J3 — the FLEET-WIDE role read (`Samen.Fleet.Authz` `:fleet_authority` seam, ADR-044 §6.2/§6.3a #1).
+# Returns %{scope => role} for the cockpit's tile gating. `:fleet_operators` grants the reserved
+# `:fleet` cockpit scope (default empty ⇒ fail-CLOSED: no cockpit access until provisioned).
+config :driftwood, :fleet_authority, {Driftwood.Auth, :fleet_roles, []}
+config :driftwood, :fleet_operators, %{}
+
+# J3 / Amendment 1 — the `:fleet_resolution` name-resolution + drill-in scope seam (ADR-044 §16.2).
+# T83 ships the framework seam SHAPE (`Samen.Fleet.Resolution`, fail-closed to :none); the host
+# resolver + the assignment resource it reads are T84 (operator ruling R-A). LEFT UNWIRED here so
+# the seam fails CLOSED (every name masked, every scoped drill-in denied) until T84 provisions it.
+# config :driftwood, :fleet_resolution, {Driftwood.Auth, :resolution_scope, [:driftwood]}
 
 config :driftwood, Driftwood.Repo,
   migration_primary_key: [name: :id, type: :binary_id]

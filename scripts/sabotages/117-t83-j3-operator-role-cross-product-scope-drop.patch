@@ -1,0 +1,19 @@
+# SABOTAGE: T83 J3 (ADR-044 §6.2). Samen.Web.Operator.Authz.resolve_role/2 must APPEND
+# the principal id AFTER the per-product scope carrier (args ++ [principal_id]). Reversing
+# the order ([principal_id | args]) passes the scope where the resolver expects the
+# principal, collapsing per-product resolution — a role resolves under the wrong product.
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator/cross_product_authz_test.exs
+# MUST_FAIL: carol's single identity reaches product A and product B
+diff --git a/samen_web/lib/samen/web/operator/authz.ex b/samen_web/lib/samen/web/operator/authz.ex
+--- a/samen_web/lib/samen/web/operator/authz.ex
++++ b/samen_web/lib/samen/web/operator/authz.ex
+@@ -95,7 +95,7 @@
+ 
+     case authority_mfa(mount) do
+       {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
+-        validate_role(apply(mod, fun, args ++ [principal_id]))
++        validate_role(apply(mod, fun, [principal_id | args]))
+ 
+       _ ->
+         nil

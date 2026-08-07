@@ -1,0 +1,19 @@
+# SABOTAGE: T82 fix-round UNPINNED-INVARIANT (i) (ADR-044 §4.3 step 3 /
+# §4.6 matrix row 'expired enrollment token -> 401, generic'). Drops the
+# 'expires_at > $now' clause from Registry.consume_enrollment/3's atomic
+# single-use filter, so an EXPIRED enrollment token is consumable forever.
+# APP: samen_core
+# TEST_FILES: test/fleet_registry_test.exs
+# MUST_FAIL: UNPINNED-INVARIANT (i): an EXPIRED enrollment token is rejected, never consumable — red + control
+diff --git a/samen_core/lib/samen/fleet/registry.ex b/samen_core/lib/samen/fleet/registry.ex
+--- a/samen_core/lib/samen/fleet/registry.ex
++++ b/samen_core/lib/samen/fleet/registry.ex
+@@ -228,7 +228,7 @@
+ 
+     result =
+       token_res(ns)
+-      |> Ash.Query.filter(token_digest == ^digest and is_nil(consumed_at) and expires_at > ^now)
++      |> Ash.Query.filter(token_digest == ^digest and is_nil(consumed_at))
+       |> Ash.bulk_update(:consume, %{consumed_at: now},
+         authorize?: false,
+         strategy: [:atomic],

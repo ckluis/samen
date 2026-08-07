@@ -194,6 +194,11 @@ defmodule Samen.UI.Nav do
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
         </:icon>
       </.nav_item>
+      <.nav_item label="Knowledge base" href={"#{@support_path}/kb?org=#{@org_id}"} active={@active == :support_kb}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
+        </:icon>
+      </.nav_item>
     </.nav_group>
 
     <.nav_group label="Marketing">

@@ -1,7 +1,10 @@
 defmodule Samen.Scopes.Support do
   @moduledoc """
   The **Support** universal scope (T3.6; doc §"The inherited 80%" scope table:
-  `ticket · conversation · message🔒 · agent🔒 · sla · macro · csat`).
+  `ticket · conversation · message🔒 · agent🔒 · sla · macro · csat`), plus the
+  I6 (T79) `csat_survey_token` resource that closes the CSAT request→response
+  loop (not in the original doc scope table — an infrastructure resource, no
+  PII, see its own moduledoc).
 
   Ships as a **library-authored blueprint** (ADR-004): `use`-ing this module inside a
   host's Ash domain expands into seven host-owned resources in the host's namespace —
@@ -66,19 +69,21 @@ defmodule Samen.Scopes.Support do
     * `Demo.SupportScope.Sla`          — Tier-0: SLA policies per org
     * `Demo.SupportScope.Macro`        — Tier-0: canned responses per org
     * `Demo.SupportScope.Csat`         — customer satisfaction response
+    * `Demo.SupportScope.CsatSurveyToken` — I6 (T79): single-use survey link
 
   ## Abbrevs (permanent, registry-checked)
 
   Each resource carries a permanent 3-letter abbrev, reserved in
   `samen_core/priv/abbrev_registry.json` under the HOST module name:
 
-    * `Demo.SupportScope.Ticket`       → `stk`
-    * `Demo.SupportScope.Conversation` → `scv`
-    * `Demo.SupportScope.Message`      → `smg`
-    * `Demo.SupportScope.Agent`        → `sag`
-    * `Demo.SupportScope.Sla`          → `ssl`
-    * `Demo.SupportScope.Macro`        → `smc`
-    * `Demo.SupportScope.Csat`         → `scs`
+    * `Demo.SupportScope.Ticket`           → `stk`
+    * `Demo.SupportScope.Conversation`     → `scv`
+    * `Demo.SupportScope.Message`          → `smg`
+    * `Demo.SupportScope.Agent`            → `sag`
+    * `Demo.SupportScope.Sla`              → `ssl`
+    * `Demo.SupportScope.Macro`            → `smc`
+    * `Demo.SupportScope.Csat`             → `scs`
+    * `Demo.SupportScope.CsatSurveyToken`  → `dsc`
 
   The macro does NOT invent abbrevs. Defaults are provided for the demo mount.
   """
@@ -90,7 +95,8 @@ defmodule Samen.Scopes.Support do
     agent: "sag",
     sla: "ssl",
     macro: "smc",
-    csat: "scs"
+    csat: "scs",
+    csat_survey_token: "dsc"
   }
 
   @doc false
@@ -115,11 +121,13 @@ defmodule Samen.Scopes.Support do
     sla_mod = Module.concat(namespace, Sla)
     macro_mod = Module.concat(namespace, Macro)
     csat_mod = Module.concat(namespace, Csat)
+    csat_survey_token_mod = Module.concat(namespace, CsatSurveyToken)
 
     quote do
       require Samen.Scopes.Support.Blueprint
 
-      # Register the seven Support resources in the host domain.
+      # Register the eight Support resources in the host domain (I6/T79 added
+      # `csat_survey_token` — the CSAT request→response loop's single-use link).
       resources do
         resource(unquote(ticket_mod))
         resource(unquote(conversation_mod))
@@ -128,6 +136,7 @@ defmodule Samen.Scopes.Support do
         resource(unquote(sla_mod))
         resource(unquote(macro_mod))
         resource(unquote(csat_mod))
+        resource(unquote(csat_survey_token_mod))
       end
 
       # Materialize resource modules in the host namespace. Each is a normal Samen
@@ -148,7 +157,9 @@ defmodule Samen.Scopes.Support do
         unquote(repo),
         unquote(abbrevs.ticket),
         unquote(sla_mod),
-        unquote(conversation_mod)
+        unquote(conversation_mod),
+        unquote(csat_survey_token_mod),
+        unquote(csat_mod)
       )
 
       Samen.Scopes.Support.Blueprint.define_conversation(
@@ -193,6 +204,16 @@ defmodule Samen.Scopes.Support do
         unquote(domain),
         unquote(repo),
         unquote(abbrevs.csat),
+        unquote(ticket_mod),
+        unquote(agent_mod)
+      )
+
+      Samen.Scopes.Support.Blueprint.define_csat_survey_token(
+        unquote(csat_survey_token_mod),
+        unquote(otp_app),
+        unquote(domain),
+        unquote(repo),
+        unquote(abbrevs.csat_survey_token),
         unquote(ticket_mod),
         unquote(agent_mod)
       )

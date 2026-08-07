@@ -311,4 +311,46 @@ defmodule Samen.AI.EmbeddingsTest do
       assert {:error, :not_implemented} = Embedder.Deterministic.complete(payload, %{})
     end
   end
+
+  # ---------------------------------------------------------------------------------------
+  # T78 (spec §I5) — the honest "is this ranking simulated" seam a KB-suggestion panel reads
+  # to badge `search/3` results, mirroring T152's `%Samen.AI.Completion{simulated:}` mechanism
+  # for the embeddings lane (which has no per-Hit struct field to carry it).
+  describe "embedder_simulated?/1 — T78 honesty seam (mirrors T152 Completion.simulated)" do
+    test "the keyless :test-only deterministic fallback self-declares simulated" do
+      assert {:ok, true} = Embeddings.embedder_simulated?(opts())
+    end
+
+    test "an explicit live-shaped provider (no simulated?/0 callback) is treated as LIVE" do
+      # A provider that OMITS the optional `simulated?/0` callback — the fail-honest default
+      # (never claim a real provider is simulated). `Provider.Fake` implements `complete/2` but
+      # not `simulated?/0` in a way `embed`-lane callers would resolve to; using it here only to
+      # prove the "callback absent ⇒ false" branch, not to claim Fake is a real embedder.
+      refute function_exported?(NoSimulatedCallbackProvider, :simulated?, 0)
+
+      assert {:ok, false} =
+               Embeddings.embedder_simulated?(
+                 Keyword.merge(opts(), embedder: {NoSimulatedCallbackProvider, %{}})
+               )
+    end
+
+    test "an explicit Deterministic override also reports simulated: true (provider self-declares, not env-gated)" do
+      assert {:ok, true} =
+               Embeddings.embedder_simulated?(
+                 Keyword.merge(opts(), embedder: {Embedder.Deterministic, %{}})
+               )
+    end
+
+    test "env forced to :prod with no embedder configured ⇒ {:error, :not_configured}, same as search/3" do
+      assert {:error, :not_configured} =
+               Embeddings.embedder_simulated?(Keyword.merge(opts(), env_reader: fn -> :prod end))
+    end
+
+    test "a provider whose simulated?/0 raises degrades to false, never a crash (belt)" do
+      assert {:ok, false} =
+               Embeddings.embedder_simulated?(
+                 Keyword.merge(opts(), embedder: {RaisingSimulatedProvider, %{}})
+               )
+    end
+  end
 end

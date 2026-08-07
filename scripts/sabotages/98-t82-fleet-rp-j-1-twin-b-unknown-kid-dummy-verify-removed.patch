@@ -1,0 +1,25 @@
+# SABOTAGE: T82 fix-round — ADR-044 §14 RP-J-1's NAMED twin (b) ("remove
+# the unknown-kid dummy verification so the unknown path returns early --
+# EACH must flip its named test"). Deletes the
+# Crypto.dummy_verify_ed25519/1 call from
+# Registry.lookup_current_heartbeat_credential/4's unknown-kid branch, so
+# that path returns early (no dummy cryptographic work) — the exact timing-
+# oracle regression §4.4 exists to prevent. Verified live by the
+# adversarial round: with the dummy-verify removed, ALL 74 fleet+reveal
+# tests stayed green before this fix (the mitigation's PRESENCE was
+# previously unpinned).
+# APP: samen_core
+# TEST_FILES: test/fleet_registry_test.exs
+# MUST_FAIL: RP-J-1 twin (b): an unknown kid is rejected AND the dummy-verify mitigation is exercised, not just the outcome
+diff --git a/samen_core/lib/samen/fleet/registry.ex b/samen_core/lib/samen/fleet/registry.ex
+--- a/samen_core/lib/samen/fleet/registry.ex
++++ b/samen_core/lib/samen/fleet/registry.ex
+@@ -381,7 +381,7 @@
+       _ ->
+         # Timing-oracle mitigation (§4.4): do the SAME shape of work as a
+         # known-kid-bad-signature path before returning.
+-        _ = Crypto.dummy_verify_ed25519(signing_input)
++        _ = :ok
+         {:error, :unknown_kid}
+     end
+   end

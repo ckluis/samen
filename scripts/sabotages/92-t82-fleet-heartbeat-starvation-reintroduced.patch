@@ -1,0 +1,23 @@
+# SABOTAGE: T82 fix-round BLOCKER-1 (ADR-044 §4.4a heartbeat-starvation
+# invariant, RP-J-13). Reintroduces the pre-fix defect: a signature-invalid
+# heartbeat ALSO charges the REAL :fleet_heartbeat budget (not just the
+# separate, much-smaller :fleet_heartbeat_bad_sig bucket). With this
+# applied, a flood of forged-signature requests against one kid starves
+# that app's own subsequent VALID heartbeat -- the exact J5 failure mode
+# (a healthy product rendered stale) ADR-044 §4.4a exists to prevent.
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_ingress_test.exs
+# MUST_FAIL: BLOCKER-1 (§4.4a starvation, corrected): a signature-invalid flood PAST fleet_heartbeat's REAL limit does NOT prevent a subsequent VALID heartbeat, and raises :heartbeat_rejected
+diff --git a/samen_web/lib/samen/web/fleet/cockpit_ingress.ex b/samen_web/lib/samen/web/fleet/cockpit_ingress.ex
+--- a/samen_web/lib/samen/web/fleet/cockpit_ingress.ex
++++ b/samen_web/lib/samen/web/fleet/cockpit_ingress.ex
+@@ -118,6 +118,9 @@
+   # the :heartbeat_rejected attention entry.
+   defp handle_heartbeat_result(conn, kid, {:error, reason})
+        when reason in [:bad_signature, :unknown_kid, :retired] do
++    # BUG (reintroduced): also charges the REAL heartbeat budget on a failed
++    # signature, exactly the pre-fix defect.
++    RateLimit.check(:fleet_heartbeat, :kid, kid)
+     RateLimit.record_failure(:fleet_heartbeat_bad_sig, :kid, kid)
+ 
+     if RateLimit.over_limit?(:fleet_heartbeat_bad_sig, :kid, kid) do

@@ -24,6 +24,13 @@ config :samen_web, start_repo?: false
 
 config :samen_core, Oban, testing: :manual, plugins: false
 
+# T82 fix round (fail-honest MED): Samen.Fleet.Registry.cockpit_identity/1
+# refuses (fail-honest) unless a host EXPLICITLY configures
+# :fleet_local_credential — this test suite opts into the reference
+# (non-durable in-process) implementation explicitly, mirroring
+# samen_core/config/test.exs.
+config :samen_core, :fleet_local_credential, Samen.Fleet.LocalCredential.Agent
+
 # A5 (AC-G5-3): the sample-data offer is FAIL-CLOSED by default (env defaults :prod,
 # enabled defaults false). The test host declares its env; the RP-G5-3 red path
 # overrides this at runtime to prove the prod-without-flag refusal.

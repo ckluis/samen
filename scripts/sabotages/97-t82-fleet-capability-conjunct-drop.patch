@@ -1,0 +1,21 @@
+# SABOTAGE: T82 fix-round UNPINNED-INVARIANT (iii) (ADR-044 §4.4 'capability
+# mismatch => 401'). Drops the 'capability == :fleet_heartbeat' conjunct from
+# Registry.lookup_current_heartbeat_credential/4's filter — currently
+# shadowed in practice by the kind == :ed25519 conjunct, so this is unpinned
+# defense-in-depth: a credential row with the WRONG capability but a matching
+# kind+key_version+public_key would be accepted for a heartbeat.
+# APP: samen_core
+# TEST_FILES: test/fleet_registry_test.exs
+# MUST_FAIL: UNPINNED-INVARIANT (iii): a credential with the wrong capability is rejected even with a matching kind+key_version — red + control
+diff --git a/samen_core/lib/samen/fleet/registry.ex b/samen_core/lib/samen/fleet/registry.ex
+--- a/samen_core/lib/samen/fleet/registry.ex
++++ b/samen_core/lib/samen/fleet/registry.ex
+@@ -368,7 +368,7 @@
+       credential_res(ns)
+       |> Ash.Query.filter(
+         app_id == ^kid and key_version == ^v and kind == :ed25519 and
+-          capability == :fleet_heartbeat and is_nil(revoked_at)
++          is_nil(revoked_at)
+       )
+ 
+     case Ash.read(query, authorize?: false) do

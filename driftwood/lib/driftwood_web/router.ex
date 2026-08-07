@@ -158,6 +158,14 @@ defmodule DriftwoodWeb.Router do
     # default (`:driftwood_prometheus`).
     samen_metrics_route(name: :driftwood_prometheus)
 
+    # ADR-044 §3.2/§9.2 (T82 fix round — the ADR §9.3 row (a) two-vertical proof:
+    # "driftwood AND pawchart each mount samen_fleet_routes(), build a report from
+    # their own substrate, and GET /fleet/health returns a schema-valid,
+    # correctly-signed FleetReport for each"). Mode A/B reporting-side routes,
+    # zero-config by default (:embedded honesty floor, J5) — the SAME two lines
+    # `samen_web`'s own test host uses. See `driftwood/test/fleet_wire_test.exs`.
+    samen_fleet_routes(otp_app: :driftwood)
+
     # ADR-013 §4.4/§4.6 — the current-org data-on-the-mount seams every tenant/shared mount
     # carries: `default_org_id` (dev default → Blue Ridge Logistics, so a page with no ?org
     # renders a populated org, not a dead-end) + `org_directory` (the switcher list + the
@@ -282,7 +290,7 @@ defmodule DriftwoodWeb.Router do
                          # the `Samen.Web.Operator.Authz` on_mount (below) IN ADDITION TO the
                          # conn-level AuthGate pipeline — defense-in-depth for the real leak
                          # (operator-confidential cross-tenant MRR / load-volume aggregates).
-                         operator_authority: {Driftwood.Auth, :operator_role, []},
+                         operator_authority: {Driftwood.Auth, :operator_role, [:driftwood]},
                          aggregate_loader: {Driftwood.OperatorAggregate, :load, []}
                        }
                      )
@@ -302,7 +310,7 @@ defmodule DriftwoodWeb.Router do
                          Driftwood.Operator,
                          Driftwood.Repo,
                          plane: Samen.Web.Plane.tenant(),
-                         labels: %{operator_authority: {Driftwood.Auth, :operator_role, []}}
+                         labels: %{operator_authority: {Driftwood.Auth, :operator_role, [:driftwood]}}
                        )
                      )
 
@@ -345,7 +353,7 @@ defmodule DriftwoodWeb.Router do
         # (the principal id is appended) and FAILS CLOSED for any non-operator, so a plain
         # tenant-user session can never reach `/operator/*`. Reference resolver: a configured
         # operator roster in prod; a dev-only `:operator_admin` grant while auth is disarmed.
-        operator_authority: {Driftwood.Auth, :operator_role, []},
+        operator_authority: {Driftwood.Auth, :operator_role, [:driftwood]},
         # WS-B B6/B9 — the FlagAdminLive namespace seam: the host's Primitives
         # mount whose FeatureFlag rows the platform flag admin manages (AC-G6-7).
         flags_namespace: Driftwood.Primitives,
@@ -399,7 +407,7 @@ defmodule DriftwoodWeb.Router do
         title: "Driftwood Ops",
         crumb_root: "Driftwood Ops",
         chat_path: "/operator/desk-chat",
-        operator_authority: {Driftwood.Auth, :operator_role, []},
+        operator_authority: {Driftwood.Auth, :operator_role, [:driftwood]},
         pubsub: Driftwood.PubSub,
         object_cards: %{"freight.driver" => DriftwoodWeb.Chat.DriverCard}
       }

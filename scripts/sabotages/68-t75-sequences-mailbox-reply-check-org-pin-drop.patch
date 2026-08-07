@@ -1,0 +1,23 @@
+# SABOTAGE: T75 (spec §I2 reply-detection, org-scope pin) — drops the `org_id`
+# conjunct from `Samen.Sequences.MailboxReplyCheck.replied_since?/3`'s filter. The
+# read is documented as "org-pinned by construction" (the moduledoc's whole point:
+# "a reply recorded for a DIFFERENT org's identically-shaped person_id can never
+# leak across the boundary") — this patch is exactly that boundary breaking: any
+# org's inbound reply for a given `person_id` now pauses EVERY org's enrollment of
+# that same `person_id`.
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: CROSS-ORG: a reply recorded for the SAME person_id under a DIFFERENT org never pauses this org's enrollment
+diff --git a/samen_core/lib/samen/sequences/mailbox_reply_check.ex b/samen_core/lib/samen/sequences/mailbox_reply_check.ex
+index 5c76fd5..1e44be8 100644
+--- a/samen_core/lib/samen/sequences/mailbox_reply_check.ex
++++ b/samen_core/lib/samen/sequences/mailbox_reply_check.ex
+@@ -48,7 +48,7 @@ defmodule Samen.Sequences.MailboxReplyCheck do
+         resource
+         |> Ash.Query.new()
+         |> Ash.Query.filter(
+-          org_id == ^org_id and subject_key == "crm.person" and subject_id == ^person_id and
++          subject_key == "crm.person" and subject_id == ^person_id and
+             direction == :inbound and occurred_at >= ^since
+         )
+         |> Ash.Query.limit(1)

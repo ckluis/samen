@@ -40,6 +40,23 @@ defmodule Samen.Web.CRM.Reads do
   # kind → :type, title → :subject, completed_at||inserted_at → :at, custom["author"] → :who).
   @timeline_fields [:kind, :title, :body, :status, :due_at, :completed_at, :custom, :subject_key, :subject_id]
 
+  # The Mailbox `MailMessage` fields the CRM detail timeline projects (T74 §I1). The
+  # first three are 🔒 vault-routed and MUST be explicitly selected — otherwise the
+  # PiiResolution pass has nothing to resolve and the timeline silently loses them.
+  @mail_fields [
+    :subject,
+    :body,
+    :counterparty_address,
+    :direction,
+    :occurred_at,
+    :subject_key,
+    :subject_id,
+    :company_id
+  ]
+
+  # The Mailbox `Connection` fields the CRM mailbox settings surface reads (🔒 address).
+  @connection_fields [:address, :provider, :status, :last_synced_at, :external_account_id]
+
   @doc """
   Read CRM companies for `scope` — non-PII; org-scoped by policy. BOUNDED to
   `#{@detail_limit}` rows (A3 read-bounding); the Companies page itself reads through
@@ -623,6 +640,14 @@ defmodule Samen.Web.CRM.Reads do
     * `:closing_over_time` — opportunity COUNT bucketed by `:close_date` month over the window
       (a line series; bounded buckets).
     * `:stats` — the reused `metrics/2` (companies/contacts/open_opps/pipeline_value) stat tiles.
+    * `:rates` — `pipeline_rates/2` (T76/I3): `%{win_rate:, conversion_rate:, won:, lost:,
+      open:, on_hold:}` — see that function's doc for the two rates' EXPLICIT, DIFFERENT
+      denominators. Either rate is `nil` (never a fabricated `0.0`) when its denominator is 0.
+    * `:leaderboard` — `activity_leaderboard/3` (T76/I3): `%{rows: [%{rank:, owner_id:,
+      count:}], capped:, shown:, hidden_owners:, hidden_count:}`, ranking org members by
+      CRM-anchored activity volume, RANKED BEFORE CAPPED (fix round 1, MED-1 — the true top
+      performer always surfaces regardless of uuid sort order). `rows: []` when the org has no
+      owned CRM activities yet (honest empty, never fabricated rows).
 
   This is the THIN vertical wiring: it names the resource (`Opportunity`), the facets
   (`:pipeline_id` / `:status` / `:close_date`) and the measures, then delegates ALL discovery,
@@ -656,9 +681,208 @@ defmodule Samen.Web.CRM.Reads do
       value_by_stage: value_by_stage(mount, scope, stage_cols),
       by_status: opportunities_by_status(mount, scope),
       closing_over_time: opportunities_over_time(mount, scope, range_start, range_end),
-      stats: metrics(mount, scope)
+      stats: metrics(mount, scope),
+      # T76/I3 — conversion + win-rate + the activity leaderboard, folded into the SAME
+      # dashboard aggregate so one `crm_dashboard/3` call powers every G8 tile.
+      rates: pipeline_rates(mount, scope),
+      leaderboard: activity_leaderboard(mount, scope)
     }
   end
+
+  # ---------------------------------------------------------------------------
+  # T76/I3 — CRM reporting: conversion, win-rate, activity leaderboard (G8, T56 kit)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Pipeline WIN-RATE + CONVERSION-RATE (T76/I3) — two DISTINCT, EXPLICITLY-DEFINED rates
+  computed over the SAME per-status counts `opportunities_by_status/2` already computes (no
+  extra query — numerically consistent with the dashboard's status pie by construction).
+
+  ## Denominators (the definition a reader must be able to find HERE — spec I3's "define the
+  denominators explicitly" instruction)
+
+    * `:win_rate` — the CLOSED-DEALS basis: `won / (won + lost)`. Open and on-hold
+      opportunities are excluded from BOTH the numerator and the denominator — a rate over
+      DECIDED deals only (the deal-desk convention: "of the deals we've finished fighting
+      for, how many did we win").
+    * `:conversion_rate` — the ALL-CREATED basis: `won / (open + won + lost + on_hold)`.
+      EVERY opportunity the org has ever created counts in the denominator, including ones
+      still open — this tracks "what fraction of everything that ever entered the pipeline
+      eventually won", a wider, slower-moving number than `:win_rate` by design (an org with
+      a large open pipeline and a high win_rate can still have a low conversion_rate simply
+      because most deals haven't been decided yet — that is NOT a bug, it is the two
+      denominators disagreeing on purpose).
+
+  ## Honest-empty (never a fabricated rate)
+
+  Both rates are `nil` — NOT `0.0` — when their denominator is `0` (an org with no closed
+  deals has no win_rate; an org with no opportunities at all has no conversion_rate). A
+  fabricated `0%` would read as "we lose every deal", which is false when the truth is
+  "no deals have been decided yet". The caller renders `nil` as "—", never as a number.
+
+  Returns `%{win_rate:, conversion_rate:, won:, lost:, open:, on_hold:}` — the raw per-status
+  counts ride along so a caller can render "12 won / 30 closed" alongside the percentage.
+  """
+  def pipeline_rates(mount, scope) do
+    counts =
+      mount
+      |> opportunities_by_status(scope)
+      |> Map.get(:points)
+      |> Map.new(fn point -> {point.key, round_count(point.value)} end)
+
+    won = Map.get(counts, :won, 0)
+    lost = Map.get(counts, :lost, 0)
+    open = Map.get(counts, :open, 0)
+    on_hold = Map.get(counts, :on_hold, 0)
+
+    %{
+      win_rate: rate(won, won + lost),
+      conversion_rate: rate(won, won + lost + open + on_hold),
+      won: won,
+      lost: lost,
+      open: open,
+      on_hold: on_hold
+    }
+  rescue
+    _ -> %{win_rate: nil, conversion_rate: nil, won: 0, lost: 0, open: 0, on_hold: 0}
+  end
+
+  defp rate(_won, 0), do: nil
+  defp rate(won, total), do: won / total
+
+  defp round_count(n) when is_integer(n), do: n
+  defp round_count(n) when is_float(n), do: round(n)
+  defp round_count(_), do: 0
+
+  # The CRM object-ref subject keys a logged activity anchors to (ADR-041 §6.1) — the
+  # leaderboard counts ONLY these, so an org's OTHER Work-scope tasks (a project checklist
+  # item, a freight check-call, …) never inflate a CRM activity count.
+  @crm_subject_keys ~w(crm.company crm.person crm.opportunity)
+
+  @doc """
+  Activity LEADERBOARD (T76/I3) — ranks org members by the count of CRM-anchored activities
+  (Work `Task` rows whose `subject_key` is one of `#{inspect(@crm_subject_keys)}`) they OWN
+  (`Task.owner_id`). Built on the SAME generic `Samen.Web.Reads.aggregate_by!/3` primitive the
+  G8 dashboard's other tiles use (T56): the per-owner count is a DB `Ash.count!`, org-scoped
+  (`Samen.Policy.OrgScope`, unconditional — see `aggregate_by!/3`'s own doc).
+
+  ## `owner_id` carries NO PII — this surface resolves nothing through the vault (verified,
+  refutable)
+
+  `Task.owner_id` is a plain, structurally NON-VAULTED uuid — `samen_core/lib/samen/scopes/
+  work/blueprint.ex`'s moduledoc states this directly ("PII map — EMPTY (INV-1)… owner_id…
+  structurally non-PII") and, BY ANALOGY to ADR-041 §4.1's CRM `subject_key`/`subject_id`
+  ruling (which itself governs avoiding a CRM FK, not Identity coupling specifically), that
+  same blueprint moduledoc explains why `owner_id` is a plain uuid rather than a `belongs_to
+  User` — it decouples the Work scope from any one host's Identity mount shape. This surface
+  therefore renders the id directly (see `Samen.Web.CRM.DashboardLive`'s leaderboard tile) and
+  never calls `Samen.Api.PiiResolution`/`Samen.Vault.reveal/3` — there is no vault field on
+  this path to resolve. Verified refutably in `crm_reporting_test.exs`, anchored against the
+  vault-routed `Person.full_name`, mirroring `crm_dashboard_test.exs`'s own MASKING proof.
+  (NOTE: some hosts — `demo` — DO co-mount an Identity scope alongside CRM/Work at the same
+  root; `Task.owner_id` still carries no FK/relationship to it either way, by construction —
+  the non-PII posture holds on TYPE, not on Identity's absence.)
+
+  ## Rank BEFORE cap (T76 fix round 1, MED-1) — the true top performers always surface
+
+  A prior version discovered AT MOST `Samen.Web.Reads.default_agg_points/0` owners (the
+  primitive's OWN discovery step, which orders candidates by owner_id ASCENDING before
+  truncating) and only THEN ranked by count — so an org's single most-active member could be
+  silently ABSENT from its own leaderboard whenever their uuid happened to sort late. Fixed by
+  discovering a much LARGER candidate pool first (`:discovery_limit`, default
+  `Samen.Web.Reads.max_agg_points/0` — the primitive's OWN hard ceiling, so this is still a
+  single BOUNDED read, never unbounded), ranking THAT full pool by count DESCENDING, and only
+  THEN truncating to the DISPLAY count (`:top`, default `Samen.Web.Reads.default_agg_points/0`)
+  — cap comes AFTER rank, not before. An org with more distinct CRM-activity owners than
+  `:discovery_limit` (a 100+-head-count sales org) can still have the SAME residual — documented
+  honestly, not hidden, via `:capped`/`:hidden_owners` below (mirrors `geo_markers!/3`'s
+  `capped`/`capped_count` idiom: the exact excess is reported when knowable, `nil` — never a
+  fabricated number — when it is not).
+
+  Ties keep the discovery order (owner_id ASC). Excludes unassigned activities (`owner_id ==
+  nil`) — a leaderboard ranks MEMBERS, never the unassigned bucket. The primitive's own bounded
+  `Other` tail slice (`Samen.Web.Reads.other_key/0`) is UNCONDITIONALLY rejected before ranking
+  — it can NEVER appear as a leaderboard row (a fabricated "member" topping the board off the
+  arithmetic remainder would be exactly the disclosure-as-content-leak this reject prevents;
+  pinned by `crm_reporting_test.exs` + sabotage patch 82).
+
+  Honest empty (all-zero shape) when the org has no owned CRM-anchored activities yet, or when
+  no Work scope is mounted for this host (`work_task_resource/1` returns `nil`).
+
+  Returns `%{rows: [%{rank:, owner_id:, count:}], capped:, shown:, hidden_owners:, hidden_count:}`:
+
+    * `:rows` — the ranked, DISPLAY-bounded list (≤ `:top` entries), rank 1..N by count desc.
+    * `:shown` — `length(rows)`.
+    * `:capped` — `true` when EITHER the discovery pool itself hit `:discovery_limit` OR more
+      owners were ranked than `:top` shows.
+    * `:hidden_owners` — the EXACT count of additional distinct owners not shown, when knowable
+      (discovery was NOT capped — the common case for any realistic org); `nil` (never a
+      fabricated number) when discovery itself was capped and the true owner count beyond it is
+      unknown.
+    * `:hidden_count` — the EXACT count of activities NOT represented in `:rows` (`grand_total -
+      shown_total`, both true SQL aggregates) — ALWAYS exact regardless of which cap bound it,
+      because it is arithmetic on two real totals, not a row count.
+
+  `opts`:
+
+    * `:top` — the DISPLAY row cap (default `Samen.Web.Reads.default_agg_points/0`).
+    * `:discovery_limit` — the ranking-pool discovery cap (default
+      `Samen.Web.Reads.max_agg_points/0`; MUST be `>= :top` to rank-before-cap correctly, but
+      that invariant is the caller's — this function does not clamp `:top` against it).
+  """
+  def activity_leaderboard(mount, scope, opts \\ []) do
+    top = Keyword.get(opts, :top, Samen.Web.Reads.default_agg_points())
+    discovery_limit = Keyword.get(opts, :discovery_limit, Samen.Web.Reads.max_agg_points())
+
+    case work_task_resource(mount) do
+      nil ->
+        empty_leaderboard()
+
+      task_mod ->
+        series =
+          task_mod
+          |> Ash.Query.new()
+          |> Ash.Query.filter(not is_nil(owner_id) and subject_key in ^@crm_subject_keys)
+          |> Samen.Web.Reads.aggregate_by!(:owner_id, scope: scope, max_points: discovery_limit)
+
+        other = Samen.Web.Reads.other_key()
+
+        # Rank the FULL discovered pool (never the Other sentinel — MED-2) BEFORE truncating to
+        # the display count — this ordering is the whole MED-1 fix: cap comes AFTER rank.
+        ranked =
+          series.points
+          |> Enum.reject(&(&1.key == other))
+          |> Enum.sort_by(&(-&1.value))
+
+        shown = Enum.take(ranked, top)
+        shown_total = Enum.reduce(shown, 0, &(&1.value + &2))
+        grand_total = round_count(Samen.Web.Series.total_value(series))
+
+        # geo_markers!/3's capped_count idiom: an EXACT withheld count when knowable, else nil
+        # (never a fabricated number) — discovery capping means the true excess is unknown.
+        hidden_owners =
+          if series.capped, do: nil, else: max(length(ranked) - top, 0)
+
+        capped? = series.capped or (is_integer(hidden_owners) and hidden_owners > 0)
+
+        rows =
+          shown
+          |> Enum.with_index(1)
+          |> Enum.map(fn {point, rank} -> %{rank: rank, owner_id: point.key, count: round_count(point.value)} end)
+
+        %{
+          rows: rows,
+          capped: capped?,
+          shown: length(rows),
+          hidden_owners: hidden_owners,
+          hidden_count: max(grand_total - shown_total, 0)
+        }
+    end
+  rescue
+    _ -> empty_leaderboard()
+  end
+
+  defp empty_leaderboard, do: %{rows: [], capped: false, shown: 0, hidden_owners: 0, hidden_count: 0}
 
   @doc """
   Pipeline `value` SUMMED per stage as a bounded `%Samen.Web.Series{}` (a DB `sum` per slice,
@@ -738,6 +962,120 @@ defmodule Samen.Web.CRM.Reads do
       Ash.Resource.Info.resource?(mod)
   rescue
     _ -> false
+  end
+
+  # -- Mailbox-scope bridge (spec §I1 CRM two-way email sync, T74) --------------
+  #
+  # The SAME host-root derivation the Work bridge uses: no CRM FK, no hardcoded
+  # host module. A host that has NOT mounted `Samen.Scopes.Mailbox` gets `nil` here
+  # and an EMPTY timeline/settings surface — the honest absence, never fake mail.
+
+  @doc """
+  Derive the host's `Mailbox.MailMessage` module from a CRM `mount`, or `nil` when
+  the Mailbox scope is not mounted for this host.
+  """
+  @spec mailbox_message_resource(Mount.t()) :: module() | nil
+  def mailbox_message_resource(mount), do: mailbox_resource(mount, "MailMessage")
+
+  @doc """
+  Derive the host's `Mailbox.Connection` module from a CRM `mount`, or `nil` when
+  the Mailbox scope is not mounted for this host.
+  """
+  @spec mailbox_connection_resource(Mount.t()) :: module() | nil
+  def mailbox_connection_resource(mount), do: mailbox_resource(mount, "Connection")
+
+  defp mailbox_resource(%Mount{namespace: ns}, name) do
+    root = ns |> Module.split() |> Enum.drop(-1)
+
+    Enum.find_value(["Mailbox", "MailboxScope"], fn seg ->
+      mod = Module.concat(root ++ [seg, name])
+      if work_resource?(mod), do: mod
+    end)
+  end
+
+  defp mailbox_resource(_mount, _name), do: nil
+
+  @doc """
+  Read a person's synced mailbox messages, newest-first — BOTH directions (the
+  two-way sync's inbound AND outbound legs). 🔒 `subject`/`body`/
+  `counterparty_address` are resolved through `Samen.Api.PiiResolution` on the
+  actor's plane, exactly like every other PII read on this surface: tenant clear,
+  operator-without-grant `••••`. Returns `[]` — the honest empty list — when no
+  Mailbox scope is mounted.
+  """
+  def mail_for_person(mount, scope, person_id) do
+    pid = to_string(person_id)
+
+    read_mail(mount, scope, fn query ->
+      Ash.Query.filter(query, subject_key == "crm.person" and subject_id == ^pid)
+    end)
+  end
+
+  @doc """
+  Read a company's synced mailbox messages, newest-first. A message anchored to a
+  PERSON at that company appears here too (the secondary `company_id` anchor) —
+  zero timeline loss, the same OR-shape `activities_for_company/3` uses.
+  """
+  def mail_for_company(mount, scope, company_id) do
+    cid = to_string(company_id)
+
+    read_mail(mount, scope, fn query ->
+      Ash.Query.filter(
+        query,
+        (subject_key == "crm.company" and subject_id == ^cid) or company_id == ^cid
+      )
+    end)
+  end
+
+  defp read_mail(mount, scope, build_query) do
+    case mailbox_message_resource(mount) do
+      nil ->
+        []
+
+      resource ->
+        resource
+        |> Ash.Query.new()
+        |> Ash.Query.ensure_selected(@mail_fields)
+        |> build_query.()
+        |> Ash.Query.sort(occurred_at: :desc)
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
+        |> resolve_mail_pii(mount, resource, scope)
+    end
+  rescue
+    _ -> []
+  end
+
+  # The SAME PiiResolution chokepoint `resolve_pii/4` uses — kept separate only
+  # because the Mailbox resource is derived from the host root, not from the CRM
+  # mount's own namespace map.
+  defp resolve_mail_pii(records, mount, resource, scope) do
+    Samen.Api.PiiResolution.resolve(records, resource, actor_of(scope), repo: mount.repo)
+  rescue
+    _ -> records
+  end
+
+  @doc """
+  Read this org's mailbox connections (newest first), bounded. `[]` when the
+  Mailbox scope is not mounted — the honest absence, which the CRM mailbox settings
+  surface renders as "not connected", never as "no mail yet".
+  """
+  def mailbox_connections(mount, scope) do
+    case mailbox_connection_resource(mount) do
+      nil ->
+        []
+
+      resource ->
+        resource
+        |> Ash.Query.new()
+        |> Ash.Query.ensure_selected(@connection_fields)
+        |> Ash.Query.sort(inserted_at: :desc)
+        |> Ash.Query.limit(@detail_limit)
+        |> Ash.read!(scope: scope)
+        |> resolve_mail_pii(mount, resource, scope)
+    end
+  rescue
+    _ -> []
   end
 
   # Resolve the CRM subject anchor (precedence opportunity ▸ person ▸ company, ADR-041

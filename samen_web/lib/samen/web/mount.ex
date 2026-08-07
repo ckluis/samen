@@ -54,7 +54,8 @@ defmodule Samen.Web.Mount do
             | :search
             | :settings
             | :auth
-            | :automation,
+            | :automation
+            | :kb,
           namespace: module(),
           repo: module(),
           domain: module(),
@@ -142,6 +143,10 @@ defmodule Samen.Web.Mount do
   # T118 (ADR-039 §12 done-criterion 4 UI half) — the tenant-plane automation
   # (workflow) builder mount.
   defp scope_kind("automation"), do: :automation
+  # T78 (spec §I5) — the UNAUTHENTICATED tenant-portal KB browse + deflection
+  # mount (mounted in a host's PUBLIC router scope, no on_mount auth gate —
+  # the `samen_auth_routes` posture, never the `samen_operator_routes` one).
+  defp scope_kind("kb"), do: :kb
   defp scope_kind(k) when is_atom(k), do: k
 
   # Module atoms serialize as "Elixir.Driftwood.Crm". Host modules are COMPILED, so their
@@ -175,6 +180,11 @@ defmodule Samen.Web.Mount do
   # This is a whitelist, NOT a `to_string`/mint: an unknown key (never a framework label,
   # so cookie-injected garbage) still falls through to `String.to_existing_atom/1`, which
   # rejects a never-compiled string rather than minting an atom from session input.
+  #
+  # `fleet_authority` / `fleet_resolution` (J3 / ADR-044 §6.3a #2): the cockpit's per-product
+  # authorization + name-resolution seams (Samen.Fleet.Authz / Samen.Fleet.Resolution). MUST be
+  # whitelisted or a cockpit mount's fleet label is silently dropped at from_session/1 and the gate
+  # reads nil (fail-open-LOOKING, not loud) — round-trip pinned by mount_fleet_label_test.exs.
   @label_keys ~w(
     crm_namespace crm_path crm_logo_style
     billing_logo_style support_path support_logo_style
@@ -183,6 +193,7 @@ defmodule Samen.Web.Mount do
     operator_org_id operator_title operator_workspace operator_glyph
     operator_initials operator_logo_style operator_role operator_user
     operator_authority
+    fleet_authority fleet_resolution
     aggregate_loader otp_app status
     user_name user_role user_initials
     chat_path pubsub presence object_cards
@@ -194,6 +205,7 @@ defmodule Samen.Web.Mount do
     authn authorized_orgs
     login_path spine_sessions
     settings_path plan_labels
+    kb_namespace kb_path
   )a
 
   @label_key_strings Map.new(@label_keys, fn k -> {Atom.to_string(k), k} end)

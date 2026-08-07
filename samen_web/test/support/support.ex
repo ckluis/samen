@@ -16,6 +16,7 @@ defmodule Samen.WebTest.Support do
       agent: "wsg",
       sla: "wsl",
       macro: "wsn",
-      csat: "wss"
+      csat: "wss",
+      csat_survey_token: "scw"
     }
 end

@@ -1,0 +1,27 @@
+# SABOTAGE: T78 (spec §I5 helpdesk knowledge base) — drops the `visibility ==
+# :public` conjunct from `Samen.Scopes.Cms.PublicPostFilter.prepare/3`. `Post.
+# :read_public` still filters on `org_id` + `status == :published`, but a
+# published INTERNAL article (an agent-only note that was never meant to leave
+# the org, e.g. an internal runbook) now passes the ENTIRE authorization
+# surface for the unauthenticated tenant portal — done-criterion 1's RED path
+# ("internal article NEVER on portal") silently inverts to a real content leak.
+# The `visibility` attribute itself is untouched (still stored, still shown
+# correctly in the agent KbLive view) — only the portal's own gate stops
+# checking it.
+# APP: samen_web
+# TEST_FILES: test/samen/scopes/cms_kb_scope_test.exs test/samen/web/support/kb_reads_test.exs test/samen/web/portal_kb_live_test.exs
+# MUST_FAIL: a published but INTERNAL article is invisible to read_public
+# MUST_FAIL: an INTERNAL article (never public) never surfaces on the portal even if it ranks well
+# MUST_FAIL: a published but INTERNAL article is absent from the browse list
+diff --git a/samen_core/lib/samen/scopes/cms/blueprint.ex b/samen_core/lib/samen/scopes/cms/blueprint.ex
+--- a/samen_core/lib/samen/scopes/cms/blueprint.ex
++++ b/samen_core/lib/samen/scopes/cms/blueprint.ex
+@@ -32,7 +32,7 @@ defmodule Samen.Scopes.Cms.PublicPostFilter do
+
+     Ash.Query.filter(
+       query,
+-      org_id == ^org_id and status == :published and visibility == :public
++      org_id == ^org_id and status == :published
+     )
+   end
+ end

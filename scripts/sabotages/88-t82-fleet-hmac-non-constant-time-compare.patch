@@ -1,0 +1,25 @@
+# SABOTAGE: T82 RP-J-1 (ADR-044 §4.4/§4.6, WS-J J1) — neuters
+# Samen.Fleet.Crypto.secure_compare/2 so it ALWAYS accepts (the "short-circuit true"
+# sabotage the ADR names verbatim: "make the signature comparison non-constant-time /
+# short-circuit true"). Mirrors the shipped Samen.Webhook.Signer precedent
+# (scripts/sabotages/25-b9-webhook-signature-bypass.patch) exactly — same
+# `|> Kernel.||(true)` neuter. With this applied, mode-A HMAC verification accepts
+# ANY signature (wrong secret, tampered body, forged request), so the RP-J-1
+# bad-secret red paths — both the pure Crypto unit test and the HTTP-layer
+# GET /fleet/health 401 — MUST flip to green-when-they-should-be-red.
+# APP: samen_core
+# TEST_FILES: test/fleet_crypto_test.exs
+# MUST_FAIL: RED: wrong secret fails, with a positive control on the right one
+diff --git a/samen_core/lib/samen/fleet/crypto.ex b/samen_core/lib/samen/fleet/crypto.ex
+--- a/samen_core/lib/samen/fleet/crypto.ex
++++ b/samen_core/lib/samen/fleet/crypto.ex
+@@ -240,7 +240,8 @@ defmodule Samen.Fleet.Crypto do
+       a_bytes = :binary.bin_to_list(a)
+       b_bytes = :binary.bin_to_list(b)
+
+       Enum.zip(a_bytes, b_bytes)
+       |> Enum.reduce(0, fn {x, y}, acc -> Bitwise.bor(acc, Bitwise.bxor(x, y)) end)
+       |> Kernel.==(0)
++      |> Kernel.||(true)
+     end
+   end
