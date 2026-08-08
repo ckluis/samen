@@ -3,6 +3,120 @@
     {
       "fields": [
         {
+          "column_name": "aip_body",
+          "logical_name": "body",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "aip_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "aip_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "aip_name",
+          "logical_name": "name",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "aip_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "aip_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "aip_version",
+          "logical_name": "version",
+          "pii": false,
+          "type": "Integer"
+        }
+      ],
+      "resource": "Samen.AI.Prompt",
+      "table_name": "ai_prompt"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "sas_body",
+          "logical_name": "body",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "sas_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "sas_inbound_ref",
+          "logical_name": "inbound_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "sas_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "sas_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "sas_requested_by",
+          "logical_name": "requested_by",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "sas_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "sas_subject",
+          "logical_name": "subject",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "sas_to_subscriber_id",
+          "logical_name": "to_subscriber_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "sas_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Samen.AI.SupportReplyDraft",
+      "table_name": "ai_support_reply_draft"
+    },
+    {
+      "fields": [
+        {
           "column_name": "dag_gross_cents",
           "logical_name": "gross_cents",
           "pii": false,

@@ -1,0 +1,24 @@
+# SABOTAGE: T160 (spec §I4 completion, operator ruling 2026-08-06) — drops the org-pin
+# filter (`org_id == ^config.org_id`) from `Samen.CRM.AccountLink.domain_match/2`'s
+# candidate read (the fail-closed vaulted-domain-match fallback). Without it, the
+# candidate scan runs across EVERY org's billing customers, so a CRM Company whose
+# `domain` happens to match some OTHER org's billing customer's email domain resolves
+# to that FOREIGN customer's real MRR/subscription-status — the exact T74 cross-tenant
+# lesson (`Samen.Mailbox.Match.candidate_people/1`'s own org pin) reopened at the
+# billing-linkage seam. `authorize?: false` here is a TRUSTED-config-pin read (the org
+# boundary is meant to come from the caller's own scope, never from row data) — dropping
+# the filter turns that trust into an unbounded, unscoped scan. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_account_health_test.exs
+# MUST_FAIL: T160 FAIL-CLOSED NO-CROSS-ORG (the T74 lesson): a company's domain matches a DIFFERENT org's billing customer -> NEVER links across orgs
+diff --git a/samen_core/lib/samen/crm/account_link.ex b/samen_core/lib/samen/crm/account_link.ex
+--- a/samen_core/lib/samen/crm/account_link.ex
++++ b/samen_core/lib/samen/crm/account_link.ex
+@@ -155,7 +155,6 @@
+       config.customer_resource
+       |> Ash.Query.new()
+       |> Ash.Query.ensure_selected([:billing_email])
+-      |> Ash.Query.filter(org_id == ^config.org_id)
+       |> Ash.Query.limit(config.max_match_candidates)
+       |> Ash.read!(authorize?: false)
+       |> PiiResolution.resolve(config.customer_resource, %{plane: :tenant}, repo: config.repo)

@@ -1,0 +1,20 @@
+# SABOTAGE: T155 (driftwood draft-persistence-through-approval — the host adoption is load-bearing) — removes the ai_support_reply approval-kind registration from driftwood's config, so the AI support-reply draft can no longer route through the E3 approval engine end-to-end in the real host. Proves the driftwood adoption wiring is genuinely required (not decorative): drop it and the persistence-through-approval proof fails. Reverts byte-exact.
+# APP: driftwood
+# TEST_FILES: test/ai_support_draft_persistence_test.exs
+# MUST_FAIL: a draft PERSISTS in Driftwood.Repo and opens a pending ai_support_reply approval
+diff --git a/driftwood/config/config.exs b/driftwood/config/config.exs
+index ede4f63..d596338 100644
+--- a/driftwood/config/config.exs
++++ b/driftwood/config/config.exs
+@@ -281,10 +281,7 @@ config :samen_core, Samen.Approvals,
+ 
+ config :samen_core, Samen.Approvals.Registry,
+   kinds: %{
+-    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler},
+-    # T155 (ADR-043 §6.3 D5): the AI support operator's human-gated send. Operator plane;
+-    # requester (the AI service principal) is never the decider (distinct-party by construction).
+-    "ai_support_reply" => {:operator, Samen.AI.SupportOperator.ReplyHandler}
++    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler}
+   }
+ 
+ # T155 (ADR-043 §5.2 / §6.3): point the reusable AI-plane resources (mounted via

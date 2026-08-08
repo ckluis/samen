@@ -27,11 +27,30 @@ defmodule PawChartWeb.Router do
   import Phoenix.LiveView.Router
   import Samen.Web.Router
 
+  # T157 — the current-org data-on-the-mount labels the operator mount + directory read.
+  # `operator_authority` is the REAL roster seam (T146/T157): `PawChart.Auth.operator_role/2`
+  # resolves the configured `:operator_roster` (a production-shaped resolver), NOT the framework
+  # dev fallback. `org_directory` feeds the workspace switcher over the operator org's accounts.
+  @operator_authority {PawChart.Auth, :operator_role, [:pawchart]}
+
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
     plug(:put_root_layout, html: {PawChartWeb.Layouts, :root})
     plug(:protect_from_forgery)
+  end
+
+  pipeline :api do
+    plug(:accepts, ["json"])
+  end
+
+  # T146 / T157 — the OPERATOR control-plane authz pipeline. `Samen.Web.AuthGate` (armed by
+  # `:auth_required?`) verifies the authenticated principal HOLDS operator authority via the
+  # `:operator_authority` resolver (`config :pawchart, :operator_authority`), redirecting any
+  # non-operator to /login BEFORE any operator surface renders. The conn-level twin of the
+  # `Samen.Web.Operator.Authz` on_mount the operator macro carries.
+  pipeline :require_authenticated_operator do
+    plug(Samen.Web.AuthGate, otp_app: :pawchart)
   end
 
   scope "/", PawChartWeb do
@@ -173,10 +192,88 @@ defmodule PawChartWeb.Router do
     )
 
     # Settings (ADR-029) is NOT mounted here: `samen_settings_routes` requires a mounted
-    # IDENTITY namespace (`User`/`ApiKey`/`Membership`), and PawChart materializes no
-    # `Samen.Scopes.Identity` scope (it has no operator/account book — the clinic is a
-    # single-tenant dogfood). Mounting settings would require first materializing an
-    # Identity scope (new abbrev-owning resources via the sanctioned allocator), which is
-    # beyond an ≈0-LOC adoption. Recorded honestly in docs/gate-ws-e.md (E7.1 mount matrix).
+    # IDENTITY namespace (`User`/`ApiKey`/`Membership`). As of T157 PawChart DOES materialize an
+    # Identity scope — but only on the OPERATOR namespace (`PawChart.Operator`, the SaaS's own
+    # book of business), NOT on a tenant clinic. The tenant self-serve settings surface still has
+    # no tenant Identity mount, so it stays unmounted (honest boundary, docs/gate-ws-e.md).
+  end
+
+  # ============================================================================
+  # T157 — the OPERATOR / SaaS-company control plane, ADOPTED at ≈0 authored LOC.
+  # PawChart mounts the framework operator plane by MOUNT (this scope + a roster), NOT by
+  # re-implementing operator-plane behavior. The framework's OWN `Samen.Web.Operator.*`
+  # LiveViews render pawchart's (vet-shaped) book of business — the second-vertical proof.
+  # ============================================================================
+
+  # T146 (round 3) — the session-safe mount for the operator IMPERSONATION live_session. Its ONLY
+  # load-bearing job is to carry the `:operator_authority` seam so the `Samen.Web.Operator.Authz`
+  # `:require_operator` on_mount can resolve operator authority on the WEBSOCKET mount (the conn
+  # pipeline gates only the HTTP dead-render). Its OWN named live_session prevents a tenant socket
+  # from `live_redirect`-ing in with no gate running.
+  @impersonate_mount Samen.Web.Mount.to_session(
+                       Samen.Web.Mount.new(
+                         :operator,
+                         PawChart.Operator,
+                         PawChart.Repo,
+                         plane: Samen.Web.Plane.tenant(),
+                         labels: %{operator_authority: {PawChart.Auth, :operator_role, [:pawchart]}}
+                       )
+                     )
+
+  # ADR-010 — the OPERATOR workspace, mounted from samen_web in ONE macro call over PawChart's
+  # operator namespace (`PawChart.Operator` — its FIRST Identity mount; accounts ARE tenant orgs).
+  # Accounts · Platform billing · Revenue · Desk. Every route rides the `:require_operator`
+  # on_mount (a tenant-user session can never reach `/operator/*`) AND the conn-level AuthGate.
+  scope "/" do
+    pipe_through([:browser, :require_authenticated_operator])
+
+    samen_operator_routes(PawChart.Operator,
+      repo: PawChart.Repo,
+      operator_org_id: "0f000000-0000-4000-8000-0000000000c1",
+      include_aggregate: false,
+      labels: %{
+        operator_workspace: "PawChart Ops",
+        operator_glyph: "P",
+        # ADR-013 §5.2 — the operator Accounts "Open account →" two-grade drill-in:
+        #   :tenant_landing   — where act-as (clear) lands (the clinic landing),
+        #   :impersonate_path — the masked operator-plane impersonation surface (below).
+        tenant_landing: "/",
+        impersonate_path: "/operator/impersonate",
+        # T146 / T157 — the REAL operator-ROLE authority seam. `PawChart.Auth.operator_role/2`
+        # derives authority from the AUTHENTICATED PRINCIPAL via the configured `:operator_roster`
+        # (NOT the framework dev fallback) and FAILS CLOSED for any non-operator.
+        operator_authority: @operator_authority,
+        # WS-B — the platform flag admin namespace seam.
+        flags_namespace: PawChart.Primitives
+      }
+    )
+  end
+
+  # T146 — the pawchart-LOCAL masked impersonation console (vet-shaped: clinic patient/owner
+  # roster), in its OWN named live_session carrying the operator-ROLE on_mount. Aliased under
+  # `PawChartWeb` because `OperatorImpersonationLive` is a host-local LiveView (the vertical 20%).
+  scope "/", PawChartWeb do
+    pipe_through([:browser, :require_authenticated_operator])
+
+    live_session :pawchart_operator_impersonate,
+      on_mount: [{Samen.Web.Operator.Authz, :require_operator}],
+      session: %{"samen_mount" => @impersonate_mount} do
+      live("/operator/impersonate", OperatorImpersonationLive)
+    end
+  end
+
+  # T142 (folded into T157, per operator ruling) — the AI-plane MCP server endpoint (ADR-043 §9),
+  # mounted in ONE line with a REAL constant-time `:actor_resolver`. `PawChartWeb.Api.McpKeyResolver`
+  # digests the bearer token (SHA-256) and confirms it against the stored per-operator token digest
+  # with `Plug.Crypto.secure_compare/2`, returning a `%Samen.Scope{}` scoped to the token owner's org
+  # (org-A token cannot reach org-B data). Bare `forward` (no browser session/CSRF) — auth is the
+  # bearer token alone; unauth / forged / revoked ⇒ 401 (proven by the e2e auth test).
+  scope "/" do
+    pipe_through(:api)
+
+    samen_mcp_route(
+      actor_resolver: {PawChartWeb.Api.McpKeyResolver, :resolve_scope, []},
+      tool_opts: [domains: [PawChart.Crm], repo: PawChart.Repo]
+    )
   end
 end

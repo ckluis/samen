@@ -47,6 +47,7 @@ defmodule Samen.Web.CRMAccountHealthTest do
   defp seed_subscription(org_id, opts) do
     status = Keyword.get(opts, :status, :active)
     amount_cents = Keyword.get(opts, :amount_cents, 19_900)
+    billing_email = Keyword.get(opts, :billing_email, "billing-#{System.unique_integer([:positive])}@example.com")
 
     plan =
       Samen.WebTest.Billing.Plan
@@ -81,7 +82,7 @@ defmodule Samen.Web.CRMAccountHealthTest do
         %{
           org_id: org_id,
           billing_name: "Health Fixture Holdings #{System.unique_integer([:positive])}",
-          billing_email: "billing-#{System.unique_integer([:positive])}@example.com",
+          billing_email: billing_email,
           status: :active,
           currency: "USD"
         },
@@ -138,10 +139,39 @@ defmodule Samen.Web.CRMAccountHealthTest do
     |> Ash.create!()
   end
 
-  defp seed_company(org_id, name \\ "Acme Freight Co") do
+  defp seed_company(org_id, name \\ "Acme Freight Co", attrs \\ %{}) do
     Samen.WebTest.Crm.Company
-    |> Ash.Changeset.for_create(:create, %{org_id: org_id, name: name}, authorize?: false)
+    |> Ash.Changeset.for_create(:create, Map.merge(%{org_id: org_id, name: name}, attrs), authorize?: false)
     |> Ash.create!()
+  end
+
+  # T160 helpers ------------------------------------------------------------
+
+  # Register + set the `billing_customer_id` anchor directly (bypassing the LiveView
+  # event — used where a test wants the link ALREADY set before mount/render).
+  defp anchor_company!(org_id, company, customer_id) do
+    company_resource = Samen.WebTest.Crm.Company
+    :ok = Samen.CRM.AccountLink.ensure_registered!(org_id, company_resource, Samen.WebTest.Repo)
+
+    company
+    |> Ash.Changeset.for_update(:update, %{custom: %{"billing_customer_id" => customer_id}, org_id: org_id}, authorize?: false)
+    |> Ash.update!()
+  end
+
+  # Slice the rendered HTML into its two clearly-separated panels (see
+  # `Samen.Web.CRM.CompanyLive`'s render) so a test can prove a number appears in ONE
+  # panel and NOT the other — the precise form of the anti-regression guarantee this
+  # whole task exists to prove (never render a book-wide number under a specific
+  # company's own tiles).
+  defp per_company_panel(html) do
+    [_, rest] = String.split(html, ~s(id="account-health-panel"), parts: 2)
+    [panel, _] = String.split(rest, ~s(id="portfolio-health-panel"), parts: 2)
+    panel
+  end
+
+  defp portfolio_panel(html) do
+    [_, rest] = String.split(html, ~s(id="portfolio-health-panel"), parts: 2)
+    rest
   end
 
   # ==========================================================================
@@ -376,7 +406,7 @@ defmodule Samen.Web.CRMAccountHealthTest do
   # 6. FIRST-CLIENT — CompanyLive renders the panel from seeded data
   # ==========================================================================
 
-  test "FIRST-CLIENT: CompanyLive renders MRR / account health / open-support-ticket tiles from seeded data" do
+  test "FIRST-CLIENT PORTFOLIO: CompanyLive's secondary portfolio panel renders MRR / health / open-support-ticket tiles from seeded data" do
     mount = build_mount(:crm)
     org_id = Ash.UUID.generate()
     company = seed_company(org_id)
@@ -386,38 +416,49 @@ defmodule Samen.Web.CRMAccountHealthTest do
     seed_ticket(org_id, status: :open, breached: false)
 
     html = render_live(CompanyLive, mount, [org_id, company.id])
+    portfolio = portfolio_panel(html)
 
-    assert html =~ "account-health-panel"
-    assert html =~ "account-mrr"
-    assert html =~ "$199.00"
-    assert html =~ "account-health-score"
-    assert html =~ "84 / 100"
-    assert html =~ "watch"
-    assert html =~ "account-support-load"
-    assert html =~ "1 breaching SLA"
+    assert portfolio =~ "portfolio-mrr"
+    assert portfolio =~ "$199.00"
+    assert portfolio =~ "portfolio-health-score"
+    assert portfolio =~ "84 / 100"
+    assert portfolio =~ "watch"
+    assert portfolio =~ "portfolio-support-load"
+    assert portfolio =~ "1 breaching SLA"
+
+    # T160 — this company was NEVER linked (no anchor, no domain match set up), so the
+    # PRIMARY per-company panel must NOT show the book's numbers under this company's
+    # own name (the exact defect T160 closes) — honest "not linked", not a guess.
+    per_company = per_company_panel(html)
+    refute per_company =~ "$199.00"
+    refute per_company =~ "84 / 100"
+    assert per_company =~ "not linked to a billing account yet"
   end
 
-  test "FIRST-CLIENT HONEST EMPTY: a fresh org renders real zeros — never a fabricated MRR/health/ticket number" do
+  test "FIRST-CLIENT HONEST EMPTY: a fresh org renders real zeros in the portfolio panel — never a fabricated MRR/health/ticket number" do
     mount = build_mount(:crm)
     org_id = Ash.UUID.generate()
     company = seed_company(org_id, "Fresh Co")
 
     html = render_live(CompanyLive, mount, [org_id, company.id])
+    portfolio = portfolio_panel(html)
 
-    assert html =~ "account-health-panel"
     # Rendered via an interpolated `{@sub}` expression (unlike the static disclosure
     # text below), so Phoenix.HTML escapes the apostrophe to `&#39;`.
-    assert html =~ "no subscriptions on file across this org&#39;s customers"
-    assert html =~ "40 / 100"
-    assert html =~ "at risk"
-    assert html =~ "none breaching SLA"
+    assert portfolio =~ "no subscriptions on file across this org&#39;s customers"
+    assert portfolio =~ "40 / 100"
+    assert portfolio =~ "at risk"
+    assert portfolio =~ "none breaching SLA"
+
+    per_company = per_company_panel(html)
+    assert per_company =~ "not linked to a billing account yet"
   end
 
   # ==========================================================================
-  # 7. Fix round 1, HIGH — COPY HONESTY: portfolio totals, never this company's own
+  # 7. Fix round 1, HIGH (portfolio) + T160 (per-company) — COPY HONESTY
   # ==========================================================================
 
-  test "FIRST-CLIENT COPY HONESTY (fix round 1, HIGH): tiles/disclosure read as portfolio-wide totals, never this company's own numbers" do
+  test "COPY HONESTY (fix round 1, HIGH): the SECONDARY portfolio panel's tiles/disclosure read as portfolio-wide totals, never this company's own numbers" do
     mount = build_mount(:crm)
     org_id = Ash.UUID.generate()
     company = seed_company(org_id)
@@ -425,19 +466,45 @@ defmodule Samen.Web.CRMAccountHealthTest do
     seed_subscription(org_id, amount_cents: 19_900, status: :active)
 
     html = render_live(CompanyLive, mount, [org_id, company.id])
+    portfolio = portfolio_panel(html)
 
-    # The corrected, honest labels/disclosure.
-    assert html =~ "Total MRR — all customers"
-    assert html =~ "Portfolio health"
-    assert html =~ "Open support tickets — all customers"
-    assert html =~ "org-wide totals across this org's ENTIRE customer &amp; support book"
-    assert html =~ "NOT this specific company's numbers"
-    assert html =~ "CRM-account-to-billing-customer link the substrate does not have yet"
+    # The corrected, honest labels/disclosure — now correctly scoped to the SECONDARY
+    # portfolio panel (T160 made the per-company panel the primary/default view).
+    assert portfolio =~ "Total MRR — all customers"
+    assert portfolio =~ "Portfolio health"
+    assert portfolio =~ "Open support tickets — all customers"
+    assert portfolio =~ "org-wide totals across this org's ENTIRE customer &amp; support book"
+    assert portfolio =~ "NOT this specific company's numbers"
+    # T160 — the OLD claim ("the substrate does not have yet") is now FALSE (T160 built
+    # the link) and must never reappear; the disclosure instead points at the linking
+    # affordance the per-company panel now offers.
+    refute portfolio =~ "the substrate does not have yet"
+    assert portfolio =~ "link this company to a billing account above"
 
     # The REFUTED false claims (fix round 1) must never reappear: this is NOT "the
     # org's own relationship with the platform" copy.
     refute html =~ "own billing &amp; support relationship with the platform"
     refute html =~ "relationship with the platform"
+  end
+
+  test "T160 COPY HONESTY: the PRIMARY per-company panel never claims a book-wide number is this company's own, unlinked or linked" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+    company = seed_company(org_id)
+
+    # A large, distinctive book-wide MRR that would be UNMISTAKABLE if it leaked onto
+    # the per-company panel.
+    seed_subscription(org_id, amount_cents: 500_000, status: :active)
+
+    html = render_live(CompanyLive, mount, [org_id, company.id])
+    per_company = per_company_panel(html)
+
+    refute per_company =~ "all customers"
+    refute per_company =~ "$5000.00"
+    assert per_company =~ "not linked to a billing account yet"
+    # Interpolated (unlike the OLD static disclosure text), so Phoenix.HTML escapes
+    # the apostrophe to `&#39;`.
+    assert per_company =~ "never a guess, never a book-wide total under this company&#39;s name"
   end
 
   # ==========================================================================
@@ -485,9 +552,15 @@ defmodule Samen.Web.CRMAccountHealthTest do
     seed_subscription(org_id, amount_cents: 20_000, status: :past_due)
 
     html = render_live(CompanyLive, mount, [org_id, company.id])
+    portfolio = portfolio_panel(html)
 
-    assert html =~ "worst status in book: past_due"
-    refute html =~ "worst status in book: active"
+    assert portfolio =~ "worst status in book: past_due"
+    refute portfolio =~ "worst status in book: active"
+
+    # T160 — this company is unlinked, so its OWN (primary) panel must not echo the
+    # book's worst status as if it were this company's status.
+    per_company = per_company_panel(html)
+    refute per_company =~ "past_due"
   end
 
   # ==========================================================================
@@ -537,5 +610,354 @@ defmodule Samen.Web.CRMAccountHealthTest do
     # not a bug that reports "unavailable" for every call regardless of input.
     assert snap.billing_available? == true
     assert snap.mrr_cents == 19_900
+  end
+
+  # ==========================================================================
+  # 10. T160 — the linkage seam (Samen.CRM.AccountLink): anchor, domain fallback,
+  #     honest unlinked absence, fail-closed no-cross-org, ambiguous -> no-match,
+  #     anchor-authoritative-over-fallback
+  # ==========================================================================
+
+  test "T160 ANCHOR: a registered billing_customer_id anchor resolves THAT customer's real numbers" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+    company = seed_company(org_id)
+    %{customer: customer} = seed_subscription(org_id, amount_cents: 19_900, status: :active)
+
+    anchored_company = anchor_company!(org_id, company, customer.id)
+
+    scope = Samen.Web.Mount.scope(mount, org_id)
+    snap = AccountHealth.snapshot_for_company(mount, scope, anchored_company)
+
+    assert snap.link_status == :anchor
+    assert snap.billing_customer_id == customer.id
+    assert snap.billing_available? == true
+    assert snap.mrr_cents == 19_900
+    assert snap.subscription_status == :active
+    assert snap.support_available? == false
+    assert snap.open_tickets == nil
+  end
+
+  test "T160 DOMAIN FALLBACK: no anchor set, but a SINGLE confident domain match resolves that customer" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+    company = seed_company(org_id, "Acme", %{domain: "acme-t160.example"})
+    %{customer: customer} = seed_subscription(org_id, amount_cents: 29_900, status: :active, billing_email: "ap@acme-t160.example")
+
+    scope = Samen.Web.Mount.scope(mount, org_id)
+    snap = AccountHealth.snapshot_for_company(mount, scope, company)
+
+    assert snap.link_status == :domain
+    assert snap.billing_customer_id == customer.id
+    assert snap.mrr_cents == 29_900
+  end
+
+  test "T160 UNLINKED: no anchor, no domain match -> honest absence, NEVER a book-wide number, NEVER a fabricated $0" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+    company = seed_company(org_id, "No Link Co", %{domain: "nolink-t160.example"})
+    # A real subscription exists in the book, but under a DIFFERENT domain — no match.
+    seed_subscription(org_id, amount_cents: 19_900, status: :active, billing_email: "ap@other-domain.example")
+
+    scope = Samen.Web.Mount.scope(mount, org_id)
+    snap = AccountHealth.snapshot_for_company(mount, scope, company)
+
+    assert snap.link_status == :unlinked
+    assert snap.billing_customer_id == nil
+    assert snap.billing_available? == false
+    assert snap.mrr_cents == nil
+    refute snap.mrr_cents == 0
+    assert snap.health == nil
+  end
+
+  test "T160 DEGRADED READ (per-company): customer_billing_snapshot/3's own canary surfaces honest absence, never a fabricated $0" do
+    billing_mount = build_mount(:billing)
+    org_id = Ash.UUID.generate()
+    %{customer: customer} = seed_subscription(org_id, amount_cents: 19_900, status: :active)
+
+    # `scope: nil` is a malformed call Ash itself rejects (Ash.Error.Forbidden) BEFORE any
+    # policy runs — the SAME representative genuine-failure shape `snapshot/2`'s own
+    # degraded-read test uses, applied directly to the per-company read function T160 adds.
+    result = AccountHealth.customer_billing_snapshot(billing_mount, nil, customer.id)
+
+    assert result == nil
+    refute result == %{mrr_cents: 0, active_subs: 0, subscription_status: nil, past_due: %{count: 0, amount_cents: 0, max_days_overdue: 0}}
+  end
+
+  test "ANTI-TAUTOLOGY: the per-company degraded-read scenario is real — the SAME customer with a REAL scope reports its REAL $199.00" do
+    billing_mount = build_mount(:billing)
+    org_id = Ash.UUID.generate()
+    %{customer: customer} = seed_subscription(org_id, amount_cents: 19_900, status: :active)
+
+    scope = Samen.Web.Mount.scope(billing_mount, org_id)
+    result = AccountHealth.customer_billing_snapshot(billing_mount, scope, customer.id)
+
+    refute result == nil
+    assert result.mrr_cents == 19_900
+  end
+
+  test "T160 FAIL-CLOSED AMBIGUOUS: TWO customers share the same domain -> honest no-match, never a guess" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+    company = seed_company(org_id, "Ambiguous Co", %{domain: "ambiguous-t160.example"})
+    seed_subscription(org_id, amount_cents: 10_000, status: :active, billing_email: "ap@ambiguous-t160.example")
+    seed_subscription(org_id, amount_cents: 20_000, status: :active, billing_email: "billing@ambiguous-t160.example")
+
+    scope = Samen.Web.Mount.scope(mount, org_id)
+    snap = AccountHealth.snapshot_for_company(mount, scope, company)
+
+    assert snap.link_status == :unlinked
+    refute snap.mrr_cents == 10_000
+    refute snap.mrr_cents == 20_000
+  end
+
+  test "T160 FAIL-CLOSED NO-CROSS-ORG (the T74 lesson): a company's domain matches a DIFFERENT org's billing customer -> NEVER links across orgs" do
+    mount = build_mount(:crm)
+    org_a = Ash.UUID.generate()
+    org_b = Ash.UUID.generate()
+
+    company_a = seed_company(org_a, "Org A Co", %{domain: "shared-domain-t160.example"})
+    # Org B genuinely holds a customer whose domain happens to match — the refutation
+    # setup (a seed that never landed anywhere would trivially pass).
+    seed_subscription(org_b, amount_cents: 77_700, status: :active, billing_email: "ap@shared-domain-t160.example")
+
+    scope_a = Samen.Web.Mount.scope(mount, org_a)
+    snap_a = AccountHealth.snapshot_for_company(mount, scope_a, company_a)
+
+    assert snap_a.link_status == :unlinked
+    refute snap_a.mrr_cents == 77_700
+
+    # Refutation control: org B's OWN company, same domain, resolves normally within B.
+    company_b = seed_company(org_b, "Org B Co", %{domain: "shared-domain-t160.example"})
+    scope_b = Samen.Web.Mount.scope(mount, org_b)
+    snap_b = AccountHealth.snapshot_for_company(mount, scope_b, company_b)
+
+    assert snap_b.link_status == :domain
+    assert snap_b.mrr_cents == 77_700
+  end
+
+  test "T160 ANCHOR-AUTHORITATIVE-OVER-FALLBACK: a set anchor is NEVER overridden by a domain match, even a would-be-different one" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+    company = seed_company(org_id, "Authoritative Co", %{domain: "authoritative-t160.example"})
+
+    %{customer: anchored_customer} = seed_subscription(org_id, amount_cents: 11_100, status: :active)
+    # A SECOND customer whose domain WOULD confidently match this company's domain —
+    # if the fallback were consulted, it would resolve to THIS one instead.
+    %{customer: domain_customer} =
+      seed_subscription(org_id, amount_cents: 99_900, status: :active, billing_email: "ap@authoritative-t160.example")
+
+    anchored_company = anchor_company!(org_id, company, anchored_customer.id)
+
+    scope = Samen.Web.Mount.scope(mount, org_id)
+    snap = AccountHealth.snapshot_for_company(mount, scope, anchored_company)
+
+    assert snap.link_status == :anchor
+    assert snap.billing_customer_id == anchored_customer.id
+    assert snap.mrr_cents == 11_100
+    refute snap.billing_customer_id == domain_customer.id
+    refute snap.mrr_cents == 99_900
+  end
+
+  test "T160 ANCHOR-AUTHORITATIVE, but BROKEN (wrong org / deleted) -> honest absence, NEVER a silent re-guess via domain" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+    other_org_id = Ash.UUID.generate()
+    company = seed_company(org_id, "Broken Anchor Co", %{domain: "broken-anchor-t160.example"})
+
+    # This company's domain WOULD confidently match its own org's customer below — but
+    # the anchor points at a customer in a DIFFERENT org (simulating stale/corrupt data).
+    %{customer: same_org_domain_customer} =
+      seed_subscription(org_id, amount_cents: 44_400, status: :active, billing_email: "ap@broken-anchor-t160.example")
+
+    %{customer: other_org_customer} = seed_subscription(other_org_id, amount_cents: 12_300, status: :active)
+
+    scope = Samen.Web.Mount.scope(mount, org_id)
+    company_with_broken_anchor = %{company | custom: %{"billing_customer_id" => other_org_customer.id}}
+    snap = AccountHealth.snapshot_for_company(mount, scope, company_with_broken_anchor)
+
+    assert snap.link_status == :unlinked
+    refute snap.mrr_cents == 12_300
+    refute snap.mrr_cents == 44_400
+    refute snap.billing_customer_id == same_org_domain_customer.id
+  end
+
+  test "T160 ZERO-MIGRATION: the anchor is a registered Tier-1 custom field, writable through the ordinary Ash :update action" do
+    org_id = Ash.UUID.generate()
+    company = seed_company(org_id, "Registered Anchor Co")
+
+    :ok = Samen.CRM.AccountLink.ensure_registered!(org_id, Samen.WebTest.Crm.Company, Samen.WebTest.Repo)
+
+    assert %Samen.CustomFields.FieldRow{} =
+             field = Samen.CustomFields.get_field(org_id, "swc_company", "billing_customer_id", Samen.WebTest.Repo)
+
+    assert field.tnt_type == "string"
+
+    {:ok, updated} =
+      company
+      |> Ash.Changeset.for_update(:update, %{custom: %{"billing_customer_id" => Ash.UUID.generate()}, org_id: org_id},
+        authorize?: false
+      )
+      |> Ash.update()
+
+    assert is_binary(updated.custom["billing_customer_id"])
+
+    # RED — an UNregistered custom-bag key on the SAME resource is still rejected (the
+    # Tier-1 guard is not bypassed for this field; only the REGISTERED key is writable).
+    fresh_org = Ash.UUID.generate()
+    fresh_company = seed_company(fresh_org, "Unregistered Co")
+
+    assert {:error, _} =
+             fresh_company
+             |> Ash.Changeset.for_update(
+               :update,
+               %{custom: %{"billing_customer_id" => Ash.UUID.generate()}, org_id: fresh_org},
+               authorize?: false
+             )
+             |> Ash.update()
+  end
+
+  # ==========================================================================
+  # 11. T160 — snapshot_for_company/3 masking (verified non-PII outward, verified the
+  #     ONE PII field touched — Customer.billing_email — is resolver-only, never leaked)
+  # ==========================================================================
+
+  test "T160 MASKING: snapshot_for_company/3 never returns a vault field, and Company.domain (the match key) is NOT vault-routed" do
+    refute Samen.Pii.Info.vault_routed?(Samen.WebTest.Crm.Company, :domain)
+    assert Samen.Pii.Info.vault_routed?(Samen.WebTest.Billing.Customer, :billing_email)
+
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+    company = seed_company(org_id, "Mask Co", %{domain: "mask-t160.example"})
+    seed_subscription(org_id, amount_cents: 19_900, status: :active, billing_email: "ap@mask-t160.example")
+
+    scope = Samen.Web.Mount.scope(mount, org_id)
+    snap = AccountHealth.snapshot_for_company(mount, scope, company)
+
+    assert snap.link_status == :domain
+
+    # Every value in the returned snapshot is a bounded scalar (id/atom/integer/map of
+    # counts) — never a %Masked{} struct, never a raw billing_email, never a vt_* token.
+    refute match?(%Samen.Masked{}, snap.billing_customer_id)
+    refute inspect(snap) =~ "vt_"
+    refute inspect(snap) =~ "@mask-t160.example"
+  end
+
+  test "T160 MASKING: AccountLink never calls Samen.Vault.reveal directly (source-grep anti-tautology)" do
+    src = File.read!("../samen_core/lib/samen/crm/account_link.ex")
+    refute src =~ "Vault.reveal"
+  end
+
+  # ==========================================================================
+  # 12. T160 P3/P4/P5/P6 — folded-in T77-deferred punch items (portfolio path)
+  # ==========================================================================
+
+  test "T160 P3: PORTFOLIO FLOOR fixed — one historical cancelled subscription among many healthy ones no longer pins billing to 0.0" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+
+    for _ <- 1..9, do: seed_subscription(org_id, amount_cents: 9_900, status: :active)
+    seed_subscription(org_id, amount_cents: 9_900, status: :cancelled)
+
+    scope = Samen.Web.Mount.scope(mount, org_id)
+    snap = AccountHealth.snapshot(mount, scope)
+
+    billing = Enum.find(snap.health.factors, &(&1.name == :billing))
+    # 9 live (active), 0 dunning -> value 1.0 (the OLD worst-of-N formula would have
+    # pinned this at 0.0 purely from the ONE cancelled subscription — D4b).
+    assert_in_delta billing.value, 1.0, 1.0e-9
+    refute billing.value == 0.0
+    # The TRUE worst status (display text) still honestly shows cancelled — churn is
+    # surfaced, never hidden, just no longer allowed to floor the score alone.
+    assert snap.subscription_status in [:cancelled, :canceled]
+    assert billing.explanation =~ "1 cancelled subscription(s) excluded from the floor"
+  end
+
+  test "T160 P3: a book with ZERO live subscriptions (every one cancelled) still floors to 0.0 — genuine churn, not a false floor" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+
+    seed_subscription(org_id, amount_cents: 9_900, status: :cancelled)
+    seed_subscription(org_id, amount_cents: 9_900, status: :cancelled)
+
+    scope = Samen.Web.Mount.scope(mount, org_id)
+    snap = AccountHealth.snapshot(mount, scope)
+
+    billing = Enum.find(snap.health.factors, &(&1.name == :billing))
+    assert billing.value == 0.0
+    assert billing.explanation =~ "every subscription on file (2) is cancelled"
+  end
+
+  test "T160 P4: portfolio worst-status/past-due are TRUE DB aggregates, not a 200-row-bounded approximation" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+
+    # 205 healthy active subscriptions, THEN one genuinely past_due — past the OLD
+    # 200-row bound (Billing.Reads.subscriptions/2's `@detail_limit`).
+    for _ <- 1..205, do: seed_subscription(org_id, amount_cents: 100, status: :active)
+    seed_subscription(org_id, amount_cents: 100, status: :past_due)
+
+    scope = Samen.Web.Mount.scope(mount, org_id)
+    snap = AccountHealth.snapshot(mount, scope)
+
+    # The TRUE worst status is found regardless of book size — a 200-row-bounded read
+    # sorted oldest-first would have missed this (the past_due row is the 206th).
+    assert snap.subscription_status == :past_due
+
+    billing = Enum.find(snap.health.factors, &(&1.name == :billing))
+    refute billing.explanation =~ "no past-due invoices anywhere in the book"
+  end
+
+  test "T160 P5: :inactive is a recognized, neutral status — never rendered as 'unrecognized'" do
+    breakdown =
+      AccountHealth.score(%{
+        billing: %{subscription_status: :inactive, past_due: %{count: 0, amount_cents: 0, max_days_overdue: 0}},
+        support: nil
+      })
+
+    billing = Enum.find(breakdown.factors, &(&1.name == :billing))
+    assert_in_delta billing.value, 0.5, 1.0e-9
+    assert billing.explanation =~ "inactive"
+    refute billing.explanation =~ "unrecognized"
+  end
+
+  test "T160 P6: dunning copy never claims '0 past-due invoice(s) ... $0.00 overdue' when dunning is purely status-driven" do
+    breakdown =
+      AccountHealth.score(%{
+        billing: %{subscription_status: :past_due, past_due: %{count: 0, amount_cents: 0, max_days_overdue: 0}},
+        support: nil
+      })
+
+    billing = Enum.find(breakdown.factors, &(&1.name == :billing))
+    refute billing.explanation =~ "0 past-due invoice(s)"
+    refute billing.explanation =~ "$0.00 overdue"
+    assert billing.explanation =~ "past_due"
+  end
+
+  # ==========================================================================
+  # 13. T160 — the write affordance (CompanyLive's link_billing_customer event)
+  # ==========================================================================
+
+  test "T160 WRITE: linking via the CompanyLive event round-trips — the per-company panel then shows THAT customer's real numbers" do
+    mount = build_mount(:crm)
+    org_id = Ash.UUID.generate()
+    company = seed_company(org_id, "Live Link Co")
+    %{customer: customer} = seed_subscription(org_id, amount_cents: 15_500, status: :active)
+
+    session = mount_session(mount)
+    {:ok, socket} = CompanyLive.mount(%{"id" => company.id}, session, %Phoenix.LiveView.Socket{})
+    {:noreply, socket} = CompanyLive.handle_params(%{"org" => org_id, "id" => company.id}, "http://localhost/x", socket)
+
+    {:noreply, socket} =
+      CompanyLive.handle_event("link_billing_customer", %{"billing_customer_id" => customer.id}, socket)
+
+    assert socket.assigns.link_error == nil
+    assert socket.assigns.account_health.link_status == :anchor
+    assert socket.assigns.account_health.billing_customer_id == customer.id
+    assert socket.assigns.account_health.mrr_cents == 15_500
+
+    # Clearing (blank id) removes the anchor — falls back to unlinked (no domain set).
+    {:noreply, socket} = CompanyLive.handle_event("link_billing_customer", %{"billing_customer_id" => ""}, socket)
+    assert socket.assigns.account_health.link_status == :unlinked
   end
 end

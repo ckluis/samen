@@ -1,0 +1,32 @@
+# SABOTAGE: T160 (spec §I4 completion) — a set-but-BROKEN `billing_customer_id` anchor
+# (wrong org, or pointing at a deleted/nonexistent customer) now silently FALLS THROUGH
+# to `domain_match/2` instead of resolving to honest absence. The anchor is documented
+# as AUTHORITATIVE — "the fallback below is NEVER consulted, even if it would resolve to
+# a DIFFERENT customer" — precisely because a stale/corrupt anchor pointing at the WRONG
+# org must never be silently "fixed" by re-guessing via domain (that re-guess could land
+# on a genuinely different, wrong customer, and worse, masks the data-integrity bug the
+# broken anchor represents). This mutation makes a broken anchor behave AS IF it were
+# unset, defeating the authoritative guarantee. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_account_health_test.exs
+# MUST_FAIL: T160 ANCHOR-AUTHORITATIVE, but BROKEN (wrong org / deleted) -> honest absence, NEVER a silent re-guess via domain
+diff --git a/samen_core/lib/samen/crm/account_link.ex b/samen_core/lib/samen/crm/account_link.ex
+--- a/samen_core/lib/samen/crm/account_link.ex
++++ b/samen_core/lib/samen/crm/account_link.ex
+@@ -110,8 +110,14 @@
+   @spec resolve(struct(), Config.t()) :: {:ok, struct(), :anchor | :domain} | {:error, :not_linked}
+   def resolve(company, %Config{} = config) do
+     case anchor_id(company) do
+-      nil -> domain_match(company, config)
+-      id -> anchor_match(id, config)
++      nil ->
++        domain_match(company, config)
++
++      id ->
++        case anchor_match(id, config) do
++          {:error, :not_linked} -> domain_match(company, config)
++          ok -> ok
++        end
+     end
+   end
+ 

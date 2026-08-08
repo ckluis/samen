@@ -24,7 +24,7 @@ defmodule Samen.AbbrevFlattenConflictTest do
       assert Reg.flatten_conflicts(Reg.load_namespaced()) == []
     end
 
-    test "load/0 does not raise and returns the full lossless union (263 global + 142 host)" do
+    test "load/0 does not raise and returns the full lossless union (263 global + 170 host)" do
       flat = Reg.load()
       # + 3 T109 (ADR-038 §6.4) host reservations (dil/dol/wol — the durable
       # brute-force failure counter, allocator-proposed) = 355; +7 in T119 = 362;
@@ -61,7 +61,7 @@ defmodule Samen.AbbrevFlattenConflictTest do
       # driftwood tenant+operator, pawchart, samen_web test tenant+operator) = 404.
       # +1 T84 (ADR-044 §16.5 #1): samen_web test host's `woa`
       # (Samen.WebTest.OperatorScope.Assignment) = 405.
-      assert map_size(flat) == 405
+      assert map_size(flat) == 433
       # A global entry and a host entry both survive the (lossless) flatten.
       assert flat["com"] == "SamenCore.Support.Crm.Contact"
       assert flat["mce"] == "Demo.MarketingScope.ConsentEvent"

@@ -836,6 +836,83 @@ defmodule Samen.Web.Router do
   end
 
   @doc """
+  Mount the tenant-plane AI UI KIT (ADR-043 §5.3, T155) — the five reusable AI surfaces
+  (verbs · semantic search · CRM AI · analytics · support draft) — in ONE line. A vertical
+  adopts the whole tenant-facing AI plane at ≈0 authored LOC (the host's only real AI wiring
+  is the provider config from ADR-043 §5.2; INV-5):
+
+      import Samen.Web.Router
+
+      samen_ai_routes :ai, Driftwood.Crm,
+        repo: Driftwood.Repo,
+        labels: %{
+          ai_crm_resource: Driftwood.Crm.Company,
+          ai_aggregate_resource: Driftwood.Aggregate.Mrr
+        }
+
+  The macro mounts `GET /<path>` (verbs) + `/<path>/search` + `/<path>/crm` +
+  `/<path>/analytics` + `/<path>/support` under one `live_session`.
+
+  ## Keyless / fail-honest is signposted by construction
+
+  Every surface routes provider-bound bytes through `Samen.AI.Chokepoint` (INV-7 — the
+  anti-bypass probe scans `samen_web/lib`), signposts SIMULATED vs live from the T152
+  `%Completion{}.simulated` flag, and renders `Samen.AI.configuration_hint/0` verbatim on an
+  unconfigured plane — never a fabricated confident answer.
+
+  ## Grounding-resource labels (the `flags_namespace` precedent)
+
+    * `:ai_crm_resource` — the CRM object the CRM-AI surface grounds on (masked, org-scoped);
+      unset renders an honest empty state.
+    * `:ai_aggregate_resource` — the `use Samen.Aggregate.Resource` projection the analytics
+      ask-box queries (operator/platform-gated; a tenant plane is honestly refused).
+
+  ## Options
+
+    * `:repo`   — REQUIRED. The host's Ecto repo.
+    * `:domain` — the host Ash domain (default: `namespace`).
+    * `:plane`  — `:tenant` (default) or `:operator` (with `:operator_id`/`:target_org_id`).
+      The analytics surface only returns real answers on an operator/platform plane.
+    * `:path`   — the mount path prefix (default `/ai`); also carried as the `:ai_path` label
+      so the in-page tab links resolve.
+    * `:labels` — UI copy + the grounding-resource labels above.
+    * `:session_name` — override the `live_session` name.
+  """
+  defmacro samen_ai_routes(kind, namespace, opts \\ []) do
+    kind = Macro.expand(kind, __CALLER__)
+    path = Keyword.get(opts, :path, "/ai")
+    session_name = Keyword.get(opts, :session_name, session_name(:ai, path))
+
+    quote bind_quoted: [
+            kind: kind,
+            namespace: namespace,
+            opts: opts,
+            path: path,
+            session_name: session_name
+          ] do
+      _ = kind
+
+      labels = Map.put(Keyword.get(opts, :labels) || %{}, :ai_path, path)
+
+      mount =
+        Samen.Web.Mount.new(
+          :ai,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          plane: Samen.Web.Router.__plane__(opts),
+          labels: labels
+        )
+
+      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        for {sub_path, module} <- Samen.Web.Router.__routes__(:ai, path) do
+          live(sub_path, module)
+        end
+      end
+    end
+  end
+
+  @doc """
   Mount the tenant-plane AUTOMATION (workflow) BUILDER (ADR-039 §12 done-criterion 4
   UI half; T118) — `/automation`, list + author/edit workflows over a host's
   materialized Automation scope (`use Samen.Scopes.Automation`, T39) — in ONE line.
@@ -1686,6 +1763,18 @@ defmodule Samen.Web.Router do
     ]
   end
 
+  # T155 (ADR-043 §5.3) — the tenant-plane AI UI kit route table: the five reusable AI
+  # surfaces under one mount. Verbs is the index; the rest hang off sub-paths.
+  def __routes__(:ai, path) do
+    [
+      {"#{path}", Samen.Web.AI.VerbsLive},
+      {"#{path}/search", Samen.Web.AI.SearchLive},
+      {"#{path}/crm", Samen.Web.AI.CrmLive},
+      {"#{path}/analytics", Samen.Web.AI.AnalyticsLive},
+      {"#{path}/support", Samen.Web.AI.SupportDraftLive}
+    ]
+  end
+
   defp default_path(:crm), do: "/crm"
   defp default_path(:billing), do: "/billing"
   defp default_path(:support), do: "/support"
@@ -1697,6 +1786,7 @@ defmodule Samen.Web.Router do
   defp default_path(:search), do: "/search"
   defp default_path(:settings), do: "/settings"
   defp default_path(:automation), do: "/automation"
+  defp default_path(:ai), do: "/ai"
   # T78 (spec §I5) — the unauthenticated tenant-portal path.
   defp default_path(:kb), do: "/portal"
   # T79 (spec §I6) — the unauthenticated CSAT survey-response path.

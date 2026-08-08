@@ -26,7 +26,10 @@ config :pawchart,
     PawChart.Clinic,
     PawChart.Aggregate,
     PawChart.Primitives,
-    PawChart.Analytics
+    PawChart.Analytics,
+    # T157 — the ADR-010 OPERATOR namespace (a SECOND Identity+Billing+Support mount over the
+    # SaaS's OWN book of business: the clinic ACCOUNTS + their admins + subscriptions + desk).
+    PawChart.Operator
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…) discover
@@ -47,8 +50,43 @@ config :samen_core, :ash_domains, [
   PawChart.Clinic,
   PawChart.Aggregate,
   PawChart.Primitives,
-  PawChart.Analytics
+  PawChart.Analytics,
+  # T157 — register the operator namespace so the verifier gate scans its mounted
+  # Identity/Billing/Support resources (catalog_parity / prefixes / pii_* / vault parity).
+  PawChart.Operator
 ]
+
+# T157 (ADR-010) — the well-known OPERATOR org id (the SaaS company's own org). The operator
+# workspace (`/operator/accounts` · `/billing` · `/revenue` · `/desk`) scopes to this org over
+# its OWN book of business on the TENANT plane (the clinics-as-customers + their admins, CLEAR).
+# `Samen.Web.Operator.org_id/1` resolves it: label → this app-env → single seeded row.
+config :pawchart, operator_org_id: "0f000000-0000-4000-8000-0000000000c1"
+
+# F2 / ADR-031 — the prod auth arm. OFF for the local dogfood (the query-param convenience
+# identity stays); a real launch flips it true and provisions the operator roster below.
+config :pawchart, auth_required?: false
+
+# T146 / T157 — the operator-ROLE authority seam (`Samen.Web.Operator.Authz` on_mount +
+# `Samen.Web.AuthGate` conn pipeline). Called with the authenticated principal id appended;
+# returns an operator role (`Samen.OperatorPlane.Actor.roles/0`) or `nil` (NOT an operator →
+# refused). `PawChart.Auth.operator_role/2` resolves a REAL configured `:operator_roster`
+# (below) FIRST; a dev-only `:operator_admin` grant applies ONLY while `:auth_required?` is
+# false AND the principal is absent from the roster. The seam is the REAL resolver, NOT the
+# framework `Samen.Web.Operator.Authz.dev_operator_role/2` dev fallback (T157 done-criterion).
+config :pawchart, :operator_authority, {PawChart.Auth, :operator_role, [:pawchart]}
+
+# T157 — a REAL operator roster (not the dev fallback): the seeded platform operator principal
+# holds `:operator_support`. Proves the roster path grants a listed principal and refuses an
+# unlisted one EVEN when the dev fallback is disarmed (`auth_required?: true`). A production
+# deploy provisions this (or swaps `operator_role/2` for real operator `Membership` rows).
+config :pawchart, :operator_roster, %{
+  "op-pawchart-platform" => :operator_support
+}
+
+# T157 — masked impersonation over PawChart clinic tenants: the repo backing impersonation
+# sessions. An operator opens a bounded, reason-required session over ONE clinic org and sees
+# its REAL patient/pet roster with PII masked (••••).
+config :samen_core, :impersonation_repo, PawChart.Repo
 
 # WS-A A4/A5 — the kernel notification ENGINE (`Samen.Notifications.Engine`) wired to
 # PawChart's mounted Primitives resources (the ADR-014 SendWorker config convention:

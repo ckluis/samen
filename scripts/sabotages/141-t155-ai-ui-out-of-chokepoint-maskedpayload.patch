@@ -1,0 +1,16 @@
+# SABOTAGE: T155 (INV-7 no-PII-egress — the UI cannot become a hidden egress path) — introduces an out-of-chokepoint %Samen.AI.MaskedPayload{} construction inside the tenant AI UI server (samen_web), the exact bypass RP-AI-1's structural probe forbids. Proves the anti-bypass AST scan covers samen_web/lib too: a raw payload mint in the UI layer flips the probe. Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/ai/chokepoint_anti_bypass_probe_test.exs
+# MUST_FAIL: zero out-of-chokepoint MaskedPayload constructions (any form) under any app's lib/
+diff --git a/samen_web/lib/samen/web/ai/server.ex b/samen_web/lib/samen/web/ai/server.ex
+index 9899b00..cbe0747 100644
+--- a/samen_web/lib/samen/web/ai/server.ex
++++ b/samen_web/lib/samen/web/ai/server.ex
+@@ -57,6 +57,7 @@ defmodule Samen.Web.AI.Server do
+   @spec run_verb(Mount.t(), String.t() | nil, atom(), String.t(), map(), keyword()) :: result()
+   def run_verb(mount, org_id, verb, input, params \\ %{}, opts \\ [])
+       when is_atom(verb) and is_binary(input) do
++    _ = %Samen.AI.MaskedPayload{kind: :complete, segments: [input]}
+     Samen.AI.Verbs.run(verb, scope(mount, org_id), input, Keyword.merge([params: params], opts))
+   end
+ 

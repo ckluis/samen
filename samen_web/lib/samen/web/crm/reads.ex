@@ -238,6 +238,42 @@ defmodule Samen.Web.CRM.Reads do
     _ -> :error
   end
 
+  @doc """
+  T160 (spec §I4 completion) — set/clear this company's `billing_customer_id` anchor,
+  the authoritative CRM-`Company` <-> tenant `Billing.Customer` link
+  (`Samen.CRM.AccountLink`). Registers the Tier-1 custom field for this org first
+  (idempotent, zero migration — `AccountLink.ensure_registered!/3`, the ADR-041
+  `crm_refs` precedent), then writes through the ordinary sanctioned `:update` action
+  (org-scoped + the Tier-1 custom-bag validator — no bypass). `id` blank/nil CLEARS the
+  anchor (the link then falls back to the fail-closed domain match, or honest absence).
+  `{:ok, company}` or `{:error, reason}`.
+  """
+  def link_billing_customer(mount, scope, company, id) do
+    with org_id when is_binary(org_id) <- scope_org_id(scope) do
+      company_resource = Mount.resource(mount, Company)
+      :ok = Samen.CRM.AccountLink.ensure_registered!(org_id, company_resource, mount.repo)
+
+      value = if is_binary(id) and String.trim(id) != "", do: String.trim(id), else: nil
+      custom = Map.put(company.custom || %{}, Samen.CRM.AccountLink.anchor_field(), value)
+
+      # `org_id` is included explicitly (a same-value no-op write): `get_company/3`
+      # doesn't SELECT it (non-PII detail reads never needed it before), so
+      # `changeset.data.org_id` would otherwise be `Ash.NotLoaded` — and
+      # `Samen.CustomFields.Change`'s validator reads `org_id` straight off the
+      # changeset/data (not the scope) to resolve the Tier-1 field's tenant boundary.
+      company
+      |> Ash.Changeset.for_update(:update, %{custom: custom, org_id: org_id}, scope: scope)
+      |> Ash.update()
+    else
+      _ -> {:error, :no_org}
+    end
+  rescue
+    e -> {:error, e}
+  end
+
+  defp scope_org_id(%Samen.Scope{actor: %{org_id: org_id}}), do: org_id
+  defp scope_org_id(_scope), do: nil
+
   @doc "Read this company's contacts (people) for `scope`, PII plane-resolved. Optional (ADR-011 §4.2)."
   def contacts_for_company(mount, scope, company_id) do
     Mount.resource(mount, Person)

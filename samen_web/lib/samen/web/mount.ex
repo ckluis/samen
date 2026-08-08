@@ -143,6 +143,9 @@ defmodule Samen.Web.Mount do
   # T118 (ADR-039 §12 done-criterion 4 UI half) — the tenant-plane automation
   # (workflow) builder mount.
   defp scope_kind("automation"), do: :automation
+  # T155 (ADR-043 §5.3) — the tenant-plane AI UI kit mount (verbs · semantic search ·
+  # CRM AI · analytics · support draft).
+  defp scope_kind("ai"), do: :ai
   # T78 (spec §I5) — the UNAUTHENTICATED tenant-portal KB browse + deflection
   # mount (mounted in a host's PUBLIC router scope, no on_mount auth gate —
   # the `samen_auth_routes` posture, never the `samen_operator_routes` one).
@@ -211,6 +214,7 @@ defmodule Samen.Web.Mount do
     settings_path plan_labels
     kb_namespace kb_path
     fleet_namespace fleet_cockpit
+    ai_path ai_crm_resource ai_aggregate_resource
   )a
 
   @label_key_strings Map.new(@label_keys, fn k -> {Atom.to_string(k), k} end)

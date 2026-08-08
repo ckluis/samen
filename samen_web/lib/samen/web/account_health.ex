@@ -4,7 +4,9 @@ defmodule Samen.Web.AccountHealth do
   org's live PORTFOLIO signals (total MRR, support load, a composite health score)
   from whichever of the `Billing`/`Support` scopes the host has mounted ALONGSIDE the
   caller's own scope (CRM today; any future consumer tomorrow — see the "both planes"
-  note below).
+  note below). **T160 (below) additionally provides the REAL per-account seam** —
+  `snapshot_for_company/3` — which is what actually delivers spec §I4's "unfair
+  advantage" (a rep opens Acme's CRM page and sees ACME's own MRR/health).
 
   ## What "account" means here (load-bearing — read before touching this file; CORRECTED
   fix round 1 — the original premise below was refuted on the facts)
@@ -27,15 +29,33 @@ defmodule Samen.Web.AccountHealth do
 
   So `snapshot/2` is a **PORTFOLIO view**: totals across EVERY customer/ticket this org
   itself owns (`mrr_cents` sums every active subscription across the whole book;
-  `open_tickets` counts every open ticket the org's own helpdesk carries), computed
-  org-wide because the substrate carries no link between a specific CRM `Company` row
-  and a specific `Billing.Customer` row (no FK, no registered custom-bag anchor).
-  Building that per-company link is EXPLICITLY OUT OF SCOPE for this module (a separate,
-  operator-decided follow-on task) — inventing one here via name-matching would be
-  exactly the fabrication CLAUDE.md's fail-honest rule forbids. **Every caller MUST
-  present these numbers as portfolio/book-wide totals, never as this-specific-company's
-  numbers** — see `Samen.Web.CRM.CompanyLive`'s tile labels/disclosure copy for the
-  house style ("Total MRR — all customers", not "MRR").
+  `open_tickets` counts every open ticket the org's own helpdesk carries). **Every
+  caller MUST present these numbers as portfolio/book-wide totals, never as this-
+  specific-company's numbers** — see `Samen.Web.CRM.CompanyLive`'s PORTFOLIO panel
+  copy for the house style ("Total MRR — all customers", not "MRR").
+
+  ## T160 — the REAL per-account seam (spec §I4 completion, operator ruling 2026-08-06)
+
+  T77 correctly refused to fabricate a per-company number by name-matching — there was
+  no LINK between a specific `Company` row and a specific `Billing.Customer` row.
+  `Samen.CRM.AccountLink` (samen_core) now IS that link: a registered Tier-1 custom-
+  field anchor (`Company.custom["billing_customer_id"]`, zero migration, ADR-041
+  `crm_refs` precedent) with a fail-closed vaulted-domain-match fallback (T74
+  `Samen.Mailbox.Match`'s shape, verbatim). `snapshot_for_company/3` resolves a SPECIFIC
+  `Company` through that link and returns THAT customer's own MRR/subscription-status/
+  dunning — honest absence (`link_status: :unlinked`, `billing_available?: false`) when
+  no confident link exists, NEVER a book-wide number rendered under a specific
+  company's name (the T77 defect this closes), never a fabricated `$0` either.
+
+  **Support stays portfolio-only per company** — `Support.Ticket` carries NO structural
+  link to a `Company`/`Billing.Customer` in this substrate (verified: no
+  `customer_id`/`company_id` attribute, no typed `belongs_to`, `Conversation.sender_id`
+  is a bare untyped `:uuid` — `samen_core/lib/samen/scopes/support/blueprint.ex`).
+  Building that link would need a NEW attribute (a migration) — out of T160's
+  zero-migration scope. `snapshot_for_company/3` is therefore honest about this: it
+  ALWAYS reports `support_available?: false` with a distinct reason from "not
+  configured" (see `Samen.Web.CRM.CompanyLive`'s per-company support tile copy);
+  org-wide support load remains available via `snapshot/2`'s PORTFOLIO view.
 
   ## Honest absence vs a real zero vs a DEGRADED read (fix round 1, MED-3)
 
@@ -48,17 +68,24 @@ defmodule Samen.Web.AccountHealth do
     2. the scope IS mounted but the underlying read GENUINELY FAILED (a DB blip, a
        policy/authorization error, …) — detected via a deliberately UNCAUGHT canary
        read at the top of `billing_snapshot/2`/`support_snapshot/2` (see their docs).
-       `Samen.Web.Billing.Reads.metrics/2`/`Samen.Web.Support.Reads.metrics/2`'s own
-       helpers each carry their OWN `rescue -> 0` (correct for THEIR callers — a
-       dashboard tile that must never crash) — which means, once you call THEM, a
-       genuine failure is INDISTINGUISHABLE from "this org truly has zero rows". The
-       canary read runs the SAME query, uncaught, so a real failure raises HERE first.
+       `Billing.Reads`'s own helpers each carry their OWN `rescue -> 0` (correct for
+       THEIR callers — a dashboard tile that must never crash) — which means, once you
+       call THEM, a genuine failure is INDISTINGUISHABLE from "this org truly has zero
+       rows". The canary read runs the SAME query, uncaught, so a real failure raises
+       HERE first. `customer_billing_snapshot/3` (T160) needs no separate canary — its
+       own reads never swallow internally, so its own `rescue` IS the canary (see its doc).
+
+  For `snapshot_for_company/3` there is a THIRD honest-absence case, distinct from
+  both of the above: the scope IS mounted and every read genuinely succeeds, but this
+  specific `Company` has no confident link (`Samen.CRM.AccountLink.resolve/2` returns
+  `{:error, :not_linked}`) — `link_status: :unlinked`. This is not a read failure; it
+  is an honest "nothing to show yet" for THIS company, rendered identically to the
+  other two absence cases (never a fabricated number) but distinguishable via
+  `link_status` for a caller that wants to offer "link this company" UI.
 
   When a scope IS mounted and the read genuinely SUCCEEDS with nothing in it, the
   numbers are REAL zeros (`mrr_cents: 0`, `open_tickets: 0`, …) — a true DB aggregate,
-  not a fabrication. `Billing.Reads`/`Support.Reads` themselves are UNTOUCHED by this
-  fix — their existing consumers keep the exact fail-safe-empty contract they always
-  had; only THIS module's own call sites gained a canary.
+  not a fabrication.
 
   ## The health composite — a DELIBERATELY narrower formula than
   `Samen.Web.Operator.HealthScore` (WS-B/ADR-019), not a duplicate of it
@@ -67,50 +94,82 @@ defmodule Samen.Web.AccountHealth do
   both planes can consume" — but its 4-factor formula (billing/activity/support/
   adoption) leans on operator-only signals: G12 product-activity events, and Identity
   `Membership` seat counts. Neither is honestly available on every tenant-plane mount —
-  e.g. Driftwood's OWN tenant population carries NO Identity mount at all
-  (`driftwood/lib/driftwood/operator.ex`: "driftwood keeps its resource surface small" /
-  "the vertical's own tenant population is the freight orgs"). Reusing that formula here
-  would force a fabricated `seats: 0` ("nobody is in the product") for tenants that
-  plainly have users, and a permanently-`:unknown` activity factor everywhere. Rather
-  than duplicate that formula's SHAPE with fake inputs, `score/1` below scores exactly
-  the two dimensions this task's substrate can support honestly on ANY tenant mount —
-  `:billing` (PORTFOLIO subscription state + dunning, same dunning-cap PHILOSOPHY as
-  `Operator.HealthScore`, independently expressed) and `:support` (open-ticket +
-  SLA-breach load, portfolio-wide) — and is the ONE place either factor's math lives. A
-  future cross-tenant consumer (T84's cockpit) composes OVER many orgs' `snapshot/2`
-  results; it must not re-derive its own copy of this arithmetic. (Cross-referenced from
+  e.g. Driftwood's OWN tenant population carries NO Identity mount at all. Rather than
+  duplicate that formula's SHAPE with fake inputs, `score/1` below scores exactly the
+  two dimensions this task's substrate can support honestly on ANY tenant mount —
+  `:billing` (subscription state + dunning) and `:support` (open-ticket + SLA-breach
+  load) — and is the ONE place either factor's math lives (cross-referenced from
   `docs/adr/ADR-044-fleet-cockpit.md` §5.3 and `Samen.Web.Operator.HealthScore`'s own
-  moduledoc — three divergent health formulas is the risk being closed, fix round 1.)
+  moduledoc — three divergent health formulas is the risk being closed).
 
   Each factor is `1.0` (best) down to `0.0` (worst), or `:unknown` when its scope isn't
   mounted at all — an `:unknown` factor contributes `0` and the OTHER factor's weight
-  renormalizes to fill 100%, so the composite still computes with whichever signal
-  exists (mirrors `Operator.HealthScore`'s own `:unknown`-renormalization pattern,
-  AC-G17-7). The composite itself is `nil`/`band: :unknown` ONLY when BOTH scopes are
-  absent — there is nothing left to score, not even a partial one.
+  renormalizes to fill 100%. The composite itself is `nil`/`band: :unknown` ONLY when
+  BOTH scopes are absent — there is nothing left to score, not even a partial one.
 
-  ## Fix round 1, MED-2 — the billing factor uses the WORST subscription across the
-  WHOLE book, never a cherry-picked "primary" one
+  ## Worst-of-N vs score-by-SHARE (fix round 1 MED-2, T160 P3)
 
-  A book with 5 active subscriptions and 1 past-due one is NOT "active and current" —
-  `billing_snapshot/2` computes `subscription_status` as the WORST status across EVERY
-  subscription the org holds (`worst_subscription_status/1`), not the best/"primary"
-  one a prior version preferred. The billing factor's explanation string is written to
-  match: it describes the WORST state on file, never implies every customer is fine
-  when even one is not.
+  `billing_factor/1` takes ONE `subscription_status` (the worst across every
+  subscription considered) plus an OPTIONAL `:scoring_status`/`:share` pair:
+
+    * **Per-account** (`snapshot_for_company/3`, N = one customer's OWN
+      subscriptions) — `:scoring_status` is absent, so it defaults to
+      `subscription_status` itself: plain worst-of-N. This is CORRECT BY
+      CONSTRUCTION for a single account (T160 P3 disposition) — a customer with 5
+      subscriptions and 1 cancelled genuinely has a cancelled product on file.
+
+    * **Portfolio** (`snapshot/2`, N = every subscription across the WHOLE book) —
+      `billing_snapshot/2` supplies BOTH `subscription_status` (the TRUE worst across
+      EVERY subscription, including cancelled — still shown as-is, honest "worst
+      status in book" text) AND `:scoring_status` (the worst among the LIVE,
+      non-cancelled subset) plus `:share` (DB-aggregate counts). Cancelled
+      subscriptions are terminal history in a provider mirror, so ONE cancelled
+      subscription among nine healthy ones must not saturate the whole book's score
+      at the floor (T77 delta-verdict D4b, punch item P3) — `:scoring_status` skips
+      cancelled entirely UNLESS every subscription on file is cancelled/absent, in
+      which case the churn is surfaced honestly (`share.cancelled` count in the
+      copy) and the factor still floors to `0.0` (a book with ZERO live customers
+      genuinely IS at risk).
+
+  ## Book-wide DB aggregates, not a 200-row bound (T160 P4)
+
+  T77's delta round computed `subscription_status`/`past_due` from
+  `Billing.Reads.subscriptions/2`/`invoices/2` — each capped at 200 rows — while the
+  copy claimed book-WIDE completeness ("no past-due invoices anywhere in the book"),
+  provably false past the 200th row (delta finding D6). `worst_status_via_db/2` and
+  `past_due_aggregate/3` below replace that with `Ash.count!`/`Ash.exists?`-shaped
+  bounded existence/aggregate queries (mirroring `compute_mrr/2`'s own DB-aggregate
+  precedent in `Samen.Web.Billing.Reads`) — EXACT for any book size, not capped at 200.
+  Per-account tiles never needed the bound in the first place (one customer's own
+  subscriptions), but now use the SAME exact helpers for consistency.
+
+  ## `:inactive` (T160 P5) + dunning copy (T160 P6)
+
+  `:inactive` is a DECLARED `Billing.Subscription` status (the blueprint's `one_of`)
+  that T77 left unranked, so it fell to "an unrecognized state" — factually wrong
+  about the schema. It now gets its OWN branch (`billing_factor/1`): a neutral 0.5,
+  not a red flag, not "unrecognized". `dunning_explanation/2` no longer prints a
+  hollow "0 past-due invoice(s) … $0.00 overdue" when dunning is purely
+  SUBSCRIPTION-status-driven (no overdue invoice rows yet) — the invoice clause is
+  omitted entirely when `past_due.count == 0`.
 
   ## No PII (verified refutable in `crm_account_health_test.exs`)
 
   Every field this module reads/returns is a bounded count, cent amount, enum, or
   timestamp — `Subscription.status`, `Invoice.status/amount_due_cents/due_date`,
-  `Ticket.status/priority/breached`. None of these are vault-routed (the Billing/Support
-  blueprints carry PII only on `Customer.billing_name/billing_email` and
-  `Message.body` — neither is read here). This module never touches the PII resolver
-  or the vault directly — there is nothing on this path for either to resolve.
+  `Ticket.status/priority/breached`, `Company.domain` (plain, non-PII). The ONE PII
+  field this module's T160 half touches is `Billing.Customer.billing_email` (vault
+  `:pii_email`) — read EXCLUSIVELY through `Samen.CRM.AccountLink`'s own call into the
+  shared PII resolver (tenant plane), never directly, never unwrapped, never returned
+  to a caller (only a boolean match outcome crosses back). This module itself never
+  calls the PII resolver or the vault directly (see `crm_account_health_test.exs`'s
+  source-grep anti-tautology proof, which greps THIS file, not `AccountLink`'s).
   """
 
+  require Ash.Query
   require Logger
 
+  alias Samen.CRM.AccountLink
   alias Samen.Web.Mount
 
   defstruct score: nil, band: :unknown, factors: []
@@ -134,6 +193,21 @@ defmodule Samen.Web.AccountHealth do
   @factor_healthy 0.85
   @factor_watch 0.6
   @factor_at_risk 0.35
+
+  # T160 P4/P5 — the ordered severity tiers a subscription's status is checked against,
+  # worst-first (`worst_status_via_db/2` below). Encodes the SAME ranking T77's
+  # `@status_severity` map did (`:inactive` now included, P5), just via an ordered
+  # existence-check cascade instead of an in-memory `Enum.min_by` over a bounded read
+  # (T160 P4 — see the moduledoc). `:cancelled`/`:canceled` are the worst (§tier list
+  # order); anything not named here (including `:active`/`:trialing`, always checked
+  # last) is either "unrecognized" (an atom outside this whole list, checked after
+  # every named tier) or the best case.
+  @severity_tiers [
+    cancelled: [:cancelled, :canceled],
+    unpaid: [:unpaid],
+    past_due: [:past_due],
+    inactive: [:inactive]
+  ]
 
   @doc """
   Assemble ONE tenant org's PORTFOLIO snapshot (totals across this org's OWN customer/
@@ -178,14 +252,6 @@ defmodule Samen.Web.AccountHealth do
     }
   rescue
     e ->
-      # Fix round 1, LOW: `billing_snapshot/2`/`support_snapshot/2` already convert
-      # every genuine read failure into an honest `nil` (with their OWN loud log —
-      # see their docs); reaching THIS rescue means something else broke (e.g.
-      # `sibling_mount/4`'s own probe, or `score/1` itself) — log it loudly so a REAL
-      # bug is never silently indistinguishable from "this host just doesn't mount
-      # Billing/Support" in the returned shape (which, by necessity, looks the same
-      # either way to the caller — the distinction lives in the logs, not the return
-      # value, exactly like `billing_snapshot/2`'s canary rescue below).
       Logger.warning(
         "Samen.Web.AccountHealth.snapshot/2: unexpected crash assembling the portfolio snapshot (NOT necessarily \"scope not mounted\" — check this trace): " <>
           Exception.format(:error, e, __STACKTRACE__)
@@ -204,6 +270,93 @@ defmodule Samen.Web.AccountHealth do
         health: nil
       }
   end
+
+  @doc """
+  T160 (spec §I4 completion) — ONE CRM `Company`'s OWN snapshot, resolved through its
+  linked `Billing.Customer` via `Samen.CRM.AccountLink` (registered anchor, authoritative;
+  fail-closed vaulted-domain-match fallback otherwise). `mount`/`scope` are the CALLER's
+  (CRM) mount/scope — exactly the same pair `snapshot/2` takes; `company` is the loaded
+  `Company` struct (must carry `:custom` and `:domain` — `Reads.get_company/3` selects
+  both).
+
+  Returns the SAME shape as `snapshot/2` plus `link_status` (`:anchor | :domain |
+  :unlinked`) and `billing_customer_id` (the resolved customer's id, or `nil`).
+  `support_available?` is ALWAYS `false` here (see the moduledoc — Support carries no
+  per-account link in this substrate); `snapshot/2` remains the org-wide support source.
+
+  Honest absence (`link_status: :unlinked`, every numeric field `nil`) when: the
+  Billing scope isn't mounted at all, the company has no confident link (no anchor +
+  no single confident domain match), OR the underlying read genuinely fails — NEVER a
+  book-wide number under this company's name, NEVER a fabricated `$0`.
+  """
+  @spec snapshot_for_company(Mount.t(), Samen.Scope.t() | nil, map()) :: map()
+  def snapshot_for_company(mount, scope, company) do
+    billing_mount = sibling_mount(mount, :billing, ["Billing", "BillingScope"], Customer)
+
+    case resolve_link(billing_mount, scope_org_id(scope), mount.repo, company) do
+      {:ok, customer, source} ->
+        billing = customer_billing_snapshot(billing_mount, scope, customer.id)
+
+        %{
+          link_status: source,
+          billing_customer_id: customer.id,
+          billing_available?: billing != nil,
+          mrr_cents: billing && billing.mrr_cents,
+          active_subs: billing && billing.active_subs,
+          subscription_status: billing && billing.subscription_status,
+          past_due: billing && billing.past_due,
+          support_available?: false,
+          open_tickets: nil,
+          breaching_sla: nil,
+          solved_this_week: nil,
+          health: score(%{billing: billing, support: nil})
+        }
+
+      {:error, :not_linked} ->
+        unlinked_snapshot()
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "Samen.Web.AccountHealth.snapshot_for_company/3: unexpected crash resolving/reading the per-company snapshot (NOT necessarily \"not linked\" — check this trace): " <>
+          Exception.format(:error, e, __STACKTRACE__)
+      )
+
+      unlinked_snapshot()
+  end
+
+  defp unlinked_snapshot do
+    %{
+      link_status: :unlinked,
+      billing_customer_id: nil,
+      billing_available?: false,
+      mrr_cents: nil,
+      active_subs: nil,
+      subscription_status: nil,
+      past_due: nil,
+      support_available?: false,
+      open_tickets: nil,
+      breaching_sla: nil,
+      solved_this_week: nil,
+      health: nil
+    }
+  end
+
+  defp resolve_link(nil, _org_id, _repo, _company), do: {:error, :not_linked}
+  defp resolve_link(_billing_mount, nil, _repo, _company), do: {:error, :not_linked}
+
+  defp resolve_link(billing_mount, org_id, repo, company) do
+    config = %AccountLink.Config{
+      org_id: org_id,
+      repo: repo,
+      customer_resource: Mount.resource(billing_mount, Customer)
+    }
+
+    AccountLink.resolve(company, config)
+  end
+
+  defp scope_org_id(%Samen.Scope{actor: %{org_id: org_id}}), do: org_id
+  defp scope_org_id(_scope), do: nil
 
   @doc """
   The pure composite (no I/O, no clock) — `%{billing: nil | map, support: nil | map}`
@@ -283,28 +436,43 @@ defmodule Samen.Web.AccountHealth do
     }
   end
 
-  # `status` here is the WORST subscription status across the org's WHOLE customer book
-  # (`worst_subscription_status/1`, fix round 1 MED-2) — never a cherry-picked "primary"
-  # (best) subscription. The explanation strings below are written to match: they
-  # describe the worst state on file, never imply every customer is fine when even one
-  # is not.
-  defp billing_factor(%{subscription_status: status, past_due: pd}) do
+  # `subscription_status` is the TRUE worst-of-N (honest display text — see the
+  # moduledoc's "Worst-of-N vs score-by-SHARE" section). `scoring_status` (T160 P3),
+  # when present, DRIVES the value instead: absent -> defaults to `subscription_status`
+  # itself (plain worst-of-N — the per-account, correct-by-construction path);
+  # present (portfolio only) -> the worst status among the LIVE (non-cancelled)
+  # subscriptions, so one historical cancelled subscription can never alone floor an
+  # otherwise-healthy book. `share.cancelled` (portfolio only; absent/0 for per-account)
+  # is surfaced in the copy either way — churn is disclosed, never hidden, just no
+  # longer allowed to zero a book that still has a live customer base.
+  defp billing_factor(%{subscription_status: status, past_due: pd} = input) do
+    scoring_status = Map.get(input, :scoring_status, status)
+    cancelled_count = get_in(input, [:share, :cancelled]) || 0
+
     {value, explanation} =
       cond do
-        is_nil(status) ->
+        is_nil(scoring_status) and cancelled_count > 0 ->
+          {0.0, "every subscription on file (#{cancelled_count}) is cancelled — full churn, no active book left"}
+
+        is_nil(scoring_status) ->
           {0.0, "no subscriptions on file across this org's customer book — nothing keeps it current"}
 
-        status in [:cancelled, :canceled] ->
+        scoring_status in [:cancelled, :canceled] ->
           {0.0, "at least one customer subscription is cancelled — treat as churn risk in this book"}
 
-        dunning?(status, pd) ->
-          {dunning_value(pd), dunning_explanation(pd, status)}
+        dunning?(scoring_status, pd) ->
+          {dunning_value(pd), dunning_explanation(scoring_status, pd)}
 
-        status in [:active, :trialing] ->
-          {1.0, "the worst subscription state on file is '#{status}' — current, no past-due invoices anywhere in the book"}
+        scoring_status in [:active, :trialing] ->
+          {1.0, active_explanation(scoring_status, cancelled_count)}
+
+        # T160 P5 — `:inactive` is a DECLARED blueprint status (paused, not currently
+        # billing) — a neutral signal, never "unrecognized".
+        scoring_status == :inactive ->
+          {0.5, "at least one customer subscription is inactive (paused, not currently billing) — treated as neutral, not a red flag"}
 
         true ->
-          {0.25, "at least one customer subscription is in an unrecognized state #{inspect(status)}"}
+          {0.25, "at least one customer subscription is in an unrecognized state #{inspect(scoring_status)}"}
       end
 
     %{name: :billing, weight: @weights.billing, value: clamp01(value), contribution: 0.0, explanation: explanation}
@@ -312,12 +480,26 @@ defmodule Samen.Web.AccountHealth do
 
   defp dunning?(status, %{count: count}), do: count > 0 or status in [:past_due, :unpaid]
 
-  defp dunning_explanation(pd, status) do
-    status_note =
-      if status in [:past_due, :unpaid], do: "at least one customer subscription is #{status}; ", else: ""
+  # T160 P6 — the invoice clause is OMITTED entirely when there is no overdue invoice
+  # evidence (`pd.count == 0`, a purely subscription-status-driven dunning signal) —
+  # never "0 past-due invoice(s) … $0.00 overdue", the hollow-but-technically-true copy
+  # T77's delta round shipped.
+  defp dunning_explanation(status, pd) do
+    status_note = if status in [:past_due, :unpaid], do: "at least one customer subscription is #{status}"
+    invoice_note = if pd.count > 0, do: invoice_overdue_note(pd)
 
-    "this book is in dunning: #{status_note}#{pd.count} past-due invoice(s) across the org's customers, " <>
-      "#{cents(pd.amount_cents)} overdue, oldest #{pd.max_days_overdue} day(s) past due — capped below the top band until every invoice clears"
+    body =
+      case Enum.reject([status_note, invoice_note], &is_nil/1) do
+        [] -> "billing is in dunning"
+        parts -> Enum.join(parts, "; ")
+      end
+
+    "this book is in dunning: #{body}" <> if(invoice_note, do: " — capped below the top band until every invoice clears", else: "")
+  end
+
+  defp invoice_overdue_note(pd) do
+    "#{pd.count} past-due invoice(s) across the org's customers, #{cents(pd.amount_cents)} overdue, " <>
+      "oldest #{pd.max_days_overdue} day(s) past due"
   end
 
   defp dunning_value(pd) do
@@ -327,6 +509,14 @@ defmodule Samen.Web.AccountHealth do
     (@dunning_cap - days_penalty - count_penalty)
     |> max(0.02)
     |> min(@dunning_cap)
+  end
+
+  defp active_explanation(scoring_status, 0),
+    do: "the worst subscription state on file is '#{scoring_status}' — current, no past-due invoices anywhere in the book"
+
+  defp active_explanation(scoring_status, cancelled_count) do
+    "the worst LIVE subscription state on file is '#{scoring_status}' — current; #{cancelled_count} cancelled subscription(s) " <>
+      "excluded from the floor as historical churn, not counted against this score"
   end
 
   defp support_factor(nil) do
@@ -364,27 +554,29 @@ defmodule Samen.Web.AccountHealth do
     # Fix round 1, MED-3 — a CANARY read, deliberately UNCAUGHT, run before any of
     # `Billing.Reads`'s own helpers (whose `rescue -> 0` swallow a genuine failure into
     # a real-looking zero for THEIR callers — correct for a dashboard tile that must
-    # never crash, WRONG once this function treated that zero as fact). This runs the
-    # SAME query `metrics/2` runs internally for `active_subs`, with nothing here to
-    # catch it — a real failure propagates to THIS function's own `rescue` below
-    # instead of masquerading as "$0.00, no subscription on file". `Billing.Reads`
+    # never crash, WRONG once this function treated that zero as fact). `Billing.Reads`
     # itself is UNTOUCHED — its existing consumers keep their current, correct-for-them
     # fail-safe-empty contract; only this call site gained the canary.
     Ash.count!(Mount.resource(billing_mount, Customer), scope: scope)
 
     metrics = Samen.Web.Billing.Reads.metrics(billing_mount, scope)
-    subs = Samen.Web.Billing.Reads.subscriptions(billing_mount, scope)
-    invoices = Samen.Web.Billing.Reads.invoices(billing_mount, scope)
 
     now = DateTime.utc_now()
+    sub_query = Ash.Query.new(Mount.resource(billing_mount, Subscription))
+    invoice_query = Ash.Query.new(Mount.resource(billing_mount, Invoice))
 
     %{
       mrr_cents: metrics.mrr_cents,
       active_subs: metrics.active_subs,
-      # Fix round 1, MED-2 — the WORST status across EVERY subscription this org
-      # holds, never a cherry-picked "primary" (best) one.
-      subscription_status: worst_subscription_status(subs),
-      past_due: past_due_summary(invoices, now)
+      # TRUE worst-of-N across EVERY subscription this org holds (fix round 1, MED-2)
+      # — the honest "worst status in book" DISPLAY text, cancelled included.
+      subscription_status: worst_status_via_db(sub_query, scope),
+      # T160 P3 — the worst status among the LIVE (non-cancelled) subset, which is what
+      # actually DRIVES the billing factor's value (see `billing_factor/1`'s doc).
+      scoring_status: live_worst_status_via_db(sub_query, scope),
+      # T160 P4 — a book-WIDE DB aggregate, not a 200-row-bounded read.
+      past_due: past_due_aggregate(invoice_query, scope, now),
+      share: share_counts(sub_query, scope)
     }
   rescue
     e ->
@@ -396,45 +588,173 @@ defmodule Samen.Web.AccountHealth do
       nil
   end
 
-  # Fix round 1, MED-2 — worst-of-N: an org with 5 active subscriptions and 1 past-due
-  # one is NOT "active and current". Ranks every subscription's status by severity
-  # (cancelled/canceled worst, then unpaid, then past_due, then any unrecognized status,
-  # then active/trialing best) and returns the WORST one on file — `nil` only when the
-  # book holds NO subscriptions at all. Ties (e.g. two equally-severe statuses) resolve
-  # to whichever the underlying read returned first — irrelevant, since same-severity
-  # statuses score identically downstream.
-  @status_severity %{cancelled: 0, canceled: 0, unpaid: 1, past_due: 2, active: 4, trialing: 4}
-  @unrecognized_status_severity 3
+  @doc false
+  # T160 — the per-CUSTOMER analogue of `billing_snapshot/2`, filtered to ONE resolved
+  # `Billing.Customer`. No `:scoring_status`/`:share` keys — `billing_factor/1` falls
+  # back to plain worst-of-N over this customer's OWN subscriptions, correct by
+  # construction for a single account (see the moduledoc).
+  #
+  # NO explicit canary here (unlike `billing_snapshot/2`, which needs one to outrace
+  # `Billing.Reads.metrics/2`'s own internal `rescue -> 0`): every read below
+  # (`customer_mrr_cents/3`, `worst_status_via_db/2`, `past_due_aggregate/3`) is a
+  # DIRECT `Ash.count!`/`Ash.sum!`/`Ash.read_one!` call with NO internal swallowing —
+  # this function's OWN `rescue` below is already the first thing that can catch a
+  # genuine failure, so the whole read IS the canary. See sabotage 138, which proves
+  # this stays true by mutating the rescue itself (the only place a fabricated number
+  # could sneak back in), not a since-removed decorative canary line.
+  def customer_billing_snapshot(billing_mount, scope, customer_id) do
+    sub_query =
+      Mount.resource(billing_mount, Subscription)
+      |> Ash.Query.new()
+      |> Ash.Query.filter(customer_id == ^customer_id)
 
-  defp worst_subscription_status([]), do: nil
+    invoice_query =
+      Mount.resource(billing_mount, Invoice)
+      |> Ash.Query.new()
+      |> Ash.Query.filter(customer_id == ^customer_id)
 
-  defp worst_subscription_status(subs) do
-    subs
-    |> Enum.map(& &1.status)
-    |> Enum.min_by(&Map.get(@status_severity, &1, @unrecognized_status_severity))
+    now = DateTime.utc_now()
+
+    %{
+      mrr_cents: customer_mrr_cents(billing_mount, scope, customer_id),
+      active_subs: Ash.count!(Ash.Query.filter(sub_query, status in [:active, :trialing]), scope: scope),
+      subscription_status: worst_status_via_db(sub_query, scope),
+      past_due: past_due_aggregate(invoice_query, scope, now)
+    }
+  rescue
+    e ->
+      Logger.warning(
+        "Samen.Web.AccountHealth.customer_billing_snapshot/3: read failed, reporting honest absence, never a fabricated $0: " <>
+          Exception.format(:error, e, __STACKTRACE__)
+      )
+
+      nil
   end
 
-  defp past_due_summary(invoices, now) do
-    invoices
-    |> Enum.filter(&past_due?(&1, now))
-    |> Enum.reduce(%{count: 0, amount_cents: 0, max_days_overdue: 0}, fn inv, acc ->
-      days = div(max(DateTime.diff(now, inv.due_date), 0), 86_400)
+  # MRR for ONE customer = Σ over their OWN active monthly prices (same formula as
+  # `Billing.Reads.compute_mrr/2`, scoped to this customer's subscriptions instead of
+  # the whole book — zero duplicated FORMULA, just a narrower input set).
+  defp customer_mrr_cents(billing_mount, scope, customer_id) do
+    subs =
+      Mount.resource(billing_mount, Subscription)
+      |> Ash.Query.filter(customer_id == ^customer_id and status in [:active, :trialing])
+      |> Ash.Query.ensure_selected([:plan_id])
+      |> Ash.Query.limit(200)
+      |> Ash.read!(scope: scope)
 
-      %{
-        count: acc.count + 1,
-        amount_cents: acc.amount_cents + (inv.amount_due_cents || 0),
-        max_days_overdue: max(acc.max_days_overdue, days)
-      }
-    end)
+    plan_ids = subs |> Enum.map(& &1.plan_id) |> Enum.uniq()
+
+    if plan_ids == [] do
+      0
+    else
+      prices =
+        Mount.resource(billing_mount, Price)
+        |> Ash.Query.filter(interval == :monthly and active == true and plan_id in ^plan_ids)
+        |> Ash.Query.ensure_selected([:plan_id, :unit_amount])
+        |> Ash.Query.limit(200)
+        |> Ash.read!(scope: scope)
+
+      Enum.reduce(prices, 0, fn price, acc ->
+        count = Enum.count(subs, &(&1.plan_id == price.plan_id))
+        acc + count * Samen.Type.Money.cents(price.unit_amount)
+      end)
+    end
   end
 
-  # Same "past due" definition as `Samen.Web.Operator.Reads` (ADR-019): status in
-  # [:open, :draft] AND the due date has passed. Kept identical on purpose — an
-  # invoice is not past-due-on-the-operator-plane-but-current-on-the-tenant-plane.
-  defp past_due?(%{status: status, due_date: %DateTime{} = due}, now) when status in [:open, :draft],
-    do: DateTime.compare(due, now) == :lt
+  # T160 P4 — book-wide DB aggregates for the overdue-invoice summary (count/sum are
+  # exact `Ash.count!`/`Ash.sum!` aggregates; the oldest-overdue date comes from a
+  # `sort + limit(1)` — an ORDER BY/LIMIT the database computes exactly, not a
+  # client-side max over a capped row set). Works identically for the portfolio-wide
+  # query base and a customer-filtered one.
+  defp past_due_aggregate(query_base, scope, now) do
+    overdue = Ash.Query.filter(query_base, status in [:open, :draft] and due_date < ^now)
 
-  defp past_due?(_, _), do: false
+    count = Ash.count!(overdue, scope: scope)
+    amount = Ash.sum!(overdue, :amount_due_cents, scope: scope) || 0
+
+    max_days =
+      overdue
+      |> Ash.Query.sort(due_date: :asc)
+      |> Ash.Query.ensure_selected([:due_date])
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+      |> case do
+        nil -> 0
+        %{due_date: due} -> div(max(DateTime.diff(now, due), 0), 86_400)
+      end
+
+    %{count: count, amount_cents: amount, max_days_overdue: max_days}
+  end
+
+  # T160 P4/P5 — the TRUE worst status across EVERY row `query_base` selects, via the
+  # `@severity_tiers` cascade (worst-first) then an "anything else is unrecognized"
+  # check, then the best case (`:active`/`:trialing`) last. `nil` only when the query
+  # matches NO rows at all. Each step is a bounded (`limit(1)`) existence-style read —
+  # exact for any book size, never a capped-row-set approximation.
+  defp worst_status_via_db(query_base, scope) do
+    worst_status_via_db(query_base, scope, @severity_tiers)
+  end
+
+  # T160 P3 — the worst status among the LIVE (non-cancelled) subset only: the query is
+  # pre-filtered to exclude `:cancelled`/`:canceled` entirely, and the cancelled tier is
+  # dropped from the cascade (redundant with the filter, kept out for clarity). `nil`
+  # when there are NO live rows (none at all, or every row is cancelled).
+  defp live_worst_status_via_db(query_base, scope) do
+    live_tiers = Keyword.delete(@severity_tiers, :cancelled)
+    live_query = Ash.Query.filter(query_base, status not in [:cancelled, :canceled])
+    worst_status_via_db(live_query, scope, live_tiers)
+  end
+
+  defp worst_status_via_db(query_base, scope, tiers) do
+    known = tiers |> Keyword.values() |> List.flatten()
+
+    Enum.find_value(tiers, fn {_name, statuses} -> first_status_in(query_base, statuses, scope) end) ||
+      first_status_not_in(query_base, known ++ [:active, :trialing], scope) ||
+      first_status_in(query_base, [:active, :trialing], scope)
+  end
+
+  defp first_status_in(query_base, statuses, scope) do
+    query_base
+    |> Ash.Query.filter(status in ^statuses)
+    |> Ash.Query.ensure_selected([:status])
+    |> Ash.Query.limit(1)
+    |> Ash.read_one!(scope: scope)
+    |> case do
+      nil -> nil
+      row -> row.status
+    end
+  end
+
+  defp first_status_not_in(query_base, statuses, scope) do
+    query_base
+    |> Ash.Query.filter(status not in ^statuses)
+    |> Ash.Query.ensure_selected([:status])
+    |> Ash.Query.limit(1)
+    |> Ash.read_one!(scope: scope)
+    |> case do
+      nil -> nil
+      row -> row.status
+    end
+  end
+
+  # T160 P3/P4 — DB-aggregate counts by status bucket (exact `Ash.count!`, unbounded).
+  # `:cancelled` is surfaced (never hidden) so the composite's copy can disclose churn
+  # even though it no longer drives the value down alone (see `billing_factor/1`).
+  defp share_counts(query_base, scope) do
+    %{
+      active: count_matching(query_base, [:active, :trialing], scope),
+      cancelled: count_matching(query_base, [:cancelled, :canceled], scope),
+      dunning: count_matching(query_base, [:past_due, :unpaid], scope),
+      inactive: count_matching(query_base, [:inactive], scope),
+      total: Ash.count!(query_base, scope: scope)
+    }
+  end
+
+  defp count_matching(query_base, statuses, scope) do
+    query_base
+    |> Ash.Query.filter(status in ^statuses)
+    |> Ash.count!(scope: scope)
+  end
 
   defp support_snapshot(nil, _scope), do: nil
 

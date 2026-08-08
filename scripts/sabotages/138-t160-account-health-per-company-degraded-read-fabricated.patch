@@ -1,0 +1,28 @@
+# SABOTAGE: T160 (spec §I4 completion, per-account honest absence) — flips
+# `Samen.Web.AccountHealth.customer_billing_snapshot/3`'s crash-rescue from honest
+# absence (`nil`) to a FABRICATED zero map (`mrr_cents: 0`, …) — exactly the class of
+# lie patch 85 (T77, org-wide) closed, reopened at the PER-ACCOUNT seam. Unlike
+# `billing_snapshot/2` (which needs a dedicated canary read to outrace
+# `Billing.Reads.metrics/2`'s own internal `rescue -> 0`), `customer_billing_snapshot/3`
+# has NO internal swallowing anywhere in its read chain (`customer_mrr_cents/3`,
+# `worst_status_via_db/2`, `past_due_aggregate/3` are all direct, uncaught Ash calls) —
+# so THIS rescue clause is the ONLY place a fabricated number could sneak back in for a
+# genuinely LINKED (anchor/domain-confident) company whose read then fails. A caller
+# (`Samen.Web.CRM.CompanyLive`) would render "$0.00" for a real, linked customer whose
+# read merely blipped — indistinguishable from that customer genuinely having no
+# subscription. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_account_health_test.exs
+# MUST_FAIL: T160 DEGRADED READ (per-company): customer_billing_snapshot/3's own canary surfaces honest absence, never a fabricated $0
+diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web/account_health.ex
+--- a/samen_web/lib/samen/web/account_health.ex
++++ b/samen_web/lib/samen/web/account_health.ex
+@@ -628,7 +628,7 @@
+           Exception.format(:error, e, __STACKTRACE__)
+       )
+ 
+-      nil
++      %{mrr_cents: 0, active_subs: 0, subscription_status: nil, past_due: %{count: 0, amount_cents: 0, max_days_overdue: 0}}
+   end
+ 
+   # MRR for ONE customer = Σ over their OWN active monthly prices (same formula as

@@ -1,0 +1,16 @@
+# SABOTAGE: T155 (org-scope on the kit's new reads) — drops the org_id filter from Samen.Web.AI.Server.list_drafts/2, so the tenant support-draft surface's draft list returns EVERY org's drafts (cross-org leak). The drop-filter-flips-a-named-test discipline for the list_drafts read, proven in the real persistence host (driftwood). Reverts byte-exact.
+# APP: driftwood
+# TEST_FILES: test/ai_support_draft_persistence_test.exs
+# MUST_FAIL: the kit's list_drafts read is ORG-SCOPED: org A never sees org B's drafts (drop-filter-flips-this)
+diff --git a/samen_web/lib/samen/web/ai/server.ex b/samen_web/lib/samen/web/ai/server.ex
+index 9899b00..0c20356 100644
+--- a/samen_web/lib/samen/web/ai/server.ex
++++ b/samen_web/lib/samen/web/ai/server.ex
+@@ -213,7 +213,6 @@ defmodule Samen.Web.AI.Server do
+ 
+   def list_drafts(_mount, org_id) do
+     Samen.AI.SupportReplyDraft
+-    |> Ash.Query.filter(org_id == ^org_id)
+     |> Ash.Query.sort(inserted_at: :desc)
+     |> Ash.Query.limit(50)
+     |> Ash.read(authorize?: false)

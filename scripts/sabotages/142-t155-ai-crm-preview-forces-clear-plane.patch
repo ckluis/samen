@@ -1,0 +1,17 @@
+# SABOTAGE: T155 (INV-7 masking on AI surfaces) — flips the CRM grounding preview's PII resolution from the caller's REAL plane actor to a forced tenant-clear actor (%{plane: :tenant}), so an operator-plane grounding preview renders a vault-routed field in the CLEAR instead of ••••. A modeled leak of a 🔒 field on the AI surface; the operator-plane masking proof flips. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/ai_crm_masking_test.exs
+# MUST_FAIL: RED — operator plane grounds MASKED (••••), no plaintext, no vt_ token
+diff --git a/samen_web/lib/samen/web/ai/server.ex b/samen_web/lib/samen/web/ai/server.ex
+index 9899b00..603aa2e 100644
+--- a/samen_web/lib/samen/web/ai/server.ex
++++ b/samen_web/lib/samen/web/ai/server.ex
+@@ -148,7 +148,7 @@ defmodule Samen.Web.AI.Server do
+           Samen.Api.PiiResolution.resolve(
+             [record],
+             resource,
+-            actor_of(scope(mount, org_id)),
++            %{plane: :tenant},
+             repo: mount.repo
+           )
+ 

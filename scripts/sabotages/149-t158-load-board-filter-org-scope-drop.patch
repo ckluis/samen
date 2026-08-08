@@ -1,0 +1,27 @@
+# SABOTAGE: T158 (freight LOAD-BOARD filter) — drops the org-scope pin from
+# `Driftwood.Reads.load_board/2`'s underlying read: replaces `Ash.read!(scope: scope)`
+# with `Ash.read!(authorize?: false)`. `authorize?: false` skips Ash's policy
+# authorizer entirely — including `Samen.Policy.OrgScope`, the FilterCheck that narrows
+# every tenant-plane read to `org_id == actor.org_id`. Without it, the filtered load
+# board scans ALL orgs' loads and the (status/free-text) filter narrows across that
+# unbounded set instead of within the caller's own org — a broker in org A whose filter
+# happens to match a load in org B now sees org B's real load reference/lane/status. The
+# same regression would silently pass if the filter were built on top of an unscoped
+# read anywhere else in the freight console. Reverts byte-exact.
+# APP: driftwood
+# TEST_FILES: test/load_board_filter_test.exs
+# MUST_FAIL: ORG-SCOPE PIN: a filter matching BOTH orgs' loads never surfaces the other org's rows
+# MUST_FAIL: ORG-SCOPE PIN: an unfiltered board for org A never includes org B's loads either (control)
+diff --git a/driftwood/lib/driftwood/reads.ex b/driftwood/lib/driftwood/reads.ex
+index 9261ff8..e37bfbf 100644
+--- a/driftwood/lib/driftwood/reads.ex
++++ b/driftwood/lib/driftwood/reads.ex
+@@ -179,7 +179,7 @@ defmodule Driftwood.Reads do
+     |> Ash.Query.ensure_selected([:name, :value, :status, :close_date, :custom])
+     |> Ash.Query.sort(inserted_at: :asc)
+     |> maybe_filter_status(status)
+-    |> Ash.read!(scope: scope)
++    |> Ash.read!(authorize?: false)
+     |> Enum.map(fn l ->
+       lane = get_in(l.custom || %{}, ["lane"]) || "unknown"
+       Map.put(l, :__lane__, lane)

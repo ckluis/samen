@@ -29,7 +29,12 @@ config :driftwood,
     Driftwood.Chat,
     Driftwood.Primitives,
     Driftwood.Analytics,
-    Driftwood.Automation
+    Driftwood.Automation,
+    # T155 (ADR-043 §6.3): adopt the reusable AI-plane domain (Samen.AI.Prompt +
+    # Samen.AI.SupportReplyDraft) so AI support-reply drafts PERSIST in a real host
+    # (repo overrides + migrations below; the ai_support_reply approval kind registered
+    # in the Approvals.Registry block).
+    Samen.AI.Domain
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…)
@@ -53,7 +58,9 @@ config :samen_core, :ash_domains, [
   Driftwood.Chat,
   Driftwood.Primitives,
   Driftwood.Analytics,
-  Driftwood.Automation
+  Driftwood.Automation,
+  # T155 — verifiers must scan the mounted AI-plane resources too.
+  Samen.AI.Domain
 ]
 
 # WS-A A4/A5 — the kernel notification ENGINE (`Samen.Notifications.Engine`) wired to
@@ -274,8 +281,18 @@ config :samen_core, Samen.Approvals,
 
 config :samen_core, Samen.Approvals.Registry,
   kinds: %{
-    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler}
+    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler},
+    # T155 (ADR-043 §6.3 D5): the AI support operator's human-gated send. Operator plane;
+    # requester (the AI service principal) is never the decider (distinct-party by construction).
+    "ai_support_reply" => {:operator, Samen.AI.SupportOperator.ReplyHandler}
   }
+
+# T155 (ADR-043 §5.2 / §6.3): point the reusable AI-plane resources (mounted via
+# Samen.AI.Domain above) at Driftwood.Repo so Prompt templates + support-reply drafts
+# PERSIST in this host. Compile-time (the resources read it via compile_env, the
+# tnt_record_repo / samen_ai_*_repo precedent in samen_core/config/config.exs).
+config :samen_core, :samen_ai_prompt_repo, Driftwood.Repo
+config :samen_core, :samen_ai_support_reply_draft_repo, Driftwood.Repo
 
 # The FMCSA dispatch gate reads the CDL vault-token PRESENCE (not plaintext) via a
 # bounded repo query on the pii_vault table (design §4 / OR-7). It needs the repo.

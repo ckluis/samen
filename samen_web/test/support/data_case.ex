@@ -204,6 +204,9 @@ defmodule Samen.WebTest.DataCase do
   # SAME `Samen.WebTest.Automation` direct mount T42's health-view test already uses
   # (test/support/automation.ex) — `Workflow` is the resource this surface touches.
   defp namespace(:automation), do: Samen.WebTest.Automation
+  # T155 (ADR-043 §5.3) — the tenant AI UI kit rides the CRM test host, so the CRM-AI
+  # surface can ground on `Samen.WebTest.Crm.Person` (its vault fields drive the masking proof).
+  defp namespace(:ai), do: Samen.WebTest.Crm
   # T78 (spec §I5) — the public portal mount kind: points DIRECTLY at the CMS
   # namespace (no Support needed — the portal browses/deflects on `Post` alone).
   defp namespace(:kb), do: Samen.WebTest.Cms

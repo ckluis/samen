@@ -261,7 +261,38 @@ defmodule Samen.AbbrevRegistryTest do
                  "psl" => "PawChart.SalesOps.Lead",
                  # T79 (spec §I6): the new `CsatSurveyToken` resource — pawchart's
                  # Support mount, allocator-proposed.
-                 "psc" => "PawChart.Support.CsatSurveyToken"
+                 "psc" => "PawChart.Support.CsatSurveyToken",
+                 # T157 (ADR-010 §8.1): the pawchart OPERATOR namespace — a SECOND
+                 # Identity+Billing+Support mount (the SaaS's own book of business),
+                 # `po*`/`pm*`/`pq*` abbrevs reserved via the sanctioned allocator.
+                 "poo" => "PawChart.Operator.Org",
+                 "pou" => "PawChart.Operator.User",
+                 "pom" => "PawChart.Operator.Membership",
+                 "por" => "PawChart.Operator.Role",
+                 "pok" => "PawChart.Operator.ApiKey",
+                 "pon" => "PawChart.Operator.Invitation",
+                 "poc" => "PawChart.Operator.Credential",
+                 "pot" => "PawChart.Operator.AuthToken",
+                 "pos" => "PawChart.Operator.Session",
+                 "poi" => "PawChart.Operator.UserIdentity",
+                 "pol" => "PawChart.Operator.LoginFailure",
+                 "pmc" => "PawChart.Operator.Customer",
+                 "pmp" => "PawChart.Operator.Plan",
+                 "pmr" => "PawChart.Operator.Price",
+                 "pms" => "PawChart.Operator.Subscription",
+                 "pmi" => "PawChart.Operator.Invoice",
+                 "pmy" => "PawChart.Operator.Payment",
+                 "pmu" => "PawChart.Operator.Usage",
+                 "pme" => "PawChart.Operator.Entitlement",
+                 "pmv" => "PawChart.Operator.SubscriptionEvent",
+                 "pql" => "PawChart.Operator.Sla",
+                 "pqk" => "PawChart.Operator.Ticket",
+                 "pqc" => "PawChart.Operator.Conversation",
+                 "pqg" => "PawChart.Operator.Agent",
+                 "pqm" => "PawChart.Operator.Message",
+                 "pqn" => "PawChart.Operator.Macro",
+                 "pqs" => "PawChart.Operator.Csat",
+                 "pqo" => "PawChart.Operator.CsatSurveyToken"
                },
                "samen_core" => %{
                  # T75 (spec §I2 CRM sequences actually send): the new Outreach
@@ -509,7 +540,7 @@ defmodule Samen.AbbrevRegistryTest do
       # `psc` (pawchart), `scw`/`wco` (samen_web test tenant/operator) = 404.
       # +1 T84 (ADR-044 §16.5 #1): samen_web test host's `woa`
       # (Samen.WebTest.OperatorScope.Assignment) = 405.
-      assert map_size(Reg.load()) == 405
+      assert map_size(Reg.load()) == 433
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do
