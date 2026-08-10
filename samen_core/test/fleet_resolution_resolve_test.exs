@@ -116,6 +116,57 @@ defmodule Samen.Fleet.Resolution.ResolveTest do
     end
   end
 
+  describe "Phase-6 EDGE-LOW L1 — the seam-trust boundary, on the record" do
+    setup do
+      {:ok, handle} = Handle.compute(@app_id, "org-alpha", version: 1)
+      {:ok, other_handle} = Handle.compute(@app_id, "org-beta", version: 1)
+      on_exit(fn -> Application.delete_env(@test_host, :fleet_name_resolver) end)
+      %{handle: handle, other_handle: other_handle}
+    end
+
+    test "a NAIVE seam that ignores scope entirely is NOT caught by resolve/3's shape-only filter -- proving the boundary is real, not silently defended",
+         %{handle: handle, other_handle: other_handle} do
+      # A resolver that returns a name for EVERY requested handle regardless of
+      # who is asking (no scope_of/2 consult at all) -- the exact shape a naive
+      # host-authored seam could take.
+      Application.put_env(@test_host, :fleet_name_resolver, {__MODULE__, :scope_blind_resolver, []})
+
+      resolved = Resolution.resolve(@test_host, "anyone", [handle, other_handle])
+
+      # resolve/3's filter_resolved/2 only enforces SHAPE (requested handles +
+      # string values) -- it has no org_id to re-check scope_of/2 against, by
+      # design (resolution.ex's filter_resolved/2 moduledoc comment). A
+      # scope-blind seam therefore leaks through UNCHANGED. This is the seam-
+      # trust boundary the L1 finding named: mask-by-omission holds only when
+      # the WIRED seam itself enforces scope.
+      assert resolved == %{handle => "resolved:#{handle}", other_handle => "resolved:#{other_handle}"}
+    end
+
+    test "the SHIPPED reference seam (resolve_via_org_scan/5), composed through resolve/3 end-to-end, DOES enforce scope -- the seam a real host actually wires",
+         %{handle: handle, other_handle: other_handle} do
+      orgs_fn = fn -> [%{id: "org-alpha", name: "Alpha Co"}, %{id: "org-beta", name: "Beta Co"}] end
+
+      Application.put_env(@test_host, :fleet_name_resolver,
+        {Resolution, :resolve_via_org_scan, [@test_host, orgs_fn, @app_id]}
+      )
+
+      Application.put_env(@test_host, :fleet_resolution,
+        {__MODULE__, :alpha_only_scope, []}
+      )
+
+      on_exit(fn -> Application.delete_env(@test_host, :fleet_resolution) end)
+
+      # Composed through the GENERIC resolve/3 entry point (not calling
+      # resolve_via_org_scan/5 directly) -- this is what `FleetDetailLive`
+      # actually calls. Only the in-scope handle resolves; the out-of-scope
+      # one stays masked (absent), end to end.
+      resolved = Resolution.resolve(@test_host, "sales-rep", [handle, other_handle])
+
+      assert resolved == %{handle => "Alpha Co"}
+      refute Map.has_key?(resolved, other_handle)
+    end
+  end
+
   # -- fixture resolvers -------------------------------------------------------
 
   def raising_resolver(_principal, _handles), do: raise("boom")
@@ -124,6 +175,13 @@ defmodule Samen.Fleet.Resolution.ResolveTest do
     do: %{"asked-for" => "Asked For Inc", "not-asked-for" => "Should Never Appear"}
 
   def bad_value_resolver(_principal, _handles), do: %{"h1" => %{not: "a string"}}
+
+  # A naive host-authored seam that resolves every requested handle to SOME
+  # name without ever consulting scope_of/2 -- the shape the L1 finding warns
+  # a future vertical's resolver could take.
+  def scope_blind_resolver(_principal, handles) do
+    for h <- handles, into: %{}, do: {h, "resolved:#{h}"}
+  end
 
   def all_scope(_principal), do: :all
   def none_scope(_principal), do: :none

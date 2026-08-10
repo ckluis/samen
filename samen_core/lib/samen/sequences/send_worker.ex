@@ -37,6 +37,34 @@ defmodule Samen.Sequences.SendWorker do
   stops PERMANENTLY, `Samen.Sequences.resolve_outcome/3`). Unconfigured/failed
   => `:blocked` / `:failed` (the enrollment retries; `current_step` never
   advances past an unsent step).
+
+  ## At-least-once, not exactly-once (Phase-6 EDGE-LOW L8, documented)
+
+  If the adapter genuinely sends (`{:ok, receipt}`) but the FOLLOW-ON write —
+  `mark/4`'s `StepSend` update AND/OR `Sequences.resolve_outcome/3`'s
+  enrollment `current_step` advance — fails to persist (a correlated DB blip
+  hitting both writes in the same `perform/1` call), the `StepSend` row is left
+  non-terminal on the SAME step. `find_or_create_step_send/2`'s REUSE branch
+  (`Samen.Sequences`) then legitimately re-selects that SAME row on the next
+  in-flight-watchdog cycle and re-delivers — a genuine, honest **duplicate
+  send**, not a lie (D1 still holds: `:delivered` is never faked, and this really
+  IS a second real send). This is deliberately at-least-once, never silently
+  claimed exactly-once.
+
+  This is bounded, not a runaway loop: the moment a retry's mark+transition
+  writes DO persist, the row/enrollment reach a terminal state and the
+  watchdog stops re-selecting it.
+
+  There is no per-adapter idempotency key negotiated over the wire today, but
+  the idempotency key any real ESP adapter needs is already threaded through
+  on every attempt for free: `message.send_id` (`Samen.Delivery.Message`) is
+  the `StepSend` row's OWN id, which `find_or_create_step_send/2` REUSES
+  (never re-mints) across every retry/watchdog cycle for one step — so it is
+  STABLE across a duplicate. An adapter that dedupes provider-side by
+  `message.send_id` (e.g. as the ESP's own idempotency-key header) turns this
+  framework-level at-least-once into an effectively-once send at the provider;
+  see `sequence_send_test.exs`'s L8 test, which proves the SAME `send_id` is
+  presented on both the original and the duplicate attempt.
   """
   # T75 fix round (bug found while pinning MED-5 with a multi-cycle test): the
   # unique `:states` list EXCLUDES `:completed`/`:cancelled`/`:discarded`

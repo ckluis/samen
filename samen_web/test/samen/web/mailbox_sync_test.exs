@@ -500,4 +500,61 @@ defmodule Samen.Web.MailboxSyncTest do
     assert {:ok, %{synced: 2}} = Mailbox.sync(connection, cfg)
     assert length(mail_rows(org_id)) == 2
   end
+
+  # ==========================================================================
+  # L9 (Phase-6 EDGE-LOW, documented) — a halt+retry re-dups ONLY the
+  # external_id:nil subset; a REAL message (provider-carried id) never dups.
+  # ==========================================================================
+
+  test "L9: across a dedupe-halt retry, a REAL (id-bearing) message never duplicates -- only the external_id:nil subset re-posts (documented, not a lie)",
+       %{org_id: org_id} do
+    cfg = config(org_id)
+    connection = connect!(org_id, cfg)
+
+    FakeProvider.deliver_to_inbox([
+      inbound(Seeds.contact_email(), external_id: "ext-l9-real"),
+      inbound(Seeds.contact_email(), external_id: nil)
+    ])
+
+    # The SAME fail-closed halt mechanism as the "FAIL-CLOSED" test above: the
+    # dedupe LOOKUP itself cannot run (models a transient DB blip), so the
+    # batch aborts before writing anything and the cursor is NOT advanced.
+    broken = %{cfg | message_resource: NoSuchMailMessageResource}
+    assert {:error, {:dedupe_unavailable, _}} = Mailbox.sync(connection, broken)
+    assert mail_rows(org_id) == []
+
+    # Recovery: the exact same page re-fetches (per sync.ex's own moduledoc,
+    # "the next sync re-reads the same page") and this time the lookup works
+    # -- the FIRST genuine write for both messages.
+    assert {:ok, %{synced: 2, skipped: 0}} = Mailbox.sync(connection, cfg)
+    assert length(mail_rows(org_id)) == 2
+
+    # Now model the SAME recovery path firing a SECOND time over a page that
+    # was ALREADY (successfully) processed once -- a provider re-delivering,
+    # or a cursor write that itself failed to persist forward, lands the
+    # caller back at "re-read the same page" exactly as the halt above does.
+    replayed = %{connection | cursor: nil}
+    assert {:ok, %{synced: 1, skipped: 1}} = Mailbox.sync(replayed, cfg)
+
+    rows = mail_rows(org_id)
+    assert length(rows) == 3
+    by_ext_id = Enum.group_by(rows, & &1.external_id)
+
+    # THE GUARANTEE THAT MATTERS: a message carrying the provider's own
+    # immutable external_id NEVER duplicates on a customer-visible timeline,
+    # across ANY halt+retry cycle.
+    assert length(Map.fetch!(by_ext_id, "ext-l9-real")) == 1
+
+    # THE DOCUMENTED, ACCEPTED GAP: `duplicate?/2` (sync.ex) cannot dedupe an
+    # external_id:nil message -- "a message with no external id cannot be
+    # deduped — it is recorded (never silently dropped)". This is a
+    # fake/degenerate-provider case only; every real IMAP/Gmail/Graph message
+    # carries a stable id, so a REAL sync never hits this subset. It fails
+    # toward a harmless duplicate row, never a lie (never a fabricated
+    # success, never a silently dropped message) -- the fail-closed
+    # dedupe-unavailable halt itself (proved above and by the FAIL-CLOSED
+    # test) is unaffected: it still aborts on a genuine lookup failure
+    # regardless of whether this page's messages carry ids.
+    assert length(Map.fetch!(by_ext_id, nil)) == 2
+  end
 end

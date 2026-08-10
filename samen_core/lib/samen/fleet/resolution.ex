@@ -261,6 +261,26 @@ defmodule Samen.Fleet.Resolution do
 
   def resolve(_otp_app, _principal_id, _handles), do: %{}
 
+  # Phase-6 EDGE-LOW L1 — seam-trust boundary, documented on the record.
+  #
+  # This filter enforces SHAPE only (requested handles + string values) — it
+  # deliberately does NOT re-check `scope_of/2` here. Scope-filtering is the
+  # SEAM's job: the reference `resolve_via_org_scan/5` below composes
+  # `Handle.matches?/4` with `scope_of/2` and returns ONLY in-scope names, so a
+  # host wiring that reference (the shipped, tested path — see
+  # `fleet_detail_scope_mask_test.exs`'s GREEN/RED/SABOTAGE 3-proof and
+  # `fleet_resolution_resolve_test.exs`'s `resolve_via_org_scan/5` scope tests)
+  # gets end-to-end scope safety. A host that wires a NAIVE `:fleet_name_resolver`
+  # ignoring `scope_of/2` entirely would NOT be caught here — this framework
+  # layer cannot re-derive scope from a bare `%{handle => name}` map (it has no
+  # `org_id` to check `scope_of/2` against without ANOTHER seam call, which
+  # would couple two independently-documented seams for a hardening that adds
+  # real coupling risk for a case no shipped host exercises — the risk this
+  # comment exists to keep on the record for the NEXT vertical's resolver
+  # author to audit, per the Phase-6 EDGE-LOW dogfood finding). If a future
+  # host's resolver needs re-verification here, prefer wiring
+  # `resolve_via_org_scan/5` (or an equivalent that checks `scope_of/2` itself)
+  # over widening this function's contract.
   defp filter_resolved(%{} = resolved, handles) do
     allowed = MapSet.new(handles)
 

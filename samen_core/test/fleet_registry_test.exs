@@ -999,6 +999,48 @@ defmodule Samen.Fleet.RegistryTest do
       rows_after = Module.concat(@ns, App) |> Ash.read!(actor: @admin) |> length()
       assert rows_after == rows_before
     end
+
+    # Phase-6 EDGE-LOW L5 fix: cockpit_identity/1 is now resolved BEFORE the
+    # atomic single-use token consume (not merely before the app/credential
+    # rows are written) — a caller enrolling against a not-yet-configured
+    # cockpit gets `{:error, :not_configured}` WITHOUT burning their one-time
+    # token, so the exact same token can complete enrollment once an operator
+    # wires `:fleet_local_credential`. SABOTAGE TARGET (166): reordering this
+    # back to consume-before-check makes the token below get burned by the
+    # FIRST (failing) call, so the second call flips from {:ok, _} to
+    # {:error, :invalid_token} — a genuine assertion flip, not a compile error.
+    test "L5: cockpit_identity failure does NOT burn the enrollment token — the SAME token still enrolls once configured" do
+      prev = Application.get_env(:samen_core, :fleet_local_credential)
+      Application.delete_env(:samen_core, :fleet_local_credential)
+
+      on_exit(fn ->
+        if prev, do: Application.put_env(:samen_core, :fleet_local_credential, prev)
+      end)
+
+      {:ok, %{raw_token: raw_token}} =
+        Registry.mint_enrollment_token(
+          @ns,
+          %{app_slug: "l5-reorder-#{System.unique_integer([:positive])}", display_name: "L5Reorder"},
+          @admin
+        )
+
+      {pub, _priv} = Crypto.generate_ed25519_keypair()
+      pub_b64 = Base.encode64(pub)
+
+      # FIRST attempt: cockpit unconfigured -> fails honestly, but the token
+      # must NOT have been consumed by this failing attempt.
+      assert {:error, :not_configured} = Registry.consume_enrollment(@ns, raw_token, pub_b64)
+
+      # Now configure the cockpit identity (the operator fixes the misconfig)
+      # and retry with the EXACT SAME raw token.
+      Application.put_env(:samen_core, :fleet_local_credential, Samen.Fleet.LocalCredential.Agent)
+
+      assert {:ok, %{app_id: _app_id}} = Registry.consume_enrollment(@ns, raw_token, pub_b64)
+
+      # A THIRD attempt with the now-spent token is correctly rejected —
+      # success DOES burn the token (no replay).
+      assert {:error, :invalid_token} = Registry.consume_enrollment(@ns, raw_token, pub_b64)
+    end
   end
 
   describe "J5 — :embedded is zero config (RP-J-9 groundwork)" do

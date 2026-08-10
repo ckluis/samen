@@ -1,0 +1,98 @@
+# SABOTAGE: L5 (Phase-6 EDGE-LOW dogfood) — /fleet/enroll reverts to burning the
+# single-use enrollment token BEFORE checking cockpit_identity/1. Under this
+# sabotage, `Registry.consume_enrollment/3` atomically consumes the token FIRST
+# and only THEN resolves the cockpit's own identity inside `finish_enrollment/3`
+# — so a caller enrolling against a cockpit that has not wired
+# `:fleet_local_credential` has their ONE-TIME token consumed (committed) and
+# then gets `{:error, :not_configured}` back. The token is permanently spent
+# even though the caller did nothing wrong: a self-inflicted fail-closed. The
+# named L5 test proves the real fix's guarantee — that the SAME token still
+# enrolls successfully once the cockpit is configured — which is exactly what
+# breaks under this reorder (the token is already burned by the FIRST,
+# not_configured call, so the retry with the SAME token fails with
+# `:invalid_token` instead of succeeding). Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/fleet_registry_test.exs
+# MUST_FAIL: L5: cockpit_identity failure does NOT burn the enrollment token
+diff --git a/samen_core/lib/samen/fleet/registry.ex b/samen_core/lib/samen/fleet/registry.ex
+index 182568f..1f37177 100644
+--- a/samen_core/lib/samen/fleet/registry.ex
++++ b/samen_core/lib/samen/fleet/registry.ex
+@@ -227,53 +227,39 @@ defmodule Samen.Fleet.Registry do
+   exactly: one `UPDATE ... WHERE token_digest = $1 AND consumed_at IS NULL AND
+   expires_at > now() RETURNING`. Zero rows ⇒ one generic `{:error, :invalid_token}`
+   (never distinguishing consumed vs expired vs unknown).
+-
+-  ## Check-before-consume (Phase-6 EDGE-LOW L5 fix)
+-
+-  `cockpit_identity/1` is resolved FIRST, BEFORE the atomic token consume — not
+-  merely before the app/credential rows are written. Previously the token was
+-  burned FIRST and `cockpit_identity/1` was only checked inside
+-  `finish_enrollment/3`: a caller enrolling against a cockpit that never wired
+-  `:fleet_local_credential` would have their one-time token consumed (committed)
+-  and then get `{:error, :not_configured}` back — a self-inflicted fail-closed
+-  that permanently strands the token even though the CALLER did nothing wrong.
+-  Resolving the cockpit's own identity is a pure config/KMS read with no
+-  dependency on the token or the request, so checking it first costs nothing and
+-  means a legitimate retry (once the cockpit IS configured) can reuse the SAME
+-  token instead of being forced to mint a fresh one.
+   """
+   @spec consume_enrollment(module(), String.t(), String.t()) ::
+           {:ok, map()} | {:error, :invalid_token | term()}
+   def consume_enrollment(ns, raw_token, public_key_b64) when is_binary(raw_token) do
+-    with {:ok, {cockpit_pub, cockpit_priv}} <- cockpit_identity(ns) do
+-      digest = Samen.Auth.TokenMint.digest(raw_token)
+-      now = DateTime.utc_now()
+-
+-      result =
+-        token_res(ns)
+-        |> Ash.Query.filter(token_digest == ^digest and is_nil(consumed_at) and expires_at > ^now)
+-        |> Ash.bulk_update(:consume, %{consumed_at: now},
+-          authorize?: false,
+-          strategy: [:atomic],
+-          return_records?: true,
+-          return_errors?: true
+-        )
++    digest = Samen.Auth.TokenMint.digest(raw_token)
++    now = DateTime.utc_now()
++
++    result =
++      token_res(ns)
++      |> Ash.Query.filter(token_digest == ^digest and is_nil(consumed_at) and expires_at > ^now)
++      |> Ash.bulk_update(:consume, %{consumed_at: now},
++        authorize?: false,
++        strategy: [:atomic],
++        return_records?: true,
++        return_errors?: true
++      )
+
+-      case result do
+-        %Ash.BulkResult{status: :success, records: [token | _]} ->
+-          finish_enrollment(ns, token, public_key_b64, {cockpit_pub, cockpit_priv})
++    case result do
++      %Ash.BulkResult{status: :success, records: [token | _]} ->
++        finish_enrollment(ns, token, public_key_b64)
+
+-        _ ->
+-          {:error, :invalid_token}
+-      end
++      _ ->
++        {:error, :invalid_token}
+     end
+   end
+
+-  defp finish_enrollment(ns, token, public_key_b64, {cockpit_pub, _cockpit_priv}) do
+-    # The cockpit identity is ALREADY resolved (consume_enrollment/3, above) —
+-    # this only writes the app + credential rows now that the token is
+-    # genuinely (and irreversibly) spent.
+-    with {:ok, app} <-
++  defp finish_enrollment(ns, token, public_key_b64) do
++    # cockpit_identity/1 is checked FIRST, before any row is written: it can
++    # now fail-honestly ({:error, :not_configured} — fix round MED), and an
++    # enrollment must not half-complete (token consumed, app+credential rows
++    # written) only to fail on the response the caller actually needs.
++    with {:ok, {cockpit_pub, _priv}} <- cockpit_identity(ns),
++         {:ok, app} <-
+            app_res(ns)
+            |> Ash.Changeset.for_create(
+              :create,

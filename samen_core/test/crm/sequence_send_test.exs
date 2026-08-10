@@ -288,6 +288,86 @@ defmodule Samen.Crm.SequenceSendTest do
   end
 
   # ---------------------------------------------------------------------------
+  # L8 (Phase-6 EDGE-LOW, documented) — at-least-once, not exactly-once
+
+  describe "L8 — a StepSend left non-terminal after a GENUINE send is re-delivered (at-least-once, honestly documented, bounded)" do
+    test "the watchdog re-selects and genuinely re-sends with the SAME send_id (the adapter's idempotency key) -- then stops once the write succeeds" do
+      org = Ash.UUID.generate()
+      scope = tenant_scope(org)
+      seq = new_sequence(scope, org, [%{"delay_hours" => 0, "subject" => "S1", "body" => "B1"}])
+      enrollment = enroll(scope, org, seq.id)
+
+      scan_and_drain()
+
+      enrollment = reload_enrollment(enrollment.id)
+      assert enrollment.status == :completed
+      assert enrollment.current_step == 1
+
+      [delivered_send] = step_sends_for(enrollment.id)
+      assert delivered_send.status == :delivered
+      assert length(FakeProvider.calls()) == 1
+      [{:deliver, %{message: first_message}}] = FakeProvider.calls()
+
+      # Reconstruct the send_worker.ex moduledoc's documented boundary state:
+      # a genuine send happened (the delivery above IS genuine — FakeProvider
+      # really recorded it), but suppose the FOLLOW-ON writes (`mark/4`'s
+      # StepSend update AND `resolve_outcome/3`'s enrollment `current_step`
+      # advance) both failed to persist (a correlated DB blip within that
+      # SAME `perform/1` call — `mark/4`'s own `rescue` swallows exactly this
+      # to `:ok`, so Oban never sees a retryable error). The reachable
+      # end-state left behind is: the StepSend row stays non-terminal, and
+      # the enrollment stays on the SAME step with a past next_send_at (the
+      # in-flight watchdog window that was already set BEFORE the send ran —
+      # `Samen.Sequences.queue_step_send/3` — having simply elapsed). We
+      # reconstruct that exact end-state directly via the SAME resource
+      # actions the real code path uses (`:mark`, `Sequences.transition/2`),
+      # not a mock -- this is a genuinely reachable row/enrollment shape,
+      # not a hypothetical one.
+      FakeProvider.reset()
+
+      {:ok, _} =
+        delivered_send
+        |> Ash.Changeset.for_update(:mark, %{status: :queued}, authorize?: false)
+        |> Ash.update()
+
+      past = DateTime.utc_now() |> DateTime.add(-60, :second) |> DateTime.truncate(:second)
+      {:ok, _} = Sequences.transition(enrollment, %{status: :active, current_step: 0, next_send_at: past})
+
+      # The watchdog cycle legitimately re-selects the SAME row (find_or_create_step_send/2's
+      # REUSE branch — status :queued) and genuinely re-delivers.
+      scan_and_drain()
+
+      assert length(FakeProvider.calls()) == 1
+      [{:deliver, %{message: second_message}}] = FakeProvider.calls()
+
+      # THE idempotency key an ESP adapter needs is already stable across the
+      # duplicate: send_id is the StepSend row's OWN id, reused (never
+      # re-minted) by find_or_create_step_send/2's REUSE path.
+      assert second_message.send_id == first_message.send_id
+      assert second_message.send_id == delivered_send.id
+
+      # Bounded, not a runaway loop: THIS attempt's mark+transition writes
+      # succeed normally (no injected failure this time), so the enrollment
+      # reaches :completed and a THIRD due-scan cycle sends nothing further.
+      recovered = reload_enrollment(enrollment.id)
+      assert recovered.status == :completed
+
+      [only_send] = step_sends_for(enrollment.id)
+      assert only_send.id == delivered_send.id
+      assert only_send.status == :delivered
+
+      # An HONEST duplicate, not a cached/replayed response: the row's
+      # provider_message_id now reflects the SECOND genuine chokepoint call's
+      # OWN receipt, distinct from the first.
+      refute only_send.provider_message_id == delivered_send.provider_message_id
+
+      FakeProvider.reset()
+      scan_and_drain()
+      assert FakeProvider.calls() == []
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # 2. Suppression is honored — PERMANENTLY (spec I2 done-criterion 3)
 
   describe "suppression at the C2 chokepoint stops the enrollment permanently" do

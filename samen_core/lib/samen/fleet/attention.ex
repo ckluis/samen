@@ -22,6 +22,19 @@ defmodule Samen.Fleet.Attention do
   that published a directive, or the `fleet_revision`/target of a forged push. Kept in the
   entry so the cockpit renders *who* alongside *what*, not just a bare signal.
   """
+  # Phase-6 EDGE-LOW L6 — the ETS table is `:set` (never `:bag`/`:duplicate_bag`),
+  # keyed on `{kind, key}` (see `ensure_started/0` below). This makes
+  # `raise_entry/3` idempotent-by-key BY CONSTRUCTION: a repeat call for the
+  # SAME `{kind, key}` (e.g. a kid-holder flooding signature-invalid heartbeats
+  # to keep re-tripping `:heartbeat_rejected` for one `kid`) OVERWRITES the
+  # existing entry's timestamp/detail rather than inserting a second row.
+  # `list/1`'s `:ets.tab2list/1` can therefore NEVER return more than ONE
+  # `:heartbeat_rejected` entry per `kid`, no matter how many bad-signature
+  # requests that kid's flood generates — a flood can refresh/keep-open the
+  # ONE entry, never amplify it into N. If this module's table type or key
+  # shape ever changes, this bound must be re-derived (see the L6 sabotage
+  # twin + `fleet_ingress_test.exs`'s coalescing test, which fails loudly if
+  # the bound is lost).
   @spec raise_entry(atom(), String.t(), map()) :: :ok
   def raise_entry(kind, key, detail \\ %{}) when is_atom(kind) and is_binary(key) and is_map(detail) do
     ensure_started()

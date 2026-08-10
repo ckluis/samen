@@ -232,6 +232,56 @@ defmodule Samen.Web.FleetIngressTest do
       assert resp.resp_body == ""
     end
 
+    test "L6 (Phase-6 EDGE-LOW, documented): a kid-holder flooding bad-sig heartbeats raises AT MOST ONE open :heartbeat_rejected entry -- never N growing entries -- and the starvation fix still holds",
+         %{app_id: app_id, priv: priv} do
+      {_wrong_pub, wrong_priv} = Crypto.generate_ed25519_keypair()
+      {bad_sig_limit, _window} = Samen.Web.RateLimit.limit_for(:fleet_heartbeat_bad_sig)
+
+      # A flood well past the bad-sig bucket's own (small) limit -- every
+      # request AFTER the limit trips re-raises :heartbeat_rejected for the
+      # SAME kid (handle_heartbeat_result/3's bad-sig clause calls
+      # Attention.raise_entry/2 on every over-limit request, not just once).
+      # An attacker holding only the victim's kid (not secret, per §4.4a) can
+      # keep doing this indefinitely.
+      responses =
+        for _ <- 1..(bad_sig_limit + 15) do
+          conn = signed_heartbeat_conn(app_id, wrong_priv, unique_nonce: true)
+          CockpitIngress.heartbeat(conn, namespace: @ns)
+        end
+
+      refute Enum.any?(responses, &(&1.status == 204))
+      assert Enum.any?(responses, &(&1.status == 429))
+
+      # THE BOUND (documented, not fixed further -- see attention.ex's
+      # raise_entry/3 comment): Samen.Fleet.Attention's ETS table is `:set`,
+      # keyed on `{kind, key}`, so repeated raises for the SAME kid COALESCE
+      # into exactly one entry, no matter how many bad-sig requests flooded in.
+      entries_for_kid = Enum.filter(Samen.Fleet.Attention.list(:heartbeat_rejected), &(&1.key == app_id))
+      assert length(entries_for_kid) == 1
+
+      # A DIFFERENT kid's flood raises its OWN entry -- coalescing is per-key,
+      # never a single shared/global entry that would misattribute one app's
+      # flood to another (positive control: two entries exist in total, one
+      # per distinct kid, still never N per kid).
+      other_app_id = Ash.UUID.generate()
+
+      for _ <- 1..(bad_sig_limit + 3) do
+        conn = signed_heartbeat_conn(other_app_id, wrong_priv, unique_nonce: true)
+        CockpitIngress.heartbeat(conn, namespace: @ns)
+      end
+
+      all_entries = Samen.Fleet.Attention.list(:heartbeat_rejected)
+      assert length(Enum.filter(all_entries, &(&1.key == app_id))) == 1
+      assert length(Enum.filter(all_entries, &(&1.key == other_app_id))) == 1
+
+      # BLOCKER-1's starvation fix holds THROUGH the flood + the coalesced
+      # noise: the victim's own genuine heartbeat still 204s.
+      conn = signed_heartbeat_conn(app_id, priv, unique_nonce: true)
+      resp = CockpitIngress.heartbeat(conn, namespace: @ns)
+      assert resp.status == 204
+      assert resp.resp_body == ""
+    end
+
     defp signed_heartbeat_conn(app_id, priv, opts \\ []) do
       report = Samen.Fleet.Report.build(app_id: app_id)
       body = Samen.Fleet.Report.to_wire(report) |> Jason.encode!()
