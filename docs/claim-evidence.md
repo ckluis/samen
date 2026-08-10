@@ -643,6 +643,36 @@ floor again found more than it needed to certify the headline claims:
 | **P9 non-atomic fleet counters** | `key_version`/`fleet_revision` mints could **double-issue under concurrency** (author-flagged) | Both counters serialized by a transaction-scoped `pg_advisory_xact_lock` (`registry.ex` `with_counter_lock/3`) | **CLOSED** — `T84a-verdict.json` |
 | **T83 git-checkout process incident** | The J3 author used `git checkout --` to restore a sabotage target (violating the mandated cp+shasum restore ritual) | Independent **tree-integrity** verification confirmed the working tree **whole** (all 5 baseline shasums matched), full `./ci.sh` green, no prior deliverable lost — a process risk, not a code defect | **RESOLVED** — `T83-verdict.json` |
 
+**Boundary-persona dogfood (T85, 2026-08-10) — 19 findings, all remediated in-phase.** A
+4-cluster boundary-persona dogfood (EXTERNAL / OPERATOR / TENANT / EDGES) probed the Phase-6
+surfaces above from the outside and found **19 findings (0 blocker / 5 HIGH / 5 MED / 9
+LOW)** — full triage: `_orch/dogfood/phase6-triage.md`. **Two HIGHs refuted prior verifier
+PASS claims in this same doc:** **H1** refutes **T82**'s fleet-wire completeness (§WS-J
+J1+J5 above — the BLOCKER-2 undeclared-key fix was applied only at the top level); **H5**
+refutes **T155**'s `simulated_honesty` PASS (`draft_sequence` dropped the `:simulated` flag
+before the badge check, laundering a keyless SEAM draft as a neutral "Draft"). Operator
+ruling: **FIX EVERYTHING IN-PHASE, down to LOW.** All 19 were remediated across **5
+independently-verified fix batches** (SEC/HON/UX/EDGE-LOW/M5), each committed and each
+re-verified against a fresh sabotage twin (cp+SHA-256 byte-exact restore, `ci.sh` +
+sabotage harness + `ci-fast` green before/after); the standing sabotage harness grew
+**153 → 168**.
+
+| Defect | What the verify caught | Fix + proof | Verdict |
+|---|---|---|---|
+| **Dogfood-H1 fleet-wire nested undeclared-key egress** | T82's BLOCKER-2 undeclared-key rejection was applied only at the top level; `validate_item/5` (`schema.ex:437/459/489`) and `validate_suppressed/4` let a producer smuggle PII through nested list-item/suppressed cells — refutes T82 completeness | `validate_item` + `validate_suppressed` now reject undeclared keys the same as top-level, + a 64-byte nested-string bound; `verify.fleet_wire` checks nested membership; sabotages **154/155/158** (93 regenerated) | **CLOSED** — `T85-sec-verdict.json` + `T85-sec-round2-verdict.json` |
+| **Dogfood-H2/M1 impersonation principal-binding** | pawchart/driftwood `OperatorImpersonationLive` trusted the client `?operator_id` param over the authenticated principal (audit-ledger attribution forgery, masked so no PII leak) and bypassed `gate/3` (§16.4a R-B scope conjunct structurally absent) | vertical consoles now go through the framework `assign_identity` + `gate_socket` + `gate/3` path via a new `Impersonation.read_scope/1` — a forged `?operator_id` is ignored, a no-session request is denied, the param leg is gated behind `auth_disarmed?/1`; sabotages **156/157/159** | **CLOSED** — `T85-sec-verdict.json` |
+| **Dogfood-H5 simulated-draft badge loss** | `draft_sequence` dropped the `:simulated` flag before `ai_result`, laundering the keyless SEAM output as a neutral, badgeless "Draft" — refutes T155's `simulated_honesty` PASS | `:simulated` now survives `draft_sequence` through to the badge check → the loud SIMULATED badge renders; sabotages **160/161** | **CLOSED** — `T85-hon-verdict.json` |
+| **Dogfood-M2 mailbox ambiguous-match guess** | `Mailbox.Match.person_for_address`/`company_by_domain` guessed the first match on ambiguity (`Enum.find`; `limit(1) \|> List.first`) instead of failing closed — inconsistent with T160's exactly-1-or-no-match discipline | fail-closed on 2+ candidates (no-match), mirroring T160 exactly; sabotage **162** (existing 61/62 rebased) | **CLOSED** — `T85-hon-verdict.json` |
+| **Dogfood-M5 CRM Sequences tenant-UI gap** | T75/I2 delivered the real Sequences mechanism (`samen_core` scope + Oban chokepoint) but shipped **no tenant-plane UI at all** — a completeness gap, not a fake, but the tenant literally could not walk the surface | **BUILT** (operator scope decision: build now, not deferred): new `Samen.Web.CRM.SequencesLive` over the existing T75 Outreach scope — enroll/list/step-status, org-scoped (sabotage **167**), honest `:blocked` never faked-delivered (sabotage **168**), no vault field renders; `samen_web` test-host migration mounts Outreach, registry `wso`/`woe`/`ows` via the sanctioned allocator | **BUILT** — `T85-m5-verdict.json` |
+| **Dogfood-LOW locks (L1–L9)** | 9 LOW findings: 1 real reordering bug (L5, fleet-enroll token burned before the `cockpit_identity` check — fail-closed but self-inflicted) + 1 keyless-honesty gap (L7, CSAT reported `:invalid_token` after a failed write instead of a distinct reason) + 2 tenant UX papercuts (L3 hardcoded `/login`, L4 hardcoded color off theme var) + 5 documenting-tests locking already-safe behavior (L1/L2/L6/L8/L9, each verified non-vacuous) | L5 reordered check-before-consume (sabotage **166**, existing 95 rebased); L7 distinct `{:write_failed,_}` vs `:invalid_token` (sabotage **163**); L3/L4 fixed directly; L1/L2/L6/L8/L9 each got a documenting test proven non-vacuous by a fresh sabotage | **CLOSED** — `T85-ux-verdict.json` (L3/L4) / `T85-edgelow-verdict.json` (L1/L2/L5/L6/L8/L9) / `T85-hon-verdict.json` (L7) |
+
+**No new oversell found in the remediation.** Every fix batch was independently adversarially
+verified (fresh sabotage per named fix, cp+SHA-256 byte-exact restore, suite + `ci.sh` green
+before/after). Keyless SEAM-honest labels are unchanged by this pass — I1 mailbox and I8
+enrichment stay labeled 🌱 **SEAM**; the M2/H5/M5 fixes tighten the seam's honesty contract
+(fail-closed matching, a loud badge, a real tenant UI over the existing mechanism) — they do
+not promote any seam to a live integration.
+
 ### Phase-6 punch list — closed at this gate (`_orch/plan/phase6-punchlist.md`)
 
 All actionable rows closed under the operator's FIX-EVERYTHING-IN-PHASE ruling: **P1** (direct
