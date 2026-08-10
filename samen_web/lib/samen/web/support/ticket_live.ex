@@ -137,6 +137,18 @@ defmodule Samen.Web.Support.TicketLive do
   # AshPhoenix.Form draft (AshPhoenix.Form.validate/2) — it does not itself write
   # to the DB; the vaulted `body` still routes through Samen.Vault.Change on the
   # eventual "Send reply" submit, exactly like any other edit to this form.
+  # H4 — the crash-gate: a FRESH ticket (no conversation seeded yet) has
+  # `reply_form == nil` (`new_reply_form/3` below). `AshPhoenix.Form.value/2`
+  # calls `to_form!/1` on its first arg, which RAISES on anything that isn't
+  # already a Form/changeset — so this clause MUST come first and MUST be a
+  # true no-op (never falls through to the `AshPhoenix.Form.value(nil, ...)`
+  # clause below). The UI already renders Insert `disabled` in this state
+  # (`render_kb_suggestion/2`); this is the defense-in-depth guard for the
+  # handler itself.
+  def handle_event("insert_suggestion", _params, %{assigns: %{reply_form: nil}} = socket) do
+    {:noreply, socket}
+  end
+
   def handle_event("insert_suggestion", %{"article_id" => article_id}, socket) do
     case find_suggested_article(socket.assigns.kb_suggestion, article_id) do
       nil ->
@@ -187,6 +199,29 @@ defmodule Samen.Web.Support.TicketLive do
     end
   end
 
+  # M3 — the first-reply affordance: a UI-created ticket seeds NO conversation
+  # (`support/blueprint.ex`'s plain `create: :*`), so `new_reply_form/3` returns
+  # nil and the composer never renders — the agent could read the ticket but had
+  # no way to start answering it. `ticket_id` is the page's own server-side fact,
+  # never client input; the write goes through the SAME sanctioned `Conversation`
+  # create action set (`Samen.Web.Support.Reads.create_conversation/3`) as every
+  # other write on this page, so OrgScope + SameOrgFk apply — this handler adds no
+  # policy of its own. On success, `load/3` picks up the new conversation and
+  # builds a real `reply_form`, which also flips the KB Insert + macro palette
+  # from gated/disabled to live.
+  def handle_event("start_conversation", _params, socket) do
+    %{samen_mount: mount, org_id: org_id, ticket_id: ticket_id} = socket.assigns
+    scope = Mount.scope(mount, org_id)
+
+    case Reads.create_conversation(mount, scope, ticket_id) do
+      {:ok, _conversation} ->
+        {:noreply, load(assign(socket, conversation_error: nil), org_id, ticket_id)}
+
+      {:error, _reason} ->
+        {:noreply, assign(socket, conversation_error: "Could not start the conversation.")}
+    end
+  end
+
   # The sanctioned status change. The status STRING is matched against the bounded
   # blueprint enum inside Reads.update_ticket_status/4 — garbage is refused, no atom
   # is ever minted from client input.
@@ -212,6 +247,7 @@ defmodule Samen.Web.Support.TicketLive do
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, ticket: nil, ticket_tags: [], conversations: [], agents: [], active_tab: current_tab)
     |> assign(reply_form: nil, kb_suggestion: nil, macros: [], csat: nil)
     |> assign_new(:status_error, fn -> nil end)
+    |> assign_new(:conversation_error, fn -> nil end)
   end
 
   def load(socket, org_id, ticket_id) do
@@ -252,6 +288,7 @@ defmodule Samen.Web.Support.TicketLive do
     |> assign(macros: (ticket && Reads.macros(mount, scope)) || [])
     |> assign(csat: ticket && Reads.csat_for_ticket(mount, scope, ticket_id))
     |> assign_new(:status_error, fn -> nil end)
+    |> assign_new(:conversation_error, fn -> nil end)
   end
 
   # T78 (spec §I5) — composer suggestion. Query on the ticket SUBJECT (non-PII); the
@@ -381,7 +418,16 @@ defmodule Samen.Web.Support.TicketLive do
                     icon="❝"
                     title="No conversation thread yet."
                     body="Replies to this ticket appear here as a threaded conversation."
-                  />
+                  >
+                    <:actions :if={writable?(@samen_mount)}>
+                      <.button variant="primary" phx-click="start_conversation" id="start-conversation-btn">
+                        Start conversation
+                      </.button>
+                    </:actions>
+                  </.empty_state>
+                  <div :if={@conversation_error} class="card form-error" id="conversation-error" style="margin-top:8px;padding:10px 14px;color:var(--bad, #b91c1c);font-size:12px">
+                    {@conversation_error}
+                  </div>
                 <% else %>
                   <%= for conv <- @conversations do %>
                     <div class="card" id={"conv-#{conv.id}"} style="margin-bottom:12px">
@@ -419,7 +465,7 @@ defmodule Samen.Web.Support.TicketLive do
                   <% end %>
                 <% end %>
 
-                {render_kb_suggestion(@kb_suggestion)}
+                {render_kb_suggestion(@kb_suggestion, writable?(@samen_mount) and @reply_form != nil)}
                 {render_macro_palette(@macros, writable?(@samen_mount) and @reply_form != nil)}
 
                 <div :if={writable?(@samen_mount) and @reply_form != nil} class="card" id="reply-composer" style="padding:16px 18px">
@@ -502,12 +548,20 @@ defmodule Samen.Web.Support.TicketLive do
 
   # -- composer suggestion panel (T78, spec §I5) -----------------------------
 
-  defp render_kb_suggestion(nil), do: Phoenix.HTML.raw("")
-  defp render_kb_suggestion(%{state: :no_kb_namespace}), do: Phoenix.HTML.raw("")
-  defp render_kb_suggestion(%{state: :empty}), do: Phoenix.HTML.raw("")
+  defp render_kb_suggestion(nil, _composer_offered?), do: Phoenix.HTML.raw("")
+  defp render_kb_suggestion(%{state: :no_kb_namespace}, _composer_offered?), do: Phoenix.HTML.raw("")
+  defp render_kb_suggestion(%{state: :empty}, _composer_offered?), do: Phoenix.HTML.raw("")
 
-  defp render_kb_suggestion(%{state: :ok, simulated: simulated, hits: hits}) do
-    assigns = %{hits: hits, simulated: simulated}
+  # H4/M3 — the Insert button is GATED exactly like the macro palette
+  # (`render_macro_palette/2`'s `composer_offered?`): on a FRESH ticket
+  # `@reply_form` is nil (no conversation seeded yet), and
+  # `AshPhoenix.Form.value(nil, :body)` raises. The suggestion panel itself
+  # still renders (the ranking is computed from the ticket subject, independent
+  # of any conversation) but Insert renders `disabled` with no `phx-click` when
+  # there's no composer to insert into — a genuine gated/disabled state, never
+  # a live button wired to a handler that would crash.
+  defp render_kb_suggestion(%{state: :ok, simulated: simulated, hits: hits}, composer_offered?) do
+    assigns = %{hits: hits, simulated: simulated, composer_offered?: composer_offered?}
 
     ~H"""
     <div id="kb-suggestion-panel" class="card" style="padding:14px 18px;margin-bottom:12px;background:var(--surface-2, #F9FAFB)">
@@ -520,7 +574,14 @@ defmodule Samen.Web.Support.TicketLive do
           <div style="font-weight:500;font-size:13px">{hit.article.title}</div>
           <div :if={hit.snippet} style="font-size:12px;color:var(--muted)">{hit.snippet}</div>
         </div>
-        <.button type="button" phx-click="insert_suggestion" phx-value-article_id={hit.article.id} class="kb-suggestion-insert-btn">
+        <.button
+          type="button"
+          phx-click={@composer_offered? && "insert_suggestion"}
+          phx-value-article_id={hit.article.id}
+          disabled={!@composer_offered?}
+          title={!@composer_offered? && "Start a conversation to insert this suggestion into a reply."}
+          class="kb-suggestion-insert-btn"
+        >
           Insert
         </.button>
       </div>
@@ -528,7 +589,7 @@ defmodule Samen.Web.Support.TicketLive do
     """
   end
 
-  defp render_kb_suggestion(%{state: :not_configured, configuration_hint: hint}) do
+  defp render_kb_suggestion(%{state: :not_configured, configuration_hint: hint}, _composer_offered?) do
     assigns = %{hint: hint}
 
     ~H"""
@@ -539,7 +600,7 @@ defmodule Samen.Web.Support.TicketLive do
     """
   end
 
-  defp render_kb_suggestion(%{state: :error}), do: Phoenix.HTML.raw("")
+  defp render_kb_suggestion(%{state: :error}, _composer_offered?), do: Phoenix.HTML.raw("")
 
   # -- macros composer palette (T79, spec §I6) -------------------------------
   # Coexists with the KB suggestion panel above — one composer, both surfaces.

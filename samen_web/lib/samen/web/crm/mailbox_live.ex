@@ -141,7 +141,7 @@ defmodule Samen.Web.CRM.MailboxLive do
                     <th style="width:20%">Last synced</th>
                   </:head>
                   <tr :for={c <- @connections} class="mailbox-row" id={"mailbox-#{c.id}"}>
-                    <td class="mailbox-address" style="font-weight:500;color:#3a3b45">{c.address}</td>
+                    <td class="mailbox-address" style="font-weight:500;color:var(--ink)">{c.address}</td>
                     <td style="font-size:12px;color:var(--muted)">{c.provider}</td>
                     <td><.pill variant={status_variant(c.status)}>{c.status}</.pill></td>
                     <td style="font-size:12px;color:var(--muted)">{synced_at(c.last_synced_at)}</td>

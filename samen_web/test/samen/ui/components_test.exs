@@ -62,6 +62,23 @@ defmodule Samen.UI.ComponentsTest do
     assert html =~ ~s(class="on")
   end
 
+  test "module_nav/1 renders nav items for the CRM dashboard and mailbox surfaces (H3)" do
+    html =
+      render_component(&Samen.UI.module_nav/1, %{
+        org_id: "ORG-123",
+        active: :crm_dashboard,
+        extra: []
+      })
+
+    # Both shipped surfaces are reachable via nav, not just hand-typed URLs.
+    assert html =~ "Dashboard"
+    assert html =~ "Mailbox"
+    assert html =~ "/crm/dashboard?org=ORG-123"
+    assert html =~ "/crm/mailbox?org=ORG-123"
+    # The active dashboard item is highlighted.
+    assert html =~ ~s(href="/crm/dashboard?org=ORG-123" class="on")
+  end
+
   test "module_nav/1 honors custom path prefixes (host mounted at a different path)" do
     html =
       render_component(&Samen.UI.module_nav/1, %{

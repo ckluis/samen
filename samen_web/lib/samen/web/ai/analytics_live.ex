@@ -7,6 +7,19 @@ defmodule Samen.Web.AI.AnalyticsLive do
   capability — a tenant-plane session is refused `{:error, :unauthorized}` fail-closed BEFORE
   any row is read, and `ai_result/1` renders that honestly (never a fabricated aggregate). The
   aggregate resource is the host-configured `:ai_aggregate_resource` mount label.
+
+  ## M4 dogfood fix — no dead-tab ask input on the tenant plane
+
+  A tenant-plane caller is refused DETERMINISTICALLY, before any row is read, on
+  every single question — the ask form could never once succeed for that persona.
+  Presenting a live-looking input + Ask button that can never succeed is a dead
+  tab, not honesty. `Samen.Web.AI.Components.analytics_ask_offered?/1` (mirroring
+  `Samen.Web.CRM.Live.writable?/1`'s tenant/operator UI posture split) gates the
+  INPUT ITSELF: on the tenant plane this page renders the SAME honest
+  `ai_result/1` `:unauthorized` card up front (no input to type into); on the
+  operator plane the real input still renders. T144 itself is UNCHANGED — this is
+  a UI posture, not a security gate; the kernel's deny-by-default check still runs
+  on every submit regardless.
   """
   use Phoenix.LiveView
 
@@ -82,12 +95,16 @@ defmodule Samen.Web.AI.AnalyticsLive do
               </span>
             </div>
 
-            <form phx-submit="ask" class="card" style="display:flex;gap:8px;padding:16px">
-              <input type="text" name="question" id="ai-analytics-input" value={@question} placeholder="Ask an analytics question…" style="flex:1" />
-              <.button variant="primary" type="submit">Ask</.button>
-            </form>
+            <%= if analytics_ask_offered?(@samen_mount) do %>
+              <form phx-submit="ask" class="card" id="ai-analytics-ask-form" style="display:flex;gap:8px;padding:16px">
+                <input type="text" name="question" id="ai-analytics-input" value={@question} placeholder="Ask an analytics question…" style="flex:1" />
+                <.button variant="primary" type="submit">Ask</.button>
+              </form>
 
-            <.ai_result :if={@result} result={@result} id="ai-analytics-result" />
+              <.ai_result :if={@result} result={@result} id="ai-analytics-result" />
+            <% else %>
+              <.ai_result result={{:error, :unauthorized}} id="ai-analytics-result" />
+            <% end %>
           </div>
       <% end %>
     </.app_shell>

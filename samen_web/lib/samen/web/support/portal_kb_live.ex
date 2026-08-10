@@ -80,6 +80,15 @@ defmodule Samen.Web.Support.PortalKbLive do
 
   defp blank_deflect_form, do: to_form(%{"subject" => "", "description" => ""}, as: :deflect)
 
+  # L3 (Phase-6 T85 gate dogfood) — resolve the sign-in destination through the SAME
+  # host-configurable seam every other framework page uses
+  # (`Samen.Web.Auth.LoginLive.login_action/1`, `Samen.Web.Operator.Fleet.login_path/1`):
+  # `Mount.label(mount, :login_path, "/login")`. A hardcoded `"/login"` literal broke on
+  # any host whose login lives elsewhere (or under a path prefix); `nil` when the mount
+  # itself failed to resolve falls back to the same neutral default.
+  defp login_href(%Mount{} = mount), do: Mount.label(mount, :login_path, "/login")
+  defp login_href(_), do: "/login"
+
   # -- events -------------------------------------------------------------------
 
   @impl true
@@ -132,7 +141,7 @@ defmodule Samen.Web.Support.PortalKbLive do
             {render_suggestion(@suggestion)}
 
             <p style="font-size:12px;color:var(--muted);margin-top:14px">
-              Still need help? <a href="/login">Sign in</a> to open a support ticket.
+              Still need help? <a href={login_href(@samen_mount)} id="portal-sign-in-link">Sign in</a> to open a support ticket.
             </p>
           </div>
 

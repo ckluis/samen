@@ -147,6 +147,20 @@ defmodule Samen.Web.CRMMailboxSettingsTest do
     refute html =~ @none_connected
   end
 
+  # L4 (Phase-6 T85 gate dogfood) — the address cell uses the theme var every other
+  # bold/primary-value cell in the kit uses (`var(--ink)`, `samen_ui.css`'s `:root`
+  # token), not a hardcoded literal that can't adapt if a dark palette overrides it.
+  test "CONNECTED: the address cell renders via the var(--ink) theme token, no hardcoded literal",
+       %{org_id: org_id} do
+    wire_provider!()
+    _connection = connect!(org_id)
+
+    html = render(org_id, plane: :tenant)
+
+    assert html =~ ~s|class="mailbox-address" style="font-weight:500;color:var(--ink)"|
+    refute html =~ "#3a3b45"
+  end
+
   test "CONNECTED: the OPERATOR plane masks the mailbox address •••• (no plaintext, no vt_ token)",
        %{org_id: org_id} do
     wire_provider!()

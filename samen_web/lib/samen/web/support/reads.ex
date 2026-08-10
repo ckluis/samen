@@ -314,6 +314,23 @@ defmodule Samen.Web.Support.Reads do
   end
 
   @doc """
+  Start a NEW conversation on a ticket (the "Start conversation" first-reply
+  affordance, H4/M3 — a UI-created ticket seeds no conversation of its own, so
+  `new_reply_form/3` has nothing to build a composer against). `ticket_id` is a
+  server-side fact (the current ticket, never client input); the created
+  conversation takes the blueprint's default `:email` channel / `:open` status.
+  The write goes through Ash so OrgScope + SameOrgFk apply — this module adds NO
+  policy of its own. `{:ok, conversation}` or `{:error, reason}`.
+  """
+  def create_conversation(mount, scope, ticket_id) do
+    org_id = Map.get(actor_of(scope), :org_id)
+
+    Mount.resource(mount, Conversation)
+    |> Ash.Changeset.for_create(:create, %{org_id: org_id, ticket_id: ticket_id}, scope: scope)
+    |> Ash.create()
+  end
+
+  @doc """
   Update a ticket's STATUS (the sanctioned `update: :*` — "ticket status" per the A3
   wiring scope). `status` is a STRING matched against the bounded blueprint enum
   (`ticket_statuses/0`) — client input never mints an atom; an unknown status is

@@ -156,6 +156,37 @@ defmodule Samen.Web.PortalKbLiveTest do
   end
 
   # ---------------------------------------------------------------------------
+  # L3 (Phase-6 T85 gate dogfood) — the "Sign in" link resolves via the SAME
+  # host-configurable `:login_path` mount label every other framework page uses
+  # (`Samen.Web.Auth.LoginLive.login_action/1`), not a hardcoded `/login` literal.
+  describe "L3 — the Sign in link resolves via the login_path mount label" do
+    test "the default (no label set) resolves to /login" do
+      org_id = Ash.UUID.generate()
+      socket = mount_socket(org_id)
+
+      rendered = html(socket)
+      assert rendered =~ ~s(id="portal-sign-in-link")
+      assert rendered =~ ~s(href="/login")
+    end
+
+    test "a host with a custom :login_path label resolves THERE, not the /login literal" do
+      org_id = Ash.UUID.generate()
+
+      custom_mount =
+        Mount.new(:kb, Samen.WebTest.Cms, Samen.WebTest.Repo, labels: %{login_path: "/customers/signin"})
+
+      socket =
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(:samen_mount, custom_mount)
+        |> PortalKbLive.load(org_id)
+
+      rendered = html(socket)
+      assert rendered =~ ~s(href="/customers/signin")
+      refute rendered =~ ~s(href="/login")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # ORG-SCOPE PIN — the T74-T77 discipline, applied to the new unauthenticated read.
   describe "ORG-SCOPE PIN — the portal never crosses orgs" do
     test "org A's portal never shows org B's public article, browse OR deflect" do

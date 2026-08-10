@@ -34,6 +34,24 @@ defmodule Samen.Web.AI.Components do
   @doc "The AI kit mount path prefix for this host (label `:ai_path`, default `/ai`)."
   def ai_base(%Samen.Web.Mount{} = mount), do: Samen.Web.Mount.label(mount, :ai_path, "/ai")
 
+  @doc """
+  Whether the analytics ask-box INPUT is offered on this mount (M4 dogfood fix — an
+  honest UI POSTURE, mirroring `Samen.Web.CRM.Live.writable?/1`'s tenant/operator
+  plane split; this is NOT a security gate and does not touch T144).
+
+  The real authorization is `Samen.AI.Analytics.ask/4`'s deny-by-default
+  platform/operator capability check (T144) — unchanged, still enforced server-side
+  on every submit regardless of what this function returns. But on a TENANT-plane
+  mount that check refuses `{:error, :unauthorized}` deterministically, before any
+  row is read, for EVERY question — so a live-looking input + Ask button that can
+  never once succeed is a dead tab (a tenant types, submits, and always bounces).
+  `AnalyticsLive` renders the SAME honest `ai_result/1` `:unauthorized` card
+  up front instead, with no input to type into — never a weakened tenant path, never
+  a tempting dead-end.
+  """
+  def analytics_ask_offered?(%Samen.Web.Mount{plane: %{kind: :operator}}), do: true
+  def analytics_ask_offered?(_), do: false
+
   @doc "The five AI kit surfaces, in nav order: `{kind, label, sub_path}`."
   def surfaces do
     [
