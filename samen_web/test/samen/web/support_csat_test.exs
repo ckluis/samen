@@ -297,6 +297,52 @@ defmodule Samen.Web.SupportCsatTest do
 
       assert length(tokens) == 1
     end
+
+    # P11 (phase6-punchlist) — pin the resolved-transition guard on the
+    # force_change_attribute path (the exact path T79's verifier reasoned about but
+    # left sabotage-UNPINNED).
+    #
+    # HONEST FINDING (documented in the gate report): `force_change_attribute(:status,
+    # :resolved)` on an ALREADY-`:resolved` ticket leaves `changing_attribute?(:status)`
+    # == FALSE and `attributes` == %{} — Ash ELIDES a same-value force-change. So the two
+    # transition conjuncts (`changing_attribute?` and `previous_status != :resolved`) are
+    # mutually REDUNDANT for the same-value case: dropping either one ALONE leaves the
+    # other holding, so a single-conjunct sabotage would be VACUOUS (anti-tautology). This
+    # test therefore pins the transition-detection guard AS A WHOLE — that a re-save of an
+    # already-resolved ticket does NOT re-dispatch a survey — and sabotage 153 removes the
+    # detection (fire on any resolved-status write) to prove the guard is load-bearing.
+    test "P11 FORCE-CHANGE DIRECT: an already-resolved ticket force_change'd back to :resolved does NOT re-mint a CSAT token" do
+      configure_capture_adapter()
+      %{org_id: org_id, support: %{ticket: ticket}} = Seeds.seed_all()
+      mount = build_mount(:support)
+      scope = Mount.scope(mount, org_id)
+
+      # First real resolution mints exactly one token.
+      {:ok, resolved} = Reads.update_ticket_status(mount, scope, ticket.id, "resolved")
+      assert resolved.status == :resolved
+      assert_receive {:captured, _config}
+
+      assert Samen.WebTest.Support.CsatSurveyToken
+             |> Ash.Query.filter(ticket_id == ^ticket.id)
+             |> Ash.read!(authorize?: false)
+             |> length() == 1
+
+      # THE PIN: force `:status` back in as `:resolved` on the already-resolved ticket and
+      # run the real `:update` action (the CsatSurveyDispatch change fires here). With the
+      # transition guard present: no re-dispatch, no second token.
+      {:ok, _} =
+        resolved
+        |> Ash.Changeset.for_update(:update, %{}, scope: scope)
+        |> Ash.Changeset.force_change_attribute(:status, :resolved)
+        |> Ash.update()
+
+      refute_receive {:captured, _config2}, 100
+
+      assert Samen.WebTest.Support.CsatSurveyToken
+             |> Ash.Query.filter(ticket_id == ^ticket.id)
+             |> Ash.read!(authorize?: false)
+             |> length() == 1
+    end
   end
 
   # ---------------------------------------------------------------------------

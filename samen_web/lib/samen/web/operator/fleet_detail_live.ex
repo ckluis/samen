@@ -65,7 +65,13 @@ defmodule Samen.Web.Operator.FleetDetailLive do
       {:ok, %{rows: rows}} ->
         case Enum.find(rows, &(&1.app_id == app_id)) do
           nil ->
-            assign(socket, app: nil, in_product_scope?: false, cohorts: %{}, resolved: %{})
+            assign(socket,
+              app: nil,
+              in_product_scope?: false,
+              cohorts: %{},
+              resolved: %{},
+              name_seam_reachable?: false
+            )
 
           row ->
             in_scope? = FleetHelpers.app_role(roles, row.slug) != nil
@@ -86,11 +92,28 @@ defmodule Samen.Web.Operator.FleetDetailLive do
                 {kind, cohort_rows(report, key, kind, row.slug, resolve_path, resolved, in_scope?)}
               end
 
-            assign(socket, app: row, in_product_scope?: in_scope?, cohorts: cohorts, resolved: resolved)
+            assign(socket,
+              app: row,
+              in_product_scope?: in_scope?,
+              cohorts: cohorts,
+              resolved: resolved,
+              # P16 (phase6-punchlist / ADR-044 §16.2) — is the NAME-resolution seam
+              # even wired in THIS deployment? A separately-deployed / cross-origin
+              # cockpit with no `:fleet_name_resolver` masks every name; that is a
+              # whole-page "seam not reachable" condition, NOT per-row out-of-scope.
+              name_seam_reachable?: Resolution.name_resolver_configured?(otp_app)
+            )
         end
 
       {:error, reason} ->
-        assign(socket, app: nil, not_configured: reason, in_product_scope?: false, cohorts: %{}, resolved: %{})
+        assign(socket,
+          app: nil,
+          not_configured: reason,
+          in_product_scope?: false,
+          cohorts: %{},
+          resolved: %{},
+          name_seam_reachable?: false
+        )
     end
   end
 
@@ -145,6 +168,17 @@ defmodule Samen.Web.Operator.FleetDetailLive do
             <span class="lane">· {@app.slug} · {@app.mode} · {@app.status}</span>
           </div>
 
+          <%!-- P16 (ADR-044 §16.2) — whole-page attribution when the NAME-resolution
+                seam is not wired in this (separately-deployed) cockpit: names are
+                withheld for a reason unrelated to per-viewer scope. Counts still show. --%>
+          <.empty_state
+            :if={not @name_seam_reachable?}
+            class="fleet-name-seam-unreachable"
+            icon="⚠"
+            title="Names unavailable — resolution seam not reachable."
+            body="This cockpit deployment has no fleet name-resolution seam wired for this product (a separately-deployed / cross-origin composition). Tenant names cannot be resolved here — cohort counts remain visible, names are withheld fail-closed."
+          />
+
           <div :for={{kind, rows} <- @cohorts} id={"cohort-#{kind}"} style="margin-top:18px">
             <div class="gtitle">
               <h3>{Phoenix.Naming.humanize(kind)}</h3>
@@ -172,7 +206,7 @@ defmodule Samen.Web.Operator.FleetDetailLive do
                   <%= if row.masked? do %>
                     <tr id={"cohort-#{kind}-row-#{idx}-masked"} class="cohort-row cohort-row-masked">
                       <td class="cohort-name-masked">
-                        <span class="masked-affordance">not in your scope</span>
+                        <span class="masked-affordance">{if @name_seam_reachable?, do: "not in your scope", else: "name unavailable"}</span>
                       </td>
                       <td>{cohort_metrics_text(row.item)}</td>
                     </tr>

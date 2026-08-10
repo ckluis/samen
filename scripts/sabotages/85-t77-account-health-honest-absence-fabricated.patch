@@ -9,6 +9,7 @@
 # APP: samen_web
 # TEST_FILES: test/samen/web/crm_account_health_test.exs
 # MUST_FAIL: snapshot/2: a host with NO Billing/Support siblings gets honest absence, never a fabricated $0/0
+# MUST_FAIL: snapshot/2 DEGRADED READ (fix round 1, MED-3)
 diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web/account_health.ex
 --- a/samen_web/lib/samen/web/account_health.ex
 +++ b/samen_web/lib/samen/web/account_health.ex

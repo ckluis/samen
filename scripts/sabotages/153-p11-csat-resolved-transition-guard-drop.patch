@@ -1,0 +1,34 @@
+# SABOTAGE: P11 (phase6-punchlist) — the CSAT resolved-transition detection is gutted:
+# the `changing_attribute?(:status)` conjunct is dropped and `previous_status !=
+# :resolved` is neutered to a tautology (`!= :__sabotage_never__`, keeping
+# `previous_status/1` referenced so this is a GENUINE behavior mutant, not a compile
+# error). The survey now fires on ANY write that leaves `:status` == `:resolved` — a
+# re-save / unrelated edit of an already-resolved ticket re-mints + re-dispatches a
+# duplicate CSAT survey.
+#
+# HONEST NOTE (see gate report): Ash ELIDES same-value force-changes, so on the
+# force_change_attribute(:status,:resolved) path `changing_attribute?` is already FALSE —
+# which means the `changing_attribute?` and `previous_status != :resolved` conjuncts are
+# mutually REDUNDANT for the same-value case and neither can be pinned ALONE (a
+# single-conjunct drop is vacuous). This sabotage therefore removes the transition
+# detection AS A WHOLE, which is the non-vacuous, load-bearing property. Flips BOTH the
+# force_change-direct test and the normal resolved->resolved test. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/support_csat_test.exs
+# MUST_FAIL: P11 FORCE-CHANGE DIRECT: an already-resolved ticket force_change'd back to :resolved does NOT re-mint a CSAT token
+# MUST_FAIL: a ticket already resolved touched again (resolved -> resolved) does not re-mint a survey
+diff --git a/samen_core/lib/samen/scopes/support/csat_survey_dispatch.ex b/samen_core/lib/samen/scopes/support/csat_survey_dispatch.ex
+--- a/samen_core/lib/samen/scopes/support/csat_survey_dispatch.ex
++++ b/samen_core/lib/samen/scopes/support/csat_survey_dispatch.ex
+@@ -69,9 +69,8 @@ defmodule Samen.Scopes.Support.CsatSurveyDispatch do
+   # happens to re-submit the same status) fires nothing, matching
+   # `Samen.Notifications.StatusChange`'s exact discipline.
+   defp transitioning_to_resolved?(changeset) do
+-    Ash.Changeset.changing_attribute?(changeset, :status) and
+-      Ash.Changeset.get_attribute(changeset, :status) == :resolved and
+-      previous_status(changeset) != :resolved
++    Ash.Changeset.get_attribute(changeset, :status) == :resolved and
++      previous_status(changeset) != :__sabotage_never__
+   end
+ 
+   defp previous_status(%{data: %{status: status}}), do: status

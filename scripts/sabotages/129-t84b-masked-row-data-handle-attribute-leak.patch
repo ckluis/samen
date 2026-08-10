@@ -1,22 +1,23 @@
 # SABOTAGE: T84b (ADR-044 s16.4a, RP-J-14). The masked tier-2 row template must carry NO
 # handle in any DOM attribute (mask by omission extended to the client) - a masked <tr> renders
-# only its inert "not in your scope" affordance and its metrics, never the handle. Adding a
+# only its inert affordance and its metrics, never the handle. Adding a
 # data-handle attribute on the masked row leaks a stable per-tenant pseudonym to a viewer not
 # entitled to resolve it. Positive control: the NAMED row's resolve_href (which legitimately
 # carries the handle for an in-scope viewer) is untouched by this patch.
+# (Context regenerated at the T85 gate — P16 added the seam-reachability affordance line that
+# now sits inside this hunk's context; the sabotage itself is unchanged.)
 # APP: samen_web
 # TEST_FILES: test/samen/web/fleet_detail_scope_mask_test.exs
 # MUST_FAIL: RED: a :none-scope viewer (fleet+app role, no account scope) sees NEITHER name nor handle
 diff --git a/samen_web/lib/samen/web/operator/fleet_detail_live.ex b/samen_web/lib/samen/web/operator/fleet_detail_live.ex
-index 169af14..d6f3ba6 100644
 --- a/samen_web/lib/samen/web/operator/fleet_detail_live.ex
 +++ b/samen_web/lib/samen/web/operator/fleet_detail_live.ex
-@@ -170,7 +170,7 @@ defmodule Samen.Web.Operator.FleetDetailLive do
+@@ -204,7 +204,7 @@ defmodule Samen.Web.Operator.FleetDetailLive do
                <tbody>
                  <%= for {row, idx} <- Enum.with_index(rows) do %>
                    <%= if row.masked? do %>
 -                    <tr id={"cohort-#{kind}-row-#{idx}-masked"} class="cohort-row cohort-row-masked">
 +                    <tr id={"cohort-#{kind}-row-#{idx}-masked"} class="cohort-row cohort-row-masked" data-handle={row.handle}>
                        <td class="cohort-name-masked">
-                         <span class="masked-affordance">not in your scope</span>
+                         <span class="masked-affordance">{if @name_seam_reachable?, do: "not in your scope", else: "name unavailable"}</span>
                        </td>

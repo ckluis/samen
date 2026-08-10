@@ -239,6 +239,32 @@ defmodule Samen.Web.MailboxSyncTest do
     assert domain_row.subject_key == nil
   end
 
+  # P1 (phase6-punchlist) — `Samen.Mailbox.Match.company_for/3` is PUBLIC. The Sync
+  # path only ever hands it an already-org-filtered person, so the org conjunct in
+  # `company_by_id/2` is an equivalent-on-Sync-path mutant there. A HOST calling the
+  # public entry directly with a raw, foreign-org `%{company_id: ...}` struct is the
+  # unguarded path — pin it directly, with a positive control so the nil is the org
+  # pin (not a broken function that never resolves any company_id).
+  test "P1 PUBLIC company_for/3 is ORG-PINNED on the raw-struct path: a foreign-org company_id NEVER resolves cross-org",
+       %{org_id: org_a, company: company_a} do
+    org_b = Ash.UUID.generate()
+    company_b = seed_company!(org_b, "Foreign Freight GmbH", "p1-foreign-b.invalid")
+
+    cfg_a = config(org_a)
+    # An address that domain-matches NEITHER company, so the result is decided purely
+    # by the by-id path (company_by_domain/2 would otherwise mask the org pin).
+    address = "p1-stranger@p1-nowhere.invalid"
+
+    # THE PIN: a raw foreign-org person struct's company_id must not cross into org A.
+    assert Samen.Mailbox.Match.company_for(%{company_id: company_b.id}, address, cfg_a) == nil
+
+    # POSITIVE CONTROL (anti-tautology): org A's OWN company_id DOES resolve by-id,
+    # proving the nil above is the org boundary, not a dead code path.
+    resolved = Samen.Mailbox.Match.company_for(%{company_id: company_a.id}, address, cfg_a)
+    assert resolved != nil
+    assert resolved.id == company_a.id
+  end
+
   test "matching is address-NORMALIZED (case/whitespace), not string-identical", %{
     org_id: org_id,
     person: person

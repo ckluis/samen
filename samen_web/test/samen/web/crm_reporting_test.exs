@@ -279,6 +279,28 @@ defmodule Samen.Web.CRMReportingTest do
     assert html =~ "2 more activities not shown"
   end
 
+  # P2 (phase6-punchlist) — the DISCOVERY-CAPPED branch (`hidden_owners == nil`, i.e. the
+  # ranking pool itself was capped: >discovery_limit distinct owners) must NOT claim
+  # "the top N members" — the overall top performer may lie outside the bounded sample,
+  # so that ordinal claim is FALSE in exactly that branch. Copy-only honesty fix.
+  test "P2 cap disclosure: the discovery-capped branch (hidden_owners == nil) never claims 'the top' (ordinally false there)" do
+    capped = %{shown: 12, hidden_owners: nil, hidden_count: 40}
+    text = DashboardLive.cap_disclosure(capped)
+
+    refute text =~ "the top"
+    assert text =~ "bounded sample"
+    assert text =~ "Showing 12 members"
+    assert text =~ "40 more activities not shown"
+
+    # ANTI-TAUTOLOGY control: the KNOWN-count branch (discovery NOT capped) still makes
+    # the honest ordinal claim — proving the refute above is the nil branch, not a
+    # helper that never says "the top" at all.
+    known = %{shown: 12, hidden_owners: 1, hidden_count: 2}
+    known_text = DashboardLive.cap_disclosure(known)
+    assert known_text =~ "Showing the top 12 members"
+    assert known_text =~ "1 more member(s)"
+  end
+
   # Fix round 1, MED-2 — a leaderboard row can NEVER be the primitive's own bounded-tail
   # sentinel (`Samen.Web.Reads.other_key/0`, `:__other__`). Uses a SMALL `:discovery_limit`
   # (2, well under the 4 real owners seeded) to force discovery capping cheaply — the Other

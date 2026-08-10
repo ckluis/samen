@@ -85,6 +85,14 @@ defmodule PawChart.OperatorAuthzTest do
       assert html_response(get(session_conn(@operator_user), "/operator/billing"), 200)
       assert html_response(get(session_conn(@operator_user), "/operator/revenue"), 200)
     end
+
+    # P19 (phase6-punchlist) — the operator support DESK (`Samen.Web.Operator.DeskLive`,
+    # mounted by `samen_operator_routes` at ≈0 authored LOC) was mounted but had no
+    # dedicated pawchart assertion. Prove the Desk surface actually WORKS for pawchart's
+    # data under the in-roster operator role.
+    test "P19: GET /operator/desk (the operator support Desk) is reachable (200) for the in-roster operator" do
+      assert html_response(get(session_conn(@operator_user), "/operator/desk"), 200)
+    end
   end
 
   describe "RED: the gate closes for a tenant / anonymous request" do
@@ -113,6 +121,14 @@ defmodule PawChart.OperatorAuthzTest do
       assert conn.status == 302
       assert get_resp_header(conn, "location") == ["/login"]
       refute response(conn, 302) =~ @clinic_name
+    end
+
+    # P19 — the gate closes on the Desk too (a tenant session can never reach it).
+    test "P19: the /operator/desk surface is refused to a tenant (302 → /login)" do
+      conn = get(session_conn(@tenant_user), "/operator/desk")
+
+      assert conn.status == 302
+      assert get_resp_header(conn, "location") == ["/login"]
     end
   end
 end

@@ -131,11 +131,16 @@ defmodule Samen.Web.Operator.FleetLive do
     end
   end
 
+  # P15 (phase6-punchlist) — honest no-data. When NO product reports this metric at all
+  # the sum is `nil` (rendered `—`, matching avg_metric/2's discipline and metric/2's
+  # `_ -> "—"` fallback), NOT a fabricated `0`. A genuine reported total of `0` (some
+  # product reported, the sum is zero) still renders `0` — a real number, distinct from
+  # "nothing reported".
   defp sum_metric(tiles, key) do
-    tiles
-    |> Enum.map(&Map.get(&1.report, key))
-    |> Enum.filter(&is_number/1)
-    |> Enum.sum()
+    case tiles |> Enum.map(&Map.get(&1.report, key)) |> Enum.filter(&is_number/1) do
+      [] -> nil
+      values -> Enum.sum(values)
+    end
   end
 
   defp merged_activity_counts(tiles) do
@@ -249,8 +254,8 @@ defmodule Samen.Web.Operator.FleetLive do
           </div>
           <div :if={@t156} class="card" id="t156-panel" style="padding:16px 20px">
             <div>Deliverability health index (avg across reporting products): {@t156.deliverability_health_index || "—"}</div>
-            <div>Automation kill-switches engaged (fleet-wide): {@t156.automation.kill_switches_engaged}</div>
-            <div>Automation rules tripped, 24h (fleet-wide): {@t156.automation.rules_tripped_24h}</div>
+            <div>Automation kill-switches engaged (fleet-wide): {@t156.automation.kill_switches_engaged || "—"}</div>
+            <div>Automation rules tripped, 24h (fleet-wide): {@t156.automation.rules_tripped_24h || "—"}</div>
           </div>
 
           <div class="gtitle" id="fleet-attention-header" style="margin-top:22px">

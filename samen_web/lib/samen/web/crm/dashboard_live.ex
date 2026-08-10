@@ -183,9 +183,7 @@ defmodule Samen.Web.CRM.DashboardLive do
                     </tr>
                   </.data_table>
                   <p :if={@dash.leaderboard.capped} class="chart-empty" data-capped="true">
-                    Showing the top {@dash.leaderboard.shown} members —
-                    {hidden_owners_text(@dash.leaderboard.hidden_owners)} more member(s),
-                    {@dash.leaderboard.hidden_count} more activities not shown.
+                    {cap_disclosure(@dash.leaderboard)}
                   </p>
                 <% end %>
               </div>
@@ -229,9 +227,29 @@ defmodule Samen.Web.CRM.DashboardLive do
   defp owner_label(owner_id) when is_binary(owner_id), do: "Member " <> String.slice(owner_id, 0, 8)
   defp owner_label(other), do: to_string(other)
 
-  # T76/I3 fix round 1 (MED-1) — `hidden_owners` is EXACT when the discovery pool was NOT
-  # capped (the common case), `nil` (honest-unknown, mirrors geo_markers!/3's capped_count
-  # idiom) when it WAS. Never renders a fabricated number either way.
-  defp hidden_owners_text(nil), do: "some"
-  defp hidden_owners_text(n) when is_integer(n), do: to_string(n)
+  # T76/I3 P2 (phase6-punchlist) — the leaderboard cap disclosure.
+  #
+  # `hidden_owners` is EXACT when the discovery pool was NOT capped (the common case:
+  # fewer distinct owners than `:discovery_limit`), and `nil` when the pool ITSELF was
+  # capped (>discovery_limit distinct owners — mirrors geo_markers!/3's capped_count
+  # `nil`, never a fabricated number).
+  #
+  # The honesty distinction P2 fixes: with a KNOWN count, every member was ranked, so
+  # "Showing the top N members" is an ordinally TRUE claim. With `nil`, ranking ran over
+  # a BOUNDED SAMPLE of the roster — the overall top performer may lie OUTSIDE it — so
+  # "the top" would be ordinally FALSE. That branch says "ranked within a bounded sample"
+  # and makes no top-of-roster claim. `hidden_count` (withheld activities) is exact in
+  # BOTH branches regardless of which cap bound the read.
+  @doc false
+  def cap_disclosure(%{shown: shown, hidden_owners: nil, hidden_count: hidden_count}) do
+    "Showing #{shown} members ranked within a bounded sample " <>
+      "(the full roster exceeds the ranking pool, so the overall top performer is not guaranteed shown) — " <>
+      "#{hidden_count} more activities not shown."
+  end
+
+  def cap_disclosure(%{shown: shown, hidden_owners: hidden_owners, hidden_count: hidden_count})
+      when is_integer(hidden_owners) do
+    "Showing the top #{shown} members — #{hidden_owners} more member(s), " <>
+      "#{hidden_count} more activities not shown."
+  end
 end

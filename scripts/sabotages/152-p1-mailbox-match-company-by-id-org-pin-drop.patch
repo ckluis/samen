@@ -1,0 +1,23 @@
+# SABOTAGE: P1 (phase6-punchlist) — `Samen.Mailbox.Match.company_by_id/2` drops the
+# `org_id == ^config.org_id` conjunct, keeping only the `id == ^company_id` filter.
+# The Sync path is unaffected (it only ever passes an already-org-filtered person, so
+# this is an equivalent mutant there — exactly the delta-verify gap P1 names). But the
+# PUBLIC `company_for/3` entry, called with a raw foreign-org `%{company_id: ...}`
+# struct (a host calling it directly), now resolves a DIFFERENT org's Company by id —
+# a cross-org read. The direct raw-struct test flips; the positive control still
+# resolves org A's own company. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/mailbox_sync_test.exs
+# MUST_FAIL: P1 PUBLIC company_for/3 is ORG-PINNED on the raw-struct path
+diff --git a/samen_core/lib/samen/mailbox/match.ex b/samen_core/lib/samen/mailbox/match.ex
+--- a/samen_core/lib/samen/mailbox/match.ex
++++ b/samen_core/lib/samen/mailbox/match.ex
+@@ -167,7 +167,7 @@ defmodule Samen.Mailbox.Match do
+   defp company_by_id(%{company_id: company_id}, config) when is_binary(company_id) do
+     config.company_resource
+     |> Ash.Query.new()
+-    |> Ash.Query.filter(org_id == ^config.org_id and id == ^company_id)
++    |> Ash.Query.filter(id == ^company_id)
+     |> Ash.Query.limit(1)
+     |> Ash.read!(authorize?: false)
+     |> List.first()

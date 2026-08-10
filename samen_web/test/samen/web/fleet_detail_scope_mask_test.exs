@@ -175,6 +175,63 @@ defmodule Samen.Web.FleetDetailScopeMaskTest do
     end
   end
 
+  # P16 (phase6-punchlist / ADR-044 §16.2) — a separately-deployed cockpit whose
+  # deployment never received the `:fleet_name_resolver` seam masks EVERY cohort name.
+  # That is a whole-page "resolution seam not reachable" condition — NOT the per-row
+  # "not in your scope" authz outcome. It already fails closed by construction (resolve/3
+  # returns %{} for every handle); this pins the ATTRIBUTION and proves no leak.
+  defp render_without_name_seam(fixture, roles) do
+    Application.put_env(@otp_app, :fleet_authority, {__MODULE__, :const, [roles]})
+    # A permissive SCOPE seam is wired (so the mask is NOT a scope outcome) but the
+    # NAME-resolution seam is deliberately absent — the separately-deployed split.
+    Application.put_env(@otp_app, :fleet_resolution, {__MODULE__, :const, [:all]})
+    Application.delete_env(@otp_app, :fleet_name_resolver)
+
+    mount =
+      Mount.new(:operator, Samen.WebTest.Operator, Samen.WebTest.Repo,
+        plane: Samen.Web.Plane.tenant(),
+        labels: %{otp_app: @otp_app, fleet_namespace: @ns, fleet_cockpit: true}
+      )
+
+    socket = %Phoenix.LiveView.Socket{} |> Phoenix.Component.assign(:samen_mount, mount)
+    {:ok, socket} = FleetDetailLive.mount(%{"app_id" => fixture.app.id}, %{}, socket)
+    render_html(FleetDetailLive, socket.assigns)
+  end
+
+  describe "P16 — separately-deployed / seam-not-reachable attribution (§16.2)" do
+    test "an in-product-scope operator with NO name-resolution seam sees the whole-page 'seam not reachable' copy, never per-row 'not in your scope'",
+         fixture do
+      html = render_without_name_seam(fixture, %{fleet: :operator_admin, smx1: :operator_admin})
+
+      # Whole-page attribution (the ADR §16.2 copy), and its cause named honestly.
+      assert html =~ "resolution seam not reachable"
+
+      # NOT misattributed to per-viewer scope — the old per-row copy must be absent.
+      refute html =~ "not in your scope"
+
+      # Fail-closed either way: no resolved tenant name and no raw handle leaks into the DOM.
+      refute html =~ "Alpha Co"
+      refute html =~ "Beta Co"
+      refute html =~ fixture.alpha_handle
+      refute html =~ fixture.beta_handle
+    end
+
+    test "ANTI-TAUTOLOGY: with the name seam WIRED, an out-of-scope handle is attributed to scope ('not in your scope'), not the seam",
+         fixture do
+      # Same viewer, but the name seam IS reachable and scope EXCLUDES the handles: the
+      # honest cause flips back to per-row scope — proving the P16 test above is real.
+      html =
+        render_for(
+          fixture,
+          %{fleet: :operator_readonly, smx1: :operator_readonly},
+          {:accounts, MapSet.new(["some-other-org-entirely"])}
+        )
+
+      assert html =~ "not in your scope"
+      refute html =~ "resolution seam not reachable"
+    end
+  end
+
   describe "§5.4 tier-2 app-level gate (independent of name scope)" do
     test "no roles[app_id] -> the whole cohort's COUNTS are hidden, regardless of name scope", fixture do
       # roles[:fleet] present but NO entry for THIS app's slug (:smx1 absent) — the

@@ -169,6 +169,34 @@ defmodule Samen.Fleet.Resolution do
   def configured?(_), do: false
 
   @doc """
+  Is a `:fleet_name_resolver` NAME-resolution seam reachable for `otp_app`?
+
+  Distinct from `configured?/1` (which checks the `:fleet_resolution` SCOPE seam):
+  this checks the handle→display-name seam that `resolve/3` consumes. The tier-2
+  cockpit (`Samen.Web.Operator.FleetDetailLive`) uses it to attribute a masked
+  cohort name to the RIGHT cause (§16.2):
+
+    * seam **reachable**, but a handle is outside the viewer's `scope_of/2` ⇒ the
+      row is masked "not in your scope" — a genuine per-viewer authz outcome;
+    * seam **NOT wired at all** (a separately-deployed / cross-origin cockpit whose
+      deployment never received the product's name-resolution seam) ⇒ `resolve/3`
+      returns `%{}` for EVERY handle, so every name masks — but the honest cause is
+      "resolution seam not reachable", a whole-page condition, NOT per-row out-of-scope.
+
+  Fail-closed regardless: an unreachable/absent seam withholds names either way (no
+  leak). This predicate only picks the truthful copy.
+  """
+  @spec name_resolver_configured?(atom()) :: boolean()
+  def name_resolver_configured?(otp_app) when is_atom(otp_app) do
+    case Application.get_env(otp_app, :fleet_name_resolver) do
+      {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) -> true
+      _ -> false
+    end
+  end
+
+  def name_resolver_configured?(_), do: false
+
+  @doc """
   Plain `org_id` membership against a resolved `scope/0` value — the KEYLESS drill-in
   gate test (§16.4a): the URL already carries the `org_id` and `scope_of/2` already
   returns `org_id`s, so no handle and no `fleet_subject_key` HMAC are involved.

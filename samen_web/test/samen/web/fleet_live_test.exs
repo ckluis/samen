@@ -229,5 +229,43 @@ defmodule Samen.Web.FleetLiveTest do
       html = render_html(FleetLive, socket.assigns)
       refute html =~ "org_id"
     end
+
+    # P15 (phase6-punchlist) — the fleet-wide SUM metrics must honor the SAME "—"
+    # honest-no-data discipline the avg metric (and metric/2) use: when NO product
+    # reports a metric at all, render "—", NOT a fabricated "0". A genuine reported 0
+    # (some product DID report, the total is zero) still renders "0".
+    test "P15 HONEST NO-DATA: fleet-wide SUM metrics render nil/'—' when no product reports, not a fabricated 0" do
+      # Both apps report a base payload that OMITS the automation counters entirely
+      # (Report.to_wire drops nil fields), so nothing reports kill-switches/rules-tripped.
+      seed_app("t156e", report: minimal_payload())
+      seed_app("t156f", report: minimal_payload())
+
+      mount = mount_with_roles(%{fleet: :operator_admin})
+      socket = socket_with_mount(mount)
+      {:ok, socket} = FleetLive.mount(%{}, session(), socket)
+
+      assert socket.assigns.t156.automation.kill_switches_engaged == nil
+      assert socket.assigns.t156.automation.rules_tripped_24h == nil
+
+      html = render_html(FleetLive, socket.assigns)
+      assert html =~ "Automation kill-switches engaged (fleet-wide): —"
+      assert html =~ "Automation rules tripped, 24h (fleet-wide): —"
+    end
+
+    test "P15 ANTI-TAUTOLOGY: a genuinely-reported total of 0 still renders 0, never '—'" do
+      # One app reports a REAL zero for kill-switches — that is data, not absence.
+      seed_app("t156g", report: minimal_payload(%{"kill_switches_engaged" => 0, "rules_tripped_24h" => 0}))
+
+      mount = mount_with_roles(%{fleet: :operator_admin})
+      socket = socket_with_mount(mount)
+      {:ok, socket} = FleetLive.mount(%{}, session(), socket)
+
+      assert socket.assigns.t156.automation.kill_switches_engaged == 0
+      assert socket.assigns.t156.automation.rules_tripped_24h == 0
+
+      html = render_html(FleetLive, socket.assigns)
+      assert html =~ "Automation kill-switches engaged (fleet-wide): 0"
+      assert html =~ "Automation rules tripped, 24h (fleet-wide): 0"
+    end
   end
 end
