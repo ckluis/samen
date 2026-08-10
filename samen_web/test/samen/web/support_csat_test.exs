@@ -16,9 +16,16 @@ defmodule Samen.Web.SupportCsatTest do
 
   alias Samen.Delivery.{Message, Provider}
   alias Samen.Delivery.Lifecycle.EmailWorker
+  alias Samen.Scopes.Support.CsatSurvey
   alias Samen.Web.Support.CsatRespondLive
   alias Samen.Web.Support.Reads
   alias Samen.Web.Mount
+
+  # A bogus "Csat" resource (a bare module, NOT an Ash resource) — pointing the CSAT
+  # write leg at it forces `create_csat/4` to fail, exercising the L7 POST-consume
+  # write-failure path deterministically without a real DB blip.
+  defmodule BrokenCsat do
+  end
 
   # A configured adapter that CAPTURES the send config it received (Chokepoint.send/2
   # dispatches deliver/2 synchronously in-process, so self() is the test process) —
@@ -365,6 +372,66 @@ defmodule Samen.Web.SupportCsatTest do
       assert Reads.csat_for_ticket(mount, Mount.scope(mount, org_b), ticket_a.id) == nil
       # The SAME read under org A's own scope -> the real response.
       assert Reads.csat_for_ticket(mount, Mount.scope(mount, org_a), ticket_a.id).score == 3
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # L7 (phase6-edges F3) — a POST-consume write failure must return a DISTINCT
+  # reason ({:write_failed, _}), never the load-bearing :invalid_token (the token
+  # WAS valid). Single-use security is unchanged: the atomic burn-before-write
+  # still holds, so a token is not replayable after a SUCCESSFUL response.
+  defp good_mods do
+    %{
+      csat_survey_token: Samen.WebTest.Support.CsatSurveyToken,
+      csat: Samen.WebTest.Support.Csat
+    }
+  end
+
+  # Mint a real, PENDING survey token row (same private-column force-change shape as
+  # `CsatSurvey.send_survey/3`) and return the raw token value.
+  defp mint_token!(org_id, ticket_id) do
+    raw = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+
+    expires =
+      DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.truncate(:second)
+
+    Samen.WebTest.Support.CsatSurveyToken
+    |> Ash.Changeset.for_create(:create, %{org_id: org_id}, authorize?: false)
+    |> Ash.Changeset.force_change_attribute(:ticket_id, ticket_id)
+    |> Ash.Changeset.force_change_attribute(:token_digest, Samen.Auth.TokenMint.digest(raw))
+    |> Ash.Changeset.force_change_attribute(:expires_at, expires)
+    |> Ash.create!(authorize?: false)
+
+    raw
+  end
+
+  describe "L7: a failed Csat write after consume is DISTINCT from an invalid token" do
+    test "a write failure AFTER consume ⇒ {:error, {:write_failed, _}} (never :invalid_token), and the token is spent" do
+      %{org_id: org_id, support: %{ticket: ticket}} = Seeds.seed_all()
+      raw = mint_token!(org_id, ticket.id)
+
+      broken_mods = %{good_mods() | csat: BrokenCsat}
+
+      # THE PIN: the token was valid; the WRITE failed — a distinct reason ({:write_failed,
+      # _}), never the load-bearing :invalid_token (which the assert pattern excludes).
+      assert {:error, {:write_failed, _reason}} = CsatSurvey.respond(broken_mods, raw, 5, "great")
+
+      # The atomic burn-before-write HELD: the token is now spent, so a retry (even with
+      # a working csat resource) is honestly invalid — single-use is not weakened.
+      assert {:error, :invalid_token} = CsatSurvey.respond(good_mods(), raw, 5, "great")
+    end
+
+    test "a genuinely unknown/invalid token still returns :invalid_token (contract unchanged)" do
+      assert {:error, :invalid_token} = CsatSurvey.respond(good_mods(), "not-a-real-token", 5, nil)
+    end
+
+    test "a SUCCESSFUL response still burns the token — no replay after success (security intact)" do
+      %{org_id: org_id, support: %{ticket: ticket}} = Seeds.seed_all()
+      raw = mint_token!(org_id, ticket.id)
+
+      assert {:ok, _csat} = CsatSurvey.respond(good_mods(), raw, 5, "great")
+      # Replay of a SUCCESSFULLY-consumed token is refused — the load-bearing single-use.
+      assert {:error, :invalid_token} = CsatSurvey.respond(good_mods(), raw, 5, "great")
     end
   end
 end

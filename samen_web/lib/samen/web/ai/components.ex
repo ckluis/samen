@@ -119,8 +119,31 @@ defmodule Samen.Web.AI.Components do
     """
   end
 
-  # A draft-sequence surface returns a plain map, not a Completion — treat it as live text
-  # (it is the caller's own composed draft, not a model claim of truth).
+  # A SIMULATED draft (keyless/deterministic provider) MUST carry the same loud "SIMULATED
+  # — not a real model" badge every other AI surface renders — `draft_sequence` preserves
+  # the T152 `:simulated` flag through its plain-map conversion (`Samen.AI.Crm`), so a
+  # fake-confident outreach draft is NEVER laundered as a neutral "Draft" (the T155-missed
+  # honesty hole). This clause is ordered BEFORE the neutral-draft clause so a simulated
+  # draft always matches here first; drop the flag and the neutral clause fires (a named
+  # honesty test flips).
+  def ai_result(%{result: {:ok, %{status: :draft, body: body, simulated: true}}} = assigns) do
+    assigns = assign(assigns, :body, body)
+
+    ~H"""
+    <div class="card ai-result ai-result-draft ai-result-simulated" id={@id} data-simulated="true">
+      <div class="ai-result-head" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <.pill variant="warn"><span id={"#{@id}-badge"}>SIMULATED — not a real model</span></.pill>
+        <span style="color:var(--muted);font-size:12px">
+          keyless/deterministic draft; wire a provider for a real model result
+        </span>
+      </div>
+      <pre class="ai-result-text" id={"#{@id}-text"} style="white-space:pre-wrap;margin:0">{@body}</pre>
+    </div>
+    """
+  end
+
+  # A live/genuine draft-sequence surface returns a plain map, not a Completion — treat it
+  # as live text (it is the caller's own composed draft, not a model claim of truth).
   def ai_result(%{result: {:ok, %{status: :draft, body: body}}} = assigns) do
     assigns = assign(assigns, :body, body)
 

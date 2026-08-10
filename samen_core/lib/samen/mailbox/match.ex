@@ -25,6 +25,16 @@ defmodule Samen.Mailbox.Match do
   match is still recorded, anchored to nothing; it is never attached to an
   arbitrary record.
 
+  ## Fail-closed on AMBIGUITY (the T160 discipline)
+
+  A match resolves ONLY when there is EXACTLY ONE candidate. Zero candidates is
+  honest absence; TWO OR MORE candidates (two people in the org sharing a
+  counterparty address, or two companies sharing a domain) is ALSO honest absence —
+  an ambiguous match is NEVER resolved by guessing the first row. This mirrors
+  `Samen.CRM.AccountLink`'s (T160) fail-closed shape exactly: a vaulted body is
+  threaded onto a record only when the org's own data points at ONE unambiguous
+  contact/company, never onto an arbitrary-first guess.
+
   ## Company
 
   Precedence: the matched person's `company_id` first (the authoritative CRM link),
@@ -101,9 +111,18 @@ defmodule Samen.Mailbox.Match do
         nil
 
       norm ->
+        # FAIL-CLOSED on ambiguity (mirrors `Samen.CRM.AccountLink`'s T160 discipline):
+        # EXACTLY ONE candidate whose resolved addresses contain `norm` matches; zero OR
+        # two-or-more (an address shared across contacts in the org) both resolve to
+        # honest absence — a vaulted mail body is NEVER threaded onto an arbitrary-first
+        # record. A guess is not an honest match.
         config
         |> candidate_people()
-        |> Enum.find(fn person -> norm in resolved_addresses(person) end)
+        |> Enum.filter(fn person -> norm in resolved_addresses(person) end)
+        |> case do
+          [one] -> one
+          _ -> nil
+        end
     end
   end
 
@@ -183,12 +202,20 @@ defmodule Samen.Mailbox.Match do
         nil
 
       dom ->
+        # FAIL-CLOSED on ambiguity (mirrors `Samen.CRM.AccountLink`'s T160 domain path):
+        # `limit(2)` is enough to distinguish "exactly one" from "two-or-more" without an
+        # unbounded read — EXACTLY ONE company on this domain matches; zero OR 2+ (multiple
+        # companies sharing a domain) both resolve to honest absence, never an arbitrary-
+        # first guess. (`domain` is a plain SQL predicate, so the DB does the counting.)
         config.company_resource
         |> Ash.Query.new()
         |> Ash.Query.filter(org_id == ^config.org_id and domain == ^dom)
-        |> Ash.Query.limit(1)
+        |> Ash.Query.limit(2)
         |> Ash.read!(authorize?: false)
-        |> List.first()
+        |> case do
+          [one] -> one
+          _ -> nil
+        end
     end
   rescue
     _ -> nil

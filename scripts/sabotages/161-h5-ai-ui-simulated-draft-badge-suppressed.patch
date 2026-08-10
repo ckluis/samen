@@ -1,0 +1,22 @@
+# SABOTAGE: H5 (phase6-edges F1) — the tenant-plane AI kit's SIMULATED-draft render clause
+# is re-keyed to `simulated: false`, so a keyless draft (`simulated: true`) NO LONGER matches
+# it and falls through to the badgeless neutral "Draft" clause — the loud "SIMULATED — not a
+# real model" badge is suppressed on a simulated outreach draft (the render half of the H5
+# honesty hole: even with the flag preserved through `Samen.AI.Crm`, the badge must actually
+# fire). Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/ai_kit_test.exs
+# MUST_FAIL: ai_result renders a SIMULATED draft_sequence result with the loud SIMULATED badge
+diff --git a/samen_web/lib/samen/web/ai/components.ex b/samen_web/lib/samen/web/ai/components.ex
+index 4e6b731..d612ba8 100644
+--- a/samen_web/lib/samen/web/ai/components.ex
++++ b/samen_web/lib/samen/web/ai/components.ex
+@@ -126,7 +126,7 @@ defmodule Samen.Web.AI.Components do
+   # honesty hole). This clause is ordered BEFORE the neutral-draft clause so a simulated
+   # draft always matches here first; drop the flag and the neutral clause fires (a named
+   # honesty test flips).
+-  def ai_result(%{result: {:ok, %{status: :draft, body: body, simulated: true}}} = assigns) do
++  def ai_result(%{result: {:ok, %{status: :draft, body: body, simulated: false}}} = assigns) do
+     assigns = assign(assigns, :body, body)
+ 
+     ~H"""

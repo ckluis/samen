@@ -1,0 +1,28 @@
+# SABOTAGE: L7 (phase6-edges F3) — the CSAT `respond/4` post-consume write leg reverts to
+# MISATTRIBUTING a failed `Csat` write as `:invalid_token`. After the single-use token is
+# atomically consumed (burned), a follow-on write failure — an `{:error, _}` return OR a
+# raise (DB blip) — now reports `:invalid_token` instead of the DISTINCT `{:write_failed, _}`:
+# the token WAS valid, but the visitor is told the link is stale and the feedback is silently
+# lost + misreported. The named L7 write-failure test (which asserts the distinct reason)
+# flips; the genuinely-invalid-token and successful-burn controls still pass (single-use
+# security is unchanged either way). Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/support_csat_test.exs
+# MUST_FAIL: a write failure AFTER consume
+diff --git a/samen_core/lib/samen/scopes/support/csat_survey.ex b/samen_core/lib/samen/scopes/support/csat_survey.ex
+index ff87140..a3e8cf0 100644
+--- a/samen_core/lib/samen/scopes/support/csat_survey.ex
++++ b/samen_core/lib/samen/scopes/support/csat_survey.ex
+@@ -289,10 +289,10 @@ defmodule Samen.Scopes.Support.CsatSurvey do
+   defp write_response(mods, token_row, score, comments) do
+     case create_csat(mods, token_row, score, comments) do
+       {:ok, _} = ok -> ok
+-      {:error, reason} -> {:error, {:write_failed, reason}}
++      {:error, _reason} -> {:error, :invalid_token}
+     end
+   rescue
+-    e -> {:error, {:write_failed, Exception.message(e)}}
++    _ -> {:error, :invalid_token}
+   end
+ 
+   defp create_csat(mods, token_row, score, comments) do

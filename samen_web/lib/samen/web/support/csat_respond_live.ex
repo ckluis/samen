@@ -60,6 +60,11 @@ defmodule Samen.Web.Support.CsatRespondLive do
       {:error, :invalid_token} ->
         {:noreply, assign(socket, state: :invalid, error: nil)}
 
+      {:error, {:write_failed, _reason}} ->
+        # The token WAS valid (and is now spent) — a genuine save failure, NOT a stale
+        # link. Surface it honestly rather than misreporting it as an invalid token.
+        {:noreply, assign(socket, state: :error, error: nil)}
+
       {:error, :invalid_score} ->
         {:noreply, assign(socket, error: "Pick a score from 1 to 5.")}
 
@@ -152,6 +157,14 @@ defmodule Samen.Web.Support.CsatRespondLive do
             icon="🔗"
             title="This link is no longer valid."
             body="It may have already been used or expired."
+          />
+
+        <% :error -> %>
+          <.empty_state
+            class="csat-error"
+            icon="⚠️"
+            title="We couldn't record your response."
+            body="Something went wrong on our end saving your feedback. Please reach out to support so we don't lose it."
           />
       <% end %>
     </div>

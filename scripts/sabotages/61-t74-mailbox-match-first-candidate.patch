@@ -11,13 +11,18 @@
 # TEST_FILES: test/samen/web/mailbox_sync_test.exs
 # MUST_FAIL: REFUTABLE: a message from an UNKNOWN address is recorded but anchored to NOTHING
 diff --git a/samen_core/lib/samen/mailbox/match.ex b/samen_core/lib/samen/mailbox/match.ex
+index f26f277..066398f 100644
 --- a/samen_core/lib/samen/mailbox/match.ex
 +++ b/samen_core/lib/samen/mailbox/match.ex
-@@ -103,7 +103,7 @@
-       norm ->
+@@ -118,11 +118,7 @@ defmodule Samen.Mailbox.Match do
+         # record. A guess is not an honest match.
          config
          |> candidate_people()
--        |> Enum.find(fn person -> norm in resolved_addresses(person) end)
+-        |> Enum.filter(fn person -> norm in resolved_addresses(person) end)
+-        |> case do
+-          [one] -> one
+-          _ -> nil
+-        end
 +        |> Enum.find(fn person -> is_binary(norm) and resolved_addresses(person) != [] end)
      end
    end

@@ -265,6 +265,60 @@ defmodule Samen.Web.MailboxSyncTest do
     assert resolved.id == company_a.id
   end
 
+  # M2 (phase6-edges F2) — `Samen.Mailbox.Match` must FAIL-CLOSED on ambiguity, mirroring
+  # the T160 `Samen.CRM.AccountLink` discipline: exactly ONE candidate matches; zero OR
+  # two-or-more resolve to honest absence (nil), never an arbitrary-first guess. A vaulted
+  # mail body must never be threaded onto a plausibly-wrong contact/company.
+  test "M2 PERSON ambiguity: TWO org people sharing a counterparty address ⇒ no-match (never arbitrary first)",
+       %{org_id: org_id} do
+    shared = "m2-shared-addr@dup-contact.invalid"
+    _p1 = seed_person!(org_id, shared, nil)
+    _p2 = seed_person!(org_id, shared, nil)
+
+    cfg = config(org_id)
+
+    # THE PIN: 2+ candidates on the SAME address ⇒ honest absence, not the first person.
+    assert Samen.Mailbox.Match.person_for_address(shared, cfg) == nil
+  end
+
+  test "M2 PERSON positive control: EXACTLY ONE person on an address ⇒ that person matches (anti-tautology)",
+       %{org_id: org_id} do
+    unique = "m2-unique-addr@one-contact.invalid"
+    person = seed_person!(org_id, unique, nil)
+
+    cfg = config(org_id)
+
+    matched = Samen.Mailbox.Match.person_for_address(unique, cfg)
+    assert matched != nil
+    assert matched.id == person.id
+  end
+
+  test "M2 COMPANY-DOMAIN ambiguity: TWO org companies sharing a domain ⇒ no-match (never arbitrary first)",
+       %{org_id: org_id} do
+    _c1 = seed_company!(org_id, "Dup Freight One", "m2-dup-domain.invalid")
+    _c2 = seed_company!(org_id, "Dup Freight Two", "m2-dup-domain.invalid")
+
+    cfg = config(org_id)
+    # `company_id: nil` ⇒ the by-id leg is skipped and resolution goes to the DOMAIN
+    # fallback, where the 2+ ambiguity lives.
+    address = "someone@m2-dup-domain.invalid"
+
+    # THE PIN: 2+ companies on the same domain ⇒ honest absence, not the first company.
+    assert Samen.Mailbox.Match.company_for(%{company_id: nil}, address, cfg) == nil
+  end
+
+  test "M2 COMPANY-DOMAIN positive control: EXACTLY ONE company on a domain ⇒ that company matches",
+       %{org_id: org_id} do
+    company = seed_company!(org_id, "Solo Freight", "m2-solo-domain.invalid")
+
+    cfg = config(org_id)
+    address = "someone@m2-solo-domain.invalid"
+
+    matched = Samen.Mailbox.Match.company_for(%{company_id: nil}, address, cfg)
+    assert matched != nil
+    assert matched.id == company.id
+  end
+
   test "matching is address-NORMALIZED (case/whitespace), not string-identical", %{
     org_id: org_id,
     person: person

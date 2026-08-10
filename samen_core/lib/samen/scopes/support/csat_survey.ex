@@ -148,22 +148,39 @@ defmodule Samen.Scopes.Support.CsatSurvey do
   `score` must be `1..5` (bounded; `{:error, :invalid_score}` otherwise — the
   token is NOT consumed on this refusal, so a genuine retry with a valid score
   still works).
+
+  ## Distinct reason for a POST-CONSUME write failure (never misattributed)
+
+  The atomic burn-before-write is structurally required for single-use under
+  concurrency (only the FIRST caller's `UPDATE` matches; a replay after a
+  successful response can never re-match) — so the token is consumed BEFORE the
+  `Csat` write. If that follow-on write then fails (a DB blip), the token is
+  already spent, but the failure is `{:error, {:write_failed, reason}}` — a
+  DISTINCT reason, NEVER the load-bearing `:invalid_token` (the token WAS valid).
+  This keeps the honest signal separate: `:invalid_token` means "bad/replayed
+  token", `{:write_failed, _}` means "valid token, the write itself failed" —
+  feedback loss is surfaced honestly instead of masquerading as a stale link.
   """
   @spec respond(mods(), String.t(), integer(), String.t() | nil) ::
-          {:ok, term()} | {:error, :invalid_token | :invalid_score | term()}
+          {:ok, term()}
+          | {:error, :invalid_token | :invalid_score | {:write_failed, term()} | term()}
   def respond(%{} = mods, raw_token, score, comments \\ nil)
       when is_binary(raw_token) and is_integer(score) do
     if score in 1..5 do
       digest = TokenMint.digest(raw_token)
 
       case consume_once(mods.csat_survey_token, digest) do
-        {:ok, token_row} -> create_csat(mods, token_row, score, comments)
+        {:ok, token_row} -> write_response(mods, token_row, score, comments)
         :error -> {:error, :invalid_token}
       end
     else
       {:error, :invalid_score}
     end
   rescue
+    # A raise here is a PRE-consume failure (digest/consume leg) — the token was
+    # not burned, so the fail-closed `:invalid_token` is correct. A POST-consume
+    # write failure never reaches this clause: `write_response/4` rescues its own
+    # write and returns the DISTINCT `{:write_failed, _}` reason.
     _ -> {:error, :invalid_token}
   end
 
@@ -262,6 +279,20 @@ defmodule Samen.Scopes.Support.CsatSurvey do
       %Ash.BulkResult{status: :success, records: [row | _]} -> {:ok, row}
       _ -> :error
     end
+  end
+
+  # Post-consume write leg. The token is ALREADY spent by the atomic `consume_once`
+  # (single-use held); a failure of THIS write — a `{:error, _}` return OR a raise
+  # (DB blip) — is surfaced as the DISTINCT `{:write_failed, reason}`, never conflated
+  # with `:invalid_token`. Its own rescue keeps the raise from bubbling to `respond/4`'s
+  # outer `:invalid_token` rescue (which is for the PRE-consume leg only).
+  defp write_response(mods, token_row, score, comments) do
+    case create_csat(mods, token_row, score, comments) do
+      {:ok, _} = ok -> ok
+      {:error, reason} -> {:error, {:write_failed, reason}}
+    end
+  rescue
+    e -> {:error, {:write_failed, Exception.message(e)}}
   end
 
   defp create_csat(mods, token_row, score, comments) do

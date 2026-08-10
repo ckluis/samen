@@ -109,6 +109,26 @@ defmodule Samen.AI.CrmTest do
   end
 
   # ==========================================================================
+  # (a2) H5 — draft_sequence PRESERVES the T152 :simulated flag (honesty)
+  # ==========================================================================
+
+  describe "(a2) H5: draft_sequence carries the :simulated honesty flag through the plain map" do
+    test "draft_sequence/5 preserves :simulated from the Completion (keyless provider ⇒ simulated: true)" do
+      # `Samen.AI.Provider.Fake.simulated?/0` is `true`, so the chokepoint stamps
+      # `%Completion{simulated: true}` — the flag MUST survive the plain-map conversion in
+      # `Samen.AI.Crm.draft_sequence/5`, or the tenant CRM "Draft" renders with NO
+      # "SIMULATED — not a real model" badge (the exact T155-missed honesty hole).
+      org = Ash.UUID.generate()
+      person = person!(org)
+
+      assert {:ok, %{status: :draft, body: body, simulated: true}} =
+               Crm.draft_sequence(scope(org), Person, person.id, "draft a check-in")
+
+      assert is_binary(body)
+    end
+  end
+
+  # ==========================================================================
   # (b) a sequence draft NEVER sends
   # ==========================================================================
 

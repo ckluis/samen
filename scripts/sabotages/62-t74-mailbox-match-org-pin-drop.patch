@@ -14,9 +14,10 @@
 # TEST_FILES: test/samen/web/mailbox_sync_test.exs
 # MUST_FAIL: CROSS-ORG: the match is ORG-PINNED
 diff --git a/samen_core/lib/samen/mailbox/match.ex b/samen_core/lib/samen/mailbox/match.ex
+index f26f277..de6f2a8 100644
 --- a/samen_core/lib/samen/mailbox/match.ex
 +++ b/samen_core/lib/samen/mailbox/match.ex
-@@ -131,7 +131,6 @@
+@@ -150,7 +150,6 @@ defmodule Samen.Mailbox.Match do
        # `emails` is vault-routed: it must be EXPLICITLY selected or the resolver has
        # nothing to resolve and every match would silently miss.
        |> Ash.Query.ensure_selected([:emails, :company_id])
@@ -24,7 +25,7 @@ diff --git a/samen_core/lib/samen/mailbox/match.ex b/samen_core/lib/samen/mailbo
        |> Ash.Query.limit(config.max_match_candidates)
        |> Ash.read!(authorize?: false)
  
-@@ -167,7 +166,7 @@
+@@ -186,7 +185,7 @@ defmodule Samen.Mailbox.Match do
    defp company_by_id(%{company_id: company_id}, config) when is_binary(company_id) do
      config.company_resource
      |> Ash.Query.new()
@@ -33,12 +34,12 @@ diff --git a/samen_core/lib/samen/mailbox/match.ex b/samen_core/lib/samen/mailbo
      |> Ash.Query.limit(1)
      |> Ash.read!(authorize?: false)
      |> List.first()
-@@ -185,7 +184,7 @@
-       dom ->
+@@ -209,7 +208,7 @@ defmodule Samen.Mailbox.Match do
+         # first guess. (`domain` is a plain SQL predicate, so the DB does the counting.)
          config.company_resource
          |> Ash.Query.new()
 -        |> Ash.Query.filter(org_id == ^config.org_id and domain == ^dom)
 +        |> Ash.Query.filter(domain == ^dom)
-         |> Ash.Query.limit(1)
+         |> Ash.Query.limit(2)
          |> Ash.read!(authorize?: false)
-         |> List.first()
+         |> case do

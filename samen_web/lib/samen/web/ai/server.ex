@@ -99,7 +99,7 @@ defmodule Samen.Web.AI.Server do
   Returns the kernel result verbatim; for `:draft_sequence` a `{:ok, %{status: :draft, ...}}`.
   """
   @spec crm_run(Mount.t(), String.t() | nil, atom(), module() | nil, String.t(), String.t(), map()) ::
-          result() | {:ok, %{status: :draft, body: String.t()}}
+          result() | {:ok, %{status: :draft, body: String.t(), simulated: boolean()}}
   def crm_run(mount, org_id, helper, resource, id, input, params \\ %{})
 
   def crm_run(mount, org_id, :classify_inbound, _resource, _id, input, params) do

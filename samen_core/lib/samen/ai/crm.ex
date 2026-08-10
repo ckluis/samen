@@ -32,8 +32,9 @@ defmodule Samen.AI.Crm do
       own free text, §3.2 step 2d's user-consented-keystrokes class).
     * `recommend_next_step/4` — Recommend verb, grounded on the named CRM object.
     * `draft_sequence/5` — Generate verb, grounded on the named CRM object. ALWAYS
-      returns `{:ok, %{status: :draft, body: text}}` — a plain map, never persisted,
-      never sent. There is no code path from this function (or any function in this
+      returns `{:ok, %{status: :draft, body: text, simulated: boolean}}` — a plain map,
+      never persisted, never sent; the `:simulated` flag is carried through from the
+      `%Completion{}` so a keyless draft still renders the SIMULATED badge. There is no code path from this function (or any function in this
       module) to `Samen.Delivery.Chokepoint.send/2`: this module holds no reference to
       `Samen.Delivery` at all — proved both structurally (grep: this source file
       contains no `Samen.Delivery` reference) and at runtime (the red test asserts
@@ -81,18 +82,29 @@ defmodule Samen.AI.Crm do
 
   @doc """
   Draft an outreach sequence for a CRM object. Returns `{:ok, %{status: :draft, body:
-  text}}` — a plain, non-persisted draft; NEVER sends (see moduledoc). A real send path,
-  were one wired for CRM outreach, would need its own E3 approval exactly like the D5
-  support-reply draft (`Samen.AI.SupportOperator`) — out of scope here: ADR-043 §6.4 names
-  sequence drafts landing as drafts, not an approval flow, so this function stops at the
-  draft.
+  text, simulated: boolean}}` — a plain, non-persisted draft; NEVER sends (see moduledoc).
+  A real send path, were one wired for CRM outreach, would need its own E3 approval
+  exactly like the D5 support-reply draft (`Samen.AI.SupportOperator`) — out of scope
+  here: ADR-043 §6.4 names sequence drafts landing as drafts, not an approval flow, so
+  this function stops at the draft.
+
+  The `:simulated` flag is PRESERVED verbatim from the `%Samen.AI.Completion{}` the
+  chokepoint stamps by construction (T152) — a keyless/deterministic draft carries
+  `simulated: true` all the way to `Samen.Web.AI.Components.ai_result/1`, which draws the
+  loud "SIMULATED — not a real model" badge. Dropping this flag here is exactly the
+  T155-missed honesty hole (a fake-confident draft rendered as a neutral "Draft"); the
+  flag is threaded through so the badge fires, mirroring every OTHER CRM AI surface (which
+  returns the `%Completion{}` directly, flag intact).
   """
   @spec draft_sequence(term(), module(), String.t(), String.t(), keyword()) ::
-          {:ok, %{status: :draft, body: String.t()}} | {:error, term()}
+          {:ok, %{status: :draft, body: String.t(), simulated: boolean()}} | {:error, term()}
   def draft_sequence(scope, resource, id, instruction, opts \\ []) when is_binary(instruction) do
     case ground_and_run(:generate, scope, resource, id, instruction, opts) do
-      {:ok, completion} -> {:ok, %{status: :draft, body: completion.text}}
-      {:error, _} = err -> err
+      {:ok, completion} ->
+        {:ok, %{status: :draft, body: completion.text, simulated: completion.simulated}}
+
+      {:error, _} = err ->
+        err
     end
   end
 

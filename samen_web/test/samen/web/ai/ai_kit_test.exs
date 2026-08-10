@@ -69,6 +69,32 @@ defmodule Samen.Web.AI.KitTest do
     refute html =~ "SIMULATED"
   end
 
+  # --- H5: a SIMULATED draft MUST carry the loud badge (no badgeless simulated path) --------
+
+  test "ai_result renders a SIMULATED draft_sequence result with the loud SIMULATED badge (H5)" do
+    # `Samen.AI.Crm.draft_sequence/5` preserves the T152 `:simulated` flag through its
+    # plain-map conversion — a keyless draft (`simulated: true`) MUST render the loud
+    # "SIMULATED — not a real model" badge, never a neutral "Draft" pill (the T155-missed
+    # honesty hole where simulated output was laundered as an ordinary draft).
+    result = {:ok, %{status: :draft, body: "Hi Dana — checking in on the Chicago lane.", simulated: true}}
+    html = render_component(&Components.ai_result/1, %{result: result, id: "r"})
+
+    assert html =~ "SIMULATED — not a real model"
+    assert html =~ ~s(data-simulated="true")
+    assert html =~ "Chicago lane"
+  end
+
+  test "ai_result renders a NON-simulated draft as a neutral Draft, never SIMULATED (H5 positive control)" do
+    # The anti-tautology twin: a genuine (non-simulated) draft is the neutral "Draft" pill
+    # and carries NO SIMULATED badge — proving the badge above is driven by the flag, not
+    # unconditionally stamped on every draft.
+    result = {:ok, %{status: :draft, body: "A real-model draft.", simulated: false}}
+    html = render_component(&Components.ai_result/1, %{result: result, id: "r"})
+
+    assert html =~ "Draft"
+    refute html =~ "SIMULATED"
+  end
+
   # --- :not_configured renders the configuration_hint VERBATIM, never a fake answer ---------
 
   test "ai_result on :not_configured renders configuration_hint VERBATIM, no fabricated answer" do
