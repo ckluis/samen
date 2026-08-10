@@ -1601,7 +1601,11 @@ defmodule Samen.Web.Router do
       {"#{path}/calendar", Samen.Web.CRM.CalendarLive},
       {"#{path}/dashboard", Samen.Web.CRM.DashboardLive},
       # T74 §I1 — the two-way email-sync connect seam + its HONEST empty state.
-      {"#{path}/mailbox", Samen.Web.CRM.MailboxLive}
+      {"#{path}/mailbox", Samen.Web.CRM.MailboxLive},
+      # T85 §I2 — the tenant-plane CRM Sequences surface over the Outreach scope
+      # (enroll + sequence/enrollment lists + honest per-step send status; a keyless
+      # step renders :blocked, never a fabricated "delivered").
+      {"#{path}/sequences", Samen.Web.CRM.SequencesLive}
     ]
   end
 

@@ -444,6 +444,12 @@ defmodule Samen.AbbrevRegistryTest do
                  # operator-account ASSIGNMENT blueprint (`Samen.Fleet.Assignment`), the data
                  # source `scope_of/2` reads. Allocator-proposed.
                  "woa" => "Samen.WebTest.OperatorScope.Assignment",
+                 # T85 (spec §I2 M5): the samen_web test host's mount of the Outreach
+                 # scope (`Samen.WebTest.Outreach`) — the reference web-plane adopter
+                 # the CRM Sequences LiveView surfaces. Allocator-proposed.
+                 "wso" => "Samen.WebTest.Outreach.Sequence",
+                 "woe" => "Samen.WebTest.Outreach.Enrollment",
+                 "ows" => "Samen.WebTest.Outreach.StepSend",
                  # T78 (spec §I5 helpdesk KB + composer suggestion + deflection): the
                  # samen_web test host's FIRST materialization of the CMS scope
                  # (`Samen.WebTest.Cms`), allocator-proposed. The KB article reuses
@@ -540,7 +546,8 @@ defmodule Samen.AbbrevRegistryTest do
       # `psc` (pawchart), `scw`/`wco` (samen_web test tenant/operator) = 404.
       # +1 T84 (ADR-044 §16.5 #1): samen_web test host's `woa`
       # (Samen.WebTest.OperatorScope.Assignment) = 405.
-      assert map_size(Reg.load()) == 433
+      # +3 T85 (spec §I2 M5): samen_web test host's Outreach mount `wso`/`woe`/`ows` = 408.
+      assert map_size(Reg.load()) == 436
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do

@@ -61,7 +61,11 @@ defmodule Samen.AbbrevFlattenConflictTest do
       # driftwood tenant+operator, pawchart, samen_web test tenant+operator) = 404.
       # +1 T84 (ADR-044 §16.5 #1): samen_web test host's `woa`
       # (Samen.WebTest.OperatorScope.Assignment) = 405.
-      assert map_size(flat) == 433
+      # +3 T85 (spec §I2 M5): the samen_web test host's Outreach scope mount
+      # (`Samen.WebTest.Outreach`) — `wso`/`woe`/`ows`
+      # (Sequence/Enrollment/StepSend), the reference web-plane adopter surfaced by
+      # the CRM Sequences LiveView = 408.
+      assert map_size(flat) == 436
       # A global entry and a host entry both survive the (lossless) flatten.
       assert flat["com"] == "SamenCore.Support.Crm.Contact"
       assert flat["mce"] == "Demo.MarketingScope.ConsentEvent"
