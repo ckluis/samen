@@ -369,9 +369,15 @@ defmodule Samen.Fleet.Registry do
   top-level `app_id` the caller extracts pre-verify, for the §4.6 app_id-mismatch
   check).
 
-  Returns `{:ok, report}` | `{:error, reason}` where `reason` is one of
-  `:unknown_kid | :revoked | :retired | :bad_signature | :stale_timestamp |
-  :replayed | :app_id_mismatch | {:invalid_schema, [String.t()]}`. On EVERY
+  Returns `{:ok, report}` | `{:error, reason}` where `reason` is one of the
+  atoms `:unknown_kid | :revoked | :retired | :bad_signature | :stale_timestamp
+  | :replayed | :app_id_mismatch`, **or a bare `[String.t()]`** — the schema
+  violation list `Samen.Fleet.Report.validate_wire/1` returns, passed through
+  unwrapped. (This docstring previously claimed a `{:invalid_schema, [...]}`
+  wrapper that no code path ever produced; corrected in the phase-6 SEC fix
+  round rather than introducing the wrapper, because every caller —
+  `Samen.Web.Fleet.CockpitIngress.handle_heartbeat_result/3` and the T82/H1
+  ingest tests — already discriminates the schema case by `is_list/1`.) On EVERY
   error path this function itself never writes anything — a malformed/forged
   report is never stored (§5.2 point 4 / RP-J-3/RP-J-10).
   """

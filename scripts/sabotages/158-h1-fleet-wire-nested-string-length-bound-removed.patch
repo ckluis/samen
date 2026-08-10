@@ -1,0 +1,26 @@
+# SABOTAGE: phase-6 SEC dogfood H1, secondary angle (ADR-044 §5.2b residue
+# budget / INV-2). Raises the nested string ceiling by a factor of a million in
+# oversized_string_errors/2, so no string value inside a wire list ITEM or a
+# SUPPRESSED cell is ever length-bounded -- the pre-fix state, in which a nested
+# value had NO ceiling at all (unlike every declared top-level string, whose
+# form:/allowed: declaration bounds it to <= 40 bytes). Under it a producer gets
+# max_len items x arbitrary-size strings of storage-amplification / covert-channel
+# bandwidth far beyond the 12,308-byte residue budget. Multiplying the constant
+# (rather than deleting the guard) keeps the code compiling and warning-free, so
+# the flip is a genuine assertion failure and never a compile error.
+# APP: samen_core
+# TEST_FILES: test/fleet_report_schema_test.exs
+# MUST_FAIL: RED: an over-long string inside a list item is rejected (nested length bound)
+diff --git a/samen_core/lib/samen/fleet/report/schema.ex b/samen_core/lib/samen/fleet/report/schema.ex
+index 2a6e06b..6df6a1c 100644
+--- a/samen_core/lib/samen/fleet/report/schema.ex
++++ b/samen_core/lib/samen/fleet/report/schema.ex
+@@ -560,7 +560,7 @@ defmodule Samen.Fleet.Report.Schema do
+   defp oversized_string_errors(prefix, map) when is_map(map) do
+     for {key, value} <- map,
+         is_binary(value),
+-        byte_size(value) > @max_nested_string_bytes do
++        byte_size(value) > @max_nested_string_bytes * 1_000_000 do
+       "#{prefix} field #{safe_key(key)} carries a #{byte_size(value)}-byte string, over the " <>
+         "#{@max_nested_string_bytes}-byte nested value bound"
+     end

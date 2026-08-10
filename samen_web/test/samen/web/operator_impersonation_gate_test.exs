@@ -228,4 +228,83 @@ defmodule Samen.Web.OperatorImpersonationGateTest do
     # And the positive control: at now, it is active.
     assert {:ok, _} = Samen.Impersonation.scope(operator_id, org.id)
   end
+
+  # ==========================================================================
+  # R1 (phase-6 SEC fix round) — the CLIENT-CONTROLLED `?operator_id` leg of
+  # `resolve_operator_id/3` is DEV-ONLY: inert the instant the drill-in mount's
+  # product is armed for prod (`auth_required?: true`), exactly like
+  # `Samen.Web.Operator.Authz.dev_operator_role/2`. Defence in depth behind the
+  # `:require_operator` on_mount halt and `assign_identity/3`'s principal-first order.
+  # ==========================================================================
+  describe "R1 — the ?operator_id param leg is dev-only" do
+    # A synthetic otp_app nothing else reads, so arming it cannot perturb any other suite.
+    @probe_host :samen_web_r1_probe_host
+    @seat_org_id "0f000000-0000-4000-8000-0000000000ab"
+
+    setup do
+      on_exit(fn -> Application.delete_env(@probe_host, :auth_required?) end)
+      :ok
+    end
+
+    defp probe_socket do
+      mount = build_operator_mount(@seat_org_id, labels: %{otp_app: @probe_host})
+      Phoenix.Component.assign(%Phoenix.LiveView.Socket{}, :samen_mount, mount)
+    end
+
+    test "ARMED (auth_required?: true): a forged ?operator_id is IGNORED — falls through to the seat id" do
+      Application.put_env(@probe_host, :auth_required?, true)
+
+      forged = "op-forged-#{System.unique_integer([:positive])}"
+
+      assert Samen.Web.Operator.Impersonation.resolve_operator_id(probe_socket(), %{}, %{"operator_id" => forged}) ==
+               @seat_org_id
+
+      # ...and through the real entry point the drill-ins use.
+      identity = Samen.Web.Operator.Impersonation.assign_identity(probe_socket(), %{}, %{"operator_id" => forged})
+      assert identity.assigns[:samen_operator_id] == @seat_org_id
+      refute identity.assigns[:samen_operator_id] == forged
+    end
+
+    test "ARMED: the SERVER-set session operator_id still resolves (only the client PARAM leg is gated)" do
+      Application.put_env(@probe_host, :auth_required?, true)
+
+      # A signed, server-written session value is trustworthy and must keep working — the
+      # gate is on the client-controlled param, not on session-derived identity.
+      assert Samen.Web.Operator.Impersonation.resolve_operator_id(
+               probe_socket(),
+               %{"operator_id" => "op-from-signed-session"},
+               %{"operator_id" => "op-forged"}
+             ) == "op-from-signed-session"
+    end
+
+    test "POSITIVE CONTROL — DISARMED (dev/test): the param leg still resolves, so the dogfood URL works" do
+      Application.put_env(@probe_host, :auth_required?, false)
+
+      forged = "op-dev-dogfood"
+
+      assert Samen.Web.Operator.Impersonation.resolve_operator_id(probe_socket(), %{}, %{"operator_id" => forged}) ==
+               forged
+
+      # Non-vacuity for the ARMED tests above: the ONLY difference is the posture flag.
+      assert Samen.Web.Operator.Impersonation.auth_disarmed?(probe_socket())
+      Application.put_env(@probe_host, :auth_required?, true)
+      refute Samen.Web.Operator.Impersonation.auth_disarmed?(probe_socket())
+    end
+
+    test "the AUTHENTICATED principal always wins over a forged param, armed or not" do
+      for armed <- [true, false] do
+        Application.put_env(@probe_host, :auth_required?, armed)
+
+        identity =
+          Samen.Web.Operator.Impersonation.assign_identity(
+            probe_socket(),
+            %{Samen.Web.Auth.session_user_key() => "op-authenticated"},
+            %{"operator_id" => "op-forged"}
+          )
+
+        assert identity.assigns[:samen_operator_id] == "op-authenticated",
+               "principal must win with auth_required?: #{armed}"
+      end
+    end
+  end
 end

@@ -640,6 +640,113 @@ defmodule Samen.Fleet.RegistryTest do
       # NOTHING was stored — flt_report's row count for this app is unchanged.
       assert report_row_count(app_id) == rows_before
     end
+
+    test "H1 end-to-end: a signed heartbeat smuggling PII in an undeclared key (list item + suppressed cell) is rejected and never stored" do
+      {:ok, %{raw_token: raw_token}} =
+        Registry.mint_enrollment_token(@ns, %{app_slug: "hb9-#{System.unique_integer([:positive])}", display_name: "HB9"}, @admin)
+
+      {pub, priv} = Crypto.generate_ed25519_keypair()
+      {:ok, %{app_id: app_id}} = Registry.consume_enrollment(@ns, raw_token, Base.encode64(pub))
+
+      report = Samen.Fleet.Report.build(app_id: app_id)
+
+      # ONE report carrying BOTH nested holes the phase-6 SEC dogfood reproduced:
+      #   (a) an undeclared PII-bearing key inside a cohort LIST ITEM, and
+      #   (b) an undeclared PII-bearing key inside a SUPPRESSED cell.
+      cohort_item = %{
+        "handle" => String.duplicate("a", 32),
+        "sent" => %{
+          "suppressed" => true,
+          "reason" => "k_anonymity",
+          "k" => 5,
+          "leak_note_suppressed" => "bob@example.com card 4111 1111 1111 1111"
+        },
+        "bounced" => 0,
+        "complained" => 0,
+        "health_index" => 90,
+        "leak_note_item" => "alice@example.com / SSN 111-22-3333"
+      }
+
+      payload =
+        Samen.Fleet.Report.to_wire(report)
+        |> Map.put("deliverability", [cohort_item])
+
+      raw_body = Jason.encode!(payload)
+      ts = System.os_time(:second)
+      nonce = Crypto.generate_nonce()
+      input = Crypto.signing_input("POST", "/fleet/heartbeat", ts, nonce, Crypto.body_digest(raw_body))
+      sig = Crypto.sign_ed25519(priv, input) |> Base.encode16(case: :lower)
+
+      rows_before = report_row_count(app_id)
+
+      assert {:error, errors} =
+               Registry.verify_and_ingest_heartbeat(@ns, %{
+                 kid: app_id,
+                 v: 1,
+                 ts: ts,
+                 nonce: nonce,
+                 sig: sig,
+                 method: "POST",
+                 path: "/fleet/heartbeat",
+                 raw_body: raw_body,
+                 payload: payload
+               })
+
+      assert is_list(errors)
+      assert Enum.any?(errors, &String.contains?(&1, "leak_note_item"))
+      assert Enum.any?(errors, &String.contains?(&1, "leak_note_suppressed"))
+
+      # THE PROOF: a CORRECTLY-SIGNED request (a compromised producer holding a valid
+      # heartbeat credential) was rejected, and NOTHING was stored — flt_report's row
+      # count for this app is unchanged, so the PII never reached `flt_report.payload`.
+      assert report_row_count(app_id) == rows_before
+    end
+
+    test "POSITIVE CONTROL: the SAME heartbeat WITHOUT the undeclared keys is accepted and stored" do
+      # Anti-tautology for the test above: the rejection is the undeclared keys firing,
+      # not this signing/ingest fixture being broken.
+      {:ok, %{raw_token: raw_token}} =
+        Registry.mint_enrollment_token(@ns, %{app_slug: "hb10-#{System.unique_integer([:positive])}", display_name: "HB10"}, @admin)
+
+      {pub, priv} = Crypto.generate_ed25519_keypair()
+      {:ok, %{app_id: app_id}} = Registry.consume_enrollment(@ns, raw_token, Base.encode64(pub))
+
+      cohort_item = %{
+        "handle" => String.duplicate("a", 32),
+        "sent" => %{"suppressed" => true, "reason" => "k_anonymity", "k" => 5},
+        "bounced" => 0,
+        "complained" => 0,
+        "health_index" => 90
+      }
+
+      payload =
+        Samen.Fleet.Report.build(app_id: app_id)
+        |> Samen.Fleet.Report.to_wire()
+        |> Map.put("deliverability", [cohort_item])
+
+      raw_body = Jason.encode!(payload)
+      ts = System.os_time(:second)
+      nonce = Crypto.generate_nonce()
+      input = Crypto.signing_input("POST", "/fleet/heartbeat", ts, nonce, Crypto.body_digest(raw_body))
+      sig = Crypto.sign_ed25519(priv, input) |> Base.encode16(case: :lower)
+
+      rows_before = report_row_count(app_id)
+
+      assert {:ok, _report} =
+               Registry.verify_and_ingest_heartbeat(@ns, %{
+                 kid: app_id,
+                 v: 1,
+                 ts: ts,
+                 nonce: nonce,
+                 sig: sig,
+                 method: "POST",
+                 path: "/fleet/heartbeat",
+                 raw_body: raw_body,
+                 payload: payload
+               })
+
+      assert report_row_count(app_id) == rows_before + 1
+    end
   end
 
   defp report_row_count(app_id) do

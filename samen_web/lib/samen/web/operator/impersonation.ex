@@ -49,8 +49,8 @@ defmodule Samen.Web.Operator.Impersonation do
   @doc """
   Resolve the ACTING operator id for an operator drill-in mount. Resolution order:
 
-    1. an explicit `operator_id` query param (the local dogfood convenience identity),
-    2. an `operator_id` on the session,
+    1. an explicit `operator_id` query param — **DEV-ONLY** (see below),
+    2. an `operator_id` on the session (SERVER-set and signed, so it is trustworthy),
     3. the `:samen_operator_id` assign `Samen.Web.Operator.Authz` derived from the
        AUTHENTICATED session principal (the production path),
     4. the operator seat's well-known org id (`Samen.Web.Operator.org_id/1`) — a stable
@@ -59,13 +59,50 @@ defmodule Samen.Web.Operator.Impersonation do
        + gate a session under.
 
   Returns `nil` only when NONE resolves (no mount, no principal) → the gate denies.
+
+  ## The `?operator_id` leg is dev-only (phase-6 SEC fix round, R1)
+
+  Step 1 reads a CLIENT-CONTROLLED value. `assign_identity/3` already prefers the
+  authenticated principal, so step 1 fires only when NO principal resolves at all — which a
+  prod-armed host cannot reach, because `Samen.Web.Operator.Authz`'s `:require_operator`
+  `on_mount` halts every non-operator before `mount/3` runs. That made the leg *unreachable*
+  in prod but not *structurally dead*, and it was the mechanism behind the phase-6 dogfood
+  H2 attribution forgery in the two vertical consoles (which had bypassed this function
+  entirely and read the param FIRST, ahead of the principal).
+
+  The leg is now gated on the SAME dev posture `Samen.Web.Operator.Authz.dev_operator_role/2`
+  uses: it applies only while `auth_required?` is false for the drill-in mount's otp_app, and
+  is inert the instant the app is armed for prod (`config otp_app, auth_required?: true`).
+  A mount with no resolvable otp_app (an isolated component/unit test socket with no
+  `:samen_mount`) is treated as disarmed, exactly as before — the framework routes always
+  populate the mount, so every real armed deploy has the leg switched off.
+
+  This is defence in depth, not the control: the control remains the `:require_operator`
+  on_mount plus `assign_identity/3`'s principal-first order.
   """
   @spec resolve_operator_id(Phoenix.LiveView.Socket.t(), map(), map()) :: String.t() | nil
   def resolve_operator_id(socket, session \\ %{}, params \\ %{}) do
-    present(params["operator_id"]) ||
+    dev_param_operator_id(socket, params) ||
       present(Map.get(session, "operator_id")) ||
       present(socket.assigns[:samen_operator_id]) ||
       operator_seat_id(socket)
+  end
+
+  defp dev_param_operator_id(socket, params) do
+    if auth_disarmed?(socket), do: present(params["operator_id"]), else: nil
+  end
+
+  @doc """
+  Is the drill-in socket's product UNARMED (dev/test posture, `auth_required?` false or
+  unset)? The gate on the dev-only `?operator_id` leg of `resolve_operator_id/3`. A socket
+  with no resolvable otp_app counts as unarmed (unit-test sockets carry no mount).
+  """
+  @spec auth_disarmed?(Phoenix.LiveView.Socket.t()) :: boolean()
+  def auth_disarmed?(socket) do
+    case Operator.otp_app(socket.assigns[:samen_mount]) do
+      nil -> true
+      otp_app -> not Application.get_env(otp_app, :auth_required?, false)
+    end
   end
 
   defp operator_seat_id(socket) do
@@ -234,6 +271,32 @@ defmodule Samen.Web.Operator.Impersonation do
       {:error, :out_of_scope}
     else
       open(operator_id, socket.assigns[:samen_operator_role], org_id, reason)
+    end
+  end
+
+  @doc """
+  The `%Samen.Scope{}` a drill-in passes to `Ash.read!(scope: …)` AFTER `gate/3` (or
+  `gate_socket/3`) has APPROVED — built from the gate's OWN actor.
+
+  The framework drill-ins read through `…Reads` helpers that take the actor directly; a
+  vertical drill-in reads its own host resource with `Ash.read!(scope: scope)` and needs the
+  `%Samen.Scope{}` wrapper. Before this helper existed the verticals got that scope by calling
+  `Samen.Impersonation.scope/2` DIRECTLY — which made the kernel call the access DECISION and
+  structurally skipped `gate/3`, so the §16.4a R-B account-scope conjunct could never engage at
+  those doors (phase-6 dogfood M1, latent fail-open). Building the scope from the actor the gate
+  already returned keeps ONE decision point: no second lookup that could disagree with the gate,
+  and no path to a usable scope that did not pass through `gate/3`.
+
+  The actor carries the REAL `imp_impersonation_session` marker (`plane: :operator`,
+  member-equivalent role, no reveal grant), so the produced scope masks PII by construction
+  exactly as `Samen.Impersonation.Scope.for_session/3`'s does — the marker is also mirrored into
+  the scope context (ADR-040 §6.6) for `Samen.Audit.ImpersonationWrite`.
+  """
+  @spec read_scope(map()) :: Samen.Scope.t()
+  def read_scope(actor) when is_map(actor) do
+    case Map.get(actor, :impersonation) do
+      %{} = marker -> %Samen.Scope{actor: actor, context: %{samen_impersonation: marker}}
+      _ -> %Samen.Scope{actor: actor}
     end
   end
 

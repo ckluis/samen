@@ -1,0 +1,26 @@
+# SABOTAGE: phase-6 SEC dogfood H2 (T150/T157, ADR-010 §7.2 identity line) —
+# re-trusts the CLIENT-SUPPLIED ?operator_id over the authenticated principal in
+# PawChartWeb.OperatorImpersonationLive.mount/3, restoring the pre-fix
+# "params beat session" resolution. Under it an authenticated operator opens an
+# impersonation session as ?operator_id=<victim>, so the tenant's audit ledger --
+# the "who accessed this org, when, why" accountability promise T150 exists to
+# keep -- names the WRONG operator (attribution forgery), and the victim's active
+# masked session's roster can be ridden.
+# APP: pawchart
+# TEST_FILES: test/operator_impersonation_test.exs
+# MUST_FAIL: the acting id resolves from the SIGNED session principal, never the ?operator_id param
+# MUST_FAIL: ledger ATTRIBUTION: opening a session from a forged-param mount books the PRINCIPAL, not the forged id
+# MUST_FAIL: SESSION RIDING: a forged ?operator_id cannot borrow another operator's live session
+diff --git a/pawchart/lib/pawchart_web/operator_impersonation_live.ex b/pawchart/lib/pawchart_web/operator_impersonation_live.ex
+index 7f7f21f..c2986e7 100644
+--- a/pawchart/lib/pawchart_web/operator_impersonation_live.ex
++++ b/pawchart/lib/pawchart_web/operator_impersonation_live.ex
+@@ -61,7 +61,7 @@ defmodule PawChartWeb.OperatorImpersonationLive do
+     # `org_id` is the TARGET tenant — a bounded, non-PII id chosen in the URL and RE-GATED
+     # below on every mount, so it legitimately stays a param.
+     org_id = fetch(params, session, "org_id")
+-    {:ok, load(socket, socket.assigns[:samen_operator_id], org_id)}
++    {:ok, load(socket, fetch(params, session, "operator_id") || socket.assigns[:samen_operator_id], org_id)}
+   end
+ 
+   @doc false

@@ -24,6 +24,20 @@ defmodule Samen.Fleet.Report.Schema do
   `attention[].since_us` and `activity_counts[].count` now carry the `range:` every
   `:number` field is supposed to (they were the two fields the T81 carry named as
   missing it).
+
+  ## H1 (phase-6 SEC dogfood) — the closed-member premise reaches the NESTED level
+
+  "A laundered PII value has nowhere to land" is only true if EVERY level of the payload
+  is closed. T82's BLOCKER-2 remediation closed the TOP level (`unknown_key_errors/1`)
+  and stopped there: `validate_item/5` and `validate_suppressed/4` each walked only the
+  DECLARED field table and never inspected the keys actually present, so a producer with
+  a valid heartbeat credential could smuggle free text / PII in an UNDECLARED key inside
+  any list item or any `%{"suppressed" => true}` cell — `validate/2` returned `:ok` and
+  `Samen.Fleet.Registry.record_report/4` stored the payload verbatim in
+  `flt_report.payload`. Both nested validators now reject undeclared keys exactly as the
+  top level does (`unknown_item_key_errors/4`, `unknown_suppressed_key_errors/1`), and
+  every nested string value carries an explicit `max_nested_string_bytes/0` ceiling
+  consistent with the top level's widest declared string form (40 bytes).
   """
 
   @bounded_types Samen.WideEvent.Schema.bounded_types()
@@ -435,31 +449,56 @@ defmodule Samen.Fleet.Report.Schema do
   end
 
   defp validate_item(list_name, idx, item, item_fields, catalogs) when is_map(item) do
-    Enum.flat_map(item_fields, fn {name, type, opts} ->
-      key = Atom.to_string(name)
-      suppressible? = Keyword.get(opts, :suppressible, false)
+    declared_errors =
+      Enum.flat_map(item_fields, fn {name, type, opts} ->
+        key = Atom.to_string(name)
+        suppressible? = Keyword.get(opts, :suppressible, false)
 
-      case Map.fetch(item, key) do
-        :error ->
-          ["#{inspect(list_name)}[#{idx}].#{name} missing"]
+        case Map.fetch(item, key) do
+          :error ->
+            ["#{inspect(list_name)}[#{idx}].#{name} missing"]
 
-        {:ok, %{"suppressed" => true} = sup} when suppressible? ->
-          validate_suppressed(list_name, idx, name, sup)
+          {:ok, %{"suppressed" => true} = sup} when suppressible? ->
+            validate_suppressed(list_name, idx, name, sup)
 
-        {:ok, value} ->
-          validate_value(name, type, value, opts, catalogs)
-          |> Enum.map(&"#{inspect(list_name)}[#{idx}].#{&1}")
-      end
-    end)
+          {:ok, value} ->
+            validate_value(name, type, value, opts, catalogs)
+            |> Enum.map(&"#{inspect(list_name)}[#{idx}].#{&1}")
+        end
+      end)
+
+    declared_errors ++
+      unknown_item_key_errors(list_name, idx, item, item_fields) ++
+      oversized_string_errors("#{inspect(list_name)}[#{idx}]", item)
   end
 
   defp validate_item(list_name, idx, _other, _fields, _catalogs),
     do: ["#{inspect(list_name)}[#{idx}] must be a map"]
 
+  # H1 (phase6 SEC dogfood, INV-2 hole) — the SAME closed-member discipline
+  # `unknown_key_errors/1` enforces at the TOP level, one level DOWN. Before this,
+  # `validate_item/5` iterated only the DECLARED item fields and NEVER inspected the keys
+  # actually present, so an undeclared free-text/PII key inside ANY declared list item —
+  # `%{"handle" => "<32hex>", …, "leak_note" => "alice@example.com / SSN 111-22-3333"}` —
+  # validated `:ok` and `Samen.Fleet.Registry.record_report/4` stored the raw payload
+  # VERBATIM in `flt_report.payload`. The T82 BLOCKER-2 remediation closed the top level
+  # only; INV-2's "a laundered PII value has nowhere to land" was therefore FALSE for every
+  # list surface (checks/mrr_by_tier/oban/attention/activity_counts + the three §5.3 cohort
+  # lists). Every DECLARED item field is a bounded class (opaque_id/token/enum/number), so
+  # once undeclared keys are rejected an item has no unbounded free-text landing zone left.
+  defp unknown_item_key_errors(list_name, idx, item, item_fields) do
+    declared = MapSet.new(item_fields, fn {name, _t, _o} -> Atom.to_string(name) end)
+
+    for key <- Map.keys(item), key not in declared do
+      "#{inspect(list_name)}[#{idx}] unknown field #{safe_key(key)} — not declared in the " <>
+        "#{inspect(list_name)} item schema"
+    end
+  end
+
   defp validate_suppressed(list_name, idx, field_name, sup) do
     reason = sup["reason"]
 
-    errs =
+    field_errs =
       Enum.flat_map(@suppressed_fields, fn {name, type, opts} ->
         key = Atom.to_string(name)
         nilable? = Keyword.get(opts, :nilable, false)
@@ -472,7 +511,59 @@ defmodule Samen.Fleet.Report.Schema do
         end
       end)
 
+    errs =
+      field_errs ++
+        unknown_suppressed_key_errors(sup) ++
+        oversized_string_errors("suppressed", sup)
+
     Enum.map(errs, &"#{inspect(list_name)}[#{idx}].#{field_name}.#{&1} (reason=#{inspect(reason)})")
+  end
+
+  # H1 (phase6 SEC dogfood, INV-2 hole — the SUPPRESSED-cell half). A suppressed cell
+  # (`%{"suppressed" => true, …}`) may carry ONLY the `"suppressed"` discriminator plus the
+  # five declared `%Samen.Aggregate.Suppressed{}` fields. Before this, `validate_suppressed/4`
+  # iterated only `@suppressed_fields`, so `%{"suppressed" => true, "reason" => "k_anonymity",
+  # "leak_note" => "<PII>"}` validated `:ok` and was stored verbatim — the same hole one level
+  # deeper. Same closed-member rejection as the item level.
+  defp unknown_suppressed_key_errors(sup) do
+    declared =
+      @suppressed_fields
+      |> MapSet.new(fn {name, _t, _o} -> Atom.to_string(name) end)
+      |> MapSet.put("suppressed")
+
+    for key <- Map.keys(sup), key not in declared do
+      "unknown field #{safe_key(key)} — not declared in Samen.Aggregate.Suppressed"
+    end
+  end
+
+  # H1, secondary angle — a LENGTH BOUND on nested string values, consistent with the bound
+  # every TOP-LEVEL string already carries by construction. At the top level no declared
+  # string can exceed 40 bytes (a 40-hex `git_sha`, a 36-char uuid `app_id`, a
+  # `^[a-z][a-z0-9_]{0,39}$` catalog label), so an accepted top-level payload is
+  # length-bounded by its `form:`/`allowed:` declarations. Nested item/suppressed values had
+  # NO such ceiling on any key the declared-field walk did not visit — up to `max_len` items
+  # × arbitrary-size strings, a storage-amplification / covert-channel bandwidth far beyond
+  # the §5.2b 12,308-byte residue budget. `@max_nested_string_bytes` is that same ceiling
+  # made EXPLICIT and unconditional: it applies to every string value present in an item or
+  # a suppressed cell, declared or not, so it holds even if a future field ships with a
+  # looser `form:` than today's. Defense in depth beside the closed-member rejection above —
+  # neither guard is load-bearing for the other.
+  @max_nested_string_bytes 64
+
+  @doc """
+  The byte ceiling on ANY string value inside a wire list item or suppressed cell (H1).
+  Consistent with the top level, whose widest declared string form is 40 bytes.
+  """
+  @spec max_nested_string_bytes() :: pos_integer()
+  def max_nested_string_bytes, do: @max_nested_string_bytes
+
+  defp oversized_string_errors(prefix, map) when is_map(map) do
+    for {key, value} <- map,
+        is_binary(value),
+        byte_size(value) > @max_nested_string_bytes do
+      "#{prefix} field #{safe_key(key)} carries a #{byte_size(value)}-byte string, over the " <>
+        "#{@max_nested_string_bytes}-byte nested value bound"
+    end
   end
 
   # BLOCKER-2 fix (fix round, ATK-6/INV-2, hole (a)): "cohorts" is NO LONGER a
@@ -492,9 +583,29 @@ defmodule Samen.Fleet.Report.Schema do
     declared = MapSet.union(declared_top, declared_lists)
 
     for key <- Map.keys(payload), key not in declared do
-      "unknown field #{inspect(key)} — not declared in Samen.Fleet.Report.Schema"
+      "unknown field #{safe_key(key)} — not declared in Samen.Fleet.Report.Schema"
     end
   end
+
+  # R6 (phase-6 SEC fix round) — every "unknown field" / bound-violation message
+  # interpolates an ATTACKER-CONTROLLED key NAME. Those strings travel into logs and
+  # (for the `mix samen.verify.fleet_wire` path) onto a terminal, so an unbounded key
+  # name is itself an unbounded free-text channel out of the rejection path — the very
+  # thing the closed schema exists to deny. `safe_key/1` bounds the echoed name to
+  # `@max_echoed_key_bytes` and appends a truncation marker naming the real byte size,
+  # so the message stays diagnostic without becoming the smuggling channel.
+  @max_echoed_key_bytes 64
+
+  defp safe_key(key) when is_binary(key) do
+    if byte_size(key) > @max_echoed_key_bytes do
+      inspect(binary_part(key, 0, @max_echoed_key_bytes)) <>
+        " (truncated from #{byte_size(key)} bytes)"
+    else
+      inspect(key)
+    end
+  end
+
+  defp safe_key(key), do: key |> to_string() |> safe_key()
 
   defp uuid_v4?(value) do
     Regex.match?(

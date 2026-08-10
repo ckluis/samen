@@ -38,20 +38,34 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   the value re-masks mid-session (closing the P6-F5 "stale plaintext until reload" residual)
   — a fresh mount already re-masked correctly; this closes it live too.
 
-  ## Mount contract
+  ## Mount contract (H2/M1 — phase-6 SEC dogfood)
 
-  `mount/3` reads `operator_id` + `org_id` from params/session (a real deploy sets these
-  from the operator's authenticated session + the org they chose). It builds the
-  impersonation scope PER MOUNT (deny-on-read): an expired/absent session yields
-  `{:error, :session_inactive}` and the view renders the access-denied state, no data.
+  `mount/3` resolves the acting operator from the **AUTHENTICATED PRINCIPAL** via the
+  framework's `Samen.Web.Operator.Impersonation.assign_identity/3`, exactly as the framework
+  drill-ins (`Samen.Web.Operator.DeliverabilityLive`/`ActivityLive`/`AutomationHealthLive`) do.
+  It does NOT read the acting id from a client-supplied `?operator_id` param.
+
+  Before this the module derived the acting identity from `Map.get(params, key) ||
+  Map.get(session, key)` — **params beat session** — so an authenticated operator could book an
+  access (and, here, a *reveal request/grant*) under another operator's id: the tenant's audit
+  ledger could be made to name the wrong operator, defeating the accountability promise T150
+  exists to keep (phase-6 dogfood H2, attribution forgery).
+
+  `load/3` routes the access DECISION through the framework `gate/3` (via `gate_socket/3`)
+  instead of calling `Samen.Impersonation.scope/2` directly, so the T146 role, the §16.4a R-B
+  account-scope conjunct and the T150 session conjunct all apply at this door (dogfood M1). An
+  expired/absent session — or an out-of-scope account — renders the access-denied state, no data.
   """
   use Phoenix.LiveView
 
   # ADR-009 — the component kit is now framework-level (`Samen.UI`).
   import Samen.UI
 
-  alias Samen.Impersonation
   alias Driftwood.Reads
+
+  # H2/M1 — the framework impersonation GATE (authenticated principal + gate/3), replacing the
+  # param-derived identity and the direct `Samen.Impersonation.scope/2` decision.
+  alias Samen.Web.Operator.Impersonation, as: OperatorGate
 
   # A live reveal window is time-boxed; the countdown + mid-session re-mask ride a
   # per-second server tick (no JS — ADR-042 progressive enhancement). Only a connected
@@ -60,10 +74,22 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
 
   @impl true
   def mount(params, session, socket) do
-    operator_id = fetch(params, session, "operator_id")
+    # H2 — ADOPT the framework identity path (do not fork it): `assign_mount/2` rebuilds the
+    # `%Samen.Web.Mount{}` the gate needs to resolve this product's otp_app for the R-B scope
+    # conjunct; `assign_identity/3` resolves the acting operator from the AUTHENTICATED
+    # PRINCIPAL (`:samen_operator_id`, else `Samen.Web.Auth.authenticated_user_id/1` off the
+    # SIGNED session), falling back to a param ONLY when NO principal resolves at all (the
+    # disarmed dev dogfood). A deploy with a real session IGNORES a forged `?operator_id`.
+    socket =
+      socket
+      |> Samen.Web.Live.assign_mount(session)
+      |> OperatorGate.assign_identity(session, params)
+
+    # `org_id` is the TARGET tenant — a bounded, non-PII id chosen in the URL and RE-GATED on
+    # every mount, so it legitimately stays a param.
     org_id = fetch(params, session, "org_id")
     if connected?(socket), do: schedule_tick()
-    {:ok, load(socket, operator_id, org_id)}
+    {:ok, load(socket, socket.assigns[:samen_operator_id], org_id)}
   end
 
   # Extracted so the dogfood test drives the exact same load path.
@@ -82,13 +108,19 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   end
 
   def load(socket, operator_id, org_id) do
-    case Impersonation.scope(operator_id, org_id) do
-      {:ok, scope} ->
+    # M1 — the access DECISION goes through the framework `gate/3` (via `gate_socket/3`), which
+    # composes the §16.4a R-B account-scope conjunct with the T150 session conjunct. The read
+    # `%Samen.Scope{}` is built from the gate's OWN actor (`read_scope/1`) — one decision point,
+    # no direct `Samen.Impersonation.scope/2` call that could admit where the gate denies.
+    case OperatorGate.gate_socket(socket, operator_id, org_id) do
+      {:ok, actor, info} ->
         now = DateTime.utc_now()
+        scope = OperatorGate.read_scope(actor)
 
         assign(socket,
           impersonating: true,
           session_inactive: false,
+          samen_operator_id: operator_id,
           operator_id: operator_id,
           org_id: org_id,
           org_name: org_name(org_id),
@@ -99,13 +131,14 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
           now: now,
           reveal_windows: reveal_windows(operator_id, now),
           request_notice: socket.assigns[:request_notice],
-          session_info: session_info(org_id, operator_id)
+          session_info: info
         )
 
       # Both fail-closed shapes render access-denied with NO tenant data:
-      #   :session_inactive — never opened / closed / expired mid-flight
-      #   :operator_suspended — the operator lost operator-plane standing (F4.2)
-      {:error, reason} when reason in [:session_inactive, :operator_suspended] ->
+      #   :denied       — never opened / closed / expired mid-flight / operator suspended (F4.2)
+      #   :out_of_scope — the R-B account-scope conjunct denied (inert until a product wires a
+      #                   `:fleet_resolution` seam, so no lockout today)
+      denial when denial in [:denied, :out_of_scope] ->
         denied(socket, operator_id, org_id)
     end
   end
@@ -115,6 +148,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
     assign(socket,
       impersonating: false,
       session_inactive: true,
+      samen_operator_id: operator_id,
       operator_id: operator_id,
       org_id: org_id,
       org_name: org_name(org_id),
@@ -142,13 +176,6 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   end
 
   defp org_name(org_id), do: org_id
-
-  # The tenant-visible accountability entry for THIS operator over THIS org.
-  defp session_info(org_id, operator_id) do
-    org_id
-    |> Impersonation.list_for_org()
-    |> Enum.find(fn e -> e.operator_id == operator_id and e.active? end)
-  end
 
   # The ACTIVE reveal windows this operator holds — who approved, until when. Read-only
   # accountability projection over `Samen.Reveal.Grants` (does NOT change the reveal gate).
@@ -419,14 +446,17 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   # T150 F2 — open a real impersonation session (reason required) from the denied-state form,
   # then reload so the roster renders masked. The operator role comes from the
   # `Samen.Web.Operator.Authz` on_mount (`:samen_operator_role`); `may_impersonate?` gates it.
+  # H2/M1 — the OPEN affordance goes through the framework `open_from_socket/3`, which keys the
+  # session on the AUTHENTICATED `:samen_operator_id` (never a param) and RE-CHECKS the R-B scope
+  # conjunct before minting a row, so a crafted `phx-submit` cannot book an access under another
+  # operator's name or acquire scope by opening a session.
   @impl true
   def handle_event("open_session", %{"reason" => reason}, socket) do
-    operator_id = socket.assigns[:operator_id]
-    role = socket.assigns[:samen_operator_role]
+    org_id = socket.assigns[:org_id]
 
-    case Samen.Web.Operator.Impersonation.open(operator_id, role, socket.assigns[:org_id], reason) do
+    case OperatorGate.open_from_socket(socket, org_id, reason) do
       {:ok, _session} ->
-        {:noreply, load(socket, operator_id, socket.assigns[:org_id])}
+        {:noreply, load(socket, socket.assigns[:samen_operator_id], org_id)}
 
       {:error, reason} ->
         {:noreply, assign(socket, open_error: open_error_copy(reason))}
@@ -480,6 +510,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
 
   defp open_error_copy(:reason_required), do: "A reason for access is required."
   defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."
+  defp open_error_copy(:out_of_scope), do: "This account is not in your operator scope."
   defp open_error_copy({:pii_shaped_reason, _}), do: "The reason must name the ticket, not the person."
   defp open_error_copy(_), do: "The impersonation session could not be opened."
 

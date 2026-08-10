@@ -79,4 +79,112 @@ defmodule PawChart.OperatorImpersonationTest do
     assert inspect(resolved.full_name) =~ "Olivia"
     refute match?(%Samen.Masked{}, resolved.full_name)
   end
+
+  # ---------------------------------------------------------------------------
+  # H2/M1 (phase-6 SEC dogfood) — the acting operator is the AUTHENTICATED PRINCIPAL.
+  #
+  # The console used to derive its acting identity from `Map.get(params, key) ||
+  # Map.get(session, key)` — params BEAT the session — and never consulted the
+  # `:samen_operator_id` derived from the signed session. `?operator_id=<victim>` therefore
+  # booked the tenant's audit-ledger entry under the WRONG operator (attribution forgery) and
+  # rendered another operator's active session's roster (session riding).
+  # ---------------------------------------------------------------------------
+  describe "H2 — a forged ?operator_id is IGNORED; the ledger names the authenticated principal" do
+    @principal "op-pawchart-authenticated"
+    @victim "op-pawchart-victim"
+
+    defp signed_session(principal), do: %{Samen.Web.Auth.session_user_key() => principal}
+
+    defp mount_console(params, session) do
+      {:ok, socket} = Console.mount(params, session, %Phoenix.LiveView.Socket{})
+      socket
+    end
+
+    test "the acting id resolves from the SIGNED session principal, never the ?operator_id param" do
+      socket =
+        mount_console(
+          %{"operator_id" => @victim, "org_id" => @clinic_org},
+          signed_session(@principal)
+        )
+
+      assert socket.assigns[:samen_operator_id] == @principal
+      assert socket.assigns[:operator_id] == @principal
+      refute socket.assigns[:operator_id] == @victim
+    end
+
+    test "ledger ATTRIBUTION: opening a session from a forged-param mount books the PRINCIPAL, not the forged id" do
+      reason = "ticket #4242: attribution probe"
+
+      socket =
+        %{"operator_id" => @victim, "org_id" => @clinic_org}
+        |> mount_console(signed_session(@principal))
+        |> Phoenix.Component.assign(:samen_operator_role, @role)
+
+      {:noreply, opened} = Console.handle_event("open_session", %{"reason" => reason}, socket)
+
+      # The open succeeded and the console now renders the masked roster (positive control:
+      # this is a REAL session, not a silently-swallowed no-op).
+      refute opened.assigns.session_inactive
+      assert opened.assigns.impersonating
+
+      ledger = Samen.Impersonation.list_for_org(@clinic_org)
+
+      # POSITIVE CONTROL — the CORRECT id landed in the tenant's accountability ledger.
+      assert Enum.any?(ledger, &(&1.operator_id == @principal and &1.reason == reason and &1.active?)),
+             "expected the authenticated principal to be named in the tenant ledger"
+
+      # THE PROOF — the forged id is nowhere in the ledger.
+      refute Enum.any?(ledger, &(&1.operator_id == @victim)),
+             "the client-supplied ?operator_id must NEVER reach the tenant's audit ledger"
+    end
+
+    test "SESSION RIDING: a forged ?operator_id cannot borrow another operator's live session" do
+      _owner = create_owner()
+
+      # The victim holds a REAL, active session over this clinic...
+      assert {:ok, _} =
+               Samen.Web.Operator.Impersonation.open(@victim, @role, @clinic_org, "ticket #7: victim's own work")
+
+      # ...and the attacker mounts with the victim's id in the URL, authenticated as themselves.
+      socket =
+        mount_console(
+          %{"operator_id" => @victim, "org_id" => @clinic_org},
+          signed_session(@principal)
+        )
+
+      assert socket.assigns.session_inactive, "riding the victim's session must be DENIED"
+      assert socket.assigns.patients == []
+      refute socket.assigns.impersonating
+
+      # POSITIVE CONTROL (anti-tautology): with a session of their OWN, the same mount admits —
+      # so the denial above is the identity resolution firing, not a blanket refusal.
+      assert {:ok, _} =
+               Samen.Web.Operator.Impersonation.open(@principal, @role, @clinic_org, "ticket #8: my own work")
+
+      admitted =
+        mount_console(
+          %{"operator_id" => @victim, "org_id" => @clinic_org},
+          signed_session(@principal)
+        )
+
+      assert admitted.assigns.impersonating
+      refute admitted.assigns.session_inactive
+      assert length(admitted.assigns.patients) == 1
+    end
+
+    test "NO-SESSION mount is DENIED — no principal, no params, no data" do
+      _owner = create_owner()
+
+      # Even with somebody else's live session in play, a mount carrying no identity at all
+      # resolves to nil and fails closed (never crashes — `load/3`'s nil guard).
+      assert {:ok, _} =
+               Samen.Web.Operator.Impersonation.open(@victim, @role, @clinic_org, "ticket #9: victim's own work")
+
+      socket = mount_console(%{"org_id" => @clinic_org}, %{})
+
+      assert socket.assigns.session_inactive
+      assert socket.assigns.patients == []
+      assert socket.assigns.session_info == nil
+    end
+  end
 end

@@ -94,4 +94,36 @@ defmodule Demo.OperatorImpersonationLiveTest do
     # No contact rows rendered.
     refute html =~ "contact-row"
   end
+
+  # H2 (phase-6 SEC fix round, R3) — this slice carried an unrouted COPY of the
+  # remediated defect: a `mount/3` deriving the acting operator from
+  # `params["operator_id"] || session["operator_id"]` (params beating the session). It is
+  # gone, not fixed: demo is API-only (no endpoint, no live socket, no live route) and
+  # depends on samen_core only, so it cannot reach the framework gate that makes a routed
+  # mount safe. Pin BOTH halves so the copy cannot silently return.
+  test "H2/R3: this slice exports NO mount/3 — a client-param identity path cannot return here" do
+    Code.ensure_loaded!(DemoWeb.OperatorImpersonationLive)
+
+    refute function_exported?(DemoWeb.OperatorImpersonationLive, :mount, 3),
+           "a routed mount/3 must not exist on this proof-only slice — a host that wants a " <>
+             "real console uses the framework path (assign_identity + gate_socket), not this module"
+
+    # POSITIVE CONTROL (anti-tautology): the proof surface it DOES export is still there,
+    # so the assertion above is about the mount specifically, not a deleted module.
+    assert function_exported?(DemoWeb.OperatorImpersonationLive, :load, 3)
+    assert function_exported?(DemoWeb.OperatorImpersonationLive, :render, 1)
+  end
+
+  test "H2/R3: load/3 fails CLOSED on a nil operator/org instead of raising out of the kernel" do
+    org = mk_org("Acme")
+    _c = mk_contact(org.id, "Secret", "secret@acme.com")
+
+    for {op_id, org_id} <- [{nil, org.id}, {"op-live-3", nil}, {nil, nil}] do
+      socket = DemoWeb.OperatorImpersonationLive.load(empty_socket(), op_id, org_id)
+
+      assert socket.assigns.session_inactive
+      assert socket.assigns.contacts == []
+      refute render_live(socket) =~ "secret@acme.com"
+    end
+  end
 end

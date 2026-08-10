@@ -88,6 +88,59 @@ defmodule Samen.VerifyFleetWireTest do
     end
   end
 
+  describe "H1 (phase6 SEC, INV-2) — the closed-member premise reaches the NESTED level" do
+    test "GREEN: the real schema rejects undeclared nested keys, so the gate is clean" do
+      Application.delete_env(@test_host, :fleet_wire_catalogs)
+      # `violations/1` runs the nested-member check unconditionally, over EVERY declared
+      # list section + every suppressible cell. A clean schema contributes zero.
+      assert FleetWire.violations(host: @test_host) == []
+    end
+
+    test "anti-tautology: the CONTRACT the nested check depends on (item + suppressed reject undeclared keys)" do
+      # If either nested validator regressed, the FleetWire check would silently stop
+      # catching the INV-2 hole. Pin the contract directly, for EVERY declared section.
+      base =
+        Samen.Fleet.Report.build(app_id: "11111111-1111-4111-8111-111111111111")
+        |> Samen.Fleet.Report.to_wire()
+
+      for {section, opts} <- Samen.Fleet.Report.Schema.list_fields() do
+        fields = Keyword.fetch!(opts, :fields)
+
+        item =
+          Map.new(fields, fn {name, type, field_opts} ->
+            {Atom.to_string(name), probe_value(type, field_opts)}
+          end)
+          |> Map.put("zz_undeclared_leak", "smuggled@example.test")
+
+        payload = Map.put(base, Atom.to_string(section), [item])
+
+        assert {:error, errors} = Samen.Fleet.Report.Schema.validate(payload),
+               "expected #{section} to reject an undeclared item key"
+
+        assert Enum.any?(errors, &String.contains?(&1, "zz_undeclared_leak"))
+      end
+
+      suppressed_payload =
+        Map.put(base, "deliverability", [
+          %{
+            "handle" => String.duplicate("a", 32),
+            "sent" => %{
+              "suppressed" => true,
+              "reason" => "k_anonymity",
+              "k" => 5,
+              "zz_undeclared_leak" => "smuggled@example.test"
+            },
+            "bounced" => 0,
+            "complained" => 0,
+            "health_index" => 90
+          }
+        ])
+
+      assert {:error, sup_errors} = Samen.Fleet.Report.Schema.validate(suppressed_payload)
+      assert Enum.any?(sup_errors, &String.contains?(&1, "zz_undeclared_leak"))
+    end
+  end
+
   describe "RP-J-4b — route surface (needs --router)" do
     test "no --router: skipped, not a violation" do
       Application.delete_env(@test_host, :fleet_wire_catalogs)
@@ -99,6 +152,30 @@ defmodule Samen.VerifyFleetWireTest do
 
       assert [violation] = FleetWire.violations(host: @test_host, router: Samen.Fleet.RouteTable)
       assert violation =~ "not a compiled Phoenix router"
+    end
+  end
+
+  # A minimal VALID value for a declared field spec (mirrors the gate's own synthesiser,
+  # independently written so the two cannot agree on a shared bug).
+  defp probe_value(:number, opts) do
+    case Keyword.get(opts, :range) do
+      {lo, _hi} -> lo
+      nil -> 0
+    end
+  end
+
+  defp probe_value(:enum, opts) do
+    case Keyword.get(opts, :allowed) do
+      [first | _] -> Atom.to_string(first)
+      _sentinel -> "zz_probe_label"
+    end
+  end
+
+  defp probe_value(type, opts) when type in [:opaque_id, :token] do
+    case Keyword.get(opts, :form) do
+      {:hex, len} -> String.duplicate("a", len)
+      {:uuid_v4} -> "11111111-1111-4111-8111-111111111111"
+      nil -> ""
     end
   end
 end

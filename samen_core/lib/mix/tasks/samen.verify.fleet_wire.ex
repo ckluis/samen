@@ -46,6 +46,19 @@ defmodule Mix.Tasks.Samen.Verify.FleetWire do
   (cohort/catalog data is opt-in, §5.3) — the shape-only stopgap stands for
   that host, exactly as before this task existed.
 
+  ## 4. H1 (phase-6 SEC dogfood) — closed MEMBERSHIP reaches the NESTED level
+
+  Checks 1–3 all reason about DECLARED fields. H1 found the gap that leaves: a
+  key that was never declared AT ALL, one level down. T82 rejected undeclared
+  keys at the top level only, so a valid-credential producer could smuggle free
+  text / PII in an undeclared key inside any list ITEM or any `%{"suppressed" =>
+  true}` cell and `Registry.record_report/4` stored it verbatim. For EVERY
+  declared list section this check synthesises a minimal VALID item from the
+  section's own field table, adds one undeclared key, and asserts
+  `Schema.validate/1` REJECTS it naming that key — and the same for a suppressed
+  cell on every `suppressible: true` field. Host- and catalog-independent: a
+  regression that re-opens either nested door fails the BUILD.
+
   ## Usage
 
       mix samen.verify.fleet_wire
@@ -85,6 +98,7 @@ defmodule Mix.Tasks.Samen.Verify.FleetWire do
 
     class_discipline_violations() ++
       subset_violations() ++
+      nested_closed_member_violations() ++
       catalog_violations(host) ++
       route_violations(router)
   end
@@ -110,6 +124,120 @@ defmodule Mix.Tasks.Samen.Verify.FleetWire do
           "the fleet wire has WIDENED the inherited type discipline (the exact class of mistake " <>
           "the first ADR-044 draft made with :semver/:slug)."
       ]
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # H1 (phase-6 SEC dogfood, ADR-044 §5.2b / INV-2) — closed MEMBERSHIP one level DOWN
+  #
+  # The catalog check above closes the member VOCABULARY of four declared enum
+  # fields. It says nothing about keys that were never declared at all. T82's
+  # BLOCKER-2 fix rejected undeclared keys at the TOP level only; H1 extended that
+  # rejection to list ITEMS (`validate_item/5`) and SUPPRESSED cells
+  # (`validate_suppressed/4`). This is the BUILD-TIME backstop for that closure: for
+  # EVERY declared list section (not just the cohort lists), synthesise a minimal
+  # VALID item from the section's own field table, add ONE undeclared key, and assert
+  # `Schema.validate/1` REJECTS it naming that key — then the same for an undeclared
+  # key inside a SUPPRESSED cell on every `suppressible: true` field. Host- and
+  # catalog-independent (validated with NO catalogs, so catalog sentinels fall back to
+  # their shape-only bound and cannot mask the result). A regression that re-opens
+  # either nested door fails the BUILD, not merely a unit test.
+  # ---------------------------------------------------------------------------
+
+  # A key no declared item/suppressed field table will ever contain.
+  @undeclared_probe_key "zz_undeclared_leak"
+  @undeclared_probe_value "smuggled@example.test"
+
+  defp nested_closed_member_violations do
+    Enum.flat_map(Schema.list_fields(), fn {section, opts} ->
+      fields = Keyword.fetch!(opts, :fields)
+
+      item_violations(section, fields) ++ suppressed_violations(section, fields)
+    end)
+  end
+
+  # One undeclared key inside a minimal VALID item of `section` must be rejected.
+  defp item_violations(section, fields) do
+    item = Map.put(valid_item(fields), @undeclared_probe_key, @undeclared_probe_value)
+
+    assert_rejected(
+      Map.put(base_payload(), Atom.to_string(section), [item]),
+      "a #{section} list ITEM"
+    )
+  end
+
+  # One undeclared key inside a SUPPRESSED cell of `section`'s first suppressible field
+  # must be rejected. Sections with no suppressible field contribute nothing.
+  defp suppressed_violations(section, fields) do
+    case Enum.find(fields, fn {_n, _t, o} -> Keyword.get(o, :suppressible, false) end) do
+      nil ->
+        []
+
+      {name, _type, _opts} ->
+        cell = %{
+          "suppressed" => true,
+          "reason" => "k_anonymity",
+          "k" => 5,
+          @undeclared_probe_key => @undeclared_probe_value
+        }
+
+        item = Map.put(valid_item(fields), Atom.to_string(name), cell)
+
+        assert_rejected(
+          Map.put(base_payload(), Atom.to_string(section), [item]),
+          "a #{section} SUPPRESSED cell (#{name})"
+        )
+    end
+  end
+
+  defp assert_rejected(payload, where) do
+    case Schema.validate(payload) do
+      {:error, errors} ->
+        if Enum.any?(errors, &String.contains?(&1, @undeclared_probe_key)) do
+          []
+        else
+          [
+            "H1 nested-member check: an undeclared key in #{where} was rejected, but not for " <>
+              "the expected key #{inspect(@undeclared_probe_key)} — got: #{inspect(errors)}"
+          ]
+        end
+
+      :ok ->
+        [
+          "H1 nested-member check FAILED: an undeclared key #{inspect(@undeclared_probe_key)} " <>
+            "in #{where} was ACCEPTED by Schema.validate/1 — the closed-member discipline does " <>
+            "not reach the nested level (the INV-2 hole is open: a producer can smuggle free " <>
+            "text / PII there and record_report/4 stores it verbatim)."
+        ]
+    end
+  end
+
+  # A minimal item satisfying every declared field of `fields` — synthesised from the
+  # field table itself, so a new list section is covered the moment it is declared.
+  defp valid_item(fields) do
+    Map.new(fields, fn {name, type, opts} -> {Atom.to_string(name), valid_value(type, opts)} end)
+  end
+
+  defp valid_value(:number, opts) do
+    case Keyword.get(opts, :range) do
+      {lo, _hi} -> lo
+      nil -> 0
+    end
+  end
+
+  defp valid_value(:enum, opts) do
+    case Keyword.get(opts, :allowed) do
+      [first | _] -> Atom.to_string(first)
+      # a catalog sentinel: any shape-valid label passes with no catalogs supplied.
+      _sentinel -> "zz_probe_label"
+    end
+  end
+
+  defp valid_value(type, opts) when type in [:opaque_id, :token] do
+    case Keyword.get(opts, :form) do
+      {:hex, len} -> String.duplicate("a", len)
+      {:uuid_v4} -> "11111111-1111-4111-8111-111111111111"
+      nil -> ""
     end
   end
 
