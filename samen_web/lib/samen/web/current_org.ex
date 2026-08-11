@@ -88,18 +88,46 @@ defmodule Samen.Web.CurrentOrg do
     3. no principal, no seam, or an empty authorized set → `nil` (NO actor).
 
   The security boundary is this actor-derivation step, not the `SessionController` write: even a
-  session carrying an unauthorized org yields no actor for it here. Dev/test keep the query-param
-  convenience unchanged (the gate is off unless the mount opts in).
+  session carrying an unauthorized org yields no actor for it here.
+
+  ## Fail-closed default on an ARMED host (PP-1 / PP-3, ADR-031)
+
+  The `?org=`/session convenience is a DEV/dogfood affordance and is trusted ONLY in the
+  explicitly DISARMED posture (`param_trust_disarmed?/1` — the host's `:auth_required?` runtime
+  flag is false/unset, mirroring `Samen.Web.Operator.Impersonation.auth_disarmed?/1`). On an
+  ARMED host (`config otp_app, auth_required?: true`) a mount that carries NO `:authn` label no
+  longer falls through to the trusting dev path — it FAILS CLOSED (`nil`, no actor, no PII). This
+  closes the class where a vertical mounts a PII-bearing tenant scope but never adopts the
+  tenant-auth seam (the pawchart cross-tenant leak): such a mount is safe-because-DENIED, not
+  safe-because-trusted. A correctly `:authn`-labelled mount (driftwood) keeps working: armed → the
+  authorized path above; disarmed (dev/test) → the query-param convenience, unchanged.
   """
   @spec resolve(Mount.t() | nil, map(), map()) :: String.t() | nil
   def resolve(mount, params, session) do
-    if authn_required?(mount) do
-      resolve_authorized(mount, params, session)
-    else
-      param_org(params) ||
-        session_org(session) ||
-        default_label(mount) ||
-        first_listable_org_id(mount)
+    cond do
+      # 1. The mount ADOPTED the `:authn` seam AND its host is armed → the fail-closed
+      #    prod path: an authenticated principal, constrained to its authorized orgs
+      #    (driftwood-prod; the positive control). A `?org=` is NEVER trusted as identity.
+      authn_required?(mount) ->
+        resolve_authorized(mount, params, session)
+
+      # 2. The host is in the explicit DISARMED (dev/dogfood) posture → the sanctioned
+      #    query-param convenience identity (LOCAL ergonomics: `?org=`/session trusted).
+      param_trust_disarmed?(mount) ->
+        param_org(params) ||
+          session_org(session) ||
+          default_label(mount) ||
+          first_listable_org_id(mount)
+
+      # 3. FAIL CLOSED (PP-1 / PP-3, ADR-031). An ARMED host mounted a PII-bearing tenant
+      #    scope that never adopted the `:authn` gate (pawchart's unlabeled mounts). The
+      #    dev `?org=` convenience is an unauthenticated cross-tenant identity hole in
+      #    prod, so this mount derives NO org from a caller-supplied param — it yields
+      #    `nil` (no actor, the seed-state/no-org card renders, NO PII) rather than
+      #    trusting the param. The org a tenant acts in MUST come from the authenticated,
+      #    authorized `:authn` path (branch 1), never a raw param on an armed host.
+      true ->
+        nil
     end
   end
 
@@ -121,6 +149,24 @@ defmodule Samen.Web.CurrentOrg do
   end
 
   defp authn_required?(_), do: false
+
+  # Whether this mount's host is in the DISARMED (dev/dogfood) posture — the ONLY posture
+  # in which the `?org=`/session convenience is trusted as identity (PP-1 / PP-3 fix). Mirrors
+  # `Samen.Web.Operator.Impersonation.auth_disarmed?/1`, the SEC-batch pattern for the
+  # impersonation `?operator_id` dev-leg: trust the dev convenience ONLY when explicitly
+  # disarmed, fail closed otherwise. A host is disarmed when its `:auth_required?` runtime flag
+  # is false/unset; an ARMED host (`config otp_app, auth_required?: true`) fails closed here EVEN
+  # WHEN the mount carries no `:authn` label — so a vertical that never adopted the tenant-auth
+  # seam (pawchart) can no longer serve a caller-supplied `?org=` as identity once deployed for
+  # prod. A mount with NO resolvable otp_app (a synthetic/unit-test mount that carries no repo
+  # config) counts as disarmed, exactly as the impersonation param-leg treats a mountless socket —
+  # every framework route populates a real otp_app, so every armed deploy is covered.
+  defp param_trust_disarmed?(mount) do
+    case Samen.Web.Operator.otp_app(mount) do
+      nil -> true
+      otp_app -> not Application.get_env(otp_app, :auth_required?, false)
+    end
+  end
 
   # The fail-closed prod path: an authenticated principal, constrained to its authorized orgs.
   #
