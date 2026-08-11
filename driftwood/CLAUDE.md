@@ -1,5 +1,7 @@
 ## Code Exploration — MANDATORY (codemunch)
 
+**Agents: use `codemunch:search`/`codemunch:fetch` for exploration, not raw Read/Grep sweeps — this has been missed before; it is not optional.**
+
 <CRITICAL>
 You MUST use codemunch for ALL code exploration. This is NON-NEGOTIABLE. Do NOT ignore this rule.
 Reading full files when a codemunch command exists for the task is a violation of your instructions.
