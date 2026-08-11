@@ -46,8 +46,10 @@ defmodule Mix.Tasks.Samen.Gen.Scope do
     Post.write_scope!(spec)
 
     Mix.shell().info(
-      "samen.gen.scope: wrote #{spec.scope_module} + registered it in both :ash_domains lists. " <>
-        "Add resources with `mix samen.gen.resource --scope #{scope} --resource <Name> --abbrev <abc>`."
+      "samen.gen.scope: wrote #{spec.scope_module} + registered it in both :ash_domains lists " <>
+        "+ emitted the authn-coverage guard test/tenant_authn_coverage_test.exs. " <>
+        "Add resources with `mix samen.gen.resource --scope #{scope} --resource <Name> --abbrev <abc>`.\n\n" <>
+        Post.scope_router_guidance(spec)
     )
 
     :ok

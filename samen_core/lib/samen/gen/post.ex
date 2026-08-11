@@ -22,6 +22,13 @@ defmodule Samen.Gen.Post do
   lands Tier-0 resources into it. The scope module is emitted EMPTY (no resources yet)
   and `gen.resource` appends resources + wires the domain's `resources do … end`.
 
+  It ALSO emits (once per app, on the first `gen.scope`) the app-local AUTHN-COVERAGE
+  GUARD `test/tenant_authn_coverage_test.exs` and prints an authn-wired router snippet
+  (`scope_router_guidance/1`). Together these close the W4-H2 ergonomics gap: adding a
+  business-domain vertical (the CRM/Support/Work/Marketing pattern) is now GUIDED toward the
+  labeled mount AND CAUGHT (a bare unlabeled tenant mount that reopens the W4 cross-tenant
+  PII leak flips the guard at `mix test`) — correct-by-construction via the Batch-7 pattern.
+
   ## What `mix samen.gen.resource` emits (into an existing scope)
 
   Per the malleability ladder (scope-authoring §7) the default is a **Tier-0 config
@@ -106,7 +113,14 @@ defmodule Samen.Gen.Post do
     :ok
   end
 
-  @doc "Write the scope domain module + register it in both `:ash_domains` lists."
+  @doc """
+  Write the scope domain module + register it in both `:ash_domains` lists + emit the
+  app-local AUTHN-COVERAGE GUARD test (W4-H2 defense-in-depth; idempotent — written once,
+  on the first `gen.scope`, left as-is on later runs). The guard is the failing-until-wired
+  half of the ergonomics fix: the moment an author adds a business-domain tenant mount
+  WITHOUT `labels: @current_org_labels`, it trips at `mix test` (the guided half is
+  `scope_router_guidance/1`, printed by the task).
+  """
   def write_scope!(%ScopeSpec{} = s) do
     b = scope_bindings(s)
     dest = scope_file_path(s)
@@ -114,6 +128,43 @@ defmodule Samen.Gen.Post do
     File.write!(dest, App.render(Samen.Gen.PostTemplates.scope_module(), b))
 
     register_domain!(s.app_dir, s.otp_app, s.app_module, s.scope_module)
+    write_authn_coverage_guard!(s, b)
+    :ok
+  end
+
+  @doc """
+  The AUTHN-WIRED router snippet `mix samen.gen.scope` prints so an author copies the SAFE
+  (labeled) tenant mount, never a BARE one (the W4 BLOCKER-1 leak). The `labels:
+  @current_org_labels` merge is the load-bearing seam — a bare `samen_*_routes` mount reopens
+  the unauthenticated cross-tenant PII read (ADR-031). Illustrative for a business-domain
+  scope; the author picks the framework module kind matching this scope.
+  """
+  def scope_router_guidance(%ScopeSpec{} = s) do
+    kind = Macro.underscore(s.scope)
+
+    """
+    To expose #{s.scope} on the TENANT plane, add an AUTHN-WIRED mount to
+    lib/#{s.otp_app}_web/router.ex inside the bare `scope "/"` block. CARRY
+    `labels: @current_org_labels` so the `:authn` prod gate governs actor resolution — a BARE
+    unlabeled tenant mount is the pawchart cross-tenant PII leak (dogfood W4 BLOCKER-1, ADR-031):
+
+        samen_module_routes(:#{kind}, #{s.scope_module}, repo: #{s.app_module}.Repo, labels: @current_org_labels)
+
+    The emitted guard test/tenant_authn_coverage_test.exs FAILS until every tenant mount
+    carries the seam.
+    """
+  end
+
+  # Emit the app-local authn-coverage guard test — idempotent (a first-run artifact; later
+  # `gen.scope` runs leave the existing guard untouched, so it is authored ONCE per app).
+  defp write_authn_coverage_guard!(%ScopeSpec{} = s, bindings) do
+    dest = Path.join(s.app_dir, "test/tenant_authn_coverage_test.exs")
+
+    unless File.exists?(dest) do
+      File.mkdir_p!(Path.dirname(dest))
+      File.write!(dest, App.render(Samen.Gen.PostTemplates.tenant_authn_coverage_test(), bindings))
+    end
+
     :ok
   end
 

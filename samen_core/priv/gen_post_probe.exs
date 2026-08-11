@@ -195,6 +195,31 @@ try do
 
   IO.puts("D7a: gen.scope emitted #{module}.Crm + registered it in both :ash_domains lists.")
 
+  # --- 2b. W4-H2 defense-in-depth: gen.scope's AUTHN ergonomics (guided + guarded) ------
+  # gen.scope must EMIT the app-local failing-until-wired coverage guard, and PRINT an
+  # authn-wired router snippet (never a bare unlabeled mount — that IS the W4 leak).
+  authn_guard_file = Path.join(app_dir, "test/tenant_authn_coverage_test.exs")
+
+  unless File.exists?(authn_guard_file) do
+    halt.(1, "FAIL: gen.scope did not emit the authn-coverage guard #{authn_guard_file} (W4-H2).")
+  end
+
+  guard_body = File.read!(authn_guard_file)
+
+  unless guard_body =~ "defmodule #{module}Web.TenantAuthnCoverageTest" and
+           guard_body =~ "#{module}Web.Router.__routes__()" and
+           guard_body =~ "Mount.label(mount, :authn, nil) == {:app_env, :#{spec.otp_app}, :auth_required?}" do
+    halt.(1, "FAIL: the emitted authn-coverage guard is not wired to THIS app's router/otp_app (W4-H2).")
+  end
+
+  unless scope_out =~ "labels: @current_org_labels" and scope_out =~ "samen_module_routes" do
+    IO.puts(scope_out)
+    halt.(1, "FAIL: gen.scope did not PRINT the authn-wired router snippet (guided half, W4-H2).")
+  end
+
+  IO.puts("D7a/W4-H2: gen.scope emitted the failing-until-wired authn-coverage guard + printed the")
+  IO.puts("           authn-wired (labels: @current_org_labels) router snippet — guided AND guarded.")
+
   # --- 3. gen.resource -----------------------------------------------------------------
   {res_out, res_code} =
     mix.(app_dir, [
@@ -356,6 +381,60 @@ try do
   IO.puts("D7a: full ci.sh GREEN + the four G26 files pass (policy matrix, RBAC admin-gate,")
   IO.puts("     vault routing, catalog-parity) + the --live index/show/form mount-smoke —")
   IO.puts("     correct-by-construction, ZERO hand-edits.")
+
+  # --- 4a-authn. W4-H2: the emitted authn-coverage guard is FAILING-UNTIL-WIRED ----------
+  # ci.sh above already ran the guard GREEN (billing + notifications tenant mounts carry the
+  # seam). Prove it is NON-VACUOUS: drop `labels: @current_org_labels` from the billing mount
+  # (a bare unlabeled tenant mount — the exact pawchart W4 shape) → the guard MUST flip.
+  # Revert byte-exact → green again. This is the runtime proof the guard catches the leak.
+  router_file = Path.join(app_dir, "lib/#{spec.otp_app}_web/router.ex")
+  router_pristine = File.read!(router_file)
+
+  billing_labeled =
+    "samen_module_routes(:billing, #{module}.Billing, repo: #{module}.Repo, labels: @current_org_labels)"
+
+  billing_bare = "samen_module_routes(:billing, #{module}.Billing, repo: #{module}.Repo)"
+
+  unless String.contains?(router_pristine, billing_labeled) do
+    halt.(1, "FAIL: could not find the authn-labeled billing mount to sabotage in #{router_file}.")
+  end
+
+  # Green baseline on the clean router.
+  {ag_out, ag_code} = mix.(app_dir, ["test", "test/tenant_authn_coverage_test.exs"])
+
+  if ag_code != 0 do
+    IO.puts(ag_out)
+    halt.(1, "FAIL: the emitted authn-coverage guard did not pass on the clean generated router.")
+  end
+
+  # Sabotage: strip the seam from the billing mount → the guard MUST fail.
+  File.write!(router_file, String.replace(router_pristine, billing_labeled, billing_bare))
+
+  {sab_authn_out, sab_authn_code} = mix.(app_dir, ["test", "test/tenant_authn_coverage_test.exs"])
+  IO.puts("\nW4-H2 sabotage — dropped labels: @current_org_labels from the billing mount:")
+  IO.puts("  authn-coverage guard exit: #{sab_authn_code}  (MUST be non-zero — a bare tenant mount)")
+
+  if sab_authn_code == 0 do
+    IO.puts(sab_authn_out)
+    halt.(1, "FAIL: the authn-coverage guard STILL PASSED with a bare unlabeled billing mount — VACUOUS.")
+  end
+
+  # Revert byte-exact → the guard passes again.
+  File.write!(router_file, router_pristine)
+
+  if File.read!(router_file) != router_pristine do
+    halt.(1, "FAIL: the W4-H2 sabotage revert of the router was not byte-exact.")
+  end
+
+  {rev_authn_out, rev_authn_code} = mix.(app_dir, ["test", "test/tenant_authn_coverage_test.exs"])
+
+  if rev_authn_code != 0 do
+    IO.puts(rev_authn_out)
+    halt.(1, "FAIL: the W4-H2 sabotage revert did not restore the authn-coverage guard to green.")
+  end
+
+  IO.puts("D7a/W4-H2: authn-coverage guard CONFIRMED failing-until-wired — a bare unlabeled tenant")
+  IO.puts("           mount flipped it; the seam restored it. Guided AND guarded, non-vacuously.")
 
   # --- 4b. §5.8 flagship cycle: archive → hidden → restore → visible again, on the REAL --
   #         generated + migrated Crm.Widget (ci.sh above already ran `mix ecto.migrate`).

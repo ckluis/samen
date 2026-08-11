@@ -42,6 +42,124 @@ defmodule Samen.Gen.PostTemplates do
     """
   end
 
+  @doc """
+  The AUTHN-COVERAGE GUARD emitted by `mix samen.gen.scope` (W4-H2 defense-in-depth,
+  ADR-031). A failing-until-wired guard: it enumerates every PII-bearing tenant-plane
+  LiveView mount off THIS app's REAL compiled router and asserts each carries the
+  `@current_org_labels`/`:authn` seam — the prod gate that makes `Samen.Web.CurrentOrg`
+  fail CLOSED. The moment an author adds a business-domain mount WITHOUT
+  `labels: @current_org_labels`, this trips at `mix test`. Mirrors the framework
+  `Samen.Web.TenantAuthnCoverageTest` + `PawChart.TenantAuthnProdPathTest`, run against the
+  app's own router (routes are extracted, never hand-built, so a dropped seam flips it).
+  """
+  def tenant_authn_coverage_test do
+    """
+    defmodule <%= module %>Web.TenantAuthnCoverageTest do
+      @moduledoc \"\"\"
+      AUTHN-COVERAGE GUARD (emitted by `mix samen.gen.scope`; W4-H2 defense-in-depth, ADR-031).
+
+      Enumerates EVERY PII-bearing tenant-plane LiveView mount off this app's REAL compiled
+      router and asserts each carries the `@current_org_labels` `:authn` seam — the prod gate
+      that makes `Samen.Web.CurrentOrg.resolve/3` FAIL CLOSED (deny an unauthenticated `?org=`)
+      on an armed host. A tenant mount WITHOUT the seam is the live-reproduced pawchart
+      cross-tenant PII leak (dogfood W4 BLOCKER-1): an anonymous caller supplying any org UUID
+      reads unmasked business data.
+
+      This guard is the class-closer for THIS host. The moment you add a business-domain mount
+      (`samen_module_routes(:crm, <%= module %>.Crm, ...)` and friends) WITHOUT
+      `labels: @current_org_labels`, these assertions FAIL at `mix test` — you are GUIDED (see the
+      `mix samen.gen.scope` output) AND CAUGHT. Routes are extracted off the compiled router,
+      never hand-built, so a dropped seam flips this by construction.
+      \"\"\"
+      use ExUnit.Case, async: false
+
+      alias Samen.Web.CurrentOrg
+      alias Samen.Web.Mount
+
+      # The PII-bearing tenant-MODULE scope kinds. `:settings`/`:auth` identity mounts are the
+      # self-serve / pre-actor plane (no org actor) and are intentionally NOT in scope here.
+      @tenant_kinds ~w(crm billing support work marketing notifications files csv ics search)a
+
+      # A guessable-format org UUID an attacker supplies (the W4 vector). NOT the caller's own org.
+      @attacker_org "c1112d00-0000-4000-8000-0000000000fe"
+
+      setup do
+        prev = Application.get_env(:<%= otp_app %>, :auth_required?)
+
+        on_exit(fn ->
+          case prev do
+            nil -> Application.delete_env(:<%= otp_app %>, :auth_required?)
+            v -> Application.put_env(:<%= otp_app %>, :auth_required?, v)
+          end
+        end)
+
+        :ok
+      end
+
+      defp arm!, do: Application.put_env(:<%= otp_app %>, :auth_required?, true)
+      defp disarm!, do: Application.put_env(:<%= otp_app %>, :auth_required?, false)
+
+      test "every PII-bearing tenant mount carries the :authn seam (merge labels: @current_org_labels into any bare mount)" do
+        mounts = tenant_mounts()
+
+        assert length(mounts) >= 1,
+               "tenant-mount enumeration found nothing — the guard would be vacuous"
+
+        for {path, mount} <- mounts do
+          assert Mount.label(mount, :authn, nil) == {:app_env, :<%= otp_app %>, :auth_required?},
+                 "tenant mount \#{path} is missing the :authn seam — a bare `samen_*_routes` mount " <>
+                   "reopens the W4 cross-tenant PII leak. Merge `labels: @current_org_labels` into it."
+        end
+      end
+
+      test "armed host: EVERY tenant mount denies an unauthenticated ?org= (the W4 leak stays closed)" do
+        arm!()
+
+        for {path, mount} <- tenant_mounts() do
+          assert CurrentOrg.resolve(mount, %{"org" => @attacker_org}, %{"samen_current_org" => @attacker_org}) == nil,
+                 "ARMED tenant mount \#{path} resolved an org from an UNAUTHENTICATED ?org= — the leak is open"
+        end
+      end
+
+      test "REFUTABILITY: disarmed, the tenant mounts still trust the dev ?org= (the armed denial is non-vacuous)" do
+        disarm!()
+
+        for {path, mount} <- tenant_mounts() do
+          assert CurrentOrg.resolve(mount, %{"org" => @attacker_org}, %{}) == @attacker_org,
+                 "DISARMED tenant mount \#{path} dropped the dev ?org= convenience — refutability broken"
+        end
+      end
+
+      # Enumerate PII-bearing tenant LiveView mounts off the REAL compiled router, deduped per
+      # live_session (per distinct tenant mount adoption point) — the exact serialized
+      # `Samen.Web.Mount` each `live_session` threads through its session.
+      defp tenant_mounts do
+        <%= module %>Web.Router.__routes__()
+        |> Enum.filter(&Map.has_key?(&1.metadata, :phoenix_live_view))
+        |> Enum.map(fn route -> {route.path, live_session_name(route), mount_of(route)} end)
+        |> Enum.reject(fn {_path, _ls, mount} -> is_nil(mount) end)
+        |> Enum.filter(fn {_path, _ls, mount} -> mount.scope_kind in @tenant_kinds end)
+        |> Enum.uniq_by(fn {_path, ls, _mount} -> ls end)
+        |> Enum.map(fn {path, _ls, mount} -> {path, mount} end)
+      end
+
+      defp live_session_name(%{metadata: %{phoenix_live_view: {_view, _action, _opts, live_session}}}),
+        do: live_session[:name]
+
+      defp live_session_name(_), do: nil
+
+      defp mount_of(%{metadata: %{phoenix_live_view: {_view, _action, _opts, live_session}}}) do
+        case get_in(live_session, [:extra, :session]) do
+          %{"samen_mount" => raw} -> Mount.from_session(raw)
+          _ -> nil
+        end
+      end
+
+      defp mount_of(_), do: nil
+    end
+    """
+  end
+
   # ===========================================================================
   # mix samen.gen.resource — the Tier-0 resource module
   # ===========================================================================
