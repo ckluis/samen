@@ -439,7 +439,7 @@ defmodule Samen.Web.CurrentOrg do
   def switcher(assigns) do
     assigns =
       assigns
-      |> assign(:orgs, list_orgs(assigns.mount))
+      |> assign(:orgs, switcher_orgs(assigns.mount))
       |> assign(:current_name, name(assigns.mount, assigns.org_id))
       |> assign(:operator_label, operator_label(assigns.mount))
       |> assign_new(:return_to, fn -> nil end)
@@ -476,6 +476,73 @@ defmodule Samen.Web.CurrentOrg do
 
   defp switch_href(org_id, return_to),
     do: "/session/org/#{org_id}?return_to=#{URI.encode_www_form(return_to)}"
+
+  # ---------------------------------------------------------------------------
+  # ADR-044 Amendment-1 account-level NAME scoping in the switcher (§16.2/§16.4a,
+  # T159 switcher residual)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  The workspace list the switcher OFFERS as act-as targets, with ADR-044 Amendment-1
+  account-level NAME scoping applied (§16.2/§16.4a, the T159 switcher residual).
+
+  On the OPERATOR plane the switcher enumerates cross-tenant ACCOUNTS (each row IS a tenant
+  org) — the SAME cross-tenant name+id surface `/operator/accounts` masks. An operator WITHOUT
+  the `scope_of/2` right for an account MUST NOT see that account's NAME or `tenant_org_id`
+  here, consistent with the accounts list. The mask is BY OMISSION: an out-of-scope entry is
+  DROPPED ENTIRELY — no name, no org_id in any `href`/attribute — because a switcher entry is a
+  pure identity + act-as affordance with NO non-identifying aggregate to preserve (unlike an
+  accounts ROW, which keeps its opaque plan/health/MRR cells). Omitting is the honest analog.
+
+  Same seam as `Samen.Web.Operator.AccountsLive.name_masked?/3`:
+  `Samen.Fleet.Resolution.{configured?/1, scope_of/2, in_scope?/2}`. Preserved properties:
+
+    * **no-lockout** — a TENANT/shared switcher, or a product wiring NO `:fleet_resolution`
+      seam, keeps EVERY entry (today's behaviour). Scoping engages ONLY on an operator/aggregate
+      mount whose product has the seam configured.
+    * **fail-closed** — `scope_of/2` collapses to `:none` on any resolver error ⇒ every entry
+      is out of scope ⇒ dropped (the switcher then hides), never leaked.
+
+  This is NAME/id VISIBILITY in the list only — layered ON TOP of the T146/T150 act-as gate; it
+  never weakens the `/session/org/` act-as authorization the chosen entry still routes through.
+  """
+  @spec switcher_orgs(Mount.t() | nil) :: [{String.t(), String.t()}]
+  def switcher_orgs(%Mount{} = mount) do
+    orgs = list_orgs(mount)
+
+    if scope_mask_switcher?(mount) do
+      scope =
+        Samen.Fleet.Resolution.scope_of(
+          Samen.Web.Operator.otp_app(mount),
+          switcher_operator_id(mount)
+        )
+
+      Enum.filter(orgs, fn {org_id, _name} -> Samen.Fleet.Resolution.in_scope?(scope, org_id) end)
+    else
+      orgs
+    end
+  end
+
+  def switcher_orgs(_), do: []
+
+  # Scope-masking engages ONLY on an operator/aggregate mount (the cross-tenant switcher — the
+  # residual surface) whose product has a `:fleet_resolution` seam configured. A tenant/shared
+  # switcher (the seat's OWN authorized orgs) and a seam-less product both keep every entry —
+  # the no-lockout property (§16.4a). `configured?/1` distinguishes "no seam ⇒ inert" from
+  # "seam wired, empty scope ⇒ mask", exactly as `AccountsLive.load/1`'s `scope_masking?` does.
+  # Only ever reached from `switcher_orgs/1`'s `%Mount{}` clause, so no non-mount fallback is
+  # needed (a catch-all clause would be dead code the --warnings-as-errors gate rejects).
+  defp scope_mask_switcher?(%Mount{} = mount) do
+    badge_plane(mount) == :operator and
+      Samen.Fleet.Resolution.configured?(Samen.Web.Operator.otp_app(mount))
+  end
+
+  # The operator id `scope_of/2` reads. The switcher is stateless chrome carrying no socket
+  # assigns, so it uses the operator seat's well-known org id — the SAME fallback leg
+  # `Samen.Web.Operator.AccountsLive.acting_operator_id/2` uses when no authenticated
+  # `:samen_operator_id` principal is threaded — so the switcher's scope answer AGREES with the
+  # accounts list for the same seat (the consistency property).
+  defp switcher_operator_id(%Mount{} = mount), do: Samen.Web.Operator.org_id(mount)
 
   attr :mount, Mount, default: nil
   attr :org_id, :string, default: nil
