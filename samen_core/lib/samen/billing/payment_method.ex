@@ -57,7 +57,7 @@ defmodule Samen.Billing.PaymentMethod do
   # caller's `attrs` map contains.
   @sync_whitelist [:billing_name, :billing_email]
 
-  @type portal_opts :: [provider: module(), provider_config: map()]
+  @type portal_opts :: [provider: module(), provider_config: map(), actor: map() | nil]
 
   @doc """
   Create a hosted billing-portal (or SetupIntent) session for an existing
@@ -65,24 +65,51 @@ defmodule Samen.Billing.PaymentMethod do
   (optional, vault-RESOLVED plaintext), billing_email (optional, vault-RESOLVED
   plaintext)}` (ADR-038 §3.1, verbatim `create_portal_session` shape + the B5
   customer-sync whitelist). `opts`: `:provider` (a `Samen.Billing.Provider`
-  impl), `:provider_config`.
+  impl), `:provider_config`, and `:actor` — the acting tenant actor
+  (`%{role: ...}`).
+
+  ## Admin-by-construction (PP-5; Batch 2 TENANT-ROLE)
+
+  Opening the hosted portal lets the caller CHANGE the card on file or CANCEL the
+  subscription — a billing WRITE in the same class the Ash
+  `Samen.Scopes.Billing.Blueprint` gates on `RoleAtLeast(:admin)`. This plain function
+  enforces that gate HERE, BY CONSTRUCTION: the caller MUST pass an `:actor` whose role
+  ranks at least `:admin` (`Samen.Scope.Role`). A missing actor, a `nil`/unknown role, or
+  a `member`/`viewer` is DENIED with `{:error, :unauthorized}` BEFORE any provider call —
+  fail-closed, by ROLE (not plane). Defense-in-depth beneath the `SettingsLive` affordance
+  gate.
 
   Returns `{:ok, %{url: hosted_url}}` (ALWAYS a vendor-hosted URL — samen never
-  renders a card form, done-criterion 2) or `{:error, reason}` — a validation
-  refusal, `:not_configured` (fail-honest, ADR-014), or the provider's own
-  error.
+  renders a card form, done-criterion 2) or `{:error, reason}` — an authorization
+  refusal (`:unauthorized`), a validation refusal, `:not_configured` (fail-honest,
+  ADR-014), or the provider's own error.
   """
   @spec create_portal_session(map(), portal_opts()) ::
           {:ok, %{url: String.t()}} | {:error, term()}
   def create_portal_session(attrs, opts) when is_map(attrs) do
-    provider = Keyword.fetch!(opts, :provider)
-    provider_config = Keyword.get(opts, :provider_config, %{})
-
-    case validate_portal_attrs(attrs) do
-      :ok -> provider.create_portal_session(whitelisted_attrs(org_scope_return_url(attrs)), provider_config)
-      {:error, _} = err -> err
+    with :ok <- authorize_admin(opts),
+         :ok <- validate_portal_attrs(attrs) do
+      provider = Keyword.fetch!(opts, :provider)
+      provider_config = Keyword.get(opts, :provider_config, %{})
+      provider.create_portal_session(whitelisted_attrs(org_scope_return_url(attrs)), provider_config)
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Authorization (admin+ by construction) — the same admin gate every other billing
+  # write carries as an Ash `RoleAtLeast(:admin)` policy, enforced here for this plain
+  # function. Reads `opts[:actor].role`; absent/nil/member/viewer → deny.
+
+  defp authorize_admin(opts) do
+    actor = Keyword.get(opts, :actor)
+
+    if Samen.Scope.Role.at_least?(actor_role(actor), :admin),
+      do: :ok,
+      else: {:error, :unauthorized}
+  end
+
+  defp actor_role(actor) when is_map(actor), do: Map.get(actor, :role)
+  defp actor_role(_), do: nil
 
   # ---------------------------------------------------------------------------
   # Validation.

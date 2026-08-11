@@ -65,9 +65,14 @@ defmodule SamenStripe.PaymentMethodTest do
     )
   end
 
+  # PP-5 (Batch 2 TENANT-ROLE): the core `create_portal_session/2` is admin-gated by
+  # construction. Thread an admin actor so these adapter-transport proofs exercise the
+  # real path (the role gate itself is proven in samen_core's billing_payment_method_test).
+  defp admin_actor, do: %{id: "u_billing", org_id: @org_id, role: :admin, kind: :tenant, plane: :tenant}
+
   defp create_portal_session(attrs, config_overrides) do
     config = Map.merge(%{secret_key: @secret_key}, config_overrides)
-    PaymentMethod.create_portal_session(attrs, provider: Provider, provider_config: config)
+    PaymentMethod.create_portal_session(attrs, provider: Provider, provider_config: config, actor: admin_actor())
   end
 
   # A responder that answers BOTH the (optional) customer-sync POST and the
@@ -116,7 +121,11 @@ defmodule SamenStripe.PaymentMethodTest do
 
     test "unconfigured provider refuses with :not_configured (fail-honest, ADR-014)" do
       assert {:error, :not_configured} =
-               PaymentMethod.create_portal_session(portal_attrs(), provider: Provider, provider_config: %{})
+               PaymentMethod.create_portal_session(portal_attrs(),
+                 provider: Provider,
+                 provider_config: %{},
+                 actor: admin_actor()
+               )
     end
 
     test "the portal-session HTTP form itself carries ONLY customer/return_url — no PAN, no PII" do

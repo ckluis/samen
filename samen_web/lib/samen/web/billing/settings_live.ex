@@ -51,6 +51,7 @@ defmodule Samen.Web.Billing.SettingsLive do
   alias Samen.Web.Page
 
   alias Samen.Web.Billing.Reads
+  alias Samen.Web.Settings.Reads, as: SettingsReads
 
   @doc """
   The EXACT honest "bring your billing" empty-state copy (done-criterion 2). Rendered
@@ -69,16 +70,24 @@ defmodule Samen.Web.Billing.SettingsLive do
   @impl true
   def mount(params, session, socket) do
     socket = assign_mount(socket, session)
-    org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
-    {:ok, load(assign(socket, org_id: org_id), org_id)}
+    mount = socket.assigns[:samen_mount]
+    org_id = CurrentOrg.resolve(mount, params, session)
+    # PP-5: the acting user (the SAME current-user seam the api-key settings surface uses)
+    # — needed to resolve the REAL per-org membership role for the admin-gated billing writes.
+    user_id = SettingsReads.current_user_id(mount, params, session)
+    {:ok, load(assign(socket, org_id: org_id, user_id: user_id), org_id)}
   end
 
   @impl true
   def handle_params(params, uri, socket) do
     org_id = Map.get(params, "org") || socket.assigns.org_id
+    user_id = Map.get(params, "user") || socket.assigns[:user_id]
 
     {:noreply,
-     load(assign(socket, org_id: org_id, return_to: return_path(uri), current_uri: uri), org_id)}
+     load(
+       assign(socket, org_id: org_id, user_id: user_id, return_to: return_path(uri), current_uri: uri),
+       org_id
+     )}
   end
 
   @doc false
@@ -89,17 +98,23 @@ defmodule Samen.Web.Billing.SettingsLive do
     |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, configured: false)
     |> assign(plans_with_prices: [], customer: nil, recent_invoices: %Page{})
     |> assign(checkout_error: nil, portal_error: nil)
+    |> assign(billing_actor: nil, billing_admin?: false)
   end
 
   def load(socket, org_id) do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
     configured = provider_configured?()
+    # PP-5: the REAL per-org billing actor (role read from the caller's Membership, NOT the
+    # synthetic `:member` Mount.scope default). This is the actor billing WRITES run under;
+    # the admin gate is enforced BOTH here (affordance) and in the core BY CONSTRUCTION.
+    actor = billing_actor(mount, org_id, socket.assigns[:user_id])
 
     socket
     |> ensure_return_to()
     |> ensure_current_uri()
     |> assign(no_org: false, org_id: org_id, configured: configured)
+    |> assign(billing_actor: actor, billing_admin?: admin_actor?(actor))
     |> assign_new(:checkout_error, fn -> nil end)
     |> assign_new(:portal_error, fn -> nil end)
     |> load_billing(mount, scope, configured)
@@ -122,49 +137,124 @@ defmodule Samen.Web.Billing.SettingsLive do
 
   @impl true
   def handle_event("checkout", %{"plan_id" => plan_id}, socket) do
-    case find_plan_price_ref(socket, plan_id) do
-      nil ->
-        {:noreply, assign(socket, checkout_error: "This plan has no price configured yet.")}
+    cond do
+      # PP-5: subscribing is a billing WRITE — admin+ only, by ROLE (not plane). The UI
+      # affordance is already role-gated; this refuses a member/viewer who forces the event.
+      not socket.assigns.billing_admin? ->
+        {:noreply, assign(socket, checkout_error: admin_only_copy())}
 
-      price_ref ->
-        attrs = %{
-          org_id: socket.assigns.org_id,
-          plan_id: plan_id,
-          price_ref: price_ref,
-          success_url: settings_url(socket, %{"checkout" => "success"}),
-          cancel_url: settings_url(socket, %{"checkout" => "cancel"}),
-          customer_ref: customer_ref(socket)
-        }
+      true ->
+        case find_plan_price_ref(socket, plan_id) do
+          nil ->
+            {:noreply, assign(socket, checkout_error: "This plan has no price configured yet.")}
 
-        with {:ok, provider, provider_config} <- billing_provider(),
-             {:ok, %{url: url}} <- Checkout.create_session(attrs, provider: provider, provider_config: provider_config) do
-          {:noreply, redirect(socket, external: url)}
-        else
-          _ -> {:noreply, assign(socket, checkout_error: "Could not start checkout. Please try again.")}
+          price_ref ->
+            attrs = %{
+              org_id: socket.assigns.org_id,
+              plan_id: plan_id,
+              price_ref: price_ref,
+              success_url: settings_url(socket, %{"checkout" => "success"}),
+              cancel_url: settings_url(socket, %{"checkout" => "cancel"}),
+              customer_ref: customer_ref(socket)
+            }
+
+            with {:ok, provider, provider_config} <- billing_provider(),
+                 {:ok, %{url: url}} <-
+                   Checkout.create_session(attrs,
+                     provider: provider,
+                     provider_config: provider_config,
+                     actor: socket.assigns.billing_actor
+                   ) do
+              {:noreply, redirect(socket, external: url)}
+            else
+              _ -> {:noreply, assign(socket, checkout_error: "Could not start checkout. Please try again.")}
+            end
         end
     end
   end
 
   def handle_event("manage_payment_method", _params, socket) do
-    case socket.assigns.customer do
-      %{provider_customer_ref: ref} when is_binary(ref) and ref != "" ->
-        attrs =
-          %{org_id: socket.assigns.org_id, customer_ref: ref, return_url: settings_url(socket, %{})}
-          |> maybe_put_billing_contact(socket.assigns.customer)
+    cond do
+      # PP-5: opening the portal changes the card / cancels the subscription — admin+ only.
+      not socket.assigns.billing_admin? ->
+        {:noreply, assign(socket, portal_error: admin_only_copy())}
 
-        with {:ok, provider, provider_config} <- billing_provider(),
-             {:ok, %{url: url}} <- PaymentMethod.create_portal_session(attrs, provider: provider, provider_config: provider_config) do
-          {:noreply, redirect(socket, external: url)}
-        else
-          _ -> {:noreply, assign(socket, portal_error: "Could not open the billing portal. Please try again.")}
+      true ->
+        case socket.assigns.customer do
+          %{provider_customer_ref: ref} when is_binary(ref) and ref != "" ->
+            attrs =
+              %{org_id: socket.assigns.org_id, customer_ref: ref, return_url: settings_url(socket, %{})}
+              |> maybe_put_billing_contact(socket.assigns.customer)
+
+            with {:ok, provider, provider_config} <- billing_provider(),
+                 {:ok, %{url: url}} <-
+                   PaymentMethod.create_portal_session(attrs,
+                     provider: provider,
+                     provider_config: provider_config,
+                     actor: socket.assigns.billing_actor
+                   ) do
+              {:noreply, redirect(socket, external: url)}
+            else
+              _ -> {:noreply, assign(socket, portal_error: "Could not open the billing portal. Please try again.")}
+            end
+
+          _ ->
+            {:noreply, assign(socket, portal_error: "Subscribe to a plan before managing a payment method.")}
         end
-
-      _ ->
-        {:noreply, assign(socket, portal_error: "Subscribe to a plan before managing a payment method.")}
     end
   end
 
   # -- helpers ---------------------------------------------------------------
+
+  @admin_only_copy "Only an admin can manage billing for this workspace."
+
+  # PP-5 (Batch 2 TENANT-ROLE): the REAL per-org billing actor. Resolves the caller's
+  # `Membership` role in this org (the SAME `Reads.current_membership` seam the api-key
+  # MINT handler uses to gate on the real role) and builds a tenant-plane actor carrying
+  # that role — NEVER the synthetic `:member` of `Mount.scope/2`. `nil` when no user is in
+  # context or the user holds no membership in this org → billing writes FAIL CLOSED
+  # (affordance hidden, handler refuses, and the core function refuses by construction).
+  #
+  # The billing mount's own namespace is a Billing scope, which does not materialize
+  # `User`/`Membership`; the host wires the identity scope onto the mount via the
+  # `:identity_namespace` label (the same sibling-mount seam Marketing uses for
+  # `:crm_namespace`). Absent the label the billing mount itself is used (a host whose
+  # billing namespace already carries identity resources still resolves).
+  defp billing_actor(mount, org_id, user_id) when is_binary(org_id) and is_binary(user_id) do
+    identity = identity_mount(mount)
+    scope = Mount.scope(identity, org_id)
+
+    case SettingsReads.current_membership(identity, scope, user_id, org_id) do
+      {:ok, membership} ->
+        %{id: user_id, org_id: org_id, role: membership.role, kind: :tenant, plane: :tenant}
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp billing_actor(_mount, _org_id, _user_id), do: nil
+
+  # Derive an Identity-kind mount from the billing mount + the host's `:identity_namespace`
+  # label (same repo + plane), so `User`/`Membership` resolve off the identity scope. No
+  # label → the billing mount itself (unchanged), which fail-closes for a Billing-only
+  # namespace since it materializes no `Membership`.
+  defp identity_mount(mount) do
+    case Mount.label(mount, :identity_namespace, nil) do
+      ns when is_atom(ns) and not is_nil(ns) ->
+        Mount.new(:settings, ns, mount.repo, plane: mount.plane, domain: ns, labels: mount.labels)
+
+      _ ->
+        mount
+    end
+  end
+
+  defp admin_actor?(%{role: role}), do: Samen.Scope.Role.at_least?(role, :admin)
+  defp admin_actor?(_), do: false
+
+  defp admin_only_copy, do: @admin_only_copy
 
   defp ensure_return_to(socket) do
     if Map.has_key?(socket.assigns, :return_to), do: socket, else: assign(socket, return_to: nil)
@@ -346,7 +436,7 @@ defmodule Samen.Web.Billing.SettingsLive do
                       </span>
                     </div>
                     <.button
-                      :if={writable?(@samen_mount)}
+                      :if={writable?(@samen_mount) and @billing_admin?}
                       variant="primary"
                       phx-click="checkout"
                       phx-value-plan_id={plan.id}
@@ -356,6 +446,13 @@ defmodule Samen.Web.Billing.SettingsLive do
                     >
                       Subscribe
                     </.button>
+                    <div
+                      :if={writable?(@samen_mount) and not @billing_admin?}
+                      class="billing-admin-only"
+                      style="margin-top:12px;font-size:12px;color:var(--muted)"
+                    >
+                      Only an admin can subscribe this workspace to a plan.
+                    </div>
                   </div>
                 </div>
               </div>
@@ -368,14 +465,17 @@ defmodule Samen.Web.Billing.SettingsLive do
                   </div>
                 </div>
                 <.button
-                  :if={writable?(@samen_mount) and payment_method_available?(@customer)}
+                  :if={writable?(@samen_mount) and @billing_admin? and payment_method_available?(@customer)}
                   phx-click="manage_payment_method"
                   id="manage-payment-method"
                 >
                   Manage payment method
                 </.button>
-                <span :if={writable?(@samen_mount) and not payment_method_available?(@customer)} style="font-size:12px;color:var(--muted)">
+                <span :if={writable?(@samen_mount) and @billing_admin? and not payment_method_available?(@customer)} style="font-size:12px;color:var(--muted)">
                   Available after your first subscription.
+                </span>
+                <span :if={writable?(@samen_mount) and not @billing_admin?} class="billing-admin-only" style="font-size:12px;color:var(--muted)">
+                  Only an admin can manage the payment method.
                 </span>
               </div>
 

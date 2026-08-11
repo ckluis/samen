@@ -64,9 +64,16 @@ defmodule Samen.Billing.PaymentMethodTest do
     )
   end
 
-  defp create_portal_session(attrs, config_overrides \\ %{}) do
+  # PP-5 (Batch 2 TENANT-ROLE): the portal is a billing WRITE — admin+ by construction.
+  # The default actor is an admin (the positive control every non-role test threads); the
+  # role-gate tests pass `actor:` explicitly to prove denial by ROLE.
+  defp admin_actor(role \\ :admin),
+    do: %{id: "u_billing", org_id: @org_id, role: role, kind: :tenant, plane: :tenant}
+
+  defp create_portal_session(attrs, config_overrides \\ %{}, opts \\ []) do
     config = Map.merge(%{test_pid: self()}, config_overrides)
-    PaymentMethod.create_portal_session(attrs, provider: SpyProvider, provider_config: config)
+    actor = Keyword.get(opts, :actor, admin_actor())
+    PaymentMethod.create_portal_session(attrs, provider: SpyProvider, provider_config: config, actor: actor)
   end
 
   # ---------------------------------------------------------------------------
@@ -169,11 +176,47 @@ defmodule Samen.Billing.PaymentMethodTest do
   end
 
   # ---------------------------------------------------------------------------
+  # PP-5 (Batch 2 TENANT-ROLE) — the portal is admin-gated BY CONSTRUCTION (by ROLE, not
+  # plane): opening it changes the card / cancels the subscription. Both directions.
+  # ---------------------------------------------------------------------------
+
+  describe "create_portal_session/2 — admin-by-construction role gate (PP-5)" do
+    # SABOTAGE-adjacent: dropping `authorize_admin/1` on the portal lets a member open the
+    # Stripe portal — this assertion FLIPS from `:unauthorized` to `{:ok, ...}`.
+    test "PP-5: a MEMBER actor is DENIED the portal at the function layer, BEFORE any provider call" do
+      assert {:error, :unauthorized} = create_portal_session(portal_attrs(), %{}, actor: admin_actor(:member))
+      refute_received {:portal_attrs, _}
+    end
+
+    test "PP-5: a VIEWER actor is DENIED the portal (read-only cannot change the card)" do
+      assert {:error, :unauthorized} = create_portal_session(portal_attrs(), %{}, actor: admin_actor(:viewer))
+      refute_received {:portal_attrs, _}
+    end
+
+    test "PP-5: an ABSENT/nil actor is DENIED — fail-closed (no actor param at all)" do
+      assert {:error, :unauthorized} =
+               PaymentMethod.create_portal_session(portal_attrs(), provider: SpyProvider, provider_config: %{test_pid: self()})
+
+      refute_received {:portal_attrs, _}
+    end
+
+    test "PP-5: an ADMIN actor is ALLOWED (positive control — reaches the provider)" do
+      assert {:ok, %{url: _}} = create_portal_session(portal_attrs(), %{}, actor: admin_actor(:admin))
+      assert_received {:portal_attrs, _}
+    end
+
+    test "PP-5: an OWNER actor is ALLOWED (owner outranks admin)" do
+      assert {:ok, %{url: _}} = create_portal_session(portal_attrs(), %{}, actor: admin_actor(:owner))
+      assert_received {:portal_attrs, _}
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Fail-honest passthrough (ADR-014).
   # ---------------------------------------------------------------------------
 
   describe "fail-honest: unconfigured refuses (passthrough, never faked)" do
-    test "the provider's :not_configured refusal passes straight through" do
+    test "the provider's :not_configured refusal passes straight through (under an ADMIN actor — no false denial)" do
       assert {:error, :not_configured} = create_portal_session(portal_attrs(), %{configured?: false})
       refute_received {:portal_attrs, _}
     end

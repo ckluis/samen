@@ -74,8 +74,17 @@ defmodule Samen.Web.Settings.ApiKeysLive do
     if operator_plane?(mount) do
       {:noreply, socket}
     else
-      scope = Mount.scope(mount, org_id)
-      _ = ApiKeys.revoke(mount, scope, key_id)
+      # PP-6 (Batch 2 TENANT-ROLE): revoke sets `revoked_at` via the admin-gated `ApiKey.:update`
+      # policy (`RoleAtLeast(:admin)`). Resolve the REAL per-org membership role — the SAME
+      # pattern `do_mint/5` already uses in this file — instead of the synthetic `:member`
+      # `Mount.scope/2` default. With the real role a genuine admin/owner CAN revoke a
+      # leaked key; a member is correctly denied. (Previously the hardcoded `:member` scope
+      # silently DENIED every revoke, for every role including owners.)
+      with {:ok, membership} <- membership(mount, org_id, user_id) do
+        scope = admin_scope(user_id, org_id, membership.role)
+        _ = ApiKeys.revoke(mount, scope, key_id)
+      end
+
       {:noreply, load(assign(socket, minted_key: nil), org_id, user_id)}
     end
   end

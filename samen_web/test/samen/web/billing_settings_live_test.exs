@@ -121,10 +121,41 @@ defmodule Samen.Web.BillingSettingsLiveTest do
     %{plan: plan, price: price, customer: customer, subscription: subscription, invoice: invoice}
   end
 
-  defp mount_socket(org_id) do
+  # PP-5 (Batch 2 TENANT-ROLE): the billing mount carries the identity scope via the
+  # `:identity_namespace` sibling-seam so the LiveView can resolve the caller's REAL
+  # per-org membership role (User/Membership live under the Operator identity scope, not
+  # the Billing scope). Driftwood wires this the same way in its router.
+  defp billing_mount do
+    Samen.Web.Mount.new(:billing, Samen.WebTest.Billing, Samen.WebTest.Repo,
+      plane: Samen.Web.Plane.tenant(),
+      labels: %{identity_namespace: Samen.WebTest.Operator}
+    )
+  end
+
+  # Seed a real User + Membership (role) in `org_id` under the Operator identity scope,
+  # returning the user — so the billing LiveView resolves a REAL role, not the synthetic
+  # `:member`. Default admin (the positive control the existing tests rely on).
+  defp seed_member!(org_id, role) do
+    user =
+      Samen.WebTest.Operator.User
+      |> Ash.Changeset.for_create(:create, %{org_id: org_id, handle: "billing-#{role}"})
+      |> Ash.create!(authorize?: false)
+
+    Samen.WebTest.Operator.Membership
+    |> Ash.Changeset.for_create(:create, %{org_id: org_id, user_id: user.id, role: role})
+    |> Ash.create!(authorize?: false)
+
+    user
+  end
+
+  defp mount_socket(org_id, opts \\ []) do
+    role = Keyword.get(opts, :role, :admin)
+    user = Keyword.get(opts, :user) || seed_member!(org_id, role)
+
     %Phoenix.LiveView.Socket{}
-    |> Phoenix.Component.assign(:samen_mount, build_mount(:billing))
+    |> Phoenix.Component.assign(:samen_mount, billing_mount())
     |> Phoenix.Component.assign(:samen_acting_as, false)
+    |> Phoenix.Component.assign(:user_id, user.id)
     |> Phoenix.Component.assign(:return_to, "/billing/settings")
     |> Phoenix.Component.assign(:current_uri, "http://localhost/billing/settings?org=#{org_id}")
     |> SettingsLive.load(org_id)
@@ -208,6 +239,78 @@ defmodule Samen.Web.BillingSettingsLiveTest do
 
       refute out =~ ~s(id="manage-payment-method")
       assert out =~ "Available after your first subscription."
+    end
+  end
+
+  # ==========================================================================
+  # 1b. PP-5 (Batch 2 TENANT-ROLE) — billing WRITES (subscribe / manage payment) are
+  #     admin+ ONLY, by ROLE (not plane). Both directions, at the LiveView layer.
+  # ==========================================================================
+
+  describe "PP-5: billing writes are admin-gated by the REAL membership role" do
+    setup do
+      org_id = Ash.UUID.generate()
+      seed = seed_billing_settings(org_id)
+      Application.put_env(:samen_core, :billing_provider, {FakeProvider, %{}})
+      on_exit(fn -> Application.delete_env(:samen_core, :billing_provider) end)
+      %{org_id: org_id, seed: seed}
+    end
+
+    test "an ADMIN sees the Subscribe + Manage-payment affordances (positive control)", %{org_id: org_id} do
+      out = mount_socket(org_id, role: :admin) |> html()
+
+      assert out =~ ~s(class="checkout-plan")
+      assert out =~ ~s(id="manage-payment-method")
+      refute out =~ "billing-admin-only"
+    end
+
+    test "a MEMBER sees NO Subscribe / Manage-payment affordance — only the admin-only note", %{org_id: org_id} do
+      out = mount_socket(org_id, role: :member) |> html()
+
+      refute out =~ ~s(class="checkout-plan")
+      refute out =~ ~s(id="manage-payment-method")
+      assert out =~ "billing-admin-only"
+    end
+
+    test "a VIEWER sees NO Subscribe / Manage-payment affordance", %{org_id: org_id} do
+      out = mount_socket(org_id, role: :viewer) |> html()
+
+      refute out =~ ~s(class="checkout-plan")
+      refute out =~ ~s(id="manage-payment-method")
+    end
+
+    test "a MEMBER who forces 'checkout' is DENIED at the handler — no redirect (by role, not plane)", %{
+      org_id: org_id,
+      seed: seed
+    } do
+      socket = mount_socket(org_id, role: :member) |> event("checkout", %{"plan_id" => seed.plan.id})
+
+      refute socket.redirected
+      assert socket.assigns.checkout_error =~ "admin"
+    end
+
+    test "a VIEWER who forces 'checkout' is DENIED at the handler — no redirect", %{org_id: org_id, seed: seed} do
+      socket = mount_socket(org_id, role: :viewer) |> event("checkout", %{"plan_id" => seed.plan.id})
+
+      refute socket.redirected
+      assert socket.assigns.checkout_error =~ "admin"
+    end
+
+    test "a MEMBER who forces 'manage_payment_method' is DENIED at the handler — no redirect", %{org_id: org_id} do
+      socket = mount_socket(org_id, role: :member) |> event("manage_payment_method", %{})
+
+      refute socket.redirected
+      assert socket.assigns.portal_error =~ "admin"
+    end
+
+    test "an ADMIN 'checkout' STILL redirects (the gate is a role gate, not a blanket block)", %{
+      org_id: org_id,
+      seed: seed
+    } do
+      socket = mount_socket(org_id, role: :admin) |> event("checkout", %{"plan_id" => seed.plan.id})
+
+      assert socket.redirected ==
+               {:redirect, %{external: "https://checkout.fake.test/cs_fake_1", status: 302}}
     end
   end
 

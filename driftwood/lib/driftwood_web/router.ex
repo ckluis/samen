@@ -52,6 +52,12 @@ defmodule DriftwoodWeb.Router do
     org_directory: {Driftwood.Directory, :orgs, []},
     authn: {:app_env, :driftwood, :auth_required?},
     authorized_orgs: {Driftwood.Auth, :authorized_org_ids, []},
+    # PP-5 (Batch 2 TENANT-ROLE): the Identity scope the tenant-plane Billing surface reads
+    # the caller's REAL per-org Membership role from (the `Driftwood.Operator.{User,Membership}`
+    # spine — the SAME namespace `samen_settings_routes` mounts). Billing lives in its own
+    # scope namespace (`Driftwood.Billing`), which materializes no Membership, so the
+    # admin-gated checkout/portal writes derive the acting role through this sibling seam.
+    identity_namespace: Driftwood.Operator,
     operator_workspace: "Driftwood Ops",
     seed_command: "mix driftwood.seed"
   }

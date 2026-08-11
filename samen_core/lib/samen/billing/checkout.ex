@@ -61,7 +61,7 @@ defmodule Samen.Billing.Checkout do
 
   @required_session_attrs [:org_id, :plan_id, :price_ref, :success_url, :cancel_url]
 
-  @type session_opts :: [provider: module(), provider_config: map()]
+  @type session_opts :: [provider: module(), provider_config: map(), actor: map() | nil]
   @type reconcile_opts :: [
           provider: module(),
           provider_config: map(),
@@ -80,17 +80,30 @@ defmodule Samen.Billing.Checkout do
   Create a hosted checkout session for an existing Plan/Price. `attrs`:
   `%{org_id, plan_id, price_ref, success_url, cancel_url, customer_ref (optional)}`
   (ADR-038 §3.1, verbatim). `opts`: `:provider` (a `Samen.Billing.Provider` impl),
-  `:provider_config`.
+  `:provider_config`, and `:actor` — the acting tenant actor (`%{role: ...}`).
+
+  ## Admin-by-construction (PP-5; Batch 2 TENANT-ROLE)
+
+  Starting a hosted checkout SUBSCRIBES the org to a paid plan — a billing WRITE, and
+  the SAME class the Ash `Samen.Scopes.Billing.Blueprint` gates on `RoleAtLeast(:admin)`
+  for every OTHER billing mutation (Plan/Price/Subscription/Invoice/Payment/Entitlement).
+  This function is a plain function (not an Ash action), so it enforces that gate HERE,
+  BY CONSTRUCTION: the caller MUST pass an `:actor` whose role ranks at least `:admin`
+  (`Samen.Scope.Role`). A missing actor, a `nil`/unknown role, or a `member`/`viewer`
+  ranks below admin and is DENIED with `{:error, :unauthorized}` BEFORE any provider
+  call — fail-closed, by ROLE (not plane). This is defense-in-depth beneath the T26
+  `SettingsLive` affordance gate: a member who forces the event past the UI is still
+  refused here. An admin/owner passes and reaches the (possibly fail-honest
+  `:not_configured`) provider unchanged.
   """
   @spec create_session(map(), session_opts()) ::
           {:ok, %{provider_session_id: String.t(), url: String.t()}} | {:error, term()}
   def create_session(attrs, opts) when is_map(attrs) do
-    provider = Keyword.fetch!(opts, :provider)
-    provider_config = Keyword.get(opts, :provider_config, %{})
-
-    case validate_session_attrs(attrs) do
-      :ok -> provider.create_checkout_session(org_scope_redirects(attrs), provider_config)
-      {:error, _} = err -> err
+    with :ok <- authorize_admin(opts),
+         :ok <- validate_session_attrs(attrs) do
+      provider = Keyword.fetch!(opts, :provider)
+      provider_config = Keyword.get(opts, :provider_config, %{})
+      provider.create_checkout_session(org_scope_redirects(attrs), provider_config)
     end
   end
 
@@ -110,7 +123,21 @@ defmodule Samen.Billing.Checkout do
   def reconcile(%ProviderEvent{}, _opts), do: {:ok, :ignored}
 
   # ---------------------------------------------------------------------------
-  # Session creation — validation + org-scoping.
+  # Session creation — authorization (admin+ by construction) + validation + org-scoping.
+
+  # PP-5 (Batch 2 TENANT-ROLE): the admin gate every other billing write carries as an
+  # Ash `RoleAtLeast(:admin)` policy, enforced here for these plain-function writes. Reads
+  # `opts[:actor].role` and clears ONLY at/above admin rank; absent/nil/member/viewer → deny.
+  defp authorize_admin(opts) do
+    actor = Keyword.get(opts, :actor)
+
+    if Samen.Scope.Role.at_least?(actor_role(actor), :admin),
+      do: :ok,
+      else: {:error, :unauthorized}
+  end
+
+  defp actor_role(actor) when is_map(actor), do: Map.get(actor, :role)
+  defp actor_role(_), do: nil
 
   defp validate_session_attrs(attrs) do
     missing = Enum.filter(@required_session_attrs, &blank?(Map.get(attrs, &1)))

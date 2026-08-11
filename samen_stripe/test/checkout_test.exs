@@ -79,9 +79,14 @@ defmodule SamenStripe.CheckoutTest do
     )
   end
 
+  # PP-5 (Batch 2 TENANT-ROLE): the core `create_session/2` is admin-gated by construction.
+  # Thread an admin actor so these adapter-transport proofs exercise the real path (the role
+  # gate itself is proven in samen_core's billing_checkout_test).
+  defp admin_actor, do: %{id: "u_billing", org_id: @org_id, role: :admin, kind: :tenant, plane: :tenant}
+
   defp create_session(attrs, config_overrides) do
     config = Map.merge(%{secret_key: @secret_key}, config_overrides)
-    Checkout.create_session(attrs, provider: Provider, provider_config: config)
+    Checkout.create_session(attrs, provider: Provider, provider_config: config, actor: admin_actor())
   end
 
   # ---------------------------------------------------------------------------
@@ -151,7 +156,11 @@ defmodule SamenStripe.CheckoutTest do
 
     test "unconfigured provider refuses with :not_configured (fail-honest, ADR-014)" do
       assert {:error, :not_configured} =
-               Checkout.create_session(session_attrs(), provider: Provider, provider_config: %{})
+               Checkout.create_session(session_attrs(),
+                 provider: Provider,
+                 provider_config: %{},
+                 actor: admin_actor()
+               )
     end
   end
 

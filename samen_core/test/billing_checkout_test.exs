@@ -48,6 +48,12 @@ defmodule Samen.Billing.CheckoutTest do
   @sub_id "sub_checkout_1"
   @cus_id "cus_checkout_1"
 
+  # PP-5 (Batch 2 TENANT-ROLE): checkout is a billing WRITE — admin+ by construction.
+  # The positive-control actor every non-role test threads so the admin gate never
+  # masks what the test is actually asserting.
+  defp admin_actor(role \\ :admin),
+    do: %{id: "u_billing", org_id: @org_id, role: role, kind: :tenant, plane: :tenant}
+
   defp snap(overrides \\ %{}) do
     Map.merge(%{status: :active, current_period_end: ~U[2026-08-01 00:00:00Z]}, overrides)
   end
@@ -87,7 +93,7 @@ defmodule Samen.Billing.CheckoutTest do
       }
 
       assert {:ok, %{provider_session_id: "sess_1", received_attrs: received}} =
-               Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{})
+               Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{}, actor: admin_actor())
 
       assert received.org_id == @org_id
     end
@@ -96,7 +102,7 @@ defmodule Samen.Billing.CheckoutTest do
       attrs = %{org_id: @org_id, plan_id: @plan_id}
 
       assert {:error, {:missing_attrs, missing}} =
-               Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{})
+               Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{}, actor: admin_actor())
 
       assert :price_ref in missing
       assert :success_url in missing
@@ -113,7 +119,7 @@ defmodule Samen.Billing.CheckoutTest do
       }
 
       assert {:error, {:missing_attrs, [:price_ref]}} =
-               Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{})
+               Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{}, actor: admin_actor())
     end
   end
 
@@ -128,7 +134,7 @@ defmodule Samen.Billing.CheckoutTest do
       }
 
       {:ok, %{received_attrs: received}} =
-        Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{})
+        Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{}, actor: admin_actor())
 
       assert URI.decode_query(URI.parse(received.success_url).query) == %{"org_id" => @org_id}
       assert URI.decode_query(URI.parse(received.cancel_url).query) == %{"org_id" => @org_id}
@@ -144,10 +150,69 @@ defmodule Samen.Billing.CheckoutTest do
       }
 
       {:ok, %{received_attrs: received}} =
-        Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{})
+        Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{}, actor: admin_actor())
 
       query = URI.decode_query(URI.parse(received.success_url).query)
       assert query["org_id"] == @org_id
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # PP-5 (Batch 2 TENANT-ROLE) — checkout is admin-gated BY CONSTRUCTION (by ROLE, not
+  # plane). The same admin gate every OTHER billing write carries as an Ash
+  # `RoleAtLeast(:admin)` policy, enforced here for this plain function. Both directions.
+  # ---------------------------------------------------------------------------
+
+  describe "create_session/2 — admin-by-construction role gate (PP-5)" do
+    setup do
+      %{
+        attrs: %{
+          org_id: @org_id,
+          plan_id: @plan_id,
+          price_ref: "price_1",
+          success_url: "https://app.test/success",
+          cancel_url: "https://app.test/cancel"
+        }
+      }
+    end
+
+    # SABOTAGE PIN (PP-5): dropping the `authorize_admin/1` gate on `Checkout.create_session`
+    # lets a member subscribe — this assertion FLIPS from `:unauthorized` to `{:ok, ...}`.
+    test "PP-5: a MEMBER actor is DENIED checkout at the function layer (by role, not plane)", %{attrs: attrs} do
+      assert {:error, :unauthorized} =
+               Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{}, actor: admin_actor(:member))
+    end
+
+    test "PP-5: a VIEWER actor is DENIED checkout (read-only role cannot subscribe)", %{attrs: attrs} do
+      assert {:error, :unauthorized} =
+               Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{}, actor: admin_actor(:viewer))
+    end
+
+    test "PP-5: an ABSENT/nil actor is DENIED — fail-closed, no bypass (anti-tautology: not only member fails)", %{attrs: attrs} do
+      assert {:error, :unauthorized} =
+               Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{})
+
+      assert {:error, :unauthorized} =
+               Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{}, actor: %{role: nil})
+    end
+
+    test "PP-5: an ADMIN actor is ALLOWED (positive control — reaches the provider)", %{attrs: attrs} do
+      assert {:ok, %{provider_session_id: "sess_1"}} =
+               Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{}, actor: admin_actor(:admin))
+    end
+
+    test "PP-5: an OWNER actor is ALLOWED (owner outranks admin)", %{attrs: attrs} do
+      assert {:ok, %{provider_session_id: "sess_1"}} =
+               Checkout.create_session(attrs, provider: LocalProvider, provider_config: %{}, actor: admin_actor(:owner))
+    end
+
+    test "PP-5: fail-honesty preserved — an ADMIN against an unconfigured provider gets :not_configured, NOT a false denial", %{attrs: attrs} do
+      assert {:error, :not_configured} =
+               Checkout.create_session(attrs,
+                 provider: LocalProvider,
+                 provider_config: %{configured: false},
+                 actor: admin_actor(:admin)
+               )
     end
   end
 
