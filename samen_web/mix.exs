@@ -84,7 +84,7 @@ defmodule SamenWeb.MixProject do
       {:ash_rate_limiter, "== 1.0.0"},
       {:hammer, "~> 7.0"},
       # Test-support host deps (materialize the scope blueprints against a scratch repo):
-      {:ash, "== 3.29.3"},
+      {:ash, "== 3.31.2"},
       {:ash_postgres, "== 2.10.0"},
       {:simple_sat, "~> 0.1"},
       # StreamData — WS-F4 QA property tests for the RFC-4180 CSV round-trip +

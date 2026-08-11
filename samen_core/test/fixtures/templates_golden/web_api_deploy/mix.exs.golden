@@ -42,7 +42,7 @@ defmodule Acme.MixProject do
       {:samen_web, path: "../samen_web"},
       # `mix format`'s `import_deps` needs a DIRECT dep — pinned to the SAME exact
       # versions samen_core/samen_web declare (see `mix_exs/0`).
-      {:ash, "== 3.29.3"},
+      {:ash, "== 3.31.2"},
       {:ash_postgres, "== 2.10.0"},
       {:phoenix, "~> 1.7"},
       {:phoenix_live_view, "~> 1.0"},

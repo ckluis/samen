@@ -63,11 +63,11 @@ defmodule SamenCore.MixProject do
   # Versions pinned in spikes/s00_smoke/VERSIONS.md (Elixir 1.20.2 / OTP 29).
   defp deps do
     [
-      {:ash, "== 3.29.3"},
+      {:ash, "== 3.31.2"},
       {:ash_postgres, "== 2.10.0"},
       {:spark, "== 2.7.2"},
       {:ecto_sql, "== 3.14.0"},
-      {:postgrex, "== 0.22.2"},
+      {:postgrex, "== 0.22.4"},
       {:jason, "~> 1.4"},
       {:stream_data, "== 1.3.0"},
       # Oban: durable jobs on the same Postgres. T1.6 enqueues the reveal-grant
