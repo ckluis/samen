@@ -1764,7 +1764,13 @@ defmodule Samen.Web.Router do
       {"#{path}/profile", Samen.Web.Settings.ProfileLive},
       {"#{path}/api-keys", Samen.Web.Settings.ApiKeysLive},
       {"#{path}/security", Samen.Web.Settings.SecurityLive},
-      {"#{path}/invitations", Samen.Web.Settings.InvitationsLive}
+      {"#{path}/invitations", Samen.Web.Settings.InvitationsLive},
+      # PP-13 — the tenant reveal-APPROVER surface (its OWN LiveView, NOT SecurityLive —
+      # SecurityLive is pinned read-only by RP-ST-4). An org admin approves/denies the
+      # PENDING operator reveal-requests for their org, completing the
+      # request → approve → unmask lifecycle. Inherited by every host that already mounts
+      # `samen_settings_routes` at ≈0 authored LOC.
+      {"#{path}/reveal-approvals", Samen.Web.Settings.RevealApprovalsLive}
     ]
   end
 

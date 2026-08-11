@@ -1,0 +1,37 @@
+# SABOTAGE: PP-13 (tenant reveal-approver surface) — disables BOTH policy-layer distinct-party
+# self-approval checks (the requester-cannot-approve rule): `Samen.Reveal.Grants.approve/2`'s
+# `granted_by == req.requestor_id` guard AND `Samen.Approvals.decide/4`'s
+# `decided_by == requested_by` guard (both `... and false`, so a self-approval slips past both
+# policy layers). The DB CHECK (`apv_distinct_party` / `rvg_distinct_party`) still backstops
+# the write, so no grant is minted — but the clean `{:error, :self_approval}` refusal degrades
+# to a raw constraint error, flipping the named policy-layer pin. The two-layer distinct-party
+# guarantee ("enforced at BOTH layers") is exactly what this proves load-bearing.
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: a self-approval is refused with :self_approval
+# APPLY: git apply scripts/sabotages/187-pp13-reveal-approver-distinct-party-self-approval-policy-drop.patch
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -208,7 +208,7 @@
+
+     # POLICY-LAYER distinct-party check (clause (b), layer 1). The DB CHECK is
+     # layer 2 and would also reject a self-approval insert.
+-    if granted_by == req.requestor_id do
++    if granted_by == req.requestor_id and false do
+       write_audit(r, %{
+         event: "denied",
+         subject_id: req.subject_id,
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -200,7 +200,7 @@
+           {:error, :not_pending}
+
+         # POLICY LAYER (§4.2 layer 1): refuse self-decision before touching the DB, write
+         # a refusal audit, leave the approval pending. The DB CHECK (layer 2) is the twin.
+-        decided_by == to_actor_id(approval.requested_by) ->
++        decided_by == to_actor_id(approval.requested_by) and false ->
+           audit(repo, approval, "approval_self_decide_refused", decided_by)
+           {:error, :self_approval}
+

@@ -1,0 +1,23 @@
+# SABOTAGE: PP-13 (tenant reveal-approver surface) — drops the `org_filter(org_id)` conjunct
+# from `Samen.Approvals.list_pending/3` (the org-scoped pending read the approver surface
+# consults via `Samen.Reveal.Grants.pending_for_org/2`), replacing it with a no-op passthrough
+# that still references `org_id` (so it compiles) but no longer scopes the query. Without the
+# filter, `pending_for_org(org_b)` returns org_A's pending `pii_reveal` approvals — a
+# tenant approver in one org could see (and act on) another org's pending reveal requests.
+# The `drop-the-org-filter-must-flip-a-named-test` org-scope pin.
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: a different org sees NONE of another org
+# APPLY: git apply scripts/sabotages/188-pp13-reveal-approver-org-scope-drop.patch
+diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -165,7 +165,7 @@
+       query =
+         res
+         |> Ash.Query.filter(state == :pending and kind == ^kind)
+-        |> org_filter(org_id)
++        |> tap(fn _ -> org_id end)
+         |> Ash.Query.sort(requested_at: :asc)
+
+       case Ash.read(query, authorize?: false) do

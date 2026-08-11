@@ -161,6 +161,9 @@ defmodule Samen.Web.Settings.SecurityLive do
     case detail || "" do
       "event=requested " <> reason -> {"Reveal requested", reason}
       "event=requested" -> {"Reveal requested", ""}
+      # PP-13: the approve-moment (a distinct approver GRANTED the reveal) now rides the
+      # tenant chain too; label it explicitly rather than falling to the generic bucket.
+      "event=granted" <> rest -> {"Reveal granted", String.trim(rest)}
       "event=revoked" <> rest -> {"Reveal revoked", String.trim(rest)}
       "event=expired" <> rest -> {"Reveal window expired", String.trim(rest)}
       "event=denied" <> rest -> {"Reveal denied", String.trim(rest)}

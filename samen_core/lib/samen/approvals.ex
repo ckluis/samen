@@ -145,6 +145,36 @@ defmodule Samen.Approvals do
     end
   end
 
+  @doc """
+  List the PENDING approvals of `kind` for `org_id` — the ORG-SCOPED read a tenant
+  approver surface consults (PP-13). Reuses the engine's own `existing_pending`/`org_filter`
+  shape as a governed list read: a non-NULL `org_id` returns ONLY that org's pending rows
+  (`org_id == ^org_id`), so a tenant approver can never see — nor act on — another org's
+  pending decisions (the cross-org read the OrgScope policy also forbids on the tenant plane).
+
+  Bypasses authorization like the other kernel engine reads (`get/2`, `existing_pending/3`) —
+  a trusted kernel API; the org isolation here is the `org_filter/2` conjunct itself, NOT the
+  resource policy (which the engine's own reads run `authorize?: false` past). Newest-last
+  (oldest pending first) so the approver works the queue in arrival order.
+
+  Returns `{:ok, [approval]}` or `{:error, :no_approvals_module}` (unwired host).
+  """
+  @spec list_pending(term(), String.t(), keyword()) :: {:ok, [struct()]} | {:error, term()}
+  def list_pending(org_id, kind, opts \\ []) when is_binary(kind) do
+    with {:ok, {res, _repo}} <- wiring(opts) do
+      query =
+        res
+        |> Ash.Query.filter(state == :pending and kind == ^kind)
+        |> org_filter(org_id)
+        |> Ash.Query.sort(requested_at: :asc)
+
+      case Ash.read(query, authorize?: false) do
+        {:ok, approvals} -> {:ok, approvals}
+        {:error, _} = err -> err
+      end
+    end
+  end
+
   # ==========================================================================
   # Decision core (approve/reject) — one transaction, handler in-tx, then audit.
   # ==========================================================================

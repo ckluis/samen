@@ -318,14 +318,26 @@ defmodule Samen.Reveal.Grants do
     multi =
       Ecto.Multi.new()
       |> Ecto.Multi.insert(:grant, grant_changeset(grant_attrs))
-      |> Ecto.Multi.insert(:audit, audit_changeset(%{
-        event: "granted",
-        subject_id: req.subject_id,
-        actor_id: granted_by,
-        request_id: req.id,
-        grant_id: grant_id,
-        detail: "expires_at=#{DateTime.to_iso8601(expires_at)}"
-      }))
+      # PP-13 (B6 residual close): route the approve-moment `granted` event through
+      # `write_audit/2` with the TENANT `org_id` (like Batch 6 already did for
+      # `requested`/`revoked`), so the approval lands on the tenant's OWN audit chain and
+      # shows on `Settings.SecurityLive`'s "Reveal access" ledger (via
+      # `AuditChain.reveal_events_for_org/2`, which filters `grant_lifecycle`). The prior
+      # inline `audit_changeset` insert wrote ONLY the `rvl_reveal_audit` row — never the
+      # chain — so the moment PII was authorized to unmask was invisible to the tenant.
+      # Still in the SAME transaction (a `Multi.run` on the multi's repo), so the same-tx
+      # + rollback guarantee (clause (d)) is preserved: a chain-write error aborts the grant.
+      |> Ecto.Multi.run(:audit, fn multi_repo, _changes ->
+        write_audit(multi_repo, %{
+          event: "granted",
+          subject_id: req.subject_id,
+          actor_id: granted_by,
+          request_id: req.id,
+          grant_id: grant_id,
+          org_id: Map.get(opts, :org_id),
+          detail: "expires_at=#{DateTime.to_iso8601(expires_at)}"
+        })
+      end)
       |> Oban.insert(:auto_revoke, AutoRevokeWorker.new(%{grant_id: grant_id},
         scheduled_at: expires_at
       ))
@@ -334,6 +346,131 @@ defmodule Samen.Reveal.Grants do
       {:ok, %{grant: grant}} -> {:ok, grant}
       {:error, _step, reason, _changes} -> {:error, reason}
     end
+  end
+
+  # ==========================================================================
+  # PP-13 — the tenant APPROVER surface: org-scoped pending read + deny
+  # ==========================================================================
+
+  @doc """
+  The PENDING operator reveal-requests awaiting a tenant approver's decision for `org_id`
+  (PP-13). ORG-SCOPED via `Samen.Approvals.list_pending/3` — only `org_id`'s pending
+  `pii_reveal` approvals; a different org's pending requests never appear.
+
+  Each row is enriched with its governed `RevealRequest` facts so the approver surface can
+  show WHO (the requesting operator) wants to unmask WHICH FIELD (`resource`/`action`) of
+  WHICH SUBJECT (`subject_id`) and WHY (`reason`) — **METADATA ONLY**. It deliberately does
+  NOT resolve or carry the plaintext VALUE being requested (no vault read, no `vt_*` token):
+  the value is exactly what the approver is deciding whether to unmask, so rendering it would
+  defeat the control. `subject_id` is the subject's opaque UUID (a token, not plaintext PII);
+  `reason` is the operator-authored, PiiReasonScan-gated ticket text (never a PII value).
+
+  Returns a list of maps `%{approval_id, request_id, org_id, subject_id, requestor_id,
+  reason, resource, action, requested_at}`, oldest-first. Honest-empty (`[]`) on an unwired
+  host or any read error — never a fake row.
+  """
+  @spec pending_for_org(String.t(), keyword()) :: [map()]
+  def pending_for_org(org_id, opts \\ []) do
+    r = Keyword.get(opts, :repo, repo())
+
+    case Samen.Approvals.list_pending(org_id, "pii_reveal", opts) do
+      {:ok, approvals} ->
+        approvals
+        |> Enum.map(&enrich_pending(&1, r))
+        |> Enum.reject(&is_nil/1)
+
+      {:error, _} ->
+        []
+    end
+  rescue
+    _ -> []
+  end
+
+  # Join a pending `pii_reveal` approval to its governed RevealRequest (via subject_ref),
+  # projecting ONLY token/id/metadata fields — never a vault value.
+  defp enrich_pending(approval, r) do
+    with {:ok, request_id} <- parse_subject_ref(approval.subject_ref),
+         %RevealRequest{} = req <- r.get(RevealRequest, request_id) do
+      %{
+        approval_id: to_string(approval.id),
+        request_id: to_string(req.id),
+        org_id: approval.org_id,
+        subject_id: req.subject_id,
+        requestor_id: req.requestor_id,
+        reason: req.reason,
+        resource: req.resource,
+        action: req.action,
+        requested_at: approval.requested_at
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp parse_subject_ref("samen:reveal.request:" <> id), do: {:ok, id}
+  defp parse_subject_ref(_), do: :error
+
+  @doc """
+  DENY a reveal request as a DISTINCT tenant approver (PP-13). Transitions the pending
+  `pii_reveal` approval `pending -> rejected` through the EXISTING engine
+  (`Samen.Approvals.reject/3` — distinct-party enforced: `denied_by != requestor`), so it
+  drops off `pending_for_org/2`, AND records a `denied` event on the TENANT audit chain
+  (`write_audit/2` with the tenant `org_id`) so the refusal shows on the tenant's
+  `Settings.SecurityLive` "Reveal access" ledger. Grants NOTHING — no `RevealGrant` is ever
+  minted on this path; the mask holds by construction.
+
+  Required opts: `:denied_by`. Optional: `:org_id`, `:repo`. Returns `{:ok, %RevealRequest{}}`
+  or `{:error, term}` (incl. `{:error, :self_approval}` if the denier is the requestor).
+  """
+  @spec deny(RevealRequest.t() | binary(), map()) :: {:ok, RevealRequest.t()} | {:error, term}
+  def deny(request_or_id, opts \\ %{})
+
+  def deny(%RevealRequest{} = req, opts) do
+    r = Map.get(opts, :repo, repo())
+    denied_by = fetch!(opts, :denied_by)
+    org_id = Map.get(opts, :org_id)
+
+    approval_attrs = %{
+      org_id: org_id,
+      kind: "pii_reveal",
+      subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
+      requested_by: req.requestor_id
+    }
+
+    with {:ok, approval} <- Samen.Approvals.request(approval_attrs),
+         {:ok, _rejected} <- Samen.Approvals.reject(approval.id, denied_by) do
+      record_denial(r, req, denied_by, org_id)
+      {:ok, req}
+    else
+      # Unwired host (no engine): still record the denial on the chain — a denial that
+      # cannot transition an approval must never silently succeed as an unrecorded no-op.
+      {:error, :no_approvals_module} ->
+        record_denial(r, req, denied_by, org_id)
+        {:ok, req}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  def deny(request_id, opts) when is_binary(request_id) do
+    r = Map.get(opts, :repo, repo())
+
+    case r.get(RevealRequest, request_id) do
+      nil -> {:error, :request_not_found}
+      %RevealRequest{} = req -> deny(req, opts)
+    end
+  end
+
+  defp record_denial(r, req, denied_by, org_id) do
+    write_audit(r, %{
+      event: "denied",
+      subject_id: req.subject_id,
+      actor_id: denied_by,
+      request_id: req.id,
+      org_id: org_id,
+      detail: "reveal request denied by approver"
+    })
   end
 
   # ==========================================================================
