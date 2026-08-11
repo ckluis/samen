@@ -50,8 +50,8 @@ defmodule SamenWeb.MixProject do
       # blueprints. No web dep flows back into it.
       {:samen_core, path: "../samen_core"},
       # Web deps — the reason this lib exists separately from samen_core.
-      {:phoenix, "~> 1.7"},
-      {:phoenix_live_view, "~> 1.0"},
+      {:phoenix, "~> 1.8.9"},
+      {:phoenix_live_view, "~> 1.2.9"},
       {:phoenix_html, "~> 4.1"},
       # AshPhoenix.Form — the A2 form-primitive contract (ADR-016 §2): `simple_form/1`
       # is `AshPhoenix.Form`-backed (create/edit + inline validation errors).

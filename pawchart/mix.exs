@@ -45,11 +45,11 @@ defmodule PawChart.MixProject do
       # Support LiveViews from samen_web (3 lines in the router), so the entire
       # inherited-80% product UI is framework-level, not per-vertical.
       {:samen_web, path: "../samen_web"},
-      {:phoenix, "~> 1.7"},
-      {:phoenix_live_view, "~> 1.0"},
+      {:phoenix, "~> 1.8.9"},
+      {:phoenix_live_view, "~> 1.2.9"},
       {:phoenix_html, "~> 4.1"},
       # Bandit: the HTTP adapter behind PawChartWeb.Endpoint.
-      {:bandit, "~> 1.0"},
+      {:bandit, "~> 1.12.1"},
       {:phoenix_pubsub, "~> 2.1"},
       {:jason, "~> 1.4"},
       {:stream_data, "== 1.3.0"},
