@@ -8,11 +8,11 @@
 diff --git a/samen_web/lib/samen/web/mount.ex b/samen_web/lib/samen/web/mount.ex
 --- a/samen_web/lib/samen/web/mount.ex
 +++ b/samen_web/lib/samen/web/mount.ex
-@@ -193,7 +193,6 @@
+@@ -211,7 +211,6 @@
      operator_org_id operator_title operator_workspace operator_glyph
      operator_initials operator_logo_style operator_role operator_user
      operator_authority
 -    fleet_authority fleet_resolution
-     aggregate_loader otp_app status
+     aggregate_loader otp_app status analytics_ask_resource
      user_name user_role user_initials
      chat_path pubsub presence object_cards

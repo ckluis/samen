@@ -154,6 +154,36 @@ defmodule PawChart.TenantAuthnProdPathTest do
     end
   end
 
+  # ==========================================================================
+  # Residual B (Batch 7) — /clinic is INDIVIDUALLY pinned (per-mount, not per-scope-kind).
+  # ==========================================================================
+
+  describe "Residual B: the /clinic tenant mount is individually enumerated + authn-gated" do
+    test "/clinic is present in the enumeration (not folded into the /crm module mount)" do
+      clinic = Enum.find(tenant_mounts(), fn {path, _m} -> path == "/clinic" end)
+
+      assert clinic,
+             "/clinic must be INDIVIDUALLY enumerated (per-live-session dedup), not deduped away " <>
+               "by the /crm module mount that shares its :crm scope_kind — else a /clinic-only " <>
+               "mount divergence slips past the coverage guard"
+
+      {_path, mount} = clinic
+      assert mount.scope_kind == :crm
+
+      assert Mount.label(mount, :authn, nil) == {:app_env, :pawchart, :auth_required?},
+             "/clinic's tenant mount must carry the :authn seam (its own divergence must be caught)"
+    end
+
+    test "armed pawchart denies an unauthenticated ?org= on the /clinic mount specifically" do
+      arm!()
+      {_path, clinic} = Enum.find(tenant_mounts(), fn {path, _m} -> path == "/clinic" end)
+
+      assert CurrentOrg.resolve(clinic, %{"org" => @attacker_org}, %{}) == nil
+      assert CurrentOrg.resolve(clinic, %{}, %{"samen_current_org" => @attacker_org}) == nil
+      assert CurrentOrg.resolve(clinic, %{"org" => @attacker_org}, %{"samen_current_org" => @attacker_org}) == nil
+    end
+  end
+
   # -- helpers -------------------------------------------------------------------
 
   defp tenant_mount!(kind) do
@@ -166,14 +196,28 @@ defmodule PawChart.TenantAuthnProdPathTest do
 
   # Enumerate the PII-bearing tenant LiveView routes off the compiled pawchart router and rebuild
   # the serialized `Samen.Web.Mount` each `live_session` threads through its session.
+  #
+  # Residual B (Batch 7) — dedup PER LIVE_SESSION (per distinct tenant MOUNT adoption point), NOT
+  # per `scope_kind`. `/clinic` is its OWN `:pawchart_clinic` live_session but shares the `:crm`
+  # scope_kind with the `/crm/*` module mount (defined earlier), so the old `uniq_by(scope_kind)`
+  # dropped `/clinic` as a non-representative — a `/clinic`-only mount divergence (e.g. a dropped
+  # `:authn` seam) could slip past the enumeration entirely. Keying on the live_session name pins
+  # EVERY distinct PII-bearing tenant mount individually, `/clinic` included, so a per-mount
+  # divergence flips this guard.
   defp tenant_mounts do
     PawChartWeb.Router.__routes__()
     |> Enum.filter(&Map.has_key?(&1.metadata, :phoenix_live_view))
-    |> Enum.map(fn route -> {route.path, mount_of(route)} end)
-    |> Enum.reject(fn {_path, mount} -> is_nil(mount) end)
-    |> Enum.filter(fn {_path, mount} -> mount.scope_kind in @tenant_kinds end)
-    |> Enum.uniq_by(fn {_path, mount} -> mount.scope_kind end)
+    |> Enum.map(fn route -> {route.path, live_session_name(route), mount_of(route)} end)
+    |> Enum.reject(fn {_path, _ls, mount} -> is_nil(mount) end)
+    |> Enum.filter(fn {_path, _ls, mount} -> mount.scope_kind in @tenant_kinds end)
+    |> Enum.uniq_by(fn {_path, ls, _mount} -> ls end)
+    |> Enum.map(fn {path, _ls, mount} -> {path, mount} end)
   end
+
+  defp live_session_name(%{metadata: %{phoenix_live_view: {_view, _action, _opts, live_session}}}),
+    do: live_session[:name]
+
+  defp live_session_name(_), do: nil
 
   defp mount_of(%{metadata: %{phoenix_live_view: {_view, _action, _opts, live_session}}}) do
     case get_in(live_session, [:extra, :session]) do

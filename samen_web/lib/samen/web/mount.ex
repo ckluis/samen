@@ -192,6 +192,17 @@ defmodule Samen.Web.Mount do
   # `fleet_namespace` (T84b, ADR-044 §9.2): the `flags_namespace`-shaped seam carrying the
   # `Samen.Fleet.Scope`-mounted Ash domain a `fleet_cockpit: true` operator mount reads via
   # `Samen.Fleet.read/2` — set by `samen_operator_routes(..., fleet_namespace: MyApp.Fleet)`.
+  #
+  # ROUND-TRIP COMPLETENESS (pre-PR remediation) — these were minted only inside their
+  # consuming LiveView and so survived `from_session/1` by LOAD-ORDER LUCK (the consuming
+  # module happened to be loaded first), the exact fragility this whitelist exists to remove:
+  #   * `identity_namespace` (Batch 2, PP-5) — the tenant-plane Billing role seam. The
+  #     comment above names a dropped AUTHZ label a "fail-open-LOOKING" hazard: this IS one.
+  #   * `spine_totp` / `host_nav_extra` (PP-17 / Batch 3+5b) — the Settings 2FA opt-in and the
+  #     host-supplied nav-extras group; both ride tenant mounts a cold LiveView deserializes.
+  #   * `analytics_ask_resource` (T149/B2b) — the operator AnalyticsLive ask-scope resource.
+  # Enumerated round-trip is pinned by `identity_namespace_coverage_test.exs` +
+  # `tenant_authn_prodpath_test.exs`, which rebuild every mount off a compiled router.
   @label_keys ~w(
     crm_namespace crm_path crm_logo_style
     billing_logo_style support_path support_logo_style
@@ -201,16 +212,17 @@ defmodule Samen.Web.Mount do
     operator_initials operator_logo_style operator_role operator_user
     operator_authority
     fleet_authority fleet_resolution
-    aggregate_loader otp_app status
+    aggregate_loader otp_app status analytics_ask_resource
     user_name user_role user_initials
     chat_path pubsub presence object_cards
     default_org_id org_directory tenant_landing impersonate_path seed_command
+    host_nav_extra identity_namespace
     recipient_id
     flags_namespace flags_path revenue_plan_loader
     automation_path
     current_user_id current_membership_id
     authn authorized_orgs
-    login_path spine_sessions
+    login_path spine_sessions spine_totp
     settings_path plan_labels
     kb_namespace kb_path
     fleet_namespace fleet_cockpit

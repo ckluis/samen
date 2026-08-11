@@ -263,9 +263,22 @@ defmodule DriftwoodWeb.Router do
     # macro mounts all three surfaces at ≈0 authored LOC — profile self-edit routes
     # through the vault chokepoint, API keys are show-once/digest-only, Security is
     # read-only and honest about the host-auth boundary.
+    #
+    # PP-17 (Batch 7 CONFIG-POSTURE) — `spine_totp: true, spine_sessions: true` are the
+    # EXPLICIT framework opt-ins (ADR-035 §4.3/§5 A7, both default false) that flip
+    # Settings → Security from its honest "managed by your identity provider" PLACEHOLDER
+    # to the REAL feature: a working 2FA enrollment surface (`/settings/security/2fa` →
+    # `Samen.Web.Auth.TotpEnrollLive`) and the active login-session list + revoke controls.
+    # Driftwood's `Driftwood.Operator` Identity mount ALREADY materializes the spine's
+    # `Credential` (TOTP columns — `20260722010000_add_credential_totp_fields.exs`) and
+    # `Session` (`dos_session` — `20260721050000_mount_identity_session.exs`) tables, so
+    # this is a pure config opt-in: NO new resources, NO migrations, NO registry churn.
+    # Both verticals are now complete reference implementations at parity (W3 LOW-1 / PP-17).
     samen_settings_routes(:settings, Driftwood.Operator,
       repo: Driftwood.Repo,
-      labels: @current_org_labels
+      labels: @current_org_labels,
+      spine_totp: true,
+      spine_sessions: true
     )
 
     # ADR-012 — the FLAGSHIP cross-plane realtime CHAT, TENANT plane (the org's own chat
