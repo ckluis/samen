@@ -136,6 +136,26 @@ defmodule DriftwoodWeb.BrokerLive do
     }
   end
 
+  # PP-10 (Batch 3 NAV-REACHABILITY) — the `:host_nav_extra` mount-label DATA
+  # (`Samen.UI.host_nav_extra/1`, wired at `@current_org_labels` in the router) so the
+  # freight "Operations" group renders identically on EVERY framework module sidebar
+  # (CRM/Billing/Support/Marketing/Notifications/Files/Search), not only this LiveView's
+  # own bespoke sidebar below. Called as `apply(mod, fun, args ++ [org_id])`, so the arity
+  # here MUST be 1 (org_id appended) even though this console's OWN render still builds the
+  # identical group inline (unchanged — no behavior change on `/broker` itself).
+  @doc false
+  def operations_nav_data(org_id) do
+    %{
+      label: "Operations",
+      items: [
+        %{label: "Dispatch board", href: "/broker?panel=dashboard&org=#{org_id}"},
+        %{label: "Loads", href: "/broker?panel=loads&org=#{org_id}"},
+        %{label: "Drivers", href: "/broker?panel=roster&org=#{org_id}"},
+        %{label: "Settlements", href: "/broker?panel=settlements&org=#{org_id}"}
+      ]
+    }
+  end
+
   defp panel(params), do: param(params, "panel") || "dashboard"
   defp param(params, key), do: Map.get(params, key)
 

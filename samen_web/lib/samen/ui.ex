@@ -75,8 +75,11 @@ defmodule Samen.UI do
     * `sidebar/1`        — the sidebar container (workspace header + nav + footer slots)
     * `nav_group/1`      — a labelled group of nav items (`:label` + inner `nav_item`s)
     * `nav_item/1`       — one sidebar link (icon slot, `:active`, optional `:count`/`:dot`)
-    * `module_nav/1`     — the INHERITED CRM/Billing/Support nav (framework); host 20% nav
-      via the `:extra` slot
+    * `module_nav/1`     — the INHERITED CRM/Billing/Support/Marketing/Workspace
+      (Settings/Automation) nav (framework); host 20% nav via the `:extra` slot
+    * `host_nav_extra/1` — renders a host's `:host_nav_extra` mount-label DATA (e.g.
+      driftwood's freight "Operations") into that `:extra` slot identically from every
+      framework sidebar (PP-10)
     * `topbar/1`         — breadcrumb + title + actions slot
     * `button/1`         — a `.btn` (default / `variant="primary"`)
     * `tabs/1` + `tab/1` — the underline tab bar
@@ -125,6 +128,7 @@ defmodule Samen.UI do
   defdelegate nav_group(assigns), to: Samen.UI.Nav
   defdelegate nav_item(assigns), to: Samen.UI.Nav
   defdelegate module_nav(assigns), to: Samen.UI.Nav
+  defdelegate host_nav_extra(assigns), to: Samen.UI.Nav
   defdelegate topbar(assigns), to: Samen.UI.Nav
   defdelegate tabs(assigns), to: Samen.UI.Nav
   defdelegate tab(assigns), to: Samen.UI.Nav

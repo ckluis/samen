@@ -59,7 +59,15 @@ defmodule DriftwoodWeb.Router do
     # admin-gated checkout/portal writes derive the acting role through this sibling seam.
     identity_namespace: Driftwood.Operator,
     operator_workspace: "Driftwood Ops",
-    seed_command: "mix driftwood.seed"
+    seed_command: "mix driftwood.seed",
+    # PP-10 (Batch 3 NAV-REACHABILITY): the freight "Operations" nav group (Dispatch board /
+    # Loads / Drivers / Settlements) previously rendered ONLY on `BrokerLive`'s own bespoke
+    # sidebar — it vanished the instant a tenant navigated to CRM/Billing/Support/Marketing.
+    # `:host_nav_extra` is the SAME "host supplies DATA, framework renders it" pattern as
+    # `:object_cards`/`:aggregate_loader` — every framework module sidebar now renders this
+    # group identically (via `Samen.UI.host_nav_extra/1` in `module_nav/1`'s `:extra` slot),
+    # so Operations is reachable from every tenant page, not only `/broker`.
+    host_nav_extra: {DriftwoodWeb.BrokerLive, :operations_nav_data, []}
   }
 
   pipeline :browser do
@@ -148,14 +156,25 @@ defmodule DriftwoodWeb.Router do
     # `:require_authenticated_operator` scopes below. The pre-actor paths (`/signup`, `/verify/:t`,
     # `/reset[/:t]`, `/2fa`, `/invite/:t`) are exempted from the `DriftwoodWeb.Auth` prod gate
     # (see its `@exempt_*`), so a NEW user can reach signup/verify even when auth is armed.
-    samen_auth_routes(namespace: Driftwood.Operator, repo: Driftwood.Repo)
+    #
+    # PP-7 (Batch 3 NAV-REACHABILITY) — `tenant_landing: "/broker"` is the SAME string the
+    # operator scope's own `tenant_landing:` label already names below (ADR-013 §5.2's "Open
+    # account →" drill-in target); wiring it here too gives `Samen.Web.Auth.SessionController`'s
+    # `finish_login/5` a real fallback for a login with no `return_to` (the ordinary case), so a
+    # tenant logging in cold lands on the freight console instead of falling through to the
+    # framework-neutral `"/"` (which on this host redirected unconditionally to the operator
+    # console, W3 BLOCKER-1).
+    samen_auth_routes(namespace: Driftwood.Operator, repo: Driftwood.Repo, labels: %{tenant_landing: "/broker"})
 
     # T148 / ADR-035 §5 A8 — the FIRST-RUN onboarding wizard (`GET /onboarding`): org-naming,
     # plan-selection (the honest "no plans configured" empty state — no `:plan_labels` wired
     # until billing self-serve), and the T05 teammate-invite step. Same Identity mount as the
     # auth spine (golden: `samen_onboarding_routes(Acme.Operator, repo: Acme.Repo)`). Post-login
     # (needs an actor), so it is deliberately NOT gate-exempt — a signed-in session passes.
-    samen_onboarding_routes(Driftwood.Operator, repo: Driftwood.Repo)
+    #
+    # PP-7 — same `tenant_landing: "/broker"` label, read by `WizardLive`'s "You're all set"
+    # card (the "Go to your workspace →" CTA) once onboarding is complete.
+    samen_onboarding_routes(Driftwood.Operator, repo: Driftwood.Repo, labels: %{tenant_landing: "/broker"})
 
     # WS-F5 F5.1 — the framework `GET /metrics` Prometheus scrape endpoint over
     # `Samen.Metrics.definitions/0`, mounted in ONE line (leverage proof). OFF by

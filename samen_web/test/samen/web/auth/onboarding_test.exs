@@ -368,6 +368,42 @@ defmodule Samen.Web.Auth.OnboardingTest do
       assert later_html =~ ~s(id="onboarding-already-done")
       refute later_html =~ ~s(id="onboarding-wizard")
     end
+
+    # PP-7 (Batch 3 NAV-REACHABILITY, W3 BLOCKER-1) — before this fix the "already-done"
+    # card had ZERO links/buttons of any kind: a tenant who finished onboarding had NO
+    # nav-reachable path into the product. It now carries a real `<.link navigate=...>`
+    # into the tenant's own workspace, read off the mount's `:tenant_landing` label (the
+    # SAME label driftwood wires to `"/broker"` on its onboarding mount, and the SAME
+    # label `Samen.Web.Auth.SessionController.finish_login/5` falls back to on a login
+    # with no `return_to` — one seam, two consumers).
+    test "GREEN: the already-done card's CTA navigates into the tenant workspace via :tenant_landing" do
+      reg = register!()
+      mount = Mount.new(:settings, Samen.WebTest.Operator, Repo, labels: %{tenant_landing: "/broker"})
+
+      socket =
+        mount_socket(mount, reg.org.id, reg.user.id)
+        |> goto(:plan)
+        |> goto(:invite)
+        |> event("finish")
+
+      html_now = html(socket)
+      assert html_now =~ ~s(id="onboarding-goto-workspace")
+      assert html_now =~ ~s(href="/broker?org=#{reg.org.id}")
+    end
+
+    test "CONTROL: with no :tenant_landing label wired, the CTA still renders (framework default '/')" do
+      reg = register!()
+
+      socket =
+        mount_socket(reg.org.id, reg.user.id)
+        |> goto(:plan)
+        |> goto(:invite)
+        |> event("finish")
+
+      html_now = html(socket)
+      assert html_now =~ ~s(id="onboarding-goto-workspace")
+      assert html_now =~ ~s(href="/?org=#{reg.org.id}")
+    end
   end
 
   # ===========================================================================

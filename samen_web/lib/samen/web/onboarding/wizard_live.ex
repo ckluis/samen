@@ -265,9 +265,17 @@ defmodule Samen.Web.Onboarding.WizardLive do
         <% @complete? -> %>
           <div id="onboarding-already-done" class="card" style="padding:28px 24px">
             <h2 style="margin:0 0 4px">You're all set</h2>
-            <p style="margin:0;color:var(--muted)">
+            <p style="margin:0 0 16px;color:var(--muted)">
               Setup is already complete for {CurrentOrg.name(@samen_mount, @org_id)} — nothing left to do here.
             </p>
+            <.link
+              navigate={tenant_landing_href(@samen_mount, @org_id)}
+              id="onboarding-goto-workspace"
+              class="btn primary"
+              style="text-decoration:none"
+            >
+              Go to your workspace →
+            </.link>
           </div>
         <% true -> %>
           <div id="onboarding-wizard" class="card" style="padding:28px 24px">
@@ -376,4 +384,16 @@ defmodule Samen.Web.Onboarding.WizardLive do
 
   defp step_link(path, org_id, user_id, step),
     do: "#{path}?org=#{org_id}&user=#{user_id}&step=#{step}"
+
+  # PP-7 (Batch 3 NAV-REACHABILITY) — the ONLY change this "already set up" card gets: a
+  # REAL `<.link>` into the tenant's own workspace. Reads the SAME `:tenant_landing` mount
+  # label `Samen.Web.Auth.SessionController.finish_login/5`'s fallback now reads (driftwood
+  # wires it to `"/broker"`, its `tenant_landing:` operator label already names — see
+  # `driftwood/lib/driftwood_web/router.ex`); a host that wires nothing gets the neutral `"/"`
+  # framework default (never a dead end either way — worst case is the framework root, not
+  # this card's previous ZERO links). Plain `?org=` query threading — no new session write.
+  defp tenant_landing_href(mount, org_id) do
+    path = Mount.label(mount, :tenant_landing, "/")
+    if is_binary(org_id) and org_id != "", do: "#{path}?org=#{org_id}", else: path
+  end
 end

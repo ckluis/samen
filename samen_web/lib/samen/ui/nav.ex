@@ -8,6 +8,8 @@ defmodule Samen.UI.Nav do
   """
   use Phoenix.Component
 
+  alias Samen.Web.Mount
+
   # ---------------------------------------------------------------------------
   # Sidebar
   # ---------------------------------------------------------------------------
@@ -102,14 +104,19 @@ defmodule Samen.UI.Nav do
     * `org_id`   — threaded into every href so navigation preserves the `?org=` selector.
     * `active`   — one of `:crm_companies | :crm_contacts | :crm_pipeline | :crm_calendar |
       :crm_dashboard | :crm_mailbox | :crm_sequences | :billing_overview | :billing_invoices |
-      :billing_dunning | :billing_plans | :support_tickets` (or `nil`).
+      :billing_dunning | :billing_plans | :support_tickets | :settings | :automation` (or `nil`).
     * `crm_path` / `billing_path` / `support_path` — the mount path prefix per module
       (default `/crm`, `/billing`, `/support`). A host that mounted CRM at `/customers`
       passes `crm_path: "/customers"`.
+    * `settings_path` / `automation_path` — the mount path prefix for the Settings (PP-8) /
+      Automation (PP-9) surfaces (default `/settings`, `/automation`) — both real shipped
+      framework surfaces that otherwise have NO nav entry anywhere (they were total nav
+      islands, hand-typed-URL-only).
 
   The `:extra` slot renders BEFORE the inherited groups — a host puts its vertical-specific
   nav groups (e.g. freight "Operations") there. The inherited nav is the framework's; the
-  20% nav is the vertical's.
+  20% nav is the vertical's. See `host_nav_extra/1` for a DATA-driven way to populate this
+  slot identically from every framework sidebar (PP-10).
   """
   attr :org_id, :string, default: nil
   attr :active, :atom, default: nil
@@ -118,6 +125,8 @@ defmodule Samen.UI.Nav do
   attr :support_path, :string, default: "/support"
   attr :marketing_path, :string, default: "/marketing"
   attr :notifications_path, :string, default: "/notifications"
+  attr :settings_path, :string, default: "/settings"
+  attr :automation_path, :string, default: "/automation"
 
   attr :notifications_unread, :any,
     default: nil,
@@ -233,7 +242,75 @@ defmodule Samen.UI.Nav do
         </:icon>
       </.nav_item>
     </.nav_group>
+
+    <.nav_group label="Workspace">
+      <.nav_item label="Settings" href={"#{@settings_path}?org=#{@org_id}"} active={@active == :settings}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Automation" href={"#{@automation_path}?org=#{@org_id}"} active={@active == :automation}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z" /></svg>
+        </:icon>
+      </.nav_item>
+    </.nav_group>
     """
+  end
+
+  # ---------------------------------------------------------------------------
+  # Host nav extra (PP-10) — data-driven vertical nav, rendered identically from
+  # every framework sidebar
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  PP-10 (Batch 3 NAV-REACHABILITY) — renders a HOST's own vertical-specific nav group
+  (e.g. driftwood's freight "Operations") from DATA, so it appears consistently on every
+  framework-mounted tenant sidebar, not only the host's own bespoke page (`BrokerLive`
+  previously rendered "Operations" itself via `module_nav`'s `:extra` slot, but nothing
+  else did — the group vanished the instant a tenant left `/broker`).
+
+  A host opts in via the `:host_nav_extra` mount label — `{mod, fun, args}`, called as
+  `apply(mod, fun, args ++ [org_id])` — the SAME "host supplies DATA, framework renders
+  it" pattern as `:object_cards` (`Samen.Web.ObjectRef.Registry`) / `:aggregate_loader`
+  (ADR-009): a session-safe MFA, never a closure. Expected return shape:
+
+      %{label: "Operations", items: [%{label: "Dispatch board", href: "/broker?org=..."}]}
+
+  Absent the label, an erroring resolver, or a malformed return → renders nothing
+  (fail-safe, mirrors `ObjectRef.Registry.card_for/4`'s rescue-to-default posture — a host
+  nav bug never breaks the inherited sidebar). Place inside `module_nav/1`'s `:extra` slot:
+
+      <.module_nav org_id={@org_id} active={@active}>
+        <:extra><.host_nav_extra mount={@mount} org_id={@org_id} /></:extra>
+      </.module_nav>
+  """
+  attr :mount, Mount, required: true
+  attr :org_id, :string, default: nil
+
+  def host_nav_extra(assigns) do
+    assigns = assign(assigns, :group, host_nav_extra_data(assigns.mount, assigns.org_id))
+
+    ~H"""
+    <.nav_group :if={@group} label={@group.label}>
+      <.nav_item :for={item <- @group.items} label={item.label} href={item.href} />
+    </.nav_group>
+    """
+  end
+
+  defp host_nav_extra_data(mount, org_id) do
+    case Mount.label(mount, :host_nav_extra, nil) do
+      {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
+        case apply(mod, fun, args ++ [org_id]) do
+          %{label: label, items: items} = group when is_binary(label) and is_list(items) -> group
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
   end
 
   # ---------------------------------------------------------------------------

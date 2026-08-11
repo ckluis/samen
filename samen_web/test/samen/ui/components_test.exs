@@ -8,6 +8,8 @@ defmodule Samen.UI.ComponentsTest do
 
   import Phoenix.LiveViewTest, only: [render_component: 2]
 
+  alias Samen.Web.Mount
+
   test "app_shell/1 renders the two-pane grid" do
     html =
       render_component(&Samen.UI.app_shell/1, %{
@@ -106,6 +108,76 @@ defmodule Samen.UI.ComponentsTest do
     assert html =~ "Operations"
     # Extra appears before CRM in the source order.
     assert :binary.match(html, "Operations") < :binary.match(html, ">CRM<")
+  end
+
+  # PP-8 (Batch 3 NAV-REACHABILITY) — Settings (Profile / API keys / Security / Invitations)
+  # was a total nav island: no item anywhere in `module_nav/1`, reachable only by
+  # hand-typing `/settings?org=...`.
+  test "module_nav/1 renders a Settings nav item pointing at the settings route (PP-8)" do
+    html =
+      render_component(&Samen.UI.module_nav/1, %{
+        org_id: "ORG-123",
+        active: :settings,
+        extra: []
+      })
+
+    assert html =~ "Settings"
+    assert html =~ ~s(href="/settings?org=ORG-123" class="on")
+  end
+
+  # PP-9 (Batch 3 NAV-REACHABILITY) — same class of defect as PP-8: the shipped T118
+  # workflow builder had no discoverable entry point anywhere in `module_nav/1`.
+  test "module_nav/1 renders an Automation nav item pointing at the automation route (PP-9)" do
+    html =
+      render_component(&Samen.UI.module_nav/1, %{
+        org_id: "ORG-123",
+        active: :automation,
+        extra: []
+      })
+
+    assert html =~ "Automation"
+    assert html =~ ~s(href="/automation?org=ORG-123" class="on")
+  end
+
+  # PP-10 (Batch 3 NAV-REACHABILITY) — `host_nav_extra/1` is the shared, DATA-driven way
+  # a host's own vertical nav (e.g. driftwood's freight "Operations") renders identically
+  # from every framework sidebar, instead of only the host's own bespoke page.
+  describe "host_nav_extra/1 (PP-10)" do
+    def nav_extra_data(org_id),
+      do: %{label: "Operations", items: [%{label: "Dispatch board", href: "/broker?panel=dashboard&org=#{org_id}"}]}
+
+    def malformed_nav_extra_data(_org_id), do: :not_a_group_map
+
+    test "renders the host's :host_nav_extra mount-label DATA as a nav group" do
+      mount =
+        Mount.new(:crm, Samen.UI.ComponentsTest, Samen.WebTest.Repo,
+          labels: %{host_nav_extra: {__MODULE__, :nav_extra_data, []}}
+        )
+
+      html = render_component(&Samen.UI.host_nav_extra/1, %{mount: mount, org_id: "O1"})
+
+      assert html =~ ">Operations<"
+      assert html =~ "Dispatch board"
+      assert html =~ ~s(href="/broker?panel=dashboard&amp;org=O1")
+    end
+
+    test "renders nothing when the mount carries no :host_nav_extra label" do
+      mount = Mount.new(:crm, Samen.UI.ComponentsTest, Samen.WebTest.Repo)
+      html = render_component(&Samen.UI.host_nav_extra/1, %{mount: mount, org_id: "O1"})
+
+      refute html =~ "Operations"
+      refute html =~ ~s(class="grp")
+    end
+
+    test "fails SAFE (renders nothing, never raises) when the MFA returns a malformed shape" do
+      mount =
+        Mount.new(:crm, Samen.UI.ComponentsTest, Samen.WebTest.Repo,
+          labels: %{host_nav_extra: {__MODULE__, :malformed_nav_extra_data, []}}
+        )
+
+      html = render_component(&Samen.UI.host_nav_extra/1, %{mount: mount, org_id: "O1"})
+      refute html =~ ~s(class="grp")
+    end
   end
 
   test "token_blind_bar/1 and mask_bar/1 render their banners with the chip" do

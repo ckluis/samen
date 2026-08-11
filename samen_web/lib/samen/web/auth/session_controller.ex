@@ -287,7 +287,7 @@ defmodule Samen.Web.Auth.SessionController do
     conn
     |> Auth.log_out()
     |> configure_session(renew: true)
-    |> redirect(to: safe_return(params["return_to"]))
+    |> redirect(to: safe_return(params["return_to"], mount))
   end
 
   @doc """
@@ -322,7 +322,7 @@ defmodule Samen.Web.Auth.SessionController do
             :ok
         end
 
-        redirect(conn, to: safe_return(params["return_to"]))
+        redirect(conn, to: safe_return(params["return_to"], mount))
 
       _ ->
         redirect(conn, to: login_path(conn))
@@ -357,7 +357,7 @@ defmodule Samen.Web.Auth.SessionController do
           "All other sessions were signed out on your account. If this wasn't you, secure your account immediately."
         )
 
-        redirect(conn, to: safe_return(params["return_to"]))
+        redirect(conn, to: safe_return(params["return_to"], mount))
 
       _ ->
         redirect(conn, to: login_path(conn))
@@ -402,7 +402,7 @@ defmodule Samen.Web.Auth.SessionController do
         |> Auth.clear_totp_pending_token()
         |> delete_session(@pending_remember_key)
         |> delete_session(@pending_return_key)
-        |> redirect(to: safe_return(return_to))
+        |> redirect(to: safe_return(return_to, mount))
 
       {:error, _reason} ->
         redirect(conn, to: "#{login_path(conn)}?error=1")
@@ -672,9 +672,22 @@ defmodule Samen.Web.Auth.SessionController do
   # Only a same-origin absolute path (starts with a single "/") is honored — the
   # SAME rule `Samen.Web.SessionController.put_current_org/2` enforces (no
   # open-redirect via a crafted `return_to`).
-  defp safe_return("/" <> rest = path) when rest != "" do
-    if String.starts_with?(path, "//"), do: @default_return, else: path
+  #
+  # PP-7 (Batch 3 NAV-REACHABILITY) — when `return_to` is absent/invalid, the fallback is
+  # NO LONGER the bare literal `@default_return` ("/") unconditionally: it is
+  # `default_return/1`, which reads the mount's `:tenant_landing` label first. A host that
+  # wires `tenant_landing:` (e.g. driftwood's `"/broker"`, `samen_auth_routes(...,  labels:
+  # %{tenant_landing: "/broker"})`) sends a tenant who just logged in with no explicit
+  # `return_to` (the ordinary case — a bookmark, a fresh tab, the invite-accept page's
+  # "sign in now" link) straight to their OWN workspace instead of the framework-neutral
+  # `"/"`, which on a host with no tenant-plane `/` route (driftwood) fell through to the
+  # SaaS's own operator console (W3 BLOCKER-1). A host that wires nothing keeps the exact
+  # previous behavior (`default_return/1` falls back to `@default_return` unchanged).
+  defp safe_return("/" <> rest = path, mount) when rest != "" do
+    if String.starts_with?(path, "//"), do: default_return(mount), else: path
   end
 
-  defp safe_return(_), do: @default_return
+  defp safe_return(_, mount), do: default_return(mount)
+
+  defp default_return(mount), do: Mount.label(mount, :tenant_landing, @default_return)
 end

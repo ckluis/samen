@@ -1188,7 +1188,10 @@ defmodule Samen.Web.Router do
   `:reset_path`/`:login_path`/`:logout_path`/`:invite_path`/`:totp_path`
   override the defaults (`/signup`, `/verify`, `/reset`, `/login`, `/logout`,
   `/invite`, `/2fa`) independently; `:path` (legacy, T02) is still honored as
-  the signup path override alone.
+  the signup path override alone. `:labels` — OPTIONAL host label overrides merged onto
+  this mount (PP-7, Batch 3 NAV-REACHABILITY) — e.g. `tenant_landing:` (see
+  `Samen.Web.Auth.SessionController`'s `finish_login/5` moduledoc). The framework's own
+  path labels above always win on a name collision.
   """
   defmacro samen_auth_routes(opts \\ []) do
     signup_path = Keyword.get(opts, :signup_path, Keyword.get(opts, :path, "/signup"))
@@ -1237,17 +1240,25 @@ defmodule Samen.Web.Router do
           # T110 — the pre-actor LiveViews resolve their real `<form action=>`
           # off these labels so a host-overridden path stays consistent between
           # the GET `live(...)` and the paired POST controller route.
-          labels: %{
-            login_path: login_path,
-            totp_path: totp_path,
-            signup_path: signup_path,
-            reset_path: reset_path,
-            invite_path: invite_path,
-            # T126 — `ConfirmLive` rebuilds its own `/verify/:token` path off this
-            # label to redirect to the `?verified=1`/`?error=` status flag after
-            # the single-use consume (the double-mount guard).
-            verify_path: verify_path
-          }
+          #
+          # PP-7 (Batch 3 NAV-REACHABILITY) — `Keyword.get(opts, :labels, %{})` is merged
+          # in FIRST so a host may add its own keys (e.g. `tenant_landing:` — the path
+          # `Samen.Web.Auth.SessionController.finish_login/5` falls back to when a login
+          # carries no `return_to`, instead of the framework's neutral `"/"` default) WITHOUT
+          # touching this macro; the framework's own literal keys below still WIN on any
+          # name collision (a host cannot override `login_path`/etc through this seam).
+          labels:
+            Map.merge(Keyword.get(opts, :labels, %{}), %{
+              login_path: login_path,
+              totp_path: totp_path,
+              signup_path: signup_path,
+              reset_path: reset_path,
+              invite_path: invite_path,
+              # T126 — `ConfirmLive` rebuilds its own `/verify/:token` path off this
+              # label to redirect to the `?verified=1`/`?error=` status flag after
+              # the single-use consume (the double-mount guard).
+              verify_path: verify_path
+            })
         )
 
       live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do

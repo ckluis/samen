@@ -580,6 +580,40 @@ defmodule Samen.Web.Auth.SessionTest do
       assert conn.resp_cookies[Auth.remember_cookie_key()] == nil
     end
 
+    # PP-7 (Batch 3 NAV-REACHABILITY, W3 BLOCKER-1) — a login with NO `return_to` (the
+    # ordinary case: a bookmark, a fresh tab, the invite-accept page's "sign in now" link)
+    # used to fall through unconditionally to the bare framework default `"/"`, which on a
+    # host with no tenant-plane `/` route (driftwood) meant every cold login landed on the
+    # SaaS's own operator console. `finish_login/5` now reads the mount's `:tenant_landing`
+    # label first — GREEN below (a host that wires it lands the tenant on their own
+    # workspace) + the CONTROL right after (a host that wires NOTHING keeps the exact prior
+    # behavior — the fallback is additive, never a forced landing page).
+    test "GREEN: no return_to falls back to the mount's :tenant_landing label, not the bare '/'" do
+      result = register!()
+      mount = Mount.new(:auth, Samen.WebTest.Operator, Repo, labels: %{tenant_landing: "/broker"})
+
+      conn =
+        SessionController.create(
+          auth_conn(mount),
+          %{"login" => %{"email" => result.email, "password" => result.password}}
+        )
+
+      assert conn |> get_resp_header("location") |> List.first() == "/broker"
+    end
+
+    test "CONTROL: a mount with no :tenant_landing label keeps the framework default '/'" do
+      result = register!()
+      mount = Mount.new(:auth, Samen.WebTest.Operator, Repo)
+
+      conn =
+        SessionController.create(
+          auth_conn(mount),
+          %{"login" => %{"email" => result.email, "password" => result.password}}
+        )
+
+      assert conn |> get_resp_header("location") |> List.first() == "/"
+    end
+
     test "RED: bad credentials redirect back to login with ?error=1, mint NO session" do
       result = register!()
       mount = Mount.new(:auth, Samen.WebTest.Operator, Repo)
