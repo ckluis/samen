@@ -1,0 +1,23 @@
+# SABOTAGE: PP-4 (Batch 5b CLINIC-SURFACE) — the clinic tenant surface's PATIENT roster
+# read DROPS its org-scope: `PawChartWeb.ClinicReads.owner_roster/1` reads with
+# `authorize?: false` instead of `scope: scope`, defeating `PawChart.Clinic.Patient`'s
+# `Samen.Policy.OrgScope` read policy. Another clinic's patients then leak into THIS
+# clinic's roster — exactly the cross-tenant read the red-path pins. The named cross-org
+# test flips (its `refute b_owner.id in a_ids` now holds a foreign row); the positive
+# control (each clinic sees its own) still passes, so the flip is non-vacuous. Reverts
+# byte-exact.
+# APP: pawchart
+# TEST_FILES: test/clinic_surface_test.exs
+# MUST_FAIL: clinic A's owner_roster NEVER returns clinic B's patient
+diff --git a/pawchart/lib/pawchart_web/clinic_reads.ex b/pawchart/lib/pawchart_web/clinic_reads.ex
+--- a/pawchart/lib/pawchart_web/clinic_reads.ex
++++ b/pawchart/lib/pawchart_web/clinic_reads.ex
+@@ -70,7 +70,7 @@ defmodule PawChartWeb.ClinicReads do
+     |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :marketing_opt_in, :inserted_at])
+     |> Ash.Query.sort(inserted_at: :desc)
+     |> Ash.Query.limit(@limit)
+-    |> Ash.read!(scope: scope)
++    |> Ash.read!(authorize?: false)
+     |> resolve_pii(Patient, scope)
+   rescue
+     _ -> []

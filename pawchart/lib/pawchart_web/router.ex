@@ -56,22 +56,56 @@ defmodule PawChartWeb.Router do
   #     checkout/portal writes derive the acting role through this sibling seam.
   #   :operator_workspace / :seed_command — the shared cross-plane chrome (switcher return link,
   #     no-org card) derives pawchart's OWN boundary names, not the framework-neutral default.
+  #   :host_nav_extra — (PP-4 / Batch 5b CLINIC-SURFACE) the "host supplies DATA, framework
+  #     renders it" nav seam (`Samen.UI.host_nav_extra/1`, same pattern as driftwood's freight
+  #     "Operations" group): `PawChartWeb.ClinicLive.clinic_nav_data/1` returns the "Clinic" nav
+  #     group, so the vet vertical's namesake surface (`/clinic`) is reachable from EVERY framework
+  #     module sidebar (CRM/Billing/Support/…), not only its own page. Called as
+  #     `apply(mod, fun, args ++ [org_id])`, so `clinic_nav_data/1` is arity 1.
   @current_org_labels %{
     default_org_id: PawChart.Seeds.clinic_org_id(),
     org_directory: {PawChart.Directory, :orgs, []},
     authn: {:app_env, :pawchart, :auth_required?},
     authorized_orgs: {PawChart.Auth, :authorized_org_ids, []},
     identity_namespace: PawChart.Operator,
+    host_nav_extra: {PawChartWeb.ClinicLive, :clinic_nav_data, []},
     operator_workspace: "PawChart Ops",
     seed_command: "mix pawchart.seed"
   }
 
-  # PP-7 (Batch 5a / Batch-3 pattern) — where a fresh pawchart tenant lands after onboarding/login
-  # when the login carries no `return_to` (the ordinary cold-login case): the primary tenant
-  # workspace surface. Pawchart has no bespoke clinic console yet (Batch 5b authors the Clinic
-  # tenant surface — a follow-up repoints this at it), so 5a lands on the best available tenant
-  # page — the CRM workspace dashboard — instead of dead-ending on the public marketing `/`.
-  @tenant_landing "/crm/dashboard"
+  # PP-7 / PP-4 (Batch 5b CLINIC-SURFACE) — where a fresh pawchart tenant lands after
+  # onboarding/login when the login carries no `return_to` (the ordinary cold-login case): the
+  # clinic's OWN domain workspace. Batch 5a landed on the inherited CRM dashboard as a placeholder
+  # ("a follow-up repoints this at it"); Batch 5b authors the Clinic tenant surface
+  # (`PawChartWeb.ClinicLive`, `/clinic`), so a clinic user now lands on their actual patients/pets
+  # workspace — the vertical's namesake domain — not the generic CRM page.
+  @tenant_landing "/clinic"
+
+  # PP-4 (Batch 5b CLINIC-SURFACE) — the session-safe TENANT-plane mount for the host-local
+  # `PawChartWeb.ClinicLive` (`/clinic`). Carries `@current_org_labels` (authn/authorized_orgs/
+  # default_org_id/org_directory/host_nav_extra) UNDER the clinic branding, so the Clinic surface is
+  # authn-gated + org-scoped BY CONSTRUCTION exactly as the framework CRM mount is — a clinic reaches
+  # only its OWN patients/pets. `:crm` kind + `PawChart.Crm` namespace so the inherited sidebar
+  # (`module_nav` + the `host_nav_extra` "Clinic" group + the workspace switcher) renders correctly;
+  # the Clinic reads target `PawChart.Clinic.{Patient,Pet}` directly (host-local), not the mount's
+  # namespace. Its OWN named live_session prevents a foreign socket from `live_redirect`-ing in.
+  @clinic_mount Samen.Web.Mount.to_session(
+                  Samen.Web.Mount.new(
+                    :crm,
+                    PawChart.Crm,
+                    PawChart.Repo,
+                    plane: Samen.Web.Plane.tenant(),
+                    labels:
+                      Map.merge(@current_org_labels, %{
+                        title: "Happy Paws Clinic",
+                        glyph: "V",
+                        crm_logo_style: "background:linear-gradient(150deg,#0A6E9E,#1A8DC5)",
+                        crumb_root: "PawChart",
+                        user_name: "Clinic Staff",
+                        user_role: "veterinarian"
+                      })
+                  )
+                )
 
   pipeline :browser do
     plug(:accepts, ["html"])
@@ -284,6 +318,22 @@ defmodule PawChartWeb.Router do
       repo: PawChart.Repo,
       labels: @current_org_labels
     )
+  end
+
+  # PP-4 (Batch 5b CLINIC-SURFACE) — the vertical 20%: the clinic's OWN tenant workspace over its
+  # namesake domain (`PawChart.Clinic.{Patient,Pet}`). Aliased under `PawChartWeb` because
+  # `ClinicLive` is a host-local LiveView (the resource SHAPE is vet-specific — the owner + their
+  # pets — even though every MECHANISM it uses is inherited framework substrate). On the `:browser`
+  # pipe (the prod `PawChartWeb.Auth` gate + the `@current_org_labels` authn seam apply), TENANT
+  # plane. Its own named live_session carries the tenant mount so the current-org + org-scope
+  # resolution runs on every mount — the clinic reads ONLY its own patients/pets.
+  scope "/", PawChartWeb do
+    pipe_through(:browser)
+
+    live_session :pawchart_clinic,
+      session: %{"samen_mount" => @clinic_mount} do
+      live("/clinic", ClinicLive)
+    end
   end
 
   # ============================================================================
