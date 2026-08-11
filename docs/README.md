@@ -102,6 +102,7 @@ proven," not as ongoing reference:
 - [saas-gap-roadmap.md](saas-gap-roadmap.md) — the ranked roadmap of what a SaaS needs that Samen under-serves; source for the WS-A/B/D/E workstreams.
 - [claim-evidence.md](claim-evidence.md) — every load-bearing claim in the vision doc mapped to the test/verifier/probe that proves it (Gate 5's anti-invention audit).
 - [risk-register-final.md](risk-register-final.md) — the Gate 6 refresh of the original risk register (R1–R15) against everything built.
+- [pre-pr-dogfood-remediation.md](pre-pr-dogfood-remediation.md) — the SaaS-readiness pre-PR whole-product dogfood (8 personas, all tiers/roles): 17 findings, the 7 remediation batches + 3 post-PR cleanup items that closed them, each independently verified; the tracked pointer to the gitignored `_orch/` evidence.
 - [extraction-retro.md](extraction-retro.md) — the Rule-of-Three retro on what Driftwood forced into the framework (feeds ADR-005/006/007).
 - [launch-checklist.md](launch-checklist.md) — the bounded list of operator tasks between "the dogfood boots on localhost" and "a paying tenant logs in tomorrow."
 - [observability-guide.md](observability-guide.md) — metrics/tracing/logging wiring and the documented operator TODO (real OTLP exporter).

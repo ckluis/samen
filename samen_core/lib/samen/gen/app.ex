@@ -259,7 +259,8 @@ defmodule Samen.Gen.App do
           usage: p1 <> "pu",
           entitlement: p1 <> "pe",
           subscription_event: p1 <> "pv",
-          # Support — the SaaS help desk
+          # Support — the SaaS help desk (keys mirror @support_resources; abbrev suffixes
+          # are independent registry-collision-driven data, not derivable from the atom).
           ticket: p1 <> "qk",
           conversation: p1 <> "qc",
           message: p1 <> "qm",
@@ -562,6 +563,29 @@ defmodule Samen.Gen.App do
   defp primitives_module(:webhook), do: "Webhook"
   defp primitives_module(:feature_flag), do: "FeatureFlag"
 
+  # P12 (T79 verify) — the Support-scope resource kinds, as a SINGLE canonical ordered
+  # list. `operator_resource_order/0` below splices this in directly (pure membership +
+  # order, no per-atom data — the one site that WAS a byte-for-byte duplicate of this
+  # list, now DRYed). The other three Support-scope sites that mention these same atoms
+  # (`operator_abbrevs` in `derive!/1`, `operator_module/1`'s clauses just below, and the
+  # `o_tick`/`o_conv`/… entries in `web_bindings/1`) are NOT DRYed against this list: each
+  # pairs an atom with a genuinely independent piece of data — a registry-collision-driven
+  # abbrev suffix, an explicit capitalized module name, or a compact binding-key alias —
+  # so collapsing them into a lookup keyed by this list would couple unrelated concerns
+  # (and, for `operator_module/1`, would trade a `FunctionClauseError` for a `KeyError` on
+  # an unmatched atom — a real behaviour change). A 9th Support resource still needs an
+  # entry in all four places; this list is the anchor a future author greps for first.
+  @support_resources [
+    :ticket,
+    :conversation,
+    :message,
+    :agent,
+    :sla,
+    :macro,
+    :csat,
+    :csat_survey_token
+  ]
+
   # Identity → Billing → Support, mirroring the Driftwood.Operator mount order.
   defp operator_resource_order,
     do: [
@@ -584,16 +608,8 @@ defmodule Samen.Gen.App do
       :payment,
       :usage,
       :entitlement,
-      :subscription_event,
-      :ticket,
-      :conversation,
-      :message,
-      :agent,
-      :sla,
-      :macro,
-      :csat,
-      :csat_survey_token
-    ]
+      :subscription_event
+    ] ++ @support_resources
 
   defp operator_module(:org), do: "Org"
   defp operator_module(:user), do: "User"
@@ -615,6 +631,9 @@ defmodule Samen.Gen.App do
   defp operator_module(:usage), do: "Usage"
   defp operator_module(:entitlement), do: "Entitlement"
   defp operator_module(:subscription_event), do: "SubscriptionEvent"
+  # Support scope (keys mirror @support_resources above) — explicit strings, not a
+  # lookup keyed by that list: a map-based rewrite would turn a typo'd/unmatched atom's
+  # `FunctionClauseError` into a `KeyError`, a real behaviour change to this generator.
   defp operator_module(:ticket), do: "Ticket"
   defp operator_module(:conversation), do: "Conversation"
   defp operator_module(:message), do: "Message"
@@ -700,6 +719,8 @@ defmodule Samen.Gen.App do
       "o_usage" => oa.usage,
       "o_ent" => oa.entitlement,
       "o_sev" => oa.subscription_event,
+      # Support scope (keys mirror @support_resources above) — binding-key aliases are
+      # independent compact template-variable names, not derivable from the atom.
       "o_tick" => oa.ticket,
       "o_conv" => oa.conversation,
       "o_msg" => oa.message,

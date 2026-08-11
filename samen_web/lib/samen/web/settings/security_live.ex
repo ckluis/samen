@@ -187,6 +187,14 @@ defmodule Samen.Web.Settings.SecurityLive do
     _ -> []
   end
 
+  # Nil guard: without it, a nil `user_id` (unresolved/unauthenticated) still hits
+  # the DB with `id == ^user_id` binding to `nil`, which Ash/AshPostgres flags at
+  # runtime ("Comparing values with nil will always return false (id == nil)")
+  # since SQL's `= NULL` is never true — the query was always doomed to return
+  # zero rows. Short-circuiting here keeps the same nil result, skips the wasted
+  # round-trip, and silences the warning (no behaviour change).
+  defp credential_id_for(_mount, nil), do: nil
+
   defp credential_id_for(mount, user_id) do
     require Ash.Query
 
