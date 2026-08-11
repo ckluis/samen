@@ -8,8 +8,8 @@
   each fix was independently proven, so a reviewer doesn't have to reconstruct that from commit
   messages alone.
 - **Base commit:** `056334f` ("SaaS-Readiness Phase 6 COMPLETE" — GREEN) is where the dogfood
-  started; the branch head at the time this doc was written is `7c7a318`, which includes the
-  7 pre-PR remediation batches below plus 3 post-PR cleanup items (H1–H3).
+  started; the branch head as of this doc is `f54adb6`, which includes the
+  7 pre-PR remediation batches below plus 6 post-PR cleanup items (H1–H5, incl. H2b).
 - **Sources:** `_orch/dogfood/pre-pr/triage.md` (the 17 canonical findings + dispositions) and
   the verifier verdicts under `_orch/verify/` (`pp1-authn-gate-verdict.json`,
   `pp5-pp6-tenant-role-verdict.json`, `pp7-nav-reach-verdict.json`,
@@ -104,7 +104,7 @@ held). The sabotage harness grew from 168 (pre-remediation baseline) to 186 acro
    attacker-supplied VALUES, and still rejects any genuinely unknown key via
    `String.to_existing_atom`. Verified non-regressive by sabotage 120.
 
-## 5 · Post-PR cleanup (H1–H3)
+## 5 · Post-PR cleanup (H1–H5)
 
 Three items surfaced by the pre-PR remediation but scoped out of it (a deferred feature and two
 residual follow-ups explicitly flagged by their own verifiers as "do not block, file as
@@ -144,9 +144,23 @@ way:
   strips the label from the generated app's own billing mount and the guard fails non-vacuously
   (exit 2), then the router is restored and the guard is green again. Idempotent (a second
   `gen.scope` call never rewrites the guard file) and made no registry/schema change.
+- **H4 — hygiene + this doc** (commit `e0b22da`). A `is_nil` guard on
+  `security_live.ex`'s `credential_id_for/2` (silences a warning the PP-17 2FA path exercised, no
+  behaviour change), a DRY of the one pure-duplicate Support-resource list in `gen/app.ex` into
+  `@support_resources` (the other three sites pair each atom with independent data and stay
+  literal), and this tracked reviewer doc. No new sabotage.
+- **H5 — dependency CVE bumps** (commit `f54adb6`). Conservative in-major bumps clearing all
+  three bundled advisories that printed on every gate run: ash 3.29.3 → 3.31.2 (keyset-cursor
+  memory exhaustion + manage_relationship predicate injection), postgrex 0.22.2 → 0.22.4 (two SQL
+  injection advisories), ymlr 5.1.5 → 5.1.6 (YAML newline injection). No major upgrade, no API
+  migration; `mix hex.audit` clean for the three across every app. **Follow-up (not touched):**
+  hex.audit still flags pre-existing, unrelated advisories — phoenix 1.8.8 (one HIGH + one MED, in
+  `demo`) and phoenix_live_view 1.2.5/1.2.6 (two LOW/MED across the web apps); the phoenix HIGH
+  warrants its own session.
 
 **Sabotage harness total: 168 → 192** across the pre-PR batches (168 → 186) and the post-PR
-cleanup (186 → 189 for H1, 189 → 190 for H2, 190 → 191 for H2b, 191 → 192 for H3).
+cleanup (186 → 189 for H1, 189 → 190 for H2, 190 → 191 for H2b, 191 → 192 for H3; H4/H5 added
+none).
 
 ## 6 · Read next
 
