@@ -87,6 +87,12 @@
           "type": "String"
         },
         {
+          "column_name": "sas_simulated",
+          "logical_name": "simulated",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
           "column_name": "sas_status",
           "logical_name": "status",
           "pii": false,

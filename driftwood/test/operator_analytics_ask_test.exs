@@ -34,6 +34,13 @@ defmodule Driftwood.OperatorAnalyticsAskTest do
   defp socket do
     %Phoenix.LiveView.Socket{}
     |> Phoenix.Component.assign(:samen_mount, mount())
+    # PP-14: the `{Samen.Web.Operator.Authz, :require_operator}` on_mount assigns these on the
+    # real armed operator route, and the analytics ask now authorizes from that VERIFIED operator
+    # principal (`:samen_operator_role` + `:samen_operator_id`) — NOT a synthetic role-less
+    # `%{plane: :operator}` tag. The socket helper here bypasses on_mount, so it mirrors what the
+    # route provides.
+    |> Phoenix.Component.assign(:samen_operator_id, "op-user-1")
+    |> Phoenix.Component.assign(:samen_operator_role, :operator_admin)
     |> AnalyticsLive.load()
   end
 

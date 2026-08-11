@@ -278,4 +278,42 @@ defmodule Samen.AI.SupportOperatorTest do
       assert FakeProvider.calls() == []
     end
   end
+
+  # ==========================================================================
+  # (e) T152 honesty provenance — the :simulated flag is threaded + persisted
+  #     (PP-15 operator-desk render source; PP-16 tenant persisted-list source)
+  # ==========================================================================
+
+  describe "(e) simulated provenance (PP-15 / PP-16)" do
+    test "PP-15: draft_reply result carries the T152 :simulated flag from the Completion" do
+      org = Ash.UUID.generate()
+
+      {:ok, result} =
+        SupportOperator.draft_reply(
+          scope(org),
+          %{to_subscriber_id: Ash.UUID.generate(), instruction: "a reply"},
+          wiring()
+        )
+
+      # In the keyless CI lane the Fake provider is SIMULATED — the flag MUST survive the
+      # %Completion{} -> result-map conversion so the operator desk renders the loud badge.
+      # Dropping it (sabotage) laundes a fake-confident draft as genuine.
+      assert result.simulated == true
+    end
+
+    test "PP-16: a simulated draft PERSISTS :simulated true (the tenant list re-reads this row)" do
+      org = Ash.UUID.generate()
+
+      {:ok, result} =
+        SupportOperator.draft_reply(
+          scope(org),
+          %{to_subscriber_id: Ash.UUID.generate(), instruction: "a reply"},
+          wiring()
+        )
+
+      # The persisted row (what the tenant Support-draft LIST re-reads) carries the provenance,
+      # so a stored keyless/deterministic draft can be badged. In-memory threading alone cannot.
+      assert reload(result.draft).simulated == true
+    end
+  end
 end

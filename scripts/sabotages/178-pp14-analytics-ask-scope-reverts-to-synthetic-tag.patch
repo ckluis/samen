@@ -1,0 +1,19 @@
+# SABOTAGE: PP-14 — `AnalyticsLive.ask_scope/1`'s fail-closed branch reverts to the synthetic
+# role-less `%{plane: :operator}` tag, so a caller with NO verified operator role STILL passes
+# the T144 platform gate with no principal (the exact defense-in-depth hole PP-14 closes).
+# Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_analytics_ask_test.exs
+# MUST_FAIL: ask_scope with NO resolved operator role is NOT a platform-caller actor
+diff --git a/samen_web/lib/samen/web/operator/analytics_live.ex b/samen_web/lib/samen/web/operator/analytics_live.ex
+--- a/samen_web/lib/samen/web/operator/analytics_live.ex
++++ b/samen_web/lib/samen/web/operator/analytics_live.ex
+@@ -136,7 +136,7 @@
+       # Fail CLOSED: no VERIFIED operator role ⇒ a non-operator actor T144 denies. Never the
+       # synthetic `%{plane: :operator}` tag (which would authorize the cross-tenant read with
+       # no principal — PP-14).
+-      %Samen.Scope{actor: %{kind: :tenant, plane: :tenant}}
++      %Samen.Scope{actor: %{plane: :operator}}
+     end
+   end
+ 

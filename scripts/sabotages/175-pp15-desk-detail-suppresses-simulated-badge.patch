@@ -1,0 +1,19 @@
+# SABOTAGE: PP-15 (render) — the operator desk-detail AI-draft card SUPPRESSES the
+# SIMULATED badge block (`:if={false}`), so a keyless/deterministic draft renders with NO
+# "SIMULATED — not a real model" badge — the render-side twin of 174 (mirrors HON 161).
+# Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_desk_detail_test.exs
+# MUST_FAIL: a simulated draft renders the loud SIMULATED badge
+diff --git a/samen_web/lib/samen/web/operator/desk_detail_live.ex b/samen_web/lib/samen/web/operator/desk_detail_live.ex
+--- a/samen_web/lib/samen/web/operator/desk_detail_live.ex
++++ b/samen_web/lib/samen/web/operator/desk_detail_live.ex
+@@ -230,7 +230,7 @@
+                 <div :if={@ai_draft} id="ai-draft" data-simulated={to_string(@ai_draft.simulated)} style="border:1px solid #C9A227;border-radius:10px;background:#FFF8E1;color:#5b4a00;padding:12px 14px;margin-bottom:10px">
+                   <%!-- PP-15: a keyless/deterministic (SIMULATED) draft ALWAYS carries the loud
+                         honesty badge — never laundered as a genuine model reply. --%>
+-                  <div :if={@ai_draft.simulated} class="ai-draft-simulated" style="margin-bottom:6px">
++                  <div :if={false} class="ai-draft-simulated" style="margin-bottom:6px">
+                     <.pill variant="warn"><span id="ai-draft-badge">SIMULATED — not a real model</span></.pill>
+                     <span style="margin-left:6px;font-size:12px">keyless/deterministic draft; wire a provider for a real model result</span>
+                   </div>

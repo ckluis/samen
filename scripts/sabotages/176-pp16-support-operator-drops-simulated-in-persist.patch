@@ -1,0 +1,19 @@
+# SABOTAGE: PP-16 — `Samen.AI.SupportOperator.draft_reply/3`'s `persist_draft` DROPS the
+# T152 `:simulated` provenance from the persisted `SupportReplyDraft` row (hardcodes
+# `simulated: false`), so a stored keyless/deterministic draft loses its provenance and the
+# tenant Support-draft LIST (which re-reads the row) can never badge it. Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/ai/support_operator_test.exs
+# MUST_FAIL: a simulated draft PERSISTS :simulated true
+diff --git a/samen_core/lib/samen/ai/support_operator.ex b/samen_core/lib/samen/ai/support_operator.ex
+--- a/samen_core/lib/samen/ai/support_operator.ex
++++ b/samen_core/lib/samen/ai/support_operator.ex
+@@ -207,7 +207,7 @@
+       # result) can render the loud SIMULATED badge on a keyless/deterministic draft. In-memory
+       # threading alone (PP-15) cannot signpost a stored draft — this is why PP-16 needs the
+       # persisted attribute.
+-      simulated: completion.simulated
++      simulated: false
+     }
+ 
+     read_opts = Keyword.take(opts, [:domain])

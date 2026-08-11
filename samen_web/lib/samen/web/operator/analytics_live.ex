@@ -37,7 +37,17 @@ defmodule Samen.Web.Operator.AnalyticsLive do
 
   @impl true
   def mount(_params, session, socket) do
-    socket = assign_mount(socket, session)
+    socket =
+      socket
+      |> assign_mount(session)
+      # PP-14: carry the AUTHENTICATED operator principal id (the same signed-session id
+      # `Samen.Web.Operator.Authz` derives authority from) so the cross-tenant aggregate "ask"
+      # authorizes from a VERIFIED principal, not a synthetic literal `%{plane: :operator}` tag.
+      # `:samen_operator_role` is already assigned by the `{Authz, :require_operator}` on_mount.
+      |> Phoenix.Component.assign_new(:samen_operator_id, fn ->
+        Samen.Web.Auth.authenticated_user_id(session)
+      end)
+
     {:ok, load(socket)}
   end
 
@@ -86,7 +96,7 @@ defmodule Samen.Web.Operator.AnalyticsLive do
       cond do
         question == "" -> {:error, :empty}
         is_nil(ask_resource(mount)) -> {:error, :not_configured}
-        true -> ask(ask_resource(mount), question)
+        true -> ask(ask_resource(mount), question, socket)
       end
 
     {:noreply, assign(socket, ask_question: question, ask_result: result)}
@@ -97,11 +107,60 @@ defmodule Samen.Web.Operator.AnalyticsLive do
   # token-blind aggregate actor inside `ask/4`; this scope only satisfies the platform-capability
   # gate + carries grounding metadata to the narration. Any raise (unreachable aggregate table on
   # a host that has not built the projection) normalizes to the honest not-configured state.
-  defp ask(resource, question) do
-    Samen.AI.Analytics.ask(%Samen.Scope{actor: %{plane: :operator}}, resource, question)
+  defp ask(resource, question, socket) do
+    Samen.AI.Analytics.ask(ask_scope(socket), resource, question)
   rescue
     _ -> {:error, :not_configured}
   end
+
+  @doc """
+  Build the T144 ask-scope from the AUTHENTICATED operator PRINCIPAL (PP-14), NOT a synthetic
+  literal `%{plane: :operator}` tag.
+
+  The platform-capability gate now rests on a VERIFIED principal: `:samen_operator_role` (the
+  role `Samen.Web.Operator.Authz` resolved from the host `:operator_authority` seam against the
+  signed-session principal — fail-closed) plus `:samen_operator_id` (that same authenticated
+  principal id). With a real operator role we mint a `Samen.OperatorPlane.Actor` (T144's
+  first-class platform actor). Without a resolved operator role we FAIL CLOSED to a non-operator
+  actor that T144 refuses — NEVER back to the synthetic tag that would pass the gate with no
+  principal (the exact defense-in-depth hole this closes). T144 itself is untouched: an
+  impersonation-into-a-tenant or tenant caller is still refused `{:error, :unauthorized}`.
+  """
+  @spec ask_scope(Phoenix.LiveView.Socket.t()) :: Samen.Scope.t()
+  def ask_scope(%Phoenix.LiveView.Socket{} = socket) do
+    role = socket.assigns[:samen_operator_role]
+
+    if role in Samen.OperatorPlane.Actor.roles() do
+      %Samen.Scope{actor: Samen.OperatorPlane.Actor.new(operator_principal_id(socket), role)}
+    else
+      # Fail CLOSED: no VERIFIED operator role ⇒ a non-operator actor T144 denies. Never the
+      # synthetic `%{plane: :operator}` tag (which would authorize the cross-tenant read with
+      # no principal — PP-14).
+      %Samen.Scope{actor: %{kind: :tenant, plane: :tenant}}
+    end
+  end
+
+  # The authenticated operator id for the audit-bearing actor. Prefer the signed-session
+  # principal (`:samen_operator_id`, production); fall back to the mount's resolved operator id
+  # (dev/dogfood, where the session carries no authenticated user but the role seam still gates).
+  defp operator_principal_id(socket) do
+    with nil <- present(socket.assigns[:samen_operator_id]),
+         nil <- plane_operator_id(socket.assigns[:samen_mount]) do
+      "operator"
+    end
+  end
+
+  defp plane_operator_id(%Samen.Web.Mount{plane: %{operator_id: id}}), do: present(id)
+  defp plane_operator_id(_), do: nil
+
+  defp present(v) when is_binary(v) do
+    case String.trim(v) do
+      "" -> nil
+      _ -> v
+    end
+  end
+
+  defp present(_), do: nil
 
   defp ask_resource(nil), do: nil
   defp ask_resource(mount), do: Samen.Web.Mount.label(mount, :analytics_ask_resource, nil)

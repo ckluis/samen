@@ -113,4 +113,37 @@ defmodule Samen.Web.OperatorDeskDetailTest do
       assert html =~ ~s(id="ai-error")
     end
   end
+
+  # PP-15 — a keyless/deterministic (SIMULATED) operator support draft ALWAYS renders the loud
+  # "SIMULATED — not a real model" badge (the honesty provenance `draft_reply/3` now preserves
+  # and this surface carries into the render). Anti-tautology twin below.
+  test "DRAFT-AI SIMULATED (PP-15): a simulated draft renders the loud SIMULATED badge", %{seed: seed, ticket_id: id} do
+    socket =
+      DeskDetailLive.load(tenant_socket(seed), id)
+      |> Phoenix.Component.assign(
+        ai_draft: %{text: "fake-completion:deadbeefdeadbeef", approval_id: "ap-1", simulated: true},
+        ai_error: nil
+      )
+
+    html = render_html(DeskDetailLive, socket.assigns)
+
+    assert html =~ "SIMULATED — not a real model"
+    assert html =~ ~s(data-simulated="true")
+  end
+
+  test "DRAFT-AI SIMULATED positive control (PP-15): a non-simulated draft shows NO SIMULATED badge", %{seed: seed, ticket_id: id} do
+    socket =
+      DeskDetailLive.load(tenant_socket(seed), id)
+      |> Phoenix.Component.assign(
+        ai_draft: %{text: "A real-model reply.", approval_id: "ap-2", simulated: false},
+        ai_error: nil
+      )
+
+    html = render_html(DeskDetailLive, socket.assigns)
+
+    # The draft still renders — only the SIMULATED badge is absent (badge is flag-driven).
+    assert html =~ ~s(id="ai-draft")
+    refute html =~ "SIMULATED"
+    assert html =~ ~s(data-simulated="false")
+  end
 end

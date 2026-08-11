@@ -122,8 +122,12 @@ defmodule Samen.Web.AI.SupportDraftLive do
               <.empty_state title="No drafts yet" body="Compose one above. Drafts are human-approved before any send." icon="✎" />
             <% else %>
               <ul style="list-style:none;margin:0;padding:0">
-                <li :for={d <- @drafts} class="ai-draft-row" id={"ai-draft-#{d.id}"} style="padding:8px 0;border-bottom:1px solid var(--line,#222)">
+                <li :for={d <- @drafts} class="ai-draft-row" id={"ai-draft-#{d.id}"} data-simulated={to_string(draft_simulated?(d))} style="padding:8px 0;border-bottom:1px solid var(--line,#222)">
                   <.pill variant={status_variant(d.status)}>{d.status}</.pill>
+                  <%!-- PP-16: a stored keyless/deterministic (SIMULATED) draft carries the loud
+                        honesty badge from the persisted `:simulated` provenance — never laundered
+                        as a genuine model reply. --%>
+                  <.pill :if={draft_simulated?(d)} variant="warn"><span class="ai-draft-badge">SIMULATED — not a real model</span></.pill>
                   <span style="margin-left:8px">{draft_body(d)}</span>
                 </li>
               </ul>
@@ -177,4 +181,10 @@ defmodule Samen.Web.AI.SupportDraftLive do
 
   defp draft_body(%{body: body}) when is_binary(body), do: String.slice(body, 0, 120)
   defp draft_body(_), do: "—"
+
+  # PP-16: the persisted T152 honesty provenance — a stored draft whose body came from a
+  # keyless/deterministic (SIMULATED) provider. A missing/false flag is a genuine draft (no
+  # badge), so the badge is driven by the persisted flag, never assumed.
+  defp draft_simulated?(%{simulated: true}), do: true
+  defp draft_simulated?(_), do: false
 end

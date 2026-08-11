@@ -61,6 +61,18 @@ defmodule Samen.AI.SupportReplyDraft do
     # check refuses `decided_by == requested_by`, so a self-approval by this principal fails.
     attribute(:requested_by, :string, public?: true)
 
+    # T152 honesty provenance (PP-16): whether the draft body came from a keyless/deterministic
+    # (SIMULATED) provider rather than a real model. Threaded verbatim from the composing
+    # `%Samen.AI.Completion{}.simulated` at `:draft` create by `Samen.AI.SupportOperator`, so the
+    # tenant Support-draft LIST (which re-reads persisted rows) can render the loud "SIMULATED —
+    # not a real model" badge on a stored simulated draft. NOT vault-routed (a boolean provenance
+    # flag, not subject PII). Defaults `false` (a real-model draft) — fail-honest.
+    attribute(:simulated, :boolean,
+      public?: true,
+      allow_nil?: false,
+      default: false
+    )
+
     # Lifecycle. `writable?: false` keeps it out of every action's default accept — only the
     # transition changes below ever set it, so a draft can never be marked `:sent` except
     # through the approve handler's `:mark_sent` action.
@@ -78,7 +90,7 @@ defmodule Samen.AI.SupportReplyDraft do
 
     create :draft do
       description("Persist an AI-composed support reply draft (status :draft).")
-      accept([:org_id, :to_subscriber_id, :inbound_ref, :subject, :body, :requested_by])
+      accept([:org_id, :to_subscriber_id, :inbound_ref, :subject, :body, :requested_by, :simulated])
     end
 
     # A human amends the drafted reply before approving (ADR-043 §6.3). Editing never sends.

@@ -176,4 +176,47 @@ defmodule Samen.Web.AI.KitTest do
     assert {:ok, fields} = Server.crm_preview(mount, org_id, Samen.WebTest.Crm.Person, person.id)
     assert fields[:__id__] == person.id
   end
+
+  # --- PP-16: a persisted SIMULATED support draft renders the loud badge in the tenant list ---
+
+  defp render_support_drafts(org_id, drafts) do
+    mount = ai_mount(org_id, :tenant)
+
+    %Phoenix.LiveView.Socket{}
+    |> Phoenix.Component.assign(:samen_mount, mount)
+    |> Phoenix.Component.assign(:samen_acting_as, false)
+    |> Samen.Web.AI.SupportDraftLive.load(org_id)
+    |> Phoenix.Component.assign(:drafts, drafts)
+    |> then(&render_html(Samen.Web.AI.SupportDraftLive, &1.assigns))
+  end
+
+  test "PP-16: a persisted SIMULATED support draft renders the loud SIMULATED badge in the list", %{org_id: org_id} do
+    draft = %Samen.AI.SupportReplyDraft{
+      id: Ash.UUID.generate(),
+      status: :draft,
+      body: "fake-completion:deadbeefdeadbeef",
+      simulated: true
+    }
+
+    html = render_support_drafts(org_id, [draft])
+
+    assert html =~ "SIMULATED — not a real model"
+    assert html =~ ~s(data-simulated="true")
+  end
+
+  test "PP-16 positive control: a NON-simulated persisted draft shows NO SIMULATED badge", %{org_id: org_id} do
+    draft = %Samen.AI.SupportReplyDraft{
+      id: Ash.UUID.generate(),
+      status: :draft,
+      body: "A real-model draft.",
+      simulated: false
+    }
+
+    html = render_support_drafts(org_id, [draft])
+
+    # The draft row still renders — only the SIMULATED badge is absent (badge is flag-driven).
+    assert html =~ "ai-draft-#{draft.id}"
+    refute html =~ "SIMULATED"
+    assert html =~ ~s(data-simulated="false")
+  end
 end

@@ -43,4 +43,35 @@ defmodule Samen.Web.OperatorAnalyticsAskTest do
     assert socket.assigns.ask_result == {:error, :empty}
     assert render_html(AnalyticsLive, socket.assigns) =~ "Enter a question"
   end
+
+  # --- PP-14: the ask-scope is built from the VERIFIED operator principal, not a literal tag ---
+
+  test "PP-14: ask_scope carries the REAL operator principal (OperatorPlane.Actor), not a synthetic tag" do
+    socket =
+      socket()
+      |> Phoenix.Component.assign(:samen_operator_id, "op-user-42")
+      |> Phoenix.Component.assign(:samen_operator_role, :operator_admin)
+
+    scope = AnalyticsLive.ask_scope(socket)
+
+    # A first-class platform actor with the resolved role + authenticated id — NOT the old
+    # role-less `%{plane: :operator}` literal. T144 authorizes from a verified principal.
+    assert %Samen.Scope{actor: %Samen.OperatorPlane.Actor{id: "op-user-42", operator_role: :operator_admin}} =
+             scope
+  end
+
+  test "PP-14 fail-closed: ask_scope with NO resolved operator role is NOT a platform-caller actor" do
+    # No `:samen_operator_role` assigned (route authz would have halted, but defense-in-depth):
+    # the scope must fail CLOSED to a non-operator actor T144 refuses — NEVER the synthetic
+    # `%{plane: :operator}` tag that would authorize the cross-tenant read with no principal.
+    # (Runtime `Map.get` reads, not struct-literal matches, so the guarantee is checked on the
+    # actual value regardless of the compiler's inferred return type.)
+    actor = AnalyticsLive.ask_scope(socket()).actor
+
+    # A plain tenant-plane actor — NOT a first-class `OperatorPlane.Actor`, and NOT the synthetic
+    # `%{plane: :operator}` tag. T144's `platform_actor?/1` accepts only an `OperatorPlane.Actor`,
+    # `%{kind: :operator}`, or `%{plane: :operator}`; this exact shape is refused fail-closed.
+    refute match?(%Samen.OperatorPlane.Actor{}, actor)
+    assert actor == %{kind: :tenant, plane: :tenant}
+  end
 end

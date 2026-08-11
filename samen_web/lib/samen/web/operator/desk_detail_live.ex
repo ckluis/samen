@@ -122,7 +122,13 @@ defmodule Samen.Web.Operator.DeskDetailLive do
       {:ok, %{draft_text: text} = result} ->
         {:noreply,
          assign(socket,
-           ai_draft: %{text: text, approval_id: Map.get(result, :approval_id)},
+           # PP-15: carry the T152 `:simulated` provenance `draft_reply/3` now preserves, so a
+           # keyless/deterministic draft renders the loud "SIMULATED — not a real model" badge.
+           ai_draft: %{
+             text: text,
+             approval_id: Map.get(result, :approval_id),
+             simulated: Map.get(result, :simulated, false)
+           },
            ai_error: nil
          )}
 
@@ -221,7 +227,13 @@ defmodule Samen.Web.Operator.DeskDetailLive do
 
                 <%!-- The AI draft (T149 B2a): produced by the EXISTING draft→approve loop; the operator
                       reviews it here and posts it through the normal governed reply (human in the loop). --%>
-                <div :if={@ai_draft} id="ai-draft" style="border:1px solid #C9A227;border-radius:10px;background:#FFF8E1;color:#5b4a00;padding:12px 14px;margin-bottom:10px">
+                <div :if={@ai_draft} id="ai-draft" data-simulated={to_string(@ai_draft.simulated)} style="border:1px solid #C9A227;border-radius:10px;background:#FFF8E1;color:#5b4a00;padding:12px 14px;margin-bottom:10px">
+                  <%!-- PP-15: a keyless/deterministic (SIMULATED) draft ALWAYS carries the loud
+                        honesty badge — never laundered as a genuine model reply. --%>
+                  <div :if={@ai_draft.simulated} class="ai-draft-simulated" style="margin-bottom:6px">
+                    <.pill variant="warn"><span id="ai-draft-badge">SIMULATED — not a real model</span></.pill>
+                    <span style="margin-left:6px;font-size:12px">keyless/deterministic draft; wire a provider for a real model result</span>
+                  </div>
                   <b>AI-drafted reply (queued for human approval<span :if={@ai_draft.approval_id}> · approval {@ai_draft.approval_id}</span>):</b>
                   <div class="ai-draft-text" style="margin-top:6px;white-space:pre-wrap">{@ai_draft.text}</div>
                 </div>

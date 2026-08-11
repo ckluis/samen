@@ -65,8 +65,11 @@ defmodule Samen.AI.SupportOperator do
   @doc """
   Draft a reply to an inbound support item in `scope`'s org and enqueue it for HUMAN
   approval. Returns `{:ok, %{draft: draft, approval: approval, approval_id: id,
-  draft_text: text}}` — with the draft PERSISTED (`:draft`) and a PENDING approval opened,
-  and **nothing sent**. Fail-honest on every leg (`{:error, :not_configured}` keyless
+  draft_text: text, simulated: boolean}}` — with the draft PERSISTED (`:draft`) and a PENDING
+  approval opened, and **nothing sent**. `:simulated` is the T152 honesty flag preserved
+  verbatim from the `%Samen.AI.Completion{}` (PP-15/PP-16): a keyless/deterministic draft
+  carries `simulated: true` to the render's loud "SIMULATED — not a real model" badge.
+  Fail-honest on every leg (`{:error, :not_configured}` keyless
   outside `:test`, `{:error, :pii_egress_refused}` on a scrub failure, `{:error,
   :source_not_found}` when the named item is not in this org, `{:error, :no_org}` for an
   org-less scope).
@@ -96,7 +99,14 @@ defmodule Samen.AI.SupportOperator do
          draft: draft,
          approval: approval,
          approval_id: to_string(approval.id),
-         draft_text: completion.text
+         draft_text: completion.text,
+         # T152 honesty provenance (PP-15): PRESERVE the `:simulated` flag the chokepoint
+         # stamps by construction all the way to the render, so a keyless/deterministic
+         # support draft ALWAYS draws the loud "SIMULATED — not a real model" badge — the
+         # EXACT flag threading the HON batch shipped for `Samen.AI.Crm.draft_sequence/5`,
+         # mirrored on this D5 support path. Dropping it laundes a fake-confident draft as
+         # a genuine one (the T155-missed honesty hole).
+         simulated: completion.simulated
        }}
     end
   end
@@ -191,7 +201,13 @@ defmodule Samen.AI.SupportOperator do
       inbound_ref: inbound_ref,
       subject: Map.get(attrs, :subject),
       body: completion.text,
-      requested_by: @principal_id
+      requested_by: @principal_id,
+      # T152 honesty provenance (PP-16): PERSIST the `:simulated` flag onto the stored draft
+      # so the tenant Support-draft LIST (which re-reads persisted rows, never the in-memory
+      # result) can render the loud SIMULATED badge on a keyless/deterministic draft. In-memory
+      # threading alone (PP-15) cannot signpost a stored draft — this is why PP-16 needs the
+      # persisted attribute.
+      simulated: completion.simulated
     }
 
     read_opts = Keyword.take(opts, [:domain])
