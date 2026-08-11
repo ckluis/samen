@@ -330,7 +330,13 @@ defmodule PawChartWeb.Router do
   scope "/", PawChartWeb do
     pipe_through(:browser)
 
+    # B-SEC / S1 — the clinic console carries the SAME framework tenant gate the mounted
+    # `samen_*_routes` surfaces carry: `{Samen.Web.TenantAuthz, :require_tenant}` halts an
+    # armed, unauthenticated request before `handle_params/3` can run on the dead render, and
+    # pins the org authority so a client `?org=` can only select among the principal's
+    # authorized orgs (`Samen.Web.CurrentOrg.reresolve/2` in `ClinicLive.handle_params/3`).
     live_session :pawchart_clinic,
+      on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
       session: %{"samen_mount" => @clinic_mount} do
       live("/clinic", ClinicLive)
     end

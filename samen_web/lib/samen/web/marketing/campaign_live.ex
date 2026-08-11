@@ -48,7 +48,7 @@ defmodule Samen.Web.Marketing.CampaignLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     campaign_id = Map.get(params, "id") || socket.assigns.campaign_id
     {:noreply, load(assign(socket, org_id: org_id, campaign_id: campaign_id, return_to: return_path(uri)), org_id, campaign_id)}
   end

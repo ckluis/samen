@@ -64,7 +64,15 @@ defmodule Samen.Web.Router do
           labels: Keyword.get(opts, :labels)
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      # B-SEC / S1 — the TENANT authz gate. Every tenant `live_session` carries
+      # `{Samen.Web.TenantAuthz, :require_tenant}`: the on_mount `:halt` is the ONLY
+      # thing that preempts `handle_params/3` on the initial DEAD RENDER (LV 1.2.9,
+      # `deps/phoenix_live_view/.../static.ex:155,320-355`), and the hook PINS the org
+      # authority so a client `?org=` can only SELECT among the authenticated
+      # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
+      live_session session_name,
+        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(kind, path) do
           live(sub_path, module)
         end
@@ -449,8 +457,13 @@ defmodule Samen.Web.Router do
       # operator-ROLE authz gate runs on the WEBSOCKET mount too (the conn pipeline gates only the
       # HTTP dead-render; same-live_session live-nav is gated only by on_mount). Requires an
       # `:operator_authority` label on the mount. Tenant-plane chat passes nothing → unchanged.
+      #
+      # B-SEC / S1 — the framework TENANT authz gate is APPENDED to whatever the host passes, so
+      # chat can never be the one tenant surface that misses it. On an operator-plane chat mount
+      # `:require_tenant` is inert (T146/T150 own that plane); on a tenant mount it is the
+      # dead-render halt + org-authority pin every other tenant `live_session` carries.
       live_session session_name,
-        on_mount: Keyword.get(opts, :on_mount, []),
+        on_mount: Keyword.get(opts, :on_mount, []) ++ [{Samen.Web.TenantAuthz, :require_tenant}],
         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:chat, path) do
           live(sub_path, module)
@@ -515,7 +528,15 @@ defmodule Samen.Web.Router do
           labels: Keyword.get(opts, :labels)
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      # B-SEC / S1 — the TENANT authz gate. Every tenant `live_session` carries
+      # `{Samen.Web.TenantAuthz, :require_tenant}`: the on_mount `:halt` is the ONLY
+      # thing that preempts `handle_params/3` on the initial DEAD RENDER (LV 1.2.9,
+      # `deps/phoenix_live_view/.../static.ex:155,320-355`), and the hook PINS the org
+      # authority so a client `?org=` can only SELECT among the authenticated
+      # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
+      live_session session_name,
+        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:notifications, path) do
           live(sub_path, module)
         end
@@ -575,7 +596,15 @@ defmodule Samen.Web.Router do
           labels: Keyword.get(opts, :labels)
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      # B-SEC / S1 — the TENANT authz gate. Every tenant `live_session` carries
+      # `{Samen.Web.TenantAuthz, :require_tenant}`: the on_mount `:halt` is the ONLY
+      # thing that preempts `handle_params/3` on the initial DEAD RENDER (LV 1.2.9,
+      # `deps/phoenix_live_view/.../static.ex:155,320-355`), and the hook PINS the org
+      # authority so a client `?org=` can only SELECT among the authenticated
+      # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
+      live_session session_name,
+        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:flags, path) do
           live(sub_path, module)
         end
@@ -645,7 +674,15 @@ defmodule Samen.Web.Router do
           labels: Keyword.get(opts, :labels)
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      # B-SEC / S1 — the TENANT authz gate. Every tenant `live_session` carries
+      # `{Samen.Web.TenantAuthz, :require_tenant}`: the on_mount `:halt` is the ONLY
+      # thing that preempts `handle_params/3` on the initial DEAD RENDER (LV 1.2.9,
+      # `deps/phoenix_live_view/.../static.ex:155,320-355`), and the hook PINS the org
+      # authority so a client `?org=` can only SELECT among the authenticated
+      # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
+      live_session session_name,
+        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:files, path) do
           live(sub_path, module)
         end
@@ -713,7 +750,15 @@ defmodule Samen.Web.Router do
           labels: Keyword.get(opts, :labels)
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      # B-SEC / S1 — the TENANT authz gate. Every tenant `live_session` carries
+      # `{Samen.Web.TenantAuthz, :require_tenant}`: the on_mount `:halt` is the ONLY
+      # thing that preempts `handle_params/3` on the initial DEAD RENDER (LV 1.2.9,
+      # `deps/phoenix_live_view/.../static.ex:155,320-355`), and the hook PINS the org
+      # authority so a client `?org=` can only SELECT among the authenticated
+      # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
+      live_session session_name,
+        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:csv, path) do
           live(sub_path, module)
         end
@@ -827,7 +872,15 @@ defmodule Samen.Web.Router do
           labels: Keyword.get(opts, :labels)
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      # B-SEC / S1 — the TENANT authz gate. Every tenant `live_session` carries
+      # `{Samen.Web.TenantAuthz, :require_tenant}`: the on_mount `:halt` is the ONLY
+      # thing that preempts `handle_params/3` on the initial DEAD RENDER (LV 1.2.9,
+      # `deps/phoenix_live_view/.../static.ex:155,320-355`), and the hook PINS the org
+      # authority so a client `?org=` can only SELECT among the authenticated
+      # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
+      live_session session_name,
+        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:search, path) do
           live(sub_path, module)
         end
@@ -904,7 +957,15 @@ defmodule Samen.Web.Router do
           labels: labels
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      # B-SEC / S1 — the TENANT authz gate. Every tenant `live_session` carries
+      # `{Samen.Web.TenantAuthz, :require_tenant}`: the on_mount `:halt` is the ONLY
+      # thing that preempts `handle_params/3` on the initial DEAD RENDER (LV 1.2.9,
+      # `deps/phoenix_live_view/.../static.ex:155,320-355`), and the hook PINS the org
+      # authority so a client `?org=` can only SELECT among the authenticated
+      # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
+      live_session session_name,
+        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:ai, path) do
           live(sub_path, module)
         end
@@ -976,7 +1037,15 @@ defmodule Samen.Web.Router do
           labels: Keyword.get(opts, :labels)
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      # B-SEC / S1 — the TENANT authz gate. Every tenant `live_session` carries
+      # `{Samen.Web.TenantAuthz, :require_tenant}`: the on_mount `:halt` is the ONLY
+      # thing that preempts `handle_params/3` on the initial DEAD RENDER (LV 1.2.9,
+      # `deps/phoenix_live_view/.../static.ex:155,320-355`), and the hook PINS the org
+      # authority so a client `?org=` can only SELECT among the authenticated
+      # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
+      live_session session_name,
+        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:automation, path) do
           live(sub_path, module)
         end
@@ -1078,17 +1147,41 @@ defmodule Samen.Web.Router do
           labels: labels
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      # B-SEC / S1 — the TENANT authz gate. Every tenant `live_session` carries
+      # `{Samen.Web.TenantAuthz, :require_tenant}`: the on_mount `:halt` is the ONLY
+      # thing that preempts `handle_params/3` on the initial DEAD RENDER (LV 1.2.9,
+      # `deps/phoenix_live_view/.../static.ex:155,320-355`), and the hook PINS the org
+      # authority so a client `?org=` can only SELECT among the authenticated
+      # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
+      live_session session_name,
+        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         for {sub_path, module} <- Samen.Web.Router.__routes__(:settings, path) do
           live(sub_path, module)
         end
 
-        # ADR-035 §5 A7 — the self-service TOTP-enrollment surface. Mounted ONLY
-        # under the `spine_totp` opt-in (a host with the Identity spine): a
-        # tenant-plane LiveView over the same `:settings` mount whose namespace
-        # materializes `Credential`/`User`. Before this route TotpEnrollLive had
-        # NO HTTP mount anywhere — 2FA was fail-closed but unreachable in prod.
-        if spine_totp do
+      end
+
+      # ADR-035 §5 A7 — the self-service TOTP-enrollment surface. Mounted ONLY
+      # under the `spine_totp` opt-in (a host with the Identity spine): a
+      # tenant-plane LiveView over the same `:settings` mount whose namespace
+      # materializes `Credential`/`User`. Before this route TotpEnrollLive had
+      # NO HTTP mount anywhere — 2FA was fail-closed but unreachable in prod.
+      #
+      # B-SEC / S3 — it rides its OWN `live_session` carrying
+      # `{Samen.Web.Auth, :ensure_authenticated}`, NOT the sibling settings session. Enrollment
+      # acts on a CREDENTIAL (disable 2FA · re-enroll a secret · regenerate recovery codes), so
+      # the boundary is AUTHENTICATION, unconditionally — not the tenant gate, which relaxes in
+      # the disarmed dev posture. Before this split the route sat in a hook-less `live_session`,
+      # so `socket.assigns.samen_credential_id` was never populated and
+      # `TotpEnrollLive` fell through to `params["credential_id"]`: an unauthenticated 2FA strip
+      # on ANY credential. Phoenix forbids nesting `live_session`s, so this is a sibling block —
+      # navigating between /settings and /settings/security/2fa is a full page load, which is the
+      # correct posture for a step across an authentication boundary.
+      if spine_totp do
+        live_session :"#{session_name}_totp",
+          on_mount: [{Samen.Web.Auth, :ensure_authenticated}],
+          session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
           live("#{path}/security/2fa", Samen.Web.Auth.TotpEnrollLive)
         end
       end
@@ -1393,7 +1486,15 @@ defmodule Samen.Web.Router do
           labels: labels
         )
 
-      live_session session_name, session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+      # B-SEC / S1 — the TENANT authz gate. Every tenant `live_session` carries
+      # `{Samen.Web.TenantAuthz, :require_tenant}`: the on_mount `:halt` is the ONLY
+      # thing that preempts `handle_params/3` on the initial DEAD RENDER (LV 1.2.9,
+      # `deps/phoenix_live_view/.../static.ex:155,320-355`), and the hook PINS the org
+      # authority so a client `?org=` can only SELECT among the authenticated
+      # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
+      live_session session_name,
+        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
         live(path, Samen.Web.Onboarding.WizardLive)
       end
 

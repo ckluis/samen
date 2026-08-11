@@ -12,11 +12,10 @@
 # MUST_FAIL: RED: armed host, cookieless ?org=<other-org> to the unlabeled CRM contacts mount
 # MUST_FAIL: resolves NO org for an unauthenticated ?org=
 diff --git a/samen_web/lib/samen/web/current_org.ex b/samen_web/lib/samen/web/current_org.ex
-index 347e803..4ce0983 100644
 --- a/samen_web/lib/samen/web/current_org.ex
 +++ b/samen_web/lib/samen/web/current_org.ex
-@@ -164,7 +164,7 @@ defmodule Samen.Web.CurrentOrg do
-   defp param_trust_disarmed?(mount) do
+@@ -276,7 +276,7 @@
+   def param_trust_disarmed?(mount) do
      case Samen.Web.Operator.otp_app(mount) do
        nil -> true
 -      otp_app -> not Application.get_env(otp_app, :auth_required?, false)

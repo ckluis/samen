@@ -98,7 +98,7 @@ defmodule Samen.Web.Support.TicketLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     ticket_id = Map.get(params, "id") || socket.assigns.ticket_id
     tab = Map.get(params, "tab") || "conversation"
 

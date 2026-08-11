@@ -131,6 +131,111 @@ defmodule Samen.Web.CurrentOrg do
     end
   end
 
+  @doc """
+  Whether the TENANT AUTHZ GATE is ENGAGED for this mount (B-SEC / S1).
+
+  True when EITHER the mount adopted the `:authn` seam and its host is armed, OR the host is
+  armed at all (the PP-1/PP-3 fail-closed branch). It is the exact complement of "the sanctioned
+  DISARMED dev posture in which `?org=` is trusted as identity" — i.e. it answers "is a
+  client-supplied `?org=` FORBIDDEN as an identity on this mount?".
+
+  This is the predicate `Samen.Web.TenantAuthz`'s `on_mount` hook and `reresolve/2` both key on,
+  so the `mount/3` answer (`resolve/3`) and the `handle_params/3` answer can never disagree.
+  """
+  @spec tenant_gate_armed?(Mount.t() | nil) :: boolean()
+  def tenant_gate_armed?(mount), do: authn_required?(mount) or not param_trust_disarmed?(mount)
+
+  @doc """
+  Whether the session carries ANY authenticated principal this mount can see — the legacy
+  BYO-auth `samen_current_user` key OR the framework spine's `samen_session_token`. Never
+  raises; never consults a param.
+  """
+  @spec principal?(Mount.t() | nil, map()) :: boolean()
+  def principal?(mount, session) do
+    is_binary(Samen.Web.Auth.authenticated_user_id(session)) or
+      match?({:ok, _}, spine_credential_id(mount, session))
+  end
+
+  @doc """
+  The org ids the session's authenticated principal is AUTHORIZED to act in, `[]` when there is
+  no principal / no seam / an error (deny). Legacy BYO `:authorized_orgs` MFA first, then the
+  framework spine's real `Membership` rows — the SAME two-tier order `resolve/3` uses, exposed
+  so the `on_mount` gate can PIN the set into the socket and `handle_params/3` can validate a
+  `?org=` against it instead of trusting it.
+  """
+  @spec authorized_orgs(Mount.t() | nil, map()) :: [String.t()]
+  def authorized_orgs(mount, session) do
+    case legacy_authorized_orgs(mount, session) do
+      [_ | _] = list -> list
+      _ -> spine_authorized_orgs(mount, session)
+    end
+  end
+
+  defp legacy_authorized_orgs(mount, session) do
+    case Samen.Web.Auth.authenticated_user_id(session) do
+      user_id when is_binary(user_id) -> authorized_org_ids(mount, user_id)
+      _ -> []
+    end
+  end
+
+  defp spine_authorized_orgs(mount, session) do
+    case spine_credential_id(mount, session) do
+      {:ok, credential_id} -> spine_authorized_org_ids(mount, credential_id)
+      _ -> []
+    end
+  end
+
+  @doc """
+  Re-resolve the current org inside `handle_params/3` — the ONE shared helper every framework
+  tenant LiveView calls in place of the old `Map.get(params, "org") || socket.assigns.org_id`
+  idiom (B-SEC / S1, the confirmed BLOCKER).
+
+  ## Why this exists
+
+  In `phoenix_live_view` 1.2.9 `handle_params/3` runs on the INITIAL DEAD RENDER (plain HTTP
+  GET, before any socket). The old idiom therefore OVERWROTE the fail-closed `resolve/3` answer
+  computed one callback earlier in `mount/3` with a raw, client-supplied `?org=` — reopening the
+  cross-tenant read (and, through the `write_scope/2` admin elevators, a cross-tenant admin
+  WRITE) on every armed host. The client param was an IDENTITY; here it is downgraded to a
+  SELECTOR, exactly as the operator drill-ins already treat `params["org_id"]`.
+
+  ## The rule (strictly narrower than before; never wider)
+
+    * `:samen_authorized_orgs` pinned by `Samen.Web.TenantAuthz`'s `on_mount` — a `?org=` is
+      honoured ONLY when it is a member of the authenticated principal's authorized set;
+      anything else keeps the org the gate/`mount/3` already resolved. (This is what keeps the
+      workspace switcher and legitimate multi-org deep links working.)
+    * `:unconstrained` (the explicitly DISARMED dev/dogfood posture, or an operator-plane mount
+      whose authorization is the T146/T150 gate) — the historical `?org=` convenience,
+      byte-for-byte unchanged.
+    * no pin at all (a LiveView mounted outside the framework tenant macros) — the posture is
+      re-derived from the mount: DISARMED keeps the convenience; ARMED refuses the param and
+      keeps `mount/3`'s fail-closed answer. So the fix holds even where the hook does not run.
+  """
+  @spec reresolve(Phoenix.LiveView.Socket.t() | map(), map()) :: String.t() | nil
+  def reresolve(socket, params) do
+    assigns = socket_assigns(socket)
+    current = Map.get(assigns, :org_id)
+    requested = param_org(params)
+
+    case Map.get(assigns, :samen_authorized_orgs) do
+      :unconstrained ->
+        requested || current
+
+      list when is_list(list) ->
+        if is_binary(requested) and requested in list, do: requested, else: current
+
+      _ ->
+        if tenant_gate_armed?(Map.get(assigns, :samen_mount)),
+          do: current,
+          else: requested || current
+    end
+  end
+
+  defp socket_assigns(%{assigns: assigns}) when is_map(assigns), do: assigns
+  defp socket_assigns(assigns) when is_map(assigns), do: assigns
+  defp socket_assigns(_), do: %{}
+
   # Whether this mount requires an authenticated session before it derives an actor. Off by
   # default (dev/test convenience). A host opts in via the `:authn` label: `:required` (always
   # on) or `{:app_env, app, key}` (runtime-flippable — driftwood points this at
@@ -161,7 +266,14 @@ defmodule Samen.Web.CurrentOrg do
   # prod. A mount with NO resolvable otp_app (a synthetic/unit-test mount that carries no repo
   # config) counts as disarmed, exactly as the impersonation param-leg treats a mountless socket —
   # every framework route populates a real otp_app, so every armed deploy is covered.
-  defp param_trust_disarmed?(mount) do
+  @doc """
+  Whether this mount's host is in the DISARMED (dev/dogfood) posture — the ONLY posture in which
+  a client-supplied `?org=`/`?user=` is trusted as identity. Public since B-SEC so the sibling
+  identity resolvers (`Samen.Web.Settings.Reads`, `Samen.Web.Auth.TotpEnrollLive`) key their own
+  param legs on the SAME predicate instead of trusting params unconditionally.
+  """
+  @spec param_trust_disarmed?(Mount.t() | nil) :: boolean()
+  def param_trust_disarmed?(mount) do
     case Samen.Web.Operator.otp_app(mount) do
       nil -> true
       otp_app -> not Application.get_env(otp_app, :auth_required?, false)
@@ -183,12 +295,13 @@ defmodule Samen.Web.CurrentOrg do
   #      materialized Identity resources (no host MFA needed — the mount's namespace IS the
   #      Identity mount for `:auth`/`:settings`-kind scopes).
   defp resolve_authorized(mount, params, session) do
-    with user_id when is_binary(user_id) <- Samen.Web.Auth.authenticated_user_id(session),
-         [_ | _] = authorized <- authorized_org_ids(mount, user_id) do
-      requested = param_org(params) || session_org(session)
-      if requested in authorized, do: requested, else: List.first(authorized)
-    else
-      _ -> resolve_spine_authorized(mount, params, session)
+    case authorized_orgs(mount, session) do
+      [_ | _] = authorized ->
+        requested = param_org(params) || session_org(session)
+        if requested in authorized, do: requested, else: List.first(authorized)
+
+      _ ->
+        nil
     end
   end
 
@@ -207,16 +320,6 @@ defmodule Samen.Web.CurrentOrg do
     end
   rescue
     _ -> []
-  end
-
-  defp resolve_spine_authorized(mount, params, session) do
-    with {:ok, credential_id} <- spine_credential_id(mount, session),
-         [_ | _] = authorized <- spine_authorized_org_ids(mount, credential_id) do
-      requested = param_org(params) || session_org(session)
-      if requested in authorized, do: requested, else: List.first(authorized)
-    else
-      _ -> nil
-    end
   end
 
   defp spine_credential_id(%Mount{} = mount, session) do

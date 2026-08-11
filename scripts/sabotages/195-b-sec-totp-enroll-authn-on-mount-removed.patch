@@ -1,0 +1,22 @@
+# SABOTAGE: B-SEC / S3 — the TOTP-ENROLLMENT AUTHN GATE DEFEATED. `samen_settings_routes/3`
+# mounts `Samen.Web.Auth.TotpEnrollLive` in a `live_session` with NO `on_mount` (the shipped
+# pre-fix shape): `socket.assigns.samen_credential_id` is then never populated, the surface
+# falls back to `params["credential_id"]`, and an UNAUTHENTICATED caller disables 2FA /
+# re-enrolls an attacker-controlled secret / regenerates recovery codes on ANY credential (the
+# kernel writes are `authorize?: false` by design — the SURFACE is the authorization). The named
+# red paths MUST flip in BOTH postures: authentication here does not relax in dev.
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_authz_live_test.exs
+# MUST_FAIL: unauthenticated `?credential_id=<victim>` is REFUSED on an ARMED host
+# MUST_FAIL: unauthenticated `?credential_id=<victim>` is REFUSED while DISARMED too
+diff --git a/samen_web/lib/samen/web/router.ex b/samen_web/lib/samen/web/router.ex
+--- a/samen_web/lib/samen/web/router.ex
++++ b/samen_web/lib/samen/web/router.ex
+@@ -1180,7 +1180,6 @@
+       # correct posture for a step across an authentication boundary.
+       if spine_totp do
+         live_session :"#{session_name}_totp",
+-          on_mount: [{Samen.Web.Auth, :ensure_authenticated}],
+           session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+           live("#{path}/security/2fa", Samen.Web.Auth.TotpEnrollLive)
+         end

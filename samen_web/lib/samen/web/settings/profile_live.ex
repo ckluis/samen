@@ -45,8 +45,8 @@ defmodule Samen.Web.Settings.ProfileLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
-    user_id = Map.get(params, "user") || socket.assigns.user_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
+    user_id = Samen.Web.Settings.Reads.reresolve_user(socket, params)
 
     {:noreply,
      socket

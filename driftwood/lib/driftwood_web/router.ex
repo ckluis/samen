@@ -70,6 +70,23 @@ defmodule DriftwoodWeb.Router do
     host_nav_extra: {DriftwoodWeb.BrokerLive, :operations_nav_data, []}
   }
 
+  # B-SEC / S4 — the session-transported mount for the freight tenant console (`/broker`).
+  # Same labels (hence the same `:authn` + `:authorized_orgs` seams) as every other tenant
+  # mount; the namespace is the Identity spine (`Driftwood.Operator`) because this mount is
+  # consulted for AUTHORIZATION ONLY — BrokerLive reads `Driftwood.Freight` resources directly.
+  @broker_mount Samen.Web.Mount.to_session(
+                  Samen.Web.Mount.new(:settings, Driftwood.Operator, Driftwood.Repo,
+                    labels: %{
+                      default_org_id: Driftwood.Seeds.blue_ridge_org_id(),
+                      org_directory: {Driftwood.Directory, :orgs, []},
+                      authn: {:app_env, :driftwood, :auth_required?},
+                      authorized_orgs: {Driftwood.Auth, :authorized_org_ids, []},
+                      operator_workspace: "Driftwood Ops",
+                      seed_command: "mix driftwood.seed"
+                    }
+                  )
+                )
+
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
@@ -125,7 +142,19 @@ defmodule DriftwoodWeb.Router do
     # prod gate still redirects unauthenticated tenants to `/login` (now the framework LoginLive).
 
     # The freight vertical 20% (stays driftwood-local — freight-shaped resources).
-    live("/broker", BrokerLive)
+    #
+    # B-SEC / S4 — `/broker` is a PII-bearing TENANT surface (it reads vaulted driver
+    # `full_name`/`cdl_number` in the clear on the tenant plane), so it adopts the FRAMEWORK
+    # tenant gate at ≈0 authored authz LOC instead of carrying its own actor construction: a
+    # `live_session` threading the SAME `@current_org_labels` mount every other tenant surface
+    # carries, plus `{Samen.Web.TenantAuthz, :require_tenant}`. `BrokerLive` then resolves its
+    # org through `Samen.Web.CurrentOrg` like every framework tenant LiveView, rather than
+    # fabricating a `plane: :tenant` actor from `?org=` and discarding the session.
+    live_session :driftwood_broker,
+      on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+      session: %{"samen_mount" => @broker_mount} do
+      live("/broker", BrokerLive)
+    end
     # NOTE (T146): `/operator/impersonate` was moved OUT of this bare `:browser` scope into the
     # operator-authz scope below — it is an OPERATOR surface and must be role-gated, not merely
     # authenticated. Mounting it here (authentication only) was the verifier-found bypass.

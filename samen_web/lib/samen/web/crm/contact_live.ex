@@ -68,7 +68,7 @@ defmodule Samen.Web.CRM.ContactLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     contact_id = Map.get(params, "id") || socket.assigns.contact_id
     tab = Map.get(params, "tab") || "overview"
 

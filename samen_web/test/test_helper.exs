@@ -22,3 +22,11 @@ case Oban.start_link(Application.fetch_env!(:samen_core, Oban)) do
   {:ok, _pid} -> :ok
   {:error, {:already_started, _pid}} -> :ok
 end
+
+# B-SEC (S5) — the LiveView-driving tenant-authz red-path suite needs a real endpoint.
+# `server: false`, so this starts the endpoint's supervision tree (config, pubsub-less)
+# without binding a port.
+case Samen.WebTest.SecurityEndpoint.start_link() do
+  {:ok, _} -> :ok
+  {:error, {:already_started, _}} -> :ok
+end

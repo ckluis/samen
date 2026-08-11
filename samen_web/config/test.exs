@@ -68,3 +68,20 @@ config :samen_web, :fleet_wire_catalogs,
   closed_plan_tier_catalog: ~w(free pro enterprise),
   closed_app_queue_catalog: ~w(mailers webhooks reports),
   closed_audit_taxonomy_catalog: ~w(login logout org_update billing_update)
+
+# B-SEC (luminary pre-merge, S5) — the ONLY endpoint in this library, and it exists ONLY for
+# the LiveView-driving tenant-authz red-path suite (`test/samen/web/tenant_authz_live_test.exs`).
+# Before it, NO test in the repo drove a tenant LiveView through a real router: every
+# tenant-authn proof asserted `Samen.Web.CurrentOrg.resolve/3` as a unit function, which is why
+# the `handle_params`-on-dead-render bypass passed every gate. `server: false` — the suite drives
+# it through Phoenix.ConnTest / Phoenix.LiveViewTest, never a listening socket.
+config :samen_web, Samen.WebTest.SecurityEndpoint,
+  secret_key_base: String.duplicate("samen-web-security-probe-", 4),
+  live_view: [signing_salt: "sec-probe-lv"],
+  render_errors: [formats: [html: Samen.WebTest.SecurityErrorHTML], layout: false],
+  server: false
+
+# NOTE: the fictional host app the probe arms/disarms (`:samen_web_security_test_host`) is
+# deliberately NOT configured here — it is not a real dependency, and an unset
+# `:auth_required?` already reads as DISARMED (`Application.get_env(app, :auth_required?, false)`).
+# The suite flips it at runtime via `Samen.WebTest.SecurityHost.arm!/0`.

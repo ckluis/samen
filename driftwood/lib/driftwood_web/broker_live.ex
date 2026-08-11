@@ -20,10 +20,24 @@ defmodule DriftwoodWeb.BrokerLive do
     * `settlements` — the reshaped two-sided money (`Driftwood.Reads.settlements/1`):
       gross − advances − factoring_fee − claims = net_payable, with carryover.
 
-  The org is chosen by `?org=<uuid>` (a LOCAL DOGFOOD convenience — a real deploy derives
-  the tenant org from the authenticated session; see docs/driftwood-dogfood.md). The
-  broker actor is a tenant member of that org. Every read goes through Ash with this
-  scope, so OrgScope confines the view to the broker's own org.
+  ## The acting org — the FRAMEWORK seam, not a raw `?org=` (B-SEC / S4)
+
+  This console used to take its org from `param(params, "org")` in `mount/3` itself and
+  discard the `session` argument entirely, fabricating a `plane: :tenant` actor from
+  whatever UUID the caller typed — so `curl '/broker?org=<victim>&panel=roster'` read
+  another org's vaulted driver `full_name`/`cdl_number` in the CLEAR, in ANY posture,
+  because this surface never consulted the gate at all.
+
+  It now adopts the framework tenant seam at ≈0 authored authz LOC, exactly like the
+  mounted CRM/Billing/Support pages: `/broker` rides a `live_session` carrying the
+  `@current_org_labels` mount + `{Samen.Web.TenantAuthz, :require_tenant}` (see
+  `DriftwoodWeb.Router`), `mount/3` resolves through `Samen.Web.CurrentOrg.resolve/3`
+  (fail-closed; armed → the authenticated principal's authorized orgs only), and
+  `handle_params/3` re-reads through `Samen.Web.CurrentOrg.reresolve/2` so the dead-render
+  callback cannot re-derive identity from the client. While the host is explicitly DISARMED
+  the dogfood `?org=<uuid>` convenience is unchanged (see docs/driftwood-dogfood.md). The
+  broker actor is a tenant member of the RESOLVED org; every read goes through Ash with
+  that scope, so OrgScope confines the view to the broker's own org.
   """
   use Phoenix.LiveView
 
@@ -42,8 +56,9 @@ defmodule DriftwoodWeb.BrokerLive do
   alias Driftwood.{BrokerRollup, Reads}
 
   @impl true
-  def mount(params, _session, socket) do
-    org_id = param(params, "org")
+  def mount(params, session, socket) do
+    socket = Samen.Web.Live.assign_mount(socket, session)
+    org_id = Samen.Web.CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
     panel = panel(params)
 
     socket =
@@ -87,7 +102,7 @@ defmodule DriftwoodWeb.BrokerLive do
   @impl true
   def handle_params(params, _uri, socket) do
     panel = panel(params)
-    org_id = param(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     {:noreply, load_panel(assign(socket, panel: panel, org_id: org_id), panel, org_id)}
   end
 

@@ -39,8 +39,8 @@ defmodule Samen.Web.Settings.InvitationsLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
-    user_id = Map.get(params, "user") || socket.assigns.user_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
+    user_id = Samen.Web.Settings.Reads.reresolve_user(socket, params)
 
     {:noreply,
      socket
@@ -239,6 +239,18 @@ defmodule Samen.Web.Settings.InvitationsLive do
     }
   end
 
+  # B-SEC / S2 — the NO-PRINCIPAL branch is fail-CLOSED.
+  #
+  # This used to return `true` for "no principal resolved", on the reasoning that a BYO-auth host
+  # with no spine `Credential` has no unverified state to enforce. But the same branch also
+  # caught the case with no principal AT ALL — so an UNAUTHENTICATED attacker driving this
+  # surface got `verified?: true` handed to the invite scope, satisfying the ADR-035 §5 A2
+  # capability gate for free. The three cases are now distinguished:
+  #
+  #   * spine principal      → the REAL `Credential.verified_at` (unchanged);
+  #   * legacy BYO principal → `true` (a BYO host genuinely has no verified state — unchanged
+  #     for every authenticated BYO caller, which is the only caller that reaches it);
+  #   * NO principal / error → `false` (fail CLOSED — the attacker's branch).
   defp verified?(mount, session) do
     session_mod = Mount.resource(mount, Session)
 
@@ -249,10 +261,13 @@ defmodule Samen.Web.Settings.InvitationsLive do
           _ -> false
         end
 
+      {:ok, %{user_id: user_id}} ->
+        is_binary(user_id)
+
       _ ->
-        true
+        not Samen.Web.CurrentOrg.tenant_gate_armed?(mount)
     end
   rescue
-    _ -> true
+    _ -> not Samen.Web.CurrentOrg.tenant_gate_armed?(mount)
   end
 end

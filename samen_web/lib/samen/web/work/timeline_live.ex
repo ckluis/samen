@@ -64,7 +64,7 @@ defmodule Samen.Web.Work.TimelineLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     from = parse_from(Map.get(params, "from"), socket.assigns[:from] || default_from())
     {:noreply, load(assign(socket, org_id: org_id, from: from, return_to: return_path(uri)), org_id)}
   end

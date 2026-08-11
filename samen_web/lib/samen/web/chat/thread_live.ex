@@ -51,7 +51,7 @@ defmodule Samen.Web.Chat.ThreadLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     thread_id = Map.get(params, "id") || socket.assigns.thread_id
     {:noreply, load(assign(socket, org_id: org_id, thread_id: thread_id), org_id, thread_id)}
   end

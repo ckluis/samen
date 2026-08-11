@@ -333,6 +333,31 @@ try do
     end
   end
 
+  # B-SEC / S3 — a GET that must be REFUSED (no autoredirect, so the 302 itself is asserted
+  # rather than the login page httpc would silently follow to).
+  refuses = fn path, why ->
+    url = ~c"http://127.0.0.1:#{http_port}\#{path}"
+
+    case :httpc.request(:get, {url, []}, [autoredirect: false], body_format: :binary) do
+      {:ok, {{_, 302, _}, hdrs, _body}} ->
+        loc = for({~c"location", v} <- hdrs, do: to_string(v)) |> List.first()
+
+        unless loc && String.starts_with?(loc, "/login") do
+          IO.puts("FLAGSHIP FAIL: GET \#{path} redirected to \#{inspect(loc)}, expected /login (\#{why})")
+          System.halt(1)
+        end
+
+        IO.puts("FLAGSHIP: GET \#{path} → 302 /login (REFUSED — \#{why})")
+
+      {:ok, {{_, code, _}, _hdrs, _body}} ->
+        IO.puts("FLAGSHIP FAIL: GET \#{path} → \#{code}, expected a 302 to /login (\#{why})")
+        System.halt(1)
+
+      other ->
+        raise "HTTP GET \#{path} failed: \#{inspect(other)}"
+    end
+  end
+
   check = fn path, expect ->
     {code, body} = get.(path)
 
@@ -753,10 +778,21 @@ try do
   # Settings/Security (mounted via --modules settings, spine_totp on) + the 2FA-enroll
   # route that had NO HTTP mount before Addendum 2 (2FA was unreachable in prod).
   check.("/settings/security?org=\#{inviter.org.id}&user=\#{inviter.user.id}", nil)
-  check.("/settings/security/2fa?credential_id=\#{inviter.credential.id}", "auth-totp-enroll")
+
+  # B-SEC / S3 (luminary pre-merge BLOCKER) — the 2FA-ENROLL route is MOUNTED (Addendum 2: it
+  # had no HTTP mount at all before), but it is now AUTHENTICATED: it rides its own
+  # `live_session` carrying `{Samen.Web.Auth, :ensure_authenticated}`. An UNAUTHENTICATED
+  # `?credential_id=<victim>` used to render the enrollment page and let the caller disable 2FA
+  # / re-enroll an attacker-controlled secret / regenerate recovery codes on ANY credential.
+  # A 404 here would mean the route vanished; a 200 would mean the hole is back. The honest
+  # answer is 302 → /login, asserted directly.
+  refuses.(
+    "/settings/security/2fa?credential_id=\#{inviter.credential.id}",
+    "the 2FA-enroll surface must never act on a client-named credential"
+  )
 
   IO.puts("FLAGSHIP: auth spine reachable over HTTP — /signup /login /onboarding " <>
-            "/settings/security /settings/security/2fa (Addendum 2: 2FA-enroll route live)")
+            "/settings/security (Addendum 2: 2FA-enroll route live, B-SEC: and authenticated)")
 
   IO.puts("FLAGSHIP: ALL ROUTES 200")
   """

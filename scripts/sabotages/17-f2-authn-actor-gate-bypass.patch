@@ -12,10 +12,9 @@
 # MUST_FAIL: prod-path RED: an unauthenticated request derives NO actor
 # MUST_FAIL: prod-path RED: an authenticated user cannot act on a non-member org
 diff --git a/samen_web/lib/samen/web/current_org.ex b/samen_web/lib/samen/web/current_org.ex
-index 347e803..c972456 100644
 --- a/samen_web/lib/samen/web/current_org.ex
 +++ b/samen_web/lib/samen/web/current_org.ex
-@@ -141,7 +141,10 @@ defmodule Samen.Web.CurrentOrg do
+@@ -246,7 +246,10 @@
          true
  
        {:app_env, app, key} when is_atom(app) and is_atom(key) ->
@@ -27,8 +26,8 @@ index 347e803..c972456 100644
  
        _ ->
          false
-@@ -164,7 +167,7 @@ defmodule Samen.Web.CurrentOrg do
-   defp param_trust_disarmed?(mount) do
+@@ -276,7 +279,7 @@
+   def param_trust_disarmed?(mount) do
      case Samen.Web.Operator.otp_app(mount) do
        nil -> true
 -      otp_app -> not Application.get_env(otp_app, :auth_required?, false)

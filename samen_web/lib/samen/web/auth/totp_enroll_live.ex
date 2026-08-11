@@ -17,12 +17,22 @@ defmodule Samen.Web.Auth.TotpEnrollLive do
   `Samen.Web.Auth.ResetLive`'s shape rather than `LoginLive`'s
   `phx-trigger-action` pattern.
 
+  ## B-SEC / S3 — `credential_id` is the AUTHENTICATED principal, never a param
+
   `credential_id` comes from `on_mount {Samen.Web.Auth, :ensure_authenticated}`
-  (`socket.assigns.samen_credential_id`) when mounted behind the framework
-  spine's auth, with a `params["credential_id"]` override for direct/test
-  mounts — the SAME "explicit override, else session-derived" shape
-  `Samen.Web.Settings.Reads.current_user_id/3` already uses elsewhere in this
-  library.
+  (`socket.assigns.samen_credential_id`), which `samen_settings_routes/3` now
+  attaches via a DEDICATED `live_session` for this route.
+
+  It used to read `params["credential_id"]` FIRST, and the `live_session` this
+  route rode carried NO `on_mount` at all — so the session fallback was never
+  populated and the param was the only source. Combined with
+  `SecurityLive.credential_id_for/2` handing the id out, that was an
+  UNAUTHENTICATED 2FA strip / secret re-enroll / recovery-code regeneration on
+  ANY credential (the kernel writes are `authorize?: false` by design — the
+  surface WAS the authorization). The param leg is now consulted only in the
+  explicitly DISARMED dev posture, exactly like `?org=`/`?user=`, and a mount
+  that resolves NO credential renders the honest "no credential" card instead of
+  acting on a client-named one.
 
   ## A10 fan-out (T09, ADR-035 §5 A10)
 
@@ -55,7 +65,7 @@ defmodule Samen.Web.Auth.TotpEnrollLive do
 
   @doc false
   def load(socket, params) do
-    credential_id = params["credential_id"] || socket.assigns[:samen_credential_id]
+    credential_id = credential_id(socket, params)
     mount = socket.assigns.samen_mount
 
     cond do
@@ -97,6 +107,18 @@ defmodule Samen.Web.Auth.TotpEnrollLive do
   # One-time recovery codes handed over by `TotpEnrollController` via flash (a
   # signed, same-user, single-use channel — never a URL). Read defensively: a
   # directly-constructed test socket carries no `:flash` assign.
+  # B-SEC / S3 — the AUTHENTICATED principal wins. `samen_credential_id` is assigned by
+  # `on_mount {Samen.Web.Auth, :ensure_authenticated}` (the dedicated `live_session` this route
+  # rides). The `?credential_id=` leg survives ONLY for direct/dev mounts in the explicitly
+  # DISARMED posture — the SAME gate `Samen.Web.CurrentOrg` applies to `?org=` — so on an armed
+  # host a client can never name whose 2FA this page acts on.
+  defp credential_id(socket, params) do
+    socket.assigns[:samen_credential_id] ||
+      if Samen.Web.CurrentOrg.param_trust_disarmed?(socket.assigns[:samen_mount]) do
+        params["credential_id"]
+      end
+  end
+
   defp flash_recovery_codes(socket) do
     with %{} = flash <- socket.assigns[:flash],
          joined when is_binary(joined) and joined != "" <- Phoenix.Flash.get(flash, :totp_recovery_codes) do

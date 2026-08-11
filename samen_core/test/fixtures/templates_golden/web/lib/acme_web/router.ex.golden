@@ -27,6 +27,21 @@ defmodule AcmeWeb.Router do
   ON in prod (the actor is derived only from an authenticated session — see
   `Samen.Web.CurrentOrg`). Flipping `config :acme, :auth_required?`
   to `true` closes the spoofable `?org=`/`?user=` URL-param resolution path.
+
+  ## The tenant AUTH GATE is emitted by the route macros (B-SEC)
+
+  There is deliberately NO hand-written tenant auth plug in this router. Every
+  `samen_*_routes` tenant macro emits its `live_session` carrying
+  `on_mount: [{Samen.Web.TenantAuthz, :require_tenant}]` — the framework-side
+  gate that (1) `:halt`s an armed, UNAUTHENTICATED tenant request before anything
+  renders (an `on_mount` halt is the only thing that preempts `handle_params/3`
+  on Phoenix LiveView's initial DEAD RENDER) and (2) PINS the org authority into
+  the socket so a client `?org=` can only SELECT among the authenticated
+  principal's authorized orgs, never name a new identity. A generated app is
+  therefore secure-by-construction: you cannot mount a tenant surface here and
+  forget the gate, because the gate travels with the macro. The operator plane
+  keeps its own conn-level `:require_authenticated_operator` pipeline below —
+  it derives its scope from the well-known operator org id, not `CurrentOrg`.
   """
   use Phoenix.Router
   import Phoenix.LiveView.Router

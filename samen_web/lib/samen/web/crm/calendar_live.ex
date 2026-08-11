@@ -55,7 +55,7 @@ defmodule Samen.Web.CRM.CalendarLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     month = Calendar.parse_month(Map.get(params, "month"), socket.assigns[:month] || Date.utc_today())
     {:noreply, load(assign(socket, org_id: org_id, month: month, return_to: return_path(uri)), org_id)}
   end

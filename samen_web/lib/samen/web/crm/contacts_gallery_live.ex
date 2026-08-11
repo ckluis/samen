@@ -53,7 +53,7 @@ defmodule Samen.Web.CRM.ContactsGalleryLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     after_id = parse_after(Map.get(params, "after"))
     {:noreply, load(assign(socket, org_id: org_id, after_id: after_id, return_to: return_path(uri)), org_id)}
   end

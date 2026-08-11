@@ -777,7 +777,17 @@ defmodule Samen.Gen.App do
 
   # Each mountable surface carries the `@current_org_labels` seam (the `:authn`
   # prod gate — see the router template) so a generated prod app never resolves an
-  # arbitrary org/user via `?org=`/`?user=`. The settings mount ALSO opts into
+  # arbitrary org/user via `?org=`/`?user=`.
+  #
+  # B-SEC (luminary pre-merge) — that seam alone was NOT the whole guarantee it claimed to
+  # be: `Samen.Web.CurrentOrg.resolve/3` runs in `mount/3`, and every framework tenant
+  # LiveView then re-derived the org from `params["org"]` in `handle_params/3`, which LV
+  # 1.2.9 runs on the initial DEAD RENDER. The seam is now backed by two structural
+  # controls the route macros themselves emit — `{Samen.Web.TenantAuthz, :require_tenant}`
+  # on every tenant `live_session` (the on_mount halt that preempts `handle_params`) and
+  # `Samen.Web.CurrentOrg.reresolve/2` in every tenant `handle_params` (a `?org=` may only
+  # SELECT among the principal's authorized orgs) — so the claim holds by construction and
+  # a generated app inherits both at ≈0 authored LOC. The settings mount ALSO opts into
   # `spine_totp: true`: this app mounts the framework Identity spine, so its
   # `/settings/security` surface exposes the REAL TOTP-enrollment route
   # (`/settings/security/2fa`) instead of the honest "managed by your identity
