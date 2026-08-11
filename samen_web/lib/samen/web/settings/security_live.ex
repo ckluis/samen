@@ -98,6 +98,7 @@ defmodule Samen.Web.Settings.SecurityLive do
       org_id: org_id,
       user_id: user_id,
       sessions: sessions_for(mount, org_id),
+      reveal_events: reveal_events_for(mount, org_id),
       host_managed: if(spine?, do: @host_managed_spine, else: @host_managed_default),
       spine_sessions?: spine?,
       spine_totp?: totp?,
@@ -132,6 +133,39 @@ defmodule Samen.Web.Settings.SecurityLive do
     Samen.Impersonation.Sessions.list_for_org(org_id, repo: mount.repo)
   rescue
     _ -> []
+  end
+
+  # PP-11 (T150) — the REVEAL-access ledger. An impersonation session records the MASKED
+  # view; a reveal is the moment tenant PII actually becomes plaintext to an operator. Read
+  # the org-scoped reveal-grant lifecycle from the tenant-readable audit chain (the SAME
+  # honest-empty posture as `sessions_for/2`: a host that has not migrated `aud_chain`, or
+  # the reserved `__global__` partition, yields `[]` — never a fake). This closes the T150
+  # blind spot where the tenant could see "operator held a masked session" but never "operator
+  # requested/held a reveal of subject Y, reason Z, at time T". READ-ONLY — no mutation.
+  defp reveal_events_for(_mount, nil), do: []
+
+  defp reveal_events_for(mount, org_id) do
+    org_id
+    |> Samen.AuditChain.reveal_events_for_org(repo: mount.repo)
+    |> Enum.map(fn e ->
+      {label, reason} = reveal_row(e.detail)
+      Map.merge(e, %{label: label, reason: reason})
+    end)
+  rescue
+    _ -> []
+  end
+
+  # Turn the token-only `detail` ("event=requested <reason>") into a tenant-legible
+  # {label, reason} pair for the ledger row.
+  defp reveal_row(detail) do
+    case detail || "" do
+      "event=requested " <> reason -> {"Reveal requested", reason}
+      "event=requested" -> {"Reveal requested", ""}
+      "event=revoked" <> rest -> {"Reveal revoked", String.trim(rest)}
+      "event=expired" <> rest -> {"Reveal window expired", String.trim(rest)}
+      "event=denied" <> rest -> {"Reveal denied", String.trim(rest)}
+      other -> {"Reveal event", String.trim(other)}
+    end
   end
 
   # ADR-035 §4.3 — the REAL `Identity.Session` list for the current user's
@@ -222,6 +256,35 @@ defmodule Samen.Web.Settings.SecurityLive do
                   </tr>
                   <tr :if={@sessions == []}>
                     <td colspan="5" style="color:var(--muted)">No impersonation sessions recorded.</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="gtitle" style="margin-top:24px">
+                <h3>Reveal access</h3>
+                <span class="lane">when an operator unmasked customer PII in your org — who, which subject, when, and the reason — read-only accountability</span>
+              </div>
+
+              <table id="security-reveal-table" class="tbl">
+                <thead>
+                  <tr>
+                    <th scope="col">Event</th>
+                    <th scope="col">Operator</th>
+                    <th scope="col">Subject</th>
+                    <th scope="col">Reason</th>
+                    <th scope="col">When</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :for={e <- @reveal_events} class="security-reveal-row">
+                    <td>{e.label}</td>
+                    <td>{e.actor_id}</td>
+                    <td class="mono" style="font-size:12px">{e.subject_id}</td>
+                    <td style="font-size:12px">{e.reason}</td>
+                    <td>{fmt(e.occurred_at)}</td>
+                  </tr>
+                  <tr :if={@reveal_events == []}>
+                    <td colspan="5" style="color:var(--muted)">No reveal access recorded for this org.</td>
                   </tr>
                 </tbody>
               </table>

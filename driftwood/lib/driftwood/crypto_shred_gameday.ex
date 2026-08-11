@@ -150,10 +150,13 @@ defmodule Driftwood.CryptoShredGameday do
         reason: "Carrier onboarding CDL verification, ticket DW-#{unique()}",
         resource: Driftwood.Freight.Driver,
         action: :reveal_driver,
+        # PP-11 (T150): tenant-attribute the reveal lifecycle onto the driver's OWN org
+        # chain (the tenant's SecurityLive ledger), not the `__global__` operator chain.
+        org_id: org_id,
         repo: repo
       })
 
-    {:ok, grant} = Grants.approve(request, %{granted_by: approver, repo: repo})
+    {:ok, grant} = Grants.approve(request, %{granted_by: approver, org_id: org_id, repo: repo})
 
     # Drive the actual reveal through the single decrypt chokepoint (proves the CDL
     # is decryptable PRE-shred — the anti-tautology anchor for the CDL red path).

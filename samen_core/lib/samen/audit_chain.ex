@@ -66,6 +66,58 @@ defmodule Samen.AuditChain do
   @spec global_org() :: String.t()
   def global_org, do: @global_org
 
+  # The reveal/grant lifecycle event_type on the chain (`Samen.Reveal.Grants.write_audit/2`
+  # writes `requested`/`revoked`/`expired`/`denied` rows under this type). This is the
+  # token-only lifecycle record a tenant is entitled to see for its OWN org (T150).
+  @reveal_event_type "grant_lifecycle"
+
+  @doc """
+  The tenant-visible REVEAL-access ledger for `org_id` (PP-11 / T150). Returns the
+  org's `grant_lifecycle` chain entries — the reveal-grant lifecycle events
+  (requested / revoked / expired / denied) that were TENANT-ATTRIBUTED (the caller
+  threaded the subject's `org_id` through `Samen.Reveal.Grants`), newest first, as a
+  token-only projection (`subject_id`, `actor_id`, `detail`, `correlation_id`,
+  `occurred_at`).
+
+  ## Org-scoped, never cross-tenant, never the operator chain (ADR-002 §2.1)
+
+  The chain is per-org, so a tenant sees ONLY its own org's reveal events. The reserved
+  `"__global__"` operator/system partition is NOT a tenant org — it is refused with an
+  empty list (a reveal event that DROPPED its org_id lands there and is deliberately NOT
+  surfaced to any tenant; that is the PP-11 defect this reader + the org_id threading
+  close). On any read error (e.g. a host that has not migrated `aud_chain`) it degrades to
+  an empty list — honest, never a fake — mirroring how `Settings.SecurityLive` reads
+  impersonation sessions.
+  """
+  @spec reveal_events_for_org(String.t(), keyword()) :: [map()]
+  def reveal_events_for_org(org_id, opts \\ []) do
+    org_id = to_string(org_id)
+
+    if org_id == @global_org do
+      []
+    else
+      r = Keyword.get(opts, :repo, repo())
+      limit = Keyword.get(opts, :limit, 50)
+
+      r.all(
+        from(e in Entry,
+          where: e.org_id == ^org_id and e.event_type == ^@reveal_event_type,
+          order_by: [desc: e.occurred_at, desc: e.seq],
+          limit: ^limit,
+          select: %{
+            subject_id: e.subject_id,
+            actor_id: e.actor_id,
+            detail: e.detail,
+            correlation_id: e.correlation_id,
+            occurred_at: e.occurred_at
+          }
+        )
+      )
+    end
+  rescue
+    _ -> []
+  end
+
   @doc "The Ecto repo backing the chain. Configured via :audit_chain_repo (falls back to :reveal_grant_repo)."
   @spec repo() :: module()
   def repo do

@@ -1,0 +1,26 @@
+# SABOTAGE: PP-11 (Batch 6 REVEAL-ACCOUNTABILITY) — the reveal-request lifecycle audit
+# DROPS the tenant org_id (`Samen.Reveal.Grants.do_request/3` writes the `requested` event
+# with `org_id: nil` instead of `attrs[:org_id]`), so the "who requested to unmask which
+# subject, when, and why" event is routed to the reserved `__global__` operator chain
+# instead of the SUBJECT'S tenant org chain — invisible to that tenant's
+# `Settings.SecurityLive` ledger. This is the exact T150 accountability blind spot Batch 6
+# closes: the most sensitive access (a reveal) is the one event the tenant ledger omitted.
+# The named test flips — the tenant's org-scoped reveal ledger no longer names the
+# requestor/subject/reason (the `requested` grant_lifecycle entry now lands on __global__).
+# `attrs` stays referenced elsewhere in `do_request/3` (⇒ a genuine assertion flip, not a
+# compile error). Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/reveal_grants_test.exs
+# MUST_FAIL: visible on THAT tenant's reveal ledger
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -144,7 +144,7 @@ defmodule Samen.Reveal.Grants do
+         # THAT tenant's `Settings.SecurityLive` ledger. Absent an org_id it falls to the
+         # reserved `__global__` operator chain (`write_audit/2` / ADR-002 §2.1) — the
+         # pre-PP-11 behavior for callers that have not threaded the target org.
+-        org_id: attrs[:org_id]
++        org_id: nil
+       })
+
+       # T35 §4.7: additionally open a `pii_reveal` Approval through the T34 engine —

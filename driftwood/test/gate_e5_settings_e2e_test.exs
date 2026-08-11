@@ -160,4 +160,52 @@ defmodule Driftwood.GateE5SettingsE2ETest do
     # Sanity: the rendered session is the one we opened.
     assert session.org_id == org_id
   end
+
+  # PP-11 (T150) — the Security page now also surfaces the REVEAL-access ledger: the moment
+  # tenant PII actually becomes plaintext to an operator (the reveal), org-scoped. The reveal
+  # lifecycle is written to the TENANT's audit chain (org_id threaded through Grants), so it
+  # is visible HERE and NOT on a different org's page. Read-only (no phx-click/submit).
+  test "Security page renders the org-scoped REVEAL-access ledger (PP-11); a different org does not see it" do
+    org_id = Ash.UUID.generate()
+    other_org = Ash.UUID.generate()
+    subject = Ash.UUID.generate()
+    requestor = "op-reveal-pp11"
+
+    {:ok, req} =
+      Samen.Reveal.Grants.request(%{
+        subject_id: subject,
+        requestor_id: requestor,
+        reason: "ticket PP11: CDL verification",
+        org_id: org_id,
+        repo: Driftwood.Repo
+      })
+
+    {:ok, _grant} =
+      Samen.Reveal.Grants.approve(req, %{
+        granted_by: "distinct-approver-pp11",
+        org_id: org_id,
+        repo: Driftwood.Repo
+      })
+
+    mount = Mount.new(:settings, Driftwood.Operator, Driftwood.Repo, plane: Plane.tenant())
+    html = render_framework(SecurityLive, mount, [org_id, nil])
+
+    # The tenant sees WHO requested the reveal, of WHICH subject, and the reason.
+    assert html =~ "security-reveal-table"
+    assert html =~ "security-reveal-row"
+    assert html =~ requestor
+    assert html =~ subject
+    assert html =~ "ticket PP11"
+    refute html =~ "No reveal access recorded"
+
+    # ORG ISOLATION — a DIFFERENT org's Security page does not surface org_id's reveal.
+    other_html = render_framework(SecurityLive, mount, [other_org, nil])
+    refute other_html =~ requestor
+    refute other_html =~ subject
+    assert other_html =~ "No reveal access recorded"
+
+    # RP-ST-4 stays true — the reveal ledger is read-only, no invented auth mutation.
+    refute html =~ "phx-click"
+    refute html =~ "phx-submit"
+  end
 end

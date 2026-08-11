@@ -82,9 +82,16 @@ defmodule Driftwood.OperatorReveal do
   `{:error, {:pii_shaped_reason, _}}` when the reason is itself a PII value shape — the reason
   must name the ticket, not the person).
   """
-  @spec request_reveal(binary(), binary(), String.t()) ::
+  # PP-11 (T150): `org_id` is the TENANT org the impersonation session is opened over —
+  # the driver's own org. Threading it makes the reveal-request lifecycle event land on
+  # THAT tenant's audit chain (visible on its `Settings.SecurityLive` ledger), instead of
+  # the org-less `__global__` operator chain. Optional (defaults `nil`) so the pre-PP-11
+  # 3-arity call sites keep compiling with the pre-PP-11 (global-chain) behavior.
+  @spec request_reveal(binary(), binary(), String.t(), String.t() | nil) ::
           {:ok, Samen.Reveal.RevealRequest.t()} | {:error, term()}
-  def request_reveal(operator_id, driver_id, reason)
+  def request_reveal(operator_id, driver_id, reason, org_id \\ nil)
+
+  def request_reveal(operator_id, driver_id, reason, org_id)
       when is_binary(operator_id) and is_binary(driver_id) and is_binary(reason) do
     Samen.Reveal.Grants.request(%{
       subject_id: to_string(driver_id),
@@ -92,9 +99,10 @@ defmodule Driftwood.OperatorReveal do
       reason: reason,
       resource: Driftwood.Freight.Driver,
       action: :reveal_driver,
+      org_id: org_id,
       repo: Driftwood.Repo
     })
   end
 
-  def request_reveal(_operator_id, _driver_id, _reason), do: {:error, :invalid_request}
+  def request_reveal(_operator_id, _driver_id, _reason, _org_id), do: {:error, :invalid_request}
 end

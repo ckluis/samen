@@ -138,7 +138,13 @@ defmodule Samen.Reveal.Grants do
         subject_id: req.subject_id,
         actor_id: req.requestor_id,
         request_id: req.id,
-        detail: req.reason
+        detail: req.reason,
+        # PP-11 (T150): ride the SUBJECT'S TENANT org chain when the caller supplies
+        # `org_id`, so the "who requested to unmask what, when, why" event is visible on
+        # THAT tenant's `Settings.SecurityLive` ledger. Absent an org_id it falls to the
+        # reserved `__global__` operator chain (`write_audit/2` / ADR-002 §2.1) — the
+        # pre-PP-11 behavior for callers that have not threaded the target org.
+        org_id: attrs[:org_id]
       })
 
       # T35 §4.7: additionally open a `pii_reveal` Approval through the T34 engine —
@@ -148,15 +154,18 @@ defmodule Samen.Reveal.Grants do
       # Never blocks/fails the reveal request itself: an unwired host, an unregistered
       # kind, or any other engine hiccup here must not regress `request/1`'s pre-T35
       # contract (RevealRequest write + `requested` audit, unconditionally).
-      open_engine_approval(req)
+      open_engine_approval(req, attrs[:org_id])
 
       {:ok, req}
     end
   end
 
-  defp open_engine_approval(%RevealRequest{} = req) do
+  defp open_engine_approval(%RevealRequest{} = req, org_id) do
     Samen.Approvals.request(%{
-      org_id: nil,
+      # PP-11: carry the target tenant org onto the parallel `pii_reveal` approval so its
+      # governance-audit rows (approval_requested/approved) also ride the TENANT chain, not
+      # `__global__`. Nil preserves the pre-PP-11 org-less operator-chain behavior.
+      org_id: org_id,
       kind: "pii_reveal",
       subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
       requested_by: req.requestor_id
@@ -246,13 +255,21 @@ defmodule Samen.Reveal.Grants do
   # layered on top for that host.
   defp route_through_engine(req, granted_by, opts, r) do
     approval_attrs = %{
-      org_id: nil,
+      # PP-11: the approval carries the target tenant org (idempotent with the request-time
+      # open above), so the engine's approval_approved chain row rides the TENANT chain.
+      org_id: Map.get(opts, :org_id),
       kind: "pii_reveal",
       subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
       requested_by: req.requestor_id
     }
 
-    engine_opts = [window_minutes: Map.get(opts, :window_minutes, default_window_minutes())]
+    engine_opts = [
+      window_minutes: Map.get(opts, :window_minutes, default_window_minutes()),
+      # Rides into `ctx.opts` → `do_approve/4` (via the ApprovalHandler) so the granted-side
+      # audit is tenant-attributed on BOTH the engine path and the no_approvals_module
+      # fallback below (which passes `opts` straight through).
+      org_id: Map.get(opts, :org_id)
+    ]
 
     with {:ok, approval} <- Samen.Approvals.request(approval_attrs),
          {:ok, _decided, meta} <- Samen.Approvals.approve(approval.id, granted_by, engine_opts) do

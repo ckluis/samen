@@ -469,9 +469,54 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   # `Samen.Reveal.Grants.request/1` fail-closed REJECTS a PII-shaped reason.
   def handle_event("request_reveal", %{"driver" => driver_id}, socket) do
     operator_id = socket.assigns[:operator_id]
+    org_id = socket.assigns[:org_id]
     reason = request_reason(socket.assigns[:session_info])
 
-    case Driftwood.OperatorReveal.request_reveal(operator_id, driver_id, reason) do
+    # PP-12 — a reveal REQUEST must be framed by the ACTIVE, ledgered impersonation session
+    # AND scoped to a subject visible in THIS session's gated org. `driver_id` arrives from
+    # the client `phx-value`; without this guard a crafted value could file a request for a
+    # subject outside the opened tenant (defeating PP-11's tenant attribution). The grant
+    # gate still applies downstream — this binds the action to the session that frames it.
+    cond do
+      not socket.assigns[:impersonating] ->
+        {:noreply, assign(socket, request_notice: "No active impersonation session — open one first.")}
+
+      not driver_in_scope?(socket, driver_id) ->
+        {:noreply,
+         assign(socket, request_notice: "That subject is not in this impersonation session's scope.")}
+
+      true ->
+        do_request_reveal(socket, operator_id, driver_id, reason, org_id)
+    end
+  end
+
+  def handle_event("reveal", %{"driver" => driver_id}, socket) do
+    # PP-12 — bind the unmask to the ACTIVE, ledgered impersonation session and its gated
+    # org scope BEFORE touching the reveal chokepoint. `driver_id` is client-supplied
+    # (`phx-value`); `Driftwood.OperatorReveal.masked_cdl/1` reads `authorize?: false`
+    # across ANY org, so without this guard an operator holding a valid grant for a subject
+    # in ANOTHER org could unmask it from a session opened over a DIFFERENT tenant — a reveal
+    # executing outside the session that is supposed to frame it. The second-party grant gate
+    # still applies downstream; this re-asserts the session/org scope on top of it.
+    if socket.assigns[:impersonating] and driver_in_scope?(socket, driver_id) do
+      case Driftwood.OperatorReveal.reveal_cdl(socket.assigns.operator_id, driver_id) do
+        {:ok, plaintext} ->
+          revealed = Map.put(socket.assigns.revealed, cast_id(socket, driver_id), plaintext)
+          {:noreply, assign(socket, revealed: revealed)}
+
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, "reveal denied — no active second-party grant")}
+      end
+    else
+      {:noreply,
+       put_flash(socket, :error, "reveal denied — subject is not in this impersonation session's scope")}
+    end
+  end
+
+  defp do_request_reveal(socket, operator_id, driver_id, reason, org_id) do
+    # PP-11: thread the impersonated tenant `org_id` so the reveal-request lifecycle event
+    # lands on THAT tenant's audit chain (its SecurityLive ledger), not `__global__`.
+    case Driftwood.OperatorReveal.request_reveal(operator_id, driver_id, reason, org_id) do
       {:ok, _request} ->
         window = Samen.Reveal.Grants.default_window_minutes()
 
@@ -490,15 +535,13 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
     end
   end
 
-  def handle_event("reveal", %{"driver" => driver_id}, socket) do
-    case Driftwood.OperatorReveal.reveal_cdl(socket.assigns.operator_id, driver_id) do
-      {:ok, plaintext} ->
-        revealed = Map.put(socket.assigns.revealed, cast_id(socket, driver_id), plaintext)
-        {:noreply, assign(socket, revealed: revealed)}
-
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "reveal denied — no active second-party grant")}
-    end
+  # PP-12 — is `driver_id` one of the drivers loaded under THIS session's gated org scope?
+  # The roster (`socket.assigns.drivers`) is read through the impersonation gate's own
+  # `read_scope/1`, so membership in it IS the org-scope re-assertion. A forged/foreign
+  # `driver_id` (a subject in another org, or none) is not present → refused.
+  defp driver_in_scope?(socket, driver_id) do
+    sid = to_string(driver_id)
+    Enum.any?(socket.assigns[:drivers] || [], fn d -> to_string(d.id) == sid end)
   end
 
   # The reveal-request reason: reuse the active impersonation session's (ticket-shaped) reason

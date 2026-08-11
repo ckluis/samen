@@ -18,6 +18,8 @@ defmodule Samen.Reveal.GrantsTest do
   alias Samen.Reveal.Grants
   alias Samen.Reveal.{RevealRequest, RevealGrant}
 
+  import Ecto.Query, only: [from: 2]
+
   @repo SamenCore.TestRepo
 
   setup do
@@ -304,6 +306,62 @@ defmodule Samen.Reveal.GrantsTest do
       assert {:error, :self_approval} = Grants.approve(req, %{granted_by: me})
       # Therefore the actor holds no capability.
       refute Grants.active?(me, s)
+    end
+  end
+
+  # ==========================================================================
+  # PP-11 (T150) — the reveal lifecycle is TENANT-attributed on the org audit chain,
+  # NOT the reserved __global__ operator chain, and is ORG-ISOLATED. This is the
+  # accountability guarantee the reveal-grant seam previously dropped (the vertical
+  # wiring threaded no org_id, so the who/when/why of the actual PII access was invisible
+  # to the tenant's Settings.SecurityLive ledger). SABOTAGE-PINNED.
+  # ==========================================================================
+
+  describe "PP-11: reveal lifecycle is tenant-attributed (org chain), not the __global__ operator chain" do
+    test "a reveal request threaded with org_id is visible on THAT tenant's reveal ledger, not global, not another tenant" do
+      org_a = Ecto.UUID.generate()
+      org_b = Ecto.UUID.generate()
+      s = subj()
+      requestor = actor()
+      approver = actor()
+
+      {:ok, req} =
+        Grants.request(%{
+          subject_id: s,
+          requestor_id: requestor,
+          reason: "ticket 77: onboarding CDL",
+          org_id: org_a
+        })
+
+      {:ok, _grant} = Grants.approve(req, %{granted_by: approver, org_id: org_a})
+
+      events_a = Samen.AuditChain.reveal_events_for_org(org_a, repo: @repo)
+
+      # POSITIVE: the tenant sees the reveal — who (requestor), which subject, the reason.
+      assert Enum.any?(events_a, fn e ->
+               e.subject_id == s and e.actor_id == requestor and e.detail =~ "ticket 77"
+             end),
+             "the tenant's reveal ledger must name the requestor + subject + reason"
+
+      # It did NOT land on the reserved __global__ operator chain (the PP-11 defect).
+      global_hits =
+        @repo.all(
+          from(e in Samen.AuditChain.Entry,
+            where:
+              e.org_id == ^Samen.AuditChain.global_org() and e.subject_id == ^s and
+                e.event_type == "grant_lifecycle"
+          )
+        )
+
+      assert global_hits == [],
+             "a tenant-attributed reveal must NOT land on the __global__ operator chain"
+
+      # ORG ISOLATION: a DIFFERENT tenant sees nothing of org_a's reveal.
+      assert Samen.AuditChain.reveal_events_for_org(org_b, repo: @repo) == [],
+             "a different tenant must NOT see another org's reveal events (org-scoped ledger)"
+
+      # The reserved global partition is NEVER surfaced as a tenant ledger.
+      assert Samen.AuditChain.reveal_events_for_org(Samen.AuditChain.global_org(), repo: @repo) == []
     end
   end
 end
