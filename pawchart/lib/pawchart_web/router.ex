@@ -33,11 +33,56 @@ defmodule PawChartWeb.Router do
   # dev fallback. `org_directory` feeds the workspace switcher over the operator org's accounts.
   @operator_authority {PawChart.Auth, :operator_role, [:pawchart]}
 
+  # PP-2 (Batch 5a PAWCHART-SPINE) — the current-org data-on-the-mount labels EVERY PII-bearing
+  # tenant/shared mount carries, so pawchart is a properly-authenticated tenant host (mirroring
+  # driftwood's `@current_org_labels`). A module attribute (compile-time literal usable inside the
+  # `samen_module_routes` macro expansion); every value is session-safe (uuids + MFAs of atoms).
+  #
+  #   :default_org_id  — the dev default (Happy Paws Clinic), so a page with no ?org renders a
+  #     populated org (resolution step 3), never a dead-end.
+  #   :org_directory   — the `{mod,fun,args}` the framework switcher + name resolution read
+  #     (`PawChart.Directory.orgs/0` → `[{tenant_org_id, name}]` over the operator accounts).
+  #   :authn           — `{:app_env, :pawchart, :auth_required?}`: OFF in dev/test (the query-param
+  #     convenience identity stays), ON in prod (the actor is derived ONLY from an authenticated
+  #     session). This is the label the Batch-1 fail-closed `CurrentOrg.resolve/3` consults; its
+  #     PRESENCE is what the tenant-authn coverage guard requires of a real product.
+  #   :authorized_orgs — the membership seam `Samen.Web.CurrentOrg` calls to constrain the tenant
+  #     actor to the authenticated user's OWN orgs (`PawChart.Auth.authorized_org_ids/1` over REAL
+  #     `PawChart.Operator` Membership rows).
+  #   :identity_namespace — (PP-5 / Batch 2 TENANT-ROLE) the Identity scope the tenant-plane Billing
+  #     surface reads the caller's REAL per-org Membership role from (the `PawChart.Operator.{User,
+  #     Membership}` spine — the SAME namespace `samen_settings_routes` mounts). Billing lives in its
+  #     own scope namespace (`PawChart.Billing`), which materializes no Membership, so the admin-gated
+  #     checkout/portal writes derive the acting role through this sibling seam.
+  #   :operator_workspace / :seed_command — the shared cross-plane chrome (switcher return link,
+  #     no-org card) derives pawchart's OWN boundary names, not the framework-neutral default.
+  @current_org_labels %{
+    default_org_id: PawChart.Seeds.clinic_org_id(),
+    org_directory: {PawChart.Directory, :orgs, []},
+    authn: {:app_env, :pawchart, :auth_required?},
+    authorized_orgs: {PawChart.Auth, :authorized_org_ids, []},
+    identity_namespace: PawChart.Operator,
+    operator_workspace: "PawChart Ops",
+    seed_command: "mix pawchart.seed"
+  }
+
+  # PP-7 (Batch 5a / Batch-3 pattern) — where a fresh pawchart tenant lands after onboarding/login
+  # when the login carries no `return_to` (the ordinary cold-login case): the primary tenant
+  # workspace surface. Pawchart has no bespoke clinic console yet (Batch 5b authors the Clinic
+  # tenant surface — a follow-up repoints this at it), so 5a lands on the best available tenant
+  # page — the CRM workspace dashboard — instead of dead-ending on the public marketing `/`.
+  @tenant_landing "/crm/dashboard"
+
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
     plug(:put_root_layout, html: {PawChartWeb.Layouts, :root})
     plug(:protect_from_forgery)
+    # PP-1/PP-2 (Batch 5a) — the prod auth gate. NO-OP in dev/test (`:auth_required?` false: the
+    # query-param convenience identity stays); in prod it redirects unauthenticated requests to
+    # /login (auth + health routes exempted). Defense-in-depth over the CurrentOrg actor gate, and
+    # the reason the operator plane's AuthGate `/login` redirect target is now a LIVE route.
+    plug(PawChartWeb.Auth)
   end
 
   pipeline :api do
@@ -69,6 +114,30 @@ defmodule PawChartWeb.Router do
   scope "/" do
     pipe_through(:browser)
 
+    # PP-2 (Batch 5a PAWCHART-SPINE) — pawchart is a REAL authenticated tenant host (operator
+    # ruling), so it ADOPTS the framework IDENTITY SPINE exactly as driftwood does: three macro
+    # calls over pawchart's SOLE Identity mount (`PawChart.Operator` — already materialized for the
+    # operator plane, so NO new resources/migrations). This gives pawchart /login, /signup, verify,
+    # reset, sessions, invite, 2FA/step-up, onboarding, AND tenant Settings — closing PP-2 (pawchart
+    # had NONE of these; the operator AuthGate's /login redirect target was a dead route).
+
+    # ADR-013 §4.3 — the framework SESSION-write endpoint (`GET /session/org/:org_id`), the target
+    # of the workspace switcher + the operator "Open account →". Sets the session current org so
+    # tenant/shared navigation is sticky without a hand-typed UUID.
+    samen_session_routes()
+
+    # ADR-035 §5 — the pre-actor auth surfaces (signup → verify → reset → login → 2fa → invite),
+    # mounted over PawChart's sole Identity mount in ONE line (the generated golden-app pattern).
+    # `tenant_landing:` gives `Samen.Web.Auth.SessionController.finish_login/5` a real fallback for
+    # a login with no `return_to`, so a clinic user logging in cold lands on their workspace.
+    samen_auth_routes(namespace: PawChart.Operator, repo: PawChart.Repo, labels: %{tenant_landing: @tenant_landing})
+
+    # ADR-035 §5 A8 — the FIRST-RUN onboarding wizard (`GET /onboarding`): org-naming, plan-selection
+    # (honest "no plans configured" empty state), and the T05 teammate-invite step. Same Identity
+    # mount as the auth spine. The "You're all set" card's "Go to your workspace →" CTA reads the
+    # SAME `tenant_landing:` label so onboarding does not dead-end.
+    samen_onboarding_routes(PawChart.Operator, repo: PawChart.Repo, labels: %{tenant_landing: @tenant_landing})
+
     # WS-F5 F5.1 — the framework `GET /metrics` Prometheus scrape endpoint over
     # `Samen.Metrics.definitions/0`, mounted in ONE line (leverage proof). OFF by
     # default: self-gates to 404 until an operator sets metrics_egress? + adds a
@@ -87,47 +156,58 @@ defmodule PawChartWeb.Router do
     samen_fleet_routes(otp_app: :pawchart)
 
     # 1. CRM — clinic contacts, referring vets, labs, vendors.
+    #    PP-2 (Batch 5a) — `@current_org_labels` (authn/authorized_orgs/identity_namespace/
+    #    default_org_id/org_directory/…) is merged UNDER the cosmetic branding labels (branding
+    #    wins on any name collision), so this PII-bearing tenant mount is a properly-gated real
+    #    product surface: armed → the authenticated-authorized path; dev/test → the ?org= convenience.
     samen_module_routes(:crm, PawChart.Crm,
       repo: PawChart.Repo,
-      labels: %{
-        title: "Happy Paws Clinic",
-        glyph: "V",
-        crm_logo_style: "background:linear-gradient(150deg,#0A6E9E,#1A8DC5)",
-        crumb_root: "PawChart",
-        user_name: "Clinic Staff",
-        user_role: "veterinarian"
-      }
+      labels:
+        Map.merge(@current_org_labels, %{
+          title: "Happy Paws Clinic",
+          glyph: "V",
+          crm_logo_style: "background:linear-gradient(150deg,#0A6E9E,#1A8DC5)",
+          crumb_root: "PawChart",
+          user_name: "Clinic Staff",
+          user_role: "veterinarian"
+        })
     )
 
-    # 2. Billing — clinic subscription billing (mounts AS-IS, no reshape).
+    # 2. Billing — clinic subscription billing (mounts AS-IS, no reshape). The `:identity_namespace`
+    #    label (in `@current_org_labels`) lets the tenant-plane Billing surface resolve the caller's
+    #    REAL per-org Membership role, so a clinic ADMIN can subscribe/manage-payment and a MEMBER
+    #    cannot (PP-5 / Batch 2 role gate, now ACTIVE on pawchart).
     samen_module_routes(:billing, PawChart.Billing,
       repo: PawChart.Repo,
-      labels: %{
-        title: "Happy Paws Clinic",
-        glyph: "V",
-        crumb_root: "PawChart"
-      }
+      labels:
+        Map.merge(@current_org_labels, %{
+          title: "Happy Paws Clinic",
+          glyph: "V",
+          crumb_root: "PawChart"
+        })
     )
 
     # 3. Support — clinics file tickets with the platform (the operator plane).
     samen_module_routes(:support, PawChart.Support,
       repo: PawChart.Repo,
-      labels: %{
-        title: "Happy Paws Clinic",
-        glyph: "V",
-        crumb_root: "PawChart"
-      }
+      labels:
+        Map.merge(@current_org_labels, %{
+          title: "Happy Paws Clinic",
+          glyph: "V",
+          crumb_root: "PawChart"
+        })
     )
 
     # 3b. Work (F1 / ADR-041 §3, T43) — internal follow-up/reminder tasks (task
     #     inbox/detail + project list). Zero CRM contact.
     samen_module_routes(:work, PawChart.Work,
       repo: PawChart.Repo,
-      labels: %{
-        title: "Happy Paws Clinic",
-        glyph: "V",
-        crumb_root: "PawChart"
-      }
+      labels:
+        Map.merge(@current_org_labels, %{
+          title: "Happy Paws Clinic",
+          glyph: "V",
+          crumb_root: "PawChart"
+        })
     )
 
     # 4. Marketing — clinic outreach (wellness reminders, referral thank-yous). The SECOND
@@ -136,12 +216,13 @@ defmodule PawChartWeb.Router do
     #    the Leads lens over `PawChart.Crm.Person` (same posture as Driftwood).
     samen_module_routes(:marketing, PawChart.Marketing,
       repo: PawChart.Repo,
-      labels: %{
-        title: "Happy Paws Clinic",
-        glyph: "V",
-        crumb_root: "PawChart",
-        crm_namespace: PawChart.Crm
-      }
+      labels:
+        Map.merge(@current_org_labels, %{
+          title: "Happy Paws Clinic",
+          glyph: "V",
+          crumb_root: "PawChart",
+          crm_namespace: PawChart.Crm
+        })
     )
 
     # 5. Notifications (WS-A A4/A5) — the framework inbox (+ /notifications/settings),
@@ -150,12 +231,13 @@ defmodule PawChartWeb.Router do
     #    resolves. Realtime rides `PawChart.PubSub` (id-only envelopes).
     samen_notifications_routes(:notifications, PawChart.Primitives,
       repo: PawChart.Repo,
-      labels: %{
-        title: "Happy Paws Clinic",
-        glyph: "V",
-        crumb_root: "PawChart",
-        pubsub: PawChart.PubSub
-      }
+      labels:
+        Map.merge(@current_org_labels, %{
+          title: "Happy Paws Clinic",
+          glyph: "V",
+          crumb_root: "PawChart",
+          pubsub: PawChart.PubSub
+        })
     )
 
     # WS-E E7.1 — the framework end-user surfaces, mounted over PawChart's EXISTING
@@ -167,19 +249,19 @@ defmodule PawChartWeb.Router do
     #    Primitives mount (`PawChart.Primitives.File`, abbrev `vfl`).
     samen_files_routes(:files, PawChart.Primitives,
       repo: PawChart.Repo,
-      labels: %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"}
+      labels: Map.merge(@current_org_labels, %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"})
     )
 
     # 7. CSV (ADR-028) — per-plane-masked export + governed import over PawChart's CRM
     #    domain (`/csv/*/:resource` resolves deny-by-default onto PawChart.Crm resources).
     samen_csv_routes(:csv, PawChart.Crm,
       repo: PawChart.Repo,
-      labels: %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"}
+      labels: Map.merge(@current_org_labels, %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"})
     )
 
     # 7a. ICS (F2, spec §F2/§F8 c8) — per-plane-masked `.ics` calendar export over
     #     PawChart's Calendar domain (`PawChart.Calendar.Event`, abbrev `pce`).
-    samen_ics_routes(:ics, PawChart.Calendar, repo: PawChart.Repo)
+    samen_ics_routes(:ics, PawChart.Calendar, repo: PawChart.Repo, labels: @current_org_labels)
 
     # 8. Search (ADR-027) — the ⌘K/per-list search page over the KERNEL `Samen.Search`
     #    engine, mounted over `PawChart.Primitives.{File,SearchIndex}` (`vfl`/`vsh`). The
@@ -188,14 +270,20 @@ defmodule PawChartWeb.Router do
     #    a per-abbrev `vfl_file` tsvector trigger/GIN index if a host registers at scale).
     samen_search_routes(:search, PawChart.Primitives,
       repo: PawChart.Repo,
-      labels: %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"}
+      labels: Map.merge(@current_org_labels, %{title: "Happy Paws Clinic", glyph: "V", crumb_root: "PawChart"})
     )
 
-    # Settings (ADR-029) is NOT mounted here: `samen_settings_routes` requires a mounted
-    # IDENTITY namespace (`User`/`ApiKey`/`Membership`). As of T157 PawChart DOES materialize an
-    # Identity scope — but only on the OPERATOR namespace (`PawChart.Operator`, the SaaS's own
-    # book of business), NOT on a tenant clinic. The tenant self-serve settings surface still has
-    # no tenant Identity mount, so it stays unmounted (honest boundary, docs/gate-ws-e.md).
+    # WS-E E5 (ADR-029) — the framework SELF-SERVE SETTINGS surface (Profile · API keys ·
+    # Security), mounted over PawChart's Identity namespace (`PawChart.Operator.{User,ApiKey,
+    # Membership}`) in ONE line. PP-2 (Batch 5a): pawchart NOW mounts the tenant Identity spine
+    # (`samen_auth_routes`/`samen_onboarding_routes` above), so the earlier "no tenant Identity
+    # mount → settings stays unmounted (honest boundary)" caveat is retired — a clinic can reach
+    # tenant Settings exactly as driftwood does. `spine_totp`/`spine_sessions` are left at their
+    # honest-placeholder defaults (the same posture driftwood ships).
+    samen_settings_routes(:settings, PawChart.Operator,
+      repo: PawChart.Repo,
+      labels: @current_org_labels
+    )
   end
 
   # ============================================================================

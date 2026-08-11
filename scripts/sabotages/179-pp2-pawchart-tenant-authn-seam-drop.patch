@@ -1,0 +1,23 @@
+# SABOTAGE: PP-2 (Batch 5a PAWCHART-SPINE) — strip the `:authn` seam from pawchart's
+# `@current_org_labels`, so pawchart's PII-bearing tenant mounts no longer adopt the
+# framework tenant-auth gate. On an ARMED host this drops the fail-closed AUTHORIZED
+# path: an authenticated clinic member no longer resolves its own org (the mount falls
+# to the Batch-1 fail-closed branch → nil), regressing pawchart from a properly-gated
+# real product back toward the W4 non-adoption. The positive-control test that an
+# authenticated member resolves its OWN org FLIPS (it now gets nil).
+# APP: pawchart
+# TEST_FILES: test/tenant_authn_prodpath_test.exs
+# MUST_FAIL: an authenticated member with a real Membership resolves its OWN org
+# MUST_FAIL: every enumerated tenant mount carries the :authn seam
+diff --git a/pawchart/lib/pawchart_web/router.ex b/pawchart/lib/pawchart_web/router.ex
+index cefd444..e4bb49c 100644
+--- a/pawchart/lib/pawchart_web/router.ex
++++ b/pawchart/lib/pawchart_web/router.ex
+@@ -59,7 +59,6 @@ defmodule PawChartWeb.Router do
+   @current_org_labels %{
+     default_org_id: PawChart.Seeds.clinic_org_id(),
+     org_directory: {PawChart.Directory, :orgs, []},
+-    authn: {:app_env, :pawchart, :auth_required?},
+     authorized_orgs: {PawChart.Auth, :authorized_org_ids, []},
+     identity_namespace: PawChart.Operator,
+     operator_workspace: "PawChart Ops",

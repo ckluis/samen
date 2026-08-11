@@ -13,7 +13,19 @@ defmodule PawChart.Auth do
   `operator_role/2` for real operator `Membership` rows); the seam and the `Samen.Web.Operator.Authz`
   / `Samen.Web.AuthGate` consumers stay exactly the same underneath. Mirrors `Driftwood.Auth`'s
   operator-role seam, scoped to the `:pawchart` product.
+
+  ## Tenant membership seam (PP-2, Batch 5a)
+
+  `authorized_org_ids/1` is the `:authorized_orgs` membership seam `Samen.Web.CurrentOrg.resolve/3`
+  calls on an ARMED host to constrain the tenant actor to the authenticated user's OWN orgs. Because
+  pawchart is a REAL authenticated product (operator ruling), this resolves from REAL
+  `Identity.Membership` rows on `PawChart.Operator` (the SAME spine `samen_auth_routes` /
+  `samen_settings_routes` mount) — NOT a static credential map. An unknown user → `[]` (deny). This
+  is the "a real deploy points it at Identity.Membership rows" completion `Driftwood.Auth`'s
+  reference docstring describes.
   """
+
+  require Ash.Query
 
   @operator_roles [:operator_admin, :operator_support, :operator_readonly, :operator_break_glass]
 
@@ -59,10 +71,25 @@ defmodule PawChart.Auth do
 
   @doc """
   The tenant org ids the authenticated `user_id` may act on — the `:authorized_orgs` membership
-  seam `Samen.Web.CurrentOrg` calls. PawChart's local dogfood sources this from the operator
-  roster's absence (no per-user tenant provisioning yet), so it denies by default (`[]`); a real
-  deploy points it at operator `Membership` rows. Unknown user → `[]` (deny).
+  seam `Samen.Web.CurrentOrg` calls on an armed host. Resolves REAL `Identity.Membership` rows on
+  `PawChart.Operator` (the identity spine `samen_auth_routes`/`samen_settings_routes` mount): every
+  org the user holds a membership in. Read unscoped (`authorize?: false`) BY DESIGN — this function
+  IS the authorization boundary that decides which orgs the principal may act on, exactly as
+  `Samen.Auth.OrgActor.authorized_org_ids/2` reads the spine directly. Unknown user / error → `[]`
+  (deny — fail closed).
   """
   @spec authorized_org_ids(String.t() | nil) :: [String.t()]
+  def authorized_org_ids(user_id) when is_binary(user_id) do
+    PawChart.Operator.Membership
+    |> Ash.Query.filter(user_id == ^user_id)
+    |> Ash.Query.ensure_selected([:org_id])
+    |> Ash.read!(authorize?: false)
+    |> Enum.map(& &1.org_id)
+    |> Enum.filter(&is_binary/1)
+    |> Enum.uniq()
+  rescue
+    _ -> []
+  end
+
   def authorized_org_ids(_user_id), do: []
 end
