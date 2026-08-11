@@ -140,31 +140,29 @@ config :samen_core, :rollups, [
   }
 ]
 
-# Oban config (T2.1 queue taxonomy). Uses the canonical Samen queue taxonomy
-# from `Samen.Jobs.default_queue_config/0`. The test config overrides with
+# Oban config (T2.1 queue taxonomy). The test config overrides with
 # `testing: :manual` so job rows are written but not auto-executed (the
 # same-tx crash test needs observable job rows; the starvation test starts
 # its own Oban supervisor with custom queues).
 #
-# Host apps should wire:
+# Host apps wire ONLY their repo (+ plugins), and start Oban through the
+# framework seam so the canonical queue taxonomy AND cron are installed for them:
 #
 #     config :my_app, Oban,
 #       repo: MyApp.Repo,
-#       queues: Samen.Jobs.default_queue_config(),
-#       plugins: [
-#         {Oban.Plugins.Cron, crontab: Samen.Jobs.default_crontab()},
-#         {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
-#       ]
+#       plugins: [{Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}]
+#
+#     # application.ex
+#     {Oban, Samen.Jobs.install_defaults(Application.fetch_env!(:samen_core, Oban))}
+# B-OBAN: NO hand-listed `queues:`. config.exs is evaluated before dependency
+# modules load, so it cannot call `Samen.Jobs.default_queue_config/0` — which is
+# exactly why four hosts hand-maintained four DIVERGENT lists and `:webhooks_in`
+# ended up configured by none of them (jobs enqueued to an unconfigured queue sit
+# `available` forever, silently). The taxonomy is installed at start time instead,
+# by `Samen.Jobs.install_defaults/1` in application.ex, and gated by
+# `mix samen.verify.oban_queues`.
 config :samen_core, Oban,
   repo: SamenCore.TestRepo,
-  queues: [
-    default: 10,
-    rollups: 2,
-    webhooks_out: 5,
-    erasure: 1,
-    maintenance: 1,
-    reveal: 5
-  ],
   plugins: false
 
 # T2.6 OTel tracing: db_statement MUST be :disabled on a Samen substrate.

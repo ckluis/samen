@@ -152,23 +152,25 @@ config :samen_core, :query_budget_enforce, false
 config :samen_core, :dp_enabled, false
 
 # Oban: T2.1 canonical queue taxonomy (consolidates T1.6 same-tx reveal enqueue).
-# Uses the full Samen.Jobs queue taxonomy per the T2.1 convention layer.
-# In production wire cron + pruner plugins; in test override with testing: :manual.
+# NO hand-listed `queues:` and NO host Cron block (B-OBAN / O6). Two things were
+# wrong here and both were silent:
+#
+#   1. the hand-listed six omitted :webhooks_in / :automation / :automation_timers,
+#      so a job enqueued there would sit `available` forever with no error; and
+#   2. this host declared a Cron plugin carrying ONLY RollupRefreshWorker. Because
+#      `install_default_cron/1` lets an explicit host schedule win (no double
+#      scheduling), that block would have SUPPRESSED the canonical crontab —
+#      including `Samen.AuditEvent.PartitionManager`, whose absence fails audit
+#      writes outright once the wall clock crosses the last seeded partition.
+#      RollupRefreshWorker is already in `Samen.Jobs.default_crontab/0` at the same
+#      cadence, so the block bought nothing and cost the other five entries.
+#
+# `Demo.Application` now starts Oban through `Samen.Jobs.install_defaults/1`, which
+# installs the canonical taxonomy AND the canonical crontab. Test overrides with
+# `testing: :manual, plugins: false`.
 config :samen_core, Oban,
   repo: Demo.Repo,
-  queues: [
-    default: 10,
-    rollups: 2,
-    webhooks_out: 5,
-    erasure: 1,
-    maintenance: 1,
-    reveal: 5
-  ],
   plugins: [
-    {Oban.Plugins.Cron,
-     crontab: [
-       {"*/10 * * * *", Samen.Jobs.RollupRefreshWorker}
-     ]},
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
   ]
 

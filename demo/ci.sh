@@ -114,6 +114,17 @@ echo "--- step 9/10: mix samen.verify.metric_labels (T2.8 bounded-cardinality la
 mix samen.verify.metric_labels
 echo "    PASSED"
 
+# 9b. B-OBAN worker-queue ⊆ configured-queue parity. Discovers every queue enqueued
+#     to by a compiled Oban.Worker (hand-written AND AshOban-generated trigger
+#     workers/schedulers, via the __opts__/0 callback) and asserts each has a
+#     producer in this host's RESOLVED runtime Oban config. A job on an unconfigured
+#     queue does NOT fail — it sits `available` forever with no error, no retry and
+#     an empty DLQ, while the enqueuing surface reports success. Fails CLOSED on
+#     empty discovery so it can never pass vacuously.
+echo "--- step 9b/10: mix samen.verify.oban_queues (B-OBAN worker/queue parity)"
+mix samen.verify.oban_queues
+echo "    PASSED"
+
 # 10. C6 vault-declared-parity (Phase-3 review fix F3.1): every physical column
 #     matching the vault storage shape `pii_<abbrev>_<name>` must have a matching
 #     declared pii_attribute route. Fails closed on a DE-VAULTED free-text 🔒 field

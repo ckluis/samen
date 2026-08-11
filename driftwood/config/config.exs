@@ -330,25 +330,15 @@ config :driftwood, DriftwoodWeb.Endpoint,
 
 config :phoenix, :json_library, Jason
 
-# Oban: T2.1 canonical queue taxonomy. The load/dispatch workflow (DispatchWorker)
-# runs on :default; erasure + reveal keep the shipped queues.
+# Oban: T2.1 canonical queue taxonomy. NO hand-listed `queues:` — B-OBAN: this
+# host used to maintain its own list (the only one that registered :automation /
+# :automation_timers, and like every other host it dropped :webhooks_in). config.exs
+# runs before dependency modules load, so it cannot call the canonical
+# `Samen.Jobs.default_queue_config/0` here; `Driftwood.Application` starts Oban via
+# `Samen.Jobs.install_defaults/1`, which installs the whole taxonomy (plus the
+# canonical cron) at boot. `mix samen.verify.oban_queues` gates the parity.
 config :samen_core, Oban,
   repo: Driftwood.Repo,
-  queues: [
-    default: 10,
-    rollups: 2,
-    webhooks_out: 5,
-    erasure: 1,
-    maintenance: 1,
-    reveal: 5,
-    # ADR-039 §4.1/§6.3/§7.3 (T39/T41/T118) — the E1 dispatch/run queue + the E4/E5
-    # timer fan-out queue (a different load shape than rule dispatch, so its own
-    # queue per the blueprint's own moduledoc). Registered so a workflow's manual
-    # "Run now" (T118's builder) and the schedule/reminder/escalation AshOban
-    # triggers actually drain, not just sit `available` forever.
-    automation: 3,
-    automation_timers: 2
-  ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
   ]

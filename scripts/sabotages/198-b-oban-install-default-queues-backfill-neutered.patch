@@ -1,0 +1,29 @@
+# SABOTAGE: B-OBAN adoption seam — neuters `Samen.Jobs.install_default_queues/1`'s
+# BACKFILL so a host-declared `queues:` list is returned unchanged instead of being
+# merged with the canonical taxonomy. This is the pre-fix world restored: any host that
+# hand-lists queues silently loses every canonical queue it forgot (which is how all four
+# shipped hosts ended up without `:webhooks_in`, and three without `:automation` /
+# `:automation_timers`). The failure mode is invisible at runtime — the app boots, Oban
+# reports healthy, and jobs on the dropped queues sit `available` forever. The seam's
+# merge semantics are therefore load-bearing, not cosmetic: the named tests must FAIL.
+# APP: samen_core
+# TEST_FILES: test/jobs_queue_parity_test.exs
+# MUST_FAIL: install_default_queues/1 BACKFILLS a host list that omits canonical queues
+# MUST_FAIL: install_default_queues/1 preserves a host's deliberate limit override
+diff --git a/samen_core/lib/samen/jobs.ex b/samen_core/lib/samen/jobs.ex
+--- a/samen_core/lib/samen/jobs.ex
++++ b/samen_core/lib/samen/jobs.ex
+@@ -293,12 +293,7 @@
+ 
+   # Host-declared limits win; every canonical queue the host omitted is appended.
+   defp merge_queues(host_queues) do
+-    missing =
+-      Enum.reject(default_queue_config(), fn {name, _limit} ->
+-        Keyword.has_key?(host_queues, name)
+-      end)
+-
+-    host_queues ++ missing
++    host_queues
+   end
+ 
+   @doc """

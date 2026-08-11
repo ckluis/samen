@@ -122,17 +122,17 @@ config :<%= otp_app %>, <%= module %>Web.Endpoint,
   pubsub_server: <%= module %>.PubSub,
   server: false
 
-# Oban: the canonical queue taxonomy (reused verbatim from the substrate convention).
+# Oban: the canonical queue taxonomy is DERIVED, never hand-listed here (B-OBAN).
+# config.exs is evaluated before dependency modules load, so it cannot call
+# `Samen.Jobs.default_queue_config/0`; application.ex installs the full taxonomy
+# (and the canonical crontab) at boot via `Samen.Jobs.install_defaults/1`. That
+# matters because a job enqueued to a queue with no configured producer does not
+# fail — it sits in oban_jobs as `available` forever, with no error, no retry and
+# an empty DLQ. Declare only your repo + plugins here; add a queue name below ONLY
+# to retune its limit (your limit wins, the rest are still installed).
+# `mix samen.verify.oban_queues` gates worker-queue ⊆ configured-queue parity.
 config :samen_core, Oban,
   repo: <%= module %>.Repo,
-  queues: [
-    default: 10,
-    rollups: 2,
-    webhooks_out: 5,
-    erasure: 1,
-    maintenance: 1,
-    reveal: 5
-  ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
   ]

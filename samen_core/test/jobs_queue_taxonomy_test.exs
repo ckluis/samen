@@ -3,7 +3,13 @@ defmodule Samen.Jobs.QueueTaxonomyTest do
   T2.1 (b): Queue taxonomy and per-queue concurrency limits.
 
   Tests:
-    1. `Samen.Jobs.default_queue_config/0` returns all six canonical queues.
+    1. `Samen.Jobs.default_queue_config/0` covers every queue actually enqueued to.
+       (B-OBAN: this assertion used to be a HARD-CODED list of "six canonical
+       queues" that itself omitted `:webhooks_in` — it compared the taxonomy to a
+       restatement of the taxonomy, so it passed while three enqueued-to queues had
+       no producer anywhere. The expectation is now DISCOVERED from the compiled
+       `Oban.Worker` modules; see `jobs_queue_parity_test.exs` for the full parity
+       gate and its non-vacuity floors.)
     2. Each queue has a positive integer concurrency limit.
     3. The `:erasure` queue limit is 1 (guaranteed single-concurrency for
        crypto-shred orchestration — running two simultaneous erasure jobs for
@@ -20,12 +26,21 @@ defmodule Samen.Jobs.QueueTaxonomyTest do
   # Queue taxonomy shape
   # -----------------------------------------------------------------------
 
-  test "default_queue_config/0 returns all six canonical queues" do
-    queues = Jobs.default_queue_config()
-    names = Keyword.keys(queues)
+  test "default_queue_config/0 covers every queue a shipped worker enqueues to" do
+    names = Keyword.keys(Jobs.default_queue_config())
 
-    for expected <- [:default, :rollups, :webhooks_out, :erasure, :maintenance, :reveal] do
-      assert expected in names, "expected queue #{inspect(expected)} in taxonomy"
+    # DISCOVERED, not hand-listed: the expectation comes from the compiled
+    # Oban.Worker modules (hand-written + AshOban-generated), so a worker added on
+    # an unregistered queue fails here instead of silently never draining.
+    discovered = Samen.Jobs.QueueParity.discover()
+
+    refute discovered == %{},
+           "worker discovery returned nothing — this assertion would be vacuous"
+
+    for {expected, mods} <- discovered do
+      assert expected in names,
+             "queue #{inspect(expected)} is enqueued to by " <>
+               "#{Enum.map_join(mods, ", ", &inspect/1)} but is NOT in the taxonomy"
     end
   end
 

@@ -13,9 +13,13 @@ defmodule Driftwood.Application do
         Samen.Observability.child_specs(:driftwood) ++
           [
             Driftwood.Repo,
-            # T128: install the canonical Samen cron (default_crontab/0) at boot so the
-            # audit-partition roll-forward runs by default. No-op under test (plugins: false).
-            {Oban, Samen.Jobs.install_default_cron(Application.fetch_env!(:samen_core, Oban))}
+            # T128 + B-OBAN: install the canonical Samen queue taxonomy
+            # (default_queue_config/0) AND cron (default_crontab/0) at boot — modules are
+            # loaded here, unlike in config.exs. So every queue any shipped worker or
+            # AshOban trigger enqueues to has a producer, and the audit-partition
+            # roll-forward runs, with no host-maintained list. No-op under test
+            # (plugins: false, testing: :manual).
+            {Oban, Samen.Jobs.install_defaults(Application.fetch_env!(:samen_core, Oban))}
           ]
       else
         []

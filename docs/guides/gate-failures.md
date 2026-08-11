@@ -206,6 +206,42 @@ Use bounded labels: action, route, result, tenant_tier.
 
 ---
 
+## Step 9b — `mix samen.verify.oban_queues`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.oban_queues.ex`):
+
+```text
+[oban-queue-parity] FAIL: queues enqueued to but NOT configured:
+  - :webhooks_in <- Samen.Webhook.IngestWorker
+Jobs on an unconfigured queue sit `available` FOREVER — no error, no retry, no DLQ.
+Register the queue in Samen.Jobs.default_queue_config/0 (the single source of truth).
+** (Mix) oban-queue-parity: unconfigured worker queues — exit 1
+
+[oban-queue-parity] FAIL: discovered ZERO Oban workers.
+A parity check that discovers nothing verifies nothing — this is a FAILURE, not a pass.
+** (Mix) oban-queue-parity: empty discovery — exit 1
+```
+
+**Meaning:** a compiled `Oban.Worker` (hand-written, or one of the worker/scheduler
+modules AshOban generates per `trigger`) enqueues to a queue that has no producer in
+this app's resolved runtime Oban config. This never surfaces at runtime: `Oban.insert`
+returns `{:ok, job}`, the row sits at `state = 'available'` forever, nothing claims it,
+and the DLQ stays empty because nothing was ever attempted — so the enqueuing surface
+(a webhook ingress answering 200, an operator "replay" button) reports success while the
+work silently never happens.
+
+**Fix:** add the queue to `Samen.Jobs.default_queue_config/0` — the single source of
+truth. Do NOT add it to a host's `config :samen_core, Oban` `queues:` list: hosts derive
+the taxonomy at boot through `Samen.Jobs.install_defaults/1`, and hand-maintained
+per-host lists are what caused the drift this gate exists to prevent. A host may list a
+queue ONLY to retune its limit (host limits win; omissions are backfilled).
+
+The empty-discovery variant means the `Oban.Worker` introspection itself broke (e.g. a
+dependency stopped emitting real worker modules). It fails closed on purpose: containment
+over an empty set is trivially true, so a green line there would verify nothing.
+
+---
+
 ## Step 10 — `mix samen.verify.vault_declared_parity`
 
 **Errors** (`samen_core/lib/mix/tasks/samen.verify.vault_declared_parity.ex`):

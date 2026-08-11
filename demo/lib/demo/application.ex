@@ -10,7 +10,22 @@ defmodule Demo.Application do
     # in :test start_repo? is false, so no Ecto telemetry exists to observe.
     children =
       if Application.get_env(:demo, :start_repo?, true) do
-        Samen.Observability.child_specs(:demo) ++ [Demo.Repo]
+        Samen.Observability.child_specs(:demo) ++
+          [
+            Demo.Repo,
+            # O6 / B-OBAN: the demo DECLARED a full Oban runtime (queues, cron, pruner)
+            # and never started it. It is API-only, but "API-only" is not "job-free" —
+            # demo mounts the Marketing scope (every send is an Oban job on
+            # :webhooks_out via Samen.Jobs.enqueue_in_tx/3), wires the notification
+            # ENGINE (EmailDispatchWorker), ships reveal_grants (the T1.6 same-tx
+            # auto-revoke enqueue on :reveal), and owns a PARTITIONED aud_event table
+            # whose roll-forward is `Samen.AuditEvent.PartitionManager` on the canonical
+            # crontab. With no Oban child every one of those enqueues succeeded and then
+            # never ran, and audit writes were on course to fail outright at the next
+            # partition boundary. Started here through the same framework seam
+            # driftwood/pawchart/generated apps use. No-op under test (start_repo? false).
+            {Oban, Samen.Jobs.install_defaults(Application.fetch_env!(:samen_core, Oban))}
+          ]
       else
         []
       end

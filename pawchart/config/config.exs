@@ -251,17 +251,14 @@ config :pawchart, PawChartWeb.Endpoint,
   pubsub_server: PawChart.PubSub,
   server: false
 
-# Oban: the canonical queue taxonomy (reused verbatim from the substrate convention).
+# Oban: the canonical queue taxonomy, DERIVED not hand-listed (B-OBAN). config.exs
+# is evaluated before dependency modules load, so `Samen.Jobs.default_queue_config/0`
+# cannot be called here — `PawChart.Application` installs it (plus the canonical cron)
+# at boot via `Samen.Jobs.install_defaults/1`. The previous hand-listed six omitted
+# :webhooks_in / :automation / :automation_timers, so anything enqueued there sat
+# `available` forever with no error. `mix samen.verify.oban_queues` gates the parity.
 config :samen_core, Oban,
   repo: PawChart.Repo,
-  queues: [
-    default: 10,
-    rollups: 2,
-    webhooks_out: 5,
-    erasure: 1,
-    maintenance: 1,
-    reveal: 5
-  ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
   ]

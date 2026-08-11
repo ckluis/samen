@@ -93,6 +93,15 @@ echo "--- step 9/17: mix samen.verify.metric_labels"
 mix samen.verify.metric_labels
 echo "    PASSED"
 
+# 9b. B-OBAN worker-queue ⊆ configured-queue parity. Discovers every queue enqueued
+#     to by a compiled Oban.Worker (hand-written AND AshOban-generated trigger
+#     workers/schedulers) and asserts each has a producer in this host's RESOLVED
+#     runtime Oban config. A job on an unconfigured queue never drains and never
+#     errors. Fails CLOSED on empty discovery.
+echo "--- step 9b/17: mix samen.verify.oban_queues (B-OBAN worker/queue parity)"
+mix samen.verify.oban_queues
+echo "    PASSED"
+
 # 10. C6 vault-declared-parity.
 echo "--- step 10/17: mix samen.verify.vault_declared_parity"
 mix samen.verify.vault_declared_parity

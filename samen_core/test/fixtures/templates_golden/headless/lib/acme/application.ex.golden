@@ -8,10 +8,14 @@ defmodule Acme.Application do
       if Application.get_env(:acme, :start_repo?, true) do
         [
           Acme.Repo,
-          # T128: install the canonical Samen cron (default_crontab/0) at boot — modules
-          # are loaded here, so the audit-partition roll-forward + the rest of the periodic
-          # schedule run by default with no host action. No-op under test (plugins: false).
-          {Oban, Samen.Jobs.install_default_cron(Application.fetch_env!(:samen_core, Oban))}
+          # T128 + B-OBAN: install the canonical Samen queue taxonomy
+          # (default_queue_config/0) AND cron (default_crontab/0) at boot — modules are
+          # loaded here (unlike in config.exs), so every queue a shipped worker or AshOban
+          # trigger enqueues to gets a producer, and the audit-partition roll-forward plus
+          # the rest of the periodic schedule run with no host action. A queue that is
+          # enqueued-to but unconfigured never drains and never errors — this seam is what
+          # makes that unrepresentable. No-op under test (plugins: false).
+          {Oban, Samen.Jobs.install_defaults(Application.fetch_env!(:samen_core, Oban))}
         ]
       else
         []

@@ -85,7 +85,7 @@ repo_cfg =
 Application.put_env(:driftwood, Repo, repo_cfg)
 
 {:ok, _} = Repo.start_link()
-{:ok, _} = Oban.start_link(Application.fetch_env!(:samen_core, Oban))
+{:ok, _} = Oban.start_link(Samen.Jobs.install_defaults(Application.fetch_env!(:samen_core, Oban)))
 
 project_dir = File.cwd!()
 

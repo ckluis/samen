@@ -69,6 +69,17 @@ echo "--- step 9/18: mix samen.verify.metric_labels"
 mix samen.verify.metric_labels
 echo "    PASSED"
 
+# oban_queues (B-OBAN): worker-queue ⊆ configured-queue parity. Discovers every queue
+# enqueued to by a compiled Oban.Worker — hand-written AND the worker/scheduler modules
+# AshOban generates per trigger — and asserts each has a producer in this app's RESOLVED
+# runtime Oban config (Samen.Jobs.install_defaults/1 over config :samen_core, Oban). A job
+# enqueued to an unconfigured queue does NOT fail: it sits `available` forever, no error,
+# no retry, empty DLQ, while the enqueuing surface reports success. Fails CLOSED on empty
+# discovery so it can never pass vacuously.
+echo "--- step 9b/18: mix samen.verify.oban_queues (B-OBAN worker/queue parity)"
+mix samen.verify.oban_queues
+echo "    PASSED"
+
 echo "--- step 10/18: mix samen.verify.vault_declared_parity"
 mix samen.verify.vault_declared_parity
 echo "    PASSED"
