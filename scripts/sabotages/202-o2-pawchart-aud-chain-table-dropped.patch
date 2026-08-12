@@ -1,0 +1,22 @@
+# SABOTAGE: O2 (ADR-045 §4.3, panel-4 O2) — PawChart's `aud_chain` table DELETED again. The fix
+# gave pawchart the tamper-evident audit chain the SAME way every other host does: its migration
+# wraps the shared `Samen.OperatorPlane.Migration.create_aud_chain/1` body so the table exists and
+# audit-chain appends PERSIST. This sabotage neuters the migration's `up/0` to a no-op, so the
+# fresh test DB comes up with NO `aud_chain` table — exactly the O2 state where every
+# `Samen.AuditChain.append/2` raises `relation "aud_chain" does not exist` and the DSAR/reveal
+# writers swallow it (non-repudiation silently broken in the vet vertical). The named persistence
+# red path MUST flip: the append no longer lands / is not retrievable.
+# APP: pawchart
+# TEST_FILES: test/aud_chain_persist_test.exs
+# MUST_FAIL: an append PERSISTS and is retrievable from the aud_chain table
+diff --git a/pawchart/priv/repo/migrations/20260807110500_aud_chain.exs b/pawchart/priv/repo/migrations/20260807110500_aud_chain.exs
+--- a/pawchart/priv/repo/migrations/20260807110500_aud_chain.exs
++++ b/pawchart/priv/repo/migrations/20260807110500_aud_chain.exs
+@@ -34,6 +34,6 @@
+
+   @app_role Application.compile_env(:pawchart, :aud_event_app_role, "clank")
+
+-  def up, do: Samen.OperatorPlane.Migration.create_aud_chain(@app_role)
++  def up, do: :ok
+   def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(@app_role)
+ end

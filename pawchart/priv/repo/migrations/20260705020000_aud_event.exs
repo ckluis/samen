@@ -1,18 +1,22 @@
 defmodule PawChart.Repo.Migrations.AudEvent do
   @moduledoc """
-  T2.2: the `aud_event` append-only event/audit tier for the demo app.
+  T2.2: the `aud_event` append-only event/audit tier for the PawChart vertical.
 
   Mirrors `SamenCore.TestRepo.Migrations.AudEvent` — same DDL, same catalog rows,
   same append-only enforcement.  See that module for full documentation.
 
-  Demo-specific notes:
-    * App role is `"clank"` (the local dev/CI Postgres user).
-    * First child partition covers July 2026 (the demo launch month).
+  PawChart-specific notes:
+    * App role is `"clank"` (the local dev/CI Postgres user); the `:aud_event_app_role`
+      config knob is read off PawChart's OWN otp_app (`:pawchart`), so a pawchart
+      operator's `config :pawchart, :aud_event_app_role, "..."` is honoured (O7 fix —
+      this migration previously copy-pasted driftwood's `:driftwood` key, which made
+      pawchart's own knob unreachable and defaulted the REVOKE role to `"clank"`).
+    * First child partition covers July 2026 (the launch month).
   """
 
   use Ecto.Migration
 
-  @app_role Application.compile_env(:driftwood, :aud_event_app_role, "clank")
+  @app_role Application.compile_env(:pawchart, :aud_event_app_role, "clank")
 
   @resource "Samen.AuditEvent"
   @table "aud_event"
