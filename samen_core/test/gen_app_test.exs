@@ -1009,6 +1009,27 @@ defmodule Samen.Gen.AppTest do
       # No CSV was selected here — the menu lists only what is mounted.
       refute home =~ ~s{<.nav_item label="CSV import"}
     end
+
+    # X1 (ADR-045 §4.1) — the inherited `module_nav/1` is CONSTRAINED to the groups this
+    # router actually mounts (`surfaces={...}`), so a generated `--modules` subset app never
+    # renders a nav link to a route it never mounts (CRM/Support/Marketing/Automation) — the
+    # first-click `NoRouteError` class. The router mounts billing + notifications always, so
+    # `:inbox` + `:billing` are always present; `--modules settings` adds `:settings`.
+    test "the HomeLive menu constrains module_nav to the mounted surfaces (X1)" do
+      # settings selected → the workspace :settings item is mounted, so it is included.
+      with_settings = Gen.render(Samen.Gen.Templates.home_live_ex(), Gen.bindings(spec(modules: "files,search,settings")))
+      assert with_settings =~ "surfaces={[:inbox, :billing, :settings]}"
+
+      # settings NOT selected → only the always-mounted billing + notifications groups.
+      without_settings = Gen.render(Samen.Gen.Templates.home_live_ex(), Gen.bindings(spec(modules: "files,search")))
+      assert without_settings =~ "surfaces={[:inbox, :billing]}"
+
+      # The `home_surfaces` binding itself is the mounted-only list — never CRM/Support/etc.
+      assert Gen.bindings(spec(modules: "files,search,csv,settings"))["home_surfaces"] ==
+               "[:inbox, :billing, :settings]"
+
+      refute Gen.bindings(spec(modules: "files"))["home_surfaces"] =~ ~r/:crm|:support|:marketing|:automation/
+    end
   end
 
   # A minimal structural TOML validator for the deploy proof bound (no TOML dep in

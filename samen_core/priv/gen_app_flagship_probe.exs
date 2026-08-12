@@ -399,17 +399,69 @@ try do
   check.("/csv/import/record?org=#{org}", nil)
 
   # --- WS-E `--modules`: the MENU renders — the Samen.UI HomeLive landing at `/` lists the
-  #     mounted surfaces as real navigation (the "undocumented as a menu" fix). -------------
-  {menu_code, menu_body} = get.("/")
+  #     mounted surfaces as real navigation (the "undocumented as a menu" fix). GET with a
+  #     real ?org= so every rendered href carries a resolvable org selector. -----------------
+  {menu_code, menu_body} = get.("/?org=#{org}")
   menu_labels = ["Files", "Search", "Settings", "CSV import", "Product"]
 
-  if menu_code == 200 and Enum.all?(menu_labels, &String.contains?(menu_body, &1)) do
-    IO.puts("FLAGSHIP: GET / → 200 Samen.UI menu (HomeLive) lists every mounted surface")
-  else
+  unless menu_code == 200 and Enum.all?(menu_labels, &String.contains?(menu_body, &1)) do
     IO.puts("FLAGSHIP FAIL: GET / did not render the --modules menu (code " <> Integer.to_string(menu_code) <> ")")
     IO.puts(String.slice(menu_body, 0, 2000))
     System.halt(1)
   end
+
+  # --- X1 (luminary pre-merge HIGH — ADR-045 §4.1): the DURABLE dead-link guard. -----------
+  # The ≈0-LOC adoption promise is load-bearing: the FIRST thing an adopter does is open `/`
+  # and click a nav link. The prior nav rendered CRM/Support/Marketing/Automation groups the
+  # generated router NEVER mounts → the first click raised `Phoenix.Router.NoRouteError` (404).
+  # This guard proves that CANNOT happen for THIS --modules subset: extract EVERY internal href
+  # the landing nav emits and GET each — a link to an unmounted surface 404s and fails here.
+  # This is the regression guard that makes an X1-class nav regression RED in the gate (a probe
+  # that only asserted the 5 selected labels appear — as this one used to — never saw it).
+  nav_hrefs =
+    Regex.scan(~r/href="([^"]+)"/, menu_body)
+    |> Enum.map(fn [_, h] -> String.replace(h, "&amp;", "&") end)
+    |> Enum.filter(&String.starts_with?(&1, "/"))
+    |> Enum.reject(&(String.starts_with?(&1, "/assets") or String.starts_with?(&1, "/api")))
+    |> Enum.uniq()
+
+  if nav_hrefs == [] do
+    IO.puts("FLAGSHIP FAIL: the landing nav rendered NO internal links — the X1 dead-link guard would be vacuous")
+    IO.puts(String.slice(menu_body, 0, 2000))
+    System.halt(1)
+  end
+
+  dead_links =
+    Enum.filter(nav_hrefs, fn href ->
+      {code, _body} = get.(href)
+      code != 200
+    end)
+
+  if dead_links != [] do
+    IO.puts("FLAGSHIP FAIL: X1 — the landing nav has DEAD links (unmounted routes → NoRouteError):")
+
+    Enum.each(dead_links, fn href ->
+      {code, _body} = get.(href)
+      IO.puts("  \#{href} → \#{code}")
+    end)
+
+    System.halt(1)
+  end
+
+  # The specific X1 class, named: the generated router mounts NEITHER of these groups, so no
+  # link to them may appear (belt-and-braces over the resolution sweep above).
+  x1_unmounted = ["/crm/", "/support", "/marketing/", "/automation"]
+
+  if Enum.any?(nav_hrefs, fn href -> Enum.any?(x1_unmounted, &String.starts_with?(href, &1)) end) do
+    IO.puts("FLAGSHIP FAIL: X1 — the landing nav links to an unmounted CRM/Support/Marketing/Automation surface")
+    IO.puts("  hrefs: \#{inspect(nav_hrefs)}")
+    System.halt(1)
+  end
+
+  IO.puts(
+    "FLAGSHIP: GET / → 200 Samen.UI menu (HomeLive) lists the mounted --modules surfaces AND " <>
+      "all \#{length(nav_hrefs)} rendered nav links resolve to a mounted route (X1: zero dead links, NoRouteError-free)"
+  )
 
   # --- The public JSON:API: key-less fail-closed, tenant key serves, deny-by-default ---
   api_org = Ecto.UUID.generate()

@@ -139,6 +139,51 @@ defmodule Samen.UI.ComponentsTest do
     assert html =~ ~s(href="/automation?org=ORG-123" class="on")
   end
 
+  # X1 (luminary pre-merge HIGH — ADR-045 §4.1) — a `mix samen.gen.app --modules …` app mounts
+  # only a SUBSET of the inherited groups (its router mounts billing + notifications, plus the
+  # selected `--modules`, and never CRM/Support/Marketing/Automation). `module_nav/1` must
+  # render ONLY the mounted groups (`surfaces: [...]`) so it never emits a nav link to a route
+  # the host never mounted — clicking one otherwise raises `Phoenix.Router.NoRouteError`. This
+  # is the sabotage-flippable half of the X1 guard (the flagship probe proves it end-to-end
+  # over real HTTP; this proves the filter at the component level in the `mix test` harness).
+  test "module_nav/1 renders ONLY the mounted surfaces and omits dead-link groups (X1)" do
+    # A generated `--modules settings` app: mounts billing + notifications (+ settings),
+    # never CRM/Support/Marketing/Automation.
+    html =
+      render_component(&Samen.UI.module_nav/1, %{
+        org_id: "ORG-123",
+        active: nil,
+        surfaces: [:inbox, :billing, :settings],
+        extra: []
+      })
+
+    # Mounted groups present...
+    assert html =~ ">Inbox<"
+    assert html =~ ">Billing<"
+    assert html =~ ">Workspace<"
+    assert html =~ ~s(href="/notifications?org=ORG-123")
+    assert html =~ ~s(href="/settings?org=ORG-123")
+
+    # ...unmounted groups OMITTED — no dead links to routes the router never mounts.
+    refute html =~ ">CRM<"
+    refute html =~ ">Support<"
+    refute html =~ ">Marketing<"
+    refute html =~ "/crm/companies"
+    refute html =~ "/support?org="
+    refute html =~ "/marketing/campaigns"
+    refute html =~ "/automation?org="
+
+    # Positive control (anti-tautology): with the default `:all`, every inherited group still
+    # renders — a full vertical that mounts them all. Proves the refutes above are the FILTER
+    # doing work, not a group that never renders.
+    full = render_component(&Samen.UI.module_nav/1, %{org_id: "ORG-123", active: nil, extra: []})
+    assert full =~ ">CRM<"
+    assert full =~ ">Support<"
+    assert full =~ ">Marketing<"
+    assert full =~ "/crm/companies?org=ORG-123"
+    assert full =~ "/automation?org=ORG-123"
+  end
+
   # PP-10 (Batch 3 NAV-REACHABILITY) — `host_nav_extra/1` is the shared, DATA-driven way
   # a host's own vertical nav (e.g. driftwood's freight "Operations") renders identically
   # from every framework sidebar, instead of only the host's own bespoke page.

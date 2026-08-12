@@ -1,0 +1,26 @@
+# SABOTAGE: X1 (luminary pre-merge HIGH — ADR-045 §4.1) dead-link nav guard.
+# Defeats Samen.UI.Nav.surface_mounted?/2 so the `surfaces` filter ALWAYS
+# passes (`surface in surfaces or true` == true) — the inherited CRM/Support/
+# Marketing/Automation groups render even when the host mounts only a SUBSET,
+# reintroducing exactly the X1 defect: a generated `--modules` app renders nav
+# links to routes its router never mounts, so the adopter's first click raises
+# Phoenix.Router.NoRouteError. The component-level X1 regression test must FLIP
+# (the end-to-end proof is the flagship gen probe's dead-link resolution sweep,
+# which runs under `mix run`, not `mix test`, so it cannot be replayed by this
+# `mix test`-based harness — this real test is the sabotage-flippable twin).
+# APP: samen_web
+# TEST_FILES: test/samen/ui/components_test.exs
+# MUST_FAIL: renders ONLY the mounted surfaces and omits dead-link groups (X1)
+diff --git a/samen_web/lib/samen/ui/nav.ex b/samen_web/lib/samen/ui/nav.ex
+index f51ca98..2e6691a 100644
+--- a/samen_web/lib/samen/ui/nav.ex
++++ b/samen_web/lib/samen/ui/nav.ex
+@@ -293,7 +293,7 @@ defmodule Samen.UI.Nav do
+   # and every pre-existing caller) renders everything unchanged; a LIST renders only its
+   # members. Correct for ANY subset with no per-app fork.
+   defp surface_mounted?(:all, _surface), do: true
+-  defp surface_mounted?(surfaces, surface) when is_list(surfaces), do: surface in surfaces
++  defp surface_mounted?(surfaces, surface) when is_list(surfaces), do: surface in surfaces or true
+ 
+   # ---------------------------------------------------------------------------
+   # Host nav extra (PP-10) — data-driven vertical nav, rendered identically from

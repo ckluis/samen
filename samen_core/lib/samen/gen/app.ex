@@ -735,7 +735,8 @@ defmodule Samen.Gen.App do
       # via a nested `<%= module %>`) so `render/2`'s single substitution pass is exact.
       "module_mounts" => module_mounts_binding(s),
       "root_route" => root_route_binding(s),
-      "menu_nav_items" => menu_nav_items_binding(s)
+      "menu_nav_items" => menu_nav_items_binding(s),
+      "home_surfaces" => home_surfaces_binding(s)
     }
   end
 
@@ -852,6 +853,19 @@ defmodule Samen.Gen.App do
 
   defp nav_item_line(:settings),
     do: ~s(                <.nav_item label="Settings" href={"/settings?org=\#{@org_id}"} />)
+
+  # The `<%= home_surfaces %>` seam (X1 / ADR-045 §4.1): the LIST of inherited `module_nav/1`
+  # groups this app's router ACTUALLY mounts, passed as `surfaces={...}` so the framework nav
+  # renders ONLY mounted groups and never a dead link (NoRouteError on the first click). The
+  # generated router (see `router_ex_api.eex`) mounts `samen_module_routes(:billing, …)` and
+  # `samen_notifications_routes(…)` UNCONDITIONALLY → `:billing` + `:inbox` are always present;
+  # it never mounts CRM/Support/Marketing/Automation. `--modules settings` adds the `:settings`
+  # workspace item (files/search/csv are the `:extra` "Product" group, not `module_nav` groups).
+  # Kept in lockstep with the router mounts above so both derive from the same `s.modules`.
+  defp home_surfaces_binding(%__MODULE__{modules: mods}) do
+    surfaces = [:inbox, :billing] ++ if :settings in mods, do: [:settings], else: []
+    "[" <> Enum.map_join(surfaces, ", ", &inspect/1) <> "]"
+  end
 
   @doc """
   The relative path from the generated app dir to the samen_core SOURCE root, used for the

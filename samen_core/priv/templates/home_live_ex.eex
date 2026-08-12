@@ -4,10 +4,14 @@ defmodule <%= module %>Web.HomeLive do
 
   Surfaces the mounted framework surfaces as real NAVIGATION using the Samen UI kit
   (`Samen.UI.app_shell`/`sidebar`/`module_nav`/`nav_group`/`nav_item`) — so a builder SEES
-  every mounted surface as a menu, not an orphaned route. The inherited Inbox/CRM/Billing/
-  Support/Marketing groups come from the framework `module_nav/1`; the `--modules` end-user
-  surfaces are the `:extra` "Product" group. Statically rendered (no per-request field
-  value), so it has no masking surface.
+  every mounted surface as a menu, not an orphaned route. The inherited groups come from the
+  framework `module_nav/1`, CONSTRAINED to the surfaces THIS router actually mounts via
+  `surfaces={<%= home_surfaces %>}` (X1 / ADR-045 §4.1): this app mounts billing +
+  notifications always, plus the selected `--modules`, and never CRM/Support/Marketing/
+  Automation — so the nav renders ONLY those groups and never a dead link that would raise
+  `Phoenix.Router.NoRouteError` on the first click. The `--modules` end-user surfaces are the
+  `:extra` "Product" group. Statically rendered (no per-request field value), so it has no
+  masking surface.
   """
   use Phoenix.LiveView
   import Samen.UI
@@ -23,7 +27,7 @@ defmodule <%= module %>Web.HomeLive do
     <.app_shell>
       <:sidebar>
         <.sidebar title="<%= module %>" subtitle="Samen vertical">
-          <.module_nav org_id={@org_id} active={nil}>
+          <.module_nav org_id={@org_id} active={nil} surfaces={<%= home_surfaces %>}>
             <:extra>
               <.nav_group label="Product">
 <%= menu_nav_items %>
