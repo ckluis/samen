@@ -8,8 +8,10 @@
   each fix was independently proven, so a reviewer doesn't have to reconstruct that from commit
   messages alone.
 - **Base commit:** `056334f` ("SaaS-Readiness Phase 6 COMPLETE" — GREEN) is where the dogfood
-  started; the branch head as of this doc is `f54adb6`, which includes the
-  7 pre-PR remediation batches below plus 6 post-PR cleanup items (H1–H5, incl. H2b).
+  started. §1–§5 below record the state through `f54adb6` (the 7 pre-PR remediation batches plus
+  6 post-PR cleanup items H1–H5, incl. H2b). **The branch head as of this revision is `359abe7`**
+  — §6 (2026-08-11) records the four pre-merge commits that followed and supersedes the stale
+  head/CVE claims that §5 carried.
 - **Sources:** `_orch/dogfood/pre-pr/triage.md` (the 17 canonical findings + dispositions) and
   the verifier verdicts under `_orch/verify/` (`pp1-authn-gate-verdict.json`,
   `pp5-pp6-tenant-role-verdict.json`, `pp7-nav-reach-verdict.json`,
@@ -153,16 +155,86 @@ way:
   three bundled advisories that printed on every gate run: ash 3.29.3 → 3.31.2 (keyset-cursor
   memory exhaustion + manage_relationship predicate injection), postgrex 0.22.2 → 0.22.4 (two SQL
   injection advisories), ymlr 5.1.5 → 5.1.6 (YAML newline injection). No major upgrade, no API
-  migration; `mix hex.audit` clean for the three across every app. **Follow-up (not touched):**
-  hex.audit still flags pre-existing, unrelated advisories — phoenix 1.8.8 (one HIGH + one MED, in
-  `demo`) and phoenix_live_view 1.2.5/1.2.6 (two LOW/MED across the web apps); the phoenix HIGH
-  warrants its own session.
+  migration; `mix hex.audit` clean for the three across every app. **Follow-up (CLOSED — see §6):**
+  H5 left the pre-existing phoenix 1.8.8 (one HIGH + one MED, in `demo`) and phoenix_live_view
+  1.2.5/1.2.6 advisories for their own session. That session is commit `02a426f` (Phase A below);
+  they are **no longer open**.
 
 **Sabotage harness total: 168 → 192** across the pre-PR batches (168 → 186) and the post-PR
 cleanup (186 → 189 for H1, 189 → 190 for H2, 190 → 191 for H2b, 191 → 192 for H3; H4/H5 added
-none).
+none). §6's pre-merge burn-down took it to **198**.
 
-## 6 · Read next
+## 6 · Pre-merge burn-down (2026-08-11)
+
+Everything above happened *before* the PR was reviewed. This section records what happened after,
+and corrects the two claims §5 had gone stale on (the branch head, and the phoenix CVE).
+
+**Branch head is now `359abe7`.** Four commits and one review, in order:
+
+- **Phase A — dependency CVE advisories cleared** (`02a426f`, verdict
+  `premerge-phaseA-phoenix-lv-cve-verdict.json` → PASS). Closes the follow-up H5 explicitly
+  deferred: phoenix 1.8.8 → 1.8.9 in `demo` (EEF-CVE-2026-56811 HIGH + EEF-CVE-2026-56812 MED),
+  phoenix_live_view → 1.2.9 across all four web apps (EEF-CVE-2026-58228 MED + EEF-CVE-2026-64941
+  LOW, and it resolves the demo-1.2.5-vs-samen_web-1.2.6 skew), bandit 1.12.0 → 1.12.1 in the two
+  verticals (EEF-CVE-2026-65623 HIGH), plus a websock_adapter ride-along. `mix.exs`/`mix.lock`
+  only — zero source edits. `mix hex.audit` is now clean in all 17 mix projects.
+- **Phase B — P18 + live doc-debt version sync** (`d3f4a7d`). A small docs/hygiene batch: the
+  codemunch exploration convention reinforced in `driftwood/CLAUDE.md`, and live prose claiming
+  current dependency versions re-synced to the enforced `mix.lock` pins (Ash 3.29.3 → 3.31.2 in
+  `samen_core/README.md` + `index.html`). Dated historical snapshots were deliberately left
+  unedited — they are honest records of what was true on their date.
+- **The LUMINARY pre-merge review** — 39 experts across 5 panels (architecture, security,
+  data/privacy, ops/reliability, API/DX/compliance) plus one independent adversarial confirmer,
+  run over the *integrated* branch rather than per item. It found two classes the per-item
+  verification and the persona dogfood structurally could not see: cross-feature auth-boundary
+  flow, and config/deploy artifacts that no test boots. Reports live in the gitignored
+  `_orch/luminary-premerge/`. **Honesty posture verdict: HOLDS** — the fail-honest adapter
+  contract, T144 operator-only analytics, and the anti-overclaim posture were all audited
+  directly and found sound; the findings are auth-boundary, config, erasure-completeness and
+  deploy-template, not fabrication.
+- **Phase D, B-SEC — the framework tenant-authn `on_mount` gate** (`3b251e3`, verdict
+  `premerge-bsec-tenant-authz-verdict.json` → PASS, sabotages 193–196). Framework tenant
+  LiveViews resolved org fail-closed in `mount/3` and then overwrote it with raw `params["org"]`
+  in `handle_params/3` — which in LiveView 1.2.9 runs on the **initial dead render**, and no
+  `on_mount` existed to preempt it. Confirmed live, 7/7 red paths, unauthenticated. Closed by a
+  new `Samen.Web.TenantAuthz` (`on_mount {:require_tenant}`, attached by every tenant route macro
+  — ≈0 authored LOC for a vertical) plus `CurrentOrg.reresolve/2`, which demotes `?org=` from an
+  identity to a selector validated against the principal's pinned authorized set; the settings /
+  2FA / onboarding param-identity legs and the `--live` generator templates were fixed in the same
+  pass. The independent verifier built its own endpoint **and** drove the real driftwood/pawchart
+  endpoints, and ran an anti-tautology pre-fix control proving the new helper is load-bearing.
+  Strictly narrowing: armed hosts get stricter, disarmed hosts are byte-for-byte unchanged.
+- **Phase D, B-OBAN — canonical Oban queue taxonomy + parity gate** (`359abe7`, verdict
+  `premerge-boban-queue-drain-verdict.json` → PASS, sabotages 197–198). Workers enqueued into
+  queues configured nowhere, so jobs sat `available` forever — including webhook ingress, which
+  verified the signature, persisted, returned 200 to Stripe/Postmark, and never drained (DLQ
+  replay re-enqueued into the same dead queue and reported success). The gate missed it because
+  the taxonomy test asserted a hard-coded six-queue list that itself omitted `webhooks_in`. Closed
+  by a canonical 9-queue `default_queue_config/0` + a config-time `Samen.Jobs.install_defaults/1`
+  seam every host and both application templates now resolve through, plus a **non-vacuous**
+  `mix samen.verify.oban_queues` parity verifier (worker queue ⊆ configured queue, fails closed on
+  empty discovery) wired as a gate step in every host `ci.sh` and both generator ci templates.
+  Demo also now starts Oban (it had declared a full config, cron included, and never started it).
+
+**What remains, and the merge gate.** The two BLOCKERs are fixed and banked; the rest of the
+review is filed as a durable decision record rather than a sprawling same-session fix:
+
+> **[ADR-045 — LUMINARY pre-merge review dispositions](adr/ADR-045-premerge-review-dispositions.md)**
+
+ADR-045 §2 carries the one item that **gates this merge and needs an operator decision**: the
+tenant-authn gate — both the new `on_mount` hook and the pre-existing host `:browser` plug — is
+conditioned on `:auth_required?`, which per ADR-031 defaults to **`false`** (a deliberate
+dev-ergonomics posture) with no `config_env()` guard. Every shipped host commits or inherits that
+default and none has a `prod.exs`/`runtime.exs` at all, and the generated-app config template emits
+it too — so as shipped, an anonymous `GET /broker?org=<victim>` still returns another org's data,
+and a fresh `mix samen.gen.app` deploys with an open tenant plane. This is **not a regression** (the
+pre-fix tree was identically open when disarmed) and not a defect the B-SEC fix introduced — it
+means the B-SEC remediation is only realized once a host arms. ADR-045 states the options honestly
+and recommends **fail-secure by environment**. §4 of that ADR files every other unresolved finding
+into four phases (gate integrity · deploy/runtime hardening · erasure completeness · residual role
+derivation), and §5 names the two non-V-F1 items it would advise fixing before merge.
+
+## 7 · Read next
 
 - `_orch/dogfood/pre-pr/triage.md` (gitignored) — the full per-finding adjudication, root-cause
   clusters, and the pawchart-posture recommendation the operator decided against.
@@ -170,3 +242,8 @@ none).
   deferral entry for what became H1.
 - [risk-register-final.md](risk-register-final.md) — the earlier Gate-6 risk register this
   dogfood postdates; same "named, bounded residual, never silently dropped" discipline.
+- [adr/ADR-045-premerge-review-dispositions.md](adr/ADR-045-premerge-review-dispositions.md) —
+  the pre-merge review's decision record: the V-F1 merge gate and the four-phase backlog.
+- `_orch/luminary-premerge/` + `_orch/verify/premerge-*.json` (gitignored) — the five panel
+  reports, the synthesis/triage, and the three pre-merge verifier verdicts every claim in §6 is
+  traceable to.
