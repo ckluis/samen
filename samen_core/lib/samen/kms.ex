@@ -144,6 +144,97 @@ defmodule Samen.Kms do
     Application.get_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
   end
 
+  @doc """
+  FAIL-SECURE KMS boot guard (ADR-045 §4.2, O5) — the crypto-keystore twin of the `--deploy`
+  `runtime.exs` prod-secret raise (ADR-024) and the tenant-gate boot guard
+  (`Samen.Web.TenantGate.assert_prod_armed!/1`). REFUSES TO BOOT a production host whose
+  configured `:kms_adapter` is an UNIMPLEMENTED SKELETON — rather than boot green and then 500
+  on every vault operation (the O5/X6 defect: the generated `--deploy` posture selected
+  `Samen.Kms.AwsKmsDynamo`, a raise-only skeleton, so the app booted and every encrypt/decrypt
+  crashed).
+
+  An adapter is treated as an unimplemented skeleton iff it DECLARES itself one via
+  `__kms_skeleton__?/0 == true`. The shipped `Samen.Kms.AwsKmsDynamo` declares this until its
+  real AWS KMS + DynamoDB calls are wired (the ADR-001 §8.2 obligations are listed in its
+  `@moduledoc` and reproduced in the raise below). A working adapter (`FileBacked`, `InMemory`,
+  or a fully-wired production one) does not declare the marker, so the guard admits it.
+
+  Dev/test NEVER raise (the guard is a no-op unless the runtime is production). Call it at the
+  framework boot seam — a mount-bearing host's `Application.start/2`, alongside the ADR-024
+  prod-secret raise and the tenant-gate boot guard — so it fires before the endpoint accepts a
+  request. `env_reader` is a test-only seam (default `&Mix.env/0`) so a suite can prove the prod
+  refusal inside a `:test` run.
+  """
+  @spec assert_prod_adapter_ready!((-> atom())) :: :ok
+  def assert_prod_adapter_ready!(env_reader \\ &Mix.env/0) do
+    adapter = adapter()
+
+    if prod?(env_reader) and skeleton_adapter?(adapter) do
+      raise """
+      Samen.Kms refuses to boot: the configured KMS adapter #{inspect(adapter)} is an
+      UNIMPLEMENTED SKELETON in PRODUCTION.
+
+      This host was started in a production environment with
+
+          config :samen_core, :kms_adapter, #{inspect(adapter)}
+
+      but that adapter's real keystore calls are NOT wired — it would boot green and then FAIL
+      every vault operation (encrypt / decrypt / shred). A vaulted Samen SaaS must NEVER come up
+      with a non-functional keystore (ADR-045 §4.2 O5; the crypto twin of the ADR-024 prod-secret
+      raise). It refuses to boot rather than 500 on the first PII read.
+
+      To fix, EITHER:
+
+        1. Implement #{inspect(adapter)}'s ADR-001 §8.2 obligations (see its @moduledoc) and then
+           REMOVE its `__kms_skeleton__?/0` marker (or make it return false):
+             a. PITR cannot resurrect the key — DynamoDB PITR disabled; backups_disabled?/0.
+             b. Post-shred unwrap/1 raises :shredded.
+             c. attest/1 returns a POSITIVE :shredded tombstone (not mere :absent).
+             d. pseudonym/2 unlinks on shred.
+             e. KMS/store outage fails closed (:unavailable, never plaintext).
+             f. key_material_present?/1 is false after shred (the wrapped DEK is DELETED).
+             g. list_active_subjects/0 (the oracle wrong-key probe) wired or documented.
+
+        2. OR select a working adapter. The file-backed keystore is real, but is NOT durable
+           across an ephemeral release filesystem — provision a real KMS before trusting it:
+             config :samen_core, :kms_adapter, Samen.Kms.FileBacked
+
+      See docs/runbooks/deploy.md ("Operator TODO" — wire a real KMS adapter).
+      """
+    end
+
+    :ok
+  end
+
+  @doc false
+  @spec prod?((-> atom())) :: boolean()
+  def prod?(env_reader \\ &Mix.env/0), do: resolved_env(env_reader) == :prod
+
+  # Release-safe env resolution (the `Samen.AI.resolved_env/0` precedent, mirrored in
+  # `Samen.Web.TenantGate`): a compiled release has no `:mix` application, so Mix is absent at
+  # boot — treat an unknowable environment as :prod (fail-SECURE: the guard ARMS rather than
+  # silently admitting an unimplemented adapter).
+  defp resolved_env(env_reader) do
+    if Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) do
+      env_reader.()
+    else
+      :prod
+    end
+  rescue
+    _ -> :prod
+  end
+
+  # An adapter is an unimplemented skeleton iff it opts IN by exporting `__kms_skeleton__?/0`
+  # returning true. A fully-wired / working adapter never carries the marker, so the guard
+  # admits it. This keeps the refusal a property the adapter declares about ITSELF, not a
+  # hardcoded denylist the boot guard has to keep in sync.
+  defp skeleton_adapter?(adapter) when is_atom(adapter) do
+    Code.ensure_loaded?(adapter) and function_exported?(adapter, :__kms_skeleton__?, 0) and
+      adapter.__kms_skeleton__?()
+  end
+
+  defp skeleton_adapter?(_), do: false
+
   # ADR-035 §4.1 — the reserved synthetic subject set. "sys:bidx" is the blind-index
   # HMAC purpose key (Samen.Auth.BlindIndex). Adding a future FIXED reserved subject
   # is a one-line append here — every caller routes through `shred/1` below, so the

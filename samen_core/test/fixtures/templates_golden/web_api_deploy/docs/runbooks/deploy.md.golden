@@ -113,24 +113,58 @@ The multi-tenant plane's authentication gate is **armed by default in production
 ## Operator TODO — the human prerequisites (NOT provided by this scaffold)
 
 These are deliberately **not** automated (ADR-024 — no live deploy claim). The scaffold is
-a fail-honest on-ramp, not a turnkey deploy. You must provide:
+a fail-honest on-ramp, not a turnkey deploy. They are ordered **by consequence** — the first
+three are the ones that make the app REFUSE TO BOOT (fail-secure) until you do them:
 
-1. **A real Fly account + app** — sign up, `fly auth login`, `fly apps create acme`,
+1. **Wire a real KMS adapter — the app REFUSES TO BOOT without one (ADR-045 §4.2, O5).** The
+   `config/runtime.exs` selects `Samen.Kms.AwsKmsDynamo`, but that adapter is a **raise-only
+   skeleton** (its AWS KMS + DynamoDB calls are NOT wired). It ships with
+   `aws_kms_dynamo_enabled: false` and is backstopped by the framework boot guard
+   (`Samen.Kms.assert_prod_adapter_ready!/0`, wired in `acme/application.ex`): a prod
+   boot with an unimplemented KMS adapter selected **raises a named error and refuses to start**,
+   naming the ADR-001 §8.2 obligations — rather than booting green and then **500-ing on every
+   vault operation**. Choose ONE:
+     - **Implement `Samen.Kms.AwsKmsDynamo`** (its `@moduledoc` lists the seven ADR-001 §8.2
+       obligations: PITR-off, post-shred `unwrap` raises `:shredded`, positive `:shredded`
+       attestation, pseudonym unlink, outage fails closed, `key_material_present?` false after a
+       real `DeleteItem`, `list_active_subjects` wired), then REMOVE its `__kms_skeleton__?/0`
+       marker so the boot guard admits it; create the AWS KMS key + the wrapped-DEK DynamoDB
+       table (PITR OFF, per ADR-001) and set `SAMEN_KMS_KEY_ID` / `SAMEN_KMS_REGION`; or
+     - **Select a real KMS you operate** (`config :samen_core, :kms_adapter, MyKms` in
+       `config/runtime.exs`). `Samen.Kms.FileBacked` is a REAL adapter but is NOT durable across
+       an ephemeral release filesystem — do not trust a production vault to it.
+   The in-memory/file-backed dev adapters are NOT for production; the vault needs a real keystore.
+
+2. **A real auth path for the ARMED tenant gate (ADR-045 §2).** The gate is **armed by default
+   in prod** (see "Tenant-auth gate" above): the tenant actor is derived only from an
+   authenticated session. Provision a login + membership/roster (the `:auth_credentials` /
+   `:operator_roster` seams, or real `Identity.Membership` rows) so operators and tenants are not
+   locked out. Do NOT disarm it (`auth_required?: false`) to work around a missing login — the
+   app **refuses to boot** disarmed in prod (`Samen.Web.TenantGate.assert_prod_armed!/1`).
+
+3. **Set the `aud_event_app_role` — the Postgres role the app connects as (ADR-045 §4.2, O4).**
+   The `aud_event` migration emits `REVOKE UPDATE, DELETE ON aud_event FROM <role>` to make the
+   audit tier append-only for the app. That `<role>` is resolved at migration time from, in
+   order: the `:aud_event_app_role` knob, else the repo's configured `:username`, else it
+   **raises** (it will NOT guess a role). Under a Neon `DATABASE_URL` there is no static
+   `:username`, so set the knob explicitly before the first `release_command` migration:
+
+       config :acme, :aud_event_app_role, "<the DB role in your DATABASE_URL>"
+
+   A REVOKE against the WRONG role silently leaves `aud_event` mutable for the real app role — an
+   audit-integrity gap — which is why the migration refuses to emit an arbitrary/guessed role.
+
+4. **A real Fly account + app** — sign up, `fly auth login`, `fly apps create acme`,
    and set `app`/`primary_region` in `fly.toml`. No Fly account exists in a fresh generation.
-2. **A real Neon project + DATABASE_URL** — create the project + branches (above) and set
+5. **A real Neon project + DATABASE_URL** — create the project + branches (above) and set
    `DATABASE_URL`. No database is provisioned by this scaffold.
-3. **Real KMS keys** — create the AWS KMS key + the wrapped-DEK DynamoDB table (PITR OFF,
-   per ADR-001) and set `SAMEN_KMS_KEY_ID` / `SAMEN_KMS_REGION`. The in-memory/file-backed
-   dev KMS adapters are NOT for production; the vault needs a real keystore.
-4. **A real OTLP exporter** — the observability plane records token-only spans with
+6. **A real OTLP exporter** — the observability plane records token-only spans with
    `db_statement: :disabled`, but the wide-event OTLP sink is operator-wired (it defaults
    to `:none`). Point it at your real collector to see traces in production.
-5. **A real auth path for the ARMED tenant gate** — the gate is armed by default in prod (above),
-   so provision a login + membership/roster so operators and tenants are not locked out. Do NOT
-   disarm it (`auth_required?: false`) to work around a missing login — the app refuses to boot.
 
-Until all five are done, `fly deploy` is not expected to yield a running app — and
-`config/runtime.exs` will fail closed rather than pretend otherwise.
+Until these are done, `fly deploy` is not expected to yield a running app — and both
+`config/runtime.exs` (missing secret) and `acme/application.ex` (unimplemented KMS
+adapter / disarmed tenant gate) will **fail closed** at boot rather than pretend otherwise.
 
 **Operator-plane authority (T146).** The generated `:operator_authority` seam
 (`config :acme, :operator_authority, ...` + the operator mount label) ships a

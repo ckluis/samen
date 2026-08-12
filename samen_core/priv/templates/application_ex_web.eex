@@ -11,6 +11,15 @@ defmodule <%= module %>.Application do
     # `Samen.Web.TenantGate`), so this only fires if an operator EXPLICITLY set auth_required? false.
     Samen.Web.TenantGate.assert_prod_armed!(:<%= otp_app %>)
 
+    # ADR-045 §4.2 (V-F1 sibling, O5) — the FAIL-SECURE KMS boot guard. Refuses to boot in
+    # PRODUCTION with an UNIMPLEMENTED (raise-only) KMS adapter selected — rather than boot green
+    # and then 500 on every vault operation. The `--deploy` `runtime.exs` selects the AWS KMS
+    # skeleton (`Samen.Kms.AwsKmsDynamo`) with `aws_kms_dynamo_enabled: false`; this guard turns
+    # that into an honest boot REFUSAL naming the ADR-001 §8.2 obligations, until a real KMS is
+    # wired. A no-op in dev/test and whenever a working adapter is configured. The crypto twin of
+    # the ADR-024 `runtime.exs` prod-secret raise + the tenant-gate boot guard above.
+    Samen.Kms.assert_prod_adapter_ready!()
+
     # Observability plane (WS-D D1.1/D5): OTel-Ecto with the un-forgettable
     # db_statement: :disabled + metrics contention handlers, wired via the
     # framework helper instead of hand-copied setup calls. Follows the repo:

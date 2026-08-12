@@ -407,6 +407,122 @@ try do
 
   IO.puts("DEPLOY: runbook Operator TODO names all four human prerequisites (Fly / Neon / KMS / OTLP); no turnkey claim.")
 
+  # --- O5 / X6 (ADR-045 §4.2): the --deploy KMS posture FAILS HONEST AT BOOT, not per-op ---
+  # The generated runtime.exs selects Samen.Kms.AwsKmsDynamo — a raise-only SKELETON. Prove the
+  # generated prod app does NOT boot green and then 500 on every vault op: (1) runtime.exs selects
+  # the skeleton with aws_kms_dynamo_enabled:FALSE (the O5/X6 defect shipped it as `true`),
+  # (2) application.ex WIRES the framework boot guard, and (3) that guard REFUSES to boot in prod
+  # when the skeleton adapter is selected — with a working adapter as the anti-tautology control.
+  runtime_prod_cfg =
+    (fn ->
+       saved = Map.new(required_secrets, fn k -> {k, System.get_env(k)} end)
+
+       try do
+         for k <- required_secrets, do: System.delete_env(k)
+         for {k, v} <- all_secrets, do: System.put_env(k, v)
+         Config.Reader.read!(runtime_path, env: :prod)
+       after
+         for {k, v} <- saved do
+           if v, do: System.put_env(k, v), else: System.delete_env(k)
+         end
+       end
+     end).()
+
+  core_cfg = Keyword.get(runtime_prod_cfg, :samen_core, [])
+  selected_adapter = Keyword.get(core_cfg, :kms_adapter)
+  enabled_flag = Keyword.get(core_cfg, :aws_kms_dynamo_enabled)
+
+  unless selected_adapter == Samen.Kms.AwsKmsDynamo do
+    halt.(1, "FAIL (O5): runtime.exs did not select Samen.Kms.AwsKmsDynamo (got #{inspect(selected_adapter)}).")
+  end
+
+  if enabled_flag != false do
+    halt.(
+      1,
+      "FAIL (O5): runtime.exs set aws_kms_dynamo_enabled to #{inspect(enabled_flag)} — it MUST be " <>
+        "false. A raise-only skeleton enabled in prod is the O5/X6 defect (boots green, 500s per op)."
+    )
+  end
+
+  app_ex_src = File.read!(Path.join(app_dir, "lib/#{otp_app}/application.ex"))
+
+  unless String.contains?(app_ex_src, "Samen.Kms.assert_prod_adapter_ready!") do
+    halt.(1, "FAIL (O5): application.ex does not wire the KMS prod boot guard (Samen.Kms.assert_prod_adapter_ready!).")
+  end
+
+  IO.puts("DEPLOY: O5 — runtime.exs selects AwsKmsDynamo with aws_kms_dynamo_enabled:false; application.ex wires the boot guard.")
+
+  # Behavioral proof: apply the runtime.exs-selected adapter to :samen_core and assert the boot
+  # guard REFUSES in prod (naming the adapter + the ADR-001 §8.2 obligations), then a positive
+  # control that it ADMITS a working adapter (FileBacked). Restores the ambient adapter after.
+  saved_adapter = Application.get_env(:samen_core, :kms_adapter)
+
+  try do
+    Application.put_env(:samen_core, :kms_adapter, selected_adapter)
+
+    boot =
+      try do
+        Samen.Kms.assert_prod_adapter_ready!(fn -> :prod end)
+        :booted_green
+      rescue
+        e -> {:refused, Exception.message(e)}
+      end
+
+    case boot do
+      {:refused, msg} ->
+        unless String.contains?(msg, "AwsKmsDynamo") and String.contains?(msg, "ADR-001 §8.2") do
+          halt.(1, "FAIL (O5): the boot guard refused but did NOT name the adapter + the ADR-001 §8.2 obligations:\n#{msg}")
+        end
+
+        IO.puts("DEPLOY: O5 — the prod boot guard REFUSES the raise-only KMS skeleton (names it + the ADR-001 §8.2 obligations). [fail-honest AT BOOT]")
+
+      :booted_green ->
+        halt.(
+          1,
+          "FAIL (O5): the prod boot guard did NOT refuse a raise-only KMS skeleton — the generated " <>
+            "app would boot GREEN and then 500 on every vault op (the O5/X6 defect)."
+        )
+    end
+
+    Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
+    Samen.Kms.assert_prod_adapter_ready!(fn -> :prod end)
+    IO.puts("DEPLOY: O5 positive control — the boot guard ADMITS a working adapter (Samen.Kms.FileBacked).")
+  after
+    if saved_adapter,
+      do: Application.put_env(:samen_core, :kms_adapter, saved_adapter),
+      else: Application.delete_env(:samen_core, :kms_adapter)
+  end
+
+  # --- O4 (ADR-045 §4.2): the generated aud_event migration derives its REVOKE role -------------
+  # It must NOT ship `REVOKE UPDATE, DELETE ON aud_event FROM clank` — a developer's laptop
+  # Postgres role — into an adopter's prod migration (the O4 defect). The literal must be absent.
+  aud_event_migration = File.read!(Path.join(app_dir, "priv/repo/migrations/20260705020000_aud_event.exs"))
+
+  if String.contains?(aud_event_migration, "clank") do
+    halt.(1, "FAIL (O4): the generated aud_event migration contains the hardcoded developer role 'clank'.")
+  end
+
+  unless String.contains?(aud_event_migration, "aud_event_app_role") do
+    halt.(1, "FAIL (O4): the generated aud_event migration does not resolve the role via :aud_event_app_role.")
+  end
+
+  IO.puts("DEPLOY: O4 — the generated aud_event migration derives its REVOKE role (no hardcoded 'clank'); the migration RAN in the gate above.")
+
+  # --- §2.1: the generated app has a config/prod.exs so a prod config-load does not abort -------
+  prod_exs_path = Path.join(app_dir, "config/prod.exs")
+
+  unless File.exists?(prod_exs_path) do
+    halt.(1, "FAIL (§2.1): the generated app has no config/prod.exs — a prod config-load would abort on the missing import.")
+  end
+
+  case eval_runtime.(prod_exs_path, :prod, all_secrets) do
+    :ok ->
+      IO.puts("DEPLOY: §2.1 — the generated config/prod.exs exists and loads under Config.Reader in :prod.")
+
+    {:raised, msg} ->
+      halt.(1, "FAIL (§2.1): the generated config/prod.exs did not load in :prod:\n#{msg}")
+  end
+
   elapsed = System.monotonic_time(:millisecond) - t0
 
   IO.puts("\nRESULT: DEPLOY PROBE CONFIRMED (AC-G16-1/2/3) — `mix samen.gen.app --deploy` emitted")

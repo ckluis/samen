@@ -4,6 +4,13 @@ defmodule Acme.Application do
 
   @impl true
   def start(_type, _args) do
+    # ADR-045 §4.2 (O5) — the FAIL-SECURE KMS boot guard. Refuses to boot in PRODUCTION with an
+    # UNIMPLEMENTED (raise-only) KMS adapter selected, rather than boot green and then 500 on
+    # every vault operation. A no-op in dev/test and whenever a working adapter is configured
+    # (the headless default is `Samen.Kms.FileBacked`); the crypto twin of the ADR-024
+    # `runtime.exs` prod-secret raise.
+    Samen.Kms.assert_prod_adapter_ready!()
+
     children =
       if Application.get_env(:acme, :start_repo?, true) do
         [

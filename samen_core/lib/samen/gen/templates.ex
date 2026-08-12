@@ -65,6 +65,10 @@ defmodule Samen.Gen.Templates do
   @config_exs File.read!(Path.join(@templates_dir, "config_exs.eex"))
   @external_resource Path.join(@templates_dir, "config_exs_web.eex")
   @config_exs_web File.read!(Path.join(@templates_dir, "config_exs_web.eex"))
+  @external_resource Path.join(@templates_dir, "config_prod_exs.eex")
+  @config_prod_exs File.read!(Path.join(@templates_dir, "config_prod_exs.eex"))
+  @external_resource Path.join(@templates_dir, "config_prod_exs_web.eex")
+  @config_prod_exs_web File.read!(Path.join(@templates_dir, "config_prod_exs_web.eex"))
   @external_resource Path.join(@templates_dir, "data_case.eex")
   @data_case File.read!(Path.join(@templates_dir, "data_case.eex"))
   @external_resource Path.join(@templates_dir, "deploy_runbook.eex")
@@ -183,6 +187,10 @@ defmodule Samen.Gen.Templates do
       {"config/config.exs", config_exs()},
       {"config/dev.exs", dev_exs()},
       {"config/test.exs", test_exs()},
+      # ADR-045 §2.1 — a prod.exs so `import_config "#{config_env()}.exs"` does not ABORT a prod
+      # config load on the missing file. The web set swaps in the web variant (below) that also
+      # re-states the armed tenant-gate + KMS boot posture. Secrets stay in runtime.exs (deploy).
+      {"config/prod.exs", config_prod_exs()},
       {"lib/<%= otp_app %>/application.ex", application_ex()},
       {"lib/<%= otp_app %>/repo.ex", repo_ex()},
       {"lib/<%= otp_app %>/billing.ex", billing_ex()},
@@ -220,6 +228,7 @@ defmodule Samen.Gen.Templates do
       ".formatter.exs" => formatter_exs_web(),
       "config/config.exs" => config_exs_web(),
       "config/dev.exs" => dev_exs_web(),
+      "config/prod.exs" => config_prod_exs_web(),
       "lib/<%= otp_app %>/application.ex" => application_ex_web(),
       ".gitignore" => gitignore_web(),
       "README.md" => readme_web()
@@ -363,6 +372,12 @@ defmodule Samen.Gen.Templates do
 
   # ------------------------------------------------------------------ config
   defp config_exs, do: @config_exs
+
+  # ADR-045 §2.1 — the prod compile-time config (base, web-agnostic) + the web variant that
+  # re-states the armed tenant-gate + KMS boot posture. Without a prod.exs, a MIX_ENV=prod
+  # `import_config "#{config_env()}.exs"` ABORTS on the missing file.
+  defp config_prod_exs, do: @config_prod_exs
+  defp config_prod_exs_web, do: @config_prod_exs_web
 
   defp dev_exs do
     """

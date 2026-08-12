@@ -1,0 +1,23 @@
+# SABOTAGE: O4 (ADR-045 §4.2) — the generated aud_event REVOKE role RE-HARDCODED to "clank". The
+# fix made `m_aud_event.eex` derive the app role at migration time (the :aud_event_app_role knob,
+# else the repo's configured :username, else RAISE) instead of defaulting to the literal "clank"
+# — a developer's local Postgres role that would ship `REVOKE UPDATE, DELETE ON aud_event FROM
+# clank` into every adopter's prod migration (whose first release_command then aborts). This
+# sabotage restores the "clank" default, so the rendered migration once again contains the laptop
+# role. The named O4 red path (the generated migration must NOT contain "clank") MUST flip.
+# APP: samen_core
+# TEST_FILES: test/gen_deploy_bootability_test.exs
+# MUST_FAIL: the generated aud_event migration derives the DB app role, never a hardcoded 'clank' (O4)
+diff --git a/samen_core/priv/templates/m_aud_event.eex b/samen_core/priv/templates/m_aud_event.eex
+index 9df5a91..a8685e3 100644
+--- a/samen_core/priv/templates/m_aud_event.eex
++++ b/samen_core/priv/templates/m_aud_event.eex
+@@ -13,7 +13,7 @@ defmodule <%= module %>.Repo.Migrations.AudEvent do
+   #   3. RAISE a named error — refusing to guess a role, since a REVOKE against the WRONG role
+   #      silently leaves aud_event mutable for the real app role (an audit-integrity gap).
+   defp app_role do
+-    case Application.get_env(:<%= otp_app %>, :aud_event_app_role) do
++    case Application.get_env(:<%= otp_app %>, :aud_event_app_role, "clank") do
+       role when is_binary(role) and role != "" ->
+         role
+ 

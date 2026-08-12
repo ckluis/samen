@@ -93,7 +93,7 @@ if config_env() == :prod do
   # prod requirement for a vaulted app (ADR-024). Fail-closed on absence: the vault
   # cannot wrap/unwrap DEKs without it, so booting without it would be a silent
   # half-secure app. The AWS KMS + DynamoDB adapter (Samen.Kms.AwsKmsDynamo) is the
-  # prod store; enabling it requires these keys.
+  # intended prod store; enabling it requires these keys.
   kms_key_id =
     fetch_secret!.(
       "SAMEN_KMS_KEY_ID",
@@ -107,8 +107,19 @@ if config_env() == :prod do
       "The AWS region of the KMS key + the wrapped-DEK DynamoDB table (PITR OFF)."
     )
 
+  # ADR-045 §4.2 (O5) — FAIL-HONEST AT BOOT, not per-op. `Samen.Kms.AwsKmsDynamo` is a
+  # raise-only SKELETON in this scaffold (its AWS calls are NOT wired). It is selected here
+  # with `aws_kms_dynamo_enabled: false` and BACKSTOPPED by the framework prod boot guard
+  # (`Samen.Kms.assert_prod_adapter_ready!/0`, wired in <%= otp_app %>/application.ex): a prod
+  # host that reaches boot with an unimplemented KMS adapter selected REFUSES TO BOOT with a
+  # named, actionable error listing the ADR-001 §8.2 obligations — rather than booting green and
+  # then 500-ing on every vault operation. Do NOT flip `aws_kms_dynamo_enabled` to true until the
+  # real AWS KMS + DynamoDB calls in Samen.Kms.AwsKmsDynamo are implemented (and its
+  # `__kms_skeleton__?/0` marker removed); until then the honest posture is: refuse to boot. See
+  # docs/runbooks/deploy.md ("Operator TODO" — wire a real KMS adapter) for the two paths
+  # (implement the AWS adapter, or select a real KMS you operate).
   config :samen_core, :kms_adapter, Samen.Kms.AwsKmsDynamo
-  config :samen_core, :aws_kms_dynamo_enabled, true
+  config :samen_core, :aws_kms_dynamo_enabled, false
 
   config :samen_core, Samen.Kms.AwsKmsDynamo,
     key_id: kms_key_id,

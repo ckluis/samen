@@ -36,6 +36,7 @@ defmodule Samen.Gen.AppTest do
     "config/config.exs",
     "config/dev.exs",
     "config/test.exs",
+    "config/prod.exs",
     "lib/<%= otp_app %>/application.ex",
     "lib/<%= otp_app %>/repo.ex",
     "lib/<%= otp_app %>/billing.ex",
@@ -823,7 +824,11 @@ defmodule Samen.Gen.AppTest do
 
     test "wires the prod KMS adapter from the SAMEN_KMS_* env (vault keystore)", %{runtime: rt} do
       assert rt =~ "config :samen_core, :kms_adapter, Samen.Kms.AwsKmsDynamo"
-      assert rt =~ "config :samen_core, :aws_kms_dynamo_enabled, true"
+      # ADR-045 §4.2 (O5): the AWS adapter is a raise-only SKELETON, so it is selected with
+      # aws_kms_dynamo_enabled:FALSE (NOT the old `true`, which booted green then 500'd per op)
+      # and backstopped by the application.ex boot guard. Enabling it in prod is the O5/X6 defect.
+      assert rt =~ "config :samen_core, :aws_kms_dynamo_enabled, false"
+      refute rt =~ "config :samen_core, :aws_kms_dynamo_enabled, true"
     end
 
     test "NO insecure dev fallback (empty password / localhost) in the prod runtime", %{runtime: rt} do
@@ -895,6 +900,18 @@ defmodule Samen.Gen.AppTest do
       assert todo =~ ~r/Neon project/i
       assert todo =~ ~r/KMS key/i
       assert todo =~ ~r/OTLP exporter/i
+    end
+
+    test "the Operator TODO names the P2-A boot-blockers by consequence (KMS adapter, arming, aud role)",
+         %{runbook: rb} do
+      todo = rb |> String.split("## Operator TODO") |> List.last()
+      # O5: the KMS adapter is a raise-only skeleton — the app REFUSES TO BOOT until wired.
+      assert todo =~ ~r/refuses to boot/i
+      assert todo =~ "Samen.Kms.assert_prod_adapter_ready!"
+      # O4: the aud_event REVOKE role knob.
+      assert todo =~ ":aud_event_app_role"
+      # V-F1: the armed tenant-gate arming step.
+      assert todo =~ "auth_required?"
     end
 
     test "documents Neon branch-per-env + the secrets checklist (incl. KMS + SECRET_KEY_BASE)",
