@@ -93,7 +93,12 @@ defmodule Samen.Web.TenantAuthz do
         {:cont,
          socket
          |> assign(:samen_authorized_orgs, CurrentOrg.authorized_orgs(mount, session))
-         |> assign(:samen_tenant_org_id, CurrentOrg.resolve(mount, params, session))}
+         |> assign(:samen_tenant_org_id, CurrentOrg.resolve(mount, params, session))
+         # ADR-045 §4.4 — pin the authenticated principal (resolved through the Identity spine)
+         # so the tenant `write_scope` helpers (`Samen.Web.TenantRole`) can derive the REAL
+         # `Identity.Membership` role on an armed host instead of self-elevating `:member` to
+         # `:admin` (S1a).
+         |> assign(:samen_tenant_principal, CurrentOrg.principal_id(mount, session))}
     end
   end
 
@@ -105,6 +110,7 @@ defmodule Samen.Web.TenantAuthz do
     socket
     |> assign(:samen_authorized_orgs, :unconstrained)
     |> assign_new(:samen_tenant_org_id, fn -> nil end)
+    |> assign_new(:samen_tenant_principal, fn -> nil end)
   end
 
   defp operator_plane?(%Mount{plane: %{kind: :operator}}), do: true

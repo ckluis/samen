@@ -115,9 +115,11 @@ defmodule Samen.Web.ListLive do
       filter_fields: Keyword.get(opts, :filter_fields, []),
       default_sort: Keyword.get(opts, :default_sort, {hd(sortable), :asc}),
       page_size: Reads.bounded_page_size(Keyword.get(opts, :page_size, Reads.default_page_size())),
-      # ADR-040 §5.8 (T37h) — `restore`'s write-scope elevator (1-arity `scope -> scope`,
-      # default identity). See moduledoc.
-      write_scope: Keyword.get(opts, :write_scope, & &1)
+      # ADR-040 §5.8 (T37h) — `restore`'s write-scope elevator, default identity. ADR-045 §4.4
+      # (S1a): now `(scope, socket) -> scope` so the elevator can re-derive the admin scope from
+      # the socket's pinned principal (armed hosts derive the REAL membership role, never a
+      # hardcoded `:admin`). See moduledoc.
+      write_scope: Keyword.get(opts, :write_scope, fn scope, _socket -> scope end)
     }
   end
 
@@ -266,7 +268,7 @@ defmodule Samen.Web.ListLive do
     if resource && Samen.Info.archivable?(resource) do
       case Enum.find(socket.assigns.page.items, &(to_string(&1.id) == id)) do
         nil -> {:noreply, socket}
-        record -> restore_and_reread(record, config.write_scope.(scope), state, socket)
+        record -> restore_and_reread(record, config.write_scope.(scope, socket), state, socket)
       end
     else
       {:noreply, socket}

@@ -18,12 +18,25 @@ defmodule Samen.Web.Live do
   the framework routes always populate it.
   """
   def assign_mount(socket, %{"samen_mount" => raw} = session) when is_map(raw) do
+    mount = Samen.Web.Mount.from_session(raw)
+
     socket
-    |> assign(:samen_mount, Samen.Web.Mount.from_session(raw))
+    |> assign(:samen_mount, stash_principal(mount, socket.assigns[:samen_tenant_principal]))
     |> assign(:samen_acting_as, Samen.Web.CurrentOrg.acting_as?(session))
   end
 
   def assign_mount(socket, _session), do: socket
+
+  # ADR-045 §4.4 (S1a) — stash the request's authenticated principal (pinned in assigns by
+  # `Samen.Web.TenantAuthz`'s `on_mount`, which runs before this) onto the mount, so the 2-arity
+  # tenant `write_scope(mount, org_id)` helpers derive the REAL `Identity.Membership` role on an
+  # armed host with no per-call-site threading. Runtime-only: this mount is assigned, never
+  # re-serialized into the session (`Mount.to_session/1` runs only at router-compile time). A nil
+  # principal (the disarmed dev posture) leaves the write scope at its byte-identical `:admin`.
+  defp stash_principal(%Samen.Web.Mount{} = mount, principal) do
+    labels = Map.put(mount.labels || %{}, Samen.Web.TenantRole.principal_label(), principal)
+    %{mount | labels: labels}
+  end
 
   @doc """
   The client IP for a LiveView surface, for per-IP rate limiting (ADR-038 §6.3; T103).

@@ -566,7 +566,7 @@ defmodule Samen.Gen.PostTemplates do
       "\n" <>
       "      # FAIL-HONEST restore: navigate/refresh only when the restore actually happened.\n" <>
       "      def handle_event(\"restore\", %{\"id\" => id}, socket) do\n" <>
-      "        scope = scope(socket.assigns.org_id)\n" <>
+      "        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal])\n" <>
       "\n" <>
       "        case Enum.find(socket.assigns.records, &(to_string(&1.id) == id)) do\n" <>
       "          nil ->\n" <>
@@ -666,7 +666,14 @@ defmodule Samen.Gen.PostTemplates do
 
       @impl true
       def mount(params, session, socket) do
-        socket = assign(socket, samen_mount: @samen_authn_mount)
+        # ADR-045 §4.4 — pin the authenticated principal (from the SIGNED session) so `scope/2`
+        # can derive the REAL Identity.Membership role on an armed app (S12), never a hardcoded rank.
+        socket =
+          assign(socket,
+            samen_mount: @samen_authn_mount,
+            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session)
+          )
+
         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
         {:ok, load(assign(socket, org_id: org_id), org_id)}
       end
@@ -695,7 +702,7 @@ defmodule Samen.Gen.PostTemplates do
       end
 
       def load(socket, org_id) do
-        scope = scope(org_id)
+        scope = scope(org_id, socket.assigns[:samen_principal])
         show_archived = Map.get(socket.assigns, :show_archived, false)
 
         socket
@@ -712,7 +719,7 @@ defmodule Samen.Gen.PostTemplates do
 
       @impl true
       def handle_event("new", _params, socket) do
-        {:noreply, assign(socket, show_new: true, new_form: create_form(scope(socket.assigns.org_id)))}
+        {:noreply, assign(socket, show_new: true, new_form: create_form(scope(socket.assigns.org_id, socket.assigns[:samen_principal])))}
       end
 
       def handle_event("cancel_new", _params, socket) do
@@ -738,7 +745,7 @@ defmodule Samen.Gen.PostTemplates do
 
       # FAIL-HONEST delete: navigate/refresh only when the destroy actually happened.
       def handle_event("delete", %{"id" => id}, socket) do
-        scope = scope(socket.assigns.org_id)
+        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal])
 
         case Enum.find(socket.assigns.records, &(to_string(&1.id) == id)) do
           nil ->
@@ -755,22 +762,29 @@ defmodule Samen.Gen.PostTemplates do
       <%= archivable_live_events %>
       # `?org=` selects the tenant org; the actor carries `plane: :tenant`, so its OWN
       # org's PII resolves in CLEAR through `Samen.Api.PiiResolution` (never hand-masked,
-      # never a `vt_*` token). `role: :admin` clears the kernel's admin write gate.
-      # B-SEC / S12 — the acting scope. `org_id` is the SESSION-RESOLVED org (see `mount/3`
-      # and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`), never a raw
-      # `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the CALLER is
-      # authorized for. The role is no longer an unconditional `:admin`: it is the DEV grant
-      # while this app is explicitly DISARMED (`config :<%= otp_app %>, auth_required?: false`)
-      # — the named `Samen.Web.Operator.Authz.dev_operator_role/2` pattern — and drops to
-      # `:member` the instant the app is armed for prod, so the kernel's `RoleAtLeast :admin`
-      # write gate FAILS CLOSED rather than being satisfied by a hardcoded elevation. Wire a
-      # real `Identity.Membership`-derived role here before you arm this app for writes.
-      defp scope(org_id) do
-        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: ui_role(), plane: :tenant}}
+      # never a `vt_*` token). The role clears (or fails) the kernel's admin write gate per
+      # the caller's real membership on an armed app (see `role/2`).
+      # B-SEC / S12 · ADR-045 §4.4 — the acting scope. `org_id` is the SESSION-RESOLVED org
+      # (see `mount/3` and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`),
+      # never a raw `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the
+      # CALLER is authorized for. `principal` is the authenticated principal id pinned in `mount/3`.
+      defp scope(org_id, principal) do
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role(org_id, principal), plane: :tenant}}
       end
 
-      defp ui_role do
-        if Application.get_env(:<%= otp_app %>, :auth_required?, false), do: :member, else: :admin
+      # The acting role. DISARMED (`config :<%= otp_app %>, auth_required?: false`): the dev
+      # convenience (`:admin`), unchanged. ARMED: the principal's REAL `Identity.Membership` role
+      # via the framework (`Samen.Web.TenantRole.membership_role/3` — the SAME source of truth the
+      # settings surfaces use), fail-CLOSED to `:member` so admin-rank writes require ACTUAL admin
+      # membership rather than a hardcoded elevation, and a non-admin member's write is refused by
+      # the kernel `RoleAtLeast :admin` gate. Reads are unaffected — `OrgScope` confines by org_id
+      # regardless of role. This is the tenant-plane twin of the operator `dev_operator_role/2`
+      # convenience: `?org=` names the org, the SESSION names the principal, the Membership names
+      # the rank.
+      defp role(org_id, principal) do
+        if Samen.Web.CurrentOrg.tenant_gate_armed?(@samen_authn_mount),
+          do: Samen.Web.TenantRole.membership_role(@samen_authn_mount, org_id, principal),
+          else: :admin
       end
 
       <%= archivable_read_records_fn %>
@@ -906,7 +920,14 @@ defmodule Samen.Gen.PostTemplates do
 
       @impl true
       def mount(params, session, socket) do
-        socket = assign(socket, samen_mount: @samen_authn_mount)
+        # ADR-045 §4.4 — pin the authenticated principal so `scope/2`'s write path derives the
+        # REAL Identity.Membership role on an armed app (S12), never a hardcoded rank.
+        socket =
+          assign(socket,
+            samen_mount: @samen_authn_mount,
+            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session)
+          )
+
         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
         id = params["id"]
         {:ok, load(assign(socket, org_id: org_id, id: id), org_id, id)}
@@ -935,7 +956,7 @@ defmodule Samen.Gen.PostTemplates do
 
       @impl true
       def handle_event("delete", %{"id" => id}, socket) do
-        scope = scope(socket.assigns.org_id)
+        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal])
 
         case fetch(socket.assigns.org_id, id) do
           nil ->
@@ -958,28 +979,34 @@ defmodule Samen.Gen.PostTemplates do
         Resource
         |> Ash.Query.filter(id == ^id)
         |> Ash.Query.ensure_selected([:secret])
-        |> Ash.read_one(scope: scope(org_id))
+        |> Ash.read_one(scope: scope(org_id, nil))
         |> case do
           {:ok, record} -> record
           {:error, _} -> nil
         end
       end
 
-      # B-SEC / S12 — the acting scope. `org_id` is the SESSION-RESOLVED org (see `mount/3`
-      # and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`), never a raw
-      # `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the CALLER is
-      # authorized for. The role is no longer an unconditional `:admin`: it is the DEV grant
-      # while this app is explicitly DISARMED (`config :<%= otp_app %>, auth_required?: false`)
-      # — the named `Samen.Web.Operator.Authz.dev_operator_role/2` pattern — and drops to
-      # `:member` the instant the app is armed for prod, so the kernel's `RoleAtLeast :admin`
-      # write gate FAILS CLOSED rather than being satisfied by a hardcoded elevation. Wire a
-      # real `Identity.Membership`-derived role here before you arm this app for writes.
-      defp scope(org_id) do
-        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: ui_role(), plane: :tenant}}
+      # B-SEC / S12 · ADR-045 §4.4 — the acting scope. `org_id` is the SESSION-RESOLVED org
+      # (see `mount/3` and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`),
+      # never a raw `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the
+      # CALLER is authorized for. `principal` is the authenticated principal id pinned in `mount/3`.
+      defp scope(org_id, principal) do
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role(org_id, principal), plane: :tenant}}
       end
 
-      defp ui_role do
-        if Application.get_env(:<%= otp_app %>, :auth_required?, false), do: :member, else: :admin
+      # The acting role. DISARMED (`config :<%= otp_app %>, auth_required?: false`): the dev
+      # convenience (`:admin`), unchanged. ARMED: the principal's REAL `Identity.Membership` role
+      # via the framework (`Samen.Web.TenantRole.membership_role/3` — the SAME source of truth the
+      # settings surfaces use), fail-CLOSED to `:member` so admin-rank writes require ACTUAL admin
+      # membership rather than a hardcoded elevation, and a non-admin member's write is refused by
+      # the kernel `RoleAtLeast :admin` gate. Reads are unaffected — `OrgScope` confines by org_id
+      # regardless of role. This is the tenant-plane twin of the operator `dev_operator_role/2`
+      # convenience: `?org=` names the org, the SESSION names the principal, the Membership names
+      # the rank.
+      defp role(org_id, principal) do
+        if Samen.Web.CurrentOrg.tenant_gate_armed?(@samen_authn_mount),
+          do: Samen.Web.TenantRole.membership_role(@samen_authn_mount, org_id, principal),
+          else: :admin
       end
 
       defp index_path(org_id), do: "/<%= scope_path %>/<%= resource_path %>?org=#{org_id}"
@@ -1107,7 +1134,14 @@ defmodule Samen.Gen.PostTemplates do
 
       @impl true
       def mount(params, session, socket) do
-        socket = assign(socket, samen_mount: @samen_authn_mount)
+        # ADR-045 §4.4 — pin the authenticated principal so the create/update form scope derives
+        # the REAL Identity.Membership role on an armed app (S12), never a hardcoded rank.
+        socket =
+          assign(socket,
+            samen_mount: @samen_authn_mount,
+            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session)
+          )
+
         org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
         id = params["id"]
         action = if id, do: :edit, else: :new
@@ -1118,7 +1152,7 @@ defmodule Samen.Gen.PostTemplates do
       def load(socket, nil, _id, action), do: assign(socket, no_org: true, action: action, record: nil, form: nil)
 
       def load(socket, org_id, nil, _action) do
-        assign(socket, no_org: false, action: :new, record: nil, form: create_form(scope(org_id)))
+        assign(socket, no_org: false, action: :new, record: nil, form: create_form(scope(org_id, socket.assigns[:samen_principal])))
       end
 
       def load(socket, org_id, id, _action) do
@@ -1127,7 +1161,7 @@ defmodule Samen.Gen.PostTemplates do
             assign(socket, no_org: false, action: :edit, record: nil, form: nil)
 
           record ->
-            assign(socket, no_org: false, action: :edit, record: record, form: update_form(record, scope(org_id)))
+            assign(socket, no_org: false, action: :edit, record: record, form: update_form(record, scope(org_id, socket.assigns[:samen_principal])))
         end
       end
 
@@ -1138,7 +1172,7 @@ defmodule Samen.Gen.PostTemplates do
         Resource
         |> Ash.Query.filter(id == ^id)
         |> Ash.Query.ensure_selected([:secret])
-        |> Ash.read_one(scope: scope(org_id))
+        |> Ash.read_one(scope: scope(org_id, nil))
         |> case do
           {:ok, record} -> record
           {:error, _} -> nil
@@ -1160,21 +1194,27 @@ defmodule Samen.Gen.PostTemplates do
         end
       end
 
-      # B-SEC / S12 — the acting scope. `org_id` is the SESSION-RESOLVED org (see `mount/3`
-      # and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`), never a raw
-      # `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the CALLER is
-      # authorized for. The role is no longer an unconditional `:admin`: it is the DEV grant
-      # while this app is explicitly DISARMED (`config :<%= otp_app %>, auth_required?: false`)
-      # — the named `Samen.Web.Operator.Authz.dev_operator_role/2` pattern — and drops to
-      # `:member` the instant the app is armed for prod, so the kernel's `RoleAtLeast :admin`
-      # write gate FAILS CLOSED rather than being satisfied by a hardcoded elevation. Wire a
-      # real `Identity.Membership`-derived role here before you arm this app for writes.
-      defp scope(org_id) do
-        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: ui_role(), plane: :tenant}}
+      # B-SEC / S12 · ADR-045 §4.4 — the acting scope. `org_id` is the SESSION-RESOLVED org
+      # (see `mount/3` and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`),
+      # never a raw `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the
+      # CALLER is authorized for. `principal` is the authenticated principal id pinned in `mount/3`.
+      defp scope(org_id, principal) do
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role(org_id, principal), plane: :tenant}}
       end
 
-      defp ui_role do
-        if Application.get_env(:<%= otp_app %>, :auth_required?, false), do: :member, else: :admin
+      # The acting role. DISARMED (`config :<%= otp_app %>, auth_required?: false`): the dev
+      # convenience (`:admin`), unchanged. ARMED: the principal's REAL `Identity.Membership` role
+      # via the framework (`Samen.Web.TenantRole.membership_role/3` — the SAME source of truth the
+      # settings surfaces use), fail-CLOSED to `:member` so admin-rank writes require ACTUAL admin
+      # membership rather than a hardcoded elevation, and a non-admin member's write is refused by
+      # the kernel `RoleAtLeast :admin` gate. Reads are unaffected — `OrgScope` confines by org_id
+      # regardless of role. This is the tenant-plane twin of the operator `dev_operator_role/2`
+      # convenience: `?org=` names the org, the SESSION names the principal, the Membership names
+      # the rank.
+      defp role(org_id, principal) do
+        if Samen.Web.CurrentOrg.tenant_gate_armed?(@samen_authn_mount),
+          do: Samen.Web.TenantRole.membership_role(@samen_authn_mount, org_id, principal),
+          else: :admin
       end
 
       defp create_form(scope) do

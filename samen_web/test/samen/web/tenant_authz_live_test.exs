@@ -32,7 +32,15 @@ defmodule Samen.Web.TenantAuthzLiveTest do
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
+  alias Samen.Auth.SessionCreate
+  alias Samen.Identity.Invite
+  alias Samen.Identity.Register
   alias Samen.Web.Auth
+  alias Samen.Web.Flags.SettingsLive
+  alias Samen.Web.Mount
+  alias Samen.Web.TenantRole
+  alias Samen.WebTest.Operator, as: Op
+  alias Samen.WebTest.Primitives.FeatureFlag
   alias Samen.WebTest.SecurityHost
 
   @endpoint Samen.WebTest.SecurityEndpoint
@@ -50,6 +58,18 @@ defmodule Samen.Web.TenantAuthzLiveTest do
   setup do
     prev = Application.get_env(SecurityHost.otp_app(), :auth_required?)
     prev_orgs = Application.get_env(:samen_web, :security_test_authorized_orgs, %{})
+
+    # S1a spine harness — invite/accept dispatches an invite email through the fail-honest
+    # Delivery chokepoint; `:test` makes it a no-op (the invitation_test precedent).
+    prev_delivery = Application.get_env(:samen_core, :delivery_env)
+    Application.put_env(:samen_core, :delivery_env, :test)
+
+    on_exit(fn ->
+      case prev_delivery do
+        nil -> Application.delete_env(:samen_core, :delivery_env)
+        v -> Application.put_env(:samen_core, :delivery_env, v)
+      end
+    end)
 
     on_exit(fn ->
       case prev do
@@ -307,6 +327,253 @@ defmodule Samen.Web.TenantAuthzLiveTest do
                "a tenant live_session carries no authz on_mount: #{inspect(hooks)}"
       end
     end
+  end
+
+  # ==========================================================================
+  # S1a (ADR-045 §4.4) — the tenant write helpers no longer self-elevate a member
+  # to :admin on an ARMED host: admin-rank writes require ACTUAL admin membership.
+  # Driven end-to-end through the REAL flags LiveView + Identity spine.
+  # ==========================================================================
+
+  describe "S1a — armed host, admin-rank write requires REAL admin membership" do
+    test "the armed flags surface SERVES an authenticated member on the DEAD RENDER (TenantAuthz pins the principal)" do
+      SecurityHost.arm!()
+      host = register_owner!()
+      member = accept_into!(host, :member)
+      _flag = seed_flag(host.org.id)
+
+      # The real endpoint + router + TenantAuthz on_mount: an armed, spine-authenticated member is
+      # served (200), NOT halted — the flags MODULE surface is spine-capable via :identity_namespace.
+      html =
+        session_conn(member.credential.id)
+        |> get("/flags?org=#{host.org.id}")
+        |> html_response(200)
+
+      assert html =~ "checkout.v2", "the member must see their own org's flags"
+    end
+
+    test "a NON-admin member's flag toggle is REFUSED (the DB row is unchanged)" do
+      SecurityHost.arm!()
+      host = register_owner!()
+      member = accept_into!(host, :member)
+      flag = seed_flag(host.org.id)
+
+      _socket = toggle_flag(member.credential.id, host.org.id, flag.id)
+
+      assert raw_flag(flag.id).enabled == true,
+             "an armed member self-elevated to :admin and flipped the flag (S1a regression)"
+    end
+
+    test "POSITIVE CONTROL — an actual ADMIN member's toggle SUCCEEDS (anti-tautology)" do
+      SecurityHost.arm!()
+      host = register_owner!()
+      admin = accept_into!(host, :admin)
+      flag = seed_flag(host.org.id)
+
+      _socket = toggle_flag(admin.credential.id, host.org.id, flag.id)
+
+      assert raw_flag(flag.id).enabled == false,
+             "a real admin member must still perform the admin-rank write on an armed host"
+    end
+
+    test "the DISARMED dev posture is UNCHANGED — a member's toggle still succeeds (byte-identical)" do
+      SecurityHost.disarm!()
+      host = register_owner!()
+      member = accept_into!(host, :member)
+      flag = seed_flag(host.org.id)
+
+      _socket = toggle_flag(member.credential.id, host.org.id, flag.id)
+
+      assert raw_flag(flag.id).enabled == false,
+             "the sanctioned ADR-031 dev convenience (:admin) must be preserved verbatim"
+    end
+
+    test "TenantRole helper — real role, fail-CLOSED to :member, disarmed dev convenience" do
+      host = register_owner!()
+      admin = accept_into!(host, :admin)
+      member = accept_into!(host, :member)
+      mount = armed_flags_mount()
+
+      # membership_role reads the REAL Identity.Membership through the ONE source of truth.
+      assert TenantRole.membership_role(mount, host.org.id, admin.credential.id) == :admin
+      assert TenantRole.membership_role(mount, host.org.id, member.credential.id) == :member
+      # Fail-closed to least privilege (never :admin): no principal / no membership.
+      assert TenantRole.membership_role(mount, host.org.id, nil) == :member
+      assert TenantRole.membership_role(mount, host.org.id, Ash.UUID.generate()) == :member
+
+      SecurityHost.arm!()
+      assert TenantRole.admin_scope(mount, host.org.id, admin.credential.id).actor.role == :admin
+      assert TenantRole.admin_scope(mount, host.org.id, member.credential.id).actor.role == :member
+
+      SecurityHost.disarm!()
+      # Disarmed → the byte-identical dev convenience, regardless of the caller's real role.
+      assert TenantRole.admin_scope(mount, host.org.id, member.credential.id).actor.role == :admin
+    end
+  end
+
+  # ==========================================================================
+  # S1a (chat) — Chat.set_disclosure_setting/3's org-wide identity-exposure flip is
+  # RoleAtLeast :admin-gated; the ThreadsLive "toggle_disclosure" event now enforces
+  # real admin membership on an armed host (its "admin only" branch is reachable).
+  # ==========================================================================
+
+  describe "S1a (chat) — armed host, org-wide disclosure flip requires REAL admin membership" do
+    test "a NON-admin member's toggle_disclosure is REFUSED (no ChatDisclosureSetting row written)" do
+      SecurityHost.arm!()
+      host = register_owner!()
+      member = accept_into!(host, :member)
+
+      _socket = toggle_disclosure(member.credential.id, host.org.id, true)
+
+      refute disclosure_on?(host.org.id),
+             "an armed member self-elevated to :admin and flipped org-wide identity disclosure (S1a)"
+    end
+
+    test "POSITIVE CONTROL — an actual ADMIN member's toggle_disclosure SUCCEEDS" do
+      SecurityHost.arm!()
+      host = register_owner!()
+      admin = accept_into!(host, :admin)
+
+      _socket = toggle_disclosure(admin.credential.id, host.org.id, true)
+
+      assert disclosure_on?(host.org.id),
+             "a real admin member must still flip org-wide disclosure on an armed host"
+    end
+
+    test "the DISARMED dev posture is UNCHANGED — a member's toggle_disclosure still succeeds" do
+      SecurityHost.disarm!()
+      host = register_owner!()
+      member = accept_into!(host, :member)
+
+      _socket = toggle_disclosure(member.credential.id, host.org.id, true)
+
+      assert disclosure_on?(host.org.id),
+             "the sanctioned dev convenience (:admin) must be preserved verbatim"
+    end
+  end
+
+  # -- S1a spine harness --------------------------------------------------------
+
+  defp register_mods,
+    do: %{org: Op.Org, credential: Op.Credential, user: Op.User, membership: Op.Membership, auth_token: Op.AuthToken, repo: Samen.WebTest.Repo}
+
+  defp invite_mods,
+    do: %{invitation: Op.Invitation, credential: Op.Credential, user: Op.User, membership: Op.Membership, repo: Samen.WebTest.Repo}
+
+  defp session_create_mods,
+    do: %{session: Op.Session, org: Op.Org, membership: Op.Membership, user: Op.User}
+
+  defp register_owner! do
+    attrs = %{
+      org_name: "S1a Co #{System.unique_integer([:positive])}",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "s1a-#{System.unique_integer([:positive])}@example.test",
+      password: "correct horse battery staple"
+    }
+
+    {:ok, result} = Register.register(attrs, register_mods())
+    Map.put(result, :email, attrs.email)
+  end
+
+  # Land `invitee` into `host`'s org at `role` through the sanctioned invite/accept path — so
+  # the acting principal holds a REAL `Identity.Membership` at exactly `role`.
+  defp accept_into!(host, role) do
+    invitee = register_owner!()
+
+    owner_scope = %Samen.Scope{
+      actor: %{id: host.user.id, org_id: host.org.id, role: :owner, verified?: true, kind: :tenant, plane: :tenant}
+    }
+
+    {:ok, _invitation, raw_token} =
+      Invite.create(invite_mods(), owner_scope, %{email: invitee.email, role: role})
+
+    {:ok, _joined} = Invite.accept(invite_mods(), raw_token)
+    invitee
+  end
+
+  defp session_conn(credential_id) do
+    {:ok, _session, raw_session_token} = SessionCreate.create(session_create_mods(), credential_id)
+
+    build_conn()
+    |> Plug.Test.init_test_session(%{})
+    |> Plug.Conn.put_session(Auth.session_token_key(), raw_session_token)
+  end
+
+  defp seed_flag(org_id) do
+    FeatureFlag
+    |> Ash.Changeset.for_create(:create, %{org_id: org_id, name: "checkout.v2", enabled: true, rollout_pct: 100}, authorize?: false)
+    |> Ash.create!()
+  end
+
+  defp raw_flag(id), do: Ash.get!(FeatureFlag, id, authorize?: false)
+
+  # Drive the REAL flags LiveView at the callback level (the `flags_settings_crud_test` pattern —
+  # a connected `live/2` socket needs the `lazy_html` test dep, ADR-045 §4.4 test-gap). The mount
+  # is assigned through the REAL `Samen.Web.Live.assign_mount/2`, which stashes the principal (as
+  # `Samen.Web.TenantAuthz`'s `on_mount` pins it) — so `write_scope/2` derives the REAL membership
+  # role exactly as it does over the websocket.
+  defp toggle_flag(principal, org_id, flag_id) do
+    session = %{"samen_mount" => Mount.to_session(armed_flags_mount())}
+
+    socket =
+      %Phoenix.LiveView.Socket{}
+      |> Phoenix.Component.assign(:samen_tenant_principal, principal)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
+      |> Phoenix.Component.assign(:return_to, nil)
+      |> Samen.Web.Live.assign_mount(session)
+      |> SettingsLive.load(org_id)
+
+    {:noreply, socket} = SettingsLive.handle_event("toggle_flag", %{"id" => flag_id}, socket)
+    socket
+  end
+
+  # Drive the REAL ThreadsLive "toggle_disclosure" handle_event at the callback level (the same
+  # pattern as `toggle_flag/3`) — proving the "admin only" error branch is now reachable for a
+  # non-admin member on an armed host.
+  defp toggle_disclosure(principal, org_id, expose?) do
+    session = %{"samen_mount" => Mount.to_session(armed_chat_mount())}
+
+    socket =
+      %Phoenix.LiveView.Socket{}
+      |> Phoenix.Component.assign(:samen_tenant_principal, principal)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
+      |> Samen.Web.Live.assign_mount(session)
+      |> Phoenix.Component.assign(:org_id, org_id)
+
+    raw = if expose?, do: "on", else: "off"
+
+    {:noreply, socket} =
+      Samen.Web.Chat.ThreadsLive.handle_event("toggle_disclosure", %{"expose_identity" => raw}, socket)
+
+    socket
+  end
+
+  # The org's persisted disclosure state, read through the framework's own OrgScope-gated read
+  # (`Chat.disclosure_setting?/2`, role-agnostic) — the established verification path.
+  defp disclosure_on?(org_id) do
+    m = Mount.new(:chat, Samen.WebTest.Chat, Samen.WebTest.Repo)
+    Samen.Web.Chat.disclosure_setting?(m, Mount.scope(m, org_id))
+  end
+
+  defp armed_chat_mount do
+    Mount.new(:chat, Samen.WebTest.Chat, Samen.WebTest.Repo,
+      labels: %{
+        otp_app: SecurityHost.otp_app(),
+        authn: {:app_env, SecurityHost.otp_app(), :auth_required?},
+        identity_namespace: Samen.WebTest.Operator
+      }
+    )
+  end
+
+  defp armed_flags_mount do
+    Mount.new(:flags, Samen.WebTest.Primitives, Samen.WebTest.Repo,
+      labels: %{
+        otp_app: SecurityHost.otp_app(),
+        authn: {:app_env, SecurityHost.otp_app(), :auth_required?},
+        identity_namespace: Samen.WebTest.Operator
+      }
+    )
   end
 
   defp armed_settings_mount do

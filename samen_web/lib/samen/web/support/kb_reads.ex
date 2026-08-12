@@ -106,20 +106,21 @@ defmodule Samen.Web.Support.KbReads do
   @doc """
   The tenant-ADMIN write scope for the kernel's admin-gated `:publish`/`:mark_archived`
   actions (`Post` carries `RoleAtLeast :admin`; the mount's plane scope is `:member`).
-  Same-org role elevation ONLY — the `Samen.Web.Flags.Reads.write_scope/2` /
-  `Samen.Web.Billing.Reads.write_scope/2` pattern: PRESERVES every plane marker from
-  `Mount.scope/2` (an operator-plane mount elevated here still carries `plane:
-  :operator`), so the elevation raises RBAC rank only, never the masking plane.
+
+  ADR-045 §4.4 (S1a) — delegates to `Samen.Web.TenantRole.admin_scope/3`: the disarmed dev
+  posture keeps `:admin` byte-for-byte; an ARMED host derives the principal's REAL
+  `Identity.Membership` role (fail-closed `:member`, never `:admin`). PRESERVES every plane marker
+  from `Mount.scope/2` (an operator-plane mount keeps `plane: :operator`), so the elevation raises
+  RBAC rank only, never the masking plane.
   """
-  def write_scope(kb_mount, org_id) do
-    %Samen.Scope{actor: actor} = Mount.scope(kb_mount, org_id)
-    %Samen.Scope{actor: Map.put(actor, :role, :admin)}
-  end
+  def write_scope(kb_mount, org_id, principal \\ nil),
+    do: Samen.Web.TenantRole.admin_scope(kb_mount, org_id, principal)
 
   @doc """
   Publish an article (admin-gated by the kernel — `write_scope/2` elevates for the
   actual `:publish` write; the lookup itself only needs the ordinary member-scoped
-  read) — best-effort reindex on success.
+  read) — best-effort reindex on success. The armed host's REAL membership role is derived from
+  the principal stashed on `kb_mount` by `Samen.Web.Live.assign_mount/2` (ADR-045 §4.4).
   """
   def publish_article(kb_mount, org_id, id) do
     read_scope = Mount.scope(kb_mount, org_id)

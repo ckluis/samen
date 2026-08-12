@@ -157,6 +157,22 @@ defmodule Samen.Web.CurrentOrg do
   end
 
   @doc """
+  The authenticated principal's id for `mount` + `session`, or `nil`. The SPINE credential id
+  (`samen_session_token`) first — the id `Samen.Auth.OrgActor` keys a membership lookup on
+  (ADR-045 §4.4, the tenant-role residual) — then the legacy BYO `samen_current_user` id. Never
+  a param, never raises. `Samen.Web.TenantAuthz` pins this into the socket so the tenant
+  `write_scope` helpers + the generated `--live` screens can derive the REAL membership role on an
+  armed host instead of a hardcoded `:admin`.
+  """
+  @spec principal_id(Mount.t() | nil, map()) :: String.t() | nil
+  def principal_id(mount, session) do
+    case spine_credential_id(mount, session) do
+      {:ok, credential_id} when is_binary(credential_id) -> credential_id
+      _ -> Samen.Web.Auth.authenticated_user_id(session)
+    end
+  end
+
+  @doc """
   The org ids the session's authenticated principal is AUTHORIZED to act in, `[]` when there is
   no principal / no seam / an error (deny). Legacy BYO `:authorized_orgs` MFA first, then the
   framework spine's real `Membership` rows — the SAME two-tier order `resolve/3` uses, exposed
@@ -322,7 +338,22 @@ defmodule Samen.Web.CurrentOrg do
     _ -> []
   end
 
+  # ADR-045 §4.4 — the sibling mount carrying the Identity spine (`Session`/`User`/`Membership`).
+  # A tenant MODULE mount (crm/flags/billing/…) has a VERTICAL namespace, so the host names the
+  # Identity namespace with the `:identity_namespace` label — the `:kb_namespace` sibling-mount
+  # seam. Absent the label the mount is used as-is (a settings/auth mount, or a generated `--live`
+  # `@samen_authn_mount`, already carries the Identity namespace — backward compatible). This lets
+  # a wired module surface be genuinely SPINE-capable (authenticate the principal, read its
+  # authorized orgs + Membership role) instead of only legacy-BYO-capable.
+  defp identity_ns_mount(%Mount{} = mount) do
+    case Mount.label(mount, :identity_namespace, nil) do
+      ns when is_atom(ns) and not is_nil(ns) -> %{mount | namespace: ns}
+      _ -> mount
+    end
+  end
+
   defp spine_credential_id(%Mount{} = mount, session) do
+    mount = identity_ns_mount(mount)
     session_mod = Mount.resource(mount, Session)
 
     case Samen.Web.Auth.resolve_principal(session, %{session: session_mod}) do
@@ -336,6 +367,7 @@ defmodule Samen.Web.CurrentOrg do
   defp spine_credential_id(_mount, _session), do: :error
 
   defp spine_authorized_org_ids(%Mount{} = mount, credential_id) do
+    mount = identity_ns_mount(mount)
     mods = %{user: Mount.resource(mount, User), membership: Mount.resource(mount, Membership)}
     Samen.Auth.OrgActor.authorized_org_ids(mods, credential_id)
   rescue
@@ -354,6 +386,7 @@ defmodule Samen.Web.CurrentOrg do
   @spec resolve_actor(Mount.t() | nil, String.t(), String.t()) :: map() | nil
   def resolve_actor(%Mount{} = mount, credential_id, org_id)
       when is_binary(credential_id) and is_binary(org_id) do
+    mount = identity_ns_mount(mount)
     mods = %{user: Mount.resource(mount, User), membership: Mount.resource(mount, Membership)}
 
     case Samen.Auth.OrgActor.resolve(mods, credential_id, org_id) do

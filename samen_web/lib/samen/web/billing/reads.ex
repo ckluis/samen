@@ -292,26 +292,34 @@ defmodule Samen.Web.Billing.Reads do
   (Plan / Price / Invoice / Subscription carry `RoleAtLeast :admin`; the mount's
   plane scope is a `:member`, per `Samen.Web.Plane.scope/2`).
 
-  Same-org role elevation ONLY — the chat-disclosure precedent (`Samen.Web.Chat`),
-  with one hardening: the elevation PRESERVES every plane marker (`plane`, `kind`,
-  `impersonation`) from `Mount.scope/2`. An operator-plane mount elevated here still
-  carries `plane: :operator`, so `Samen.Pii.WriteGuard` (MC-1 / Invariant L1) rejects
-  a vaulted-PII write exactly as before — the elevation raises RBAC rank, never the
-  masking plane. `OrgScope` still confines the write to `org_id`.
+  ADR-045 §4.4 (S1a) — delegates to `Samen.Web.TenantRole.admin_scope/3`: the disarmed dev
+  posture keeps `:admin` byte-for-byte; an ARMED host derives the principal's REAL
+  `Identity.Membership` role (fail-closed `:member`, never `:admin`) so an ordinary member no
+  longer self-elevates. The elevation still PRESERVES every plane marker (`plane`, `kind`,
+  `impersonation`) from `Mount.scope/2` — an operator-plane mount keeps `plane: :operator`, so
+  `Samen.Pii.WriteGuard` (MC-1 / Invariant L1) rejects a vaulted-PII write exactly as before, the
+  elevation raises RBAC rank only, and `OrgScope` still confines the write to `org_id`.
   """
-  def write_scope(mount, org_id) do
-    %Samen.Scope{actor: actor} = Mount.scope(mount, org_id)
-    %Samen.Scope{actor: Map.put(actor, :role, :admin)}
-  end
+  def write_scope(mount, org_id, principal \\ nil),
+    do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal)
 
   @doc """
-  Elevate an EXISTING scope to `:admin` (same transform as `write_scope/2`, minus the
-  redundant `Mount.scope/2` re-derivation — for a caller that already holds a scope).
-  ADR-040 §5.8 (T37h): `Samen.Web.ListLive`'s `restore` event passes this as its
-  `:write_scope` elevator — Plan writes are `RoleAtLeast :admin`-gated (billing
-  blueprint), stricter than the plain list `scope` reads use.
+  The `Samen.Web.ListLive` `restore` elevator (ADR-040 §5.8, T37h) — the archived-Plan restore is
+  `RoleAtLeast :admin`-gated, stricter than the plain list `scope` reads use. `(scope, socket)`:
+  re-derives the tenant-ADMIN scope for the list's org through `Samen.Web.TenantRole.admin_scope/3`
+  using the socket's pinned principal, so ADR-045 §4.4 (S1a) governs it exactly as every other
+  write path — disarmed → `:admin`; armed → the REAL `Identity.Membership` role, fail-closed
+  `:member`.
   """
-  def elevate_to_admin(%Samen.Scope{actor: actor} = scope), do: %{scope | actor: Map.put(actor, :role, :admin)}
+  def restore_admin_scope(%Samen.Scope{actor: %{org_id: org_id}}, socket) when is_binary(org_id) do
+    Samen.Web.TenantRole.admin_scope(
+      socket.assigns.samen_mount,
+      org_id,
+      socket.assigns[:samen_tenant_principal]
+    )
+  end
+
+  def restore_admin_scope(scope, _socket), do: scope
 
   @doc "Destroy one billing plan for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
   def delete_plan(mount, scope, id), do: delete_record(mount, scope, Plan, id)

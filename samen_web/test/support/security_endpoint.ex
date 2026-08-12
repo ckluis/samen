@@ -83,6 +83,15 @@ defmodule Samen.WebTest.SecurityRouter do
       labels: @labels,
       spine_totp: true
     )
+
+    # ADR-045 §4.4 (S1a) — a tenant MODULE surface (flags) with the `:identity_namespace` seam
+    # wired to the Operator/Identity namespace, so an armed host derives the acting principal's
+    # REAL `Identity.Membership` role for its admin-gated `write_scope` (a member's flag toggle is
+    # refused; an admin's succeeds — driven end-to-end in `tenant_authz_live_test.exs`).
+    samen_flags_routes(:flags, Samen.WebTest.Primitives,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
   end
 end
 

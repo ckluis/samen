@@ -38,9 +38,10 @@ defmodule Samen.Web.Billing.PlansLive do
     sortable: [:name, :interval, :enabled],
     filter_fields: [:name, :label],
     default_sort: {:name, :asc},
-    # ADR-040 §5.8 (T37h) — Plan writes are RoleAtLeast :admin-gated (same elevation
-    # every other write event here already applies via Reads.write_scope/2).
-    write_scope: &Samen.Web.Billing.Reads.elevate_to_admin/1
+    # ADR-040 §5.8 (T37h) — Plan writes are RoleAtLeast :admin-gated (same elevation every
+    # other write event here already applies via Reads.write_scope/3). ADR-045 §4.4 (S1a): the
+    # `(scope, socket)` elevator re-derives the admin scope from the socket's pinned principal.
+    write_scope: &Samen.Web.Billing.Reads.restore_admin_scope/2
 
   @impl true
   def mount(params, session, socket) do
