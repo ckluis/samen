@@ -1,3 +1,19 @@
+# Fresh, per-run FileBacked KMS key store (mirrors samen_core/demo/driftwood/pawchart
+# test_helpers). Without this, every samen_web `mix test` run writes subject key
+# subdirs into the SHARED `$TMPDIR/samen_core_keystore` (the `Samen.Kms.FileBacked`
+# default), accumulating per-subject dirs across runs until that directory hits the
+# filesystem's directory link-count ceiling and every vault op fails with
+# `{:error, :decrypt_failed}`. Pointing `:samen_core, :kms_key_dir` at a per-run temp
+# dir keeps the shared keystore untouched and cleans up on exit. (Test infra only —
+# the FileBacked adapter and vault runtime are unchanged; the masking/vault suites
+# still write+read+decrypt subject keys, just inside this isolated dir.)
+kms_key_dir =
+  Path.join(System.tmp_dir!(), "samen_web_keystore_test_#{System.system_time(:nanosecond)}")
+
+File.rm_rf!(kms_key_dir)
+Application.put_env(:samen_core, :kms_key_dir, kms_key_dir)
+System.at_exit(fn _ -> File.rm_rf!(kms_key_dir) end)
+
 ExUnit.start()
 
 # Start the scratch repo for the render tests. `mix samen_web.test_setup` (run by the test
