@@ -117,7 +117,7 @@ defmodule Samen.Web.Operator.Authz do
   """
   @spec dev_operator_role(atom(), String.t() | nil) :: :operator_admin | nil
   def dev_operator_role(otp_app, _principal_id \\ nil) when is_atom(otp_app) do
-    if Application.get_env(otp_app, :auth_required?, false), do: nil, else: :operator_admin
+    if Samen.Web.TenantGate.armed?(otp_app), do: nil, else: :operator_admin
   end
 
   # -- internals --------------------------------------------------------------

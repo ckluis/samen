@@ -56,7 +56,7 @@ defmodule PawChart.Auth do
 
         _ ->
           # Dev/test convenience ONLY (unmistakably gated on the prod-arming flag being off).
-          if Application.get_env(:pawchart, :auth_required?, false), do: nil, else: :operator_admin
+          if Samen.Web.TenantGate.armed?(:pawchart), do: nil, else: :operator_admin
       end
     end
   end

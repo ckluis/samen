@@ -82,6 +82,34 @@ named error (never a silent half-secure boot):
     DATABASE_URL=… SECRET_KEY_BASE=… PHX_HOST=… SAMEN_KMS_REGION=… \
       /app/bin/acme eval ":ok"
 
+## Tenant-auth gate — ARMED BY DEFAULT in prod (ADR-045 §2 V-F1)
+
+The multi-tenant plane's authentication gate is **armed by default in production** and
+**dev/test stay disarmed** (the query-param dogfood convenience is preserved).
+
+- **Armed by default.** In `:prod` the tenant actor is derived ONLY from an authenticated
+  session; an unauthenticated `?org=<uuid>` can never resolve another tenant's vaulted data.
+  This is set three ways, any one sufficient: explicitly in `config/config.exs`
+  (`config_env() == :prod`) and `config/runtime.exs` (`auth_required?: true`), and — absent any
+  config — by the framework env-aware default (`Samen.Web.TenantGate`).
+- **Refuses to boot if disarmed in prod.** If you set `config :acme, auth_required?:
+  false` in a production environment, the app **refuses to boot** with a named error
+  (`Samen.Web.TenantGate.assert_prod_armed!/1`, wired in `acme/application.ex`) — the
+  framework twin of the ADR-024 prod-secret raise. There is no way to silently serve an open
+  tenant plane in prod.
+- **Arming has two prerequisites (or operators are locked out).** Arming without them yields a
+  locked-out app, not a broken-open one — the right direction of failure, but wire both:
+    1. **A login path** that sets the authenticated principal (`Samen.Web.Auth`). The generated
+       app serves the framework auth spine (`/login`, `/signup`, …) over `Acme.Operator`;
+       provision credentials / SSO for your operators + tenants (the `:auth_credentials` /
+       `:operator_roster` seams, or real `Identity.Membership` rows).
+    2. **The tenant `:identity_namespace` seam.** The generated router already wires
+       `identity_namespace: Acme.Operator` on every tenant/shared mount
+       (`@current_org_labels`), so on an armed host admin-rank writes derive the caller's REAL
+       `Identity.Membership` role instead of failing closed to `:member` (ADR-045 §4.4). Keep
+       that label if you author your own mounts — a role-gated tenant mount WITHOUT it is
+       safe-because-denied (every write drops to `:member`), never safe-because-elevated.
+
 ## Operator TODO — the human prerequisites (NOT provided by this scaffold)
 
 These are deliberately **not** automated (ADR-024 — no live deploy claim). The scaffold is
@@ -97,8 +125,11 @@ a fail-honest on-ramp, not a turnkey deploy. You must provide:
 4. **A real OTLP exporter** — the observability plane records token-only spans with
    `db_statement: :disabled`, but the wide-event OTLP sink is operator-wired (it defaults
    to `:none`). Point it at your real collector to see traces in production.
+5. **A real auth path for the ARMED tenant gate** — the gate is armed by default in prod (above),
+   so provision a login + membership/roster so operators and tenants are not locked out. Do NOT
+   disarm it (`auth_required?: false`) to work around a missing login — the app refuses to boot.
 
-Until all four are done, `fly deploy` is not expected to yield a running app — and
+Until all five are done, `fly deploy` is not expected to yield a running app — and
 `config/runtime.exs` will fail closed rather than pretend otherwise.
 
 **Operator-plane authority (T146).** The generated `:operator_authority` seam

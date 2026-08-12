@@ -410,9 +410,13 @@ defmodule Samen.Gen.AppTest do
       assert router =~ "samen_auth_routes(namespace: Widgetco.Operator, repo: Widgetco.Repo)"
       assert router =~ "samen_onboarding_routes(Widgetco.Operator, repo: Widgetco.Repo)"
 
-      # Addendum 3 — the `:authn` prod-safety gate is wired on every tenant mount by
-      # default, so a generated prod app never resolves an arbitrary org via `?org=`.
-      assert router =~ "@current_org_labels %{authn: {:app_env, :widgetco, :auth_required?}}"
+      # Addendum 3 / ADR-045 §2 — the `:authn` prod-safety gate is wired on every tenant mount
+      # by default (ARMED BY DEFAULT in prod), so a generated prod app never resolves an arbitrary
+      # org via `?org=`; the `:identity_namespace` seam is co-wired so an armed host derives the
+      # caller's REAL Membership role for admin writes (ADR-045 §4.4) rather than failing closed.
+      assert router =~ "@current_org_labels %{"
+      assert router =~ "authn: {:app_env, :widgetco, :auth_required?}"
+      assert router =~ "identity_namespace: Widgetco.Operator"
 
       # T117 (P9-F1 fix) — the OPERATOR control plane is conn-gated in prod. The generated
       # router declares the `:require_authenticated_operator` pipeline over `Samen.Web.AuthGate`

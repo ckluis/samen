@@ -47,13 +47,22 @@ defmodule <%= module %>Web.Router do
   import Phoenix.LiveView.Router
   import Samen.Web.Router
 
-  # ADR-031/ADR-035 — the current-org data-on-the-mount labels shared by every
+  # ADR-031/ADR-035/ADR-045 — the current-org data-on-the-mount labels shared by every
   # tenant/shared mount. `:authn` is the launch AUTH gate (the driftwood
   # convention): `{:app_env, :<%= otp_app %>, :auth_required?}` — false in
   # dev/test (query-param convenience), true in prod (session-derived actor
-  # only). A module attribute (compile-time literal) so it is usable inside the
-  # framework route-macro expansions; the value is session-safe (an MFA of atoms).
-  @current_org_labels %{authn: {:app_env, :<%= otp_app %>, :auth_required?}}
+  # only, ARMED BY DEFAULT — ADR-045 §2). `:identity_namespace` names this app's
+  # Identity mount (`<%= module %>.Operator`) so that on an ARMED (prod) host the
+  # tenant `write_scope` helpers derive the caller's REAL `Identity.Membership`
+  # role (`Samen.Web.TenantRole`) instead of failing closed to `:member` — a
+  # generated app is secure-AND-functional in prod by construction (ADR-045 §4.4,
+  # the S12 residual). A module attribute (compile-time literal) so it is usable
+  # inside the framework route-macro expansions; both values are session-safe
+  # (an MFA of atoms / a module atom).
+  @current_org_labels %{
+    authn: {:app_env, :<%= otp_app %>, :auth_required?},
+    identity_namespace: <%= module %>.Operator
+  }
 
   pipeline :browser do
     plug(:accepts, ["html"])

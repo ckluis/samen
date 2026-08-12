@@ -67,13 +67,16 @@ config :samen_core, :query_budget_ledger_repo, Acme.Repo
 # OWN book of business on the TENANT plane (clear); seeds anchor rows on this id.
 config :acme, :operator_org_id, "0f000000-0000-4000-8000-0000000000aa"
 
-# ADR-031/ADR-035 — the launch AUTH gate (the driftwood convention). The router's
-# tenant/shared mounts carry `authn: {:app_env, :acme, :auth_required?}`;
-# with this FALSE (dev/test) `Samen.Web.CurrentOrg` keeps the query-param convenience
-# identity (a spoofable `?org=`/`?user=`), and with it TRUE (a production deploy sets
-# it — see the endpoint/runtime notes) the current org/actor is derived ONLY from an
-# authenticated session, so `?org=`/`?user=` can never resolve an arbitrary tenant.
-config :acme, auth_required?: false
+# ADR-031/ADR-045 §2 — the launch AUTH gate, ARMED BY DEFAULT IN PROD (V-F1, Option A). The
+# router's tenant/shared mounts carry `authn: {:app_env, :acme, :auth_required?}`;
+# in dev/test this is FALSE so `Samen.Web.CurrentOrg` keeps the query-param convenience identity
+# (a spoofable `?org=`/`?user=`), and in prod it is TRUE so the current org/actor is derived ONLY
+# from an authenticated session — a `?org=`/`?user=` can never resolve an arbitrary tenant. This
+# is EXPLICIT here (`config_env() == :prod`) AND backstopped by the framework env-aware default +
+# the `Samen.Web.TenantGate` boot guard (a prod host that is disarmed refuses to boot). To run a
+# real launch you must ALSO wire a login path + the tenant `:identity_namespace` seam (the router
+# already does) so admin writes derive the caller's REAL membership role — see the deploy runbook.
+config :acme, auth_required?: config_env() == :prod
 
 # T146 — the OPERATOR-ROLE authority seam (conn-level twin of the operator mount's
 # `:operator_authority` label). `Samen.Web.AuthGate` reads this app env to verify an

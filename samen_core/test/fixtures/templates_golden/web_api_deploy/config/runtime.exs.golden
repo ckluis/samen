@@ -75,6 +75,20 @@ if config_env() == :prod do
     secret_key_base: secret_key_base,
     server: true
 
+  # --- launch AUTH arm (ADR-045 §2 V-F1, Option A) — ARMED BY DEFAULT IN PROD -----------
+  # The tenant-auth gate is armed here EXPLICITLY (it is also armed by config/config.exs's
+  # `config_env() == :prod` and, absent any config, by the framework env-aware default). With it
+  # ARMED the current org/actor is derived ONLY from an authenticated session — an unauthenticated
+  # `?org=<uuid>` can never resolve another tenant's vaulted data. The app REFUSES TO BOOT in prod
+  # if this is set false (`Samen.Web.TenantGate` boot guard). Do NOT flip this to false in prod.
+  #
+  # ARMING PREREQUISITES (else operators are locked out — the deploy runbook's Operator TODO):
+  #   * a real login path that sets the authenticated principal (Samen.Web.Auth), and
+  #   * the tenant `:identity_namespace` seam (the generated router already wires it to
+  #     `Acme.Operator`) so admin-rank writes derive the caller's REAL Membership role
+  #     instead of failing closed to `:member`.
+  config :acme, auth_required?: true
+
   # --- KMS env (SAMEN_KMS_*) — the vault's crypto keystore, the single most-forgotten
   # prod requirement for a vaulted app (ADR-024). Fail-closed on absence: the vault
   # cannot wrap/unwrap DEKs without it, so booting without it would be a silent

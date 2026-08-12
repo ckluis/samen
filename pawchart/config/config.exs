@@ -62,9 +62,12 @@ config :samen_core, :ash_domains, [
 # `Samen.Web.Operator.org_id/1` resolves it: label → this app-env → single seeded row.
 config :pawchart, operator_org_id: "0f000000-0000-4000-8000-0000000000c1"
 
-# F2 / ADR-031 — the prod auth arm. OFF for the local dogfood (the query-param convenience
-# identity stays); a real launch flips it true and provisions the operator roster below.
-config :pawchart, auth_required?: false
+# F2 / ADR-031 — the prod auth arm, ARMED BY DEFAULT IN PROD (ADR-045 §2 V-F1, Option A). OFF
+# for the local dogfood (dev/test keep the query-param convenience identity); prod derives the
+# tenant actor ONLY from an authenticated session and provisions the operator roster below. This
+# is EXPLICIT here AND enforced by the framework env-aware default + the `Samen.Web.TenantGate`
+# boot guard (a prod host that is disarmed refuses to boot).
+config :pawchart, auth_required?: config_env() == :prod
 
 # T146 / T157 — the operator-ROLE authority seam (`Samen.Web.Operator.Authz` on_mount +
 # `Samen.Web.AuthGate` conn pipeline). Called with the authenticated principal id appended;

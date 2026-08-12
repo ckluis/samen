@@ -1,0 +1,22 @@
+# SABOTAGE: V-F1 (ADR-045 §2, Option A) — the PROD-ARMED-BY-DEFAULT tenant gate DEFEATED. The
+# fix made `Samen.Web.TenantGate.armed?/2` resolve an UNSET `:auth_required?` env-aware: ARMED in
+# :prod, disarmed in dev/test — so a shipped host / a fresh gen.app running in production with no
+# extra config comes up ARMED instead of serving an open tenant plane. This sabotage restores the
+# old env-blind default (UNSET always ⇒ disarmed), so a prod host with no explicit config resolves
+# DISARMED again — the exact V-F1 hole. The named prod-arming red path MUST flip.
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_gate_prod_default_test.exs
+# MUST_FAIL: UNSET flag: ARMED in :prod
+diff --git a/samen_web/lib/samen/web/tenant_gate.ex b/samen_web/lib/samen/web/tenant_gate.ex
+--- a/samen_web/lib/samen/web/tenant_gate.ex
++++ b/samen_web/lib/samen/web/tenant_gate.ex
+@@ -53,7 +53,7 @@
+   def armed?(otp_app, env_reader) when is_atom(otp_app) do
+     case Application.get_env(otp_app, :auth_required?, @unset) do
+-      @unset -> prod?(env_reader)
+-      nil -> prod?(env_reader)
++      @unset -> false
++      nil -> false
+       value -> !!value
+     end
+   end

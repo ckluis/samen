@@ -101,7 +101,7 @@ defmodule Samen.Web.Operator.Impersonation do
   def auth_disarmed?(socket) do
     case Operator.otp_app(socket.assigns[:samen_mount]) do
       nil -> true
-      otp_app -> not Application.get_env(otp_app, :auth_required?, false)
+      otp_app -> not Samen.Web.TenantGate.armed?(otp_app)
     end
   end
 

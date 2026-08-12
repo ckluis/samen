@@ -4,6 +4,11 @@ defmodule PawChart.Application do
 
   @impl true
   def start(_type, _args) do
+    # ADR-045 §2 (V-F1) — the fail-secure tenant-auth BOOT GUARD: refuse to boot a PROD host
+    # whose tenant gate is disarmed (a no-op in dev/test). Sits beside the ADR-024 prod-secret
+    # raise as the framework's second boot-honest refusal.
+    Samen.Web.TenantGate.assert_prod_armed!(:pawchart)
+
     # Observability plane (WS-D D1.1): OTel-Ecto with the un-forgettable
     # db_statement: :disabled + metrics contention handlers, wired via the
     # framework helper instead of hand-copied setup calls. Follows the repo:

@@ -4,6 +4,13 @@ defmodule Acme.Application do
 
   @impl true
   def start(_type, _args) do
+    # ADR-045 §2 (V-F1) — the fail-secure tenant-auth BOOT GUARD. Refuses to boot this host in
+    # PRODUCTION with the tenant gate disarmed (an unauthenticated `?org=` would resolve any
+    # tenant's vaulted data in the clear). A no-op in dev/test; the framework twin of the ADR-024
+    # `runtime.exs` prod-secret raise. The gate is armed by default in prod (config/config.exs +
+    # `Samen.Web.TenantGate`), so this only fires if an operator EXPLICITLY set auth_required? false.
+    Samen.Web.TenantGate.assert_prod_armed!(:acme)
+
     # Observability plane (WS-D D1.1/D5): OTel-Ecto with the un-forgettable
     # db_statement: :disabled + metrics contention handlers, wired via the
     # framework helper instead of hand-copied setup calls. Follows the repo:

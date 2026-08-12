@@ -261,6 +261,12 @@ defmodule Samen.Web.CurrentOrg do
       :required ->
         true
 
+      # The launch AUTH flag arms env-aware (ADR-045 §2 V-F1): explicit config honoured, UNSET
+      # ⇒ armed in :prod / disarmed in dev-test (`Samen.Web.TenantGate`). Any OTHER app-env key
+      # keeps the literal-default-false read (the mechanism stays generic).
+      {:app_env, app, :auth_required?} when is_atom(app) ->
+        Samen.Web.TenantGate.armed?(app)
+
       {:app_env, app, key} when is_atom(app) and is_atom(key) ->
         !!Application.get_env(app, key, false)
 
@@ -275,8 +281,10 @@ defmodule Samen.Web.CurrentOrg do
   # in which the `?org=`/session convenience is trusted as identity (PP-1 / PP-3 fix). Mirrors
   # `Samen.Web.Operator.Impersonation.auth_disarmed?/1`, the SEC-batch pattern for the
   # impersonation `?operator_id` dev-leg: trust the dev convenience ONLY when explicitly
-  # disarmed, fail closed otherwise. A host is disarmed when its `:auth_required?` runtime flag
-  # is false/unset; an ARMED host (`config otp_app, auth_required?: true`) fails closed here EVEN
+  # disarmed, fail closed otherwise. Armed-ness resolves through `Samen.Web.TenantGate.armed?/1`
+  # (ADR-045 §2 V-F1): explicit `:auth_required?` config honoured, UNSET ⇒ ARMED in :prod /
+  # disarmed in dev-test — so a shipped host or a fresh gen.app comes up armed in prod by default.
+  # An ARMED host (`config otp_app, auth_required?: true`, or prod-by-default) fails closed here EVEN
   # WHEN the mount carries no `:authn` label — so a vertical that never adopted the tenant-auth
   # seam (pawchart) can no longer serve a caller-supplied `?org=` as identity once deployed for
   # prod. A mount with NO resolvable otp_app (a synthetic/unit-test mount that carries no repo
@@ -292,7 +300,7 @@ defmodule Samen.Web.CurrentOrg do
   def param_trust_disarmed?(mount) do
     case Samen.Web.Operator.otp_app(mount) do
       nil -> true
-      otp_app -> not Application.get_env(otp_app, :auth_required?, false)
+      otp_app -> not Samen.Web.TenantGate.armed?(otp_app)
     end
   end
 

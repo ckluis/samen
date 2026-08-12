@@ -14,24 +14,22 @@
 diff --git a/samen_web/lib/samen/web/current_org.ex b/samen_web/lib/samen/web/current_org.ex
 --- a/samen_web/lib/samen/web/current_org.ex
 +++ b/samen_web/lib/samen/web/current_org.ex
-@@ -246,7 +246,10 @@
-         true
- 
-       {:app_env, app, key} when is_atom(app) and is_atom(key) ->
--        !!Application.get_env(app, key, false)
+@@ -265,6 +265,9 @@
+       # ⇒ armed in :prod / disarmed in dev-test (`Samen.Web.TenantGate`). Any OTHER app-env key
+       # keeps the literal-default-false read (the mechanism stays generic).
+       {:app_env, app, :auth_required?} when is_atom(app) ->
+-        Samen.Web.TenantGate.armed?(app)
 +        # SABOTAGE (17-f2): the authn gate is forced OFF regardless of the runtime flag, so a
 +        # tenant mount that opted into `authn` still trusts the query-param identity — the prod
 +        # actor is derived with NO authenticated session (the exact launch hole F2 closes).
-+        false && !!Application.get_env(app, key, false)
++        false && Samen.Web.TenantGate.armed?(app)
  
-       _ ->
-         false
-@@ -276,7 +279,7 @@
+       {:app_env, app, key} when is_atom(app) and is_atom(key) ->
+@@ -300,6 +300,6 @@
    def param_trust_disarmed?(mount) do
      case Samen.Web.Operator.otp_app(mount) do
        nil -> true
--      otp_app -> not Application.get_env(otp_app, :auth_required?, false)
+-      otp_app -> not Samen.Web.TenantGate.armed?(otp_app)
 +      _otp_app -> true
      end
    end
- 

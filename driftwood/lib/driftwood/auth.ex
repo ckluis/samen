@@ -118,7 +118,7 @@ defmodule Driftwood.Auth do
 
         _ ->
           # Dev/test convenience ONLY (unmistakably gated on the prod-arming flag being off).
-          if Application.get_env(:driftwood, :auth_required?, false), do: nil, else: :operator_admin
+          if Samen.Web.TenantGate.armed?(:driftwood), do: nil, else: :operator_admin
       end
     end
   end

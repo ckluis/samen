@@ -91,12 +91,14 @@ config :driftwood, operator_org_id: "0f000000-0000-4000-8000-0000000000aa"
 
 config :ash, disable_async?: true
 
-# F2 (ADR-031) — the launch AUTH gate. Default OFF: dev/test keep the query-param convenience
-# identity (a `?org=<uuid>` is trusted, so the dogfood needs no login). A REAL launch sets this
-# `true` in a prod config so the tenant actor is derived ONLY from an authenticated session (see
-# docs/launch-checklist.md). `:auth_credentials` is empty by design — this PUBLIC repo commits no
-# working password; the operator provisions credentials (phx.gen.auth / IdP for real).
-config :driftwood, auth_required?: false
+# F2 (ADR-031) — the launch AUTH gate, ARMED BY DEFAULT IN PROD (ADR-045 §2 V-F1, Option A).
+# dev/test keep the query-param convenience identity (a `?org=<uuid>` is trusted, so the dogfood
+# needs no login); prod derives the tenant actor ONLY from an authenticated session. This is
+# EXPLICIT here AND enforced by the framework env-aware default + the `Samen.Web.TenantGate` boot
+# guard (a prod host that is disarmed refuses to boot). `:auth_credentials` is empty by design —
+# this PUBLIC repo commits no working password; the operator provisions credentials (phx.gen.auth
+# / IdP for real). See docs/launch-checklist.md.
+config :driftwood, auth_required?: config_env() == :prod
 config :driftwood, auth_credentials: %{}
 
 # T146 — the OPERATOR-ROLE authority resolver `Samen.Web.AuthGate` reads at the conn level (the

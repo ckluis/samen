@@ -72,10 +72,14 @@ defmodule Samen.Web.AuthGate do
     end
   end
 
-  @doc "Whether the prod auth gate is armed for `otp_app` (runtime flag; false in dev/test)."
+  @doc """
+  Whether the prod auth gate is armed for `otp_app`. Resolves through the ONE env-aware seam
+  (`Samen.Web.TenantGate.armed?/1`, ADR-045 §2 V-F1): explicit config honoured, UNSET ⇒ armed in
+  :prod / disarmed in dev/test — so the operator plug and the tenant gate never disagree.
+  """
   @spec auth_required?(atom()) :: boolean()
   def auth_required?(otp_app) when is_atom(otp_app),
-    do: !!Application.get_env(otp_app, :auth_required?, false)
+    do: Samen.Web.TenantGate.armed?(otp_app)
 
   # T146 — resolve the authenticated principal's operator role via the host's app-env
   # `:operator_authority` MFA (called with the principal id appended). Fail CLOSED: no resolver,

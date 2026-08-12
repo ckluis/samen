@@ -48,9 +48,9 @@ defmodule DriftwoodWeb.Auth do
     path in @exempt_exact or Enum.any?(@exempt_prefixes, &String.starts_with?(path, &1))
   end
 
-  @doc "Whether the prod auth gate is armed (runtime flag; false in dev/test)."
+  @doc "Whether the prod auth gate is armed (env-aware via `Samen.Web.TenantGate`; false in dev/test)."
   @spec auth_required?() :: boolean()
-  def auth_required?, do: !!Application.get_env(:driftwood, :auth_required?, false)
+  def auth_required?, do: Samen.Web.TenantGate.armed?(:driftwood)
 
   @doc """
   The gate: pass through when auth is not required (dev/test convenience) or the session already
