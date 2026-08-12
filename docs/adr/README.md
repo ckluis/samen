@@ -77,7 +77,7 @@ reading all 46.
 
 | # | Title | Decision |
 |---|---|---|
-| [031](031-byo-auth-launch-onramp.md) | BYO-auth launch on-ramp: the prod tenant actor is derived from an authenticated session, not a query param | Wire a real session-auth flow into `Samen.Web.CurrentOrg` for one vertical (driftwood), replacing the query-param-derived actor on its prod path. |
+| [031](031-byo-auth-launch-onramp.md) | BYO-auth launch on-ramp: the prod tenant actor is derived from an authenticated session, not a query param | Wire a real session-auth flow into `Samen.Web.CurrentOrg` for one vertical (driftwood), replacing the query-param-derived actor on its prod path. Amended 2026-08-12 by ADR-045 §2 — the `:auth_required?` default is now ARMED in `:prod` (fail-secure); dev/test unchanged. |
 | [032](032-data-residency-us-only.md) | Data residency: US-only, documented (no per-tenant region selection) | Document (no code change) that the single-Postgres-per-host model is US-only with no per-tenant region selection, and name what a real multi-region story would require. |
 | [033](033-in-monorepo-distribution-constraint.md) | Framework distribution stays path-dep-in-monorepo; Hex publishing deferred to a stated trigger | Keep framework distribution as `path:` deps inside the monorepo; defer Hex publishing until a stated trigger, since every consumer today resolves the framework via a path dep. |
 
@@ -127,11 +127,11 @@ reading all 46.
 
 | # | Title | Decision |
 |---|---|---|
-| [ADR-045](ADR-045-premerge-review-dispositions.md) | LUMINARY pre-merge review dispositions: the tenant-gate prod default (V-F1) + the phased burn-down of what remains | **Proposed — §2 awaits operator sign-off.** After the two confirmed BLOCKERs were fixed and independently verified (B-SEC tenant-authn `on_mount`, `3b251e3`; B-OBAN queue-drain parity gate, `359abe7`), one decision remains merge-gating: the tenant gate is conditioned on `:auth_required?`, which **defaults `false`** with no `config_env()` guard, so every shipped host and every generated app ships **disarmed** and serves another org's data to an anonymous `?org=` caller. Recommends **Option A** — fail-secure by environment (armed default / boot refusal in `:prod`, dev+test untouched) — as an **amendment to ADR-031's literal default that is compatible with ADR-031's stated dev-ergonomics rationale**; records Options B (loud prod warning + mandatory runbook arming step + gate test) and C (document only) honestly. Everything else is filed as a four-phase backlog (1 gate integrity · 2 deploy/runtime hardening · 3 erasure completeness · 4 residual role derivation + authz hardening), with O2 and X1 advised as the only non-V-F1 merge-blockers. Honesty posture (fail-honest, T144, no-overclaim) re-verified sound; T130 still blocked-safe and sequenced with D4. |
+| [ADR-045](ADR-045-premerge-review-dispositions.md) | LUMINARY pre-merge review dispositions: the tenant-gate prod default (V-F1) + the phased burn-down of what remains | **Accepted (2026-08-12).** After the two confirmed BLOCKERs were fixed and independently verified (B-SEC tenant-authn `on_mount`, `3b251e3`; B-OBAN queue-drain parity gate, `359abe7`), the merge-gating decision — the tenant gate is conditioned on `:auth_required?`, which **defaulted `false`** with no `config_env()` guard, so every shipped host + generated app shipped **disarmed** — was resolved by the operator choosing **Option A (fail-secure by environment, full-harden)** and shipping it: `9f14a61` (G2/V-F1, `:prod` armed by default + boot-refusal + generator `identity_namespace`) and `dc7b80d` (G1, membership-role derivation, closing S1a/S12), with the ADR-031 literal-default amendment now **in force** (§2.5). The two advised non-V-F1 items also CLOSED: O2 (pawchart `aud_chain`, `98125e5` G3) and X1 (generated-nav, `ead7a42` G4). Sabotage harness → **203**. The rest is filed as a four-phase backlog (1 gate integrity · 2 deploy/runtime hardening · 3 erasure completeness · 4 residual authz hardening), all honestly post-merge. Honesty posture (fail-honest, T144, no-overclaim) re-verified sound; T130 still blocked-safe and sequenced with D4. |
 
 ---
 
-46 ADRs total. All are `Status: Accepted` except ADR-025 (`Proposed (deferred)`) and ADR-045
-(`Proposed` — its §2 decision is open). If you add a new one, append a row here in the same pass
+46 ADRs total. All are `Status: Accepted` except ADR-025 (`Proposed (deferred)`); ADR-045 was
+Accepted on 2026-08-12 once its §2 (V-F1) decision was made and shipped. If you add a new one, append a row here in the same pass
 (`docs/guides/cookbook.md`'s claim-evidence discipline applies to this index too — keep it honest,
 not aspirational).

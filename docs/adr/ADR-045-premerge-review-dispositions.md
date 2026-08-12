@@ -1,14 +1,18 @@
 # ADR-045 — LUMINARY pre-merge review dispositions: the tenant-gate prod default (V-F1) and the phased burn-down of what remains
 
-- **Status:** **Proposed — §2 (V-F1) requires operator sign-off before PR #1 merges.** §4's phased
-  backlog is Accepted as filed (it records dispositions, it authors no code). Docs-only per the
-  standing decompose-cross-cutting-changes rule: this ADR touches no source, no test, no sabotage,
-  no abbrev-registry row, no `schema.dict.json`.
-- **Date:** 2026-08-11
+- **Status:** **Accepted** — §2 (V-F1) was operator-approved as **Option A** and is now
+  IMPLEMENTED + independently verified (commits `dc7b80d` G1, `9f14a61` G2; see §2). §4's phased
+  backlog is Accepted as filed (it records dispositions, it authors no code); the items closed this
+  session are marked with their SHAs in §4, the rest remain OPEN/post-merge. This ADR itself is
+  docs-only per the standing decompose-cross-cutting-changes rule: it touches no source, no test, no
+  sabotage, no abbrev-registry row, no `schema.dict.json` (the code lives in the G-phase commits it
+  cites).
+- **Date:** 2026-08-11 (filed) · **Accepted 2026-08-12** (Option A operator-approved + shipped)
 - **Task:** Pre-merge disposition record for branch `saas-readiness-phase-1` (PR #1), after the
   LUMINARY 39-expert pre-merge review (5 panels + 1 independent adversarial confirmer) and the two
   BLOCKER fixes that review produced.
-- **Deciders:** **pending the operator for §2** (it changes a posture ADR-031 deliberately chose).
+- **Deciders:** **the operator for §2** — Option A approved 2026-08-12 (it changes a posture ADR-031
+  deliberately chose; the amendment to ADR-031 is now in force, see §2.5).
   §3–§5 recorded by the pre-merge disposition pass, grounded in: the five panel reports and
   `SYNTHESIS-triage.md` (`_orch/luminary-premerge/`, gitignored), the independent verifier verdict
   `_orch/verify/premerge-bsec-tenant-authz-verdict.json` (the source of V-F1), and a direct read of
@@ -59,7 +63,35 @@ decide once and a future session can execute without re-deriving the review.
 
 ## 2 · The V-F1 decision — the tenant gate is dormant on every shipped host, and "disarmed" is the fail-OPEN default
 
-> **This is the real merge gate. It needs operator sign-off; nothing below it is a substitute.**
+> **RESOLVED 2026-08-12 — Option A operator-approved and IMPLEMENTED + independently verified.**
+> The analysis below (§2.1–§2.5) stands as the record of the decision; §2.0 records the outcome.
+
+### 2.0 · Outcome (2026-08-12) — Option A shipped, full-harden
+
+The operator approved **Option A** (fail-secure by environment, full-harden). It is implemented and
+independently verified across two banked commits, with the ADR-031 amendment now in force (§2.5):
+
+- **`9f14a61` (G2 / V-F1)** — `Samen.Web.TenantGate` arms `:prod` **by default**, fail-secure, with
+  a **boot-refusal guard** that raises (naming the flag and the fix) when a mount-bearing host comes
+  up unarmed in `:prod`; dev/test defaults are byte-for-byte unchanged. The generator and deploy
+  templates now **arm prod** and wire `identity_namespace`, so a fresh `mix samen.gen.app` is
+  fail-secure by default rather than open by default. Independent verifier verdict:
+  `_orch/verify/premerge-g2-prod-armed-verdict.json` → **PASS** (with the boot-refusal red path and
+  an armed-host positive control).
+- **`dc7b80d` (G1)** — membership-role derivation (closes the S1a + S12 residuals §2.4.2 named as A's
+  collision risk): armed hosts derive admin-rank from real `Identity.Membership` rows instead of a
+  hardcoded `:admin`/posture flag, so "arm in prod" is actually *usable* for an adopter. Verdicts:
+  `_orch/verify/premerge-g1-membership-role-verdict.json` + `premerge-g1-chat-delta-verdict.json`
+  → **PASS**.
+
+The Option A scope note in §2.4 is satisfied by these two commits: (a) env-aware default + boot
+refusal that names the flag → G2; (b) generator `config_exs_web.eex` + emitted prod/runtime posture
++ `identity_namespace` wiring → G2; (c) the red-path + positive control → G2 verifier; (d) sabotage
+patch → the harness is now **203**; (e) the Phase-4 role derivation sequenced alongside → G1. The
+`runbook` row in §4.2 (the operator-facing arming step / KMS / `aud_event_app_role`) remains OPEN as
+Phase 2 deploy work — the *control* is armed by construction; the runbook prose is post-merge.
+
+> **This was the real merge gate. It needed operator sign-off; nothing below it was a substitute.**
 
 ### 2.1 · The problem (mechanism, verified end-to-end)
 
@@ -216,15 +248,20 @@ contradiction of intent, but a genuine amendment of the written default** — an
 recorded as an amendment to ADR-031 (an "Amended <date> — see ADR-045 §2" line, the ADR-044
 precedent), not slipped in as an implementation detail.
 
+> **In force (2026-08-12).** The amendment is now recorded on ADR-031 itself ("Amended 2026-08-12 by
+> ADR-045 §2" in its Status block): the `:prod` default is **ARMED**, dev/test unchanged. ADR-031's
+> dev-ergonomics rationale is preserved exactly (dev/test keep the query-param dogfood; every prior
+> test stays green; both postures still prove in one suite); only the `:prod` answer changed.
+
 ### 2.6 · Sign-off
 
 | | |
 |---|---|
 | **Decision required** | A / B / C |
 | **Recommended** | **A** (with B's runbook + warning folded in) |
-| **Operator** | _pending_ |
-| **Date** | _pending_ |
-| **If A or B** | file as the first item of Phase 1 and amend ADR-031 in the same pass |
+| **Operator** | **Approved — Option A (full-harden)** |
+| **Date** | **2026-08-12** |
+| **Outcome** | Shipped in `9f14a61` (G2/V-F1) + `dc7b80d` (G1); ADR-031 amended in force (§2.5); harness → 203. See §2.0 |
 
 ---
 
@@ -271,7 +308,7 @@ The gates that are supposed to catch the next class of this, plus the first thin
 | ID | Sev | One-line | Disposition | Fix sketch |
 |---|---|---|---|---|
 | **A2 / X9** | HIGH / MED | `samen.verify.pii_classify` and `samen.verify.api_contract` pass **vacuously on empty discovery**, while structurally identical siblings fail closed; `api_contract --update` will write an empty snapshot without complaint | **fix-before-merge** | Add a non-emptiness floor to both (exactly the shape `mix samen.verify.oban_queues` just shipped with in B-OBAN), plus a test asserting empty discovery **fails**, plus a sabotage |
-| **X1** | HIGH | Generated `--modules` landing renders CRM/Support/Marketing/Automation nav links to routes the generated router never mounts → `NoRouteError` on the adopter's first click; the flagship probe prints "lists every mounted surface" while probing only the 5 selected labels | **fix-before-merge (advised — see §5)** | Filter `Samen.UI.Nav` entries against the routes actually mounted (derive from the router, not a static list); extend `gen_app_flagship_probe.exs` to `get` every rendered nav href and assert 200 |
+| **X1** | HIGH | Generated `--modules` landing renders CRM/Support/Marketing/Automation nav links to routes the generated router never mounts → `NoRouteError` on the adopter's first click; the flagship probe prints "lists every mounted surface" while probing only the 5 selected labels | **CLOSED this session — `ead7a42` (G4)** | Generated landing nav is now constrained to the surfaces actually mounted (no dead links), with a durable probe guard in `gen_app_flagship_probe.exs`. Gate GREEN; sabotage added (harness → 203) |
 | **A3** | HIGH | Generated apps run a **strictly weaker verifier gate** than the reference verticals: `no_pan_columns` is in neither `ci_sh.eex` nor `ci_sh_api.eex`; `column_refs` runs in no `.sh` at all | **fix-before-merge** (`no_pan_columns`) · **post-merge-phase-1** (`column_refs`) | Add the `no_pan_columns` step to both ci templates + the golden fixtures; decide separately whether `column_refs` is a real gate or dead code and either wire it everywhere or delete it |
 | **A4** | MED | `Mount.@label_keys` whitelist has drifted — 7 used keys missing, 5 of them set by `samen_auth_routes` itself; the completeness test is tautological (it checks the list against itself) | **fix-before-merge** (add the keys) · **post-merge** (bind the sets) | Add the 7 keys; then make the test derive the used-key set from the router macros so it can actually fail |
 | **X4 / X5 / X12** | MED | Doc-integrity cluster: README + `index.html` publish six stale/mutually contradictory verification counts (sabotages cited as 28/31, actually 198; ADR count; verifier count; gate-step count); README understates pawchart as "~191 authored lines" (actual `pawchart/lib` ≈ 3,938); "18-step gate" published in five places while the `--api` gate emits 19 | **fix-before-merge** (cheap, docs-only) | Recount from the filesystem and correct in one pass. **Claim-evidence parity is this repo's thesis — a stale count is the one defect class the product is least allowed to have** |
@@ -284,7 +321,7 @@ Everything in the `--deploy` scaffold that a *boot* would find and no test does.
 
 | ID | Sev | One-line | Disposition | Fix sketch |
 |---|---|---|---|---|
-| **O4** | HIGH | Every generated prod migration emits `REVOKE UPDATE, DELETE ON aud_chain FROM clank` — **a developer's local Postgres role** — because `priv/templates/m_aud_event.eex:5` defaults `@app_role` to `"clank"`; the first prod `release_command` aborts, and the deploy runbook never mentions the knob | **post-merge-phase-2** | Default the role to the migration's own connection role (or the repo's configured `:username`) instead of a hardcoded literal; if it cannot be derived, **raise a named error** rather than emit someone's laptop role; document the `:aud_event_app_role` knob in the runbook. Related: **O7** (pawchart's `aud_event` migration reads *driftwood's* config key — one-line, its own `:aud_event_app_role` is unreachable) |
+| **O4** | HIGH | Every generated prod migration emits `REVOKE UPDATE, DELETE ON aud_chain FROM clank` — **a developer's local Postgres role** — because `priv/templates/m_aud_event.eex:5` defaults `@app_role` to `"clank"`; the first prod `release_command` aborts, and the deploy runbook never mentions the knob | **post-merge-phase-2** | Default the role to the migration's own connection role (or the repo's configured `:username`) instead of a hardcoded literal; if it cannot be derived, **raise a named error** rather than emit someone's laptop role; document the `:aud_event_app_role` knob in the runbook. Related: **O7 — CLOSED this session (`98125e5`, G3):** pawchart's aud-chain wiring was corrected alongside adding its `aud_chain` table (O2), so its own audit-role config key is now reachable. **O4 itself remains OPEN (Phase 2 deploy).** |
 | **O5 / X6** | HIGH / MED | The generated `--deploy` `runtime.exs` sets `config :samen_core, :kms_adapter, Samen.Kms.AwsKmsDynamo` **and** `:aws_kms_dynamo_enabled, true` — and that adapter is a **raise-only skeleton** (`stub_delegate/2` raises whenever enabled; `backups_disabled?/0` and `key_material_present?/1` raise directly). The app boots green and then **every vault operation 500s**. The runbook's four-item "Operator TODO" omits it entirely | **post-merge-phase-2** | Do not select a raise-only adapter by default. Either emit the working `FileBacked`/explicit-choice posture with a named operator step, or keep the selection with `enabled: false` plus a fail-closed boot check that raises with the actual implementation checklist (the adapter's own moduledoc already lists the seven ADR-001 §8.2 obligations). Add it to the runbook's Operator TODO as **item 1** — it is the largest blocker there, and today it is absent. Honesty note: it fails **loudly**, so the fail-honest contract itself is intact — this is a scaffold-correctness bug, not an overclaim |
 | **O3** | HIGH | The 15-minute audit-chain verify cron loads **every entry of every org** into memory, on the `maintenance: 1` queue it shares with the partition roll-forward | **post-merge-phase-2** | Bound the verify to a keyset window / per-org batch with a resume cursor; consider its own queue so a long verify cannot starve partition roll-forward |
 | **runbook** | — | The deploy runbook's Operator TODO is incomplete against reality (O5/X6 above; the `:authorized_orgs` replacement warning exists but the **arming step** does not) | **post-merge-phase-2**, or **fix-before-merge if §2 lands as Option A or B** | One pass over `priv/templates/deploy_runbook.eex`: KMS adapter, `auth_required?` arming, `aud_event_app_role`, in that order of consequence |
@@ -301,7 +338,7 @@ DEK envelope, therefore outside the reach of key destruction.
 |---|---|---|---|---|
 | **D1** | HIGH | Crypto-shred leaves `email_bidx`, a keyed HMAC of the subject's email under `sys:bidx` — a **reserved subject `Kms.shred/1` refuses to destroy by design** — so an erased subject's email stays confirmable forever via an equality oracle over the enumerable email space | **operator-decision → post-merge-phase-3** (needs design; this is an **ADR-035 §4.1 amendment**, not a code tweak) | Cannot be fixed by nulling the column (`Credential.email_bidx` is `allow_nil?: false` and carries the global one-account-per-email unique invariant). Two coherent shapes: (a) destroy the `Credential`/`Invitation` rows as part of subject erasure, or (b) **re-key the blind index per subject** so shred unlinks it — precisely the pattern `Samen.Vault.pseudonym/1` already uses correctly, which is why the pseudonym carve-out *is* reached by shred and the blind index is not |
 | **D3** | HIGH | `pii_declared: true` custom-bag values are plaintext PII in a `public?: true` `:map` column that `PiiResolution` never resolves — rendered **in the clear to operators** on CSV / JSON:API / UI-kit surfaces that claim per-plane masking, and no erasure path ever redacts them (`NonPii` redacts whole *columns*; there is no bag-key path) | **fix-before-merge IF reachable, else post-merge-phase-3** | **First action is a reachability check**, not a fix: grep whether any shipped resource declares a `pii_declared` bag field today. If yes it is an INV-1 gap on a live surface and rates merge-gating; if no it is a framework hazard awaiting its first adopter. Then: resolve bag keys through `PiiResolution` (or refuse `pii_declared` at the write chokepoint until routed), and add a `MaskingCase` three-proof for a bag field on at least one surface |
-| **O2** | HIGH | **PawChart has no `aud_chain` table at all** — every audit-chain append fails, and the failure is swallowed. A shipped vertical mounting the operator plane has no tamper-evident chain | **fix-before-merge (advised — see §5)** | Mechanical: add the `aud_chain` migration via the shared core helper (`Samen.OperatorPlane.Migration`, the ADR-005 extraction) that driftwood/demo already use, and add a red-path asserting an append **lands** (the swallow is what let this ship) |
+| **O2** | HIGH | **PawChart has no `aud_chain` table at all** — every audit-chain append fails, and the failure is swallowed. A shipped vertical mounting the operator plane has no tamper-evident chain | **CLOSED this session — `98125e5` (G3)** | Added the pawchart `aud_chain` migration wrapping the shared `Samen.OperatorPlane.Migration.create_aud_chain/1` helper (byte-identical adoption to driftwood/demo — append-only trigger, `UNIQUE(org,seq)`, `REVOKE UPDATE/DELETE`), plus `aud_chain_persist_test.exs` asserting appends **land**, hash-link, and verify. Independent verifier `_orch/verify/premerge-g3-pawchart-audchain-verdict.json` → **PASS** (raw UPDATE/DELETE both rejected P0001). Sabotage 202. **O9/O10 swallow remain OPEN (Phase 2)** — the table now exists so they no longer hide a live gap |
 | **D4 / T130** | MED | No production path deletes a stored file blob; destroying/archiving/retention-sweeping a `File` row leaves raw, unencrypted bytes in storage indefinitely. Same fact that keeps T130 non-exploitable | **post-merge-phase-3, sequenced with T130** | Wire `Storage.delete/2` into the destroy/retention path **and** close T130's clone-aliasing in the same task, with a red-path proving a shredded subject's blob is gone and an aliased clone cannot resurrect it. **Never ship one without the other** |
 | **D5** | MED | The framework's own automated erasure driver drops `:org_id`, so a retention-swept subject's erasure event lands on the reserved `"__global__"` chain — which `TenantView.for_org/2` refuses by design. The tenant's own chain never records the erasure of its own data subject | **post-merge-phase-3** | Thread `org_id` from the just-read row into `shred_opts` in `retention.ex`. Reachability: no shipped host configures a `:shred` retention spec today, so this is a framework defect awaiting first adopter |
 | **D6** | MED | `Samen.Dsar.export_subject/2` applies **no org binding** and takes plane/grant as caller-asserted options with a plaintext default; the moduledoc's "NO cross-tenant leakage" claim is about *planes*, not *orgs* | **post-merge-phase-3** | Require an org predicate on both queries and check `grant?` against `Reveal.grant_checker/0` rather than trusting the caller. Reachability: no host wires DSAR to a route today — framework API hazard, not a live gap |
@@ -315,8 +352,8 @@ over-denying** — the verifier confirmed no cross-tenant path survives on an ar
 
 | ID | Sev | One-line | Disposition | Fix sketch |
 |---|---|---|---|---|
-| **S1a** (residual) | HIGH→intra-org | Four tenant write helpers still `Map.put(actor, :role, :admin)` unconditionally (`flags/reads.ex:76`, `support/kb_reads.ex:116`, `marketing/reads.ex:332`, `billing/reads.ex:304`+`:314`) — an ordinary member gets **admin-rank writes in their own org**. Verifier-confirmed genuinely intra-org only (`V-S1a-POSITIVE-CONTROL`) and unreachable across tenants post-fix | **post-merge-phase-4** | Derive the role from the resolved `Identity.Membership` instead of elevating; red-path a `:viewer`/`:member` refused on each of the four surfaces, with a positive control for an actual admin |
-| **S12** (residual) | HIGH→fail-closed gap | Generated `--live` screens fail **closed** on armed hosts (via `reresolve/2`'s no-pin fallback), but `ui_role/0` is a **posture flag, not a membership read** — so an armed generated app has **no admin-rank writes at all** until a real membership role is wired | **post-merge-phase-4 — sequence with §2 Option A** | Emit membership-derived role resolution in the `--live` templates; this is the item that makes "arm in prod" usable for an adopter |
+| **S1a** (residual) | HIGH→intra-org | Four tenant write helpers still `Map.put(actor, :role, :admin)` unconditionally (`flags/reads.ex:76`, `support/kb_reads.ex:116`, `marketing/reads.ex:332`, `billing/reads.ex:304`+`:314`) — an ordinary member gets **admin-rank writes in their own org**. Verifier-confirmed genuinely intra-org only (`V-S1a-POSITIVE-CONTROL`) and unreachable across tenants post-fix | **CLOSED this session — `dc7b80d` (G1)** | Role is now derived from the resolved `Identity.Membership` instead of unconditionally elevating; red-paths refuse a `:viewer`/`:member` on the affected surfaces with a positive control for an actual admin. Verifier `_orch/verify/premerge-g1-membership-role-verdict.json` → **PASS** |
+| **S12** (residual) | HIGH→fail-closed gap | Generated `--live` screens fail **closed** on armed hosts (via `reresolve/2`'s no-pin fallback), but `ui_role/0` is a **posture flag, not a membership read** — so an armed generated app has **no admin-rank writes at all** until a real membership role is wired | **CLOSED this session — `dc7b80d` (G1), sequenced with §2 Option A (G2)** | The `--live` templates now emit membership-derived role resolution, so an armed generated app has real admin-rank writes — this is the item that makes "arm in prod" usable for an adopter. Verifier `_orch/verify/premerge-g1-membership-role-verdict.json` (+ `premerge-g1-chat-delta-verdict.json`) → **PASS** |
 | **S13** | HIGH | `Chat.ThreadLive` subscribes to the tenant thread topic **before** the gate, and neither `handle_info({:chat_message, …})` nor `handle_event("send", …)` re-consults `gate_socket/3` — an operator whose impersonation session expires mid-flight keeps streaming and can still post | **post-merge-phase-4** | Re-gate in both callbacks, the standard `operator/automation_health_live.ex:176-184` already states; subscribe **after** the gate |
 | **S6 / S14** | MED | `SecurityLive.credential_id_for/2` does `Ash.read!(authorize?: false)` on a client-supplied `user_id` with no org scope and **no `# authz-scope:` justification** — a global user_id → credential_id oracle. `Operator.WebhookDlqLive` `replay`/`resolve` use a bare `repo.get` with no scope/actor and admit `:operator_readonly` (a read-only role getting a write) | **post-merge-phase-4** | Scope both to the session-derived actor; add the missing justification markers or remove the bypass |
 | **S15** | MED | The `authorize?: false` lint is fooled by `Ash.Query.ensure_selected([:org_id])` (a *selection* counted as a *pin*) and **does not sweep the vertical trees at all** (79 + 47 + 26 unlinted sites) | **post-merge-phase-4** | Restrict pin detection to filter expressions; extend `source_files/0` to `driftwood/lib`, `pawchart/lib`, `demo/lib`. This is the lint that should have caught S6 |
@@ -357,18 +394,17 @@ over-denying** — the verifier confirmed no cross-tenant path survives on an ar
 
 ## 5 · What should block merge
 
-**V-F1 (§2) is the only item this ADR asserts as a hard gate**, and it is a *decision* gate: the
-operator must choose A, B, or C. Merging without choosing means choosing C by default, which is
-exactly the failure mode this record exists to prevent.
+**V-F1 (§2) was the only item this ADR asserts as a hard gate**, and it was a *decision* gate. **It
+is now RESOLVED (2026-08-12):** the operator chose **Option A (full-harden)**, shipped in `9f14a61`
+(G2) + `dc7b80d` (G1), with the ADR-031 amendment in force. The merge is no longer blocked on a human
+decision.
 
-**Two more are strongly advised in the same pre-merge phase** — both small, both mechanical, and
-both contradict something the repo publishes about itself:
+**Two more were strongly advised in the same pre-merge phase — both are now CLOSED this session:**
 
-- **O2** — a shipped vertical with no `aud_chain` table, silently swallowing every audit append,
-  while the product claims a tamper-evident hash-chained audit tier for hosts mounting the operator
-  plane. It is one migration and one red-path.
-- **X1** — the generated landing page's nav 500s on the adopter's first click, while the ≈0-LOC
-  adoption promise is the product's central claim. It is a nav filter and a probe assertion.
+- **O2 — CLOSED (`98125e5`, G3).** PawChart now has its `aud_chain` table (shared-helper migration +
+  persist red-path); appends land, immutability verifier PASS.
+- **X1 — CLOSED (`ead7a42`, G4).** Generated landing nav is constrained to mounted surfaces (no dead
+  links) with a durable probe guard.
 
 **A2/X9 and A3** are the next tier: they are gate-integrity, not user-facing, but a vacuous verifier
 is precisely how the next B-SEC-class finding ships behind a green gate. Fix-before-merge if the

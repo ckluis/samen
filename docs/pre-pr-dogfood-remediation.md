@@ -162,7 +162,7 @@ way:
 
 **Sabotage harness total: 168 → 192** across the pre-PR batches (168 → 186) and the post-PR
 cleanup (186 → 189 for H1, 189 → 190 for H2, 190 → 191 for H2b, 191 → 192 for H3; H4/H5 added
-none). §6's pre-merge burn-down took it to **198**.
+none). §6's pre-merge burn-down took it to **198**; §7's full-harden burn-down took it to **203**.
 
 ## 6 · Pre-merge burn-down (2026-08-11)
 
@@ -234,7 +234,39 @@ and recommends **fail-secure by environment**. §4 of that ADR files every other
 into four phases (gate integrity · deploy/runtime hardening · erasure completeness · residual role
 derivation), and §5 names the two non-V-F1 items it would advise fixing before merge.
 
-## 7 · Read next
+## 7 · Full-harden burn-down (2026-08-12)
+
+ADR-045 §2 (V-F1) needed an operator decision; §5 named O2 and X1 as the two advised non-V-F1
+merge-blockers. **The operator approved ADR-045 §2 Option A (arm the tenant-auth gate by default in
+`:prod`, full-harden).** It plus the two advised items shipped as four gated commits (G1–G4), each
+independently verified, sabotage harness **198 → 203**:
+
+- **G1 — membership-role derivation** (`dc7b80d`, verdicts `premerge-g1-membership-role` +
+  `premerge-g1-chat-delta` → PASS). Closes ADR-045 §4.4 **S1a** (four tenant write helpers stopped
+  hardcoding `:admin`) and **S12** (generated `--live` templates now derive admin-rank from real
+  `Identity.Membership`). Armed hosts now gate admin-rank writes on real org membership, not a
+  posture flag — the item that makes "arm in prod" usable for an adopter.
+- **G2 / V-F1 — prod-armed, fail-secure** (`9f14a61`, verdict `premerge-g2-prod-armed` → PASS).
+  `Samen.Web.TenantGate` arms `:prod` **by default** with a **boot-refusal guard** (raises, naming
+  the flag + fix, if a mount-bearing host boots unarmed in prod); dev/test byte-for-byte unchanged.
+  Generator + deploy templates arm prod and wire `identity_namespace`, so a fresh `mix samen.gen.app`
+  is fail-secure by default. **ADR-031's literal "Off by default" is amended in force** (ADR-045
+  §2.5; the amendment note now lives on ADR-031's Status block).
+- **G3 — pawchart `aud_chain`** (`98125e5`, verdict `premerge-g3-pawchart-audchain` → PASS).
+  Closes ADR-045 §4.3 **O2** (pawchart had no `aud_chain` table — every append silently swallowed)
+  and §4.2 **O7** (its migration read driftwood's config key). Adds the table via the shared
+  `Samen.OperatorPlane.Migration` helper + a persist/immutability red-path; verifier fired raw
+  UPDATE/DELETE and confirmed both P0001-rejected. Sabotage 202.
+- **G4 — generated-nav** (`ead7a42`, gate GREEN). Closes ADR-045 §4.1 **X1**: generated landing nav
+  is constrained to the surfaces actually mounted (no dead links / `NoRouteError` on first click),
+  with a durable `gen_app_flagship_probe.exs` guard. Sabotage 203.
+
+**Remaining backlog** lives in **ADR-045 §4** (now Accepted): Phase 2 deploy hardening (O4/O5/X6/O3,
+the O9/O10 swallow, the runbook arming/KMS prose), Phase 3 erasure completeness (D1/D3/D4-T130/D5/D6),
+the A2/X9 + A3 verifier floors, S13/S6/S14/S15/S16/S7 authz hardening, and the note-only items — all
+honestly deferred as post-merge, none a live cross-tenant path on an armed host.
+
+## 8 · Read next
 
 - `_orch/dogfood/pre-pr/triage.md` (gitignored) — the full per-finding adjudication, root-cause
   clusters, and the pawchart-posture recommendation the operator decided against.

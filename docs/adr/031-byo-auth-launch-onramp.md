@@ -1,6 +1,10 @@
 # ADR-031 — BYO-auth launch on-ramp: the prod tenant actor is derived from an authenticated session, not a query param
 
-- **Status:** Accepted (design + reference wiring; F2 / WS-F2).
+- **Status:** Accepted (design + reference wiring; F2 / WS-F2). **Amended 2026-08-12 by ADR-045 §2
+  — the `:auth_required?` default is now ARMED in `:prod` (fail-secure), superseding the literal
+  "Off by default" in §2 below; dev/test are unchanged (the query-param dogfood and every prior test
+  stay green). The amendment preserves this ADR's dev-ergonomics rationale exactly — only the `:prod`
+  answer changed. Read §2's "Off by default" together with this note and ADR-045 §2/§2.5.**
 - **Date:** 2026-07-20
 - **Task:** WS-F2 unit 1 + 4 — prove day-1 login exists. Wire a real session-auth flow into the
   `Samen.Web.CurrentOrg` actor derivation in ONE vertical (driftwood), replacing the query-param
