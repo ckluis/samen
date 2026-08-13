@@ -25,15 +25,19 @@ defmodule PawChart.Repo.Migrations.AudChain do
   plaintext token channel (ADR-002 §2.5); `ach_subject_ciphertext` is the
   per-subject key-destroyable column that makes the chain crypto-shreddable.
 
-  PawChart-specific: app role is read off pawchart's OWN otp_app (`:pawchart`) so
-  the append-only `REVOKE`/`GRANT` names the host's Postgres role; it defaults to
-  `"clank"` (the local dev/CI Postgres user), matching the sibling hosts.
+  PawChart-specific: the app role is read off pawchart's OWN otp_app (`:pawchart`) so
+  the append-only `REVOKE`/`GRANT` names the host's Postgres role; it is DERIVED at
+  migration time (ADR-045 §4.2, O4; see `app_role/0`), never a hardcoded laptop role.
   """
 
   use Ecto.Migration
 
-  @app_role Application.compile_env(:pawchart, :aud_event_app_role, "clank")
+  # ADR-045 §4.2 (O4): DERIVE the app role at migration time (the `:aud_event_app_role` knob,
+  # else the repo's configured `:username`, else RAISE) via the shared helper — NEVER a
+  # hardcoded developer laptop role, which would ship a `REVOKE ... FROM <laptop-role>` into a
+  # fresh prod deploy (whose first `release_command` then aborts: the role does not exist).
+  defp app_role, do: Samen.OperatorPlane.Migration.app_role!(:pawchart, PawChart.Repo)
 
-  def up, do: Samen.OperatorPlane.Migration.create_aud_chain(@app_role)
-  def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(@app_role)
+  def up, do: Samen.OperatorPlane.Migration.create_aud_chain(app_role())
+  def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(app_role())
 end

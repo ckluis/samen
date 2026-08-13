@@ -28,13 +28,28 @@ defmodule Driftwood.Reads do
 
   require Ash.Query
 
+  # ADR-045 §4.2 (O8) — the HARD read bound for the vertical read layer. Every list read here
+  # decrypts vault fields per row (`resolve_pii/2`), so an UNBOUNDED read on a large org's
+  # roster is a per-navigation resource-exhaustion / KMS-cost hazard. `@limit` caps every list
+  # read so one call can never sweep-and-decrypt more than this many rows — the SAME discipline
+  # the framework `Samen.Web.Reads` clamp (`@max_page_size 200`) and the sibling
+  # `PawChartWeb.ClinicReads` `@limit 200` already apply. Enforced by the boundedness lint
+  # (`Samen.Web.Reads.Lint`), which now sweeps this vertical tree.
+  @limit 200
+
   @doc """
   The DRIVER ROSTER for the given scope: driver rows with name (masked unless granted),
   CDL number (masked), CDL state/expiry (non-PII), medical expiry, status, ELD provider,
   and a computed FMCSA badge. Reads through Ash — OrgScope narrows to the scope's org;
   the vault fields load `%Masked{}` without a reveal grant.
+
+  BOUNDED (O8): the read carries an explicit `Ash.Query.limit` so a large org's roster never
+  triggers an unbounded per-row vault-decrypt sweep on navigation. `opts[:limit]` may request
+  a SMALLER page (a future "load more", or a test probe); it is CLAMPED to `@limit`, so a
+  caller can only ever narrow the page — never exceed the cap. The bound does not change WHICH
+  plane resolves the vault fields, so masking is untouched (tenant CLEAR, operator masked).
   """
-  def driver_roster(scope) do
+  def driver_roster(scope, opts \\ []) do
     Driftwood.Freight.Driver
     |> Ash.Query.ensure_selected([
       :full_name,
@@ -46,6 +61,7 @@ defmodule Driftwood.Reads do
       :eld_provider
     ])
     |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(bounded_limit(opts))
     |> Ash.read!(scope: scope)
     |> resolve_pii(scope)
     |> Enum.map(fn d ->
@@ -53,6 +69,15 @@ defmodule Driftwood.Reads do
     end)
   rescue
     _ -> []
+  end
+
+  # Clamp a requested page into `1..@limit` — a caller can narrow the page but NEVER exceed the
+  # cap (defence in depth: even a hostile/buggy `:limit` can only shrink the decrypt sweep).
+  defp bounded_limit(opts) do
+    case Keyword.get(opts, :limit) do
+      n when is_integer(n) and n >= 1 -> min(n, @limit)
+      _ -> @limit
+    end
   end
 
   @doc """
@@ -179,6 +204,7 @@ defmodule Driftwood.Reads do
     |> Ash.Query.ensure_selected([:name, :value, :status, :close_date, :custom])
     |> Ash.Query.sort(inserted_at: :asc)
     |> maybe_filter_status(status)
+    |> Ash.Query.limit(@limit)
     |> Ash.read!(scope: scope)
     |> Enum.map(fn l ->
       lane = get_in(l.custom || %{}, ["lane"]) || "unknown"
@@ -229,6 +255,7 @@ defmodule Driftwood.Reads do
   def settlements(scope) do
     Samen.Context.reshaped_query(Driftwood.Context, Driftwood.Freight.Settlement)
     |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@limit)
     |> Ash.read!(scope: scope)
     |> Enum.map(fn s ->
       calc = s.calculations || %{}

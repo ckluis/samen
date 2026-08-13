@@ -26,13 +26,18 @@ defmodule Driftwood.Repo.Migrations.AudChain do
   `ach_subject_ciphertext` is the per-subject key-destroyable column that makes the
   chain crypto-shreddable.
 
-  Driftwood-specific: app role is `"clank"` (the local dev/CI Postgres user).
+  Driftwood-specific: the app role is DERIVED at migration time (ADR-045 §4.2, O4; see
+  `app_role/0`), never a hardcoded developer laptop role.
   """
 
   use Ecto.Migration
 
-  @app_role Application.compile_env(:driftwood, :aud_event_app_role, "clank")
+  # ADR-045 §4.2 (O4): DERIVE the app role at migration time (the `:aud_event_app_role` knob,
+  # else the repo's configured `:username`, else RAISE) via the shared helper — NEVER a
+  # hardcoded developer laptop role, which would ship a `REVOKE ... FROM <laptop-role>` into a
+  # fresh prod deploy (whose first `release_command` then aborts: the role does not exist).
+  defp app_role, do: Samen.OperatorPlane.Migration.app_role!(:driftwood, Driftwood.Repo)
 
-  def up, do: Samen.OperatorPlane.Migration.create_aud_chain(@app_role)
-  def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(@app_role)
+  def up, do: Samen.OperatorPlane.Migration.create_aud_chain(app_role())
+  def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(app_role())
 end

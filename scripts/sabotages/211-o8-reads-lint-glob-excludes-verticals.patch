@@ -1,0 +1,23 @@
+# SABOTAGE: O8 (ADR-045 §4.2) — the boundedness lint's sweep NARROWED back to the framework
+# tree, so the vertical read layers (driftwood/pawchart) are invisible again — the exact defect
+# O8 closed (A3-GATE-1 reproduced one directory outside the scanner). The fix made
+# `reads_files/0` include `vertical_reads_files/0`; this sabotage drops that union, so a future
+# unbounded vertical read would go uncaught. The vertical-coverage red path MUST flip: the sweep
+# no longer includes the driftwood + pawchart read layers.
+# APP: samen_web
+# TEST_FILES: test/samen/web/reads_lint_test.exs
+# MUST_FAIL: the sweep now includes the driftwood + pawchart read layers
+diff --git a/samen_web/lib/samen/web/reads/lint.ex b/samen_web/lib/samen/web/reads/lint.ex
+index fb51133..9d670f1 100644
+--- a/samen_web/lib/samen/web/reads/lint.ex
++++ b/samen_web/lib/samen/web/reads/lint.ex
+@@ -65,7 +65,8 @@ defmodule Samen.Web.Reads.Lint do
+   caught by the gate rather than living one directory outside the scanner.
+   """
+   def reads_files do
+-    framework_reads_files() ++ vertical_reads_files()
++    # SABOTAGE: narrow the sweep back to the framework tree — verticals invisible again.
++    framework_reads_files()
+   end
+ 
+   # `__ENV__.file` is this file's compile-time source path (.../lib/samen/web/reads/

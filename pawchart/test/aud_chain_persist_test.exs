@@ -105,24 +105,36 @@ defmodule PawChart.AudChainPersistTest do
                            __DIR__
                          )
 
-    test "aud_event reads :pawchart (never driftwood's :driftwood) for :aud_event_app_role" do
+    # ADR-045 §4.2 (O4 fold-in): the role is now DERIVED at migration time via the shared
+    # `Samen.OperatorPlane.Migration.app_role!/2` helper (knob → repo :username → RAISE) instead
+    # of `Application.compile_env(:pawchart, :aud_event_app_role, "clank")`. The O7 guarantee is
+    # UNCHANGED — the derivation still reads pawchart's OWN otp_app (`:pawchart`, never
+    # driftwood's `:driftwood`) — so these wiring proofs now assert the helper call names
+    # `:pawchart` / `PawChart.Repo` rather than the (removed) `compile_env(:pawchart, ...)` form.
+    test "aud_event derives off :pawchart (never driftwood's :driftwood) for :aud_event_app_role" do
       src = File.read!(@aud_event_migration)
 
-      assert src =~ ~r/compile_env\(:pawchart,\s*:aud_event_app_role/,
-             "pawchart aud_event migration must read pawchart's OWN :aud_event_app_role key"
+      assert src =~ "Samen.OperatorPlane.Migration.app_role!(:pawchart, PawChart.Repo)",
+             "pawchart aud_event migration must derive the role off pawchart's OWN otp_app"
 
-      refute src =~ ~r/compile_env\(:driftwood,\s*:aud_event_app_role/,
-             "pawchart aud_event migration must NOT read driftwood's :driftwood key (O7)"
+      refute src =~ "app_role!(:driftwood",
+             "pawchart aud_event migration must NOT derive off driftwood's otp_app (O7)"
+
+      refute src =~ ~r/compile_env\(:driftwood/,
+             "pawchart aud_event migration must NOT read driftwood's compile_env key (O7)"
     end
 
-    test "aud_chain reads :pawchart for :aud_event_app_role" do
+    test "aud_chain derives off :pawchart for :aud_event_app_role" do
       src = File.read!(@aud_chain_migration)
 
-      assert src =~ ~r/compile_env\(:pawchart,\s*:aud_event_app_role/,
-             "pawchart aud_chain migration must read pawchart's OWN :aud_event_app_role key"
+      assert src =~ "Samen.OperatorPlane.Migration.app_role!(:pawchart, PawChart.Repo)",
+             "pawchart aud_chain migration must derive the role off pawchart's OWN otp_app"
 
-      refute src =~ ~r/compile_env\(:driftwood,/,
-             "pawchart aud_chain migration must NOT read driftwood's otp_app"
+      refute src =~ "app_role!(:driftwood",
+             "pawchart aud_chain migration must NOT derive off driftwood's otp_app"
+
+      refute src =~ ~r/compile_env\(:driftwood/,
+             "pawchart aud_chain migration must NOT read driftwood's compile_env key"
     end
   end
 end

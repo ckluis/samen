@@ -30,10 +30,12 @@ defmodule Samen.OperatorPlane.Migration do
       defmodule MyApp.Repo.Migrations.AudChain do
         use Ecto.Migration
 
-        @app_role Application.compile_env(:my_app, :aud_event_app_role, "clank")
+        # ADR-045 §4.2 (O4): DERIVE the app role at migration time (knob → repo :username →
+        # RAISE) via the shared helper — NEVER a hardcoded developer laptop role ("clank").
+        defp app_role, do: Samen.OperatorPlane.Migration.app_role!(:my_app, MyApp.Repo)
 
-        def up,   do: Samen.OperatorPlane.Migration.create_aud_chain(@app_role)
-        def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(@app_role)
+        def up,   do: Samen.OperatorPlane.Migration.create_aud_chain(app_role())
+        def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(app_role())
       end
 
   The DDL body, the column list, the catalog rows, and the append-only
@@ -232,6 +234,62 @@ defmodule Samen.OperatorPlane.Migration do
     exec1("DROP TABLE IF EXISTS aud_chain")
 
     :ok
+  end
+
+  @doc """
+  Resolve the Postgres app role for the `aud_event`/`aud_chain` `REVOKE UPDATE, DELETE`
+  grant AT MIGRATION TIME (ADR-045 §4.2, O4) — the SHARED derivation both the generated
+  `m_aud_event.eex` template and every in-repo host migration (driftwood/pawchart/demo)
+  use, so a role is NEVER a hardcoded developer laptop role (`"clank"`) shipped into an
+  adopter's prod migration (whose first `release_command` would then abort with
+  `role "clank" does not exist`).
+
+  Resolution order:
+
+    1. the explicit `:aud_event_app_role` knob (what a real prod deploy sets — the deploy
+       runbook's Operator TODO), else
+    2. the repo's CONFIGURED `:username` (the role this app actually connects as in dev/CI),
+       else
+    3. RAISE a named error — refusing to guess a role, since a `REVOKE` against the WRONG
+       role silently leaves the audit tables mutable for the real app role (an
+       audit-integrity gap), which is worse than a loud failure.
+
+  `otp_app` is the host's OTP app atom; `repo` is the host's `Ecto.Repo` module (the key its
+  `:username` is configured under). The returned role is NOT `safe_role!/1`-checked here —
+  `create_aud_chain/1`/`drop_aud_chain/1` (and the template's own DDL) apply that gate at the
+  interpolation site.
+  """
+  @spec app_role!(atom(), module()) :: String.t()
+  def app_role!(otp_app, repo) when is_atom(otp_app) and is_atom(repo) do
+    case Application.get_env(otp_app, :aud_event_app_role) do
+      role when is_binary(role) and role != "" ->
+        role
+
+      _ ->
+        repo_username =
+          otp_app
+          |> Application.get_env(repo, [])
+          |> Keyword.get(:username)
+
+        case repo_username do
+          role when is_binary(role) and role != "" ->
+            role
+
+          _ ->
+            raise """
+            #{inspect(repo)}: cannot determine the Postgres app role for the audit-table
+            REVOKE UPDATE, DELETE grant (ADR-045 §4.2, O4).
+
+            Set it explicitly (the deploy runbook's `aud_event_app_role` step):
+
+                config #{inspect(otp_app)}, :aud_event_app_role, "your_app_db_role"
+
+            It could not be derived from the repo's configured :username either. Refusing to
+            emit an arbitrary role — a REVOKE against the wrong role would silently leave the
+            audit tables mutable for the real app role (an audit-integrity gap).
+            """
+        end
+    end
   end
 
   # `Ecto.Migration.execute/1,2` depends on the migration process's runtime state

@@ -10,13 +10,14 @@
 # TEST_FILES: test/aud_chain_persist_test.exs
 # MUST_FAIL: an append PERSISTS and is retrievable from the aud_chain table
 diff --git a/pawchart/priv/repo/migrations/20260807110500_aud_chain.exs b/pawchart/priv/repo/migrations/20260807110500_aud_chain.exs
+index 73b4949..7912100 100644
 --- a/pawchart/priv/repo/migrations/20260807110500_aud_chain.exs
 +++ b/pawchart/priv/repo/migrations/20260807110500_aud_chain.exs
-@@ -34,6 +34,6 @@
-
-   @app_role Application.compile_env(:pawchart, :aud_event_app_role, "clank")
-
--  def up, do: Samen.OperatorPlane.Migration.create_aud_chain(@app_role)
+@@ -38,6 +38,6 @@ defmodule PawChart.Repo.Migrations.AudChain do
+   # fresh prod deploy (whose first `release_command` then aborts: the role does not exist).
+   defp app_role, do: Samen.OperatorPlane.Migration.app_role!(:pawchart, PawChart.Repo)
+ 
+-  def up, do: Samen.OperatorPlane.Migration.create_aud_chain(app_role())
 +  def up, do: :ok
-   def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(@app_role)
+   def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(app_role())
  end

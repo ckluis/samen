@@ -87,6 +87,7 @@ defmodule PawChartWeb.ClinicReads do
     Patient
     |> Ash.Query.filter(id == ^id)
     |> Ash.Query.ensure_selected([:full_name, :emails, :phones, :marketing_opt_in])
+    |> Ash.Query.limit(1)
     |> Ash.read!(scope: scope)
     |> resolve_pii(Patient, scope)
     |> case do
@@ -234,6 +235,7 @@ defmodule PawChartWeb.ClinicReads do
   defp fetch(resource, scope, id) do
     resource
     |> Ash.Query.filter(id == ^id)
+    |> Ash.Query.limit(1)
     |> Ash.read_one!(scope: scope)
   rescue
     _ -> nil

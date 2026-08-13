@@ -1087,12 +1087,16 @@ defmodule DriftwoodWeb.BrokerLive do
           {:ok, map()} | {:error, :not_found | :fmcsa_blocked}
   def dispatch_decision(org_id, driver_id) do
     scope = broker_scope(org_id)
-    driver = Enum.find(Reads.driver_roster(scope), &(to_string(&1.id) == driver_id))
 
-    cond do
-      is_nil(driver) -> {:error, :not_found}
-      not Reads.dispatchable?(driver) -> {:error, :fmcsa_blocked}
-      true -> {:ok, driver}
+    # ADR-045 §4.2 (O8): fetch the ONE driver by id via the BOUNDED `Reads.get_driver/2`
+    # (limit 1, PII-resolved on the SAME tenant plane) rather than loading + decrypting the
+    # ENTIRE org roster and `Enum.find`-ing it — the per-interaction unbounded-sweep amplifier.
+    case Reads.get_driver(scope, driver_id) do
+      {:ok, driver} ->
+        if Reads.dispatchable?(driver), do: {:ok, driver}, else: {:error, :fmcsa_blocked}
+
+      :error ->
+        {:error, :not_found}
     end
   end
 

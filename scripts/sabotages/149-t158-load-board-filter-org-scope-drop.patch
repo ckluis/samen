@@ -13,13 +13,13 @@
 # MUST_FAIL: ORG-SCOPE PIN: a filter matching BOTH orgs' loads never surfaces the other org's rows
 # MUST_FAIL: ORG-SCOPE PIN: an unfiltered board for org A never includes org B's loads either (control)
 diff --git a/driftwood/lib/driftwood/reads.ex b/driftwood/lib/driftwood/reads.ex
-index 9261ff8..e37bfbf 100644
+index d033bab..ff77970 100644
 --- a/driftwood/lib/driftwood/reads.ex
 +++ b/driftwood/lib/driftwood/reads.ex
-@@ -179,7 +179,7 @@ defmodule Driftwood.Reads do
-     |> Ash.Query.ensure_selected([:name, :value, :status, :close_date, :custom])
+@@ -205,7 +205,7 @@ defmodule Driftwood.Reads do
      |> Ash.Query.sort(inserted_at: :asc)
      |> maybe_filter_status(status)
+     |> Ash.Query.limit(@limit)
 -    |> Ash.read!(scope: scope)
 +    |> Ash.read!(authorize?: false)
      |> Enum.map(fn l ->

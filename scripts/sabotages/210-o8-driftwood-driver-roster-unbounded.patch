@@ -1,0 +1,29 @@
+# SABOTAGE: O8 (ADR-045 §4.2) — Driftwood.Reads.driver_roster/2 UNBOUNDED again. The fix
+# HARD-CAPS the roster read (`Ash.Query.limit(bounded_limit(opts))`, clamped to @limit 200) so
+# a large org's roster can never trigger an unbounded per-row vault-decrypt sweep on navigation
+# (the O8 resource-exhaustion / KMS-cost hazard). This sabotage makes `bounded_limit/1` ignore
+# the cap and return a huge constant, so the read returns the FULL set — effectively unbounded.
+# The bounding red path (a roster larger than the requested page returns at MOST the page) MUST
+# flip: driver_roster(scope, limit: 2) over 3 drivers now returns 3, not 2.
+# APP: driftwood
+# TEST_FILES: test/reads_bounded_test.exs
+# MUST_FAIL: a roster larger than the requested page returns at MOST the page
+diff --git a/driftwood/lib/driftwood/reads.ex b/driftwood/lib/driftwood/reads.ex
+index d033bab..0a2f5ff 100644
+--- a/driftwood/lib/driftwood/reads.ex
++++ b/driftwood/lib/driftwood/reads.ex
+@@ -73,12 +73,8 @@ defmodule Driftwood.Reads do
+ 
+   # Clamp a requested page into `1..@limit` — a caller can narrow the page but NEVER exceed the
+   # cap (defence in depth: even a hostile/buggy `:limit` can only shrink the decrypt sweep).
+-  defp bounded_limit(opts) do
+-    case Keyword.get(opts, :limit) do
+-      n when is_integer(n) and n >= 1 -> min(n, @limit)
+-      _ -> @limit
+-    end
+-  end
++  # SABOTAGE: unbound the roster — ignore the @limit cap so the read returns the FULL set.
++  defp bounded_limit(_opts), do: 100_000_000
+ 
+   @doc """
+   T158 — fetch ONE driver by id for `scope`, PII-resolved through the SAME seam
