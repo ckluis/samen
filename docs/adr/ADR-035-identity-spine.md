@@ -1,6 +1,14 @@
 # ADR-035 — Identity spine architecture: the WS-A A1–A10 contracts
 
 - **Status:** Accepted (design ADR; fixes every WS-A contract before any auth code is written).
+  **Amended 2026-08-13 by ADR-046 (§4.1 / §7 decision 1) — the §4.1 erasure bullet's "null
+  `email_bidx`" is superseded: `email_bidx` is `allow_nil?: false` + unique, so on
+  principal-account erasure the blind-index arm now TOMBSTONES it to a fresh random unique
+  sentinel (same 64-hex shape, no schema change) rather than nulling it, destroying the
+  post-shred equality oracle while preserving pre-auth lookup + global dedupe for live
+  subjects and allowing re-registration. The arm fires ONLY on principal-account erasure
+  (the credential/invitation OWNER), never a per-tenant data-subject shred (the org-less
+  Credential is shared cross-org). See §4.1's amended erasure bullet and ADR-046 §4.1/§6.**
 - **Date:** 2026-07-21
 - **Task:** T01 (phase 1). Binding on T02–T10 (implementation), consulted by T16 (phase gate).
 - **Deciders:** fable (T01 orchestrator), grounded in ADR-037 §5.1/§5.8/§5.14 (binding input),
@@ -127,6 +135,36 @@ subject context exists; never the app secret_key_base). Properties:
 - Erasure/crypto-shred: the DSAR/erasure arm nulls `email_bidx` (and `sent_to_bidx`) when the
   subject is erased — the HMAC is non-reversible, but a lookup handle to an erased subject is
   still a handle; null it.
+
+  > **AMENDED 2026-08-13 by ADR-046 (§4.1 D1, §7 decision 1/1a/1b).** "Null it" is superseded.
+  > `email_bidx` is `allow_nil?: false` + unique (the global one-account-per-email invariant),
+  > so it **cannot** be nulled without a schema/constraint relaxation — and, more importantly,
+  > key-shred never reached it at all: `email_bidx = HMAC(k_bidx, normalize(email))` is keyed on
+  > the shared reserved subject `"sys:bidx"`, which `Kms.shred/1` refuses permanently, so an
+  > erased subject's email stayed **confirmable forever** via an equality oracle (HMAC a candidate
+  > email, compare to the stored index). The erasure arm therefore **TOMBSTONES** `email_bidx` on
+  > **principal-account erasure**: it overwrites the column with a fresh 32-byte random unique
+  > sentinel rendered to the same 64-upper-hex shape the column already holds
+  > (`Base.encode16(:crypto.strong_rand_bytes(32), case: :upper)`), which satisfies
+  > `allow_nil?: false` + the unique index with **no schema migration and no `allow_nil`
+  > relaxation**. The random sentinel has no `HMAC(email)` preimage, so the oracle finds nothing
+  > for the erased subject, while every **live** subject's real index is untouched (pre-auth
+  > lookup + global dedupe fully preserved), and a legitimate **re-registration** with the same
+  > email later is correctly allowed (the old row's index is now random, so the unique constraint
+  > no longer blocks a fresh signup).
+  >
+  > **Load-bearing scope (decision 1b): principal-account erasure ONLY.** Credential is org-LESS
+  > ("one human, N orgs"). A *per-tenant data-subject* shred (a tenant erasing an `Identity.User`
+  > row, subject_id = the User's own id) must **NEVER** touch the shared login Credential — doing
+  > so would break that human's login to their *other* orgs. The arm enforces this structurally,
+  > not by a flag: it matches index rows on the row's **own subject key** (`subject_column`,
+  > default `"id"`), and a Credential/Invitation vaults its own material under `subject_id == its
+  > primary key` (`Samen.Vault.Change`; Credential's TOTP binds `subject_id: credential_id`). So a
+  > principal-account erasure (`subject_id == credential.id`) matches and tombstones, while a
+  > per-tenant User shred (`subject_id == user.id`) matches **zero** Credential/Invitation rows
+  > (distinct resources, distinct pks) and is a no-op. Implemented by `Samen.Auth.BlindIndexErasure`
+  > as a spec-driven arm of `Samen.Erasure.shred/2` (the `Samen.NonPii` / file-blob registry
+  > pattern), asserted reachable by the forthcoming completeness verifier (ADR-046 §6).
 - Red test (T02): `email_bidx` never equals the plaintext or lowercased email; rotating
   `k_bidx` is a documented operator runbook (re-derive via a vault-revealed sweep), not in
   scope this run.

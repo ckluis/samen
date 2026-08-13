@@ -5,10 +5,13 @@ defmodule Samen.Erasure do
   `shred/2` is the one entry point that erases a subject. It is a *key-destruction*
   job — NOT a copy-chasing / destruction-by-eventual-consistency job. One key shred
   makes every vaulted value undecryptable across live/replica/backup-PITR/CDC/
-  rollup/audit at once (the ciphertext stays; the DEK is gone). The two carve-outs
-  key-shred does NOT reach — trace-sink pseudonyms and review-gated `non_pii!`
-  plaintext columns — are handled explicitly here (pseudonym unlinks with the same
-  DEK; `non_pii!` rows are redacted row-level).
+  rollup/audit at once (the ciphertext stays; the DEK is gone). The residues that
+  live OUTSIDE the per-subject-DEK envelope — so key-shred does NOT reach them — are
+  handled by explicit arms here (ADR-046 makes this carve-out list complete):
+  trace-sink pseudonyms (unlink with the same DEK), review-gated `non_pii!` plaintext
+  columns (redacted row-level), stored file blobs (deleted via the governed
+  ref-counted `Samen.Files` chokepoint — §4.3 D4), and the recomputable `email_bidx`
+  blind index (tombstoned to a random sentinel on principal-account erasure — §4.1 D1).
 
   ## What `shred/2` does (T1.7 (a)–(d))
 
@@ -94,13 +97,19 @@ defmodule Samen.Erasure do
       actor_id: actor_id
     ]
 
+    # The blind-index erasure arm (ADR-046 §4.1 D1; amends ADR-035 §4.1): the registered
+    # `email_bidx` specs (or the config default). Fires ONLY on principal-account erasure
+    # (subject == the credential/invitation owner — matched on the row's own key), never a
+    # per-tenant data-subject shred (which would break the org-less human's cross-org login).
+    bidx_specs = Keyword.get(opts, :bidx_specs)
+
     # STEP 1 — destroy the key FIRST, outside the DB tx. This is the load-bearing
     # act. It is the ONLY thing that can make the guarantee fail closed (if the
     # key store is unreachable we must NOT proceed and NOT fabricate an
     # attestation).
     case Kms.shred(subject_id) do
       {:ok, attestation} ->
-        seal_db_tiers(subject_id, attestation, :from_state, actor_id, org_id, r, rollup_opts, file_opts)
+        seal_db_tiers(subject_id, attestation, :from_state, actor_id, org_id, r, rollup_opts, file_opts, bidx_specs)
 
       {:error, :absent} ->
         # Subject never had a key. Still redact any non_pii! rows and write a
@@ -115,7 +124,7 @@ defmodule Samen.Erasure do
           checked_at: DateTime.utc_now()
         }
 
-        seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts, file_opts)
+        seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts, file_opts, bidx_specs)
 
       {:error, reason} ->
         # Key store unreachable (outage) — FAIL CLOSED. No sentinel, no report,
@@ -127,7 +136,7 @@ defmodule Samen.Erasure do
   # STEP 2–5 in one transaction. `outcome_mode` is `:from_state` (derive from the
   # seal result — "shredded" on the first call that seals rows, "already_shredded"
   # on an idempotent later call) or a fixed string (e.g. "absent").
-  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, org_id, r, rollup_opts, file_opts) do
+  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, org_id, r, rollup_opts, file_opts, bidx_specs) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     multi =
@@ -163,15 +172,27 @@ defmodule Samen.Erasure do
       |> Ecto.Multi.run(:file_blobs, fn repo, _changes ->
         {:ok, Samen.Files.Erasure.erase_subject(subject_id, repo, file_opts)}
       end)
+      # STEP 3d — blind-index erasure arm (ADR-046 §4.1 D1; amends ADR-035 §4.1). The
+      # recomputable `email_bidx` HMAC lives OUTSIDE the per-subject-DEK envelope (it is
+      # keyed on the shared, permanently-un-shreddable `sys:bidx`), so key-shred does not
+      # reach it: left as-is it keeps an erased subject's email confirmable forever via an
+      # equality oracle. This arm tombstones `email_bidx` to a fresh random sentinel — but
+      # ONLY on principal-account erasure (the arm matches the credential/invitation OWNER's
+      # own key; a per-tenant data-subject shred matches zero rows, so the org-less human's
+      # cross-org login is never broken). Runs INSIDE the tx, fail-closed (pure in-DB write).
+      |> Ecto.Multi.run(:blind_index, fn repo, _changes ->
+        {:ok, Samen.Auth.BlindIndexErasure.erase_subject(subject_id, repo, bidx_specs: bidx_specs)}
+      end)
       # STEP 5 (built here, needs step 2/3/3b/3c results) — the erasure report.
       |> Ecto.Multi.run(:report, fn repo, changes ->
         {sealed, _} = changes.seal_vault
         %{count: redacted, details: redaction_details} = changes.redact_non_pii
         rollup_report = changes.rollups
         file_report = changes.file_blobs
+        blind_index_report = changes.blind_index
 
         tiers =
-          build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, repo)
+          build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, repo)
         outcome = resolve_outcome(outcome_mode, subject_id, sealed, repo)
 
         report_attrs = %{
@@ -247,7 +268,7 @@ defmodule Samen.Erasure do
   # Tier descriptors — what the T2.9 oracle reads (D7 report).
   # ---------------------------------------------------------------------------
 
-  defp build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, repo) do
+  defp build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, repo) do
     remaining_active =
       repo.aggregate(
         from(v in VaultRow, where: v.subject_id == ^subject_id and v.state == "active"),
@@ -289,7 +310,12 @@ defmodule Samen.Erasure do
       # File-blob tier (ADR-046 §4.3 D4): the per-file-resource report of blobs the
       # erasure arm deleted for the subject (last-reference-aware). Empty when no file
       # erasure spec is registered. Token-only (counts + resource name, never a key).
-      "file_blobs" => file_report
+      "file_blobs" => file_report,
+      # Blind-index tier (ADR-046 §4.1 D1): the per-resource report of `email_bidx`
+      # columns tombstoned for the subject (principal-account erasure only). Empty when
+      # no blind-index spec is registered, or when this is a per-tenant data-subject shred
+      # (no owning-principal row matches). Token-only (counts + resource label).
+      "blind_index" => blind_index_report
     }
   end
 
