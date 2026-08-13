@@ -88,8 +88,9 @@ The Option A scope note in §2.4 is satisfied by these two commits: (a) env-awar
 refusal that names the flag → G2; (b) generator `config_exs_web.eex` + emitted prod/runtime posture
 + `identity_namespace` wiring → G2; (c) the red-path + positive control → G2 verifier; (d) sabotage
 patch → the harness is now **203**; (e) the Phase-4 role derivation sequenced alongside → G1. The
-`runbook` row in §4.2 (the operator-facing arming step / KMS / `aud_event_app_role`) remains OPEN as
-Phase 2 deploy work — the *control* is armed by construction; the runbook prose is post-merge.
+`runbook` row in §4.2 (the operator-facing arming step / KMS / `aud_event_app_role`) has since been
+CLOSED as Phase 2 deploy work (`2a03dc0`, P2-A) — the *control* was armed by construction here; the
+runbook prose landed in Phase 2.
 
 > **This was the real merge gate. It needed operator sign-off; nothing below it was a substitute.**
 
@@ -124,6 +125,14 @@ takes that default:
 The independent verifier drove all of this end-to-end (`V-S4-disarmed`, `V-PC-disarmed`,
 `V-POSTURE-disarmed`), including proving there is no prod posture to read at all: a
 `Config.Reader.read!(env: :prod)` on driftwood *aborts* on the missing `config/prod.exs`.
+
+> **CLOSED — the missing-`prod.exs` gap is resolved (`2a03dc0`, P2-A).** driftwood, pawchart, and
+> every generated app set (headless/web/deploy) now emit a loadable `config/prod.exs`, so a prod
+> `import_config` no longer aborts and there **is** a prod posture to read. Asserted by
+> `gen_deploy_bootability_test.exs` (`config/prod.exs` is emitted for every set and loads under
+> `Config.Reader` in `:prod` without aborting); verifier
+> `_orch/verify/premerge-p2a-deploy-bootability-verdict.json` → **PASS**. The table above records the
+> as-shipped state at review time.
 
 Two things this is **not**, stated plainly so the decision is made on true facts:
 
@@ -319,13 +328,30 @@ The gates that are supposed to catch the next class of this, plus the first thin
 
 Everything in the `--deploy` scaffold that a *boot* would find and no test does.
 
+> **Phase 2 is COMPLETE (2026-08-12) — all rows CLOSED across three verified + banked batches.**
+> **P2-A `2a03dc0`** (deploy bootability: O5/X6 KMS boot refusal, §2.1 `prod.exs` generation, O4
+> `aud_event` role derivation, runbook) → `_orch/verify/premerge-p2a-deploy-bootability-verdict.json`
+> PASS. **P2-B `82f229d`** (audit reliability: O3 bounded verify + own `:audit_verify` queue, O9
+> DSAR audit precondition, O10 reveal-ledger read-error signal) →
+> `_orch/verify/premerge-p2b-audit-reliability-verdict.json` PASS. **P2-C `936a874`** (O8 bounded
+> vertical reads + boundedness lint extended to the vertical trees, and the "clank fold" —
+> `Samen.OperatorPlane.Migration.app_role!/2` extracted, all 6 vertical migrations repointed) →
+> `_orch/verify/premerge-p2c-o8-clank-verdict.json` PASS. The sabotage harness grew **203 → 212**.
+>
+> **OPERATIONAL note (tooling, not a defect).** At **212** patches the full `./scripts/sabotage.sh`
+> harness now exceeds the 600s single tool-call ceiling, so full-harness certification must be run
+> **split-form or backgrounded/chunked** rather than in one synchronous call. Recommended small infra
+> follow-up: add a **range/chunk mode** to `scripts/sabotage.sh` (e.g. run patches N..M) so the
+> harness can be certified in bounded slices. This is a harness-runtime scaling note; every individual
+> sabotage still applies → flips its named tests → reverts byte-exact.
+
 | ID | Sev | One-line | Disposition | Fix sketch |
 |---|---|---|---|---|
-| **O4** | HIGH | Every generated prod migration emits `REVOKE UPDATE, DELETE ON aud_chain FROM clank` — **a developer's local Postgres role** — because `priv/templates/m_aud_event.eex:5` defaults `@app_role` to `"clank"`; the first prod `release_command` aborts, and the deploy runbook never mentions the knob | **post-merge-phase-2** | Default the role to the migration's own connection role (or the repo's configured `:username`) instead of a hardcoded literal; if it cannot be derived, **raise a named error** rather than emit someone's laptop role; document the `:aud_event_app_role` knob in the runbook. Related: **O7 — CLOSED this session (`98125e5`, G3):** pawchart's aud-chain wiring was corrected alongside adding its `aud_chain` table (O2), so its own audit-role config key is now reachable. **O4 itself remains OPEN (Phase 2 deploy).** |
-| **O5 / X6** | HIGH / MED | The generated `--deploy` `runtime.exs` sets `config :samen_core, :kms_adapter, Samen.Kms.AwsKmsDynamo` **and** `:aws_kms_dynamo_enabled, true` — and that adapter is a **raise-only skeleton** (`stub_delegate/2` raises whenever enabled; `backups_disabled?/0` and `key_material_present?/1` raise directly). The app boots green and then **every vault operation 500s**. The runbook's four-item "Operator TODO" omits it entirely | **post-merge-phase-2** | Do not select a raise-only adapter by default. Either emit the working `FileBacked`/explicit-choice posture with a named operator step, or keep the selection with `enabled: false` plus a fail-closed boot check that raises with the actual implementation checklist (the adapter's own moduledoc already lists the seven ADR-001 §8.2 obligations). Add it to the runbook's Operator TODO as **item 1** — it is the largest blocker there, and today it is absent. Honesty note: it fails **loudly**, so the fail-honest contract itself is intact — this is a scaffold-correctness bug, not an overclaim |
-| **O3** | HIGH | The 15-minute audit-chain verify cron loads **every entry of every org** into memory, on the `maintenance: 1` queue it shares with the partition roll-forward | **post-merge-phase-2** | Bound the verify to a keyset window / per-org batch with a resume cursor; consider its own queue so a long verify cannot starve partition roll-forward |
-| **runbook** | — | The deploy runbook's Operator TODO is incomplete against reality (O5/X6 above; the `:authorized_orgs` replacement warning exists but the **arming step** does not) | **post-merge-phase-2**, or **fix-before-merge if §2 lands as Option A or B** | One pass over `priv/templates/deploy_runbook.eex`: KMS adapter, `auth_required?` arming, `aud_event_app_role`, in that order of consequence |
-| **O8 / O9** | MED | `Driftwood.Reads.driver_roster/1` is unbounded with per-row vault decrypt, called per `handle_params` (the boundedness lint's glob excludes the vertical trees); DSAR export returns `{:ok, bundle}` even when the "who exported what" audit record failed — a non-repudiation hole on a compliance surface | **post-merge-phase-2** | Add `limit`/keyset via `Samen.Web.Reads` and extend the lint's `source_files/0` to the verticals; make the DSAR audit write a hard precondition of returning the bundle |
+| **O4** | HIGH | Every generated prod migration emits `REVOKE UPDATE, DELETE ON aud_chain FROM clank` — **a developer's local Postgres role** — because `priv/templates/m_aud_event.eex:5` defaults `@app_role` to `"clank"`; the first prod `release_command` aborts, and the deploy runbook never mentions the knob | **CLOSED — `2a03dc0` (P2-A)** | The generated `aud_event` migration now derives the DB app role from the `:aud_event_app_role` config knob (falling back to the repo's connection role), never a hardcoded literal — asserted by `gen_deploy_bootability_test.exs` ("must not ship a hardcoded 'clank' laptop role"); the runbook documents the knob. Independent verifier `_orch/verify/premerge-p2a-deploy-bootability-verdict.json` → **PASS**. Related: **O7 — CLOSED (`98125e5`, G3):** pawchart's aud-chain wiring was corrected alongside adding its `aud_chain` table (O2), so its own audit-role config key is now reachable. **P2-C fold:** `Samen.OperatorPlane.Migration.app_role!/2` was extracted and all 6 vertical `aud_event`/`aud_chain` migrations repointed to it (no literal `"clank"` remains in migration source; `936a874`). **RESIDUAL:** the generated `m_aud_event.eex` template keeps its intentional self-contained `app_role` copy — the shared helper is the single source of truth for **in-repo** migrations only |
+| **O5 / X6** | HIGH / MED | The generated `--deploy` `runtime.exs` sets `config :samen_core, :kms_adapter, Samen.Kms.AwsKmsDynamo` **and** `:aws_kms_dynamo_enabled, true` — and that adapter is a **raise-only skeleton** (`stub_delegate/2` raises whenever enabled; `backups_disabled?/0` and `key_material_present?/1` raise directly). The app boots green and then **every vault operation 500s**. The runbook's four-item "Operator TODO" omits it entirely | **CLOSED — `2a03dc0` (P2-A)** | Fail-honest KMS boot refusal: a `:prod` boot with the raise-only `AwsKmsDynamo` skeleton selected now **refuses at boot**, naming the adapter and the ADR-001 §8.2 implementation checklist, instead of booting green and 500-ing every vault op — asserted by `gen_deploy_bootability_test.exs` (`__kms_skeleton__?` guard) and added to the runbook Operator TODO. Independent verifier `_orch/verify/premerge-p2a-deploy-bootability-verdict.json` → **PASS**. Fails **loudly** by construction — the fail-honest contract was intact; this closed the scaffold-correctness gap |
+| **O3** | HIGH | The 15-minute audit-chain verify cron loads **every entry of every org** into memory, on the `maintenance: 1` queue it shares with the partition roll-forward | **CLOSED — `82f229d` (P2-B)** | The verify is now keyset-bounded / per-org batched with an in-run resume cursor, and runs on its own dedicated `:audit_verify` queue so a long verify cannot starve partition roll-forward — asserted by `audit_chain_bounded_verify_test.exs`. Independent verifier `_orch/verify/premerge-p2b-audit-reliability-verdict.json` → **PASS**. **RESIDUAL (honest):** the in-run cursor resolves the memory/starvation HIGH; a **cross-run persisted checkpoint** (resume across process restarts) is deferred — it needs durable state and is not required to close the memory/starvation finding |
+| **runbook** | — | The deploy runbook's Operator TODO is incomplete against reality (O5/X6 above; the `:authorized_orgs` replacement warning exists but the **arming step** does not) | **CLOSED — `2a03dc0` (P2-A)** | One pass over `priv/templates/deploy_runbook.eex` landed the missing Operator TODO items in order of consequence: the KMS adapter selection/refusal (O5/X6), the `auth_required?` prod arming step, and the `:aud_event_app_role` knob (O4). Covered by the P2-A verifier `_orch/verify/premerge-p2a-deploy-bootability-verdict.json` → **PASS** (runbook pass) |
+| **O8 / O9** | MED | `Driftwood.Reads.driver_roster/1` is unbounded with per-row vault decrypt, called per `handle_params` (the boundedness lint's glob excludes the vertical trees); DSAR export returns `{:ok, bundle}` even when the "who exported what" audit record failed — a non-repudiation hole on a compliance surface | **CLOSED — O8 `936a874` (P2-C) · O9 `82f229d` (P2-B)** | **O8:** `driver_roster/1` (and `load_board`/`settlements`/`get_owner`/`fetch`) are now `limit`/keyset-bounded via `Samen.Web.Reads`, and the boundedness lint's `source_files/0` was extended to the vertical trees so the glob no longer excludes them — asserted by `driftwood/test/reads_bounded_test.exs` + `samen_web/test/samen/web/reads_lint_test.exs`; verifier `_orch/verify/premerge-p2c-o8-clank-verdict.json` → **PASS**. **O9:** the DSAR audit write is now a hard precondition of returning the bundle (a failed "who exported what" record fails the export closed rather than returning `{:ok, bundle}`); verifier `_orch/verify/premerge-p2b-audit-reliability-verdict.json` → **PASS** |
 
 ### 4.3 · Phase 3 — erasure completeness (the unifying finding)
 
@@ -338,7 +364,7 @@ DEK envelope, therefore outside the reach of key destruction.
 |---|---|---|---|---|
 | **D1** | HIGH | Crypto-shred leaves `email_bidx`, a keyed HMAC of the subject's email under `sys:bidx` — a **reserved subject `Kms.shred/1` refuses to destroy by design** — so an erased subject's email stays confirmable forever via an equality oracle over the enumerable email space | **operator-decision → post-merge-phase-3** (needs design; this is an **ADR-035 §4.1 amendment**, not a code tweak) | Cannot be fixed by nulling the column (`Credential.email_bidx` is `allow_nil?: false` and carries the global one-account-per-email unique invariant). Two coherent shapes: (a) destroy the `Credential`/`Invitation` rows as part of subject erasure, or (b) **re-key the blind index per subject** so shred unlinks it — precisely the pattern `Samen.Vault.pseudonym/1` already uses correctly, which is why the pseudonym carve-out *is* reached by shred and the blind index is not |
 | **D3** | HIGH | `pii_declared: true` custom-bag values are plaintext PII in a `public?: true` `:map` column that `PiiResolution` never resolves — rendered **in the clear to operators** on CSV / JSON:API / UI-kit surfaces that claim per-plane masking, and no erasure path ever redacts them (`NonPii` redacts whole *columns*; there is no bag-key path) | **fix-before-merge IF reachable, else post-merge-phase-3** | **First action is a reachability check**, not a fix: grep whether any shipped resource declares a `pii_declared` bag field today. If yes it is an INV-1 gap on a live surface and rates merge-gating; if no it is a framework hazard awaiting its first adopter. Then: resolve bag keys through `PiiResolution` (or refuse `pii_declared` at the write chokepoint until routed), and add a `MaskingCase` three-proof for a bag field on at least one surface |
-| **O2** | HIGH | **PawChart has no `aud_chain` table at all** — every audit-chain append fails, and the failure is swallowed. A shipped vertical mounting the operator plane has no tamper-evident chain | **CLOSED this session — `98125e5` (G3)** | Added the pawchart `aud_chain` migration wrapping the shared `Samen.OperatorPlane.Migration.create_aud_chain/1` helper (byte-identical adoption to driftwood/demo — append-only trigger, `UNIQUE(org,seq)`, `REVOKE UPDATE/DELETE`), plus `aud_chain_persist_test.exs` asserting appends **land**, hash-link, and verify. Independent verifier `_orch/verify/premerge-g3-pawchart-audchain-verdict.json` → **PASS** (raw UPDATE/DELETE both rejected P0001). Sabotage 202. **O9/O10 swallow remain OPEN (Phase 2)** — the table now exists so they no longer hide a live gap |
+| **O2** | HIGH | **PawChart has no `aud_chain` table at all** — every audit-chain append fails, and the failure is swallowed. A shipped vertical mounting the operator plane has no tamper-evident chain | **CLOSED this session — `98125e5` (G3)** | Added the pawchart `aud_chain` migration wrapping the shared `Samen.OperatorPlane.Migration.create_aud_chain/1` helper (byte-identical adoption to driftwood/demo — append-only trigger, `UNIQUE(org,seq)`, `REVOKE UPDATE/DELETE`), plus `aud_chain_persist_test.exs` asserting appends **land**, hash-link, and verify. Independent verifier `_orch/verify/premerge-g3-pawchart-audchain-verdict.json` → **PASS** (raw UPDATE/DELETE both rejected P0001). Sabotage 202. **O9/O10 swallow now CLOSED (Phase 2):** O9 via `82f229d` (P2-B) — DSAR audit-write precondition (§4.2); O10 via `82f229d` (P2-B) — the reveal-ledger read error now surfaces an honest signal instead of degrading to `[]` (§4.5) |
 | **D4 / T130** | MED | No production path deletes a stored file blob; destroying/archiving/retention-sweeping a `File` row leaves raw, unencrypted bytes in storage indefinitely. Same fact that keeps T130 non-exploitable | **post-merge-phase-3, sequenced with T130** | Wire `Storage.delete/2` into the destroy/retention path **and** close T130's clone-aliasing in the same task, with a red-path proving a shredded subject's blob is gone and an aliased clone cannot resurrect it. **Never ship one without the other** |
 | **D5** | MED | The framework's own automated erasure driver drops `:org_id`, so a retention-swept subject's erasure event lands on the reserved `"__global__"` chain — which `TenantView.for_org/2` refuses by design. The tenant's own chain never records the erasure of its own data subject | **post-merge-phase-3** | Thread `org_id` from the just-read row into `shred_opts` in `retention.ex`. Reachability: no shipped host configures a `:shred` retention spec today, so this is a framework defect awaiting first adopter |
 | **D6** | MED | `Samen.Dsar.export_subject/2` applies **no org binding** and takes plane/grant as caller-asserted options with a plaintext default; the moduledoc's "NO cross-tenant leakage" claim is about *planes*, not *orgs* | **post-merge-phase-3** | Require an org predicate on both queries and check `grant?` against `Reveal.grant_checker/0` rather than trusting the caller. Reachability: no host wires DSAR to a route today — framework API hazard, not a live gap |
@@ -383,8 +409,11 @@ over-denying** — the verifier confirmed no cross-tenant path survives on an ar
   `Identity.ApiKey`'s `create: :*` makes `plane`/`minter_role` attacker-supplied inputs (not
   externally reachable today), which `AI.Analytics.platform_actor?/1` would compound if an
   API/MCP analytics tool is ever added.
-- **O10 / O11 / O12 / D8** (accepted with note): reveal-ledger read error degrades to `[]`
-  (indistinguishable from "no reveals ever occurred"); the tamper telemetry emits `org_id`
+- **O10 / O11 / O12 / D8** (accepted with note): **O10 — CLOSED (`82f229d`, P2-B):** the
+  reveal-ledger read error no longer degrades to `[]` (indistinguishable from "no reveals ever
+  occurred") — it now surfaces an honest read-error signal; verifier
+  `_orch/verify/premerge-p2b-audit-reliability-verdict.json` → PASS. The rest of this note stands:
+  the tamper telemetry emits `org_id`
   metadata, a `forbidden_tag_keys/0` value the label-lint cannot see because it scans metric
   *definitions*, not `:telemetry.execute` metadata; `QueryBudget.check/2` fails open **as
   designed**; CDC deliberately mirrors `vt_*` tokens into the analytics tier (inert post-shred) —
@@ -410,8 +439,14 @@ decision.
 is precisely how the next B-SEC-class finding ships behind a green gate. Fix-before-merge if the
 merge is not urgent; Phase 1 immediately after if it is.
 
-**Everything else in §4 is honestly post-merge.** None of it is a live cross-tenant path on an armed
-host, and saying otherwise to force urgency would be its own kind of overclaim.
+**Phase 2 (§4.2 deploy/runtime hardening) is now COMPLETE** — all rows CLOSED across P2-A `2a03dc0`,
+P2-B `82f229d`, and P2-C `936a874` (each independently verified; harness 203 → 212). It was never a
+§5 merge-blocker; it is recorded here as closed so the queue reflects reality.
+
+**Everything else in §4 is honestly post-merge** — the Phase 1 verifier floors (A2/X9, A3), Phase 3
+erasure completeness (D1/D3/D4-T130/D5/D6), and the Phase 4 authz-hardening residuals
+(S13/S6/S14/S15/S16/S7). None of it is a live cross-tenant path on an armed host, and saying
+otherwise to force urgency would be its own kind of overclaim.
 
 ---
 

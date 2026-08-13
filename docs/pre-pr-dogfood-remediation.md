@@ -162,7 +162,8 @@ way:
 
 **Sabotage harness total: 168 → 192** across the pre-PR batches (168 → 186) and the post-PR
 cleanup (186 → 189 for H1, 189 → 190 for H2, 190 → 191 for H2b, 191 → 192 for H3; H4/H5 added
-none). §6's pre-merge burn-down took it to **198**; §7's full-harden burn-down took it to **203**.
+none). §6's pre-merge burn-down took it to **198**; §7's full-harden burn-down took it to **203**; §8's
+Phase-2 deploy/runtime hardening took it to **212**.
 
 ## 6 · Pre-merge burn-down (2026-08-11)
 
@@ -261,12 +262,35 @@ independently verified, sabotage harness **198 → 203**:
   is constrained to the surfaces actually mounted (no dead links / `NoRouteError` on first click),
   with a durable `gen_app_flagship_probe.exs` guard. Sabotage 203.
 
-**Remaining backlog** lives in **ADR-045 §4** (now Accepted): Phase 2 deploy hardening (O4/O5/X6/O3,
-the O9/O10 swallow, the runbook arming/KMS prose), Phase 3 erasure completeness (D1/D3/D4-T130/D5/D6),
-the A2/X9 + A3 verifier floors, S13/S6/S14/S15/S16/S7 authz hardening, and the note-only items — all
-honestly deferred as post-merge, none a live cross-tenant path on an armed host.
+**Remaining backlog** lives in **ADR-045 §4** (now Accepted). Since this section was written, **Phase 2
+(§4.2 deploy/runtime hardening) has been completed** — see §8 below. What remains post-merge: Phase 3
+erasure completeness (D1/D3/D4-T130/D5/D6), the A2/X9 + A3 verifier floors, S13/S6/S14/S15/S16/S7 authz
+hardening, and the note-only items — all honestly deferred as post-merge, none a live cross-tenant path
+on an armed host.
 
-## 8 · Read next
+## 8 · Phase 2 deploy/runtime hardening — COMPLETE (2026-08-12)
+
+ADR-045 §4.2 (Phase 2) is now closed across three independently verified + banked batches. Phase 2 was
+never a §5 merge-blocker; it is the first slice of the post-decision backlog burned down. All rows in
+ADR-045 §4.2 are marked CLOSED with these SHAs + verdicts.
+
+| Batch | Findings closed | Commit | Verdict file | Result |
+|---|---|---|---|---|
+| P2-A — DEPLOY BOOTABILITY | O5/X6 (fail-honest KMS boot refusal), §2.1 (`prod.exs` generation for driftwood/pawchart/generated sets), O4 (`aud_event` app-role derivation), runbook | `2a03dc0` | `premerge-p2a-deploy-bootability-verdict.json` | PASS |
+| P2-B — AUDIT RELIABILITY | O3 (bounded audit-verify + own `:audit_verify` queue), O9 (DSAR audit-write precondition), O10 (reveal-ledger read-error signal) | `82f229d` | `premerge-p2b-audit-reliability-verdict.json` | PASS |
+| P2-C — O8 + CLANK FOLD | O8 (`driver_roster` + `load_board`/`settlements`/`get_owner`/`fetch` bounded; boundedness lint extended to the vertical trees) + the clank fold (`Samen.OperatorPlane.Migration.app_role!/2` extracted, all 6 vertical `aud_event`/`aud_chain` migrations repointed — no literal `"clank"` in migration source) | `936a874` | `premerge-p2c-o8-clank-verdict.json` | PASS |
+
+**Honest residuals** (recorded, not silently dropped): P2-B O3's in-run cursor resolves the
+memory/starvation HIGH but a **cross-run persisted checkpoint** is deferred (needs durable state); P2-C
+leaves the generated `m_aud_event.eex` template's intentional self-contained `app_role` copy — the
+shared helper is the single source of truth for **in-repo** migrations only.
+
+**Sabotage harness: 203 → 212** across the three batches. Operational note: at 212 patches the full
+`./scripts/sabotage.sh` exceeds the 600s single tool-call ceiling and must be run split/chunked for
+full-harness certification (a range/chunk mode is a filed infra follow-up in ADR-045 §4.2) — a tooling
+scaling note, not a defect.
+
+## 9 · Read next
 
 - `_orch/dogfood/pre-pr/triage.md` (gitignored) — the full per-finding adjudication, root-cause
   clusters, and the pawchart-posture recommendation the operator decided against.
