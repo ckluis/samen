@@ -263,10 +263,12 @@ independently verified, sabotage harness **198 → 203**:
   with a durable `gen_app_flagship_probe.exs` guard. Sabotage 203.
 
 **Remaining backlog** lives in **ADR-045 §4** (now Accepted). Since this section was written, **Phase 2
-(§4.2 deploy/runtime hardening) has been completed** — see §8 below. What remains post-merge: Phase 3
-erasure completeness (D1/D3/D4-T130/D5/D6), the A2/X9 + A3 verifier floors, S13/S6/S14/S15/S16/S7 authz
-hardening, and the note-only items — all honestly deferred as post-merge, none a live cross-tenant path
-on an armed host.
+(§4.2 deploy/runtime hardening) has been completed** — see §8 — and **Phase 3 (§4.3 erasure
+completeness, D1/D3/D4-T130/D5/D6) has been completed** — see §9 (ADR-046 Accepted; E1–E7 banked). What
+remains post-merge: the A2/X9 + A3 verifier floors, S13/S6/S14/S15/S16/S7 authz hardening, and the
+note-only items — all honestly deferred as post-merge, none a live cross-tenant path on an armed host —
+plus **one new open operator decision** surfaced by the Phase-3 E7 gate (about-a-subject content-bearing
+blobs; ADR-046 §7#5, needs-operator-input).
 
 ## 8 · Phase 2 deploy/runtime hardening — COMPLETE (2026-08-12)
 
@@ -290,7 +292,56 @@ shared helper is the single source of truth for **in-repo** migrations only.
 full-harness certification (a range/chunk mode is a filed infra follow-up in ADR-045 §4.2) — a tooling
 scaling note, not a defect.
 
-## 9 · Read next
+## 9 · Phase 3 erasure completeness — COMPLETE (2026-08-13)
+
+ADR-045 §4.3 (Phase 3), scoped and sequenced by **[ADR-046 — erasure completeness](adr/ADR-046-erasure-completeness.md)**
+(**Accepted 2026-08-13**), is now closed across seven independently verified + banked batches.
+`Samen.Erasure`'s moduledoc named **two** carve-outs key-shred does not reach; the LUMINARY panel
+found **at least five** — each a plaintext-or-linkable value living *outside* the per-subject-DEK
+envelope. All seven batches shipped, gate GREEN before/after each, sabotage harness **212 → 227**.
+
+| Batch | Findings closed | Commit | Verdict file(s) | Result |
+|---|---|---|---|---|
+| E1 + E2 | D2 (`SameOrgFk` org-less arm passes = docs), D7 (`Csv.compact(%Masked{})` nested-mask), D5 (retention shred rides the tenant chain, not `__global__`) | `71ba98b` | `premerge-e1e2-d2-d7-d5-verdict.json` | PASS |
+| E3 | D6 (DSAR required org predicate on both walks + real `Reveal.grant_checker/0` gating, fail-closed) | `e8aa2ea` | `premerge-e3-dsar-org-grant-verdict.json` | PASS |
+| E4 | D4 + T130 (governed fail-honest ref-counted `Storage.delete` chokepoint; erasure reaches file bytes; clone aliasing safe both directions) | `2f20b2d` | `premerge-e4-storage-delete-refcount-verdict.json` | PASS |
+| E5 | D1 (`email_bidx` tombstone-to-random-sentinel on principal-account erasure — kills the recomputable-email oracle) | `535620a` | `premerge-e5-blind-index-tombstone-verdict.json` | PASS |
+| E6 | D3 (`pii_declared` custom-bag mask-by-omission + per-key erasure + `define`-guard, fail-closed) | `740a8de` | `premerge-e6-pii-declared-bag-verdict.json` + `premerge-e6-failclosed-delta-verdict.json` | PASS |
+| E7 | completeness verifier (`mix samen.verify.erasure_completeness`) + arm activation — `default_specs` wired into hosts + gen templates, so `gen.app` is **erasure-complete by construction** | `97dabf3` | `premerge-e7-completeness-verifier-verdict.json` | PASS |
+
+**Operator decisions taken** (ADR-046 §7 #1–#4, all as recommended): **D1** = tombstone
+`email_bidx` to a random unique sentinel, in place, **only on principal-account erasure** (never a
+per-org data-subject shred touching a shared login credential); **D4/T130** = build the fail-honest
+`Storage.delete` chokepoint **now**, with **last-reference ref-counting**, D4 and T130 in one batch;
+**D3** = mask-by-omission via the resolver reading the org's `tnt_field` catalog.
+
+**Named residuals** (recorded, not silently dropped):
+
+- **E7 NAMED RESIDUAL → NEW operator decision #5 (OPEN, needs-operator-input).** Subject-detection
+  keys on `uploaded_by_id` (a blob *uploaded BY* a subject), not on domain FKs (a blob *ABOUT* a
+  subject). **CRM Attachment carries a nullable `person_id` FK**, so a blob about a person (e.g. a
+  scanned ID / signed contract) is **not** reached by that person's per-subject erasure; **CMS
+  Media is genuinely org-owned**. The E7 completeness gate **NAMES both** as a visible residual
+  line (not a silent pass), and `delete_file` has **no destroy/retention caller** for either
+  surface today — so **nothing regressed**. The decision the operator must rule on: are
+  about-a-subject content-bearing blobs in scope for right-to-be-forgotten erasure, or is the org's
+  retention interest legitimate? ADR-046 §7#5 recommends extending subject-detection to domain
+  subject-FKs for content-bearing blobs, gated by a retention-hold exception (vs. keeping org-asset
+  scope) — flagged **needs-operator-input**.
+- **INFO residual** — the custom-OBJECT (`tnt$obj$…`) `pii_declared` uncovered rung: E6 closed the
+  bag rung for custom *fields* on catalog resources; the analogous custom-*object* record-bag rung
+  is a known-uncovered discovery class, latent (no shipped surface), carried so a future adopter
+  cannot slip it silently.
+- **E4 residuals** — the retention **`:delete` generic-purge** blob-deletion caller is **not yet
+  wired** through the new chokepoint (the delete capability exists and is fail-honest; the generic
+  purge caller is a follow-on); and **blob encryption-at-rest** stays explicitly out of scope
+  (erasure reaches blobs by *deletion*, not by bringing bytes into the DEK envelope).
+
+**Sabotage harness: 212 → 227** across the seven batches. At 227 patches the full
+`./scripts/sabotage.sh` exceeds the 600s single tool-call ceiling — certified backgrounded / in
+additive-filter chunks (`--app`/`--range`/`--touching`/`--changed`), per the §8 scaling note.
+
+## 10 · Read next
 
 - `_orch/dogfood/pre-pr/triage.md` (gitignored) — the full per-finding adjudication, root-cause
   clusters, and the pawchart-posture recommendation the operator decided against.
@@ -300,6 +351,9 @@ scaling note, not a defect.
   dogfood postdates; same "named, bounded residual, never silently dropped" discipline.
 - [adr/ADR-045-premerge-review-dispositions.md](adr/ADR-045-premerge-review-dispositions.md) —
   the pre-merge review's decision record: the V-F1 merge gate and the four-phase backlog.
+- [adr/ADR-046-erasure-completeness.md](adr/ADR-046-erasure-completeness.md) — the Phase-3
+  erasure-completeness design + build close-out (E1–E7); §7 carries the operator decisions taken
+  and the one open about-a-subject-blob ruling (§7#5, needs-operator-input).
 - `_orch/luminary-premerge/` + `_orch/verify/premerge-*.json` (gitignored) — the five panel
   reports, the synthesis/triage, and the three pre-merge verifier verdicts every claim in §6 is
   traceable to.

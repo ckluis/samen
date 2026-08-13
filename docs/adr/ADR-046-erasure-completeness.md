@@ -1,7 +1,15 @@
 # ADR-046 — Erasure completeness: making `Samen.Erasure`'s carve-out list complete, and checkable-by-construction
 
-- **Status:** **Proposed**
+- **Status:** **Accepted** (2026-08-13)
 - **Date:** 2026-08-13
+- **Build status:** **COMPLETE.** All seven batches §5 sequences (E1–E7) shipped, each
+  independently verified + banked; the completeness verifier §6 is **shipped (E7)**. Sabotage
+  harness **212 → 227**. Per-item close-out (SHAs + verdicts) is recorded inline in §4 and §5;
+  the operator decisions §7 posed were taken as recommended and are marked TAKEN below. One
+  **NAMED RESIDUAL surfaced by E7's completeness gate** (CRM Attachment `person_id` — a blob
+  *about* a data subject vs. *uploaded by* one) is carried as an **open operator decision** in
+  §7 (flagged **needs-operator-input**); it is a visible, gate-named boundary, not a silent
+  pass, and nothing regresses today.
 - **Task:** Scope + design the Phase-3 "erasure completeness" cluster from ADR-045 §4.3
   (D1 / D3 / D4-T130 / D5 / D6 / D2 / D7) plus the unifying completeness verifier, and
   sequence it into BATON fix→verify batches. **This ADR authors no product code.** It is
@@ -9,8 +17,12 @@
   test, no sabotage, no abbrev-registry row, no `schema.dict.json`. The build lands in the
   batches §5 sequences, each with its own gate.
 - **Deciders:** the operator for the two genuine tradeoffs in §7 (D1's crypto approach, which
-  amends ADR-035 §4.1; and building `Storage.delete` now, which makes T130 live). The rest is
-  recorded design a BATON builder can execute without re-deriving.
+  amends ADR-035 §4.1; and building `Storage.delete` now, which makes T130 live) — **both TAKEN
+  as recommended** (D1 = tombstone-to-random-sentinel on principal-account erasure; D4/T130 =
+  build the fail-honest `Storage.delete` chokepoint now with last-reference ref-counting, in one
+  batch). A **third** operator decision — the scope of *about-a-subject* content-bearing blobs —
+  was **surfaced by the E7 gate** and is carried **open** in §7 (needs-operator-input). The rest
+  is recorded design a BATON builder executed without re-deriving.
 - **Consumes (binding inputs):**
   - **ADR-045 §4.3** — the Phase-3 dispositions this ADR designs. IDs (D1…D7, T130) travel
     from the LUMINARY panel-3 report (`_orch/luminary-premerge/panel-3-data-privacy.md`,
@@ -137,6 +149,15 @@ unerasable. It does **not** rate fix-before-merge, because nothing ships in that
 
 ### 4.1 · D1 (HIGH) — recomputable `email_bidx` after erasure · **a genuine crypto decision → §7**
 
+> **CLOSED — E5 (`535620a`), verdict `premerge-e5-blind-index-tombstone-verdict.json` → PASS.**
+> Operator decision §7#1/1a/1b **TAKEN as recommended**: option **(c)** tombstone `email_bidx`
+> to a fresh 32-byte random unique sentinel, **in place** (row preserved for FK/audit), fired
+> **only on principal-account erasure** (subject owns the Credential/Invitation index row), never
+> on a per-org data-subject shred. Shipped as a derived-linkable erasure arm (the blind-index
+> analogue of `NonPii`); erasure red-path proves the erased principal's email is no longer
+> confirmable via `compute/1`, with a non-erased-principal positive control (anti-vacuity). No
+> schema change was needed (sentinel fits the existing `allow_nil?: false` + unique column).
+
 **The purpose the fix must preserve.** `email_bidx` is an *equality-only, pre-authentication* lookup
 index: sign-in, password reset, and invite-matching find a Credential/Invitation **by email before any
 subject or org context exists**, and it carries the global "one account per email" uniqueness
@@ -201,6 +222,15 @@ column or index is added, the batch regenerates `schema.dict` via the sanctioned
 
 ### 4.2 · D3 — `pii_declared` bag PII · framework-hardening (latent, per §2)
 
+> **CLOSED — E6 (`740a8de`), verdicts `premerge-e6-pii-declared-bag-verdict.json` +
+> `premerge-e6-failclosed-delta-verdict.json` → PASS.** Operator decision §7#4 **TAKEN as
+> recommended**: **mask-by-omission** via the resolver reading the org's `tnt_field` catalog for
+> `tnt_pii_declared: true` keys (not the blunt `define`-refusal fallback). Shipped **fail-closed**:
+> a `pii_declared` bag key masks (`••••` / omitted) on any plane without a grant; a per-key erasure
+> arm nulls the declared keys in the `custom` map on shred of the owning subject, leaving non-PII
+> keys intact; a `define`-time **guard** ensures a future `pii_declared` field cannot ship both
+> unmasked and unerasable. MaskingCase three-proof on ≥1 surface + the fail-closed delta both green.
+
 Two open ends of the `pii_declared` capability, plus a guard:
 
 1. **Mask on the operator plane (mask-by-omission).** Route `pii_declared` bag keys through the
@@ -223,6 +253,17 @@ Two open ends of the `pii_declared` capability, plus a guard:
    arm — so a future adopter's `pii_declared` field cannot ship both unmasked and unerasable.
 
 ### 4.3 · D4 / T130 (MED) — no file-blob deletion; clone aliases `storage_key` · **must ship together**
+
+> **CLOSED — E4 (`2f20b2d`), verdict `premerge-e4-storage-delete-refcount-verdict.json` → PASS.**
+> Operator decisions §7#2 and §7#3 **TAKEN as recommended**: build the governed fail-honest
+> `Storage.delete` chokepoint **now**, with shape **(i) last-reference / ref-counted delete**, D4
+> and T130 **in one batch**. Shipped: a single governed deletion entry point (fail-honest per
+> ADR-026 — unconfigured adapter returns `{:error, :not_configured}`, never a faked `:ok`;
+> chokepoint-guarded, fail-closed, token-only audit event); a blob ref-count so the blob is
+> destroyed only when the *last* File row referencing that `storage_key` is shredded/destroyed;
+> red-path both directions (a shredded subject's single-reference blob is gone from storage; an
+> aliasing clone cannot be resurrected nor have its bytes destroyed by the other's deletion) plus
+> a single-reference positive control. Erasure now reaches file bytes (T130 live and safe).
 
 This is a **new capability** (a delete path that does not exist), so its surface is scoped carefully.
 
@@ -261,6 +302,12 @@ at-rest blob encryption; it makes deletion reach them. Named as a residual, not 
 
 ### 4.4 · D5 (MED) — retention shred lands on `__global__`
 
+> **CLOSED — E2, shipped in batch E1+E2 (`71ba98b`), verdict
+> `premerge-e1e2-d2-d7-d5-verdict.json` → PASS.** `org_id` is threaded from the just-read row into
+> the `:shred` arm's `shred_opts` (via a `Retention.Spec` `org_field`, config not DB), so the
+> erasure event rides that org's T4.3 chain (ADR-002) instead of the `__global__` fallback;
+> red-path proves the retention shred lands on the tenant chain, not `__global__`. No schema touch.
+
 Thread `org_id` from the just-read row into `shred_opts` in `retention.ex`'s `:shred` arm
 (`retention.ex:237-259`): resolve the row's org (the retention spec knows the resource; add an
 `org_field` to `Retention.Spec`, defaulting to `:org_id`) and pass `org_id:` to `Erasure.shred/2` so
@@ -270,6 +317,14 @@ framework defect ahead of the first adopter. Schema: `Spec` is a plain struct (n
 touch** unless an `org_field` needs persistence (it does not; it is config).
 
 ### 4.5 · D6 (MED) — DSAR no org binding / plaintext default
+
+> **CLOSED — E3 (`e8aa2ea`), verdict `premerge-e3-dsar-org-grant-verdict.json` → PASS.** Both
+> §4.5 changes shipped: (1) a **required `:org_id` predicate** on both `walk_vault/3` and
+> `walk_audit/2`, so an export cannot gather another org's rows for a caller-supplied `subject_id`
+> (the §4.5 org-tagging unknown resolved during the batch); (2) the operator plane is gated on a
+> **real `Reveal.grant_checker/0`** rather than a caller-asserted `:grant?` boolean, default
+> fail-closed (masked). The moduledoc's "NO cross-tenant leakage" claim now holds for orgs, not
+> only planes.
 
 Two changes to `Dsar.export_subject/2`:
 1. **Require an org predicate** on both `walk_vault/3` and `walk_audit/2` (`dsar.ex:115,143`): add
@@ -286,6 +341,14 @@ Reachability: no host wires DSAR to a route — framework API hazard. If (1) req
 with org, that batch regenerates `schema.dict` + FULL gate; otherwise docs/logic only.
 
 ### 4.6 · D2 / D7 — the two one-liners
+
+> **CLOSED — E1, shipped in batch E1+E2 (`71ba98b`), verdict
+> `premerge-e1e2-d2-d7-d5-verdict.json` → PASS.** **D2**: `SameOrgFk`'s org-less-target arm now
+> returns the **pass** result (code = the documented intent = the moduledoc), with a test asserting
+> a write whose FK targets an org-less row **succeeds** and a positive control that a genuine
+> cross-org mismatch still refuses. **D7**: the `defp compact(%Masked{} = m), do: m` clause was
+> added before the generic struct clause, plus a MaskingCase proof exercising a **container-nested**
+> masked value (no `vt_*` token leaks through `Csv.compact/1`).
 
 - **D2 (MED).** `Samen.Policy.SameOrgFk`'s org-less-target arm returns `{:error, :target_has_no_org_id}`
   (`same_org_fk.ex:170-176`), which `validate_relationship/3` routes into `add_error` — refusing the
@@ -321,6 +384,26 @@ FULL root gate. **Masking** = ships `MaskingCase` three-proofs + is checked by t
 | **E6** | **D3** — `pii_declared` masking + bag-key erasure | mask-by-omission for `tnt_pii_declared` bag keys via the resolver reading `tnt_field`; per-key erasure arm; MaskingCase three-proof on ≥1 surface | no (reads `tnt_field`, no new column) | **yes** | Latent (framework-hardening). Can run in parallel with E4/E5 in principle, but land after E5 so the erasure-arm registry pattern is settled. |
 | **E7** | **completeness verifier** (the unifying fix) | new gate enumerating out-of-envelope residues and asserting each has an erasure arm; non-empty-discovery floor; wired into `ci.sh` + both generator ci templates; sabotage | no | no | **Lands LAST** — it asserts the arms E1–E6 built. A registry/marker touch may be needed so discovery is exhaustive; that is code, not schema. |
 
+**Close-out — all seven batches CLOSED, each independently verified + banked (sabotage harness 212 → 227):**
+
+| # | Batch | Status | Commit | Verdict(s) |
+|---|---|---|---|---|
+| **E1** | D2 + D7 one-liners | **CLOSED** | `71ba98b` (with E2) | `premerge-e1e2-d2-d7-d5-verdict.json` → PASS |
+| **E2** | D5 retention `org_id` binding | **CLOSED** | `71ba98b` (with E1) | `premerge-e1e2-d2-d7-d5-verdict.json` → PASS |
+| **E3** | D6 DSAR org-binding + grant check | **CLOSED** | `e8aa2ea` | `premerge-e3-dsar-org-grant-verdict.json` → PASS |
+| **E4** | D4 + T130 `Storage.delete` + ref-count | **CLOSED** | `2f20b2d` | `premerge-e4-storage-delete-refcount-verdict.json` → PASS |
+| **E5** | D1 `email_bidx` tombstone arm | **CLOSED** | `535620a` | `premerge-e5-blind-index-tombstone-verdict.json` → PASS |
+| **E6** | D3 `pii_declared` masking + bag-key erasure | **CLOSED** | `740a8de` | `premerge-e6-pii-declared-bag-verdict.json` + `premerge-e6-failclosed-delta-verdict.json` → PASS |
+| **E7** | completeness verifier + arm activation | **CLOSED** | `97dabf3` | `premerge-e7-completeness-verifier-verdict.json` → PASS |
+
+E3's schema-`maybe` and E5's schema-`likely-no` unknowns both resolved to **no schema change**
+(no `schema.dict` regeneration was required in any batch). E7 wired
+`mix samen.verify.erasure_completeness` into `ci.sh` + both generator ci templates and activated
+the arms by construction (`default_specs` wired into hosts + gen templates, so `gen.app` is
+erasure-complete by construction). The E7 gate also **named a residual it cannot close on its own**
+— the about-a-subject blob question (§7#5, open) — surfacing it as a visible gate line rather than a
+silent pass.
+
 Rationale for order: quick correctness wins first (E1–E2), then the mechanical framework-API fixes
 (E3), then the new-capability batch that unblocks T130 (E4), then the crypto-decision batch (E5), then
 the hardening + proof (E6), and finally the verifier (E7) that makes the whole class checkable — it
@@ -330,6 +413,19 @@ decision and may be reordered after E6 if the decision is slow; nothing else dep
 ---
 
 ## 6 · The erasure-completeness verifier (the durable framework fix)
+
+> **SHIPPED (E7, `97dabf3`) — `mix samen.verify.erasure_completeness`, verdict
+> `premerge-e7-completeness-verifier-verdict.json` → PASS.** The gate discovers every
+> out-of-envelope residue (derived-linkable / blind-index columns, `pii_declared`-capable bag
+> columns, `storage_key` columns, plus the already-covered `non_pii!` columns + DEK-keyed
+> pseudonyms) from the live schema + arm registry — **not** from the grandfathering
+> `schema.dict.json` baseline — and asserts a registered erasure arm (redact / tombstone / delete)
+> reaches each, failing closed on empty discovery. Wired into `ci.sh` + both generator ci
+> templates; `default_specs` are wired into the hosts and gen templates so a fresh `mix
+> samen.gen.app` is **erasure-complete by construction**. A sabotage removing any one erasure arm
+> flips the named assertion (non-vacuity proven). **One residue the gate NAMES but does not
+> auto-erase** — CRM Attachment's `person_id` (a blob *about* a subject, not *uploaded by* one) —
+> is a visible gate line carried to §7#5 as an open operator decision, not a silent pass.
 
 **One-paragraph design.** A new structural gate (`mix samen.verify.erasure_completeness`, the
 `oban_queues`/`SameOrgFk` shape) that **discovers** every plaintext-or-linkable value living *outside
@@ -358,14 +454,37 @@ It discovers from the live schema + the arm registry, so "pre-existing" confers 
 
 ## 7 · Decisions for the operator
 
-| # | Decision | Options | Recommendation |
-|---|---|---|---|
-| **1** | **D1 — how to make an erased subject's email un-confirmable** (amends **ADR-035 §4.1**) | (a) rotate/shred shared `k_bidx` · (b) re-key per subject on DEK · (c) **tombstone `email_bidx` to a random unique sentinel on principal-account erasure** · (d) per-subject shreddable derived key | **(c).** Only option that kills the equality oracle for the erased subject while preserving pre-auth lookup + global dedupe, with **no migration**. (a) is not per-subject; (b)/(d) break pre-auth lookup (circular — can't key on a subject you don't yet know) and dedupe. |
-| **1a** | **D1 sub-decision — tombstone vs. destroy the Credential/Invitation row** | tombstone `email_bidx` in place · destroy the row | **Tombstone.** Kills the oracle and the login while preserving the row for FK/audit reference. |
-| **1b** | **D1 sub-decision — what triggers the blind-index arm** (Credential is **org-less, one human N orgs**) | fire on any subject shred · fire **only** on principal-account erasure (subject == credential/invitation owner) | **Principal-account only.** A per-tenant data-subject shred must NOT tombstone a shared login credential — that would break the human's access to their *other* orgs. Load-bearing; belongs in the ADR-035 amendment. |
-| **2** | **D4 — build `Storage.delete` now, given it makes T130 live** | build now (delete + ref-count in one batch, E4) · defer (T130 stays blocked-safe, blobs stay unerasable) | **Build now, together.** Erasure genuinely does not reach blobs today; the fix and T130's ref-count re-tokenization **must ship in one batch**. Deferring keeps a real (if latent) erasure gap open. |
-| **3** | **D4 ref-count shape** | (i) last-reference delete / ref-count · (ii) re-tokenize clones to independent blobs at clone time | **(i).** Preserves clone's documented shallow re-link contract; localizes the change to the delete path. |
-| **4** | **D3 masking approach** | mask-by-omission via resolver reading `tnt_field` · refuse `pii_declared: true` at the `define` chokepoint until routed | **Mask-by-omission.** Keeps the capability usable; refusal is the fallback if masking proves too invasive for one batch. Latent either way (no shipped `pii_declared` field). |
+Decisions #1–#4 were **posed at design time and TAKEN as recommended** during the build (§4/§5
+record the closing SHAs). Decision **#5 is NEW — surfaced by the E7 completeness gate at build
+time, and is carried OPEN (needs-operator-input).**
+
+| # | Decision | Options | Recommendation | Status |
+|---|---|---|---|---|
+| **1** | **D1 — how to make an erased subject's email un-confirmable** (amends **ADR-035 §4.1**) | (a) rotate/shred shared `k_bidx` · (b) re-key per subject on DEK · (c) **tombstone `email_bidx` to a random unique sentinel on principal-account erasure** · (d) per-subject shreddable derived key | **(c).** Only option that kills the equality oracle for the erased subject while preserving pre-auth lookup + global dedupe, with **no migration**. (a) is not per-subject; (b)/(d) break pre-auth lookup (circular — can't key on a subject you don't yet know) and dedupe. | **TAKEN — (c) shipped E5 (`535620a`)** |
+| **1a** | **D1 sub-decision — tombstone vs. destroy the Credential/Invitation row** | tombstone `email_bidx` in place · destroy the row | **Tombstone.** Kills the oracle and the login while preserving the row for FK/audit reference. | **TAKEN — tombstone (E5)** |
+| **1b** | **D1 sub-decision — what triggers the blind-index arm** (Credential is **org-less, one human N orgs**) | fire on any subject shred · fire **only** on principal-account erasure (subject == credential/invitation owner) | **Principal-account only.** A per-tenant data-subject shred must NOT tombstone a shared login credential — that would break the human's access to their *other* orgs. Load-bearing; belongs in the ADR-035 amendment. | **TAKEN — principal-account only (E5)** |
+| **2** | **D4 — build `Storage.delete` now, given it makes T130 live** | build now (delete + ref-count in one batch, E4) · defer (T130 stays blocked-safe, blobs stay unerasable) | **Build now, together.** Erasure genuinely does not reach blobs today; the fix and T130's ref-count re-tokenization **must ship in one batch**. Deferring keeps a real (if latent) erasure gap open. | **TAKEN — built E4 (`2f20b2d`)** |
+| **3** | **D4 ref-count shape** | (i) last-reference delete / ref-count · (ii) re-tokenize clones to independent blobs at clone time | **(i).** Preserves clone's documented shallow re-link contract; localizes the change to the delete path. | **TAKEN — (i) last-reference (E4)** |
+| **4** | **D3 masking approach** | mask-by-omission via resolver reading `tnt_field` · refuse `pii_declared: true` at the `define` chokepoint until routed | **Mask-by-omission.** Keeps the capability usable; refusal is the fallback if masking proves too invasive for one batch. Latent either way (no shipped `pii_declared` field). | **TAKEN — mask-by-omission (E6, `740a8de`)** |
+| **5** | **NEW — are *about-a-subject* content-bearing blobs in scope for that subject's per-subject erasure?** (surfaced by the E7 gate) | (a) **extend subject-detection to domain subject-FKs** for content-bearing blobs (e.g. an Attachment holding a person's scanned ID/contract), gated by a **retention-hold exception** · (b) **keep the org-asset scope**, document the boundary | **(a), scoped — but decide.** Recommend extending detection to *content-bearing* blobs whose domain FK names a data subject (CRM Attachment `person_id`), with a retention-hold carve-out for documents the org has a legitimate legal-retention interest in — a person's right-to-be-forgotten under GDPR reaches a scanned ID/contract *about* them, and today it does not. But it is a genuine policy call (retention interest vs. erasure right), so it is **flagged needs-operator-input**, not silently defaulted. | **OPEN — needs-operator-input** |
+
+**Decision #5 — the E7 NAMED RESIDUAL, in full (honest framing).** The framework's
+subject-detection keys erasure on **`uploaded_by_id`** — "a blob *uploaded BY* a data subject" —
+not on domain FKs — "a blob *ABOUT* a data subject." Consequence: **CRM Attachment carries a
+nullable `person_id` FK**, so a blob that is *about* a person (their scanned ID, a signed
+contract) is **NOT reached by that person's per-subject erasure**, because the framework model
+does not treat a domain subject-FK as ownership. **CMS Media is genuinely org-owned** (no
+subject FK) and is correctly out of per-subject erasure scope. The E7 completeness gate **NAMES
+both** as a visible residual line (not a silent pass), and — critically — **`delete_file` has no
+destroy/retention caller wired for either surface today**, so **nothing regressed**: no live path
+deletes these blobs on a subject shred, and none silently claims to. The open question the
+operator must rule on: **is an about-a-subject content-bearing blob (an attachment holding a
+person's scanned ID / contract) in scope for that person's right-to-be-forgotten erasure, or is
+the org's retention interest in such a document legitimate?** Recommendation: **(a)** extend
+subject-detection to domain subject-FKs for *content-bearing* blobs, gated by a retention-hold
+exception, so right-to-be-forgotten reaches documents *about* the subject; keep CMS Media's
+org-asset scope as-is. **Flagged needs-operator-input** — it is a retention-vs-erasure policy
+call, not a mechanical fix, and the current state is safe (named boundary, no regression).
 
 ---
 
@@ -378,17 +497,40 @@ option and its two load-bearing sub-decisions (tombstone; principal-account scop
 buried. The D3 reachability question is answered with evidence (latent), so the operator is not asked to
 merge-gate a non-live leak. D4/T130's "ship together" constraint is restated as a hard batch boundary.
 
-**Negative / accepted.** This ADR fixes nothing — it is a design + queue. Two batches carry genuine
-unknowns the builder must resolve at batch start, named here rather than papered over: **E3/D6** — whether
-`pii_vault` is org-taggable or the org must be caller-asserted (decides if D6 is a schema batch);
-**E5/D1** — whether the sentinel-tombstone truly needs no schema change (expected none; confirm). E1's D7
-clause and E2/D5 are latent (no live trigger), so their value is future-adopter safety, not a live-leak
-close — stated plainly so urgency is not overclaimed. Blob **encryption-at-rest** is explicitly out of
-scope; D4 makes erasure reach blobs by *deletion*, not by bringing them into the DEK envelope — a named
-residual. And E5 depends on a human decision (§7), which is a real scheduling cost.
+**Negative / accepted.** This ADR fixes nothing itself — it was a design + queue; the **build**
+landed in E1–E7 (§5 close-out). The two named batch-start unknowns both resolved cleanly at build
+time: **E3/D6** — `pii_vault` org-tagging was resolvable, so D6 was **not** a schema batch;
+**E5/D1** — the sentinel-tombstone needed **no** schema change (as expected). E1's D7 clause and
+E2/D5 were latent (no live trigger), so their value is future-adopter safety, not a live-leak
+close — stated plainly so urgency is not overclaimed.
 
-**Neutral.** Docs-only. No source, test, sabotage, registry, or `schema.dict.json` change in this ADR.
-The ADR index (`docs/adr/README.md`) gains one row and its "46 ADRs total" line advances to 47 in the
+**Named residuals carried forward (not silently dropped).**
+
+1. **E7 NAMED RESIDUAL — about-a-subject content-bearing blobs → OPERATOR DECISION #5, OPEN.**
+   Subject-detection keys on `uploaded_by_id` (*uploaded BY* a subject), not on domain FKs
+   (*ABOUT* a subject). **CRM Attachment's nullable `person_id`** means a blob about a person is
+   not reached by that person's per-subject erasure; **CMS Media is genuinely org-owned** (no
+   subject FK). The E7 gate **names both** as a visible residual line, and `delete_file` has **no
+   destroy/retention caller** for either today, so **nothing regressed**. The decision — is an
+   about-a-subject blob (e.g. a scanned ID / signed contract) in scope for right-to-be-forgotten,
+   or is the org's retention interest legitimate? — is **flagged needs-operator-input** (§7#5).
+   Recommendation: extend detection to domain subject-FKs for content-bearing blobs, gated by a
+   retention-hold exception; keep CMS Media's org scope. See §7#5 for the full framing.
+2. **INFO residual — custom-OBJECT (`tnt$obj$…`) `pii_declared` uncovered rung.** E6 closed the
+   `pii_declared` bag rung for custom *fields* on catalog resources; the analogous rung on custom
+   **objects** (`tnt$obj$…` record bags) is a known-uncovered discovery class carried as INFO —
+   latent (no shipped custom-object surface defines a `pii_declared` bag today), tracked so a
+   future adopter's custom-object bag cannot slip the gate silently.
+3. **E4 residual — retention `:delete` generic-purge blob deletion not wired.** E4 shipped the
+   governed `Storage.delete` chokepoint + ref-count and wired erasure/shred to it; the retention
+   engine's generic `:delete` (non-shred) purge arm does **not** yet route blob deletion through
+   the chokepoint. Named residual — the delete *capability* exists and is fail-honest; the generic
+   retention-purge caller is a follow-on wiring item, not a silent gap.
+4. **E4 residual — blob encryption-at-rest is explicitly out of scope.** D4 makes erasure reach
+   blobs by **deletion**, not by bringing blob bytes into the DEK envelope (`Local.put/3` writes
+   raw bytes). At-rest blob encryption remains a named residual, unchanged by this cluster.
+
+**Neutral.** The ADR index (`docs/adr/README.md`) ADR-046 row is synced to **Accepted** in the
 same pass (the claim-evidence discipline that governs this repo governs its index).
 
 ## 9 · See also
