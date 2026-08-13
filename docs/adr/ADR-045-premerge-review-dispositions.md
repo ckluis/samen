@@ -340,10 +340,37 @@ Everything in the `--deploy` scaffold that a *boot* would find and no test does.
 >
 > **OPERATIONAL note (tooling, not a defect).** At **212** patches the full `./scripts/sabotage.sh`
 > harness now exceeds the 600s single tool-call ceiling, so full-harness certification must be run
-> **split-form or backgrounded/chunked** rather than in one synchronous call. Recommended small infra
-> follow-up: add a **range/chunk mode** to `scripts/sabotage.sh` (e.g. run patches N..M) so the
-> harness can be certified in bounded slices. This is a harness-runtime scaling note; every individual
-> sabotage still applies → flips its named tests → reverts byte-exact.
+> **split-form or backgrounded/chunked** rather than in one synchronous call. Every individual sabotage
+> still applies → flips its named tests → reverts byte-exact; only the *aggregate wall-clock* exceeds the
+> ceiling.
+>
+> **#1 / #2 — DONE (harness selection/filter modes).** `scripts/sabotage.sh` now takes additive
+> selection flags so the harness can be certified in bounded slices under the ceiling (the DEFAULT
+> no-arg run is unchanged — full harness, byte-identical output; ci.sh wiring untouched):
+> - `--app <name>` — only that app's patches (samen_web 97 · samen_core 86 · driftwood 14 · pawchart 11
+>   · demo 3 · samen_stripe 1; the six partition the full 212 exactly).
+> - `--range <lo>-<hi>` / `--from <lo> --to <hi>` — patches by **filename number** (the NNN in
+>   `NNN-slug.patch`, inclusive) — e.g. `--range 200-212` for the newest chunk.
+> - `--touching <path>…` / `--touching-file <f>` / `--changed [<ref>]` — only patches whose touched-file
+>   set intersects the given paths (or `git diff --name-only <ref>`, default `origin/main`) — the
+>   **"certify the sabotages relevant to my diff"** verifier primitive.
+> - `--list` / `--dry-run` — print the selected set (names + resolved APP + count), apply/run nothing.
+>
+> Filters **compose** (intersection). The header preflight (`sabotage_lint.sh`) still lints **all** 212
+> patch headers even under a filter (a missing header anywhere is a latent bug). A filtered run's success
+> line is deliberately distinct so a partial run can never be read as full certification
+> (`ALL PASSED (97 of 212 sabotages — FILTERED: app=samen_web)`). **Coverage tradeoff:** a filtered run
+> certifies ONLY its subset — **total coverage still requires a full (unfiltered) run**, done backgrounded
+> or as `--app`/`--range` chunks.
+>
+> **#3 — FILED for future (parallel replay), "if necessary."** When chunking is no longer enough (patch
+> count keeps climbing and even per-app slices strain the ceiling), the next scaling step is
+> **worktree-isolated parallel replay**: each worker gets its own `git worktree` + isolated test DB,
+> the selected patches are sharded across N workers, and wall-clock collapses to ≈ 212/N. This needs
+> per-worker DB provisioning and worktree lifecycle management (create/prune, ensure clean-tree
+> guarantees per worker), so it is deferred until the serial chunked mode stops being sufficient. Tooling
+> note only — no sabotage/verifier semantics change; each patch still applies → flips → reverts byte-exact,
+> just concurrently.
 
 | ID | Sev | One-line | Disposition | Fix sketch |
 |---|---|---|---|---|
