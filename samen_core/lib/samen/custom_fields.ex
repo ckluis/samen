@@ -104,10 +104,26 @@ defmodule Samen.CustomFields do
     * `:constraints` — a map of per-type constraints (optional, default `%{}`).
     * `:pii_declared` — whether the org accepts plaintext-in-bag for this field
       (optional, default `false`). See the moduledoc containment note.
+    * `:erasure_specs` — (optional) an explicit list of custom-bag erasure specs to
+      satisfy the `pii_declared` erasability guard for THIS call, in addition to the
+      configured `:custom_bag_erasure_specs`. A host normally registers erasure in
+      config; this override lets a caller/test declare erasability inline.
 
   Returns `{:ok, %FieldRow{}}` or `{:error, reason}`. Fails closed on an unknown
   type or a malformed constraint spec (a definition the validator could not
   enforce is refused, not silently accepted).
+
+  ## The `pii_declared` erasability guard (ADR-046 §4.2 · D3, fail-closed)
+
+  Masking of a `pii_declared` bag key is automatic-by-construction (the resolver
+  `Samen.Api.PiiResolution` reads every org's `tnt_field` catalog generically), so a
+  pii_declared bag can never ship UNMASKED. The one remaining open end is ERASURE,
+  which is spec-driven (`Samen.CustomFields.Erasure`). This chokepoint closes it: a
+  `pii_declared: true` definition is **REFUSED** (`{:error, {:pii_declared_unerasable,
+  table}}`) UNLESS a custom-bag erasure spec covers the table — so a live pii_declared
+  bag can never exist without a registered arm to erase it (masked AND erasable, by
+  construction). Custom-OBJECT tables (`tnt$obj$…`) are exempt: they are a distinct
+  malleability rung with their own erasure story, out of D3's scope.
   """
   @spec define_field(map() | keyword(), Ecto.Repo.t() | nil) ::
           {:ok, FieldRow.t()} | {:error, term()}
@@ -121,9 +137,9 @@ defmodule Samen.CustomFields do
          {:ok, type} <- fetch(opts, :type),
          {:ok, type} <- validate_type(type),
          constraints = Map.get(opts, :constraints, %{}),
-         {:ok, constraints} <- validate_constraint_spec(type, constraints) do
-      pii_declared = Map.get(opts, :pii_declared, false) == true
-
+         {:ok, constraints} <- validate_constraint_spec(type, constraints),
+         pii_declared = Map.get(opts, :pii_declared, false) == true,
+         :ok <- guard_pii_declared_erasable(pii_declared, table, opts) do
       attrs = %{
         tnt_org_id: to_string(org_id),
         tnt_table_name: to_string(table),
@@ -545,6 +561,38 @@ defmodule Samen.CustomFields do
       nil -> {:error, {:missing, key}}
       value -> {:ok, value}
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # The pii_declared erasability guard (ADR-046 §4.2 D3, fail-closed chokepoint)
+  # ---------------------------------------------------------------------------
+
+  # Custom-object tables carry their own prefix and a distinct erasure story — out
+  # of D3's scope, so they are exempt from the bag-erasability guard.
+  @object_table_prefix "tnt$obj$"
+
+  # A non-PII field is always fine; a pii_declared field is refused unless erasable.
+  defp guard_pii_declared_erasable(false, _table, _opts), do: :ok
+
+  defp guard_pii_declared_erasable(true, table, opts) do
+    table = to_string(table)
+
+    cond do
+      String.starts_with?(table, @object_table_prefix) -> :ok
+      erasure_spec_covers?(table, opts) -> :ok
+      true -> {:error, {:pii_declared_unerasable, table}}
+    end
+  end
+
+  # A pii_declared bag is erasable iff a `Samen.CustomFields.Erasure` spec covers its
+  # table — via config (`:custom_bag_erasure_specs`, how a host wires it) or the inline
+  # `:erasure_specs` override on this call.
+  defp erasure_spec_covers?(table, opts) do
+    specs =
+      List.wrap(Map.get(opts, :erasure_specs)) ++
+        Application.get_env(:samen_core, :custom_bag_erasure_specs, [])
+
+    Enum.any?(specs, fn spec -> to_string(Map.get(spec, :table_name)) == table end)
   end
 
   defp default_repo! do

@@ -30,6 +30,15 @@ defmodule SamenCore.CustomFieldsTest do
   alias SamenCore.TestRepo
 
   @table "tcf_widget"
+  # ADR-046 §4.2 D3: a `pii_declared: true` define is refused unless a custom-bag
+  # erasure spec covers the table (the fail-closed guard). This fixture wires it,
+  # modeling a compliant host; the guard's refusal path is proven explicitly below.
+  @erasure_spec %{
+    table_name: @table,
+    bag_column: "tcf_custom",
+    subject_column: "tcf_id",
+    org_column: "tcf_org_id"
+  }
 
   setup do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
@@ -46,7 +55,8 @@ defmodule SamenCore.CustomFieldsTest do
           org_id: org_id,
           table_name: @table,
           field_name: field,
-          type: type
+          type: type,
+          erasure_specs: [@erasure_spec]
         }),
         TestRepo
       )
@@ -324,6 +334,54 @@ defmodule SamenCore.CustomFieldsTest do
       assert {:error, {:invalid_constraint, _}} =
                CustomFields.define_field(
                  %{org_id: org(), table_name: @table, field_name: "t", type: :enum},
+                 TestRepo
+               )
+    end
+  end
+
+  # ==========================================================================
+  # ADR-046 §4.2 D3 — the pii_declared erasability GUARD (fail-closed chokepoint)
+  # ==========================================================================
+
+  describe "pii_declared erasability guard (ADR-046 §4.2 D3)" do
+    test "REFUSED: a pii_declared field on a table with NO custom-bag erasure spec is rejected" do
+      # No :erasure_specs override, no configured spec → the bag would be unerasable,
+      # so the define chokepoint refuses it (a live pii_declared bag can never exist
+      # without a registered arm to erase it).
+      assert {:error, {:pii_declared_unerasable, @table}} =
+               CustomFields.define_field(
+                 %{
+                   org_id: org(),
+                   table_name: @table,
+                   field_name: "care_note",
+                   type: :string,
+                   pii_declared: true
+                 },
+                 TestRepo
+               )
+    end
+
+    test "ALLOWED (positive control): the SAME define WITH an erasure spec succeeds" do
+      # Anti-tautology: the guard discriminates — wiring the erasure arm lets the very
+      # same pii_declared field through.
+      assert {:ok, %FieldRow{tnt_pii_declared: true}} =
+               CustomFields.define_field(
+                 %{
+                   org_id: org(),
+                   table_name: @table,
+                   field_name: "care_note",
+                   type: :string,
+                   pii_declared: true,
+                   erasure_specs: [@erasure_spec]
+                 },
+                 TestRepo
+               )
+    end
+
+    test "a NON-pii_declared field needs no erasure spec (the guard only gates pii_declared)" do
+      assert {:ok, %FieldRow{tnt_pii_declared: false}} =
+               CustomFields.define_field(
+                 %{org_id: org(), table_name: @table, field_name: "seats", type: :integer},
                  TestRepo
                )
     end

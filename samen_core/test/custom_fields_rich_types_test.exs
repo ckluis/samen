@@ -47,7 +47,10 @@ defmodule SamenCore.CustomFieldsRichTypesTest do
           org_id: org_id,
           table_name: @table,
           field_name: field,
-          type: type
+          type: type,
+          # ADR-046 §4.2 D3: wire the custom-bag erasure arm so the pii_declared
+          # rich-type defines below satisfy the erasability guard (compliant host).
+          erasure_specs: [%{table_name: @table, subject_column: "tcf_id", org_column: "tcf_org_id"}]
         }),
         TestRepo
       )
