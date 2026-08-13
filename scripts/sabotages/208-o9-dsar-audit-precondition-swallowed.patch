@@ -9,21 +9,20 @@
 # TEST_FILES: test/dsar_audit_precondition_test.exs
 # MUST_FAIL: writes NO dsar_export record
 diff --git a/samen_core/lib/samen/dsar.ex b/samen_core/lib/samen/dsar.ex
-index 8f79764..0294559 100644
 --- a/samen_core/lib/samen/dsar.ex
 +++ b/samen_core/lib/samen/dsar.ex
-@@ -96,11 +96,9 @@ defmodule Samen.Dsar do
-       audit_trail: audit_trail
-     }
+@@ -122,11 +122,9 @@
+         audit_trail: audit_trail
+       }
  
--    # The access record is a HARD PRECONDITION (O9): no non-repudiation record → no bundle.
--    case record_export(repo, org_id, subject_id, actor_id, plane, length(personal_data)) do
--      {:ok, _entry} -> {:ok, bundle}
--      {:error, reason} -> {:error, {:audit_write_failed, reason}}
--    end
-+    _ = record_export(repo, org_id, subject_id, actor_id, plane, length(personal_data))
+-      # The access record is a HARD PRECONDITION (O9): no non-repudiation record → no bundle.
+-      case record_export(repo, org_id, subject_id, actor_id, plane, length(personal_data)) do
+-        {:ok, _entry} -> {:ok, bundle}
+-        {:error, reason} -> {:error, {:audit_write_failed, reason}}
+-      end
++      _ = record_export(repo, org_id, subject_id, actor_id, plane, length(personal_data))
 +
-+    {:ok, bundle}
++      {:ok, bundle}
+     end
    end
  
-   # The masking decision — the two-plane rule (mirrors Samen.Scope.ApiKey.masking_for).
