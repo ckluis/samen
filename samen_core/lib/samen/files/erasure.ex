@@ -19,6 +19,35 @@ defmodule Samen.Files.Erasure do
   the LAST referencing row is gone — so erasing one subject NEVER destroys a blob a
   non-erased clone still references, and the blob IS removed once the final reference goes.
 
+  ## Uploaded-BY *and* about-A subject (ADR-046 §7 decision #5)
+
+  The arm reaches a subject's blobs through a domain **subject-field** — a column on the
+  `File`-like resource that carries a data-subject id. This is deliberately NOT limited to
+  `uploaded_by_id` ("a blob *uploaded BY* the subject"): it equally covers a domain
+  subject-FK naming a data subject the blob is *ABOUT* — e.g. `CRM.Attachment.person_id`,
+  where the blob may be that person's scanned ID or signed contract. A person's
+  right-to-be-forgotten reaches documents *about* them, so shredding that `Person` deletes
+  their `person_id`-linked attachment blobs through the SAME governed, ref-counted, audited
+  `delete_file/3` path (last-reference-aware — a blob a non-erased row still references
+  survives, T130). The completeness gate (`Samen.Erasure.Completeness`) treats such a
+  subject-FK `storage_key` resource as GATED (it MUST have an arm); a genuinely org-owned
+  blob with no subject FK (CMS `Media`) stays an org-lifecycle residual, not a per-subject
+  arm.
+
+  ## Retention-hold exception (the safety valve — fail-honest)
+
+  A subject's right-to-be-forgotten can be legitimately overridden by a legal/retention
+  obligation (a document the org must retain). So a spec MAY carry an optional
+  `:hold?` predicate — `(row -> boolean)` — and any blob for which it returns `true` is
+  **NOT deleted**; instead the arm records the delete was SKIPPED under hold
+  (`%{blob_deleted: false, held: true}` in the per-file result, tallied as
+  `"holds_skipped"` in the report). This is fail-honest in both directions: a held blob is
+  never silently deleted (the hold is respected + visible in the report/audit), and an
+  un-held blob is never silently kept (absent a hold predicate every matched blob IS
+  deleted). No schema column is required — the predicate reads the row as read (all of the
+  resource's attributes are selected), so a host keys the hold on whatever field encodes
+  its retention policy (a `legal_hold` flag, a `retained_until` timestamp, …).
+
   ## Spec-driven, framework-first (the registry)
 
   The kernel does not know a host's `File` resource modules, so the arm is expressed as a
@@ -28,14 +57,18 @@ defmodule Samen.Files.Erasure do
       %{
         file_module:    MyApp.PrimitivesScope.File,  # the File resource
         subject_field:  :uploaded_by_id,             # column carrying the subject id
+                                                     # (or a domain subject-FK, e.g. :person_id)
+        hold?:          fn row -> row.legal_hold end, # optional retention-hold predicate
         storage:        Samen.Files.Storage.Local,   # optional; default Local
         storage_config: %{root: "/var/lib/app/files"} # optional; default %{}
       }
 
   Absent any spec the arm is a no-op (returns `[]`) — a host that has not registered file
   erasure is unchanged, exactly as `Samen.NonPii` redacts nothing until a column is
-  registered. (The forthcoming erasure-completeness verifier (ADR-046 §6) will assert every
-  `storage_key` column has such an arm, so a future one cannot ship unregistered.)
+  registered. The erasure-completeness verifier (ADR-046 §6) asserts every subject-linked
+  `storage_key` column has such an arm, so a future one cannot ship unregistered; the specs
+  are DERIVED per host by `Samen.Erasure.default_specs/1`, so a fresh `gen.app` covers its
+  about-a-subject blobs by construction.
 
   ## Fail-soft inside the erasure transaction
 
@@ -75,6 +108,7 @@ defmodule Samen.Files.Erasure do
   defp erase_one_spec(spec, subject_id, repo, org_id, actor_id) do
     file_mod = Map.fetch!(spec, :file_module)
     subject_field = Map.fetch!(spec, :subject_field)
+    hold_fun = Map.get(spec, :hold?)
     storage = Map.get(spec, :storage, Samen.Files.Storage.Local)
     storage_config = Map.get(spec, :storage_config, %{})
 
@@ -82,24 +116,31 @@ defmodule Samen.Files.Erasure do
 
     results =
       Enum.map(rows, fn row ->
-        scope = %{org_id: org_id || Map.get(row, :org_id), actor_id: actor_id}
+        # RETENTION-HOLD exception (fail-honest): a blob the org has a legitimate legal /
+        # retention obligation for is NOT deleted by erasure — the delete is recorded as
+        # SKIPPED under hold, never silently dropped and never silently deleted-under-hold.
+        if held?(hold_fun, row) do
+          %{file_id: Map.get(row, :id), blob_deleted: false, held: true}
+        else
+          scope = %{org_id: org_id || Map.get(row, :org_id), actor_id: actor_id}
 
-        case Samen.Files.delete_file(scope, row,
-               file_module: file_mod,
-               repo: repo,
-               storage: storage,
-               storage_config: storage_config
-             ) do
-          {:ok, res} ->
-            res
+          case Samen.Files.delete_file(scope, row,
+                 file_module: file_mod,
+                 repo: repo,
+                 storage: storage,
+                 storage_config: storage_config
+               ) do
+            {:ok, res} ->
+              res
 
-          {:error, reason} ->
-            Logger.warning(
-              "[Samen.Files.Erasure] blob delete failed for file " <>
-                "#{inspect(Map.get(row, :id))} (#{inspect(file_mod)}): #{inspect(reason)}"
-            )
+            {:error, reason} ->
+              Logger.warning(
+                "[Samen.Files.Erasure] blob delete failed for file " <>
+                  "#{inspect(Map.get(row, :id))} (#{inspect(file_mod)}): #{inspect(reason)}"
+              )
 
-            %{file_id: Map.get(row, :id), blob_deleted: false, error: reason}
+              %{file_id: Map.get(row, :id), blob_deleted: false, error: reason}
+          end
         end
       end)
 
@@ -107,9 +148,16 @@ defmodule Samen.Files.Erasure do
       "file_resource" => inspect(file_mod),
       "files_erased" => length(results),
       "blobs_deleted" => Enum.count(results, &(Map.get(&1, :blob_deleted) == true)),
+      "holds_skipped" => Enum.count(results, &(Map.get(&1, :held) == true)),
       "errors" => Enum.count(results, &Map.has_key?(&1, :error))
     }
   end
+
+  # A blob is under a retention hold iff the spec's `:hold?` predicate returns true for it.
+  # No predicate => no hold (every matched blob is deleted — erasure reaches it).
+  defp held?(nil, _row), do: false
+  defp held?(fun, row) when is_function(fun, 1), do: fun.(row) == true
+  defp held?(_other, _row), do: false
 
   # Find ALL the subject's File rows, archive-state-inclusive (an archived file of an
   # erased subject must still have its blob reached). The default read is live-only and
@@ -117,11 +165,11 @@ defmodule Samen.Files.Erasure do
   # archivable resource we union both — a row is either live or archived, never both, so
   # the two sets are disjoint.
   defp find_subject_files(file_mod, subject_field, subject_id) do
-    live = read_subject_files(file_mod, subject_field, subject_id)
+    live = read_subject_files(file_mod, file_mod, subject_field, subject_id)
 
     archived =
       if Samen.Info.archivable?(file_mod) do
-        read_subject_files(Samen.Archival.archived_query(file_mod), subject_field, subject_id)
+        read_subject_files(Samen.Archival.archived_query(file_mod), file_mod, subject_field, subject_id)
       else
         []
       end
@@ -129,10 +177,17 @@ defmodule Samen.Files.Erasure do
     live ++ archived
   end
 
-  defp read_subject_files(queryable, subject_field, subject_id) do
+  # Select EVERY attribute of the resource so the spec's `:hold?` predicate can read
+  # whatever field encodes the host's retention policy (a `legal_hold` flag / a
+  # `retained_until` timestamp / …) — the minimal retention-hold mechanism needs no
+  # dedicated schema column. `storage_key`/`org_id`/`id` (needed by `delete_file/3` and the
+  # report) are in that set. Vault-routed columns select as opaque tokens, never plaintext.
+  defp read_subject_files(queryable, resource, subject_field, subject_id) do
+    select = resource |> Ash.Resource.Info.attributes() |> Enum.map(& &1.name)
+
     queryable
     |> Ash.Query.filter(^Ash.Expr.ref(subject_field) == ^subject_id)
-    |> Ash.Query.ensure_selected([:storage_key, :org_id, subject_field])
+    |> Ash.Query.ensure_selected(select)
     |> Ash.read!(authorize?: false)
   rescue
     e ->

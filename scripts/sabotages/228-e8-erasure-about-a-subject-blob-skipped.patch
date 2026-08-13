@@ -1,0 +1,23 @@
+# SABOTAGE: E8 (ADR-046 §7 #5) — the file-blob erasure arm no longer reaches an ABOUT-a-subject
+# blob: `find_subject_files/3` returns `[]` whenever the spec keys on the domain subject-FK
+# `:person_id` (`if subject_field == :person_id, do: []`), so a CRM Person's `person_id`-linked
+# Attachment blob (their scanned ID / signed contract) SURVIVES that person's crypto-shred — the
+# exact right-to-be-forgotten gap ADR-046 §7 #5 closes. An `:uploaded_by_id` / `:id`-keyed spec is
+# untouched, so this targets ONLY the about-a-subject reach (the domain subject-FK extension), not
+# the D4 upload-BY arm. Flips the reach proof (the person's about-them blob must be GONE after shred).
+# APP: samen_core
+# TEST_FILES: test/files_delete_test.exs
+# MUST_FAIL: shredding a Person deletes their person_id-linked Attachment blob
+diff --git a/samen_core/lib/samen/files/erasure.ex b/samen_core/lib/samen/files/erasure.ex
+index 5eebf0d..c62170e 100644
+--- a/samen_core/lib/samen/files/erasure.ex
++++ b/samen_core/lib/samen/files/erasure.ex
+@@ -165,7 +165,7 @@ defmodule Samen.Files.Erasure do
+   # archivable resource we union both — a row is either live or archived, never both, so
+   # the two sets are disjoint.
+   defp find_subject_files(file_mod, subject_field, subject_id) do
+-    live = read_subject_files(file_mod, file_mod, subject_field, subject_id)
++    live = if subject_field == :person_id, do: [], else: read_subject_files(file_mod, file_mod, subject_field, subject_id)
+ 
+     archived =
+       if Samen.Info.archivable?(file_mod) do

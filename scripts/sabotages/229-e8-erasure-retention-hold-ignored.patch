@@ -1,0 +1,23 @@
+# SABOTAGE: E8 (ADR-046 §7 #5) — the retention-hold exception is neutered: `held?/2`'s
+# predicate clause is short-circuited to `false` (`do: (_ = {fun, row}; false)`), so a blob under
+# a legitimate legal / retention hold is DELETED by the subject's erasure instead of being SKIPPED
+# and recorded. That silently destroys a document the org has a legal obligation to retain — the
+# exact fail-honest safety valve the hold exception exists to enforce (never delete-under-hold).
+# Flips the hold proof (a held Attachment blob must SURVIVE the Person's shred, hold-skip recorded);
+# the no-hold positive control (an un-held blob IS deleted) and the reach arm stay green.
+# APP: samen_core
+# TEST_FILES: test/files_delete_test.exs
+# MUST_FAIL: an Attachment blob under a retention hold is NOT deleted
+diff --git a/samen_core/lib/samen/files/erasure.ex b/samen_core/lib/samen/files/erasure.ex
+index 5eebf0d..5ef06ed 100644
+--- a/samen_core/lib/samen/files/erasure.ex
++++ b/samen_core/lib/samen/files/erasure.ex
+@@ -156,7 +156,7 @@ defmodule Samen.Files.Erasure do
+   # A blob is under a retention hold iff the spec's `:hold?` predicate returns true for it.
+   # No predicate => no hold (every matched blob is deleted — erasure reaches it).
+   defp held?(nil, _row), do: false
+-  defp held?(fun, row) when is_function(fun, 1), do: fun.(row) == true
++  defp held?(fun, row) when is_function(fun, 1), do: (_ = {fun, row}; false)
+   defp held?(_other, _row), do: false
+ 
+   # Find ALL the subject's File rows, archive-state-inclusive (an archived file of an

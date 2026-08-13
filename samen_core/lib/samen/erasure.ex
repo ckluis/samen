@@ -82,8 +82,12 @@ defmodule Samen.Erasure do
       UNregistered `_bidx` column is deliberately NOT auto-covered — the completeness
       gate fails it so a new blind index must be registered, never silently activated.
     * one `file_erasure_spec` per **subject-linked** `storage_key` resource (one carrying
-      a data-subject field, e.g. `uploaded_by_id`). Org-asset blobs (no subject field)
-      are org-lifecycle, not per-subject-erasure residues, and get no subject-keyed spec.
+      a data-subject field — `uploaded_by_id` for a blob *uploaded BY* a subject, or a
+      domain subject-FK like `person_id` for a blob *ABOUT* a subject, ADR-046 §7 #5).
+      Org-asset blobs (no subject field, e.g. CMS `Media`) are org-lifecycle, not
+      per-subject-erasure residues, and get no subject-keyed spec. (A host with a
+      legitimate retention obligation on some about-a-subject blobs adds a `:hold?`
+      predicate to the derived spec — the retention-hold exception; see `Samen.Files.Erasure`.)
 
   Options are passed to `Samen.Erasure.Completeness.resources/1` (`:resources`/`:domains`/
   `:otp_app`) so tests can derive against an explicit resource list.

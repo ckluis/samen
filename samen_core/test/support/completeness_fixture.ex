@@ -15,6 +15,7 @@ defmodule SamenCore.Support.Completeness.Domain do
     resource(SamenCore.Support.Completeness.Credential)
     resource(SamenCore.Support.Completeness.AuthToken)
     resource(SamenCore.Support.Completeness.File)
+    resource(SamenCore.Support.Completeness.Attachment)
     resource(SamenCore.Support.Completeness.OrgAsset)
     resource(SamenCore.Support.Completeness.Bag)
     resource(SamenCore.Support.Completeness.RogueBidx)
@@ -73,6 +74,32 @@ defmodule SamenCore.Support.Completeness.File do
     attribute(:id, :uuid, primary_key?: true, allow_nil?: false, writable?: true, source: :fil_id)
     attribute(:storage_key, :string, public?: true, allow_nil?: false, source: :fil_storage_key)
     attribute(:uploaded_by_id, :uuid, public?: true, source: :fil_uploaded_by_id)
+  end
+
+  actions do
+    defaults([:read])
+  end
+end
+
+defmodule SamenCore.Support.Completeness.Attachment do
+  @moduledoc """
+  storage_key fixture: subject-linked via a DOMAIN subject-FK (`person_id`) — a blob
+  *ABOUT* a data subject (e.g. a person's scanned ID / signed contract), NOT one uploaded
+  BY them. The completeness gate must treat this as subject-linked (GATED, requiring a
+  `:file_erasure_specs` arm keyed on `:person_id`), the ADR-046 §7 #5 reach.
+  """
+  use Ash.Resource, domain: SamenCore.Support.Completeness.Domain, data_layer: AshPostgres.DataLayer
+
+  postgres do
+    table("ath_attachment")
+    repo(SamenCore.TestRepo)
+  end
+
+  attributes do
+    attribute(:id, :uuid, primary_key?: true, allow_nil?: false, writable?: true, source: :ath_id)
+    attribute(:storage_key, :string, public?: true, source: :ath_storage_key)
+    attribute(:person_id, :uuid, public?: true, source: :ath_person_id)
+    attribute(:org_id, :uuid, public?: true, source: :ath_org_id)
   end
 
   actions do

@@ -35,7 +35,7 @@ defmodule Samen.FilesDeleteTest do
   alias Samen.Erasure
   alias Samen.AuditEvent
   alias SamenCore.TestRepo
-  alias SamenCore.Support.CrmScopeFixture.Attachment
+  alias SamenCore.Support.CrmScopeFixture.{Attachment, Person}
 
   require Ash.Query
 
@@ -85,6 +85,28 @@ defmodule Samen.FilesDeleteTest do
       [] -> false
       [_ | _] -> true
     end
+  end
+
+  defp uniq, do: System.unique_integer([:positive])
+
+  # A REAL CRM Person (a data subject — its PII is vaulted under subject_id == its own id).
+  defp person!(org) do
+    attrs = Map.merge(%{org_id: org, display_name: "Data Subject #{uniq()}"}, Samen.Factory.person("Data", "Subject"))
+    Samen.Factory.create!(Person, attrs, authorize?: false)
+  end
+
+  # A CRM Attachment *ABOUT* a person (person_id domain subject-FK), carrying REAL bytes at
+  # `key` — the "scanned ID / signed contract about a person" vector of ADR-046 §7 #5.
+  defp attach_about(org, scope, cfg, person_id, key, bytes) do
+    assert {:ok, _} = Local.put(key, bytes, cfg)
+
+    Attachment
+    |> Ash.Changeset.for_create(
+      :create,
+      %{org_id: org, file_name: "id-scan.bin", content_type: "application/octet-stream", storage_key: key, person_id: person_id},
+      scope: scope
+    )
+    |> Ash.create!()
   end
 
   # ---------------------------------------------------------------------------
@@ -254,6 +276,116 @@ defmodule Samen.FilesDeleteTest do
       assert {:ok, ^bytes} = Local.get(key, cfg)
       assert attachment_exists?(clone.id)
       refute attachment_exists?(subject_file.id)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # About-a-subject reach (ADR-046 §7 #5) — a Person's erasure deletes their
+  # person_id-linked Attachment blobs through the SAME governed delete_file path.
+  # ---------------------------------------------------------------------------
+
+  describe "about-a-subject reach — shredding a Person deletes their person_id-linked blob (D5/§7#5)" do
+    test "shredding a Person deletes their person_id-linked Attachment blob; a non-erased person's blob remains; a blob shared with a non-erased row survives",
+         %{org: org, scope: scope, storage_config: cfg} do
+      p1 = person!(org)
+      p2 = person!(org)
+
+      key1 = "#{org}/about-p1-#{uniq()}.bin"
+      key2 = "#{org}/about-p2-#{uniq()}.bin"
+      key_shared = "#{org}/about-shared-#{uniq()}.bin"
+      b1 = :crypto.strong_rand_bytes(1024)
+      b2 = :crypto.strong_rand_bytes(1024)
+      bs = :crypto.strong_rand_bytes(1024)
+
+      att1 = attach_about(org, scope, cfg, p1.id, key1, b1)
+      att2 = attach_about(org, scope, cfg, p2.id, key2, b2)
+
+      # A blob shared by an about-p1 attachment AND an about-p2 attachment (two rows, one key).
+      shared_p1 = attach_about(org, scope, cfg, p1.id, key_shared, bs)
+      # Re-link the SAME key on a second row about the NON-erased p2 (no re-upload).
+      shared_p2 =
+        Attachment
+        |> Ash.Changeset.for_create(
+          :create,
+          %{org_id: org, file_name: "id-scan.bin", content_type: "application/octet-stream", storage_key: key_shared, person_id: p2.id},
+          scope: scope
+        )
+        |> Ash.create!()
+
+      # The about-a-subject arm: keyed on the DOMAIN subject-FK :person_id, not uploaded_by_id.
+      specs = [%{file_module: Attachment, subject_field: :person_id, storage: Local, storage_config: cfg}]
+
+      assert {:ok, %{report: report}} =
+               Erasure.shred(to_string(p1.id), repo: @repo, org_id: org, file_specs: specs)
+
+      # p1's about-them blob is GONE — right-to-be-forgotten reached a document ABOUT them.
+      assert {:error, :not_found} = Local.get(key1, cfg)
+      refute attachment_exists?(att1.id)
+
+      # POSITIVE CONTROL: the NON-erased p2's blob is untouched.
+      assert {:ok, ^b2} = Local.get(key2, cfg)
+      assert attachment_exists?(att2.id)
+
+      # LAST-REFERENCE-AWARE (T130): the shared blob SURVIVES — p2's row still references it —
+      # while p1's referencing row is destroyed.
+      assert {:ok, ^bs} = Local.get(key_shared, cfg)
+      assert attachment_exists?(shared_p2.id)
+      refute attachment_exists?(shared_p1.id)
+
+      # The report surfaces the about-a-subject arm as reached (≥1 blob deleted for p1).
+      file_tier = report.tiers["file_blobs"]
+      assert Enum.sum(Enum.map(file_tier, &Map.get(&1, "blobs_deleted", 0))) >= 1
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Retention-hold exception (ADR-046 §7 #5 safety valve) — fail-honest.
+  # ---------------------------------------------------------------------------
+
+  describe "retention-hold exception — a held blob is NOT deleted by erasure (fail-honest, visible)" do
+    test "an Attachment blob under a retention hold is NOT deleted by the Person's erasure and the hold-skip is recorded; without a hold it IS deleted",
+         %{org: org, scope: scope, storage_config: cfg} do
+      p = person!(org)
+
+      key_held = "#{org}/held-#{uniq()}.bin"
+      key_free = "#{org}/free-#{uniq()}.bin"
+      b_held = :crypto.strong_rand_bytes(512)
+      b_free = :crypto.strong_rand_bytes(512)
+
+      att_held = attach_about(org, scope, cfg, p.id, key_held, b_held)
+      att_free = attach_about(org, scope, cfg, p.id, key_free, b_free)
+
+      # The retention hold — a per-spec predicate over the row (the MINIMAL mechanism, no
+      # schema column). Here it holds exactly the one blob; a real host reads its own
+      # legal_hold / retained_until field off the row.
+      held_key = att_held.storage_key
+      specs = [
+        %{
+          file_module: Attachment,
+          subject_field: :person_id,
+          storage: Local,
+          storage_config: cfg,
+          hold?: fn row -> row.storage_key == held_key end
+        }
+      ]
+
+      assert {:ok, %{report: report}} =
+               Erasure.shred(to_string(p.id), repo: @repo, org_id: org, file_specs: specs)
+
+      # The HELD blob SURVIVES and its row is preserved — erasure overridden by the
+      # legitimate retention obligation, never silently deleted-under-hold.
+      assert {:ok, ^b_held} = Local.get(key_held, cfg)
+      assert attachment_exists?(att_held.id)
+
+      # POSITIVE CONTROL: the UN-held blob for the SAME person IS deleted (erasure reaches it) —
+      # so the survival above keys on the hold, not on some incidental skip.
+      assert {:error, :not_found} = Local.get(key_free, cfg)
+      refute attachment_exists?(att_free.id)
+
+      # FAIL-HONEST + VISIBLE: the report records the hold-skip AND the real delete.
+      file_tier = report.tiers["file_blobs"]
+      assert Enum.sum(Enum.map(file_tier, &Map.get(&1, "holds_skipped", 0))) >= 1
+      assert Enum.sum(Enum.map(file_tier, &Map.get(&1, "blobs_deleted", 0))) >= 1
     end
   end
 end

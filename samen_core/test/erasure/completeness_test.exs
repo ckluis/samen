@@ -34,6 +34,7 @@ defmodule Samen.Erasure.CompletenessTest do
     Credential,
     AuthToken,
     File,
+    Attachment,
     OrgAsset,
     Bag,
     RogueBidx
@@ -41,6 +42,10 @@ defmodule Samen.Erasure.CompletenessTest do
 
   # The clean, fully-coverable residue population (no unregistered rogue column).
   @clean [Credential, AuthToken, File, OrgAsset, Bag]
+
+  # + an about-a-subject blob (CRM.Attachment analogue: storage_key + a domain subject-FK
+  # `person_id`) alongside the org-owned Media analogue (OrgAsset) — ADR-046 §7 #5.
+  @with_attachment [Credential, AuthToken, File, Attachment, OrgAsset, Bag]
 
   defp derived_specs, do: Erasure.default_specs(resources: @clean)
 
@@ -182,6 +187,60 @@ defmodule Samen.Erasure.CompletenessTest do
 
     # One file arm for the subject-linked File; the OrgAsset blob gets NO subject-keyed spec.
     assert [%{file_module: File, subject_field: :uploaded_by_id}] = specs.file_erasure_specs
+  end
+
+  # ======================================================================
+  # ABOUT-A-SUBJECT blobs — domain subject-FK reach (ADR-046 §7 #5)
+  # ======================================================================
+
+  defp check_with_attachment(file_specs) do
+    specs = Erasure.default_specs(resources: @with_attachment)
+
+    Completeness.check(
+      resources: @with_attachment,
+      bidx_specs: specs.blind_index_erasure_specs,
+      file_specs: file_specs || specs.file_erasure_specs,
+      skip_bag_guard?: true
+    )
+  end
+
+  test "an about-a-subject person_id storage_key column is GATED subject-linked and derives a person_id arm" do
+    # Discovery marks Attachment (domain subject-FK person_id) subject-linked; the org-owned
+    # Media analogue (OrgAsset, no subject FK) stays org-scoped.
+    residues = Completeness.discover(resources: @with_attachment)
+    att = Enum.find(residues.storage_key, &(&1.resource == Attachment))
+    assert att.subject_field == :person_id
+    assert Enum.find(residues.storage_key, &(&1.resource == OrgAsset)).subject_field == nil
+
+    # default_specs DERIVES a file arm for it keyed on :person_id — cover-by-construction.
+    specs = Erasure.default_specs(resources: @with_attachment)
+
+    assert %{file_module: Attachment, subject_field: :person_id} in specs.file_erasure_specs
+
+    # With the derived arms the gate PASSES: Attachment is subject-linked (gated + reached),
+    # the org-owned Media analogue is an org-asset residual (NOT gated as subject-linked).
+    assert {:ok, report} = check_with_attachment(nil)
+    assert Enum.any?(report.storage_key.subject_linked, &(&1 =~ "ath_storage_key"))
+    assert Enum.any?(report.org_asset_residuals, &(&1 =~ "OrgAsset"))
+    refute Enum.any?(report.org_asset_residuals, &(&1 =~ "Attachment"))
+  end
+
+  test "removing the file arm names the about-a-subject person_id blob UNREACHED; org-owned Media stays a residual (refutable)" do
+    # Positive control: WITH the derived file arms it passes.
+    assert {:ok, _} = check_with_attachment(nil)
+
+    # Drop the file arm → the person_id Attachment blob is named UNREACHED (proving the gate
+    # genuinely REQUIRES an arm for an about-a-subject blob, not a tautology).
+    assert {:error, {:incomplete, violations, _}} = check_with_attachment([])
+
+    assert Enum.any?(
+             violations,
+             &(&1 =~ "UNREACHED storage_key blob" and &1 =~ "ath_storage_key" and &1 =~ "person_id")
+           )
+
+    # The org-owned Media analogue (no subject FK) is NEVER a violation — it stays correctly
+    # org-scoped, never forced into an inappropriate per-subject spec.
+    refute Enum.any?(violations, &(&1 =~ "med_storage_key"))
   end
 
   test "install_default_specs/1 registers the arms into config so they actually fire" do

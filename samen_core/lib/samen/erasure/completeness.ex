@@ -29,10 +29,12 @@ defmodule Samen.Erasure.Completeness do
       chokepoint (a `pii_declared: true` field is REFUSED unless a `:custom_bag_erasure_specs`
       spec covers its table). The gate asserts BOTH governing mechanisms are live.
     * **(c) `storage_key` columns** — raw stored file blobs (outside the DEK envelope).
-      A subject-linked blob (the resource carries a data-subject field, e.g.
-      `uploaded_by_id`) must be covered by a `:file_erasure_specs` entry. An org-asset
-      blob (no data-subject field) is not a per-subject-erasure residue; it is REPORTED
-      as an org-lifecycle residual (named, not silently dropped).
+      A subject-linked blob (the resource carries a data-subject field — `uploaded_by_id`
+      for a blob *uploaded BY* a subject, or a domain subject-FK like `person_id` for a
+      blob *ABOUT* a subject, ADR-046 §7 #5) must be covered by a `:file_erasure_specs`
+      entry. An org-asset blob (no data-subject field, e.g. CMS `Media`) is not a
+      per-subject-erasure residue; it is REPORTED as an org-lifecycle residual (named, not
+      silently dropped).
     * **(d) regression floor** — the already-covered classes: `non_pii!` columns
       (redacted row-level inside `shred/2`) and DEK-keyed pseudonyms (unlinked for free
       by key-shred). Asserted still-wired so a refactor cannot drop them.
@@ -57,10 +59,14 @@ defmodule Samen.Erasure.Completeness do
 
   alias Samen.DerivedLinkable
 
-  # Physical attributes that mark a File-like resource's data subject (the uploader).
-  # A `storage_key` resource carrying one of these is subject-linked (per-subject
-  # erasable); one carrying none is an org-asset blob (org-lifecycle, not subject-shred).
-  @subject_fields [:uploaded_by_id]
+  # Physical attributes that mark a File-like resource's DATA SUBJECT. This covers both a
+  # blob *uploaded BY* a subject (`uploaded_by_id`) AND a blob *ABOUT* a subject named by a
+  # domain subject-FK (`person_id` → a CRM Person, whose scanned ID / signed contract the
+  # blob may be — ADR-046 §7 decision #5). A `storage_key` resource carrying ANY of these is
+  # subject-linked (per-subject erasable → MUST have a `:file_erasure_specs` arm); one
+  # carrying NONE is a genuinely org-owned asset (CMS `Media`) — an org-lifecycle residual,
+  # not a per-subject-shred residue.
+  @subject_fields [:uploaded_by_id, :person_id]
 
   # ---------------------------------------------------------------------------
   # Resource enumeration

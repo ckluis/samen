@@ -1,0 +1,23 @@
+# SABOTAGE: E8 (ADR-046 §7 #5) — the completeness gate's DOMAIN subject-FK requirement is removed:
+# `@subject_fields` drops `:person_id` (back to `[:uploaded_by_id]`), so an about-a-subject
+# `storage_key` resource (CRM Attachment, carrying `person_id`) is mis-classified as an org-asset
+# residual instead of a GATED subject-linked blob — a future about-a-subject blob could then ship
+# with NO `:file_erasure_specs` arm and the gate would say nothing (right-to-be-forgotten silently
+# unreached). Flips the gating proof (the person_id storage_key column must be discovered
+# subject-linked and derive a `:person_id` arm); the org-owned Media residual reporting stays green.
+# APP: samen_core
+# TEST_FILES: test/erasure/completeness_test.exs
+# MUST_FAIL: an about-a-subject person_id storage_key column is GATED subject-linked
+diff --git a/samen_core/lib/samen/erasure/completeness.ex b/samen_core/lib/samen/erasure/completeness.ex
+index f807f4b..1742fa0 100644
+--- a/samen_core/lib/samen/erasure/completeness.ex
++++ b/samen_core/lib/samen/erasure/completeness.ex
+@@ -66,7 +66,7 @@ defmodule Samen.Erasure.Completeness do
+   # subject-linked (per-subject erasable → MUST have a `:file_erasure_specs` arm); one
+   # carrying NONE is a genuinely org-owned asset (CMS `Media`) — an org-lifecycle residual,
+   # not a per-subject-shred residue.
+-  @subject_fields [:uploaded_by_id, :person_id]
++  @subject_fields [:uploaded_by_id]
+ 
+   # ---------------------------------------------------------------------------
+   # Resource enumeration
