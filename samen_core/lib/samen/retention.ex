@@ -240,17 +240,28 @@ defmodule Samen.Retention do
 
     subjects =
       expired_query(spec, wall)
+      # Ensure the org column is loaded (it is not selected by default) so it can be
+      # threaded into the shred (D5 / ADR-046 §4.4).
+      |> Ash.Query.ensure_selected([spec.org_field])
       # authz-scope: system retention sweep (shred path) — cross-org BY DESIGN (every
       # tenant's expired subject rows, narrowed by expired_query/2's TTL filter); no
       # tenant actor. Cannot be org_id-pinned (T132).
       |> Ash.read!(authorize?: false)
-      |> Enum.map(&Map.get(&1, spec.subject_field))
-      |> Enum.reject(&is_nil/1)
-      |> Enum.map(&to_string/1)
-      |> Enum.uniq()
+      # Carry the row's owning org alongside its subject id (D5 / ADR-046 §4.4): the
+      # row was just read, so its org is in hand — thread it into the shred so the
+      # erasure event lands on the TENANT's T4.3 chain, not "__global__".
+      |> Enum.map(&{Map.get(&1, spec.subject_field), Map.get(&1, spec.org_field)})
+      |> Enum.reject(fn {subject, _org} -> is_nil(subject) end)
+      |> Enum.map(fn {subject, org} -> {to_string(subject), org} end)
+      |> Enum.uniq_by(fn {subject, _org} -> subject end)
 
-    Enum.reduce(subjects, 0, fn subject_id, acc ->
-      shred_opts = if repo, do: [repo: repo], else: []
+    Enum.reduce(subjects, 0, fn {subject_id, org_id}, acc ->
+      # Only pass keys we actually have — an absent repo/org_id must NOT override
+      # Erasure.shred/2's own defaults (a nil org_id would defeat the D5 fix by
+      # forcing the "__global__" fallback).
+      shred_opts =
+        [repo: repo, org_id: org_id]
+        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
       case Samen.Erasure.shred(subject_id, shred_opts) do
         {:ok, _} -> acc + 1

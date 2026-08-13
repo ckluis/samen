@@ -288,6 +288,16 @@ defmodule Samen.Web.Csv do
     [second: seconds] |> Duration.new!() |> Duration.to_iso8601()
   end
 
+  # D7 / ADR-046 §4.6 — a %Masked{} nested INSIDE a container cell (a `:map`/list
+  # column value) must serialize as its MASKED representation (`••••` via its own
+  # Jason.Encoder), NEVER unwrapped to its `vt_*` token. Without this clause the
+  # generic struct clause below would `Map.from_struct/1` it into
+  # `{"token":"vt_…","label":…}`, defeating the module's "NEVER a vt_* token"
+  # guarantee for any nested occurrence. Kept BEFORE the generic struct clause so
+  # the masked wrapper is preserved (Jason then renders it `••••`). The top-level
+  # `cell(%Samen.Masked{})` clause already covers the direct (non-nested) case.
+  defp compact(%Samen.Masked{} = masked), do: masked
+
   defp compact(%_{} = struct), do: struct |> Map.from_struct() |> compact()
 
   defp compact(%{} = map),
@@ -379,6 +389,14 @@ defmodule Samen.Web.Csv do
   defp error_message(error), do: inspect(error)
 
   # -- RFC 4180 (ship note: hand-rolled, no dependency) ------------------------
+
+  @doc false
+  # Serialize ONE already-plane-resolved value exactly as an export row cell does —
+  # the same private `cell/1` path `export_rows/8` uses. Exposed (doc-false) so the
+  # D7 container-nested-masking proof can exercise the real serialization boundary a
+  # nested `%Masked{}` flows through (a nested masked must render `••••`, never its
+  # `vt_*` token). Not part of the public CSV API.
+  def render_cell(value), do: cell(value)
 
   @doc "Serialize rows (list of list-of-strings) as RFC-4180 CSV (CRLF, quoted as needed)."
   def serialize(rows) do

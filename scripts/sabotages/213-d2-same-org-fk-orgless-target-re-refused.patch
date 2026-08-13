@@ -1,0 +1,25 @@
+# SABOTAGE: D2 (ADR-046 §4.6) — the org-less-TARGET arm of Samen.Policy.SameOrgFk is
+# reverted to its pre-fix bug: it returns {:error, :target_has_no_org_id}, which
+# validate_relationship/3 routes into add_error — REFUSING a write whose belongs_to
+# targets a row with no org_id (an org-less anchor / shared cross-org Credential).
+# The fix made that arm PASS (an org-less target cannot cross orgs), matching the
+# module's own comment and the verifier moduledoc. Reverting it flips the org-less
+# PASS proof: the create is refused (changeset invalid) instead of passing. The
+# genuine cross-org guard is untouched (its arm still refuses), so this sabotage
+# targets ONLY the org-less relaxation — no invariant is weakened by it.
+# APP: samen_core
+# TEST_FILES: test/same_org_fk_change_test.exs
+# MUST_FAIL: a write whose FK targets an org-less row is NOT refused
+diff --git a/samen_core/lib/samen/policy/same_org_fk.ex b/samen_core/lib/samen/policy/same_org_fk.ex
+index 3262da0..2a316ef 100644
+--- a/samen_core/lib/samen/policy/same_org_fk.ex
++++ b/samen_core/lib/samen/policy/same_org_fk.ex
+@@ -187,7 +187,7 @@ defmodule Samen.Policy.SameOrgFk do
+         # `:org_less_target` sentinel is routed to a pass arm in
+         # `validate_relationship/3` (D2 / ADR-046 §4.6) — matching this module's
+         # documented contract and the verifier moduledoc, not an add_error refusal.
+-        :org_less_target
++        {:error, :target_has_no_org_id}
+ 
+       true ->
+         sql =

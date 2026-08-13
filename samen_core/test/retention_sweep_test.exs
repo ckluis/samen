@@ -16,6 +16,7 @@ defmodule Samen.RetentionSweepTest do
 
   alias SamenCore.TestRepo, as: Repo
   alias Samen.Archival
+  alias Samen.AuditChain.TenantView
   alias Samen.Retention
   alias Samen.Retention.Spec
   alias Samen.Vault
@@ -172,6 +173,77 @@ defmodule Samen.RetentionSweepTest do
       # The expired row's subject is crypto-shredded; the fresh row's subject is intact.
       assert Samen.Erasure.erased?(shred_subject, repo: @repo)
       refute Samen.Erasure.erased?(keep_subject, repo: @repo)
+    end
+  end
+
+  # ── D5 (ADR-046 §4.4) — a retention-driven shred rides the TENANT's chain ────
+
+  # Create a subject-bearing Company in a SPECIFIC org (name carries the subject
+  # id, like the :shred test above) and age its inserted_at past the TTL.
+  defp company_in_org_aged!(org_id, name, age_days) do
+    row =
+      Company
+      |> Ash.Changeset.for_create(:create, %{name: name, org_id: org_id})
+      |> Ash.create!(authorize?: false)
+
+    ts = DateTime.add(@now, -age_days * 24 * 60 * 60, :second) |> DateTime.truncate(:second)
+    Repo.query!("UPDATE cpy_company SET cpy_inserted_at = $1 WHERE cpy_id = $2", [ts, Ecto.UUID.dump!(row.id)])
+    row
+  end
+
+  describe "D5 — retention shred is org-attributed (ADR-046 §4.4)" do
+    test "the erasure event lands on the TENANT's chain, not __global__" do
+      org_id = Ash.UUID.generate()
+      subject_id = "ret-org-subj-#{System.unique_integer([:positive])}"
+      {:ok, _} = Vault.store_field(subject_id, :pii_email, :emails, "d5@example.com", @repo)
+
+      _old = company_in_org_aged!(org_id, subject_id, 400)
+
+      spec = %Spec{
+        resource: Company,
+        ttl_seconds: 365 * 24 * 60 * 60,
+        action: :shred,
+        subject_field: :name
+      }
+
+      report = Retention.sweep([spec], now: @now, repo: @repo)
+      assert report.swept == 1
+      assert Samen.Erasure.erased?(subject_id, repo: @repo)
+
+      # The erasure event is retrievable on the TENANT's own chain via TenantView —
+      # org-attributed, so the tenant can see the erasure of its own data subject.
+      {:ok, view} = TenantView.for_org(org_id, repo: @repo)
+
+      assert Enum.any?(view.entries, fn e ->
+               e.event_type == "erasure" and e.subject_id == subject_id
+             end),
+             "the retention-driven shred's erasure event MUST land on the tenant org's chain — " <>
+               "entries: #{inspect(view.entries)}"
+    end
+
+    test "ANTI-TAUTOLOGY: __global__ is refused; another org's chain is clean" do
+      org_id = Ash.UUID.generate()
+      other_org = Ash.UUID.generate()
+      subject_id = "ret-org-subj-#{System.unique_integer([:positive])}"
+      {:ok, _} = Vault.store_field(subject_id, :pii_email, :emails, "d5b@example.com", @repo)
+
+      _old = company_in_org_aged!(org_id, subject_id, 400)
+
+      spec = %Spec{resource: Company, ttl_seconds: 365 * 24 * 60 * 60, action: :shred, subject_field: :name}
+      assert %{swept: 1} = Retention.sweep([spec], now: @now, repo: @repo)
+
+      # Had the event landed on "__global__" (the pre-fix behavior), NO tenant could
+      # ever see it — TenantView refuses the reserved partition outright.
+      assert {:error, :not_a_tenant_org} = TenantView.for_org("__global__", repo: @repo)
+
+      # And the event is NOT visible on an unrelated org's chain — proving the
+      # attribution is to THIS tenant specifically, not blanket-written everywhere.
+      {:ok, other_view} = TenantView.for_org(other_org, repo: @repo)
+
+      refute Enum.any?(other_view.entries, fn e ->
+               e.event_type == "erasure" and e.subject_id == subject_id
+             end),
+             "the erasure must be attributed to the OWNING org only — leaked into #{other_org}"
     end
   end
 
