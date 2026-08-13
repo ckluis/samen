@@ -137,4 +137,28 @@ defmodule Samen.Scopes.Primitives.Audit do
           "verdict=#{Map.get(file, :verdict, :clean)}"
     })
   end
+
+  @doc """
+  Emit a file blob-deletion audit event (the governed `Samen.Files.delete_file/3` /
+  erasure-arm path — ADR-046 §4.3 D4/T130).
+
+  Token-only + org-attributed: `subject_id = file.id`, `correlation_id = org_id`, and the
+  detail carries ONLY the bounded booleans/counts `blob_deleted` (was the physical blob
+  removed — i.e. was this the LAST reference) and `refs_remaining` (how many aliasing
+  `File` rows still reference the blob). The `storage_key` (a credential-shaped reference)
+  and the filename are NEVER in the audit row.
+  """
+  @spec file_blob_deleted(module(), map(), String.t() | nil, map()) ::
+          {:ok, term()} | {:error, term()}
+  def file_blob_deleted(repo, file, actor_id, meta) do
+    Samen.AuditEvent.insert(repo, %{
+      event_type: "system",
+      subject_id: to_string(Map.get(file, :id)),
+      actor_id: actor_id,
+      correlation_id: Map.get(file, :org_id),
+      detail:
+        "primitives.file.blob_deleted blob_deleted=#{Map.get(meta, :blob_deleted)} " <>
+          "refs_remaining=#{Map.get(meta, :refs_remaining)}"
+    })
+  end
 end

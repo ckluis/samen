@@ -320,6 +320,217 @@ defmodule Samen.Files do
     end
   end
 
+  @doc """
+  The **governed blob-deletion chokepoint** (ADR-046 §4.3 · D4/T130) — the delete twin
+  of `upload/3` (the only `storage_key` MINT). This is the ONLY path in `lib/` that ever
+  calls the storage adapter's `delete/2`, so blob deletion is governed-by-construction,
+  exactly as `Samen.Files.ChokepointGuard` makes minting governed.
+
+  It removes ONE reference to a blob (the `file` row) and physically deletes the blob
+  bytes ONLY when it was the **last** reference (`Samen.Clone` re-links `storage_key`
+  verbatim, so N `File` rows can alias one blob — T130). Everything a blob delete must be
+  is enforced here, in order, inside ONE transaction:
+
+    1. **Advisory-lock the blob key** (`pg_advisory_xact_lock(hashtext(key))`) so the
+       count-then-delete critical section is mutually exclusive across concurrent deletes
+       of the SAME blob. This is what makes ref-counting correct under concurrency: two
+       transactions deleting the last two references SERIALIZE on the lock, so exactly one
+       sees `refs_remaining == 0` and deletes — never both (no double-delete), never
+       neither (no orphaned live blob), never a delete while a reference remains (no
+       premature delete). The count is DERIVED from the physical rows (not a stored
+       counter that could drift): the rows ARE the references.
+    2. **Governed destroy of the reference row** through the resource's real terminal
+       destroy action (`:destroy_permanently` on an archivable resource, else `:destroy`)
+       — the same governed, audited, chokepoint-guarded path a normal destroy takes (the
+       destroy sets no `storage_key`, so `ChokepointGuard` passes it structurally).
+    3. **Count remaining references** — every physical row (live, archived, quarantined)
+       still pointing at `storage_key`, archive-state-inclusive (an archived alias still
+       references its bytes and must keep the blob alive).
+    4. **Last-reference delete** — when `refs_remaining == 0`, call the configured
+       fail-honest adapter's `delete/2`. **Fail-honest + fail-closed** (ADR-026): an
+       unconfigured/unimplemented adapter returns `{:error, _}` — a delete that did NOT
+       happen must not report success on a compliance path. On such an error the whole
+       transaction ROLLS BACK, so the last reference is NOT dropped while the blob
+       survives (no silent orphan) and the caller sees the honest error.
+    5. **Audit** — a token-only `primitives.file.blob_deleted` event, org-attributed
+       (`correlation_id = org_id`), carrying only `blob_deleted?`/`refs_remaining` — never
+       the filename or `storage_key`.
+
+  ## Who may call it
+
+  The internal erasure/retention driver (`Samen.Files.Erasure`, wired into
+  `Samen.Erasure.shred/2`) and a host's governed File-destroy path. Never an ad-hoc raw
+  `storage.delete` — that would bypass the ref-count and could destroy a still-referenced
+  clone's bytes (T130). Because this is the only `storage.delete` caller, "no ungoverned
+  blob delete" holds by construction.
+
+  ## Arguments / returns
+
+    * `scope` — a map/struct carrying `:org_id` and, optionally, `:actor_id`/`:user_id`.
+    * `file`  — the `File` struct to delete (must carry `:id`, `:storage_key`, `:org_id`).
+    * `opts`  — `:file_module`, `:repo`, `:storage`, `:storage_config` (opts win over config).
+
+    * `{:ok, %{blob_deleted: boolean, refs_remaining: non_neg_integer, file_id: term}}` —
+      the reference was removed; `blob_deleted` is `true` iff it was the last reference AND
+      the adapter deleted the bytes.
+    * `{:error, :no_file_module | :no_repo | :missing_storage_key}` — fail-closed.
+    * `{:error, {:blob_delete_failed, reason}}` — last reference, but the fail-honest
+      adapter refused; the transaction rolled back (reference preserved).
+  """
+  @spec delete_file(map(), map(), keyword()) :: {:ok, map()} | {:error, term()}
+  def delete_file(scope, file, opts \\ []) when is_map(scope) and is_map(file) do
+    file_mod = opt(opts, :file_module)
+    repo = opt(opts, :repo)
+    storage = opt(opts, :storage) || Samen.Files.Storage.Local
+    storage_config = opt(opts, :storage_config) || %{}
+
+    org_id = fetch(scope, :org_id) || Map.get(file, :org_id)
+    actor_id = fetch(scope, :actor_id) || fetch(scope, :user_id)
+    storage_key = Map.get(file, :storage_key)
+
+    cond do
+      is_nil(file_mod) ->
+        {:error, :no_file_module}
+
+      is_nil(repo) ->
+        {:error, :no_repo}
+
+      not is_binary(storage_key) or storage_key == "" ->
+        {:error, :missing_storage_key}
+
+      true ->
+        do_delete_file(file, %{
+          file_mod: file_mod,
+          repo: repo,
+          storage: storage,
+          storage_config: storage_config,
+          storage_key: storage_key,
+          org_id: org_id,
+          actor_id: actor_id
+        })
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Governed blob delete — the transactional, advisory-locked, last-reference core.
+  # ---------------------------------------------------------------------------
+  defp do_delete_file(file, ctx) do
+    ctx.repo.transaction(fn ->
+      # (1) Serialize concurrent deletes of THIS blob (see delete_file/3 §1).
+      lock_blob(ctx.repo, ctx.storage_key)
+
+      # (2) Remove this reference through the resource's real terminal destroy action.
+      case destroy_reference(file, ctx) do
+        :ok -> :ok
+        {:ok, _} -> :ok
+        {:error, reason} -> ctx.repo.rollback({:reference_destroy_failed, reason})
+      end
+
+      # (3) Count remaining physical references to the blob (archive-inclusive).
+      remaining = count_refs(ctx.repo, ctx.file_mod, ctx.storage_key)
+
+      # (4) Last-reference delete — fail-honest, fail-closed.
+      blob_deleted =
+        if remaining == 0 do
+          case ctx.storage.delete(ctx.storage_key, ctx.storage_config) do
+            :ok ->
+              true
+
+            {:error, reason} ->
+              # A delete that did NOT happen must not report success, and the last
+              # reference must not be dropped while the blob survives: roll back.
+              ctx.repo.rollback({:blob_delete_failed, reason})
+          end
+        else
+          false
+        end
+
+      # (5) Token-only, org-attributed audit of the blob deletion.
+      emit_delete_audit(ctx, file, blob_deleted, remaining)
+
+      %{blob_deleted: blob_deleted, refs_remaining: remaining, file_id: Map.get(file, :id)}
+    end)
+  end
+
+  # A transaction-scoped advisory lock keyed on the blob storage_key. Held until the
+  # surrounding transaction commits/rolls back, so it serializes the count-then-delete
+  # critical section across concurrent delete transactions for the same blob.
+  defp lock_blob(repo, key) do
+    repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [key])
+    :ok
+  end
+
+  # Hard-remove the reference row: `:destroy_permanently` on an archivable resource (its
+  # primary `:destroy` is SOFT — it would only archive, leaving the row referencing the
+  # blob), else the plain `:destroy`. Neither sets a `storage_key`, so ChokepointGuard
+  # passes them structurally.
+  defp destroy_reference(file, ctx) do
+    action = if Samen.Info.archivable?(ctx.file_mod), do: :destroy_permanently, else: :destroy
+
+    file
+    |> Ash.Changeset.for_destroy(action, %{})
+    |> Ash.destroy(authorize?: false)
+  end
+
+  # DERIVED reference count: every physical row still pointing at `storage_key`, counted
+  # over the raw table so it is archive-state-inclusive (an archived alias still keeps the
+  # blob alive) and cannot be hidden by an archival read preparation. The table name comes
+  # from AshPostgres introspection (never user input) and is charset-validated before
+  # interpolation.
+  defp count_refs(repo, file_mod, key) do
+    table = AshPostgres.DataLayer.Info.table(file_mod)
+    # The physical column is abbrev-prefixed (e.g. `sca_storage_key`), NOT the logical
+    # attribute name — resolve its `source` from Ash introspection.
+    column = attribute_source(file_mod, :storage_key)
+
+    unless safe_identifier?(table) and safe_identifier?(column) do
+      raise ArgumentError,
+            "unsafe or missing table/column for #{inspect(file_mod)}: " <>
+              "#{inspect(table)} / #{inspect(column)}"
+    end
+
+    %{rows: [[n]]} =
+      repo.query!("SELECT count(*) FROM \"#{table}\" WHERE \"#{column}\" = $1", [key])
+
+    n
+  end
+
+  defp attribute_source(resource, name) do
+    case Ash.Resource.Info.attribute(resource, name) do
+      nil -> nil
+      attr -> to_string(attr.source || attr.name)
+    end
+  end
+
+  # Identifiers come from Ash introspection (never user input); validate the charset
+  # before interpolation as belt-and-braces against a malformed abbrev.
+  defp safe_identifier?(id), do: is_binary(id) and Regex.match?(~r/\A[a-z0-9_]+\z/, id)
+
+  defp emit_delete_audit(ctx, file, blob_deleted, remaining) do
+    audit_repo = ctx.repo || Application.get_env(:samen_core, :verify_repo)
+
+    if audit_repo do
+      try do
+        Audit.file_blob_deleted(
+          audit_repo,
+          %{id: Map.get(file, :id), org_id: ctx.org_id},
+          ctx.actor_id,
+          %{blob_deleted: blob_deleted, refs_remaining: remaining}
+        )
+      rescue
+        e ->
+          Logger.warning(
+            "[Samen.Files] blob-delete audit emit failed for file " <>
+              "#{inspect(Map.get(file, :id))}: #{Exception.message(e)}"
+          )
+
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
   # ---------------------------------------------------------------------------
 
   defp scan_and_promote(file, ctx) do

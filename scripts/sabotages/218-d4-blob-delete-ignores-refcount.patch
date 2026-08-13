@@ -1,0 +1,25 @@
+# SABOTAGE: D4/T130 (ADR-046 §4.3) — Samen.Files.delete_file/3 ignores the reference
+# count: the last-reference guard `if remaining == 0` is widened to `if remaining >= 0`
+# (always true), so EVERY governed delete physically removes the blob — even when other
+# File rows (a Samen.Clone alias) still reference it. This is the exact premature
+# shared-blob destroy T130 forbids: deleting one clone destroys the blob its source (or
+# another clone) still needs. It flips T130 direction A — after deleting the clone the
+# shared blob is gone, so `Storage.get(key)` is :not_found and `refs_remaining`-keyed
+# assertions fail. The ref-count is the whole T130 safety; this proves it is load-bearing,
+# weakening no other invariant (the fail-honest + audit arms are untouched).
+# APP: samen_core
+# TEST_FILES: test/files_delete_test.exs
+# MUST_FAIL: deleting the clone leaves the shared blob INTACT
+diff --git a/samen_core/lib/samen/files.ex b/samen_core/lib/samen/files.ex
+index b3be005..52512c7 100644
+--- a/samen_core/lib/samen/files.ex
++++ b/samen_core/lib/samen/files.ex
+@@ -431,7 +431,7 @@ defmodule Samen.Files do
+ 
+       # (4) Last-reference delete — fail-honest, fail-closed.
+       blob_deleted =
+-        if remaining == 0 do
++        if remaining >= 0 do
+           case ctx.storage.delete(ctx.storage_key, ctx.storage_config) do
+             :ok ->
+               true

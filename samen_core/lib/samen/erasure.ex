@@ -85,13 +85,22 @@ defmodule Samen.Erasure do
     # detaching a partition; see the simulation seam in `Samen.Rollup`).
     rollup_opts = Keyword.take(opts, [:specs, :raw_retained?])
 
+    # Options for the file-blob erasure arm (ADR-046 §4.3 D4): the registered file
+    # specs (or the config default), the subject's org (for the token-only blob-delete
+    # audit; nil → each file's own org_id), and who initiated the erasure.
+    file_opts = [
+      file_specs: Keyword.get(opts, :file_specs),
+      org_id: Keyword.get(opts, :org_id),
+      actor_id: actor_id
+    ]
+
     # STEP 1 — destroy the key FIRST, outside the DB tx. This is the load-bearing
     # act. It is the ONLY thing that can make the guarantee fail closed (if the
     # key store is unreachable we must NOT proceed and NOT fabricate an
     # attestation).
     case Kms.shred(subject_id) do
       {:ok, attestation} ->
-        seal_db_tiers(subject_id, attestation, :from_state, actor_id, org_id, r, rollup_opts)
+        seal_db_tiers(subject_id, attestation, :from_state, actor_id, org_id, r, rollup_opts, file_opts)
 
       {:error, :absent} ->
         # Subject never had a key. Still redact any non_pii! rows and write a
@@ -106,7 +115,7 @@ defmodule Samen.Erasure do
           checked_at: DateTime.utc_now()
         }
 
-        seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts)
+        seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts, file_opts)
 
       {:error, reason} ->
         # Key store unreachable (outage) — FAIL CLOSED. No sentinel, no report,
@@ -118,7 +127,7 @@ defmodule Samen.Erasure do
   # STEP 2–5 in one transaction. `outcome_mode` is `:from_state` (derive from the
   # seal result — "shredded" on the first call that seals rows, "already_shredded"
   # on an idempotent later call) or a fixed string (e.g. "absent").
-  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, org_id, r, rollup_opts) do
+  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, org_id, r, rollup_opts, file_opts) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     multi =
@@ -145,13 +154,24 @@ defmodule Samen.Erasure do
       |> Ecto.Multi.run(:rollups, fn repo, _changes ->
         {:ok, Samen.Rollup.erase_subject(subject_id, repo, rollup_opts)}
       end)
-      # STEP 5 (built here, needs step 2/3/3b results) — the erasure report.
+      # STEP 3c — file-blob erasure arm (ADR-046 §4.3 D4). Raw stored file bytes live
+      # OUTSIDE the per-subject-DEK envelope, so key-shred does not reach them: this arm
+      # deletes the subject's file blobs through the governed, ref-counted, fail-honest
+      # Samen.Files.delete_file/3 chokepoint (last-reference-aware — a blob a NON-erased
+      # clone still references survives, T130). Fail-soft: a file whose blob cannot be
+      # reached is recorded, never rolls back the subject's vault erasure.
+      |> Ecto.Multi.run(:file_blobs, fn repo, _changes ->
+        {:ok, Samen.Files.Erasure.erase_subject(subject_id, repo, file_opts)}
+      end)
+      # STEP 5 (built here, needs step 2/3/3b/3c results) — the erasure report.
       |> Ecto.Multi.run(:report, fn repo, changes ->
         {sealed, _} = changes.seal_vault
         %{count: redacted, details: redaction_details} = changes.redact_non_pii
         rollup_report = changes.rollups
+        file_report = changes.file_blobs
 
-        tiers = build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, repo)
+        tiers =
+          build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, repo)
         outcome = resolve_outcome(outcome_mode, subject_id, sealed, repo)
 
         report_attrs = %{
@@ -227,7 +247,7 @@ defmodule Samen.Erasure do
   # Tier descriptors — what the T2.9 oracle reads (D7 report).
   # ---------------------------------------------------------------------------
 
-  defp build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, repo) do
+  defp build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, repo) do
     remaining_active =
       repo.aggregate(
         from(v in VaultRow, where: v.subject_id == ^subject_id and v.state == "active"),
@@ -265,7 +285,11 @@ defmodule Samen.Erasure do
       # governed (rebuilt subject-free or the subject's derived rows suppressed);
       # a registered rollup ABSENT from this list on a post-shred report is a
       # fail-closed gap.
-      "rollups" => rollup_report
+      "rollups" => rollup_report,
+      # File-blob tier (ADR-046 §4.3 D4): the per-file-resource report of blobs the
+      # erasure arm deleted for the subject (last-reference-aware). Empty when no file
+      # erasure spec is registered. Token-only (counts + resource name, never a key).
+      "file_blobs" => file_report
     }
   end
 
