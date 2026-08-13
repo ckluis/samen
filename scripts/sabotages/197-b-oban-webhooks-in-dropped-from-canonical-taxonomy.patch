@@ -17,13 +17,14 @@
 # MUST_FAIL: every discovered worker queue is registered in default_queue_config/0
 # MUST_FAIL: the three B-OBAN regression queues are discovered AND canonically configured
 diff --git a/samen_core/lib/samen/jobs.ex b/samen_core/lib/samen/jobs.ex
+index e3b2437..935ed36 100644
 --- a/samen_core/lib/samen/jobs.ex
 +++ b/samen_core/lib/samen/jobs.ex
-@@ -122,7 +122,6 @@
+@@ -123,7 +123,6 @@ defmodule Samen.Jobs do
        default: 10,
        rollups: 2,
        webhooks_out: 5,
 -      webhooks_in: 5,
        erasure: 1,
        maintenance: 1,
-       reveal: 5,
+       # F3.5 / O3 — the audit-chain integrity VERIFY sweep runs on its OWN queue, NOT

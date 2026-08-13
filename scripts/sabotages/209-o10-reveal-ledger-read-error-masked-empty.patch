@@ -1,0 +1,22 @@
+# SABOTAGE: O10 — the reveal-ledger read-error signal is defeated. The fix makes
+# `reveal_events_result/2` distinguish a genuinely-empty ledger ({:ok, []}) from a FAILED
+# read ({:error, :unavailable}), so a tenant TRUST surface never shows an unreadable ledger
+# as a clean, empty "no reveals" record. This sabotage reverts the rescue to `{:ok, []}` —
+# a read FAILURE is again masked as a clean, empty ledger (a false all-clear). The read-error
+# red path MUST flip: a failing read now returns {:ok, []} instead of {:error, :unavailable}.
+# APP: samen_core
+# TEST_FILES: test/reveal_ledger_read_signal_test.exs
+# MUST_FAIL: a failing ledger read returns
+diff --git a/samen_core/lib/samen/audit_chain.ex b/samen_core/lib/samen/audit_chain.ex
+index b2204d5..e92aaee 100644
+--- a/samen_core/lib/samen/audit_chain.ex
++++ b/samen_core/lib/samen/audit_chain.ex
+@@ -132,7 +132,7 @@ defmodule Samen.AuditChain do
+   rescue
+     # A genuine READ failure (missing table, DB outage) is surfaced as a DISTINCT signal,
+     # never masked as an empty ("clean") ledger — that masking is the O10 defect.
+-    _ -> {:error, :unavailable}
++    _ -> {:ok, []}
+   end
+ 
+   @doc """

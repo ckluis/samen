@@ -17,12 +17,24 @@ defmodule Samen.AuditChain.VerifyWorker do
   signal + the error log; Oban retry is reserved for the seal worker's transient
   anchor-store outages.
 
-  ## Queue / attempts
+  ## Queue / attempts — its OWN queue so a long verify cannot starve roll-forward (O3)
 
-  Queue `:maintenance` (shared with the seal + reconcile crons). `max_attempts: 1`
-  — a read-only verification sweep is not retried; the next cron tick re-runs it.
+  Queue `:audit_verify` (NOT the shared `:maintenance` lane). The verify sweep is a
+  keyset-bounded but still potentially long scan of every org's chain; on `:maintenance`
+  (concurrency 1) it shared a strict-serialization lane with `Samen.AuditEvent.PartitionManager`
+  — the audit-partition roll-forward whose absence makes `aud_event` writes FAIL at the next
+  month boundary. A verify that ran long would queue the roll-forward behind it. Its own
+  queue removes that collision: the verify can take as long as it needs without blocking the
+  mechanism that keeps the audit table writable.
+
+  `max_attempts: 1` — a read-only verification sweep is not retried; the next cron tick
+  re-runs it. `unique: [period: 900, ...]` — a still-`available`/`executing` verify is NOT
+  re-enqueued by the next 15-minute tick, so ticks cannot pile up into a backlog.
   """
-  use Oban.Worker, queue: :maintenance, max_attempts: 1
+  use Oban.Worker,
+    queue: :audit_verify,
+    max_attempts: 1,
+    unique: [period: 900, states: [:scheduled, :available, :executing, :retryable, :suspended]]
 
   require Logger
 

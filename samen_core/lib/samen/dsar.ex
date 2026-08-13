@@ -27,11 +27,16 @@ defmodule Samen.Dsar do
   A shredded subject's field resolves to the `"[shredded]"` sentinel (the ciphertext
   is undecryptable — honest absence, not a fabricated value).
 
-  ## Records the access (mirrors erasure's audit emission)
+  ## Records the access — a HARD PRECONDITION of returning the bundle (O9)
 
   Every export appends a `dsar_export` event to the subject's hash chain (tokens
   only — plane + field count, never the exported plaintext), so a subject-access is
-  itself on the tamper-evident lifecycle log.
+  itself on the tamper-evident lifecycle log. That access record is NON-REPUDIATION on a
+  GDPR Art. 15 compliance surface — it is the load-bearing "who exported whose data"
+  artifact. So the append is a PRECONDITION of handing back the bundle, NOT best-effort:
+  if the audit append fails (repo down, missing `aud_chain` table, seq contention), the
+  export FAILS with `{:error, {:audit_write_failed, reason}}` and the caller gets NO
+  bundle. `export_subject/2` never returns an export it could not account for.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -65,8 +70,10 @@ defmodule Samen.Dsar do
     * `:org_id`   — the subject's org (the export event rides that org's chain).
     * `:actor_id` — who ran the export (recorded in the audit event).
 
-  Returns `{:ok, bundle}`. The bundle NEVER contains a token or ciphertext; masked
-  values are `Masked.mask/0`.
+  Returns `{:ok, bundle}` on success. The bundle NEVER contains a token or ciphertext;
+  masked values are `Masked.mask/0`. Returns `{:error, {:audit_write_failed, reason}}` if
+  the mandatory `dsar_export` access record could not be written — the export is refused
+  rather than handed back unaccounted-for (O9). The success path is unchanged.
   """
   @spec export_subject(String.t(), keyword()) :: {:ok, bundle()} | {:error, term}
   def export_subject(subject_id, opts \\ []) when is_binary(subject_id) do
@@ -89,9 +96,11 @@ defmodule Samen.Dsar do
       audit_trail: audit_trail
     }
 
-    _ = record_export(repo, org_id, subject_id, actor_id, plane, length(personal_data))
-
-    {:ok, bundle}
+    # The access record is a HARD PRECONDITION (O9): no non-repudiation record → no bundle.
+    case record_export(repo, org_id, subject_id, actor_id, plane, length(personal_data)) do
+      {:ok, _entry} -> {:ok, bundle}
+      {:error, reason} -> {:error, {:audit_write_failed, reason}}
+    end
   end
 
   # The masking decision — the two-plane rule (mirrors Samen.Scope.ApiKey.masking_for).
@@ -138,6 +147,9 @@ defmodule Samen.Dsar do
   end
 
   # Append the DSAR access to the subject's chain (tokens only — never the payload).
+  # Returns `AuditChain.append/2`'s `{:ok, entry} | {:error, reason}` VERBATIM — the caller
+  # gates the bundle on it (O9). A raise (e.g. missing `aud_chain` table) is converted to an
+  # `{:error, _}` so the failure is honest, NOT swallowed into a fake success.
   defp record_export(repo, org_id, subject_id, actor_id, plane, field_count) do
     AuditChain.append(
       %{
@@ -150,7 +162,7 @@ defmodule Samen.Dsar do
       repo: repo
     )
   rescue
-    _ -> :ok
+    e -> {:error, {:audit_append_raised, Exception.message(e)}}
   end
 
   @doc """

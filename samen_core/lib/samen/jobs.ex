@@ -17,6 +17,7 @@ defmodule Samen.Jobs do
       webhooks_in        |         5          | inbound webhook processing (B9; ADR-038 §5.2)
       erasure            |         1          | crypto-shred orchestration (T1.7/T2.9)
       maintenance        |         1          | partition detach, vacuum, pruning (T2.2)
+      audit_verify       |         1          | audit-chain integrity sweep (F3.5; O3)
       reveal             |         5          | reveal-grant auto-revoke (T1.6 D6)
       automation         |         3          | E1 workflow dispatch/run (ADR-039 §4.1)
       automation_timers  |         2          | E4/E5/outreach timer fan-out (ADR-039 §6.3/§7.3)
@@ -125,6 +126,11 @@ defmodule Samen.Jobs do
       webhooks_in: 5,
       erasure: 1,
       maintenance: 1,
+      # F3.5 / O3 — the audit-chain integrity VERIFY sweep runs on its OWN queue, NOT
+      # `:maintenance`, so a long (keyset-bounded) verify cannot starve the audit-partition
+      # roll-forward (`Samen.AuditEvent.PartitionManager`) that shares the `:maintenance`
+      # concurrency-1 lane and whose absence fails `aud_event` writes at the month boundary.
+      audit_verify: 1,
       reveal: 5,
       # ADR-039 §4.1/§6.3/§7.3 (T39/T41/T118) — the E1 workflow dispatch/run queue
       # and the E4/E5 + outreach TIMER fan-out queue (a different load shape than

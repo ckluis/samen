@@ -85,37 +85,68 @@ defmodule Samen.AuditChain do
   `"__global__"` operator/system partition is NOT a tenant org — it is refused with an
   empty list (a reveal event that DROPPED its org_id lands there and is deliberately NOT
   surfaced to any tenant; that is the PP-11 defect this reader + the org_id threading
-  close). On any read error (e.g. a host that has not migrated `aud_chain`) it degrades to
-  an empty list — honest, never a fake — mirroring how `Settings.SecurityLive` reads
-  impersonation sessions.
+  close).
+
+  ## Empty vs unavailable — `reveal_events_result/2` is the HONEST reader (O10)
+
+  A genuinely-empty ledger ("no operator ever revealed PII in this org") and a FAILED
+  read ("the ledger is unreadable — e.g. a host that has not migrated `aud_chain`, or a
+  DB outage") are NOT the same fact on a tenant TRUST surface: showing a failed read as a
+  clean, empty ledger is a false all-clear. `reveal_events_result/2` therefore returns
+  `{:ok, events}` on a successful read (an empty list is the honest "no reveals") and
+  `{:error, :unavailable}` when the read itself fails — so the consumer
+  (`Settings.SecurityLive`) can render "ledger temporarily unavailable" instead of a
+  fabricated bill of health. `reveal_events_for_org/2` is the back-compat list projection
+  (error → `[]`); prefer the result form on any tenant-visible surface.
   """
-  @spec reveal_events_for_org(String.t(), keyword()) :: [map()]
-  def reveal_events_for_org(org_id, opts \\ []) do
+  @spec reveal_events_result(String.t(), keyword()) :: {:ok, [map()]} | {:error, :unavailable}
+  def reveal_events_result(org_id, opts \\ []) do
     org_id = to_string(org_id)
 
     if org_id == @global_org do
-      []
+      # The reserved operator/system partition is legitimately never a tenant ledger —
+      # an honest empty-OK, NOT a read failure.
+      {:ok, []}
     else
       r = Keyword.get(opts, :repo, repo())
       limit = Keyword.get(opts, :limit, 50)
 
-      r.all(
-        from(e in Entry,
-          where: e.org_id == ^org_id and e.event_type == ^@reveal_event_type,
-          order_by: [desc: e.occurred_at, desc: e.seq],
-          limit: ^limit,
-          select: %{
-            subject_id: e.subject_id,
-            actor_id: e.actor_id,
-            detail: e.detail,
-            correlation_id: e.correlation_id,
-            occurred_at: e.occurred_at
-          }
+      events =
+        r.all(
+          from(e in Entry,
+            where: e.org_id == ^org_id and e.event_type == ^@reveal_event_type,
+            order_by: [desc: e.occurred_at, desc: e.seq],
+            limit: ^limit,
+            select: %{
+              subject_id: e.subject_id,
+              actor_id: e.actor_id,
+              detail: e.detail,
+              correlation_id: e.correlation_id,
+              occurred_at: e.occurred_at
+            }
+          )
         )
-      )
+
+      {:ok, events}
     end
   rescue
-    _ -> []
+    # A genuine READ failure (missing table, DB outage) is surfaced as a DISTINCT signal,
+    # never masked as an empty ("clean") ledger — that masking is the O10 defect.
+    _ -> {:error, :unavailable}
+  end
+
+  @doc """
+  Back-compat LIST projection of `reveal_events_result/2` — a successful read yields the
+  events, a FAILED read degrades to `[]`. This exists for callers that only ever read a
+  populated org chain (the reveal-lifecycle tests). Tenant TRUST surfaces MUST use
+  `reveal_events_result/2` so a read failure is not shown as a clean, empty ledger (O10).
+  """
+  @spec reveal_events_for_org(String.t(), keyword()) :: [map()]
+  def reveal_events_for_org(org_id, opts \\ []) do
+    case reveal_events_result(org_id, opts) do
+      {:ok, events} -> events
+      {:error, _} -> []
+    end
   end
 
   @doc "The Ecto repo backing the chain. Configured via :audit_chain_repo (falls back to :reveal_grant_repo)."
@@ -252,8 +283,21 @@ defmodule Samen.AuditChain do
   end
 
   # ==========================================================================
-  # verify_chain/1 — detect edit, delete, gap
+  # verify_chain/1 — detect edit, delete, gap (BOUNDED / keyset-streamed — O3)
   # ==========================================================================
+
+  # The append-only chain grows monotonically forever, so loading a whole org's
+  # entries (let alone the whole table across every org) into BEAM heap in one
+  # `r.all` is an unbounded, ever-growing allocation — the O3 OOM/starvation hazard.
+  # The verify instead walks the chain in KEYSET-BOUNDED batches from a resume
+  # cursor `{expected_seq, prior_hash}`, carrying the running link-hash forward
+  # across batches. Memory is bounded to one batch, never the whole chain, and the
+  # bounding changes nothing about coverage: every entry is still recomputed and any
+  # tamper anywhere in the chain (seq gap, broken link, hash edit) is still detected.
+  @verify_batch_size 500
+
+  @typedoc "A verify resume cursor: `{next_expected_seq, prior_entry_hash}`."
+  @type cursor :: {non_neg_integer(), binary()}
 
   @doc """
   Verify the org's entire chain. Recomputes every entry's hash from its stored
@@ -267,6 +311,11 @@ defmodule Samen.AuditChain do
   Returns `{:ok, %{org_id, entries, head_seq, head_hash}}` on success, or
   `{:error, {reason, seq}}` on the first inconsistency.
 
+  BOUNDED (O3): the chain is walked in keyset batches of `:batch_size` (default
+  #{@verify_batch_size}) from genesis, so heap use is bounded to one batch — it never
+  materialises the whole chain. Coverage is complete: the resume cursor advances
+  contiguously to the head and a tamper anywhere is still caught.
+
   An EMPTY chain (no entries for the org) verifies `{:ok, ... entries: 0}` — there
   is nothing to tamper with. Callers that require a non-empty chain check `entries`.
   """
@@ -274,14 +323,81 @@ defmodule Samen.AuditChain do
           {:ok, map()} | {:error, {atom(), non_neg_integer()}}
   def verify_chain(org_id, opts \\ []) do
     r = Keyword.get(opts, :repo, repo())
+    org_id = to_string(org_id)
+    batch = verify_batch_size(opts)
+
+    stream_verify(r, org_id, {0, Canonical.genesis()}, batch)
+  end
+
+  defp verify_batch_size(opts) do
+    case Keyword.get(opts, :batch_size, @verify_batch_size) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> @verify_batch_size
+    end
+  end
+
+  # Drive `verify_chain_batch/4` to completion, following the resume cursor batch by
+  # batch. Short-circuits on the first detected tamper.
+  defp stream_verify(r, org_id, cursor, batch) do
+    case verify_chain_batch(r, org_id, cursor, batch) do
+      {:cont, next_cursor} -> stream_verify(r, org_id, next_cursor, batch)
+      {:done, summary} -> {:ok, summary}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Verify ONE keyset-bounded batch of the org's chain from a resume `cursor`, loading
+  at most `batch` entries (`seq >= cursor_seq`, ordered by seq).
+
+  This is the incremental, memory-bounded primitive `verify_chain/2` streams over and
+  the unit that proves the O3 bounding: a single call never loads the whole chain.
+
+    * `cursor` — `:genesis` (start) or a `{next_expected_seq, prior_hash}` tuple to
+      RESUME from (e.g. a mid-chain checkpoint). Resuming is exact: the carried
+      `prior_hash` is the link the first row of the batch must chain to.
+
+  Returns:
+
+    * `{:cont, cursor}` — this batch verified clean and MORE may remain (a full batch
+      was returned); feed `cursor` back to continue.
+    * `{:done, summary}` — the chain is exhausted (a short/empty batch); `summary` is
+      the same `%{org_id, entries, head_seq, head_hash}` shape `verify_chain/2` returns.
+    * `{:error, {reason, seq}}` — a tamper (`:seq_gap` / `:broken_link` / `:hash_mismatch`)
+      was detected in this batch.
+  """
+  @spec verify_chain_batch(module(), String.t(), cursor() | :genesis, pos_integer()) ::
+          {:cont, cursor()} | {:done, map()} | {:error, {atom(), non_neg_integer()}}
+  def verify_chain_batch(r, org_id, cursor \\ :genesis, batch \\ @verify_batch_size) do
+    org_id = to_string(org_id)
+    {expected_seq, prior_hash} = normalize_cursor(cursor)
 
     entries =
       r.all(
-        from(e in Entry, where: e.org_id == ^to_string(org_id), order_by: [asc: e.seq])
+        from(e in Entry,
+          where: e.org_id == ^org_id and e.seq >= ^expected_seq,
+          order_by: [asc: e.seq],
+          limit: ^batch
+        )
       )
 
-    verify_entries(to_string(org_id), entries)
+    case verify_batch(entries, expected_seq, prior_hash, org_id) do
+      {:error, _} = err ->
+        err
+
+      {:ok, {next_seq, next_hash}} ->
+        # A full batch means the keyset window was saturated — advance the cursor and
+        # continue; anything shorter is the tail (chain exhausted).
+        if length(entries) == batch and entries != [] do
+          {:cont, {next_seq, next_hash}}
+        else
+          {:done, summary(org_id, next_seq, next_hash)}
+        end
+    end
   end
+
+  defp normalize_cursor(:genesis), do: {0, Canonical.genesis()}
+  defp normalize_cursor({seq, hash}) when is_integer(seq) and is_binary(hash), do: {seq, hash}
 
   @doc """
   Verify an already-loaded list of entries (ordered by seq). Used by the tenant
@@ -291,22 +407,20 @@ defmodule Samen.AuditChain do
   @spec verify_entries(String.t(), [Entry.t()]) ::
           {:ok, map()} | {:error, {atom(), non_neg_integer()}}
   def verify_entries(org_id, entries) do
-    do_verify(entries, 0, Canonical.genesis(), org_id)
+    org_id = to_string(org_id)
+
+    case verify_batch(entries, 0, Canonical.genesis(), org_id) do
+      {:error, _} = err -> err
+      {:ok, {count, running_hash}} -> {:ok, summary(org_id, count, running_hash)}
+    end
   end
 
-  defp do_verify([], expected_seq, prior_hash, org_id) do
-    head_seq = if expected_seq == 0, do: -1, else: expected_seq - 1
+  # Fold one batch of entries, threading `{expected_seq, prior_hash}`. Returns the
+  # advanced cursor `{:ok, {next_seq, running_hash}}` (so batches COMPOSE across the
+  # keyset window) or the first tamper `{:error, {reason, seq}}`.
+  defp verify_batch([], expected_seq, prior_hash, _org_id), do: {:ok, {expected_seq, prior_hash}}
 
-    {:ok,
-     %{
-       org_id: org_id,
-       entries: expected_seq,
-       head_seq: head_seq,
-       head_hash: if(expected_seq == 0, do: Canonical.genesis(), else: prior_hash)
-     }}
-  end
-
-  defp do_verify([%Entry{} = e | rest], expected_seq, prior_hash, org_id) do
+  defp verify_batch([%Entry{} = e | rest], expected_seq, prior_hash, org_id) do
     cond do
       e.seq != expected_seq ->
         {:error, {:seq_gap, expected_seq}}
@@ -320,9 +434,20 @@ defmodule Samen.AuditChain do
         if recomputed != e.hash do
           {:error, {:hash_mismatch, e.seq}}
         else
-          do_verify(rest, expected_seq + 1, e.hash, org_id)
+          verify_batch(rest, expected_seq + 1, e.hash, org_id)
         end
     end
+  end
+
+  # The verify summary — `count` is the entry total (seq is dense from 0, so the next
+  # expected seq equals the count), `head_hash` the running link-hash at the head.
+  defp summary(org_id, count, running_hash) do
+    %{
+      org_id: to_string(org_id),
+      entries: count,
+      head_seq: if(count == 0, do: -1, else: count - 1),
+      head_hash: if(count == 0, do: Canonical.genesis(), else: running_hash)
+    }
   end
 
   # The canonical payload of a stored entry (mirrors do_append's payload map).

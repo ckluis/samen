@@ -94,11 +94,14 @@ defmodule Samen.Web.Settings.SecurityLive do
     # honesty red-path stays literally true (the enrollment page owns the write).
     totp? = Mount.label(mount, :spine_totp, false)
 
+    {reveal_events, reveal_unavailable?} = reveal_events_for(mount, org_id)
+
     assign(socket,
       org_id: org_id,
       user_id: user_id,
       sessions: sessions_for(mount, org_id),
-      reveal_events: reveal_events_for(mount, org_id),
+      reveal_events: reveal_events,
+      reveal_ledger_unavailable?: reveal_unavailable?,
       host_managed: if(spine?, do: @host_managed_spine, else: @host_managed_default),
       spine_sessions?: spine?,
       spine_totp?: totp?,
@@ -137,22 +140,33 @@ defmodule Samen.Web.Settings.SecurityLive do
 
   # PP-11 (T150) — the REVEAL-access ledger. An impersonation session records the MASKED
   # view; a reveal is the moment tenant PII actually becomes plaintext to an operator. Read
-  # the org-scoped reveal-grant lifecycle from the tenant-readable audit chain (the SAME
-  # honest-empty posture as `sessions_for/2`: a host that has not migrated `aud_chain`, or
-  # the reserved `__global__` partition, yields `[]` — never a fake). This closes the T150
-  # blind spot where the tenant could see "operator held a masked session" but never "operator
-  # requested/held a reveal of subject Y, reason Z, at time T". READ-ONLY — no mutation.
-  defp reveal_events_for(_mount, nil), do: []
+  # the org-scoped reveal-grant lifecycle from the tenant-readable audit chain.
+  #
+  # O10 — HONEST empty vs unavailable. This is a tenant TRUST surface, so a FAILED read
+  # (a host that has not migrated `aud_chain`, a DB outage) must NOT be shown as a clean,
+  # empty ledger — that false all-clear is the O10 defect. `reveal_events_result/2` returns
+  # `{:ok, events}` (an empty list is the honest "no reveals") vs `{:error, :unavailable}`
+  # (the read itself failed); we thread that into `{events, unavailable?}` so the render can
+  # say "ledger temporarily unavailable" instead of "no reveal access recorded". The reserved
+  # `__global__` partition is a legitimate empty-OK. READ-ONLY — no mutation.
+  defp reveal_events_for(_mount, nil), do: {[], false}
 
   defp reveal_events_for(mount, org_id) do
-    org_id
-    |> Samen.AuditChain.reveal_events_for_org(repo: mount.repo)
-    |> Enum.map(fn e ->
-      {label, reason} = reveal_row(e.detail)
-      Map.merge(e, %{label: label, reason: reason})
-    end)
+    case Samen.AuditChain.reveal_events_result(org_id, repo: mount.repo) do
+      {:ok, events} ->
+        decorated =
+          Enum.map(events, fn e ->
+            {label, reason} = reveal_row(e.detail)
+            Map.merge(e, %{label: label, reason: reason})
+          end)
+
+        {decorated, false}
+
+      {:error, _} ->
+        {[], true}
+    end
   rescue
-    _ -> []
+    _ -> {[], true}
   end
 
   # Turn the token-only `detail` ("event=requested <reason>") into a tenant-legible
@@ -294,7 +308,12 @@ defmodule Samen.Web.Settings.SecurityLive do
                     <td style="font-size:12px">{e.reason}</td>
                     <td>{fmt(e.occurred_at)}</td>
                   </tr>
-                  <tr :if={@reveal_events == []}>
+                  <tr :if={@reveal_ledger_unavailable?} id="security-reveal-unavailable">
+                    <td colspan="5" style="color:var(--muted)">
+                      Reveal ledger temporarily unavailable — this is a read error, not a clean record. Retry shortly.
+                    </td>
+                  </tr>
+                  <tr :if={@reveal_events == [] and not @reveal_ledger_unavailable?}>
                     <td colspan="5" style="color:var(--muted)">No reveal access recorded for this org.</td>
                   </tr>
                 </tbody>
