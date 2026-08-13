@@ -6,7 +6,7 @@ decision in one clause. Read the ADR itself before changing anything it governs 
 
 Numbering is chronological, not thematic; the columns below group them by concern so you can
 scan for "everything about the vault" or "everything about the operator plane" without
-reading all 46.
+reading all 47.
 
 ## Vault, crypto-shred, audit
 
@@ -129,9 +129,16 @@ reading all 46.
 |---|---|---|
 | [ADR-045](ADR-045-premerge-review-dispositions.md) | LUMINARY pre-merge review dispositions: the tenant-gate prod default (V-F1) + the phased burn-down of what remains | **Accepted (2026-08-12).** After the two confirmed BLOCKERs were fixed and independently verified (B-SEC tenant-authn `on_mount`, `3b251e3`; B-OBAN queue-drain parity gate, `359abe7`), the merge-gating decision — the tenant gate is conditioned on `:auth_required?`, which **defaulted `false`** with no `config_env()` guard, so every shipped host + generated app shipped **disarmed** — was resolved by the operator choosing **Option A (fail-secure by environment, full-harden)** and shipping it: `9f14a61` (G2/V-F1, `:prod` armed by default + boot-refusal + generator `identity_namespace`) and `dc7b80d` (G1, membership-role derivation, closing S1a/S12), with the ADR-031 literal-default amendment now **in force** (§2.5). The two advised non-V-F1 items also CLOSED: O2 (pawchart `aud_chain`, `98125e5` G3) and X1 (generated-nav, `ead7a42` G4). Sabotage harness → **203**. The rest is filed as a four-phase backlog (1 gate integrity · 2 deploy/runtime hardening · 3 erasure completeness · 4 residual authz hardening), all honestly post-merge. Honesty posture (fail-honest, T144, no-overclaim) re-verified sound; T130 still blocked-safe and sequenced with D4. |
 
+## Erasure completeness (Phase 3)
+
+| # | Title | Decision |
+|---|---|---|
+| [ADR-046](ADR-046-erasure-completeness.md) | Erasure completeness: making `Samen.Erasure`'s carve-out list complete, and checkable-by-construction | **Proposed (2026-08-13).** Designs the ADR-045 §4.3 Phase-3 cluster and sequences it into seven BATON batches. `Samen.Erasure`'s moduledoc names **two** carve-outs key-shred does not reach; there are **at least five** — each a plaintext-or-linkable value living *outside* the per-subject-DEK envelope. **D3 reachability answered: LATENT** (no shipped resource declares a `pii_declared: true` bag field; it is a runtime tenant capability) → framework-hardening, not a live leak. **D1** (recomputable `email_bidx` under the shared un-shreddable `sys:bidx`): recommend **tombstone to a random sentinel on principal-account erasure** — options (rotate `k_bidx` / re-key per-subject-DEK) rejected because they break pre-auth lookup + global dedupe; a genuine operator decision (ADR-035 §4.1 amendment). **D4/T130** (no blob deletion; clone aliases `storage_key`): build a fail-honest chokepoint `Storage.delete` **and** clone ref-counting in **one batch** — delete makes T130 live, so they ship together, never separately. **D5** (retention drops `org_id`), **D6** (DSAR no org binding), **D2/D7** (one-liners): mechanical. The durable fix is a **completeness verifier** that discovers every out-of-envelope residue (blind indexes, `pii_declared` bags, `storage_key` blobs) and asserts erasure reaches each, with a non-empty-discovery floor — the check the grandfathering `pii_classify` baseline structurally cannot do. Docs-only; authors no code. |
+
 ---
 
-46 ADRs total. All are `Status: Accepted` except ADR-025 (`Proposed (deferred)`); ADR-045 was
+47 ADRs total. All are `Status: Accepted` except ADR-025 (`Proposed (deferred)`) and ADR-046
+(`Proposed` — the erasure-completeness design, pending its §7 operator decision); ADR-045 was
 Accepted on 2026-08-12 once its §2 (V-F1) decision was made and shipped. If you add a new one, append a row here in the same pass
 (`docs/guides/cookbook.md`'s claim-evidence discipline applies to this index too — keep it honest,
 not aspirational).
