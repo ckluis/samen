@@ -131,6 +131,14 @@ echo "--- step 14/20: mix samen.verify.same_org_fk"
 mix samen.verify.same_org_fk
 echo "    PASSED"
 
+# 14b. ADR-046 §6 erasure_completeness (CAPSTONE): every out-of-DEK-envelope residue
+#      (derived-linkable _bidx columns, storage_key blobs, pii_declared bags) discovered
+#      from the LIVE schema has a registered subject_id-keyed erasure arm. Fail-closed on
+#      empty discovery (non-vacuous: email_bidx + storage_key exist).
+echo "--- step 14b/20: mix samen.verify.erasure_completeness (ADR-046 §6)"
+mix samen.verify.erasure_completeness
+echo "    PASSED"
+
 # 15. C7 no_pii_columns (token-blind aggregate plane).
 echo "--- step 15/20: mix samen.verify.no_pii_columns"
 mix samen.verify.no_pii_columns

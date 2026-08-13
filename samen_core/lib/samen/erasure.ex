@@ -66,6 +66,78 @@ defmodule Samen.Erasure do
   import Ecto.Query, only: [from: 2]
 
   @doc """
+  DERIVE the canonical erasure specs for a host from its LIVE Ash schema.
+
+  The framework-first activation seam (the erasure analogue of
+  `Samen.Jobs.default_queue_config/0` + `install_defaults/1`): rather than every host
+  hand-wiring which of its abbrev-prefixed tables carry `email_bidx` / `storage_key`,
+  the specs are DERIVED from the host's own materialized resources so a fresh `gen.app`
+  is erasure-complete by construction.
+
+  Returns `%{blind_index_erasure_specs: [...], file_erasure_specs: [...]}`:
+
+    * one `blind_index_erasure_spec` per **registered** derived-linkable column
+      (`Samen.DerivedLinkable`) — `email_bidx` on Credential/Invitation (subject_column
+      `"id"`), `sent_to_bidx` on AuthToken (subject_column `"credential_id"`). An
+      UNregistered `_bidx` column is deliberately NOT auto-covered — the completeness
+      gate fails it so a new blind index must be registered, never silently activated.
+    * one `file_erasure_spec` per **subject-linked** `storage_key` resource (one carrying
+      a data-subject field, e.g. `uploaded_by_id`). Org-asset blobs (no subject field)
+      are org-lifecycle, not per-subject-erasure residues, and get no subject-keyed spec.
+
+  Options are passed to `Samen.Erasure.Completeness.resources/1` (`:resources`/`:domains`/
+  `:otp_app`) so tests can derive against an explicit resource list.
+  """
+  @spec default_specs(keyword()) :: %{
+          blind_index_erasure_specs: [map()],
+          file_erasure_specs: [map()]
+        }
+  def default_specs(opts \\ []) do
+    residues = Samen.Erasure.Completeness.discover(opts)
+
+    bidx =
+      for r <- residues.derived_linkable, r.registered? do
+        %{
+          table_name: r.table,
+          bidx_column: r.column,
+          subject_column: r.subject_column,
+          label: spec_label(r.resource)
+        }
+      end
+
+    files =
+      for r <- residues.storage_key, r.subject_field do
+        %{file_module: r.resource, subject_field: r.subject_field}
+      end
+
+    %{blind_index_erasure_specs: bidx, file_erasure_specs: files}
+  end
+
+  @doc """
+  Install the derived erasure specs into `:samen_core` application env, so the erasure
+  ARMS (`Samen.Auth.BlindIndexErasure` / `Samen.Files.Erasure`) actually fire for this
+  host's resources. Called once at `application.ex` start (the Oban `install_defaults/1`
+  seam's twin) and by `mix samen.verify.erasure_completeness` before it checks.
+
+  Idempotent. Returns the installed spec map.
+  """
+  @spec install_default_specs(keyword()) :: %{
+          blind_index_erasure_specs: [map()],
+          file_erasure_specs: [map()]
+        }
+  def install_default_specs(opts \\ []) do
+    specs = default_specs(opts)
+    Application.put_env(:samen_core, :blind_index_erasure_specs, specs.blind_index_erasure_specs)
+    Application.put_env(:samen_core, :file_erasure_specs, specs.file_erasure_specs)
+    specs
+  end
+
+  # A short human label for the token-only erasure report (never PII).
+  defp spec_label(resource) do
+    resource |> Module.split() |> List.last() |> Macro.underscore()
+  end
+
+  @doc """
   Crypto-shred `subject_id`. See the module doc for the full sequence.
 
   Options:

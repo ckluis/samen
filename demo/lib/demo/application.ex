@@ -10,6 +10,13 @@ defmodule Demo.Application do
     # in :test start_repo? is false, so no Ecto telemetry exists to observe.
     children =
       if Application.get_env(:demo, :start_repo?, true) do
+        # ADR-046 §6 — activate the crypto-shred erasure arms (email_bidx tombstone +
+        # file-blob delete) derived from this host's LIVE schema. The
+        # Samen.Jobs.install_defaults/1 twin: no host-maintained spec list, so the
+        # shipped host (and every gen.app) is erasure-complete by construction. No-op
+        # under test (start_repo? false); the completeness gate installs explicitly.
+        Samen.Erasure.install_default_specs()
+
         Samen.Observability.child_specs(:demo) ++
           [
             Demo.Repo,

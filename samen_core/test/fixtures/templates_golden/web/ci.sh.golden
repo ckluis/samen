@@ -96,6 +96,16 @@ echo "--- step 13/18: mix samen.verify.same_org_fk"
 mix samen.verify.same_org_fk
 echo "    PASSED"
 
+# ADR-046 §6 erasure_completeness (CAPSTONE): every out-of-DEK-envelope residue
+# (derived-linkable _bidx columns, storage_key blobs, pii_declared custom bags) discovered
+# from the LIVE schema is reached by a registered subject_id-keyed erasure arm. The specs
+# are activated framework-first (Samen.Erasure.install_default_specs/1, derived from this
+# app's own resources), so a fresh gen.app passes by construction. Fail-closed on empty
+# discovery (non-vacuous: email_bidx + storage_key exist in every identity+primitives app).
+echo "--- step 13b/18: mix samen.verify.erasure_completeness (ADR-046 §6)"
+mix samen.verify.erasure_completeness
+echo "    PASSED"
+
 echo "--- step 14/18: mix samen.verify.no_pii_columns"
 mix samen.verify.no_pii_columns
 echo "    PASSED"

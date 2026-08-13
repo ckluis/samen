@@ -242,6 +242,56 @@ over an empty set is trivially true, so a green line there would verify nothing.
 
 ---
 
+## Step 13b — `mix samen.verify.erasure_completeness`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.erasure_completeness.ex`):
+
+```text
+[erasure-completeness] FAIL: out-of-envelope residues with NO erasure arm:
+  - UNREGISTERED derived-linkable column <table>.<col>_bidx (...): a `_bidx`-shaped blind index that is NOT in Samen.DerivedLinkable ...
+  - UNREACHED derived-linkable column <table>.email_bidx (...): registered ... but NO :blind_index_erasure_specs entry covers it ...
+  - UNREACHED storage_key blob on <resource> (...): NO :file_erasure_specs entry names this file_module ...
+** (Mix) erasure-completeness: unreached residues — exit 1
+
+[erasure-completeness] FAIL: discovered ZERO derived_linkable residues.
+** (Mix) erasure-completeness: empty derived_linkable discovery — exit 1
+```
+
+**Meaning (ADR-046 §6):** `Samen.Erasure.shred/2` is a KEY-destruction job — it makes
+every *vaulted* value undecryptable at once, but a plaintext-or-linkable value that lives
+OUTSIDE the per-subject-DEK envelope is not reached by key destruction. This gate
+DISCOVERS every such residue from the LIVE schema + registries (never `schema.dict.json`,
+which grandfathers pre-existing columns — the exact mechanism that let `email_bidx` ship
+un-erasable) and ASSERTS a registered `subject_id`-keyed arm reaches each:
+
+- **derived-linkable (`_bidx`) columns** — blind indexes (keyed HMAC of PII) leave an
+  equality oracle over the input space that survives a shred. Discovered via the
+  `Samen.DerivedLinkable` marker registry plus the structural `_bidx` backstop; each must
+  be registered there AND covered by a `:blind_index_erasure_specs` tombstone arm. An
+  UNREGISTERED `_bidx` column fails — a new blind index cannot ship silently.
+- **`storage_key` blobs** — raw file bytes. A subject-linked blob (the resource carries a
+  data-subject field, e.g. `uploaded_by_id`) must be covered by a `:file_erasure_specs`
+  blob-delete arm. An **org-asset** blob (no data-subject field, e.g. CRM `attachment` /
+  CMS `media`) is NOT a per-subject-erasure residue; it is a NOTE-level org-lifecycle
+  residual (deleted on row destroy / retention), named in the output, not gated.
+- **`pii_declared`-capable `:custom` bags** — masking is automatic (the resolver reads
+  every org's `tnt_field`) and erasure is guaranteed at the `define_field` chokepoint (a
+  `pii_declared: true` field is REFUSED unless a `:custom_bag_erasure_specs` arm covers
+  the table). The gate asserts both mechanisms are live.
+
+**Fix:** register the missing arm framework-first, never per-host by hand. The specs are
+DERIVED from each host's live schema by `Samen.Erasure.install_default_specs/1` (the
+`Samen.Jobs.install_defaults/1` twin, called at `application.ex` boot), so a fresh
+`gen.app` is complete by construction. A new blind index goes in `Samen.DerivedLinkable`
+(logical name → owning-principal subject column); a new subject-linked file resource is
+picked up automatically once it carries a recognized subject field.
+
+The empty-discovery variant fails closed on purpose: `email_bidx` + `storage_key` columns
+exist in every host that mounts identity + primitives, so an empty residue set is a broken
+verifier (containment over an empty set is trivially true), never a green line.
+
+---
+
 ## Step 10 — `mix samen.verify.vault_declared_parity`
 
 **Errors** (`samen_core/lib/mix/tasks/samen.verify.vault_declared_parity.ex`):

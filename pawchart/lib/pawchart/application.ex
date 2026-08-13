@@ -15,6 +15,12 @@ defmodule PawChart.Application do
     # in :test start_repo? is false, so no Ecto telemetry exists to observe.
     repo_children =
       if Application.get_env(:pawchart, :start_repo?, true) do
+        # ADR-046 §6 — activate the crypto-shred erasure arms (email_bidx tombstone +
+        # file-blob delete) derived from this host's LIVE schema (the
+        # Samen.Jobs.install_defaults/1 twin — no host-maintained spec list). No-op
+        # under test; the completeness gate installs explicitly.
+        Samen.Erasure.install_default_specs()
+
         Samen.Observability.child_specs(:pawchart) ++
           [
             PawChart.Repo,

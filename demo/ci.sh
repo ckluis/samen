@@ -175,6 +175,16 @@ echo "--- step 14/15: mix samen.verify.same_org_fk (F3.5 same-org-FK guard)"
 mix samen.verify.same_org_fk
 echo "    PASSED"
 
+# 14b. ADR-046 §6 erasure_completeness (Phase-3 CAPSTONE): DISCOVER every out-of-DEK-envelope
+#      residue from the LIVE schema (never schema.dict — it grandfathers, which is how
+#      email_bidx shipped un-erasable) and ASSERT a registered subject_id-keyed erasure arm
+#      reaches each: derived-linkable (_bidx) columns → blind_index tombstone; storage_key
+#      blobs → file-blob delete; pii_declared custom bags → masking + define-time erasure
+#      guard. Fails CLOSED on empty discovery (email_bidx + storage_key exist ⇒ non-vacuous).
+echo "--- step 14b/15: mix samen.verify.erasure_completeness (ADR-046 §6 out-of-envelope residue coverage)"
+mix samen.verify.erasure_completeness
+echo "    PASSED"
+
 # 15. C7 no_pii_columns: the token-blind aggregate plane (T4.2) must have NO pii_
 #     columns at all. Whole-app backstop to the compile-time NoPiiColumns verifier +
 #     transformer: (a) re-runs the C7 rules on every `use Samen.Aggregate.Resource`
