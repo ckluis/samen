@@ -4,12 +4,14 @@
 # it scopes NOTHING — counts as an org pin and the modeled org-less all-tenants read sails through;
 # (b) `source_files/0` drops the demo/driftwood/pawchart trees, so the ~150 vertical
 # `authorize?: false` sites are unswept again. Flips the S15 decoy red-path AND the vertical
-# roll-call; the GREEN sweep's sanctioned-count floor also collapses (marked-but-now-"narrowed"
-# sites stop counting as sanctions).
+# roll-call; AND (verifier R1) the GREEN sweep's non-vacuity floors are independently
+# load-bearing — a framework-only sweep measures 729 files / 130 governed / 45 sanctioned,
+# red against `files >= 800`, `governed >= 140`, `sanctioned in 47..60` on their own.
 # APP: samen_web
 # TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
 # MUST_FAIL: the decoy is FLAGGED
 # MUST_FAIL: vertical trees
+# MUST_FAIL: pinned or sanctioned
 diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
 index e45707e..a888bca 100644
 --- a/samen_web/lib/samen/web/authz/read_scope_lint.ex

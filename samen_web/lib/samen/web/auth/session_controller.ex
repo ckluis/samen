@@ -24,8 +24,13 @@ defmodule Samen.Web.Auth.SessionController do
       (only on success) consumes the pending token and mints the real
       `Identity.Session` row via the SAME `finish_login/4` the password-only
       path uses.
-    * `GET /logout`   → `delete/2` — revokes the CURRENT session row + clears
-      both cookies (`Samen.Web.Auth.log_out/1`).
+    * `POST /logout`  → `delete/2` — revokes the CURRENT session row + clears
+      both cookies (`Samen.Web.Auth.log_out/1`). POST-only since verifier R6
+      (the S7 state-changing-GET class): the revoke + `auth.logout` audit write
+      + session renew ride a CSRF-protected POST.
+    * `GET /logout`   → `stale_logout_get/2` — stale-safe: redirects WITHOUT
+      revoking/auditing/renewing (old bookmarks and prefetchers cannot end a
+      session).
     * `POST .../sessions/:id/revoke`         → `revoke/2` — one session,
       scoped to the caller's OWN credential (defense in depth).
     * `POST .../sessions/revoke_others`      → `revoke_others/2` — every
@@ -261,7 +266,8 @@ defmodule Samen.Web.Auth.SessionController do
   end
 
   @doc """
-  `GET /logout`. Revokes the CURRENT `Identity.Session` row (if any resolved
+  `POST /logout` (R6 — POST-only; the GET path lands on `stale_logout_get/2`).
+  Revokes the CURRENT `Identity.Session` row (if any resolved
   — a stale/already-revoked session logs out cleanly regardless) and clears
   both the session key and the remember-me cookie (`Samen.Web.Auth.log_out/1`).
   """
@@ -288,6 +294,20 @@ defmodule Samen.Web.Auth.SessionController do
     |> Auth.log_out()
     |> configure_session(renew: true)
     |> redirect(to: safe_return(params["return_to"], mount))
+  end
+
+  @doc """
+  The STALE-GET logout landing (R6, the S7 class): `GET /logout` used to BE the
+  logout, so old bookmarks / crawled links / prefetchers still hit it. It must
+  never mutate — a GET is CSRF-forgeable (`<img src=/logout>`) and
+  prefetch-triggerable — so it redirects to the sanitized `return_to` WITHOUT
+  revoking the session row, WITHOUT the `auth.logout` audit write, WITHOUT
+  clearing cookies, and WITHOUT renewing the session: nothing was logged out,
+  nothing happened. The viewer stays signed in exactly as they were.
+  """
+  def stale_logout_get(conn, params) do
+    mount = conn.private.samen_mount
+    redirect(conn, to: safe_return(params["return_to"], mount))
   end
 
   @doc """

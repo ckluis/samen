@@ -154,18 +154,25 @@ defmodule Samen.Web.Authz.ReadScopeLintTest do
 
     # Non-vacuity: the sweep saw all five app trees (hundreds of modules) and a
     # realistic governed-read count — a matcher that finds none, or that misses
-    # authorize?: false, cannot green-light the gate. (At the S15 hardening the sweep
-    # saw 841 files / 150 governed reads.)
-    assert files >= 700
-    assert governed >= 120
+    # authorize?: false, cannot green-light the gate. INDEPENDENTLY LOAD-BEARING
+    # (verifier R1): a framework-only sweep (verticals dropped — the S15b regression)
+    # measures 729 files / 130 governed / 45 sanctioned, so EACH floor below fails
+    # that shape on its own, not only via the roll-call's path assertions.
+    # (At the S15 hardening the full sweep saw 841 files / 150 governed reads.)
+    assert files >= 800
+    assert governed >= 140
 
     # The sanctioned reads are a KNOWN, per-site-justified set (S15 hardening: 49 —
     # pre-auth boot-path/unique-key lookups, webhook-ingest provider-ref lookups,
     # FK cascades, the system-plane sweeps, the operator activity rollup), each
     # carrying a `# authz-scope:` reason at the read site. A regression that started
     # silently swallowing violations as sanctions would blow this ceiling; a lost
-    # marker (or a lost pin downgraded to a sanction) would move it.
-    assert sanctioned in 40..60
+    # marker (or a lost pin downgraded to a sanction) would move it. Lower bound 47:
+    # ABOVE the framework-only count (45, so a dropped vertical sweep goes red here
+    # too) while leaving headroom for two marker→genuine-pin conversions before a
+    # conscious band update — shrinking the sanctioned set further than that is a
+    # deliberate posture change and SHOULD re-open this test.
+    assert sanctioned in 47..60
   end
 
   test "COMPLETENESS ROLL-CALL: the sweep covers both kernels AND the vertical trees, and skips the seed/fixture harnesses" do

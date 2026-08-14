@@ -1247,7 +1247,15 @@ defmodule Samen.Web.Router do
       second-factor interstitial; only reached when `create/2` finds
       `Credential.totp_enabled_at` set)
     * `POST /2fa`          → `Samen.Web.Auth.SessionController.verify_totp/2` (ADR-035 §5 A7)
-    * `GET /logout`        → `Samen.Web.Auth.SessionController.delete/2` (ADR-035 §5 A4)
+    * `POST /logout`       → `Samen.Web.Auth.SessionController.delete/2` (ADR-035 §5 A4;
+      POST-only since verifier R6 — logout REVOKES the session row, writes an
+      `auth.logout` audit event and renews the session, the exact state-changing-GET
+      class S7 closed for the org switch. Callers submit a zero-JS CSRF-token
+      `<form method="post">`; the host `:browser` pipeline's `protect_from_forgery`
+      enforces it)
+    * `GET /logout`        → `Samen.Web.Auth.SessionController.stale_logout_get/2` — the
+      stale-safe landing for old bookmarks/prefetchers: redirects WITHOUT revoking,
+      auditing, or renewing (a forged/prefetched GET can never end a session)
     * `GET /invite/:token` → `Samen.Web.Auth.InviteAcceptLive` (ADR-035 §5 A5)
 
   The no-JS HTTP POST fallbacks (T110 — Samen ships no client JS, so every
@@ -1378,7 +1386,16 @@ defmodule Samen.Web.Router do
         private: %{samen_mount: mount, samen_login_path: login_path, samen_totp_path: totp_path}
       )
 
-      get(logout_path, Samen.Web.Auth.SessionController, :delete,
+      # R6 (the S7 class, logout instance): logout is a session-row REVOKE + audit
+      # write + session renew — a state change, so it rides a CSRF-protected POST.
+      # The GET path stays mounted but STALE-SAFE: `stale_logout_get/2` redirects
+      # without revoking/auditing/renewing, so an `<img src=/logout>` or a link
+      # prefetcher can never end the viewer's session.
+      post(logout_path, Samen.Web.Auth.SessionController, :delete,
+        private: %{samen_mount: mount, samen_login_path: login_path, samen_totp_path: totp_path}
+      )
+
+      get(logout_path, Samen.Web.Auth.SessionController, :stale_logout_get,
         private: %{samen_mount: mount, samen_login_path: login_path, samen_totp_path: totp_path}
       )
 

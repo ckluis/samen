@@ -1,0 +1,27 @@
+# SABOTAGE: R6 (luminary addendum, the S7 class — logout instance) — the stale-GET logout
+# landing regresses to the pre-R6 behavior: `Auth.SessionController.stale_logout_get/2`
+# delegates straight to `delete/2`, so `GET /logout` REVOKES the current Identity.Session
+# row, writes the `auth.logout` audit event, clears both cookies and renews the session
+# again — a CSRF-forgeable (`<img src="/logout">`), prefetch-triggerable session KILL with
+# no token and no click. Flips the R6 red-path (session row must stay alive, no audit event,
+# principal intact after a bare GET). The POST positive control stays green — proving the
+# red-path fails because the GET mutates, not because logout died.
+# APP: samen_web
+# TEST_FILES: test/samen/web/auth/logout_csrf_test.exs
+# MUST_FAIL: does NOT log out
+diff --git a/samen_web/lib/samen/web/auth/session_controller.ex b/samen_web/lib/samen/web/auth/session_controller.ex
+index d8b7bee..dbce05a 100644
+--- a/samen_web/lib/samen/web/auth/session_controller.ex
++++ b/samen_web/lib/samen/web/auth/session_controller.ex
+@@ -305,10 +305,7 @@ defmodule Samen.Web.Auth.SessionController do
+   clearing cookies, and WITHOUT renewing the session: nothing was logged out,
+   nothing happened. The viewer stays signed in exactly as they were.
+   """
+-  def stale_logout_get(conn, params) do
+-    mount = conn.private.samen_mount
+-    redirect(conn, to: safe_return(params["return_to"], mount))
+-  end
++  def stale_logout_get(conn, params), do: delete(conn, params)
+ 
+   @doc """
+   `POST /settings/security/sessions/:id/revoke` — revoke exactly ONE session,

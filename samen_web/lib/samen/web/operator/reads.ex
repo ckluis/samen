@@ -835,13 +835,17 @@ defmodule Samen.Web.Operator.Reads do
 
   defp latest_activity_days(resource, now) do
     resource
-    |> Ash.Query.ensure_selected([:org_id, :occurred_at])
+    # `select/2`, not `ensure_selected/2` (verifier R-wording): ensure_selected ADDS to the
+    # default select, so the "only these columns" claim held by resource shape, not by the
+    # query; the RESTRICTING select/2 (the digest.ex `unread_recipients` form) makes it
+    # structural — nothing beyond these two columns transfers.
+    |> Ash.Query.select([:org_id, :occurred_at])
     |> Ash.Query.distinct([:org_id])
     |> Ash.Query.distinct_sort(occurred_at: :desc)
     |> Ash.Query.limit(@lookup_limit)
     # authz-scope: operator-plane cross-tenant activity rollup — org-less BY DESIGN (one row
-    # per org via distinct, hard-capped, token-blind [:org_id, :occurred_at] only, NO PII);
-    # the S15 escapee, now justified at the read site
+    # per org via distinct, hard-capped, RESTRICTED by select/2 to token-blind
+    # [:org_id, :occurred_at] only, NO PII); the S15 escapee, now justified at the read site
     |> Ash.read!(authorize?: false)
     |> Enum.reduce(%{}, fn ev, acc ->
       case ev.occurred_at do
