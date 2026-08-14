@@ -40,6 +40,12 @@ config :samen_core, :samen_ai_prompt_repo, SamenCore.TestRepo
 # because the resource's `postgres do repo(...) end` reads it via compile_env.
 config :samen_core, :samen_ai_support_reply_draft_repo, SamenCore.TestRepo
 
+# ADR-047 A1: the repos backing the agent-loop cursor resources (`Samen.AI.Agent.Run` /
+# `Samen.AI.Agent.Turn` — the `:samen_ai_prompt_repo` precedent above). Host apps
+# configure their own; compile-time via compile_env.
+config :samen_core, :samen_ai_agent_run_repo, SamenCore.TestRepo
+config :samen_core, :samen_ai_agent_turn_repo, SamenCore.TestRepo
+
 config :ash, disable_async?: true
 
 # T145: quiet Ash's benign `[warning] Missed N notifications` runtime log noise. The AI

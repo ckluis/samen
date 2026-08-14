@@ -3,6 +3,240 @@
     {
       "fields": [
         {
+          "column_name": "arn_agent",
+          "logical_name": "agent",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "arn_cancel_requested_at",
+          "logical_name": "cancel_requested_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "arn_chain",
+          "logical_name": "chain",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "arn_current_turn",
+          "logical_name": "current_turn",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "arn_deadline_seconds",
+          "logical_name": "deadline_seconds",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "arn_depth",
+          "logical_name": "depth",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "arn_error_kind",
+          "logical_name": "error_kind",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "arn_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "arn_input_tokens_used",
+          "logical_name": "input_tokens_used",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "arn_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "arn_max_input_tokens",
+          "logical_name": "max_input_tokens",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "arn_max_output_tokens",
+          "logical_name": "max_output_tokens",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "arn_max_tool_calls",
+          "logical_name": "max_tool_calls",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "arn_max_turns",
+          "logical_name": "max_turns",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "arn_next_turn_at",
+          "logical_name": "next_turn_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "arn_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "arn_origin",
+          "logical_name": "origin",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "arn_output_tokens_used",
+          "logical_name": "output_tokens_used",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "arn_started_at",
+          "logical_name": "started_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "arn_state",
+          "logical_name": "state",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "arn_tool_calls_used",
+          "logical_name": "tool_calls_used",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "arn_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Samen.AI.Agent.Run",
+      "table_name": "ai_agent_run"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "atn_arg_keys",
+          "logical_name": "arg_keys",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "atn_duration_ms",
+          "logical_name": "duration_ms",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "atn_error_kind",
+          "logical_name": "error_kind",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "atn_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "atn_input_tokens",
+          "logical_name": "input_tokens",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "atn_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "atn_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "atn_output_tokens",
+          "logical_name": "output_tokens",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "atn_provider",
+          "logical_name": "provider",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "atn_run_id",
+          "logical_name": "run_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "atn_simulated",
+          "logical_name": "simulated",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "atn_status",
+          "logical_name": "status",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "atn_tool_kind",
+          "logical_name": "tool_kind",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "atn_turn_index",
+          "logical_name": "turn_index",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "atn_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Samen.AI.Agent.Turn",
+      "table_name": "ai_agent_turn"
+    },
+    {
+      "fields": [
+        {
           "column_name": "aip_body",
           "logical_name": "body",
           "pii": false,

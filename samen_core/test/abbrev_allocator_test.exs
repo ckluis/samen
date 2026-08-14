@@ -252,8 +252,10 @@ defmodule Samen.Abbrev.AllocatorTest do
       # (Samen.WebTest.OperatorScope.Assignment) → 405, growing the file to 19_022 bytes.
       # +3 T85 (spec §I2 M5) — samen_web test host's Outreach scope mount `wso`/`woe`/`ows`
       # (Samen.WebTest.Outreach.{Sequence,Enrollment,StepSend}) → 408.
-      assert byte_size(committed) == 20368
-      assert map_size(R.load()) == 436
+      # +2 A1 (ADR-047 §4.1/§6) — samen_core host's agent-loop cursor pair `arn`/`atn`
+      # (Samen.AI.Agent.{Run,Turn}) → 410, growing the file to 20_439 bytes.
+      assert byte_size(committed) == 20439
+      assert map_size(R.load()) == 438
     end
   end
 

@@ -377,6 +377,7 @@
       "aes": "SamenCore.Support.AutomationFixture.Escalation",
       "sco": "SamenCore.Support.CrmScopeFixture.Opportunity",
       "aip": "Samen.AI.Prompt",
+      "arn": "Samen.AI.Agent.Run",
       "scm": "SamenCore.Support.MailboxFixture.Connection",
       "tst": "SamenCore.Support.TagsFixture.Tagging",
       "sca": "SamenCore.Support.CrmScopeFixture.Attachment",
@@ -404,6 +405,7 @@
       "vcv": "SamenCore.Support.Versioning.Contact.Version",
       "sls": "SamenCore.Support.SalesOpsFixture.Lead",
       "sat": "SamenCore.Support.AutomationFixture.Target",
+      "atn": "Samen.AI.Agent.Turn",
       "sfe": "SamenCore.Support.FleetFixture.EnrollmentToken"
     },
     "samen_web": {

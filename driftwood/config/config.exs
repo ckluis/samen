@@ -296,6 +296,12 @@ config :samen_core, Samen.Approvals.Registry,
 config :samen_core, :samen_ai_prompt_repo, Driftwood.Repo
 config :samen_core, :samen_ai_support_reply_draft_repo, Driftwood.Repo
 
+# A1 (ADR-047 §4.1/§6): the agent-loop cursor resources ride the same Samen.AI.Domain
+# mount — point them at Driftwood.Repo so run/turn rows persist in this host (the
+# `samen_ai_prompt_repo` precedent above).
+config :samen_core, :samen_ai_agent_run_repo, Driftwood.Repo
+config :samen_core, :samen_ai_agent_turn_repo, Driftwood.Repo
+
 # The FMCSA dispatch gate reads the CDL vault-token PRESENCE (not plaintext) via a
 # bounded repo query on the pii_vault table (design §4 / OR-7). It needs the repo.
 config :driftwood, :vault_repo, Driftwood.Repo
