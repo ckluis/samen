@@ -542,6 +542,43 @@ defmodule SamenCore.VerifyPiiClassifyTest do
   end
 
   # ==========================================================================
+  # RED PATH: fail-closed on empty resource discovery (A2 vacuous-pass floor)
+  #
+  # Luminary pre-merge A2: with a mis-keyed :ash_domains the task discovered
+  # ZERO resources, scanned nothing, and printed "OK — no violations found."
+  # (exit 0) — a green indistinguishable from a clean scan, in every app, on
+  # step 5 of every gate. The floor makes empty discovery exit 1, the same
+  # fail-closed shape as vault_declared_parity / oban_queues /
+  # erasure_completeness. SAMEN_EMPTY_ASH_DOMAINS=1 clears :ash_domains in the
+  # child process (config/test.exs seam, same as the vault_declared_parity and
+  # pii_reads floor tests).
+  # ==========================================================================
+
+  describe "RED PATH: fail-closed on empty discovery (A2)" do
+    @tag :exit_code
+    test "mix task exits 1 when resource discovery is empty (vacuous classify)" do
+      {output, exit_code} =
+        System.cmd(
+          "mix",
+          ["samen.verify.pii_classify"],
+          cd: @project_dir,
+          env: [{"MIX_ENV", "test"}, {"SAMEN_EMPTY_ASH_DOMAINS", "1"}],
+          stderr_to_stdout: true
+        )
+
+      assert exit_code == 1,
+             "Expected exit 1 on empty discovery (a vacuous classify check must " <>
+               "not pass), got #{exit_code}.\nOutput: #{output}"
+
+      assert output =~ "ZERO resources",
+             "Expected the fail-closed diagnostic, got: #{output}"
+
+      refute output =~ "OK — no violations found",
+             "The vacuous green banner printed on empty discovery: #{output}"
+    end
+  end
+
+  # ==========================================================================
   # Anti-tautology probe (inline documentation)
   # ==========================================================================
 

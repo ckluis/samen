@@ -1,0 +1,23 @@
+# SABOTAGE: A2 (luminary pre-merge) — the pii_classify non-emptiness floor is neutered:
+# `halt_if_no_resources!/1` matches a sentinel that can never occur (`[:__sabotaged__]`)
+# instead of `[]`, so a mis-keyed :ash_domains discovers ZERO resources, scans nothing,
+# and the C4 PII gate prints "OK — no violations found." (exit 0) — a vacuous green
+# indistinguishable from a clean scan, on step 5 of EVERY app's ci.sh. Flips the
+# empty-discovery red path (SAMEN_EMPTY_ASH_DOMAINS=1 child process MUST exit 1 with the
+# "ZERO resources" diagnostic) while every non-empty-discovery test stays green.
+# APP: samen_core
+# TEST_FILES: test/verify_pii_classify_test.exs
+# MUST_FAIL: mix task exits 1 when resource discovery is empty (vacuous classify)
+diff --git a/samen_core/lib/mix/tasks/samen.verify.pii_classify.ex b/samen_core/lib/mix/tasks/samen.verify.pii_classify.ex
+index ce36710..ec9745a 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.pii_classify.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.pii_classify.ex
+@@ -167,7 +167,7 @@ defmodule Mix.Tasks.Samen.Verify.PiiClassify do
+   # indistinguishable from a green on a real one. Same fail-closed shape as
+   # `vault_declared_parity.halt_if_no_resources!/1`.
+   defp halt_if_no_resources!(resources) do
+-    if resources == [] do
++    if resources == [:__sabotaged__] do
+       IO.puts("")
+ 
+       IO.puts(

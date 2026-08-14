@@ -1,0 +1,25 @@
+# SABOTAGE: X9 (luminary pre-merge) — the api_contract non-emptiness floor is neutered:
+# `halt_if_empty_contract!/1` matches a sentinel that can never occur (`[:__sabotaged__]`)
+# instead of `[]`, so a live contract that introspects ZERO AshJsonApi resources sails
+# through both branches again: `--update` silently persists an EMPTY snapshot, and an
+# empty-vs-empty diff prints "OK — no structural breaks found." (exit 0) — a contract
+# gate that pins nothing and can never flip, forever. Flips BOTH empty-discovery red
+# paths (the --update refusal incl. the snapshot-file-not-written proof, and the diff-mode
+# refusal) while demo's non-empty positive controls stay green.
+# APP: samen_core
+# TEST_FILES: test/verify_api_contract_task_test.exs
+# MUST_FAIL: mix task exits 1 in --update mode and REFUSES to write an empty snapshot
+# MUST_FAIL: mix task exits 1 in diff mode (empty-vs-empty must not print OK)
+diff --git a/samen_core/lib/mix/tasks/samen.verify.api_contract.ex b/samen_core/lib/mix/tasks/samen.verify.api_contract.ex
+index fb00490..e514f15 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.api_contract.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.api_contract.ex
+@@ -159,7 +159,7 @@ defmodule Mix.Tasks.Samen.Verify.ApiContract do
+   # vacuously forever. Same fail-closed shape as
+   # `vault_declared_parity.halt_if_no_resources!/1`.
+   defp halt_if_empty_contract!(live_snapshot) do
+-    if (live_snapshot["resources"] || []) == [] do
++    if (live_snapshot["resources"] || []) == [:__sabotaged__] do
+       IO.puts("")
+ 
+       IO.puts(

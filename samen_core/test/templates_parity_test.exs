@@ -125,6 +125,26 @@ defmodule Samen.Gen.TemplatesParityTest do
            "orphaned golden fixtures (an emitter was removed/renamed without re-capture)"
   end
 
+  # A3 gate-parity guard (luminary pre-merge): EVERY generated app's ci.sh must run the B5
+  # no_pan_columns sweep — the reference verticals (demo/driftwood/pawchart) all run it, and
+  # before this guard the templates emitted a strictly WEAKER gate: a raw-DDL card_number
+  # column that bypassed Ash was caught in driftwood and MISSED in an adopter's generated
+  # app. Asserted on the RENDERED output (not the golden files) so a template edit that
+  # drops the step fails HERE even after a golden re-capture — the leverage guarantee
+  # ("generated apps get the reference verticals' enforcement") cannot silently regress.
+  test "every generated ci.sh runs samen.verify.no_pan_columns (A3 gate parity with the reference verticals)" do
+    for {set, files} <- render_all() do
+      ci = files["ci.sh"]
+
+      assert is_binary(ci), "#{set} emitted no ci.sh — the gate-parity guard has nothing to check"
+
+      assert ci =~ "mix samen.verify.no_pan_columns",
+             "#{set}/ci.sh is MISSING the B5 no_pan_columns step — a generated app would " <>
+               "run a strictly weaker verifier gate than demo/driftwood/pawchart (the " <>
+               "information_schema PAN sweep would never run in an adopter's CI)"
+    end
+  end
+
   # T60 framework-first guard: EVERY generated app's operator-mount migration must EMIT the
   # chat offline-escalation dedupe partial-unique index. This is stronger than the byte-golden
   # (which would silently accept a regenerated index-less golden): if a future template edit

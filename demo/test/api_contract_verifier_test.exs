@@ -547,6 +547,38 @@ defmodule Demo.ApiContractVerifierTest do
   end
 
   # ---------------------------------------------------------------------------
+  # X9 non-emptiness floor — POSITIVE CONTROL (luminary pre-merge)
+  #
+  # The task now fails closed when the live contract discovers zero AshJsonApi
+  # resources (samen_core/test/verify_api_contract_task_test.exs proves the red
+  # side). These are the green side: demo's contract genuinely discovers
+  # resources, so the round-trip test above is a real diff, not empty-vs-empty.
+  # ---------------------------------------------------------------------------
+
+  describe "non-emptiness floor (X9): positive control" do
+    test "the live demo contract discovers a NON-empty resource set" do
+      live = ApiContract.snapshot([Demo.Crm, Demo.Identity], "v1")
+
+      assert length(live["resources"]) > 0,
+             "The demo live API contract introspected ZERO resources — the " <>
+               "committed-snapshot round-trip above would be a vacuous empty-vs-empty diff."
+    end
+
+    test "the committed api_contract.v1.json pins a NON-empty resource set" do
+      stored =
+        File.cwd!()
+        |> Path.join("api_contract.v1.json")
+        |> File.read!()
+        |> Samen.ApiContract.decode!()
+
+      assert length(stored["resources"]) > 0,
+             "The committed snapshot is EMPTY — it pins nothing, so no structural " <>
+               "break could ever flip the gate. Re-run `mix samen.verify.api_contract " <>
+               "--version v1 --update` (the task now refuses to write an empty snapshot)."
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # SNAPSHOT FORMAT — deterministic ordering
   # ---------------------------------------------------------------------------
 

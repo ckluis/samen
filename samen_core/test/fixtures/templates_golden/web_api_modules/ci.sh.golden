@@ -110,6 +110,15 @@ echo "--- step 14/19: mix samen.verify.no_pii_columns"
 mix samen.verify.no_pii_columns
 echo "    PASSED"
 
+# 14b. B5 no_pan_columns (ADR-038 §3.5; T23) — no resource/table ANYWHERE (every
+#      plane, not just aggregate) may carry a PAN/CVC-shaped column. Includes the
+#      information_schema sweep against the LIVE database, so a raw-DDL card_number
+#      column that bypassed Ash is caught here — the same enforcement the reference
+#      verticals (demo/driftwood/pawchart) hold themselves to.
+echo "--- step 14b/19: mix samen.verify.no_pan_columns (B5 no-PAN invariant)"
+mix samen.verify.no_pan_columns
+echo "    PASSED"
+
 echo "--- step 15/19: mix samen.verify.aggregate_privacy"
 mix samen.verify.aggregate_privacy
 echo "    PASSED"
