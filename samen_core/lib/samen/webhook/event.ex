@@ -170,6 +170,19 @@ defmodule Samen.Webhook.Event do
   @spec get(module(), String.t()) :: t() | nil
   def get(repo, id) when is_atom(repo), do: repo.get(__MODULE__, id)
 
+  @doc """
+  Fetch one envelope by id ONLY if it is in the DLQ's actionable state (`status == "dead"`)
+  — the governed fetch for the operator replay/resolve WRITE paths (S14). The operator DLQ
+  surface renders its mutation affordances exclusively on `:dead` rows, so the write path's
+  read is bounded to that same set: a crafted event id naming a `:received`/`:processing`/
+  `:processed` envelope reads `nil` here and the mutation never runs. Strictly narrower
+  than `get/2` (which remains the ungated internal fetch for the ingest worker itself).
+  """
+  @spec get_dead(module(), String.t()) :: t() | nil
+  def get_dead(repo, id) when is_atom(repo) do
+    repo.one(from(e in __MODULE__, where: e.id == ^id and e.status == "dead", limit: 1))
+  end
+
   @doc "Fetch one envelope by its `{provider, event_id}` natural key."
   @spec get_by_event(module(), String.t(), String.t()) :: t() | nil
   def get_by_event(repo, provider, event_id) when is_atom(repo) do

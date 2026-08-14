@@ -96,6 +96,10 @@ defmodule Samen.Web.Settings.SecurityLive do
 
     {reveal_events, reveal_unavailable?} = reveal_events_for(mount, org_id)
 
+    # S6 — the org-resolved tenant scope every credential read on this page is governed by
+    # (`credential_id_for/3` below). No resolved org → no scope → the seam fails closed.
+    scope = if is_binary(org_id), do: Mount.scope(mount, org_id)
+
     assign(socket,
       org_id: org_id,
       user_id: user_id,
@@ -106,8 +110,8 @@ defmodule Samen.Web.Settings.SecurityLive do
       spine_sessions?: spine?,
       spine_totp?: totp?,
       settings_path: Mount.label(mount, :settings_path, "/settings"),
-      totp_enroll_path: totp_enroll_path(mount, totp?, user_id),
-      login_sessions: login_sessions_for(mount, spine?, user_id),
+      totp_enroll_path: totp_enroll_path(mount, scope, totp?, user_id),
+      login_sessions: login_sessions_for(mount, scope, spine?, user_id),
       csrf_token: safe_csrf_token()
     )
   end
@@ -116,12 +120,12 @@ defmodule Samen.Web.Settings.SecurityLive do
   # Carries the resolved `credential_id` (the SAME `credential_id_for/2` seam the
   # spine session list uses) so TotpEnrollLive enrolls the right account; degrades
   # to the bare path when the credential can't be resolved (honest, never a crash).
-  defp totp_enroll_path(_mount, false, _user_id), do: nil
+  defp totp_enroll_path(_mount, _scope, false, _user_id), do: nil
 
-  defp totp_enroll_path(mount, true, user_id) do
+  defp totp_enroll_path(mount, scope, true, user_id) do
     base = Mount.label(mount, :settings_path, "/settings") <> "/security/2fa"
 
-    case credential_id_for(mount, user_id) do
+    case credential_id_for(mount, scope, user_id) do
       nil -> base
       credential_id -> base <> "?credential_id=#{credential_id}"
     end
@@ -189,11 +193,11 @@ defmodule Samen.Web.Settings.SecurityLive do
   # credential, spine-opt-in ONLY. Never invents rows; any read error (host hasn't
   # actually mounted Credential/Session under this namespace) degrades to an empty
   # list — honest, matching the impersonation-sessions precedent above.
-  defp login_sessions_for(_mount, false, _user_id), do: []
-  defp login_sessions_for(_mount, true, nil), do: []
+  defp login_sessions_for(_mount, _scope, false, _user_id), do: []
+  defp login_sessions_for(_mount, _scope, true, nil), do: []
 
-  defp login_sessions_for(mount, true, user_id) do
-    case credential_id_for(mount, user_id) do
+  defp login_sessions_for(mount, scope, true, user_id) do
+    case credential_id_for(mount, scope, user_id) do
       nil -> []
       credential_id -> Samen.Auth.SessionList.list_live(Mount.resource(mount, Session), credential_id)
     end
@@ -207,15 +211,27 @@ defmodule Samen.Web.Settings.SecurityLive do
   # since SQL's `= NULL` is never true — the query was always doomed to return
   # zero rows. Short-circuiting here keeps the same nil result, skips the wasted
   # round-trip, and silences the warning (no behaviour change).
-  defp credential_id_for(_mount, nil), do: nil
+  defp credential_id_for(_mount, _scope, nil), do: nil
 
-  defp credential_id_for(mount, user_id) do
+  # S6 — no org-resolved scope (org_id was nil) → fail closed: never fall back to an
+  # ungoverned read.
+  defp credential_id_for(_mount, nil, _user_id), do: nil
+
+  # S6 (luminary panel-2) — this read was `Ash.read!(authorize?: false)` with no org
+  # scope: a global `user_id → credential_id` oracle (the pivot in the S3 chain). It is
+  # now GOVERNED, the same pattern as `Samen.Web.Settings.Reads.get_user/3`: the read
+  # runs under the caller's org-resolved tenant scope, so `Samen.Policy.OrgScope` on the
+  # Identity `User` makes a cross-org `user_id` read ZERO rows — the seam answers `nil`,
+  # the 2FA link degrades to the bare path, the session list stays empty. Same-org
+  # resolution is unchanged (never widened).
+  defp credential_id_for(mount, scope, user_id) do
     require Ash.Query
 
     Mount.resource(mount, User)
     |> Ash.Query.filter(id == ^user_id)
     |> Ash.Query.select([:credential_id])
-    |> Ash.read!(authorize?: false)
+    |> Ash.Query.limit(1)
+    |> Ash.read!(scope: scope)
     |> case do
       [%{credential_id: credential_id}] -> credential_id
       _ -> nil

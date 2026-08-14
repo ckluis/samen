@@ -59,12 +59,18 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
     end
   end
 
+  # S14 — the operator roles that may MUTATE the webhook store (replay/resolve). The role is
+  # ONLY ever read from `:samen_operator_role` — the assign `Samen.Web.Operator.Authz`'s
+  # `:require_operator` on_mount derived from the AUTHENTICATED session principal (the T146
+  # role-derivation pattern) — never from the mount or a param. `:operator_readonly`'s
+  # contract is "read the operator CRM only" (`Samen.OperatorPlane.Actor`): it may render
+  # this page, never write through it. `nil`/unknown roles fail closed.
+  @write_roles [:operator_admin, :operator_support]
+
   @impl true
   def handle_event("replay", %{"id" => id}, socket) do
-    mount = socket.assigns[:samen_mount]
-    repo = mount && mount.repo
-
-    with %Event{} = row <- repo && Event.get(repo, id),
+    with {:ok, repo} <- authorize_write(socket),
+         %Event{} = row <- Event.get_dead(repo, id),
          {:ok, row} <- Event.reset_for_replay(repo, row) do
       # Re-enqueue the processing job — safe because processing is idempotent (§5.5).
       _ = safe_enqueue(row, repo)
@@ -75,14 +81,32 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
 
   @impl true
   def handle_event("resolve", %{"id" => id}, socket) do
-    mount = socket.assigns[:samen_mount]
-    repo = mount && mount.repo
-
-    with %Event{} = row <- repo && Event.get(repo, id) do
+    with {:ok, repo} <- authorize_write(socket),
+         %Event{} = row <- Event.get_dead(repo, id) do
       _ = Event.mark_processed(repo, row)
     end
 
     {:noreply, load(socket)}
+  end
+
+  # The S14 write gate, three ANDed conjuncts — all strictly narrowing, never widening:
+  #   1. ROLE — `:samen_operator_role` ∈ @write_roles (see above; fail closed on nil);
+  #   2. ORG  — the mount resolves an operator org, the SAME `no_org` fail-secure guard
+  #      `load/1` applies to the read path (an org-less mount renders nothing AND writes
+  #      nothing — parity, instead of the old write-path bypass);
+  #   3. REPO — a usable repo on the mount.
+  # The row fetch itself is `Event.get_dead/2` (bounded to the DLQ's actionable set), so
+  # even an authorized operator can only ever touch rows this surface actually exposes.
+  defp authorize_write(socket) do
+    mount = socket.assigns[:samen_mount]
+
+    with true <- socket.assigns[:samen_operator_role] in @write_roles,
+         %Mount{repo: repo} when is_atom(repo) and not is_nil(repo) <- mount,
+         org_id when is_binary(org_id) <- Operator.org_id(mount) do
+      {:ok, repo}
+    else
+      _ -> :denied
+    end
   end
 
   # ---------------------------------------------------------------------------

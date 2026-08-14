@@ -1,0 +1,21 @@
+# SABOTAGE: S14 (luminary panel-2) — the operator DLQ write gate admits `:operator_readonly` into
+# `@write_roles`, so a read-only operator (contract: "read the operator CRM only") can REPLAY/RESOLVE
+# webhook envelopes — the exact readonly-can-WRITE privilege escalation S14 closes. The org conjunct
+# and the dead-only bounded read are untouched, so this targets ONLY the role check. Flips the
+# readonly-replay red-path (a readonly operator's replay must leave the dead envelope dead).
+# APP: samen_web
+# TEST_FILES: test/samen/web/webhook_dlq_authz_test.exs
+# MUST_FAIL: :operator_readonly replay is REFUSED — the dead envelope stays dead
+diff --git a/samen_web/lib/samen/web/operator/webhook_dlq_live.ex b/samen_web/lib/samen/web/operator/webhook_dlq_live.ex
+index 0c381bd..49eeb25 100644
+--- a/samen_web/lib/samen/web/operator/webhook_dlq_live.ex
++++ b/samen_web/lib/samen/web/operator/webhook_dlq_live.ex
+@@ -65,7 +65,7 @@ defmodule Samen.Web.Operator.WebhookDlqLive do
+   # role-derivation pattern) — never from the mount or a param. `:operator_readonly`'s
+   # contract is "read the operator CRM only" (`Samen.OperatorPlane.Actor`): it may render
+   # this page, never write through it. `nil`/unknown roles fail closed.
+-  @write_roles [:operator_admin, :operator_support]
++  @write_roles [:operator_admin, :operator_support, :operator_readonly]
+ 
+   @impl true
+   def handle_event("replay", %{"id" => id}, socket) do

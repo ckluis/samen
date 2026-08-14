@@ -42,11 +42,17 @@ defmodule Samen.Web.Chat.ThreadLive do
     org_id = CurrentOrg.resolve(socket.assigns[:samen_mount], params, session)
     thread_id = Map.get(params, "id")
 
-    if connected?(socket) and is_binary(thread_id) do
+    socket = load(assign(socket, org_id: org_id, thread_id: thread_id), org_id, thread_id)
+
+    # S13 — subscribe to the thread topic ONLY after the T153 gate has PASSED (not before, as
+    # the mount used to). An unauthorized operator socket is never subscribed in the first
+    # place, so it cannot be delivered to; the delivery/send handlers below re-run the gate
+    # too, so a session that lapses mid-flight is cut off even on an already-subscribed socket.
+    if connected?(socket) and is_binary(thread_id) and delivery_authorized?(socket) do
       PubSub.subscribe(socket.assigns.samen_mount, thread_id)
     end
 
-    {:ok, load(assign(socket, org_id: org_id, thread_id: thread_id), org_id, thread_id)}
+    {:ok, socket}
   end
 
   @impl true
@@ -123,6 +129,19 @@ defmodule Samen.Web.Chat.ThreadLive do
 
   defp ok_state(mount), do: if(operator_plane?(mount), do: :active, else: :tenant)
 
+  # S13 — the ONE chokepoint the realtime SUBSCRIBE, the message DELIVERY, and the SEND paths
+  # all consult: the SAME `gate/3` `load/*` runs, re-evaluated per call so an expired/revoked
+  # operator session denies mid-flight. `true` only when the gate PASSES (tenant plane is never
+  # gated → always true; operator plane requires an active, in-scope impersonation session).
+  defp delivery_authorized?(socket) do
+    mount = socket.assigns[:samen_mount]
+
+    case gate(socket, mount, socket.assigns[:org_id]) do
+      {:ok, _info} -> true
+      _ -> false
+    end
+  end
+
   # T153 — on the OPERATOR desk-chat plane, resolve the acting operator identity the gate keys on.
   defp maybe_assign_operator_identity(socket, session, params) do
     if operator_plane?(socket.assigns[:samen_mount]) do
@@ -141,7 +160,16 @@ defmodule Samen.Web.Chat.ThreadLive do
     scope = Mount.scope(mount, socket.assigns.org_id)
     party = plane_party(mount)
 
-    with {:ok, participant_id} <- self_participant_id(socket, party),
+    # S13 — the gate conjunct here is DEFENSE-IN-DEPTH behind `Samen.Pii.WriteGuard`: every
+    # operator-plane chat post is already refused at the vault write chokepoint (MC-1 /
+    # ADR-016 L1, `samen_core/test/pii_write_guard_test.exs`) regardless of session state,
+    # so removing this line changes no outcome on this edge today. It stays so the send path
+    # shares the ONE delivery chokepoint with subscribe + handle_info (and denies at the
+    # door if a future change ever makes an operator-plane post writable). Do NOT add a
+    # red-path test asserting "a lapsed session cannot post" — it cannot go red while
+    # WriteGuard stands (anti-tautology; see chat_thread_subscribe_gate_test.exs moduledoc).
+    with true <- delivery_authorized?(socket),
+         {:ok, participant_id} <- self_participant_id(socket, party),
          {:ok, message} <-
            Chat.post_message(mount, scope, %{
              org_id: socket.assigns.org_id,
@@ -190,7 +218,10 @@ defmodule Samen.Web.Chat.ThreadLive do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, socket.assigns.org_id)
 
-    if envelope.thread_id == socket.assigns.thread_id do
+    # S13 — re-run the T153 gate on EVERY delivery (impersonation.ex: "Rebuild this on EVERY
+    # request … so an expired session — or a revoked assignment — denies mid-flight"). A socket
+    # whose operator session has lapsed drops the broadcast instead of streaming it.
+    if envelope.thread_id == socket.assigns.thread_id and delivery_authorized?(socket) do
       case Chat.read_broadcast(mount, scope, envelope) do
         {:ok, %{message: message, cards: cards}} ->
           {:noreply, push_message(socket, %{message: message, cards: cards})}

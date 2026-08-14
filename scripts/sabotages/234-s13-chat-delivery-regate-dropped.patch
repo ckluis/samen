@@ -1,0 +1,23 @@
+# SABOTAGE: S13 (luminary panel-2) — the chat room's realtime DELIVERY path no longer re-runs the
+# T153 impersonation gate: `handle_info({:chat_message, …})` drops the `and delivery_authorized?(socket)`
+# conjunct, so a broadcast is delivered to ANY subscribed socket regardless of whether its operator
+# impersonation session is still active. This re-opens the "operator whose session expires mid-flight
+# keeps streaming" leak (S13): a lapsed-session operator socket appends the re-read message again.
+# The SUBSCRIBE-after-gate and the send-path gate are untouched, so this targets ONLY the delivery
+# re-check. Flips the lapsed-session delivery red-path (the message must NOT be appended after close).
+# APP: samen_web
+# TEST_FILES: test/samen/web/chat_thread_subscribe_gate_test.exs
+# MUST_FAIL: handle_info does NOT deliver a broadcast to an operator whose session has lapsed
+diff --git a/samen_web/lib/samen/web/chat/thread_live.ex b/samen_web/lib/samen/web/chat/thread_live.ex
+index 8663f52..93f3a4a 100644
+--- a/samen_web/lib/samen/web/chat/thread_live.ex
++++ b/samen_web/lib/samen/web/chat/thread_live.ex
+@@ -213,7 +213,7 @@ defmodule Samen.Web.Chat.ThreadLive do
+     # S13 — re-run the T153 gate on EVERY delivery (impersonation.ex: "Rebuild this on EVERY
+     # request … so an expired session — or a revoked assignment — denies mid-flight"). A socket
+     # whose operator session has lapsed drops the broadcast instead of streaming it.
+-    if envelope.thread_id == socket.assigns.thread_id and delivery_authorized?(socket) do
++    if envelope.thread_id == socket.assigns.thread_id do
+       case Chat.read_broadcast(mount, scope, envelope) do
+         {:ok, %{message: message, cards: cards}} ->
+           {:noreply, push_message(socket, %{message: message, cards: cards})}
