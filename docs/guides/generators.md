@@ -31,34 +31,54 @@ mix samen.gen.app --module Widgetco --prefix wg --abbrev wid
 | flag | required | meaning |
 |---|---|---|
 | `--module` | yes | app base module, e.g. `Widgetco` (otp_app = `:widgetco`) |
-| `--prefix` | yes | **2-letter** app prefix; derives the 8 Billing abbrevs (`<p>c/<p>s/<p>l/<p>p/<p>i/<p>y/<p>u/<p>e`) + the aggregate abbrev (`<p>a`) |
+| `--prefix` | yes | **2-letter** app prefix; derives the 9 Billing abbrevs (`<p>c/<p>s/<p>l/<p>p/<p>i/<p>y/<p>u/<p>e/<p>v`) + the aggregate abbrev (`<p>a`) + the Approval abbrev (`<p>z`) + (with `--web`) the Primitives/Operator abbrevs |
 | `--abbrev` | yes | **3-letter** abbrev for the authored vertical resource |
 | `--target` | no | parent dir the app is created under (default: parent of the `samen_core` source root, so the app is a sibling and `path:` resolves) |
-| `--modules` | no | comma-separated framework END-USER surfaces to ALSO mount + surface as a menu (WS-E): `files`, `search`, `csv`, `settings` (mountable at ≈0 LOC), `chat` (documented-with-prerequisite). See [Mountable surfaces](#mountable-surfaces--the---modules-menu). OFF by default — omitting it leaves the output byte-for-byte unchanged. |
+| `--web` / `--no-web` | no | emit the web layer — **ON by default** (ADR-022): the `*_web/` tree, the Primitives + Operator mounts, samen_web/phoenix deps, endpoint config. `--no-web` alone is the same as `--headless`. |
+| `--api` / `--no-api` | no | emit the public `/api/v1` JSON:API layer — **ON by default, follows `--web`** (WS-D D3): `*_web/api/{router,endpoint,key_auth_plug}.ex`, a deny-by-default allowlist + bounded `:api_read`, the API red-path tests, the `api_contract.v1.json` snapshot + ci.sh step. REQUIRES the web layer. |
+| `--deploy` | no | emit the fail-honest deploy layer — **OFF by default** (WS-D D10 / ADR-024): `fly.toml`, `Dockerfile`, `rel/env.sh.eex`, `release.ex`, a fail-closed `runtime.exs`, and a runbook with an explicit operator-TODO. Compiles/parses; does NOT claim a live deploy. REQUIRES the web layer. |
+| `--modules` | no | comma-separated framework END-USER surfaces to ALSO mount + surface as a menu (WS-E): `files`, `search`, `csv`, `settings` (mountable at ≈0 LOC), `chat` (documented-with-prerequisite). See [Mountable surfaces](#mountable-surfaces--the---modules-menu). OFF by default — omitting it leaves the output byte-for-byte unchanged. Requires the web layer. |
+| `--headless` | no | the escape hatch: all product layers off (`--no-web --no-api`), reproducing the original 26-file data-only output exactly. Conflicts with an explicit `--web`/`--api`/`--deploy`/`--modules`. |
+| `--port` | no | dev HTTP port wired into the endpoint config (default `4050`) |
 | `--no-reserve-abbrevs` | no | do **not** append the abbrevs to the registry — produces an app that fails compile fail-closed (the red-path fixture) |
 | `--no-compile` | no | emit files only; skip the compile + schema-dict dump post-steps |
 
 ## What it produces
 
 A sibling Mix project depending on `samen_core` via a **computed relative path** (`../samen_core`
-for a direct sibling; deeper `../../samen_core` if nested), containing:
+for a direct sibling; deeper `../../samen_core` if nested). By default (`--web --api`, both ON
+unless overridden — X7 correction: this is the **default** shape, not the headless one) it
+contains:
 
 ```
 <app>/
-  mix.exs                    # {:samen_core, path: <computed>} + jason/stream_data/simple_sat
-  config/{config,dev,test}.exs
-  lib/<app>/application.ex    # Repo + Oban children, start_repo? gate
+  mix.exs                    # {:samen_core, path: <computed>} + samen_web/phoenix/jason/… deps
+  config/{config,dev,test,runtime}.exs
+  lib/<app>/application.ex    # Repo + Oban + web plane children, start_repo? gate
   lib/<app>/repo.ex          # AshPostgres.Repo (uuid-ossp, citext)
   lib/<app>/billing.ex       # Samen.Scopes.Billing mounted AS-IS (the "80%")
   lib/<app>/vertical.ex      # the authored resource with a `pii do` scalar vault field (the "20%")
   lib/<app>/aggregate.ex     # a token-blind aggregate projection (no pii_ columns)
+  lib/<app>/primitives.ex    # Samen.Scopes.Primitives mount (notifications inbox, FeatureFlag)
+  lib/<app>/operator.ex      # the ADR-010 Operator namespace (Identity + Billing + Support)
+  lib/<app>_web/             # thin emitted endpoint/router/layouts/page_controller/error_html
+  lib/<app>_web/api/         # (--api) AshJsonApi router + endpoint + key_auth_plug
   priv/repo/migrations/…     # the substrate tables + a catalog-in-tx resource migration
   priv/ci_bootstrap.exs      # recreate + migrate the test DB for the standalone verifiers
   priv/anti_tautology_probe.exs  # the per-app vault-path flip probe
-  test/…                     # test_helper + data_case + the vault round-trip red-path test
+  test/…                     # test_helper + data_case + the vault round-trip + API red-path tests
+  test/support/api_case.ex   # (--api) the bounded/clamp/allowlist test harness
+  api_contract.v1.json       # (--api) committed API snapshot
   schema.dict.json           # committed drift baseline, dumped from the compiled app
   ci.sh                      # the FULL verifier gate, wired to the app
 ```
+
+`--headless` drops every `*_web`/`--api`/`primitives.ex`/`operator.ex` line above and reproduces
+the original 26-file data-only output exactly (AC-G4-10): `mix.exs`, `config/{config,dev,test}.exs`,
+`lib/<app>/{application,repo,billing,vertical,aggregate}.ex`, `priv/repo/migrations/…`,
+`priv/{ci_bootstrap,anti_tautology_probe}.exs`, `test/…`, `schema.dict.json`, `ci.sh` — see
+`Samen.Gen.App`'s moduledoc (`samen_core/lib/samen/gen/app.ex`) and `mix help samen.gen.app` for
+the byte-exact file list and flag semantics of each layer.
 
 > This path-dep-in-monorepo model is a stated design decision, not an accident — see
 > [ADR-033](../adr/033-in-monorepo-distribution-constraint.md) for why Hex publishing and
@@ -196,8 +216,14 @@ The generator's guarantees each ship a red path, per the repo's hard rules:
 
 3. **Anti-tautology probe on the generated-gate-passes assertion.**
    `samen_core/priv/gen_app_gate_probe.exs` proves the "generated app passes its own gate"
-   claim is **non-vacuous**. In a project-local scratch dir (`_gen_probe_scratch/`, a sibling
-   of `samen_core`, removed on exit, never added to root `ci.sh`) it:
+   claim is **non-vacuous** — but it is a standalone dev-time re-verification tool
+   (`mix run priv/gen_app_gate_probe.exs`), never wired into any gate (luminary A16). The
+   proof root `ci.sh` actually runs on every build is the equivalent-but-separate
+   `priv/gen_app_flagship_probe.exs` (its own baseline → sabotage → revert flip, permanently
+   in the `run_gen_probe` tier below); this probe exists for a fast, isolated re-check of the
+   exact same non-vacuity claim outside the full root gate. In a project-local scratch dir
+   (`_gen_probe_scratch/`, a sibling of `samen_core`, removed on exit, never added to root
+   `ci.sh`) it:
    - generates an app and runs `ci.sh` → **exit 0** (baseline PASS);
    - **sabotages** the generated app by adding a `pii_`-shaped column to the token-blind
      aggregate table (the exact leak the C7 `no_pii_columns` step forbids), re-dumps the dict,

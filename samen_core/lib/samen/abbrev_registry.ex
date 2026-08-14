@@ -42,11 +42,13 @@ defmodule Samen.AbbrevRegistry do
         }
       }
 
-  The `"hosts"` key is **optional** — a file without it (the committed 263-entry
-  registry) reads byte-identically. `load/0` returns the **flat global view** (the
-  union of `"abbrevs"` and every host namespace) so the compile-time verifier and every
-  existing reader keep working unchanged (the compat shim). Host-scoped reads/writes go
-  through `load_namespaced/1`, `owner/2`, and `validate_host/4`.
+  The `"hosts"` key is **optional** — a file without one reads byte-identically to the
+  legacy shape (the committed registry now HAS a `"hosts"` object — see ADR-025 §5 — so
+  this optionality is about the *schema*, not the current committed file). `load/0`
+  returns the **flat global view** (the union of `"abbrevs"` and every host namespace) so
+  the compile-time verifier and every existing reader keep working unchanged (the compat
+  shim). Host-scoped reads/writes go through `load_namespaced/1`, `owner/2`, and
+  `validate_host/4`.
 
   ## Bounded scope (ADR-023 §2 / §4)
 
@@ -105,8 +107,9 @@ defmodule Samen.AbbrevRegistry do
 
   Returns the union of the legacy `"abbrevs"` map and every host namespace, so the
   compile-time verifier and every existing flat reader keep working unchanged against
-  the host-namespaced schema. A file without a `"hosts"` key (the committed 263-entry
-  registry) reads byte-identically to before.
+  the host-namespaced schema. A file without a `"hosts"` key reads byte-identically to
+  before (the legacy 263-entry map on its own); the committed registry itself has since
+  grown a `"hosts"` object (ADR-025 §5) and now flattens 263 legacy + per-host entries.
   """
   @spec load(String.t()) :: %{optional(String.t()) => String.t()}
   def load(registry_path) do

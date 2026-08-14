@@ -45,7 +45,8 @@ defmodule Samen.Abbrev.Allocator do
 
   `reserve!/5` takes the registry path explicitly (defaulting to the committed file only
   for the real generator path). Probes and tests pass a **scratch copy** — the committed
-  `samen_core/priv/abbrev_registry.json` (263 entries) must stay byte-untouched.
+  `samen_core/priv/abbrev_registry.json` (the 263-entry legacy global map plus every
+  host's namespace) must stay byte-untouched.
   """
 
   alias Samen.AbbrevRegistry

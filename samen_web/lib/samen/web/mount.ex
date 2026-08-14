@@ -201,8 +201,18 @@ defmodule Samen.Web.Mount do
   #   * `spine_totp` / `host_nav_extra` (PP-17 / Batch 3+5b) — the Settings 2FA opt-in and the
   #     host-supplied nav-extras group; both ride tenant mounts a cold LiveView deserializes.
   #   * `analytics_ask_resource` (T149/B2b) — the operator AnalyticsLive ask-scope resource.
+  #   * `signup_path`/`verify_path`/`reset_path`/`invite_path`/`totp_path` (luminary A4) — the
+  #     five ADR-035 identity-spine path labels `samen_auth_routes/1` merges alongside
+  #     `login_path` (already whitelisted); `totp_issuer` (`auth/totp_enroll_live.ex`) and
+  #     `work_path`/`work_logo_style` (`work/live.ex`) round out the same audit. `__principal__`
+  #     (`tenant_role.ex`) is the stashed-role sentinel key.
   # Enumerated round-trip is pinned by `identity_namespace_coverage_test.exs` +
-  # `tenant_authn_prodpath_test.exs`, which rebuild every mount off a compiled router.
+  # `tenant_authn_prodpath_test.exs`, which rebuild every mount off a compiled router, AND by
+  # `label_keys_completeness_test.exs` (luminary A4) — a source-grep over every call site
+  # under `samen_web/lib` that reads a label key off a mount, asserted a subset of this list.
+  # That test is refutable BY CONSTRUCTION (not by a derived-input tautology): it reads real
+  # source files independent of this list, so a key read here without being added above makes
+  # it fail on its own, no synthetic drift required.
   @label_keys ~w(
     crm_namespace crm_path crm_logo_style
     billing_logo_style support_path support_logo_style
@@ -227,6 +237,9 @@ defmodule Samen.Web.Mount do
     kb_namespace kb_path
     fleet_namespace fleet_cockpit
     ai_path ai_crm_resource ai_aggregate_resource
+    signup_path verify_path reset_path invite_path totp_path totp_issuer
+    work_path work_logo_style
+    __principal__
   )a
 
   @label_key_strings Map.new(@label_keys, fn k -> {Atom.to_string(k), k} end)

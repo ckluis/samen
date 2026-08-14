@@ -157,8 +157,9 @@ defmodule Samen.Gen.App do
     resource_name = "Record"
     resource_table = "#{abbrev}_record"
 
-    # Eight Billing-scope abbrevs derived from the 2-char prefix (mirrors pawchart's
-    # pbc/pbs/pbl/ppc/pbi/pby/pbu/pbe — one suffix letter per resource).
+    # Nine Billing-scope abbrevs derived from the 2-char prefix (mirrors pawchart's
+    # pbc/pbs/pbl/ppc/pbi/pby/pbu/pbe/pbv — one suffix letter per resource; luminary X10
+    # corrected this comment from "Eight" — the map below always had nine entries).
     billing_abbrevs = %{
       customer: prefix <> "c",
       subscription: prefix <> "s",

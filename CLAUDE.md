@@ -13,8 +13,11 @@ verifiers, generators) · `samen_web` (framework UI library: LiveViews, Mount/Pl
   0.8.0 from source against your pg major when no bottle exists). Without it, `./ci.sh`
   fails the samen_core suite at setup with a clear "pgvector not installed" guard message
   (`samen_core/test/test_helper.exs`), not an opaque `CREATE EXTENSION` error.
-- Root gate: `./ci.sh` — spikes → samen_core → 3 gen_app probes → samen_web → demo →
-  driftwood → pawchart. Takes minutes; must end `ROOT CI: ALL PASSED`.
+- Root gate: `./ci.sh` — spikes → samen_core → the AI eval/red-team tier → 5 adapter-package
+  gates (samen_stripe/postmark/ses/resend/anthropic) → 3 gen_app probes → an opt-in
+  (`SAMEN_SABOTAGE=1`) sabotage-harness step → samen_web + demo + driftwood + pawchart run
+  CONCURRENTLY last (own DBs, race-free once everything registry-mutating above has finished
+  sequentially). Takes minutes; must end `ROOT CI: ALL PASSED`.
 - Iteration tier: `./ci-fast.sh` — spikes → samen_core → samen_web ONLY (framework core,
   skips the gen_app probes + demo/vertical gates). Fast inner-loop feedback; NOT a
   substitute for `./ci.sh` before a milestone. Ends `CI-FAST: ALL PASSED`.

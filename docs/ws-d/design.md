@@ -1,7 +1,14 @@
 # WS-D — "Builder Joy" — Design
 
 **Workstream:** D (G4 generator catch-up · G26 test scaffolds · G10 docs · G16 deploy).
-**Status:** design (no code written by this doc).
+**Status:** design (no code written by this doc). WS-D SHIPPED after this was written; this
+doc is the pre-implementation snapshot and is **not** kept in sync with the shipped shape
+(luminary A16). Two drifts worth knowing before citing this doc: (1) `priv/gen_app_gate_probe.exs`,
+named throughout below as "the" gen_app non-vacuity probe, is never wired into root `ci.sh` —
+the probe root `ci.sh` actually runs is `priv/gen_app_flagship_probe.exs` (see
+`docs/guides/generators.md#red-paths-must-fail--anti-tautology-probe`); (2) counts/step numbers
+below (e.g. "17 steps") reflect the design-time headless-only generator, not the shipped
+`--web`/`--api`-by-default output.
 **Date:** 2026-07-14.
 **Depends on:** WS-A (SHIPPED — `docs/gate-ws-a.md`) and WS-B (SHIPPED — `docs/gate-ws-b.md`).
 Both shipped verticals now prove the *real* patterns the generator must emit, so scaffolding

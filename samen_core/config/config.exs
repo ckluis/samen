@@ -146,9 +146,14 @@ config :samen_core, :rollups, [
 # its own Oban supervisor with custom queues).
 #
 # Host apps wire ONLY their repo (+ plugins), and start Oban through the
-# framework seam so the canonical queue taxonomy AND cron are installed for them:
+# framework seam so the canonical queue taxonomy AND cron are installed for them. The config
+# key is `:samen_core` (NOT the host's own otp_app) — every shipped host (demo, driftwood,
+# pawchart, samen_web, the emitted app) reads Oban's own config back via
+# `Application.fetch_env!(:samen_core, Oban)` below, so that is the app env a host must write
+# to (luminary A14 — this comment previously said `:my_app`, which no host does and which
+# would raise `ArgumentError` at boot if followed literally):
 #
-#     config :my_app, Oban,
+#     config :samen_core, Oban,
 #       repo: MyApp.Repo,
 #       plugins: [{Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}]
 #

@@ -18,13 +18,20 @@ ADR-023 shipped, **bounded**, in WS-D D8:
   app's host namespace (no hand-edit of `abbrev_registry.json`).
 
 The committed registry's legacy global `"abbrevs"` map (263 entries) is **byte-untouched** — the
-allocator only ever writes host namespaces. A `"hosts"` object now exists in-tree, carrying five
-non-conflicting allocations (the F3 consent-ledger abbrevs — one per host: `demo`/`mce`,
+allocator only ever writes host namespaces. A `"hosts"` object now exists in-tree; at F7 landing it
+carried five non-conflicting allocations (the F3 consent-ledger abbrevs — one per host: `demo`/`mce`,
 `driftwood`/`fmv`, `pawchart`/`vmv`, `samen_core`/`sxv`, `samen_web`/`wmv`), each a distinct abbrev
 reserved via the sanctioned allocator. Because every host abbrev resolves to exactly one owner across
-all namespaces, the flattened view (263 + 5 = 268 entries) is still **lossless** and the
-flattened-view verifier is still correct. There is currently **zero** cross-host abbrev reuse and
-**zero** host-vs-global owner mismatch.
+all namespaces, the flattened view (then 263 + 5 = 268 entries) was **lossless** and the
+flattened-view verifier was correct. **Current state (post-F7, count-checked live rather than
+re-pinned here so this paragraph cannot go stale the way its F7 numbers did):** the allocator has
+since reserved many more host-namespaced abbrevs across normal feature work; `mix run -e
+"IO.inspect(Samen.AbbrevRegistry.load() |> map_size())"` against the committed registry reports the
+current flattened total, `flatten_conflicts/1` against the committed file reports the current
+conflict count — the invariant this ADR cares about is that the LATTER is always **zero**, not that
+either total matches the F7 snapshot above. There is still **zero** cross-host abbrev reuse and
+**zero** host-vs-global owner mismatch (reverified for this luminary doc-integrity pass: 263 legacy +
+173 host-namespaced = 436 flattened entries, zero conflicts).
 
 ## 2. What is deferred here (the 50+ file partition ADR-006 §3 named)
 
@@ -77,9 +84,10 @@ that makes the deferral *self-enforcing* rather than a silent latent risk:
   host-aware path (`load_namespaced/1` → `validate_host/4`, and `reserve!/4`'s direct file read) never
   flattens, so it still reads and reserves a fresh non-conflicting abbrev normally. A lossy flattening
   is a flattened-view problem, not a namespaced-view problem.
-- **No behavior change today.** The committed registry has zero flatten-conflicts (263 global + 5
-  distinct host allocations), so `load/0` returns the 268-entry union unchanged and the whole suite +
-  every gen probe stays green.
+- **No behavior change today.** The committed registry has zero flatten-conflicts (263 legacy-global
+  entries plus the current set of host-namespaced allocations — 436 total as of this doc-integrity
+  pass, up from 268 at F7 landing as normal feature work reserved more host abbrevs), so `load/0`
+  returns the current flattened union unchanged and the whole suite + every gen probe stays green.
 
 Proofs: `samen_core/test/abbrev_flatten_conflict_test.exs` (green: committed registry has zero
 conflicts, load returns the union, allocator still reserves; red: synthetic cross-host reuse and
