@@ -430,6 +430,8 @@ defmodule Samen.Fleet.Registry do
           capability == :fleet_heartbeat and is_nil(revoked_at)
       )
 
+    # authz-scope: fleet-heartbeat AUTH-STEP credential lookup keyed on the unique
+    # (app_id, key_version, capability) tuple — no actor exists until this row resolves
     case Ash.read(query, authorize?: false) do
       {:ok, [credential]} ->
         cond do

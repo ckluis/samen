@@ -88,6 +88,8 @@ defmodule Samen.Scopes.Chat.CascadeArchive do
   defp archive_all(resource, thread_id, instant) do
     resource
     |> Ash.Query.filter(thread_id == ^thread_id)
+    # authz-scope: FK-pinned cascade read — bounded to the archived parent thread's own
+    # members, inside that parent's org-authorized archive write
     |> Ash.read!(authorize?: false)
     |> Enum.each(&archive_member_at(&1, instant))
   end

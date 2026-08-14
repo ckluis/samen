@@ -10,7 +10,7 @@
 diff --git a/samen_core/lib/samen/fleet/registry.ex b/samen_core/lib/samen/fleet/registry.ex
 --- a/samen_core/lib/samen/fleet/registry.ex
 +++ b/samen_core/lib/samen/fleet/registry.ex
-@@ -368,7 +368,7 @@
+@@ -427,7 +427,7 @@ defmodule Samen.Fleet.Registry do
        credential_res(ns)
        |> Ash.Query.filter(
          app_id == ^kid and key_version == ^v and kind == :ed25519 and
@@ -18,4 +18,4 @@ diff --git a/samen_core/lib/samen/fleet/registry.ex b/samen_core/lib/samen/fleet
 +          is_nil(revoked_at)
        )
  
-     case Ash.read(query, authorize?: false) do
+     # authz-scope: fleet-heartbeat AUTH-STEP credential lookup keyed on the unique

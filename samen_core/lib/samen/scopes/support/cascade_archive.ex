@@ -108,6 +108,8 @@ defmodule Samen.Scopes.Support.CascadeArchive do
   defp live_conversations(resource, ticket_id) do
     resource
     |> Ash.Query.filter(ticket_id == ^ticket_id)
+    # authz-scope: FK-pinned cascade read — bounded to the just-archived parent ticket's own
+    # conversations, inside that parent's org-authorized archive write
     |> Ash.read!(authorize?: false)
   end
 
@@ -126,6 +128,8 @@ defmodule Samen.Scopes.Support.CascadeArchive do
   defp archive_live_messages(resource, conversation_ids, instant) do
     resource
     |> Ash.Query.filter(conversation_id in ^conversation_ids)
+    # authz-scope: FK-pinned cascade read — bounded to exactly the conversation ids archived
+    # by THIS sweep (the parent write was org-authorized)
     |> Ash.read!(authorize?: false)
     |> Enum.each(&archive_member_at(&1, instant))
   end

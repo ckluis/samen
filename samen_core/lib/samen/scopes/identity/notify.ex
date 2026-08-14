@@ -70,6 +70,8 @@ defmodule Samen.Scopes.Identity.Notify do
     |> Ash.Query.filter(credential_id == ^credential_id)
     |> Ash.Query.ensure_selected([:id, :org_id])
     |> Ash.Query.limit(1)
+    # authz-scope: system notification recipient resolve keyed on the unique credential id
+    # (<=1 User row); org_id comes FROM the resolved row
     |> Ash.read!(authorize?: false)
     |> case do
       [%{id: user_id, org_id: org_id}] -> {:ok, %{org_id: org_id, user_id: user_id}}

@@ -108,6 +108,7 @@ defmodule Samen.Identity.Reset do
     |> Ash.Query.filter(email_bidx == ^bidx)
     |> Ash.Query.ensure_selected([:id])
     |> Ash.Query.limit(1)
+    # authz-scope: pre-auth password-reset lookup keyed on the unique email blind index (<=1 row)
     |> Ash.read!(authorize?: false)
   end
 

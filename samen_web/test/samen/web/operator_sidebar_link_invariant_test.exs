@@ -44,6 +44,12 @@ defmodule Samen.Web.OperatorSidebarLinkInvariantTest do
     Regex.scan(~r/href="([^"]*)"/, html) |> Enum.map(fn [_, h] -> h end)
   end
 
+  # S7: the governed act-as crossing is now a POST <form action=…> (the org switch is a
+  # session write, CSRF-protected), so crossing targets live in `action` attributes too.
+  defp form_actions(html) do
+    Regex.scan(~r/action="([^"]*)"/, html) |> Enum.map(fn [_, a] -> a end)
+  end
+
   defp bare_tenant?(href) do
     Enum.any?(@tenant_prefixes, fn p ->
       href == p or String.starts_with?(href, p <> "/") or String.starts_with?(href, p <> "?")
@@ -72,8 +78,12 @@ defmodule Samen.Web.OperatorSidebarLinkInvariantTest do
 
     # The "Act as a tenant →" footer switcher — the ONE governed crossing — uses the
     # SessionController write (which sets acting-as context, marking the crossing on arrival).
+    # Since S7 that write is a CSRF-protected POST form, so the target is a form ACTION:
+    # a bare GET href to /session/org/ would be the forgeable shape again.
     assert html =~ "Act as a tenant"
-    assert Enum.any?(hrefs(html), &String.starts_with?(&1, "/session/org/"))
+    assert Enum.any?(form_actions(html), &String.starts_with?(&1, "/session/org/"))
+    assert html =~ ~s(method="post")
+    refute Enum.any?(hrefs(html), &String.starts_with?(&1, "/session/org/"))
   end
 
   test "every operator nav href is an operator-plane, governed-crossing, or inert target" do

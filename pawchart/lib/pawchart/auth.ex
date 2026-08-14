@@ -83,6 +83,8 @@ defmodule PawChart.Auth do
     PawChart.Operator.Membership
     |> Ash.Query.filter(user_id == ^user_id)
     |> Ash.Query.ensure_selected([:org_id])
+    # authz-scope: authorization-boundary read — derives the org set user_id may act on from
+    # real Membership rows (unique user key; deny-on-empty, fail closed); this IS the seam CurrentOrg consults
     |> Ash.read!(authorize?: false)
     |> Enum.map(& &1.org_id)
     |> Enum.filter(&is_binary/1)

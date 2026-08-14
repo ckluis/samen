@@ -161,6 +161,7 @@ defmodule Samen.Identity.OidcLink do
     mods.user_identity
     |> Ash.Query.filter(provider == ^provider and provider_uid == ^provider_uid)
     |> Ash.Query.limit(1)
+    # authz-scope: pre-auth OIDC lookup keyed on the unique (provider, provider_uid) pair (<=1 row)
     |> Ash.read!(authorize?: false)
   end
 
@@ -169,6 +170,7 @@ defmodule Samen.Identity.OidcLink do
     |> Ash.Query.filter(email_bidx == ^bidx)
     |> Ash.Query.ensure_selected([:id, :password_hash])
     |> Ash.Query.limit(1)
+    # authz-scope: pre-auth boot-path credential lookup keyed on the unique email blind index (<=1 row)
     |> Ash.read!(authorize?: false)
   end
 

@@ -12,12 +12,12 @@
 diff --git a/samen_core/lib/samen/approvals.ex b/samen_core/lib/samen/approvals.ex
 --- a/samen_core/lib/samen/approvals.ex
 +++ b/samen_core/lib/samen/approvals.ex
-@@ -165,7 +165,7 @@
+@@ -165,7 +165,7 @@ defmodule Samen.Approvals do
        query =
          res
          |> Ash.Query.filter(state == :pending and kind == ^kind)
 -        |> org_filter(org_id)
 +        |> tap(fn _ -> org_id end)
          |> Ash.Query.sort(requested_at: :asc)
-
-       case Ash.read(query, authorize?: false) do
+ 
+       # authz-scope: org-pinned one clause down via org_filter/2 (binary org => org_id == ^org_id;

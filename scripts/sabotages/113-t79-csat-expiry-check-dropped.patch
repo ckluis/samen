@@ -11,9 +11,10 @@
 # TEST_FILES: test/samen/web/support_csat_test.exs
 # MUST_FAIL: TIME-TRAVEL: an expired token is honestly invalid
 # APPLY: patch -p1 --no-backup-if-mismatch < scripts/sabotages/113-t79-csat-expiry-check-dropped.patch
+diff --git a/samen_core/lib/samen/scopes/support/csat_survey.ex b/samen_core/lib/samen/scopes/support/csat_survey.ex
 --- a/samen_core/lib/samen/scopes/support/csat_survey.ex
 +++ b/samen_core/lib/samen/scopes/support/csat_survey.ex
-@@ -124,10 +124,9 @@
+@@ -124,10 +124,9 @@ defmodule Samen.Scopes.Support.CsatSurvey do
    @spec preview(mods(), String.t()) :: {:ok, map()} | {:error, :invalid_token}
    def preview(%{} = mods, raw_token) when is_binary(raw_token) do
      digest = TokenMint.digest(raw_token)
@@ -24,4 +25,4 @@
 +    |> Ash.Query.filter(token_digest == ^digest and is_nil(consumed_at))
      |> Ash.Query.ensure_selected([:id, :org_id, :ticket_id, :agent_id, :expires_at, :consumed_at])
      |> Ash.Query.limit(1)
-     |> Ash.read!(authorize?: false)
+     # authz-scope: pre-auth survey-token preview keyed on the unique token digest (<=1 row);

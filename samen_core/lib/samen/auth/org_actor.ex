@@ -34,6 +34,9 @@ defmodule Samen.Auth.OrgActor do
     mods.user
     |> Ash.Query.filter(credential_id == ^credential_id)
     |> Ash.Query.ensure_selected([:id, :org_id])
+    # authz-scope: authorization-boundary read — enumerates the org ids this credential holds
+    # live User rows in (unique credential key; deny-on-empty). This read BUILDS the
+    # :authorized_orgs set everything else scopes by
     |> Ash.read!(authorize?: false)
     |> Enum.map(& &1.org_id)
     |> Enum.uniq()

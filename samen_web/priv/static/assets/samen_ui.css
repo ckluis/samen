@@ -684,8 +684,13 @@ td.right { text-align: right; }
   font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint);
   padding: 6px 8px 4px;
 }
+/* S7: each workspace row is a zero-JS POST <form><button> (the switch is a session write,
+   so it rides a CSRF-protected POST, not a forgeable GET). The button restyles to the
+   exact anchor look so the menu renders unchanged. */
+.ws-switcher-form { margin: 0; }
 .ws-switcher-item {
-  display: block; padding: 8px 10px; border-radius: 7px; font-size: 13px;
+  display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 7px;
+  font-size: 13px; font-family: inherit; background: none; border: 0; cursor: pointer;
   color: var(--ink); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .ws-switcher-item:hover { background: var(--card); }

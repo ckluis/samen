@@ -73,7 +73,7 @@ defmodule Samen.Billing.MovementBackfill do
     {seeded, skipped} =
       Enum.reduce(active, {0, 0}, fn sub, {seeded, skipped} ->
         cond do
-          has_movement?(event_resource, sub.id) ->
+          has_movement?(event_resource, org_id, sub.id) ->
             {seeded, skipped + 1}
 
           true ->
@@ -101,9 +101,11 @@ defmodule Samen.Billing.MovementBackfill do
     _ -> []
   end
 
-  defp has_movement?(event_resource, subscription_id) do
+  # Org-pinned (S15): the subscription is unique already, but the explicit org filter
+  # makes the read a genuine tenant-scoped read the ReadScopeLint can prove.
+  defp has_movement?(event_resource, org_id, subscription_id) do
     event_resource
-    |> Ash.Query.filter(subscription_id == ^subscription_id)
+    |> Ash.Query.filter(org_id == ^org_id and subscription_id == ^subscription_id)
     |> Ash.Query.limit(1)
     |> Ash.read!(authorize?: false)
     |> case do

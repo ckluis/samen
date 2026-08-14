@@ -96,7 +96,9 @@ defmodule <%= module %>Web.Router do
   scope "/" do
     pipe_through(:browser)
 
-    # ADR-013 §4.3 — the framework SESSION-write endpoint (`GET /session/org/:org_id`).
+    # ADR-013 §4.3 — the framework SESSION-write endpoint (`POST /session/org/:org_id`;
+    # the stale GET redirects without switching — luminary S7. CSRF-protected via this
+    # pipeline's `protect_from_forgery`).
     samen_session_routes()
 
     # ADR-035 §5 A1–A5/A7 — the IDENTITY-SPINE pre-actor auth surfaces

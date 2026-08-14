@@ -306,6 +306,8 @@ defmodule Samen.Identity.Invite do
     |> Ash.Query.lock(:for_update)
     |> Ash.Query.ensure_selected([:id, :org_id, :role, :status, :email_bidx])
     |> Ash.Query.limit(1)
+    # authz-scope: pre-auth invite-accept lookup keyed on the unique token digest
+    # (<=1 row, FOR UPDATE); the org comes FROM the invitation row
     |> Ash.read!(authorize?: false)
   end
 
@@ -315,6 +317,8 @@ defmodule Samen.Identity.Invite do
     |> Ash.Query.lock(:for_update)
     |> Ash.Query.ensure_selected([:id, :org_id, :role, :status, :email_bidx])
     |> Ash.Query.limit(1)
+    # authz-scope: pre-auth invite-accept lookup keyed on the unique token digest
+    # (<=1 row, FOR UPDATE); the org comes FROM the invitation row
     |> Ash.read!(authorize?: false)
   end
 
@@ -323,6 +327,8 @@ defmodule Samen.Identity.Invite do
     |> Ash.Query.filter(token_digest == ^digest)
     |> Ash.Query.ensure_selected([:id, :org_id, :role, :status, :expires_at, :email_bidx])
     |> Ash.Query.limit(1)
+    # authz-scope: pre-auth invite-accept lookup keyed on the unique token digest (<=1 row);
+    # the org comes FROM the invitation row, never from the request
     |> Ash.read!(authorize?: false)
   end
 
@@ -348,6 +354,7 @@ defmodule Samen.Identity.Invite do
     |> Ash.Query.filter(email_bidx == ^bidx)
     |> Ash.Query.ensure_selected([:id, :verified_at])
     |> Ash.Query.limit(1)
+    # authz-scope: pre-auth boot-path credential lookup keyed on the unique email blind index (<=1 row)
     |> Ash.read!(authorize?: false)
   end
 

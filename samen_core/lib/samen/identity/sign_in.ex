@@ -69,6 +69,8 @@ defmodule Samen.Identity.SignIn do
     # every other field this authenticate/3 call already needed.
     |> Ash.Query.ensure_selected([:id, :password_hash, :hash_scheme, :verified_at, :totp_enabled_at])
     |> Ash.Query.limit(1)
+    # authz-scope: pre-auth sign-in lookup keyed on the unique email blind index (<=1 row);
+    # the org is not known until the credential resolves — this read IS the login boot path
     |> Ash.read!(authorize?: false)
   end
 

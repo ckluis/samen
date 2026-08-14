@@ -104,6 +104,8 @@ defmodule Samen.Billing.AshInvoiceMirror do
     |> Ash.Query.filter_input(%{Atom.to_string(ref_attr) => provider_invoice_id})
     |> Ash.Query.ensure_selected([:last_event_id])
     |> Ash.Query.limit(1)
+    # authz-scope: webhook-ingest invoice lookup keyed on the unique provider invoice ref
+    # (<=1 row); the org comes FROM the resolved row, never from the request
     |> Ash.read_one(authorize?: false)
   end
 
@@ -121,6 +123,8 @@ defmodule Samen.Billing.AshInvoiceMirror do
            |> Ash.Query.filter_input(%{Atom.to_string(ref_attr) => customer_ref})
            |> Ash.Query.ensure_selected([:org_id])
            |> Ash.Query.limit(1)
+           # authz-scope: webhook-ingest customer resolve keyed on the unique provider customer ref
+           # (<=1 row); org_id is selected FROM the matched row for the downstream org checks
            |> Ash.read_one(authorize?: false) do
       {:ok, customer}
     else
@@ -146,6 +150,7 @@ defmodule Samen.Billing.AshInvoiceMirror do
           subscription_resource
           |> Ash.Query.filter_input(%{Atom.to_string(ref_attr) => sub_ref})
           |> Ash.Query.limit(1)
+          # authz-scope: webhook-ingest subscription resolve keyed on the unique provider subscription ref (<=1 row)
           |> Ash.read_one(authorize?: false)
         end
 

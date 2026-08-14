@@ -139,6 +139,8 @@ defmodule Samen.Identity.Register do
     mods.credential
     |> Ash.Query.filter(email_bidx == ^bidx)
     |> Ash.Query.limit(1)
+    # authz-scope: pre-auth duplicate probe keyed on the unique email blind index
+    # (<=1 row, boolean out — no row data leaves this function)
     |> Ash.read!(authorize?: false)
     |> case do
       [] -> false

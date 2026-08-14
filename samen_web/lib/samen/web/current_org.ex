@@ -571,10 +571,14 @@ defmodule Samen.Web.CurrentOrg do
   operator-plane name (or the neutral default) — the shared switcher no longer mislabels every
   non-driftwood host's boundary with the reference vertical's brand.
 
-  Each tenant row links to `GET /session/org/<org_id>?return_to=<path>` (the framework
-  `SessionController`), which writes the session current org and redirects back to the same
-  module for the newly chosen org. Plain disclosure + links — works on the dead render, no JS
-  hook, matching the ADR-012 "works before the socket connects" posture. Hidden when the
+  Each tenant row is a zero-JS `<form method="post">` submitting to
+  `POST /session/org/<org_id>?return_to=<path>` (the framework `SessionController`) with the
+  Phoenix `_csrf_token`, which writes the session current org and redirects back to the same
+  module for the newly chosen org. POST because the switch is a session WRITE (luminary S7 —
+  the old GET was CSRF-forgeable and prefetch-triggerable; a stale GET now redirects without
+  switching). Plain disclosure + native forms — works on the dead render, no JS hook, matching
+  the ADR-012 "works before the socket connects" posture (LiveView seeds the CSRF state into
+  the connected process, so the token is session-valid on both renders). Hidden when the
   directory is empty.
 
   `compact: true` (the default in the CRM/Billing/Support sidebar header, where the `.who`
@@ -597,14 +601,25 @@ defmodule Samen.Web.CurrentOrg do
       </summary>
       <div class="ws-switcher-menu" role="menu">
         <div class="ws-switcher-group">Workspaces</div>
-        <a
+        <form
           :for={{oid, oname} <- @orgs}
-          class={["ws-switcher-item", oid == @org_id && "on"]}
-          href={switch_href(oid, @return_to)}
-          role="menuitem"
+          method="post"
+          action={switch_href(oid, @return_to)}
+          class="ws-switcher-form"
         >
-          {oname}
-        </a>
+          <input
+            type="hidden"
+            name="_csrf_token"
+            value={Plug.CSRFProtection.get_csrf_token_for(switch_href(oid, @return_to))}
+          />
+          <button
+            type="submit"
+            class={["ws-switcher-item", oid == @org_id && "on"]}
+            role="menuitem"
+          >
+            {oname}
+          </button>
+        </form>
         <div class="ws-switcher-sep"></div>
         <a class="ws-switcher-item ws-switcher-ops" href="/operator/accounts" role="menuitem">
           ← {@operator_label} (operator)
@@ -614,8 +629,9 @@ defmodule Samen.Web.CurrentOrg do
     """
   end
 
-  # The switch endpoint the SessionController serves (§4.3). `return_to` keeps the viewer on the
-  # same module for the newly chosen org.
+  # The switch endpoint the SessionController serves (§4.3) — a POST form action since S7
+  # (the query-string `return_to` merges into the POST params). `return_to` keeps the viewer
+  # on the same module for the newly chosen org.
   defp switch_href(org_id, nil), do: "/session/org/#{org_id}"
 
   defp switch_href(org_id, return_to),

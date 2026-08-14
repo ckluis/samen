@@ -123,6 +123,8 @@ defmodule Samen.Identity.LoginFailure do
     resource
     |> Ash.Query.filter(key_kind == ^key_kind and key_value == ^key_value and window_started_at > ^cutoff)
     |> Ash.Query.select([:failure_count])
+    # authz-scope: pre-auth rate-limit counter read keyed on the unique (key_kind, key_value)
+    # pair (<=1 row); no actor exists on the failed-login path
     |> Ash.read!(authorize?: false)
     |> case do
       [%{failure_count: n}] -> n >= limit
@@ -136,6 +138,8 @@ defmodule Samen.Identity.LoginFailure do
     resource
     |> Ash.Query.filter(key_kind == ^key_kind and key_value == ^key_value)
     |> Ash.Query.select([:failure_count])
+    # authz-scope: pre-auth rate-limit counter read keyed on the unique (key_kind, key_value)
+    # pair (<=1 row); no actor exists on the failed-login path
     |> Ash.read!(authorize?: false)
     |> case do
       [%{failure_count: n}] -> n

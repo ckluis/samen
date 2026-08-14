@@ -127,6 +127,8 @@ defmodule Samen.Fleet.Resolution do
 
         assignment_resource
         |> Ash.Query.filter(operator_id == ^principal_id and app_scope == ^app_scope_str)
+        # authz-scope: authorization-boundary read — derives the operator's account scope from
+        # assignment rows keyed on the unique operator id; deny-on-empty (:none), fail closed
         |> Ash.read!(authorize?: false)
         |> Enum.map(& &1.account_org_id)
         |> Enum.filter(&is_binary/1)

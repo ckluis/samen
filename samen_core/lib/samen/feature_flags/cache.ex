@@ -188,6 +188,8 @@ defmodule Samen.FeatureFlags.Cache do
       flag_module
       |> Ash.Query.filter(name == ^flag_name)
       |> Ash.Query.limit(1)
+      # authz-scope: system-plane flag-config load keyed on the unique flag name — config rows,
+      # not a tenant row set; per-org targeting is evaluated downstream by the engine
       |> Ash.read(authorize?: false)
 
     case result do

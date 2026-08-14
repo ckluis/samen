@@ -1,0 +1,38 @@
+# SABOTAGE: S15 (luminary panel-2) — the `authorize?: false` read-scope lint regresses to its
+# pre-S15 shape, BOTH defects at once: (a) `clause_narrowed?` accepts an `org_id`/`id` mention
+# inside ANY `Ash.Query.*` call again, so `Ash.Query.ensure_selected([:org_id])` — select-FORCING,
+# it scopes NOTHING — counts as an org pin and the modeled org-less all-tenants read sails through;
+# (b) `source_files/0` drops the demo/driftwood/pawchart trees, so the ~150 vertical
+# `authorize?: false` sites are unswept again. Flips the S15 decoy red-path AND the vertical
+# roll-call; the GREEN sweep's sanctioned-count floor also collapses (marked-but-now-"narrowed"
+# sites stop counting as sanctions).
+# APP: samen_web
+# TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
+# MUST_FAIL: the decoy is FLAGGED
+# MUST_FAIL: vertical trees
+diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+index e45707e..a888bca 100644
+--- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
++++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+@@ -124,10 +124,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+ 
+     [
+       Path.join(repo_root, "samen_core/lib/**/*.ex"),
+-      Path.join(repo_root, "samen_web/lib/**/*.ex"),
+-      Path.join(repo_root, "demo/lib/**/*.ex"),
+-      Path.join(repo_root, "driftwood/lib/**/*.ex"),
+-      Path.join(repo_root, "pawchart/lib/**/*.ex")
++      Path.join(repo_root, "samen_web/lib/**/*.ex")
+     ]
+     |> Enum.flat_map(&Path.wildcard/1)
+     |> Enum.reject(fn f -> Path.basename(f) in @skip_basenames end)
+@@ -292,8 +289,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+   # sanction marker (the principled, per-site, justified exemption).
+   defp clause_narrowed?(body) do
+     walk_any?(body, fn
+-      {{:., _, [{:__aliases__, _, [_ | _] = segs}, fun]}, _, args}
+-      when fun in @narrowing_funs and is_list(args) ->
++      {{:., _, [{:__aliases__, _, [_ | _] = segs}, _fun]}, _, args} ->
+         List.last(segs) == :Query and args_reference_pin?(args)
+ 
+       {fun, _, args} when fun in @narrowing_funs and is_list(args) ->

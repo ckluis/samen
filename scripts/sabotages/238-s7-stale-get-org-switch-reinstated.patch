@@ -1,0 +1,28 @@
+# SABOTAGE: S7 (luminary panel-2) — the stale-GET landing regresses to the pre-S7 behavior:
+# `SessionController.stale_get/2` writes `session["samen_current_org"] = org_id` again, so
+# `GET /session/org/:org_id` is once more a CSRF-forgeable, prefetch-triggerable session
+# WRITE — an attacker page's `<img src="/session/org/X">` flips a logged-in viewer's current
+# org with no token and no click. Flips both S7 red-paths (the victim's session org moves on
+# a bare GET; a prefetch writes a session org where none existed). The POST positive control
+# stays green — proving the red-paths fail because the GET mutates, not because the endpoint died.
+# APP: samen_web
+# TEST_FILES: test/samen/web/session_org_csrf_test.exs
+# MUST_FAIL: does NOT switch the org
+# MUST_FAIL: prefetch is a no-op
+diff --git a/samen_web/lib/samen/web/session_controller.ex b/samen_web/lib/samen/web/session_controller.ex
+index 91faf6f..3851e08 100644
+--- a/samen_web/lib/samen/web/session_controller.ex
++++ b/samen_web/lib/samen/web/session_controller.ex
+@@ -62,8 +62,10 @@ defmodule Samen.Web.SessionController do
+   nothing was switched, nothing signed in). The viewer lands wherever they were headed,
+   still on whatever org their session already held.
+   """
+-  def stale_get(conn, params) do
+-    redirect(conn, to: safe_return(params["return_to"]))
++  def stale_get(conn, %{"org_id" => org_id} = params) do
++    conn
++    |> put_session(CurrentOrg.session_key(), org_id)
++    |> redirect(to: safe_return(params["return_to"]))
+   end
+ 
+   # Only a same-origin absolute path (starts with a single "/") is honored; anything else

@@ -69,6 +69,8 @@ defmodule Samen.Billing.AshCheckoutMirror do
     subscription_resource
     |> Ash.Query.filter_input(%{Atom.to_string(ref_attr) => provider_subscription_id})
     |> Ash.Query.limit(1)
+    # authz-scope: webhook-ingest existence probe keyed on the unique provider subscription ref
+    # (<=1 row, boolean out); the org is resolved downstream FROM provider-ref-matched rows
     |> Ash.read(authorize?: false)
     |> case do
       {:ok, [_ | _]} -> {:ok, true}

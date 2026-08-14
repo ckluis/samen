@@ -65,6 +65,8 @@ defmodule PawChartWeb.Api.McpKeyResolver do
     |> Ash.Query.filter(token_digest == ^digest)
     |> Ash.Query.filter(is_nil(revoked_at))
     |> Ash.Query.ensure_selected([:id, :org_id, :plane, :scopes, :minter_role, :token_digest])
+    # authz-scope: MCP API-key AUTH-STEP lookup keyed on the unique token digest — no actor/org
+    # exists until this row resolves (revoked filtered out; unmatched digest => :error, fail closed)
     |> Ash.read_one(authorize?: false)
     |> case do
       {:ok, nil} -> :error

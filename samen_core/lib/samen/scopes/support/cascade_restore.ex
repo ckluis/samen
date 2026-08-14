@@ -97,6 +97,8 @@ defmodule Samen.Scopes.Support.CascadeRestore do
     resource
     |> Ash.Query.for_read(:archived)
     |> Ash.Query.filter(ticket_id == ^ticket_id and archived_at == ^instant)
+    # authz-scope: FK-pinned cascade read — bounded to the restored parent ticket's
+    # conversations archived at the SAME instant (org-authorized parent write)
     |> Ash.read!(authorize?: false)
   end
 
@@ -106,6 +108,7 @@ defmodule Samen.Scopes.Support.CascadeRestore do
     resource
     |> Ash.Query.for_read(:archived)
     |> Ash.Query.filter(conversation_id in ^conversation_ids and archived_at == ^instant)
+    # authz-scope: FK-pinned cascade read — bounded to exactly the conversation ids restored by THIS sweep
     |> Ash.read!(authorize?: false)
   end
 

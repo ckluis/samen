@@ -73,6 +73,8 @@ defmodule Samen.Scopes.Chat.CascadeRestore do
     resource
     |> Ash.Query.for_read(:archived)
     |> Ash.Query.filter(thread_id == ^thread_id and archived_at == ^instant)
+    # authz-scope: FK-pinned cascade read — bounded to the restored parent thread's members
+    # archived at the SAME instant (org-authorized parent write)
     |> Ash.read!(authorize?: false)
   end
 end

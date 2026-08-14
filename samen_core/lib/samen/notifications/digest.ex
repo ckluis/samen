@@ -182,6 +182,8 @@ defmodule Samen.Notifications.Digest do
     notification_mod
     |> Ash.Query.filter(status != :read)
     |> Ash.Query.select([:id, :org_id, :recipient_id])
+    # authz-scope: system-plane digest fan-out sweep — cross-org BY DESIGN (the worker walks
+    # every org's unread rows to fan out per-(org, recipient) digests); ids only, no PII
     |> Ash.read!(authorize?: false)
     |> Enum.map(&{&1.org_id, &1.recipient_id})
     |> Enum.uniq()

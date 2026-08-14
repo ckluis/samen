@@ -172,9 +172,11 @@ defmodule DriftwoodWeb.Router do
   scope "/" do
     pipe_through(:browser)
 
-    # ADR-013 §4.3 — the framework SESSION-write endpoint (`GET /session/org/:org_id`), the
-    # target of the workspace switcher + the operator "Open account →". Sets the session current
-    # org so tenant/shared navigation is sticky without a hand-typed UUID.
+    # ADR-013 §4.3 — the framework SESSION-write endpoint (`POST /session/org/:org_id`; the
+    # stale GET redirects without switching — luminary S7), the target of the workspace switcher
+    # + the operator "Open account →". Sets the session current org so tenant/shared navigation
+    # is sticky without a hand-typed UUID. CSRF-protected by this pipeline's
+    # `protect_from_forgery`; inherited from the macro at 0 authored LOC.
     samen_session_routes()
 
     # T148 / ADR-035 §5 A1–A5/A7 — the framework IDENTITY-SPINE pre-actor auth surfaces

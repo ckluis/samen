@@ -35,6 +35,8 @@ defmodule Samen.Auth.SessionResolve do
     session_mod
     |> Ash.Query.filter(token_digest == ^digest and is_nil(revoked_at) and expires_at > ^now)
     |> Ash.Query.limit(1)
+    # authz-scope: session AUTH-STEP resolve keyed on the unique token digest — no actor exists
+    # until this row resolves (unknown/revoked/expired collapse to the same :error, fail closed)
     |> Ash.read!(authorize?: false)
     |> case do
       [session] -> {:ok, session}

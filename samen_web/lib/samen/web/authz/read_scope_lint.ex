@@ -33,16 +33,26 @@ defmodule Samen.Web.Authz.ReadScopeLint do
       an argument; a single row the caller already holds the id for);
     * it is a scalar aggregate — `count`/`count!`/`exists?`/`aggregate`/`sum!`/…
       (transfers a scalar, never a cross-tenant row set — the aggregate plane);
-    * its clause carries an explicit narrowing filter — a call to `filter`,
-      `filter_input`, or `for_read` (whether `Ash.Query.filter(...)` or the bare
-      imported `filter(...)`), OR the clause references `org_id`/`id` inside a query
-      call (the tenant/PK pin, incl. reads whose filter is expressed on a piped var);
+    * its clause carries a genuine ORG/PK SCOPING filter — a narrowing call
+      (`filter`, `filter_input`, or `for_read`, whether `Ash.Query.`-qualified or the
+      bare imported form) whose OWN arguments reference `org_id`/`id` (the atom, or
+      the `"org_id"`/`"id"` string key `filter_input` takes). Select-forcing and
+      ordering calls (`ensure_selected`, `select`, `sort`, `distinct`, `load`,
+      `limit`, …) NEVER count — `ensure_selected([:org_id])` forces `org_id` into the
+      SELECT of every org's rows, it scopes nothing (the S15 defect this rule
+      closed); nor does a filter on some OTHER field alone — the lint cannot prove a
+      non-org/non-PK predicate bounds the read to one tenant, so it demands the
+      sanction marker instead;
     * the read carries an explicit, greppable `# authz-scope:` SANCTION marker on or
-      just above the read line — for the small set of deliberately ORG-LESS /
-      cross-org reads a static check cannot prove safe (a system retention sweep, an
-      operator-namespace anchor bootstrap). The marker names WHY it is safe; the lint
-      COUNTS every sanctioned read and reports the total, so a sanction is auditable,
-      never a silent whitelist.
+      just above the read line — the principled exemption for reads that are safe for
+      a reason a static org/PK check cannot see: a system-plane sweep (retention,
+      digest fan-out, erasure), a pre-auth boot-path lookup keyed on a unique
+      credential/token digest (sign-in, invite, API-key auth — org-less because the
+      org is not KNOWN yet; the lookup IS the auth step), a webhook-ingest lookup
+      keyed on a unique provider ref, or an FK-pinned cascade inside an already
+      org-authorized parent write. The marker names WHY it is safe; the lint COUNTS
+      every sanctioned read and reports the total, so a sanction is auditable, never
+      a silent whitelist.
 
   A read with NONE of the above is FLAGGED: a bare, unnarrowed `authorize?: false`
   read — the exact reintroduction T127 warns about. The failure names
@@ -53,11 +63,14 @@ defmodule Samen.Web.Authz.ReadScopeLint do
 
   The lint reads SOURCE only — it never executes a query, never touches a record,
   never resolves or reveals a field. It sweeps `samen_core/lib` + `samen_web/lib`
-  (the framework planes where `OrgScope` is defined and inherited), skipping the seed
-  / fixture harnesses (`factory.ex`, `red_path.ex`) whose `authorize?: false` reads
-  run under a system actor at setup time, not on a tenant request path. New modules
-  and new reads are swept in automatically — an unpinned read cannot go green by
-  simply not being named in a test.
+  (the framework planes where `OrgScope` is defined and inherited) AND the three
+  vertical trees — `demo/lib`, `driftwood/lib`, `pawchart/lib` — where the exact
+  same reintroduction shape can ship (the S15 gap: the verticals carried ~150
+  `authorize?: false` sites no lint ever swept). It skips only the seed / fixture
+  harnesses (`factory.ex`, `red_path.ex`) whose `authorize?: false` reads run under
+  a system actor at setup time, not on a tenant request path. New modules and new
+  reads are swept in automatically — an unpinned read cannot go green by simply not
+  being named in a test.
 
   This is a companion to `Samen.Web.Reads.Lint` (the unbounded-read completeness
   scan): same AST-completeness discipline, a different invariant (scope, not bound).
@@ -88,6 +101,8 @@ defmodule Samen.Web.Authz.ReadScopeLint do
   @aggregate_funs [:count, :count!, :exists?, :aggregate, :sum!, :avg!, :min!, :max!]
   @narrowing_funs [:filter, :filter_input, :for_read]
   @pin_atoms [:org_id, :id]
+  # `filter_input` takes STRING keys (`%{"org_id" => …}`) — the same pin, input-typed.
+  @pin_strings ["org_id", "id"]
   @sanction_marker "authz-scope:"
 
   # Basenames skipped: seed / fixture harnesses whose authorize?: false reads run under
@@ -95,19 +110,24 @@ defmodule Samen.Web.Authz.ReadScopeLint do
   @skip_basenames ~w(factory.ex red_path.ex read_scope_lint.ex)
 
   @doc """
-  The `.ex` source files under lint: everything beneath `samen_core/lib` and
-  `samen_web/lib`, minus the seed/fixture harnesses. Anchored on THIS file's compile-
-  time path so the glob resolves wherever the suite runs from.
+  The `.ex` source files under lint: everything beneath `samen_core/lib`,
+  `samen_web/lib`, AND the three vertical trees (`demo/lib`, `driftwood/lib`,
+  `pawchart/lib` — the S15 sweep extension; a tree absent from the checkout, e.g. in
+  a generated app, simply globs to `[]`), minus the seed/fixture harnesses. Anchored
+  on THIS file's compile-time path so the glob resolves wherever the suite runs from.
   """
   def source_files do
     # __ENV__.file = .../samen_web/lib/samen/web/authz/read_scope_lint.ex — climb to the
-    # samen_web app root, then one more to the repo root that holds both app trees.
+    # samen_web app root, then one more to the repo root that holds all the app trees.
     samen_web_root = __ENV__.file |> Path.dirname() |> Path.join("../../../..") |> Path.expand()
     repo_root = Path.expand(Path.join(samen_web_root, ".."))
 
     [
       Path.join(repo_root, "samen_core/lib/**/*.ex"),
-      Path.join(repo_root, "samen_web/lib/**/*.ex")
+      Path.join(repo_root, "samen_web/lib/**/*.ex"),
+      Path.join(repo_root, "demo/lib/**/*.ex"),
+      Path.join(repo_root, "driftwood/lib/**/*.ex"),
+      Path.join(repo_root, "pawchart/lib/**/*.ex")
     ]
     |> Enum.flat_map(&Path.wildcard/1)
     |> Enum.reject(fn f -> Path.basename(f) in @skip_basenames end)
@@ -258,30 +278,22 @@ defmodule Samen.Web.Authz.ReadScopeLint do
   defp authorize_false_pair?({:authorize?, false}), do: true
   defp authorize_false_pair?(_), do: false
 
-  # A clause is NARROWED when it contains an explicit filter/for_read call, OR
-  # references org_id/id inside a query call — the tenant/PK pin.
-  defp clause_narrowed?(body), do: has_narrowing_call?(body) or references_pin?(body)
-
-  defp has_narrowing_call?(body) do
+  # A clause is NARROWED only by a genuine SCOPING construct: a narrowing call
+  # (`filter`/`filter_input`/`for_read` — `Ash.Query.`-qualified or the bare imported
+  # form) whose OWN arguments reference the tenant/PK pin (`org_id`/`id`).
+  #
+  # S15 (luminary panel-2) closed here: the pre-S15 rule ALSO accepted (a) any
+  # filter/for_read call regardless of what it filtered on, and (b) an `org_id`/`id`
+  # mention inside ANY `Ash.Query.*` call — so `Ash.Query.ensure_selected([:org_id])`
+  # (select-FORCING: it puts org_id in the SELECT of every org's rows and scopes
+  # NOTHING) counted as an org pin, and a genuinely org-less all-tenants read sailed
+  # through with no justification. Now the pin atoms must sit inside a call that
+  # actually CONSTRAINS the row set; everything else needs the `# authz-scope:`
+  # sanction marker (the principled, per-site, justified exemption).
+  defp clause_narrowed?(body) do
     walk_any?(body, fn
-      {{:., _, [{:__aliases__, _, segs}, fun]}, _, args}
+      {{:., _, [{:__aliases__, _, [_ | _] = segs}, fun]}, _, args}
       when fun in @narrowing_funs and is_list(args) ->
-        List.last(segs) == :Query
-
-      {fun, _, args} when fun in @narrowing_funs and is_list(args) ->
-        true
-
-      _ ->
-        false
-    end)
-  end
-
-  # An `org_id`/`id` reference inside a query/filter call — the actual scope pin. Only
-  # counts when it appears as an ARGUMENT to an `Ash.Query.*` / `filter*` / `for_read`
-  # call (a filter/select/for_read on org_id or id), never a bare mention elsewhere.
-  defp references_pin?(body) do
-    walk_any?(body, fn
-      {{:., _, [{:__aliases__, _, [_ | _] = segs}, _fun]}, _, args} ->
         List.last(segs) == :Query and args_reference_pin?(args)
 
       {fun, _, args} when fun in @narrowing_funs and is_list(args) ->
@@ -295,6 +307,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
   defp args_reference_pin?(args) do
     walk_any?(args, fn
       atom when is_atom(atom) -> atom in @pin_atoms
+      str when is_binary(str) -> str in @pin_strings
       {atom, _, ctx} when is_atom(atom) and is_atom(ctx) -> atom in @pin_atoms
       _ -> false
     end)

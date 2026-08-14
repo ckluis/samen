@@ -99,6 +99,8 @@ defmodule DemoWeb.Api.KeyAuthPlug do
     |> Ash.Query.filter(token_digest == ^digest)
     |> Ash.Query.filter(is_nil(revoked_at))
     |> Ash.Query.filter(is_nil(expires_at) or expires_at > ^now)
+    # authz-scope: API-key AUTH-STEP lookup keyed on the unique token digest — no actor/org
+    # exists until this row resolves (revoked/expired filtered out; unmatched digest => :error, fail closed)
     |> Ash.read_one(authorize?: false)
     |> case do
       {:ok, nil} -> :error

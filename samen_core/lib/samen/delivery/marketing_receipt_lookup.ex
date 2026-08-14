@@ -39,6 +39,8 @@ defmodule Samen.Delivery.MarketingReceiptLookup do
     send_module
     |> Ash.Query.filter(provider_message_id == ^provider_message_id)
     |> Ash.Query.limit(1)
+    # authz-scope: webhook-ingest receipt lookup keyed on the unique provider_message_id
+    # (<=1 row); org_id is read FROM the matched send row, never from the request
     |> Ash.read(authorize?: false)
     |> case do
       {:ok, [row]} -> {:ok, %{send_id: row.id, org_id: row.org_id, subscriber_id: row.subscriber_id}}

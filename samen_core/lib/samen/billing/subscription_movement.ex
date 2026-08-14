@@ -144,8 +144,11 @@ defmodule Samen.Billing.SubscriptionMovement do
 
   # Was this subscription EVER revenue-active before (any prior mov row that moved it
   # onto the book)? Distinguishes :reactivation from :new.
-  defp prior_active?(event_resource, subscription_id, _org_id) do
+  # Org-pinned (S15): `org_id` was already threaded here — filter on it so the read
+  # is a genuine tenant-scoped read the ReadScopeLint can prove.
+  defp prior_active?(event_resource, subscription_id, org_id) do
     event_resource
+    |> Ash.Query.filter(org_id == ^org_id)
     |> Ash.Query.filter(subscription_id == ^subscription_id)
     |> Ash.Query.filter(kind in [:new, :reactivation])
     |> Ash.Query.limit(1)

@@ -188,6 +188,8 @@ defmodule Samen.Files.Erasure do
     queryable
     |> Ash.Query.filter(^Ash.Expr.ref(subject_field) == ^subject_id)
     |> Ash.Query.ensure_selected(select)
+    # authz-scope: about-a-subject erasure sweep — cross-org BY DESIGN (every row the subject
+    # appears in must be reachable to erase); pinned to the subject id, vaulted columns stay opaque tokens
     |> Ash.read!(authorize?: false)
   rescue
     e ->

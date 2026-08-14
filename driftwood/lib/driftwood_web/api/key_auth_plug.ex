@@ -81,6 +81,8 @@ defmodule DriftwoodWeb.Api.KeyAuthPlug do
     |> Ash.Query.filter(token_digest == ^digest)
     |> Ash.Query.filter(is_nil(revoked_at))
     |> Ash.Query.ensure_selected([:id, :org_id, :plane, :scopes, :minter_role, :minter_user_id])
+    # authz-scope: API-key AUTH-STEP lookup keyed on the unique token digest — no actor/org
+    # exists until this row resolves (revoked filtered out; unmatched digest => :error, fail closed)
     |> Ash.read_one(authorize?: false)
     |> case do
       {:ok, nil} -> :error

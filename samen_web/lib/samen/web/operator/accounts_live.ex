@@ -256,14 +256,27 @@ defmodule Samen.Web.Operator.AccountsLive do
                         <div>
                           <span style="font-weight:500;color:#3a3b45">{a.name}</span>
                           <div :if={a.tenant_org_id} style="display:flex;gap:10px;font-size:11px">
-                            <a
-                              class="open-account"
-                              href={open_account_href(@samen_mount, a.tenant_org_id)}
-                              style="color:#3B4CCA"
-                              title="Act as this tenant on the TENANT plane (clear) — fill out / QA the demo"
+                            <%!-- S7: act-as is a session WRITE — a zero-JS CSRF-protected
+                                 POST form, never a forgeable GET link. --%>
+                            <form
+                              method="post"
+                              action={open_account_href(@samen_mount, a.tenant_org_id)}
+                              style="margin:0;display:inline"
                             >
-                              Open account →
-                            </a>
+                              <input
+                                type="hidden"
+                                name="_csrf_token"
+                                value={Plug.CSRFProtection.get_csrf_token_for(open_account_href(@samen_mount, a.tenant_org_id))}
+                              />
+                              <button
+                                type="submit"
+                                class="open-account"
+                                style="color:#3B4CCA;background:none;border:0;padding:0;font:inherit;cursor:pointer"
+                                title="Act as this tenant on the TENANT plane (clear) — fill out / QA the demo"
+                              >
+                                Open account →
+                              </button>
+                            </form>
                             <a
                               class="impersonate-account"
                               href={impersonate_href(@samen_mount, a.tenant_org_id)}
@@ -324,6 +337,8 @@ defmodule Samen.Web.Operator.AccountsLive do
   # (1) Act-as / CLEAR — set the session current org via the framework SessionController and
   # land in the tenant's workspace on the TENANT plane. The tenant landing path is a mount
   # label (`:tenant_landing`, default `/broker`) so a host lands you on its own home page.
+  # Since S7 this is a POST form ACTION (the switch writes the session; CSRF-protected),
+  # not a GET href — the query-string `return_to` merges into the POST params.
   defp open_account_href(mount, tenant_org_id) do
     landing = Samen.Web.Mount.label(mount, :tenant_landing, "/broker")
     "/session/org/#{tenant_org_id}?return_to=#{URI.encode_www_form(landing)}"

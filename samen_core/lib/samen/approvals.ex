@@ -168,6 +168,8 @@ defmodule Samen.Approvals do
         |> org_filter(org_id)
         |> Ash.Query.sort(requested_at: :asc)
 
+      # authz-scope: org-pinned one clause down via org_filter/2 (binary org => org_id == ^org_id;
+      # nil => is_nil(org_id), the deliberate GLOBAL lane) — a cross-clause pin the static check cannot see
       case Ash.read(query, authorize?: false) do
         {:ok, approvals} -> {:ok, approvals}
         {:error, _} = err -> err
@@ -340,6 +342,8 @@ defmodule Samen.Approvals do
       |> org_filter(org_id)
       |> Ash.Query.limit(1)
 
+    # authz-scope: org-pinned one clause down via org_filter/2 (binary org => org_id == ^org_id;
+    # nil => is_nil(org_id), the deliberate GLOBAL lane) — a cross-clause pin the static check cannot see
     case Ash.read(query, authorize?: false) do
       {:ok, [approval]} -> {:ok, approval}
       _ -> :none

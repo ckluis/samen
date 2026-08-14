@@ -839,6 +839,9 @@ defmodule Samen.Web.Operator.Reads do
     |> Ash.Query.distinct([:org_id])
     |> Ash.Query.distinct_sort(occurred_at: :desc)
     |> Ash.Query.limit(@lookup_limit)
+    # authz-scope: operator-plane cross-tenant activity rollup — org-less BY DESIGN (one row
+    # per org via distinct, hard-capped, token-blind [:org_id, :occurred_at] only, NO PII);
+    # the S15 escapee, now justified at the read site
     |> Ash.read!(authorize?: false)
     |> Enum.reduce(%{}, fn ev, acc ->
       case ev.occurred_at do

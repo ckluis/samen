@@ -22,6 +22,8 @@ defmodule Samen.Auth.SessionList do
     |> Ash.Query.filter(credential_id == ^credential_id and is_nil(revoked_at) and expires_at > ^now)
     |> Ash.Query.select([:id, :device_label, :last_seen_at, :expires_at, :inserted_at, :credential_id])
     |> Ash.Query.sort(inserted_at: :desc)
+    # authz-scope: per-credential session list keyed on the unique credential id (the caller's
+    # own authenticated credential); sessions are org-less identity-spine rows
     |> Ash.read!(authorize?: false)
   end
 end

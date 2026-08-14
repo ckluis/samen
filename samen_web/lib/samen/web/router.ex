@@ -1549,15 +1549,23 @@ defmodule Samen.Web.Router do
         samen_session_routes()
       end
 
-  Declares `GET /session/org/:org_id` → `Samen.Web.SessionController.put_current_org/2`, the
+  Declares `POST /session/org/:org_id` → `Samen.Web.SessionController.put_current_org/2`, the
   target of the workspace switcher + the operator "Open account →" clear act-as. Every vertical
   inherits the same durable current-org write. `:path` overrides the default `/session/org`.
+
+  POST-only (luminary S7/S16): the org switch is a session WRITE, so it is CSRF-protected —
+  callers submit a zero-JS `<form method="post">` with the Phoenix `_csrf_token`, and the host
+  `:browser` pipeline's `protect_from_forgery` enforces it. The macro ALSO declares
+  `GET  /session/org/:org_id` → `SessionController.stale_get/2`, the stale-safe landing for
+  old bookmarks/prefetchers: it redirects WITHOUT touching the session, so a forged/prefetched
+  GET can never flip the viewer's org. Verticals inherit both at 0 authored LOC.
   """
   defmacro samen_session_routes(opts \\ []) do
     path = Keyword.get(opts, :path, "/session/org")
 
     quote bind_quoted: [path: path] do
-      get("#{path}/:org_id", Samen.Web.SessionController, :put_current_org)
+      post("#{path}/:org_id", Samen.Web.SessionController, :put_current_org)
+      get("#{path}/:org_id", Samen.Web.SessionController, :stale_get)
     end
   end
 

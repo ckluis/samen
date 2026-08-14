@@ -144,6 +144,8 @@ defmodule Samen.Auth.SessionCreate do
       |> Ash.Query.filter(credential_id == ^credential_id and is_nil(revoked_at))
       |> Ash.Query.select([:id, :inserted_at])
       |> Ash.Query.sort(inserted_at: :asc, id: :asc)
+      # authz-scope: login-time session-cap eviction keyed on the unique credential id — bounded
+      # to that credential's OWN live sessions (org-less spine rows), never a cross-tenant row set
       |> Ash.read!(authorize?: false)
 
     excess = length(live) - keep

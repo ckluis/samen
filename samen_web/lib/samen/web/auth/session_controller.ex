@@ -516,6 +516,8 @@ defmodule Samen.Web.Auth.SessionController do
       |> Ash.Query.filter(email_bidx == ^bidx)
       |> Ash.Query.select([:id])
       |> Ash.Query.limit(1)
+      # authz-scope: pre-auth audit-correlation lookup keyed on the unique email blind index
+      # (<=1 row, id only) on the FAILED-login path — no session exists to derive an org from
       |> Ash.read!(authorize?: false)
       |> case do
         [%{id: id}] -> {:ok, id}
@@ -539,6 +541,8 @@ defmodule Samen.Web.Auth.SessionController do
     )
     |> Ash.Query.select([:id, :credential_id])
     |> Ash.Query.limit(1)
+    # authz-scope: pre-auth 2FA pending-token peek keyed on the unique token digest (<=1 row);
+    # the second factor is not verified yet — no actor exists
     |> Ash.read!(authorize?: false)
     |> case do
       [%{credential_id: credential_id}] -> {:ok, credential_id}

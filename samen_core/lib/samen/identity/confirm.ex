@@ -86,6 +86,8 @@ defmodule Samen.Identity.Confirm do
     |> Ash.Query.filter(email_bidx == ^bidx and is_nil(verified_at))
     |> Ash.Query.ensure_selected([:id, :verified_at])
     |> Ash.Query.limit(1)
+    # authz-scope: pre-auth boot-path lookup keyed on the unique email blind index
+    # (<=1 credential); the org is not known before the credential resolves
     |> Ash.read!(authorize?: false)
   end
 
