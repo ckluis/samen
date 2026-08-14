@@ -1,25 +1,30 @@
 defmodule Samen.AI.Agent.Turn do
   @moduledoc """
-  `Samen.AI.Agent.Turn` — the bounded per-turn log row (ADR-047 §6, batch A1).
+  `Samen.AI.Agent.Turn` — the bounded per-turn log row (ADR-047 §6, batches A1+A2).
 
-  One row per executed turn, keyed `{run_id, turn_index}` — the identity that becomes
-  A2's crash-replay idempotency key (`Samen.Sequences.find_or_create_step_send/2`'s
-  row-reuse shape; a replayed turn finds its existing row and does NOT re-execute,
-  RP-AG-7).
+  One row per executed turn, keyed `{run_id, turn_index}` — the identity that is A2's
+  crash-replay idempotency key (`Samen.Sequences.find_or_create_step_send/2`'s
+  row-reuse shape, RP-AG-7). A2 makes it load-bearing: the executor writes this row
+  `:proposed` as the DECISION checkpoint **before** the slow provider call, and a
+  replay of turn N (worker death, watchdog re-select) FINDS and REUSES that row —
+  `Samen.AI.Agent`'s `find_or_reuse_turn!/3` — instead of creating a duplicate (the
+  unique index refuses one structurally). The outcome checkpoint (`:finalize`) then
+  commits atomically with the run-cursor advance, so a `:done` row always agrees with
+  the cursor. Posture stated as Sequences states it: **at-least-once, never claimed
+  exactly-once** — the provider call between the two checkpoints can genuinely repeat;
+  the turn ROW (and, from A3, the tool execution keyed on it) does not.
 
   ## Token-only, by allowlist (the E4 / `RunRecord.bounded_outcomes/1` pattern)
 
   Exactly the ADR-047 §6 field set: `turn_index`, `tool_kind`, **arg key NAMES only**
   (`arg_keys` — never values), `status`, `error_kind` (closed enum, degraded — never
   rejected — via `Samen.AI.Agent.safe_error_kind/1`), `input_tokens`, `output_tokens`,
-  `duration_ms`, `provider`, `simulated`. **No prompt text, no tool arg values, no
-  result text, ever** — a Completion's `:text` never touches this row (asserted
-  directly by the A1 no-text-at-rest test, not inferred).
-
-  A1 is tool-free, so `tool_kind`/`arg_keys` are written empty; the columns exist
-  because they are the §6 contract of the turn log itself (A3 fills them). `:proposed`
-  is the A2 decision-checkpoint status (committed before a tool fires); A1 writes
-  `:done` / `:failed` only.
+  `duration_ms`, `provider`, `simulated`, plus A2's **bounded `meta` map** (replay
+  provenance — filtered through `Samen.AI.Agent.bounded_meta/1`, the
+  `RunRecord.bounded_outcomes/1` posture: plain string-keyed scalars only, anything
+  struct-shaped or rich degrades to `%{}`, never an `inspect`). **No prompt text, no
+  tool arg values, no result text, ever** — `Samen.AgentCase.assert_no_text_at_rest!/2`
+  scans every attribute INCLUDING map values (`Samen.AgentCase.leaks?/2`).
   """
   use Samen.Resource,
     otp_app: :samen_core,
@@ -62,11 +67,16 @@ defmodule Samen.AI.Agent.Turn do
     # Honesty provenance (T152): stamped from `%Completion{}.simulated` — by construction
     # at the chokepoint's dispatch site, never parsed from text.
     attribute(:simulated, :boolean, public?: true, allow_nil?: false, default: false)
+
+    # A2: bounded replay/outcome provenance (e.g. %{"replayed" => true}). Every write
+    # passes `Samen.AI.Agent.bounded_meta/1` (default-deny: plain string-keyed scalars
+    # only) — a struct/exception/rich term can never be inspect-ed into this jsonb.
+    attribute(:meta, :map, public?: true, allow_nil?: false, default: %{})
   end
 
   identities do
-    # THE idempotency key (ADR-047 §4.1): a second write for the same {run, turn} is a
-    # DB-level conflict — A2's replay executor reuses the row instead of re-firing.
+    # THE idempotency key (ADR-047 §4.1): a second row for the same {run, turn} is a
+    # DB-level conflict — the A2 replay executor reuses the row instead of re-firing.
     identity(:run_turn, [:run_id, :turn_index])
   end
 
@@ -74,7 +84,10 @@ defmodule Samen.AI.Agent.Turn do
     defaults([:read])
 
     create :record do
-      description("Record one executed turn's bounded, token-only log row. Kernel-only.")
+      description(
+        "Record one turn's bounded, token-only log row (A2: the :proposed DECISION " <>
+          "checkpoint, committed before the slow provider call). Kernel-only."
+      )
 
       accept([
         :org_id,
@@ -88,8 +101,27 @@ defmodule Samen.AI.Agent.Turn do
         :output_tokens,
         :duration_ms,
         :provider,
-        :simulated
+        :simulated,
+        :meta
       ])
+    end
+
+    # A2: the OUTCOME checkpoint — finalize the (possibly replay-reused) :proposed row.
+    # Kernel-only; committed in the SAME transaction as the run-cursor advance so a
+    # :done row and the cursor can never disagree.
+    update :finalize do
+      accept([
+        :status,
+        :error_kind,
+        :input_tokens,
+        :output_tokens,
+        :duration_ms,
+        :provider,
+        :simulated,
+        :meta
+      ])
+
+      require_atomic?(false)
     end
   end
 

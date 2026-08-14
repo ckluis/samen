@@ -54,12 +54,15 @@ defmodule Mix.Tasks.Samen.Verify.ErasureCompleteness do
         dl = report.derived_linkable.count
         sk = report.storage_key.count
         bag = report.custom_bag.count
+        tr = report.transcript.count
 
         Mix.shell().info(
           "[erasure-completeness] #{dl} derived-linkable + #{sk} storage_key + #{bag} custom-bag " <>
-            "residues discovered — every one reached by a registered erasure arm. ✓"
+            "+ #{tr} vaulted-transcript residues discovered — every one reached by a registered " <>
+            "erasure arm. ✓"
         )
 
+        report_transcripts(report.transcript)
         report_org_assets(report.org_asset_residuals)
 
       {:error, {:no_residues_discovered, class}} ->
@@ -90,6 +93,20 @@ defmodule Mix.Tasks.Samen.Verify.ErasureCompleteness do
 
         Mix.raise("erasure-completeness: unreached residues — exit 1")
     end
+  end
+
+  # Vault-routed transcripts (ADR-047 §7.4, batch A2): in-envelope, keyed on the row's
+  # own id, reached by the registered retention :shred arm — listed so the coverage is
+  # visible, never inferred.
+  defp report_transcripts(%{count: 0}), do: :ok
+
+  defp report_transcripts(%{columns: columns}) do
+    Mix.shell().info(
+      "[erasure-completeness] vault-routed transcript(s) reached by the retention :shred arm " <>
+        "(ADR-047 §7.4, 90d §9#4):"
+    )
+
+    Enum.each(columns, fn c -> Mix.shell().info("    · #{c}") end)
   end
 
   # Org-asset blobs (no data-subject field) are NOT per-subject-erasure residues — they

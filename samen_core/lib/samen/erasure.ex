@@ -91,10 +91,21 @@ defmodule Samen.Erasure do
 
   Options are passed to `Samen.Erasure.Completeness.resources/1` (`:resources`/`:domains`/
   `:otp_app`) so tests can derive against an explicit resource list.
+
+  A2 (ADR-047 §7.4, §9#4 TAKEN): the derived map also carries one `retention_specs`
+  entry per **vault-routed transcript** resource (a `pii do` block declaring
+  `:transcript` — `Samen.AI.Agent.Run` is the first) — the default 90-day `:shred`
+  retention arm keyed on the row's OWN id (the per-row crypto-shred unit), because a
+  transcript's DEK is keyed on the run, not on any person the run discussed, so
+  subject-level reach is by retention only. The window is host-configurable
+  (`config :samen_core, Samen.AI.Agent, transcript_retention_days: n`); the derived arm
+  is what makes `mix samen.gen.app` erasure-complete by construction and what the
+  erasure-completeness gate's transcript arm asserts.
   """
   @spec default_specs(keyword()) :: %{
           blind_index_erasure_specs: [map()],
-          file_erasure_specs: [map()]
+          file_erasure_specs: [map()],
+          retention_specs: [map()]
         }
   def default_specs(opts \\ []) do
     residues = Samen.Erasure.Completeness.discover(opts)
@@ -114,7 +125,27 @@ defmodule Samen.Erasure do
         %{file_module: r.resource, subject_field: r.subject_field}
       end
 
-    %{blind_index_erasure_specs: bidx, file_erasure_specs: files}
+    transcripts =
+      for r <- residues.transcript do
+        %{
+          resource: r.resource,
+          ttl_seconds: transcript_retention_days() * 86_400,
+          action: :shred,
+          subject_field: :id,
+          timestamp_field: :inserted_at
+        }
+      end
+
+    %{blind_index_erasure_specs: bidx, file_erasure_specs: files, retention_specs: transcripts}
+  end
+
+  # The ratified transcript retention window (ADR-047 §9#4 TAKEN: 90 days; hosts may
+  # lengthen or shorten). Fail-closed shape: junk config degrades to the ratified 90.
+  defp transcript_retention_days do
+    case Application.get_env(:samen_core, Samen.AI.Agent, [])[:transcript_retention_days] do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 90
+    end
   end
 
   @doc """
@@ -124,15 +155,32 @@ defmodule Samen.Erasure do
   seam's twin) and by `mix samen.verify.erasure_completeness` before it checks.
 
   Idempotent. Returns the installed spec map.
+
+  A2: the derived transcript `retention_specs` are MERGED into `:samen_core,
+  :retention_specs` — appended only for resources the host has not already registered a
+  spec for (host entries always win; a host tightening the window is never clobbered
+  back to the default). The `Samen.Retention.SweepWorker` daily cron then enforces them
+  with zero host wiring.
   """
   @spec install_default_specs(keyword()) :: %{
           blind_index_erasure_specs: [map()],
-          file_erasure_specs: [map()]
+          file_erasure_specs: [map()],
+          retention_specs: [map()]
         }
   def install_default_specs(opts \\ []) do
     specs = default_specs(opts)
     Application.put_env(:samen_core, :blind_index_erasure_specs, specs.blind_index_erasure_specs)
     Application.put_env(:samen_core, :file_erasure_specs, specs.file_erasure_specs)
+
+    existing = Application.get_env(:samen_core, :retention_specs, [])
+
+    host_covered =
+      MapSet.new(existing, fn spec -> spec |> Samen.Retention.Spec.normalize() |> Map.get(:resource) end)
+
+    derived_new =
+      Enum.reject(specs.retention_specs, fn spec -> MapSet.member?(host_covered, spec.resource) end)
+
+    Application.put_env(:samen_core, :retention_specs, existing ++ derived_new)
     specs
   end
 

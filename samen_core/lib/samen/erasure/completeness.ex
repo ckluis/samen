@@ -38,6 +38,18 @@ defmodule Samen.Erasure.Completeness do
     * **(d) regression floor** — the already-covered classes: `non_pii!` columns
       (redacted row-level inside `shred/2`) and DEK-keyed pseudonyms (unlinked for free
       by key-shred). Asserted still-wired so a refactor cannot drop them.
+    * **(e) vault-routed transcripts** (ADR-047 §7.4, batch A2) — every resource whose
+      `pii do` block declares a `:transcript` attribute. The transcript IS inside the
+      DEK envelope (it is not an out-of-envelope residue, and classes (a)–(c) gain no
+      member from it) — but its DEK is keyed on the ROW's own id, not on any person the
+      run discussed, so **subject-level reach is by retention only**: the gate asserts a
+      registered `:retention_specs` `:shred` arm (subject_field `:id`) covers each such
+      resource, exactly as `Samen.Erasure.default_specs/1` derives it (90 days, operator
+      decision ADR-047 §9#4 TAKEN). Without that arm a transcript would live until
+      account erasure — the indefinite-liability window §7.4 exists to close. The
+      broader "self-keyed vaulted free text" class (e.g. `Automation.Reminder.note`)
+      remains the carried ADR-046 §7#5 residual, ruled on together with it — this arm
+      deliberately covers the transcript class ADR-047 ships, not that open decision.
 
   ## Non-vacuity (the A2/X9/QueueParity lesson — MANDATORY)
 
@@ -117,14 +129,17 @@ defmodule Samen.Erasure.Completeness do
   # ---------------------------------------------------------------------------
 
   @doc """
-  Discover every out-of-envelope residue across `resources/1`.
+  Discover every out-of-envelope residue across `resources/1` — plus class (e), the
+  in-envelope-but-retention-reached vault-routed transcripts (ADR-047 §7.4).
 
-  Returns `%{derived_linkable: [...], storage_key: [...], custom_bag: [...]}`.
+  Returns `%{derived_linkable: [...], storage_key: [...], custom_bag: [...],
+  transcript: [...]}`.
   """
   @spec discover(keyword()) :: %{
           derived_linkable: [map()],
           storage_key: [map()],
-          custom_bag: [map()]
+          custom_bag: [map()],
+          transcript: [map()]
         }
   def discover(opts \\ []) do
     resources = resources(opts)
@@ -132,7 +147,8 @@ defmodule Samen.Erasure.Completeness do
     %{
       derived_linkable: DerivedLinkable.discover(resources),
       storage_key: discover_storage_key(resources),
-      custom_bag: discover_custom_bag(resources)
+      custom_bag: discover_custom_bag(resources),
+      transcript: discover_transcript(resources)
     }
   end
 
@@ -162,6 +178,32 @@ defmodule Samen.Erasure.Completeness do
 
   defp map_attr?(attr), do: attr.type in [:map, Ash.Type.Map] and attr.public? == true
 
+  # (e) vault-routed transcripts (ADR-047 §7.4): a resource whose `pii do` block
+  # declares a `:transcript` pii_attribute. Discovered from the LIVE pii declarations
+  # (`Samen.Pii.Info.fields/1`), never schema.dict — the same no-grandfathering rule as
+  # every other class. The physical column resolves through the materialized attribute
+  # (`pii_<abbrev>_transcript`).
+  defp discover_transcript(resources) do
+    for resource <- resources,
+        field <- pii_fields(resource),
+        field.name == :transcript do
+      attr = attribute(resource, :transcript)
+
+      %{
+        resource: resource,
+        table: table(resource),
+        column: to_string((attr && (attr.source || attr.name)) || :transcript),
+        vault: field.vault
+      }
+    end
+  end
+
+  defp pii_fields(resource) do
+    Samen.Pii.Info.fields(resource)
+  rescue
+    _ -> []
+  end
+
   defp subject_field(resource) do
     Enum.find(@subject_fields, fn f -> attribute(resource, f) != nil end)
   end
@@ -182,6 +224,7 @@ defmodule Samen.Erasure.Completeness do
     * `:resources` / `:domains` / `:otp_app` — passed to `resources/1`.
     * `:bidx_specs`      — override `:blind_index_erasure_specs` (refutability).
     * `:file_specs`      — override `:file_erasure_specs` (refutability).
+    * `:retention_specs` — override `:retention_specs` (transcript-arm refutability).
     * `:skip_bag_guard?` — skip the live `pii_declared` guard probe (tests without a repo).
   """
   @spec check(keyword()) :: {:ok, map()} | {:error, term()}
@@ -190,6 +233,9 @@ defmodule Samen.Erasure.Completeness do
 
     bidx_specs = opts[:bidx_specs] || Application.get_env(:samen_core, :blind_index_erasure_specs, [])
     file_specs = opts[:file_specs] || Application.get_env(:samen_core, :file_erasure_specs, [])
+
+    retention_specs =
+      opts[:retention_specs] || Application.get_env(:samen_core, :retention_specs, [])
 
     cond do
       # NON-VACUITY floor: the two hard residue classes exist in every real host
@@ -205,14 +251,17 @@ defmodule Samen.Erasure.Completeness do
         {dl_violations, dl_report} = check_derived_linkable(residues.derived_linkable, bidx_specs)
         {sk_violations, sk_report} = check_storage_key(residues.storage_key, file_specs)
         {bag_violations, bag_report} = check_custom_bag(residues.custom_bag, opts)
+        {tr_violations, tr_report} = check_transcript(residues.transcript, retention_specs)
         floor = regression_floor()
 
-        violations = dl_violations ++ sk_violations ++ bag_violations ++ floor.violations
+        violations =
+          dl_violations ++ sk_violations ++ bag_violations ++ tr_violations ++ floor.violations
 
         report = %{
           derived_linkable: dl_report,
           storage_key: sk_report,
           custom_bag: bag_report,
+          transcript: tr_report,
           regression_floor: floor.report,
           org_asset_residuals: sk_report.org_assets
         }
@@ -366,6 +415,50 @@ defmodule Samen.Erasure.Completeness do
   # A non-nil placeholder repo so define_field does not call default_repo!/0; the guard
   # refuses before the repo is ever touched (the insert is never reached).
   defp __probe_repo__, do: Application.get_env(:samen_core, :vault_repo) || :__erasure_completeness_no_repo__
+
+  # (e) vault-routed transcripts (ADR-047 §7.4) — each discovered transcript resource
+  # must be covered by a registered retention `:shred` arm keyed on the row's OWN id
+  # (the per-row crypto-shred unit). Refutable: `check/1` accepts `:retention_specs`,
+  # so a test hands it an empty list and the check must NAME the uncovered transcript.
+  # No hard non-vacuity floor here (a host that mounts no agent domain legitimately
+  # discovers zero transcripts); non-vacuity is proven by the unit red-path instead.
+  defp check_transcript(residues, retention_specs) do
+    violations =
+      Enum.flat_map(residues, fn r ->
+        if transcript_covered?(r, retention_specs) do
+          []
+        else
+          [
+            "UNREACHED vault-routed transcript #{r.table}.#{r.column} " <>
+              "(#{inspect(r.resource)}): inside the DEK envelope but keyed on the ROW's " <>
+              "own id, so subject-level reach is by retention ONLY (ADR-047 §7.4) — and " <>
+              "NO registered `:retention_specs` `:shred` arm (subject_field :id) covers " <>
+              "this resource. Without it the transcript lives until account erasure. " <>
+              "Register the arm (Samen.Erasure.default_specs/1 derives the ratified " <>
+              "90-day spec — §9#4)."
+          ]
+        end
+      end)
+
+    {violations,
+     %{
+       count: length(residues),
+       columns: Enum.map(residues, &"#{&1.table}.#{&1.column}"),
+       covered:
+         residues
+         |> Enum.filter(&transcript_covered?(&1, retention_specs))
+         |> Enum.map(&"#{&1.table}.#{&1.column}")
+     }}
+  end
+
+  defp transcript_covered?(r, retention_specs) do
+    Enum.any?(retention_specs, fn spec ->
+      spec = Samen.Retention.Spec.normalize(spec)
+
+      spec.resource == r.resource and spec.action == :shred and spec.subject_field == :id and
+        is_integer(spec.ttl_seconds) and spec.ttl_seconds > 0
+    end)
+  end
 
   # (d) regression floor — the already-covered classes must stay wired.
   defp regression_floor do

@@ -1,6 +1,6 @@
 defmodule Samen.AI.Agent.Run do
   @moduledoc """
-  `Samen.AI.Agent.Run` — the durable agent-run cursor (ADR-047 §4.1, batch A1).
+  `Samen.AI.Agent.Run` — the durable agent-run cursor (ADR-047 §4.1, batches A1+A2).
 
   One row per agent run: the AshStateMachine lifecycle (`queued → running →
   {succeeded, failed, cancelled, budget_exhausted}` — A4 adds `:awaiting_approval`), the
@@ -8,31 +8,40 @@ defmodule Samen.AI.Agent.Run do
   counters, and the durable cancel flag (`cancel_requested_at`) `Samen.AI.Agent.cancel/2`
   sets and the loop re-checks at EVERY turn boundary (RP-AG-8).
 
-  ## Token-only at rest (ADR-047 §6 — deliberate, load-bearing)
+  ## The vault-routed transcript (A2 — ADR-047 §7.4; operator decision §9#4 TAKEN)
 
-  This row carries **no prompt text, no completion text, no tool arg values, no result
-  text, ever** — ids, enums, counts, and timestamps only. The rendered transcript (the
-  one text artifact a run legitimately persists) is A2's **vault-routed** `:transcript`
-  attribute inside the DEK envelope (ADR-047 §7.4); in A1 the accumulated history lives
-  only in the executing process. That is what makes "no plaintext in any persisted
-  artifact" an asserted property of this batch, not a hope.
+  The ONE text artifact a run legitimately persists — the goal (tenant free text) plus
+  the rendered assistant lines — lives in the vault-routed `:transcript` attribute
+  (`pii do vault(:pii_transcript) … end`): plaintext never lands in the domain column
+  (a `vt_*` token does — `Samen.Vault.Change` + `Samen.Type.VaultField`'s last-line
+  refusal), the ciphertext sits INSIDE the DEK envelope keyed on the run row's OWN id
+  (`Samen.Vault.Change.resolve_subject_id/1` — the framework's per-row crypto-shred
+  unit), and subject-level reach is by retention: a default 90-day `:shred` retention
+  spec is DERIVED framework-first (`Samen.Erasure.default_specs/1` → the
+  `:retention_specs` registry) and asserted by `mix samen.verify.erasure_completeness`'s
+  transcript arm. Every other run/turn column stays token-only (ADR-047 §6): ids, enums,
+  counts, timestamps — no prompt/completion text outside the envelope, ever.
 
-  ## A1 scope honesty
+  ## Durability (A2 — the `Samen.Sequences` shape)
 
-  A1 executes runs synchronously in the calling process (`Samen.AI.Agent.run/4`); the
-  row is already the durable cursor shape A2's Oban worker + never-nil `next_turn_at`
-  watchdog resume from (`next_turn_at` is set while the run is live and cleared exactly
-  once at the terminal transition — the `Samen.Sequences` invariant, adopted in A2).
-  Writes go through the kernel only (`Samen.AI.Agent` — a trusted kernel API, the
-  `Samen.Approvals` engine precedent); tenant reads are org-scoped through
-  `Samen.Policy.OrgScope` like every other read (RP-AG-10).
+  `next_turn_at` is **never nil while the run is non-terminal** (the Sequences MED-2
+  invariant): `:start` arms it at create, every `:advance` re-arms the in-flight
+  watchdog window, and only the terminal transitions clear it — exactly once. The
+  AshOban `:agent_turn_due` trigger (queue `:automation_timers`, explicit
+  `scheduler_cron`, pinned module names so `mix samen.verify.oban_queues` sees both
+  generated modules) re-selects any run whose watchdog window elapsed — a crashed
+  worker, a lost enqueue, a silently-discarded job — and `:resume_due` re-enqueues
+  `Samen.AI.Agent.TurnWorker` INSIDE its own action transaction (the `EventCapture` /
+  Sequences `:advance_due` idiom). Writes go through the kernel only
+  (`Samen.AI.Agent`); tenant reads are org-scoped through `Samen.Policy.OrgScope`
+  (RP-AG-10).
   """
   use Samen.Resource,
     otp_app: :samen_core,
     domain: Samen.AI.Domain,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
-    extensions: [AshStateMachine],
+    extensions: [AshStateMachine, AshOban],
     abbrev: "arn"
 
   postgres do
@@ -47,7 +56,7 @@ defmodule Samen.AI.Agent.Run do
     transitions do
       transition(:begin, from: :queued, to: :running)
       transition(:succeed, from: :running, to: :succeeded)
-      transition(:fail, from: :running, to: :failed)
+      transition(:fail, from: [:queued, :running], to: :failed)
       # Exhaustion is its OWN honest terminal state (never dressed as :succeeded — §6).
       transition(:exhaust, from: :running, to: :budget_exhausted)
       # A cancel can land before the first turn ever runs (queued) or between turns.
@@ -59,6 +68,16 @@ defmodule Samen.AI.Agent.Run do
     # The agent definition's validated name (`Samen.AI.Agent` `use` macro) — a bounded,
     # authored identifier, never tenant data.
     attribute(:agent, :string, public?: true, allow_nil?: false)
+
+    # A2: the agent definition MODULE, so the Oban worker can re-resolve `definition/0`
+    # across a restart (validated on resolve: must exist, export definition/0, and its
+    # name must equal `:agent` — anything else is a fail-honest `:agent_unresolvable`).
+    attribute(:agent_module, :string, public?: true)
+
+    # A2: the initiating member's id — the owner actor the worker re-resolves at turn
+    # time (the Automation.RunWorker owner-resolution rule: a missing owner is
+    # `:owner_unavailable`, never a silent re-attribution).
+    attribute(:owner_id, :string, public?: true)
 
     # Pre-declare the AshStateMachine state attribute so AbbrevStorage prefixes its
     # physical column (the Samen.Approvals.Blueprint precedent).
@@ -73,8 +92,10 @@ defmodule Samen.AI.Agent.Run do
     # The turn cursor: how many turns have completed (the checkpoint A2's worker resumes at).
     attribute(:current_turn, :integer, public?: true, allow_nil?: false, default: 0)
 
-    # The A2 watchdog cursor (never nil while non-terminal, ONCE the Oban worker exists;
-    # A1 sets it while a run is live and clears it exactly once at the terminal write).
+    # The A2 watchdog cursor — NEVER nil while non-terminal (the Samen.Sequences MED-2
+    # invariant: a nil cursor is unselectable by the due-scan `where` clause and produces
+    # a permanent silent stall). Armed at :start, re-armed per :advance, cleared exactly
+    # once by the terminal transitions.
     attribute(:next_turn_at, :utc_datetime_usec, public?: true)
 
     attribute(:started_at, :utc_datetime_usec, public?: true)
@@ -107,18 +128,36 @@ defmodule Samen.AI.Agent.Run do
     attribute(:chain, {:array, :string}, public?: true, allow_nil?: false, default: [])
   end
 
+  # A2 (ADR-047 §7.4, §9#2/#4 TAKEN): the run's ONE persisted text artifact — the goal +
+  # rendered transcript lines, JSON-encoded — vault-routed inside the DEK envelope keyed
+  # on this row's own id. The domain column only ever holds a `vt_*` token; reads present
+  # `%Samen.Masked{}`; the loop reveals through the single `Samen.Vault.reveal/3`
+  # chokepoint bound to `subject_id: run.id` (the Samen.Identity.Totp precedent).
+  pii do
+    vault(:pii_transcript)
+    pii_attribute(:transcript, :string, vault: :pii_transcript)
+    reveal(:reveal_agent_run)
+  end
+
   actions do
     defaults([:read])
 
     create :start do
-      description("Open an agent run cursor (:queued) with its resolved budgets. Kernel-only.")
+      description(
+        "Open an agent run cursor (:queued) with its resolved budgets, the seeded " <>
+          "vault-routed transcript, and an ARMED next_turn_at watchdog. Kernel-only."
+      )
 
       accept([
         :org_id,
         :agent,
+        :agent_module,
+        :owner_id,
         :origin,
         :depth,
         :chain,
+        :transcript,
+        :next_turn_at,
         :max_turns,
         :max_tool_calls,
         :max_input_tokens,
@@ -133,11 +172,14 @@ defmodule Samen.AI.Agent.Run do
       change(transition_state(:running))
     end
 
-    # Per-turn cursor/counter advance (kernel-only, between turns).
+    # Per-turn cursor/counter/transcript advance (kernel-only, between turns). The
+    # transcript plaintext handed here is vault-routed by Samen.Vault.Change before
+    # the row is written — the column receives a token, never text.
     update :advance do
       accept([
         :current_turn,
         :next_turn_at,
+        :transcript,
         :tool_calls_used,
         :input_tokens_used,
         :output_tokens_used
@@ -185,9 +227,95 @@ defmodule Samen.AI.Agent.Run do
       change(set_attribute(:error_kind, "cancelled"))
       change(transition_state(:cancelled))
     end
+
+    # Internal cross-org system read used ONLY by the AshOban :agent_turn_due scheduler
+    # (bypass-authorized below) — each due row resumes under its OWN org, never
+    # cross-plane.
+    read :due_scan do
+      pagination(keyset?: true, required?: false)
+    end
+
+    # System maintenance action driven by the :agent_turn_due AshOban trigger (A2's
+    # watchdog): re-arm the in-flight window and re-enqueue the TurnWorker INSIDE this
+    # action's transaction (the EventCapture / Sequences :advance_due idiom — the job
+    # exists iff the re-arm committed). The trigger's `where` clause selects only due,
+    # non-terminal runs; the changeset filter is the defensive double-check.
+    update :resume_due do
+      accept([])
+      require_atomic?(false)
+
+      change(fn changeset, _ctx ->
+        changeset
+        |> Ash.Changeset.filter({:state, [in: [:queued, :running]]})
+        |> Ash.Changeset.force_change_attribute(
+          :next_turn_at,
+          DateTime.add(DateTime.utc_now(), Samen.AI.Agent.inflight_watchdog_seconds())
+        )
+        |> Ash.Changeset.after_action(fn _changeset, result ->
+          Samen.AI.Agent.TurnWorker.enqueue(result.id)
+          {:ok, result}
+        end)
+      end)
+    end
+
+    action :reveal_agent_run, :map do
+      argument(:actor_id, :string, allow_nil?: false)
+      argument(:subject_id, :string, allow_nil?: false)
+
+      run(fn input, _ctx ->
+        ctx = %Samen.Reveal.Context{
+          actor: input.arguments.actor_id,
+          subject_id: input.arguments.subject_id,
+          resource: __MODULE__,
+          action: :reveal_agent_run,
+          label: :transcript
+        }
+
+        if Samen.Reveal.grant_checker().granted?(ctx) do
+          {:ok, %{status: "granted", subject_id: input.arguments.subject_id}}
+        else
+          {:error, :denied}
+        end
+      end)
+    end
+  end
+
+  oban do
+    triggers do
+      trigger :agent_turn_due do
+        action(:resume_due)
+        queue(:automation_timers)
+        scheduler_cron("* * * * *")
+        scheduler_module_name(Samen.AI.Agent.Run.AgentTurnDueScheduler)
+        worker_module_name(Samen.AI.Agent.Run.AgentTurnDueWorker)
+        read_action(:due_scan)
+        worker_read_action(:due_scan)
+        stream_with(:full_read)
+        actor_persister(:none)
+        max_attempts(3)
+
+        # The never-nil invariant makes this selector complete: every non-terminal run
+        # HAS a next_turn_at, so a stalled run is always eventually due — there is no
+        # unselectable in-flight state (the Sequences MED-2 lesson, adopted verbatim).
+        where(
+          expr(
+            ^ref(:state) in [:queued, :running] and not is_nil(^ref(:next_turn_at)) and
+              ^ref(:next_turn_at) <= now()
+          )
+        )
+      end
+    end
   end
 
   policies do
+    bypass action([:resume_due, :due_scan]) do
+      authorize_if(always())
+    end
+
+    policy action(:reveal_agent_run) do
+      authorize_if(always())
+    end
+
     # Tenant reads are org-scoped (fail-closed FilterCheck — a foreign org's runs do not
     # exist for this scope, RP-AG-10).
     policy action_type(:read) do

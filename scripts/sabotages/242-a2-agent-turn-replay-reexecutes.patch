@@ -1,0 +1,44 @@
+# SABOTAGE: A2 (ADR-047 §4.1 / RP-AG-7) gate sabotage — turn-row replay idempotency
+# defeated. The replay executor no longer REUSES the {run_id, turn_index} :proposed
+# decision checkpoint: it destroys the existing row and mints a FRESH one, so every
+# watchdog/retry replay gets a new row identity — the Samen.Sequences
+# find_or_create_step_send "one row, reused across every retry cycle" rule reversed, and
+# (from A3) the tool-idempotency key gone: a replayed turn would re-fire its tool. Flips
+# the named restart-safety tests (the mid-turn worker death replay must find the SAME row
+# stamped meta.replayed=true; the pre-seeded crash-after-decision row must be reused);
+# the no-death positive control (a straight 3-turn worker run) stays green — proving the
+# reds fail because reuse is gone, not because the worker died.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: the replay REUSES the row and never re-executes turn 1
+# MUST_FAIL: a crash-after-decision replay (pre-seeded :proposed row) executes the turn AT MOST once more
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 51594c5..76e5dbc 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -665,7 +665,24 @@ defmodule Samen.AI.Agent do
+         {:ok, false, row}
+ 
+       [%{status: :proposed} = row] ->
+-        {:ok, true, row}
++        # SABOTAGE (A2, RP-AG-7): the replay executor does NOT reuse the decision
++        # checkpoint — it destroys the existing :proposed row and mints a FRESH one, so
++        # every replay attempt gets a new row identity and the {run_id, turn_index}
++        # dedupe unit (from A3: the tool-idempotency key) is defeated. The Sequences
++        # "one row, reused across every retry/watchdog cycle" rule, reversed.
++        Ash.destroy!(row, authorize?: false)
++
++        fresh =
++          Turn
++          |> Ash.Changeset.for_create(:record, %{
++            org_id: org_id,
++            run_id: run.id,
++            turn_index: turn_index,
++            status: :proposed
++          })
++          |> Ash.create!(authorize?: false)
++
++        {:ok, false, fresh}
+ 
+       [_resolved] ->
+         {:error, :turn_desync}

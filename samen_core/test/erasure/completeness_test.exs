@@ -272,4 +272,79 @@ defmodule Samen.Erasure.CompletenessTest do
     assert length(installed.blind_index_erasure_specs) == 2
     assert length(installed.file_erasure_specs) == 1
   end
+
+  # ======================================================================
+  # CLASS (e) — vault-routed transcripts (ADR-047 §7.4, batch A2)
+  # ======================================================================
+
+  test "discovery finds the vault-routed run transcript (physical column) — and classes (a)-(c) are BYTE-IDENTICAL with or without it" do
+    agent_run = Samen.AI.Agent.Run
+
+    without_agent = Completeness.discover(resources: @clean)
+    with_agent = Completeness.discover(resources: [agent_run | @clean])
+
+    # The transcript class discovers the run resource's PHYSICAL vaulted column.
+    assert [tr] = with_agent.transcript
+    assert tr.resource == agent_run
+    assert tr.table == "ai_agent_run"
+    assert tr.column == "pii_arn_transcript"
+    assert tr.vault == :pii_transcript
+
+    # RP-AG-11: the pre-existing residue classes gain NO member from the agent tables —
+    # the transcript is IN-envelope (vault-routed), not a new out-of-envelope residue.
+    assert with_agent.derived_linkable == without_agent.derived_linkable
+    assert with_agent.storage_key == without_agent.storage_key
+    assert with_agent.custom_bag == without_agent.custom_bag
+    assert without_agent.transcript == []
+  end
+
+  test "RED: removing the retention :shred arm names the transcript UNREACHED (refutable); the derived arm covers it (control)" do
+    agent_run = Samen.AI.Agent.Run
+    base = derived_specs()
+    derived = Erasure.default_specs(resources: [agent_run | @clean])
+
+    # POSITIVE CONTROL: with the DERIVED retention arm (90d :shred keyed :id) it passes.
+    assert {:ok, report} =
+             Completeness.check(
+               resources: [agent_run | @clean],
+               bidx_specs: base.blind_index_erasure_specs,
+               file_specs: base.file_erasure_specs,
+               retention_specs: derived.retention_specs,
+               skip_bag_guard?: true
+             )
+
+    assert report.transcript.count == 1
+    assert report.transcript.covered == ["ai_agent_run.pii_arn_transcript"]
+
+    # The red half: NO retention arm → the transcript is NAMED unreached (the E7 rule —
+    # a coverage assertion that cannot fail asserts nothing).
+    assert {:error, {:incomplete, violations, _}} =
+             Completeness.check(
+               resources: [agent_run | @clean],
+               bidx_specs: base.blind_index_erasure_specs,
+               file_specs: base.file_erasure_specs,
+               retention_specs: [],
+               skip_bag_guard?: true
+             )
+
+    assert Enum.any?(
+             violations,
+             &(&1 =~ "UNREACHED vault-routed transcript" and &1 =~ "pii_arn_transcript")
+           )
+
+    # A NON-:shred / non-self-keyed spec does NOT count as coverage (the arm must be the
+    # crypto-shred of the ROW's own DEK, not a row prune under someone else's key).
+    assert {:error, {:incomplete, violations2, _}} =
+             Completeness.check(
+               resources: [agent_run | @clean],
+               bidx_specs: base.blind_index_erasure_specs,
+               file_specs: base.file_erasure_specs,
+               retention_specs: [
+                 %{resource: agent_run, ttl_seconds: 90 * 86_400, action: :delete, subject_field: :id}
+               ],
+               skip_bag_guard?: true
+             )
+
+    assert Enum.any?(violations2, &(&1 =~ "UNREACHED vault-routed transcript"))
+  end
 end

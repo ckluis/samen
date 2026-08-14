@@ -1,0 +1,35 @@
+# SABOTAGE: A2 (ADR-047 §6) gate sabotage — the operator kill-switch is checked ONCE, at
+# run start (Breaker.check_start), instead of re-checked at EVERY turn boundary. An
+# operator kill (or rate/provider trip throwing the same switch) landing between turn N
+# and turn N+1 is silently ignored: the in-flight run keeps burning turns, budget, and
+# provider spend to its own conclusion — the Automation.RunWorker "already-queued half"
+# lesson (a run of a killed workflow must finalize, never fire) reversed on the agent
+# path. Flips the named in-flight kill red test (a kill flipped DURING turn 2 must stop
+# turn 3); the start-refusal test AND the no-kill positive control stay green — proving
+# the red fails because the per-turn re-check is gone, not because the switch died.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: a kill flipped DURING turn 2 stops turn 3
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 51594c5..a9e88b5 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -502,13 +502,11 @@ defmodule Samen.AI.Agent do
+         log_terminal(run)
+         {:error, :cancelled, run}
+ 
+-      Breaker.killed?() ->
+-        # Fail-closed interrupt (A2, §6): an operator kill between turn N and N+1 stops
+-        # turn N+1 — the in-flight turn completed and was recorded honestly.
+-        run = terminal!(run, :fail, :killed)
+-        log_terminal(run)
+-        {:error, :killed, run}
+-
++      # SABOTAGE (A2, §6): the kill-switch re-check is REMOVED from the turn boundary —
++      # it now runs only at run start (Breaker.check_start), so an operator kill landing
++      # between turn N and N+1 is silently ignored and the in-flight run keeps burning
++      # turns/budget to its own conclusion. The Automation.RunWorker "already-queued
++      # half" lesson, reversed.
+       budget_kind != nil ->
+         # Fail-honest exhaustion (RP-AG-6): an explicit terminal state + a bounded kind.
+         # The transcript — including any last assistant text — is deliberately NOT

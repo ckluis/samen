@@ -67,7 +67,16 @@ defmodule Samen.AI.AgentLoopTest do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
     Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
     Scripted.reset()
-    on_exit(fn -> Scripted.reset() end)
+    # A2: the breaker's runtime state (kill-switch, provider-trip streaks) is global —
+    # clear it so this suite's provider-error red paths can never park the agent
+    # definition across tests.
+    Samen.AI.Agent.Breaker.reset()
+
+    on_exit(fn ->
+      Scripted.reset()
+      Samen.AI.Agent.Breaker.reset()
+    end)
+
     :ok
   end
 

@@ -1,0 +1,43 @@
+# SABOTAGE: A2 (ADR-047 §4.1) gate sabotage — the never-nil next_turn_at watchdog dropped.
+# A run is created :queued with next_turn_at NIL (a lost launch enqueue becomes a
+# PERMANENT silent stall: the :agent_turn_due due-scan `where` clause requires
+# `not is_nil(next_turn_at)`, so a nil cursor is unselectable forever), and the per-turn
+# advance clears the in-flight window mid-run (the same stall for a worker death between
+# batches). This is the Samen.Sequences MED-2 invariant — "next_send_at is NEVER nil while
+# in flight" — reversed on the agent path. Flips the named watchdog tests (the ARMED
+# cursor at start, the non-nil re-arm at the batch boundary, the never-nil invariant
+# sweep); the terminal-clears-it half stays green — proving the reds fail because the
+# arming is gone, not because the loop died.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: ARMED watchdog and a token-only TurnWorker job
+# MUST_FAIL: re-arms with a non-nil watchdog
+# MUST_FAIL: never-nil invariant holds at every non-terminal point
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 51594c5..a778b26 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -615,7 +615,7 @@ defmodule Samen.AI.Agent do
+           run
+           |> Ash.Changeset.for_update(:advance, %{
+             current_turn: turn_index,
+-            next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
++            next_turn_at: nil,
+             transcript: encode_transcript(goal, lines ++ [completion.text]),
+             input_tokens_used: run.input_tokens_used + in_tokens,
+             output_tokens_used: run.output_tokens_used + out_tokens
+@@ -731,8 +731,12 @@ defmodule Samen.AI.Agent do
+             origin: Keyword.get(opts, :origin, default_origin(scope)),
+             depth: 0,
+             chain: [],
+-            transcript: encode_transcript(goal, []),
+-            next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds)
++            # SABOTAGE (A2, §4.1): the never-nil watchdog is DROPPED — a :queued run is
++            # created with next_turn_at nil (unselectable by the due-scan `where`
++            # clause: a lost launch enqueue is a PERMANENT silent stall), and the
++            # per-turn advance below clears it in flight (same stall, mid-run). The
++            # Samen.Sequences MED-2 invariant, reversed.
++            transcript: encode_transcript(goal, [])
+           },
+           Map.new(budgets)
+         )

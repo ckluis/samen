@@ -117,8 +117,11 @@ defmodule Samen.AgentCase do
   @doc """
   NO-TEXT-AT-REST red half (ADR-047 §6): no attribute of the persisted run row NOR of any
   of its turn rows contains any of `canaries` (prompt text, completion text, tool arg
-  values). Pair it with a `sent_texts/0` control proving the canaries DID cross the
-  provider boundary — otherwise the scan is vacuous.
+  values) — scalar, list, AND map/jsonb values alike (`leaks?/2`). Pair it with a
+  `sent_texts/0` control proving the canaries DID cross the provider boundary —
+  otherwise the scan is vacuous. The run's vault-routed `:transcript` reads back as
+  `%Samen.Masked{}` (a `vt_*` token at rest, never text) — proven at the PHYSICAL layer
+  by `assert_transcript_vaulted_at_rest!/2`.
   """
   def assert_no_text_at_rest!(run, canaries) do
     run = Ash.get!(Samen.AI.Agent.Run, run.id, authorize?: false)
@@ -129,6 +132,39 @@ defmodule Samen.AgentCase do
       refute leaks?(value, canary),
              "persisted text leak: #{inspect(attr)} on #{inspect(row.__struct__)} " <>
                "contains #{inspect(canary)} — the run/turn log is token-only (ADR-047 §6)"
+    end
+
+    :ok
+  end
+
+  @doc """
+  A2's vault-routing proof at the PHYSICAL layer (ADR-047 §7.4): read the run's RAW
+  database row (`SELECT *`, no Ash types, no `Samen.Type.VaultField` masking) and assert
+
+    * the transcript column holds a `vt_*` vault token — never plaintext, and
+    * NO column of the raw row contains any of `canaries`.
+
+  This is the direct assertion that the transcript at rest lives inside the DEK
+  envelope — not an inference from the (type-mediated) Ash read.
+  """
+  def assert_transcript_vaulted_at_rest!(run, canaries) do
+    repo = AshPostgres.DataLayer.Info.repo(Samen.AI.Agent.Run, :read)
+    {:ok, run_pk} = Ecto.UUID.dump(run.id)
+
+    %{columns: columns, rows: [row]} =
+      Ecto.Adapters.SQL.query!(repo, "SELECT * FROM ai_agent_run WHERE arn_id = $1", [run_pk])
+
+    raw = Enum.zip(columns, row)
+    {_col, transcript} = Enum.find(raw, fn {col, _} -> col == "pii_arn_transcript" end)
+
+    assert is_binary(transcript) and String.starts_with?(transcript, "vt_"),
+           "the physical transcript column must hold a vt_* vault token " <>
+             "(ADR-047 §7.4 — inside the DEK envelope); got: #{inspect(transcript)}"
+
+    for {col, value} <- raw, is_binary(value), canary <- List.wrap(canaries) do
+      refute String.contains?(value, canary),
+             "PHYSICAL text leak: raw column #{col} contains #{inspect(canary)} — " <>
+               "transcript plaintext escaped the DEK envelope (ADR-047 §7.4)"
     end
 
     :ok
@@ -172,6 +208,33 @@ defmodule Samen.AgentCase do
     :ok
   end
 
+  @doc """
+  Does `value` contain `canary` anywhere — as a binary, inside a list, or inside a
+  MAP/jsonb value (keys AND values, recursively)?
+
+  A1 shipped this scanning binaries and lists only, which the A1 verifier flagged as
+  VACUOUS for map-typed attributes; A2's bounded `meta` jsonb on the turn log makes the
+  map arm load-bearing, so it is now public and recursive over maps — with a red-path
+  test proving a canary inside a map value IS detected (non-vacuity). Structs (e.g. the
+  `%Samen.Masked{}` a vault-routed read presents, `DateTime`) are deliberately NOT
+  descended: a masked value at rest is a token, and scanning it would assert nothing.
+  """
+  @spec leaks?(term(), String.t()) :: boolean()
+  def leaks?(value, canary) when is_binary(value), do: String.contains?(value, canary)
+
+  def leaks?(value, canary) when is_list(value),
+    do: Enum.any?(value, &leaks?(&1, canary))
+
+  def leaks?(%_struct{}, _canary), do: false
+
+  def leaks?(value, canary) when is_map(value),
+    do: Enum.any?(value, fn {k, v} -> leaks?(k, canary) or leaks?(v, canary) end)
+
+  def leaks?(value, canary) when is_atom(value) and not is_nil(value),
+    do: String.contains?(Atom.to_string(value), canary)
+
+  def leaks?(_value, _canary), do: false
+
   # --- internals -------------------------------------------------------------------------
 
   # Every persisted (non-meta) attribute of an Ash record, as {name, value}.
@@ -180,11 +243,4 @@ defmodule Samen.AgentCase do
     |> Ash.Resource.Info.attributes()
     |> Enum.map(fn %{name: name} -> {name, Map.get(row, name)} end)
   end
-
-  defp leaks?(value, canary) when is_binary(value), do: String.contains?(value, canary)
-
-  defp leaks?(value, canary) when is_list(value),
-    do: Enum.any?(value, &leaks?(&1, canary))
-
-  defp leaks?(_value, _canary), do: false
 end
