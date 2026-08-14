@@ -23,10 +23,29 @@ defmodule Samen.AI.Completion do
   The struct default is `false` (a completion is not simulated unless the kernel proves
   the provider is), the fail-honest posture: never claim a keyless output is real, and
   never silently mark a live output simulated.
+
+  ## `:tool_calls` — native provider tool selection (ADR-047 §5.2, batch A3)
+
+  An adapter that supports native (vendor-side) tool use maps the vendor response into
+  this bounded field — a list of `%{"name" => kind, "args" => map}` entries; an adapter
+  that does not leaves it `[]` (the default) and the agent loop falls back to parsing
+  the bounded `TOOL:` JSON envelope out of `:text` (`Samen.AI.Agent.parse_next/1`).
+  The field is provider **ingress**, so INV-7 does not govern its arrival — but its
+  contents are UNTRUSTED MODEL OUTPUT that becomes EG2 egress on the next turn's echo
+  (ADR-047 §4.3#6): the loop validates args through the action's own `validate/2`,
+  refuses any `vt_` sentinel before execution, and re-enters only renderer-produced
+  binaries. (Adding this field is in-contract: ADR-043 §11 deferred the exact
+  `Completion` field list — extend by adding, never removing.)
   """
 
   @enforce_keys [:text]
-  defstruct text: nil, model: nil, provider: nil, usage: %{}, meta: %{}, simulated: false
+  defstruct text: nil,
+            model: nil,
+            provider: nil,
+            usage: %{},
+            meta: %{},
+            simulated: false,
+            tool_calls: []
 
   @type t :: %__MODULE__{
           text: String.t(),
@@ -34,6 +53,7 @@ defmodule Samen.AI.Completion do
           provider: atom() | nil,
           usage: map(),
           meta: map(),
-          simulated: boolean()
+          simulated: boolean(),
+          tool_calls: [map()]
         }
 end

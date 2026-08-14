@@ -136,6 +136,11 @@ defmodule Samen.AI.Chokepoint do
       / vault-repo / vault-module injection — tests inject an approving grant here).
     * `:history` — prior-turn segments (strings, or `{:grant_span, text, %Reveal.Context{}}`
       for grant-tagged spans re-checked per §3.2a).
+    * `:tools` — EG2 tool DEFINITIONS (ADR-047 §4.2, A3): a list of bounded static schema
+      maps riding the sealed payload's `:tools` field. Scrubbed fail-closed by
+      `scrub_tools/1` (below): each def must pass the `safe_metadata?/1` allowlist (keys AND
+      values, `vt_`-scanned) AND be byte-identical to an OPTED-IN registry action's
+      compile-time `tool_schema/0` — a runtime-composed def REFUSES (the static-schema rule).
     * `:grounding` (metadata map) and `:meta` (bounded dispatch metadata).
   """
   @spec seal(MaskedPayload.kind(), [term()] | term(), keyword()) ::
@@ -148,12 +153,14 @@ defmodule Samen.AI.Chokepoint do
     with {:ok, binding_segs} <- resolve_bindings(kind, opts),
          {:ok, history_segs} <- rescrub_history(kind, opts),
          {:ok, assembled} <- assemble_and_scrub(segments, binding_segs, history_segs),
+         {:ok, tools} <- scrub_tools(Keyword.get(opts, :tools, [])),
          :ok <- scrub_metadata(grounding),
          :ok <- scrub_metadata(meta) do
       {:ok,
        %MaskedPayload{
          kind: kind,
          segments: assembled,
+         tools: tools,
          grounding: grounding,
          meta: meta
        }}
@@ -536,4 +543,47 @@ defmodule Samen.AI.Chokepoint do
   # Every other leaf shape (binary, number, boolean/nil already caught above as atoms, pid,
   # ref, fun) delegates to the segments allowlist verbatim — no independently invented rule.
   defp safe_metadata?(seg), do: safe_segment?(seg)
+
+  # --- EG2 tool-definition scrub (ADR-047 §4.2, batch A3) --------------------------------
+  #
+  # Tool DEFINITIONS are EG2 egress and ride the sealed payload's `:tools` field. Two
+  # fail-closed gates, both required, refusal payload-free:
+  #
+  #   1. **the allowlist** — every def must pass `safe_metadata?/1` whole (a plain map of
+  #      bounded label atoms / binaries / numbers / booleans / lists / maps, keys AND
+  #      values recursed, `vt_`-scanned, charlist-rendering-scanned, structs refused) —
+  #      a canary/`vt_`-bearing description refuses like any metadata violation;
+  #   2. **the static-schema rule** — the def must be BYTE-IDENTICAL to an opted-in
+  #      `Samen.Automation.Action` module's compile-time `tool_schema/0` constant
+  #      (`Samen.AI.Agent.Tools.static_def?/1`). A schema whose `enum` was populated from
+  #      live records would be a silent EG2 egress of tenant data on every turn — so a
+  #      RUNTIME-COMPOSED tool def refuses HERE, structurally, before A7's AST verifier
+  #      check (d) even runs. Dynamic choices are resolved by CALLING a read tool, never
+  #      by baking values into a definition.
+  #
+  # `[]`/nil = "no tools" (the pre-A3 shape of every payload); any non-list refuses.
+  defp scrub_tools(nil), do: {:ok, []}
+  defp scrub_tools([]), do: {:ok, []}
+
+  defp scrub_tools(tools) when is_list(tools) do
+    if Enum.all?(tools, &safe_tool_def?/1), do: {:ok, tools}, else: @refusal
+  rescue
+    _ -> @refusal
+  end
+
+  defp scrub_tools(_other), do: @refusal
+
+  defp safe_tool_def?(def) when is_map(def) and not is_struct(def) do
+    not unsafe_metadata?(def) and static_tool_def?(def)
+  end
+
+  defp safe_tool_def?(_other), do: false
+
+  # A broken/raising registry lookup is NOT a static def (fail-closed, never a raise —
+  # a crash's stack trace is itself an EG6 egress).
+  defp static_tool_def?(def) do
+    Samen.AI.Agent.Tools.static_def?(def)
+  rescue
+    _ -> false
+  end
 end

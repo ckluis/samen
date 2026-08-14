@@ -20,6 +20,11 @@ defmodule Samen.AI.Provider.Scripted do
 
     * `{:continue, text}` — an intermediate assistant turn (`FINAL:`-free by shape);
     * `{:final, text}` — a goal-met turn (`"FINAL: " <> text`);
+    * `{:tool_call, kind, args}` — a NATIVE tool selection (A3, ADR-047 §5.2): a
+      completion with `tool_calls: [%{"name" => kind, "args" => args}]` and empty text
+      (the vendor-native shape an adapter maps into `%Completion{}`);
+      `{:tool_call, kind, args, usage}` is the token-budget sugar. The TEXT-envelope
+      fallback needs no special form — script `{:continue, ~s(TOOL: {"tool": ...})}`;
     * `{:error, reason}` — a scripted provider failure (the chokepoint EG6-normalizes it);
     * `%{text: ..., usage: %{input_tokens: _, output_tokens: _}}` — full control (token
       budgets); `{:continue | :final, text, usage}` is sugar for the same;
@@ -72,7 +77,7 @@ defmodule Samen.AI.Provider.Scripted do
       # Fail-honest: nothing (left) scripted = no work done. NEVER a canned {:ok, _}.
       :exhausted -> {:error, :not_configured}
       {:error, reason} -> {:error, reason}
-      %{text: text} = entry -> {:ok, completion(text, Map.get(entry, :usage, %{}))}
+      %{text: _} = entry -> {:ok, scripted_completion(entry)}
     end
   end
 
@@ -123,6 +128,14 @@ defmodule Samen.AI.Provider.Scripted do
   defp normalize({:final, text, usage}) when is_binary(text),
     do: %{text: "FINAL: " <> text, usage: usage}
 
+  # A3: the native tool-selection entry (ADR-047 §5.2) — models an adapter that maps a
+  # vendor tool_use block into %Completion{tool_calls: [...]}.
+  defp normalize({:tool_call, kind, args}) when is_binary(kind) and is_map(args),
+    do: %{text: "", tool_calls: [%{"name" => kind, "args" => args}]}
+
+  defp normalize({:tool_call, kind, args, usage}) when is_binary(kind) and is_map(args),
+    do: %{text: "", tool_calls: [%{"name" => kind, "args" => args}], usage: usage}
+
   defp normalize({:error, reason}), do: {:error, reason}
   defp normalize(%{text: text} = entry) when is_binary(text), do: entry
 
@@ -130,12 +143,13 @@ defmodule Samen.AI.Provider.Scripted do
   # never guess a completion into existence.
   defp normalize(_other), do: {:error, :not_configured}
 
-  defp completion(text, usage) do
+  defp scripted_completion(%{text: text} = entry) do
     %Completion{
       text: text,
       model: "scripted-1",
       provider: :scripted,
-      usage: usage
+      usage: Map.get(entry, :usage, %{}),
+      tool_calls: Map.get(entry, :tool_calls, [])
     }
   end
 

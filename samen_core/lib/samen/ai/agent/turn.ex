@@ -106,12 +106,26 @@ defmodule Samen.AI.Agent.Turn do
       ])
     end
 
+    # A3: the tool DECISION stamp (ADR-047 §4.1 checkpoint 1, tool half) — tool_kind,
+    # arg key NAMES, and the validated-args sha256 digest (in bounded `meta`) land on
+    # the still-:proposed row, committed BEFORE the governed action fires. The
+    # {run_id, turn_index} row is the tool-idempotency key a replay reuses; a replayed
+    # decision whose fresh digest diverges is recorded (`replay_divergent`), never
+    # silently double-fired. Kernel-only.
+    update :decide do
+      accept([:tool_kind, :arg_keys, :meta])
+      require_atomic?(false)
+    end
+
     # A2: the OUTCOME checkpoint — finalize the (possibly replay-reused) :proposed row.
     # Kernel-only; committed in the SAME transaction as the run-cursor advance so a
-    # :done row and the cursor can never disagree.
+    # :done row and the cursor can never disagree. (A3 adds tool_kind/arg_keys for the
+    # refusal-feedback turns that never reach the :decide stamp.)
     update :finalize do
       accept([
         :status,
+        :tool_kind,
+        :arg_keys,
         :error_kind,
         :input_tokens,
         :output_tokens,

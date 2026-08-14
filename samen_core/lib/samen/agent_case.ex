@@ -80,6 +80,19 @@ defmodule Samen.AgentCase do
   end
 
   @doc """
+  Every scripted `:complete` payload's EG2 `:tools` field (the sealed tool DEFS the
+  provider was offered), OLDEST call first (A3 — ADR-047 §4.2).
+  """
+  @spec sent_tool_defs() :: [[map()]]
+  def sent_tool_defs do
+    Scripted.sent_payloads()
+    |> Enum.reverse()
+    |> Enum.filter(fn {callback, _} -> callback == :complete end)
+    # Field-less match + dot access (the single-mint probe convention).
+    |> Enum.map(fn {_callback, %MaskedPayload{} = payload} -> payload.tools end)
+  end
+
+  @doc """
   BUDGET-HONESTY red half (RP-AG-6): the result is `{:error, :budget_exhausted, run}` —
   never an `{:ok, …}` promotion of the last assistant turn — and the persisted run is
   terminal `:budget_exhausted` with a bounded `error_kind`. Returns the run.

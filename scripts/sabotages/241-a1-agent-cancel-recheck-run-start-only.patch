@@ -11,32 +11,31 @@
 # TEST_FILES: test/ai/agent_loop_test.exs
 # MUST_FAIL: a cancel issued DURING turn 2 stops turn 3
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index 51594c5..eeeed99 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -220,7 +220,20 @@ defmodule Samen.AI.Agent do
-         {:error, :tools_not_supported, terminal!(run, :fail, :tools_not_supported)}
-       else
-         run = begin!(run)
--        loop(run, scope, definition, opts, :infinity)
+@@ -265,7 +265,20 @@
+          :ok <- Breaker.check_start(org_id, definition.name) do
+       run = create_run!(agent_mod, definition, org_id, scope, goal, budgets, opts)
+       run = begin!(run)
+-      loop(run, scope, definition, Keyword.put(opts, :resolved_tools, tools), :infinity)
 +
-+        # SABOTAGE (A1/A2, RP-AG-8): the durable-cancel check runs ONCE, at run start,
-+        # instead of at every turn boundary — a cancel landing between turn N and N+1 is
-+        # silently ignored and the run keeps executing turns.
-+        if run.cancel_requested_at != nil do
-+          cancelled =
-+            run
-+            |> Ash.Changeset.for_update(:cancel, %{})
-+            |> Ash.update!(authorize?: false)
++      # SABOTAGE (A1/A2, RP-AG-8): the durable-cancel check runs ONCE, at run start,
++      # instead of at every turn boundary — a cancel landing between turn N and N+1 is
++      # silently ignored and the run keeps executing turns.
++      if run.cancel_requested_at != nil do
++        cancelled =
++          run
++          |> Ash.Changeset.for_update(:cancel, %{})
++          |> Ash.update!(authorize?: false)
 +
-+          {:error, :cancelled, cancelled}
-+        else
-+          loop(run, scope, definition, opts, :infinity)
-+        end
-       end
++        {:error, :cancelled, cancelled}
++      else
++        loop(run, scope, definition, Keyword.put(opts, :resolved_tools, tools), :infinity)
++      end
      end
    end
-@@ -493,15 +506,6 @@ defmodule Samen.AI.Agent do
+ 
+@@ -615,15 +628,6 @@
      budget_kind = over_budget(run, DateTime.utc_now())
  
      cond do

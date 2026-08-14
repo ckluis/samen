@@ -1,0 +1,26 @@
+# SABOTAGE: A3 (ADR-047 §4.2) gate sabotage — the EG2 tool-DEFINITION egress scrub. Neutralizes
+# Samen.AI.Chokepoint.seal/3's scrub_tools/1 call: the `:tools` opt is copied straight into the
+# sealed %MaskedPayload{} with NO allowlist scan and NO static-membership check, so a
+# runtime-composed tool definition (whose enum could be populated from live tenant records) or a
+# canary/vt_-bearing tool def egresses to the provider intact — the exact EG2 half-one leak the
+# static-schema rule + the safe_metadata? allowlist prevent. The named A3 tool-def refusal reds
+# must flip.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_tools_test.exs
+# MUST_FAIL: a RUNTIME-COMPOSED tool def is REFUSED fail-closed
+# MUST_FAIL: a canary/vt_-bearing tool definition is REFUSED fail-closed
+diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+--- a/samen_core/lib/samen/ai/chokepoint.ex
++++ b/samen_core/lib/samen/ai/chokepoint.ex
+@@ -153,7 +153,10 @@
+     with {:ok, binding_segs} <- resolve_bindings(kind, opts),
+          {:ok, history_segs} <- rescrub_history(kind, opts),
+          {:ok, assembled} <- assemble_and_scrub(segments, binding_segs, history_segs),
+-         {:ok, tools} <- scrub_tools(Keyword.get(opts, :tools, [])),
++         # SABOTAGE (A3, ADR-047): the EG2 tool-def scrub is BYPASSED — the :tools opt is
++         # copied into the sealed payload with NO scrub_tools/1, so a runtime-composed or
++         # canary/vt_-bearing tool definition egresses to the provider intact.
++         tools <- Keyword.get(opts, :tools, []),
+          :ok <- scrub_metadata(grounding),
+          :ok <- scrub_metadata(meta) do
+       {:ok,

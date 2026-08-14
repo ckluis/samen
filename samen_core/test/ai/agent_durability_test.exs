@@ -565,6 +565,53 @@ defmodule Samen.AI.AgentDurabilityTest do
       assert {:error, :shredded} = reveal_transcript(run)
     end
 
+    test "RED (A3 fold — the F4.1 accountability bind): a cross-run transcript token SWAP is refused by the subject bind — the run terminates :transcript_unavailable, executing nothing" do
+      scripted_worker_config()
+      a = new_scope()
+      b = new_scope()
+
+      assert {:ok, run_a} = Agent.start(Durable, a, "goal A CANARY-bind-a3")
+      assert {:ok, run_b} = Agent.start(Durable, b, "goal B CANARY-bind-b3")
+
+      # The attack: launder run B's transcript TOKEN into run A's row (raw SQL — the
+      # cross-subject confusion `Samen.Vault.reveal/3`'s subject bind exists to refuse).
+      # WITHOUT the loop asserting `subject_id: run.id` at its reveal, B's token would
+      # decrypt just fine under B's own subject DEK — and run A would keep executing on
+      # a FOREIGN transcript while every audit line attributes the work to run A.
+      {:ok, a_pk} = Ecto.UUID.dump(run_a.id)
+      {:ok, b_pk} = Ecto.UUID.dump(run_b.id)
+
+      %{rows: [[token_b]]} =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          "SELECT pii_arn_transcript FROM ai_agent_run WHERE arn_id = $1",
+          [b_pk]
+        )
+
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        "UPDATE ai_agent_run SET pii_arn_transcript = $1 WHERE arn_id = $2",
+        [token_b, a_pk]
+      )
+
+      script(final: "never reached for A")
+      assert :ok = perform!(run_a)
+
+      run_a = assert_terminal!(run_a, :failed)
+      assert run_a.error_kind == "transcript_unavailable"
+      # Fail-closed BEFORE any decrypt: run B's goal never egressed under run A.
+      assert sent_segments() == []
+
+      # POSITIVE CONTROL: the untampered run B reveals + executes through the SAME
+      # chokepoint (the refusal above is the bind catching the swap, not breakage).
+      script(final: "answer B")
+      assert :ok = perform!(run_b)
+      run_b = assert_terminal!(run_b, :succeeded)
+
+      assert {:ok, json} = reveal_transcript(run_b)
+      assert json =~ "CANARY-bind-b3"
+    end
+
     test "RED: a shredded run can NEVER keep executing — the worker refuses fail-honest (:transcript_unavailable)" do
       scripted_worker_config()
       s = new_scope()

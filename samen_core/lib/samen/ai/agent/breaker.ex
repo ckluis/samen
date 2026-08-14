@@ -26,6 +26,17 @@ defmodule Samen.AI.Agent.Breaker do
   `>` — the crossing turn completes and is billed); the run COUNT here is what trips,
   never the overshoot.
 
+  > **Cross-tenant blast radius, named plainly (A3 fold of the A2 verifier finding).**
+  > The rate COUNT is per-org, but the switch it throws is the HOST-LEVEL kill: **one
+  > org crossing its own 60-runs/hour threshold stops agent runs for EVERY org on the
+  > host** — in-flight runs terminate at their next turn boundary and new runs refuse
+  > `{:error, :killed}` — until an operator explicitly re-arms (`rearm/1`; trips never
+  > self-heal). This is the deliberate A2/A3 posture: fail-closed beats fail-open on a
+  > brand-new spend-bearing AI surface, and a single host-level lever is auditable.
+  > The residual is REAL and carried to **A5** alongside the durable
+  > per-definition-kill column below: the operator surface ships a per-org /
+  > per-definition trip so one noisy tenant no longer halts the fleet.
+
   ## Provider trip
 
   Consecutive normalized provider errors (`{:provider_error, _}` / `:not_configured`,

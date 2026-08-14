@@ -16,12 +16,22 @@ defmodule A1TestAgents do
       budgets: [max_turns: 2]
   end
 
-  defmodule WithTools do
+  defmodule UnknownTool do
     @moduledoc false
     use Samen.AI.Agent,
-      name: "a1.with-tools",
+      name: "a1.unknown-tool",
       goal_prompt: "Use your tools. Reply FINAL: <answer> when done.",
-      tools: ["search_records"]
+      tools: ["no_such_tool"]
+  end
+
+  defmodule NotOptedInTool do
+    @moduledoc false
+    use Samen.AI.Agent,
+      name: "a1.not-opted-in-tool",
+      goal_prompt: "Use your tools. Reply FINAL: <answer> when done.",
+      # "notify" IS a registered Automation.Action kind — but it does not export
+      # tool_schema/0, so intersection arm 2 (explicit opt-in, default OFF) refuses it.
+      tools: ["notify"]
   end
 end
 
@@ -54,7 +64,7 @@ defmodule Samen.AI.AgentLoopTest do
 
   import ExUnit.CaptureLog
 
-  alias A1TestAgents.{Basic, Tight, WithTools}
+  alias A1TestAgents.{Basic, NotOptedInTool, Tight, UnknownTool}
   alias Samen.AI.Agent
   alias Samen.AI.Agent.Run
   alias Samen.AI.Chokepoint
@@ -466,14 +476,22 @@ defmodule Samen.AI.AgentLoopTest do
       assert [%{turn_index: 1, status: :failed}] = turn_rows(run)
     end
 
-    test "RED: an A1 definition declaring tools: is refused honestly, before any provider call" do
+    test "RED: a definition declaring an unresolvable tool is refused at START — nothing persisted, no provider call (A3 arms 1+2)" do
       s = new_scope()
+      org_id = s.actor.org_id
       script(final: "should never be consumed")
 
-      assert {:error, :tools_not_supported, run} = run_scripted(WithTools, s, "goal")
+      # Arm 1 (the registry is the allowlist): an unregistered kind refuses.
+      assert {:error, :invalid_tools} = run_scripted(UnknownTool, s, "goal")
+      assert {:error, :invalid_tools} = Agent.start(UnknownTool, s, "goal")
 
-      run = assert_terminal!(run, :failed)
-      assert run.error_kind == "tools_not_supported"
+      # Arm 2 (explicit per-action opt-in, default OFF): a registered-but-not-opted-in
+      # kind ("notify") refuses identically — no shipped action becomes a tool by
+      # accident (ADR-047 §5.1; the full intersection reds live in agent_tools_test.exs).
+      assert {:error, :invalid_tools} = run_scripted(NotOptedInTool, s, "goal")
+
+      # Fail-closed AND clean: refused BEFORE anything persisted, before any provider call.
+      assert [] = Run |> Ash.Query.filter(org_id == ^org_id) |> Ash.read!(authorize?: false)
       assert sent_segments() == []
       assert length(Scripted.remaining()) == 1
     end

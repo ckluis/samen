@@ -1,0 +1,30 @@
+# SABOTAGE: A3 (ADR-047 §4.3#2) gate sabotage — the EG2 tool-RESULT re-entry render. Neutralizes
+# Samen.AI.Agent.ToolResult.render/2: a governed tool result's {:ok, meta} is returned as the RAW
+# meta map (records, structs, arg maps) instead of the ordered egress-resolved binaries, so §3.2
+# step 1 is skipped and an un-rendered structured shape re-enters the agent prompt. The renderer
+# is the defense; the transcript is_binary guard + the chokepoint safe_segment? allowlist are the
+# fail-closed last lines — so the run cannot complete and the masked-only re-entry reds flip.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_tools_test.exs
+# MUST_FAIL: ONLY as rendered binaries
+# MUST_FAIL: renders •••• on the AI plane
+diff --git a/samen_core/lib/samen/ai/agent/tool_result.ex b/samen_core/lib/samen/ai/agent/tool_result.ex
+--- a/samen_core/lib/samen/ai/agent/tool_result.ex
++++ b/samen_core/lib/samen/ai/agent/tool_result.ex
+@@ -62,10 +62,12 @@
+   refusal the model sees (never a silent skip, never a rich term).
+   """
+   @spec render({:ok, map()} | {:error, term()}, keyword()) :: [String.t()]
+-  def render({:ok, meta}, opts) when is_map(meta) do
+-    meta
+-    |> render_meta(opts)
+-    |> Enum.take(@max_lines)
++  def render({:ok, meta}, _opts) when is_map(meta) do
++    # SABOTAGE (A3, ADR-047): the renderer returns the RAW result meta (records, arg
++    # maps, structs) instead of the ordered egress-resolved binaries — the un-rendered
++    # shape then re-enters the agent prompt, so the PiiResolution egress-mode resolve
++    # (§3.2 step 1) is skipped. The renderer is the defense.
++    [meta]
+   end
+ 
+   def render({:ok, _other}, _opts), do: ["tool_result: [unrenderable]"]

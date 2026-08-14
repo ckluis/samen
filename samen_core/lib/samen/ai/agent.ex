@@ -1,7 +1,29 @@
 defmodule Samen.AI.Agent do
   @moduledoc """
   `Samen.AI.Agent` — the first-party multi-turn agent loop over `Samen.AI.complete/4`
-  (ADR-047 §3/§4/§6; batch A1: the loop core; batch A2: durability + erasure).
+  (ADR-047 §3/§4/§6; batch A1: the loop core; batch A2: durability + erasure; batch A3:
+  the read-tool surface + EG2 scrubbing).
+
+  ## What A3 adds — governed tools (ADR-047 §4.2/§4.3/§5.1)
+
+  A definition's `tools:` list now RESOLVES through the four-way narrowing intersection
+  (`Samen.AI.Agent.Tools`: registry ∩ per-action `tool_schema/0` opt-in ∩ the declared
+  list ∩ the owner actor's policy envelope at execution) — at run START (arms 1-3,
+  fail-closed refusals persist nothing) and again PER CALL. One tool call per turn:
+  native `%Completion{tool_calls:}` first, else the bounded `TOOL: {"tool": _, "args":
+  _}` JSON envelope (`parse_next/1` — the A1 `FINAL:` grammar grown per §10). The EG2
+  story hop-by-hop: tool DEFS ride the sealed payload's `:tools` field (compile-time
+  static, chokepoint-scrubbed + static-membership-checked); model ARGS are vt_-scanned
+  and validated by the action's own `validate/2` BEFORE execution; the governed action
+  runs AS the owner actor (`Samen.AI.Agent.Context.build/2` — honest refusals recorded,
+  never silent skips); the call ECHO + RESULT re-enter ONLY as
+  `Samen.AI.Agent.ToolResult` rendered, PiiResolution-EGRESS-resolved binaries through
+  the vault-routed transcript → `:history` (per-turn §3.2a re-scrub; `safe_segment?/1`
+  fail-closed last line; vault-routed result fields render `••••` always — §9#2). The
+  `{run_id, turn_index}` turn row gains the tool DECISION stamp (kind + arg key names +
+  validated-args digest) committed before the tool fires; `tool_calls_used` now counts
+  for real and `max_tool_calls` exhaustion is live. `effect: :write` tools refuse
+  `:tools_not_supported` until A4 ships propose-then-approve.
 
   ## What A2 adds to the A1 loop
 
@@ -96,6 +118,8 @@ defmodule Samen.AI.Agent do
 
   alias Samen.AI.Agent.Breaker
   alias Samen.AI.Agent.Run
+  alias Samen.AI.Agent.ToolResult
+  alias Samen.AI.Agent.Tools
   alias Samen.AI.Agent.Turn
   alias Samen.AI.Completion
 
@@ -119,7 +143,11 @@ defmodule Samen.AI.Agent do
   @budget_keys Keyword.keys(@default_budgets)
 
   # The bounded error-kind enum (closed — anything else degrades to :unknown, never an
-  # inspect and never a rejected finalize).
+  # inspect and never a rejected finalize). A3 adds the TOOL kinds: the intersection
+  # refusal (:tool_refused), the arg gates (:invalid_args, :invalid_tool_call), the
+  # governed-action outcomes the two shipped read tools surface (:record_not_found,
+  # :unknown_resource, :not_authorized, :no_org), the degrade (:tool_failed), and the
+  # definition-resolution refusal (:invalid_tools).
   @error_kinds [
     :max_turns,
     :max_tool_calls,
@@ -140,6 +168,15 @@ defmodule Samen.AI.Agent do
     :not_configured,
     :not_implemented,
     :tools_not_supported,
+    :invalid_tools,
+    :tool_refused,
+    :invalid_args,
+    :invalid_tool_call,
+    :tool_failed,
+    :record_not_found,
+    :unknown_resource,
+    :not_authorized,
+    :no_org,
     :unknown
   ]
 
@@ -153,7 +190,13 @@ defmodule Samen.AI.Agent do
   @default_turns_per_job 4
 
   @final_marker "FINAL:"
+  @tool_marker "TOOL:"
   @name_pattern ~r/\A[a-z0-9][a-z0-9_.\-]*\z/
+
+  # The vault FK-token sentinel: a model-emitted tool ARG carrying it is refused BEFORE
+  # any execution (ADR-047 §4.3 — vault fields are structurally excluded from arg space;
+  # the shipped sabotage-45 tuple hole, re-proven on the agent path at A3).
+  @vt_sentinel "vt_"
 
   defmacro __using__(opts) do
     definition = validate_definition!(opts, __CALLER__)
@@ -185,8 +228,11 @@ defmodule Samen.AI.Agent do
     * `{:error, reason, run}` — a provider/chokepoint error (bounded, EG6-normalized);
       the run is terminal `:failed` with a bounded `error_kind`;
     * `{:error, reason}` — the run could not start (`:org_scope_required`,
-      `:invalid_goal`, `:invalid_budgets`, and A2's breaker refusals — `:killed`,
-      `:rate_tripped`, `:provider_tripped`; nothing is persisted for a refusal).
+      `:invalid_goal`, `:invalid_budgets`, A2's breaker refusals — `:killed`,
+      `:rate_tripped`, `:provider_tripped` — and A3's tool-resolution refusals:
+      `:invalid_tools` for a declared kind that is unregistered or not opted in,
+      `:tools_not_supported` for a declared `effect: :write` tool before A4;
+      nothing is persisted for a refusal).
 
   ## Options
 
@@ -211,17 +257,15 @@ defmodule Samen.AI.Agent do
     with {:ok, org_id} <- scope_org(scope),
          :ok <- validate_goal(goal),
          {:ok, budgets} <- resolve_budgets(definition, opts),
+         # A3 (ADR-047 §5.1): intersection arms 1-3 resolve at run start, fail-closed —
+         # a definition declaring an unregistered / non-opted-in / write-effect tool is
+         # REFUSED before anything persists (never silently run with fewer tools than
+         # declared, never a tool the registry+opt-in did not admit).
+         {:ok, tools} <- Tools.resolve_definition(definition),
          :ok <- Breaker.check_start(org_id, definition.name) do
       run = create_run!(agent_mod, definition, org_id, scope, goal, budgets, opts)
-
-      # A2 boundary, fail-honest: the tool surface is A3. A definition that declares tools
-      # must be REFUSED, never silently run tool-less as if its tools had been offered.
-      if definition.tools != [] do
-        {:error, :tools_not_supported, terminal!(run, :fail, :tools_not_supported)}
-      else
-        run = begin!(run)
-        loop(run, scope, definition, opts, :infinity)
-      end
+      run = begin!(run)
+      loop(run, scope, definition, Keyword.put(opts, :resolved_tools, tools), :infinity)
     end
   end
 
@@ -248,7 +292,9 @@ defmodule Samen.AI.Agent do
          :ok <- validate_goal(goal),
          {:ok, budgets} <- resolve_budgets(definition, opts),
          :ok <- Breaker.check_start(org_id, definition.name),
-         :ok <- refuse_tools(definition) do
+         # A3: same start-time intersection resolution as run/4 (the worker re-resolves
+         # from the row at execution time — a definition drift lands fail-honest there).
+         {:ok, _tools} <- Tools.resolve_definition(definition) do
       {:ok, create_run!(agent_mod, definition, org_id, scope, goal, budgets, opts, enqueue: true)}
     end
   end
@@ -283,31 +329,95 @@ defmodule Samen.AI.Agent do
   @doc """
   The egress options the loop passes to EVERY `Samen.AI.complete/4` call. Pure and public
   so the §4.4 property is directly assertable: `:history` is exactly the accumulated
-  rendered binaries, and `grant_egress?: false` is appended LAST — a caller-supplied
-  override cannot re-enable grant plaintext on the agent path (masked-only, categorically;
-  operator decision §9#2 TAKEN).
+  rendered binaries, `:tools` (A3, ADR-047 §4.2) is exactly the LOOP-resolved static tool
+  defs — the caller-opts allowlist (`Keyword.take/2`, unchanged from A1 byte-for-byte)
+  admits NEITHER, so a caller can supply history, tools, nor grant state — and
+  `grant_egress?: false` is appended LAST — a caller-supplied override cannot re-enable
+  grant plaintext on the agent path (masked-only, categorically; operator decision §9#2
+  TAKEN).
   """
-  @spec egress_opts(keyword(), [String.t()]) :: keyword()
-  def egress_opts(opts, history) do
+  @spec egress_opts(keyword(), [String.t()], [map()]) :: keyword()
+  def egress_opts(opts, history, tool_defs \\ []) do
     opts
     |> Keyword.take([:provider, :grounding, :meta, :env_reader])
     |> Keyword.put(:history, history)
+    |> Keyword.put(:tools, tool_defs)
     |> Keyword.put(:grant_egress?, false)
   end
 
   @doc """
-  A1's bounded next-step envelope (dynamic next-step selection, tool-free form): a
-  completion whose text opens with `FINAL:` ends the run with the remainder as the
-  answer; anything else continues (the text joins the history). The richer tool-call
-  envelope grammar is A3's (ADR-047 §10).
+  The bounded next-step envelope (dynamic next-step selection). A1's `FINAL:` grammar,
+  grown at A3 with tool-call selection (the ADR-047 §10 deferred spelling, decided
+  here — the text-envelope FALLBACK for adapters without native tool use, §5.2):
+
+    * `FINAL: <answer>` — goal met; the remainder is the answer;
+    * `TOOL: {"tool": "<kind>", "args": {...}}` — ONE tool call as a bounded JSON
+      object (exactly the keys `"tool"` — required, a registry kind string — and
+      `"args"` — an optional object, default `{}`). Anything malformed — undecodable
+      JSON, extra keys, a non-string tool, non-object args — is `{:tool_error,
+      :invalid_tool_call}`: a fail-honest bounded feedback turn, never a raise, never
+      a silent `continue` that would hide a mangled tool intent;
+    * anything else continues (the text joins the history).
+
+  Native `%Completion{tool_calls: [...]}` takes PRIORITY over text parsing — see
+  `next_step/1`.
   """
-  @spec parse_next(String.t()) :: {:final, String.t()} | {:continue, String.t()}
+  @spec parse_next(String.t()) ::
+          {:final, String.t()}
+          | {:continue, String.t()}
+          | {:tool, String.t(), map()}
+          | {:tool_error, :invalid_tool_call}
   def parse_next(text) when is_binary(text) do
     case String.trim_leading(text) do
       @final_marker <> rest -> {:final, String.trim(rest)}
+      @tool_marker <> rest -> parse_tool_envelope(rest)
       _ -> {:continue, text}
     end
   end
+
+  # The bounded JSON tool envelope: {"tool": kind} + optional {"args": %{}} and NOTHING
+  # else (default-deny on extra keys — untrusted model output stays a closed shape).
+  defp parse_tool_envelope(rest) do
+    case Jason.decode(String.trim(rest)) do
+      {:ok, %{"tool" => kind} = envelope} when is_binary(kind) ->
+        args = Map.get(envelope, "args", %{})
+
+        if is_map(args) and envelope |> Map.drop(["tool", "args"]) |> map_size() == 0 do
+          {:tool, kind, args}
+        else
+          {:tool_error, :invalid_tool_call}
+        end
+
+      _ ->
+        {:tool_error, :invalid_tool_call}
+    end
+  end
+
+  @doc """
+  The next-step decision for a completion (A3): native `tool_calls` win over the text
+  envelope (ADR-047 §5.2 — an adapter that supports vendor tool use maps into the
+  bounded field; one that does not leaves it `[]` and the text grammar applies).
+  Exactly ONE native call is supported in v1 — more is `{:tool_error,
+  :invalid_tool_call}` (fail-honest, never a silent partial execution).
+  """
+  @spec next_step(Completion.t()) ::
+          {:final, String.t()}
+          | {:continue, String.t()}
+          | {:tool, String.t(), map()}
+          | {:tool_error, :invalid_tool_call}
+  def next_step(%Completion{tool_calls: [call]}), do: parse_native_call(call)
+  def next_step(%Completion{tool_calls: [_ | _]}), do: {:tool_error, :invalid_tool_call}
+  def next_step(%Completion{text: text}), do: parse_next(text)
+
+  defp parse_native_call(%{"name" => kind, "args" => args}) when is_binary(kind) and is_map(args),
+    do: {:tool, kind, args}
+
+  defp parse_native_call(%{"name" => kind}) when is_binary(kind), do: {:tool, kind, %{}}
+  defp parse_native_call(%{name: kind, args: args}) when is_binary(kind) and is_map(args),
+    do: {:tool, kind, args}
+
+  defp parse_native_call(%{name: kind}) when is_binary(kind), do: {:tool, kind, %{}}
+  defp parse_native_call(_call), do: {:tool_error, :invalid_tool_call}
 
   @doc """
   Which budget (if any) is exhausted at this turn boundary (ADR-047 §6) — checked BEFORE
@@ -430,11 +540,23 @@ defmodule Samen.AI.Agent do
              {:ok, scope} <- owner_scope(run) do
           definition = agent_mod.definition()
 
-          if definition.tools != [] do
-            {:error, :tools_not_supported, terminal_logged!(run, :tools_not_supported)}
-          else
-            run = if run.state == :queued, do: begin!(run), else: run
-            loop(run, scope, definition, worker_opts(), turns_per_job())
+          # A3: re-resolve the intersection from the definition AS DEPLOYED — a tool
+          # de-registered/de-opted between start and execution is a fail-honest
+          # terminal, never a silently narrowed tool surface.
+          case Tools.resolve_definition(definition) do
+            {:ok, tools} ->
+              run = if run.state == :queued, do: begin!(run), else: run
+
+              loop(
+                run,
+                scope,
+                definition,
+                Keyword.put(worker_opts(), :resolved_tools, tools),
+                turns_per_job()
+              )
+
+            {:error, kind} ->
+              {:error, kind, terminal_logged!(run, kind)}
           end
         else
           {:error, kind} -> {:error, kind, terminal_logged!(run, kind)}
@@ -536,6 +658,7 @@ defmodule Samen.AI.Agent do
   defp execute_turn(%Run{} = run, scope, definition, opts) do
     {:ok, org_id} = scope_org(scope)
     turn_index = run.current_turn + 1
+    tools = Keyword.get(opts, :resolved_tools, [])
 
     with {:ok, {goal, lines}} <- transcript(run),
          {:ok, replayed?, turn_row} <- find_or_reuse_turn(run, org_id, turn_index) do
@@ -543,28 +666,63 @@ defmodule Samen.AI.Agent do
 
       # Every provider-bound byte still routes kernel → chokepoint: prior turns re-enter
       # ONLY as `:history` (re-scrubbed per §3.2a + allowlist-scanned per §3.2 step 3/4,
-      # every turn), and grant plaintext is categorically excluded (§4.4). The slow
-      # provider call sits BETWEEN the two checkpoints, outside any transaction (§4.1).
+      # every turn), tool DEFS ride the sealed payload's `:tools` field (scrubbed +
+      # static-membership-checked, §4.2), and grant plaintext is categorically excluded
+      # (§4.4). The slow provider call sits BETWEEN the two checkpoints, outside any
+      # transaction (§4.1).
       result =
-        Samen.AI.complete(scope, [definition.goal_prompt, goal], %{}, egress_opts(opts, lines))
+        Samen.AI.complete(
+          scope,
+          [definition.goal_prompt, goal],
+          %{},
+          egress_opts(opts, lines, Tools.defs(tools))
+        )
 
       duration_ms = System.monotonic_time(:millisecond) - started
 
       case result do
         {:ok, %Completion{} = completion} ->
           Breaker.note_provider_ok(run.agent)
-          next = parse_next(completion.text)
 
-          run =
-            commit_turn!(run, turn_row, completion, next, duration_ms, {goal, lines}, replayed?)
+          case next_step(completion) do
+            {:tool, kind, args} ->
+              tool_turn(
+                run,
+                scope,
+                tools,
+                turn_row,
+                completion,
+                kind,
+                args,
+                duration_ms,
+                {goal, lines},
+                replayed?
+              )
 
-          case next do
-            {:final, answer} ->
-              log_terminal(run)
-              {:ok, %{answer: answer, run: run, turns: run.current_turn}}
+            {:tool_error, tool_error_kind} ->
+              feedback_turn(
+                run,
+                turn_row,
+                completion,
+                tool_error_kind,
+                nil,
+                duration_ms,
+                {goal, lines},
+                replayed?
+              )
 
-            {:continue, _text} ->
-              {:continue, run}
+            next ->
+              run =
+                commit_turn!(run, turn_row, completion, next, duration_ms, {goal, lines}, replayed?)
+
+              case next do
+                {:final, answer} ->
+                  log_terminal(run)
+                  {:ok, %{answer: answer, run: run, turns: run.current_turn}}
+
+                {:continue, _text} ->
+                  {:continue, run}
+              end
           end
 
         {:error, reason} ->
@@ -635,6 +793,256 @@ defmodule Samen.AI.Agent do
 
     run
   end
+
+  # ------------------------------------------------------------------------------------
+  # The tool turn (A3 — ADR-047 §4.3/§5.1)
+
+  # One model-chosen tool call. Order is load-bearing:
+  #   1. AUTHORIZE — the four-way intersection re-check (arms 1-3 via the run's RESOLVED
+  #      set; sabotage 249's target) + the vt_-sentinel arg gate + the action's own
+  #      write-time validate/2. Any refusal is an HONEST feedback turn (recorded on the
+  #      turn row + a bounded line the model sees) — never a silent skip, never an
+  #      execution;
+  #   2. DECIDE — stamp tool_kind + arg key names + the validated-args sha256 digest onto
+  #      the :proposed turn row (ADR-047 §4.1 checkpoint 1's tool half), committed BEFORE
+  #      the governed action fires — the {run_id, turn_index} row is the tool-idempotency
+  #      key a replay reuses;
+  #   3. EXECUTE — the governed action runs AS the owner actor (arm 4: the actor's real
+  #      policy envelope binds inside the action's own Ash reads; INV-2);
+  #   4. RENDER + COMMIT — the call echo + result re-enter ONLY as ToolResult-rendered,
+  #      PiiResolution-egress-resolved binaries appended to the vault-routed transcript
+  #      (they re-enter as :history next turn — §3.2a re-scrub + safe_segment?/1 last
+  #      line), finalized atomically with the cursor advance + tool_calls_used counter.
+  defp tool_turn(run, scope, tools, turn_row, completion, kind, args, duration_ms, {goal, lines}, replayed?) do
+    case authorize_tool(tools, kind, args) do
+      {:ok, entry, normalized} ->
+        turn_row = decide_tool!(turn_row, entry.kind, normalized)
+        outcome = run_tool(entry, normalized, run, scope)
+
+        new_lines = [
+          ToolResult.render_call(entry.kind, normalized)
+          | ToolResult.render(outcome, actor: scope_actor(scope))
+        ]
+
+        run =
+          commit_tool_turn!(run, turn_row, completion, %{
+            tool_kind: entry.kind,
+            arg_keys: sorted_arg_keys(normalized),
+            error_kind: outcome_error_kind(outcome),
+            executed?: true,
+            new_lines: new_lines,
+            duration_ms: duration_ms,
+            goal: goal,
+            lines: lines,
+            replayed?: replayed?
+          })
+
+        {:continue, run}
+
+      {:error, refusal_kind, known_kind} ->
+        feedback_turn(
+          run,
+          turn_row,
+          completion,
+          refusal_kind,
+          known_kind,
+          duration_ms,
+          {goal, lines},
+          replayed?
+        )
+    end
+  end
+
+  # A tool call the run could not even execute (outside the intersection, poisoned or
+  # invalid args, malformed envelope): the HONEST refusal turn. Recorded on the turn row
+  # (bounded error_kind; tool_kind only when the requested kind is a REGISTRY kind — an
+  # arbitrary model string never lands in a persisted column) and fed back to the model
+  # as one bounded fixed line, so the run continues under its budgets. Never a silent
+  # skip, never an execution.
+  defp feedback_turn(run, turn_row, completion, refusal_kind, known_kind, duration_ms, {goal, lines}, replayed?) do
+    feedback = "tool_error: " <> to_string(safe_error_kind(refusal_kind))
+
+    run =
+      commit_tool_turn!(run, turn_row, completion, %{
+        tool_kind: known_kind,
+        arg_keys: [],
+        error_kind: refusal_kind,
+        executed?: false,
+        new_lines: [feedback],
+        duration_ms: duration_ms,
+        goal: goal,
+        lines: lines,
+        replayed?: replayed?
+      })
+
+    {:continue, run}
+  end
+
+  # The four-way-intersection + arg gates for one call (order: membership → vt_ scan →
+  # the action's own validator). Returns {:ok, entry, normalized} or
+  # {:error, bounded_kind, registry_kind_or_nil}.
+  defp authorize_tool(tools, kind, args) do
+    known_kind = if Tools.registry_kind?(kind), do: kind, else: nil
+
+    with {:ok, entry} <- Tools.resolve_call(tools, kind),
+         :ok <- refuse_vt_args(args),
+         {:ok, normalized} <- validate_args(entry.module, args) do
+      {:ok, entry, normalized}
+    else
+      {:error, :tool_refused} -> {:error, :tool_refused, known_kind}
+      {:error, :invalid_args} -> {:error, :invalid_args, known_kind}
+    end
+  end
+
+  # A model-emitted arg carrying the vault-token sentinel is refused BEFORE anything
+  # executes or persists beyond the bounded row (ADR-047 §4.3; the sabotage-45 EG2
+  # tool-args hole, re-proven on the agent path). Keys AND values, recursively —
+  # fail-closed: an unscannable shape refuses.
+  defp refuse_vt_args(args) do
+    if vt_free?(args), do: :ok, else: {:error, :invalid_args}
+  rescue
+    _ -> {:error, :invalid_args}
+  end
+
+  defp vt_free?(value) when is_binary(value), do: not String.contains?(value, @vt_sentinel)
+
+  defp vt_free?(value) when is_atom(value) and not is_nil(value),
+    do: not (value |> Atom.to_string() |> String.contains?(@vt_sentinel))
+
+  defp vt_free?(value) when is_number(value) or is_boolean(value) or is_nil(value), do: true
+  defp vt_free?(value) when is_list(value), do: Enum.all?(value, &vt_free?/1)
+
+  defp vt_free?(value) when is_map(value) and not is_struct(value),
+    do: Enum.all?(value, fn {k, v} -> vt_free?(k) and vt_free?(v) end)
+
+  defp vt_free?(_other), do: false
+
+  # Tool args are untrusted model output validated by the action's OWN write-time
+  # validate/2 (the same validator the Workflow changeset uses; ADR-047 §4.3). Invalid
+  # args are a fail-honest bounded tool error fed back to the model — never a raise
+  # (a raise's message is an EG6 egress) and never a silent coercion.
+  defp validate_args(module, args) when is_map(args) do
+    case module.validate(args, nil) do
+      {:ok, normalized} when is_map(normalized) -> {:ok, normalized}
+      _ -> {:error, :invalid_args}
+    end
+  rescue
+    _ -> {:error, :invalid_args}
+  end
+
+  defp validate_args(_module, _args), do: {:error, :invalid_args}
+
+  # The governed execution (arm 4 binds HERE): the action runs AS the run's owner actor
+  # through its own governed Ash reads — a policy refusal surfaces as the action's
+  # bounded honest error. An action error never crashes the engine (ADR-039 §5.1) and
+  # never leaks a rich term (EG6): anything unexpected degrades to :tool_failed.
+  defp run_tool(entry, normalized, run, scope) do
+    ctx = Samen.AI.Agent.Context.build(run, scope)
+
+    case entry.module.run(normalized, ctx) do
+      {:ok, meta} when is_map(meta) -> {:ok, meta}
+      {:error, kind} when is_atom(kind) and not is_nil(kind) -> {:error, kind}
+      _other -> {:error, :tool_failed}
+    end
+  rescue
+    _ -> {:error, :tool_failed}
+  end
+
+  # The tool DECISION stamp (ADR-047 §4.1 checkpoint 1, tool half): tool_kind + arg key
+  # NAMES + the validated-args sha256 digest land on the :proposed row BEFORE the
+  # governed action fires. A watchdog replay that re-decides finds the stamp; a
+  # divergent fresh decision (provider nondeterminism across the replay) is recorded
+  # honestly — read tools are side-effect-free, so the fresh decision executes, with
+  # `replay_divergent` in the bounded meta (A4's write path parks on the approval seam
+  # instead, so a stamped write can never double-fire on divergence).
+  defp decide_tool!(turn_row, kind, normalized) do
+    digest = args_digest(normalized)
+    prior = turn_row.meta || %{}
+
+    meta =
+      %{"args_digest" => digest}
+      |> maybe_put_divergent(prior["args_digest"], digest)
+
+    turn_row
+    |> Ash.Changeset.for_update(:decide, %{
+      tool_kind: kind,
+      arg_keys: sorted_arg_keys(normalized),
+      meta: bounded_meta(meta)
+    })
+    |> Ash.update!(authorize?: false)
+  end
+
+  defp maybe_put_divergent(meta, nil, _fresh), do: meta
+  defp maybe_put_divergent(meta, prior, prior), do: meta
+  defp maybe_put_divergent(meta, _prior, _fresh), do: Map.put(meta, "replay_divergent", true)
+
+  # The validated-args digest: sha256 over the canonical (sorted [key, value] pairs)
+  # JSON encoding — a stable identity for "this exact tool call", never the values
+  # themselves. Public so the A3 suite proves the stamped digest byte-for-byte.
+  @doc false
+  @spec args_digest(map()) :: String.t()
+  def args_digest(normalized) do
+    canonical =
+      normalized
+      |> Enum.map(fn {k, v} -> [to_string(k), v] end)
+      |> Enum.sort()
+      |> Jason.encode!()
+
+    :crypto.hash(:sha256, canonical) |> Base.encode16(case: :lower)
+  end
+
+  defp sorted_arg_keys(args) when is_map(args),
+    do: args |> Map.keys() |> Enum.map(&to_string/1) |> Enum.sort()
+
+  defp outcome_error_kind({:ok, _meta}), do: nil
+  defp outcome_error_kind({:error, kind}), do: kind
+
+  # The tool OUTCOME checkpoint (§4.1 checkpoint 2, tool half): finalize the turn row
+  # (status :done — the TURN completed; a refused/failed TOOL is carried honestly in
+  # error_kind), advance the cursor + the vault-routed transcript (echo + rendered
+  # result lines — next turn's :history) + the tool_calls_used budget counter, all in
+  # ONE transaction (the commit_turn! discipline).
+  defp commit_tool_turn!(%Run{} = run, turn_row, %Completion{} = completion, turn) do
+    turn_index = run.current_turn + 1
+    in_tokens = usage_int(completion.usage, :input_tokens)
+    out_tokens = usage_int(completion.usage, :output_tokens)
+
+    finalize_meta =
+      (turn_row.meta || %{})
+      |> Map.put("replayed", turn.replayed?)
+
+    {:ok, run} =
+      repo!().transaction(fn ->
+        finalize_turn!(turn_row, %{
+          status: :done,
+          tool_kind: turn.tool_kind,
+          arg_keys: turn.arg_keys,
+          error_kind: turn.error_kind && to_string(safe_error_kind(turn.error_kind)),
+          input_tokens: in_tokens,
+          output_tokens: out_tokens,
+          duration_ms: turn.duration_ms,
+          provider: bounded_provider(completion.provider),
+          simulated: completion.simulated,
+          meta: bounded_meta(finalize_meta)
+        })
+
+        run
+        |> Ash.Changeset.for_update(:advance, %{
+          current_turn: turn_index,
+          next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
+          transcript: encode_transcript(turn.goal, turn.lines ++ turn.new_lines),
+          tool_calls_used: run.tool_calls_used + if(turn.executed?, do: 1, else: 0),
+          input_tokens_used: run.input_tokens_used + in_tokens,
+          output_tokens_used: run.output_tokens_used + out_tokens
+        })
+        |> Ash.update!(authorize?: false)
+      end)
+
+    run
+  end
+
+  defp scope_actor(%Samen.Scope{actor: actor}) when is_map(actor), do: actor
+  defp scope_actor(_scope), do: nil
 
   # The DECISION checkpoint (§4.1 checkpoint 1) + replay reuse (RP-AG-7): the
   # `{run_id, turn_index}` row is committed :proposed BEFORE the provider call; a replay
@@ -841,9 +1249,6 @@ defmodule Samen.AI.Agent do
 
   defp validate_goal(goal) when is_binary(goal) and goal != "", do: :ok
   defp validate_goal(_), do: {:error, :invalid_goal}
-
-  defp refuse_tools(%{tools: []}), do: :ok
-  defp refuse_tools(_definition), do: {:error, :tools_not_supported}
 
   # Budget precedence: defaults < host config < agent definition < per-run opts. Every
   # value must be a positive integer; anything else refuses honestly (never a silent

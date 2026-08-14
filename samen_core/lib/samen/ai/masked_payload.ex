@@ -73,6 +73,14 @@ defmodule Samen.AI.MaskedPayload do
       the MCP server proper is T69) — routed through the same scrub as `:complete`, but
       grants never apply to it (persisted/external egress, INV-7).
     * `:segments` — the sealed, already-scrubbed payload segments the provider transmits.
+    * `:tools` — the EG2 tool DEFINITIONS the provider may offer the model (ADR-047 §4.2,
+      batch A3): a list of bounded, STATIC schema maps (`%{name:, description:, params:}`),
+      scrubbed by the chokepoint's `safe_metadata?/1` (keys AND values, `vt_`-scanned) AND
+      required to be byte-identical to an opted-in `Samen.Automation.Action.tool_schema/0`
+      compile-time constant — a runtime-composed tool definition REFUSES fail-closed
+      (`Samen.AI.Chokepoint.seal/3`'s `scrub_tools/1`; the §4.2 static-schema rule). An
+      adapter maps this field onto its vendor `tools:` parameter. The `Inspect` impl below
+      renders only the tool COUNT — never names or descriptions.
     * `:grounding` — catalog-derived grounding metadata (§8; metadata only, never sample
       values). A map keyed by bounded label atoms.
     * `:meta` — bounded, content-free dispatch metadata (payload id, size hints) safe for
@@ -80,13 +88,14 @@ defmodule Samen.AI.MaskedPayload do
   """
 
   @enforce_keys [:kind]
-  defstruct kind: nil, segments: [], grounding: %{}, meta: %{}
+  defstruct kind: nil, segments: [], tools: [], grounding: %{}, meta: %{}
 
   @type kind :: :complete | :embed | :mcp
 
   @type t :: %__MODULE__{
           kind: kind(),
           segments: [term()],
+          tools: [map()],
           grounding: map(),
           meta: map()
         }
@@ -106,6 +115,7 @@ defmodule Samen.AI.MaskedPayload do
       # a field-BEARING `%MaskedPayload{...}` construction literal, which must appear ONLY in
       # Samen.AI.Chokepoint — never here (this is redaction, not construction).
       seg_count = if is_list(payload.segments), do: length(payload.segments), else: 1
+      tool_count = if is_list(payload.tools), do: length(payload.tools), else: 1
       grounding_keys = payload.grounding |> Map.keys() |> Enum.sort()
 
       concat([
@@ -114,7 +124,9 @@ defmodule Samen.AI.MaskedPayload do
         Kernel.inspect(payload.kind),
         ", segments: ",
         Integer.to_string(seg_count),
-        " sealed, grounding: ",
+        " sealed, tools: ",
+        Integer.to_string(tool_count),
+        ", grounding: ",
         Kernel.inspect(grounding_keys),
         ">"
       ])

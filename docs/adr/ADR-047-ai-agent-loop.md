@@ -638,6 +638,21 @@ lands** (the batch plan is the implementation; the ratification unblocks A1).
 Nothing in §4 (the scrub points), §5.3 (propose-then-approve), §6 (fail-honest budgets), or §7
 (the proof obligations) is deferrable.
 
+### §10a · A2 implementation deviations (consolidated record, written at A3)
+
+The A2 verifier found five places where the shipped A2 diverges from this ADR's letter. Each is
+recorded here with its justification; **none weakens a §9 ratified decision** — the fail-honest
+floor, masked-only agent runs, the ratified budgets/retention, and the §4/§6/§7 non-deferrables
+are untouched by all five.
+
+| # | Deviation | ADR letter | As shipped | Justification |
+|---|---|---|---|---|
+| 1 | **`bounded_meta/1` naming.** | §6 says the turn log reuses "`RunRecord.bounded_outcomes/1` verbatim". | `Samen.AI.Agent.bounded_meta/1` — a NEW function in the same default-deny posture (plain string-keyed scalar maps only; structs/rich terms dropped, never `inspect`-ed; degrade, never reject). | `bounded_outcomes/1` is coupled to the Automation Run outcome shape (`status`/`error_kind` envelope), not a generic map filter; importing it would have meant exporting a RunRecord internal for a foreign row type. The POSTURE is reused verbatim; the function is the turn log's own. Proven non-vacuous by the A2 jsonb red-path tests. |
+| 2 | **Erasure-gate output line.** | §7.4 / A2's gate obligation: `mix samen.verify.erasure_completeness` residual list "byte-identical before/after". | The verifier's output gained a line: A2 ADDED a transcript arm to the completeness discovery (the vault-routed `arn` transcript + its 90-day retention spec is now a discovered, asserted class — sabotage 245 flips when the arm is dropped). The pre-existing residual entries are unchanged. | "Byte-identical" was written assuming A2 adds no discovery; the stricter reading — the gate must now SEE the transcript, or removing its retention arm would be silent — is the one that keeps RP-AG-11 real. A weaker, unchanged gate would have been the actual violation. No new out-of-envelope residue and no new named residual (§7.4's real obligation) holds. |
+| 3 | **Four sabotages, not one.** | The §8 A2 row lists "S8 (replayed turn double-executes)". | A2 shipped FOUR patches: 242 (S8 replay reuse), 243 (never-nil watchdog dropped), 244 (kill-switch re-check dropped), 245 (erasure transcript arm dropped). | Strictly additive proof surface: §7.1's table lists kill-recheck (S7) and the watchdog/erasure invariants as obligations of the batches that ship them; A2 shipped those mechanisms, so it shipped their refutations rather than deferring them to a later batch that would not be editing this code. More refutation, same invariants. |
+| 4 | **`Provider.Scripted` state in `:persistent_term`.** | The A1 design described a process-local scripted double. | Script + recording live in `:persistent_term` (cross-process; agent suites run `async: false` + `reset/0`). | A2's Oban worker executes turns in whatever process runs the job (drain, watchdog replay, crash-simulation Task); a process-local script would make the worker path fail `{:error, :not_configured}` for scripted work — a dishonestly-honest double. The fail-honest floor (no script ⇒ never `{:ok, _}`) is unchanged. Flagged by A1, required by A2, kept at A3 (the tool-turn worker parity test depends on it). |
+| 5 | **`:fail` (and `:cancel`) transition from `:queued`.** | §8/A1 sketches `queued → running → {terminals}`. | The state machine admits `:fail` and `:cancel` from `:queued` as well as `:running`. | A durable `:queued` run can die before its first turn (agent unresolvable, owner gone, transcript shredded mid-queue, tenant cancel before the worker picks up). Without `queued → failed/cancelled`, those runs could either stall forever (violating the never-nil watchdog's *purpose*) or be forced through a fake `:running` hop (a lie in the audit trail). `:exhaust` remains `:running`-only — a queued run cannot exhaust a budget it never spent. |
+
 ---
 
 ## 11 · Consequences
