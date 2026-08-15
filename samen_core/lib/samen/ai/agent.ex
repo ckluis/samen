@@ -145,6 +145,7 @@ defmodule Samen.AI.Agent do
   prompt — the EG5 authored-artifact posture, budget shape) and defines `definition/0`.
   """
 
+  alias Samen.AI.Agent.Approver
   alias Samen.AI.Agent.Breaker
   alias Samen.AI.Agent.Run
   alias Samen.AI.Agent.ToolResult
@@ -220,6 +221,10 @@ defmodule Samen.AI.Agent do
     :approval_org_mismatch,
     :proposal_mismatch,
     :rejected,
+    # A5: the A4 verifier's R4b — a proposal whose deadline lapsed with no human
+    # decision, and the R2 fail-closed refusal of an unresolvable approver.
+    :deadline_expired,
+    :approver_unresolvable,
     :depth_exceeded,
     :no_owner_attribute,
     :unauthorized,
@@ -699,9 +704,14 @@ defmodule Samen.AI.Agent do
         log_terminal(run)
         {:error, :cancelled, run}
 
-      Breaker.killed?() ->
+      Breaker.killed?(run.org_id, run.agent) ->
         # Fail-closed interrupt (A2, §6): an operator kill between turn N and N+1 stops
-        # turn N+1 — the in-flight turn completed and was recorded honestly.
+        # turn N+1 — the in-flight turn completed and was recorded honestly. A5 widens
+        # WHAT counts as a kill here (the host switch OR this org's DURABLE
+        # per-definition row) and narrows what a rate trip THROWS (that row, never the
+        # host switch) — so a targeted stop still stops this run mid-flight, and one
+        # tenant's trip no longer stops every other tenant's. Sabotage 260 makes the
+        # per-definition half of this check refutable.
         run = terminal!(run, :fail, :killed)
         log_terminal(run)
         {:error, :killed, run}
@@ -1186,7 +1196,14 @@ defmodule Samen.AI.Agent do
               kind: entry.kind,
               normalized: normalized,
               approval_id: to_string(approval.id),
-              approver_id: approver_id
+              approver_id: approver_id,
+              # A5 (the A4 verifier's R2, second half): the approver's REAL role, as
+              # resolved from their membership row — a bounded enum, token-only (§6).
+              # A4 hardcoded `:member` here, so the audit trail could not distinguish
+              # an owner's consent from a silently-elevated narrower role. Recording it
+              # makes the resolved role observable, which is what makes sabotage 257's
+              # re-synthesis flip a named test rather than pass unnoticed.
+              approver_role: scope_role(approver_scope)
             })
 
           # Same-transaction resume enqueue (the EventCapture idiom): the continuation
@@ -1248,6 +1265,121 @@ defmodule Samen.AI.Agent do
       :ok
     else
       _ -> :ok
+    end
+  end
+
+  @doc """
+  Expire a PARKED run whose approval deadline has lapsed (ADR-047 §5.3; the A4
+  verifier's R4b, closed at A5).
+
+  A4 parked a run on a human decision and set `next_turn_at` to the approval deadline,
+  but nothing ever swept it: a lapsed proposal sat decidable forever, and the run was an
+  unselectable in-flight state. `:awaiting_approval` is now swept by the
+  `:agent_proposal_expiry` AshOban trigger, which drives this path.
+
+  What expiry IS, precisely: the pending approval is **withdrawn** (via the requester's
+  own `Samen.Approvals.cancel/3` — `decided_by` stays NULL, so the distinct-party CHECK
+  is untouched and the audit trail never claims a human decided), the still-`:proposed`
+  turn row is finalized `:failed` / `deadline_expired`, one bounded line is appended to
+  the vault-routed transcript so a later reader sees WHY the run stopped, and the run
+  lands in the honest terminal `:expired` with `next_turn_at` cleared (never-nil holds:
+  the run is terminal). **The proposed write is never executed** — and cannot be, because
+  `execute_approved/3` requires `run_parked?/1` AND a genuinely `:approved` approval row,
+  and the withdrawal makes the second impossible while the terminal makes the first
+  impossible.
+
+  Public + idempotent so the sweep is directly drivable in a test (and by an operator
+  surface) without waiting on a cron tick. A run that is not parked is a no-op.
+  """
+  @spec expire_parked(Ash.Resource.record() | String.t()) ::
+          {:ok, Ash.Resource.record()} | {:error, term()}
+  def expire_parked(%Run{} = run), do: expire_parked(run.id)
+
+  def expire_parked(run_id) when is_binary(run_id) do
+    with {:ok, %Run{state: :awaiting_approval} = run} <- fetch_run(run_id) do
+      {:ok,
+       run
+       |> Ash.Changeset.for_update(:expire_due, %{})
+       |> Ash.update!(authorize?: false)}
+    else
+      {:ok, %Run{}} -> {:error, :run_not_parked}
+      other -> other
+    end
+  end
+
+  def expire_parked(_run), do: {:error, :not_found}
+
+  @doc false
+  @spec on_proposal_expired(Ash.Resource.record()) :: :ok
+  def on_proposal_expired(%Run{} = updated) do
+    # Re-read the row so the vault-routed transcript is a `%Samen.Masked{}` this path can
+    # reveal: the record an update hands back carries the just-written attributes, not
+    # necessarily the loaded vault token.
+    run =
+      case fetch_run(updated.id) do
+        {:ok, %Run{} = reloaded} -> reloaded
+        _ -> updated
+      end
+
+    # 1. Withdraw the pending approval FIRST — the lapsed proposal must stop being
+    #    decidable in the same transaction that terminates the run.
+    _ = withdraw_pending_approval(run)
+
+    # 2. Finalize the still-:proposed turn row honestly (token-only, bounded kind).
+    case pending_turn(run) do
+      {:ok, turn_row} ->
+        finalize_turn!(turn_row, %{
+          status: :failed,
+          error_kind: "deadline_expired",
+          meta: bounded_meta(Map.put(turn_row.meta || %{}, "expired", true))
+        })
+
+      _ ->
+        :ok
+    end
+
+    # 3. One bounded transcript line (inside the DEK envelope), and the pending proposal
+    #    CLEARED by the 2-arity encoder — an expired proposal is never re-bindable.
+    case transcript_state(run) do
+      {:ok, {goal, lines, _pending}} ->
+        kind = (pending_kind(run) || "write")
+
+        run
+        |> Ash.Changeset.for_update(:advance, %{
+          transcript: encode_transcript(goal, lines ++ ["tool_expired: #{kind}"])
+        })
+        |> Ash.update!(authorize?: false)
+
+      _ ->
+        :ok
+    end
+
+    log_terminal(run)
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  defp pending_turn(%Run{} = run) do
+    require Ash.Query
+
+    Turn
+    |> Ash.Query.filter(run_id == ^run.id and status == :proposed)
+    |> Ash.Query.sort(turn_index: :desc)
+    |> Ash.Query.limit(1)
+    |> Ash.read(authorize?: false)
+    |> case do
+      {:ok, [turn]} -> {:ok, turn}
+      _ -> {:error, :turn_not_found}
+    end
+  rescue
+    _ -> {:error, :turn_not_found}
+  end
+
+  defp pending_kind(%Run{} = run) do
+    case transcript_state(run) do
+      {:ok, {_goal, _lines, pending}} when is_map(pending) -> Map.get(pending, "kind")
+      _ -> nil
     end
   end
 
@@ -1352,6 +1484,7 @@ defmodule Samen.AI.Agent do
       |> Map.put("approved", true)
       |> Map.put("approval_id", stamp.approval_id)
       |> Map.put("approver_id", stamp.approver_id)
+      |> Map.put("approver_role", stamp.approver_role)
       |> Map.put("executed_by", "approver")
 
     finalize_turn!(turn_row, %{
@@ -1399,12 +1532,17 @@ defmodule Samen.AI.Agent do
       else: {:error, :not_authorized}
   end
 
-  defp approver_scope(approver_id, %Run{org_id: org_id})
-       when is_binary(approver_id) and is_binary(org_id) do
-    {:ok, Samen.Scope.new(%{id: approver_id, org_id: org_id, role: :member})}
-  end
-
-  defp approver_scope(_approver_id, _run), do: {:error, :not_authorized}
+  # A5 (the A4 verifier's R2): the approver is RESOLVED, never synthesized. A4 built
+  # `%Scope{id: <unvalidated argument>, org_id: run.org_id, role: :member}` here, so
+  # (i) membership was never verified — a wholly foreign actor id executed a governed
+  # write in the run's org — and (ii) the role was hardcoded, silently ELEVATING an
+  # approver whose real role is narrower. `Samen.AI.Agent.Approver.resolve/2` reads the
+  # host's REAL membership row for {approver, run org} and carries its REAL role; a
+  # non-member refuses `:not_authorized` and an unwired host refuses
+  # `:approver_unresolvable` — either way the whole E3 decision rolls back, the approval
+  # stays pending, and nothing executed. Sabotage 257 puts the synthesis back.
+  defp approver_scope(approver_id, %Run{org_id: org_id}),
+    do: Approver.resolve(approver_id, org_id)
 
   defp fetch_turn(turn_id) when is_binary(turn_id) do
     require Ash.Query
@@ -1462,7 +1600,61 @@ defmodule Samen.AI.Agent do
   omitting a `:depth` argument. Public so the guard's liveness is directly assertable.
   """
   @spec current_provenance() :: %{depth: non_neg_integer(), chain: [String.t()]} | nil
-  def current_provenance, do: Process.get(@provenance_key)
+  def current_provenance do
+    case Process.get(@provenance_key) do
+      %{} = provenance -> provenance
+      # A5 (the A4 verifier's R3): ORDINARY CONCURRENCY DOES NOT ESCAPE THE MARKER.
+      # A process-dictionary marker is process-SCOPED, so a tool whose `run/2` did its
+      # work in a `Task.async` (the most ordinary way an action does concurrent work)
+      # called `Agent.start/4` from a child with an EMPTY dictionary: the guard fell
+      # through to the caller-opts branch and persisted a fresh TOP-LEVEL run at
+      # `depth: 0, chain: []` — so `max_agent_depth 0` never bound and even the depth
+      # accounting could not see the nesting. The marker now follows the same
+      # `$callers`/`$ancestors` chain the BEAM (and Ecto/Ash's own sandbox ownership,
+      # and Task/Supervisor) already propagate for exactly this purpose. Sabotage 258
+      # removes the walk and the named spawn-escape red flips.
+      _ -> inherited_provenance()
+    end
+  end
+
+  # Walk the spawn chain for an ambient marker. `$callers` is set by `Task.async`/
+  # `Task.Supervisor` (transitively — a task of a task carries the whole chain);
+  # `$ancestors` covers a bare `spawn_link`/GenServer start under a supervisor. Both
+  # are read defensively: a dead pid, a registered-name atom that no longer resolves,
+  # and a process that refuses inspection all contribute nothing.
+  defp inherited_provenance do
+    (Process.get(:"$callers", []) ++ Process.get(:"$ancestors", []))
+    |> Enum.find_value(&provenance_of/1)
+  end
+
+  defp provenance_of(pid) when is_pid(pid) do
+    case Process.info(pid, :dictionary) do
+      {:dictionary, dict} when is_list(dict) ->
+        case List.keyfind(dict, @provenance_key, 0) do
+          {_key, %{depth: d, chain: c}} when is_integer(d) and is_list(c) ->
+            %{depth: d, chain: c}
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp provenance_of(name) when is_atom(name) and not is_nil(name) do
+    case Process.whereis(name) do
+      pid when is_pid(pid) -> provenance_of(pid)
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp provenance_of(_other), do: nil
 
   @doc "The v1 nesting ceiling (ADR-047 §5.1): agent runs above this depth are refused."
   @spec max_agent_depth() :: non_neg_integer()
@@ -1673,6 +1865,12 @@ defmodule Samen.AI.Agent do
 
   defp scope_actor(%Samen.Scope{actor: actor}) when is_map(actor), do: actor
   defp scope_actor(_scope), do: nil
+
+  # The bounded role enum off a resolved scope (never a free term — §6).
+  defp scope_role(%Samen.Scope{actor: %{role: role}}) when is_atom(role) and not is_nil(role),
+    do: Atom.to_string(role)
+
+  defp scope_role(_scope), do: "unknown"
 
   # The DECISION checkpoint (§4.1 checkpoint 1) + replay reuse (RP-AG-7): the
   # `{run_id, turn_index}` row is committed :proposed BEFORE the provider call; a replay

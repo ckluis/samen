@@ -26,16 +26,27 @@ defmodule Samen.AI.Agent.Breaker do
   `>` — the crossing turn completes and is billed); the run COUNT here is what trips,
   never the overshoot.
 
-  > **Cross-tenant blast radius, named plainly (A3 fold of the A2 verifier finding).**
-  > The rate COUNT is per-org, but the switch it throws is the HOST-LEVEL kill: **one
-  > org crossing its own 60-runs/hour threshold stops agent runs for EVERY org on the
-  > host** — in-flight runs terminate at their next turn boundary and new runs refuse
-  > `{:error, :killed}` — until an operator explicitly re-arms (`rearm/1`; trips never
-  > self-heal). This is the deliberate A2/A3 posture: fail-closed beats fail-open on a
-  > brand-new spend-bearing AI surface, and a single host-level lever is auditable.
-  > The residual is REAL and carried to **A5** alongside the durable
-  > per-definition-kill column below: the operator surface ships a per-org /
-  > per-definition trip so one noisy tenant no longer halts the fleet.
+  > **The cross-tenant blast radius is CLOSED at A5.** A2/A3 counted the rate per org
+  > but threw the HOST-LEVEL kill, so one org crossing its own 60-runs/hour threshold
+  > stopped agent runs for EVERY org on the host until a human re-armed. A5 narrows the
+  > trip to exactly the offending `{org, agent definition}`: `check_start/2` writes a
+  > durable `Samen.AI.Agent.Kill` row (`kill_definition/4`) instead of throwing the host
+  > switch, so a noisy tenant no longer halts the fleet. **Nothing automatic touches the
+  > host-level switch any more** — it is the operator's explicit global emergency stop
+  > and nothing else. Fail-closed is preserved in the narrowed scope: the tripped
+  > tenant's definition refuses new runs AND stops its in-flight runs at their next turn
+  > boundary, and only an explicit operator re-arm clears it.
+
+  ## The durable per-definition kill (A5 — `Samen.AI.Agent.Kill`)
+
+  `kill_definition/4` / `rearm_definition/3` write a real table row per
+  `{org_id, agent}` — durable across a restart, unlike the node-lifetime
+  `:persistent_term` switch A2 shipped, and readable by the operator surface as STATE
+  rather than reconstructed from an audit log. `killed?/2` is the composite check the
+  loop and `check_start/2` both use: host switch OR this org's definition row. A row
+  read that FAILS is treated as KILLED (fail-closed) — a kill switch that cannot be
+  read must never be assumed off. Trips never self-heal; `rearm_definition/3` is the
+  only thing that clears one, and the row retains its own history.
 
   ## Provider trip
 
@@ -56,16 +67,21 @@ defmodule Samen.AI.Agent.Breaker do
 
   ## Durability, stated honestly
 
-  The runtime switch + provider-trip streaks live in `:persistent_term` — node-lifetime
-  state, NOT restart-durable (a restart is itself an explicit operator action; the
-  config `kill_switch:` half IS deploy-durable, and a rate condition that still holds
-  after a restart re-trips on the next crossing run because the run log is the
-  counter). A durable per-definition kill column is A5's operator-surface residual.
+  The HOST-level runtime switch + the provider-trip streaks still live in
+  `:persistent_term` — node-lifetime state, NOT restart-durable. That is deliberate for
+  both: the host switch is a global operator lever (its deploy-durable half is the
+  config `kill_switch:` key), and a provider trip is a transient-outage park that SHOULD
+  re-evaluate after a restart rather than outlive the outage. The **per-definition kill
+  is durable** (`Samen.AI.Agent.Kill`, above) because it is the one that carries a
+  tenant-visible policy decision — a rate trip or an operator's targeted stop — which
+  must not be silently cleared by a redeploy. A5 closes the A2/A3 residual exactly
+  there; the two node-lifetime halves are named, not hidden.
   """
 
   require Logger
   require Ash.Query
 
+  alias Samen.AI.Agent.Kill
   alias Samen.AI.Agent.Run
 
   @kill_key {__MODULE__, :kill}
@@ -146,22 +162,193 @@ defmodule Samen.AI.Agent.Breaker do
           :ok | {:error, :killed | :provider_tripped | :rate_tripped}
   def check_start(org_id, agent_name) do
     cond do
-      killed?() ->
+      killed?(org_id, agent_name) ->
         {:error, :killed}
 
       provider_tripped?(agent_name) ->
         {:error, :provider_tripped}
 
       rate_exceeded?(org_id) ->
-        # The same operator kill action a human uses, reason :rate_tripped, idempotent,
-        # audited (§6). Only ever trips; re-arming is explicit-operator-only.
-        kill(:rate_tripped, org_id: org_id)
+        # A5: the same kill action a human operator uses — but the PER-DEFINITION one,
+        # reason "rate_tripped", idempotent (an upsert), durable, audited. A2/A3 threw
+        # the HOST switch here, which stopped every other tenant's agents too; that
+        # cross-tenant blast radius is gone. Only ever trips; re-arming is
+        # explicit-operator-only.
+        kill_definition(org_id, agent_name, :rate_tripped, org_id: org_id)
         {:error, :rate_tripped}
 
       true ->
         :ok
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # The DURABLE per-{org, definition} kill (A5 — the A2/A3 blast-radius residual)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  The composite kill check for one `{org_id, agent_name}`: the HOST-level switch (the
+  operator's explicit global stop) OR this org's durable per-definition row. This is
+  what `check_start/2` and the loop's per-turn re-check both consult — fail-closed on
+  either half.
+  """
+  @spec killed?(String.t() | nil, String.t() | nil) :: boolean()
+  def killed?(org_id, agent_name) do
+    killed?() or definition_killed?(org_id, agent_name)
+  end
+
+  @doc """
+  Is `{org_id, agent_name}` durably killed? A row counts as ACTIVE while it has no
+  `rearmed_at`, or its `killed_at` is at/after the `rearmed_at` (a re-trip after a
+  re-arm).
+
+  **Fail-CLOSED on a read failure**: an unreachable/unmigrated kill table answers
+  `true`. A kill switch whose state cannot be read must never be assumed off — the
+  opposite of the rate COUNT, which is observability and degrades to "no trip".
+  """
+  @spec definition_killed?(String.t() | nil, String.t() | nil) :: boolean()
+  def definition_killed?(org_id, agent_name)
+      when is_binary(org_id) and is_binary(agent_name) do
+    Kill
+    |> Ash.Query.filter(org_id == ^org_id and agent == ^agent_name)
+    |> Ash.Query.limit(1)
+    |> Ash.read(authorize?: false)
+    |> case do
+      {:ok, [row]} -> active_kill?(row)
+      {:ok, []} -> false
+      {:error, _} -> true
+    end
+  rescue
+    e ->
+      Logger.debug("[Samen.AI.Agent.Breaker] kill read failed: #{Exception.message(e)}")
+      true
+  end
+
+  def definition_killed?(_org_id, _agent_name), do: false
+
+  @doc "Is this kill ROW currently active (never re-armed, or re-tripped after a re-arm)?"
+  @spec active_kill?(map()) :: boolean()
+  def active_kill?(%{killed_at: %DateTime{} = killed_at, rearmed_at: rearmed_at}) do
+    case rearmed_at do
+      %DateTime{} = rearmed -> DateTime.compare(killed_at, rearmed) != :lt
+      _ -> true
+    end
+  end
+
+  def active_kill?(_row), do: false
+
+  @doc """
+  Throw the DURABLE per-definition kill for `{org_id, agent_name}`. Idempotent (an
+  upsert on the `{org_id, agent}` identity — a repeated trip refreshes the row rather
+  than piling up), audited token-only. `reason` is bounded to the closed set the
+  resource constrains (`:operator | :rate_tripped | :provider_tripped`); anything else
+  degrades to `:operator` rather than rejecting the trip — a kill must never fail
+  because its label was unexpected.
+
+  Opts: `:actor_id` (the deciding operator, recorded on the row + the audit line),
+  `:org_id` (audit correlation).
+  """
+  @spec kill_definition(String.t(), String.t(), atom(), keyword()) :: :ok | {:error, term()}
+  def kill_definition(org_id, agent_name, reason \\ :operator, opts \\ [])
+
+  def kill_definition(org_id, agent_name, reason, opts)
+      when is_binary(org_id) and is_binary(agent_name) do
+    reason = bounded_reason(reason)
+    actor_id = opts[:actor_id]
+
+    Kill
+    |> Ash.Changeset.for_create(:trip, %{
+      org_id: org_id,
+      agent: agent_name,
+      reason: reason,
+      killed_at: DateTime.utc_now(),
+      killed_by: actor_id
+    })
+    |> Ash.create(authorize?: false)
+    |> case do
+      {:ok, _row} ->
+        audit(
+          "ai.agent.kill_definition agent=#{agent_name} reason=#{reason}",
+          Keyword.put_new(opts, :org_id, org_id)
+        )
+
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  def kill_definition(_org_id, _agent_name, _reason, _opts), do: {:error, :invalid_kill}
+
+  @doc """
+  Explicit operator re-arm of ONE `{org_id, agent_name}` (trips never self-heal, §6).
+  A definition that was never killed is a no-op `:ok` — re-arming is idempotent.
+  """
+  @spec rearm_definition(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
+  def rearm_definition(org_id, agent_name, opts \\ [])
+
+  def rearm_definition(org_id, agent_name, opts)
+      when is_binary(org_id) and is_binary(agent_name) do
+    Kill
+    |> Ash.Query.filter(org_id == ^org_id and agent == ^agent_name)
+    |> Ash.Query.limit(1)
+    |> Ash.read(authorize?: false)
+    |> case do
+      {:ok, [row]} ->
+        row
+        |> Ash.Changeset.for_update(:rearm, %{
+          rearmed_at: DateTime.utc_now(),
+          rearmed_by: opts[:actor_id]
+        })
+        |> Ash.update!(authorize?: false)
+
+        audit(
+          "ai.agent.rearm_definition agent=#{agent_name}",
+          Keyword.put_new(opts, :org_id, org_id)
+        )
+
+        :ok
+
+      {:ok, []} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  def rearm_definition(_org_id, _agent_name, _opts), do: {:error, :invalid_kill}
+
+  @doc "Every durable kill row for one org (the operator surface's read; token-only)."
+  @spec kills(String.t()) :: [map()]
+  def kills(org_id) when is_binary(org_id) do
+    Kill
+    |> Ash.Query.filter(org_id == ^org_id)
+    |> Ash.Query.sort(killed_at: :desc)
+    |> Ash.Query.limit(200)
+    |> Ash.read(authorize?: false)
+    |> case do
+      {:ok, rows} -> rows
+      _ -> []
+    end
+  rescue
+    _ -> []
+  end
+
+  def kills(_org_id), do: []
+
+  defp bounded_reason(reason) when reason in [:operator, :rate_tripped, :provider_tripped],
+    do: to_string(reason)
+
+  defp bounded_reason(reason) when reason in ["operator", "rate_tripped", "provider_tripped"],
+    do: reason
+
+  defp bounded_reason(_reason), do: "operator"
 
   @doc "The configured runs/org/hour threshold (§9#3 TAKEN: default 60; host-tunable)."
   @spec rate_limit_per_org_hour() :: pos_integer()

@@ -3,6 +3,72 @@
     {
       "fields": [
         {
+          "column_name": "akl_agent",
+          "logical_name": "agent",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "akl_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "akl_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "akl_killed_at",
+          "logical_name": "killed_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "akl_killed_by",
+          "logical_name": "killed_by",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "akl_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "akl_rearmed_at",
+          "logical_name": "rearmed_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "akl_rearmed_by",
+          "logical_name": "rearmed_by",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "akl_reason",
+          "logical_name": "reason",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "akl_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Samen.AI.Agent.Kill",
+      "table_name": "ai_agent_kill"
+    },
+    {
+      "fields": [
+        {
           "column_name": "arn_agent",
           "logical_name": "agent",
           "pii": false,

@@ -57,6 +57,7 @@ defmodule Samen.AI.AgentWriteTest do
   alias Samen.AI.Provider.Scripted
   alias Samen.Approvals
   alias SamenCore.Support.AutomationFixture.Target
+  alias SamenCore.Support.AgentMembershipFixture, as: Membership
   alias SamenCore.TestRepo
 
   require Ash.Query
@@ -71,9 +72,18 @@ defmodule Samen.AI.AgentWriteTest do
     Scripted.reset()
     Samen.AI.Agent.Breaker.reset()
 
+    # A5 (the A4 verifier's R2): the approver is now RESOLVED from the host's real
+    # membership store, never synthesized — so the kernel suite wires the seam and
+    # registers each approver as a genuine member. An unwired host, or an approver with
+    # no membership row, refuses fail-closed (the reds below).
+    Membership.reset()
+    prior_agent_config = Membership.install!()
+
     on_exit(fn ->
       Scripted.reset()
       Samen.AI.Agent.Breaker.reset()
+      Membership.reset()
+      Membership.restore!(prior_agent_config)
     end)
 
     :ok
@@ -128,7 +138,13 @@ defmodule Samen.AI.AgentWriteTest do
   end
 
   # A distinct human approver — never the AI service principal, never the run owner.
-  defp approver_id, do: "human:" <> Ash.UUID.generate()
+  # A5: an approver only EXISTS if they hold a real membership row in the run's org, so
+  # the helper registers one (the positive control for the R2 fold's red paths).
+  defp approver_id(org_id, role \\ :member) do
+    id = "human:" <> Ash.UUID.generate()
+    Membership.register(id, org_id, role)
+    id
+  end
 
   defp all_sent_text, do: sent_texts() |> Enum.join("\n")
 
@@ -260,7 +276,7 @@ defmodule Samen.AI.AgentWriteTest do
     test "POSITIVE CONTROL: a DISTINCT human's approve executes exactly that write, and the run resumes" do
       {s, run, target, approval, new_owner} = propose!()
 
-      assert {:ok, decided, meta} = Approvals.approve(approval.id, approver_id())
+      assert {:ok, decided, meta} = Approvals.approve(approval.id, approver_id(approval.org_id))
       assert decided.state == :approved
       assert meta.executed == "assign_record_owner"
       assert meta.executed_by == "approver"
@@ -280,7 +296,7 @@ defmodule Samen.AI.AgentWriteTest do
       assert turn.meta["executed_by"] == "approver"
 
       # The pending proposal is CLEARED — an executed proposal is not re-bindable.
-      assert {:error, :not_pending} = Approvals.approve(approval.id, approver_id())
+      assert {:error, :not_pending} = Approvals.approve(approval.id, approver_id(approval.org_id))
       assert pending_approvals(s.actor.org_id) == []
     end
 
@@ -314,7 +330,7 @@ defmodule Samen.AI.AgentWriteTest do
     test "a REJECT by a distinct human terminates the run :rejected and executes nothing" do
       {_s, run, target, approval, _new_owner} = propose!()
 
-      assert {:ok, rejected} = Approvals.reject(approval.id, approver_id())
+      assert {:ok, rejected} = Approvals.reject(approval.id, approver_id(approval.org_id))
       assert rejected.state == :rejected
 
       assert reload_target!(target.id).owner_id == nil
@@ -351,7 +367,7 @@ defmodule Samen.AI.AgentWriteTest do
 
     test "POSITIVE CONTROL: approving through the REAL engine path executes AND lands an approval_approved audit event (the refusals above are authority, not breakage)" do
       {_s, _run, target, approval, new_owner} = propose!()
-      human = approver_id()
+      human = approver_id(approval.org_id)
 
       # Deliberately NOT `execute_approved/3` with a hand-made context: the only sanctioned
       # route is the engine, which transitions `pending -> approved` and writes the
@@ -375,7 +391,7 @@ defmodule Samen.AI.AgentWriteTest do
       assert approval.state == :pending
 
       assert {:error, :approval_not_approved} =
-               Agent.execute_approved(turn_id, approval, %{actor: approver_id()})
+               Agent.execute_approved(turn_id, approval, %{actor: approver_id(approval.org_id)})
 
       assert reload_target!(target.id).owner_id == nil
       assert Approvals.get(approval.id) |> elem(1) |> Map.get(:state) == :pending
@@ -400,7 +416,7 @@ defmodule Samen.AI.AgentWriteTest do
             %{}
           ] do
         assert {:error, kind} =
-                 Agent.execute_approved(turn_id, forged, %{actor: approver_id()}),
+                 Agent.execute_approved(turn_id, forged, %{actor: approver_id(approval.org_id)}),
                "a forged approval must refuse: #{inspect(forged)}"
 
         assert kind in [:approval_not_approved, :approval_not_found],
@@ -413,7 +429,7 @@ defmodule Samen.AI.AgentWriteTest do
     test "RED: an APPROVED approval belonging to ANOTHER org cannot execute this org's parked write at the seam" do
       {_s, _run, target, approval, _new_owner} = propose!()
       {:ok, turn_id} = WriteProposal.parse_subject_ref(approval.subject_ref)
-      human = approver_id()
+      human = approver_id(approval.org_id)
 
       # A genuine, genuinely-:approved approval — of the right kind, pointing at the right
       # subject_ref — that simply belongs to a different org. Transitioned directly (not via
@@ -442,7 +458,7 @@ defmodule Samen.AI.AgentWriteTest do
 
     test "the executed write is attributable to the human: the turn row records executed_by=approver and the approver's id" do
       {_s, run, _target, approval, _new_owner} = propose!()
-      human = approver_id()
+      human = approver_id(approval.org_id)
 
       assert {:ok, _decided, _meta} = Approvals.approve(approval.id, human)
 
@@ -466,7 +482,7 @@ defmodule Samen.AI.AgentWriteTest do
         put_in(pending, ["args", "user_id"], hijacked_owner)
       end)
 
-      assert {:error, :proposal_mismatch} = Approvals.approve(approval.id, approver_id())
+      assert {:error, :proposal_mismatch} = Approvals.approve(approval.id, approver_id(approval.org_id))
 
       # NOTHING executed, and the decision rolled back whole.
       assert reload_target!(target.id).owner_id == nil
@@ -485,7 +501,7 @@ defmodule Samen.AI.AgentWriteTest do
         {_s, _run, target, approval, _new_owner} = propose!()
         tamper_pending!(approval, tamper)
 
-        assert {:error, :proposal_mismatch} = Approvals.approve(approval.id, approver_id()),
+        assert {:error, :proposal_mismatch} = Approvals.approve(approval.id, approver_id(approval.org_id)),
                "a tampered proposal must refuse: #{inspect(tamper)}"
 
         assert reload_target!(target.id).owner_id == nil
@@ -499,7 +515,7 @@ defmodule Samen.AI.AgentWriteTest do
       # same :park action — so the only difference from the reds above is the content.
       tamper_pending!(approval, & &1)
 
-      assert {:ok, _decided, _meta} = Approvals.approve(approval.id, approver_id())
+      assert {:ok, _decided, _meta} = Approvals.approve(approval.id, approver_id(approval.org_id))
       assert reload_target!(target.id).owner_id == new_owner
     end
 
@@ -688,7 +704,7 @@ defmodule Samen.AI.AgentWriteTest do
         ["a4.read-only", Atom.to_string(ReadOnly), pk]
       )
 
-      assert {:error, :tool_refused} = Approvals.approve(approval.id, approver_id())
+      assert {:error, :tool_refused} = Approvals.approve(approval.id, approver_id(approval.org_id))
       assert reload_target!(target.id).owner_id == nil
     end
   end
@@ -730,7 +746,7 @@ defmodule Samen.AI.AgentWriteTest do
 
       assert reload_run!(run).tool_calls_used == 0, "a proposal executed nothing"
 
-      assert {:ok, _decided, _meta} = Approvals.approve(approval.id, approver_id())
+      assert {:ok, _decided, _meta} = Approvals.approve(approval.id, approver_id(approval.org_id))
       assert reload_run!(run).tool_calls_used == 1
     end
 
@@ -742,7 +758,7 @@ defmodule Samen.AI.AgentWriteTest do
       assert cancelled.next_turn_at == nil
 
       assert pending_approvals(s.actor.org_id) == []
-      assert {:error, :not_pending} = Approvals.approve(approval.id, approver_id())
+      assert {:error, :not_pending} = Approvals.approve(approval.id, approver_id(approval.org_id))
       assert reload_target!(target.id).owner_id == nil
     end
   end
@@ -766,6 +782,288 @@ defmodule Samen.AI.AgentWriteTest do
       assert pending_approvals(s.actor.org_id) == []
       refute all_sent_text() =~ "vt_"
       assert_no_text_at_rest!(run, [@vt_token])
+    end
+  end
+
+  # ── A5 FOLD F1: the approver is a REAL org member with their REAL role ──────────────
+
+  describe "the APPROVER is resolved, never synthesized (the A4 verifier's R2)" do
+    test "RED: a NON-MEMBER approver cannot execute the parked write — the approval stays pending and nothing is mutated" do
+      {s, run, target, approval, _new_owner} = propose!()
+
+      # A wholly foreign actor id: not registered as a member of this (or any) org. A4
+      # SYNTHESIZED `%Scope{id: <that id>, org_id: run.org_id, role: :member}` here and
+      # the write executed in the run's org. Sabotage 257 restores that synthesis.
+      foreign = "human:" <> Ash.UUID.generate()
+
+      assert {:error, _} = Approvals.approve(approval.id, foreign)
+
+      assert reload_target!(target.id).owner_id == nil,
+             "a non-member executed a governed write in this org — the approver is unverified again"
+
+      assert [%{state: :pending}] = pending_approvals(s.actor.org_id)
+      assert reload_run!(run).state == :awaiting_approval
+
+      # ...and the resolver itself refuses the foreign principal outright.
+      assert {:error, :not_authorized} =
+               Samen.AI.Agent.Approver.resolve(foreign, s.actor.org_id)
+    end
+
+    test "POSITIVE CONTROL: the SAME actor, once a real member of this org, executes (the refusal is the membership check, not breakage)" do
+      {s, _run, target, approval, new_owner} = propose!()
+      human = "human:" <> Ash.UUID.generate()
+
+      assert {:error, _} = Approvals.approve(approval.id, human)
+      assert reload_target!(target.id).owner_id == nil
+
+      # The ONLY thing that changes is a real membership row in the run's org.
+      Membership.register(human, s.actor.org_id, :member)
+
+      assert {:ok, _decided, meta} = Approvals.approve(approval.id, human)
+      assert meta.executed_by == "approver"
+      assert reload_target!(target.id).owner_id == new_owner
+    end
+
+    test "RED: a membership in ANOTHER org is not a membership here" do
+      {s, _run, target, approval, _new_owner} = propose!()
+      human = "human:" <> Ash.UUID.generate()
+      Membership.register(human, Ash.UUID.generate(), :owner)
+
+      assert {:error, _} = Approvals.approve(approval.id, human)
+      assert reload_target!(target.id).owner_id == nil
+
+      Membership.register(human, s.actor.org_id, :member)
+      assert {:ok, _decided, _meta} = Approvals.approve(approval.id, human)
+    end
+
+    test "RED: an UNWIRED host refuses fail-closed (:approver_unresolvable) — never a synthesized member" do
+      {s, _run, target, approval, _new_owner} = propose!()
+      human = approver_id(approval.org_id)
+
+      # Un-wire the seam entirely: the host has not told the kernel where memberships
+      # live. The honest failure mode is "this write cannot be approved", never "the
+      # write executed under an invented member".
+      prior = Application.get_env(:samen_core, Samen.AI.Agent, [])
+      Application.put_env(:samen_core, Samen.AI.Agent, Keyword.delete(prior, :approver_membership))
+
+      try do
+        assert Samen.AI.Agent.Approver.seam() == nil
+
+        assert {:error, :approver_unresolvable} =
+                 Samen.AI.Agent.Approver.resolve(human, s.actor.org_id)
+
+        assert {:error, _} = Approvals.approve(approval.id, human)
+        assert reload_target!(target.id).owner_id == nil
+        assert [%{state: :pending}] = pending_approvals(s.actor.org_id)
+      after
+        Application.put_env(:samen_core, Samen.AI.Agent, prior)
+      end
+
+      # POSITIVE CONTROL: re-wired, the very same decision executes.
+      assert {:ok, _decided, _meta} = Approvals.approve(approval.id, human)
+    end
+
+    test "the approver's REAL role rides the execution and is recorded token-only — never a hardcoded :member" do
+      for role <- [:owner, :admin, :member] do
+        {_s, run, _target, approval, _new_owner} = propose!()
+        human = approver_id(approval.org_id, role)
+
+        assert {:ok, _decided, _meta} = Approvals.approve(approval.id, human)
+
+        assert [turn] = turn_rows(run)
+        assert turn.meta["approver_id"] == human
+
+        assert turn.meta["approver_role"] == to_string(role),
+               "the executing scope carried a hardcoded role instead of the approver's real one"
+      end
+    end
+
+    test "an UNKNOWN role can only SUBTRACT authority: it normalizes to nil, never to :member" do
+      org_id = Ash.UUID.generate()
+      id = "human:" <> Ash.UUID.generate()
+      Membership.register(id, org_id, :not_a_real_role)
+
+      assert {:ok, scope} = Samen.AI.Agent.Approver.resolve(id, org_id)
+      assert scope.actor.id == id
+      assert scope.actor.org_id == org_id
+      refute scope.actor.role == :member
+      assert scope.actor.role == nil
+
+      # ...and a blank/garbled principal never resolves at all.
+      assert {:error, :not_authorized} = Samen.AI.Agent.Approver.resolve("", org_id)
+      assert {:error, :not_authorized} = Samen.AI.Agent.Approver.resolve(nil, org_id)
+      assert {:error, :not_authorized} = Samen.AI.Agent.Approver.resolve(id, nil)
+    end
+  end
+
+  # ── A5 FOLD F2: ordinary concurrency does not escape the recursion guard ────────────
+
+  describe "the recursion guard survives a spawn (the A4 verifier's R3)" do
+    test "RED (sabotage 258's target): a tool that starts a nested agent run from inside Task.async is refused :depth_exceeded" do
+      s = new_scope()
+
+      with_spawn_probe(fn ->
+        script([
+          {:tool_call, "a5_spawn_probe", %{}},
+          {:final, "declined to recurse from a task"}
+        ])
+
+        assert {:ok, %{run: run}} = run_scripted(SpawnAgent, s, "try to recurse via Task.async")
+
+        assert [turn, _] = turn_rows(run)
+        assert turn.tool_kind == "a5_spawn_probe"
+
+        assert turn.error_kind == "depth_exceeded",
+               "a Task.async escaped the ambient recursion marker — max_agent_depth never bound"
+
+        # The decisive assertion: NO nested run row exists at all. A4 persisted the
+        # child as a fresh TOP-LEVEL run (depth 0, chain []), so filtering on `depth > 0`
+        # could not have seen it — count the definition's runs instead.
+        assert [_only_parent] =
+                 Run
+                 |> Ash.Query.filter(org_id == ^s.actor.org_id)
+                 |> Ash.read!(authorize?: false)
+      end)
+    end
+
+    test "the marker is visible from inside the spawned process (the mechanism, not just the outcome)" do
+      s = new_scope()
+
+      with_spawn_probe(fn ->
+        script([
+          {:tool_call, "a5_spawn_probe", %{}},
+          {:final, "observed"}
+        ])
+
+        assert {:ok, %{run: run}} = run_scripted(SpawnAgent, s, "observe from a task")
+
+        assert %{depth: 0, chain: [chain_run_id]} = :persistent_term.get({:a5_probe, :seen})
+        assert chain_run_id == run.id
+      end)
+
+      # POSITIVE CONTROL: a bare Task with no agent ancestry sees nothing.
+      assert Task.async(fn -> Agent.current_provenance() end) |> Task.await() == nil
+    end
+  end
+
+  # ── A5 FOLD F3: a lapsed proposal expires; it never executes ────────────────────────
+
+  describe "parked-proposal deadline expiry (the A4 verifier's R4b)" do
+    test "RED (sabotage 259's target): a LAPSED proposal is expired, its approval withdrawn, and it can never execute" do
+      {s, run, target, approval, _new_owner} = propose!()
+
+      # Lapse the deadline: the parked run's next_turn_at IS the approval deadline.
+      lapse!(run)
+
+      assert {:ok, expired} = Agent.expire_parked(run.id)
+      assert expired.state == :expired
+      assert expired.error_kind == "deadline_expired"
+
+      assert expired.next_turn_at == nil,
+             "a terminal run must clear the watchdog cursor exactly once (never-nil holds)"
+
+      # The pending approval is WITHDRAWN — the lapsed proposal is no longer decidable.
+      assert pending_approvals(s.actor.org_id) == []
+      assert {:error, :not_pending} = Approvals.approve(approval.id, approver_id(approval.org_id))
+
+      # ...and nothing was executed, at the seam either.
+      assert reload_target!(target.id).owner_id == nil
+      {:ok, turn_id} = WriteProposal.parse_subject_ref(approval.subject_ref)
+
+      assert {:error, _} =
+               Agent.execute_approved(turn_id, approval, %{actor: approver_id(approval.org_id)})
+
+      assert reload_target!(target.id).owner_id == nil
+
+      # The turn row is finalized honestly, token-only.
+      assert [turn] = turn_rows(run)
+      assert turn.status == :failed
+      assert turn.error_kind == "deadline_expired"
+      assert turn.meta["expired"] == true
+
+      # One bounded transcript line records WHY, and the pending proposal is cleared.
+      transcript = revealed_transcript(run)
+      assert Enum.any?(transcript["lines"], &String.starts_with?(&1, "tool_expired:"))
+      refute Map.has_key?(transcript, "pending")
+    end
+
+    test "POSITIVE CONTROL: a proposal whose deadline has NOT lapsed is untouched and still approvable" do
+      {s, run, target, approval, new_owner} = propose!()
+
+      # The sweep's selector is the deadline: a live proposal is not selected...
+      assert due_expiry_ids() == []
+
+      lapse!(run)
+      assert run.id in due_expiry_ids(), "a lapsed parked run must be selectable by the sweep"
+
+      # ...and un-lapsing it (a fresh deadline) removes it from the sweep again.
+      arm!(run, DateTime.add(DateTime.utc_now(), 3600))
+      assert due_expiry_ids() == []
+
+      assert {:ok, _decided, _meta} = Approvals.approve(approval.id, approver_id(approval.org_id))
+      assert reload_target!(target.id).owner_id == new_owner
+      assert reload_run!(run).state == :running
+      assert pending_approvals(s.actor.org_id) == []
+    end
+
+    test "expiry is idempotent and only ever applies to a PARKED run" do
+      {_s, run, _target, _approval, _new_owner} = propose!()
+      lapse!(run)
+
+      assert {:ok, _expired} = Agent.expire_parked(run.id)
+      assert {:error, :run_not_parked} = Agent.expire_parked(run.id)
+      assert {:error, :not_found} = Agent.expire_parked(Ash.UUID.generate())
+    end
+  end
+
+  # --- A5 helpers -------------------------------------------------------------------------
+
+  # Drive the parked run's deadline (its `next_turn_at`) into the past — what the
+  # `:agent_proposal_expiry` sweep selects on.
+  defp lapse!(run), do: arm!(run, DateTime.add(DateTime.utc_now(), -60))
+
+  defp arm!(run, at) do
+    {:ok, pk} = Ecto.UUID.dump(run.id)
+
+    Ecto.Adapters.SQL.query!(
+      TestRepo,
+      "UPDATE ai_agent_run SET arn_next_turn_at = $1 WHERE arn_id = $2",
+      [at, pk]
+    )
+
+    :ok
+  end
+
+  # Exactly what the AshOban `:agent_proposal_expiry` trigger's `where` selects.
+  defp due_expiry_ids do
+    now = DateTime.utc_now()
+
+    Run
+    |> Ash.Query.filter(state == :awaiting_approval and not is_nil(next_turn_at))
+    |> Ash.Query.filter(next_turn_at <= ^now)
+    |> Ash.read!(authorize?: false)
+    |> Enum.map(& &1.id)
+  end
+
+  # A host-extra READ tool whose run/2 does its work in a `Task.async` and tries to start
+  # a nested agent run FROM THERE — the ordinary-concurrency hole R3 found.
+  defp with_spawn_probe(fun) do
+    previous = Application.get_env(:samen_core, Samen.Automation.Action, [])
+    extra = Keyword.get(previous, :extra, %{})
+
+    Application.put_env(
+      :samen_core,
+      Samen.Automation.Action,
+      Keyword.put(previous, :extra, Map.put(extra, "a5_spawn_probe", A5SpawnProbe))
+    )
+
+    :persistent_term.erase({:a5_probe, :seen})
+
+    try do
+      fun.()
+    after
+      Application.put_env(:samen_core, Samen.Automation.Action, previous)
+      :persistent_term.erase({:a5_probe, :seen})
     end
   end
 
@@ -839,4 +1137,51 @@ defmodule NestingAgent do
     name: "a4.nesting",
     goal_prompt: "Try the probe. Reply FINAL: <answer> when done.",
     tools: ["a4_nesting_probe"]
+end
+
+defmodule A5SpawnProbe do
+  @moduledoc false
+  @behaviour Samen.Automation.Action
+
+  @tool_schema %{
+    name: "a5_spawn_probe",
+    description: "test-only probe that tries to start a nested agent run from a spawned task",
+    params: []
+  }
+
+  @impl true
+  def kind, do: :a5_spawn_probe
+
+  @impl true
+  def tool_schema, do: @tool_schema
+
+  @impl true
+  def effect, do: :read
+
+  @impl true
+  def validate(config, _resource_key) when is_map(config), do: {:ok, %{}}
+
+  @impl true
+  def run(_config, ctx) do
+    # The most ordinary way an action does concurrent work — and the exact escape the
+    # A4 verifier found: the child process has an EMPTY process dictionary.
+    Task.async(fn ->
+      :persistent_term.put({:a5_probe, :seen}, Samen.AI.Agent.current_provenance())
+
+      case Samen.AI.Agent.start(SpawnAgent, ctx.actor, "nested goal from a task") do
+        {:error, kind} when is_atom(kind) -> {:error, kind}
+        {:ok, _run} -> {:ok, %{kind: :a5_spawn_probe, recursed: true}}
+        _ -> {:error, :tool_failed}
+      end
+    end)
+    |> Task.await()
+  end
+end
+
+defmodule SpawnAgent do
+  @moduledoc false
+  use Samen.AI.Agent,
+    name: "a5.spawn",
+    goal_prompt: "Try the probe. Reply FINAL: <answer> when done.",
+    tools: ["a5_spawn_probe"]
 end

@@ -450,7 +450,7 @@ defmodule Samen.AI.AgentDurabilityTest do
   # ── rate trip: 60 runs/org/hour ratified; counted from the run log (§6, §9#3) ───────
 
   describe "the per-org rate trip" do
-    test "RED: the crossing run is refused :rate_tripped and the operator kill trips (reason :rate_tripped); re-arm is explicit" do
+    test "RED: the crossing run is refused :rate_tripped and trips the DURABLE per-definition kill (reason rate_tripped); re-arm is explicit" do
       put_agent_config(rate_limit_per_org_hour: 3)
       s = new_scope()
 
@@ -460,24 +460,67 @@ defmodule Samen.AI.AgentDurabilityTest do
       end
 
       # The 4th run crosses 3-per-hour: refused, NOTHING persisted for it, and the
-      # host kill-switch is thrown with the rate reason — idempotently.
+      # kill lands — idempotently — on THIS {org, definition} only.
       assert {:error, :rate_tripped} = run_scripted(Durable, s, "goal")
-      assert Breaker.killed?()
-      assert Breaker.kill_reason() == :rate_tripped
-
       org_id = s.actor.org_id
+      agent_name = Durable.definition().name
+
+      assert Breaker.definition_killed?(org_id, agent_name)
+      assert Breaker.killed?(org_id, agent_name)
+      assert [kill] = Breaker.kills(org_id)
+      assert kill.agent == agent_name
+      assert kill.reason == "rate_tripped"
+
       assert 3 = Run |> Ash.Query.filter(org_id == ^org_id) |> Ash.count!(authorize?: false)
 
-      # Tripped means TRIPPED for every org until an operator re-arms (fail-closed,
-      # host-level; §6 "re-arming is explicit-operator-only").
-      assert {:error, :killed} = run_scripted(Durable, new_scope(), "goal")
+      # Fail-closed for the TRIPPED tenant's definition: a further run refuses :killed.
+      assert {:error, :killed} = run_scripted(Durable, s, "goal")
 
-      # POSITIVE CONTROL: explicit re-arm + a raised limit runs again — the refusal
-      # was the threshold, not breakage.
-      Breaker.rearm()
+      # A5 — THE BLAST-RADIUS FOLD (the A2/A3 residual, closed). A2/A3 threw the
+      # HOST-LEVEL switch here, so one org crossing its own threshold stopped agent runs
+      # for EVERY org on the host. It no longer does: the host switch is untouched, and
+      # ANOTHER org's run of the SAME definition still runs. Sabotage 260 re-widens this.
+      refute Breaker.killed?(), "the rate trip must NOT throw the host-level kill switch"
+      other = new_scope()
+      script(final: "other org unaffected")
+
+      assert {:ok, %{answer: "other org unaffected"}} =
+               run_scripted(Durable, other, "goal"),
+             "one org's rate trip halted another org's agent runs — the cross-tenant blast radius is back"
+
+      # POSITIVE CONTROL: explicit per-definition re-arm + a raised limit runs again —
+      # the refusal was the threshold, not breakage. Trips never self-heal.
+      assert {:error, :killed} = run_scripted(Durable, s, "goal")
+      :ok = Breaker.rearm_definition(org_id, agent_name, actor_id: "op:1")
+      refute Breaker.definition_killed?(org_id, agent_name)
       put_agent_config(rate_limit_per_org_hour: 100)
       script(final: "ok again")
       assert {:ok, %{answer: "ok again"}} = run_scripted(Durable, s, "goal")
+    end
+
+    test "RED: a DURABLE per-definition kill stops an IN-FLIGHT run at its next turn boundary, and only that {org, definition}" do
+      s = new_scope()
+      agent_name = Durable.definition().name
+
+      # Turn 1 runs and the DURABLE per-definition kill lands during it; turn 2 never
+      # reaches the provider (the per-turn re-check, narrowed — sabotage 260's target).
+      script([
+        fn ->
+          Breaker.kill_definition(s.actor.org_id, agent_name, :operator, actor_id: "op:1")
+          {:continue, "turn one"}
+        end,
+        {:final, "never reached"}
+      ])
+
+      assert {:error, :killed, run} = run_scripted(Durable, s, "goal")
+      run = assert_terminal!(run, :failed)
+      assert run.error_kind == "killed"
+      assert length(sent_segments()) == 1, "the in-flight turn completed and was recorded honestly"
+      assert length(Scripted.remaining()) == 1
+
+      # Another org running the same definition is unaffected (blast radius).
+      script(final: "unaffected")
+      assert {:ok, %{answer: "unaffected"}} = run_scripted(Durable, new_scope(), "goal")
     end
   end
 

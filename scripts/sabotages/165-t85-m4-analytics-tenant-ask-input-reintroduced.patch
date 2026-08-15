@@ -21,5 +21,5 @@
 -  def analytics_ask_offered?(_), do: false
 +  def analytics_ask_offered?(_), do: true
  
-   @doc "The five AI kit surfaces, in nav order: `{kind, label, sub_path}`."
+   @doc "The six AI kit surfaces, in nav order: `{kind, label, sub_path}`."
    def surfaces do

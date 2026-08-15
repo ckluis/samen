@@ -1,0 +1,34 @@
+# SABOTAGE: A5 (ADR-047 §5.3; the A4 verifier's R4b) gate sabotage — parked-proposal EXPIRY
+# is dropped. `expire_parked/1` becomes a no-op, so a write proposal whose 24h deadline has
+# lapsed stays PENDING forever: the run sits `:awaiting_approval` with a stale watchdog
+# cursor, the approval is still decidable, and a human who wanders past it days later can
+# still execute a write the tenant proposed and abandoned. This restores exactly the A4
+# residual — an unselectable in-flight state and a lapsed proposal that can still fire. The
+# named expiry reds must flip; the not-yet-lapsed positive control stays green, proving what
+# was lost is the expiry and not the parking.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: a LAPSED proposal is expired, its approval withdrawn, and it can never execute
+# MUST_FAIL: expiry is idempotent and only ever applies to a PARKED run
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1296,15 +1296,9 @@
+   def expire_parked(%Run{} = run), do: expire_parked(run.id)
+ 
+   def expire_parked(run_id) when is_binary(run_id) do
+-    with {:ok, %Run{state: :awaiting_approval} = run} <- fetch_run(run_id) do
+-      {:ok,
+-       run
+-       |> Ash.Changeset.for_update(:expire_due, %{})
+-       |> Ash.update!(authorize?: false)}
+-    else
+-      {:ok, %Run{}} -> {:error, :run_not_parked}
+-      other -> other
+-    end
++    # SABOTAGE (A5, the A4 verifier's R4b): expiry is a NO-OP. A lapsed proposal keeps
++    # its pending approval and its parked run forever — decidable indefinitely.
++    fetch_run(run_id)
+   end
+ 
+   def expire_parked(_run), do: {:error, :not_found}

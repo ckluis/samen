@@ -46,6 +46,10 @@ config :samen_core, :samen_ai_support_reply_draft_repo, SamenCore.TestRepo
 config :samen_core, :samen_ai_agent_run_repo, SamenCore.TestRepo
 config :samen_core, :samen_ai_agent_turn_repo, SamenCore.TestRepo
 
+# ADR-047 A5: the DURABLE per-{org, definition} agent kill switch — the A2/A3
+# cross-tenant blast-radius residual, closed. Same compile_env seam as its siblings.
+config :samen_core, :samen_ai_agent_kill_repo, SamenCore.TestRepo
+
 config :ash, disable_async?: true
 
 # T145: quiet Ash's benign `[warning] Missed N notifications` runtime log noise. The AI

@@ -73,6 +73,12 @@ defmodule Samen.AI.Agent.Run do
       transition(:park, from: :running, to: :awaiting_approval)
       transition(:resume, from: :awaiting_approval, to: :running)
       transition(:reject, from: :awaiting_approval, to: :rejected)
+
+      # A5 (ADR-047 §5.3, the A4 verifier's R4b): the proposal's DEADLINE lapsed with no
+      # human decision. An honest terminal of its own — never `:rejected` (a human refused
+      # nothing) and never `:failed` (the engine did not fail). The pending approval is
+      # WITHDRAWN in the same transaction, so the lapsed proposal can never later execute.
+      transition(:expire_due, from: :awaiting_approval, to: :expired)
     end
   end
 
@@ -113,7 +119,9 @@ defmodule Samen.AI.Agent.Run do
           # own — never dressed as :failed (which means the ENGINE failed) and never as
           # :succeeded. The state column is plain text (`arn_state`, the `apv_state`
           # precedent), so widening this enum needs no migration and no schema.dict change.
-          :rejected
+          :rejected,
+          # A5: the proposal's deadline lapsed undecided (see the `:expire` transition).
+          :expired
         ]
       ]
     )
@@ -266,6 +274,31 @@ defmodule Samen.AI.Agent.Run do
       change(transition_state(:rejected))
     end
 
+    # A5 (the A4 verifier's R4b): the parked-proposal EXPIRY sweep, driven by the
+    # `:agent_proposal_expiry` AshOban trigger below. The changeset filter is the
+    # defensive double-check on the trigger's own `where`; the after_action hook
+    # (`Samen.AI.Agent.on_proposal_expired/1`) WITHDRAWS the pending approval, finalizes
+    # the still-`:proposed` turn row, and appends one bounded transcript line — INSIDE
+    # this action's transaction, the `EventCapture`/`:resume_due` idiom, so a run can
+    # never be `:expired` with its approval still decidable. Nothing is ever executed.
+    update :expire_due do
+      accept([])
+      require_atomic?(false)
+
+      change(fn changeset, _ctx ->
+        changeset
+        |> Ash.Changeset.filter({:state, [eq: :awaiting_approval]})
+        |> Ash.Changeset.force_change_attribute(:next_turn_at, nil)
+        |> Ash.Changeset.force_change_attribute(:error_kind, "deadline_expired")
+        |> Ash.Changeset.after_action(fn _changeset, result ->
+          Samen.AI.Agent.on_proposal_expired(result)
+          {:ok, result}
+        end)
+      end)
+
+      change(transition_state(:expired))
+    end
+
     update :succeed do
       accept([])
       require_atomic?(false)
@@ -367,17 +400,46 @@ defmodule Samen.AI.Agent.Run do
         # every `:queued`/`:running` run HAS a next_turn_at, so a stalled one is always
         # eventually due (the Sequences MED-2 lesson, adopted verbatim).
         #
-        # A4 narrows what that sentence may claim. `:awaiting_approval` is non-terminal and
-        # carries a non-nil `next_turn_at` (its approval DEADLINE), but it is deliberately
-        # NOT selected here: a parked run has no turn to execute, so re-arming it would
-        # enqueue a TurnWorker job that can only no-op. The honest consequence is that a
-        # parked run IS an unselectable in-flight state, and nothing in A4 expires a
-        # proposal whose deadline has passed — it waits for a human decision or a tenant
-        # `Samen.AI.Agent.cancel/2` (which withdraws the approval). Deadline expiry belongs
-        # with the approve/reject surface that renders it: carried as an **A5 residual**.
+        # A4 narrowed what that sentence may claim, and A5 CLOSES it. `:awaiting_approval`
+        # is non-terminal and carries a non-nil `next_turn_at` (its approval DEADLINE), but
+        # it is deliberately NOT selected HERE: a parked run has no turn to execute, so
+        # re-arming it would enqueue a TurnWorker job that can only no-op. It is instead
+        # swept by the SIBLING `:agent_proposal_expiry` trigger below, which terminates it
+        # `:expired` once its deadline lapses. So every non-terminal state is selected by
+        # exactly one of the two triggers, and there is again NO unselectable in-flight
+        # state (the Sequences MED-2 lesson, restored in full — the A4 residual R4b is
+        # closed, not carried).
         where(
           expr(
             ^ref(:state) in [:queued, :running] and not is_nil(^ref(:next_turn_at)) and
+              ^ref(:next_turn_at) <= now()
+          )
+        )
+      end
+
+      # A5 (ADR-047 §5.3; the A4 verifier's R4b): the parked-proposal EXPIRY sweep. A run
+      # parked on a human decision sets `next_turn_at` to the approval DEADLINE
+      # (`Samen.AI.Agent.WriteProposal.deadline_seconds/0`, default 24h); once that
+      # timestamp is in the past the proposal has LAPSED. `:expire_due` withdraws the
+      # pending approval, records the honest terminal `:expired`, and never executes the
+      # proposed write. Same queue + explicit cron + pinned module names as its sibling, so
+      # `mix samen.verify.oban_queues` / `Samen.Jobs.QueueParity` see both generated
+      # modules. Sabotage 259 drops this arm and the lapsed proposal is decidable forever.
+      trigger :agent_proposal_expiry do
+        action(:expire_due)
+        queue(:automation_timers)
+        scheduler_cron("* * * * *")
+        scheduler_module_name(Samen.AI.Agent.Run.AgentProposalExpiryScheduler)
+        worker_module_name(Samen.AI.Agent.Run.AgentProposalExpiryWorker)
+        read_action(:due_scan)
+        worker_read_action(:due_scan)
+        stream_with(:full_read)
+        actor_persister(:none)
+        max_attempts(3)
+
+        where(
+          expr(
+            ^ref(:state) == :awaiting_approval and not is_nil(^ref(:next_turn_at)) and
               ^ref(:next_turn_at) <= now()
           )
         )

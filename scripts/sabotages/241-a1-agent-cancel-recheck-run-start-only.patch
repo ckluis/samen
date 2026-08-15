@@ -48,6 +48,6 @@ diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
 -        log_terminal(run)
 -        {:error, :cancelled, run}
 -
-       Breaker.killed?() ->
+       Breaker.killed?(run.org_id, run.agent) ->
          # Fail-closed interrupt (A2, §6): an operator kill between turn N and N+1 stops
-         # turn N+1 — the in-flight turn completed and was recorded honestly.
+         # turn N+1 — the in-flight turn completed and was recorded honestly. A5 widens

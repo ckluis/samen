@@ -34,6 +34,17 @@ config :samen_core, :verify_repo, Samen.WebTest.Repo
 config :samen_core, :vault_repo, Samen.WebTest.Repo
 config :samen_core, :impersonation_repo, Samen.WebTest.Repo
 
+# ADR-047 A5: the agent-loop resources back the tenant AgentLive + operator
+# AgentHealthLive surfaces, so samen_web's scratch DB carries their tables (the three
+# migrations mirror samen_core's test_repo byte-for-byte apart from the module name) and
+# the compile_env repo seams point at it. Without this the resources would compile
+# against SamenCore.TestRepo and no render test could exercise a real vault-routed
+# transcript.
+config :samen_core, :samen_ai_agent_run_repo, Samen.WebTest.Repo
+config :samen_core, :samen_ai_agent_turn_repo, Samen.WebTest.Repo
+config :samen_core, :samen_ai_agent_kill_repo, Samen.WebTest.Repo
+
+
 config :phoenix, :json_library, Jason
 
 # Oban base config (the vault/erasure machinery references it). Manual in test.

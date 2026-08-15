@@ -181,7 +181,11 @@ defmodule Samen.AI.Agent.ToolResult do
       )
 
     Enum.flat_map(resolved, fn record ->
-      header = "record: #{inspect(resource_mod)}##{Map.get(record, :id)}"
+      # A5 (the A4 verifier's R7): the primary key goes through `render_scalar/2` like
+      # every other value. It was the ONE interpolation site that did not, which is
+      # structurally moot for a uuid pk but would have been a sentinel path around the
+      # A4 elision fold for a host resource with a string pk.
+      header = "record: #{inspect(resource_mod)}##{render_scalar(Map.get(record, :id), "id")}"
 
       value_lines =
         Enum.map(eligible, fn field ->

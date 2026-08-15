@@ -371,6 +371,7 @@
       "sos": "SamenCore.Support.OutreachFixture.Sequence",
       "svs": "SamenCore.Support.Versioning.Snapshot",
       "scc": "SamenCore.Support.CrmScopeFixture.Company",
+      "akl": "Samen.AI.Agent.Kill",
       "sfa": "SamenCore.Support.FleetFixture.App",
       "sce": "SamenCore.Support.CalendarFixture.Event",
       "sll": "SamenCore.Support.LocationsFixture.Location",

@@ -1,0 +1,24 @@
+# SABOTAGE: A5 (ADR-047 §7.3) gate sabotage — the OPERATOR agent-health projection carries the
+# vault-routed TRANSCRIPT. `Samen.AI.Agent.Health`'s token-only `@run_fields` allowlist gains
+# `:transcript`, so the operator oversight plane now holds the run's one text artifact —
+# defeating §7.3's rule that this surface renders NO transcript at all (mask-by-OMISSION, not
+# mask-by-styling). Even as a `%Masked{}` this is the wrong shape for this plane, and it puts
+# the field one careless template edit away from the DOM, with no per-plane proof standing
+# between. The named omission red must flip; the bounded run/turn columns stay present, proving
+# what was lost is the omission and not the projection.
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/agent_masking_test.exs
+# MUST_FAIL: the OPERATOR agent-health projection does not carry the transcript at all
+diff --git a/samen_core/lib/samen/ai/agent/health.ex b/samen_core/lib/samen/ai/agent/health.ex
+--- a/samen_core/lib/samen/ai/agent/health.ex
++++ b/samen_core/lib/samen/ai/agent/health.ex
+@@ -37,6 +37,9 @@
+   # The bounded run projection an operator may see. `:transcript` is deliberately absent
+   # (see the moduledoc) — this list IS the two-plane rule for this surface.
+   @run_fields [
++    # SABOTAGE (A5, ADR-047 §7.3): the vault-routed transcript is projected to the
++    # OPERATOR plane, defeating mask-by-omission.
++    :transcript,
+     :id,
+     :org_id,
+     :agent,

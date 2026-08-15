@@ -1,0 +1,35 @@
+# SABOTAGE: A5 (ADR-047 §5.1; the A4 verifier's R3) gate sabotage — the ambient recursion
+# marker stops following the spawn chain, so ORDINARY CONCURRENCY escapes the depth guard
+# again. `current_provenance/0` reads only THIS process's dictionary, exactly as A4 did.
+# A tool whose `run/2` does its work in a `Task.async` — the most ordinary way an action
+# does concurrent work — then calls `Samen.AI.Agent.start/4` from the child, whose
+# dictionary is empty: `resolve_provenance/1` falls through to the caller-opts branch and
+# persists the nested run as a fresh TOP-LEVEL run at `depth: 0, chain: []`, so
+# `max_agent_depth 0` never binds and even the depth accounting cannot see the nesting.
+# The named spawn-escape red must flip (and the marker-visibility test with it); the
+# same-process guard (sabotage 254's target) stays green, proving what was lost is the
+# propagation and not the guard itself.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: a tool that starts a nested agent run from inside Task.async is refused
+# MUST_FAIL: the marker is visible from inside the spawned process
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1603,6 +1603,16 @@
+   def current_provenance do
+     case Process.get(@provenance_key) do
+       %{} = provenance -> provenance
++      # SABOTAGE (A5, the A4 verifier's R3): the $callers/$ancestors walk is gone — a
++      # spawned process sees an EMPTY marker and starts a fresh top-level run.
++      _ -> nil
++    end
++  end
++
++  @doc false
++  def unused_current_provenance do
++    case Process.get(@provenance_key) do
++      %{} = provenance -> provenance
+       # A5 (the A4 verifier's R3): ORDINARY CONCURRENCY DOES NOT ESCAPE THE MARKER.
+       # A process-dictionary marker is process-SCOPED, so a tool whose `run/2` did its
+       # work in a `Task.async` (the most ordinary way an action does concurrent work)

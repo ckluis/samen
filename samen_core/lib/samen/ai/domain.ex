@@ -3,7 +3,8 @@ defmodule Samen.AI.Domain do
   The Ash domain that hosts the reusable AI-plane resources: the D3 managed-prompt
   resource (`Samen.AI.Prompt`, ADR-043 §7.5, T68), the D5 AI-support-operator draft
   resource (`Samen.AI.SupportReplyDraft`, ADR-043 §6.3, T70), and the agent-loop
-  run/turn cursor rows (`Samen.AI.Agent.Run` / `Samen.AI.Agent.Turn`, ADR-047 A1).
+  run/turn cursor rows (`Samen.AI.Agent.Run` / `Samen.AI.Agent.Turn`, ADR-047 A1) plus the
+  durable per-definition agent kill switch (`Samen.AI.Agent.Kill`, ADR-047 A5).
 
   These are reusable kernel infrastructure, not per-host fixtures, so they live in their
   own domain a host mounts by adding `Samen.AI.Domain` to its own `:ash_domains` config
@@ -19,5 +20,6 @@ defmodule Samen.AI.Domain do
     resource(Samen.AI.SupportReplyDraft)
     resource(Samen.AI.Agent.Run)
     resource(Samen.AI.Agent.Turn)
+    resource(Samen.AI.Agent.Kill)
   end
 end

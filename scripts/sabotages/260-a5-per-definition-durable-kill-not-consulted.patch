@@ -1,0 +1,28 @@
+# SABOTAGE: A5 (ADR-047 §6) gate sabotage — the DURABLE per-definition kill is not consulted.
+# `Breaker.killed?/2` drops the `definition_killed?/2` half and answers with the HOST switch
+# alone, so a `{org, definition}` an operator explicitly killed (or a rate trip tripped) KEEPS
+# RUNNING: `check_start/2` admits new runs for it, and the loop's per-turn re-check never
+# stops an in-flight one. The tenant-visible policy decision becomes decorative and the only
+# working lever is the host-wide one whose blast radius A5 exists to remove. The named
+# per-definition reds must flip; the host-switch tests stay green, proving what was lost is
+# the narrowed lever and not the kill machinery.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: the crossing run is refused :rate_tripped and trips the DURABLE per-definition kill
+# MUST_FAIL: a DURABLE per-definition kill stops an IN-FLIGHT run at its next turn boundary
+diff --git a/samen_core/lib/samen/ai/agent/breaker.ex b/samen_core/lib/samen/ai/agent/breaker.ex
+--- a/samen_core/lib/samen/ai/agent/breaker.ex
++++ b/samen_core/lib/samen/ai/agent/breaker.ex
+@@ -194,7 +194,11 @@
+   """
+   @spec killed?(String.t() | nil, String.t() | nil) :: boolean()
+   def killed?(org_id, agent_name) do
+-    killed?() or definition_killed?(org_id, agent_name)
++    # SABOTAGE (A5, ADR-047 §6): the durable per-definition row is never consulted — a
++    # killed {org, definition} keeps starting and keeps running.
++    _ = org_id
++    _ = agent_name
++    killed?()
+   end
+ 
+   @doc """

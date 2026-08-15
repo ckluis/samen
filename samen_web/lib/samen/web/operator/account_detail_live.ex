@@ -92,6 +92,16 @@ defmodule Samen.Web.Operator.AccountDetailLive do
             >
               Automation health →
             </a>
+            <%!-- ADR-047 A5: the agent oversight drill-in (per-definition health + the
+                  durable per-{org, definition} kill), the automation sibling. --%>
+            <a
+              :if={@account_id}
+              href={"/operator/agents/#{@account_id}"}
+              id="account-agent-health-link"
+              style="font-size:12px;color:#3B4CCA;margin-right:14px"
+            >
+              Agent health →
+            </a>
             <a
               :if={@account_id}
               href={"/operator/activity/#{@account_id}"}

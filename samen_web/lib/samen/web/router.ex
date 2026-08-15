@@ -243,6 +243,14 @@ defmodule Samen.Web.Router do
         # actually runs (unchanged, T84a-wired).
         live("#{path}/automation/resolve", Samen.Web.Operator.FleetResolveLive, :automation)
         live("#{path}/automation/:org_id", Samen.Web.Operator.AutomationHealthLive)
+        # ADR-047 A5 — the agent oversight surface (per-definition health, the bounded
+        # run + turn log, and the DURABLE per-{org, definition} kill switch that replaced
+        # A2/A3's host-wide rate trip), scoped to ONE tenant org at a time (the route
+        # param), the AutomationHealthLive mirror. Rides this SAME live_session, so the
+        # `{Samen.Web.Operator.Authz, :require_operator}` on_mount gates it by
+        # construction. The tenant's TRANSCRIPT is never projected to this plane
+        # (ADR-047 §7.3 mask-by-omission). Inherited at 0 vertical LOC.
+        live("#{path}/agents/:org_id", Samen.Web.Operator.AgentHealthLive)
         # The R2/T114 per-tenant deliverability drill-down (dogfood-report.md R3 —
         # P4's "why didn't this tenant get their email?" job-test) — the T28/T30
         # delivery/suppression store, scoped to ONE tenant org at a time (the
@@ -1918,7 +1926,15 @@ defmodule Samen.Web.Router do
       {"#{path}/search", Samen.Web.AI.SearchLive},
       {"#{path}/crm", Samen.Web.AI.CrmLive},
       {"#{path}/analytics", Samen.Web.AI.AnalyticsLive},
-      {"#{path}/support", Samen.Web.AI.SupportDraftLive}
+      {"#{path}/support", Samen.Web.AI.SupportDraftLive},
+      # ADR-047 A5 — the tenant-plane AGENT RUN surfaces (list + detail: transcript,
+      # bounded turn log, cancel, and the approve/reject decision card for a run parked
+      # `:awaiting_approval`). Framework-side, so a vertical mounting `samen_ai_routes`
+      # inherits them at 0 authored LOC (A6's ≈0-LOC adoption proof). Declaration order
+      # matters: the STATIC list path is declared before its dynamic `:id` sibling, the
+      # same rule the operator family's resolve routes follow.
+      {"#{path}/agents", Samen.Web.AI.AgentLive},
+      {"#{path}/agents/:id", Samen.Web.AI.AgentLive}
     ]
   end
 

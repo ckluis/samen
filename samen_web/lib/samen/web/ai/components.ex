@@ -52,14 +52,17 @@ defmodule Samen.Web.AI.Components do
   def analytics_ask_offered?(%Samen.Web.Mount{plane: %{kind: :operator}}), do: true
   def analytics_ask_offered?(_), do: false
 
-  @doc "The five AI kit surfaces, in nav order: `{kind, label, sub_path}`."
+  @doc "The six AI kit surfaces, in nav order: `{kind, label, sub_path}`."
   def surfaces do
     [
       {:verbs, "Verbs", ""},
       {:search, "Semantic search", "/search"},
       {:crm, "CRM AI", "/crm"},
       {:analytics, "Analytics", "/analytics"},
-      {:support, "Support draft", "/support"}
+      {:support, "Support draft", "/support"},
+      # ADR-047 A5 — the agent run surface (multi-step runs, transcript, cancel, and the
+      # approve/reject card for a proposed write).
+      {:agents, "Agent runs", "/agents"}
     ]
   end
 

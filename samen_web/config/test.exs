@@ -85,3 +85,10 @@ config :samen_web, Samen.WebTest.SecurityEndpoint,
 # deliberately NOT configured here — it is not a real dependency, and an unset
 # `:auth_required?` already reads as DISARMED (`Application.get_env(app, :auth_required?, false)`).
 # The suite flips it at runtime via `Samen.WebTest.SecurityHost.arm!/0`.
+
+# A5 fold F1 (ADR-047; the A4 verifier's R2): the approver-membership seam pointed at the
+# REAL materialized Identity mount the test support carries, so `Samen.AI.Agent.Approver`'s
+# Ash-RESOURCE path is exercised against a genuine `use Samen.Scopes.Identity` Membership
+# table (samen_core exercises the {module, function} path against a fixture). Test-env only:
+# `Samen.WebTest.Operator` is test-support, and an unwired env must stay fail-closed.
+config :samen_core, Samen.AI.Agent, approver_membership: Samen.WebTest.Operator.Membership

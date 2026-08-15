@@ -388,7 +388,11 @@ defmodule Samen.AbbrevRegistryTest do
                  # A1 (ADR-047 §4.1/§6): the agent-loop durable cursor + bounded
                  # turn-log resources, allocator-reserved.
                  "arn" => "Samen.AI.Agent.Run",
-                 "atn" => "Samen.AI.Agent.Turn"
+                 "atn" => "Samen.AI.Agent.Turn",
+                 # A5 (ADR-047 §6): the DURABLE per-{org, definition} agent kill switch
+                 # that closes A2/A3's cross-tenant rate-trip blast radius,
+                 # allocator-reserved.
+                 "akl" => "Samen.AI.Agent.Kill"
                },
                "samen_web" => %{
                  "wmv" => "Samen.WebTest.Marketing.ConsentEvent",
@@ -553,7 +557,7 @@ defmodule Samen.AbbrevRegistryTest do
       # +3 T85 (spec §I2 M5): samen_web test host's Outreach mount `wso`/`woe`/`ows` = 408.
       # +2 A1 (ADR-047 §4.1/§6): samen_core host's agent-loop cursor pair `arn`/`atn`
       # (Samen.AI.Agent.{Run,Turn}), allocator-reserved = 410.
-      assert map_size(Reg.load()) == 438
+      assert map_size(Reg.load()) == 439
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do
