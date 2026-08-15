@@ -115,7 +115,13 @@ defmodule Samen.Automation.Action do
 
   **No shipped action becomes a tool by accident**: the 8 ADR-039 kinds export
   NEITHER callback, so all 8 are `:not_a_tool` (and would be `:write` even if opted
-  in). The only opted-in tools are A3's two read-effect actions below.
+  in). The only opted-in tools are A3's two read-effect actions and A4's ONE
+  write-effect action below — every one an explicit, reviewed edit to a module.
+
+  A4's `assign_record_owner` is `effect: :write`: `Samen.AI.Agent` never invokes its
+  `run/2` from a turn. The turn opens an E3 approval and the run parks; a distinct human's
+  approve is the only thing that executes it, with the APPROVER's actor (ADR-043 §6.2,
+  unamended — ADR-047 §5.3).
 
   ## Registry
 
@@ -153,7 +159,8 @@ defmodule Samen.Automation.Action do
     "webhook" => Samen.Automation.Actions.Webhook,
     "enqueue_reminder" => Samen.Automation.Actions.EnqueueReminder,
     "search_records" => Samen.Automation.Actions.SearchRecords,
-    "fetch_record" => Samen.Automation.Actions.FetchRecord
+    "fetch_record" => Samen.Automation.Actions.FetchRecord,
+    "assign_record_owner" => Samen.Automation.Actions.AssignRecordOwner
   }
 
   @doc "Resolve a bounded action `kind` string to its module, or `nil`."

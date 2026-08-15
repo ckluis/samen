@@ -18,6 +18,49 @@ defmodule A3TestAgents do
   end
 end
 
+defmodule A4SentinelProbe do
+  @moduledoc """
+  A test-only READ tool whose result carries an ATTACKER-CONTROLLED scalar (ADR-047 A4
+  fold (c)). Registered through the sanctioned host-extra seam
+  (`config :samen_core, Samen.Automation.Action, extra: …`) only for the tests that need
+  it. `:persistent_term` holds the value it should return, so one module covers both the
+  poisoned case and its clean positive control.
+  """
+  @behaviour Samen.Automation.Action
+
+  @tool_schema %{
+    name: "a4_sentinel_probe",
+    description: "test-only probe returning a caller-chosen scalar in its result",
+    params: []
+  }
+
+  @impl true
+  def kind, do: :a4_sentinel_probe
+
+  @impl true
+  def tool_schema, do: @tool_schema
+
+  @impl true
+  def effect, do: :read
+
+  @impl true
+  def validate(config, _resource_key) when is_map(config), do: {:ok, %{}}
+  def validate(_config, _resource_key), do: {:error, :invalid_config}
+
+  @impl true
+  def run(_config, _ctx) do
+    {:ok, %{kind: :a4_sentinel_probe, note: :persistent_term.get({:a4_sentinel, :note}, "clean")}}
+  end
+end
+
+defmodule A4SentinelAgent do
+  @moduledoc false
+  use Samen.AI.Agent,
+    name: "a4.sentinel",
+    goal_prompt: "Use the probe. Reply FINAL: <answer> when done.",
+    tools: ["a4_sentinel_probe"]
+end
+
 defmodule Samen.AI.AgentToolsTest do
   @moduledoc """
   ADR-047 batch A3 — the tool surface: read tools + EG2 scrubbing.
@@ -140,15 +183,21 @@ defmodule Samen.AI.AgentToolsTest do
       end
 
       # The whole opted-in surface, exactly (arm 2 is an allowlist, not a heuristic).
-      assert Action.tool_kinds() == ["fetch_record", "search_records"]
-      assert length(Tools.static_defs()) == 2
+      # A4 adds exactly ONE more member — the write tool — and nothing else moves.
+      assert Action.tool_kinds() == ["assign_record_owner", "fetch_record", "search_records"]
+      assert length(Tools.static_defs()) == 3
 
-      # And the two read actions declare BOTH faces explicitly.
+      # And every opted-in action declares BOTH faces explicitly, with its effect class
+      # spelled out: the two A3 reads execute inline, A4's ONE write proposes.
       for kind <- ["search_records", "fetch_record"] do
         mod = Action.module_for(kind)
         assert is_map(Action.tool_schema_for(mod))
         assert Action.effect_for(mod) == :read
       end
+
+      write_mod = Action.module_for("assign_record_owner")
+      assert is_map(Action.tool_schema_for(write_mod))
+      assert Action.effect_for(write_mod) == :write
     end
 
     test "RED (arm 3 — sabotage 249's target): a registered, opted-in tool OUTSIDE the agent's declared list is refused, recorded honestly, and NEVER executes" do
@@ -307,9 +356,10 @@ defmodule Samen.AI.AgentToolsTest do
 
       # EG6: the Inspect redaction renders only the tool COUNT — never names/descriptions.
       rendered = inspect(payload)
-      assert rendered =~ "tools: 2"
+      assert rendered =~ "tools: 3"
       refute rendered =~ "search_records"
       refute rendered =~ "fetch_record"
+      refute rendered =~ "assign_record_owner"
     end
   end
 
@@ -747,6 +797,164 @@ defmodule Samen.AI.AgentToolsTest do
       # Additive: a workflow-shaped context still constructs with origin defaulting nil.
       wf_ctx = %Samen.Automation.Context{org_id: "o", workflow_id: "w", subject_ref: "s"}
       assert wf_ctx.origin == nil
+    end
+  end
+
+
+  # ── fold (b): the vt_ ARG GATE, refutable in the SHIPPED suite (A4) ─────────────────
+
+  describe "the vt_ arg gate is load-bearing on its own (ADR-047 §4.3; A3 verifier residual #2)" do
+    test "RED (sabotage 251's target): a SHAPE-VALID, IN-ALLOWLIST arg carrying a vt_ token is killed by the sentinel gate ALONE" do
+      s = new_scope()
+      poisoned = %{"query" => "late shipment " <> @vt_token}
+
+      # ANTI-TAUTOLOGY, asserted FIRST and this is the whole point of the test: the
+      # action's OWN validate/2 ACCEPTS this arg set. `query` is in the declared
+      # allowlist and the value is a well-formed, in-range query string, so the
+      # default-deny validator cannot be what refuses it. A3's vt_ red used an arg KEY
+      # outside the allowlist, so validate/2 refused it anyway and the dedicated sentinel
+      # gate was invisible — neutering `refuse_vt_args/1` flipped nothing in the shipped
+      # suite. Here ONLY `refuse_vt_args/1` stands between the token and execution.
+      mod = Action.module_for("search_records")
+      assert {:ok, %{"query" => _, "limit" => 5}} = mod.validate(poisoned, nil)
+
+      script([
+        {:tool_call, "search_records", poisoned},
+        {:final, "declined the token"}
+      ])
+
+      assert {:ok, %{answer: "declined the token", run: run}} =
+               run_scripted(Reader, s, "find the late shipment")
+
+      assert [t1, _t2] = turn_rows(run)
+      assert t1.error_kind == "invalid_args"
+      assert t1.tool_kind == "search_records"
+      assert t1.arg_keys == [], "no poisoned arg key may reach a persisted column"
+      assert_history_accumulated!(2, ["tool_error: invalid_args"])
+
+      # Nothing executed, nothing egressed, nothing at rest.
+      assert Ash.get!(Run, run.id, authorize?: false).tool_calls_used == 0
+      refute all_sent_text() =~ "vt_"
+      assert_no_text_at_rest!(run, [@vt_token])
+      assert_transcript_vaulted_at_rest!(run, [String.slice(@vt_token, 3..-1//1)])
+    end
+
+    test "POSITIVE CONTROL: the SAME shape-valid query WITHOUT the token executes (the refusal above is the sentinel gate, not the validator)" do
+      s = new_scope()
+
+      script([
+        {:tool_call, "search_records", %{"query" => "late shipment clean"}},
+        {:final, "searched"}
+      ])
+
+      assert {:ok, %{answer: "searched", run: run}} = run_scripted(Reader, s, "find it")
+
+      assert [t1, _t2] = turn_rows(run)
+      assert t1.error_kind == nil
+      assert t1.arg_keys == ["limit", "query"]
+      assert Ash.get!(Run, run.id, authorize?: false).tool_calls_used == 1
+      assert all_sent_text() =~ "tool_call: search_records limit=5 query=late shipment clean"
+    end
+  end
+
+  # ── fold (c): a sentinel in tenant DATA is elided per value, never a run kill (A4) ──
+
+  describe "a sentinel-bearing tool-result scalar is replaced, not escalated to a run failure" do
+    test "UNIT: render/2 and render_call/2 emit [unrenderable:<key>] for a vt_-bearing scalar — NO sentinel ever egresses" do
+      poisoned = "attacker-supplied " <> @vt_token
+
+      lines = ToolResult.render({:ok, %{kind: :probe, note: poisoned}}, actor: %{})
+      joined = Enum.join(lines, "\n")
+
+      assert joined =~ "[unrenderable:note]"
+      refute joined =~ "vt_"
+      refute joined =~ poisoned
+
+      # The call echo (§4.3#6: "rendered to a single vt_-FREE binary") and a poisoned KEY.
+      echo = ToolResult.render_call("probe", %{"q" => poisoned})
+      assert echo == "tool_call: probe q=[unrenderable:q]"
+      refute echo =~ "vt_"
+
+      keyed = ToolResult.render({:ok, %{@vt_token => "x"}}, actor: %{})
+      refute Enum.join(keyed, "\n") =~ "vt_"
+
+      # A sentinel hiding PAST the 500-byte truncation boundary is still caught (the scan
+      # runs BEFORE truncation — a leak must not be prevented only by luck).
+      long = String.duplicate("a", 600) <> @vt_token
+      assert ToolResult.render({:ok, %{note: long}}, actor: %{}) == ["note: [unrenderable:note]"]
+
+      # POSITIVE CONTROL: a clean scalar of the same shape still renders its VALUE.
+      assert ToolResult.render({:ok, %{note: "clean value"}}, actor: %{}) == ["note: clean value"]
+    end
+
+    test "RED (sabotage 255's target): a tenant-controlled sentinel in a tool RESULT does NOT hard-fail the run — it is elided and the run completes" do
+      with_sentinel_probe("attacker-supplied " <> @vt_token, fn ->
+        s = new_scope()
+
+        script([
+          {:tool_call, "a4_sentinel_probe", %{}},
+          {:final, "survived the poisoned record"}
+        ])
+
+        # THE DoS PROPERTY: before fold (c) this run died `:pii_egress_refused` at the
+        # chokepoint, because one attacker-controlled column value killed the whole
+        # payload. Now the value is elided and the governed run finishes honestly.
+        assert {:ok, %{answer: "survived the poisoned record", run: run}} =
+                 run_scripted(A4SentinelAgent, s, "read the poisoned record")
+
+        assert [%{error_kind: nil, tool_kind: "a4_sentinel_probe"}, _] = turn_rows(run)
+
+        # THE EGRESS PROPERTY, undiminished: no sentinel reached the provider, on any turn.
+        refute all_sent_text() =~ "vt_"
+        assert all_sent_text() =~ "note: [unrenderable:note]"
+        assert_masked_only_payloads!()
+        assert_no_text_at_rest!(run, [@vt_token])
+      end)
+    end
+
+    test "POSITIVE CONTROL: the SAME probe returning a CLEAN scalar renders the value (the elision above is the sentinel scan, not breakage)" do
+      with_sentinel_probe("perfectly-fine-note", fn ->
+        s = new_scope()
+
+        script([
+          {:tool_call, "a4_sentinel_probe", %{}},
+          {:final, "read it"}
+        ])
+
+        assert {:ok, %{run: _run}} = run_scripted(A4SentinelAgent, s, "read the clean record")
+        assert all_sent_text() =~ "note: perfectly-fine-note"
+        refute all_sent_text() =~ "[unrenderable:note]"
+      end)
+    end
+
+    test "the LAST LINE is untouched: the chokepoint still refuses a vt_-bearing history segment fail-closed" do
+      # fold (c) changed only what the RENDERER emits. The §4.3#5 belt-and-braces
+      # guarantee — a renderer regression that emits an unsafe segment REFUSES — is not
+      # weakened, and this is the assertion that says so.
+      assert Chokepoint.seal(:complete, ["turn N+1"], history: ["leaked " <> @vt_token]) ==
+               {:error, :pii_egress_refused}
+    end
+  end
+
+  # A host-extra READ tool returning `note` — registered through the sanctioned `extra:`
+  # seam only for the tests that need it, and torn down after.
+  defp with_sentinel_probe(note, fun) do
+    previous = Application.get_env(:samen_core, Samen.Automation.Action, [])
+    extra = Keyword.get(previous, :extra, %{})
+
+    Application.put_env(
+      :samen_core,
+      Samen.Automation.Action,
+      Keyword.put(previous, :extra, Map.put(extra, "a4_sentinel_probe", A4SentinelProbe))
+    )
+
+    :persistent_term.put({:a4_sentinel, :note}, note)
+
+    try do
+      fun.()
+    after
+      Application.put_env(:samen_core, Samen.Automation.Action, previous)
+      :persistent_term.erase({:a4_sentinel, :note})
     end
   end
 

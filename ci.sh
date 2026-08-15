@@ -211,6 +211,20 @@ run_gen_probe "priv/gen_post_probe.exs" \
 run_gen_probe "priv/gen_app_deploy_probe.exs" \
   "gen_app deploy probe (WS-D D10 / AC-G16-1/2/3 — --deploy → ci.sh + fail-closed runtime + sabotage)"
 
+# --- Sabotage-harness SELECTION regression (ADR-047 A4 fold (a)) ----------------------
+# `scripts/sabotage.sh --changed [<ref>]` is the VERIFIER PRIMITIVE ("replay the sabotages
+# relevant to my diff"). It used to derive its touched set from `git diff --name-only`,
+# which lists only TRACKED paths — so any batch that ADDED files silently under-selected
+# (A3's own new patches 247/248/249 were missed, because their touched files were brand
+# new). A selector that reports a confident green over a hole is worse than no selector,
+# so the union with `git ls-files --others --exclude-standard` is pinned by a permanent,
+# UNCONDITIONAL gate step (unlike the opt-in replay below, this one is ~1s, needs no DB,
+# and applies no patch — it only runs `--list`). Ships with its own negative control.
+echo ""
+echo "==> Running sabotage-harness selection regression (ADR-047 A4 fold (a) — --changed must see untracked files)"
+bash "$REPO_ROOT/scripts/sabotage_selection_test.sh"
+echo "==> sabotage selection regression: PASSED"
+
 # --- WS-E sabotage harness (E2i.1) — permanent OPT-IN step (SAMEN_SABOTAGE=1) ---
 # Replays every shipped gate sabotage as a committed patch (scripts/sabotages/*.patch):
 # apply → targeted `mix test` MUST fail with the NAMED tests among the failures (the

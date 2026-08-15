@@ -1,0 +1,30 @@
+# SABOTAGE: A4 (ADR-047 §5.3; ADR-040 §4.4 / INV-1) gate sabotage — proposal provenance
+# stops being token-only: `Samen.AI.Agent.WriteProposal`'s `proposal_reason/1` writes the
+# tool kind and the VALIDATED ARG VALUES into the approval row's `reason` column. That is
+# raw action input persisted in a governed row, in plaintext, OUTSIDE the DEK envelope —
+# exactly what the engine's no-persisted-inputs rule exists to prevent, and the shape that
+# would put a tenant identifier (or anything a permissive host tool accepts as an arg) into
+# a row the vault's crypto-shred never reaches. The named token-only-provenance red (the
+# approval row carries NO arg values) must flip, together with its physical-row twin,
+# proving the property is asserted at both the Ash and the raw-column layer.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: the approval row carries NO arg values
+# MUST_FAIL: the PHYSICAL approval row holds no arg value either
+diff --git a/samen_core/lib/samen/ai/agent/write_proposal.ex b/samen_core/lib/samen/ai/agent/write_proposal.ex
+--- a/samen_core/lib/samen/ai/agent/write_proposal.ex
++++ b/samen_core/lib/samen/ai/agent/write_proposal.ex
+@@ -162,7 +162,12 @@
+   # a gate is not a licence — a `reason` carrying arg values would be raw proposal input
+   # persisted in a governed row, in plaintext, outside the DEK envelope. Sabotage 253 puts
+   # them there and the named token-only-provenance test flips.
+-  defp proposal_reason(_proposal), do: nil
++  # SABOTAGE (A4, ADR-040 §4.4 / INV-1): the proposal's raw inputs are persisted on the
++  # approval row's freeform `reason` column — outside the DEK envelope, unreachable by the
++  # run's crypto-shred, and visible to every approver surface.
++  defp proposal_reason(proposal) do
++    "#{Map.get(proposal, :tool_kind)} #{Jason.encode!(Map.get(proposal, :args, %{}))}"
++  end
+ 
+   @doc """
+   The bounded, TOKEN-ONLY provenance of a proposal, re-derived from governed domain state

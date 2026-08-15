@@ -28,6 +28,31 @@ defmodule Samen.AI.Agent.ToolResult do
   Mask-by-omission composes on top: `fetch_record` projects to condition-eligible
   fields only, so a plaintext-PII freeform column is not even present to render —
   and the vault-routed fields that ARE present render masked.
+
+  ## Sentinel-bearing scalars: replaced per value, NOT escalated to a run failure (A4)
+
+  A3 shipped this renderer NOT scanning for the `vt_` sentinel, leaning entirely on the
+  chokepoint's `safe_segment?/1` last line. The A3 verifier confirmed the seam is real
+  and named the consequence: a tenant who can get a `vt_`-looking string into an
+  eligible column HARD-FAILS every agent run that touches that record
+  (`:pii_egress_refused`), because the offending line kills the whole payload. That is a
+  tenant-controlled denial-of-service on the agent plane — attacker-controlled DATA
+  choosing the outcome of a governed run.
+
+  The ADR settles the posture and it is not the fail-closed one. §4.3 step 2 makes
+  `[unrenderable:<field>]` the renderer's general answer to "a value I cannot safely
+  emit"; §4.3 step 3 asserts as a PROPERTY that "the transcript at rest contains no
+  vault plaintext and **no `vt_*` token**"; and §4.3#6 says the echo "is rendered to a
+  single **`vt_`-free binary** by the same renderer". A renderer that emits a `vt_`
+  scalar violates all three. So a sentinel-bearing scalar (or map key) renders as the
+  bounded `[unrenderable:<key>]` marker — the SAME marker every other unrenderable value
+  gets — and the run proceeds honestly with that one value elided.
+
+  This does not weaken the last line: `safe_segment?/1` still refuses any `vt_`-bearing
+  binary the renderer might ever emit, and the belt-and-braces §4.3#5 property (a
+  renderer regression that emits raw shapes REFUSES fail-closed) is untouched — sabotage
+  247 still proves it. What changed is only that the normal path stopped routing
+  tenant data through the emergency exit. Sabotage 255 keeps the replacement refutable.
   """
 
   alias Samen.Api.PiiResolution
@@ -35,6 +60,10 @@ defmodule Samen.AI.Agent.ToolResult do
   @mask Samen.Masked.mask()
   @max_scalar_bytes 500
   @max_lines 60
+
+  # The vault FK-token sentinel (ADR-043 §3.1 INV-7). See `render_scalar/2` and the
+  # "sentinel-bearing scalars" section of the moduledoc.
+  @vt_sentinel "vt_"
 
   @doc """
   Render the model's own tool call (kind + validated args) to a single bounded
@@ -45,7 +74,7 @@ defmodule Samen.AI.Agent.ToolResult do
     rendered_args =
       args
       |> Enum.sort_by(fn {k, _v} -> to_string(k) end)
-      |> Enum.map_join(" ", fn {k, v} -> "#{k}=#{render_scalar(v, to_string(k))}" end)
+      |> Enum.map_join(" ", fn {k, v} -> "#{render_key(k)}=#{render_scalar(v, to_string(k))}" end)
 
     String.trim("tool_call: #{kind} #{rendered_args}")
   end
@@ -85,7 +114,7 @@ defmodule Samen.AI.Agent.ToolResult do
     scalar_lines =
       meta
       |> Enum.sort_by(fn {k, _v} -> to_string(k) end)
-      |> Enum.map(fn {k, v} -> "#{k}: #{render_scalar(v, to_string(k))}" end)
+      |> Enum.map(fn {k, v} -> "#{render_key(k)}: #{render_scalar(v, to_string(k))}" end)
 
     scalar_lines ++
       render_hits(hits) ++
@@ -111,7 +140,7 @@ defmodule Samen.AI.Agent.ToolResult do
         rendered =
           hit
           |> Enum.sort_by(fn {k, _v} -> to_string(k) end)
-          |> Enum.map_join(" ", fn {k, v} -> "#{k}=#{render_hit_value(v, to_string(k))}" end)
+          |> Enum.map_join(" ", fn {k, v} -> "#{render_key(k)}=#{render_hit_value(v, to_string(k))}" end)
 
         "hit: " <> rendered
 
@@ -126,7 +155,7 @@ defmodule Samen.AI.Agent.ToolResult do
   defp render_hit_value(v, _key) when is_map(v) and not is_struct(v) do
     v
     |> Enum.sort_by(fn {k, _} -> to_string(k) end)
-    |> Enum.map_join(",", fn {k, val} -> "#{k}:#{render_scalar(val, to_string(k))}" end)
+    |> Enum.map_join(",", fn {k, val} -> "#{render_key(k)}:#{render_scalar(val, to_string(k))}" end)
   end
 
   defp render_hit_value(v, key), do: render_scalar(v, key)
@@ -156,12 +185,12 @@ defmodule Samen.AI.Agent.ToolResult do
 
       value_lines =
         Enum.map(eligible, fn field ->
-          "#{field}: #{render_field(Map.get(record, field), to_string(field))}"
+          "#{render_key(field)}: #{render_field(Map.get(record, field), to_string(field))}"
         end)
 
       pii_lines =
         Enum.map(pii_fields, fn field ->
-          "#{field}: #{render_field(Map.get(record, field), to_string(field))}"
+          "#{render_key(field)}: #{render_field(Map.get(record, field), to_string(field))}"
         end)
 
       [header | value_lines ++ pii_lines]
@@ -185,20 +214,58 @@ defmodule Samen.AI.Agent.ToolResult do
   # Bounded scalar rendering: binaries (truncated), numbers, booleans, atoms, and
   # date/times render; EVERYTHING else — a struct, a nested rich term, a pid — is
   # dropped with the bounded marker, never inspect-ed.
-  defp render_scalar(v, _key) when is_binary(v), do: truncate(v)
+  #
+  # A4 (fold (c)): a scalar CARRYING the `vt_` vault-token sentinel is one more value
+  # this renderer cannot safely emit, so it takes the same `[unrenderable:<key>]` exit
+  # as any other. Per-VALUE, deliberately: escalating it to the chokepoint's whole-payload
+  # refusal would let attacker-controlled data hard-fail a governed run (see moduledoc).
+  # Truncation runs AFTER the scan, so a sentinel past the 500-byte boundary cannot be
+  # "sanitised" by luck.
+  defp render_scalar(v, key) when is_binary(v) do
+    if sentinel?(v), do: unrenderable(key), else: truncate(v)
+  end
+
   defp render_scalar(v, _key) when is_number(v), do: to_string(v)
   defp render_scalar(v, _key) when is_boolean(v), do: to_string(v)
-  defp render_scalar(v, _key) when is_atom(v) and not is_nil(v), do: Atom.to_string(v)
+
+  defp render_scalar(v, key) when is_atom(v) and not is_nil(v) do
+    rendered = Atom.to_string(v)
+    if sentinel?(rendered), do: unrenderable(key), else: rendered
+  end
+
   defp render_scalar(%DateTime{} = v, _key), do: DateTime.to_iso8601(v)
   defp render_scalar(%NaiveDateTime{} = v, _key), do: NaiveDateTime.to_iso8601(v)
   defp render_scalar(%Date{} = v, _key), do: Date.to_iso8601(v)
-  defp render_scalar(_v, key), do: "[unrenderable:#{key}]"
+  defp render_scalar(_v, key), do: unrenderable(key)
+
+  # The bounded marker. The KEY is authored/catalog-derived (a field or arg name), never
+  # tenant free text — but it is scanned anyway, so no path can smuggle a sentinel out
+  # through the marker itself.
+  defp unrenderable(key) do
+    key = to_string(key)
+    if sentinel?(key), do: "[unrenderable]", else: "[unrenderable:#{key}]"
+  end
+
+  defp sentinel?(value) when is_binary(value), do: String.contains?(value, @vt_sentinel)
+  defp sentinel?(_value), do: false
+
+  # Every key this module interpolates into a line — a meta key, a record field name, a
+  # search-hit key, a model-emitted ARG name. Field names are catalog-derived and arg
+  # names are already `vt_`-gated upstream (`Samen.AI.Agent`'s `refuse_vt_args/1` scans
+  # keys AND values), but `render_call/2` and `render/2` are PUBLIC — so the key side is
+  # scanned here too rather than relying on every caller having done it.
+  defp render_key(key) do
+    rendered = to_string(key)
+    if sentinel?(rendered), do: "[key]", else: rendered
+  end
 
   defp truncate(v) when byte_size(v) <= @max_scalar_bytes, do: v
   defp truncate(v), do: String.slice(v, 0, @max_scalar_bytes)
 
-  defp bounded_kind(kind) when is_atom(kind) and not is_nil(kind),
-    do: kind |> Atom.to_string() |> truncate()
+  defp bounded_kind(kind) when is_atom(kind) and not is_nil(kind) do
+    rendered = Atom.to_string(kind)
+    if sentinel?(rendered), do: "tool_failed", else: truncate(rendered)
+  end
 
   defp bounded_kind(_kind), do: "tool_failed"
 

@@ -3,7 +3,8 @@ defmodule Samen.AI.Agent.Run do
   `Samen.AI.Agent.Run` — the durable agent-run cursor (ADR-047 §4.1, batches A1+A2).
 
   One row per agent run: the AshStateMachine lifecycle (`queued → running →
-  {succeeded, failed, cancelled, budget_exhausted}` — A4 adds `:awaiting_approval`), the
+  {succeeded, failed, cancelled, budget_exhausted}`, plus A4's propose-then-approve park
+  `running → awaiting_approval → {running, rejected}` — ADR-047 §5.3), the
   turn cursor (`current_turn`), the resolved fail-honest budgets and their consumption
   counters, and the durable cancel flag (`cancel_requested_at`) `Samen.AI.Agent.cancel/2`
   sets and the loop re-checks at EVERY turn boundary (RP-AG-8).
@@ -56,11 +57,22 @@ defmodule Samen.AI.Agent.Run do
     transitions do
       transition(:begin, from: :queued, to: :running)
       transition(:succeed, from: :running, to: :succeeded)
-      transition(:fail, from: [:queued, :running], to: :failed)
+      transition(:fail, from: [:queued, :running, :awaiting_approval], to: :failed)
       # Exhaustion is its OWN honest terminal state (never dressed as :succeeded — §6).
       transition(:exhaust, from: :running, to: :budget_exhausted)
-      # A cancel can land before the first turn ever runs (queued) or between turns.
-      transition(:cancel, from: [:queued, :running], to: :cancelled)
+      # A cancel can land before the first turn ever runs (queued), between turns, or
+      # while the run is PARKED on a human decision (A4 — `Samen.AI.Agent.cancel/2`
+      # withdraws the pending approval in the same breath).
+      transition(:cancel, from: [:queued, :running, :awaiting_approval], to: :cancelled)
+
+      # A4 (ADR-047 §5.3): the propose-then-approve park. A write tool NEVER executes in
+      # the turn — the turn opens an E3 approval and the run parks here, non-terminal
+      # (so `next_turn_at` stays non-nil — the MED-2 invariant), until a DISTINCT human
+      # decides. `:resume` is driven ONLY by the approval handler, inside the decision
+      # transaction; `:reject` is the honest terminal for a refused proposal.
+      transition(:park, from: :running, to: :awaiting_approval)
+      transition(:resume, from: :awaiting_approval, to: :running)
+      transition(:reject, from: :awaiting_approval, to: :rejected)
     end
   end
 
@@ -86,7 +98,24 @@ defmodule Samen.AI.Agent.Run do
       default: :queued,
       public?: true,
       writable?: false,
-      constraints: [one_of: [:queued, :running, :succeeded, :failed, :cancelled, :budget_exhausted]]
+      constraints: [
+        one_of: [
+          :queued,
+          :running,
+          # A4 (ADR-047 §5.3): parked on a human decision — NON-terminal, so the
+          # never-nil `next_turn_at` invariant still binds here.
+          :awaiting_approval,
+          :succeeded,
+          :failed,
+          :cancelled,
+          :budget_exhausted,
+          # A4: the proposal was refused by a distinct human. An honest terminal of its
+          # own — never dressed as :failed (which means the ENGINE failed) and never as
+          # :succeeded. The state column is plain text (`arn_state`, the `apv_state`
+          # precedent), so widening this enum needs no migration and no schema.dict change.
+          :rejected
+        ]
+      ]
     )
 
     # The turn cursor: how many turns have completed (the checkpoint A2's worker resumes at).
@@ -197,6 +226,46 @@ defmodule Samen.AI.Agent.Run do
       change(set_attribute(:cancel_requested_at, &DateTime.utc_now/0))
     end
 
+    # A4 (ADR-047 §5.3): PARK on a human decision. The cursor deliberately does NOT
+    # advance — the `{run_id, turn_index}` turn row stays `:proposed` and remains the
+    # idempotency key the approved execution finalizes, so a proposal can never be
+    # double-executed and a park can never be mistaken for a completed turn. Token
+    # counters DO advance (the provider turn genuinely happened and is billed);
+    # `tool_calls_used` does NOT (nothing executed — the A3 `executed?` rule, unchanged).
+    # `next_turn_at` is set to the approval DEADLINE: non-nil, because a parked run is
+    # non-terminal (the Sequences MED-2 invariant).
+    update :park do
+      accept([:next_turn_at, :transcript, :input_tokens_used, :output_tokens_used])
+      require_atomic?(false)
+      change(transition_state(:awaiting_approval))
+    end
+
+    # A4: resume a parked run after a DISTINCT human approved. Driven ONLY by
+    # `Samen.AI.Agent.execute_approved/3`, inside the E3 decision transaction, in the
+    # same breath as the turn-row finalize + cursor advance.
+    update :resume do
+      accept([
+        :current_turn,
+        :next_turn_at,
+        :transcript,
+        :tool_calls_used,
+        :input_tokens_used,
+        :output_tokens_used
+      ])
+
+      require_atomic?(false)
+      change(transition_state(:running))
+    end
+
+    # A4: the proposal was REFUSED by a distinct human — an honest terminal of its own.
+    update :reject do
+      accept([:transcript])
+      require_atomic?(false)
+      change(set_attribute(:next_turn_at, nil))
+      change(set_attribute(:error_kind, "rejected"))
+      change(transition_state(:rejected))
+    end
+
     update :succeed do
       accept([])
       require_atomic?(false)
@@ -294,9 +363,18 @@ defmodule Samen.AI.Agent.Run do
         actor_persister(:none)
         max_attempts(3)
 
-        # The never-nil invariant makes this selector complete: every non-terminal run
-        # HAS a next_turn_at, so a stalled run is always eventually due — there is no
-        # unselectable in-flight state (the Sequences MED-2 lesson, adopted verbatim).
+        # The never-nil invariant makes this selector complete FOR THE EXECUTING STATES:
+        # every `:queued`/`:running` run HAS a next_turn_at, so a stalled one is always
+        # eventually due (the Sequences MED-2 lesson, adopted verbatim).
+        #
+        # A4 narrows what that sentence may claim. `:awaiting_approval` is non-terminal and
+        # carries a non-nil `next_turn_at` (its approval DEADLINE), but it is deliberately
+        # NOT selected here: a parked run has no turn to execute, so re-arming it would
+        # enqueue a TurnWorker job that can only no-op. The honest consequence is that a
+        # parked run IS an unselectable in-flight state, and nothing in A4 expires a
+        # proposal whose deadline has passed — it waits for a human decision or a tenant
+        # `Samen.AI.Agent.cancel/2` (which withdraws the approval). Deadline expiry belongs
+        # with the approve/reject surface that renders it: carried as an **A5 residual**.
         where(
           expr(
             ^ref(:state) in [:queued, :running] and not is_nil(^ref(:next_turn_at)) and

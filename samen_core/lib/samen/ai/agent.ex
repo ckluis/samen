@@ -4,6 +4,34 @@ defmodule Samen.AI.Agent do
   (ADR-047 §3/§4/§6; batch A1: the loop core; batch A2: durability + erasure; batch A3:
   the read-tool surface + EG2 scrubbing).
 
+  ## What A4 adds — the WRITE surface, via approval only (ADR-047 §5.3)
+
+  ADR-043 §6.2 — *"AI writes do not exist … anything with side effects goes through the
+  E3 approvals engine"* — was ratified **unamended** for this loop (§9#1), and A4 is where
+  that stops being a promise. An `effect: :write` tool passes the same four-way
+  intersection a read tool passes, and that admission buys it a **proposal, not an
+  execution**: the turn stamps its decision (tool kind + arg key names + the sha256
+  args digest) on the still-`:proposed` `{run_id, turn_index}` row, opens an E3 approval
+  through `Samen.AI.Agent.WriteProposal` with the AI service principal as requester, and
+  the run **parks `:awaiting_approval`** — non-terminal, watchdog armed to the deadline,
+  cursor NOT advanced, `tool_calls_used` NOT billed. `entry.module.run/2` is never called
+  on that path.
+
+  A DISTINCT human's approve is the only thing that executes it, and `execute_approved/3`
+  runs the governed action **as the APPROVER** — never the agent, never the AI principal,
+  which holds no write authority anywhere (§10a row 7). Before it fires, `bind_proposal/3`
+  requires the proposal recovered from the run's DEK envelope to agree, field by field,
+  with the token-only stamp committed before the human ever saw it: **approving proposal X
+  executes exactly X**, and a mutated or substituted payload refuses `:proposal_mismatch`,
+  rolling the whole decision back. The four-way intersection, `validate/2` and the `vt_`
+  arg gate all re-run at execution — nothing is trusted from proposal time. A rejection
+  terminates the run `:rejected`, honestly, having executed nothing.
+
+  The §5.1 **recursion guard is live**: an AMBIENT provenance marker is published around
+  every tool execution (inline reads and approved writes alike), so an action that starts
+  an agent run is refused `:depth_exceeded` whether or not it passes a `:depth` argument.
+  v1 admits no nesting (`max_agent_depth/0 == 0`).
+
   ## What A3 adds — governed tools (ADR-047 §4.2/§4.3/§5.1)
 
   A definition's `tools:` list now RESOLVES through the four-way narrowing intersection
@@ -22,8 +50,9 @@ defmodule Samen.AI.Agent do
   fail-closed last line; vault-routed result fields render `••••` always — §9#2). The
   `{run_id, turn_index}` turn row gains the tool DECISION stamp (kind + arg key names +
   validated-args digest) committed before the tool fires; `tool_calls_used` now counts
-  for real and `max_tool_calls` exhaustion is live. `effect: :write` tools refuse
-  `:tools_not_supported` until A4 ships propose-then-approve.
+  for real and `max_tool_calls` exhaustion is live. `effect: :write` tools PROPOSE
+  instead of executing (A4, above) — A3's interim `:tools_not_supported` refusal is gone,
+  replaced by a real door rather than a wider one.
 
   ## What A2 adds to the A1 loop
 
@@ -121,6 +150,7 @@ defmodule Samen.AI.Agent do
   alias Samen.AI.Agent.ToolResult
   alias Samen.AI.Agent.Tools
   alias Samen.AI.Agent.Turn
+  alias Samen.AI.Agent.WriteProposal
   alias Samen.AI.Completion
 
   @doc "The compile-time-validated agent definition (defined by `use Samen.AI.Agent`)."
@@ -177,6 +207,23 @@ defmodule Samen.AI.Agent do
     :unknown_resource,
     :not_authorized,
     :no_org,
+    # A4 (ADR-047 §5.3/§5.1) — the write-via-approval kinds. `:awaiting_approval` is a
+    # PARK, not a failure; `:approval_unavailable` is the fail-honest kind for an unwired
+    # / refusing approvals engine (the write is NOT executed); `:proposal_mismatch` is the
+    # args-digest binding refusing to execute something other than exactly what was
+    # approved; `:rejected` is a distinct human's refusal; `:depth_exceeded` is the live
+    # recursion guard; the last three are the write action's own governed outcomes.
+    :awaiting_approval,
+    :approval_unavailable,
+    :approval_not_found,
+    :approval_not_approved,
+    :approval_org_mismatch,
+    :proposal_mismatch,
+    :rejected,
+    :depth_exceeded,
+    :no_owner_attribute,
+    :unauthorized,
+    :write_failed,
     :unknown
   ]
 
@@ -197,6 +244,16 @@ defmodule Samen.AI.Agent do
   # any execution (ADR-047 §4.3 — vault fields are structurally excluded from arg space;
   # the shipped sabotage-45 tuple hole, re-proven on the agent path at A3).
   @vt_sentinel "vt_"
+
+  # ADR-047 §5.1 recursion guard, LIVE (A4). "An agent tool may not start another agent
+  # run at `depth > 0` in v1" — read literally and conservatively: an agent run at depth
+  # > 0 may not be started AT ALL, so v1 admits no nesting. The guard is AMBIENT (a
+  # process-scoped provenance marker set around every tool execution, including the
+  # APPROVED write execution) rather than a `:depth` argument, precisely so an action
+  # cannot route around it by calling `run/4`/`start/4` without one. An explicit
+  # `:depth`/`:chain` opt is checked too; the ambient marker wins.
+  @max_agent_depth 0
+  @provenance_key {__MODULE__, :tool_provenance}
 
   defmacro __using__(opts) do
     definition = validate_definition!(opts, __CALLER__)
@@ -262,6 +319,10 @@ defmodule Samen.AI.Agent do
          # REFUSED before anything persists (never silently run with fewer tools than
          # declared, never a tool the registry+opt-in did not admit).
          {:ok, tools} <- Tools.resolve_definition(definition),
+         # A4 (§5.1): the LIVE recursion guard. A run started from inside a tool
+         # execution — including an APPROVED write's execution — is refused
+         # `:depth_exceeded` before anything persists.
+         {:ok, opts} <- resolve_provenance(opts),
          :ok <- Breaker.check_start(org_id, definition.name) do
       run = create_run!(agent_mod, definition, org_id, scope, goal, budgets, opts)
       run = begin!(run)
@@ -291,6 +352,7 @@ defmodule Samen.AI.Agent do
     with {:ok, org_id} <- scope_org(scope),
          :ok <- validate_goal(goal),
          {:ok, budgets} <- resolve_budgets(definition, opts),
+         {:ok, opts} <- resolve_provenance(opts),
          :ok <- Breaker.check_start(org_id, definition.name),
          # A3: same start-time intersection resolution as run/4 (the worker re-resolves
          # from the row at execution time — a definition drift lands fail-honest there).
@@ -312,6 +374,15 @@ defmodule Samen.AI.Agent do
           {:ok, Ash.Resource.record()} | {:error, :not_found | :already_terminal | term()}
   def cancel(%Samen.Scope{} = scope, run_id) do
     case Ash.get(Run, run_id, scope: scope) do
+      # A4: a PARKED run has no loop to honour the durable flag at a turn boundary, and
+      # its pending approval is a standing invitation for a human to execute a write the
+      # tenant just withdrew. So cancelling a parked run WITHDRAWS the approval
+      # (`Samen.Approvals.cancel/3` — the requester's own withdrawal path, which never
+      # sets `decided_by`, so the distinct-party CHECK stays satisfied) and terminates
+      # the run in the same call. Nothing was ever executed.
+      {:ok, %Run{state: :awaiting_approval} = run} ->
+        cancel_parked(run)
+
       {:ok, %Run{state: state}} when state not in [:queued, :running] ->
         {:error, :already_terminal}
 
@@ -413,6 +484,7 @@ defmodule Samen.AI.Agent do
     do: {:tool, kind, args}
 
   defp parse_native_call(%{"name" => kind}) when is_binary(kind), do: {:tool, kind, %{}}
+
   defp parse_native_call(%{name: kind, args: args}) when is_binary(kind) and is_map(args),
     do: {:tool, kind, args}
 
@@ -469,7 +541,10 @@ defmodule Samen.AI.Agent do
 
   defp bounded_meta_key?(k), do: is_binary(k) or is_atom(k)
   defp bounded_meta_value?(v), do: is_binary(v) or is_atom(v) or is_number(v) or is_boolean(v)
-  defp bounded_meta_value(v) when is_atom(v) and not is_boolean(v) and not is_nil(v), do: Atom.to_string(v)
+
+  defp bounded_meta_value(v) when is_atom(v) and not is_boolean(v) and not is_nil(v),
+    do: Atom.to_string(v)
+
   defp bounded_meta_value(v), do: v
 
   @doc "The five resolved default budgets (§9#3 TAKEN). The honesty floor is not in here."
@@ -713,7 +788,15 @@ defmodule Samen.AI.Agent do
 
             next ->
               run =
-                commit_turn!(run, turn_row, completion, next, duration_ms, {goal, lines}, replayed?)
+                commit_turn!(
+                  run,
+                  turn_row,
+                  completion,
+                  next,
+                  duration_ms,
+                  {goal, lines},
+                  replayed?
+                )
 
               case next do
                 {:final, answer} ->
@@ -729,7 +812,9 @@ defmodule Samen.AI.Agent do
           # Fail-honest error terminal (EG6): the bounded kind goes to the row; the
           # normalized reason (already content-free by the chokepoint) to the caller.
           kind = safe_error_kind(reason)
-          if kind in [:provider_error, :not_configured], do: Breaker.note_provider_error(run.agent)
+
+          if kind in [:provider_error, :not_configured],
+            do: Breaker.note_provider_error(run.agent)
 
           finalize_turn!(turn_row, %{
             status: :failed,
@@ -752,7 +837,15 @@ defmodule Samen.AI.Agent do
   # cursor (+ the vault-routed transcript, + counters, + the re-armed watchdog), and —
   # for a FINAL turn — the terminal transition, all in ONE DB transaction, so a :done
   # turn row and the cursor can never disagree (the replay-idempotency load-bearer).
-  defp commit_turn!(%Run{} = run, turn_row, %Completion{} = completion, next, duration_ms, {goal, lines}, replayed?) do
+  defp commit_turn!(
+         %Run{} = run,
+         turn_row,
+         %Completion{} = completion,
+         next,
+         duration_ms,
+         {goal, lines},
+         replayed?
+       ) do
     turn_index = run.current_turn + 1
     in_tokens = usage_int(completion.usage, :input_tokens)
     out_tokens = usage_int(completion.usage, :output_tokens)
@@ -813,8 +906,40 @@ defmodule Samen.AI.Agent do
   #      PiiResolution-egress-resolved binaries appended to the vault-routed transcript
   #      (they re-enter as :history next turn — §3.2a re-scrub + safe_segment?/1 last
   #      line), finalized atomically with the cursor advance + tool_calls_used counter.
-  defp tool_turn(run, scope, tools, turn_row, completion, kind, args, duration_ms, {goal, lines}, replayed?) do
+  defp tool_turn(
+         run,
+         scope,
+         tools,
+         turn_row,
+         completion,
+         kind,
+         args,
+         duration_ms,
+         {goal, lines},
+         replayed?
+       ) do
     case authorize_tool(tools, kind, args) do
+      # A4 (ADR-047 §5.3; ADR-043 §6.2 unamended): a MUTATING tool never executes here.
+      # It passed the same four-way intersection a read tool passes — and that admission
+      # buys it a PROPOSAL, not an execution. The decision stamp lands first (so the
+      # args digest that BINDS the proposal is committed before anything else), then the
+      # E3 approval opens and the run parks. `entry.module.run/2` is not called on this
+      # path at all; the ONLY caller of it for a write is `execute_approved/3`, after a
+      # distinct human approved, with the APPROVER's actor.
+      {:ok, %{effect: :write} = entry, normalized} ->
+        turn_row = decide_tool!(turn_row, entry.kind, normalized)
+
+        propose_turn(
+          run,
+          turn_row,
+          completion,
+          entry,
+          normalized,
+          duration_ms,
+          {goal, lines},
+          replayed?
+        )
+
       {:ok, entry, normalized} ->
         turn_row = decide_tool!(turn_row, entry.kind, normalized)
         outcome = run_tool(entry, normalized, run, scope)
@@ -859,7 +984,16 @@ defmodule Samen.AI.Agent do
   # arbitrary model string never lands in a persisted column) and fed back to the model
   # as one bounded fixed line, so the run continues under its budgets. Never a silent
   # skip, never an execution.
-  defp feedback_turn(run, turn_row, completion, refusal_kind, known_kind, duration_ms, {goal, lines}, replayed?) do
+  defp feedback_turn(
+         run,
+         turn_row,
+         completion,
+         refusal_kind,
+         known_kind,
+         duration_ms,
+         {goal, lines},
+         replayed?
+       ) do
     feedback = "tool_error: " <> to_string(safe_error_kind(refusal_kind))
 
     run =
@@ -876,6 +1010,496 @@ defmodule Samen.AI.Agent do
       })
 
     {:continue, run}
+  end
+
+  # ------------------------------------------------------------------------------------
+  # A4 — write via approval (ADR-047 §5.3; ADR-043 §6.2 unamended)
+
+  # PROPOSE + PARK. Nothing is mutated: the E3 approval is opened against the still-
+  # `:proposed` `{run_id, turn_index}` turn row (so a replay proposes ONCE — the engine's
+  # own `{org_id, kind, subject_ref}` pending-idempotency), the model's call ECHO plus a
+  # bounded "proposed" line join the vault-routed transcript, and the run parks
+  # `:awaiting_approval` with `next_turn_at` armed to the approval deadline (non-nil —
+  # the run is NOT terminal). The proposed ARGS ride the transcript, i.e. inside the DEK
+  # envelope; the approval row and the turn row hold only tokens.
+  #
+  # An approvals engine that cannot open the approval (unwired host, unregistered kind,
+  # write failure) is a fail-honest `:approval_unavailable` feedback turn — the run keeps
+  # going under its budgets and NOTHING is executed. The failure mode of a broken
+  # approvals seam is "the agent cannot propose", never "the agent just did it".
+  defp propose_turn(
+         run,
+         turn_row,
+         completion,
+         entry,
+         normalized,
+         duration_ms,
+         {goal, lines},
+         replayed?
+       ) do
+    case WriteProposal.open(%{
+           org_id: run.org_id,
+           turn_id: turn_row.id,
+           tool_kind: entry.kind,
+           args: normalized
+         }) do
+      {:ok, approval} ->
+        approval_id = to_string(approval.id)
+
+        new_lines = [
+          ToolResult.render_call(entry.kind, normalized),
+          "tool_proposed: #{entry.kind} status=awaiting_human_approval"
+        ]
+
+        pending = %{
+          "approval_id" => approval_id,
+          "kind" => entry.kind,
+          "turn_index" => turn_row.turn_index,
+          "digest" => args_digest(normalized),
+          "args" => normalized
+        }
+
+        _ = stamp_proposal!(turn_row, approval_id, replayed?)
+        run = park_run!(run, completion, {goal, lines ++ new_lines}, pending, approval)
+        log_terminal(run)
+        {:awaiting_approval, run}
+
+      {:error, reason} ->
+        require Logger
+
+        Logger.warning(
+          "[Samen.AI.Agent] write proposal NOT opened run=#{run.id} " <>
+            "tool=#{entry.kind} reason=#{inspect(reason)} — nothing was executed"
+        )
+
+        feedback_turn(
+          run,
+          turn_row,
+          completion,
+          :approval_unavailable,
+          entry.kind,
+          duration_ms,
+          {goal, lines},
+          replayed?
+        )
+    end
+  end
+
+  # The proposal stamp: the approval id joins the turn row's bounded meta alongside the
+  # args digest `decide_tool!/3` already committed. The row stays `:proposed` — it is the
+  # idempotency key the approved execution finalizes, so a proposal can never be
+  # double-executed and a park can never be mistaken for a completed turn.
+  defp stamp_proposal!(turn_row, approval_id, replayed?) do
+    meta =
+      (turn_row.meta || %{})
+      |> Map.put("approval_id", approval_id)
+      |> Map.put("awaiting_approval", true)
+      |> Map.put("replayed", replayed?)
+
+    turn_row
+    |> Ash.Changeset.for_update(:decide, %{meta: bounded_meta(meta)})
+    |> Ash.update!(authorize?: false)
+  end
+
+  defp park_run!(%Run{} = run, %Completion{} = completion, {goal, lines}, pending, approval) do
+    run
+    |> Ash.Changeset.for_update(:park, %{
+      next_turn_at: park_deadline(approval),
+      transcript: encode_transcript(goal, lines, pending),
+      # The provider turn genuinely happened, so its tokens are billed. `tool_calls_used`
+      # is NOT touched: nothing executed (A3's `executed?` rule, unchanged) — the
+      # approved execution bills the one tool call it actually performs.
+      input_tokens_used: run.input_tokens_used + usage_int(completion.usage, :input_tokens),
+      output_tokens_used: run.output_tokens_used + usage_int(completion.usage, :output_tokens)
+    })
+    |> Ash.update!(authorize?: false)
+  end
+
+  defp park_deadline(%{deadline_at: %DateTime{} = at}), do: at
+  defp park_deadline(_approval), do: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds)
+
+  @doc """
+  Execute an APPROVED write proposal — called ONLY by `Samen.AI.Agent.WriteProposal`'s
+  `on_approve/2`, INSIDE the E3 decision transaction, after the engine has already
+  refused `decided_by == requested_by` at both the policy and DB-CHECK layers.
+
+  **The approval itself is verified from the DATABASE, not from the argument.** The struct
+  handed in is caller-supplied — this function is public because the E3 handler lives in
+  its own module — and its `id` is the only field an attacker needs, which is exactly the
+  field that sits in the PLAIN `atn_meta.approval_id` column next to the proposal. So
+  `verify_approval/4` re-loads the row through the engine and requires it to be a real,
+  `:approved`-state approval, in the RUN's org, of this module's kind, hanging on THIS
+  turn's `subject_ref`, decided by a distinct party who is the actor now executing. A
+  forged map, a still-`pending` row, a rejected/cancelled row, or another org's approval
+  all refuse fail-closed — so the execution can never outrun the state transition that
+  makes the decision real and writes its audit event.
+
+  Three properties are load-bearing here, and each has its own sabotage:
+
+    * **the approval of proposal X executes exactly X** — `bind_proposal/3` re-derives the
+      proposal from the vault-routed transcript and requires it to agree, field by field,
+      with the token-only stamp committed on the turn row BEFORE the approval was opened:
+      the sha256 args digest recomputed over the stored args, the digest recorded in the
+      proposal, the tool kind, the arg key names, the turn index, and the approval id. A
+      payload mutated or substituted between proposal and approval — in either store —
+      refuses `:proposal_mismatch`, which rolls the whole decision back;
+    * **only an APPROVED approval executes** — `verify_approval/4` (above); sabotage 256
+      drops the state guard and a still-`pending` approval executes the parked write with
+      no decision transition and no `approval_approved` audit event;
+    * **execution carries the APPROVER's authority, never the agent's** — the governed
+      action runs as a principal built from the DECIDING actor. The AI service principal
+      that requested it holds no write authority on this path (or any other), which is
+      what makes ADR-043 §6.2 ("AI writes do not exist") structurally true rather than
+      procedurally hoped-for.
+
+  The full four-way intersection is re-resolved here, not trusted from proposal time: a
+  tool de-registered, de-opted-in, or de-declared while the approval sat pending refuses
+  `:tool_refused`. `validate/2` and the `vt_` arg gate run again too.
+
+  Any `{:error, _}` rolls the decision back: the approval stays `pending`, the run stays
+  parked, nothing executed, no audit lands.
+  """
+  @spec execute_approved(String.t(), struct(), map()) :: {:ok, map()} | {:error, term()}
+  def execute_approved(turn_id, approval, ctx) do
+    approver_id = deciding_actor_id(ctx)
+
+    with {:ok, turn_row} <- fetch_turn(turn_id),
+         :ok <- turn_proposed?(turn_row),
+         {:ok, run} <- fetch_run(turn_row.run_id),
+         :ok <- run_parked?(run),
+         :ok <- refuse_principal_execution(approver_id),
+         {:ok, approval} <- verify_approval(approval, run, turn_row, approver_id),
+         {:ok, approver_scope} <- approver_scope(approver_id, run),
+         {:ok, {goal, lines, pending}} <- transcript_state(run),
+         {:ok, proposal} <- bind_proposal(pending, turn_row, approval),
+         {:ok, agent_mod} <- resolve_agent(run),
+         {:ok, entry} <- resolve_write_tool(agent_mod, proposal.kind),
+         {:ok, normalized} <- revalidate_proposal_args(entry, proposal) do
+      case run_tool(entry, normalized, run, approver_scope) do
+        {:ok, meta} ->
+          new_lines =
+            ["tool_approved: #{entry.kind} executed_by=approver"] ++
+              ToolResult.render({:ok, meta}, actor: scope_actor(approver_scope))
+
+          run =
+            commit_approved!(run, turn_row, {goal, lines}, new_lines, %{
+              kind: entry.kind,
+              normalized: normalized,
+              approval_id: to_string(approval.id),
+              approver_id: approver_id
+            })
+
+          # Same-transaction resume enqueue (the EventCapture idiom): the continuation
+          # job exists iff the decision committed. A lost enqueue is recovered by the
+          # `:agent_turn_due` watchdog, which can now see the run again (it is :running).
+          _ = Samen.AI.Agent.TurnWorker.enqueue(run.id)
+
+          {:ok,
+           %{
+             executed: entry.kind,
+             run_id: to_string(run.id),
+             turn_index: turn_row.turn_index,
+             executed_by: "approver"
+           }}
+
+        {:error, kind} ->
+          # A genuine tool failure is NOT swallowed into an :ok and does NOT consume the
+          # approval: the whole decision rolls back, so an approver who approved X and
+          # got nothing still holds a pending approval to retry or reject (the
+          # ReplyHandler fail-honest posture).
+          {:error, {:tool_failed, safe_error_kind(kind)}}
+      end
+    end
+  end
+
+  @doc """
+  Handle a REJECTED write proposal (the `on_reject/2` face) — inside the reject
+  transaction. The governed action is never invoked. The run terminates `:rejected`, an
+  honest terminal of its own, with a bounded line appended to the transcript so a later
+  reader sees WHY the run stopped. A missing/garbled turn or an already-decided run never
+  blocks the rejection (the `ReplyHandler` precedent).
+  """
+  @spec reject_proposal(String.t(), struct(), map()) :: :ok | {:error, term()}
+  def reject_proposal(turn_id, _approval, _ctx) do
+    with {:ok, turn_row} <- fetch_turn(turn_id),
+         {:ok, %Run{state: :awaiting_approval} = run} <- fetch_run(turn_row.run_id) do
+      finalize_turn!(turn_row, %{
+        status: :failed,
+        error_kind: "rejected",
+        meta: bounded_meta(Map.put(turn_row.meta || %{}, "rejected", true))
+      })
+
+      attrs =
+        case transcript_state(run) do
+          {:ok, {goal, lines, _pending}} ->
+            kind = turn_row.tool_kind || "write"
+            %{transcript: encode_transcript(goal, lines ++ ["tool_rejected: #{kind}"])}
+
+          _ ->
+            %{}
+        end
+
+      run =
+        run
+        |> Ash.Changeset.for_update(:reject, attrs)
+        |> Ash.update!(authorize?: false)
+
+      log_terminal(run)
+      :ok
+    else
+      _ -> :ok
+    end
+  end
+
+  # THE STATE + IDENTITY GUARD on the approval itself (see the `execute_approved/3` doc).
+  # Everything here is read from the PERSISTED row: the argument is only ever used for its
+  # id. Inside the E3 decision transaction the `pending -> approved` transition has already
+  # been applied, so a genuine decision sees `:approved` on this same connection — while a
+  # caller who reached this seam directly, holding nothing but the id, sees `:pending` and
+  # is refused.
+  defp verify_approval(approval, %Run{} = run, turn_row, approver_id) do
+    case load_approval(approval_id_of(approval)) do
+      {:ok, loaded} ->
+        cond do
+          loaded.state != :approved -> {:error, :approval_not_approved}
+          loaded.org_id != run.org_id -> {:error, :approval_org_mismatch}
+          loaded.kind != WriteProposal.kind() -> {:error, :proposal_mismatch}
+          loaded.subject_ref != WriteProposal.subject_ref(turn_row.id) -> {:error, :proposal_mismatch}
+          not is_binary(loaded.decided_by) or loaded.decided_by == "" -> {:error, :approval_not_approved}
+          # The persisted decision IS the authority: the actor executing must be the party
+          # the row records as having decided, and that party must be distinct from the
+          # requester (the engine's own rule, re-asserted from the row rather than trusted
+          # from the call).
+          loaded.decided_by == loaded.requested_by -> {:error, :not_authorized}
+          loaded.decided_by != approver_id -> {:error, :not_authorized}
+          true -> {:ok, loaded}
+        end
+
+      _ ->
+        {:error, :approval_not_found}
+    end
+  end
+
+  # Fail-closed on every edge: a nil/garbled/unknown id is `:approval_not_found`, never a
+  # raise escaping into the decision transaction.
+  defp load_approval(nil), do: {:error, :approval_not_found}
+
+  defp load_approval(id) do
+    Samen.Approvals.get(id)
+  rescue
+    _ -> {:error, :approval_not_found}
+  end
+
+  defp approval_id_of(%{id: id}) when is_binary(id), do: id
+  defp approval_id_of(%{id: id}) when not is_nil(id), do: to_string(id)
+  defp approval_id_of(_approval), do: nil
+
+  # THE BINDING (RP-AG-5's "exactly X" half). Two independent stores must agree: the
+  # token-only stamp on the turn row (a plain column, committed BEFORE the approval was
+  # opened) and the proposal inside the run's DEK envelope. Tampering with either one
+  # alone refuses; tampering with both requires the vault key AND the domain row.
+  defp bind_proposal(pending, turn_row, approval) when is_map(pending) do
+    stamped = Map.get(turn_row.meta || %{}, "args_digest")
+    kind = Map.get(pending, "kind")
+    args = Map.get(pending, "args")
+
+    cond do
+      not is_binary(stamped) -> {:error, :proposal_mismatch}
+      not is_binary(kind) -> {:error, :proposal_mismatch}
+      not (is_map(args) and not is_struct(args)) -> {:error, :proposal_mismatch}
+      Map.get(pending, "digest") != stamped -> {:error, :proposal_mismatch}
+      args_digest(args) != stamped -> {:error, :proposal_mismatch}
+      kind != turn_row.tool_kind -> {:error, :proposal_mismatch}
+      sorted_arg_keys(args) != turn_row.arg_keys -> {:error, :proposal_mismatch}
+      Map.get(pending, "turn_index") != turn_row.turn_index -> {:error, :proposal_mismatch}
+      Map.get(pending, "approval_id") != to_string(approval.id) -> {:error, :proposal_mismatch}
+      true -> {:ok, %{kind: kind, args: args}}
+    end
+  end
+
+  defp bind_proposal(_pending, _turn_row, _approval), do: {:error, :proposal_mismatch}
+
+  # The intersection, re-resolved at EXECUTION time (arms 1-3) — never trusted from
+  # proposal time. Arm 4 binds inside the action's own governed writes, as the approver.
+  defp resolve_write_tool(agent_mod, kind) do
+    with definition when is_map(definition) <- agent_mod.definition(),
+         {:ok, tools} <- Tools.resolve_definition(definition),
+         {:ok, %{effect: :write} = entry} <- Tools.resolve_call(tools, kind) do
+      {:ok, entry}
+    else
+      _ -> {:error, :tool_refused}
+    end
+  end
+
+  # The arg gates run AGAIN at execution, and the re-validation must be STABLE: a
+  # validator that normalizes to different bytes than the digest bound at decision time
+  # would execute something the approver never saw.
+  defp revalidate_proposal_args(entry, proposal) do
+    with :ok <- refuse_vt_args(proposal.args),
+         {:ok, normalized} <- validate_args(entry.module, proposal.args),
+         true <- args_digest(normalized) == args_digest(proposal.args) do
+      {:ok, normalized}
+    else
+      false -> {:error, :proposal_mismatch}
+      {:error, kind} -> {:error, kind}
+    end
+  end
+
+  defp commit_approved!(%Run{} = run, turn_row, {goal, lines}, new_lines, stamp) do
+    meta =
+      (turn_row.meta || %{})
+      |> Map.delete("awaiting_approval")
+      |> Map.put("approved", true)
+      |> Map.put("approval_id", stamp.approval_id)
+      |> Map.put("approver_id", stamp.approver_id)
+      |> Map.put("executed_by", "approver")
+
+    finalize_turn!(turn_row, %{
+      status: :done,
+      tool_kind: stamp.kind,
+      arg_keys: sorted_arg_keys(stamp.normalized),
+      meta: bounded_meta(meta)
+    })
+
+    run
+    |> Ash.Changeset.for_update(:resume, %{
+      current_turn: turn_row.turn_index,
+      next_turn_at: DateTime.utc_now(),
+      # The pending proposal is CLEARED (the 2-arity encoder): an executed proposal must
+      # never be re-bindable by a second decision.
+      transcript: encode_transcript(goal, lines ++ new_lines),
+      tool_calls_used: run.tool_calls_used + 1,
+      input_tokens_used: run.input_tokens_used,
+      output_tokens_used: run.output_tokens_used
+    })
+    |> Ash.update!(authorize?: false)
+  end
+
+  defp turn_proposed?(%{status: :proposed}), do: :ok
+  defp turn_proposed?(_turn_row), do: {:error, :not_pending}
+
+  defp run_parked?(%Run{state: :awaiting_approval}), do: :ok
+  defp run_parked?(_run), do: {:error, :run_not_parked}
+
+  # The DECIDING actor (`Samen.Approvals.Handler`'s ctx contract: `actor` is the approver,
+  # already normalized to a bounded id by the engine's `to_actor_id/1`).
+  defp deciding_actor_id(%{actor: actor}), do: bounded_actor_id(actor)
+  defp deciding_actor_id(_ctx), do: nil
+
+  defp bounded_actor_id(id) when is_binary(id), do: id
+  defp bounded_actor_id(%{id: id}) when is_binary(id), do: id
+  defp bounded_actor_id(_), do: nil
+
+  # Belt-and-braces third layer under the engine's policy refusal and the
+  # `<abbrev>_distinct_party` DB CHECK: the AI service principal can never be the actor a
+  # write executes as, even if some future caller reached this function directly.
+  defp refuse_principal_execution(actor_id) do
+    if is_binary(actor_id) and actor_id != WriteProposal.requester_principal_id(),
+      do: :ok,
+      else: {:error, :not_authorized}
+  end
+
+  defp approver_scope(approver_id, %Run{org_id: org_id})
+       when is_binary(approver_id) and is_binary(org_id) do
+    {:ok, Samen.Scope.new(%{id: approver_id, org_id: org_id, role: :member})}
+  end
+
+  defp approver_scope(_approver_id, _run), do: {:error, :not_authorized}
+
+  defp fetch_turn(turn_id) when is_binary(turn_id) do
+    require Ash.Query
+
+    Turn
+    |> Ash.Query.filter(id == ^turn_id)
+    |> Ash.Query.ensure_selected([:org_id])
+    |> Ash.Query.limit(1)
+    |> Ash.read(authorize?: false)
+    |> case do
+      {:ok, [turn]} -> {:ok, turn}
+      _ -> {:error, :turn_not_found}
+    end
+  rescue
+    _ -> {:error, :turn_not_found}
+  end
+
+  defp fetch_turn(_turn_id), do: {:error, :turn_not_found}
+
+  defp cancel_parked(%Run{} = run) do
+    run = reload!(run)
+    _ = withdraw_pending_approval(run)
+
+    run =
+      run
+      |> Ash.Changeset.for_update(:request_cancel, %{})
+      |> Ash.update!(authorize?: false)
+
+    run =
+      run
+      |> Ash.Changeset.for_update(:cancel, %{})
+      |> Ash.update!(authorize?: false)
+
+    log_terminal(run)
+    {:ok, run}
+  end
+
+  defp withdraw_pending_approval(%Run{} = run) do
+    with {:ok, {_goal, _lines, pending}} <- transcript_state(run),
+         true <- is_map(pending),
+         approval_id when is_binary(approval_id) <- Map.get(pending, "approval_id") do
+      Samen.Approvals.cancel(approval_id, WriteProposal.requester_principal_id())
+    else
+      _ -> :ok
+    end
+  end
+
+  # ------------------------------------------------------------------------------------
+  # The LIVE recursion guard (ADR-047 §5.1)
+
+  @doc """
+  The ambient agent provenance of the current process (`%{depth:, chain:}`), or `nil`
+  outside any tool execution. Set around EVERY tool execution — the inline read path and
+  the approved write path alike — so an action cannot start a nested agent run simply by
+  omitting a `:depth` argument. Public so the guard's liveness is directly assertable.
+  """
+  @spec current_provenance() :: %{depth: non_neg_integer(), chain: [String.t()]} | nil
+  def current_provenance, do: Process.get(@provenance_key)
+
+  @doc "The v1 nesting ceiling (ADR-047 §5.1): agent runs above this depth are refused."
+  @spec max_agent_depth() :: non_neg_integer()
+  def max_agent_depth, do: @max_agent_depth
+
+  defp with_tool_provenance(%Run{} = run, fun) do
+    prior = Process.get(@provenance_key)
+    Process.put(@provenance_key, %{depth: run.depth, chain: run.chain ++ [run.id]})
+
+    try do
+      fun.()
+    after
+      if is_nil(prior),
+        do: Process.delete(@provenance_key),
+        else: Process.put(@provenance_key, prior)
+    end
+  end
+
+  # Resolve this run's `{depth, chain}` and refuse anything past the v1 ceiling. The
+  # AMBIENT marker wins over caller opts: a tool that calls `run/4`/`start/4` with no
+  # depth argument at all is still bounded. A repeated run id in the chain (a cycle) is
+  # refused on its own, so the guard does not depend on depth accounting alone.
+  defp resolve_provenance(opts) do
+    {depth, chain} =
+      case current_provenance() do
+        %{depth: d, chain: c} when is_integer(d) and is_list(c) -> {d + 1, c}
+        _ -> {Keyword.get(opts, :depth, 0), Keyword.get(opts, :chain, [])}
+      end
+
+    cond do
+      not (is_integer(depth) and depth >= 0) -> {:error, :depth_exceeded}
+      not (is_list(chain) and Enum.all?(chain, &is_binary/1)) -> {:error, :depth_exceeded}
+      depth > @max_agent_depth -> {:error, :depth_exceeded}
+      length(chain) > @max_agent_depth -> {:error, :depth_exceeded}
+      length(Enum.uniq(chain)) != length(chain) -> {:error, :depth_exceeded}
+      true -> {:ok, opts |> Keyword.put(:depth, depth) |> Keyword.put(:chain, chain)}
+    end
   end
 
   # The four-way-intersection + arg gates for one call (order: membership → vt_ scan →
@@ -939,11 +1563,17 @@ defmodule Samen.AI.Agent do
   defp run_tool(entry, normalized, run, scope) do
     ctx = Samen.AI.Agent.Context.build(run, scope)
 
-    case entry.module.run(normalized, ctx) do
-      {:ok, meta} when is_map(meta) -> {:ok, meta}
-      {:error, kind} when is_atom(kind) and not is_nil(kind) -> {:error, kind}
-      _other -> {:error, :tool_failed}
-    end
+    # A4 (§5.1): the ambient recursion marker is set around EVERY governed tool
+    # execution — the inline read path and the approved write path alike — so an action
+    # that tries to start a nested agent run is refused `:depth_exceeded` whether or not
+    # it bothers to pass a `:depth` option.
+    with_tool_provenance(run, fn ->
+      case entry.module.run(normalized, ctx) do
+        {:ok, meta} when is_map(meta) -> {:ok, meta}
+        {:error, kind} when is_atom(kind) and not is_nil(kind) -> {:error, kind}
+        _other -> {:error, :tool_failed}
+      end
+    end)
   rescue
     _ -> {:error, :tool_failed}
   end
@@ -1094,6 +1724,18 @@ defmodule Samen.AI.Agent do
   # transcript is fail-honest :transcript_unavailable — an erased run never keeps
   # executing on cached text.
   defp transcript(%Run{} = run) do
+    case transcript_state(run) do
+      {:ok, {goal, lines, _pending}} -> {:ok, {goal, lines}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # A4: the same single reveal, returning the PENDING write proposal alongside the
+  # history. The proposal's ARGS are the one place a write's argument VALUES are ever
+  # persisted, and they live here — inside the DEK envelope, keyed on the run's own id,
+  # reached by the run's own 90-day `:shred` retention (§7.4). The approval row and the
+  # turn row stay token-only.
+  defp transcript_state(%Run{} = run) do
     case run.transcript do
       %Samen.Masked{} = masked ->
         case Samen.Vault.reveal(masked, repo!(), subject_id: run.id) do
@@ -1108,9 +1750,10 @@ defmodule Samen.AI.Agent do
 
   defp decode_transcript(json) do
     case Jason.decode(json) do
-      {:ok, %{"goal" => goal, "lines" => lines}} when is_binary(goal) and is_list(lines) ->
+      {:ok, %{"goal" => goal, "lines" => lines} = decoded}
+      when is_binary(goal) and is_list(lines) ->
         if Enum.all?(lines, &is_binary/1) do
-          {:ok, {goal, lines}}
+          {:ok, {goal, lines, Map.get(decoded, "pending")}}
         else
           {:error, :transcript_unavailable}
         end
@@ -1121,6 +1764,12 @@ defmodule Samen.AI.Agent do
   end
 
   defp encode_transcript(goal, lines), do: Jason.encode!(%{"goal" => goal, "lines" => lines})
+
+  # The 3-arity encoder is used ONLY by the park: it carries the pending proposal. Every
+  # other write uses the 2-arity form, which is exactly how an executed/rejected proposal
+  # gets CLEARED — a proposal can never be re-bindable after its decision.
+  defp encode_transcript(goal, lines, pending),
+    do: Jason.encode!(%{"goal" => goal, "lines" => lines, "pending" => pending})
 
   # ------------------------------------------------------------------------------------
   # Durable-cursor writes (kernel-only, the Approvals trusted-API precedent)
@@ -1137,8 +1786,10 @@ defmodule Samen.AI.Agent do
             agent_module: Atom.to_string(agent_mod),
             owner_id: actor_id(scope),
             origin: Keyword.get(opts, :origin, default_origin(scope)),
-            depth: 0,
-            chain: [],
+            # A4 (§5.1): the resolved loop provenance (`resolve_provenance/1` refused
+            # anything past the v1 ceiling before we got here), not a hardcoded 0/[].
+            depth: Keyword.get(opts, :depth, 0),
+            chain: Keyword.get(opts, :chain, []),
             transcript: encode_transcript(goal, []),
             next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds)
           },

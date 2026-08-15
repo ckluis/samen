@@ -1,0 +1,47 @@
+# SABOTAGE: A4 (ADR-047 §5.3 / RP-AG-5; ADR-043 §6.2) gate sabotage — THE crown-jewel
+# defeat: an `effect: :write` agent tool EXECUTES INLINE in the turn, with the agent's own
+# run authority, instead of opening an E3 approval and parking. No approve event, no
+# distinct human, no approver actor — exactly the "AI writes" ADR-043 §6.2 rules do not
+# exist. The write branch of tool_turn/10 is deleted so a write falls through to the READ
+# path and fires `entry.module.run/2` as the run's OWNER scope. The named RP-AG-5 red (the
+# record is UNCHANGED, the run PARKS, only an approval exists) must flip; the
+# approve-then-execute positive control flips with it (there is no approval left to
+# approve), proving the mechanism is gone rather than merely mis-ordered.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: a WRITE tool call does NOT execute
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -887,27 +887,10 @@
+          replayed?
+        ) do
+     case authorize_tool(tools, kind, args) do
+-      # A4 (ADR-047 §5.3; ADR-043 §6.2 unamended): a MUTATING tool never executes here.
+-      # It passed the same four-way intersection a read tool passes — and that admission
+-      # buys it a PROPOSAL, not an execution. The decision stamp lands first (so the
+-      # args digest that BINDS the proposal is committed before anything else), then the
+-      # E3 approval opens and the run parks. `entry.module.run/2` is not called on this
+-      # path at all; the ONLY caller of it for a write is `execute_approved/3`, after a
+-      # distinct human approved, with the APPROVER's actor.
+-      {:ok, %{effect: :write} = entry, normalized} ->
+-        turn_row = decide_tool!(turn_row, entry.kind, normalized)
+-
+-        propose_turn(
+-          run,
+-          turn_row,
+-          completion,
+-          entry,
+-          normalized,
+-          duration_ms,
+-          {goal, lines},
+-          replayed?
+-        )
+-
++      # SABOTAGE (A4, ADR-047 §5.3, RP-AG-5): the propose-then-approve branch is GONE. An
++      # `effect: :write` tool now falls through to the inline READ path and executes
++      # immediately, as the run's own owner actor — no approval opened, no human, no
++      # approver authority. This is the autonomous AI write ADR-043 §6.2 forbids.
+       {:ok, entry, normalized} ->
+         turn_row = decide_tool!(turn_row, entry.kind, normalized)
+         outcome = run_tool(entry, normalized, run, scope)

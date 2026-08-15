@@ -5,18 +5,22 @@
 # declared — the allowlist-escape the intersection prevents. The named arm-3 red (a tool outside
 # the declared list is refused, recorded, never executed) must flip; the positive control (a
 # declared tool still runs) stays green, proving the flip is the escape, not breakage.
+# (RE-ANCHORED at A4: resolve_call/2 now admits both effect classes, so the bypassed clause
+# reads `%{effect: effect} when effect in [:read, :write]`. The fabricated entry is stamped
+# `effect: :read` — which is exactly what makes the escaped tool EXECUTE. Same guarantee,
+# same MUST_FAIL, undiluted.)
 # APP: samen_core
 # TEST_FILES: test/ai/agent_tools_test.exs
 # MUST_FAIL: OUTSIDE the agent's declared list is refused
 diff --git a/samen_core/lib/samen/ai/agent/tools.ex b/samen_core/lib/samen/ai/agent/tools.ex
 --- a/samen_core/lib/samen/ai/agent/tools.ex
 +++ b/samen_core/lib/samen/ai/agent/tools.ex
-@@ -93,9 +93,17 @@
+@@ -109,9 +109,17 @@
    """
    @spec resolve_call([resolved()], term()) :: {:ok, resolved()} | {:error, :tool_refused}
    def resolve_call(resolved, kind) when is_list(resolved) and is_binary(kind) do
 -    case Enum.find(resolved, fn entry -> entry.kind == kind end) do
--      %{effect: :read} = entry -> {:ok, entry}
+-      %{effect: effect} = entry when effect in [:read, :write] -> {:ok, entry}
 -      _ -> {:error, :tool_refused}
 +    # SABOTAGE (A3, ADR-047 §5.1, RP-AG-4): the per-call intersection re-check is BYPASSED
 +    # — the resolver looks the kind up DIRECTLY in the registry (arm 1) instead of the run's

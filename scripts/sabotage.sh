@@ -35,10 +35,17 @@
 #   --touching <path>...    only patches whose touched-file set (the +++ b/…
 #   --touching-file <file>    paths) INTERSECTS the given repo-relative paths
 #                             (or the newline-separated paths in <file>).
-#   --changed [<ref>]       derive the touched set from `git diff --name-only
-#                             <ref>` (default: origin/main if it exists, else
-#                             HEAD~1) — "certify the sabotages relevant to my
-#                             diff". Selects patches touching any changed file.
+#   --changed [<ref>]       derive the touched set from the UNION of `git diff
+#                             --name-only <ref>` and `git ls-files --others
+#                             --exclude-standard` (default ref: origin/main if it
+#                             exists, else HEAD~1) — "certify the sabotages
+#                             relevant to my diff". Selects patches touching any
+#                             changed file. The untracked half is LOAD-BEARING:
+#                             `git diff` never lists new files, so without it a
+#                             batch that ADDS a module + its sabotages selects
+#                             NONE of them (the A3 247/248/249 miss). The banner
+#                             says `changed=<ref>+untracked` so the union is
+#                             visible in the run's own output.
 #   --list, --dry-run       print the SELECTED patch set (name + resolved APP,
 #                             and the count) and EXIT — no patch is applied and
 #                             no test runs. Fast proof of what a filter will run.
@@ -186,9 +193,18 @@ while [[ $# -gt 0 ]]; do
       fi
       git -C "$REPO_ROOT" rev-parse --verify -q "$changed_ref" >/dev/null \
         || arg_err "--changed: not a valid git ref: $changed_ref"
+      # The changed set is the UNION of tracked modifications AND untracked-but-not-
+      # ignored files. `git diff --name-only` lists ONLY tracked paths, so a batch that
+      # ADDS files (a new lib module + the sabotages that target it) silently
+      # under-selected: A3's own new patches 247/248/249 were missed by `--changed`
+      # because their only touched files were brand-new, and a verifier trusting
+      # `--changed` alone would have certified the batch without ever replaying them.
+      # An under-selecting verifier primitive is worse than no primitive, so the union
+      # is taken here (and reflected in --list and in the FILTERED banner below).
       git -C "$REPO_ROOT" diff --name-only "$changed_ref" >> "$TOUCH_SET"
+      git -C "$REPO_ROOT" ls-files --others --exclude-standard >> "$TOUCH_SET"
       TOUCH_MODE=1
-      TOUCH_DESC="changed=${changed_ref}" ;;
+      TOUCH_DESC="changed=${changed_ref}+untracked" ;;
     --list|--dry-run)
       LIST_ONLY=1; shift ;;
     -h|--help)

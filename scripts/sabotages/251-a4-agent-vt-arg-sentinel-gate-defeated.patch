@@ -1,0 +1,31 @@
+# SABOTAGE: A4 fold (b) (ADR-047 §4.3) gate sabotage — the dedicated `vt_` ARG SENTINEL
+# gate is defeated: `refuse_vt_args/1` always returns `:ok`, so a model-emitted tool
+# argument carrying a raw vault FK token is handed straight to the action's own
+# `validate/2`. For a SHAPE-VALID, in-allowlist arg (a `search_records` "query" string —
+# a declared key, a well-formed value) `validate/2` accepts it, so the sentinel gate is
+# the ONLY thing that ever stood between the token and execution. This is the exact
+# EG2 tool-args hole shipped sabotage 45 documents, re-opened on the agent path. The
+# named test (a shape-valid in-allowlist arg is killed by the sentinel gate ALONE) must
+# flip; its positive control (the same query WITHOUT the token executes) stays green,
+# proving the flip is the missing gate, not a broken validator.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_tools_test.exs
+# MUST_FAIL: a SHAPE-VALID, IN-ALLOWLIST arg carrying a vt_ token
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1433,9 +1433,11 @@
+   # tool-args hole, re-proven on the agent path). Keys AND values, recursively —
+   # fail-closed: an unscannable shape refuses.
+   defp refuse_vt_args(args) do
+-    if vt_free?(args), do: :ok, else: {:error, :invalid_args}
+-  rescue
+-    _ -> {:error, :invalid_args}
++    # SABOTAGE (A4 fold (b), ADR-047 §4.3): the sentinel gate is NEUTERED — every arg set
++    # passes, so only the action's own validate/2 remains. A shape-valid in-allowlist arg
++    # carrying a vt_ token now reaches execution (and the wire).
++    _ = args
++    :ok
+   end
+ 
+   defp vt_free?(value) when is_binary(value), do: not String.contains?(value, @vt_sentinel)

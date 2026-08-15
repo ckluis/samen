@@ -1,0 +1,54 @@
+# SABOTAGE: A4 (ADR-047 §5.3 / RP-AG-5) gate sabotage — the APPROVAL-STATE GUARD is
+# dropped: `verify_approval/4` stops re-loading the approval row and simply TRUSTS the
+# struct it was handed. `execute_approved/3` is public (the E3 handler lives in its own
+# module), and the only field an attacker needs is the approval id — which is not a secret:
+# it sits verbatim in the token-only `atn_meta.approval_id` jsonb of the turn row, in the
+# clear, right next to the proposal. With the guard gone, a bare `%{id: <real id>}` map, a
+# still-PENDING approval, or an APPROVED approval belonging to ANOTHER ORG each executes
+# the parked write — with no `pending -> approved` transition, no distinct-party decision,
+# and NO `approval_approved` audit event. The human approval becomes decorative. The three
+# named reds must flip; the real-engine positive control stays green, proving what was lost
+# is the verification and not the execution path.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: a still-PENDING approval cannot execute the parked write at the seam
+# MUST_FAIL: a FORGED bare-map approval refuses
+# MUST_FAIL: an APPROVED approval belonging to ANOTHER org
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1258,26 +1258,14 @@
+   # caller who reached this seam directly, holding nothing but the id, sees `:pending` and
+   # is refused.
+   defp verify_approval(approval, %Run{} = run, turn_row, approver_id) do
+-    case load_approval(approval_id_of(approval)) do
+-      {:ok, loaded} ->
+-        cond do
+-          loaded.state != :approved -> {:error, :approval_not_approved}
+-          loaded.org_id != run.org_id -> {:error, :approval_org_mismatch}
+-          loaded.kind != WriteProposal.kind() -> {:error, :proposal_mismatch}
+-          loaded.subject_ref != WriteProposal.subject_ref(turn_row.id) -> {:error, :proposal_mismatch}
+-          not is_binary(loaded.decided_by) or loaded.decided_by == "" -> {:error, :approval_not_approved}
+-          # The persisted decision IS the authority: the actor executing must be the party
+-          # the row records as having decided, and that party must be distinct from the
+-          # requester (the engine's own rule, re-asserted from the row rather than trusted
+-          # from the call).
+-          loaded.decided_by == loaded.requested_by -> {:error, :not_authorized}
+-          loaded.decided_by != approver_id -> {:error, :not_authorized}
+-          true -> {:ok, loaded}
+-        end
+-
+-      _ ->
+-        {:error, :approval_not_found}
+-    end
++    # SABOTAGE (A4, ADR-047 §5.3, RP-AG-5): the persisted approval is never consulted —
++    # the caller-supplied struct is trusted wholesale. A forged `%{id: _}` map, a pending
++    # row, or another org's approval now executes the parked write, with no decision
++    # transition and no audit event.
++    _ = run
++    _ = turn_row
++    _ = approver_id
++    {:ok, approval}
+   end
+ 
+   # Fail-closed on every edge: a nil/garbled/unknown id is `:approval_not_found`, never a

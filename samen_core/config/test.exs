@@ -146,7 +146,15 @@ config :samen_core, Samen.Approvals.Registry,
     # T70 (ADR-043 §6.3 D5): the AI support operator's human-gated send. Operator plane;
     # the ReplyHandler sends via Samen.Delivery.Chokepoint.send/2 ONLY on a distinct-human
     # approve — the AI service principal is never a decider (distinct-party enforced).
-    "ai_support_reply" => {:operator, Samen.AI.SupportOperator.ReplyHandler}
+    "ai_support_reply" => {:operator, Samen.AI.SupportOperator.ReplyHandler},
+    # A4 (ADR-047 §5.3; ADR-043 §6.2 unamended): the agent loop's propose-then-approve
+    # seam. TENANT plane — an agent run belongs to the initiating member's org, unlike
+    # the operator-plane support draft above. `requested_by` is the AI service principal
+    # (reused from §6.3, never a decider); `Samen.AI.Agent.WriteProposal.on_approve/2`
+    # executes the governed action with the DECIDING human's actor, inside the decision
+    # transaction. An unregistered kind here would make every write proposal refuse
+    # `:approval_unavailable` — fail-honest, never an ungated write.
+    "ai_agent_write" => {:tenant, Samen.AI.Agent.WriteProposal}
   }
 
 # T2.6 OTel test config: use the pid exporter so tests receive spans as messages

@@ -8,16 +8,18 @@
 # cursor at start, the non-nil re-arm at the batch boundary, the never-nil invariant
 # sweep); the terminal-clears-it half stays green — proving the reds fail because the
 # arming is gone, not because the loop died.
+# (RE-ANCHORED at A4: the create_run! context moved when the hardcoded `depth: 0, chain:
+# []` became the resolved loop provenance. The sabotage's removed/added lines and the
+# guarantee it defeats are unchanged.)
 # APP: samen_core
 # TEST_FILES: test/ai/agent_durability_test.exs
 # MUST_FAIL: ARMED watchdog and a token-only TurnWorker job
 # MUST_FAIL: re-arms with a non-nil watchdog
 # MUST_FAIL: never-nil invariant holds at every non-terminal point
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index 51594c5..a778b26 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -615,7 +615,7 @@ defmodule Samen.AI.Agent do
+@@ -834,7 +834,7 @@
            run
            |> Ash.Changeset.for_update(:advance, %{
              current_turn: turn_index,
@@ -26,10 +28,10 @@ index 51594c5..a778b26 100644
              transcript: encode_transcript(goal, lines ++ [completion.text]),
              input_tokens_used: run.input_tokens_used + in_tokens,
              output_tokens_used: run.output_tokens_used + out_tokens
-@@ -731,8 +731,12 @@ defmodule Samen.AI.Agent do
-             origin: Keyword.get(opts, :origin, default_origin(scope)),
-             depth: 0,
-             chain: [],
+@@ -1700,8 +1700,12 @@
+             # anything past the v1 ceiling before we got here), not a hardcoded 0/[].
+             depth: Keyword.get(opts, :depth, 0),
+             chain: Keyword.get(opts, :chain, []),
 -            transcript: encode_transcript(goal, []),
 -            next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds)
 +            # SABOTAGE (A2, §4.1): the never-nil watchdog is DROPPED — a :queued run is
