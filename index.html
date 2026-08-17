@@ -410,8 +410,63 @@
   .frameflow-note { border-top: 1px solid var(--rule); padding: 14px 26px; font-family: var(--mono); font-size: 12px; color: var(--faint); background: var(--paper); }
   .frameflow-note b { color: var(--accent-deep); }
 
+  /* ---- the AI agent loop (ADR-047) — run + propose-then-approve decision card ---- */
+  .ui-frame .ui-ag { display: grid; grid-template-columns: 1fr 336px; gap: 12px; align-items: start; }
+  .ui-frame .ui-ag-run { border: 1px solid var(--uc-line2); border-radius: 12px; background: var(--uc-card); overflow: hidden; }
+  .ui-frame .ui-ag-rh { display: flex; align-items: center; gap: 11px; padding: 13px 16px; border-bottom: 1px solid var(--uc-line); }
+  .ui-frame .ui-ag-rh .ui-ic { width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0; display: grid; place-items: center; color: #fff; background: linear-gradient(150deg,#6D45C4,#8A5BE0); }
+  .ui-frame .ui-ag-rh .ui-rt b { display: block; font-size: 13.5px; font-weight: 650; letter-spacing: -0.01em; }
+  .ui-frame .ui-ag-rh .ui-rt span { display: block; font-family: var(--mono); font-size: 10.5px; color: var(--uc-faint); }
+  .ui-frame .ui-ag-rh .ui-state { margin-left: auto; }
+  .ui-frame .ui-ag-turn { display: grid; grid-template-columns: 26px 1fr auto; gap: 11px; align-items: start; padding: 13px 16px; border-bottom: 1px solid var(--uc-line); }
+  .ui-frame .ui-ag-turn:last-child { border-bottom: none; }
+  .ui-frame .ui-ag-tn { width: 22px; height: 22px; border-radius: 50%; background: #F1F1F4; color: var(--uc-muted); font-family: var(--mono); font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+  .ui-frame .ui-ag-turn.wr .ui-ag-tn { background: var(--uc-violet-wash); color: var(--uc-violet); }
+  .ui-frame .ui-ag-tb .ui-kind { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--uc-ink); display: inline-flex; align-items: center; gap: 6px; }
+  .ui-frame .ui-ag-tb .ui-ktag { font-family: var(--mono); font-size: 9.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 1px 6px; border-radius: 5px; }
+  .ui-frame .ui-ag-tb .ui-ktag.read { background: #EEF0FD; color: var(--uc-brand); }
+  .ui-frame .ui-ag-tb .ui-ktag.write { background: var(--uc-violet-wash); color: var(--uc-violet); }
+  .ui-frame .ui-ag-tb .ui-tr { margin-top: 5px; font-size: 12.5px; color: var(--uc-muted); line-height: 1.5; }
+  .ui-frame .ui-ag-tb .ui-tr .ui-masked { color: #8C8D99; letter-spacing: .1em; font-family: var(--mono); font-size: 11.5px; }
+  .ui-frame .ui-ag-tb .ui-tr code { font-family: var(--mono); font-size: 11.5px; background: #F1F1F4; padding: 1px 5px; border-radius: 4px; color: #454652; }
+  .ui-frame .ui-ag-tb .ui-tr b { color: #2f3039; font-weight: 600; }
+  .ui-frame .ui-ag-ts { align-self: center; }
+  .ui-frame .ui-ag-dec { border: 1px solid #CFC3F0; border-radius: 12px; background: #FBFAFE; overflow: hidden; box-shadow: 0 8px 22px -14px rgba(60,40,120,.28); }
+  .ui-frame .ui-ag-dh { padding: 13px 16px 12px; border-bottom: 1px solid #ECE6FA; }
+  .ui-frame .ui-ag-dh .ui-dl { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--uc-violet); background: var(--uc-violet-wash); border: 1px solid #E1D6F7; border-radius: 6px; padding: 3px 8px; }
+  .ui-frame .ui-ag-dh b { display: block; margin-top: 10px; font-size: 14px; font-weight: 650; letter-spacing: -0.01em; }
+  .ui-frame .ui-ag-dh span { display: block; margin-top: 3px; font-size: 11.5px; color: var(--uc-muted); line-height: 1.45; }
+  .ui-frame .ui-ag-prov { padding: 6px 16px 4px; }
+  .ui-frame .ui-ag-pr { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px dashed #ECE6FA; font-size: 12px; }
+  .ui-frame .ui-ag-pr:first-child { border-top: none; }
+  .ui-frame .ui-ag-pr .ui-pk { color: var(--uc-faint); font-size: 11px; }
+  .ui-frame .ui-ag-pr .ui-pv { font-family: var(--mono); font-size: 11.5px; color: #3a3b45; text-align: right; overflow: hidden; text-overflow: ellipsis; max-width: 205px; white-space: nowrap; }
+  .ui-frame .ui-ag-pr .ui-pv.keys { color: var(--uc-violet); }
+  .ui-frame .ui-ag-pr .ui-pv.digest { color: var(--uc-muted); }
+  .ui-frame .ui-ag-pr .ui-pv.noval { color: var(--uc-faint); font-style: italic; font-family: var(--body); }
+  .ui-frame .ui-ag-note { margin: 6px 16px 0; padding: 10px 12px; border-radius: 9px; background: #F4F0FC; font-size: 11.5px; color: #4B3B78; line-height: 1.5; }
+  .ui-frame .ui-ag-note b { color: #38295C; font-weight: 650; }
+  .ui-frame .ui-ag-acts { display: flex; gap: 9px; padding: 13px 16px; }
+  .ui-frame .ui-ag-acts .ui-ab { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 12px; border-radius: 9px; font-size: 12.5px; font-weight: 600; border: 1px solid var(--uc-line2); background: var(--uc-card); color: var(--uc-ink); }
+  .ui-frame .ui-ag-acts .ui-ab.approve { background: #1B1C22; color: #fff; border-color: #1B1C22; }
+  .ui-frame .ui-ag-acts .ui-ab .ui-i { width: 14px; height: 14px; }
+  .ui-frame .ui-ag-guard { padding: 10px 16px; border-top: 1px solid #ECE6FA; font-family: var(--mono); font-size: 10px; color: var(--uc-faint); line-height: 1.6; }
+  .ui-frame .ui-ag-guard b { color: var(--uc-violet); font-weight: 600; }
+  .ui-frame .ui-supp .ui-sup-cell { color: var(--uc-faint); font-family: var(--mono); }
+
+  /* ---- load-bearing invariants strip ---- */
+  .invariants { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 44px; }
+  .inv { background: var(--card); border: 1px solid var(--rule); border-radius: 13px; padding: 22px 22px; }
+  .inv .in-name { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--accent-deep); margin-bottom: 9px; display: flex; align-items: center; gap: 8px; }
+  .inv .in-name .in-d { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+  .inv p { font-size: 13.5px; color: var(--muted); line-height: 1.55; }
+  .inv .in-proof { margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--rule); font-family: var(--mono); font-size: 11px; color: var(--faint); line-height: 1.5; }
+  .inv .in-proof b { color: var(--accent-deep); font-weight: 500; }
+
   @media (max-width: 900px) {
-    .moneyshot { grid-template-columns: 1fr; }
+    .ui-frame .ui-ag { grid-template-columns: 1fr; }
+    .moneyshot { grid-template-columns: 1fr; overflow-x: hidden; }
+    .moneyshot .ms-col { min-width: 0; }
     .frameflow-hosts { grid-template-columns: 1fr; }
     .frameflow-host + .frameflow-host { border-left: none; border-top: 1px solid var(--rule); }
     .ui-frame .ui-app { grid-template-columns: 1fr; }
@@ -420,7 +475,7 @@
     .ui-frame .ui-metrics { grid-template-columns: repeat(2,1fr); }
   }
   @media (max-width: 820px) {
-    .modes, .axioms, .feature-grid, .stack, .deleted, .idioms, .tier-grid { grid-template-columns: 1fr; }
+    .modes, .axioms, .feature-grid, .stack, .deleted, .idioms, .tier-grid, .invariants { grid-template-columns: 1fr; }
     .idioms { grid-template-columns: 1fr 1fr; }
     .axiom + .axiom { border-left: none; border-top: 1px solid var(--rule); }
     .mirror-cols { grid-template-columns: 1fr; }
@@ -450,13 +505,14 @@
   <header class="hero">
     <div class="kicker fade d1">A governed B2B-SaaS foundry — Elixir · Ash · Oban · one Postgres</div>
     <h1 class="fade d2">Support your tenants <em>without ever seeing their customers.</em> On one substrate.</h1>
-    <p class="sub fade d3">Samen presets the boring 80% of every B2B SaaS — identity, CRM, billing, support, the operator control plane, and now <strong>the entire product UI</strong> — as <strong>six governed idioms applied uniformly to every object</strong>, on one Postgres per product. The product your tenants use and the control plane you run the business with are <strong>the same resources on the same substrate</strong>. The difference is the plane: on the tenant plane an owner reads their own people in the clear; on the operator plane the very same rows render <strong>••••</strong> — because masking is the field's normal value, not a view you remembered to add. The flagship makes it literal: <strong>realtime cross-plane chat</strong> where pasting any object id renders a live card that is <strong>masking-aware per viewer</strong> — the same message shows a clear contact card to the owning tenant and a <strong>••••</strong> card to the SaaS operator, with the non-PII fields still clear so support can actually help. This document describes what was <strong>built, gated GO, and tested</strong> — then hardened past the demo by four post-build workstreams (real CRUD, an operator cockpit, generator catch-up, and table-stakes UX), each adversarially gated GO, with every masking guarantee held by a standing, ever-growing committed sabotage harness (233 patches as of this pass — count it live: <code style="font-family:var(--mono);font-size:12px">ls scripts/sabotages/*.patch</code>). <strong>2,606 kernel tests · 1,711 framework · 465 demo · 123 freight · 49 vet</strong> — all warnings-as-errors, over a navigable 5-tenant demo, with a destruction oracle you can run.</p>
+    <p class="sub fade d3">Samen presets the boring 80% of every B2B SaaS — identity, CRM, billing, support, the operator control plane, and <strong>the entire product UI</strong> — as <strong>six governed idioms applied uniformly to every object</strong>, on one Postgres per product. The product your tenants use and the control plane you run the business with are <strong>the same resources on the same substrate</strong>. The difference is the plane: on the tenant plane an owner reads their own people in the clear; on the operator plane the very same rows render <strong>••••</strong> — because masking is the field's normal value, not a view you remembered to add. The flagship makes it literal: <strong>realtime cross-plane chat</strong> where pasting any object id renders a live card that is <strong>masking-aware per viewer</strong> — a clear contact card to the owning tenant, a <strong>••••</strong> card to the SaaS operator, non-PII fields still clear so support can actually help. And the newest layer proves the thesis holds for AI too: a <strong>first-party, durable, multi-step AI agent loop</strong> (ADR-047, accepted) whose tool results are re-masked hop-by-hop and whose every <em>write</em> executes only on a human's approval, <strong>as that human, never on the agent's authority</strong>. This document describes what was <strong>built, gated GO, and tested</strong> on an open pre-merge branch — hardened past the demo by post-build workstreams (real CRUD, an operator cockpit, generator catch-up, table-stakes UX, the AI agent loop), each adversarially gated GO, with every guarantee held by a standing, ever-growing committed sabotage harness (278 patches as of this pass — count it live: <code style="font-family:var(--mono);font-size:12px">ls scripts/sabotages/*.patch</code>). <strong>2,786 kernel tests · 1,773 framework · 631 demo · 251 freight · 125 vet</strong> — all warnings-as-errors, over a navigable 5-tenant demo, with a destruction oracle you can run.</p>
     <div class="surfaces fade d4">
       <span class="surface-pill"><b>one BEAM release</b> — web · workers · cron</span>
       <span class="surface-pill"><b>one Postgres</b> — truth · queue · history · audit · vault</span>
       <span class="surface-pill lit">one message, two truths — clear to the tenant, •••• to the operator</span>
+      <span class="surface-pill"><b>propose-then-approve AI</b> — an agent's write executes as the human who approved it, never the agent</span>
       <span class="surface-pill"><b>self-serve identity spine</b> — signup · verify · reset · sessions · invites · OIDC + TOTP step-up · 2FA · onboarding, generator-emitted</span>
-      <span class="surface-pill"><b>233 sabotages</b> — CI proves each guarantee's test fails when it's broken</span>
+      <span class="surface-pill"><b>278 sabotages</b> — CI proves each guarantee's test fails when it's broken</span>
     </div>
   </header>
 
@@ -890,6 +946,53 @@
       </div>
       <div class="ui-caption"><span><b>Operator plane · aggregate</b> — a token-blind actor, no pii_ columns, k-anon suppression</span><span>proof: C7 no_pii_columns · aggregate_actor_denied before any grant · aggregate_privacy floor</span></div>
     </div>
+
+    <div class="prose measure" style="margin-top:44px">
+      <p><strong>The same floor, turned inward (ADR-045 / P17).</strong> The k-anonymity discipline the operator's portfolio uses is not operator-only — a tenant can hand its <em>own</em> lower-privilege staff analytics without letting a masked role reconstruct a <strong>••••</strong>'d individual. This surface reads as the tenant's own org actor over the <strong>vault-excluded rollup</strong> (<code>Samen.Aggregate.read_all_for_org/3</code>, org bound from the authenticated scope — never a <code>?org=</code> parameter), through the <em>same</em> shipped <code>Privacy.apply/3</code> floor: <strong>k ≥ 5, l ≥ 2</strong>, and any cohort below the floor is emitted as <strong>⊘ suppressed</strong> on both planes. A support member who sees driver names as <strong>••••</strong> still gets the operational read — throughput, on-time, cohort health — but a count-of-one never leaks back as "exactly one subject." It is a <em>separate</em> org-scoped read path, not a relaxation of the operator-only analytics gate (T144, byte-intact).</p>
+    </div>
+
+    <div class="ui-shell" style="margin-top:24px">
+      <div class="ui-frame">
+        <main class="ui-main">
+          <div class="ui-top">
+            <div class="ui-crumb">Blue Ridge Logistics <span class="ui-sep">/</span> Insights <span class="ui-sep">/</span> Team analytics</div>
+            <div class="ui-head">
+              <h3>Team analytics</h3>
+              <div class="ui-actions">
+                <button class="ui-btn"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/></svg>Last 4 weeks</button>
+              </div>
+            </div>
+          </div>
+          <div class="ui-tb-bar" style="background:var(--uc-green-wash);border-color:#CBE7D5">
+            <div class="ui-ic" style="border-color:#CBE7D5;color:var(--uc-green)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 19V9m6 10V5m6 14v-7"/></svg></div>
+            <div class="ui-tx" style="color:#215938"><b style="color:#164026">Tenant plane · masked member.</b> Rosa's role reads its own org's aggregates over a vault-excluded rollup — driver identity stays <b>••••</b>, but the operational numbers are hers. Cohorts under the k-anonymity floor render <b>⊘</b>, so a count-of-one can't be reconstructed by a role that can't see the name.</div>
+            <div class="ui-chip" style="color:#215938;border-color:#CBE7D5">plane: tenant · k ≥ 5 · l ≥ 2</div>
+          </div>
+          <div class="ui-metrics">
+            <div class="ui-metric"><div class="ui-k"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h13l5 5v5H3z"/></svg> Loads / wk</div><div class="ui-v"><span class="ui-num">126</span><span class="ui-delta ui-up">+8%</span></div><div class="ui-spark"><i style="height:44%"></i><i style="height:52%"></i><i style="height:49%"></i><i style="height:60%"></i><i style="height:66%"></i><i style="height:70%"></i><i class="hi" style="height:82%"></i></div></div>
+            <div class="ui-metric"><div class="ui-k"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6L9 17l-5-5"/></svg> On-time %</div><div class="ui-v"><span class="ui-num">94.2</span><span class="ui-delta ui-up">+1.1</span></div><div class="ui-spark"><i style="height:60%"></i><i style="height:64%"></i><i style="height:62%"></i><i style="height:70%"></i><i style="height:74%"></i><i style="height:76%"></i><i class="hi" style="height:80%"></i></div></div>
+            <div class="ui-metric"><div class="ui-k"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6"/></svg> Active drivers</div><div class="ui-v"><span class="ui-num">31</span></div><div class="ui-spark"><i style="height:55%"></i><i style="height:58%"></i><i style="height:60%"></i><i style="height:64%"></i><i style="height:66%"></i><i style="height:70%"></i><i class="hi" style="height:72%"></i></div></div>
+            <div class="ui-metric"><div class="ui-k"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> Rev / load</div><div class="ui-v"><span class="ui-num">$3.1k</span><span class="ui-delta ui-up">+4%</span></div><div class="ui-spark"><i style="height:50%"></i><i style="height:54%"></i><i style="height:58%"></i><i style="height:56%"></i><i style="height:62%"></i><i style="height:66%"></i><i class="hi" style="height:70%"></i></div></div>
+          </div>
+          <div class="ui-wrap">
+            <div class="ui-gtitle"><h4>Drivers by lane cohort</h4><span class="ui-n">6</span><span class="ui-lane">· org-level aggregates only — no personal data, no reveal path</span></div>
+            <div class="ui-card">
+              <table>
+                <thead><tr><th style="width:32%">Lane cohort</th><th style="width:16%">Drivers</th><th style="width:18%">Loads · wk</th><th style="width:16%">On-time</th><th style="width:18%">Med-card valid</th></tr></thead>
+                <tbody>
+                  <tr><td class="ui-carrier">Midwest corridor</td><td class="ui-num">11</td><td class="ui-num">48</td><td class="ui-num">95%</td><td><span class="ui-pill ok"><span class="ui-d"></span>100%</span></td></tr>
+                  <tr><td class="ui-carrier">Northeast metro</td><td class="ui-num">9</td><td class="ui-num">37</td><td class="ui-num">93%</td><td><span class="ui-pill warn"><span class="ui-d"></span>89%</span></td></tr>
+                  <tr><td class="ui-carrier">Southeast regional</td><td class="ui-num">6</td><td class="ui-num">29</td><td class="ui-num">94%</td><td><span class="ui-pill ok"><span class="ui-d"></span>100%</span></td></tr>
+                  <tr><td class="ui-carrier">Pacific NW <span style="color:var(--uc-faint);font-size:11px">· n = 3</span></td><td><span class="ui-sup-cell">⊘</span></td><td><span class="ui-sup-cell">⊘</span></td><td><span class="ui-sup-cell">⊘</span></td><td><span class="ui-sup-cell">⊘</span></td></tr>
+                  <tr><td colspan="5" style="padding:0"><div class="ui-supp"><svg class="ui-lk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Pacific NW holds 3 drivers — below the k ≥ 5 floor, so every cell is suppressed to ⊘. Insight for the role, not a lever to re-identify one person.</div></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </main>
+      </div>
+      <div class="ui-caption"><span><b>Tenant plane · masked member</b> — the tenant's own k-anon analytics over a vault-excluded rollup</span><span>proof: aggregate_privacy org-scoped arm · MaskingCase twin (masked member cannot reconstruct ••••) · T144 byte-intact · sab 276–278</span></div>
+    </div>
   </section>
 
   <section id="flagship" style="background:linear-gradient(180deg,var(--accent-wash) 0%,transparent 40%)">
@@ -1021,7 +1124,7 @@
     <h2>You inherit the UI too, <em>not just the schema.</em></h2>
     <div class="prose measure">
       <p>The reuse thesis had a hole: the inherited-80% <em>data</em> was framework-level, but the <em>product surface that renders it</em> was forked into one vertical. That has been closed. A new library, <code>samen_web</code>, now holds the <strong>entire product-UI layer</strong> — a 13-component kit plus the CRM, Billing, Support, Operator, Marketing, and Chat LiveViews — behind a <strong>Mount seam</strong> that derives each host's resources from the catalog's <code>Module.concat(namespace, Resource)</code> convention. A host supplies three facts (namespace · repo · plane); the framework derives the rest. No LiveView names a host module; no host copies a page.</p>
-      <p>The payoff is visual. <strong>PawChart</strong>, the vet vertical, had <em>no web layer at all</em>. It inherited the entire product UI — 3,284 lines of LiveViews, reads, and the component kit — through <strong>~3 router lines</strong>. The <em>same</em> <code>Samen.Web.CRM.ContactsLive</code> module renders freight contacts for Driftwood and clinic contacts for PawChart, byte-identical, each over its own data. And the two-plane masking travels with it by construction: the framework LiveViews resolve every PII field through the single <code>PiiResolution</code> chokepoint, so a component fix or a new inherited page ships to every vertical on a dep bump. Throughout, <strong>samen_core stayed web-dep-free — now 2,606 tests green</strong>; the web dependency lives only in <code>samen_web</code> (1,711 green).</p>
+      <p>The payoff is visual. <strong>PawChart</strong>, the vet vertical, had <em>no web layer at all</em>. It inherited the entire product UI — 3,284 lines of LiveViews, reads, and the component kit — through <strong>~3 router lines</strong>. The <em>same</em> <code>Samen.Web.CRM.ContactsLive</code> module renders freight contacts for Driftwood and clinic contacts for PawChart, byte-identical, each over its own data. And the two-plane masking travels with it by construction: the framework LiveViews resolve every PII field through the single <code>PiiResolution</code> chokepoint, so a component fix or a new inherited page ships to every vertical on a dep bump. Throughout, <strong>samen_core stayed web-dep-free — now 2,786 tests green</strong>; the web dependency lives only in <code>samen_web</code> (1,773 green).</p>
     </div>
     <div class="frameflow">
       <div class="frameflow-lib">
@@ -1056,7 +1159,7 @@
           <div class="fh-got">Renders <b>clinic</b> contacts/invoices/tickets over <code>PawChart.*</code> — the <b>same modules</b>, zero UI code. Branded "Happy Paws Clinic", live at HTTP 200.</div>
         </div>
       </div>
-      <div class="frameflow-note"><b>The same module renders both verticals.</b> PawChart inherited 3,284 lines of product UI via 3 router lines · samen_core web-dep-free, 2,606 green · masking proven in the framework, not the host · gated GO (ADR-009).</div>
+      <div class="frameflow-note"><b>The same module renders both verticals.</b> PawChart inherited 3,284 lines of product UI via 3 router lines · samen_core web-dep-free, 2,786 green · masking proven in the framework, not the host · gated GO (ADR-009).</div>
     </div>
   </section>
 
@@ -1065,8 +1168,8 @@
     <h2>Build the 20%. <em>Inherit the 80%.</em> On real numbers, honestly.</h2>
     <div class="feature-grid">
       <div class="prose">
-        <p>The bet is that the boring infrastructure is inherited near-total and only the domain stays authored — and the second vertical is where it stops being a claim. <strong>PawChart</strong>, a vet-clinic SaaS, was built as the reuse probe. It authored <strong>191 lines</strong> of real domain logic and sits on <strong>33,640 lines</strong> of substrate. Every one of the 15 verifiers returned green on its <em>first</em> invocation — no verifier fix, ever. Against the four families a clinic touches, it <strong>inherited ~96%</strong> of the code that makes them work.</p>
-        <p>The starkest leverage is at the point declarations: <code>pii_attribute :microchip</code> — <strong>one line</strong> — buys the ~1,900-line vault-mask-shred-KMS chain; <code>use Samen.Scopes.Billing</code> — <strong>17 lines</strong> — buys eight fully-policed, vaulted, catalogued billing resources; a <code>base:</code> option buys the folded core-person shape. <strong>Four of the six idioms applied with literally zero vertical code.</strong></p>
+        <p>The bet is that the boring infrastructure is inherited near-total and only the domain stays authored — and the second vertical is where it stops being a claim. <strong>PawChart</strong>, a vet-clinic SaaS, was built as the reuse probe. It authored <strong>~104 lines</strong> of real domain logic and sits on <strong>33,640 lines</strong> of substrate. Every one of the 15 verifiers returned green on its <em>first</em> invocation — no verifier fix, ever. Against the four families a clinic touches, it <strong>inherited ~96%</strong> of the code that makes them work.</p>
+        <p>The starkest leverage is at the point declarations: <code>pii_attribute :microchip</code> — <strong>one line</strong> — buys the ~1,900-line vault-mask-shred-KMS chain; <code>use Samen.Scopes.Billing</code> — <strong>17 lines</strong> — buys eight fully-policed, vaulted, catalogued billing resources; a <code>base:</code> option buys the folded core-person shape. <strong>Four of the six idioms applied with literally zero vertical code.</strong> The newest datapoint is the sharpest: Driftwood's <strong>support-triage AI agent</strong> — a durable, multi-step, propose-then-approve loop with EG2 egress scrubbing — mounts at <strong>~5 authored lines</strong> of tool-definition (13 counting the heredoc, plus an 8-line router line), the figure the leverage guard holds under a ceiling.</p>
         <p>The honest calibration, which the doc names and PawChart confirms: <strong>you inherit infrastructure, not a domain model.</strong> The 104 lines of clinic logic are real work — what a Pet is, that a microchip is a vaulted secret, that the owner is the messaged party. And PawChart was the <em>easy additive case</em>: it wrote zero <code>Samen.Context</code>, where Driftwood had to author an anti-corruption layer of renames plus a ~90-line settlement reshape. The 80% is inherited; the 20% is yours; the reshape tax is real when the vertical's language is genuinely new.</p>
       </div>
       <div>
@@ -1076,8 +1179,9 @@
           <div class="reuse-row"><div class="rn">Billing scope<span>8 resources, mounted</span></div><div class="track"><div class="barf" style="width:98.6%"></div></div><div class="rv">17 lines</div></div>
           <div class="reuse-row"><div class="rn">Tier-2 objects<span>VaccineLot, self-defined</span></div><div class="track"><div class="barf" style="width:100%"></div></div><div class="rv">0 lines</div></div>
           <div class="reuse-row"><div class="rn">Operator plane<span>token-blind projection</span></div><div class="track"><div class="barf" style="width:96%"></div></div><div class="rv">42 lines</div></div>
-          <div class="reuse-row"><div class="rn">Domain (the 20%)<span>Patient + Pet — authored</span></div><div class="track"><div class="barf dim" style="width:20%"></div></div><div class="rv">104 lines</div></div>
-          <div class="reuse-note">~96% inherited against the 4 families a clinic touches · 15/15 verifiers green on first run · the domain 20% stays authored real work — that is the calibrated deal, not the oversell</div>
+          <div class="reuse-row"><div class="rn">AI agent loop<span>Driftwood triage · multi-step</span></div><div class="track"><div class="barf" style="width:99%"></div></div><div class="rv">~5 lines</div></div>
+          <div class="reuse-row"><div class="rn">Domain (the 20%)<span>Patient + Pet — authored</span></div><div class="track"><div class="barf dim" style="width:20%"></div></div><div class="rv">~104 lines</div></div>
+          <div class="reuse-note">~96% inherited against the 4 families a clinic touches · 15/15 verifiers green on first run · a first-party AI agent at ~5 authored lines · the domain 20% stays authored real work — the calibrated deal, not the oversell</div>
         </div>
       </div>
     </div>
@@ -1138,9 +1242,84 @@
     </div>
     <div class="resolution" style="margin-top:36px">
       <div class="mark">✓</div>
-      <div class="claim">The sabotage harness keeps every guarantee refutable: <span>every committed sabotage patch (233 today and growing — <code style="font-family:var(--mono);font-size:14px;background:#fff;color:var(--accent-deep)">scripts/sabotages/</code>) that CI applies one at a time — each proves its <em>named</em> guarantee's test actually FAILS when the guarantee is broken, then restores the tree byte-exact (SHA-256). A green test is only trusted once its red twin is proven un-fakeable. Run <code style="font-family:var(--mono);font-size:14px;background:#fff;color:var(--accent-deep)">SAMEN_SABOTAGE=1 ./ci.sh</code>.</span></div>
+      <div class="claim">The sabotage harness keeps every guarantee refutable: <span>every committed sabotage patch (278 today and growing — <code style="font-family:var(--mono);font-size:14px;background:#fff;color:var(--accent-deep)">scripts/sabotages/</code>) that CI applies one at a time — each proves its <em>named</em> guarantee's test actually FAILS when the guarantee is broken, then restores the tree byte-exact (SHA-256). A green test is only trusted once its red twin is proven un-fakeable. Run <code style="font-family:var(--mono);font-size:14px;background:#fff;color:var(--accent-deep)">SAMEN_SABOTAGE=1 ./ci.sh</code>.</span></div>
     </div>
-    <p class="prose measure" style="margin-top:24px;font-family:var(--mono);font-size:12.5px;color:var(--faint)">Every masking/vault surface ships a green (plane resolves clear) · red (operator-without-grant renders ••••, never a <code style="font-family:var(--mono);font-size:12px">vt_</code> token) · sabotage (the mask is proven refutable) triple. Suites, all <code style="font-family:var(--mono);font-size:12px">--warnings-as-errors</code>: samen_core 2,606 · samen_web 1,711 · demo 465 · driftwood 123 · pawchart 49 — the final CI line is <code style="font-family:var(--mono);font-size:12px">ROOT CI: ALL PASSED</code>.</p>
+    <p class="prose measure" style="margin-top:24px;font-family:var(--mono);font-size:12.5px;color:var(--faint)">Every masking/vault surface ships a green (plane resolves clear) · red (operator-without-grant renders ••••, never a <code style="font-family:var(--mono);font-size:12px">vt_</code> token) · sabotage (the mask is proven refutable) triple. Suites, all <code style="font-family:var(--mono);font-size:12px">--warnings-as-errors</code>: samen_core 2,786 · samen_web 1,773 · demo 631 · driftwood 251 · pawchart 125 — the final CI line is <code style="font-family:var(--mono);font-size:12px">ROOT CI: ALL PASSED</code>.</p>
+  </section>
+
+  <section id="agent" style="background:linear-gradient(180deg,#F4F0FC 0%,transparent 42%)">
+    <div class="sec-label">Unique feature № 7 — the first-party AI agent loop</div>
+    <h2>An AI agent that proposes. <em>A human that approves.</em> The write runs as the human — never the agent.</h2>
+    <div class="prose measure">
+      <p>The newest layer (ADR-047, <strong>accepted 2026-08-17</strong>) closes the last gap the governance model had left open: multi-step AI tool use. It is built <strong>first-party — zero new dependencies</strong>. Adopting an agent framework (ash_ai, Jido — both evaluated, both rejected) would have moved prompt assembly <em>outside</em> the two chokepoints that make every AI claim on this page defensible; so the loop is a durable state machine over the substrate that already exists. A run is a <strong>checkpoint-per-turn cursor row</strong> (<code>Samen.AI.Agent.Run</code>) driven by Oban and recovered by a watchdog: a crash mid-turn replays the turn and finds its own <code>:proposed</code> checkpoint, so a tool fires <strong>at most once</strong> — at-least-once delivery, the turn row as the idempotency key, never a claimed exactly-once. The first vertical to mount it, <strong>Driftwood support-triage</strong>, is the leverage proof: the whole agent is <strong>~5 authored lines of tool-definition</strong> (13 total incl. heredoc, plus an 8-line router mount) — the framework's <em>first</em> <code>samen_ai_routes</code> vertical mount, held under the leverage guard.</p>
+      <p>Two properties carry the section. <strong>Every read is re-masked hop-by-hop (the EG2 egress class).</strong> A tool result is resolved in <em>egress mode</em> — <code>%Masked{}</code> → <strong>••••</strong>, <code>nil</code> → <strong>••••</strong>, anything unrecognized dropped with a bounded <code>[unrenderable:&lt;field&gt;]</code> marker, never <code>inspect</code>-ed — so the transcript <em>at rest</em> holds no vault plaintext and no <code>vt_</code> token, and if the renderer ever regressed the assembled payload <strong>refuses <code>{:error, :pii_egress_refused}</code></strong>, fail-closed. Crucially, an agent run resolves <strong>masked on every plane regardless of any live reveal grant</strong> — because the history is <em>persisted</em>, and a grant never unlocks persisted egress. <strong>And writes do not exist for the agent.</strong> An <code>effect: :write</code> tool doesn't mutate — it <strong>proposes</strong> through the E3 approvals engine and parks the run <code>:awaiting_approval</code> (unbilled, 24-hour deadline). It executes only when a human approves, <em>inside</em> the decision transaction — re-resolved, re-validated, field-by-field digest-bound (else <code>:proposal_mismatch</code>) — and it runs <strong>as the approver's actor, never the agent's</strong>. Requester ≠ approver is enforced twice: in policy and by a DB <code>CHECK (&lt;abbrev&gt;_distinct_party)</code>. The approver sees <strong>token-only provenance</strong> — tool kind, turn index, the argument <em>key names</em>, and an args digest — <strong>never the raw argument values</strong>, which live only in the vault-routed transcript.</p>
+    </div>
+
+    <div class="ui-shell">
+      <div class="ui-frame">
+        <div class="ui-ag">
+          <div class="ui-ag-run">
+            <div class="ui-ag-rh">
+              <div class="ui-ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 2a2 2 0 0 1 2 2v1.1a7 7 0 0 1 4 6.4V16l1.5 2.5H4.5L6 16v-4.5a7 7 0 0 1 4-6.4V4a2 2 0 0 1 2-2z"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/></svg></div>
+              <div class="ui-rt"><b>Driftwood · support-triage</b><span>run 6f2a…d1 · owner: R. Medina (member)</span></div>
+              <span class="ui-state"><span class="ui-pill info"><span class="ui-d"></span>awaiting approval</span></span>
+            </div>
+            <div class="ui-ag-turn">
+              <div class="ui-ag-tn">1</div>
+              <div class="ui-ag-tb">
+                <div class="ui-kind">search_records <span class="ui-ktag read">read</span></div>
+                <div class="ui-tr">query <code>status:open lane:midwest</code> → <b>3 tickets</b> matched · driver identity resolved <span class="ui-masked">••••••</span>, non-PII clear</div>
+              </div>
+              <div class="ui-ag-ts"><span class="ui-pill ok"><span class="ui-d"></span>done</span></div>
+            </div>
+            <div class="ui-ag-turn">
+              <div class="ui-ag-tn">2</div>
+              <div class="ui-ag-tb">
+                <div class="ui-kind">fetch_record <span class="ui-ktag read">read</span></div>
+                <div class="ui-tr">driver <span class="ui-masked">•••••••••</span> · CDL <span class="ui-masked">•••••••••</span> · status <b>Available</b> · ELD <code>samsara</code> · med-card <b>valid</b> <span style="color:var(--uc-faint)">— identity masked, ops fields clear</span></div>
+              </div>
+              <div class="ui-ag-ts"><span class="ui-pill ok"><span class="ui-d"></span>done</span></div>
+            </div>
+            <div class="ui-ag-turn wr">
+              <div class="ui-ag-tn">3</div>
+              <div class="ui-ag-tb">
+                <div class="ui-kind">assign_record_owner <span class="ui-ktag write">write</span></div>
+                <div class="ui-tr">proposes reassigning ticket <code>DW-7781</code> to an on-duty driver — <b>parked, unbilled</b>, no mutation until a human decides →</div>
+              </div>
+              <div class="ui-ag-ts"><span class="ui-pill info"><span class="ui-d"></span>proposed</span></div>
+            </div>
+          </div>
+
+          <div class="ui-ag-dec">
+            <div class="ui-ag-dh">
+              <span class="ui-dl"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>write · awaiting approval</span>
+              <b>Approve this agent write?</b>
+              <span>The agent proposed a mutation. It runs only if you approve — and it runs <strong>as you</strong>.</span>
+            </div>
+            <div class="ui-ag-prov">
+              <div class="ui-ag-pr"><span class="ui-pk">Tool</span><span class="ui-pv">assign_record_owner</span></div>
+              <div class="ui-ag-pr"><span class="ui-pk">Turn</span><span class="ui-pv">#3</span></div>
+              <div class="ui-ag-pr"><span class="ui-pk">Arg keys</span><span class="ui-pv keys">record_id · owner_id</span></div>
+              <div class="ui-ag-pr"><span class="ui-pk">Arg values</span><span class="ui-pv noval">not shown — vault transcript only</span></div>
+              <div class="ui-ag-pr"><span class="ui-pk">Args digest</span><span class="ui-pv digest">sha256:9f2a…c71b</span></div>
+              <div class="ui-ag-pr"><span class="ui-pk">Requester</span><span class="ui-pv">agent · support-triage</span></div>
+              <div class="ui-ag-pr"><span class="ui-pk">Approver</span><span class="ui-pv">you · C. Kluis (support)</span></div>
+            </div>
+            <div class="ui-ag-note">On approve, the write executes <b>inside this decision transaction</b> — re-resolved, re-validated, and digest-bound (a changed arg ⇒ <code style="font-family:var(--mono)">:proposal_mismatch</code>) — under <b>your</b> actor. The agent never holds write authority.</div>
+            <div class="ui-ag-acts">
+              <button class="ui-ab approve"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>Approve as me</button>
+              <button class="ui-ab"><svg class="ui-i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>Reject</button>
+            </div>
+            <div class="ui-ag-guard">requester ≠ approver — enforced in policy <b>and</b> by DB <b>CHECK (apv_distinct_party)</b> · executes at most once (the turn row is the idempotency key) · fail-honest budget: exhaustion returns an honest error, never a dressed-up partial</div>
+          </div>
+        </div>
+      </div>
+      <div class="ui-caption"><span><b>Tenant plane · /ai/agents</b> — a support-triage run, reads re-masked, the one write parked for a human</span><span>proof: agent_write_test.exs (real E3 approvals · executes as approver) · EG2 tool-result re-mask · sab 250/252/253/256</span></div>
+    </div>
+
+    <div class="prose measure" style="margin-top:44px">
+      <p><strong>The operator plane sees the fleet of runs — never the transcript.</strong> Where the tenant surface renders the run and its (masked) transcript, the operator's <code>/operator/agents/:org_id</code> health plane is <strong>token-only by construction</strong>: per-definition run counts, states, and budgets, plus a <strong>per-definition durable kill</strong> — and no transcript at all. The kill switch closed a real blast-radius: a rate-trip writes an <em>org-scoped</em> kill row, never the host-wide switch, so one tenant tripping a definition can never silence it for another. And the plane is <strong>fail-honest about wiring</strong>: a host that never configured the agent repos renders an explicit "agent plane not wired" card rather than a false "no runs," and an unreadable kill row reads <code>:unknown</code>, never <code>active</code>. Every one of these was landed behind its own adversarial gate (A1–A7), each with a red-path sabotage, and the whole arc is locked by <code>mix samen.verify.agent_coverage</code> — an AST check that <em>no</em> tool-exporting module can start an agent run, so the recursion guard can't be bypassed by a raw spawn.</p>
+    </div>
   </section>
 
   <section class="sec">
@@ -1166,7 +1345,7 @@
       <div class="mode">
         <span class="flag">admit</span>
         <h3>The build fails closed</h3>
-        <p>catalog_parity, prefixes, pii_reads, pii_classify, no_plaintext_pii, no_pii_columns, api_contract — AST-checked, not grepped. Each exits non-zero on a violation. A hallucinated column, net-new plaintext PII, a leaked vault value: each <strong>fails the build</strong>, proven by the agent-authoring eval.</p>
+        <p>catalog_parity, prefixes, pii_reads, pii_classify, no_plaintext_pii, no_pii_columns, api_contract, aggregate_privacy, erasure_completeness, agent_coverage — AST-checked, not grepped. Each exits non-zero on a violation. A hallucinated column, net-new plaintext PII, a leaked vault value, a tool-module that could start an agent run: each <strong>fails the build</strong>, proven by the agent-authoring eval.</p>
         <div class="fine">22 verifiers · red-path each · CI exit 0 = obeyed</div>
       </div>
       <div class="mode">
@@ -1201,6 +1380,44 @@
   </section>
 
   <section>
+    <div class="sec-label">The technical substrate — what's proven, by name</div>
+    <h2>The load-bearing invariants. <em>Each one has a name, a mechanism, and a red twin.</em></h2>
+    <p class="prose measure" style="color:var(--muted)">This is the technical-document half in one screen: the invariants everything else on this page rests on, stated by their real names in the codebase. None is a slogan — each is enforced by construction and paired with a sabotage that proves its test fails when the invariant is broken. Spot-check any of them against <code>docs/claim-evidence.md</code> and <code>_orch/verify/</code>.</p>
+    <div class="invariants">
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>INV-7 · no-PII-egress (incl. EG2)</div>
+        <p>Every AI egress is masked-by-default through one chokepoint. Tool <em>definitions</em> and tool <em>results</em> are re-scrubbed hop-by-hop; a leaked <code>vt_</code> token or a struct on the wire refuses <code>{:error, :pii_egress_refused}</code>, fail-closed — never a partial leak.</p>
+        <div class="in-proof"><b>proof:</b> ai_prompt_masking · red-team EG2 arm · adr047-a3-tools-eg2-verdict</div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Two-plane masking</div>
+        <p><code>%Masked{}</code> is the field's normal value, not a view. Tenant-plane (or operator-with-grant) resolves clear; operator-without-grant renders <strong>••••</strong> across UI, JSON, CSV, and logs — by omission, with no <code>vt_</code> token in the DOM.</p>
+        <div class="in-proof"><b>proof:</b> Samen.MaskingCase three-proofs · RED PATH 1/2/6</div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Propose-then-approve</div>
+        <p>An AI-proposed write executes <em>only</em> on a human's approval, inside the decision transaction, digest-bound, and <strong>as the approver's actor</strong>. Requester ≠ approver is enforced in policy <em>and</em> by a DB <code>CHECK</code>. The agent never holds write authority.</p>
+        <div class="in-proof"><b>proof:</b> agent_write_test · apv_distinct_party · sab 250/252/253/256</div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Erasure-completeness</div>
+        <p>Crypto-shred reaches every tier at once — live rows, replica, rollups, audit, PITR history, <strong>and the agent transcript + custom-object bags</strong>. The destruction oracle attests it left every place the data could hide.</p>
+        <div class="in-proof"><b>proof:</b> erasure_completeness · no_plaintext_pii oracle · ADR-046</div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Per-definition durable kill</div>
+        <p>A rate-trip writes an <em>org-scoped</em> kill row, never the host-wide switch — one tenant can't silence a definition for another. An unreadable row reads <code>:unknown</code>, never <code>active</code>; the gate fails closed.</p>
+        <div class="in-proof"><b>proof:</b> adr047-a5-surfaces-verdict · sab 257–262</div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>k-anonymity aggregate floor</div>
+        <p>Aggregates enforce <strong>k ≥ 5, l ≥ 2</strong>; sub-floor cohorts suppress to <strong>⊘</strong> on both planes. The tenant's own org-scoped analytics path is separate from the operator-only gate (T144), not a relaxation of it.</p>
+        <div class="in-proof"><b>proof:</b> aggregate_privacy (+ org-scoped arm) · p17-tenant-analytics-verdict</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
     <div class="sec-label">Simplicity, measured in deletions</div>
     <h2>Infrastructure you will never run</h2>
     <p class="prose measure" style="color:var(--muted)">Every box below is a thing the from-scratch stack deploys, versions, secures, monitors, and pays for. In Samen each is a table, a query, a verifier, or the base macro's normal behavior — inside the one release and the one Postgres you already have. The last rows are the unusual ones: the compliance work most stacks bolt on at the end is the storage format here.</p>
@@ -1210,6 +1427,7 @@
       <div class="gone"><div class="name">Internal admin tooling</div><p><b>→ the operator plane</b> — built from the same objects; accounts ARE tenant orgs, masked impersonation, not a second app six months later</p></div>
       <div class="gone"><div class="name">A forked product UI per app</div><p><b>→ samen_web</b> — the component kit + every LiveView is inherited; PawChart got the whole UI in 3 router lines</p></div>
       <div class="gone"><div class="name">A per-app object-preview service</div><p><b>→ ObjectRef</b> — the catalog renders any resource as a masking-aware card; new objects unfurl with zero card code</p></div>
+      <div class="gone"><div class="name">An AI-agent orchestration service</div><p><b>→ a cursor row</b> — the multi-step loop is a durable Run row over Oban; tool egress is re-masked hop-by-hop and every write goes through the approvals engine you already have, executed as the human</p></div>
       <div class="gone"><div class="name">A PII-masking layer</div><p><b>→ the field type</b> — %Masked{} is the normal value; no CSV, API, or log path leaks by omission</p></div>
       <div class="gone"><div class="name">An erasure runbook</div><p><b>→ crypto-shred</b> — destroy one key; the oracle proves the PII left every tier at once</p></div>
       <div class="gone"><div class="name">A code-search / IDE indexer</div><p><b>→ the catalog</b> — schema.dict.json is ground an agent can't hallucinate off of</p></div>
@@ -1228,7 +1446,7 @@
       <div class="brick"><span class="badge">exists</span><div class="lib">Phoenix · LiveView · AshOban</div><p>The web plane and durable jobs. Both planes are LiveViews over the same Ash resources; the reveal auto-revoke is an AshOban job enqueued in the grant's transaction.</p></div>
       <div class="brick"><span class="badge dim">prior art</span><div class="lib">Twenty · Ash · the Rule of Three</div><p>The composite-PII spec (re-implemented, not depended on), resource derivation, and the extract-the-third-product discipline. Credits and a spec, not runtime dependencies.</p></div>
       <div class="brick"><span class="badge">samen</span><div class="lib">The base macro + fragments</div><p><code style="font-family:var(--mono);font-size:12.5px">use Samen.Resource</code>: injects the abbrev transformer, catalog, vault, org-scope, and audit; <code style="font-family:var(--mono);font-size:12.5px">base:</code> folds CorePerson into one table. One line per new column, every guarantee free.</p></div>
-      <div class="brick"><span class="badge">samen</span><div class="lib">The 22-verifier gate + sabotage harness</div><p>catalog_parity, prefixes, pii_reads, pii_classify, no_plaintext_pii, no_pii_columns, api_contract, aggregate_privacy — each fail-closed, each with a red path. Every committed sabotage patch (233 today, growing every phase) proves each named guarantee's test actually fails when broken. The type system the dynamic idioms must earn.</p></div>
+      <div class="brick"><span class="badge">samen</span><div class="lib">The 22-verifier gate + sabotage harness</div><p>catalog_parity, prefixes, pii_reads, pii_classify, no_plaintext_pii, no_pii_columns, api_contract, aggregate_privacy, erasure_completeness, agent_coverage — each fail-closed, each with a red path. Every committed sabotage patch (278 today, growing every phase) proves each named guarantee's test actually fails when broken. The type system the dynamic idioms must earn.</p></div>
       <div class="brick"><span class="badge">samen</span><div class="lib">The vault + destruction oracle</div><p>Per-subject external-KMS keys, authenticated envelope crypto, %Masked{} by default, expiring second-party reveal grants, crypto-shred, and the oracle that attests erasure across every tier.</p></div>
       <div class="brick"><span class="badge">samen</span><div class="lib">The two-plane control plane + generators</div><p>Masked impersonation, the token-blind aggregate actor, hash-chained tenant-readable audit + WORM anchor + break-glass, and <code style="font-family:var(--mono);font-size:12.5px">mix samen.gen.app</code> — one command to a gate-green vertical.</p></div>
       <div class="brick"><span class="badge">samen</span><div class="lib">samen_web — the product-UI framework</div><p>The 13-component kit + the CRM/Billing/Support/Operator/Marketing/Chat LiveViews behind a Mount seam. <code style="font-family:var(--mono);font-size:12.5px">samen_module_routes</code> mounts a whole scope in ~3 lines; masking is tested in the framework. samen_core stays web-dep-free.</p></div>
@@ -1255,6 +1473,9 @@
         <li><strong>The kernel's Send suppression check — once hardcoded — is now abbrev-derived, fixed in the kernel (WS-A / ADR-014).</strong> The old <code>send_checked</code> path hardcoded the <code>msp_suppression</code> table, so a host mount's differently-named suppression table wouldn't be consulted. WS-A replaced the literal SQL with an Ash read on the mount's declared Suppression resource (abbrev-derived, inheriting <code>OrgScope</code>) — proven by a red-path test that mounts Marketing under a non-<code>msp</code> abbrev, adds an active suppression row, and confirms the send is REFUSED (no crash, no silent bypass). The framework's fail-closed consent/suppression wrapper remains as belt-and-suspenders. This residue, named in the original doc, is closed.</li>
         <li><strong>The identity-disclosure path synthesizes a tenant-plane actor.</strong> The 3-state chat identity model implements disclosure as "resolve this one participant on the <em>tenant</em> plane instead of the operator plane," which means the disclose branch builds a tenant-plane actor map rather than deriving it from the live scope. This is legitimate and org-scope-confined — the branch only fires when stored <code>disclosure_mode</code>/<code>identity_shared</code> say so, never on operator request — but it is a synthesized-actor pattern flagged for future-reader awareness, not a bypass.</li>
         <li><strong>Cosmetic label / nav residue in the demo.</strong> The "acting as" banner rendered an empty <code>&lt;b&gt;&lt;/b&gt;</code> because an <code>attr</code> default pre-empted its <code>assign_new</code> fallback — cosmetic only (the topbar/breadcrumb show the org name correctly); filed as a fix-forward. The operator "health" pill (derived from subscription status) and the billing "dunning" list (derived from invoice due dates) can read as inconsistent on the seed until "has a past-due invoice" folds into the at-risk signal. Neither affects scoping or masking; both are named polish items from the demo-coherence gate.</li>
+        <li><strong>The AI agent loop is governed, durable, and deliberately un-streamed in v1.</strong> The crown properties — reads re-masked hop-by-hop, writes via human approval executed as the approver, per-definition kill — are all shipped and gated (ADR-047 A1–A7, each with a red-path sabotage). What v1 does <em>not</em> have is live token streaming: the tenant and operator surfaces re-read on navigation, and the id-only-PubSub live-progress affordance is a <strong>named residual</strong> (§11), not a governance gap. PawChart and demo inherit the <code>/operator/agents</code> health route deliberately <em>unwired</em> and render an honest "agent plane not wired" card rather than a false empty state. The raw-<code>spawn/1</code> recursion escape is closed by an AST gate (<code>agent_coverage</code>), not a dynamic mechanism, and was confirmed not tenant-reachable — defence-in-depth, named as such.</li>
+        <li><strong>Tenant analytics enforces a k-anonymity floor, not a formal DP budget.</strong> The P17 tenant-facing surface reuses the shipped <code>Privacy.apply/3</code> floor (k ≥ 5 / l ≥ 2, sub-floor cohorts ⊘) over a vault-excluded rollup, org-bound from the authenticated scope. But cross-query <em>differencing over time</em> is guarded by a WARN-level read budget, not an enforced ε-budget — an honestly-disclosed accepted v1 residual, consistent with "token-blind is not inference-blind" above. It is a separate org-scoped path, and T144 (the operator-only analytics gate) is byte-intact, not relaxed.</li>
+        <li><strong>This is a foundry on an open pre-merge branch, not a deployed product.</strong> Everything here is built and gated GREEN on PR #1 (the <code>saas-readiness-phase-1</code> branch), not merged and not hosted. Every "live," "port 4041," or "HTTP 200" on this page means the app <em>boots and serves locally</em> — the navigable 5-tenant demo and the two verticals on their ports, proven by <code>ci.sh</code> and the game-days — never a claim of a running production instance.</li>
         <li><strong>The doc was a sales artifact; the code is the arbiter.</strong> Positioning claims from the vision (socket counts, CFO math) were never lowered into code. Where the doc asserted more than the build proves, this page tells the build's version — <code>docs/claim-evidence.md</code> maps every load-bearing claim to a test, a game-day, or a named residue, and no claim is left un-evidenced and un-labeled.</li>
       </ul>
     </div>
@@ -1262,7 +1483,7 @@
 
   <section class="cta" style="border-top:1px solid var(--rule)">
     <div class="sec-label">The pitch, in one sentence</div>
-    <h2>Your identity, CRM, billing, support, PII vault, audit, the operator plane, <em>the product UI, and realtime cross-plane chat</em> are one governed object model on one Postgres — so engineering writes only the B2B problem, the compliance-grade parts come with it, and you can support your tenants without ever seeing their customers.</h2>
+    <h2>Your identity, CRM, billing, support, PII vault, audit, the operator plane, <em>the product UI, realtime cross-plane chat, and a propose-then-approve AI agent loop</em> are one governed object model on one Postgres — so engineering writes only the B2B problem, the compliance-grade parts come with it, and you can support your tenants without ever seeing their customers.</h2>
     <div class="actions">
       <a class="btn btn-primary" href="https://github.com/ckluis/samen">Browse the repo — github.com/ckluis/samen</a>
       <a class="btn btn-ghost" href="https://github.com/ckluis/samen/blob/main/docs/claim-evidence.md">Read the claim-evidence map</a>
