@@ -61,4 +61,10 @@ Samen.AuditEvent.PartitionManager.ensure_upcoming_partitions(TestRepo, Date.utc_
 
 Ecto.Adapters.SQL.Sandbox.mode(TestRepo, :manual)
 
-ExUnit.start()
+# L4 (T90) multi-node Oban proof is OPT-IN: it boots real BEAM peer nodes against
+# a dedicated non-sandbox DB (needs epmd + distribution), so it is excluded from
+# the default fast suite. `SAMEN_MULTINODE=1 mix test` (the ci tier) includes it.
+multinode_exclude =
+  if System.get_env("SAMEN_MULTINODE") == "1", do: [], else: [:multinode]
+
+ExUnit.start(exclude: multinode_exclude)

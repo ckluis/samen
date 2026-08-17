@@ -14,6 +14,18 @@ config :samen_core, SamenCore.TestRepo,
   queue_target: 200,
   queue_interval: 2_000
 
+# L4 multi-node Oban proof (T90) — a SECOND repo on a DEDICATED database with the
+# NORMAL pool (NOT the SQL sandbox), so two real BEAM nodes can both run real Oban
+# producers against one Postgres. Only started by the opt-in `:multinode` tier
+# (`SAMEN_MULTINODE=1`); untouched by every other suite.
+config :samen_core, Samen.MultiNode.Repo,
+  username: System.get_env("USER") || "postgres",
+  password: "",
+  hostname: "localhost",
+  database: "samen_core_multinode_test",
+  pool_size: 10,
+  log: false
+
 config :logger, level: :warning
 
 # Gate-1 F1 red-path hook: the empty-registry exit-code test runs the pii_reads

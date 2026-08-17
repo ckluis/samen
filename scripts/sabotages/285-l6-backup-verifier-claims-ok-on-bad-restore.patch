@@ -1,0 +1,29 @@
+# SABOTAGE: L6 (T92) — the backup VERIFIER is neutered into claiming a bad backup is good.
+# `Samen.Backup.Verification.compare/2` is the fail-closed gate: it returns `{:mismatch, _}`
+# whenever the RESTORED manifest diverges from the primary's expected manifest (a table
+# missing from the restore, a short row count, or a drifted content checksum — i.e. exactly
+# the shapes a partial/corrupt/silently-bad backup takes). This patch drops the gate: `compare/2`
+# now returns `:ok` UNCONDITIONALLY, so a restore that came back WRONG is reported as a passing
+# verification and `verify/1` returns `{:ok, _}` for a backup that would not actually restore
+# your data. That is precisely the "did the backup work? — yes (lie)" failure L6 exists to catch,
+# and it also silences the `[:samen, :backup, :verification, :failed]` operator alert. Flips the
+# mismatch-detection cases + the alert assertion; the clean-match path stays green (non-vacuous).
+# APP: samen_core
+# TEST_FILES: test/backup_verification_test.exs
+# MUST_FAIL: a short row count is a mismatch
+# MUST_FAIL: a restore that does NOT match the manifest surfaces
+# MUST_FAIL: a failed verification raises the operator alert
+--- a/samen_core/lib/samen/backup/verification.ex
++++ b/samen_core/lib/samen/backup/verification.ex
+@@ -153,7 +153,10 @@ defmodule Samen.Backup.Verification do
+         end
+       end)
+ 
+-    if diffs == [], do: :ok, else: {:mismatch, Enum.reverse(diffs)}
++    # SABOTAGE: gate defeated — always claim OK. A mismatched (partial/corrupt/drifted)
++    # restore now passes verification and the operator alert never fires.
++    _ = diffs
++    :ok
+   end
+ 
+   # ---- operator-plane alert (token-blind) ---------------------------------------

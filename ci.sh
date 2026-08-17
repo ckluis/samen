@@ -42,6 +42,29 @@ echo "==> Running samen_core tests"
 )
 echo "==> samen_core: PASSED"
 
+# --- L4 multi-node Oban proof (T90) — permanent OPT-IN tier (SAMEN_MULTINODE=1) --------
+# Boots TWO real BEAM peer nodes against ONE Postgres and proves the Oban substrate is
+# safe under multiple nodes: (1) exactly-once fetch across nodes (SKIP LOCKED — 120
+# distinct jobs, no double-grab), (2) `unique` insert-time dedup with a refutable no-unique
+# control, (3) reveal auto-revoke FAILOVER (kill the enqueuing node; the survivor runs the
+# scheduled revoke exactly once — no double side effect). This is a genuine distributed
+# test (local nodes satisfy spec §L4), not a simulation. OPT-IN because it needs epmd + a
+# dedicated non-sandbox DB + real distribution (~10s): the default green-only path skips it;
+# phase gates and the final sweep run it explicitly. Every node spawns+joins inside the
+# test's own lifecycle — nothing is backgrounded and polled.
+echo ""
+if [[ "${SAMEN_MULTINODE:-0}" == "1" ]]; then
+  echo "==> Running multi-node Oban proof (SAMEN_MULTINODE=1 — two BEAM nodes, one Postgres)"
+  (
+    cd "$REPO_ROOT/samen_core"
+    epmd -daemon 2>/dev/null || true
+    SAMEN_MULTINODE=1 mix test test/multinode/oban_multinode_test.exs
+  )
+  echo "==> multi-node Oban proof: PASSED"
+else
+  echo "==> Skipping multi-node Oban proof (opt-in: SAMEN_MULTINODE=1 ./ci.sh boots the 2-node cluster)"
+fi
+
 # --- AI runtime eval + mask-leak red-team tier (ADR-043 §10 / D8, T72) -----------------
 # The PERMANENT D8 CI tier — a keyless, deterministic runtime eval of the AI plane, wired
 # as a first-class ROOT-gate step (like the samen_core suite / the demo verifier gate) so a
