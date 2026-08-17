@@ -135,11 +135,14 @@ defmodule DriftwoodWeb.Router do
     # IDENTITY SPINE (`samen_auth_routes` in the bare tenant scope below) now OWNS `/login` +
     # `/logout` (the generated golden-app pattern — `samen_core/.../router.ex.golden`), so
     # signup → verify → login → onboarding is ONE coherent framework flow over
-    # `Driftwood.Operator`'s Ash Identity resources. `DriftwoodWeb.AuthController` +
-    # `Driftwood.Auth`'s verifier remain the BYO REFERENCE (Driftwood.Auth is still the
-    # `operator_role`/`authorized_org_ids` seam), but no route points at the controller — the
-    # framework `Samen.Web.Auth.SessionController` is the login write. The `DriftwoodWeb.Auth`
-    # prod gate still redirects unauthenticated tenants to `/login` (now the framework LoginLive).
+    # `Driftwood.Operator`'s Ash Identity resources. The bespoke `DriftwoodWeb.AuthController`
+    # (the pre-T148 GET-logout-era BYO login controller) was REMOVED once no route pointed at it
+    # (R9 doc-sweep); `Driftwood.Auth`'s verifier remains the BYO REFERENCE seam (still the
+    # `operator_role`/`authorized_org_ids` source). The framework `Samen.Web.Auth.SessionController`
+    # is the login write, and logout is its CSRF-safe `POST /logout` (`delete/2` — revoke +
+    # `auth.logout` audit + session renew); the old `GET /logout` is inert (`stale_logout_get/2`,
+    # redirect only). The `DriftwoodWeb.Auth` prod gate still redirects unauthenticated tenants to
+    # `/login` (now the framework LoginLive).
 
     # The freight vertical 20% (stays driftwood-local — freight-shaped resources).
     #

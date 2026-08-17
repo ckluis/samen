@@ -6,8 +6,8 @@ defmodule DriftwoodWeb.IdentitySpineMountTest do
   Proves:
     * the pre-actor auth surfaces (signup / verify / reset / 2fa / invite) + login/logout +
       the onboarding wizard are routed (the ≈0-LOC adoption);
-    * the bespoke `DriftwoodWeb.AuthController` login was MIGRATED to the framework spine
-      (no route points at it anymore — `/login` is the framework LoginLive);
+    * the bespoke BYO login controller was MIGRATED to the framework spine and then REMOVED
+      (R9 doc-sweep) — `/login` is now the framework LoginLive, no host controller owns it;
     * the pre-actor paths are EXEMPT from the `DriftwoodWeb.Auth` prod gate (a new user can
       sign up / verify when auth is armed), while `/onboarding` and normal tenant surfaces
       stay gated (they need an actor).
@@ -27,13 +27,19 @@ defmodule DriftwoodWeb.IdentitySpineMountTest do
     end
   end
 
-  test "the bespoke DriftwoodWeb.AuthController is no longer routed (migrated to the framework spine)" do
-    refute Enum.any?(@routes, &(&1.plug == DriftwoodWeb.AuthController)),
-           "the bespoke AuthController should no longer own any route — /login is the framework LoginLive"
-
+  test "/login is the framework LoginLive, not a bespoke controller (migrated to the identity spine)" do
     login = Enum.find(@routes, &(&1.path == "/login" and &1.verb == :get))
-    assert login
-    refute login.plug == DriftwoodWeb.AuthController
+    assert login, "expected a GET /login route mounted by the framework identity spine"
+
+    # The bespoke `DriftwoodWeb.AuthController` was REMOVED (R9 doc-sweep) once no route pointed
+    # at it. GET /login is now served by the framework LiveView (`Samen.Web.Auth.LoginLive`) via
+    # `samen_auth_routes`, so it carries LiveView metadata and its plug is `Phoenix.LiveView.Plug`
+    # — never a host controller module.
+    assert login.plug == Phoenix.LiveView.Plug,
+           "GET /login must be the framework LoginLive (a LiveView), not a host controller"
+
+    assert elem(login.metadata.phoenix_live_view, 0) == Samen.Web.Auth.LoginLive,
+           "GET /login must resolve to the framework Samen.Web.Auth.LoginLive"
   end
 
   describe "DriftwoodWeb.Auth prod gate exemptions (T148)" do
