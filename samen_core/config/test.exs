@@ -27,7 +27,8 @@ end
 # test_helper.exs owns the Repo lifecycle (storage_up + migrate before connect).
 config :samen_core, start_repo?: false
 
-# Configure the verify_repo for mix samen.verify.column_refs in test.
+# Shared default repo for the samen_core verifiers/runtime that resolve a repo from
+# :verify_repo (migrations, no_plaintext_pii, erasure/dsar, files audit, the workers, …).
 config :samen_core, :verify_repo, SamenCore.TestRepo
 
 # T1.7 erasure: the repo backing the non_pii! registry + erasure reports. The

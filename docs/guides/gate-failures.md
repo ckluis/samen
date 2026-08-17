@@ -453,23 +453,15 @@ still green under sabotage, a verifier regressed: fix the verifier, not the prob
 
 ## Off-gate verifiers
 
-These two `samen.verify.*` tasks are not steps of the generated 18-step gate but are part of
+This `samen.verify.*` task is not a step of the generated 18-step gate but is part of
 the verifier suite (AC-G10-4 covers every task in `samen_core/lib/mix/tasks/`):
 
-### `mix samen.verify.column_refs`
-
-**Error** (`samen_core/lib/mix/tasks/samen.verify.column_refs.ex`):
-
-```text
-unknown storage column reference: <token> at <path>:<line>
-```
-
-**Meaning:** a freeform artifact (SQL fragment, projection, doc) references a physical
-column name that does not exist in the catalog — the anti-hallucination check for
-hand-written (or agent-written) storage references. Exercised by the samen_core suite
-(`catalog_test.exs`, the agent-authoring eval) rather than a fixed gate step.
-**Fix:** use the real abbrev-prefixed column name — introspect with `Samen.Catalog.fields/1`
-or read `schema.dict.json`; never guess storage names.
+> The uncatalogued-column ("hallucinated field") bug class is owned by
+> **`mix samen.verify.catalog_parity`** (a live gate step — bidirectional physical ⇄
+> `fld_field` parity). The former source-text `column_refs` linter was retired (ADR-045 A3):
+> its `^[a-z]{3}_` regex matched the whole Elixir identifier namespace (~1.5k false
+> positives) and ran in no gate, adding no coverage catalog_parity + compile-time Ash
+> attribute verification don't already give.
 
 ### `mix samen.verify.never_read_current`
 

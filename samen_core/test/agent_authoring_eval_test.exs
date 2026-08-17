@@ -40,7 +40,7 @@ defmodule SamenCore.AgentAuthoringEvalTest do
   | # | seeded wrong (what the agent got wrong)                  | owning verifier         | expect |
   |---|---------------------------------------------------------|-------------------------|--------|
   | 1 | a CORRECT new resource (vaulted PII, guarded FK, no leak)| the whole gate          | exit 0 |
-  | 2 | a hallucinated / uncatalogued column                    | catalog_parity + column_refs | exit 1 |
+  | 2 | a hallucinated / uncatalogued column                    | catalog_parity          | exit 1 |
   | 3 | net-new plaintext PII (`attribute :ssn, :string`)       | pii_classify            | exit 1 |
   | 4 | an unprefixed physical column                           | prefixes                | exit 1 |
   | 5 | a vault value logged OUTSIDE a `:reveal` action         | pii_reads               | exit 1 |
@@ -70,7 +70,7 @@ defmodule SamenCore.AgentAuthoringEvalTest do
 
   alias SamenCore.TestRepo
 
-  alias Mix.Tasks.Samen.Verify.{CatalogParity, ColumnRefs, PiiClassify, Prefixes, SameOrgFk}
+  alias Mix.Tasks.Samen.Verify.{CatalogParity, PiiClassify, Prefixes, SameOrgFk}
   alias Samen.PiiReads
   alias Samen.PiiReads.Registry
 
@@ -83,7 +83,6 @@ defmodule SamenCore.AgentAuthoringEvalTest do
   alias SamenCore.Support.SameOrgFkFixture
 
   @project_dir Path.expand("../", __DIR__)
-  @scratch_root Path.join([__DIR__, "..", "tmp", "agent_eval_scratch"])
 
   # ADR-015 (default-deny): `RevealPerson.:display_name` is a pre-existing benign-
   # named freeform :string. Under default-deny it is flagged UNLESS it is in the
@@ -97,7 +96,7 @@ defmodule SamenCore.AgentAuthoringEvalTest do
   # The scoring rubric: case_id => {label, owning_verifier, expected_exit}.
   @rubric %{
     1 => {"a correct new resource passes the whole gate", :gate, :exit_0},
-    2 => {"a hallucinated / uncatalogued column", :catalog_parity_column_refs, :exit_1},
+    2 => {"a hallucinated / uncatalogued column", :catalog_parity, :exit_1},
     3 => {"net-new plaintext PII (attribute :ssn, :string)", :pii_classify, :exit_1},
     4 => {"an unprefixed column", :prefixes, :exit_1},
     5 => {"a vault value logged outside :reveal", :pii_reads, :exit_1},
@@ -173,33 +172,21 @@ defmodule SamenCore.AgentAuthoringEvalTest do
   end
 
   # ==========================================================================
-  # CASE 2 — a hallucinated / uncatalogued column FAILS catalog_parity/column_refs
+  # CASE 2 — a hallucinated / uncatalogued column FAILS catalog_parity
   #
-  # The doc's headline: "a hallucinated field doesn't compile." Two shapes:
-  #   (a) source referencing a column that is NOT in fld_field → column_refs;
-  #   (b) a physical DB column with no fld_field row → catalog_parity.
+  # The doc's headline: "a hallucinated field doesn't compile." The bug class is
+  # owned end-to-end by the LIVE-gated `mix samen.verify.catalog_parity`: a physical
+  # DB column with no `fld_field` row (the shape an agent actually produces when it
+  # adds DDL but forgets to catalog) is caught, named, and exit-1'd. (A hallucinated
+  # ATTRIBUTE reference in Ash source does not reach here at all — it fails to
+  # compile via the Spark DSL verifiers under `--warnings-as-errors`.)
+  #
+  # The former source-text `column_refs` linter was retired (ADR-045 A3): its
+  # `^[a-z]{3}_` regex matched the entire Elixir identifier namespace (~1.5k FPs)
+  # and ran in no gate, adding no coverage catalog_parity + the compiler don't give.
   # ==========================================================================
 
   describe "CASE 2 — a hallucinated / uncatalogued column FAILS (exit 1)" do
-    test "column_refs FAILS on a source reference to an uncatalogued column" do
-      scratch = make_scratch_dir("case2_colrefs")
-
-      File.write!(Path.join(scratch, "agent_authored.ex"), """
-      defmodule Agent.Authored do
-        # The agent grounded on the WRONG name — `drv_license` is not in the catalog.
-        def dispatch(row), do: row.drv_license
-      end
-      """)
-
-      violations = ColumnRefs.check(TestRepo, [scratch])
-
-      assert violations != [],
-             "column_refs MUST FAIL on an uncatalogued column reference (exit 1)"
-
-      assert Enum.any?(violations, &(&1 =~ "drv_license")),
-             "the diagnostic must NAME the hallucinated column, got: #{inspect(violations)}"
-    end
-
     test "catalog_parity FAILS on a physical column with no fld_field row" do
       # The agent added a column to the DDL but forgot to catalog it. Seed it
       # in-sandbox on a managed table; the sandbox rolls it back at test end.
@@ -428,15 +415,15 @@ defmodule SamenCore.AgentAuthoringEvalTest do
   end
 
   defp score_case(2) do
-    scratch = make_scratch_dir("score2")
+    # The agent added a physical column to the DDL but forgot to catalog it.
+    # Seed it in-sandbox on a managed table; catalog_parity (LIVE gate) must NAME
+    # the uncatalogued column. The sandbox rolls the ALTER back at test end.
+    {:ok, _} = TestRepo.query("ALTER TABLE com_contact ADD COLUMN com_hallucinated text")
 
-    File.write!(Path.join(scratch, "x.ex"), """
-    defmodule X do
-      def f(r), do: r.drv_license
-    end
-    """)
+    caught? =
+      CatalogParity.check(TestRepo)
+      |> Enum.any?(&(&1 =~ "com_contact.com_hallucinated" and &1 =~ "uncatalogued"))
 
-    caught? = Enum.any?(ColumnRefs.check(TestRepo, [scratch]), &(&1 =~ "drv_license"))
     if caught?, do: :pass, else: :fail
   end
 
@@ -483,13 +470,6 @@ defmodule SamenCore.AgentAuthoringEvalTest do
   # --------------------------------------------------------------------------
   # Helpers
   # --------------------------------------------------------------------------
-
-  defp make_scratch_dir(name) do
-    base = Path.expand(Path.join(@scratch_root, "#{name}_#{System.unique_integer([:positive])}"))
-    File.mkdir_p!(base)
-    on_exit(fn -> File.rm_rf(base) end)
-    base
-  end
 
   # A direct (non-sandbox) Postgrex connection so a seeded DDL is visible to a
   # child OS process (which has its own connection). Copied from the pattern in
