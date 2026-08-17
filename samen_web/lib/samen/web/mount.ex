@@ -55,6 +55,8 @@ defmodule Samen.Web.Mount do
             | :settings
             | :auth
             | :automation
+            | :ai
+            | :analytics
             | :kb,
           namespace: module(),
           repo: module(),
@@ -146,6 +148,11 @@ defmodule Samen.Web.Mount do
   # T155 (ADR-043 §5.3) — the tenant-plane AI UI kit mount (verbs · semantic search ·
   # CRM AI · analytics · support draft).
   defp scope_kind("ai"), do: :ai
+  # P17 (ADR-045 §3) — the tenant own-org analytics mount (`samen_tenant_analytics_routes`).
+  # The org-scoped, k-anonymity-floored activation surface, distinct from the cross-tenant
+  # operator analytics. Registering the kind here is what lets the mount round-trip through
+  # the signed session on a REAL router mount (P17-carry-2, tenant_analytics_route_e2e_test).
+  defp scope_kind("analytics"), do: :analytics
   # T78 (spec §I5) — the UNAUTHENTICATED tenant-portal KB browse + deflection
   # mount (mounted in a host's PUBLIC router scope, no on_mount auth gate —
   # the `samen_auth_routes` posture, never the `samen_operator_routes` one).

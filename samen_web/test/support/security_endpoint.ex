@@ -102,6 +102,16 @@ defmodule Samen.WebTest.SecurityRouter do
       repo: Samen.WebTest.Repo,
       labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
     )
+
+    # P17 (ADR-045 §3, P17-carry-2) — the TENANT own-org analytics surface. It was mounted by
+    # NO router this LiveView-DRIVING harness covers, so the on_mount tenant gate + CurrentOrg
+    # org-authority pinning on `/analytics` were only ever verified by-construction (the read
+    # layer was proven in `tenant_analytics_test.exs`, never end-to-end through a real mount).
+    # Mounting the macro here puts `/analytics` under the SAME armed `?org=`-forge red paths every
+    # other tenant surface rides: an authenticated member of org A asking for org B is bound to A,
+    # never B (org bound from the authenticated scope, forge refused). Driven in
+    # `tenant_analytics_route_e2e_test.exs`.
+    samen_tenant_analytics_routes(Samen.WebTest.Crm, repo: Samen.WebTest.Repo, labels: @labels)
   end
 end
 
