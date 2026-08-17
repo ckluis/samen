@@ -33,6 +33,7 @@ defmodule Samen.FilesDeleteTest do
   alias Samen.Files.Storage.{Local, S3}
   alias Samen.Clone
   alias Samen.Erasure
+  alias Samen.Retention
   alias Samen.AuditEvent
   alias SamenCore.TestRepo
   alias SamenCore.Support.CrmScopeFixture.{Attachment, Person}
@@ -386,6 +387,119 @@ defmodule Samen.FilesDeleteTest do
       file_tier = report.tiers["file_blobs"]
       assert Enum.sum(Enum.map(file_tier, &Map.get(&1, "holds_skipped", 0))) >= 1
       assert Enum.sum(Enum.map(file_tier, &Map.get(&1, "blobs_deleted", 0))) >= 1
+    end
+  end
+
+  # ==========================================================================
+  # I2 (ADR-046 §8 residual #3) — retention `:delete` generic-purge routes the blob
+  # through the GOVERNED, ref-counted `delete_file/3` chokepoint (never a raw destroy).
+  # ==========================================================================
+
+  # Attachment is archivable, so retention `:delete` purges the TRASH — archived rows keyed
+  # on `archived_at` ("purge N days after archive", ADR-040 §5.6). Soft-delete then backdate
+  # `sca_archived_at` to `age_days` ago to make an archived row past its retention cutoff.
+  defp archive_and_age!(att, age_days) do
+    Ash.destroy!(att, authorize?: false)
+    ts = DateTime.add(DateTime.utc_now(), -age_days * 24 * 60 * 60, :second) |> DateTime.truncate(:microsecond)
+    @repo.query!("UPDATE sca_attachment SET sca_archived_at = $1 WHERE sca_id = $2", [ts, Ecto.UUID.dump!(att.id)])
+  end
+
+  # PHYSICAL row existence (archive-inclusive) — an archived-but-not-purged row is absent
+  # from `attachment_exists?/1` (the live read) but still physically present, so distinguish
+  # "archived" (row present) from "purged" (row physically gone) over the raw table.
+  defp attachment_row_present?(id) do
+    %{rows: [[n]]} = @repo.query!("SELECT count(*) FROM sca_attachment WHERE sca_id = $1", [Ecto.UUID.dump!(id)])
+    n > 0
+  end
+
+  describe "retention :delete blob purge (governed chokepoint)" do
+    test "an expired :delete sweep of a blob-backed resource PURGES the blob AND the row (governed + audited)",
+         %{org: org, scope: scope, storage_config: cfg} do
+      key = "ret-del-#{uniq()}"
+      bytes = "retention-purge-me-#{uniq()}"
+      att = attach_with_blob(org, scope, cfg, key, bytes)
+      assert {:ok, ^bytes} = Local.get(key, cfg)
+
+      # A blob-backed resource IS routed through the governed chokepoint on :delete.
+      assert Retention.blob_backed?(Attachment)
+
+      # Trash it, then age it past the retention window.
+      archive_and_age!(att, 400)
+      assert attachment_row_present?(att.id)
+
+      spec = %{
+        resource: Attachment,
+        ttl_seconds: 90 * 24 * 3600,
+        action: :delete,
+        timestamp_field: :archived_at,
+        storage: Local,
+        storage_config: cfg
+      }
+
+      assert %{swept: 1} = Retention.sweep([spec], now: DateTime.utc_now(), repo: @repo)
+
+      # GOVERNED reach: the raw blob bytes are GONE and the row is physically destroyed.
+      assert {:error, :not_found} = Local.get(key, cfg)
+      refute attachment_row_present?(att.id)
+
+      # The delete went through the chokepoint's token-only audit (never the storage_key).
+      events = AuditEvent.for_subject(@repo, to_string(att.id))
+      refute Enum.any?(events, fn e -> inspect(e) =~ key end)
+    end
+
+    test "POSITIVE CONTROL: an in-TTL archived blob-backed row is NEVER touched (blob + row survive)",
+         %{org: org, scope: scope, storage_config: cfg} do
+      key = "ret-keep-#{uniq()}"
+      bytes = "retention-keep-me-#{uniq()}"
+      att = attach_with_blob(org, scope, cfg, key, bytes)
+
+      # Trashed just now — well within a 100-year window.
+      archive_and_age!(att, 1)
+
+      spec = %{
+        resource: Attachment,
+        ttl_seconds: 100 * 365 * 24 * 3600,
+        action: :delete,
+        timestamp_field: :archived_at,
+        storage: Local,
+        storage_config: cfg
+      }
+
+      assert %{swept: 0} = Retention.sweep([spec], now: DateTime.utc_now(), repo: @repo)
+
+      assert {:ok, ^bytes} = Local.get(key, cfg)
+      assert attachment_row_present?(att.id)
+    end
+
+    test "T130 REF-COUNT SAFETY: sweeping ONE aliasing row leaves a still-referenced blob (governed, not raw)",
+         %{org: org, scope: scope, storage_config: cfg} do
+      key = "ret-alias-#{uniq()}"
+      bytes = "retention-shared-#{uniq()}"
+      source = attach_with_blob(org, scope, cfg, key, bytes)
+      {:ok, clone} = Clone.clone(source, scope, repo: @repo)
+
+      # The clone ALIASES the same blob; trash + age ONLY the clone (source stays live, so it
+      # is never in the archived-trash read the sweep purges).
+      assert clone.storage_key == key
+      archive_and_age!(clone, 400)
+
+      spec = %{
+        resource: Attachment,
+        ttl_seconds: 30 * 24 * 3600,
+        action: :delete,
+        timestamp_field: :archived_at,
+        storage: Local,
+        storage_config: cfg
+      }
+
+      assert %{swept: 1} = Retention.sweep([spec], now: DateTime.utc_now(), repo: @repo)
+
+      # The expired clone's row is physically gone, but the live SOURCE still references the
+      # blob — so the ref-counted governed delete leaves the bytes INTACT (a raw delete would
+      # have destroyed a still-referenced blob — exactly the T130 lie the chokepoint prevents).
+      refute attachment_row_present?(clone.id)
+      assert attachment_exists?(source.id)
+      assert {:ok, ^bytes} = Local.get(key, cfg)
     end
   end
 end

@@ -27,14 +27,21 @@ defmodule Samen.Erasure.Completeness do
       bag column. Masking is automatic-by-construction (the resolver reads every org's
       `tnt_field`), and erasure is guaranteed at the `Samen.CustomFields.define_field/2`
       chokepoint (a `pii_declared: true` field is REFUSED unless a `:custom_bag_erasure_specs`
-      spec covers its table). The gate asserts BOTH governing mechanisms are live.
+      spec covers its table). The gate asserts BOTH governing mechanisms are live. The SAME
+      define-time discipline covers the **custom-OBJECT record bag** (`tnt$obj$…`, ADR-046 §8
+      residual #2): a `pii_declared: true` field on a tenant-defined object table is EQUALLY
+      refused unless a `:record_bag_erasure_specs` arm covers the object, so a custom object
+      cannot carry PII in its `tnt_record` bag with no erasure arm.
     * **(c) `storage_key` columns** — raw stored file blobs (outside the DEK envelope).
       A subject-linked blob (the resource carries a data-subject field — `uploaded_by_id`
       for a blob *uploaded BY* a subject, or a domain subject-FK like `person_id` for a
       blob *ABOUT* a subject, ADR-046 §7 #5) must be covered by a `:file_erasure_specs`
       entry. An org-asset blob (no data-subject field, e.g. CMS `Media`) is not a
       per-subject-erasure residue; it is REPORTED as an org-lifecycle residual (named, not
-      silently dropped).
+      silently dropped). Additionally, EVERY `storage_key` blob (subject-linked and org-asset)
+      must have its RETENTION `:delete` generic-purge routed through the governed ref-counted
+      `Samen.Files.delete_file/3` chokepoint (`Samen.Retention.blob_backed?/1`), never a raw
+      `Ash.destroy!` that orphans the blob bytes (ADR-046 §8 residual #3).
     * **(d) regression floor** — the already-covered classes: `non_pii!` columns
       (redacted row-level inside `shred/2`) and DEK-keyed pseudonyms (unlinked for free
       by key-shred). Asserted still-wired so a refactor cannot drop them.
@@ -249,7 +256,7 @@ defmodule Samen.Erasure.Completeness do
 
       true ->
         {dl_violations, dl_report} = check_derived_linkable(residues.derived_linkable, bidx_specs)
-        {sk_violations, sk_report} = check_storage_key(residues.storage_key, file_specs)
+        {sk_violations, sk_report} = check_storage_key(residues.storage_key, file_specs, opts)
         {bag_violations, bag_report} = check_custom_bag(residues.custom_bag, opts)
         {tr_violations, tr_report} = check_transcript(residues.transcript, retention_specs)
         floor = regression_floor()
@@ -312,10 +319,18 @@ defmodule Samen.Erasure.Completeness do
   end
 
   # (c) storage_key — subject-linked blobs need a file spec; org-asset blobs are residual.
-  defp check_storage_key(residues, specs) do
+  # PLUS: the RETENTION `:delete` generic-purge arm must route EVERY storage_key blob (subject
+  # -linked AND org-asset) through the governed, ref-counted `Samen.Files.delete_file/3`
+  # chokepoint — never a raw `Ash.destroy!` that drops the row and ORPHANS the blob bytes
+  # (ADR-046 §8 residual #3). `Samen.Retention.blob_backed?/1` is the LIVE routing predicate the
+  # `:delete` sweep itself branches on, so asserting it here ties the gate to the real behavior:
+  # neuter the predicate and both the sweep (raw destroy, blob survives) AND this arm flip.
+  # Injectable (`:retention_blob_backed_fun`) so a unit test models the gap and proves detection.
+  defp check_storage_key(residues, specs, opts) do
     {subject_linked, org_assets} = Enum.split_with(residues, & &1.subject_field)
+    blob_backed_fun = opts[:retention_blob_backed_fun] || (&Samen.Retention.blob_backed?/1)
 
-    violations =
+    file_violations =
       Enum.flat_map(subject_linked, fn r ->
         if file_covered?(r, specs) do
           []
@@ -329,13 +344,31 @@ defmodule Samen.Erasure.Completeness do
         end
       end)
 
+    retention_violations =
+      Enum.flat_map(residues, fn r ->
+        if blob_backed_fun.(r.resource) do
+          []
+        else
+          [
+            "UN-PURGED storage_key blob on #{inspect(r.resource)} (#{r.table}.#{r.column}): " <>
+              "`Samen.Retention`'s `:delete` generic-purge does NOT route this blob through the " <>
+              "governed ref-counted `Samen.Files.delete_file/3` chokepoint — an expired-retention " <>
+              "`:delete` would drop the row via a raw destroy and ORPHAN the blob bytes (never " <>
+              "deleted, never ref-count-checked). Route it through the chokepoint (ADR-046 §8 #3)."
+          ]
+        end
+      end)
+
+    retention_blob_aware? = retention_violations == []
+
     report = %{
       count: length(residues),
       subject_linked: Enum.map(subject_linked, &"#{&1.table}.#{&1.column}"),
-      org_assets: Enum.map(org_assets, &"#{inspect(&1.resource)} (#{&1.table}.#{&1.column})")
+      org_assets: Enum.map(org_assets, &"#{inspect(&1.resource)} (#{&1.table}.#{&1.column})"),
+      retention_blob_aware: retention_blob_aware?
     }
 
-    {violations, report}
+    {file_violations ++ retention_violations, report}
   end
 
   defp file_covered?(r, specs) do
@@ -343,40 +376,56 @@ defmodule Samen.Erasure.Completeness do
   end
 
   # (b) custom bag — masking automatic + erasure guaranteed at the define chokepoint.
+  #
+  # Two rungs of the SAME discipline are asserted here:
+  #   * FIRST-CLASS bag (`:custom` column on a catalog resource) — masking resolver live +
+  #     `define_field/2` refuses a `pii_declared: true` field on an un-covered table.
+  #   * CUSTOM-OBJECT record bag (`tnt$obj$…`, ADR-046 §8 residual #2) — the analogue rung:
+  #     `define_field/2` must EQUALLY refuse a `pii_declared: true` field on a `tnt$obj$…`
+  #     object table unless a `:record_bag_erasure_specs` arm covers the object. Without this
+  #     a custom object could carry PII in its `tnt_record` bag with no erasure arm — the exact
+  #     escape the E6 first-class rung closes. Refutable: restore the blanket `tnt$obj$` exempt
+  #     (or inject `:object_guard_fun`) and the object-bag rung is named un-enforced.
   defp check_custom_bag(residues, opts) do
     masking_ok? = masking_arm_present?()
-    guard_ok? = if opts[:skip_bag_guard?], do: true, else: define_guard_enforced?()
+    guard_fun = opts[:object_guard_fun] || (&define_object_guard_enforced?/0)
+
+    {guard_ok?, object_guard_ok?} =
+      if opts[:skip_bag_guard?] do
+        {true, true}
+      else
+        {define_guard_enforced?(), guard_fun.()}
+      end
 
     violations =
-      cond do
-        residues == [] ->
-          # Not fatal on its own (bags are optional), but if present must be governed.
-          []
-
-        not masking_ok? ->
-          [
-            "custom-bag MASKING arm missing: the universal `pii_declared` masking resolver " <>
-              "(Samen.Api.PiiResolution) is not present — a pii_declared bag key could ship " <>
-              "UNMASKED to an operator without a grant."
-          ]
-
-        not guard_ok? ->
-          [
-            "custom-bag ERASURE guard not enforced: `Samen.CustomFields.define_field/2` no " <>
-              "longer REFUSES a `pii_declared: true` field on an un-covered table — a " <>
-              "pii_declared bag could ship UN-ERASABLE (no `:custom_bag_erasure_specs` arm)."
-          ]
-
-        true ->
-          []
-      end
+      []
+      |> add_if(
+        residues != [] and not masking_ok?,
+        "custom-bag MASKING arm missing: the universal `pii_declared` masking resolver " <>
+          "(Samen.Api.PiiResolution) is not present — a pii_declared bag key could ship " <>
+          "UNMASKED to an operator without a grant."
+      )
+      |> add_if(
+        residues != [] and masking_ok? and not guard_ok?,
+        "custom-bag ERASURE guard not enforced: `Samen.CustomFields.define_field/2` no " <>
+          "longer REFUSES a `pii_declared: true` field on an un-covered table — a " <>
+          "pii_declared bag could ship UN-ERASABLE (no `:custom_bag_erasure_specs` arm)."
+      )
+      |> add_if(
+        not object_guard_ok?,
+        "custom-OBJECT record-bag ERASURE guard not enforced: `Samen.CustomFields.define_field/2` " <>
+          "no longer REFUSES a `pii_declared: true` field on a `tnt$obj$…` object table — a " <>
+          "custom object's `tnt_record` bag could ship UN-ERASABLE (no `:record_bag_erasure_specs` " <>
+          "arm), escaping the discipline first-class resources cannot (ADR-046 §8 residual #2)."
+      )
 
     {violations,
      %{
        count: length(residues),
        columns: Enum.map(residues, &"#{&1.table}.#{&1.column}"),
        masking_arm: masking_ok?,
-       erasure_guard: guard_ok?
+       erasure_guard: guard_ok?,
+       object_bag_guard: object_guard_ok?
      }}
   end
 
@@ -415,6 +464,32 @@ defmodule Samen.Erasure.Completeness do
   # A non-nil placeholder repo so define_field does not call default_repo!/0; the guard
   # refuses before the repo is ever touched (the insert is never reached).
   defp __probe_repo__, do: Application.get_env(:samen_core, :vault_repo) || :__erasure_completeness_no_repo__
+
+  # Prove the CUSTOM-OBJECT record-bag erasability guard is LIVE (ADR-046 §8 residual #2):
+  # a `pii_declared: true` field on a `tnt$obj$…` object table that no `:record_bag_erasure_specs`
+  # entry covers MUST be refused, exactly as the first-class rung refuses on an un-covered
+  # physical table. Like `define_guard_enforced?/0` the guard short-circuits before any DB
+  # insert (it only reads config), so this probe needs no live row. If the blanket `tnt$obj$`
+  # exemption is restored, define_field returns `{:ok, _}` (or raises reaching the insert) —
+  # either way NOT the refusal, so the object-bag guard is reported un-enforced.
+  defp define_object_guard_enforced? do
+    object_table = Samen.CustomObjects.object_table("__erasure_completeness_probe__")
+
+    probe = %{
+      org_id: "erasure-completeness-probe",
+      table_name: object_table,
+      field_name: "probe",
+      type: :string,
+      pii_declared: true
+    }
+
+    match?(
+      {:error, {:pii_declared_unerasable, ^object_table}},
+      Samen.CustomFields.define_field(probe, __probe_repo__())
+    )
+  rescue
+    _ -> false
+  end
 
   # (e) vault-routed transcripts (ADR-047 §7.4) — each discovered transcript resource
   # must be covered by a registered retention `:shred` arm keyed on the row's OWN id

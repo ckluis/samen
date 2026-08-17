@@ -22,6 +22,12 @@ defmodule Samen.Retention do
     * `:delete` — the resource carries no subject key of its own (or is a pure
       event/log row); expired rows are hard-deleted (pruned). (Files/messages/tickets
       whose subject is erased via their parent, or whose retention is a straight prune.)
+      When the resource is **blob-backed** (`Samen.Retention.blob_backed?/1` — it carries a
+      `storage_key`), a `:delete` purge routes each expired row's blob through the governed,
+      ref-counted, fail-honest `Samen.Files.delete_file/3` chokepoint (last-reference-aware,
+      T130-safe, audited) — never a raw `Ash.destroy!` that drops the row and orphans the raw
+      file bytes (ADR-046 §8 residual #3). The `:storage`/`:storage_config` `Spec` fields name
+      the adapter.
 
   ## Fail-closed cutoff — the load-bearing safety
 
@@ -213,21 +219,35 @@ defmodule Samen.Retention do
     0
   end
 
-  defp sweep_one(%Spec{action: :delete} = spec, now, _opts) do
+  defp sweep_one(%Spec{action: :delete} = spec, now, opts) do
     wall = cutoff(spec.ttl_seconds, now)
-    destroy_opts = terminal_destroy_opts(spec.resource)
 
     expired =
-      expired_query(spec, wall)
+      spec
+      |> expired_query(wall)
+      # A blob-backed (`storage_key`) resource must also purge its raw file bytes, so ensure
+      # the key + org are loaded for the governed delete (they are not selected by default).
+      |> ensure_delete_fields(spec)
       # authz-scope: system retention sweep — cross-org BY DESIGN (purges EVERY tenant's
       # rows past the TTL cutoff, narrowed by expired_query/2's timestamp filter); runs
       # under no tenant actor, selects no vault field. Cannot be org_id-pinned (T132).
       |> Ash.read!(authorize?: false)
 
-    Enum.reduce(expired, 0, fn row, acc ->
-      Ash.destroy!(row, destroy_opts)
-      acc + 1
-    end)
+    if blob_backed?(spec.resource) do
+      # ADR-046 §8 residual #3: a `:delete` purge of a `storage_key`-bearing resource must
+      # route the blob through the GOVERNED, ref-counted `Samen.Files.delete_file/3`
+      # chokepoint (last-reference-aware, T130-safe, audited) — NEVER a raw `Ash.destroy!`
+      # that drops the row and orphans the bytes. delete_file does the terminal row destroy
+      # AND the ref-counted blob delete in one transaction.
+      purge_blobs(spec, expired, opts)
+    else
+      destroy_opts = terminal_destroy_opts(spec.resource)
+
+      Enum.reduce(expired, 0, fn row, acc ->
+        Ash.destroy!(row, destroy_opts)
+        acc + 1
+      end)
+    end
   rescue
     e ->
       Logger.error("[Samen.Retention] delete sweep failed for #{inspect(spec.resource)}: #{inspect(e)}")
@@ -272,6 +292,76 @@ defmodule Samen.Retention do
     e ->
       Logger.error("[Samen.Retention] shred sweep failed for #{inspect(spec.resource)}: #{inspect(e)}")
       0
+  end
+
+  # Purge each expired blob-backed row through the governed ref-counted chokepoint. A row
+  # with no blob (nil/blank `storage_key`) has no bytes to purge, so it takes the ordinary
+  # terminal row destroy. A governed delete that FAILS (fail-honest: e.g. an unconfigured
+  # adapter) is logged and the row is PRESERVED (delete_file rolls back) — never dropping a
+  # reference while the blob survives, and never counting a delete that did not happen.
+  defp purge_blobs(spec, rows, opts) do
+    repo = Keyword.get(opts, :repo) || AshPostgres.DataLayer.Info.repo(spec.resource, :mutate)
+    destroy_opts = terminal_destroy_opts(spec.resource)
+
+    Enum.reduce(rows, 0, fn row, acc ->
+      key = Map.get(row, :storage_key)
+
+      cond do
+        not (is_binary(key) and key != "") ->
+          # No blob to purge — ordinary terminal row delete (unchanged behavior).
+          Ash.destroy!(row, destroy_opts)
+          acc + 1
+
+        true ->
+          scope = %{org_id: Map.get(row, spec.org_field), actor_id: "system:retention"}
+
+          case Samen.Files.delete_file(scope, row,
+                 file_module: spec.resource,
+                 repo: repo,
+                 storage: spec.storage,
+                 storage_config: spec.storage_config
+               ) do
+            {:ok, _} ->
+              acc + 1
+
+            {:error, reason} ->
+              Logger.error(
+                "[Samen.Retention] governed blob delete failed for #{inspect(spec.resource)} " <>
+                  "row #{inspect(Map.get(row, :id))}: #{inspect(reason)} — row PRESERVED " <>
+                  "(fail-honest; the blob is never orphaned)."
+              )
+
+              acc
+          end
+      end
+    end)
+  end
+
+  # Load the `storage_key`/org columns a governed `:delete` needs on a blob-backed resource
+  # (they are not in the default select). A non-blob-backed resource's query is untouched.
+  defp ensure_delete_fields(query, spec) do
+    if blob_backed?(spec.resource) do
+      Ash.Query.ensure_selected(query, [:storage_key, spec.org_field])
+    else
+      query
+    end
+  end
+
+  @doc """
+  Is `resource` **blob-backed** — does it carry a `storage_key` column, so a `:delete`
+  retention sweep must route its bytes through the governed ref-counted
+  `Samen.Files.delete_file/3` chokepoint (ADR-046 §8 residual #3)?
+
+  This is the LIVE routing predicate `sweep_one/3`'s `:delete` arm branches on, and the
+  same one the erasure-completeness gate (`Samen.Erasure.Completeness`) asserts is true for
+  every discovered `storage_key` residue — so a change that stops routing blobs through the
+  chokepoint flips BOTH the sweep behavior AND the gate (anti-tautology).
+  """
+  @spec blob_backed?(module()) :: boolean()
+  def blob_backed?(resource) do
+    Ash.Resource.Info.attribute(resource, :storage_key) != nil
+  rescue
+    _ -> false
   end
 
   # Rows whose retention timestamp is at/before the wall — the expired set. The field

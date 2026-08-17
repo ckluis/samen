@@ -516,16 +516,26 @@ close — stated plainly so urgency is not overclaimed.
    or is the org's retention interest legitimate? — is **flagged needs-operator-input** (§7#5).
    Recommendation: extend detection to domain subject-FKs for content-bearing blobs, gated by a
    retention-hold exception; keep CMS Media's org scope. See §7#5 for the full framing.
-2. **INFO residual — custom-OBJECT (`tnt$obj$…`) `pii_declared` uncovered rung.** E6 closed the
-   `pii_declared` bag rung for custom *fields* on catalog resources; the analogous rung on custom
-   **objects** (`tnt$obj$…` record bags) is a known-uncovered discovery class carried as INFO —
-   latent (no shipped custom-object surface defines a `pii_declared` bag today), tracked so a
-   future adopter's custom-object bag cannot slip the gate silently.
-3. **E4 residual — retention `:delete` generic-purge blob deletion not wired.** E4 shipped the
-   governed `Storage.delete` chokepoint + ref-count and wired erasure/shred to it; the retention
-   engine's generic `:delete` (non-shred) purge arm does **not** yet route blob deletion through
-   the chokepoint. Named residual — the delete *capability* exists and is fail-honest; the generic
-   retention-purge caller is a follow-on wiring item, not a silent gap.
+2. **CLOSED (Phase-3 leftovers) — custom-OBJECT (`tnt$obj$…`) `pii_declared` uncovered rung.** E6
+   closed the `pii_declared` bag rung for custom *fields* on catalog resources; the analogous rung
+   on custom **objects** (`tnt$obj$…` record bags) was a known-uncovered discovery class carried as
+   INFO. **Now closed:** the `define_field/2` guard no longer blanket-exempts `tnt$obj$…` tables —
+   a `pii_declared: true` custom-object field is REFUSED unless a `:record_bag_erasure_specs` arm
+   covers the object (`Samen.CustomObjects.Erasure`, per-key redaction of the `tnt_record` bag keyed
+   via the record's opaque `refs` subject reference, wired into `Samen.Erasure.shred/2`). The
+   completeness gate's class (b) now asserts the object-bag rung of the guard is live (refutable
+   arm; sabotages 271–273). Latent either way (no shipped custom-object surface defines a
+   `pii_declared` bag), so the value is future-adopter safety, stated plainly.
+3. **CLOSED (Phase-3 leftovers) — retention `:delete` generic-purge blob deletion wired.** E4
+   shipped the governed `delete_file/3` chokepoint + ref-count and wired erasure/shred to it; the
+   retention engine's generic `:delete` (non-shred) purge arm did **not** route blob deletion
+   through the chokepoint. **Now wired:** `Samen.Retention`'s `:delete` sweep of a blob-backed
+   resource (`Samen.Retention.blob_backed?/1` — carries a `storage_key`) routes each expired row's
+   blob through the governed, ref-counted, fail-honest `delete_file/3` (last-reference-aware,
+   T130-safe, audited) — never a raw destroy that orphans the bytes. The completeness gate's class
+   (c) now asserts every `storage_key` residue is retention-blob-aware (refutable arm; sabotages
+   274–275). Latent (no shipped host registers a `:delete` retention spec today), so future-adopter
+   safety.
 4. **E4 residual — blob encryption-at-rest is explicitly out of scope.** D4 makes erasure reach
    blobs by **deletion**, not by bringing blob bytes into the DEK envelope (`Local.put/3` writes
    raw bytes). At-rest blob encryption remains a named residual, unchanged by this cluster.

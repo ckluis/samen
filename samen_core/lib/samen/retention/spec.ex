@@ -15,6 +15,13 @@ defmodule Samen.Retention.Spec do
       erasure event rides the TENANT's T4.3 chain (ADR-002), not the reserved
       `"__global__"` operator/system chain (D5 / ADR-046 §4.4). Config, not a DB
       column — every subject-bearing resource already carries the injected `org_id`.
+    * `:storage`         — the file-storage adapter for a `:delete` sweep of a
+      `storage_key`-bearing (blob-backed) resource (default `Samen.Files.Storage.Local`).
+      A `:delete` purge of a blob-backed resource routes each expired row's blob through
+      the governed, ref-counted `Samen.Files.delete_file/3` chokepoint (never a raw
+      destroy that orphans the bytes — ADR-046 §8 residual #3); this names the adapter.
+    * `:storage_config`  — the adapter config map for that governed delete (default `%{}`,
+      e.g. `%{root: "/var/lib/app/files"}` for `Local`). Config, not a DB column.
   """
 
   @enforce_keys [:resource, :ttl_seconds, :action]
@@ -23,7 +30,9 @@ defmodule Samen.Retention.Spec do
             action: nil,
             timestamp_field: :inserted_at,
             subject_field: :subject_id,
-            org_field: :org_id
+            org_field: :org_id,
+            storage: Samen.Files.Storage.Local,
+            storage_config: %{}
 
   @type t :: %__MODULE__{
           resource: module(),
@@ -31,7 +40,9 @@ defmodule Samen.Retention.Spec do
           action: :shred | :delete,
           timestamp_field: atom(),
           subject_field: atom(),
-          org_field: atom()
+          org_field: atom(),
+          storage: module(),
+          storage_config: map()
         }
 
   @doc "Coerce a plain map/keyword spec into a `%Spec{}` with defaults filled."
@@ -47,7 +58,9 @@ defmodule Samen.Retention.Spec do
       action: Map.fetch!(attrs, :action),
       timestamp_field: Map.get(attrs, :timestamp_field, :inserted_at),
       subject_field: Map.get(attrs, :subject_field, :subject_id),
-      org_field: Map.get(attrs, :org_field, :org_id)
+      org_field: Map.get(attrs, :org_field, :org_id),
+      storage: Map.get(attrs, :storage, Samen.Files.Storage.Local),
+      storage_config: Map.get(attrs, :storage_config, %{})
     }
   end
 end

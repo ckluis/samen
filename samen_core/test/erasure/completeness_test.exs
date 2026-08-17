@@ -118,6 +118,54 @@ defmodule Samen.Erasure.CompletenessTest do
     assert {:ok, report} = check(@clean, skip_bag_guard?: false)
     assert report.custom_bag.erasure_guard == true
     assert report.custom_bag.masking_arm == true
+    # I1 (ADR-046 §8 residual #2): the custom-OBJECT record-bag rung of the SAME guard is
+    # ALSO live — a pii_declared field on a `tnt$obj$…` object table with no record-bag arm
+    # is refused, closing the analogue escape.
+    assert report.custom_bag.object_bag_guard == true
+  end
+
+  # ======================================================================
+  # I1 — custom-OBJECT record-bag define-time guard (ADR-046 §8 residual #2)
+  # ======================================================================
+
+  test "the custom-OBJECT record-bag guard arm is REFUTABLE (a neutered object-guard is named)" do
+    # Positive control: with the live guard the tree passes (proven above).
+    assert {:ok, _} = check(@clean, skip_bag_guard?: false)
+
+    # Model the gap: the object-bag guard no longer refuses a pii_declared tnt$obj$ field
+    # (the blanket exemption restored). The gate MUST name the un-enforced object-bag rung —
+    # proving the arm is not a tautology.
+    assert {:error, {:incomplete, violations, _}} =
+             check(@clean, skip_bag_guard?: false, object_guard_fun: fn -> false end)
+
+    assert Enum.any?(
+             violations,
+             &(&1 =~ "custom-OBJECT record-bag ERASURE guard not enforced")
+           )
+  end
+
+  # ======================================================================
+  # I2 — retention :delete generic-purge blob routing (ADR-046 §8 residual #3)
+  # ======================================================================
+
+  test "every storage_key residue is retention-blob-aware (routes :delete through the chokepoint)" do
+    assert {:ok, report} = check(@clean)
+    assert report.storage_key.retention_blob_aware == true
+  end
+
+  test "the retention-blob-aware arm is REFUTABLE (an un-routed storage_key blob is named)" do
+    # Positive control: with the live routing predicate the tree passes.
+    assert {:ok, _} = check(@clean)
+
+    # Model the gap: retention's :delete no longer routes any storage_key blob through the
+    # governed chokepoint. BOTH the subject-linked File AND the org-asset Media blob must be
+    # named UN-PURGED (a raw destroy would orphan the bytes) — proving the arm is not a
+    # tautology and covers org-asset blobs too.
+    assert {:error, {:incomplete, violations, _}} =
+             check(@clean, retention_blob_backed_fun: fn _ -> false end)
+
+    assert Enum.any?(violations, &(&1 =~ "UN-PURGED storage_key blob" and &1 =~ "fil_storage_key"))
+    assert Enum.any?(violations, &(&1 =~ "UN-PURGED storage_key blob" and &1 =~ "med_storage_key"))
   end
 
   # ======================================================================

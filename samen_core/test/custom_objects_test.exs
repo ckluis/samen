@@ -255,7 +255,14 @@ defmodule SamenCore.CustomObjectsTest do
       s = scope_for(o)
       define_object!(o, "contact_note")
       define_field!(o, "contact_note", "note", :string)
-      define_field!(o, "contact_note", "declared_email", :string, pii_declared: true)
+      # ADR-046 §8 residual #2: a pii_declared custom-object field is now REFUSED at define
+      # unless a record-bag erasure arm covers the object (the analogue of the first-class
+      # discipline). Declare erasability inline so the pii_declared field is admissible.
+      define_field!(o, "contact_note", "declared_email", :string,
+        pii_declared: true,
+        record_bag_specs: [%{object_key: "contact_note", subject_ref_key: "subject"}]
+      )
+
       %{org: o, scope: s}
     end
 

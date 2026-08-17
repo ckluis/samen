@@ -1,0 +1,24 @@
+# SABOTAGE: I2 (ADR-046 §8 residual #3) — the retention `:delete` generic-purge no longer
+# routes a blob-backed resource through the GOVERNED ref-counted `Samen.Files.delete_file/3`
+# chokepoint: the `if blob_backed?(spec.resource)` branch is forced OFF (`if false and …`),
+# so an expired `:delete` sweep falls to a raw `Ash.destroy!` that drops the row and ORPHANS
+# the raw file bytes — the exact carve-out gap this residual closes. `blob_backed?/1` itself
+# is unchanged (still referenced, still true), so the sweep's routing is what breaks. Flips
+# the governed-purge proof (after the sweep `Storage.get(key)` still returns the bytes instead
+# of :not_found) while the row IS still deleted and the audit/ref-count arms are untouched.
+# APP: samen_core
+# TEST_FILES: test/files_delete_test.exs
+# MUST_FAIL: an expired :delete sweep of a blob-backed resource PURGES the blob AND the row
+diff --git a/samen_core/lib/samen/retention.ex b/samen_core/lib/samen/retention.ex
+--- a/samen_core/lib/samen/retention.ex
++++ b/samen_core/lib/samen/retention.ex
+@@ -234,6 +234,8 @@ defmodule Samen.Retention do
+       |> Ash.read!(authorize?: false)
+ 
+-    if blob_backed?(spec.resource) do
++    # SABOTAGE: the :delete sweep no longer routes a blob-backed resource through the governed
++    # delete_file chokepoint — it falls to a raw destroy that ORPHANS the file bytes.
++    if false and blob_backed?(spec.resource) do
+       # ADR-046 §8 residual #3: a `:delete` purge of a `storage_key`-bearing resource must
+       # route the blob through the GOVERNED, ref-counted `Samen.Files.delete_file/3`
+       # chokepoint (last-reference-aware, T130-safe, audited) — NEVER a raw `Ash.destroy!`

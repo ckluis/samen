@@ -122,8 +122,11 @@ defmodule Samen.CustomFields do
   `pii_declared: true` definition is **REFUSED** (`{:error, {:pii_declared_unerasable,
   table}}`) UNLESS a custom-bag erasure spec covers the table — so a live pii_declared
   bag can never exist without a registered arm to erase it (masked AND erasable, by
-  construction). Custom-OBJECT tables (`tnt$obj$…`) are exempt: they are a distinct
-  malleability rung with their own erasure story, out of D3's scope.
+  construction). Custom-OBJECT tables (`tnt$obj$…`) get the SAME discipline via their own
+  rung (ADR-046 §8 residual #2): a pii_declared field on a custom object is refused unless a
+  `:record_bag_erasure_specs` arm (config, or inline `:record_bag_specs`) covers the object
+  — the `Samen.CustomObjects.Erasure` arm that reaches the `tnt_record` bag. Formerly a
+  blanket exemption; closed so a custom object cannot carry PII with no erasure arm.
   """
   @spec define_field(map() | keyword(), Ecto.Repo.t() | nil) ::
           {:ok, FieldRow.t()} | {:error, term()}
@@ -567,8 +570,11 @@ defmodule Samen.CustomFields do
   # The pii_declared erasability guard (ADR-046 §4.2 D3, fail-closed chokepoint)
   # ---------------------------------------------------------------------------
 
-  # Custom-object tables carry their own prefix and a distinct erasure story — out
-  # of D3's scope, so they are exempt from the bag-erasability guard.
+  # Custom-object field tables carry this synthetic prefix (`Samen.CustomObjects.object_table/1`).
+  # Their record bag lives in `tnt_record` and has its OWN erasure arm
+  # (`Samen.CustomObjects.Erasure`, `:record_bag_erasure_specs`) — NOT the physical-table
+  # `:custom_bag_erasure_specs` registry. The guard applies the SAME discipline to both rungs
+  # (ADR-046 §8 residual #2): a pii_declared field is refused unless its rung's arm covers it.
   @object_table_prefix "tnt$obj$"
 
   # A non-PII field is always fine; a pii_declared field is refused unless erasable.
@@ -578,9 +584,19 @@ defmodule Samen.CustomFields do
     table = to_string(table)
 
     cond do
-      String.starts_with?(table, @object_table_prefix) -> :ok
-      erasure_spec_covers?(table, opts) -> :ok
-      true -> {:error, {:pii_declared_unerasable, table}}
+      # Custom-OBJECT record bag: the analogue rung — erasable iff a record-bag erasure arm
+      # covers the object (formerly a blanket exemption; ADR-046 §8 residual #2 closes it so a
+      # custom object cannot carry PII in its tnt_record bag with no arm).
+      String.starts_with?(table, @object_table_prefix) ->
+        if record_bag_spec_covers?(table, opts),
+          do: :ok,
+          else: {:error, {:pii_declared_unerasable, table}}
+
+      erasure_spec_covers?(table, opts) ->
+        :ok
+
+      true ->
+        {:error, {:pii_declared_unerasable, table}}
     end
   end
 
@@ -593,6 +609,19 @@ defmodule Samen.CustomFields do
         Application.get_env(:samen_core, :custom_bag_erasure_specs, [])
 
     Enum.any?(specs, fn spec -> to_string(Map.get(spec, :table_name)) == table end)
+  end
+
+  # A custom-OBJECT record bag is erasable iff a `Samen.CustomObjects.Erasure` spec covers
+  # its object — via config (`:record_bag_erasure_specs`) or the inline `:record_bag_specs`
+  # override on this call. The object key is the object table minus the synthetic prefix.
+  defp record_bag_spec_covers?(table, opts) do
+    object_key = String.replace_prefix(table, @object_table_prefix, "")
+
+    specs =
+      List.wrap(Map.get(opts, :record_bag_specs)) ++
+        Application.get_env(:samen_core, :record_bag_erasure_specs, [])
+
+    Enum.any?(specs, fn spec -> to_string(Map.get(spec, :object_key)) == object_key end)
   end
 
   defp default_repo! do

@@ -12,8 +12,10 @@ defmodule Samen.Erasure do
   columns (redacted row-level), stored file blobs (deleted via the governed
   ref-counted `Samen.Files` chokepoint — §4.3 D4), the recomputable `email_bidx`
   blind index (tombstoned to a random sentinel on principal-account erasure — §4.1 D1),
-  and Tier-1 `pii_declared: true` custom-bag plaintext (per-key redacted from the sealed
-  jsonb bag via `Samen.CustomFields.Erasure` — §4.2 D3).
+  Tier-1 `pii_declared: true` custom-bag plaintext (per-key redacted from the sealed
+  jsonb bag via `Samen.CustomFields.Erasure` — §4.2 D3), and Tier-2 custom-OBJECT
+  `pii_declared: true` record-bag plaintext (per-key redacted from the `tnt_record` bag via
+  `Samen.CustomObjects.Erasure` — §8 residual #2).
 
   ## What `shred/2` does (T1.7 (a)–(d))
 
@@ -235,13 +237,20 @@ defmodule Samen.Erasure do
     # whole-column). Empty when no spec is registered.
     custom_bag_specs = Keyword.get(opts, :custom_bag_specs)
 
+    # The Tier-2 custom-OBJECT record-bag erasure arm (ADR-046 §8 residual #2): the
+    # registered `:record_bag_erasure_specs` (or the config default). Per-KEY redaction of a
+    # custom object's `pii_declared: true` plaintext keys in the `tnt_record` bag (the
+    # analogue of the Tier-1 arm, keyed via the record's opaque `refs` subject reference).
+    # Empty when no spec is registered.
+    record_bag_specs = Keyword.get(opts, :record_bag_specs)
+
     # STEP 1 — destroy the key FIRST, outside the DB tx. This is the load-bearing
     # act. It is the ONLY thing that can make the guarantee fail closed (if the
     # key store is unreachable we must NOT proceed and NOT fabricate an
     # attestation).
     case Kms.shred(subject_id) do
       {:ok, attestation} ->
-        seal_db_tiers(subject_id, attestation, :from_state, actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs)
+        seal_db_tiers(subject_id, attestation, :from_state, actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs)
 
       {:error, :absent} ->
         # Subject never had a key. Still redact any non_pii! rows and write a
@@ -256,7 +265,7 @@ defmodule Samen.Erasure do
           checked_at: DateTime.utc_now()
         }
 
-        seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs)
+        seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs)
 
       {:error, reason} ->
         # Key store unreachable (outage) — FAIL CLOSED. No sentinel, no report,
@@ -268,7 +277,7 @@ defmodule Samen.Erasure do
   # STEP 2–5 in one transaction. `outcome_mode` is `:from_state` (derive from the
   # seal result — "shredded" on the first call that seals rows, "already_shredded"
   # on an idempotent later call) or a fixed string (e.g. "absent").
-  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs) do
+  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     multi =
@@ -323,6 +332,15 @@ defmodule Samen.Erasure do
       |> Ecto.Multi.run(:custom_bag, fn repo, _changes ->
         {:ok, Samen.CustomFields.Erasure.erase_subject(subject_id, repo, custom_bag_specs: custom_bag_specs)}
       end)
+      # STEP 3f — Tier-2 custom-OBJECT record-bag erasure arm (ADR-046 §8 residual #2). A
+      # custom object's `pii_declared: true` field stores PLAINTEXT in the shared `tnt_record`
+      # attributes bag (never vaulted), so key-shred does not reach it — the analogue of the
+      # Tier-1 bag, keyed via the record's opaque `refs` subject reference. This arm removes
+      # exactly the object's pii_declared keys from the subject's records. Runs INSIDE the tx,
+      # fail-closed (pure in-DB write).
+      |> Ecto.Multi.run(:record_bag, fn repo, _changes ->
+        {:ok, Samen.CustomObjects.Erasure.erase_subject(subject_id, repo, record_bag_specs: record_bag_specs)}
+      end)
       # STEP 5 (built here, needs step 2/3/3b/3c results) — the erasure report.
       |> Ecto.Multi.run(:report, fn repo, changes ->
         {sealed, _} = changes.seal_vault
@@ -331,9 +349,10 @@ defmodule Samen.Erasure do
         file_report = changes.file_blobs
         blind_index_report = changes.blind_index
         custom_bag_report = changes.custom_bag
+        record_bag_report = changes.record_bag
 
         tiers =
-          build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, custom_bag_report, repo)
+          build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, custom_bag_report, record_bag_report, repo)
         outcome = resolve_outcome(outcome_mode, subject_id, sealed, repo)
 
         report_attrs = %{
@@ -409,7 +428,7 @@ defmodule Samen.Erasure do
   # Tier descriptors — what the T2.9 oracle reads (D7 report).
   # ---------------------------------------------------------------------------
 
-  defp build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, custom_bag_report, repo) do
+  defp build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, custom_bag_report, record_bag_report, repo) do
     remaining_active =
       repo.aggregate(
         from(v in VaultRow, where: v.subject_id == ^subject_id and v.state == "active"),
@@ -460,7 +479,11 @@ defmodule Samen.Erasure do
       # Custom-bag tier (ADR-046 §4.2 D3): the per-resource report of `pii_declared`
       # bag keys redacted from the subject's rows. Empty when no custom-bag spec is
       # registered. Token-only (row/key counts + resource label, never a key value).
-      "custom_bag" => custom_bag_report
+      "custom_bag" => custom_bag_report,
+      # Custom-OBJECT record-bag tier (ADR-046 §8 residual #2): the per-object report of
+      # `pii_declared` keys redacted from the subject's `tnt_record` rows. Empty when no
+      # record-bag spec is registered. Token-only (row/key counts + object label).
+      "record_bag" => record_bag_report
     }
   end
 

@@ -12,12 +12,13 @@
 diff --git a/samen_core/lib/samen/custom_fields.ex b/samen_core/lib/samen/custom_fields.ex
 --- a/samen_core/lib/samen/custom_fields.ex
 +++ b/samen_core/lib/samen/custom_fields.ex
-@@ -580,7 +580,7 @@
-     cond do
-       String.starts_with?(table, @object_table_prefix) -> :ok
-       erasure_spec_covers?(table, opts) -> :ok
--      true -> {:error, {:pii_declared_unerasable, table}}
-+      true -> :ok
+@@ -595,7 +595,7 @@ defmodule Samen.CustomFields do
+       erasure_spec_covers?(table, opts) ->
+         :ok
+ 
+-      true ->
+-        {:error, {:pii_declared_unerasable, table}}
++      true ->
++        :ok
      end
    end
- 
