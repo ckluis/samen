@@ -315,6 +315,14 @@ defmodule Samen.AbbrevRegistryTest do
                  # T71 (ADR-043 §6.4 D6/D7): the D7 analytics anti-tautology test fixture
                  # (a self-contained, freshly-compiled `use Samen.Aggregate.Resource`).
                  "aac" => "SamenCore.Support.AnalyticsFixture.CleanAggregate",
+                 # P17 (ADR-045 §3): the org-scoped aggregate fixtures — Metric (a valid
+                 # non-null org partition, read via read_all_for_org/3), NoPartition (the
+                 # verifier org-scoped RED: claims org-scope with a NULLABLE org_id), and
+                 # CrossTenant (the fail-closed guard: a cross-tenant aggregate refused on
+                 # the org path), allocator-reserved.
+                 "oea" => "SamenCore.Support.OrgAnalyticsFixture.Metric",
+                 "oen" => "SamenCore.Support.OrgAnalyticsFixture.NoPartition",
+                 "oec" => "SamenCore.Support.OrgAnalyticsFixture.CrossTenant",
                  "sxv" => "SamenCore.Support.SuppressionFixture.ConsentEvent",
                  "sro" => "SamenCore.Support.RichTypes.OrgFixture",
                  "srp" => "SamenCore.Support.RichTypes.PersonalFixture",
@@ -557,7 +565,7 @@ defmodule Samen.AbbrevRegistryTest do
       # +3 T85 (spec §I2 M5): samen_web test host's Outreach mount `wso`/`woe`/`ows` = 408.
       # +2 A1 (ADR-047 §4.1/§6): samen_core host's agent-loop cursor pair `arn`/`atn`
       # (Samen.AI.Agent.{Run,Turn}), allocator-reserved = 410.
-      assert map_size(Reg.load()) == 439
+      assert map_size(Reg.load()) == 442
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do

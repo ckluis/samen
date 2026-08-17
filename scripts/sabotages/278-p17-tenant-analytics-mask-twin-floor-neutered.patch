@@ -1,0 +1,24 @@
+# SABOTAGE: P17 (ADR-045 §3) — the tenant-facing own-org analytics surface
+# (`Samen.Web.Tenant.AnalyticsReads`) drops the k-anonymity floor: it returns `stage_rows`
+# RAW instead of routing through `Samen.Aggregate.Privacy.apply/3`. The MaskingCase twin
+# proves the floor IS the intra-org masking enforcement: the SAME lower-privilege plane that
+# resolves a subject's vault field to `••••` must see a count-of-one own-org cohort as `⊘`;
+# with the floor neutered the count-of-one RECONSTRUCTS ("exactly 1 subject reached this
+# stage") — leak DETECTED. The masked-field half stays green (masking is untouched).
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_analytics_test.exs
+# MUST_FAIL: same lower-priv plane
+--- a/samen_web/lib/samen/web/tenant/analytics_reads.ex
++++ b/samen_web/lib/samen/web/tenant/analytics_reads.ex
+@@ -147,8 +147,9 @@ defmodule Samen.Web.Tenant.AnalyticsReads do
+             Map.get(by_stage, stage, %{stage: stage, actor_count: 0})
+           end)
+ 
+-        {:ok, floored} = Privacy.apply(stage_rows, @funnel_spec, Keyword.take(opts, [:k, :l]))
+-        floored
++        # SABOTAGE: the floor is bypassed — a sub-floor / count-of-one own-org cohort emits
++        # its re-identifying raw count instead of ⊘.
++        stage_rows
+ 
+       _ ->
+         []

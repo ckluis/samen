@@ -79,6 +79,49 @@ defmodule Mix.Tasks.Samen.Verify.AggregatePrivacy do
   end
 
   defp resource_violations(resource) do
+    cohort_violations(resource) ++ org_scoped_violations(resource)
+  end
+
+  # The ORG-SCOPED arm (P17 / ADR-045 §3). Every EXTRA check applies ONLY to a resource
+  # that opts into the org-scoped aggregate plane (`org_scoped_aggregate?/0` → true). It
+  # must carry a real `org_id` PARTITION — a non-null `org_id` attribute — or an org-scoped
+  # read (`Samen.Aggregate.read_all_for_org/3`) is not actually partitioned by org and a
+  # cohort could span orgs. A nullable `org_id` is exactly the CROSS-tenant shape (the
+  # org-less `Aggregate.Actor` plane, where `org_id` is NULL by design) — the wrong shape
+  # for the tenant's own-org path. The fail-closed cohort spec (below) and the C7
+  # `NoPiiColumns` compile-time refusal already apply to EVERY aggregate resource; this arm
+  # adds the org-partition invariant that makes "the tenant reads only their own org" a
+  # gated property, not a convention. Keeps the non-vacuity discipline (a claim of
+  # org-scope with no real partition FAILS, per the A2/X9 lesson).
+  defp org_scoped_violations(resource) do
+    if Samen.Aggregate.Info.org_scoped?(resource) do
+      case Ash.Resource.Info.attribute(resource, :org_id) do
+        nil ->
+          [
+            "org-scoped aggregate resource #{inspect(resource)} (org_scoped_aggregate?/0 == " <>
+              "true) declares no `org_id` attribute — an org-scoped projection MUST carry a " <>
+              "non-null org_id PARTITION so Samen.Policy.OrgScope narrows the read to the " <>
+              "caller's own org. Without it, read_all_for_org/3 is not partitioned by org."
+          ]
+
+        %{allow_nil?: true} ->
+          [
+            "org-scoped aggregate resource #{inspect(resource)} (org_scoped_aggregate?/0 == " <>
+              "true) has a NULLABLE `org_id` — that is the CROSS-tenant (org-less) shape, not " <>
+              "an org partition. An org-scoped projection MUST declare org_id allow_nil?: " <>
+              "false so every row belongs to exactly one org and OrgScope can narrow it. A " <>
+              "nullable org_id lets a NULL-org (cross-tenant) row enter a tenant's own-org read."
+          ]
+
+        %{allow_nil?: false} ->
+          []
+      end
+    else
+      []
+    end
+  end
+
+  defp cohort_violations(resource) do
     case CohortSpec.spec_for(resource) do
       nil ->
         [

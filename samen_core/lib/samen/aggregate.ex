@@ -288,6 +288,92 @@ defmodule Samen.Aggregate do
   end
 
   @doc """
+  Read an **org-scoped** aggregate-plane resource as the tenant's OWN org actor — the
+  P17 intra-org analytics path (ADR-045 §3). Returns `{:ok, floored_rows}` or
+  `{:error, reason}`.
+
+  This is the SEPARATE, org-scoped sibling of `read_all/2` — it is NOT a relaxation of
+  T144 and NOT the token-blind cross-tenant plane. Three structural differences make it
+  the "separate org-scoped path" ADR-045 §3 demands rather than a weakening of the gate:
+
+    1. **It runs as the caller's OWN org actor**, not the org-less
+       `Samen.Aggregate.Actor`. The resource guards reads with `Samen.Policy.OrgScope`
+       (a `FilterCheck`), so the read is narrowed to `org_id == actor.org_id` — a
+       foreign org's rows are INVISIBLE (not merely forbidden). Cross-org is impossible
+       by construction, the same mechanism the tenant plane already relies on.
+
+    2. **It refuses an org-LESS actor, fail closed** (`{:error, :org_scope_required}`),
+       BEFORE any row is read. So the token-blind cross-tenant `Aggregate.Actor` (no
+       `org_id`) can never reach the org-scoped plane through here, and an
+       unauthenticated/org-less caller reads nothing — defense-in-depth ABOVE OrgScope's
+       own zero-rows filter.
+
+    3. **It refuses a non-org-scoped aggregate resource** (`{:error,
+       :not_org_scoped_aggregate}`) — you cannot read a cross-tenant
+       (`AggregateActorOnly`) projection "as an org actor" through here. The resource
+       must opt in via `org_scoped_aggregate?/0` (verified to carry a non-null `org_id`
+       partition by the org-scoped arm of `mix samen.verify.aggregate_privacy`).
+
+  Everything downstream REUSES the shipped output-privacy floor unchanged: the rows pass
+  through `Samen.Aggregate.Privacy.apply/3` using the resource's `aggregate_cohort_spec/0`
+  (`Samen.Aggregate.CohortSpec`). A cohort whose count is `< k` (count-of-one included) or
+  whose distinct-sensitive count is `< l` has its value columns REPLACED by
+  `%Samen.Aggregate.Suppressed{}` — so a lower-privilege, `••••`-masked tenant role that
+  can enumerate a cohort key cannot reconstruct a suppressed value or re-identify a
+  count-of-one cohort. A resource with NO cohort spec fails closed (`:no_cohort_spec`).
+  The C7 `NoPiiColumns` compile-time refusal (via `use Samen.Aggregate.Resource`)
+  guarantees no vault/`pii_` column is projectable in the first place.
+
+  Options:
+    * `:actor` is NOT taken here — the org actor is the required 2nd argument (a
+      `%Samen.Scope{}` or a plain actor map carrying `:org_id`).
+    * `:query` — a preset `Ash.Query` over bounded columns (still OrgScope-narrowed).
+    * `:k` / `:l` — override the floors (tests use this to prove the floor is
+      load-bearing; production reads config, default k=5 / l=2).
+
+  There is deliberately NO `suppress: false` escape on the org-scoped path (unlike the
+  internal control path on `read_all/2`): an org-facing analytics read ALWAYS floors.
+  """
+  @spec read_all_for_org(module(), map(), keyword()) :: {:ok, [map()]} | {:error, term()}
+  def read_all_for_org(resource, org_actor, opts \\ []) when is_atom(resource) do
+    actor = unwrap_actor(org_actor)
+
+    cond do
+      not Samen.Aggregate.Info.aggregate_plane?(resource) ->
+        {:error, :not_aggregate_resource}
+
+      not Samen.Aggregate.Info.org_scoped?(resource) ->
+        {:error, :not_org_scoped_aggregate}
+
+      is_nil(org_id(actor)) ->
+        # Fail closed: the org-scoped plane is NEVER readable org-less. This refuses the
+        # token-blind Aggregate.Actor (no org_id) and any unauthenticated caller BEFORE a
+        # row is read — the cross-org guard, above OrgScope's own zero-rows filter.
+        {:error, :org_scope_required}
+
+      true ->
+        query = Keyword.get(opts, :query, resource)
+
+        case Ash.read(query, actor: actor, authorize?: true) do
+          {:ok, rows} ->
+            # OrgScope has already narrowed rows to actor.org_id. Route through the EXACT
+            # shipped floor (reuse, never reimplement) — fail closed on a nil cohort spec.
+            Privacy.apply(rows, CohortSpec.spec_for(resource), Keyword.take(opts, [:k, :l]))
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  # Accept either a %Samen.Scope{} (unwrap its actor) or a bare actor map.
+  defp unwrap_actor(%{__struct__: Samen.Scope, actor: actor}), do: actor
+  defp unwrap_actor(actor), do: actor
+
+  defp org_id(actor) when is_map(actor), do: Map.get(actor, :org_id)
+  defp org_id(_), do: nil
+
+  @doc """
   The singleton token-blind aggregate actor. Sugar over
   `Samen.Aggregate.Actor.new/0` so callers don't reach into the Actor module.
   """

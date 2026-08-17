@@ -62,4 +62,29 @@ defmodule Samen.Aggregate.Info do
   rescue
     _ -> false
   end
+
+  @doc """
+  Is this aggregate-plane resource an **org-scoped** projection (P17 / ADR-045 §3)?
+
+  The token-blind cross-tenant aggregate plane (`Samen.Aggregate.read_all/2`,
+  `Samen.Policy.AggregateActorOnly`, org-less `Samen.Aggregate.Actor`) is org-LESS by
+  construction. P17 is the SEPARATE, org-scoped sibling: a `use Samen.Aggregate.Resource`
+  projection that carries a NON-NULL `org_id` partition, guards reads with
+  `Samen.Policy.OrgScope`, and is read by the tenant's OWN org actor via
+  `Samen.Aggregate.read_all_for_org/3` — NOT by relaxing T144 or the cross-tenant gate.
+
+  A resource opts in by defining `org_scoped_aggregate?/0` returning `true` (the same
+  zero-DSL convention `aggregate_cohort_spec/0` uses). The org-scoped arm of
+  `mix samen.verify.aggregate_privacy` then holds it to the extra invariant that its
+  `org_id` attribute is a real partition (`allow_nil?: false`) — the C7 `NoPiiColumns`
+  refusal and the fail-closed cohort spec apply to EVERY aggregate resource already.
+  """
+  @spec org_scoped?(module()) :: boolean()
+  def org_scoped?(resource) when is_atom(resource) do
+    aggregate_plane?(resource) and
+      function_exported?(resource, :org_scoped_aggregate?, 0) and
+      resource.org_scoped_aggregate?() == true
+  rescue
+    _ -> false
+  end
 end

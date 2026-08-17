@@ -254,8 +254,8 @@ defmodule Samen.Abbrev.AllocatorTest do
       # (Samen.WebTest.Outreach.{Sequence,Enrollment,StepSend}) → 408.
       # +2 A1 (ADR-047 §4.1/§6) — samen_core host's agent-loop cursor pair `arn`/`atn`
       # (Samen.AI.Agent.{Run,Turn}) → 410, growing the file to 20_439 bytes.
-      assert byte_size(committed) == 20475
-      assert map_size(R.load()) == 439
+      assert byte_size(committed) == 20668
+      assert map_size(R.load()) == 442
     end
   end
 

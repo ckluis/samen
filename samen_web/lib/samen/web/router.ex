@@ -621,6 +621,56 @@ defmodule Samen.Web.Router do
   end
 
   @doc """
+  Mount the framework TENANT own-org ANALYTICS surface (P17; ADR-045 §3) — the org-scoped,
+  k-anonymity-floored activation view a tenant sees over its OWN org — in ONE line.
+
+      import Samen.Web.Router
+
+      # TENANT plane — the org's own floored analytics (`/analytics`).
+      samen_tenant_analytics_routes Demo.PrimitivesScope, repo: Demo.Repo
+
+  This is the SEPARATE org-scoped path (ADR-045 §3), NOT the cross-tenant operator
+  analytics (`samen_operator_routes`'s `/operator/analytics`, T144-gated) and NOT a
+  relaxation of T144. The single `Samen.Web.Tenant.AnalyticsLive` route rides a tenant
+  `live_session` behind `{Samen.Web.TenantAuthz, :require_tenant}` (the same gate every
+  tenant surface mounts through) so the org authority is PINNED to the authenticated
+  principal — a client `?org=` can only select among that principal's authorized orgs, and
+  every read is bound to the caller's OWN org (`Samen.Web.Tenant.AnalyticsReads`). The
+  surface is available to the org's admins AND its lower-privilege members (the deliberate
+  P17 choice that a `••••`-masked `:member` gets floored insight-without-PII).
+
+  Options: `:repo` (required); `:domain` (default `namespace`), `:plane`, `:path` (default
+  `/analytics`), `:labels`, `:session_name`.
+  """
+  defmacro samen_tenant_analytics_routes(namespace, opts \\ []) do
+    path = Keyword.get(opts, :path, "/analytics")
+    session_name = Keyword.get(opts, :session_name, session_name(:tenant_analytics, path))
+
+    quote bind_quoted: [
+            namespace: namespace,
+            opts: opts,
+            path: path,
+            session_name: session_name
+          ] do
+      mount =
+        Samen.Web.Mount.new(
+          :analytics,
+          namespace,
+          Keyword.fetch!(opts, :repo),
+          domain: Keyword.get(opts, :domain, namespace),
+          plane: Samen.Web.Router.__plane__(opts),
+          labels: Keyword.get(opts, :labels)
+        )
+
+      live_session session_name,
+        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+        session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+        live(path, Samen.Web.Tenant.AnalyticsLive)
+      end
+    end
+  end
+
+  @doc """
   Mount the framework FILES surface (WS-E E2.1; ADR-026) — the upload + preview LiveViews
   and the plane-gated `/files/:id` byte-serve route — in ONE line, on either plane.
 

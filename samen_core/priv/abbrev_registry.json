@@ -358,7 +358,9 @@
     },
     "samen_core": {
       "sdd": "SamenCore.Support.DocsFixture.Doc",
+      "oec": "SamenCore.Support.OrgAnalyticsFixture.CrossTenant",
       "sas": "Samen.AI.SupportReplyDraft",
+      "oea": "SamenCore.Support.OrgAnalyticsFixture.Metric",
       "ssv": "SamenCore.Support.SalesOpsFixture.Vendor",
       "emb": "SamenCore.Support.EmbeddingsDomain.Article",
       "stw": "SamenCore.Support.WorkFixture.Task",
@@ -390,6 +392,7 @@
       "sfd": "SamenCore.Support.FleetFixture.Directive",
       "smm": "SamenCore.Support.MailboxFixture.MailMessage",
       "sdn": "SamenCore.Support.DocsFixture.Note",
+      "oen": "SamenCore.Support.OrgAnalyticsFixture.NoPartition",
       "sro": "SamenCore.Support.RichTypes.OrgFixture",
       "spd": "SamenCore.Support.PanFixture.DirtyProjection",
       "svc": "SamenCore.Support.Versioning.Contact",

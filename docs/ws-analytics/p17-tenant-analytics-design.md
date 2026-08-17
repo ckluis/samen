@@ -1,6 +1,7 @@
 # P17 — Tenant-own-org analytics: design brief (office-hours record)
 
-- **Status:** DESIGN-ONLY — problem/context/options + a recommendation for the operator to decide. Authors no product code. Touches no `lib/`, `test/`, `config/`, schema, sabotage, or abbrev registry.
+- **Status:** BUILT (2026-08-17) — operator APPROVED **Option A** with the consumer CONFIRMED as a lower-privilege, PII-masked role (so the k-anonymity floor is load-bearing). Q4 (precompute vs live) resolved to **live-computed at query time** — no NEW persisted store, so no ADR-046 rollup registration and no `p17-org-rollup-survives-shred` sabotage (that arm is conditional on a persisted rollup existing). See the "BUILD RECORD" addendum at the foot of this file for what shipped. The design analysis below is unchanged.
+- **Original status:** DESIGN-ONLY — problem/context/options + a recommendation for the operator to decide. Authors no product code. Touches no `lib/`, `test/`, `config/`, schema, sabotage, or abbrev registry.
 - **Date:** 2026-08-17
 - **Decider:** operator (Chris). This is the ADR-045 §3 "P17 remains a **build-or-defer decision for the operator**, not a defect" item, brought to office hours.
 - **Binding constraints (must not be re-litigated here):**
@@ -152,3 +153,22 @@ P17 is **a new, separate, org-scoped path**. It must not touch `Samen.AI.Analyti
 3. **Which tenant roles may query analytics** (via `Samen.Web.TenantRole`), and is the intent specifically to give a masked role insight-without-PII? If yes, accept that every released aggregate is a *deliberate, floored* channel into masked data — is that trade worth it for the demand you see?
 4. **Precompute vs live.** Accept the ADR-046 constraint (every analytics rollup registered as a `Samen.Rollup` spec so `shred/2` governs it), or restrict v1 to **live-computed aggregates only** (derived-safe for free, simpler, but no materialized dashboard performance)?
 5. **Appetite / sequencing.** Is P17 worth a workstream now, or does it wait behind the erasure/gate-integrity backlog? ADR-045 already carries it as build-or-defer with no deadline.
+
+---
+
+## 6 · BUILD RECORD (2026-08-17) — what shipped for Option A (live-computed)
+
+**The separate org-scoped path (NOT a T144 relaxation).**
+
+- `Samen.Aggregate.read_all_for_org/3` (`samen_core/lib/samen/aggregate.ex`) — the org-scoped sibling of `read_all/2`. Runs as the caller's OWN org actor (OrgScope narrows to `org_id == actor.org_id`; foreign-org rows are INVISIBLE), refuses an org-less actor fail-closed (`:org_scope_required`, so the token-blind `Aggregate.Actor` can never reach it), refuses a non-org-scoped resource (`:not_org_scoped_aggregate`), then REUSES the shipped `Samen.Aggregate.Privacy.apply/3` floor (k=5/l=2 config) + `CohortSpec` + `Suppressed` — reimplements nothing. There is no `suppress:false` escape (always floors). `read_all/2` and the T144 `Samen.AI.Analytics.ask/4` path are byte-untouched.
+- `Samen.Aggregate.Info.org_scoped?/1` (`aggregate/extension.ex`) — a resource opts in via `org_scoped_aggregate?/0 → true` (the zero-DSL convention `aggregate_cohort_spec/0` uses); still `use Samen.Aggregate.Resource`, so the C7 `NoPiiColumns` compile-time refusal applies.
+
+**Verifier (org-scoped arm).** `mix samen.verify.aggregate_privacy` extended: an org-scoped aggregate resource MUST carry a NON-NULL `org_id` partition (a nullable org_id — the cross-tenant shape — FAILS). Non-vacuity kept.
+
+**Tenant surface (framework-first, ≈0 LOC).** `Samen.Web.Tenant.AnalyticsReads` + `Samen.Web.Tenant.AnalyticsLive` + the `samen_tenant_analytics_routes` router macro — the own-org activation funnel, org-scoped from the AUTHENTICATED scope (never `?org=`), floored by the SAME `Privacy.apply/3`, gated by TenantRole (`queryable_roles/0 = [:admin, :member]` — the masked `:member` gets floored insight-without-PII; org-less callers refused). Token-blind by construction (counts + bounded labels only; no vault field), live-computed over the already-governed `paf_product_event_rollup`.
+
+**Covert-channel discipline.** Sub-floor cells are `⊘`-suppressed (never emitted); no min/max/sample-row is exposed (only floored counts); cross-org is impossible (org_id bound from the authenticated scope / OrgScope FilterCheck).
+
+**Erasure.** Live-computed only — no new precomputed store, so nothing to resurrect an erased subject from (ADR-046 satisfied without a rollup registration); the completeness oracle's existing rollup arm remains the guard for any host that DOES add a persisted store.
+
+**Sabotages** (`scripts/sabotages/`): `276-p17-org-analytics-cohort-floor-neutered` (core floor bypass → count-of-one emits), `277-p17-org-aggregate-reads-cross-org` (OrgScope bypass → cross-org leak), `278-p17-tenant-analytics-mask-twin-floor-neutered` (surface floor bypass → the MaskingCase twin's count-of-one reconstructs). All flip the named tests + restore byte-exact.

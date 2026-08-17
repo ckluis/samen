@@ -1,0 +1,24 @@
+# SABOTAGE: P17 (ADR-045 §3) — the org-scoped aggregate read's k-anonymity/l-diversity
+# FLOOR is neutered: `Samen.Aggregate.read_all_for_org/3` returns the rows RAW instead of
+# routing them through the shipped `Samen.Aggregate.Privacy.apply/3`. A sub-floor / count-of-
+# one own-org cohort then EMITS its raw value (re-identifying the single subject) instead of
+# a `%Suppressed{}` (⊘). Flips the suppression proof; the >= k positive control stays green
+# (it releases either way), so the discriminator is non-vacuous.
+# APP: samen_core
+# TEST_FILES: test/org_analytics_test.exs
+# MUST_FAIL: a count-of-one cohort SUPPRESSES its value
+--- a/samen_core/lib/samen/aggregate.ex
++++ b/samen_core/lib/samen/aggregate.ex
+@@ -356,9 +356,9 @@ defmodule Samen.Aggregate do
+ 
+         case Ash.read(query, actor: actor, authorize?: true) do
+           {:ok, rows} ->
+-            # OrgScope has already narrowed rows to actor.org_id. Route through the EXACT
+-            # shipped floor (reuse, never reimplement) — fail closed on a nil cohort spec.
+-            Privacy.apply(rows, CohortSpec.spec_for(resource), Keyword.take(opts, [:k, :l]))
++            # SABOTAGE: the floor is bypassed — rows are returned RAW, so a sub-floor /
++            # count-of-one own-org cohort emits its re-identifying value instead of ⊘.
++            {:ok, rows}
+ 
+           {:error, reason} ->
+             {:error, reason}
