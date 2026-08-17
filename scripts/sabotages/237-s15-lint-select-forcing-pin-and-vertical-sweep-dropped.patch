@@ -1,22 +1,25 @@
 # SABOTAGE: S15 (luminary panel-2) — the `authorize?: false` read-scope lint regresses to its
-# pre-S15 shape, BOTH defects at once: (a) `clause_narrowed?` accepts an `org_id`/`id` mention
+# pre-S15 shape, BOTH defects at once: (a) `read_narrowed?` accepts an `org_id`/`id` mention
 # inside ANY `Ash.Query.*` call again, so `Ash.Query.ensure_selected([:org_id])` — select-FORCING,
 # it scopes NOTHING — counts as an org pin and the modeled org-less all-tenants read sails through;
 # (b) `source_files/0` drops the demo/driftwood/pawchart trees, so the ~150 vertical
 # `authorize?: false` sites are unswept again. Flips the S15 decoy red-path AND the vertical
-# roll-call; AND (verifier R1) the GREEN sweep's non-vacuity floors are independently
-# load-bearing — a framework-only sweep measures 729 files / 130 governed / 45 sanctioned,
-# red against `files >= 800`, `governed >= 140`, `sanctioned in 47..60` on their own.
+# roll-call; AND the GREEN sweep's FILES floor is independently load-bearing — a framework-only
+# sweep now measures 754 files < 800 on its own (the kernel has since grown past the point where
+# the governed/sanctioned floors independently catch a dropped-vertical sweep — 154 governed / 48
+# sanctioned — so that shape is red via the files floor + the roll-call's vertical path assertions).
+# (Re-anchored at the R3/R4/R5 addendum: the select-forcing check moved from clause_narrowed?/1 to
+# the per-read read_narrowed?/2; the defect and its flips are unchanged.)
 # APP: samen_web
 # TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
 # MUST_FAIL: the decoy is FLAGGED
 # MUST_FAIL: vertical trees
 # MUST_FAIL: pinned or sanctioned
 diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
-index e45707e..a888bca 100644
+index d2c6b17..a8a54ea 100644
 --- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
 +++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
-@@ -124,10 +124,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+@@ -158,10 +158,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
  
      [
        Path.join(repo_root, "samen_core/lib/**/*.ex"),
@@ -28,10 +31,10 @@ index e45707e..a888bca 100644
      ]
      |> Enum.flat_map(&Path.wildcard/1)
      |> Enum.reject(fn f -> Path.basename(f) in @skip_basenames end)
-@@ -292,8 +289,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
-   # sanction marker (the principled, per-site, justified exemption).
-   defp clause_narrowed?(body) do
-     walk_any?(body, fn
+@@ -405,8 +402,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+   # CONSTRAINS the row set; everything else needs the `# authz-scope:` sanction marker.
+   defp read_narrowed?(ctx, pinned_vars) do
+     walk_any?(ctx, fn
 -      {{:., _, [{:__aliases__, _, [_ | _] = segs}, fun]}, _, args}
 -      when fun in @narrowing_funs and is_list(args) ->
 +      {{:., _, [{:__aliases__, _, [_ | _] = segs}, _fun]}, _, args} ->

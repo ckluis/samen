@@ -154,24 +154,31 @@ defmodule Samen.Web.Authz.ReadScopeLintTest do
 
     # Non-vacuity: the sweep saw all five app trees (hundreds of modules) and a
     # realistic governed-read count — a matcher that finds none, or that misses
-    # authorize?: false, cannot green-light the gate. INDEPENDENTLY LOAD-BEARING
-    # (verifier R1): a framework-only sweep (verticals dropped — the S15b regression)
-    # measures 729 files / 130 governed / 45 sanctioned, so EACH floor below fails
-    # that shape on its own, not only via the roll-call's path assertions.
-    # (At the S15 hardening the full sweep saw 841 files / 150 governed reads.)
+    # authorize?: false, cannot green-light the gate. The FILES floor is INDEPENDENTLY
+    # LOAD-BEARING against the S15b dropped-vertical regression: a framework-only sweep
+    # (verticals dropped) measures 754 files < 800 on its own (the roll-call test below
+    # independently asserts vertical coverage too). The governed/sanctioned floors guard
+    # a DIFFERENT failure — a broken matcher that finds nothing or misses authorize?:
+    # false collapses both toward 0; the kernel has since grown past the point where
+    # they'd independently catch a dropped-vertical sweep (framework-only now measures
+    # 154 governed / 48 sanctioned), so that shape is caught by the files floor + roll-call.
+    # (Full sweep at the R3/R4/R5 addendum: 866 files / 174 governed / 52 sanctioned —
+    # was 841 / 150 / 49 at S15; R4 surfaced 3 opts-smuggled reads + R3 re-sanctioned 3
+    # clause-laundered reads with their own markers.)
     assert files >= 800
     assert governed >= 140
 
-    # The sanctioned reads are a KNOWN, per-site-justified set (S15 hardening: 49 —
-    # pre-auth boot-path/unique-key lookups, webhook-ingest provider-ref lookups,
-    # FK cascades, the system-plane sweeps, the operator activity rollup), each
-    # carrying a `# authz-scope:` reason at the read site. A regression that started
-    # silently swallowing violations as sanctions would blow this ceiling; a lost
-    # marker (or a lost pin downgraded to a sanction) would move it. Lower bound 47:
-    # ABOVE the framework-only count (45, so a dropped vertical sweep goes red here
-    # too) while leaving headroom for two marker→genuine-pin conversions before a
-    # conscious band update — shrinking the sanctioned set further than that is a
-    # deliberate posture change and SHOULD re-open this test.
+    # The sanctioned reads are a KNOWN, per-site-justified set (now 52 — pre-auth
+    # boot-path/unique-key lookups, webhook-ingest provider-ref lookups, FK cascades,
+    # the system-plane sweeps, the operator activity rollup, and the R3/R4 addendum's
+    # three authorization-boundary reads: the two session-cap credential enumerations
+    # and the mcp generic read helper — each carrying a `# authz-scope:` reason at the
+    # read SITE, bound to exactly that read). A regression that started silently
+    # swallowing violations as sanctions would blow this ceiling; a lost marker (or a
+    # lost pin downgraded to a sanction) would move it. Lower bound 47 leaves headroom
+    # for a couple marker→genuine-pin conversions before a conscious band update —
+    # shrinking the sanctioned set further is a deliberate posture change and SHOULD
+    # re-open this test. (At S15 this set was 49; the R3/R4 addendum added 3.)
     assert sanctioned in 47..60
   end
 
@@ -305,5 +312,243 @@ defmodule Samen.Web.Authz.ReadScopeLintTest do
     assert violations == []
     assert governed == 0
     assert sanctioned == 0
+  end
+
+  # ---------------------------------------------------------------------------
+  # R3 — a pin/marker justifies EXACTLY its own read, not a clause sibling
+  # (Phase-4 addendum: "the most plausible future laundering path")
+  # ---------------------------------------------------------------------------
+
+  # ONE `# authz-scope:` marker over TWO org-less reads. The marker binds to the FIRST
+  # read; the SECOND is still unjustified and must be FLAGGED — the clause-scoped launder.
+  @marker_launder_fixture """
+  defmodule Samen.Web.Fixture.MarkerLaunder do
+    require Ash.Query
+
+    def two(a, b) do
+      # authz-scope: system sweep — org-less by design
+      first = Ash.read!(a, authorize?: false)
+      second = Ash.read!(b, authorize?: false)
+      {first, second}
+    end
+  end
+  """
+
+  # A clause holding a genuinely PINNED read AND a bare unpinned sibling. The sibling's
+  # pin belongs to the OTHER read — it must not launder past a clause-level pin check.
+  @pin_launder_fixture """
+  defmodule Samen.Web.Fixture.PinLaunder do
+    require Ash.Query
+
+    def two(resource, org_id) do
+      scoped =
+        resource
+        |> Ash.Query.filter(org_id == ^org_id)
+        |> Ash.read!(authorize?: false)
+
+      everyone = Ash.read!(resource, authorize?: false)
+      {scoped, everyone}
+    end
+  end
+  """
+
+  test "R3 (marker granularity): one # authz-scope: marker sanctions ONE read — a second org-less sibling is FLAGGED" do
+    {violations, governed, sanctioned} =
+      Lint.scan_source(@marker_launder_fixture, "fixture/marker_launder.ex")
+
+    assert governed == 2
+    assert sanctioned == 1
+    assert [%{fun: :two, arity: 2, read_line: flagged_line}] = violations
+
+    # The flagged read is the SECOND one — the marker bound to the first.
+    lines = String.split(@marker_launder_fixture, "\n")
+    second_line = Enum.find_index(lines, &String.contains?(&1, "second =")) + 1
+    assert flagged_line == second_line
+
+    # Anti-tautology: give the second read its OWN marker and BOTH pass (two sanctions).
+    two_markers =
+      String.replace(
+        @marker_launder_fixture,
+        "    second = Ash.read!(b, authorize?: false)",
+        "    # authz-scope: system sweep — org-less by design\n    second = Ash.read!(b, authorize?: false)"
+      )
+
+    {v2, g2, s2} = Lint.scan_source(two_markers, "fixture/two_markers.ex")
+    assert v2 == []
+    assert g2 == 2
+    assert s2 == 2
+  end
+
+  test "R3 (pin granularity): a filter on a SIBLING read does NOT launder a bare unpinned read in the same clause" do
+    {violations, governed, sanctioned} =
+      Lint.scan_source(@pin_launder_fixture, "fixture/pin_launder.ex")
+
+    assert governed == 2
+    assert sanctioned == 0
+    # Only the unpinned `everyone` read is flagged — `scoped` is pinned by its own chain.
+    assert [%{fun: :two, arity: 2, read_line: flagged_line}] = violations
+
+    lines = String.split(@pin_launder_fixture, "\n")
+    everyone_line = Enum.find_index(lines, &String.contains?(&1, "everyone =")) + 1
+    assert flagged_line == everyone_line
+
+    # Anti-tautology: pin `everyone` too (its OWN chain) and the clause passes clean.
+    both_pinned = """
+    defmodule Samen.Web.Fixture.BothPinned do
+      require Ash.Query
+
+      def two(resource, org_id) do
+        scoped =
+          resource
+          |> Ash.Query.filter(org_id == ^org_id)
+          |> Ash.read!(authorize?: false)
+
+        everyone =
+          resource
+          |> Ash.Query.filter(org_id == ^org_id)
+          |> Ash.read!(authorize?: false)
+
+        {scoped, everyone}
+      end
+    end
+    """
+
+    {v2, g2, _s2} = Lint.scan_source(both_pinned, "fixture/both_pinned.ex")
+    assert v2 == []
+    assert g2 == 2
+  end
+
+  test "R3 (cross-statement pin): a read on a variable whose binding carries an org filter PASSES (no false positive)" do
+    # `q = Resource |> filter(org_id == ^o); Ash.read(q, authorize?: false)` — the pin is
+    # on a prior statement; the dataflow credits it to the variable, so this is NOT flagged.
+    fixture = """
+    defmodule Samen.Web.Fixture.CrossStatementPin do
+      require Ash.Query
+
+      def all(resource, org_id) do
+        query =
+          resource
+          |> Ash.Query.filter(org_id == ^org_id)
+
+        Ash.read!(query, authorize?: false)
+      end
+    end
+    """
+
+    {violations, governed, _} = Lint.scan_source(fixture, "fixture/cross_statement_pin.ex")
+    assert violations == []
+    assert governed == 1
+  end
+
+  # ---------------------------------------------------------------------------
+  # R4 — opts-variable smuggling (authorize?: false hidden behind a name)
+  # ---------------------------------------------------------------------------
+
+  @opts_smuggle_fixture """
+  defmodule Samen.Web.Fixture.OptsSmuggle do
+    require Ash.Query
+
+    def all(resource) do
+      opts = [authorize?: false]
+      Ash.read!(resource, opts)
+    end
+  end
+  """
+
+  test "R4 (opts smuggle): a read whose authorize?: false is smuggled via a local opts var is SEEN and FLAGGED" do
+    {violations, governed, sanctioned} =
+      Lint.scan_source(@opts_smuggle_fixture, "fixture/opts_smuggle.ex")
+
+    # It is GOVERNED (no longer invisible) and, being unpinned, FLAGGED.
+    assert governed == 1
+    assert sanctioned == 0
+    assert [%{fun: :all, arity: 1}] = violations
+
+    # Positive control: the SAME smuggled read, org-pinned in its chain, PASSES — proving
+    # the read is seen and the pin (not the opts hiding) is what flips it.
+    pinned =
+      String.replace(
+        @opts_smuggle_fixture,
+        "    Ash.read!(resource, opts)",
+        "    resource |> Ash.Query.filter(org_id == ^org_id) |> Ash.read!(opts)"
+      )
+      |> String.replace("def all(resource) do", "def all(resource, org_id) do")
+
+    {v2, g2, _} = Lint.scan_source(pinned, "fixture/opts_smuggle_pinned.ex")
+    assert v2 == []
+    assert g2 == 1
+  end
+
+  test "R4 (specificity): an opts var that does NOT carry authorize?: false is NOT governed (no false positive)" do
+    fixture = """
+    defmodule Samen.Web.Fixture.NonAuthzOpts do
+      require Ash.Query
+
+      def all(resource) do
+        opts = [domain: :crm]
+        Ash.read!(resource, opts)
+      end
+    end
+    """
+
+    {violations, governed, sanctioned} = Lint.scan_source(fixture, "fixture/non_authz_opts.ex")
+    assert violations == []
+    assert governed == 0
+    assert sanctioned == 0
+  end
+
+  # ---------------------------------------------------------------------------
+  # R5 — non-Ash read wrappers (a read verb routed through another module)
+  # ---------------------------------------------------------------------------
+
+  @wrapper_bypass_fixture """
+  defmodule Samen.Web.Fixture.WrapperBypass do
+    def all(resource) do
+      ScopedReads.read!(resource, authorize?: false)
+    end
+  end
+  """
+
+  test "R5 (wrapper bypass): a read verb on a NON-Ash module is governed too — an unpinned one is FLAGGED" do
+    {violations, governed, sanctioned} =
+      Lint.scan_source(@wrapper_bypass_fixture, "fixture/wrapper_bypass.ex")
+
+    assert governed == 1
+    assert sanctioned == 0
+    assert [%{fun: :all, arity: 1}] = violations
+
+    # Anti-tautology: the same wrapper read, org-pinned in its chain, PASSES.
+    pinned = """
+    defmodule Samen.Web.Fixture.WrapperBypassPinned do
+      require Ash.Query
+
+      def all(resource, org_id) do
+        resource
+        |> Ash.Query.filter(org_id == ^org_id)
+        |> ScopedReads.read!(authorize?: false)
+      end
+    end
+    """
+
+    {v2, g2, _} = Lint.scan_source(pinned, "fixture/wrapper_bypass_pinned.ex")
+    assert v2 == []
+    assert g2 == 1
+  end
+
+  test "R5 (bound): a wrapper whose NAME is not a read verb is NOT governed — the documented residual" do
+    # `Reads.page!/3` is un-static-analyzable from the call site; it is closed
+    # STRUCTURALLY instead (T127: page!/3 RAISES on authorize?: false), so the lint does
+    # not — and cannot soundly — flag the call site. Documents the boundary of R5.
+    fixture = """
+    defmodule Samen.Web.Fixture.NonReadVerbWrapper do
+      def all(resource) do
+        Reads.page!(resource, authorize?: false)
+      end
+    end
+    """
+
+    {violations, governed, _} = Lint.scan_source(fixture, "fixture/non_read_verb_wrapper.ex")
+    assert violations == []
+    assert governed == 0
   end
 end

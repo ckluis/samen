@@ -1,0 +1,21 @@
+# SABOTAGE: Phase-4 addendum R5 (non-Ash read-wrapper bypass). The read-verb matcher
+# regresses to a literal `Ash.` module segment only (`[:Ash]` instead of any `[_ | _]`), so a
+# read verb routed through another module — an aliased-Ash call or a same-named wrapper
+# (`ScopedReads.read!(q, authorize?: false)`) — is no longer swept and an unpinned one slips
+# through. Flips the wrapper-bypass red path; the pinned-wrapper positive control stays green.
+# APP: samen_web
+# TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
+# MUST_FAIL: wrapper bypass
+diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+index d2c6b17..74c8d1d 100644
+--- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
++++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+@@ -332,7 +332,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+   # `{read_fun, line}` when `node` is a governed read CALL, else nil. Matches a
+   # `Module.<read_fun>(args)` call (any module segment — R5) whose args carry
+   # `authorize?: false` inline/spread or via a variable in `authz_vars` (R4).
+-  defp read_call({{:., _, [{:__aliases__, _, [_ | _]}, fun]}, meta, args}, authz_vars)
++  defp read_call({{:., _, [{:__aliases__, _, [:Ash]}, fun]}, meta, args}, authz_vars)
+        when fun in @read_funs and is_list(args) do
+     if authorize_off?(args, authz_vars), do: {fun, meta[:line]}, else: nil
+   end

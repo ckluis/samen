@@ -1,0 +1,22 @@
+# SABOTAGE: Phase-4 addendum R4 (opts-variable smuggling). The read-detection stops
+# following `authorize?: false` through a locally-bound opts variable — the var clause in
+# `authorize_off?` is neutered to `false`. A read whose `authorize?: false` is hidden behind
+# a name (`opts = [authorize?: false]; Ash.read!(q, opts)`) becomes INVISIBLE (governed 0)
+# and slips past the scope gate entirely. Flips the opts-smuggle red path; the specificity
+# control (a non-authz opts var stays ungoverned) is unaffected.
+# APP: samen_web
+# TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
+# MUST_FAIL: opts smuggle
+diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+index d2c6b17..a63fac2 100644
+--- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
++++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+@@ -358,7 +358,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+   defp authorize_off?(args, authz_vars) do
+     walk_any?(args, fn
+       {:authorize?, false} -> true
+-      {name, _, ctx} when is_atom(name) and is_atom(ctx) -> MapSet.member?(authz_vars, name)
++      {_n, _, ctx} when is_atom(ctx) -> false
+       _ -> false
+     end)
+   end

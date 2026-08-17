@@ -59,6 +59,40 @@ defmodule Samen.Web.Authz.ReadScopeLint do
   `file:line — fun/arity` and tells the author to pin with an `org_id`/`id` filter
   (or, if the read is deliberately org-less, add the `# authz-scope:` marker).
 
+  ## Granularity: a pin/marker justifies EXACTLY its own read (Phase-4 addendum R3/R4/R5)
+
+  The pin and the sanction marker are bound to the INDIVIDUAL read, never to the
+  whole clause — closing the three laundering paths the Phase-4 addendum recorded:
+
+    * **R3 (clause-scoped pin/marker launder — the addendum's "most plausible future
+      laundering path").** A clause may hold several `authorize?: false` reads. A pin is
+      credited to a read only when the scoping construct is in THAT read's own value
+      (its pipe chain, its own args, or a variable it reads whose binding carries the
+      pin — see below); a filter attached to a SIBLING read never launders it. A
+      `# authz-scope:` marker sanctions EXACTLY ONE read — the first governed read at or
+      below the marker line, within the clause; a second org-less sibling needs its own
+      marker. So `scoped = q |> filter(org_id==^o) |> Ash.read!(...); all = Ash.read!(r,
+      authorize?: false)` flags `all` (the pin belongs to `scoped`), and one marker over
+      two org-less reads sanctions one and flags the other.
+    * **R4 (opts-variable smuggling).** `authorize?: false` reaches a read either
+      inline OR via a locally-bound opts variable (`opts = [authorize?: false] ++ …;
+      Ash.read(q, opts)`). The lint constant-propagates such a variable INSIDE the
+      clause, so the smuggled read is SEEN (governed) and must be pinned/marked like any
+      other — it can no longer slip past by hiding `authorize?: false` behind a name.
+      The clause-crossing case (opts arriving as a function PARAMETER) is
+      un-static-analyzable and is the bounded residual — but it necessarily surfaces as
+      an inline `authorize?: false` literal at some CALL site inside the swept trees,
+      where R5's relaxed matcher (below) governs it.
+    * **R5 (non-`Ash` read wrappers).** The read-verb matcher recognizes the read funs
+      on ANY module segment, not only a literal `Ash.` — so an aliased-`Ash` call
+      (`alias Ash, as: A; A.read!(…)`) or a same-named wrapper (`ScopedReads.read!(q,
+      authorize?: false)`) is governed too, never silently unswept. The bounded residual
+      is a wrapper whose name is NOT a read verb (`Reads.page!/3`): fundamentally
+      un-static-analyzable from the call site — closed structurally instead, since
+      `Samen.Web.Reads.page!/3` RAISES on `authorize?: false` (T127) and every real
+      `authorize?: false` read ultimately reaches a matched read verb in the swept
+      source, where the clause-local rules above apply.
+
   ## Scope & posture
 
   The lint reads SOURCE only — it never executes a query, never touches a record,
@@ -154,20 +188,28 @@ defmodule Samen.Web.Authz.ReadScopeLint do
     |> collect_clauses()
     |> with_line_spans(total_lines)
     |> Enum.reduce({[], 0, 0}, fn {fun, arity, line, body, span}, {viol, gov, sanc} ->
-      reads = authz_reads(body)
+      # R4: opts variables locally bound to a keyword list carrying `authorize?: false`
+      # — so a read whose `authorize?: false` is smuggled through a name is still SEEN.
+      authz_vars = authorize_false_vars(body)
+      reads = authz_reads(body, authz_vars)
 
       if reads == [] do
         {viol, gov, sanc}
       else
-        narrowed? = clause_narrowed?(body)
-        marked? = clause_marked?(marker_lines, span)
+        # R3: pins/markers bind to the INDIVIDUAL read, never the whole clause.
+        # `pinned_vars` = variables whose binding carries an org/PK scoping construct
+        # (a cross-statement pin the read's own chain cannot show).
+        pinned_vars = pinned_query_vars(body)
+        clause_markers = clause_marker_lines(marker_lines, span)
+        read_lines = reads |> Enum.map(fn {_f, rl, _ctx} -> rl end) |> Enum.sort()
 
-        Enum.reduce(reads, {viol, gov, sanc}, fn {read_fun, read_line}, {v, g, s} ->
+        Enum.reduce(reads, {viol, gov, sanc}, fn {read_fun, read_line, ctx}, {v, g, s} ->
           cond do
-            read_fun in @by_id_funs or read_fun in @aggregate_funs or narrowed? ->
+            read_fun in @by_id_funs or read_fun in @aggregate_funs or
+                read_narrowed?(ctx, pinned_vars) ->
               {v, g + 1, s}
 
-            marked? ->
+            marker_binds?(clause_markers, read_lines, read_line) ->
               {v, g + 1, s + 1}
 
             true ->
@@ -250,54 +292,128 @@ defmodule Samen.Web.Authz.ReadScopeLint do
   defp fun_arity({fun, _, _}) when is_atom(fun), do: {fun, 0}
   defp fun_arity(_), do: {:__unknown__, 0}
 
-  # Every `Ash.<read>` call in `body` whose OWN args carry `authorize?: false`, as
-  # `{read_fun, line}`. Keyed on the call node's args (not the whole clause) so a read
-  # that does NOT pass authorize?: false is never treated as governed.
-  defp authz_reads(body) do
-    {_ast, acc} =
-      Macro.prewalk(body, [], fn
-        {{:., _, [{:__aliases__, _, [:Ash]}, fun]}, meta, args} = node, acc
-        when fun in @read_funs and is_list(args) ->
-          if authorize_false?(args) do
-            {node, [{fun, meta[:line]} | acc]}
-          else
-            {node, acc}
+  # Every governed read call in `body`, as `{read_fun, read_line, ctx}`. A read is
+  # governed when it names a read fun AND its OWN args carry `authorize?: false` —
+  # inline, spread (`[authorize?: false] ++ opts`), OR through a locally-bound opts
+  # variable in `authz_vars` (R4). `ctx` is the read's OWN VALUE for the per-read pin
+  # check (R3): the enclosing pipe when the read is a pipe RHS (so its upstream
+  # `filter`/`for_read` stages count), else the bare call node (so a filter on a SIBLING
+  # read never launders it).
+  #
+  # R5: the read verb is matched on ANY `Module.` segment, not only a literal `Ash.` —
+  # an aliased-Ash call or a same-named wrapper (`ScopedReads.read!(…)`) is governed too,
+  # never silently unswept. (A wrapper whose NAME is not a read verb is the bounded
+  # residual, closed structurally — see the moduledoc.)
+  defp authz_reads(body, authz_vars) do
+    # Map read-call line -> enclosing pipe node, for reads that are a pipe RHS.
+    pipe_ctx =
+      body
+      |> reduce_prewalk(%{}, fn
+        {:|>, _, [_lhs, rhs]} = pipe, acc ->
+          case read_call(rhs, authz_vars) do
+            {_fun, line} when is_integer(line) -> Map.put_new(acc, line, pipe)
+            _ -> acc
           end
 
-        node, acc ->
-          {node, acc}
+        _node, acc ->
+          acc
       end)
 
-    Enum.reverse(acc)
+    body
+    |> reduce_prewalk([], fn node, acc ->
+      case read_call(node, authz_vars) do
+        {fun, line} -> [{fun, line, Map.get(pipe_ctx, line, node)} | acc]
+        nil -> acc
+      end
+    end)
+    |> Enum.reverse()
   end
 
-  # `authorize?: false` appearing anywhere in the call's argument AST — catches a bare
-  # `authorize?: false` opt and the `[authorize?: false] ++ opts` spread idiom.
-  defp authorize_false?(args), do: walk_any?(args, &authorize_false_pair?/1)
+  # `{read_fun, line}` when `node` is a governed read CALL, else nil. Matches a
+  # `Module.<read_fun>(args)` call (any module segment — R5) whose args carry
+  # `authorize?: false` inline/spread or via a variable in `authz_vars` (R4).
+  defp read_call({{:., _, [{:__aliases__, _, [_ | _]}, fun]}, meta, args}, authz_vars)
+       when fun in @read_funs and is_list(args) do
+    if authorize_off?(args, authz_vars), do: {fun, meta[:line]}, else: nil
+  end
 
-  defp authorize_false_pair?({:authorize?, false}), do: true
-  defp authorize_false_pair?(_), do: false
+  defp read_call(_node, _authz_vars), do: nil
 
-  # A clause is NARROWED only by a genuine SCOPING construct: a narrowing call
-  # (`filter`/`filter_input`/`for_read` — `Ash.Query.`-qualified or the bare imported
-  # form) whose OWN arguments reference the tenant/PK pin (`org_id`/`id`).
+  # Variables locally bound to a value whose AST carries `authorize?: false` (R4): the
+  # `opts = [authorize?: false] ++ …` smuggle. Fixpoint so `a = [authorize?: false]; b =
+  # a` also counts. Keyed on the bound value only — never widened past the clause.
+  defp authorize_false_vars(body) do
+    bindings = collect_bindings(body)
+
+    Enum.reduce(1..3, MapSet.new(), fn _i, acc ->
+      Enum.reduce(bindings, acc, fn {name, rhs}, a ->
+        if authorize_off?([rhs], a), do: MapSet.put(a, name), else: a
+      end)
+    end)
+  end
+
+  # `authorize?: false` reachable from a call's args: the literal pair anywhere in the
+  # arg AST (bare opt or `[authorize?: false] ++ opts`), OR a bare variable reference
+  # whose name is a known authorize-false var (R4).
+  defp authorize_off?(args, authz_vars) do
+    walk_any?(args, fn
+      {:authorize?, false} -> true
+      {name, _, ctx} when is_atom(name) and is_atom(ctx) -> MapSet.member?(authz_vars, name)
+      _ -> false
+    end)
+  end
+
+  # Variables whose binding carries an org/PK SCOPING construct (R3 cross-statement pin:
+  # `q = Resource |> Ash.Query.filter(org_id == ^o); Ash.read(q, …)`). A read that reads
+  # such a variable is credited the pin; a read that does NOT reference it is not.
+  # Fixpoint so `a = filter(...); b = a |> …` propagates.
+  defp pinned_query_vars(body) do
+    bindings = collect_bindings(body)
+
+    Enum.reduce(1..3, MapSet.new(), fn _i, acc ->
+      Enum.reduce(bindings, acc, fn {name, rhs}, a ->
+        if read_narrowed?(rhs, a), do: MapSet.put(a, name), else: a
+      end)
+    end)
+  end
+
+  # `{var_name, rhs_ast}` for every simple `var = rhs` binding in `body`.
+  defp collect_bindings(body) do
+    body
+    |> reduce_prewalk([], fn
+      {:=, _, [{name, _, ctx}, rhs]}, acc when is_atom(name) and is_atom(ctx) ->
+        [{name, rhs} | acc]
+
+      _node, acc ->
+        acc
+    end)
+    |> Enum.reverse()
+  end
+
+  # A read's OWN value (`ctx`) is NARROWED when it carries a genuine SCOPING construct:
+  # a narrowing call (`filter`/`filter_input`/`for_read` — `Ash.Query.`-qualified or the
+  # bare imported form) whose OWN args reference the tenant/PK pin (`org_id`/`id`), OR a
+  # reference to a `pinned_var` (a variable whose binding carries such a pin — R3
+  # cross-statement pin). Because `ctx` is the read's own value (its pipe chain / args),
+  # a pin on a SIBLING read is invisible here and cannot launder this read.
   #
   # S15 (luminary panel-2) closed here: the pre-S15 rule ALSO accepted (a) any
   # filter/for_read call regardless of what it filtered on, and (b) an `org_id`/`id`
   # mention inside ANY `Ash.Query.*` call — so `Ash.Query.ensure_selected([:org_id])`
   # (select-FORCING: it puts org_id in the SELECT of every org's rows and scopes
-  # NOTHING) counted as an org pin, and a genuinely org-less all-tenants read sailed
-  # through with no justification. Now the pin atoms must sit inside a call that
-  # actually CONSTRAINS the row set; everything else needs the `# authz-scope:`
-  # sanction marker (the principled, per-site, justified exemption).
-  defp clause_narrowed?(body) do
-    walk_any?(body, fn
+  # NOTHING) counted as an org pin. The pin atoms must sit inside a call that actually
+  # CONSTRAINS the row set; everything else needs the `# authz-scope:` sanction marker.
+  defp read_narrowed?(ctx, pinned_vars) do
+    walk_any?(ctx, fn
       {{:., _, [{:__aliases__, _, [_ | _] = segs}, fun]}, _, args}
       when fun in @narrowing_funs and is_list(args) ->
         List.last(segs) == :Query and args_reference_pin?(args)
 
       {fun, _, args} when fun in @narrowing_funs and is_list(args) ->
         args_reference_pin?(args)
+
+      {name, _, ctx} when is_atom(name) and is_atom(ctx) ->
+        MapSet.member?(pinned_vars, name)
 
       _ ->
         false
@@ -325,10 +441,26 @@ defmodule Samen.Web.Authz.ReadScopeLint do
     |> MapSet.new()
   end
 
-  # A clause is sanctioned when a `# authz-scope:` marker sits anywhere within its raw-
-  # source line span (the author names WHY the org-less read is safe, at the read site).
-  defp clause_marked?(marker_lines, {clause_start, clause_end}) do
-    Enum.any?(clause_start..clause_end, &MapSet.member?(marker_lines, &1))
+  # The sorted `# authz-scope:` marker lines lying within a clause's raw-source span.
+  defp clause_marker_lines(marker_lines, {clause_start, clause_end}) do
+    marker_lines
+    |> Enum.filter(fn n -> n >= clause_start and n <= clause_end end)
+    |> Enum.sort()
+  end
+
+  # R3 (marker granularity): a marker binds to EXACTLY ONE read — the first governed
+  # read at or below the marker line. `read_line` is sanctioned iff a marker sits in its
+  # immediate preceding gap `(prev_read, read_line]`, where `prev_read` is the nearest
+  # governed read strictly above it (or 0). A marker already "spent" on an earlier read
+  # cannot reach a later sibling, and a marker below a read cannot reach back up to it —
+  # so one marker over two org-less reads sanctions one and leaves the other FLAGGED.
+  defp marker_binds?(clause_markers, read_lines, read_line) do
+    prev_read =
+      read_lines
+      |> Enum.filter(&(&1 < read_line))
+      |> Enum.max(fn -> 0 end)
+
+    Enum.any?(clause_markers, fn m -> m > prev_read and m <= read_line end)
   end
 
   defp walk_any?(ast, pred) do
@@ -336,5 +468,11 @@ defmodule Samen.Web.Authz.ReadScopeLint do
       Macro.prewalk(ast, false, fn node, found -> {node, found or pred.(node)} end)
 
     found
+  end
+
+  # `Macro.prewalk/3` that only threads an accumulator (node is never rewritten).
+  defp reduce_prewalk(ast, acc, fun) do
+    {_ast, acc} = Macro.prewalk(ast, acc, fn node, a -> {node, fun.(node, a)} end)
+    acc
   end
 end

@@ -86,6 +86,9 @@ defmodule Samen.Auth.SessionCreate do
       mods.user
       |> Ash.Query.filter(credential_id == ^credential_id)
       |> Ash.Query.select([:id])
+      # authz-scope: authorization-boundary read — enumerates THIS credential's own users
+      # (credential_id pin, the caller's own credential); org-less BY DESIGN (a credential's
+      # session cap spans every org it holds a membership in), never a cross-tenant row set
       |> Ash.read!(authorize?: false)
       |> Enum.map(& &1.id)
 
@@ -98,6 +101,9 @@ defmodule Samen.Auth.SessionCreate do
           mods.membership
           |> Ash.Query.filter(user_id in ^user_ids)
           |> Ash.Query.select([:org_id])
+          # authz-scope: authorization-boundary read — the memberships of THIS credential's
+          # own users (user_id pin, derived one read up); org-less BY DESIGN (resolves which
+          # orgs the credential belongs to), never a cross-tenant row set
           |> Ash.read!(authorize?: false)
           |> Enum.map(& &1.org_id)
           |> Enum.uniq()

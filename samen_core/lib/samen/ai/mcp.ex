@@ -514,6 +514,9 @@ defmodule Samen.AI.Mcp do
   defp do_read(query, opts) do
     read_opts = [authorize?: false] ++ Keyword.take(opts, [:domain])
 
+    # authz-scope: generic read helper — `query` arrives already org-pinned by every caller
+    # (`read_object`/`read_record` each apply `Ash.Query.filter(org_id == ^org …)` above), a
+    # cross-function pin this frame cannot see; no unpinned caller path reaches here
     case Ash.read(query, read_opts) do
       {:ok, records} -> {:ok, records}
       {:error, reason} -> {:error, {:read_failed, reason}}

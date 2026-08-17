@@ -1,0 +1,23 @@
+# SABOTAGE: Phase-4 addendum R3 (clause-scoped PIN launder — "the most plausible future
+# laundering path"). The per-read pin check regresses to CLAUSE scope: `read_narrowed?`
+# is fed the whole clause `body` instead of the individual read's own value `ctx`, so a
+# genuine org filter on ONE read (`scoped = q |> filter(org_id==^o) |> Ash.read!(…)`)
+# again launders a bare unpinned SIBLING read (`everyone = Ash.read!(r, authorize?: false)`)
+# in the same clause. The sibling passes when it must be FLAGGED. The positive control
+# (pin BOTH reads → clean) stays green, so the discriminator is non-vacuous.
+# APP: samen_web
+# TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
+# MUST_FAIL: pin granularity
+diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+index d2c6b17..79dc5f7 100644
+--- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
++++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+@@ -206,7 +206,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+         Enum.reduce(reads, {viol, gov, sanc}, fn {read_fun, read_line, ctx}, {v, g, s} ->
+           cond do
+             read_fun in @by_id_funs or read_fun in @aggregate_funs or
+-                read_narrowed?(ctx, pinned_vars) ->
++                read_narrowed?(body, pinned_vars) ->
+               {v, g + 1, s}
+ 
+             marker_binds?(clause_markers, read_lines, read_line) ->
