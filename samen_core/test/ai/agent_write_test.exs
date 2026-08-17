@@ -18,6 +18,12 @@ defmodule A4TestAgents do
   end
 end
 
+defmodule A6NilSeam do
+  @moduledoc false
+  # The natural spelling of "no membership found" from a custom `{m, f}` approver seam.
+  def resolve(_user_id, _org_id), do: {:ok, nil}
+end
+
 defmodule Samen.AI.AgentWriteTest do
   @moduledoc """
   ADR-047 batch A4 — the write surface: **propose-then-approve** (§5.3; ADR-043 §6.2
@@ -893,6 +899,67 @@ defmodule Samen.AI.AgentWriteTest do
       assert {:error, :not_authorized} = Samen.AI.Agent.Approver.resolve("", org_id)
       assert {:error, :not_authorized} = Samen.AI.Agent.Approver.resolve(nil, org_id)
       assert {:error, :not_authorized} = Samen.AI.Agent.Approver.resolve(id, nil)
+    end
+
+    # ── A6 FOLD F3 (the A5 verifier's R-A5-2) ───────────────────────────────────────
+    test "RED: a seam answering {:ok, nil} — 'no membership found' — REFUSES, and nothing executes" do
+      {s, run, target, approval, _new_owner} = propose!()
+
+      prior = Application.get_env(:samen_core, Samen.AI.Agent, [])
+
+      Application.put_env(
+        :samen_core,
+        Samen.AI.Agent,
+        Keyword.put(prior, :approver_membership, {A6NilSeam, :resolve})
+      )
+
+      human = "human:" <> Ash.UUID.generate()
+
+      try do
+        # `nil` IS an atom, so before A6 this matched the `{:ok, role} when is_atom(role)`
+        # clause and produced a REAL scope with role nil — an ambiguous affirmative
+        # admitted as a positive membership answer.
+        assert A6NilSeam.resolve(human, s.actor.org_id) == {:ok, nil}
+
+        assert {:error, :not_authorized} =
+                 Samen.AI.Agent.Approver.resolve(human, s.actor.org_id)
+
+        assert {:error, _} = Approvals.approve(approval.id, human)
+        assert reload_target!(target.id).owner_id == nil
+        assert [%{state: :pending}] = pending_approvals(s.actor.org_id)
+        assert %{state: :awaiting_approval} = Ash.get!(Run, run.id, authorize?: false)
+      after
+        Application.put_env(:samen_core, Samen.AI.Agent, prior)
+      end
+
+      # POSITIVE CONTROL — the SAME seam shape with a real answer resolves and executes,
+      # so the refusal above is the `nil`, not the `{m, f}` seam being broken.
+      human2 = approver_id(s.actor.org_id, :member)
+      assert {:ok, _decided, _meta} = Approvals.approve(approval.id, human2)
+      assert reload_target!(target.id).owner_id != nil
+    end
+
+    test "the nil-ROLE posture, pinned: identical where role is not consulted, NARROWER where it is" do
+      # (a) On a target gated ONLY by `Samen.Policy.OrgScope` (org, not role), a nil-role
+      # approver executes exactly as a :member one. That equivalence is INTENDED: the
+      # resource asked nothing about role, so there is no role gate failing open.
+      {s1, _run1, target1, approval1, new_owner1} = propose!()
+      unknown = "human:" <> Ash.UUID.generate()
+      Membership.register(unknown, s1.actor.org_id, :not_a_real_role)
+
+      assert {:ok, scope} = Samen.AI.Agent.Approver.resolve(unknown, s1.actor.org_id)
+      assert scope.actor.role == nil
+
+      assert {:ok, _decided, _meta} = Approvals.approve(approval1.id, unknown)
+      assert reload_target!(target1.id).owner_id == new_owner1
+
+      # (b) CONTROL for the other half: `Samen.Scope.Role.rank/1` — the function every
+      # role gate (`Samen.Policy.RoleAtLeast`) keys on — ranks nil BELOW :member, so on a
+      # role-gated target the same approver is refused. (Proven end-to-end against a real
+      # role-gated write target in driftwood's A6 vertical e2e, which has one.)
+      assert Samen.Scope.Role.rank(nil) < Samen.Scope.Role.rank(:member)
+      refute Samen.Scope.Role.at_least?(nil, :member)
+      assert Samen.Scope.Role.at_least?(:member, :member)
     end
   end
 

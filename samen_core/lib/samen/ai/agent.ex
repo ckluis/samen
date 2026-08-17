@@ -257,6 +257,39 @@ defmodule Samen.AI.Agent do
   # APPROVED write execution) rather than a `:depth` argument, precisely so an action
   # cannot route around it by calling `run/4`/`start/4` without one. An explicit
   # `:depth`/`:chain` opt is checked too; the ambient marker wins.
+  #
+  # NAMED RESIDUAL — a RAW `spawn/1` still escapes, and closing it is A7's job
+  # (A6; the A5 verifier's R-A5-1). A5 made the marker follow `$callers`/`$ancestors`,
+  # which closes the ORDINARY-concurrency class (`Task.async`, `Task.Supervisor`, a task
+  # of a task, a supervised child) — verified live. A bare `spawn/1` sets NEITHER, so a
+  # first-party action module whose `run/2` did its work there and called `start/4` from
+  # the child would persist a fresh TOP-LEVEL run at `depth: 0, chain: []`. A6 examined
+  # every DYNAMIC closure and rejected each as disproportionate or actively harmful:
+  #
+  #   * any process-scoped mechanism (dictionary, ambient marker, logger metadata) is
+  #     defeated by the same primitive that defeats this one — it is the primitive's
+  #     defining property that it inherits nothing;
+  #   * a DURABLE in-flight arm — "refuse a start whose caller chain is unresolvable
+  #     while this {org, definition} has a tool execution in flight" — is the only
+  #     runtime signal a raw-spawned child shares with its parent, and it REFUSES
+  #     LEGITIMATE CONCURRENCY: two humans starting the same triage definition in the
+  #     same org at the same time is ordinary, and the second start would be refused
+  #     because the first is mid-tool. Trading a real availability bug for a
+  #     defence-in-depth one is a bad trade, and the ADR's own instruction is not to
+  #     ship a half-measure that breaks legitimate concurrency;
+  #   * stamping the run/turn row does not help either: the child cannot be ATTRIBUTED
+  #     to the parent run without the caller chain the raw spawn destroyed, so the
+  #     stamp could only be consulted by {org, definition} — which is the same
+  #     concurrency-breaking arm above, wearing a schema change.
+  #
+  # The escape's reachability class is unchanged from A4's R3: only a FIRST-PARTY /
+  # host-authored action module can author the spawn (tenant data never becomes code),
+  # so this is defence-in-depth, not a tenant-reachable path. The sound closure is
+  # therefore STATIC, not dynamic: `mix samen.verify.agent_coverage` (A7, §9#6) must
+  # assert by AST that no `tool_schema/0`-exporting module calls `Samen.AI.Agent.start/4`
+  # or `run/4` at all — which refuses the escape at compile/gate time regardless of
+  # which spawn primitive the module would have used, and costs no concurrency. Recorded
+  # as ADR-047 §10a row 19 and carried as an explicit A7 obligation.
   @max_agent_depth 0
   @provenance_key {__MODULE__, :tool_provenance}
 
@@ -1622,6 +1655,10 @@ defmodule Samen.AI.Agent do
   # `$ancestors` covers a bare `spawn_link`/GenServer start under a supervisor. Both
   # are read defensively: a dead pid, a registered-name atom that no longer resolves,
   # and a process that refuses inspection all contribute nothing.
+  #
+  # A RAW `spawn/1` sets neither list and therefore still escapes this walk — a NAMED,
+  # DEFERRED residual whose sound closure is A7's static AST check, argued in full at
+  # `@max_agent_depth` above (A6; the A5 verifier's R-A5-1, ADR-047 §10a row 19).
   defp inherited_provenance do
     (Process.get(:"$callers", []) ++ Process.get(:"$ancestors", []))
     |> Enum.find_value(&provenance_of/1)

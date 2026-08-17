@@ -326,26 +326,135 @@ defmodule Samen.Web.AI.AgentSurfaceTest do
     {:ok, summary} = Health.summary(operator, org_id)
     {:ok, runs} = Health.runs(operator, org_id)
 
-    assigns = %{
-      samen_mount: build_operator_mount(Ash.UUID.generate()),
-      no_org: false,
-      impersonation: :active,
-      target_org_id: org_id,
-      operator: operator,
-      summary: summary,
-      runs: runs,
-      turns: [],
-      selected_run: nil,
-      action_error: nil,
-      session_info: nil,
-      open_error: nil
-    }
-
-    html = render_html(Samen.Web.Operator.AgentHealthLive, assigns)
+    html = render_health(org_id, summary: summary, runs: runs, operator: operator)
     assert html =~ "Agent health"
     assert html =~ "agent-support_triage"
     assert html =~ "kill-support_triage"
     assert html =~ "no transcript"
+  end
+
+  # ==========================================================================
+  # A6 FOLD F2 (the A5 verifier's R-A5-4) — "nothing to show" vs "cannot read"
+  # ==========================================================================
+
+  describe "the operator agent-health surface is fail-HONEST about an unwired host" do
+    test "AVAILABILITY: a wired host is :available; an UNWIRED one is :unavailable, and the reads REFUSE",
+         %{org_id: org_id} do
+      operator = Actor.new("op-1", :operator_admin)
+      _ = AgentFixture.run!(org_id, agent: "support_triage", state: :running)
+
+      # WIRED (this host is): the reads answer, and an empty org is honestly empty.
+      assert Health.availability() == :available
+      assert Health.available?()
+      assert {:ok, [_]} = Health.runs(operator, org_id)
+      assert {:ok, []} = Health.runs(operator, Ash.UUID.generate())
+
+      # UNWIRED: the seam names no reachable repo — the pawchart/demo posture exactly.
+      unwire(fn ->
+        assert Health.availability() == :unavailable
+
+        assert {:error, :unavailable} = Health.summary(operator, org_id)
+        assert {:error, :unavailable} = Health.runs(operator, org_id)
+        assert {:error, :unavailable} = Health.turns(operator, org_id, Ash.UUID.generate())
+
+        # AUTHZ still refuses FIRST — an unauthorized caller learns nothing about wiring.
+        assert {:error, :not_authorized} = Health.summary(%{id: "nobody"}, org_id)
+      end)
+
+      # POSITIVE CONTROL — re-wired, the identical calls answer again.
+      assert {:ok, [_]} = Health.runs(operator, org_id)
+    end
+
+    test "the page renders an EXPLICIT 'not wired' state — never the empty-success claim",
+         %{org_id: org_id} do
+      html = render_health(org_id, agent_plane: :unavailable)
+
+      assert html =~ "agent-plane-unavailable"
+      assert html =~ "Agent plane not wired on this host"
+      assert html =~ ":samen_ai_agent_run_repo"
+
+      refute html =~ "No agent runs for this org.",
+             "an unreadable surface claimed it read nothing — the fail-honest contract inverted"
+
+      # ANTI-TAUTOLOGY: a WIRED host with genuinely no runs still renders the empty state,
+      # so the assertion above discriminates cannot-read from honestly-empty.
+      empty = render_health(org_id, agent_plane: :available)
+      assert empty =~ "No agent runs for this org."
+      refute empty =~ "agent-plane-unavailable"
+    end
+
+    test "an UNREADABLE kill row renders 'kill state unreadable', never 'active'", %{org_id: org_id} do
+      operator = Actor.new("op-1", :operator_admin)
+      _ = AgentFixture.run!(org_id, agent: "support_triage", state: :running)
+
+      {:ok, summary} = Health.summary(operator, org_id)
+      assert [%{kill_state: :active, killed: false}] = summary
+      assert render_health(org_id, summary: summary) =~ "active"
+
+      # THE DECISION ITSELF (the shipped tri-state the summary rows carry). `Breaker.
+      # definition_killed?/2` fails CLOSED on an unreadable kill table — every run of the
+      # definition is being refused — so reporting `active` there is the DISPLAY
+      # contradicting the engine. `:unknown` is the honest third state.
+      assert Health.kill_state(false, nil) == :unknown
+      assert Health.kill_state(false, %{killed_at: nil, rearmed_at: nil}) == :unknown
+
+      # ...paired with its positive controls on the READABLE side (anti-tautology: the
+      # variable under test is readability, not the row).
+      assert Health.kill_state(true, nil) == :active
+      killed_row = %{killed_at: DateTime.utc_now(), rearmed_at: nil}
+      assert Health.kill_state(true, killed_row) == :killed
+
+      unknown = Enum.map(summary, &Map.put(&1, :kill_state, Health.kill_state(false, nil)))
+      html = render_health(org_id, summary: unknown)
+
+      assert html =~ "kill state unreadable"
+      assert html =~ "kill-unknown-support_triage"
+      refute html =~ ~s(id="kill-support_triage"), "a kill affordance on unreadable kill state"
+    end
+
+    test "kills_status/1 distinguishes readable-empty from unreadable", %{org_id: org_id} do
+      assert {:ok, []} = Breaker.kills_status(org_id)
+      assert :ok = Breaker.kill_definition(org_id, "support_triage", :operator)
+      assert {:ok, [_]} = Breaker.kills_status(org_id)
+
+      # A non-binary org id cannot be read at all — refused, never an empty success.
+      assert {:error, :unavailable} = Breaker.kills_status(nil)
+      assert Breaker.kills(nil) == []
+    end
+  end
+
+  # Point the agent-plane repo seam at a module that is not a running repo — the exact
+  # shape of a host that mounted `samen_operator_routes/2` and wired no agent tables.
+  defp unwire(fun) do
+    prior = Application.get_env(:samen_core, :samen_ai_agent_run_repo)
+    Application.put_env(:samen_core, :samen_ai_agent_run_repo, Samen.WebTest.NoSuchRepo)
+
+    try do
+      fun.()
+    after
+      Application.put_env(:samen_core, :samen_ai_agent_run_repo, prior)
+    end
+  end
+
+  defp render_health(org_id, opts) do
+    assigns =
+      %{
+        samen_mount: build_operator_mount(Ash.UUID.generate()),
+        no_org: false,
+        impersonation: :active,
+        target_org_id: org_id,
+        operator: Keyword.get(opts, :operator, Actor.new("op-1", :operator_admin)),
+        agent_plane: Keyword.get(opts, :agent_plane, :available),
+        summary: Keyword.get(opts, :summary, []),
+        runs: Keyword.get(opts, :runs, []),
+        turns: [],
+        selected_run: nil,
+        action_error: nil,
+        session_info: nil,
+        open_error: nil
+      }
+
+    render_html(Samen.Web.Operator.AgentHealthLive, assigns)
   end
   # ==========================================================================
   # A5 FOLD F1 — the approver-membership seam, on a REAL Identity mount

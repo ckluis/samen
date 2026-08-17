@@ -36,6 +36,18 @@ defmodule Samen.Web.Operator.AgentHealthLive do
   read, T154 on write), re-consulted on the write path rather than trusted from the last
   render.
 
+  ## "Not wired" is not "nothing to show" (A6 — the A5 verifier's R-A5-4)
+
+  This page is inherited at 0 LOC by every host mounting `samen_operator_routes/2`,
+  including hosts that never wired the agent-plane repo seams (`pawchart`). Until A6 those
+  reads rescued to `[]` and the page rendered the positive claim *"No agent runs for this
+  org"* from a surface structurally incapable of reading one — the fail-honest contract
+  (ADR-014/024/026) inverted on a display. `Samen.AI.Agent.Health.availability/0` now
+  answers the question once and this page renders an explicit **agent plane not wired**
+  state instead of an empty success. The same distinction applies one level down: an
+  UNREADABLE kill row renders `kill state unreadable`, never `active`, because the breaker
+  is meanwhile refusing every run of that definition fail-CLOSED. Sabotages 265/266.
+
   ADR-042 Class B: every read renders from `mount`/`load` with JS off; kill/re-arm are
   `phx-click` writes.
   """
@@ -77,6 +89,7 @@ defmodule Samen.Web.Operator.AgentHealthLive do
         impersonation: :none,
         target_org_id: target_org_id,
         operator: operator,
+        agent_plane: Health.availability(),
         summary: [],
         runs: [],
         turns: [],
@@ -254,6 +267,22 @@ defmodule Samen.Web.Operator.AgentHealthLive do
                   </button>
                 </form>
               </div>
+            <% @agent_plane == :unavailable -> %>
+              <div class="card" id="agent-plane-unavailable" data-agent-plane="unavailable" style="padding:22px 20px">
+                <div style="color:var(--red);font-weight:600" id="agent-plane-not-wired">
+                  Agent plane not wired on this host — no agent data can be read.
+                </div>
+                <p style="color:var(--muted);margin:10px 0 0;font-size:13px">
+                  This page is inherited by every host that mounts the operator workspace, but this
+                  one has not configured the agent-plane repo seams
+                  (<span class="mono">:samen_ai_agent_run_repo</span> /
+                  <span class="mono">:samen_ai_agent_turn_repo</span> /
+                  <span class="mono">:samen_ai_agent_kill_repo</span>), so agent runs, turns and kill
+                  state are <b>unreadable here</b> — not absent. This is deliberately <b>not</b> an
+                  empty state: a surface that cannot read must never claim it read nothing
+                  (ADR-014/024/026 fail-honest; ADR-047 §6).
+                </p>
+              </div>
             <% true -> %>
               <div :if={@session_info} id="session-accountability" class="card" style="padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--muted)">
                 <b style="color:inherit">Impersonation session.</b>
@@ -302,9 +331,12 @@ defmodule Samen.Web.Operator.AgentHealthLive do
                   </:head>
                   <tr :for={a <- @summary} class="agent-row" id={"agent-#{a.agent}"}>
                     <td class="a-name">{a.agent}</td>
-                    <td class="a-killed">
-                      <span :if={a.killed} class="pill pill-killed" id={"killed-badge-#{a.agent}"}>killed ({a.kill_reason})</span>
-                      <span :if={!a.killed}>active</span>
+                    <td class="a-killed" data-kill-state={a.kill_state}>
+                      <span :if={a.kill_state == :killed} class="pill pill-killed" id={"killed-badge-#{a.agent}"}>killed ({a.kill_reason})</span>
+                      <span :if={a.kill_state == :active}>active</span>
+                      <span :if={a.kill_state == :unknown} class="pill pill-killed" id={"kill-unknown-#{a.agent}"}>
+                        kill state unreadable — runs are being refused fail-closed
+                      </span>
                     </td>
                     <td class="a-total">{a.total_runs}</td>
                     <td class="a-by-state">{counts_str(a.run_counts)}</td>
@@ -314,11 +346,11 @@ defmodule Samen.Web.Operator.AgentHealthLive do
                     <td class="a-tokens">{a.tokens}</td>
                     <td class="a-last" style="color:var(--muted)">{ts(a.last_run_at)}</td>
                     <td class="a-actions">
-                      <button :if={!a.killed} class="btn-kill" id={"kill-#{a.agent}"} phx-click="kill" phx-value-agent={a.agent}
+                      <button :if={a.kill_state == :active} class="btn-kill" id={"kill-#{a.agent}"} phx-click="kill" phx-value-agent={a.agent}
                         data-confirm="Stop this agent for this tenant? Running runs stop at their next turn boundary.">
                         Kill
                       </button>
-                      <button :if={a.killed} class="btn-rearm" id={"rearm-#{a.agent}"} phx-click="rearm" phx-value-agent={a.agent}>
+                      <button :if={a.kill_state == :killed} class="btn-rearm" id={"rearm-#{a.agent}"} phx-click="rearm" phx-value-agent={a.agent}>
                         Re-arm
                       </button>
                     </td>

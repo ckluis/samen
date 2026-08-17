@@ -335,6 +335,90 @@ defmodule Samen.Web.TenantAuthzLiveTest do
   # Driven end-to-end through the REAL flags LiveView + Identity spine.
   # ==========================================================================
 
+  # ==========================================================================
+  # A6 (ADR-047; the A5 verifier's R-A5-3 + its "could not prove here" #2) — the AGENT
+  # surfaces now ride this LiveView-DRIVING harness, and the decision card's acting
+  # principal is the AUTHENTICATED HUMAN rather than the synthetic per-org pseudo-id.
+  # ==========================================================================
+
+  describe "A6 — the agent surfaces are gated, and the deciding principal is a PERSON" do
+    test "armed + unauthenticated: the agent run list AND detail are REFUSED (dead render + live)", ctx do
+      SecurityHost.arm!()
+
+      for path <- ["/ai/agents", "/ai/agents/#{Ash.UUID.generate()}"] do
+        conn = get(build_conn(), "#{path}?org=#{ctx.victim_org}")
+        assert conn.status == 302, "#{path} served an armed, unauthenticated dead render"
+        assert redirected_to(conn) == "/login"
+
+        assert {:error, {:redirect, %{to: "/login"}}} =
+                 live(build_conn(), "#{path}?org=#{ctx.victim_org}")
+      end
+    end
+
+    test "POSITIVE CONTROL: an authenticated member IS served the agent list for their own org" do
+      SecurityHost.arm!()
+      host = register_owner!()
+      member = accept_into!(host, :member)
+
+      html =
+        session_conn(member.credential.id)
+        |> get("/ai/agents?org=#{host.org.id}")
+        |> html_response(200)
+
+      assert html =~ "agent-run-list"
+      assert html =~ "No agent runs yet"
+    end
+
+    test "the PRINCIPAL the decision card acts as is the authenticated human, not broker:<org_id>" do
+      SecurityHost.arm!()
+      host = register_owner!()
+      member = accept_into!(host, :member)
+      mount = ai_mount()
+
+      # What A5 acted as — a per-ORG pseudo-principal, identical for every human in the org.
+      broker = "broker:#{host.org.id}"
+      assert %Samen.Scope{actor: %{id: ^broker}} = Mount.scope(mount, host.org.id)
+
+      # What A6 acts as: the principal `Samen.Web.TenantAuthz` pins from the SIGNED session.
+      session = %{Auth.session_token_key() => session_token!(member.credential.id)}
+      {:cont, socket} = Samen.Web.TenantAuthz.on_mount(:require_tenant, %{}, live_session(mount, session), fresh_socket())
+
+      assert socket.assigns.samen_tenant_principal == member.credential.id
+      refute socket.assigns.samen_tenant_principal == broker
+
+      # FAIL-CLOSED: no principal in the session ⇒ nothing to decide as. (Armed hosts halt
+      # outright; the assertion here is that nothing invents an identity.)
+      disarmed_mount = disarmed_ai_mount()
+      refute Samen.Web.CurrentOrg.tenant_gate_armed?(disarmed_mount)
+
+      {:cont, disarmed} =
+        Samen.Web.TenantAuthz.on_mount(:require_tenant, %{}, live_session(disarmed_mount, %{}), fresh_socket())
+
+      assert disarmed.assigns.samen_tenant_principal == nil
+    end
+
+    test "the DISARMED dev posture still NAMES a signed-in human (it no longer discards the identity)" do
+      SecurityHost.disarm!()
+      host = register_owner!()
+      member = accept_into!(host, :member)
+      mount = disarmed_ai_mount()
+
+      # NON-VACUITY: this leg must really be the DISARMED one (otherwise the armed branch
+      # would assign the principal and the test would prove nothing about this fold).
+      refute Samen.Web.CurrentOrg.tenant_gate_armed?(mount)
+
+      session = %{Auth.session_token_key() => session_token!(member.credential.id)}
+
+      {:cont, socket} =
+        Samen.Web.TenantAuthz.on_mount(:require_tenant, %{}, live_session(mount, session), fresh_socket())
+
+      # Unchanged: org authority stays unconstrained on the disarmed leg (byte-for-byte).
+      assert socket.assigns.samen_authorized_orgs == :unconstrained
+      # New: the human is named rather than discarded, so a CONSENT can be attributed.
+      assert socket.assigns.samen_tenant_principal == member.credential.id
+    end
+  end
+
   describe "S1a — armed host, admin-rank write requires REAL admin membership" do
     test "the armed flags surface SERVES an authenticated member on the DEAD RENDER (TenantAuthz pins the principal)" do
       SecurityHost.arm!()
@@ -564,6 +648,32 @@ defmodule Samen.Web.TenantAuthzLiveTest do
         identity_namespace: Samen.WebTest.Operator
       }
     )
+  end
+
+  defp ai_mount do
+    Mount.new(:ai, Samen.WebTest.Crm, Samen.WebTest.Repo,
+      labels: %{
+        otp_app: SecurityHost.otp_app(),
+        authn: {:app_env, SecurityHost.otp_app(), :auth_required?},
+        identity_namespace: Samen.WebTest.Operator
+      }
+    )
+  end
+
+  # The same AI mount with NO `:authn` seam — the explicitly disarmed dev/dogfood posture.
+  defp disarmed_ai_mount do
+    Mount.new(:ai, Samen.WebTest.Crm, Samen.WebTest.Repo,
+      labels: %{identity_namespace: Samen.WebTest.Operator, param_trust: :disarmed}
+    )
+  end
+
+  defp live_session(mount, session), do: Map.put(session, "samen_mount", Mount.to_session(mount))
+
+  defp fresh_socket, do: %Phoenix.LiveView.Socket{}
+
+  defp session_token!(credential_id) do
+    {:ok, _session, raw} = SessionCreate.create(session_create_mods(), credential_id)
+    raw
   end
 
   defp armed_flags_mount do

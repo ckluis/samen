@@ -88,4 +88,7 @@ defmodule Driftwood.DataCase do
   defp driftwood_namespace(:notifications), do: Driftwood.Primitives
   defp driftwood_namespace(:files), do: Driftwood.Primitives
   defp driftwood_namespace(:csv), do: Driftwood.Crm
+  # ADR-047 A6 — the tenant AI-kit mount (`samen_ai_routes(:ai, Driftwood.Crm, …)` in the
+  # real router); the agent surfaces read the framework's own Run/Turn rows through it.
+  defp driftwood_namespace(:ai), do: Driftwood.Crm
 end

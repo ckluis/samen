@@ -1,0 +1,28 @@
+# SABOTAGE: A6 (ADR-047 §6, ADR-014/024/026; the A5 verifier's R-A5-4) gate sabotage — the
+# operator agent-health plane is FAIL-OPEN in display again. `Samen.AI.Agent.Health.
+# availability/0`'s unwired branch answers `:available`, so a host that inherited
+# `/operator/agents/:org_id` from `samen_operator_routes/2` but wired NO agent repo seams
+# (pawchart, demo) goes back to rescuing every read to `[]` and rendering the positive claim
+# "No agent runs for this org" from a surface structurally incapable of reading one. That is
+# the fail-honest adapter contract inverted on a DISPLAY: an empty list IS a success claim.
+# The unwired host's reds must flip; the WIRED host's honest-empty state stays green, proving
+# what was lost is the distinction and not the reads.
+# APP: pawchart
+# TEST_FILES: test/agent_plane_unwired_test.exs
+# MUST_FAIL: availability/0 answers :unavailable
+# MUST_FAIL: the page renders the explicit NOT-WIRED state
+diff --git a/samen_core/lib/samen/ai/agent/health.ex b/samen_core/lib/samen/ai/agent/health.ex
+--- a/samen_core/lib/samen/ai/agent/health.ex
++++ b/samen_core/lib/samen/ai/agent/health.ex
+@@ -132,8 +132,10 @@ defmodule Samen.AI.Agent.Health do
+   would invite the very confusion this closes (org with no runs vs host with no plane).
+   """
+   @spec availability() :: :available | :unavailable
++  # SABOTAGE (A6, R-A5-4): a host with no reachable agent repo is declared READABLE, so it
++  # reports an empty SUCCESS instead of refusing.
+   def availability do
+-    if repo_running?(run_repo()), do: probe_read(), else: :unavailable
++    if repo_running?(run_repo()), do: probe_read(), else: :available
+   end
+ 
+   @doc "`availability/0` as a boolean, for callers that only branch."

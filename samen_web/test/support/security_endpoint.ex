@@ -92,6 +92,16 @@ defmodule Samen.WebTest.SecurityRouter do
       repo: Samen.WebTest.Repo,
       labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
     )
+
+    # ADR-047 A6 (the A5 verifier's third "could not prove here"): the AI kit — and with it
+    # the A5 AGENT surfaces `/ai/agents` + `/ai/agents/:id` — was mounted by no router this
+    # LiveView-DRIVING harness covers, so the tenant authn gate on those two routes was only
+    # ever verified structurally. Mounting the macro here puts them under the same armed
+    # dead-render red paths every other tenant surface rides. Cheap, and it closes the gap.
+    samen_ai_routes(:ai, Samen.WebTest.Crm,
+      repo: Samen.WebTest.Repo,
+      labels: Map.put(@labels, :identity_namespace, Samen.WebTest.Operator)
+    )
   end
 end
 

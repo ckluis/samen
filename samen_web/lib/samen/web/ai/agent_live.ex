@@ -19,10 +19,29 @@ defmodule Samen.Web.AI.AgentLive do
     * (A5) the approver is resolved to a REAL member of the run's org with their REAL
       role — a non-member's click refuses and NOTHING executes.
 
-  The acting principal is taken from the TRUSTED mount scope, never from a form field,
-  and the approval id is validated against THIS run's own `:proposed` turn row before
-  the card renders it — so a crafted `phx-value-approval` for another run's proposal
-  cannot be decided here.
+  The acting principal is the AUTHENTICATED PRINCIPAL from the signed session, never a
+  form field, and the approval id is validated against THIS run's own `:proposed` turn
+  row before the card renders it — so a crafted `phx-value-approval` for another run's
+  proposal cannot be decided here.
+
+  ## The approver is a PERSON, not the org (A6 — the A5 verifier's R-A5-3)
+
+  A5 took the acting principal from `Mount.scope(mount, org_id)`, whose tenant-plane actor
+  id is the SYNTHETIC per-org broker pseudo-principal `"broker:<org_id>"` — identical for
+  every human in the org and never the logged-in user. On a wired host that fail-CLOSED
+  (no membership row exists for `broker:<org>`), which was the right direction but left the
+  card non-functional; and had any host ever created that membership, an agent write would
+  have been attributable to an ORG rather than to a PERSON — the E3 distinct-party CHECK
+  still holds (the requester is the AI principal), but the consent record loses its human.
+
+  A6 threads the principal `Samen.Web.TenantAuthz` pins into the socket
+  (`:samen_tenant_principal`, resolved through `Samen.Web.CurrentOrg.principal_id/2` — the
+  spine credential id, else the legacy BYO session id), falling back to the same value
+  stashed on the mount labels by `Samen.Web.Live.assign_mount/2`. It is FAIL-CLOSED: no
+  authenticated principal ⇒ no decision is attempted at all, and `Samen.AI.Agent.Approver`
+  then verifies that principal really holds a membership row in the run's org. So the
+  `decided_by` on the approval, the executing actor, and the audit all name the real human
+  who clicked. Sabotage 263.
 
   ## What the card shows: token-only provenance
 
@@ -121,10 +140,18 @@ defmodule Samen.Web.AI.AgentLive do
     outcome =
       with {:ok, detail} <- fetch_detail(mount, org_id, run_id),
            %{id: ^approval_id} <- detail.approval,
-           actor_id when is_binary(actor_id) <- actor_id(mount, org_id) do
+           # TAGGED so a nil principal can never be confused with a nil approval above —
+           # the two refusals are different facts and must not share a clause.
+           {:principal, actor_id} when is_binary(actor_id) <- {:principal, principal_id(socket)} do
         classify(action, AgentReads.decide(action, approval_id, actor_id))
       else
-        _ -> {:error, "That proposal is no longer pending for this run."}
+        # An unauthenticated session is refused HERE, before the engine — and told which
+        # rule refused it. `nil` is never handed on as an actor (A6/R-A5-3 fail-closed).
+        {:principal, _} ->
+          {:error, "You must be signed in as a member of this org to decide a proposal."}
+
+        _ ->
+          {:error, "That proposal is no longer pending for this run."}
       end
 
     {:noreply, load(socket, org_id, run_id: run_id, outcome: outcome)}
@@ -134,12 +161,27 @@ defmodule Samen.Web.AI.AgentLive do
   defp fetch_detail(_mount, _org_id, nil), do: :error
   defp fetch_detail(mount, org_id, run_id), do: AgentReads.get(mount, org_id, run_id)
 
-  defp actor_id(mount, org_id) do
-    case Mount.scope(mount, org_id) do
-      %Samen.Scope{actor: %{id: id}} when is_binary(id) -> id
+  # THE acting principal (A6 / R-A5-3): the AUTHENTICATED human, never the synthetic
+  # per-org `broker:<org_id>` pseudo-principal `Mount.scope/2` fabricates for the tenant
+  # plane. `:samen_tenant_principal` is pinned by `Samen.Web.TenantAuthz`'s `on_mount`
+  # (from the SIGNED session only — never a param); the mount-label copy is the same
+  # value, stashed by `Samen.Web.Live.assign_mount/2` for the helpers that see no socket.
+  # Nil ⇒ refuse: an unauthenticated caller has no identity to record a consent against.
+  defp principal_id(socket) do
+    case socket.assigns[:samen_tenant_principal] do
+      id when is_binary(id) and id != "" -> id
+      _ -> stashed_principal(socket.assigns[:samen_mount])
+    end
+  end
+
+  defp stashed_principal(%Mount{} = mount) do
+    case Mount.label(mount, Samen.Web.TenantRole.principal_label(), nil) do
+      id when is_binary(id) and id != "" -> id
       _ -> nil
     end
   end
+
+  defp stashed_principal(_mount), do: nil
 
   # Every refusal is reported HONESTLY and specifically — an approver who was refused
   # must never see "approved" (ADR-014), and must be told which rule refused them.

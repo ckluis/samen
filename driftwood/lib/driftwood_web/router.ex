@@ -312,6 +312,32 @@ defmodule DriftwoodWeb.Router do
       spine_sessions: true
     )
 
+    # ADR-047 A6 (§9#7 TAKEN) — the tenant-plane AI KIT, and with it the AGENT surfaces.
+    # THE ≈0-LOC ADOPTION PROOF: before A6 no vertical mounted `samen_ai_routes` at all, so
+    # the AI kit had a mount seam with no adoption evidence. This ONE macro call mounts all
+    # SIX tenant AI surfaces — verbs (`/ai`), semantic search, CRM AI, analytics, support
+    # draft, and the ADR-047 A5 agent pair `/ai/agents` + `/ai/agents/:id` (run list, run
+    # detail with the bounded turn log + vault-routed transcript resolved on the caller's
+    # plane, the cancel affordance, and the approve/reject DECISION CARD). Not one line of
+    # agent UI, read code, masking code or approval code is authored in this vertical; the
+    # only driftwood-authored agent artifact is the ~5-line `Driftwood.Support.TriageAgent`
+    # definition. `Samen.Web.TenantAuthz`'s `:require_tenant` on_mount rides inside the
+    # macro, so the new routes carry the same tenant gate every other framework surface has.
+    #
+    # The `ai_*` labels are the grounding seams the kit's OTHER surfaces read (the
+    # `flags_namespace` pattern); the agent surfaces need none of them — they read the
+    # framework's own `Samen.AI.Agent.{Run,Turn}` rows, which this host already points at
+    # `Driftwood.Repo` (config.exs). Mounted over `Driftwood.Crm` exactly as the macro's own
+    # documented example does.
+    samen_ai_routes(:ai, Driftwood.Crm,
+      repo: Driftwood.Repo,
+      labels:
+        Map.merge(@current_org_labels, %{
+          ai_crm_resource: Driftwood.Crm.Company,
+          ai_aggregate_resource: Driftwood.Aggregate.MrrByTier
+        })
+    )
+
     # ADR-012 — the FLAGSHIP cross-plane realtime CHAT, TENANT plane (the org's own chat
     # console — bodies + participant identities in the clear). The `:object_cards` label
     # registers Driftwood's bespoke `freight.driver` unfurl card (the vertical override seam);

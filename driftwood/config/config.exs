@@ -286,8 +286,28 @@ config :samen_core, Samen.Approvals.Registry,
     "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler},
     # T155 (ADR-043 §6.3 D5): the AI support operator's human-gated send. Operator plane;
     # requester (the AI service principal) is never the decider (distinct-party by construction).
-    "ai_support_reply" => {:operator, Samen.AI.SupportOperator.ReplyHandler}
+    "ai_support_reply" => {:operator, Samen.AI.SupportOperator.ReplyHandler},
+    # ADR-047 A4/A6 (§9#1 TAKEN, ADR-043 §6.2 unamended): the ONE agent-write kind. An
+    # `effect: :write` agent tool NEVER executes in the turn — it opens this E3 Face-1
+    # approval (requester = the AI service principal, which the distinct-party CHECK bars
+    # from ever deciding) and the run parks `:awaiting_approval` until a DISTINCT human
+    # approves; the write then executes with the APPROVER's authority. TENANT plane: the
+    # org's own member decides a write against the org's own record.
+    #
+    # A6 wires it because an UNREGISTERED kind is refused at request time — an unwired host
+    # is honest ("the agent cannot propose") but its decision card can never do anything.
+    "ai_agent_write" => {:tenant, Samen.AI.Agent.WriteProposal}
   }
+
+# ADR-047 A5/A6 (§5.3) — the APPROVER-MEMBERSHIP seam. `Identity.Membership` is
+# materialized INTO the host namespace (ADR-004), so samen_core cannot name it; the host
+# does. At decision time the clicking principal is resolved against a REAL membership row
+# in the RUN's org (pinned from the durable run row, never a caller argument) and executes
+# under that row's REAL role. Driftwood's Identity spine is `Driftwood.Operator` — the same
+# mount `samen_settings_routes`/`samen_auth_routes` use. An UNWIRED host refuses
+# `:approver_unresolvable` (fail-closed); before A6 driftwood WAS that unwired host, so its
+# inherited decision card was structurally non-functional.
+config :samen_core, Samen.AI.Agent, approver_membership: Driftwood.Operator.Membership
 
 # T155 (ADR-043 §5.2 / §6.3): point the reusable AI-plane resources (mounted via
 # Samen.AI.Domain above) at Driftwood.Repo so Prompt templates + support-reply drafts

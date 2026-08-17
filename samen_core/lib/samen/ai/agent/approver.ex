@@ -60,6 +60,43 @@ defmodule Samen.AI.Agent.Approver do
   The read is `authorize?: false` because this IS the authorization-boundary read that
   establishes the actor (the `Samen.Auth.OrgActor` precedent) — it is pinned to the
   RUN's org id, taken from the durable run row, never from a caller argument.
+
+  ## `{:ok, nil}` is a REFUSAL, not a membership (A6 — the A5 verifier's R-A5-2)
+
+  A custom `{m, f}` seam's natural spelling of *"no membership found"* is `{:ok, nil}`.
+  Elixir's `nil` **is** an atom, so it matched the `{:ok, role} when is_atom(role)` clause
+  and resolved to a real `%Samen.Scope{role: nil}` — an ambiguous affirmative admitted as
+  a positive membership answer, while a bare `nil` correctly refused. That is the exact
+  default-member synthesis this module exists to close, one shape over. `{:ok, nil}` now
+  refuses `{:error, :not_authorized}`, ahead of the atom clause. The sanctioned Ash-resource
+  path was never affected (it requires a real row); this closes the host-seam contract.
+
+  ## The `nil`-ROLE posture, decided and pinned (A6)
+
+  A membership row whose `role` is outside `Samen.Scope.Role`'s closed set normalizes to
+  `nil` — deliberately, so an unrecognized role can only ever SUBTRACT authority. The A5
+  verifier observed that a `nil`-role approver nonetheless executed an org-scoped governed
+  write *identically to a `:member` one*, and asked whether `nil` should therefore refuse
+  outright. **It should not, and the equivalence is intended:** role gating is the TARGET
+  RESOURCE's job, not this resolver's.
+
+    * On a target gated only by `Samen.Policy.OrgScope` (which keys on ORG, not role —
+      the A4 fixture target) there is no role gate to fail open: `nil` and `:member`
+      execute alike because the resource asked nothing about role.
+    * On a target that DOES consult role — `Samen.Policy.RoleAtLeast`, which the shipped
+      `Driftwood.Work.Task` write path carries — `nil` ranks `-1` and is REFUSED where
+      `:member` is admitted. Proven live in the A6 vertical e2e (`:viewer` and `:member`
+      approvers of the *same* proposal diverge, and the refusal rolls the whole decision
+      back: approval still pending, run still parked, record unmutated).
+
+  So `nil` is strictly narrower than `:member` everywhere role is consulted, and
+  indistinguishable only where role is deliberately not consulted. Refusing `nil`-role
+  membership here instead would refuse legitimate hosts whose membership rows carry role
+  vocabulary outside the framework's closed set — a host-vocabulary decision the kernel
+  has no standing to make. What the resolution guarantees is what §5.3 needs: the approver
+  is a REAL member of the run's org, and the role recorded on the turn row
+  (`meta.approver_role`) is their REAL one, never a synthesized `:member`. Pinned by the
+  named `nil`-role tests in `samen_core/test/ai/agent_write_test.exs`.
   """
 
   require Ash.Query
@@ -108,6 +145,34 @@ defmodule Samen.AI.Agent.Approver do
   end
 
   defp resolve_wired(resource, approver_id, org_id) when is_atom(resource) do
+    # A6: an approver id that cannot even be CAST to the seam's key type (e.g. the
+    # synthetic `"broker:<org_id>"` tenant-plane pseudo-principal against a `:uuid`
+    # `user_id`) is not a seam failure — it is a principal that provably holds no
+    # membership row. Refuse `:not_authorized` (the honest "you are not a member of this
+    # org" the surface reports) instead of letting the filter's cast error degrade into
+    # `:approver_unresolvable` ("approvals are not wired on this host"), which would
+    # misattribute a caller problem to the operator's configuration. Both are refusals —
+    # nothing executes either way — but only one of them is TRUE.
+    if castable_key?(resource, approver_id) do
+      read_membership(resource, approver_id, org_id)
+    else
+      {:error, :not_authorized}
+    end
+  end
+
+  defp castable_key?(resource, approver_id) do
+    case Ash.Resource.Info.attribute(resource, :user_id) do
+      %{type: type, constraints: constraints} ->
+        match?({:ok, _}, Ash.Type.cast_input(type, approver_id, constraints))
+
+      _ ->
+        true
+    end
+  rescue
+    _ -> true
+  end
+
+  defp read_membership(resource, approver_id, org_id) do
     resource
     |> Ash.Query.filter(user_id == ^approver_id and org_id == ^org_id)
     |> Ash.Query.ensure_selected([:id, :role])
@@ -127,6 +192,11 @@ defmodule Samen.AI.Agent.Approver do
   # default-member fallback (that would re-introduce exactly the synthesis this closes).
   defp normalize({:ok, %{} = membership}, approver_id, org_id),
     do: scope_for(approver_id, org_id, membership)
+
+  # A6 (R-A5-2): `{:ok, nil}` — the natural spelling of "no membership found" — is a
+  # REFUSAL. It must be matched BEFORE the atom clause below, because `nil` is an atom
+  # and would otherwise be admitted as a positive membership answer with a `nil` role.
+  defp normalize({:ok, nil}, _approver_id, _org_id), do: {:error, :not_authorized}
 
   defp normalize({:ok, role}, approver_id, org_id) when is_atom(role) or is_binary(role),
     do: scope_for(approver_id, org_id, %{role: role})

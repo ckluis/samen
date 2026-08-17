@@ -269,7 +269,9 @@ defmodule Samen.AI.Agent.Breaker do
       {:ok, _row} ->
         audit(
           "ai.agent.kill_definition agent=#{agent_name} reason=#{reason}",
-          Keyword.put_new(opts, :org_id, org_id)
+          opts
+          |> Keyword.put_new(:org_id, org_id)
+          |> Keyword.put(:subject_id, definition_subject_id(org_id, agent_name))
         )
 
         :ok
@@ -307,7 +309,9 @@ defmodule Samen.AI.Agent.Breaker do
 
         audit(
           "ai.agent.rearm_definition agent=#{agent_name}",
-          Keyword.put_new(opts, :org_id, org_id)
+          opts
+          |> Keyword.put_new(:org_id, org_id)
+          |> Keyword.put(:subject_id, definition_subject_id(org_id, agent_name))
         )
 
         :ok
@@ -324,23 +328,43 @@ defmodule Samen.AI.Agent.Breaker do
 
   def rearm_definition(_org_id, _agent_name, _opts), do: {:error, :invalid_kill}
 
-  @doc "Every durable kill row for one org (the operator surface's read; token-only)."
-  @spec kills(String.t()) :: [map()]
-  def kills(org_id) when is_binary(org_id) do
+  @doc """
+  Every durable kill row for one org (the operator surface's read; token-only), or
+  `{:error, :unavailable}` when the kill table cannot be read at all.
+
+  A6 (the A5 verifier's R-A5-4): the GATE was already fail-CLOSED on an unreadable kill
+  row (`definition_killed?/2` answers `true`), but the DISPLAY collapsed the same failure
+  to `[]` — so the operator surface rendered a definition as `active` while every run of
+  it was being refused `:killed`. That is the fail-honest contract inverted (ADR-014/024/
+  026: a read that could not happen never reports an empty success). This is the honest
+  read; `kills/1` keeps the lossy `[]` shape for callers that only aggregate.
+  """
+  @spec kills_status(String.t()) :: {:ok, [map()]} | {:error, :unavailable}
+  def kills_status(org_id) when is_binary(org_id) do
     Kill
     |> Ash.Query.filter(org_id == ^org_id)
     |> Ash.Query.sort(killed_at: :desc)
     |> Ash.Query.limit(200)
     |> Ash.read(authorize?: false)
     |> case do
+      {:ok, rows} -> {:ok, rows}
+      _ -> {:error, :unavailable}
+    end
+  rescue
+    _ -> {:error, :unavailable}
+  end
+
+  def kills_status(_org_id), do: {:error, :unavailable}
+
+  @doc "Every durable kill row for one org (token-only). `[]` also means 'unreadable' —
+  use `kills_status/1` when the difference matters (it does on any DISPLAY surface)."
+  @spec kills(String.t()) :: [map()]
+  def kills(org_id) do
+    case kills_status(org_id) do
       {:ok, rows} -> rows
       _ -> []
     end
-  rescue
-    _ -> []
   end
-
-  def kills(_org_id), do: []
 
   defp bounded_reason(reason) when reason in [:operator, :rate_tripped, :provider_tripped],
     do: to_string(reason)
@@ -458,15 +482,26 @@ defmodule Samen.AI.Agent.Breaker do
       false
   end
 
+  # The audit SUBJECT of a per-{org, definition} kill is that definition, not the host
+  # (A6; the A5 verifier's R-A5-5 minor). A2/A5 filed every breaker line against the one
+  # host subject `"samen:ai_agent:host"`, so a targeted tenant kill and the global
+  # emergency stop were indistinguishable by subject — and a per-definition kill history
+  # could only be reconstructed by parsing `detail`. Token-only by construction: an org
+  # uuid and the bounded definition NAME, both already on the row.
+  defp definition_subject_id(org_id, agent_name),
+    do: "samen:ai_agent:#{org_id}:#{agent_name}"
+
   # Token-only audit line (ids/enums/counts — the Automation.Breaker/Health shape).
-  # Best-effort: observability never blocks or crashes the switch.
+  # Best-effort: observability never blocks or crashes the switch. `:subject_id` defaults
+  # to the HOST switch's subject — which is correct for `kill/2`/`rearm/1` (they ARE the
+  # host lever) and overridden by the per-definition callers above.
   defp audit(detail, opts) do
     repo = AshPostgres.DataLayer.Info.repo(Run, :mutate)
 
     if repo do
       Samen.AuditEvent.insert(repo, %{
         event_type: "system",
-        subject_id: "samen:ai_agent:host",
+        subject_id: Keyword.get(opts, :subject_id) || "samen:ai_agent:host",
         actor_id: opts[:actor_id],
         correlation_id: opts[:org_id],
         detail: detail

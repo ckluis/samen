@@ -25,6 +25,24 @@ defmodule Samen.AI.Agent.Health do
   enums, counts, durations, bounded error kinds, arg key NAMES. There is no `%Masked{}`
   branch here because there is no PII column in reach — the `Samen.Automation.Health` /
   `Samen.Web.Operator.WebhookDlqLive` posture.
+
+  ## "Nothing to show" vs "cannot read": `availability/0` (A6 — the A5 verifier's R-A5-4)
+
+  `/operator/agents/:org_id` is inherited at 0 LOC by every host that calls
+  `samen_operator_routes/2` — including hosts that never wired the agent plane at all
+  (`pawchart` configures none of `:samen_ai_agent_{run,turn,kill}_repo`). Until A6, every
+  read here rescued to `[]`, so such a host rendered a positive claim — *"No agent runs
+  for this org"* — from a surface that is structurally incapable of reading one. That is
+  the ADR-014/024/026 fail-honest contract inverted: an adapter that did not do the work
+  must never report success, and an empty list IS a success claim on a display.
+
+  `availability/0` answers that question once, from the host wiring seam itself, and
+  `summary/3` / `runs/3` / `turns/4` refuse `{:error, :unavailable}` rather than
+  fabricating an empty success. An UNWIRED host's operator page therefore says the agent
+  plane is not wired; a WIRED host with no runs says there are no runs. The gate side is
+  untouched and stays fail-CLOSED (`Breaker.killed?/2` still answers `true` on an
+  unreadable kill row) — this fold is about what the surface CLAIMS, never about what the
+  breaker permits.
   """
 
   require Ash.Query
@@ -93,6 +111,75 @@ defmodule Samen.AI.Agent.Health do
   def may_manage?(_), do: false
 
   # ---------------------------------------------------------------------------
+  # Availability — honest-empty vs cannot-read (A6; the A5 verifier's R-A5-4)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Is the agent plane READABLE on this host — `:available` or `:unavailable`?
+
+  Two arms, cheapest first:
+
+    1. **the host wiring seam.** `config :samen_core, :samen_ai_agent_run_repo` is the
+       key `Samen.AI.Agent.Run` compiles its `postgres do repo … end` against, and it is
+       what a host wires (or does not) when it adopts the agent plane. An absent /
+       unloadable / NOT-RUNNING repo is `:unavailable` — this is the pawchart case, and
+       it is decided without touching the database;
+    2. **a bounded probe read.** A running repo can still be unmigrated or otherwise
+       unreadable, so one `LIMIT 1` read over `Run` decides the rest. `{:ok, _}` (rows or
+       none) is `:available`; an error or a raise is `:unavailable`.
+
+  Deliberately NOT org-scoped: the agent plane is wired per HOST, and asking per org
+  would invite the very confusion this closes (org with no runs vs host with no plane).
+  """
+  @spec availability() :: :available | :unavailable
+  def availability do
+    if repo_running?(run_repo()), do: probe_read(), else: :unavailable
+  end
+
+  @doc "`availability/0` as a boolean, for callers that only branch."
+  @spec available?() :: boolean()
+  def available?, do: availability() == :available
+
+  # The configured host seam. Read at RUNTIME from the same application-env key the
+  # resource reads at COMPILE time (`Application.compile_env(:samen_core,
+  # :samen_ai_agent_run_repo, SamenCore.TestRepo)`), so the two can only disagree on a
+  # host that changed the key without recompiling — and arm 2 (the probe read) catches
+  # that case anyway.
+  defp run_repo, do: Application.get_env(:samen_core, :samen_ai_agent_run_repo)
+
+  defp repo_running?(repo) when is_atom(repo) and not is_nil(repo) do
+    Code.ensure_loaded?(repo) and function_exported?(repo, :__adapter__, 0) and
+      is_pid(Process.whereis(repo))
+  rescue
+    _ -> false
+  end
+
+  defp repo_running?(_repo), do: false
+
+  # PK-PINNED BY CONSTRUCTION (T132/S15): the probe asks "can this table be read at all
+  # on this host?", so it is pinned to the all-zero UUID — a primary key no `arn` row can
+  # ever carry (ids are generated v4). It therefore reads ZERO tenant rows on every host,
+  # by construction rather than by the caller discarding them, while still telling a
+  # readable table (`{:ok, []}`) apart from an unreachable/unmigrated one (error/raise).
+  # A `LIMIT 1` unpinned read would have answered the same question by selecting some
+  # arbitrary tenant's row — a needless org-less read for a question that never needed a
+  # row at all.
+  @probe_id "00000000-0000-0000-0000-000000000000"
+
+  defp probe_read do
+    Run
+    |> Ash.Query.filter(id == ^@probe_id)
+    |> Ash.Query.limit(1)
+    |> Ash.read(authorize?: false)
+    |> case do
+      {:ok, _rows} -> :available
+      _ -> :unavailable
+    end
+  rescue
+    _ -> :unavailable
+  end
+
+  # ---------------------------------------------------------------------------
   # Reads
   # ---------------------------------------------------------------------------
 
@@ -103,10 +190,12 @@ defmodule Samen.AI.Agent.Health do
   """
   @spec summary(Actor.t() | term(), String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def summary(operator, org_id, opts \\ []) do
-    if may_view?(operator) do
-      {:ok, build_summary(org_id, opts)}
-    else
-      {:error, :not_authorized}
+    # AUTHZ first, availability second: an unauthorized caller learns nothing about the
+    # host's wiring either (the refusal order is itself a boundary).
+    cond do
+      not may_view?(operator) -> {:error, :not_authorized}
+      availability() == :unavailable -> {:error, :unavailable}
+      true -> {:ok, build_summary(org_id, opts)}
     end
   end
 
@@ -116,10 +205,10 @@ defmodule Samen.AI.Agent.Health do
   """
   @spec runs(Actor.t() | term(), String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def runs(operator, org_id, opts \\ []) do
-    if may_view?(operator) do
-      {:ok, list_runs(org_id, opts)}
-    else
-      {:error, :not_authorized}
+    cond do
+      not may_view?(operator) -> {:error, :not_authorized}
+      availability() == :unavailable -> {:error, :unavailable}
+      true -> {:ok, list_runs(org_id, opts)}
     end
   end
 
@@ -131,17 +220,17 @@ defmodule Samen.AI.Agent.Health do
   @spec turns(Actor.t() | term(), String.t(), String.t(), keyword()) ::
           {:ok, [map()]} | {:error, term()}
   def turns(operator, org_id, run_id, opts \\ []) do
-    if may_view?(operator) do
-      {:ok, list_turns(org_id, run_id, opts)}
-    else
-      {:error, :not_authorized}
+    cond do
+      not may_view?(operator) -> {:error, :not_authorized}
+      availability() == :unavailable -> {:error, :unavailable}
+      true -> {:ok, list_turns(org_id, run_id, opts)}
     end
   end
 
   @doc "The durable kill rows for one org (token-only), newest first."
   @spec kills(Actor.t() | term(), String.t()) :: {:ok, [map()]} | {:error, term()}
   def kills(operator, org_id) do
-    if may_view?(operator), do: {:ok, Breaker.kills(org_id)}, else: {:error, :not_authorized}
+    if may_view?(operator), do: Breaker.kills_status(org_id), else: {:error, :not_authorized}
   end
 
   # ---------------------------------------------------------------------------
@@ -190,7 +279,15 @@ defmodule Samen.AI.Agent.Health do
 
   defp build_summary(org_id, opts) do
     runs = list_runs(org_id, Keyword.put_new(opts, :limit, 500))
-    kill_index = Map.new(Breaker.kills(org_id), fn k -> {k.agent, k} end)
+
+    # A6 (R-A5-4, first half): an UNREADABLE kill table is `:unknown`, never "active".
+    # The gate already fails CLOSED on this read (`Breaker.definition_killed?/2` answers
+    # true), so rendering `active` here was the display contradicting the engine.
+    {kill_index, kills_readable?} =
+      case Breaker.kills_status(org_id) do
+        {:ok, rows} -> {Map.new(rows, fn k -> {k.agent, k} end), true}
+        _ -> {%{}, false}
+      end
 
     runs
     |> Enum.group_by(& &1.agent)
@@ -212,13 +309,34 @@ defmodule Samen.AI.Agent.Health do
           |> Enum.filter(&(&1.state in [:failed, :budget_exhausted]))
           |> Enum.map(& &1.updated_at)
           |> latest(),
-        killed: kill != nil and Breaker.active_kill?(kill),
+        killed: kills_readable? and kill != nil and Breaker.active_kill?(kill),
+        kill_state: kill_state(kills_readable?, kill),
         kill_reason: kill && kill.reason,
         killed_at: kill && kill.killed_at
       }
     end)
     |> Enum.sort_by(& &1.agent)
   end
+
+  @doc """
+  The HONEST tri-state a summary row reports for one definition's durable kill, given
+  whether the kill table could be read at all and that definition's row (or `nil`).
+
+    * `:killed`  — an active kill row (new runs refused, in-flight runs stop at the next
+      turn boundary);
+    * `:active`  — the table was READ and this definition has no active kill;
+    * `:unknown` — the table could NOT be read. This is deliberately NOT `:active`:
+      `Breaker.definition_killed?/2` fails CLOSED on exactly that read, so the breaker is
+      meanwhile refusing every run of this definition. Reporting `active` there is the
+      DISPLAY contradicting the engine, in the dangerous direction (A6; the A5 verifier's
+      R-A5-4, first half). Public because it is the operator surface's contract, and
+      because a tri-state that only exists inside a comprehension cannot be proven.
+  """
+  @spec kill_state(boolean(), map() | nil) :: :killed | :active | :unknown
+  def kill_state(kills_readable?, kill)
+  def kill_state(false, _kill), do: :unknown
+  def kill_state(true, nil), do: :active
+  def kill_state(true, kill), do: if(Breaker.active_kill?(kill), do: :killed, else: :active)
 
   defp count_by(rows, fun) do
     rows |> Enum.group_by(fun) |> Map.new(fn {k, v} -> {to_string(k), length(v)} end)

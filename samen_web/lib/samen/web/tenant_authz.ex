@@ -78,11 +78,11 @@ defmodule Samen.Web.TenantAuthz do
       # The operator plane authorizes through T146/T150, which re-derive from the session
       # principal and re-check scope per write. Leave that path byte-for-byte unchanged.
       operator_plane?(mount) ->
-        {:cont, unconstrained(socket)}
+        {:cont, unconstrained(socket, mount, session)}
 
       # The explicitly DISARMED dev/dogfood posture — the sanctioned ADR-031 `?org=` convenience.
       not CurrentOrg.tenant_gate_armed?(mount) ->
-        {:cont, unconstrained(socket)}
+        {:cont, unconstrained(socket, mount, session)}
 
       # ARMED + no authenticated principal → render NOTHING. This is the halt that closes the
       # `handle_params`-on-dead-render bypass.
@@ -106,11 +106,19 @@ defmodule Samen.Web.TenantAuthz do
   def on_mount(:require_tenant, _params, _session, socket),
     do: {:halt, Phoenix.LiveView.redirect(socket, to: @default_login_path)}
 
-  defp unconstrained(socket) do
+  # A6 (ADR-047, the A5 verifier's R-A5-3): even on the DISARMED / operator-plane legs the
+  # principal is resolved from the SIGNED SESSION when one is present — never from a param,
+  # and never invented. This grants nothing (org authority stays `:unconstrained` exactly as
+  # before, and `Samen.Web.TenantRole.role_for/4` still returns `:admin` on both legs, so the
+  # disarmed posture is byte-for-byte unchanged); it only stops discarding the identity of a
+  # human who IS signed in, which is what surfaces recording a CONSENT (the agent decision
+  # card) need in order to name a person rather than a per-org pseudo-principal. No session
+  # principal ⇒ still nil ⇒ those surfaces still fail closed.
+  defp unconstrained(socket, mount, session) do
     socket
     |> assign(:samen_authorized_orgs, :unconstrained)
     |> assign_new(:samen_tenant_org_id, fn -> nil end)
-    |> assign_new(:samen_tenant_principal, fn -> nil end)
+    |> assign_new(:samen_tenant_principal, fn -> CurrentOrg.principal_id(mount, session) end)
   end
 
   defp operator_plane?(%Mount{plane: %{kind: :operator}}), do: true
