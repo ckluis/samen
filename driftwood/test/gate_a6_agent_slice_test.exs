@@ -238,8 +238,12 @@ defmodule Driftwood.GateA6AgentSliceTest do
       # name/goal_prompt/tools + `end`. No loop, no provider, no masking, no approval, no UI.
       # 13 today: 5 lines of DEFINITION (defmodule / use / name: / tools: / end) + an
       # 8-line goal-prompt heredoc. §8/A6's guard is "authored vertical LOC ≤ ~10" of
-      # substance; the ceiling here leaves room for the prompt to breathe and nothing else.
-      assert authored <= 18,
+      # substance. A7 (R-A6-2) TIGHTENS the ceiling from the old <= 18 to a near-exact pin
+      # at the actual authored figure (13, +1 line of slack) so a re-implementation cannot
+      # land inside the unearned five lines the old ceiling left; the tree-wide form of this
+      # guard — no OTHER driftwood module may re-implement agent behaviour — now also rides
+      # `mix samen.verify.agent_coverage` (A7, the A6 verifier's R-A6-1).
+      assert authored <= 14,
              "authored agent LOC drifted to #{authored} — re-implementing framework " <>
                "behaviour in the vertical is exactly what this guard forbids"
 

@@ -512,6 +512,31 @@ a demo/vertical `ci.sh` step (the root gate runs demo's `ci.sh`).
 `vt_` token from the Prompt template body — a template must reference values by binding, resolved
 +masked at egress by `Samen.AI.Chokepoint`, never embed a raw token.
 
+### `mix samen.verify.agent_coverage`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex`):
+
+```text
+<file>: a `tool_schema/0`-exporting module (an agent-callable tool) calls `Samen.AI.Agent.start/run` — this reopens the raw-spawn recursion escape the F-4 static lock forbids (ADR-047 §10a row 19). ...
+NON-VACUITY: discovery found ZERO `use Samen.AI.Agent` modules under any app lib/ ...
+the agent-run resource Samen.AI.Agent.Run has NO derived `:shred` retention spec ...
+<file>: a vertical `lib/` file references the `Samen.AI.Agent` kernel but is NEITHER an agent definition NOR a router ...
+```
+
+**Meaning:** the ADR-047 §9#6 coverage gate (batch A7) — the agent loop A1–A6 built is
+self-defending. It scans the WHOLE umbrella tree from `samen_core` and asserts: (1) THE F-4
+RAW-SPAWN AST LOCK — no `tool_schema/0` module may name `Samen.AI.Agent.start/run` (a tool that
+cannot re-enter the loop cannot reopen the raw-spawn recursion escape, ADR-047 §10a row 19);
+(2) every opted-in tool declares both callbacks and carries a test; (3) the agent-run resource
+carries its `:shred` retention arm (§7.4); (4) a NON-VACUITY floor (≥1 agent + ≥1 opted-in
+tool); (5) every agent ships an `AgentCase` proof; (6) the TREE-WIDE leverage guard (a vertical's
+only kernel-referencing `lib/` files are its agent definitions + router). Wired into the ROOT
+`ci.sh`, sabotage-refutable via `scripts/sabotages/268-a7-agent-coverage-f4-reentry-lock.patch`
+(a tool that names `Agent.start` flips the gate red).
+**Fix:** remove the `Samen.AI.Agent.start/run` call from the tool module (a tool proposes/reads,
+never re-enters the loop); add the missing `AgentCase` proof / tool test / retention arm; move
+re-implemented agent behaviour out of the vertical into the framework.
+
 ### `mix samen.verify.fleet_wire`
 
 **Errors** (`samen_core/lib/mix/tasks/samen.verify.fleet_wire.ex`):

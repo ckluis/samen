@@ -71,6 +71,29 @@ echo "==> Running AI runtime eval + mask-leak red-team tier (ADR-043 D8 / §10 �
 )
 echo "==> AI eval tier: PASSED"
 
+# --- agent-coverage verifier (ADR-047 A7 / §9#6) --------------------------------------
+# The agent loop A1-A6 built is made SELF-DEFENDING here. `mix samen.verify.agent_coverage`
+# runs from samen_core but scans the WHOLE umbrella tree (the anti-bypass probe technique),
+# so it discovers driftwood's shipped agent (non-vacuity floor) and locks in the F-4
+# obligation by static AST: NO `tool_schema/0`-exporting module may call
+# `Samen.AI.Agent.start/run` — a tool that cannot name the loop-entry primitives cannot
+# reopen the raw-spawn recursion escape (ADR-047 §10a row 19; the A6 verifier's R-A6-3),
+# regardless of which spawn primitive a future edit reaches for. It also asserts the
+# opted-in tools declare both callbacks + carry tests, the agent-run resource carries its
+# :shred retention arm (§7.4), every agent ships an AgentCase proof, and the TREE-WIDE
+# leverage guard (no vertical re-implements agent behaviour outside its definition/router).
+# Fail-closed (:erlang.halt(1)); sabotage-refutable at scripts/sabotages/268-*. NOT wired
+# into the ci_sh.eex generated-app template — the non-vacuity floor is host-specific (a
+# generated app authors no agent until it adopts one), the same T134 decomposition
+# `ai_prompt_masking` took; recorded as ADR-047 §10a row 22.
+echo ""
+echo "==> Running agent-coverage verifier (ADR-047 A7 / §9#6 — F-4 raw-spawn AST lock + coverage floor)"
+(
+  cd "$REPO_ROOT/samen_core"
+  mix samen.verify.agent_coverage
+)
+echo "==> agent coverage verifier: PASSED"
+
 # --- samen_stripe adapter package gate (ADR-038 §8.1, T18/B1) ---
 # The first-party-but-separate Stripe billing adapter (skeleton): path-deps on
 # samen_core ONLY (never samen_web), owns its own vendor HTTP client dep (req),
@@ -210,6 +233,18 @@ run_gen_probe "priv/gen_post_probe.exs" \
 # committed abbrev registry is restored byte-exact.
 run_gen_probe "priv/gen_app_deploy_probe.exs" \
   "gen_app deploy probe (WS-D D10 / AC-G16-1/2/3 — --deploy → ci.sh + fail-closed runtime + sabotage)"
+
+# --- gen_agent tier: the AGENT scaffolder proof (ADR-047 A7) ---------------------------
+# The permanent proof for `mix samen.gen.agent`: it scaffolds a first-party agent (a valid
+# opted-in tool) + its AgentCase proof into a scratch scope, runs the emitted test (MUST
+# pass — correct-by-construction), SABOTAGES the definition's tools with a non-opted-in
+# kind (the four-way-intersection resolution assertion MUST flip), and reverts to green.
+# SCHEMA: NONE — gen.agent reserves no abbrev + writes no migration, so the committed
+# registry is untouched and run_gen_probe's SHA-256 byte-exact restore (T107) is satisfied
+# trivially; the probe additionally leaves zero file residue. Wrapped by run_gen_probe like
+# the three gen_app probes so the interrupt-safe registry backstop covers it uniformly.
+run_gen_probe "priv/gen_agent_probe.exs" \
+  "gen_agent probe (ADR-047 A7 — samen.gen.agent scaffold → emitted AgentCase proof + sabotage)"
 
 # --- Sabotage-harness SELECTION regression (ADR-047 A4 fold (a)) ----------------------
 # `scripts/sabotage.sh --changed [<ref>]` is the VERIFIER PRIMITIVE ("replay the sabotages

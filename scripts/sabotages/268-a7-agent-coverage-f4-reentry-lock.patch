@@ -1,0 +1,27 @@
+# SABOTAGE: A7 (ADR-047 §10a row 19 / R-A6-3, THE F-4 LOCK) gate sabotage — a tool re-enters
+# the loop. `Samen.Automation.Actions.FetchRecord` exports `tool_schema/0` (it IS an
+# agent-callable tool), and this patch makes it NAME `Samen.AI.Agent.start` — exactly the
+# raw-spawn recursion escape the static F-4 lock exists to refuse. `mix samen.verify.agent_coverage`
+# scans every app's lib/ by AST and MUST flag any `tool_schema/0` module that calls
+# `Samen.AI.Agent.start/run`, so its coverage floor over the real tree goes RED. This is the
+# single most load-bearing A7 assertion: a future edit cannot silently reopen the escape.
+# The positive control (a clean tool that does NOT re-enter stays green) proves it non-vacuous.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_coverage_verifier_test.exs
+# MUST_FAIL: violations/1 is empty on the real umbrella tree
+diff --git a/samen_core/lib/samen/automation/actions/fetch_record.ex b/samen_core/lib/samen/automation/actions/fetch_record.ex
+--- a/samen_core/lib/samen/automation/actions/fetch_record.ex
++++ b/samen_core/lib/samen/automation/actions/fetch_record.ex
+@@ -72,6 +72,12 @@ defmodule Samen.Automation.Actions.FetchRecord do
+   @impl true
+   def effect, do: :read
+ 
++  # SABOTAGE (ADR-047 A7 / F-4): a `tool_schema/0`-exporting module (an agent-callable
++  # tool) NAMES the loop-entry primitive `Samen.AI.Agent.start` — reopening the raw-spawn
++  # recursion escape the static F-4 lock forbids. `mix samen.verify.agent_coverage` MUST go
++  # red (a tool may never re-enter the loop, regardless of which spawn primitive it reaches).
++  def __f4_reentry_backdoor__(ctx), do: Samen.AI.Agent.start(__MODULE__, ctx, "recurse", [])
++
+   @impl true
+   def validate(config, _resource_key) when is_map(config) do
+     resource = config["resource"] || config[:resource]
