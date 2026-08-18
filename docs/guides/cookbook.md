@@ -333,7 +333,7 @@ report.vault_rows_sealed
 ```
 
 Under the hood (module doc, `erasure.ex:13`): the key is destroyed FIRST and outside the DB
-transaction (the key store is external — [ADR-001](../adr/001-key-hierarchy.md)); then, in
+transaction (the key store is external — [ADR-001](../adr/ADR-001-key-hierarchy.md)); then, in
 ONE `Ecto.Multi`, every `pii_vault` row for the subject is stamped `state: "shredded"`,
 registered `non_pii!` plaintext columns are redacted, every registered rollup is rebuilt
 subject-free or has its derived row suppressed, and an `"erased"` audit row lands on the

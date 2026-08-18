@@ -1,7 +1,7 @@
 # samen_web — framework UI library: design + parameterization contract
 
 **Status:** DESIGN (Build/Rewire phases follow this). Companion to **ADR-009**
-(`docs/adr/009-samen-web.md`, supersedes ADR-008).
+(`docs/adr/ADR-009-samen-web.md`, supersedes ADR-008).
 
 **One-line thesis:** the inherited-80% product UI (component kit + CRM/Billing/Support
 LiveViews + the two-plane masking) becomes a framework library `samen_web` that EVERY vertical

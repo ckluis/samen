@@ -81,7 +81,7 @@ the original 26-file data-only output exactly (AC-G4-10): `mix.exs`, `config/{co
 the byte-exact file list and flag semantics of each layer.
 
 > This path-dep-in-monorepo model is a stated design decision, not an accident — see
-> [ADR-033](../adr/033-in-monorepo-distribution-constraint.md) for why Hex publishing and
+> [ADR-033](../adr/ADR-033-in-monorepo-distribution-constraint.md) for why Hex publishing and
 > vendoring are deferred, and the trigger that would change it.
 
 ### The one scope mount, one authored resource, one aggregate

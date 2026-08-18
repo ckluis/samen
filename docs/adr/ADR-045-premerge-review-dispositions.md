@@ -498,13 +498,13 @@ corrected in the same pass.
 
 ## 7 · See also
 
-- **ADR-031** (`031-byo-auth-launch-onramp.md`) — the decision §2 challenges. If §2 lands as A or B,
+- **ADR-031** (`ADR-031-byo-auth-launch-onramp.md`) — the decision §2 challenges. If §2 lands as A or B,
   amend ADR-031 with a pointer here.
-- **ADR-024** (`024-generated-deploy-fail-honest.md`) — the fail-closed boot posture Phase 2 (§4.2)
+- **ADR-024** (`ADR-024-generated-deploy-fail-honest.md`) — the fail-closed boot posture Phase 2 (§4.2)
   measures the deploy scaffold against.
 - **ADR-035 §4.1** (`ADR-035-identity-spine.md`) — the blind-index design D1 (§4.3) requires an
   amendment to.
-- **ADR-005** (`005-operator-plane-migration-extraction.md`) — the shared `aud_chain` migration
+- **ADR-005** (`ADR-005-operator-plane-migration-extraction.md`) — the shared `aud_chain` migration
   helper O2 (§4.3) should adopt rather than hand-copy.
 - `docs/pre-pr-dogfood-remediation.md` — the tracked reviewer doc; its 2026-08-11 section records
   the pre-merge burn-down that produced this ADR.

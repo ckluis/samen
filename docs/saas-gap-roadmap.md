@@ -291,7 +291,7 @@ where the brief mandates, a committed sabotage patch replayed by `scripts/sabota
    incl. operator-masked red-path + serialized-bundle no-leak assertion + with-grant positive control).
    Sabotage `20-f3-dsar-plane-bypass.patch` (masks nothing on the operator plane) flips the plane red-path.
 
-6. **Docs + residency ADR + breach runbook (F3.6, partial).** `docs/adr/032-data-residency-us-only.md`
+6. **Docs + residency ADR + breach runbook (F3.6, partial).** `docs/adr/ADR-032-data-residency-us-only.md`
    (US-only, documented; no per-tenant region selection today), `docs/runbooks/breach-notification.md`
    (contain → scope via `AuditChain`/`Dsar.affected_subjects` → tokens-vs-plaintext assessment → notification
    guidance → remediation), `docs/free-text-pii-residue.md` (the non-shreddable free-text residue + controls).
@@ -475,7 +475,7 @@ but sabotage #15 was REFRESHED, see Unit 7).
    templates (mix format's `import_deps` only resolves direct deps) — pinned to the exact versions the SoT
    already uses. Also single-lined a config line so `mix format --check-formatted` passes on the generated tree.
 
-4. **Upgrade/distribution ADR — DECIDED.** `docs/adr/033-in-monorepo-distribution-constraint.md`: Samen stays an
+4. **Upgrade/distribution ADR — DECIDED.** `docs/adr/ADR-033-in-monorepo-distribution-constraint.md`: Samen stays an
    explicit in-monorepo path-dep framework (verticals + every generated app resolve `samen_core`/`samen_web`
    via computed relative `path:`; `--target` only chooses WHERE the app dir sits, the dep always climbs back to
    this checkout). Hex + git-subtree REJECTED for now. Named revisit trigger: first external builder needing an

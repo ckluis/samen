@@ -5,7 +5,7 @@ defmodule Driftwood.Auth do
   Auth is host-owned (ADR-029). This module is the driftwood-local proof that a real,
   fail-closed login CAN sit under the framework session seam (`Samen.Web.Auth` +
   `Samen.Web.CurrentOrg`) — it is NOT what samen ships. A production deploy replaces it with
-  `phx.gen.auth` or an external IdP (see `docs/adr/031-*` and `docs/launch-checklist.md`); the
+  `phx.gen.auth` or an external IdP (see `docs/adr/ADR-031-*` and `docs/launch-checklist.md`); the
   session seam and the `CurrentOrg` actor gate stay exactly the same underneath.
 
   ## What it does

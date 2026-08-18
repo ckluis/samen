@@ -14,8 +14,8 @@ kernel's test suite + verifier gate stay green by construction.
 - **`Samen.Web.{Mount, Plane, Router}`** — the host-parameterization contract and the two-plane
   (`:tenant` / `:operator`) abstraction that drives PII masking by construction. See
   [`docs/concepts/two-plane-masking.md`](../docs/concepts/two-plane-masking.md) for the
-  reader-facing explainer, and [ADR-009](../docs/adr/009-samen-web.md) /
-  [ADR-010](../docs/adr/010-operator-plane.md) for the full specs.
+  reader-facing explainer, and [ADR-009](../docs/adr/ADR-009-samen-web.md) /
+  [ADR-010](../docs/adr/ADR-010-operator-plane.md) for the full specs.
 - **`Samen.Web.{CRM, Billing, Support}`** — the inherited product surfaces every vertical mounts
   at ~5 lines via `samen_module_routes/3`.
 - **`Samen.Web.Operator.*`** — the operator/control-plane workspace (accounts, platform

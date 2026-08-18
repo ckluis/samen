@@ -547,9 +547,9 @@ same pass (the claim-evidence discipline that governs this repo governs its inde
 
 - **ADR-045 §4.3** (`ADR-045-premerge-review-dispositions.md`) — the Phase-3 dispositions this ADR designs.
 - **ADR-035 §4.1** (`ADR-035-identity-spine.md`) — the blind-index design D1 amends (decision §7).
-- **ADR-001** (`001-key-hierarchy.md`) — the per-subject KMS envelope the "outside the DEK" framing rests on.
-- **ADR-026** (`026-files-storage-adapter-fail-honest.md`) — the fail-honest contract `Storage.delete` obeys.
-- **ADR-002** (`002-worm-anchor.md`) — the T4.3 tenant chain D5's `org_id` binding rides.
+- **ADR-001** (`ADR-001-key-hierarchy.md`) — the per-subject KMS envelope the "outside the DEK" framing rests on.
+- **ADR-026** (`ADR-026-files-storage-adapter-fail-honest.md`) — the fail-honest contract `Storage.delete` obeys.
+- **ADR-002** (`ADR-002-worm-anchor.md`) — the T4.3 tenant chain D5's `org_id` binding rides.
 - **ADR-036 D6 / T3.8** (`ADR-036-rich-types.md`) — the `pii_declared` containment rule D3 hardens.
 - `_orch/luminary-premerge/panel-3-data-privacy.md` (gitignored) — the panel evidence every D-ID traces to.
 - `samen_core/lib/samen/erasure.ex` (the carve-out moduledoc), `auth/blind_index.ex`, `kms.ex` (`sys:bidx`

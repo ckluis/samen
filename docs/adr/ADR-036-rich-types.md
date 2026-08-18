@@ -259,7 +259,7 @@ The keystone is preserved and extended: no new type opens a plaintext-PII path; 
 ## 9 · References
 
 - **Binding:** `docs/adr/ADR-037-ash-ecosystem-adoption.md` §5.2 (AshMoney ADOPT + Money migration shape), §5.11 (AshCsv REJECT), §5.10 (ash_geo REJECT — Location/F5).
-- `docs/adr/034-nonpii-type-selfclassify-reviewer-gate.md` (the `:non_pii` two-party `TypeClearance` gate); `docs/adr/028-csv-import-export-mask-by-omission.md` (the masked CSV surface H7 extends).
+- `docs/adr/ADR-034-nonpii-type-selfclassify-reviewer-gate.md` (the `:non_pii` two-party `TypeClearance` gate); `docs/adr/ADR-028-csv-import-export-mask-by-omission.md` (the masked CSV surface H7 extends).
 - Spec: `spec/full-saas-readiness.md` §WS-H (H1–H7), INV-1..INV-6. Rulings: `_orch/plan/spec-questions.md` M6, c15, c17.
 - Code seams: `samen_core/lib/samen/pii/classification.ex` (the oracle); `samen_core/lib/samen/pii.ex` (`vault`/`pii_attribute` DSL, `VaultDeclared`); `samen_core/lib/samen/vault/schema.ex` (`pii_vault`); `samen_core/lib/samen/type/{full_name,emails,phones,vault_field}.ex` (the `use Ash.Type` skeleton); `samen_core/lib/samen/catalog.ex` (`type_string/1`); `samen_web/lib/samen/web/csv.ex` (`cell/1`/`decode_cell/1`); `samen_web/lib/samen/ui/form.ex` (`form_field/1`); `samen_core/lib/samen/custom_fields.ex` (`@field_types`); `samen_core/lib/samen/scopes/crm/blueprint.ex` (`define_opportunity/7`), `samen_core/lib/samen/scopes/billing/blueprint.ex` (`define_price/6`); `samen_core/lib/samen/transformers/abbrev_storage.ex` (`<abbrev>_<name>`); `CHANGELOG.md`.
 

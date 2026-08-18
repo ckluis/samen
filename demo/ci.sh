@@ -35,14 +35,14 @@ cd "$DEMO_DIR"
 echo "==> demo CI gate: starting (MIX_ENV=$MIX_ENV)"
 
 # 1. Compile
-echo "--- step 1/9: mix compile --warnings-as-errors"
+echo "--- step 1/18: mix compile --warnings-as-errors"
 mix compile --warnings-as-errors
 echo "    PASSED"
 
 # 1a. Migrate (A4 gate P2: catalog_parity queries the live DB, so the gate must
 #     not depend on `mix test` having run first to apply pending migrations —
 #     a stale DB reports fresh tables as ghosts).
-echo "--- step 1a/9: mix ecto.migrate"
+echo "--- step 1a/18: mix ecto.migrate"
 mix ecto.migrate --quiet
 echo "    PASSED"
 
@@ -51,7 +51,7 @@ echo "    PASSED"
 #     Fails CI if the schema has changed without updating the committed artifact.
 #     This gives C4 pii_classify a real new-column baseline so existing demo
 #     columns are treated as pre-existing (not flagged as all-new).
-echo "--- step 1b/9: schema.dict.json drift check"
+echo "--- step 1b/18: schema.dict.json drift check"
 COMMITTED_DICT="$DEMO_DIR/schema.dict.json"
 FRESH_DICT="$(mktemp /tmp/samen_schema_dict_XXXXXX.json)"
 trap 'rm -f "$FRESH_DICT"' EXIT
@@ -67,42 +67,42 @@ fi
 echo "    PASSED (schema.dict.json matches regenerated output)"
 
 # 2. C1 catalog_parity
-echo "--- step 2/9: mix samen.verify.catalog_parity"
+echo "--- step 2/18: mix samen.verify.catalog_parity"
 mix samen.verify.catalog_parity
 echo "    PASSED"
 
 # 3. C2 prefixes
-echo "--- step 3/9: mix samen.verify.prefixes"
+echo "--- step 3/18: mix samen.verify.prefixes"
 mix samen.verify.prefixes
 echo "    PASSED"
 
 # 4. C3 pii_reads
-echo "--- step 4/9: mix samen.verify.pii_reads"
+echo "--- step 4/18: mix samen.verify.pii_reads"
 mix samen.verify.pii_reads
 echo "    PASSED"
 
 # 5. C4 pii_classify — uses schema.dict.json as baseline so existing columns
 #    are recognised as pre-existing (not re-flagged as new).
-echo "--- step 5/9: mix samen.verify.pii_classify"
+echo "--- step 5/18: mix samen.verify.pii_classify"
 mix samen.verify.pii_classify --baseline "$COMMITTED_DICT"
 echo "    PASSED"
 
 # 6. C5 no_plaintext_pii
-echo "--- step 6/9: mix samen.verify.no_plaintext_pii"
+echo "--- step 6/18: mix samen.verify.no_plaintext_pii"
 mix samen.verify.no_plaintext_pii
 echo "    PASSED"
 
 # 7. T2.4 expand-migration down/0 CI check: every :expand migration's down/0 is
 #    exercised in a throwaway scratch DB (created + dropped by the task). Fails
 #    closed if any expand's down is missing/broken/non-reversible.
-echo "--- step 7/9: mix samen.verify.migrations (expand down/0 check)"
+echo "--- step 7/18: mix samen.verify.migrations (expand down/0 check)"
 mix samen.verify.migrations
 echo "    PASSED"
 
 # 8. J2 sink-schema allow-list check (T2.7): every wide-event/span field must be a
 #    bounded ID / token / enum / number. Fails on any free-string/untyped field —
 #    the laundered-leak backstop the layered privacy design (C3 + J2) promises.
-echo "--- step 8/9: mix samen.verify.sink_schema (J2 wide-event/span schema)"
+echo "--- step 8/18: mix samen.verify.sink_schema (J2 wide-event/span schema)"
 mix samen.verify.sink_schema
 echo "    PASSED"
 
@@ -110,7 +110,7 @@ echo "    PASSED"
 #    use only bounded label dimensions. Fails on any raw org_id/actor_id/subject_id
 #    tag (unbounded Prometheus cardinality). This is the "CI label-lint" the T2.8
 #    acceptance names — now actually gated, not just unit-tested.
-echo "--- step 9/10: mix samen.verify.metric_labels (T2.8 bounded-cardinality labels)"
+echo "--- step 9/18: mix samen.verify.metric_labels (T2.8 bounded-cardinality labels)"
 mix samen.verify.metric_labels
 echo "    PASSED"
 
@@ -121,7 +121,7 @@ echo "    PASSED"
 #     queue does NOT fail — it sits `available` forever with no error, no retry and
 #     an empty DLQ, while the enqueuing surface reports success. Fails CLOSED on
 #     empty discovery so it can never pass vacuously.
-echo "--- step 9b/10: mix samen.verify.oban_queues (B-OBAN worker/queue parity)"
+echo "--- step 9b/18: mix samen.verify.oban_queues (B-OBAN worker/queue parity)"
 mix samen.verify.oban_queues
 echo "    PASSED"
 
@@ -131,7 +131,7 @@ echo "    PASSED"
 #     (pii_smg_body / pii_pnt_rendered_body / pii_pwh_signing_secret left in the DB
 #     while the resource dropped the vault route) — the exact gap C4 pii_classify
 #     misses because those logical names aren't in its heuristic token-list.
-echo "--- step 10/11: mix samen.verify.vault_declared_parity (F3.1 de-vault backstop)"
+echo "--- step 10/18: mix samen.verify.vault_declared_parity (F3.1 de-vault backstop)"
 mix samen.verify.vault_declared_parity
 echo "    PASSED"
 
@@ -141,7 +141,7 @@ echo "    PASSED"
 #     field, the "customization that rotted past the catalog" failure the
 #     validated-at-write change prevents; this is the durable CI backstop that
 #     also catches a raw-SQL write that bypassed Ash).
-echo "--- step 11/12: mix samen.verify.tnt_catalog (T3.8 Tier-1 + T3.9 Tier-2 catalog parity)"
+echo "--- step 11/18: mix samen.verify.tnt_catalog (T3.8 Tier-1 + T3.9 Tier-2 catalog parity)"
 mix samen.verify.tnt_catalog
 echo "    PASSED"
 
@@ -150,7 +150,7 @@ echo "    PASSED"
 #     The tenant regime references OUT to system rows as validated opaque IDs,
 #     never the reverse. Compile-time enforced per-resource by
 #     Samen.Verifiers.TntBoundary; this is the whole-app CI backstop.
-echo "--- step 12/13: mix samen.verify.tnt_boundary (T3.9 one-way boundary)"
+echo "--- step 12/18: mix samen.verify.tnt_boundary (T3.9 one-way boundary)"
 mix samen.verify.tnt_boundary
 echo "    PASSED"
 
@@ -162,7 +162,7 @@ echo "    PASSED"
 #     the vision doc — each diagnostic states this note.
 #     Re-snapshot intentional versioned changes with:
 #       mix samen.verify.api_contract --version v1 --update
-echo "--- step 13/14: mix samen.verify.api_contract --version v1 (C6 structural break check)"
+echo "--- step 13/18: mix samen.verify.api_contract --version v1 (C6 structural break check)"
 mix samen.verify.api_contract --version v1 --snapshot "$DEMO_DIR/api_contract.v1.json"
 echo "    PASSED"
 
@@ -171,7 +171,7 @@ echo "    PASSED"
 #     change covering that FK. Turns the scope-authoring guide §10 prose rule into a
 #     gated invariant (Gate-3 §F3.5). Fails closed on an unguarded org-scoped FK —
 #     matters most now that the operator plane's cross-tenant reach is going live.
-echo "--- step 14/15: mix samen.verify.same_org_fk (F3.5 same-org-FK guard)"
+echo "--- step 14/18: mix samen.verify.same_org_fk (F3.5 same-org-FK guard)"
 mix samen.verify.same_org_fk
 echo "    PASSED"
 
@@ -181,7 +181,7 @@ echo "    PASSED"
 #      reaches each: derived-linkable (_bidx) columns → blind_index tombstone; storage_key
 #      blobs → file-blob delete; pii_declared custom bags → masking + define-time erasure
 #      guard. Fails CLOSED on empty discovery (email_bidx + storage_key exist ⇒ non-vacuous).
-echo "--- step 14b/15: mix samen.verify.erasure_completeness (ADR-046 §6 out-of-envelope residue coverage)"
+echo "--- step 14b/18: mix samen.verify.erasure_completeness (ADR-046 §6 out-of-envelope residue coverage)"
 mix samen.verify.erasure_completeness
 echo "    PASSED"
 
@@ -192,7 +192,7 @@ echo "    PASSED"
 #     reaching a PII-bearing resource), and (b) asserts via information_schema that
 #     each aggregate projection table physically contains no pii_ column. This is the
 #     "pii_ columns physically don't exist" claim asserted against the LIVE database.
-echo "--- step 15/16: mix samen.verify.no_pii_columns (C7 token-blind aggregate plane)"
+echo "--- step 15/18: mix samen.verify.no_pii_columns (C7 token-blind aggregate plane)"
 mix samen.verify.no_pii_columns
 echo "    PASSED"
 
@@ -203,7 +203,7 @@ echo "    PASSED"
 #      configured domain, (b) asserts via information_schema that every resource's
 #      physical table carries no PAN/CVC-shaped column — the "no PAN column ANYWHERE"
 #      claim asserted against the LIVE database.
-echo "--- step 15b/16: mix samen.verify.no_pan_columns (B5 no-PAN invariant)"
+echo "--- step 15b/18: mix samen.verify.no_pan_columns (B5 no-PAN invariant)"
 mix samen.verify.no_pan_columns
 echo "    PASSED"
 

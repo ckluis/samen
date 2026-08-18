@@ -283,7 +283,7 @@ defmodule Samen.AbbrevRegistry do
     false-positive a collision on the dropped resource. This is the ADR-025 trigger — the \
     first legitimate cross-host prefix reuse (or a host-vs-global owner disagreement) has \
     landed. The deferred abbrev verifier host-partition MUST now be implemented (see \
-    docs/adr/025-abbrev-verifier-host-partition-followon.md): validate each resource against \
+    docs/adr/ADR-025-abbrev-verifier-host-partition-followon.md): validate each resource against \
     its OWN host namespace (validate_host/4) instead of the flattened union. Refusing to \
     compile (fail-closed).
 

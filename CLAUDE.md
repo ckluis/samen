@@ -6,6 +6,16 @@ verifiers, generators) · `samen_web` (framework UI library: LiveViews, Mount/Pl
 `spikes/` (frozen mechanism spikes). Design records live in `docs/adr/` + per-workstream
 `docs/ws-*/{design,build-plan}.md` — consult the ADR before changing anything it governs.
 
+## Code exploration — codemunch FIRST (MANDATORY, not optional)
+Before you Read/Grep/Glob to orient yourself in this tree, use codemunch — this has been missed
+repeatedly (agents keep defaulting to raw Read/Grep sweeps). The rule, verbatim and enforced in
+`driftwood/CLAUDE.md`: your FIRST orientation action is `codemunch:explore`/`codemunch:search`/
+`codemunch:fetch`/`codemunch:refs`, NOT a multi-file Read or a large-tree Grep. WHEN it fires:
+reading >1 source file to understand something, or grepping/globbing any of `samen_core/`,
+`samen_web/`, `driftwood/`, `pawchart/`, `demo/`, `docs/` for a symbol/caller/structure → route it
+through codemunch first. A single grep for one exact string in one known file is fine; a *sweep* is
+not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full rules + decision tree.
+
 ## Suites / CI (local Postgres + pgvector required)
 - Prerequisite: a local Postgres server WITH the `pgvector` extension installed (`CREATE
   EXTENSION vector`) — the samen_core AI-embeddings migration hard-requires it (ADR-043

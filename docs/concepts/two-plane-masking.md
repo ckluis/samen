@@ -1,7 +1,7 @@
 # Concepts — the two-plane model and PII masking
 
-**Read this before the ADRs.** [ADR-009](../adr/009-samen-web.md) and
-[ADR-010](../adr/010-operator-plane.md) are the load-bearing specs — precise, but written as
+**Read this before the ADRs.** [ADR-009](../adr/ADR-009-samen-web.md) and
+[ADR-010](../adr/ADR-010-operator-plane.md) are the load-bearing specs — precise, but written as
 decision records with rejected alternatives and staging notes. This page pulls the mental
 model out of both and states it plainly, the way you'd want it explained before you build your
 first Samen surface. It does not replace the ADRs; it's the on-ramp to them.
@@ -49,7 +49,7 @@ never needs permission to see its own data" rule.
 
 ### `:operator` — the SaaS company, either over its own book of business or impersonating a tenant
 
-This is the subtler half, and [ADR-010](../adr/010-operator-plane.md) is entirely about getting
+This is the subtler half, and [ADR-010](../adr/ADR-010-operator-plane.md) is entirely about getting
 it right. There are actually two different operator situations, and conflating them is the
 mistake ADR-010 exists to prevent:
 
@@ -70,7 +70,7 @@ mistake ADR-010 exists to prevent:
    `%{org_id: blue_ridge_org_id, plane: :operator, impersonation: %{session_id: ...}}`. PII
    renders `••••` by default; a live, second-party-approved reveal grant is required to see
    plaintext, and every reveal is written to the tenant-readable hash-chained audit log
-   ([ADR-002](../adr/002-worm-anchor.md)).
+   ([ADR-002](../adr/ADR-002-worm-anchor.md)).
 
 The line between (1) and (2) — which PII is "the SaaS's own" versus "the tenant's own" — is
 called **the identity line** in ADR-010, and it is drawn by a mount boundary (operator-namespace
@@ -182,9 +182,9 @@ rather than an unhandled crash.
 
 ## Cross-links
 
-- [ADR-009](../adr/009-samen-web.md) — the `samen_web` framework lib, the `Samen.Web.Mount`
+- [ADR-009](../adr/ADR-009-samen-web.md) — the `samen_web` framework lib, the `Samen.Web.Mount`
   parameterization struct, and the full `Samen.Web.Plane` two-plane specification.
-- [ADR-010](../adr/010-operator-plane.md) — the operator/SaaS-company plane, the identity line,
+- [ADR-010](../adr/ADR-010-operator-plane.md) — the operator/SaaS-company plane, the identity line,
   and why the operator's own workspace is `plane: :tenant` while impersonation is
   `plane: :operator` (§7.2 of that ADR is the exact vocabulary note this page's "two operator
   situations" section is built from).
