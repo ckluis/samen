@@ -101,7 +101,7 @@ Two apps are the substrate; three are proof; one command spins up new ones.
   call at roughly zero authored LOC.
 
 The full design story lives in [index.html](index.html) (open it in
-a browser) and in the 48 ADRs under [docs/adr/](docs/adr/) (indexed in
+a browser) and in the 49 ADRs under [docs/adr/](docs/adr/) (indexed in
 [docs/adr/README.md](docs/adr/README.md); the count grows with every load-bearing decision —
 `ls docs/adr/*.md | wc -l` for the live total).
 
@@ -112,7 +112,7 @@ red-path proof, and a sabotage that proves the test can actually fail.** A test 
 fail is treated as a bug.
 
 - **Committed sabotage harness.** `scripts/sabotage.sh` replays **every committed sabotage
-  patch** (`scripts/sabotages/*.patch` — 233 today, and growing every phase: count it live
+  patch** (`scripts/sabotages/*.patch` — 285 today, and growing every phase: count it live
   rather than trusting this number). For each: SHA-256 the touched files → apply the
   patch → the *named* tests **must** fail (not "something broke") → revert → verify a
   byte-exact restore. Run it with:
@@ -148,7 +148,7 @@ re-run this pass), `--warnings-as-errors` clean; treat exact counts as direction
 | `demo` | 465 |
 | `driftwood` | 123 |
 | `pawchart` | 49 |
-| sabotage harness | 233/233 sabotages flipped their named tests; byte-exact restores |
+| sabotage harness | 285/285 sabotages flipped their named tests; byte-exact restores |
 
 ## Getting started
 
@@ -202,7 +202,7 @@ command in this README and that tutorial is verified against the CI probes' exec
 | `pawchart/` | Reference vertical: veterinary — thin scope mounts (~188 lines) plus a real, hand-authored clinic UI on top |
 | `spikes/` | The mechanism spikes (s00–s07) that de-risked the kernel; still run by root `ci.sh` |
 | `docs/` | ADRs (`docs/adr/`), guides (`docs/guides/`), the gate reports (`docs/gate-*.md`), the roadmap (`docs/saas-gap-roadmap.md`), and an archived long-form design variant (`docs/archive/samen-foundry.html`) |
-| `scripts/` | `sabotage.sh` + every committed sabotage patch (233 today, growing every phase) |
+| `scripts/` | `sabotage.sh` + every committed sabotage patch (285 today, growing every phase) |
 | `ci.sh` | The root gate: everything above, in sequence, fail-fast |
 
 ## Docs
@@ -214,6 +214,8 @@ command in this README and that tutorial is verified against the CI probes' exec
 - [Generators](docs/guides/generators.md) · [Scope authoring](docs/guides/scope-authoring.md)
 - [LLM grounding](docs/guides/llm-grounding.md) — the machine-readable schema dictionary
 - [Claim-evidence parity](docs/claim-evidence.md) — every claim mapped to its proof
+- [Compliance & GDPR/SOC 2 story](docs/compliance-story.md) — the honest control-posture split (day-one-from-Samen vs operator responsibility); **not** a certification
+- [Outward-claim sweep](docs/claim-sweep.md) — the claim→evidence audit of the landing page, README, and compliance docs
 - [ADRs](docs/adr/) — every load-bearing decision
 - [The full design story](index.html) — open in a browser
 

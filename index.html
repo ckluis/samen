@@ -505,14 +505,14 @@
   <header class="hero">
     <div class="kicker fade d1">A governed B2B-SaaS foundry — Elixir · Ash · Oban · one Postgres</div>
     <h1 class="fade d2">Support your tenants <em>without ever seeing their customers.</em> On one substrate.</h1>
-    <p class="sub fade d3">Samen presets the boring 80% of every B2B SaaS — identity, CRM, billing, support, the operator control plane, and <strong>the entire product UI</strong> — as <strong>six governed idioms applied uniformly to every object</strong>, on one Postgres per product. The product your tenants use and the control plane you run the business with are <strong>the same resources on the same substrate</strong>. The difference is the plane: on the tenant plane an owner reads their own people in the clear; on the operator plane the very same rows render <strong>••••</strong> — because masking is the field's normal value, not a view you remembered to add. The flagship makes it literal: <strong>realtime cross-plane chat</strong> where pasting any object id renders a live card that is <strong>masking-aware per viewer</strong> — a clear contact card to the owning tenant, a <strong>••••</strong> card to the SaaS operator, non-PII fields still clear so support can actually help. And the newest layer proves the thesis holds for AI too: a <strong>first-party, durable, multi-step AI agent loop</strong> (ADR-047, accepted) whose tool results are re-masked hop-by-hop and whose every <em>write</em> executes only on a human's approval, <strong>as that human, never on the agent's authority</strong>. This document describes what was <strong>built, gated GO, and tested</strong> on an open pre-merge branch — hardened past the demo by post-build workstreams (real CRUD, an operator cockpit, generator catch-up, table-stakes UX, the AI agent loop), each adversarially gated GO, with every guarantee held by a standing, ever-growing committed sabotage harness (278 patches as of this pass — count it live: <code style="font-family:var(--mono);font-size:12px">ls scripts/sabotages/*.patch</code>). <strong>2,786 kernel tests · 1,773 framework · 631 demo · 251 freight · 125 vet</strong> — all warnings-as-errors, over a navigable 5-tenant demo, with a destruction oracle you can run.</p>
+    <p class="sub fade d3">Samen presets the boring 80% of every B2B SaaS — identity, CRM, billing, support, the operator control plane, and <strong>the entire product UI</strong> — as <strong>six governed idioms applied uniformly to every object</strong>, on one Postgres per product. The product your tenants use and the control plane you run the business with are <strong>the same resources on the same substrate</strong>. The difference is the plane: on the tenant plane an owner reads their own people in the clear; on the operator plane the very same rows render <strong>••••</strong> — because masking is the field's normal value, not a view you remembered to add. The flagship makes it literal: <strong>realtime cross-plane chat</strong> where pasting any object id renders a live card that is <strong>masking-aware per viewer</strong> — a clear contact card to the owning tenant, a <strong>••••</strong> card to the SaaS operator, non-PII fields still clear so support can actually help. And the newest layer proves the thesis holds for AI too: a <strong>first-party, durable, multi-step AI agent loop</strong> (ADR-047, accepted) whose tool results are re-masked hop-by-hop and whose every <em>write</em> executes only on a human's approval, <strong>as that human, never on the agent's authority</strong>. This document describes what was <strong>built, gated GO, and tested</strong> on an open pre-merge branch — hardened past the demo by post-build workstreams (real CRUD, an operator cockpit, generator catch-up, table-stakes UX, the AI agent loop), each adversarially gated GO, with every guarantee held by a standing, ever-growing committed sabotage harness (285 patches as of this pass — count it live: <code style="font-family:var(--mono);font-size:12px">ls scripts/sabotages/*.patch</code>). <strong>2,786 kernel tests · 1,773 framework · 631 demo · 251 freight · 125 vet</strong> — all warnings-as-errors, over a navigable 5-tenant demo, with a destruction oracle you can run.</p>
     <div class="surfaces fade d4">
       <span class="surface-pill"><b>one BEAM release</b> — web · workers · cron</span>
       <span class="surface-pill"><b>one Postgres</b> — truth · queue · history · audit · vault</span>
       <span class="surface-pill lit">one message, two truths — clear to the tenant, •••• to the operator</span>
       <span class="surface-pill"><b>propose-then-approve AI</b> — an agent's write executes as the human who approved it, never the agent</span>
       <span class="surface-pill"><b>self-serve identity spine</b> — signup · verify · reset · sessions · invites · OIDC + TOTP step-up · 2FA · onboarding, generator-emitted</span>
-      <span class="surface-pill"><b>278 sabotages</b> — CI proves each guarantee's test fails when it's broken</span>
+      <span class="surface-pill"><b>285 sabotages</b> — CI proves each guarantee's test fails when it's broken</span>
     </div>
   </header>
 
@@ -1242,7 +1242,7 @@
     </div>
     <div class="resolution" style="margin-top:36px">
       <div class="mark">✓</div>
-      <div class="claim">The sabotage harness keeps every guarantee refutable: <span>every committed sabotage patch (278 today and growing — <code style="font-family:var(--mono);font-size:14px;background:#fff;color:var(--accent-deep)">scripts/sabotages/</code>) that CI applies one at a time — each proves its <em>named</em> guarantee's test actually FAILS when the guarantee is broken, then restores the tree byte-exact (SHA-256). A green test is only trusted once its red twin is proven un-fakeable. Run <code style="font-family:var(--mono);font-size:14px;background:#fff;color:var(--accent-deep)">SAMEN_SABOTAGE=1 ./ci.sh</code>.</span></div>
+      <div class="claim">The sabotage harness keeps every guarantee refutable: <span>every committed sabotage patch (285 today and growing — <code style="font-family:var(--mono);font-size:14px;background:#fff;color:var(--accent-deep)">scripts/sabotages/</code>) that CI applies one at a time — each proves its <em>named</em> guarantee's test actually FAILS when the guarantee is broken, then restores the tree byte-exact (SHA-256). A green test is only trusted once its red twin is proven un-fakeable. Run <code style="font-family:var(--mono);font-size:14px;background:#fff;color:var(--accent-deep)">SAMEN_SABOTAGE=1 ./ci.sh</code>.</span></div>
     </div>
     <p class="prose measure" style="margin-top:24px;font-family:var(--mono);font-size:12.5px;color:var(--faint)">Every masking/vault surface ships a green (plane resolves clear) · red (operator-without-grant renders ••••, never a <code style="font-family:var(--mono);font-size:12px">vt_</code> token) · sabotage (the mask is proven refutable) triple. Suites, all <code style="font-family:var(--mono);font-size:12px">--warnings-as-errors</code>: samen_core 2,786 · samen_web 1,773 · demo 631 · driftwood 251 · pawchart 125 — the final CI line is <code style="font-family:var(--mono);font-size:12px">ROOT CI: ALL PASSED</code>.</p>
   </section>
@@ -1418,6 +1418,67 @@
   </section>
 
   <section>
+    <div class="sec-label">Compliance &amp; trust posture</div>
+    <h2>The compliance work most stacks bolt on at the end <em>is the storage format here.</em></h2>
+    <p class="prose measure" style="color:var(--muted)">These are <strong>GDPR-relevant capabilities</strong> and controls that <strong>support your SOC&nbsp;2 journey</strong> — born into the object model, each enforced by construction and paired with a proof. This is a <strong>control posture</strong>, described honestly for a pre-merge foundry. The <a href="https://github.com/ckluis/samen/blob/main/docs/compliance-story.md">full GDPR / SOC&nbsp;2 story</a> splits what the substrate gives you on day one from what stays your responsibility as the operator.</p>
+    <div class="honest" style="margin-top:8px">
+      <div class="h-label">The honesty boundary — read first</div>
+      <ul>
+        <li><strong>Samen is not SOC&nbsp;2 certified</strong> — there is no Type&nbsp;I/II report, no auditor, and no control period under observation.</li>
+        <li><strong>Samen has not completed a GDPR audit, a DPIA, or a DPA process</strong>, and ships no Data Processing Agreement.</li>
+        <li><strong>Samen operates no production deployment.</strong> It is a foundry / substrate on an open pre-merge branch — not a hosted service and not a package on Hex. Nothing here asserts that a system built on it is compliant; that depends on your deployment, DPO, policies, and processes. "Born-compliant substrate" means the controls are native to the object model, never that anything is certified.</li>
+      </ul>
+    </div>
+    <div class="invariants">
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Masked by default, both planes</div>
+        <p>Data-minimisation at rest: every 🔒 field is a <code>vt_</code> vault token; <code>%Masked{}</code> is the field's normal value, resolved per-plane by one resolver — operator-without-grant renders <strong>••••</strong> across UI, JSON, CSV, and logs by omission. (GDPR Art.&nbsp;5/25)</p>
+        <div class="in-proof"><b>proof:</b> claim-evidence §B C2 · <code>PiiResolution</code> · MaskingCase three-proofs</div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Right to erasure — crypto-shred</div>
+        <p>Destroy one subject's external KMS key and their vaulted PII is undecryptable across live, replica, rollup, audit, and PITR-history at once — key destruction, not row-chasing. (GDPR Art.&nbsp;17)</p>
+        <div class="in-proof"><b>proof:</b> claim-evidence §C D3/D4 · <code>erasure_completeness</code> · driftwood shred game-day</div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Second-party, time-boxed reveal</div>
+        <p>Least privilege: a reveal needs a <em>distinct</em> approver — policy <em>and</em> a DB <code>CHECK (granted_by &lt;&gt; requestor_id)</code>. Grants expire, cannot renew in place, and enqueue auto-revoke in the same transaction. (SOC&nbsp;2 CC6)</p>
+        <div class="in-proof"><b>proof:</b> claim-evidence §B C3/C5 · README hero</div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Tamper-evident audit</div>
+        <p>Records-of-processing substrate: <code>aud_chain</code> is hash-chained and append-only at the DB level — a raw <code>UPDATE</code>/<code>DELETE</code> is refused by trigger; the chain detects any gap or forgery, is tenant-readable, and is crypto-shreddable. (SOC&nbsp;2 CC7 · GDPR Art.&nbsp;30)</p>
+        <div class="in-proof"><b>proof:</b> claim-evidence §B C7 · audit_chain_test</div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Encryption &amp; key handling</div>
+        <p>Per-subject data-encryption keys in an external KMS <em>outside</em> the WAL/PITR surface; authenticated envelope crypto; a PITR restore brings back ciphertext, never the key; no PAN column can compile. (SOC&nbsp;2 CC6 · GDPR Art.&nbsp;32)</p>
+        <div class="in-proof"><b>proof:</b> claim-evidence §C D4/§E H5 · <code>Samen.Kms.*</code></div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Consent / suppression ledger</div>
+        <p>Lawful basis for outreach: marketing send runs through a suppression chokepoint — a suppressed or unconsented address is refused at the single send seam; the kernel check is abbrev-derived, not a hardcoded table. (GDPR Art.&nbsp;6/7 · ePrivacy)</p>
+        <div class="in-proof"><b>proof:</b> claim-evidence §L/§M · ADR-014 · sequence_send_test</div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Backup verification</div>
+        <p>Availability &amp; recoverability: the backup-verify job really <code>pg_restore</code>s into a scratch DB and checksums it; unconfigured returns <code>{:error, :not_configured}</code> — never a fake <code>:ok</code>; corrupt / missing / drifted fail loudly. (SOC&nbsp;2 A1)</p>
+        <div class="in-proof"><b>proof:</b> phase7-l4-l6-verdict (L6, 13/13) · sab 285</div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Multi-node availability</div>
+        <p>A real two-BEAM-node proof over one Postgres: exactly-once job fetch (no double-grab), refutable dedup, and reveal auto-revoke <strong>failover</strong> — kill the enqueuing node, the survivor runs the revoke exactly once. (SOC&nbsp;2 A1)</p>
+        <div class="in-proof"><b>proof:</b> phase7-l4-l6-verdict (L4, 3/3)</div>
+      </div>
+      <div class="inv">
+        <div class="in-name"><span class="in-d"></span>Change management, verified</div>
+        <p>Every guarantee ships a green proof, a red-path proof, and a committed sabotage that proves the test fails when broken (285 patches). Migrations are expand/contract with a tested <code>down/0</code> and a bake gate. (SOC&nbsp;2 CC8)</p>
+        <div class="in-proof"><b>proof:</b> <code>samen.verify.migrations</code> · <code>ls scripts/sabotages/*.patch</code></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
     <div class="sec-label">Simplicity, measured in deletions</div>
     <h2>Infrastructure you will never run</h2>
     <p class="prose measure" style="color:var(--muted)">Every box below is a thing the from-scratch stack deploys, versions, secures, monitors, and pays for. In Samen each is a table, a query, a verifier, or the base macro's normal behavior — inside the one release and the one Postgres you already have. The last rows are the unusual ones: the compliance work most stacks bolt on at the end is the storage format here.</p>
@@ -1446,7 +1507,7 @@
       <div class="brick"><span class="badge">exists</span><div class="lib">Phoenix · LiveView · AshOban</div><p>The web plane and durable jobs. Both planes are LiveViews over the same Ash resources; the reveal auto-revoke is an AshOban job enqueued in the grant's transaction.</p></div>
       <div class="brick"><span class="badge dim">prior art</span><div class="lib">Twenty · Ash · the Rule of Three</div><p>The composite-PII spec (re-implemented, not depended on), resource derivation, and the extract-the-third-product discipline. Credits and a spec, not runtime dependencies.</p></div>
       <div class="brick"><span class="badge">samen</span><div class="lib">The base macro + fragments</div><p><code style="font-family:var(--mono);font-size:12.5px">use Samen.Resource</code>: injects the abbrev transformer, catalog, vault, org-scope, and audit; <code style="font-family:var(--mono);font-size:12.5px">base:</code> folds CorePerson into one table. One line per new column, every guarantee free.</p></div>
-      <div class="brick"><span class="badge">samen</span><div class="lib">The 22-verifier gate + sabotage harness</div><p>catalog_parity, prefixes, pii_reads, pii_classify, no_plaintext_pii, no_pii_columns, api_contract, aggregate_privacy, erasure_completeness, agent_coverage — each fail-closed, each with a red path. Every committed sabotage patch (278 today, growing every phase) proves each named guarantee's test actually fails when broken. The type system the dynamic idioms must earn.</p></div>
+      <div class="brick"><span class="badge">samen</span><div class="lib">The 22-verifier gate + sabotage harness</div><p>catalog_parity, prefixes, pii_reads, pii_classify, no_plaintext_pii, no_pii_columns, api_contract, aggregate_privacy, erasure_completeness, agent_coverage — each fail-closed, each with a red path. Every committed sabotage patch (285 today, growing every phase) proves each named guarantee's test actually fails when broken. The type system the dynamic idioms must earn.</p></div>
       <div class="brick"><span class="badge">samen</span><div class="lib">The vault + destruction oracle</div><p>Per-subject external-KMS keys, authenticated envelope crypto, %Masked{} by default, expiring second-party reveal grants, crypto-shred, and the oracle that attests erasure across every tier.</p></div>
       <div class="brick"><span class="badge">samen</span><div class="lib">The two-plane control plane + generators</div><p>Masked impersonation, the token-blind aggregate actor, hash-chained tenant-readable audit + WORM anchor + break-glass, and <code style="font-family:var(--mono);font-size:12.5px">mix samen.gen.app</code> — one command to a gate-green vertical.</p></div>
       <div class="brick"><span class="badge">samen</span><div class="lib">samen_web — the product-UI framework</div><p>The 13-component kit + the CRM/Billing/Support/Operator/Marketing/Chat LiveViews behind a Mount seam. <code style="font-family:var(--mono);font-size:12.5px">samen_module_routes</code> mounts a whole scope in ~3 lines; masking is tested in the framework. samen_core stays web-dep-free.</p></div>
