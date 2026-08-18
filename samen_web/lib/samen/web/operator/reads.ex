@@ -28,7 +28,8 @@ defmodule Samen.Web.Operator.Reads do
   ## A3 read-bounding + sanctioned writes
 
   The hot lists (Accounts, Desk) read through the paginated `accounts_page/3` /
-  `desk_page/3` (built on `Samen.Web.Reads.page!/3` — BOUNDED BY CONSTRUCTION); every
+  `desk_page/3` (Accounts on the T127 cross-tenant `Samen.Web.Reads.page_operator!/3`, Desk on
+  the org-scoped `Samen.Web.Reads.page!/3` — both BOUNDED BY CONSTRUCTION); every
   join/lookup read carries an explicit `limit(#{200})`. The write side exposes ONLY
   domain-defined actions: the Org anchor create (account provisioning — always-authorized
   by the identity blueprint's bootstrap policy) and the desk `Ticket` create/destroy
@@ -74,10 +75,13 @@ defmodule Samen.Web.Operator.Reads do
   Read ONE keyset page of the operator's ACCOUNTS — the A2 `ListLive` reads contract
   (`(mount, scope, %ListState{}) -> %Page{}`, ADR-016 §3), the A3 retrofit of
   `accounts/3`. The account `Org` rows are the same trusted non-PII grouping read as
-  `account_orgs/2` (`authorize?: false` with an explicit operator-namespace filter —
-  see the moduledoc; `OrgIsSelf` would return only the operator org's own row), routed
-  through `Samen.Web.Reads.page!/3` so the read is BOUNDED BY CONSTRUCTION
-  (`limit(page_size + 1)`, hostile page sizes clamped, keyset-stable).
+  `account_orgs/2` (a DELIBERATE operator-plane cross-tenant read — see the moduledoc;
+  `OrgIsSelf` would return only the operator org's own row), routed through
+  `Samen.Web.Reads.page_operator!/3` (the T127 sanctioned cross-tenant page path), which
+  PINS the read to the operator namespace BY CONSTRUCTION (`account_scope: operator_org_id`
+  → `filter(org_id == ^operator_org_id)`, so it can never span all orgs) and is BOUNDED BY
+  CONSTRUCTION (`limit(page_size + 1)`, hostile page sizes clamped, keyset-stable). A bare
+  `page!/3` `authorize?: false` is refused; the cross-tenant intent is named here instead.
 
   The PII-bearing joins (tenant-admin name/email) resolve exactly as in `accounts/3`:
   `OrgScope` + tenant-plane `PiiResolution` — CLEAR because the SaaS owns population
@@ -98,10 +102,10 @@ defmodule Samen.Web.Operator.Reads do
         page =
           Mount.resource(mount, Org)
           |> Ash.Query.ensure_selected([:name, :slug, :plan, :org_id])
-          |> Ash.Query.filter(org_id == ^operator_org_id and id != ^operator_org_id)
-          |> Samen.Web.Reads.page!(state,
+          |> Ash.Query.filter(id != ^operator_org_id)
+          |> Samen.Web.Reads.page_operator!(state,
             scope: scope,
-            authorize?: false,
+            account_scope: operator_org_id,
             filter_fields: [:name]
           )
 
@@ -209,7 +213,7 @@ defmodule Samen.Web.Operator.Reads do
     joins = desk_joins(mount, scope)
 
     Mount.resource(mount, Ticket)
-    |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :tags, :custom])
+    |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :custom])
     |> Ash.Query.sort(inserted_at: :asc)
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
@@ -232,7 +236,7 @@ defmodule Samen.Web.Operator.Reads do
 
     page =
       Mount.resource(mount, Ticket)
-      |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :tags, :custom])
+      |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :custom])
       |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:subject])
 
     %{page | items: Enum.map(page.items, &desk_row(&1, joins))}
@@ -244,8 +248,19 @@ defmodule Samen.Web.Operator.Reads do
     %{
       users_by_id: users_by_id(mount, scope),
       agents_by_id: agents_by_id(mount, scope),
-      agent_by_ticket: agent_by_ticket(mount, scope)
+      agent_by_ticket: agent_by_ticket(mount, scope),
+      tags_by_ticket: tags_by_ticket(mount, scope)
     }
+  end
+
+  # F4/T46: the generic-Tag-backed read equivalent of the former `Ticket.tags`
+  # array column — batched (one query for every desk ticket, not N+1),
+  # mirroring `agent_by_ticket/2`'s "read everything up to the lookup limit,
+  # bucket by key" shape. Derives the ticket's object-ref key host-agnostically
+  # (matches whatever `MigrateTicketTagsToTagScope` anchored on this host).
+  defp tags_by_ticket(mount, scope) do
+    subject_key = Samen.Web.ObjectRef.Catalog.key_for(Mount.resource(mount, Ticket))
+    Samen.Web.Tags.names_by_subject_key(mount, scope, subject_key, @lookup_limit)
   end
 
   defp desk_row(ticket, joins) do
@@ -259,7 +274,7 @@ defmodule Samen.Web.Operator.Reads do
       priority: ticket.priority,
       sla_breach_at: ticket.sla_breach_at,
       breached: ticket.breached,
-      tags: ticket.tags,
+      tags: Map.get(joins.tags_by_ticket, ticket.id, []),
       __requester__: requester_user_id && Map.get(joins.users_by_id, requester_user_id),
       __requester_org_id__: requester_org_id,
       __agent__:
@@ -299,10 +314,15 @@ defmodule Samen.Web.Operator.Reads do
   # policy (WS-A design: only sanctioned actions).
 
   @doc """
-  Destroy one desk ticket for `scope` (A3 CRUD wiring). The write goes through Ash so
+  Archive one desk ticket for `scope` (A3 CRUD wiring). The write goes through Ash so
   OrgScope + `RoleAtLeast(:member)` apply — this module adds NO policy of its own.
-  FAIL-HONEST: a ticket with linked conversations is refused by the DB FK and the
-  refusal is returned, never swallowed. `:ok` or `{:error, reason}`.
+
+  ADR-040 §5.9/T37f: `Ticket` is `archivable true` and the cascade PARENT of `ticket
+  ▸cascade conversation ▸cascade message` (§5.4). Routes through the explicit `:archive`
+  action (not the plain default destroy) so the cascade engages — see
+  `Samen.Web.Support.Reads.delete_ticket/3`'s identical moduledoc for the full rationale.
+  A ticket with linked conversations/messages is no longer refused — it archives, and its
+  conversations/messages archive with it at the same instant. `:ok` or `{:error, reason}`.
   """
   def delete_ticket(mount, scope, id) do
     record =
@@ -313,10 +333,153 @@ defmodule Samen.Web.Operator.Reads do
 
     case record do
       nil -> {:error, :not_found}
-      record -> Ash.destroy(record, scope: scope)
+      record -> Ash.destroy(record, action: :archive, scope: scope)
     end
   rescue
     e -> {:error, e}
+  end
+
+  @doc """
+  Assemble ONE desk ticket's DETAIL (T149 B1): the ticket row (`desk_row/2` shape —
+  requester tenant-admin + handling agent PII resolved per plane, CLEAR on the operator's
+  own tenant plane) PLUS its conversation threads with each message's body resolved through
+  `PiiResolution` on the scope's plane (clear own-org; `••••` on an operator-plane mount) —
+  NEVER unwraps a `%Masked{}`, NO plaintext branch. Returns the enriched row (with
+  `:__conversations__`) or `nil` (unknown ticket / read error) — the LiveView renders
+  "not found", never a crash. Every read is OrgScope'd + explicitly bounded.
+  """
+  def ticket_detail(mount, scope, ticket_id) do
+    ticket =
+      Mount.resource(mount, Ticket)
+      |> Ash.Query.ensure_selected([:subject, :status, :priority, :sla_breach_at, :breached, :custom])
+      |> Ash.Query.filter(id == ^ticket_id)
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+
+    case ticket do
+      nil ->
+        nil
+
+      ticket ->
+        ticket
+        |> desk_row(desk_joins(mount, scope))
+        |> Map.put(:__conversations__, conversation_threads(mount, scope, ticket_id))
+    end
+  rescue
+    _ -> nil
+  end
+
+  @doc """
+  Post an operator REPLY to a desk ticket (T149 B1 — the missing resolve affordance). The
+  reply is a `Support.Message` (sender_type `:agent`, `:reply`) created through the SAME
+  governed domain action the seeds/support engine use — so OrgScope + `RoleAtLeast(:member)`
+  gate the write and the `body` is VAULT-routed by `Samen.Vault.Change` at the write boundary
+  (this module adds NO policy, mints no plaintext column). Finds-or-creates the ticket's
+  conversation (a fresh ticket has none). `org_id` is the server-side operator-org fact (never
+  client input), threaded from the LiveView. Returns `:ok` or `{:error, reason}`.
+  """
+  def post_reply(mount, scope, org_id, ticket_id, body) when is_binary(body) do
+    with {:ok, conversation_id} <- ensure_conversation(mount, scope, org_id, ticket_id),
+         {:ok, _message} <- create_reply(mount, scope, org_id, conversation_id, body) do
+      :ok
+    end
+  rescue
+    e -> {:error, e}
+  end
+
+  # The ticket's conversation threads, each with its messages' bodies resolved per plane.
+  defp conversation_threads(mount, scope, ticket_id) do
+    agents = agents_by_id(mount, scope)
+
+    Mount.resource(mount, Conversation)
+    |> Ash.Query.ensure_selected([:channel, :status, :subject, :ticket_id])
+    |> Ash.Query.filter(ticket_id == ^ticket_id)
+    |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@lookup_limit)
+    |> Ash.read!(scope: scope)
+    |> Enum.map(fn conv ->
+      %{
+        id: conv.id,
+        channel: conv.channel,
+        status: conv.status,
+        subject: conv.subject,
+        messages: messages_for_conversation(mount, scope, conv.id, agents)
+      }
+    end)
+  rescue
+    _ -> []
+  end
+
+  # Messages on ONE conversation, oldest first, `body` resolved through PiiResolution on the
+  # scope's plane — CLEAR on the operator's own tenant plane, `%Masked{}` (→ ••••) on an
+  # operator-plane mount. NEVER unwraps.
+  defp messages_for_conversation(mount, scope, conversation_id, agents) do
+    Mount.resource(mount, Message)
+    |> Ash.Query.ensure_selected([:sender_type, :message_type, :agent_id, :conversation_id, :body, :created_via])
+    |> Ash.Query.filter(conversation_id == ^conversation_id)
+    |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@lookup_limit)
+    |> Ash.read!(scope: scope)
+    |> resolve_pii(mount, Message, scope)
+    |> Enum.map(fn m ->
+      %{
+        id: m.id,
+        sender_type: m.sender_type,
+        message_type: m.message_type,
+        body: m.body,
+        created_via: m.created_via,
+        __agent__: m.agent_id && Map.get(agents, m.agent_id)
+      }
+    end)
+  rescue
+    _ -> []
+  end
+
+  # Find the ticket's first conversation, or create one (a fresh ticket has none). Governed
+  # create (`scope:` → OrgScope + RoleAtLeast(:member)); no LiveView policy.
+  defp ensure_conversation(mount, scope, org_id, ticket_id) do
+    existing =
+      Mount.resource(mount, Conversation)
+      |> Ash.Query.ensure_selected([:ticket_id])
+      |> Ash.Query.filter(ticket_id == ^ticket_id)
+      |> Ash.Query.sort(inserted_at: :asc)
+      |> Ash.Query.limit(1)
+      |> Ash.read_one!(scope: scope)
+
+    case existing do
+      %{id: id} ->
+        {:ok, id}
+
+      _ ->
+        Mount.resource(mount, Conversation)
+        |> Ash.Changeset.for_create(
+          :create,
+          %{org_id: org_id, ticket_id: ticket_id, channel: :internal, status: :open, subject: "Operator reply"},
+          scope: scope
+        )
+        |> Ash.create()
+        |> case do
+          {:ok, conv} -> {:ok, conv.id}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp create_reply(mount, scope, org_id, conversation_id, body) do
+    Mount.resource(mount, Message)
+    |> Ash.Changeset.for_create(
+      :create,
+      %{
+        org_id: org_id,
+        conversation_id: conversation_id,
+        sender_type: :agent,
+        message_type: :reply,
+        body: body,
+        created_via: :web
+      },
+      scope: scope
+    )
+    |> Ash.create()
   end
 
   @doc "Non-PII operator summary metrics for the Accounts page header (bands per ADR-019)."
@@ -352,13 +515,17 @@ defmodule Samen.Web.Operator.Reads do
   Returns `%{account:, movements:, tickets:, invoices:}` or `nil` (unknown account /
   read error) — the LiveView renders "not found", never a crash.
   """
-  def account_detail(mount, scope, operator_org_id, account_org_id) do
+  def account_detail(mount, scope, operator_org_id, account_org_id, opts \\ []) do
     case find_account_org(mount, operator_org_id, account_org_id) do
       nil ->
         nil
 
       org ->
-        now = DateTime.utc_now()
+        # ONE clock reading, captured once per assembly (B9 carry B4-P2-1). Defaults to
+        # `DateTime.utc_now/0` in production; tests pin it via `:now` (the sanctioned
+        # clock-injection opt — same pattern as `Samen.Retention`/`Samen.BreakGlass.Budget`)
+        # so the not-yet-due boundary is deterministic instead of a wall-clock margin.
+        now = Keyword.get(opts, :now, DateTime.utc_now())
         row = account_row(org, account_joins(mount, scope, operator_org_id, now))
         customer_id = row.__customer__ && row.__customer__.id
 
@@ -397,7 +564,10 @@ defmodule Samen.Web.Operator.Reads do
     Mount.resource(mount, SubscriptionEvent)
     |> Ash.Query.ensure_selected([:kind, :mrr_delta_cents, :mrr_before_cents, :mrr_after_cents, :occurred_at, :customer_id])
     |> Ash.Query.filter(customer_id == ^customer_id)
-    |> Ash.Query.sort(occurred_at: :desc)
+    # T121: `id` belt makes this a STRICT TOTAL ORDER (not merely deterministic-in-
+    # practice) — two mov rows sharing an `occurred_at` instant resolve to ONE defined
+    # order regardless of timestamp precision, mirroring the ledger read's tiebreak.
+    |> Ash.Query.sort(occurred_at: :desc, id: :desc)
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
   rescue
@@ -552,13 +722,15 @@ defmodule Samen.Web.Operator.Reads do
     _ -> %{}
   end
 
+  # ADR-036 §4.5(3): unit_amount_cents was dropped by the H1 Money migration;
+  # unit_amount is now the money_with_currency composite — extract minor units.
   defp monthly_prices_by_plan(mount, scope) do
     Mount.resource(mount, Price)
-    |> Ash.Query.ensure_selected([:plan_id, :unit_amount_cents, :interval, :active])
+    |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval, :active])
     |> Ash.Query.filter(interval == :monthly and active == true)
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
-    |> Map.new(&{&1.plan_id, &1.unit_amount_cents})
+    |> Map.new(&{&1.plan_id, Samen.Type.Money.cents(&1.unit_amount)})
   rescue
     _ -> %{}
   end
@@ -663,10 +835,17 @@ defmodule Samen.Web.Operator.Reads do
 
   defp latest_activity_days(resource, now) do
     resource
-    |> Ash.Query.ensure_selected([:org_id, :occurred_at])
+    # `select/2`, not `ensure_selected/2` (verifier R-wording): ensure_selected ADDS to the
+    # default select, so the "only these columns" claim held by resource shape, not by the
+    # query; the RESTRICTING select/2 (the digest.ex `unread_recipients` form) makes it
+    # structural — nothing beyond these two columns transfers.
+    |> Ash.Query.select([:org_id, :occurred_at])
     |> Ash.Query.distinct([:org_id])
     |> Ash.Query.distinct_sort(occurred_at: :desc)
     |> Ash.Query.limit(@lookup_limit)
+    # authz-scope: operator-plane cross-tenant activity rollup — org-less BY DESIGN (one row
+    # per org via distinct, hard-capped, RESTRICTED by select/2 to token-blind
+    # [:org_id, :occurred_at] only, NO PII); the S15 escapee, now justified at the read site
     |> Ash.read!(authorize?: false)
     |> Enum.reduce(%{}, fn ev, acc ->
       case ev.occurred_at do

@@ -1,0 +1,32 @@
+# SABOTAGE: T78 (spec §I5) — `Samen.AI.Embeddings.embedder_simulated?/1` mirrors T152's
+# `%Samen.AI.Completion{simulated:}` mechanism onto the embeddings/search lane (the
+# retrieval primitive KB composer-suggestion + deflection both ride). This patch
+# short-circuits `simulated_provider?/1` to a hardcoded `false`, so `Samen.AI.Embedder.
+# Deterministic` — the ONLY embedder `:test` resolves to — never self-reports as
+# simulated: the "SIMULATED ranking (keyless test embedder)" badge silently disappears
+# from BOTH the composer-suggestion panel (TicketLive) and the portal deflection panel
+# (PortalKbLive), presenting keyless hash-distance ranking as if it were a real semantic
+# match — exactly the "never fabricate a suggestion as if real" guarantee the task hard
+# rules require. A live provider's own (correctly-false) `simulated?/0` is unaffected —
+# this sabotage only ever LIES in one direction (never claims a real provider is
+# simulated; always claims a simulated one is real), the fail-honest inverse of the
+# guarantee.
+# APP: samen_core
+# TEST_FILES: test/ai/embeddings_test.exs
+# MUST_FAIL: the keyless :test-only deterministic fallback self-declares simulated
+# MUST_FAIL: an explicit Deterministic override also reports simulated: true (provider self-declares, not env-gated)
+diff --git a/samen_core/lib/samen/ai/embeddings.ex b/samen_core/lib/samen/ai/embeddings.ex
+--- a/samen_core/lib/samen/ai/embeddings.ex
++++ b/samen_core/lib/samen/ai/embeddings.ex
+@@ -186,10 +186,7 @@
+   # real provider is simulated, never claim a keyless one is real). Wrapped so a provider whose
+   # `simulated?/0` raises can never crash the caller.
+   defp simulated_provider?(provider) do
+-    Code.ensure_loaded?(provider) and function_exported?(provider, :simulated?, 0) and
+-      provider.simulated?() == true
+-  rescue
+-    _ -> false
++    false
+   end
+
+   # --- deny-by-default allowlist ------------------------------------------------------------

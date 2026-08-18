@@ -1,0 +1,26 @@
+# SABOTAGE: D3 (ADR-046 §4.2) — the custom-bag erasure arm (Samen.CustomFields.Erasure)
+# SKIPS the actual per-key redaction: the UPDATE drops the `- $1::text[]` jsonb-key
+# removal (setting the bag to itself) while keeping the `$1::text[] IS NOT NULL` clause so
+# both the key list AND the matched-row count are unchanged (num_rows == 1 — the report
+# still LIES `rows_redacted => 1`). So after a shred the subject's `pii_declared` bag key
+# SURVIVES in the sealed jsonb bag — the exact carve-out gap D3 closes (key-shred cannot
+# reach plaintext-in-bag; NonPii is whole-column). Flips the genuine erasure assertion
+# (`refute Map.has_key?(after_, "care_note")`) while leaving the arm's report count
+# untouched, so this targets ONLY the reach of erasure into the bag, not its reporting.
+# APP: samen_core
+# TEST_FILES: test/custom_fields_erasure_test.exs
+# MUST_FAIL: REACHED + PER-KEY: erasure removes the pii_declared key, keeps the non-PII key
+diff --git a/samen_core/lib/samen/custom_fields/erasure.ex b/samen_core/lib/samen/custom_fields/erasure.ex
+--- a/samen_core/lib/samen/custom_fields/erasure.ex
++++ b/samen_core/lib/samen/custom_fields/erasure.ex
+@@ -104,8 +104,8 @@
+             # jsonb `- text[]` removes every listed key from the bag; non-PII keys
+             # (and the non-matching rows) are untouched.
+             sql =
+-              "UPDATE #{table} SET #{bag_col} = COALESCE(#{bag_col}, '{}'::jsonb) - $1::text[] " <>
+-                "WHERE #{subject_col}::text = $2 AND #{org_col}::text = $3"
++              "UPDATE #{table} SET #{bag_col} = COALESCE(#{bag_col}, '{}'::jsonb) " <>
++                "WHERE #{subject_col}::text = $2 AND #{org_col}::text = $3 AND $1::text[] IS NOT NULL"
+ 
+             %{num_rows: n} = Ecto.Adapters.SQL.query!(repo, sql, [keys, subject_id, org_id])
+             {racc + n, Enum.reduce(keys, kacc, &MapSet.put(&2, &1))}

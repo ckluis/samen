@@ -1,0 +1,34 @@
+# SABOTAGE: D8 (T72) gate sabotage — the permanent mask-leak RED-TEAM tier (ADR-043 §10.2 /
+# §3.4 / RP-AI-7). Neutralizes the value-layer mask of a full-DB-seeded vault-routed (🔒)
+# field in Samen.AI.Chokepoint.render_value/1: instead of rendering a resolved %Samen.Masked{}
+# binding to the mask string ("••••"), it leaks the raw vault FK token (`vt_*`). That token
+# now egresses to EVERY provider recording for any full-DB canary-seeded binding — the exact
+# INV-7 (no-PII-egress) breach the permanent T72 tier exists to catch (a `vt_*` token is a
+# vault-routed value; INV-7 forbids it at any egress just like plaintext). This flips the
+# NAMED EG1 verbs red-team test in the D8 eval tier — both its `refute recorded =~ "vt_"`
+# assertion AND its non-vacuous `assert recorded =~ mask()` positive control (the mask string
+# is gone, replaced by the token). Because TEST_FILES is the tier file `mix test
+# test/ai_eval/` runs, the harness proves the permanent TIER fails, not merely a unit test.
+# Distinct from sabotage 44 (history re-scrub) and 45 (scrub-allowlist tuple hole): this
+# targets render_value/1, the mask of a resolved binding — the exact line the full-DB seeding
+# exercises. Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/ai_eval/ai_plane_redteam_test.exs
+# MUST_FAIL: never reaches the provider recording across all six verbs
+diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+--- a/samen_core/lib/samen/ai/chokepoint.ex
++++ b/samen_core/lib/samen/ai/chokepoint.ex
+@@ -268,7 +268,11 @@ defmodule Samen.AI.Chokepoint do
+   defp render_fields(record, pii_fields) do
+     Enum.map(pii_fields, fn name -> render_value(Map.get(record, name)) end)
+   end
+
+-  defp render_value(%Samen.Masked{}), do: @mask
++  # SABOTAGE (T72 D8, RP-AI-7): leak the vault FK token instead of masking a full-DB-seeded
++  # 🔒 field at the value layer — the exact INV-7 (no-PII-egress) breach the permanent
++  # mask-leak red-team tier exists to catch. The vt_ token now egresses to every provider
++  # recording, flipping the NAMED EG1 verbs red-team test (and its mask positive control).
++  defp render_value(%Samen.Masked{} = masked), do: masked.token
+   defp render_value(%Ash.ForbiddenField{}), do: @mask
+   defp render_value(nil), do: @mask
+   defp render_value(other), do: other

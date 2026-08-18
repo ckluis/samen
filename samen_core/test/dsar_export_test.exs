@@ -81,14 +81,31 @@ defmodule Samen.DsarExportTest do
       refute blob =~ "vt_"
     end
 
-    test "WITH a live grant the operator export DOES reveal plaintext (positive control)" do
+    test "a caller-asserted grant?: true is IGNORED — no real grant → still MASKED (hole closed)" do
       s = subj()
       seed(s)
 
-      assert {:ok, bundle} = Dsar.export_subject(s, repo: @repo, plane: :operator, grant?: true, org_id: "org-1")
+      # The old caller-asserted hole: passing grant?: true used to force plaintext with NO real
+      # authorization. It is now a no-op — plaintext derives from the REAL grant model only.
+      assert {:ok, bundle} =
+               Dsar.export_subject(s, repo: @repo, plane: :operator, grant?: true, org_id: "org-1")
+
       vals = values(bundle)
-      assert "alice@example.com" in vals
-      assert "Alice Anders" in vals
+      assert Enum.all?(vals, &(&1 == Masked.mask()))
+      refute "alice@example.com" in vals
+      refute "Alice Anders" in vals
+    end
+  end
+
+  describe "org binding is required (fail-closed)" do
+    test "an export with no org_id is refused — never a plaintext bundle for any subject" do
+      s = subj()
+      seed(s)
+
+      assert {:error, :org_id_required} = Dsar.export_subject(s, repo: @repo, plane: :tenant)
+      # The reserved system chain is refused too — an export never rides "__global__".
+      assert {:error, :org_id_required} =
+               Dsar.export_subject(s, repo: @repo, plane: :tenant, org_id: "__global__")
     end
   end
 

@@ -36,6 +36,10 @@ defmodule Driftwood.BrokerRollup do
         )
 
         # Per-status LOAD rollup for this org (counts + gross value cents).
+        #
+        # ADR-036 §4.5(2): fop_value_cents was dropped by the H1 Money migration;
+        # fop_value is now the money_with_currency composite — sum its minor units
+        # directly ((composite).amount * 100).
         %{num_rows: status_rows} =
           Ecto.Adapters.SQL.query!(
             repo,
@@ -44,13 +48,13 @@ defmodule Driftwood.BrokerRollup do
               (dbs_org_id, dbs_status, dbs_load_count, dbs_gross_cents,
                dbs_settlement_count, dbs_net_payable_cents, dbs_refreshed_at)
             SELECT
-              l.fop_org_id                         AS dbs_org_id,
-              l.fop_status                         AS dbs_status,
-              COUNT(*)::int                        AS dbs_load_count,
-              COALESCE(SUM(l.fop_value_cents),0)::int AS dbs_gross_cents,
-              0                                    AS dbs_settlement_count,
-              0                                    AS dbs_net_payable_cents,
-              now()                                AS dbs_refreshed_at
+              l.fop_org_id                               AS dbs_org_id,
+              l.fop_status                               AS dbs_status,
+              COUNT(*)::int                              AS dbs_load_count,
+              COALESCE(SUM((l.fop_value).amount * 100),0)::int AS dbs_gross_cents,
+              0                                          AS dbs_settlement_count,
+              0                                          AS dbs_net_payable_cents,
+              now()                                      AS dbs_refreshed_at
             FROM fop_opportunity l
             WHERE l.fop_org_id = $1
             GROUP BY l.fop_org_id, l.fop_status

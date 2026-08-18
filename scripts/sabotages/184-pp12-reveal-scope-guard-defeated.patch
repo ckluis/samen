@@ -1,0 +1,27 @@
+# SABOTAGE: PP-12 (Batch 6 REVEAL-ACCOUNTABILITY) — the console reveal handler's
+# session/org SCOPE GUARD is defeated: `DriftwoodWeb.OperatorImpersonationLive.driver_in_scope?/2`
+# always returns `true`, so a client-supplied `phx-value-driver` naming a subject in ANOTHER
+# org (outside the active impersonation session's gated roster) is treated as in-scope. An
+# operator holding a valid second-party grant for that foreign subject can then unmask it
+# from a session opened over a DIFFERENT tenant — the reveal executes OUTSIDE the ledgered
+# session that is supposed to frame it (`masked_cdl/1` reads `authorize?: false` across any
+# org). The named RED test flips (`revealed` is no longer empty — the foreign subject is
+# unmasked); the in-scope POSITIVE control still passes, so the flip is non-vacuous. All vars
+# stay referenced (`_ = Enum.any?(...)`) ⇒ a genuine assertion flip, not a compile error.
+# Reverts byte-exact.
+# APP: driftwood
+# TEST_FILES: test/operator_reveal_request_test.exs
+# MUST_FAIL: OUTSIDE the active session's org is refused
+diff --git a/driftwood/lib/driftwood_web/operator_impersonation_live.ex b/driftwood/lib/driftwood_web/operator_impersonation_live.ex
+--- a/driftwood/lib/driftwood_web/operator_impersonation_live.ex
++++ b/driftwood/lib/driftwood_web/operator_impersonation_live.ex
+@@ -541,7 +541,8 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
+   # `driver_id` (a subject in another org, or none) is not present → refused.
+   defp driver_in_scope?(socket, driver_id) do
+     sid = to_string(driver_id)
+-    Enum.any?(socket.assigns[:drivers] || [], fn d -> to_string(d.id) == sid end)
++    _ = Enum.any?(socket.assigns[:drivers] || [], fn d -> to_string(d.id) == sid end)
++    true
+   end
+
+   # The reveal-request reason: reuse the active impersonation session's (ticket-shaped) reason

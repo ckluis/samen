@@ -1,0 +1,27 @@
+# SABOTAGE: I1 (ADR-046 §8 residual #2) — the custom-OBJECT record-bag erasure arm
+# (Samen.CustomObjects.Erasure) SKIPS the actual per-key redaction: the UPDATE drops the
+# `- $1::text[]` jsonb-key removal (setting the bag to itself) while keeping a
+# `$1::text[] IS NOT NULL` clause so both the key list AND the matched-row count are
+# unchanged (num_rows == 1 — the report still LIES `rows_redacted => 1`). So after a shred
+# the subject's `pii_declared` record-bag key SURVIVES in the sealed `tnt_record` bag — the
+# exact carve-out gap this rung closes (key-shred cannot reach plaintext-in-bag). Flips the
+# genuine erasure assertion (`refute Map.has_key?(after_, "declared_email")`) while the arm's
+# report count stays untouched, so this targets ONLY erasure's reach into the record bag.
+# APP: samen_core
+# TEST_FILES: test/custom_objects_erasure_test.exs
+# MUST_FAIL: REACHED + PER-KEY: erasure removes the pii_declared record-bag key, keeps the non-PII key
+diff --git a/samen_core/lib/samen/custom_objects/erasure.ex b/samen_core/lib/samen/custom_objects/erasure.ex
+--- a/samen_core/lib/samen/custom_objects/erasure.ex
++++ b/samen_core/lib/samen/custom_objects/erasure.ex
+@@ -120,8 +120,9 @@ defmodule Samen.CustomObjects.Erasure do
+             # jsonb `- text[]` removes every listed key from the bag; non-PII keys (and the
+             # non-matching rows) are untouched.
+             sql =
+-              "UPDATE #{record_table} SET #{bag_col} = COALESCE(#{bag_col}, '{}'::jsonb) - $1::text[] " <>
+-                "WHERE #{object_key_col}::text = $2 AND #{refs_col} ->> $3 = $4 AND #{org_col}::text = $5"
++              "UPDATE #{record_table} SET #{bag_col} = COALESCE(#{bag_col}, '{}'::jsonb) " <>
++                "WHERE #{object_key_col}::text = $2 AND #{refs_col} ->> $3 = $4 AND #{org_col}::text = $5 " <>
++                "AND $1::text[] IS NOT NULL"
+ 
+             %{num_rows: n} =
+               Ecto.Adapters.SQL.query!(repo, sql, [keys, object_key, subject_ref_key, subject_id, org_id])

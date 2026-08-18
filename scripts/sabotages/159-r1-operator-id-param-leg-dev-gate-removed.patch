@@ -1,0 +1,27 @@
+# SABOTAGE: phase-6 SEC fix round R1 (defence in depth behind H2). Removes the
+# dev-only posture gate on the CLIENT-CONTROLLED ?operator_id leg of
+# Samen.Web.Operator.Impersonation.resolve_operator_id/3, so the param is trusted
+# in EVERY posture -- including a prod-armed host (auth_required?: true) -- exactly
+# as before the fix round. The leg is only reachable when no principal resolves, so
+# this is not the primary control (that is assign_identity/3's principal-first order
+# plus the :require_operator on_mount halt); the patch proves the defence-in-depth
+# layer is load-bearing and not decorative. The auth_disarmed?/1 call is retained
+# and discarded so the sabotage introduces no unused-function warning.
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_impersonation_gate_test.exs
+# MUST_FAIL: ARMED (auth_required?: true): a forged ?operator_id is IGNORED
+# MUST_FAIL: ARMED: the SERVER-set session operator_id still resolves
+diff --git a/samen_web/lib/samen/web/operator/impersonation.ex b/samen_web/lib/samen/web/operator/impersonation.ex
+index 2e41ad8..55bdf0a 100644
+--- a/samen_web/lib/samen/web/operator/impersonation.ex
++++ b/samen_web/lib/samen/web/operator/impersonation.ex
+@@ -89,7 +89,8 @@ defmodule Samen.Web.Operator.Impersonation do
+   end
+ 
+   defp dev_param_operator_id(socket, params) do
+-    if auth_disarmed?(socket), do: present(params["operator_id"]), else: nil
++    _ = auth_disarmed?(socket)
++    present(params["operator_id"])
+   end
+ 
+   @doc """

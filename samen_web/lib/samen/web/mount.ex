@@ -52,7 +52,12 @@ defmodule Samen.Web.Mount do
             | :files
             | :csv
             | :search
-            | :settings,
+            | :settings
+            | :auth
+            | :automation
+            | :ai
+            | :analytics
+            | :kb,
           namespace: module(),
           repo: module(),
           domain: module(),
@@ -122,6 +127,8 @@ defmodule Samen.Web.Mount do
   defp scope_kind("crm"), do: :crm
   defp scope_kind("billing"), do: :billing
   defp scope_kind("support"), do: :support
+  # F1 / ADR-041 §3 (T43) — the Work scope (Project + the canonical Task).
+  defp scope_kind("work"), do: :work
   defp scope_kind("marketing"), do: :marketing
   defp scope_kind("aggregate"), do: :aggregate
   defp scope_kind("operator"), do: :operator
@@ -132,6 +139,24 @@ defmodule Samen.Web.Mount do
   defp scope_kind("csv"), do: :csv
   defp scope_kind("search"), do: :search
   defp scope_kind("settings"), do: :settings
+  # ADR-035 — the pre-actor identity-spine surfaces (signup/login/verify/reset/…,
+  # §6 "pre-actor public" plane row). No org actor exists yet at this scope.
+  defp scope_kind("auth"), do: :auth
+  # T118 (ADR-039 §12 done-criterion 4 UI half) — the tenant-plane automation
+  # (workflow) builder mount.
+  defp scope_kind("automation"), do: :automation
+  # T155 (ADR-043 §5.3) — the tenant-plane AI UI kit mount (verbs · semantic search ·
+  # CRM AI · analytics · support draft).
+  defp scope_kind("ai"), do: :ai
+  # P17 (ADR-045 §3) — the tenant own-org analytics mount (`samen_tenant_analytics_routes`).
+  # The org-scoped, k-anonymity-floored activation surface, distinct from the cross-tenant
+  # operator analytics. Registering the kind here is what lets the mount round-trip through
+  # the signed session on a REAL router mount (P17-carry-2, tenant_analytics_route_e2e_test).
+  defp scope_kind("analytics"), do: :analytics
+  # T78 (spec §I5) — the UNAUTHENTICATED tenant-portal KB browse + deflection
+  # mount (mounted in a host's PUBLIC router scope, no on_mount auth gate —
+  # the `samen_auth_routes` posture, never the `samen_operator_routes` one).
+  defp scope_kind("kb"), do: :kb
   defp scope_kind(k) when is_atom(k), do: k
 
   # Module atoms serialize as "Elixir.Driftwood.Crm". Host modules are COMPILED, so their
@@ -165,6 +190,36 @@ defmodule Samen.Web.Mount do
   # This is a whitelist, NOT a `to_string`/mint: an unknown key (never a framework label,
   # so cookie-injected garbage) still falls through to `String.to_existing_atom/1`, which
   # rejects a never-compiled string rather than minting an atom from session input.
+  #
+  # `fleet_authority` / `fleet_resolution` (J3 / ADR-044 §6.3a #2): the cockpit's per-product
+  # authorization + name-resolution seams (Samen.Fleet.Authz / Samen.Fleet.Resolution). MUST be
+  # whitelisted or a cockpit mount's fleet label is silently dropped at from_session/1 and the gate
+  # reads nil (fail-open-LOOKING, not loud) — round-trip pinned by mount_fleet_label_test.exs.
+  #
+  # `fleet_namespace` (T84b, ADR-044 §9.2): the `flags_namespace`-shaped seam carrying the
+  # `Samen.Fleet.Scope`-mounted Ash domain a `fleet_cockpit: true` operator mount reads via
+  # `Samen.Fleet.read/2` — set by `samen_operator_routes(..., fleet_namespace: MyApp.Fleet)`.
+  #
+  # ROUND-TRIP COMPLETENESS (pre-PR remediation) — these were minted only inside their
+  # consuming LiveView and so survived `from_session/1` by LOAD-ORDER LUCK (the consuming
+  # module happened to be loaded first), the exact fragility this whitelist exists to remove:
+  #   * `identity_namespace` (Batch 2, PP-5) — the tenant-plane Billing role seam. The
+  #     comment above names a dropped AUTHZ label a "fail-open-LOOKING" hazard: this IS one.
+  #   * `spine_totp` / `host_nav_extra` (PP-17 / Batch 3+5b) — the Settings 2FA opt-in and the
+  #     host-supplied nav-extras group; both ride tenant mounts a cold LiveView deserializes.
+  #   * `analytics_ask_resource` (T149/B2b) — the operator AnalyticsLive ask-scope resource.
+  #   * `signup_path`/`verify_path`/`reset_path`/`invite_path`/`totp_path` (luminary A4) — the
+  #     five ADR-035 identity-spine path labels `samen_auth_routes/1` merges alongside
+  #     `login_path` (already whitelisted); `totp_issuer` (`auth/totp_enroll_live.ex`) and
+  #     `work_path`/`work_logo_style` (`work/live.ex`) round out the same audit. `__principal__`
+  #     (`tenant_role.ex`) is the stashed-role sentinel key.
+  # Enumerated round-trip is pinned by `identity_namespace_coverage_test.exs` +
+  # `tenant_authn_prodpath_test.exs`, which rebuild every mount off a compiled router, AND by
+  # `label_keys_completeness_test.exs` (luminary A4) — a source-grep over every call site
+  # under `samen_web/lib` that reads a label key off a mount, asserted a subset of this list.
+  # That test is refutable BY CONSTRUCTION (not by a derived-input tautology): it reads real
+  # source files independent of this list, so a key read here without being added above makes
+  # it fail on its own, no synthetic drift required.
   @label_keys ~w(
     crm_namespace crm_path crm_logo_style
     billing_logo_style support_path support_logo_style
@@ -172,14 +227,26 @@ defmodule Samen.Web.Mount do
     crumb_root title glyph
     operator_org_id operator_title operator_workspace operator_glyph
     operator_initials operator_logo_style operator_role operator_user
-    aggregate_loader otp_app status
+    operator_authority
+    fleet_authority fleet_resolution
+    aggregate_loader otp_app status analytics_ask_resource
     user_name user_role user_initials
     chat_path pubsub presence object_cards
-    default_org_id org_directory tenant_landing impersonate_path
+    default_org_id org_directory tenant_landing impersonate_path seed_command
+    host_nav_extra identity_namespace
     recipient_id
     flags_namespace flags_path revenue_plan_loader
+    automation_path
     current_user_id current_membership_id
     authn authorized_orgs
+    login_path spine_sessions spine_totp
+    settings_path plan_labels
+    kb_namespace kb_path
+    fleet_namespace fleet_cockpit
+    ai_path ai_crm_resource ai_aggregate_resource
+    signup_path verify_path reset_path invite_path totp_path totp_issuer
+    work_path work_logo_style
+    __principal__
   )a
 
   @label_key_strings Map.new(@label_keys, fn k -> {Atom.to_string(k), k} end)

@@ -32,6 +32,11 @@ defmodule <%= module %>.Vertical.Record do
     * OrgScope on every action.
     * a public JSON:API surface (WS-D D3) behind a DENY-BY-DEFAULT allowlist bound to
       the BOUNDED `:api_read`.
+    * `archivable: true` (ADR-040 §5.8, T37h) — soft-deletable by default (E6
+      substrate: `archived_at`, `:archive`/`:restore`/`:archived`, default-read
+      exclusion) with zero authored code; the public `:api_read`/`:read` both inherit
+      the default-read archived-exclusion preparation, so an archived record drops
+      out of the JSON:API listing too.
   """
   use Samen.Resource,
     otp_app: :<%= otp_app %>,
@@ -39,7 +44,8 @@ defmodule <%= module %>.Vertical.Record do
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer],
     extensions: [AshJsonApi.Resource],
-    abbrev: "<%= abbrev %>"
+    abbrev: "<%= abbrev %>",
+    archivable: true
 
   postgres do
     table("<%= resource_table %>")

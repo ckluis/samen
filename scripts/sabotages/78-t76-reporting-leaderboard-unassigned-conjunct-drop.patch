@@ -1,0 +1,28 @@
+# SABOTAGE: T76 (spec §I3 CRM reporting) — drops the `not is_nil(owner_id) and` conjunct
+# from `Samen.Web.CRM.Reads.activity_leaderboard/3`'s filter. A leaderboard ranks MEMBERS —
+# unassigned activities (owner_id: nil) must never appear as a ranked row. Without this
+# conjunct, an org whose activities are mostly unowned (a common real-world case: activities
+# logged before an owner is assigned, or a host that never adopted owner assignment) would
+# show a phantom "nil" row at the top of the leaderboard — an anonymous, non-member entry
+# masquerading as a ranked member, and it would silently absorb count that a real member's
+# row should carry once ownership IS assigned (the unassigned bucket and a real owner's
+# bucket are mutually exclusive slices of the same total). Orgs where EVERY activity already
+# has an owner stay green (there is no unassigned row to wrongly include) — exactly why the
+# named test seeds a deliberately-unassigned batch alongside an owned one. REGENERATED T76
+# fix round 1 (MED-1 rewrite; same guarantee/line content, context shifted). Reverts
+# byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_reporting_test.exs
+# MUST_FAIL: activity_leaderboard EXCLUDES unassigned (owner_id: nil) activities from the ranked list
+diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+--- a/samen_web/lib/samen/web/crm/reads.ex
++++ b/samen_web/lib/samen/web/crm/reads.ex
+@@ -842,7 +842,7 @@
+         series =
+           task_mod
+           |> Ash.Query.new()
+-          |> Ash.Query.filter(not is_nil(owner_id) and subject_key in ^@crm_subject_keys)
++          |> Ash.Query.filter(subject_key in ^@crm_subject_keys)
+           |> Samen.Web.Reads.aggregate_by!(:owner_id, scope: scope, max_points: discovery_limit)
+
+         other = Samen.Web.Reads.other_key()

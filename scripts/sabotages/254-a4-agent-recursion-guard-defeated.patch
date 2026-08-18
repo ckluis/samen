@@ -1,0 +1,39 @@
+# SABOTAGE: A4 (ADR-047 §5.1) gate sabotage — the DEPTH/CHAIN RECURSION GUARD stops being
+# live: `with_tool_provenance/2` no longer publishes the ambient provenance marker, so
+# `resolve_provenance/1` sees no parent and treats a run started from INSIDE a tool
+# execution as a fresh top-level run at depth 0. A governed action can then start agent
+# runs (each of which can propose further writes) in an unbounded chain simply by not
+# passing a `:depth` argument — which is precisely the bypass an explicit-argument-only
+# guard misses, and why the guard is ambient. The named red (a tool that tries to start a
+# nested agent run is refused :depth_exceeded, WITHOUT passing any depth argument) must
+# flip, along with the marker-visibility test; the explicit-opt red stays green, proving
+# what was lost is the AMBIENT half specifically.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: a tool that tries to start a nested agent run is refused :depth_exceeded
+# MUST_FAIL: the ambient marker is set during a tool execution
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1379,16 +1379,11 @@
+   def max_agent_depth, do: @max_agent_depth
+ 
+   defp with_tool_provenance(%Run{} = run, fun) do
+-    prior = Process.get(@provenance_key)
+-    Process.put(@provenance_key, %{depth: run.depth, chain: run.chain ++ [run.id]})
+-
+-    try do
+-      fun.()
+-    after
+-      if is_nil(prior),
+-        do: Process.delete(@provenance_key),
+-        else: Process.put(@provenance_key, prior)
+-    end
++    # SABOTAGE (A4, ADR-047 §5.1): the ambient provenance marker is NOT published, so a
++    # tool that starts an agent run without passing :depth looks like a top-level caller
++    # and the v1 nesting ceiling never binds.
++    _ = run
++    fun.()
+   end
+ 
+   # Resolve this run's `{depth, chain}` and refuse anything past the v1 ceiling. The

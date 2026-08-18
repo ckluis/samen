@@ -22,6 +22,22 @@ defmodule Samen.FeatureFlags.Decision do
         * `:rollout_out`  — outside the bucket (OFF).
         * `:default`      — no rule/rollout applied; the flag's default gate.
 
+  ## Fleet-composed reasons (ADR-044 §7.3, `Samen.Fleet.Directive.Precedence`)
+
+  `Samen.Fleet.Directive.Precedence.decide/3` returns a `Decision` too, composing
+  a LOCAL config with a fleet directive — it adds these reasons, which never
+  appear from a plain `Samen.FeatureFlags.evaluate/2` call:
+
+        * `:local_off`         — a local off-state (kill / explicit deny / a local
+          `then: "off"` targeting match / `rollout_pct <= 0`) — fleet was NOT
+          consulted (§7.3's one-way OFF authority).
+        * `:fleet_kill`        — no local off-state, but the fleet directive's
+          `kill: true` short-circuited OFF.
+        * `:fleet_deny`/`:fleet_allow`/`:fleet_targeted` — a FLEET targeting rule
+          (not a local one) decided the outcome.
+        * `:fleet_rollout_in`/`:fleet_rollout_out` — the FLEET percentage bucket
+          decided the outcome.
+
   Every field is bounded and non-PII by construction: `variant` is a config-defined
   atom, `reason` is a fixed enum, `on` is a boolean. A `Decision` is safe to log as
   a metric.
@@ -36,6 +52,13 @@ defmodule Samen.FeatureFlags.Decision do
           | :rollout_in
           | :rollout_out
           | :default
+          | :local_off
+          | :fleet_kill
+          | :fleet_deny
+          | :fleet_allow
+          | :fleet_targeted
+          | :fleet_rollout_in
+          | :fleet_rollout_out
 
   @type t :: %__MODULE__{
           on: boolean(),

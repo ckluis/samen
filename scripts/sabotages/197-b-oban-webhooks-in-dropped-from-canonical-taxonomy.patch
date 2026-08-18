@@ -1,0 +1,30 @@
+# SABOTAGE: B-OBAN (worker-queue ⊆ configured-queue parity) — drops `webhooks_in: 5`
+# from `Samen.Jobs.default_queue_config/0`, reintroducing the EXACT shipped blocker:
+# `Samen.Webhook.IngestWorker` (`use Oban.Worker, queue: :webhooks_in`, behind every
+# inbound provider webhook and the operator DLQ-replay button) enqueues to a queue the
+# canonical taxonomy — and therefore every host's resolved runtime Oban config, since
+# hosts now derive it via `Samen.Jobs.install_defaults/1` — no longer registers. At
+# runtime that is SILENT: Oban.insert returns {:ok, job}, the row sits `available`
+# forever, no producer claims it, the DLQ stays empty and the ingress already answered
+# 200. Nothing else in the tree notices. The parity verifier is the only thing that can:
+# it DISCOVERS the enqueued-to queues off the compiled Oban.Worker modules instead of
+# restating a list, so the containment assertion (and the resolved-config assertion)
+# must FAIL. If either stops failing here, the gate has gone tautological again — which
+# is precisely how the previous hard-coded "six canonical queues" test passed while
+# three enqueued-to queues had no producer anywhere.
+# APP: samen_core
+# TEST_FILES: test/jobs_queue_parity_test.exs
+# MUST_FAIL: every discovered worker queue is registered in default_queue_config/0
+# MUST_FAIL: the three B-OBAN regression queues are discovered AND canonically configured
+diff --git a/samen_core/lib/samen/jobs.ex b/samen_core/lib/samen/jobs.ex
+index e3b2437..935ed36 100644
+--- a/samen_core/lib/samen/jobs.ex
++++ b/samen_core/lib/samen/jobs.ex
+@@ -123,7 +123,6 @@ defmodule Samen.Jobs do
+       default: 10,
+       rollups: 2,
+       webhooks_out: 5,
+-      webhooks_in: 5,
+       erasure: 1,
+       maintenance: 1,
+       # F3.5 / O3 — the audit-chain integrity VERIFY sweep runs on its OWN queue, NOT

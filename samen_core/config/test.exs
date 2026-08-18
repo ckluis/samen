@@ -14,6 +14,18 @@ config :samen_core, SamenCore.TestRepo,
   queue_target: 200,
   queue_interval: 2_000
 
+# L4 multi-node Oban proof (T90) — a SECOND repo on a DEDICATED database with the
+# NORMAL pool (NOT the SQL sandbox), so two real BEAM nodes can both run real Oban
+# producers against one Postgres. Only started by the opt-in `:multinode` tier
+# (`SAMEN_MULTINODE=1`); untouched by every other suite.
+config :samen_core, Samen.MultiNode.Repo,
+  username: System.get_env("USER") || "postgres",
+  password: "",
+  hostname: "localhost",
+  database: "samen_core_multinode_test",
+  pool_size: 10,
+  log: false
+
 config :logger, level: :warning
 
 # Gate-1 F1 red-path hook: the empty-registry exit-code test runs the pii_reads
@@ -27,7 +39,8 @@ end
 # test_helper.exs owns the Repo lifecycle (storage_up + migrate before connect).
 config :samen_core, start_repo?: false
 
-# Configure the verify_repo for mix samen.verify.column_refs in test.
+# Shared default repo for the samen_core verifiers/runtime that resolve a repo from
+# :verify_repo (migrations, no_plaintext_pii, erasure/dsar, files audit, the workers, …).
 config :samen_core, :verify_repo, SamenCore.TestRepo
 
 # T1.7 erasure: the repo backing the non_pii! registry + erasure reports. The
@@ -76,8 +89,86 @@ config :samen_core, :vault_declared_parity_allow_list, [
   # vault-routed signing_secret (column pii_nwh_signing_secret), but the fixture
   # domain is NOT in :ash_domains so vault_declared_parity cannot discover the
   # route. The route IS declared — allow-list the pair.
-  {"nwh_webhook", "pii_nwh_signing_secret"}
+  {"nwh_webhook", "pii_nwh_signing_secret"},
+  # T39 automation fixture (test/support/automation_fixture.ex): the Subject trigger
+  # source declares a vault-routed email (column pii_asj_email) so the c2 red-path can
+  # prove a condition on it is refused. The fixture domain is NOT in :ash_domains, so
+  # vault_declared_parity cannot discover the route — allow-list the pair.
+  {"asj_subject", "pii_asj_email"},
+  # T34 E3 approvals fixture (test/support/approvals_fixture.ex): the Document Gate-client
+  # declares a vault-routed secret (column pii_apd_secret) so the INV-1 no-persisted-inputs
+  # proof is non-vacuous. The fixture domain is NOT in :ash_domains — allow-list the pair.
+  {"apd_document", "pii_apd_secret"},
+  # T41 E4 reminder (test/support/automation_fixture.ex, the SAME AutomationFixture
+  # domain T39 mounts): Reminder.note is vault-routed (column pii_arm_note) so the
+  # per-plane masking 3-proof is non-vacuous. The fixture domain is NOT in
+  # :ash_domains — allow-list the pair.
+  {"arm_reminder", "pii_arm_note"},
+  # T40 E2 action-library fixture (test/support/automation_fixture.ex, the SAME
+  # AutomationFixture domain T39/T41 mount): Target.email is vault-routed
+  # (column pii_sat_email) so the webhook snapshot assert's negative control
+  # (a vault field named in `include` still never reaches the payload) is
+  # non-vacuous. The fixture domain is NOT in :ash_domains — allow-list the pair.
+  {"sat_target", "pii_sat_email"},
+  # T45 F3 (Docs scope, test/support/docs_fixture.ex): Doc.secure_body /
+  # Note.secure_body are vault-routed (columns pii_sdd_secure_body /
+  # pii_sdn_secure_body — the "PII-classified routes to vault" path, see
+  # Samen.Scopes.Docs.Blueprint) so the INV-1 masking three-proof is
+  # non-vacuous. The fixture domain is NOT in :ash_domains — allow-list the pair.
+  {"sdd_doc", "pii_sdd_secure_body"},
+  {"sdn_note", "pii_sdn_secure_body"},
+  # T75 (spec §I2 CRM sequences): a SECOND materialization of the T74 Mailbox
+  # scope (test/support/mailbox_fixture.ex) so the sequence reply-detection
+  # test can prove Samen.Sequences.MailboxReplyCheck reads REAL MailMessage
+  # rows. Connection.address / MailMessage.{subject,body,counterparty_address}
+  # are vault-routed (columns pii_scm_address / pii_smm_subject / pii_smm_body /
+  # pii_smm_counterparty_address) but this fixture domain is NOT in
+  # :ash_domains — allow-list the pairs (same posture as every other fixture
+  # above).
+  {"scm_connection", "pii_scm_address"},
+  {"smm_mail_message", "pii_smm_subject"},
+  {"smm_mail_message", "pii_smm_body"},
+  {"smm_mail_message", "pii_smm_counterparty_address"}
 ]
+
+# T34 E3 approve/reject engine (ADR-040 §4). The host-wired seam: the Approval resource +
+# its repo. samen_core wires the TestRepo fixture; hosts configure their own (T35).
+config :samen_core, Samen.Approvals,
+  approval_resource: SamenCore.Support.ApprovalsFixture.Approval,
+  repo: SamenCore.TestRepo
+
+# The kind registry (§4.4): `kind => {plane, handler}`. Gate-guarded action kinds route to
+# the generic `Samen.Approvals.Gate` handler (re-invokes the action as the requester); the
+# Face-1 "test:*" kinds drive the handler-registry proofs (the reveal grant becomes exactly
+# this shape of client in T35). Unregistered kinds are refused at write.
+config :samen_core, Samen.Approvals.Registry,
+  kinds: %{
+    (Atom.to_string(SamenCore.Support.ApprovalsFixture.Document) <> ":publish") =>
+      {:tenant, Samen.Approvals.Gate},
+    (Atom.to_string(SamenCore.Support.ApprovalsFixture.Document) <> ":lock") =>
+      {:tenant, Samen.Approvals.Gate},
+    "test:note" => {:tenant, SamenCore.Support.ApprovalsFixture.NoteHandler},
+    "test:boom" => {:tenant, SamenCore.Support.ApprovalsFixture.BoomHandler},
+    # An OPERATOR-plane kind (the reveal "pii_reveal" shape): its rows carry org_id NULL
+    # and are structurally invisible to every tenant actor (the cross-org read red test).
+    "test:op" => {:operator, SamenCore.Support.ApprovalsFixture.NoteHandler},
+    # T35 §4.7: reveal grants are a REAL client of this shape (not just the "test:op"
+    # rehearsal above) — samen_core's own reveal test suite runs against the SAME
+    # ApprovalsFixture.Approval + TestRepo wiring configured above.
+    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler},
+    # T70 (ADR-043 §6.3 D5): the AI support operator's human-gated send. Operator plane;
+    # the ReplyHandler sends via Samen.Delivery.Chokepoint.send/2 ONLY on a distinct-human
+    # approve — the AI service principal is never a decider (distinct-party enforced).
+    "ai_support_reply" => {:operator, Samen.AI.SupportOperator.ReplyHandler},
+    # A4 (ADR-047 §5.3; ADR-043 §6.2 unamended): the agent loop's propose-then-approve
+    # seam. TENANT plane — an agent run belongs to the initiating member's org, unlike
+    # the operator-plane support draft above. `requested_by` is the AI service principal
+    # (reused from §6.3, never a decider); `Samen.AI.Agent.WriteProposal.on_approve/2`
+    # executes the governed action with the DECIDING human's actor, inside the decision
+    # transaction. An unregistered kind here would make every write proposal refuse
+    # `:approval_unavailable` — fail-honest, never an ungated write.
+    "ai_agent_write" => {:tenant, Samen.AI.Agent.WriteProposal}
+  }
 
 # T2.6 OTel test config: use the pid exporter so tests receive spans as messages
 # and can assert on attributes inline. The simple processor sends spans
@@ -85,3 +176,10 @@ config :samen_core, :vault_declared_parity_allow_list, [
 config :opentelemetry,
   span_processor: :simple,
   traces_exporter: {:otel_exporter_pid, self()}
+
+# T82 fix round (fail-honest MED): Samen.Fleet.Registry.cockpit_identity/1 now
+# refuses (fail-honest) unless a host EXPLICITLY configures
+# :fleet_local_credential. This test suite opts into the reference (non-durable
+# in-process) implementation explicitly — the same way Samen.Delivery.FakeProvider
+# is explicitly wired rather than silently defaulted to.
+config :samen_core, :fleet_local_credential, Samen.Fleet.LocalCredential.Agent

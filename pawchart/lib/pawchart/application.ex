@@ -4,14 +4,34 @@ defmodule PawChart.Application do
 
   @impl true
   def start(_type, _args) do
+    # ADR-045 §2 (V-F1) — the fail-secure tenant-auth BOOT GUARD: refuse to boot a PROD host
+    # whose tenant gate is disarmed (a no-op in dev/test). Sits beside the ADR-024 prod-secret
+    # raise as the framework's second boot-honest refusal.
+    Samen.Web.TenantGate.assert_prod_armed!(:pawchart)
+
     # Observability plane (WS-D D1.1): OTel-Ecto with the un-forgettable
     # db_statement: :disabled + metrics contention handlers, wired via the
     # framework helper instead of hand-copied setup calls. Follows the repo:
     # in :test start_repo? is false, so no Ecto telemetry exists to observe.
     repo_children =
       if Application.get_env(:pawchart, :start_repo?, true) do
+        # ADR-046 §6 — activate the crypto-shred erasure arms (email_bidx tombstone +
+        # file-blob delete) derived from this host's LIVE schema (the
+        # Samen.Jobs.install_defaults/1 twin — no host-maintained spec list). No-op
+        # under test; the completeness gate installs explicitly.
+        Samen.Erasure.install_default_specs()
+
         Samen.Observability.child_specs(:pawchart) ++
-          [PawChart.Repo, {Oban, Application.fetch_env!(:samen_core, Oban)}]
+          [
+            PawChart.Repo,
+            # T128 + B-OBAN: install the canonical Samen queue taxonomy
+            # (default_queue_config/0) AND cron (default_crontab/0) at boot — modules are
+            # loaded here, unlike in config.exs. So every queue any shipped worker or
+            # AshOban trigger enqueues to has a producer, and the audit-partition
+            # roll-forward runs, with no host-maintained list. No-op under test
+            # (plugins: false, testing: :manual).
+            {Oban, Samen.Jobs.install_defaults(Application.fetch_env!(:samen_core, Oban))}
+          ]
       else
         []
       end

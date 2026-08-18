@@ -81,7 +81,7 @@ app*; **MET (substrate)** if only ♻️; **CAVEAT** if 🟡; **GAP** if 🔴.
 | H2 | "Can't log it ⇒ can't see it" is a real availability cost; routine reveal fails closed if the audit sink / control-plane DB is unreachable; the KMS gets its own availability posture; a KMS partition denies decrypts, never resurrects a key or exposes plaintext (:951) | 🎯 GAME-DAY + ♻️ | T5.5 proves KMS-unavailability fails CLOSED: an empty key dir → `reveal` returns `{:error, :unavailable}` (`reports/T5.5.md` §T5.5(c)). Fail-closed reveal on an unreachable grant/suspension table is ♻️ substrate (`suspended?/2` defaults to "suspended"; `for_session/3` denies). | **MET** |
 | H3 | One substrate is one blast radius — engineered down (BEAM isolation, Oban SKIP LOCKED + per-queue limits, read replica, expand/contract + lock/statement_timeout + PITR with stated RPO/RTO) (:953) | 🎯 GAME-DAY + 🟡 RESIDUE | The bad-migration incident — "the highest-consequence incident we run" — is the T5.5 drill (both arms, production-sized, key-store exclusion). Oban is wired (`lib/driftwood/jobs/dispatch_worker.ex`, `AutoRevokeWorker`). **Read replica is not provisioned locally** (operator TODO); the drilled RTO numbers are local-sim floors, not the real Neon RTO (named honestly in `reports/T5.5.md`). | **MET (as local sim)** + CAVEAT |
 | H4 | Erasure of a `non_pii!` plaintext-at-rest column is by row-level deletion/redaction (not key-shred); the destruction oracle includes the registered-non_pii! set in its tier list (:927) | 🎯 GAME-DAY | Driftwood registers `drv_cdl_state`/`drv_cdl_expiry` via reviewed `non_pii!` (distinct reviewers; `pii_classify` fails without it — `reports/T5.2.md` OR-2). T5.4 oracle attests `registered_non_pii` redacted post-shred (`cdl_state → [REDACTED_NON_PII]`, `cdl_expiry → 1970-01-01` sentinel) (`reports/T5.4.md` §4). | **MET** |
-| H5 | The trace-sink pseudonym + `non_pii!` are the two key-shred carve-outs; the reveal-request `reason` free-text is a NON-shreddable plaintext channel (ADR-002 §2.5) with a fail-closed value-shape scan (:637, F4.3) | ✅ TEST + ♻️ | The reveal-request `reason` PII-shape scan fires in Driftwood: CI-log evidence this session ("Samen.PiiReasonScan: rejected a ssn-shaped / email-shaped reveal-request reason — Refusing the write"). The residue is named in `docs/adr/002-worm-anchor.md §2.5` (♻️). T5.4 oracle attests the trace-sink pseudonym goes unlinkable at shred (`reports/T5.4.md` §3). | **MET** |
+| H5 | The trace-sink pseudonym + `non_pii!` are the two key-shred carve-outs; the reveal-request `reason` free-text is a NON-shreddable plaintext channel (ADR-002 §2.5) with a fail-closed value-shape scan (:637, F4.3) | ✅ TEST + ♻️ | The reveal-request `reason` PII-shape scan fires in Driftwood: CI-log evidence this session ("Samen.PiiReasonScan: rejected a ssn-shaped / email-shaped reveal-request reason — Refusing the write"). The residue is named in `docs/adr/ADR-002-worm-anchor.md §2.5` (♻️). T5.4 oracle attests the trace-sink pseudonym goes unlinkable at shred (`reports/T5.4.md` §3). | **MET** |
 | H6 | You inherit infrastructure, NOT a domain model; every non-trivial vertical re-identifies the core nouns (Company→Carrier/Shipper, Opportunity→Load, Activity→Encounter) and reshapes billing (settlement-netting) — bounded-context translations, not additive extensions (:556, :566, :959) | ✅ TEST | `Driftwood.Context` (`lib/driftwood/context.ex`): `alias_resource Company as: Carrier AND Shipper` (two aliases, one kernel Company), `Opportunity as: Load`, `Activity as: CheckCall`; `reshape Settlement` netting calcs. Proven by `test/context_aliases_test.exs` (both aliases resolve to `Driftwood.Crm.Company`) + `test/settlement_math_test.exs`. The anti-corruption REFUSAL is itself proven: an alias/reshape cannot add the FMCSA FK/validation, so dispatch is a vertical `DispatchEvent` resource (design §1.4, `reports/T5.2.md`). | **MET** |
 
 ---
@@ -190,7 +190,7 @@ independently re-run this gate is marked ⟳.
 | # | Claim (doc line) | Class | Evidence | Verdict |
 |---|---|---|---|---|
 | **L1** | "Samen removes the blank page. Every object and field is in the catalog, so the agent grounds on a known model." (:921) | ✅ TEST | `schema.dict.json` on all 4 hosts is a committed, resource-qualified, PII-flagged dict (`mix samen.catalog.dump`, T6.3); each host's `ci.sh` drift-check confirms committed == code ⟳. `docs/guides/llm-grounding.md` documents the two-name identity model + the authoring loop. | **MET** |
-| **L2** | "a schema hallucination fails at compile time … a CI linter rejects any reference to a column that isn't catalogued — a hallucinated field doesn't compile" (:923) | ✅ TEST + real OS-exit proof | `agent_authoring_eval_test.exs` case 2 (T6.3): a hallucinated/uncatalogued column FAILS `catalog_parity` + `column_refs`, driven through a **real `System.cmd/3` child process** — `mix samen.verify.catalog_parity` EXITs **1** on the seeded column, **0** on the clean host (true `:erlang.halt(1)`). 13/13 eval green ⟳. | **MET** |
+| **L2** | "a schema hallucination fails at compile time … a CI linter rejects any reference to a column that isn't catalogued — a hallucinated field doesn't compile" (:923) | ✅ TEST + real OS-exit proof | `agent_authoring_eval_test.exs` case 2 (T6.3): a hallucinated/uncatalogued physical column (`com_contact.com_hallucinated`, no `fld_field` row) FAILS `catalog_parity` (the LIVE gate step; a hallucinated *attribute* reference in Ash source fails to compile even earlier via the Spark DSL verifiers). Case 2 asserts this **in-process** via `Samen.Verifier.CatalogParity.check/1` — a non-empty violations list naming the column, the deterministic proxy for the gate's `halt(1)`. The **true OS `:erlang.halt(1)` exit** (EXIT **1** on the seeded column, **0** on the clean host) is proven by a SEPARATE child-process test in the same file (the "TRUE exit-code proof" `System.cmd/3` case). The source-text `column_refs` linter that once co-owned this claim was retired as redundant (ADR-045 A3), and case 2 was re-anchored onto catalog_parity's physical-uncatalogued-column shape. Eval green ⟳. | **MET** |
 | **L3** | "net-new PII … attribute :ssn, :string … is caught by mix samen.verify.pii_classify before it merges, or requires an explicit audited non_pii! override" (:923) | ✅ TEST | Eval case 3: a net-new plaintext `attribute :ssn, :string` FAILS `pii_classify` (exit 1). Case 5: a vault value logged outside `:reveal` FAILS `pii_reads`. Case 4: an unprefixed column FAILS `prefixes`. Case 6: a `belongs_to` with no `SameOrgFk` FAILS `same_org_fk`. Case 1 (a correct resource) PASSES — the non-vacuous positive control. Anti-tautology (T6.3): sabotaging `pii_classify.check` flips ONLY case 3 to uncaught, reverted byte-identical. | **MET** |
 | **L4** | The agent disambiguates by the resource-qualified catalog entry, not a bare field name; `pii` keyed on the vault DECLARATION not the `pii_` prefix (:923) | ✅ TEST | `catalog_test.exs` (+2, T6.3): the `pii` boolean keys on `Samen.Pii.Info.vault_routed_columns/1` — a composite `per_full_name`/`pat_full_name` (no `pii_` prefix) is correctly `pii:true`; an anti-vacuity guard asserts BOTH true and false appear. | **MET** |
 | **F0** | "the core extracted by the Rule of Three … pays from the third product on — not a foundry you build before you've shipped one" (:67, :957) | ✅ TEST + 🟡 RESIDUE | `docs/extraction-retro.md` (T6.1) applies the counting rule HONESTLY (demo + driftwood = 2, not 3); ONE extraction where the copy was byte-identical + security-critical (A4 aud_chain → `Samen.OperatorPlane.Migration`, 10 red-path tests + anti-tautology ⟳); everything else ADR'd (006/007) or backlogged with a trigger. **RESIDUE (honest, matches the doc):** the inheritance is measured on 2 self-built hosts; a 3rd *independently-motivated* vertical would sharpen several abstractions (A3/A5). Named, not oversold. | **MET (honest)** |
@@ -224,3 +224,463 @@ independently re-run this gate is marked ⟳.
   residue → **carry-to-P6** fix task. **F2** (tenant-owner sees own PII masked, inverting
   the two-key-classes rule) is a **fail-safe** deviation (over-masking) and a stated posture
   → carry-to-P6 or accept.
+
+---
+
+## J. Phase 1 (BATON) — WS-A identity spine + WS-H rich types (INV-6)
+
+Added by the Phase-1 gate (T16, 2026-07-22). Everything below is **complete + verified** at
+the authoritative full-root level: `./ci.sh` passed twice consecutively (`ROOT CI: ALL PASSED`,
+seeds 611057/182579 and 201315/306140, zero re-rolls). Each claim cites its proof artifact
+(INV-6: a claim without a proof artifact is not allowed). Honest scope: this is the identity
+*spine* + rich types — billing, live email delivery, and AI features are later phases. The
+one deliberately-deferred auth-hardening item (rate-limiting, T103) is named in row A-DEFER.
+
+### WS-A — self-serve identity spine (generator-emitted, zero-hand-edit)
+
+| Req | Claim | Class | Evidence | Verdict |
+|---|---|---|---|---|
+| A1 | Self-serve registration creates Org+User+Membership atomically, credential PII vaulted | ✅ TEST | `samen_core/test/auth/{blind_index,hasher}_test.exs`; gen-app flagship probe "signup (A1) created org+user+owner-membership atomically" (root `ci.sh`) | **MET** |
+| A2 | Email verification token round-trips and is single-use | ✅ TEST | `samen_web/test/samen/web/auth/confirm_test.exs`; `samen_core/test/policy/verified_test.exs`; flagship "verify (A2) token round-tripped + is single-use" | **MET** |
+| A3 | Password reset token loop (no account-existence timing oracle) | ✅ TEST | `samen_web/test/samen/web/auth/confirm_test.exs`; `samen_core/test/delivery_auth_mailer_test.exs` (fail-honest AuthMailer — `:blocked`, never fake `:delivered`) | **MET** |
+| A4 | Session management: remember-me, listing, revocation, policy; deterministic org-cap eviction (oldest-first) | ✅ TEST | `samen_web/test/samen/web/auth/session_test.exs`; `samen_core/test/auth/device_label_test.exs` (usec `inserted_at` + `{inserted_at,id}` strict order — the T104 fix) | **MET** |
+| A5 | Team invitation lifecycle: invite → accept → membership in the inviting org | ✅ TEST | `samen_web/test/samen/web/auth/invitation_test.exs`; flagship "invite (A5) accept landed a membership" | **MET** |
+| A6 | OIDC login (Google reference; SAML seam) **honors TOTP** — federated login steps up through /2fa | ✅ TEST | `samen_web/test/samen/web/auth/oidc_test.exs`; **`samen_web/test/samen/web/auth/oidc_totp_stepup_test.exs`** (T100 red tests — closes an account-takeover 2FA-bypass; zero Session until second factor) | **MET** |
+| A7 | TOTP 2FA + vaulted recovery codes; enrollment reachable over a **production HTTP route** | ✅ TEST + LIVE PROBE | `samen_web/test/samen/web/auth/totp_test.exs`; `router.ex:663` mounts `live(".../security/2fa", TotpEnrollLive)`; flagship `GET /settings/security/2fa → 200` | **MET** |
+| A8 | Onboarding wizard scaffold (first-run seam) with honest `:not_configured` empty state | ✅ TEST | `samen_web/test/samen/web/auth/onboarding_test.exs`; flagship "A8 wizard offered + plan hook is the honest :not_configured empty state (INV-4)" | **MET** |
+| A9 | `mix samen.gen.app` emits the full auth spine with zero hand-edits | ✅ TEST | `samen_core/test/gen_app_test.exs`; the gen-app flagship probe IS the AC-X-1 proof (permanent root `ci.sh` step) | **MET** |
+| A10 | Auth events → notifications + audit/CDC; login-family taxonomy (login/login_failed/logout/session_revoked/sessions_revoked_all) | ✅ TEST | `samen_web/test/samen/web/auth/auth_events_test.exs` (T09); `samen_web/test/samen/web/auth/login_events_test.exs` (T101 — `subject_id` always set); `Samen.Notifications.Engine` wired on demo + generated hosts (`demo/config/config.exs:44`; flagship "engine wired, fan-out dispatched") | **MET** |
+| A-DEFER | **Auth-surface rate-limiting + bounded `login_failed` audit (T103, ADR-035 §4.5 / ADR-037 §5.14)** | 🟡 RESIDUE | **Deliberately deferred to early Phase 2 behind T17's ingress-limit ADR.** The brute-force / credential-stuffing control is NOT yet wired — the identity spine is complete, its rate-limit hardening is not. Named so no claim implies the auth story is finished. | **DEFERRED (named)** |
+
+### WS-H — rich-type foundation + vault-write validation
+
+| Req | Claim | Class | Evidence | Verdict |
+|---|---|---|---|---|
+| H1 | `Samen.Type.Money` (ash_money/ex_money) + Opportunity/Price migration | ✅ TEST | `samen_core/test/type/money_test.exs`; `samen_web/test/samen/web/csv_money_test.exs` | **MET** |
+| H2 | Scalar types Percent / Score / Duration / Priority | ✅ TEST | `samen_core/test/type/{percent,score,duration,priority}_test.exs` | **MET** |
+| H3 | Contact scalar types URL / EmailAddress / PhoneNumber (cast + normalize) | ✅ TEST | `samen_core/test/type/{url,email_address,phone_number}_test.exs` | **MET** |
+| H4 | Address composite type | ✅ TEST | `samen_core/test/type/address_test.exs`; migration `20260721180000_rich_types_address_dob.exs` | **MET** |
+| H5 | `pii_address` / `pii_dob` vault classes | ✅ TEST | `samen_core/test/type/address_test.exs` + the rich-types-address-dob migration | **MET** |
+| H6 | Custom-field types over the rich menu | ✅ TEST | `samen_core/test/custom_fields_rich_types_test.exs`; `samen_core/test/red_path_vault_scan_test.exs` | **MET** |
+| H7 | `gen.resource` full type menu | ✅ TEST | `samen_core/test/gen_post_test.exs` (post-app generator probe D7a, root `ci.sh`) | **MET** |
+| H-D3 | **Vault write path re-runs declared-type `cast_input` (ADR-036 D3)** — vaulted Email/Phone/URL validated + normalized on input; garbage refused, never echoed | ✅ TEST | `samen_core/test/vault/vault_cast_validation_test.exs` (T99). Scalar-only by design; composites are a documented ADR-036 §10 follow-up | **MET (scalar); composites deferred** |
+
+**Security defects caught-and-fixed by adversarial verification (Phase 1):** OIDC account-takeover
+2FA-bypass (T100), account-existence timing oracle (T03), vault write-validation gap (T99),
+loose-prefix leak-detection under-check (T102), and the session-cap eviction ordering **production
+bug** (T104). Each fixed in-phase with a RED-on-revert proof. Full accounting:
+`_orch/tasks/T16/work/phase-1-report.md`.
+
+---
+
+## K. Phase 2 (BATON) — WS-B Stripe billing + WS-C ESP delivery + auth rate-limiting (INV-6)
+
+Added by the Phase-2 gate (T31, 2026-07-23). Everything below is **complete + verified** at
+the authoritative full-root level: `./ci.sh` passed **twice consecutively** (`ROOT CI: ALL
+PASSED`, EXIT:0, zero re-rolls; INV-3 determinism), and the **INV-4 adapters-absent probe**
+holds — with `samen_stripe/` + `samen_postmark/` + `samen_ses/` + `samen_resend/` all removed,
+`samen_core` (1718 passed) and `samen_web` (935 passed) still go green, so core+web carry
+**zero vendor deps**. Each claim cites its green test artifact **and the lane that produced it**.
+
+**Honest scope / lanes.** Everything in CI runs on the **keyless lane**: billing dispatch is
+proven against `Samen.Billing.FakeProvider` / `Fake*Mirror` (hermetic, call-recording) and the
+`samen_stripe` adapter against **injected-transport cassettes** (lane-0, no network); ESP
+delivery is proven against fixtures + injected capture transports. **Production persistence is
+FAKE-backed in Phase 2** — the Ash-backed mirrors exist but their host wiring + `si_` item-ref
+resolution is **deferred to T108** (see below). **No host wires a live provider** — every
+generated app boots with billing/ESP **unconfigured** and honestly renders the
+`:not_configured` empty state. Live lanes exist but are **documented-and-not-CI**:
+`STRIPE_TEST_KEY` (Stripe test-mode), `SAMEN_POSTMARK_SMOKE=1` / `mix samen.smoke.postmark`
+(real Postmark API), and `SAMEN_ESP_LIVE=1` / `mix samen.smoke.{ses,resend}` (real SES/Resend).
+
+### WS-B — Stripe billing adapter (fail-honest, vendor-free core)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| B1 | Billing behaviour (`Samen.Billing.Provider`, ADR-038 §3.1) + honest `FakeProvider`; `samen_stripe` skeleton is fail-honest (unconfigured→`:not_configured`, unwired→`:not_implemented`, never a fake `:ok`); tautological `SyncAdapter`/`Stub` deleted | ✅ TEST · keyless | `samen_core/test/billing_provider_test.exs`; `samen_stripe/test/skeleton_test.exs` (84 passed, standalone); `samen_core/test/billing_vendor_free_test.exs` (INV-4 ratchet, closed to 0 by T106) | **MET** — `_orch/verify/T18-verdict.json` |
+| B2 | Hosted checkout: org-scoped success/cancel URLs FORCED, metadata-only (no PII, INV-1 snapshot), reconcile via the T19 dispatch on a separate `:billing_checkout_mirror` slot | ✅ TEST · keyless | `samen_core/test/billing_checkout_test.exs`; `samen_web/test/samen/billing/checkout_reconcile_test.exs`; `samen_stripe/test/checkout_test.exs` | **MET** — `T20-verdict.json` |
+| B3 | Subscription lifecycle sync: fetch-on-event convergence (never trusts payload), idempotent (`last_event_id`), **out-of-order stale events discarded** (`occurred_at` watermark, `:lt`→`:stale`) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/billing_reconciler_test.exs`; `samen_stripe/test/lifecycle_sync_test.exs`; **`scripts/sabotages/29-b3-subscription-ordering-guard-drop.patch`** flips the named out-of-order tests, reverts byte-exact | **MET** — `T21-verdict.json` |
+| B4 | Invoice mirror + tax fields: tax **mirrored exactly**, never a fabricated `0` (nil/`[]` passed verbatim when the provider computed none) — proven adapter→mirror→UI | ✅ TEST · keyless | `samen_core/test/billing_invoice_test.exs`; `samen_web/test/samen/billing/invoice_reconcile_test.exs`; `samen_stripe/test/invoice_mirror_test.exs`; `docs/guides/stripe-tax.md` | **MET** — `T22-verdict.json` |
+| B5 | Payment methods via **Stripe-hosted surfaces only** — no card fields; a base-wired `NoPanColumns` verifier+transformer **hard-aborts compile** on any PAN-shaped column | ✅ TEST + compile-time verifier · keyless | `samen_core/test/billing_payment_method_test.exs`; `samen_core/test/no_pan_columns_red_path_test.exs`; `samen_stripe/test/payment_method_test.exs`; `mix samen.verify.no_pan_columns` (in every app `ci.sh`) | **MET** — `T23-verdict.json` |
+| B6 | Hosted invoice/receipt links, **gated OFF on the operator plane** (INV-2 masked-read `writable?/1`) — raw URLs/link text refuted on the operator render | ✅ TEST · keyless | `samen_web/test/samen/web/billing_invoice_tax_links_test.exs` (operator-plane refute-assertions) | **MET** — `T22-verdict.json` |
+| B7 | Dunning: grace-until-period-end on `:invoice_payment_failed`, recover on `:invoice_paid`; **symmetric watermark guard** so a stale failure can't re-clip a recovered customer (the attempt-1 money bug, FIXED) | ✅ TEST · keyless | `samen_core/test/billing_dunning_test.exs` ("out-of-order guard" block, RED-on-revert); `samen_stripe/test/dunning_test.exs` | **MET (attempt 2)** — `T24-verdict.json` |
+| B8 | Usage-based metered reporting: one idempotent batch, **never marks reported on `{:error,_}`** (no double-charge / no data-loss), fail-honest `configured?/1` gate before any HTTP | ✅ TEST · keyless | `samen_core/test/billing_usage_reporter_test.exs`; `samen_stripe/test/usage_test.exs` (HTTP-500 + `:econnrefused` both leave rows pending, retry reuses keys) | **MET** — `T25-verdict.json` |
+| B9 | Webhook ingress security: signature **fail-closed** (no-sig/wrong-secret/body-swap/future-ts → 400, raw bytes preserved), replay DB-unique-index-arbitrated, oversize→413, DLQ + operator view, rate-limited | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_web/test/samen/web/webhook_security_test.exs`; `samen_stripe/test/webhook_security_test.exs`; **`scripts/sabotages/25-b9-webhook-signature-bypass.patch`** neuters the constant-time compare → 2 named red-paths fail, revert byte-exact | **MET** — `T19-verdict.json` |
+| B10 | Billing settings page: composes B2/B4/B5 verbatim; **honest `:not_configured` empty state** with **zero fake affordances** (no plan card / checkout button / `$0.00` when unwired), emitted by the generator with zero hand-edits | ✅ TEST + LIVE PROBE · keyless | `samen_web/test/samen/web/billing_settings_live_test.exs`; the gen-app flagship probe asserts `GET /billing/settings → 200` + the exact not-configured copy (root `ci.sh`) | **MET** — `T26-verdict.json` |
+
+### WS-C — ESP delivery adapters (behaviour + conformance + three vendors)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| C1 | ESP `Samen.Delivery.Provider` behaviour + a **shared, non-vacuous conformance harness**, satisfied by **all THREE adapters** — Postmark (Basic-Auth), SES (SNS RSA + SigV4), Resend (Svix HMAC) (M1 ruling: one contract, three vendors) | ✅ TEST · keyless | Harness `samen_core/lib/samen/delivery/provider_conformance_case.ex` (self-test `.../delivery_provider_conformance_case_test.exs`, non-vacuity proven by a toy adapter); `samen_postmark/test/conformance_test.exs` (38), `samen_ses/test/conformance_test.exs` (48), `samen_resend/test/conformance_test.exs` (43); vendor-freeness `samen_core/test/delivery_vendor_free_test.exs` (postmark **+ SES + Resend distinctive-token bans, T31 #5**) | **MET** — `T27`/`T94`/`T95-verdict.json` |
+| C2 | Outbound send has a **single chokepoint** (`Samen.Delivery.Chokepoint` is the sole caller of `deliver/2`); suppression fail-closed + uniform across all 4 families; no fake-ok | ✅ TEST · keyless | `samen_core/test/delivery/lifecycle_send_test.exs` (full-repo grep + anti-tautology twin) | **MET** — `T28-verdict.json` |
+| C3 | PII-safe rendering: every PII field resolves **through `Samen.Api.PiiResolution` on the actor's plane**; payload whitelist is **fail-closed** (raises on `%Masked{}` / `vt_`); at-rest record is body-free; a **non-skippable deliver-leak conformance gate** binds every adapter | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/delivery/pii_rendering_test.exs`; `samen_core/test/delivery/deliver_leak_gate_test.exs` (LeakyProvider caught / CleanProvider passes); **`scripts/sabotages/30-c3-payload-minimality-vault-token-leak.patch`** leaks `vault_token_ref` → minimality test flips, revert byte-exact | **MET (attempt 2)** — `T29-verdict.json` |
+| C4 | Deliverability: bounce/complaint match a real send receipt → kernel `EmailEvent`/`Suppression` rows; a bounced address is **refused at the chokepoint**; open/click **default-OFF** behind an org flag + per-recipient consent | ✅ TEST · keyless | `samen_core/test/delivery/deliverability_test.exs` (provider-agnostic); adapter shape proofs `samen_{postmark,ses,resend}/test/deliverability_test.exs` | **MET** — `T30-verdict.json` |
+| C8 | Notification digests: one masked send per due cadence (daily/weekly/off, per-user), timezone-aware (fixed-offset, no tzdata dep), time-travel tested, reuses the C3 masked-render 3-proof | ✅ TEST · keyless | `samen_core/test/delivery/digest_test.exs` | **MET** — `T30-verdict.json` |
+
+### Cross-cutting Phase-2 hardening
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| T103 | Auth-surface rate-limiting (the A-DEFER item from Phase 1): sign-in / 2FA / registration / reset limited via the shared `Samen.Web.RateLimit` seam (Hammer ETS); keys are **bidx/credential/IP, never plaintext email**; bounded `login_failed` audit (edge row, O(windows) not O(N)) | ✅ TEST · keyless | `samen_web/test/samen/web/auth/rate_limit_test.exs` (every bypass axis — IP-rotate, account-rotate, casing-split, 2FA-brute, missed-surface — reproduced and LIMITED) | **MET** — `T103-verdict.json` |
+| T106 | INV-4 vendor-ref rename ratchet **24→0**: `stripe_*_id` blueprint attrs renamed to neutral `provider_*_ref` across blueprint + 6 host migrations + goldens; ADR-038-A records the 5 billing-persistence decisions T108 implements | ✅ TEST · keyless | `samen_core/test/billing_vendor_free_test.exs` (carve-out CLOSED to 0, floor kept refutable via a `count_occurrences` self-test); `docs/adr/ADR-038-A-billing-persistence-architecture.md` | **MET** — `T106-verdict.json` |
+
+**Security defects caught-and-fixed by adversarial verification (Phase 2):** the T19 webhook
+**metadata-redaction** leak (P2), the T29 **deliver-seam** goodwill hole (P1 — now enforced by a
+non-skippable conformance gate), the T24 **dunning out-of-order** money bug (P1 — a stale failure
+re-clipping a recovered customer's entitlement, fixed with a symmetric watermark guard), and the
+SNS (T94) / Svix (T95) **signature-forgery** suites (all forgeries rejected). Plus the T23
+**deadlock-and-recovery**: two orphaned `./ci.sh` process trees from a prior session were mutating
+the shared registry + holding stale DB locks — killed, cleared, registry restored byte-exact.
+Full accounting: `_orch/tasks/T31/work/gate-report.md`.
+
+**Deferred (named, not vanished):** production Ash-backed billing mirrors + `si_` resolution
+(**T108**, blocked on T106, gates at T49); durable `Samen.Identity.LoginFailure` resource
+(**T109** — ETS count is restart-ephemeral, the durable audit edge rows survive; gates at T49);
+`ci.sh` gen_app-probe interrupt-safety (**T107** — registry corruption on kill); and the T30
+`Suppression`/`ProviderSelection`/`MarketingReceiptLookup` stores that ship **unwired into any
+host `config.exs`** (fail-OPEN when unconfigured; nothing sends in prod — keyless). Lesser P2/P3
+notes are enumerated in the gate report.
+
+---
+
+## L. Phase 3 (BATON) — WS-E lifecycle/automation + WS-F work objects + LiveView client (INV-6)
+
+Added by the Phase-3 gate (T49, 2026-07-29). Everything below is **complete + verified** at the
+authoritative full-root level: `./ci.sh` passed **twice consecutively** (`ROOT CI: ALL PASSED`,
+EXIT:0, distinct seeds, zero re-rolls; INV-3 determinism). The two known/suspected flake surfaces
+were watched and both stayed green — the demo `SubscriptionMovementLedgerTest` (root-caused +
+fixed by T121) and `reveal_grant_property_test.exs` (the noisy `[warning] Missed notifications`
+lines it emits are benign Ash runtime logging inside the test transaction, not a failing
+assertion). Each claim cites its green artifact **and** its `_orch/verify/T*-verdict.json`.
+
+**Honest scope.** Phase 3 delivers the automation engine, the lifecycle substrate (approvals /
+soft-delete / audit-on-write / versioning), the WS-F work objects, and — per operator ruling R1a
+(2026-07-27) — **reverses the no-JS/CSS-only posture** by wiring a real LiveView client (ADR-042).
+Progressive enhancement is preserved: reads and the auth arc still work JS-off (Class-A floor).
+Everything still runs on the **keyless lane** (no live billing/ESP/AI provider). The M5 CRM
+Activity→Task migration is **destructive and executed** (the Activity table/resource is gone).
+
+### WS-E — automation engine (ADR-039)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| E1 | Workflow/Automation resource + trigger/condition engine: event + schedule triggers, predicates keyed **only on NonPii-eligible attributes** (a PII-keyed predicate is refused, red + control); PII-leak oracle + kill-switch; runs on `ash_oban` | ✅ TEST · keyless | `samen_core/test/automation/*` (workflow/trigger/predicate); ADR-039 | **MET** — `T39-verdict.json` |
+| E1-UI | Tenant-plane automation **builder LiveView** + `samen_automation_routes()` mounting at ≈0 host LOC; a workflow is authorable end-to-end via `phx-click` over the T113 client; only NonPii-eligible attributes offered as condition keys (INV-1) | ✅ TEST · keyless | `samen_web/test/samen/web/automation/*` builder tests; ADR-039 §12 / ADR-042 Class-B | **MET** — `T118-verdict.json` |
+| E2 | Action library (8 actions) — one green test per action incl. email-via-C1 + webhook; escalate/reminder actions invoke the real T41 primitives (module probe, no stub) | ✅ TEST · keyless | `samen_core/test/automation/action_*` (per-action) | **MET** — `T40-verdict.json` |
+| E4/E5 | Reminder scheduler + escalation primitive (+ SLA / dunning clients): reminder-at-T, escalation chain, SLA-breach + dunning invoke the primitive (client tests) | ✅ TEST · keyless | `samen_core/test/automation/{reminder,escalation}_*` | **MET** — `T41-verdict.json` |
+| E8 | Automation observability: fired/skipped/failed run log, operator health view (token-blind), kill-switch (red + control) | ✅ TEST · keyless | `samen_core/test/automation/observability_*`; operator health view tests | **MET** — `T42-verdict.json` |
+
+### WS-E — lifecycle substrate (ADR-040)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| E3 | Generalized approve/reject engine (ADR-040 §4): requester≠approver **DB CHECK** (red + control); any action can require approval (hook proven). Reveal grants are now an **engine client** — all existing reveal/grant tests stay green | ✅ TEST · keyless | `samen_core/test/{approvals,reveal_grants}_*`; DB-CHECK red-path | **MET** — `T34`/`T35-verdict.json` |
+| E6 | Soft-delete **blueprint-wide** (ADR-040 §5) via `use Samen.Resource, archivable: true` on `ash_archival`: archive hides from default reads (red) + restore (green), policy-aware filters, crypto-shred path unchanged. Adopted across every scope — billing / cms / crm / marketing / primitives+chat / support — with composition-cascade + independent-restore honesty; retention integration + archived-count sweep | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/lifecycle/*`; per-scope archival + leak-red tests (T37a–f); retention sweep (T37g); UI affordance + `gen --archivable` + catalog adoption probe (T37h) | **MET** — `T36`/`T37a-h-verdict.json` |
+| E6-fix | `archived_at` is **microsecond** (`:utc_datetime_usec`), not second-granularity — closes the same-second cascade **mis-restore** (a child independently archived in the same wall-clock second as a cascade parent is no longer resurrected). Substrate-wide grep + regenerated host migrations + same-second regression test | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/lib/samen/transformers/archivable_attribute.ex`; CMS Page▸Block same-second regression test (RED pre-fix) | **MET** — `T124-verdict.json` |
+| E7 | Audit-on-write (ADR-040 §6): change-log records actor/diff/timestamp; hash-chain tests untouched-green; four audit tiers **disjoint**. **P7-F1 (impersonation)**: impersonation-context writes are the **mandatory first client** (not opt-in) — single/bulk create/update/**destroy**/destroy_permanently + archive/restore all emit an attributable, **value-free (INV-1)**, in-transaction fail-closed audit row; an impersonated write **without** an audit row is impossible | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/audit/*`; impersonation-write red-path + bulk_destroy coverage; sabotage 33 (6 RED) | **MET** — `T38-verdict.json` (P7-F1 closed) |
+| E7-ver | General `versioned` opt-in (ADR-040 §6.2) on `ash_paper_trail`: a `versioned true` pilot logs versions (control: non-opted resource writes none); vaulted-field diffs are **token-only** incl. `:snapshot` over a vault attribute (INV-1 red + sabotage twin); `store_action_inputs?` FALSE. CMS **ContentVersion retired** across demo/driftwood/pawchart (destructive pre-1.0 break, §6.5, zero-drop) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/audit/versioned_*`; ContentVersion-retirement migration; CHANGELOG | **MET** — `T119-verdict.json` |
+
+### WS-F — work objects (canonical Task + calendar/docs/tag/location/vendor/lead)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| F1 | **Canonical Work Task + Project + Subtask** (ADR-041): Task schema matches the ADR field-for-field (`kind` mirrors the old Activity `type` enum; plain-atom `status`; self-referential `parent_id` subtree, cycle-refused). **M5 destructive migration EXECUTED** — the CRM `Activity` table + resource + catalog entry are **GONE**, CRM timelines/CDC ride the Task, multi-anchor timeline preserved in `custom.crm_refs`, zero data loss | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/lib/samen/scopes/work/blueprint.ex`; `2026…_migrate_activity_to_task.exs` (all four hosts, `MigrateActivityToTask.up/0` via Ecto.Migrator); sabotage 34 | **MET** — `T43`/`T96`/`T97-verdict.json` (M5 confirmed) |
+| F2 | **Calendar** scope: Event/Meeting + recurrence + ICS export; attendees vaulted (MaskingCase 3-proof); a valid `VCALENDAR` endpoint masked per plane | ✅ TEST · keyless | `samen_core/test/scopes/calendar/*`; ICS-export masking 3-proof | **MET** — `T44-verdict.json` |
+| F3 | **Docs** scope: Doc + Note attachable via object-ref; PII-classified body vaulted; attach test on two host resources | ✅ TEST · keyless | `samen_core/test/scopes/docs/*` | **MET** — `T45-verdict.json` |
+| F4 | **Tag** resource + polymorphic taggings; Ticket's bespoke `tags` array **migrated** onto the generic scope with an equivalence assert, old column dropped | ✅ TEST · keyless | `samen_core/test/scopes/tag/*`; Ticket tags-array migration | **MET** — `T46-verdict.json` |
+| F5 | **Location** resource on the `Address` type; `pii_address` MaskingCase 3-proof | ✅ TEST · keyless | `samen_core/test/scopes/location/*` | **MET** — `T47-verdict.json` |
+| F6/F7 | **Vendor** resource + **Sales Lead** with a conversion action; `lead ≠ subscriber` schema probe; convert → Contact/Opportunity | ✅ TEST · keyless | `samen_core/test/scopes/{vendor,lead}/*` | **MET** — `T48-verdict.json` |
+
+### Client runtime — LiveView adoption (ADR-042, operator ruling R1a)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| UX-R1 | The shared root layout ships a **real LiveSocket/app.js bundle** inherited by every host + gen.app parity — a representative `phx-click` write (reveal / dispatch) now **mutates + re-renders browser-real** (headless Chromium). **Progressive enhancement preserved**: JS-off auth arc still completes (Class-A floor). Socket masking-leak probe clean (no `vt_`/plaintext to a no-grant operator); masking watch-list unmodified-green | ✅ BROWSER-REAL + 🧨 SABOTAGE · keyless | ADR-042; headless-browser regression (3 assets 200, liveSocket connect, `phx-click='reveal'` round-trip); sabotage 32 | **MET** — `T113-verdict.json` |
+
+### Security defects caught-and-fixed by adversarial verification (Phase 3 — dogfood escalations)
+
+Four dogfood-walk escalations were fixed **in-phase** and are closed by the gate:
+
+| Esc | Defect (persona walk) | Fix + proof | Verdict |
+|---|---|---|---|
+| **P1-F1/F2** | **T110** — first-run auth arc was LiveView-only/browser-inert; the broken native-GET fallback **leaked the plaintext password into the URL query string** | Auth forms flip get→post; password moves to POST body (proven live, capture sink); onboarding + invite-accept work JS-off; regression red-on-old-form | **CLOSED** — `T110-verdict.json` |
+| **P11-F3/F1/F2** | **T111** — a recipient `display_name` carrying `<script>` rendered **executable (stored-XSS)** in outbound HTML mail; AuthMailer never rendered content (empty verify/reset/invite emails); invite dispatch swallowed an `Ash.NotLoaded` crash as success | Template fields **html-escaped** to inert text; auth emails carry real working links; invite dispatch **fail-honest** (`{:error,_}`, never fake `{:ok}`) | **CLOSED** — `T111-verdict.json` |
+| **P9-F1** | **T117** — generated-app **operator routes shipped with no prod auth gate**: a deployed app exposed `/operator/*` to anonymous visitors | Generator + `samen_operator_routes` macro emit a real prod-active `:authn` gate (dev/test no-op preserved): anonymous → 302/401 to login, authenticated operator → allowed; LiveView websocket back-door closed; sabotage-refutable | **CLOSED** — `T117-verdict.json` |
+| **P7-F1** | **T38** — impersonation had session-level attribution but **per-mutation attribution was zero** (an impersonated tenant write left only a bare `updated_at`) | Impersonation-context writes are the mandatory first audit-on-write client incl. `bulk_destroy`; impersonated write without an audit row is impossible (red + control + sabotage) | **CLOSED** — `T38-verdict.json` |
+
+### Infra hardening (INV-class, filed off Phase-3 incidents)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| T107 | `ci.sh` gen_app probes restore `abbrev_registry.json` **byte-exact on ALL exit paths** incl. SIGINT/SIGTERM (registry corruption on interrupt was observed 4+ times in Phase 2) | ✅ TEST · keyless | interrupt harness (SIGTERM mid-mutation → SHA-256 byte-exact, zero scratch); `ci.sh` `run_gen_probe` trap | **MET** — `T107-verdict.json` |
+| T123 | Abbrev allocator `propose` checks the **union of ALL host namespaces** (not just own-host + flat global) — it can no longer hand back an abbrev already owned by a different host (root cause of the T44–T47 cross-host collisions + the T47 build-break). Refuses accidental cross-host different-owner reservation **at write time**; ADR-025 same-owner reuse preserved behind explicit opt-in | ✅ TEST + 🧨 SABOTAGE · keyless | RED-path proposer test + anti-tautology; sabotage 39; committed registry byte-untouched | **MET** — `T123-verdict.json` |
+| T121 | The pre-existing flaky demo `SubscriptionMovementLedgerTest` root-caused at the ordering level (non-total `sort` tiebreak) and fixed with a **total-order** tiebreaker (occurred_at-usec + id belt), RED-on-revert guard — no retry/sleep/margin band-aid | ✅ TEST · keyless | `demo/test/…/subscription_movement_ledger_test.exs`; 450+ iterations 0-fail | **MET** — `T121-verdict.json` |
+
+### Deferred / operator-scheduled (named, not vanished)
+
+Per the T103/T107 naming precedent, the following are **honestly open** and NOT claimed done:
+
+- **T108** — production Ash-backed billing mirrors + `si_` resolution: **DEFERRED until a live
+  billing provider is actually wired** (operator ruling 2026-07-23). Under the keyless posture
+  nothing sends in prod; the capability is proven against fakes (T106 / ADR-038-A). The T49→T108
+  gate edge was removed by that ruling.
+- **T114 / T115 / T116** — operator delivery/suppression surface, operator audit/activity UI over
+  `aud_event` + T38 rows, and the plane-legibility system: operator-approved **additive** backlog,
+  scheduled by the operator rather than auto-built (deliberately NOT gating T49).
+- **T122** — rewire the T40 `add_tag` action onto the generic T46 Tag/Tagging: a functional
+  **enhancement** (`add_tag` already degrades cleanly to `{:error, :no_tag_surface}` on a Ticket
+  after T46 dropped the array column, not broken), non-gating.
+- **T125** — reconcile E6 composition-cascade child-archivability posture across scopes (CMS blocks
+  independent vs chat/support children cascade-locked): a **spec/product-semantics** reconciliation
+  (each scope is internally correct; the lock is the safe over-restrictive direction, never a leak),
+  non-gating — awaits an explicit operator posture decision (A/B/C).
+
+Full accounting: `_orch/tasks/T49/work/gate-report.md`.
+
+---
+
+## M. Phase 4 (BATON) — WS-G views + WS-C comms (INV-6)
+
+Added by the Phase-4 gate (T62, 2026-08-03). Everything below is **complete + verified** at the
+authoritative full-root level: `./ci.sh` passed **twice consecutively** (`ROOT CI: ALL PASSED`,
+EXIT:0, distinct seeds, zero re-rolls; INV-3 determinism). The Phase-3 `reveal_grant` clock-property
+flake is **NOW FIXED** (T129 removed the mint-pipeline/Oban/wall-clock path from
+`reveal_grant_property_test.exs`, so it no longer needs watching) — the one remaining watched flake
+surface is the `samen_web` **RateLimitTest**. Each claim cites its green artifact **and** its
+`_orch/verify/T*-verdict.json`.
+
+**Honest scope.** Phase 4 delivers the WS-G reusable view kit (group-by primitive → kanban /
+calendar / gantt / gallery+tree / map / charts+dashboard / clone / saved views) and the WS-C
+comms surface (inbound-email→ticket / chat offline-escalation / chat attachments+masked search),
+plus two infra hardenings. Everything still runs on the **keyless lane** (no live billing/ESP/AI
+provider). **The G7 map (T55) has NO production adopter yet** — there is no geo-bearing resource
+in any host (ADR-037 §5.10 REJECTs `ash_geo`/PostGIS for a zero-spec requirement; T47 Location
+uses the H4 `Address` composite with no geometry column). The component + read are genuinely
+**functional and framework-ready** — exercised against a REAL CRM `Person` resource with REAL DB
+seeds (not mocks) — but the "framework-ready-awaiting-adopter" posture is stated so no row implies
+a live geo product. Three deferred/latent follow-ups are **filed** (named, not vanished):
+**T127** (`Samen.Web.Reads.page!/3` `authorize?:false`-drops-OrgScope hardening — safe today, all
+current callers narrow explicitly; latent for a future caller), **T130** (`storage_key`
+file-clone alias — re-tokenize/ref-count the file blob when file-level erasure lands), **T131**
+(remove the global Google-Fonts `@import` from `samen_ui.css` — the framework's own no-external-CDN
+invariant). All three are logged in `_orch/plan/backlog.yaml` (phase 4).
+
+### WS-G — reusable view kit
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| G4 | Generic `group_by!/3` read primitive: ordered group discovery + per-group **bounded** rows (`limit(cap+1)`) + **exact** per-group count aggregate; **org-scope is UNCONDITIONAL** — no `:authorize?` opt reaches any of the 3 reads (the attempt-1 cross-org bleed, where `authorize?:false` dropped OrgScope and leaked count cardinality, is **closed by construction**); a vault-routed group field is refused (`MaskedGroupKeyError`, no plaintext) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_web/test/samen/web/reads_group_by_test.exs` (6, incl. the "NO caller opt disables scoping" boundary test — RED on re-forwarding `:authorize?`, count 7 leak; restored byte-exact) | **MET (attempt 2)** — `T50-verdict.json` (page!/3 latent → T127) |
+| G1 | Reusable `Samen.UI.board/1` kanban renders a `%Samen.Web.Board{}` as ordered columns (label + exact count + per-column-bounded cards + legible +N-more w/ optional `phx-click`); CRM `PipelineLive` is the first client and **re-implements no grouping/bounding/org-scoping** (delegates to G4). **Move genuinely deferred** (no raw `update` in the board path — only a governed seam, asserted). Opportunity **genuinely non-PII** (grep-confirmed no vault/`pii` block → no masking needed, real discriminator). No-JS floor + the load-more **second query re-scopes** (forged cross-org stage key → no rows) | ✅ TEST · keyless | `samen_web/test/.../crm_pipeline_board_test.exs` (ORG-SCOPE / LOAD-MORE org-scoped / BOUNDING / non-PII) + `board_component_test.exs` | **MET** — `T51-verdict.json` (framework-wide `:authn`-off dev `?org=` caveat, NOT a T51 defect — prod must run `:authn`) |
+| G2 | Calendar view: client `?month=` **bounded** (garbage/5-digit-year/inverted → current month, no crash; a >62d or inverted window is structurally **unreachable** from client input); reads are **DB-windowed per day** (window filter + per-day equality + org-scope + per-cell `LIMIT` all pushed into SQL, not load-then-filter); per-cell cap + **exact** +N; org-scope holds (2-org, disjoint); `close_date` non-vaulted, a vaulted date facet refused; no-JS `<a href=?month=…>` GET prev/next | ✅ TEST · keyless | `samen_web/test/.../reads_calendar_test.exs` + `crm_calendar_test.exs` (12) | **MET** — `T52-verdict.json` |
+| G3 | Gantt/timeline view: overlap predicate **boundary-correct** on all 7 positions; null-end / inverted-end **sane** (`max(width,0)`, point, clamped `left`, no negative width / no crash); **DB-bounded** (overlap predicate + `LIMIT cap+1` compiled into SQL; 200 out-of-window rows never loaded); `?from=` is a **fixed 28-day** forward window (no over-wide/inverted reachable; primitive-level >372d/inverted raise); per-lane cap + exact count; **vaulted axis refused** (`MaskedGroupKeyError`); single-lane **cross-org org-scoped** (sabotage-refutable) | ✅ TEST + 🧨 SABOTAGE · keyless | `reads_timeline_test.exs` (10) + `gantt_component_test.exs` (7) + `work_timeline_test.exs` (5); single-lane `authorize?:false` sabotage leaks count 8, restored byte-exact | **MET** — `T53-verdict.json` |
+| G5+G6 | **Gallery** (keyset-bounded page walk, **non-PII opaque uuid** cursor via `:id` sort, MaskingCase **3-proof** render, org-scope refutable, forged `?after` cross-org matches nothing) + **Tree** (cycle-safe on self-parent / A↔B / long cycles — terminates fast, with **defense-in-depth** depth+node budgets as an independent guarantee; org-scope enforced + refutable at **EVERY level**; per-level cap + exact child count; vault parent-field refused) | ✅ TEST + 🧨 SABOTAGE · keyless | `gallery_component`/`tree_component`/`reads_tree`/`contacts_gallery`(`_masking`)/`task_tree` (36); cycle-check, org-scope, and plane-flip sabotages all restored byte-exact | **MET** — `T54-verdict.json` |
+| G7 | Map view: self-contained **inline Natural-Earth SVG** basemap — **ZERO external host/CDN** in the rendered DOM (no `<script>`/remote `<img>`/`url()`); bring-your-tiles seam **fail-honest** (nil/blank/attribution-only/garbage → `{:error,:not_configured}`, no hardcoded host; host names its own `{z}/{x}/{y}`); `geo_markers!/2` **org-scoped** (unconditional, sabotage leaks a foreign site → restored); a **vaulted coordinate refused** (`MaskedCoordinateError`); label masking 3-proof; **DB-bounded** `limit(cap+1)` at query level (100k rows can't OOM the DOM). **HONEST: framework-ready, NO production adopter** — exercised against a real CRM `Person` resource with real seeds, not mocks | ✅ TEST + 🧨 SABOTAGE · keyless | `map_component_test.exs` (24, incl. "NO EXTERNAL CDN") + `geo_tiles_test.exs` + `reads_geo_test.exs`; org-scope + coord-refusal sabotages restored byte-exact | **MET (framework-ready, no adopter)** — `T55-verdict.json` (global Google-Fonts `@import`, pre-existing, not in map DOM → T131) |
+| G8 | Tenant chart/dashboard components: measures are **DB-level** `Ash.count!/sum!/avg!` on an unset (`limit/offset/sort`) query; org-scope **unconditional** (no `:authorize?` opt); a vaulted **dimension OR measure** is refused (`MaskedGroupKeyError`/`MaskedMeasureError`) — the sole real PII guarantee. **HONEST: `:collapse_below` is NOT k-anonymity** — it folds small-cohort **labels** into an **arithmetic-remainder "Other"** tail for legibility only (a lone folded cohort is recoverable by subtraction); docs corrected to state "EXPLICITLY NOT k-anonymity" (the prior oversold `:min_cell` naming resolved) | ✅ TEST · keyless | `series.ex`/`dashboard_live.ex` aggregate tests; full `min_cell`→`collapse_below` rename grep-clean; docs-truthful re-check | **MET (attempt 2)** — `T56-verdict.json` |
+| G9 | Duplicate/clone with vault re-tokenization: `Samen.Clone.clone/3` re-tokenizes vault PII into a **fresh per-subject DEK/tokens** (new PK ⇒ new subject_id ⇒ fresh `pii_vault` rows; feeds resolved plaintext, never a token); **independence proven BOTH directions through the REAL Erasure engine** (erase source → clone still resolves; erase clone → source still resolves; tokens differ, subjects disjoint); **no plaintext/token leak** to the caller (vault field returns `NotLoaded`); operator-without-grant refused at resolve, tenant control succeeds, operator-plane plaintext write blocked at `WriteGuard`; cross-org refused; audit row token-only | ✅ TEST + 🧨 SABOTAGE · keyless | `clone_test.exs` (10); `scripts/sabotages/43-g9-clone-token-sharing.patch` flips all 4 MUST_FAIL (cross-record bleed observed), reverts byte-exact | **MET** — `T57-verdict.json` (`storage_key` shallow file-alias, non-exploitable today → T130) |
+| G10 | Saved views (per-user persisted list state): **per-user isolation** (real user id via `owner_scope/2`; `OwnerOnly` + `OrgScope` AND'd; another user in the same org gets `[]`/`:not_found`; owner-spoof create refused); **restore from an UNTRUSTED blob is safe** (`org_id` override ignored — scope re-applied from the actor; non-whitelisted fields dropped; **no dynamic atom creation**; injected SQL survives inert as a parameterized `contains`; oversized `page_size` clamped); a filter/sort ref to a **vaulted field is REFUSED at serialize** (`{:vaulted_field,_}`, no PII in the blob); masking **preserved on restore** (3-proof); all **10** view types round-trip | ✅ TEST + 🧨 SABOTAGE · keyless | `saved_views_test.exs` + `saved_views_masking_test.exs` (23); OwnerOnly/OrgScope/non_vaulted sabotages restored byte-exact; registry = one **sanctioned allocator-shaped** append (`wvs`), byte-exact | **MET** — `T58-verdict.json` |
+
+### WS-C — comms surface
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| C5 | Inbound-email → ticket: **`org_id` is un-spoofable** — a required `@enforce_keys` field on the host-supplied `Inbound.Config`, **never** derived from `To`/`From`/subject/`In-Reply-To`/plus-address; forged `In-Reply-To`/subject-token/plus-address (alone and combined at an org-B ticket) all open a **NEW ticket in the actor org**, never attach cross-org (sabotage dropping the org filter → cross-org FAIL, and a **3rd DB-level FK guard** also fires); **mail-loop prevention** (`Auto-Submitted`/`Precedence`/`X-Auto-Response-Suppress`/system-localparts/own-address suppress, case+whitespace-normalized, `max_inbound_per_thread` cap — 8-msg autoresponder loop → 0 tickets); stored-XSS **inert at rest** + HEEx-escaped; PII body + sender **vaulted** (3-proof); malformed/3MB-oversized **safe** (byte-capped, UTF-8-boundary-safe, no crash); **fail-honest** (unconfigured adapter → `:not_configured`, never a fabricated ticket); attachments via the `upload/3` chokepoint (`:quarantined`) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core` inbound suites (23) + `demo` inbound test (11) + `samen_postmark` (8); cross-org-filter and `plain_text/1` sabotages restored byte-exact | **MET** — `T59-verdict.json` |
+| C6 | Chat offline-escalation: the partial-unique dedupe index on `(org_id, external_id) WHERE external_id IS NOT NULL` **now travels with the framework for EVERY Support-Ticket adopter** — blueprint `custom_indexes` is the declarative single-source, the operator-mount gen template **emits it + a down-drop**, all **4 goldens carry it**, and the byte-golden parity test renders the template LIVE and matches (no drift); demo/driftwood/pawchart each ship a migration; **live-verified UNIQUE+PARTIAL on driftwood** (a raw-SQL duplicate REJECTED while two NULLs insert freely); **atomic** (TOCTOU race blocked); the escalation email is gated on the create-**winner**. **NOTE (honest): the index is now framework-emitted for every adopter** — the attempt-2 "only demo had it" gap is closed | ✅ TEST + 🧨 SABOTAGE · keyless | `support_chat_escalation_test.exs` (core 13 / demo gate 9) + `templates_parity_test.exs` (byte-golden + content-guard) + `driftwood/test/support_chat_escalation_index_test.exs`; parity-content and migration-disable sabotages restored byte-exact | **MET (attempt 3)** — `T60-verdict.json` |
+| C7 | Chat attachments + masked search: the match oracle runs over the **plane-RESOLVED** value — an operator-without-grant body resolves to `%Masked{}` (structurally **unmatchable**, not a `vt_` string), and **present-vs-absent is indistinguishable** (secret-in-org vs clean-org both return `[]`, identical shape; searching the literal `vt_` also `[]`); the body is **NEVER tsvector-indexed** (`SearchIndexGuard` refuses a PII column — sabotage-refutable — ciphertext at rest, never a blind-index copy); search **org-scoped** (sabotage-refutable); bounded ≤200 keyset window (**perf, not security**); attachments via the `upload/3` chokepoint (`:quarantined` fail-closed, cross-org `[]`, direct `storage_key` mint refused); XSS-safe snippets + filenames | ✅ TEST + 🧨 SABOTAGE · keyless | `chat_search_masking_test.exs` (9) + `chat_attachments_test.exs` (7); index-guard, org-scope, and resolve-plane sabotages restored byte-exact | **MET** — `T61-verdict.json` |
+
+### Infra hardening (INV-class, filed off Phase-4 verification)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| T128 | Prod `aud_event` partition **auto-roll cron**: the baseline defect is **real** — an audit write to a month with NO partition **RAISES** `Postgrex.Error` (silent prod audit-write loss); `ensure_upcoming_partitions/3` + the cron worker `perform/1` create the needed partition so the future-dated write **succeeds**; **idempotent + data-safe** (`CREATE TABLE IF NOT EXISTS … PARTITION OF` + `duplicate_table` rescue, **never DROP/DETACH** on the cron path, a seeded row survives a re-run); **GENERATED-APP PRODUCTION inheritance is REAL, not test-only** — a running Oban started with the generated-app prod-shaped config (`plugins:[Pruner]`) through `install_default_cron` registers `{"0 1 * * *", Samen.AuditEvent.PartitionManager}` in its **live Cron plugin**; tripwire sabotage-refutable | ✅ TEST + 🧨 SABOTAGE · keyless | `aud_event_test.exs` + `jobs_queue_taxonomy_test.exs` (40); removing the crontab entry flips 3 tests RED, `jobs.ex` restored byte-exact | **MET** — `T128-verdict.json` |
+| T129 | `reveal_grant` flake **determinism fix**: `reveal_grant_property_test.exs` no longer calls the mint pipeline / Ash-engine / Oban / wall-clock path (the old `[warning] Missed notifications` source — a **test-env SQL-Sandbox artifact**, NOT a latent prod fragility); the two **security-load-bearing** clauses (clock-vs-expiry, requestor-binding) **remain refutable** (each sabotage flips the fixed test RED); the fix **GUTTED NOTHING** (coverage byte-identical to the original, proven by parity; the other 3 clauses have dedicated coverage elsewhere incl. the real `rvg_distinct_party` DB CHECK); determinism **empirically demonstrated** (0 failures across seeds 1..40 `--warnings-as-errors`, `--repeat-until-failure 80`). **Result: `reveal_grant` no longer needs watching** | ✅ TEST + 🧨 SABOTAGE · keyless | `reveal_grant_property_test.exs` + `rvg_check_probe_test.exs` (removed after); `grants.ex` restored byte-exact post-sabotage AND post-ci | **MET** — `T129-verdict.json` |
+
+**Security defects caught-and-fixed by adversarial verification (Phase 4):** the **T50 attempt-1
+cross-org group-by bleed** (`authorize?:false` dropped OrgScope on all 3 read paths — leaked count
+cardinality `2+5=7`; closed **by construction** in attempt-2, page!/3's shared contract filed as
+the T127 latent hardening); the **T60 attempt-2 framework-first gap** (the chat-escalation dedupe
+index shipped only on `demo`, not on every adopter — closed in attempt-3 via the declarative
+blueprint `custom_indexes` single-source + template emission + byte-golden parity); and the
+**T56 oversold-naming** (`:min_cell` → `:collapse_below`, docs corrected to state it is NOT
+k-anonymity). Each closed in-phase with a RED-on-revert / sabotage-refutable proof.
+
+**Deferred / latent (named, not vanished)** — logged in `_orch/plan/backlog.yaml` (phase 4):
+
+- **T127** — `Samen.Web.Reads.page!/3` lets `authorize?:false` drop OrgScope (policy-only isolation,
+  no attribute multitenancy): **safe today** (all current `authorize?:false` callers pass an explicit
+  scope-derived org filter), **latent** for any future caller — make the boundary safe-by-construction
+  or loud. Same dev-posture class as the framework-wide `:authn`-off `?org=` caveat.
+- **T130** — `Samen.Clone.clone/3` copies `storage_key` verbatim, so a clone + its source share one
+  file blob (the same aliasing shape vault re-tokenization prevents, applied to files):
+  **non-exploitable today** (the Erasure engine never touches files; no `Storage.delete` caller
+  exists), documented as a deliberate shallow re-link. When file-level erasure lands, re-tokenize /
+  duplicate / ref-count the blob so clone + source are independent on the file substrate too.
+- **T131** — `samen_ui.css` carries a global Google-Fonts `@import` (a framework-wide external-CDN
+  fetch on every page, pre-existing, **not** in the map component's DOM): contradicts the codebase's
+  own no-external-CDN invariant. Self-host the font (vendor the woff2, like the Natural-Earth asset)
+  or fall back to a system stack, and extend T55's no-CDN grep to the global stylesheet.
+
+Plus the **G7 map (T55) framework-ready-no-adopter** posture above (no geo-bearing resource per
+ADR-037 §5.10). Full accounting: the per-task `_orch/verify/T*-verdict.json` cited above +
+`_orch/tasks/T62/status.json`.
+
+---
+
+## N. Phase 5 (BATON) — WS-D the AI plane (INV-6, INV-7)
+
+Added by the Phase-5 gate (T73, 2026-08-05). Everything below is **complete + verified** at the
+authoritative full-root level: `./ci.sh` passed **twice consecutively** (`ROOT CI: ALL PASSED`,
+EXIT:0, zero re-rolls; INV-3 determinism) — see the T73 gate log for the exact seeds/counts. Each
+claim cites its green artifact **and** its `_orch/verify/T*-verdict.json`.
+
+**Honest scope.** Phase 5 closes the Intelligence column (D1–D9) on ADR-043: a hand-built
+`Samen.AI` kernel + single egress chokepoint (`Samen.AI.Chokepoint`) enforcing INV-7
+(no-PII-egress) fail-closed across all six egress classes EG1–EG6; `samen_anthropic` as the
+vendor-isolated reference provider package; a runtime catalog grounding source; pgvector-backed
+embeddings with a deny-by-default vault-routed-field refusal; a versioned Prompt resource + the
+six intelligence verbs; an HTTP+SSE MCP server (read/propose only, never a write path); an AI
+support operator that can draft but structurally cannot send without a distinct human approval;
+AI-on-CRM + token-blind AI analytics; and two permanent CI tiers (the ≥90% grounding-context eval
+and the mask-leak red-team). Everything runs on the **keyless lane** (`Samen.AI.Provider.Fake` +
+`Samen.AI.Embedder.Deterministic`) — `SAMEN_AI_LIVE=1` is a documented, non-CI, host opt-in
+(ADR-043 §4) not exercised by this gate. Twelve hardening/defense-in-depth follow-ups the
+T65/T66/T67/T69/T70/T71/T72 verifications themselves surfaced (T134–T145 in
+`_orch/plan/backlog.yaml`, phase 5); two were closed IN-PHASE by the very task whose own
+verification found them (T135 — the runtime/structural embed-deny field-set alignment, closed
+by T67; T136 — the grounding/meta scrub gap, closed by T66), leaving TEN currently open and
+named in row **N-DEFER** — each is non-blocking, non-reachable-in-repo-today, or doc/DX-only;
+none is a live PII-egress gap.
+
+| Req | Claim (ADR-043) | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| N1 | **D1 kernel + provider seam (§5):** two-callback `Samen.AI.Provider` behaviour; `Samen.AI.complete/4` / `embed/4` route ONLY through the chokepoint; unwired provider ⇒ keyless `Fake` in `:test`, `{:error, :not_configured}` elsewhere (never a fake `:ok`); `samen_anthropic` ships as a separate vendor-free package with its own fixture tests | ✅ TEST · keyless | `samen_core/test/ai/kernel_test.exs` ("unwired in :prod is BLOCKED — `{:error, :not_configured}`, never a fake ok"; "a provider callback accepts ONLY `%MaskedPayload{}`" function-clause refusal); `samen_anthropic/test/provider_test.exs` (standalone package suite) | **MET** — `T64-verdict.json` |
+| N2 | **D2 masking chokepoint, fail-closed (§3):** `Samen.AI.Chokepoint` is the SOLE minting site for `%Samen.AI.MaskedPayload{}` and the SOLE caller of a `Samen.AI.Provider` callback — an AST probe over every app's `lib/` catches any out-of-chokepoint construction; the scrub is an ALLOWLIST ("provably safe", not a blocklist), so a `vt_*` token / un-rendered `%Masked{}` / any other unsafe shape refuses with payload-free `{:error, :pii_egress_refused}` | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/ai/chokepoint_anti_bypass_probe_test.exs` (full-tree AST scan; "ROGUE-FILE RED PROOF" — literal/`struct/2`/`struct!/2`/`apply`-`Kernel.struct` forges all flip the probe); `samen_core/test/ai/ai_prompt_masking_test.exs` (RP-AI-2 fail-closed refusal); `samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex` (structural verifier, wired into `ci.sh`); `scripts/sabotages/44-d2-ai-egress-history-remask-bypass.patch` + `45-t65-ai-egress-scrub-shape-blind-tuple-hole.patch` (revert byte-exact) | **MET** — `T65-verdict.json` |
+| N3 | **§6.1 per-egress-class masking (EG1–EG6):** every plane's AI egress is masked-by-default (stricter than the tenant UI); grant-covered plaintext is admitted ONLY into `:complete` (ephemeral) payloads and never into `:embed`/`:mcp`; §3.2a — history (incl. prior assistant turns) re-scrubs per-turn against the CURRENT grant state, so a canary revealed under grant in turn N never survives into the ungranted turn N+1; §3.2b — EG6 (logs/telemetry/errors) carry masked/token-only content, never raw prompt or grant-resolved plaintext | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/ai/ai_prompt_masking_test.exs` (`describe "§6.1 — egress is masked-by-default on every plane"`; `describe "RP-AI-10 — the §3.2a multi-turn re-scrub"`; `describe "EG6 — the observability shadow carries no canary or vt_"`); `samen_core/test/ai/kernel_test.exs` (`%MaskedPayload{}` Inspect-redaction; adapter-error normalization); `samen_core/test/ai_eval/ai_plane_redteam_test.exs` (RP-AI-10 canary-revealed-then-expires case; EG6 log/telemetry/error provocation) | **MET** — `T65-verdict.json`, `T72-verdict.json` |
+| N4 | **D9 runtime catalog grounding (§8):** a live runtime catalog module serves the equivalent of `mix samen.catalog.dump`, byte/normalized-parity-tested; PII ships as a `pii:true` metadata flag only, NEVER a sample value; org-scoped custom-object grounding never leaks org A into org B's context | ✅ TEST · keyless | `samen_core/test/ai/catalog_runtime_test.exs` (RP-AI-8 parity with `Mix.Tasks.Samen.Catalog.Dump.build_dict/1`; "the catalog shape carries NO sample/row value"; org-isolation describe block); `scripts/sabotages/46-t66-ai-egress-grounding-meta-scrub-bypass.patch` + `47-t66-f1-ai-egress-grounding-meta-charlist-hole.patch` | **MET** — `T66-verdict.json` |
+| N5 | **D3 embeddings deny-by-default (§7.2):** pgvector REQUIRED (no optional-by-detection: `CREATE EXTENSION IF NOT EXISTS vector` runs in the migration); embedding input is allowlist-by-construction (only a resource-declared embeddable field); a vault-routed field is refused at BOTH the structural verifier and chokepoint runtime — even under a live reveal grant (grants never unlock embedding, since a vector persists beyond any grant window); vector rows are org-scoped, cross-org search returns nothing | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/ai/embeddings_test.exs` (RP-AI-4/§7.2 "a vault-routed field with a grant-resolved plaintext value is refused, nothing stored"; RP-AI-5 cross-org search); `samen_core/priv/test_repo/migrations/20260804010000_ai_embeddings.exs` (`CREATE EXTENSION IF NOT EXISTS vector`); `samen_core/lib/samen/ai/embedder/deterministic.ex` (keyless embedder); `scripts/sabotages/48-t67-ai-embeddings-vault-embed-deny-bypass.patch` | **MET** — `T67-verdict.json` |
+| N6 | **D3 Prompt resource versioned + `vt_` ban (§7.5):** an edit creates a new immutable version (verbs reference name+version, never silently rewrite history); a template body carrying a `vt_` sentinel or a bare PII-shaped string (email/SSN/phone) is refused at write, fail-closed, nothing persisted; org isolation on read AND enumeration; ADR-043 §7.5's **eight-verb** D3 surface ships complete — Search (T67, `Samen.AI.Embeddings.search/3`) + the Prompt resource itself (T68) + the six `Samen.AI.Verbs.run/3`-dispatched ops (Summarize/Extract/Classify/Generate/Recommend/Analyze, T68) — all executing org-scoped through the chokepoint against the fake provider | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/ai/prompt_resource_test.exs` ("a body carrying a `vt_` vault-token sentinel is refused; nothing is written"; "a body that is itself a bare email/SSN/phone shape is refused"; versioning + org-isolation describe blocks); `samen_core/test/ai/verbs_test.exs` ("`Samen.AI.Verbs.verbs/0` lists exactly the six ADR-043 §7.5 verb names"; per-verb table test over those six; Search's own evidence is N5's `embeddings_test.exs`); `samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex` (check (c) — Prompt template `vt_` scan); `scripts/sabotages/49-t68-ai-prompt-vt-scan-weaken.patch` | **MET** — `T68-verdict.json` |
+| N7 | **D4 MCP grant-never-unlocks + human-gated proposals (§9):** per-operator token auth (401 fail-closed + valid-token positive control); four tool families are read-or-propose ONLY — `browse`/`search`/`drafts` mask vault fields (EG4) even under a LIVE grant (grants never apply to the persisted `:mcp` egress class); an `action-proposal` tool opens a T34 approval and changes NOTHING by itself — a human, never the token's principal, approves before the action re-invokes | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/ai/mcp_test.exs` ("the SAME live grant reveals on `:complete` but MASKS on `:mcp`"; "proposing `:publish` opens a PENDING approval and changes NOTHING; a human then executes it"; org-scope + no-org-refusal describe blocks); `samen_web/lib/samen/web/ai/mcp_plug.ex` + `samen_web/test/samen/web/ai/mcp_plug_test.exs` (HTTP+SSE, 401 auth); `scripts/sabotages/50-t69-ai-mcp-browse-org-scope-bypass.patch` | **MET** — `T69-verdict.json` |
+| N8 | **D5 AI support operator human-gate (§6.3):** the AI service principal drafts (grounded, masked-path) and is structurally UNABLE to send — the only path to `Samen.Delivery.Chokepoint.send/2` is the E3 approve flow with `requested_by` = the AI principal and `decided_by` = a distinct human (self-approval REJECTED at both the policy layer and the DB CHECK); an unconfigured delivery adapter yields `{:error, :adapter_unconfigured}` and rolls back (fail-honest, never a fake send) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/ai/support_operator_test.exs` ("drafting opens a PENDING approval and sends NOTHING"; "a distinct human approve fires the send within-org; a self-approval is REJECTED"; "an unconfigured delivery yields `{:error, :adapter_unconfigured}`; the decision rolls back"); `samen_core/lib/samen/ai/support_operator.ex` (`requested_by`/`decided_by` distinct-party wiring); `scripts/sabotages/51-t70-ai-support-operator-org-scope-bypass.patch` | **MET** — `T70-verdict.json` |
+| N9 | **D6 AI-on-CRM drafts-never-send (§6.4):** timeline summary / sequence draft / inbound classify / next-step recommendation execute as the CRM actor's real scope (masked-path); a sequence draft returns a plain `:draft` map and structurally never reaches `Samen.Delivery` (grep-proven: no code-level reference to `Samen.Delivery` in the CRM AI module, moduledoc prose excluded) | ✅ TEST · keyless | `samen_core/test/ai/crm_test.exs` ("draft_sequence/5 returns a plain `:draft` map and sends NOTHING"; "STRUCTURAL: samen/ai/crm.ex contains no CODE-level reference to Samen.Delivery"; org-scope isolation describe block) | **MET** — `T71-verdict.json` |
+| N10 | **D7 AI analytics is token-blind by schema, not by filter (§6.4):** `Samen.AI.Analytics.ask/4` refuses a PII-bearing resource BEFORE any read — proven against a real CRM resource carrying vault-routed columns (non-vacuity control: the same gate ADMITS a genuinely schema-pure aggregate fixture); `mix samen.verify.aggregate_privacy` (the substrate D7 verifier ADR-043 §6.4 names) stays green | ✅ TEST · keyless | `samen_core/test/ai/analytics_test.exs` ("a real CRM resource (vault-routed full_name/emails/phones) is refused BEFORE any read"; "a freshly-compiled `use Samen.Aggregate.Resource` fixture passes the SAME gate"); `samen_core/test/aggregate_privacy_verifier_test.exs` + `samen_core/lib/mix/tasks/samen.verify.aggregate_privacy.ex` (♻️ substrate, unchanged-green); `scripts/sabotages/52-t71-ai-analytics-aggregate-suppress-bypass.patch` | **MET** — `T71-verdict.json` |
+| N11 | **D8 permanent eval + mask-leak red-team CI tier (§10):** the keyless grounding-context eval holds the ADR-043 §10.1 ≥90% bar on a ≥20-case, non-trivial corpus (both `:present` and `:absent` cases; non-vacuity: dropping the resource from a `:present` case fails it) — honestly framed as context-ASSEMBLY, not model fidelity; the mask-leak red-team seeds a real canary through the actual vault write path and asserts ZERO canary / `vt_*` across ALL SIX egress classes EG1–EG6 (the six verbs, support-operator drafts, CRM AI, MCP browse/drafts, embeddings, the §3.2a multi-turn expired-grant case, and EG6 log/telemetry/error provocation), plus cross-org isolation and a master fan-out assertion; both tiers are standing `ci.sh` steps with their own sabotage patch | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/test/ai_eval/ai_grounding_eval_test.exs` (`@pass_bar 0.90`; "the assembled-grounding score meets the ADR-043 §10.1 ≥90% context-assembly bar"; non-vacuity test); `samen_core/test/ai_eval/ai_plane_redteam_test.exs` (per-egress-class describe blocks EG1/EG3/EG4/EG6 + RP-AI-10 + the "master INV-7 assertion — zero seeded canary across the whole matrix"); `ci.sh` step running `mix test --warnings-as-errors test/ai_eval/` as a named permanent tier; `scripts/sabotages/53-t72-ai-egress-render-value-token-leak.patch` | **MET** — `T72-verdict.json` |
+| N-DEFER | **Ten CURRENTLY-OPEN hardening/defense-in-depth follow-ups, of twelve total surfaced BY the T65/T66/T67/T69/T70/T71/T72 verifications themselves** (T134 generated-app `ai_prompt_masking` wiring gap; T137 grant-verdict truthiness strictness; T138 forged-`MaskedPayload` accepted-risk track; T139 sabotage-harness drift on 3 pre-existing patches; T140 pgvector prerequisite doc; T141 embedder error-sentinel mismatch; T142 MCP vertical-adoption token-resolver note; T143 approvals-engine `on_reject` module-load latency; T144 `Samen.AI.Analytics.ask/4` missing an in-function caller-authz gate; T145 benign Ash log noise). **T135** (embed-deny/verifier field-set alignment) and **T136** (the grounding/meta scrub gap) were already CLOSED in-phase — by T67 and T66 respectively — so are NOT in this open list | 🟡 RESIDUE (tracked) | `_orch/plan/backlog.yaml` (phase 5) rows **T134, T137–T145** (9 ids + T134 = 10) remain open, each named non-blocking / not-reachable-in-repo-today / doc-DX-only by the verifying task; **T135** closed per `samen_core/lib/samen/ai/embeddings.ex`'s `assert_embeddable/2` union comment citing T135; **T136** closed per `samen_core/lib/samen/ai/chokepoint.ex`'s "Grounding/meta scrub (T65-F8 close … T66)" moduledoc note; none of the open ten is a live PII-egress gap, none contradicts a D1–D8 decision | **DEFERRED (10 open, tracked; 2 closed in-phase)** |
+
+**Security-relevant findings surfaced-and-closed during Phase-5 verification:** T65's delta-verify
+caught and closed the grounding/meta scrub gap (F8, closed same-task) and the tuple-shape scrub
+hole (the allowlist rewrite); T66 closed T136 (the F1 charlist-hole in grounding/meta scrubbing)
+before its own gate went green (T136's "HARD PREREQUISITE OF T66" was honored in-task, not
+deferred); T67 separately closed T135, aligning the runtime embed-deny field set to the same
+`pii_attributes` ∪ `vault_routed_columns` union the structural verifier uses. Twelve
+hardening/defense-in-depth items were raised in total by the same verification passes that also
+proved the underlying D1–D8 claims MET; two (T135, T136) were closed in-phase, and the remaining
+ten are tracked open in N-DEFER — the adversarial floor found more than it needed to certify the
+headline claims, which is the intended shape of the gate.
+
+Full accounting: `_orch/tasks/T73/` (this gate); `_orch/verify/T64-verdict.json` through
+`T72-verdict.json` (incl. `T65-delta-verdict.json`, `T66-delta-verdict.json`,
+`T66-harness-verdict.json`); `docs/adr/ADR-043-ai-plane.md` §11 (deferred sub-decisions, all
+resolved in-task by their binding task) and §13 (RP-AI-1..10, the red-path floor this table maps
+1:1 against).
+
+---
+
+## O. Phase 6 (BATON) — WS-I surface completeness + WS-J portfolio cockpit (INV-6)
+
+Added by the Phase-6 gate (T85, 2026-08-07). Everything below is **complete + verified** at the
+authoritative full-root level: `./ci.sh` passed **twice consecutively** (`ROOT CI: ALL PASSED`,
+EXIT:0, zero re-rolls; INV-3 determinism) — see `_orch/tasks/T85/work/ci-output.txt` for the exact
+tails, and the standing sabotage harness ran the **full 153-patch** replay to green
+(`SABOTAGE HARNESS: ALL PASSED`). Each claim cites its in-repo evidence (the module + test) **and**
+its `_orch/verify/T*-verdict.json` artifact.
+
+**Honest scope + the seam/integration line (INV-6/K3).** Phase 6 finishes the WS-I product
+surfaces (CRM mailbox, sequences, reporting, per-account intelligence, helpdesk KB/deflection,
+macros + CSAT, chat sign-off, enrichment) and the WS-J portfolio cockpit (fleet registry,
+cross-product operator identity, cockpit aggregates + fleet flags, cross-tenant platform-health
+dashboards). Two WS-I deliverables are **SEAMS, not live integrations**, and are labeled as such
+below per the M8 default: **I1 the CRM mailbox two-way sync** (a `Samen.Mailbox` behaviour + a
+keyless `FakeProvider` — no live ESP/IMAP is wired) and **I8 enrichment** (a `Samen.Enrichment`
+behaviour + `FakeProvider` + fail-honest `{:error, :not_configured}` — no live data-enrichment
+vendor). Everything runs on the **keyless lane**. Where the round-0 build's own adversarial verify
+refuted a claim, the refutation and its in-phase fix are recorded (I4: T77 → T160; the security
+subsection below).
+
+### WS-I — product surface completeness
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| I1 | **CRM two-way email sync SEAM (M8):** a `Samen.Mailbox.Provider` behaviour + keyless `FakeProvider` — inbound threads onto the RIGHT `Person` by the person's **VAULTED** `emails` (resolved through `PiiResolution`, never a plaintext column) and onto that person's `Company`; outbound is recorded on the same timeline; matching is **org-PINNED** (a foreign org's identical address/domain anchors to NOTHING — the pin is from trusted `Config.org_id`, never the message); idempotent; **fail-honest** (unconfigured ⇒ `{:error, :not_configured}`, never a fabricated thread); `pii_body`/sender MaskingCase 3-proof | 🌱 **SEAM** · TEST + 🧨 SABOTAGE · keyless | `samen_core/lib/samen/mailbox/{provider,fake_provider,match,sync}.ex`; `samen_web/test/samen/web/mailbox_sync_test.exs` (incl. CROSS-ORG pin + the **P1** direct `company_for/3` raw-struct org-pin test) + `mailbox_timeline_masking_test.exs`; `samen_core/test/mailbox_vendor_free_test.exs` (core names no vendor); sabotage **152** (drop the by-id org conjunct → the direct test flips) | **MET (SEAM)** — `T74-verdict.json` |
+| I2 | **CRM sequences actually send (via C2):** scheduled sends go through the real `Samen.Delivery` suppression **chokepoint** (never a bypass); an inbound **reply pauses** the sequence (`Samen.Sequences.MailboxReplyCheck` reads REAL `MailMessage` rows via the same anchor convention as I1); org-pin / direction / subject conjuncts load-bearing | ✅ TEST · keyless | `samen_core/lib/samen/sequences.ex` (+ `sequences/mailbox_reply_check.ex`); `samen_core/test/crm/sequence_send_test.exs` | **MET** — `T75-verdict.json` |
+| I3 | **CRM reporting (conversion / win-rate / leaderboards on G8):** tenant-plane aggregate reads on the G8 kit; **cap disclosure is honest** — the **P2** fix drops the ordinally-false "the top N members" claim in the discovery-capped branch (`hidden_owners == nil`, >discovery_limit distinct owners) in favor of "ranked within a bounded sample"; the aggregate-privacy verifier stays green | ✅ TEST · keyless | `samen_web/lib/samen/web/crm/{reads,dashboard_live}.ex`; `samen_web/test/samen/web/crm_reporting_test.exs` (incl. the **P2** discovery-capped-copy test) | **MET** — `T76-verdict.json` |
+| I4 | **Per-account MRR/health/support (the "unfair advantage"):** REAL per-CRM-account intelligence via `Samen.CRM.AccountLink` — a `billing_customer_id` custom-field **anchor** (zero migrations), else a **single-confident-domain** fallback (the T74 vaulted-match discipline), else **honest absence** (`nil`, NEVER a book-wide number under a company's name, NEVER a fabricated `$0`); **fail-closed no-cross-org** (domain matching an off-org customer never links); ambiguous domain ⇒ honest no-match; a genuinely FAILED read surfaces absence, not `$0` (the **P7** degraded-read pin) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/lib/samen/crm/account_link.ex`; `samen_web/lib/samen/web/account_health.ex`; `samen_web/test/samen/web/crm_account_health_test.exs`; sabotages 85 (honest-absence, header tidied at **P7** to declare BOTH flipped tests) / 134 / 135 / 136 / 137 | **MET (per-account; T77 relabel superseded)** — `T160-verdict.json` (closes the `T77-verdict.json` §I4 design-refutation) |
+| I5 | **Helpdesk KB + composer suggestion + portal deflection:** KB public/internal **visibility boundary** solid on every attacked path (direct `read_public`, the deflection AI path, cross-org, stale/over-broad vector); composer suggestion rides the D5 AI client (masked-path); portal **deflection** = pre-submit article surfacing + an honest sign-in wall (anonymous ticket creation is correctly out of scope, `dc3_ruling: accept`) | ⚠️ **PARTIAL (accepted)** · TEST + 🧨 SABOTAGE · keyless | `samen_web/lib/samen/web/support/{kb_live,portal_kb_live,kb_reads}.ex`; `samen_web/test/samen/web/{support_kb_composer,portal_kb_live}_test.exs` + `support/kb_reads_test.exs`; 4 sabotages (102/103/106 + KB) all pin | **MET — security COMPLETE, scope-accepted** — `T78-verdict.json` |
+| I6 | **Macros composer palette + CSAT loop closed:** macro insertion into the composer; **survey → Csat score → operator analytics** chain end-to-end; the resolved-transition guard fires **once per real transition** — an already-resolved ticket re-saved does NOT re-mint a survey (the **P11** force-change-direct pin) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/lib/samen/scopes/support/{csat_survey,csat_survey_dispatch}.ex`; `samen_web/test/samen/web/{support_macro_composer,support_csat}_test.exs`; sabotages 109/111/113 + **153** (gut the transition detection → the force-change test flips) | **MET** — `T79-verdict.json` |
+| I7 | **Chat sign-off:** the C7 chat-attachments + masked-search guarantees (plane-resolved match oracle, never tsvector-indexed PII, org-scoped, chokepoint-quarantined attachments) sign off green — I7 is a completeness sign-off over the shipped C7 surface | ✅ TEST · keyless | C7 evidence (§M, `T61-verdict.json`): `samen_core/test/…/chat_search_masking_test.exs` + `chat_attachments_test.exs` (16/16) | **MET** — `T80-verdict.json` |
+| I8 | **Enrichment provider SEAM (M8 default):** a `Samen.Enrichment.Provider` behaviour + keyless `FakeProvider` + fail-honest `{:error, :not_configured}`; **INV-4 clean** — no vendor dep in any `mix.exs`, no HTTP/SaaS reference in the enrichment lib; no schema/registry/migration change; the facade+fake survives every live attack | 🌱 **SEAM** · TEST + 🧨 SABOTAGE · keyless | `samen_core/lib/samen/enrichment.ex` (+ `enrichment/{provider,fake_provider}.ex`); `samen_core/test/enrichment_test.exs`; sabotage 114 | **MET (SEAM)** — `T80-verdict.json` (delta round — the round-0 fabricated-sabotage was caught + fixed; see below) |
+
+### WS-J — portfolio cockpit (fleet)
+
+| Req | Claim | Class · Lane | Evidence | Verdict |
+|---|---|---|---|---|
+| J1+J5 | **Fleet registry, honest from 1 to N (M10):** BOTH **manual** register/list AND opt-in **heartbeat** self-registration with a secured credential — forged/revoked credential red + control, a zero-read credential probe; `cockpit_identity` fail-honest; n=1 reads exactly as n=N (no fabricated fleet) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/lib/samen/fleet/{registry,heartbeat_actor,local_credential}.ex`; `samen_core/test/fleet_registry_test.exs`; `driftwood/test/fleet_wire_test.exs` | **MET** — `T82-verdict.json` |
+| J3 | **Cross-product operator identity (per-product role scoping):** one operator session carries **different roles per product** (readonly on app A, admin on app B); role-isolation **RED**; impersonation/reveal **refuse** fleet actors; masking travels | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/lib/samen/fleet/{authz,resolution}.ex`; `samen_web/test/samen/web/operator/{cross_product_authz,operator_identity_line}_test.exs`; `driftwood/test/operator_cross_product_scope_test.exs`; sabotages 119/123 | **MET** — `T83-verdict.json` (tree-integrity confirmed whole; see incident below) |
+| J2+J4 | **Cockpit aggregates + fleet flags/announcements:** roll-ups across ≥2 apps; **tier-2 cohort names masked-by-omission** per-viewer via T84a `scope_of/2` (no `••••`, no handle in any DOM attribute); **P8 closed-catalog membership** enforced (`mix samen.verify.fleet_wire`, wired in `samen_web/ci.sh`); flag/announcement fan-out with **local-off-beats-fleet** precedence; `GET /fleet/apps` is an **honest deferral** (in `RouteTable.deferred/0`, not mounted); the **P15** fix renders `—` (not a fabricated `0`) when no product reports a SUM metric; the **P16** fix attributes a masked name to the **right cause** (seam-not-reachable vs out-of-scope) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_web/lib/samen/web/operator/{fleet_live,fleet_detail_live,fleet_directives_live,fleet_resolve_live,fleet_register_live}.ex`; `samen_web/test/samen/web/{fleet_cockpit_authz,fleet_live,fleet_detail_scope_mask}_test.exs` (incl. **P15** honest-no-data + **P16** separately-deployed tests); `samen_core/test/verify_fleet_wire_test.exs`; sabotages 128/129 (regen at gate) /131 | **MET** — `T84b-verdict.json` |
+| J-sec | **The security core (T84a):** the `Samen.Fleet.Assignment` resource + real `scope_of/2`/`scope_from_assignments/4`; the operator scope-gate conjunct (§16.4a, **no-lockout** confirmed); **P9** atomic `key_version`/`fleet_revision` counters via `pg_advisory_xact_lock` (double-issue under concurrency closed); **P10** every directive push raises an accountable `:directive_published` audit entry (who/revision/target) | ✅ TEST + 🧨 SABOTAGE · keyless | `samen_core/lib/samen/fleet/{assignment,resolution,registry}.ex` (+ `policy/operator_admin_only.ex`); `samen_web/test/samen/web/operator_scope_gate_test.exs`; `samen_core/test/{fleet_counter_audit,verify_fleet_wire}_test.exs`; sabotage 123 | **MET** — `T84a-verdict.json` |
+| T156 | **Cross-tenant platform-health dashboards:** MERGED into the T84 tier-2 cockpit per ADR-044 §5.3/§5.4 (no separate build) — the ESP-deliverability / automation / activity platform indices in `fleet_live.ex`, **token-blind by construction** (no `org_id` in the panel); avg + (post-**P15**) SUM both honor the `—` no-data discipline | ✅ TEST · keyless | `samen_web/lib/samen/web/operator/fleet_live.ex`; `samen_web/test/samen/web/fleet_live_test.exs` (T156 describe + **P15** tests) | **MET** — covered by `T84b-verdict.json` (ADR-044 §5.3/§5.4) |
+| T142 | **MCP vertical adoption:** the D4 MCP server endpoint is mounted in **pawchart** with a real constant-time `:actor_resolver` (`Plug.Crypto.secure_compare`) + an **e2e auth test over live HTTP** with org-scoping enforced and a forged-token rejection pin — **closes the Phase-5 T142 low** | ✅ TEST + 🧨 SABOTAGE · keyless | `pawchart` MCP mount + `pawchart/test/*mcp*`/operator suites; `samen_web/lib/samen/web/ai/mcp_plug.ex` | **MET** — `T157-verdict.json` (T142 folded in, closed) |
+
+### Security defects caught-and-fixed by adversarial verification (Phase 6)
+
+The Phase-6 verifications surfaced and closed several real defects **in-phase** — the adversarial
+floor again found more than it needed to certify the headline claims:
+
+| Defect | What the verify caught | Fix + proof | Verdict |
+|---|---|---|---|
+| **T77 §I4 org-wide refutation** | I4's round-0 build met its done-criteria **literally** but rendered an **org-WIDE** MRR/health number **under a single company's name** — not the per-account intelligence spec §I4 asks for (a real over-claim, not a leak) | **T160** built the real linkage (`AccountLink`: anchor → single-domain fallback → honest absence), **fail-closed no-cross-org**, no book-wide number under a company name, no fabricated `$0`; sabotage-pinned (134–137) | **CLOSED** — `T160-verdict.json` |
+| **T80 fabricated-sabotage catch** | I8's round-0 shipped a **corrupt sabotage patch + a mis-targeted MUST_FAIL + a fabricated evidence claim** for the new enrichment seam — the exact "the sabotage lies" failure the harness exists to refuse (verdict held **PARTIAL**, not CONFIRMED) | Delta round rebuilt the enrichment seam's sabotage (114) to genuinely flip its named test + revert byte-exact; the fail-honest facade re-proven under live attack | **CLOSED** — `T80-verdict.json` (delta) |
+| **T82 cockpit-ingress starvation + INV-2 wire holes** | The heartbeat cockpit ingress needed a **flood_peek + commit-charge** bound (a starvation/DoS surface) and the fleet report wire needed **closed-catalog membership** (INV-2: shape-only bounds admit out-of-vocabulary labels) | `cockpit_ingress.ex` flood_peek + commit-charge; `schema.ex` `catalog_label?` + cohorts removed from the allowlist; **P8** `mix samen.verify.fleet_wire` membership check wired into `samen_web/ci.sh` | **CLOSED** — `T82-verdict.json` (delta) |
+| **P9 non-atomic fleet counters** | `key_version`/`fleet_revision` mints could **double-issue under concurrency** (author-flagged) | Both counters serialized by a transaction-scoped `pg_advisory_xact_lock` (`registry.ex` `with_counter_lock/3`) | **CLOSED** — `T84a-verdict.json` |
+| **T83 git-checkout process incident** | The J3 author used `git checkout --` to restore a sabotage target (violating the mandated cp+shasum restore ritual) | Independent **tree-integrity** verification confirmed the working tree **whole** (all 5 baseline shasums matched), full `./ci.sh` green, no prior deliverable lost — a process risk, not a code defect | **RESOLVED** — `T83-verdict.json` |
+
+**Boundary-persona dogfood (T85, 2026-08-10) — 19 findings, all remediated in-phase.** A
+4-cluster boundary-persona dogfood (EXTERNAL / OPERATOR / TENANT / EDGES) probed the Phase-6
+surfaces above from the outside and found **19 findings (0 blocker / 5 HIGH / 5 MED / 9
+LOW)** — full triage: `_orch/dogfood/phase6-triage.md`. **Two HIGHs refuted prior verifier
+PASS claims in this same doc:** **H1** refutes **T82**'s fleet-wire completeness (§WS-J
+J1+J5 above — the BLOCKER-2 undeclared-key fix was applied only at the top level); **H5**
+refutes **T155**'s `simulated_honesty` PASS (`draft_sequence` dropped the `:simulated` flag
+before the badge check, laundering a keyless SEAM draft as a neutral "Draft"). Operator
+ruling: **FIX EVERYTHING IN-PHASE, down to LOW.** All 19 were remediated across **5
+independently-verified fix batches** (SEC/HON/UX/EDGE-LOW/M5), each committed and each
+re-verified against a fresh sabotage twin (cp+SHA-256 byte-exact restore, `ci.sh` +
+sabotage harness + `ci-fast` green before/after); the standing sabotage harness grew
+**153 → 168**.
+
+| Defect | What the verify caught | Fix + proof | Verdict |
+|---|---|---|---|
+| **Dogfood-H1 fleet-wire nested undeclared-key egress** | T82's BLOCKER-2 undeclared-key rejection was applied only at the top level; `validate_item/5` (`schema.ex:437/459/489`) and `validate_suppressed/4` let a producer smuggle PII through nested list-item/suppressed cells — refutes T82 completeness | `validate_item` + `validate_suppressed` now reject undeclared keys the same as top-level, + a 64-byte nested-string bound; `verify.fleet_wire` checks nested membership; sabotages **154/155/158** (93 regenerated) | **CLOSED** — `T85-sec-verdict.json` + `T85-sec-round2-verdict.json` |
+| **Dogfood-H2/M1 impersonation principal-binding** | pawchart/driftwood `OperatorImpersonationLive` trusted the client `?operator_id` param over the authenticated principal (audit-ledger attribution forgery, masked so no PII leak) and bypassed `gate/3` (§16.4a R-B scope conjunct structurally absent) | vertical consoles now go through the framework `assign_identity` + `gate_socket` + `gate/3` path via a new `Impersonation.read_scope/1` — a forged `?operator_id` is ignored, a no-session request is denied, the param leg is gated behind `auth_disarmed?/1`; sabotages **156/157/159** | **CLOSED** — `T85-sec-verdict.json` |
+| **Dogfood-H5 simulated-draft badge loss** | `draft_sequence` dropped the `:simulated` flag before `ai_result`, laundering the keyless SEAM output as a neutral, badgeless "Draft" — refutes T155's `simulated_honesty` PASS | `:simulated` now survives `draft_sequence` through to the badge check → the loud SIMULATED badge renders; sabotages **160/161** | **CLOSED** — `T85-hon-verdict.json` |
+| **Dogfood-M2 mailbox ambiguous-match guess** | `Mailbox.Match.person_for_address`/`company_by_domain` guessed the first match on ambiguity (`Enum.find`; `limit(1) \|> List.first`) instead of failing closed — inconsistent with T160's exactly-1-or-no-match discipline | fail-closed on 2+ candidates (no-match), mirroring T160 exactly; sabotage **162** (existing 61/62 rebased) | **CLOSED** — `T85-hon-verdict.json` |
+| **Dogfood-M5 CRM Sequences tenant-UI gap** | T75/I2 delivered the real Sequences mechanism (`samen_core` scope + Oban chokepoint) but shipped **no tenant-plane UI at all** — a completeness gap, not a fake, but the tenant literally could not walk the surface | **BUILT** (operator scope decision: build now, not deferred): new `Samen.Web.CRM.SequencesLive` over the existing T75 Outreach scope — enroll/list/step-status, org-scoped (sabotage **167**), honest `:blocked` never faked-delivered (sabotage **168**), no vault field renders; `samen_web` test-host migration mounts Outreach, registry `wso`/`woe`/`ows` via the sanctioned allocator | **BUILT** — `T85-m5-verdict.json` |
+| **Dogfood-LOW locks (L1–L9)** | 9 LOW findings: 1 real reordering bug (L5, fleet-enroll token burned before the `cockpit_identity` check — fail-closed but self-inflicted) + 1 keyless-honesty gap (L7, CSAT reported `:invalid_token` after a failed write instead of a distinct reason) + 2 tenant UX papercuts (L3 hardcoded `/login`, L4 hardcoded color off theme var) + 5 documenting-tests locking already-safe behavior (L1/L2/L6/L8/L9, each verified non-vacuous) | L5 reordered check-before-consume (sabotage **166**, existing 95 rebased); L7 distinct `{:write_failed,_}` vs `:invalid_token` (sabotage **163**); L3/L4 fixed directly; L1/L2/L6/L8/L9 each got a documenting test proven non-vacuous by a fresh sabotage | **CLOSED** — `T85-ux-verdict.json` (L3/L4) / `T85-edgelow-verdict.json` (L1/L2/L5/L6/L8/L9) / `T85-hon-verdict.json` (L7) |
+
+**No new oversell found in the remediation.** Every fix batch was independently adversarially
+verified (fresh sabotage per named fix, cp+SHA-256 byte-exact restore, suite + `ci.sh` green
+before/after). Keyless SEAM-honest labels are unchanged by this pass — I1 mailbox and I8
+enrichment stay labeled 🌱 **SEAM**; the M2/H5/M5 fixes tighten the seam's honesty contract
+(fail-closed matching, a loud badge, a real tenant UI over the existing mechanism) — they do
+not promote any seam to a live integration.
+
+### Phase-6 punch list — closed at this gate (`_orch/plan/phase6-punchlist.md`)
+
+All actionable rows closed under the operator's FIX-EVERYTHING-IN-PHASE ruling: **P1** (direct
+`company_for/3` org-pin test + sabotage 152), **P2** (honest discovery-capped leaderboard copy +
+test), **P7** (patch 85 header declares both flipped tests), **P11** (force-change-direct CSAT
+re-mint test + sabotage 153; the honest finding that Ash elides same-value force-changes, making the
+two transition conjuncts mutually redundant, is recorded), **P15** (SUM renders `—` on no-data),
+**P16** (seam-not-reachable vs out-of-scope attribution + test), **P19** (pawchart operator Desk
+assertion). **P8/P9/P10/P13/P14** verified-closed (guarantees live). **P12** (gen/app.ex 4-place
+Support-scope list) / **P17** (tenant-own-org analytics) / **P18** (codemunch convention) filed as
+explicitly deferred (convention/product, not defects). Full accounting: `_orch/tasks/T85/work/gate-report.md`.

@@ -40,14 +40,24 @@ defmodule Samen.Web.Plane do
   @doc """
   An operator plane over a single target tenant org (masked impersonation).
   `operator_id` identifies the acting operator; `target_org_id` is the tenant org
-  being opened. Optional `session_id` records the impersonation session.
+  being opened. Optional `session_id` records the REAL `imp_impersonation_session`
+  id backing this plane.
+
+  T150: this NO LONGER fabricates a synthetic `"operator-session"` id when none is
+  given — an operator-plane scope with no real session carries `session_id: nil`
+  (honest: it references no `imp_impersonation_session` row). The per-tenant drill-in
+  surfaces do not read through this plane at all anymore: they gate on a real session
+  via `Samen.Web.Operator.Impersonation.gate/2` (deny-on-read) and build their scope
+  from `Samen.Impersonation.scope/3`, which carries the REAL session id. The marker
+  key stays present so `Samen.Api.PiiResolution`'s impersonation posture (masked-but-
+  PRESENT `••••`) still holds for the operator-plane masking unit tests.
   """
   def operator(operator_id, target_org_id, session_id \\ nil) do
     %__MODULE__{
       kind: :operator,
       operator_id: operator_id,
       target_org_id: target_org_id,
-      impersonation: %{session_id: session_id || "operator-session"}
+      impersonation: %{session_id: session_id}
     }
   end
 
@@ -87,7 +97,7 @@ defmodule Samen.Web.Plane do
         role: :member,
         kind: :operator,
         plane: :operator,
-        impersonation: plane.impersonation || %{session_id: "operator-session"}
+        impersonation: plane.impersonation || %{session_id: nil}
       }
     }
   end
@@ -108,7 +118,7 @@ defmodule Samen.Web.Plane do
       kind: :operator,
       operator_id: m["operator_id"],
       target_org_id: m["target_org_id"],
-      impersonation: %{session_id: m["session_id"] || "operator-session"}
+      impersonation: %{session_id: m["session_id"]}
     }
   end
 

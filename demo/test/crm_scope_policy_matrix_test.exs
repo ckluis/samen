@@ -15,7 +15,10 @@ defmodule Demo.CrmScopePolicyMatrixTest do
   use Demo.DataCase, async: false
   use ExUnitProperties
 
-  alias Demo.CrmScope.{Company, Person, Pipeline, Opportunity, Activity, Attachment}
+  # Activity removed (ADR-041 §5, ruling M5) — migrated into the canonical Work-scope
+  # Task (`Demo.WorkScope.Task`); the cross-org red paths below move to the Task anchor.
+  alias Demo.CrmScope.{Company, Person, Pipeline, Opportunity, Attachment}
+  alias Demo.WorkScope.Task
   alias Demo.Identity.{Org, User}
 
   # --- helpers ---------------------------------------------------------------
@@ -274,7 +277,7 @@ defmodule Demo.CrmScopePolicyMatrixTest do
   # Smoke: opportunities, activities, attachments are all org-scoped.
   # =========================================================================
 
-  test "opportunities, activities, attachments are org-scoped (cross-org invisible)" do
+  test "opportunities, tasks, attachments are org-scoped (cross-org invisible)" do
     org_a = mk_org("smoke-xa")
     org_b = mk_org("smoke-xb")
     scope_a = mk_actor(org_a.id, :member)
@@ -292,13 +295,14 @@ defmodule Demo.CrmScopePolicyMatrixTest do
       })
       |> Ash.create(authorize?: false)
 
-    # Activity and attachment in org_b.
-    {:ok, _act_b} =
-      Activity
+    # Work Task (former Activity, ADR-041 §5) anchored to org_b's person + attachment in org_b.
+    {:ok, _task_b} =
+      Task
       |> Ash.Changeset.for_create(:create, %{
-        type: :note,
+        kind: :note,
         org_id: org_b.id,
-        person_id: person_b.id
+        subject_key: "crm.person",
+        subject_id: person_b.id
       })
       |> Ash.create(authorize?: false)
 
@@ -313,11 +317,11 @@ defmodule Demo.CrmScopePolicyMatrixTest do
 
     # org_a actor sees ZERO of org_b's rows across all three resources.
     {:ok, opps} = Ash.read(Opportunity, actor: scope_a.actor, authorize?: true)
-    {:ok, acts} = Ash.read(Activity, actor: scope_a.actor, authorize?: true)
+    {:ok, tasks} = Ash.read(Task, actor: scope_a.actor, authorize?: true)
     {:ok, atts} = Ash.read(Attachment, actor: scope_a.actor, authorize?: true)
 
     assert Enum.all?(opps, fn r -> r.org_id == org_a.id end)
-    assert Enum.all?(acts, fn r -> r.org_id == org_a.id end)
+    assert Enum.all?(tasks, fn r -> r.org_id == org_a.id end)
     assert Enum.all?(atts, fn r -> r.org_id == org_a.id end)
 
     # Specifically, org_b's rows are absent.
@@ -327,53 +331,60 @@ defmodule Demo.CrmScopePolicyMatrixTest do
   end
 
   # =========================================================================
-  # F3.2 same-org FK red path (cross-scope review): an org-A activity that
-  # references an org-B person must be REFUSED. Reading the foreign parent is
-  # already filtered to nil (OrgScope), but the dangling cross-tenant FK write
-  # was previously stored. The Samen.Policy.SameOrgFk change refuses it.
+  # Cross-org protection at the Task anchor (ADR-041 §6.1) — the SameOrgFk
+  # replacement. The canonical Task's subject is a GENERIC object-ref
+  # `(subject_key, subject_id)`, NOT a belongs_to — so SameOrgFk cannot target it
+  # and a cross-org anchor is not DB-rejected. Instead the reference is INERT:
+  # OrgScope narrows every read to the actor's org, so org-A can never RESOLVE
+  # (reach) org-B's person through the anchor. This is exactly the OrgScope filter
+  # the org-scoped `Samen.Web.ObjectRef.resolve/3` boundary relies on in samen_web
+  # (unavailable to this samen_core-only demo host, so tested at the OrgScope layer).
+  # NOT weakened: the cross-tenant reach is still refused; the positive control
+  # (same-org resolves) is retained (anti-tautology).
   # =========================================================================
 
-  test "an org-A activity referencing an org-B person is REFUSED (same-org FK red path)" do
+  test "an org-A task anchoring an org-B person is INERT — org-A cannot resolve the cross-org reference (ADR-041 §6.1)" do
     org_a = mk_org("xfk-a")
     org_b = mk_org("xfk-b")
+    scope_a = mk_actor(org_a.id, :member)
     person_b = mk_person(org_b.id, "ForeignPerson")
 
-    result =
-      Activity
+    {:ok, task} =
+      Task
       |> Ash.Changeset.for_create(:create, %{
-        type: :note,
+        kind: :note,
         org_id: org_a.id,
-        person_id: person_b.id
+        subject_key: "crm.person",
+        subject_id: person_b.id
       })
       |> Ash.create(authorize?: false)
 
-    assert {:error, %Ash.Error.Invalid{errors: errors}} = result,
-           "org-A activity to org-B person must be refused, got: #{inspect(result)}"
+    # RED PATH: org-A, reading persons under authorization, can NOT see org-B's person —
+    # so the anchored id is unresolvable and the reference is inert (no cross-tenant reach).
+    {:ok, visible} = Ash.read(Person, actor: scope_a.actor, authorize?: true)
 
-    messages =
-      Enum.map(errors, fn
-        %{message: msg} -> msg
-        e -> inspect(e)
-      end)
-
-    assert Enum.any?(messages, &(&1 =~ "cross-org FK")),
-           "Expected a cross-org FK refusal, got: #{inspect(messages)}"
+    refute Enum.any?(visible, &(&1.id == task.subject_id)),
+           "org-A must NOT resolve org-B's person through a task anchor (cross-org reach)"
   end
 
-  test "a same-org activity referencing a same-org person SUCCEEDS (positive control for F3.2)" do
+  test "a same-org task anchoring a same-org person RESOLVES (positive control)" do
     org = mk_org("xfk-ok")
+    scope = mk_actor(org.id, :member)
     person = mk_person(org.id, "SameOrgPerson")
 
-    result =
-      Activity
+    {:ok, task} =
+      Task
       |> Ash.Changeset.for_create(:create, %{
-        type: :note,
+        kind: :note,
         org_id: org.id,
-        person_id: person.id
+        subject_key: "crm.person",
+        subject_id: person.id
       })
       |> Ash.create(authorize?: false)
 
-    assert {:ok, act} = result, "same-org activity must succeed, got: #{inspect(result)}"
-    assert act.person_id == person.id
+    {:ok, visible} = Ash.read(Person, actor: scope.actor, authorize?: true)
+
+    assert Enum.any?(visible, &(&1.id == task.subject_id)),
+           "same-org person must resolve through the anchor (positive control)"
   end
 end

@@ -8,8 +8,12 @@ defmodule Driftwood.Context do
       kernel Company's OrgScope/vault/audit ride underneath unchanged. The role is
       carried in the `company_role` Tier-1 custom field; aliased reads filter on it.
     * `alias_resource Opportunity, as: Load` — the freight load/shipment (DECISION L).
-    * `alias_resource Activity, as: CheckCall` — the routine check-call event stream
-      (DECISION A). Dispatch itself is the vertical DispatchEvent resource.
+    * `alias_resource Work.Task, as: CheckCall` — the routine check-call event stream
+      (DECISION A). Post ADR-041 (ruling M5) the CRM `Activity` was destructively
+      migrated into the canonical Work-scope `Task` and removed, so CheckCall now
+      re-identifies `Driftwood.Work.Task` (the migration destination) — the aliased
+      read still runs against the kernel resource, org-scoped, under the anti-corruption
+      invariant. Dispatch itself is the vertical DispatchEvent resource.
     * `reshape Settlement do … end` — the carrier-settlement netting math as derived
       `calculate … expr(...)` fields (DECISION S). This is the load-bearing billing
       reshape: `net_payable = linehaul − advances − factoring_fee − claims`, clamped
@@ -32,7 +36,9 @@ defmodule Driftwood.Context do
     alias_resource(Driftwood.Crm.Company, as: Driftwood.Carrier)
     alias_resource(Driftwood.Crm.Company, as: Driftwood.Shipper)
     alias_resource(Driftwood.Crm.Opportunity, as: Driftwood.Load)
-    alias_resource(Driftwood.Crm.Activity, as: Driftwood.CheckCall)
+    # ADR-041 (M5): Activity migrated into the canonical Work-scope Task and removed —
+    # CheckCall now re-identifies Driftwood.Work.Task (the migration destination).
+    alias_resource(Driftwood.Work.Task, as: Driftwood.CheckCall)
 
     # --- the carrier-settlement netting reshape (derived money) ---
     #

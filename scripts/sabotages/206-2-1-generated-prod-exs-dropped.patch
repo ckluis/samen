@@ -1,0 +1,21 @@
+# SABOTAGE: §2.1 (ADR-045) — the generated `config/prod.exs` emission DROPPED. The fix made the
+# generator emit a `config/prod.exs` for every app set so that `config/config.exs`'s trailing
+# `import_config "#{config_env()}.exs"` does not ABORT a prod config load on the missing file.
+# This sabotage removes the base emission tuple, so a generated app has no prod.exs again — a
+# `Config.Reader.read!(env: :prod)` / a MIX_ENV=prod release would abort on the missing import.
+# The named §2.1 red path (config/prod.exs must be emitted for every set) MUST flip.
+# APP: samen_core
+# TEST_FILES: test/gen_deploy_bootability_test.exs
+# MUST_FAIL: config/prod.exs is emitted for the headless, web, and deploy sets (§2.1)
+diff --git a/samen_core/lib/samen/gen/templates.ex b/samen_core/lib/samen/gen/templates.ex
+index 9db27a0..8d56bbb 100644
+--- a/samen_core/lib/samen/gen/templates.ex
++++ b/samen_core/lib/samen/gen/templates.ex
+@@ -190,7 +190,6 @@ defmodule Samen.Gen.Templates do
+       # ADR-045 §2.1 — a prod.exs so `import_config "#{config_env()}.exs"` does not ABORT a prod
+       # config load on the missing file. The web set swaps in the web variant (below) that also
+       # re-states the armed tenant-gate + KMS boot posture. Secrets stay in runtime.exs (deploy).
+-      {"config/prod.exs", config_prod_exs()},
+       {"lib/<%= otp_app %>/application.ex", application_ex()},
+       {"lib/<%= otp_app %>/repo.ex", repo_ex()},
+       {"lib/<%= otp_app %>/billing.ex", billing_ex()},

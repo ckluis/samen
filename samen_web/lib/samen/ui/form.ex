@@ -27,7 +27,8 @@ defmodule Samen.UI.Form do
   attr :for, :any, required: true, doc: "an AshPhoenix.Form / %Phoenix.HTML.Form{} / FormData source"
   attr :id, :string, default: nil
   attr :as, :any, default: nil
-  attr :rest, :global, include: ~w(autocomplete method novalidate phx-submit phx-change phx-target phx-auto-recover)
+  attr :rest, :global,
+    include: ~w(action method autocomplete novalidate phx-submit phx-change phx-target phx-auto-recover)
 
   slot :inner_block, required: true
   slot :actions, doc: "the submit/cancel row (receives the form via :let)"

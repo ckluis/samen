@@ -1,0 +1,22 @@
+# SABOTAGE: T84b (ADR-044 s5.4/s6.3, RP-J-5). Samen.Web.Operator.Fleet.gate/2 is the tier-1/2
+# roles[:fleet] role gate - the ONLY thing standing between "no fleet role at all" and the
+# cockpit rendering. Falling back to :operator_readonly when roles[:fleet] is nil turns the
+# gate into a no-op: an operator with ZERO fleet grant reaches the cockpit. Positive control:
+# an explicit roles[:fleet] role still resolves correctly (this is an OR fallback, not a
+# removal of the case entirely), so the flip is in the DENY path specifically.
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_live_test.exs
+# MUST_FAIL: no roles[:fleet] at all -> redirect, renders nothing
+diff --git a/samen_web/lib/samen/web/operator/fleet.ex b/samen_web/lib/samen/web/operator/fleet.ex
+index 100812c..0a62dd0 100644
+--- a/samen_web/lib/samen/web/operator/fleet.ex
++++ b/samen_web/lib/samen/web/operator/fleet.ex
+@@ -34,7 +34,7 @@ defmodule Samen.Web.Operator.Fleet do
+     otp_app = Operator.otp_app(mount)
+     roles = if otp_app, do: Authz.roles_for(otp_app, principal_id), else: %{}
+ 
+-    case Map.get(roles, :fleet) do
++    case Map.get(roles, :fleet) || :operator_readonly do
+       nil ->
+         :denied
+ 

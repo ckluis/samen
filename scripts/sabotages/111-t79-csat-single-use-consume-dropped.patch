@@ -1,0 +1,24 @@
+# SABOTAGE: T79 (spec §I6 macros composer palette + CSAT loop closed) — the
+# SINGLE-USE consume guarantee: `Samen.Scopes.Support.CsatSurvey`'s private
+# `consume_once/2` (the atomic `Ash.bulk_update!/4` + `strategy: [:atomic]`
+# discipline mirroring `Samen.Auth.TokenConsume.consume_once/3`) drops the
+# `is_nil(consumed_at)` conjunct from its WHERE-shaped filter — the ENTIRE
+# single-use enforcement. Without it, an already-consumed token still matches
+# the query and `:consume` re-fires on every replay, so `respond/4` would create
+# a SECOND `Csat` row for the same survey link on reuse — the exact reuse
+# vulnerability a single-use token exists to prevent.
+# APP: samen_web
+# TEST_FILES: test/samen/web/support_csat_test.exs
+# MUST_FAIL: REUSE RED TEST: the SAME token cannot be redeemed twice
+# APPLY: patch -p1 --no-backup-if-mismatch < scripts/sabotages/111-t79-csat-single-use-consume-dropped.patch
+--- a/samen_core/lib/samen/scopes/support/csat_survey.ex
++++ b/samen_core/lib/samen/scopes/support/csat_survey.ex
+@@ -249,7 +249,7 @@
+ 
+     result =
+       csat_survey_token_mod
+-      |> Ash.Query.filter(token_digest == ^digest and is_nil(consumed_at) and expires_at > ^now)
++      |> Ash.Query.filter(token_digest == ^digest and expires_at > ^now)
+       |> Ash.Query.ensure_selected([:id, :org_id, :ticket_id, :agent_id, :consumed_at])
+       |> Ash.bulk_update!(:consume, %{consumed_at: now},
+         authorize?: false,

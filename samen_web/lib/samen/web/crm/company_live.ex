@@ -21,12 +21,14 @@ defmodule Samen.Web.CRM.CompanyLive do
   use Phoenix.LiveView
 
   import Samen.UI
-  import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1, writable?: 1]
+  import Samen.Web.CRM.Live,
+    only: [assign_mount: 2, crm_sidebar: 1, writable?: 1, mail_timeline_entries: 1, merge_timeline: 2]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
 
+  alias Samen.Web.AccountHealth
   alias Samen.Web.CRM.Reads
 
   @impl true
@@ -45,7 +47,7 @@ defmodule Samen.Web.CRM.CompanyLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     company_id = Map.get(params, "id") || socket.assigns.company_id
     tab = Map.get(params, "tab") || "overview"
 
@@ -74,16 +76,21 @@ defmodule Samen.Web.CRM.CompanyLive do
     %{samen_mount: mount, org_id: org_id, company_id: company_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
 
+    # ADR-041 §6.1: the composer writes a canonical Work Task anchored to this
+    # (same-org) company via the generic `(subject_key, subject_id)` object-ref — not a
+    # CRM FK. (custom.crm_refs is a migration-only preservation bag; a new single-anchor
+    # task needs only the primary anchor — the Tier-1 custom bag rejects unregistered keys.)
     params =
       Map.merge(params, %{
         "status" => "completed",
         "completed_at" => DateTime.utc_now() |> DateTime.truncate(:second),
-        "company_id" => company_id,
+        "subject_key" => "crm.company",
+        "subject_id" => company_id,
         "org_id" => org_id
       })
 
     case AshPhoenix.Form.submit(socket.assigns.activity_form, params: params) do
-      {:ok, _activity} ->
+      {:ok, _task} ->
         {:noreply,
          assign(socket,
            activity_form: activity_form(mount, scope),
@@ -123,9 +130,14 @@ defmodule Samen.Web.CRM.CompanyLive do
     end
   end
 
-  # FAIL-HONEST delete: navigate away ONLY when the destroy actually happened. The
-  # kernel defines no cascade — a company with linked people/deals/activities is
-  # refused by the DB (FK) and the refusal is SURFACED, never a silent no-op.
+  # ADR-040 §5.9/T37c: `Company` is `archivable true`, so `Reads.delete_company/3`'s
+  # `Ash.destroy/2` now rides the default SOFT destroy (T36) — this sets
+  # `archived_at` rather than removing the row, so the company simply drops out of
+  # the default (archived-excluding) reads. No cascade is declared for CRM (§5.4),
+  # so linked people/opportunities/attachments are untouched and the destroy is
+  # never refused on their account; any `{:error, _}` here is a genuine failure
+  # (e.g. an authorization denial), not the old FK-refusal case. (Tasks are
+  # anchored by a generic object-ref, not a CRM FK, and never blocked either way.)
   def handle_event("delete_company", %{"id" => id}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
@@ -135,11 +147,23 @@ defmodule Samen.Web.CRM.CompanyLive do
         {:noreply, push_navigate(socket, to: companies_path(mount, org_id))}
 
       {:error, _reason} ->
-        {:noreply,
-         assign(socket,
-           delete_error:
-             "Could not delete this company — it still has linked records (contacts, deals, or activities)."
-         )}
+        {:noreply, assign(socket, delete_error: "Could not delete this company.")}
+    end
+  end
+
+  # T160 (spec §I4 completion) — set/clear this company's billing-account anchor
+  # (`Samen.CRM.AccountLink`). Tenant plane only (`writable?/1` gates the form in the
+  # render); the kernel enforces org-scope + member role regardless.
+  def handle_event("link_billing_customer", %{"billing_customer_id" => id}, socket) do
+    %{samen_mount: mount, org_id: org_id, company: company, company_id: company_id} = socket.assigns
+    scope = Mount.scope(mount, org_id)
+
+    case Reads.link_billing_customer(mount, scope, company, id) do
+      {:ok, _company} ->
+        {:noreply, load(assign(socket, link_error: nil), org_id, company_id)}
+
+      {:error, _reason} ->
+        {:noreply, assign(socket, link_error: "Could not update the billing link.")}
     end
   end
 
@@ -156,12 +180,16 @@ defmodule Samen.Web.CRM.CompanyLive do
       company: nil,
       contacts: [],
       activities: [],
+      mail: [],
       deals: [],
       active_tab: tab,
       show_edit: false,
       edit_form: nil,
       activity_form: nil,
-      delete_error: nil
+      delete_error: nil,
+      link_error: nil,
+      account_health: nil,
+      portfolio_health: nil
     )
   end
 
@@ -177,18 +205,35 @@ defmodule Samen.Web.CRM.CompanyLive do
         end
       end
 
-    {activities, deals, contacts} =
+    {activities, mail, deals, contacts} =
       if company do
         {
           Reads.activities_for_company(mount, scope, company_id),
+          # T74 §I1: synced mailbox messages (both directions) share this timeline.
+          # `[]` when no Mailbox scope is mounted — the honest absence.
+          Reads.mail_for_company(mount, scope, company_id),
           Reads.opportunities_for_company(mount, scope, company_id),
           Reads.contacts_for_company(mount, scope, company_id)
         }
       else
-        {[], [], []}
+        {[], [], [], []}
       end
 
     tab = Map.get(socket.assigns, :active_tab, "overview")
+
+    # T160 (spec §I4 completion) — THIS company's OWN MRR/health, resolved through its
+    # linked Billing.Customer (`Samen.CRM.AccountLink` — a registered anchor,
+    # authoritative, with a fail-closed domain-match fallback). Honest absence
+    # (`link_status: :unlinked`) when no confident link exists — never a book-wide
+    # number rendered under this company's name (the T77 defect this closes). `nil`
+    # when no company is loaded.
+    account_health = company && AccountHealth.snapshot_for_company(mount, scope, company)
+
+    # T77 (spec §I4) — the org-wide PORTFOLIO totals (across this org's ENTIRE own
+    # customer/support book) — kept as a CLEARLY SEPARATED secondary view (see
+    # `Samen.Web.AccountHealth`'s moduledoc "T160" section): the per-company panel
+    # above is now the default/primary view T160 delivers.
+    portfolio_health = AccountHealth.snapshot(mount, scope)
 
     socket
     |> ensure_return_to()
@@ -199,11 +244,15 @@ defmodule Samen.Web.CRM.CompanyLive do
       company: company,
       contacts: contacts,
       activities: activities,
+      mail: mail,
       deals: deals,
       active_tab: tab,
       edit_form: company && edit_form(company, scope),
       activity_form: activity_form(mount, scope),
-      delete_error: nil
+      delete_error: nil,
+      link_error: nil,
+      account_health: account_health,
+      portfolio_health: portfolio_health
     )
     |> assign_new(:show_edit, fn -> false end)
   end
@@ -214,8 +263,10 @@ defmodule Samen.Web.CRM.CompanyLive do
     |> to_form()
   end
 
+  # The composer writes a canonical Work Task (ADR-041 §6.1); the Task resource is
+  # derived from this CRM mount's host root (Reads.work_task_resource/1).
   defp activity_form(mount, scope) do
-    Mount.resource(mount, Activity)
+    Reads.work_task_resource(mount)
     |> AshPhoenix.Form.for_create(:create, scope: scope, as: "activity")
     |> to_form()
   end
@@ -291,6 +342,114 @@ defmodule Samen.Web.CRM.CompanyLive do
               </div>
             </div>
 
+            <!-- T160 (spec §I4 completion) — the REAL per-company panel: THIS company's OWN
+                 MRR/health, resolved through its linked Billing.Customer. Default/primary
+                 view (the "unfair advantage" spec §I4 asks for). -->
+            <div class="wrap" style="margin-bottom:0;padding-top:10px" id="account-health-panel">
+              <div class="metrics">
+                <div id="account-mrr">
+                  <.metric label="MRR" value={account_mrr_value(@account_health)} sub={account_mrr_sub(@account_health)}>
+                    <:icon>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                      </svg>
+                    </:icon>
+                  </.metric>
+                </div>
+                <div id="account-health-score">
+                  <.metric label="Account health" value={account_health_value(@account_health)} sub={account_health_sub(@account_health)}>
+                    <:icon>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                      </svg>
+                    </:icon>
+                  </.metric>
+                </div>
+                <div id="account-support-load">
+                  <.metric label="Open support tickets" value={account_support_value(@account_health)} sub={account_support_sub(@account_health)}>
+                    <:icon>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                      </svg>
+                    </:icon>
+                  </.metric>
+                </div>
+              </div>
+              <div class="lane" id="account-health-disclosure" style="font-size:11px;color:var(--muted);padding:4px 2px 0">
+                {account_health_disclosure(@account_health)}
+              </div>
+              <div :if={@link_error} class="card form-error" id="link-error" style="margin-top:6px;padding:6px 10px;color:var(--bad, #b91c1c);font-size:11px">
+                {@link_error}
+              </div>
+              <form
+                :if={writable?(@samen_mount)}
+                id="link-billing-customer-form"
+                phx-submit="link_billing_customer"
+                style="margin-top:6px;display:flex;gap:6px;align-items:center"
+              >
+                <input
+                  type="text"
+                  name="billing_customer_id"
+                  value={account_health_anchor_value(@account_health)}
+                  placeholder="Billing customer ID — paste to link (blank clears the anchor)"
+                  style="font-size:11px;padding:4px 6px;flex:1;max-width:360px"
+                />
+                <.button type="submit" id="link-billing-customer-submit">Link</.button>
+              </form>
+            </div>
+
+            <!-- T77 (spec §I4) — the org-wide PORTFOLIO view, kept as a CLEARLY SEPARATED
+                 secondary panel (see AccountHealth's "T160" moduledoc section). -->
+            <div class="wrap" style="margin-bottom:0;padding-top:8px" id="portfolio-health-panel">
+              <details>
+                <summary style="cursor:pointer;font-size:12px;color:var(--muted)">Portfolio view — totals across ALL of this org's customers</summary>
+                <div class="metrics" style="margin-top:8px">
+                  <div id="portfolio-mrr">
+                    <.metric
+                      label="Total MRR — all customers"
+                      value={portfolio_mrr_value(@portfolio_health)}
+                      sub={portfolio_mrr_sub(@portfolio_health)}
+                    >
+                      <:icon>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+                        </svg>
+                      </:icon>
+                    </.metric>
+                  </div>
+                  <div id="portfolio-health-score">
+                    <.metric
+                      label="Portfolio health"
+                      value={portfolio_health_value(@portfolio_health)}
+                      sub={portfolio_health_sub(@portfolio_health)}
+                    >
+                      <:icon>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                        </svg>
+                      </:icon>
+                    </.metric>
+                  </div>
+                  <div id="portfolio-support-load">
+                    <.metric
+                      label="Open support tickets — all customers"
+                      value={portfolio_support_value(@portfolio_health)}
+                      sub={portfolio_support_sub(@portfolio_health)}
+                    >
+                      <:icon>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                        </svg>
+                      </:icon>
+                    </.metric>
+                  </div>
+                </div>
+                <div class="lane" id="portfolio-health-disclosure" style="font-size:11px;color:var(--muted);padding:4px 2px 0">
+                  org-wide totals across this org's ENTIRE customer &amp; support book (spec §I4) — NOT this specific company's numbers; link this company to a billing account above for its OWN numbers
+                </div>
+              </details>
+            </div>
+
             <div class="wrap" style="margin-bottom:0;padding-top:8px">
               <.tabs>
                 <.tab label="Overview" href={"?org=#{@org_id}&tab=overview"} active={@active_tab == "overview"} />
@@ -303,7 +462,10 @@ defmodule Samen.Web.CRM.CompanyLive do
               <% "activity" -> %>
                 <div class="wrap" id="activity-pane">
                   <div class="card" style="padding:8px 4px 12px">
-                    <.timeline entries={timeline_entries(@activities)} empty="No activity yet — log the first call or note below.">
+                    <.timeline
+                      entries={merge_timeline(timeline_entries(@activities), mail_timeline_entries(@mail))}
+                      empty="No activity yet — log the first call or note below."
+                    >
                       <:composer :if={composer?(@samen_mount)}>
                         {activity_composer(assigns)}
                       </:composer>
@@ -331,7 +493,7 @@ defmodule Samen.Web.CRM.CompanyLive do
                         <td style="font-weight:500;color:#3a3b45">{opp.name}</td>
                         <td style="color:var(--muted)">{stage_label(opp)}</td>
                         <td><.pill variant={opp_status_variant(opp.status)}>{opp.status}</.pill></td>
-                        <td style="color:var(--muted)">{dollars(opp.value_cents)}</td>
+                        <td style="color:var(--muted)">{dollars(opp.value)}</td>
                       </tr>
                     </.data_table>
                   <% end %>
@@ -413,12 +575,12 @@ defmodule Samen.Web.CRM.CompanyLive do
     <div style="padding:14px 16px;border-bottom:1px solid var(--border)">
       <.simple_form :let={f} for={@activity_form} id="log-activity-form" phx-change="validate_activity" phx-submit="log_activity">
         <.form_field
-          field={f[:type]}
+          field={f[:kind]}
           label="Type"
           type="select"
           options={[{"Note", "note"}, {"Call", "call"}, {"Email", "email"}, {"Meeting", "meeting"}, {"Task", "task"}]}
         />
-        <.form_field field={f[:subject]} label="Subject" placeholder="Subject" />
+        <.form_field field={f[:title]} label="Subject" placeholder="Subject" />
         <.form_field field={f[:body]} label="Details" type="textarea" rows="2" placeholder="Details…" />
         <:actions>
           <.button variant="primary" type="submit">Log activity</.button>
@@ -455,22 +617,137 @@ defmodule Samen.Web.CRM.CompanyLive do
   defp company_role(%{custom: custom}) when is_map(custom), do: Map.get(custom, "company_role")
   defp company_role(_), do: nil
 
-  defp timeline_entries(activities) do
-    Enum.map(activities, fn a ->
+  # -- T160 (spec §I4 completion) per-COMPANY panel renderers --------------------
+  #
+  # THIS company's OWN numbers, resolved through `Samen.CRM.AccountLink` — see
+  # `Samen.Web.AccountHealth.snapshot_for_company/3`'s moduledoc. Honest absence
+  # (`link_status: :unlinked`) renders "—", NEVER a book-wide number under this
+  # company's name (the T77 defect this closes) and NEVER a fabricated `$0.00`.
+
+  defp account_mrr_value(%{link_status: :unlinked}), do: "—"
+  defp account_mrr_value(%{billing_available?: false}), do: "—"
+  defp account_mrr_value(%{mrr_cents: cents}) when is_integer(cents), do: dollars(cents)
+  defp account_mrr_value(_), do: "—"
+
+  defp account_mrr_sub(%{link_status: :unlinked}), do: "not linked to a billing account yet"
+  defp account_mrr_sub(%{billing_available?: false}), do: "billing not configured for this app"
+  defp account_mrr_sub(%{subscription_status: nil}), do: "no subscription on file for this account"
+
+  defp account_mrr_sub(%{subscription_status: status, active_subs: n}),
+    do: "#{n} active subscription(s) · status: #{status}"
+
+  defp account_mrr_sub(_), do: "—"
+
+  defp account_health_value(%{link_status: :unlinked}), do: "—"
+  defp account_health_value(%{health: nil}), do: "—"
+  defp account_health_value(%{health: %AccountHealth{score: nil}}), do: "—"
+  defp account_health_value(%{health: %AccountHealth{score: score}}), do: "#{score} / 100"
+  defp account_health_value(_), do: "—"
+
+  defp account_health_sub(%{link_status: :unlinked}), do: "no signal — link this company to a billing account"
+  defp account_health_sub(%{health: nil}), do: "no billing signal available"
+  defp account_health_sub(%{health: %AccountHealth{band: band}}), do: health_band_label(band)
+  defp account_health_sub(_), do: "no billing signal available"
+
+  defp health_band_label(:healthy), do: "healthy"
+  defp health_band_label(:watch), do: "watch"
+  defp health_band_label(:at_risk), do: "at risk"
+  defp health_band_label(:critical), do: "critical"
+  defp health_band_label(_), do: "no signal"
+
+  # Support carries NO structural per-account link in this substrate (see
+  # `AccountHealth`'s moduledoc — `Ticket` has no `customer_id`/`company_id`) — the
+  # per-company tile is ALWAYS honest absence, distinct copy from "not configured" so
+  # it doesn't read as a bug.
+  defp account_support_value(_), do: "—"
+  defp account_support_sub(_), do: "not linked to individual accounts in this build — see the portfolio view below"
+
+  defp account_health_disclosure(%{link_status: :anchor}) do
+    "linked via a registered billing-account anchor on this company — MRR/health reflect THIS company's own " <>
+      "billing customer only. Support tickets remain portfolio-only (see below) — this substrate has no " <>
+      "per-account ticket link yet."
+  end
+
+  defp account_health_disclosure(%{link_status: :domain}) do
+    "linked by a confident, fail-closed domain match against this org's billing customers (no anchor set yet) — " <>
+      "MRR/health reflect THIS company's own billing customer only. Support tickets remain portfolio-only " <>
+      "(see below)."
+  end
+
+  defp account_health_disclosure(%{link_status: :unlinked}) do
+    "this company isn't linked to a billing account yet — set an anchor below, or a confident domain match will " <>
+      "link it automatically. No numbers are shown until a link is confident: never a guess, never a book-wide " <>
+      "total under this company's name."
+  end
+
+  defp account_health_disclosure(_), do: "this company isn't linked to a billing account yet."
+
+  defp account_health_anchor_value(%{link_status: :anchor, billing_customer_id: id}) when is_binary(id), do: id
+  defp account_health_anchor_value(_), do: ""
+
+  # -- T77 (spec §I4) PORTFOLIO panel renderers (secondary, clearly separated) ---
+  #
+  # PORTFOLIO totals across this org's ENTIRE customer/support book — see
+  # `Samen.Web.AccountHealth`'s moduledoc. Every label/sub-copy below says "all
+  # customers"/"across the book" so nobody reads these tiles as this-specific-
+  # company's numbers.
+  #
+  # Honest-absence discipline: `billing_available?`/`support_available?` false means
+  # EITHER the scope is not MOUNTED for this host, OR the underlying read genuinely
+  # FAILED (fix round 1, MED-3 — see `AccountHealth.billing_snapshot/2`'s canary read)
+  # — rendered "—", NEVER a fabricated `$0.00` or `0`. When a scope IS mounted and the
+  # read genuinely SUCCEEDS with nothing in it, the real zero renders (a true DB
+  # aggregate, not a fabrication).
+
+  defp portfolio_mrr_value(%{billing_available?: false}), do: "—"
+  defp portfolio_mrr_value(%{mrr_cents: cents}), do: dollars(cents)
+  defp portfolio_mrr_value(_), do: "—"
+
+  defp portfolio_mrr_sub(%{billing_available?: false}), do: "billing not configured for this app"
+  defp portfolio_mrr_sub(%{subscription_status: nil}), do: "no subscriptions on file across this org's customers"
+
+  defp portfolio_mrr_sub(%{subscription_status: status, active_subs: n}),
+    do: "#{n} active subscription(s) · worst status in book: #{status}"
+
+  defp portfolio_mrr_sub(_), do: "—"
+
+  defp portfolio_health_value(%{health: nil}), do: "—"
+  defp portfolio_health_value(%{health: %AccountHealth{score: nil}}), do: "—"
+  defp portfolio_health_value(%{health: %AccountHealth{score: score}}), do: "#{score} / 100"
+  defp portfolio_health_value(_), do: "—"
+
+  defp portfolio_health_sub(%{health: nil}), do: "no billing or support signal available"
+  defp portfolio_health_sub(%{health: %AccountHealth{band: band}}), do: health_band_label(band)
+  defp portfolio_health_sub(_), do: "no billing or support signal available"
+
+  defp portfolio_support_value(%{support_available?: false}), do: "—"
+  defp portfolio_support_value(%{open_tickets: n}) when is_integer(n), do: n
+  defp portfolio_support_value(_), do: "—"
+
+  defp portfolio_support_sub(%{support_available?: false}), do: "support not configured for this app"
+  defp portfolio_support_sub(%{breaching_sla: 0}), do: "none breaching SLA, across all customers"
+  defp portfolio_support_sub(%{breaching_sla: n}) when is_integer(n), do: "#{n} breaching SLA, across all customers"
+  defp portfolio_support_sub(_), do: "—"
+
+  # Project the Work Task onto the EXISTING timeline entry keys (ADR-041 §6.1):
+  # kind → :type, title → :subject, completed_at||inserted_at → :at. The presentational
+  # timeline component is unchanged.
+  defp timeline_entries(tasks) do
+    Enum.map(tasks, fn t ->
       %{
-        id: a.id,
-        type: a.type,
-        subject: a.subject,
-        body: a.body,
-        status: a.status,
-        at: a.completed_at || Map.get(a, :inserted_at),
-        who: activity_author(a)
+        id: t.id,
+        type: t.kind,
+        subject: t.title,
+        body: t.body,
+        status: t.status,
+        at: t.completed_at || Map.get(t, :inserted_at),
+        who: task_author(t)
       }
     end)
   end
 
-  defp activity_author(%{custom: custom}) when is_map(custom), do: Map.get(custom, "author")
-  defp activity_author(_), do: nil
+  defp task_author(%{custom: custom}) when is_map(custom), do: Map.get(custom, "author")
+  defp task_author(_), do: nil
 
   defp stage_label(%{__stage__: %{label: label}}) when is_binary(label), do: label
   defp stage_label(%{__stage__: %{name: name}}) when is_binary(name), do: name
@@ -482,6 +759,8 @@ defmodule Samen.Web.CRM.CompanyLive do
   defp opp_status_variant(:on_hold), do: "warn"
   defp opp_status_variant(_), do: "mut"
 
+  # ADR-036 §4.5(3): opp.value is now the Money composite (dollars(opp.value)).
+  defp dollars(%Money{} = money), do: dollars(Samen.Type.Money.cents(money))
   defp dollars(cents) when is_integer(cents),
     do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
 

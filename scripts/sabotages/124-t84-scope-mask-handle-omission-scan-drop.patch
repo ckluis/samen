@@ -1,0 +1,27 @@
+# SABOTAGE: T84 (ADR-044 s16.3/s16.4a). Samen.ScopeMaskCase.assert_scope_masked!/3 asserts a
+# masked tier-2 row carries NO handle anywhere in the DOM (incl. data-/attribute values) - the
+# s16.4a "no handle in any attribute" ruling, the second half of mask-by-omission. Dropping the
+# handle omission scan lets a handle leak through a data- attribute undetected. Positive control:
+# the name omission scan still fires, so the flip is non-vacuous.
+# APP: samen_core
+# TEST_FILES: test/samen/scope_mask_case_test.exs
+# MUST_FAIL: catches a handle that leaked into a DOM attribute
+diff --git a/samen_core/lib/samen/scope_mask_case.ex b/samen_core/lib/samen/scope_mask_case.ex
+index eca4f2c..2796186 100644
+--- a/samen_core/lib/samen/scope_mask_case.ex
++++ b/samen_core/lib/samen/scope_mask_case.ex
+@@ -76,11 +76,9 @@ defmodule Samen.ScopeMaskCase do
+                "viewer is not scoped to (§16.2/§16.3)"
+     end)
+ 
+-    Enum.each(handles, fn handle ->
+-      refute html =~ handle,
+-             "scope-mask by omission FAILED: handle #{inspect(handle)} reached the client on a " <>
+-               "masked row (§16.4a: no name, no deep link, no handle in any DOM attribute)"
+-    end)
++    # SABOTAGE (T84 R-B, s16.4a): drop the handle omission scan, so a handle leaked into a
++    # masked row's DOM attribute (a stable per-tenant pseudonym) is no longer caught.
++    _ = handles
+ 
+     html
+   end

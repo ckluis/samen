@@ -55,7 +55,7 @@ defmodule Samen.Web.Marketing.CampaignsLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     {:noreply, load(assign(socket, org_id: org_id, return_to: return_path(uri)), org_id)}
   end
 
@@ -111,8 +111,14 @@ defmodule Samen.Web.Marketing.CampaignsLive do
     end
   end
 
-  # FAIL-HONEST delete: the kernel defines no cascade — a campaign with linked
-  # sends is refused by the DB (FK) and the refusal is SURFACED on the page.
+  # ADR-040 §5.9 (T37d): Campaign adopted E6 soft-delete (`archivable true`) —
+  # the default `:destroy` is now a soft archive (an UPDATE, never a DELETE),
+  # so a linked `send` row can no longer FK-refuse this path (§5.4: no cascade
+  # is declared for Marketing, and `send` is not itself archivable — archiving
+  # a campaign simply leaves its `send` rows live and untouched). The
+  # `{:error, _}` branch below stays as defensive fail-honest surfacing for any
+  # OTHER failure (e.g. a not-found id, `Reads.delete_record/4`'s rescue
+  # clause) — it is no longer reachable via a linked-send FK specifically.
   # Admin-gated by the kernel → the plane-preserving `write_scope/2`.
   def handle_event("delete", %{"id" => id}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
@@ -124,7 +130,7 @@ defmodule Samen.Web.Marketing.CampaignsLive do
       {:error, _reason} ->
         {:noreply,
          assign(socket,
-           delete_error: "Could not delete this campaign — it still has linked records (sends)."
+           delete_error: "Could not delete this campaign."
          )}
     end
   end

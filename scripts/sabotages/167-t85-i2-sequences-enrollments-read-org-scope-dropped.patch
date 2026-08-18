@@ -1,0 +1,23 @@
+# SABOTAGE: T85/I2 (phase6 T85 gate M5) — the tenant-plane CRM Sequences surface's
+# enrollments read DROPS its org-scope: `Samen.Web.CRM.SequencesReads.enrollments/2`
+# reads with `authorize?: false` instead of `scope: scope`, defeating the resources'
+# `Samen.Policy.OrgScope` read policy. A cross-org enrollment then leaks into another
+# tenant's Sequences page — exactly the "a sequences page listing every tenant's
+# enrollments" regression the red-path pins. The named cross-org test flips (its
+# `refute enr_b.id in enr_ids_a` now holds a foreign row); the positive control (each
+# org sees its own) still passes, so the flip is non-vacuous. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_sequences_test.exs
+# MUST_FAIL: CROSS-ORG: another org's sequences/enrollments NEVER appear in this org's reads
+diff --git a/samen_web/lib/samen/web/crm/sequences_reads.ex b/samen_web/lib/samen/web/crm/sequences_reads.ex
+--- a/samen_web/lib/samen/web/crm/sequences_reads.ex
++++ b/samen_web/lib/samen/web/crm/sequences_reads.ex
+@@ -139,7 +139,7 @@ defmodule Samen.Web.CRM.SequencesReads do
+         ])
+         |> Ash.Query.sort(inserted_at: :desc)
+         |> Ash.Query.limit(@limit)
+-        |> Ash.read!(scope: scope)
++        |> Ash.read!(authorize?: false)
+     end
+   rescue
+     _ -> []

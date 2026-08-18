@@ -10,7 +10,9 @@ defmodule SamenCore.TestRepo do
 
   @impl true
   def installed_extensions do
-    ["ash-functions"]
+    # AshMoney.AshPostgresExtension (ADR-036 D1): installs money_with_currency —
+    # samen_core's own money_test.exs fixture resource needs the composite type.
+    ["ash-functions", AshMoney.AshPostgresExtension]
   end
 
   @impl true

@@ -65,16 +65,15 @@ defmodule Samen.Web.Flags.Reads do
   The tenant-ADMIN write scope for the kernel's admin-gated flag writes (`FeatureFlag`
   carries `RoleAtLeast :admin`; the mount's plane scope is a `:member`).
 
-  Same-org role elevation ONLY — the `Samen.Web.Billing.Reads.write_scope/2` pattern:
-  the elevation PRESERVES every plane marker from `Mount.scope/2`, so an
-  operator-plane (impersonation) mount elevated here still carries `plane: :operator`
-  and the kernel write guard behaves exactly as before — the elevation raises RBAC
-  rank, never the masking plane. `OrgScope` still confines the write to `org_id`.
+  ADR-045 §4.4 (S1a) — delegates to `Samen.Web.TenantRole.admin_scope/3`, the ONE tenant-role
+  helper: the disarmed dev posture keeps `:admin` byte-for-byte; an ARMED host derives the
+  principal's REAL `Identity.Membership` role (fail-closed `:member`, never `:admin`) so an
+  ordinary member no longer self-elevates. The elevation still PRESERVES every plane marker from
+  `Mount.scope/2` (operator-plane mounts keep `plane: :operator`), so the kernel write guard is
+  unchanged and `OrgScope` still confines the write to `org_id`.
   """
-  def write_scope(mount, org_id) do
-    %Samen.Scope{actor: actor} = Mount.scope(mount, org_id)
-    %Samen.Scope{actor: Map.put(actor, :role, :admin)}
-  end
+  def write_scope(mount, org_id, principal \\ nil),
+    do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal)
 
   @doc """
   Flip a flag's `enabled` gate through the sanctioned `:update` action (the tenant

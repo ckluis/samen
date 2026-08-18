@@ -12,9 +12,10 @@ defmodule Samen.Web.CRMCompanyDetailCrudTest do
       timeline; an invalid submit (blank required `type`) renders inline errors and
       persists NOTHING.
     * **Delete** — `delete_confirm/1` interlock + destroy + navigate back to the
-      companies list; FAIL-HONEST red path: the seeded company has linked
-      person/opportunity/activity rows, the kernel defines no cascade, so the destroy
-      is REFUSED and the refusal is SURFACED (no silent navigate).
+      companies list. ADR-040 §5.9/T37c: `Company` is `archivable true`, so the
+      default destroy now soft-archives (T36); CRM declares no cascade (§5.4), so
+      a company with linked person/opportunity rows archives cleanly too — its
+      children stay live, untouched.
     * **PER-PLANE MASKING (MC on the newly write-enabled surface)** — Company itself
       is non-PII, but the Overview tab renders this company's CONTACTS sub-list
       (name/email through `PiiResolution`): tenant reads it CLEAR, the operator plane
@@ -22,6 +23,8 @@ defmodule Samen.Web.CRMCompanyDetailCrudTest do
       NO write affordance (edit/delete/composer are tenant-plane posture).
   """
   use Samen.WebTest.DataCase, async: false
+
+  require Ash.Query
 
   alias Samen.Web.CRM.CompanyLive
 
@@ -49,8 +52,16 @@ defmodule Samen.Web.CRMCompanyDetailCrudTest do
 
   defp raw_company(id), do: Ash.get!(Samen.WebTest.Crm.Company, id, authorize?: false)
 
+  defp archived_company(id) do
+    Samen.WebTest.Crm.Company
+    |> Ash.Query.for_read(:archived)
+    |> Ash.read!(authorize?: false)
+    |> Enum.find(&(&1.id == id))
+  end
+
+  # ADR-041 §5: the log-activity composer now writes a canonical Work Task. Count Tasks.
   defp activity_count(org_id) do
-    Samen.WebTest.Crm.Activity
+    Samen.WebTest.Work.Task
     |> Ash.Query.ensure_selected([:org_id])
     |> Ash.read!(authorize?: false)
     |> Enum.count(&(&1.org_id == org_id))
@@ -116,7 +127,7 @@ defmodule Samen.Web.CRMCompanyDetailCrudTest do
   # Log-activity — the kit-form composer on the company timeline (AC-G1-1/2)
   # ---------------------------------------------------------------------------
 
-  test "log_activity creates a company-linked Activity and it appears in the re-rendered timeline",
+  test "log_activity creates a company-anchored Work Task and it appears in the re-rendered timeline",
        %{org_id: org_id, company_id: company_id} do
     before_count = activity_count(org_id)
 
@@ -126,26 +137,30 @@ defmodule Samen.Web.CRMCompanyDetailCrudTest do
 
     assert html(socket) =~ ~s(id="log-activity-form")
 
+    # ADR-041 §6.1: the composer writes a Work Task with the Task field names (kind/title);
+    # the LiveView merges the crm.company subject anchor.
     socket =
       event(socket, "log_activity", %{
-        "activity" => %{"type" => "call", "subject" => "Carrier onboarding call", "body" => "Docs received."}
+        "activity" => %{"kind" => "call", "title" => "Carrier onboarding call", "body" => "Docs received."}
       })
 
     assert activity_count(org_id) == before_count + 1
     rendered = html(socket)
     assert rendered =~ "Carrier onboarding call"
 
-    # The new row is company-linked (the server-side fact, never client input).
+    # The new Task is company-ANCHORED via the generic object-ref (subject_key/subject_id) —
+    # the server-side fact, never client input (no CRM FK).
     linked =
-      Samen.WebTest.Crm.Activity
-      |> Ash.Query.ensure_selected([:subject, :company_id])
+      Samen.WebTest.Work.Task
+      |> Ash.Query.ensure_selected([:title, :subject_key, :subject_id])
       |> Ash.read!(authorize?: false)
-      |> Enum.find(&(&1.subject == "Carrier onboarding call"))
+      |> Enum.find(&(&1.title == "Carrier onboarding call"))
 
-    assert linked.company_id == company_id
+    assert linked.subject_key == "crm.company"
+    assert linked.subject_id == company_id
   end
 
-  test "RED PATH (AC-G1-2): an invalid composer submit (blank required type) shows inline errors, persists NOTHING",
+  test "RED PATH (AC-G1-2): an invalid composer submit (out-of-enum kind) shows inline errors, persists NOTHING",
        %{org_id: org_id, company_id: company_id} do
     before_count = activity_count(org_id)
 
@@ -153,26 +168,26 @@ defmodule Samen.Web.CRMCompanyDetailCrudTest do
       mount_socket(org_id, company_id)
       |> Phoenix.Component.assign(:active_tab, "activity")
 
+    # ADR-041 §6.1: the composer writes a Work Task; `kind` is a bounded one_of enum — an
+    # out-of-enum value is refused + surfaced inline, persisting nothing (AC-G1-2 red path).
     socket =
       event(socket, "log_activity", %{
-        "activity" => %{"type" => "", "subject" => "Half-written note"}
+        "activity" => %{"kind" => "not_a_valid_kind", "title" => "Half-written note"}
       })
 
     rendered = html(socket)
     assert rendered =~ ~s(id="log-activity-form")
     assert rendered =~ "field-invalid"
     assert rendered =~ "field-error"
-    assert rendered =~ "is required"
     assert activity_count(org_id) == before_count
   end
 
   # ---------------------------------------------------------------------------
-  # Delete — interlock + destroy + navigate back; fail-honest refusal
+  # Delete — interlock + soft-archive + navigate back (ADR-040 §5.9/T37c)
   # ---------------------------------------------------------------------------
 
-  test "TENANT: delete carries the interlock, destroys the company, and navigates back to the list",
+  test "TENANT: delete carries the interlock, soft-archives the company, and navigates back to the list",
        %{org_id: org_id} do
-    # A FRESH company with no linked rows — deletable under the kernel's FK rules.
     company = fresh_company(org_id, "Deletable Freight Co")
     socket = mount_socket(org_id, company.id)
 
@@ -185,21 +200,38 @@ defmodule Samen.Web.CRMCompanyDetailCrudTest do
     assert {:live, :redirect, %{to: to}} = socket.redirected
     assert to =~ "/crm/companies"
 
+    # `raw_company/1` reads through the default (archived-excluding) filter — the
+    # archived company drops out, same observable shape as the old hard delete for
+    # THIS assertion, even though the row still exists (T36 soft-destroy).
     assert_raise Ash.Error.Invalid, fn -> raw_company(company.id) end
+    assert archived_company(company.id).archived_at
   end
 
-  test "FAIL-HONEST RED PATH: deleting a company with linked records is REFUSED and SURFACED — no silent navigate",
+  test "delete soft-archives a company WITH linked person/opportunity rows too (no FK refusal — ADR-040 §5.4 declares no cascade)",
        %{org_id: org_id, company_id: company_id} do
-    # The seeded company HAS a person + opportunity + activity; no cascade in the
-    # kernel, so the DB refuses. The page must surface the refusal, not navigate.
+    # The seeded company HAS a person + opportunity; CRM declares no cascade
+    # (§5.4), so the destroy is no longer a real DELETE for Postgres to refuse —
+    # it soft-archives and the page navigates away, exactly like the bare case.
     socket = mount_socket(org_id, company_id)
     socket = event(socket, "delete_company", %{"id" => company_id})
 
-    assert socket.redirected == nil
-    assert socket.assigns.delete_error =~ "Could not delete this company"
-    assert html(socket) =~ ~s(id="delete-error")
-    # The company provably still exists.
-    assert raw_company(company_id).id == company_id
+    # The redirect itself proves success (the error branch never navigates —
+    # see the TENANT test above and the handler's `case` in company_live.ex).
+    assert {:live, :redirect, %{to: to}} = socket.redirected
+    assert to =~ "/crm/companies"
+    assert archived_company(company_id).archived_at
+
+    # The linked Person/Opportunity rows are untouched (no cascade) — still live
+    # and still pointing at the now-archived company.
+    assert Samen.WebTest.Crm.Person
+           |> Ash.Query.filter(company_id == ^company_id)
+           |> Ash.read!(authorize?: false)
+           |> Enum.any?()
+
+    assert Samen.WebTest.Crm.Opportunity
+           |> Ash.Query.filter(company_id == ^company_id)
+           |> Ash.read!(authorize?: false)
+           |> Enum.any?()
   end
 
   # ---------------------------------------------------------------------------

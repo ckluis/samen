@@ -14,7 +14,6 @@ defmodule Driftwood.Repo.Migrations.DriftwoodResources do
     Driftwood.Crm.Person,
     Driftwood.Crm.Pipeline,
     Driftwood.Crm.Opportunity,
-    Driftwood.Crm.Activity,
     Driftwood.Crm.Attachment,
     Driftwood.Freight.Driver,
     Driftwood.Freight.Settlement,
@@ -112,51 +111,10 @@ defmodule Driftwood.Repo.Migrations.DriftwoodResources do
       add(:fop_updated_at, :utc_datetime, null: false)
     end
 
-    # --- fac_activity : the CHECK-CALL event stream (re-identified via the Context) ---
-    create table(:fac_activity, primary_key: false) do
-      add(:fac_type, :text, null: false)
-      add(:fac_subject, :text)
-      add(:fac_body, :text)
-      add(:fac_status, :text, default: "pending")
-      add(:fac_due_at, :utc_datetime)
-      add(:fac_completed_at, :utc_datetime)
-      add(:fac_custom, :map, default: fragment("'{}'::jsonb"))
-
-      add(
-        :fac_company_id,
-        references(:fcm_company,
-          column: :fcm_id,
-          name: "fac_activity_fac_company_id_fkey",
-          type: :uuid,
-          prefix: "public"
-        )
-      )
-
-      add(
-        :fac_person_id,
-        references(:fpr_person,
-          column: :fpr_id,
-          name: "fac_activity_fac_person_id_fkey",
-          type: :uuid,
-          prefix: "public"
-        )
-      )
-
-      add(
-        :fac_opportunity_id,
-        references(:fop_opportunity,
-          column: :fop_id,
-          name: "fac_activity_fac_opportunity_id_fkey",
-          type: :uuid,
-          prefix: "public"
-        )
-      )
-
-      add(:fac_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
-      add(:fac_org_id, :uuid, null: false)
-      add(:fac_inserted_at, :utc_datetime, null: false)
-      add(:fac_updated_at, :utc_datetime, null: false)
-    end
+    # --- fac_activity : REMOVED (ADR-041 §5, ruling M5) — the CRM Activity (freight
+    # CheckCall) was migrated into the canonical Work-scope Task (see the
+    # `migrate_activity_to_task` contract migration) and its resource removed, so this
+    # migration no longer creates the table. ---
 
     # --- fat_attachment : rate cons, BOLs, PODs (file refs) ---
     create table(:fat_attachment, primary_key: false) do
@@ -328,11 +286,6 @@ defmodule Driftwood.Repo.Migrations.DriftwoodResources do
     drop(constraint(:fat_attachment, "fat_attachment_fat_person_id_fkey"))
     drop(constraint(:fat_attachment, "fat_attachment_fat_company_id_fkey"))
     drop(table(:fat_attachment))
-
-    drop(constraint(:fac_activity, "fac_activity_fac_opportunity_id_fkey"))
-    drop(constraint(:fac_activity, "fac_activity_fac_person_id_fkey"))
-    drop(constraint(:fac_activity, "fac_activity_fac_company_id_fkey"))
-    drop(table(:fac_activity))
 
     drop(constraint(:fop_opportunity, "fop_opportunity_fop_pipeline_id_fkey"))
     drop(constraint(:fop_opportunity, "fop_opportunity_fop_company_id_fkey"))

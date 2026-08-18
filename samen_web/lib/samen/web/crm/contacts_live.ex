@@ -65,7 +65,7 @@ defmodule Samen.Web.CRM.ContactsLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     {:noreply, load(assign(socket, org_id: org_id, return_to: return_path(uri)), org_id)}
   end
 
@@ -161,8 +161,13 @@ defmodule Samen.Web.CRM.ContactsLive do
     end
   end
 
-  # FAIL-HONEST delete: the kernel defines no cascade — a contact with linked
-  # activities is refused by the DB (FK) and the refusal is SURFACED on the page.
+  # ADR-040 §5.9/T37c: `Person` is `archivable true`, so `Reads.delete_contact/3`'s
+  # `Ash.destroy/2` now rides the default SOFT destroy (T36) — this sets
+  # `archived_at` rather than removing the row (INV-1: the archived row still
+  # masks its vault fields per plane, unchanged by this handler). No cascade is
+  # declared for CRM (§5.4), so linked attachments are untouched and the destroy
+  # is never refused on their account; any `{:error, _}` here is a genuine
+  # failure (e.g. an authorization denial), not the old FK-refusal case.
   def handle_event("delete", %{"id" => id}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
@@ -172,10 +177,7 @@ defmodule Samen.Web.CRM.ContactsLive do
         {:noreply, load(assign(socket, delete_error: nil), org_id)}
 
       {:error, _reason} ->
-        {:noreply,
-         assign(socket,
-           delete_error: "Could not delete this contact — it still has linked records (activities)."
-         )}
+        {:noreply, assign(socket, delete_error: "Could not delete this contact.")}
     end
   end
 
@@ -212,6 +214,9 @@ defmodule Samen.Web.CRM.ContactsLive do
 
         <.topbar title="Contacts" crumbs={crumbs(@samen_mount, @org_id, "Contacts")}>
           <:actions>
+            <.button :if={not @no_org} phx-click="toggle_archived" id="toggle-archived-contacts">
+              {if @list_state.show_archived, do: "Hide archived", else: "Show archived"}
+            </.button>
             <.button :if={writable?(@samen_mount) and not @no_org} variant="primary" phx-click="new_contact" id="new-contact">
               <:icon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
@@ -301,7 +306,12 @@ defmodule Samen.Web.CRM.ContactsLive do
                   <td class="p-company" style="color:var(--muted)">{(p.company_id && Map.get(@company_names, p.company_id)) || "—"}</td>
                   <td class="p-title" style="color:var(--muted);font-size:12px">{p.job_title || "—"}</td>
                   <td :if={writable?(@samen_mount)} class="p-actions">
-                    <.delete_confirm phx-click="delete" phx-value-id={p.id} />
+                    <%= if Map.get(p, :archived_at) do %>
+                      <.pill variant="mut">archived</.pill>
+                      <.button phx-click="restore" phx-value-id={p.id} class="restore-contact">Restore</.button>
+                    <% else %>
+                      <.delete_confirm phx-click="delete" phx-value-id={p.id} />
+                    <% end %>
                   </td>
                 </:row>
               </.list_view>

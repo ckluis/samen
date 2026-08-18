@@ -108,6 +108,17 @@ defmodule Samen.Policy.SameOrgFk do
         {:ok, ^org_id} ->
           changeset
 
+        :org_less_target ->
+          # The target table carries NO org_id (an org-less anchor like Identity.Org
+          # or a shared, cross-org Credential). There is no org on the target to
+          # MISMATCH against, so the same-org check has nothing to enforce — PASS
+          # (D2 / ADR-046 §4.6). This matches both this module's own inline comment
+          # below and the verifier moduledoc ("returns :target_has_no_org_id and
+          # passes"). It only ever relaxes the check for a target that structurally
+          # cannot cross orgs; a target that HAS an org_id is still routed through
+          # the query arm below and a genuine cross-org mismatch is still refused.
+          changeset
+
         {:ok, other_org_id} ->
           Ash.Changeset.add_error(
             changeset,
@@ -172,8 +183,11 @@ defmodule Samen.Policy.SameOrgFk do
 
       is_nil(org_id_source) ->
         # Target has no org_id (an org-less anchor like Identity.Org) — nothing to
-        # enforce; treat as a pass by returning the write's own org (no mismatch).
-        {:error, :target_has_no_org_id}
+        # enforce; treat as a PASS (an org-less target cannot cross orgs). The
+        # `:org_less_target` sentinel is routed to a pass arm in
+        # `validate_relationship/3` (D2 / ADR-046 §4.6) — matching this module's
+        # documented contract and the verifier moduledoc, not an add_error refusal.
+        :org_less_target
 
       true ->
         sql =

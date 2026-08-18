@@ -13,8 +13,8 @@
 #      dir, using FRESH registry-safe abbrevs.
 #   2. deps.get + `mix compile --warnings-as-errors` (via Gen.compile_and_dump!/1, which also
 #      dumps the schema.dict + api_contract.v1.json baselines) — ZERO hand-edits.
-#   3. Run the generated app's FULL ci.sh — the entire verifier gate (18 steps incl.
-#      api_contract), the generated test suite (incl. the gen'd red-paths: record_vault,
+#   3. Run the generated app's FULL ci.sh — the entire verifier gate (19 steps incl.
+#      api_contract + ai_prompt_masking), the generated test suite (incl. the gen'd red-paths: record_vault,
 #      the bounded/clamp/allowlist API red paths, the seeds vault-routing red path), and the
 #      per-resource anti-tautology probe. It must PASS (exit 0).
 #   4. SEED it via the emitted `mix <app>.seed` task, and confirm the seeds ran (the task
@@ -51,6 +51,16 @@
 # `:code.priv_dir(:samen_core)` at ITS compile time), and the physical file is restored from
 # the scratch copy on exit. The scratch copy is the source of truth for the restore.
 #
+# T107 (interrupt hardening): both the scratch app dir and the registry snapshot are now
+# created via real OS `mktemp`/`mktemp -d` (unique-per-run, collision-immune by construction
+# — a pre-planted stray file with a colliding-shaped name cannot break the run, unlike the
+# old nanosecond-timestamp naming). A `:sigterm` trap (`System.trap_signal/3`) runs `cleanup.()`
+# for defense-in-depth when this probe is invoked directly (outside ci.sh). NOTE: `:sigint` is
+# NOT trappable inside the BEAM (`System.trap_signal/3` has no :sigint clause) — the
+# AUTHORITATIVE interrupt backstop for both SIGINT and SIGTERM is the OS-level snapshot+trap
+# wrapper in root `ci.sh` (`run_gen_probe`), which restores the registry byte-exact regardless
+# of whether this process gets a chance to run its own cleanup at all.
+#
 # Run:  cd samen_core && mix run priv/gen_app_flagship_probe.exs
 # Exit: 0 only if the FULL running product generated with zero hand-edits, its ci.sh passed,
 #       it seeded + booted + served every route, and BOTH sabotages flipped the gate and
@@ -86,17 +96,25 @@ resource_abbrev = identity.abbrev
 http_port = 4990 + rem(System.unique_integer([:positive]), 90)
 
 samen_core_root = Gen.default_target() |> Path.join("samen_core")
-scratch_parent = Path.join([samen_core_root, "..", "_gen_flagship_scratch"]) |> Path.expand()
+scratch_root = Path.expand(Path.join(samen_core_root, ".."))
 
-File.rm_rf!(scratch_parent)
-File.mkdir_p!(scratch_parent)
+# T107: real `mktemp -d` — atomic, collision-immune, unique per run (was a fixed
+# `_gen_flagship_scratch` name; two concurrent/orphaned runs of this probe could clash).
+{scratch_parent_out, 0} =
+  System.cmd("mktemp", ["-d", Path.join(scratch_root, "_gen_flagship_scratch.XXXXXX")])
+
+scratch_parent = String.trim(scratch_parent_out)
 
 # --- REGISTRY SAFETY: snapshot the committed registry to a scratch/tmp copy FIRST -----
 registry_path = Samen.AbbrevRegistry.path()
 registry_pristine = File.read!(registry_path)
 
-registry_scratch =
-  Path.join(System.tmp_dir!(), "flagship_registry_pristine_#{System.system_time(:nanosecond)}.json")
+# T107: real `mktemp` (was a nanosecond-timestamp name) — atomically-created, guaranteed
+# non-colliding even against a pre-planted stray file with the same naming shape.
+{registry_scratch_out, 0} =
+  System.cmd("mktemp", [Path.join(System.tmp_dir!(), "flagship_registry_pristine.XXXXXX")])
+
+registry_scratch = String.trim(registry_scratch_out)
 
 File.write!(registry_scratch, registry_pristine)
 
@@ -122,6 +140,19 @@ halt = fn code, msg ->
   IO.puts(msg)
   cleanup.()
   System.halt(code)
+end
+
+# T107: SIGTERM defense-in-depth for standalone invocation (outside ci.sh). `:sigint` has
+# no trap clause inside the BEAM — see the T107 note above the REGISTRY SAFETY section.
+# SAMEN_T107_DISABLE_INNER_TRAP=1 skips installing this trap — used ONLY by
+# scripts/interrupt_probe_test.sh's negative control, to isolate proof of the OUTER
+# ci.sh-level trap (scripts/gen_probe_guard.sh) without this inner layer masking it.
+if System.get_env("SAMEN_T107_DISABLE_INNER_TRAP") != "1" do
+  System.trap_signal(:sigterm, :t107_flagship_probe_sigterm, fn ->
+    IO.puts("\nFATAL: SIGTERM received — restoring registry from snapshot before exit.")
+    cleanup.()
+    System.halt(143)
+  end)
 end
 
 IO.puts("== WS-D D6 FLAGSHIP probe (AC-X-1): --web --api --seeds --observability ==")
@@ -183,7 +214,7 @@ try do
     halt.(1, "FAIL: the generated app is missing the seeds vault-routing red path (D4).")
   end
 
-  IO.puts("FLAGSHIP: full ci.sh green — verifier gate (18 steps incl. api_contract) + gen'd")
+  IO.puts("FLAGSHIP: full ci.sh green — verifier gate (19 steps incl. api_contract + ai_prompt_masking) + gen'd")
   IO.puts("          test suite (record_vault, API bounded/clamp/allowlist, seeds vault) + probe.")
 
   # --- 2. SEED via the emitted `mix <app>.seed`, then BOOT + HTTP-probe ----------------
@@ -218,9 +249,39 @@ try do
 
   {:ok, _} = Application.ensure_all_started(:#{otp_app})
 
+  # The generated app's `aud_event` migration creates only the FIXED launch-month partition; in a
+  # real deployment the daily `Samen.AuditEvent.PartitionManager` Oban job rolls partitions
+  # forward, but on a FRESH boot before that job's first run (or when the wall clock is already
+  # past the launch month) the current month's partition is absent — so the boot+archive probe's
+  # audit write would hit "no partition of relation aud_event". Provision the current + upcoming
+  # months up front, exactly what the daily job does (forward-safe; the ensure is idempotent).
+  Samen.AuditEvent.PartitionManager.ensure_upcoming_partitions(#{module}.Repo, Date.utc_today(), 2)
+
   # `mix run` prunes unused-OTP-app code paths; restore inets for the HTTP client.
   Mix.ensure_application!(:inets)
   {:ok, _} = Application.ensure_all_started(:inets)
+
+  # --- ADR-044 §9.3(d)/§9.2 (T82 fix round, WS-J J5) — the ZERO-CONFIG fleet
+  # honesty proof, IN-PROCESS (the "gen_app zero-config probe" ADR §9.3 binds
+  # to T82 by name). A freshly generated app, with NO fleet config anywhere in
+  # this boot, must default to `:embedded` mode and read back exactly one
+  # honest self-row, zero DB/network dependency. This is the SUBSTRATE half of
+  # J5's zero-config claim; the "cockpit renders it" half needs
+  # /operator/fleet, which is T84's (not built yet) — tracked, not silently
+  # skipped. ----------------------------------------------------------------
+  unless Samen.Fleet.mode(:#{otp_app}) == :embedded do
+    IO.puts("FLAGSHIP FAIL: Samen.Fleet.mode(:#{otp_app}) != :embedded with zero fleet config — \#{inspect(Samen.Fleet.mode(:#{otp_app}))}")
+    System.halt(1)
+  end
+
+  case Samen.Fleet.read(:#{otp_app}) do
+    {:ok, %{rows: [_row], reporting: 1, total: 1}} ->
+      IO.puts("FLAGSHIP: Samen.Fleet.mode(:#{otp_app}) == :embedded, read/2 -> exactly one honest self-row, zero config")
+
+    other ->
+      IO.puts("FLAGSHIP FAIL: Samen.Fleet.read(:#{otp_app}) did not return exactly one honest self-row — \#{inspect(other)}")
+      System.halt(1)
+  end
 
   # --- SEED via the app's Seeds module (the exact call `mix #{otp_app}.seed` makes) ----
   seed_org = #{module}.Seeds.run()
@@ -272,6 +333,31 @@ try do
     end
   end
 
+  # B-SEC / S3 — a GET that must be REFUSED (no autoredirect, so the 302 itself is asserted
+  # rather than the login page httpc would silently follow to).
+  refuses = fn path, why ->
+    url = ~c"http://127.0.0.1:#{http_port}\#{path}"
+
+    case :httpc.request(:get, {url, []}, [autoredirect: false], body_format: :binary) do
+      {:ok, {{_, 302, _}, hdrs, _body}} ->
+        loc = for({~c"location", v} <- hdrs, do: to_string(v)) |> List.first()
+
+        unless loc && String.starts_with?(loc, "/login") do
+          IO.puts("FLAGSHIP FAIL: GET \#{path} redirected to \#{inspect(loc)}, expected /login (\#{why})")
+          System.halt(1)
+        end
+
+        IO.puts("FLAGSHIP: GET \#{path} → 302 /login (REFUSED — \#{why})")
+
+      {:ok, {{_, code, _}, _hdrs, _body}} ->
+        IO.puts("FLAGSHIP FAIL: GET \#{path} → \#{code}, expected a 302 to /login (\#{why})")
+        System.halt(1)
+
+      other ->
+        raise "HTTP GET \#{path} failed: \#{inspect(other)}"
+    end
+  end
+
   check = fn path, expect ->
     {code, body} = get.(path)
 
@@ -292,6 +378,16 @@ try do
   check.("/healthz", "ok")
   check.("/", "#{module}")
   check.("/billing?org=#{org}", nil)
+
+  # B10/T26 — the billing SETTINGS page, EMITTED by gen.app with zero hand-edits (the
+  # route flows automatically through the already-templated `samen_module_routes(:billing,
+  # ...)` line, via samen_web's own `__routes__(:billing, path)` route table — no
+  # router_ex.eex change needed). This generated app never wires `:billing_provider`
+  # (no default gen.app config slot for it, same posture as the onboarding wizard's
+  # `:plan_labels` hook), so the page MUST render the honest "bring your billing" empty
+  # state (ADR-038 §3.5 B10) — the exact copy, asserted here, not just a 200.
+  check.("/billing/settings?org=#{org}", "No billing provider is configured for this workspace")
+
   check.("/notifications?org=#{org}", nil)
   check.("/operator/accounts", nil)
   check.("/assets/samen_ui.css", nil)
@@ -303,23 +399,75 @@ try do
   check.("/csv/import/record?org=#{org}", nil)
 
   # --- WS-E `--modules`: the MENU renders — the Samen.UI HomeLive landing at `/` lists the
-  #     mounted surfaces as real navigation (the "undocumented as a menu" fix). -------------
-  {menu_code, menu_body} = get.("/")
+  #     mounted surfaces as real navigation (the "undocumented as a menu" fix). GET with a
+  #     real ?org= so every rendered href carries a resolvable org selector. -----------------
+  {menu_code, menu_body} = get.("/?org=#{org}")
   menu_labels = ["Files", "Search", "Settings", "CSV import", "Product"]
 
-  if menu_code == 200 and Enum.all?(menu_labels, &String.contains?(menu_body, &1)) do
-    IO.puts("FLAGSHIP: GET / → 200 Samen.UI menu (HomeLive) lists every mounted surface")
-  else
+  unless menu_code == 200 and Enum.all?(menu_labels, &String.contains?(menu_body, &1)) do
     IO.puts("FLAGSHIP FAIL: GET / did not render the --modules menu (code " <> Integer.to_string(menu_code) <> ")")
     IO.puts(String.slice(menu_body, 0, 2000))
     System.halt(1)
   end
 
+  # --- X1 (luminary pre-merge HIGH — ADR-045 §4.1): the DURABLE dead-link guard. -----------
+  # The ≈0-LOC adoption promise is load-bearing: the FIRST thing an adopter does is open `/`
+  # and click a nav link. The prior nav rendered CRM/Support/Marketing/Automation groups the
+  # generated router NEVER mounts → the first click raised `Phoenix.Router.NoRouteError` (404).
+  # This guard proves that CANNOT happen for THIS --modules subset: extract EVERY internal href
+  # the landing nav emits and GET each — a link to an unmounted surface 404s and fails here.
+  # This is the regression guard that makes an X1-class nav regression RED in the gate (a probe
+  # that only asserted the 5 selected labels appear — as this one used to — never saw it).
+  nav_hrefs =
+    Regex.scan(~r/href="([^"]+)"/, menu_body)
+    |> Enum.map(fn [_, h] -> String.replace(h, "&amp;", "&") end)
+    |> Enum.filter(&String.starts_with?(&1, "/"))
+    |> Enum.reject(&(String.starts_with?(&1, "/assets") or String.starts_with?(&1, "/api")))
+    |> Enum.uniq()
+
+  if nav_hrefs == [] do
+    IO.puts("FLAGSHIP FAIL: the landing nav rendered NO internal links — the X1 dead-link guard would be vacuous")
+    IO.puts(String.slice(menu_body, 0, 2000))
+    System.halt(1)
+  end
+
+  dead_links =
+    Enum.filter(nav_hrefs, fn href ->
+      {code, _body} = get.(href)
+      code != 200
+    end)
+
+  if dead_links != [] do
+    IO.puts("FLAGSHIP FAIL: X1 — the landing nav has DEAD links (unmounted routes → NoRouteError):")
+
+    Enum.each(dead_links, fn href ->
+      {code, _body} = get.(href)
+      IO.puts("  \#{href} → \#{code}")
+    end)
+
+    System.halt(1)
+  end
+
+  # The specific X1 class, named: the generated router mounts NEITHER of these groups, so no
+  # link to them may appear (belt-and-braces over the resolution sweep above).
+  x1_unmounted = ["/crm/", "/support", "/marketing/", "/automation"]
+
+  if Enum.any?(nav_hrefs, fn href -> Enum.any?(x1_unmounted, &String.starts_with?(href, &1)) end) do
+    IO.puts("FLAGSHIP FAIL: X1 — the landing nav links to an unmounted CRM/Support/Marketing/Automation surface")
+    IO.puts("  hrefs: \#{inspect(nav_hrefs)}")
+    System.halt(1)
+  end
+
+  IO.puts(
+    "FLAGSHIP: GET / → 200 Samen.UI menu (HomeLive) lists the mounted --modules surfaces AND " <>
+      "all \#{length(nav_hrefs)} rendered nav links resolve to a mounted route (X1: zero dead links, NoRouteError-free)"
+  )
+
   # --- The public JSON:API: key-less fail-closed, tenant key serves, deny-by-default ---
   api_org = Ecto.UUID.generate()
   api_secret = "SECRET-FLAGSHIP-\#{System.unique_integer([:positive])}"
 
-  {:ok, _record} =
+  {:ok, flagship_record} =
     #{module}.Vertical.Record
     |> Ash.Changeset.for_create(:create, %{
       org_id: api_org,
@@ -328,6 +476,82 @@ try do
       secret: api_secret
     })
     |> Ash.create(authorize?: false)
+
+  # --- T37h (ADR-040 §5.8): the default-archivable Vertical.Record — archive → hidden
+  #     from the default read → restore → visible again, on THIS generated app's real DB.
+  {:ok, flagship_archived} = Samen.Archival.archive(flagship_record, authorize?: false)
+
+  if flagship_archived.archived_at == nil do
+    IO.puts("FLAGSHIP FAIL: Samen.Archival.archive/2 did not set archived_at on Vertical.Record")
+    System.halt(1)
+  end
+
+  if Enum.any?(Ash.read!(#{module}.Vertical.Record, authorize?: false), &(&1.id == flagship_record.id)) do
+    IO.puts("FLAGSHIP FAIL: archived Vertical.Record is STILL visible in the default read")
+    System.halt(1)
+  end
+
+  {:ok, flagship_restored} = Samen.Archival.restore(flagship_archived, authorize?: false)
+
+  if flagship_restored.archived_at != nil do
+    IO.puts("FLAGSHIP FAIL: Samen.Archival.restore/2 did not clear archived_at")
+    System.halt(1)
+  end
+
+  unless Enum.any?(Ash.read!(#{module}.Vertical.Record, authorize?: false), &(&1.id == flagship_record.id)) do
+    IO.puts("FLAGSHIP FAIL: restored Vertical.Record is not visible again in the default read")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: §5.8 archive -> hidden -> restore -> visible again on the default-archivable Vertical.Record")
+
+  # --- T37h (gen-approval-golden fold-in): reveal-approve routes THROUGH Samen.Approvals,
+  #     NOT the pre-T35 inline fallback — `mix samen.gen.app` now wires
+  #     `config :samen_core, Samen.Approvals` + emits `lib/#{otp_app}/approvals.ex` +
+  #     its migration, closing the T35 verifier's non-fatal note. Proof: Grants.request/1's
+  #     dual-write opens a REAL pii_reveal Approval row (an unwired host would silently
+  #     no-op there — `open_engine_approval/1` rescues to `:ok`), and Grants.approve/2
+  #     transitions that SAME row to :approved (the inline fallback never touches it —
+  #     a host stuck on the fallback would leave it :pending forever).
+  reveal_subject = "flagship-subject-\#{System.unique_integer([:positive])}"
+  reveal_requestor = "flagship-requestor-\#{System.unique_integer([:positive])}"
+  reveal_granter = "flagship-granter-\#{System.unique_integer([:positive])}"
+
+  baseline_approvals = length(Ash.read!(#{module}.Approvals.Approval, authorize?: false))
+
+  {:ok, reveal_req} =
+    Samen.Reveal.Grants.request(%{
+      subject_id: reveal_subject,
+      requestor_id: reveal_requestor,
+      reason: "flagship-probe-audit-review"
+    })
+
+  after_request_approvals = length(Ash.read!(#{module}.Approvals.Approval, authorize?: false))
+
+  if after_request_approvals != baseline_approvals + 1 do
+    IO.puts("FLAGSHIP FAIL: Grants.request/1 did not open a pii_reveal Approval through " <>
+              "Samen.Approvals (baseline \#{baseline_approvals}, after \#{after_request_approvals}) " <>
+              "— reveal-approve is on the pre-T35 inline fallback, not the engine.")
+    System.halt(1)
+  end
+
+  {:ok, _reveal_grant} = Samen.Reveal.Grants.approve(reveal_req, %{granted_by: reveal_granter})
+
+  approval_row =
+    #{module}.Approvals.Approval
+    |> Ash.read!(authorize?: false)
+    |> Enum.find(&(&1.requested_by == reveal_requestor))
+
+  if approval_row == nil or approval_row.state != :approved do
+    IO.puts("FLAGSHIP FAIL: the pii_reveal Approval row did not transition to :approved via " <>
+              "Grants.approve/2 (found \#{inspect(approval_row && approval_row.state)}) — " <>
+              "reveal-approve did NOT route through Samen.Approvals.")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: T37h reveal-approve routes THROUGH Samen.Approvals (Approval opened by " <>
+            "Grants.request/1, approved -> :approved by Grants.approve/2) — not the pre-T35 " <>
+            "inline fallback.")
 
   {:ok, api_user} =
     #{module}.Operator.User
@@ -402,6 +626,226 @@ try do
   end
 
   IO.puts("FLAGSHIP: /api/v1/records payload omits the un-allowlisted secret/org_id (deny-by-default)")
+
+  # =========================================================================
+  # A9 — the FULL AUTH SPINE, emitted by `mix samen.gen.app` with ZERO hand-edits
+  # (spec A9 + T10 addenda 1-4). The generated app is the FIRST host to serve the
+  # entire framework auth path. This drives the DOMAIN flow (signup -> verify ->
+  # invite) end to end over the generated `#{module}.Operator` Identity mount AND
+  # asserts every auth surface is reachable over real HTTP.
+  # =========================================================================
+
+  # The invite step dispatches through the fail-honest `Samen.Delivery.AuthMailer`
+  # chokepoint. samen_core is compiled as a path dep here, so its compiled-in
+  # delivery env is not necessarily `:test` — set it EXPLICITLY (the house
+  # convention every auth test follows) so the mailer CAPTURES via
+  # `Samen.Delivery.LocalSink` (returning `{:ok, receipt}`) instead of the
+  # unconfigured-adapter fail-honest `{:error, :adapter_unconfigured}`.
+  Application.put_env(:samen_core, :delivery_env, :test)
+
+  reg_mods = %{
+    org: #{module}.Operator.Org,
+    credential: #{module}.Operator.Credential,
+    user: #{module}.Operator.User,
+    membership: #{module}.Operator.Membership,
+    auth_token: #{module}.Operator.AuthToken,
+    repo: #{module}.Repo
+  }
+
+  reg_attrs = fn ->
+    n = System.unique_integer([:positive])
+
+    %{
+      org_name: "Flagship Org \#{n}",
+      first_name: "Ada",
+      last_name: "Lovelace",
+      email: "flagship-\#{n}@example.test",
+      password: "correct horse battery staple"
+    }
+  end
+
+  # --- SIGNUP (A1): creates Org + Credential + User + owner Membership atomically ---
+  inviter_attrs = reg_attrs.()
+
+  {:ok, inviter} = Samen.Identity.Register.register(inviter_attrs, reg_mods)
+
+  unless inviter.status == :registered and inviter.membership.role == :owner and
+           is_binary(inviter.org.id) and is_binary(inviter.user.id) do
+    IO.puts("FLAGSHIP FAIL: signup did not create org/user/owner-membership")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: signup (A1) created org+user+owner-membership atomically")
+
+  # --- Addendum 4: the auth notification actually LANDS (engine wired, not a no-op) ---
+  require Ash.Query
+
+  signup_notifications =
+    #{module}.Primitives.Notification
+    |> Ash.Query.filter(org_id == ^inviter.org.id)
+    |> Ash.Query.filter(recipient_id == ^inviter.user.id)
+    |> Ash.Query.filter(event_type == "auth.signup")
+    |> Ash.Query.ensure_selected([:id, :event_type, :org_id, :recipient_id])
+    |> Ash.read!(authorize?: false)
+
+  if signup_notifications == [] do
+    IO.puts("FLAGSHIP FAIL: no auth.signup notification landed — Notifications.Engine is not " <>
+              "wired (config :samen_core, Samen.Notifications.Engine) and the A10 fan-out no-op'd")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: Addendum 4 — auth.signup notification LANDED (engine wired, fan-out dispatched)")
+
+  # --- VERIFY (A2): the email-verify token round-trips (single-use) ---
+  confirm_mods = %{
+    credential: #{module}.Operator.Credential,
+    auth_token: #{module}.Operator.AuthToken,
+    user: #{module}.Operator.User,
+    repo: #{module}.Repo
+  }
+
+  case Samen.Identity.Confirm.consume(inviter.raw_verify_token, confirm_mods) do
+    {:ok, _} -> :ok
+    other ->
+      IO.puts("FLAGSHIP FAIL: email-verify token did not round-trip: \#{inspect(other)}")
+      System.halt(1)
+  end
+
+  # Single-use: a SECOND consume of the SAME token must now fail (proves it was consumed).
+  case Samen.Identity.Confirm.consume(inviter.raw_verify_token, confirm_mods) do
+    {:error, _} -> :ok
+    other ->
+      IO.puts("FLAGSHIP FAIL: verify token was NOT single-use (second consume: \#{inspect(other)})")
+      System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: verify (A2) token round-tripped + is single-use")
+
+  # --- INVITE (A5): an invite lands a Membership in the INVITING org ---
+  invitee_attrs = reg_attrs.()
+  {:ok, invitee} = Samen.Identity.Register.register(invitee_attrs, reg_mods)
+
+  invite_mods = %{
+    invitation: #{module}.Operator.Invitation,
+    credential: #{module}.Operator.Credential,
+    user: #{module}.Operator.User,
+    membership: #{module}.Operator.Membership,
+    repo: #{module}.Repo
+  }
+
+  inviter_scope = %Samen.Scope{
+    actor: %{
+      id: inviter.user.id,
+      org_id: inviter.org.id,
+      role: :owner,
+      verified?: true,
+      kind: :tenant,
+      plane: :tenant
+    }
+  }
+
+  {:ok, _invitation, raw_invite_token} =
+    Samen.Identity.Invite.create(invite_mods, inviter_scope, %{email: invitee_attrs.email, role: :member})
+
+  memberships_before =
+    #{module}.Operator.Membership
+    |> Ash.Query.filter(org_id == ^inviter.org.id)
+    |> Ash.count!(authorize?: false)
+
+  case Samen.Identity.Invite.accept(invite_mods, raw_invite_token) do
+    {:ok, _joined} -> :ok
+    other ->
+      IO.puts("FLAGSHIP FAIL: invite accept did not land a membership: \#{inspect(other)}")
+      System.halt(1)
+  end
+
+  memberships_after =
+    #{module}.Operator.Membership
+    |> Ash.Query.filter(org_id == ^inviter.org.id)
+    |> Ash.count!(authorize?: false)
+
+  unless memberships_after == memberships_before + 1 do
+    IO.puts("FLAGSHIP FAIL: invite accept did not add a membership to the inviting org " <>
+              "(before \#{memberships_before}, after \#{memberships_after})")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: invite (A5) accept landed a membership in the inviting org")
+
+  # --- A8 first-run wizard: OFFERED for the fresh org; plan hook is the HONEST empty state ---
+  onboard_mount = Samen.Web.Mount.new(:settings, #{module}.Operator, #{module}.Repo, labels: %{})
+
+  unless Samen.Web.Onboarding.needed?(onboard_mount, inviter_scope, inviter.org.id) do
+    IO.puts("FLAGSHIP FAIL: the A8 onboarding wizard is not offered for a fresh org")
+    System.halt(1)
+  end
+
+  # INV-4: with NO :plan_labels hook wired (the default generated app has no billing
+  # plan source), plan selection is the fail-honest :not_configured empty state — never
+  # a fabricated plan list.
+  unless Samen.Web.Onboarding.plan_choices(onboard_mount, inviter.org.id) == :not_configured do
+    IO.puts("FLAGSHIP FAIL: onboarding plan hook did not render the honest empty state " <>
+              "(a plan list was fabricated with no :plan_labels wired)")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: A8 wizard offered + plan hook is the honest :not_configured empty state (INV-4)")
+
+  # --- Addendum 3: the :authn prod gate closes the spoofable ?org= URL-param path ---
+  # Built EXACTLY as the generated router's billing mount is (labels: @current_org_labels).
+  authn_mount =
+    Samen.Web.Mount.new(:billing, #{module}.Billing, #{module}.Repo,
+      labels: %{authn: {:app_env, :#{otp_app}, :auth_required?}}
+    )
+
+  arbitrary_org = Ecto.UUID.generate()
+
+  # Positive control (dev/test default: auth_required? false) — the query param resolves.
+  Application.put_env(:#{otp_app}, :auth_required?, false)
+
+  unless Samen.Web.CurrentOrg.resolve(authn_mount, %{"org" => arbitrary_org}, %{}) == arbitrary_org do
+    IO.puts("FLAGSHIP FAIL: with auth off, the ?org= param did not resolve (control broken)")
+    System.halt(1)
+  end
+
+  # The FIX (prod: auth_required? true) — an UNAUTHENTICATED request can NOT resolve an
+  # arbitrary org via ?org=; the spoofable path is closed (nil, not the arbitrary org).
+  Application.put_env(:#{otp_app}, :auth_required?, true)
+  spoofed = Samen.Web.CurrentOrg.resolve(authn_mount, %{"org" => arbitrary_org}, %{})
+  Application.put_env(:#{otp_app}, :auth_required?, false)
+
+  if spoofed == arbitrary_org do
+    IO.puts("FLAGSHIP FAIL: Addendum 3 — with auth_required? TRUE an unauthenticated ?org= " <>
+              "STILL resolved an arbitrary org (\#{inspect(spoofed)}) — the prod gate is a TAUTOLOGY")
+    System.halt(1)
+  end
+
+  IO.puts("FLAGSHIP: Addendum 3 — :authn prod gate closes the spoofable ?org= URL-param path")
+
+  # --- Every auth surface is reachable over real HTTP (zero hand-edits) ---
+  check.("/signup", "Create your account")
+  check.("/login", nil)
+  check.("/onboarding?org=#{org}", nil)
+  check.("/onboarding?org=\#{inviter.org.id}&user=\#{inviter.user.id}", nil)
+  # Settings/Security (mounted via --modules settings, spine_totp on) + the 2FA-enroll
+  # route that had NO HTTP mount before Addendum 2 (2FA was unreachable in prod).
+  check.("/settings/security?org=\#{inviter.org.id}&user=\#{inviter.user.id}", nil)
+
+  # B-SEC / S3 (luminary pre-merge BLOCKER) — the 2FA-ENROLL route is MOUNTED (Addendum 2: it
+  # had no HTTP mount at all before), but it is now AUTHENTICATED: it rides its own
+  # `live_session` carrying `{Samen.Web.Auth, :ensure_authenticated}`. An UNAUTHENTICATED
+  # `?credential_id=<victim>` used to render the enrollment page and let the caller disable 2FA
+  # / re-enroll an attacker-controlled secret / regenerate recovery codes on ANY credential.
+  # A 404 here would mean the route vanished; a 200 would mean the hole is back. The honest
+  # answer is 302 → /login, asserted directly.
+  refuses.(
+    "/settings/security/2fa?credential_id=\#{inviter.credential.id}",
+    "the 2FA-enroll surface must never act on a client-named credential"
+  )
+
+  IO.puts("FLAGSHIP: auth spine reachable over HTTP — /signup /login /onboarding " <>
+            "/settings/security (Addendum 2: 2FA-enroll route live, B-SEC: and authenticated)")
+
   IO.puts("FLAGSHIP: ALL ROUTES 200")
   """
 

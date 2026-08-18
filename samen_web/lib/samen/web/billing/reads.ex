@@ -144,6 +144,12 @@ defmodule Samen.Web.Billing.Reads do
   on `Samen.Web.Reads.page!/3` (BOUNDED BY CONSTRUCTION). The invoice carries no PII;
   the joined customer's billing_name is plane-resolved AFTER paging (tenant clear /
   operator ••••). On any read error the page is EMPTY.
+
+  Selects the T22/B4+B6 tax + hosted-link fields alongside the existing amount/status
+  columns — `tax_amount_cents`/`tax_lines` mirror verbatim (nil/[] when the provider
+  computed no tax, never a fabricated `0`); `hosted_invoice_url`/`hosted_receipt_url`
+  are the provider's hosted pages (rendered TENANT-SIDE ONLY, ADR-038 §3.5 — see
+  `Samen.Web.Billing.InvoicesLive`'s render).
   """
   def invoices_page(mount, scope, state) do
     page =
@@ -156,7 +162,10 @@ defmodule Samen.Web.Billing.Reads do
         :due_date,
         :paid_at,
         :customer_id,
-        :subscription_id
+        :subscription_id,
+        :tax_amount_cents,
+        :hosted_invoice_url,
+        :hosted_receipt_url
       ])
       |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:currency])
 
@@ -184,10 +193,21 @@ defmodule Samen.Web.Billing.Reads do
   built on `Samen.Web.Reads.page!/3` (BOUNDED BY CONSTRUCTION). Plans are non-PII
   Tier-0 config rows; sort/filter fields are bounded plain attributes. On any read
   error the page is EMPTY.
+
+  ADR-040 §5.8 (T37h) — `state.show_archived` (the `Samen.Web.ListLive` archived-
+  filter toggle) switches the base query to the `:archived` read (Plan IS
+  `archivable: true`, T37a). `Samen.Archival.OnlyArchived` backs that read — it is a
+  TRASH view (archived rows ONLY), not a union with the live set — so the toggle is
+  "View: live | archived", a filter switch, matching the substrate's own trash/
+  restore convention (§5.2). `false` (the default) is the plain default read —
+  byte-identical to pre-T37h behavior.
   """
   def plans_page(mount, scope, state) do
-    Mount.resource(mount, Plan)
-    |> Ash.Query.ensure_selected([:name, :label, :description, :interval, :enabled, :features])
+    base = Mount.resource(mount, Plan)
+    base = if state.show_archived, do: Ash.Query.for_read(base, :archived), else: base
+
+    base
+    |> Ash.Query.ensure_selected([:name, :label, :description, :interval, :enabled, :features, :archived_at])
     |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:name, :label])
   rescue
     _ -> %Samen.Web.Page{items: [], page_size: Samen.Web.Reads.bounded_page_size(state.page_size)}
@@ -205,11 +225,23 @@ defmodule Samen.Web.Billing.Reads do
     _ -> []
   end
 
-  @doc "plan_id → [price] map (non-PII config rows, BOUNDED) for joining prices to a plan page."
+  @doc """
+  plan_id → [price] map (non-PII config rows, BOUNDED) for joining prices to a plan page.
+
+  Selects `:provider_price_ref` alongside the display fields — T26/B10 needs it as the
+  `price_ref` a checkout session names (ADR-038 §3.1 `create_checkout_session`); the
+  attribute is the SAME T18-documented opaque vendor cross-reference `provider_customer_ref`
+  already is (non-PII, public?: true on the Price blueprint), referenced under its
+  CURRENT name per the billing-blueprint collision-group rule (T106 owns the rename).
+  """
   def prices_by_plan(mount, scope) do
+    # ADR-036 §4.5(3): unit_amount_cents/currency were dropped by the H1 Money
+    # migration; unit_amount is now the money_with_currency composite (sortable
+    # via Postgres's default composite comparison — same-currency price lists
+    # degenerate to an amount sort, as this call site always assumed).
     Mount.resource(mount, Price)
-    |> Ash.Query.ensure_selected([:plan_id, :unit_amount_cents, :currency, :interval, :active])
-    |> Ash.Query.sort(unit_amount_cents: :asc)
+    |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval, :active, :provider_price_ref])
+    |> Ash.Query.sort(unit_amount: :asc)
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
     |> Enum.group_by(& &1.plan_id)
@@ -260,17 +292,34 @@ defmodule Samen.Web.Billing.Reads do
   (Plan / Price / Invoice / Subscription carry `RoleAtLeast :admin`; the mount's
   plane scope is a `:member`, per `Samen.Web.Plane.scope/2`).
 
-  Same-org role elevation ONLY — the chat-disclosure precedent (`Samen.Web.Chat`),
-  with one hardening: the elevation PRESERVES every plane marker (`plane`, `kind`,
-  `impersonation`) from `Mount.scope/2`. An operator-plane mount elevated here still
-  carries `plane: :operator`, so `Samen.Pii.WriteGuard` (MC-1 / Invariant L1) rejects
-  a vaulted-PII write exactly as before — the elevation raises RBAC rank, never the
-  masking plane. `OrgScope` still confines the write to `org_id`.
+  ADR-045 §4.4 (S1a) — delegates to `Samen.Web.TenantRole.admin_scope/3`: the disarmed dev
+  posture keeps `:admin` byte-for-byte; an ARMED host derives the principal's REAL
+  `Identity.Membership` role (fail-closed `:member`, never `:admin`) so an ordinary member no
+  longer self-elevates. The elevation still PRESERVES every plane marker (`plane`, `kind`,
+  `impersonation`) from `Mount.scope/2` — an operator-plane mount keeps `plane: :operator`, so
+  `Samen.Pii.WriteGuard` (MC-1 / Invariant L1) rejects a vaulted-PII write exactly as before, the
+  elevation raises RBAC rank only, and `OrgScope` still confines the write to `org_id`.
   """
-  def write_scope(mount, org_id) do
-    %Samen.Scope{actor: actor} = Mount.scope(mount, org_id)
-    %Samen.Scope{actor: Map.put(actor, :role, :admin)}
+  def write_scope(mount, org_id, principal \\ nil),
+    do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal)
+
+  @doc """
+  The `Samen.Web.ListLive` `restore` elevator (ADR-040 §5.8, T37h) — the archived-Plan restore is
+  `RoleAtLeast :admin`-gated, stricter than the plain list `scope` reads use. `(scope, socket)`:
+  re-derives the tenant-ADMIN scope for the list's org through `Samen.Web.TenantRole.admin_scope/3`
+  using the socket's pinned principal, so ADR-045 §4.4 (S1a) governs it exactly as every other
+  write path — disarmed → `:admin`; armed → the REAL `Identity.Membership` role, fail-closed
+  `:member`.
+  """
+  def restore_admin_scope(%Samen.Scope{actor: %{org_id: org_id}}, socket) when is_binary(org_id) do
+    Samen.Web.TenantRole.admin_scope(
+      socket.assigns.samen_mount,
+      org_id,
+      socket.assigns[:samen_tenant_principal]
+    )
   end
+
+  def restore_admin_scope(scope, _socket), do: scope
 
   @doc "Destroy one billing plan for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
   def delete_plan(mount, scope, id), do: delete_record(mount, scope, Plan, id)
@@ -581,8 +630,11 @@ defmodule Samen.Web.Billing.Reads do
   # The price read is a bounded config read (≤ @detail_limit rows); the sub side is a
   # DB COUNT per plan — no subscription row set is ever transferred.
   defp compute_mrr(mount, scope) do
+    # ADR-036 §4.5(3): unit_amount_cents was dropped by the H1 Money migration;
+    # unit_amount is now the money_with_currency composite — extract minor units
+    # via Samen.Type.Money.cents/1, keeping the integer-cents accumulator unchanged.
     Mount.resource(mount, Price)
-    |> Ash.Query.ensure_selected([:plan_id, :unit_amount_cents, :interval])
+    |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval])
     |> Ash.Query.filter(interval == :monthly and active == true)
     |> Ash.Query.limit(@detail_limit)
     |> Ash.read!(scope: scope)
@@ -592,7 +644,7 @@ defmodule Samen.Web.Billing.Reads do
         |> Ash.Query.filter(status == :active and plan_id == ^price.plan_id)
         |> count_resource(scope)
 
-      acc + subs_on_plan * (price.unit_amount_cents || 0)
+      acc + subs_on_plan * Samen.Type.Money.cents(price.unit_amount)
     end)
   rescue
     _ -> 0

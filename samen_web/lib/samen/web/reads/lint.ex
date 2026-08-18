@@ -23,9 +23,9 @@ defmodule Samen.Web.Reads.Lint do
 
     * `Ash.Query.limit(...)` — the explicit cap (`@detail_limit` / `@lookup_limit` /
       `limit(1)` single-id reads);
-    * `Samen.Web.Reads.page!(...)` or `Samen.Web.Reads.build(...)` (any alias ending in
-      `Reads`) — the keyset builder, which applies `limit(page_size + 1)` by
-      construction.
+    * `Samen.Web.Reads.page!(...)`, `Samen.Web.Reads.page_operator!(...)`, or
+      `Samen.Web.Reads.build(...)` (any alias ending in `Reads`) — the keyset builder, which
+      applies `limit(page_size + 1)` by construction.
 
   Aggregate reads (`Ash.count!`/`Ash.sum!`/`Ash.aggregate`) transfer a scalar, never a
   row set — they are bounded by construction and not flagged.
@@ -46,21 +46,61 @@ defmodule Samen.Web.Reads.Lint do
   alias Samen.Web.Reads.UnboundedReadError
 
   @read_funs [:read!, :read, :read_one!, :read_one, :stream!]
-  @bound_funs [:page!, :build]
+  @bound_funs [:page!, :page_operator!, :build]
+
+  # ADR-045 §4.2 (O8) — the SHIPPED vertical read layers. The original glob anchored inside
+  # `samen_web/lib/samen/web/`, so `driftwood/lib/driftwood/reads.ex` and
+  # `pawchart/lib/pawchart_web/clinic_reads.ex` were INVISIBLE to the completeness scan — the
+  # verticals reproduced the A3-GATE-1 unbounded-read defect one directory outside the scanner
+  # (`Driftwood.Reads.driver_roster/1`). These trees are now swept too, so a future unbounded
+  # vertical read fails the gate instead of silently mounting. The pattern is `*reads.ex` (not
+  # just `reads.ex`) so `clinic_reads.ex` is caught alongside `reads.ex`.
+  @vertical_read_trees ["driftwood/lib", "pawchart/lib"]
 
   @doc """
   The reads modules under lint: every `reads.ex` beneath `lib/samen/web/` in the
   `samen_web` app (chat, crm, billing, support, marketing, operator, and any module a
-  future phase adds — new files are swept in automatically).
+  future phase adds — new files are swept in automatically), PLUS the shipped vertical
+  read layers (driftwood/pawchart — ADR-045 §4.2 O8), so an unbounded vertical read is
+  caught by the gate rather than living one directory outside the scanner.
   """
   def reads_files do
-    # `__ENV__.file` is this file's compile-time source path (.../lib/samen/web/reads/
-    # lint.ex), so the glob anchors on the source tree wherever the suite runs from.
+    framework_reads_files() ++ vertical_reads_files()
+  end
+
+  # `__ENV__.file` is this file's compile-time source path (.../lib/samen/web/reads/
+  # lint.ex), so the glob anchors on the source tree wherever the suite runs from.
+  defp framework_reads_files do
     __ENV__.file
     |> Path.dirname()
     |> Path.join("../**/reads.ex")
     |> Path.expand()
     |> Path.wildcard()
+  end
+
+  @doc """
+  The shipped vertical read-layer files under lint (driftwood/pawchart) — ADR-045 §4.2 (O8).
+  Anchored on this file's compile-time path (repo root is five levels above the `reads`
+  dir), so it is cwd-independent like `framework_reads_files/0`. Matches `*reads.ex`, so
+  `clinic_reads.ex` is covered as well as `reads.ex`.
+  """
+  def vertical_reads_files do
+    root = repo_root()
+
+    Enum.flat_map(@vertical_read_trees, fn tree ->
+      root
+      |> Path.join(tree)
+      |> Path.join("**/*reads.ex")
+      |> Path.wildcard()
+    end)
+  end
+
+  # <root>/samen_web/lib/samen/web/reads/lint.ex → ascend 5 dirs to the repo root.
+  defp repo_root do
+    __ENV__.file
+    |> Path.dirname()
+    |> Path.join("../../../../..")
+    |> Path.expand()
   end
 
   @doc """

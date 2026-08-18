@@ -1,0 +1,25 @@
+# SABOTAGE: O5 / X6 (ADR-045 §4.2) — the fail-honest KMS prod BOOT GUARD DEFEATED. The fix made
+# `Samen.Kms.assert_prod_adapter_ready!/1` REFUSE to boot a production host whose configured
+# `:kms_adapter` is an unimplemented raise-only SKELETON (`Samen.Kms.AwsKmsDynamo`), rather than
+# let the app come up green and then 500 on every vault op. This sabotage neuters the skeleton
+# detector (`skeleton_adapter?/1` never fires), so the guard silently ADMITS the raise-only
+# skeleton in prod — the exact O5/X6 hole (boot green, per-op 500). The named prod boot-refusal
+# red path MUST flip. (The end-to-end proof is the --deploy gen probe under `mix run`, which this
+# `mix test` harness cannot replay — this test is its sabotage-flippable twin, per the G4 X1
+# precedent.)
+# APP: samen_core
+# TEST_FILES: test/gen_deploy_bootability_test.exs
+# MUST_FAIL: refuses to boot in prod when an unimplemented skeleton KMS adapter is selected (O5)
+diff --git a/samen_core/lib/samen/kms.ex b/samen_core/lib/samen/kms.ex
+index 1749103..0267daa 100644
+--- a/samen_core/lib/samen/kms.ex
++++ b/samen_core/lib/samen/kms.ex
+@@ -230,7 +230,7 @@ defmodule Samen.Kms do
+   # hardcoded denylist the boot guard has to keep in sync.
+   defp skeleton_adapter?(adapter) when is_atom(adapter) do
+     Code.ensure_loaded?(adapter) and function_exported?(adapter, :__kms_skeleton__?, 0) and
+-      adapter.__kms_skeleton__?()
++      false
+   end
+ 
+   defp skeleton_adapter?(_), do: false

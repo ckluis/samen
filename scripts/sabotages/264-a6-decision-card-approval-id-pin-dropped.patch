@@ -1,0 +1,29 @@
+# SABOTAGE: A6 (ADR-047 §5.3; the A5 verifier's R-A5-5) gate sabotage — the decision
+# handler TRUSTS THE CLICK PAYLOAD. `Samen.Web.AI.AgentLive`'s decide guard stops re-reading
+# the run's own pending proposal from the server and pins nothing: any approval id carried on
+# a crafted `phx-value-id` is forwarded straight to the engine. On a host with a REAL
+# approvals engine that is a live cross-run (and, but for the engine's own org pin, cross-org)
+# decision: a reviewer looking at run A's page approves run B's write — a write they were
+# never shown the provenance for. This is precisely the arm A5 could NOT exercise (samen_web's
+# scratch host mounts no `apv_approval` resource, so `pending_approval/2` was always nil there
+# and the id-discrimination leg never ran); driftwood has two real parked runs, so it flips
+# here. The POSITIVE CONTROL — the same approval id clicked from ITS OWN run's page — stays
+# green, proving what was lost is the pin and not the approve path.
+# APP: driftwood
+# TEST_FILES: test/gate_a6_agent_slice_test.exs
+# MUST_FAIL: ID-DISCRIMINATION: a crafted click carrying ANOTHER run's real approval id refuses
+diff --git a/samen_web/lib/samen/web/ai/agent_live.ex b/samen_web/lib/samen/web/ai/agent_live.ex
+--- a/samen_web/lib/samen/web/ai/agent_live.ex
++++ b/samen_web/lib/samen/web/ai/agent_live.ex
+@@ -138,8 +138,10 @@ defmodule Samen.Web.AI.AgentLive do
+     run_id = socket.assigns[:run_id]
+ 
+     outcome =
++      # SABOTAGE (A6, R-A5-5): the server-side pin is gone — whatever approval id the click
++      # carried is decided, whether or not it belongs to the run being viewed.
+       with {:ok, detail} <- fetch_detail(mount, org_id, run_id),
+-           %{id: ^approval_id} <- detail.approval,
++           %{id: _any} <- detail.approval,
+            # TAGGED so a nil principal can never be confused with a nil approval above —
+            # the two refusals are different facts and must not share a clause.
+            {:principal, actor_id} when is_binary(actor_id) <- {:principal, principal_id(socket)} do

@@ -1,0 +1,28 @@
+# SABOTAGE: A6 (ADR-047 §5.3; the A5 verifier's R-A5-2) gate sabotage — the approver seam
+# accepts an AMBIGUOUS AFFIRMATIVE again. `Samen.AI.Agent.Approver.normalize/3` loses its
+# `{:ok, nil}` clause, so a host seam answering `{:ok, nil}` — the natural spelling of "no
+# membership found" — falls through to `{:ok, role} when is_atom(role)` (nil IS an atom) and
+# resolves to a REAL `%Samen.Scope{role: nil}`. A caller the host just told us is NOT a member
+# thereby executes a governed write in the run's org: the default-member synthesis A5 closed,
+# reappearing one shape over. The named red must flip; the positive control (the same seam
+# shape answering a real membership) stays green, proving what was lost is the refusal and not
+# the seam.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: a seam answering {:ok, nil}
+diff --git a/samen_core/lib/samen/ai/agent/approver.ex b/samen_core/lib/samen/ai/agent/approver.ex
+--- a/samen_core/lib/samen/ai/agent/approver.ex
++++ b/samen_core/lib/samen/ai/agent/approver.ex
+@@ -193,10 +193,8 @@ defmodule Samen.AI.Agent.Approver do
+   defp normalize({:ok, %{} = membership}, approver_id, org_id),
+     do: scope_for(approver_id, org_id, membership)
+ 
+-  # A6 (R-A5-2): `{:ok, nil}` — the natural spelling of "no membership found" — is a
+-  # REFUSAL. It must be matched BEFORE the atom clause below, because `nil` is an atom
+-  # and would otherwise be admitted as a positive membership answer with a `nil` role.
+-  defp normalize({:ok, nil}, _approver_id, _org_id), do: {:error, :not_authorized}
++  # SABOTAGE (A6, R-A5-2): the `{:ok, nil}` refusal clause is gone, so "no membership
++  # found" is admitted as a positive membership answer with a nil role.
+ 
+   defp normalize({:ok, role}, approver_id, org_id) when is_atom(role) or is_binary(role),
+     do: scope_for(approver_id, org_id, %{role: role})

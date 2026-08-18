@@ -1,0 +1,35 @@
+# SABOTAGE: D4 (T69) gate sabotage — defeats the MCP server's org-scope isolation (ADR-043
+# §9: every tool is org-scoped; an MCP session for org A can never reach org B's data). The
+# `browse` tool's records read (`Samen.AI.Mcp.read_records/4`) applies a HARD `org_id == ^org`
+# filter — the "correct filter parameter" mechanism the embeddings plane and custom-object
+# catalog use — so org B's browse never returns org A's rows. This sabotage drops that filter,
+# so `browse` returns records across ALL orgs: an MCP session bound to org B now sees org A's
+# records at the MCP boundary (the exact EG4 / org-isolation breach §9 forbids). `_ = org` keeps
+# the arg bound so the tree still compiles; the isolation is simply gone. Dropping it flips the
+# named cross-org browse test (org B must see zero of org A's records), while the same-org
+# positive control and the masking tests stay green — a precise, refutable proof that org
+# isolation is the load-bearing guard.
+# APP: samen_core
+# TEST_FILES: test/ai/mcp_test.exs
+# MUST_FAIL: (c) org-scope: org B's browse never returns org A's records
+diff --git a/samen_core/lib/samen/ai/mcp.ex b/samen_core/lib/samen/ai/mcp.ex
+index 1111111..2222222 100644
+--- a/samen_core/lib/samen/ai/mcp.ex
++++ b/samen_core/lib/samen/ai/mcp.ex
+@@ -482,9 +482,15 @@
+   # ==========================================================================
+ 
+   defp read_records(org, resource, lim, opts) do
++    # SABOTAGE (T69 §9 org-scope bypass): the MCP browse read drops the hard `org_id` filter,
++    # so `browse` returns records across ALL orgs — an MCP session bound to org B now sees
++    # org A's records (the EG4 / org-isolation breach ADR-043 §9 forbids). `_ = org` keeps the
++    # arg bound so the tree still compiles; the isolation is simply gone. Flips the named
++    # cross-org browse test.
++    _ = org
++
+     query =
+       resource
+-      |> Ash.Query.filter(org_id == ^org)
+       |> Ash.Query.limit(lim)
+       |> ensure_pii_selected(resource)
+ 

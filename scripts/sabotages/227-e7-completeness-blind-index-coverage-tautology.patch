@@ -1,0 +1,28 @@
+# SABOTAGE: E7 (ADR-046 §6) — the erasure-completeness gate's derived-linkable coverage
+# check is made a TAUTOLOGY: `bidx_covered?/2` returns `true` unconditionally instead of
+# asserting a registered `:blind_index_erasure_specs` entry matches the residue's table +
+# column. Every `_bidx` blind index (email_bidx / sent_to_bidx) is then reported "covered"
+# even with NO tombstone arm registered — so a shredded subject's email stays confirmable
+# forever via the equality oracle and the gate says nothing (the un-erasable-email_bidx
+# defect ADR-046 §6 (a) closes). Flips the per-class refutability proof (with the blind-index
+# arm REMOVED the email_bidx/sent_to_bidx residues must be named UNREACHED) while the
+# positive control (arm present ⇒ pass) and the UNREGISTERED-`_bidx` backstop stay green.
+# APP: samen_core
+# TEST_FILES: test/erasure/completeness_test.exs
+# MUST_FAIL: removing the blind-index arm makes the email_bidx residue UNREACHED
+--- a/samen_core/lib/samen/erasure/completeness.ex
++++ b/samen_core/lib/samen/erasure/completeness.ex
+@@ -250,10 +250,9 @@ defmodule Samen.Erasure.Completeness do
+   end
+ 
+   defp bidx_covered?(r, specs) do
+-    Enum.any?(specs, fn spec ->
+-      to_string(Map.get(spec, :table_name)) == r.table and
+-        to_string(Map.get(spec, :bidx_column, "email_bidx")) == r.column
+-    end)
++    _ = {r, specs}
++
++    true
+   end
+ 
+   # (c) storage_key — subject-linked blobs need a file spec; org-asset blobs are residual.

@@ -1,0 +1,23 @@
+{
+  "id": "sub_lifecycle",
+  "object": "subscription",
+  "customer": "cus_lifecycle",
+  "status": "canceled",
+  "current_period_start": 1782518400,
+  "current_period_end": 1785196800,
+  "cancel_at": null,
+  "canceled_at": 1783000000,
+  "trial_end": null,
+  "currency": "usd",
+  "items": {
+    "object": "list",
+    "data": [
+      { "id": "si_pro", "price": { "id": "price_pro", "unit_amount": 4900, "currency": "usd" } }
+    ]
+  },
+  "latest_invoice": {
+    "id": "in_cancelled",
+    "currency": "usd",
+    "lines": { "object": "list", "data": [] }
+  }
+}

@@ -1,0 +1,27 @@
+# SABOTAGE: T74 (spec §I1 CRM two-way email sync) gate sabotage — defeats the HONEST EMPTY STATE
+# of the CRM mailbox settings surface. `Samen.Web.CRM.MailboxLive.load/2` assigns
+# `provider_configured` from `Samen.Mailbox.provider_configured?/0` — the adapter's own answer,
+# never an assumption. This patch hardcodes it to `true`, the "assume it works" lie: a host with
+# NO mailbox provider wired (the CI default, and every un-adopted host) would then render
+# "No mailbox connected yet." plus a live Connect affordance instead of "Mailbox sync is not
+# configured." — collapsing "nothing is wired" into "connected but quiet", which is exactly the
+# distinction the fail-honest contract exists to preserve. The CONFIGURED-state tests stay green
+# (they wire a real provider), so the flip isolates the honesty guarantee. Reverts byte-exact.
+# REGENERATED in the T74 fix round (LOW-3 added the honest connect-notice affordance to the same
+# assign block, shifting this hunk's context).
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_mailbox_settings_test.exs
+# MUST_FAIL: UNCONFIGURED: the page says so, offers NO connect affordance, and fabricates NO data
+# MUST_FAIL: UNCONFIGURED even when connection ROWS exist — the provider is the source of truth
+diff --git a/samen_web/lib/samen/web/crm/mailbox_live.ex b/samen_web/lib/samen/web/crm/mailbox_live.ex
+--- a/samen_web/lib/samen/web/crm/mailbox_live.ex
++++ b/samen_web/lib/samen/web/crm/mailbox_live.ex
+@@ -76,7 +76,7 @@
+       org_id: org_id,
+       connections: Reads.mailbox_connections(mount, scope),
+       # The fail-honest predicate — read from the adapter itself, never assumed.
+-      provider_configured: Samen.Mailbox.provider_configured?(),
++      provider_configured: true,
+       scope_mounted: not is_nil(Reads.mailbox_connection_resource(mount)),
+       connect_notice: nil
+     )

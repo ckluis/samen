@@ -40,6 +40,16 @@ defmodule Samen.Scopes.Chat do
   (`cth`/`chp`/`cmg`/`cds`, ADR-012 §11) are provided for the canonical mount; each host passes
   its own prefixed set (driftwood `dct/dcp/dcm/dcd`; the samen_web test host `wct/wcp/wcm/wcd`).
   The macro does NOT invent abbrevs.
+
+  ## Soft-delete adoption (ADR-040 §5.9, T37e)
+
+  `thread` is `archivable: true` and the cascade PARENT of `thread ▸cascade participant
+  ▸cascade message` (§5.4): archiving a thread cascades to archive its participants and
+  messages at the same instant; restoring the thread restores exactly the matched members.
+  `participant`/`message` are ALSO `archivable: true` (substrate only — the cascade needs
+  something to set/match/restore) but policy-locked against actor-driven independent
+  archive/restore (§5.4 ¶ footnote — see `Samen.Scopes.Chat.Blueprint` moduledoc).
+  `disclosure_setting` stays excluded (a live per-org config row — delete is delete).
   """
 
   @default_abbrevs %{
@@ -80,7 +90,9 @@ defmodule Samen.Scopes.Chat do
         unquote(otp_app),
         unquote(domain),
         unquote(repo),
-        unquote(abbrevs.thread)
+        unquote(abbrevs.thread),
+        unquote(participant_mod),
+        unquote(message_mod)
       )
 
       Samen.Scopes.Chat.Blueprint.define_participant(

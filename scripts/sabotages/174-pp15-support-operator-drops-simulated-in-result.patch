@@ -1,0 +1,20 @@
+# SABOTAGE: PP-15 — `Samen.AI.SupportOperator.draft_reply/3` DROPS the T152 `:simulated`
+# flag from its result map (hardcodes `simulated: false`), laundering a keyless/deterministic
+# support draft as a genuine model reply — the operator desk then never draws the loud
+# "SIMULATED — not a real model" badge. The exact honesty hole the HON batch closed for
+# `draft_sequence` (sabotage 160), on the D5 support path. Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/ai/support_operator_test.exs
+# MUST_FAIL: draft_reply result carries the T152 :simulated flag
+diff --git a/samen_core/lib/samen/ai/support_operator.ex b/samen_core/lib/samen/ai/support_operator.ex
+--- a/samen_core/lib/samen/ai/support_operator.ex
++++ b/samen_core/lib/samen/ai/support_operator.ex
+@@ -106,7 +106,7 @@
+          # EXACT flag threading the HON batch shipped for `Samen.AI.Crm.draft_sequence/5`,
+          # mirrored on this D5 support path. Dropping it laundes a fake-confident draft as
+          # a genuine one (the T155-missed honesty hole).
+-         simulated: completion.simulated
++         simulated: false
+        }}
+     end
+   end

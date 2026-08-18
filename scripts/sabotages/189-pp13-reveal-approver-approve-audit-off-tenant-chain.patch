@@ -1,0 +1,23 @@
+# SABOTAGE: PP-13 (tenant reveal-approver surface) — drops the tenant `org_id` from the
+# approve-moment `granted` audit in `Samen.Reveal.Grants.do_approve/4`, sending it to the
+# reserved `__global__` operator chain instead of the tenant's own audit chain. This is the
+# exact Batch-6 residual PP-13 closed: with `org_id: nil` the "granted" event no longer shows
+# on the tenant's `Settings.SecurityLive` "Reveal access" ledger (`reveal_events_for_org/2`
+# filters `grant_lifecycle` on the org chain), so the moment PII was authorized to unmask is
+# invisible to the tenant again. The `approve-audit-on-tenant-chain-must-flip-a-named-test` pin.
+# APP: samen_core
+# TEST_FILES: test/reveal_approver_test.exs
+# MUST_FAIL: on the tenant audit chain, org-attributed
+# APPLY: git apply scripts/sabotages/189-pp13-reveal-approver-approve-audit-off-tenant-chain.patch
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -334,7 +334,7 @@
+           actor_id: granted_by,
+           request_id: req.id,
+           grant_id: grant_id,
+-          org_id: Map.get(opts, :org_id),
++          org_id: nil,
+           detail: "expires_at=#{DateTime.to_iso8601(expires_at)}"
+         })
+       end)

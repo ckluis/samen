@@ -280,8 +280,7 @@ defmodule PawChart.SamenWebMountTest do
             status: :open,
             priority: :high,
             sla_id: sla.id,
-            sla_breach_at: DateTime.add(now, sla.resolve_minutes * 60, :second),
-            tags: ["clinic-support"]
+            sla_breach_at: DateTime.add(now, sla.resolve_minutes * 60, :second)
           },
           actor: member,
           authorize?: false
@@ -348,8 +347,9 @@ defmodule PawChart.SamenWebMountTest do
 
     # WS-E E7.1 — the framework end-user surfaces adopted at ≈0 authored LOC. PawChart's
     # router mounts files/CSV/search via one macro each over its EXISTING Primitives/CRM
-    # namespaces (no PawChart LiveView/engine code). Settings is intentionally NOT mounted
-    # (no Identity namespace) — see the router note + docs/gate-ws-e.md.
+    # namespaces (no PawChart LiveView/engine code). PP-2 (Batch 5a): Settings is NOW mounted
+    # over PawChart.Operator (the tenant Identity spine), so the earlier "not mounted" note is
+    # retired — see identity_spine_mount_test.exs.
     test "samen_files_routes macro generates the files surface routes (E7.1 adoption)" do
       routes = Samen.Web.Router.__routes__(:files, "/files")
       assert Enum.any?(routes, fn {_p, m} -> m == Samen.Web.Files.UploadLive end)

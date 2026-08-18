@@ -38,6 +38,20 @@ defmodule Samen.Web.Settings.Live do
         <a href={href("/settings/security", @org_id, @user_id)} class={nav_class(@active, :security)} id="settings-nav-security">
           Security
         </a>
+        <a
+          href={href("/settings/invitations", @org_id, @user_id)}
+          class={nav_class(@active, :invitations)}
+          id="settings-nav-invitations"
+        >
+          Invitations
+        </a>
+        <a
+          href={href("/settings/reveal-approvals", @org_id, @user_id)}
+          class={nav_class(@active, :reveal_approvals)}
+          id="settings-nav-reveal-approvals"
+        >
+          Reveal approvals
+        </a>
       </nav>
     </.sidebar>
     """

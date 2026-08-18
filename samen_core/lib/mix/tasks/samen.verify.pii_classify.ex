@@ -48,10 +48,19 @@ defmodule Mix.Tasks.Samen.Verify.PiiClassify do
   heuristic, like any heuristic, can miss a non-obvious name — the `non_pii!`
   review gate, not the scanner, is the backstop for a miss.
 
+  ## Non-emptiness floor (fail-closed on empty discovery)
+
+  A classify check that discovers ZERO resources verifies nothing — a mis-keyed
+  `:ash_domains` would otherwise turn this gate green in every app. The task
+  FAILS CLOSED (exit 1) when resource discovery is empty, the same
+  non-emptiness floor as `samen.verify.vault_declared_parity`,
+  `samen.verify.oban_queues`, and `samen.verify.erasure_completeness`.
+
   ## Exit code
 
   Exits 0 when no violations are found (fail-closed via `:erlang.halt/1` on
-  violation — no cleanup hook can swallow the exit code).
+  violation — no cleanup hook can swallow the exit code). Exits 1 when
+  resource discovery is empty (a vacuous check must not pass).
 
   ## Usage
 
@@ -91,6 +100,7 @@ defmodule Mix.Tasks.Samen.Verify.PiiClassify do
 
     domain_args = Keyword.get_values(opts, :domain)
     resources = resolve_resources(domain_args)
+    halt_if_no_resources!(resources)
 
     registry_entries = load_registry()
 
@@ -150,6 +160,25 @@ defmodule Mix.Tasks.Samen.Verify.PiiClassify do
       end)
 
     Samen.Catalog.resource_modules(domains)
+  end
+
+  # A2 non-emptiness floor: empty discovery means a mis-keyed :ash_domains (or a
+  # broken --domain list), NOT a clean scan — a green "OK" on zero resources is
+  # indistinguishable from a green on a real one. Same fail-closed shape as
+  # `vault_declared_parity.halt_if_no_resources!/1`.
+  defp halt_if_no_resources!(resources) do
+    if resources == [] do
+      IO.puts("")
+
+      IO.puts(
+        "FAIL: #{@task_name} discovered ZERO resources — cannot classify PII columns. " <>
+          "Configure the host's :ash_domains (or pass --domain) so the resources are " <>
+          "introspectable. A vacuous classify check must not pass (fail-closed)."
+      )
+
+      IO.puts("")
+      :erlang.halt(1)
+    end
   end
 
   defp load_registry do

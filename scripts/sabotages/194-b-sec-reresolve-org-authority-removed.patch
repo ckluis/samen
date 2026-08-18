@@ -1,0 +1,31 @@
+# SABOTAGE: B-SEC / S1·S1a — the ORG AUTHORITY in `Samen.Web.CurrentOrg.reresolve/2` DEFEATED.
+# The shared `handle_params/3` helper every framework tenant LiveView routes through stops
+# validating a client `?org=` against the authenticated principal's authorized set and simply
+# returns `requested || current` — the exact pre-fix idiom
+# (`Map.get(params, "org") || socket.assigns.org_id`) that reopened the cross-tenant read AND,
+# through the `write_scope/2` admin elevators, the cross-tenant admin WRITE. The named red path
+# (an AUTHENTICATED member of org A asking for org B on a real dead render — the
+# driftwood/pawchart "authenticates but never checks WHICH org" shape) MUST flip: the victim's
+# vault-routed `full_name` appears in the attacker's DOM.
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_authz_live_test.exs
+# MUST_FAIL: an authenticated member of org A asking for org B gets A's data, never B's
+diff --git a/samen_web/lib/samen/web/current_org.ex b/samen_web/lib/samen/web/current_org.ex
+--- a/samen_web/lib/samen/web/current_org.ex
++++ b/samen_web/lib/samen/web/current_org.ex
+@@ -223,12 +223,11 @@
+         requested || current
+ 
+       list when is_list(list) ->
+-        if is_binary(requested) and requested in list, do: requested, else: current
++        _ = list
++        requested || current
+ 
+       _ ->
+-        if tenant_gate_armed?(Map.get(assigns, :samen_mount)),
+-          do: current,
+-          else: requested || current
++        requested || current
+     end
+   end
+ 

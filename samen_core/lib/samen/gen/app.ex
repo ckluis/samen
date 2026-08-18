@@ -81,6 +81,8 @@ defmodule Samen.Gen.App do
     # derived aggregate abbrev / table
     :agg_abbrev,
     :agg_table,
+    # T37h — the per-app Approvals engine client's abbrev (ADR-040 §4.7/T35 fold-in)
+    :approval_abbrev,
     # WS-D D2 (ADR-022): the web layer — flag + derived web-plane abbrevs + port
     web?: true,
     port: 4050,
@@ -155,8 +157,9 @@ defmodule Samen.Gen.App do
     resource_name = "Record"
     resource_table = "#{abbrev}_record"
 
-    # Eight Billing-scope abbrevs derived from the 2-char prefix (mirrors pawchart's
-    # pbc/pbs/pbl/ppc/pbi/pby/pbu/pbe — one suffix letter per resource).
+    # Nine Billing-scope abbrevs derived from the 2-char prefix (mirrors pawchart's
+    # pbc/pbs/pbl/ppc/pbi/pby/pbu/pbe/pbv — one suffix letter per resource; luminary X10
+    # corrected this comment from "Eight" — the map below always had nine entries).
     billing_abbrevs = %{
       customer: prefix <> "c",
       subscription: prefix <> "s",
@@ -172,6 +175,11 @@ defmodule Samen.Gen.App do
 
     agg_abbrev = prefix <> "a"
     agg_table = "#{agg_abbrev}_record_count"
+
+    # T37h — the per-app Approval resource's abbrev (ADR-040 §4.7/T35 fold-in). `z` is
+    # unused by the prefix-derived billing (c/s/l/p/i/y/u/e/v) or aggregate (a) suffix
+    # letters, so `<prefix>z` cannot collide with either family.
+    approval_abbrev = prefix <> "z"
 
     # WS-D D2 (ADR-022): the web layer is ON by default; `--headless` (web: false)
     # reproduces the original data-only output exactly.
@@ -217,6 +225,31 @@ defmodule Samen.Gen.App do
           role: p1 <> "or",
           api_key: p1 <> "ok",
           invitation: p1 <> "on",
+          # ADR-035 (T02x integration) — the identity spine's two org-less resources.
+          # Prefix-derived (`<p1>oc`/`<p1>ot`), NEVER `Samen.Scopes.Identity`'s literal
+          # `crd`/`atk` defaults: those two are ALREADY permanently owned in the committed
+          # registry (`hosts.demo.crd`/`hosts.demo.atk`), so falling back to them on every
+          # generated app would collide on the first run. `do*`/`wo*`'s shipped `doc`/`dot`
+          # and `woc`/`wot` prove the `<p1>o` + first-letter-of-resource shape.
+          credential: p1 <> "oc",
+          auth_token: p1 <> "ot",
+          # T06x (this integration pass) — the identity spine's other two org-less
+          # resources (T04's Session, T06's UserIdentity). Prefix-derived
+          # (`<p1>os`/`<p1>oi`), NEVER `Samen.Scopes.Identity`'s literal `ses`/`uid`
+          # defaults: those two are ALREADY permanently owned in the committed
+          # registry (`hosts.demo.ses`/`hosts.demo.uid`), so falling back to them on
+          # every generated app would collide on the first run — the exact "ses" is
+          # registered to Demo.Identity.Session collision this fixes. `do*`/`wo*`'s
+          # shipped `dos`/`doi` and `wos`/`woi` prove the `<p1>o` + first-letter shape.
+          session: p1 <> "os",
+          user_identity: p1 <> "oi",
+          # ADR-038 §6.4 (T109) — the durable brute-force failure counter.
+          # Prefix-derived (`<p1>ol`), NEVER `Samen.Scopes.Identity`'s literal
+          # `dil` default: that is ALREADY permanently owned in the committed
+          # registry (`hosts.demo.dil`), so falling back to it on every
+          # generated app would collide on the first run — the same reasoning
+          # `credential`/`auth_token`/`session`/`user_identity` document above.
+          login_failure: p1 <> "ol",
           # Billing — each tenant's subscription TO the SaaS
           customer: p1 <> "pc",
           subscription: p1 <> "ps",
@@ -227,14 +260,17 @@ defmodule Samen.Gen.App do
           usage: p1 <> "pu",
           entitlement: p1 <> "pe",
           subscription_event: p1 <> "pv",
-          # Support — the SaaS help desk
+          # Support — the SaaS help desk (keys mirror @support_resources; abbrev suffixes
+          # are independent registry-collision-driven data, not derivable from the atom).
           ticket: p1 <> "qk",
           conversation: p1 <> "qc",
           message: p1 <> "qm",
           agent: p1 <> "qg",
           sla: p1 <> "ql",
           macro: p1 <> "qn",
-          csat: p1 <> "qs"
+          csat: p1 <> "qs",
+          # I6 (T79) — the CSAT request→response loop's single-use survey link.
+          csat_survey_token: p1 <> "qt"
         }
       end
 
@@ -251,6 +287,7 @@ defmodule Samen.Gen.App do
       billing_abbrevs: billing_abbrevs,
       agg_abbrev: agg_abbrev,
       agg_table: agg_table,
+      approval_abbrev: approval_abbrev,
       web?: web?,
       api?: api?,
       deploy?: deploy?,
@@ -308,7 +345,8 @@ defmodule Samen.Gen.App do
       billing ++
         [
           {s.agg_abbrev, "#{s.module}.Aggregate.RecordCountBySegment"},
-          {s.abbrev, s.resource_module}
+          {s.abbrev, s.resource_module},
+          {s.approval_abbrev, "#{s.module}.Approvals.Approval"}
         ]
 
     if s.web? do
@@ -526,6 +564,29 @@ defmodule Samen.Gen.App do
   defp primitives_module(:webhook), do: "Webhook"
   defp primitives_module(:feature_flag), do: "FeatureFlag"
 
+  # P12 (T79 verify) — the Support-scope resource kinds, as a SINGLE canonical ordered
+  # list. `operator_resource_order/0` below splices this in directly (pure membership +
+  # order, no per-atom data — the one site that WAS a byte-for-byte duplicate of this
+  # list, now DRYed). The other three Support-scope sites that mention these same atoms
+  # (`operator_abbrevs` in `derive!/1`, `operator_module/1`'s clauses just below, and the
+  # `o_tick`/`o_conv`/… entries in `web_bindings/1`) are NOT DRYed against this list: each
+  # pairs an atom with a genuinely independent piece of data — a registry-collision-driven
+  # abbrev suffix, an explicit capitalized module name, or a compact binding-key alias —
+  # so collapsing them into a lookup keyed by this list would couple unrelated concerns
+  # (and, for `operator_module/1`, would trade a `FunctionClauseError` for a `KeyError` on
+  # an unmatched atom — a real behaviour change). A 9th Support resource still needs an
+  # entry in all four places; this list is the anchor a future author greps for first.
+  @support_resources [
+    :ticket,
+    :conversation,
+    :message,
+    :agent,
+    :sla,
+    :macro,
+    :csat,
+    :csat_survey_token
+  ]
+
   # Identity → Billing → Support, mirroring the Driftwood.Operator mount order.
   defp operator_resource_order,
     do: [
@@ -535,6 +596,11 @@ defmodule Samen.Gen.App do
       :role,
       :api_key,
       :invitation,
+      :credential,
+      :auth_token,
+      :session,
+      :user_identity,
+      :login_failure,
       :customer,
       :subscription,
       :plan,
@@ -543,15 +609,8 @@ defmodule Samen.Gen.App do
       :payment,
       :usage,
       :entitlement,
-      :subscription_event,
-      :ticket,
-      :conversation,
-      :message,
-      :agent,
-      :sla,
-      :macro,
-      :csat
-    ]
+      :subscription_event
+    ] ++ @support_resources
 
   defp operator_module(:org), do: "Org"
   defp operator_module(:user), do: "User"
@@ -559,6 +618,11 @@ defmodule Samen.Gen.App do
   defp operator_module(:role), do: "Role"
   defp operator_module(:api_key), do: "ApiKey"
   defp operator_module(:invitation), do: "Invitation"
+  defp operator_module(:credential), do: "Credential"
+  defp operator_module(:auth_token), do: "AuthToken"
+  defp operator_module(:session), do: "Session"
+  defp operator_module(:user_identity), do: "UserIdentity"
+  defp operator_module(:login_failure), do: "LoginFailure"
   defp operator_module(:customer), do: "Customer"
   defp operator_module(:subscription), do: "Subscription"
   defp operator_module(:plan), do: "Plan"
@@ -568,6 +632,9 @@ defmodule Samen.Gen.App do
   defp operator_module(:usage), do: "Usage"
   defp operator_module(:entitlement), do: "Entitlement"
   defp operator_module(:subscription_event), do: "SubscriptionEvent"
+  # Support scope (keys mirror @support_resources above) — explicit strings, not a
+  # lookup keyed by that list: a map-based rewrite would turn a typo'd/unmatched atom's
+  # `FunctionClauseError` into a `KeyError`, a real behaviour change to this generator.
   defp operator_module(:ticket), do: "Ticket"
   defp operator_module(:conversation), do: "Conversation"
   defp operator_module(:message), do: "Message"
@@ -575,6 +642,7 @@ defmodule Samen.Gen.App do
   defp operator_module(:sla), do: "Sla"
   defp operator_module(:macro), do: "Macro"
   defp operator_module(:csat), do: "Csat"
+  defp operator_module(:csat_survey_token), do: "CsatSurveyToken"
 
   @doc false
   # The template variable bindings. Every `<%= key %>` in a template is replaced by
@@ -594,6 +662,7 @@ defmodule Samen.Gen.App do
       "resource_table" => s.resource_table,
       "agg_abbrev" => s.agg_abbrev,
       "agg_table" => s.agg_table,
+      "approval_abbrev" => s.approval_abbrev,
       "bc" => ba.customer,
       "bs" => ba.subscription,
       "bl" => ba.plan,
@@ -637,6 +706,11 @@ defmodule Samen.Gen.App do
       "o_role" => oa.role,
       "o_key" => oa.api_key,
       "o_invite" => oa.invitation,
+      "o_cred" => oa.credential,
+      "o_atok" => oa.auth_token,
+      "o_sess" => oa.session,
+      "o_uid" => oa.user_identity,
+      "o_lgf" => oa.login_failure,
       "o_cus" => oa.customer,
       "o_sub" => oa.subscription,
       "o_plan" => oa.plan,
@@ -646,6 +720,8 @@ defmodule Samen.Gen.App do
       "o_usage" => oa.usage,
       "o_ent" => oa.entitlement,
       "o_sev" => oa.subscription_event,
+      # Support scope (keys mirror @support_resources above) — binding-key aliases are
+      # independent compact template-variable names, not derivable from the atom.
       "o_tick" => oa.ticket,
       "o_conv" => oa.conversation,
       "o_msg" => oa.message,
@@ -653,13 +729,15 @@ defmodule Samen.Gen.App do
       "o_sla" => oa.sla,
       "o_macro" => oa.macro,
       "o_csat" => oa.csat,
+      "o_csat_token" => oa.csat_survey_token,
       # WS-E `--modules` seams. Each is "" for a default (no-`--modules`) app, so the
       # rendered router/landing are byte-for-byte unchanged; they carry content only when a
       # surface is selected. Values are computed with `s.module` interpolated DIRECTLY (never
       # via a nested `<%= module %>`) so `render/2`'s single substitution pass is exact.
       "module_mounts" => module_mounts_binding(s),
       "root_route" => root_route_binding(s),
-      "menu_nav_items" => menu_nav_items_binding(s)
+      "menu_nav_items" => menu_nav_items_binding(s),
+      "home_surfaces" => home_surfaces_binding(s)
     }
   end
 
@@ -699,17 +777,39 @@ defmodule Samen.Gen.App do
     end
   end
 
+  # Each mountable surface carries the `@current_org_labels` seam (the `:authn`
+  # prod gate — see the router template) so a generated prod app never resolves an
+  # arbitrary org/user via `?org=`/`?user=`.
+  #
+  # B-SEC (luminary pre-merge) — that seam alone was NOT the whole guarantee it claimed to
+  # be: `Samen.Web.CurrentOrg.resolve/3` runs in `mount/3`, and every framework tenant
+  # LiveView then re-derived the org from `params["org"]` in `handle_params/3`, which LV
+  # 1.2.9 runs on the initial DEAD RENDER. The seam is now backed by two structural
+  # controls the route macros themselves emit — `{Samen.Web.TenantAuthz, :require_tenant}`
+  # on every tenant `live_session` (the on_mount halt that preempts `handle_params`) and
+  # `Samen.Web.CurrentOrg.reresolve/2` in every tenant `handle_params` (a `?org=` may only
+  # SELECT among the principal's authorized orgs) — so the claim holds by construction and
+  # a generated app inherits both at ≈0 authored LOC. The settings mount ALSO opts into
+  # `spine_totp: true`: this app mounts the framework Identity spine, so its
+  # `/settings/security` surface exposes the REAL TOTP-enrollment route
+  # (`/settings/security/2fa`) instead of the honest "managed by your identity
+  # provider" placeholder — 2FA is reachable, not dormant (Addendum 2).
   defp mount_line(:files, mod),
-    do: "    samen_files_routes(:files, #{mod}.Primitives, repo: #{mod}.Repo)"
+    do: "    samen_files_routes(:files, #{mod}.Primitives, repo: #{mod}.Repo, labels: @current_org_labels)"
 
   defp mount_line(:search, mod),
-    do: "    samen_search_routes(:search, #{mod}.Primitives, repo: #{mod}.Repo)"
+    do: "    samen_search_routes(:search, #{mod}.Primitives, repo: #{mod}.Repo, labels: @current_org_labels)"
 
   defp mount_line(:csv, mod),
-    do: "    samen_csv_routes(:csv, #{mod}.Vertical, repo: #{mod}.Repo)"
+    do: "    samen_csv_routes(:csv, #{mod}.Vertical, repo: #{mod}.Repo, labels: @current_org_labels)"
 
   defp mount_line(:settings, mod),
-    do: "    samen_settings_routes(:settings, #{mod}.Operator, repo: #{mod}.Repo)"
+    do:
+      "    samen_settings_routes(:settings, #{mod}.Operator,\n" <>
+        "      repo: #{mod}.Repo,\n" <>
+        "      labels: @current_org_labels,\n" <>
+        "      spine_totp: true\n" <>
+        "    )"
 
   defp chat_prerequisite_comment(mod) do
     "    # chat requested but NOT auto-mounted (≈0-LOC adoption not possible): it needs a\n" <>
@@ -754,6 +854,19 @@ defmodule Samen.Gen.App do
 
   defp nav_item_line(:settings),
     do: ~s(                <.nav_item label="Settings" href={"/settings?org=\#{@org_id}"} />)
+
+  # The `<%= home_surfaces %>` seam (X1 / ADR-045 §4.1): the LIST of inherited `module_nav/1`
+  # groups this app's router ACTUALLY mounts, passed as `surfaces={...}` so the framework nav
+  # renders ONLY mounted groups and never a dead link (NoRouteError on the first click). The
+  # generated router (see `router_ex_api.eex`) mounts `samen_module_routes(:billing, …)` and
+  # `samen_notifications_routes(…)` UNCONDITIONALLY → `:billing` + `:inbox` are always present;
+  # it never mounts CRM/Support/Marketing/Automation. `--modules settings` adds the `:settings`
+  # workspace item (files/search/csv are the `:extra` "Product" group, not `module_nav` groups).
+  # Kept in lockstep with the router mounts above so both derive from the same `s.modules`.
+  defp home_surfaces_binding(%__MODULE__{modules: mods}) do
+    surfaces = [:inbox, :billing] ++ if :settings in mods, do: [:settings], else: []
+    "[" <> Enum.map_join(surfaces, ", ", &inspect/1) <> "]"
+  end
 
   @doc """
   The relative path from the generated app dir to the samen_core SOURCE root, used for the

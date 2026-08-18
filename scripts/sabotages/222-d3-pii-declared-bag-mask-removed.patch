@@ -1,0 +1,23 @@
+# SABOTAGE: D3 (ADR-046 §4.2) — the pii_declared custom-bag MASK is removed on the
+# operator-without-grant plane: `resolve_bag_value/8`'s operator branch returns the raw
+# plaintext-in-bag value (`else: value`) instead of `bag_mask(key)`. The `%Masked{}` is
+# never substituted, so an operator (impersonation, no reveal grant) receives the
+# pii_declared bag key's PLAINTEXT in the clear on every generic surface — the exact
+# INV-1 gap D3 closes. Flips the MaskingCase RED proof (operator plane must render `••••`,
+# never the plaintext) while leaving tenant plaintext + non-PII keys untouched, so this
+# targets ONLY the per-plane bag mask, not the resolver's vault-field path.
+# APP: samen_core
+# TEST_FILES: test/custom_fields_masking_test.exs
+# MUST_FAIL: RED: the operator-without-grant plane resolves the bag key to
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -390,7 +390,7 @@
+       plane == :operator ->
+         if operator_granted?(record, key, resource, reveal_action, actor, opts),
+           do: value,
+-          else: bag_mask(key)
++          else: value
+ 
+       true ->
+         bag_mask(key)

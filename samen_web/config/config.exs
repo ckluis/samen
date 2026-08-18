@@ -1,5 +1,11 @@
 import Config
 
+# ADR-036 D1 / ADR-037 §5.2: AshMoney/ex_money wiring — the mounted test-support
+# CRM Opportunity / Billing Price Money attributes. No FX feature — the background
+# exchange-rate poller stays off.
+config :ash, :known_types, [AshMoney.Types.Money]
+config :ex_money, auto_start_exchange_rate_service: false
+
 # samen_web is a LIBRARY — in a host app the host owns this config. These entries
 # exist ONLY for the standalone test-support host (Samen.WebTest.*), so the framework
 # render tests can materialize real scope resources + exercise PiiResolution against a
@@ -27,6 +33,17 @@ config :samen_core, :non_pii_repo, Samen.WebTest.Repo
 config :samen_core, :verify_repo, Samen.WebTest.Repo
 config :samen_core, :vault_repo, Samen.WebTest.Repo
 config :samen_core, :impersonation_repo, Samen.WebTest.Repo
+
+# ADR-047 A5: the agent-loop resources back the tenant AgentLive + operator
+# AgentHealthLive surfaces, so samen_web's scratch DB carries their tables (the three
+# migrations mirror samen_core's test_repo byte-for-byte apart from the module name) and
+# the compile_env repo seams point at it. Without this the resources would compile
+# against SamenCore.TestRepo and no render test could exercise a real vault-routed
+# transcript.
+config :samen_core, :samen_ai_agent_run_repo, Samen.WebTest.Repo
+config :samen_core, :samen_ai_agent_turn_repo, Samen.WebTest.Repo
+config :samen_core, :samen_ai_agent_kill_repo, Samen.WebTest.Repo
+
 
 config :phoenix, :json_library, Jason
 

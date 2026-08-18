@@ -1,0 +1,26 @@
+# SABOTAGE: S1a (ADR-045 §4.4) — the TENANT membership-role derivation DEFEATED. The
+# `Samen.Web.TenantRole.membership_role/3` helper is the tenant-plane twin of the T146 operator
+# gate: on an ARMED host it reads the acting principal's REAL `Identity.Membership` role (via
+# `Samen.Auth.OrgActor`, fail-closed `:member`) so the tenant `write_scope` helpers no longer
+# self-elevate an ordinary member to `:admin`. This sabotage makes the helper IGNORE the
+# membership entirely and return `:admin` unconditionally — the exact pre-fix
+# `Map.put(actor, :role, :admin)` hole, intra-org — so on an armed flags surface a NON-admin
+# member's admin-gated flag toggle SUCCEEDS. The named LiveView-driving red path (a real member
+# whose toggle must be REFUSED) and the fail-closed unit control MUST flip.
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_authz_live_test.exs
+# MUST_FAIL: a NON-admin member's flag toggle is REFUSED
+# MUST_FAIL: real role, fail-CLOSED to :member
+diff --git a/samen_web/lib/samen/web/tenant_role.ex b/samen_web/lib/samen/web/tenant_role.ex
+--- a/samen_web/lib/samen/web/tenant_role.ex
++++ b/samen_web/lib/samen/web/tenant_role.ex
+@@ -98,8 +98,7 @@
+   def membership_role(mount, org_id, principal)
+       when is_binary(org_id) and is_binary(principal) do
+     case CurrentOrg.resolve_actor(mount, principal, org_id) do
+-      %{role: role} when is_atom(role) and not is_nil(role) -> role
+-      _ -> :member
++      _ -> :admin
+     end
+   end
+ 

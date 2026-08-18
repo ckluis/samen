@@ -1,0 +1,24 @@
+# SABOTAGE: T123 (attempt 2) gate sabotage — the abbrev PERSISTENCE-path cross-host
+# collision guard (build-integrity). Samen.AbbrevRegistry.validate_host/5's
+# cross_host_conflict/4 is neutered (its other-host hit `{h, other}` is replaced by `nil`)
+# so it never reports an other-host different-owner collision. With that guard dead,
+# validate_host/5 returns :ok for an accidental cross-host reservation and reserve!/5 (the
+# sanctioned write path routing through it) again PERSISTS hosts.A.xyz alongside
+# hosts.B.xyz — the exact T47 orphan that trips flatten_conflicts/1's fail-closed LOSSY
+# FLATTENING raise at compile. The T123 persistence red-paths MUST fail.
+# APP: samen_core
+# TEST_FILES: test/abbrev_allocator_cross_host_test.exs
+# MUST_FAIL: reserve! for host A of host B's abbrev for a DIFFERENT module is REFUSED
+# MUST_FAIL: validate_host/5: default REFUSES other-host different owner
+diff --git a/samen_core/lib/samen/abbrev_registry.ex b/samen_core/lib/samen/abbrev_registry.ex
+--- a/samen_core/lib/samen/abbrev_registry.ex
++++ b/samen_core/lib/samen/abbrev_registry.ex
+@@ -428,7 +428,7 @@ defmodule Samen.AbbrevRegistry do
+         case Map.get(ns, abbrev) do
+           nil -> nil
+           ^owner -> nil
+-          other -> {h, other}
++          _other -> nil
+         end
+       else
+         nil

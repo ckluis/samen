@@ -1,0 +1,25 @@
+# SABOTAGE: T75 fix round MED-1 — drops the `direction == :inbound` conjunct
+# from `Samen.Sequences.MailboxReplyCheck.replied_since?/3`'s filter. This
+# conjunct was UNPINNED before this fix round (dropping it flipped ZERO
+# tests). It is live ordnance: with the T74 I1 two-way Mailbox sync adopted,
+# the org's OWN sent mail lands as `:outbound` rows on the SAME `crm.person`
+# anchor a genuine reply would use. Without this conjunct, EVERY sequence
+# would self-pause after step 1 (the org's own outbound copy of that very
+# step reads back as if the contact replied) — silently, with the rest of
+# the suite green.
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: an OUTBOUND MailMessage on the SAME anchor does NOT pause the sequence (direction conjunct pinned)
+diff --git a/samen_core/lib/samen/sequences/mailbox_reply_check.ex b/samen_core/lib/samen/sequences/mailbox_reply_check.ex
+index 5c76fd5..b53d5c8 100644
+--- a/samen_core/lib/samen/sequences/mailbox_reply_check.ex
++++ b/samen_core/lib/samen/sequences/mailbox_reply_check.ex
+@@ -49,7 +49,7 @@ defmodule Samen.Sequences.MailboxReplyCheck do
+         |> Ash.Query.new()
+         |> Ash.Query.filter(
+           org_id == ^org_id and subject_key == "crm.person" and subject_id == ^person_id and
+-            direction == :inbound and occurred_at >= ^since
++            occurred_at >= ^since
+         )
+         |> Ash.Query.limit(1)
+         |> Ash.read!(authorize?: false)

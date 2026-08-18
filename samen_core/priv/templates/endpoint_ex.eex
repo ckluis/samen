@@ -18,12 +18,22 @@ defmodule <%= module %>Web.Endpoint do
 
   socket("/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]])
 
-  # ADR-009: serve the Samen UI kit's stylesheet from the samen_web DEPENDENCY's priv
-  # at `/assets/samen_ui.css`. Same file as every vertical — zero duplication.
+  # ADR-009 + ADR-042 C3: serve the samen_web UI kit stylesheet AND the vendored Phoenix
+  # LiveView JS client at `/assets/*`, all from dependency priv (same files as every
+  # vertical — zero duplication). Framework bundles come from the deps' OWN priv so
+  # client/server versions cannot skew; each clause is a scoped `only:` allowlist.
+  plug(Plug.Static, at: "/assets", from: {:phoenix, "priv/static"}, only: ~w(phoenix.min.js))
+
+  plug(Plug.Static,
+    at: "/assets",
+    from: {:phoenix_live_view, "priv/static"},
+    only: ~w(phoenix_live_view.min.js)
+  )
+
   plug(Plug.Static,
     at: "/assets",
     from: {:samen_web, "priv/static/assets"},
-    only: ~w(samen_ui.css)
+    only: ~w(samen_ui.css app.js fonts)
   )
 
   plug(Plug.RequestId)
@@ -32,7 +42,13 @@ defmodule <%= module %>Web.Endpoint do
   plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
-    json_decoder: Phoenix.json_library()
+    json_decoder: Phoenix.json_library(),
+    # ADR-044 (WS-J J1): required for POST /fleet/directive's signature
+    # verification (Samen.Web.Fleet.Ingress needs the EXACT signed bytes,
+    # which Plug.Parsers otherwise discards after decoding) — same
+    # body_reader every samen_webhook_routes/1 host wires; harmless for every
+    # other route (it only caches bytes alongside the normal parse).
+    body_reader: {Samen.Web.Webhook.RawBodyReader, :read_body, []}
   )
 
   plug(Plug.MethodOverride)

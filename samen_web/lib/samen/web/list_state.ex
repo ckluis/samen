@@ -16,6 +16,11 @@ defmodule Samen.Web.ListState do
     * `cursor_stack` — cursors of the pages BEFORE the current one (LIFO)
     * `page_size`    — bounded by `Samen.Web.Reads.max_page_size/0`
     * `selected`     — `MapSet` of selected row ids (bulk-action affordance)
+    * `show_archived` — the E6 archived-filter toggle (ADR-040 §5.8, T37h): `false`
+      (default) shows only live rows — byte-identical to pre-T37h behavior for any
+      view that never toggles it; `true` asks the view's `reads/3` to include
+      archived rows too (a resource-specific choice — the mixin only carries the
+      flag, `Samen.Info.archivable?/1` decides whether it is even meaningful).
   """
 
   defstruct sort: nil,
@@ -23,7 +28,8 @@ defmodule Samen.Web.ListState do
             cursor: nil,
             cursor_stack: [],
             page_size: 50,
-            selected: MapSet.new()
+            selected: MapSet.new(),
+            show_archived: false
 
   @type t :: %__MODULE__{
           sort: {atom(), :asc | :desc} | nil,
@@ -31,6 +37,7 @@ defmodule Samen.Web.ListState do
           cursor: term() | nil,
           cursor_stack: [term()],
           page_size: pos_integer(),
-          selected: MapSet.t()
+          selected: MapSet.t(),
+          show_archived: boolean()
         }
 end

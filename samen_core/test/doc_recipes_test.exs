@@ -279,9 +279,6 @@ defmodule Samen.Gen.DocRecipesTest do
     {"samen_core/lib/samen/api_contract.ex", "changed type from"},
     {"samen_core/lib/samen/api_contract.ex", "NOTE: semantic breaks"},
     {"samen_core/lib/mix/tasks/samen.verify.api_contract.ex", "Snapshot file not found: "},
-    # column_refs (off-gate)
-    {"samen_core/lib/mix/tasks/samen.verify.column_refs.ex",
-     "unknown storage column reference: "},
     # never_read_current (off-gate / Driftwood 16b)
     {"samen_core/lib/samen/cdc/never_read_current.ex",
      "against the CDC analytics repo in a module NOT marked"},

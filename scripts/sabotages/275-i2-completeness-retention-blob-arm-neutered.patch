@@ -1,0 +1,24 @@
+# SABOTAGE: I2 (ADR-046 §8 residual #3 / §6 gate) — the erasure-completeness gate's
+# retention-blob-aware storage_key arm is neutered: the per-residue check always passes
+# (`if true or blob_backed_fun.(r.resource)`), so a storage_key blob whose `:delete` purge
+# does NOT route through the governed chokepoint (a raw-destroy orphan) is never NAMED by the
+# gate — the coverage this arm exists to assert is gone. `blob_backed_fun` stays referenced.
+# Flips the arm's refutability proof (a modeled un-routed blob must be named UN-PURGED) while
+# the subject-linked file-arm class and the positive control stay green.
+# APP: samen_core
+# TEST_FILES: test/erasure/completeness_test.exs
+# MUST_FAIL: the retention-blob-aware arm is REFUTABLE
+diff --git a/samen_core/lib/samen/erasure/completeness.ex b/samen_core/lib/samen/erasure/completeness.ex
+--- a/samen_core/lib/samen/erasure/completeness.ex
++++ b/samen_core/lib/samen/erasure/completeness.ex
+@@ -347,7 +347,9 @@ defmodule Samen.Erasure.Completeness do
+ 
+     retention_violations =
+       Enum.flat_map(residues, fn r ->
+-        if blob_backed_fun.(r.resource) do
++        # SABOTAGE: the retention-blob-aware residue check always passes — an un-routed
++        # storage_key blob (raw-destroy orphan) is never named by the gate.
++        if true or blob_backed_fun.(r.resource) do
+           []
+         else
+           [

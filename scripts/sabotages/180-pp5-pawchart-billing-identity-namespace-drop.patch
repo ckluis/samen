@@ -1,0 +1,23 @@
+# SABOTAGE: PP-5 (Batch 2 TENANT-ROLE) / the :identity_namespace enumerating guard —
+# strip `:identity_namespace` from pawchart's `@current_org_labels`, so the tenant-plane
+# Billing surface can no longer resolve the caller's REAL per-org Membership role (the
+# billing mount's own `PawChart.Billing` namespace materializes no Membership). The
+# role-gated billing writes then fail CLOSED for EVERYONE — a clinic ADMIN can no longer
+# subscribe/manage-payment — reintroducing the Batch-2 silent-breakage class. The
+# enumerating guard that asserts pawchart's role-gated billing mount WIRES
+# :identity_namespace FLIPS (the label is now absent).
+# APP: pawchart
+# TEST_FILES: test/billing_role_gate_test.exs
+# MUST_FAIL: wires :identity_namespace to an identity-materializing namespace
+# MUST_FAIL: an ADMIN resolves the admin billing actor
+diff --git a/pawchart/lib/pawchart_web/router.ex b/pawchart/lib/pawchart_web/router.ex
+--- a/pawchart/lib/pawchart_web/router.ex
++++ b/pawchart/lib/pawchart_web/router.ex
+@@ -67,7 +67,6 @@ defmodule PawChartWeb.Router do
+     org_directory: {PawChart.Directory, :orgs, []},
+     authn: {:app_env, :pawchart, :auth_required?},
+     authorized_orgs: {PawChart.Auth, :authorized_org_ids, []},
+-    identity_namespace: PawChart.Operator,
+     host_nav_extra: {PawChartWeb.ClinicLive, :clinic_nav_data, []},
+     operator_workspace: "PawChart Ops",
+     seed_command: "mix pawchart.seed"

@@ -111,15 +111,37 @@ defmodule Samen.AbbrevPropertyTest do
     end
   end
 
+  # Pin a printable-string generator to values that survive the `:string` type's
+  # write-time normalization (trim + empty→nil), so any round-trip difference is
+  # attributable to the abbrev prefix mechanism under test, never to trimming.
+  defp trim_stable(gen) do
+    gen
+    |> StreamData.map(&String.trim/1)
+    |> StreamData.filter(&(&1 != ""), 200)
+  end
+
   # Non-empty values: Ash's :string type coerces `""` to nil by default (a type
   # concern, not a storage-prefix concern), which is out of scope for this T1.1
   # property. The point here is that arbitrary values round-trip through the
   # *prefixed physical columns* via their logical names.
+  #
+  # ROOT-CAUSE FIX (T102, the T100 "1 of 15 properties" flake): the declared
+  # `:string` type ALSO defaults `trim?: true` + `allow_empty?: false`
+  # (deps/ash/lib/ash/type/string.ex:19-27 — "values are trimmed and empty values
+  # are set to nil"). `String.trim/1` strips ALL Unicode whitespace, so a value
+  # that is only-whitespace (StreamData once shrank to " ", a SIX-PER-EM
+  # SPACE) or has leading/trailing whitespace is normalized on write and no longer
+  # equals the raw input — the round-trip assertion then fails for a reason
+  # unrelated to the abbrev PREFIX this property actually tests. `min_length: 1`
+  # already guards the empty case; `trim_stable/1` completes that guard by pinning
+  # the generated value to what the type stores (trim it, reject the ones that
+  # trim to empty). Same class of fix as `min_length: 1`, not an assertion change —
+  # the `==` round-trip assertions below are untouched.
   property "create/read round-trips via the logical name for arbitrary values" do
     check all(
-            name <- StreamData.string(:printable, min_length: 1, max_length: 40),
-            label <- StreamData.string(:printable, min_length: 1, max_length: 40),
-            notes <- StreamData.string(:printable, min_length: 1, max_length: 200),
+            name <- trim_stable(StreamData.string(:printable, min_length: 1, max_length: 40)),
+            label <- trim_stable(StreamData.string(:printable, min_length: 1, max_length: 40)),
+            notes <- trim_stable(StreamData.string(:printable, min_length: 1, max_length: 200)),
             org_id = Ash.UUID.generate(),
             max_runs: 60
           ) do
@@ -143,6 +165,50 @@ defmodule Samen.AbbrevPropertyTest do
       assert read_back.label == label
       assert read_back.notes == notes
       assert read_back.org_id == org_id
+    end
+  end
+
+  # DETERMINISTIC regression for the T100 "1 of 15 properties" flake (T102): pins
+  # BOTH sides of the trim boundary that the property's generator now respects, so
+  # the flake can never silently return and the fix's premise stays honest.
+  describe "T102 — string-normalization boundary the round-trip property depends on" do
+    test "a trim-stable value round-trips byte-for-byte via the prefixed column" do
+      org_id = Ash.UUID.generate()
+      value = "gráce notes — vïa"
+
+      rec =
+        SamenCore.Support.PropFixture
+        |> Ash.Changeset.for_create(:create, %{org_id: org_id, name: "n", label: "l", notes: value})
+        |> Ash.create!()
+
+      [read_back] =
+        SamenCore.Support.PropFixture
+        |> Ash.Query.filter(id == ^rec.id)
+        |> Ash.Query.ensure_selected([:notes])
+        |> Ash.read!()
+
+      assert read_back.notes == value
+    end
+
+    test "the exact shrunk flake vector — a whitespace-only string (U+2006) — is normalized to nil by the :string type" do
+      # This is INTENDED, documented Ash `:string` behaviour (trim? + allow_empty?
+      # defaults, deps/ash/lib/ash/type/string.ex), NOT a substrate bug — which is
+      # precisely why `trim_stable/1` excludes such values from the round-trip
+      # generator. Asserting it here proves the exclusion is contract-correct.
+      org_id = Ash.UUID.generate()
+
+      rec =
+        SamenCore.Support.PropFixture
+        |> Ash.Changeset.for_create(:create, %{org_id: org_id, name: "n", label: "l", notes: " "})
+        |> Ash.create!()
+
+      [read_back] =
+        SamenCore.Support.PropFixture
+        |> Ash.Query.filter(id == ^rec.id)
+        |> Ash.Query.ensure_selected([:notes])
+        |> Ash.read!()
+
+      assert read_back.notes == nil
     end
   end
 end

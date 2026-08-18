@@ -1,0 +1,29 @@
+# SABOTAGE: A6 (ADR-047 §6; the A5 verifier's R-A5-4, first half) gate sabotage — an
+# UNREADABLE kill row is reported as `active` again. `Samen.AI.Agent.Health.kill_state/2`
+# drops its `:unknown` arm and collapses a failed kill-table read to "not killed", so the
+# operator page positively reports a definition as running while `Breaker.definition_killed?/2`
+# — which fails CLOSED on that same unreadable row — is refusing every one of its runs. The
+# page then contradicts the engine in the dangerous direction: an operator sees "active" and a
+# kill affordance for a definition that is already stopped. The named red must flip; the
+# READABLE `:active` / `:killed` positive controls stay green, proving what was lost is the
+# honest third state and not the kill display.
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/agent_surface_test.exs
+# MUST_FAIL: an UNREADABLE kill row renders
+diff --git a/samen_core/lib/samen/ai/agent/health.ex b/samen_core/lib/samen/ai/agent/health.ex
+--- a/samen_core/lib/samen/ai/agent/health.ex
++++ b/samen_core/lib/samen/ai/agent/health.ex
+@@ -322,10 +322,10 @@ defmodule Samen.AI.Agent.Health do
+       because a tri-state that only exists inside a comprehension cannot be proven.
+   """
+   @spec kill_state(boolean(), map() | nil) :: :killed | :active | :unknown
++  # SABOTAGE (A6, R-A5-4): an unreadable kill table is reported as "not killed".
+   def kill_state(kills_readable?, kill)
+-  def kill_state(false, _kill), do: :unknown
+-  def kill_state(true, nil), do: :active
+-  def kill_state(true, kill), do: if(Breaker.active_kill?(kill), do: :killed, else: :active)
++  def kill_state(_readable?, nil), do: :active
++  def kill_state(_readable?, kill), do: if(Breaker.active_kill?(kill), do: :killed, else: :active)
+ 
+   defp count_by(rows, fun) do
+     rows |> Enum.group_by(fun) |> Map.new(fn {k, v} -> {to_string(k), length(v)} end)

@@ -15,9 +15,10 @@ defmodule Demo.BillingScope do
 
   ## Scope shape
 
-  The Billing scope is a **Stripe-mirror shape**: no live Stripe calls. Sync is an
-  opt-in host concern via `Samen.Scopes.Billing.SyncAdapter`. The default adapter
-  (`Stub`) is used in demo/test environments.
+  The Billing scope is a **provider-mirror shape**: no live billing-provider calls.
+  Sync is an opt-in adapter-package concern via `Samen.Billing.Provider` (ADR-038
+  §3). `Samen.Billing.FakeProvider` (the honest, call-recording test double) is
+  used in demo/test environments.
 
   ## Tier-0 config rows
 

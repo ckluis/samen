@@ -1,0 +1,24 @@
+# SABOTAGE: D3 (ADR-046 §4.2) — the FAIL-CLOSED whole-bag mask is defeated: when the
+# pii_declared key set is INDETERMINATE on a masking plane (no org resolvable — actor
+# without org_id AND record without a loaded org_id), `bag_context/5` returns `:skip`
+# instead of `:mask_all`. `resolve_bag_keys(record, :skip, …)` then leaves the record
+# UNTOUCHED, so the operator-without-grant read receives the `custom` bag PLAINTEXT in the
+# clear — the fail-OPEN residual D3's hardening closes (a masking resolver that cannot
+# enumerate which keys are pii_declared must not emit ANY bag value). Flips the fail-closed
+# RED proof (indeterminate operator plane must render the WHOLE bag `••••`) while the
+# determinate per-key path and the tenant clear-through are untouched.
+# APP: samen_core
+# TEST_FILES: test/custom_fields_masking_test.exs
+# MUST_FAIL: RED: operator-without-grant + indeterminate org
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -328,7 +328,7 @@
+         cond do
+           # INDETERMINATE on a masking plane → fail closed (mask the whole bag).
+           is_nil(repo) or is_nil(table) or org_ids == [] ->
+-            :mask_all
++            :skip
+ 
+           true ->
+             case pii_declared_keys(repo, table, org_ids) do

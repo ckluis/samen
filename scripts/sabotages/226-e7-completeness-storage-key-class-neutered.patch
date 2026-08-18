@@ -1,0 +1,20 @@
+# SABOTAGE: E7 (ADR-046 §6) — the erasure-completeness gate's storage_key residue class is
+# neutered: `check_storage_key/3` partitions EVERY storage_key column into the org-asset
+# bucket (`Enum.split_with(residues, fn _ -> nil end)`) instead of splitting on the
+# data-subject field, so a SUBJECT-LINKED file blob (an uploader's File row) is no longer
+# required to have a registered `:file_erasure_specs` arm. A shredded subject's raw file
+# bytes would then survive crypto-shred with no gate objection — the exact out-of-envelope
+# residue ADR-046 §6 (c) exists to make un-shippable. Flips the per-class refutability proof
+# (with the file arm REMOVED the subject-linked storage_key must be named UNREACHED) while
+# the positive control (arm present ⇒ pass) and the org-asset residual reporting stay green.
+# APP: samen_core
+# TEST_FILES: test/erasure/completeness_test.exs
+# MUST_FAIL: removing the file arm makes the storage_key residue UNREACHED
+--- a/samen_core/lib/samen/erasure/completeness.ex
++++ b/samen_core/lib/samen/erasure/completeness.ex
+@@ -328,4 +328,4 @@ defmodule Samen.Erasure.Completeness do
+   # Injectable (`:retention_blob_backed_fun`) so a unit test models the gap and proves detection.
+   defp check_storage_key(residues, specs, opts) do
+-    {subject_linked, org_assets} = Enum.split_with(residues, & &1.subject_field)
++    {subject_linked, org_assets} = Enum.split_with(residues, fn _ -> nil end)
+     blob_backed_fun = opts[:retention_blob_backed_fun] || (&Samen.Retention.blob_backed?/1)

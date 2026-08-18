@@ -1,0 +1,25 @@
+# SABOTAGE: B3 subscription-sync out-of-order guard drop (T21; ADR-038 §3.4(3) / handoff criterion 4).
+# Removes the event-ordering (watermark) guard in Samen.Billing.Reconciler.gate/2 so a
+# strictly-OLDER event PROCEEDS and re-applies its stale snapshot — naive last-write-wins.
+# With this applied, a late-arriving `customer.subscription.created` (older marker) clobbers
+# the already-applied `customer.subscription.updated` (newer) back to the basic plan, so the
+# reverse/out-of-order permutations no longer converge to the pro terminal state and the
+# strictly-older ":stale" path stops being reported. The named out-of-order tests MUST flip.
+# APP: samen_stripe
+# TEST_FILES: test/lifecycle_sync_test.exs
+# MUST_FAIL: converges — reverse
+# MUST_FAIL: never clobbers newer state
+diff --git a/samen_core/lib/samen/billing/reconciler.ex b/samen_core/lib/samen/billing/reconciler.ex
+index f9424a7..67b741d 100644
+--- a/samen_core/lib/samen/billing/reconciler.ex
++++ b/samen_core/lib/samen/billing/reconciler.ex
+@@ -135,7 +135,8 @@ defmodule Samen.Billing.Reconciler do
+   defp gate(%{exists: true, watermark: %DateTime{} = watermark}, %ProviderEvent{occurred_at: occurred_at}) do
+     # Out-of-order guard: a strictly-older event never clobbers newer applied state.
+     case DateTime.compare(occurred_at, watermark) do
+-      :lt -> {:short, {:ok, :stale}}
++      # SABOTAGE (T21/B3): the out-of-order guard is dropped — a strictly-older
++      # event now PROCEEDS and clobbers newer applied state (naive last-write-wins).
+       _ -> :proceed
+     end
+   end

@@ -8,6 +8,21 @@ defmodule Samen.Web.Operator.HealthScore do
   `explanation` — explainable BY CONSTRUCTION (AC-G17-3): the drill-down renders
   "why this score" without a second computation.
 
+  ## Forward pointer (T77 fix round 1) — a SECOND, narrower per-tenant formula exists;
+  they are deliberately NOT unified
+
+  `Samen.Web.AccountHealth` (spec §I4) is a second, DELIBERATELY narrower per-tenant
+  health composite — billing + support only, no activity/adoption factors — because it
+  must compute honestly on ANY tenant-plane mount, including hosts with no Identity
+  mount at all (this module's `:adoption` factor needs Identity `Membership` seats;
+  `AccountHealth` cannot assume that exists). The two are NOT meant to converge into
+  one formula: this module scores the OPERATOR's book of tenants it directly bills;
+  `AccountHealth` scores a TENANT's own book of its own customers (a different
+  population entirely — see that module's moduledoc for the full "what account means"
+  correction). Anyone adding a THIRD per-tenant/per-org health formula (e.g. for
+  `docs/adr/ADR-044-fleet-cockpit.md`'s J2 cockpit aggregates) should read both first
+  and reconcile with one of them rather than inventing a fourth.
+
   ## The four factors (weights are config-defaulted, heuristic per ADR-019 §4)
 
     * **`:billing`** (40) — subscription state + DUNNING. This is the incoherence fix

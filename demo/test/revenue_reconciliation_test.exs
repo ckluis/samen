@@ -69,7 +69,8 @@ defmodule Demo.RevenueReconciliationTest do
       |> Ash.Changeset.for_create(:create, %{
         org_id: org_id,
         plan_id: plan_id,
-        unit_amount_cents: cents,
+        # ADR-036 §4.5: unit_amount_cents/currency dropped by the H1 Money migration.
+        unit_amount: Samen.Type.Money.from_cents(cents, :USD),
         interval: :monthly,
         active: true
       })
@@ -115,13 +116,15 @@ defmodule Demo.RevenueReconciliationTest do
     end)
   end
 
+  # ADR-036 §4.5: unit_amount_cents dropped by the H1 Money migration; unit_amount
+  # is now the Money composite — extract minor units.
   defp monthly_prices_by_plan(org_id) do
     Price
     |> Ash.Query.filter(org_id == ^org_id)
     |> Ash.Query.filter(interval == :monthly and active == true)
-    |> Ash.Query.ensure_selected([:plan_id, :unit_amount_cents, :interval, :active, :org_id])
+    |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval, :active, :org_id])
     |> Ash.read!(authorize?: false)
-    |> Map.new(&{&1.plan_id, &1.unit_amount_cents})
+    |> Map.new(&{&1.plan_id, Samen.Type.Money.cents(&1.unit_amount)})
   end
 
   # ---- read the rollup (what the dashboard reads — NEVER a live movement scan) --

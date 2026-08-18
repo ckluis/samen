@@ -1,0 +1,29 @@
+require Samen.Approvals.Blueprint
+
+Samen.Approvals.Blueprint.define_approval(
+  Acme.Approvals.Approval,
+  :acme,
+  Acme.Approvals,
+  Acme.Repo,
+  "acz"
+)
+
+defmodule Acme.Approvals do
+  @moduledoc """
+  T35 §4.7 / T37h — the per-app materialization of the T34 E3 `Approval` resource
+  (`Samen.Approvals.Blueprint.define_approval/5`), this app's engine client for the
+  `"pii_reveal"` kind (`Samen.Reveal.ApprovalHandler`; wired in `config/config.exs`).
+  Emitted by `mix samen.gen.app` (T37h — the fold-in that closes the T35 non-fatal
+  note: without this, a generated app's `Samen.Reveal.Grants.approve/2` fell back to
+  the pre-T35 inline path because no `pii_reveal` approvals module was ever wired).
+
+  Deliberately NOT in `:ash_domains` — a kernel-owned decision table (see
+  `Samen.Approvals.Blueprint` moduledoc), the same posture `demo`/`driftwood` (T35)
+  and `SamenCore.Support.ApprovalsFixture` (T34) already carry.
+  """
+  use Ash.Domain, validate_config_inclusion?: false
+
+  resources do
+    resource(Acme.Approvals.Approval)
+  end
+end

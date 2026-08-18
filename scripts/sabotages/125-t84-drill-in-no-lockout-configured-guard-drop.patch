@@ -1,0 +1,32 @@
+# SABOTAGE: T84 (ADR-044 s16.4a, RP-J-16 no-lockout). The R-B drill-in gate engages the scope
+# conjunct ONLY when the product wires a :fleet_resolution seam (Resolution.configured?/1); with
+# NO seam the conjunct is INERT so a product with no fleet is never locked out of its own
+# drill-ins. Dropping the configured? guard makes an unconfigured seam (scope_of -> :none) DENY,
+# reproducing the "separately-deployed fleet locks everyone out" composition error. Positive
+# control: the configured-seam scoped-out/in-scope tests still behave, so the flip is non-vacuous.
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_scope_gate_test.exs
+# MUST_FAIL: with NO :fleet_resolution seam configured
+diff --git a/samen_web/lib/samen/web/operator/impersonation.ex b/samen_web/lib/samen/web/operator/impersonation.ex
+index 817938e..271ec24 100644
+--- a/samen_web/lib/samen/web/operator/impersonation.ex
++++ b/samen_web/lib/samen/web/operator/impersonation.ex
+@@ -185,11 +185,13 @@ defmodule Samen.Web.Operator.Impersonation do
+   # (the no-lockout / fleet-independent property, §16.4a). `scope_of/2` itself fails closed to
+   # `:none` on any error, so a wired-but-erroring seam denies (mask-by-omission).
+   defp scope_denied?(otp_app, operator_id, org_id) when is_atom(otp_app) and not is_nil(otp_app) do
+-    Samen.Fleet.Resolution.configured?(otp_app) and
+-      not Samen.Fleet.Resolution.in_scope?(
+-        Samen.Fleet.Resolution.scope_of(otp_app, operator_id),
+-        org_id
+-      )
++    # SABOTAGE (T84 R-B, s16.4a): drop the configured? guard, so an UNCONFIGURED seam
++    # (scope_of -> :none) denies too - a product with no fleet is locked out of its own
++    # drill-ins, the separately-deployed-fleet composition error R-B forbids.
++    not Samen.Fleet.Resolution.in_scope?(
++      Samen.Fleet.Resolution.scope_of(otp_app, operator_id),
++      org_id
++    )
+   end
+ 
+   defp scope_denied?(_otp_app, _operator_id, _org_id), do: false

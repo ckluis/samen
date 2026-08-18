@@ -36,11 +36,13 @@ defmodule Samen.Gen.AppTest do
     "config/config.exs",
     "config/dev.exs",
     "config/test.exs",
+    "config/prod.exs",
     "lib/<%= otp_app %>/application.ex",
     "lib/<%= otp_app %>/repo.ex",
     "lib/<%= otp_app %>/billing.ex",
     "lib/<%= otp_app %>/vertical.ex",
     "lib/<%= otp_app %>/aggregate.ex",
+    "lib/<%= otp_app %>/approvals.ex",
     "priv/repo/migrations/20260705010000_ash_functions.exs",
     "priv/repo/migrations/20260705010100_oban.exs",
     "priv/repo/migrations/20260705010200_vault_tables.exs",
@@ -52,6 +54,7 @@ defmodule Samen.Gen.AppTest do
     "priv/repo/migrations/20260706070000_tnt_field.exs",
     "priv/repo/migrations/20260706080000_tnt_object_record.exs",
     "priv/repo/migrations/20260709100000_app_resources.exs",
+    "priv/repo/migrations/20260709150000_add_approvals.exs",
     "priv/ci_bootstrap.exs",
     "priv/anti_tautology_probe.exs",
     "test/test_helper.exs",
@@ -132,30 +135,36 @@ defmodule Samen.Gen.AppTest do
       assert s.agg_table == "wga_record_count"
     end
 
-    test "headless reserved_pairs covers the 9 billing + aggregate + authored abbrevs (11)" do
+    test "headless reserved_pairs covers the 9 billing + aggregate + authored + approvals abbrevs (12)" do
       pairs = Gen.reserved_pairs(spec(web: false))
       abbrevs = Enum.map(pairs, &elem(&1, 0))
 
       # 9 billing resources (incl. the `mov` subscription-movement ledger, ADR-017)
-      # + aggregate + authored = 11.
-      assert length(pairs) == 11
+      # + aggregate + authored + approvals (T37h) = 12.
+      assert length(pairs) == 12
       assert "wid" in abbrevs
       assert "wga" in abbrevs
       assert "wgc" in abbrevs
       assert "wgv" in abbrevs
+      assert "wgz" in abbrevs
       assert {"wid", "Widgetco.Vertical.Record"} in pairs
       assert {"wga", "Widgetco.Aggregate.RecordCountBySegment"} in pairs
       assert {"wgc", "Widgetco.Billing.Customer"} in pairs
       assert {"wgv", "Widgetco.Billing.SubscriptionEvent"} in pairs
+      assert {"wgz", "Widgetco.Approvals.Approval"} in pairs
     end
 
-    test "web (default) reserved_pairs adds the 6 Primitives + 22 operator abbrevs (39)" do
+    test "web (default) reserved_pairs adds the 6 Primitives + 28 operator abbrevs (46)" do
       pairs = Gen.reserved_pairs(spec())
       abbrevs = Enum.map(pairs, &elem(&1, 0))
 
-      # 11 headless + 6 Primitives + 22 operator (Identity 6 + Billing 9 + Support 7) = 39.
-      assert length(pairs) == 39
-      assert length(Enum.uniq(abbrevs)) == 39
+      # 12 headless (incl. T37h's approvals abbrev) + 6 Primitives + 28 operator
+      # (Identity 11 [incl. ADR-035's Credential/AuthToken/Session/UserIdentity and
+      # ADR-038 §6.4's LoginFailure, T109] + Billing 9 + Support 8 [T79/I6 added
+      # `csat_survey_token`, the CSAT request→response loop's single-use survey
+      # link]) = 46.
+      assert length(pairs) == 46
+      assert length(Enum.uniq(abbrevs)) == 46
 
       # Primitives — <p1> + the blueprint suffix (the samen_web test-host convention).
       assert {"wnt", "Widgetco.Primitives.Notification"} in pairs
@@ -165,10 +174,24 @@ defmodule Samen.Gen.AppTest do
       # Operator — <p1> + o/p/q + the per-resource letter (the driftwood convention).
       assert {"woo", "Widgetco.Operator.Org"} in pairs
       assert {"wou", "Widgetco.Operator.User"} in pairs
+      # ADR-035 (T02x integration) — prefix-derived, NEVER the `crd`/`atk` literal
+      # defaults (those are permanently owned by `hosts.demo` in the committed registry).
+      assert {"woc", "Widgetco.Operator.Credential"} in pairs
+      assert {"wot", "Widgetco.Operator.AuthToken"} in pairs
+      # T06x (this integration pass) — prefix-derived, NEVER the `ses`/`uid` literal
+      # defaults (also permanently owned by `hosts.demo` in the committed registry) —
+      # the exact "ses" is registered to Demo.Identity.Session collision this fixes.
+      assert {"wos", "Widgetco.Operator.Session"} in pairs
+      assert {"woi", "Widgetco.Operator.UserIdentity"} in pairs
+      # ADR-038 §6.4 (T109) — prefix-derived, NEVER the `dil` literal default
+      # (permanently owned by `hosts.demo` in the committed registry).
+      assert {"wol", "Widgetco.Operator.LoginFailure"} in pairs
       assert {"wpc", "Widgetco.Operator.Customer"} in pairs
       assert {"wpv", "Widgetco.Operator.SubscriptionEvent"} in pairs
       assert {"wqk", "Widgetco.Operator.Ticket"} in pairs
       assert {"wqs", "Widgetco.Operator.Csat"} in pairs
+      # T79 (spec §I6) — the CSAT request→response loop's single-use survey link.
+      assert {"wqt", "Widgetco.Operator.CsatSurveyToken"} in pairs
     end
 
     test "web derivation fails closed on an internal collision (prefix ending in o/p/q)" do
@@ -376,11 +399,35 @@ defmodule Samen.Gen.AppTest do
       # The design's default mount set: the authored scope + notifications + the
       # operator plane (+ the session write), via Samen.Web.Router macros.
       assert router =~ "import Samen.Web.Router"
-      assert router =~ "samen_module_routes(:billing, Widgetco.Billing, repo: Widgetco.Repo)"
+      assert router =~ "samen_module_routes(:billing, Widgetco.Billing, repo: Widgetco.Repo, labels: @current_org_labels)"
       assert router =~ "samen_notifications_routes(:notifications, Widgetco.Primitives,"
       assert router =~ "samen_operator_routes(Widgetco.Operator,"
       assert router =~ "samen_session_routes()"
       assert router =~ "flags_namespace: Widgetco.Primitives"
+
+      # A9 (T10) — the FULL auth spine is emitted by DEFAULT: the ADR-035 §5 identity
+      # surfaces (signup→verify→invite) + the A8 first-run onboarding wizard, over the
+      # app's sole Identity mount (`Widgetco.Operator`), zero hand-edits.
+      assert router =~ "samen_auth_routes(namespace: Widgetco.Operator, repo: Widgetco.Repo)"
+      assert router =~ "samen_onboarding_routes(Widgetco.Operator, repo: Widgetco.Repo)"
+
+      # Addendum 3 / ADR-045 §2 — the `:authn` prod-safety gate is wired on every tenant mount
+      # by default (ARMED BY DEFAULT in prod), so a generated prod app never resolves an arbitrary
+      # org via `?org=`; the `:identity_namespace` seam is co-wired so an armed host derives the
+      # caller's REAL Membership role for admin writes (ADR-045 §4.4) rather than failing closed.
+      assert router =~ "@current_org_labels %{"
+      assert router =~ "authn: {:app_env, :widgetco, :auth_required?}"
+      assert router =~ "identity_namespace: Widgetco.Operator"
+
+      # T117 (P9-F1 fix) — the OPERATOR control plane is conn-gated in prod. The generated
+      # router declares the `:require_authenticated_operator` pipeline over `Samen.Web.AuthGate`
+      # and pipes the operator scope through it (NOT the bare `:browser` pipeline), so a deployed
+      # prod app redirects an anonymous `/operator/*` request to `/login`. Mirrors driftwood's
+      # `plug(DriftwoodWeb.Auth)` house gate, scoped to the operator plane.
+      assert router =~ "pipeline :require_authenticated_operator do"
+      assert router =~ "plug(Samen.Web.AuthGate, otp_app: :widgetco)"
+      assert router =~ "pipe_through([:browser, :require_authenticated_operator])"
+
       assert router =~ ~s{get("/healthz", PageController, :healthz)}
       # F1.2 — the readiness route sits alongside liveness (Repo/KMS/Oban probe).
       assert router =~ ~s{get("/readyz", PageController, :readyz)}
@@ -416,6 +463,7 @@ defmodule Samen.Gen.AppTest do
       assert b["o_org"] == "woo"
       assert b["o_sev"] == "wpv"
       assert b["o_csat"] == "wqs"
+      assert b["o_csat_token"] == "wqt"
 
       # Headless bindings carry NO web keys (the substitution engine stays exact).
       hb = Gen.bindings(spec(web: false))
@@ -586,15 +634,19 @@ defmodule Samen.Gen.AppTest do
       assert plug =~ "_ -> conn"
     end
 
-    test "ci.sh gains the api_contract step (18 steps) and README documents the API" do
+    test "ci.sh gains the api_contract + ai_prompt_masking steps (19 steps) and README documents the API" do
       files = rendered_api_files()
       ci = files["ci.sh"]
 
-      assert ci =~ "step 16/18: mix samen.verify.api_contract --version v1"
+      assert ci =~ "step 16/19: mix samen.verify.api_contract --version v1"
       assert ci =~ ~s{--snapshot "$APP_DIR/api_contract.v1.json"}
-      assert ci =~ "step 17/18: mix test"
-      assert ci =~ "step 18/18: anti-tautology probe"
-      refute ci =~ "/17:"
+      # T134: the app re-verifies its OWN AI surface / vault resources (last verify.* step,
+      # mirroring demo/ci.sh) — inserted between api_contract and the default suite.
+      assert ci =~ "step 17/19: mix samen.verify.ai_prompt_masking"
+      assert ci =~ "step 18/19: mix test"
+      assert ci =~ "step 19/19: anti-tautology probe"
+      # Not the headless template (which totals /18: after T134 renumber).
+      refute ci =~ "/18:"
 
       readme = files["README.md"]
       assert readme =~ "/api/v1"
@@ -772,7 +824,11 @@ defmodule Samen.Gen.AppTest do
 
     test "wires the prod KMS adapter from the SAMEN_KMS_* env (vault keystore)", %{runtime: rt} do
       assert rt =~ "config :samen_core, :kms_adapter, Samen.Kms.AwsKmsDynamo"
-      assert rt =~ "config :samen_core, :aws_kms_dynamo_enabled, true"
+      # ADR-045 §4.2 (O5): the AWS adapter is a raise-only SKELETON, so it is selected with
+      # aws_kms_dynamo_enabled:FALSE (NOT the old `true`, which booted green then 500'd per op)
+      # and backstopped by the application.ex boot guard. Enabling it in prod is the O5/X6 defect.
+      assert rt =~ "config :samen_core, :aws_kms_dynamo_enabled, false"
+      refute rt =~ "config :samen_core, :aws_kms_dynamo_enabled, true"
     end
 
     test "NO insecure dev fallback (empty password / localhost) in the prod runtime", %{runtime: rt} do
@@ -846,6 +902,18 @@ defmodule Samen.Gen.AppTest do
       assert todo =~ ~r/OTLP exporter/i
     end
 
+    test "the Operator TODO names the P2-A boot-blockers by consequence (KMS adapter, arming, aud role)",
+         %{runbook: rb} do
+      todo = rb |> String.split("## Operator TODO") |> List.last()
+      # O5: the KMS adapter is a raise-only skeleton — the app REFUSES TO BOOT until wired.
+      assert todo =~ ~r/refuses to boot/i
+      assert todo =~ "Samen.Kms.assert_prod_adapter_ready!"
+      # O4: the aud_event REVOKE role knob.
+      assert todo =~ ":aud_event_app_role"
+      # V-F1: the armed tenant-gate arming step.
+      assert todo =~ "auth_required?"
+    end
+
     test "documents Neon branch-per-env + the secrets checklist (incl. KMS + SECRET_KEY_BASE)",
          %{runbook: rb} do
       assert rb =~ ~r/branch-per-env/i
@@ -878,7 +946,11 @@ defmodule Samen.Gen.AppTest do
 
       router = rendered_router(s)
       assert router =~ "\n    get(\"/\", PageController, :index)\n"
-      assert router =~ "\n    samen_metrics_route(name: :widgetco_prometheus)\n  end\n"
+      assert router =~ "\n    samen_metrics_route(name: :widgetco_prometheus)\n"
+      # ADR-044 §9.2 (T82 fix round, WS-J J1/J5): the fleet reporting-side
+      # routes are now the tail of this scope's ≈0-LOC leverage list — mounted
+      # unconditionally (zero config), regardless of --modules.
+      assert router =~ "\n    samen_fleet_routes(otp_app: :widgetco)\n  end\n"
       refute router =~ "HomeLive"
       refute router =~ "samen_files_routes"
       refute router =~ "--modules"
@@ -904,10 +976,14 @@ defmodule Samen.Gen.AppTest do
     test "mounts the mountable surfaces over the app's existing mounts + swaps / to HomeLive" do
       router = rendered_router(spec(modules: "files,search,csv,settings"))
 
-      assert router =~ "samen_files_routes(:files, Widgetco.Primitives, repo: Widgetco.Repo)"
-      assert router =~ "samen_search_routes(:search, Widgetco.Primitives, repo: Widgetco.Repo)"
-      assert router =~ "samen_csv_routes(:csv, Widgetco.Vertical, repo: Widgetco.Repo)"
-      assert router =~ "samen_settings_routes(:settings, Widgetco.Operator, repo: Widgetco.Repo)"
+      # Each mountable surface carries the `@current_org_labels` (:authn prod gate) seam;
+      # settings ALSO opts into `spine_totp: true` so its Security surface exposes the
+      # real TOTP-enroll route (Addenda 2 & 3).
+      assert router =~ "samen_files_routes(:files, Widgetco.Primitives, repo: Widgetco.Repo, labels: @current_org_labels)"
+      assert router =~ "samen_search_routes(:search, Widgetco.Primitives, repo: Widgetco.Repo, labels: @current_org_labels)"
+      assert router =~ "samen_csv_routes(:csv, Widgetco.Vertical, repo: Widgetco.Repo, labels: @current_org_labels)"
+      assert router =~ "samen_settings_routes(:settings, Widgetco.Operator,"
+      assert router =~ "spine_totp: true"
       # The landing swaps to the Samen.UI menu LiveView (bare name — the scope aliases it).
       assert router =~ ~s{live("/", HomeLive)}
       refute router =~ ~s{get("/", PageController, :index)}
@@ -949,6 +1025,27 @@ defmodule Samen.Gen.AppTest do
       assert home =~ ~s{<.nav_item label="Settings"}
       # No CSV was selected here — the menu lists only what is mounted.
       refute home =~ ~s{<.nav_item label="CSV import"}
+    end
+
+    # X1 (ADR-045 §4.1) — the inherited `module_nav/1` is CONSTRAINED to the groups this
+    # router actually mounts (`surfaces={...}`), so a generated `--modules` subset app never
+    # renders a nav link to a route it never mounts (CRM/Support/Marketing/Automation) — the
+    # first-click `NoRouteError` class. The router mounts billing + notifications always, so
+    # `:inbox` + `:billing` are always present; `--modules settings` adds `:settings`.
+    test "the HomeLive menu constrains module_nav to the mounted surfaces (X1)" do
+      # settings selected → the workspace :settings item is mounted, so it is included.
+      with_settings = Gen.render(Samen.Gen.Templates.home_live_ex(), Gen.bindings(spec(modules: "files,search,settings")))
+      assert with_settings =~ "surfaces={[:inbox, :billing, :settings]}"
+
+      # settings NOT selected → only the always-mounted billing + notifications groups.
+      without_settings = Gen.render(Samen.Gen.Templates.home_live_ex(), Gen.bindings(spec(modules: "files,search")))
+      assert without_settings =~ "surfaces={[:inbox, :billing]}"
+
+      # The `home_surfaces` binding itself is the mounted-only list — never CRM/Support/etc.
+      assert Gen.bindings(spec(modules: "files,search,csv,settings"))["home_surfaces"] ==
+               "[:inbox, :billing, :settings]"
+
+      refute Gen.bindings(spec(modules: "files"))["home_surfaces"] =~ ~r/:crm|:support|:marketing|:automation/
     end
   end
 

@@ -42,6 +42,22 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
       layer). The four `live/3` routes are wired into the generated app's router; the
       🔒 vault field resolves per plane through `Samen.Api.PiiResolution` (never
       hand-masked). Requires a `--web` app (the surfaces mount on samen_web's kit).
+    * `--field-type` (optional) — the ONE scalar `pii do` vault field's LOGICAL type
+      (ADR-036 §3 H7; T15). One of `Samen.Gen.FieldTypeMenu.menu/0`:
+      `string | money | percent | score | duration | priority | url | email | phone |
+      address`. Defaults to `"string"` — byte-identical to pre-T15 output. Every menu
+      entry still materializes as a `Samen.Type.VaultField` `vt_*` token column
+      (`pii_attribute` always vault-routes regardless of its declared logical type) —
+      only the resource's declared type + the four generated G26 test files' sample
+      values change per entry.
+    * `--archivable` (optional, ADR-040 §5.8, T37h) — emit the resource with
+      `archivable: true` on its `use Samen.Resource` call, so it gets the FULL E6
+      soft-delete substrate (`archived_at`, `:archive`/`:restore`/`:archived`
+      actions, the default-read exclusion) with ZERO hand-edits: the migration also
+      emits the `<abbrev>_archived_at` column. Defaults to `false` — byte-identical
+      to pre-T37h output when omitted. With `--live`, the generated index LiveView
+      also gains a restore action + an archived-filter toggle (§5.8's UI clause,
+      inherited by any `--live --archivable` resource — never per-vertical hand-wiring).
   """
 
   use Mix.Task
@@ -54,7 +70,9 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
     abbrev: :string,
     app_dir: :string,
     reserve_abbrevs: :boolean,
-    live: :boolean
+    live: :boolean,
+    field_type: :string,
+    archivable: :boolean
   ]
 
   @impl Mix.Task
@@ -67,6 +85,8 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
     app_dir = Keyword.get(opts, :app_dir) || File.cwd!()
     reserve? = Keyword.get(opts, :reserve_abbrevs, true)
     live? = Keyword.get(opts, :live, false)
+    field_type = Keyword.get(opts, :field_type, "string")
+    archivable? = Keyword.get(opts, :archivable, false)
 
     spec =
       Post.build_resource_spec(
@@ -74,7 +94,9 @@ defmodule Mix.Tasks.Samen.Gen.Resource do
         scope: scope,
         resource: resource,
         abbrev: abbrev,
-        live: live?
+        live: live?,
+        field_type: field_type,
+        archivable: archivable?
       )
 
     Post.validate_resource!(spec)

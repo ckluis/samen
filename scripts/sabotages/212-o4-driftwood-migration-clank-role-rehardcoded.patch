@@ -1,0 +1,24 @@
+# SABOTAGE: O4 (ADR-045 §4.2 fold-in) — Driftwood's aud_event PROD migration RE-HARDCODES the
+# developer laptop role "clank". The fold-in made the vertical migrations DERIVE the REVOKE role
+# at migration time via the shared `Samen.OperatorPlane.Migration.app_role!/2` helper (knob →
+# repo :username → RAISE), never a laptop role that would ship `REVOKE ... FROM clank` into a
+# fresh prod deploy (whose first release_command then aborts). This sabotage restores the "clank"
+# literal, so the vertical migration once again names the laptop role. The named O4 fold red path
+# (the vertical migration must NOT contain "clank" and must derive its role) MUST flip.
+# APP: driftwood
+# TEST_FILES: test/aud_role_derivation_test.exs
+# MUST_FAIL: derives its REVOKE role and never ships the literal 'clank'
+diff --git a/driftwood/priv/repo/migrations/20260705020000_aud_event.exs b/driftwood/priv/repo/migrations/20260705020000_aud_event.exs
+index a8ffe38..4c42d99 100644
+--- a/driftwood/priv/repo/migrations/20260705020000_aud_event.exs
++++ b/driftwood/priv/repo/migrations/20260705020000_aud_event.exs
+@@ -16,7 +16,8 @@ defmodule Driftwood.Repo.Migrations.AudEvent do
+   # else the repo's configured `:username`, else RAISE) via the shared helper — NEVER the
+   # hardcoded developer laptop role, which would ship `REVOKE ... FROM <laptop-role>` into a
+   # fresh prod deploy (whose first `release_command` then aborts: role does not exist).
+-  defp app_role, do: Samen.OperatorPlane.Migration.app_role!(:driftwood, Driftwood.Repo)
++  # SABOTAGE: re-hardcode the developer laptop role into the vertical prod migration.
++  defp app_role, do: "clank"
+ 
+   @resource "Samen.AuditEvent"
+   @table "aud_event"

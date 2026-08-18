@@ -1,0 +1,21 @@
+# SABOTAGE: Phase-4 addendum R3 (clause-scoped MARKER launder). A `# authz-scope:` marker
+# regresses to sanctioning EVERY read in its clause instead of exactly the one it sits on:
+# `marker_binds?` is replaced by `clause_markers != []`. One marker over two org-less reads
+# then sanctions BOTH — the second, unjustified read sails through instead of being FLAGGED.
+# Flips the marker-granularity red path; the two-marker positive control stays green.
+# APP: samen_web
+# TEST_FILES: test/samen/web/authz_read_scope_lint_test.exs
+# MUST_FAIL: marker granularity
+diff --git a/samen_web/lib/samen/web/authz/read_scope_lint.ex b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+index d2c6b17..04b3d2f 100644
+--- a/samen_web/lib/samen/web/authz/read_scope_lint.ex
++++ b/samen_web/lib/samen/web/authz/read_scope_lint.ex
+@@ -209,7 +209,7 @@ defmodule Samen.Web.Authz.ReadScopeLint do
+                 read_narrowed?(ctx, pinned_vars) ->
+               {v, g + 1, s}
+ 
+-            marker_binds?(clause_markers, read_lines, read_line) ->
++            clause_markers != [] ->
+               {v, g + 1, s + 1}
+ 
+             true ->

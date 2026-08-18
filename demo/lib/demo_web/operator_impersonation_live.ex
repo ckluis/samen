@@ -20,28 +20,46 @@ defmodule DemoWeb.OperatorImpersonationLive do
   It also renders the tenant-visible accountability line (who/why/expiry) so the same
   page demonstrates the impersonation is bounded and recorded.
 
-  ## Mount contract
+  ## No `mount/3` — this slice is a RENDER PROOF, never a routed surface (H2, phase-6 SEC fix round)
 
-  `mount/3` reads `operator_id` and `org_id` from the session/params (a real app sets
-  these from the operator's authenticated session + the org they chose to impersonate).
-  It builds the impersonation scope PER MOUNT (deny-on-read: an expired session yields
-  `{:error, :session_inactive}`, and the view renders a "session expired/inactive"
-  state instead of any data).
+  This module used to carry a `mount/3` that derived the acting operator from
+  `Map.get(params, "operator_id") || Map.get(session, "operator_id")` — **params beating the
+  session** — which is the exact pattern the phase-6 dogfood flagged as H2 (audit-ledger
+  attribution forgery / session riding) in the two vertical consoles. Nothing in demo could
+  reach it: demo is API-only (`DemoWeb.Router` is a bare `Plug.Router` forwarding `/api/v1`),
+  there is no `Phoenix.Endpoint`, no live socket and no `live/2` route, so `mount/3` was
+  structurally unreachable — but leaving an unremediated copy of a fixed security defect
+  in-tree is how the next host inherits it (T157 inherited exactly this pattern rather than
+  the fixed one). The `mount/3` is therefore GONE rather than fixed: demo depends on
+  `samen_core` only, so it cannot reach the framework gate that makes a mount safe
+  (`Samen.Web.Operator.Impersonation.assign_identity/3` + `gate_socket/3` + `read_scope/1`),
+  and adding `samen_web` to this host's dep graph to support a route that does not exist would
+  be disproportionate.
+
+  **Any host that wants a REAL routed impersonation console must use the framework path** —
+  see `Samen.Web.Operator.DeliverabilityLive`, `DriftwoodWeb.OperatorImpersonationLive` or
+  `PawChartWeb.OperatorImpersonationLive`: the acting operator comes from the AUTHENTICATED
+  principal and the access decision goes through `gate/3` (T146 role + ADR-044 §16.4a R-B
+  account scope + T150 session), never a client param and never a direct
+  `Samen.Impersonation.scope/2` call.
+
+  What remains here is the T4.1 clause (e) proof itself: `load/3` (driven by the test with an
+  explicit, caller-supplied operator id — no client-controlled input anywhere) plus `render/1`.
+  `load/3` now fails CLOSED on a nil operator/org instead of raising.
   """
   use Phoenix.LiveView
 
   alias Samen.Impersonation
 
-  @impl true
-  def mount(params, session, socket) do
-    operator_id = fetch(params, session, "operator_id")
-    org_id = fetch(params, session, "org_id")
-
-    {:ok, load(socket, operator_id, org_id)}
-  end
-
-  # Extracted so tests can drive the exact same load path.
+  # Extracted so tests can drive the exact same load path. `operator_id` is supplied BY THE
+  # CALLER (never parsed out of params/session here) — see the moduledoc.
   @doc false
+  def load(socket, operator_id, org_id)
+
+  # Fail CLOSED rather than raising a FunctionClauseError out of the kernel on a nil id.
+  def load(socket, operator_id, org_id) when not is_binary(operator_id) or not is_binary(org_id),
+    do: denied(socket, operator_id, org_id)
+
   def load(socket, operator_id, org_id) do
     case Impersonation.scope(operator_id, org_id) do
       {:ok, scope} ->
@@ -56,16 +74,20 @@ defmodule DemoWeb.OperatorImpersonationLive do
           session_info: session_info(org_id, operator_id)
         )
 
-      {:error, :session_inactive} ->
-        assign(socket,
-          impersonating: false,
-          session_inactive: true,
-          operator_id: operator_id,
-          org_id: org_id,
-          contacts: [],
-          session_info: nil
-        )
+      {:error, reason} when reason in [:session_inactive, :operator_suspended] ->
+        denied(socket, operator_id, org_id)
     end
+  end
+
+  defp denied(socket, operator_id, org_id) do
+    assign(socket,
+      impersonating: false,
+      session_inactive: true,
+      operator_id: operator_id,
+      org_id: org_id,
+      contacts: [],
+      session_info: nil
+    )
   end
 
   defp read_contacts(scope) do
@@ -87,10 +109,6 @@ defmodule DemoWeb.OperatorImpersonationLive do
     org_id
     |> Impersonation.list_for_org()
     |> Enum.find(fn e -> e.operator_id == operator_id and e.active? end)
-  end
-
-  defp fetch(params, session, key) do
-    Map.get(params, key) || Map.get(session, key)
   end
 
   @impl true

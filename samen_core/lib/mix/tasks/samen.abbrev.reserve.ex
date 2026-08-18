@@ -34,6 +34,12 @@ defmodule Mix.Tasks.Samen.Abbrev.Reserve do
     * `--registry` — path to the registry file to write. Defaults to the committed
       `samen_core/priv/abbrev_registry.json`. **Probes/tests MUST pass a scratch copy** —
       the committed registry stays byte-untouched from a probe.
+    * `--allow-cross-host-reuse` — the EXPLICIT opt-in (T123) for a **deliberate** ADR-025
+      Option-B cross-host prefix reuse (two hosts owning the same abbrev for DISTINCT
+      modules). WITHOUT it, reserving an abbrev already owned by a different module in
+      another host is **refused** — an accidental cross-host collision would persist the
+      T47 orphan that trips `flatten_conflicts/1`'s fail-closed raise at compile. Only pass
+      this when the cross-host reuse is intentional (it then trips the ADR-025 tripwire).
 
   Prints the reserved `host/abbrev → owner` triple.
   """
@@ -48,7 +54,8 @@ defmodule Mix.Tasks.Samen.Abbrev.Reserve do
     owner: :string,
     abbrev: :string,
     propose: :boolean,
-    registry: :string
+    registry: :string,
+    allow_cross_host_reuse: :boolean
   ]
 
   @impl Mix.Task
@@ -81,8 +88,12 @@ defmodule Mix.Tasks.Samen.Abbrev.Reserve do
           Mix.raise("mix samen.abbrev.reserve: pass --abbrev <abc> or --propose")
       end
 
+    allow_cross_host_reuse? = Keyword.get(opts, :allow_cross_host_reuse, false)
+
     try do
-      Allocator.reserve!(host, abbrev, owner, registry)
+      Allocator.reserve!(host, abbrev, owner, registry,
+        allow_cross_host_reuse: allow_cross_host_reuse?
+      )
     rescue
       e in ArgumentError -> Mix.raise("mix samen.abbrev.reserve: #{Exception.message(e)}")
     end

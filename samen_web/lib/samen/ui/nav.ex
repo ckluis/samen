@@ -8,6 +8,8 @@ defmodule Samen.UI.Nav do
   """
   use Phoenix.Component
 
+  alias Samen.Web.Mount
+
   # ---------------------------------------------------------------------------
   # Sidebar
   # ---------------------------------------------------------------------------
@@ -100,16 +102,21 @@ defmodule Samen.UI.Nav do
   Attrs:
 
     * `org_id`   — threaded into every href so navigation preserves the `?org=` selector.
-    * `active`   — one of `:crm_companies | :crm_contacts | :crm_pipeline |
-      :billing_overview | :billing_invoices | :billing_dunning | :billing_plans |
-      :support_tickets` (or `nil`).
+    * `active`   — one of `:crm_companies | :crm_contacts | :crm_pipeline | :crm_calendar |
+      :crm_dashboard | :crm_mailbox | :crm_sequences | :billing_overview | :billing_invoices |
+      :billing_dunning | :billing_plans | :support_tickets | :settings | :automation` (or `nil`).
     * `crm_path` / `billing_path` / `support_path` — the mount path prefix per module
       (default `/crm`, `/billing`, `/support`). A host that mounted CRM at `/customers`
       passes `crm_path: "/customers"`.
+    * `settings_path` / `automation_path` — the mount path prefix for the Settings (PP-8) /
+      Automation (PP-9) surfaces (default `/settings`, `/automation`) — both real shipped
+      framework surfaces that otherwise have NO nav entry anywhere (they were total nav
+      islands, hand-typed-URL-only).
 
   The `:extra` slot renders BEFORE the inherited groups — a host puts its vertical-specific
   nav groups (e.g. freight "Operations") there. The inherited nav is the framework's; the
-  20% nav is the vertical's.
+  20% nav is the vertical's. See `host_nav_extra/1` for a DATA-driven way to populate this
+  slot identically from every framework sidebar (PP-10).
   """
   attr :org_id, :string, default: nil
   attr :active, :atom, default: nil
@@ -118,10 +125,27 @@ defmodule Samen.UI.Nav do
   attr :support_path, :string, default: "/support"
   attr :marketing_path, :string, default: "/marketing"
   attr :notifications_path, :string, default: "/notifications"
+  attr :settings_path, :string, default: "/settings"
+  attr :automation_path, :string, default: "/automation"
 
   attr :notifications_unread, :any,
     default: nil,
     doc: "unread count feeding the nav_item badge (nil → unlit; AC-G2-7)"
+
+  attr :surfaces, :any,
+    default: :all,
+    doc: """
+    Which inherited nav GROUPS this host actually mounts — the X1 dead-link guard (ADR-045
+    §4.1). `:all` (default) renders every group, correct for a full vertical that mounts them
+    all (driftwood/pawchart) and for every pre-existing caller. A LIST of surface atoms
+    (`:inbox | :crm | :billing | :support | :marketing | :settings | :automation`) renders
+    ONLY those groups, so a host that mounts a SUBSET — a generated
+    `mix samen.gen.app --modules …` app whose router mounts billing + notifications (+ the
+    selected `--modules`) but never CRM/Support/Marketing/Automation — never emits a nav link
+    to a route it never mounted (clicking one otherwise raises `Phoenix.Router.NoRouteError`).
+    Filtered by construction here so the nav is correct for ANY `--modules` subset without a
+    per-app fork.
+    """
 
   slot :extra
 
@@ -129,7 +153,7 @@ defmodule Samen.UI.Nav do
     ~H"""
     {render_slot(@extra)}
 
-    <.nav_group label="Inbox">
+    <.nav_group :if={surface_mounted?(@surfaces, :inbox)} label="Inbox">
       <.nav_item
         label="Notifications"
         href={"#{@notifications_path}?org=#{@org_id}"}
@@ -142,7 +166,7 @@ defmodule Samen.UI.Nav do
       </.nav_item>
     </.nav_group>
 
-    <.nav_group label="CRM">
+    <.nav_group :if={surface_mounted?(@surfaces, :crm)} label="CRM">
       <.nav_item label="Companies" href={"#{@crm_path}/companies?org=#{@org_id}"} active={@active == :crm_companies}>
         <:icon>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18" /></svg>
@@ -158,9 +182,29 @@ defmodule Samen.UI.Nav do
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3v18M12 6v15M19 9v12" /></svg>
         </:icon>
       </.nav_item>
+      <.nav_item label="Calendar" href={"#{@crm_path}/calendar?org=#{@org_id}"} active={@active == :crm_calendar}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Dashboard" href={"#{@crm_path}/dashboard?org=#{@org_id}"} active={@active == :crm_dashboard}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V10M12 19V5M20 19v-7" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Mailbox" href={"#{@crm_path}/mailbox?org=#{@org_id}"} active={@active == :crm_mailbox}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Sequences" href={"#{@crm_path}/sequences?org=#{@org_id}"} active={@active == :crm_sequences}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h13M4 12h13M4 18h9" /><circle cx="20" cy="6" r="1.6" /><circle cx="20" cy="12" r="1.6" /></svg>
+        </:icon>
+      </.nav_item>
     </.nav_group>
 
-    <.nav_group label="Billing">
+    <.nav_group :if={surface_mounted?(@surfaces, :billing)} label="Billing">
       <.nav_item label="Customers" href={"#{@billing_path}?org=#{@org_id}"} active={@active == :billing_overview}>
         <:icon>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
@@ -183,15 +227,20 @@ defmodule Samen.UI.Nav do
       </.nav_item>
     </.nav_group>
 
-    <.nav_group label="Support">
+    <.nav_group :if={surface_mounted?(@surfaces, :support)} label="Support">
       <.nav_item label="Tickets" href={"#{@support_path}?org=#{@org_id}"} active={@active == :support_tickets}>
         <:icon>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
         </:icon>
       </.nav_item>
+      <.nav_item label="Knowledge base" href={"#{@support_path}/kb?org=#{@org_id}"} active={@active == :support_kb}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" /></svg>
+        </:icon>
+      </.nav_item>
     </.nav_group>
 
-    <.nav_group label="Marketing">
+    <.nav_group :if={surface_mounted?(@surfaces, :marketing)} label="Marketing">
       <.nav_item label="Campaigns" href={"#{@marketing_path}/campaigns?org=#{@org_id}"} active={@active == :marketing_campaigns}>
         <:icon>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l18-8-8 18-2-8-8-2z" /></svg>
@@ -208,7 +257,97 @@ defmodule Samen.UI.Nav do
         </:icon>
       </.nav_item>
     </.nav_group>
+
+    <.nav_group
+      :if={surface_mounted?(@surfaces, :settings) or surface_mounted?(@surfaces, :automation)}
+      label="Workspace"
+    >
+      <.nav_item
+        :if={surface_mounted?(@surfaces, :settings)}
+        label="Settings"
+        href={"#{@settings_path}?org=#{@org_id}"}
+        active={@active == :settings}
+      >
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item
+        :if={surface_mounted?(@surfaces, :automation)}
+        label="Automation"
+        href={"#{@automation_path}?org=#{@org_id}"}
+        active={@active == :automation}
+      >
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z" /></svg>
+        </:icon>
+      </.nav_item>
+    </.nav_group>
     """
+  end
+
+  # X1 (ADR-045 §4.1) — the dead-link guard. A nav GROUP/item renders ONLY when the host
+  # actually mounts its surface, so a `mix samen.gen.app --modules …` subset app never emits a
+  # link to a route it never mounted (clicking one otherwise raises
+  # `Phoenix.Router.NoRouteError`). `:all` (the default, a full vertical mounting every group,
+  # and every pre-existing caller) renders everything unchanged; a LIST renders only its
+  # members. Correct for ANY subset with no per-app fork.
+  defp surface_mounted?(:all, _surface), do: true
+  defp surface_mounted?(surfaces, surface) when is_list(surfaces), do: surface in surfaces
+
+  # ---------------------------------------------------------------------------
+  # Host nav extra (PP-10) — data-driven vertical nav, rendered identically from
+  # every framework sidebar
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  PP-10 (Batch 3 NAV-REACHABILITY) — renders a HOST's own vertical-specific nav group
+  (e.g. driftwood's freight "Operations") from DATA, so it appears consistently on every
+  framework-mounted tenant sidebar, not only the host's own bespoke page (`BrokerLive`
+  previously rendered "Operations" itself via `module_nav`'s `:extra` slot, but nothing
+  else did — the group vanished the instant a tenant left `/broker`).
+
+  A host opts in via the `:host_nav_extra` mount label — `{mod, fun, args}`, called as
+  `apply(mod, fun, args ++ [org_id])` — the SAME "host supplies DATA, framework renders
+  it" pattern as `:object_cards` (`Samen.Web.ObjectRef.Registry`) / `:aggregate_loader`
+  (ADR-009): a session-safe MFA, never a closure. Expected return shape:
+
+      %{label: "Operations", items: [%{label: "Dispatch board", href: "/broker?org=..."}]}
+
+  Absent the label, an erroring resolver, or a malformed return → renders nothing
+  (fail-safe, mirrors `ObjectRef.Registry.card_for/4`'s rescue-to-default posture — a host
+  nav bug never breaks the inherited sidebar). Place inside `module_nav/1`'s `:extra` slot:
+
+      <.module_nav org_id={@org_id} active={@active}>
+        <:extra><.host_nav_extra mount={@mount} org_id={@org_id} /></:extra>
+      </.module_nav>
+  """
+  attr :mount, Mount, required: true
+  attr :org_id, :string, default: nil
+
+  def host_nav_extra(assigns) do
+    assigns = assign(assigns, :group, host_nav_extra_data(assigns.mount, assigns.org_id))
+
+    ~H"""
+    <.nav_group :if={@group} label={@group.label}>
+      <.nav_item :for={item <- @group.items} label={item.label} href={item.href} />
+    </.nav_group>
+    """
+  end
+
+  defp host_nav_extra_data(mount, org_id) do
+    case Mount.label(mount, :host_nav_extra, nil) do
+      {mod, fun, args} when is_atom(mod) and is_atom(fun) and is_list(args) ->
+        case apply(mod, fun, args ++ [org_id]) do
+          %{label: label, items: items} = group when is_binary(label) and is_list(items) -> group
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
   end
 
   # ---------------------------------------------------------------------------

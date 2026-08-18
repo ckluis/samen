@@ -1,25 +1,35 @@
-# SABOTAGE: F2 gate sabotage — the launch AUTH actor-derivation gate (ADR-031). Flips
-# `Samen.Web.CurrentOrg`'s `authn_required?/1` OFF for the `{:app_env, …}` opt-in, so a tenant
-# mount that requested `authn` (driftwood's prod path) still resolves the current org from the
-# query-param convenience identity — deriving a tenant actor with NO authenticated session. This
-# is the exact launch hole F2 closes; the prod-path RED tests MUST fail with it.
+# SABOTAGE: F2 gate sabotage — the launch AUTH actor-derivation gate (ADR-031). Defeats BOTH
+# layers of the tenant prod-path gate so an authenticated session is no longer required:
+#   (1) flips `Samen.Web.CurrentOrg`'s `authn_required?/1` OFF for the `{:app_env, …}` opt-in, and
+#   (2) forces `param_trust_disarmed?/1` to report the (armed) host as disarmed — the PP-1/PP-3
+#       fail-closed default that otherwise still denies an unauthenticated `?org=` on an armed host.
+# With both defeated, a tenant mount that requested `authn` (driftwood's prod path) again resolves
+# the current org from the query-param convenience identity — deriving a tenant actor with NO
+# authenticated session (the exact launch hole F2 closes). The prod-path RED tests MUST fail with
+# it — proving BOTH the authn opt-in AND the armed-host fail-closed default are load-bearing.
 # APP: driftwood
 # TEST_FILES: test/auth_prodpath_test.exs
 # MUST_FAIL: prod-path RED: an unauthenticated request derives NO actor
 # MUST_FAIL: prod-path RED: an authenticated user cannot act on a non-member org
 diff --git a/samen_web/lib/samen/web/current_org.ex b/samen_web/lib/samen/web/current_org.ex
-index 5467fed..4a39c3e 100644
 --- a/samen_web/lib/samen/web/current_org.ex
 +++ b/samen_web/lib/samen/web/current_org.ex
-@@ -113,7 +113,10 @@ defmodule Samen.Web.CurrentOrg do
-         true
-
-       {:app_env, app, key} when is_atom(app) and is_atom(key) ->
--        !!Application.get_env(app, key, false)
+@@ -265,6 +265,9 @@
+       # ⇒ armed in :prod / disarmed in dev-test (`Samen.Web.TenantGate`). Any OTHER app-env key
+       # keeps the literal-default-false read (the mechanism stays generic).
+       {:app_env, app, :auth_required?} when is_atom(app) ->
+-        Samen.Web.TenantGate.armed?(app)
 +        # SABOTAGE (17-f2): the authn gate is forced OFF regardless of the runtime flag, so a
 +        # tenant mount that opted into `authn` still trusts the query-param identity — the prod
 +        # actor is derived with NO authenticated session (the exact launch hole F2 closes).
-+        false && !!Application.get_env(app, key, false)
-
-       _ ->
-         false
++        false && Samen.Web.TenantGate.armed?(app)
+ 
+       {:app_env, app, key} when is_atom(app) and is_atom(key) ->
+@@ -300,6 +300,6 @@
+   def param_trust_disarmed?(mount) do
+     case Samen.Web.Operator.otp_app(mount) do
+       nil -> true
+-      otp_app -> not Samen.Web.TenantGate.armed?(otp_app)
++      _otp_app -> true
+     end
+   end

@@ -1,0 +1,25 @@
+# SABOTAGE: D2 (T65) gate sabotage — the INV-7 no-PII-egress masking chokepoint, multi-turn
+# re-scrub (ADR-043 §3.2a / RP-AI-10). Neutralizes the per-turn history re-mask in
+# Samen.AI.Chokepoint.rescrub_history/2: a grant-tagged span from turn N is kept VERBATIM in a
+# later turn regardless of the current turn's grant state, so the accumulated canary plaintext
+# survives into an ungranted turn N+1 payload and reaches the provider — the exact INV-7 leak
+# the §3.2a re-scrub prevents. The permanent ai_prompt_masking red-team must flip.
+# APP: samen_core
+# TEST_FILES: test/ai/ai_prompt_masking_test.exs
+# MUST_FAIL: RE-MASKED in the ungranted turn N+1
+diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+--- a/samen_core/lib/samen/ai/chokepoint.ex
++++ b/samen_core/lib/samen/ai/chokepoint.ex
+@@ -260,7 +260,11 @@ defmodule Samen.AI.Chokepoint do
+         # CURRENT turn still covers it (flag on AND the grant re-approves the exact context).
+         # Otherwise RE-MASK — an expired/revoked/actor-changed/flag-off turn cannot echo it.
+         {:grant_span, _text, %Reveal.Context{} = ctx} = span ->
+-          if grant_egress? and granted?(grant_mod, ctx), do: span_text(span), else: @mask
++          # SABOTAGE (T65 D2, RP-AI-10): drop the ADR-043 §3.2a per-turn re-mask — keep a
++          # prior-turn grant-tagged span REGARDLESS of the current turn's grant state, so an
++          # expired/ungranted turn N+1 echoes the accumulated canary plaintext.
++          _ = {grant_egress?, granted?(grant_mod, ctx)}
++          span_text(span)
+ 
+         # A MALFORMED grant-tagged span: the tag claims grant-resolved plaintext but the
+         # context is NOT a `%Reveal.Context{}`, so THIS turn cannot re-check the grant that

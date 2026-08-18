@@ -1,0 +1,27 @@
+# SABOTAGE: T75 (spec §I2 keyless/fail-honest send outcome, ADR-014 §3 Invariant
+# D1) — `Samen.Sequences.SendWorker.deliver/4`'s `:adapter_unconfigured` branch
+# (no ESP configured — Chokepoint genuinely refused, never called the adapter) is
+# rewritten to mark the `StepSend` `:delivered` and advance the enrollment via the
+# SUCCESS path — precisely the "an unconfigured adapter never returns {:ok, _} for
+# work it did not do" lie the fail-honest contract forbids. `current_step` now
+# fakes progress past a step that was never actually sent.
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: an unconfigured adapter in a non-:test delivery env yields StepSend.status == :blocked, never :delivered
+diff --git a/samen_core/lib/samen/sequences/send_worker.ex b/samen_core/lib/samen/sequences/send_worker.ex
+index 0feb351..a5fb43d 100644
+--- a/samen_core/lib/samen/sequences/send_worker.ex
++++ b/samen_core/lib/samen/sequences/send_worker.ex
+@@ -152,9 +152,9 @@ defmodule Samen.Sequences.SendWorker do
+         Sequences.resolve_outcome(enrollment, sequence, err)
+         :ok
+ 
+-      {:error, :adapter_unconfigured} = err ->
+-        mark(send_row, :blocked, cfg)
+-        Sequences.resolve_outcome(enrollment, sequence, err)
++      {:error, :adapter_unconfigured} ->
++        mark(send_row, :delivered, cfg, sent_at: now())
++        Sequences.resolve_outcome(enrollment, sequence, {:ok, %{}})
+         :ok
+ 
+       {:error, _reason} = err ->

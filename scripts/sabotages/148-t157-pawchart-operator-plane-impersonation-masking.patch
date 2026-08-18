@@ -1,0 +1,17 @@
+# SABOTAGE: T157 (pawchart operator-plane masking under impersonation) — forces the masked impersonation console's PII resolve onto the TENANT plane (Map.put(actor, :plane, :tenant)) instead of the impersonation scope's OPERATOR plane, so a drilled-in operator reads the clinic owner's vault-routed name/emails/phones in CLEAR instead of ••••. Reverts byte-exact.
+# APP: pawchart
+# TEST_FILES: test/operator_impersonation_test.exs
+# MUST_FAIL: session-gated masked drill-in: owner PII renders •••• under the live impersonation scope
+diff --git a/pawchart/lib/pawchart_web/operator_impersonation_live.ex b/pawchart/lib/pawchart_web/operator_impersonation_live.ex
+index a7c151e..70c2e6f 100644
+--- a/pawchart/lib/pawchart_web/operator_impersonation_live.ex
++++ b/pawchart/lib/pawchart_web/operator_impersonation_live.ex
+@@ -88,7 +88,7 @@ defmodule PawChartWeb.OperatorImpersonationLive do
+     Samen.Api.PiiResolution.resolve(
+       records,
+       PawChart.Clinic.Patient,
+-      actor_of(scope),
++      Map.put(actor_of(scope), :plane, :tenant),
+       repo: PawChart.Repo
+     )
+   rescue

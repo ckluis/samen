@@ -63,4 +63,11 @@ defmodule SamenCore.Support.RevealDomain.RevealPerson do
     action :read_email_looks_like_reveal, :string do
     end
   end
+
+  # ai_prompt_masking (b) non-vacuity hook (ADR-043 §7.2 / T65): this fixture MODELS the leak
+  # the verifier must catch — it declares its vault-routed field (`:emails`) "embeddable". The
+  # `mix samen.verify.ai_prompt_masking` (b) cross-check flags exactly this. RevealPerson is
+  # test-support only (never in a configured `:ash_domains`), so the CI verifier run does not
+  # scan it — only the unit test does, explicitly, as the sabotage-refutable proof.
+  def embeddable_fields, do: [:emails]
 end

@@ -1,0 +1,29 @@
+# SABOTAGE: T74 (spec §I1 CRM two-way email sync) gate sabotage — defeats the PER-PLANE MASKING
+# of synced mailbox messages on the CRM detail timelines (INV-1). `Samen.Web.CRM.Reads`'
+# `resolve_mail_pii/4` is the single seam every mailbox-message read resolves through: it hands
+# the ACTOR'S plane to `Samen.Api.PiiResolution.resolve/4`, so an operator-without-grant gets
+# `%Masked{}` (••••) for the vault-routed subject/body/counterparty_address. This patch pins the
+# resolution to `%{plane: :tenant}` regardless of who is reading — the classic "resolve as the
+# owner" leak: an impersonating operator with no reveal grant would read a tenant's customer
+# mail in the CLEAR on the contact AND company timelines. The TENANT-plane green half stays
+# green (it was already resolving clear), so the flip is non-vacuous — it isolates exactly the
+# masking guarantee. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/mailbox_timeline_masking_test.exs
+# MUST_FAIL: RED: OPERATOR plane renders •••• — subject/body/counterparty ABSENT, no vt_ token
+# MUST_FAIL: RED: the COMPANY timeline masks the same message identically
+# MUST_FAIL: ANTI-TAUTOLOGY: the SAME record is CLEAR on tenant and MASKED on operator (plane flip)
+diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+--- a/samen_web/lib/samen/web/crm/reads.ex
++++ b/samen_web/lib/samen/web/crm/reads.ex
+@@ -842,8 +842,8 @@
+   # The SAME PiiResolution chokepoint `resolve_pii/4` uses — kept separate only
+   # because the Mailbox resource is derived from the host root, not from the CRM
+   # mount's own namespace map.
+-  defp resolve_mail_pii(records, mount, resource, scope) do
+-    Samen.Api.PiiResolution.resolve(records, resource, actor_of(scope), repo: mount.repo)
++  defp resolve_mail_pii(records, mount, resource, _scope) do
++    Samen.Api.PiiResolution.resolve(records, resource, %{plane: :tenant}, repo: mount.repo)
+   rescue
+     _ -> records
+   end

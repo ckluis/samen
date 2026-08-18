@@ -93,6 +93,15 @@ echo "--- step 9/17: mix samen.verify.metric_labels"
 mix samen.verify.metric_labels
 echo "    PASSED"
 
+# 9b. B-OBAN worker-queue ⊆ configured-queue parity. Discovers every queue enqueued
+#     to by a compiled Oban.Worker (hand-written AND AshOban-generated trigger
+#     workers/schedulers) and asserts each has a producer in this host's RESOLVED
+#     runtime Oban config. A job on an unconfigured queue never drains and never
+#     errors. Fails CLOSED on empty discovery.
+echo "--- step 9b/17: mix samen.verify.oban_queues (B-OBAN worker/queue parity)"
+mix samen.verify.oban_queues
+echo "    PASSED"
+
 # 10. C6 vault-declared-parity.
 echo "--- step 10/17: mix samen.verify.vault_declared_parity"
 mix samen.verify.vault_declared_parity
@@ -113,14 +122,37 @@ echo "--- step 13/17: mix samen.verify.same_org_fk"
 mix samen.verify.same_org_fk
 echo "    PASSED"
 
+# 13b. ADR-046 §6 erasure_completeness (CAPSTONE): every out-of-DEK-envelope residue
+#      (derived-linkable _bidx columns, storage_key blobs, pii_declared bags) discovered
+#      from the LIVE schema has a registered subject_id-keyed erasure arm. Fail-closed on
+#      empty discovery (non-vacuous: email_bidx + storage_key exist).
+echo "--- step 13b/17: mix samen.verify.erasure_completeness (ADR-046 §6)"
+mix samen.verify.erasure_completeness
+echo "    PASSED"
+
 # 14. C7 no_pii_columns (token-blind aggregate plane).
 echo "--- step 14/17: mix samen.verify.no_pii_columns"
 mix samen.verify.no_pii_columns
 echo "    PASSED"
 
+# 14b. B5 no_pan_columns (ADR-038 §3.5; T23) — no resource/table ANYWHERE (every
+#      plane, not just aggregate) may carry a PAN/CVC-shaped column.
+echo "--- step 14b/17: mix samen.verify.no_pan_columns"
+mix samen.verify.no_pan_columns
+echo "    PASSED"
+
 # 15. T4.5 aggregate-privacy floors.
 echo "--- step 15/17: mix samen.verify.aggregate_privacy"
 mix samen.verify.aggregate_privacy
+echo "    PASSED"
+
+# 15b. ai_prompt_masking (ADR-043 §3.4, T65 INV-7 no-PII-egress structural gate; T134):
+#      (b) no vault-routed field is embeddable (grants never unlock embedding, §7.2);
+#      (c) no managed Prompt template body embeds a `vt_` vault token (§7.5). The masker
+#      (Samen.AI.Chokepoint) is framework code Pawchart inherits at runtime — this step
+#      re-verifies Pawchart's OWN AI surface / vault resources in its own gate.
+echo "--- step 15b/17: mix samen.verify.ai_prompt_masking (INV-7 no-PII-egress structural gate)"
+mix samen.verify.ai_prompt_masking
 echo "    PASSED"
 
 # 16. Default test suite (the four red paths + Billing reuse + dogfood walkthrough).

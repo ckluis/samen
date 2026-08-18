@@ -1,0 +1,34 @@
+# SABOTAGE: T74 fix round (spec §I1 CRM two-way email sync) — defeats the ORG SCOPING of the two
+# mailbox READ surfaces. `Samen.Web.CRM.Reads.read_mail/3` (the CRM detail timelines) and
+# `mailbox_connections/2` (the /crm/mailbox settings page) both read `scope: scope` — the
+# org-scoped actor, so `Samen.Policy.OrgScope` filters every row to the acting tenant. This patch
+# swaps both to `authorize?: false`, dropping the tenant boundary entirely: the settings page
+# would list EVERY tenant's connected mailboxes, and a CRM timeline read would surface another
+# org's mail whenever an anchor id is known. Single-org fixtures stay green (there is nothing
+# else in the table), which is exactly why the named two-org tests exist — each asserts its own
+# org's row IS present (positive control) and the foreign org's row is NOT. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_mailbox_settings_test.exs test/samen/web/mailbox_sync_test.exs
+# MUST_FAIL: CROSS-ORG: another tenant's mailbox connections NEVER appear in this org's settings read
+# MUST_FAIL: CROSS-ORG: the match is ORG-PINNED
+diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+--- a/samen_web/lib/samen/web/crm/reads.ex
++++ b/samen_web/lib/samen/web/crm/reads.ex
+@@ -832,7 +832,7 @@
+         |> build_query.()
+         |> Ash.Query.sort(occurred_at: :desc)
+         |> Ash.Query.limit(@detail_limit)
+-        |> Ash.read!(scope: scope)
++        |> Ash.read!(authorize?: false)
+         |> resolve_mail_pii(mount, resource, scope)
+     end
+   rescue
+@@ -864,7 +864,7 @@
+         |> Ash.Query.ensure_selected(@connection_fields)
+         |> Ash.Query.sort(inserted_at: :desc)
+         |> Ash.Query.limit(@detail_limit)
+-        |> Ash.read!(scope: scope)
++        |> Ash.read!(authorize?: false)
+         |> resolve_mail_pii(mount, resource, scope)
+     end
+   rescue

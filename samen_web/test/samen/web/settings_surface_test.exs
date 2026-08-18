@@ -160,6 +160,17 @@ defmodule Samen.Web.SettingsSurfaceTest do
       assert html =~ ~s(id="security-sessions-table")
       assert html =~ ~s(id="security-host-managed")
       assert html =~ "Managed by your identity provider"
+
+      # PP-11 (T150) — the framework surface carries the REVEAL-access ledger section. This
+      # host has no aud_chain migration, so the ledger READ genuinely FAILS. O10: a failed
+      # read is now surfaced HONESTLY as "temporarily unavailable", NOT masked as a clean,
+      # empty "no reveal access" ledger (that false all-clear was the O10 defect). The
+      # org-scoped, populated render is proven on driftwood (which HAS aud_chain).
+      assert html =~ ~s(id="security-reveal-table")
+      assert html =~ ~s(id="security-reveal-unavailable")
+      assert html =~ "Reveal ledger temporarily unavailable"
+      # NOT the false all-clear: a genuine read error must never read as "no reveals".
+      refute html =~ "No reveal access recorded"
     end
 
     test "HONESTY: the surface has NO write control (phx-click) — it fakes no host-auth toggle" do

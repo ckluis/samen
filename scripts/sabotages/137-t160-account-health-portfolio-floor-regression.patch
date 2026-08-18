@@ -1,0 +1,25 @@
+# SABOTAGE: T160 P3 (spec §I4 completion, portfolio-floor fix — T77 delta finding D4b) —
+# `live_worst_status_via_db/2` stops excluding `:cancelled`/`:canceled` subscriptions from
+# the "worst LIVE status" computation that DRIVES the portfolio billing factor's value.
+# Reintroduces the EXACT bug the T77 delta round found: one historical cancelled
+# subscription among many otherwise-healthy ones again pins `scoring_status` to
+# `:cancelled`, flooring the billing factor to `0.0` and reading "at risk" for a book that
+# is, in reality, mostly healthy — the portfolio-floor regression. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_account_health_test.exs
+# MUST_FAIL: T160 P3: PORTFOLIO FLOOR fixed — one historical cancelled subscription among many healthy ones no longer pins billing to 0.0
+# MUST_FAIL: T160 P3: a book with ZERO live subscriptions (every one cancelled) still floors to 0.0 — genuine churn, not a false floor
+diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web/account_health.ex
+--- a/samen_web/lib/samen/web/account_health.ex
++++ b/samen_web/lib/samen/web/account_health.ex
+@@ -692,9 +692,7 @@
+   # dropped from the cascade (redundant with the filter, kept out for clarity). `nil`
+   # when there are NO live rows (none at all, or every row is cancelled).
+   defp live_worst_status_via_db(query_base, scope) do
+-    live_tiers = Keyword.delete(@severity_tiers, :cancelled)
+-    live_query = Ash.Query.filter(query_base, status not in [:cancelled, :canceled])
+-    worst_status_via_db(live_query, scope, live_tiers)
++    worst_status_via_db(query_base, scope, @severity_tiers)
+   end
+ 
+   defp worst_status_via_db(query_base, scope, tiers) do

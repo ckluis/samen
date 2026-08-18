@@ -5,7 +5,8 @@ defmodule Samen.Delivery.LifecycleTest do
   The lifecycle worker (`Samen.Delivery.Lifecycle.EmailWorker`) is the
   transactional sibling of `Samen.Scopes.Marketing.SendWorker`: it dispatches
   event-triggered lifecycle mail (welcome/onboarding/trial-ending/payment-failed/
-  subscription-cancelled) through the SAME `Samen.Delivery.Adapter` boundary under
+  subscription-cancelled) through the SAME `Samen.Delivery.Provider` boundary
+  (ADR-038 §4.2 rename of the ADR-014 `Samen.Delivery.Adapter` contract) under
   the SAME Invariant D1.
 
   AC coverage:
@@ -22,13 +23,13 @@ defmodule Samen.Delivery.LifecycleTest do
   """
   use ExUnit.Case, async: false
 
-  alias Samen.Delivery.{Adapter, LocalSink, Message}
+  alias Samen.Delivery.{LocalSink, Message, Provider, Rendering}
   alias Samen.Delivery.Lifecycle
   alias Samen.Delivery.Lifecycle.EmailWorker
 
   # A configured, always-succeeding adapter (anti-tautology green).
   defmodule OkAdapter do
-    @behaviour Adapter
+    use Provider
     @impl true
     def configured?(_config), do: true
     @impl true
@@ -37,7 +38,7 @@ defmodule Samen.Delivery.LifecycleTest do
 
   # A configured adapter that fails dispatch (RP-D2).
   defmodule ErrAdapter do
-    @behaviour Adapter
+    use Provider
     @impl true
     def configured?(_config), do: true
     @impl true
@@ -46,11 +47,25 @@ defmodule Samen.Delivery.LifecycleTest do
 
   # An adapter whose configured?/1 is false (creds absent) — must NOT be sent.
   defmodule UnconfiguredAdapter do
-    @behaviour Adapter
+    use Provider
     @impl true
     def configured?(_config), do: false
     @impl true
     def deliver(%Message{}, _config), do: {:ok, %{lie: true}}
+  end
+
+  # A configured adapter that CAPTURES the send config it received (the merged
+  # per-event render config) back to the calling process — Chokepoint.send/2
+  # dispatches deliver/2 synchronously in-process, so self() is the test process.
+  defmodule CaptureAdapter do
+    use Provider
+    @impl true
+    def configured?(_config), do: true
+    @impl true
+    def deliver(%Message{} = m, config) do
+      send(self(), {:captured, config})
+      {:ok, %{provider_id: "cap-#{m.send_id}"}}
+    end
   end
 
   defp job(args), do: %Oban.Job{args: args}
@@ -97,7 +112,7 @@ defmodule Samen.Delivery.LifecycleTest do
   describe "lifecycle event enum (token-only)" do
     test "events/0 is the bounded lifecycle set" do
       assert EmailWorker.events() ==
-               ~w(welcome onboarding trial_ending payment_failed subscription_cancelled)
+               ~w(welcome onboarding trial_ending payment_failed payment_recovered subscription_cancelled)
     end
 
     test "valid_event?/1 accepts recognised events (string or atom), rejects free text" do
@@ -219,6 +234,66 @@ defmodule Samen.Delivery.LifecycleTest do
       # resolve_adapter/0 must stay nil → decide → blocked (never a fake sink send).
       assert EmailWorker.resolve_adapter() == nil
       assert {:error, :adapter_unconfigured} = EmailWorker.perform(job(args()))
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # T151 — the C3 render seam: each of the six events sends DISTINCT, non-placeholder
+  # per-event content (not one static config that emits "(rendering pending …)").
+
+  describe "per-event render (T151): each event sends distinct, non-placeholder, PII-safe copy" do
+    test "all six lifecycle events reach the adapter with distinct, non-placeholder subject+body" do
+      rendered =
+        for event <- EmailWorker.events(), into: %{} do
+          Application.put_env(:samen_core, EmailWorker, adapter: CaptureAdapter, adapter_config: %{})
+          assert EmailWorker.perform(job(args(%{"event" => event}))) == :ok
+          assert_received {:captured, config}
+          {event, config}
+        end
+
+      # Every event has real content on the wire — the placeholder is GONE.
+      for {event, config} <- rendered do
+        assert is_binary(config.subject) and config.subject != "",
+               "#{event}: subject must be real copy"
+
+        assert is_binary(config.text_body) and config.text_body != "",
+               "#{event}: text_body must be real copy"
+
+        assert is_binary(config.html_body) and config.html_body != "",
+               "#{event}: html_body must be real copy"
+
+        for field <- [config.subject, config.text_body, config.html_body] do
+          refute field =~ "(rendering pending",
+                 "#{event}: the (rendering pending) placeholder must be GONE"
+
+          # PII-safe: no vault token / masked marker reaches the wire.
+          refute field =~ "vt_", "#{event}: no vault token may reach the wire"
+          refute field =~ "••••", "#{event}: no masked marker may reach the wire"
+          refute field =~ "%Samen.Masked", "#{event}: no unresolved Masked value may reach the wire"
+        end
+      end
+
+      # The six events are DISTINCT — not one shared static map. Subjects AND bodies differ.
+      subjects = Enum.map(rendered, fn {_e, c} -> c.subject end)
+      bodies = Enum.map(rendered, fn {_e, c} -> c.text_body end)
+      assert length(Enum.uniq(subjects)) == 6, "each event needs its OWN subject"
+      assert length(Enum.uniq(bodies)) == 6, "each event needs its OWN body"
+
+      # Appropriate copy (spot-checks): the dunning event is a payment-failure notice,
+      # the recovery event is a success notice — they are NOT interchangeable.
+      failed = rendered["payment_failed"]
+      recovered = rendered["payment_recovered"]
+      assert failed.subject =~ ~r/payment/i and failed.text_body =~ ~r/unable|could/i
+      assert recovered.text_body =~ ~r/success/i
+      refute failed.subject == recovered.subject
+    end
+
+    test "Rendering.lifecycle_content/1 is the per-event seam (string or atom), all six distinct" do
+      contents = Enum.map(EmailWorker.events(), &Rendering.lifecycle_content/1)
+      assert length(Enum.uniq(contents)) == 6
+
+      # Atom and string forms agree (the worker passes a string; a caller may pass an atom).
+      assert Rendering.lifecycle_content(:welcome) == Rendering.lifecycle_content("welcome")
     end
   end
 

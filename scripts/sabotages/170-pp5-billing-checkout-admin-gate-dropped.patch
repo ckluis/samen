@@ -1,0 +1,29 @@
+# SABOTAGE: PP-5 (Batch 2, TENANT-ROLE) — the billing-checkout admin-by-construction gate.
+# Neutralizes `Samen.Billing.Checkout`'s `authorize_admin/1` so it always returns `:ok`,
+# dropping the `RoleAtLeast(:admin)` gate that every billing write must carry. This restores
+# the exact fail-OPEN the W6 dogfood found: `Checkout.create_session/2` no longer refuses a
+# non-admin actor, so a plain invited MEMBER (or read-only VIEWER) can subscribe the org to a
+# paid plan through the T26 settings surface. The named PP-5 function-layer denial tests (a
+# member/viewer/absent actor MUST be `{:error, :unauthorized}`) FLIP to `{:ok, ...}` with it,
+# proving they are refutable and load-bearing on the admin gate — and NOT tautological (the
+# admin/owner positive-control tests still pass, so the flip is the ROLE gate, not the call).
+# APP: samen_core
+# TEST_FILES: test/billing_checkout_test.exs
+# MUST_FAIL: a MEMBER actor is DENIED checkout at the function layer
+# MUST_FAIL: a VIEWER actor is DENIED checkout
+diff --git a/samen_core/lib/samen/billing/checkout.ex b/samen_core/lib/samen/billing/checkout.ex
+index a1171a7..08eeea3 100644
+--- a/samen_core/lib/samen/billing/checkout.ex
++++ b/samen_core/lib/samen/billing/checkout.ex
+@@ -131,9 +131,8 @@ defmodule Samen.Billing.Checkout do
+   defp authorize_admin(opts) do
+     actor = Keyword.get(opts, :actor)
+ 
+-    if Samen.Scope.Role.at_least?(actor_role(actor), :admin),
+-      do: :ok,
+-      else: {:error, :unauthorized}
++    _ = actor_role(actor)
++    :ok
+   end
+ 
+   defp actor_role(actor) when is_map(actor), do: Map.get(actor, :role)

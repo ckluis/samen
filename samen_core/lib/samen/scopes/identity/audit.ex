@@ -44,6 +44,38 @@ defmodule Samen.Scopes.Identity.Audit do
     })
   end
 
+  @doc """
+  Record an auth-lifecycle event (ADR-035 §5 A10 taxonomy; extends the
+  `api_key_event` precedent — the FULL notification+audit fan-out for every
+  `auth.*` event kind is T09's contract; this is the audit HALF, used
+  directly by A2/A3's confirm/reset consume paths). `opts`:
+
+    * `:event` — REQUIRED. The bounded `auth.*` event (atom or string, e.g.
+      `"auth.password_reset"` / `:email_verified`) — token-only, never PII.
+    * `:actor_id` / `:subject_id` — opaque credential/user ids.
+    * `:correlation_id` — optional correlation ref.
+    * `:detail` — optional operator-authored token string, never subject PII.
+  """
+  @spec auth_event(module(), keyword()) :: {:ok, term()} | {:error, term()}
+  def auth_event(repo, opts) do
+    event = Keyword.fetch!(opts, :event)
+    extra = Keyword.get(opts, :detail)
+
+    detail =
+      case extra do
+        nil -> "identity.#{event}"
+        _ -> "identity.#{event} #{extra}"
+      end
+
+    Samen.AuditEvent.insert(repo, %{
+      event_type: "system",
+      actor_id: Keyword.get(opts, :actor_id),
+      subject_id: Keyword.get(opts, :subject_id),
+      correlation_id: Keyword.get(opts, :correlation_id),
+      detail: detail
+    })
+  end
+
   @doc "Record a denied Identity action (policy denial), for the audit trail."
   @spec policy_denied(module(), keyword()) :: {:ok, term()} | {:error, term()}
   def policy_denied(repo, opts) do

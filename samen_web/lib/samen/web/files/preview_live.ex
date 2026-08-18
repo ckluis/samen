@@ -52,7 +52,7 @@ defmodule Samen.Web.Files.PreviewLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     file_id = Map.get(params, "id")
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)

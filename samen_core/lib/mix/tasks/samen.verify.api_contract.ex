@@ -55,11 +55,23 @@ defmodule Mix.Tasks.Samen.Verify.ApiContract do
   as `schema.dict.json`). Resources are sorted by `type`; routes by `method` then
   `path`; fields by `name`.
 
+  ## Non-emptiness floor (fail-closed on empty discovery)
+
+  An EMPTY live contract means introspection discovered ZERO AshJsonApi
+  resources — a mis-keyed `:ash_domains` (or a snapshot builder swallowing
+  every resource) would otherwise let `--update` write an empty snapshot and
+  every future diff green vacuously (empty vs empty, forever). The task FAILS
+  CLOSED (exit 1) before writing or diffing when the live contract has no
+  resources — the same non-emptiness floor as
+  `samen.verify.vault_declared_parity`, `samen.verify.oban_queues`, and
+  `samen.verify.erasure_completeness`.
+
   ## Exit code
 
   - 0 — clean (no structural breaks, or `--update` wrote a new snapshot)
   - 1 — structural break(s) found (fail-closed via `:erlang.halt/1`)
   - 1 — snapshot file not found (must run `--update` first to create it)
+  - 1 — the live contract discovered ZERO resources (a vacuous check must not pass)
 
   ## Example
 
@@ -102,6 +114,10 @@ defmodule Mix.Tasks.Samen.Verify.ApiContract do
     # Build the live snapshot from the running app.
     live_snapshot = Samen.ApiContract.snapshot(domains, version)
 
+    # X9 floor — BEFORE both branches: --update must never persist an empty
+    # snapshot, and diff must never green an empty-vs-empty contract.
+    halt_if_empty_contract!(live_snapshot)
+
     if update? do
       write_snapshot!(snapshot_path, live_snapshot)
       IO.puts("#{@task_name}: snapshot written to #{snapshot_path}")
@@ -133,6 +149,28 @@ defmodule Mix.Tasks.Samen.Verify.ApiContract do
 
       {:error, violations} ->
         Samen.Verifier.halt_if_violations(@task_name, violations)
+    end
+  end
+
+  # X9 non-emptiness floor: `Snapshot.resource_entry/1` rescues per-resource
+  # introspection failures into absence, and a mis-keyed :ash_domains yields []
+  # outright — either way an empty live contract pins NOTHING. Writing it
+  # (--update) or diffing it against an empty stored snapshot would green
+  # vacuously forever. Same fail-closed shape as
+  # `vault_declared_parity.halt_if_no_resources!/1`.
+  defp halt_if_empty_contract!(live_snapshot) do
+    if (live_snapshot["resources"] || []) == [] do
+      IO.puts("")
+
+      IO.puts(
+        "FAIL: #{@task_name} discovered ZERO AshJsonApi resources — cannot verify the " <>
+          "API contract. Configure the host's :ash_domains (or pass --domains) so the " <>
+          "JSON:API resources are introspectable. A vacuous contract check must not " <>
+          "pass (fail-closed)."
+      )
+
+      IO.puts("")
+      :erlang.halt(1)
     end
   end
 

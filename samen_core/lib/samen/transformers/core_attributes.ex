@@ -105,6 +105,16 @@ defmodule Samen.Transformers.CoreAttributes do
       allow_nil?: false,
       public?: true,
       writable?: true,
+      # Explicit booleans (each == the Ash default, so no behaviour change): a raw-struct
+      # injection leaves these `nil`, which the E7 version-resource generator rejects when
+      # it mirrors org_id onto the `<Resource>.Version` via ash_paper_trail's
+      # `attributes_as_attributes` (ADR-040 §6.2) — it re-declares the attribute through the
+      # DSL, which validates each option as a boolean. Filling them lets the copy succeed;
+      # org_id keeps its default query/write posture.
+      always_select?: false,
+      primary_key?: false,
+      generated?: false,
+      sensitive?: false,
       constraints: []
     }
   end

@@ -62,7 +62,10 @@ defmodule Samen.Billing.MovementBackfill do
     subscription_resource = Keyword.fetch!(opts, :subscription_resource)
     event_resource = Keyword.fetch!(opts, :event_resource)
     price_resource = Keyword.fetch!(opts, :price_resource)
-    as_of = Keyword.get(opts, :as_of, DateTime.utc_now()) |> DateTime.truncate(:second)
+    # T121: keep microsecond resolution on `occurred_at` (the ledger column is now
+    # `:utc_datetime_usec`) so backfilled rows share the movement ledger's strict
+    # total-order guarantee; truncating to :second would re-introduce tied keys.
+    as_of = Keyword.get(opts, :as_of, DateTime.utc_now())
 
     prices_by_plan = monthly_prices_by_plan(price_resource, org_id)
     active = active_subscriptions(subscription_resource, org_id)
@@ -70,7 +73,7 @@ defmodule Samen.Billing.MovementBackfill do
     {seeded, skipped} =
       Enum.reduce(active, {0, 0}, fn sub, {seeded, skipped} ->
         cond do
-          has_movement?(event_resource, sub.id) ->
+          has_movement?(event_resource, org_id, sub.id) ->
             {seeded, skipped + 1}
 
           true ->
@@ -98,9 +101,11 @@ defmodule Samen.Billing.MovementBackfill do
     _ -> []
   end
 
-  defp has_movement?(event_resource, subscription_id) do
+  # Org-pinned (S15): the subscription is unique already, but the explicit org filter
+  # makes the read a genuine tenant-scoped read the ReadScopeLint can prove.
+  defp has_movement?(event_resource, org_id, subscription_id) do
     event_resource
-    |> Ash.Query.filter(subscription_id == ^subscription_id)
+    |> Ash.Query.filter(org_id == ^org_id and subscription_id == ^subscription_id)
     |> Ash.Query.limit(1)
     |> Ash.read!(authorize?: false)
     |> case do
@@ -141,13 +146,16 @@ defmodule Samen.Billing.MovementBackfill do
     _ -> :error
   end
 
+  # ADR-036 §4.5(1): Price.unit_amount_cents is now the Money attribute
+  # Price.unit_amount — select it and extract minor units via
+  # Samen.Type.Money.cents/1 so the downstream mrr_delta_cents math is unchanged.
   defp monthly_prices_by_plan(price_resource, org_id) do
     price_resource
-    |> Ash.Query.ensure_selected([:plan_id, :unit_amount_cents, :interval, :active, :org_id])
+    |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval, :active, :org_id])
     |> Ash.Query.filter(org_id == ^org_id)
     |> Ash.Query.filter(interval == :monthly and active == true)
     |> Ash.read!(authorize?: false)
-    |> Map.new(&{&1.plan_id, &1.unit_amount_cents})
+    |> Map.new(&{&1.plan_id, Samen.Type.Money.cents(&1.unit_amount)})
   rescue
     _ -> %{}
   end

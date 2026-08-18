@@ -138,11 +138,42 @@ defmodule Samen.Reveal.Grants do
         subject_id: req.subject_id,
         actor_id: req.requestor_id,
         request_id: req.id,
-        detail: req.reason
+        detail: req.reason,
+        # PP-11 (T150): ride the SUBJECT'S TENANT org chain when the caller supplies
+        # `org_id`, so the "who requested to unmask what, when, why" event is visible on
+        # THAT tenant's `Settings.SecurityLive` ledger. Absent an org_id it falls to the
+        # reserved `__global__` operator chain (`write_audit/2` / ADR-002 §2.1) — the
+        # pre-PP-11 behavior for callers that have not threaded the target org.
+        org_id: attrs[:org_id]
       })
+
+      # T35 §4.7: additionally open a `pii_reveal` Approval through the T34 engine —
+      # dual truth, per the ADR. The `RevealRequest` row (just written above) STAYS the
+      # domain intent record; this is a best-effort parallel governance record so an
+      # approval surface can see the pending decision even before `approve/2` is called.
+      # Never blocks/fails the reveal request itself: an unwired host, an unregistered
+      # kind, or any other engine hiccup here must not regress `request/1`'s pre-T35
+      # contract (RevealRequest write + `requested` audit, unconditionally).
+      open_engine_approval(req, attrs[:org_id])
 
       {:ok, req}
     end
+  end
+
+  defp open_engine_approval(%RevealRequest{} = req, org_id) do
+    Samen.Approvals.request(%{
+      # PP-11: carry the target tenant org onto the parallel `pii_reveal` approval so its
+      # governance-audit rows (approval_requested/approved) also ride the TENANT chain, not
+      # `__global__`. Nil preserves the pre-PP-11 org-less operator-chain behavior.
+      org_id: org_id,
+      kind: "pii_reveal",
+      subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
+      requested_by: req.requestor_id
+    })
+
+    :ok
+  rescue
+    _ -> :ok
   end
 
   # ==========================================================================
@@ -188,7 +219,7 @@ defmodule Samen.Reveal.Grants do
 
       {:error, :self_approval}
     else
-      do_approve(req, granted_by, opts, r)
+      route_through_engine(req, granted_by, opts, r)
     end
   end
 
@@ -201,7 +232,65 @@ defmodule Samen.Reveal.Grants do
     end
   end
 
-  defp do_approve(req, granted_by, opts, r) do
+  # ==========================================================================
+  # T35 §4.7 — route the happy path through the T34 approvals engine.
+  # ==========================================================================
+
+  # Opens (fetches-or-creates, idempotent) the `pii_reveal` Approval for this request and
+  # decides it through `Samen.Approvals.approve/3`. The registered handler
+  # (`Samen.Reveal.ApprovalHandler`) runs `do_approve/4` (below) INSIDE the engine's
+  # decision transaction, so the T34 guarantees (exactly-once by state machine,
+  # distinct-party incl. the T34-F1 null-approver refusal, same-tx handler+audit) now
+  # apply to reveal. `window_minutes` is NOT persisted on the approval row (§4.4,
+  # no-persisted-inputs) — it rides the synchronous `opts` keyword list into `ctx.opts`,
+  # the same call-time value the pre-T35 inline path always used.
+  #
+  # An UNWIRED host (`{:error, :no_approvals_module}`, e.g. no `pii_reveal` registration
+  # yet — the per-host sweep residual, ADR-040 §4.7 item 4) falls back to the ORIGINAL
+  # inline `do_approve/4` call, preserving exact pre-migration behavior rather than
+  # regressing a host that has not adopted the engine. Reveal's own distinct-party
+  # enforcement (policy above + the `rvg_distinct_party` DB CHECK) still fully applies on
+  # that fallback path — "unwired" never means "single-party grant slips through", it
+  # only means the T34-specific guarantees (exactly-once machine, T34-F1) are not yet
+  # layered on top for that host.
+  defp route_through_engine(req, granted_by, opts, r) do
+    approval_attrs = %{
+      # PP-11: the approval carries the target tenant org (idempotent with the request-time
+      # open above), so the engine's approval_approved chain row rides the TENANT chain.
+      org_id: Map.get(opts, :org_id),
+      kind: "pii_reveal",
+      subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
+      requested_by: req.requestor_id
+    }
+
+    engine_opts = [
+      window_minutes: Map.get(opts, :window_minutes, default_window_minutes()),
+      # Rides into `ctx.opts` → `do_approve/4` (via the ApprovalHandler) so the granted-side
+      # audit is tenant-attributed on BOTH the engine path and the no_approvals_module
+      # fallback below (which passes `opts` straight through).
+      org_id: Map.get(opts, :org_id)
+    ]
+
+    with {:ok, approval} <- Samen.Approvals.request(approval_attrs),
+         {:ok, _decided, meta} <- Samen.Approvals.approve(approval.id, granted_by, engine_opts) do
+      {:ok, r.get!(RevealGrant, meta.grant_id)}
+    else
+      {:error, :no_approvals_module} ->
+        do_approve(req, granted_by, opts, r)
+
+      {:error, _reason} = err ->
+        err
+    end
+  end
+
+  @doc false
+  # Public (not private) so `Samen.Reveal.ApprovalHandler.on_approve/2` — the registered
+  # T34 engine handler for kind "pii_reveal" — can invoke this EXACT Multi body inside the
+  # engine's decision transaction (§4.7 item 2). Behavior is UNCHANGED from the pre-T35
+  # inline call: same grant insert + `granted` audit + same-tx auto-revoke enqueue.
+  @spec do_approve(RevealRequest.t(), term(), map(), module()) ::
+          {:ok, RevealGrant.t()} | {:error, term()}
+  def do_approve(req, granted_by, opts, r) do
     window = Map.get(opts, :window_minutes, default_window_minutes())
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
     expires_at = DateTime.add(now, window * 60, :second)
@@ -229,14 +318,26 @@ defmodule Samen.Reveal.Grants do
     multi =
       Ecto.Multi.new()
       |> Ecto.Multi.insert(:grant, grant_changeset(grant_attrs))
-      |> Ecto.Multi.insert(:audit, audit_changeset(%{
-        event: "granted",
-        subject_id: req.subject_id,
-        actor_id: granted_by,
-        request_id: req.id,
-        grant_id: grant_id,
-        detail: "expires_at=#{DateTime.to_iso8601(expires_at)}"
-      }))
+      # PP-13 (B6 residual close): route the approve-moment `granted` event through
+      # `write_audit/2` with the TENANT `org_id` (like Batch 6 already did for
+      # `requested`/`revoked`), so the approval lands on the tenant's OWN audit chain and
+      # shows on `Settings.SecurityLive`'s "Reveal access" ledger (via
+      # `AuditChain.reveal_events_for_org/2`, which filters `grant_lifecycle`). The prior
+      # inline `audit_changeset` insert wrote ONLY the `rvl_reveal_audit` row — never the
+      # chain — so the moment PII was authorized to unmask was invisible to the tenant.
+      # Still in the SAME transaction (a `Multi.run` on the multi's repo), so the same-tx
+      # + rollback guarantee (clause (d)) is preserved: a chain-write error aborts the grant.
+      |> Ecto.Multi.run(:audit, fn multi_repo, _changes ->
+        write_audit(multi_repo, %{
+          event: "granted",
+          subject_id: req.subject_id,
+          actor_id: granted_by,
+          request_id: req.id,
+          grant_id: grant_id,
+          org_id: Map.get(opts, :org_id),
+          detail: "expires_at=#{DateTime.to_iso8601(expires_at)}"
+        })
+      end)
       |> Oban.insert(:auto_revoke, AutoRevokeWorker.new(%{grant_id: grant_id},
         scheduled_at: expires_at
       ))
@@ -245,6 +346,131 @@ defmodule Samen.Reveal.Grants do
       {:ok, %{grant: grant}} -> {:ok, grant}
       {:error, _step, reason, _changes} -> {:error, reason}
     end
+  end
+
+  # ==========================================================================
+  # PP-13 — the tenant APPROVER surface: org-scoped pending read + deny
+  # ==========================================================================
+
+  @doc """
+  The PENDING operator reveal-requests awaiting a tenant approver's decision for `org_id`
+  (PP-13). ORG-SCOPED via `Samen.Approvals.list_pending/3` — only `org_id`'s pending
+  `pii_reveal` approvals; a different org's pending requests never appear.
+
+  Each row is enriched with its governed `RevealRequest` facts so the approver surface can
+  show WHO (the requesting operator) wants to unmask WHICH FIELD (`resource`/`action`) of
+  WHICH SUBJECT (`subject_id`) and WHY (`reason`) — **METADATA ONLY**. It deliberately does
+  NOT resolve or carry the plaintext VALUE being requested (no vault read, no `vt_*` token):
+  the value is exactly what the approver is deciding whether to unmask, so rendering it would
+  defeat the control. `subject_id` is the subject's opaque UUID (a token, not plaintext PII);
+  `reason` is the operator-authored, PiiReasonScan-gated ticket text (never a PII value).
+
+  Returns a list of maps `%{approval_id, request_id, org_id, subject_id, requestor_id,
+  reason, resource, action, requested_at}`, oldest-first. Honest-empty (`[]`) on an unwired
+  host or any read error — never a fake row.
+  """
+  @spec pending_for_org(String.t(), keyword()) :: [map()]
+  def pending_for_org(org_id, opts \\ []) do
+    r = Keyword.get(opts, :repo, repo())
+
+    case Samen.Approvals.list_pending(org_id, "pii_reveal", opts) do
+      {:ok, approvals} ->
+        approvals
+        |> Enum.map(&enrich_pending(&1, r))
+        |> Enum.reject(&is_nil/1)
+
+      {:error, _} ->
+        []
+    end
+  rescue
+    _ -> []
+  end
+
+  # Join a pending `pii_reveal` approval to its governed RevealRequest (via subject_ref),
+  # projecting ONLY token/id/metadata fields — never a vault value.
+  defp enrich_pending(approval, r) do
+    with {:ok, request_id} <- parse_subject_ref(approval.subject_ref),
+         %RevealRequest{} = req <- r.get(RevealRequest, request_id) do
+      %{
+        approval_id: to_string(approval.id),
+        request_id: to_string(req.id),
+        org_id: approval.org_id,
+        subject_id: req.subject_id,
+        requestor_id: req.requestor_id,
+        reason: req.reason,
+        resource: req.resource,
+        action: req.action,
+        requested_at: approval.requested_at
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp parse_subject_ref("samen:reveal.request:" <> id), do: {:ok, id}
+  defp parse_subject_ref(_), do: :error
+
+  @doc """
+  DENY a reveal request as a DISTINCT tenant approver (PP-13). Transitions the pending
+  `pii_reveal` approval `pending -> rejected` through the EXISTING engine
+  (`Samen.Approvals.reject/3` — distinct-party enforced: `denied_by != requestor`), so it
+  drops off `pending_for_org/2`, AND records a `denied` event on the TENANT audit chain
+  (`write_audit/2` with the tenant `org_id`) so the refusal shows on the tenant's
+  `Settings.SecurityLive` "Reveal access" ledger. Grants NOTHING — no `RevealGrant` is ever
+  minted on this path; the mask holds by construction.
+
+  Required opts: `:denied_by`. Optional: `:org_id`, `:repo`. Returns `{:ok, %RevealRequest{}}`
+  or `{:error, term}` (incl. `{:error, :self_approval}` if the denier is the requestor).
+  """
+  @spec deny(RevealRequest.t() | binary(), map()) :: {:ok, RevealRequest.t()} | {:error, term}
+  def deny(request_or_id, opts \\ %{})
+
+  def deny(%RevealRequest{} = req, opts) do
+    r = Map.get(opts, :repo, repo())
+    denied_by = fetch!(opts, :denied_by)
+    org_id = Map.get(opts, :org_id)
+
+    approval_attrs = %{
+      org_id: org_id,
+      kind: "pii_reveal",
+      subject_ref: Samen.Reveal.ApprovalHandler.subject_ref(req),
+      requested_by: req.requestor_id
+    }
+
+    with {:ok, approval} <- Samen.Approvals.request(approval_attrs),
+         {:ok, _rejected} <- Samen.Approvals.reject(approval.id, denied_by) do
+      record_denial(r, req, denied_by, org_id)
+      {:ok, req}
+    else
+      # Unwired host (no engine): still record the denial on the chain — a denial that
+      # cannot transition an approval must never silently succeed as an unrecorded no-op.
+      {:error, :no_approvals_module} ->
+        record_denial(r, req, denied_by, org_id)
+        {:ok, req}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  def deny(request_id, opts) when is_binary(request_id) do
+    r = Map.get(opts, :repo, repo())
+
+    case r.get(RevealRequest, request_id) do
+      nil -> {:error, :request_not_found}
+      %RevealRequest{} = req -> deny(req, opts)
+    end
+  end
+
+  defp record_denial(r, req, denied_by, org_id) do
+    write_audit(r, %{
+      event: "denied",
+      subject_id: req.subject_id,
+      actor_id: denied_by,
+      request_id: req.id,
+      org_id: org_id,
+      detail: "reveal request denied by approver"
+    })
   end
 
   # ==========================================================================
@@ -301,6 +527,45 @@ defmodule Samen.Reveal.Grants do
       )
 
     r.exists?(query)
+  end
+
+  @doc """
+  List the ACTIVE reveal windows this actor currently holds AS THE REQUESTOR — the
+  legibility data for the R-P6 reveal-window UI (who approved, when it expires).
+
+  This is a READ-ONLY accountability projection: it applies the SAME gate as
+  `active?/3` (requestor-bound, distinct-party, unrevoked, `expires_at > now`) and returns
+  the grant facts `%{subject_id, granted_by, expires_at}` instead of a boolean. It does
+  NOT change enforcement — `active?/3` remains the authorization chokepoint; this only
+  surfaces the already-recorded grant so a human can SEE that a privileged window is open,
+  by whom, and until when.
+
+  Note the honest scope: a reveal grant is SUBJECT-WIDE (keyed on `subject_id` +
+  `requestor_id`, no field filter), so an open window authorizes resolving the whole
+  subject record, not a single field — the UI copy must say so.
+  """
+  @spec active_windows(term(), keyword()) :: [
+          %{subject_id: String.t(), granted_by: String.t(), expires_at: DateTime.t()}
+        ]
+  def active_windows(actor, opts \\ []) do
+    r = Keyword.get(opts, :repo, repo())
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    requestor_id = actor_id(actor)
+
+    r.all(
+      from(g in RevealGrant,
+        where:
+          g.requestor_id == ^requestor_id and
+            g.granted_by != g.requestor_id and
+            is_nil(g.revoked_at) and
+            g.expires_at > ^now,
+        select: %{
+          subject_id: g.subject_id,
+          granted_by: g.granted_by,
+          expires_at: g.expires_at
+        }
+      )
+    )
   end
 
   # ==========================================================================

@@ -92,6 +92,22 @@ defmodule Samen.Web.Operator do
     Plane.operator(org_id(mount) || "operator", tenant_org_id, session_id)
   end
 
+  @doc """
+  The host `otp_app` this operator mount belongs to — read from an explicit `:otp_app`
+  label, else derived from the mount repo's config (`repo.config()[:otp_app]`). `nil`
+  when neither resolves.
+
+  Public so the R-B drill-in scope gate (`Samen.Web.Operator.Impersonation`) can read
+  the product's `:fleet_resolution` seam for the SAME app the mount belongs to — the
+  scope is product-local and fleet-independent (ADR-044 §16.4a).
+  """
+  @spec otp_app(Mount.t()) :: atom() | nil
+  def otp_app(%Mount{} = mount) do
+    Mount.label(mount, :otp_app, nil) || repo_otp_app(mount)
+  end
+
+  def otp_app(_), do: nil
+
   # -- resolution steps --------------------------------------------------------
 
   defp explicit_label(%Mount{} = mount), do: Mount.label(mount, :operator_org_id, nil)
@@ -101,10 +117,6 @@ defmodule Samen.Web.Operator do
       nil -> nil
       app -> Application.get_env(app, :operator_org_id)
     end
-  end
-
-  defp otp_app(%Mount{} = mount) do
-    Mount.label(mount, :otp_app, nil) || repo_otp_app(mount)
   end
 
   defp repo_otp_app(%Mount{repo: repo}) when is_atom(repo) do
@@ -124,6 +136,10 @@ defmodule Samen.Web.Operator do
     Mount.resource(mount, Org)
     |> Ash.Query.sort(inserted_at: :asc)
     |> Ash.Query.limit(1)
+    # authz-scope: operator-namespace anchor bootstrap — this read DISCOVERS the
+    # operator org id, so it cannot be org_id-pinned (chicken-and-egg); the operator
+    # namespace holds exactly one Org by seed invariant, `limit(1)` takes that anchor,
+    # Org carries no PII. Operator plane only (T132).
     |> Ash.read!(authorize?: false)
     |> case do
       [%{id: id} | _] -> id

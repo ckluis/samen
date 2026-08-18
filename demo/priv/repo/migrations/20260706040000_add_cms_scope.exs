@@ -34,14 +34,19 @@ defmodule Demo.Repo.Migrations.AddCmsScope do
   """
   use Samen.Migration
 
+  # ContentVersion was RETIRED in T119 (ADR-040 §6.5) — the bespoke content-version
+  # ledger is replaced by E7 `versioned` history. Its resource module no longer exists,
+  # so it is removed from this historical migration's catalog set and its table create/
+  # drop are elided (pre-1.0 destructive break on dev-only fixture data; test DBs are
+  # dropped+recreated every run). The `<Resource>.Version` tables are created by
+  # `20260729320000_cms_retire_content_version_add_versions`.
   @resources [
     Demo.CmsScope.Page,
     Demo.CmsScope.Post,
     Demo.CmsScope.Block,
     Demo.CmsScope.Media,
     Demo.CmsScope.Navigation,
-    Demo.CmsScope.SeoMeta,
-    Demo.CmsScope.ContentVersion
+    Demo.CmsScope.SeoMeta
   ]
 
   def up do
@@ -163,24 +168,9 @@ defmodule Demo.Repo.Migrations.AddCmsScope do
       add(:csm_updated_at, :utc_datetime, null: false)
     end
 
-    # --- cvr_content_version : IMMUTABLE content version history ---
-    # Append-only at the application layer (no :update/:destroy Ash actions).
-    # Stores a snapshot of authored content at the time of a publish/archive event.
-    create table(:cvr_content_version, primary_key: false) do
-      add(:cvr_subject_type, :text, null: false)
-      add(:cvr_subject_id, :uuid, null: false)
-      add(:cvr_content_snapshot, :map, default: fragment("'{}'::jsonb"))
-      add(:cvr_status, :text)
-      add(:cvr_author_id, :uuid)
-      add(:cvr_version_number, :integer, default: 1)
-      add(:cvr_change_summary, :text)
-      add(:cvr_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
-      add(:cvr_org_id, :uuid, null: false)
-      add(:cvr_inserted_at, :utc_datetime, null: false)
-      add(:cvr_updated_at, :utc_datetime, null: false)
-    end
+    # (cvr_content_version RETIRED in T119 — ADR-040 §6.5. See the @resources note.)
 
-    # --- catalog all seven CMS resources in THIS transaction ---
+    # --- catalog the six CMS resources in THIS transaction ---
     catalog_sync(@resources)
   end
 
@@ -195,7 +185,6 @@ defmodule Demo.Repo.Migrations.AddCmsScope do
     drop(constraint(:cbl_block, "cbl_block_cbl_page_id_fkey"))
     drop(table(:cbl_block))
 
-    drop(table(:cvr_content_version))
     drop(table(:cnv_navigation))
     drop(table(:cmd_media))
     drop(table(:cpt_post))

@@ -56,6 +56,17 @@ defmodule Samen.Kms.AwsKmsDynamo do
 
   @behaviour Samen.Kms
 
+  @doc """
+  Declares this adapter an UNIMPLEMENTED SKELETON (ADR-045 §4.2, O5). The framework prod boot
+  guard (`Samen.Kms.assert_prod_adapter_ready!/1`, called at a mount-bearing host's
+  `Application.start/2`) REFUSES to boot a production host that selects a skeleton adapter —
+  rather than boot green and then 500 on every vault operation. When the real AWS KMS + DynamoDB
+  calls in this module are wired (the ADR-001 §8.2 obligations in the moduledoc), REMOVE this
+  function (or make it return `false`) so the boot guard admits the now-functional adapter.
+  """
+  @spec __kms_skeleton__?() :: boolean()
+  def __kms_skeleton__?, do: true
+
   # Stub delegation to InMemory for the disabled-mode conformance suite.
   # When enabled: replace these with real AWS SDK calls.
   alias Samen.Kms.InMemory

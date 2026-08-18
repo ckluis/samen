@@ -12,7 +12,11 @@ defmodule Samen.Web.Billing.PlansLive do
   changes"): "New plan" opens a `modal/1` hosting an `AshPhoenix.Form`-backed
   `simple_form/1` create (`name` is required — the inline-error path is real); each row
   carries an enable/disable toggle (the blueprint's `update: :*`) and a
-  `delete_confirm/1`. Write affordances are offered on the tenant plane only
+  `delete_confirm/1` — which now soft-archives (ADR-040 §5.9/T37a: `Plan` is
+  `archivable true`, so the default `:destroy` action is T36's soft-destroy; "delete"
+  hides the row from the bounded list rather than a hard DB delete, and — no cascade
+  declared for billing (§5.4) — a plan's linked prices/subscriptions are never
+  refused, they simply stay live). Write affordances are offered on the tenant plane only
   (`Samen.Web.Billing.Live.writable?/1`); enforcement stays in the kernel — Plan writes
   are ADMIN-gated (`RoleAtLeast :admin`), so writes go through `Reads.write_scope/2`
   (same-org, PLANE-PRESERVING role elevation).
@@ -33,7 +37,11 @@ defmodule Samen.Web.Billing.PlansLive do
     reads: &Samen.Web.Billing.Reads.plans_page/3,
     sortable: [:name, :interval, :enabled],
     filter_fields: [:name, :label],
-    default_sort: {:name, :asc}
+    default_sort: {:name, :asc},
+    # ADR-040 §5.8 (T37h) — Plan writes are RoleAtLeast :admin-gated (same elevation every
+    # other write event here already applies via Reads.write_scope/3). ADR-045 §4.4 (S1a): the
+    # `(scope, socket)` elevator re-derives the admin scope from the socket's pinned principal.
+    write_scope: &Samen.Web.Billing.Reads.restore_admin_scope/2
 
   @impl true
   def mount(params, session, socket) do
@@ -44,7 +52,7 @@ defmodule Samen.Web.Billing.PlansLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     {:noreply, load(assign(socket, org_id: org_id, return_to: return_path(uri)), org_id)}
   end
 
@@ -196,8 +204,13 @@ defmodule Samen.Web.Billing.PlansLive do
     end
   end
 
-  # FAIL-HONEST delete: a plan with linked prices/subscriptions is refused by the DB
-  # (FK) and the refusal is SURFACED on the page.
+  # ADR-040 §5.9/T37a: `Plan` is `archivable true`, so `Reads.delete_plan/3`'s
+  # `Ash.destroy/2` now rides the default SOFT destroy (T36) — this sets
+  # `archived_at` rather than removing the row, so the plan simply drops out of the
+  # default (archived-excluding) bounded read below. No cascade is declared for
+  # billing (§5.4), so linked prices/subscriptions are untouched and the destroy is
+  # never refused on their account; any `{:error, _}` here is a genuine failure
+  # (e.g. an authorization denial), not the old FK-refusal case.
   def handle_event("delete", %{"id" => id}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
 
@@ -206,10 +219,7 @@ defmodule Samen.Web.Billing.PlansLive do
         {:noreply, load(assign(socket, delete_error: nil), org_id)}
 
       {:error, _reason} ->
-        {:noreply,
-         assign(socket,
-           delete_error: "Could not delete this plan — it still has linked records (prices or subscriptions)."
-         )}
+        {:noreply, assign(socket, delete_error: "Could not delete this plan.")}
     end
   end
 
@@ -254,6 +264,9 @@ defmodule Samen.Web.Billing.PlansLive do
 
         <.topbar title="Plans" crumbs={crumbs(@samen_mount, @org_id, "Plans")}>
           <:actions>
+            <.button :if={not @no_org} phx-click="toggle_archived" id="toggle-archived-plans">
+              {if @list_state.show_archived, do: "Hide archived", else: "Show archived"}
+            </.button>
             <.button :if={writable?(@samen_mount) and not @no_org} phx-click="open_ents" id="manage-entitlements">
               Entitlements
             </.button>
@@ -341,11 +354,16 @@ defmodule Samen.Web.Billing.PlansLive do
                   </td>
                   <td :if={writable?(@samen_mount)} class="plan-actions">
                     <div style="display:flex;gap:6px;align-items:center">
-                      <.button phx-click="edit_plan" phx-value-id={plan.id} class="edit-plan">Edit</.button>
-                      <.button phx-click="toggle_plan" phx-value-id={plan.id}>
-                        {if plan.enabled, do: "Disable", else: "Enable"}
-                      </.button>
-                      <.delete_confirm phx-click="delete" phx-value-id={plan.id} />
+                      <%= if Map.get(plan, :archived_at) do %>
+                        <.pill variant="mut">archived</.pill>
+                        <.button phx-click="restore" phx-value-id={plan.id} class="restore-plan">Restore</.button>
+                      <% else %>
+                        <.button phx-click="edit_plan" phx-value-id={plan.id} class="edit-plan">Edit</.button>
+                        <.button phx-click="toggle_plan" phx-value-id={plan.id}>
+                          {if plan.enabled, do: "Disable", else: "Enable"}
+                        </.button>
+                        <.delete_confirm phx-click="delete" phx-value-id={plan.id} />
+                      <% end %>
                     </div>
                   </td>
                 </:row>
@@ -463,7 +481,7 @@ defmodule Samen.Web.Billing.PlansLive do
   defp crumbs(mount, org_id, leaf), do: [CurrentOrg.name(mount, org_id), "Billing", leaf]
 
   defp primary_price([]), do: "—"
-  defp primary_price([price | _]), do: dollars(price.unit_amount_cents)
+  defp primary_price([price | _]), do: dollars(price.unit_amount)
 
   defp interval_label(:monthly), do: "monthly"
   defp interval_label(:annual), do: "annual"
@@ -510,6 +528,9 @@ defmodule Samen.Web.Billing.PlansLive do
   defp plan_fg("scale"), do: "#7C3AED"
   defp plan_fg(_), do: "#6B7280"
 
+  # ADR-036 §4.5(3): unit_amount is the Money composite now — a plain integer
+  # cents count is no longer the sole call shape (dollars(price.unit_amount)).
+  defp dollars(%Money{} = money), do: dollars(Samen.Type.Money.cents(money))
   defp dollars(cents) when is_integer(cents),
     do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
 

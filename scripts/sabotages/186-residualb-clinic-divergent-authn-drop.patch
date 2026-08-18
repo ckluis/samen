@@ -1,0 +1,27 @@
+# SABOTAGE: Residual B (Batch 7) — give pawchart's `/clinic` mount a DIVERGENT unlabeled
+# shape by stripping the `:authn` seam from `@clinic_mount` (`Map.delete(@current_org_labels,
+# :authn)`) — the exact "a future change gives /clinic a divergent mount" regression the
+# strengthened per-live-session enumeration exists to catch. `/clinic` then drops its tenant-auth
+# seam. The strengthened `tenant_authn_prodpath` guard — which now pins `/clinic` INDIVIDUALLY
+# (per live_session, NOT deduped away by the shared `:crm` scope_kind, as the old
+# `uniq_by(scope_kind)` did) — FLIPS: `/clinic` is enumerated and is caught missing the `:authn`
+# seam. The other (still-labeled) tenant mounts pass, so the flip is non-vacuous. Before this
+# batch's fix the divergence slipped past the guard entirely (the SECURITY blast radius stays
+# nil regardless — Batch-1's `resolve/3` fails CLOSED by default on a seam-less mount — so the
+# guarantee this pins is COVERAGE: the guard notices the divergence). Reverts byte-exact.
+# APP: pawchart
+# TEST_FILES: test/tenant_authn_prodpath_test.exs
+# MUST_FAIL: /clinic is present in the enumeration
+# MUST_FAIL: every enumerated tenant mount carries the :authn seam
+diff --git a/pawchart/lib/pawchart_web/router.ex b/pawchart/lib/pawchart_web/router.ex
+--- a/pawchart/lib/pawchart_web/router.ex
++++ b/pawchart/lib/pawchart_web/router.ex
+@@ -96,7 +96,7 @@ defmodule PawChartWeb.Router do
+                     PawChart.Repo,
+                     plane: Samen.Web.Plane.tenant(),
+                     labels:
+-                      Map.merge(@current_org_labels, %{
++                      Map.merge(Map.delete(@current_org_labels, :authn), %{
+                         title: "Happy Paws Clinic",
+                         glyph: "V",
+                         crm_logo_style: "background:linear-gradient(150deg,#0A6E9E,#1A8DC5)",

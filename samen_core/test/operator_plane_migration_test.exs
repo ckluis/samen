@@ -84,7 +84,10 @@ defmodule Samen.OperatorPlaneMigrationTest do
       username: Keyword.get(base, :username),
       password: Keyword.get(base, :password, ""),
       database: "postgres",
-      pool_size: 1
+      pool_size: 1,
+      # sync_connect: block start_link until the socket is established so the first
+      # query never races the async connect under suite load (flake F, T105).
+      sync_connect: true
     ]
 
     {:ok, admin} = Postgrex.start_link(admin_opts)

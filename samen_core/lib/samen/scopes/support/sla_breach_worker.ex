@@ -15,6 +15,19 @@ defmodule Samen.Scopes.Support.SlaBreachWorker do
   3. Emits a `support.ticket.breached` `aud_event` row per ticket via
      `Samen.Scopes.Support.Audit.ticket_breached/2`.
 
+  ## E5 escalation client (ADR-039 §7.4 — T41 adoption seam)
+
+  The scan, the `breached` flag flip, and the `aud_event` emission are UNCHANGED.
+  The ONLY bespoke attention path — a direct `Samen.Notifications.Engine.emit/1`
+  call — is REPLACED by `Samen.Automation.Escalate.open/2` (`kind: "sla_breach"`,
+  `dedupe_key: ticket_id`, `deadline_at: breach_at`, `chain: nil` — the default
+  single-step org chain, preserving the org-recipient notification this worker
+  always sent). The escalation primitive now owns the attention/chain-walking;
+  this worker owns ONLY the domain truth (the breach itself). Best-effort: an
+  unwired/failing escalation call never aborts or reverts the breach flip
+  (mirrors `Samen.Billing.Dunning`'s "never re-decides, never aborts the main
+  path" posture for its own escalation calls).
+
   ## Why SQL rather than Ash actions
 
   The worker is mounted in `samen_core` but the ticket resource is a host-owned module
@@ -118,9 +131,13 @@ defmodule Samen.Scopes.Support.SlaBreachWorker do
     org_col = "#{abbrev}_org_id"
     now = DateTime.utc_now()
 
-    # Find tickets past their SLA deadline, not yet flagged.
+    # Find tickets past their SLA deadline, not yet flagged. breach_col is
+    # selected BOTH as text (the log-message form) and natively (untyped —
+    # decodes as whatever the column's declared PG type is, so
+    # Escalate.open/2's deadline_at gets a real DateTime/NaiveDateTime instead
+    # of re-parsing the text form).
     query_sql = """
-    SELECT #{id_col}::text, #{org_col}::text, #{breach_col}::text
+    SELECT #{id_col}::text, #{org_col}::text, #{breach_col}::text, #{breach_col}
     FROM #{table}
     WHERE #{breach_col} IS NOT NULL
       AND #{breach_col} <= $1
@@ -131,8 +148,8 @@ defmodule Samen.Scopes.Support.SlaBreachWorker do
       {:ok, %{rows: rows}} ->
         Logger.debug("[SlaBreachWorker] found #{length(rows)} breached tickets in #{table}")
 
-        Enum.each(rows, fn [id_bin, org_id_bin, breach_at_str] ->
-          mark_breached(repo, table, id_col, breached_col, id_bin, org_id_bin, breach_at_str)
+        Enum.each(rows, fn [id_bin, org_id_bin, breach_at_str, breach_at_native] ->
+          mark_breached(repo, table, id_col, breached_col, id_bin, org_id_bin, breach_at_str, breach_at_native)
         end)
 
         :ok
@@ -143,7 +160,7 @@ defmodule Samen.Scopes.Support.SlaBreachWorker do
     end
   end
 
-  defp mark_breached(repo, table, id_col, breached_col, id_bin, org_id_bin, breach_at_str) do
+  defp mark_breached(repo, table, id_col, breached_col, id_bin, org_id_bin, breach_at_str, breach_at_native) do
     update_sql = """
     UPDATE #{table}
     SET #{breached_col} = true
@@ -168,21 +185,13 @@ defmodule Samen.Scopes.Support.SlaBreachWorker do
         Samen.Scopes.Support.Audit.ticket_breached(repo, ticket, breach_at_str)
 
         # WS-A A4 event source (design §2.3; fixes H-9): the breach is no longer a
-        # SILENT state flip — it also notifies through the engine. Best-effort +
-        # preference-gated (emit/1 never aborts the flip; a suppressed "sla_breach"
-        # preference writes NO record — the red path). The request carries bounded
-        # ids + framework copy only; the ticket travels as an object REF
-        # ("samen:support.ticket:<id>"), never denormalized subject data. The
-        # recipient entity is the OWNING ORG (org-level system event).
-        Samen.Notifications.Engine.emit(%{
-          org_id: org_id_bin,
-          recipient_id: org_id_bin,
-          event_type: "sla_breach",
-          channel: :in_app,
-          rendered_body: "A support ticket breached its SLA (deadline #{breach_at_str}).",
-          subject_ref: "samen:support.ticket:#{id_bin}",
-          metadata: %{"ticket_id" => id_bin}
-        })
+        # SILENT state flip. ADR-039 §7.4 (T41): attention now routes through the
+        # E5 escalation primitive instead of a bespoke direct notify — Escalate.open
+        # is idempotent-by-dedupe (a concurrent duplicate tick just advances the
+        # SAME escalation, never opens a second one) and, with chain: nil, sends
+        # the SAME org-recipient in_app notification this worker always sent (the
+        # default single-step org chain), best-effort (never aborts the flip).
+        escalate_breach(org_id_bin, id_bin, breach_at_native)
 
         Logger.info(
           "[SlaBreachWorker] marked ticket #{id_bin} as breached (breach_at=#{breach_at_str})"
@@ -196,4 +205,45 @@ defmodule Samen.Scopes.Support.SlaBreachWorker do
         Logger.error("[SlaBreachWorker] UPDATE failed for #{id_bin}: #{inspect(reason)}")
     end
   end
+
+  # Best-effort — an unwired/failing escalation call must NEVER surface as a
+  # worker failure (the breach flip + audit above already committed).
+  defp escalate_breach(org_id_bin, id_bin, breach_at_native) do
+    case Samen.Automation.Escalate.open(%{
+           org_id: org_id_bin,
+           kind: "sla_breach",
+           dedupe_key: id_bin,
+           subject_ref: "samen:support.ticket:#{id_bin}",
+           deadline_at: to_deadline(breach_at_native),
+           chain: nil
+         }) do
+      {:ok, _escalation} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.debug("[SlaBreachWorker] escalation open skipped for #{id_bin}: #{inspect(reason)}")
+        :ok
+    end
+  rescue
+    e ->
+      Logger.warning("[SlaBreachWorker] escalation open raised for #{id_bin}: #{Exception.message(e)}")
+      :ok
+  end
+
+  # Normalize whatever the DB handed back for the untyped breach_col select
+  # (a real DateTime for timestamptz, a NaiveDateTime for timestamp-without-tz,
+  # or — defensively — a string) into a UTC DateTime for Escalate.open/2.
+  defp to_deadline(%DateTime{} = dt), do: dt
+  defp to_deadline(%NaiveDateTime{} = ndt), do: DateTime.from_naive!(ndt, "Etc/UTC")
+
+  defp to_deadline(str) when is_binary(str) do
+    normalized = String.replace(str, " ", "T", global: false)
+
+    case NaiveDateTime.from_iso8601(normalized) do
+      {:ok, ndt} -> DateTime.from_naive!(ndt, "Etc/UTC")
+      _ -> DateTime.utc_now()
+    end
+  end
+
+  defp to_deadline(_other), do: DateTime.utc_now()
 end

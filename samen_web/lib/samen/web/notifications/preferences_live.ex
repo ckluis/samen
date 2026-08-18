@@ -67,7 +67,7 @@ defmodule Samen.Web.Notifications.PreferencesLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
 
     {:noreply,
      load(

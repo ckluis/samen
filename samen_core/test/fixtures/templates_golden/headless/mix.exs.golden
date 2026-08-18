@@ -38,7 +38,7 @@ defmodule Acme.MixProject do
       # SAME exact versions the framework kernel declares, so this app's authored DSL
       # (`postgres do ... end`, `attributes do ... end`, `pii do ... end`) formats
       # correctly without a second resolution of either package.
-      {:ash, "== 3.29.3"},
+      {:ash, "== 3.31.2"},
       {:ash_postgres, "== 2.10.0"},
       {:jason, "~> 1.4"},
       {:stream_data, "== 1.3.0"},

@@ -154,30 +154,35 @@ defmodule Samen.Web.OperatorAccountDetailRenderTest do
 
   test "RED-PATH (B4-P2-1): the invoice dunning flag is the READS-computed determination — a due date crossing 'now' between read and render cannot desync flag and score",
        %{seed: seed, account: account} do
-    # Clear the seeded dunning, then park the current invoice's due date JUST ahead
-    # of "now": at READ time the account is current (no dunning evidence, billing
-    # healthy) — and one second later that due date has crossed the clock.
+    # Clear the seeded dunning, then park the invoice's due date at a FIXED instant.
+    # The read's "now" is pinned via the sanctioned `:now` clock-injection opt — no
+    # wall-clock margin, no sleep — so the not-yet-due boundary is deterministic under
+    # any suite load. `@due` sits in the real past (2020) precisely so that if the
+    # RENDER ever recomputed past-due from a SECOND, real clock, it would flip the flag
+    # (real now ≫ @due) — the exact desync this test refutes.
+    due = ~U[2020-06-15 12:00:00Z]
+    before_due = DateTime.add(due, -1, :second)
+    after_due = DateTime.add(due, 1, :second)
+
     account.past_due_invoice
     |> Ash.Changeset.for_update(:update, %{status: :paid}, authorize?: false)
     |> Ash.update!()
 
     account.invoice
-    |> Ash.Changeset.for_update(
-      :update,
-      %{due_date: DateTime.add(DateTime.utc_now(), 1, :second)},
-      authorize?: false
-    )
+    |> Ash.Changeset.for_update(:update, %{due_date: due}, authorize?: false)
     |> Ash.update!()
 
     mount = build_operator_mount(seed.operator_org_id)
 
-    # Load (the read) WITHOUT rendering yet — the exact window the dual utc_now
-    # straddled (Reads assembly vs the old render-time `past_due_now?`).
+    # Load (the read) with "now" pinned JUST BEFORE the due date — the account is
+    # current: no dunning evidence, billing healthy. Render is deferred to the exact
+    # window the old dual-utc_now (Reads assembly vs render-time `past_due_now?`)
+    # straddled.
     socket =
       %Phoenix.LiveView.Socket{}
       |> Phoenix.Component.assign(:samen_mount, mount)
       |> Phoenix.Component.assign(:samen_acting_as, false)
-      |> Samen.Web.Operator.AccountDetailLive.load(account.account_org.id)
+      |> Samen.Web.Operator.AccountDetailLive.load(account.account_org.id, now: before_due)
 
     detail = socket.assigns.detail
 
@@ -187,22 +192,28 @@ defmodule Samen.Web.OperatorAccountDetailRenderTest do
     billing = Enum.find(detail.account.__health__.factors, &(&1.name == :billing))
     assert billing.explanation =~ "no past-due invoices"
 
-    # Let the due date CROSS "now" between the read and the render.
-    Process.sleep(1_200)
-
     html = render_html(Samen.Web.Operator.AccountDetailLive, socket.assigns)
 
-    # The render trusts the READ-time determination — no second clock. The OLD
-    # code recomputed `DateTime.utc_now()` here and flagged "past due" beside a
-    # billing factor that said current: the momentary flag/score desync.
+    # The render trusts the READ-time determination — no second clock. The OLD code
+    # recomputed `DateTime.utc_now()` here; because @due is in the real past, a second
+    # clock would flag "past due" beside a billing factor that said current — the
+    # momentary flag/score desync. Rendering not-due proves the render reads no clock.
     refute html =~ ~s(class="dunning-flag"),
            "the render recomputed past-due from a second clock — flag/score desync (B4-P2-1)"
 
     assert html =~ "no past-due invoices"
 
-    # POSITIVE CONTROL (anti-tautology): a FRESH read after the crossing sees the
-    # invoice past due — flag AND score flip together, from the same one clock.
-    fresh = detail_html(seed, account)
+    # POSITIVE CONTROL (anti-tautology): a FRESH read with "now" AFTER the due date
+    # sees the invoice past due — flag AND score flip together, from the same one clock.
+    fresh_socket =
+      %Phoenix.LiveView.Socket{}
+      |> Phoenix.Component.assign(:samen_mount, mount)
+      |> Phoenix.Component.assign(:samen_acting_as, false)
+      |> Samen.Web.Operator.AccountDetailLive.load(account.account_org.id, now: after_due)
+
+    assert Enum.any?(fresh_socket.assigns.detail.invoices, &(&1.__past_due__ == true))
+
+    fresh = render_html(Samen.Web.Operator.AccountDetailLive, fresh_socket.assigns)
     assert fresh =~ ~s(class="dunning-flag")
     assert fresh =~ "in dunning"
   end

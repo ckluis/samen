@@ -37,6 +37,21 @@ config :samen_core, :verify_repo, <%= module %>.Repo
 config :samen_core, :vault_repo, <%= module %>.Repo
 config :samen_core, :tnt_record_repo, <%= module %>.Repo
 
+# T35 §4.7 / T37h: reveal grants are a CLIENT of the T34 E3 approve/reject engine.
+# This app's own Approval resource (Samen.Approvals.Blueprint.define_approval/5,
+# lib/<%= otp_app %>/approvals.ex) + the "pii_reveal" kind registered to
+# Samen.Reveal.ApprovalHandler — Grants.approve/2 now routes its happy path through
+# Samen.Approvals, not the pre-T35 inline fallback (the T35 non-fatal note this
+# fold-in closes).
+config :samen_core, Samen.Approvals,
+  approval_resource: <%= module %>.Approvals.Approval,
+  repo: <%= module %>.Repo
+
+config :samen_core, Samen.Approvals.Registry,
+  kinds: %{
+    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler}
+  }
+
 # T4.5 aggregate-privacy floors. samen_core defaults are k=5/l=2; a fresh app's
 # dogfood datasets are small, so — exactly as demo/driftwood/pawchart — use a
 # small-but-non-trivial floor (k=2/l=2): a count-of-one cohort still suppresses.
@@ -51,6 +66,28 @@ config :samen_core, :query_budget_ledger_repo, <%= module %>.Repo
 # step 2 reads it from this app env. The operator workspace reads the operator org's
 # OWN book of business on the TENANT plane (clear); seeds anchor rows on this id.
 config :<%= otp_app %>, :operator_org_id, "<%= operator_org_id %>"
+
+# ADR-031/ADR-045 §2 — the launch AUTH gate, ARMED BY DEFAULT IN PROD (V-F1, Option A). The
+# router's tenant/shared mounts carry `authn: {:app_env, :<%= otp_app %>, :auth_required?}`;
+# in dev/test this is FALSE so `Samen.Web.CurrentOrg` keeps the query-param convenience identity
+# (a spoofable `?org=`/`?user=`), and in prod it is TRUE so the current org/actor is derived ONLY
+# from an authenticated session — a `?org=`/`?user=` can never resolve an arbitrary tenant. This
+# is EXPLICIT here (`config_env() == :prod`) AND backstopped by the framework env-aware default +
+# the `Samen.Web.TenantGate` boot guard (a prod host that is disarmed refuses to boot). To run a
+# real launch you must ALSO wire a login path + the tenant `:identity_namespace` seam (the router
+# already does) so admin writes derive the caller's REAL membership role — see the deploy runbook.
+config :<%= otp_app %>, auth_required?: config_env() == :prod
+
+# T146 — the OPERATOR-ROLE authority seam (conn-level twin of the operator mount's
+# `:operator_authority` label). `Samen.Web.AuthGate` reads this app env to verify an
+# authenticated principal actually holds operator authority before admitting them to the
+# operator control plane, and `Samen.Web.Operator.Authz` enforces the SAME by construction at
+# every operator route's mount. Deny-by-default: absent a resolver, a prod-armed app admits NO
+# operator. The generated default is a NAMED dev-only grant — it returns `:operator_admin` while
+# `:auth_required?` is false (dogfood convenience) and `nil` (fail CLOSED) once armed for prod.
+# A real deploy REPLACES it with a resolver over your operator roster / `Membership` rows (see
+# docs/runbooks/deploy.md).
+config :<%= otp_app %>, :operator_authority, {Samen.Web.Operator.Authz, :dev_operator_role, [:<%= otp_app %>]}
 
 # WS-A A4/A5 — the kernel notification ENGINE wired to this app's Primitives mount
 # (the ADR-014 SendWorker config convention: the kernel is mount-agnostic; the host
@@ -88,17 +125,17 @@ config :<%= otp_app %>, <%= module %>Web.Endpoint,
   pubsub_server: <%= module %>.PubSub,
   server: false
 
-# Oban: the canonical queue taxonomy (reused verbatim from the substrate convention).
+# Oban: the canonical queue taxonomy is DERIVED, never hand-listed here (B-OBAN).
+# config.exs is evaluated before dependency modules load, so it cannot call
+# `Samen.Jobs.default_queue_config/0`; application.ex installs the full taxonomy
+# (and the canonical crontab) at boot via `Samen.Jobs.install_defaults/1`. That
+# matters because a job enqueued to a queue with no configured producer does not
+# fail — it sits in oban_jobs as `available` forever, with no error, no retry and
+# an empty DLQ. Declare only your repo + plugins here; add a queue name below ONLY
+# to retune its limit (your limit wins, the rest are still installed).
+# `mix samen.verify.oban_queues` gates worker-queue ⊆ configured-queue parity.
 config :samen_core, Oban,
   repo: <%= module %>.Repo,
-  queues: [
-    default: 10,
-    rollups: 2,
-    webhooks_out: 5,
-    erasure: 1,
-    maintenance: 1,
-    reveal: 5
-  ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
   ]

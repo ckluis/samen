@@ -1,0 +1,26 @@
+# SABOTAGE: T34-F1 — the mandatory-approver guard (ADR-040 §4.2; verifier T34-F1, P2).
+# An approval is a TWO-party decision: approve/reject with a nil/blank approver is a
+# single-party decision and MUST be refused fail-closed (Samen.Approvals.blank_actor?/1 ->
+# {:error, :no_approver}) BEFORE the transition, so a null/blank approver never executes a
+# gated privileged action. This is the app-layer twin of the tightened apv_distinct_party DB
+# CHECK (a decided row must carry a non-NULL approver). This sabotage adds a first,
+# always-matching blank_actor?/1 clause returning false — so a null/blank approver slips past
+# the guard. The named RED test MUST fail (approve(id, "") / "   " now execute single-party;
+# approve(id, nil) returns a different error than :no_approver), proving the mandatory-approver
+# guard is load-bearing, not a tautology. All other engine tests stay green (positive controls:
+# distinct-party, DB CHECK, NULL-org exception, Gate-as-requester, same-tx rollback).
+# APP: samen_core
+# TEST_FILES: test/approvals/engine_test.exs
+# MUST_FAIL: null approver: approve(id, nil) is REFUSED
+--- a/samen_core/lib/samen/approvals.ex
++++ b/samen_core/lib/samen/approvals.ex
+@@ -180,6 +180,9 @@
+     end
+   end
+ 
++  # SABOTAGE (T34-F1): defeat the mandatory-approver guard — a null/blank approver passes.
++  defp blank_actor?(_sab) when 1 == 1, do: false
++
+   defp blank_actor?(nil), do: true
+   defp blank_actor?(""), do: true
+   defp blank_actor?(id) when is_binary(id), do: String.trim(id) == ""

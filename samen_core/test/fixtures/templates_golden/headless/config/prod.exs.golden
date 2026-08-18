@@ -1,0 +1,12 @@
+import Config
+
+# Acme — production COMPILE-TIME config (ADR-045 §2.1). `config/config.exs` ends with
+# `import_config "#{config_env()}.exs"`, so a MIX_ENV=prod build (a release, or
+# `Config.Reader.read!(env: :prod)`) imports THIS file. Without it a prod config load ABORTS on
+# the missing `prod.exs` — the §2.1 defect this file closes.
+#
+# SECRETS ARE NOT READ HERE. Prod secrets are read fail-closed at BOOT in `config/runtime.exs`
+# (ADR-024, the --deploy layer). This file carries only compile-time prod POSTURE.
+
+# Quieter prod logging (dev is :debug).
+config :logger, level: :info

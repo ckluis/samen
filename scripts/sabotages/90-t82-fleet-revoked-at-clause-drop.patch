@@ -1,0 +1,21 @@
+# SABOTAGE: T82 RP-J-3 (ADR-044 §4.5, "deny-on-use, re-checked per request") — drops
+# the `is_nil(revoked_at)` clause from the heartbeat credential lookup
+# (Samen.Fleet.Registry.lookup_current_heartbeat_credential/4), exactly the ADR's
+# named mutation: "drop the revoked_at IS NULL clause from credential lookup and
+# the revocation test must fail". With this applied, a REVOKED mode-B credential
+# is still accepted on the very next heartbeat — the deny-on-use guarantee is gone.
+# APP: samen_core
+# TEST_FILES: test/fleet_registry_test.exs
+# MUST_FAIL: RED: revoked heartbeat credential is dead on the next request
+diff --git a/samen_core/lib/samen/fleet/registry.ex b/samen_core/lib/samen/fleet/registry.ex
+--- a/samen_core/lib/samen/fleet/registry.ex
++++ b/samen_core/lib/samen/fleet/registry.ex
+@@ -366,7 +366,7 @@ defmodule Samen.Fleet.Registry do
+   defp lookup_current_heartbeat_credential(ns, kid, v, signing_input) do
+     query =
+       credential_res(ns)
+       |> Ash.Query.filter(
+         app_id == ^kid and key_version == ^v and kind == :ed25519 and
+-          capability == :fleet_heartbeat and is_nil(revoked_at)
++          capability == :fleet_heartbeat
+       )

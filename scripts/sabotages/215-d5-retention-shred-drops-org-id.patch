@@ -1,0 +1,31 @@
+# SABOTAGE: D5 (ADR-046 §4.4) — the retention :shred sweep drops :org_id from
+# shred_opts (reverted to the pre-fix `if repo, do: [repo: repo], else: []`), so the
+# retention-driven erasure event falls back to Samen.AuditChain.global_org()
+# ("__global__") instead of riding the tenant's T4.3 chain. TenantView.for_org/2
+# refuses "__global__" by design, so the tenant never sees the erasure of its own
+# data subject. The D5 org-attribution proof flips: the erasure event no longer
+# lands on the tenant org's chain. The fix only fixes attribution — this sabotage
+# proves that threading org_id is load-bearing, weakening no other invariant.
+# APP: samen_core
+# TEST_FILES: test/retention_sweep_test.exs
+# MUST_FAIL: the erasure event lands on the TENANT's chain, not __global__
+diff --git a/samen_core/lib/samen/retention.ex b/samen_core/lib/samen/retention.ex
+index ef5d570..05290d1 100644
+--- a/samen_core/lib/samen/retention.ex
++++ b/samen_core/lib/samen/retention.ex
+@@ -255,13 +255,8 @@ defmodule Samen.Retention do
+       |> Enum.map(fn {subject, org} -> {to_string(subject), org} end)
+       |> Enum.uniq_by(fn {subject, _org} -> subject end)
+ 
+-    Enum.reduce(subjects, 0, fn {subject_id, org_id}, acc ->
+-      # Only pass keys we actually have — an absent repo/org_id must NOT override
+-      # Erasure.shred/2's own defaults (a nil org_id would defeat the D5 fix by
+-      # forcing the "__global__" fallback).
+-      shred_opts =
+-        [repo: repo, org_id: org_id]
+-        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
++    Enum.reduce(subjects, 0, fn {subject_id, _org_id}, acc ->
++      shred_opts = if repo, do: [repo: repo], else: []
+ 
+       case Samen.Erasure.shred(subject_id, shred_opts) do
+         {:ok, _} -> acc + 1

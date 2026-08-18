@@ -1,0 +1,24 @@
+# SABOTAGE: PP-4 (Batch 5b CLINIC-SURFACE) — the clinic tenant surface BYPASSES the
+# per-plane masking decision: `PawChartWeb.ClinicReads.resolve_pii/3` forces the resolver
+# to the `:tenant` plane regardless of the actor's real plane (`Map.put(actor_of(scope),
+# :plane, :tenant)`), so an OPERATOR-without-grant read resolves the owner's vaulted
+# name/emails/phones + the pet microchip to PLAINTEXT instead of `%Samen.Masked{}` (••••).
+# This is the exact "an operator sees a clinic's PII in the clear" leak the masking
+# watch-list forbids. The named RED test flips (`assert_plane_masked!` now sees clear
+# values); the tenant GREEN control still passes, so the flip is non-vacuous. `scope` stays
+# referenced (no unused-variable warning ⇒ a genuine assertion flip, not a compile error).
+# Reverts byte-exact.
+# APP: pawchart
+# TEST_FILES: test/clinic_masking_test.exs
+# MUST_FAIL: the operator-without-grant plane resolves owner PII + microchip to %Masked{}
+# MUST_FAIL: the operator-plane render shows •••• and NEVER the plaintext
+diff --git a/pawchart/lib/pawchart_web/clinic_reads.ex b/pawchart/lib/pawchart_web/clinic_reads.ex
+--- a/pawchart/lib/pawchart_web/clinic_reads.ex
++++ b/pawchart/lib/pawchart_web/clinic_reads.ex
+@@ -220,5 +220,5 @@ defmodule PawChartWeb.ClinicReads do
+   defp resolve_pii(records, resource, scope) do
+-    Samen.Api.PiiResolution.resolve(records, resource, actor_of(scope), repo: PawChart.Repo)
++    Samen.Api.PiiResolution.resolve(records, resource, Map.put(actor_of(scope), :plane, :tenant), repo: PawChart.Repo)
+   rescue
+     _ -> records
+   end

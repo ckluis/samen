@@ -23,6 +23,15 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     Acme.Operator.Role,
     Acme.Operator.ApiKey,
     Acme.Operator.Invitation,
+    # ADR-035 — the identity spine's two org-less resources (T02x integration).
+    Acme.Operator.Credential,
+    Acme.Operator.AuthToken,
+    # ADR-035 §3.1/§4.3, §5 A6 — the identity spine's other two org-less resources
+    # (T04's Session, T06's UserIdentity; T06x integration).
+    Acme.Operator.Session,
+    Acme.Operator.UserIdentity,
+    # ADR-038 §6.4 (T109) — the durable brute-force failure counter.
+    Acme.Operator.LoginFailure,
     # Billing (operator: tenant subscriptions-to-the-SaaS + the movement ledger)
     Acme.Operator.Customer,
     Acme.Operator.Subscription,
@@ -40,7 +49,9 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     Acme.Operator.Agent,
     Acme.Operator.Message,
     Acme.Operator.Macro,
-    Acme.Operator.Csat
+    Acme.Operator.Csat,
+    # I6 (T79) — the CSAT request→response loop's single-use survey link.
+    Acme.Operator.CsatSurveyToken
   ]
 
   def up do
@@ -54,6 +65,12 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aoo_name, :text, null: false)
       add(:aoo_slug, :text)
       add(:aoo_plan, :text, default: "free")
+      # ADR-035 §4.3/§5 A4 (spec-questions c3, T04) — the OPTIONAL org-level
+      # concurrent-session cap; nil = unlimited (the default).
+      add(:aoo_max_concurrent_sessions, :integer)
+      # ADR-035 §5 A8 (T08) — set once the first-run onboarding wizard completes
+      # (`Samen.Web.Onboarding.complete!/3`); nil until then (`needed?/3` reads it).
+      add(:aoo_onboarded_at, :utc_datetime)
       add(:aoo_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:aoo_org_id, :uuid)
       add(:aoo_inserted_at, :utc_datetime, null: false)
@@ -132,11 +149,21 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aok_updated_at, :utc_datetime, null: false)
     end
 
-    # --- aon_invitation : a pending invite 🔒 (email vault-routed) ---
+    # --- aon_invitation : a pending invite 🔒 (email vault-routed).
+    #     ADR-035 §4.1/§4.2/§5 A5 (T05 hardening): `token_digest` (SHA-256 digest at
+    #     rest, the ApiKey precedent) + `email_bidx` (the §4.1 non-reversible keyed-HMAC
+    #     lookup — accept-time credential matching never needs a vault reveal) +
+    #     `expires_at`/`accepted_at`/`revoked_at` (the 4-state lifecycle's terminal
+    #     timestamps). Mirrors demo/driftwood's `harden_identity_invitation` shape,
+    #     emitted directly (fresh app — no rename dance needed). ---
     create table(:aon_invitation, primary_key: false) do
       add(:aon_role, :text, default: "member")
       add(:aon_status, :text, default: "pending")
-      add(:aon_accept_token, :text)
+      add(:aon_token_digest, :text)
+      add(:aon_email_bidx, :text)
+      add(:aon_expires_at, :utc_datetime)
+      add(:aon_accepted_at, :utc_datetime)
+      add(:aon_revoked_at, :utc_datetime)
       add(:aon_email, :text)
       add(:aon_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:aon_org_id, :uuid, null: false)
@@ -144,12 +171,155 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aon_updated_at, :utc_datetime, null: false)
     end
 
+    create(unique_index(:aon_invitation, [:aon_token_digest]))
+
+    # --- aoc_credential : THE authentication principal (org-less; ADR-035). ---
+    create table(:aoc_credential, primary_key: false) do
+      add(:aoc_email_bidx, :text, null: false)
+      add(:aoc_password_hash, :text)
+      add(:aoc_hash_scheme, :text)
+      add(:aoc_verified_at, :utc_datetime)
+      # ADR-035 §5 A7 (T07) — the TOTP 2FA columns the Identity Credential blueprint
+      # declares. `pii_<abbrev>_totp_secret`/`pii_<abbrev>_recovery_codes` are 🔒
+      # vault-routed (`:pii_secret` — `text` holding a `vt_*` token only, INV-1; the
+      # scalar `pii_attribute` `pii_<abbrev>_<name>` storage prefix); the two
+      # `*_totp_*_at` timestamps are plain non-PII. Without these four columns the
+      # generated app has schema drift the moment TotpEnrollLive enrolls (the
+      # driftwood `add_credential_totp_fields` migration, folded into this create).
+      add(:pii_aoc_totp_secret, :text)
+      add(:pii_aoc_recovery_codes, :text)
+      add(:aoc_totp_enabled_at, :utc_datetime)
+      add(:aoc_totp_last_verified_at, :utc_datetime)
+      add(:aoc_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aoc_org_id, :uuid)
+      add(:aoc_inserted_at, :utc_datetime, null: false)
+      add(:aoc_updated_at, :utc_datetime, null: false)
+    end
+
+    # ADR-035 §4.1 — the global "one account per email" invariant.
+    create(unique_index(:aoc_credential, [:aoc_email_bidx]))
+
+    # --- aot_auth_token : single-use, expiring, hashed-at-rest emailed secrets. ---
+    create table(:aot_auth_token, primary_key: false) do
+      add(:aot_token_digest, :text, null: false)
+      add(:aot_context, :text, null: false)
+      add(:aot_sent_to_bidx, :text)
+      add(:aot_expires_at, :utc_datetime, null: false)
+      add(:aot_consumed_at, :utc_datetime)
+
+      add(
+        :aot_credential_id,
+        references(:aoc_credential,
+          column: :aoc_id,
+          name: "aot_auth_token_aot_credential_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(:aot_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aot_org_id, :uuid)
+      add(:aot_inserted_at, :utc_datetime, null: false)
+      add(:aot_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:aot_auth_token, [:aot_token_digest]))
+
+    # --- aos_session : a revocable, DB-backed login session (org-less;
+    #     ADR-035 §3.1/§4.3, T04). No PII: device_label is a bounded browser/OS-family
+    #     string (never the raw user-agent, never an IP); token_digest is the SHA-256
+    #     digest of the raw session token (the ApiKey token_digest precedent) — never
+    #     vault-routed, never allowlisted. ---
+    create table(:aos_session, primary_key: false) do
+      add(:aos_token_digest, :text, null: false)
+      add(:aos_last_seen_at, :utc_datetime)
+      add(:aos_expires_at, :utc_datetime, null: false)
+      add(:aos_revoked_at, :utc_datetime)
+      add(:aos_device_label, :text)
+
+      add(
+        :aos_credential_id,
+        references(:aoc_credential,
+          column: :aoc_id,
+          name: "aos_session_aos_credential_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(:aos_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aos_org_id, :uuid)
+      # ADR-035 §4.3 A4 (T104) — microsecond precision so the concurrent-session
+      # cap eviction sorts a total order (same-second sign-ins get a sub-second
+      # creation key); mirrors the Identity.Session blueprint's usec inserted_at.
+      add(:aos_inserted_at, :utc_datetime_usec, null: false)
+      add(:aos_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:aos_session, [:aos_token_digest]))
+
+    # --- aoi_user_identity : the SSO link (org-less; ADR-035 §3.1/§5 A6, T06) —
+    #     binds an external IdP subject (provider + opaque provider_uid) to a Credential.
+    #     No PII: provider is a bounded name and provider_uid is an IdP-scoped opaque
+    #     handle — the IdP-asserted email is used only transiently for a bidx lookup at
+    #     link time and, on JIT signup, vaulted on the aou_user row; it is
+    #     NEVER persisted on this table (INV-1). ---
+    create table(:aoi_user_identity, primary_key: false) do
+      add(:aoi_provider, :text, null: false)
+      add(:aoi_provider_uid, :text, null: false)
+      add(:aoi_linked_at, :utc_datetime, null: false)
+
+      add(
+        :aoi_credential_id,
+        references(:aoc_credential,
+          column: :aoc_id,
+          name: "aoi_user_identity_aoi_credential_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(:aoi_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aoi_org_id, :uuid)
+      add(:aoi_inserted_at, :utc_datetime, null: false)
+      add(:aoi_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:aoi_user_identity, [:aoi_provider, :aoi_provider_uid]))
+
+    # --- aol_login_failure : the DURABLE brute-force failure counter (org-less;
+    #     ADR-038 §6.4, T109). One row per (key_kind, key_value) — key_value is a
+    #     non-reversible email_bidx HMAC or an opaque credential UUID, never PII. Makes
+    #     the T103-shaped bounded login_failed signal survive a node restart. ---
+    create table(:aol_login_failure, primary_key: false) do
+      add(:aol_key_kind, :text, null: false)
+      add(:aol_key_value, :text, null: false)
+      add(:aol_failure_count, :integer, null: false, default: 1)
+      add(:aol_window_started_at, :utc_datetime_usec, null: false)
+      add(:aol_last_failed_at, :utc_datetime_usec, null: false)
+
+      add(:aol_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aol_org_id, :uuid)
+      add(:aol_inserted_at, :utc_datetime, null: false)
+      add(:aol_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:aol_login_failure, [:aol_key_kind, :aol_key_value]))
+
+    # ADR-035 §3.1 — additive, nullable FK on the already-created aou_user table.
+    alter table(:aou_user) do
+      add(:aou_credential_id, :uuid)
+    end
+
     # =====================================================================
     # BILLING — each tenant's subscription TO the SaaS
     # =====================================================================
 
     create table(:apc_customer, primary_key: false) do
-      add(:apc_stripe_customer_id, :text)
+      add(:apc_provider_customer_ref, :text)
       add(:apc_status, :text, default: "active")
       add(:apc_currency, :text, default: "USD")
       add(:apc_custom, :map, default: fragment("'{}'::jsonb"))
@@ -165,7 +335,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:app_name, :text, null: false)
       add(:app_label, :text)
       add(:app_description, :text)
-      add(:app_stripe_plan_id, :text)
+      add(:app_provider_plan_ref, :text)
       add(:app_interval, :text, default: "monthly")
       add(:app_enabled, :boolean, default: true)
       add(:app_features, :map, default: fragment("'{}'::jsonb"))
@@ -174,12 +344,14 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:app_org_id, :uuid, null: false)
       add(:app_inserted_at, :utc_datetime, null: false)
       add(:app_updated_at, :utc_datetime, null: false)
+      add(:app_archived_at, :utc_datetime_usec)
     end
 
     create table(:apr_price, primary_key: false) do
-      add(:apr_stripe_price_id, :text)
-      add(:apr_unit_amount_cents, :integer, null: false)
-      add(:apr_currency, :text, null: false, default: "USD")
+      add(:apr_provider_price_ref, :text)
+      # ADR-036 H1/D7: one money_with_currency composite column (the type was
+      # installed by the app_resources migration this one runs after).
+      add(:apr_unit_amount, :money_with_currency, null: false)
       add(:apr_interval, :text, default: "monthly")
       add(:apr_active, :boolean, default: true)
       add(:apr_custom, :map, default: fragment("'{}'::jsonb"))
@@ -198,10 +370,11 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:apr_org_id, :uuid, null: false)
       add(:apr_inserted_at, :utc_datetime, null: false)
       add(:apr_updated_at, :utc_datetime, null: false)
+      add(:apr_archived_at, :utc_datetime_usec)
     end
 
     create table(:aps_subscription, primary_key: false) do
-      add(:aps_stripe_subscription_id, :text)
+      add(:aps_provider_subscription_ref, :text)
       add(:aps_status, :text, default: "active")
       add(:aps_current_period_start, :utc_datetime)
       add(:aps_current_period_end, :utc_datetime)
@@ -236,8 +409,11 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aps_updated_at, :utc_datetime, null: false)
     end
 
+    # T106 decision (e): DB-unique-fence on the provider-subscription-ref (mirror idempotency).
+    create(unique_index(:aps_subscription, [:aps_provider_subscription_ref], name: "aps_subscription_provider_ref_index"))
+
     create table(:api_invoice, primary_key: false) do
-      add(:api_stripe_invoice_id, :text)
+      add(:api_provider_invoice_ref, :text)
       add(:api_status, :text, default: "draft")
       add(:api_amount_due_cents, :integer, default: 0)
       add(:api_amount_paid_cents, :integer, default: 0)
@@ -247,6 +423,11 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:api_due_date, :utc_datetime)
       add(:api_paid_at, :utc_datetime)
       add(:api_line_items, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:api_tax_amount_cents, :integer)
+      add(:api_tax_lines, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:api_hosted_invoice_url, :text)
+      add(:api_hosted_receipt_url, :text)
+      add(:api_last_event_id, :text)
       add(:api_custom, :map, default: fragment("'{}'::jsonb"))
 
       add(
@@ -276,7 +457,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     end
 
     create table(:apy_payment, primary_key: false) do
-      add(:apy_stripe_payment_intent_id, :text)
+      add(:apy_provider_payment_ref, :text)
       add(:apy_status, :text, default: "pending")
       add(:apy_amount_cents, :integer, null: false)
       add(:apy_currency, :text, default: "USD")
@@ -403,6 +584,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aql_org_id, :uuid, null: false)
       add(:aql_inserted_at, :utc_datetime, null: false)
       add(:aql_updated_at, :utc_datetime, null: false)
+      add(:aql_archived_at, :utc_datetime_usec)
     end
 
     # The ticket's custom bag carries the requester back-references
@@ -415,7 +597,6 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqk_breached, :boolean, default: false, null: false)
       add(:aqk_resolved_at, :utc_datetime)
       add(:aqk_closed_at, :utc_datetime)
-      add(:aqk_tags, {:array, :text}, default: [])
       add(:aqk_custom, :map, default: fragment("'{}'::jsonb"))
       add(:aqk_external_id, :text)
 
@@ -433,12 +614,24 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqk_org_id, :uuid, null: false)
       add(:aqk_inserted_at, :utc_datetime, null: false)
       add(:aqk_updated_at, :utc_datetime, null: false)
+      add(:aqk_archived_at, :utc_datetime_usec)
     end
 
     create(
       index(:aqk_ticket, [:aqk_sla_breach_at, :aqk_breached],
         name: "aqk_ticket_sla_breach_idx",
         where: "aqk_sla_breach_at IS NOT NULL AND aqk_breached = false"
+      )
+    )
+
+    # T60: the chat offline-escalation dedupe backstop — a partial-unique index makes a
+    # CONCURRENT double-escalation of the same chat impossible (one ticket per chat). This
+    # is emitted for EVERY generated app so the framework guarantee is inherited, not
+    # demo-only. Partial (external_id IS NOT NULL) so normal tickets are unconstrained.
+    create(
+      unique_index(:aqk_ticket, [:aqk_org_id, :aqk_external_id],
+        name: "aqk_ticket_chat_dedupe_idx",
+        where: "aqk_external_id IS NOT NULL"
       )
     )
 
@@ -462,6 +655,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqc_org_id, :uuid, null: false)
       add(:aqc_inserted_at, :utc_datetime, null: false)
       add(:aqc_updated_at, :utc_datetime, null: false)
+      add(:aqc_archived_at, :utc_datetime_usec)
     end
 
     # The SaaS support AGENT 🔒 (the SaaS's own employee — CLEAR on its own plane).
@@ -478,6 +672,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqg_org_id, :uuid, null: false)
       add(:aqg_inserted_at, :utc_datetime, null: false)
       add(:aqg_updated_at, :utc_datetime, null: false)
+      add(:aqg_archived_at, :utc_datetime_usec)
     end
 
     create table(:aqm_message, primary_key: false) do
@@ -513,6 +708,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqm_org_id, :uuid, null: false)
       add(:aqm_inserted_at, :utc_datetime, null: false)
       add(:aqm_updated_at, :utc_datetime, null: false)
+      add(:aqm_archived_at, :utc_datetime_usec)
     end
 
     create table(:aqn_macro, primary_key: false) do
@@ -526,6 +722,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqn_org_id, :uuid, null: false)
       add(:aqn_inserted_at, :utc_datetime, null: false)
       add(:aqn_updated_at, :utc_datetime, null: false)
+      add(:aqn_archived_at, :utc_datetime_usec)
     end
 
     create table(:aqs_csat, primary_key: false) do
@@ -561,6 +758,42 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:aqs_updated_at, :utc_datetime, null: false)
     end
 
+    # I6 (T79) — the CSAT request→response loop's single-use survey link.
+    create table(:aqt_csat_survey_token, primary_key: false) do
+      add(:aqt_token_digest, :text, null: false)
+      add(:aqt_expires_at, :utc_datetime, null: false)
+      add(:aqt_consumed_at, :utc_datetime)
+      add(:aqt_sent_at, :utc_datetime)
+
+      add(
+        :aqt_ticket_id,
+        references(:aqk_ticket,
+          column: :aqk_id,
+          name: "aqt_csat_survey_token_aqt_ticket_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(
+        :aqt_agent_id,
+        references(:aqg_agent,
+          column: :aqg_id,
+          name: "aqt_csat_survey_token_aqt_agent_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:aqt_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:aqt_org_id, :uuid, null: false)
+      add(:aqt_inserted_at, :utc_datetime, null: false)
+      add(:aqt_updated_at, :utc_datetime, null: false)
+    end
+
+    create(index(:aqt_csat_survey_token, [:aqt_token_digest], name: "aqt_csat_survey_token_digest_idx"))
+
     catalog_sync(@resources)
   end
 
@@ -568,6 +801,10 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     catalog_sync_down(@resources)
 
     # --- Support (reverse FK order) ---
+    drop(index(:aqt_csat_survey_token, [:aqt_token_digest], name: "aqt_csat_survey_token_digest_idx"))
+    drop(constraint(:aqt_csat_survey_token, "aqt_csat_survey_token_aqt_agent_id_fkey"))
+    drop(constraint(:aqt_csat_survey_token, "aqt_csat_survey_token_aqt_ticket_id_fkey"))
+    drop(table(:aqt_csat_survey_token))
     drop(constraint(:aqs_csat, "aqs_csat_aqs_agent_id_fkey"))
     drop(constraint(:aqs_csat, "aqs_csat_aqs_ticket_id_fkey"))
     drop(table(:aqs_csat))
@@ -578,6 +815,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     drop(table(:aqg_agent))
     drop(constraint(:aqc_conversation, "aqc_conversation_aqc_ticket_id_fkey"))
     drop(table(:aqc_conversation))
+    drop(index(:aqk_ticket, [:aqk_org_id, :aqk_external_id], name: "aqk_ticket_chat_dedupe_idx"))
     drop(index(:aqk_ticket, [:aqk_sla_breach_at, :aqk_breached], name: "aqk_ticket_sla_breach_idx"))
     drop(constraint(:aqk_ticket, "aqk_ticket_aqk_sla_id_fkey"))
     drop(table(:aqk_ticket))
@@ -605,6 +843,18 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     drop(table(:apc_customer))
 
     # --- Identity (reverse FK order) ---
+    alter table(:aou_user) do
+      remove(:aou_credential_id)
+    end
+
+    drop(table(:aol_login_failure))
+    drop(constraint(:aoi_user_identity, "aoi_user_identity_aoi_credential_id_fkey"))
+    drop(table(:aoi_user_identity))
+    drop(constraint(:aos_session, "aos_session_aos_credential_id_fkey"))
+    drop(table(:aos_session))
+    drop(constraint(:aot_auth_token, "aot_auth_token_aot_credential_id_fkey"))
+    drop(table(:aot_auth_token))
+    drop(table(:aoc_credential))
     drop(constraint(:aok_api_key, "aok_api_key_aok_membership_id_fkey"))
     drop(table(:aok_api_key))
     drop(table(:aon_invitation))

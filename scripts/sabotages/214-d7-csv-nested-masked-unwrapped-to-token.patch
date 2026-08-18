@@ -1,0 +1,34 @@
+# SABOTAGE: D7 (ADR-046 §4.6) — the Csv.compact/1 guard clause for a nested
+# %Samen.Masked{} is removed, so the generic struct clause below unwraps it via
+# Map.from_struct/1 and a container-nested masked value serializes as
+# {"token":"vt_…","label":…} — leaking the vault token into a CSV cell, defeating
+# the module's "NEVER a vt_* token" guarantee. The D7 proof flips: the RED
+# assertions (masked cell, no vt_ token) fail because the nested masked now
+# serializes its vt_ token instead of ••••. INV-1 preserved by the FIX; this
+# sabotage only proves the guard is load-bearing (its removal reintroduces the leak).
+# APP: samen_web
+# TEST_FILES: test/samen/web/csv_nested_masking_test.exs
+# MUST_FAIL: nested inside a MAP
+# MUST_FAIL: nested inside a LIST
+# MUST_FAIL: nested DEEPLY
+diff --git a/samen_web/lib/samen/web/csv.ex b/samen_web/lib/samen/web/csv.ex
+index 8c1ca84..f64b89b 100644
+--- a/samen_web/lib/samen/web/csv.ex
++++ b/samen_web/lib/samen/web/csv.ex
+@@ -288,16 +288,6 @@ defmodule Samen.Web.Csv do
+     [second: seconds] |> Duration.new!() |> Duration.to_iso8601()
+   end
+ 
+-  # D7 / ADR-046 §4.6 — a %Masked{} nested INSIDE a container cell (a `:map`/list
+-  # column value) must serialize as its MASKED representation (`••••` via its own
+-  # Jason.Encoder), NEVER unwrapped to its `vt_*` token. Without this clause the
+-  # generic struct clause below would `Map.from_struct/1` it into
+-  # `{"token":"vt_…","label":…}`, defeating the module's "NEVER a vt_* token"
+-  # guarantee for any nested occurrence. Kept BEFORE the generic struct clause so
+-  # the masked wrapper is preserved (Jason then renders it `••••`). The top-level
+-  # `cell(%Samen.Masked{})` clause already covers the direct (non-nested) case.
+-  defp compact(%Samen.Masked{} = masked), do: masked
+-
+   defp compact(%_{} = struct), do: struct |> Map.from_struct() |> compact()
+ 
+   defp compact(%{} = map),

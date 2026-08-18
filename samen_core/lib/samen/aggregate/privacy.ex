@@ -121,11 +121,28 @@ defmodule Samen.Aggregate.Privacy do
   def apply(_rows, nil, _opts), do: {:error, :no_cohort_spec}
 
   def apply(rows, %CohortSpec{} = spec, opts) when is_list(rows) do
-    k = Keyword.get(opts, :k, k())
-    l = Keyword.get(opts, :l, l())
+    k = floor_opt(Keyword.get(opts, :k), k())
+    l = floor_opt(Keyword.get(opts, :l), l())
 
     {:ok, Enum.map(rows, fn row -> suppress_row(row, spec, k, l) end)}
   end
+
+  # Fail-closed lower bound on an EXPLICIT `:k` / `:l` override (P17-carry-3, ADR-045 §3).
+  #
+  # A POSITIVE integer override is honored verbatim — including the `k: 1` neuter the
+  # aggregate-floor anti-tautology tests drive to prove the floor is load-bearing (a count-of-
+  # one releases under `k: 1`). But a NON-positive / non-integer override (`k: 0`, `k: -1`,
+  # `l: 0`) would DISABLE the floor entirely — `cohort_count < 0` never fires, so every cohort
+  # (count-of-one included) would leak. Such an override is REFUSED and the CONFIG floor applies
+  # instead: an explicit opt can only RAISE the floor toward the config minimum, never drive it
+  # below (the config minimum, which `k()`/`l()` already guarantee is `>= 1`, is the hard floor).
+  # So no caller — not even a server-side one passing a hostile `k: 0` — can emit a sub-floor
+  # cohort through this module. `nil` (no override supplied) also falls through to the config
+  # floor, preserving the production default.
+  defp floor_opt(override, _config_floor) when is_integer(override) and override >= 1,
+    do: override
+
+  defp floor_opt(_override, config_floor), do: config_floor
 
   # --- per-row floor evaluation -------------------------------------------------
 

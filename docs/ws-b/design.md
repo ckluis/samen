@@ -3,7 +3,7 @@
 - **Status:** Design (buildable). Build phases follow this spec + ADR-017..021; each phase is independently committable + gate-able.
 - **Date:** 2026-07-13
 - **Scope owner:** WS-B design sub-orchestrator (opus). Design only — no code touched.
-- **Reads:** `docs/saas-gap-roadmap.md` (WS-B = G7 + G17 + G6 + G12 seed), `docs/gap-discovery/operator.md` (evidence base), `docs/gate-ws-a.md` (WS-A shipped: CRUD/kit/notifications/bounded-reads exist), `docs/cdc-analytics-tier.md`, `docs/adr/007-rollup-cron-worker.md`, existing ADR-001..016, live tree.
+- **Reads:** `docs/saas-gap-roadmap.md` (WS-B = G7 + G17 + G6 + G12 seed), `docs/gap-discovery/operator.md` (evidence base), `docs/gate-ws-a.md` (WS-A shipped: CRUD/kit/notifications/bounded-reads exist), `docs/cdc-analytics-tier.md`, `docs/adr/ADR-007-rollup-cron-worker.md`, existing ADR-001..016, live tree.
 - **Mission:** turn Samen's world-class governed substrate (billing scope, token-blind aggregate + k-anon floors, CDC projection, notifications engine, rollup framework) into the operator **cockpit** it is missing — revenue movements, per-tenant health, a flag evaluation engine, and the first product-analytics events — **entirely as read/compute/capture layers over already-governed data**, framework-first, privacy-correct by construction.
 
 **North star (measured):** every capability lands in `samen_web` (operator plane) or `samen_core` (kernel, only where sanctioned — flag evaluation + event capture); `driftwood` + `pawchart` PROVE inheritance at ≈0 vertical LiveView lines via the existing `samen_operator_routes/2` macro + one domain-mount.

@@ -39,6 +39,16 @@
 # `:code.priv_dir(:samen_core)` at ITS compile time), and the physical file is restored
 # from the scratch copy on exit.
 #
+# T107 (interrupt hardening): both the scratch app dir and the registry snapshot are now
+# created via real OS `mktemp`/`mktemp -d` (unique-per-run, collision-immune by construction
+# — a pre-planted stray file with a colliding-shaped name cannot break the run, unlike the
+# old nanosecond-timestamp naming). A `:sigterm` trap (`System.trap_signal/3`) runs `cleanup.()`
+# for defense-in-depth when this probe is invoked directly (outside ci.sh). NOTE: `:sigint` is
+# NOT trappable inside the BEAM (`System.trap_signal/3` has no :sigint clause) — the
+# AUTHORITATIVE interrupt backstop for both SIGINT and SIGTERM is the OS-level snapshot+trap
+# wrapper in root `ci.sh` (`run_gen_probe`), which restores the registry byte-exact regardless
+# of whether this process gets a chance to run its own cleanup at all.
+#
 # Run:  cd samen_core && mix run priv/gen_post_probe.exs
 # Exit: 0 only if the post-app generators scaffolded a second scope+resource that passed
 #       its full ci.sh with the four G26 files green, the anti-tautology probe confirmed,
@@ -77,17 +87,25 @@ resource_abbrev = identity.resource_abbrev
 http_port = 4880 + rem(System.unique_integer([:positive]), 90)
 
 samen_core_root = Gen.default_target() |> Path.join("samen_core")
-scratch_parent = Path.join([samen_core_root, "..", "_gen_post_scratch"]) |> Path.expand()
+scratch_root = Path.expand(Path.join(samen_core_root, ".."))
 
-File.rm_rf!(scratch_parent)
-File.mkdir_p!(scratch_parent)
+# T107: real `mktemp -d` — atomic, collision-immune, unique per run (was a fixed
+# `_gen_post_scratch` name; two concurrent/orphaned runs of this probe could clash).
+{scratch_parent_out, 0} =
+  System.cmd("mktemp", ["-d", Path.join(scratch_root, "_gen_post_scratch.XXXXXX")])
+
+scratch_parent = String.trim(scratch_parent_out)
 
 # --- REGISTRY SAFETY: snapshot the committed registry FIRST ----------------------------
 registry_path = Samen.AbbrevRegistry.path()
 registry_pristine = File.read!(registry_path)
 
-registry_scratch =
-  Path.join(System.tmp_dir!(), "gen_post_registry_pristine_#{System.system_time(:nanosecond)}.json")
+# T107: real `mktemp` (was a nanosecond-timestamp name) — atomically-created, guaranteed
+# non-colliding even against a pre-planted stray file with the same naming shape.
+{registry_scratch_out, 0} =
+  System.cmd("mktemp", [Path.join(System.tmp_dir!(), "gen_post_registry_pristine.XXXXXX")])
+
+registry_scratch = String.trim(registry_scratch_out)
 
 File.write!(registry_scratch, registry_pristine)
 
@@ -112,6 +130,19 @@ halt = fn code, msg ->
   IO.puts(msg)
   cleanup.()
   System.halt(code)
+end
+
+# T107: SIGTERM defense-in-depth for standalone invocation (outside ci.sh). `:sigint` has
+# no trap clause inside the BEAM — see the T107 note above the REGISTRY SAFETY section.
+# SAMEN_T107_DISABLE_INNER_TRAP=1 skips installing this trap — used ONLY by
+# scripts/interrupt_probe_test.sh's negative control, to isolate proof of the OUTER
+# ci.sh-level trap (scripts/gen_probe_guard.sh) without this inner layer masking it.
+if System.get_env("SAMEN_T107_DISABLE_INNER_TRAP") != "1" do
+  System.trap_signal(:sigterm, :t107_post_probe_sigterm, fn ->
+    IO.puts("\nFATAL: SIGTERM received — restoring registry from snapshot before exit.")
+    cleanup.()
+    System.halt(143)
+  end)
 end
 
 IO.puts("== WS-D D7a POST-APP GENERATOR probe (AC-G4-7 / AC-G26-1/3) ==")
@@ -164,6 +195,31 @@ try do
 
   IO.puts("D7a: gen.scope emitted #{module}.Crm + registered it in both :ash_domains lists.")
 
+  # --- 2b. W4-H2 defense-in-depth: gen.scope's AUTHN ergonomics (guided + guarded) ------
+  # gen.scope must EMIT the app-local failing-until-wired coverage guard, and PRINT an
+  # authn-wired router snippet (never a bare unlabeled mount — that IS the W4 leak).
+  authn_guard_file = Path.join(app_dir, "test/tenant_authn_coverage_test.exs")
+
+  unless File.exists?(authn_guard_file) do
+    halt.(1, "FAIL: gen.scope did not emit the authn-coverage guard #{authn_guard_file} (W4-H2).")
+  end
+
+  guard_body = File.read!(authn_guard_file)
+
+  unless guard_body =~ "defmodule #{module}Web.TenantAuthnCoverageTest" and
+           guard_body =~ "#{module}Web.Router.__routes__()" and
+           guard_body =~ "Mount.label(mount, :authn, nil) == {:app_env, :#{spec.otp_app}, :auth_required?}" do
+    halt.(1, "FAIL: the emitted authn-coverage guard is not wired to THIS app's router/otp_app (W4-H2).")
+  end
+
+  unless scope_out =~ "labels: @current_org_labels" and scope_out =~ "samen_module_routes" do
+    IO.puts(scope_out)
+    halt.(1, "FAIL: gen.scope did not PRINT the authn-wired router snippet (guided half, W4-H2).")
+  end
+
+  IO.puts("D7a/W4-H2: gen.scope emitted the failing-until-wired authn-coverage guard + printed the")
+  IO.puts("           authn-wired (labels: @current_org_labels) router snippet — guided AND guarded.")
+
   # --- 3. gen.resource -----------------------------------------------------------------
   {res_out, res_code} =
     mix.(app_dir, [
@@ -175,7 +231,11 @@ try do
       "--abbrev",
       resource_abbrev,
       # WS-D D7a `--live`: ALSO scaffold index/show/form LiveViews on `Samen.UI`.
-      "--live"
+      "--live",
+      # ADR-040 §5.8 (T37h) `--archivable`: the emitted resource gets the FULL E6
+      # substrate + the migration's archived_at column + (via --live) the generated
+      # index LiveView's restore/archived-filter affordance — zero hand-edits.
+      "--archivable"
     ])
 
   if res_code != 0 do
@@ -242,6 +302,42 @@ try do
 
   IO.puts("D7a: gen.resource --live emitted index/show/form LiveViews + smoke test + router routes.")
 
+  # --- 3c. --archivable (ADR-040 §5.8, T37h): zero-hand-edit E6 substrate on the ---------
+  #         emitted resource + migration + (via --live) the index LiveView's restore/
+  #         archived-filter affordance. ---------------------------------------------------
+  resource_src_check = File.read!(resource_file)
+
+  unless resource_src_check =~ "archivable: true" do
+    halt.(1, "FAIL: gen.resource --archivable did not emit `archivable: true` on #{resource_file}.")
+  end
+
+  widget_migration_files = Path.wildcard(Path.join(app_dir, "priv/repo/migrations/*_add_widget.exs"))
+
+  case widget_migration_files do
+    [widget_migration_file] ->
+      unless File.read!(widget_migration_file) =~ ~r/#{resource_abbrev}_archived_at/ do
+        halt.(1, "FAIL: gen.resource --archivable did not emit the archived_at column in #{widget_migration_file}.")
+      end
+
+    other ->
+      halt.(1, "FAIL: expected exactly one *_add_widget.exs migration, found #{inspect(other)}.")
+  end
+
+  index_live_file = Path.join(app_dir, "lib/#{spec.otp_app}_web/crm/widget_index_live.ex")
+  index_live_src = File.read!(index_live_file)
+
+  unless index_live_src =~ ~s(phx-click="toggle_archived") and index_live_src =~ ~s(phx-click="restore") do
+    halt.(1,
+      "FAIL: `--live --archivable` did not emit the restore + archived-filter toggle " <>
+        "affordance into #{index_live_file} — §5.8's UI clause must be inherited, not " <>
+        "hand-wired, by any --live --archivable resource."
+    )
+  end
+
+  IO.puts("D7a/§5.8: gen.resource --archivable emitted `archivable: true` + the migration's " <>
+            "archived_at column + (via --live) the index LiveView's restore/toggle affordance " <>
+            "— inherited, zero hand-edits.")
+
   # --- 4. re-dump the drift baseline (includes the new table), then run FULL ci.sh -----
   # compile first so catalog.dump sees the new resource; then re-baseline schema.dict.json
   # (the human's "commit the baseline" step), then the app's own ci.sh migrates + gates.
@@ -285,6 +381,127 @@ try do
   IO.puts("D7a: full ci.sh GREEN + the four G26 files pass (policy matrix, RBAC admin-gate,")
   IO.puts("     vault routing, catalog-parity) + the --live index/show/form mount-smoke —")
   IO.puts("     correct-by-construction, ZERO hand-edits.")
+
+  # --- 4a-authn. W4-H2: the emitted authn-coverage guard is FAILING-UNTIL-WIRED ----------
+  # ci.sh above already ran the guard GREEN (billing + notifications tenant mounts carry the
+  # seam). Prove it is NON-VACUOUS: drop `labels: @current_org_labels` from the billing mount
+  # (a bare unlabeled tenant mount — the exact pawchart W4 shape) → the guard MUST flip.
+  # Revert byte-exact → green again. This is the runtime proof the guard catches the leak.
+  router_file = Path.join(app_dir, "lib/#{spec.otp_app}_web/router.ex")
+  router_pristine = File.read!(router_file)
+
+  billing_labeled =
+    "samen_module_routes(:billing, #{module}.Billing, repo: #{module}.Repo, labels: @current_org_labels)"
+
+  billing_bare = "samen_module_routes(:billing, #{module}.Billing, repo: #{module}.Repo)"
+
+  unless String.contains?(router_pristine, billing_labeled) do
+    halt.(1, "FAIL: could not find the authn-labeled billing mount to sabotage in #{router_file}.")
+  end
+
+  # Green baseline on the clean router.
+  {ag_out, ag_code} = mix.(app_dir, ["test", "test/tenant_authn_coverage_test.exs"])
+
+  if ag_code != 0 do
+    IO.puts(ag_out)
+    halt.(1, "FAIL: the emitted authn-coverage guard did not pass on the clean generated router.")
+  end
+
+  # Sabotage: strip the seam from the billing mount → the guard MUST fail.
+  File.write!(router_file, String.replace(router_pristine, billing_labeled, billing_bare))
+
+  {sab_authn_out, sab_authn_code} = mix.(app_dir, ["test", "test/tenant_authn_coverage_test.exs"])
+  IO.puts("\nW4-H2 sabotage — dropped labels: @current_org_labels from the billing mount:")
+  IO.puts("  authn-coverage guard exit: #{sab_authn_code}  (MUST be non-zero — a bare tenant mount)")
+
+  if sab_authn_code == 0 do
+    IO.puts(sab_authn_out)
+    halt.(1, "FAIL: the authn-coverage guard STILL PASSED with a bare unlabeled billing mount — VACUOUS.")
+  end
+
+  # Revert byte-exact → the guard passes again.
+  File.write!(router_file, router_pristine)
+
+  if File.read!(router_file) != router_pristine do
+    halt.(1, "FAIL: the W4-H2 sabotage revert of the router was not byte-exact.")
+  end
+
+  {rev_authn_out, rev_authn_code} = mix.(app_dir, ["test", "test/tenant_authn_coverage_test.exs"])
+
+  if rev_authn_code != 0 do
+    IO.puts(rev_authn_out)
+    halt.(1, "FAIL: the W4-H2 sabotage revert did not restore the authn-coverage guard to green.")
+  end
+
+  IO.puts("D7a/W4-H2: authn-coverage guard CONFIRMED failing-until-wired — a bare unlabeled tenant")
+  IO.puts("           mount flipped it; the seam restored it. Guided AND guarded, non-vacuously.")
+
+  # --- 4b. §5.8 flagship cycle: archive → hidden → restore → visible again, on the REAL --
+  #         generated + migrated Crm.Widget (ci.sh above already ran `mix ecto.migrate`).
+  archive_cycle_script = """
+  # `config/test.exs` sets `start_repo?: false` (mix test's own DataCase owns the
+  # sandboxed pool) — a plain `mix run -e` under MIX_ENV=test therefore does NOT start
+  # the Repo via full app supervision. Start it directly (real pool, not sandboxed —
+  # this script IS the only writer, no ExUnit concurrency to guard against here).
+  {:ok, _} = #{module}.Repo.start_link()
+
+  # The archive step below writes an `aud_event` row (archival audit). The generated app's
+  # migration creates only the FIXED launch-month partition; the daily PartitionManager Oban job
+  # that rolls partitions forward is not running under this bare `mix run`, so the current month's
+  # partition may be absent. Provision current + upcoming months up front (forward-safe/idempotent
+  # — exactly what the daily job does), else the archive audit hits "no partition of aud_event".
+  Samen.AuditEvent.PartitionManager.ensure_upcoming_partitions(#{module}.Repo, Date.utc_today(), 2)
+
+  alias #{module}.Crm.Widget
+  org_id = Ash.UUID.generate()
+
+  {:ok, w} =
+    Widget
+    |> Ash.Changeset.for_create(:create, %{
+      org_id: org_id,
+      name: "archtest",
+      label: "L",
+      status: :active,
+      secret: "s3cr3t-flagship-cycle"
+    })
+    |> Ash.create(authorize?: false)
+
+  unless Enum.any?(Ash.read!(Widget, authorize?: false), &(&1.id == w.id)) do
+    raise "FAIL: freshly-created Widget not visible in the default read"
+  end
+
+  {:ok, archived} = Samen.Archival.archive(w, authorize?: false)
+
+  if archived.archived_at == nil do
+    raise "FAIL: Samen.Archival.archive/2 did not set archived_at"
+  end
+
+  if Enum.any?(Ash.read!(Widget, authorize?: false), &(&1.id == w.id)) do
+    raise "FAIL: archived Widget is STILL visible in the default read (hidden expected)"
+  end
+
+  {:ok, restored} = Samen.Archival.restore(archived, authorize?: false)
+
+  if restored.archived_at != nil do
+    raise "FAIL: Samen.Archival.restore/2 did not clear archived_at"
+  end
+
+  unless Enum.any?(Ash.read!(Widget, authorize?: false), &(&1.id == w.id)) do
+    raise "FAIL: restored Widget is not visible again in the default read"
+  end
+
+  IO.puts("ARCHIVE_CYCLE: OK — archive -> hidden -> restore -> visible again, full round trip")
+  """
+
+  {cycle_out, cycle_code} = mix.(app_dir, ["run", "-e", archive_cycle_script])
+
+  unless cycle_code == 0 and String.contains?(cycle_out, "ARCHIVE_CYCLE: OK") do
+    IO.puts(cycle_out)
+    halt.(1, "FAIL: the §5.8 archive/hidden/restore/visible cycle did not confirm on the generated --archivable Crm.Widget.")
+  end
+
+  IO.puts("D7a/§5.8: FLAGSHIP CYCLE CONFIRMED on the generated app — archive -> hidden from")
+  IO.puts("          default read -> restore -> visible again, real Postgres round trip.")
 
   # --- 5. the per-resource anti-tautology probe confirms non-vacuity -------------------
   {probe_out, probe_code} =

@@ -188,17 +188,19 @@ defmodule PawChart.Seeds do
         {type, subject, body} =
           Enum.at(@activity_templates, rem(p_idx + offset, length(@activity_templates)))
 
-        PawChart.Crm.Activity
+        # ADR-041 §5: Activity migrated into the canonical Work-scope Task, anchored to
+        # the CRM person via the generic object-ref, full ref set in custom.crm_refs.
+        PawChart.Work.Task
         |> Ash.Changeset.for_create(
           :create,
           %{
             org_id: org_id,
-            person_id: person.id,
-            company_id: person.company_id,
-            type: type,
-            subject: subject,
+            kind: type,
+            title: subject,
             body: body,
             status: :completed,
+            subject_key: "crm.person",
+            subject_id: person.id,
             completed_at:
               DateTime.add(DateTime.utc_now(), -offset * 86_400, :second)
               |> DateTime.truncate(:second)
@@ -221,7 +223,8 @@ defmodule PawChart.Seeds do
       %{
         org_id: org_id,
         name: "Valley Animal Hospital — Pro Plan Upsell",
-        value_cents: 119_800,
+        # ADR-036 §4.5(5): value_cents/currency dropped by the H1 Money migration.
+        value: Samen.Type.Money.from_cents(119_800, :USD),
         status: :open,
         company_id: company.id,
         pipeline_id: stage && stage.id
@@ -261,8 +264,8 @@ defmodule PawChart.Seeds do
         %{
           org_id: org_id,
           plan_id: plan.id,
-          unit_amount_cents: 9_900,
-          currency: "USD",
+          # ADR-036 §4.5(5): unit_amount_cents/currency dropped by the H1 Money migration.
+          unit_amount: Samen.Type.Money.from_cents(9_900, :USD),
           interval: :monthly,
           active: true
         },
@@ -422,8 +425,7 @@ defmodule PawChart.Seeds do
             priority: priority,
             sla_id: sla.id,
             sla_breach_at: DateTime.add(now, sla.resolve_minutes * 60, :second),
-            resolved_at: resolved_at,
-            tags: ["clinic-support"]
+            resolved_at: resolved_at
           },
           actor: member,
           authorize?: false

@@ -3,7 +3,7 @@
 **Audience:** whoever authors a universal scope (CRM, Billing, Marketing, CMS, Support,
 Primitives — tasks T3.2–T3.7) or a new vertical scope. This is the pattern the
 **Identity** scope (T3.1) established and every other scope copies verbatim. Read
-[ADR-004](../adr/004-scope-packaging.md) first for *why* scopes are packaged this way;
+[ADR-004](../adr/ADR-004-scope-packaging.md) first for *why* scopes are packaged this way;
 this guide is *how*.
 
 Reference implementation (copy from these):

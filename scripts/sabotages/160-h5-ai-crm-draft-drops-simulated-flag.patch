@@ -1,0 +1,22 @@
+# SABOTAGE: H5 (phase6-edges F1) — `Samen.AI.Crm.draft_sequence/5` DROPS the T152
+# `:simulated` flag when it converts the `%Completion{}` into its plain `%{status: :draft}`
+# map (the exact T155-missed path). Downstream the tenant CRM "Draft" then renders via the
+# badgeless `%{status: :draft}` clause with NO "SIMULATED — not a real model" badge — a
+# keyless/deterministic (fake-confident) outreach draft laundered as an ordinary draft, the
+# precise honesty hole T152/T155 shipped the badge to prevent. Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/ai/crm_test.exs
+# MUST_FAIL: draft_sequence/5 preserves :simulated from the Completion
+diff --git a/samen_core/lib/samen/ai/crm.ex b/samen_core/lib/samen/ai/crm.ex
+index 4a6d7f8..87affd7 100644
+--- a/samen_core/lib/samen/ai/crm.ex
++++ b/samen_core/lib/samen/ai/crm.ex
+@@ -101,7 +101,7 @@ defmodule Samen.AI.Crm do
+   def draft_sequence(scope, resource, id, instruction, opts \\ []) when is_binary(instruction) do
+     case ground_and_run(:generate, scope, resource, id, instruction, opts) do
+       {:ok, completion} ->
+-        {:ok, %{status: :draft, body: completion.text, simulated: completion.simulated}}
++        {:ok, %{status: :draft, body: completion.text}}
+ 
+       {:error, _} = err ->
+         err

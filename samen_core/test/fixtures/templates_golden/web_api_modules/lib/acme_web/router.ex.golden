@@ -14,20 +14,73 @@ defmodule AcmeWeb.Router do
       namespace; the `flags_namespace` label activates the flag admin over this
       app's FeatureFlag rows,
     * `samen_session_routes()` — the ADR-013 current-org session write (the
-      workspace switcher + the operator "Open account →" target).
+      workspace switcher + the operator "Open account →" target),
+    * `samen_auth_routes(...)` — the ADR-035 §5 IDENTITY-SPINE pre-actor surfaces
+      (signup A1 · verify A2 · reset A3 · login A4 · 2fa A7 · invite A5), over
+      this app's sole Identity mount (`Acme.Operator`),
+    * `samen_onboarding_routes(...)` — the ADR-035 §5 A8 first-run wizard
+      (org-naming · plan-selection honest empty state · teammate invite).
 
   The public JSON:API (WS-D D3) is FORWARDED to `AcmeWeb.Api.Endpoint`
   under the versioned `/api/v1` namespace.
+
+  Every tenant/shared mount carries the `@current_org_labels` seam, whose
+  `:authn` label (`{:app_env, :acme, :auth_required?}`) is the
+  prod-safety gate: OFF in dev/test (the query-param convenience identity stays),
+  ON in prod (the actor is derived only from an authenticated session — see
+  `Samen.Web.CurrentOrg`). Flipping `config :acme, :auth_required?`
+  to `true` closes the spoofable `?org=`/`?user=` URL-param resolution path.
+
+  ## The tenant AUTH GATE is emitted by the route macros (B-SEC)
+
+  There is deliberately NO hand-written tenant auth plug in this router. Every
+  `samen_*_routes` tenant macro emits its `live_session` carrying
+  `on_mount: [{Samen.Web.TenantAuthz, :require_tenant}]` — the framework-side
+  gate that (1) `:halt`s an armed, UNAUTHENTICATED tenant request before anything
+  renders (an `on_mount` halt is the only thing that preempts `handle_params/3`
+  on Phoenix LiveView's initial DEAD RENDER) and (2) PINS the org authority into
+  the socket so a client `?org=` can only SELECT among the authenticated
+  principal's authorized orgs, never name a new identity. A generated app is
+  therefore secure-by-construction: you cannot mount a tenant surface here and
+  forget the gate, because the gate travels with the macro. The operator plane
+  keeps its own conn-level `:require_authenticated_operator` pipeline below —
+  it derives its scope from the well-known operator org id, not `CurrentOrg`.
   """
   use Phoenix.Router
   import Phoenix.LiveView.Router
   import Samen.Web.Router
+
+  # ADR-031/ADR-035/ADR-045 — the current-org data-on-the-mount labels shared by every
+  # tenant/shared mount. `:authn` is the launch AUTH gate (the driftwood
+  # convention): `{:app_env, :acme, :auth_required?}` — false in
+  # dev/test (query-param convenience), true in prod (session-derived actor
+  # only, ARMED BY DEFAULT — ADR-045 §2). `:identity_namespace` names this app's
+  # Identity mount (`Acme.Operator`) so an ARMED (prod) host derives the
+  # caller's REAL `Identity.Membership` role for tenant `write_scope` instead of
+  # failing closed to `:member` (ADR-045 §4.4, the S12 residual). A module
+  # attribute (compile-time literal) so it is usable inside the framework
+  # route-macro expansions; both values are session-safe.
+  @current_org_labels %{
+    authn: {:app_env, :acme, :auth_required?},
+    identity_namespace: Acme.Operator
+  }
 
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
     plug(:put_root_layout, html: {AcmeWeb.Layouts, :root})
     plug(:protect_from_forgery)
+  end
+
+  # T117/ADR-031 — the OPERATOR control-plane auth gate. `Samen.Web.AuthGate` is a NO-OP in
+  # dev/test (`:auth_required?` false — the query-param convenience identity stays) and, in
+  # prod, redirects any UNAUTHENTICATED request to `/login` before the SaaS-internal operator
+  # surfaces render. The tenant/shared mounts are already gated by the `:authn` seam through
+  # `Samen.Web.CurrentOrg`, but the operator mount derives its scope from the well-known
+  # operator org id (NOT CurrentOrg), so it needs this conn-level gate — the driftwood
+  # `plug(DriftwoodWeb.Auth)` house pattern, scoped to the operator plane.
+  pipeline :require_authenticated_operator do
+    plug(Samen.Web.AuthGate, otp_app: :acme)
   end
 
   # WS-D D3 — the versioned public API surface. `forward` sends `/api/v1/*` to the
@@ -51,18 +104,35 @@ defmodule AcmeWeb.Router do
   scope "/" do
     pipe_through(:browser)
 
-    # ADR-013 §4.3 — the framework SESSION-write endpoint (`GET /session/org/:org_id`).
+    # ADR-013 §4.3 — the framework SESSION-write endpoint (`POST /session/org/:org_id`;
+    # the stale GET redirects without switching — luminary S7. CSRF-protected via this
+    # pipeline's `protect_from_forgery`).
     samen_session_routes()
 
-    # 1. Billing — the mounted samen_core Billing scope's inherited pages.
-    samen_module_routes(:billing, Acme.Billing, repo: Acme.Repo)
+    # ADR-035 §5 A1–A5/A7 — the IDENTITY-SPINE pre-actor auth surfaces
+    # (signup → verify → reset → login → 2fa → invite), mounted over this app's
+    # sole Identity mount (`Acme.Operator`) in ONE line. Pre-actor
+    # public (no plane/org data). The generated app is the first host to serve
+    # the full framework auth path with zero hand-edits (A9).
+    samen_auth_routes(namespace: Acme.Operator, repo: Acme.Repo)
+
+    # ADR-035 §5 A8 — the FIRST-RUN onboarding wizard (`GET /onboarding`):
+    # org-naming, plan-selection (the honest "no plans configured" empty state —
+    # no `:plan_labels` hook wired until the host adds billing, INV-4), teammate
+    # invite (T05's real Invite flow). Same Identity mount as the auth spine.
+    samen_onboarding_routes(Acme.Operator, repo: Acme.Repo)
+
+    # 1. Billing — the mounted samen_core Billing scope's inherited pages. Carries
+    #    the `@current_org_labels` seam so the `:authn` prod gate governs actor
+    #    resolution (query-param convenience in dev/test; session-only in prod).
+    samen_module_routes(:billing, Acme.Billing, repo: Acme.Repo, labels: @current_org_labels)
 
     # 2. Notifications (WS-A A4/A5) — the framework inbox (+ /notifications/settings),
     #    mounted over the Primitives mount in ONE line. Realtime rides
     #    `Acme.PubSub` (id-only envelopes).
     samen_notifications_routes(:notifications, Acme.Primitives,
       repo: Acme.Repo,
-      labels: %{pubsub: Acme.PubSub}
+      labels: Map.put(@current_org_labels, :pubsub, Acme.PubSub)
     )
 
     # 3. Metrics egress (WS-F5 F5.1) — the framework `GET /metrics` Prometheus
@@ -72,12 +142,23 @@ defmodule AcmeWeb.Router do
     #    Samen.Observability starts (`:acme_prometheus`).
     samen_metrics_route(name: :acme_prometheus)
 
+    # ADR-044 §9.2 (J5 zero-config honesty) — the framework fleet reporting-side
+    # routes (`GET /fleet/health`, `POST /fleet/directive`). Zero-config by
+    # default (`:embedded` mode: one honest self-row, no credential, no
+    # network) — this is what makes the J5 zero-config probe pass without the
+    # generated app knowing what a fleet is.
+    samen_fleet_routes(otp_app: :acme)
+
     # --- Selected end-user surfaces (--modules files,search,csv,settings,chat) — WS-E framework
     #     macros, mounted over this app's existing mounts at ≈0 authored LOC.
-    samen_files_routes(:files, Acme.Primitives, repo: Acme.Repo)
-    samen_csv_routes(:csv, Acme.Vertical, repo: Acme.Repo)
-    samen_search_routes(:search, Acme.Primitives, repo: Acme.Repo)
-    samen_settings_routes(:settings, Acme.Operator, repo: Acme.Repo)
+    samen_files_routes(:files, Acme.Primitives, repo: Acme.Repo, labels: @current_org_labels)
+    samen_csv_routes(:csv, Acme.Vertical, repo: Acme.Repo, labels: @current_org_labels)
+    samen_search_routes(:search, Acme.Primitives, repo: Acme.Repo, labels: @current_org_labels)
+    samen_settings_routes(:settings, Acme.Operator,
+      repo: Acme.Repo,
+      labels: @current_org_labels,
+      spine_totp: true
+    )
     # chat requested but NOT auto-mounted (≈0-LOC adoption not possible): it needs a
     # materialized Samen.Scopes.Chat mount + {Samen.Web.Chat.Presence, pubsub_server:
     # Acme.PubSub} in the supervision tree. After authoring those, mount it with
@@ -90,12 +171,18 @@ defmodule AcmeWeb.Router do
   # operator org's OWN book of business on the TENANT plane (clear); drilling into
   # a tenant is the existing masked impersonation path.
   scope "/" do
-    pipe_through(:browser)
+    pipe_through([:browser, :require_authenticated_operator])
 
     samen_operator_routes(Acme.Operator,
       repo: Acme.Repo,
       labels: %{
         operator_workspace: "Acme Ops",
+        # T146 — the operator-ROLE authority seam. `Samen.Web.Operator.Authz`'s on_mount derives
+        # operator authority from the AUTHENTICATED SESSION PRINCIPAL via this MFA (fail CLOSED
+        # for any non-operator), so a plain tenant-user session cannot reach `/operator/*`. The
+        # generated default is a NAMED dev-only grant (see config/config.exs `:operator_authority`);
+        # a real deploy points this at your operator roster / `Membership` rows.
+        operator_authority: {Samen.Web.Operator.Authz, :dev_operator_role, [:acme]},
         # WS-B B6 — the FlagAdminLive namespace seam: the Primitives mount whose
         # FeatureFlag rows the platform flag admin manages.
         flags_namespace: Acme.Primitives

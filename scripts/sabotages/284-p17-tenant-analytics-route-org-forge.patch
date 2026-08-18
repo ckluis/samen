@@ -1,0 +1,23 @@
+# SABOTAGE: P17-carry-2 (ADR-045 §3) — the tenant own-org analytics SURFACE's org-authority
+# binding is defeated: `Samen.Web.Tenant.AnalyticsLive.handle_params/3` trusts a client-supplied
+# `?org=` param OVER the authenticated org authority (`params["org"] || CurrentOrg.reresolve/2`).
+# On an ARMED host an authenticated member of org A requesting `?org=<org B>` is then bound to
+# ORG B and the funnel emits org B's cohorts end-to-end through the real mount — the cross-org
+# forge the P17 route must refuse. Flips the router-forge e2e; the own-org positive control and
+# the unauthenticated on_mount halt (302 → /login, evaluated before this callback) stay green.
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_analytics_route_e2e_test.exs
+# MUST_FAIL: gets A's funnel, never B's
+--- a/samen_web/lib/samen/web/tenant/analytics_live.ex
++++ b/samen_web/lib/samen/web/tenant/analytics_live.ex
+@@ -28,7 +28,9 @@ defmodule Samen.Web.Tenant.AnalyticsLive do
+ 
+   @impl true
+   def handle_params(params, _uri, socket) do
+-    org_id = CurrentOrg.reresolve(socket, params)
++    # SABOTAGE: the surface trusts a client-supplied `?org=` over the authenticated org
++    # authority, so an armed `?org=<other-org>` forge binds the FOREIGN org and leaks its cohorts.
++    org_id = params["org"] || CurrentOrg.reresolve(socket, params)
+     {:noreply, load(assign(socket, org_id: org_id), org_id)}
+   end
+ 

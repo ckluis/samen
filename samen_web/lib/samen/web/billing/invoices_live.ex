@@ -51,7 +51,7 @@ defmodule Samen.Web.Billing.InvoicesLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     {:noreply, load(assign(socket, org_id: org_id, return_to: return_path(uri)), org_id)}
   end
 
@@ -237,12 +237,14 @@ defmodule Samen.Web.Billing.InvoicesLive do
                   <.button variant="primary" phx-click="new_invoice" id="empty-new-invoice">New invoice</.button>
                 </:empty_actions>
                 <:head>
-                  <th scope="col" style="width:12%">Number</th>
-                  <th scope="col" style="width:24%">Customer</th>
-                  <.sort_header field={:amount_due_cents} label="Amount" sort={@list_state.sort} width="14%" />
-                  <.sort_header field={:status} label="Status" sort={@list_state.sort} width="14%" />
-                  <.sort_header field={:due_date} label="Due date" sort={@list_state.sort} width="14%" />
-                  <th scope="col" style="width:12%">Paid</th>
+                  <th scope="col" style="width:11%">Number</th>
+                  <th scope="col" style="width:20%">Customer</th>
+                  <.sort_header field={:amount_due_cents} label="Amount" sort={@list_state.sort} width="12%" />
+                  <th scope="col" style="width:10%">Tax</th>
+                  <.sort_header field={:status} label="Status" sort={@list_state.sort} width="11%" />
+                  <.sort_header field={:due_date} label="Due date" sort={@list_state.sort} width="11%" />
+                  <th scope="col" style="width:10%">Paid</th>
+                  <th :if={writable?(@samen_mount)} scope="col" style="width:15%">Links</th>
                   <th :if={writable?(@samen_mount)} scope="col" style="width:10%"><span class="sr-only">Actions</span></th>
                 </:head>
                 <:row :let={inv}>
@@ -255,6 +257,9 @@ defmodule Samen.Web.Billing.InvoicesLive do
                   <td class="inv-amount" style="font-weight:500;color:#3a3b45">
                     {dollars(inv.amount_due_cents || 0)}
                   </td>
+                  <td class="inv-tax" style="color:var(--muted);font-size:12px">
+                    {tax_display(inv.tax_amount_cents)}
+                  </td>
                   <td class="inv-status">
                     <.pill variant={invoice_status_variant(inv)}>{invoice_status_label(inv)}</.pill>
                   </td>
@@ -263,6 +268,28 @@ defmodule Samen.Web.Billing.InvoicesLive do
                   </td>
                   <td class="inv-paid" style="color:var(--muted);font-size:12px">
                     {if inv.status == :paid, do: dollars(inv.amount_paid_cents || 0), else: "—"}
+                  </td>
+                  <td :if={writable?(@samen_mount)} class="inv-links" style="font-size:12px">
+                    <a
+                      :if={inv.hosted_invoice_url}
+                      class="inv-hosted-invoice-link"
+                      href={inv.hosted_invoice_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      View invoice
+                    </a>
+                    <span :if={!inv.hosted_invoice_url} style="color:var(--muted)">—</span>
+                    <span :if={inv.hosted_receipt_url}> · </span>
+                    <a
+                      :if={inv.hosted_receipt_url}
+                      class="inv-hosted-receipt-link"
+                      href={inv.hosted_receipt_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Receipt
+                    </a>
                   </td>
                   <td :if={writable?(@samen_mount)} class="inv-actions">
                     <.delete_confirm phx-click="delete" phx-value-id={inv.id} />
@@ -323,6 +350,15 @@ defmodule Samen.Web.Billing.InvoicesLive do
     do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
 
   defp dollars(_), do: "$0.00"
+
+  # Fail-honest tax display (ADR-014 shape applied to tax; docs/guides/*-tax.md):
+  # `nil` means the provider genuinely computed no tax (not configured / not
+  # applicable) — rendered as an honest "—", NEVER as "$0.00" (a `0` figure here
+  # would falsely claim "tax was computed and is zero"). An explicit `0` (e.g. a
+  # fully tax-exempt line the provider DID compute) renders as the real $0.00.
+  defp tax_display(nil), do: "—"
+  defp tax_display(cents) when is_integer(cents), do: dollars(cents)
+  defp tax_display(_), do: "—"
 
   defp format_date(nil), do: "—"
   defp format_date(%DateTime{} = dt), do: "#{dt.year}-#{pad(dt.month)}-#{pad(dt.day)}"

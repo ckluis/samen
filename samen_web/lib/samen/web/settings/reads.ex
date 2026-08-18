@@ -8,9 +8,24 @@ defmodule Samen.Web.Settings.Reads do
   Auth is HOST-OWNED: `samen_web` has no login LiveView and no session user store. The
   settings surfaces need to know WHICH `User` row is "me" — resolved the SAME way
   `Samen.Web.CurrentOrg` resolves the current org (the notifications `:recipient_id`
-  precedent): `params["user"]` → `session["samen_current_user"]` → the host-wired
-  `Mount.label(:current_user_id)` → `nil` (the honest "no user wired" card). The
-  framework never invents an identity; it reads the one the host supplies.
+  precedent): `session["samen_current_user"]` → the host-wired
+  `Mount.label(:current_user_id)` → the DISARMED-ONLY `params["user"]` dev leg →
+  `nil` (the honest "no user wired" card). The framework never invents an identity;
+  it reads the one the host supplies.
+
+  ## B-SEC / S2 — `params["user"]` is a DEV leg, gated exactly like `?org=`
+
+  Before this fix `current_user_id/3` tried `params["user"]` FIRST, unconditionally, with
+  **no arming gate at all** — unlike `Samen.Web.CurrentOrg.resolve/3` and
+  `Samen.Web.Operator.Impersonation.resolve_operator_id/3`, both of which trust their dev
+  param leg ONLY in the explicitly disarmed posture. Tenant IDENTITY was therefore a query
+  param: `?user=<victim-admin>` on `/settings/invitations` produced a scope carrying the
+  victim's REAL membership role, minting an `:admin` invite token into their org; the same
+  shape drove reveal-grant approval and API-key mint/revoke.
+
+  Now the SESSION (and the host-wired label) win, and the param leg is consulted ONLY when
+  `Samen.Web.CurrentOrg.param_trust_disarmed?/1` — the SAME predicate that governs the
+  `?org=` convenience. On an armed host a `?user=` cannot name an identity at all.
 
   ## MASKING INVARIANT (the profile self-edit surface)
 
@@ -34,14 +49,44 @@ defmodule Samen.Web.Settings.Reads do
 
   @doc """
   Resolve the current user id for `mount` given the LiveView `params` + `session`.
-  First hit wins: explicit `?user=` param → session → host-wired mount label → `nil`.
-  Never raises.
+  First hit wins: session → host-wired mount label → the DISARMED-ONLY `?user=` dev
+  param → `nil`. Never raises. See the moduledoc's B-SEC / S2 note for why the param
+  leg moved LAST and behind the arming gate.
   """
   @spec current_user_id(Mount.t() | nil, map(), map()) :: String.t() | nil
   def current_user_id(mount, params, session) do
-    present(param_user(params)) ||
-      present(session_user(session)) ||
-      present(label_user(mount))
+    present(session_user(session)) ||
+      present(label_user(mount)) ||
+      present(dev_param_user(mount, params))
+  end
+
+  @doc """
+  Re-resolve the current user id inside `handle_params/3` — the shared helper the settings /
+  billing-settings / onboarding surfaces call in place of the old
+  `Map.get(params, "user") || socket.assigns.user_id` idiom (B-SEC / S2, the identity twin of
+  `Samen.Web.CurrentOrg.reresolve/2`).
+
+  `handle_params/3` runs on the initial DEAD RENDER, so that idiom let a client `?user=`
+  overwrite the session-derived identity `mount/3` had just computed. Here the param is
+  honoured ONLY in the explicitly DISARMED dev posture; otherwise the identity `mount/3`
+  resolved from the session stands.
+  """
+  @spec reresolve_user(Phoenix.LiveView.Socket.t() | map(), map()) :: String.t() | nil
+  def reresolve_user(socket, params) do
+    assigns = socket_assigns(socket)
+    current = Map.get(assigns, :user_id)
+
+    present(dev_param_user(Map.get(assigns, :samen_mount), params)) || current
+  end
+
+  defp socket_assigns(%{assigns: assigns}) when is_map(assigns), do: assigns
+  defp socket_assigns(assigns) when is_map(assigns), do: assigns
+  defp socket_assigns(_), do: %{}
+
+  # The `?user=` DEV leg — trusted ONLY in the explicitly disarmed posture, the SAME gate
+  # `Samen.Web.CurrentOrg` applies to `?org=`. On an armed host it is `nil`, always.
+  defp dev_param_user(mount, params) do
+    if Samen.Web.CurrentOrg.param_trust_disarmed?(mount), do: param_user(params)
   end
 
   defp param_user(params) when is_map(params), do: Map.get(params, "user")

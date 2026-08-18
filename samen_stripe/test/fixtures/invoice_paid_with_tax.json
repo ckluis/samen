@@ -1,0 +1,42 @@
+{
+  "id": "in_tax_finalized",
+  "object": "invoice",
+  "customer": "cus_invoice_tax",
+  "subscription": "sub_invoice_tax",
+  "status": "paid",
+  "amount_due": 32130,
+  "amount_paid": 32130,
+  "currency": "usd",
+  "period_start": 1782518400,
+  "period_end": 1785196800,
+  "due_date": 1785196800,
+  "status_transitions": {
+    "paid_at": 1782600000
+  },
+  "tax": 2130,
+  "total_tax_amounts": [
+    {
+      "amount": 2130,
+      "tax_rate": {
+        "display_name": "CA Sales Tax",
+        "percentage": 7.25,
+        "jurisdiction": "California"
+      }
+    }
+  ],
+  "lines": {
+    "data": [
+      {
+        "description": "Pro plan — Jul 2026",
+        "amount": 30000,
+        "quantity": 1
+      }
+    ]
+  },
+  "hosted_invoice_url": "https://invoice.stripe.com/i/acct_test/in_tax_finalized",
+  "invoice_pdf": "https://invoice.stripe.com/i/acct_test/in_tax_finalized/pdf",
+  "charge": {
+    "id": "ch_invoice_tax",
+    "receipt_url": "https://pay.stripe.com/receipts/acct_test/ch_invoice_tax"
+  }
+}

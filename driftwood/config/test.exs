@@ -26,3 +26,12 @@ end
 
 # In test: manual Oban (job rows visible but not auto-executed) + no plugins.
 config :samen_core, Oban, testing: :manual, plugins: false
+
+# ADR-047 A6 — the agent write proposal opens its E3 approval INSIDE the turn transaction
+# (the same-transaction contract A2/A4 shipped: the approval exists iff the turn committed).
+# Ash warns, per notification it cannot dispatch from inside a transaction, that it was
+# "missed" — advisory observability, not a failure, and driftwood's suite compiles with
+# `--warnings-as-errors`. `samen_core` already takes this exact setting for the same code
+# path (`samen_core/config/config.exs`); dependency config is not inherited by a host, so the
+# host takes it too. TEST env only — dev/prod keep Ash's default warning.
+config :ash, :missed_notifications, :ignore

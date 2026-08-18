@@ -1,0 +1,29 @@
+# SABOTAGE: E7 four-audit-tiers-disjoint (ADR-040 §6/§7.4; T119).
+# A versioned + impersonated write must produce BOTH an E7 `<Resource>.Version` row AND
+# EXACTLY ONE §6.6 `impersonation_write` governance aud_event (for the source write) — never
+# a second aud_event for the version-row create itself. ash_paper_trail's CreateNewVersion
+# creates the Version row INSIDE the source action's transaction carrying the SAME (operator)
+# actor, so without a guard the global Samen.Audit.ImpersonationWrite change would fire AGAIN
+# on the version resource, double-counting into the governance tier and collapsing the
+# tier-disjointness invariant. Samen.Audit.ImpersonationWrite.version_resource?/1 is that
+# guard (it no-ops the audit on any generated version module, detected via resource_version?/0).
+# This sabotage disables the guard, so an impersonated versioned write self-audits its version
+# create and the tiers-disjoint RED test sees TWO impersonation_write rows instead of one.
+# The named RED test MUST fail — proving the "exactly one governance row per impersonated
+# write" assertion is not a tautology.
+# APP: samen_core
+# TEST_FILES: test/versioned_change_log_test.exs
+# MUST_FAIL: a versioned + impersonated write produces BOTH a Version row AND exactly one impersonation_write aud_event
+diff --git a/samen_core/lib/samen/audit/impersonation_write.ex b/samen_core/lib/samen/audit/impersonation_write.ex
+--- a/samen_core/lib/samen/audit/impersonation_write.ex
++++ b/samen_core/lib/samen/audit/impersonation_write.ex
+@@ -163,6 +163,9 @@
+   end
+
+   # ash_paper_trail stamps every generated version module with `resource_version?/0`.
++  # SABOTAGE (T119 §7.4 tiers-disjoint): disable the version-resource guard so an
++  # impersonated versioned write ALSO self-audits its Version-row create (=> 2 rows).
++  defp version_resource?(_resource) when 1 == 1, do: false
+   defp version_resource?(resource) do
+     is_atom(resource) and function_exported?(resource, :resource_version?, 0) and
+       resource.resource_version?()

@@ -1,0 +1,26 @@
+# SABOTAGE: B-SEC / S2 — the TENANT-IDENTITY ARMING GATE DEFEATED.
+# `Samen.Web.Settings.Reads.current_user_id/3` goes back to trusting `params["user"]` FIRST and
+# UNCONDITIONALLY — no `param_trust_disarmed?/1` check, unlike every sibling resolver. Tenant
+# identity becomes a query param again: `?user=<victim-admin>` on `/settings/invitations` builds
+# a scope carrying the victim's REAL membership role (minting an `:admin` invite token into
+# their org), and drives reveal-grant approval and API-key mint/revoke the same way. The named
+# red path (an ARMED host must ignore `?user=` and act as the SESSION principal) MUST flip.
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_authz_live_test.exs
+# MUST_FAIL: armed + authenticated: a `?user=` cannot re-derive identity
+diff --git a/samen_web/lib/samen/web/settings/reads.ex b/samen_web/lib/samen/web/settings/reads.ex
+--- a/samen_web/lib/samen/web/settings/reads.ex
++++ b/samen_web/lib/samen/web/settings/reads.ex
+@@ -55,9 +55,9 @@
+   """
+   @spec current_user_id(Mount.t() | nil, map(), map()) :: String.t() | nil
+   def current_user_id(mount, params, session) do
+-    present(session_user(session)) ||
+-      present(label_user(mount)) ||
+-      present(dev_param_user(mount, params))
++    present(param_user(params)) ||
++      present(session_user(session)) ||
++      present(label_user(mount))
+   end
+ 
+   @doc """

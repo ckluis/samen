@@ -1,0 +1,24 @@
+# SABOTAGE: D3 (ADR-046 §4.2) — the pii_declared erasability GUARD at the define
+# chokepoint is bypassed: `guard_pii_declared_erasable/3`'s fail-closed final branch
+# returns `:ok` instead of `{:error, {:pii_declared_unerasable, table}}`. A tenant can
+# then turn on `pii_declared: true` for a table with NO registered custom-bag erasure
+# arm — so a live pii_declared bag ships UNERASABLE (its plaintext survives every shred),
+# the exact structural hole the guard closes. Flips the guard's REFUSED red-path (a
+# spec-less pii_declared define must be rejected) while the WITH-spec positive control
+# still passes, so this targets ONLY the guard's fail-closed branch.
+# APP: samen_core
+# TEST_FILES: test/custom_fields_test.exs
+# MUST_FAIL: REFUSED: a pii_declared field on a table with NO custom-bag erasure spec is rejected
+diff --git a/samen_core/lib/samen/custom_fields.ex b/samen_core/lib/samen/custom_fields.ex
+--- a/samen_core/lib/samen/custom_fields.ex
++++ b/samen_core/lib/samen/custom_fields.ex
+@@ -595,7 +595,7 @@ defmodule Samen.CustomFields do
+       erasure_spec_covers?(table, opts) ->
+         :ok
+ 
+-      true ->
+-        {:error, {:pii_declared_unerasable, table}}
++      true ->
++        :ok
+     end
+   end

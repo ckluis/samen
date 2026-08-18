@@ -1,0 +1,29 @@
+# SABOTAGE: T158 (freight driver create/edit — FMCSA-guard-not-bypassable) — drops the
+# `check_cdl_expiry/3` clause from `Driftwood.Policy.FmcsaDispatchGate.evaluate_gate/3`'s
+# pipeline. The gate is the SOLE enforcement point `DispatchEvent.:dispatch` runs before
+# assigning a driver to a load; T158 adds the first UI path (create/edit) that can change
+# a driver's compliance fields, and the load-bearing claim is that editing a driver can
+# never let a dispatch skip this check — only change what the check will SEE next time it
+# runs. This sabotage proves the check itself is genuinely load-bearing (not dead code a
+# UI-level guard could quietly duplicate around): with the CDL-expiry clause gone, a
+# driver edited to `status: available` while its CDL is still expired dispatches
+# successfully — the exact scenario T158's new adversarial test exercises. It ALSO flips
+# the pre-existing `fmcsa_dispatch_gate_test.exs` red path (expired CDL must refuse),
+# confirming this is the same enforcing layer, not a T158-local duplicate. Reverts
+# byte-exact.
+# APP: driftwood
+# TEST_FILES: test/broker_driver_crud_test.exs test/fmcsa_dispatch_gate_test.exs
+# MUST_FAIL: an edit that only changes status (leaving CDL/medical expired) does NOT bypass the gate — dispatch still refuses
+# MUST_FAIL: expired CDL REFUSES dispatch, no row written
+diff --git a/driftwood/lib/driftwood/policy/fmcsa_dispatch_gate.ex b/driftwood/lib/driftwood/policy/fmcsa_dispatch_gate.ex
+index 4e03bac..bd4c17b 100644
+--- a/driftwood/lib/driftwood/policy/fmcsa_dispatch_gate.ex
++++ b/driftwood/lib/driftwood/policy/fmcsa_dispatch_gate.ex
+@@ -80,7 +80,6 @@ defmodule Driftwood.Policy.FmcsaDispatchGate do
+     errors =
+       []
+       |> check_medical_card(driver.medical_card_expiry, today)
+-      |> check_cdl_expiry(parse_iso(driver.cdl_expiry), today)
+       |> check_cdl_on_file(changeset, driver_id)
+       |> check_status(driver.status)
+ 

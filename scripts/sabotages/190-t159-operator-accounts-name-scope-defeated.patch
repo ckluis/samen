@@ -1,0 +1,23 @@
+# SABOTAGE: T159 account-level NAME-scope on /operator/accounts DEFEATED
+# (ADR-044 Amendment-1 §16.2/§16.4a, RP-J-14 shape). The name-mask predicate
+# `Samen.Web.Operator.AccountsLive.name_masked?/3` no longer consults the
+# operator's `scope_of/2` membership: the `in_scope?/2` result is OR'd with a
+# tautology (`is_binary(tenant_org_id)`, true for every real account), so the
+# predicate is ALWAYS false — every account NAME renders ungated by scope, the
+# exact pre-Amendment "every org name visible to any operator role" hole this
+# ruling closes. Mask-by-omission is defeated; the named RED proof leaks.
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_accounts_scope_mask_test.exs
+# MUST_FAIL: RED: a :none-scope operator sees NEITHER name NOR the tenant_org_id handle
+diff --git a/samen_web/lib/samen/web/operator/accounts_live.ex b/samen_web/lib/samen/web/operator/accounts_live.ex
+--- a/samen_web/lib/samen/web/operator/accounts_live.ex
++++ b/samen_web/lib/samen/web/operator/accounts_live.ex
+@@ -355,7 +355,7 @@
+   """
+   @spec name_masked?(boolean(), Samen.Fleet.Resolution.scope(), String.t() | nil) :: boolean()
+   def name_masked?(scope_masking?, name_scope, tenant_org_id) do
+-    scope_masking? and not Samen.Fleet.Resolution.in_scope?(name_scope, tenant_org_id)
++    scope_masking? and not (Samen.Fleet.Resolution.in_scope?(name_scope, tenant_org_id) or is_binary(tenant_org_id))
+   end
+
+   # The acting operator id used to read `scope_of/2`: the authenticated principal

@@ -43,6 +43,16 @@
 # physical registry (unavoidable — the generated code reads `:code.priv_dir(:samen_core)` at
 # ITS compile time), and the physical file is restored from the scratch copy on exit.
 #
+# T107 (interrupt hardening): both the scratch app dir and the registry snapshot are now
+# created via real OS `mktemp`/`mktemp -d` (unique-per-run, collision-immune by construction
+# — a pre-planted stray file with a colliding-shaped name cannot break the run, unlike the
+# old nanosecond-timestamp naming). A `:sigterm` trap (`System.trap_signal/3`) runs `cleanup.()`
+# for defense-in-depth when this probe is invoked directly (outside ci.sh). NOTE: `:sigint` is
+# NOT trappable inside the BEAM (`System.trap_signal/3` has no :sigint clause) — the
+# AUTHORITATIVE interrupt backstop for both SIGINT and SIGTERM is the OS-level snapshot+trap
+# wrapper in root `ci.sh` (`run_gen_probe`), which restores the registry byte-exact regardless
+# of whether this process gets a chance to run its own cleanup at all.
+#
 # Run:  cd samen_core && mix run priv/gen_app_deploy_probe.exs
 # Exit: 0 only if the --deploy app generated with zero hand-edits, passed its full ci.sh
 #       with the deploy layer present, its fly.toml parsed, its runtime.exs raised (naming
@@ -79,17 +89,25 @@ resource_abbrev = identity.abbrev
 http_port = 4790 + rem(System.unique_integer([:positive]), 90)
 
 samen_core_root = Gen.default_target() |> Path.join("samen_core")
-scratch_parent = Path.join([samen_core_root, "..", "_gen_deploy_scratch"]) |> Path.expand()
+scratch_root = Path.expand(Path.join(samen_core_root, ".."))
 
-File.rm_rf!(scratch_parent)
-File.mkdir_p!(scratch_parent)
+# T107: real `mktemp -d` — atomic, collision-immune, unique per run (was a fixed
+# `_gen_deploy_scratch` name; two concurrent/orphaned runs of this probe could clash).
+{scratch_parent_out, 0} =
+  System.cmd("mktemp", ["-d", Path.join(scratch_root, "_gen_deploy_scratch.XXXXXX")])
+
+scratch_parent = String.trim(scratch_parent_out)
 
 # --- REGISTRY SAFETY: snapshot the committed registry FIRST ----------------------------
 registry_path = Samen.AbbrevRegistry.path()
 registry_pristine = File.read!(registry_path)
 
-registry_scratch =
-  Path.join(System.tmp_dir!(), "gen_deploy_registry_pristine_#{System.system_time(:nanosecond)}.json")
+# T107: real `mktemp` (was a nanosecond-timestamp name) — atomically-created, guaranteed
+# non-colliding even against a pre-planted stray file with the same naming shape.
+{registry_scratch_out, 0} =
+  System.cmd("mktemp", [Path.join(System.tmp_dir!(), "gen_deploy_registry_pristine.XXXXXX")])
+
+registry_scratch = String.trim(registry_scratch_out)
 
 File.write!(registry_scratch, registry_pristine)
 
@@ -114,6 +132,19 @@ halt = fn code, msg ->
   IO.puts(msg)
   cleanup.()
   System.halt(code)
+end
+
+# T107: SIGTERM defense-in-depth for standalone invocation (outside ci.sh). `:sigint` has
+# no trap clause inside the BEAM — see the T107 note above the REGISTRY SAFETY section.
+# SAMEN_T107_DISABLE_INNER_TRAP=1 skips installing this trap — used ONLY by
+# scripts/interrupt_probe_test.sh's negative control, to isolate proof of the OUTER
+# ci.sh-level trap (scripts/gen_probe_guard.sh) without this inner layer masking it.
+if System.get_env("SAMEN_T107_DISABLE_INNER_TRAP") != "1" do
+  System.trap_signal(:sigterm, :t107_deploy_probe_sigterm, fn ->
+    IO.puts("\nFATAL: SIGTERM received — restoring registry from snapshot before exit.")
+    cleanup.()
+    System.halt(143)
+  end)
 end
 
 # A minimal structural TOML validator (the ADR-024 proof bound — "fly.toml parses" without
@@ -375,6 +406,122 @@ try do
   end
 
   IO.puts("DEPLOY: runbook Operator TODO names all four human prerequisites (Fly / Neon / KMS / OTLP); no turnkey claim.")
+
+  # --- O5 / X6 (ADR-045 §4.2): the --deploy KMS posture FAILS HONEST AT BOOT, not per-op ---
+  # The generated runtime.exs selects Samen.Kms.AwsKmsDynamo — a raise-only SKELETON. Prove the
+  # generated prod app does NOT boot green and then 500 on every vault op: (1) runtime.exs selects
+  # the skeleton with aws_kms_dynamo_enabled:FALSE (the O5/X6 defect shipped it as `true`),
+  # (2) application.ex WIRES the framework boot guard, and (3) that guard REFUSES to boot in prod
+  # when the skeleton adapter is selected — with a working adapter as the anti-tautology control.
+  runtime_prod_cfg =
+    (fn ->
+       saved = Map.new(required_secrets, fn k -> {k, System.get_env(k)} end)
+
+       try do
+         for k <- required_secrets, do: System.delete_env(k)
+         for {k, v} <- all_secrets, do: System.put_env(k, v)
+         Config.Reader.read!(runtime_path, env: :prod)
+       after
+         for {k, v} <- saved do
+           if v, do: System.put_env(k, v), else: System.delete_env(k)
+         end
+       end
+     end).()
+
+  core_cfg = Keyword.get(runtime_prod_cfg, :samen_core, [])
+  selected_adapter = Keyword.get(core_cfg, :kms_adapter)
+  enabled_flag = Keyword.get(core_cfg, :aws_kms_dynamo_enabled)
+
+  unless selected_adapter == Samen.Kms.AwsKmsDynamo do
+    halt.(1, "FAIL (O5): runtime.exs did not select Samen.Kms.AwsKmsDynamo (got #{inspect(selected_adapter)}).")
+  end
+
+  if enabled_flag != false do
+    halt.(
+      1,
+      "FAIL (O5): runtime.exs set aws_kms_dynamo_enabled to #{inspect(enabled_flag)} — it MUST be " <>
+        "false. A raise-only skeleton enabled in prod is the O5/X6 defect (boots green, 500s per op)."
+    )
+  end
+
+  app_ex_src = File.read!(Path.join(app_dir, "lib/#{otp_app}/application.ex"))
+
+  unless String.contains?(app_ex_src, "Samen.Kms.assert_prod_adapter_ready!") do
+    halt.(1, "FAIL (O5): application.ex does not wire the KMS prod boot guard (Samen.Kms.assert_prod_adapter_ready!).")
+  end
+
+  IO.puts("DEPLOY: O5 — runtime.exs selects AwsKmsDynamo with aws_kms_dynamo_enabled:false; application.ex wires the boot guard.")
+
+  # Behavioral proof: apply the runtime.exs-selected adapter to :samen_core and assert the boot
+  # guard REFUSES in prod (naming the adapter + the ADR-001 §8.2 obligations), then a positive
+  # control that it ADMITS a working adapter (FileBacked). Restores the ambient adapter after.
+  saved_adapter = Application.get_env(:samen_core, :kms_adapter)
+
+  try do
+    Application.put_env(:samen_core, :kms_adapter, selected_adapter)
+
+    boot =
+      try do
+        Samen.Kms.assert_prod_adapter_ready!(fn -> :prod end)
+        :booted_green
+      rescue
+        e -> {:refused, Exception.message(e)}
+      end
+
+    case boot do
+      {:refused, msg} ->
+        unless String.contains?(msg, "AwsKmsDynamo") and String.contains?(msg, "ADR-001 §8.2") do
+          halt.(1, "FAIL (O5): the boot guard refused but did NOT name the adapter + the ADR-001 §8.2 obligations:\n#{msg}")
+        end
+
+        IO.puts("DEPLOY: O5 — the prod boot guard REFUSES the raise-only KMS skeleton (names it + the ADR-001 §8.2 obligations). [fail-honest AT BOOT]")
+
+      :booted_green ->
+        halt.(
+          1,
+          "FAIL (O5): the prod boot guard did NOT refuse a raise-only KMS skeleton — the generated " <>
+            "app would boot GREEN and then 500 on every vault op (the O5/X6 defect)."
+        )
+    end
+
+    Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
+    Samen.Kms.assert_prod_adapter_ready!(fn -> :prod end)
+    IO.puts("DEPLOY: O5 positive control — the boot guard ADMITS a working adapter (Samen.Kms.FileBacked).")
+  after
+    if saved_adapter,
+      do: Application.put_env(:samen_core, :kms_adapter, saved_adapter),
+      else: Application.delete_env(:samen_core, :kms_adapter)
+  end
+
+  # --- O4 (ADR-045 §4.2): the generated aud_event migration derives its REVOKE role -------------
+  # It must NOT ship `REVOKE UPDATE, DELETE ON aud_event FROM clank` — a developer's laptop
+  # Postgres role — into an adopter's prod migration (the O4 defect). The literal must be absent.
+  aud_event_migration = File.read!(Path.join(app_dir, "priv/repo/migrations/20260705020000_aud_event.exs"))
+
+  if String.contains?(aud_event_migration, "clank") do
+    halt.(1, "FAIL (O4): the generated aud_event migration contains the hardcoded developer role 'clank'.")
+  end
+
+  unless String.contains?(aud_event_migration, "aud_event_app_role") do
+    halt.(1, "FAIL (O4): the generated aud_event migration does not resolve the role via :aud_event_app_role.")
+  end
+
+  IO.puts("DEPLOY: O4 — the generated aud_event migration derives its REVOKE role (no hardcoded 'clank'); the migration RAN in the gate above.")
+
+  # --- §2.1: the generated app has a config/prod.exs so a prod config-load does not abort -------
+  prod_exs_path = Path.join(app_dir, "config/prod.exs")
+
+  unless File.exists?(prod_exs_path) do
+    halt.(1, "FAIL (§2.1): the generated app has no config/prod.exs — a prod config-load would abort on the missing import.")
+  end
+
+  case eval_runtime.(prod_exs_path, :prod, all_secrets) do
+    :ok ->
+      IO.puts("DEPLOY: §2.1 — the generated config/prod.exs exists and loads under Config.Reader in :prod.")
+
+    {:raised, msg} ->
+      halt.(1, "FAIL (§2.1): the generated config/prod.exs did not load in :prod:\n#{msg}")
+  end
 
   elapsed = System.monotonic_time(:millisecond) - t0
 

@@ -36,7 +36,13 @@ defmodule Demo.CrmScopeCustomFieldsTest do
           org_id: org_id,
           table_name: @table,
           field_name: field,
-          type: type
+          type: type,
+          # ADR-046 §4.2 D3: a pii_declared define is refused unless a custom-bag
+          # erasure spec covers the table. Wire it (compliant host); the arm removes
+          # pii_declared keys from per_person's bag on shred.
+          erasure_specs: [
+            %{table_name: @table, bag_column: "per_custom", subject_column: "per_id", org_column: "per_org_id"}
+          ]
         }),
         Repo
       )

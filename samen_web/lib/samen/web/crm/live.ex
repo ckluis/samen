@@ -31,6 +31,53 @@ defmodule Samen.Web.CRM.Live do
   def writable?(_), do: true
 
   @doc """
+  Project synced mailbox messages (spec §I1 CRM two-way email sync, T74) onto the
+  SAME timeline entry keys the Work `Task` projection uses (ADR-041 §6.1) — so the
+  presentational `Samen.UI.Object.timeline/1` is UNCHANGED and one rail carries
+  logged activity and real mail together:
+
+    * `:type` is always `:email` (the kit already ships that glyph/label);
+    * `:status` is the message DIRECTION (`inbound` / `outbound`) — the two-way
+      sync's two legs are legible on the timeline itself;
+    * `:subject` / `:body` / `:who` are the 🔒 vault-routed `subject` / `body` /
+      `counterparty_address` **exactly as `Samen.Api.PiiResolution` returned them**.
+      This module NEVER unwraps a `%Samen.Masked{}` and has no plaintext branch: on
+      the operator-without-grant plane those three arrive as `%Masked{}` and render
+      `••••` through `Phoenix.HTML.Safe`, never a `vt_*` token.
+  """
+  def mail_timeline_entries(mail) when is_list(mail) do
+    Enum.map(mail, fn m ->
+      %{
+        id: m.id,
+        type: :email,
+        subject: Map.get(m, :subject),
+        body: Map.get(m, :body),
+        status: Map.get(m, :direction),
+        at: Map.get(m, :occurred_at) || Map.get(m, :inserted_at),
+        who: Map.get(m, :counterparty_address)
+      }
+    end)
+  end
+
+  def mail_timeline_entries(_), do: []
+
+  @doc """
+  Merge two already-projected timeline entry lists, newest-first. Entries with no
+  timestamp sort last (they are never silently dropped).
+  """
+  def merge_timeline(entries, more) when is_list(entries) and is_list(more) do
+    (entries ++ more)
+    |> Enum.sort_by(&timeline_sort_key/1, :desc)
+  end
+
+  defp timeline_sort_key(%{at: %DateTime{} = at}), do: DateTime.to_unix(at, :microsecond)
+
+  defp timeline_sort_key(%{at: %NaiveDateTime{} = at}),
+    do: at |> DateTime.from_naive!("Etc/UTC") |> DateTime.to_unix(:microsecond)
+
+  defp timeline_sort_key(_), do: -1
+
+  @doc """
   The composite FULL-NAME form field for CRM person forms (🔒 PII — `full_name` is a
   vault-routed `Samen.Type.FullName`).
 
@@ -139,7 +186,9 @@ defmodule Samen.Web.CRM.Live do
         <.search_box org_id={@org_id} placeholder="Search companies, contacts…" />
       </:search>
 
-      <.module_nav org_id={@org_id} active={@active} />
+      <.module_nav org_id={@org_id} active={@active}>
+        <:extra><.host_nav_extra mount={@mount} org_id={@org_id} /></:extra>
+      </.module_nav>
 
       <:footer>
         <div class="foot">

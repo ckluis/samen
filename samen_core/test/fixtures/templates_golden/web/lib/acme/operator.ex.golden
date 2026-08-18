@@ -28,7 +28,12 @@ defmodule Acme.Operator do
       membership: "aom",
       role: "aor",
       api_key: "aok",
-      invitation: "aon"
+      invitation: "aon",
+      credential: "aoc",
+      auth_token: "aot",
+      session: "aos",
+      user_identity: "aoi",
+      login_failure: "aol"
     }
 
   use Samen.Scopes.Billing,
@@ -58,6 +63,7 @@ defmodule Acme.Operator do
       agent: "aqg",
       sla: "aql",
       macro: "aqn",
-      csat: "aqs"
+      csat: "aqs",
+      csat_survey_token: "aqt"
     }
 end

@@ -36,7 +36,12 @@ defmodule Driftwood.Operator do
       membership: "dom",
       role: "dor",
       api_key: "dok",
-      invitation: "don"
+      invitation: "don",
+      credential: "doc",
+      auth_token: "dot",
+      session: "dos",
+      user_identity: "doi",
+      login_failure: "dol"
     }
 
   use Samen.Scopes.Billing,
@@ -66,6 +71,7 @@ defmodule Driftwood.Operator do
       agent: "dqg",
       sla: "dql",
       macro: "dqn",
-      csat: "dqs"
+      csat: "dqs",
+      csat_survey_token: "dco"
     }
 end

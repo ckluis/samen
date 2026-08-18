@@ -1,0 +1,46 @@
+# SABOTAGE: A2 (ADR-047 §7.4 / RP-AG-11) gate sabotage — the erasure arm no longer reaches
+# agent transcripts. Samen.Erasure.Completeness's transcript discovery (class (e)) returns
+# the empty set: the completeness gate silently stops asserting retention coverage for the
+# vault-routed transcript, and Samen.Erasure.default_specs derives NO retention :shred arm
+# for it — so a run's echoed tenant free text would live until account erasure with every
+# gate still green. The exact "a gate that discovers nothing verifies nothing" failure the
+# ADR-046 E7 lesson forbids, on the residue ADR-047 §7.4 exists to close. Flips the named
+# discovery + refutability + derivation tests; the pre-existing classes (a)-(c) and their
+# tests stay green — proving the reds fail because the transcript arm is gone, not because
+# the gate died.
+# APP: samen_core
+# TEST_FILES: test/erasure/completeness_test.exs test/ai/agent_durability_test.exs
+# MUST_FAIL: discovery finds the vault-routed run transcript
+# MUST_FAIL: removing the retention :shred arm names the transcript UNREACHED
+# MUST_FAIL: default_specs/1 derives the ratified spec
+diff --git a/samen_core/lib/samen/erasure/completeness.ex b/samen_core/lib/samen/erasure/completeness.ex
+index a174cd8..949d5d6 100644
+--- a/samen_core/lib/samen/erasure/completeness.ex
++++ b/samen_core/lib/samen/erasure/completeness.ex
+@@ -183,19 +183,13 @@ defmodule Samen.Erasure.Completeness do
+   # (`Samen.Pii.Info.fields/1`), never schema.dict — the same no-grandfathering rule as
+   # every other class. The physical column resolves through the materialized attribute
+   # (`pii_<abbrev>_transcript`).
+-  defp discover_transcript(resources) do
+-    for resource <- resources,
+-        field <- pii_fields(resource),
+-        field.name == :transcript do
+-      attr = attribute(resource, :transcript)
+-
+-      %{
+-        resource: resource,
+-        table: table(resource),
+-        column: to_string((attr && (attr.source || attr.name)) || :transcript),
+-        vault: field.vault
+-      }
+-    end
++  defp discover_transcript(_resources) do
++    # SABOTAGE (A2, ADR-047 §7.4 / RP-AG-11): transcript discovery returns NOTHING —
++    # the gate silently stops covering the vault-routed agent transcript, no retention
++    # arm is derived (default_specs finds zero residues), and a run's echoed free text
++    # lives until account erasure with every gate still green. The exact
++    # discovers-nothing-verifies-nothing failure the E7 lesson forbids.
++    []
+   end
+ 
+   defp pii_fields(resource) do

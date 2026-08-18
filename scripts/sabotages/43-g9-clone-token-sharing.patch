@@ -1,0 +1,32 @@
+# SABOTAGE: T57/G9 gate sabotage — the re-tokenizing clone is replaced by a
+# token-SHARING clone. Instead of resolving each vault field to plaintext and
+# re-tokenizing through the governed create, the clone copies the SOURCE's %Masked{}
+# vault tokens directly, so both records ALIAS the same pii_vault subject rows.
+# This is the exact P0 hazard the gate forbids: the clone's token equals the
+# source's (no re-tokenization) and crypto-shred bleeds across the two records.
+# APP: samen_core
+# TEST_FILES: test/clone_test.exs
+# MUST_FAIL: token-COPYING clone fails this
+# MUST_FAIL: the SOURCE still resolves
+# MUST_FAIL: the CLONE still resolves
+# MUST_FAIL: a fresh pii_vault subject row is minted for the clone
+diff --git a/samen_core/lib/samen/clone.ex b/samen_core/lib/samen/clone.ex
+index b1ee717..e078617 100644
+--- a/samen_core/lib/samen/clone.ex
++++ b/samen_core/lib/samen/clone.ex
+@@ -184,9 +184,12 @@ defmodule Samen.Clone do
+         {:ok, %{}}
+ 
+       fields ->
+-        resolve_opts = [repo: repo] |> maybe_put_grant(opts)
+-        [resolved] = PiiResolution.resolve([record], resource, actor, resolve_opts)
+-        collect_vault_inputs(fields, resolved)
++        # SABOTAGE (T57 token-sharing clone): copy the SOURCE's %Masked{} tokens
++        # directly instead of resolving plaintext + re-tokenizing. The clone ALIASES
++        # the source vault rows — the clone's token equals the source's and a shred
++        # of either record bleeds across both.
++        _ = {actor, repo, opts, PiiResolution, &collect_vault_inputs/2, &decode_vault_value/2, &maybe_put_grant/2}
++        {:ok, Map.new(fields, fn f -> {f.name, Map.get(record, f.name)} end)}
+     end
+   end
+ 

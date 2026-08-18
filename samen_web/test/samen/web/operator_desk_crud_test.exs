@@ -11,8 +11,10 @@ defmodule Samen.Web.OperatorDeskCrudTest do
       the inline-error path is real); an INVALID submit renders inline errors and
       persists NOTHING; a VALID submit persists + refreshes the bounded list; each row
       carries `delete_confirm/1`; a bare ticket deletes through Ash; a ticket with a
-      linked conversation is REFUSED (FAIL-HONEST — the FK refusal is surfaced, the
-      row survives).
+      linked conversation now ARCHIVES (ADR-040 §5.9/T37f: `Ticket` is `archivable
+      true`, the cascade PARENT of `ticket ▸cascade conversation ▸cascade message`,
+      §5.4), cascading the archive to its conversation/message at the same instant,
+      superseding the old hard-delete FK-refusal.
     * **Bounded read (AC-G1-5 / AC-G1-3)** — `desk_page/3` passes `bounded!/4`
       non-vacuously; a 55-ticket desk NEVER loads the full set; keyset next/prev +
       sort + filter work on the REAL page; the sort red path refuses an undeclared
@@ -32,6 +34,8 @@ defmodule Samen.Web.OperatorDeskCrudTest do
       plane succeeds and vault-routes, so the rejection discriminates on the plane).
   """
   use Samen.WebTest.DataCase, async: false
+
+  require Ash.Query
 
   alias Samen.Web.ListLive
   alias Samen.Web.Operator.DeskLive
@@ -170,19 +174,43 @@ defmodule Samen.Web.OperatorDeskCrudTest do
     assert html(socket) =~ "empty-state"
   end
 
-  test "RED PATH (fail-honest): deleting a ticket with a linked conversation is REFUSED and the refusal is SURFACED" do
+  test "ADR-040 §5.9/T37f: deleting a ticket with a linked conversation ARCHIVES it, cascading to its conversation/message" do
     seed = OpSeeds.seed_all(tenants: 1)
     [%{tickets: [ticket | _]} | _] = seed.accounts
     before_count = ticket_count(seed.operator_org_id)
 
+    linked_conversation =
+      Samen.WebTest.Operator.Conversation
+      |> Ash.Query.filter(ticket_id == ^ticket.id)
+      |> Ash.read_one!(authorize?: false)
+
+    linked_message =
+      Samen.WebTest.Operator.Message
+      |> Ash.Query.filter(conversation_id == ^linked_conversation.id)
+      |> Ash.read_one!(authorize?: false)
+
     socket = mount_socket(build_operator_mount(seed.operator_org_id))
     socket = event(socket, "delete", %{"id" => ticket.id})
 
-    # The FK refusal is surfaced, never swallowed; the row provably survives.
-    assert socket.assigns.delete_error =~ "Could not delete this ticket"
-    assert html(socket) =~ ~s(id="delete-error")
-    assert ticket_count(seed.operator_org_id) == before_count
-    assert Enum.any?(socket.assigns.page.items, &(&1.id == ticket.id))
+    # No refusal — the ticket archives, cascading to its conversation/message.
+    refute socket.assigns.delete_error
+    assert ticket_count(seed.operator_org_id) == before_count - 1
+    refute Enum.any?(socket.assigns.page.items, &(&1.id == ticket.id))
+
+    live_conversation_ids =
+      Samen.WebTest.Operator.Conversation
+      |> Ash.Query.ensure_selected([:id])
+      |> Ash.read!(authorize?: false)
+      |> Enum.map(& &1.id)
+
+    live_message_ids =
+      Samen.WebTest.Operator.Message
+      |> Ash.Query.ensure_selected([:id])
+      |> Ash.read!(authorize?: false)
+      |> Enum.map(& &1.id)
+
+    refute linked_conversation.id in live_conversation_ids
+    refute linked_message.id in live_message_ids
   end
 
   # ---------------------------------------------------------------------------

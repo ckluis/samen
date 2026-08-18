@@ -30,6 +30,50 @@ defmodule Samen.Web.Support.TicketLive do
 
   Write affordances are offered on the tenant plane only
   (`Samen.Web.Support.Live.writable?/1`); enforcement stays in the kernel.
+
+  ## Composer suggestion (T78, spec §I5; D5/T68 AI-plane path)
+
+  While an agent has the reply composer open, `@kb_suggestion` (computed in
+  `load/3` from the ticket's `subject` — non-PII; `Message.body` is
+  deliberately NOT fed to the AI plane here, out of T78's scope) surfaces
+  semantically-relevant KB articles via `Samen.Web.Support.KbReads.
+  suggest_for_agent/3` (`Samen.AI.Embeddings.search/3`, never a provider
+  called directly). "Insert" (`handle_event("insert_suggestion", ...)`)
+  appends the article's title + snippet to the CURRENT reply body via
+  `AshPhoenix.Form.validate/2` — the same governed write path every other
+  edit on this form takes (`Samen.Vault.Change` still runs on submit; this
+  event only edits the draft `AshPhoenix.Form` state, it never itself writes
+  to the DB). Honest states throughout: no KB namespace wired → the panel
+  renders nothing (not an error); no AI provider wired → `:not_configured`
+  with `Samen.AI.configuration_hint()`; the keyless `:test`-only deterministic
+  ranking is signposted `SIMULATED` (T152's mechanism) — never presented as a
+  real semantic match.
+
+  ## Macros composer palette (T79, spec §I6) — coexists with the KB panel
+
+  `@macros` (`Reads.macros/2`, org-scoped, `enabled: true` Tier-0 rows) renders
+  as a palette of buttons ABOVE the reply composer, alongside the KB
+  suggestion panel — ONE composer, both surfaces. "Insert"
+  (`handle_event("insert_macro", ...)`) expands the macro's `{{agent_name}}`
+  placeholder (`Reads.expand_macro/2`) against `@agents` — the SAME
+  plane-resolved list already used to render sender names in the thread
+  above, so the substitution is masking-safe BY CONSTRUCTION (no new vault
+  call; a `%Masked{}` interpolates to `••••` via `String.Chars`, the same
+  convention `Samen.Delivery.Rendering` documents) — then appends the
+  expanded text to the CURRENT draft body via `AshPhoenix.Form.validate/2`,
+  the identical edit-only-the-draft mechanism `insert_suggestion` uses. Honest
+  empty: no macros → the palette renders nothing (not an error).
+
+  ## CSAT (T79, spec §I6) — the response lands on the Details tab
+
+  `@csat` (`Reads.csat_for_ticket/3`) shows the RECORDED response (score +
+  comments), if any, on the Details tab — "somewhere honest" (spec wording):
+  no response yet → nothing renders (never a fabricated score). The full
+  request→response→aggregate loop (survey send via the C2 chokepoint,
+  single-use token redemption, org-wide `csat_avg`) lives in
+  `Samen.Scopes.Support.CsatSurvey` / `Samen.Web.Support.CsatRespondLive` /
+  `Samen.Web.Support.TicketsLive`'s existing metrics tile — this page is only
+  the per-ticket landing spot.
   """
   use Phoenix.LiveView
 
@@ -41,6 +85,7 @@ defmodule Samen.Web.Support.TicketLive do
   alias Samen.Web.Mount
 
   alias Samen.Web.Support.Reads
+  alias Samen.Web.Support.KbReads
 
   @impl true
   def mount(params, session, socket) do
@@ -53,7 +98,7 @@ defmodule Samen.Web.Support.TicketLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     ticket_id = Map.get(params, "id") || socket.assigns.ticket_id
     tab = Map.get(params, "tab") || "conversation"
 
@@ -87,6 +132,96 @@ defmodule Samen.Web.Support.TicketLive do
     end
   end
 
+  # T78 (spec §I5) — composer suggestion "Insert": appends the suggested article's
+  # title + snippet to the CURRENT draft reply body. Edits ONLY the in-memory
+  # AshPhoenix.Form draft (AshPhoenix.Form.validate/2) — it does not itself write
+  # to the DB; the vaulted `body` still routes through Samen.Vault.Change on the
+  # eventual "Send reply" submit, exactly like any other edit to this form.
+  # H4 — the crash-gate: a FRESH ticket (no conversation seeded yet) has
+  # `reply_form == nil` (`new_reply_form/3` below). `AshPhoenix.Form.value/2`
+  # calls `to_form!/1` on its first arg, which RAISES on anything that isn't
+  # already a Form/changeset — so this clause MUST come first and MUST be a
+  # true no-op (never falls through to the `AshPhoenix.Form.value(nil, ...)`
+  # clause below). The UI already renders Insert `disabled` in this state
+  # (`render_kb_suggestion/2`); this is the defense-in-depth guard for the
+  # handler itself.
+  def handle_event("insert_suggestion", _params, %{assigns: %{reply_form: nil}} = socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("insert_suggestion", %{"article_id" => article_id}, socket) do
+    case find_suggested_article(socket.assigns.kb_suggestion, article_id) do
+      nil ->
+        {:noreply, socket}
+
+      hit ->
+        current_body = AshPhoenix.Form.value(socket.assigns.reply_form, :body) || ""
+        current_type = AshPhoenix.Form.value(socket.assigns.reply_form, :message_type) || "reply"
+
+        new_body = insert_snippet(current_body, hit)
+
+        form =
+          AshPhoenix.Form.validate(socket.assigns.reply_form, %{
+            "body" => new_body,
+            "message_type" => to_string(current_type)
+          })
+
+        {:noreply, assign(socket, reply_form: form)}
+    end
+  end
+
+  # T79 (spec §I6) — macro "Insert": expands the macro's `{{agent_name}}`
+  # placeholder against `@agents` (ALREADY plane-resolved — masking-safe by
+  # construction, see `Reads.expand_macro/2` moduledoc) and appends the
+  # result to the CURRENT draft reply body. Same edit-only-the-draft
+  # mechanism as `insert_suggestion` — no DB write here; the vaulted `body`
+  # still routes through `Samen.Vault.Change` on the eventual "Send reply"
+  # submit.
+  def handle_event("insert_macro", %{"macro_id" => macro_id}, socket) do
+    case Enum.find(socket.assigns.macros, fn m -> to_string(m.id) == macro_id end) do
+      nil ->
+        {:noreply, socket}
+
+      macro ->
+        current_body = AshPhoenix.Form.value(socket.assigns.reply_form, :body) || ""
+        current_type = AshPhoenix.Form.value(socket.assigns.reply_form, :message_type) || "reply"
+
+        expanded = Reads.expand_macro(macro, socket.assigns.agents)
+        new_body = String.trim(current_body <> "\n\n" <> expanded)
+
+        form =
+          AshPhoenix.Form.validate(socket.assigns.reply_form, %{
+            "body" => new_body,
+            "message_type" => to_string(current_type)
+          })
+
+        {:noreply, assign(socket, reply_form: form)}
+    end
+  end
+
+  # M3 — the first-reply affordance: a UI-created ticket seeds NO conversation
+  # (`support/blueprint.ex`'s plain `create: :*`), so `new_reply_form/3` returns
+  # nil and the composer never renders — the agent could read the ticket but had
+  # no way to start answering it. `ticket_id` is the page's own server-side fact,
+  # never client input; the write goes through the SAME sanctioned `Conversation`
+  # create action set (`Samen.Web.Support.Reads.create_conversation/3`) as every
+  # other write on this page, so OrgScope + SameOrgFk apply — this handler adds no
+  # policy of its own. On success, `load/3` picks up the new conversation and
+  # builds a real `reply_form`, which also flips the KB Insert + macro palette
+  # from gated/disabled to live.
+  def handle_event("start_conversation", _params, socket) do
+    %{samen_mount: mount, org_id: org_id, ticket_id: ticket_id} = socket.assigns
+    scope = Mount.scope(mount, org_id)
+
+    case Reads.create_conversation(mount, scope, ticket_id) do
+      {:ok, _conversation} ->
+        {:noreply, load(assign(socket, conversation_error: nil), org_id, ticket_id)}
+
+      {:error, _reason} ->
+        {:noreply, assign(socket, conversation_error: "Could not start the conversation.")}
+    end
+  end
+
   # The sanctioned status change. The status STRING is matched against the bounded
   # blueprint enum inside Reads.update_ticket_status/4 — garbage is refused, no atom
   # is ever minted from client input.
@@ -109,16 +244,17 @@ defmodule Samen.Web.Support.TicketLive do
 
     socket
     |> ensure_return_to()
-    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, ticket: nil, conversations: [], agents: [], active_tab: current_tab)
-    |> assign(reply_form: nil)
+    |> assign(no_org: CurrentOrg.no_org?(socket.assigns[:samen_mount], nil), org_id: nil, ticket: nil, ticket_tags: [], conversations: [], agents: [], active_tab: current_tab)
+    |> assign(reply_form: nil, kb_suggestion: nil, macros: [], csat: nil)
     |> assign_new(:status_error, fn -> nil end)
+    |> assign_new(:conversation_error, fn -> nil end)
   end
 
   def load(socket, org_id, ticket_id) do
     mount = socket.assigns.samen_mount
     scope = Mount.scope(mount, org_id)
 
-    {ticket, conversations, agents} =
+    {ticket, ticket_tags, conversations, agents} =
       if ticket_id do
         t =
           case Reads.get_ticket(mount, scope, ticket_id) do
@@ -126,11 +262,12 @@ defmodule Samen.Web.Support.TicketLive do
             :error -> nil
           end
 
+        tags = if t, do: Reads.ticket_tag_names(mount, scope, ticket_id), else: []
         convs = if t, do: Reads.conversations_for_ticket(mount, scope, ticket_id), else: []
         ags = Reads.agents(mount, scope)
-        {t, convs, ags}
+        {t, tags, convs, ags}
       else
-        {nil, [], []}
+        {nil, [], [], []}
       end
 
     current_tab = Map.get(socket.assigns, :active_tab, "conversation")
@@ -141,12 +278,36 @@ defmodule Samen.Web.Support.TicketLive do
       no_org: false,
       org_id: org_id,
       ticket: ticket,
+      ticket_tags: ticket_tags,
       conversations: conversations,
       agents: agents,
       active_tab: current_tab
     )
     |> assign(reply_form: new_reply_form(mount, scope, conversations))
+    |> assign(kb_suggestion: kb_suggestion(mount, scope, ticket))
+    |> assign(macros: (ticket && Reads.macros(mount, scope)) || [])
+    |> assign(csat: ticket && Reads.csat_for_ticket(mount, scope, ticket_id))
     |> assign_new(:status_error, fn -> nil end)
+    |> assign_new(:conversation_error, fn -> nil end)
+  end
+
+  # T78 (spec §I5) — composer suggestion. Query on the ticket SUBJECT (non-PII); the
+  # message body is vault-routed 🔒 and deliberately not fed to the AI plane here.
+  defp kb_suggestion(_mount, _scope, nil), do: nil
+
+  defp kb_suggestion(mount, scope, %{subject: subject}) when is_binary(subject) do
+    KbReads.suggest_for_agent(KbReads.kb_mount(mount), scope, subject)
+  end
+
+  defp find_suggested_article(%{state: :ok, hits: hits}, article_id) do
+    Enum.find(hits, fn %{article: a} -> to_string(a.id) == article_id end)
+  end
+
+  defp find_suggested_article(_, _), do: nil
+
+  defp insert_snippet(current_body, %{article: article, snippet: snippet}) do
+    line = "See: #{article.title}" <> if(snippet, do: " — #{snippet}", else: "")
+    String.trim(current_body <> "\n\n" <> line)
   end
 
   # The reply targets the LATEST conversation on the ticket — a server-side fact.
@@ -257,7 +418,16 @@ defmodule Samen.Web.Support.TicketLive do
                     icon="❝"
                     title="No conversation thread yet."
                     body="Replies to this ticket appear here as a threaded conversation."
-                  />
+                  >
+                    <:actions :if={writable?(@samen_mount)}>
+                      <.button variant="primary" phx-click="start_conversation" id="start-conversation-btn">
+                        Start conversation
+                      </.button>
+                    </:actions>
+                  </.empty_state>
+                  <div :if={@conversation_error} class="card form-error" id="conversation-error" style="margin-top:8px;padding:10px 14px;color:var(--bad, #b91c1c);font-size:12px">
+                    {@conversation_error}
+                  </div>
                 <% else %>
                   <%= for conv <- @conversations do %>
                     <div class="card" id={"conv-#{conv.id}"} style="margin-bottom:12px">
@@ -294,6 +464,9 @@ defmodule Samen.Web.Support.TicketLive do
                     </div>
                   <% end %>
                 <% end %>
+
+                {render_kb_suggestion(@kb_suggestion, writable?(@samen_mount) and @reply_form != nil)}
+                {render_macro_palette(@macros, writable?(@samen_mount) and @reply_form != nil)}
 
                 <div :if={writable?(@samen_mount) and @reply_form != nil} class="card" id="reply-composer" style="padding:16px 18px">
                   <div class="gtitle" style="margin-bottom:10px"><h3>Reply <small style="font-weight:400;color:var(--muted)">(🔒 body is vault-routed PII)</small></h3></div>
@@ -338,9 +511,11 @@ defmodule Samen.Web.Support.TicketLive do
                     </tr>
                     <tr style="border-bottom:1px solid var(--border)">
                       <td style="padding:10px 0;color:var(--muted)">Tags</td>
-                      <td style="padding:10px 0;font-size:12px;color:var(--muted)">{tags_label(@ticket.tags)}</td>
+                      <td style="padding:10px 0;font-size:12px;color:var(--muted)">{tags_label(@ticket_tags)}</td>
                     </tr>
                   </table>
+
+                  {render_csat(@csat)}
 
                   <%= if @agents != [] do %>
                     <div class="gtitle" style="margin:20px 0 12px"><h3>Agents <small style="font-weight:400;color:var(--muted)">(PII resolved per plane)</small></h3></div>
@@ -368,6 +543,109 @@ defmodule Samen.Web.Support.TicketLive do
         <% end %>
       </.app_shell>
     </div>
+    """
+  end
+
+  # -- composer suggestion panel (T78, spec §I5) -----------------------------
+
+  defp render_kb_suggestion(nil, _composer_offered?), do: Phoenix.HTML.raw("")
+  defp render_kb_suggestion(%{state: :no_kb_namespace}, _composer_offered?), do: Phoenix.HTML.raw("")
+  defp render_kb_suggestion(%{state: :empty}, _composer_offered?), do: Phoenix.HTML.raw("")
+
+  # H4/M3 — the Insert button is GATED exactly like the macro palette
+  # (`render_macro_palette/2`'s `composer_offered?`): on a FRESH ticket
+  # `@reply_form` is nil (no conversation seeded yet), and
+  # `AshPhoenix.Form.value(nil, :body)` raises. The suggestion panel itself
+  # still renders (the ranking is computed from the ticket subject, independent
+  # of any conversation) but Insert renders `disabled` with no `phx-click` when
+  # there's no composer to insert into — a genuine gated/disabled state, never
+  # a live button wired to a handler that would crash.
+  defp render_kb_suggestion(%{state: :ok, simulated: simulated, hits: hits}, composer_offered?) do
+    assigns = %{hits: hits, simulated: simulated, composer_offered?: composer_offered?}
+
+    ~H"""
+    <div id="kb-suggestion-panel" class="card" style="padding:14px 18px;margin-bottom:12px;background:var(--surface-2, #F9FAFB)">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
+        Suggested articles
+        <span :if={@simulated} id="kb-suggestion-simulated-badge" class="pill mut" style="margin-left:6px">SIMULATED ranking (keyless test embedder)</span>
+      </div>
+      <div :for={hit <- @hits} class="kb-suggestion-hit" id={"kb-suggestion-#{hit.article.id}"} style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:500;font-size:13px">{hit.article.title}</div>
+          <div :if={hit.snippet} style="font-size:12px;color:var(--muted)">{hit.snippet}</div>
+        </div>
+        <.button
+          type="button"
+          phx-click={@composer_offered? && "insert_suggestion"}
+          phx-value-article_id={hit.article.id}
+          disabled={!@composer_offered?}
+          title={!@composer_offered? && "Start a conversation to insert this suggestion into a reply."}
+          class="kb-suggestion-insert-btn"
+        >
+          Insert
+        </.button>
+      </div>
+    </div>
+    """
+  end
+
+  defp render_kb_suggestion(%{state: :not_configured, configuration_hint: hint}, _composer_offered?) do
+    assigns = %{hint: hint}
+
+    ~H"""
+    <div id="kb-suggestion-panel" class="card" style="padding:10px 14px;margin-bottom:12px;color:var(--muted);font-size:12px">
+      <div id="kb-suggestion-not-configured">Article suggestions are not configured.</div>
+      <div style="margin-top:4px;font-size:11px">{@hint}</div>
+    </div>
+    """
+  end
+
+  defp render_kb_suggestion(%{state: :error}, _composer_offered?), do: Phoenix.HTML.raw("")
+
+  # -- macros composer palette (T79, spec §I6) -------------------------------
+  # Coexists with the KB suggestion panel above — one composer, both surfaces.
+  # Honest empty: no macros OR the composer itself isn't offered (operator
+  # plane / no conversation yet) → nothing renders, not an error.
+
+  defp render_macro_palette([], _composer_offered?), do: Phoenix.HTML.raw("")
+  defp render_macro_palette(_macros, false), do: Phoenix.HTML.raw("")
+
+  defp render_macro_palette(macros, true) do
+    assigns = %{macros: macros}
+
+    ~H"""
+    <div id="macro-palette" class="card" style="padding:14px 18px;margin-bottom:12px;background:var(--surface-2, #F9FAFB)">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Macros</div>
+      <div :for={macro <- @macros} class="macro-option" id={"macro-#{macro.id}"} style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:500;font-size:13px">{macro.name}</div>
+          <div :if={macro.description} style="font-size:12px;color:var(--muted)">{macro.description}</div>
+        </div>
+        <.button type="button" phx-click="insert_macro" phx-value-macro_id={macro.id} class="macro-insert-btn">
+          Insert
+        </.button>
+      </div>
+    </div>
+    """
+  end
+
+  # -- CSAT (T79, spec §I6) — the response landing spot on the Details tab --
+  # Honest empty: no response recorded yet → nothing renders, never a
+  # fabricated score.
+
+  defp render_csat(nil), do: Phoenix.HTML.raw("")
+
+  defp render_csat(%{score: score, comments: comments, responded_at: responded_at}) do
+    assigns = %{score: score, comments: comments, responded_at: responded_at}
+
+    ~H"""
+    <div id="csat-response" class="gtitle" style="margin:20px 0 12px">
+      <h3>
+        Customer satisfaction
+        <small style="font-weight:400;color:var(--muted)">{@score}/5 — {format_dt(@responded_at)}</small>
+      </h3>
+    </div>
+    <div :if={@comments} id="csat-comments" style="font-size:13px;color:#3a3b45;margin-bottom:8px">{@comments}</div>
     """
   end
 

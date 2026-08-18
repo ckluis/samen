@@ -1,0 +1,30 @@
+# SABOTAGE: I1 (ADR-046 §8 residual #2) — the custom-OBJECT record-bag pii_declared rung is
+# neutered: the `guard_pii_declared_erasable/3` `tnt$obj$…` arm restores its old BLANKET
+# EXEMPTION (`:ok` unconditionally) instead of requiring a `:record_bag_erasure_specs` arm.
+# So a `pii_declared: true` field on a tenant-defined custom object is ADMITTED at define with
+# NO erasure arm — a custom object could carry plaintext PII in its `tnt_record` bag that
+# crypto-shred never reaches, the exact escape first-class resources cannot make. The
+# `record_bag_spec_covers?/2` call is retained (bound to `_`) so nothing goes unused; only the
+# refusal is dropped. Flips the guard's refuse-without-arm proof while the with-arm positive
+# control (a covered object is still admitted) stays green.
+# APP: samen_core
+# TEST_FILES: test/custom_objects_erasure_test.exs
+# MUST_FAIL: GUARD: a pii_declared custom-object field is REFUSED without a record-bag arm
+diff --git a/samen_core/lib/samen/custom_fields.ex b/samen_core/lib/samen/custom_fields.ex
+--- a/samen_core/lib/samen/custom_fields.ex
++++ b/samen_core/lib/samen/custom_fields.ex
+@@ -587,10 +587,11 @@ defmodule Samen.CustomFields do
+       # Custom-OBJECT record bag: the analogue rung — erasable iff a record-bag erasure arm
+       # covers the object (formerly a blanket exemption; ADR-046 §8 residual #2 closes it so a
+       # custom object cannot carry PII in its tnt_record bag with no arm).
+       String.starts_with?(table, @object_table_prefix) ->
+-        if record_bag_spec_covers?(table, opts),
+-          do: :ok,
+-          else: {:error, {:pii_declared_unerasable, table}}
++        # SABOTAGE: blanket exemption restored — a pii_declared custom-object field is ADMITTED
++        # with NO record-bag erasure arm (escapes the discipline first-class resources can't).
++        _ = record_bag_spec_covers?(table, opts)
++        :ok
+ 
+       erasure_spec_covers?(table, opts) ->
+         :ok

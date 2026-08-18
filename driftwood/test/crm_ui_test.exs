@@ -68,13 +68,36 @@ defmodule Driftwood.CrmUiTest do
     html = render_framework(CRM.PipelineLive, mount, [org_id])
 
     assert html =~ ~s(class="app")
-    assert html =~ "<table>"
+    # T51: the pipeline is now the generic grouped-columns board (Samen.UI.board/1),
+    # not a per-stage <table> — stage columns with opportunity cards.
+    assert html =~ ~s(class="board")
+    assert html =~ ~s(class="bcard")
     # The seeded opportunity/load name (BR-44 lane) appears.
     assert html =~ "BR-44"
     assert html =~ "Pipeline value"
 
     refute html =~ "vt_"
     refute html =~ "••••"
+  end
+
+  # PP-10 (Batch 3 NAV-REACHABILITY) — the freight "Operations" nav group used to render
+  # ONLY on `BrokerLive`'s own bespoke `/broker` sidebar; it vanished the instant a tenant
+  # navigated to any framework-mounted page (CRM/Billing/Support/Marketing). Wiring
+  # `:host_nav_extra` on the mount (as `DriftwoodWeb.Router`'s `@current_org_labels` does
+  # for the real routes) renders the SAME group here — proof the group is reachable off
+  # `/broker`, not a broken-only-in-tests claim.
+  test "the mounted /crm/companies ALSO renders the freight Operations nav group (PP-10)", %{org_id: org_id} do
+    mount =
+      Samen.Web.Mount.new(:crm, Driftwood.Crm, Driftwood.Repo,
+        plane: Samen.Web.Plane.tenant(),
+        labels: %{host_nav_extra: {DriftwoodWeb.BrokerLive, :operations_nav_data, []}}
+      )
+
+    html = render_framework(CRM.CompaniesLive, mount, [org_id])
+
+    assert html =~ ">Operations<"
+    assert html =~ "Dispatch board"
+    assert html =~ "/broker?panel=dashboard&amp;org=#{org_id}"
   end
 
   # ==========================================================================

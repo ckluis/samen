@@ -1,0 +1,24 @@
+# SABOTAGE: T82 RP-J-2 (ADR-044 §4.6, the LOAD-BEARING zero-read proof) — flips
+# `POST /fleet/heartbeat`'s successful response from `204 No Content` (empty body)
+# to `200` + a fleet-list-shaped JSON body. This is the exact mutation the ADR
+# names: "change POST /fleet/heartbeat from 204 empty to 200 + a fleet list, and
+# the named zero-read test must fail" (§4.6/§14 RP-J-2). The whole "a heartbeat
+# credential grants zero read capability" claim rests on there being NO response
+# channel to read through — this sabotage manufactures one.
+# (Fix-round regen: cockpit_ingress.ex's success clause moved/changed shape for
+# BLOCKER-1's rate-limit fix; same mutation, updated context.)
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_ingress_test.exs
+# MUST_FAIL: RP-J-2 GREEN: a valid heartbeat -> 204 No Content, EMPTY body
+diff --git a/samen_web/lib/samen/web/fleet/cockpit_ingress.ex b/samen_web/lib/samen/web/fleet/cockpit_ingress.ex
+--- a/samen_web/lib/samen/web/fleet/cockpit_ingress.ex
++++ b/samen_web/lib/samen/web/fleet/cockpit_ingress.ex
+@@ -103,7 +103,7 @@
+     # increments this bucket (BLOCKER-1 fix — was previously charged
+     # pre-crypto by `flood_gate/1`, which starved the app's own budget).
+     case RateLimit.check(:fleet_heartbeat, :kid, kid) do
+-      :ok -> respond(conn, 204, "")
++      :ok -> json(conn, 200, %{"apps" => ["leaked"]})
+       {:error, :rate_limited} -> respond(conn, 429, "")
+     end
+   end

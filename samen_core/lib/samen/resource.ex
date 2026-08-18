@@ -68,7 +68,19 @@ defmodule Samen.Resource do
 
   defmacro __using__(opts) do
     {abbrev, opts} = Keyword.pop(opts, :abbrev)
+    {archivable, opts} = Keyword.pop(opts, :archivable, false)
+    {versioned_opt, opts} = Keyword.pop(opts, :versioned, false)
+    # D3/T67 (ADR-043 §7.2): the DENY-BY-DEFAULT embeddable-field declaration. A list of
+    # logical attribute names whose plain-text values may enter vector space. Refused at
+    # compile time for a vault-routed field (`Samen.Verifiers.EmbeddableNoPii`).
+    {embeddable, opts} = Keyword.pop(opts, :embeddable, [])
+    embeddable = normalize_embeddable!(embeddable, __CALLER__)
     {base, ash_opts} = Keyword.pop(opts, :base)
+
+    # E7 audit-on-write (ADR-040 §6): `versioned: true | :changes_only | :snapshot`.
+    # `true` defaults to `:changes_only`; an explicit mode selects it. `:full_diff` is
+    # never accepted (refused substrate-wide — it forces `require_atomic? false`).
+    {versioned?, versioned_mode} = normalize_versioned!(versioned_opt, __CALLER__)
 
     # Validate caller-side so the diagnostic points at the resource's own `use`
     # line. Abbrev shape first, then the fragment extension gate (Gate-0 fix #3 —
@@ -82,21 +94,61 @@ defmodule Samen.Resource do
 
     validate_registry!(abbrev, __CALLER__)
 
+    # E6 soft-delete adoption (ADR-040 §5.2/§5.9, ADR-037 §5.3, T36): `archivable:
+    # true` folds ash_archival's `AshArchival.Resource` extension in alongside the
+    # fixed Samen allow-list; the default (`false`) adds nothing.
+    default_extensions =
+      provided_samen_extensions() ++
+        archival_extensions(archivable) ++ versioned_extensions(versioned?)
+
     ash_opts =
       ash_opts
-      |> Keyword.update(:extensions, provided_samen_extensions(), fn exts ->
-        Enum.uniq(provided_samen_extensions() ++ List.wrap(exts))
+      |> Keyword.update(:extensions, default_extensions, fn exts ->
+        Enum.uniq(default_extensions ++ List.wrap(exts))
       end)
       |> maybe_put_fragments(base)
+
+    archival_dsl = archival_dsl(archivable)
+    # The generated version resource module name (ADR-040 §6.1/§6.2), matching
+    # ash_paper_trail's default (`SourceResource.Version`). Its allocator-owned abbrev
+    # is injected by Samen.Versioning.VersionMixin at the version module's compile.
+    version_module = Module.concat(__CALLER__.module, Version)
+    versioned_dsl = versioned_dsl(versioned?, versioned_mode, version_module)
 
     quote do
       use Ash.Resource, unquote(ash_opts)
 
       # First-class `samen do abbrev "..." end` section (F4). This is the source
-      # of truth for the abbrev, introspectable via Samen.Info.abbrev/1.
+      # of truth for the abbrev, introspectable via Samen.Info.abbrev/1. The
+      # `archivable` / `versioned` flags ride alongside it (introspectable via
+      # Samen.Info.archivable?/1 and Samen.Info.versioned?/1).
       samen do
         abbrev(unquote(abbrev))
+        archivable(unquote(archivable))
+        versioned(unquote(versioned?))
+        versioned_mode(unquote(versioned_mode))
+        embeddable(unquote(embeddable))
       end
+
+      unquote(archival_dsl)
+      unquote(versioned_dsl)
+      unquote(embeddable_seam(embeddable))
+    end
+  end
+
+  # D3/T67 (ADR-043 §7.2): inject the `embeddable_fields/0` seam ONLY for a resource that
+  # declares embeddable fields (keeps the injection off every other resource — zero blast
+  # radius). It is a thin reader of the `samen` section (the single source of truth), so the
+  # `ai_prompt_masking` verifier's `resource.embeddable_fields()` call + the embeddings plane
+  # both bind to the DECLARATION. A resource with no declaration exposes no seam (the verifier
+  # treats an absent seam as "no embeddable fields", green-and-real).
+  defp embeddable_seam([]), do: nil
+
+  defp embeddable_seam(_fields) do
+    quote do
+      @doc "The declared embeddable fields (ADR-043 §7.2) — reads the `samen` section."
+      @spec embeddable_fields() :: [atom()]
+      def embeddable_fields, do: Samen.Info.embeddable_fields(__MODULE__)
     end
   end
 
@@ -194,6 +246,170 @@ defmodule Samen.Resource do
     Keyword.update(ash_opts, :fragments, [base], fn frags ->
       Enum.uniq([base | List.wrap(frags)])
     end)
+  end
+
+  # E6 soft-delete (ADR-037 §5.3): `archivable: true` folds in ash_archival's
+  # resource extension; the default adds nothing.
+  defp archival_extensions(true), do: [AshArchival.Resource]
+  defp archival_extensions(_), do: []
+
+  # E7 audit-on-write (ADR-037 §5.4, ADR-040 §6): `versioned` folds in
+  # ash_paper_trail's resource extension; the default adds nothing.
+  defp versioned_extensions(true), do: [AshPaperTrail.Resource]
+  defp versioned_extensions(_), do: []
+
+  # Normalize the `versioned:` sugar caller-side (friendly diagnostic at the resource's
+  # own `use` line). `:full_diff` is explicitly refused (ADR-040 §6.3(5)).
+  defp normalize_versioned!(false, _caller), do: {false, :changes_only}
+  defp normalize_versioned!(nil, _caller), do: {false, :changes_only}
+  defp normalize_versioned!(true, _caller), do: {true, :changes_only}
+  defp normalize_versioned!(:changes_only, _caller), do: {true, :changes_only}
+  defp normalize_versioned!(:snapshot, _caller), do: {true, :snapshot}
+
+  defp normalize_versioned!(other, caller) do
+    raise %CompileError{
+      file: caller.file,
+      line: caller.line,
+      description:
+        "use Samen.Resource, versioned: expects `true`, `:changes_only`, or " <>
+          ":snapshot (ADR-040 §6). `:full_diff` is refused substrate-wide (it forces " <>
+          "`require_atomic? false`). Got: #{inspect(other)}"
+    }
+  end
+
+  # D3/T67 (ADR-043 §7.2): the `embeddable:` opt must be a (possibly empty) list of atoms —
+  # logical attribute names. Validated caller-side so a malformed value points at the
+  # resource's own `use` line; the vault-routed refusal is the compile-time
+  # `Samen.Verifiers.EmbeddableNoPii` (it needs the fully-built `pii do` section).
+  defp normalize_embeddable!(nil, _caller), do: []
+
+  defp normalize_embeddable!(fields, caller) do
+    unless is_list(fields) and Enum.all?(fields, &is_atom/1) do
+      raise %CompileError{
+        file: caller.file,
+        line: caller.line,
+        description:
+          "use Samen.Resource, embeddable: expects a list of logical attribute-name atoms " <>
+            "(e.g. `embeddable: [:notes, :description]`), the fields whose plain-text values " <>
+            "may enter vector space (ADR-043 §7.2, deny-by-default). Got: #{inspect(fields)}"
+      }
+    end
+
+    fields
+  end
+
+  # E6 soft-delete DSL (ADR-040 §5.2/§5.9, ADR-037 §5.3, T36). `archivable: true`
+  # injects the archive/restore/archived/destroy_permanently actions plus the
+  # ash_archival `archive` config that scopes the `is_nil(archived_at)` default
+  # read filter. `archivable: false` (the default) injects nothing.
+  defp archival_dsl(false), do: nil
+
+  defp archival_dsl(true) do
+    quote do
+      actions do
+        # Soft destroy: ash_archival's SetupArchival stamps archived_at; the
+        # Samen.Archival.Archive change adds audit + idempotence (ADR-040 §5.2).
+        # Non-primary + non-atomic so it composes with the default hard destroy.
+        destroy :archive do
+          primary?(false)
+          require_atomic?(false)
+          change(Samen.Archival.Archive)
+        end
+
+        # Restore: clear archived_at + audit the archived → live transition.
+        update :restore do
+          primary?(false)
+          require_atomic?(false)
+          change(Samen.Archival.Restore)
+        end
+
+        # The trash read: shows ONLY archived rows (Samen.Archival.OnlyArchived).
+        read :archived do
+          prepare(Samen.Archival.OnlyArchived)
+        end
+
+        # A real hard delete, retained for erasure/GC paths.
+        destroy :destroy_permanently do
+          primary?(false)
+        end
+      end
+
+      archive do
+        # Preparation variant (ADR-037 §5.3): base_filter? stays the package default
+        # (false) so :restore is possible. The trash read shows archived rows; the
+        # terminal destroy stays a real hard delete.
+        exclude_read_actions([:archived])
+        exclude_destroy_actions([:destroy_permanently])
+      end
+    end
+  end
+
+  # E7 audit-on-write DSL (ADR-040 §6). `versioned` injects the ash_paper_trail
+  # `paper_trail` section configuring the generated `<Resource>.Version`. Nothing when
+  # not versioned.
+  defp versioned_dsl(false, _mode, _version_module), do: nil
+
+  defp versioned_dsl(true, mode, version_module) do
+    quote do
+      paper_trail do
+        # §6.3(5): :changes_only (default) or :snapshot. :full_diff never reaches here
+        # (refused in normalize_versioned!/2).
+        change_tracking_mode(unquote(mode))
+
+        # INV-1 / §6.3(2): version rows NEVER persist raw action inputs (pre-vault
+        # plaintext / vt_* tokens). FALSE, forever, on every samen resource. Belt-and-
+        # braces over the package's own sensitive-input redaction; guarded by a test.
+        store_action_inputs?(false)
+
+        # INV-1 / §6.3: keep values (`:display`) so vault-routed attributes are versioned
+        # as their `vt_*` TOKEN — token-only BY CONSTRUCTION via `Samen.Type.VaultField`'s
+        # dump face (never plaintext), which §6.3(1) makes the guarantee. NOTE: in the
+        # samen substrate every `sensitive?` attribute IS a vault field (all PII routes
+        # through the vault; a non-vault `sensitive?` attribute would be a discipline
+        # violation caught upstream) — so `:display` never versions a non-vault sensitive
+        # value. `Samen.VersionedSensitiveTest` guards this: a versioned resource whose
+        # `sensitive?` attribute is NOT a VaultField would fail, flagging that this must
+        # switch to ignoring that specific attribute (§6.3(3)). `:ignore` is NOT usable
+        # here: it would drop the vault fields too (they are `sensitive?`), defeating
+        # §6.3(1)'s token-in-diff requirement.
+        sensitive_attributes(:display)
+
+        # The universal write timestamps are noise in a change diff (every write bumps
+        # updated_at); the version row's own version_inserted_at is the authoritative
+        # instant. Excluding them keeps :snapshot/:changes_only diffs signal-only.
+        ignore_attributes([:inserted_at, :updated_at])
+
+        # §6.2: mirror org_id onto the version row as a real column (populated from the
+        # source record), so version history is OrgScope-boundable exactly like the
+        # source table — tenant plane resolves, operator plane masks.
+        attributes_as_attributes([:org_id])
+
+        # §6.4: an archivable+versioned resource's soft-destroy (`:archive`) records a
+        # version — the archive is itself a recorded change; a terminal hard destroy also
+        # records its final version. Keep create-a-version-on-destroy on.
+        create_version_on_destroy?(true)
+
+        # A samen resource can be hard-destroyed (`:destroy_permanently`, crypto-shred,
+        # GC), so the version must survive its source's deletion — no FK back to the
+        # source row (ash_paper_trail's own guidance when actual deletion is allowed).
+        # Version rows stay org-scoped/keyset-bounded via the mirrored org_id (§6.2), not
+        # a source FK; crypto-shred degrades the tokens to masked like every other tier
+        # (§6.4), it does not chase version rows.
+        reference_source?(false)
+
+        # §6.2 (INV-3): the generated version resource gets FULL samen governance —
+        # allocator-owned abbrev + prefixed columns + org_id + catalog + no_plaintext_pii
+        # roster + OrgScope policies — by carrying the same samen extensions + the policy
+        # authorizer any governed table does. The abbrev + OrgScope policies are injected
+        # by the mixin (abbrev reverse-looked-up from the registry; never pinned).
+        version_extensions(
+          extensions: [Samen.Extension, Samen.Pii, Samen.Catalog],
+          authorizers: [Ash.Policy.Authorizer]
+        )
+
+        mixin({Samen.Versioning.VersionMixin, :inject, [unquote(version_module)]})
+      end
+    end
   end
 
   # Caller-side abbrev REGISTRY enforcement (permanent / 3-letter / collision-free

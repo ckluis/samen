@@ -71,7 +71,13 @@ defmodule Demo.Adversarial.AggregateDifferencingTest do
   defp mk_price(org_id, plan_id, cents) do
     {:ok, price} =
       Demo.BillingScope.Price
-      |> Ash.Changeset.for_create(:create, %{org_id: org_id, plan_id: plan_id, unit_amount_cents: cents, active: true})
+      |> Ash.Changeset.for_create(:create, %{
+        org_id: org_id,
+        plan_id: plan_id,
+        # ADR-036 §4.5: unit_amount_cents/currency dropped by the H1 Money migration.
+        unit_amount: Samen.Type.Money.from_cents(cents, :USD),
+        active: true
+      })
       |> Ash.create(authorize?: false)
 
     price
@@ -82,7 +88,7 @@ defmodule Demo.Adversarial.AggregateDifferencingTest do
       Demo.BillingScope.Customer
       |> Ash.Changeset.for_create(:create, %{
         org_id: org_id,
-        billing_name: %{first: "Bill", last: "Payer"},
+        billing_name: "Bill Payer",
         billing_email: "billing@example.com"
       })
       |> Ash.create(authorize?: false)

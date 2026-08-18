@@ -6,9 +6,28 @@ verifiers, generators) · `samen_web` (framework UI library: LiveViews, Mount/Pl
 `spikes/` (frozen mechanism spikes). Design records live in `docs/adr/` + per-workstream
 `docs/ws-*/{design,build-plan}.md` — consult the ADR before changing anything it governs.
 
-## Suites / CI (local Postgres required)
-- Root gate: `./ci.sh` — spikes → samen_core → 3 gen_app probes → samen_web → demo →
-  driftwood → pawchart. Takes minutes; must end `ROOT CI: ALL PASSED`.
+## Code exploration — codemunch FIRST (MANDATORY, not optional)
+Before you Read/Grep/Glob to orient yourself in this tree, use codemunch — this has been missed
+repeatedly (agents keep defaulting to raw Read/Grep sweeps). The rule, verbatim and enforced in
+`driftwood/CLAUDE.md`: your FIRST orientation action is `codemunch:explore`/`codemunch:search`/
+`codemunch:fetch`/`codemunch:refs`, NOT a multi-file Read or a large-tree Grep. WHEN it fires:
+reading >1 source file to understand something, or grepping/globbing any of `samen_core/`,
+`samen_web/`, `driftwood/`, `pawchart/`, `demo/`, `docs/` for a symbol/caller/structure → route it
+through codemunch first. A single grep for one exact string in one known file is fine; a *sweep* is
+not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full rules + decision tree.
+
+## Suites / CI (local Postgres + pgvector required)
+- Prerequisite: a local Postgres server WITH the `pgvector` extension installed (`CREATE
+  EXTENSION vector`) — the samen_core AI-embeddings migration hard-requires it (ADR-043
+  §7.1/M3; `docs/adr/ADR-043-ai-plane.md`). Install via `brew install pgvector` (or build
+  0.8.0 from source against your pg major when no bottle exists). Without it, `./ci.sh`
+  fails the samen_core suite at setup with a clear "pgvector not installed" guard message
+  (`samen_core/test/test_helper.exs`), not an opaque `CREATE EXTENSION` error.
+- Root gate: `./ci.sh` — spikes → samen_core → the AI eval/red-team tier → 5 adapter-package
+  gates (samen_stripe/postmark/ses/resend/anthropic) → 3 gen_app probes → an opt-in
+  (`SAMEN_SABOTAGE=1`) sabotage-harness step → samen_web + demo + driftwood + pawchart run
+  CONCURRENTLY last (own DBs, race-free once everything registry-mutating above has finished
+  sequentially). Takes minutes; must end `ROOT CI: ALL PASSED`.
 - Iteration tier: `./ci-fast.sh` — spikes → samen_core → samen_web ONLY (framework core,
   skips the gen_app probes + demo/vertical gates). Fast inner-loop feedback; NOT a
   substitute for `./ci.sh` before a milestone. Ends `CI-FAST: ALL PASSED`.
@@ -19,6 +38,16 @@ verifiers, generators) · `samen_web` (framework UI library: LiveViews, Mount/Pl
   replays every shipped gate sabotage (`scripts/sabotages/*.patch`): apply → the NAMED
   tests must FAIL → revert → SHA-256 byte-exact restore. Gates add new sabotages as
   patches (header lines: APP / TEST_FILES / MUST_FAIL) instead of re-deriving them.
+  Default (no args) = the full 212-patch harness (unchanged). At 212 the full serial run
+  exceeds the 600s single tool-call ceiling, so certify it **backgrounded** or in **chunks**
+  via additive selection flags (they COMPOSE as an intersection; a FILTERED run certifies
+  ONLY its subset — full coverage still needs a full/background run):
+  `--app <name>` (per-app: samen_web/samen_core/driftwood/pawchart/demo/samen_stripe),
+  `--range <lo>-<hi>` / `--from`/`--to` (by filename number, inclusive),
+  `--touching <path>…` / `--changed [<ref>]` (only patches whose touched files intersect
+  your diff — the verifier primitive), and `--list`/`--dry-run` to preview a selection
+  (names + resolved APP + count) without applying anything. The header preflight still
+  lints ALL patch headers even under a filter.
 
 ## Fail-honest adapter contract (ADR-014, ADR-024, ADR-026)
 An unconfigured/unimplemented adapter NEVER returns `{:ok, _}` for work it did not do —
@@ -51,7 +80,12 @@ tests: `samen_web/test/samen/web/file_preview_masking_test.exs` (first consumer)
 ## Abbrev registry — HANDS-OFF
 NEVER add/edit rows in any `priv/abbrev_registry.json` by hand. Allocation goes through the
 sanctioned allocator only (`mix samen.abbrev.reserve`, driven by `mix samen.gen.*`; ADR-023).
-Any probe/script touching the registry must restore it SHA-256 byte-exact on every exit path.
+Any probe/script touching the registry must restore it SHA-256 byte-exact on every exit path
+— INCLUDING an OS-level interrupt (SIGINT/SIGTERM), not just normal/error returns (T107).
+Enforced by `ci.sh`'s `run_gen_probe` wrapper around the three `samen_core/priv/gen_*_probe.exs`
+invocations: it snapshots the registry to a `mktemp`'d file before each probe and restores +
+SHA-256-verifies it in a trap covering SIGINT/SIGTERM/ERR/EXIT, independent of whether the
+probe itself gets to run its own cleanup (SIGINT is not trappable inside the BEAM at all).
 
 ## Framework-first, ≈0-LOC vertical mounts
 Features live in samen_core/samen_web; verticals adopt via one router/macro call

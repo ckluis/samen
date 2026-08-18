@@ -5,12 +5,18 @@ defmodule SamenCore.CatalogTest do
     * `Samen.Catalog` — introspection helpers
     * `Samen.Migration` — `catalog_sync` fail-closed guarantee
     * `mix samen.catalog.dump` — deterministic schema.dict.json
-    * `mix samen.verify.column_refs` — CI linter for unknown `^[a-z]{3}_` refs
 
-  RED PATHS (3 mandatory per task spec):
+  The uncatalogued-column ("hallucinated field") bug class is owned by the LIVE-gated
+  `mix samen.verify.catalog_parity` (bidirectional physical ⇄ `fld_field` parity, run in
+  every app's ci.sh) — see `verify_catalog_parity_test.exs` and the agent-authoring eval.
+  The former `mix samen.verify.column_refs` source-text linter was retired (ADR-045 A3):
+  its `^[a-z]{3}_` regex collided with the entire Elixir identifier namespace (~1.5k
+  false positives) and it ran in no gate; catalog_parity + compile-time Ash attribute
+  verification already cover the bug class.
+
+  RED PATHS (2 mandatory per task spec):
     1. `catalog_sync` under `@disable_ddl_transaction true` raises at compile time
     2. `mix samen.catalog.dump` is byte-identical across two runs on the same codebase
-    3. CI linter catches a seeded bogus column reference (fails exit 1)
   """
   use ExUnit.Case, async: false
 
@@ -293,129 +299,4 @@ defmodule SamenCore.CatalogTest do
     end
   end
 
-  # ============================================================
-  # Section 5 — mix samen.verify.column_refs (CI linter RED PATH)
-  # ============================================================
-
-  # ---------------------------------------------------------------------------
-  # Helper: create a unique isolated scratch dir under a self-owned, project-local
-  # parent, register cleanup, and return the dir path.
-  #
-  # Gate-2 F2.4: the scratch parent is a PROJECT-LOCAL `samen_core/tmp/` dir
-  # (git-ignored), NOT the shared `/tmp` root. The gate's scratch-dir rule is
-  # "scratch OUTSIDE the /tmp root"; the previous PRE-a fix isolated per-test with a
-  # unique subdir but still rooted it at `/tmp/samen_colrefs_test/`, so a hostile or
-  # stray file dropped directly in shared `/tmp` was outside our subtree (fine) but
-  # the parent itself lived under the shared root. Rooting the scratch subtree in a
-  # self-owned project dir removes the shared-root dependency entirely: no other
-  # process, test suite, or user writes into `samen_core/tmp/colrefs_scratch/`.
-  # ---------------------------------------------------------------------------
-  @scratch_root Path.join([__DIR__, "..", "tmp", "colrefs_scratch"])
-
-  defp make_scratch_dir(ctx_name) do
-    base = Path.expand(Path.join(@scratch_root, ctx_name))
-    File.mkdir_p!(base)
-    base
-  end
-
-  describe "mix samen.verify.column_refs — CI linter" do
-    test "no violations on files that only reference known catalogued columns" do
-      # Each test gets its own isolated scratch dir — stray files from other
-      # tests cannot pollute this scan (PRE-a fix for Gate-1 caveat).
-      scratch = make_scratch_dir("good_#{System.unique_integer([:positive])}")
-      file_path = Path.join(scratch, "good_source.ex")
-
-      File.write!(file_path, """
-      defmodule GoodModule do
-        # Reference a known catalogued column
-        def example, do: :com_name
-      end
-      """)
-
-      on_exit(fn -> File.rm_rf(scratch) end)
-
-      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [scratch])
-      assert violations == [], "Expected no violations, got: #{inspect(violations)}"
-    end
-
-    test "RED PATH: linter catches a seeded bogus column reference" do
-      # Plant a reference to a column that does NOT exist in fld_field.
-      # This is the mandatory red-path for the CI linter.
-      scratch = make_scratch_dir("bad_#{System.unique_integer([:positive])}")
-      file_path = Path.join(scratch, "bad_source.ex")
-
-      # "xyz_hallucinated_column" is a valid ^[a-z]{3}_ token but is NOT in fld_field
-      File.write!(file_path, """
-      defmodule BadModule do
-        def example, do: :xyz_hallucinated_column
-      end
-      """)
-
-      on_exit(fn -> File.rm_rf(scratch) end)
-
-      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [scratch])
-
-      assert length(violations) >= 1, "Expected at least 1 violation, got: #{inspect(violations)}"
-
-      assert Enum.any?(violations, &(&1 =~ "xyz_hallucinated_column")),
-             "Violation should name the bogus column, got: #{inspect(violations)}"
-    end
-
-    test "linter ignores catalog infrastructure tokens (tam_, fld_)" do
-      # tam_ and fld_ tokens are part of the catalog infra and should never be flagged
-      scratch = make_scratch_dir("infra_#{System.unique_integer([:positive])}")
-      file_path = Path.join(scratch, "infra_source.ex")
-
-      File.write!(file_path, """
-      defmodule InfraModule do
-        def example do
-          "SELECT tam_table_name FROM tam_table"
-          "SELECT fld_column_name FROM fld_field"
-        end
-      end
-      """)
-
-      on_exit(fn -> File.rm_rf(scratch) end)
-
-      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [scratch])
-      assert violations == [], "Catalog infra tokens must not be flagged"
-    end
-
-    test "samen:allow comment suppresses a specific token on that line" do
-      scratch = make_scratch_dir("allow_#{System.unique_integer([:positive])}")
-      file_path = Path.join(scratch, "allowed_source.ex")
-
-      File.write!(file_path, """
-      defmodule AllowedModule do
-        def example, do: :xyz_legacy_col  # samen:allow xyz_legacy_col
-      end
-      """)
-
-      on_exit(fn -> File.rm_rf(scratch) end)
-
-      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [scratch])
-      assert violations == [], "samen:allow should suppress the flagged token"
-    end
-
-    test "linter scans .ex and .exs files" do
-      scratch = make_scratch_dir("scan_#{System.unique_integer([:positive])}")
-      ex_path = Path.join(scratch, "check_me.ex")
-      exs_path = Path.join(scratch, "check_me.exs")
-
-      bad_content = """
-      def something do
-        :abc_bogus_column
-      end
-      """
-
-      File.write!(ex_path, bad_content)
-      File.write!(exs_path, bad_content)
-
-      on_exit(fn -> File.rm_rf(scratch) end)
-
-      violations = Mix.Tasks.Samen.Verify.ColumnRefs.check(TestRepo, [scratch])
-      # Both files should be scanned — at least 2 violations
-      assert length(violations) >= 2, "Expected violations from both .ex and .exs files"
-    end
-  end
 end

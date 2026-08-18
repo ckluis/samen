@@ -1,0 +1,42 @@
+# SABOTAGE: A4 (ADR-047 §5.3 / RP-AG-5) gate sabotage — the ARGS-DIGEST BINDING is
+# defeated: `bind_proposal/3` stops cross-checking the proposal recovered from the run's
+# vault-routed transcript against the token-only stamp committed on the turn row BEFORE
+# the approval was opened (the sha256 digest recomputed over the stored args, the digest
+# recorded in the proposal, the tool kind, the arg key names, the turn index, the approval
+# id) and simply trusts whatever the transcript now says. A payload MUTATED or SUBSTITUTED
+# between proposal and approval therefore executes — i.e. approving proposal X executes
+# X', which is the property that makes a human approval mean anything at all. The named
+# reds (mutated args refuse; substituted kind/digest/turn/approval refuse) must flip; the
+# untampered positive control stays green, proving the binding is gone and not the path.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: args MUTATED between proposal and approval REFUSE
+# MUST_FAIL: a SUBSTITUTED tool kind, a re-stamped digest, and a swapped turn index each refuse
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1213,16 +1213,17 @@
+     kind = Map.get(pending, "kind")
+     args = Map.get(pending, "args")
+ 
++    # SABOTAGE (A4, ADR-047 §5.3, RP-AG-5): the binding is GONE. Whatever the transcript
++    # currently holds is executed, with no cross-check against the digest/kind/turn/approval
++    # stamped on the turn row before the human ever saw the proposal. Approving X now
++    # executes X'.
++    _ = stamped
++    _ = turn_row
++    _ = approval
++
+     cond do
+-      not is_binary(stamped) -> {:error, :proposal_mismatch}
+       not is_binary(kind) -> {:error, :proposal_mismatch}
+       not (is_map(args) and not is_struct(args)) -> {:error, :proposal_mismatch}
+-      Map.get(pending, "digest") != stamped -> {:error, :proposal_mismatch}
+-      args_digest(args) != stamped -> {:error, :proposal_mismatch}
+-      kind != turn_row.tool_kind -> {:error, :proposal_mismatch}
+-      sorted_arg_keys(args) != turn_row.arg_keys -> {:error, :proposal_mismatch}
+-      Map.get(pending, "turn_index") != turn_row.turn_index -> {:error, :proposal_mismatch}
+-      Map.get(pending, "approval_id") != to_string(approval.id) -> {:error, :proposal_mismatch}
+       true -> {:ok, %{kind: kind, args: args}}
+     end
+   end

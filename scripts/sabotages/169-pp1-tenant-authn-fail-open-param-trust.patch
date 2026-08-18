@@ -1,0 +1,25 @@
+# SABOTAGE: PP-1/PP-3 (Batch 1, ADR-031) — the framework tenant-plane FAIL-CLOSED resolver.
+# Neutralizes `Samen.Web.CurrentOrg`'s `param_trust_disarmed?/1` so it always reports the host
+# as disarmed — the ARMED-host branch that refuses to resolve an org from a caller-supplied
+# `?org=` on a mount that never adopted the `:authn` seam is defeated, and `resolve/3` falls back
+# to trusting the query-param identity in EVERY posture. This restores the exact fail-OPEN the
+# W4 dogfood live-reproduced (a cookieless `curl ".../crm/contacts?org=<clinic-org>"` resolves a
+# tenant actor for the attacker-chosen org -> unmasked cross-tenant PII). The named tenant-authn
+# coverage tests (the reproduce-the-attack RED + the enumerating PP-3 guard) MUST fail with it,
+# proving they are refutable and load-bearing on the fail-closed branch.
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_authn_coverage_test.exs
+# MUST_FAIL: RED: armed host, cookieless ?org=<other-org> to the unlabeled CRM contacts mount
+# MUST_FAIL: resolves NO org for an unauthenticated ?org=
+diff --git a/samen_web/lib/samen/web/current_org.ex b/samen_web/lib/samen/web/current_org.ex
+--- a/samen_web/lib/samen/web/current_org.ex
++++ b/samen_web/lib/samen/web/current_org.ex
+@@ -300,6 +300,6 @@
+   def param_trust_disarmed?(mount) do
+     case Samen.Web.Operator.otp_app(mount) do
+       nil -> true
+-      otp_app -> not Samen.Web.TenantGate.armed?(otp_app)
++      _otp_app -> true
+     end
+   end
+ 

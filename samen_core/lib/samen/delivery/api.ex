@@ -1,6 +1,10 @@
 defmodule Samen.Delivery.Api do
   @moduledoc """
   HTTP-API (ESP) delivery adapter — **skeleton** (ADR-014 §2; operator TODO).
+  Migrated to `Samen.Delivery.Provider` (ADR-038 §4.2 rename); semantics
+  unchanged. First-party ESP integrations now ship as separate, vendor-named
+  adapter packages (ADR-038 §8) — this generic skeleton remains for BYO hosts
+  wiring a different HTTP ESP.
 
   `configured?/1` returns `true` only when the ESP creds (`:api_key` + `:endpoint`)
   are present in the adapter config; otherwise `false`. `deliver/2` performs the
@@ -9,21 +13,21 @@ defmodule Samen.Delivery.Api do
   fail-honest seam as `Samen.Delivery.Smtp`.
 
   Web-dep-free: this module references no HTTP client at compile time. A host
-  wiring a real ESP (SendGrid/Postmark/SES) pulls the HTTP client dependency in
-  the host app and supplies it via config.
+  wiring a real ESP pulls the HTTP client dependency in the host app and
+  supplies it via config.
   """
-  @behaviour Samen.Delivery.Adapter
+  use Samen.Delivery.Provider
 
   alias Samen.Delivery.Message
 
-  @impl Samen.Delivery.Adapter
+  @impl true
   def configured?(config) when is_map(config) do
     present?(config, :api_key) and present?(config, :endpoint)
   end
 
   def configured?(_), do: false
 
-  @impl Samen.Delivery.Adapter
+  @impl true
   def deliver(%Message{} = _message, config) do
     if configured?(config) do
       # Operator TODO: POST to the ESP endpoint with the api_key and the

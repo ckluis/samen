@@ -1,0 +1,30 @@
+# SABOTAGE: phase-6 SEC dogfood H1 (ADR-044 §5.2b / INV-2, ATK-6 class) — the
+# LIST-ITEM half. Reintroduces the undeclared-key hole one level down: unions the
+# item's OWN keys into the "declared" set inside unknown_item_key_errors/4, so
+# every key present is trivially "declared" and NOTHING is ever rejected. That is
+# exactly the pre-fix behaviour -- validate_item/5 walked only the declared field
+# table and never inspected the keys actually present -- under which a
+# valid-credential producer smuggled free text / PII in an undeclared key inside
+# any cohort/list item and Registry.record_report/4 stored the payload verbatim in
+# flt_report.payload. Mirrors patch 93 (the same hole at the TOP level).
+# APP: samen_core
+# TEST_FILES: test/fleet_report_schema_test.exs
+# MUST_FAIL: RED: an undeclared PII-bearing key inside a cohort LIST ITEM is rejected, never validated-through
+# MUST_FAIL: RED: an undeclared item key is rejected across EVERY declared list section
+# REGENERATED (phase-6 SEC fix round R6): bounding the echoed attacker-controlled key
+# name (safe_key/1) shifted the target hunk context. Same guarantee, same intent, retargeted.
+diff --git a/samen_core/lib/samen/fleet/report/schema.ex b/samen_core/lib/samen/fleet/report/schema.ex
+index 2a6e06b..11dc92d 100644
+--- a/samen_core/lib/samen/fleet/report/schema.ex
++++ b/samen_core/lib/samen/fleet/report/schema.ex
+@@ -487,7 +487,9 @@ defmodule Samen.Fleet.Report.Schema do
+   # lists). Every DECLARED item field is a bounded class (opaque_id/token/enum/number), so
+   # once undeclared keys are rejected an item has no unbounded free-text landing zone left.
+   defp unknown_item_key_errors(list_name, idx, item, item_fields) do
+-    declared = MapSet.new(item_fields, fn {name, _t, _o} -> Atom.to_string(name) end)
++    declared =
++      MapSet.new(item_fields, fn {name, _t, _o} -> Atom.to_string(name) end)
++      |> MapSet.union(MapSet.new(Map.keys(item)))
+ 
+     for key <- Map.keys(item), key not in declared do
+       "#{inspect(list_name)}[#{idx}] unknown field #{safe_key(key)} — not declared in the " <>

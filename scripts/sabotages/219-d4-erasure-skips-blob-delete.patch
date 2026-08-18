@@ -1,0 +1,24 @@
+# SABOTAGE: D4 (ADR-046 §4.3) — the file-blob erasure arm (Samen.Files.Erasure) skips the
+# delete: `find_subject_files/3`'s result is truncated to `Enum.take(..., 0)`, so the arm
+# discovers a subject's files but deletes NONE of their blobs. Crypto-shred then no longer
+# reaches raw stored file bytes — the exact carve-out gap D4 closes. It flips the
+# erasure-reach proof: after shredding the subject, `Storage.get(key)` still returns the
+# bytes instead of :not_found. The arm still runs and reports (files_erased may be 0), so
+# this targets ONLY the reach of erasure into blobs; the standalone governed delete_file
+# path, ref-count, and fail-honest arms are untouched.
+# APP: samen_core
+# TEST_FILES: test/files_delete_test.exs
+# MUST_FAIL: shredding a subject deletes its file blob
+diff --git a/samen_core/lib/samen/files/erasure.ex b/samen_core/lib/samen/files/erasure.ex
+index d9d2568..be0c3c9 100644
+--- a/samen_core/lib/samen/files/erasure.ex
++++ b/samen_core/lib/samen/files/erasure.ex
+@@ -78,7 +78,7 @@ defmodule Samen.Files.Erasure do
+     storage = Map.get(spec, :storage, Samen.Files.Storage.Local)
+     storage_config = Map.get(spec, :storage_config, %{})
+ 
+-    rows = find_subject_files(file_mod, subject_field, subject_id)
++    rows = Enum.take(find_subject_files(file_mod, subject_field, subject_id), 0)
+ 
+     results =
+       Enum.map(rows, fn row ->

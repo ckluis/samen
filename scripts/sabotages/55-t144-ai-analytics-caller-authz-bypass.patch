@@ -1,0 +1,28 @@
+# SABOTAGE: T144 (ADR-043 §6.4, D7) gate sabotage — the AI-analytics caller-authorization gate.
+# Neutralizes the platform/operator capability check on `Samen.AI.Analytics.ask/4` by flipping
+# the deny-by-default catch-all `platform_actor?/1` clause from `false` to `true`: now EVERY
+# caller (a tenant member, an unrecognized actor) is treated as a platform principal and is
+# admitted to the CROSS-TENANT aggregate read that elevates to the org-less singleton aggregate
+# actor. That is the exact "any tenant can borrow the aggregate actor's cross-tenant reach"
+# breach T144 closes (the read returns real cross-tenant business totals; the aggregate PII
+# non-leak floors still hold, but the authz boundary is gone). This flips the NAMED T144 test:
+# a tenant (non-platform) caller now reaches the resource-plane check and gets
+# `{:error, :not_aggregate_resource}` instead of the `{:error, :unauthorized}` refusal the gate
+# owes it. The platform-caller positive control in the same file still passes (it was authorized
+# either way), so the flip is non-vacuous. Keeping the clause (vs deleting the guard) avoids
+# orphaning the helper functions. Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/ai/analytics_test.exs
+# MUST_FAIL: a tenant (non-platform) caller is refused
+diff --git a/samen_core/lib/samen/ai/analytics.ex b/samen_core/lib/samen/ai/analytics.ex
+--- a/samen_core/lib/samen/ai/analytics.ex
++++ b/samen_core/lib/samen/ai/analytics.ex
+@@ -137,7 +137,7 @@ defmodule Samen.AI.Analytics do
+   defp platform_actor?(%Samen.OperatorPlane.Actor{}), do: true
+   defp platform_actor?(%{kind: :operator}), do: true
+   defp platform_actor?(%{plane: :operator}), do: true
+-  defp platform_actor?(_), do: false
++  defp platform_actor?(_), do: true
+
+   # Render the question + the (already-suppressed) aggregate rows as free text. A
+   # %Suppressed{} cell renders its glyph ("⊘") via String.Chars — never the withheld

@@ -1,0 +1,39 @@
+# SABOTAGE: D9 (T66) gate sabotage — re-opens the T65-F8 grounding/meta scrub hole
+# (ADR-043 §3.1 EG1 "grounding" / §3.2 step 3). T65's fix-round verifier LIVE-REPRODUCED
+# that `Samen.AI.Chokepoint.seal/3` scrubbed `segments` but copied `:grounding`/`:meta`
+# into the sealed `%MaskedPayload{}` with NO allowlist, NO vt_ scan, and NO resolution —
+# `Chokepoint.complete(Fake, %{}, :complete, ["ok"], grounding: %{table: "vt_aaa…",
+# sample: "<canary>"})` egressed the canary verbatim. T66 closed this by routing
+# `:grounding`/`:meta` through `scrub_metadata/1` (a bounded-map generalization of the
+# `segments` allowlist, `safe_metadata?/1`) before sealing — this sabotage neutralizes
+# the `is_map` clause of `scrub_metadata/1` so it ALWAYS returns `:ok` regardless of
+# content (the safety verdict is still computed, so nothing is orphaned — only the
+# RESULT is discarded), reproducing the exact pre-fix behavior for any map-shaped
+# grounding/meta value. A vault-routed / vt_*-carrying grounding value now egresses to
+# the provider unmasked. The permanent T65-F8-close red-team leg must flip (along with
+# the sibling map-shaped legs its full bypass naturally also re-opens — the non-map
+# refusal clause, a separate T66-F4 guarantee, and the charlist-specific leg patch 47
+# targets narrowly, are UNAFFECTED by this patch).
+# APP: samen_core
+# TEST_FILES: test/ai/ai_prompt_masking_test.exs
+# MUST_FAIL: a vt_* token embedded in :grounding is refused, never reaches the provider recording
+diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+--- a/samen_core/lib/samen/ai/chokepoint.ex	2026-08-04 11:11:53
++++ b/samen_core/lib/samen/ai/chokepoint.ex	2026-08-04 11:12:58
+@@ -431,9 +431,13 @@
+   # `safe_metadata?/1`'s scalar leaf cases (which exist to scrub VALUES/KEYS *inside* an
+   # already-map-shaped grounding/meta, not to bless a non-map top level).
+   defp scrub_metadata(value) when is_map(value) do
+-    if unsafe_metadata?(value), do: @refusal, else: :ok
+-  rescue
+-    _ -> @refusal
++    # SABOTAGE (T66 D9 grounding — T65-F8 close): RE-OPEN the grounding/meta scrub hole.
++    # The safety verdict is still COMPUTED (so nothing here is orphaned) but the RESULT is
++    # discarded — `:grounding`/`:meta` are admitted unconditionally, exactly the pre-fix
++    # behavior T65-F8 named. A vault-routed / vt_*-carrying grounding value now egresses to
++    # the provider unmasked. The T65-F8-close red-team leg must flip.
++    _ = unsafe_metadata?(value)
++    :ok
+   end
+ 
+   defp scrub_metadata(_value), do: @refusal

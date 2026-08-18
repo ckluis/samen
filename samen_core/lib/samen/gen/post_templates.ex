@@ -42,6 +42,124 @@ defmodule Samen.Gen.PostTemplates do
     """
   end
 
+  @doc """
+  The AUTHN-COVERAGE GUARD emitted by `mix samen.gen.scope` (W4-H2 defense-in-depth,
+  ADR-031). A failing-until-wired guard: it enumerates every PII-bearing tenant-plane
+  LiveView mount off THIS app's REAL compiled router and asserts each carries the
+  `@current_org_labels`/`:authn` seam — the prod gate that makes `Samen.Web.CurrentOrg`
+  fail CLOSED. The moment an author adds a business-domain mount WITHOUT
+  `labels: @current_org_labels`, this trips at `mix test`. Mirrors the framework
+  `Samen.Web.TenantAuthnCoverageTest` + `PawChart.TenantAuthnProdPathTest`, run against the
+  app's own router (routes are extracted, never hand-built, so a dropped seam flips it).
+  """
+  def tenant_authn_coverage_test do
+    """
+    defmodule <%= module %>Web.TenantAuthnCoverageTest do
+      @moduledoc \"\"\"
+      AUTHN-COVERAGE GUARD (emitted by `mix samen.gen.scope`; W4-H2 defense-in-depth, ADR-031).
+
+      Enumerates EVERY PII-bearing tenant-plane LiveView mount off this app's REAL compiled
+      router and asserts each carries the `@current_org_labels` `:authn` seam — the prod gate
+      that makes `Samen.Web.CurrentOrg.resolve/3` FAIL CLOSED (deny an unauthenticated `?org=`)
+      on an armed host. A tenant mount WITHOUT the seam is the live-reproduced pawchart
+      cross-tenant PII leak (dogfood W4 BLOCKER-1): an anonymous caller supplying any org UUID
+      reads unmasked business data.
+
+      This guard is the class-closer for THIS host. The moment you add a business-domain mount
+      (`samen_module_routes(:crm, <%= module %>.Crm, ...)` and friends) WITHOUT
+      `labels: @current_org_labels`, these assertions FAIL at `mix test` — you are GUIDED (see the
+      `mix samen.gen.scope` output) AND CAUGHT. Routes are extracted off the compiled router,
+      never hand-built, so a dropped seam flips this by construction.
+      \"\"\"
+      use ExUnit.Case, async: false
+
+      alias Samen.Web.CurrentOrg
+      alias Samen.Web.Mount
+
+      # The PII-bearing tenant-MODULE scope kinds. `:settings`/`:auth` identity mounts are the
+      # self-serve / pre-actor plane (no org actor) and are intentionally NOT in scope here.
+      @tenant_kinds ~w(crm billing support work marketing notifications files csv ics search)a
+
+      # A guessable-format org UUID an attacker supplies (the W4 vector). NOT the caller's own org.
+      @attacker_org "c1112d00-0000-4000-8000-0000000000fe"
+
+      setup do
+        prev = Application.get_env(:<%= otp_app %>, :auth_required?)
+
+        on_exit(fn ->
+          case prev do
+            nil -> Application.delete_env(:<%= otp_app %>, :auth_required?)
+            v -> Application.put_env(:<%= otp_app %>, :auth_required?, v)
+          end
+        end)
+
+        :ok
+      end
+
+      defp arm!, do: Application.put_env(:<%= otp_app %>, :auth_required?, true)
+      defp disarm!, do: Application.put_env(:<%= otp_app %>, :auth_required?, false)
+
+      test "every PII-bearing tenant mount carries the :authn seam (merge labels: @current_org_labels into any bare mount)" do
+        mounts = tenant_mounts()
+
+        assert length(mounts) >= 1,
+               "tenant-mount enumeration found nothing — the guard would be vacuous"
+
+        for {path, mount} <- mounts do
+          assert Mount.label(mount, :authn, nil) == {:app_env, :<%= otp_app %>, :auth_required?},
+                 "tenant mount \#{path} is missing the :authn seam — a bare `samen_*_routes` mount " <>
+                   "reopens the W4 cross-tenant PII leak. Merge `labels: @current_org_labels` into it."
+        end
+      end
+
+      test "armed host: EVERY tenant mount denies an unauthenticated ?org= (the W4 leak stays closed)" do
+        arm!()
+
+        for {path, mount} <- tenant_mounts() do
+          assert CurrentOrg.resolve(mount, %{"org" => @attacker_org}, %{"samen_current_org" => @attacker_org}) == nil,
+                 "ARMED tenant mount \#{path} resolved an org from an UNAUTHENTICATED ?org= — the leak is open"
+        end
+      end
+
+      test "REFUTABILITY: disarmed, the tenant mounts still trust the dev ?org= (the armed denial is non-vacuous)" do
+        disarm!()
+
+        for {path, mount} <- tenant_mounts() do
+          assert CurrentOrg.resolve(mount, %{"org" => @attacker_org}, %{}) == @attacker_org,
+                 "DISARMED tenant mount \#{path} dropped the dev ?org= convenience — refutability broken"
+        end
+      end
+
+      # Enumerate PII-bearing tenant LiveView mounts off the REAL compiled router, deduped per
+      # live_session (per distinct tenant mount adoption point) — the exact serialized
+      # `Samen.Web.Mount` each `live_session` threads through its session.
+      defp tenant_mounts do
+        <%= module %>Web.Router.__routes__()
+        |> Enum.filter(&Map.has_key?(&1.metadata, :phoenix_live_view))
+        |> Enum.map(fn route -> {route.path, live_session_name(route), mount_of(route)} end)
+        |> Enum.reject(fn {_path, _ls, mount} -> is_nil(mount) end)
+        |> Enum.filter(fn {_path, _ls, mount} -> mount.scope_kind in @tenant_kinds end)
+        |> Enum.uniq_by(fn {_path, ls, _mount} -> ls end)
+        |> Enum.map(fn {path, _ls, mount} -> {path, mount} end)
+      end
+
+      defp live_session_name(%{metadata: %{phoenix_live_view: {_view, _action, _opts, live_session}}}),
+        do: live_session[:name]
+
+      defp live_session_name(_), do: nil
+
+      defp mount_of(%{metadata: %{phoenix_live_view: {_view, _action, _opts, live_session}}}) do
+        case get_in(live_session, [:extra, :session]) do
+          %{"samen_mount" => raw} -> Mount.from_session(raw)
+          _ -> nil
+        end
+      end
+
+      defp mount_of(_), do: nil
+    end
+    """
+  end
+
   # ===========================================================================
   # mix samen.gen.resource — the Tier-0 resource module
   # ===========================================================================
@@ -57,8 +175,9 @@ defmodule Samen.Gen.PostTemplates do
       Malleability ladder (scope-authoring §7): org-scoped reads
       (`Samen.Policy.OrgScope`), **admin-gated writes** (`Samen.Policy.RoleAtLeast`,
       role `:admin` — the bounded-enum + admin-gated Tier-0 shape), a bounded-enum
-      `status`, plain non-PII label columns, and ONE scalar `pii do` vault field
-      (`pii_<%= abbrev %>_secret`) so the whole vault/mask/reveal path is exercised.
+      `status`, plain non-PII label columns, and ONE `pii do` vault field
+      (`<%= field_vault_column %>`, logical type `<%= field_ash_type %>`) so the
+      whole vault/mask/reveal path is exercised.
       Inherits the ENTIRE substrate (abbrev storage, vault routing, masking, OrgScope,
       catalog parity, audit, crypto-shred) via `use Samen.Resource` — zero vertical
       infrastructure code.
@@ -68,7 +187,7 @@ defmodule Samen.Gen.PostTemplates do
         domain: <%= scope_module %>,
         data_layer: AshPostgres.DataLayer,
         authorizers: [Ash.Policy.Authorizer],
-        abbrev: "<%= abbrev %>"
+        abbrev: "<%= abbrev %>"<%= archivable_opt %>
 
       postgres do
         table("<%= table %>")
@@ -90,7 +209,7 @@ defmodule Samen.Gen.PostTemplates do
 
       pii do
         vault(:pii_secret)
-        pii_attribute(:secret, :string, vault: :pii_secret)
+        pii_attribute(:secret, <%= field_ash_type %>, vault: :pii_secret)
         reveal(:reveal_<%= abbrev %>)
       end
 
@@ -158,9 +277,18 @@ defmodule Samen.Gen.PostTemplates do
     defmodule <%= module %>.Repo.Migrations.Add<%= resource %> do
       @moduledoc """
       Creates <%= module %>'s authored `<%= resource %>` table (<%= table %>, abbrev
-      `<%= abbrev %>`, scalar vault field pii_<%= abbrev %>_secret) and catalogs it in
+      `<%= abbrev %>`, vault field `<%= field_vault_column %>`) and catalogs it in
       the SAME migration transaction (ADR-004 catalog-in-tx). Emitted by
       `mix samen.gen.resource` (WS-D D7a).
+
+      ADR-036 H7 (T15): the vault column's NAME follows
+      `Samen.Transformers.MaterializePii`'s scalar-vs-composite routing
+      (`Samen.Gen.FieldTypeMenu.vault_column/2`) — `pii_<%= abbrev %>_secret` for
+      a scalar `--field-type` (the default `:string` and every H1-H3 scalar), or
+      `<%= abbrev %>_secret` (no `pii_` prefix) for a composite PII type
+      (`Samen.Type.Address`, H4) — matching the SAME convention
+      `FullName`/`Emails`/`Phones` use. This resource's `--field-type` is
+      `<%= field_type %>`.
       """
       use Samen.Migration
 
@@ -170,15 +298,15 @@ defmodule Samen.Gen.PostTemplates do
 
       def up do
         create table(:<%= table %>, primary_key: false) do
-          # Scalar pii_ vault field → column pii_<%= abbrev %>_secret (vt_* token):
-          add(:pii_<%= abbrev %>_secret, :text)
+          # 🔒 vault field (vt_* token) → column <%= field_vault_column %>:
+          add(:<%= field_vault_column %>, :text)
           add(:<%= abbrev %>_name, :text, null: false)
           add(:<%= abbrev %>_label, :text)
           add(:<%= abbrev %>_status, :text, default: "active")
           add(:<%= abbrev %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
           add(:<%= abbrev %>_org_id, :uuid, null: false)
           add(:<%= abbrev %>_inserted_at, :utc_datetime, null: false)
-          add(:<%= abbrev %>_updated_at, :utc_datetime, null: false)
+          add(:<%= abbrev %>_updated_at, :utc_datetime, null: false)<%= archived_at_migration_line %>
         end
 
         # ---- catalog the resource in THIS transaction ----
@@ -228,7 +356,7 @@ defmodule Samen.Gen.PostTemplates do
             name: "row-#{n}",
             label: "L#{n}",
             status: :active,
-            secret: "SECRET-<%= abbrev %>-#{n}"
+            secret: <%= field_dynamic_sample %>
           }
         end,
         update: {:update, %{label: "changed"}},
@@ -267,7 +395,7 @@ defmodule Samen.Gen.PostTemplates do
         attrs: fn org_id ->
           n = System.unique_integer([:positive])
           %{org_id: org_id, name: "gate-#{n}", label: "L#{n}", status: :active,
-            secret: "SECRET-<%= abbrev %>-#{n}"}
+            secret: <%= field_dynamic_sample %>}
         end
       )
     end
@@ -294,10 +422,10 @@ defmodule Samen.Gen.PostTemplates do
         resource: Resource,
         org: Org,
         fields: [:secret],
-        plaintexts: ["VAULT-PLAINTEXT-<%= abbrev %>-hunt"],
+        plaintexts: ["<%= field_vault_plaintext %>"],
         attrs: fn org_id ->
           %{org_id: org_id, name: "vault-row", status: :active,
-            secret: "VAULT-PLAINTEXT-<%= abbrev %>-hunt"}
+            secret: <%= field_vault_sample %>}
         end
       )
     end
@@ -417,6 +545,82 @@ defmodule Samen.Gen.PostTemplates do
   # otherwise). No hand-masking, no `vt_*` token ever reaches a template.
   # ===========================================================================
 
+  # ===========================================================================
+  # `--live --archivable` (ADR-040 §5.8, T37h) — the generated index LiveView's
+  # restore + archived-filter affordance. Pre-resolved snippets (Elixir string
+  # interpolation for `resource_path`, never a literal `<%= key %>` left for the
+  # OUTER single-pass `<%= key %>` engine to maybe-catch on a later binding — map
+  # iteration order over `Samen.Gen.App.render/2`'s bindings is not guaranteed).
+  # `false` clauses reproduce the exact pre-T37h plain-delete behavior.
+  # ===========================================================================
+
+  @doc false
+  def archivable_live_events(false, _resource_path), do: ""
+
+  def archivable_live_events(true, resource_path) do
+    "\n" <>
+      "      def handle_event(\"toggle_archived\", _params, socket) do\n" <>
+      "        show_archived = not Map.get(socket.assigns, :show_archived, false)\n" <>
+      "        {:noreply, socket |> assign(show_archived: show_archived) |> load(socket.assigns.org_id)}\n" <>
+      "      end\n" <>
+      "\n" <>
+      "      # FAIL-HONEST restore: navigate/refresh only when the restore actually happened.\n" <>
+      "      def handle_event(\"restore\", %{\"id\" => id}, socket) do\n" <>
+      "        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal])\n" <>
+      "\n" <>
+      "        case Enum.find(socket.assigns.records, &(to_string(&1.id) == id)) do\n" <>
+      "          nil ->\n" <>
+      "            {:noreply, socket}\n" <>
+      "\n" <>
+      "          record ->\n" <>
+      "            case Samen.Archival.restore(record, scope: scope) do\n" <>
+      "              {:ok, _} -> {:noreply, load(assign(socket, delete_error: nil), socket.assigns.org_id)}\n" <>
+      "              {:error, _} -> {:noreply, assign(socket, delete_error: \"Could not restore this #{resource_path}.\")}\n" <>
+      "            end\n" <>
+      "        end\n" <>
+      "      end"
+  end
+
+  @doc false
+  def archivable_live_toggle_button(false, _resource_path), do: ""
+
+  def archivable_live_toggle_button(true, resource_path) do
+    "<.button :if={not @no_org} phx-click=\"toggle_archived\" id=\"toggle-archived-#{resource_path}\">" <>
+      "{if @show_archived, do: \"Hide archived\", else: \"Show archived\"}</.button>"
+  end
+
+  @doc false
+  def archivable_live_row_action(false, _resource_path),
+    do: ~s(<.delete_confirm phx-click="delete" phx-value-id={r.id} />)
+
+  def archivable_live_row_action(true, resource_path) do
+    "<%= if r.archived_at do %>" <>
+      "<.pill variant=\"mut\">archived</.pill> " <>
+      "<.button phx-click=\"restore\" phx-value-id={r.id} class=\"restore-#{resource_path}\">Restore</.button>" <>
+      "<% else %><.delete_confirm phx-click=\"delete\" phx-value-id={r.id} /><% end %>"
+  end
+
+  @doc false
+  def archivable_read_records_fn(false) do
+    "defp read_records(scope, _show_archived?) do\n" <>
+      "        Resource\n" <>
+      "        |> Ash.read!(scope: scope)\n" <>
+      "      end"
+  end
+
+  def archivable_read_records_fn(true) do
+    "defp read_records(scope, true) do\n" <>
+      "        Resource\n" <>
+      "        |> Ash.Query.for_read(:archived)\n" <>
+      "        |> Ash.read!(scope: scope)\n" <>
+      "      end\n" <>
+      "\n" <>
+      "      defp read_records(scope, false) do\n" <>
+      "        Resource\n" <>
+      "        |> Ash.read!(scope: scope)\n" <>
+      "      end"
+  end
+
   @doc "The INDEX LiveView — a kit `data_table` list + a `modal`/`simple_form` create."
   def resource_index_live do
     ~S'''
@@ -426,10 +630,16 @@ defmodule Samen.Gen.PostTemplates do
       generated tenant-plane list screen on the `Samen.UI` kit (emitted by
       `mix samen.gen.resource --live`, WS-D D7a).
 
-      Self-contained after driftwood's `broker_live` idiom: `?org=<uuid>` selects the
-      tenant org (a LOCAL DOGFOOD convenience — a real deploy derives it from the
-      authenticated session), a `%Samen.Scope{}` carrying `plane: :tenant` scopes every
-      Ash read, and `Samen.Policy.OrgScope` confines the result to the acting org.
+      The acting org is resolved by `Samen.Web.CurrentOrg.resolve/3` from the SIGNED
+      SESSION, fail-closed (B-SEC / S12): on an armed app (`config :<%= otp_app %>,
+      auth_required?: true`) it comes from the authenticated principal's authorized
+      `Identity.Membership` set and a client `?org=` can only SELECT within it; while the
+      app is explicitly DISARMED the historical `?org=<uuid>` dogfood convenience still
+      applies. `handle_params/3` re-reads it through `CurrentOrg.reresolve/2` rather than
+      the raw param — `handle_params/3` runs on the initial DEAD RENDER, so trusting the
+      param there was an unauthenticated cross-tenant read. A `%Samen.Scope{}` carrying
+      `plane: :tenant` scopes every Ash read, and `Samen.Policy.OrgScope` confines the
+      result to the acting org.
       Writes are admin-gated in the kernel (`RoleAtLeast :admin`); the "New" affordance
       opens a `modal/1` hosting the `AshPhoenix.Form`-backed `simple_form/1` create. The
       resource carries a 🔒 vault field, resolved per plane through
@@ -442,15 +652,39 @@ defmodule Samen.Gen.PostTemplates do
 
       alias <%= resource_module %>, as: Resource
 
+      # B-SEC / S12 — the TENANT-AUTHN mount. `Samen.Web.CurrentOrg` needs a
+      # `%Samen.Web.Mount{}` to know (a) which app's `:auth_required?` flag arms the tenant
+      # gate and (b) which Identity namespace holds the `User`/`Membership` rows that define
+      # "the orgs this principal may act in". Both are compile-time facts of this app, so the
+      # mount is built once here. It is used for AUTHORIZATION ONLY — this screen reads its
+      # own `Resource` directly and never derives a resource module from it.
+      @samen_authn_mount Samen.Web.Mount.new(:settings, <%= module %>.Operator, <%= module %>.Repo,
+                           labels: %{
+                             otp_app: :<%= otp_app %>,
+                             authn: {:app_env, :<%= otp_app %>, :auth_required?}
+                           })
+
       @impl true
-      def mount(params, _session, socket) do
-        org_id = params["org"]
+      def mount(params, session, socket) do
+        # ADR-045 §4.4 — pin the authenticated principal (from the SIGNED session) so `scope/2`
+        # can derive the REAL Identity.Membership role on an armed app (S12), never a hardcoded rank.
+        socket =
+          assign(socket,
+            samen_mount: @samen_authn_mount,
+            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session)
+          )
+
+        org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
         {:ok, load(assign(socket, org_id: org_id), org_id)}
       end
 
+      # B-SEC / S1 — `handle_params/3` runs on the initial DEAD RENDER, so it must NOT
+      # re-derive identity from the client. `reresolve/2` honours a `?org=` only when it is
+      # one of the authenticated principal's authorized orgs (or the app is explicitly
+      # disarmed); otherwise the fail-closed org `mount/3` resolved stands.
       @impl true
       def handle_params(params, _uri, socket) do
-        org_id = params["org"] || socket.assigns.org_id
+        org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
         {:noreply, load(assign(socket, org_id: org_id), org_id)}
       end
 
@@ -464,13 +698,20 @@ defmodule Samen.Gen.PostTemplates do
           new_form: nil,
           delete_error: nil
         )
+        |> assign_new(:show_archived, fn -> false end)
       end
 
       def load(socket, org_id) do
-        scope = scope(org_id)
+        scope = scope(org_id, socket.assigns[:samen_principal])
+        show_archived = Map.get(socket.assigns, :show_archived, false)
 
         socket
-        |> assign(no_org: false, org_id: org_id, records: read_records(scope))
+        |> assign(
+          no_org: false,
+          org_id: org_id,
+          show_archived: show_archived,
+          records: read_records(scope, show_archived)
+        )
         |> assign_new(:show_new, fn -> false end)
         |> assign_new(:delete_error, fn -> nil end)
         |> assign(new_form: create_form(scope))
@@ -478,7 +719,7 @@ defmodule Samen.Gen.PostTemplates do
 
       @impl true
       def handle_event("new", _params, socket) do
-        {:noreply, assign(socket, show_new: true, new_form: create_form(scope(socket.assigns.org_id)))}
+        {:noreply, assign(socket, show_new: true, new_form: create_form(scope(socket.assigns.org_id, socket.assigns[:samen_principal])))}
       end
 
       def handle_event("cancel_new", _params, socket) do
@@ -504,7 +745,7 @@ defmodule Samen.Gen.PostTemplates do
 
       # FAIL-HONEST delete: navigate/refresh only when the destroy actually happened.
       def handle_event("delete", %{"id" => id}, socket) do
-        scope = scope(socket.assigns.org_id)
+        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal])
 
         case Enum.find(socket.assigns.records, &(to_string(&1.id) == id)) do
           nil ->
@@ -518,18 +759,35 @@ defmodule Samen.Gen.PostTemplates do
             end
         end
       end
-
+      <%= archivable_live_events %>
       # `?org=` selects the tenant org; the actor carries `plane: :tenant`, so its OWN
       # org's PII resolves in CLEAR through `Samen.Api.PiiResolution` (never hand-masked,
-      # never a `vt_*` token). `role: :admin` clears the kernel's admin write gate.
-      defp scope(org_id) do
-        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: :admin, plane: :tenant}}
+      # never a `vt_*` token). The role clears (or fails) the kernel's admin write gate per
+      # the caller's real membership on an armed app (see `role/2`).
+      # B-SEC / S12 · ADR-045 §4.4 — the acting scope. `org_id` is the SESSION-RESOLVED org
+      # (see `mount/3` and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`),
+      # never a raw `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the
+      # CALLER is authorized for. `principal` is the authenticated principal id pinned in `mount/3`.
+      defp scope(org_id, principal) do
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role(org_id, principal), plane: :tenant}}
       end
 
-      defp read_records(scope) do
-        Resource
-        |> Ash.read!(scope: scope)
+      # The acting role. DISARMED (`config :<%= otp_app %>, auth_required?: false`): the dev
+      # convenience (`:admin`), unchanged. ARMED: the principal's REAL `Identity.Membership` role
+      # via the framework (`Samen.Web.TenantRole.membership_role/3` — the SAME source of truth the
+      # settings surfaces use), fail-CLOSED to `:member` so admin-rank writes require ACTUAL admin
+      # membership rather than a hardcoded elevation, and a non-admin member's write is refused by
+      # the kernel `RoleAtLeast :admin` gate. Reads are unaffected — `OrgScope` confines by org_id
+      # regardless of role. This is the tenant-plane twin of the operator `dev_operator_role/2`
+      # convenience: `?org=` names the org, the SESSION names the principal, the Membership names
+      # the rank.
+      defp role(org_id, principal) do
+        if Samen.Web.CurrentOrg.tenant_gate_armed?(@samen_authn_mount),
+          do: Samen.Web.TenantRole.membership_role(@samen_authn_mount, org_id, principal),
+          else: :admin
       end
+
+      <%= archivable_read_records_fn %>
 
       defp create_form(scope) do
         Resource
@@ -554,6 +812,7 @@ defmodule Samen.Gen.PostTemplates do
 
             <.topbar title="<%= resource %>" crumbs={["<%= module %>", "<%= scope %>", "<%= resource %>"]}>
               <:actions>
+                <%= archivable_live_toggle_button %>
                 <.button :if={not @no_org} variant="primary" phx-click="new" id="new-<%= resource_path %>">New <%= resource %></.button>
               </:actions>
             </.topbar>
@@ -592,7 +851,7 @@ defmodule Samen.Gen.PostTemplates do
                       </td>
                       <td style="color:var(--muted)">{r.label || "—"}</td>
                       <td><.pill variant={status_variant(r.status)}>{r.status}</.pill></td>
-                      <td><.delete_confirm phx-click="delete" phx-value-id={r.id} /></td>
+                      <td><%= archivable_live_row_action %></td>
                     </tr>
                   </.data_table>
                 <% end %>
@@ -647,16 +906,40 @@ defmodule Samen.Gen.PostTemplates do
 
       alias <%= resource_module %>, as: Resource
 
+      # B-SEC / S12 — the TENANT-AUTHN mount. `Samen.Web.CurrentOrg` needs a
+      # `%Samen.Web.Mount{}` to know (a) which app's `:auth_required?` flag arms the tenant
+      # gate and (b) which Identity namespace holds the `User`/`Membership` rows that define
+      # "the orgs this principal may act in". Both are compile-time facts of this app, so the
+      # mount is built once here. It is used for AUTHORIZATION ONLY — this screen reads its
+      # own `Resource` directly and never derives a resource module from it.
+      @samen_authn_mount Samen.Web.Mount.new(:settings, <%= module %>.Operator, <%= module %>.Repo,
+                           labels: %{
+                             otp_app: :<%= otp_app %>,
+                             authn: {:app_env, :<%= otp_app %>, :auth_required?}
+                           })
+
       @impl true
-      def mount(params, _session, socket) do
-        org_id = params["org"]
+      def mount(params, session, socket) do
+        # ADR-045 §4.4 — pin the authenticated principal so `scope/2`'s write path derives the
+        # REAL Identity.Membership role on an armed app (S12), never a hardcoded rank.
+        socket =
+          assign(socket,
+            samen_mount: @samen_authn_mount,
+            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session)
+          )
+
+        org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
         id = params["id"]
         {:ok, load(assign(socket, org_id: org_id, id: id), org_id, id)}
       end
 
+      # B-SEC / S1 — see the index screen: the ORG is never re-derived from the client here
+      # (`reresolve/2` validates a `?org=` against the principal's authorized set). The record
+      # `:id` stays a param — it is a TARGET, and a cross-org id reads zero rows under
+      # `Samen.Policy.OrgScope`, which is the correct "no existence oracle" posture.
       @impl true
       def handle_params(params, _uri, socket) do
-        org_id = params["org"] || socket.assigns.org_id
+        org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
         id = params["id"] || socket.assigns.id
         {:noreply, load(assign(socket, org_id: org_id, id: id), org_id, id)}
       end
@@ -673,7 +956,7 @@ defmodule Samen.Gen.PostTemplates do
 
       @impl true
       def handle_event("delete", %{"id" => id}, socket) do
-        scope = scope(socket.assigns.org_id)
+        scope = scope(socket.assigns.org_id, socket.assigns[:samen_principal])
 
         case fetch(socket.assigns.org_id, id) do
           nil ->
@@ -696,15 +979,34 @@ defmodule Samen.Gen.PostTemplates do
         Resource
         |> Ash.Query.filter(id == ^id)
         |> Ash.Query.ensure_selected([:secret])
-        |> Ash.read_one(scope: scope(org_id))
+        |> Ash.read_one(scope: scope(org_id, nil))
         |> case do
           {:ok, record} -> record
           {:error, _} -> nil
         end
       end
 
-      defp scope(org_id) do
-        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: :admin, plane: :tenant}}
+      # B-SEC / S12 · ADR-045 §4.4 — the acting scope. `org_id` is the SESSION-RESOLVED org
+      # (see `mount/3` and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`),
+      # never a raw `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the
+      # CALLER is authorized for. `principal` is the authenticated principal id pinned in `mount/3`.
+      defp scope(org_id, principal) do
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role(org_id, principal), plane: :tenant}}
+      end
+
+      # The acting role. DISARMED (`config :<%= otp_app %>, auth_required?: false`): the dev
+      # convenience (`:admin`), unchanged. ARMED: the principal's REAL `Identity.Membership` role
+      # via the framework (`Samen.Web.TenantRole.membership_role/3` — the SAME source of truth the
+      # settings surfaces use), fail-CLOSED to `:member` so admin-rank writes require ACTUAL admin
+      # membership rather than a hardcoded elevation, and a non-admin member's write is refused by
+      # the kernel `RoleAtLeast :admin` gate. Reads are unaffected — `OrgScope` confines by org_id
+      # regardless of role. This is the tenant-plane twin of the operator `dev_operator_role/2`
+      # convenience: `?org=` names the org, the SESSION names the principal, the Membership names
+      # the rank.
+      defp role(org_id, principal) do
+        if Samen.Web.CurrentOrg.tenant_gate_armed?(@samen_authn_mount),
+          do: Samen.Web.TenantRole.membership_role(@samen_authn_mount, org_id, principal),
+          else: :admin
       end
 
       defp index_path(org_id), do: "/<%= scope_path %>/<%= resource_path %>?org=#{org_id}"
@@ -764,7 +1066,7 @@ defmodule Samen.Gen.PostTemplates do
                       </tr>
                       <tr style="border-bottom:1px solid var(--border)">
                         <td style="padding:10px 0;color:var(--muted)">Secret <small style="font-weight:400">(🔒 PII — resolved per plane)</small></td>
-                        <td style="padding:10px 0" class="d-secret">{@record.secret}</td>
+                        <td style="padding:10px 0" class="d-secret">{render_secret(@record.secret)}</td>
                       </tr>
                     </table>
                   </div>
@@ -780,6 +1082,16 @@ defmodule Samen.Gen.PostTemplates do
       defp status_variant(:paused), do: "warn"
       defp status_variant(:archived), do: "mut"
       defp status_variant(_), do: "mut"
+
+      # ADR-036 H7 (T15): the 🔒 field's plane-resolved value can be `%Samen.Masked{}`
+      # (already Phoenix.HTML.Safe — "••••"), a plain string (URL/email/phone/nil),
+      # or — for the H1/H2/H4 menu types — a struct/Decimal (Money/Address/Percent/
+      # Score) Phoenix.HTML.Safe has no built-in impl for. `inspect/1` renders any of
+      # those safely as text (never raises); binaries/Masked pass through untouched.
+      defp render_secret(nil), do: ""
+      defp render_secret(%Samen.Masked{} = m), do: m
+      defp render_secret(v) when is_binary(v), do: v
+      defp render_secret(v), do: inspect(v)
     end
     '''
   end
@@ -808,9 +1120,29 @@ defmodule Samen.Gen.PostTemplates do
 
       alias <%= resource_module %>, as: Resource
 
+      # B-SEC / S12 — the TENANT-AUTHN mount. `Samen.Web.CurrentOrg` needs a
+      # `%Samen.Web.Mount{}` to know (a) which app's `:auth_required?` flag arms the tenant
+      # gate and (b) which Identity namespace holds the `User`/`Membership` rows that define
+      # "the orgs this principal may act in". Both are compile-time facts of this app, so the
+      # mount is built once here. It is used for AUTHORIZATION ONLY — this screen reads its
+      # own `Resource` directly and never derives a resource module from it.
+      @samen_authn_mount Samen.Web.Mount.new(:settings, <%= module %>.Operator, <%= module %>.Repo,
+                           labels: %{
+                             otp_app: :<%= otp_app %>,
+                             authn: {:app_env, :<%= otp_app %>, :auth_required?}
+                           })
+
       @impl true
-      def mount(params, _session, socket) do
-        org_id = params["org"]
+      def mount(params, session, socket) do
+        # ADR-045 §4.4 — pin the authenticated principal so the create/update form scope derives
+        # the REAL Identity.Membership role on an armed app (S12), never a hardcoded rank.
+        socket =
+          assign(socket,
+            samen_mount: @samen_authn_mount,
+            samen_principal: Samen.Web.CurrentOrg.principal_id(@samen_authn_mount, session)
+          )
+
+        org_id = Samen.Web.CurrentOrg.resolve(@samen_authn_mount, params, session)
         id = params["id"]
         action = if id, do: :edit, else: :new
         {:ok, load(assign(socket, org_id: org_id, id: id, action: action), org_id, id, action)}
@@ -820,7 +1152,7 @@ defmodule Samen.Gen.PostTemplates do
       def load(socket, nil, _id, action), do: assign(socket, no_org: true, action: action, record: nil, form: nil)
 
       def load(socket, org_id, nil, _action) do
-        assign(socket, no_org: false, action: :new, record: nil, form: create_form(scope(org_id)))
+        assign(socket, no_org: false, action: :new, record: nil, form: create_form(scope(org_id, socket.assigns[:samen_principal])))
       end
 
       def load(socket, org_id, id, _action) do
@@ -829,7 +1161,7 @@ defmodule Samen.Gen.PostTemplates do
             assign(socket, no_org: false, action: :edit, record: nil, form: nil)
 
           record ->
-            assign(socket, no_org: false, action: :edit, record: record, form: update_form(record, scope(org_id)))
+            assign(socket, no_org: false, action: :edit, record: record, form: update_form(record, scope(org_id, socket.assigns[:samen_principal])))
         end
       end
 
@@ -840,7 +1172,7 @@ defmodule Samen.Gen.PostTemplates do
         Resource
         |> Ash.Query.filter(id == ^id)
         |> Ash.Query.ensure_selected([:secret])
-        |> Ash.read_one(scope: scope(org_id))
+        |> Ash.read_one(scope: scope(org_id, nil))
         |> case do
           {:ok, record} -> record
           {:error, _} -> nil
@@ -862,8 +1194,27 @@ defmodule Samen.Gen.PostTemplates do
         end
       end
 
-      defp scope(org_id) do
-        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: :admin, plane: :tenant}}
+      # B-SEC / S12 · ADR-045 §4.4 — the acting scope. `org_id` is the SESSION-RESOLVED org
+      # (see `mount/3` and `handle_params/3`, which both go through `Samen.Web.CurrentOrg`),
+      # never a raw `?org=`, so `Samen.Policy.OrgScope` confines every read/write to an org the
+      # CALLER is authorized for. `principal` is the authenticated principal id pinned in `mount/3`.
+      defp scope(org_id, principal) do
+        %Samen.Scope{actor: %{id: "ui:" <> to_string(org_id), org_id: org_id, role: role(org_id, principal), plane: :tenant}}
+      end
+
+      # The acting role. DISARMED (`config :<%= otp_app %>, auth_required?: false`): the dev
+      # convenience (`:admin`), unchanged. ARMED: the principal's REAL `Identity.Membership` role
+      # via the framework (`Samen.Web.TenantRole.membership_role/3` — the SAME source of truth the
+      # settings surfaces use), fail-CLOSED to `:member` so admin-rank writes require ACTUAL admin
+      # membership rather than a hardcoded elevation, and a non-admin member's write is refused by
+      # the kernel `RoleAtLeast :admin` gate. Reads are unaffected — `OrgScope` confines by org_id
+      # regardless of role. This is the tenant-plane twin of the operator `dev_operator_role/2`
+      # convenience: `?org=` names the org, the SESSION names the principal, the Membership names
+      # the rank.
+      defp role(org_id, principal) do
+        if Samen.Web.CurrentOrg.tenant_gate_armed?(@samen_authn_mount),
+          do: Samen.Web.TenantRole.membership_role(@samen_authn_mount, org_id, principal),
+          else: :admin
       end
 
       defp create_form(scope) do

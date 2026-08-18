@@ -151,6 +151,205 @@ defmodule Samen.Gen.PostTest do
       # One past the latest existing migration (20260709100000).
       assert r.migration_ts == "20260709100001"
     end
+
+    test "field_type defaults to \"string\" (byte-identical to pre-T15 output)" do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+
+      r = Post.build_resource_spec(app_dir: dir, scope: "Crm", resource: "Widget", abbrev: "wdg")
+      assert r.field_type == "string"
+      assert Post.resource_bindings(r)["field_ash_type"] == ":string"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # ADR-036 H7 (T15) — the `--field-type` full type menu (Samen.Gen.FieldTypeMenu).
+  # The end-to-end "a resource generated with every menu type compiles and passes
+  # its generated tests" claim is covered by `priv/gen_resource_type_menu_probe.exs`
+  # (done-criterion 2); this describe block is the pure, hermetic unit coverage of
+  # the spec-derivation + binding + fail-closed-validation seam.
+  # ---------------------------------------------------------------------------
+  describe "--field-type (ADR-036 H7/T15 type menu)" do
+    setup do
+      dir = fake_app!()
+      Post.write_scope!(Post.build_scope_spec(app_dir: dir, scope: "Crm"))
+      {:ok, dir: dir}
+    end
+
+    test "the menu has exactly the ten ADR-036 kinds" do
+      assert Samen.Gen.FieldTypeMenu.menu() == ~w(
+        string money percent score duration priority url email phone address
+      )
+    end
+
+    test "every menu entry derives a valid spec + non-empty bindings", %{dir: dir} do
+      for field_type <- Samen.Gen.FieldTypeMenu.menu() do
+        r =
+          Post.build_resource_spec(
+            app_dir: dir,
+            scope: "Crm",
+            resource: "Widget",
+            abbrev: "wdg",
+            field_type: field_type
+          )
+
+        assert r.field_type == field_type
+        assert Post.validate_resource!(r, %{}) == :ok
+
+        b = Post.resource_bindings(r)
+        assert b["field_ash_type"] == Samen.Gen.FieldTypeMenu.ash_type(field_type)
+        assert is_binary(b["field_dynamic_sample"]) and b["field_dynamic_sample"] != ""
+        assert is_binary(b["field_vault_sample"]) and b["field_vault_sample"] != ""
+        assert is_binary(b["field_vault_plaintext"]) and b["field_vault_plaintext"] != ""
+        # The vault_routing_test plaintext-hunt marker must be a genuine substring of
+        # what vault_sample/2 actually writes, or the emitted test would be vacuous.
+        assert b["field_vault_sample"] =~ b["field_vault_plaintext"]
+      end
+    end
+
+    test "red: an unknown --field-type is refused (closed-world, fail-closed)", %{dir: dir} do
+      r =
+        Post.build_resource_spec(
+          app_dir: dir,
+          scope: "Crm",
+          resource: "Widget",
+          abbrev: "wdg",
+          field_type: "geopoint"
+        )
+
+      assert_raise ArgumentError, ~r/--field-type must be one of/, fn ->
+        Post.validate_resource!(r, %{})
+      end
+    end
+
+    test "write_resource!/1 with field_type: \"money\" emits the Money pii_attribute + type-valid samples",
+         %{dir: dir} do
+      r =
+        Post.build_resource_spec(
+          app_dir: dir,
+          scope: "Crm",
+          resource: "Widget",
+          abbrev: "wdg",
+          field_type: "money"
+        )
+
+      Post.validate_resource!(r, %{})
+      Post.write_resource!(r)
+
+      resource_src = File.read!(Path.join(dir, "lib/widgetco/crm/widget.ex"))
+      assert resource_src =~ "pii_attribute(:secret, Samen.Type.Money, vault: :pii_secret)"
+
+      policy = File.read!(Path.join(dir, "test/crm_widget_policy_matrix_test.exs"))
+      assert policy =~ ~s(secret: "USD 12.34")
+      refute policy =~ "SECRET-wdg-"
+
+      rbac = File.read!(Path.join(dir, "test/crm_widget_rbac_red_path_test.exs"))
+      assert rbac =~ ~s(secret: "USD 12.34")
+
+      vault = File.read!(Path.join(dir, "test/crm_widget_vault_routing_test.exs"))
+      assert vault =~ ~s(secret: "EUR 500123.87")
+      assert vault =~ ~s(plaintexts: ["EUR 500123.87"])
+
+      # attempt-2 regression guard: Money is SCALAR — the physical vault column
+      # keeps the pii_ prefix (matches MaterializePii's scalar routing, D3).
+      migration_file = Path.join(dir, "priv/repo/migrations/#{r.migration_ts}_add_widget.exs")
+      migration_src = File.read!(migration_file)
+      assert migration_src =~ "add(:pii_wdg_secret, :text)"
+      refute migration_src =~ "add(:wdg_secret, :text)"
+    end
+
+    test "write_resource!/1 with field_type: \"address\" emits a map-literal sample (not a quoted string)",
+         %{dir: dir} do
+      r =
+        Post.build_resource_spec(
+          app_dir: dir,
+          scope: "Crm",
+          resource: "Widget",
+          abbrev: "wdg",
+          field_type: "address"
+        )
+
+      Post.validate_resource!(r, %{})
+      Post.write_resource!(r)
+
+      resource_src = File.read!(Path.join(dir, "lib/widgetco/crm/widget.ex"))
+      assert resource_src =~ "pii_attribute(:secret, Samen.Type.Address, vault: :pii_secret)"
+
+      policy = File.read!(Path.join(dir, "test/crm_widget_policy_matrix_test.exs"))
+      assert policy =~ ~s(secret: %{line1: "123 Test St",)
+
+      vault = File.read!(Path.join(dir, "test/crm_widget_vault_routing_test.exs"))
+      assert vault =~ ~s(secret: %{line1: "999 Vault Ave",)
+      assert vault =~ ~s(plaintexts: ["999 Vault Ave"])
+
+      # attempt-2 REGRESSION GUARD (the T15 attempt-1 defect a concurrent-task
+      # abbrev-collision fix finally let `gen_resource_type_menu_probe.exs`
+      # reach): Address is COMPOSITE — Samen.Transformers.MaterializePii routes
+      # it with NO `pii_` column prefix (D4). The migration must create the
+      # SAME physical column the resource actually materializes to, or
+      # `mix samen.verify.catalog_parity` fails on the mismatch.
+      migration_file = Path.join(dir, "priv/repo/migrations/#{r.migration_ts}_add_widget.exs")
+      migration_src = File.read!(migration_file)
+      assert migration_src =~ "add(:wdg_secret, :text)"
+      refute migration_src =~ "add(:pii_wdg_secret, :text)"
+    end
+
+    # A distinct, valid 3-letter abbrev per menu entry (this describe block's own
+    # `dir` fixture starts with an empty abbrev history — no collision risk).
+    @menu_abbrevs %{
+      "string" => "wds",
+      "money" => "wdm",
+      "percent" => "wdp",
+      "score" => "wdc",
+      "duration" => "wdu",
+      "priority" => "wdy",
+      "url" => "wdl",
+      "email" => "wde",
+      "phone" => "wdh",
+      "address" => "wda"
+    }
+
+    test "the migration's vault column name matches Samen.Transformers.MaterializePii's routing for EVERY menu entry",
+         %{dir: dir} do
+      for field_type <- Samen.Gen.FieldTypeMenu.menu() do
+        resource_name = "Widget#{Macro.camelize(field_type)}"
+        abbrev = Map.fetch!(@menu_abbrevs, field_type)
+
+        r =
+          Post.build_resource_spec(
+            app_dir: dir,
+            scope: "Crm",
+            resource: resource_name,
+            abbrev: abbrev,
+            field_type: field_type
+          )
+
+        Post.validate_resource!(r, %{})
+        Post.write_resource!(r)
+
+        migration_file =
+          Path.join(
+            dir,
+            "priv/repo/migrations/#{r.migration_ts}_add_#{Macro.underscore(resource_name)}.exs"
+          )
+
+        migration_src = File.read!(migration_file)
+        expected_column = Samen.Gen.FieldTypeMenu.vault_column(field_type, abbrev)
+
+        assert migration_src =~ "add(:#{expected_column}, :text)",
+               "field_type #{field_type}: expected the migration to create #{expected_column}, " <>
+                 "got:\n#{migration_src}"
+
+        # The scalar/composite split is exactly {address} vs everything else in
+        # THIS menu — an explicit anti-tautology check that the predicate isn't
+        # vacuously true for every entry.
+        if field_type == "address" do
+          assert expected_column == "#{abbrev}_secret"
+        else
+          assert expected_column == "pii_#{abbrev}_secret"
+        end
+      end
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -388,8 +587,11 @@ defmodule Samen.Gen.PostTest do
 
       show = File.read!(Path.join(dir, "lib/widgetco_web/crm/widget_show_live.ex"))
       assert show =~ "defmodule WidgetcoWeb.Crm.WidgetShowLive do"
-      # The 🔒 field is rendered straight from the already-resolved read record.
-      assert show =~ "{@record.secret}"
+      # The 🔒 field is rendered straight from the already-resolved read record
+      # (through the type-safe `render_secret/1` helper — ADR-036 H7/T15: the plane-
+      # resolved value can be a non-Phoenix.HTML.Safe struct/Decimal for some menu
+      # types, e.g. Money/Address/Percent, not just a Masked/binary/nil).
+      assert show =~ "{render_secret(@record.secret)}"
 
       form = File.read!(Path.join(dir, "lib/widgetco_web/crm/widget_form_live.ex"))
       assert form =~ "defmodule WidgetcoWeb.Crm.WidgetFormLive do"

@@ -1,0 +1,22 @@
+# SABOTAGE: D6 — the DSAR grant gate reverts to a CALLER-ASSERTED boolean. The fix makes
+# operator-plane plaintext derive from the REAL reveal grant model (`Reveal.grant_checker/0`,
+# distinct-party) — a caller can NOT pass `grant?: true` to force plaintext without an actual
+# grant. This sabotage OR-s the caller boolean back in, so `grant?: true` with NO real grant
+# dumps plaintext across the plane boundary — the exact hole the fix closed. The grant red path
+# MUST flip: the operator export's masked (RED) half now resolves plaintext.
+# APP: samen_core
+# TEST_FILES: test/dsar_org_binding_test.exs
+# MUST_FAIL: operator export flips MASKED → PLAINTEXT purely by a genuine distinct-party grant
+diff --git a/samen_core/lib/samen/dsar.ex b/samen_core/lib/samen/dsar.ex
+--- a/samen_core/lib/samen/dsar.ex
++++ b/samen_core/lib/samen/dsar.ex
+@@ -161,7 +161,8 @@
+   defp real_grant?(subject_id, actor, opts) do
+     grant = Keyword.get(opts, :grant, Reveal.grant_checker())
+ 
+-    grant.granted?(%Context{
++    Keyword.get(opts, :grant?, false) or
++      grant.granted?(%Context{
+       actor: actor,
+       subject_id: subject_id,
+       resource: __MODULE__,

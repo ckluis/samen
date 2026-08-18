@@ -2,7 +2,47 @@ defmodule Acme.Repo.Migrations.AudEvent do
   @moduledoc "T2.2: the aud_event append-only event/audit tier."
   use Ecto.Migration
 
-  @app_role Application.compile_env(:acme, :aud_event_app_role, "clank")
+  # The Postgres role the app CONNECTS as — the REVOKE UPDATE/DELETE target that makes
+  # aud_event append-only for the app (a superuser/owner bypasses it, by design). Resolved at
+  # MIGRATION TIME (ADR-045 §4.2, O4) — NEVER a hardcoded developer laptop role, which would
+  # ship a `REVOKE ... FROM <someone's-laptop-role>` into every adopter's prod migration:
+  #   1. the explicit `:aud_event_app_role` knob (what a real prod deploy sets — see the deploy
+  #      runbook's Operator TODO), else
+  #   2. the repo's CONFIGURED `:username` (the role this app actually connects as in dev/CI),
+  #      else
+  #   3. RAISE a named error — refusing to guess a role, since a REVOKE against the WRONG role
+  #      silently leaves aud_event mutable for the real app role (an audit-integrity gap).
+  defp app_role do
+    case Application.get_env(:acme, :aud_event_app_role) do
+      role when is_binary(role) and role != "" ->
+        role
+
+      _ ->
+        repo_username =
+          :acme
+          |> Application.get_env(Acme.Repo, [])
+          |> Keyword.get(:username)
+
+        case repo_username do
+          role when is_binary(role) and role != "" ->
+            role
+
+          _ ->
+            raise """
+            #{inspect(__MODULE__)}: cannot determine the Postgres app role for the aud_event
+            REVOKE UPDATE, DELETE grant.
+
+            Set it explicitly (the deploy runbook's `aud_event_app_role` step):
+
+                config :acme, :aud_event_app_role, "your_app_db_role"
+
+            It could not be derived from the repo's configured :username either. Refusing to
+            emit an arbitrary role — a REVOKE against the wrong role would silently leave
+            aud_event mutable for the real app role (an audit-integrity gap).
+            """
+        end
+    end
+  end
 
   @resource "Samen.AuditEvent"
   @table "aud_event"
@@ -65,10 +105,10 @@ defmodule Acme.Repo.Migrations.AudEvent do
     "DROP TRIGGER IF EXISTS aud_event_append_only_tg ON aud_event"
 
     execute """
-    REVOKE UPDATE, DELETE ON aud_event FROM #{@app_role}
+    REVOKE UPDATE, DELETE ON aud_event FROM #{app_role()}
     """,
     """
-    GRANT UPDATE, DELETE ON aud_event TO #{@app_role}
+    GRANT UPDATE, DELETE ON aud_event TO #{app_role()}
     """
 
     execute """
@@ -103,7 +143,7 @@ defmodule Acme.Repo.Migrations.AudEvent do
 
     execute "DELETE FROM tam_table WHERE tam_table_name = '#{@table}'"
 
-    execute "GRANT UPDATE, DELETE ON aud_event TO #{@app_role}"
+    execute "GRANT UPDATE, DELETE ON aud_event TO #{app_role()}"
     execute "DROP TRIGGER IF EXISTS aud_event_append_only_tg ON aud_event"
     execute "DROP FUNCTION IF EXISTS aud_event_enforce_append_only()"
     execute "DROP INDEX IF EXISTS aud_event_brin_occurred_at"

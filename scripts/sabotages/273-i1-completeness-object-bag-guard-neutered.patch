@@ -1,0 +1,25 @@
+# SABOTAGE: I1 (ADR-046 §8 residual #2 / §6 gate) — the erasure-completeness gate's
+# custom-OBJECT record-bag guard arm is neutered: `check_custom_bag/2` NEVER raises the
+# object-bag-guard violation (`add_if` condition forced to `false`). So even if the
+# `tnt$obj$…` define-time erasability guard is disabled, the gate says nothing — a
+# pii_declared custom-object field could ship un-erasable with no gate objection, exactly
+# the coverage this arm exists to assert. Flips the arm's refutability proof (a modeled
+# neutered object-guard must be NAMED unenforced) while the mechanism report field and the
+# first-class bag rungs stay green.
+# APP: samen_core
+# TEST_FILES: test/erasure/completeness_test.exs
+# MUST_FAIL: the custom-OBJECT record-bag guard arm is REFUTABLE
+diff --git a/samen_core/lib/samen/erasure/completeness.ex b/samen_core/lib/samen/erasure/completeness.ex
+--- a/samen_core/lib/samen/erasure/completeness.ex
++++ b/samen_core/lib/samen/erasure/completeness.ex
+@@ -412,7 +412,9 @@ defmodule Samen.Erasure.Completeness do
+           "pii_declared bag could ship UN-ERASABLE (no `:custom_bag_erasure_specs` arm)."
+       )
+       |> add_if(
+-        not object_guard_ok?,
++        # SABOTAGE: the custom-OBJECT record-bag guard violation is never raised — a
++        # pii_declared tnt$obj$ field could ship un-erasable and the gate stays silent.
++        false,
+         "custom-OBJECT record-bag ERASURE guard not enforced: `Samen.CustomFields.define_field/2` " <>
+           "no longer REFUSES a `pii_declared: true` field on a `tnt$obj$…` object table — a " <>
+           "custom object's `tnt_record` bag could ship UN-ERASABLE (no `:record_bag_erasure_specs` " <>

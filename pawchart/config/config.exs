@@ -1,5 +1,11 @@
 import Config
 
+# ADR-036 D1 / ADR-037 §5.2: AshMoney/ex_money wiring (CRM Opportunity / Billing
+# Price Money attributes). No FX feature — the background exchange-rate poller
+# stays off.
+config :ash, :known_types, [AshMoney.Types.Money]
+config :ex_money, auto_start_exchange_rate_service: false
+
 # PawChart — the Phase-6 second-vertical thin slice (T6.2), the reuse-measurement
 # probe. MOUNTS the samen_core Billing scope AS-IS (plain subscriptions, NO reshape),
 # AUTHORS the vertical Clinical resources (Patient / Pet), and DEFINES a Tier-2
@@ -10,11 +16,20 @@ config :pawchart,
     PawChart.Crm,
     PawChart.Billing,
     PawChart.Support,
+    PawChart.Work,
+    PawChart.Calendar,
+    PawChart.Docs,
+    PawChart.Tags,
+    PawChart.Locations,
+    PawChart.SalesOps,
     PawChart.Marketing,
     PawChart.Clinic,
     PawChart.Aggregate,
     PawChart.Primitives,
-    PawChart.Analytics
+    PawChart.Analytics,
+    # T157 — the ADR-010 OPERATOR namespace (a SECOND Identity+Billing+Support mount over the
+    # SaaS's OWN book of business: the clinic ACCOUNTS + their admins + subscriptions + desk).
+    PawChart.Operator
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…) discover
@@ -25,12 +40,56 @@ config :samen_core, :ash_domains, [
   PawChart.Crm,
   PawChart.Billing,
   PawChart.Support,
+  PawChart.Work,
+  PawChart.Calendar,
+  PawChart.Docs,
+  PawChart.Tags,
+  PawChart.Locations,
+  PawChart.SalesOps,
   PawChart.Marketing,
   PawChart.Clinic,
   PawChart.Aggregate,
   PawChart.Primitives,
-  PawChart.Analytics
+  PawChart.Analytics,
+  # T157 — register the operator namespace so the verifier gate scans its mounted
+  # Identity/Billing/Support resources (catalog_parity / prefixes / pii_* / vault parity).
+  PawChart.Operator
 ]
+
+# T157 (ADR-010) — the well-known OPERATOR org id (the SaaS company's own org). The operator
+# workspace (`/operator/accounts` · `/billing` · `/revenue` · `/desk`) scopes to this org over
+# its OWN book of business on the TENANT plane (the clinics-as-customers + their admins, CLEAR).
+# `Samen.Web.Operator.org_id/1` resolves it: label → this app-env → single seeded row.
+config :pawchart, operator_org_id: "0f000000-0000-4000-8000-0000000000c1"
+
+# F2 / ADR-031 — the prod auth arm, ARMED BY DEFAULT IN PROD (ADR-045 §2 V-F1, Option A). OFF
+# for the local dogfood (dev/test keep the query-param convenience identity); prod derives the
+# tenant actor ONLY from an authenticated session and provisions the operator roster below. This
+# is EXPLICIT here AND enforced by the framework env-aware default + the `Samen.Web.TenantGate`
+# boot guard (a prod host that is disarmed refuses to boot).
+config :pawchart, auth_required?: config_env() == :prod
+
+# T146 / T157 — the operator-ROLE authority seam (`Samen.Web.Operator.Authz` on_mount +
+# `Samen.Web.AuthGate` conn pipeline). Called with the authenticated principal id appended;
+# returns an operator role (`Samen.OperatorPlane.Actor.roles/0`) or `nil` (NOT an operator →
+# refused). `PawChart.Auth.operator_role/2` resolves a REAL configured `:operator_roster`
+# (below) FIRST; a dev-only `:operator_admin` grant applies ONLY while `:auth_required?` is
+# false AND the principal is absent from the roster. The seam is the REAL resolver, NOT the
+# framework `Samen.Web.Operator.Authz.dev_operator_role/2` dev fallback (T157 done-criterion).
+config :pawchart, :operator_authority, {PawChart.Auth, :operator_role, [:pawchart]}
+
+# T157 — a REAL operator roster (not the dev fallback): the seeded platform operator principal
+# holds `:operator_support`. Proves the roster path grants a listed principal and refuses an
+# unlisted one EVEN when the dev fallback is disarmed (`auth_required?: true`). A production
+# deploy provisions this (or swaps `operator_role/2` for real operator `Membership` rows).
+config :pawchart, :operator_roster, %{
+  "op-pawchart-platform" => :operator_support
+}
+
+# T157 — masked impersonation over PawChart clinic tenants: the repo backing impersonation
+# sessions. An operator opens a bounded, reason-required session over ONE clinic org and sees
+# its REAL patient/pet roster with PII masked (••••).
+config :samen_core, :impersonation_repo, PawChart.Repo
 
 # WS-A A4/A5 — the kernel notification ENGINE (`Samen.Notifications.Engine`) wired to
 # PawChart's mounted Primitives resources (the ADR-014 SendWorker config convention:
@@ -195,17 +254,14 @@ config :pawchart, PawChartWeb.Endpoint,
   pubsub_server: PawChart.PubSub,
   server: false
 
-# Oban: the canonical queue taxonomy (reused verbatim from the substrate convention).
+# Oban: the canonical queue taxonomy, DERIVED not hand-listed (B-OBAN). config.exs
+# is evaluated before dependency modules load, so `Samen.Jobs.default_queue_config/0`
+# cannot be called here — `PawChart.Application` installs it (plus the canonical cron)
+# at boot via `Samen.Jobs.install_defaults/1`. The previous hand-listed six omitted
+# :webhooks_in / :automation / :automation_timers, so anything enqueued there sat
+# `available` forever with no error. `mix samen.verify.oban_queues` gates the parity.
 config :samen_core, Oban,
   repo: PawChart.Repo,
-  queues: [
-    default: 10,
-    rollups: 2,
-    webhooks_out: 5,
-    erasure: 1,
-    maintenance: 1,
-    reveal: 5
-  ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
   ]

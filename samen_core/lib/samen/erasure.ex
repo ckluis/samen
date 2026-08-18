@@ -5,10 +5,17 @@ defmodule Samen.Erasure do
   `shred/2` is the one entry point that erases a subject. It is a *key-destruction*
   job — NOT a copy-chasing / destruction-by-eventual-consistency job. One key shred
   makes every vaulted value undecryptable across live/replica/backup-PITR/CDC/
-  rollup/audit at once (the ciphertext stays; the DEK is gone). The two carve-outs
-  key-shred does NOT reach — trace-sink pseudonyms and review-gated `non_pii!`
-  plaintext columns — are handled explicitly here (pseudonym unlinks with the same
-  DEK; `non_pii!` rows are redacted row-level).
+  rollup/audit at once (the ciphertext stays; the DEK is gone). The residues that
+  live OUTSIDE the per-subject-DEK envelope — so key-shred does NOT reach them — are
+  handled by explicit arms here (ADR-046 makes this carve-out list complete):
+  trace-sink pseudonyms (unlink with the same DEK), review-gated `non_pii!` plaintext
+  columns (redacted row-level), stored file blobs (deleted via the governed
+  ref-counted `Samen.Files` chokepoint — §4.3 D4), the recomputable `email_bidx`
+  blind index (tombstoned to a random sentinel on principal-account erasure — §4.1 D1),
+  Tier-1 `pii_declared: true` custom-bag plaintext (per-key redacted from the sealed
+  jsonb bag via `Samen.CustomFields.Erasure` — §4.2 D3), and Tier-2 custom-OBJECT
+  `pii_declared: true` record-bag plaintext (per-key redacted from the `tnt_record` bag via
+  `Samen.CustomObjects.Erasure` — §8 residual #2).
 
   ## What `shred/2` does (T1.7 (a)–(d))
 
@@ -61,6 +68,130 @@ defmodule Samen.Erasure do
   import Ecto.Query, only: [from: 2]
 
   @doc """
+  DERIVE the canonical erasure specs for a host from its LIVE Ash schema.
+
+  The framework-first activation seam (the erasure analogue of
+  `Samen.Jobs.default_queue_config/0` + `install_defaults/1`): rather than every host
+  hand-wiring which of its abbrev-prefixed tables carry `email_bidx` / `storage_key`,
+  the specs are DERIVED from the host's own materialized resources so a fresh `gen.app`
+  is erasure-complete by construction.
+
+  Returns `%{blind_index_erasure_specs: [...], file_erasure_specs: [...]}`:
+
+    * one `blind_index_erasure_spec` per **registered** derived-linkable column
+      (`Samen.DerivedLinkable`) — `email_bidx` on Credential/Invitation (subject_column
+      `"id"`), `sent_to_bidx` on AuthToken (subject_column `"credential_id"`). An
+      UNregistered `_bidx` column is deliberately NOT auto-covered — the completeness
+      gate fails it so a new blind index must be registered, never silently activated.
+    * one `file_erasure_spec` per **subject-linked** `storage_key` resource (one carrying
+      a data-subject field — `uploaded_by_id` for a blob *uploaded BY* a subject, or a
+      domain subject-FK like `person_id` for a blob *ABOUT* a subject, ADR-046 §7 #5).
+      Org-asset blobs (no subject field, e.g. CMS `Media`) are org-lifecycle, not
+      per-subject-erasure residues, and get no subject-keyed spec. (A host with a
+      legitimate retention obligation on some about-a-subject blobs adds a `:hold?`
+      predicate to the derived spec — the retention-hold exception; see `Samen.Files.Erasure`.)
+
+  Options are passed to `Samen.Erasure.Completeness.resources/1` (`:resources`/`:domains`/
+  `:otp_app`) so tests can derive against an explicit resource list.
+
+  A2 (ADR-047 §7.4, §9#4 TAKEN): the derived map also carries one `retention_specs`
+  entry per **vault-routed transcript** resource (a `pii do` block declaring
+  `:transcript` — `Samen.AI.Agent.Run` is the first) — the default 90-day `:shred`
+  retention arm keyed on the row's OWN id (the per-row crypto-shred unit), because a
+  transcript's DEK is keyed on the run, not on any person the run discussed, so
+  subject-level reach is by retention only. The window is host-configurable
+  (`config :samen_core, Samen.AI.Agent, transcript_retention_days: n`); the derived arm
+  is what makes `mix samen.gen.app` erasure-complete by construction and what the
+  erasure-completeness gate's transcript arm asserts.
+  """
+  @spec default_specs(keyword()) :: %{
+          blind_index_erasure_specs: [map()],
+          file_erasure_specs: [map()],
+          retention_specs: [map()]
+        }
+  def default_specs(opts \\ []) do
+    residues = Samen.Erasure.Completeness.discover(opts)
+
+    bidx =
+      for r <- residues.derived_linkable, r.registered? do
+        %{
+          table_name: r.table,
+          bidx_column: r.column,
+          subject_column: r.subject_column,
+          label: spec_label(r.resource)
+        }
+      end
+
+    files =
+      for r <- residues.storage_key, r.subject_field do
+        %{file_module: r.resource, subject_field: r.subject_field}
+      end
+
+    transcripts =
+      for r <- residues.transcript do
+        %{
+          resource: r.resource,
+          ttl_seconds: transcript_retention_days() * 86_400,
+          action: :shred,
+          subject_field: :id,
+          timestamp_field: :inserted_at
+        }
+      end
+
+    %{blind_index_erasure_specs: bidx, file_erasure_specs: files, retention_specs: transcripts}
+  end
+
+  # The ratified transcript retention window (ADR-047 §9#4 TAKEN: 90 days; hosts may
+  # lengthen or shorten). Fail-closed shape: junk config degrades to the ratified 90.
+  defp transcript_retention_days do
+    case Application.get_env(:samen_core, Samen.AI.Agent, [])[:transcript_retention_days] do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 90
+    end
+  end
+
+  @doc """
+  Install the derived erasure specs into `:samen_core` application env, so the erasure
+  ARMS (`Samen.Auth.BlindIndexErasure` / `Samen.Files.Erasure`) actually fire for this
+  host's resources. Called once at `application.ex` start (the Oban `install_defaults/1`
+  seam's twin) and by `mix samen.verify.erasure_completeness` before it checks.
+
+  Idempotent. Returns the installed spec map.
+
+  A2: the derived transcript `retention_specs` are MERGED into `:samen_core,
+  :retention_specs` — appended only for resources the host has not already registered a
+  spec for (host entries always win; a host tightening the window is never clobbered
+  back to the default). The `Samen.Retention.SweepWorker` daily cron then enforces them
+  with zero host wiring.
+  """
+  @spec install_default_specs(keyword()) :: %{
+          blind_index_erasure_specs: [map()],
+          file_erasure_specs: [map()],
+          retention_specs: [map()]
+        }
+  def install_default_specs(opts \\ []) do
+    specs = default_specs(opts)
+    Application.put_env(:samen_core, :blind_index_erasure_specs, specs.blind_index_erasure_specs)
+    Application.put_env(:samen_core, :file_erasure_specs, specs.file_erasure_specs)
+
+    existing = Application.get_env(:samen_core, :retention_specs, [])
+
+    host_covered =
+      MapSet.new(existing, fn spec -> spec |> Samen.Retention.Spec.normalize() |> Map.get(:resource) end)
+
+    derived_new =
+      Enum.reject(specs.retention_specs, fn spec -> MapSet.member?(host_covered, spec.resource) end)
+
+    Application.put_env(:samen_core, :retention_specs, existing ++ derived_new)
+    specs
+  end
+
+  # A short human label for the token-only erasure report (never PII).
+  defp spec_label(resource) do
+    resource |> Module.split() |> List.last() |> Macro.underscore()
+  end
+
+  @doc """
   Crypto-shred `subject_id`. See the module doc for the full sequence.
 
   Options:
@@ -85,13 +216,41 @@ defmodule Samen.Erasure do
     # detaching a partition; see the simulation seam in `Samen.Rollup`).
     rollup_opts = Keyword.take(opts, [:specs, :raw_retained?])
 
+    # Options for the file-blob erasure arm (ADR-046 §4.3 D4): the registered file
+    # specs (or the config default), the subject's org (for the token-only blob-delete
+    # audit; nil → each file's own org_id), and who initiated the erasure.
+    file_opts = [
+      file_specs: Keyword.get(opts, :file_specs),
+      org_id: Keyword.get(opts, :org_id),
+      actor_id: actor_id
+    ]
+
+    # The blind-index erasure arm (ADR-046 §4.1 D1; amends ADR-035 §4.1): the registered
+    # `email_bidx` specs (or the config default). Fires ONLY on principal-account erasure
+    # (subject == the credential/invitation owner — matched on the row's own key), never a
+    # per-tenant data-subject shred (which would break the org-less human's cross-org login).
+    bidx_specs = Keyword.get(opts, :bidx_specs)
+
+    # The Tier-1 custom-bag erasure arm (ADR-046 §4.2 D3): the registered `custom` bag
+    # specs (or the config default). Per-KEY redaction of `pii_declared: true` plaintext
+    # keys in the sealed jsonb bag (key-shred cannot reach plaintext-in-bag; NonPii is
+    # whole-column). Empty when no spec is registered.
+    custom_bag_specs = Keyword.get(opts, :custom_bag_specs)
+
+    # The Tier-2 custom-OBJECT record-bag erasure arm (ADR-046 §8 residual #2): the
+    # registered `:record_bag_erasure_specs` (or the config default). Per-KEY redaction of a
+    # custom object's `pii_declared: true` plaintext keys in the `tnt_record` bag (the
+    # analogue of the Tier-1 arm, keyed via the record's opaque `refs` subject reference).
+    # Empty when no spec is registered.
+    record_bag_specs = Keyword.get(opts, :record_bag_specs)
+
     # STEP 1 — destroy the key FIRST, outside the DB tx. This is the load-bearing
     # act. It is the ONLY thing that can make the guarantee fail closed (if the
     # key store is unreachable we must NOT proceed and NOT fabricate an
     # attestation).
-    case Kms.adapter().shred(subject_id) do
+    case Kms.shred(subject_id) do
       {:ok, attestation} ->
-        seal_db_tiers(subject_id, attestation, :from_state, actor_id, org_id, r, rollup_opts)
+        seal_db_tiers(subject_id, attestation, :from_state, actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs)
 
       {:error, :absent} ->
         # Subject never had a key. Still redact any non_pii! rows and write a
@@ -106,7 +265,7 @@ defmodule Samen.Erasure do
           checked_at: DateTime.utc_now()
         }
 
-        seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts)
+        seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs)
 
       {:error, reason} ->
         # Key store unreachable (outage) — FAIL CLOSED. No sentinel, no report,
@@ -118,7 +277,7 @@ defmodule Samen.Erasure do
   # STEP 2–5 in one transaction. `outcome_mode` is `:from_state` (derive from the
   # seal result — "shredded" on the first call that seals rows, "already_shredded"
   # on an idempotent later call) or a fixed string (e.g. "absent").
-  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, org_id, r, rollup_opts) do
+  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     multi =
@@ -145,13 +304,55 @@ defmodule Samen.Erasure do
       |> Ecto.Multi.run(:rollups, fn repo, _changes ->
         {:ok, Samen.Rollup.erase_subject(subject_id, repo, rollup_opts)}
       end)
-      # STEP 5 (built here, needs step 2/3/3b results) — the erasure report.
+      # STEP 3c — file-blob erasure arm (ADR-046 §4.3 D4). Raw stored file bytes live
+      # OUTSIDE the per-subject-DEK envelope, so key-shred does not reach them: this arm
+      # deletes the subject's file blobs through the governed, ref-counted, fail-honest
+      # Samen.Files.delete_file/3 chokepoint (last-reference-aware — a blob a NON-erased
+      # clone still references survives, T130). Fail-soft: a file whose blob cannot be
+      # reached is recorded, never rolls back the subject's vault erasure.
+      |> Ecto.Multi.run(:file_blobs, fn repo, _changes ->
+        {:ok, Samen.Files.Erasure.erase_subject(subject_id, repo, file_opts)}
+      end)
+      # STEP 3d — blind-index erasure arm (ADR-046 §4.1 D1; amends ADR-035 §4.1). The
+      # recomputable `email_bidx` HMAC lives OUTSIDE the per-subject-DEK envelope (it is
+      # keyed on the shared, permanently-un-shreddable `sys:bidx`), so key-shred does not
+      # reach it: left as-is it keeps an erased subject's email confirmable forever via an
+      # equality oracle. This arm tombstones `email_bidx` to a fresh random sentinel — but
+      # ONLY on principal-account erasure (the arm matches the credential/invitation OWNER's
+      # own key; a per-tenant data-subject shred matches zero rows, so the org-less human's
+      # cross-org login is never broken). Runs INSIDE the tx, fail-closed (pure in-DB write).
+      |> Ecto.Multi.run(:blind_index, fn repo, _changes ->
+        {:ok, Samen.Auth.BlindIndexErasure.erase_subject(subject_id, repo, bidx_specs: bidx_specs)}
+      end)
+      # STEP 3e — Tier-1 custom-bag erasure arm (ADR-046 §4.2 D3). A `pii_declared: true`
+      # custom field stores PLAINTEXT in the sealed `custom` jsonb bag (never vaulted), so
+      # key-shred does not reach it and NonPii (whole-column) cannot redact it key-by-key.
+      # This arm removes exactly the org's pii_declared keys from the subject's bag rows.
+      # Runs INSIDE the tx, fail-closed (pure in-DB write).
+      |> Ecto.Multi.run(:custom_bag, fn repo, _changes ->
+        {:ok, Samen.CustomFields.Erasure.erase_subject(subject_id, repo, custom_bag_specs: custom_bag_specs)}
+      end)
+      # STEP 3f — Tier-2 custom-OBJECT record-bag erasure arm (ADR-046 §8 residual #2). A
+      # custom object's `pii_declared: true` field stores PLAINTEXT in the shared `tnt_record`
+      # attributes bag (never vaulted), so key-shred does not reach it — the analogue of the
+      # Tier-1 bag, keyed via the record's opaque `refs` subject reference. This arm removes
+      # exactly the object's pii_declared keys from the subject's records. Runs INSIDE the tx,
+      # fail-closed (pure in-DB write).
+      |> Ecto.Multi.run(:record_bag, fn repo, _changes ->
+        {:ok, Samen.CustomObjects.Erasure.erase_subject(subject_id, repo, record_bag_specs: record_bag_specs)}
+      end)
+      # STEP 5 (built here, needs step 2/3/3b/3c results) — the erasure report.
       |> Ecto.Multi.run(:report, fn repo, changes ->
         {sealed, _} = changes.seal_vault
         %{count: redacted, details: redaction_details} = changes.redact_non_pii
         rollup_report = changes.rollups
+        file_report = changes.file_blobs
+        blind_index_report = changes.blind_index
+        custom_bag_report = changes.custom_bag
+        record_bag_report = changes.record_bag
 
-        tiers = build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, repo)
+        tiers =
+          build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, custom_bag_report, record_bag_report, repo)
         outcome = resolve_outcome(outcome_mode, subject_id, sealed, repo)
 
         report_attrs = %{
@@ -227,7 +428,7 @@ defmodule Samen.Erasure do
   # Tier descriptors — what the T2.9 oracle reads (D7 report).
   # ---------------------------------------------------------------------------
 
-  defp build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, repo) do
+  defp build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, custom_bag_report, record_bag_report, repo) do
     remaining_active =
       repo.aggregate(
         from(v in VaultRow, where: v.subject_id == ^subject_id and v.state == "active"),
@@ -265,7 +466,24 @@ defmodule Samen.Erasure do
       # governed (rebuilt subject-free or the subject's derived rows suppressed);
       # a registered rollup ABSENT from this list on a post-shred report is a
       # fail-closed gap.
-      "rollups" => rollup_report
+      "rollups" => rollup_report,
+      # File-blob tier (ADR-046 §4.3 D4): the per-file-resource report of blobs the
+      # erasure arm deleted for the subject (last-reference-aware). Empty when no file
+      # erasure spec is registered. Token-only (counts + resource name, never a key).
+      "file_blobs" => file_report,
+      # Blind-index tier (ADR-046 §4.1 D1): the per-resource report of `email_bidx`
+      # columns tombstoned for the subject (principal-account erasure only). Empty when
+      # no blind-index spec is registered, or when this is a per-tenant data-subject shred
+      # (no owning-principal row matches). Token-only (counts + resource label).
+      "blind_index" => blind_index_report,
+      # Custom-bag tier (ADR-046 §4.2 D3): the per-resource report of `pii_declared`
+      # bag keys redacted from the subject's rows. Empty when no custom-bag spec is
+      # registered. Token-only (row/key counts + resource label, never a key value).
+      "custom_bag" => custom_bag_report,
+      # Custom-OBJECT record-bag tier (ADR-046 §8 residual #2): the per-object report of
+      # `pii_declared` keys redacted from the subject's `tnt_record` rows. Empty when no
+      # record-bag spec is registered. Token-only (row/key counts + object label).
+      "record_bag" => record_bag_report
     }
   end
 

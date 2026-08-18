@@ -175,9 +175,15 @@ defmodule Samen.Web.ChatIdentityWriteTest do
     assert tenant_html =~ "Expose participant identity"
     assert tenant_html =~ "initiator opt-in"
 
+    # T153 — the operator inbox is a per-tenant drill-in: an active impersonation session is
+    # required to read it (deny-on-read). Open one (keyed on the plane's operator id "op-1"), so
+    # this test still asserts what it always did — the operator inbox lacks the tenant WRITE
+    # controls — rather than the denied panel.
+    open_impersonation!("op-1", org_id)
     operator_html = render_live(ThreadsLive, operator_mount(org_id), [org_id])
     refute operator_html =~ "chat-identity-setting"
     refute operator_html =~ "chat-new-conversation"
+    refute operator_html =~ "no active impersonation session"
   end
 
   # -- helpers -----------------------------------------------------------------

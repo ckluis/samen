@@ -1,0 +1,24 @@
+# SABOTAGE: P17-carry-3 (ADR-045 §3) — the fail-closed lower-bound CLAMP on an explicit
+# `:k`/`:l` override is neutered. `Samen.Aggregate.Privacy.apply/3`'s `floor_opt/2` regresses
+# to trusting the override VERBATIM (`override || config_floor` — and `0` is truthy in Elixir),
+# so a hostile / invalid `k: 0` (or negative, or `l: 0`) again DISABLES the floor:
+# `cohort_count < 0` never fires and a below-floor / count-of-one cohort emits its raw value
+# instead of `%Suppressed{}`. Flips the clamp refutation; the POSITIVE override seam (`k: 1`
+# releases a count-of-one) and every config-default path stay green (the clamp is non-vacuous).
+# APP: samen_core
+# TEST_FILES: test/aggregate_privacy_test.exs
+# MUST_FAIL: a k: 0 opt CANNOT disable the floor
+--- a/samen_core/lib/samen/aggregate/privacy.ex
++++ b/samen_core/lib/samen/aggregate/privacy.ex
+@@ -139,8 +139,7 @@ defmodule Samen.Aggregate.Privacy do
+   # So no caller — not even a server-side one passing a hostile `k: 0` — can emit a sub-floor
+   # cohort through this module. `nil` (no override supplied) also falls through to the config
+   # floor, preserving the production default.
+-  defp floor_opt(override, _config_floor) when is_integer(override) and override >= 1,
+-    do: override
+-
+-  defp floor_opt(_override, config_floor), do: config_floor
++  # SABOTAGE: the lower-bound clamp is neutered — an explicit override is trusted VERBATIM
++  # (0 is truthy in Elixir), so a hostile `k: 0` disables the floor and a below-floor cohort leaks.
++  defp floor_opt(override, config_floor), do: override || config_floor
+ 

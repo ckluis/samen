@@ -1,0 +1,24 @@
+# SABOTAGE: D6 — the DSAR audit walk drops its ORG predicate. The fix org-binds the audit
+# trail (`ach_org_id == ^org_id`) so an export scoped to org A never surfaces the same
+# subject's org-B chain entries. This sabotage removes the org filter (subject_id alone),
+# so an org-A export leaks the subject's org-B events — cross-org leakage on a GDPR Art. 15
+# surface. The cross-org red path MUST flip: `refute "evt_in_org_b" in types_a` now fails.
+# APP: samen_core
+# TEST_FILES: test/dsar_org_binding_test.exs
+# MUST_FAIL: an org-A export surfaces org-A events ONLY; the same subject's org-B events are NOT surfaced
+diff --git a/samen_core/lib/samen/dsar.ex b/samen_core/lib/samen/dsar.ex
+--- a/samen_core/lib/samen/dsar.ex
++++ b/samen_core/lib/samen/dsar.ex
+@@ -201,10 +201,10 @@
+   # The subject's audit-chain trail for THIS org — already token-only (event_type + timing +
+   # bounded detail), safe to include verbatim. Org-bound: filtered on `ach_org_id` so an export
+   # scoped to org A never surfaces the same subject's org-B chain entries (cross-org isolation).
+-  defp walk_audit(subject_id, org_id, repo) do
++  defp walk_audit(subject_id, _org_id, repo) do
+     repo.all(
+       from(e in Entry,
+-        where: e.subject_id == ^subject_id and e.org_id == ^org_id,
++        where: e.subject_id == ^subject_id,
+         order_by: [asc: e.occurred_at]
+       )
+     )

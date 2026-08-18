@@ -1,0 +1,31 @@
+# SABOTAGE: T76 (spec §I3 CRM reporting) — drops the `scope: scope` threading from
+# `Samen.Web.CRM.Reads.activity_leaderboard/3`'s call into the generic
+# `Samen.Web.Reads.aggregate_by!/3` primitive (org-scope pin, the T74/T75 lesson: EVERY new
+# aggregate gets a two-org pin proving org B's rows never count in org A's metrics).
+# `aggregate_by!/3` has DELIBERATELY NO `authorize?` escape hatch (its own doc: "an
+# :authorize? key in opts is IGNORED, never forwarded") — the ONLY way this caller can leak
+# org scope is by failing to thread `:scope` at all, which is exactly what this patch does.
+# `Samen.Web.Reads.aggregate_by!/3` requires `:scope` via `Keyword.fetch!/2`, so this patch
+# turns every leaderboard read into a `KeyError`, caught by the function's own `rescue`
+# clause into an honest-looking (but WRONG) empty leaderboard — silently hiding a real org's
+# activity leaderboard instead of rendering it. The named org-scope pin test (which expects
+# org A's OWN activity to rank) and the plain ranking tests both flip. REGENERATED T76 fix
+# round 1 (MED-1 rewrite renamed the local `max_points` to `discovery_limit` and moved the
+# call two lines down; same guarantee, same line content otherwise — only context shifted).
+# Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_reporting_test.exs
+# MUST_FAIL: ORG-SCOPE: org B's activities never contribute to org A's leaderboard (and DO rank on org B's own)
+# MUST_FAIL: activity_leaderboard ranks owners by CRM-anchored activity COUNT, descending, EXACT ranks
+diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+--- a/samen_web/lib/samen/web/crm/reads.ex
++++ b/samen_web/lib/samen/web/crm/reads.ex
+@@ -843,7 +843,7 @@
+           task_mod
+           |> Ash.Query.new()
+           |> Ash.Query.filter(not is_nil(owner_id) and subject_key in ^@crm_subject_keys)
+-          |> Samen.Web.Reads.aggregate_by!(:owner_id, scope: scope, max_points: discovery_limit)
++          |> Samen.Web.Reads.aggregate_by!(:owner_id, max_points: discovery_limit)
+
+         other = Samen.Web.Reads.other_key()
+

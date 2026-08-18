@@ -1,0 +1,18 @@
+# SABOTAGE: PP-16 (render) — the tenant Support-draft LIST row SUPPRESSES the persisted
+# SIMULATED badge (`:if={false}`), so a stored keyless/deterministic draft renders with NO
+# "SIMULATED — not a real model" badge — the render-side twin of 176. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/ai_kit_test.exs
+# MUST_FAIL: a persisted SIMULATED support draft renders the loud SIMULATED badge
+diff --git a/samen_web/lib/samen/web/ai/support_draft_live.ex b/samen_web/lib/samen/web/ai/support_draft_live.ex
+--- a/samen_web/lib/samen/web/ai/support_draft_live.ex
++++ b/samen_web/lib/samen/web/ai/support_draft_live.ex
+@@ -127,7 +127,7 @@
+                   <%!-- PP-16: a stored keyless/deterministic (SIMULATED) draft carries the loud
+                         honesty badge from the persisted `:simulated` provenance — never laundered
+                         as a genuine model reply. --%>
+-                  <.pill :if={draft_simulated?(d)} variant="warn"><span class="ai-draft-badge">SIMULATED — not a real model</span></.pill>
++                  <.pill :if={false} variant="warn"><span class="ai-draft-badge">SIMULATED — not a real model</span></.pill>
+                   <span style="margin-left:8px">{draft_body(d)}</span>
+                 </li>
+               </ul>

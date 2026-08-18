@@ -26,13 +26,30 @@ defmodule Driftwood.Reads do
   bypassed).
   """
 
+  require Ash.Query
+
+  # ADR-045 §4.2 (O8) — the HARD read bound for the vertical read layer. Every list read here
+  # decrypts vault fields per row (`resolve_pii/2`), so an UNBOUNDED read on a large org's
+  # roster is a per-navigation resource-exhaustion / KMS-cost hazard. `@limit` caps every list
+  # read so one call can never sweep-and-decrypt more than this many rows — the SAME discipline
+  # the framework `Samen.Web.Reads` clamp (`@max_page_size 200`) and the sibling
+  # `PawChartWeb.ClinicReads` `@limit 200` already apply. Enforced by the boundedness lint
+  # (`Samen.Web.Reads.Lint`), which now sweeps this vertical tree.
+  @limit 200
+
   @doc """
   The DRIVER ROSTER for the given scope: driver rows with name (masked unless granted),
   CDL number (masked), CDL state/expiry (non-PII), medical expiry, status, ELD provider,
   and a computed FMCSA badge. Reads through Ash — OrgScope narrows to the scope's org;
   the vault fields load `%Masked{}` without a reveal grant.
+
+  BOUNDED (O8): the read carries an explicit `Ash.Query.limit` so a large org's roster never
+  triggers an unbounded per-row vault-decrypt sweep on navigation. `opts[:limit]` may request
+  a SMALLER page (a future "load more", or a test probe); it is CLAMPED to `@limit`, so a
+  caller can only ever narrow the page — never exceed the cap. The bound does not change WHICH
+  plane resolves the vault fields, so masking is untouched (tenant CLEAR, operator masked).
   """
-  def driver_roster(scope) do
+  def driver_roster(scope, opts \\ []) do
     Driftwood.Freight.Driver
     |> Ash.Query.ensure_selected([
       :full_name,
@@ -44,6 +61,7 @@ defmodule Driftwood.Reads do
       :eld_provider
     ])
     |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(bounded_limit(opts))
     |> Ash.read!(scope: scope)
     |> resolve_pii(scope)
     |> Enum.map(fn d ->
@@ -51,6 +69,73 @@ defmodule Driftwood.Reads do
     end)
   rescue
     _ -> []
+  end
+
+  # Clamp a requested page into `1..@limit` — a caller can narrow the page but NEVER exceed the
+  # cap (defence in depth: even a hostile/buggy `:limit` can only shrink the decrypt sweep).
+  defp bounded_limit(opts) do
+    case Keyword.get(opts, :limit) do
+      n when is_integer(n) and n >= 1 -> min(n, @limit)
+      _ -> @limit
+    end
+  end
+
+  @doc """
+  T158 — fetch ONE driver by id for `scope`, PII-resolved through the SAME seam
+  `driver_roster/1` uses (`resolve_pii/2` → `Samen.Api.PiiResolution`) — the
+  form-prefill source for the driver EDIT modal. On the `broker_scope/1` tenant
+  plane this resolves `full_name`/`cdl_number` CLEAR; on an operator-without-grant
+  plane it would resolve `%Masked{}` (this console never mounts that plane, but the
+  read function is the same one that does elsewhere). `{:ok, driver}` or `:error`
+  (not found — including a cross-org id, invisible under OrgScope — or a read
+  failure) — never a partial/fabricated record.
+  """
+  @spec get_driver(term(), binary()) :: {:ok, struct()} | :error
+  def get_driver(scope, id) do
+    result =
+      Driftwood.Freight.Driver
+      |> Ash.Query.ensure_selected([
+        :full_name,
+        :cdl_number,
+        :cdl_state,
+        :cdl_expiry,
+        :medical_card_expiry,
+        :status,
+        :eld_provider
+      ])
+      |> Ash.Query.filter(id == ^id)
+      |> Ash.Query.limit(1)
+      |> Ash.read!(scope: scope)
+      |> resolve_pii(scope)
+
+    case result do
+      [driver | _] -> {:ok, driver}
+      [] -> :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  @doc """
+  T158 — fetch ONE settlement by id for `scope`, the RAW (un-reshaped) resource —
+  the form-prefill source for the settlement EDIT modal. Settlement carries no PII;
+  `settlements/1` reshapes the derived netting calcs on TOP of this same resource,
+  but the edit form only touches the STORED input columns, so this reads the plain
+  resource directly (no `Driftwood.Context` reshape needed for a write form).
+  `{:ok, settlement}` or `:error` (not found / cross-org / read failure).
+  """
+  @spec get_settlement(term(), binary()) :: {:ok, struct()} | :error
+  def get_settlement(scope, id) do
+    Driftwood.Freight.Settlement
+    |> Ash.Query.filter(id == ^id)
+    |> Ash.Query.limit(1)
+    |> Ash.read_one!(scope: scope)
+    |> case do
+      nil -> :error
+      settlement -> {:ok, settlement}
+    end
+  rescue
+    _ -> :error
   end
 
   # F2 (Gate-5 carry) — the SHARED tenant-plane PII resolver.
@@ -86,21 +171,77 @@ defmodule Driftwood.Reads do
   defp actor_of(_), do: %{}
 
   @doc """
-  The LOAD BOARD for the given scope: Load (Opportunity alias) rows — name, value cents,
-  status, close date, lane (from the custom bag). Non-PII throughout; reads through the
-  scope's org boundary.
+  The LOAD BOARD for the given scope: Load (Opportunity alias) rows — name, value
+  (ADR-036 H1: the Money composite, formerly value_cents/currency), status, close
+  date, lane (from the custom bag). Non-PII throughout; reads through the scope's
+  org boundary.
   """
-  def load_board(scope) do
+  def load_board(scope), do: load_board(scope, %{})
+
+  @doc """
+  T158 — the REAL filtered load board. `filters` is a plain map (string or atom
+  keys, as it arrives straight off `phx-change` params) with two optional keys:
+
+    * `:status` (or `"status"`) — one of the Load status enum
+      (`open`/`won`/`lost`/`on_hold`); an unrecognised value is IGNORED (treated
+      as no status filter) rather than raising — a malformed/forged param must
+      never 500 the board.
+    * `:q` (or `"q"`) — a free-text substring matched against the load
+      reference `name` and the `lane` (case-insensitive).
+
+  ORG-SCOPE (load-bearing): the underlying `Ash.read!` call is passed `scope:
+  scope` — the SAME `Samen.Policy.OrgScope` boundary every other read in this
+  module rides. The filter narrows WITHIN that already-org-scoped result set; it
+  can never be used to reach across into another org's rows (there is no path
+  here that widens the read past the scope's own org). No matches is an HONEST
+  empty list — never a fabricated/sample row.
+  """
+  def load_board(scope, filters) when is_map(filters) do
+    status = normalize_load_status(fetch(filters, :status))
+    q = filters |> fetch(:q) |> to_string() |> String.trim() |> String.downcase()
+
     Driftwood.Crm.Opportunity
-    |> Ash.Query.ensure_selected([:name, :value_cents, :currency, :status, :close_date, :custom])
+    |> Ash.Query.ensure_selected([:name, :value, :status, :close_date, :custom])
     |> Ash.Query.sort(inserted_at: :asc)
+    |> maybe_filter_status(status)
+    |> Ash.Query.limit(@limit)
     |> Ash.read!(scope: scope)
     |> Enum.map(fn l ->
       lane = get_in(l.custom || %{}, ["lane"]) || "unknown"
       Map.put(l, :__lane__, lane)
     end)
+    |> filter_by_query(q)
   rescue
     _ -> []
+  end
+
+  defp fetch(map, key), do: Map.get(map, key) || Map.get(map, to_string(key))
+
+  @load_statuses ~w(open won lost on_hold)
+
+  defp normalize_load_status(nil), do: nil
+  defp normalize_load_status(""), do: nil
+
+  defp normalize_load_status(s) when is_atom(s) do
+    if to_string(s) in @load_statuses, do: s, else: nil
+  end
+
+  defp normalize_load_status(s) when is_binary(s) do
+    if s in @load_statuses, do: String.to_existing_atom(s), else: nil
+  end
+
+  defp normalize_load_status(_), do: nil
+
+  defp maybe_filter_status(query, nil), do: query
+  defp maybe_filter_status(query, status), do: Ash.Query.filter(query, status == ^status)
+
+  defp filter_by_query(loads, ""), do: loads
+
+  defp filter_by_query(loads, q) do
+    Enum.filter(loads, fn l ->
+      String.contains?(String.downcase(l.name || ""), q) or
+        String.contains?(String.downcase(to_string(l.__lane__)), q)
+    end)
   end
 
   @doc """
@@ -114,6 +255,7 @@ defmodule Driftwood.Reads do
   def settlements(scope) do
     Samen.Context.reshaped_query(Driftwood.Context, Driftwood.Freight.Settlement)
     |> Ash.Query.sort(inserted_at: :asc)
+    |> Ash.Query.limit(@limit)
     |> Ash.read!(scope: scope)
     |> Enum.map(fn s ->
       calc = s.calculations || %{}

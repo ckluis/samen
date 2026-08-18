@@ -50,7 +50,7 @@ defmodule Samen.Web.Support.TicketsLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     {:noreply, load(assign(socket, org_id: org_id, return_to: return_path(uri)), org_id)}
   end
 
@@ -113,8 +113,12 @@ defmodule Samen.Web.Support.TicketsLive do
     end
   end
 
-  # FAIL-HONEST delete: the kernel defines no cascade — a ticket with linked
-  # conversations is refused by the DB (FK) and the refusal is SURFACED.
+  # ADR-040 §5.9/T37f: `Ticket` is `archivable true` and the cascade PARENT of `ticket
+  # ▸cascade conversation ▸cascade message` (§5.4). `Reads.delete_ticket/3` now rides the
+  # explicit `:archive` action, so a ticket with linked conversations is no longer refused
+  # — it archives, and its conversations/messages cascade-archive with it at the same
+  # instant. Any `{:error, _}` here is a genuine failure (e.g. an authorization denial),
+  # not the old FK-refusal case.
   def handle_event("delete", %{"id" => id}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
@@ -124,10 +128,7 @@ defmodule Samen.Web.Support.TicketsLive do
         {:noreply, load(assign(socket, delete_error: nil), org_id)}
 
       {:error, _reason} ->
-        {:noreply,
-         assign(socket,
-           delete_error: "Could not delete this ticket — it still has linked records (conversations)."
-         )}
+        {:noreply, assign(socket, delete_error: "Could not delete this ticket.")}
     end
   end
 

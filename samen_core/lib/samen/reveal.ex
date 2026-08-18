@@ -104,6 +104,16 @@ defmodule Samen.Reveal do
     * `{:ok, plaintext}` — granted and decryptable
     * `{:error, :aggregate_actor_denied}` — the token-blind aggregate actor may
       NEVER reveal (T4.2 mutual exclusion; refused before any grant/vault check)
+    * `{:error, :fleet_actor_denied}` — ADR-044 §4.6/§6.4/§16.2 (T82, carried-LOW 1):
+      a fleet-credential actor (`Samen.Fleet.HeartbeatActor`) or the fleet-admin
+      actor (`Samen.Fleet.AdminActor`) may NEVER reveal — refused STRUCTURALLY,
+      before any grant/vault check, exactly like the aggregate actor above. Before
+      this clause, a fleet actor was refused only by `Samen.Reveal.DenyAll`'s
+      GRANT-level default deny (a live, permissively-configured grant checker would
+      have let it through) — this is the fix carried-LOW 1 named: "add the
+      structural `cond` clause refusing a fleet-credential actor in `Reveal`, and
+      respecify/implement RP-J-6 to run with a PERMISSIVE grant checker so the
+      structural refusal is what the test proves."
     * `{:error, :not_reveal_action}` — the action is not a declared reveal action
     * `{:error, :denied}` — no approving grant (default with DenyAll)
     * `{:error, :shredded | :unavailable | :not_found | term}` — from the vault
@@ -122,6 +132,7 @@ defmodule Samen.Reveal do
           {:ok, binary()}
           | {:error,
              :aggregate_actor_denied
+             | :fleet_actor_denied
              | :not_reveal_action
              | :denied
              | :shredded
@@ -150,6 +161,15 @@ defmodule Samen.Reveal do
       # code path by which the aggregate actor reaches the vault.
       Samen.Aggregate.Actor.aggregate?(actor) ->
         {:error, :aggregate_actor_denied}
+
+      # ADR-044 §4.6/§6.4/§16.2 (T82, carried-LOW 1): a fleet-credential actor can
+      # NEVER cross the reveal seam either — structural, precedes the grant check,
+      # so even a (spuriously present) PERMISSIVE grant checker cannot let a fleet
+      # actor decrypt. Mirrors the aggregate-actor clause immediately above; see
+      # `Samen.Fleet.HeartbeatActor`/`Samen.Fleet.AdminActor` moduledocs.
+      Samen.Fleet.HeartbeatActor.heartbeat_actor?(actor) or
+          Samen.Fleet.AdminActor.admin_actor?(actor) ->
+        {:error, :fleet_actor_denied}
 
       # Marker gate: only a declared reveal action can produce plaintext here.
       not Info.reveal_action?(resource, action_name) ->

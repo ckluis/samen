@@ -22,6 +22,25 @@ defmodule Samen.Files.ChokepointGuard do
   change closes BOTH shapes so the guarantee is STRUCTURAL on every write: the size/type +
   audit governance cannot be bypassed by writing a `storage_key` on a create OR an update.
 
+  ## The `:destroy` action type (T37h — ADR-040 §5.9 footnote §, the E6 archive/restore
+  ## sanction)
+
+  The File resource is `archivable: true` (T37e). Its E6 substrate adds `:archive` and
+  `:destroy_permanently` (`destroy`-typed) and `:restore` (`update`-typed). Registering
+  this change `on: [:create, :update]` only meant a `destroy`-typed action NEVER even
+  reached this guard — not because archive/restore were sanctioned, but because the
+  action-type filter excluded them entirely, a **destroy-shaped twin** of the update-
+  shaped hole above (the same class of gap: "a write mode this guard doesn't watch").
+  Registering `on: [:create, :update, :destroy]` closes it: every `destroy`-typed action
+  (the soft `:destroy`, `:archive`, `:destroy_permanently`) now runs through
+  `refuse_ungoverned_storage_key/1` too. None of them touch `storage_key`
+  (`:archive`/`:destroy` only set `archived_at`; `:destroy_permanently` sets nothing —
+  it deletes the row), so `sets_storage_key?/1` is `false` for all of them and they pass
+  unconditionally — archive/restore are now STRUCTURALLY sanctioned (evaluated and
+  allowed by the same guard, not exempt from it), and a hypothetical future `destroy`-
+  typed action that DID try to smuggle a `storage_key` change is refused by construction,
+  not by nobody having written one yet.
+
   ## The rule — refuse a storage_key write that did not come through the chokepoint
 
   `Samen.Files.upload/3` stamps the changeset context with the private marker
@@ -49,8 +68,11 @@ defmodule Samen.Files.ChokepointGuard do
   of a `storage_key`-bearing row — OR a direct `Ash.update` repointing `storage_key` — would
   then SUCCEED, and the tests that assert each is `{:error, _}` (refused) would fail.
   Narrowing the registration back to `on: [:create]` (dropping `:update`) re-opens the
-  update-shaped hole and FLIPS the update red-path. Mirrors `Samen.Pii.WriteGuard`'s
-  before-action rejection pattern.
+  update-shaped hole and FLIPS the update red-path. Narrowing it back to
+  `on: [:create, :update]` (dropping `:destroy`, T37h's addition) re-opens the destroy-
+  shaped hole and FLIPS `test/files_upload_test.exs`'s "archive/restore sanction" red
+  test (a raw `:destroy`-typed changeset force-changing `storage_key` would then slip
+  through unrefused). Mirrors `Samen.Pii.WriteGuard`'s before-action rejection pattern.
   """
   use Ash.Resource.Change
 
@@ -62,6 +84,21 @@ defmodule Samen.Files.ChokepointGuard do
   @impl true
   def change(changeset, _opts, _context) do
     Ash.Changeset.before_action(changeset, &refuse_ungoverned_storage_key/1)
+  end
+
+  # T37h: with the registration widened to `on: [:create, :update, :destroy]`, this
+  # change now also attaches to `:destroy_permanently` (same action TYPE as `:archive`/
+  # the soft `:destroy`), which — unlike `:archive` (forced `require_atomic?: false` by
+  # the archival DSL) — is otherwise atomic-eligible. Without this callback,
+  # `:destroy_permanently` would spuriously lose atomic eligibility just for sharing a
+  # type with a non-atomic change (`mix compile --warnings-as-errors` catches this).
+  # `:ok` tells Ash's atomicity checker this change contributes nothing when running
+  # atomically; the normal (non-bulk) `Ash.destroy/2` path this guard actually governs
+  # still runs `change/3`'s `before_action` hook regardless — mirrors
+  # `Samen.Scopes.Support.CascadeArchive.atomic/3`'s identical precedent.
+  @impl true
+  def atomic(_changeset, _opts, _context) do
+    :ok
   end
 
   defp refuse_ungoverned_storage_key(changeset) do

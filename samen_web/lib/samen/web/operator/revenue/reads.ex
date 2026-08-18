@@ -168,7 +168,10 @@ defmodule Samen.Web.Operator.RevenueReads do
   defp movement_timeline(mount, scope) do
     Mount.resource(mount, SubscriptionEvent)
     |> Ash.Query.ensure_selected([:customer_id, :kind, :mrr_delta_cents, :occurred_at])
-    |> Ash.Query.sort(occurred_at: :asc)
+    # T121: `id` belt makes this a STRICT TOTAL ORDER (not merely deterministic-in-
+    # practice) — mov rows sharing an `occurred_at` instant resolve to ONE defined
+    # order regardless of timestamp precision, mirroring the ledger read's tiebreak.
+    |> Ash.Query.sort(occurred_at: :asc, id: :asc)
     |> Ash.Query.limit(@lookup_limit)
     |> Ash.read!(scope: scope)
   rescue

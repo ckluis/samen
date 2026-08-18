@@ -1,0 +1,25 @@
+# SABOTAGE: A7 (ADR-047 §7.2 check (d)) gate sabotage — the ai_prompt_masking tool-schema
+# BOUNDEDNESS + STATICNESS scan is disabled. `tool_schema_boundedness_violations/0` returns
+# [] unconditionally, so an EG2 tool definition carrying a struct/pid leaf, a `vt_` sentinel,
+# or a schema DERIVED FROM A LIVE Ash.read (tenant data egressed on every turn) passes the
+# INV-7 gate unchecked. The named (d) reds — each modeled defect — MUST flip; the shipped-set
+# clean control proves the checks are not blanket-failing.
+# APP: samen_core
+# TEST_FILES: test/ai/ai_prompt_masking_tool_checks_test.exs
+# MUST_FAIL: an unbounded leaf (a pid) is a violation
+diff --git a/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex b/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
+--- a/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
+@@ -79,7 +79,11 @@
+   """
+   @spec tool_schema_boundedness_violations() :: [String.t()]
+   def tool_schema_boundedness_violations do
+-    for mod <- tool_modules(), violation <- tool_schema_violations(mod), do: violation
++    # SABOTAGE (A7, ADR-047 §7.2 check (d)): the tool-schema boundedness + staticness scan is
++    # disabled, so a struct/pid/vt_ leaf, or a tool def derived from a live Ash.read (tenant
++    # data → EG2 egress every turn), passes unchecked. The named (d) reds MUST flip.
++    _ = (&tool_schema_violations/1)
++    []
+   end
+ 
+   defp tool_schema_violations(mod) do

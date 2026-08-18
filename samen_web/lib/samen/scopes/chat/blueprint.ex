@@ -45,12 +45,47 @@ defmodule Samen.Scopes.Chat.Blueprint do
   from. A cross-plane thread is OWNED BY THE TENANT ORG; the operator reaches it through the
   existing impersonation bridge carrying the tenant `org_id`, so `OrgScope` is satisfied for
   BOTH parties with NO new policy. The grant is checked against the live actor at render.
+
+  ## Soft-delete adoption (ADR-040 §5.9, T37e; reconciled T125) — `thread ▸cascade participant
+  ## ▸cascade message`
+
+  `ChatThread` is `archivable: true` and is the roster's cascade PARENT: archiving a thread
+  cascades to archive its `ChatParticipant`s AND `ChatMessage`s at the SAME instant
+  (`Samen.Scopes.Chat.CascadeArchive`, §5.4 — "neither is meaningful without its thread");
+  restoring a thread restores exactly the same-instant-archived members
+  (`Samen.Scopes.Chat.CascadeRestore`) — a participant/message archived independently stays
+  archived (the same-instant match, T124-microsecond-safe per the CMS `page ▸cascade block`
+  precedent this mirrors).
+
+  `ChatParticipant` and `ChatMessage` are ALSO `archivable: true` — the archival SUBSTRATE
+  (the `archived_at` column, the default-read exclusion, the `:archive`/`:restore`/`:archived`
+  actions the cascade modules invoke) must exist on both for the cascade to have anything to
+  set/match/restore, exactly as CMS's `Block` carries its own full substrate as the cascade
+  TARGET of `page ▸cascade block`.
+
+  **POSTURE (T125, ADR-040 §5.4/§5.9 reconciled — INDEPENDENT-ARCHIVABLE CHILDREN
+  EVERYWHERE):** `ChatMessage` is an ORDINARY independently-archivable composition child, same
+  as CMS's `Block` — an authorized (org-scoped) actor CAN archive/restore a message directly,
+  and the thread's cascade still sweeps every still-live message at parent-archive time; a
+  message archived independently stays archived across a later thread restore (the
+  same-instant match, §5.4). `ChatParticipant` is the ONE documented exception (§5.9 ¶): it
+  is the cross-plane grant carrier, so it KEEPS its own, resource-specific
+  `policy action([:archive, :restore]) do forbid_if(always()) end` (archiving a participant
+  must retire its grants; only the thread's `authorize?: false` cascade may do that) — the same
+  "reachable ONLY via the internal cascade call; any actor-based attempt is refused" posture
+  `Samen.Scopes.Identity.Blueprint`'s pre-actor `:accept`/`:expire` transitions use.
+  `ChatMessage` carries NO such lock — its policy is the plain `OrgScope`-only default,
+  matching `ChatThread`/CMS `Block`'s independent-archivability posture. (Pre-T125, this
+  scope locked BOTH `ChatParticipant` and `ChatMessage`; T125 reconciled the cross-scope
+  inconsistency the T37f verifier flagged — see `_orch/verify/T37f-verdict.json` finding
+  F3 and ADR-040 §5.4/§5.9 — by relaxing `ChatMessage` to match CMS's default, while
+  preserving `ChatParticipant`'s lock for its own, orthogonal, grant-carrier reason.)
   """
 
   # ---------------------------------------------------------------------------
   # ChatThread — a conversation that may span two planes. Org-scoped. No PII.
   # ---------------------------------------------------------------------------
-  defmacro define_thread(module, otp_app, domain, repo, abbrev) do
+  defmacro define_thread(module, otp_app, domain, repo, abbrev, participant_mod, message_mod) do
     quote do
       defmodule unquote(module) do
         @moduledoc """
@@ -61,13 +96,27 @@ defmodule Samen.Scopes.Chat.Blueprint do
         (`:masked | :tenant_wide | :initiator_opt_in`) so flipping the org setting later never
         retroactively exposes old threads. `context_ref` is an OPTIONAL `samen:<key>:<id>`
         object ref this thread is "about" (rendered via the SAME unfurl resolver).
+
+        ## Soft-delete (ADR-040 §5.9, T37e)
+
+        Archivable — and the cascade PARENT of `thread ▸cascade participant ▸cascade message`
+        (§5.4): archiving a thread cascades to archive its `ChatParticipant`s and
+        `ChatMessage`s at the same instant (`Samen.Scopes.Chat.CascadeArchive`); restoring a
+        thread restores exactly the same-instant-archived members
+        (`Samen.Scopes.Chat.CascadeRestore`) — a member archived independently stays archived.
+        No action-name collision: no hand-authored `:archive`/`:restore`/`:archived` action
+        exists here. `:archive`/`:restore`/`:archived` are TYPE-matched by the existing
+        `action_type([:create, :update, :destroy])`/`action_type(:read)` policy blocks below
+        (no separate policy needed — unlike CMS's Page/Post, this scope's generic policies are
+        already type-based, not name-based).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_thread")
@@ -102,6 +151,34 @@ defmodule Samen.Scopes.Chat.Blueprint do
           attribute(:context_ref, :string, public?: true)
         end
 
+        relationships do
+          # The thread ▸cascade participant / thread ▸cascade message composition
+          # (ADR-040 §5.4). Inverse of ChatParticipant/ChatMessage's `belongs_to :thread`.
+          has_many :participants, unquote(participant_mod) do
+            public?(true)
+            destination_attribute(:thread_id)
+          end
+
+          has_many :messages, unquote(message_mod) do
+            public?(true)
+            destination_attribute(:thread_id)
+          end
+        end
+
+        changes do
+          # Thread ▸ {Participant, Message} same-instant cascade, both directions
+          # (§5.4). See each cascade module's moduledoc for why this scope does not
+          # use ash_archival's `archive_related` DSL option directly (timestamp
+          # exactness + audit completeness — mirrors `Samen.Scopes.Cms.CascadeArchive`).
+          #
+          # `on:` defaults to `[:create, :update]` (Ash omits `:destroy` by default).
+          # `:archive` IS a `:destroy`-type action, so CascadeArchive needs
+          # `on: [:destroy]` explicitly or it silently never runs. CascadeRestore's
+          # `:restore` is `:update`-typed, already covered by the default.
+          change(Samen.Scopes.Chat.CascadeArchive, on: [:destroy])
+          change(Samen.Scopes.Chat.CascadeRestore)
+        end
+
         actions do
           defaults([:read, :destroy, create: :*, update: :*])
         end
@@ -134,13 +211,27 @@ defmodule Samen.Scopes.Chat.Blueprint do
         cross-plane seam. `full_name` is the participant's REAL identity (vault-routed PII);
         `handle` is the always-safe non-PII display label. `identity_shared` is the
         per-conversation initiator opt-in (§5 state 2). Org-scoped.
+
+        ## Soft-delete (ADR-040 §5.9, T37e) — cascade child, NO independent archive
+
+        Archivable (substrate only): carries `archived_at` + the `:archive`/`:restore`/
+        `:archived` actions so `Samen.Scopes.Chat.CascadeArchive`/`CascadeRestore` (declared on
+        `ChatThread`) have something to set/match/restore — but per the roster's ¶ footnote
+        ("has NO independent archive: it cascades with its thread only"), the `policies` block
+        below explicitly `forbid_if(always())`s any actor-driven `:archive`/`:restore` call;
+        the ONLY path that ever archives/restores a participant is the thread's cascade,
+        which runs `authorize?: false` (bypassing policy checks entirely, same as every other
+        cascade in this foundry). An archived participant retires its `full_name` 🔒 vault
+        token from default reads on BOTH planes, same as a live row's masking (§5.1) — the
+        `full_name` masking-on-archived 3-proof (T37e) exercises exactly this row.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_participant")
@@ -230,6 +321,20 @@ defmodule Samen.Scopes.Chat.Blueprint do
             authorize_if(Samen.Policy.OrgScope)
           end
 
+          # No independent archive (§5.4 ¶ footnote): reachable ONLY via the
+          # thread's `authorize?: false` cascade calls (`Samen.Scopes.Chat.
+          # CascadeArchive`/`CascadeRestore`); any actor-based attempt is refused
+          # — the same "pre-actor / system transition" posture
+          # `Samen.Scopes.Identity.Blueprint`'s `:accept`/`:expire` use. Placed
+          # AFTER the broad `action_type` policy above so BOTH policies match
+          # `:archive`/`:restore` (they are `:destroy`/`:update`-typed) — Ash
+          # requires every matching policy to authorize, so this one alone
+          # forbidding is enough to close the actor-driven path regardless of
+          # ordering.
+          policy action([:archive, :restore]) do
+            forbid_if(always())
+          end
+
           policy action(:reveal_participant) do
             authorize_if(always())
           end
@@ -253,13 +358,31 @@ defmodule Samen.Scopes.Chat.Blueprint do
         `refs` are the object refs parsed out of `body` AT SEND TIME (on the plaintext, before
         the body is vaulted) so unfurl never re-parses ciphertext (§4.2). Opaque strings; not
         PII. `sender_party` is denormalized (`:tenant | :operator`) for cheap broadcast render.
+
+        ## Soft-delete (ADR-040 §5.9, T37e; reconciled T125) — cascade child,
+        ## INDEPENDENTLY-ARCHIVABLE (posture A)
+
+        Archivable — carries `archived_at` + the `:archive`/`:restore`/`:archived` actions.
+        The thread's cascade (`Samen.Scopes.Chat.CascadeArchive`/`CascadeRestore`) still
+        sweeps every still-live message at thread-archive time (same-instant), but — per
+        T125's reconciliation of ADR-040 §5.4/§5.9 — a `ChatMessage` is ALSO an ORDINARY
+        independently-archivable resource: an authorized (org-scoped) actor may call
+        `:archive`/`:restore` on it directly, exactly like CMS's `Block`. A message archived
+        independently stays archived across a later thread restore (the same-instant match,
+        §5.4) — this is now the SAME posture as `ChatParticipant` was NOT: unlike
+        `ChatParticipant` (the cross-plane grant carrier, which keeps its own
+        `forbid_if(always())` lock for a resource-specific reason — see
+        `Samen.Scopes.Chat.Blueprint` moduledoc), `ChatMessage` carries no such lock. An
+        archived message keeps its `body` 🔒 vault token and masks by plane exactly like a
+        live row (§5.1) — trash, not erasure.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_message")
@@ -282,6 +405,15 @@ defmodule Samen.Scopes.Chat.Blueprint do
 
           # The parsed object refs found in `body` at send time (opaque). Not PII.
           attribute(:refs, {:array, :string}, public?: true, default: [])
+
+          # Attachment storage_keys (T61 / C7). Opaque governed pointers minted ONLY by
+          # `Samen.Files.upload/3` (the chokepoint) and stored here via
+          # `Samen.Scopes.Chat.Attachments` — never a raw `storage_key` write. Not PII
+          # (an opaque key, never a personal identifier). The referenced File rows land
+          # `:quarantined` (fail-closed) and become viewable only after a clean scan; the
+          # File itself is org-scoped, so an attachment on org A's message is unreachable
+          # from org B (the File's own `OrgScope` read policy).
+          attribute(:attachments, {:array, :string}, public?: true, default: [])
         end
 
         pii do
@@ -337,6 +469,14 @@ defmodule Samen.Scopes.Chat.Blueprint do
         end
 
         policies do
+          # T125 (ADR-040 §5.4/§5.9 reconciled, posture A): NO
+          # `forbid_if(always())` lock here — a ChatMessage is an ordinary,
+          # independently-archivable composition child, matching CMS's
+          # `Block`. `:archive`/`:restore` are `:destroy`/`:update`-typed, so
+          # they are already covered by the broad `action_type` policy above
+          # (OrgScope-gated, any org member) — no separate policy needed.
+          # Contrast `ChatParticipant`, which KEEPS its own lock (the
+          # cross-plane grant-carrier exception, §5.9 ¶).
           policy action_type([:read, :create, :update, :destroy]) do
             authorize_if(Samen.Policy.OrgScope)
           end

@@ -1,0 +1,20 @@
+# SABOTAGE: P17 (ADR-045 §3) — the org-scoped aggregate read bypasses OrgScope: it reads
+# with `authorize?: false`, so `Samen.Policy.OrgScope` no longer narrows the rows to the
+# caller's own org and ANOTHER org's rows enter the tenant's own-org aggregate (a cross-org
+# leak). Flips the cross-org isolation proof (org A sees org B's rows). The org-less fail-
+# closed guard is upstream of this line, so the discriminator is the OrgScope narrowing itself.
+# APP: samen_core
+# TEST_FILES: test/org_analytics_test.exs
+# MUST_FAIL: reading as org A returns ONLY org A's cohorts
+diff --git a/samen_core/lib/samen/aggregate.ex b/samen_core/lib/samen/aggregate.ex
+--- a/samen_core/lib/samen/aggregate.ex
++++ b/samen_core/lib/samen/aggregate.ex
+@@ -354,7 +354,7 @@ defmodule Samen.Aggregate do
+       true ->
+         query = Keyword.get(opts, :query, resource)
+
+-        case Ash.read(query, actor: actor, authorize?: true) do
++        case Ash.read(query, actor: actor, authorize?: false) do
+           {:ok, rows} ->
+             # OrgScope has already narrowed rows to actor.org_id. Route through the EXACT
+             # shipped floor (reuse, never reimplement) — fail closed on a nil cohort spec.

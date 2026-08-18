@@ -1,0 +1,28 @@
+# SABOTAGE: phase-6 SEC dogfood H2 (T150, ADR-010 §7.2 identity line) — the
+# DRIFTWOOD half (patch 156 pins pawchart). Re-trusts the CLIENT-SUPPLIED
+# ?operator_id over the authenticated principal in
+# DriftwoodWeb.OperatorImpersonationLive.mount/3, restoring the pre-fix
+# "params beat session" resolution. Under it an authenticated operator opens an
+# impersonation session as ?operator_id=<victim>, so the tenant's audit ledger
+# names the WRONG operator (attribution forgery), the victim's active masked
+# session's roster can be ridden, and -- driftwood-specific -- the second-party
+# REVEAL request/grant path (which keys on the same acting id) is booked under
+# the victim too.
+# APP: driftwood
+# TEST_FILES: test/operator_impersonation_console_test.exs
+# MUST_FAIL: the acting id resolves from the SIGNED session principal, never the ?operator_id param
+# MUST_FAIL: ledger ATTRIBUTION: opening a session from a forged-param mount books the PRINCIPAL
+# MUST_FAIL: SESSION RIDING: a forged ?operator_id cannot borrow another operator's live session
+diff --git a/driftwood/lib/driftwood_web/operator_impersonation_live.ex b/driftwood/lib/driftwood_web/operator_impersonation_live.ex
+index a5a0492..5c91834 100644
+--- a/driftwood/lib/driftwood_web/operator_impersonation_live.ex
++++ b/driftwood/lib/driftwood_web/operator_impersonation_live.ex
+@@ -89,7 +89,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
+     # every mount, so it legitimately stays a param.
+     org_id = fetch(params, session, "org_id")
+     if connected?(socket), do: schedule_tick()
+-    {:ok, load(socket, socket.assigns[:samen_operator_id], org_id)}
++    {:ok, load(socket, fetch(params, session, "operator_id") || socket.assigns[:samen_operator_id], org_id)}
+   end
+ 
+   # Extracted so the dogfood test drives the exact same load path.

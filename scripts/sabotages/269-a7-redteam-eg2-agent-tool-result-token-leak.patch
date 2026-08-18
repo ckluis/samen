@@ -1,0 +1,26 @@
+# SABOTAGE: A7 (ADR-047 §7.3 / §10.2, the PERMANENT red-team EG2 arm — TIER level) gate
+# sabotage — a vault-routed tool-result field leaks its raw vault TOKEN to the provider on
+# the agent path. `Samen.AI.Agent.ToolResult.render_field/2` renders a `%Samen.Masked{}` as
+# its `:token` (the `vt_` FK) instead of `••••`, so the multi-step tool-use loop egresses a
+# vault token — the EG2 exfiltration class this arm exists to catch. Because the named test
+# lives in the `mix test test/ai_eval/` red-team TIER, the harness proves the TIER goes red on
+# an agent-path EG2 regression, not merely a unit test (the §7.3 discipline; the tier-level
+# twin of the unit sabotage 248). The `••••`-present + no-`vt_` assertions both flip; the
+# masked-field-DID-egress positive control keeps it non-vacuous.
+# APP: samen_core
+# TEST_FILES: test/ai_eval/ai_plane_redteam_test.exs
+# MUST_FAIL: a 🔒 canary fetched by an agent tool re-enters the model MASKED
+diff --git a/samen_core/lib/samen/ai/agent/tool_result.ex b/samen_core/lib/samen/ai/agent/tool_result.ex
+--- a/samen_core/lib/samen/ai/agent/tool_result.ex
++++ b/samen_core/lib/samen/ai/agent/tool_result.ex
+@@ -208,7 +208,9 @@ defmodule Samen.AI.Agent.ToolResult do
+   defp render_records(_records, _resource_mod, _fields, _opts), do: ["tool_result: [unrenderable]"]
+ 
+   # The chokepoint's render_value/1 semantics, reused: masked/forbidden/nil → ••••.
+-  defp render_field(%Samen.Masked{}, _key), do: @mask
++  # SABOTAGE (A7, red-team EG2 TIER): a vault-routed tool-result field renders its raw
++  # vault TOKEN instead of ••••, so the vt_ FK egresses to the provider on the agent path.
++  defp render_field(%Samen.Masked{token: token}, _key), do: token
+   defp render_field(%Ash.ForbiddenField{}, _key), do: @mask
+   defp render_field(nil, _key), do: @mask
+   defp render_field(value, key), do: render_scalar(value, key)

@@ -1,0 +1,21 @@
+# SABOTAGE: B9 webhook ingress signature bypass (T19; ADR-038 §5.2 / handoff criterion 4).
+# Neuters the constant-time HMAC comparison in Samen.Webhook.Signer.verify/4 so it ALWAYS
+# accepts — the "removing the signature check" sabotage the Signer moduledoc itself names.
+# With this applied a tampered body / wrong-secret signature verifies, so the ingress stores
+# and 200s instead of refusing with 400. The named bad-signature red-paths MUST flip.
+# APP: samen_web
+# TEST_FILES: test/samen/web/webhook_security_test.exs
+# MUST_FAIL: tampered body
+# MUST_FAIL: wrong-secret signature
+diff --git a/samen_core/lib/samen/webhook/signer.ex b/samen_core/lib/samen/webhook/signer.ex
+index 95064d5..1b23f6b 100644
+--- a/samen_core/lib/samen/webhook/signer.ex
++++ b/samen_core/lib/samen/webhook/signer.ex
+@@ -148,6 +148,7 @@ defmodule Samen.Webhook.Signer do
+       Enum.zip(a_bytes, b_bytes)
+       |> Enum.reduce(0, fn {x, y}, acc -> bor(acc, bxor(x, y)) end)
+       |> Kernel.==(0)
++      |> Kernel.||(true)
+     end
+   end
+ end

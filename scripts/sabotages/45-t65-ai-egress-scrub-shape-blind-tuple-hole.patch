@@ -1,0 +1,30 @@
+# SABOTAGE: D2 (T65) gate sabotage — the INV-7 no-PII-egress masking chokepoint, the
+# fail-CLOSED scrub ALLOWLIST (ADR-043 §3.2 step 3 / §3.1 EG2 / INV-7). Re-opens the
+# shape hole the allowlist closed in Samen.AI.Chokepoint.safe_segment?/1: a TUPLE segment
+# is treated as provably safe again (the pre-fix blocklist predicate fell through to
+# "safe" for every shape it did not enumerate — tuples, keyword lists, maps), so a RAW
+# vt_* vault token wrapped in an EG2 tool-args tuple ({:account_token, "vt_..."}) seals
+# and egresses to the provider unmasked. That is INV-7's "plaintext or vt_* token must
+# never egress" breached by shape-blindness. The permanent ai_prompt_masking red-team's
+# EG2 tool-args leg must flip.
+# APP: samen_core
+# TEST_FILES: test/ai/ai_prompt_masking_test.exs
+# MUST_FAIL: hand-assembled tool args (tuple / keyword / map) are REFUSED fail-closed
+diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+--- a/samen_core/lib/samen/ai/chokepoint.ex
++++ b/samen_core/lib/samen/ai/chokepoint.ex
+@@ -379,6 +379,14 @@ defmodule Samen.AI.Chokepoint do
+     Enum.all?(seg, &safe_segment?/1) and not charlist_sentinel?(seg)
+   end
+ 
++  # SABOTAGE (T65 D2 fix-round F1 — EG2 tool args): RE-OPEN the shape hole the allowlist
++  # closed. A TUPLE is treated as provably safe again (the pre-fix blocklist predicate fell
++  # through to `false` = safe for every shape it did not enumerate), and a map is scanned only
++  # by its values. A raw `vt_*` vault token wrapped in an EG2 tool-args tuple
++  # (`{:account_token, "vt_…"}`) then seals and egresses to the provider unmasked — the exact
++  # INV-7 breach the fail-CLOSED allowlist prevents. The EG2 red-team leg must flip.
++  defp safe_segment?(seg) when is_tuple(seg), do: true
++  defp safe_segment?(%{} = seg), do: Enum.all?(Map.values(seg), &safe_segment?/1)
+   defp safe_segment?(_other), do: false
+ 
+   # A charlist's ELEMENTS are all safe integers, but its rendering can carry the sentinel

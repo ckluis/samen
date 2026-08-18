@@ -1,0 +1,33 @@
+# SABOTAGE: Phase-6 T85 gate UX batch, H4 fix regression — removes the
+# defense-in-depth crash-gate clause on TicketLive's "insert_suggestion"
+# handle_event/3 (`def handle_event("insert_suggestion", _params, %{assigns:
+# %{reply_form: nil}} = socket)`). Without it, the handler falls straight
+# through to the ungated clause, which calls
+# `AshPhoenix.Form.value(socket.assigns.reply_form, :body)` — and on a FRESH
+# ticket (no conversation seeded yet, `reply_form == nil`)
+# `AshPhoenix.Form.value/2` immediately calls `to_form!(nil)`, which RAISES,
+# crashing the LiveView (the exact H4 dogfood finding this fix closed).
+# APP: samen_web
+# TEST_FILES: test/samen/web/support_ticket_fresh_conversation_test.exs
+# MUST_FAIL: clicking Insert on a fresh ticket does NOT crash the LiveView (the handler's own guard)
+--- a/samen_web/lib/samen/web/support/ticket_live.ex
++++ b/samen_web/lib/samen/web/support/ticket_live.ex
+@@ -137,18 +137,6 @@
+   # AshPhoenix.Form draft (AshPhoenix.Form.validate/2) — it does not itself write
+   # to the DB; the vaulted `body` still routes through Samen.Vault.Change on the
+   # eventual "Send reply" submit, exactly like any other edit to this form.
+-  # H4 — the crash-gate: a FRESH ticket (no conversation seeded yet) has
+-  # `reply_form == nil` (`new_reply_form/3` below). `AshPhoenix.Form.value/2`
+-  # calls `to_form!/1` on its first arg, which RAISES on anything that isn't
+-  # already a Form/changeset — so this clause MUST come first and MUST be a
+-  # true no-op (never falls through to the `AshPhoenix.Form.value(nil, ...)`
+-  # clause below). The UI already renders Insert `disabled` in this state
+-  # (`render_kb_suggestion/2`); this is the defense-in-depth guard for the
+-  # handler itself.
+-  def handle_event("insert_suggestion", _params, %{assigns: %{reply_form: nil}} = socket) do
+-    {:noreply, socket}
+-  end
+-
+   def handle_event("insert_suggestion", %{"article_id" => article_id}, socket) do
+     case find_suggested_article(socket.assigns.kb_suggestion, article_id) do
+       nil ->

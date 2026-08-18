@@ -72,7 +72,7 @@ defmodule Samen.WebTest.Repo.Migrations.MountBillingSupportScopes do
 
     # --- wbc_customer : 🔒 (billing_name/billing_email vault-routed) ---
     create table(:wbc_customer, primary_key: false) do
-      add(:wbc_stripe_customer_id, :text)
+      add(:wbc_provider_customer_ref, :text)
       add(:wbc_status, :text, default: "active")
       add(:wbc_currency, :text, default: "USD")
       add(:wbc_custom, :map, default: fragment("'{}'::jsonb"))
@@ -90,7 +90,7 @@ defmodule Samen.WebTest.Repo.Migrations.MountBillingSupportScopes do
       add(:wbp_name, :text, null: false)
       add(:wbp_label, :text)
       add(:wbp_description, :text)
-      add(:wbp_stripe_plan_id, :text)
+      add(:wbp_provider_plan_ref, :text)
       add(:wbp_interval, :text, default: "monthly")
       add(:wbp_enabled, :boolean, default: true)
       add(:wbp_features, :map, default: fragment("'{}'::jsonb"))
@@ -103,7 +103,7 @@ defmodule Samen.WebTest.Repo.Migrations.MountBillingSupportScopes do
 
     # --- wbr_price : Tier-0 config rows (price per plan) ---
     create table(:wbr_price, primary_key: false) do
-      add(:wbr_stripe_price_id, :text)
+      add(:wbr_provider_price_ref, :text)
       add(:wbr_unit_amount_cents, :integer, null: false)
       add(:wbr_currency, :text, null: false, default: "USD")
       add(:wbr_interval, :text, default: "monthly")
@@ -128,7 +128,7 @@ defmodule Samen.WebTest.Repo.Migrations.MountBillingSupportScopes do
 
     # --- wbs_subscription : an active billing subscription ---
     create table(:wbs_subscription, primary_key: false) do
-      add(:wbs_stripe_subscription_id, :text)
+      add(:wbs_provider_subscription_ref, :text)
       add(:wbs_status, :text, default: "active")
       add(:wbs_current_period_start, :utc_datetime)
       add(:wbs_current_period_end, :utc_datetime)
@@ -163,9 +163,15 @@ defmodule Samen.WebTest.Repo.Migrations.MountBillingSupportScopes do
       add(:wbs_updated_at, :utc_datetime, null: false)
     end
 
+    # T106 decision (e): DB-unique-fence on the provider-subscription-ref — the
+    # idempotency guard for the checkout-seeded + lifecycle mirror convergence
+    # (ADR-038 addendum). Nullable column, so local rows with no provider ref are
+    # unconstrained (Postgres allows multiple NULLs); non-null provider refs collide.
+    create(unique_index(:wbs_subscription, [:wbs_provider_subscription_ref], name: "wbs_subscription_provider_ref_index"))
+
     # --- wbi_invoice : a billing invoice ---
     create table(:wbi_invoice, primary_key: false) do
-      add(:wbi_stripe_invoice_id, :text)
+      add(:wbi_provider_invoice_ref, :text)
       add(:wbi_status, :text, default: "draft")
       add(:wbi_amount_due_cents, :integer, default: 0)
       add(:wbi_amount_paid_cents, :integer, default: 0)
@@ -205,7 +211,7 @@ defmodule Samen.WebTest.Repo.Migrations.MountBillingSupportScopes do
 
     # --- wby_payment : a payment record (no raw card data) ---
     create table(:wby_payment, primary_key: false) do
-      add(:wby_stripe_payment_intent_id, :text)
+      add(:wby_provider_payment_ref, :text)
       add(:wby_status, :text, default: "pending")
       add(:wby_amount_cents, :integer, null: false)
       add(:wby_currency, :text, default: "USD")

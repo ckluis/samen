@@ -18,9 +18,16 @@ defmodule Samen.Web.CRMContactDetailCrudTest do
     * **Log-activity (AC-G1-2)** — the composer is the kit `simple_form` now: an
       invalid submit (blank required `type`) renders inline errors and persists
       NOTHING; the green path lives in `crm_detail_render_test.exs`.
-    * **Delete** — `delete_confirm/1` interlock + destroy + navigate back to the list.
+    * **Delete** — `delete_confirm/1` interlock + destroy + navigate back to the
+      list. ADR-040 §5.9/T37c: `Person` is `archivable true`, so the default
+      destroy now soft-archives (T36); CRM declares no cascade (§5.4), so a
+      contact with linked attachment rows archives cleanly too — its children
+      stay live, untouched. The archived row still masks its vault fields per
+      plane (INV-1), proven separately in `crm_scope_archival_leak_red_path_test.exs`.
   """
   use Samen.WebTest.DataCase, async: false
+
+  require Ash.Query
 
   alias Samen.Web.CRM.ContactLive
 
@@ -48,8 +55,16 @@ defmodule Samen.Web.CRMContactDetailCrudTest do
 
   defp raw_person(id), do: Ash.get!(Samen.WebTest.Crm.Person, id, authorize?: false)
 
+  defp archived_person(id) do
+    Samen.WebTest.Crm.Person
+    |> Ash.Query.for_read(:archived)
+    |> Ash.read!(authorize?: false)
+    |> Enum.find(&(&1.id == id))
+  end
+
+  # ADR-041 §5: the log-activity composer now writes a canonical Work Task. Count Tasks.
   defp activity_count(org_id) do
-    Samen.WebTest.Crm.Activity
+    Samen.WebTest.Work.Task
     |> Ash.Query.ensure_selected([:org_id])
     |> Ash.read!(authorize?: false)
     |> Enum.count(&(&1.org_id == org_id))
@@ -171,7 +186,7 @@ defmodule Samen.Web.CRMContactDetailCrudTest do
   # Log-activity — the kit form's inline-error red path (AC-G1-2)
   # ---------------------------------------------------------------------------
 
-  test "RED PATH (AC-G1-2): an invalid composer submit (blank required type) shows inline errors, persists NOTHING",
+  test "RED PATH (AC-G1-2): an invalid composer submit (out-of-enum kind) shows inline errors, persists NOTHING",
        %{org_id: org_id, contact_id: contact_id} do
     before_count = activity_count(org_id)
 
@@ -179,26 +194,27 @@ defmodule Samen.Web.CRMContactDetailCrudTest do
       mount_socket(org_id, contact_id)
       |> Phoenix.Component.assign(:active_tab, "activity")
 
+    # ADR-041 §6.1: the composer writes a Work Task; `kind` is a bounded one_of enum. An
+    # out-of-enum kind is refused at the write path and surfaced as an inline field error
+    # (the composer's AC-G1-2 red path — invalid input rejected + surfaced + nothing persisted).
     socket =
       event(socket, "log_activity", %{
-        "activity" => %{"type" => "", "subject" => "Half-written note"}
+        "activity" => %{"kind" => "not_a_valid_kind", "title" => "Half-written note"}
       })
 
     rendered = html(socket)
     assert rendered =~ ~s(id="log-activity-form")
     assert rendered =~ "field-invalid"
     assert rendered =~ "field-error"
-    assert rendered =~ "is required"
     assert activity_count(org_id) == before_count
   end
 
   # ---------------------------------------------------------------------------
-  # Delete — interlock + destroy + navigate back
+  # Delete — interlock + soft-archive + navigate back (ADR-040 §5.9/T37c)
   # ---------------------------------------------------------------------------
 
-  test "TENANT: delete carries the interlock, destroys the contact, and navigates back to the list",
+  test "TENANT: delete carries the interlock, soft-archives the contact, and navigates back to the list",
        %{org_id: org_id} do
-    # A FRESH contact with no linked activities — deletable under the kernel's FK rules.
     person =
       Samen.WebTest.Crm.Person
       |> Ash.Changeset.for_create(
@@ -219,21 +235,44 @@ defmodule Samen.Web.CRMContactDetailCrudTest do
     assert {:live, :redirect, %{to: to}} = socket.redirected
     assert to =~ "/crm/contacts"
 
+    # `raw_person/1` reads through the default (archived-excluding) filter — the
+    # archived contact drops out, same observable shape as the old hard delete
+    # for THIS assertion, even though the row still exists (T36 soft-destroy).
     assert_raise Ash.Error.Invalid, fn -> raw_person(person.id) end
+    assert archived_person(person.id).archived_at
   end
 
-  test "FAIL-HONEST RED PATH: deleting a contact with linked activities is REFUSED and SURFACED — no silent navigate",
+  test "delete soft-archives a contact WITH a linked attachment too (no FK refusal — ADR-040 §5.4 declares no cascade)",
        %{org_id: org_id, contact_id: contact_id} do
-    # The seeded contact HAS activities; the kernel defines no cascade, so the DB
-    # refuses the destroy. The page must surface the refusal, not navigate away.
+    # ADR-041: the seeded contact's timeline is now Work Tasks anchored by a GENERIC
+    # object-ref (not a CRM FK). Attach a CRM Attachment (a real belongs_to FK on
+    # person) to prove the point on its own terms: CRM declares no cascade (§5.4),
+    # so the destroy is no longer a real DELETE for Postgres to refuse — it
+    # soft-archives and the page navigates away, exactly like the bare case.
+    Samen.WebTest.Crm.Attachment
+    |> Ash.Changeset.for_create(
+      :create,
+      %{org_id: org_id, file_name: "signed-nda.pdf", person_id: contact_id},
+      actor: %{org_id: org_id, role: :member},
+      authorize?: false
+    )
+    |> Ash.create!()
+
     socket = mount_socket(org_id, contact_id)
     socket = event(socket, "delete_contact", %{"id" => contact_id})
 
-    assert socket.redirected == nil
-    assert socket.assigns.delete_error =~ "Could not delete this contact"
-    assert html(socket) =~ ~s(id="delete-error")
-    # The contact provably still exists.
-    assert raw_person(contact_id).id == contact_id
+    # The redirect itself proves success (the error branch never navigates —
+    # see the TENANT test above and the handler's `case` in contact_live.ex).
+    assert {:live, :redirect, %{to: to}} = socket.redirected
+    assert to =~ "/crm/contacts"
+    assert archived_person(contact_id).archived_at
+
+    # The linked Attachment row is untouched (no cascade) — still live and still
+    # pointing at the now-archived contact.
+    assert Samen.WebTest.Crm.Attachment
+           |> Ash.Query.filter(person_id == ^contact_id)
+           |> Ash.read!(authorize?: false)
+           |> Enum.any?()
   end
 
   test "OPERATOR: the delete affordance is NOT offered (tenant-plane posture)",

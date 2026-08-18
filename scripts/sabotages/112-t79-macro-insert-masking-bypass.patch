@@ -1,0 +1,32 @@
+# SABOTAGE: T79 (spec §I6 macros composer palette + CSAT loop closed) — the
+# MASKING guarantee on the macro composer's `{{agent_name}}` placeholder:
+# `TicketLive`'s `insert_macro` handler must substitute using `socket.assigns.
+# agents` — the list ALREADY plane-resolved by `Reads.agents/2`
+# (`Samen.Api.PiiResolution`, tenant CLEAR / operator `%Masked{}`) — never a
+# fresh, unresolved read. This sabotage bypasses that resolved list and issues
+# a RAW `Ash.read!/2` (no `resolve_pii` step) instead, so the substitution no
+# longer routes through PiiResolution at all — on the operator plane this
+# defeats the mask (the raw vault-field representation no longer even matches
+# a `%Masked{}`/binary shape, so the substitution silently falls through to the
+# neutral fallback instead of the intended `••••` mask) — the refutable half of
+# the mask assertion (CLAUDE.md's masking-watch-list discipline: "a modeled
+# leak IS detected").
+# APP: samen_web
+# TEST_FILES: test/samen/web/support_macro_composer_test.exs
+# MUST_FAIL: sabotage twin — insert_macro THROUGH the LiveView handler, direct-invoked on the OPERATOR plane, masks too
+# APPLY: patch -p1 --no-backup-if-mismatch < scripts/sabotages/112-t79-macro-insert-masking-bypass.patch
+--- a/samen_web/lib/samen/web/support/ticket_live.ex
++++ b/samen_web/lib/samen/web/support/ticket_live.ex
+@@ -174,7 +174,11 @@
+         current_body = AshPhoenix.Form.value(socket.assigns.reply_form, :body) || ""
+         current_type = AshPhoenix.Form.value(socket.assigns.reply_form, :message_type) || "reply"
+ 
+-        expanded = Reads.expand_macro(macro, socket.assigns.agents)
++        raw_agents =
++          Mount.resource(socket.assigns.samen_mount, Agent)
++          |> Ash.read!(scope: Mount.scope(socket.assigns.samen_mount, socket.assigns.org_id))
++
++        expanded = Reads.expand_macro(macro, raw_agents)
+         new_body = String.trim(current_body <> "\n\n" <> expanded)
+ 
+         form =

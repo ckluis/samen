@@ -1,0 +1,61 @@
+# SABOTAGE: T82 fix-round J5 metric-optionality MED (ADR-044 §8.2 rule 2:
+# "a metric the app cannot compute renders — with a not_available reason,
+# NEVER 0"). Reverts Samen.Fleet.Report's struct defaults for every
+# BUSINESS metric field from nil (honest omission) back to 0 (or, for
+# deliverability_health_index, a fabricated PERFECT 100) — so a bare
+# framework install with no billing/support/deliverability substrate wired
+# once again emits a confident, fabricated zero (or perfect score) it never
+# actually computed, indistinguishable from a genuine zero.
+# APP: samen_core
+# TEST_FILES: test/fleet_report_schema_test.exs test/fleet_registry_test.exs
+# MUST_FAIL: GREEN: a report with every business metric OMITTED still validates :ok
+diff --git a/samen_core/lib/samen/fleet/report.ex b/samen_core/lib/samen/fleet/report.ex
+--- a/samen_core/lib/samen/fleet/report.ex
++++ b/samen_core/lib/samen/fleet/report.ex
+@@ -45,27 +45,27 @@
+             health_status: :ok,
+             health_score: 100,
+             checks: [],
+-            mrr_cents: nil,
+-            arr_cents: nil,
+-            active_subscriptions: nil,
+-            delinquent_subs: nil,
++            mrr_cents: 0,
++            arr_cents: 0,
++            active_subscriptions: 0,
++            delinquent_subs: 0,
+             mrr_by_tier: [],
+-            tenant_count: nil,
+-            active_tenant_count: nil,
+-            new_tenants_24h: nil,
++            tenant_count: 0,
++            active_tenant_count: 0,
++            new_tenants_24h: 0,
+             oban: [],
+-            open_tickets: nil,
+-            breaching_sla: nil,
+-            oldest_open_age_s: nil,
+-            sent: nil,
+-            delivered: nil,
+-            bounced: nil,
+-            complained: nil,
+-            suppressed: nil,
+-            deliverability_health_index: nil,
+-            rules_active: nil,
+-            rules_tripped_24h: nil,
+-            kill_switches_engaged: nil,
++            open_tickets: 0,
++            breaching_sla: 0,
++            oldest_open_age_s: 0,
++            sent: 0,
++            delivered: 0,
++            bounced: 0,
++            complained: 0,
++            suppressed: 0,
++            deliverability_health_index: 100,
++            rules_active: 0,
++            rules_tripped_24h: 0,
++            kill_switches_engaged: 0,
+             attention: [],
+             activity_counts: [],
+             engine_version: 1,

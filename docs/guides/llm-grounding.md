@@ -154,8 +154,7 @@ can swallow it). The load-bearing steps for an agent-authored change:
 
 | verifier | catches | the agent's mistake it bounds |
 |---|---|---|
-| `catalog_parity` | a physical column with no `fld_field` row (and the reverse; ghost tables) | added a column to the DDL but forgot to catalog it |
-| `column_refs` | a source reference to a `^[a-z]{3}_` name not in the catalog | grounded on a hallucinated storage name |
+| `catalog_parity` | a physical column with no `fld_field` row (and the reverse; ghost tables) | added a column to the DDL but forgot to catalog it — the "hallucinated field" bug class |
 | `prefixes` | a physical column missing its resource abbrev | hand-wrote a bare column name, breaking self-qualifying storage |
 | `pii_classify` | a NEW plain-typed `:string`/`:date` column that looks like PII | wrote `attribute :ssn, :string` — plaintext PII at rest |
 | `pii_reads` | a vault-routed value reaching a log/span/sink outside `:reveal` | logged a name/CDL/email in the clear |
@@ -189,9 +188,12 @@ the residues:
   flows of a vault-declared value into a sink. A value laundered through a helper is
   the **sink-schema allow-list**'s job (`sink_schema` / `no_plaintext_pii`), not the
   AST walker's — the layered design is the accepted mitigation (plan C3).
-- **`column_refs` / `prefixes` / `catalog_parity` are storage/catalog checks, not
+- **`prefixes` / `catalog_parity` are storage/catalog checks, not
   semantic ones.** They prove a name exists and is prefixed and catalogued; they do
-  not prove the agent used the *right* field for the business meaning.
+  not prove the agent used the *right* field for the business meaning. (A hallucinated
+  *attribute* reference in Ash source is caught earlier still — it fails to compile via
+  the Spark DSL verifiers under `--warnings-as-errors`. The former source-text
+  `column_refs` linter was retired — ADR-045 A3 — as redundant with these two guards.)
 - **The gate bounds correctness of the substrate idioms, not the agent's domain
   logic.** Settlement math, a dispatch gate, a clinical workflow — those the agent
   writes natively and tests itself; the substrate makes the *infrastructure* wrong
@@ -212,7 +214,7 @@ the gate's exact exit behavior on six seeded cases:
 | # | seeded wrong | owning verifier | expected exit |
 |---|---|---|---|
 | 1 | a **correct** resource (vaulted PII, guarded FK, no leak) | the whole gate | **exit 0** (passes) |
-| 2 | a hallucinated / uncatalogued column | `catalog_parity` + `column_refs` | exit 1 |
+| 2 | a hallucinated / uncatalogued column | `catalog_parity` | exit 1 |
 | 3 | net-new plaintext PII (`attribute :ssn, :string`) | `pii_classify` | exit 1 |
 | 4 | an unprefixed physical column | `prefixes` | exit 1 |
 | 5 | a vault value logged outside `:reveal` | `pii_reads` | exit 1 |

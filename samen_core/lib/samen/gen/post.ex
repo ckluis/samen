@@ -22,6 +22,13 @@ defmodule Samen.Gen.Post do
   lands Tier-0 resources into it. The scope module is emitted EMPTY (no resources yet)
   and `gen.resource` appends resources + wires the domain's `resources do … end`.
 
+  It ALSO emits (once per app, on the first `gen.scope`) the app-local AUTHN-COVERAGE
+  GUARD `test/tenant_authn_coverage_test.exs` and prints an authn-wired router snippet
+  (`scope_router_guidance/1`). Together these close the W4-H2 ergonomics gap: adding a
+  business-domain vertical (the CRM/Support/Work/Marketing pattern) is now GUIDED toward the
+  labeled mount AND CAUGHT (a bare unlabeled tenant mount that reopens the W4 cross-tenant
+  PII leak flips the guard at `mix test`) — correct-by-construction via the Batch-7 pattern.
+
   ## What `mix samen.gen.resource` emits (into an existing scope)
 
   Per the malleability ladder (scope-authoring §7) the default is a **Tier-0 config
@@ -54,6 +61,8 @@ defmodule Samen.Gen.Post do
   """
 
   alias Samen.Gen.App
+  alias Samen.Gen.FieldTypeMenu
+  alias Samen.Gen.PostTemplates
   alias Samen.AbbrevRegistry
 
   # ===========================================================================
@@ -104,7 +113,14 @@ defmodule Samen.Gen.Post do
     :ok
   end
 
-  @doc "Write the scope domain module + register it in both `:ash_domains` lists."
+  @doc """
+  Write the scope domain module + register it in both `:ash_domains` lists + emit the
+  app-local AUTHN-COVERAGE GUARD test (W4-H2 defense-in-depth; idempotent — written once,
+  on the first `gen.scope`, left as-is on later runs). The guard is the failing-until-wired
+  half of the ergonomics fix: the moment an author adds a business-domain tenant mount
+  WITHOUT `labels: @current_org_labels`, it trips at `mix test` (the guided half is
+  `scope_router_guidance/1`, printed by the task).
+  """
   def write_scope!(%ScopeSpec{} = s) do
     b = scope_bindings(s)
     dest = scope_file_path(s)
@@ -112,6 +128,43 @@ defmodule Samen.Gen.Post do
     File.write!(dest, App.render(Samen.Gen.PostTemplates.scope_module(), b))
 
     register_domain!(s.app_dir, s.otp_app, s.app_module, s.scope_module)
+    write_authn_coverage_guard!(s, b)
+    :ok
+  end
+
+  @doc """
+  The AUTHN-WIRED router snippet `mix samen.gen.scope` prints so an author copies the SAFE
+  (labeled) tenant mount, never a BARE one (the W4 BLOCKER-1 leak). The `labels:
+  @current_org_labels` merge is the load-bearing seam — a bare `samen_*_routes` mount reopens
+  the unauthenticated cross-tenant PII read (ADR-031). Illustrative for a business-domain
+  scope; the author picks the framework module kind matching this scope.
+  """
+  def scope_router_guidance(%ScopeSpec{} = s) do
+    kind = Macro.underscore(s.scope)
+
+    """
+    To expose #{s.scope} on the TENANT plane, add an AUTHN-WIRED mount to
+    lib/#{s.otp_app}_web/router.ex inside the bare `scope "/"` block. CARRY
+    `labels: @current_org_labels` so the `:authn` prod gate governs actor resolution — a BARE
+    unlabeled tenant mount is the pawchart cross-tenant PII leak (dogfood W4 BLOCKER-1, ADR-031):
+
+        samen_module_routes(:#{kind}, #{s.scope_module}, repo: #{s.app_module}.Repo, labels: @current_org_labels)
+
+    The emitted guard test/tenant_authn_coverage_test.exs FAILS until every tenant mount
+    carries the seam.
+    """
+  end
+
+  # Emit the app-local authn-coverage guard test — idempotent (a first-run artifact; later
+  # `gen.scope` runs leave the existing guard untouched, so it is authored ONCE per app).
+  defp write_authn_coverage_guard!(%ScopeSpec{} = s, bindings) do
+    dest = Path.join(s.app_dir, "test/tenant_authn_coverage_test.exs")
+
+    unless File.exists?(dest) do
+      File.mkdir_p!(Path.dirname(dest))
+      File.write!(dest, App.render(Samen.Gen.PostTemplates.tenant_authn_coverage_test(), bindings))
+    end
+
     :ok
   end
 
@@ -144,19 +197,30 @@ defmodule Samen.Gen.Post do
       :table,
       :migration_ts,
       # WS-D D7a `--live`: also scaffold index/show/form LiveViews on `Samen.UI`.
-      live?: false
+      live?: false,
+      # ADR-036 H7 (T15): the `pii do` vault field's LOGICAL type, one of
+      # `Samen.Gen.FieldTypeMenu.menu/0`. Defaults to "string" — byte-identical to
+      # pre-T15 output when `--field-type` is omitted.
+      field_type: "string",
+      # ADR-040 §5.8 (T37h) `--archivable`: emit the resource with `archivable: true`
+      # (full E6 soft-delete substrate) + the migration's `archived_at` column.
+      # Defaults to `false` — byte-identical to pre-T37h output when omitted.
+      archivable?: false
     ]
   end
 
   @doc """
   Build a resource spec. `opts`: `:app_dir`, `:scope` (the target scope base name),
-  `:resource` (the resource base name, e.g. `Widget`), `:abbrev` (3 lowercase letters).
+  `:resource` (the resource base name, e.g. `Widget`), `:abbrev` (3 lowercase letters),
+  `:field_type` (optional — one of `Samen.Gen.FieldTypeMenu.menu/0`, default `"string"`;
+  ADR-036 H7/T15's full type menu for the ONE scalar `pii do` vault field).
   """
   def build_resource_spec(opts) do
     app_dir = Keyword.fetch!(opts, :app_dir) |> Path.expand()
     scope = Keyword.fetch!(opts, :scope) |> to_string()
     resource = Keyword.fetch!(opts, :resource) |> to_string()
     abbrev = Keyword.fetch!(opts, :abbrev) |> to_string() |> String.downcase()
+    field_type = Keyword.get(opts, :field_type, "string") |> to_string()
     {app_module, otp_app} = read_app_identity!(app_dir)
 
     scope_module = "#{app_module}.#{scope}"
@@ -172,7 +236,9 @@ defmodule Samen.Gen.Post do
       abbrev: abbrev,
       table: "#{abbrev}_#{Macro.underscore(resource)}",
       migration_ts: Keyword.get(opts, :migration_ts, next_migration_ts(app_dir)),
-      live?: Keyword.get(opts, :live, false)
+      live?: Keyword.get(opts, :live, false),
+      field_type: field_type,
+      archivable?: Keyword.get(opts, :archivable, false)
     }
   end
 
@@ -203,6 +269,15 @@ defmodule Samen.Gen.Post do
 
     unless Regex.match?(~r/\A[a-z]{3}\z/, s.abbrev) do
       raise ArgumentError, "--abbrev must be exactly 3 lowercase letters (got #{inspect(s.abbrev)})"
+    end
+
+    # ADR-036 H7 (T15) — closed-world: an unknown --field-type is refused, not
+    # silently defaulted (the same fail-closed discipline `Samen.CustomFields`
+    # applies to its own type menu).
+    unless Samen.Gen.FieldTypeMenu.valid?(s.field_type) do
+      raise ArgumentError,
+            "--field-type must be one of #{inspect(Samen.Gen.FieldTypeMenu.menu())} " <>
+              "(got #{inspect(s.field_type)})"
     end
 
     # The target scope must already be a registered domain in the app (gen.scope first).
@@ -352,7 +427,41 @@ defmodule Samen.Gen.Post do
       "test_stem" => test_stem(s),
       # `--live` bindings: underscored path segments for the emitted LiveViews' routes.
       "scope_path" => Macro.underscore(s.scope),
-      "resource_path" => Macro.underscore(s.resource)
+      "resource_path" => Macro.underscore(s.resource),
+      # ADR-036 H7 (T15) — the `pii do` vault field's menu-selected type + its
+      # type-appropriate sample literals (Samen.Gen.FieldTypeMenu; "string" is
+      # byte-identical to pre-T15 output).
+      "field_type" => s.field_type,
+      "field_ash_type" => FieldTypeMenu.ash_type(s.field_type),
+      "field_dynamic_sample" => FieldTypeMenu.dynamic_sample(s.field_type, s.abbrev),
+      "field_vault_sample" => FieldTypeMenu.vault_sample(s.field_type, s.abbrev),
+      "field_vault_plaintext" => FieldTypeMenu.vault_plaintext(s.field_type, s.abbrev),
+      # attempt-2 fix: the migration's physical column name must match
+      # MaterializePii's OWN scalar-vs-composite routing (D4) — see
+      # FieldTypeMenu's moduledoc "T15 attempt-1 defect" note.
+      "field_vault_column" => FieldTypeMenu.vault_column(s.field_type, s.abbrev),
+      # ADR-040 §5.8 (T37h) `--archivable`: pre-resolved (not re-templated) insertion
+      # strings so the tiny `<%= key %>` engine (single-pass, no conditionals) can emit
+      # the E6 substrate ONLY when requested — "" leaves pre-T37h output byte-identical.
+      "archivable_opt" => if(s.archivable?, do: ",\n        archivable: true", else: ""),
+      "archived_at_migration_line" =>
+        if(s.archivable?,
+          do: "\n          add(:#{s.abbrev}_archived_at, :utc_datetime_usec)",
+          else: ""
+        ),
+      # `--live --archivable`: the generated index LiveView's restore + archived-filter
+      # affordance (§5.8's UI clause) — empty/plain-delete when not archivable, so a
+      # plain `--live` resource keeps its pre-T37h behavior. Resolved with the CONCRETE
+      # `resource_path` now (Elixir string interpolation), never left as a literal
+      # `<%= key %>` for the outer single-pass engine to (maybe) catch on a later key —
+      # the substitution order over a map is not guaranteed.
+      "archivable_live_events" =>
+        PostTemplates.archivable_live_events(s.archivable?, Macro.underscore(s.resource)),
+      "archivable_live_toggle_button" =>
+        PostTemplates.archivable_live_toggle_button(s.archivable?, Macro.underscore(s.resource)),
+      "archivable_live_row_action" =>
+        PostTemplates.archivable_live_row_action(s.archivable?, Macro.underscore(s.resource)),
+      "archivable_read_records_fn" => PostTemplates.archivable_read_records_fn(s.archivable?)
     }
   end
 

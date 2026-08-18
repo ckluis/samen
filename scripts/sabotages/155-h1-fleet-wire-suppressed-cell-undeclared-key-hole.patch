@@ -1,0 +1,25 @@
+# SABOTAGE: phase-6 SEC dogfood H1 (ADR-044 §5.2b / INV-2, ATK-6 class) — the
+# SUPPRESSED-CELL half. Reintroduces the undeclared-key hole inside a
+# %{"suppressed" => true} sub-map: unions the cell's OWN keys into the "declared"
+# set inside unknown_suppressed_key_errors/1, so nothing is ever rejected. That is
+# the pre-fix behaviour -- validate_suppressed/4 walked only @suppressed_fields --
+# under which %{"suppressed" => true, "reason" => "k_anonymity", "leak_note" =>
+# "<PII>"} validated :ok and was stored verbatim. Mirrors patch 94 (the same
+# closed-member premise failing one level down).
+# APP: samen_core
+# TEST_FILES: test/fleet_report_schema_test.exs
+# MUST_FAIL: RED: an undeclared PII-bearing key inside a SUPPRESSED cell is rejected
+# REGENERATED (phase-6 SEC fix round R6): bounding the echoed attacker-controlled key
+# name (safe_key/1) shifted the target hunk context. Same guarantee, same intent, retargeted.
+diff --git a/samen_core/lib/samen/fleet/report/schema.ex b/samen_core/lib/samen/fleet/report/schema.ex
+index 2a6e06b..23ec48e 100644
+--- a/samen_core/lib/samen/fleet/report/schema.ex
++++ b/samen_core/lib/samen/fleet/report/schema.ex
+@@ -530,6 +530,7 @@ defmodule Samen.Fleet.Report.Schema do
+       @suppressed_fields
+       |> MapSet.new(fn {name, _t, _o} -> Atom.to_string(name) end)
+       |> MapSet.put("suppressed")
++      |> MapSet.union(MapSet.new(Map.keys(sup)))
+ 
+     for key <- Map.keys(sup), key not in declared do
+       "unknown field #{safe_key(key)} — not declared in Samen.Aggregate.Suppressed"

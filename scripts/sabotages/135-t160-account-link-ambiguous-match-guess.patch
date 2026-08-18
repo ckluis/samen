@@ -1,0 +1,27 @@
+# SABOTAGE: T160 (spec §I4 completion) — flips `Samen.CRM.AccountLink.domain_match/2`'s
+# exhaustive `[one] -> match | _ -> no-match` pattern to `[one | _] -> match | [] -> no-
+# match`. Two or more CONFIDENT domain candidates (a genuinely ambiguous match — e.g. two
+# billing customers both use the shared brokerage's domain) now silently resolves to
+# WHICHEVER candidate the underlying read happened to return FIRST — an unstable guess,
+# not the honest "cannot resolve confidently" absence the fail-closed contract promises
+# (mirrors T74 `Samen.Mailbox.Match`'s own "an ambiguous match is never resolved by
+# guessing" discipline). A company's MRR/health could flip between TWO real customers'
+# numbers depending on read ordering — never a stable, honest answer either way. Reverts
+# byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_account_health_test.exs
+# MUST_FAIL: T160 FAIL-CLOSED AMBIGUOUS: TWO customers share the same domain -> honest no-match, never a guess
+diff --git a/samen_core/lib/samen/crm/account_link.ex b/samen_core/lib/samen/crm/account_link.ex
+--- a/samen_core/lib/samen/crm/account_link.ex
++++ b/samen_core/lib/samen/crm/account_link.ex
+@@ -164,8 +164,8 @@
+     # FAIL-CLOSED: exactly one confident candidate resolves; zero OR two-or-more
+     # (ambiguous — never guessed) both resolve to honest absence.
+     case matches do
+-      [one] -> {:ok, one, :domain}
+-      _ -> {:error, :not_linked}
++      [one | _] -> {:ok, one, :domain}
++      [] -> {:error, :not_linked}
+     end
+   rescue
+     _ -> {:error, :not_linked}

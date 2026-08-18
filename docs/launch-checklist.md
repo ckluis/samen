@@ -17,8 +17,8 @@ without it degrades gracefully but is not a breach · **[DRILL]** = a production
 ## 0 · Before you start
 
 - [ ] Pick the vertical (`driftwood` is the worked reference for every item below).
-- [ ] Read `docs/adr/031-byo-auth-launch-onramp.md` (auth), `docs/guides/byo-esp.md` (email),
-      and `docs/adr/024-generated-deploy-fail-honest.md` + the generated `runbook.md` (deploy).
+- [ ] Read `docs/adr/ADR-031-byo-auth-launch-onramp.md` (auth), `docs/guides/byo-esp.md` (email),
+      and `docs/adr/ADR-024-generated-deploy-fail-honest.md` + the generated `runbook.md` (deploy).
 - [ ] Confirm the tree is green: `./ci.sh` ends `ROOT CI: ALL PASSED`.
 
 ## 1 · Auth — turn on the launch gate **[BLOCKER]**
@@ -80,7 +80,7 @@ The Stripe mirror schema is real; `SyncAdapter.Stub` returns `{:ok, %{stub: true
 
 - [ ] Generate/adopt the deploy artifacts (`mix samen.gen.app --deploy` or the committed
       `fly.toml`/`runtime.exs` pattern); front the endpoint with TLS; point `DATABASE_URL` at a
-      managed Postgres (Neon) branch. See `docs/adr/024-*` and the generated `runbook.md`.
+      managed Postgres (Neon) branch. See `docs/adr/ADR-024-*` and the generated `runbook.md`.
 
 ## 6 · Production drills **[DRILL]**
 

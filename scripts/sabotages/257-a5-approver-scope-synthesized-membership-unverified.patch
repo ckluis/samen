@@ -1,0 +1,37 @@
+# SABOTAGE: A5 (ADR-047 §5.3; the A4 verifier's R2) gate sabotage — the APPROVER is
+# SYNTHESIZED again instead of resolved. `approver_scope/2` reverts to A4's
+# `%Samen.Scope{id: <whatever string the caller passed>, org_id: run.org_id, role: :member}`,
+# so (i) membership is never verified — a wholly foreign actor id executes a governed write
+# in the run's org, which is exactly the exploit the A4 verifier landed live — and (ii) the
+# role is hardcoded, silently ELEVATING an approver whose real role is narrower and
+# mis-attributing the consent in the audit trail. With A5's approve surface shipped this is
+# reachable by anyone who can name an approval id. The membership reds must flip, and so must
+# the role-recording test; the positive controls stay green, proving what was lost is the
+# identity resolution and not the execution path.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_write_test.exs
+# MUST_FAIL: a NON-MEMBER approver cannot execute the parked write
+# MUST_FAIL: a membership in ANOTHER org is not a membership here
+# MUST_FAIL: an UNWIRED host refuses fail-closed
+# MUST_FAIL: the approver's REAL role rides the execution and is recorded token-only
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1541,8 +1541,15 @@
+   # non-member refuses `:not_authorized` and an unwired host refuses
+   # `:approver_unresolvable` — either way the whole E3 decision rolls back, the approval
+   # stays pending, and nothing executed. Sabotage 257 puts the synthesis back.
+-  defp approver_scope(approver_id, %Run{org_id: org_id}),
+-    do: Approver.resolve(approver_id, org_id)
++  # SABOTAGE (A5, the A4 verifier's R2): back to SYNTHESIS — the caller's id is trusted
++  # without a membership read, and the role is invented rather than read.
++  defp approver_scope(approver_id, %Run{org_id: org_id})
++       when is_binary(approver_id) and is_binary(org_id) do
++    _ = Approver
++    {:ok, Samen.Scope.new(%{id: approver_id, org_id: org_id, role: :member})}
++  end
++
++  defp approver_scope(_approver_id, _run), do: {:error, :not_authorized}
+ 
+   defp fetch_turn(turn_id) when is_binary(turn_id) do
+     require Ash.Query

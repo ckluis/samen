@@ -1,0 +1,88 @@
+defmodule <%= module %>.Repo.Migrations.AddApprovals do
+  @moduledoc """
+  T35 §4.7 / T37h — materializes the T34 E3 `Approval` resource
+  (`Samen.Approvals.Blueprint`) on this app's own repo: `<%= approval_abbrev %>_approval`,
+  abbrev `<%= approval_abbrev %>` (allocator-reserved).
+
+  This app is `Samen.Reveal.Grants`' engine client for the `"pii_reveal"` kind
+  (`Samen.Reveal.ApprovalHandler`; registered in `config/config.exs`) — this is the
+  table `Grants.approve/2` now writes through via `Samen.Approvals`, closing the T35
+  non-fatal note (a generated app's reveal-approve previously took the fail-safe
+  INLINE path, never the T34 engine, because no `pii_reveal` approvals module was
+  wired). Shape mirrors `demo/priv/repo/migrations/20260728180000_add_approvals.exs`
+  (the T35 in-tree reference) — no AshOban expiry-scan index (this resource carries
+  no `:expire` action — see `Samen.Approvals.Blueprint` moduledoc for why).
+  """
+  use Samen.Migration
+
+  @resources [<%= module %>.Approvals.Approval]
+
+  def up do
+    create table(:<%= approval_abbrev %>_approval, primary_key: false) do
+      # NULL = plane-global governance approval (reveal); non-NULL = tenant-plane (§4.1).
+      add(:<%= approval_abbrev %>_org_id, :uuid)
+      add(:<%= approval_abbrev %>_kind, :text, null: false)
+      add(:<%= approval_abbrev %>_subject_ref, :text, null: false)
+      add(:<%= approval_abbrev %>_requested_by, :text, null: false)
+      add(:<%= approval_abbrev %>_decided_by, :text)
+      add(:<%= approval_abbrev %>_reason, :text)
+      add(:<%= approval_abbrev %>_deadline_at, :utc_datetime_usec)
+      add(:<%= approval_abbrev %>_requested_at, :utc_datetime_usec)
+      add(:<%= approval_abbrev %>_decided_at, :utc_datetime_usec)
+      add(:<%= approval_abbrev %>_state, :text, null: false, default: "pending")
+      add(:<%= approval_abbrev %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= approval_abbrev %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= approval_abbrev %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # Distinct-party DB CHECK — the rvg_distinct_party twin (§4.2 layer 2), carrying the
+    # T34-F1 tightening: a DECIDED row (approved | rejected) MUST carry a non-NULL approver.
+    create(
+      constraint(:<%= approval_abbrev %>_approval, :<%= approval_abbrev %>_distinct_party,
+        check: """
+        (<%= approval_abbrev %>_decided_by IS NULL OR <%= approval_abbrev %>_decided_by <> <%= approval_abbrev %>_requested_by)
+        AND (<%= approval_abbrev %>_state NOT IN ('approved', 'rejected') OR <%= approval_abbrev %>_decided_by IS NOT NULL)
+        """
+      )
+    )
+
+    create(
+      unique_index(:<%= approval_abbrev %>_approval, [:<%= approval_abbrev %>_org_id, :<%= approval_abbrev %>_kind, :<%= approval_abbrev %>_subject_ref],
+        where: "<%= approval_abbrev %>_state = 'pending' AND <%= approval_abbrev %>_org_id IS NOT NULL",
+        name: "<%= approval_abbrev %>_approval_pending_tenant_idx"
+      )
+    )
+
+    create(
+      unique_index(:<%= approval_abbrev %>_approval, [:<%= approval_abbrev %>_kind, :<%= approval_abbrev %>_subject_ref],
+        where: "<%= approval_abbrev %>_state = 'pending' AND <%= approval_abbrev %>_org_id IS NULL",
+        name: "<%= approval_abbrev %>_approval_pending_global_idx"
+      )
+    )
+
+    create(index(:<%= approval_abbrev %>_approval, [:<%= approval_abbrev %>_org_id], name: "<%= approval_abbrev %>_approval_org_idx"))
+
+    catalog_sync(@resources)
+  end
+
+  def down do
+    catalog_sync_down(@resources)
+
+    drop(index(:<%= approval_abbrev %>_approval, [:<%= approval_abbrev %>_org_id], name: "<%= approval_abbrev %>_approval_org_idx"))
+
+    drop(
+      unique_index(:<%= approval_abbrev %>_approval, [:<%= approval_abbrev %>_kind, :<%= approval_abbrev %>_subject_ref],
+        name: "<%= approval_abbrev %>_approval_pending_global_idx"
+      )
+    )
+
+    drop(
+      unique_index(:<%= approval_abbrev %>_approval, [:<%= approval_abbrev %>_org_id, :<%= approval_abbrev %>_kind, :<%= approval_abbrev %>_subject_ref],
+        name: "<%= approval_abbrev %>_approval_pending_tenant_idx"
+      )
+    )
+
+    drop(constraint(:<%= approval_abbrev %>_approval, :<%= approval_abbrev %>_distinct_party))
+    drop(table(:<%= approval_abbrev %>_approval))
+  end
+end

@@ -150,10 +150,13 @@ defmodule Driftwood.CryptoShredGameday do
         reason: "Carrier onboarding CDL verification, ticket DW-#{unique()}",
         resource: Driftwood.Freight.Driver,
         action: :reveal_driver,
+        # PP-11 (T150): tenant-attribute the reveal lifecycle onto the driver's OWN org
+        # chain (the tenant's SecurityLive ledger), not the `__global__` operator chain.
+        org_id: org_id,
         repo: repo
       })
 
-    {:ok, grant} = Grants.approve(request, %{granted_by: approver, repo: repo})
+    {:ok, grant} = Grants.approve(request, %{granted_by: approver, org_id: org_id, repo: repo})
 
     # Drive the actual reveal through the single decrypt chokepoint (proves the CDL
     # is decryptable PRE-shred — the anti-tautology anchor for the CDL red path).
@@ -262,11 +265,19 @@ defmodule Driftwood.CryptoShredGameday do
     |> Ash.create!()
   end
 
+  # ADR-036 §4.5(5): value_cents/currency dropped by the H1 Money migration —
+  # construct the Money value directly.
   defp create_load(org_id, name, value_cents, lane) do
     Driftwood.Crm.Opportunity
     |> Ash.Changeset.for_create(
       :create,
-      %{org_id: org_id, name: name, value_cents: value_cents, status: :open, custom: %{"lane" => lane}},
+      %{
+        org_id: org_id,
+        name: name,
+        value: Samen.Type.Money.from_cents(value_cents, :USD),
+        status: :open,
+        custom: %{"lane" => lane}
+      },
       authorize?: false
     )
     |> Ash.create!()

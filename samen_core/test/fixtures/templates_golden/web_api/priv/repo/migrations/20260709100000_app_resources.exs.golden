@@ -22,9 +22,17 @@ defmodule Acme.Repo.Migrations.AppResources do
   ]
 
   def up do
+    # ADR-036 H1/D7: money_with_currency is the AshMoney.AshPostgresExtension
+    # composite type acp_unit_amount (below) is stored as. Idempotent-per-DB
+    # (this is the app's first migration to need it); a host that adds further
+    # Money columns later installs the extension's full operator/aggregate set via
+    # `AshMoney.AshPostgresExtension` in its repo's `installed_extensions/0` +
+    # `mix ash_postgres.generate_migrations`.
+    execute("CREATE TYPE public.money_with_currency AS (currency_code varchar, amount numeric);")
+
     # ---- Billing scope (Stripe-mirror shape) — mounted AS-IS ----
     create table(:acc_customer, primary_key: false) do
-      add(:acc_stripe_customer_id, :text)
+      add(:acc_provider_customer_ref, :text)
       add(:acc_status, :text, default: "active")
       add(:acc_currency, :text, default: "USD")
       add(:acc_custom, :map, default: fragment("'{}'::jsonb"))
@@ -40,7 +48,7 @@ defmodule Acme.Repo.Migrations.AppResources do
       add(:acl_name, :text, null: false)
       add(:acl_label, :text)
       add(:acl_description, :text)
-      add(:acl_stripe_plan_id, :text)
+      add(:acl_provider_plan_ref, :text)
       add(:acl_interval, :text, default: "monthly")
       add(:acl_enabled, :boolean, default: true)
       add(:acl_features, :map, default: fragment("'{}'::jsonb"))
@@ -49,12 +57,15 @@ defmodule Acme.Repo.Migrations.AppResources do
       add(:acl_org_id, :uuid, null: false)
       add(:acl_inserted_at, :utc_datetime, null: false)
       add(:acl_updated_at, :utc_datetime, null: false)
+      add(:acl_archived_at, :utc_datetime_usec)
     end
 
     create table(:acp_price, primary_key: false) do
-      add(:acp_stripe_price_id, :text)
-      add(:acp_unit_amount_cents, :integer, null: false)
-      add(:acp_currency, :text, null: false, default: "USD")
+      add(:acp_provider_price_ref, :text)
+      # ADR-036 H1/D7: one money_with_currency composite column, not a paired
+      # _cents/currency convention (AshMoney.AshPostgresExtension below installs
+      # the type).
+      add(:acp_unit_amount, :money_with_currency, null: false)
       add(:acp_interval, :text, default: "monthly")
       add(:acp_active, :boolean, default: true)
       add(:acp_custom, :map, default: fragment("'{}'::jsonb"))
@@ -73,10 +84,11 @@ defmodule Acme.Repo.Migrations.AppResources do
       add(:acp_org_id, :uuid, null: false)
       add(:acp_inserted_at, :utc_datetime, null: false)
       add(:acp_updated_at, :utc_datetime, null: false)
+      add(:acp_archived_at, :utc_datetime_usec)
     end
 
     create table(:acs_subscription, primary_key: false) do
-      add(:acs_stripe_subscription_id, :text)
+      add(:acs_provider_subscription_ref, :text)
       add(:acs_status, :text, default: "active")
       add(:acs_current_period_start, :utc_datetime)
       add(:acs_current_period_end, :utc_datetime)
@@ -111,8 +123,11 @@ defmodule Acme.Repo.Migrations.AppResources do
       add(:acs_updated_at, :utc_datetime, null: false)
     end
 
+    # T106 decision (e): DB-unique-fence on the provider-subscription-ref (mirror idempotency).
+    create(unique_index(:acs_subscription, [:acs_provider_subscription_ref], name: "acs_subscription_provider_ref_index"))
+
     create table(:aci_invoice, primary_key: false) do
-      add(:aci_stripe_invoice_id, :text)
+      add(:aci_provider_invoice_ref, :text)
       add(:aci_status, :text, default: "draft")
       add(:aci_amount_due_cents, :integer, default: 0)
       add(:aci_amount_paid_cents, :integer, default: 0)
@@ -122,6 +137,11 @@ defmodule Acme.Repo.Migrations.AppResources do
       add(:aci_due_date, :utc_datetime)
       add(:aci_paid_at, :utc_datetime)
       add(:aci_line_items, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:aci_tax_amount_cents, :integer)
+      add(:aci_tax_lines, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:aci_hosted_invoice_url, :text)
+      add(:aci_hosted_receipt_url, :text)
+      add(:aci_last_event_id, :text)
       add(:aci_custom, :map, default: fragment("'{}'::jsonb"))
 
       add(
@@ -151,7 +171,7 @@ defmodule Acme.Repo.Migrations.AppResources do
     end
 
     create table(:acy_payment, primary_key: false) do
-      add(:acy_stripe_payment_intent_id, :text)
+      add(:acy_provider_payment_ref, :text)
       add(:acy_status, :text, default: "pending")
       add(:acy_amount_cents, :integer, null: false)
       add(:acy_currency, :text, default: "USD")
@@ -273,6 +293,7 @@ defmodule Acme.Repo.Migrations.AppResources do
       add(:acm_org_id, :uuid, null: false)
       add(:acm_inserted_at, :utc_datetime, null: false)
       add(:acm_updated_at, :utc_datetime, null: false)
+      add(:acm_archived_at, :utc_datetime_usec)
     end
 
     # ---- Token-blind aggregate projection (no pii_ columns) ----

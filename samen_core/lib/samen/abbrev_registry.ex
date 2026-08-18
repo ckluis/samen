@@ -42,11 +42,13 @@ defmodule Samen.AbbrevRegistry do
         }
       }
 
-  The `"hosts"` key is **optional** — a file without it (the committed 263-entry
-  registry) reads byte-identically. `load/0` returns the **flat global view** (the
-  union of `"abbrevs"` and every host namespace) so the compile-time verifier and every
-  existing reader keep working unchanged (the compat shim). Host-scoped reads/writes go
-  through `load_namespaced/1`, `owner/2`, and `validate_host/4`.
+  The `"hosts"` key is **optional** — a file without one reads byte-identically to the
+  legacy shape (the committed registry now HAS a `"hosts"` object — see ADR-025 §5 — so
+  this optionality is about the *schema*, not the current committed file). `load/0`
+  returns the **flat global view** (the union of `"abbrevs"` and every host namespace) so
+  the compile-time verifier and every existing reader keep working unchanged (the compat
+  shim). Host-scoped reads/writes go through `load_namespaced/1`, `owner/2`, and
+  `validate_host/4`.
 
   ## Bounded scope (ADR-023 §2 / §4)
 
@@ -105,8 +107,9 @@ defmodule Samen.AbbrevRegistry do
 
   Returns the union of the legacy `"abbrevs"` map and every host namespace, so the
   compile-time verifier and every existing flat reader keep working unchanged against
-  the host-namespaced schema. A file without a `"hosts"` key (the committed 263-entry
-  registry) reads byte-identically to before.
+  the host-namespaced schema. A file without a `"hosts"` key reads byte-identically to
+  before (the legacy 263-entry map on its own); the committed registry itself has since
+  grown a `"hosts"` object (ADR-025 §5) and now flattens 263 legacy + per-host entries.
   """
   @spec load(String.t()) :: %{optional(String.t()) => String.t()}
   def load(registry_path) do
@@ -120,6 +123,37 @@ defmodule Samen.AbbrevRegistry do
     case flatten_conflicts(namespaced) do
       [] -> flatten(namespaced)
       conflicts -> raise flatten_conflict_message(conflicts, registry_path)
+    end
+  end
+
+  @doc """
+  Reverse lookup: returns the abbrev reserved for `module` (an atom or its
+  `inspect/1` string), fail-closed.
+
+  The abbrev is matched against `inspect(module)` — the exact owner form the
+  sanctioned allocator (`mix samen.abbrev.reserve`) and the compile-time verifier
+  both use. Raises if no abbrev is reserved for the module: this is the enforcement
+  point for the E7 generated `<Resource>.Version` resources (ADR-040 §6.2), whose
+  allocator-owned abbrev is injected into their `samen do abbrev end` section at
+  build time (never pinned in code) — an unreserved version resource must fail the
+  build, not compile with an invented prefix.
+  """
+  @spec abbrev_for!(module() | String.t()) :: String.t()
+  def abbrev_for!(module) do
+    owner = if is_binary(module), do: module, else: inspect(module)
+
+    case Enum.find(load(), fn {_abbrev, o} -> o == owner end) do
+      {abbrev, _owner} ->
+        abbrev
+
+      nil ->
+        raise """
+        No storage abbrev is reserved for #{owner} in the abbrev registry \
+        (#{path()}). Reserve one through the sanctioned allocator \
+        (`mix samen.abbrev.reserve --host <host> --owner #{owner} --propose`) — the \
+        registry is HANDS-OFF and never hand-edited. A generated version resource \
+        (ADR-040 §6.2) whose abbrev is not reserved cannot compile.
+        """
     end
   end
 
@@ -249,7 +283,7 @@ defmodule Samen.AbbrevRegistry do
     false-positive a collision on the dropped resource. This is the ADR-025 trigger — the \
     first legitimate cross-host prefix reuse (or a host-vs-global owner disagreement) has \
     landed. The deferred abbrev verifier host-partition MUST now be implemented (see \
-    docs/adr/025-abbrev-verifier-host-partition-followon.md): validate each resource against \
+    docs/adr/ADR-025-abbrev-verifier-host-partition-followon.md): validate each resource against \
     its OWN host namespace (validate_host/4) instead of the flattened union. Refusing to \
     compile (fail-closed).
 
@@ -336,15 +370,46 @@ defmodule Samen.AbbrevRegistry do
     * `abbrev` is registered to a **different** owner *within this host's namespace*
       (per-host permanence — ADR-006 one-owner-forever, made host-scoped);
     * `abbrev` is registered to a **different** owner in the **global** namespace
-      (the cross-host collision net — two hosts sharing physical infra cannot clash).
+      (the cross-host collision net — two hosts sharing physical infra cannot clash);
+    * `abbrev` is registered to a **different** owner in **ANY OTHER host's namespace**
+      (T123 — the accidental cross-host collision that broke the T47 build). This last
+      check is **refused by default** and opted out of, deliberately, via
+      `allow_cross_host_reuse: true` (see below).
 
-  Returns `:ok` when the abbrev is unowned, or already owned by exactly this owner in
-  this host (idempotent re-reservation).
+  Returns `:ok` when the abbrev is unowned, or already owned by exactly this owner in ANY
+  host (idempotent re-reservation — own-host OR cross-host same-owner).
+
+  ## T123 — accidental cross-host collision refused by default (the persistence path)
+
+  Before T123 this checked only the *target* host's namespace + the global net, never any
+  OTHER host's namespace — so `Samen.Abbrev.Allocator.reserve!/5` (the sanctioned write
+  path routing through here) would persist `hosts.A.xyz` alongside a pre-existing
+  `hosts.B.xyz` owned by a DIFFERENT module. That orphan is exactly the T47 incident: it
+  trips `flatten_conflicts/1`'s fail-closed "LOSSY FLATTENING" raise inside every
+  `use Samen.Resource`, breaking the whole compile. `propose/3` never auto-picks such a
+  collision (its `owners_of/2` union check); this makes the *explicit-abbrev* / persistence
+  path just as safe — an accidental different-owner cross-host reservation is refused at
+  WRITE time, not deferred to a compile-break.
+
+  ### The deliberate ADR-025 Option-B door (explicit override)
+
+  A *legitimate* cross-host prefix reuse (two hosts deliberately owning the same abbrev for
+  distinct resources — "the whole point of Option B", ADR-025 §2) is still possible, but
+  ONLY when the caller opts in explicitly with `allow_cross_host_reuse: true`. Because
+  `validate_host/5` cannot tell a sanctioned reuse from an accident, the default is
+  fail-closed and the human must say so. A deliberate reuse then (correctly) trips
+  `flatten_conflicts/1` at load — the ADR-025 trigger to implement the verifier
+  host-partition, not an accident.
   """
-  @spec validate_host(map(), String.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
-  def validate_host(%{global: global, hosts: hosts}, host, abbrev, owner)
-      when is_binary(host) and is_binary(abbrev) and is_binary(owner) do
+  @spec validate_host(map(), String.t(), String.t(), String.t(), keyword()) ::
+          :ok | {:error, String.t()}
+  def validate_host(namespaced, host, abbrev, owner, opts \\ [])
+
+  def validate_host(%{global: global, hosts: hosts}, host, abbrev, owner, opts)
+      when is_binary(host) and is_binary(abbrev) and is_binary(owner) and is_list(opts) do
     host_ns = Map.get(hosts, host, %{})
+    allow_cross_host_reuse? = Keyword.get(opts, :allow_cross_host_reuse, false)
+    cross_host = cross_host_conflict(hosts, host, abbrev, owner)
 
     cond do
       not valid_shape?(abbrev) ->
@@ -368,8 +433,40 @@ defmodule Samen.AbbrevRegistry do
            "(#{@registry_path}), not #{owner}. Two hosts sharing physical infrastructure cannot " <>
            "silently clash on a 3-letter prefix — pick a new, unused abbrev."}
 
+      cross_host != nil and not allow_cross_host_reuse? ->
+        {other_host, other_owner} = cross_host
+
+        {:error,
+         "abbrev #{inspect(abbrev)} is already owned by #{other_owner} in host " <>
+           "#{inspect(other_host)}, not #{owner} (a DIFFERENT module in a DIFFERENT host). " <>
+           "Refusing by default (T123): persisting an accidental cross-host collision " <>
+           "re-creates the T47 build-break — the orphan trips " <>
+           "Samen.AbbrevRegistry.flatten_conflicts/1's fail-closed \"LOSSY FLATTENING\" raise " <>
+           "inside every `use Samen.Resource`. propose/3 never auto-picks this; pick a new, " <>
+           "unused abbrev. If this IS a DELIBERATE ADR-025 Option-B cross-host prefix reuse, " <>
+           "opt in explicitly with `allow_cross_host_reuse: true` (that reuse then trips the " <>
+           "ADR-025 tripwire — the signal to implement the verifier host-partition)."}
+
       true ->
         :ok
     end
+  end
+
+  # The first {other_host, other_owner} in ANY host namespace OTHER than `host` that owns
+  # `abbrev` for a module that is NOT `owner` — i.e. an accidental cross-host collision
+  # (T123). Same-owner cross-host reuse returns nil (idempotent, not a collision). This is
+  # the persistence-path twin of the allocator's owners_of/2 union check.
+  defp cross_host_conflict(hosts, host, abbrev, owner) do
+    Enum.find_value(hosts, fn {h, ns} ->
+      if h != host do
+        case Map.get(ns, abbrev) do
+          nil -> nil
+          ^owner -> nil
+          other -> {h, other}
+        end
+      else
+        nil
+      end
+    end)
   end
 end

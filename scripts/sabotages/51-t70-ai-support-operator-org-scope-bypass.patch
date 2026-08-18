@@ -1,0 +1,32 @@
+# SABOTAGE: D5 (T70) gate sabotage — defeats the AI support operator's org-scope isolation
+# (ADR-043 6.3: the operator drafts over / sends within its OWN org only; org B can never
+# read another org's support item or reply on its behalf). `Samen.AI.SupportOperator`'s
+# inbound-item read (`read_source/4`) applies a HARD `org_id == ^org` filter — the "correct
+# filter parameter" mechanism the MCP browse read and the embeddings plane use — so org B
+# grounding a reply on org A's item resolves NOTHING (`{:error, :source_not_found}`). This
+# sabotage drops that filter, so the operator reads the item by id ACROSS ALL orgs: org B's
+# operator can now ground a reply on (and send over) org A's support item — the exact
+# cross-org breach 6.3/RP-AI-6 forbids. `_ = org` keeps the arg bound so the tree still
+# compiles; the isolation is simply gone. Dropping it flips the named cross-org test (org B
+# must get :source_not_found for org A's item), while the same-org positive control and the
+# masking / no-auto-send / fail-honest tests stay green — a precise, refutable proof that
+# org isolation is the load-bearing guard.
+# APP: samen_core
+# TEST_FILES: test/ai/support_operator_test.exs
+# MUST_FAIL: org B's operator cannot ground on org A's support item
+diff --git a/samen_core/lib/samen/ai/support_operator.ex b/samen_core/lib/samen/ai/support_operator.ex
+--- a/samen_core/lib/samen/ai/support_operator.ex
++++ b/samen_core/lib/samen/ai/support_operator.ex
+@@ -138,5 +138,11 @@
+   defp read_source(org, resource, id, opts) do
++    # SABOTAGE (T70 ADR-043 section 6.3 org-scope bypass): the AI support operator drops the
++    # hard `org_id` filter on the inbound-item read, so org B can ground a reply on / reply
++    # over org A's support item (the cross-org breach RP-AI-6 forbids). `_ = org` keeps the
++    # arg bound so the tree still compiles; the isolation is simply gone. Flips the cross-org test.
++    _ = org
++
+     query =
+       resource
+-      |> Ash.Query.filter(org_id == ^org and id == ^id)
++      |> Ash.Query.filter(id == ^id)
+       |> ensure_pii_selected(resource)

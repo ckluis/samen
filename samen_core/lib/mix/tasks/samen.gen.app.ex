@@ -36,9 +36,12 @@ defmodule Mix.Tasks.Samen.Gen.App do
 
     * `--module`  (required) — the app's base module, e.g. `Widgetco`. The otp_app is the
       Macro.underscore of this (`:widgetco`).
-    * `--prefix`  (required) — a **2-letter lowercase** app prefix used to derive the eight
-      permanent Billing-scope abbrevs (`<p>c/<p>s/<p>l/<p>p/<p>i/<p>y/<p>u/<p>e`) and the
-      aggregate-plane abbrev (`<p>a`). With `--web` the FIRST prefix letter also derives the
+    * `--prefix`  (required) — a **2-letter lowercase** app prefix used to derive the nine
+      permanent Billing-scope abbrevs (`<p>c/<p>s/<p>l/<p>p/<p>i/<p>y/<p>u/<p>e/<p>v` — the
+      last is the ADR-017 subscription-movement ledger), the aggregate-plane abbrev (`<p>a`),
+      and the per-app Approval resource's abbrev (`<p>z`, ADR-040 §4.7/T37h — unused by either
+      family, so it never collides). `getting-started.md` has the correct nine; this bullet
+      previously said "eight" (luminary X10). With `--web` the FIRST prefix letter also derives the
       Primitives abbrevs (`<p1>nt/np/fl/sh/wh/ff`) and the operator namespace
       (`<p1>o?/<p1>p?/<p1>q?` — the driftwood per-plane convention). Must not collide with
       abbrevs already reserved in the registry (checked; fails closed on collision — this

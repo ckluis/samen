@@ -1,0 +1,43 @@
+# SABOTAGE: T77 fix round 1, MED-3 (spec §I4 "unfair advantage") — REGENERATED T160
+# (context shifted: T160 restructured the lines immediately following each canary —
+# `billing_snapshot/2` now derives share/scoring-status via DB aggregates instead of
+# bounded `subs`/`invoices` reads; the canary lines/positions themselves are unchanged).
+# Removes the uncaught CANARY read (`Ash.count!(Mount.resource(billing_mount, Customer),
+# scope: scope)` / `Ash.count!(Mount.resource(support_mount, Ticket), scope: scope)`) from
+# the top of `Samen.Web.AccountHealth.billing_snapshot/2` AND `support_snapshot/2`.
+# Without it, a GENUINELY FAILED read (e.g. the malformed-scope `Ash.Error.Forbidden` the
+# named test forces, standing in for any real read failure — a DB blip, a policy crash,
+# …) is swallowed by `Samen.Web.Billing.Reads.metrics/2`/`Samen.Web.Support.Reads.metrics/2`'s
+# OWN internal `rescue -> 0` (correct for THEIR callers, a dashboard tile that must never
+# crash) before it ever reaches THIS function's `rescue` — so the failure renders
+# identically to "this org genuinely has zero rows": `billing_available?: true`,
+# `mrr_cents: 0`, `subscription_status: nil` ("no subscriptions on file") instead of the
+# honest absence the delta verdict's MED-3 finding demanded. The canary runs the SAME
+# query, uncaught, so the SAME failure now raises HERE first and is correctly reported as
+# absence. `customer_billing_snapshot/3`'s OWN (separate, T160-new) canary is covered by
+# its own patch (138), not this one — this patch stays scoped to the two ORIGINAL T77
+# functions per its original intent. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_account_health_test.exs
+# MUST_FAIL: snapshot/2 DEGRADED READ (fix round 1, MED-3): a genuinely FAILED read surfaces honest absence, never a fabricated $0/0
+diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web/account_health.ex
+--- a/samen_web/lib/samen/web/account_health.ex
++++ b/samen_web/lib/samen/web/account_health.ex
+@@ -556,8 +556,6 @@
+     # never crash, WRONG once this function treated that zero as fact). `Billing.Reads`
+     # itself is UNTOUCHED — its existing consumers keep their current, correct-for-them
+     # fail-safe-empty contract; only this call site gained the canary.
+-    Ash.count!(Mount.resource(billing_mount, Customer), scope: scope)
+-
+     metrics = Samen.Web.Billing.Reads.metrics(billing_mount, scope)
+ 
+     now = DateTime.utc_now()
+@@ -755,8 +753,6 @@
+     # doc): `Support.Reads.metrics/2`'s helpers carry the identical `rescue -> 0`
+     # shape, so this uncaught canary is what lets a genuine failure surface as honest
+     # absence here instead of a fabricated "0 open tickets".
+-    Ash.count!(Mount.resource(support_mount, Ticket), scope: scope)
+-
+     metrics = Samen.Web.Support.Reads.metrics(support_mount, scope)
+ 
+     %{

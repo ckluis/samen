@@ -4,9 +4,32 @@ defmodule <%= module %>.Application do
 
   @impl true
   def start(_type, _args) do
+    # ADR-045 §4.2 (O5) — the FAIL-SECURE KMS boot guard. Refuses to boot in PRODUCTION with an
+    # UNIMPLEMENTED (raise-only) KMS adapter selected, rather than boot green and then 500 on
+    # every vault operation. A no-op in dev/test and whenever a working adapter is configured
+    # (the headless default is `Samen.Kms.FileBacked`); the crypto twin of the ADR-024
+    # `runtime.exs` prod-secret raise.
+    Samen.Kms.assert_prod_adapter_ready!()
+
     children =
       if Application.get_env(:<%= otp_app %>, :start_repo?, true) do
-        [<%= module %>.Repo, {Oban, Application.fetch_env!(:samen_core, Oban)}]
+        # ADR-046 §6 — activate the crypto-shred erasure arms (email_bidx tombstone +
+        # file-blob delete) DERIVED from this app's live schema (the
+        # Samen.Jobs.install_defaults/1 twin). No host-maintained spec list, so a fresh
+        # gen.app is erasure-complete by construction. No-op under test.
+        Samen.Erasure.install_default_specs()
+
+        [
+          <%= module %>.Repo,
+          # T128 + B-OBAN: install the canonical Samen queue taxonomy
+          # (default_queue_config/0) AND cron (default_crontab/0) at boot — modules are
+          # loaded here (unlike in config.exs), so every queue a shipped worker or AshOban
+          # trigger enqueues to gets a producer, and the audit-partition roll-forward plus
+          # the rest of the periodic schedule run with no host action. A queue that is
+          # enqueued-to but unconfigured never drains and never errors — this seam is what
+          # makes that unrepresentable. No-op under test (plugins: false).
+          {Oban, Samen.Jobs.install_defaults(Application.fetch_env!(:samen_core, Oban))}
+        ]
       else
         []
       end

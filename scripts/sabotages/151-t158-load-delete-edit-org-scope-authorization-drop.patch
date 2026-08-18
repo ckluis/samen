@@ -1,0 +1,36 @@
+# SABOTAGE: T158 (freight LOADS delete + edit) — drops org-scope authorization from BOTH
+# steps of the load write path: `fetch_load/2`'s read (`Ash.read_one!(scope: scope)` ->
+# `authorize?: false`) and `delete_load/2`'s destroy (`Ash.destroy(load, scope: scope,
+# ...)` -> `authorize?: false`). `fetch_load/2` is the shared org-scoped lookup BOTH
+# `update_load/3` and `delete_load/2` use before writing — with authorization dropped
+# from it, a load id from ANY org resolves (not just the caller's own org), and with the
+# destroy call's own authorization also dropped, the write actually lands: an actor
+# scoped to org B can soft-delete (and, via the same shared lookup, edit) org A's load by
+# id alone. This is the "a cross-org destroy/edit must be a genuine :not_found, never a
+# silent success" guarantee T158 documents for both new writes. Reverts byte-exact.
+# APP: driftwood
+# TEST_FILES: test/broker_edit_delete_load_test.exs
+# MUST_FAIL: RED: deleting another org's load id is a genuine :not_found — nothing destroyed
+# MUST_FAIL: RED: editing another org's load id is a genuine :not_found (org-scope pin)
+diff --git a/driftwood/lib/driftwood_web/broker_live.ex b/driftwood/lib/driftwood_web/broker_live.ex
+index 03e7f8c..dc2ffdb 100644
+--- a/driftwood/lib/driftwood_web/broker_live.ex
++++ b/driftwood/lib/driftwood_web/broker_live.ex
+@@ -1138,7 +1138,7 @@ defmodule DriftwoodWeb.BrokerLive do
+ 
+     case fetch_load(scope, load_id) do
+       nil -> {:error, :not_found}
+-      load -> Ash.destroy(load, scope: scope, return_destroyed?: true)
++      load -> Ash.destroy(load, authorize?: false, return_destroyed?: true)
+     end
+   rescue
+     e -> {:error, e}
+@@ -1148,7 +1148,7 @@ defmodule DriftwoodWeb.BrokerLive do
+     Driftwood.Crm.Opportunity
+     |> Ash.Query.filter(id == ^load_id)
+     |> Ash.Query.limit(1)
+-    |> Ash.read_one!(scope: scope)
++    |> Ash.read_one!(authorize?: false)
+   rescue
+     _ -> nil
+   end

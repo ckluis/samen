@@ -19,31 +19,77 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   ## Reveal (T1.6 second-party grant, end-to-end)
 
   Below the roster is a per-driver reveal control. When a DISTINCT second party has
-  approved a reveal grant for `(operator, driver)`, the operator can unmask THAT ONE
-  driver's CDL number end-to-end via `Samen.Reveal.reveal/5` (the single decrypt
-  chokepoint). Without an approving grant it denies — `••••` stays. The dogfood /
-  adversarial tests drive both the granted and ungranted paths.
+  approved a reveal grant for `(operator, driver)`, the operator can unmask that driver's
+  vaulted PII end-to-end via `Samen.Reveal.reveal/5` (the single decrypt chokepoint).
+  Without an approving grant it denies — `••••` stays. The dogfood / adversarial tests
+  drive both the granted and ungranted paths.
 
-  ## Mount contract
+  ## Reveal-window legibility + honest scope (R-P6; persona-6 findings P6-F1/F2/F3/F5)
 
-  `mount/3` reads `operator_id` + `org_id` from params/session (a real deploy sets these
-  from the operator's authenticated session + the org they chose). It builds the
-  impersonation scope PER MOUNT (deny-on-read): an expired/absent session yields
-  `{:error, :session_inactive}` and the view renders the access-denied state, no data.
+  A reveal grant is **subject-wide**, not field-narrow: `Samen.Reveal.Grants.active?/3`
+  keys on `(subject_id, requestor_id)` with no field filter, so an active grant authorizes
+  resolving the WHOLE subject record — the driver's NAME as well as the CDL number, and it
+  resolves them **passively on any roster load** (no click needed). The UI therefore states
+  the true scope: the control reads "Reveal driver record" (not "Reveal CDL"), and while a
+  window is open a visible banner announces it, names the approver (`granted_by`), shows the
+  expiry + a live countdown, and every already-resolved row reads "revealed" regardless of
+  whether it was unmasked by a click or by the passive grant-gated read. The per-second
+  `:tick` recomputes the open windows and, the instant one expires, reloads the roster so
+  the value re-masks mid-session (closing the P6-F5 "stale plaintext until reload" residual)
+  — a fresh mount already re-masked correctly; this closes it live too.
+
+  ## Mount contract (H2/M1 — phase-6 SEC dogfood)
+
+  `mount/3` resolves the acting operator from the **AUTHENTICATED PRINCIPAL** via the
+  framework's `Samen.Web.Operator.Impersonation.assign_identity/3`, exactly as the framework
+  drill-ins (`Samen.Web.Operator.DeliverabilityLive`/`ActivityLive`/`AutomationHealthLive`) do.
+  It does NOT read the acting id from a client-supplied `?operator_id` param.
+
+  Before this the module derived the acting identity from `Map.get(params, key) ||
+  Map.get(session, key)` — **params beat session** — so an authenticated operator could book an
+  access (and, here, a *reveal request/grant*) under another operator's id: the tenant's audit
+  ledger could be made to name the wrong operator, defeating the accountability promise T150
+  exists to keep (phase-6 dogfood H2, attribution forgery).
+
+  `load/3` routes the access DECISION through the framework `gate/3` (via `gate_socket/3`)
+  instead of calling `Samen.Impersonation.scope/2` directly, so the T146 role, the §16.4a R-B
+  account-scope conjunct and the T150 session conjunct all apply at this door (dogfood M1). An
+  expired/absent session — or an out-of-scope account — renders the access-denied state, no data.
   """
   use Phoenix.LiveView
 
   # ADR-009 — the component kit is now framework-level (`Samen.UI`).
   import Samen.UI
 
-  alias Samen.Impersonation
   alias Driftwood.Reads
+
+  # H2/M1 — the framework impersonation GATE (authenticated principal + gate/3), replacing the
+  # param-derived identity and the direct `Samen.Impersonation.scope/2` decision.
+  alias Samen.Web.Operator.Impersonation, as: OperatorGate
+
+  # A live reveal window is time-boxed; the countdown + mid-session re-mask ride a
+  # per-second server tick (no JS — ADR-042 progressive enhancement). Only a connected
+  # LiveView ticks; the first (static) mount and the render-only tests do not.
+  @tick_ms 1000
 
   @impl true
   def mount(params, session, socket) do
-    operator_id = fetch(params, session, "operator_id")
+    # H2 — ADOPT the framework identity path (do not fork it): `assign_mount/2` rebuilds the
+    # `%Samen.Web.Mount{}` the gate needs to resolve this product's otp_app for the R-B scope
+    # conjunct; `assign_identity/3` resolves the acting operator from the AUTHENTICATED
+    # PRINCIPAL (`:samen_operator_id`, else `Samen.Web.Auth.authenticated_user_id/1` off the
+    # SIGNED session), falling back to a param ONLY when NO principal resolves at all (the
+    # disarmed dev dogfood). A deploy with a real session IGNORES a forged `?operator_id`.
+    socket =
+      socket
+      |> Samen.Web.Live.assign_mount(session)
+      |> OperatorGate.assign_identity(session, params)
+
+    # `org_id` is the TARGET tenant — a bounded, non-PII id chosen in the URL and RE-GATED on
+    # every mount, so it legitimately stays a param.
     org_id = fetch(params, session, "org_id")
-    {:ok, load(socket, operator_id, org_id)}
+    if connected?(socket), do: schedule_tick()
+    {:ok, load(socket, socket.assigns[:samen_operator_id], org_id)}
   end
 
   # Extracted so the dogfood test drives the exact same load path.
@@ -62,23 +108,37 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   end
 
   def load(socket, operator_id, org_id) do
-    case Impersonation.scope(operator_id, org_id) do
-      {:ok, scope} ->
+    # M1 — the access DECISION goes through the framework `gate/3` (via `gate_socket/3`), which
+    # composes the §16.4a R-B account-scope conjunct with the T150 session conjunct. The read
+    # `%Samen.Scope{}` is built from the gate's OWN actor (`read_scope/1`) — one decision point,
+    # no direct `Samen.Impersonation.scope/2` call that could admit where the gate denies.
+    case OperatorGate.gate_socket(socket, operator_id, org_id) do
+      {:ok, actor, info} ->
+        now = DateTime.utc_now()
+        scope = OperatorGate.read_scope(actor)
+
         assign(socket,
           impersonating: true,
           session_inactive: false,
+          samen_operator_id: operator_id,
           operator_id: operator_id,
           org_id: org_id,
+          org_name: org_name(org_id),
+          open_error: nil,
           drivers: Reads.driver_roster(scope),
           loads: Reads.load_board(scope),
           revealed: %{},
-          session_info: session_info(org_id, operator_id)
+          now: now,
+          reveal_windows: reveal_windows(operator_id, now),
+          request_notice: socket.assigns[:request_notice],
+          session_info: info
         )
 
       # Both fail-closed shapes render access-denied with NO tenant data:
-      #   :session_inactive — never opened / closed / expired mid-flight
-      #   :operator_suspended — the operator lost operator-plane standing (F4.2)
-      {:error, reason} when reason in [:session_inactive, :operator_suspended] ->
+      #   :denied       — never opened / closed / expired mid-flight / operator suspended (F4.2)
+      #   :out_of_scope — the R-B account-scope conjunct denied (inert until a product wires a
+      #                   `:fleet_resolution` seam, so no lockout today)
+      denial when denial in [:denied, :out_of_scope] ->
         denied(socket, operator_id, org_id)
     end
   end
@@ -88,24 +148,51 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
     assign(socket,
       impersonating: false,
       session_inactive: true,
+      samen_operator_id: operator_id,
       operator_id: operator_id,
       org_id: org_id,
+      org_name: org_name(org_id),
+      open_error: nil,
       drivers: [],
       loads: [],
       revealed: %{},
+      now: DateTime.utc_now(),
+      reveal_windows: [],
+      request_notice: socket.assigns[:request_notice],
       session_info: nil
     )
   end
 
-  # The tenant-visible accountability entry for THIS operator over THIS org.
-  defp session_info(org_id, operator_id) do
-    org_id
-    |> Impersonation.list_for_org()
-    |> Enum.find(fn e -> e.operator_id == operator_id and e.active? end)
+  # T150 F3 — resolve the target tenant org id to its display NAME (via the operator
+  # directory), so the console names WHOSE house the operator is in rather than showing a
+  # raw UUID. Fail-safe: an unresolvable id renders as itself.
+  defp org_name(org_id) when is_binary(org_id) do
+    case List.keyfind(Driftwood.Directory.orgs(), org_id, 0) do
+      {_id, name} when is_binary(name) and name != "" -> name
+      _ -> org_id
+    end
+  rescue
+    _ -> org_id
   end
+
+  defp org_name(org_id), do: org_id
+
+  # The ACTIVE reveal windows this operator holds — who approved, until when. Read-only
+  # accountability projection over `Samen.Reveal.Grants` (does NOT change the reveal gate).
+  defp reveal_windows(operator_id, now) when is_binary(operator_id) do
+    Samen.Reveal.Grants.active_windows(operator_id, repo: Driftwood.Repo, now: now)
+  rescue
+    _ -> []
+  end
+
+  defp reveal_windows(_operator_id, _now), do: []
+
+  defp schedule_tick, do: Process.send_after(self(), :tick, @tick_ms)
 
   defp fetch(params, session, key), do: Map.get(params, key) || Map.get(session, key)
 
+  # ADR-036 §4.5(4): l.value is now the Money composite (dollars(l.value)).
+  defp dollars(%Money{} = money), do: dollars(Samen.Type.Money.cents(money))
   defp dollars(cents) when is_integer(cents), do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
   defp dollars(_), do: "$0.00"
 
@@ -181,7 +268,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
 
         <.topbar
           title="Driver roster"
-          crumbs={["Operator plane", "Impersonation", @org_id, "Drivers"]}
+          crumbs={["Operator plane", "Impersonation", @org_name, "Drivers"]}
         >
           <:actions>
             <.button>
@@ -195,20 +282,66 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
 
         <%= if @session_inactive do %>
           <div class="wrap">
-            <div class="card" id="session-state" style="padding:22px 20px;color:var(--red)">
-              access denied — no active impersonation session (expired or never opened).
+            <div class="card" id="session-state" style="padding:22px 20px">
+              <div style="color:var(--red);font-weight:600">
+                access denied — no active impersonation session (expired or never opened).
+              </div>
+              <%!--
+                T150 F2 — the OPEN-SESSION-WITH-REASON affordance. Nothing else in a real deploy
+                calls `Samen.Impersonation.open/3`; this is the human entry point. Opening writes a
+                short-TTL, reason-required session recorded in the tenant's audit ledger, after
+                which the roster renders MASKED. --%>
+              <p style="color:var(--muted);margin:10px 0 14px;font-size:13px">
+                Start a masked impersonation session over <b>{@org_name}</b>. The reason is required
+                and is written to this tenant's audit log (who / when / why).
+              </p>
+              <div :if={@open_error} id="open-error" style="color:#B42318;font-size:12px;margin-bottom:8px">
+                {@open_error}
+              </div>
+              <form phx-submit="open_session" id="open-session-form" style="display:flex;gap:8px;align-items:flex-start;max-width:640px">
+                <input type="text" name="reason" id="session-reason-input"
+                  placeholder="Reason (e.g. ticket #7781: dispatch dispute)"
+                  style="flex:1;padding:8px 10px;border:1px solid #D0D5DD;border-radius:8px;font-size:13px" />
+                <button type="submit" id="start-session-btn" style="padding:8px 14px;border-radius:8px;background:var(--brand,#3B4CCA);color:#fff;font-size:13px">
+                  Start session (masked)
+                </button>
+              </form>
             </div>
           </div>
         <% else %>
           <.mask_bar chip={session_chip(@session_info)}>
             <b>Masked impersonation.</b>
             <span id="banner">
-              Impersonating brokerage org {@org_id} as operator {@operator_id}. PII is masked (••••).
+              Impersonating brokerage <b>{@org_name}</b> as operator {@operator_id}. PII is masked (••••).
             </span>
             Unmasking a subject needs a second-party reveal grant, is time-boxed, and is written to the tenant-readable audit log.
-            <span :if={@session_info} id="session-reason" style="display:none">Reason: {@session_info.reason}</span>
-            <span :if={@session_info} id="session-expiry" style="display:none">Expires: {@session_info.expires_at}</span>
+            <span :if={@session_info} id="session-reason" class="acct">Reason: {@session_info.reason}</span>
+            <span :if={@session_info} id="session-expiry" class="acct">Session expires: {@session_info.expires_at}</span>
           </.mask_bar>
+
+    <%!-- R-P6: a privileged reveal window is legible while OPEN — who approved it, when it
+          expires, a live countdown, and the HONEST subject-wide scope (name + CDL, not just
+          the CDL). Absent when no window is open (the ungranted masked-only view). --%>
+          <div :if={@reveal_windows != []} id="reveal-window-banner" class="reveal-window-open"
+               style="margin:0 20px 14px;padding:12px 16px;border:1px solid #C9A227;border-radius:10px;background:#FFF8E1;color:#6B5200">
+            <b>⚠ Privileged reveal window OPEN.</b>
+            A second-party grant is unmasking the FULL subject record (driver name AND CDL number — reveal is subject-wide, not field-narrow) for {length(@reveal_windows)} subject(s):
+            <ul style="margin:8px 0 0;padding-left:18px">
+              <li :for={w <- @reveal_windows} class="reveal-window-entry">
+                subject <span class="mono">{w.subject_id}</span>
+                · <span class="approved-by">approved by <b>{w.granted_by}</b></span>
+                · expires <span class="expires-at">{clock(w.expires_at)}</span>
+                · <span class="countdown">{countdown(w.expires_at, @now)} left</span>
+              </li>
+            </ul>
+          </div>
+
+    <%!-- T149 B5: the outcome of a "Request reveal" — the REQUEST side of the existing
+          reveal-grant lifecycle. It grants nothing; a DISTINCT second party must approve. --%>
+          <div :if={@request_notice} id="reveal-request-notice" class="reveal-request-open"
+               style="margin:0 20px 14px;padding:12px 16px;border:1px solid #3B4CCA;border-radius:10px;background:#EEF1FF;color:#26307a">
+            {@request_notice}
+          </div>
 
           <div class="wrap">
             <div class="gtitle">
@@ -231,7 +364,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
                 <td>
                   <div class="drv">
                     <div class="av"></div>
-                    <span class="nm masked d-name">{d.full_name}</span>
+                    <span class="nm masked d-name">{fmt_name(d.full_name)}</span>
                   </div>
                 </td>
                 <td class="d-cdl"><span class="mono masked">{Map.get(@revealed, d.id) || d.cdl_number}</span></td>
@@ -251,15 +384,25 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
                   <% end %>
                 </td>
                 <td class="d-reveal">
-                  <%= if Map.get(@revealed, d.id) do %>
+                  <%= if row_revealed?(@revealed, @reveal_windows, d) do %>
                     <span class="revealed rev" style="color:var(--brand);border-color:#CFD5F6;background:var(--brand-wash)">
                       <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
-                      revealed (grant active)
+                      revealed · record open
+                      <span :if={window_for(@reveal_windows, d.id)} class="row-countdown">
+                        (expires {clock(window_for(@reveal_windows, d.id).expires_at)} · {countdown(window_for(@reveal_windows, d.id).expires_at, @now)})
+                      </span>
                     </span>
                   <% else %>
-                    <button class="reveal-btn rev" phx-click="reveal" phx-value-driver={d.id}>
+                    <button class="reveal-btn rev" phx-click="reveal" phx-value-driver={d.id} title="Reveals the FULL subject record (name + CDL) — a reveal grant is subject-wide">
                       <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
-                      Reveal CDL
+                      Reveal driver record
+                    </button>
+                    <%!-- T149 B5: no active grant → REQUEST one. Opens a RevealRequest + pending
+                          pii_reveal approval; a DISTINCT second party approves, then the grant is
+                          time-boxed. This is the REQUEST entry point the console lacked. --%>
+                    <button class="request-reveal-btn rev" phx-click="request_reveal" phx-value-driver={d.id}
+                      title={"Request a second-party reveal grant — a DISTINCT operator must approve; the grant is time-boxed to #{Samen.Reveal.Grants.default_window_minutes()} minutes"}>
+                      Request reveal
                     </button>
                   <% end %>
                 </td>
@@ -282,7 +425,7 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
               <tr :for={l <- @loads} class="load-row">
                 <td class="l-name"><span class="nm" style="color:#3a3b45;letter-spacing:normal">{l.name}</span></td>
                 <td class="l-lane"><span class="mono">{l.__lane__}</span></td>
-                <td class="l-value mono num">{dollars(l.value_cents)}</td>
+                <td class="l-value mono num">{dollars(l.value)}</td>
                 <td class="l-status"><.pill variant={status_variant(l.status)}>{l.status}</.pill></td>
               </tr>
             </.data_table>
@@ -300,17 +443,119 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
   # The reveal action: attempt to unmask ONE driver's CDL number via the second-party
   # grant path (Samen.Reveal.reveal/5). Denies (no state change, •••• stays) unless a
   # distinct party has approved a grant for (operator, driver).
+  # T150 F2 — open a real impersonation session (reason required) from the denied-state form,
+  # then reload so the roster renders masked. The operator role comes from the
+  # `Samen.Web.Operator.Authz` on_mount (`:samen_operator_role`); `may_impersonate?` gates it.
+  # H2/M1 — the OPEN affordance goes through the framework `open_from_socket/3`, which keys the
+  # session on the AUTHENTICATED `:samen_operator_id` (never a param) and RE-CHECKS the R-B scope
+  # conjunct before minting a row, so a crafted `phx-submit` cannot book an access under another
+  # operator's name or acquire scope by opening a session.
   @impl true
-  def handle_event("reveal", %{"driver" => driver_id}, socket) do
-    case Driftwood.OperatorReveal.reveal_cdl(socket.assigns.operator_id, driver_id) do
-      {:ok, plaintext} ->
-        revealed = Map.put(socket.assigns.revealed, cast_id(socket, driver_id), plaintext)
-        {:noreply, assign(socket, revealed: revealed)}
+  def handle_event("open_session", %{"reason" => reason}, socket) do
+    org_id = socket.assigns[:org_id]
 
-      {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "reveal denied — no active second-party grant")}
+    case OperatorGate.open_from_socket(socket, org_id, reason) do
+      {:ok, _session} ->
+        {:noreply, load(socket, socket.assigns[:samen_operator_id], org_id)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, open_error: open_error_copy(reason))}
     end
   end
+
+  # T149 B5 — REQUEST a second-party reveal grant (the REQUEST side of the existing lifecycle).
+  # Grants nothing; a DISTINCT second party must approve, after which the grant is time-boxed.
+  # The reason names the impersonation session context (or a bounded default), never the person —
+  # `Samen.Reveal.Grants.request/1` fail-closed REJECTS a PII-shaped reason.
+  def handle_event("request_reveal", %{"driver" => driver_id}, socket) do
+    operator_id = socket.assigns[:operator_id]
+    org_id = socket.assigns[:org_id]
+    reason = request_reason(socket.assigns[:session_info])
+
+    # PP-12 — a reveal REQUEST must be framed by the ACTIVE, ledgered impersonation session
+    # AND scoped to a subject visible in THIS session's gated org. `driver_id` arrives from
+    # the client `phx-value`; without this guard a crafted value could file a request for a
+    # subject outside the opened tenant (defeating PP-11's tenant attribution). The grant
+    # gate still applies downstream — this binds the action to the session that frames it.
+    cond do
+      not socket.assigns[:impersonating] ->
+        {:noreply, assign(socket, request_notice: "No active impersonation session — open one first.")}
+
+      not driver_in_scope?(socket, driver_id) ->
+        {:noreply,
+         assign(socket, request_notice: "That subject is not in this impersonation session's scope.")}
+
+      true ->
+        do_request_reveal(socket, operator_id, driver_id, reason, org_id)
+    end
+  end
+
+  def handle_event("reveal", %{"driver" => driver_id}, socket) do
+    # PP-12 — bind the unmask to the ACTIVE, ledgered impersonation session and its gated
+    # org scope BEFORE touching the reveal chokepoint. `driver_id` is client-supplied
+    # (`phx-value`); `Driftwood.OperatorReveal.masked_cdl/1` reads `authorize?: false`
+    # across ANY org, so without this guard an operator holding a valid grant for a subject
+    # in ANOTHER org could unmask it from a session opened over a DIFFERENT tenant — a reveal
+    # executing outside the session that is supposed to frame it. The second-party grant gate
+    # still applies downstream; this re-asserts the session/org scope on top of it.
+    if socket.assigns[:impersonating] and driver_in_scope?(socket, driver_id) do
+      case Driftwood.OperatorReveal.reveal_cdl(socket.assigns.operator_id, driver_id) do
+        {:ok, plaintext} ->
+          revealed = Map.put(socket.assigns.revealed, cast_id(socket, driver_id), plaintext)
+          {:noreply, assign(socket, revealed: revealed)}
+
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, "reveal denied — no active second-party grant")}
+      end
+    else
+      {:noreply,
+       put_flash(socket, :error, "reveal denied — subject is not in this impersonation session's scope")}
+    end
+  end
+
+  defp do_request_reveal(socket, operator_id, driver_id, reason, org_id) do
+    # PP-11: thread the impersonated tenant `org_id` so the reveal-request lifecycle event
+    # lands on THAT tenant's audit chain (its SecurityLive ledger), not `__global__`.
+    case Driftwood.OperatorReveal.request_reveal(operator_id, driver_id, reason, org_id) do
+      {:ok, _request} ->
+        window = Samen.Reveal.Grants.default_window_minutes()
+
+        notice =
+          "Reveal requested for driver #{driver_id}. A DISTINCT second operator must approve " <>
+            "the request (self-approval is refused); once approved the grant is time-boxed to " <>
+            "#{window} minutes and written to this tenant's audit log."
+
+        {:noreply, assign(socket, request_notice: notice)}
+
+      {:error, {:pii_shaped_reason, _}} ->
+        {:noreply, assign(socket, request_notice: "The reveal reason must name the ticket, not the person.")}
+
+      {:error, _reason} ->
+        {:noreply, assign(socket, request_notice: "Could not open a reveal request.")}
+    end
+  end
+
+  # PP-12 — is `driver_id` one of the drivers loaded under THIS session's gated org scope?
+  # The roster (`socket.assigns.drivers`) is read through the impersonation gate's own
+  # `read_scope/1`, so membership in it IS the org-scope re-assertion. A forged/foreign
+  # `driver_id` (a subject in another org, or none) is not present → refused.
+  defp driver_in_scope?(socket, driver_id) do
+    sid = to_string(driver_id)
+    Enum.any?(socket.assigns[:drivers] || [], fn d -> to_string(d.id) == sid end)
+  end
+
+  # The reveal-request reason: reuse the active impersonation session's (ticket-shaped) reason
+  # when present, else a bounded default. Never PII-shaped (the kernel would reject it anyway).
+  defp request_reason(%{reason: reason}) when is_binary(reason) and reason != "",
+    do: "reveal for #{reason}"
+
+  defp request_reason(_), do: "operator console reveal request"
+
+  defp open_error_copy(:reason_required), do: "A reason for access is required."
+  defp open_error_copy(:not_authorized), do: "Your operator role may not open an impersonation session."
+  defp open_error_copy(:out_of_scope), do: "This account is not in your operator scope."
+  defp open_error_copy({:pii_shaped_reason, _}), do: "The reason must name the ticket, not the person."
+  defp open_error_copy(_), do: "The impersonation session could not be opened."
 
   defp cast_id(socket, driver_id) do
     case Enum.find(socket.assigns.drivers, &(to_string(&1.id) == driver_id)) do
@@ -318,4 +563,63 @@ defmodule DriftwoodWeb.OperatorImpersonationLive do
       d -> d.id
     end
   end
+
+  # Per-second tick (connected sessions only): advance the countdown clock and recompute
+  # the open windows. The moment a window CLOSES (its grant expired), reload the roster so
+  # the value re-masks live — closing the P6-F5 residual where a revealed value lingered in
+  # the socket assign until the next full mount.
+  @impl true
+  def handle_info(:tick, socket) do
+    schedule_tick()
+    %{operator_id: operator_id, org_id: org_id} = socket.assigns
+    now = DateTime.utc_now()
+    windows = reveal_windows(operator_id, now)
+
+    socket =
+      if length(windows) < length(socket.assigns.reveal_windows) do
+        # A window just expired — full reload re-masks the roster + drops stale reveals.
+        load(socket, operator_id, org_id)
+      else
+        assign(socket, now: now, reveal_windows: windows)
+      end
+
+    {:noreply, socket}
+  end
+
+  # --- Reveal-window legibility helpers (R-P6) ------------------------------
+
+  # Is this subject inside an OPEN reveal window right now? Returns the window map or nil.
+  defp window_for(reveal_windows, subject_id) do
+    sid = to_string(subject_id)
+    Enum.find(reveal_windows, fn w -> to_string(w.subject_id) == sid end)
+  end
+
+  # Actual resolution state of a row, independent of HOW it resolved (click vs passive
+  # grant-gated read): a value that is NOT a %Samen.Masked{} is already plaintext.
+  defp resolved?(%Samen.Masked{}), do: false
+  defp resolved?(_), do: true
+
+  # A row is "revealed" if it was clicked (@revealed), OR the value already resolved to
+  # plaintext on the passive path, OR the subject sits in an open window (P6-F3: the
+  # indicator reflects state, not just the click handler).
+  defp row_revealed?(revealed, reveal_windows, d) do
+    Map.get(revealed, d.id) != nil or resolved?(d.cdl_number) or
+      window_for(reveal_windows, d.id) != nil
+  end
+
+  # Human-readable countdown to expiry, e.g. "4m 32s". Never negative.
+  defp countdown(expires_at, now) do
+    secs = max(DateTime.diff(expires_at, now, :second), 0)
+    "#{div(secs, 60)}m #{rem(secs, 60)}s"
+  end
+
+  defp clock(%DateTime{} = dt), do: Calendar.strftime(dt, "%H:%M:%S UTC")
+  defp clock(_), do: "—"
+
+  # P6-F6: the resolved composite name renders as a map — format it "First Last" for
+  # humans. A masked value (%Samen.Masked{}) is returned untouched so it still renders ••••.
+  defp fmt_name(%Samen.Masked{} = m), do: m
+  defp fmt_name(%{"first" => f, "last" => l}), do: "#{f} #{l}"
+  defp fmt_name(%{first: f, last: l}), do: "#{f} #{l}"
+  defp fmt_name(other), do: other
 end

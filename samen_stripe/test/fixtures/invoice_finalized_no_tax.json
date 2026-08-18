@@ -1,0 +1,27 @@
+{
+  "id": "in_no_tax_finalized",
+  "object": "invoice",
+  "customer": "cus_invoice_no_tax",
+  "subscription": "sub_invoice_no_tax",
+  "status": "open",
+  "amount_due": 30000,
+  "amount_paid": 0,
+  "currency": "usd",
+  "period_start": 1782518400,
+  "period_end": 1785196800,
+  "due_date": 1785196800,
+  "status_transitions": {
+    "paid_at": null
+  },
+  "lines": {
+    "data": [
+      {
+        "description": "Pro plan — Jul 2026",
+        "amount": 30000,
+        "quantity": 1
+      }
+    ]
+  },
+  "hosted_invoice_url": "https://invoice.stripe.com/i/acct_test/in_no_tax_finalized",
+  "charge": null
+}

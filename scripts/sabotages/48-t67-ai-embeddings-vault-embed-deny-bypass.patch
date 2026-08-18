@@ -1,0 +1,31 @@
+# SABOTAGE: D3 (T67) gate sabotage — defeats the §7.2 embeddings deny-by-default. The
+# `Samen.AI.Embeddings` plane guard `assert_embeddable/2` refuses a VAULT-ROUTED (🔒) field
+# (grants never unlock embedding — a vector persists beyond any grant window and is invertible,
+# ADR-043 §7.2). This sabotage discards the `vault_routed?/2` result, so a 🔒 field now passes
+# the plane guard: embedding a vault-routed field with a (grant-resolved) PLAINTEXT value now
+# succeeds and the canary lands permanently in the `aie_embedding` vector store — the exact
+# §7.2 leak. Free-text plaintext for a vaulted field passes the chokepoint scrub (it is a
+# vt_-free binary), so the plane guard is the ONLY thing standing between a grant-resolved
+# vaulted value and vector space; dropping it flips the named test.
+# APP: samen_core
+# TEST_FILES: test/ai/embeddings_test.exs
+# MUST_FAIL: a vault-routed field with a grant-resolved plaintext value is refused, nothing stored
+diff --git a/samen_core/lib/samen/ai/embeddings.ex b/samen_core/lib/samen/ai/embeddings.ex
+index 5ddd5b8..f62033d 100644
+--- a/samen_core/lib/samen/ai/embeddings.ex
++++ b/samen_core/lib/samen/ai/embeddings.ex
+@@ -148,9 +148,13 @@ defmodule Samen.AI.Embeddings do
+   # on the SAME union the structural verifier + the chokepoint use (`Samen.Pii.Info`), so the
+   # plane, the chokepoint, and ci.sh agree by construction (T135). Fail-closed.
+   defp assert_embeddable(resource, field) do
++    # SABOTAGE (T67 §7.2 deny bypass): the vault-routed embed deny is dropped — the
++    # `vault_routed?/2` result is discarded, so a 🔒 field now passes the plane guard and its
++    # (grant-resolved) plaintext embeds into vector space permanently (the exact §7.2 leak).
++    _ = vault_routed?(resource, field)
++
+     cond do
+       field not in declared_embeddable_fields(resource) -> {:error, :field_not_embeddable}
+-      vault_routed?(resource, field) -> {:error, :field_not_embeddable}
+       true -> :ok
+     end
+   end

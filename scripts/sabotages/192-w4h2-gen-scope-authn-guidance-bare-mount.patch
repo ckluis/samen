@@ -1,0 +1,24 @@
+# SABOTAGE: W4-H2 gen.scope AUTHN ergonomics DEFEATED — the generator emits a BARE
+# unlabeled tenant-mount snippet (dogfood W4 BLOCKER-1 shape, ADR-031). `mix samen.gen.scope`
+# guides an author to add a business-domain vertical (the CRM/Support/Work/Marketing pattern)
+# by PRINTING a router-mount snippet; the fix makes that snippet carry `labels:
+# @current_org_labels` so the copied mount is authn-gated by construction. This sabotage strips
+# the `, labels: @current_org_labels` seam from `Samen.Gen.Post.scope_router_guidance/1`'s
+# emitted `samen_module_routes(...)` line, so the generator now hands the author the exact bare
+# unlabeled mount that reopens the unauthenticated cross-tenant PII leak. The named guard-output
+# test (which asserts the printed snippet carries the seam verbatim) MUST flip.
+# APP: samen_core
+# TEST_FILES: test/gen_scope_authn_ergonomics_test.exs
+# MUST_FAIL: never a bare mount
+diff --git a/samen_core/lib/samen/gen/post.ex b/samen_core/lib/samen/gen/post.ex
+--- a/samen_core/lib/samen/gen/post.ex
++++ b/samen_core/lib/samen/gen/post.ex
+@@ -148,7 +148,7 @@
+     `labels: @current_org_labels` so the `:authn` prod gate governs actor resolution — a BARE
+     unlabeled tenant mount is the pawchart cross-tenant PII leak (dogfood W4 BLOCKER-1, ADR-031):
+ 
+-        samen_module_routes(:#{kind}, #{s.scope_module}, repo: #{s.app_module}.Repo, labels: @current_org_labels)
++        samen_module_routes(:#{kind}, #{s.scope_module}, repo: #{s.app_module}.Repo)
+ 
+     The emitted guard test/tenant_authn_coverage_test.exs FAILS until every tenant mount
+     carries the seam.

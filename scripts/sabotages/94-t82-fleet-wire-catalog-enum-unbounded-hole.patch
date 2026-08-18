@@ -1,0 +1,27 @@
+# SABOTAGE: T82 fix-round BLOCKER-2, hole (b) (ADR-044 §5.2/INV-2, ATK-6).
+# Reverts the closed-catalog fields (checks[].name, mrr_by_tier[].tier,
+# oban[].queue, activity_counts[].event_kind, cohorts' activity[].event_kind)
+# from a bounded ^[a-z][a-z0-9_]{0,39}$ label check back to the pre-fix
+# is_binary(value) or is_atom(value) fall-through -- i.e. ANY string/atom,
+# unbounded -- exactly the live-reproduced hole (an email+card-number string
+# in checks[].name, and 3000-char blobs in activity_counts[].event_kind,
+# both validated :ok).
+# REGENERATED (T84b): P8 restructured the catalog_sentinel clause from an if/else into a
+# cond (adding real closed-catalog MEMBERSHIP alongside shape) -- the sabotage target line
+# shifted. Same guarantee, same intent (unbounded is_binary/is_atom fallback), retargeted.
+# APP: samen_core
+# TEST_FILES: test/fleet_report_schema_test.exs
+# MUST_FAIL: RED: checks[].name carrying PII/free text is rejected
+diff --git a/samen_core/lib/samen/fleet/report/schema.ex b/samen_core/lib/samen/fleet/report/schema.ex
+index ab9b6f8..0c0b1f9 100644
+--- a/samen_core/lib/samen/fleet/report/schema.ex
++++ b/samen_core/lib/samen/fleet/report/schema.ex
+@@ -365,7 +365,7 @@ defmodule Samen.Fleet.Report.Schema do
+       # regression for a caller that passes no catalogs.
+       catalog_sentinel ->
+         cond do
+-          not catalog_label?(value) ->
++          not (is_binary(value) or is_atom(value)) ->
+             ["#{inspect(name)} = #{inspect(value)} is not a bounded catalog label (^[a-z][a-z0-9_]{0,39}$)"]
+ 
+           (members = Map.get(catalogs, catalog_sentinel)) not in [nil, []] and

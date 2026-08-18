@@ -1,0 +1,34 @@
+# SABOTAGE: A6 (ADR-047; the A5 verifier's R-A5-3) gate sabotage — the DECISION CARD acts
+# as the SYNTHETIC per-org pseudo-principal again. `Samen.Web.AI.AgentLive.principal_id/1`
+# reverts to reading `Mount.scope(mount, org_id).actor.id`, which on the tenant plane is
+# `"broker:<org_id>"` — a per-ORG id, identical for every human in the org and never the
+# authenticated user. Two things break at once: the approver recorded on the consent is an
+# ORG rather than a PERSON (the E3 distinct-party CHECK still holds, but the consent record
+# loses its human), and a caller who is not signed in at all decides with a fabricated
+# identity instead of being refused. The vertical's shipped reds — where a real approvals
+# engine, a real Identity spine and real membership rows exist — must flip; their POSITIVE
+# CONTROLS (a genuine :admin member's click still executes) stay green, proving what was
+# lost is the principal threading and not the decision path.
+# APP: driftwood
+# TEST_FILES: test/gate_a6_agent_slice_test.exs
+# MUST_FAIL: the SYNTHETIC broker:<org_id> principal cannot approve
+# MUST_FAIL: an UNAUTHENTICATED session decides nothing
+diff --git a/samen_web/lib/samen/web/ai/agent_live.ex b/samen_web/lib/samen/web/ai/agent_live.ex
+--- a/samen_web/lib/samen/web/ai/agent_live.ex
++++ b/samen_web/lib/samen/web/ai/agent_live.ex
+@@ -167,10 +167,12 @@ defmodule Samen.Web.AI.AgentLive do
+   # (from the SIGNED session only — never a param); the mount-label copy is the same
+   # value, stashed by `Samen.Web.Live.assign_mount/2` for the helpers that see no socket.
+   # Nil ⇒ refuse: an unauthenticated caller has no identity to record a consent against.
++  # SABOTAGE (A6, R-A5-3): the acting principal is the synthetic per-org pseudo-principal
++  # off `Mount.scope/2` again — never the authenticated human.
+   defp principal_id(socket) do
+-    case socket.assigns[:samen_tenant_principal] do
+-      id when is_binary(id) and id != "" -> id
+-      _ -> stashed_principal(socket.assigns[:samen_mount])
++    case Mount.scope(socket.assigns[:samen_mount], socket.assigns[:org_id]) do
++      %Samen.Scope{actor: %{id: id}} when is_binary(id) -> id
++      _ -> nil
+     end
+   end
+ 

@@ -1,0 +1,25 @@
+# SABOTAGE: T82 fix-round BLOCKER-2, hole (a) (ADR-044 §5.2/INV-2, ATK-6).
+# Reintroduces the unvalidated 'cohorts' escape hatch: whitelists the literal
+# top-level key "cohorts" in unknown_key_errors/1 with NOTHING validating its
+# contents, so an arbitrary free-text/PII blob under "cohorts" (of any size)
+# passes Schema.validate/1 -- exactly the live-reproduced leak (a 300KB text
+# blob, and nested PII, both validated :ok).
+# APP: samen_core
+# TEST_FILES: test/fleet_report_schema_test.exs
+# MUST_FAIL: RED: a top-level "cohorts" key is rejected as unknown, never validated-through
+# REGENERATED (phase-6 SEC fix round R6): bounding the echoed attacker-controlled key
+# name (safe_key/1) in unknown_key_errors/1 shifted this hunk's context. Same guarantee,
+# same intent (whitelist "cohorts" so an unvalidated blob rides through), retargeted.
+diff --git a/samen_core/lib/samen/fleet/report/schema.ex b/samen_core/lib/samen/fleet/report/schema.ex
+index 2a6e06b..a00949a 100644
+--- a/samen_core/lib/samen/fleet/report/schema.ex
++++ b/samen_core/lib/samen/fleet/report/schema.ex
+@@ -580,7 +580,7 @@ defmodule Samen.Fleet.Report.Schema do
+   defp unknown_key_errors(payload) do
+     declared_top = MapSet.new(@top_level_fields, fn {name, _t, _o} -> Atom.to_string(name) end)
+     declared_lists = MapSet.new(@list_fields, fn {name, _o} -> Atom.to_string(name) end)
+-    declared = MapSet.union(declared_top, declared_lists)
++    declared = MapSet.union(declared_top, declared_lists) |> MapSet.put("cohorts")
+ 
+     for key <- Map.keys(payload), key not in declared do
+       "unknown field #{safe_key(key)} — not declared in Samen.Fleet.Report.Schema"

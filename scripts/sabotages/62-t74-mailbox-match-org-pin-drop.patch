@@ -1,0 +1,45 @@
+# SABOTAGE: T74 fix round (spec §I1 CRM two-way email sync) — defeats the ORG PIN in the mailbox
+# CRM matcher. `Samen.Mailbox.Match` binds a synced message to a CRM record through three reads,
+# each `authorize?: false` with an EXPLICIT `org_id == config.org_id` filter (the org boundary is
+# pinned from trusted config — the connection row — never from the message, the same posture
+# `Samen.Support.Inbound.Ingest` uses). This patch deletes that filter from all three:
+# `candidate_people/1` (the vaulted-address person match), `company_by_id/2`, and
+# `company_by_domain/2`. A tenant's inbound mail would then thread onto ANOTHER TENANT's contact
+# or company whenever the two share a counterparty address or an email domain — a cross-tenant
+# data-exposure bug that leaves every happy-path assertion green (the seeded org still matches
+# its own person first in single-org fixtures). The named test uses a THIRD, bare org that owns
+# no CRM records at all: with the pin gone it anchors to a foreign org's person/company; with the
+# pin intact it correctly anchors to nothing. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/mailbox_sync_test.exs
+# MUST_FAIL: CROSS-ORG: the match is ORG-PINNED
+diff --git a/samen_core/lib/samen/mailbox/match.ex b/samen_core/lib/samen/mailbox/match.ex
+index f26f277..de6f2a8 100644
+--- a/samen_core/lib/samen/mailbox/match.ex
++++ b/samen_core/lib/samen/mailbox/match.ex
+@@ -150,7 +150,6 @@ defmodule Samen.Mailbox.Match do
+       # `emails` is vault-routed: it must be EXPLICITLY selected or the resolver has
+       # nothing to resolve and every match would silently miss.
+       |> Ash.Query.ensure_selected([:emails, :company_id])
+-      |> Ash.Query.filter(org_id == ^config.org_id)
+       |> Ash.Query.limit(config.max_match_candidates)
+       |> Ash.read!(authorize?: false)
+ 
+@@ -186,7 +185,7 @@ defmodule Samen.Mailbox.Match do
+   defp company_by_id(%{company_id: company_id}, config) when is_binary(company_id) do
+     config.company_resource
+     |> Ash.Query.new()
+-    |> Ash.Query.filter(org_id == ^config.org_id and id == ^company_id)
++    |> Ash.Query.filter(id == ^company_id)
+     |> Ash.Query.limit(1)
+     |> Ash.read!(authorize?: false)
+     |> List.first()
+@@ -209,7 +208,7 @@ defmodule Samen.Mailbox.Match do
+         # first guess. (`domain` is a plain SQL predicate, so the DB does the counting.)
+         config.company_resource
+         |> Ash.Query.new()
+-        |> Ash.Query.filter(org_id == ^config.org_id and domain == ^dom)
++        |> Ash.Query.filter(domain == ^dom)
+         |> Ash.Query.limit(2)
+         |> Ash.read!(authorize?: false)
+         |> case do

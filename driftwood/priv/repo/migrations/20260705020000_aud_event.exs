@@ -6,13 +6,17 @@ defmodule Driftwood.Repo.Migrations.AudEvent do
   same append-only enforcement.  See that module for full documentation.
 
   Demo-specific notes:
-    * App role is `"clank"` (the local dev/CI Postgres user).
+    * App role is DERIVED at migration time (ADR-045 §4.2, O4) — see `app_role/0` below.
     * First child partition covers July 2026 (the demo launch month).
   """
 
   use Ecto.Migration
 
-  @app_role Application.compile_env(:driftwood, :aud_event_app_role, "clank")
+  # ADR-045 §4.2 (O4): DERIVE the app role at migration time (the `:aud_event_app_role` knob,
+  # else the repo's configured `:username`, else RAISE) via the shared helper — NEVER the
+  # hardcoded developer laptop role, which would ship `REVOKE ... FROM <laptop-role>` into a
+  # fresh prod deploy (whose first `release_command` then aborts: role does not exist).
+  defp app_role, do: Samen.OperatorPlane.Migration.app_role!(:driftwood, Driftwood.Repo)
 
   @resource "Samen.AuditEvent"
   @table "aud_event"
@@ -75,10 +79,10 @@ defmodule Driftwood.Repo.Migrations.AudEvent do
     "DROP TRIGGER IF EXISTS aud_event_append_only_tg ON aud_event"
 
     execute """
-    REVOKE UPDATE, DELETE ON aud_event FROM #{@app_role}
+    REVOKE UPDATE, DELETE ON aud_event FROM #{app_role()}
     """,
     """
-    GRANT UPDATE, DELETE ON aud_event TO #{@app_role}
+    GRANT UPDATE, DELETE ON aud_event TO #{app_role()}
     """
 
     execute """
@@ -113,7 +117,7 @@ defmodule Driftwood.Repo.Migrations.AudEvent do
 
     execute "DELETE FROM tam_table WHERE tam_table_name = '#{@table}'"
 
-    execute "GRANT UPDATE, DELETE ON aud_event TO #{@app_role}"
+    execute "GRANT UPDATE, DELETE ON aud_event TO #{app_role()}"
     execute "DROP TRIGGER IF EXISTS aud_event_append_only_tg ON aud_event"
     execute "DROP FUNCTION IF EXISTS aud_event_enforce_append_only()"
     execute "DROP INDEX IF EXISTS aud_event_brin_occurred_at"

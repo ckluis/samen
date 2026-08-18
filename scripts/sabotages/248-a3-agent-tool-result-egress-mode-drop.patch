@@ -1,0 +1,25 @@
+# SABOTAGE: A3 (ADR-047 §4.3#2 / §4.4) gate sabotage — the EG2 tool-result EGRESS-mode resolve.
+# Neutralizes Samen.AI.Agent.ToolResult's PiiResolution.resolve call: the egress:true flag is
+# flipped to egress:false, so a fetch_record result on the run owner's own-org (tenant) plane
+# resolves vault-routed fields as PLAINTEXT — the AI-plane masked-by-default posture (§6.1,
+# stricter than the UI) is defeated and the canary reaches the provider. The named masking red
+# must flip; the tenant-plane non-egress refutability control proves it is not vacuous.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_tools_test.exs
+# MUST_FAIL: renders •••• on the AI plane
+diff --git a/samen_core/lib/samen/ai/agent/tool_result.ex b/samen_core/lib/samen/ai/agent/tool_result.ex
+--- a/samen_core/lib/samen/ai/agent/tool_result.ex
++++ b/samen_core/lib/samen/ai/agent/tool_result.ex
+@@ -145,8 +145,11 @@
+     # explicitly — a live reveal grant and grant_plaintext_egress: true can never
+     # admit plaintext into an agent tool result (operator decision §9#2 TAKEN).
+     resolved =
++      # SABOTAGE (A3, ADR-047 §4.3#2 / §4.4): the egress-mode flag is DROPPED — records
++      # resolve under the ordinary UI/API plane rule, so the run owner's own-org tenant
++      # read returns vault PLAINTEXT into the tool result instead of ••••.
+       PiiResolution.resolve(records, resource_mod, actor,
+-        egress: true,
++        egress: false,
+         grant_egress?: false,
+         repo: repo_of(resource_mod)
+       )

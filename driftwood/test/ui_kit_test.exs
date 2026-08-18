@@ -24,6 +24,10 @@ defmodule Driftwood.UiSidebarTest do
       loads: [],
       drivers: [],
       settlements: [],
+      # T148 — the "New load" create-flow assigns the render now reads.
+      show_new: false,
+      new_load_form: nil,
+      load_error: nil,
       __changed__: %{}
     }
 

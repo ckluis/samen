@@ -1,0 +1,35 @@
+# SABOTAGE: T77 (spec §I4 "unfair advantage") — REGENERATED T160 (context shifted: T160
+# restructured `billing_snapshot/2`'s body around this line — DB-aggregate share/scoring-
+# status computation replaces the old bounded `subs`/`invoices` reads — the TARGET line
+# itself is untouched verbatim). Drops the `scope` threading from
+# `Samen.Web.AccountHealth.billing_snapshot/2`'s call into `Samen.Web.Billing.Reads.metrics/2`
+# (org-scope pin, the T74/T75/T76 lesson: EVERY new read gets a two-org pin proving org B's
+# rows never count in org A's numbers). `Billing.Reads.metrics/2`'s private helpers each
+# carry their OWN `rescue -> 0` (they were written to fail honest-EMPTY on a genuine read
+# error) — so passing `nil` where the org-scoped actor belongs does not raise past this call
+# site; it silently degrades every metric field (`mrr_cents`/`active_subs`/
+# `outstanding_cents`/`collected_cents`) to `0`, masking a REAL org's MRR as if the org had
+# no subscription at all. Same shape as patch 77 (T76 leaderboard-org-scope-drop): the
+# scope-threading guarantee breaks into a silently-WRONG empty/zero result rather than a
+# literal cross-tenant leak — and the named tests below (which assert the ACTUAL seeded MRR,
+# not merely "org B is absent") still catch it exactly because a fabricated `0` is
+# indistinguishable from "no data" without them. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_account_health_test.exs
+# MUST_FAIL: snapshot/2: seeded subscription -> MRR figure EXACT; open tickets -> support-load count EXACT
+# MUST_FAIL: ORG-SCOPE: org B's subscription/tickets never contribute to org A's snapshot (and DO contribute to org B's own)
+# MUST_FAIL: FIRST-CLIENT PORTFOLIO: CompanyLive's secondary portfolio panel renders MRR / health / open-support-ticket tiles from seeded data
+# MUST_FAIL: snapshot/2 WORST-OF-N (fix round 1, MED-2): an active sub + a sibling past_due sub reports the WORST status, never the best one
+# MUST_FAIL: ANTI-TAUTOLOGY: the degraded-read scenario is real — the SAME org with a REAL scope reports its REAL $199.00
+diff --git a/samen_web/lib/samen/web/account_health.ex b/samen_web/lib/samen/web/account_health.ex
+--- a/samen_web/lib/samen/web/account_health.ex
++++ b/samen_web/lib/samen/web/account_health.ex
+@@ -558,7 +558,7 @@
+     # fail-safe-empty contract; only this call site gained the canary.
+     Ash.count!(Mount.resource(billing_mount, Customer), scope: scope)
+
+-    metrics = Samen.Web.Billing.Reads.metrics(billing_mount, scope)
++    metrics = Samen.Web.Billing.Reads.metrics(billing_mount, nil)
+
+     now = DateTime.utc_now()
+     sub_query = Ash.Query.new(Mount.resource(billing_mount, Subscription))

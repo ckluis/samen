@@ -1,5 +1,11 @@
 import Config
 
+# ADR-036 D1 / ADR-037 §5.2: AshMoney/ex_money wiring (CRM Opportunity / Billing
+# Price Money attributes, tenant + operator billing mounts). No FX feature — the
+# background exchange-rate poller stays off.
+config :ash, :known_types, [AshMoney.Types.Money]
+config :ex_money, auto_start_exchange_rate_service: false
+
 # Driftwood — the Phase-5 freight-brokerage reference vertical (T5.2).
 # Mounts the samen_core CRM scope, composes the vertical Freight resources
 # (Driver / Settlement / DispatchEvent) and lays Driftwood.Context over the
@@ -10,13 +16,25 @@ config :driftwood,
     Driftwood.Crm,
     Driftwood.Billing,
     Driftwood.Support,
+    Driftwood.Work,
+    Driftwood.Calendar,
+    Driftwood.Docs,
+    Driftwood.Tags,
+    Driftwood.Locations,
+    Driftwood.SalesOps,
     Driftwood.Marketing,
     Driftwood.Freight,
     Driftwood.Aggregate,
     Driftwood.Operator,
     Driftwood.Chat,
     Driftwood.Primitives,
-    Driftwood.Analytics
+    Driftwood.Analytics,
+    Driftwood.Automation,
+    # T155 (ADR-043 §6.3): adopt the reusable AI-plane domain (Samen.AI.Prompt +
+    # Samen.AI.SupportReplyDraft) so AI support-reply drafts PERSIST in a real host
+    # (repo overrides + migrations below; the ai_support_reply approval kind registered
+    # in the Approvals.Registry block).
+    Samen.AI.Domain
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…)
@@ -27,13 +45,22 @@ config :samen_core, :ash_domains, [
   Driftwood.Crm,
   Driftwood.Billing,
   Driftwood.Support,
+  Driftwood.Work,
+  Driftwood.Calendar,
+  Driftwood.Docs,
+  Driftwood.Tags,
+  Driftwood.Locations,
+  Driftwood.SalesOps,
   Driftwood.Marketing,
   Driftwood.Freight,
   Driftwood.Aggregate,
   Driftwood.Operator,
   Driftwood.Chat,
   Driftwood.Primitives,
-  Driftwood.Analytics
+  Driftwood.Analytics,
+  Driftwood.Automation,
+  # T155 — verifiers must scan the mounted AI-plane resources too.
+  Samen.AI.Domain
 ]
 
 # WS-A A4/A5 — the kernel notification ENGINE (`Samen.Notifications.Engine`) wired to
@@ -64,13 +91,38 @@ config :driftwood, operator_org_id: "0f000000-0000-4000-8000-0000000000aa"
 
 config :ash, disable_async?: true
 
-# F2 (ADR-031) — the launch AUTH gate. Default OFF: dev/test keep the query-param convenience
-# identity (a `?org=<uuid>` is trusted, so the dogfood needs no login). A REAL launch sets this
-# `true` in a prod config so the tenant actor is derived ONLY from an authenticated session (see
-# docs/launch-checklist.md). `:auth_credentials` is empty by design — this PUBLIC repo commits no
-# working password; the operator provisions credentials (phx.gen.auth / IdP for real).
-config :driftwood, auth_required?: false
+# F2 (ADR-031) — the launch AUTH gate, ARMED BY DEFAULT IN PROD (ADR-045 §2 V-F1, Option A).
+# dev/test keep the query-param convenience identity (a `?org=<uuid>` is trusted, so the dogfood
+# needs no login); prod derives the tenant actor ONLY from an authenticated session. This is
+# EXPLICIT here AND enforced by the framework env-aware default + the `Samen.Web.TenantGate` boot
+# guard (a prod host that is disarmed refuses to boot). `:auth_credentials` is empty by design —
+# this PUBLIC repo commits no working password; the operator provisions credentials (phx.gen.auth
+# / IdP for real). See docs/launch-checklist.md.
+config :driftwood, auth_required?: config_env() == :prod
 config :driftwood, auth_credentials: %{}
+
+# T146 — the OPERATOR-ROLE authority resolver `Samen.Web.AuthGate` reads at the conn level (the
+# `:require_authenticated_operator` pipeline every `/operator/*` scope pipes through). Called with
+# the authenticated principal id; returns an operator role (`Samen.OperatorPlane.Actor.roles/0`)
+# or `nil` (NOT an operator → refused). `Driftwood.Auth.operator_role/2` resolves a configured
+# `:operator_roster` in prod, with a dev-only `:operator_admin` grant while `:auth_required?` is
+# false. The `[:driftwood]` args list is the J3 PRODUCT-SCOPE carrier (ADR-044 §6.2/§6.3a #4) —
+# a role granted here confers scope ONLY on :driftwood. Empty by design in this PUBLIC repo — a
+# real launch provisions the operator roster.
+config :driftwood, :operator_authority, {Driftwood.Auth, :operator_role, [:driftwood]}
+config :driftwood, :operator_roster, %{}
+
+# J3 — the FLEET-WIDE role read (`Samen.Fleet.Authz` `:fleet_authority` seam, ADR-044 §6.2/§6.3a #1).
+# Returns %{scope => role} for the cockpit's tile gating. `:fleet_operators` grants the reserved
+# `:fleet` cockpit scope (default empty ⇒ fail-CLOSED: no cockpit access until provisioned).
+config :driftwood, :fleet_authority, {Driftwood.Auth, :fleet_roles, []}
+config :driftwood, :fleet_operators, %{}
+
+# J3 / Amendment 1 — the `:fleet_resolution` name-resolution + drill-in scope seam (ADR-044 §16.2).
+# T83 ships the framework seam SHAPE (`Samen.Fleet.Resolution`, fail-closed to :none); the host
+# resolver + the assignment resource it reads are T84 (operator ruling R-A). LEFT UNWIRED here so
+# the seam fails CLOSED (every name masked, every scoped drill-in denied) until T84 provisions it.
+# config :driftwood, :fleet_resolution, {Driftwood.Auth, :resolution_scope, [:driftwood]}
 
 config :driftwood, Driftwood.Repo,
   migration_primary_key: [name: :id, type: :binary_id]
@@ -220,6 +272,59 @@ config :samen_core, :non_pii_repo, Driftwood.Repo
 config :samen_core, :verify_repo, Driftwood.Repo
 config :samen_core, :vault_repo, Driftwood.Repo
 
+# T35 §4.7: reveal grants are a CLIENT of the T34 E3 approve/reject engine. Driftwood's
+# own Approval resource (Samen.Approvals.Blueprint.define_approval/5,
+# driftwood/lib/driftwood/approvals.ex) + the "pii_reveal" kind registered to
+# Samen.Reveal.ApprovalHandler — Grants.approve/2 now routes its happy path through
+# Samen.Approvals on this host.
+config :samen_core, Samen.Approvals,
+  approval_resource: Driftwood.Approvals.Approval,
+  repo: Driftwood.Repo
+
+config :samen_core, Samen.Approvals.Registry,
+  kinds: %{
+    "pii_reveal" => {:operator, Samen.Reveal.ApprovalHandler},
+    # T155 (ADR-043 §6.3 D5): the AI support operator's human-gated send. Operator plane;
+    # requester (the AI service principal) is never the decider (distinct-party by construction).
+    "ai_support_reply" => {:operator, Samen.AI.SupportOperator.ReplyHandler},
+    # ADR-047 A4/A6 (§9#1 TAKEN, ADR-043 §6.2 unamended): the ONE agent-write kind. An
+    # `effect: :write` agent tool NEVER executes in the turn — it opens this E3 Face-1
+    # approval (requester = the AI service principal, which the distinct-party CHECK bars
+    # from ever deciding) and the run parks `:awaiting_approval` until a DISTINCT human
+    # approves; the write then executes with the APPROVER's authority. TENANT plane: the
+    # org's own member decides a write against the org's own record.
+    #
+    # A6 wires it because an UNREGISTERED kind is refused at request time — an unwired host
+    # is honest ("the agent cannot propose") but its decision card can never do anything.
+    "ai_agent_write" => {:tenant, Samen.AI.Agent.WriteProposal}
+  }
+
+# ADR-047 A5/A6 (§5.3) — the APPROVER-MEMBERSHIP seam. `Identity.Membership` is
+# materialized INTO the host namespace (ADR-004), so samen_core cannot name it; the host
+# does. At decision time the clicking principal is resolved against a REAL membership row
+# in the RUN's org (pinned from the durable run row, never a caller argument) and executes
+# under that row's REAL role. Driftwood's Identity spine is `Driftwood.Operator` — the same
+# mount `samen_settings_routes`/`samen_auth_routes` use. An UNWIRED host refuses
+# `:approver_unresolvable` (fail-closed); before A6 driftwood WAS that unwired host, so its
+# inherited decision card was structurally non-functional.
+config :samen_core, Samen.AI.Agent, approver_membership: Driftwood.Operator.Membership
+
+# T155 (ADR-043 §5.2 / §6.3): point the reusable AI-plane resources (mounted via
+# Samen.AI.Domain above) at Driftwood.Repo so Prompt templates + support-reply drafts
+# PERSIST in this host. Compile-time (the resources read it via compile_env, the
+# tnt_record_repo / samen_ai_*_repo precedent in samen_core/config/config.exs).
+config :samen_core, :samen_ai_prompt_repo, Driftwood.Repo
+config :samen_core, :samen_ai_support_reply_draft_repo, Driftwood.Repo
+
+# A1 (ADR-047 §4.1/§6): the agent-loop cursor resources ride the same Samen.AI.Domain
+# mount — point them at Driftwood.Repo so run/turn rows persist in this host (the
+# `samen_ai_prompt_repo` precedent above).
+config :samen_core, :samen_ai_agent_run_repo, Driftwood.Repo
+config :samen_core, :samen_ai_agent_turn_repo, Driftwood.Repo
+
+# A5 (ADR-047 §6): the durable per-{org, definition} agent kill switch.
+config :samen_core, :samen_ai_agent_kill_repo, Driftwood.Repo
+
 # The FMCSA dispatch gate reads the CDL vault-token PRESENCE (not plaintext) via a
 # bounded repo query on the pii_vault table (design §4 / OR-7). It needs the repo.
 config :driftwood, :vault_repo, Driftwood.Repo
@@ -256,20 +361,27 @@ config :driftwood, DriftwoodWeb.Endpoint,
 
 config :phoenix, :json_library, Jason
 
-# Oban: T2.1 canonical queue taxonomy. The load/dispatch workflow (DispatchWorker)
-# runs on :default; erasure + reveal keep the shipped queues.
+# Oban: T2.1 canonical queue taxonomy. NO hand-listed `queues:` — B-OBAN: this
+# host used to maintain its own list (the only one that registered :automation /
+# :automation_timers, and like every other host it dropped :webhooks_in). config.exs
+# runs before dependency modules load, so it cannot call the canonical
+# `Samen.Jobs.default_queue_config/0` here; `Driftwood.Application` starts Oban via
+# `Samen.Jobs.install_defaults/1`, which installs the whole taxonomy (plus the
+# canonical cron) at boot. `mix samen.verify.oban_queues` gates the parity.
 config :samen_core, Oban,
   repo: Driftwood.Repo,
-  queues: [
-    default: 10,
-    rollups: 2,
-    webhooks_out: 5,
-    erasure: 1,
-    maintenance: 1,
-    reveal: 5
-  ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
   ]
+
+# ADR-039 §3.2 (T118) — the E1 engine's host-wired seam (the
+# `Samen.Notifications.Engine` convention: config-resolved, opts override). The
+# tenant automation builder (`Samen.Web.Automation.Reads`) never actually relies
+# on this — it always passes explicit `workflow_module:`/`repo:` opts derived
+# from the mount (opts win over config) — this line exists for host-level
+# completeness (a future EventCapture-driven resource_event trigger needs it).
+config :samen_core, Samen.Automation,
+  workflow_module: Driftwood.Automation.Workflow,
+  repo: Driftwood.Repo
 
 import_config "#{config_env()}.exs"

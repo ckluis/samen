@@ -28,7 +28,22 @@ defmodule Samen.VaultTest do
     # Use FileBacked adapter for tests that need the PITR physical proof;
     # InMemory for others (overridden per describe block).
     Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
-    on_exit(fn -> Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked) end)
+
+    on_exit(fn ->
+      # ROOT-CAUSE FIX (T102): the outage flag is a GLOBAL :persistent_term. Two
+      # red-path tests in this module (RED PATH 5, "no local cache") set it TRUE
+      # and — modelling a genuine store outage — deliberately do NOT reset it
+      # inline. Before this line, teardown reset only :kms_adapter, so whenever one
+      # of those tests ran LAST in this module the flag leaked past the module
+      # boundary into the next sync module (e.g. vault_cast_validation_test), whose
+      # vault writes then failed `vault store failed: :unavailable` (seed 8644: 1
+      # property + ~11 tests). Resetting the flag here guarantees it can never
+      # survive past a test — the identical teardown break_glass_test/erasure_test
+      # already carry.
+      Samen.Kms.FileBacked.simulate_outage(false)
+      Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
+    end)
+
     :ok
   end
 

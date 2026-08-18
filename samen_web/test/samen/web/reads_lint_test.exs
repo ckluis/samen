@@ -107,6 +107,77 @@ defmodule Samen.Web.Reads.LintTest do
     assert Enum.any?(files, &String.ends_with?(&1, "/web/reads.ex"))
   end
 
+  # ---------------------------------------------------------------------------
+  # VERTICAL COVERAGE — ADR-045 §4.2 (O8): the lint sweeps the shipped vertical read
+  # layers, not just samen_web. Before this, driftwood/pawchart reads were one directory
+  # outside the scanner and an unbounded vertical read (driver_roster/1) was invisible.
+  # ---------------------------------------------------------------------------
+
+  @vertical_reads [
+    "/driftwood/lib/driftwood/reads.ex",
+    "/pawchart/lib/pawchart_web/clinic_reads.ex"
+  ]
+
+  test "VERTICAL COVERAGE (O8): the sweep now includes the driftwood + pawchart read layers" do
+    files = Lint.reads_files()
+    vertical = Lint.vertical_reads_files()
+
+    for suffix <- @vertical_reads do
+      assert Enum.any?(files, &String.ends_with?(&1, suffix)),
+             "the lint no longer sweeps #{suffix} — an unbounded vertical read there would be " <>
+               "invisible to the gate (the exact O8 defect: A3-GATE-1 one dir outside the scanner)"
+
+      assert Enum.any?(vertical, &String.ends_with?(&1, suffix)),
+             "#{suffix} is not in vertical_reads_files/0"
+    end
+
+    # Non-vacuity: the vertical globs actually resolved to files on disk (a broken path
+    # arithmetic that matched nothing would silently un-cover the verticals).
+    assert length(vertical) >= 2
+  end
+
+  test "VERTICAL REGRESSION PIN (O8): the driftwood + pawchart read layers scan CLEAN AND non-vacuously" do
+    for suffix <- @vertical_reads do
+      file = Enum.find(Lint.reads_files(), &String.ends_with?(&1, suffix))
+      assert file, "#{suffix} missing from the sweep"
+
+      {violations, read_clauses} = file |> File.read!() |> Lint.scan_source(file)
+
+      assert violations == [],
+             "#{suffix} has an UNBOUNDED read (O8): #{inspect(violations)} — bound it via " <>
+               "Ash.Query.limit or Samen.Web.Reads.page!/3"
+
+      # Non-vacuous: the scanner genuinely saw this vertical module's reads.
+      assert read_clauses > 0
+    end
+  end
+
+  test "VERTICAL RED PATH (O8): a synthetic UNBOUNDED vertical read is FLAGGED (the coverage is not cosmetic)" do
+    # A driftwood-shaped unbounded roster read (the pre-fix driver_roster/1 shape) — proves the
+    # extended sweep would actually catch a future unbounded vertical read, not merely list the
+    # files. Path is vertical-shaped; the scanner is path-agnostic, so this is the same
+    # discriminator the framework RED path uses, aimed at the vertical tree.
+    vertical_unbounded = """
+    defmodule Driftwood.Fixture.UnboundedReads do
+      require Ash.Query
+
+      def driver_roster(scope) do
+        Driftwood.Freight.Driver
+        |> Ash.Query.sort(inserted_at: :asc)
+        |> Ash.read!(scope: scope)
+      rescue
+        _ -> []
+      end
+    end
+    """
+
+    {violations, read_clauses} =
+      Lint.scan_source(vertical_unbounded, "driftwood/lib/driftwood/reads.ex")
+
+    assert read_clauses == 1
+    assert [%{fun: :driver_roster, arity: 1}] = violations
+  end
+
   test "REGRESSION PIN (A3-GATE-1): the two modules the A3 gate caught unbounded now scan clean AND non-vacuously" do
     for module_dir <- ["chat", "crm"] do
       file = Enum.find(Lint.reads_files(), &String.ends_with?(&1, "/#{module_dir}/reads.ex"))

@@ -1,0 +1,44 @@
+# SABOTAGE: M2 (phase6-edges F2) — `Samen.Mailbox.Match` reverts to GUESSING the first
+# match on ambiguity: `person_for_address/2` goes back to `Enum.find` (arbitrary-first
+# person) and `company_by_domain/2` back to `limit(1) |> List.first()` (arbitrary-first
+# company). On 2+ candidates a vaulted mail body is silently anchored to a plausibly-wrong
+# contact/company timeline instead of the honest, fail-closed no-match — inconsistent with
+# the T160 AccountLink discipline (exactly-1 matches; 0 OR 2+ ⇒ honest absence). The named
+# ambiguity tests (which expect nil on 2+) flip; the exactly-1 positive controls still pass.
+# Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/mailbox_sync_test.exs
+# MUST_FAIL: M2 PERSON ambiguity: TWO org people sharing a counterparty address
+# MUST_FAIL: M2 COMPANY-DOMAIN ambiguity: TWO org companies sharing a domain
+diff --git a/samen_core/lib/samen/mailbox/match.ex b/samen_core/lib/samen/mailbox/match.ex
+index f26f277..81a064f 100644
+--- a/samen_core/lib/samen/mailbox/match.ex
++++ b/samen_core/lib/samen/mailbox/match.ex
+@@ -118,11 +118,7 @@ defmodule Samen.Mailbox.Match do
+         # record. A guess is not an honest match.
+         config
+         |> candidate_people()
+-        |> Enum.filter(fn person -> norm in resolved_addresses(person) end)
+-        |> case do
+-          [one] -> one
+-          _ -> nil
+-        end
++        |> Enum.find(fn person -> norm in resolved_addresses(person) end)
+     end
+   end
+ 
+@@ -210,12 +206,9 @@ defmodule Samen.Mailbox.Match do
+         config.company_resource
+         |> Ash.Query.new()
+         |> Ash.Query.filter(org_id == ^config.org_id and domain == ^dom)
+-        |> Ash.Query.limit(2)
++        |> Ash.Query.limit(1)
+         |> Ash.read!(authorize?: false)
+-        |> case do
+-          [one] -> one
+-          _ -> nil
+-        end
++        |> List.first()
+     end
+   rescue
+     _ -> nil

@@ -1,0 +1,29 @@
+# SABOTAGE: A5 (ADR-047 §7.3; CLAUDE.md per-plane masking) gate sabotage — the tenant agent
+# transcript is resolved PLANE-BLIND. `AgentReads.get/3` stops handing `PiiResolution` the
+# mount's real actor and hands it a hardcoded tenant-plane actor instead, so an
+# operator-without-grant viewing the same run gets the vault-routed transcript CLEAR: the
+# goal (tenant keystrokes) and every rendered line land in the operator's DOM in plaintext.
+# This is the exact class the masking watch-list exists for — the surface deciding masking
+# instead of the resolver — and it is invisible on the tenant plane, which is why the RED
+# proof carries the weight. The named red must flip; the GREEN tenant proof stays green,
+# proving the difference is the plane and not the panel.
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/agent_masking_test.exs
+# MUST_FAIL: the OPERATOR-without-grant plane renders •••• on the SAME run
+# MUST_FAIL: the same DOM scan DETECTS a modeled leak, and the plane flip is the only difference
+diff --git a/samen_web/lib/samen/web/ai/agent_reads.ex b/samen_web/lib/samen/web/ai/agent_reads.ex
+--- a/samen_web/lib/samen/web/ai/agent_reads.ex
++++ b/samen_web/lib/samen/web/ai/agent_reads.ex
+@@ -84,8 +84,11 @@
+     |> case do
+       {:ok, [run]} ->
+         # THE resolution: the actor's plane decides, `Samen.Api.PiiResolution` performs.
++        # SABOTAGE (A5, ADR-047 §7.3): PLANE-BLIND resolution — the mount's real actor is
++        # discarded for a hardcoded tenant-plane one, so an operator-without-grant reads
++        # the vault-routed transcript CLEAR.
+         [resolved] =
+-          Samen.Api.PiiResolution.resolve([run], Run, actor_of(mount, org_id), repo: mount.repo)
++          Samen.Api.PiiResolution.resolve([run], Run, %{plane: :tenant}, repo: mount.repo)
+ 
+         {goal, lines} = decode_transcript(Map.get(resolved, :transcript))
+         approval = pending_approval(org_id, run)

@@ -1,0 +1,30 @@
+# SABOTAGE: T84 (ADR-044 s4.6a, P10 mode-A mitigation). Every directive push is AUDITED per app
+# with the publishing identity: record_directive raises a :directive_published attention entry
+# carrying who/revision/target, so a push (including a forged mode-A one) is visible, not silent.
+# Dropping the audit makes directive publishing untraceable. Positive control: the forged-push
+# incident detector still works, so the flip is non-vacuous.
+# APP: samen_core
+# TEST_FILES: test/fleet_counter_audit_test.exs
+# MUST_FAIL: audited per app with the publishing identity
+diff --git a/samen_core/lib/samen/fleet/registry.ex b/samen_core/lib/samen/fleet/registry.ex
+index 8c2def4..310a448 100644
+--- a/samen_core/lib/samen/fleet/registry.ex
++++ b/samen_core/lib/samen/fleet/registry.ex
+@@ -503,14 +503,9 @@ defmodule Samen.Fleet.Registry do
+     # identity: a `:directive_published` attention entry carries who/which-revision/target, so a
+     # push (including a forged mode-A one that DID land a row) is visible with its accountable
+     # operator id, not silent.
+-    with {:ok, directive} <- result do
+-      Samen.Fleet.Attention.raise_entry(:directive_published, directive_key(target), %{
+-        published_by: directive.published_by,
+-        fleet_revision: directive.fleet_revision,
+-        target: target,
+-        published_at: directive.published_at
+-      })
+-    end
++    # SABOTAGE (T84 P10, s4.6a): drop the per-app directive-publish audit, so a push
++    # (incl. a forged mode-A one that landed a row) is SILENT - no accountable operator id.
++    _ = result
+ 
+     result
+   end

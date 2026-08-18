@@ -1,0 +1,25 @@
+# SABOTAGE: Phase-6 T85 gate UX batch, M4 fix regression — flips
+# `Samen.Web.AI.Components.analytics_ask_offered?/1`'s catch-all clause from
+# `false` to `true`, so the AI analytics ask-box INPUT renders on the TENANT
+# plane too (not just the operator plane). This weakens the M4 UX posture —
+# the tenant would see a live-looking "Ask an analytics question…" input +
+# button again, even though `Samen.AI.Analytics.ask/4`'s T144 deny-by-default
+# gate refuses every tenant question with `{:error, :unauthorized}`
+# deterministically. T144 ITSELF is untouched by this sabotage (the kernel
+# gate still refuses); this patch only reintroduces the dead-tab INPUT the
+# M4 fix removed. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/analytics_ask_honesty_test.exs
+# MUST_FAIL: the ask-box INPUT is not rendered on the tenant plane
+# MUST_FAIL: true for an operator-plane mount, false for a tenant-plane mount
+--- a/samen_web/lib/samen/web/ai/components.ex
++++ b/samen_web/lib/samen/web/ai/components.ex
+@@ -50,7 +50,7 @@
+   a tempting dead-end.
+   """
+   def analytics_ask_offered?(%Samen.Web.Mount{plane: %{kind: :operator}}), do: true
+-  def analytics_ask_offered?(_), do: false
++  def analytics_ask_offered?(_), do: true
+ 
+   @doc "The six AI kit surfaces, in nav order: `{kind, label, sub_path}`."
+   def surfaces do

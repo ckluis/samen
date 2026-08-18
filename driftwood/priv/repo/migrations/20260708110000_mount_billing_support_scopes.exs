@@ -72,7 +72,7 @@ defmodule Driftwood.Repo.Migrations.MountBillingSupportScopes do
 
     # --- fbc_customer : 🔒 (billing_name/billing_email vault-routed) ---
     create table(:fbc_customer, primary_key: false) do
-      add(:fbc_stripe_customer_id, :text)
+      add(:fbc_provider_customer_ref, :text)
       add(:fbc_status, :text, default: "active")
       add(:fbc_currency, :text, default: "USD")
       add(:fbc_custom, :map, default: fragment("'{}'::jsonb"))
@@ -90,7 +90,7 @@ defmodule Driftwood.Repo.Migrations.MountBillingSupportScopes do
       add(:fbp_name, :text, null: false)
       add(:fbp_label, :text)
       add(:fbp_description, :text)
-      add(:fbp_stripe_plan_id, :text)
+      add(:fbp_provider_plan_ref, :text)
       add(:fbp_interval, :text, default: "monthly")
       add(:fbp_enabled, :boolean, default: true)
       add(:fbp_features, :map, default: fragment("'{}'::jsonb"))
@@ -103,7 +103,7 @@ defmodule Driftwood.Repo.Migrations.MountBillingSupportScopes do
 
     # --- fbr_price : Tier-0 config rows (price per plan) ---
     create table(:fbr_price, primary_key: false) do
-      add(:fbr_stripe_price_id, :text)
+      add(:fbr_provider_price_ref, :text)
       add(:fbr_unit_amount_cents, :integer, null: false)
       add(:fbr_currency, :text, null: false, default: "USD")
       add(:fbr_interval, :text, default: "monthly")
@@ -128,7 +128,7 @@ defmodule Driftwood.Repo.Migrations.MountBillingSupportScopes do
 
     # --- fbs_subscription : an active billing subscription ---
     create table(:fbs_subscription, primary_key: false) do
-      add(:fbs_stripe_subscription_id, :text)
+      add(:fbs_provider_subscription_ref, :text)
       add(:fbs_status, :text, default: "active")
       add(:fbs_current_period_start, :utc_datetime)
       add(:fbs_current_period_end, :utc_datetime)
@@ -163,9 +163,15 @@ defmodule Driftwood.Repo.Migrations.MountBillingSupportScopes do
       add(:fbs_updated_at, :utc_datetime, null: false)
     end
 
+    # T106 decision (e): DB-unique-fence on the provider-subscription-ref — the
+    # idempotency guard for the checkout-seeded + lifecycle mirror convergence
+    # (ADR-038 addendum). Nullable column, so local rows with no provider ref are
+    # unconstrained (Postgres allows multiple NULLs); non-null provider refs collide.
+    create(unique_index(:fbs_subscription, [:fbs_provider_subscription_ref], name: "fbs_subscription_provider_ref_index"))
+
     # --- fbi_invoice : a billing invoice ---
     create table(:fbi_invoice, primary_key: false) do
-      add(:fbi_stripe_invoice_id, :text)
+      add(:fbi_provider_invoice_ref, :text)
       add(:fbi_status, :text, default: "draft")
       add(:fbi_amount_due_cents, :integer, default: 0)
       add(:fbi_amount_paid_cents, :integer, default: 0)
@@ -205,7 +211,7 @@ defmodule Driftwood.Repo.Migrations.MountBillingSupportScopes do
 
     # --- fby_payment : a payment record (no raw card data) ---
     create table(:fby_payment, primary_key: false) do
-      add(:fby_stripe_payment_intent_id, :text)
+      add(:fby_provider_payment_ref, :text)
       add(:fby_status, :text, default: "pending")
       add(:fby_amount_cents, :integer, null: false)
       add(:fby_currency, :text, default: "USD")

@@ -4,6 +4,13 @@
 
 Date: 2026-07-20
 
+> **Point-in-time snapshot (luminary X4).** Every count below (suite totals, sabotage-patch
+> total, gate-step numbering) is the number reproduced AT THIS GATE (F7). Many phases have
+> shipped since, and every one of these numbers has grown — do not cite this table as the
+> repo's current state. For a live count: `ls scripts/sabotages/*.patch | wc -l` (sabotages),
+> `cd samen_core && mix test` / `cd samen_web && mix test` (suite totals). `README.md`'s
+> "Suite totals" section is intended to track HEAD, not this gate.
+
 Scope gated: the ENTIRE F1–F7 burn-down — six committed phases (F1, F2, F3, F3b, F4, F5, F6),
 each already phase-gated in its roadmap record, plus the F7 phase (Cockpit v2 + tail + this final
 gate), now adversarially re-gated as a whole (round 1). F7 is the FINAL phase of the burn-down.

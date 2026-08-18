@@ -3,7 +3,7 @@ defmodule Demo.CmsScopeCatalogParityRedPathTest do
   Catalog-parity red path for the CMS scope (T3.5).
 
   Proves:
-    1. All seven CMS tables are catalogued (green path: verifier passes).
+    1. All nine CMS tables (6 content + 3 E7 version) are catalogued (green path: verifier passes).
     2. Deleting a catalog row makes the verifier fail (anti-tautology probe).
     3. The pattern mirrors `Demo.IdentityCatalogParityRedPathTest` exactly.
   """
@@ -19,14 +19,16 @@ defmodule Demo.CmsScopeCatalogParityRedPathTest do
     cmd_media
     cnv_navigation
     csm_seo_meta
-    cvr_content_version
+    cpg_page_versions
+    cpt_post_versions
+    cbl_block_versions
   )
 
   # =========================================================================
   # Green path: all CMS tables are catalogued.
   # =========================================================================
 
-  test "all seven CMS tables have catalog rows (green path)" do
+  test "all nine CMS tables (6 content + 3 version) have catalog rows (green path)" do
     catalogued =
       Repo.all(
         from t in "tam_table",

@@ -4,8 +4,10 @@ defmodule Samen.Web.NotificationsSourcesTest do
   notification engine (design §2.3; ADR-016 §4; AC-G2-6):
 
     * **SLA breach** (fixes H-9): `SlaBreachWorker` no longer flips `breached=true`
-      silently — the flip also emits an `"sla_breach"` notification with a
-      `samen:support.ticket:<id>` subject ref.
+      silently — the flip opens an E5 escalation (ADR-039 §7.4, T41), whose
+      `:escalation_due` chain walk emits the `"sla_breach"` notification with a
+      `samen:support.ticket:<id>` subject ref (`test/support/automation.ex` mounts
+      the `Escalation` primitive for this host).
     * **Chat mentions**: `Samen.Web.Chat.post_message/4` parses `@handle` mentions
       from the PLAINTEXT body (pre-vault, like refs) and notifies each mentioned
       participant (`"chat_mention"`) — never the sender, never the vaulted body.
@@ -41,7 +43,7 @@ defmodule Samen.Web.NotificationsSourcesTest do
   # An adapter that IS configured but fails delivery — the "marketing.send.failed"
   # trigger (fail-honest path 3, ADR-014).
   defmodule FailingAdapter do
-    @behaviour Samen.Delivery.Adapter
+    use Samen.Delivery.Provider
     @impl true
     def configured?(_config), do: true
     @impl true
@@ -57,8 +59,17 @@ defmodule Samen.Web.NotificationsSourcesTest do
       repo: Samen.WebTest.Repo
     )
 
+    # T41 (ADR-039 §7.4): SlaBreachWorker's attention path now routes through the
+    # E5 escalation primitive — wire its seam to this host's Escalation mount
+    # (test/support/automation.ex) the same way.
+    Application.put_env(:samen_core, Samen.Automation.Escalate,
+      escalation_module: Samen.WebTest.Automation.Escalation,
+      repo: Samen.WebTest.Repo
+    )
+
     on_exit(fn ->
       Application.delete_env(:samen_core, Samen.Notifications.Engine)
+      Application.delete_env(:samen_core, Samen.Automation.Escalate)
       Application.delete_env(:samen_core, :delivery_env)
       Application.delete_env(:samen_core, Samen.Scopes.Marketing.SendWorker)
     end)
@@ -115,6 +126,14 @@ defmodule Samen.Web.NotificationsSourcesTest do
              })
   end
 
+  defp only_sla_escalation(ticket_id) do
+    Samen.WebTest.Automation.Escalation
+    |> Ash.Query.filter(kind == "sla_breach")
+    |> Ash.Query.filter(dedupe_key == ^to_string(ticket_id))
+    |> Ash.read!(authorize?: false)
+    |> List.first()
+  end
+
   defp breached?(ticket_id) do
     %{rows: [[breached]]} =
       Samen.WebTest.Repo.query!(
@@ -125,7 +144,7 @@ defmodule Samen.Web.NotificationsSourcesTest do
     breached
   end
 
-  test "GREEN sla_breach: the breach flip emits an 'sla_breach' notification with the ticket ref" do
+  test "GREEN sla_breach: the breach flip opens an escalation whose step 0 emits the 'sla_breach' notification" do
     org_id = Ash.UUID.generate()
     ticket = seed_breachable_ticket!(org_id)
 
@@ -133,26 +152,46 @@ defmodule Samen.Web.NotificationsSourcesTest do
 
     assert breached?(ticket.id)
 
-    assert [notification] = notifications(org_id, "sla_breach")
+    # The breach flip's ONLY bespoke attention path is now Escalate.open/2
+    # (ADR-039 §7.4) — it opens the escalation SYNCHRONOUSLY (state :open,
+    # dedupe_key = ticket id), but the notification itself fires on the NEXT
+    # `:escalation_due` chain-walk tick (step 0, at deadline_at = breach_at,
+    # already in the past). Drain that tick to observe the SAME final outcome
+    # this test always asserted.
+    escalation = only_sla_escalation(ticket.id)
+    assert escalation.state == :open
+    assert escalation.dedupe_key == to_string(ticket.id)
+
+    AshOban.Test.schedule_and_run_triggers(Samen.WebTest.Automation.Escalation)
+
+    # The escalation primitive's chain-step notification is `event_type:
+    # "escalation_step"` for EVERY client kind (SLA breach, dunning, future
+    # clients) by design — the unified attention surface (ADR-039 §7.2). What
+    # discriminates SLA breach is the escalation's OWN `kind`, carried into the
+    # notification's metadata (never a per-kind event_type).
+    assert [notification] = notifications(org_id, "escalation_step")
     assert notification.recipient_id == org_id
     assert notification.channel == :in_app
     # The subject travels as an object REF (unfurled per-viewer by the inbox),
     # never denormalized ticket data.
     assert notification.metadata["subject_ref"] == "samen:support.ticket:#{ticket.id}"
-    assert notification.metadata["ticket_id"] == ticket.id
+    assert notification.metadata["kind"] == "sla_breach"
   end
 
-  test "RED sla_breach: a suppressed preference writes NO record — but the breach flip still lands" do
+  test "RED sla_breach: a suppressed preference writes NO record — but the breach flip + escalation still land" do
     org_id = Ash.UUID.generate()
     ticket = seed_breachable_ticket!(org_id)
-    suppress!(org_id, org_id, "sla_breach")
+    # Suppresses the UNIFIED escalation-step event type (§7.2) — the per-kind
+    # discriminator lives in metadata now, not the event_type a preference keys on.
+    suppress!(org_id, org_id, "escalation_step")
 
     run_breach_worker!()
+    AshOban.Test.schedule_and_run_triggers(Samen.WebTest.Automation.Escalation)
 
     # The PRIMARY write (the harden fix's state flip) is untouched by suppression…
     assert breached?(ticket.id)
     # …and the suppressed event type wrote NOTHING (no record, not a hidden row).
-    assert notifications(org_id, "sla_breach") == []
+    assert notifications(org_id, "escalation_step") == []
   end
 
   # ---------------------------------------------------------------------------

@@ -31,12 +31,14 @@ defmodule Driftwood.ContextAliasesTest do
     assert carrier.resource == shipper.resource
   end
 
-  test "Load aliases Opportunity; CheckCall aliases Activity" do
+  test "Load aliases Opportunity; CheckCall aliases the canonical Work Task (ADR-041 M5)" do
     assert Samen.Context.kernel_resource(Driftwood.Context, Driftwood.Load) ==
              Driftwood.Crm.Opportunity
 
+    # ADR-041 (M5): the CRM Activity was destructively migrated into the canonical
+    # Work-scope Task and removed; CheckCall now re-identifies Driftwood.Work.Task.
     assert Samen.Context.kernel_resource(Driftwood.Context, Driftwood.CheckCall) ==
-             Driftwood.Crm.Activity
+             Driftwood.Work.Task
   end
 
   test "an aliased read runs against the kernel resource and stays org-scoped (anti-corruption)" do

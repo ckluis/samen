@@ -18,6 +18,14 @@ _ = Ecto.Adapters.Postgres.storage_down(Repo.config())
 {:ok, _} = Repo.start_link()
 Ecto.Migrator.run(Repo, :up, all: true)
 
+# The `aud_event` migration creates only the FIXED launch-month partition; the daily
+# `Samen.AuditEvent.PartitionManager` Oban job that rolls partitions forward in production does
+# not run under this bootstrap, so on a wall clock past the launch month the current month's
+# partition is absent — and the gamedays/verifiers that write audit rows on the freshly-migrated
+# DB would hit "no partition of relation aud_event". Provision current + upcoming months up front
+# (forward-safe; the ensure is idempotent — exactly what the daily job does).
+Samen.AuditEvent.PartitionManager.ensure_upcoming_partitions(Repo, Date.utc_today(), 2)
+
 :ok = Driftwood.NonPiiSetup.register_all()
 
 IO.puts("driftwood ci bootstrap: DB migrated + non_pii! registered")

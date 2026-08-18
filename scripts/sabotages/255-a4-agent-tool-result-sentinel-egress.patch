@@ -1,0 +1,32 @@
+# SABOTAGE: A4 fold (c) (ADR-047 §4.3 steps 2/3/6) gate sabotage — the tool-result
+# renderer stops scanning scalars for the `vt_` vault-token sentinel, so a
+# tenant/attacker-controlled column value carrying one is rendered VERBATIM into the
+# transcript and the next turn's history. Two ADR properties break at once: §4.3 step 3's
+# "the transcript at rest contains no vault plaintext and no vt_* token", and §4.3#6's
+# "rendered to a single vt_-FREE binary". Downstream, the chokepoint's allowlist catches
+# it — which is the OTHER half of the harm: the whole governed run dies
+# `:pii_egress_refused` because of one attacker-supplied string, the tenant-DoS shape the
+# per-value elision exists to remove. The named reds (the unit renderer assertion and the
+# end-to-end no-hard-fail run) must flip; the clean-scalar positive control and the
+# last-line chokepoint assertion stay green, proving the belt-and-braces refusal is intact
+# and only the normal path regressed.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_tools_test.exs
+# MUST_FAIL: emit [unrenderable:<key>] for a vt_-bearing scalar
+# MUST_FAIL: does NOT hard-fail the run
+diff --git a/samen_core/lib/samen/ai/agent/tool_result.ex b/samen_core/lib/samen/ai/agent/tool_result.ex
+--- a/samen_core/lib/samen/ai/agent/tool_result.ex
++++ b/samen_core/lib/samen/ai/agent/tool_result.ex
+@@ -221,8 +221,10 @@
+   # refusal would let attacker-controlled data hard-fail a governed run (see moduledoc).
+   # Truncation runs AFTER the scan, so a sentinel past the 500-byte boundary cannot be
+   # "sanitised" by luck.
+-  defp render_scalar(v, key) when is_binary(v) do
+-    if sentinel?(v), do: unrenderable(key), else: truncate(v)
++  defp render_scalar(v, _key) when is_binary(v) do
++    # SABOTAGE (A4 fold (c), ADR-047 §4.3): the sentinel scan is GONE — a vt_-bearing
++    # scalar renders verbatim into the transcript and the next turn's history.
++    truncate(v)
+   end
+ 
+   defp render_scalar(v, _key) when is_number(v), do: to_string(v)

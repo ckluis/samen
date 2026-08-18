@@ -1,0 +1,23 @@
+# SABOTAGE: T84 (ADR-044 s16.5 #1, ruling R-A). Samen.Fleet.Resolution.scope_from_assignments/4
+# is fail-closed BY ABSENCE: an assignable operator with NO assignment row resolves :none (no
+# scope), not :all. Flipping the empty-rows branch to :all fails OPEN - a newly-added operator
+# silently sees every account before anyone assigns them. Positive control: an operator WITH
+# rows still resolves {:accounts, set}, so the flip is non-vacuous.
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_scope_gate_test.exs
+# MUST_FAIL: :none WITHOUT
+diff --git a/samen_core/lib/samen/fleet/resolution.ex b/samen_core/lib/samen/fleet/resolution.ex
+index 842ceb6..82512b7 100644
+--- a/samen_core/lib/samen/fleet/resolution.ex
++++ b/samen_core/lib/samen/fleet/resolution.ex
+@@ -131,7 +131,9 @@ defmodule Samen.Fleet.Resolution do
+         |> Enum.map(& &1.account_org_id)
+         |> Enum.filter(&is_binary/1)
+         |> case do
+-          [] -> :none
++          # SABOTAGE (T84 R-A): fail OPEN on an absent assignment row - an unassigned
++          # operator gets :all instead of :none, defeating fail-closed-by-absence.
++          [] -> :all
+           accounts -> validate_scope({:accounts, MapSet.new(accounts)})
+         end
+     end

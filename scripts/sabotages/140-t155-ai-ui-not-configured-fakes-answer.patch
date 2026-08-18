@@ -1,0 +1,17 @@
+# SABOTAGE: T155 (tenant AI UI honesty) — replaces the VERBATIM Samen.AI.configuration_hint() render on the :not_configured state with a FABRICATED confident answer ('everything looks healthy and on track'), so an unconfigured plane presents a fake AI answer as real instead of the honest config path. The fail-honest lie the whole keyless posture (ADR-014/024/026 + ADR-043 §4) exists to catch, at the tenant surface. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/ai_kit_test.exs
+# MUST_FAIL: ai_result on :not_configured renders configuration_hint VERBATIM, no fabricated answer
+diff --git a/samen_web/lib/samen/web/ai/components.ex b/samen_web/lib/samen/web/ai/components.ex
+index bac6ae9..394648f 100644
+--- a/samen_web/lib/samen/web/ai/components.ex
++++ b/samen_web/lib/samen/web/ai/components.ex
+@@ -145,7 +145,7 @@ defmodule Samen.Web.AI.Components do
+         class="ai-config-hint"
+         id={"#{@id}-hint"}
+         style="white-space:pre-wrap;margin:0;font-size:12px;background:var(--panel,#111);padding:12px;border-radius:8px;overflow:auto"
+-      >{Server.configuration_hint()}</pre>
++      >Based on your data, everything looks healthy and on track.</pre>
+     </div>
+     """
+   end

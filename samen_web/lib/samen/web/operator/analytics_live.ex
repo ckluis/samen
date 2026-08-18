@@ -37,13 +37,32 @@ defmodule Samen.Web.Operator.AnalyticsLive do
 
   @impl true
   def mount(_params, session, socket) do
-    socket = assign_mount(socket, session)
+    socket =
+      socket
+      |> assign_mount(session)
+      # PP-14: carry the AUTHENTICATED operator principal id (the same signed-session id
+      # `Samen.Web.Operator.Authz` derives authority from) so the cross-tenant aggregate "ask"
+      # authorizes from a VERIFIED principal, not a synthetic literal `%{plane: :operator}` tag.
+      # `:samen_operator_role` is already assigned by the `{Authz, :require_operator}` on_mount.
+      |> Phoenix.Component.assign_new(:samen_operator_id, fn ->
+        Samen.Web.Auth.authenticated_user_id(session)
+      end)
+
     {:ok, load(socket)}
   end
 
   @doc false
   def load(socket) do
-    case socket.assigns[:samen_mount] do
+    socket =
+      socket
+      |> assign_new(:ask_question, fn -> nil end)
+      |> assign_new(:ask_result, fn -> nil end)
+
+    mount = socket.assigns[:samen_mount]
+
+    socket = assign(socket, ask_available: not is_nil(ask_resource(mount)))
+
+    case mount do
       nil ->
         assign(socket, analytics: AnalyticsReads.empty(), funnel_suppressed: 0, retention_suppressed: 0)
 
@@ -57,6 +76,94 @@ defmodule Samen.Web.Operator.AnalyticsLive do
         )
     end
   end
+
+  # T149 B2b — the "ask" box wires the EXISTING kernel `Samen.AI.Analytics.ask/4` (D7, the
+  # token-blind AGGREGATE-plane NL narration) into the operator UI, AUGMENTING the static
+  # SEED read above. The narration runs over a host-supplied aggregate-plane projection (a
+  # `use Samen.Aggregate.Resource` module) resolved from the `:analytics_ask_resource` mount
+  # label; `ask/4` reads it ONLY through `Samen.Aggregate.read_all/2` (k-anon/l-diversity
+  # floored, `suppress: true`), so a suppressed cohort carries no number to narrate. The
+  # operator caller IS authorized for the cross-tenant read (T144 platform gate). Keyless in
+  # CI (`Provider.Fake`); unconfigured outside `:test` ⇒ the honest `{:error, :not_configured}`
+  # state, never a faked narration. NO Ash read on `load/1` (the `analytics_zero_ash_read`
+  # invariant holds — the aggregate read fires only on the `ask` event).
+  @impl true
+  def handle_event("ask", %{"q" => question}, socket) do
+    question = String.trim(question || "")
+    mount = socket.assigns[:samen_mount]
+
+    result =
+      cond do
+        question == "" -> {:error, :empty}
+        is_nil(ask_resource(mount)) -> {:error, :not_configured}
+        true -> ask(ask_resource(mount), question, socket)
+      end
+
+    {:noreply, assign(socket, ask_question: question, ask_result: result)}
+  end
+
+  # The operator runs the platform analytics on an OPERATOR-plane caller — authorized for the
+  # cross-tenant aggregate read (T144). The aggregate itself is still read by the singleton
+  # token-blind aggregate actor inside `ask/4`; this scope only satisfies the platform-capability
+  # gate + carries grounding metadata to the narration. Any raise (unreachable aggregate table on
+  # a host that has not built the projection) normalizes to the honest not-configured state.
+  defp ask(resource, question, socket) do
+    Samen.AI.Analytics.ask(ask_scope(socket), resource, question)
+  rescue
+    _ -> {:error, :not_configured}
+  end
+
+  @doc """
+  Build the T144 ask-scope from the AUTHENTICATED operator PRINCIPAL (PP-14), NOT a synthetic
+  literal `%{plane: :operator}` tag.
+
+  The platform-capability gate now rests on a VERIFIED principal: `:samen_operator_role` (the
+  role `Samen.Web.Operator.Authz` resolved from the host `:operator_authority` seam against the
+  signed-session principal — fail-closed) plus `:samen_operator_id` (that same authenticated
+  principal id). With a real operator role we mint a `Samen.OperatorPlane.Actor` (T144's
+  first-class platform actor). Without a resolved operator role we FAIL CLOSED to a non-operator
+  actor that T144 refuses — NEVER back to the synthetic tag that would pass the gate with no
+  principal (the exact defense-in-depth hole this closes). T144 itself is untouched: an
+  impersonation-into-a-tenant or tenant caller is still refused `{:error, :unauthorized}`.
+  """
+  @spec ask_scope(Phoenix.LiveView.Socket.t()) :: Samen.Scope.t()
+  def ask_scope(%Phoenix.LiveView.Socket{} = socket) do
+    role = socket.assigns[:samen_operator_role]
+
+    if role in Samen.OperatorPlane.Actor.roles() do
+      %Samen.Scope{actor: Samen.OperatorPlane.Actor.new(operator_principal_id(socket), role)}
+    else
+      # Fail CLOSED: no VERIFIED operator role ⇒ a non-operator actor T144 denies. Never the
+      # synthetic `%{plane: :operator}` tag (which would authorize the cross-tenant read with
+      # no principal — PP-14).
+      %Samen.Scope{actor: %{kind: :tenant, plane: :tenant}}
+    end
+  end
+
+  # The authenticated operator id for the audit-bearing actor. Prefer the signed-session
+  # principal (`:samen_operator_id`, production); fall back to the mount's resolved operator id
+  # (dev/dogfood, where the session carries no authenticated user but the role seam still gates).
+  defp operator_principal_id(socket) do
+    with nil <- present(socket.assigns[:samen_operator_id]),
+         nil <- plane_operator_id(socket.assigns[:samen_mount]) do
+      "operator"
+    end
+  end
+
+  defp plane_operator_id(%Samen.Web.Mount{plane: %{operator_id: id}}), do: present(id)
+  defp plane_operator_id(_), do: nil
+
+  defp present(v) when is_binary(v) do
+    case String.trim(v) do
+      "" -> nil
+      _ -> v
+    end
+  end
+
+  defp present(_), do: nil
+
+  defp ask_resource(nil), do: nil
+  defp ask_resource(mount), do: Samen.Web.Mount.label(mount, :analytics_ask_resource, nil)
 
   @impl true
   def render(assigns) do
@@ -79,6 +186,26 @@ defmodule Samen.Web.Operator.AnalyticsLive do
         </.token_blind_bar>
 
         <div class="wrap">
+          <%!-- T149 B2b — the AI "ask" box over the token-blind aggregate plane (augments the
+                static SEED below). Fail-honest: no narration is faked. --%>
+          <div id="analytics-ask" class="card" style="padding:16px 20px;margin-bottom:16px">
+            <div class="gtitle" style="margin:0 0 8px"><h3>Ask (AI · aggregate plane)</h3></div>
+            <form phx-submit="ask" id="analytics-ask-form" style="display:flex;gap:8px;align-items:flex-start">
+              <input type="text" name="q" id="analytics-ask-input" value={@ask_question || ""}
+                placeholder="e.g. Which plan tier drives the most MRR?"
+                style="flex:1;padding:8px 10px;border:1px solid #D0D5DD;border-radius:8px;font-size:13px" />
+              <.button variant="primary" type="submit" id="analytics-ask-submit">Ask</.button>
+            </form>
+            <div :if={not @ask_available} id="ask-unwired" style="color:var(--muted);font-size:12px;margin-top:8px">
+              No aggregate projection wired for AI narration on this host (set the
+              <span class="mono">:analytics_ask_resource</span> mount label to a
+              <span class="mono">use Samen.Aggregate.Resource</span> module).
+            </div>
+            <div :if={@ask_result} id="ask-result" style="margin-top:10px">
+              {ask_answer(@ask_result)}
+            </div>
+          </div>
+
           <div id="activation-funnel">
             <div class="gtitle">
               <h3>Activation funnel</h3>
@@ -155,6 +282,43 @@ defmodule Samen.Web.Operator.AnalyticsLive do
   end
 
   # -- helpers -----------------------------------------------------------------
+
+  # Render the AI ask result HONESTLY — the narration text on success (class "ask-narration"),
+  # an honest muted status on every error (class "ask-honest"; never a faked answer).
+  # `{:error, :not_configured}` is the keyless/unwired fail-honest state (Provider.Fake in CI;
+  # no provider or no aggregate projection otherwise). Returns a Phoenix.Component to render.
+  defp ask_answer(result) do
+    assigns = %{result: result}
+
+    ~H"""
+    <div :if={ok?(@result)} class="ask-narration" style="white-space:pre-wrap;font-size:13px;color:#3a3b45">{answer_text(@result)}</div>
+    <div :if={not ok?(@result)} class="ask-honest" style="color:var(--muted);font-size:12px">{honest_text(@result)}</div>
+    """
+  end
+
+  defp ok?(result) do
+    case result do
+      {:ok, %Samen.AI.Completion{text: text}} when is_binary(text) -> true
+      _ -> false
+    end
+  end
+
+  defp answer_text(result) do
+    case result do
+      {:ok, %Samen.AI.Completion{text: text}} when is_binary(text) -> text
+      _ -> ""
+    end
+  end
+
+  defp honest_text(result) do
+    case result do
+      {:error, :empty} -> "Enter a question above."
+      {:error, :not_configured} -> "AI analytics is not configured (no provider / aggregate projection wired). No narration was produced."
+      {:error, :unauthorized} -> "This caller is not authorized for the cross-tenant aggregate read."
+      {:error, reason} -> "AI analytics is unavailable (#{inspect(reason)}). No narration was produced."
+      _ -> "No result."
+    end
+  end
 
   defp stage_label("signup"), do: "Signed in"
   defp stage_label("first_run"), do: "First run completed"

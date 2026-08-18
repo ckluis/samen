@@ -3,7 +3,13 @@ defmodule Samen.Jobs.QueueTaxonomyTest do
   T2.1 (b): Queue taxonomy and per-queue concurrency limits.
 
   Tests:
-    1. `Samen.Jobs.default_queue_config/0` returns all six canonical queues.
+    1. `Samen.Jobs.default_queue_config/0` covers every queue actually enqueued to.
+       (B-OBAN: this assertion used to be a HARD-CODED list of "six canonical
+       queues" that itself omitted `:webhooks_in` — it compared the taxonomy to a
+       restatement of the taxonomy, so it passed while three enqueued-to queues had
+       no producer anywhere. The expectation is now DISCOVERED from the compiled
+       `Oban.Worker` modules; see `jobs_queue_parity_test.exs` for the full parity
+       gate and its non-vacuity floors.)
     2. Each queue has a positive integer concurrency limit.
     3. The `:erasure` queue limit is 1 (guaranteed single-concurrency for
        crypto-shred orchestration — running two simultaneous erasure jobs for
@@ -20,12 +26,21 @@ defmodule Samen.Jobs.QueueTaxonomyTest do
   # Queue taxonomy shape
   # -----------------------------------------------------------------------
 
-  test "default_queue_config/0 returns all six canonical queues" do
-    queues = Jobs.default_queue_config()
-    names = Keyword.keys(queues)
+  test "default_queue_config/0 covers every queue a shipped worker enqueues to" do
+    names = Keyword.keys(Jobs.default_queue_config())
 
-    for expected <- [:default, :rollups, :webhooks_out, :erasure, :maintenance, :reveal] do
-      assert expected in names, "expected queue #{inspect(expected)} in taxonomy"
+    # DISCOVERED, not hand-listed: the expectation comes from the compiled
+    # Oban.Worker modules (hand-written + AshOban-generated), so a worker added on
+    # an unregistered queue fails here instead of silently never draining.
+    discovered = Samen.Jobs.QueueParity.discover()
+
+    refute discovered == %{},
+           "worker discovery returned nothing — this assertion would be vacuous"
+
+    for {expected, mods} <- discovered do
+      assert expected in names,
+             "queue #{inspect(expected)} is enqueued to by " <>
+               "#{Enum.map_join(mods, ", ", &inspect/1)} but is NOT in the taxonomy"
     end
   end
 
@@ -66,5 +81,82 @@ defmodule Samen.Jobs.QueueTaxonomyTest do
     assert Keyword.fetch!(defaults, :queue) == :rollups
     assert Keyword.fetch!(defaults, :max_attempts) == 20
     assert Keyword.has_key?(defaults, :unique)
+  end
+
+  # -----------------------------------------------------------------------
+  # T128: audit-partition roll-forward is registered by DEFAULT
+  # -----------------------------------------------------------------------
+  # These assertions are the regression tripwire: a future edit that removes the
+  # PartitionManager cron entry (re-opening the silent audit-write-failure gap once
+  # the wall clock crosses the seeded partition boundary) FAILS here.
+
+  test "default_crontab/0 registers the aud_event PartitionManager (daily @ 01:00)" do
+    crontab = Jobs.default_crontab()
+
+    assert {"0 1 * * *", Samen.AuditEvent.PartitionManager} in crontab,
+           "default_crontab/0 MUST schedule Samen.AuditEvent.PartitionManager so every " <>
+             "generated app rolls aud_event partitions forward; got: #{inspect(crontab)}"
+  end
+
+  test "the registered PartitionManager entry points at a real Oban worker (not a stub)" do
+    {_expr, worker} =
+      Enum.find(Jobs.default_crontab(), fn {_e, w} -> w == Samen.AuditEvent.PartitionManager end)
+
+    assert Code.ensure_loaded?(worker)
+    # It must actually be an Oban.Worker with a perform/1 that the cron will invoke.
+    assert function_exported?(worker, :perform, 1)
+    behaviours = worker.__info__(:attributes) |> Keyword.get(:behaviour, [])
+    assert Oban.Worker in behaviours, "PartitionManager must `use Oban.Worker`"
+  end
+
+  # -----------------------------------------------------------------------
+  # T128: install_default_cron/1 — the framework adoption seam
+  # -----------------------------------------------------------------------
+
+  test "install_default_cron/1 adds the Cron plugin with default_crontab/0 (prod/dev shape)" do
+    base = [repo: SamenCore.TestRepo, queues: [maintenance: 1], plugins: [{Oban.Plugins.Pruner, max_age: 60}]]
+
+    installed = Jobs.install_default_cron(base)
+    plugins = Keyword.fetch!(installed, :plugins)
+
+    cron = Enum.find(plugins, &match?({Oban.Plugins.Cron, _}, &1))
+    assert cron, "expected an Oban.Plugins.Cron plugin to be installed"
+    {Oban.Plugins.Cron, cron_opts} = cron
+    assert Keyword.fetch!(cron_opts, :crontab) == Jobs.default_crontab()
+
+    # The pre-existing Pruner is preserved (not clobbered).
+    assert Enum.any?(plugins, &match?({Oban.Plugins.Pruner, _}, &1))
+  end
+
+  test "install_default_cron/1 is a no-op when plugins are disabled (test convention)" do
+    base = [repo: SamenCore.TestRepo, testing: :manual, plugins: false]
+    assert Jobs.install_default_cron(base) == base
+  end
+
+  test "install_default_cron/1 respects a host that already declared its own Cron plugin" do
+    host_cron = {Oban.Plugins.Cron, crontab: [{"*/30 * * * *", Samen.Jobs.RollupRefreshWorker}]}
+    base = [repo: SamenCore.TestRepo, plugins: [host_cron]]
+
+    # Unchanged — no double-scheduling; the explicit host schedule wins.
+    assert Jobs.install_default_cron(base) == base
+  end
+
+  test "a generated app that calls install_default_cron ends up scheduling PartitionManager" do
+    # End-to-end of the adoption seam: the generated application.ex passes the config.exs
+    # Oban opts (Pruner only, no Cron) through install_default_cron — the result must
+    # schedule the audit-partition roll-forward.
+    generated_config = [
+      repo: SamenCore.TestRepo,
+      queues: Jobs.default_queue_config(),
+      plugins: [{Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}]
+    ]
+
+    {Oban.Plugins.Cron, cron_opts} =
+      generated_config
+      |> Jobs.install_default_cron()
+      |> Keyword.fetch!(:plugins)
+      |> Enum.find(&match?({Oban.Plugins.Cron, _}, &1))
+
+    assert {"0 1 * * *", Samen.AuditEvent.PartitionManager} in Keyword.fetch!(cron_opts, :crontab)
   end
 end

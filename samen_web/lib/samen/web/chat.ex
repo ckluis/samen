@@ -134,12 +134,15 @@ defmodule Samen.Web.Chat do
   def set_disclosure_setting(%Mount{} = mount, scope, expose?) do
     # This is a tenant-ADMIN org-level policy write. The chat mount's own tenant plane scope is
     # a `:member` (like every tenant chat write); flipping org-wide disclosure requires `:admin`
-    # (the blueprint's `RoleAtLeast :admin` on this ONE resource). We build a same-org admin
-    # tenant scope for the write — legitimate because it is the tenant setting ITS OWN org's flag,
-    # still confined by `OrgScope` to that org. Only reachable on the tenant plane (the LiveView
-    # gates the event), never from a masked operator.
+    # (the blueprint's `RoleAtLeast :admin` on this ONE resource). ADR-045 §4.4 (S1a) — the admin
+    # write scope now routes through `Samen.Web.TenantRole.admin_scope/3` (the SAME helper the flags/
+    # billing/marketing/support write helpers use): the DISARMED dev posture keeps `:admin`
+    # byte-for-byte, an ARMED host derives the caller's REAL `Identity.Membership` role (fail-closed
+    # `:member`, never a hardcoded elevation), so a NON-admin member's org-wide disclosure flip is
+    # refused by the kernel `RoleAtLeast :admin` gate (the `ThreadsLive` "admin only" branch becomes
+    # reachable). Still `OrgScope`-confined; only reachable on the tenant plane (the LiveView gates).
     org_id = org_id_of(scope)
-    admin_scope = admin_tenant_scope(org_id)
+    admin_scope = Samen.Web.TenantRole.admin_scope(mount, org_id)
     resource = Mount.resource(mount, ChatDisclosureSetting)
 
     case Reads.disclosure_setting(mount, admin_scope) do
@@ -159,20 +162,6 @@ defmodule Samen.Web.Chat do
         )
         |> Ash.create()
     end
-  end
-
-  # A tenant-plane ADMIN actor over `org_id` — same-org, clear-plane. The tenant flipping its
-  # OWN org's disclosure flag (org-scope confines it; the operator can never reach this path).
-  defp admin_tenant_scope(org_id) do
-    %Samen.Scope{
-      actor: %{
-        id: "chat-admin:#{org_id}",
-        org_id: org_id,
-        role: :admin,
-        kind: :tenant,
-        plane: :tenant
-      }
-    }
   end
 
   defp org_id_of(%Samen.Scope{actor: %{org_id: org_id}}), do: org_id

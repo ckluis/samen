@@ -189,7 +189,7 @@ revert or commit the new baseline.
 
 Real deploys (Fly account, Neon project, production KMS keys, a real OTLP exporter) are
 deliberately **not** claimed by this tutorial — they are operator work. The deploy
-scaffolding decision is [ADR-024](../adr/024-generated-deploy-fail-honest.md):
+scaffolding decision is [ADR-024](../adr/ADR-024-generated-deploy-fail-honest.md):
 fail-honest artifacts + explicit operator-TODO runbooks, never an aspirational
 "just run `fly deploy`".
 

@@ -1,0 +1,51 @@
+# SABOTAGE: PP-8/PP-9 (Batch 3, NAV-REACHABILITY) — the Settings + Automation nav items.
+# Removes the "Workspace" nav_group (Settings + Automation) from `Samen.UI.Nav.module_nav/1`,
+# restoring the exact W3 HIGH-1/HIGH-2 defect: Settings (Profile/API keys/Security/
+# Invitations) and Automation (the T118 workflow builder) are total nav islands — real,
+# shipped, non-stub features reachable ONLY by hand-typing their URL, with no item anywhere
+# in the inherited sidebar every CRM/Billing/Support/Marketing/Notifications/Files/Search
+# page renders. The two named PP-8/PP-9 reachability tests FLIP (the items are simply gone
+# from the rendered nav); `host_nav_extra/1` and its own tests are UNTOUCHED by this patch —
+# the flip isolates exactly the Settings/Automation nav-item guarantee.
+# Re-anchored (X1 / ADR-045 §4.1): the Workspace group is now `:if`-gated on the mounted
+# `surfaces` set and its items are multi-line; the deletion targets that current shape.
+# APP: samen_web
+# TEST_FILES: test/samen/ui/components_test.exs
+# MUST_FAIL: module_nav/1 renders a Settings nav item pointing at the settings route (PP-8)
+# MUST_FAIL: module_nav/1 renders an Automation nav item pointing at the automation route (PP-9)
+diff --git a/samen_web/lib/samen/ui/nav.ex b/samen_web/lib/samen/ui/nav.ex
+index f51ca98..06bd15e 100644
+--- a/samen_web/lib/samen/ui/nav.ex
++++ b/samen_web/lib/samen/ui/nav.ex
+@@ -258,31 +258,6 @@ defmodule Samen.UI.Nav do
+       </.nav_item>
+     </.nav_group>
+ 
+-    <.nav_group
+-      :if={surface_mounted?(@surfaces, :settings) or surface_mounted?(@surfaces, :automation)}
+-      label="Workspace"
+-    >
+-      <.nav_item
+-        :if={surface_mounted?(@surfaces, :settings)}
+-        label="Settings"
+-        href={"#{@settings_path}?org=#{@org_id}"}
+-        active={@active == :settings}
+-      >
+-        <:icon>
+-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z" /></svg>
+-        </:icon>
+-      </.nav_item>
+-      <.nav_item
+-        :if={surface_mounted?(@surfaces, :automation)}
+-        label="Automation"
+-        href={"#{@automation_path}?org=#{@org_id}"}
+-        active={@active == :automation}
+-      >
+-        <:icon>
+-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z" /></svg>
+-        </:icon>
+-      </.nav_item>
+-    </.nav_group>
+     """
+   end
+ 

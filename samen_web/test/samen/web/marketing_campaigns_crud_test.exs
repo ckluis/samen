@@ -13,12 +13,17 @@ defmodule Samen.Web.MarketingCampaignsCrudTest do
     * **CRUD (AC-G1-1/2)** — "New campaign" is a REAL button opening the modal +
       `simple_form`; an INVALID submit (`name` required) renders inline errors and
       persists NOTHING; a VALID submit persists + refreshes the bounded list; each
-      row carries the `delete_confirm/1` interlock and delete destroys through Ash
-      (FAIL-HONEST: an FK-linked campaign surfaces the refusal).
+      row carries the `delete_confirm/1` interlock and delete destroys through Ash.
+      ADR-040 §5.9 (T37d): Campaign adopted E6 soft-delete (`archivable true`) —
+      the default destroy is now a soft archive, so a campaign with linked sends
+      archives successfully (no cascade declared; `send` is untouched) rather
+      than being FK-refused (the old pre-T37d expectation).
     * **Plane posture (belt)** — write affordances are tenant-plane only
       (`Marketing.Live.writable?/1`): the operator render offers no New/Delete.
   """
   use Samen.WebTest.DataCase, async: false
+
+  require Ash.Query
 
   alias Samen.Web.ListLive
   alias Samen.Web.Marketing.CampaignsLive
@@ -231,12 +236,12 @@ defmodule Samen.Web.MarketingCampaignsCrudTest do
     assert html(socket) =~ "empty-state"
   end
 
-  test "FAIL-HONEST delete: a campaign with linked sends is REFUSED (FK) and the refusal is surfaced" do
+  test "ADR-040 §5.9 (T37d): deleting a campaign with linked sends SOFT-ARCHIVES it (no FK refusal); the send row is untouched" do
     %{org_id: org_id, marketing: mkt} = Seeds.seed_all()
     mount = build_mount(:marketing)
     scope = Mount.scope(mount, org_id)
 
-    assert {:ok, _send} =
+    assert {:ok, send_row} =
              MktReads.enqueue_send(mount, scope, %{
                subscriber_id: mkt.active_subscriber.id,
                org_id: org_id,
@@ -248,11 +253,32 @@ defmodule Samen.Web.MarketingCampaignsCrudTest do
     socket = mount_socket(org_id)
     socket = event(socket, "delete", %{"id" => mkt.campaign.id})
 
-    # The kernel defines no cascade — the send FK refuses the destroy; the campaign
-    # survives and the error renders on the page (fail-honest, not fail-silent).
-    assert campaign_count(org_id) == before_count
-    assert socket.assigns.delete_error
-    assert html(socket) =~ "Could not delete this campaign"
+    # Campaign adopted E6 soft-delete (T37d): the default destroy now archives
+    # rather than hard-deleting, so there is no DB row for a `send` FK to refuse
+    # — the campaign disappears from the default (live) read/count exactly as a
+    # genuine delete would appear to, no error surfaces, and (§5.4: no cascade
+    # declared for Marketing) the linked send row is left live and untouched.
+    assert campaign_count(org_id) == before_count - 1
+    refute socket.assigns.delete_error
+    refute html(socket) =~ "Could not delete this campaign"
+
+    reloaded_send =
+      Samen.WebTest.Marketing.Send
+      |> Ash.Query.filter(id == ^send_row.id)
+      |> Ash.read_one!(authorize?: false)
+
+    assert reloaded_send, "the send row must survive the campaign's archive (no cascade, §5.4)"
+    assert reloaded_send.campaign_id == mkt.campaign.id
+
+    # The campaign itself is not GONE — it is hidden. The :archived read still
+    # sees it (trash, not erasure, §5.1).
+    archived =
+      Samen.WebTest.Marketing.Campaign
+      |> Ash.Query.for_read(:archived)
+      |> Ash.read!(authorize?: false)
+      |> Enum.find(&(&1.id == mkt.campaign.id))
+
+    assert archived, "the archived campaign must still be visible via the :archived read"
   end
 
   # ---------------------------------------------------------------------------

@@ -1,0 +1,21 @@
+# SABOTAGE: T75 fix round MED-5 — `resolve_outcome/3`'s `:adapter_unconfigured`
+# clause stops setting `status: :blocked`. The enrollment reverts to the
+# pre-fix-round LIE BY OMISSION: it stays `status: :active` /
+# `paused_reason: nil` while genuinely unable to send — indistinguishable
+# from a healthy enrollment to any tenant surface reading its status.
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: an unconfigured adapter in a non-:test delivery env yields StepSend.status == :blocked, never :delivered
+diff --git a/samen_core/lib/samen/sequences.ex b/samen_core/lib/samen/sequences.ex
+index a62c4a7..3665a64 100644
+--- a/samen_core/lib/samen/sequences.ex
++++ b/samen_core/lib/samen/sequences.ex
+@@ -383,7 +383,7 @@ defmodule Samen.Sequences do
+   # next successful send flips it back to `:active`/`:completed` for free
+   # (the `{:ok, _receipt}` clause above sets status unconditionally).
+   def resolve_outcome(enrollment, _sequence, {:error, :adapter_unconfigured}) do
+-    transition(enrollment, %{status: :blocked, next_send_at: in_future(@retry_backoff_seconds, :seconds)})
++    transition(enrollment, %{next_send_at: in_future(@retry_backoff_seconds, :seconds)})
+     :ok
+   end
+

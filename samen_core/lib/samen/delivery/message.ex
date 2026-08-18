@@ -4,7 +4,7 @@ defmodule Samen.Delivery.Message do
 
   A `Message` carries ONLY opaque IDs and tokens — NEVER plaintext PII. In
   particular the recipient email is NOT a field here: it is looked up at
-  `Samen.Delivery.Adapter.deliver/2` time via the vault reveal path under a grant
+  `Samen.Delivery.Provider.deliver/2` time via the vault reveal path under a grant
   (matching the `Samen.Scopes.Marketing.SendWorker` token-only job-args
   convention). This keeps the envelope safe to log, persist to an Oban job row, or
   hand to a `LocalSink` without leaking subject PII.

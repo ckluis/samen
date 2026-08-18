@@ -1,0 +1,17 @@
+# SABOTAGE: T155 (tenant AI UI honesty) — flips the SIMULATED signpost badge: a keyless/deterministic completion (T152 %Completion{}.simulated == true) renders 'Live model result' instead of 'SIMULATED — not a real model', misleading a tenant that a fake output is a real model result — the exact lie ADR-043 §4's keyless/fail-honest posture forbids on a tenant-facing surface. Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/ai/ai_kit_test.exs
+# MUST_FAIL: the verbs surface signposts a keyless result as SIMULATED (not real)
+diff --git a/samen_web/lib/samen/web/ai/components.ex b/samen_web/lib/samen/web/ai/components.ex
+index bac6ae9..ce7b02e 100644
+--- a/samen_web/lib/samen/web/ai/components.ex
++++ b/samen_web/lib/samen/web/ai/components.ex
+@@ -95,7 +95,7 @@ defmodule Samen.Web.AI.Components do
+     ~H"""
+     <div class="card ai-result ai-result-simulated" id={@id} data-simulated="true">
+       <div class="ai-result-head" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+-        <.pill variant="warn"><span id={"#{@id}-badge"}>SIMULATED — not a real model</span></.pill>
++        <.pill variant="warn"><span id={"#{@id}-badge"}>Live model result</span></.pill>
+         <span style="color:var(--muted);font-size:12px">
+           keyless/deterministic output; wire a provider for a real model result
+         </span>

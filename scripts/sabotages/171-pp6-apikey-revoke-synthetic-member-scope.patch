@@ -1,0 +1,37 @@
+# SABOTAGE: PP-6 (Batch 2, TENANT-ROLE) — the api-key revoke real-role threading.
+# Reverts `Samen.Web.Settings.ApiKeysLive`'s "revoke" handler to the synthetic hardcoded
+# `Mount.scope(mount, org_id)` scope (`role: :member`) instead of resolving the caller's REAL
+# per-org membership role. `ApiKey.:update` (revoke) is `RoleAtLeast(:admin)`, so the synthetic
+# `:member` scope makes the policy DENY every revoke — for EVERY role, including genuine
+# owners/admins (the exact W6 HIGH-1 silent-failure). The named PP-6 tests — a genuine
+# ADMIN/OWNER CAN revoke through the LiveView handler — FLIP (the key stays active), proving
+# they are refutable and pin the real-role fix. The member-cannot-revoke control still passes
+# (a member is denied either way), so the flip isolates the ROLE-threading regression.
+# APP: samen_web
+# TEST_FILES: test/samen/web/api_keys_live_revoke_test.exs
+# MUST_FAIL: an ADMIN CAN revoke an API key through the LiveView revoke handler
+# MUST_FAIL: an OWNER CAN revoke
+diff --git a/samen_web/lib/samen/web/settings/api_keys_live.ex b/samen_web/lib/samen/web/settings/api_keys_live.ex
+index 849f386..2e0de7a 100644
+--- a/samen_web/lib/samen/web/settings/api_keys_live.ex
++++ b/samen_web/lib/samen/web/settings/api_keys_live.ex
+@@ -74,17 +74,8 @@ defmodule Samen.Web.Settings.ApiKeysLive do
+     if operator_plane?(mount) do
+       {:noreply, socket}
+     else
+-      # PP-6 (Batch 2 TENANT-ROLE): revoke sets `revoked_at` via the admin-gated `ApiKey.:update`
+-      # policy (`RoleAtLeast(:admin)`). Resolve the REAL per-org membership role — the SAME
+-      # pattern `do_mint/5` already uses in this file — instead of the synthetic `:member`
+-      # `Mount.scope/2` default. With the real role a genuine admin/owner CAN revoke a
+-      # leaked key; a member is correctly denied. (Previously the hardcoded `:member` scope
+-      # silently DENIED every revoke, for every role including owners.)
+-      with {:ok, membership} <- membership(mount, org_id, user_id) do
+-        scope = admin_scope(user_id, org_id, membership.role)
+-        _ = ApiKeys.revoke(mount, scope, key_id)
+-      end
+-
++      scope = Mount.scope(mount, org_id)
++      _ = ApiKeys.revoke(mount, scope, key_id)
+       {:noreply, load(assign(socket, minted_key: nil), org_id, user_id)}
+     end
+   end

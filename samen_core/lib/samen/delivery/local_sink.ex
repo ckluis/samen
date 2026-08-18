@@ -1,6 +1,8 @@
 defmodule Samen.Delivery.LocalSink do
   @moduledoc """
   Dev/test delivery adapter — an HONEST "captured, not delivered" (ADR-014 §2).
+  Migrated to `Samen.Delivery.Provider` (ADR-038 §4.2 rename); semantics
+  unchanged.
 
   `LocalSink` does NOT send a real email. It logs the token-only
   `Samen.Delivery.Message` (opaque IDs only — no revealed recipient email) and
@@ -25,16 +27,16 @@ defmodule Samen.Delivery.LocalSink do
   the lie ADR-014 forbids, so the SendWorker refuses an unconfigured prod adapter
   rather than falling back to the sink).
   """
-  @behaviour Samen.Delivery.Adapter
+  use Samen.Delivery.Provider
 
   require Logger
 
   alias Samen.Delivery.Message
 
-  @impl Samen.Delivery.Adapter
+  @impl true
   def configured?(_config), do: true
 
-  @impl Samen.Delivery.Adapter
+  @impl true
   def deliver(%Message{} = message, _config) do
     Logger.info(
       "[Samen.Delivery.LocalSink] captured (NOT delivered) send_id=#{message.send_id} " <>

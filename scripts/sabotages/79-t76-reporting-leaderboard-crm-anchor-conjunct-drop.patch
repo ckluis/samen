@@ -1,0 +1,29 @@
+# SABOTAGE: T76 (spec §I3 CRM reporting) — drops the `and subject_key in
+# ^@crm_subject_keys` conjunct from `Samen.Web.CRM.Reads.activity_leaderboard/3`'s filter —
+# the "leaderboard content integrity" guarantee (the closest analog, on this PII-free
+# surface, to the masking-watch-list discipline: the ONLY thing this tile must not let leak
+# in is activity that isn't actually CRM work). The `#{@crm_subject_keys}` allowlist is what
+# keeps a member's OTHER Work-scope tasks (a project checklist item, a freight check-call,
+# any non-CRM `subject_key`) out of the CRM activity count. Without it, an owner who is
+# simply prolific in some UNRELATED Work-scope surface would rank on the CRM leaderboard for
+# work that has nothing to do with company/person/opportunity engagement — the count would
+# be real (no fabrication), but attributed to the wrong ACTIVITY, defeating the tile's whole
+# purpose ("who is doing CRM work"). Orgs with ONLY CRM-anchored tasks stay green (there is
+# no non-CRM row to wrongly include) — exactly why the named test seeds a
+# `subject_key: "freight.load"` sentinel alongside a real CRM one. REGENERATED T76 fix round
+# 1 (MED-1 rewrite; same guarantee/line content, context shifted). Reverts byte-exact.
+# APP: samen_web
+# TEST_FILES: test/samen/web/crm_reporting_test.exs
+# MUST_FAIL: activity_leaderboard counts ONLY CRM-anchored tasks — a non-CRM Work task never inflates the count
+diff --git a/samen_web/lib/samen/web/crm/reads.ex b/samen_web/lib/samen/web/crm/reads.ex
+--- a/samen_web/lib/samen/web/crm/reads.ex
++++ b/samen_web/lib/samen/web/crm/reads.ex
+@@ -842,7 +842,7 @@
+         series =
+           task_mod
+           |> Ash.Query.new()
+-          |> Ash.Query.filter(not is_nil(owner_id) and subject_key in ^@crm_subject_keys)
++          |> Ash.Query.filter(not is_nil(owner_id))
+           |> Samen.Web.Reads.aggregate_by!(:owner_id, scope: scope, max_points: discovery_limit)
+
+         other = Samen.Web.Reads.other_key()

@@ -209,6 +209,142 @@ defmodule Samen.AuditEventTest do
   end
 
   # ---------------------------------------------------------------------------
+  # (d.2) T128: forward-roll across a partition boundary (PRODUCTION cron behavior)
+  # ---------------------------------------------------------------------------
+  # The production defect this guards: aud_event is partitioned; once the wall clock
+  # crosses the latest existing partition boundary, an audit write has no partition to
+  # land in and FAILS. `Samen.AuditEvent.PartitionManager` (wired into
+  # `Samen.Jobs.default_crontab/0`, daily @ 01:00) rolls the partitions forward. These
+  # tests prove: (1) the failure mode is real; (2) ensure_upcoming crossing a boundary
+  # makes the future-month write SUCCEED and is idempotent; (3) the cron's worker
+  # perform/1 actually invokes ensure_upcoming (not a stub).
+
+  defp aud_partition_exists?(name) do
+    %{rows: rows} =
+      Repo.query!(
+        """
+        SELECT 1 FROM pg_inherits i
+        JOIN pg_class p ON p.oid = i.inhparent
+        JOIN pg_class c ON c.oid = i.inhrelid
+        WHERE p.relname = 'aud_event' AND c.relname = $1
+        """,
+        [name]
+      )
+
+    rows != []
+  end
+
+  describe "PartitionManager forward-roll (T128 production audit-write safety)" do
+    test "BASELINE: an audit write to a month with NO partition FAILS (the silent prod defect)" do
+      # A far-future month whose partition does not exist. This is exactly what happens
+      # in production once the clock passes the last migration-seeded partition.
+      future = ~U[2099-11-15 09:00:00Z]
+      name = PartitionManager.partition_name(DateTime.to_date(future))
+      Repo.query("DROP TABLE IF EXISTS #{name}")
+      refute aud_partition_exists?(name)
+
+      # No partition to hold the row -> Postgres refuses the insert. Audit trail lost.
+      assert_raise Postgrex.Error, ~r/no partition/i, fn ->
+        AuditEvent.insert(Repo, %{
+          event_type: "system",
+          subject_id: "t128-baseline",
+          occurred_at: future
+        })
+      end
+    end
+
+    test "ensure_upcoming crossing a boundary creates the partition + the write SUCCEEDS (idempotent)" do
+      # Anchor two months BEFORE a fresh future month so the job's lookahead rolls the
+      # boundary forward into it (mirrors the daily cron catching up past a boundary).
+      anchor = ~D[2099-09-15]
+      target = ~U[2099-11-15 09:00:00Z]
+      target_date = DateTime.to_date(target)
+      target_name = PartitionManager.partition_name(target_date)
+
+      created_names =
+        [~D[2099-09-01], ~D[2099-10-01], target_date]
+        |> Enum.map(&PartitionManager.partition_name/1)
+
+      # Start clean: none of the three months exist.
+      Enum.each(created_names, fn n -> Repo.query("DROP TABLE IF EXISTS #{n}") end)
+      refute aud_partition_exists?(target_name)
+
+      # ROLL FORWARD (exactly the call the worker's perform/1 makes).
+      results = PartitionManager.ensure_upcoming_partitions(Repo, anchor, 2)
+      assert Enum.all?(results, &match?({:ok, _}, &1))
+      assert aud_partition_exists?(target_name)
+
+      # The future-month audit write now SUCCEEDS — the defect is closed.
+      assert {:ok, row} =
+               AuditEvent.insert(Repo, %{
+                 event_type: "system",
+                 subject_id: "t128-forward",
+                 occurred_at: target
+               })
+
+      # It landed in the newly-created November partition (not the parent-only view).
+      %{rows: [[count]]} =
+        Repo.query!("SELECT COUNT(*) FROM #{target_name} WHERE aud_id = $1", [
+          Ecto.UUID.dump!(row.id)
+        ])
+
+      assert count == 1
+
+      # IDEMPOTENT: a second run is a no-op (never drops/rewrites) and the row survives;
+      # a subsequent write still succeeds.
+      results2 = PartitionManager.ensure_upcoming_partitions(Repo, anchor, 2)
+      assert Enum.all?(results2, &match?({:ok, _}, &1))
+      assert aud_partition_exists?(target_name)
+
+      %{rows: [[count_after]]} =
+        Repo.query!("SELECT COUNT(*) FROM #{target_name} WHERE aud_id = $1", [
+          Ecto.UUID.dump!(row.id)
+        ])
+
+      assert count_after == 1, "idempotent re-run must NOT drop/rewrite the existing partition/data"
+
+      assert {:ok, _} =
+               AuditEvent.insert(Repo, %{
+                 event_type: "system",
+                 subject_id: "t128-forward-2",
+                 occurred_at: ~U[2099-11-20 09:00:00Z]
+               })
+
+      # Cleanup (belt-and-suspenders; the sandbox rolls this back anyway).
+      Enum.each(created_names, fn n ->
+        Repo.query("ALTER TABLE aud_event DETACH PARTITION #{n}")
+        Repo.query("DROP TABLE IF EXISTS #{n}")
+      end)
+    end
+
+    test "the cron's worker perform/1 actually invokes ensure_upcoming (not a stub)" do
+      # perform/1 anchors at Date.utc_today() and ensures current + months_ahead months.
+      # Drop the +2-month partition, run the worker, and prove it was recreated — a stub
+      # returning :ok without doing the work would leave it absent.
+      months_ahead = 2
+      plus_two = Date.add(Date.utc_today(), months_ahead * 31)
+      target_name = PartitionManager.partition_name(plus_two)
+
+      Repo.query("ALTER TABLE aud_event DETACH PARTITION #{target_name}")
+      Repo.query("DROP TABLE IF EXISTS #{target_name}")
+      refute aud_partition_exists?(target_name)
+
+      # The worker resolves its repo from :aud_event_repo.
+      prev = Application.get_env(:samen_core, :aud_event_repo)
+      Application.put_env(:samen_core, :aud_event_repo, Repo)
+
+      on_exit(fn ->
+        if prev, do: Application.put_env(:samen_core, :aud_event_repo, prev),
+          else: Application.delete_env(:samen_core, :aud_event_repo)
+      end)
+
+      assert :ok = PartitionManager.perform(%Oban.Job{args: %{"months_ahead" => months_ahead}})
+      assert aud_partition_exists?(target_name),
+             "worker perform/1 must call ensure_upcoming_partitions and create the partition"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # (e) Detach-for-archival refuses when erasure window is active — RED PATH
   # ---------------------------------------------------------------------------
 

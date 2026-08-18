@@ -61,7 +61,6 @@ defmodule Samen.Web.Support.Reads do
       :sla_breach_at,
       :breached,
       :resolved_at,
-      :tags,
       :sla_id
     ])
     |> Ash.Query.sort(inserted_at: :desc)
@@ -88,7 +87,6 @@ defmodule Samen.Web.Support.Reads do
       :sla_breach_at,
       :breached,
       :resolved_at,
-      :tags,
       :sla_id
     ])
     |> Samen.Web.Reads.page!(state, scope: scope, filter_fields: [:subject])
@@ -107,7 +105,6 @@ defmodule Samen.Web.Support.Reads do
         :sla_breach_at,
         :breached,
         :resolved_at,
-        :tags,
         :sla_id
       ])
       |> Ash.Query.filter(id == ^id)
@@ -120,6 +117,20 @@ defmodule Samen.Web.Support.Reads do
     end
   rescue
     _ -> :error
+  end
+
+  @doc """
+  Read tag NAMES for one ticket (F4/T46 — the generic-Tag-backed read
+  equivalent of the former `Ticket.tags` array column). Derives the ticket's
+  object-ref key via `ObjectRef.Catalog.key_for/1` (host-agnostic — matches
+  whatever the host's `MigrateTicketTagsToTagScope` migration anchored, e.g.
+  `"support.ticket"` on driftwood/pawchart/samen_web, `"support_scope.ticket"`
+  on demo) and looks up `Samen.Web.Tags.names_for/4`. Fails safe to `[]` if the
+  host has not mounted the Tags scope — never raises.
+  """
+  def ticket_tag_names(mount, scope, ticket_id) do
+    subject_key = Samen.Web.ObjectRef.Catalog.key_for(Mount.resource(mount, Ticket))
+    Samen.Web.Tags.names_for(mount, scope, subject_key, ticket_id)
   end
 
   @doc "Read conversations (+ PII-resolved messages) for a ticket. BOUNDED."
@@ -200,6 +211,79 @@ defmodule Samen.Web.Support.Reads do
   end
 
   @doc """
+  I6 (spec §I6, T79) — the CSAT response for ONE ticket, if any (the ticket
+  detail page's "somewhere honest" landing spot — see `csats/2` for the
+  org-wide list). `nil` when no response has been recorded yet (honest empty,
+  never a fabricated score). Org-scoped via `scope` — a cross-org `ticket_id`
+  yields `nil`, never another org's response (no existence oracle).
+  """
+  def csat_for_ticket(mount, scope, ticket_id) do
+    Mount.resource(mount, Csat)
+    |> Ash.Query.ensure_selected([:score, :comments, :channel, :responded_at, :ticket_id, :agent_id])
+    |> Ash.Query.filter(ticket_id == ^ticket_id)
+    |> Ash.Query.sort(responded_at: :desc)
+    |> Ash.Query.limit(1)
+    |> Ash.read_one!(scope: scope)
+  rescue
+    _ -> nil
+  end
+
+  @doc """
+  I6 (spec §I6, T79) — read org-scoped, ENABLED macros for the composer
+  palette (Tier-0 config rows, `Sla`'s own sibling). Non-PII (the blueprint's
+  own `body_template` non-PII classification). BOUNDED to #{@detail_limit}
+  rows, sorted by name. Honest empty (`[]`) when the org has none — never
+  fabricated.
+  """
+  def macros(mount, scope) do
+    Mount.resource(mount, Macro)
+    |> Ash.Query.filter(enabled == true)
+    |> Ash.Query.ensure_selected([:name, :description, :body_template, :tags, :category])
+    |> Ash.Query.sort(name: :asc)
+    |> Ash.Query.limit(@detail_limit)
+    |> Ash.read!(scope: scope)
+  rescue
+    _ -> []
+  end
+
+  # The macro composer palette's ONE placeholder: `{{agent_name}}`. `agents`
+  # is `Reads.agents/2`'s ALREADY plane-resolved list (tenant CLEAR / operator
+  # `%Masked{}`) — substitution never itself calls the vault or PiiResolution;
+  # it just interpolates whatever the resolver already returned, via
+  # `String.Chars` (a `%Masked{}` renders `••••` automatically — the SAME
+  # convention `Samen.Delivery.Rendering.default_template/1` documents: "the
+  # mask is the field's normal value, not a special case here"). `agents`
+  # picks the FIRST loaded agent as "the" agent — a documented judgment call
+  # (this framework has no per-agent login/session concept to derive a
+  # "current agent" from, the same substrate limit `T76`'s CRM leaderboard
+  # tile flagged for `owner_id` display identity).
+  @doc """
+  Expand `macro.body_template`'s `{{agent_name}}` placeholder (if present)
+  against `agents` (a `Reads.agents/2`-shaped, ALREADY plane-resolved list —
+  masking-safe by construction, no new vault call). Absent macro/agents ⇒ the
+  template returned unexpanded (never crashes on `nil`).
+  """
+  def expand_macro(%{body_template: template}, agents) when is_binary(template) do
+    String.replace(template, "{{agent_name}}", agent_name_placeholder(agents))
+  end
+
+  def expand_macro(_macro, _agents), do: ""
+
+  defp agent_name_placeholder([%{full_name: full_name} | _]), do: to_string(render_agent_name_for_macro(full_name))
+  defp agent_name_placeholder(_), do: "our team"
+
+  defp render_agent_name_for_macro(%Samen.Masked{} = m), do: m
+  defp render_agent_name_for_macro(name) when is_binary(name), do: decode_macro_full_name(name) || name
+  defp render_agent_name_for_macro(_), do: "our team"
+
+  defp decode_macro_full_name(name) when is_binary(name) do
+    case Jason.decode(name) do
+      {:ok, %{"first" => first, "last" => last}} -> String.trim("#{first} #{last}")
+      _ -> nil
+    end
+  end
+
+  @doc """
   Non-PII support metrics (open_tickets, breaching_sla, solved_this_week, csat_avg).
   DB aggregates (`Ash.count`/`Ash.avg`) — no row set is ever transferred (A3
   read-bounding: this replaced an unbounded CSAT `read!`).
@@ -226,6 +310,23 @@ defmodule Samen.Web.Support.Reads do
   def create_message(mount, scope, attrs) do
     Mount.resource(mount, Message)
     |> Ash.Changeset.for_create(:create, attrs, scope: scope)
+    |> Ash.create()
+  end
+
+  @doc """
+  Start a NEW conversation on a ticket (the "Start conversation" first-reply
+  affordance, H4/M3 — a UI-created ticket seeds no conversation of its own, so
+  `new_reply_form/3` has nothing to build a composer against). `ticket_id` is a
+  server-side fact (the current ticket, never client input); the created
+  conversation takes the blueprint's default `:email` channel / `:open` status.
+  The write goes through Ash so OrgScope + SameOrgFk apply — this module adds NO
+  policy of its own. `{:ok, conversation}` or `{:error, reason}`.
+  """
+  def create_conversation(mount, scope, ticket_id) do
+    org_id = Map.get(actor_of(scope), :org_id)
+
+    Mount.resource(mount, Conversation)
+    |> Ash.Changeset.for_create(:create, %{org_id: org_id, ticket_id: ticket_id}, scope: scope)
     |> Ash.create()
   end
 
@@ -262,7 +363,20 @@ defmodule Samen.Web.Support.Reads do
     e -> {:error, e}
   end
 
-  @doc "Destroy one support ticket for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
+  @doc """
+  Archive one support ticket for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`.
+
+  ADR-040 §5.9/T37f: `Ticket` is `archivable true` and the cascade PARENT of `ticket
+  ▸cascade conversation ▸cascade message` (§5.4). Routes through the explicit `:archive`
+  action (not the plain default destroy) so the cascade engages —
+  `Samen.Scopes.Support.CascadeArchive` self-guards on the `:archive` action name
+  specifically (mirroring `Samen.Scopes.Cms.CascadeArchive`'s convention: the plain soft
+  destroy does NOT cascade, only the explicit audited `:archive` does). A ticket with
+  linked conversations/messages is therefore no longer refused — it archives, and its
+  conversations/messages archive with it at the same instant, dropping all of them out of
+  their default (archived-excluding) bounded reads. Any `{:error, _}` here is a genuine
+  failure (e.g. an authorization denial), not the old FK-refusal case.
+  """
   def delete_ticket(mount, scope, id) do
     record =
       Mount.resource(mount, Ticket)
@@ -272,7 +386,7 @@ defmodule Samen.Web.Support.Reads do
 
     case record do
       nil -> {:error, :not_found}
-      ticket -> Ash.destroy(ticket, scope: scope)
+      ticket -> Ash.destroy(ticket, action: :archive, scope: scope)
     end
   rescue
     e -> {:error, e}

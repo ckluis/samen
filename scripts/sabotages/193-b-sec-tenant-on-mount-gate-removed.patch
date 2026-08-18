@@ -1,0 +1,23 @@
+# SABOTAGE: B-SEC / S1 — the TENANT `on_mount` GATE DEFEATED. `samen_module_routes/3` emits its
+# `live_session` WITHOUT `{Samen.Web.TenantAuthz, :require_tenant}` — the exact pre-fix shape the
+# luminary panel confirmed live (7/7 red paths). An `on_mount` `:halt` is the ONLY thing that
+# preempts `handle_params/3` on phoenix_live_view 1.2.9's initial DEAD RENDER
+# (`deps/phoenix_live_view/.../static.ex:155,320-355`), so without it an ARMED host serves an
+# UNAUTHENTICATED tenant request instead of redirecting to /login. The named LiveView-DRIVING
+# red paths (a cookieless `GET /crm/contacts?org=<victim>` and its `live/2` twin, against a REAL
+# compiled router + endpoint) MUST flip.
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_authz_live_test.exs
+# MUST_FAIL: the DEAD RENDER (plain HTTP GET, no cookies) is REFUSED, not served
+# MUST_FAIL: the LIVE mount is REFUSED
+diff --git a/samen_web/lib/samen/web/router.ex b/samen_web/lib/samen/web/router.ex
+--- a/samen_web/lib/samen/web/router.ex
++++ b/samen_web/lib/samen/web/router.ex
+@@ -71,7 +71,6 @@
+       # authority so a client `?org=` can only SELECT among the authenticated
+       # principal's authorized orgs (`Samen.Web.CurrentOrg.reresolve/2`).
+       live_session session_name,
+-        on_mount: [{Samen.Web.TenantAuthz, :require_tenant}],
+         session: %{"samen_mount" => Samen.Web.Mount.to_session(mount)} do
+         for {sub_path, module} <- Samen.Web.Router.__routes__(kind, path) do
+           live(sub_path, module)

@@ -1,0 +1,28 @@
+# SABOTAGE: D1 (ADR-046 §4.1; amends ADR-035 §4.1) — the blind-index erasure arm
+# (Samen.Auth.BlindIndexErasure) SKIPS the actual overwrite: the UPDATE sets
+# `email_bidx = email_bidx` (the column to itself) instead of to the fresh random
+# sentinel, and the `$1 = $1` clause keeps both bind params referenced so the row is
+# still matched (num_rows == 1, so the arm still REPORTS "rows_tombstoned => 1" — the
+# lie). The stored `email_bidx` is therefore UNCHANGED after principal-account erasure,
+# so the equality oracle SURVIVES: `HMAC(the-erased-email)` still equals the stored
+# index and the erased subject's email stays confirmable forever — the exact carve-out
+# gap D1 closes. It flips the genuine security assertion (`refute after_erasure == bidx`)
+# in the oracle-destroyed test while leaving the report count untouched, so this targets
+# ONLY the reach of erasure into the blind index, not the arm's reporting or scoping.
+# APP: samen_core
+# TEST_FILES: test/auth/blind_index_erasure_test.exs
+# MUST_FAIL: oracle destroyed: after principal-account erasure HMAC(email) no longer matches the stored index
+diff --git a/samen_core/lib/samen/auth/blind_index_erasure.ex b/samen_core/lib/samen/auth/blind_index_erasure.ex
+--- a/samen_core/lib/samen/auth/blind_index_erasure.ex
++++ b/samen_core/lib/samen/auth/blind_index_erasure.ex
+@@ -137,8 +137,8 @@ defmodule Samen.Auth.BlindIndexErasure do
+     # against the string subject_id without Postgrex needing a uuid-binary encode. The
+     # `subject_column = id` match is what scopes this to principal-account erasure only.
+     sql =
+-      "UPDATE #{table} SET #{column} = $1 " <>
+-        "WHERE #{subject_column}::text = $2"
++      "UPDATE #{table} SET #{column} = #{column} " <>
++        "WHERE #{subject_column}::text = $2 AND $1 = $1"
+
+     %{num_rows: n} = Ecto.Adapters.SQL.query!(repo, sql, [sentinel, subject_id])
+

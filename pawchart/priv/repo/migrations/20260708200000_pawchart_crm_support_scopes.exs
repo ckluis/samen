@@ -51,7 +51,6 @@ defmodule PawChart.Repo.Migrations.PawchartCrmSupportScopes do
     PawChart.Crm.Person,
     PawChart.Crm.Pipeline,
     PawChart.Crm.Opportunity,
-    PawChart.Crm.Activity,
     PawChart.Crm.Attachment,
     # Support
     PawChart.Support.Sla,
@@ -159,51 +158,10 @@ defmodule PawChart.Repo.Migrations.PawchartCrmSupportScopes do
       add(:vcd_updated_at, :utc_datetime, null: false)
     end
 
-    # --- vce_activity : call-logs, follow-ups against the pipeline ---
-    create table(:vce_activity, primary_key: false) do
-      add(:vce_type, :text, null: false)
-      add(:vce_subject, :text)
-      add(:vce_body, :text)
-      add(:vce_status, :text, default: "pending")
-      add(:vce_due_at, :utc_datetime)
-      add(:vce_completed_at, :utc_datetime)
-      add(:vce_custom, :map, default: fragment("'{}'::jsonb"))
-
-      add(
-        :vce_company_id,
-        references(:vca_company,
-          column: :vca_id,
-          name: "vce_activity_vce_company_id_fkey",
-          type: :uuid,
-          prefix: "public"
-        )
-      )
-
-      add(
-        :vce_person_id,
-        references(:vcb_person,
-          column: :vcb_id,
-          name: "vce_activity_vce_person_id_fkey",
-          type: :uuid,
-          prefix: "public"
-        )
-      )
-
-      add(
-        :vce_opportunity_id,
-        references(:vcd_opportunity,
-          column: :vcd_id,
-          name: "vce_activity_vce_opportunity_id_fkey",
-          type: :uuid,
-          prefix: "public"
-        )
-      )
-
-      add(:vce_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
-      add(:vce_org_id, :uuid, null: false)
-      add(:vce_inserted_at, :utc_datetime, null: false)
-      add(:vce_updated_at, :utc_datetime, null: false)
-    end
+    # --- vce_activity : REMOVED (ADR-041 §5, ruling M5) — the CRM Activity (clinic
+    # call-logs / follow-ups) was migrated into the canonical Work-scope Task (see the
+    # `migrate_activity_to_task` contract migration) and its resource removed, so this
+    # migration no longer creates the table. ---
 
     # --- vcf_attachment : file refs (referral letters, insurance forms) ---
     create table(:vcf_attachment, primary_key: false) do
@@ -463,11 +421,6 @@ defmodule PawChart.Repo.Migrations.PawchartCrmSupportScopes do
     drop(constraint(:vcf_attachment, "vcf_attachment_vcf_person_id_fkey"))
     drop(constraint(:vcf_attachment, "vcf_attachment_vcf_company_id_fkey"))
     drop(table(:vcf_attachment))
-
-    drop(constraint(:vce_activity, "vce_activity_vce_opportunity_id_fkey"))
-    drop(constraint(:vce_activity, "vce_activity_vce_person_id_fkey"))
-    drop(constraint(:vce_activity, "vce_activity_vce_company_id_fkey"))
-    drop(table(:vce_activity))
 
     drop(constraint(:vcd_opportunity, "vcd_opportunity_vcd_pipeline_id_fkey"))
     drop(constraint(:vcd_opportunity, "vcd_opportunity_vcd_company_id_fkey"))

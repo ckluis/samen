@@ -1,0 +1,28 @@
+# SABOTAGE: ADR-042 C9 — the LiveView JS client is actually shipped (RP-JS-1).
+# ADR-042 wires the Phoenix LiveView client platform-wide through the shared root
+# layout: three `defer` script tags (phoenix.min.js, phoenix_live_view.min.js,
+# app.js) inherited by every host at zero authored LOC. Without app.js the socket
+# is never constructed or connected — every `phx-click`/`phx-submit` write is
+# browser-dead again (dogfood finding B1: CI green while the browser could write
+# nothing). Server-side LiveViewTest simulates the socket, so ONLY a layout-shape
+# assertion refutes "the client is shipped".
+#
+# This sabotage strips the `app.js` script tag from `Samen.Web.Layouts.root/1`
+# (the exact regression B1 exposed). The RP-JS-1 named test — which asserts all
+# three tags are emitted in dependency order — MUST fail. Revert restores the tag
+# byte-exact.
+#
+# APP: samen_web
+# TEST_FILES: test/samen/web/layouts_test.exs
+# MUST_FAIL: RP-JS-1
+diff --git a/samen_web/lib/samen/web/layouts.ex b/samen_web/lib/samen/web/layouts.ex
+--- a/samen_web/lib/samen/web/layouts.ex
++++ b/samen_web/lib/samen/web/layouts.ex
+@@ -95,7 +95,6 @@ defmodule Samen.Web.Layouts do
+         --%>
+         <script defer nonce={assigns[:csp_nonce]} src="/assets/phoenix.min.js"></script>
+         <script defer nonce={assigns[:csp_nonce]} src="/assets/phoenix_live_view.min.js"></script>
+-        <script defer nonce={assigns[:csp_nonce]} src="/assets/app.js"></script>
+       </head>
+       <body>
+         {@inner_content}

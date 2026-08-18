@@ -12,9 +12,15 @@ config :samen_core,
     SamenCore.Support.PropDomain,
     SamenCore.Support.PiiClassifyDomain,
     SamenCore.Support.CustomFields,
+    SamenCore.Support.RichTypes,
     Samen.CustomObjects.Domain,
     # T3.10 bounded-context DSL toy KERNEL domain (aliased/reshaped by Ctx.Toy).
-    Core.Ctx
+    Core.Ctx,
+    # T68 (ADR-043 §7.5): the D3 versioned Prompt resource. Real kernel infra (the
+    # Samen.CustomObjects.Domain precedent) — registered here so samen_core's OWN
+    # test/dev suite can exercise it against SamenCore.TestRepo with a real migration.
+    # Host apps mount it by adding Samen.AI.Domain to THEIR OWN :ash_domains.
+    Samen.AI.Domain
   ]
 
 # T3.9 Tier-2 custom objects: the repo backing the `tnt_record` Ash resource +
@@ -23,7 +29,47 @@ config :samen_core,
 # resource's `postgres do repo(...) end` reads it via compile_env.
 config :samen_core, :tnt_record_repo, SamenCore.TestRepo
 
+# T68 (ADR-043 §7.5): the repo backing the `Samen.AI.Prompt` Ash resource (the
+# `:tnt_record_repo` precedent above). Host apps configure their own. Compile-time
+# here because the Prompt resource's `postgres do repo(...) end` reads it via
+# compile_env.
+config :samen_core, :samen_ai_prompt_repo, SamenCore.TestRepo
+
+# T70 (ADR-043 §6.3): the repo backing the `Samen.AI.SupportReplyDraft` Ash resource (the
+# `:samen_ai_prompt_repo` precedent above). Host apps configure their own. Compile-time here
+# because the resource's `postgres do repo(...) end` reads it via compile_env.
+config :samen_core, :samen_ai_support_reply_draft_repo, SamenCore.TestRepo
+
+# ADR-047 A1: the repos backing the agent-loop cursor resources (`Samen.AI.Agent.Run` /
+# `Samen.AI.Agent.Turn` — the `:samen_ai_prompt_repo` precedent above). Host apps
+# configure their own; compile-time via compile_env.
+config :samen_core, :samen_ai_agent_run_repo, SamenCore.TestRepo
+config :samen_core, :samen_ai_agent_turn_repo, SamenCore.TestRepo
+
+# ADR-047 A5: the DURABLE per-{org, definition} agent kill switch — the A2/A3
+# cross-tenant blast-radius residual, closed. Same compile_env seam as its siblings.
+config :samen_core, :samen_ai_agent_kill_repo, SamenCore.TestRepo
+
 config :ash, disable_async?: true
+
+# T145: quiet Ash's benign `[warning] Missed N notifications` runtime log noise. The AI
+# plane opens an E3 approval (Samen.AI.SupportOperator.draft_reply) outside a
+# notification-collecting Ash transaction, so Ash's default `:warn` posture logs a missed-
+# notification line into ci.sh output. No real notification is dropped (the approvals engine
+# and reveal-grant auto-revoke drive their side effects via explicit repo transactions +
+# Oban, not Ash resource notifications), so ignoring is honest cosmetic cleanup, not
+# swallowing a live signal.
+config :ash, :missed_notifications, :ignore
+
+# ADR-036 D1/ADR-037 §5.2: AshMoney/ex_money wiring. `known_types` lets Ash's
+# operator-overload expr evaluation (sum/compare in calculations) recognize the
+# wrapped type transitively; `auto_start_exchange_rate_service: false` is a
+# deliberate no-op — samen_core/hosts never do live currency conversion, only
+# same-currency arithmetic (ADR-036 D1 "Money is not PII", no FX feature), so the
+# background exchange-rate poller (which would otherwise try a network call at
+# boot) stays off.
+config :ash, :known_types, [AshMoney.Types.Money]
+config :ex_money, auto_start_exchange_rate_service: false
 
 # AshPostgres migration primary key shape (matches the S0.2/S0.3 spike convention:
 # binary_id named :id — the abbrev transformer then prefixes it per-resource).
@@ -104,31 +150,34 @@ config :samen_core, :rollups, [
   }
 ]
 
-# Oban config (T2.1 queue taxonomy). Uses the canonical Samen queue taxonomy
-# from `Samen.Jobs.default_queue_config/0`. The test config overrides with
+# Oban config (T2.1 queue taxonomy). The test config overrides with
 # `testing: :manual` so job rows are written but not auto-executed (the
 # same-tx crash test needs observable job rows; the starvation test starts
 # its own Oban supervisor with custom queues).
 #
-# Host apps should wire:
+# Host apps wire ONLY their repo (+ plugins), and start Oban through the
+# framework seam so the canonical queue taxonomy AND cron are installed for them. The config
+# key is `:samen_core` (NOT the host's own otp_app) — every shipped host (demo, driftwood,
+# pawchart, samen_web, the emitted app) reads Oban's own config back via
+# `Application.fetch_env!(:samen_core, Oban)` below, so that is the app env a host must write
+# to (luminary A14 — this comment previously said `:my_app`, which no host does and which
+# would raise `ArgumentError` at boot if followed literally):
 #
-#     config :my_app, Oban,
+#     config :samen_core, Oban,
 #       repo: MyApp.Repo,
-#       queues: Samen.Jobs.default_queue_config(),
-#       plugins: [
-#         {Oban.Plugins.Cron, crontab: Samen.Jobs.default_crontab()},
-#         {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
-#       ]
+#       plugins: [{Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}]
+#
+#     # application.ex
+#     {Oban, Samen.Jobs.install_defaults(Application.fetch_env!(:samen_core, Oban))}
+# B-OBAN: NO hand-listed `queues:`. config.exs is evaluated before dependency
+# modules load, so it cannot call `Samen.Jobs.default_queue_config/0` — which is
+# exactly why four hosts hand-maintained four DIVERGENT lists and `:webhooks_in`
+# ended up configured by none of them (jobs enqueued to an unconfigured queue sit
+# `available` forever, silently). The taxonomy is installed at start time instead,
+# by `Samen.Jobs.install_defaults/1` in application.ex, and gated by
+# `mix samen.verify.oban_queues`.
 config :samen_core, Oban,
   repo: SamenCore.TestRepo,
-  queues: [
-    default: 10,
-    rollups: 2,
-    webhooks_out: 5,
-    erasure: 1,
-    maintenance: 1,
-    reveal: 5
-  ],
   plugins: false
 
 # T2.6 OTel tracing: db_statement MUST be :disabled on a Samen substrate.

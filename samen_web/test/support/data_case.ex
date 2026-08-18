@@ -19,6 +19,10 @@ defmodule Samen.WebTest.DataCase do
   setup do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Samen.WebTest.Repo)
     Ecto.Adapters.SQL.Sandbox.mode(Samen.WebTest.Repo, {:shared, self()})
+    # The rate-limit counters (Samen.Web.RateLimit / Hammer ETS) are a GLOBAL table,
+    # not sandboxed — clear them per test so auth-surface limits (T103) never leak
+    # across tests (e.g. repeated `/signup` submits sharing the per-IP bucket).
+    Samen.Web.RateLimit.reset()
     :ok
   end
 
@@ -45,9 +49,13 @@ defmodule Samen.WebTest.DataCase do
 
     # The Marketing mount carries the CRM namespace on its labels so the Leads lens
     # (`Samen.Web.Marketing.LeadsLive`) can derive a CRM-kind mount and read contacts.
+    # T78 (spec §I5): the Support mount carries the CMS namespace (`kb_namespace`, the
+    # `flags_namespace`/`crm_namespace` sibling-mount seam) so the agent-facing KB
+    # surface can derive a `:cms`-kind mount and read/author `Post` (the KB article).
     labels =
       case scope_kind do
         :marketing -> %{crm_namespace: Samen.WebTest.Crm}
+        :support -> %{kb_namespace: Samen.WebTest.Cms}
         _ -> nil
       end
 
@@ -152,9 +160,34 @@ defmodule Samen.WebTest.DataCase do
     )
   end
 
+  @doc """
+  T150 — open a REAL `Samen.Impersonation` session for `(operator_id, org_id)` in the scratch
+  host repo (the `imp_impersonation_session` table this repo now carries), so an operator
+  per-tenant drill-in's deny-on-read gate (`Samen.Web.Operator.Impersonation.gate/2`) sees an
+  ACTIVE session. Returns the session struct. Uses `:operator_admin` (may impersonate).
+  """
+  def open_impersonation!(operator_id, org_id, reason \\ "T150 gate test — ticket #4242") do
+    {:ok, session} =
+      Samen.Impersonation.open(
+        %Samen.OperatorPlane.Actor{id: operator_id, operator_role: :operator_admin},
+        org_id,
+        reason
+      )
+
+    session
+  end
+
+  @doc "Assign the operator identity a drill-in gate resolves (`:samen_operator_id`/`:samen_operator_role`)."
+  def with_operator_identity(socket, operator_id, role \\ :operator_admin) do
+    socket
+    |> Phoenix.Component.assign(:samen_operator_id, operator_id)
+    |> Phoenix.Component.assign(:samen_operator_role, role)
+  end
+
   defp namespace(:crm), do: Samen.WebTest.Crm
   defp namespace(:billing), do: Samen.WebTest.Billing
   defp namespace(:support), do: Samen.WebTest.Support
+  defp namespace(:work), do: Samen.WebTest.Work
   defp namespace(:marketing), do: Samen.WebTest.Marketing
   defp namespace(:notifications), do: Samen.WebTest.Primitives
   defp namespace(:flags), do: Samen.WebTest.Primitives
@@ -164,4 +197,17 @@ defmodule Samen.WebTest.DataCase do
   defp namespace(:csv), do: Samen.WebTest.Crm
   # WS-E E5 settings — the Identity mount (User/ApiKey/Membership) is the operator host.
   defp namespace(:settings), do: Samen.WebTest.Operator
+  # ADR-035 — the pre-actor auth surfaces ride the SAME Identity mount as settings
+  # (Credential/AuthToken/Org/User/Membership all live under Operator in this test host).
+  defp namespace(:auth), do: Samen.WebTest.Operator
+  # T118 (ADR-039 §12 done-criterion 4) — the tenant automation builder rides the
+  # SAME `Samen.WebTest.Automation` direct mount T42's health-view test already uses
+  # (test/support/automation.ex) — `Workflow` is the resource this surface touches.
+  defp namespace(:automation), do: Samen.WebTest.Automation
+  # T155 (ADR-043 §5.3) — the tenant AI UI kit rides the CRM test host, so the CRM-AI
+  # surface can ground on `Samen.WebTest.Crm.Person` (its vault fields drive the masking proof).
+  defp namespace(:ai), do: Samen.WebTest.Crm
+  # T78 (spec §I5) — the public portal mount kind: points DIRECTLY at the CMS
+  # namespace (no Support needed — the portal browses/deflects on `Post` alone).
+  defp namespace(:kb), do: Samen.WebTest.Cms
 end

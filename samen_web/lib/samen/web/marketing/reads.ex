@@ -318,19 +318,17 @@ defmodule Samen.Web.Marketing.Reads do
   (Campaign / Segment / Template carry `RoleAtLeast :admin`; the mount's plane scope
   is a `:member`, per `Samen.Web.Plane.scope/2`).
 
-  Same-org role elevation ONLY — the billing precedent
-  (`Samen.Web.Billing.Reads.write_scope/2`): the elevation PRESERVES every plane
-  marker (`plane`, `kind`, `impersonation`) from `Mount.scope/2`. An operator-plane
-  mount elevated here still carries `plane: :operator`, so `Samen.Pii.WriteGuard`
-  (MC-1 / Invariant L1) rejects a vaulted-PII write exactly as before — the elevation
-  raises RBAC rank, never the masking plane. `OrgScope` still confines the write to
-  `org_id`. Subscriber writes are member-gated and use the plain scope (and the
-  subscriber `email` vault path is unchanged — `add_subscriber/3`).
+  ADR-045 §4.4 (S1a) — delegates to `Samen.Web.TenantRole.admin_scope/3`: the disarmed dev
+  posture keeps `:admin` byte-for-byte; an ARMED host derives the principal's REAL
+  `Identity.Membership` role (fail-closed `:member`, never `:admin`). The elevation still
+  PRESERVES every plane marker (`plane`, `kind`, `impersonation`) from `Mount.scope/2` — an
+  operator-plane mount keeps `plane: :operator`, so `Samen.Pii.WriteGuard` (MC-1 / Invariant L1)
+  rejects a vaulted-PII write exactly as before, the elevation raises RBAC rank only, and
+  `OrgScope` still confines the write to `org_id`. Subscriber writes are member-gated and use the
+  plain scope (and the subscriber `email` vault path is unchanged — `add_subscriber/3`).
   """
-  def write_scope(mount, org_id) do
-    %Samen.Scope{actor: actor} = Mount.scope(mount, org_id)
-    %Samen.Scope{actor: Map.put(actor, :role, :admin)}
-  end
+  def write_scope(mount, org_id, principal \\ nil),
+    do: Samen.Web.TenantRole.admin_scope(mount, org_id, principal)
 
   @doc "Destroy one Marketing campaign for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
   def delete_campaign(mount, scope, id), do: delete_record(mount, scope, Campaign, id)
@@ -338,9 +336,12 @@ defmodule Samen.Web.Marketing.Reads do
   @doc "Destroy one Marketing segment for `scope` (A3 CRUD wiring). `:ok` or `{:error, reason}`."
   def delete_segment(mount, scope, id), do: delete_record(mount, scope, Segment, id)
 
-  # FAIL-HONEST destroy (mirrors `Samen.Web.CRM.Reads.delete_record/4`): the kernel
-  # defines no cascade — a campaign with linked sends is refused by the DB (FK) and
-  # the refusal surfaces to the caller. The read is `limit(1)` (bounded).
+  # FAIL-HONEST destroy (mirrors `Samen.Web.CRM.Reads.delete_record/4`). ADR-040
+  # §5.9 (T37d): Campaign/Segment adopted E6 soft-delete (`archivable true`) — the
+  # default `:destroy` is now a soft archive (an UPDATE), so a linked `send` row
+  # can no longer FK-refuse it (§5.4: no cascade declared; `send` is not itself
+  # archivable). Any OTHER destroy failure (e.g. a policy denial) still surfaces
+  # honestly to the caller. The read is `limit(1)` (bounded).
   defp delete_record(mount, scope, name, id) do
     record =
       Mount.resource(mount, name)

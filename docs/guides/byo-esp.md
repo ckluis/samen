@@ -1,22 +1,31 @@
 # Bring-Your-Own ESP — wiring real email delivery without samen owning an adapter
 
-**The boundary.** Samen does NOT ship a first-party email integration, and deliberately so
-(ADR-014, and the F1 decision to decline first-party adapters). Outbound email routes through a
-pluggable, **fail-honest** contract — `Samen.Delivery.Adapter` — and the kernel ships exactly
-three implementations:
+**The boundary.** Samen does NOT ship a first-party email integration wired into every host by
+default, and deliberately so (ADR-014, and the F1 decision to decline auto-wired first-party
+adapters). Outbound email routes through a pluggable, **fail-honest** contract —
+`Samen.Delivery.Provider` (ADR-038 §4 — the ADR-014 `Samen.Delivery.Adapter` contract, finalized
+and renamed) — and the kernel ships:
 
 | Adapter | Role | `deliver/2` when unconfigured |
 |---|---|---|
 | `Samen.Delivery.LocalSink` | dev/test | `{:ok, %{sink: true}}` — honest "captured, not delivered" |
 | `Samen.Delivery.Smtp` | skeleton | `{:error, :not_configured}` — never a fake `{:ok, _}` |
-| `Samen.Delivery.Api` (ESP) | skeleton | `{:error, :not_configured}` — never a fake `{:ok, _}` |
+| `Samen.Delivery.Api` (generic HTTP ESP) | skeleton | `{:error, :not_configured}` — never a fake `{:ok, _}` |
+
+Additionally, first-party-but-separate real ESP adapter packages (`samen_postmark`, and
+`samen_ses`/`samen_resend` following the same shape) ship as standalone mix projects (ADR-038
+§8.1) implementing this SAME behaviour — pick one of those instead of BYO-ing your own if it fits.
 
 The load-bearing rule (Invariant D1, enforced by `Samen.Scopes.Marketing.SendWorker`): a send
 reaches `:delivered` **if and only if** a *configured* adapter returned `{:ok, receipt}`. Your job
 is to supply that configured adapter — in your HOST app, pulling whatever client library it needs
-— so samen never has to own a provider dependency or a provider's failure modes.
+(or select one of the first-party packages above) — so samen never has to own a provider
+dependency or a provider's failure modes.
 
-This guide shows the two shapes. You implement ONE behaviour with two callbacks.
+This guide shows the two BYO shapes. `use Samen.Delivery.Provider` gives you overridable, honest
+defaults for `capabilities/0` (`[]`), `verify_and_parse_event/3`/`parse_inbound/3`
+(`{:error, :not_implemented}`), and `redact_payload/1` (identity) — so a minimal BYO adapter still
+only implements TWO functions: `configured?/1` + `deliver/2`.
 
 ---
 
@@ -53,7 +62,7 @@ read) — do not expect a plaintext address on the struct.
 
    ```elixir
    defmodule Driftwood.Delivery.GenSmtp do
-     @behaviour Samen.Delivery.Adapter
+     use Samen.Delivery.Provider
 
      @impl true
      def configured?(%{host: h, username: u, password: p})
@@ -103,7 +112,7 @@ Identical shape; the client is an HTTP lib (`Req`/`Finch`) in YOUR host:
 
 ```elixir
 defmodule Driftwood.Delivery.Esp do
-  @behaviour Samen.Delivery.Adapter
+  use Samen.Delivery.Provider
 
   @impl true
   def configured?(%{api_key: k, endpoint: e})

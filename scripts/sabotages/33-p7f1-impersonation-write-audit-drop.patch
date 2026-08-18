@@ -1,0 +1,29 @@
+# SABOTAGE: P7-F1 impersonation-write audit (ADR-040 §6.6; persona-7 P7-F1, security · ESCALATE).
+# Every mutation executed under a live Samen.Impersonation scope MUST emit an attributable
+# `impersonation_write` aud_event (operator id, session id, tenant subject, action). The
+# enforcement point is Samen.Audit.ImpersonationWrite (the in-transaction, fail-closed change,
+# registered on: [:create, :update, :destroy]), which emits via the shared
+# Samen.Audit.ImpersonationEmit.emit/4. This sabotage short-circuits that shared emission so an
+# impersonated write produces NO audit row (the write still succeeds) — reproducing exactly the
+# P7-F1 gap the walk found. The named RED tests MUST fail (they find no row), proving the
+# audit-presence assertions are not tautologies. The CONTROLs (normal tenant writes) are
+# unaffected — they never expected a row.
+# APP: samen_core
+# TEST_FILES: test/impersonation_write_audit_test.exs
+# MUST_FAIL: RED (P7-F1): an impersonated UPDATE emits an attributable impersonation_write aud_event
+# MUST_FAIL: RED (P7-F1): an impersonated CREATE is audited too (not just update)
+# MUST_FAIL: RED (bulk): an impersonated bulk_create audits EVERY created row
+# MUST_FAIL: RED (bulk): an impersonated bulk_update audits EVERY affected row
+# MUST_FAIL: RED (destroy): an impersonated single-record :destroy AND :destroy_permanently each audit (in-transaction)
+# MUST_FAIL: RED (bulk): an impersonated bulk_destroy audits EVERY destroyed row
+diff --git a/samen_core/lib/samen/audit/impersonation_emit.ex b/samen_core/lib/samen/audit/impersonation_emit.ex
+--- a/samen_core/lib/samen/audit/impersonation_emit.ex
++++ b/samen_core/lib/samen/audit/impersonation_emit.ex
+@@ -26,5 +26,7 @@ defmodule Samen.Audit.ImpersonationEmit do
+   """
+   @spec emit(module(), atom(), term(), map()) :: :ok | {:error, term()}
++  # SABOTAGE (P7-F1): short-circuit the audit emission — impersonated writes leave NO row.
++  def emit(_resource, _action_name, _record, _marker) when 1 == 1, do: :ok
+   def emit(resource, action_name, record, marker) when is_map(marker) do
+     repo = AshPostgres.DataLayer.Info.repo(resource, :mutate)
+     org_id = marker[:org_id] && to_string(marker[:org_id])

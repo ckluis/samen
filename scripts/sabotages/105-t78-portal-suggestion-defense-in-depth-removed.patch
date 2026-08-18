@@ -1,0 +1,35 @@
+# SABOTAGE: T78 (spec §I5 helpdesk knowledge base + composer suggestion + deflection) —
+# `Samen.Web.Support.KbReads.suggest_for_portal/4`'s re-verification refetch swaps
+# `Post.:read_public` (org_id + status:published + visibility:public, the SAME gate
+# `public_articles/2` and the portal browse use) for a raw `org_id`-only filter with
+# `authorize?: false`. The vector index (`Samen.AI.Embeddings`) is candidate RETRIEVAL
+# ONLY by design — every consumer is supposed to re-verify a hit's source record
+# against its OWN scoped read before ever rendering it (defense in depth: a stale or
+# over-broad vector must never surface content the reader is not otherwise authorized
+# to see). This patch removes exactly that re-verification for the deflection path: an
+# INTERNAL article that was ever embedded (e.g. published, then flipped internal, or an
+# internal article some future caller embeds) now surfaces in the UNAUTHENTICATED
+# portal's deflection suggestions the moment it semantically matches a visitor's typed
+# subject/description — a real content leak that never touches `Post.:read_public`'s
+# own filter at all (patches 102/103 are a DIFFERENT guarantee: this one is the
+# candidate-retrieval-is-not-authorization discipline).
+# APP: samen_web
+# TEST_FILES: test/samen/web/support/kb_reads_test.exs test/samen/web/portal_kb_live_test.exs
+# MUST_FAIL: DEFENSE IN DEPTH — an article embedded while public, then flipped to internal, never surfaces on the portal
+# MUST_FAIL: an INTERNAL article (never public) never surfaces on the portal even if it ranks well
+# MUST_FAIL: an internal article never surfaces in deflection even if it would rank well
+diff --git a/samen_web/lib/samen/web/support/kb_reads.ex b/samen_web/lib/samen/web/support/kb_reads.ex
+--- a/samen_web/lib/samen/web/support/kb_reads.ex
++++ b/samen_web/lib/samen/web/support/kb_reads.ex
+@@ -204,9 +204,8 @@ defmodule Samen.Web.Support.KbReads do
+       query,
+       fn hit_ids ->
+         Mount.resource(kb_mount, Post)
+-        |> Ash.Query.for_read(:read_public, %{org_id: org_id})
+-        |> Ash.Query.filter(id in ^hit_ids)
+-        |> Ash.read!(actor: nil, authorize?: true)
++        |> Ash.Query.filter(org_id == ^org_id and id in ^hit_ids)
++        |> Ash.read!(authorize?: false)
+       end,
+       opts
+     )

@@ -144,8 +144,11 @@ defmodule Samen.Billing.SubscriptionMovement do
 
   # Was this subscription EVER revenue-active before (any prior mov row that moved it
   # onto the book)? Distinguishes :reactivation from :new.
-  defp prior_active?(event_resource, subscription_id, _org_id) do
+  # Org-pinned (S15): `org_id` was already threaded here — filter on it so the read
+  # is a genuine tenant-scoped read the ReadScopeLint can prove.
+  defp prior_active?(event_resource, subscription_id, org_id) do
     event_resource
+    |> Ash.Query.filter(org_id == ^org_id)
     |> Ash.Query.filter(subscription_id == ^subscription_id)
     |> Ash.Query.filter(kind in [:new, :reactivation])
     |> Ash.Query.limit(1)
@@ -161,13 +164,16 @@ defmodule Samen.Billing.SubscriptionMovement do
   # Monthly active prices keyed by plan_id, for this org — the MRR source.
   defp monthly_prices_by_plan(nil, _org_id), do: %{}
 
+  # ADR-036 §4.5(1): Price.unit_amount_cents is now the Money attribute
+  # Price.unit_amount — select it and extract minor units via
+  # Samen.Type.Money.cents/1 so the downstream mrr_delta_cents math is unchanged.
   defp monthly_prices_by_plan(price_resource, org_id) do
     price_resource
-    |> Ash.Query.ensure_selected([:plan_id, :unit_amount_cents, :interval, :active, :org_id])
+    |> Ash.Query.ensure_selected([:plan_id, :unit_amount, :interval, :active, :org_id])
     |> Ash.Query.filter(org_id == ^org_id)
     |> Ash.Query.filter(interval == :monthly and active == true)
     |> Ash.read!(authorize?: false)
-    |> Map.new(&{&1.plan_id, &1.unit_amount_cents})
+    |> Map.new(&{&1.plan_id, Samen.Type.Money.cents(&1.unit_amount)})
   rescue
     _ -> %{}
   end
@@ -201,7 +207,12 @@ defmodule Samen.Billing.SubscriptionMovement do
       from_status: status_of(before_state),
       to_status: status_of(after_state),
       reason: Keyword.get(extra, :reason, :status_change),
-      occurred_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      # T121: microsecond `occurred_at` (NOT truncated to :second) so movements
+      # appended within the same wall-clock second carry distinct business-time
+      # instants — the ledger read (`occurred_at` ordering) is then a strict total
+      # order that respects chronology. Truncating here would collapse a rapid
+      # lifecycle's movements to one tied key and re-introduce the non-total sort.
+      occurred_at: DateTime.utc_now()
     })
     |> Ash.create!(authorize?: false)
 

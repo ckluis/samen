@@ -28,8 +28,8 @@ defmodule Demo.MixProject do
     [
       {:samen_core, path: "../samen_core"},
       # Phoenix + LiveView for the HEEx %Masked{} rendering proof (T1.9 acceptance)
-      {:phoenix, "~> 1.7"},
-      {:phoenix_live_view, "~> 1.0"},
+      {:phoenix, "~> 1.8.9"},
+      {:phoenix_live_view, "~> 1.2.9"},
       {:phoenix_html, "~> 4.1"},
       # Stream-data for property tests (T1.9 acceptance)
       {:stream_data, "== 1.3.0"},

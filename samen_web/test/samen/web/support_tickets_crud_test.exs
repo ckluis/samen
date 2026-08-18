@@ -8,8 +8,11 @@ defmodule Samen.Web.SupportTicketsCrudTest do
     * **CRUD (AC-G1-1/2)** — "New ticket" is a REAL button opening the modal +
       `simple_form`; an INVALID submit (missing required subject) renders inline
       errors and persists NOTHING; a VALID submit persists + refreshes the bounded
-      inbox; each row carries `delete_confirm/1` with a FAIL-HONEST FK refusal for a
-      ticket that still has conversations.
+      inbox; each row carries `delete_confirm/1` — deleting a ticket with linked
+      conversations now ARCHIVES it (ADR-040 §5.9/T37f: `Ticket` is `archivable
+      true`, the cascade PARENT of `ticket ▸cascade conversation ▸cascade message`,
+      §5.4), cascading the archive to its conversation/message at the same instant,
+      superseding the old hard-delete FK-refusal.
     * **Bounded read (AC-G1-5)** — `tickets_page/3` passes `bounded!/4` non-vacuously;
       a 55-ticket org NEVER loads the full set; keyset next/prev + sort + filter work
       on the REAL page; the sort red path refuses an undeclared field.
@@ -112,11 +115,13 @@ defmodule Samen.Web.SupportTicketsCrudTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Delete — interlock + FAIL-HONEST FK refusal
+  # Delete — interlock + ADR-040 §5.9/T37f archive cascade
   # ---------------------------------------------------------------------------
 
-  test "delete destroys a bare ticket; a ticket with conversations is REFUSED and the refusal is surfaced" do
-    %{org_id: org_id, support: %{ticket: linked_ticket}} = Seeds.seed_all()
+  test "delete archives a bare ticket; a ticket with conversations ALSO archives, cascading to its conversation/message" do
+    %{org_id: org_id, support: %{ticket: linked_ticket, conversation: conversation, message: message}} =
+      Seeds.seed_all()
+
     [bare_ticket] = seed_tickets(org_id, 1)
 
     socket = mount_socket(org_id)
@@ -128,10 +133,28 @@ defmodule Samen.Web.SupportTicketsCrudTest do
     assert ticket_count(org_id) == 1
     refute bare_ticket.id in Enum.map(socket.assigns.page.items, & &1.id)
 
-    # FAIL-HONEST: the seeded ticket carries a conversation (FK) — refused, surfaced.
+    # ADR-040 §5.9/T37f: a ticket with a linked conversation/message is no longer
+    # refused — it archives (dropping out of the bounded list), cascading the
+    # archive to its conversation AND message at the same instant.
     socket = event(socket, "delete", %{"id" => linked_ticket.id})
-    assert ticket_count(org_id) == 1
-    assert html(socket) =~ "Could not delete this ticket"
+    assert ticket_count(org_id) == 0
+    refute html(socket) =~ "Could not delete this ticket"
+    refute linked_ticket.id in Enum.map(socket.assigns.page.items, & &1.id)
+
+    live_conversation_ids =
+      Samen.WebTest.Support.Conversation
+      |> Ash.Query.ensure_selected([:id])
+      |> Ash.read!(authorize?: false)
+      |> Enum.map(& &1.id)
+
+    live_message_ids =
+      Samen.WebTest.Support.Message
+      |> Ash.Query.ensure_selected([:id])
+      |> Ash.read!(authorize?: false)
+      |> Enum.map(& &1.id)
+
+    refute conversation.id in live_conversation_ids
+    refute message.id in live_message_ids
   end
 
   # ---------------------------------------------------------------------------

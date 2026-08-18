@@ -32,13 +32,23 @@ defmodule Samen.Web.Operator.Live do
 
   attr :mount, Mount, default: nil
   attr :active, :atom, default: nil
-  attr :notifications_path, :string, default: "/notifications"
 
-  attr :notifications_unread, :any,
-    default: nil,
-    doc: "unread count feeding the Notifications nav badge (nil → unlit; AC-G2-7)"
+  @doc """
+  The operator control-plane sidebar — workspace header + the operator nav group.
 
-  @doc "The operator control-plane sidebar — workspace header + the operator nav group."
+  INVARIANT (T116 P9-F2/AMB-1, attempt 2): every operator-chrome nav link stays on the
+  operator plane (`/operator/*`); the ONLY operator→tenant affordance is the GOVERNED
+  "Act as a tenant →" switcher in the footer, which routes through `/session/org/<id>`
+  (the `SessionController` write) so the crossing sets the acting-as context and trips the
+  `plane_badge` crossing marker. NO operator nav link may target a BARE tenant-plane surface
+  (`/notifications`, `/crm`, `/billing`, …): a raw operator→tenant link is the silent-crossing
+  bug the verifier reproduced (an operator landing on a tenant inbox with `data-plane=tenant`
+  and NO `#acting-as-bar`, byte-identical to a real tenant). The prior `Notifications` item
+  linked to bare `/notifications` and is REMOVED — the operator plane mounts no notifications
+  surface (no `/operator/notifications` route, no `active: :notifications` LiveView), so it was
+  a vestigial mislink, not a feature. `operator_sidebar_link_invariant_test.exs` proves the bar
+  (a bare-tenant href fails the test).
+  """
   def operator_sidebar(assigns) do
     ~H"""
     <.sidebar
@@ -88,19 +98,37 @@ defmodule Samen.Web.Operator.Live do
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 21V4" /><path d="M4 4h12l-2 4 2 4H4" /></svg>
           </:icon>
         </.nav_item>
+        <.nav_item label="Webhook DLQ" href="/operator/webhooks" active={@active == :webhooks}>
+          <:icon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v6m0 0 3-3m-3 3L9 5" /><path d="M5 12a7 7 0 0 0 7 7 7 7 0 0 0 7-7" /></svg>
+          </:icon>
+        </.nav_item>
+        <%!--
+          WS-J fleet cockpit (ADR-044, T84b) — a TOP-LEVEL tier-1/2 platform surface (unlike
+          Deliverability/Automation/Activity below, which are per-tenant drill-ins with no
+          top-level index). Rendered ONLY on a `fleet_cockpit: true` mount (§6.3's `roles[:fleet]`
+          gate runs inside `FleetLive` itself; this nav item is chrome, not the gate).
+        --%>
+        <.nav_item :if={Mount.label(@mount, :fleet_cockpit, false)} label="Fleet" href="/operator/fleet" active={@active == :fleet}>
+          <:icon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
+          </:icon>
+        </.nav_item>
+        <%!--
+          T149 P1 — the Deliverability / Automation / Activity items are REMOVED from the
+          top-level operator nav. Each is a per-TENANT drill-in (`/operator/deliverability/:org_id`,
+          `/operator/automation/:org_id`, `/operator/activity/:org_id`) with NO top-level index
+          route — they are reached by drilling into a SPECIFIC account (the account drill-down's
+          "Deliverability → / Automation health → / Activity →" links). Their prior top-level
+          `href="/operator/accounts"` dumped the operator on the Accounts page while marking the
+          WRONG nav item active — a mislink, not a feature (exactly the vestigial "Notifications"
+          mislink the moduledoc above already removed). `operator_sidebar_link_invariant_test.exs`
+          proves no bare-tenant/off-plane href remains; there is no `active: :deliverability |
+          :automation | :activity` case here because no top-level surface exists to be active.
+        --%>
         <.nav_item label="Portfolio" href="/operator/aggregate" active={@active == :aggregate}>
           <:icon>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19V9m6 10V5m6 14v-7" /></svg>
-          </:icon>
-        </.nav_item>
-        <.nav_item
-          label="Notifications"
-          href={@notifications_path}
-          active={@active == :notifications}
-          count={@notifications_unread}
-        >
-          <:icon>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
           </:icon>
         </.nav_item>
       </.nav_group>

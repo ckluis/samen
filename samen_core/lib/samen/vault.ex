@@ -249,9 +249,13 @@ defmodule Samen.Vault do
   subject's vault ciphertext becomes permanently undecryptable across every
   tier at once, and the trace-sink pseudonym becomes unrecomputable (RQ5).
   Returns the KMS attestation.
+
+  Rides `Samen.Kms.shred/1` — the governed chokepoint that refuses a RESERVED
+  synthetic subject (ADR-035 §4.1, e.g. `"sys:bidx"`, the blind-index HMAC key)
+  before it ever reaches the adapter: `{:error, :reserved_subject}`.
   """
-  @spec shred(String.t()) :: {:ok, Kms.attestation()} | {:error, term}
-  def shred(subject_id), do: Kms.adapter().shred(subject_id)
+  @spec shred(String.t()) :: {:ok, Kms.attestation()} | {:error, :reserved_subject | term}
+  def shred(subject_id), do: Kms.shred(subject_id)
 
   @doc """
   Attestation for the destruction oracle (oracle check 3).

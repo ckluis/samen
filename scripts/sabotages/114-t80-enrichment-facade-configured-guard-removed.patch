@@ -1,0 +1,31 @@
+# SABOTAGE: T80 (spec §I8 external enrichment provider seam) gate sabotage — defeats the
+# FACADE-level FAIL-HONEST guard (ADR-014/024/026). `Samen.Enrichment.enrich/2` is the single
+# chokepoint every enrich call routes through: it calls `provider_mod.configured?(config)` and
+# returns `{:error, :not_configured}` IMMEDIATELY, without ever delegating to the provider, when
+# the provider is not ready. This patch drops that guard entirely and delegates unconditionally
+# to `provider_mod.enrich/3` — the exact "guard removed" shape as the canonical T74 mailbox
+# sabotage (scripts/sabotages/58-t74-mailbox-fake-provider-canned-ok.patch), but applied at the
+# layer that ACTUALLY enforces this guarantee for enrichment (the facade, not the fake — the
+# fake's own `enrich/3` checks `capabilities()` BEFORE it ever reaches its own `configured?`
+# guard, so with the facade guard removed and no capability declared, the call now returns
+# `{:error, :not_implemented}` instead of `{:error, :not_configured}` — a genuine, non-vacuous
+# assertion failure on the exact atom the fail-honest contract promises). Reverts byte-exact.
+# APP: samen_core
+# TEST_FILES: test/enrichment_test.exs
+# MUST_FAIL: unconfigured provider returns {:error, :not_configured}
+diff --git a/samen_core/lib/samen/enrichment.ex b/samen_core/lib/samen/enrichment.ex
+--- a/samen_core/lib/samen/enrichment.ex
++++ b/samen_core/lib/samen/enrichment.ex
+@@ -14,11 +14,7 @@
+   def enrich(subject_type, subject_id) when subject_type in [:person, :company] do
+     {provider_mod, config} = provider_selection()
+
+-    if provider_mod.configured?(config) do
+-      provider_mod.enrich(subject_type, subject_id, config)
+-    else
+-      {:error, :not_configured}
+-    end
++    provider_mod.enrich(subject_type, subject_id, config)
+   end
+
+   @doc "Check if the enrichment provider is configured and ready."

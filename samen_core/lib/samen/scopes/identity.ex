@@ -29,6 +29,20 @@ defmodule Samen.Scopes.Identity do
     * `Demo.Identity.Role`       — Tier-0 config rows: the role catalog per org
     * `Demo.Identity.ApiKey`     — scoped credential, two planes (tenant/operator)
     * `Demo.Identity.Invitation` — a pending invite 🔒 (email vault-routed)
+    * `Demo.Identity.Credential` — ADR-035 §3.1: THE authentication principal
+      (org-less; one human, N orgs); no PII, `email_bidx` is a keyed-HMAC index
+    * `Demo.Identity.AuthToken`  — ADR-035 §4.2: single-use, expiring, hashed
+      emailed secrets (email_verify / password_reset / email_change / totp_pending)
+    * `Demo.Identity.Session`    — ADR-035 §3.1/§4.3: a revocable, DB-backed
+      login session (org-less; belongs_to Credential); introduced at T03 for
+      A3's "revoke all sessions on reset", extended by T04 (A4) with the full
+      listing/remember-me/revocation surface
+    * `Demo.Identity.UserIdentity` — ADR-035 §3.1/§5 A6: the SSO link (org-less;
+      belongs_to Credential); binds an external IdP subject (`provider` +
+      opaque `provider_uid`) to a Credential (the optional OIDC module, T06)
+    * `Demo.Identity.LoginFailure` — ADR-038 §6.4: the durable brute-force
+      failure counter (org-less; one row per `email_bidx`/`credential` key);
+      makes T103's bounded `login_failed` signal survive a node restart (T109)
 
   ## Abbrevs (permanent, registry-checked)
 
@@ -43,6 +57,11 @@ defmodule Samen.Scopes.Identity do
       prefix `rol_*`)
     * `Demo.Identity.ApiKey`     → `key`
     * `Demo.Identity.Invitation` → `inv`
+    * `Demo.Identity.Credential` → `crd` (ADR-035 §3.1)
+    * `Demo.Identity.AuthToken`  → `atk` (ADR-035 §4.2)
+    * `Demo.Identity.Session`    → `ses` (ADR-035 §3.1/§4.3)
+    * `Demo.Identity.UserIdentity` → `uid` (ADR-035 §3.1/§5 A6)
+    * `Demo.Identity.LoginFailure` → `dil` (ADR-038 §6.4; T109)
 
   The macro does NOT invent abbrevs — the host passes them so the host owns the
   registry entry. Defaults are provided for the demo mount.
@@ -68,7 +87,13 @@ defmodule Samen.Scopes.Identity do
     membership: "mbs",
     role: "iro",
     api_key: "key",
-    invitation: "inv"
+    invitation: "inv",
+    credential: "crd",
+    auth_token: "atk",
+    session: "ses",
+    user_identity: "uid",
+    # ADR-038 §6.4 (T109) — the durable brute-force failure counter.
+    login_failure: "dil"
   }
 
   @doc false
@@ -101,11 +126,19 @@ defmodule Samen.Scopes.Identity do
     role_mod = Module.concat(namespace, Role)
     api_key_mod = Module.concat(namespace, ApiKey)
     invitation_mod = Module.concat(namespace, Invitation)
+    credential_mod = Module.concat(namespace, Credential)
+    auth_token_mod = Module.concat(namespace, AuthToken)
+    session_mod = Module.concat(namespace, Session)
+    user_identity_mod = Module.concat(namespace, UserIdentity)
+    login_failure_mod = Module.concat(namespace, LoginFailure)
 
     quote do
       require Samen.Scopes.Identity.Blueprint
 
-      # Register the six Identity resources in the host domain.
+      # Register the eleven Identity resources in the host domain (ADR-035 §3.1
+      # adds Credential + AuthToken to the original six; T03 adds Session; T06
+      # adds UserIdentity, the A6 SSO link; T109 adds LoginFailure, the ADR-038
+      # §6.4 durable brute-force counter).
       resources do
         resource(unquote(org_mod))
         resource(unquote(user_mod))
@@ -113,6 +146,11 @@ defmodule Samen.Scopes.Identity do
         resource(unquote(role_mod))
         resource(unquote(api_key_mod))
         resource(unquote(invitation_mod))
+        resource(unquote(credential_mod))
+        resource(unquote(auth_token_mod))
+        resource(unquote(session_mod))
+        resource(unquote(user_identity_mod))
+        resource(unquote(login_failure_mod))
       end
 
       # Materialize the resource modules in the host namespace. Each is a normal
@@ -170,6 +208,49 @@ defmodule Samen.Scopes.Identity do
         unquote(domain),
         unquote(repo),
         unquote(abbrevs.invitation)
+      )
+
+      Samen.Scopes.Identity.Blueprint.define_credential(
+        unquote(credential_mod),
+        unquote(otp_app),
+        unquote(domain),
+        unquote(repo),
+        unquote(abbrevs.credential)
+      )
+
+      Samen.Scopes.Identity.Blueprint.define_auth_token(
+        unquote(auth_token_mod),
+        unquote(otp_app),
+        unquote(domain),
+        unquote(repo),
+        unquote(abbrevs.auth_token),
+        unquote(credential_mod)
+      )
+
+      Samen.Scopes.Identity.Blueprint.define_session(
+        unquote(session_mod),
+        unquote(otp_app),
+        unquote(domain),
+        unquote(repo),
+        unquote(abbrevs.session),
+        unquote(credential_mod)
+      )
+
+      Samen.Scopes.Identity.Blueprint.define_user_identity(
+        unquote(user_identity_mod),
+        unquote(otp_app),
+        unquote(domain),
+        unquote(repo),
+        unquote(abbrevs.user_identity),
+        unquote(credential_mod)
+      )
+
+      Samen.Scopes.Identity.Blueprint.define_login_failure(
+        unquote(login_failure_mod),
+        unquote(otp_app),
+        unquote(domain),
+        unquote(repo),
+        unquote(abbrevs.login_failure)
       )
     end
   end

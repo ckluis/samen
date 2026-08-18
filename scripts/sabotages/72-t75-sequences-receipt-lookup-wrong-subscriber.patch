@@ -1,0 +1,27 @@
+# SABOTAGE: T75 fix round MED-3 — `Samen.Sequences.ReceiptLookup.lookup/3`
+# resolves the receipt's `subscriber_id` to the StepSend row's OWN id instead
+# of `enrollment.person_id` (the actual recipient identity). A bounce/
+# complaint webhook still "matches" (a receipt is returned, so
+# `Samen.Delivery.Deliverability` proceeds), but the resulting
+# `Samen.Delivery.Suppression` row is keyed on a MEANINGLESS random id —
+# `Samen.Delivery.Chokepoint.suppressed?/2` will NEVER match the actual
+# `person_id` future sends key on, so the bounced recipient keeps receiving
+# further sequence steps. A quiet, structurally-plausible bug (the lookup
+# still returns `{:ok, _}`, never `:not_found`), the exact shape of receipt-
+# resolution defects that are easy to ship without a live suppression test.
+# APP: samen_core
+# TEST_FILES: test/crm/sequence_send_test.exs
+# MUST_FAIL: bounce -> dlv_suppression row -> the recipient's NEXT step is refused as :suppressed
+diff --git a/samen_core/lib/samen/sequences/receipt_lookup.ex b/samen_core/lib/samen/sequences/receipt_lookup.ex
+index f984dbf..d72d3a4 100644
+--- a/samen_core/lib/samen/sequences/receipt_lookup.ex
++++ b/samen_core/lib/samen/sequences/receipt_lookup.ex
+@@ -70,7 +70,7 @@ defmodule Samen.Sequences.ReceiptLookup do
+   defp lookup(step_send_module, enrollment_module, provider_message_id) do
+     with {:ok, send_row} <- fetch_send(step_send_module, provider_message_id),
+          {:ok, enrollment} <- Sequences.fetch_by_id(enrollment_module, send_row.enrollment_id) do
+-      {:ok, %{send_id: send_row.id, org_id: send_row.org_id, subscriber_id: enrollment.person_id}}
++      {:ok, %{send_id: send_row.id, org_id: send_row.org_id, subscriber_id: send_row.id}}
+     else
+       _ -> :not_found
+     end

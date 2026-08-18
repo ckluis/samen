@@ -474,4 +474,103 @@ defmodule Samen.FilesTest do
       refute_receive {:files_upload_telemetry, _, _}
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # T37h — ChokepointGuard archive/restore sanction (ADR-040 §5.9 footnote §)
+  #
+  # `File` is `archivable: true` (T37e). `Samen.Files.ChokepointGuard` is now
+  # registered `on: [:create, :update, :destroy]` (widened from `[:create,
+  # :update]`) — every `destroy`-typed action (the soft `:destroy`, `:archive`,
+  # `:destroy_permanently`) now runs through the guard too. Proves BOTH halves:
+  # (1) the legitimate archive/restore path is governed (evaluated, allowed, and
+  # leaves the quarantine `status` + `storage_key` untouched — no corruption), and
+  # (2) the widening is non-vacuous — a raw `:destroy`-typed changeset that FORCES
+  # a `storage_key` change (the only way to construct the destroy-shaped bypass,
+  # since no real `:destroy`-typed action on this resource accepts `storage_key`
+  # as input) is REFUSED, exactly like the create/update bypasses above. Reverting
+  # the registration to `on: [:create, :update]` flips ONLY the second test.
+  # ---------------------------------------------------------------------------
+  describe "archive/restore sanction (T37h, ADR-040 §5.9 footnote §)" do
+    test "archiving a governed file succeeds, hides it from the default read, and leaves storage_key/status untouched",
+         ctx do
+      {:ok, file} = Files.upload(scope(), payload(), base_opts(ctx))
+      assert file.status == :quarantined
+
+      assert {:ok, archived} = Samen.Archival.archive(file, authorize?: false)
+      assert archived.archived_at != nil
+      # Governed metadata is UNCHANGED by the soft-delete — no residue, no corruption.
+      assert archived.storage_key == file.storage_key
+      assert archived.status == :quarantined
+
+      # Hidden from the default (archived-excluding) read — E6's ExcludeArchived.
+      live_ids = FileResource |> Ash.read!(authorize?: false) |> Enum.map(& &1.id)
+      refute file.id in live_ids
+
+      # Still findable via the `:archived` read (the trash/retention view).
+      archived_ids =
+        FileResource |> Ash.Query.for_read(:archived) |> Ash.read!(authorize?: false) |> Enum.map(& &1.id)
+
+      assert file.id in archived_ids
+    end
+
+    test "restoring an archived file succeeds, makes it visible again, and leaves storage_key/status untouched",
+         ctx do
+      {:ok, file} = Files.upload(scope(), payload(), base_opts(ctx))
+      {:ok, archived} = Samen.Archival.archive(file, authorize?: false)
+
+      assert {:ok, restored} = Samen.Archival.restore(archived, authorize?: false)
+      assert restored.archived_at == nil
+      assert restored.storage_key == file.storage_key
+      assert restored.status == :quarantined
+
+      live_ids = FileResource |> Ash.read!(authorize?: false) |> Enum.map(& &1.id)
+      assert file.id in live_ids
+    end
+
+    # Anti-tautology: a raw `:destroy`-typed changeset cannot accept `storage_key` as
+    # ordinary input (neither `:archive` nor the soft `:destroy` `accept`s it), so the
+    # ONLY way to construct the destroy-shaped bypass is to force the change directly
+    # on the changeset — exactly mirroring the RP-FI-1 update-twin's raw
+    # `Ash.Changeset.for_update` bypass above, one level down at the destroy layer.
+    test "RP-FI-1 destroy: a raw :destroy-typed changeset force-changing storage_key is REFUSED — no residue",
+         ctx do
+      {:ok, file} = Files.upload(scope(), payload(), base_opts(ctx))
+      governed_key = file.storage_key
+      smuggled = "#{governed_key}-smuggled-via-destroy"
+
+      result =
+        file
+        |> Ash.Changeset.for_destroy(:archive, %{})
+        |> Ash.Changeset.force_change_attribute(:storage_key, smuggled)
+        |> Ash.destroy(authorize?: false, return_destroyed?: true)
+
+      assert {:error, error} = result
+      assert Exception.message(error) =~ "ungoverned-file-row"
+
+      # No residue: the row is untouched — neither archived (the :archive side-effect
+      # never landed) nor storage_key-repointed.
+      reloaded = FileResource |> Ash.get!(file.id, authorize?: false)
+      assert reloaded.archived_at == nil
+      assert reloaded.storage_key == governed_key
+      refute reloaded.storage_key == smuggled
+    end
+
+    # Positive control for the destroy-typed registration itself (not just the
+    # marker): the SAME shape (a `:destroy`-typed action) with NO storage_key change
+    # succeeds — proving the guard fires on the destroy path at all (a guard that
+    # silently never attached to :destroy would make the red test above vacuously
+    # pass for the wrong reason: no guard ever running, not a guard correctly refusing).
+    test "RP-FI-1 destroy control: :archive with no storage_key change succeeds (the guard evaluates :destroy and allows it)",
+         ctx do
+      {:ok, file} = Files.upload(scope(), payload(), base_opts(ctx))
+
+      assert {:ok, archived} =
+               file
+               |> Ash.Changeset.for_destroy(:archive, %{})
+               |> Ash.destroy(authorize?: false, return_destroyed?: true)
+
+      assert archived.archived_at != nil
+      assert archived.storage_key == file.storage_key
+    end
+  end
 end

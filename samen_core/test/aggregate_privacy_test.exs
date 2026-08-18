@@ -111,6 +111,46 @@ defmodule Samen.AggregatePrivacyTest do
   end
 
   # ==========================================================================
+  # P17-carry-3 — the fail-closed lower-bound clamp on an EXPLICIT k/l override.
+  #
+  # An explicit opts `:k`/`:l` below 1 (`k: 0`, `k: -1`, `l: 0`) would DISABLE the floor
+  # (`cohort_count < 0` never fires). The clamp REFUSES such a hostile/invalid override and
+  # applies the CONFIG floor (samen_core default k=5 / l=2) instead — a sub-floor cohort can
+  # never be emitted through an explicit opt. The POSITIVE override seam (`k: 1`, which the
+  # whole suite's anti-tautology neuters depend on) is UNTOUCHED.
+  # ==========================================================================
+
+  test "clamp: a k: 0 opt CANNOT disable the floor — a below-floor cohort still SUPPRESSES" do
+    # tenant_count 4 < config k=5. WITHOUT the clamp, `k: 0` makes `4 < 0` false → the value LEAKS.
+    rows = [%{tier: "Enterprise", tenant_count: 4, mrr_cents: 999_999}]
+    assert {:ok, [row]} = Privacy.apply(rows, mrr_spec(), k: 0)
+    assert %Suppressed{reason: :k_anonymity} = row.mrr_cents
+    refute match?(999_999, row.mrr_cents)
+  end
+
+  test "clamp: a NEGATIVE k opt is refused to the config floor (cannot emit a sub-floor cohort)" do
+    rows = [%{tier: "Bespoke", tenant_count: 1, mrr_cents: 250_000}]
+    assert {:ok, [row]} = Privacy.apply(rows, mrr_spec(), k: -1)
+    assert %Suppressed{reason: :k_anonymity} = row.mrr_cents
+  end
+
+  test "clamp: an l: 0 opt CANNOT disable the l-diversity floor" do
+    # depth 8 clears k, distinct 1 < config l=2. `l: 0` would disable l-div (`1 < 0` false).
+    rows = [%{status: "resolved", depth: 8, distinct_priorities: 1}]
+    assert {:ok, [row]} = Privacy.apply(rows, queue_spec(), k: 1, l: 0)
+    assert %Suppressed{reason: :l_diversity} = row.depth
+  end
+
+  test "clamp: the POSITIVE override seam is preserved — k: 1 still RELEASES a count-of-one" do
+    # The suite's floor-is-load-bearing proof relies on `k: 1` releasing; the clamp must NOT
+    # raise a legitimate positive override.
+    rows = [%{tier: "Solo", tenant_count: 1, mrr_cents: 500}]
+    assert {:ok, [row]} = Privacy.apply(rows, mrr_spec(), k: 1)
+    refute Suppressed.suppressed?(row.mrr_cents)
+    assert row.mrr_cents == 500
+  end
+
+  # ==========================================================================
   # Config defaults
   # ==========================================================================
 

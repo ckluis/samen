@@ -46,7 +46,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
 
   @impl true
   def handle_params(params, uri, socket) do
-    org_id = Map.get(params, "org") || socket.assigns.org_id
+    org_id = Samen.Web.CurrentOrg.reresolve(socket, params)
     {:noreply, load(assign(socket, org_id: org_id, return_to: return_path(uri)), org_id)}
   end
 
@@ -107,8 +107,13 @@ defmodule Samen.Web.CRM.CompaniesLive do
     end
   end
 
-  # FAIL-HONEST delete: the kernel defines no cascade — a company with linked
-  # people/deals/activities is refused by the DB (FK) and the refusal is SURFACED.
+  # ADR-040 §5.9/T37c: `Company` is `archivable true`, so `Reads.delete_company/3`'s
+  # `Ash.destroy/2` now rides the default SOFT destroy (T36) — this sets
+  # `archived_at` rather than removing the row, dropping it out of the default
+  # (archived-excluding) bounded read below. No cascade is declared for CRM
+  # (§5.4), so linked people/deals/attachments are untouched and the destroy is
+  # never refused on their account; any `{:error, _}` here is a genuine failure
+  # (e.g. an authorization denial), not the old FK-refusal case.
   def handle_event("delete", %{"id" => id}, socket) do
     %{samen_mount: mount, org_id: org_id} = socket.assigns
     scope = Mount.scope(mount, org_id)
@@ -118,11 +123,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
         {:noreply, load(assign(socket, delete_error: nil), org_id)}
 
       {:error, _reason} ->
-        {:noreply,
-         assign(socket,
-           delete_error:
-             "Could not delete this company — it still has linked records (contacts, deals, or activities)."
-         )}
+        {:noreply, assign(socket, delete_error: "Could not delete this company.")}
     end
   end
 
@@ -197,7 +198,7 @@ defmodule Samen.Web.CRM.CompaniesLive do
             </.metric>
             <.metric
               label="Pipeline value"
-              value={dollars((@metrics && @metrics.pipeline_value_cents) || 0)}
+              value={dollars((@metrics && @metrics.pipeline_value) || 0)}
               sub="open opportunities"
             >
               <:icon>
@@ -305,6 +306,8 @@ defmodule Samen.Web.CRM.CompaniesLive do
   defp role_variant("shipper"), do: "ok"
   defp role_variant(_), do: "mut"
 
+  # ADR-036 §4.5(3): the CRM pipeline-value metric is now a Money composite sum.
+  defp dollars(%Money{} = money), do: dollars(Samen.Type.Money.cents(money))
   defp dollars(cents) when is_integer(cents),
     do: "$#{:erlang.float_to_binary(cents / 100, decimals: 2)}"
 

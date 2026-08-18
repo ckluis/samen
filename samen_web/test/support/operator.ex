@@ -31,7 +31,12 @@ defmodule Samen.WebTest.Operator do
       membership: "wom",
       role: "wor",
       api_key: "wok",
-      invitation: "won"
+      invitation: "won",
+      credential: "woc",
+      auth_token: "wot",
+      session: "wos",
+      user_identity: "woi",
+      login_failure: "wol"
     }
 
   use Samen.Scopes.Billing,
@@ -61,6 +66,7 @@ defmodule Samen.WebTest.Operator do
       agent: "wqg",
       sla: "wql",
       macro: "wqn",
-      csat: "wqs"
+      csat: "wqs",
+      csat_survey_token: "wco"
     }
 end

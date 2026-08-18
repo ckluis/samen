@@ -1,0 +1,32 @@
+import Config
+
+# <%= module %> — production COMPILE-TIME config (ADR-045 §2.1). `config/config.exs` ends with
+# `import_config "#{config_env()}.exs"`, so a MIX_ENV=prod build (a release, or
+# `Config.Reader.read!(env: :prod)`) imports THIS file. Without it a prod config load ABORTS on
+# the missing `prod.exs` — the §2.1 defect this file closes.
+#
+# SECRETS ARE NOT READ HERE. Prod secrets (DATABASE_URL / SECRET_KEY_BASE / PHX_HOST / the
+# SAMEN_KMS_* keys) are read fail-closed at BOOT in `config/runtime.exs` (ADR-024, the --deploy
+# layer). This file carries only compile-time prod POSTURE.
+
+# Quieter prod logging (dev is :debug).
+config :logger, level: :info
+
+# --- tenant-auth gate: ARMED IN PROD (ADR-045 §2, V-F1 Option A) ----------------------------
+# This is already set (and load-bearing) in `config/config.exs` via `auth_required?:
+# config_env() == :prod`, evaluated BEFORE this import — so the gate is ARMED by the time this
+# file loads. Re-stated here so the prod posture is legible in one place and cannot silently
+# drift to disarmed: a prod host that reaches boot DISARMED refuses to start
+# (`Samen.Web.TenantGate.assert_prod_armed!/1`, wired in <%= otp_app %>/application.ex). Keep it
+# armed; wire a real login path + the `:identity_namespace` seam (the runbook's Operator TODO) so
+# operators are not locked out.
+config :<%= otp_app %>, auth_required?: true
+
+# --- KMS keystore posture (ADR-045 §4.2, O5) ------------------------------------------------
+# The vault's crypto keystore is selected in `config/runtime.exs` (the --deploy layer), which
+# names `Samen.Kms.AwsKmsDynamo` (a raise-only SKELETON) with `aws_kms_dynamo_enabled: false`,
+# backstopped by the `Samen.Kms.assert_prod_adapter_ready!/0` boot guard: a prod host with an
+# UNIMPLEMENTED KMS adapter selected REFUSES TO BOOT rather than 500 on every vault op. If you run
+# a prod build WITHOUT the --deploy `runtime.exs` (no `:kms_adapter` set), the vault falls back to
+# `Samen.Kms.FileBacked` — a REAL adapter, but NOT durable across an ephemeral release filesystem.
+# Provision a real KMS you operate before trusting a production vault (see the deploy runbook).

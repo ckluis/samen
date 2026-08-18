@@ -1,0 +1,28 @@
+# SABOTAGE: D3 (T68) gate sabotage — defeats the ADR-043 §3.4 check-(c) structural gate
+# ("no Prompt-resource template body carries a vt_ sentinel"). `prompt_body_vt_violations/1`
+# is narrowed from `String.contains?/2` (the fail-closed "anywhere in the body" scan) to
+# `String.starts_with?/2` (only the FIRST character position) — the exact class of scan
+# narrowing the chokepoint's own moduledoc warns against ("an allowlist that fails open for
+# every shape nobody positioned first"). A real-shaped leak — a vault FK token embedded
+# mid-sentence in an authored/managed prompt body, e.g. "Reference account token: vt_<hex>" —
+# no longer starts with "vt_", so the narrowed scan silently calls it clean. The T68 seam
+# (`Samen.AI.Prompt.samen_ai_prompt_template_bodies/0`) still returns the real data; the
+# verifier itself now blinds to it. The named test constructs exactly this shape (T68's
+# `T68LeakySeedFixture`, mirroring the shipped `LeakyPromptFixture` convention) and flips.
+# APP: samen_core
+# TEST_FILES: test/ai/prompt_resource_test.exs
+# MUST_FAIL: T68 binds check (c): the real Prompt seed templates are clean; a modeled vt_-in-body leak is flagged
+diff --git a/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex b/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
+index 0000000..0000000 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex
+@@ -97,7 +97,8 @@
+     for resource <- resources,
+         {name, body} <- prompt_template_bodies(resource),
+         is_binary(body),
+-        String.contains?(body, @vt_sentinel) do
++        # SABOTAGE (T68 check-(c) weaken): narrowed to String.starts_with?/2 -- a vt_ token embedded mid-body silently passes.
++        String.starts_with?(body, @vt_sentinel) do
+       "#{inspect(resource)}: Prompt template #{inspect(name)} body contains a `vt_` vault-token " <>
+         "sentinel — a committed template must never embed a raw vault FK token (ADR-043 §7.5)."
+     end

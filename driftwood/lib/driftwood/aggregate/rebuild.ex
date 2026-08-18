@@ -7,7 +7,8 @@ defmodule Driftwood.Aggregate.Rebuild do
   CROSS-TENANT (no org filter — the aggregate spans all brokerages) and writes ONLY
   bounded, non-PII summary columns (lane / tier enums + counts + cents numbers) into
   the vault-excluded projection tables. It never touches a `pii_` column — the source
-  columns it reads (`fop_status`, `fop_value_cents`, `fop_custom->>'lane'`,
+  columns it reads (`fop_status`, `fop_value` (ADR-036 H1: the
+  money_with_currency composite, formerly `fop_value_cents`), `fop_custom->>'lane'`,
   `fcm_custom->>'plan_tier'`, `fcm_custom->>'mrr_cents'`) are all non-PII, and the
   destination tables have no `pii_` columns (the C7 verifier + `mix
   samen.verify.no_pii_columns` enforce this).
@@ -31,6 +32,10 @@ defmodule Driftwood.Aggregate.Rebuild do
         # Cross-tenant LOAD VOLUME by lane: for each lane bucket (fop_custom->>'lane'),
         # count distinct brokerages with a load on that lane, count loads, and sum the
         # load gross value cents. NO org filter — this spans every brokerage tenant.
+        #
+        # ADR-036 §4.5(2): fop_value_cents was dropped by the H1 Money migration;
+        # fop_value is now the money_with_currency composite — sum its minor units
+        # directly ((composite).amount * 100).
         %{num_rows: lane_rows} =
           Ecto.Adapters.SQL.query!(
             repo,
@@ -38,11 +43,11 @@ defmodule Driftwood.Aggregate.Rebuild do
             INSERT INTO dag_load_volume_by_lane
               (dag_lane, dag_tenant_count, dag_load_count, dag_gross_cents, dag_refreshed_at)
             SELECT
-              COALESCE(l.fop_custom->>'lane', 'unknown')  AS dag_lane,
-              COUNT(DISTINCT l.fop_org_id)::int           AS dag_tenant_count,
-              COUNT(*)::int                               AS dag_load_count,
-              COALESCE(SUM(l.fop_value_cents), 0)::int    AS dag_gross_cents,
-              now()                                       AS dag_refreshed_at
+              COALESCE(l.fop_custom->>'lane', 'unknown')        AS dag_lane,
+              COUNT(DISTINCT l.fop_org_id)::int                 AS dag_tenant_count,
+              COUNT(*)::int                                     AS dag_load_count,
+              COALESCE(SUM((l.fop_value).amount * 100), 0)::int AS dag_gross_cents,
+              now()                                             AS dag_refreshed_at
             FROM fop_opportunity l
             GROUP BY COALESCE(l.fop_custom->>'lane', 'unknown')
             """,

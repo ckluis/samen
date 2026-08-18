@@ -1,0 +1,23 @@
+# SABOTAGE: O3 — the audit-chain verify BOUNDING is defeated. The fix loads each verify
+# window in a KEYSET-BOUNDED batch (`limit: ^batch`) from a resume cursor, so it never
+# materialises the whole chain into memory (the O3 OOM/starvation hazard). This sabotage
+# drops the `limit`, so a single `verify_chain_batch/4` loads the ENTIRE org chain again —
+# unbounded. The bounding red path (one batch consumes exactly batch_size and reports more
+# remains) MUST flip: the whole 6-entry chain now loads in one shot → {:done} not {:cont,{2,_}}.
+# APP: samen_core
+# TEST_FILES: test/audit_chain_bounded_verify_test.exs
+# MUST_FAIL: consumes exactly batch_size and reports more remains
+diff --git a/samen_core/lib/samen/audit_chain.ex b/samen_core/lib/samen/audit_chain.ex
+index b2204d5..647647a 100644
+--- a/samen_core/lib/samen/audit_chain.ex
++++ b/samen_core/lib/samen/audit_chain.ex
+@@ -376,8 +376,7 @@ defmodule Samen.AuditChain do
+       r.all(
+         from(e in Entry,
+           where: e.org_id == ^org_id and e.seq >= ^expected_seq,
+-          order_by: [asc: e.seq],
+-          limit: ^batch
++          order_by: [asc: e.seq]
+         )
+       )
+ 

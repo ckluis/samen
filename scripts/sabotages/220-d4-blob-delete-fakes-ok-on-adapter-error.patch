@@ -1,0 +1,30 @@
+# SABOTAGE: D4 (ADR-046 §4.3 · ADR-026 fail-honest) — Samen.Files.delete_file/3 fakes
+# success on an adapter delete error: the `{:error, reason} -> rollback({:blob_delete_failed,
+# reason})` arm is replaced with `{:error, _reason} -> true`, so an UNCONFIGURED adapter
+# (S3 without creds, returning {:error, :not_configured}) is reported as a successful blob
+# deletion — a delete that never happened claiming success on a compliance path, the exact
+# lie the fail-honest contract abolishes. Worse, the transaction no longer rolls back, so
+# the last File reference is DROPPED while the blob survives (a silent orphan). It flips the
+# fail-honest proof: delete_file returns {:ok, blob_deleted: true} instead of
+# {:error, {:blob_delete_failed, :not_configured}}, and the reference is not preserved. The
+# ref-count and audit arms are untouched — this targets ONLY the fail-honest refusal.
+# APP: samen_core
+# TEST_FILES: test/files_delete_test.exs
+# MUST_FAIL: returns {:error, _} and PRESERVES the reference
+diff --git a/samen_core/lib/samen/files.ex b/samen_core/lib/samen/files.ex
+index b3be005..2909130 100644
+--- a/samen_core/lib/samen/files.ex
++++ b/samen_core/lib/samen/files.ex
+@@ -436,10 +436,8 @@ defmodule Samen.Files do
+             :ok ->
+               true
+ 
+-            {:error, reason} ->
+-              # A delete that did NOT happen must not report success, and the last
+-              # reference must not be dropped while the blob survives: roll back.
+-              ctx.repo.rollback({:blob_delete_failed, reason})
++            {:error, _reason} ->
++              true
+           end
+         else
+           false

@@ -59,6 +59,9 @@ defmodule <%= module %>.Repo.Migrations.MountPrimitivesScope do
       add(:<%= p_np %>_in_app_enabled, :boolean, default: true)
       add(:<%= p_np %>_email_enabled, :boolean, default: false)
       add(:<%= p_np %>_quiet_hours, :map, default: fragment("'{}'::jsonb"))
+      add(:<%= p_np %>_digest_cadence, :text, null: false, default: "daily")
+      add(:<%= p_np %>_digest_timezone, :text, null: false, default: "Etc/UTC")
+      add(:<%= p_np %>_digest_last_sent_at, :utc_datetime)
       add(:<%= p_np %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:<%= p_np %>_org_id, :uuid, null: false)
       add(:<%= p_np %>_inserted_at, :utc_datetime, null: false)
@@ -82,6 +85,8 @@ defmodule <%= module %>.Repo.Migrations.MountPrimitivesScope do
       add(:<%= p_fl %>_uploaded_by_id, :uuid)
       add(:<%= p_fl %>_metadata, :map, default: fragment("'{}'::jsonb"))
       add(:<%= p_fl %>_search_vector, :text)
+      # ADR-040 §5.9 (T37e) — file is archivable: true.
+      add(:<%= p_fl %>_archived_at, :utc_datetime_usec)
       add(:<%= p_fl %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:<%= p_fl %>_org_id, :uuid, null: false)
       add(:<%= p_fl %>_inserted_at, :utc_datetime, null: false)
@@ -112,6 +117,8 @@ defmodule <%= module %>.Repo.Migrations.MountPrimitivesScope do
       add(:<%= p_wh %>_last_delivered_at, :utc_datetime)
       add(:<%= p_wh %>_metadata, :map, default: fragment("'{}'::jsonb"))
       add(:pii_<%= p_wh %>_signing_secret, :text)
+      # ADR-040 §5.9 (T37e) — webhook is archivable: true.
+      add(:<%= p_wh %>_archived_at, :utc_datetime_usec)
       add(:<%= p_wh %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:<%= p_wh %>_org_id, :uuid, null: false)
       add(:<%= p_wh %>_inserted_at, :utc_datetime, null: false)
@@ -128,6 +135,8 @@ defmodule <%= module %>.Repo.Migrations.MountPrimitivesScope do
       add(:<%= p_ff %>_metadata, :map, default: fragment("'{}'::jsonb"))
       add(:<%= p_ff %>_target_rules, :map, default: fragment("'[]'::jsonb"))
       add(:<%= p_ff %>_variants, :map, default: fragment("'{}'::jsonb"))
+      # ADR-040 §5.9 (T37e) — feature_flag is archivable: true.
+      add(:<%= p_ff %>_archived_at, :utc_datetime_usec)
       add(:<%= p_ff %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:<%= p_ff %>_org_id, :uuid, null: false)
       add(:<%= p_ff %>_inserted_at, :utc_datetime, null: false)

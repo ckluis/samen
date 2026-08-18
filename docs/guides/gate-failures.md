@@ -206,6 +206,92 @@ Use bounded labels: action, route, result, tenant_tier.
 
 ---
 
+## Step 9b — `mix samen.verify.oban_queues`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.oban_queues.ex`):
+
+```text
+[oban-queue-parity] FAIL: queues enqueued to but NOT configured:
+  - :webhooks_in <- Samen.Webhook.IngestWorker
+Jobs on an unconfigured queue sit `available` FOREVER — no error, no retry, no DLQ.
+Register the queue in Samen.Jobs.default_queue_config/0 (the single source of truth).
+** (Mix) oban-queue-parity: unconfigured worker queues — exit 1
+
+[oban-queue-parity] FAIL: discovered ZERO Oban workers.
+A parity check that discovers nothing verifies nothing — this is a FAILURE, not a pass.
+** (Mix) oban-queue-parity: empty discovery — exit 1
+```
+
+**Meaning:** a compiled `Oban.Worker` (hand-written, or one of the worker/scheduler
+modules AshOban generates per `trigger`) enqueues to a queue that has no producer in
+this app's resolved runtime Oban config. This never surfaces at runtime: `Oban.insert`
+returns `{:ok, job}`, the row sits at `state = 'available'` forever, nothing claims it,
+and the DLQ stays empty because nothing was ever attempted — so the enqueuing surface
+(a webhook ingress answering 200, an operator "replay" button) reports success while the
+work silently never happens.
+
+**Fix:** add the queue to `Samen.Jobs.default_queue_config/0` — the single source of
+truth. Do NOT add it to a host's `config :samen_core, Oban` `queues:` list: hosts derive
+the taxonomy at boot through `Samen.Jobs.install_defaults/1`, and hand-maintained
+per-host lists are what caused the drift this gate exists to prevent. A host may list a
+queue ONLY to retune its limit (host limits win; omissions are backfilled).
+
+The empty-discovery variant means the `Oban.Worker` introspection itself broke (e.g. a
+dependency stopped emitting real worker modules). It fails closed on purpose: containment
+over an empty set is trivially true, so a green line there would verify nothing.
+
+---
+
+## Step 13b — `mix samen.verify.erasure_completeness`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.erasure_completeness.ex`):
+
+```text
+[erasure-completeness] FAIL: out-of-envelope residues with NO erasure arm:
+  - UNREGISTERED derived-linkable column <table>.<col>_bidx (...): a `_bidx`-shaped blind index that is NOT in Samen.DerivedLinkable ...
+  - UNREACHED derived-linkable column <table>.email_bidx (...): registered ... but NO :blind_index_erasure_specs entry covers it ...
+  - UNREACHED storage_key blob on <resource> (...): NO :file_erasure_specs entry names this file_module ...
+** (Mix) erasure-completeness: unreached residues — exit 1
+
+[erasure-completeness] FAIL: discovered ZERO derived_linkable residues.
+** (Mix) erasure-completeness: empty derived_linkable discovery — exit 1
+```
+
+**Meaning (ADR-046 §6):** `Samen.Erasure.shred/2` is a KEY-destruction job — it makes
+every *vaulted* value undecryptable at once, but a plaintext-or-linkable value that lives
+OUTSIDE the per-subject-DEK envelope is not reached by key destruction. This gate
+DISCOVERS every such residue from the LIVE schema + registries (never `schema.dict.json`,
+which grandfathers pre-existing columns — the exact mechanism that let `email_bidx` ship
+un-erasable) and ASSERTS a registered `subject_id`-keyed arm reaches each:
+
+- **derived-linkable (`_bidx`) columns** — blind indexes (keyed HMAC of PII) leave an
+  equality oracle over the input space that survives a shred. Discovered via the
+  `Samen.DerivedLinkable` marker registry plus the structural `_bidx` backstop; each must
+  be registered there AND covered by a `:blind_index_erasure_specs` tombstone arm. An
+  UNREGISTERED `_bidx` column fails — a new blind index cannot ship silently.
+- **`storage_key` blobs** — raw file bytes. A subject-linked blob (the resource carries a
+  data-subject field, e.g. `uploaded_by_id`) must be covered by a `:file_erasure_specs`
+  blob-delete arm. An **org-asset** blob (no data-subject field, e.g. CRM `attachment` /
+  CMS `media`) is NOT a per-subject-erasure residue; it is a NOTE-level org-lifecycle
+  residual (deleted on row destroy / retention), named in the output, not gated.
+- **`pii_declared`-capable `:custom` bags** — masking is automatic (the resolver reads
+  every org's `tnt_field`) and erasure is guaranteed at the `define_field` chokepoint (a
+  `pii_declared: true` field is REFUSED unless a `:custom_bag_erasure_specs` arm covers
+  the table). The gate asserts both mechanisms are live.
+
+**Fix:** register the missing arm framework-first, never per-host by hand. The specs are
+DERIVED from each host's live schema by `Samen.Erasure.install_default_specs/1` (the
+`Samen.Jobs.install_defaults/1` twin, called at `application.ex` boot), so a fresh
+`gen.app` is complete by construction. A new blind index goes in `Samen.DerivedLinkable`
+(logical name → owning-principal subject column); a new subject-linked file resource is
+picked up automatically once it carries a recognized subject field.
+
+The empty-discovery variant fails closed on purpose: `email_bidx` + `storage_key` columns
+exist in every host that mounts identity + primitives, so an empty residue set is a broken
+verifier (containment over an empty set is trivially true), never a green line.
+
+---
+
 ## Step 10 — `mix samen.verify.vault_declared_parity`
 
 **Errors** (`samen_core/lib/mix/tasks/samen.verify.vault_declared_parity.ex`):
@@ -293,6 +379,23 @@ cohort keys and numeric value columns only.
 
 ---
 
+## Step 14b — `mix samen.verify.no_pan_columns`
+
+**Error** (`samen_core/lib/mix/tasks/samen.verify.no_pan_columns.ex`):
+
+```text
+resource <Module> declares attribute <attr>, which is PAN/CVC-shaped. No samen resource may EVER store a raw card number or a card security code (ADR-038 §3.5 B5 no-PAN invariant) ...
+resource <Module> (table <table>) has PHYSICAL column <col> that is PAN/CVC-shaped. ...
+```
+
+**Meaning:** a resource (any plane) or a live table carries a column shaped like a raw card
+number (PAN) or a card security code (CVC/CVV) — card-on-file must live exclusively in the
+hosted billing provider's own vault (ADR-038 §3.5 B5); samen never stores a PAN.
+**Fix:** remove/rename the attribute. Non-PAN display metadata (`brand`, `last4`,
+`exp_month`, `exp_year`) is explicitly allowed and never flagged.
+
+---
+
 ## Step 15 — `mix samen.verify.aggregate_privacy`
 
 **Errors** (`samen_core/lib/mix/tasks/samen.verify.aggregate_privacy.ex`):
@@ -350,23 +453,15 @@ still green under sabotage, a verifier regressed: fix the verifier, not the prob
 
 ## Off-gate verifiers
 
-These two `samen.verify.*` tasks are not steps of the generated 18-step gate but are part of
+This `samen.verify.*` task is not a step of the generated 18-step gate but is part of
 the verifier suite (AC-G10-4 covers every task in `samen_core/lib/mix/tasks/`):
 
-### `mix samen.verify.column_refs`
-
-**Error** (`samen_core/lib/mix/tasks/samen.verify.column_refs.ex`):
-
-```text
-unknown storage column reference: <token> at <path>:<line>
-```
-
-**Meaning:** a freeform artifact (SQL fragment, projection, doc) references a physical
-column name that does not exist in the catalog — the anti-hallucination check for
-hand-written (or agent-written) storage references. Exercised by the samen_core suite
-(`catalog_test.exs`, the agent-authoring eval) rather than a fixed gate step.
-**Fix:** use the real abbrev-prefixed column name — introspect with `Samen.Catalog.fields/1`
-or read `schema.dict.json`; never guess storage names.
+> The uncatalogued-column ("hallucinated field") bug class is owned by
+> **`mix samen.verify.catalog_parity`** (a live gate step — bidirectional physical ⇄
+> `fld_field` parity). The former source-text `column_refs` linter was retired (ADR-045 A3):
+> its `^[a-z]{3}_` regex matched the whole Elixir identifier namespace (~1.5k false
+> positives) and ran in no gate, adding no coverage catalog_parity + compile-time Ash
+> attribute verification don't already give.
 
 ### `mix samen.verify.never_read_current`
 
@@ -382,3 +477,91 @@ task prints `Nothing to lint — never-read-current is vacuously satisfied (tier
 and passes; Driftwood runs it as gate step 16b.
 **Fix:** read live truth from the primary repo; if the module genuinely is an analytics
 report, mark it `@cdc_analytics_read true` (an explicit, reviewable claim).
+
+### `mix samen.verify.ai_prompt_masking`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.ai_prompt_masking.ex`):
+
+```text
+<Module>: embeddable field <field> is vault-routed (🔒) — a vault-routed value must never enter vector space (grants never unlock embedding; ADR-043 §7.2). ...
+<Module>: Prompt template <name> body contains a `vt_` vault-token sentinel — a committed template must never embed a raw vault FK token (ADR-043 §7.5).
+```
+
+**Meaning:** the D2 INV-7 (no-PII-egress) STRUCTURAL gate (ADR-043 §3.4, T65) — the
+persisted-egress backstops: (b) a resource declared a vault-routed field embeddable (a vector
+outlives any grant and is invertible, so vault values must never enter vector space — grants
+never unlock embedding), or (c) a managed Prompt template body embeds a raw `vt_` vault token.
+The RUNTIME half — the permanent canary red-team firing a PII canary through every egress class
+EG1–EG6 (prompt, tool args, embedding, MCP, grounding, and the EG6 log/telemetry/error shadow),
+RP-AI-9/10 — runs under `samen_core`'s `mix test` gate
+(`samen_core/test/ai/ai_prompt_masking_test.exs`), sabotage-refutable via
+`scripts/sabotages/44-d2-ai-egress-history-remask-bypass.patch` (the §3.2a per-turn history
+re-mask) and `scripts/sabotages/45-t65-ai-egress-scrub-shape-blind-tuple-hole.patch` (the
+§3.2 step-3 scrub ALLOWLIST — re-opening the tuple/keyword/map shape hole egresses a raw
+`vt_*` token wrapped in EG2 tool args). Wired as
+a demo/vertical `ci.sh` step (the root gate runs demo's `ci.sh`).
+**Fix:** drop the vault-routed field from the embeddable set (or de-vault it); remove the raw
+`vt_` token from the Prompt template body — a template must reference values by binding, resolved
++masked at egress by `Samen.AI.Chokepoint`, never embed a raw token.
+
+### `mix samen.verify.agent_coverage`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex`):
+
+```text
+<file>: a `tool_schema/0`-exporting module (an agent-callable tool) calls `Samen.AI.Agent.start/run` — this reopens the raw-spawn recursion escape the F-4 static lock forbids (ADR-047 §10a row 19). ...
+NON-VACUITY: discovery found ZERO `use Samen.AI.Agent` modules under any app lib/ ...
+the agent-run resource Samen.AI.Agent.Run has NO derived `:shred` retention spec ...
+<file>: a vertical `lib/` file references the `Samen.AI.Agent` kernel but is NEITHER an agent definition NOR a router ...
+```
+
+**Meaning:** the ADR-047 §9#6 coverage gate (batch A7) — the agent loop A1–A6 built is
+self-defending. It scans the WHOLE umbrella tree from `samen_core` and asserts: (1) THE F-4
+RAW-SPAWN AST LOCK — no `tool_schema/0` module may name `Samen.AI.Agent.start/run` (a tool that
+cannot re-enter the loop cannot reopen the raw-spawn recursion escape, ADR-047 §10a row 19);
+(2) every opted-in tool declares both callbacks and carries a test; (3) the agent-run resource
+carries its `:shred` retention arm (§7.4); (4) a NON-VACUITY floor (≥1 agent + ≥1 opted-in
+tool); (5) every agent ships an `AgentCase` proof; (6) the TREE-WIDE leverage guard (a vertical's
+only kernel-referencing `lib/` files are its agent definitions + router). Wired into the ROOT
+`ci.sh`, sabotage-refutable via `scripts/sabotages/268-a7-agent-coverage-f4-reentry-lock.patch`
+(a tool that names `Agent.start` flips the gate red).
+**Fix:** remove the `Samen.AI.Agent.start/run` call from the tool module (a tool proposes/reads,
+never re-enters the loop); add the missing `AgentCase` proof / tool test / retention arm; move
+re-implemented agent behaviour out of the vertical into the framework.
+
+### `mix samen.verify.fleet_wire`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.fleet_wire.ex`):
+
+```text
+field type <type> is not a member of Samen.WideEvent.Schema.bounded_types/0 ... — the fleet wire must never widen the inherited discipline
+Samen.Fleet.Report.Schema.bounded_types/0 [...] is NOT a subset of Samen.WideEvent.Schema.bounded_types/0 [...]
+<host> declares <sentinel> in :fleet_wire_catalogs but the list is empty or malformed ...
+P8 smoke-check FAILED for <sentinel>: a label (...) that is NOT a member of the declared closed catalog [...] was ACCEPTED by Schema.validate/2 ...
+route <VERB> <PATH> is mounted on <Router> but is NOT in Samen.Fleet.RouteTable.declared/0 (ADR-044 §4.4a) — an undeclared fleet route was added.
+Samen.Fleet.RouteTable.declared/0 promises <VERB> <PATH> but <Router> does not mount it.
+```
+
+**Meaning:** ADR-044 §5.2 point 4 / §5.2b's "closed member list" premise (WS-J J2,
+T84b) — three independent checks: (1) RP-J-4, the `FleetReport` wire's four-class
+type discipline (`Samen.Fleet.Report.Schema.class_discipline_violations/0` — no
+field of a text-carrying class can exist, so a PII value has nowhere to land) and
+that the schema never WIDENS the inherited `Samen.WideEvent.Schema.bounded_types/0`
+discipline; (2) P8 (`phase6-punchlist.md`) — a host that declares
+`:fleet_wire_catalogs` (`Samen.Fleet.Report.Catalogs`) for one of the four closed-
+catalog sentinels (`checks[].name` / `mrr_by_tier[].tier` / `oban[].queue` /
+`activity_counts[].event_kind`) gets a LIVE smoke-check proving
+`Samen.Fleet.Report.Schema.validate/2` actually REJECTS an out-of-catalog label,
+not merely shape-checks it — an empty/malformed declared catalog fails outright; a
+host that has not adopted cohort/catalog data at all is untouched (opt-in); (3)
+RP-J-4b, the route-surface cross-check against `Samen.Fleet.RouteTable.declared/0`
+(ADR-044 §4.4a + §5.3's tier-2 resolve routes) — only runs with `--router
+MyAppWeb.Router`, skipped (not a violation) otherwise. Not wired into any
+generated-app gate step (fleet cohorts are opt-in, ADR-044 §5.3); a host that
+adopts the fleet wire runs it directly (`mix samen.verify.fleet_wire`), and
+`samen_web/ci.sh` runs it against the framework's own test fixtures.
+**Fix:** for (1), remove/replace the offending field type with one of
+`:opaque_id`/`:token`/`:enum`/`:number`; for (2), populate the declared catalog
+with the real per-vertical member list (or remove the empty declaration); for (3),
+mount the missing route via `samen_fleet_routes`/`samen_operator_routes(...,
+fleet_cockpit: true)`, or remove the undeclared one.

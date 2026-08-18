@@ -28,7 +28,12 @@ defmodule <%= module %>.Operator do
       membership: "<%= o_mem %>",
       role: "<%= o_role %>",
       api_key: "<%= o_key %>",
-      invitation: "<%= o_invite %>"
+      invitation: "<%= o_invite %>",
+      credential: "<%= o_cred %>",
+      auth_token: "<%= o_atok %>",
+      session: "<%= o_sess %>",
+      user_identity: "<%= o_uid %>",
+      login_failure: "<%= o_lgf %>"
     }
 
   use Samen.Scopes.Billing,
@@ -58,6 +63,7 @@ defmodule <%= module %>.Operator do
       agent: "<%= o_agent %>",
       sla: "<%= o_sla %>",
       macro: "<%= o_macro %>",
-      csat: "<%= o_csat %>"
+      csat: "<%= o_csat %>",
+      csat_survey_token: "<%= o_csat_token %>"
     }
 end

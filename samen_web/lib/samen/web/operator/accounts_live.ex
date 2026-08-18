@@ -62,15 +62,27 @@ defmodule Samen.Web.Operator.AccountsLive do
         |> assign(no_org: true, operator_org_id: nil, metrics: nil)
         |> assign(page: %Samen.Web.Page{}, list_state: %Samen.Web.ListState{})
         |> assign(show_new: false, new_form: nil)
+        |> assign(scope_masking?: false, name_scope: :none)
 
       org_id ->
         scope = Operator.scope(mount)
+        otp_app = Operator.otp_app(mount)
+        operator_id = acting_operator_id(socket, mount)
 
         socket
         |> assign(
           no_org: false,
           operator_org_id: org_id,
-          metrics: Reads.account_metrics(mount, scope, org_id)
+          metrics: Reads.account_metrics(mount, scope, org_id),
+          # ADR-044 Amendment-1 account-level NAME scoping (§16.2/§16.4a, T159). The SAME
+          # keyless `scope_of/2` seam the R-B impersonation drill-in gate uses
+          # (`Samen.Web.Operator.Impersonation`): an operator sees an account's NAME only
+          # when the account org is in their `scope_of/2`. `scope_masking?` engages ONLY
+          # when the product wires a `:fleet_resolution` seam — a product with none gets
+          # today's all-clear behaviour + the no-lockout property (§16.4a). A resolver
+          # bug fails CLOSED to `:none` (mask-by-omission), never toward exposure.
+          scope_masking?: Samen.Fleet.Resolution.configured?(otp_app),
+          name_scope: Samen.Fleet.Resolution.scope_of(otp_app, operator_id)
         )
         |> assign_new(:show_new, fn -> false end)
         |> assign(new_form: new_account_form(mount, scope))
@@ -208,55 +220,97 @@ defmodule Samen.Web.Operator.AccountsLive do
                   <th scope="col" style="width:8%">MRR</th>
                 </:head>
                 <:row :let={a}>
-                  <td class="a-name">
-                    <div style="display:flex;align-items:center;gap:8px">
-                      <div class="av" style="width:28px;height:28px;border-radius:6px;background:#DDE2F5;color:#3B4CCA;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-                        {account_initials(a.name)}
-                      </div>
-                      <div>
-                        <span style="font-weight:500;color:#3a3b45">{a.name}</span>
-                        <div :if={a.tenant_org_id} style="display:flex;gap:10px;font-size:11px">
-                          <a
-                            class="open-account"
-                            href={open_account_href(@samen_mount, a.tenant_org_id)}
-                            style="color:#3B4CCA"
-                            title="Act as this tenant on the TENANT plane (clear) — fill out / QA the demo"
-                          >
-                            Open account →
-                          </a>
-                          <a
-                            class="impersonate-account"
-                            href={impersonate_href(@samen_mount, a.tenant_org_id)}
-                            style="color:var(--muted)"
-                            title="Impersonate on the OPERATOR plane (masked) — the support drill-in"
-                          >
-                            Impersonate (masked) →
-                          </a>
+                  <%= if name_masked?(@scope_masking?, @name_scope, a.tenant_org_id) do %>
+                    <%!--
+                      Mask by omission (ADR-044 §16.4a, T159): the row STILL EXISTS (its
+                      non-identifying aggregates — plan, health band/score, seats, MRR —
+                      render), but the account's IDENTITY does not: NO name, NO tenant-admin
+                      contact/email, NO `tenant_org_id`/`id` handle in ANY href/attribute,
+                      NO drill/open/impersonate deep link. Never a plaintext name, never a
+                      leaking token — the fleet tier-2 mask-by-omission rule, on this surface.
+                    --%>
+                    <td class="a-name a-name-masked">
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <div class="av" style="width:28px;height:28px;border-radius:6px;background:#ECECF2;color:#9aa0b5;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                          •
                         </div>
+                        <span class="masked-affordance" style="color:var(--muted)">not in your scope</span>
                       </div>
-                    </div>
-                  </td>
-                  <td class="a-contact" style="font-weight:500;color:#3a3b45">
-                    {primary_contact_name(a.__admins__)}
-                  </td>
-                  <td class="a-email" style="font-size:12px;color:var(--muted)">
-                    {primary_contact_email(a.__admins__)}
-                  </td>
-                  <td class="a-plan" style="color:var(--muted)">{a.plan || "—"}</td>
-                  <td class="a-health">
-                    <a
-                      class="account-drill"
-                      href={"/operator/accounts/#{a.id}"}
-                      title="Health drill-down — why this score (ADR-019)"
-                      style="text-decoration:none"
-                    >
+                    </td>
+                    <td class="a-contact" style="color:var(--muted)">—</td>
+                    <td class="a-email" style="font-size:12px;color:var(--muted)">—</td>
+                    <td class="a-plan" style="color:var(--muted)">{a.plan || "—"}</td>
+                    <td class="a-health">
                       <.pill variant={health_variant(a.__health__.band)}>
                         {health_label(a.__health__.band)} · {a.__health__.score}
                       </.pill>
-                    </a>
-                  </td>
-                  <td class="a-seats" style="color:var(--muted)">{a.__seats__}</td>
-                  <td class="a-mrr" style="color:var(--muted)">{dollars(a.__mrr_cents__)}</td>
+                    </td>
+                    <td class="a-seats" style="color:var(--muted)">{a.__seats__}</td>
+                    <td class="a-mrr" style="color:var(--muted)">{dollars(a.__mrr_cents__)}</td>
+                  <% else %>
+                    <td class="a-name">
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <div class="av" style="width:28px;height:28px;border-radius:6px;background:#DDE2F5;color:#3B4CCA;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                          {account_initials(a.name)}
+                        </div>
+                        <div>
+                          <span style="font-weight:500;color:#3a3b45">{a.name}</span>
+                          <div :if={a.tenant_org_id} style="display:flex;gap:10px;font-size:11px">
+                            <%!-- S7: act-as is a session WRITE — a zero-JS CSRF-protected
+                                 POST form, never a forgeable GET link. --%>
+                            <form
+                              method="post"
+                              action={open_account_href(@samen_mount, a.tenant_org_id)}
+                              style="margin:0;display:inline"
+                            >
+                              <input
+                                type="hidden"
+                                name="_csrf_token"
+                                value={Plug.CSRFProtection.get_csrf_token_for(open_account_href(@samen_mount, a.tenant_org_id))}
+                              />
+                              <button
+                                type="submit"
+                                class="open-account"
+                                style="color:#3B4CCA;background:none;border:0;padding:0;font:inherit;cursor:pointer"
+                                title="Act as this tenant on the TENANT plane (clear) — fill out / QA the demo"
+                              >
+                                Open account →
+                              </button>
+                            </form>
+                            <a
+                              class="impersonate-account"
+                              href={impersonate_href(@samen_mount, a.tenant_org_id)}
+                              style="color:var(--muted)"
+                              title="Impersonate on the OPERATOR plane (masked) — the support drill-in"
+                            >
+                              Impersonate (masked) →
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="a-contact" style="font-weight:500;color:#3a3b45">
+                      {primary_contact_name(a.__admins__)}
+                    </td>
+                    <td class="a-email" style="font-size:12px;color:var(--muted)">
+                      {primary_contact_email(a.__admins__)}
+                    </td>
+                    <td class="a-plan" style="color:var(--muted)">{a.plan || "—"}</td>
+                    <td class="a-health">
+                      <a
+                        class="account-drill"
+                        href={"/operator/accounts/#{a.id}"}
+                        title="Health drill-down — why this score (ADR-019)"
+                        style="text-decoration:none"
+                      >
+                        <.pill variant={health_variant(a.__health__.band)}>
+                          {health_label(a.__health__.band)} · {a.__health__.score}
+                        </.pill>
+                      </a>
+                    </td>
+                    <td class="a-seats" style="color:var(--muted)">{a.__seats__}</td>
+                    <td class="a-mrr" style="color:var(--muted)">{dollars(a.__mrr_cents__)}</td>
+                  <% end %>
                 </:row>
               </.list_view>
             </div>
@@ -283,6 +337,8 @@ defmodule Samen.Web.Operator.AccountsLive do
   # (1) Act-as / CLEAR — set the session current org via the framework SessionController and
   # land in the tenant's workspace on the TENANT plane. The tenant landing path is a mount
   # label (`:tenant_landing`, default `/broker`) so a host lands you on its own home page.
+  # Since S7 this is a POST form ACTION (the switch writes the session; CSRF-protected),
+  # not a GET href — the query-string `return_to` merges into the POST params.
   defp open_account_href(mount, tenant_org_id) do
     landing = Samen.Web.Mount.label(mount, :tenant_landing, "/broker")
     "/session/org/#{tenant_org_id}?return_to=#{URI.encode_www_form(landing)}"
@@ -294,6 +350,40 @@ defmodule Samen.Web.Operator.AccountsLive do
   defp impersonate_href(mount, tenant_org_id) do
     path = Samen.Web.Mount.label(mount, :impersonate_path, "/operator/impersonate")
     "#{path}?org=#{tenant_org_id}"
+  end
+
+  # -- ADR-044 Amendment-1 account-level name scoping (§16.4a, T159) ------------
+
+  @doc """
+  The account-level NAME-scope predicate — `true` ⇒ this account's NAME (and its
+  identifying contact + linkage handles) must be masked-by-omission for the acting
+  operator. KEYLESS `org_id` membership against the operator's `scope_of/2` value
+  (`Samen.Fleet.Resolution.in_scope?/2`) — the SAME seam the R-B impersonation
+  drill-in gate tests (`Samen.Web.Operator.Impersonation`), on the account's
+  `tenant_org_id` (the impersonation back-reference `scope_of/2` returns org_ids for).
+
+  Inert (`false` — every name clear, today's behaviour) when the product wires no
+  `:fleet_resolution` seam (`scope_masking?` false): the no-lockout property. `scope_of/2`
+  itself fails CLOSED to `:none` on any error, so a wired-but-erroring seam masks
+  (mask-by-omission), never exposes. This is NAME-scoping layered ON TOP of the T146
+  operator-role gate — it never substitutes for it.
+  """
+  @spec name_masked?(boolean(), Samen.Fleet.Resolution.scope(), String.t() | nil) :: boolean()
+  def name_masked?(scope_masking?, name_scope, tenant_org_id) do
+    scope_masking? and not Samen.Fleet.Resolution.in_scope?(name_scope, tenant_org_id)
+  end
+
+  # The acting operator id used to read `scope_of/2`: the authenticated principal
+  # (`:samen_operator_id`, assigned by `Samen.Web.Operator.Authz`'s `:require_operator`
+  # on_mount from the signed session principal) when present, else the operator seat's
+  # well-known org id — the SAME fallback ladder the drill-in gate uses
+  # (`Samen.Web.Operator.Impersonation.resolve_operator_id/3`), so the scope answer is
+  # consistent between the accounts list and a drill-in opened from it.
+  defp acting_operator_id(socket, mount) do
+    case socket.assigns[:samen_operator_id] do
+      id when is_binary(id) -> id
+      _ -> Operator.org_id(mount)
+    end
   end
 
   # -- helpers -----------------------------------------------------------------

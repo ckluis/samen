@@ -1,0 +1,25 @@
+# SABOTAGE: T159 switcher account-level NAME-scope DEFEATED (ADR-044 Amendment-1
+# §16.2/§16.4a, RP-J-14 shape — the shared operator "Act as a tenant →" workspace
+# switcher residual). `Samen.Web.CurrentOrg.switcher_orgs/1` no longer gates the
+# act-as list by the operator's `scope_of/2` membership: the `in_scope?/2` filter
+# predicate is OR'd with a tautology (`is_binary(org_id)`, true for every real
+# account org id), so EVERY account passes the filter — every tenant NAME +
+# `/session/org/<tenant_org_id>` act-as deep link renders in the switcher ungated
+# by scope, the exact cross-tenant name+id leak (arguably worse than the passive
+# accounts-row name — the link is actionable) this residual closes. Mask-by-omission
+# is defeated; the named switcher RED proof leaks.
+# APP: samen_web
+# TEST_FILES: test/samen/web/operator_switcher_scope_mask_test.exs
+# MUST_FAIL: RED: a :none-scope operator sees NEITHER name NOR the tenant_org_id handle
+diff --git a/samen_web/lib/samen/web/current_org.ex b/samen_web/lib/samen/web/current_org.ex
+--- a/samen_web/lib/samen/web/current_org.ex
++++ b/samen_web/lib/samen/web/current_org.ex
+@@ -517,7 +517,7 @@
+           switcher_operator_id(mount)
+         )
+
+-      Enum.filter(orgs, fn {org_id, _name} -> Samen.Fleet.Resolution.in_scope?(scope, org_id) end)
++      Enum.filter(orgs, fn {org_id, _name} -> Samen.Fleet.Resolution.in_scope?(scope, org_id) or is_binary(org_id) end)
+     else
+       orgs
+     end

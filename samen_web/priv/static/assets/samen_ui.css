@@ -19,7 +19,32 @@
  * (Rule-of-Three). When that happens this file moves to that lib's priv/static.
  * ========================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+/* ---------------------------------------------------------------------------
+ * Self-hosted webfonts (T131) — ZERO external CDN. The former
+ *   the former Google Fonts stylesheet import (Inter + JetBrains Mono)
+ * was a framework-wide external font fetch on EVERY page (IP leak, breaks
+ * offline / air-gapped self-hosting, third-party runtime dependency) and violated
+ * this codebase's no-external-CDN invariant. Replaced with local @font-face rules
+ * whose src points at the Latin-subset VARIABLE woff2, served SAME-ORIGIN as
+ * a SEPARATE static file under /assets/fonts/ (T133) rather than a base64 data:
+ * URI, so the stylesheet stays small and the fonts cache independently — still
+ * ZERO external CDN (same-origin only, resolves identically air-gapped). One
+ * variable file per family covers every weight (400-700); OFL + provenance in fonts/.
+ * ------------------------------------------------------------------------- */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/assets/fonts/Inter-latin.var.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/assets/fonts/JetBrainsMono-latin.var.woff2') format('woff2');
+}
 
 /* ---------------------------------------------------------------------------
  * Design tokens (the mockups' :root)
@@ -241,6 +266,196 @@ svg { display: block; }
 }
 .gtitle .lane { font-size: 12px; color: var(--faint); }
 .gtitle .filt { margin-left: auto; }
+
+/* ---------------------------------------------------------------------------
+ * Board (generic grouped columns — Samen.UI.board/1; G1 kanban first client)
+ * Horizontal, per-column-bounded lanes. Bounded horizontal scroll (value-blind,
+ * like .table-scroll) so a wide board never breaks the page layout.
+ * ------------------------------------------------------------------------- */
+.board {
+  display: flex; gap: 14px; align-items: flex-start;
+  overflow-x: auto; padding-bottom: 8px;
+}
+.bcol {
+  flex: 0 0 300px; max-width: 300px;
+  background: var(--card); border: 1px solid var(--line2); border-radius: 12px;
+  display: flex; flex-direction: column; max-height: 100%;
+}
+.bcol-h {
+  display: flex; align-items: center; gap: 9px;
+  padding: 12px 14px; border-bottom: 1px solid var(--line);
+}
+.bcol-t { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
+.bcol-n {
+  font-size: 11px; font-weight: 600; color: var(--muted);
+  background: #F1F1F4; border-radius: 20px; padding: 2px 8px;
+}
+.bcol-body { display: flex; flex-direction: column; gap: 8px; padding: 12px; overflow-y: auto; }
+.bcard {
+  border: 1px solid var(--line); border-radius: 10px; background: var(--bg);
+  padding: 10px 12px;
+}
+.bcard .opp-row { display: flex; flex-direction: column; gap: 6px; }
+.bcard .opp-meta { display: flex; align-items: center; gap: 8px; }
+.bcol-empty { font-size: 12px; color: var(--faint); padding: 6px 2px; }
+.bcol-more {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-top: 1px solid var(--line);
+}
+.bcol-more-n { font-size: 11.5px; color: var(--faint); }
+.bcol-more-btn { margin-left: auto; font-size: 12px; padding: 4px 10px; }
+
+/* ---------------------------------------------------------------------------
+ * Calendar (generic month grid — Samen.UI.calendar/1; G2 first client)
+ * A day-keyed %Samen.Web.Board{} laid out as a 6-week grid. Per-day-bounded
+ * events + a "+N more" overflow; prev/next month are real <a href> links
+ * (the no-JS navigation floor), never JS-only.
+ * ------------------------------------------------------------------------- */
+.cal {
+  background: var(--card); border: 1px solid var(--line2); border-radius: 12px;
+  overflow: hidden;
+}
+.cal-h {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+}
+.cal-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.cal-nav {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line);
+  font-size: 18px; line-height: 1; color: var(--muted); text-decoration: none;
+  background: var(--bg);
+}
+.cal-nav:hover { border-color: var(--line2); color: var(--fg); }
+.cal-nav-off { opacity: 0.35; }
+.cal-wd {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  border-bottom: 1px solid var(--line);
+}
+.cal-wd-c {
+  padding: 8px 10px; font-size: 11px; font-weight: 600; color: var(--faint);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.cal-week { display: grid; grid-template-columns: repeat(7, 1fr); }
+.cal-cell {
+  min-height: 104px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  padding: 6px 7px; display: flex; flex-direction: column; gap: 5px; overflow: hidden;
+}
+.cal-week > .cal-cell:last-child { border-right: none; }
+.cal-out { background: var(--bg); }
+.cal-out .cal-daynum { color: var(--faint); }
+.cal-today .cal-daynum {
+  background: var(--accent, #17A06E); color: #fff; border-radius: 20px;
+  width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+}
+.cal-cell-h { display: flex; align-items: center; justify-content: space-between; }
+.cal-daynum { font-size: 12px; font-weight: 600; color: var(--muted); }
+.cal-cell-n {
+  font-size: 10.5px; font-weight: 600; color: var(--muted);
+  background: #F1F1F4; border-radius: 20px; padding: 1px 7px;
+}
+.cal-events { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.cal-ev {
+  border: 1px solid var(--line); border-radius: 7px; background: var(--card);
+  padding: 4px 7px; font-size: 11.5px;
+}
+.cal-ev .opp-ev { display: flex; flex-direction: column; gap: 3px; }
+.cal-ev .opp-ev-meta { display: flex; align-items: center; gap: 6px; }
+.cal-ev-name { font-weight: 500; }
+.cal-cell-empty { font-size: 11px; color: var(--faint); }
+.cal-more { font-size: 10.5px; color: var(--faint); padding: 1px 2px; }
+
+@media (max-width: 720px) {
+  .cal-cell { min-height: 72px; }
+  .cal-wd-c { padding: 6px 4px; font-size: 10px; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Gantt / timeline (generic horizontal view — Samen.UI.gantt/1; G3 first client)
+ * A lane-keyed %Samen.Web.Board{} whose rows are BARS positioned by a start..end
+ * range. left/width are server-computed % (no-JS layout); a NULL end is a point
+ * marker (min-width), never an infinite bar; prev/next are real <a href> links.
+ * The whole layout scrolls horizontally inside its own track (never the page).
+ * ------------------------------------------------------------------------- */
+.gantt {
+  background: var(--card); border: 1px solid var(--line2); border-radius: 12px;
+  overflow: hidden;
+}
+.gantt-h {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+}
+.gantt-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.gantt-nav {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line);
+  font-size: 18px; line-height: 1; color: var(--muted); text-decoration: none;
+  background: var(--bg);
+}
+.gantt-nav:hover { border-color: var(--line2); color: var(--fg); }
+.gantt-nav-off { opacity: 0.35; }
+
+/* label gutter + track: lanes share a fixed header column and a positioned track. */
+.gantt-axis, .gantt-lane {
+  display: grid; grid-template-columns: 180px 1fr; align-items: stretch;
+}
+.gantt-axis { border-bottom: 1px solid var(--line); background: var(--bg); }
+.gantt-axis-h { border-right: 1px solid var(--line); }
+.gantt-axis-track { position: relative; height: 30px; overflow: hidden; }
+.gantt-tick {
+  position: absolute; top: 0; transform: translateX(-50%);
+  padding: 8px 4px 0; font-size: 10.5px; font-weight: 600; color: var(--faint);
+  white-space: nowrap; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.gantt-tick:first-child { transform: none; }
+.gantt-tick:last-child { transform: translateX(-100%); }
+
+.gantt-lanes { display: flex; flex-direction: column; }
+.gantt-lane { border-bottom: 1px solid var(--line); min-height: 46px; }
+.gantt-lane:last-child { border-bottom: none; }
+.gantt-lane-h {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-right: 1px solid var(--line); font-size: 12.5px; font-weight: 600; color: var(--fg);
+}
+.gantt-lane-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gantt-lane-n {
+  font-size: 10.5px; font-weight: 600; color: var(--muted);
+  background: #F1F1F4; border-radius: 20px; padding: 1px 7px;
+}
+.gantt-lane-track {
+  position: relative; padding: 6px 0; min-height: 46px; overflow: hidden;
+}
+.gantt-bar {
+  position: absolute; box-sizing: border-box; min-width: 8px; height: 22px;
+  margin-top: 4px; border: 1px solid var(--line2); border-radius: 6px;
+  background: var(--card); overflow: hidden;
+}
+.gantt-bar-point {
+  width: 12px !important; border-radius: 50%; background: var(--accent, #17A06E);
+  border-color: var(--accent, #17A06E);
+}
+.gantt-bar-in {
+  display: flex; align-items: center; gap: 6px; height: 100%;
+  padding: 0 7px; font-size: 11px; white-space: nowrap;
+}
+.gantt-bar-point .gantt-bar-in { padding: 0; overflow: hidden; }
+.gantt-now {
+  position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
+  background: var(--accent, #17A06E); opacity: 0.55; z-index: 1;
+}
+.gantt-lane-empty {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  font-size: 11px; color: var(--faint);
+}
+.gantt-more {
+  position: absolute; right: 8px; bottom: 3px; font-size: 10.5px; color: var(--faint);
+}
+.gantt-empty { padding: 18px; font-size: 12px; color: var(--faint); text-align: center; }
+
+@media (max-width: 720px) {
+  .gantt-axis, .gantt-lane { grid-template-columns: 110px 1fr; }
+  .gantt-lane-h { padding: 6px 8px; font-size: 11.5px; }
+}
 
 /* ---------------------------------------------------------------------------
  * Card + data table
@@ -469,8 +684,13 @@ td.right { text-align: right; }
   font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint);
   padding: 6px 8px 4px;
 }
+/* S7: each workspace row is a zero-JS POST <form><button> (the switch is a session write,
+   so it rides a CSRF-protected POST, not a forgeable GET). The button restyles to the
+   exact anchor look so the menu renders unchanged. */
+.ws-switcher-form { margin: 0; }
 .ws-switcher-item {
-  display: block; padding: 8px 10px; border-radius: 7px; font-size: 13px;
+  display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 7px;
+  font-size: 13px; font-family: inherit; background: none; border: 0; cursor: pointer;
   color: var(--ink); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .ws-switcher-item:hover { background: var(--card); }
@@ -488,15 +708,45 @@ td.right { text-align: right; }
 .op-act-as .ws-switcher > summary { border: 1px solid var(--line2); background: var(--card); justify-content: space-between; }
 .op-act-as .ws-switcher-name { max-width: 150px; }
 
-/* "You are viewing <tenant> · Return to Driftwood Ops" banner (ADR-013 §5.3). */
-.acting-as-bar {
+/* T116 / P9-F3 — the PLANE-LEGIBILITY BADGE. A persistent chrome element at the top of every
+ * shared main pane that answers "which plane / whose org." Glyph discipline: a doc/org glyph
+ * for the tenant plane, a SHIELD glyph for operator presence (operator plane + acting-as
+ * crossing) — so the two planes are distinguishable by SHAPE, not only colour, even where the
+ * sidebar glyph LETTER collides (uxwalk's pixel-identical "S", P9-F1). Colour is driven by
+ * [data-plane]/[data-crossing]. */
+.plane-badge {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 13px; border-radius: 10px; font-size: 13px; margin: 14px;
+  border: 1px solid transparent;
+}
+.plane-badge .pb-glyph-wrap { display: inline-flex; flex: 0 0 auto; }
+.plane-badge .pb-glyph { width: 17px; height: 17px; }
+.plane-badge .pb-name { flex: 1 1 auto; }
+.plane-badge .pb-name b { font-weight: 650; }
+.plane-badge .pb-pill {
+  flex: 0 0 auto; font-size: 11px; font-weight: 600; letter-spacing: .01em;
+  padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+}
+
+/* Tenant plane — calm green (data in the clear, you're on your own org). */
+.plane-badge.plane-tenant { background: #EBF7F0; border-color: #BFE3CF; color: #1E7A45; }
+.plane-badge.plane-tenant .pb-pill { background: #D6EFE0; color: #146138; }
+
+/* Operator plane — indigo (masked, cross-tenant SaaS staff). */
+.plane-badge.plane-operator { background: #EEF1FC; border-color: #C7CFF3; color: #2C378F; }
+.plane-badge.plane-operator .pb-pill { background: #DBE1F8; color: #26307C; }
+
+/* "You are viewing <tenant> · Return to <operator>" crossing marker (ADR-013 §5.3, T116). The
+ * dangerous operator→tenant crossing — amber, strong, unmistakable. Keeps the `.acting-as-bar`
+ * contract for backwards compatibility. */
+.plane-badge.plane-crossing, .acting-as-bar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  background: #EEF1FC; border: 1px solid #C7CFF3; color: #2C378F;
+  background: #FDF3E3; border: 1px solid #F0D28C; color: #8A5A11;
   padding: 9px 14px; border-radius: 10px; font-size: 13px; margin: 14px;
 }
 .acting-as-tx { flex: 1 1 auto; }
 .acting-as-tx b { font-weight: 650; }
-.acting-as-return { color: #3B4CCA; text-decoration: none; font-weight: 600; white-space: nowrap; }
+.acting-as-return { color: #B4690E; text-decoration: none; font-weight: 600; white-space: nowrap; }
 .acting-as-return:hover { text-decoration: underline; }
 
 /* ===========================================================================
@@ -633,3 +883,135 @@ td.right { text-align: right; }
   .card { overflow-x: auto; }
   .cmdk { margin: 0; box-shadow: none; }
 }
+
+/* -------------------------------------------------------------------------
+ * Gallery (generic responsive card grid — Samen.UI.gallery/1; G5 first client)
+ * A keyset-bounded %Samen.Web.Page{} laid out as cards. Prev/next are real
+ * <a href> links (?after=<id> keyset cursor); an optional Load-more button is a
+ * JS enhancement layered on top. A dumb renderer — masking is the resolver's.
+ * ------------------------------------------------------------------------- */
+.gallery { display: flex; flex-direction: column; gap: 12px; }
+.gallery-grid {
+  display: grid; gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+.gcard {
+  display: flex; align-items: flex-start; gap: 12px;
+  background: var(--card); border: 1px solid var(--line2); border-radius: 12px;
+  padding: 14px; min-width: 0;
+}
+.gcard-media { flex: 0 0 auto; }
+.gcard-mono {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border-radius: 10px;
+  background: var(--brand-wash); color: var(--brand);
+  font-size: 13px; font-weight: 700; letter-spacing: 0.02em;
+}
+.gcard-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gcard-name { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gcard-sub { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gcard-title { font-size: 11.5px; color: var(--faint); }
+.gcard-email { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gallery-footer { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gallery-page-link { text-decoration: none; }
+.gallery-page-off { opacity: 0.4; pointer-events: none; }
+.gallery-page-size { font-size: 12px; color: var(--muted); margin-left: auto; }
+
+/* -------------------------------------------------------------------------
+ * Tree (generic hierarchical nodes — Samen.UI.tree/1; G6 first client)
+ * A depth-bounded, cycle-safe, per-parent-bounded %Samen.Web.Tree{} rendered as
+ * nested <ul>/<details>. A loaded subtree collapses via native <details> (no
+ * JS). A truncated node (depth/budget) offers a real ?focus=<id> drill-in link
+ * (the no-JS floor); a :cycle node is an inert marker. A dumb renderer.
+ * ------------------------------------------------------------------------- */
+.tree {
+  background: var(--card); border: 1px solid var(--line2); border-radius: 12px;
+  padding: 10px 12px; overflow-x: auto;
+}
+.tree-lvl { list-style: none; margin: 0; padding: 0; }
+.tree-lvl .tree-lvl { margin-left: 18px; border-left: 1px solid var(--line); padding-left: 8px; }
+.tree-node { margin: 0; }
+.tree-det > summary { list-style: none; cursor: pointer; }
+.tree-det > summary::-webkit-details-marker { display: none; }
+.tree-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 6px; border-radius: 8px; min-height: 30px;
+}
+.tree-row:hover { background: var(--brand-wash); }
+.tree-twist {
+  flex: 0 0 auto; width: 10px; height: 10px; position: relative;
+}
+.tree-det > summary .tree-twist::before {
+  content: "▸"; position: absolute; left: -1px; top: -3px;
+  font-size: 10px; color: var(--faint); transition: transform .15s ease;
+}
+.tree-det[open] > summary .tree-twist::before { transform: rotate(90deg); }
+.tree-twist-leaf::before { content: "•"; position: absolute; left: 0; top: -6px; color: var(--line2); }
+.tree-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tree-task-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-more { margin: 2px 0 4px 18px; font-size: 11.5px; color: var(--faint); }
+.tree-drill {
+  font-size: 11.5px; color: var(--brand); text-decoration: none; font-weight: 600;
+}
+.tree-drill:hover { text-decoration: underline; }
+.tree-cycle { font-size: 11px; color: var(--red); font-weight: 600; }
+.tree-cyc { opacity: 0.75; }
+.tree-empty { font-size: 12.5px; color: var(--faint); padding: 6px 4px; }
+.tree-focus-note { font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
+
+/* ── Charts + dashboard (G8, T56) ───────────────────────────────────────── */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.dash-grid {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px; margin: 16px 0;
+}
+.dash-tile {
+  background: var(--card, #fff); border: 1px solid var(--line, #E7E7EC);
+  border-radius: 12px; padding: 14px 16px; min-width: 0;
+}
+.dash-tile.span-2 { grid-column: span 2; }
+.dash-tile-title { font-size: 12px; font-weight: 600; color: var(--muted); margin: 0 0 10px; }
+@media (max-width: 900px) {
+  .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dash-tile.span-2 { grid-column: span 2; }
+}
+@media (max-width: 560px) {
+  .dash-grid { grid-template-columns: 1fr; }
+  .dash-tile.span-2 { grid-column: span 1; }
+}
+.chart { margin: 0; min-width: 0; }
+.chart-title { font-size: 12.5px; font-weight: 600; color: var(--ink, #1b1c22); margin: 0 0 8px; }
+.chart-svg { width: 100%; height: auto; display: block; }
+.chart-svg-pie { width: 130px; height: 130px; flex-shrink: 0; }
+.chart-axis { stroke: var(--line, #E7E7EC); stroke-width: 1; }
+.chart-xlabel { font-size: 9px; fill: var(--muted); }
+.chart-bar-rect { rx: 2; }
+.chart-donut-hole { fill: var(--card, #fff); }
+.chart-empty { font-size: 12.5px; color: var(--faint, #9a9ba5); padding: 12px 4px; }
+.chart-pie-wrap { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.chart-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.chart-legend-item { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.chart-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.chart-legend-label { color: var(--ink, #1b1c22); }
+.chart-legend-val { color: var(--muted); margin-left: auto; white-space: nowrap; }
+.chart-data { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.chart-data th, .chart-data td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line, #E7E7EC); }
+.chart-data td { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Map view (G7, T55) — self-contained SVG basemap + projected pins. No external tiles/CDN. */
+.geo-map { margin: 0; min-width: 0; }
+.geo-map-title { font-size: 12.5px; font-weight: 600; color: var(--ink, #1b1c22); margin: 0 0 8px; }
+.geo-map-canvas { width: 100%; border: 1px solid var(--line, #E7E7EC); border-radius: 6px; overflow: hidden; }
+.geo-map-svg { width: 100%; height: auto; display: block; }
+.geo-map-ocean { fill: var(--surface, #f4f6fb); }
+.geo-land { fill: var(--line, #d7dbe6); stroke: var(--muted, #9a9ba5); stroke-width: 0.4; stroke-linejoin: round; }
+.geo-map-tiles { image-rendering: auto; }
+.geo-marker-dot { fill: #ef4444; stroke: #fff; stroke-width: 0.6; }
+.geo-map-notice { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+.geo-map-capped { font-size: 12px; color: var(--faint, #9a9ba5); margin: 8px 0 0; }
+.geo-map-data { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.geo-map-data th, .geo-map-data td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line, #E7E7EC); }
+.geo-map-data td { text-align: right; font-variant-numeric: tabular-nums; }

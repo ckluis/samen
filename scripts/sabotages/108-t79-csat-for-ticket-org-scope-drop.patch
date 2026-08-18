@@ -1,0 +1,31 @@
+# SABOTAGE: T79 (spec §I6 macros composer palette + CSAT loop closed) — drops the
+# `scope: scope` org-scope threading from `Samen.Web.Support.Reads.csat_for_ticket/3`
+# (the ticket detail page's CSAT landing spot), replacing it with `authorize?:
+# false` (a raw, unscoped lookup by `ticket_id` alone). Without `Samen.Policy.
+# OrgScope` in effect, a ticket-detail page for org B could read org A's CSAT
+# response for a foreign ticket id — a cross-tenant leak. The
+# `drop-the-filter-must-flip-a-named-test` org-scope pin.
+# APP: samen_web
+# TEST_FILES: test/samen/web/support_csat_test.exs
+# MUST_FAIL: a two-org pin: org B's scope never reads org A's ticket's CSAT response
+# APPLY: patch -p1 --no-backup-if-mismatch < scripts/sabotages/108-t79-csat-for-ticket-org-scope-drop.patch
+diff --git a/samen_web/lib/samen/web/support/reads.ex b/samen_web/lib/samen/web/support/reads.ex
+index 904b1fd..0000000 100644
+--- a/samen_web/lib/samen/web/support/reads.ex
++++ b/samen_web/lib/samen/web/support/reads.ex
+@@ -217,13 +217,13 @@
+   never a fabricated score). Org-scoped via `scope` — a cross-org `ticket_id`
+   yields `nil`, never another org's response (no existence oracle).
+   """
+-  def csat_for_ticket(mount, scope, ticket_id) do
++  def csat_for_ticket(mount, _scope, ticket_id) do
+     Mount.resource(mount, Csat)
+     |> Ash.Query.ensure_selected([:score, :comments, :channel, :responded_at, :ticket_id, :agent_id])
+     |> Ash.Query.filter(ticket_id == ^ticket_id)
+     |> Ash.Query.sort(responded_at: :desc)
+     |> Ash.Query.limit(1)
+-    |> Ash.read_one!(scope: scope)
++    |> Ash.read_one!(authorize?: false)
+   rescue
+     _ -> nil
+   end

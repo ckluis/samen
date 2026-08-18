@@ -23,6 +23,15 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     <%= module %>.Operator.Role,
     <%= module %>.Operator.ApiKey,
     <%= module %>.Operator.Invitation,
+    # ADR-035 — the identity spine's two org-less resources (T02x integration).
+    <%= module %>.Operator.Credential,
+    <%= module %>.Operator.AuthToken,
+    # ADR-035 §3.1/§4.3, §5 A6 — the identity spine's other two org-less resources
+    # (T04's Session, T06's UserIdentity; T06x integration).
+    <%= module %>.Operator.Session,
+    <%= module %>.Operator.UserIdentity,
+    # ADR-038 §6.4 (T109) — the durable brute-force failure counter.
+    <%= module %>.Operator.LoginFailure,
     # Billing (operator: tenant subscriptions-to-the-SaaS + the movement ledger)
     <%= module %>.Operator.Customer,
     <%= module %>.Operator.Subscription,
@@ -40,7 +49,9 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     <%= module %>.Operator.Agent,
     <%= module %>.Operator.Message,
     <%= module %>.Operator.Macro,
-    <%= module %>.Operator.Csat
+    <%= module %>.Operator.Csat,
+    # I6 (T79) — the CSAT request→response loop's single-use survey link.
+    <%= module %>.Operator.CsatSurveyToken
   ]
 
   def up do
@@ -54,6 +65,12 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_org %>_name, :text, null: false)
       add(:<%= o_org %>_slug, :text)
       add(:<%= o_org %>_plan, :text, default: "free")
+      # ADR-035 §4.3/§5 A4 (spec-questions c3, T04) — the OPTIONAL org-level
+      # concurrent-session cap; nil = unlimited (the default).
+      add(:<%= o_org %>_max_concurrent_sessions, :integer)
+      # ADR-035 §5 A8 (T08) — set once the first-run onboarding wizard completes
+      # (`Samen.Web.Onboarding.complete!/3`); nil until then (`needed?/3` reads it).
+      add(:<%= o_org %>_onboarded_at, :utc_datetime)
       add(:<%= o_org %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:<%= o_org %>_org_id, :uuid)
       add(:<%= o_org %>_inserted_at, :utc_datetime, null: false)
@@ -132,11 +149,21 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_key %>_updated_at, :utc_datetime, null: false)
     end
 
-    # --- <%= o_invite %>_invitation : a pending invite 🔒 (email vault-routed) ---
+    # --- <%= o_invite %>_invitation : a pending invite 🔒 (email vault-routed).
+    #     ADR-035 §4.1/§4.2/§5 A5 (T05 hardening): `token_digest` (SHA-256 digest at
+    #     rest, the ApiKey precedent) + `email_bidx` (the §4.1 non-reversible keyed-HMAC
+    #     lookup — accept-time credential matching never needs a vault reveal) +
+    #     `expires_at`/`accepted_at`/`revoked_at` (the 4-state lifecycle's terminal
+    #     timestamps). Mirrors demo/driftwood's `harden_identity_invitation` shape,
+    #     emitted directly (fresh app — no rename dance needed). ---
     create table(:<%= o_invite %>_invitation, primary_key: false) do
       add(:<%= o_invite %>_role, :text, default: "member")
       add(:<%= o_invite %>_status, :text, default: "pending")
-      add(:<%= o_invite %>_accept_token, :text)
+      add(:<%= o_invite %>_token_digest, :text)
+      add(:<%= o_invite %>_email_bidx, :text)
+      add(:<%= o_invite %>_expires_at, :utc_datetime)
+      add(:<%= o_invite %>_accepted_at, :utc_datetime)
+      add(:<%= o_invite %>_revoked_at, :utc_datetime)
       add(:<%= o_invite %>_email, :text)
       add(:<%= o_invite %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
       add(:<%= o_invite %>_org_id, :uuid, null: false)
@@ -144,12 +171,155 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_invite %>_updated_at, :utc_datetime, null: false)
     end
 
+    create(unique_index(:<%= o_invite %>_invitation, [:<%= o_invite %>_token_digest]))
+
+    # --- <%= o_cred %>_credential : THE authentication principal (org-less; ADR-035). ---
+    create table(:<%= o_cred %>_credential, primary_key: false) do
+      add(:<%= o_cred %>_email_bidx, :text, null: false)
+      add(:<%= o_cred %>_password_hash, :text)
+      add(:<%= o_cred %>_hash_scheme, :text)
+      add(:<%= o_cred %>_verified_at, :utc_datetime)
+      # ADR-035 §5 A7 (T07) — the TOTP 2FA columns the Identity Credential blueprint
+      # declares. `pii_<abbrev>_totp_secret`/`pii_<abbrev>_recovery_codes` are 🔒
+      # vault-routed (`:pii_secret` — `text` holding a `vt_*` token only, INV-1; the
+      # scalar `pii_attribute` `pii_<abbrev>_<name>` storage prefix); the two
+      # `*_totp_*_at` timestamps are plain non-PII. Without these four columns the
+      # generated app has schema drift the moment TotpEnrollLive enrolls (the
+      # driftwood `add_credential_totp_fields` migration, folded into this create).
+      add(:pii_<%= o_cred %>_totp_secret, :text)
+      add(:pii_<%= o_cred %>_recovery_codes, :text)
+      add(:<%= o_cred %>_totp_enabled_at, :utc_datetime)
+      add(:<%= o_cred %>_totp_last_verified_at, :utc_datetime)
+      add(:<%= o_cred %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_cred %>_org_id, :uuid)
+      add(:<%= o_cred %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_cred %>_updated_at, :utc_datetime, null: false)
+    end
+
+    # ADR-035 §4.1 — the global "one account per email" invariant.
+    create(unique_index(:<%= o_cred %>_credential, [:<%= o_cred %>_email_bidx]))
+
+    # --- <%= o_atok %>_auth_token : single-use, expiring, hashed-at-rest emailed secrets. ---
+    create table(:<%= o_atok %>_auth_token, primary_key: false) do
+      add(:<%= o_atok %>_token_digest, :text, null: false)
+      add(:<%= o_atok %>_context, :text, null: false)
+      add(:<%= o_atok %>_sent_to_bidx, :text)
+      add(:<%= o_atok %>_expires_at, :utc_datetime, null: false)
+      add(:<%= o_atok %>_consumed_at, :utc_datetime)
+
+      add(
+        :<%= o_atok %>_credential_id,
+        references(:<%= o_cred %>_credential,
+          column: :<%= o_cred %>_id,
+          name: "<%= o_atok %>_auth_token_<%= o_atok %>_credential_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(:<%= o_atok %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_atok %>_org_id, :uuid)
+      add(:<%= o_atok %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_atok %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:<%= o_atok %>_auth_token, [:<%= o_atok %>_token_digest]))
+
+    # --- <%= o_sess %>_session : a revocable, DB-backed login session (org-less;
+    #     ADR-035 §3.1/§4.3, T04). No PII: device_label is a bounded browser/OS-family
+    #     string (never the raw user-agent, never an IP); token_digest is the SHA-256
+    #     digest of the raw session token (the ApiKey token_digest precedent) — never
+    #     vault-routed, never allowlisted. ---
+    create table(:<%= o_sess %>_session, primary_key: false) do
+      add(:<%= o_sess %>_token_digest, :text, null: false)
+      add(:<%= o_sess %>_last_seen_at, :utc_datetime)
+      add(:<%= o_sess %>_expires_at, :utc_datetime, null: false)
+      add(:<%= o_sess %>_revoked_at, :utc_datetime)
+      add(:<%= o_sess %>_device_label, :text)
+
+      add(
+        :<%= o_sess %>_credential_id,
+        references(:<%= o_cred %>_credential,
+          column: :<%= o_cred %>_id,
+          name: "<%= o_sess %>_session_<%= o_sess %>_credential_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(:<%= o_sess %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_sess %>_org_id, :uuid)
+      # ADR-035 §4.3 A4 (T104) — microsecond precision so the concurrent-session
+      # cap eviction sorts a total order (same-second sign-ins get a sub-second
+      # creation key); mirrors the Identity.Session blueprint's usec inserted_at.
+      add(:<%= o_sess %>_inserted_at, :utc_datetime_usec, null: false)
+      add(:<%= o_sess %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:<%= o_sess %>_session, [:<%= o_sess %>_token_digest]))
+
+    # --- <%= o_uid %>_user_identity : the SSO link (org-less; ADR-035 §3.1/§5 A6, T06) —
+    #     binds an external IdP subject (provider + opaque provider_uid) to a Credential.
+    #     No PII: provider is a bounded name and provider_uid is an IdP-scoped opaque
+    #     handle — the IdP-asserted email is used only transiently for a bidx lookup at
+    #     link time and, on JIT signup, vaulted on the <%= o_user %>_user row; it is
+    #     NEVER persisted on this table (INV-1). ---
+    create table(:<%= o_uid %>_user_identity, primary_key: false) do
+      add(:<%= o_uid %>_provider, :text, null: false)
+      add(:<%= o_uid %>_provider_uid, :text, null: false)
+      add(:<%= o_uid %>_linked_at, :utc_datetime, null: false)
+
+      add(
+        :<%= o_uid %>_credential_id,
+        references(:<%= o_cred %>_credential,
+          column: :<%= o_cred %>_id,
+          name: "<%= o_uid %>_user_identity_<%= o_uid %>_credential_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(:<%= o_uid %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_uid %>_org_id, :uuid)
+      add(:<%= o_uid %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_uid %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:<%= o_uid %>_user_identity, [:<%= o_uid %>_provider, :<%= o_uid %>_provider_uid]))
+
+    # --- <%= o_lgf %>_login_failure : the DURABLE brute-force failure counter (org-less;
+    #     ADR-038 §6.4, T109). One row per (key_kind, key_value) — key_value is a
+    #     non-reversible email_bidx HMAC or an opaque credential UUID, never PII. Makes
+    #     the T103-shaped bounded login_failed signal survive a node restart. ---
+    create table(:<%= o_lgf %>_login_failure, primary_key: false) do
+      add(:<%= o_lgf %>_key_kind, :text, null: false)
+      add(:<%= o_lgf %>_key_value, :text, null: false)
+      add(:<%= o_lgf %>_failure_count, :integer, null: false, default: 1)
+      add(:<%= o_lgf %>_window_started_at, :utc_datetime_usec, null: false)
+      add(:<%= o_lgf %>_last_failed_at, :utc_datetime_usec, null: false)
+
+      add(:<%= o_lgf %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_lgf %>_org_id, :uuid)
+      add(:<%= o_lgf %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_lgf %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create(unique_index(:<%= o_lgf %>_login_failure, [:<%= o_lgf %>_key_kind, :<%= o_lgf %>_key_value]))
+
+    # ADR-035 §3.1 — additive, nullable FK on the already-created <%= o_user %>_user table.
+    alter table(:<%= o_user %>_user) do
+      add(:<%= o_user %>_credential_id, :uuid)
+    end
+
     # =====================================================================
     # BILLING — each tenant's subscription TO the SaaS
     # =====================================================================
 
     create table(:<%= o_cus %>_customer, primary_key: false) do
-      add(:<%= o_cus %>_stripe_customer_id, :text)
+      add(:<%= o_cus %>_provider_customer_ref, :text)
       add(:<%= o_cus %>_status, :text, default: "active")
       add(:<%= o_cus %>_currency, :text, default: "USD")
       add(:<%= o_cus %>_custom, :map, default: fragment("'{}'::jsonb"))
@@ -165,7 +335,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_plan %>_name, :text, null: false)
       add(:<%= o_plan %>_label, :text)
       add(:<%= o_plan %>_description, :text)
-      add(:<%= o_plan %>_stripe_plan_id, :text)
+      add(:<%= o_plan %>_provider_plan_ref, :text)
       add(:<%= o_plan %>_interval, :text, default: "monthly")
       add(:<%= o_plan %>_enabled, :boolean, default: true)
       add(:<%= o_plan %>_features, :map, default: fragment("'{}'::jsonb"))
@@ -174,12 +344,14 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_plan %>_org_id, :uuid, null: false)
       add(:<%= o_plan %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_plan %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_plan %>_archived_at, :utc_datetime_usec)
     end
 
     create table(:<%= o_price %>_price, primary_key: false) do
-      add(:<%= o_price %>_stripe_price_id, :text)
-      add(:<%= o_price %>_unit_amount_cents, :integer, null: false)
-      add(:<%= o_price %>_currency, :text, null: false, default: "USD")
+      add(:<%= o_price %>_provider_price_ref, :text)
+      # ADR-036 H1/D7: one money_with_currency composite column (the type was
+      # installed by the app_resources migration this one runs after).
+      add(:<%= o_price %>_unit_amount, :money_with_currency, null: false)
       add(:<%= o_price %>_interval, :text, default: "monthly")
       add(:<%= o_price %>_active, :boolean, default: true)
       add(:<%= o_price %>_custom, :map, default: fragment("'{}'::jsonb"))
@@ -198,10 +370,11 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_price %>_org_id, :uuid, null: false)
       add(:<%= o_price %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_price %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_price %>_archived_at, :utc_datetime_usec)
     end
 
     create table(:<%= o_sub %>_subscription, primary_key: false) do
-      add(:<%= o_sub %>_stripe_subscription_id, :text)
+      add(:<%= o_sub %>_provider_subscription_ref, :text)
       add(:<%= o_sub %>_status, :text, default: "active")
       add(:<%= o_sub %>_current_period_start, :utc_datetime)
       add(:<%= o_sub %>_current_period_end, :utc_datetime)
@@ -236,8 +409,11 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_sub %>_updated_at, :utc_datetime, null: false)
     end
 
+    # T106 decision (e): DB-unique-fence on the provider-subscription-ref (mirror idempotency).
+    create(unique_index(:<%= o_sub %>_subscription, [:<%= o_sub %>_provider_subscription_ref], name: "<%= o_sub %>_subscription_provider_ref_index"))
+
     create table(:<%= o_invoice %>_invoice, primary_key: false) do
-      add(:<%= o_invoice %>_stripe_invoice_id, :text)
+      add(:<%= o_invoice %>_provider_invoice_ref, :text)
       add(:<%= o_invoice %>_status, :text, default: "draft")
       add(:<%= o_invoice %>_amount_due_cents, :integer, default: 0)
       add(:<%= o_invoice %>_amount_paid_cents, :integer, default: 0)
@@ -247,6 +423,11 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_invoice %>_due_date, :utc_datetime)
       add(:<%= o_invoice %>_paid_at, :utc_datetime)
       add(:<%= o_invoice %>_line_items, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:<%= o_invoice %>_tax_amount_cents, :integer)
+      add(:<%= o_invoice %>_tax_lines, {:array, :map}, default: fragment("ARRAY[]::jsonb[]"))
+      add(:<%= o_invoice %>_hosted_invoice_url, :text)
+      add(:<%= o_invoice %>_hosted_receipt_url, :text)
+      add(:<%= o_invoice %>_last_event_id, :text)
       add(:<%= o_invoice %>_custom, :map, default: fragment("'{}'::jsonb"))
 
       add(
@@ -276,7 +457,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     end
 
     create table(:<%= o_pay %>_payment, primary_key: false) do
-      add(:<%= o_pay %>_stripe_payment_intent_id, :text)
+      add(:<%= o_pay %>_provider_payment_ref, :text)
       add(:<%= o_pay %>_status, :text, default: "pending")
       add(:<%= o_pay %>_amount_cents, :integer, null: false)
       add(:<%= o_pay %>_currency, :text, default: "USD")
@@ -403,6 +584,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_sla %>_org_id, :uuid, null: false)
       add(:<%= o_sla %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_sla %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_sla %>_archived_at, :utc_datetime_usec)
     end
 
     # The ticket's custom bag carries the requester back-references
@@ -415,7 +597,6 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_tick %>_breached, :boolean, default: false, null: false)
       add(:<%= o_tick %>_resolved_at, :utc_datetime)
       add(:<%= o_tick %>_closed_at, :utc_datetime)
-      add(:<%= o_tick %>_tags, {:array, :text}, default: [])
       add(:<%= o_tick %>_custom, :map, default: fragment("'{}'::jsonb"))
       add(:<%= o_tick %>_external_id, :text)
 
@@ -433,12 +614,24 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_tick %>_org_id, :uuid, null: false)
       add(:<%= o_tick %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_tick %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_tick %>_archived_at, :utc_datetime_usec)
     end
 
     create(
       index(:<%= o_tick %>_ticket, [:<%= o_tick %>_sla_breach_at, :<%= o_tick %>_breached],
         name: "<%= o_tick %>_ticket_sla_breach_idx",
         where: "<%= o_tick %>_sla_breach_at IS NOT NULL AND <%= o_tick %>_breached = false"
+      )
+    )
+
+    # T60: the chat offline-escalation dedupe backstop — a partial-unique index makes a
+    # CONCURRENT double-escalation of the same chat impossible (one ticket per chat). This
+    # is emitted for EVERY generated app so the framework guarantee is inherited, not
+    # demo-only. Partial (external_id IS NOT NULL) so normal tickets are unconstrained.
+    create(
+      unique_index(:<%= o_tick %>_ticket, [:<%= o_tick %>_org_id, :<%= o_tick %>_external_id],
+        name: "<%= o_tick %>_ticket_chat_dedupe_idx",
+        where: "<%= o_tick %>_external_id IS NOT NULL"
       )
     )
 
@@ -462,6 +655,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_conv %>_org_id, :uuid, null: false)
       add(:<%= o_conv %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_conv %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_conv %>_archived_at, :utc_datetime_usec)
     end
 
     # The SaaS support AGENT 🔒 (the SaaS's own employee — CLEAR on its own plane).
@@ -478,6 +672,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_agent %>_org_id, :uuid, null: false)
       add(:<%= o_agent %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_agent %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_agent %>_archived_at, :utc_datetime_usec)
     end
 
     create table(:<%= o_msg %>_message, primary_key: false) do
@@ -513,6 +708,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_msg %>_org_id, :uuid, null: false)
       add(:<%= o_msg %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_msg %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_msg %>_archived_at, :utc_datetime_usec)
     end
 
     create table(:<%= o_macro %>_macro, primary_key: false) do
@@ -526,6 +722,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_macro %>_org_id, :uuid, null: false)
       add(:<%= o_macro %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_macro %>_updated_at, :utc_datetime, null: false)
+      add(:<%= o_macro %>_archived_at, :utc_datetime_usec)
     end
 
     create table(:<%= o_csat %>_csat, primary_key: false) do
@@ -561,6 +758,42 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_csat %>_updated_at, :utc_datetime, null: false)
     end
 
+    # I6 (T79) — the CSAT request→response loop's single-use survey link.
+    create table(:<%= o_csat_token %>_csat_survey_token, primary_key: false) do
+      add(:<%= o_csat_token %>_token_digest, :text, null: false)
+      add(:<%= o_csat_token %>_expires_at, :utc_datetime, null: false)
+      add(:<%= o_csat_token %>_consumed_at, :utc_datetime)
+      add(:<%= o_csat_token %>_sent_at, :utc_datetime)
+
+      add(
+        :<%= o_csat_token %>_ticket_id,
+        references(:<%= o_tick %>_ticket,
+          column: :<%= o_tick %>_id,
+          name: "<%= o_csat_token %>_csat_survey_token_<%= o_csat_token %>_ticket_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        ),
+        null: false
+      )
+
+      add(
+        :<%= o_csat_token %>_agent_id,
+        references(:<%= o_agent %>_agent,
+          column: :<%= o_agent %>_id,
+          name: "<%= o_csat_token %>_csat_survey_token_<%= o_csat_token %>_agent_id_fkey",
+          type: :uuid,
+          prefix: "public"
+        )
+      )
+
+      add(:<%= o_csat_token %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_csat_token %>_org_id, :uuid, null: false)
+      add(:<%= o_csat_token %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_csat_token %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create(index(:<%= o_csat_token %>_csat_survey_token, [:<%= o_csat_token %>_token_digest], name: "<%= o_csat_token %>_csat_survey_token_digest_idx"))
+
     catalog_sync(@resources)
   end
 
@@ -568,6 +801,10 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     catalog_sync_down(@resources)
 
     # --- Support (reverse FK order) ---
+    drop(index(:<%= o_csat_token %>_csat_survey_token, [:<%= o_csat_token %>_token_digest], name: "<%= o_csat_token %>_csat_survey_token_digest_idx"))
+    drop(constraint(:<%= o_csat_token %>_csat_survey_token, "<%= o_csat_token %>_csat_survey_token_<%= o_csat_token %>_agent_id_fkey"))
+    drop(constraint(:<%= o_csat_token %>_csat_survey_token, "<%= o_csat_token %>_csat_survey_token_<%= o_csat_token %>_ticket_id_fkey"))
+    drop(table(:<%= o_csat_token %>_csat_survey_token))
     drop(constraint(:<%= o_csat %>_csat, "<%= o_csat %>_csat_<%= o_csat %>_agent_id_fkey"))
     drop(constraint(:<%= o_csat %>_csat, "<%= o_csat %>_csat_<%= o_csat %>_ticket_id_fkey"))
     drop(table(:<%= o_csat %>_csat))
@@ -578,6 +815,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     drop(table(:<%= o_agent %>_agent))
     drop(constraint(:<%= o_conv %>_conversation, "<%= o_conv %>_conversation_<%= o_conv %>_ticket_id_fkey"))
     drop(table(:<%= o_conv %>_conversation))
+    drop(index(:<%= o_tick %>_ticket, [:<%= o_tick %>_org_id, :<%= o_tick %>_external_id], name: "<%= o_tick %>_ticket_chat_dedupe_idx"))
     drop(index(:<%= o_tick %>_ticket, [:<%= o_tick %>_sla_breach_at, :<%= o_tick %>_breached], name: "<%= o_tick %>_ticket_sla_breach_idx"))
     drop(constraint(:<%= o_tick %>_ticket, "<%= o_tick %>_ticket_<%= o_tick %>_sla_id_fkey"))
     drop(table(:<%= o_tick %>_ticket))
@@ -605,6 +843,18 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     drop(table(:<%= o_cus %>_customer))
 
     # --- Identity (reverse FK order) ---
+    alter table(:<%= o_user %>_user) do
+      remove(:<%= o_user %>_credential_id)
+    end
+
+    drop(table(:<%= o_lgf %>_login_failure))
+    drop(constraint(:<%= o_uid %>_user_identity, "<%= o_uid %>_user_identity_<%= o_uid %>_credential_id_fkey"))
+    drop(table(:<%= o_uid %>_user_identity))
+    drop(constraint(:<%= o_sess %>_session, "<%= o_sess %>_session_<%= o_sess %>_credential_id_fkey"))
+    drop(table(:<%= o_sess %>_session))
+    drop(constraint(:<%= o_atok %>_auth_token, "<%= o_atok %>_auth_token_<%= o_atok %>_credential_id_fkey"))
+    drop(table(:<%= o_atok %>_auth_token))
+    drop(table(:<%= o_cred %>_credential))
     drop(constraint(:<%= o_key %>_api_key, "<%= o_key %>_api_key_<%= o_key %>_membership_id_fkey"))
     drop(table(:<%= o_key %>_api_key))
     drop(table(:<%= o_invite %>_invitation))

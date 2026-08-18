@@ -138,12 +138,24 @@ defmodule Driftwood.CryptoShredGamedayTest do
 
       {:ok, _} = Erasure.shred(d, repo: @repo, org_id: s.org_id)
 
-      # Org chain (carries the erasure event) + global operator chain (reveal lifecycle)
-      # both verify — the hashes are over tokens, not plaintext.
+      # Org chain (carries the erasure event AND — post PP-11/T150 — the TENANT-attributed
+      # reveal lifecycle) + the global operator chain both verify — the hashes are over
+      # tokens, not plaintext.
       assert {:ok, %{entries: n_org}} = Samen.AuditChain.verify_chain(s.org_id, repo: @repo)
       assert n_org >= 1
-      assert {:ok, %{entries: n_glob}} = Samen.AuditChain.verify_chain(Samen.AuditChain.global_org(), repo: @repo)
-      assert n_glob >= 2
+      assert {:ok, %{entries: _n_glob}} = Samen.AuditChain.verify_chain(Samen.AuditChain.global_org(), repo: @repo)
+
+      # PP-11 (T150): the reveal lifecycle is now TENANT-attributed — it rides the driver's
+      # OWN org chain (visible on that tenant's SecurityLive ledger), NOT the __global__
+      # operator chain where it used to land when the vertical wiring dropped org_id.
+      reveal_events = Samen.AuditChain.reveal_events_for_org(s.org_id, repo: @repo)
+      assert reveal_events != [], "the reveal lifecycle must be visible on the tenant's org chain"
+
+      refute [] ==
+               Enum.filter(
+                 Samen.AuditChain.reveal_events_for_org(s.org_id, repo: @repo),
+                 &(&1.subject_id == d)
+               )
 
       # The erasure event survives on the WORM aud_event tier.
       %{rows: [[erasures]]} =

@@ -1,0 +1,24 @@
+# SABOTAGE: T79 (spec §I6 macros composer palette + CSAT loop closed) — the
+# HONEST-EMPTY CSAT aggregate guarantee: `Samen.Web.Support.Reads.metrics/2`'s
+# `csat_avg` (the org-wide "operator analytics reflect it" tile the CSAT loop
+# feeds) must be `nil` — never a fabricated `0.0` — when the org has recorded NO
+# CSAT responses yet. This sabotage turns the `nil` (no rows) branch of
+# `avg_csat/2` into a fabricated `0.0`, which the TicketsLive metrics tile would
+# render as a real "0.0 / 5" score rather than the honest "—" empty state — the
+# exact "never a fabricated satisfaction number" violation T79's hard rules name
+# explicitly.
+# APP: samen_web
+# TEST_FILES: test/samen/web/support_csat_test.exs
+# MUST_FAIL: no CSAT responses yet -> csat_avg is nil, never a fabricated number
+# APPLY: patch -p1 --no-backup-if-mismatch < scripts/sabotages/110-t79-csat-avg-honest-empty-violated.patch
+--- a/samen_web/lib/samen/web/support/reads.ex
++++ b/samen_web/lib/samen/web/support/reads.ex
+@@ -420,7 +420,7 @@
+ 
+   defp avg_csat(mount, scope) do
+     case Ash.avg!(Mount.resource(mount, Csat), :score, scope: scope) do
+-      nil -> nil
++      nil -> 0.0
+       avg when is_float(avg) -> Float.round(avg, 1)
+       avg -> avg |> Decimal.to_float() |> Float.round(1)
+     end

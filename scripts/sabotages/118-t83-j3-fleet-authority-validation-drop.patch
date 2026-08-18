@@ -1,0 +1,18 @@
+# SABOTAGE: T83 J3 (ADR-044 §6.2/§6.3a #1). Samen.Fleet.Authz.roles_for/2 must validate
+# the host seam's return — dropping the is_atom(scope) guard admits a non-atom (e.g. a
+# cookie-derived string) scope into the fleet-wide role map, a mask-by-omission violation.
+# APP: samen_core
+# TEST_FILES: test/fleet/authz_test.exs
+# MUST_FAIL: a non-role value and a non-atom scope are both dropped
+diff --git a/samen_core/lib/samen/fleet/authz.ex b/samen_core/lib/samen/fleet/authz.ex
+--- a/samen_core/lib/samen/fleet/authz.ex
++++ b/samen_core/lib/samen/fleet/authz.ex
+@@ -67,7 +67,7 @@
+   # -- internals --------------------------------------------------------------
+ 
+   defp validate_map(map) when is_map(map) do
+-    for {scope, role} <- map, is_atom(scope), role in @roles, into: %{}, do: {scope, role}
++    for {scope, role} <- map, role in @roles, into: %{}, do: {scope, role}
+   end
+ 
+   defp validate_map(_), do: %{}

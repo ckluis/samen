@@ -1,0 +1,44 @@
+# SABOTAGE: T78 fix round (spec §I5, LOW recommended by the independent verifier) —
+# reorders `Post`'s `policies do` block so the generic `policy action_type(:read)`
+# (which requires `Samen.Policy.OrgScope`, i.e. an ACTOR with an `org_id`) is declared
+# BEFORE the `bypass action(:read_public)`. Ash's policy engine evaluates top-to-bottom;
+# a regular `policy` that FAILS can decide the whole request forbidden before a LATER
+# bypass is ever reached — declaring the bypass second (instead of first) leaves
+# `:read_public` PERMANENTLY forbidden for its only real caller (the unauthenticated
+# portal, which has no actor at all), even though the bypass's own condition still
+# matches and its own check (`authorize_if(always())`) would still pass in isolation.
+# This is NOT a content leak (the opposite failure mode from patches 102/103/105): it
+# is a total portal outage — every KB article, public or internal, becomes invisible to
+# every unauthenticated visitor. Verified empirically while building T78 (this exact
+# ordering mistake was hit and fixed before shipping); this patch pins the ordering
+# itself as an explicit, permanent invariant rather than relying on it never being
+# touched again.
+# APP: samen_web
+# TEST_FILES: test/samen/scopes/cms_kb_scope_test.exs
+# MUST_FAIL: read_public returns a public, published article with no actor at all
+# MUST_FAIL: org A's portal read shows ONLY org A's public article, never org B's
+# MUST_FAIL: org B's portal read shows its OWN article, not org A's (both sides proven live)
+--- a/samen_core/lib/samen/scopes/cms/blueprint.ex
++++ b/samen_core/lib/samen/scopes/cms/blueprint.ex
+@@ -449,6 +449,10 @@
+         end
+ 
+         policies do
++          policy action_type(:read) do
++            authorize_if(Samen.Policy.OrgScope)
++          end
++
+           # T78 (spec §I5) — `:read_public` has NO actor (the unauthenticated
+           # portal). A `bypass` (not a `policy`) is REQUIRED, and MUST be
+           # declared BEFORE the generic `policy action_type(:read)` block below
+@@ -469,10 +473,6 @@
+           # nothing beyond what that filter allows.
+           bypass action(:read_public) do
+             authorize_if(always())
+-          end
+-
+-          policy action_type(:read) do
+-            authorize_if(Samen.Policy.OrgScope)
+           end
+ 
+           policy action_type([:create, :destroy]) do

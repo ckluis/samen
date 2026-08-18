@@ -1,0 +1,49 @@
+# SABOTAGE: A1/A2 (ADR-047 §6 / RP-AG-6) gate sabotage — the agent loop's fail-honest budget
+# floor. Budget exhaustion in Samen.AI.Agent's turn-boundary check no longer terminates
+# `:budget_exhausted` with `{:error, :budget_exhausted, run}` — it PROMOTES the last
+# transcript line (A2: the durable, vault-routed history) to `{:ok, %{answer: ...}}` and
+# finalizes the run `:succeeded`, i.e. a partial answer dressed as a result for a goal the
+# model never finished. That is the exact lie the non-configurable fail-honest floor forbids
+# (operator decision §9#3 TAKEN: values configurable, the never-a-partial-answer semantics
+# not). Flips the named budget-honesty red tests (max-turns + both token budgets); their
+# positive controls (the SAME script under a sufficient budget succeeding with the REAL
+# answer) stay green — proving the reds fail because exhaustion turned dishonest, not
+# because the loop died.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_loop_test.exs
+# MUST_FAIL: the last turn is NOT promoted
+# MUST_FAIL: input-token budget exhausts
+# MUST_FAIL: output-token budget exhausts
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 51594c5..bcba650 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -510,12 +510,23 @@ defmodule Samen.AI.Agent do
+         {:error, :killed, run}
+ 
+       budget_kind != nil ->
+-        # Fail-honest exhaustion (RP-AG-6): an explicit terminal state + a bounded kind.
+-        # The transcript — including any last assistant text — is deliberately NOT
+-        # promoted to an answer (sabotage 240 keeps this refutable).
+-        run = terminal!(run, :exhaust, budget_kind)
++        # SABOTAGE (A1/A2, RP-AG-6): budget exhaustion PROMOTES the last transcript line
++        # to a success — the run finalizes :succeeded and the caller gets {:ok, answer}
++        # for a goal the model never finished. The exact "partial answer dressed as a
++        # result" lie the fail-honest floor forbids (ADR-047 §6).
++        answer =
++          case transcript(run) do
++            {:ok, {_goal, lines}} -> List.last(lines) || ""
++            _ -> ""
++          end
++
++        run =
++          run
++          |> Ash.Changeset.for_update(:succeed, %{})
++          |> Ash.update!(authorize?: false)
++
+         log_terminal(run)
+-        {:error, :budget_exhausted, run}
++        {:ok, %{answer: answer, run: run, turns: run.current_turn}}
+ 
+       remaining == 0 ->
+         # Batch boundary (worker mode): the durable cursor carries everything; the

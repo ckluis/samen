@@ -31,6 +31,17 @@ defmodule Samen.Scopes.Crm.Blueprint do
   Every column is `<abbrev>_<name>` (self-qualifying storage, injected by the
   Samen base macro and the abbrev transformer). The public API/catalog only ever
   sees the logical name.
+
+  ## E6 soft-delete adoption (ADR-040 §5.9, T37c)
+
+  `company`, `person` 🔒, `pipeline`, `opportunity`, and `attachment` all carry
+  `archivable: true` — the §5.9 roster lists no exclusion for this scope. The
+  former `activity` resource is NOT part of this adoption: it was destructively
+  migrated into the canonical Work-scope `Task` and removed from this module
+  before T37c ran (ADR-041 §5, T97) — the canonical Task arrives
+  `archivable true` on its own terms, tracked by T97/T43, not here. No
+  composition cascade is declared for CRM (§5.4): archiving any of the five
+  adopted resources leaves its linked rows live.
   """
 
   # ---------------------------------------------------------------------------
@@ -42,13 +53,19 @@ defmodule Samen.Scopes.Crm.Blueprint do
         @moduledoc """
         CRM.Company — a B2B company record (doc scope table `company`).
         Org-scoped. No PII. Admin-gated writes.
+
+        ADR-040 §5.9 roster (T37c): `company` adopts E6 soft-delete
+        (`archivable true`). No cascade declared for CRM (§5.4) — archiving a
+        company leaves its linked person/opportunity/attachment rows live (no
+        PII on this resource, so INV-1 masking is not applicable here).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_company")
@@ -101,6 +118,15 @@ defmodule Samen.Scopes.Crm.Blueprint do
         masked by default) plus `job_title`, `custom`, and `company_id`.
 
         The revealed vault action exposes plaintext under a grant only. Org-scoped.
+
+        ADR-040 §5.9 roster (T37c): `person` 🔒 adopts E6 soft-delete
+        (`archivable true`) — this scope's vaulted-pilot masking target. An
+        archived person keeps its vault tokens (full_name/emails/phones stay
+        `vt_*`, never erased) and masks per plane exactly like a live row
+        (§5.1/INV-1): the operator-without-grant plane still resolves
+        `%Samen.Masked{}`, never plaintext, never the raw token; a restore
+        never leaks either. No cascade declared for CRM (§5.4) — archiving a
+        person leaves its linked attachment rows live.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -108,7 +134,8 @@ defmodule Samen.Scopes.Crm.Blueprint do
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
           abbrev: unquote(abbrev),
-          base: Samen.Fragments.CorePerson
+          base: Samen.Fragments.CorePerson,
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_person")
@@ -188,13 +215,19 @@ defmodule Samen.Scopes.Crm.Blueprint do
         ladder §7 "config rows cover ~70%"). One row per pipeline/stage per org.
         Tenants rename stages and reorder without forking the product. Admin-gated
         writes. Org-scoped.
+
+        ADR-040 §5.9 roster (T37c): `pipeline` adopts E6 soft-delete
+        (`archivable true`). No cascade declared for CRM (§5.4) — archiving a
+        pipeline stage leaves opportunities pointing at it live (no PII on
+        this resource, so INV-1 masking is not applicable here).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_pipeline")
@@ -243,13 +276,19 @@ defmodule Samen.Scopes.Crm.Blueprint do
         @moduledoc """
         CRM.Opportunity — a deal/opportunity record (doc scope table `opportunity`).
         Belongs to a company and a pipeline stage. Org-scoped. No PII.
+
+        ADR-040 §5.9 roster (T37c): `opportunity` adopts E6 soft-delete
+        (`archivable true`). No cascade declared for CRM (§5.4) — archiving an
+        opportunity leaves its linked attachment rows live (no PII on this
+        resource, so INV-1 masking is not applicable here).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_opportunity")
@@ -258,8 +297,11 @@ defmodule Samen.Scopes.Crm.Blueprint do
 
         attributes do
           attribute(:name, :string, public?: true, allow_nil?: false)
-          attribute(:value_cents, :integer, public?: true, default: 0)
-          attribute(:currency, :string, public?: true, default: "USD")
+          # ADR-036 H1/D7: the paired `value_cents :integer` + `currency :string`
+          # convention is replaced by ONE Money composite attribute (destructive,
+          # pre-1.0, single data-copy migration — no deprecation window; T12).
+          # Default $0.00 USD mirrors the prior pair's `default: 0` / `default: "USD"`.
+          attribute(:value, Samen.Type.Money, public?: true, default: {Money, :new!, [:USD, 0]})
           attribute(:probability, :integer, public?: true, default: 0)
           attribute(:status, :atom,
             public?: true,
@@ -311,101 +353,13 @@ defmodule Samen.Scopes.Crm.Blueprint do
   end
 
   # ---------------------------------------------------------------------------
-  # Activity — a CRM activity (call, email, note, meeting). Org-scoped. No PII
-  # (person/company IDs are opaque IDs, not names).
+  # Activity — REMOVED (ADR-041 §5, operator ruling M5). The CRM `Activity`
+  # resource was destructively migrated into the canonical Work-scope `Task`
+  # (`Samen.Scopes.Work.Task`) and dropped by T97. The former `define_activity/8`
+  # macro lived here; every Activity row now lands on Task field-for-field
+  # (ADR-041 §5.1), and the CRM timeline reads Task through the generic
+  # `(subject_key, subject_id)` object-ref anchor. See ADR-041 + CHANGELOG.
   # ---------------------------------------------------------------------------
-  defmacro define_activity(
-             module,
-             otp_app,
-             domain,
-             repo,
-             abbrev,
-             company_mod,
-             person_mod,
-             opportunity_mod
-           ) do
-    quote do
-      defmodule unquote(module) do
-        @moduledoc """
-        CRM.Activity — a CRM activity (call, email, meeting, note) linked to a
-        company/person/opportunity (doc scope table `activity`). Org-scoped. No PII
-        in the activity row itself — references are opaque IDs.
-        """
-        use Samen.Resource,
-          otp_app: unquote(otp_app),
-          domain: unquote(domain),
-          data_layer: AshPostgres.DataLayer,
-          authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
-
-        postgres do
-          table("#{unquote(abbrev)}_activity")
-          repo(unquote(repo))
-        end
-
-        attributes do
-          attribute(:type, :atom,
-            public?: true,
-            allow_nil?: false,
-            constraints: [one_of: [:call, :email, :meeting, :note, :task]]
-          )
-
-          attribute(:subject, :string, public?: true)
-          attribute(:body, :string, public?: true)
-          attribute(:status, :atom,
-            public?: true,
-            default: :pending,
-            constraints: [one_of: [:pending, :completed, :cancelled]]
-          )
-          attribute(:due_at, :utc_datetime, public?: true)
-          attribute(:completed_at, :utc_datetime, public?: true)
-          # Tier-1 custom bag
-          attribute(:custom, :map, public?: true)
-        end
-
-        relationships do
-          belongs_to :company, unquote(company_mod) do
-            public?(true)
-            attribute_type(:uuid)
-            allow_nil?(true)
-          end
-
-          belongs_to :person, unquote(person_mod) do
-            public?(true)
-            attribute_type(:uuid)
-            allow_nil?(true)
-          end
-
-          belongs_to :opportunity, unquote(opportunity_mod) do
-            public?(true)
-            attribute_type(:uuid)
-            allow_nil?(true)
-          end
-        end
-
-        actions do
-          defaults([:read, :destroy, create: :*, update: :*])
-        end
-
-        # F3.2 same-org FK: an activity may only reference same-org parents.
-        changes do
-          change({Samen.Policy.SameOrgFk, relationships: [:company, :person, :opportunity]})
-        end
-
-        policies do
-          policy action_type(:read) do
-            authorize_if(Samen.Policy.OrgScope)
-          end
-
-          policy action_type([:create, :update, :destroy]) do
-            forbid_unless(Samen.Policy.OrgScope)
-            forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
-            authorize_if(always())
-          end
-        end
-      end
-    end
-  end
 
   # ---------------------------------------------------------------------------
   # Attachment — a file reference linked to any CRM object. Org-scoped. No PII
@@ -427,13 +381,19 @@ defmodule Samen.Scopes.Crm.Blueprint do
         CRM.Attachment — a file reference attached to a CRM object (doc scope table
         `attachment`). Org-scoped. No PII (file_name and storage_key are metadata,
         not subject identity). Admin/member writes.
+
+        ADR-040 §5.9 roster (T37c): `attachment` adopts E6 soft-delete
+        (`archivable true`). No cascade declared for CRM (§5.4) — attachment is
+        a cascade LEAF here (no PII on this resource, so INV-1 masking is not
+        applicable here).
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
           domain: unquote(domain),
           data_layer: AshPostgres.DataLayer,
           authorizers: [Ash.Policy.Authorizer],
-          abbrev: unquote(abbrev)
+          abbrev: unquote(abbrev),
+          archivable: true
 
         postgres do
           table("#{unquote(abbrev)}_attachment")

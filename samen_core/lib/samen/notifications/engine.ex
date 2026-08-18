@@ -271,7 +271,7 @@ defmodule Samen.Notifications.Engine do
   end
 
   # In-app notifications are delivered on write (they land in the inbox). Email/other
-  # channels start :pending and are handed to Samen.Delivery.Adapter downstream.
+  # channels start :pending and are handed to Samen.Delivery.Provider downstream.
   defp initial_status(:in_app), do: :delivered
   defp initial_status(_), do: :pending
 

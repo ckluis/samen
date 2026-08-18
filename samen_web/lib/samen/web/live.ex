@@ -18,10 +18,50 @@ defmodule Samen.Web.Live do
   the framework routes always populate it.
   """
   def assign_mount(socket, %{"samen_mount" => raw} = session) when is_map(raw) do
+    mount = Samen.Web.Mount.from_session(raw)
+
     socket
-    |> assign(:samen_mount, Samen.Web.Mount.from_session(raw))
+    |> assign(:samen_mount, stash_principal(mount, socket.assigns[:samen_tenant_principal]))
     |> assign(:samen_acting_as, Samen.Web.CurrentOrg.acting_as?(session))
   end
 
   def assign_mount(socket, _session), do: socket
+
+  # ADR-045 §4.4 (S1a) — stash the request's authenticated principal (pinned in assigns by
+  # `Samen.Web.TenantAuthz`'s `on_mount`, which runs before this) onto the mount, so the 2-arity
+  # tenant `write_scope(mount, org_id)` helpers derive the REAL `Identity.Membership` role on an
+  # armed host with no per-call-site threading. Runtime-only: this mount is assigned, never
+  # re-serialized into the session (`Mount.to_session/1` runs only at router-compile time). A nil
+  # principal (the disarmed dev posture) leaves the write scope at its byte-identical `:admin`.
+  defp stash_principal(%Samen.Web.Mount{} = mount, principal) do
+    labels = Map.put(mount.labels || %{}, Samen.Web.TenantRole.principal_label(), principal)
+    %{mount | labels: labels}
+  end
+
+  @doc """
+  The client IP for a LiveView surface, for per-IP rate limiting (ADR-038 §6.3; T103).
+
+  Reads `:peer_data` from `get_connect_info/2` — available on the CONNECTED socket when
+  the host endpoint declares `connect_info: [:peer_data]` on its live socket (the submit
+  that a rate limit guards fires over the connected socket). When it is unavailable
+  (disconnected dead render, or a host that did not opt into `:peer_data`), it returns
+  `"unknown"`: the per-IP limit then degrades to a single shared bucket — a STRICTER
+  (global) bound, never a weaker one, so the brute-force control fails safe.
+  """
+  def client_ip(socket) do
+    case peer_data(socket) do
+      %{address: address} when is_tuple(address) -> address |> :inet.ntoa() |> to_string()
+      _ -> "unknown"
+    end
+  end
+
+  # `get_connect_info/2` raises outside the mount lifecycle (e.g. a unit test that calls
+  # `mount/3` on a synthetic socket) and returns nil on a disconnected dead render or a
+  # host that did not opt into `:peer_data`. Either way we want the safe `"unknown"`
+  # fallback (a stricter, global per-IP bucket), never a crash.
+  defp peer_data(socket) do
+    Phoenix.LiveView.get_connect_info(socket, :peer_data)
+  rescue
+    _ -> nil
+  end
 end

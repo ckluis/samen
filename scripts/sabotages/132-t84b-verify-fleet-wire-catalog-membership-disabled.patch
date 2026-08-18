@@ -1,0 +1,24 @@
+# SABOTAGE: T84b / P8 (phase6-punchlist). Samen.Fleet.Report.Schema.validate_value/5's :enum
+# catalog branch is where CLOSED-CATALOG MEMBERSHIP is enforced once a host declares
+# :fleet_wire_catalogs - closing the "shape-bound but not membership-bound" gap the T82 stopgap
+# left open (s5.2b). Making the membership guard's second clause vacuously false (`in []`
+# instead of `to_string(value) not in members`) silently disables ALL membership enforcement:
+# a shape-valid but never-declared catalog label is ACCEPTED regardless of what a host
+# declared. Positive control: the SHAPE bound (not catalog_label?/1) is untouched, so a
+# PII-shaped value is still rejected - only membership is defeated.
+# APP: samen_core
+# TEST_FILES: test/verify_fleet_wire_test.exs
+# MUST_FAIL: RED sabotage twin — Schema.validate/2 accepting an out-of-catalog label flips the smoke-check
+diff --git a/samen_core/lib/samen/fleet/report/schema.ex b/samen_core/lib/samen/fleet/report/schema.ex
+index ab9b6f8..142e4a5 100644
+--- a/samen_core/lib/samen/fleet/report/schema.ex
++++ b/samen_core/lib/samen/fleet/report/schema.ex
+@@ -369,7 +369,7 @@ defmodule Samen.Fleet.Report.Schema do
+             ["#{inspect(name)} = #{inspect(value)} is not a bounded catalog label (^[a-z][a-z0-9_]{0,39}$)"]
+ 
+           (members = Map.get(catalogs, catalog_sentinel)) not in [nil, []] and
+-              to_string(value) not in members ->
++              to_string(value) in [] ->
+             ["#{inspect(name)} = #{inspect(value)} is not a member of the declared closed catalog #{inspect(catalog_sentinel)} #{inspect(members)}"]
+ 
+           true ->

@@ -1,0 +1,24 @@
+# SABOTAGE: S1a (ADR-045 §4.4) — the CHAT org-wide disclosure admin gate DEFEATED. The luminary
+# G1 verifier found `Samen.Web.Chat.set_disclosure_setting/3` (the `expose_identity_to_support`
+# flip, `RoleAtLeast :admin`-gated) building a hardcoded `role: :admin` scope that discarded the
+# caller — an S1a member->admin self-elevation on an armed host, whose `ThreadsLive`
+# "toggle_disclosure" caller gates only on `tenant_plane?`, not admin (the "admin only" error
+# branch was dead). The fix routes it through `Samen.Web.TenantRole.admin_scope/3` (armed derives
+# the REAL membership role, fail-closed `:member`). This sabotage restores the hardcoded `:admin`
+# scope, so on an armed host a NON-admin member's disclosure flip SUCCEEDS again. The named
+# red path (a member whose toggle_disclosure must be REFUSED) MUST flip.
+# APP: samen_web
+# TEST_FILES: test/samen/web/tenant_authz_live_test.exs
+# MUST_FAIL: a NON-admin member's toggle_disclosure is REFUSED
+diff --git a/samen_web/lib/samen/web/chat.ex b/samen_web/lib/samen/web/chat.ex
+--- a/samen_web/lib/samen/web/chat.ex
++++ b/samen_web/lib/samen/web/chat.ex
+@@ -142,7 +142,7 @@
+     # refused by the kernel `RoleAtLeast :admin` gate (the `ThreadsLive` "admin only" branch becomes
+     # reachable). Still `OrgScope`-confined; only reachable on the tenant plane (the LiveView gates).
+     org_id = org_id_of(scope)
+-    admin_scope = Samen.Web.TenantRole.admin_scope(mount, org_id)
++    admin_scope = %Samen.Scope{actor: %{id: "chat-admin:#{org_id}", org_id: org_id, role: :admin, kind: :tenant, plane: :tenant}}
+     resource = Mount.resource(mount, ChatDisclosureSetting)
+ 
+     case Reads.disclosure_setting(mount, admin_scope) do

@@ -216,8 +216,8 @@ defmodule Samen.WebTest.Operator.Seeds do
         %{
           org_id: operator_org_id,
           plan_id: plan.id,
-          unit_amount_cents: 49_900,
-          currency: "USD",
+          # ADR-036 §4.5(5): unit_amount_cents/currency dropped by the H1 Money migration.
+          unit_amount: Samen.Type.Money.from_cents(49_900, :USD),
           interval: :monthly,
           active: true
         },
@@ -329,7 +329,6 @@ defmodule Samen.WebTest.Operator.Seeds do
             status: :open,
             priority: priority,
             sla_id: sla.id,
-            tags: ["platform"],
             custom: %{
               "requester_org_id" => tenant_org_id,
               "requester_user_id" => admin.id

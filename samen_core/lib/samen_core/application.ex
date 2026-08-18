@@ -30,7 +30,7 @@ defmodule SamenCore.Application do
     # migrating, so we skip Oban here in that case (test/test_helper.exs owns it).
     oban_children =
       if Application.get_env(:samen_core, :start_repo?, false) do
-        [{Oban, Application.fetch_env!(:samen_core, Oban)}]
+        [{Oban, Samen.Jobs.install_defaults(Application.fetch_env!(:samen_core, Oban))}]
       else
         []
       end

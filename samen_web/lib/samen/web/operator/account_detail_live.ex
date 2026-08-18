@@ -24,7 +24,7 @@ defmodule Samen.Web.Operator.AccountDetailLive do
   operator org's own tenant plane (the SaaS owns population 1), `••••` on any
   hand-crafted `plane: :operator` mount (fail-MASKED, never fail-clear). This
   LiveView never calls the vault, never unwraps a `%Masked{}`, and has no plaintext
-  branch. Bounded reads only, through `Reads.account_detail/4`.
+  branch. Bounded reads only, through `Reads.account_detail/5`.
   """
   use Phoenix.LiveView
 
@@ -47,13 +47,16 @@ defmodule Samen.Web.Operator.AccountDetailLive do
   end
 
   @doc false
-  def load(socket, account_id) do
+  # `opts` carries the sanctioned `:now` clock-injection through to `Reads.account_detail/5`
+  # (defaults to `DateTime.utc_now/0`). Production mount/handle_params pass no `:now`; the
+  # B4-P2-1 regression test pins it to make the not-yet-due boundary deterministic.
+  def load(socket, account_id, opts \\ []) do
     mount = socket.assigns[:samen_mount]
     operator_org_id = mount && Operator.org_id(mount)
 
     detail =
       if operator_org_id && account_id do
-        Reads.account_detail(mount, Operator.scope(mount), operator_org_id, account_id)
+        Reads.account_detail(mount, Operator.scope(mount), operator_org_id, account_id, opts)
       end
 
     assign(socket, account_id: account_id, no_org: is_nil(operator_org_id), detail: detail)
@@ -73,6 +76,40 @@ defmodule Samen.Web.Operator.AccountDetailLive do
           crumbs={["Operator plane", "Accounts", (@detail && @detail.account.name) || "—"]}
         >
           <:actions>
+            <a
+              :if={@account_id}
+              href={"/operator/deliverability/#{@account_id}"}
+              id="account-deliverability-link"
+              style="font-size:12px;color:#3B4CCA;margin-right:14px"
+            >
+              Deliverability →
+            </a>
+            <a
+              :if={@account_id}
+              href={"/operator/automation/#{@account_id}"}
+              id="account-automation-health-link"
+              style="font-size:12px;color:#3B4CCA;margin-right:14px"
+            >
+              Automation health →
+            </a>
+            <%!-- ADR-047 A5: the agent oversight drill-in (per-definition health + the
+                  durable per-{org, definition} kill), the automation sibling. --%>
+            <a
+              :if={@account_id}
+              href={"/operator/agents/#{@account_id}"}
+              id="account-agent-health-link"
+              style="font-size:12px;color:#3B4CCA;margin-right:14px"
+            >
+              Agent health →
+            </a>
+            <a
+              :if={@account_id}
+              href={"/operator/activity/#{@account_id}"}
+              id="account-activity-link"
+              style="font-size:12px;color:#3B4CCA;margin-right:14px"
+            >
+              Activity →
+            </a>
             <a href="/operator/accounts" id="back-to-accounts" style="font-size:12px;color:#3B4CCA">← Accounts</a>
           </:actions>
         </.topbar>

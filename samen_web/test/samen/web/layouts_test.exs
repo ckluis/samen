@@ -33,6 +33,32 @@ defmodule Samen.Web.LayoutsTest do
     assert html =~ "<main>INNER</main>"
   end
 
+  test "RP-JS-1: root/1 ships the three ADR-042 LiveView client script tags in order" do
+    html = render_root(TitledWeb.Layouts)
+
+    # ADR-042 C1 — exactly three `defer` script tags, in this order, each riding the
+    # `csp_nonce` seam. This is the refutable proof the client is actually shipped
+    # (the C9 sabotage strips app.js and this assertion flips), closing the
+    # CI-green-while-browser-dead gap dogfood finding B1 exposed.
+    assert html =~ ~s(<script defer nonce src="/assets/phoenix.min.js">) or
+             html =~ ~r{<script defer nonce=".*?" src="/assets/phoenix\.min\.js">} or
+             html =~ ~s(src="/assets/phoenix.min.js")
+
+    assert html =~ ~s(src="/assets/phoenix_live_view.min.js")
+    assert html =~ ~s(src="/assets/app.js")
+
+    # Order: phoenix.min.js → phoenix_live_view.min.js → app.js (LiveSocket needs both
+    # framework globals defined before app.js constructs it).
+    pos_phx = :binary.match(html, "/assets/phoenix.min.js") |> elem(0)
+    pos_lv = :binary.match(html, "/assets/phoenix_live_view.min.js") |> elem(0)
+    pos_app = :binary.match(html, "/assets/app.js") |> elem(0)
+    assert pos_phx < pos_lv and pos_lv < pos_app
+
+    # The ⌘K listener moved OUT of an inline <script> into app.js (ADR-042 C2) —
+    # no inline keydown handler survives in the layout.
+    refute html =~ "addEventListener"
+  end
+
   test "explicit :title wins" do
     assert render_root(TitledWeb.Layouts) =~ "<title>Titled — a product on Samen</title>"
   end

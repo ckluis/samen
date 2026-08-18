@@ -25,9 +25,12 @@ defmodule Samen.UI do
       plug Plug.Static,
         at: "/assets",
         from: {:samen_web, "priv/static/assets"},
-        only: ~w(samen_ui.css)
+        only: ~w(samen_ui.css app.js fonts)
 
   `from: {:samen_web, "priv/static/assets"}` resolves via `:code.priv_dir(:samen_web)`.
+  The `fonts` entry serves the self-hosted `@font-face` woff2 (T133) same-origin at
+  `/assets/fonts/*.woff2`, so the stylesheet references them by `url()` (small, cached
+  independently) instead of base64-inlining them — still ZERO external CDN.
   See `Samen.UI.stylesheet_path/0` for the on-disk path (documented serving helper).
 
   ## Masking invariant (LOAD-BEARING)
@@ -53,6 +56,11 @@ defmodule Samen.UI do
     * `Samen.UI.Nav`      — `sidebar/1`, `nav_group/1`, `nav_item/1`, `module_nav/1`,
       `topbar/1`, `tabs/1`, `tab/1`
     * `Samen.UI.Table`    — `data_table/1`, `list_view/1`, `sort_header/1`
+    * `Samen.UI.Board`    — `board/1` (the generic `%Samen.Web.Board{}` grouped-columns
+      renderer — G1 kanban first client, reusable by calendar/gallery/tree)
+    * `Samen.UI.Calendar` — `calendar/1` (the day-keyed `%Samen.Web.Board{}` month grid — G2)
+    * `Samen.UI.Gantt`    — `gantt/1` (the lane `%Samen.Web.Board{}` horizontal timeline —
+      records positioned as bars by a start/end range — G3 first client)
     * `Samen.UI.Form`     — `simple_form/1`, `form_field/1`
     * `Samen.UI.Overlay`  — `modal/1`, `delete_confirm/1`, `command_palette/1`, `search_box/1`
     * `Samen.UI.Feedback` — `empty_state/1`, `skeleton/1`, `progress/1`, `pill/1`,
@@ -67,8 +75,11 @@ defmodule Samen.UI do
     * `sidebar/1`        — the sidebar container (workspace header + nav + footer slots)
     * `nav_group/1`      — a labelled group of nav items (`:label` + inner `nav_item`s)
     * `nav_item/1`       — one sidebar link (icon slot, `:active`, optional `:count`/`:dot`)
-    * `module_nav/1`     — the INHERITED CRM/Billing/Support nav (framework); host 20% nav
-      via the `:extra` slot
+    * `module_nav/1`     — the INHERITED CRM/Billing/Support/Marketing/Workspace
+      (Settings/Automation) nav (framework); host 20% nav via the `:extra` slot
+    * `host_nav_extra/1` — renders a host's `:host_nav_extra` mount-label DATA (e.g.
+      driftwood's freight "Operations") into that `:extra` slot identically from every
+      framework sidebar (PP-10)
     * `topbar/1`         — breadcrumb + title + actions slot
     * `button/1`         — a `.btn` (default / `variant="primary"`)
     * `tabs/1` + `tab/1` — the underline tab bar
@@ -77,6 +88,10 @@ defmodule Samen.UI do
       pagination footer + bulk-select, as kit defaults (ADR-016; pairs with
       `Samen.Web.ListLive`)
     * `sort_header/1`    — a sortable `<th>` for `list_view/1`'s `:head` slot
+    * `board/1`          — the generic grouped-columns board: one column per
+      `%Samen.Web.Board{}` group (label + count + per-column-bounded cards + a
+      `+N more`/load-more affordance); parameterized by a `:card` renderer slot
+      (G1 kanban first client, reusable by calendar/gallery/tree — WS-G)
     * `empty_state/1`    — the standard zero-rows card (title/body/icon +
       `:actions`/`:sample` slots); `list_view/1`'s default `:empty` (ADR-016 §5)
     * `simple_form/1`    — the `AshPhoenix.Form`-backed form wrapper (ADR-016 §2;
@@ -113,6 +128,7 @@ defmodule Samen.UI do
   defdelegate nav_group(assigns), to: Samen.UI.Nav
   defdelegate nav_item(assigns), to: Samen.UI.Nav
   defdelegate module_nav(assigns), to: Samen.UI.Nav
+  defdelegate host_nav_extra(assigns), to: Samen.UI.Nav
   defdelegate topbar(assigns), to: Samen.UI.Nav
   defdelegate tabs(assigns), to: Samen.UI.Nav
   defdelegate tab(assigns), to: Samen.UI.Nav
@@ -121,6 +137,32 @@ defmodule Samen.UI do
   defdelegate data_table(assigns), to: Samen.UI.Table
   defdelegate list_view(assigns), to: Samen.UI.Table
   defdelegate sort_header(assigns), to: Samen.UI.Table
+
+  # Board (grouped columns — the %Samen.Web.Board{} renderer, G1 kanban first client)
+  defdelegate board(assigns), to: Samen.UI.Board
+
+  # Calendar (month grid — the day-keyed %Samen.Web.Board{} renderer, G2 first client)
+  defdelegate calendar(assigns), to: Samen.UI.Calendar
+
+  # Gantt (horizontal timeline — the lane %Samen.Web.Board{} bar renderer, G3 first client)
+  defdelegate gantt(assigns), to: Samen.UI.Gantt
+
+  # Gallery (responsive card grid — the %Samen.Web.Page{} card renderer, G5 first client)
+  defdelegate gallery(assigns), to: Samen.UI.Gallery
+
+  # Tree (hierarchical nodes — the %Samen.Web.Tree{} renderer, G6 first client)
+  defdelegate tree(assigns), to: Samen.UI.Tree
+
+  # Chart (aggregate lenses — the %Samen.Web.Series{} SVG renderers, G8 dashboard first client)
+  defdelegate bar_chart(assigns), to: Samen.UI.Chart
+  defdelegate line_chart(assigns), to: Samen.UI.Chart
+  defdelegate pie_chart(assigns), to: Samen.UI.Chart
+
+  # Dashboard (the tile-grid that composes metric + chart tiles, G8)
+  defdelegate dashboard(assigns), to: Samen.UI.Dashboard
+
+  # Map (the %Samen.Web.GeoSet{} SVG basemap + projected pins renderer, G7 first client)
+  defdelegate map(assigns), to: Samen.UI.Map
 
   # Form
   defdelegate simple_form(assigns), to: Samen.UI.Form

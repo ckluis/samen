@@ -1,0 +1,30 @@
+{
+  "id": "sub_lifecycle",
+  "object": "subscription",
+  "customer": "cus_lifecycle",
+  "status": "active",
+  "current_period_start": 1782518400,
+  "current_period_end": 1785196800,
+  "cancel_at": null,
+  "canceled_at": null,
+  "trial_end": null,
+  "currency": "usd",
+  "items": {
+    "object": "list",
+    "data": [
+      { "id": "si_pro", "price": { "id": "price_pro", "unit_amount": 4900, "currency": "usd" } }
+    ]
+  },
+  "latest_invoice": {
+    "id": "in_upgraded",
+    "currency": "usd",
+    "lines": {
+      "object": "list",
+      "data": [
+        { "amount": -1263, "proration": true, "description": "Unused time on Basic" },
+        { "amount": 4400, "proration": true, "description": "Remaining time on Pro" },
+        { "amount": 4900, "proration": false, "description": "Pro monthly (next period)" }
+      ]
+    }
+  }
+}
