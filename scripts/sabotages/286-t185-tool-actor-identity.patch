@@ -1,0 +1,37 @@
+# SABOTAGE: T185 (ADR-043 §6.2) gate sabotage — the tool_actor_identity check is disabled.
+# identity_leak?/1's real token match is replaced by an unconditional `false`, so a tool
+# schema declaring an actor_id/org_id/tenant_id (or any actor/org/tenant-shaped) parameter
+# on EITHER surface (the Action registry or the MCP tool catalogue) passes unchecked — a
+# model-supplied identity parameter could spoof or widen scope past ctx[:actor]. The named
+# reds (both the unit-level defect flips and the exit-code RED PATH) MUST flip; the shipped-
+# set clean control proves the checks are not blanket-failing.
+# APP: samen_core
+# TEST_FILES: test/ai/tool_actor_identity_verifier_test.exs
+# MUST_FAIL: an org_id param is a violation
+# MUST_FAIL: RED PATH: the injected-param seam flips the gate to exit 1
+diff --git a/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex b/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex
+index 24aea0a..1a0f8d1 100644
+--- a/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex
+@@ -177,15 +177,12 @@ defmodule Mix.Tasks.Samen.Verify.ToolActorIdentity do
+   @doc "Does `name` normalize to a token set containing an identity token? (public for tests)"
+   @spec identity_leak?(term()) :: boolean()
+   def identity_leak?(name) when is_binary(name) or is_atom(name) do
+-    tokens =
+-      name
+-      |> to_string()
+-      # camelCase boundary ("actorId" / "orgId") -> a splittable separator, same as "_".
+-      |> String.replace(~r/(?<=[a-z0-9])(?=[A-Z])/, "_")
+-      |> String.downcase()
+-      |> String.split(~r/[^a-z]+/, trim: true)
+-
+-    Enum.any?(tokens, &(&1 in @identity_tokens))
++    # SABOTAGE (T185, ADR-043 §6.2): the identity-token match is disabled, so a tool schema
++    # declaring actor_id/org_id/tenant_id (or any actor/org/tenant-shaped param) on EITHER
++    # surface (Action registry or MCP catalogue) passes unchecked — a model-supplied
++    # identity parameter can spoof or widen scope. The named reds MUST flip.
++    _ = @identity_tokens
++    false
+   end
+ 
+   def identity_leak?(_), do: false

@@ -117,6 +117,23 @@ echo "==> Running agent-coverage verifier (ADR-047 A7 / §9#6 — F-4 raw-spawn 
 )
 echo "==> agent coverage verifier: PASSED"
 
+# --- tool-actor-identity verifier (T185, ADR-043 §6.2/§7 — OSS-SCAN findings/009 #2) ---
+# The structural half of the "ctx[:actor]-only" tool identity rule (informal convention at
+# agent/tools.ex ~:18; ADR-043 §6.2: the chokepoint never elevates, substitutes, or
+# synthesizes an actor). `mix samen.verify.tool_actor_identity` refuses ANY tool schema
+# declaring an actor/org/tenant identity parameter, FOUNDRY-WIDE across BOTH shared
+# tool-schema surfaces — the `Samen.Automation.Action` agent-tool registry (core + host
+# `extra:`, so a generated app cannot slip an actor param past this gate either) and the
+# `Samen.AI.Mcp` tool catalogue — not scoped inside any one feature's own work. Fail-closed
+# (:erlang.halt(1)); sabotage-refutable at scripts/sabotages/286-*.
+echo ""
+echo "==> Running tool-actor-identity verifier (T185, ADR-043 §6.2/§7 — ctx[:actor]-only tool identity)"
+(
+  cd "$REPO_ROOT/samen_core"
+  mix samen.verify.tool_actor_identity
+)
+echo "==> tool-actor-identity verifier: PASSED"
+
 # --- samen_stripe adapter package gate (ADR-038 §8.1, T18/B1) ---
 # The first-party-but-separate Stripe billing adapter (skeleton): path-deps on
 # samen_core ONLY (never samen_web), owns its own vendor HTTP client dep (req),

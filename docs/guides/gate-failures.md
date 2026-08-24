@@ -529,6 +529,35 @@ only kernel-referencing `lib/` files are its agent definitions + router). Wired 
 never re-enters the loop); add the missing `AgentCase` proof / tool test / retention arm; move
 re-implemented agent behaviour out of the vertical into the framework.
 
+### `mix samen.verify.tool_actor_identity`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex`):
+
+```text
+<Module> (<kind>): tool_schema/0 declares an actor/org/tenant identity parameter <name> — tool identity MUST come from ctx[:actor] only (ADR-043 §6.2); an LLM-supplied identity parameter can spoof or widen scope.
+MCP tool <name>: inputSchema declares an actor/org/tenant identity property <name> — tool identity MUST come from the resolved token scope (ctx[:actor]) only (ADR-043 §6.2/§9); an LLM-supplied identity property can spoof or widen scope.
+```
+
+**Meaning:** T185 (backlog OSS-SCAN, findings/009 pattern #2: ZAQ's trusted-execution-context
+identity rule, AGPL-3.0 patterns-only) — the STRUCTURAL half of the `ctx[:actor]`-only tool
+identity rule (ADR-043 §6.2: "the chokepoint never elevates, substitutes, or synthesizes an
+actor"). A tool author could otherwise declare an `actor_id`/`org_id`/`tenant_id` model
+parameter — untrusted model output — and a careless `run/2` could read it instead of the
+loop-owned `ctx.actor`, spoofing or widening scope. This tier refuses the declaration itself,
+FOUNDRY-WIDE across BOTH shared tool-schema surfaces: the `Samen.Automation.Action` agent-tool
+registry (`tool_kinds()` — core kinds + host `extra:`, so a generated app cannot slip an actor
+param past this gate either) and the `Samen.AI.Mcp` MCP tool catalogue (`tools/0` inputSchema
+properties) — not scoped inside any one feature's own work (e.g. T177's OAuth-grant surface).
+A name is flagged if it normalizes (camelCase→`_`, downcase, split on non-letters) to a token
+set containing `actor`/`org`/`organization`/`tenant`; a target-record field like
+`assign_record_owner`'s `user_id` is deliberately NOT flagged (the rule is about the *acting*
+identity leaking in as a parameter, not every UUID-shaped arg). Wired into the ROOT `ci.sh`,
+sabotage-refutable via `scripts/sabotages/286-t185-tool-actor-identity.patch` (disabling the
+`identity_leak?/1` predicate flips both the unit-level defect tests and the exit-code RED PATH).
+**Fix:** drop the actor/org/tenant-shaped parameter from the tool's `tool_schema/0` (or the MCP
+`inputSchema` `properties`); read the calling actor from `ctx.actor` (Action tools) or the
+resolved token scope (MCP), never from a model-supplied argument.
+
 ### `mix samen.verify.fleet_wire`
 
 **Errors** (`samen_core/lib/mix/tasks/samen.verify.fleet_wire.ex`):
