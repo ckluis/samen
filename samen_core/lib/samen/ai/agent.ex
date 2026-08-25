@@ -4,6 +4,26 @@ defmodule Samen.AI.Agent do
   (ADR-047 §3/§4/§6; batch A1: the loop core; batch A2: durability + erasure; batch A3:
   the read-tool surface + EG2 scrubbing).
 
+  ## The declared policy seam (T181, §10a row 25)
+
+  Every policy this loop applies used to be loop-internal and unextendable. It now has
+  exactly ONE declared seam — `Samen.AI.Agent.Hook`'s seven-point ordered chain, dispatched
+  by `Samen.AI.Agent.Hooks` — resolved once per run (host config, then the per-run `:hooks`
+  opt) and threaded on `opts` as `:resolved_hooks` beside `:resolved_tools`. Six of the
+  seven points have call sites here (`:session_start`, `:before_completion`,
+  `:after_tool_request`, `:before_tool_call`, `:after_tool_execution`, `:on_error`);
+  `:after_compaction` is declared and dispatchable but has no caller, because this loop
+  performs no transcript compaction in v1.
+
+  **First-decision-wins**, and hooks may only NARROW: a `{:block, reason}` is the fail-honest
+  refusal turn `:hook_blocked`, a `{:halt, reason}` is a real terminal `:hook_halted`
+  (never a promoted answer), an `{:edit, call}` may not change WHICH tool runs and its args
+  re-run `refuse_vt_args/1` plus the action's own `validate/2` before anything is stamped
+  or executed, and no hook return approves a write — an `effect: :write` tool still parks
+  for a distinct human (ADR-043 §6.2, unamended). A hook that RAISES fails the call closed
+  (`:hook_error`), never letting it execute unhooked. `egress_opts/3`'s allowlist is
+  untouched, so no hook can re-enable grant plaintext on the agent path.
+
   ## What A4 adds — the WRITE surface, via approval only (ADR-047 §5.3)
 
   ADR-043 §6.2 — *"AI writes do not exist … anything with side effects goes through the
@@ -147,6 +167,7 @@ defmodule Samen.AI.Agent do
 
   alias Samen.AI.Agent.Approver
   alias Samen.AI.Agent.Breaker
+  alias Samen.AI.Agent.Hooks
   alias Samen.AI.Agent.Run
   alias Samen.AI.Agent.ToolResult
   alias Samen.AI.Agent.Tools
@@ -229,6 +250,15 @@ defmodule Samen.AI.Agent do
     :no_owner_attribute,
     :unauthorized,
     :write_failed,
+    # T181 (§10a row 25) — the declared hook seam's three bounded outcomes.
+    # `:hook_blocked` is a hook's honest refusal of ONE tool call (the run continues under
+    # its budgets, nothing executed); `:hook_halted` is a hook stopping the RUN (a real
+    # terminal, never a silent success); `:hook_error` is the FAIL-CLOSED degrade — a hook
+    # that raised, or returned something its point cannot honour, refuses the call rather
+    # than letting it execute unhooked.
+    :hook_blocked,
+    :hook_halted,
+    :hook_error,
     :unknown
   ]
 
@@ -361,6 +391,11 @@ defmodule Samen.AI.Agent do
          # execution — including an APPROVED write's execution — is refused
          # `:depth_exceeded` before anything persists.
          {:ok, opts} <- resolve_provenance(opts),
+         # T181 (§10a row 25): the declared policy chain is resolved ONCE per run — host
+         # config first, then the per-run `:hooks` opt — and rides `opts` beside the
+         # resolved tools. `egress_opts/3`'s Keyword.take allowlist is unchanged, so
+         # neither key can reach the chokepoint.
+         {:ok, opts} <- resolve_hooks(opts),
          :ok <- Breaker.check_start(org_id, definition.name) do
       run = create_run!(agent_mod, definition, org_id, scope, goal, budgets, opts)
       run = begin!(run)
@@ -660,11 +695,15 @@ defmodule Samen.AI.Agent do
             {:ok, tools} ->
               run = if run.state == :queued, do: begin!(run), else: run
 
+              worker_opts = worker_opts()
+
               loop(
                 run,
                 scope,
                 definition,
-                Keyword.put(worker_opts(), :resolved_tools, tools),
+                worker_opts
+                |> Keyword.put(:resolved_tools, tools)
+                |> Keyword.put(:resolved_hooks, Hooks.resolve(worker_opts)),
                 turns_per_job()
               )
 
@@ -777,9 +816,12 @@ defmodule Samen.AI.Agent do
     {:ok, org_id} = scope_org(scope)
     turn_index = run.current_turn + 1
     tools = Keyword.get(opts, :resolved_tools, [])
+    hooks = Keyword.get(opts, :resolved_hooks, [])
 
-    with {:ok, {goal, lines}} <- transcript(run),
-         {:ok, replayed?, turn_row} <- find_or_reuse_turn(run, org_id, turn_index) do
+    with :ok <- session_start_hook(hooks, run),
+         {:ok, {goal, lines}} <- transcript(run),
+         {:ok, replayed?, turn_row} <- find_or_reuse_turn(run, org_id, turn_index),
+         :ok <- before_completion_hook(hooks, run, turn_row, turn_index) do
       started = System.monotonic_time(:millisecond)
 
       # Every provider-bound byte still routes kernel → chokepoint: prior turns re-enter
@@ -807,7 +849,7 @@ defmodule Samen.AI.Agent do
               tool_turn(
                 run,
                 scope,
-                tools,
+                opts,
                 turn_row,
                 completion,
                 kind,
@@ -826,7 +868,9 @@ defmodule Samen.AI.Agent do
                 nil,
                 duration_ms,
                 {goal, lines},
-                replayed?
+                replayed?,
+                hooks,
+                nil
               )
 
             next ->
@@ -871,9 +915,74 @@ defmodule Samen.AI.Agent do
           {:error, reason, run}
       end
     else
+      # T181: a hook stopped the run at `:session_start` or `:before_completion`. The turn
+      # row (when one already exists) is finalized `:failed` before the terminal, so the
+      # audit trail says which turn the halt landed on — never a dangling `:proposed` row.
+      {:halt, kind, reason, turn_row} ->
+        halt_run(run, turn_row, kind, reason)
+
       {:error, kind} when is_atom(kind) ->
         {:error, kind, terminal_logged!(run, kind)}
     end
+  end
+
+  # ------------------------------------------------------------------------------------
+  # T181 — the declared hook seam's call sites (ADR-047 §10a row 25)
+
+  # `:session_start` fires ONCE per run, at the top of the first turn — which is the one
+  # place both modes share (`run/4`'s inline loop and the durable worker's batch), so the
+  # point cannot be reached in one mode and skipped in the other. A watchdog replay of
+  # turn 1 re-fires it; hooks are documented as idempotent.
+  # Resolve the chain once and put it on `opts`. Always `{:ok, _}` — an unloadable or
+  # misconfigured hook module is NOT filtered out here; it stays in the chain and refuses
+  # at dispatch time, because dropping it would run the loop with less policy than the
+  # host configured (`Samen.AI.Agent.Hooks`' fail-closed posture).
+  defp resolve_hooks(opts), do: {:ok, Keyword.put(opts, :resolved_hooks, Hooks.resolve(opts))}
+
+  defp session_start_hook(hooks, %Run{current_turn: 0} = run) do
+    case Hooks.dispatch(hooks, :session_start, %{
+           run_id: run.id,
+           agent: run.agent,
+           org_id: run.org_id,
+           turn_index: 1
+         }) do
+      :ok -> :ok
+      {:halt, kind, reason} -> {:halt, kind, reason, nil}
+    end
+  end
+
+  defp session_start_hook(_hooks, _run), do: :ok
+
+  # `:before_completion` fires after the DECISION checkpoint has committed the turn row
+  # `:proposed` and before the provider call — the last point at which stopping the run
+  # costs nothing, because no bytes have left for the provider yet.
+  defp before_completion_hook(hooks, %Run{} = run, turn_row, turn_index) do
+    case Hooks.dispatch(hooks, :before_completion, %{
+           run_id: run.id,
+           agent: run.agent,
+           org_id: run.org_id,
+           turn_index: turn_index
+         }) do
+      :ok -> :ok
+      {:halt, kind, reason} -> {:halt, kind, reason, turn_row}
+    end
+  end
+
+  # The one terminal a hook can cause. Fail-honest by construction: an explicit terminal
+  # state with the bounded kind `:hook_halted` and the bounded reason on the turn row —
+  # never `{:ok, answer}`, never a partial answer promoted out of the transcript.
+  defp halt_run(%Run{} = run, turn_row, kind, reason) do
+    if turn_row do
+      finalize_turn!(turn_row, %{
+        status: :failed,
+        error_kind: to_string(safe_error_kind(kind)),
+        meta: bounded_meta(Map.put(turn_row.meta || %{}, "hook_reason", reason))
+      })
+    end
+
+    run = terminal!(run, :fail, kind)
+    log_terminal(run)
+    {:error, safe_error_kind(kind), run}
   end
 
   # The OUTCOME checkpoint (§4.1 checkpoint 2): finalize the turn row, advance the run
@@ -949,10 +1058,73 @@ defmodule Samen.AI.Agent do
   #      PiiResolution-egress-resolved binaries appended to the vault-routed transcript
   #      (they re-enter as :history next turn — §3.2a re-scrub + safe_segment?/1 last
   #      line), finalized atomically with the cursor advance + tool_calls_used counter.
+  #
+  # T181 threads the declared hook seam through steps 1-3: `:after_tool_request` sees the
+  # RAW model request before the intersection resolves it, `:before_tool_call` sees the
+  # already-validated call and may block, edit, or halt it, and `:after_tool_execution`
+  # sees the outcome before it is committed. An edit re-runs the WHOLE arg gate.
   defp tool_turn(
          run,
          scope,
-         tools,
+         opts,
+         turn_row,
+         completion,
+         kind,
+         args,
+         duration_ms,
+         {goal, lines},
+         replayed?
+       ) do
+    tools = Keyword.get(opts, :resolved_tools, [])
+    hooks = Keyword.get(opts, :resolved_hooks, [])
+
+    case Hooks.dispatch(hooks, :after_tool_request, %{
+           run_id: run.id,
+           agent: run.agent,
+           org_id: run.org_id,
+           kind: kind,
+           arg_keys: sorted_arg_keys(args)
+         }) do
+      :ok ->
+        authorized_tool_turn(
+          run,
+          scope,
+          {tools, hooks},
+          turn_row,
+          completion,
+          kind,
+          args,
+          duration_ms,
+          {goal, lines},
+          replayed?
+        )
+
+      {:block, block_kind, reason} ->
+        # The requested kind has not been through the intersection yet, so only a
+        # REGISTRY kind may land in the persisted column (an arbitrary model string
+        # never does — the arm-1 rule, unchanged).
+        hook_blocked_turn(
+          run,
+          turn_row,
+          completion,
+          if(Tools.registry_kind?(kind), do: kind, else: nil),
+          block_kind,
+          reason,
+          duration_ms,
+          {goal, lines},
+          replayed?,
+          hooks
+        )
+
+      {:halt, halt_kind, reason} ->
+        halt_run(run, turn_row, halt_kind, reason)
+    end
+  end
+
+  defp authorized_tool_turn(
+         run,
+         scope,
+         {tools, hooks},
          turn_row,
          completion,
          kind,
@@ -962,6 +1134,143 @@ defmodule Samen.AI.Agent do
          replayed?
        ) do
     case authorize_tool(tools, kind, args) do
+      {:ok, entry, normalized} ->
+        # T181 `:before_tool_call` — the ONE point that may block, EDIT, or halt. It sits
+        # AFTER the four-way intersection and the action's own `validate/2` (so a hook
+        # never sees, and can never admit, a call the loop itself would refuse) and
+        # BEFORE `decide_tool!/3` (so an edit changes the call that is stamped, executed,
+        # and — for a write — bound to the approval; there is no logged-only copy).
+        case Hooks.dispatch(hooks, :before_tool_call, %{
+               run_id: run.id,
+               agent: run.agent,
+               org_id: run.org_id,
+               kind: entry.kind,
+               effect: entry.effect,
+               args: normalized
+             }) do
+          :ok ->
+            decided_tool_turn(
+              run,
+              scope,
+              hooks,
+              turn_row,
+              completion,
+              entry,
+              normalized,
+              duration_ms,
+              {goal, lines},
+              replayed?
+            )
+
+          {:edit, %{args: edited}} ->
+            edited_tool_turn(
+              run,
+              scope,
+              hooks,
+              turn_row,
+              completion,
+              entry,
+              edited,
+              duration_ms,
+              {goal, lines},
+              replayed?
+            )
+
+          {:block, block_kind, reason} ->
+            hook_blocked_turn(
+              run,
+              turn_row,
+              completion,
+              entry.kind,
+              block_kind,
+              reason,
+              duration_ms,
+              {goal, lines},
+              replayed?,
+              hooks
+            )
+
+          {:halt, halt_kind, reason} ->
+            halt_run(run, turn_row, halt_kind, reason)
+        end
+
+      {:error, refusal_kind, known_kind} ->
+        feedback_turn(
+          run,
+          turn_row,
+          completion,
+          refusal_kind,
+          known_kind,
+          duration_ms,
+          {goal, lines},
+          replayed?,
+          hooks,
+          nil
+        )
+    end
+  end
+
+  # Hooks may only NARROW. Edited args are UNTRUSTED exactly like the model's own: they
+  # re-run the `vt_` sentinel gate AND the action's own `validate/2` before anything is
+  # stamped or executed, so an edit cannot smuggle in a vault token to unmask a field,
+  # cannot hand the action a payload its validator rejects, and (by
+  # `Samen.AI.Agent.Hooks`' identity rule) cannot change WHICH tool runs.
+  defp edited_tool_turn(
+         run,
+         scope,
+         hooks,
+         turn_row,
+         completion,
+         entry,
+         edited,
+         duration_ms,
+         {goal, lines},
+         replayed?
+       ) do
+    with :ok <- refuse_vt_args(edited),
+         {:ok, normalized} <- validate_args(entry.module, edited) do
+      decided_tool_turn(
+        run,
+        scope,
+        hooks,
+        turn_row,
+        completion,
+        entry,
+        normalized,
+        duration_ms,
+        {goal, lines},
+        replayed?
+      )
+    else
+      {:error, refusal_kind} ->
+        feedback_turn(
+          run,
+          turn_row,
+          completion,
+          refusal_kind,
+          entry.kind,
+          duration_ms,
+          {goal, lines},
+          replayed?,
+          hooks,
+          nil
+        )
+    end
+  end
+
+  defp decided_tool_turn(
+         run,
+         scope,
+         hooks,
+         turn_row,
+         completion,
+         entry,
+         normalized,
+         duration_ms,
+         {goal, lines},
+         replayed?
+       ) do
+    case entry do
       # A4 (ADR-047 §5.3; ADR-043 §6.2 unamended): a MUTATING tool never executes here.
       # It passed the same four-way intersection a read tool passes — and that admission
       # buys it a PROPOSAL, not an execution. The decision stamp lands first (so the
@@ -969,7 +1278,9 @@ defmodule Samen.AI.Agent do
       # E3 approval opens and the run parks. `entry.module.run/2` is not called on this
       # path at all; the ONLY caller of it for a write is `execute_approved/3`, after a
       # distinct human approved, with the APPROVER's actor.
-      {:ok, %{effect: :write} = entry, normalized} ->
+      # T181: a hook can BLOCK a proposal (narrowing), and no hook return can approve
+      # one — a write still parks for a distinct human. There is no widening decision.
+      %{effect: :write} = entry ->
         turn_row = decide_tool!(turn_row, entry.kind, normalized)
 
         propose_turn(
@@ -980,12 +1291,27 @@ defmodule Samen.AI.Agent do
           normalized,
           duration_ms,
           {goal, lines},
-          replayed?
+          replayed?,
+          hooks
         )
 
-      {:ok, entry, normalized} ->
+      entry ->
         turn_row = decide_tool!(turn_row, entry.kind, normalized)
         outcome = run_tool(entry, normalized, run, scope)
+
+        # T181 `:after_tool_execution` — the outcome is visible before it is committed,
+        # and the only decision the point honours is `:halt`. The executed turn is
+        # committed FIRST either way: a halt stops the RUN, it never un-records work the
+        # governed action already did.
+        decision =
+          Hooks.dispatch(hooks, :after_tool_execution, %{
+            run_id: run.id,
+            agent: run.agent,
+            org_id: run.org_id,
+            kind: entry.kind,
+            arg_keys: sorted_arg_keys(normalized),
+            error_kind: outcome_error_kind(outcome)
+          })
 
         new_lines = [
           ToolResult.render_call(entry.kind, normalized)
@@ -1005,28 +1331,55 @@ defmodule Samen.AI.Agent do
             replayed?: replayed?
           })
 
-        {:continue, run}
-
-      {:error, refusal_kind, known_kind} ->
-        feedback_turn(
-          run,
-          turn_row,
-          completion,
-          refusal_kind,
-          known_kind,
-          duration_ms,
-          {goal, lines},
-          replayed?
-        )
+        case decision do
+          {:halt, halt_kind, reason} -> halt_run(run, nil, halt_kind, reason)
+          _ -> {:continue, run}
+        end
     end
   end
 
+  # T181: a hook's honest refusal of ONE tool call. Structurally the same fail-honest
+  # turn a refused/invalid call already produces — nothing executed, nothing proposed,
+  # the bounded kind `:hook_blocked` on the row (plus the bounded reason in `meta`) and
+  # one bounded line fed back, so the run continues under its budgets.
+  defp hook_blocked_turn(
+         run,
+         turn_row,
+         completion,
+         known_kind,
+         block_kind,
+         reason,
+         duration_ms,
+         {goal, lines},
+         replayed?,
+         hooks
+       ) do
+    feedback_turn(
+      run,
+      turn_row,
+      completion,
+      block_kind,
+      known_kind,
+      duration_ms,
+      {goal, lines},
+      replayed?,
+      hooks,
+      reason
+    )
+  end
+
   # A tool call the run could not even execute (outside the intersection, poisoned or
-  # invalid args, malformed envelope): the HONEST refusal turn. Recorded on the turn row
-  # (bounded error_kind; tool_kind only when the requested kind is a REGISTRY kind — an
-  # arbitrary model string never lands in a persisted column) and fed back to the model
-  # as one bounded fixed line, so the run continues under its budgets. Never a silent
-  # skip, never an execution.
+  # invalid args, malformed envelope, a hook's block): the HONEST refusal turn. Recorded
+  # on the turn row (bounded error_kind; tool_kind only when the requested kind is a
+  # REGISTRY kind — an arbitrary model string never lands in a persisted column) and fed
+  # back to the model as one bounded fixed line, so the run continues under its budgets.
+  # Never a silent skip, never an execution.
+  #
+  # T181: this is the ONE place the loop absorbs an error and keeps going, so it is where
+  # `:on_error` fires. A hook may escalate the absorbed error into a fail-honest terminal
+  # halt — after the refusal turn is committed, so the record of WHY still lands. (The
+  # provider-error branch of `execute_turn/4` is already unconditionally terminal and does
+  # not fire the point: there is no decision left there to take.)
   defp feedback_turn(
          run,
          turn_row,
@@ -1035,7 +1388,9 @@ defmodule Samen.AI.Agent do
          known_kind,
          duration_ms,
          {goal, lines},
-         replayed?
+         replayed?,
+         hooks,
+         hook_reason
        ) do
     feedback = "tool_error: " <> to_string(safe_error_kind(refusal_kind))
 
@@ -1049,10 +1404,21 @@ defmodule Samen.AI.Agent do
         duration_ms: duration_ms,
         goal: goal,
         lines: lines,
-        replayed?: replayed?
+        replayed?: replayed?,
+        hook_reason: hook_reason
       })
 
-    {:continue, run}
+    case Hooks.dispatch(hooks, :on_error, %{
+           run_id: run.id,
+           agent: run.agent,
+           org_id: run.org_id,
+           kind: known_kind,
+           error_kind: safe_error_kind(refusal_kind),
+           reason: hook_reason
+         }) do
+      {:halt, halt_kind, reason} -> halt_run(run, nil, halt_kind, reason)
+      _ -> {:continue, run}
+    end
   end
 
   # ------------------------------------------------------------------------------------
@@ -1078,7 +1444,8 @@ defmodule Samen.AI.Agent do
          normalized,
          duration_ms,
          {goal, lines},
-         replayed?
+         replayed?,
+         hooks
        ) do
     case WriteProposal.open(%{
            org_id: run.org_id,
@@ -1123,7 +1490,9 @@ defmodule Samen.AI.Agent do
           entry.kind,
           duration_ms,
           {goal, lines},
-          replayed?
+          replayed?,
+          hooks,
+          nil
         )
     end
   end
@@ -1869,6 +2238,7 @@ defmodule Samen.AI.Agent do
     finalize_meta =
       (turn_row.meta || %{})
       |> Map.put("replayed", turn.replayed?)
+      |> maybe_put_hook_reason(Map.get(turn, :hook_reason))
 
     {:ok, run} =
       repo!().transaction(fn ->
@@ -1899,6 +2269,12 @@ defmodule Samen.AI.Agent do
 
     run
   end
+
+  # T181: a hook's block/halt reason on the bounded turn row. Already normalized by
+  # `Samen.AI.Agent.Hooks.bounded_reason/1` (atom-or-binary, <= 64 bytes, `vt_`-free)
+  # before it ever reaches here, and `bounded_meta/1` is the second gate.
+  defp maybe_put_hook_reason(meta, nil), do: meta
+  defp maybe_put_hook_reason(meta, reason), do: Map.put(meta, "hook_reason", reason)
 
   defp scope_actor(%Samen.Scope{actor: actor}) when is_map(actor), do: actor
   defp scope_actor(_scope), do: nil
