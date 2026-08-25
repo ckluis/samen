@@ -24,6 +24,16 @@ defmodule Samen.AI.Agent.ToolResult do
     * **The call echo** (§4.3#6): the model's tool call (kind + args) re-enters as
       ONE rendered binary via `render_call/2` — never the raw arg map (the exact
       hole shipped sabotage 45 documents, re-proven on the agent path at A3).
+    * **INGRESS neutralization (§4.3a, T182 — PROPOSED).** Every scrub point above
+      faces OUTWARD; this one faces IN. A tool result is attacker-reachable data, and
+      it re-enters the prompt as `:history` on the next turn — so before a binary is
+      emitted it goes through `Samen.AI.Agent.Ingress.sanitize/1`, which neutralizes
+      invisible/bidi/control characters and instruction-shaped text into one fixed,
+      non-invertible marker. Both untrusted surfaces funnel through one clause each:
+      values via `render_scalar/2`, model-emitted argument NAMES via `render_key/1`.
+      Sabotage 289 keeps it refutable. This is a content transform inside the existing
+      render chokepoint, deliberately NOT a second policy seam beside T181's hook chain
+      (see `Samen.AI.Agent.Ingress`'s moduledoc for why the hook chain cannot host it).
 
   Mask-by-omission composes on top: `fetch_record` projects to condition-eligible
   fields only, so a plaintext-PII freeform column is not even present to render —
@@ -55,6 +65,7 @@ defmodule Samen.AI.Agent.ToolResult do
   tenant data through the emergency exit. Sabotage 255 keeps the replacement refutable.
   """
 
+  alias Samen.AI.Agent.Ingress
   alias Samen.Api.PiiResolution
 
   @mask Samen.Masked.mask()
@@ -225,8 +236,19 @@ defmodule Samen.AI.Agent.ToolResult do
   # refusal would let attacker-controlled data hard-fail a governed run (see moduledoc).
   # Truncation runs AFTER the scan, so a sentinel past the 500-byte boundary cannot be
   # "sanitised" by luck.
+  #
+  # T182 (§4.3a INGRESS, PROPOSED): the value is NEUTRALIZED before it is scanned and before
+  # it is emitted — this clause is the ingress chokepoint for every untrusted binary that
+  # becomes a `:history` line. Sanitizing FIRST is load-bearing twice over: the binary that
+  # gets emitted is the binary that was scanned, and a `vt_` obfuscated with zero-width
+  # characters cannot hide from the sentinel scan behind them. The RAW value is scanned too,
+  # so the pre-T182 refusal is a floor this can only tighten, never move.
   defp render_scalar(v, key) when is_binary(v) do
-    if sentinel?(v), do: unrenderable(key), else: truncate(v)
+    sanitized = Ingress.sanitize(v)
+
+    if sentinel?(v) or sentinel?(sanitized),
+      do: unrenderable(key),
+      else: truncate(sanitized)
   end
 
   defp render_scalar(v, _key) when is_number(v), do: to_string(v)
@@ -258,8 +280,11 @@ defmodule Samen.AI.Agent.ToolResult do
   # names are already `vt_`-gated upstream (`Samen.AI.Agent`'s `refuse_vt_args/1` scans
   # keys AND values), but `render_call/2` and `render/2` are PUBLIC — so the key side is
   # scanned here too rather than relying on every caller having done it.
+  # T182: an arg name is MODEL output, so it is untrusted content on the ingress side too —
+  # an arg name carrying a line break would forge a transcript line out of `render_call/2`'s
+  # `k=v` join exactly as a value would. Same neutralization, same chokepoint discipline.
   defp render_key(key) do
-    rendered = to_string(key)
+    rendered = key |> to_string() |> Ingress.sanitize()
     if sentinel?(rendered), do: "[key]", else: rendered
   end
 

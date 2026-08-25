@@ -10,6 +10,10 @@
 # end-to-end no-hard-fail run) must flip; the clean-scalar positive control and the
 # last-line chokepoint assertion stay green, proving the belt-and-braces refusal is intact
 # and only the normal path regressed.
+# REGENERATED at T182: the T182 ingress pass rewrote the exact `render_scalar/2` binary
+# clause this hunk anchored on. Same defect (the `vt_` sentinel scan is dropped), same two
+# MUST_FAIL targets, re-verified flip + byte-exact restore. The sabotaged clause keeps the
+# ingress sanitize call so ONLY the sentinel scan is removed — the defect is not widened.
 # APP: samen_core
 # TEST_FILES: test/ai/agent_tools_test.exs
 # MUST_FAIL: emit [unrenderable:<key>] for a vt_-bearing scalar
@@ -17,16 +21,20 @@
 diff --git a/samen_core/lib/samen/ai/agent/tool_result.ex b/samen_core/lib/samen/ai/agent/tool_result.ex
 --- a/samen_core/lib/samen/ai/agent/tool_result.ex
 +++ b/samen_core/lib/samen/ai/agent/tool_result.ex
-@@ -221,8 +221,10 @@
-   # refusal would let attacker-controlled data hard-fail a governed run (see moduledoc).
-   # Truncation runs AFTER the scan, so a sentinel past the 500-byte boundary cannot be
-   # "sanitised" by luck.
+@@ -243,12 +243,10 @@
+   # gets emitted is the binary that was scanned, and a `vt_` obfuscated with zero-width
+   # characters cannot hide from the sentinel scan behind them. The RAW value is scanned too,
+   # so the pre-T182 refusal is a floor this can only tighten, never move.
 -  defp render_scalar(v, key) when is_binary(v) do
--    if sentinel?(v), do: unrenderable(key), else: truncate(v)
+-    sanitized = Ingress.sanitize(v)
+-
+-    if sentinel?(v) or sentinel?(sanitized),
+-      do: unrenderable(key),
+-      else: truncate(sanitized)
 +  defp render_scalar(v, _key) when is_binary(v) do
 +    # SABOTAGE (A4 fold (c), ADR-047 §4.3): the sentinel scan is GONE — a vt_-bearing
 +    # scalar renders verbatim into the transcript and the next turn's history.
-+    truncate(v)
++    truncate(Ingress.sanitize(v))
    end
  
    defp render_scalar(v, _key) when is_number(v), do: to_string(v)
