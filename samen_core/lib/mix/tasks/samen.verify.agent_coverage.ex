@@ -172,8 +172,24 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
   def source_reenters_loop?(source) do
     case Code.string_to_quoted(source, emit_warnings: false) do
       {:ok, ast} -> ast_any?(ast, &agent_reentry_call?/1)
-      {:error, _} -> Regex.match?(~r/(?:Samen\.AI\.)?Agent\.(?:start|run)\s*\(/, source)
+      {:error, _} -> reentry_regex_fallback?(source)
     end
+  end
+
+  # Text fallback for the unparsable-source path. Kept in sync with the AST branch below:
+  # a direct `Agent.start/run(...)` call, OR an `apply/3` indirection (bare `apply`,
+  # `Kernel.apply`, `:erlang.apply`, or the pipe form `Agent |> apply(:start, ...)`) naming
+  # the agent kernel and `:start`/`:run` literally.
+  defp reentry_regex_fallback?(source) do
+    Regex.match?(~r/(?:Samen\.AI\.)?Agent\.(?:start|run)\s*\(/, source) or
+      Regex.match?(
+        ~r/(?:Kernel\.|:erlang\.)?apply\s*\(\s*(?:Samen\.AI\.)?Agent\s*,\s*:(?:start|run)\b/,
+        source
+      ) or
+      Regex.match?(
+        ~r/(?:Samen\.AI\.)?Agent\s*\|>\s*apply\s*\(\s*:(?:start|run)\b/,
+        source
+      )
   end
 
   # `def tool_schema` / `def tool_schema()` (arity 0), incl. `@impl true def tool_schema, do:`.
@@ -190,12 +206,50 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
        when fun in [:start, :run] and is_list(args),
        do: agent_kernel_alias?(alias_ast)
 
+  # `apply(<alias>, :start | :run, <args>)` — the bare (auto-imported `Kernel.apply/3`)
+  # indirection. Deliberately NOT constrained to a literal-list 3rd argument: a variable or
+  # an expression there (`apply(Samen.AI.Agent, :start, build_args())`) is still a real
+  # reentry attempt, only the *target* (module + fun name) needs to be statically visible.
+  defp agent_reentry_call?({:apply, _, [alias_ast, fun, _args]})
+       when fun in [:start, :run],
+       do: agent_kernel_alias?(alias_ast)
+
+  # `Kernel.apply(<alias>, :start | :run, <args>)` — the fully-qualified spelling of the
+  # same indirection.
+  defp agent_reentry_call?(
+         {{:., _, [{:__aliases__, _, [:Kernel]}, :apply]}, _, [alias_ast, fun, _args]}
+       )
+       when fun in [:start, :run],
+       do: agent_kernel_alias?(alias_ast)
+
+  # `:erlang.apply(<alias>, :start | :run, <args>)` — the BEAM-primitive spelling.
+  defp agent_reentry_call?({{:., _, [:erlang, :apply]}, _, [alias_ast, fun, _args]})
+       when fun in [:start, :run],
+       do: agent_kernel_alias?(alias_ast)
+
+  # `<alias> |> apply(:start | :run, <args>)` — the pipe-operator spelling of `apply/3`
+  # (the piped-in term becomes apply's 1st argument, i.e. the module).
+  defp agent_reentry_call?({:|>, _, [alias_ast, {:apply, _, [fun, _args]}]})
+       when fun in [:start, :run],
+       do: agent_kernel_alias?(alias_ast)
+
   defp agent_reentry_call?(_), do: false
 
   defp agent_kernel_alias?({:__aliases__, _, parts}) when is_list(parts) do
     # Fully-qualified `Samen.AI.Agent`, or an aliased `Agent` — but NOT a sub-module such
     # as `Agent.Run`/`Agent.Breaker` (those end in the sub-segment, not `:Agent`).
     List.last(parts) == :Agent and (parts == [:Agent] or Enum.take(parts, -2) == [:AI, :Agent])
+  end
+
+  # A bare module-atom literal target, e.g. `apply(:"Elixir.Samen.AI.Agent", :start, [])` —
+  # `Code.string_to_quoted/2` resolves that quoted-atom syntax straight to the atom, with no
+  # `__aliases__` wrapper. Mirrors the same "fully-qualified Agent, or bare Agent" heuristic
+  # as the `__aliases__` clause above.
+  defp agent_kernel_alias?(mod) when is_atom(mod) and mod not in [nil, true, false] do
+    parts = mod |> Module.split() |> Enum.map(&String.to_atom/1)
+    List.last(parts) == :Agent and (parts == [:Agent] or Enum.take(parts, -2) == [:AI, :Agent])
+  rescue
+    ArgumentError -> false
   end
 
   defp agent_kernel_alias?(_), do: false
