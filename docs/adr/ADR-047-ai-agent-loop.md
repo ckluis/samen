@@ -151,6 +151,7 @@ provider-bound byte still passes `Samen.AI.Chokepoint.seal/3`. Eight load-bearin
 2. **Tools are a four-way narrowing intersection** (§5.1): registry ∩ **explicit per-action
    opt-in** (`tool_schema/0`, default `:not_a_tool`) ∩ the agent definition's `tools:` list ∩
    the run actor's own policy envelope. No existing action becomes a tool by accident.
+   *(Five-way under the **PROPOSED** addendum §5.1a — a surface scope, T183.)*
 3. **Tool definitions are EG2 egress and ride a new scrubbed `:tools` field on
    `%MaskedPayload{}`** (§4.2), scrubbed by `safe_metadata?/1`. Schemas are **static per action
    module** — never derived from tenant data — enforced structurally by the verifier.
@@ -452,6 +453,53 @@ struct gains one **optional, additive** field `:origin` (`{:workflow, id} | {:ag
 exactly as T40 added four optional fields without breaking any `%Context{}` match, and
 `workflow_id` becomes nil-able **only** when `origin` is `{:agent, _}`. A single builder,
 `Samen.AI.Agent.Context.build/2`, is the only site that constructs an agent-origin context.
+
+### 5.1a · Surface-scoped tool registries — **ADDENDUM, STATUS: PROPOSED** (T183)
+
+> **Status of this subsection: PROPOSED (2026-08-25, T183).** The rest of this ADR is unchanged
+> and remains **ACCEPTED**. This addendum **extends** §5.1 by adding a fifth *narrowing* arm; it
+> amends nothing, widens nothing, and moves no §9 ratified decision — propose-then-approve
+> (§9#1), masked-only runs (§9#2), the budgets (§9#3), the 90-day retention (§9#4), the
+> streaming deferral (§9#5) and the verifier placement (§9#6) are all untouched. §3 item 2 and
+> §5.1 say "four-way"; with this addendum the intersection narrows **five** ways. Source
+> pattern: Condukt (MIT library), `findings/038` — **adapted, not translated**.
+
+**The gap.** §5.1's intersection and ADR-043 §9's MCP server describe two tool sets that never
+meet, and the code matched: `Samen.Automation.Action.registry/0` and `Samen.AI.Mcp`'s hardcoded
+four-name set were two hand-rolled registries with no shared abstraction and **no way to express
+a surface at all**. So the only answer either could give about the other's tools was
+`{:error, {:unknown_tool, name}}` — *merely absent*, indistinguishable from a typo, and a
+posture that gets weaker with every surface added (the operator plane, a CI eval lane).
+
+**The decision.** One abstraction, `Samen.AI.ToolSurface`, owns a **closed set of four
+surfaces** — `:mcp` (ADR-043 §9's external window), `:operator` (ADR-047 §7.3's plane, which
+owns **no** tools by construction), `:tenant` (this ADR's loop, as the run owner) and `:ci_eval`
+(the ADR-043 §10 / D8 keyless eval lane) — each owning **its own registry**, and both prior
+paths resolve through it. Cross-surface invocation is refused **by name**:
+`{:error, {:tool_off_surface, name, surface}}` on the MCP face, and the bounded new
+`@error_kind` `:tool_off_surface` in the loop, at definition resolution *and* per call.
+
+**Why it is not a hook.** T181's chain (§10a row 25) is optional, host-configured and
+narrowing-only; a surface scope is a *structural property of which registry owns the tool*, so
+hosting it there would make a by-construction guarantee opt-in — the inversion
+`Samen.Files.ChokepointGuard` exists to prevent. It is also strictly upstream of
+`:before_tool_call`, which fires only *after* the intersection.
+
+**Properties.** (a) Membership is declared by the tool, never by a third hardcoded list: the
+`:mcp` registry is read from `Samen.AI.Mcp.tool_names/0`, and the action registries from each
+action's own optional `tool_surfaces/0` — the same explicit per-module opt-in shape as
+`tool_schema/0` and `effect/0`. (b) `:mcp` is **not declarable from an action**: MCP tools and
+governed Automation actions have different execution contracts, and `resolve/2` must never admit
+a name `Samen.AI.Mcp` cannot dispatch. (c) An action declaring nothing is on `[:tenant]` only —
+the lane it already ran on, so the upgrade widens nothing while `:ci_eval` and `:mcp` stay
+opt-in; a **malformed** declaration (unloadable, raising, non-list, or naming one member outside
+the action-declarable set) is refused **whole** and lands the action on no surface at all.
+(d) `:ci_eval` carries the read tools only — an admitted `effect: :write` call opens a REAL E3
+approval, which a deterministic CI lane must be structurally incapable of causing. (e) The
+surface is **host application config** (`Samen.AI.ToolSurface.agent_surface/0`), identical in
+`run/4` and in the durable worker, never a per-run opt and **never derived from the actor** — a
+surface is a deployment lane, not an identity. A misconfigured value owns no registry, so a typo
+disables every tool rather than falling back to a wider one.
 
 ### 5.2 · What reaches the LLM, and what does not
 
@@ -805,7 +853,7 @@ and the verifier placement (§9#6) are all untouched by it.
 |---|---|---|---|---|
 | 25 | **The loop gains ONE declared policy seam: `Samen.AI.Agent.Hook`'s seven-point ordered chain (`:session_start` / `:before_completion` / `:after_compaction` / `:after_tool_request` / `:before_tool_call` / `:after_tool_execution` / `:on_error`) with a `{:block, reason}` / `{:edit, call}` / `{:halt, reason}` return contract and first-decision-wins.** (T181; source pattern: Alloy, MIT, `findings/034` item 2 — adapted, not translated.) | The ADR describes every policy the loop applies (§4.2/§4.3 the four-way intersection and the `vt_` arg gate, §5.3 write-via-approval, §6 the budgets) as loop-INTERNAL. It names no extension point, so a host needing one more narrowing rule had nowhere to put it but a fork. | `Samen.AI.Agent.Hook` (the behaviour + the per-point CLOSED `accepts/1` decision sets) and `Samen.AI.Agent.Hooks` (`resolve/1` — host config first, then the per-run `:hooks` opt — and `dispatch/3`, first-decision-wins via `reduce_while`). Six points have call sites in `Samen.AI.Agent`; `:after_compaction` is declared and dispatchable with **no caller**, because v1 ships no compactor. Three new closed `@error_kinds`: `:hook_blocked` (a hook's honest refusal of one call — the run continues under its budgets), `:hook_halted` (a real terminal, never a promoted answer), `:hook_error` (the FAIL-CLOSED degrade). Sabotage 288. | **Hooks may only NARROW, structurally.** `:before_tool_call` fires AFTER the four-way intersection and the action's own `validate/2`, so a hook never sees — and can never admit — a call the loop itself would refuse; an `{:edit, call}` may not change the tool IDENTITY and its args re-run `refuse_vt_args/1` plus `validate/2` before anything is stamped or executed (so no hook can inject a `vt_` token to unmask a field); no hook return approves a write — an `effect: :write` tool still PROPOSES and parks for a distinct human, so **ADR-043 §6.2 stays unamended**; and `egress_opts/3`'s `Keyword.take/2` allowlist is untouched, so no hook can re-enable grant plaintext (§9#2 intact). A hook that raises does NOT degrade to running unhooked — it fails the call closed. The edit binds the EXECUTED call, not a logged copy: `decide_tool!/3` stamps the edited args, so the §4.1 checkpoint-1 digest (and, for a write, the approval binding) is the digest of what actually runs. **One deviation from the `findings/034` source pattern, deliberate:** Alloy's chain is longer — it also carries `:after_completion` and `:session_end`. This seam ships the seven points and omits both: `:after_completion` sits between the provider's bytes and the §3.2a re-scrub, where a hook could observe unscrubbed completion text (an EG2/EG6 egress the seam must not open), and `:session_end` would fire on paths that are already unconditionally terminal, where no decision is left to take — `log_terminal/1` is the honest record there. Two policy seams in one loop is the failure the T181→T184 ordering exists to prevent, so later work extends THIS chain rather than adding another. |
 | 26 | **The tool-result chokepoint gains its INGRESS direction: `Samen.AI.Agent.Ingress.sanitize/1`, neutralizing invisible/bidi/control characters and instruction-shaped text into one shared, non-invertible marker before a binary enters `:history`.** *(T182 — see the **PROPOSED** addendum §4.3a; source pattern AlexClaw Apache-2.0 + Pepe MIT, `findings/000`+`findings/006`, adapted.)* | §4.3's six numbered scrub points are all EGRESS — masking, `vt_`, unrenderable shapes. The ADR names no ingress obligation at all, so attacker-reachable tool-result bytes re-entered the prompt verbatim under step 4. | Two clauses in `Samen.AI.Agent.ToolResult` — `render_scalar/2` for values and `render_key/1` for model-emitted argument names — call one new module. No new dispatch point, no `Chokepoint` public head touched, both loop modes covered by construction. Sabotage 289; sabotage 255 regenerated against the new clause (same defect, same `MUST_FAIL` targets). | Neutralize, never drop: the content stays readable and the marker is visible. Not reversible, structurally: every class collapses to the SAME marker, so the transform is many-to-one and has no inverse. Frame forgery is closed by (a) rather than by a role-word blocklist, so ordinary tenant text is not mangled. Sanitizing BEFORE the sentinel scan only tightens §4.3#3 — the emitted binary is the scanned binary, and the raw value is still scanned, so the pre-T182 refusal is a floor. Carried as a **PROPOSED** addendum rather than an edit to §4.3 because it adds an assertion site to an ACCEPTED contract. |
-
+| 27 | **Tool registries become SURFACE-SCOPED: one `Samen.AI.ToolSurface` abstraction owning a closed four-surface set (`:mcp` / `:operator` / `:tenant` / `:ci_eval`), each with its own registry, that BOTH prior hand-rolled paths now resolve through — so a tool registered for one surface is REFUSED BY NAME on another, never merely absent.** *(T183 — see the **PROPOSED** addendum §5.1a; source pattern Condukt, MIT library, `findings/038`, adapted.)* | §5.1's intersection and ADR-043 §9's MCP server describe two tool sets that never meet, and the code matched: `Samen.Automation.Action.registry/0` and `Samen.AI.Mcp`'s hardcoded `@tool_names` were two registries with no shared abstraction and no way to name a surface, so a cross-surface call came back `{:unknown_tool, name}` — indistinguishable from a typo. | NEW `Samen.AI.ToolSurface` (`surfaces/0`, `registry/1`, `resolve/2`, `surfaces_for/1`, `agent_surface/0`); a new optional `c:Samen.Automation.Action.tool_surfaces/0` declared by the three opted-in tools; `Samen.AI.Agent.Tools` gains arm 5 with arity-preserving heads (no call-site sweep); `Samen.AI.Mcp.call_tool/4` gates on `resolve(:mcp, name)` before a private `dispatch_tool/4`; one new bounded `@error_kind` `:tool_off_surface`. Sabotage 290. | NOT a T181 hook consumer: that chain is optional, host-configured and fires only AFTER the intersection, so hosting a structural registry property there would make the guarantee opt-in. `:mcp` is not declarable from an action (different execution contracts). An action declaring nothing keeps `[:tenant]` — the lane it already ran on, so nothing widens — while a MALFORMED declaration is refused whole and lands nowhere. `:operator` owns NO tools, which is the structural form of §7.3. `:ci_eval` carries the read tools only, because an admitted write opens a real E3 approval. The surface is host config, identical in `run/4` and the durable worker, and never derived from the actor (a lane, not an identity); a typo'd surface disables every tool rather than widening one. |
 ---
 
 ## 11 · Consequences
