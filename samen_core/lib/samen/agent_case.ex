@@ -207,18 +207,13 @@ defmodule Samen.AgentCase do
   every recorded payload is a plain binary — no `{:grant_span, …}` tag, no `vt_*` token,
   no un-rendered struct — because the agent path passes `grant_egress?: false` and only
   rendered binaries as history.
+
+  T188: delegates to the shared, cross-family kit
+  `Samen.AdapterConformanceCase.assert_masked_segments!/1` — same contract, same callers,
+  DRY (this was one of the three narrower things T188 generalizes).
   """
   def assert_masked_only_payloads! do
-    for segments <- sent_segments(), segment <- segments do
-      assert is_binary(segment),
-             "a non-binary segment reached the provider on the agent path: " <>
-               "#{inspect(segment)} — agent history is rendered binaries ONLY (§4.3)"
-
-      refute segment =~ "vt_", "a vt_* vault token reached the provider (INV-7)"
-      refute segment =~ "grant_span", "a grant-span tag leaked onto the agent path (§4.4)"
-    end
-
-    :ok
+    Samen.AdapterConformanceCase.assert_masked_segments!(sent_segments())
   end
 
   @doc """

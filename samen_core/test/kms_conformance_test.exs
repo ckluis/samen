@@ -6,7 +6,13 @@ defmodule Samen.KmsConformanceTest do
   AwsKmsDynamo is tested in disabled mode (aws_kms_dynamo_enabled: false) where
   it delegates to InMemory — this verifies the skeleton compiles and passes the
   conformance suite shape without a live AWS account.
+
+  T188: family #1 (KMS, non-ESP, in-core) consumer of the shared
+  `Samen.AdapterConformanceCase` kit — its named compile-time `adapter:` guard, and the
+  post-shred `unwrap -> :shredded` refusal below now runs through the shared, generalized
+  `assert_refusal_table!/1` (WS-C).
   """
+  use Samen.AdapterConformanceCase, adapter: Samen.Kms.InMemory
   use ExUnit.Case, async: false
 
   @adapters [Samen.Kms.FileBacked, Samen.Kms.InMemory, Samen.Kms.AwsKmsDynamo]
@@ -55,7 +61,12 @@ defmodule Samen.KmsConformanceTest do
 
         assert dt != nil
         assert is_binary(aid)
-        assert {:error, :shredded} = @adapter.unwrap(s)
+
+        # T188: routed through the shared kit's generalized refusal-semantics assertion
+        # instead of a bare `assert` — DRY with the AI/other adapter-family consumers.
+        assert_refusal_table!([
+          {"#{inspect(@adapter)}.unwrap/1 post-shred", fn -> @adapter.unwrap(s) end, :shredded}
+        ])
       end
 
       test "attest after shred stays :shredded (positive tombstone, not absence) — RED PATH 3" do
