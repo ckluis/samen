@@ -42,6 +42,49 @@ defmodule T182IngressAgent do
     tools: ["t182_ingress_probe"]
 end
 
+defmodule T184Probe do
+  @moduledoc """
+  A test-only READ tool whose result carries an ATTACKER/TENANT-CONTROLLED scalar that is
+  secret-SHAPED (T184; ADR-047 §4.3b). Its `:note` field declares NO `pii_*` vault routing
+  anywhere — this module is not an Ash resource at all — which is the whole point: the
+  secrets lane must catch a leaked credential in ordinary free text that no vault-class
+  taxonomy governs. Same host-extra registration seam as `T182Probe`.
+  """
+  @behaviour Samen.Automation.Action
+
+  @tool_schema %{
+    name: "t184_secrets_probe",
+    description: "test-only probe returning a caller-chosen untrusted scalar in its result",
+    params: []
+  }
+
+  @impl true
+  def kind, do: :t184_secrets_probe
+
+  @impl true
+  def tool_schema, do: @tool_schema
+
+  @impl true
+  def effect, do: :read
+
+  @impl true
+  def validate(config, _resource_key) when is_map(config), do: {:ok, %{}}
+  def validate(_config, _resource_key), do: {:error, :invalid_config}
+
+  @impl true
+  def run(_config, _ctx) do
+    {:ok, %{kind: :t184_secrets_probe, note: :persistent_term.get({:t184, :note}, "clean")}}
+  end
+end
+
+defmodule T184SecretsAgent do
+  @moduledoc false
+  use Samen.AI.Agent,
+    name: "t184.secrets",
+    goal_prompt: "Use the probe. Reply FINAL: <answer> when done.",
+    tools: ["t184_secrets_probe"]
+end
+
 defmodule Samen.AI.AgentIngressTest do
   @moduledoc """
   T182 — untrusted-content sanitization at tool-result **INGRESS** (ADR-047 §4.3a, PROPOSED).
@@ -73,6 +116,7 @@ defmodule Samen.AI.AgentIngressTest do
   use Samen.AgentCase
 
   alias Samen.AI.Agent.Ingress
+  alias Samen.AI.Agent.Secrets
   alias Samen.AI.Agent.ToolResult
   alias Samen.AI.Chokepoint
   alias Samen.AI.Provider.Scripted
@@ -261,6 +305,92 @@ defmodule Samen.AI.AgentIngressTest do
     end
   end
 
+  # ── T184: the secrets-redaction lane, distinct from `pii_*` (§4.3b, PROPOSED) ─────────
+
+  @aws_secret "aws_access_key_id=AKIAIOSFODNN7EXAMPLE"
+  @unrecognized_secret "internal_api_key=zzqq11837462meliorplatformvalue"
+  @vt_token "vt_00000000-0000-0000-0000-0000000000ff"
+
+  describe "T184: a secret-shaped tool-result payload with NO pii_* declaration is still caught" do
+    test "RED: a KNOWN vendor-shaped secret (no pii_* field anywhere on this fixture) redacts" do
+      with_secrets_probe(@aws_secret, fn ->
+        assert {:ok, %{answer: "read the note"}} = run_secrets_probe()
+
+        stored = history_note_line()
+        assert is_binary(stored), "no `note:` line reached history — the assertion below would be vacuous"
+
+        # (1) The raw credential never reaches history.
+        refute stored =~ "AKIAIOSFODNN7EXAMPLE"
+        assert stored =~ Secrets.marker()
+
+        # (2) And that is the binary the PROVIDER saw on the next turn.
+        assert_history_accumulated!(2, [stored])
+        refute all_sent_text() =~ "AKIAIOSFODNN7EXAMPLE"
+      end)
+    end
+
+    test "RED: an UNRECOGNIZED-but-labeled secret (fail-closed generic fallback) redacts" do
+      with_secrets_probe(@unrecognized_secret, fn ->
+        assert {:ok, %{answer: "read the note"}} = run_secrets_probe()
+
+        stored = history_note_line()
+        assert is_binary(stored)
+        refute stored =~ "zzqq11837462meliorplatformvalue"
+        assert stored =~ Secrets.marker()
+        refute all_sent_text() =~ "zzqq11837462meliorplatformvalue"
+      end)
+    end
+
+    test "POSITIVE CONTROL: the SAME probe returning CLEAN business text enters history VERBATIM" do
+      with_secrets_probe(@clean_payload, fn ->
+        assert {:ok, %{answer: "read the note"}} = run_secrets_probe()
+        assert history_note_line() == "note: " <> @clean_payload
+        refute history_note_line() =~ Secrets.marker()
+      end)
+    end
+
+    test "NOT REVERSIBLE: two different secrets in the SAME probe field collapse to the SAME stored line" do
+      aws_line =
+        with_secrets_probe(@aws_secret, fn ->
+          run_secrets_probe()
+          history_note_line()
+        end)
+
+      other_secret_line =
+        with_secrets_probe("sk_live_" <> String.duplicate("z", 24), fn ->
+          run_secrets_probe()
+          history_note_line()
+        end)
+
+      assert aws_line == other_secret_line
+    end
+  end
+
+  describe "T184: pii_* / egress behaviour is BYTE-UNCHANGED by the secrets lane" do
+    test "the A4 per-value vt_ elision still holds through the new pass" do
+      assert ToolResult.render({:ok, %{note: "x " <> @vt_token}}, actor: %{}) ==
+               ["note: [unrenderable:note]"]
+
+      assert ToolResult.render_call("probe", %{"q" => "x " <> @vt_token}) ==
+               "tool_call: probe q=[unrenderable:q]"
+    end
+
+    test "the T182 ingress reds are unchanged (both content transforms compose, neither swallows the other)" do
+      sanitized = ToolResult.render({:ok, %{note: @instruction_payload}}, actor: %{})
+      assert sanitized == ["note: " <> Ingress.sanitize(@instruction_payload)]
+      refute sanitized == [@instruction_payload]
+    end
+
+    test "a clean scalar with no secret shape and no vt_ sentinel renders its VALUE unchanged" do
+      assert ToolResult.render({:ok, %{note: "clean value"}}, actor: %{}) == ["note: clean value"]
+    end
+
+    test "the LAST LINE is untouched: the chokepoint still refuses a vt_-bearing history segment" do
+      assert Chokepoint.seal(:complete, ["turn N+1"], history: ["leaked " <> @vt_token]) ==
+               {:error, :pii_egress_refused}
+    end
+  end
+
   # ── helpers ──────────────────────────────────────────────────────────────────────────
 
   defp run_probe do
@@ -270,6 +400,35 @@ defmodule Samen.AI.AgentIngressTest do
     ])
 
     run_scripted(T182IngressAgent, new_scope(), "read the note")
+  end
+
+  defp run_secrets_probe do
+    script([
+      {:tool_call, "t184_secrets_probe", %{}},
+      {:final, "read the note"}
+    ])
+
+    run_scripted(T184SecretsAgent, new_scope(), "read the note")
+  end
+
+  defp with_secrets_probe(note, fun) do
+    previous = Application.get_env(:samen_core, Samen.Automation.Action, [])
+    extra = Keyword.get(previous, :extra, %{})
+
+    Application.put_env(
+      :samen_core,
+      Samen.Automation.Action,
+      Keyword.put(previous, :extra, Map.put(extra, "t184_secrets_probe", T184Probe))
+    )
+
+    :persistent_term.put({:t184, :note}, note)
+
+    try do
+      fun.()
+    after
+      Application.put_env(:samen_core, Samen.Automation.Action, previous)
+      :persistent_term.erase({:t184, :note})
+    end
   end
 
   # THE history assertion: turn 2's recorded payload IS turn 1's rendered lines re-entering

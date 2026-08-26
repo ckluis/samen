@@ -34,6 +34,16 @@ defmodule Samen.AI.Agent.ToolResult do
       Sabotage 289 keeps it refutable. This is a content transform inside the existing
       render chokepoint, deliberately NOT a second policy seam beside T181's hook chain
       (see `Samen.AI.Agent.Ingress`'s moduledoc for why the hook chain cannot host it).
+    * **Secrets-redaction lane (§4.3b, T184 — PROPOSED), distinct from `pii_*`.** A
+      THIRD content transform at the SAME two clauses: `Samen.AI.Agent.Secrets.redact/1`
+      pattern-scans for operator/app API keys, tokens and credentialed connection
+      strings appearing INCIDENTALLY in tool output — free text no `pii_*` vault
+      declaration governs, so `PiiResolution` has nothing to key on. Runs BEFORE
+      `Ingress.sanitize/1` (on the untouched raw binary, so ingress's own marker cannot
+      first break the generic fallback's label/value adjacency); the vault-masking path
+      above (`render_field/2`, egress-mode `PiiResolution.resolve/4`) is untouched.
+      Sabotage 291 keeps it refutable; sabotage 255 regenerated (see `Secrets`'
+      moduledoc for why the passes order this way).
 
   Mask-by-omission composes on top: `fetch_record` projects to condition-eligible
   fields only, so a plaintext-PII freeform column is not even present to render —
@@ -66,6 +76,7 @@ defmodule Samen.AI.Agent.ToolResult do
   """
 
   alias Samen.AI.Agent.Ingress
+  alias Samen.AI.Agent.Secrets
   alias Samen.Api.PiiResolution
 
   @mask Samen.Masked.mask()
@@ -243,8 +254,13 @@ defmodule Samen.AI.Agent.ToolResult do
   # gets emitted is the binary that was scanned, and a `vt_` obfuscated with zero-width
   # characters cannot hide from the sentinel scan behind them. The RAW value is scanned too,
   # so the pre-T182 refusal is a floor this can only tighten, never move.
+  #
+  # T184 (§4.3b secrets lane, PROPOSED): `Secrets.redact/1` runs FIRST, on the untouched raw
+  # binary, before `Ingress.sanitize/1` — a distinct lane from the `pii_*` vault taxonomy
+  # above, catching operator/app API keys, tokens and connection strings that carry no
+  # declared-field vault routing at all (see `Secrets`' moduledoc for the ordering rationale).
   defp render_scalar(v, key) when is_binary(v) do
-    sanitized = Ingress.sanitize(v)
+    sanitized = v |> Secrets.redact() |> Ingress.sanitize()
 
     if sentinel?(v) or sentinel?(sanitized),
       do: unrenderable(key),
@@ -283,8 +299,10 @@ defmodule Samen.AI.Agent.ToolResult do
   # T182: an arg name is MODEL output, so it is untrusted content on the ingress side too —
   # an arg name carrying a line break would forge a transcript line out of `render_call/2`'s
   # `k=v` join exactly as a value would. Same neutralization, same chokepoint discipline.
+  # T184: same secrets lane, same ordering (redact before sanitize) — a model-emitted arg
+  # name is untrusted content too and gets no exemption from the pattern scan.
   defp render_key(key) do
-    rendered = key |> to_string() |> Ingress.sanitize()
+    rendered = key |> to_string() |> Secrets.redact() |> Ingress.sanitize()
     if sentinel?(rendered), do: "[key]", else: rendered
   end
 
