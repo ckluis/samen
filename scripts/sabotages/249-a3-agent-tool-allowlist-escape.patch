@@ -9,19 +9,24 @@
 # reads `%{effect: effect} when effect in [:read, :write]`. The fabricated entry is stamped
 # `effect: :read` — which is exactly what makes the escaped tool EXECUTE. Same guarantee,
 # same MUST_FAIL, undiluted.)
+# (RE-ANCHORED AGAIN at T183: the `-` lines are the exact clause T183's arm-5 work rewrote —
+# the refusal is now `{:error, refusal_kind(kind)}` and the @spec admits `:tool_off_surface`.
+# The sabotaged clause DELIBERATELY KEEPS `refusal_kind/1` on the miss branch, so the ONLY
+# thing removed is still the arms-2+3 membership re-check: the T183 surface arm is untouched
+# and the defect is not widened. Same defect, same MUST_FAIL, same effect: :read stamp.)
 # APP: samen_core
 # TEST_FILES: test/ai/agent_tools_test.exs
 # MUST_FAIL: OUTSIDE the agent's declared list is refused
 diff --git a/samen_core/lib/samen/ai/agent/tools.ex b/samen_core/lib/samen/ai/agent/tools.ex
 --- a/samen_core/lib/samen/ai/agent/tools.ex
 +++ b/samen_core/lib/samen/ai/agent/tools.ex
-@@ -109,9 +109,17 @@
-   """
-   @spec resolve_call([resolved()], term()) :: {:ok, resolved()} | {:error, :tool_refused}
+@@ -144,9 +144,23 @@ defmodule Samen.AI.Agent.Tools do
+   @spec resolve_call([resolved()], term()) ::
+           {:ok, resolved()} | {:error, :tool_refused | :tool_off_surface}
    def resolve_call(resolved, kind) when is_list(resolved) and is_binary(kind) do
 -    case Enum.find(resolved, fn entry -> entry.kind == kind end) do
 -      %{effect: effect} = entry when effect in [:read, :write] -> {:ok, entry}
--      _ -> {:error, :tool_refused}
+-      _ -> {:error, refusal_kind(kind)}
 +    # SABOTAGE (A3, ADR-047 §5.1, RP-AG-4): the per-call intersection re-check is BYPASSED
 +    # — the resolver looks the kind up DIRECTLY in the registry (arm 1) instead of the run's
 +    # RESOLVED set (arms 2+3), so a model can call ANY opted-in tool the agent never declared.
@@ -29,10 +34,16 @@ diff --git a/samen_core/lib/samen/ai/agent/tools.ex b/samen_core/lib/samen/ai/ag
 +
 +    case Samen.Automation.Action.module_for(kind) do
 +      nil ->
-+        {:error, :tool_refused}
++        {:error, refusal_kind(kind)}
 +
 +      mod ->
-+        {:ok, %{kind: kind, module: mod, schema: Samen.Automation.Action.tool_schema_for(mod), effect: :read}}
++        {:ok,
++         %{
++           kind: kind,
++           module: mod,
++           schema: Samen.Automation.Action.tool_schema_for(mod),
++           effect: :read
++         }}
      end
    end
  

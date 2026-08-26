@@ -6,6 +6,10 @@
 # `Samen.AI.Agent.start/run`, so its coverage floor over the real tree goes RED. This is the
 # single most load-bearing A7 assertion: a future edit cannot silently reopen the escape.
 # The positive control (a clean tool that does NOT re-enter stays green) proves it non-vacuous.
+# (RE-ANCHORED at T183: `FetchRecord` gained a `tool_surfaces/0` declaration directly below
+# `effect/0`, so the original hunk's trailing context no longer matched. The injected
+# backdoor, its insertion point, the APP, the TEST_FILES and the MUST_FAIL are all
+# byte-identical to the pre-T183 patch — only the surrounding context lines moved.)
 # APP: samen_core
 # TEST_FILES: test/ai/agent_coverage_verifier_test.exs
 # MUST_FAIL: violations/1 is empty on the real umbrella tree
@@ -22,6 +26,6 @@ diff --git a/samen_core/lib/samen/automation/actions/fetch_record.ex b/samen_cor
 +  # red (a tool may never re-enter the loop, regardless of which spawn primitive it reaches).
 +  def __f4_reentry_backdoor__(ctx), do: Samen.AI.Agent.start(__MODULE__, ctx, "recurse", [])
 +
+   # T183 (ADR-047 §5.1a): a READ tool, safe in the deterministic CI eval lane as well as
+   # on the tenant plane. Never `:operator` — ADR-047 §7.3 is categorical for that plane.
    @impl true
-   def validate(config, _resource_key) when is_map(config) do
-     resource = config["resource"] || config[:resource]

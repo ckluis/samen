@@ -54,10 +54,11 @@ defmodule Samen.AI.Agent do
 
   ## What A3 adds — governed tools (ADR-047 §4.2/§4.3/§5.1)
 
-  A definition's `tools:` list now RESOLVES through the four-way narrowing intersection
-  (`Samen.AI.Agent.Tools`: registry ∩ per-action `tool_schema/0` opt-in ∩ the declared
-  list ∩ the owner actor's policy envelope at execution) — at run START (arms 1-3,
-  fail-closed refusals persist nothing) and again PER CALL. One tool call per turn:
+  A definition's `tools:` list now RESOLVES through the five-way narrowing intersection
+  (`Samen.AI.Agent.Tools`: registry ∩ per-action `tool_schema/0` opt-in ∩ the T183
+  SURFACE scope ∩ the declared list ∩ the owner actor's policy envelope at execution)
+  — at run START (arms 1-3, fail-closed refusals persist nothing) and again PER CALL.
+  One tool call per turn:
   native `%Completion{tool_calls:}` first, else the bounded `TOOL: {"tool": _, "args":
   _}` JSON envelope (`parse_next/1` — the A1 `FINAL:` grammar grown per §10). The EG2
   story hop-by-hop: tool DEFS ride the sealed payload's `:tools` field (compile-time
@@ -222,6 +223,11 @@ defmodule Samen.AI.Agent do
     :tools_not_supported,
     :invalid_tools,
     :tool_refused,
+    # T183 (ADR-047 §5.1a): intersection arm 5 — the tool exists and is opted in, but is
+    # registered for a DIFFERENT surface than the one this run executes on. A NAMED
+    # refusal, so the turn row/feedback says "off surface", never "no such tool" and
+    # never the silent `:unknown` a missing @error_kinds member would degrade to.
+    :tool_off_surface,
     :invalid_args,
     :invalid_tool_call,
     :tool_failed,

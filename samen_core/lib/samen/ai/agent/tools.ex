@@ -1,13 +1,22 @@
 defmodule Samen.AI.Agent.Tools do
   @moduledoc """
-  The agent tool surface resolver (ADR-047 §5.1, batch A3) — the FOUR-WAY NARROWING
-  INTERSECTION, the only path from an agent definition to a callable tool:
+  The agent tool surface resolver (ADR-047 §5.1, batch A3; §5.1a at T183) — the FIVE-WAY
+  NARROWING INTERSECTION, the only path from an agent definition to a callable tool:
 
       callable_tools(agent, actor) =
             Samen.Automation.Action.registry()          # 1. the governed allowlist (ADR-039)
           ∩ {a | a.tool_schema() != :not_a_tool}        # 2. explicit per-action opt-in, default OFF
+          ∩ {a | agent_surface() in a.tool_surfaces()}  # 5. the SURFACE scope (T183), default OFF
           ∩ agent.definition.tools                      # 3. the agent's own declared list
           ∩ {a | authorized?(a, actor)}                 # 4. the run actor's real policy envelope
+
+  Arms 1, 2 and 5 are no longer read here one at a time: they ARE membership in
+  `Samen.AI.ToolSurface.registry/1` for the run's surface, which is the single abstraction both
+  this path and `Samen.AI.Mcp` now resolve through (T183). A name registered for a DIFFERENT
+  surface is refused BY NAME — `{:error, :tool_off_surface}`, a bounded `@error_kinds` member —
+  rather than being reported as unregistered, so cross-surface invocation fails honestly instead
+  of looking like a typo. The surface itself is host application config
+  (`Samen.AI.ToolSurface.agent_surface/0`), never a caller opt and never an identity parameter.
 
   Arms 1–3 are resolved STATICALLY at run start (`resolve_definition/1` — a definition
   declaring an unregistered or non-opted-in kind refuses `{:error, :invalid_tools}`
@@ -45,6 +54,7 @@ defmodule Samen.AI.Agent.Tools do
   egress even if some caller assembles one.
   """
 
+  alias Samen.AI.ToolSurface
   alias Samen.Automation.Action
 
   @static_defs_key {__MODULE__, :static_defs}
@@ -61,35 +71,59 @@ defmodule Samen.AI.Agent.Tools do
       opted in (arm 2): the definition is misconfigured, refused honestly.
   """
   @spec resolve_definition(%{required(:tools) => [String.t()]}) ::
-          {:ok, [resolved()]} | {:error, :invalid_tools}
-  def resolve_definition(%{tools: []}), do: {:ok, []}
+          {:ok, [resolved()]} | {:error, :invalid_tools | :tool_off_surface}
+  def resolve_definition(definition),
+    do: resolve_definition(definition, ToolSurface.agent_surface())
 
-  def resolve_definition(%{tools: kinds}) when is_list(kinds) do
+  @doc """
+  `resolve_definition/1` against an EXPLICIT surface (T183). The arity-1 head is preserved and
+  simply supplies `Samen.AI.ToolSurface.agent_surface/0`, so no existing call site changed.
+  """
+  @spec resolve_definition(%{required(:tools) => [String.t()]}, term()) ::
+          {:ok, [resolved()]} | {:error, :invalid_tools | :tool_off_surface}
+  def resolve_definition(%{tools: []}, _surface), do: {:ok, []}
+
+  def resolve_definition(%{tools: kinds}, surface) when is_list(kinds) do
     kinds
     |> Enum.uniq()
     |> Enum.reduce_while({:ok, []}, fn kind, {:ok, acc} ->
-      case resolve_kind(kind) do
+      case resolve_kind(kind, surface) do
         {:ok, entry} -> {:cont, {:ok, acc ++ [entry]}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
 
-  def resolve_definition(_definition), do: {:error, :invalid_tools}
+  def resolve_definition(_definition, _surface), do: {:error, :invalid_tools}
 
-  defp resolve_kind(kind) when is_binary(kind) do
-    with mod when not is_nil(mod) <- Action.module_for(kind),
-         schema when is_map(schema) <- Action.tool_schema_for(mod) do
-      # `effect_for/1` is fail-closed (:write unless the module returns the literal
-      # :read), so an unloadable/raising/undeclared action lands on the approval path,
-      # never the inline one.
-      {:ok, %{kind: kind, module: mod, schema: schema, effect: Action.effect_for(mod)}}
-    else
+  # Arms 1 + 2 + 5 in ONE membership question (T183): `ToolSurface.registry/1` IS
+  # registry ∩ opt-in ∩ surface. A name owned by another surface is refused BY NAME; a name
+  # owned by no surface at all — unregistered, or registered but not opted in — is the
+  # pre-T183 `:invalid_tools`, unchanged. A misconfigured `agent_surface/0` owns no registry,
+  # so every tool is off it: fail-closed, never a fallback to a wider surface.
+  defp resolve_kind(kind, surface) when is_binary(kind) do
+    case ToolSurface.resolve(surface, kind) do
+      {:ok, mod} when is_atom(mod) and mod != :mcp -> resolved_entry(kind, mod)
+      {:error, {:tool_off_surface, _name, _surface}} -> {:error, :tool_off_surface}
+      {:error, {:unknown_surface, _surface}} -> {:error, :tool_off_surface}
       _ -> {:error, :invalid_tools}
     end
   end
 
-  defp resolve_kind(_kind), do: {:error, :invalid_tools}
+  defp resolve_kind(_kind, _surface), do: {:error, :invalid_tools}
+
+  defp resolved_entry(kind, mod) do
+    case Action.tool_schema_for(mod) do
+      :not_a_tool ->
+        {:error, :invalid_tools}
+
+      schema ->
+        # `effect_for/1` is fail-closed (:write unless the module returns the literal
+        # :read), so an unloadable/raising/undeclared action lands on the approval path,
+        # never the inline one.
+        {:ok, %{kind: kind, module: mod, schema: schema, effect: Action.effect_for(mod)}}
+    end
+  end
 
   @doc "The EG2 tool DEFINITIONS of a resolved set — what rides `%MaskedPayload{}.tools`."
   @spec defs([resolved()]) :: [map()]
@@ -107,15 +141,27 @@ defmodule Samen.AI.Agent.Tools do
   (`Samen.AI.Agent.execute_approved/3`), so a tool de-declared or de-opted-in between
   proposal and approval refuses instead of executing on a stale admission.
   """
-  @spec resolve_call([resolved()], term()) :: {:ok, resolved()} | {:error, :tool_refused}
+  @spec resolve_call([resolved()], term()) ::
+          {:ok, resolved()} | {:error, :tool_refused | :tool_off_surface}
   def resolve_call(resolved, kind) when is_list(resolved) and is_binary(kind) do
     case Enum.find(resolved, fn entry -> entry.kind == kind end) do
       %{effect: effect} = entry when effect in [:read, :write] -> {:ok, entry}
-      _ -> {:error, :tool_refused}
+      _ -> {:error, refusal_kind(kind)}
     end
   end
 
   def resolve_call(_resolved, _kind), do: {:error, :tool_refused}
+
+  # T183: distinguish the two refusals the model can provoke. A kind the agent simply did not
+  # DECLARE (arm 3) is `:tool_refused`, exactly as before. A kind belonging to another SURFACE
+  # — an MCP tool name arriving in a tenant agent turn — is `:tool_off_surface`: still a
+  # refusal, but a named one, so the turn row says why instead of implying "no such tool".
+  defp refusal_kind(kind) do
+    case ToolSurface.resolve(ToolSurface.agent_surface(), kind) do
+      {:error, {:tool_off_surface, _name, _surface}} -> :tool_off_surface
+      _ -> :tool_refused
+    end
+  end
 
   @doc """
   Every opted-in registry action's byte-exact static `tool_schema/0` constant — the

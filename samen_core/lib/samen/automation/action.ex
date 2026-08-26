@@ -113,6 +113,15 @@ defmodule Samen.Automation.Action do
       executes ONLY `effect: :read` tools inline; `:write` tools propose via
       `Samen.Approvals.Gate` at A4.
 
+    * `tool_surfaces/0` — the SURFACE opt-in (T183; ADR-047 §5.1a, PROPOSED). Which of
+      `Samen.AI.ToolSurface.action_surfaces/0`'s scopes may invoke this tool. Read
+      through `Samen.AI.ToolSurface.surfaces_for/1`, which also owns the closed set, so
+      this module keeps no second copy of it. An action that declares NOTHING is on
+      `[:tenant]` only — the one lane it already ran on before T183, so nothing widens;
+      `:ci_eval` is opt-in, and `:mcp` is not declarable here at all (that registry
+      belongs to `Samen.AI.Mcp`, the only module that can dispatch it). A MALFORMED
+      declaration is refused whole and lands the action on no surface.
+
   **No shipped action becomes a tool by accident**: the 8 ADR-039 kinds export
   NEITHER callback, so all 8 are `:not_a_tool` (and would be `:write` even if opted
   in). The only opted-in tools are A3's two read-effect actions and A4's ONE
@@ -139,8 +148,9 @@ defmodule Samen.Automation.Action do
               :ok | {:error, term()}
   @callback tool_schema() :: map() | :not_a_tool
   @callback effect() :: :read | :write
+  @callback tool_surfaces() :: [Samen.AI.ToolSurface.surface()]
 
-  @optional_callbacks undo: 3, tool_schema: 0, effect: 0
+  @optional_callbacks undo: 3, tool_schema: 0, effect: 0, tool_surfaces: 0
 
   # The core-shipped kinds. ADR-039 §5.2's exactly-8 side-effecting kinds (T39 shipped
   # `notify`, T40 the remaining 7; `mutate_record` merges the spec's "create/update a
