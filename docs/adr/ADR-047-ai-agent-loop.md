@@ -380,6 +380,77 @@ ingress reds in `samen_core/test/ai/agent_ingress_test.exs`, one per payload cla
 positive control. Shipped sabotage **255** is regenerated against the new clause with the same
 defect and the same two `MUST_FAIL` targets.
 
+### 4.3b · Secrets-redaction lane, distinct from `pii_*` — **ADDENDUM, STATUS: PROPOSED** (T184)
+
+> **Status of this subsection: PROPOSED (2026-08-26, T184).** The rest of this ADR is unchanged
+> and remains **ACCEPTED**. This addendum **extends** §4.3a; it amends nothing and moves no §9
+> ratified decision. Source pattern: Condukt (MIT library) — **adapted, not translated**.
+
+**The gap.** `pii_*` (`Samen.Pii.Info`, the vault, `PiiResolution.resolve/4`) governs content a
+resource **declares**: a column marked `pii_attribute(:ssn, ..., vault: :pii_ssn)` resolves
+through the vault on every read. It has no opinion about a column nobody declared — a tenant's
+freeform note that happens to contain an operator's leaked AWS key, or an app config value
+copied into a support-ticket body. Those bytes carry no vault token and nothing `PiiResolution`
+can key on: they are free text that merely happens to be secret-**shaped**. Repo evidence: zero
+hits for secret-pattern/free-text-scanner terms anywhere in `samen_core`/`samen_web`, no Logger
+`filter_parameters`; the two adjacent shipped facts are both narrower — `:pii_secret`
+(`gen/post_templates.ex`) is a declared-attribute generator example never wired into
+`no_plaintext_pii.ex`, and `redact_payload/1` (mailbox/delivery/enrichment/billing provider
+behaviours) is a fixed-key `Map.drop` over inbound webhook envelopes that never runs on the AI
+plane.
+
+**8. Redact (a second, distinct ingress pass).** At the SAME two clauses §4.3a already owns —
+`render_scalar/2` (values) and `render_key/1` (model-emitted argument names) in
+`Samen.AI.Agent.ToolResult` — `Samen.AI.Agent.Secrets.redact/1` runs **first**, on the untouched
+raw binary, before `Ingress.sanitize/1`: a pattern scan for two ordered classes, both collapsing
+to ONE fixed marker distinct from `Ingress.marker/0`:
+
+  a. **known vendor-shaped prefixes** (AWS access/session key ids, GitHub tokens classic and
+     fine-grained, Slack tokens, Stripe live/restricted keys, npm tokens, Google API keys, PEM
+     private-key headers, JWTs, `Authorization: Bearer` values, and connection-string schemes
+     carrying an embedded `user:pass@host` credential); and
+  b. **a fail-closed generic fallback** — an `api_key=`/`token=`/`secret=`/`password=`-shaped
+     label assigned a non-trivial value, regardless of whether the value matches any known
+     vendor format. This is the "unrecognized-but-secret-shaped string is redacted, not passed
+     through" floor.
+
+Three properties, mirroring §4.3a's:
+
+1. **A distinct lane, not a wider `pii_*`.** This module never calls `PiiResolution.resolve/4`,
+   never reads `Samen.Pii.Info`, and is not invoked from `render_field/2` or the record-resolution
+   path — those remain byte-unchanged. A secret with no `pii_*` declaration is still caught
+   because the vector is a pattern match, not a vault lookup; a `pii_*` field with no secret
+   shape is still vault-masked because that machinery is untouched.
+2. **Not reversible.** Every redacted span of both classes collapses to the same fixed marker —
+   a collision, hence no inverse — and the marker itself matches neither class, so a second pass
+   changes nothing.
+3. **Ordering is load-bearing.** `redact/1` runs BEFORE `Ingress.sanitize/1` on the raw binary so
+   a control/bidi character `Ingress` would later collapse cannot first split a label/value
+   adjacency the generic fallback depends on. A known vendor-shaped secret cannot be evaded this
+   way either — its signature is internal to the token, not a separate label.
+
+**Placement, and why it is not a hook.** Same reasoning as §4.3a, restated for a third content
+transform at the identical two clauses: `:after_tool_execution` is optional, host-configured,
+narrowing-only, and its context never carries outcome content, so hosting a redaction pass there
+would make a security guarantee opt-in. No new dispatch point; no `Chokepoint` public head
+touched. Two policy seams in one loop is the failure the T181 → T184 ordering exists to prevent
+— this is the THIRD content transform inside the one existing render chokepoint, not a fourth
+seam.
+
+**Known residual, named.** The generic labeled fallback requires label/separator/value adjacency
+in the raw string; an attacker who interleaves zero-width/bidi noise between an *unrecognized*
+secret's label and its value could defeat pattern (b) specifically (pattern (a)'s vendor
+signatures do not depend on a label at all, so they are unaffected). This is the honest trade
+against the fallback silently over-redacting ordinary tenant text containing words like
+"password" near unrelated content.
+
+**Proof.** New sabotage **291** (`redact/1` returns its input verbatim) flips the two named
+secrets reds in `samen_core/test/ai/agent_ingress_test.exs` (one known-vendor, one unrecognized
+generic), each with its positive control, plus the unit floor in
+`samen_core/test/samen/ai/agent/secrets_test.exs`. Shipped sabotage **255** is regenerated a
+second time against the rewritten `render_scalar/2` clause, same defect, same two `MUST_FAIL`
+targets.
+
 ### 4.4 · Grant plaintext is categorically excluded from agent runs
 
 ADR-043 §6.1 admits grant-covered plaintext into **ephemeral completion payloads only**, and
@@ -854,6 +925,7 @@ and the verifier placement (§9#6) are all untouched by it.
 | 25 | **The loop gains ONE declared policy seam: `Samen.AI.Agent.Hook`'s seven-point ordered chain (`:session_start` / `:before_completion` / `:after_compaction` / `:after_tool_request` / `:before_tool_call` / `:after_tool_execution` / `:on_error`) with a `{:block, reason}` / `{:edit, call}` / `{:halt, reason}` return contract and first-decision-wins.** (T181; source pattern: Alloy, MIT, `findings/034` item 2 — adapted, not translated.) | The ADR describes every policy the loop applies (§4.2/§4.3 the four-way intersection and the `vt_` arg gate, §5.3 write-via-approval, §6 the budgets) as loop-INTERNAL. It names no extension point, so a host needing one more narrowing rule had nowhere to put it but a fork. | `Samen.AI.Agent.Hook` (the behaviour + the per-point CLOSED `accepts/1` decision sets) and `Samen.AI.Agent.Hooks` (`resolve/1` — host config first, then the per-run `:hooks` opt — and `dispatch/3`, first-decision-wins via `reduce_while`). Six points have call sites in `Samen.AI.Agent`; `:after_compaction` is declared and dispatchable with **no caller**, because v1 ships no compactor. Three new closed `@error_kinds`: `:hook_blocked` (a hook's honest refusal of one call — the run continues under its budgets), `:hook_halted` (a real terminal, never a promoted answer), `:hook_error` (the FAIL-CLOSED degrade). Sabotage 288. | **Hooks may only NARROW, structurally.** `:before_tool_call` fires AFTER the four-way intersection and the action's own `validate/2`, so a hook never sees — and can never admit — a call the loop itself would refuse; an `{:edit, call}` may not change the tool IDENTITY and its args re-run `refuse_vt_args/1` plus `validate/2` before anything is stamped or executed (so no hook can inject a `vt_` token to unmask a field); no hook return approves a write — an `effect: :write` tool still PROPOSES and parks for a distinct human, so **ADR-043 §6.2 stays unamended**; and `egress_opts/3`'s `Keyword.take/2` allowlist is untouched, so no hook can re-enable grant plaintext (§9#2 intact). A hook that raises does NOT degrade to running unhooked — it fails the call closed. The edit binds the EXECUTED call, not a logged copy: `decide_tool!/3` stamps the edited args, so the §4.1 checkpoint-1 digest (and, for a write, the approval binding) is the digest of what actually runs. **One deviation from the `findings/034` source pattern, deliberate:** Alloy's chain is longer — it also carries `:after_completion` and `:session_end`. This seam ships the seven points and omits both: `:after_completion` sits between the provider's bytes and the §3.2a re-scrub, where a hook could observe unscrubbed completion text (an EG2/EG6 egress the seam must not open), and `:session_end` would fire on paths that are already unconditionally terminal, where no decision is left to take — `log_terminal/1` is the honest record there. Two policy seams in one loop is the failure the T181→T184 ordering exists to prevent, so later work extends THIS chain rather than adding another. |
 | 26 | **The tool-result chokepoint gains its INGRESS direction: `Samen.AI.Agent.Ingress.sanitize/1`, neutralizing invisible/bidi/control characters and instruction-shaped text into one shared, non-invertible marker before a binary enters `:history`.** *(T182 — see the **PROPOSED** addendum §4.3a; source pattern AlexClaw Apache-2.0 + Pepe MIT, `findings/000`+`findings/006`, adapted.)* | §4.3's six numbered scrub points are all EGRESS — masking, `vt_`, unrenderable shapes. The ADR names no ingress obligation at all, so attacker-reachable tool-result bytes re-entered the prompt verbatim under step 4. | Two clauses in `Samen.AI.Agent.ToolResult` — `render_scalar/2` for values and `render_key/1` for model-emitted argument names — call one new module. No new dispatch point, no `Chokepoint` public head touched, both loop modes covered by construction. Sabotage 289; sabotage 255 regenerated against the new clause (same defect, same `MUST_FAIL` targets). | Neutralize, never drop: the content stays readable and the marker is visible. Not reversible, structurally: every class collapses to the SAME marker, so the transform is many-to-one and has no inverse. Frame forgery is closed by (a) rather than by a role-word blocklist, so ordinary tenant text is not mangled. Sanitizing BEFORE the sentinel scan only tightens §4.3#3 — the emitted binary is the scanned binary, and the raw value is still scanned, so the pre-T182 refusal is a floor. Carried as a **PROPOSED** addendum rather than an edit to §4.3 because it adds an assertion site to an ACCEPTED contract. |
 | 27 | **Tool registries become SURFACE-SCOPED: one `Samen.AI.ToolSurface` abstraction owning a closed four-surface set (`:mcp` / `:operator` / `:tenant` / `:ci_eval`), each with its own registry, that BOTH prior hand-rolled paths now resolve through — so a tool registered for one surface is REFUSED BY NAME on another, never merely absent.** *(T183 — see the **PROPOSED** addendum §5.1a; source pattern Condukt, MIT library, `findings/038`, adapted.)* | §5.1's intersection and ADR-043 §9's MCP server describe two tool sets that never meet, and the code matched: `Samen.Automation.Action.registry/0` and `Samen.AI.Mcp`'s hardcoded `@tool_names` were two registries with no shared abstraction and no way to name a surface, so a cross-surface call came back `{:unknown_tool, name}` — indistinguishable from a typo. | NEW `Samen.AI.ToolSurface` (`surfaces/0`, `registry/1`, `resolve/2`, `surfaces_for/1`, `agent_surface/0`); a new optional `c:Samen.Automation.Action.tool_surfaces/0` declared by the three opted-in tools; `Samen.AI.Agent.Tools` gains arm 5 with arity-preserving heads (no call-site sweep); `Samen.AI.Mcp.call_tool/4` gates on `resolve(:mcp, name)` before a private `dispatch_tool/4`; one new bounded `@error_kind` `:tool_off_surface`. Sabotage 290. | NOT a T181 hook consumer: that chain is optional, host-configured and fires only AFTER the intersection, so hosting a structural registry property there would make the guarantee opt-in. `:mcp` is not declarable from an action (different execution contracts). An action declaring nothing keeps `[:tenant]` — the lane it already ran on, so nothing widens — while a MALFORMED declaration is refused whole and lands nowhere. `:operator` owns NO tools, which is the structural form of §7.3. `:ci_eval` carries the read tools only, because an admitted write opens a real E3 approval. The surface is host config, identical in `run/4` and the durable worker, and never derived from the actor (a lane, not an identity); a typo'd surface disables every tool rather than widening one. |
+| 28 | **The tool-result chokepoint gains a THIRD content transform, a secrets-redaction lane pattern-scanning free text for API keys/tokens/connection strings, distinct from the declared-field `pii_*` vault-class taxonomy.** *(T184 — see the **PROPOSED** addendum §4.3b; source pattern Condukt, MIT library, `findings/038`, adapted.)* | `pii_*` governs only DECLARED vault columns; a secret in a freeform, undeclared field carried no vector at all — `:pii_secret` is a generator example never wired into `no_plaintext_pii.ex`, and `redact_payload/1` is a fixed-key `Map.drop` confined to inbound webhook envelopes on a different plane entirely. | NEW `Samen.AI.Agent.Secrets.redact/1` — vendor-shaped prefixes (AWS/GitHub/Slack/Stripe/npm/Google/PEM/JWT/Bearer/credentialed connection strings) plus a fail-closed generic labeled fallback, one fixed marker, called at the SAME two `Samen.AI.Agent.ToolResult` clauses §4.3a owns (`render_scalar/2`, `render_key/1`), running BEFORE `Ingress.sanitize/1`. Sabotage 291; sabotage 255 regenerated a second time. | NOT a T181 hook consumer, same reasoning as §4.3a restated for a third transform at the identical clauses. Never touches `PiiResolution`/`Samen.Pii.Info`/`render_field/2` — `pii_*` masking is byte-unchanged, proven by re-running the existing masking + `no_plaintext_pii` suites rather than asserted. Redact-before-sanitize is deliberate: ingress noise inserted between an unrecognized secret's label and its value cannot defeat vendor-prefix detection (internal to the token, not label-adjacent), though it could in principle defeat the generic fallback specifically — named, not silently accepted. |
 ---
 
 ## 11 · Consequences
