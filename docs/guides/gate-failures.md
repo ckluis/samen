@@ -558,6 +558,39 @@ sabotage-refutable via `scripts/sabotages/286-t185-tool-actor-identity.patch` (d
 `inputSchema` `properties`); read the calling actor from `ctx.actor` (Action tools) or the
 resolved token scope (MCP), never from a model-supplied argument.
 
+### `mix samen.verify.tool_surface`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.tool_surface.ex`):
+
+```text
+<kind>: tool_kinds/0 lists it as an opted-in tool but Samen.AI.ToolSurface.surfaces_for/1 returns [] (on no surface, unreachable anywhere) — a malformed or dropped tool_surfaces/0 declaration.
+Samen.AI.Mcp.tool_names/0 (<list>) and Samen.AI.ToolSurface.names(:mcp) (<list>) disagree — the :mcp registry must be read straight from its own source, never hand-rolled.
+Samen.AI.ToolSurface.surfaces/0 is <list>, expected exactly [:mcp, :operator, :tenant, :ci_eval] — the closed surface set changed.
+<kind>: registered on the :ci_eval surface with effect: :write — a write tool on the CI eval lane could open a REAL E3 approval from a CI run (UXD-11; the :ci_eval surface's moduledoc guarantee).
+```
+
+**Meaning:** T183b (backlog UXD-REMEDIATION, `_orch/ux-debt.yaml` UXD-11 + UXD-12) — T183
+shipped `Samen.AI.ToolSurface` (ADR-043 §7/§9 + ADR-047 §5.1a, PROPOSED — the one
+surface-scoped tool registry: `:mcp`/`:operator`/`:tenant`/`:ci_eval`) with no verifier tier
+asserting its invariants, so they could rot silently once the shipping unit test's hardcoded
+fixtures stopped being the only thing exercising the property. This tier is the mechanical
+fix: (1) every opted-in tool in `Samen.Automation.Action.tool_kinds/0` lands on at least one
+surface (a malformed `tool_surfaces/0` fails CLOSED to `[]`, silently uncallable everywhere —
+this check turns that silence into a named violation); (2) `Samen.AI.Mcp.tool_names/0` and
+`Samen.AI.ToolSurface.names(:mcp)` agree — `ToolSurface` never hand-rolls a second MCP list;
+(3) `Samen.AI.ToolSurface.surfaces/0` stays exactly the closed four; (4) every tool registered
+on `:ci_eval` is `effect: :read` — the structural half of UXD-11's "a write tool can never
+open a real E3 approval from a CI eval run" guarantee (wiring the D8 eval tier itself onto
+`:ci_eval` is a behaviour change to another gate and stays out of this tier's scope). Wired
+into the ROOT `ci.sh` beside `mix samen.verify.tool_actor_identity`, sabotage-refutable via
+`scripts/sabotages/300-t183b-ci-eval-dropped-from-closed-surface-set.patch` (dropping
+`:ci_eval` from `Samen.AI.ToolSurface`'s closed `@surfaces` set flips both this tier and the
+shipped `samen_core/test/ai/tool_surface_test.exs` suite).
+**Fix:** add/repair the tool's `tool_surfaces/0` declaration; keep `Samen.AI.ToolSurface`'s
+`:mcp` registry reading straight from `Samen.AI.Mcp.tool_names/0`; restore the closed
+`surfaces/0` set to the four named surfaces; move an `effect: :write` action off the
+`:ci_eval` surface (or make the action genuinely read-only).
+
 ### `mix samen.verify.fleet_wire`
 
 **Errors** (`samen_core/lib/mix/tasks/samen.verify.fleet_wire.ex`):

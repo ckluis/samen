@@ -134,6 +134,25 @@ echo "==> Running tool-actor-identity verifier (T185, ADR-043 §6.2/§7 — ctx[
 )
 echo "==> tool-actor-identity verifier: PASSED"
 
+# --- tool-surface verifier (T183b, UXD-11/UXD-12 — ADR-043 §7/§9 + ADR-047 §5.1a) -----
+# T183 shipped `Samen.AI.ToolSurface` (the one surface-scoped tool registry: :mcp /
+# :operator / :tenant / :ci_eval) with no verifier tier asserting its invariants, so they
+# could rot silently (UXD-12). `mix samen.verify.tool_surface` closes that gap: every
+# opted-in tool (`Action.tool_kinds/0`) lands on at least one surface (a malformed
+# declaration fails CLOSED to unreachable-everywhere, which this gate now catches loudly
+# instead of silently), the `:mcp` registry agrees with its own source
+# (`Samen.AI.Mcp.tool_names/0`), `surfaces/0` stays exactly the closed four, and every tool
+# on `:ci_eval` is `effect: :read` — the structural half of UXD-11's "a write tool can
+# never open a real E3 approval from a CI eval run" guarantee. Fail-closed
+# (:erlang.halt(1)); sabotage-refutable at scripts/sabotages/300-*.
+echo ""
+echo "==> Running tool-surface verifier (T183b, UXD-11/UXD-12 — Samen.AI.ToolSurface invariants)"
+(
+  cd "$REPO_ROOT/samen_core"
+  mix samen.verify.tool_surface
+)
+echo "==> tool-surface verifier: PASSED"
+
 # --- samen_stripe adapter package gate (ADR-038 §8.1, T18/B1) ---
 # The first-party-but-separate Stripe billing adapter (skeleton): path-deps on
 # samen_core ONLY (never samen_web), owns its own vendor HTTP client dep (req),
