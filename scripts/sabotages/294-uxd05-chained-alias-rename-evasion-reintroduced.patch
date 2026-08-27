@@ -1,0 +1,31 @@
+# SABOTAGE: UXD-05 attempt-2 (T11-verdict.json's `strongest_attack` against attempt 1's
+# `29f7786`; ADR-047 §10a row 19) — head substitution in `resolves_to_kernel?/3` stops
+# RECURSING, so exactly one alias hop resolves. A rename OF a rename
+# (`alias Samen.AI.Agent, as: A` then `alias A, as: B`, at any depth) again evades the F-4
+# raw-spawn lock in BOTH the direct-call and apply/3 forms — the gap V13 found in attempt
+# 1. Single-hop renames and single-prefix renames are UNAFFECTED by this sabotage: one
+# substitution still happens, only the transitive closure is reopened.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_coverage_verifier_test.exs
+# MUST_FAIL: RED FIXTURE (UXD-05, attempt 2) — a CHAINED renamed alias evades the DIRECT-CALL form
+# MUST_FAIL: RED FIXTURE (UXD-05, attempt 2) — a CHAINED renamed alias evades the apply/3 form
+# MUST_FAIL: a THREE-hop chain (arbitrary depth, not just a single re-alias) still resolves
+# MUST_FAIL: spawn_lock_violations/2 flips on the chained-alias fixture path (refutable)
+# MUST_FAIL: RED FIXTURE (UXD-05, attempt 3) — a PARENT rename carrying a further as: chain
+diff --git a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+--- a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+@@ -318,8 +318,11 @@
+         if MapSet.member?(visited, head) do
+           false
+         else
+-          seen = MapSet.put(visited, head)
+-          Enum.any?(candidates, &resolves_to_kernel?(&1 ++ rest, env, seen))
++          # SABOTAGE (UXD-05 attempt 2, ADR-047 §10a row 19): head substitution no longer
++          # RECURSES, so exactly one hop resolves. A rename OF a rename (`alias
++          # Samen.AI.Agent, as: A` then `alias A, as: B`, any depth) evades again. The
++          # single-hop and single-prefix cases are unaffected.
++          Enum.any?(candidates, &agent_module_parts?(&1 ++ rest))
+         end
+     end
+   end

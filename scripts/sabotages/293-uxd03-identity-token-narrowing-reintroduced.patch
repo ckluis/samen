@@ -1,0 +1,29 @@
+# SABOTAGE: UXD-03 (T11-verdict.json's strongest_attack, ADR-043 §6.2, backlog.yaml:195) —
+# the widened identity-token set is reverted to the original three-token set (`actor`/
+# `org`/`organization`/`tenant`), reopening the identity-smuggling gap where `on_behalf_of`,
+# `account_id`, `acting_as`, `as_user` all pass `identity_leak?/1` unflagged. Pre-existing —
+# not a regression in T185 itself (backlog.yaml:195 literally scopes the rule to "actor/
+# org/tenant"), but the fix widened the closed vocabulary to also catch these names; this
+# sabotage targets that widening specifically.
+# APP: samen_core
+# TEST_FILES: test/ai/tool_actor_identity_verifier_test.exs
+# MUST_FAIL: RED FIXTURE (UXD-03) — identity-shaped names outside the old token set are flagged
+diff --git a/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex b/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex
+--- a/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex
+@@ -80,11 +80,10 @@
+ 
+   @task_name "samen.verify.tool_actor_identity"
+ 
+-  # The bounded identity-token blocklist (§ "What counts as an identity parameter").
+-  # UXD-03: widened with `account`/`behalf`/`as` to catch `on_behalf_of`, `account_id`,
+-  # `acting_as`, `as_user` (V11's strongest_attack, T11-verdict.json) — still a CLOSED
+-  # vocabulary, see the moduledoc note.
+-  @identity_tokens ~w(actor org organization tenant account behalf as)
++  # SABOTAGE (UXD-03, ADR-043 §6.2/T11-verdict.json): the widened token set is reverted to
++  # the original three-token set, reopening the `on_behalf_of`/`account_id`/`acting_as`/
++  # `as_user` identity-smuggling gap. The named RED FIXTURE test MUST flip.
++  @identity_tokens ~w(actor org organization tenant)
+ 
+   # Test seam (red-path exit-code proof, same discipline as
+   # `samen.verify.sink_schema`'s `SAMEN_SINK_SCHEMA_INJECT_STRING_FIELD`): when set, a

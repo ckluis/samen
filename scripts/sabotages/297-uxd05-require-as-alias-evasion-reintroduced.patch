@@ -1,0 +1,27 @@
+# SABOTAGE: UXD-05 attempt-4 (`_orch/verify/T11-verdict-attempt3.json`, V11's REFUTATION of
+# attempt 3's `33723d8`; ADR-047 §10a row 19) — `alias_env/1`'s prewalk stops matching
+# `{:require, _, args}`, so Elixir's OTHER alias-creating form binds nothing again:
+# `require Samen.AI.Agent, as: A` then `A.start(...)` (and the prefix, apply/3 and
+# require-seeded-chain variants) evade the F-4 raw-spawn lock. V11 proved this AT THE GATE,
+# not just at the predicate: `spawn_lock_violations/2` returned 0 for a require-as fixture
+# against 1 for a byte-identical plain-`alias` control. Plain `alias` renames, chains and
+# parent-namespace renames are UNAFFECTED: this patch reopens only the `require ..., as:`
+# class. (`require_bindings/1` goes unused under this patch — a warning, not an error.)
+# APP: samen_core
+# TEST_FILES: test/ai/agent_coverage_verifier_test.exs
+# MUST_FAIL: RED FIXTURE (UXD-05, attempt 4) — `require ..., as:` renaming the KERNEL evades the DIRECT-CALL form
+# MUST_FAIL: RED FIXTURE (UXD-05, attempt 4) — `require ..., as:` evades the apply/3 form
+# MUST_FAIL: RED FIXTURE (UXD-05, attempt 4) — `require ..., as:` renaming a PREFIX segment
+# MUST_FAIL: RED FIXTURE (UXD-05, attempt 4) — a require-as binding SEEDS a further alias chain
+# MUST_FAIL: spawn_lock_violations/2 flips on the require-as and atom-alias fixture paths (refutable, gate level)
+diff --git a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+--- a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+@@ -273,7 +273,6 @@
+     {_ast, bindings} =
+       Macro.prewalk(ast, [], fn
+         {:alias, _, args} = node, acc when is_list(args) -> {node, alias_bindings(args) ++ acc}
+-        {:require, _, args} = node, acc when is_list(args) -> {node, require_bindings(args) ++ acc}
+         node, acc -> {node, acc}
+       end)
+ 

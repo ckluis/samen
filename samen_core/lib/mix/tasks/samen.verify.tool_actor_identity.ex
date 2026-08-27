@@ -41,13 +41,34 @@ defmodule Mix.Tasks.Samen.Verify.ToolActorIdentity do
   ## What counts as an identity parameter
 
   A param/property name normalizes (camelCase→`_`, downcase, split on non-letters) to a
-  token set containing `actor`, `org`, `organization`, or `tenant` — catches `actor`,
-  `actor_id`, `org_id`, `organization_id`, `tenant_id`, `tenant_org_id`, `actorId`
-  (JSON-Schema-style camelCase, the MCP surface's convention), etc., while leaving
-  unrelated business fields (`resource`, `id`, `query`, `limit`, `user_id`) untouched. `user_id` is
-  deliberately NOT blocked: `assign_record_owner`'s `user_id` names a TARGET record to
-  mutate, not the calling actor's own identity — the rule is about the actor's own
-  identity leaking in as a parameter, not every UUID-shaped arg.
+  token set containing `actor`, `org`, `organization`, `tenant`, `account`, `behalf`, or
+  `as` — catches `actor`, `actor_id`, `org_id`, `organization_id`, `tenant_id`,
+  `tenant_org_id`, `actorId` (JSON-Schema-style camelCase, the MCP surface's convention),
+  and (UXD-03, widened — see below) `account_id`, `on_behalf_of`, `acting_as`, `as_user`,
+  etc., while leaving unrelated business fields (`resource`, `id`, `query`, `limit`,
+  `user_id`) untouched. `user_id` is deliberately NOT blocked: `assign_record_owner`'s
+  `user_id` names a TARGET record to mutate, not the calling actor's own identity — the
+  rule is about the actor's own identity leaking in as a parameter, not every UUID-shaped
+  arg.
+
+  **UXD-03 (`_orch/verify/T11-verdict.json`'s `strongest_attack`, backlog.yaml:195).** The
+  original three-token set (`actor`/`org`/`organization`/`tenant`) matched only the
+  literal words the backlog line names, so `on_behalf_of`, `account_id`, `acting_as`, and
+  `as_user` — all identity-shaped params naming who the model is acting as/for — passed
+  `identity_leak?/1` as `false`. Widened to `account`, `behalf`, `as`, which catches all
+  four without touching `user_id` (verified: `["user","id"]` contains none of the three).
+  **This remains a CLOSED vocabulary, not general identity-shape inference** — a still
+  further rename (e.g. `impersonate`, `requester_ref`) would again pass undetected; that
+  residual is the same class of limit the original three-token set always had, only
+  narrower now, not eliminated. Route a genuinely new identity spelling here, not around
+  the gate.
+
+  **Known OVER-approximation, accepted (UXD-03, `_orch/verify/T11-verdict-attempt3.json`).**
+  The bare token `as` also flags unrelated names that merely tokenize to it — `same_as`,
+  `known_as`, `as_of`, `as_of_date`, `base_as` all return `true` from `identity_leak?/1`.
+  This is deliberate and fail-CLOSED: a false positive blocks a build and is renamed or
+  argued in review, whereas a false negative admits an identity-spoofing parameter. The
+  deliberate sparing of TARGET-record fields is unaffected and pinned by test.
 
   ## Diagnostics
 
@@ -67,7 +88,10 @@ defmodule Mix.Tasks.Samen.Verify.ToolActorIdentity do
   @task_name "samen.verify.tool_actor_identity"
 
   # The bounded identity-token blocklist (§ "What counts as an identity parameter").
-  @identity_tokens ~w(actor org organization tenant)
+  # UXD-03: widened with `account`/`behalf`/`as` to catch `on_behalf_of`, `account_id`,
+  # `acting_as`, `as_user` (V11's strongest_attack, T11-verdict.json) — still a CLOSED
+  # vocabulary, see the moduledoc note.
+  @identity_tokens ~w(actor org organization tenant account behalf as)
 
   # Test seam (red-path exit-code proof, same discipline as
   # `samen.verify.sink_schema`'s `SAMEN_SINK_SCHEMA_INJECT_STRING_FIELD`): when set, a

@@ -1,0 +1,35 @@
+# SABOTAGE: UXD-05 attempt-4 — residual 4 (MODULE-ATTRIBUTE INDIRECTION) is deleted from
+# the F-4 lock's KNOWN RESIDUALS disclosure, exactly the way that class was silent at
+# `33723d8`. V11's refutation of attempt 3 was NOT "an evasion exists" but "that class is
+# UNDISCLOSED, unpinned by any test, and covered by none of the moduledoc residuals" — the
+# silent-bypass condition the directive names. Patch 296 proved the pin refutable for the
+# ORIGINAL four fragments only; a pin cannot protect a residual nobody wrote down, so this
+# patch proves the pin now covers the fragments added at attempt 4 too. The BEHAVIOURAL
+# negative control stays green under this patch (the code is untouched) — only the
+# documentation pin flips, which is the whole point.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_coverage_verifier_test.exs
+# MUST_FAIL: KNOWN RESIDUAL — the disclosure itself is pinned in the tier source
+diff --git a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+--- a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+@@ -66,19 +66,6 @@
+         3. **Indirection through another module or a macro.** A reference the kernel gains
+            only after macro expansion, or a call routed through a helper module in a
+            different file, is invisible to a per-file pre-expansion scan.
+-        4. **MODULE-ATTRIBUTE INDIRECTION** (UXD-05 attempt 4, named here because it was
+-           found live and silent). `@k Samen.AI.Agent` followed by `@k.start(...)` or
+-           `apply(@k, :start, [...])` INSIDE a `tool_schema/0` module is a working call
+-           that this lock DOES NOT FLAG. A module attribute is not an alias: it is a
+-           compile-time binding held in the module's own attribute table, so it never
+-           enters `alias_env/1`, and the call site's target is an `{:@, _, _}` node that
+-           `agent_kernel_alias?/2` has no clause for. Resolving it means tracking attribute
+-           assignment and re-binding (attributes may be reassigned, accumulated, or set
+-           from another attribute), i.e. the same data-flow analysis residual 1 needs —
+-           deliberately NOT folded in here. This is a STATED, TESTED limit: the negative
+-           control is `"KNOWN RESIDUAL (module-attribute indirection)"` in
+-           `test/ai/agent_coverage_verifier_test.exs`.
+-
+       Residuals 1 and 4 are pinned by negative-control tests, and a further test asserts
+       this paragraph is still present in this source, so deleting any disclosure above
+       turns it red (`test/ai/agent_coverage_verifier_test.exs`, the "KNOWN RESIDUAL" tests).

@@ -94,6 +94,41 @@ defmodule Mix.Tasks.Samen.Verify.ToolActorIdentityTest do
       end
     end
 
+    # ==========================================================================
+    # UXD-03 (`_orch/verify/T11-verdict.json`'s `strongest_attack`, backlog.yaml:195) —
+    # the original literal token set (`actor`/`org`/`organization`/`tenant`) let
+    # identity-shaped names OUTSIDE it pass: `on_behalf_of`, `account_id`, `acting_as`,
+    # `as_user` all returned `false`. Widened to also match `account`/`behalf`/`as`.
+    # `user_id` (assign_record_owner's TARGET-record field) must keep passing — the
+    # sparing is deliberate and must survive the widening (pinned below and in the
+    # existing "does not flag unrelated business fields" test above).
+    # ==========================================================================
+    test "RED FIXTURE (UXD-03) — identity-shaped names outside the old token set are flagged" do
+      for name <- ~w(on_behalf_of account_id acting_as as_user onBehalfOf accountId actingAs asUser) do
+        assert V.identity_leak?(name), "expected #{inspect(name)} to be flagged (UXD-03)"
+      end
+    end
+
+    test "UXD-03 widening does not disturb the deliberate user_id sparing" do
+      refute V.identity_leak?("user_id")
+      refute V.identity_leak?("userId")
+    end
+
+    test "UXD-03 OVER-approximation is documented, accepted and pinned (fail-closed direction)" do
+      # `_orch/verify/T11-verdict-attempt3.json` judged this ACCEPTABLE, not a defect: the
+      # bare `as` token also matches names that merely tokenize to it. Recorded here so the
+      # moduledoc's "Known OVER-approximation, accepted" note is TESTED, not just asserted —
+      # if a later narrowing changes this behaviour, that note must be updated in the same
+      # commit. The spared TARGET-record fields stay false in the same breath.
+      for name <- ~w(same_as known_as as_of as_of_date base_as) do
+        assert V.identity_leak?(name), "expected the accepted over-approximation on #{inspect(name)}"
+      end
+
+      for name <- ~w(user_id userId record_id owner_id assignee_id target_user_id task_id document_id) do
+        refute V.identity_leak?(name), "the deliberate TARGET-record sparing broke on #{inspect(name)}"
+      end
+    end
+
     test "does not flag non-binary/atom input" do
       refute V.identity_leak?(nil)
       refute V.identity_leak?(%{})
