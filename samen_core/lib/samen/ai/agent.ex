@@ -419,6 +419,10 @@ defmodule Samen.AI.Agent do
   committed; a lost/failed enqueue is recovered by the `:agent_turn_due` watchdog).
   Returns `{:ok, run}` (the `:queued` cursor) or the same start refusals as `run/4`
   (`{:error, :killed | :rate_tripped | :provider_tripped | …}` — nothing persisted).
+
+  A per-run `:hooks` opt (UXD-08, T21-verdict.json) is persisted on the row (`arn_hooks`)
+  and re-resolved by the durable worker at each execution batch — it fires exactly as it
+  would under `run/4`, host config still first (`Samen.AI.Agent.Hooks.resolve/1`).
   """
   @spec start(module(), Samen.Scope.t(), String.t(), keyword()) ::
           {:ok, Ash.Resource.record()} | {:error, term()}
@@ -701,7 +705,7 @@ defmodule Samen.AI.Agent do
             {:ok, tools} ->
               run = if run.state == :queued, do: begin!(run), else: run
 
-              worker_opts = worker_opts()
+              worker_opts = worker_opts(run)
 
               loop(
                 run,
@@ -725,10 +729,25 @@ defmodule Samen.AI.Agent do
   # The worker's opts: the host-configured agent provider override (tests point this at
   # Samen.AI.Provider.Scripted — the cross-process script seam), else Samen.AI's own
   # provider resolution applies (host config / env fallback; fail-honest when unwired).
-  defp worker_opts do
-    case Application.get_env(:samen_core, __MODULE__, [])[:provider] do
-      nil -> []
-      provider -> [provider: provider]
+  #
+  # UXD-08 (T21-verdict.json): also the per-run :hooks opt `start/4` persisted onto
+  # `run.hooks` (arn_hooks) — this is the ONE place the durable path re-hydrates it, so
+  # `Hooks.resolve/1` (called by the caller with the return value here) sees the SAME
+  # per-run chain `run/4` would have. Host-configured hooks are read separately by
+  # `Hooks.resolve/1` itself and always go first — a per-run hook can never pre-empt them.
+  defp worker_opts(%Run{} = run) do
+    base =
+      case Application.get_env(:samen_core, __MODULE__, [])[:provider] do
+        nil -> []
+        provider -> [provider: provider]
+      end
+
+    case run.hooks do
+      hooks when is_list(hooks) and hooks != [] ->
+        Keyword.put(base, :hooks, Enum.map(hooks, &String.to_atom/1))
+
+      _ ->
+        base
     end
   end
 
@@ -2407,6 +2426,12 @@ defmodule Samen.AI.Agent do
             # anything past the v1 ceiling before we got here), not a hardcoded 0/[].
             depth: Keyword.get(opts, :depth, 0),
             chain: Keyword.get(opts, :chain, []),
+            # UXD-08 (T21-verdict.json): persist the per-run :hooks opt on the row so the
+            # durable TurnWorker can re-resolve it at execution time (worker_opts/1) —
+            # Oban job args stay token-only (ADR-037 §5.9), so the row is the only
+            # durability path for this. Shared by run/4 AND start/4 (both funnel through
+            # this one function), so both modes now agree on what they persisted.
+            hooks: opts |> Keyword.get(:hooks) |> List.wrap() |> Enum.map(&Atom.to_string/1),
             transcript: encode_transcript(goal, []),
             next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds)
           },

@@ -163,6 +163,16 @@ defmodule Samen.AI.Agent.Run do
     attribute(:origin, :string, public?: true)
     attribute(:depth, :integer, public?: true, allow_nil?: false, default: 0)
     attribute(:chain, {:array, :string}, public?: true, allow_nil?: false, default: [])
+
+    # UXD-08/UXD-09 (T21-verdict.json): the per-run `Samen.AI.Agent.Hook` module chain a
+    # caller passed to `start/4` as the `:hooks` opt, stored as module-name strings so the
+    # durable `TurnWorker` can re-resolve it at execution time (`execute_batch/1`'s
+    # `worker_opts/1`). This is the row-durability path deliberately used INSTEAD of Oban
+    # job args, which stay token-only (`run_id` only — the ADR-037 §5.9 sink rule) — the
+    # same shape `agent_module`/`owner_id` already use for other start-time facts the
+    # worker resumes from. Host-configured hooks (`config :samen_core, Samen.AI.Agent,
+    # hooks: [...]`) are unaffected: `Hooks.resolve/1` puts them first regardless.
+    attribute(:hooks, {:array, :string}, public?: true, allow_nil?: false, default: [])
   end
 
   # A2 (ADR-047 §7.4, §9#2/#4 TAKEN): the run's ONE persisted text artifact — the goal +
@@ -193,6 +203,7 @@ defmodule Samen.AI.Agent.Run do
         :origin,
         :depth,
         :chain,
+        :hooks,
         :transcript,
         :next_turn_at,
         :max_turns,
