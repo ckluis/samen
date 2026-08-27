@@ -282,10 +282,16 @@ prose and OSA's staged pipeline:
 
 **Level 1 — pre-turn, deterministic, no model call in the selection.** Before `seal/3`, if the
 assembled `:history` exceeds a `context_cutoff_tokens` watermark (host config; default a fraction
-of `max_input_tokens`, e.g. 70% of 60k), fold the **oldest eligible span**. Three things are never
-foldable: the goal, the tool definitions (compile-time static per §4.2), and a **protected recent
-tail** (default the 2 most recent turns). Selection is oldest-first and **whole turns only** — a
-half-folded turn would put a tool call in the ledger without its result.
+of `max_input_tokens`, e.g. 70% of 60k), fold the **oldest eligible span**. Four things are never
+foldable: the goal, the tool definitions (compile-time static per §4.2), a **protected recent
+tail** (default the 2 most recent turns), and — **ruling UXD-17 explicitly** — **a prior fold's own
+summary segment**. Selection is oldest-first and **whole turns only**, and a fold summary is a
+*segment* appended beside a `[folded: …]` marker (§4 non-negotiable 4), never a turn, so it was
+already excluded by that rule under one reading; this item removes the second reading rather than
+leaving the two to disagree. **Consequence, stated so it is not inferred:** folds stay **one level
+deep** — a later fold can consume unfolded turns but never another fold's summary, so no fold ever
+cites another fold's provenance (see §7.2's note). A half-folded turn would put a tool call in the
+ledger without its result.
 
 > **The determinism rule, and why it is load-bearing.** The *selection* is a pure function of
 > `{run_id, turn_index, view state}`; the *summary text* is not, because a model wrote it. The loop
@@ -296,6 +302,17 @@ half-folded turn would put a tool call in the ledger without its result.
 > the loop states it: the summarization *call* can genuinely repeat; the *fold* does not. Without
 > this rule a crash-replay would produce a different `llm_view` than the pre-crash run, which is a
 > worse failure than re-charging tokens for one summary.
+>
+> **Ruling UXD-18 — the two-checkpoint shape this needs, stated rather than assumed.** Persisting
+> the fold entry only in the cursor-advance transaction means a crash *before* that transaction
+> commits leaves nothing to reuse — there is no ledger row yet. This mirrors the turn-row shape
+> already shipped one level down (`agent.ex:100-105`, RP-AG-7): a `:proposed` row is written
+> **before** the slow provider call, and the same transaction that advances the cursor finalizes it
+> to `:done`. The fold ledger adopts the identical two-checkpoint shape: a `:proposed` fold-entry
+> row is persisted for the turn index **before** the summarize call, and the cursor-advance
+> transaction finalizes it. A replay that finds an existing `:proposed` (or `:done`) row reuses it
+> and does not re-invoke the summarizer; only a crash *before* that pre-call write causes a genuine
+> re-summarize, with no ledger row yet committed to reconcile against.
 
 **Level 2 — mid-turn, exactly one recovery attempt.** A provider "prompt too long" response
 normalizes to a new bounded `@error_kind` `:context_overflow` (today it collapses into the
@@ -378,6 +395,14 @@ Containment covers **run shred**. It does not cover withdrawals that happen *ins
 That last row is deliberate: the obvious fourth case is already structurally impossible, and saying
 so is cheaper and more honest than shipping a mechanism for it.
 
+**A fifth case, closed by §6's ruling rather than by this section (UXD-17).** A fold whose
+*source* is itself a prior fold's summary segment would be a nested-withdrawal path this table
+does not name. §6's never-foldable list now rules it out structurally: a fold summary is never
+itself eligible for a later fold, so no fold ever cites another fold's provenance, and every
+`source_marker` the §7.3 walk matches is always a leaf record's, never a fold's. The propagation
+walk therefore never needs a fold-to-fold hop — there is no second-generation summary for it to
+reach, and no transitive hole for §7.3 to have.
+
 ### 7.3 · The mechanism — a pseudonym-keyed provenance index and a bounded walk
 
 **Provenance (the Ankole citation rule, adapted).** Every fold entry records, per source segment:
@@ -403,11 +428,16 @@ subject's **own** DEK. Then:
 > **The ordering constraint this creates — stated, not glossed.** ADR-046 §1 runs the key shred
 > (step 1) **first and outside** the steps-2–5 transaction, in the fail-safe direction. That
 > ordering is correct and this ADR does **not** propose changing it. The requirement is weaker: the
-> pseudonym must be **computed in the pre-flight that already assembles the erasure report** and
-> carried as a value into the steps-2–5 transaction, where the withdrawal arm runs alongside the
-> other redact-class arms. This is a parameter capture, not a reordering. Whether the shipped
-> pre-flight can carry such a value into the transaction unchanged is the one thing in §7 this
-> draft cannot settle from the ADRs alone — **§11 O-3**.
+> pseudonym must be **computed before `Kms.shred/1` destroys the key** and carried as a value into
+> the steps-2–5 transaction, where the withdrawal arm runs alongside the other redact-class arms.
+> **Correction (UXD-19): `shred/2`'s pre-step-1 region does not assemble the erasure report** — it
+> is option unpacking only (`erasure.ex:206-245`); the report is built at step 5, *inside* the
+> steps-2–5 `Multi`, after the key is gone. There is no existing pre-flight computation to
+> piggyback the pseudonym onto — it must be added, either as a new first line of `shred/2` before
+> `Kms.shred/1`, or computed and passed in by `shred/2`'s caller. The conclusion is unaffected by
+> the correction: adding that computation is still a parameter capture, not a reordering. Whether
+> the shipped call sites can supply it unchanged is the one thing in §7 this draft cannot settle
+> from the ADRs alone — **§11 O-3**.
 
 **The walk** (`Samen.AI.Agent.Compaction.withdraw/2`, illustrative name), registered as an ADR-046
 **erasure arm keyed on `subject_id`**, so `mix samen.verify.erasure_completeness` **discovers** it:
@@ -460,7 +490,7 @@ retention-vs-erasure policy call, not a mechanical one.
 | P3 | The fail-honest floor survives recovery | Sabotage: promote the last assistant turn on `:context_exhausted`; extends sabotage 240's target to the new terminal |
 | P4 | Level 2 retries exactly once | Sabotage: drop the retry counter; a red asserting two attempts per turn row must flip |
 | P5 | The kill-switch is re-checked at the retry boundary | Sabotage: skip the re-check on retry; the sabotage-244 shape, one level down |
-| P6 | Fold reuse on replay | Red: crash between the summarize call and the cursor advance; the replayed turn must reuse the ledger entry, not re-summarize (`meta: %{"replayed" => true}`) |
+| P6 | Fold reuse on replay | Red, two cases per the §6 two-checkpoint ruling (UXD-18): crash **after** the pre-call `:proposed` write — the replay must reuse that row, not re-summarize (`meta: %{"replayed" => true}`); crash **before** it — the replay legitimately re-summarizes, since no ledger row exists yet to reuse |
 | P7 | Withdrawal reaches folds | New `erasure_completeness` discovery class + a red: shred a subject, assert every citing fold is marked, plus the anti-tautology positive control that a **non**-erased subject's fold survives |
 | P8 | The provenance index is unlinkable after shred | Red: after shred, no index row resolves to the subject; asserted on the pseudonym, not on absence of rows |
 | P9 | `:after_compaction` cannot widen | Red: a hook returning `{:edit, _}` at that point is refused (`:hook_error`), never applied |
@@ -509,13 +539,15 @@ All **OPEN — needs-operator-input**. Nothing below is taken.
   ADR-046 §7#5 (about-a-subject blobs) and ADR-047 §11 (third-party free text in a goal) are the
   same question; §7.4 shows a fold inherits it without widening it. **Recommendation: rule them
   together**, since a summary makes the boundary more visible without changing it.
-- **O-3 — Can the shipped erasure pre-flight carry a pseudonym into the steps-2–5 transaction?**
+- **O-3 — Can a new pre-shred computation carry a pseudonym into the steps-2–5 transaction?**
   §7.3 needs the subject's pseudonym computed **before** step 1 destroys the key, without
-  reordering ADR-046's fail-safe step order. This draft asserts it is a parameter capture, not a
-  reordering, but it **cannot verify that from the ADRs alone** — it is the one implementation fact
-  C4 must confirm before its design is final. If it turns out the pre-flight cannot, the fallback
-  is an index keyed on a **separately shreddable** derived key, and that fallback needs its own
-  crypto review (it is a `k_bidx`-shaped decision, and `k_bidx` is the one that went wrong).
+  reordering ADR-046's fail-safe step order. No such computation exists today (UXD-19: `shred/2`'s
+  pre-step-1 region is option unpacking only, `erasure.ex:206-245`); this draft asserts adding one
+  is a parameter capture, not a reordering, but it **cannot verify that from the ADRs alone** — it
+  is the one implementation fact C4 must confirm before its design is final. If it turns out no
+  call site can supply it unchanged, the fallback is an index keyed on a **separately shreddable**
+  derived key, and that fallback needs its own crypto review (it is a `k_bidx`-shaped decision, and
+  `k_bidx` is the one that went wrong).
 - **O-4 — What is the default `context_cutoff_tokens` watermark?** Proposed: 70% of
   `max_input_tokens` (42k of the ratified 60k), host-configurable, floor non-configurable at
   "never fold the goal, the tool defs, or the 2 most recent turns."
