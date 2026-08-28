@@ -9,7 +9,13 @@ defmodule Samen.AdapterConformanceCaseTest do
     * `assert_masked_payload_only!/2` passes on a fake adapter with a real
       function-clause guard and FLUNKS when the "masked" call is itself over-strict;
     * `assert_masked_segments!/1` passes on clean segments and FLUNKS on a leaked
-      `vt_*` token / non-binary segment.
+      `vt_*` token / non-binary segment;
+    * (UXD-07 / A6, the delivery-shaped additions) `load_fixtures!/1` loads a real
+      fixture and FLUNKS on a missing one; `assert_capture_no_leak!/2` passes on a clean
+      outbound payload and FLUNKS on a leaked `vt_*` token, a leaked plaintext sentinel,
+      and on a call that built NO request at all; `assert_redaction!/3` passes on a
+      surgical redaction and FLUNKS on a PII leak, a dropped retained key, and a
+      wipe-everything no-op.
   """
   use ExUnit.Case, async: true
 
@@ -149,6 +155,117 @@ defmodule Samen.AdapterConformanceCaseTest do
     test "flunks on a non-binary segment" do
       assert_raise ExUnit.AssertionError, fn ->
         Harness.assert_masked_segments!([[{:grant_span, :x}]])
+      end
+    end
+  end
+  # ---------------------------------------------------------------------------
+  # load_fixtures!/1 — UXD-07 / A6 (delivery-shaped addition)
+
+  describe "load_fixtures!/1" do
+    test "loads a real, checked-in conformance fixture (positive control)" do
+      # The toy fixture samen_core already ships for its own harness self-test — an
+      # adapter-package-shaped `<dir>/conformance.exs` evaluating to a map.
+      fixtures = Harness.load_fixtures!("test/fixtures/toy_conformance")
+
+      assert is_map(fixtures)
+      assert Map.has_key?(fixtures, :configured_config)
+    end
+
+    test "flunks with a named message when the fixture file is missing (RED)" do
+      assert_raise ExUnit.AssertionError, ~r/no conformance fixture found/, fn ->
+        Harness.load_fixtures!("test/fixtures/there_is_no_such_fixture_dir")
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # assert_capture_no_leak!/2 — UXD-07 / A6 (delivery-shaped addition), anti-tautology
+
+  describe "assert_capture_no_leak!/2" do
+    test "passes when the captured outbound payload is clean (positive control)" do
+      assert :ok =
+               Harness.assert_capture_no_leak!(
+                 fn capture -> capture.(%{to: "recipient@example.test", subject: "hello"}) end,
+                 ["OTHER-SUBJECT-SENTINEL@leak.test"]
+               )
+    end
+
+    test "flunks when a vt_* vault token reaches the outbound payload (RED)" do
+      assert_raise ExUnit.AssertionError, ~r/vault token/, fn ->
+        Harness.assert_capture_no_leak!(fn capture ->
+          capture.(%{to: "vt_rogue_token_must_not_reach_the_provider"})
+        end)
+      end
+    end
+
+    test "flunks when a forbidden plaintext sentinel reaches the outbound payload (RED)" do
+      assert_raise ExUnit.AssertionError, ~r/forbidden plaintext sentinel/, fn ->
+        Harness.assert_capture_no_leak!(
+          fn capture -> capture.(%{subject: "OTHER-SUBJECT-SENTINEL@leak.test"}) end,
+          ["OTHER-SUBJECT-SENTINEL@leak.test"]
+        )
+      end
+    end
+
+    test "flunks when the call built NO outbound request at all (non-vacuity)" do
+      assert_raise ExUnit.AssertionError, ~r/NO outbound request/, fn ->
+        Harness.assert_capture_no_leak!(fn _capture -> {:error, :not_configured} end)
+      end
+    end
+
+    test "an adapter that raises still has its captured request inspected" do
+      assert_raise ExUnit.AssertionError, ~r/vault token/, fn ->
+        Harness.assert_capture_no_leak!(fn capture ->
+          capture.(%{to: "vt_leaked"})
+          raise "the adapter blew up on the probe's error return"
+        end)
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # assert_redaction!/3 — UXD-07 / A6 (delivery-shaped addition), anti-tautology
+
+  describe "assert_redaction!/3" do
+    @payload %{
+      "MessageID" => "msg-1",
+      "Email" => "known-pii@example.test",
+      "FromName" => "Known Pii Name"
+    }
+
+    test "passes for a surgical redaction (positive control)" do
+      surgical = fn payload -> Map.take(payload, ["MessageID"]) end
+
+      assert :ok =
+               Harness.assert_redaction!(surgical, @payload,
+                 pii_strings: ["known-pii@example.test", "Known Pii Name"],
+                 retained_keys: ["MessageID"]
+               )
+    end
+
+    test "flunks when a PII string survives redaction (RED)" do
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        Harness.assert_redaction!(&Function.identity/1, @payload,
+          pii_strings: ["known-pii@example.test"],
+          retained_keys: ["MessageID"]
+        )
+      end
+    end
+
+    test "flunks when a documented retained key is dropped (wipe-everything no-op)" do
+      assert_raise ExUnit.AssertionError, ~r/must be surgical, not total/, fn ->
+        Harness.assert_redaction!(fn _ -> %{} end, @payload,
+          pii_strings: ["known-pii@example.test"],
+          retained_keys: ["MessageID"]
+        )
+      end
+    end
+
+    test "flunks on an EMPTY result for a non-empty payload with no documented retained_keys" do
+      assert_raise ExUnit.AssertionError, ~r/wipe-everything/, fn ->
+        Harness.assert_redaction!(fn _ -> %{} end, @payload,
+          pii_strings: ["known-pii@example.test"]
+        )
       end
     end
   end

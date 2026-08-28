@@ -1,0 +1,39 @@
+# SABOTAGE: UXD-07 / A6 — samen_postmark is the first ESP adapter to consume the SHARED
+# cross-family kit `Samen.AdapterConformanceCase` (T188) instead of the ESP-only
+# `Samen.Delivery.ProviderConformanceCase` macro harness. An adopted kit that would pass a
+# broken adapter has adopted nothing, so this patch widens SamenPostmark.Provider's
+# redaction allowlist to admit the two PII-bearing Postmark bounce keys (`Email`, the
+# bounced recipient address, and `FromName`, the sender display name). redact_payload/1
+# then persists plaintext PII verbatim — the exact leak ADR-038 §4.5(d) forbids. The named
+# red is the redaction test in samen_postmark/test/conformance_test.exs, whose assertion is
+# `Samen.AdapterConformanceCase.assert_redaction!/3` in samen_core: if it does not flip, the
+# kit's delivery-shaped assertions are not actually running against the adapter. The other
+# seven conformance tests stay GREEN under this patch, proving the flip is surgical and the
+# suite is not blanket-failing.
+# APP: samen_postmark
+# TEST_FILES: test/conformance_test.exs
+# MUST_FAIL: redact_payload/1 strips every known-PII fixture string
+diff --git a/samen_postmark/lib/samen_postmark/provider.ex b/samen_postmark/lib/samen_postmark/provider.ex
+index c7540b7..90c836e 100644
+--- a/samen_postmark/lib/samen_postmark/provider.ex
++++ b/samen_postmark/lib/samen_postmark/provider.ex
+@@ -69,10 +69,18 @@ defmodule SamenPostmark.Provider do
+   # safe merely because the key name is safe. `Metadata` — and every other
+   # nested map/list (`Headers`, `Attachments`, …) — is dropped WHOLESALE,
+   # never selectively descended into.
++  # SABOTAGE (UXD-07 / A6): the redaction allowlist is widened to admit the two
++  # PII-bearing Postmark bounce keys — `Email` (the bounced recipient address) and
++  # `FromName` (the sender's display name). redact_payload/1 then persists plaintext
++  # PII verbatim, exactly the leak ADR-038 §4.5(d) exists to forbid. MUST FLIP the
++  # redaction test in samen_postmark/test/conformance_test.exs, which is
++  # Samen.AdapterConformanceCase.assert_redaction!/3 — the delivery-shaped assertion
++  # the cross-family kit gained when samen_postmark adopted it. If that test still
++  # passes, the adopted kit's assertions are not actually running.
+   @safe_keys ~w(
+     RecordType ID Type TypeCode Name Tag MessageID ServerID Description
+     Details BouncedAt DeliveredAt ReceivedAt SentAt Inactive CanActivate
+-    DumpAvailable
++    DumpAvailable Email FromName
+   )
+ 
+   @impl true

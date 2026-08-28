@@ -16,6 +16,16 @@ defmodule Samen.AdapterConformanceCase do
       masked-only segment scan is generalized here as `assert_masked_segments!/1` and
       `Samen.AgentCase` now delegates to it (same contract, same callers, DRY).
 
+  UXD-07 / A6 extends this kit with the DELIVERY-SHAPED assertions an ESP adapter package
+  needs in order to adopt it — `load_fixtures!/1`, `assert_capture_no_leak!/2` and
+  `assert_redaction!/3`, the ADR-038 §4.5 (d)/(f) guarantees restated family-neutrally. The
+  ADR-038 §8.1 REFERENCE delivery adapter is the kit's first delivery-family consumer; the
+  remaining ESP adapter packages, and samen_core's own `Samen.Delivery.DeliverLeakGateTest`
+  and `Samen.Delivery.ChokepointAntiBypassProbeTest`, keep consuming
+  `Samen.Delivery.ProviderConformanceCase` exactly as before, so its frozen signature never
+  moves. (No adapter package is NAMED here — INV-4 / ADR-038 §8.3 keep samen_core
+  vendor-string clean; see the ADR for which package adopted which kit.)
+
   ## Usage
 
       use Samen.AdapterConformanceCase, adapter: MyAdapter.Module
@@ -143,6 +153,131 @@ defmodule Samen.AdapterConformanceCase do
 
       refute segment =~ "vt_", "a vt_* vault token reached the provider (INV-7)"
       refute segment =~ "grant_span", "a grant-span tag leaked onto the provider path"
+    end
+
+    :ok
+  end
+  @doc """
+  Family-neutral conformance-fixture loader (the delivery-shaped generalization of
+  `Samen.Delivery.ProviderConformanceCase`'s own ESP-scoped loader, which stays
+  UNCHANGED). `fixtures_dir` is relative to the adapter PACKAGE root — the cwd `mix test`
+  runs from. Evaluates `<fixtures_dir>/conformance.exs` (checked-in, hand-curated data,
+  never network-recorded in CI — ADR-038 §7.2) and returns its value.
+  """
+  @spec load_fixtures!(Path.t()) :: term()
+  def load_fixtures!(fixtures_dir) when is_binary(fixtures_dir) do
+    path = Path.join(Path.expand(fixtures_dir), "conformance.exs")
+
+    unless File.exists?(path) do
+      flunk(
+        "Samen.AdapterConformanceCase: no conformance fixture found at #{path} — an adapter " <>
+          "package adopting this kit ships its fixture data as <fixtures_dir>/conformance.exs " <>
+          "(see the kit moduledoc)."
+      )
+    end
+
+    {fixtures, _bindings} = Code.eval_file(path)
+    fixtures
+  end
+
+  @doc """
+  Outbound-payload leak gate, generalized across adapter families (the delivery-shaped
+  generalization of `Samen.Delivery.ProviderConformanceCase.assert_deliver_no_leak!/2`,
+  which stays UNCHANGED and ESP-scoped — ADR-038 §4.5(f) / C3 T29, INV-1). `invoke` is
+  arity-1: given the harness CAPTURE function, it must run the adapter's REAL outbound
+  call with that capture wired in as the adapter's injectable transport. The adapter's
+  RETURN VALUE is ignored — only the requests it actually built are inspected: at least
+  one must be captured (a call that builds nothing cannot prove no leak), none may carry
+  a `vt_*` vault token (INV-1/INV-7), and none may carry any `forbidden` plaintext
+  sentinel. This makes masking enforced-by-a-gate rather than adapter goodwill.
+  """
+  @spec assert_capture_no_leak!(((term() -> term()) -> term()), [String.t()]) :: :ok
+  def assert_capture_no_leak!(invoke, forbidden \\ [])
+      when is_function(invoke, 1) and is_list(forbidden) do
+    {:ok, agent} = Agent.start_link(fn -> [] end)
+
+    capture = fn request ->
+      Agent.update(agent, fn acc -> [request | acc] end)
+      # Adapter request/response shapes differ across families, so there is no universal
+      # success to hand back; return an error the adapter will surface. Only the CAPTURED
+      # outbound request is inspected — never the adapter's result.
+      {:error, :harness_leak_probe}
+    end
+
+    _ =
+      try do
+        invoke.(capture)
+      rescue
+        _ -> :ok
+      catch
+        _, _ -> :ok
+      end
+
+    captured = Agent.get(agent, &Enum.reverse/1)
+    Agent.stop(agent)
+
+    assert captured != [],
+           "the adapter built NO outbound request through the harness capture transport — " <>
+             "the leak gate cannot prove no leak. The call under test MUST route its outbound " <>
+             "payload through its injectable transport hook so the harness can prove the " <>
+             "payload carries no vault token."
+
+    serialized = inspect(captured, limit: :infinity, printable_limit: :infinity)
+
+    refute serialized =~ "vt_",
+           "the adapter LEAKED a vault token (vt_) into its outbound payload — a vault " <>
+             "reference must NEVER reach a provider, and it also leaks the vault scheme " <>
+             "(INV-1/INV-7). Captured request(s): #{serialized}"
+
+    for sentinel <- forbidden do
+      refute serialized =~ sentinel,
+             "the adapter LEAKED the forbidden plaintext sentinel #{inspect(sentinel)} into " <>
+               "its outbound payload (INV-1) — an adapter that hand-reveals PII instead of " <>
+               "using the framework render seam is caught here. Captured request(s): #{serialized}"
+    end
+
+    :ok
+  end
+
+  @doc """
+  Surgical-redaction property (the delivery-shaped generalization of
+  `Samen.Delivery.ProviderConformanceCase`'s ESP-scoped redaction assertion, which stays
+  UNCHANGED — ADR-038 §4.5(d)). `redact.(payload)` must strip every `:pii_strings`
+  substring, must RETAIN every `:retained_keys` key the fixture documents as non-PII, and
+  — when no retained keys are documented — must not return an empty result for a
+  non-empty payload. The last two are the anti-tautology halves: redaction must be
+  surgical, never a wipe-everything no-op that trivially passes the PII check.
+  """
+  @spec assert_redaction!((map() -> map()), map(), keyword()) :: :ok
+  def assert_redaction!(redact, payload, opts)
+      when is_function(redact, 1) and is_map(payload) and is_list(opts) do
+    pii_strings = Keyword.fetch!(opts, :pii_strings)
+    retained_keys = Keyword.get(opts, :retained_keys, [])
+
+    redacted = redact.(payload)
+
+    assert is_map(redacted),
+           "the redaction function must return a map, got: #{inspect(redacted)}"
+
+    serialized = inspect(redacted, limit: :infinity, printable_limit: :infinity)
+
+    for pii <- pii_strings do
+      refute serialized =~ pii,
+             "the redaction function LEAKED a PII fixture string (#{inspect(pii)}) into the " <>
+               "persisted payload: #{serialized}"
+    end
+
+    for key <- retained_keys do
+      assert Map.has_key?(redacted, key),
+             "the redaction function dropped the non-PII key #{inspect(key)} that the fixture " <>
+               "documents as retained — redaction must be surgical, not total."
+    end
+
+    if retained_keys == [] and map_size(payload) > 0 do
+      refute map_size(redacted) == 0,
+             "the redaction function returned an EMPTY map for a non-empty payload with no " <>
+               "documented retained_keys — this cannot be distinguished from a wipe-everything " <>
+               "no-op; document retained_keys to prove redaction is surgical."
     end
 
     :ok

@@ -174,8 +174,9 @@ echo "==> samen_stripe: PASSED"
 # The first-party-but-separate, INBOUND-CAPABLE reference delivery adapter:
 # path-deps on samen_core ONLY (never samen_web), owns its own vendor HTTP
 # client dep (req), runs its own standalone suite INCLUDING the shared
-# Samen.Delivery.ProviderConformanceCase harness (samen_core, ADR-038 §4.5) —
-# the same harness samen_ses/samen_resend (T94/T95) will cite unchanged.
+# cross-family Samen.AdapterConformanceCase kit (samen_core, ADR-038 §4.5;
+# UXD-07/A6 switched this adapter onto it — samen_ses/samen_resend still cite
+# Samen.Delivery.ProviderConformanceCase, which is UNCHANGED).
 # samen_core itself never references this package (INV-4; proved by
 # samen_core's own delivery_vendor_free_test.exs above, which already ran).
 echo ""
