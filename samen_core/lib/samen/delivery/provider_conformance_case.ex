@@ -2,11 +2,19 @@ defmodule Samen.Delivery.ProviderConformanceCase do
   @moduledoc """
   The SHARED `Samen.Delivery.Provider` conformance harness (ADR-038 §4.5;
   T27/C1). Defined here, consumed READ-ONLY by every ESP adapter package
-  (three ship under ADR-038 §8.1 — the first now, two more later). Its
-  signature and fixture contract are FIXED as of this task: later adapter
-  tasks cite it UNCHANGED (the ADR-038 roadmap-collision rule — any needed
-  harness change is a T27-owned follow-up, never an in-place edit by an
-  adapter task).
+  (three ship under ADR-038 §8.1). **A13/T27-owned follow-up decision
+  (`_orch/nodes/A13a/work/conformance-case-decision.md`): this module is now
+  a thin SHIM.** Its public macro signature (`use ..., provider:, fixtures:,
+  capabilities:`) and its public function names/arities are unchanged and
+  stay FIXED — `deliver_leak_gate_test.exs` calls
+  `assert_deliver_no_leak!/2` directly, and
+  `chokepoint_anti_bypass_probe_test.exs` excludes this file by path — but
+  the bodies that have a delivery-shaped equivalent in the general kit
+  (`load_fixtures!/1`, the deliver-leak gate, redaction) now DELEGATE to
+  `Samen.AdapterConformanceCase` instead of duplicating its logic. ESP-only
+  concerns (webhook red/green, inbound, the unconfigured table, capability
+  honesty) have no kit equivalent and stay implemented here, expressed as
+  macro-time options.
 
   ## Usage (verbatim ADR-038 §4.5 example shape)
 
@@ -183,17 +191,10 @@ defmodule Samen.Delivery.ProviderConformanceCase do
 
   @doc false
   def load_fixtures!(fixtures_dir) do
-    path = Path.join(Path.expand(fixtures_dir), "conformance.exs")
-
-    unless File.exists?(path) do
-      flunk(
-        "Samen.Delivery.ProviderConformanceCase: no conformance fixture found at #{path} " <>
-          "— every adapter package must ship test/fixtures/conformance.exs (see the harness moduledoc)"
-      )
-    end
-
-    {fixtures, _bindings} = Code.eval_file(path)
-    fixtures
+    # SHIM: delegates to the general kit's loader (same relative-to-package-root
+    # path join + Code.eval_file, ADR-038 §7.2). Kept as a same-name/arity
+    # wrapper here so the macro body above needs no change.
+    Samen.AdapterConformanceCase.load_fixtures!(fixtures_dir)
   end
 
   @doc false
@@ -324,23 +325,20 @@ defmodule Samen.Delivery.ProviderConformanceCase do
 
     message = struct!(Samen.Delivery.Message, atomize_message(probe.message))
     forbidden = Map.get(probe, :forbidden_plaintext)
+    forbidden_list = if is_binary(forbidden), do: [forbidden], else: []
 
-    {:ok, agent} = Agent.start_link(fn -> [] end)
+    # SHIM: the ESP-specific probe setup (deliver_leak_probe shape, message
+    # struct, non-skippable precheck above) stays here; the capture/assert
+    # mechanics themselves — same Agent-based capture, same "must capture at
+    # least one request" check, same vt_ check, same forbidden-plaintext
+    # check — now delegate to the general kit (ADR-038 §4.5(f) / C3 T29,
+    # INV-1 stay enforced identically; the gate stays armed).
+    invoke = fn capture ->
+      config = probe.build_config.(capture)
 
-    capture = fn request ->
-      Agent.update(agent, fn acc -> [request | acc] end)
-      # Provider request/response shapes differ, so there is no universal success
-      # to hand back; return an error the adapter will surface. Only the CAPTURED
-      # outbound request is inspected — never the deliver/2 result.
-      {:error, :harness_leak_probe}
-    end
-
-    config = probe.build_config.(capture)
-
-    # The deliver RESULT is irrelevant; the outbound request was captured before
-    # the adapter processed the transport return. Guard against any handler that
-    # raises on the probe's error return.
-    _ =
+      # The deliver RESULT is irrelevant; the outbound request was captured
+      # before the adapter processed the transport return. Guard against any
+      # handler that raises on the probe's error return.
       try do
         provider.deliver(message, config)
       rescue
@@ -348,64 +346,23 @@ defmodule Samen.Delivery.ProviderConformanceCase do
       catch
         _, _ -> :ok
       end
-
-    captured = Agent.get(agent, &Enum.reverse/1)
-    Agent.stop(agent)
-
-    assert captured != [],
-           "#{inspect(provider)}.deliver/2 built NO outbound request through the harness capture " <>
-             "transport — the leak gate cannot prove no leak. deliver/2 MUST route its outbound " <>
-             "payload through the injectable transport (ADR-038 §7.2 hermeticity) so the harness " <>
-             "can prove it carries no vault token."
-
-    serialized = inspect(captured, limit: :infinity, printable_limit: :infinity)
-
-    refute serialized =~ "vt_",
-           "#{inspect(provider)}.deliver/2 LEAKED a vault token (vt_) into the outbound ESP " <>
-             "payload — a vault reference must NEVER reach the ESP (INV-1). It also leaks the " <>
-             "vault scheme. Captured request(s): #{serialized}"
-
-    if is_binary(forbidden) do
-      refute serialized =~ forbidden,
-             "#{inspect(provider)}.deliver/2 LEAKED the forbidden plaintext sentinel " <>
-               "#{inspect(forbidden)} into the outbound ESP payload (INV-1) — an adapter that " <>
-               "hand-reveals PII instead of using the framework render seam is caught here. " <>
-               "Captured request(s): #{serialized}"
     end
 
-    :ok
+    Samen.AdapterConformanceCase.assert_capture_no_leak!(invoke, forbidden_list)
   end
 
   @doc false
   def assert_redaction!(provider, fixtures) do
+    # SHIM: delegates to the general kit's redaction property (same PII-string
+    # check, same retained-keys anti-tautology check, same empty-map guard) —
+    # ADR-038 §4.5(d) stays enforced identically.
     %{payload: payload, pii_strings: pii_strings} = fixtures.redaction
     retained_keys = Map.get(fixtures.redaction, :retained_keys, [])
 
-    redacted = provider.redact_payload(payload)
-    serialized = Jason.encode!(redacted)
-
-    for pii <- pii_strings do
-      refute serialized =~ pii,
-             "#{inspect(provider)}.redact_payload/1 leaked a PII fixture string (#{inspect(pii)}) " <>
-               "into the persisted payload: #{serialized}"
-    end
-
-    # Anti-tautology: redact_payload/1 must not be a "wipe everything" no-op —
-    # the documented non-PII keys must survive.
-    for key <- retained_keys do
-      assert Map.has_key?(redacted, key),
-             "#{inspect(provider)}.redact_payload/1 dropped the non-PII key #{inspect(key)} " <>
-               "that the fixture documents as retained — redaction must be surgical, not total."
-    end
-
-    if retained_keys == [] and map_size(payload) > 0 do
-      refute map_size(redacted) == 0,
-             "#{inspect(provider)}.redact_payload/1 returned an EMPTY map for a non-empty payload " <>
-               "with no documented retained_keys — this can't be distinguished from a wipe-everything " <>
-               "no-op; add fixtures.redaction.retained_keys to prove redaction is surgical."
-    end
-
-    :ok
+    Samen.AdapterConformanceCase.assert_redaction!(&provider.redact_payload/1, payload,
+      pii_strings: pii_strings,
+      retained_keys: retained_keys
+    )
   end
 
   @doc false

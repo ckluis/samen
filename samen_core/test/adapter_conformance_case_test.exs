@@ -268,5 +268,378 @@ defmodule Samen.AdapterConformanceCaseTest do
         )
       end
     end
+
+    # A13b (attempt 2) — this test ships the verifier's own probe
+    # (`_orch/verify/A13b-redaction-divergence-probe.md`) that REFUTED A13's original
+    # shim. `inspect/1` alone silently misses a PII substring that survives redaction
+    # inside a struct field a `@derive {Inspect, only: [...]}` hides from `inspect/1`
+    # while its `@derive {Jason.Encoder, ...}` still serializes it — a common
+    # secret-hiding pattern (Ecto schemas / credential-bearing structs). The leak-check
+    # MUST still catch it (via the `Jason.encode/1` half of the union serializer) even
+    # though it never appears in `inspect/1`'s own output.
+    defmodule LeakySecretStruct do
+      @moduledoc false
+      @derive {Jason.Encoder, only: [:safe, :secret]}
+      @derive {Inspect, only: [:safe]}
+      defstruct [:safe, :secret]
+    end
+
+    test "flunks on a PII leak hidden from inspect/1 but still present via Jason.Encoder (RED — VA13 probe)" do
+      leaked_pii = "user-ssn-123-45-6789"
+      leaky = %LeakySecretStruct{safe: "ok-field", secret: leaked_pii}
+
+      # Sanity: confirm this struct really does hide :secret from inspect/1 (the
+      # divergence this test exists to close), so the assertion below is proven to
+      # exercise the Jason.encode/1 half of the union, not a vacuous no-op.
+      refute inspect(leaky) =~ leaked_pii
+
+      not_actually_redacting = fn payload -> Map.put(payload, "leftover", leaky) end
+
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        Harness.assert_redaction!(not_actually_redacting, @payload,
+          pii_strings: [leaked_pii],
+          retained_keys: ["MessageID", "Email", "FromName"]
+        )
+      end
+    end
+
+    # A13b (attempt 3) — VA13's REFUTING probe (`_orch/verify/A13b-verdict.json`,
+    # `fallback_branch_ruling`). Attempt 2's serializer was a UNION with a FALLBACK:
+    # `Jason.encode/1` when it succeeded, otherwise `inspect/1` ALONE. For a payload
+    # that is not JSON-encodable AT ALL, that union collapsed back to exactly the
+    # `inspect/1`-only serializer attempt 1 was refuted for, so a struct that
+    # `@derive {Inspect, only: [...]}` hides a field from and that derives NO
+    # `Jason.Encoder` leaked its PII substring past the gate with `:ok` returned and
+    # nothing raised. This is not a contrived shape: credential-bearing structs, config
+    # structs and Ecto schemas routinely derive `Inspect` for log-safety and are never
+    # given a `Jason.Encoder` because nobody expected them to be JSON-encoded. The leak
+    # probe must read such a payload STRUCTURALLY and still flunk.
+    defmodule OpaqueLeakySecretStruct do
+      @moduledoc false
+      @derive {Inspect, only: [:safe]}
+      defstruct [:safe, :secret]
+    end
+
+    test "flunks on a PII leak hidden from inspect/1 in a payload Jason cannot encode at all (RED — VA13 attempt-2 probe)" do
+      leaked_pii = "user-ssn-123-45-6789"
+      leaky = %OpaqueLeakySecretStruct{safe: "ok-field", secret: leaked_pii}
+
+      # Sanity 1 (anti-tautology): `inspect/1` really does hide `:secret`, so this test
+      # cannot pass merely because the old `inspect/1` serializer happened to see it.
+      refute inspect(leaky, limit: :infinity, printable_limit: :infinity) =~ leaked_pii
+
+      # Sanity 2 (anti-tautology): the payload is genuinely NOT JSON-encodable, and
+      # `Jason.encode/1` REPORTS that as `{:error, _}` rather than raising — so attempt
+      # 2's fallback branch was genuinely reached, not bypassed by a crash.
+      assert {:error, %Protocol.UndefinedError{protocol: Jason.Encoder}} =
+               Jason.encode(%{"leftover" => leaky})
+
+      not_actually_redacting = fn payload -> Map.put(payload, "leftover", leaky) end
+
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        Harness.assert_redaction!(not_actually_redacting, @payload,
+          pii_strings: [leaked_pii],
+          retained_keys: ["MessageID", "Email", "FromName"]
+        )
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # assert_redaction!/3 — BYTE-RECOVERY (A13b attempt 4)
+  #
+  # `_orch/verify/A13b-verdict.json` REFUTED attempt 3's structural walk. The walk was
+  # total in TRAVERSAL and lossy in RENDERING: it visited every term but emitted three
+  # ordinary leaf kinds in a form the contiguous-substring assertion could not match, so
+  # `assert_redaction!/3` returned `:ok` on bytes it had looked at but could not
+  # recognise. The guarantee the gate actually needs is BYTE RECOVERY — every PII-bearing
+  # leaf rendered as the contiguous bytes the assertion looks for — and these tests pin
+  # it. VA13's own three payloads are ATTACK A / B / C, verbatim in shape; the remaining
+  # tests pin the generalizations of them, so the same class cannot be reopened one
+  # variant at a time.
+
+  describe "assert_redaction!/3 byte-recovery (A13b attempt 4 — VA13 attempt-3 probes)" do
+    @a4_payload %{
+      "MessageID" => "msg-1",
+      "Email" => "user-ssn-123-45-6789",
+      "FromName" => "Acme"
+    }
+    @a4_pii "user-ssn-123-45-6789"
+    @a4_retained ["MessageID", "FromName"]
+
+    defp a4_leak!(leftover) do
+      Samen.AdapterConformanceCase.assert_redaction!(
+        fn payload -> payload |> Map.delete("Email") |> Map.put("leftover", leftover) end,
+        @a4_payload,
+        pii_strings: [@a4_pii],
+        retained_keys: @a4_retained
+      )
+    end
+
+    # A closure built in a COMPILED function, so the captured value really is in the
+    # fun's environment (`:erlang.fun_info/2`) rather than inlined as a literal.
+    defp a4_closure_over(value), do: fn -> value end
+
+    # ATTACK A — VA13 attempt-3 probe A. PII carried as multi-chunk iodata. Attempt 3's
+    # walk joined leaves with `?\n`, so the walk's OWN separator split the substring;
+    # `inspect/1` renders `["user-", "ssn-..."]` (quote + comma between the chunks) and
+    # Jason renders a JSON array — no view held the contiguous bytes. No struct, no
+    # `@derive`, no exotic term: ordinary iodata, which is how Erlang/Elixir HTTP bodies
+    # are routinely carried.
+    test "flunks on PII carried as multi-chunk iodata (RED — VA13 attempt-3 ATTACK A)" do
+      chunks = ["user-", "ssn-123-45-6789"]
+
+      # anti-tautology: the chunks really do reassemble to the PII, and neither chunk
+      # alone contains it.
+      assert IO.iodata_to_binary(chunks) == @a4_pii
+      assert Enum.all?(chunks, &(:binary.match(&1, @a4_pii) == :nomatch))
+
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        a4_leak!(chunks)
+      end
+    end
+
+    # ATTACK A, generalized 1 — nested iodata. `IO.iodata_to_binary/1` is defined over
+    # arbitrarily nested lists, so the join view must be taken at every list, not only a
+    # flat one.
+    test "flunks on PII carried as NESTED iodata (RED — generalization of ATTACK A)" do
+      chunks = ["user-", ["ssn-", ["123-", "45-6789"]]]
+      assert IO.iodata_to_binary(chunks) == @a4_pii
+
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        a4_leak!(chunks)
+      end
+    end
+
+    # ATTACK A, generalized 2 — an IMPROPER list is still valid iodata and still a
+    # `is_list/1` term. A walk that only matches proper lists would miss it.
+    test "flunks on PII carried as an IMPROPER-list iodata tail (RED — generalization of ATTACK A)" do
+      chunks = ["user-" | "ssn-123-45-6789"]
+      assert IO.iodata_to_binary(chunks) == @a4_pii
+
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        a4_leak!(chunks)
+      end
+    end
+
+    # ATTACK B — VA13 attempt-3 probe B. A charlist inside a struct that `@derive`s
+    # `Inspect` to hide the field and derives NO `Jason.Encoder`. Attempt 3's walk saw a
+    # list of INTEGERS and emitted `117\n115\n101\n...`; the only view that would have
+    # rendered it as text is the protocol the payload's author suppressed.
+    defmodule CharlistHidingStruct do
+      @moduledoc false
+      @derive {Inspect, only: [:safe]}
+      defstruct [:safe, :contact]
+    end
+
+    test "flunks on charlist PII inside an Inspect-hiding, non-JSON-encodable struct (RED — VA13 attempt-3 ATTACK B)" do
+      leaky = %CharlistHidingStruct{safe: "ok", contact: String.to_charlist(@a4_pii)}
+
+      # anti-tautology 1: inspect really does hide the field.
+      refute inspect(%{"leftover" => leaky}, limit: :infinity, printable_limit: :infinity) =~
+               @a4_pii
+
+      # anti-tautology 2: the payload really is not JSON-encodable at all.
+      assert {:error, %Protocol.UndefinedError{protocol: Jason.Encoder}} =
+               Jason.encode(%{"leftover" => leaky})
+
+      # anti-tautology 3: the charlist really does hold the PII.
+      assert List.to_string(leaky.contact) == @a4_pii
+
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        a4_leak!(leaky)
+      end
+    end
+
+    # ATTACK B, generalized — a charlist whose codepoints are NOT all latin-1. Such a
+    # list is still `is_list/1` and still holds the text, but `IO.iodata_to_binary/1`
+    # renders codepoint 252 as the single byte 0xFC while the PII string is that
+    # codepoint's UTF-8 encoding. Only the `List.to_string/1` view recovers it, so the
+    # two list-join views must be ADDITIVE, never alternatives.
+    test "flunks on a non-latin1 charlist whose UTF-8 rendering is the PII (RED — generalization of ATTACK B)" do
+      pii = "üser-ssn-123-45-6789"
+      chars = String.to_charlist(pii)
+
+      # anti-tautology: the iodata view genuinely does NOT recover these bytes; only the
+      # chardata view does.
+      assert :binary.match(IO.iodata_to_binary(chars), pii) == :nomatch
+      assert List.to_string(chars) == pii
+
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        Samen.AdapterConformanceCase.assert_redaction!(
+          fn payload -> Map.put(payload, "leftover", chars) end,
+          @a4_payload,
+          pii_strings: [pii],
+          retained_keys: @a4_retained
+        )
+      end
+    end
+
+    # ATTACK C — VA13 attempt-3 probe C. A non-byte-aligned bitstring: `is_binary/1` is
+    # false, so attempt 3's walk skipped its binary clause and fell to the `inspect/1`
+    # catch-all, which renders `<<117, 115, 101, ...>>`.
+    test "flunks on PII in a non-byte-aligned bitstring (RED — VA13 attempt-3 ATTACK C)" do
+      bits = <<@a4_pii::binary, 0::size(1)>>
+
+      # anti-tautology: it really is not a binary, so no binary-only clause can see it.
+      refute is_binary(bits)
+      assert rem(bit_size(bits), 8) == 1
+
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        a4_leak!(bits)
+      end
+    end
+
+    # ATTACK C, generalized — the same PII bytes at a NON-ZERO BIT OFFSET inside a term
+    # that IS a binary. Padding the tail alone does not recover it; only re-aligning the
+    # leading bit offset does. This is the general form of ATTACK C, and closing it
+    # closes every bit alignment at once rather than the one VA13 happened to pick.
+    test "flunks on PII at a non-zero BIT OFFSET inside a byte-aligned binary (RED — generalization of ATTACK C)" do
+      shifted = <<0::size(3), @a4_pii::binary, 0::size(5)>>
+
+      # anti-tautology: it IS a binary, and its raw bytes do NOT contain the PII.
+      assert is_binary(shifted)
+      assert :binary.match(shifted, @a4_pii) == :nomatch
+
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        a4_leak!(shifted)
+      end
+    end
+
+    # The residual attempt 3 DISCLOSED but did not close: PII captured in a function
+    # closure's environment. `:erlang.fun_info/2` exposes the captured free variables of
+    # a local fun, so this one is closable rather than merely disclosable.
+    test "flunks on PII captured in a function closure's environment (RED — attempt 3's disclosed residual)" do
+      closure = a4_closure_over(@a4_pii)
+
+      # anti-tautology 1: no protocol renders a fun's captured environment.
+      refute inspect(closure, limit: :infinity, printable_limit: :infinity) =~ @a4_pii
+      # anti-tautology 2: the PII really is in the environment, not inlined as a literal.
+      assert {:env, env} = :erlang.fun_info(closure, :env)
+      assert @a4_pii in env
+
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        a4_leak!(closure)
+      end
+    end
+
+    # Fragment attacks that are NOT list-shaped: the same "the payload never joins it"
+    # trick applied to a tuple and to two sibling map values.
+    test "flunks on PII split across TUPLE elements (RED)" do
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        a4_leak!({"user-", "ssn-123-45-6789"})
+      end
+    end
+
+    test "flunks on PII split across two sibling MAP VALUES (RED)" do
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        a4_leak!(%{"a" => "user-", "b" => "ssn-123-45-6789"})
+      end
+    end
+
+    # PII carried as a list of INTEGERS whose DECIMAL rendering — not their byte
+    # rendering — is the PII. The byte and decimal views must both be emitted.
+    test "flunks on numeric PII carried as integer leaves (RED)" do
+      pii = "123456789"
+
+      assert_raise ExUnit.AssertionError, ~r/LEAKED a PII fixture string/, fn ->
+        Samen.AdapterConformanceCase.assert_redaction!(
+          fn payload -> Map.put(payload, "leftover", [123, 456, 789]) end,
+          @a4_payload,
+          pii_strings: [pii],
+          retained_keys: @a4_retained
+        )
+      end
+    end
+
+    # Non-vacuity of the CALLER surface (`_orch/verify/A13b-verdict.json`
+    # `minor_observations[0]`): a fixture that documents NO pii strings makes the leak
+    # check pass on any payload whatsoever. That must be refused, not honoured.
+    test "flunks when :pii_strings is empty — the leak check would otherwise be vacuous (RED)" do
+      assert_raise ExUnit.AssertionError, ~r/EMPTY :pii_strings/, fn ->
+        Samen.AdapterConformanceCase.assert_redaction!(&Function.identity/1, @a4_payload,
+          pii_strings: [],
+          retained_keys: @a4_retained
+        )
+      end
+    end
+
+    test "flunks when a :pii_strings entry is not a non-empty binary (RED)" do
+      assert_raise ExUnit.AssertionError, ~r/:pii_strings/, fn ->
+        Samen.AdapterConformanceCase.assert_redaction!(&Function.identity/1, @a4_payload,
+          pii_strings: [""],
+          retained_keys: @a4_retained
+        )
+      end
+    end
+
+    # POSITIVE CONTROL for the whole byte-recovery machinery: the additional views —
+    # eight bit alignments per byte-bearing leaf, the list-join views, and the
+    # traversal-order dense views — must NOT turn a genuinely surgical redaction red.
+    # Without this, every test above could be satisfied by a serializer that always
+    # flunks.
+    test "still PASSES a genuinely surgical redaction over a payload of every leaf kind (positive control)" do
+      rich = %{
+        "MessageID" => "msg-1",
+        "FromName" => "Acme",
+        "chunks" => ["safe-", "value"],
+        "chars" => ~c"safe chars",
+        "bits" => <<"safe"::binary, 0::size(3)>>,
+        "tuple" => {"safe", 1, 2.5, :safe_atom},
+        "nested" => %{"a" => "safe-", "b" => "tail"},
+        "fun" => a4_closure_over("safe closure value"),
+        "pid" => self(),
+        "ref" => make_ref()
+      }
+
+      assert :ok =
+               Samen.AdapterConformanceCase.assert_redaction!(
+                 fn _payload -> rich end,
+                 @a4_payload,
+                 pii_strings: [@a4_pii, "known-pii@example.test"],
+                 retained_keys: ["MessageID", "FromName"]
+               )
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # assert_capture_no_leak!/2 shares the SAME leak-probe views (A13b attempt 4). The
+  # defect VA13 refuted three times was a property of the serializer, not of one
+  # assertion, so the outbound-leak gate is pinned against the same class here.
+
+  describe "assert_capture_no_leak!/2 byte-recovery (A13b attempt 4)" do
+    test "flunks on a forbidden sentinel carried as multi-chunk iodata (RED)" do
+      sentinel = "OTHER-SUBJECT-SENTINEL@leak.test"
+      chunks = ["OTHER-SUBJECT-", "SENTINEL@leak.test"]
+      assert IO.iodata_to_binary(chunks) == sentinel
+
+      assert_raise ExUnit.AssertionError, ~r/forbidden plaintext sentinel/, fn ->
+        Samen.AdapterConformanceCase.assert_capture_no_leak!(
+          fn capture -> capture.(%{subject: chunks}) end,
+          [sentinel]
+        )
+      end
+    end
+
+    defmodule OutboundHidingStruct do
+      @moduledoc false
+      @derive {Inspect, only: [:safe]}
+      defstruct [:safe, :contact]
+    end
+
+    test "flunks on a vt_* vault token hidden from inspect/1 by @derive (RED)" do
+      leaky = %Samen.AdapterConformanceCaseTest.OutboundHidingStruct{
+        safe: "ok",
+        contact: "vt_rogue_token"
+      }
+
+      refute inspect(leaky, limit: :infinity, printable_limit: :infinity) =~ "vt_"
+
+      assert_raise ExUnit.AssertionError, ~r/vault token/, fn ->
+        Samen.AdapterConformanceCase.assert_capture_no_leak!(fn capture ->
+          capture.(%{to: leaky})
+        end)
+      end
+    end
   end
 end
