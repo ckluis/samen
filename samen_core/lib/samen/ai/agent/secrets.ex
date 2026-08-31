@@ -142,7 +142,8 @@ defmodule Samen.AI.Agent.Secrets do
   redacts the next 12-character token (`password:\n  - first-item-name`, and a comment divider
   under an empty key). Over 52 ordinary non-secret strings measured against the pre-T14 lane,
   **2 redact here that did not redact before this item** (both of them instances of the two costs
-  just named, both now pinned), and 4 more redact at this commit AND at `c41e169` — `pwd` in
+  just named, both now pinned at `secrets_test.exs:351` and `:358`), and 4 more redact at this
+  commit AND at `c41e169` — `pwd` in
   ordinary shell output, an `.env.example` placeholder, a commented-out placeholder, and
   `api_key: System.get_env(...)` in Elixir source — which are the T184-era cost of the label
   vocabulary, not this item's. A false positive costs a reader one visible marker; a false negative

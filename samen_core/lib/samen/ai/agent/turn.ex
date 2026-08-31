@@ -7,7 +7,7 @@ defmodule Samen.AI.Agent.Turn do
   row-reuse shape, RP-AG-7). A2 makes it load-bearing: the executor writes this row
   `:proposed` as the DECISION checkpoint **before** the slow provider call, and a
   replay of turn N (worker death, watchdog re-select) FINDS and REUSES that row —
-  `Samen.AI.Agent`'s `find_or_reuse_turn!/3` — instead of creating a duplicate (the
+  `Samen.AI.Agent`'s `find_or_reuse_turn/3` — instead of creating a duplicate (the
   unique index refuses one structurally). The outcome checkpoint (`:finalize`) then
   commits atomically with the run-cursor advance, so a `:done` row always agrees with
   the cursor. Posture stated as Sequences states it: **at-least-once, never claimed
