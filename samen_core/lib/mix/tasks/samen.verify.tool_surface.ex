@@ -34,15 +34,19 @@ defmodule Mix.Tasks.Samen.Verify.ToolSurface do
     * **(4) THE `:ci_eval` SURFACE OWNS READ-EFFECT TOOLS ONLY (UXD-11's structural half).**
       T183's moduledoc states the `:ci_eval` lane exists so a CI eval run can never open a
       real E3 approval — which only holds if nothing `effect: :write` ever lands on that
-      surface. UXD-11 found the lane real in code but UNWIRED (no config sets
+      surface. UXD-11 found the lane real in code but UNWIRED (no config set
       `agent_surface: :ci_eval`, so the guarantee was proven only against an explicit
-      surface argument in tests, never against a running tier). Wiring the D8 eval tier
-      itself onto `:ci_eval` is a behaviour change to ANOTHER node's gate and stays out of
-      scope here (per this item's handoff); what IS this tier's job is making the one
-      thing that must stay true for that wiring to ever be safe — every tool the surface
-      OWNS is `effect: :read` — a checked, sabotage-refutable invariant instead of an
-      unchecked assumption. A future `effect: :write` action declaring `:ci_eval` now
-      fails THIS gate before it can ever reach a wired eval tier.
+      surface argument in tests, never against a running tier). That wiring has since
+      landed (A08a/A08b, `_orch/nodes/A08a/work/ci-eval-disposition.md` — INVOKER):
+      `samen_core/test/ai_eval/ai_plane_redteam_test.exs`'s permanent D8 EG2 tier now sets
+      `agent_surface: :ci_eval` around its `EG2ReaderAgent`/`EG2NoToolsAgent` runs, so a
+      real `Samen.AI.Agent` tool call is dispatched through this surface on every `mix
+      test test/ai_eval/` / `ci.sh` run, not merely asserted against an explicit surface
+      argument in a unit test. This tier's job is unchanged — making the one thing that
+      must stay true for that wiring to be safe — every tool the surface OWNS is `effect:
+      :read` — a checked, sabotage-refutable invariant instead of an unchecked assumption.
+      An `effect: :write` action declaring `:ci_eval` now fails THIS gate before it can
+      ever reach the wired eval tier.
 
   ## Diagnostics
 

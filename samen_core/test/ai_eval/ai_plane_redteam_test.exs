@@ -476,8 +476,25 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
     setup do
       Scripted.reset()
       Samen.AI.Agent.Breaker.reset()
-      on_exit(fn -> Scripted.reset() end)
+
+      # Wire this permanent tier's agent runs onto the `:ci_eval` tool surface (T183;
+      # samen_core/lib/samen/ai/tool_surface.ex) instead of the unconfigured `:tenant`
+      # default, so EG2's fetch_record calls actually exercise the read-effect-only lane
+      # ADR-043 §10 / D8 was built for (A08a disposition: INVOKER —
+      # _orch/nodes/A08a/work/ci-eval-disposition.md). Restored on exit, matching the
+      # pattern samen_core/test/ai/tool_surface_test.exs:102-110 already uses.
+      Application.put_env(:samen_core, Samen.AI.ToolSurface, agent_surface: :ci_eval)
+
+      on_exit(fn ->
+        Application.delete_env(:samen_core, Samen.AI.ToolSurface)
+        Scripted.reset()
+      end)
+
       :ok
+    end
+
+    test "the agent loop actually runs on the wired :ci_eval tool surface, not the unconfigured :tenant default (sabotage 300 flips this)" do
+      assert Samen.AI.ToolSurface.agent_surface() == :ci_eval
     end
 
     test "a 🔒 canary fetched by an agent tool re-enters the model MASKED — never plaintext, never vt_ (sabotage 269 flips this)" do
