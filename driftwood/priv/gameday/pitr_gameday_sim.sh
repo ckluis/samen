@@ -287,32 +287,50 @@ echo ""
 echo "==> DRILL COMPLETE. Evidence:"
 cat "$EVIDENCE_JSON"
 
-# UXD-02 Seam B: "timestamp_utc" is the one run-varying mint in this evidence file
-# (E-03; minted above at $TS, from `date -u +%Y-%m-%dT%H:%M:%SZ`). It moves to a
+# UXD-02 Seam B/C (E-03): "timestamp_utc" (Seam B; minted above at $TS, from
+# `date -u +%Y-%m-%dT%H:%M:%SZ`) plus the eight MEASURED wall-clock/byte fields
+# (Seam C) are the run-varying values in this evidence file. All nine move to a
 # gitignored sidecar so the tracked evidence file stops changing byte-for-byte on
-# every regeneration. render_t55_report.py still reads it (for T5.5.md's own
-# "Generated:" line, out of this node's scope) from $EVIDENCE_JSON, which is
-# untouched — only the copy that becomes the TRACKED artifact is stripped.
+# every regeneration. The FIXED/RTO-BOOLEAN fields (drill, postgres_version,
+# simulation_seam, base_db, restore_db, dataset counts, key_store_exclusion_proven,
+# the two rto_target_*_ms constants, and the two arm_*_within_*_target booleans)
+# stay in the tracked copy. $EVIDENCE_JSON itself (the full scratch file) is left
+# untouched — render_t55_report.py reads it below to build the gitignored
+# T5.5.sidecar.md with the real measured numbers; only the copy that becomes the
+# TRACKED artifact is stripped.
 SIDECAR_JSON="$DW_DIR/reports/pitr-gameday2-evidence.sidecar.json"
 python3 -c "
 import json
 with open('$EVIDENCE_JSON') as f:
     e = json.load(f)
+measured_keys = [
+    'timestamp_utc', 'dataset_gen_ms', 'dump_bytes', 'dump_ms', 'detection_ms',
+    'arm_i_reverse_expand_forwardfix_ms', 'arm_ii_restore_ms',
+    'arm_ii_validate_ms', 'arm_ii_total_ms',
+]
+sidecar = {k: e[k] for k in measured_keys}
 with open('$SIDECAR_JSON', 'w') as f:
-    json.dump({'timestamp_utc': e['timestamp_utc']}, f, indent=2)
+    json.dump(sidecar, f, indent=2)
     f.write('\n')
+for k in measured_keys:
+    e.pop(k, None)
 with open('$DW_DIR/reports/pitr-gameday2-evidence.json', 'w') as f:
-    e.pop('timestamp_utc', None)
     json.dump(e, f, indent=2)
     f.write('\n')
 "
 
 # --------------------------------------------------------------------------
-# REPORT — generate reports/T5.5.md from the measured evidence.
+# REPORT — generate reports/T5.5.md (tracked; measured fields pointer-redacted,
+# UXD-02 Seam C, E-03) from the STRIPPED tracked evidence, and
+# reports/T5.5.sidecar.md (gitignored; full measured detail) from the unstripped
+# scratch evidence.
 # --------------------------------------------------------------------------
-python3 "$DW_DIR/priv/gameday/render_t55_report.py" "$EVIDENCE_JSON" "$REPORT" \
+SIDECAR_REPORT="$DW_DIR/reports/T5.5.sidecar.md"
+python3 "$DW_DIR/priv/gameday/render_t55_report.py" "$EVIDENCE_JSON" "$SIDECAR_REPORT" \
+  || fail "sidecar report generation failed"
+python3 "$DW_DIR/priv/gameday/render_t55_report.py" "$DW_DIR/reports/pitr-gameday2-evidence.json" "$REPORT" \
   || fail "report generation failed"
-echo "==> wrote $REPORT"
+echo "==> wrote $REPORT (tracked) and $SIDECAR_REPORT (gitignored)"
 
 cleanup
 echo ""

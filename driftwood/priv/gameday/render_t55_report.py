@@ -10,8 +10,31 @@ import json
 import sys
 
 
-def ms(v):
+# UXD-02 Seam C (E-03): this report is rendered from TWO possible evidence shapes —
+# the full unstripped scratch evidence (-> the gitignored T5.5.sidecar.md, real
+# numbers) and the stripped TRACKED evidence (-> the tracked T5.5.md, MEASURED keys
+# absent by design). SIDECAR_POINTER is what renders in place of a missing key so a
+# byte-for-byte regeneration of the tracked report no longer dirties it.
+SIDECAR_POINTER = "see `reports/T5.5.sidecar.md`"
+
+
+def ms(e, key):
+    if key not in e:
+        return SIDECAR_POINTER
+    v = e[key]
     return f"{v} ms ({v/1000:.2f} s)"
+
+
+def byte_count(e, key):
+    if key not in e:
+        return SIDECAR_POINTER
+    return f"{e[key]} bytes"
+
+
+def generated_line(e):
+    if "timestamp_utc" not in e:
+        return SIDECAR_POINTER
+    return e["timestamp_utc"]
 
 
 def within(flag):
@@ -31,7 +54,7 @@ def main():
 `priv/drills/pitr_drill.exs`) and is the drill-evidence artifact plan §7 T5.5 asks for.**
 It is regenerated (and re-verified) on every Driftwood CI run via `driftwood/ci.sh`.
 
-Generated: {e["timestamp_utc"]}
+Generated: {generated_line(e)}
 Substrate: local Postgres {pg_ver} (Homebrew), `pg_dump`/`psql` snapshot
 (Neon simulated — see the seam below and docs/runbooks/pitr-gameday.md §F).
 Base DB: `{e["base_db"]}` → restore DB: `{e["restore_db"]}` (both throwaway; dropped on cleanup).
@@ -93,9 +116,9 @@ Drill #2.
 | Carriers | {ds["carriers"]} |
 | Loads | {ds["loads"]} |
 | Settlements | {ds["settlements"]} |
-| Dataset build time | {ms(e["dataset_gen_ms"])} |
-| pg_dump size | {e["dump_bytes"]} bytes |
-| pg_dump time | {ms(e["dump_ms"])} |
+| Dataset build time | {ms(e, "dataset_gen_ms")} |
+| pg_dump size | {byte_count(e, "dump_bytes")} |
+| pg_dump time | {ms(e, "dump_ms")} |
 
 ## The honest RPO framing (bad-contract incident)
 
@@ -113,11 +136,11 @@ detection from monitoring/alerting. This is stated honestly (see the caveats).
 
 | Measurement | Value | Target | Within target |
 |---|---|---|---|
-| Detection (settlement integrity fails on bad contract) | {ms(e["detection_ms"])} | — (proxy for detection latency) | n/a |
-| **ARM (i)** — reverse expand via `down/0` + forward-fix | {ms(e["arm_i_reverse_expand_forwardfix_ms"])} | ≤ 30 min forward-fix | {within(e["arm_i_within_forward_fix_target"])} |
-| **ARM (ii)** — restore (pg_dump → fresh DB) | {ms(e["arm_ii_restore_ms"])} | — | — |
-| **ARM (ii)** — validate settlement-integrity suite | {ms(e["arm_ii_validate_ms"])} | — | — |
-| **ARM (ii)** — restore + validate total | {ms(e["arm_ii_total_ms"])} | ≤ 2 h full PITR | {within(e["arm_ii_within_pitr_target"])} |
+| Detection (settlement integrity fails on bad contract) | {ms(e, "detection_ms")} | — (proxy for detection latency) | n/a |
+| **ARM (i)** — reverse expand via `down/0` + forward-fix | {ms(e, "arm_i_reverse_expand_forwardfix_ms")} | ≤ 30 min forward-fix | {within(e["arm_i_within_forward_fix_target"])} |
+| **ARM (ii)** — restore (pg_dump → fresh DB) | {ms(e, "arm_ii_restore_ms")} | — | — |
+| **ARM (ii)** — validate settlement-integrity suite | {ms(e, "arm_ii_validate_ms")} | — | — |
+| **ARM (ii)** — restore + validate total | {ms(e, "arm_ii_total_ms")} | ≤ 2 h full PITR | {within(e["arm_ii_within_pitr_target"])} |
 | Key-store exclusion proven (empty key dir denies CDL decrypt) | **YES** (`:unavailable`) | must be YES | **YES** |
 
 ## Settlement-integrity check (the load-bearing validation)
