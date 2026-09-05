@@ -58,6 +58,32 @@ driver_cdl = "CDL-PITR-DRILL-707"
 migrations_path = Path.join([File.cwd!(), "priv", "repo", "migrations"])
 expand_path = Path.join([File.cwd!(), "priv", "drills", "expand_migrations"])
 
+# `20260905090000_expand_add_settlement_note.exs` (in migrations_path, the real CI
+# migration path) and `20260707210000_drill_expand_settlement_note.exs` (in
+# expand_path, the drill-only path) both add the same `stl_settlement_note` column —
+# the real migration lands the identical expand PB3/UXD-04 engineered so
+# `mix samen.verify.migrations` exercises a real down/0 for Driftwood outside this
+# drill. Since `"migrate"` below applies ALL of migrations_path and `"expand"` then
+# applies ALL of expand_path, applying both back-to-back collides (Postgres 42701
+# duplicate_column). Stage a filtered COPY of migrations_path (symlinks; the real
+# files are never touched) with that one migration excluded, so the drill's OWN
+# expand migration is the one that actually adds/removes the column here — this
+# affects only this drill's throwaway DB, never a real migrate/deploy path.
+stage_drill_migrations = fn source_dir, excluded_basenames ->
+  staged =
+    Path.join(System.tmp_dir!(), "driftwood_drill_migrations_#{System.unique_integer([:positive])}")
+
+  File.mkdir_p!(staged)
+
+  source_dir
+  |> Path.join("*.exs")
+  |> Path.wildcard()
+  |> Enum.reject(fn file -> Path.basename(file) in excluded_basenames end)
+  |> Enum.each(fn file -> File.ln_s!(file, Path.join(staged, Path.basename(file))) end)
+
+  staged
+end
+
 # ---------------------------------------------------------------------------
 # Boot the repo ourselves (--no-start): plain connection pool (committed writes),
 # pinned KMS keystore. Mirrors crypto_shred_gameday.exs's boot.
@@ -219,8 +245,17 @@ end
 # ===========================================================================
 case phase do
   "migrate" ->
-    # 1. Migrate DRILL_DB to the CURRENT Driftwood schema (all CI migrations).
-    Ecto.Migrator.run(Repo, migrations_path, :up, all: true, log: false)
+    # 1. Migrate DRILL_DB to the CURRENT Driftwood schema (all CI migrations),
+    #    EXCLUDING the real-path settlement-note expand migration — the drill's OWN
+    #    expand migration (applied by the "expand" phase below) adds the identical
+    #    column under its own change_key; see the `stage_drill_migrations` comment
+    #    above for why.
+    drill_migrations_path =
+      stage_drill_migrations.(migrations_path, [
+        "20260905090000_expand_add_settlement_note.exs"
+      ])
+
+    Ecto.Migrator.run(Repo, drill_migrations_path, :up, all: true, log: false)
     :ok = Driftwood.NonPiiSetup.register_all()
 
     # 2. Generate the PRODUCTION-SIZED dataset (thousands of loads/settlements across
