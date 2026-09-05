@@ -25,6 +25,10 @@ cover/
 samen_core/doc/
 samen_web/doc/
 
+# UXD-02 Seam B: run-varying provenance sidecars for the T5.4/T5.5 game-day reports
+# (Generated: timestamp, KMS scratch-keystore path, timestamp_utc) — never committed (E-03)
+driftwood/reports/*.sidecar.*
+
 # planning workspace + orchestrator state — never committed
 spec/
 _orch/

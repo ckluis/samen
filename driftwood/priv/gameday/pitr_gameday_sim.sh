@@ -287,8 +287,25 @@ echo ""
 echo "==> DRILL COMPLETE. Evidence:"
 cat "$EVIDENCE_JSON"
 
-# Persist a copy of the evidence for the runbook appendix + the report generator.
-cp "$EVIDENCE_JSON" "$DW_DIR/reports/pitr-gameday2-evidence.json"
+# UXD-02 Seam B: "timestamp_utc" is the one run-varying mint in this evidence file
+# (E-03; minted above at $TS, from `date -u +%Y-%m-%dT%H:%M:%SZ`). It moves to a
+# gitignored sidecar so the tracked evidence file stops changing byte-for-byte on
+# every regeneration. render_t55_report.py still reads it (for T5.5.md's own
+# "Generated:" line, out of this node's scope) from $EVIDENCE_JSON, which is
+# untouched — only the copy that becomes the TRACKED artifact is stripped.
+SIDECAR_JSON="$DW_DIR/reports/pitr-gameday2-evidence.sidecar.json"
+python3 -c "
+import json
+with open('$EVIDENCE_JSON') as f:
+    e = json.load(f)
+with open('$SIDECAR_JSON', 'w') as f:
+    json.dump({'timestamp_utc': e['timestamp_utc']}, f, indent=2)
+    f.write('\n')
+with open('$DW_DIR/reports/pitr-gameday2-evidence.json', 'w') as f:
+    e.pop('timestamp_utc', None)
+    json.dump(e, f, indent=2)
+    f.write('\n')
+"
 
 # --------------------------------------------------------------------------
 # REPORT — generate reports/T5.5.md from the measured evidence.
