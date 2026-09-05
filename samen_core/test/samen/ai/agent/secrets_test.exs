@@ -364,6 +364,33 @@ defmodule Samen.AI.Agent.SecretsTest do
       value = "backup_blob=" <> Base.encode64(:crypto.strong_rand_bytes(48))
       assert Secrets.redact(value) == value
     end
+
+    test "A10/E-06 KNOWN RESIDUAL — the disclosure itself is pinned in the module source" do
+      # The behavioural test above passes whether or not the limit is DOCUMENTED, so on its own
+      # it pins nothing about the documentation — T14-verdict.json's HOLE 2 recorded exactly that:
+      # the pin was flipped in mutation testing by widening `@label_vocabulary`, never by touching
+      # the moduledoc, so the disclosure paragraph could be deleted with every test still green.
+      # This test reads the module's own source and fails if any fragment of that paragraph
+      # disappears — a silent bypass of a stated limit is worse than a documented one, so the
+      # documentation is the deliverable and it is now refutable, exactly as A2 pins
+      # `mix/tasks/samen.verify.agent_coverage.ex`'s residuals in
+      # `agent_coverage_verifier_test.exs`.
+      source =
+        Path.expand("../../../../lib/samen/ai/agent/secrets.ex", __DIR__)
+        |> File.read!()
+
+      for fragment <- [
+            "**Unlisted-label high-entropy blob — STATED LIMIT, not closed.**",
+            "list (e.g. `backup_blob=<base64 blob>`) is not redacted, by design",
+            "would also flag ordinary record ids, hashes, and other",
+            "detector class, never a widening of THIS regex into free-form entropy scanning",
+            "`secrets_test.exs`'s \"DOCUMENTED LIMIT\" test so this stays a fact, not just a sentence."
+          ] do
+        assert String.contains?(source, fragment),
+               "secrets.ex no longer discloses #{inspect(fragment)}. The HOLE 2 unlisted-label " <>
+                 "entropy-gap limit may not disappear silently (T14-verdict.json HOLE 2; E-06)."
+      end
+    end
   end
 
   describe "false-positive guard: ordinary business data is NOT secret-shaped" do
