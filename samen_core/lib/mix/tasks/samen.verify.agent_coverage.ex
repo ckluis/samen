@@ -238,8 +238,11 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
         # at a time (attempt 1 closed `alias Samen.AI.Agent, as: A`; attempt 2 closed
         # `alias A, as: B` chains; each was then evaded by the next shape), build the file's
         # ALIAS ENVIRONMENT once and apply Elixir's own resolution rule — head-segment
-        # substitution — to every module reference. See `alias_env/1`.
-        env = alias_env(ast)
+        # substitution — to every module reference. See `alias_env/1`. A9: merged with
+        # `attr_env/1` so a module-attribute reference (`@k`) resolves through the same
+        # `env` map — the two key spaces never collide (`{:attr, name}` tuples vs. plain
+        # alias-name atoms), see `agent_kernel_alias?/2`'s `{:@, _, _}` clause.
+        env = Map.merge(alias_env(ast), attr_env(ast))
         ast_any?(ast, &agent_reentry_call?(&1, env)) or imported_kernel_reentry?(ast, env)
 
       {:error, _} ->
@@ -279,6 +282,40 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
 
     Enum.reduce(bindings, %{}, fn {name, parts}, acc ->
       Map.update(acc, name, [parts], &Enum.uniq([parts | &1]))
+    end)
+  end
+
+  # --- the attribute environment (A9, closing residual 4's SINGLE-ASSIGNMENT case) -------
+  #
+  # `@k Samen.AI.Agent` then `@k.start(...)` was residual 4: a module attribute is a
+  # THIRD name-binding form (after `alias`/`require`) that never entered `alias_env/1`.
+  # `attr_env/1` collects every top-level `@name <value>` ASSIGNMENT in the module —
+  # `{:@, _, [{name, _, [value]}]}`, distinguished from a REFERENCE `{:@, _, [{name, _,
+  # ctx}]}` by the third element being a one-element LIST (the assigned value) rather than
+  # `nil`/a context atom. Same shadowing rule as `alias_env/1`: a name assigned more than
+  # once keeps EVERY assigned value, and a reference counts as the kernel if ANY resolves
+  # there — over-approximate on purpose, never under-approximate a security scan.
+  #
+  # SCOPE, DELIBERATELY NOT WIDER: this closes the single, static, literal assignment the
+  # residual named and the negative-control test pins (`@k Samen.AI.Agent`). It does NOT
+  # attempt attribute REASSIGNMENT ordering, ACCUMULATION (`Module.register_attribute`,
+  # `accumulate: true`), or a value that is itself ANOTHER attribute reference (`@k @j`) —
+  # that is data-flow through two bindings, the same class residual 1 (dynamic module
+  # construction) already declines to fold in. `agent_kernel_alias?/2`'s new `{:@, _, _}`
+  # clause resolves each candidate value through the EXISTING `__aliases__`/atom machinery
+  # only (no recursion into a further `{:@, _, _}` value), so this cannot loop.
+  defp attr_env(ast) do
+    {_ast, bindings} =
+      Macro.prewalk(ast, [], fn
+        {:@, _, [{name, _, [value]}]} = node, acc when is_atom(name) ->
+          {node, [{name, value} | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    Enum.reduce(bindings, %{}, fn {name, value}, acc ->
+      Map.update(acc, {:attr, name}, [value], &[value | &1])
     end)
   end
 
@@ -493,6 +530,33 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
   defp agent_kernel_alias?(mod, _env) when is_atom(mod) and mod not in [nil, true, false] do
     parts = mod |> Module.split() |> Enum.map(&String.to_atom/1)
     agent_module_parts?(parts)
+  rescue
+    ArgumentError -> false
+  end
+
+  # `@k` used as a call target (`@k.start(...)`, `apply(@k, :start, [...])`) — A9, closing
+  # residual 4's single-assignment case. A REFERENCE has a non-list third element (`nil`,
+  # or a context atom under macro hygiene); an ASSIGNMENT's third element is a one-element
+  # list and is excluded by the guard, so this clause only ever fires at a use site. Each
+  # value `attr_env/1` recorded for `name` is resolved through the SAME machinery an
+  # ordinary reference uses — `resolves_to_kernel?/3` for an alias-shaped value (so a value
+  # built from a renamed alias, e.g. `alias Samen.AI, as: A; @k A.Agent`, still resolves),
+  # `agent_module_parts?/1` for a bare atom literal. See `attr_env/1` for what is
+  # deliberately NOT attempted (reassignment ordering, accumulation, attribute-of-attribute
+  # chaining) — this clause never recurses into another `{:@, _, _}` value, so it cannot loop.
+  defp agent_kernel_alias?({:@, _, [{name, _, ctx}]}, env) when is_atom(name) and not is_list(ctx) do
+    env
+    |> Map.get({:attr, name}, [])
+    |> Enum.any?(fn
+      {:__aliases__, _, parts} when is_list(parts) ->
+        resolves_to_kernel?(parts, env, MapSet.new())
+
+      mod when is_atom(mod) and mod not in [nil, true, false] ->
+        mod |> Module.split() |> Enum.map(&String.to_atom/1) |> agent_module_parts?()
+
+      _ ->
+        false
+    end)
   rescue
     ArgumentError -> false
   end

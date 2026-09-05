@@ -696,13 +696,18 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverageTest do
              """)
     end
 
-    test "KNOWN RESIDUAL (module-attribute indirection) — `@k Samen.AI.Agent` then `@k.start` is NOT caught" do
-      # Residual 4 of the tier moduledoc, STATED and TESTED rather than silent. A module
-      # attribute is not an alias — it never enters `alias_env/1`, and the call target is
-      # an `{:@, _, _}` node. Both live forms V11 proved (direct call and apply/3) are
-      # recorded here. If a later change CLOSES this, this test goes red and the moduledoc
-      # residual must be retired in the same commit — that is the point of pinning it.
-      refute V.source_reenters_loop?("""
+    # ========================================================================
+    # A9 (`_orch/verify/T11-verdict.json`) — module-attribute indirection was residual 4:
+    # `@k Samen.AI.Agent` then `@k.start(...)` never entered `alias_env/1` (a module
+    # attribute is not an alias) and the call target was an `{:@, _, _}` node
+    # `agent_kernel_alias?/2` had no clause for. CLOSED for the single, static,
+    # top-level-assignment case (`attr_env/1` + a new `{:@, _, _}` clause). NOT closed:
+    # attribute REASSIGNMENT ordering, ACCUMULATION, or an attribute assigned from ANOTHER
+    # attribute (`@k @j`) — deliberately out of scope, same data-flow class residual 1 is.
+    # ========================================================================
+
+    test "RED FIXTURE (A9) — `@k Samen.AI.Agent` then `@k.start` is NOW caught (was residual 4)" do
+      assert V.source_reenters_loop?("""
              defmodule RogueAttrDirect do
                @k Samen.AI.Agent
                def tool_schema, do: %{name: "x"}
@@ -710,11 +715,69 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverageTest do
              end
              """)
 
-      refute V.source_reenters_loop?("""
+      assert V.source_reenters_loop?("""
              defmodule RogueAttrApply do
                @k Samen.AI.Agent
                def tool_schema, do: %{name: "x"}
                def run(_config, ctx), do: apply(@k, :start, [SomeAgent, ctx.actor, "recurse", []])
+             end
+             """)
+    end
+
+    test "RED FIXTURE (A9) — an attribute assigned through a RENAMED alias still resolves" do
+      # `@k`'s own value is itself alias-resolved through the same `env` — a rename
+      # upstream of the attribute assignment does not evade the new clause.
+      assert V.source_reenters_loop?("""
+             defmodule RogueAttrViaRenamedAlias do
+               alias Samen.AI, as: A
+               @k A.Agent
+               def tool_schema, do: %{name: "x"}
+               def run(_config, ctx), do: @k.start(SomeAgent, ctx.actor, "recurse", [])
+             end
+             """)
+    end
+
+    test "spawn_lock_violations/2 flips on the module-attribute fixture path (refutable, A9)" do
+      tmp = Path.join(System.tmp_dir!(), "agcov_attr_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+      rogue = Path.join(tmp, "rogue_attr.ex")
+
+      File.write!(rogue, """
+      defmodule RogueAttrBoth do
+        @k Samen.AI.Agent
+        def tool_schema, do: %{name: "x"}
+        def run(_config, ctx) do
+          @k.start(SomeAgent, ctx.actor, "recurse", [])
+        end
+      end
+      """)
+
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      assert [msg] = V.spawn_lock_violations([rogue], tmp)
+      assert msg =~ "raw-spawn recursion escape"
+    end
+
+    test "ANTI-OVERREACH (A9) — an attribute bound to an UNRELATED module is NOT flagged" do
+      refute V.source_reenters_loop?("""
+             defmodule CleanAttrUnrelated do
+               @svc Enum
+               def tool_schema, do: %{name: "x"}
+               def run(c, _ctx), do: @svc.map(c.items, fn x -> x end)
+             end
+             """)
+    end
+
+    test "KNOWN RESIDUAL (A9, still open) — attribute-of-attribute chaining (`@k @j`) is NOT caught" do
+      # Deliberately out of scope per attr_env/1's own comment: the new clause resolves
+      # only `__aliases__`/atom values, never recursing into a further `{:@, _, _}` value —
+      # this is data-flow through two bindings, the same class residual 1 already declines.
+      refute V.source_reenters_loop?("""
+             defmodule RogueAttrOfAttr do
+               @j Samen.AI.Agent
+               @k @j
+               def tool_schema, do: %{name: "x"}
+               def run(_config, ctx), do: @k.start(SomeAgent, ctx.actor, "recurse", [])
              end
              """)
     end
