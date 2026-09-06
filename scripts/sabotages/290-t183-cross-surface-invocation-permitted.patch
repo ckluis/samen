@@ -1,0 +1,63 @@
+# SABOTAGE: T183 (ADR-047 §5.1a, the PROPOSED surface-scoped-registry addendum) gate
+# sabotage — CROSS-SURFACE INVOCATION IS RE-OPENED ON BOTH PATHS AT ONCE. Hunk 1 drops
+# intersection arm 5 from `Samen.AI.Agent.Tools.resolve_kind/2`: the run's surface is
+# ignored and the kind is resolved straight off the un-scoped `Samen.Automation.Action`
+# registry, so a write tool is admitted in the deterministic CI eval lane (where an
+# admitted call opens a REAL E3 approval) and an MCP tool name is admitted in a tenant
+# agent definition. Hunk 2 skips the surface gate in `Samen.AI.Mcp.call_tool/4`: a tenant
+# tool arriving over MCP stops being REFUSED BY NAME and simply falls off the end of the
+# dispatch list as `{:unknown_tool, …}` — merely ABSENT, which is exactly the posture
+# §5.1a exists to close. Both hunks still CALL `Samen.AI.ToolSurface.resolve/2` and then
+# discard the answer, so the defect is the missing enforcement and not a missing module.
+# Three named reds MUST flip. The positive controls in the same file stay green — the
+# tools that DO belong to each surface still resolve, an unregistered name is still
+# `{:unknown_tool, …}`, and `search` still reaches its own `:no_org` — proving the failure
+# is the surface arm and not the resolver or the MCP dispatcher breaking.
+# APP: samen_core
+# TEST_FILES: test/ai/tool_surface_test.exs
+# MUST_FAIL: a TENANT tool invoked on the MCP server is refused BY NAME
+# MUST_FAIL: an agent declaring an MCP tool is refused
+# MUST_FAIL: the WRITE tool is off-surface in the eval lane
+diff --git a/samen_core/lib/samen/ai/agent/tools.ex b/samen_core/lib/samen/ai/agent/tools.ex
+--- a/samen_core/lib/samen/ai/agent/tools.ex
++++ b/samen_core/lib/samen/ai/agent/tools.ex
+@@ -101,12 +101,13 @@ defmodule Samen.AI.Agent.Tools do
+   # owned by no surface at all — unregistered, or registered but not opted in — is the
+   # pre-T183 `:invalid_tools`, unchanged. A misconfigured `agent_surface/0` owns no registry,
+   # so every tool is off it: fail-closed, never a fallback to a wider surface.
+-  defp resolve_kind(kind, surface) when is_binary(kind) do
+-    case ToolSurface.resolve(surface, kind) do
+-      {:ok, mod} when is_atom(mod) and mod != :mcp -> resolved_entry(kind, mod)
+-      {:error, {:tool_off_surface, _name, _surface}} -> {:error, :tool_off_surface}
+-      {:error, {:unknown_surface, _surface}} -> {:error, :tool_off_surface}
+-      _ -> {:error, :invalid_tools}
++  defp resolve_kind(kind, _surface) when is_binary(kind) do
++    # SABOTAGE (T183, ADR-047 §5.1a): intersection arm 5 is DROPPED. The surface is ignored
++    # and the kind is resolved straight off the un-scoped registry, so any opted-in tool is
++    # admitted on ANY surface — the pre-T183 posture the addendum exists to close.
++    case Samen.Automation.Action.module_for(kind) do
++      nil -> {:error, :invalid_tools}
++      mod -> resolved_entry(kind, mod)
+     end
+   end
+ 
+diff --git a/samen_core/lib/samen/ai/mcp.ex b/samen_core/lib/samen/ai/mcp.ex
+--- a/samen_core/lib/samen/ai/mcp.ex
++++ b/samen_core/lib/samen/ai/mcp.ex
+@@ -262,11 +262,11 @@ defmodule Samen.AI.Mcp do
+     # the tenant plane (or the CI eval lane) is REFUSED here by name — `{:tool_off_surface,
+     # name, :mcp}` — instead of being reported as `{:unknown_tool, …}`, i.e. merely absent. A
+     # name registered nowhere is still `{:unknown_tool, name}`, unchanged.
+-    case Samen.AI.ToolSurface.resolve(:mcp, name) do
+-      {:ok, :mcp} -> dispatch_tool(scope, name, args, opts)
+-      {:ok, _foreign_owner} -> {:error, {:tool_off_surface, name, :mcp}}
+-      {:error, reason} -> {:error, reason}
+-    end
++    # SABOTAGE (T183, ADR-047 §5.1a): the surface gate is SKIPPED. A tool belonging to the
++    # tenant plane or the CI eval lane is no longer refused by name here — it just falls off
++    # the end of the dispatch list as if it had never been registered anywhere.
++    _surface = Samen.AI.ToolSurface.resolve(:mcp, name)
++    dispatch_tool(scope, name, args, opts)
+   end
+ 
+   defp dispatch_tool(scope, "browse", args, opts), do: browse(scope, args, opts)

@@ -1,0 +1,27 @@
+# SABOTAGE: T187 (ADR-047 §10a row 19/row 24) — the F-4 raw-spawn AST lock's apply/3
+# indirection detection is disabled. `agent_reentry_call?/2`'s bare `apply(<agent>, :start
+# | :run, <args>)` clause has its guard narrowed to `fun in []` (never matches), so a
+# `tool_schema/0`-exporting module that re-enters the agent loop via
+# `apply(Samen.AI.Agent, :start, [...])` is invisible to the gate again — the exact evasion
+# T187 closed. Both the unit-level RED FIXTURE and the refutable `spawn_lock_violations/2`
+# proof MUST flip.
+# UPDATED (UXD-05, attempt 3): `agent_reentry_call?/2`'s second argument became the file's
+# ALIAS ENVIRONMENT (`env`, from `alias_env/1`) when the parent-namespace-rename fix
+# replaced the earlier `renamed` alias SET; this patch's context is re-cut against that new
+# shape. Same regression, same MUST_FAIL tests, no change of intent.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_coverage_verifier_test.exs
+# MUST_FAIL: RED FIXTURE — apply(Samen.AI.Agent, :start, [...]) is flagged (was invisible pre-T187)
+# MUST_FAIL: spawn_lock_violations/2 flips on the apply/3 fixture path (refutable, matches the F-4 message)
+diff --git a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+--- a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+@@ -398,7 +398,7 @@
+   # an expression there (`apply(Samen.AI.Agent, :start, build_args())`) is still a real
+   # reentry attempt, only the *target* (module + fun name) needs to be statically visible.
+   defp agent_reentry_call?({:apply, _, [alias_ast, fun, _args]}, env)
+-       when fun in [:start, :run],
++       when fun in [],
+        do: agent_kernel_alias?(alias_ast, env)
+ 
+   # `Kernel.apply(<alias>, :start | :run, <args>)` — the fully-qualified spelling of the

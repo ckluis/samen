@@ -92,6 +92,12 @@ defmodule Samen.Automation.Actions.AssignRecordOwner do
   @impl true
   def effect, do: :write
 
+  # T183 (ADR-047 §5.1a): TENANT PLANE ONLY. Deliberately NOT `:ci_eval` — this tool's
+  # admitted call opens a REAL E3 approval (ADR-043 §6.2), which is a side effect the
+  # keyless, deterministic eval lane must not be able to cause. Never `:operator` either.
+  @impl true
+  def tool_surfaces, do: [:tenant]
+
   @impl true
   def validate(config, _resource_key) when is_map(config) do
     resource = config["resource"] || config[:resource]

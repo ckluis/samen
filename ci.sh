@@ -117,6 +117,42 @@ echo "==> Running agent-coverage verifier (ADR-047 A7 / §9#6 — F-4 raw-spawn 
 )
 echo "==> agent coverage verifier: PASSED"
 
+# --- tool-actor-identity verifier (T185, ADR-043 §6.2/§7 — OSS-SCAN findings/009 #2) ---
+# The structural half of the "ctx[:actor]-only" tool identity rule (informal convention at
+# agent/tools.ex ~:18; ADR-043 §6.2: the chokepoint never elevates, substitutes, or
+# synthesizes an actor). `mix samen.verify.tool_actor_identity` refuses ANY tool schema
+# declaring an actor/org/tenant identity parameter, FOUNDRY-WIDE across BOTH shared
+# tool-schema surfaces — the `Samen.Automation.Action` agent-tool registry (core + host
+# `extra:`, so a generated app cannot slip an actor param past this gate either) and the
+# `Samen.AI.Mcp` tool catalogue — not scoped inside any one feature's own work. Fail-closed
+# (:erlang.halt(1)); sabotage-refutable at scripts/sabotages/286-*.
+echo ""
+echo "==> Running tool-actor-identity verifier (T185, ADR-043 §6.2/§7 — ctx[:actor]-only tool identity)"
+(
+  cd "$REPO_ROOT/samen_core"
+  mix samen.verify.tool_actor_identity
+)
+echo "==> tool-actor-identity verifier: PASSED"
+
+# --- tool-surface verifier (T183b, UXD-11/UXD-12 — ADR-043 §7/§9 + ADR-047 §5.1a) -----
+# T183 shipped `Samen.AI.ToolSurface` (the one surface-scoped tool registry: :mcp /
+# :operator / :tenant / :ci_eval) with no verifier tier asserting its invariants, so they
+# could rot silently (UXD-12). `mix samen.verify.tool_surface` closes that gap: every
+# opted-in tool (`Action.tool_kinds/0`) lands on at least one surface (a malformed
+# declaration fails CLOSED to unreachable-everywhere, which this gate now catches loudly
+# instead of silently), the `:mcp` registry agrees with its own source
+# (`Samen.AI.Mcp.tool_names/0`), `surfaces/0` stays exactly the closed four, and every tool
+# on `:ci_eval` is `effect: :read` — the structural half of UXD-11's "a write tool can
+# never open a real E3 approval from a CI eval run" guarantee. Fail-closed
+# (:erlang.halt(1)); sabotage-refutable at scripts/sabotages/300-*.
+echo ""
+echo "==> Running tool-surface verifier (T183b, UXD-11/UXD-12 — Samen.AI.ToolSurface invariants)"
+(
+  cd "$REPO_ROOT/samen_core"
+  mix samen.verify.tool_surface
+)
+echo "==> tool-surface verifier: PASSED"
+
 # --- samen_stripe adapter package gate (ADR-038 §8.1, T18/B1) ---
 # The first-party-but-separate Stripe billing adapter (skeleton): path-deps on
 # samen_core ONLY (never samen_web), owns its own vendor HTTP client dep (req),
@@ -138,8 +174,9 @@ echo "==> samen_stripe: PASSED"
 # The first-party-but-separate, INBOUND-CAPABLE reference delivery adapter:
 # path-deps on samen_core ONLY (never samen_web), owns its own vendor HTTP
 # client dep (req), runs its own standalone suite INCLUDING the shared
-# Samen.Delivery.ProviderConformanceCase harness (samen_core, ADR-038 §4.5) —
-# the same harness samen_ses/samen_resend (T94/T95) will cite unchanged.
+# cross-family Samen.AdapterConformanceCase kit (samen_core, ADR-038 §4.5;
+# UXD-07/A6 switched this adapter onto it — samen_ses/samen_resend still cite
+# Samen.Delivery.ProviderConformanceCase, which is UNCHANGED).
 # samen_core itself never references this package (INV-4; proved by
 # samen_core's own delivery_vendor_free_test.exs above, which already ran).
 echo ""

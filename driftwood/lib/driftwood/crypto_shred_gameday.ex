@@ -74,7 +74,10 @@ defmodule Driftwood.CryptoShredGameday do
     repo = Keyword.get(opts, :repo, Repo)
     :ok = Driftwood.NonPiiSetup.register_all()
 
-    org_id = Keyword.get(opts, :org_id, Ecto.UUID.generate())
+    # UXD-02a: pinned to a fixed, obviously-synthetic literal (shape of the
+    # `pitr_gameday_sim.sh:59` DRILL_SUBJECT_ID precedent) so the T5.4 report's org id
+    # is stable run-to-run. Still overridable via opts for callers that need a fresh one.
+    org_id = Keyword.get(opts, :org_id, "5c5f4d3e-0000-4000-8000-000000000091")
     actor = %{org_id: org_id, role: :admin}
 
     # Tier-1 custom fields this scenario writes (T3.8 rejects a custom-bag value
@@ -85,12 +88,14 @@ defmodule Driftwood.CryptoShredGameday do
     carrier = create_company(org_id, "Blue Ridge Carriers", %{"company_role" => "carrier"})
     load = create_load(org_id, "Dallas -> Los Angeles dry van", 480_000, "TX->CA")
 
-    # The real subject. Unique, obviously-PII plaintext so the oracle red paths can
-    # grep for a leak.
-    cdl_plaintext = "CDL-GAMEDAY-#{unique()}"
-    name = %{first: "Marisol", last: "Gameday-#{unique()}"}
-    email = "marisol.gameday.#{unique()}@driftwood.test"
-    phone = "+1-555-#{:rand.uniform(900_000) + 100_000}"
+    # The real subject. UXD-02a: pinned to fixed, obviously-synthetic literals (same
+    # precedent as org_id above) so the T5.4 report's CDL/name/email/phone are stable
+    # run-to-run — still obviously-PII-shaped so the oracle red paths can grep for a
+    # leak; only the previously-varying suffix (`unique()`/`:rand.uniform/1`) is fixed.
+    cdl_plaintext = "CDL-GAMEDAY-000091"
+    name = %{first: "Marisol", last: "Gameday-000091"}
+    email = "marisol.gameday.000091@driftwood.test"
+    phone = "+1-555-000091"
 
     driver =
       Driftwood.Freight.Driver

@@ -269,6 +269,28 @@ Adapter split: `samen_postmark` (reference; inbound-capable; serves C5 later),
 `samen_ses` (SNS-envelope webhook verification, including the SNS subscription-confirmation
 handshake, inside the adapter; no inbound), `samen_resend` (Svix-style signatures; no inbound).
 
+**UXD-07 / A6 — the cross-family kit, adopted by one ESP adapter.**
+`Samen.AdapterConformanceCase` (`samen_core/lib/samen/adapter_conformance_case.ex`, T188) is the
+SHARED CROSS-FAMILY conformance kit — plain imported assertion functions rather than a
+macro-generated fixture DSL. It has been extended with the delivery-shaped assertions this
+section's (d) and (f) guarantees need — `load_fixtures!/1`, `assert_capture_no_leak!/2`,
+`assert_redaction!/3` — and `samen_postmark` now consumes IT instead of the macro harness, from
+the SAME `test/fixtures/conformance.exs` file and proving the same (a)-(f) list, written as
+explicit `test` blocks:
+
+```elixir
+use Samen.AdapterConformanceCase, adapter: SamenPostmark.Provider
+use ExUnit.Case, async: true
+```
+
+That adoption leaves `Samen.Delivery.ProviderConformanceCase` UNCHANGED: it is still the harness
+`samen_resend` and `samen_ses` cite, and still the module samen_core's own
+`Samen.Delivery.DeliverLeakGateTest` and `Samen.Delivery.ChokepointAntiBypassProbeTest` depend on
+— the frozen signature never moved, so the roadmap-collision rule above still holds. Converging
+the remaining two ESP adapters onto the cross-family kit, and deciding whether
+`ProviderConformanceCase` eventually becomes a shim or stays a separate contract, remain OPEN
+T27-owned follow-ups; neither is settled here.
+
 ## 5 · Webhook ingress (shared by billing + delivery; T19 builds, T20/T21/T24/T30 consume)
 
 One ingress, two domains. Everything below is the SHARED shape; per-vendor knowledge stays in

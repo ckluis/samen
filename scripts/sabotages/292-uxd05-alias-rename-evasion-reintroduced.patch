@@ -1,0 +1,35 @@
+# SABOTAGE: UXD-05 (T13-verdict-attempt1.json's strongest_attack, ADR-047 §10a row 19) —
+# the F-4 raw-spawn AST lock's alias resolution loses its explicit-rename binding.
+# `alias_bindings/1` stops honouring `as:`, so `alias Samen.AI.Agent, as: A` binds `Agent`
+# rather than `A` and a `tool_schema/0`-exporting module that re-enters the agent loop via
+# a RENAMED alias (`A.start(...)` — direct-call — or `apply(A, :start, [...])` — apply/3)
+# is invisible to the gate again. Pre-existing gap, not introduced by T187; this sabotage
+# targets the UXD-05 fix that closed it structurally. Every rename-dependent shape flips
+# with it (chained, prefix, brace-on-renamed-prefix); the four named below are the
+# original UXD-05 evasion this patch exists to pin.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_coverage_verifier_test.exs
+# MUST_FAIL: RED FIXTURE (UXD-05) — a renamed alias evades the DIRECT-CALL form
+# MUST_FAIL: RED FIXTURE (UXD-05) — a renamed alias evades the apply/3 form
+# MUST_FAIL: spawn_lock_violations/2 flips on the renamed-alias fixture path (refutable)
+# MUST_FAIL: a shadowed alias name counts if EITHER declaration reaches the kernel
+diff --git a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+--- a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+@@ -280,10 +280,12 @@
+   # falls back to the implicit-`as:` binding below.
+   defp alias_bindings([{:__aliases__, _, parts} = target, opts])
+        when is_list(parts) and is_list(opts) do
+-    case Keyword.get(opts, :as) do
+-      {:__aliases__, _, [name]} when is_atom(name) -> [{name, parts}]
+-      _ -> alias_bindings([target])
+-    end
++    # SABOTAGE (UXD-05, ADR-047 §10a row 19): the explicit `as:` binding is dropped, so
++    # `alias Samen.AI.Agent, as: A` binds `Agent` instead of `A` and every RENAMED
++    # spelling of the kernel is invisible again — the original UXD-05 evasion, in both
++    # the direct-call and apply/3 forms. The named RED FIXTURE tests MUST flip.
++    _ = opts
++    alias_bindings([target])
+   end
+ 
+   # `alias P.Q.R` — Elixir's implicit `as:` is the LAST segment.

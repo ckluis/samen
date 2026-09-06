@@ -127,6 +127,17 @@ config :driftwood, :fleet_operators, %{}
 config :driftwood, Driftwood.Repo,
   migration_primary_key: [name: :id, type: :binary_id]
 
+# catalog_parity allow-list (mirrors demo's cnt_tier precedent, Gate-1 F3):
+# stl_settlement_note is a raw-DDL operational shadow column added by the
+# ExpandAddSettlementNote expand migration (UXD-04) — nullable, backward-compatible,
+# NOT an Ash resource attribute, so catalog_sync never emits a fld_field row for it.
+# Allow-listed so C1 catalog_parity does not flag it. Lives in the SHARED config
+# (not config/test.exs) so `bash driftwood/ci.sh` is green in any MIX_ENV. Keyed
+# under :driftwood — the verifier reads Application.get_env(Mix.Project.config()[:app], …).
+config :driftwood, :catalog_parity_allow_list, [
+  {"stl_settlement", "stl_settlement_note"}
+]
+
 # T5.4 rollup registry — the DRIVER-keyed load-count rollup the crypto-shred
 # game-day governs across BOTH erasure arms (rebuild-or-exclude-on-erasure).
 # `drl_driver_load_count`: per-day / per-org / per-driver dispatch-event counts

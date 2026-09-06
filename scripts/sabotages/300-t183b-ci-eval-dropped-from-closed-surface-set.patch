@@ -1,0 +1,27 @@
+# SABOTAGE: T183b (UXD-11/UXD-12, ADR-047 §5.1a) gate sabotage — the :ci_eval surface is
+# silently dropped from Samen.AI.ToolSurface's closed @surfaces set. surfaces/0 quietly
+# becomes three instead of four, registry(:ci_eval)/surfaces_of/resolve(:ci_eval, ...) can
+# no longer see the eval lane's own tools, and the "read-effect only" guarantee UXD-11
+# depends on becomes unobservable. The named reds (the new tool_surface verifier tier AND
+# the shipped T183 unit suite) MUST flip; the clean shipped set proves the checks are not
+# blanket-failing.
+# APP: samen_core
+# TEST_FILES: samen_core/test/ai/tool_surface_test.exs
+# MUST_FAIL: the exactly-four-surfaces check (mix samen.verify.tool_surface exits 1)
+diff --git a/samen_core/lib/samen/ai/tool_surface.ex b/samen_core/lib/samen/ai/tool_surface.ex
+index d5af019..4289acc 100644
+--- a/samen_core/lib/samen/ai/tool_surface.ex
++++ b/samen_core/lib/samen/ai/tool_surface.ex
+@@ -70,7 +70,11 @@ defmodule Samen.AI.ToolSurface do
+
+   alias Samen.Automation.Action
+
+-  @surfaces [:mcp, :operator, :tenant, :ci_eval]
++  # SABOTAGE (T183b, UXD-12): :ci_eval silently dropped from the closed surface set — the
++  # eval lane's own tools become unreachable through registry(:ci_eval)/surfaces_of, and the
++  # documented four-surface closed set (ADR-047 §5.1a) quietly becomes three. MUST FLIP
++  # mix samen.verify.tool_surface (exit 1) and samen_core/test/ai/tool_surface_test.exs.
++  @surfaces [:mcp, :operator, :tenant]
+   @action_surfaces [:tenant, :ci_eval, :operator]
+   # The lane an opted-in action that predates `tool_surfaces/0` already ran on: the ADR-047
+   # agent loop, as the run owner, on the tenant plane. NOT a widening — every other surface,

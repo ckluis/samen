@@ -1,0 +1,34 @@
+# SABOTAGE: UXD-05 attempt-3 (T11-verdict.json's `strongest_attack` against attempt 2's
+# `39ebc4d`; ADR-047 §10a row 19) — head substitution in `resolves_to_kernel?/3` re-resolves
+# the substituted alias WITHOUT the reference's remaining segments, so a renamed PARENT
+# namespace no longer rebuilds the kernel path: `alias Samen.AI, as: A` followed by
+# `A.Agent.start(...)`, `apply(A.Agent, :start, [...])`, or a further `alias A.Agent, as: B`
+# evades the F-4 raw-spawn lock again — the exact class that survived attempts 1 and 2.
+# Renames of the kernel MODULE itself, and chains of them, are UNAFFECTED: this patch
+# reopens only the PREFIX-rename case.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_coverage_verifier_test.exs
+# MUST_FAIL: RED FIXTURE (UXD-05, attempt 3) — a PARENT-namespace rename evades the DIRECT-CALL form
+# MUST_FAIL: RED FIXTURE (UXD-05, attempt 3) — a PARENT-namespace rename evades the apply/3 form
+# MUST_FAIL: RED FIXTURE (UXD-05, attempt 3) — a PARENT rename carrying a further as: chain
+# MUST_FAIL: a PARENT rename resolves in the pipe, Kernel.apply and :erlang.apply shapes too
+# MUST_FAIL: a PARENT rename resolves regardless of declaration order
+# MUST_FAIL: an alias declared INSIDE a function body is resolved, not only a module-top alias
+# MUST_FAIL: spawn_lock_violations/2 flips on the parent-rename fixture path (refutable)
+diff --git a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+--- a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+@@ -319,7 +319,12 @@
+           false
+         else
+           seen = MapSet.put(visited, head)
+-          Enum.any?(candidates, &resolves_to_kernel?(&1 ++ rest, env, seen))
++          # SABOTAGE (UXD-05 attempt 3, ADR-047 §10a row 19): the substituted head is
++          # re-resolved WITHOUT the reference's remaining segments, so a renamed PARENT
++          # namespace (`alias Samen.AI, as: A` then `A.Agent.start/…`) no longer rebuilds
++          # the kernel path — the exact gap T11-verdict.json found in attempt 2. Renames
++          # of the kernel MODULE itself, and chains of them, are unaffected.
++          Enum.any?(candidates, &resolves_to_kernel?(&1, env, seen))
+         end
+     end
+   end

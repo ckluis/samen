@@ -6,6 +6,14 @@ defmodule Samen.AI.Mcp do
   per-operator token → actor plug, the streamable session) is `Samen.Web.AI.McpPlug`
   (samen_web), so a vertical mounts the server at ≈0 authored LOC (INV-5).
 
+  ## The `:mcp` SURFACE owns these four (T183; ADR-047 §5.1a)
+
+  `tool_names/0` below is the `:mcp` registry inside `Samen.AI.ToolSurface` — the one
+  surface-scoped abstraction the ADR-047 agent loop resolves through as well. `call_tool/4`
+  asks it BEFORE dispatching, so a tool belonging to another surface (`:tenant`, `:ci_eval`,
+  `:operator`) is refused by name here rather than merely falling off the end of the dispatch
+  list. This module still OWNS its four tools; it no longer answers cross-surface questions.
+
   ## Four tools, all read-or-propose (ADR-043 §9 — "never write")
 
     * **browse** — navigate the org's data. With no `resource` arg it serves the T66
@@ -248,11 +256,29 @@ defmodule Samen.AI.Mcp do
   `:mcp` scrub — the returned data carries no plaintext vault value and no `vt_*` token.
   """
   @spec call_tool(term(), String.t() | nil, map(), keyword()) :: {:ok, map()} | {:error, term()}
-  def call_tool(scope, "browse", args, opts), do: browse(scope, args, opts)
-  def call_tool(scope, "search", args, opts), do: search(scope, args, opts)
-  def call_tool(scope, "drafts", args, opts), do: drafts(scope, args, opts)
-  def call_tool(scope, "action_proposals", args, opts), do: action_proposals(scope, args, opts)
-  def call_tool(_scope, name, _args, _opts), do: {:error, {:unknown_tool, name}}
+  def call_tool(scope, name, args, opts) do
+    # T183 (ADR-047 §5.1a): the SURFACE gate, ahead of dispatch. `Samen.AI.ToolSurface` is the
+    # one registry abstraction the agent loop resolves through too, so a tool registered for
+    # the tenant plane (or the CI eval lane) is REFUSED here by name — `{:tool_off_surface,
+    # name, :mcp}` — instead of being reported as `{:unknown_tool, …}`, i.e. merely absent. A
+    # name registered nowhere is still `{:unknown_tool, name}`, unchanged.
+    case Samen.AI.ToolSurface.resolve(:mcp, name) do
+      {:ok, :mcp} -> dispatch_tool(scope, name, args, opts)
+      {:ok, _foreign_owner} -> {:error, {:tool_off_surface, name, :mcp}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp dispatch_tool(scope, "browse", args, opts), do: browse(scope, args, opts)
+  defp dispatch_tool(scope, "search", args, opts), do: search(scope, args, opts)
+  defp dispatch_tool(scope, "drafts", args, opts), do: drafts(scope, args, opts)
+
+  defp dispatch_tool(scope, "action_proposals", args, opts),
+    do: action_proposals(scope, args, opts)
+
+  # Fail-closed: a name the :mcp registry admits but this module cannot dispatch never
+  # degrades into a silent no-op or a fake {:ok, _}.
+  defp dispatch_tool(_scope, name, _args, _opts), do: {:error, {:unknown_tool, name}}
 
   # --- browse ------------------------------------------------------------------------------
 

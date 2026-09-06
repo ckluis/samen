@@ -11,20 +11,16 @@
 # TEST_FILES: test/ai/agent_write_test.exs
 # MUST_FAIL: a WRITE tool call does NOT execute
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 0272f9a..f278f48 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -887,27 +887,10 @@
-          replayed?
-        ) do
-     case authorize_tool(tools, kind, args) do
--      # A4 (ADR-047 §5.3; ADR-043 §6.2 unamended): a MUTATING tool never executes here.
--      # It passed the same four-way intersection a read tool passes — and that admission
--      # buys it a PROPOSAL, not an execution. The decision stamp lands first (so the
--      # args digest that BINDS the proposal is committed before anything else), then the
--      # E3 approval opens and the run parks. `entry.module.run/2` is not called on this
--      # path at all; the ONLY caller of it for a write is `execute_approved/3`, after a
--      # distinct human approved, with the APPROVER's actor.
--      {:ok, %{effect: :write} = entry, normalized} ->
+@@ -1278,23 +1278,10 @@ defmodule Samen.AI.Agent do
+       # E3 approval opens and the run parks. `entry.module.run/2` is not called on this
+       # path at all; the ONLY caller of it for a write is `execute_approved/3`, after a
+       # distinct human approved, with the APPROVER's actor.
+-      # T181: a hook can BLOCK a proposal (narrowing), and no hook return can approve
+-      # one — a write still parks for a distinct human. There is no widening decision.
+-      %{effect: :write} = entry ->
 -        turn_row = decide_tool!(turn_row, entry.kind, normalized)
 -
 -        propose_turn(
@@ -35,13 +31,14 @@ diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
 -          normalized,
 -          duration_ms,
 -          {goal, lines},
--          replayed?
+-          replayed?,
+-          hooks
 -        )
 -
 +      # SABOTAGE (A4, ADR-047 §5.3, RP-AG-5): the propose-then-approve branch is GONE. An
 +      # `effect: :write` tool now falls through to the inline READ path and executes
 +      # immediately, as the run's own owner actor — no approval opened, no human, no
 +      # approver authority. This is the autonomous AI write ADR-043 §6.2 forbids.
-       {:ok, entry, normalized} ->
+       entry ->
          turn_row = decide_tool!(turn_row, entry.kind, normalized)
          outcome = run_tool(entry, normalized, run, scope)

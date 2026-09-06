@@ -28,6 +28,71 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
       single most load-bearing assertion in this task, and its positive control (a fixture
       tool that DOES call `Agent.start` MUST flip the scan) is the anti-tautology proof.
 
+      **Alias resolution (UXD-05).** A `List.last(parts) == :Agent` test is blind to every
+      NAME-BINDING form that gives the kernel a different spelling, so `alias_env/1` builds
+      the file's ALIAS ENVIRONMENT and `resolves_to_kernel?/3` applies Elixir's own
+      resolution rule — head-segment substitution — to every module reference. WHAT THIS
+      CLOSES, in all five call shapes (direct-call, `apply/3`, `Kernel.apply/3`,
+      `:erlang.apply/3`, pipe): a rename of the kernel itself (`alias Samen.AI.Agent, as: A`);
+      a rename of ANY PREFIX segment at any depth (`alias Samen.AI, as: A` then
+      `A.Agent.start/…`, or `alias Samen, as: S` then `S.AI.Agent.start/…`); a chain of
+      either through further `as:` hops of any depth, in either declaration order; the brace
+      form (`alias Samen.AI.{Agent, …}`, including on a renamed prefix); an alias declared
+      inside a function body rather than at the top of the module; a name declared twice
+      (shadowing — BOTH right-hand sides count); Elixir's OTHER alias-creating form,
+      `require Samen.AI.Agent, as: A` (and the prefix form `require Samen.AI, as: A`),
+      including when it seeds a further `alias`/`require` chain — added at UXD-05 attempt 4,
+      `require_bindings/1`; an ATOM alias target, `alias :"Elixir.Samen.AI.Agent", as: A`,
+      which `Code.string_to_quoted/2` yields with no `__aliases__` wrapper — also attempt 4,
+      the atom clause of `alias_bindings/1`; and a `__MODULE__`-relative or otherwise
+      statically unresolvable prefix, which is re-tested on its literal suffix alone. The
+      raw, unexpanded reference is tested too, so this check is a strict SUPERSET of the
+      pre-fix literal one. See `resolves_to_kernel?/3` for the termination argument — no
+      alias cycle, and no self-growing alias such as `alias A.B, as: A`, can hang the scan.
+
+      **KNOWN RESIDUALS — DOCUMENTED, NOT CLOSED.** This lock is a static AST scan of one
+      file at a time. It does NOT catch, and does not claim to:
+
+        1. **Dynamic module construction.** `mod = Module.concat(Samen.AI, Agent);
+           apply(mod, :start, [...])`. No `__aliases__` node and no atom literal names the
+           target at the call site, so there is nothing static to resolve — a DISTINCT
+           vulnerability class from an alias rename (which is a compile-time textual
+           substitution the AST still names). Closing it needs data-flow/taint tracking and
+           should be scoped as its own item, not folded in here silently.
+        2. **The unparsable-source fallback.** When `Code.string_to_quoted/2` fails, the
+           scan degrades to `reentry_regex_fallback?/1`, a hardcoded literal-name regex with
+           NO alias tracking at all: every rename above evades that branch. It is reached
+           only by source that does not compile.
+        3. **Indirection through another module or a macro.** A reference the kernel gains
+           only after macro expansion, or a call routed through a helper module in a
+           different file, is invisible to a per-file pre-expansion scan.
+        4. **MODULE-ATTRIBUTE INDIRECTION** (UXD-05 attempt 4, named here because it was
+           found live and silent; PARTIALLY CLOSED AT A9). `@k Samen.AI.Agent` followed by `@k.start(...)`
+           or `apply(@k, :start, [...])` INSIDE a `tool_schema/0` module was a working call
+           this lock did not flag. A9 closed the single, static, TOP-LEVEL ASSIGNMENT case:
+           `attr_env/1` (new) collects every top-level `@name <value>` assignment the same
+           way `alias_env/1` collects `alias`/`require` bindings, and `agent_kernel_alias?/2`
+           gained an `{:@, _, _}` clause resolving an attribute reference through the same
+           alias/atom machinery every other reference uses — so the worked example above IS
+           FLAGGED NOW. What A9 deliberately did NOT attempt, and what remains open:
+           attribute REASSIGNMENT ordering, ACCUMULATION (`Module.register_attribute/3,
+           accumulate: true`), and attribute-of-attribute CHAINING (`@k @j`, one attribute
+           assigned from another) — each is data-flow through a binding, the same class
+           residual 1 (dynamic module construction) already declines to fold in. This is a
+           STATED, TESTED limit: the closed case is pinned by the "RED FIXTURE (A9)" tests
+           and the open chaining case by "KNOWN RESIDUAL (A9, still open) — attribute-of-
+           attribute chaining" in `test/ai/agent_coverage_verifier_test.exs`.
+
+      Residuals 1 and 4 are pinned by negative-control tests, and a further test asserts
+      this paragraph is still present in this source, so deleting any disclosure above
+      turns it red (`test/ai/agent_coverage_verifier_test.exs`, the "KNOWN RESIDUAL" tests).
+
+      **Unqualified `import`.** `import Samen.AI.Agent` binds `start/…` and `run/…` as bare
+      names, which no qualified-call clause can see. `imported_kernel_reentry?/2` closes
+      that: when a file imports the kernel (resolved through the same alias environment), a
+      bare `start(…)`/`run(…)` call counts as reentry. `def`/`defp` heads are stripped first
+      so a module's own `def start(…)` definition is never mistaken for a call.
+
     * **(2) every opted-in tool declares BOTH callbacks and carries a test** (ADR-047 §7.2
       check 2). Every kind in `Samen.Automation.Action.tool_kinds()` exports `tool_schema/0`
       AND `effect/0`, and at least one test file names the kind.
@@ -171,9 +236,241 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
   @spec source_reenters_loop?(String.t()) :: boolean()
   def source_reenters_loop?(source) do
     case Code.string_to_quoted(source, emit_warnings: false) do
-      {:ok, ast} -> ast_any?(ast, &agent_reentry_call?/1)
-      {:error, _} -> Regex.match?(~r/(?:Samen\.AI\.)?Agent\.(?:start|run)\s*\(/, source)
+      {:ok, ast} ->
+        # UXD-05: a bare `List.last(parts) == :Agent` test is blind to every `alias` form
+        # that gives the kernel a different spelling. Rather than special-casing shapes one
+        # at a time (attempt 1 closed `alias Samen.AI.Agent, as: A`; attempt 2 closed
+        # `alias A, as: B` chains; each was then evaded by the next shape), build the file's
+        # ALIAS ENVIRONMENT once and apply Elixir's own resolution rule — head-segment
+        # substitution — to every module reference. See `alias_env/1`. A9: merged with
+        # `attr_env/1` so a module-attribute reference (`@k`) resolves through the same
+        # `env` map — the two key spaces never collide (`{:attr, name}` tuples vs. plain
+        # alias-name atoms), see `agent_kernel_alias?/2`'s `{:@, _, _}` clause.
+        env = Map.merge(alias_env(ast), attr_env(ast))
+        ast_any?(ast, &agent_reentry_call?(&1, env)) or imported_kernel_reentry?(ast, env)
+
+      {:error, _} ->
+        reentry_regex_fallback?(source)
     end
+  end
+
+  # --- the alias environment (UXD-05, attempt 3) -----------------------------------------
+  #
+  # THE RULE, not a pattern for the last bug. In Elixir every `alias` form binds a single
+  # atom (its FIRST segment when used) to a list of parts, and a module reference
+  # `[Head | Rest]` resolves by replacing `Head` with its binding and re-resolving:
+  #
+  #   * `alias P.Q.R`          -> binds `R`  to `[:P, :Q, :R]`  (implicit `as:` = last segment)
+  #   * `alias P.Q.R, as: X`   -> binds `X`  to `[:P, :Q, :R]`
+  #   * `alias P.Q.{R, S}`     -> binds `R`  to `[:P, :Q, :R]` and `S` to `[:P, :Q, :S]`
+  #
+  # The right-hand side is stored UNEXPANDED and expanded on lookup, so the environment is
+  # order-independent by construction (a rename may legally be written above the alias it
+  # renames) and a PREFIX rename resolves at any depth: `alias Samen.AI, as: A` binds `A` to
+  # `[:Samen, :AI]`, so the reference `A.Agent` resolves to `[:Samen, :AI, :Agent]` — the
+  # case that evaded attempts 1 and 2 in all five call shapes, and the case a further
+  # `alias A.Agent, as: B` was built on.
+  #
+  # A name declared twice (shadowing) keeps BOTH right-hand sides and a reference counts as
+  # the kernel if EITHER resolves there — a static security scan over-approximates on
+  # purpose. For the same reason `resolves_to_kernel?/3` tests the raw, unexpanded parts as
+  # well, which makes this check a strict SUPERSET of the pre-fix literal one: it can flag
+  # strictly more than before, never less.
+  defp alias_env(ast) do
+    {_ast, bindings} =
+      Macro.prewalk(ast, [], fn
+        {:alias, _, args} = node, acc when is_list(args) -> {node, alias_bindings(args) ++ acc}
+        {:require, _, args} = node, acc when is_list(args) -> {node, require_bindings(args) ++ acc}
+        node, acc -> {node, acc}
+      end)
+
+    Enum.reduce(bindings, %{}, fn {name, parts}, acc ->
+      Map.update(acc, name, [parts], &Enum.uniq([parts | &1]))
+    end)
+  end
+
+  # --- the attribute environment (A9, closing residual 4's SINGLE-ASSIGNMENT case) -------
+  #
+  # `@k Samen.AI.Agent` then `@k.start(...)` was residual 4: a module attribute is a
+  # THIRD name-binding form (after `alias`/`require`) that never entered `alias_env/1`.
+  # `attr_env/1` collects every top-level `@name <value>` ASSIGNMENT in the module —
+  # `{:@, _, [{name, _, [value]}]}`, distinguished from a REFERENCE `{:@, _, [{name, _,
+  # ctx}]}` by the third element being a one-element LIST (the assigned value) rather than
+  # `nil`/a context atom. Same shadowing rule as `alias_env/1`: a name assigned more than
+  # once keeps EVERY assigned value, and a reference counts as the kernel if ANY resolves
+  # there — over-approximate on purpose, never under-approximate a security scan.
+  #
+  # SCOPE, DELIBERATELY NOT WIDER: this closes the single, static, literal assignment the
+  # residual named and the negative-control test pins (`@k Samen.AI.Agent`). It does NOT
+  # attempt attribute REASSIGNMENT ordering, ACCUMULATION (`Module.register_attribute`,
+  # `accumulate: true`), or a value that is itself ANOTHER attribute reference (`@k @j`) —
+  # that is data-flow through two bindings, the same class residual 1 (dynamic module
+  # construction) already declines to fold in. `agent_kernel_alias?/2`'s new `{:@, _, _}`
+  # clause resolves each candidate value through the EXISTING `__aliases__`/atom machinery
+  # only (no recursion into a further `{:@, _, _}` value), so this cannot loop.
+  defp attr_env(ast) do
+    {_ast, bindings} =
+      Macro.prewalk(ast, [], fn
+        {:@, _, [{name, _, [value]}]} = node, acc when is_atom(name) ->
+          {node, [{name, value} | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    Enum.reduce(bindings, %{}, fn {name, value}, acc ->
+      Map.update(acc, {:attr, name}, [value], &[value | &1])
+    end)
+  end
+
+  # `alias P.Q.{R, S}` — the brace form, one binding per child on the shared prefix. The
+  # prefix itself may be a renamed alias (`alias A.{Agent}`); it is stored unexpanded and
+  # resolved on lookup like any other right-hand side.
+  defp alias_bindings([{{:., _, [{:__aliases__, _, prefix}, :{}]}, _, children}])
+       when is_list(prefix) and is_list(children) do
+    for {:__aliases__, _, child} <- children,
+        is_list(child),
+        name = List.last(child),
+        is_atom(name),
+        do: {name, prefix ++ child}
+  end
+
+  # `alias P.Q.R, as: X`. Any other option list (`warn: false`) carries no rename, so it
+  # falls back to the implicit-`as:` binding below.
+  defp alias_bindings([{:__aliases__, _, parts} = target, opts])
+       when is_list(parts) and is_list(opts) do
+    case Keyword.get(opts, :as) do
+      {:__aliases__, _, [name]} when is_atom(name) -> [{name, parts}]
+      _ -> alias_bindings([target])
+    end
+  end
+
+  # `alias P.Q.R` — Elixir's implicit `as:` is the LAST segment.
+  defp alias_bindings([{:__aliases__, _, parts}]) when is_list(parts) do
+    case List.last(parts) do
+      name when is_atom(name) -> [{name, parts}]
+      _ -> []
+    end
+  end
+
+  # `alias :"Elixir.P.Q.R", as: X` — an ATOM alias target. Legal Elixir (it is how you
+  # alias an Erlang module, and `:"Elixir.Foo"` is the same atom `Foo` compiles to), and
+  # `Code.string_to_quoted/2` yields the bare atom with NO `__aliases__` wrapper, so the
+  # `__aliases__` clauses above never see it. UXD-05 attempt 4: this was a live evasion —
+  # `alias :"Elixir.Samen.AI.Agent", as: A` then `A.start(...)` scored 0 violations at the
+  # gate. Mirrors the atom clause of `agent_kernel_alias?/2`. A non-Elixir atom (`:lists`)
+  # makes `Module.split/1` raise; that binds nothing, which is correct.
+  defp alias_bindings([mod, opts]) when is_atom(mod) and is_list(opts) do
+    case Keyword.get(opts, :as) do
+      {:__aliases__, _, [name]} when is_atom(name) -> [{name, atom_module_parts(mod)}]
+      _ -> []
+    end
+  rescue
+    ArgumentError -> []
+  end
+
+  defp alias_bindings(_), do: []
+
+  # `require P.Q.R, as: X` — Elixir's OTHER alias-creating form, and the UXD-05 attempt-4
+  # evasion V11 proved at the gate (`_orch/verify/T11-verdict-attempt3.json`, cases N1–N4):
+  # `require Samen.AI.Agent, as: A` followed by `A.start(...)` returned 0 violations while
+  # a byte-identical `alias`-written control returned 1. ONLY an explicit `as:` binds — a
+  # bare `require P.Q.R` creates NO alias in Elixir, so it must contribute NO binding, or
+  # this scan would start flagging ordinary `require`s. With the `as:` present the target
+  # shape is identical to `alias`'s, so `alias_bindings/1` does the rest (including the
+  # atom-target clause above), and a require-seeded name feeds head substitution like any
+  # other binding — `require Samen.AI, as: A` then `alias A.Agent, as: B` resolves.
+  defp require_bindings([_target, opts] = args) when is_list(opts) do
+    if Keyword.has_key?(opts, :as), do: alias_bindings(args), else: []
+  end
+
+  defp require_bindings(_), do: []
+
+  # An Elixir module atom (`:"Elixir.Samen.AI.Agent"`) as alias-environment parts.
+  defp atom_module_parts(mod) when is_atom(mod) do
+    mod |> Module.split() |> Enum.map(&String.to_atom/1)
+  end
+
+  # Does `parts` name the agent kernel under `env`? Head-segment substitution, short-circuit.
+  #
+  # TERMINATION, without a depth cap and without a fixed-point iteration: a substitution
+  # only happens for a head that is NOT already in `visited`, and it adds that head to
+  # `visited`. `visited` therefore grows strictly along every path and is bounded by
+  # `map_size(env)`, so no path exceeds `map_size(env)` substitutions. That covers every
+  # cyclic shape uniformly — a plain cycle (`alias A, as: B` / `alias B, as: A`), a cycle
+  # that does bottom out at the kernel, and the SELF-GROWING form `alias A.B, as: A` whose
+  # expansion never repeats a value and would defeat a value-based `seen` set.
+  defp resolves_to_kernel?(parts, env, visited) when is_list(parts) do
+    agent_module_parts?(parts) or resolve_head(parts, env, visited)
+  end
+
+  defp resolve_head([head | rest], env, visited) when is_atom(head) do
+    case Map.get(env, head) do
+      nil ->
+        false
+
+      candidates ->
+        if MapSet.member?(visited, head) do
+          false
+        else
+          seen = MapSet.put(visited, head)
+          Enum.any?(candidates, &resolves_to_kernel?(&1 ++ rest, env, seen))
+        end
+    end
+  end
+
+  # A head no static analysis can resolve — `__MODULE__.Agent`, an `unquote(...)` fragment.
+  # The reference is re-tested on its literal SUFFIX alone, i.e. exactly as conservatively
+  # as a bare `Agent` written with no alias at all (which this gate already flags).
+  # `rest` is strictly shorter than the input, so this recursion terminates too.
+  defp resolve_head([_unresolvable | rest], env, visited), do: resolves_to_kernel?(rest, env, visited)
+
+  defp resolve_head(_, _env, _visited), do: false
+
+  # `import Samen.AI.Agent` binds `start/…` and `run/…` as UNQUALIFIED names — a
+  # name-binding construct that is not an alias, so none of the qualified-call clauses
+  # below can see the resulting `start(ctx, [])`. Fires only when the file actually imports
+  # the kernel (resolved through the same alias environment, so `alias Samen.AI, as: A` +
+  # `import A.Agent` is caught), and the scan runs over an AST whose `def`/`defp` HEADS have
+  # been stripped so a module's own `def start(...)` definition is never mistaken for a call.
+  defp imported_kernel_reentry?(ast, env) do
+    imports_kernel?(ast, env) and ast_any?(strip_def_heads(ast), &bare_reentry_call?/1)
+  end
+
+  defp imports_kernel?(ast, env) do
+    ast_any?(ast, fn
+      {:import, _, [target | _]} -> agent_kernel_alias?(target, env)
+      _ -> false
+    end)
+  end
+
+  defp bare_reentry_call?({fun, _, args}) when fun in [:start, :run] and is_list(args), do: true
+  defp bare_reentry_call?(_), do: false
+
+  defp strip_def_heads(ast) do
+    Macro.prewalk(ast, fn
+      {def_kw, meta, [_head | rest]} when def_kw in [:def, :defp, :defmacro, :defmacrop] ->
+        {def_kw, meta, [nil | rest]}
+
+      node ->
+        node
+    end)
+  end
+
+  # Text fallback for the unparsable-source path. Kept in sync with the AST branch below:
+  # a direct `Agent.start/run(...)` call, OR an `apply/3` indirection (bare `apply`,
+  # `Kernel.apply`, `:erlang.apply`, or the pipe form `Agent |> apply(:start, ...)`) naming
+  # the agent kernel and `:start`/`:run` literally.
+  defp reentry_regex_fallback?(source) do
+    Regex.match?(~r/(?:Samen\.AI\.)?Agent\.(?:start|run)\s*\(/, source) or
+      Regex.match?(
+        ~r/(?:Kernel\.|:erlang\.)?apply\s*\(\s*(?:Samen\.AI\.)?Agent\s*,\s*:(?:start|run)\b/,
+        source
+      ) or
+      Regex.match?(
+        ~r/(?:Samen\.AI\.)?Agent\s*\|>\s*apply\s*\(\s*:(?:start|run)\b/,
+        source
+      )
   end
 
   # `def tool_schema` / `def tool_schema()` (arity 0), incl. `@impl true def tool_schema, do:`.
@@ -184,21 +481,98 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
   defp tool_schema_def?(_), do: false
 
   # A remote call to `<alias>.start(...)` / `<alias>.run(...)` where <alias> names the agent
-  # kernel — fully-qualified `Samen.AI.Agent` OR an aliased `Agent`. Matches any arity (the
-  # F-4 obligation is start/run "at all"), never a bare local `run(...)`.
-  defp agent_reentry_call?({{:., _, [alias_ast, fun]}, _, args})
+  # kernel — fully-qualified `Samen.AI.Agent` OR an aliased `Agent` OR any reference that
+  # resolves there under `env` (from `alias_env/1`). Matches any arity (the F-4
+  # obligation is start/run "at all"), never a bare local `run(...)`.
+  defp agent_reentry_call?({{:., _, [alias_ast, fun]}, _, args}, env)
        when fun in [:start, :run] and is_list(args),
-       do: agent_kernel_alias?(alias_ast)
+       do: agent_kernel_alias?(alias_ast, env)
 
-  defp agent_reentry_call?(_), do: false
+  # `apply(<alias>, :start | :run, <args>)` — the bare (auto-imported `Kernel.apply/3`)
+  # indirection. Deliberately NOT constrained to a literal-list 3rd argument: a variable or
+  # an expression there (`apply(Samen.AI.Agent, :start, build_args())`) is still a real
+  # reentry attempt, only the *target* (module + fun name) needs to be statically visible.
+  defp agent_reentry_call?({:apply, _, [alias_ast, fun, _args]}, env)
+       when fun in [:start, :run],
+       do: agent_kernel_alias?(alias_ast, env)
 
-  defp agent_kernel_alias?({:__aliases__, _, parts}) when is_list(parts) do
+  # `Kernel.apply(<alias>, :start | :run, <args>)` — the fully-qualified spelling of the
+  # same indirection.
+  defp agent_reentry_call?(
+         {{:., _, [{:__aliases__, _, [:Kernel]}, :apply]}, _, [alias_ast, fun, _args]},
+         env
+       )
+       when fun in [:start, :run],
+       do: agent_kernel_alias?(alias_ast, env)
+
+  # `:erlang.apply(<alias>, :start | :run, <args>)` — the BEAM-primitive spelling.
+  defp agent_reentry_call?({{:., _, [:erlang, :apply]}, _, [alias_ast, fun, _args]}, env)
+       when fun in [:start, :run],
+       do: agent_kernel_alias?(alias_ast, env)
+
+  # `<alias> |> apply(:start | :run, <args>)` — the pipe-operator spelling of `apply/3`
+  # (the piped-in term becomes apply's 1st argument, i.e. the module).
+  defp agent_reentry_call?({:|>, _, [alias_ast, {:apply, _, [fun, _args]}]}, env)
+       when fun in [:start, :run],
+       do: agent_kernel_alias?(alias_ast, env)
+
+  defp agent_reentry_call?(_, _env), do: false
+
+  defp agent_kernel_alias?({:__aliases__, _, parts}, env) when is_list(parts) do
     # Fully-qualified `Samen.AI.Agent`, or an aliased `Agent` — but NOT a sub-module such
-    # as `Agent.Run`/`Agent.Breaker` (those end in the sub-segment, not `:Agent`).
-    List.last(parts) == :Agent and (parts == [:Agent] or Enum.take(parts, -2) == [:AI, :Agent])
+    # as `Agent.Run`/`Agent.Breaker` (those end in the sub-segment, not `:Agent`) — OR any
+    # reference that RESOLVES there under this file's own alias environment, at any depth
+    # and whichever segment was renamed (UXD-05, attempt 3; see `alias_env/1`).
+    resolves_to_kernel?(parts, env, MapSet.new())
   end
 
-  defp agent_kernel_alias?(_), do: false
+  # A bare module-atom literal target, e.g. `apply(:"Elixir.Samen.AI.Agent", :start, [])` —
+  # `Code.string_to_quoted/2` resolves that quoted-atom syntax straight to the atom, with no
+  # `__aliases__` wrapper. Mirrors the same "fully-qualified Agent, or bare Agent" heuristic
+  # as the `__aliases__` clause above. (No rename to check here: a bare atom literal is
+  # never subject to `alias ..., as:` resolution.)
+  defp agent_kernel_alias?(mod, _env) when is_atom(mod) and mod not in [nil, true, false] do
+    parts = mod |> Module.split() |> Enum.map(&String.to_atom/1)
+    agent_module_parts?(parts)
+  rescue
+    ArgumentError -> false
+  end
+
+  # `@k` used as a call target (`@k.start(...)`, `apply(@k, :start, [...])`) — A9, closing
+  # residual 4's single-assignment case. A REFERENCE has a non-list third element (`nil`,
+  # or a context atom under macro hygiene); an ASSIGNMENT's third element is a one-element
+  # list and is excluded by the guard, so this clause only ever fires at a use site. Each
+  # value `attr_env/1` recorded for `name` is resolved through the SAME machinery an
+  # ordinary reference uses — `resolves_to_kernel?/3` for an alias-shaped value (so a value
+  # built from a renamed alias, e.g. `alias Samen.AI, as: A; @k A.Agent`, still resolves),
+  # `agent_module_parts?/1` for a bare atom literal. See `attr_env/1` for what is
+  # deliberately NOT attempted (reassignment ordering, accumulation, attribute-of-attribute
+  # chaining) — this clause never recurses into another `{:@, _, _}` value, so it cannot loop.
+  defp agent_kernel_alias?({:@, _, [{name, _, ctx}]}, env) when is_atom(name) and not is_list(ctx) do
+    env
+    |> Map.get({:attr, name}, [])
+    |> Enum.any?(fn
+      {:__aliases__, _, parts} when is_list(parts) ->
+        resolves_to_kernel?(parts, env, MapSet.new())
+
+      mod when is_atom(mod) and mod not in [nil, true, false] ->
+        mod |> Module.split() |> Enum.map(&String.to_atom/1) |> agent_module_parts?()
+
+      _ ->
+        false
+    end)
+  rescue
+    ArgumentError -> false
+  end
+
+  defp agent_kernel_alias?(_, _env), do: false
+
+  # Shared "is this the agent kernel, fully-qualified or as bare `Agent`" predicate — used
+  # both by `agent_kernel_alias?/2` above and by `resolves_to_kernel?/3` at every step of
+  # head-segment substitution.
+  defp agent_module_parts?(parts) when is_list(parts) do
+    List.last(parts) == :Agent and (parts == [:Agent] or Enum.take(parts, -2) == [:AI, :Agent])
+  end
 
   # --- (4) NON-VACUITY FLOOR -------------------------------------------------------------
 

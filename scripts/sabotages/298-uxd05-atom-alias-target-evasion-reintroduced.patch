@@ -1,0 +1,38 @@
+# SABOTAGE: UXD-05 attempt-4, the SECOND and independent omission V11 found
+# (`_orch/verify/T11-verdict-attempt3.json`, case N5) — the ATOM-target clause of
+# `alias_bindings/1` is deleted, so `alias :"Elixir.Samen.AI.Agent", as: A` followed by
+# `A.start(...)` falls through to `alias_bindings(_), do: []` and evades the F-4 raw-spawn
+# lock again. This is literally an `alias` FORM, which is why attempt 3's moduledoc claim to
+# resolve every alias spelling was false. `require ..., as:` and every `__aliases__`-target
+# rename are UNAFFECTED: this patch reopens only the atom-target class.
+# (`atom_module_parts/1` goes unused under this patch — a warning, not an error.)
+# APP: samen_core
+# TEST_FILES: test/ai/agent_coverage_verifier_test.exs
+# MUST_FAIL: RED FIXTURE (UXD-05, attempt 4) — an ATOM alias target (`alias :"Elixir...", as: A`)
+# MUST_FAIL: spawn_lock_violations/2 flips on the require-as and atom-alias fixture paths (refutable, gate level)
+diff --git a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+--- a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+@@ -312,22 +312,6 @@
+     end
+   end
+ 
+-  # `alias :"Elixir.P.Q.R", as: X` — an ATOM alias target. Legal Elixir (it is how you
+-  # alias an Erlang module, and `:"Elixir.Foo"` is the same atom `Foo` compiles to), and
+-  # `Code.string_to_quoted/2` yields the bare atom with NO `__aliases__` wrapper, so the
+-  # `__aliases__` clauses above never see it. UXD-05 attempt 4: this was a live evasion —
+-  # `alias :"Elixir.Samen.AI.Agent", as: A` then `A.start(...)` scored 0 violations at the
+-  # gate. Mirrors the atom clause of `agent_kernel_alias?/2`. A non-Elixir atom (`:lists`)
+-  # makes `Module.split/1` raise; that binds nothing, which is correct.
+-  defp alias_bindings([mod, opts]) when is_atom(mod) and is_list(opts) do
+-    case Keyword.get(opts, :as) do
+-      {:__aliases__, _, [name]} when is_atom(name) -> [{name, atom_module_parts(mod)}]
+-      _ -> []
+-    end
+-  rescue
+-    ArgumentError -> []
+-  end
+-
+   defp alias_bindings(_), do: []
+ 
+   # `require P.Q.R, as: X` — Elixir's OTHER alias-creating form, and the UXD-05 attempt-4

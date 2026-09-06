@@ -1,0 +1,38 @@
+# SABOTAGE: T181 (ADR-047 §10a row 25) gate sabotage — the hook seam's FAIL-CLOSED rescue
+# is dropped. `Samen.AI.Agent.Hooks.safe_call/3` no longer converts a raising / throwing /
+# exiting / non-exporting hook into the strongest refusal its point accepts; it converts it
+# into `:ok`, i.e. "this hook had no opinion". The chain then defers and the loop executes
+# the governed tool call UNHOOKED — a broken policy hook stops being a refusal and becomes
+# a bypass, which is exactly the silent degrade this seam exists to prevent. The named reds
+# (the loop-level red proving the tool never executes unhooked, and the unit-level red
+# proving a raise fails closed to the strongest refusal the point accepts) MUST flip; the
+# passing remainder of the suite is the control proving the rescue is not blanket-failing
+# every hook path.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_hooks_test.exs
+# MUST_FAIL: the tool never executes UNHOOKED
+# MUST_FAIL: a raise fails closed to the STRONGEST refusal the point accepts
+diff --git a/samen_core/lib/samen/ai/agent/hooks.ex b/samen_core/lib/samen/ai/agent/hooks.ex
+index f103273..8662568 100644
+--- a/samen_core/lib/samen/ai/agent/hooks.ex
++++ b/samen_core/lib/samen/ai/agent/hooks.ex
+@@ -116,11 +116,17 @@ defmodule Samen.AI.Agent.Hooks do
+   # `:__hook_error__` is a private sentinel — it is not part of the public contract and
+   # a hook returning it verbatim is treated exactly like any other malformed return.
+   defp safe_call(hook, point, ctx) do
++    # SABOTAGE (T181, ADR-047 §10a row 25): the FAIL-CLOSED rescue is dropped. A hook that
++    # raises, throws, exits, or simply does not export `call/2` now DEFERS like a hook that
++    # returned `:ok`, so the loop runs the tool call UNHOOKED — the policy the chain was
++    # configured to apply is silently skipped and the call executes anyway. This is the
++    # silent degrade the seam exists to prevent: a broken hook must make the call not
++    # happen, never make the call happen without its policy.
+     hook.call(point, ctx)
+   rescue
+-    _ -> :__hook_error__
++    _ -> :ok
+   catch
+-    _kind, _value -> :__hook_error__
++    _kind, _value -> :ok
+   end
+ 
+   defp interpret(point, _ctx, {:block, reason}) do

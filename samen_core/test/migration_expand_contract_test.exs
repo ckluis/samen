@@ -18,6 +18,10 @@ defmodule Samen.MigrationExpandContractTest do
       is ready — the window is load-bearing, not the query).
     * the down/0 CI check catches an expand with a broken down (RED PATH via the
       `downcheck_broken` fixture) and passes the good fixture.
+    * the OPT-IN `--min-expand` floor (`Mix.Tasks.Samen.Verify.Migrations.
+      min_expand_violations/2`): floor declared and count 0 → violation naming
+      `--min-expand`; floor declared and count meets it → no violation; no floor
+      declared and count 0 → no violation (the opt-in property itself).
   """
 
   use ExUnit.Case, async: false
@@ -29,6 +33,7 @@ defmodule Samen.MigrationExpandContractTest do
   @good_migrations Path.expand("fixtures/downcheck_good", __DIR__)
   @broken_migrations Path.expand("fixtures/downcheck_broken", __DIR__)
   @layered_migrations Path.expand("fixtures/downcheck_layered", __DIR__)
+  @none_migrations Path.expand("fixtures/downcheck_none", __DIR__)
   @carveout_migrations Path.expand("fixtures/carveouts", __DIR__)
 
   # ---------------------------------------------------------------------------
@@ -355,6 +360,34 @@ defmodule Samen.MigrationExpandContractTest do
       after
         stop_scratch_repo(repo, config)
       end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # `--min-expand` floor (OPT-IN, per-gate) — pure, source-level, no scratch DB
+  # ---------------------------------------------------------------------------
+
+  describe "--min-expand floor (Mix.Tasks.Samen.Verify.Migrations.min_expand_violations/2)" do
+    test "RED PATH: floor declared and discovered count is 0 -> violation naming --min-expand" do
+      violations =
+        Mix.Tasks.Samen.Verify.Migrations.min_expand_violations(@none_migrations, min_expand: 1)
+
+      assert [violation] = violations
+      assert violation =~ "--min-expand"
+      assert violation =~ "observed 0"
+      assert violation =~ "floor 1"
+    end
+
+    test "GREEN: floor declared and discovered count meets it -> no violation" do
+      assert Mix.Tasks.Samen.Verify.Migrations.min_expand_violations(@good_migrations,
+               min_expand: 1
+             ) == []
+    end
+
+    test "GREEN (opt-in property): no floor declared and count is 0 -> no violation" do
+      # This is the assertion an over-eager repo-wide fix breaks: absent the flag,
+      # a zero-expand app must stay green — today's behaviour, byte-for-byte.
+      assert Mix.Tasks.Samen.Verify.Migrations.min_expand_violations(@none_migrations, []) == []
     end
   end
 

@@ -115,6 +115,10 @@ defmodule Samen.AI.Embeddings do
   the governed unit: it refuses fail-closed (`{:error, :field_not_embeddable}`) unless `field`
   is a DECLARED embeddable field of `resource` AND not vault-routed (the deny-by-default belt),
   then seals the text through `Samen.AI.Chokepoint` (`:embed`) before the embedder runs.
+
+  The row is stamped with `model_identifier/1` of the RESOLVED embedder (T186) — the single
+  write path every vector goes through, so every row this function ever writes carries a
+  model identifier by construction. `Samen.AI.Embeddings.stale_rows/2` is the read side.
   """
   @spec embed_field(term(), module(), String.t(), atom(), term(), keyword()) ::
           {:ok, [float()]} | {:error, term()}
@@ -126,12 +130,179 @@ defmodule Samen.AI.Embeddings do
       # `text` already passed `assert_embeddable/2` (declared embeddable AND non-vault), so it
       # is non-PII by construction; `snippet_of/1` is the belt (stores only a `vt_`-free
       # binary excerpt, `nil` otherwise) — the Hit is self-describing, masking-safe (T152).
-      store_vector(repo_for(opts), org_id, resource, source_id, field, vector, snippet_of(text))
+      model = model_identifier({embedder, config})
+      store_vector(repo_for(opts), org_id, resource, source_id, field, vector, snippet_of(text), model)
       {:ok, vector}
     else
       {:error, _} = err -> err
       other -> {:error, other}
     end
+  end
+
+  @doc """
+  T186: the model identifier that produced (or would produce) an embedding — the value stamped
+  into `aie_model` and the drift-detection key `stale_rows/2` compares against. Reads
+  `Map.get(config, :model)` first (the standard `Samen.AI.Provider` config convention: an
+  adapter's `config` map carries an explicit `:model` string), falling back to
+  `inspect(module)` when the resolved provider has no `:model` config key at all — e.g.
+  `Samen.AI.Embedder.Deterministic`, whose keyless hash projection has no model NAME but is
+  still a distinct, versionable engine (module identity IS its version). Either way the
+  identifier is stable and content-free (never a vector, never source text) — it only ever
+  answers "which engine wrote this row".
+  """
+  @spec model_identifier({module(), map()}) :: String.t()
+  def model_identifier({module, config}) when is_atom(module) and is_map(config) do
+    case Map.get(config, :model) do
+      model when is_binary(model) and model != "" -> model
+      _ -> inspect(module)
+    end
+  end
+
+  @doc """
+  T186 drift/staleness: the currently CONFIGURED embedder's `model_identifier/1`, or
+  `{:error, :not_configured}` if unwired outside `:test` (mirrors `embedder_for/1`'s own
+  fail-honest contract — there is no "current model" to compare against when nothing is
+  wired). This is what a caller (an ops dashboard, `reembed_stale/1`) uses to answer "what
+  model would a fresh embed use right now", independent of any stored row.
+  """
+  @spec current_model(keyword()) :: {:ok, String.t()} | {:error, term()}
+  def current_model(opts \\ []) do
+    case embedder_for(opts) do
+      {:ok, resolved} -> {:ok, model_identifier(resolved)}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  T186 stale-detection: org-unscoped kernel maintenance read (mirrors `Samen.Retention.sweep/2`
+  and `Samen.AuditEvent.PartitionManager` — cross-org housekeeping is legitimate for kernel
+  infrastructure; it is EMBEDDING RESULTS, not tenant data, that stay org-scoped, and this
+  reads only routing metadata: id/org/resource/source/field/model, never a vector or plaintext).
+  A row is stale when `aie_model IS NULL` (never stamped — the fail-honest default, §pre-T186
+  rows) OR `aie_model <> current_model` (the provider was upgraded since this row was written).
+  Bounded by `:limit` (default 500) so a large backlog is swept incrementally, never as one
+  unbounded scan. Returns raw maps (`:id`, `:org_id`, `:source_resource`, `:source_id`,
+  `:field`, `:model`) — the shape `reembed_stale/1` consumes.
+  """
+  @spec stale_rows(term(), String.t(), keyword()) :: [map()]
+  def stale_rows(repo, current_model, opts \\ []) when is_binary(current_model) do
+    limit = Keyword.get(opts, :limit, 500)
+
+    sql = """
+    SELECT aie_id::text, aie_org_id::text, aie_source_resource, aie_source_id, aie_field, aie_model
+    FROM #{@table}
+    WHERE aie_model IS NULL OR aie_model <> $1
+    ORDER BY aie_inserted_at ASC
+    LIMIT $2
+    """
+
+    case repo.query(sql, [current_model, limit]) do
+      {:ok, %{rows: rows}} ->
+        Enum.map(rows, fn [id, org_id, resource, source_id, field, model] ->
+          %{
+            id: id,
+            org_id: org_id,
+            source_resource: resource,
+            source_id: source_id,
+            field: field,
+            model: model
+          }
+        end)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  @doc """
+  T186 incremental re-embed: re-embeds ONLY the rows `stale_rows/2` reports — never a fresh
+  row (a byte-unchanged fresh row is proof the batch job is scoped, not a full-table sweep).
+  For each stale row, resolves the source resource module + field atom from the row's stored
+  strings, loads the CURRENT source record via `:record_loader` (default `Ash.get/3`,
+  `authorize?: false` — a system-context read, the `Samen.Approvals`/`Samen.Sequences`
+  precedent for kernel maintenance jobs with no actor), and re-runs `embed_field/6` for that
+  ONE field through the SAME chokepoint every embed goes through (never a raw embedder call,
+  never a hand-rolled INSERT). A row whose resource/record can no longer be resolved is
+  recorded as an error, never silently dropped or falsely marked fresh.
+
+  `opts`: `:repo`, `:embedder` (override), `:limit` (default 500, forwarded to `stale_rows/2`),
+  `:record_loader` (`(module(), String.t() -> {:ok, struct()} | {:error, term()})`, the test
+  seam — mirrors the `:env_reader` pattern `embedder_for/1` already uses).
+
+  Returns `{:ok, %{reembedded: n, errors: [{row, reason}]}}` or the fail-closed
+  `{:error, :not_configured}` when no embedder is wired (nothing to compare staleness against).
+  """
+  @spec reembed_stale(keyword()) ::
+          {:ok, %{reembedded: non_neg_integer(), errors: [{map(), term()}]}} | {:error, term()}
+  def reembed_stale(opts \\ []) do
+    with {:ok, {embedder, config} = resolved} <- embedder_for(opts) do
+      current = model_identifier(resolved)
+      repo = repo_for(opts)
+      rows = stale_rows(repo, current, Keyword.take(opts, [:limit]))
+      loader = Keyword.get(opts, :record_loader, &default_record_loader/2)
+
+      result =
+        Enum.reduce(rows, %{reembedded: 0, errors: []}, fn row, acc ->
+          case reembed_row(row, loader, Keyword.put(opts, :embedder, {embedder, config})) do
+            :ok -> %{acc | reembedded: acc.reembedded + 1}
+            {:error, reason} -> %{acc | errors: [{row, reason} | acc.errors]}
+          end
+        end)
+
+      {:ok, result}
+    end
+  end
+
+  defp reembed_row(row, loader, opts) do
+    with {:ok, resource} <- resolve_resource(row.source_resource),
+         {:ok, field} <- resolve_field(resource, row.field),
+         {:ok, record} <- loader.(resource, row.source_id),
+         text <- Map.get(record, field),
+         row_opts <- Keyword.put(opts, :org_id, row.org_id),
+         {:ok, _vector} <- embed_field(nil, resource, row.source_id, field, text, row_opts) do
+      :ok
+    else
+      {:error, _} = err -> err
+      other -> {:error, other}
+    end
+  end
+
+  # `aie_source_resource` was written via `inspect(resource)` (store_vector/8) — a module's
+  # `inspect/1` form (e.g. "Samen.Foo.Bar", no "Elixir." prefix). Reversed with
+  # `Module.concat/1` on the dot-split segments; `Code.ensure_loaded?/1` refuses a module that
+  # no longer exists (a renamed/removed resource) fail-closed rather than crashing the batch.
+  defp resolve_resource(inspected) when is_binary(inspected) do
+    module = inspected |> String.split(".") |> Module.concat()
+
+    if Code.ensure_loaded?(module) do
+      {:ok, module}
+    else
+      {:error, {:unresolvable_resource, inspected}}
+    end
+  rescue
+    _ -> {:error, {:unresolvable_resource, inspected}}
+  end
+
+  # `aie_field` was written via `Atom.to_string/1` — the field atom already exists (it was
+  # declared via `use Samen.Resource, embeddable: [...]` at compile time), so
+  # `String.to_existing_atom/1` is safe and fail-closed (never mints a NEW atom from row data).
+  defp resolve_field(resource, field_str) when is_binary(field_str) do
+    field = String.to_existing_atom(field_str)
+
+    if field in declared_embeddable_fields(resource) do
+      {:ok, field}
+    else
+      {:error, {:field_no_longer_embeddable, field_str}}
+    end
+  rescue
+    ArgumentError -> {:error, {:unknown_field, field_str}}
+  end
+
+  # The default `:record_loader` — a system-context read (no actor: this is kernel
+  # maintenance, the `Samen.Approvals.gate/3` / `Samen.Sequences` `authorize?: false`
+  # precedent for a job with no human actor in scope).
+  defp default_record_loader(resource, source_id) do
+    Ash.get(resource, source_id, authorize?: false)
   end
 
   @doc """
@@ -267,17 +438,17 @@ defmodule Samen.AI.Embeddings do
 
   # --- storage (raw SQL; pgvector `::vector` text cast, dependency-free) --------------------
 
-  defp store_vector(repo, org_id, resource, source_id, field, vector, snippet) do
+  defp store_vector(repo, org_id, resource, source_id, field, vector, snippet, model) do
     now = NaiveDateTime.utc_now()
 
     sql = """
     INSERT INTO #{@table}
       (aie_org_id, aie_source_resource, aie_source_id, aie_field, aie_embedding, aie_snippet,
-       aie_inserted_at, aie_updated_at)
-    VALUES ($1::text::uuid, $2, $3, $4, $5::text::vector, $6, $7, $7)
+       aie_model, aie_inserted_at, aie_updated_at)
+    VALUES ($1::text::uuid, $2, $3, $4, $5::text::vector, $6, $7, $8, $8)
     ON CONFLICT (aie_org_id, aie_source_resource, aie_source_id, aie_field)
     DO UPDATE SET aie_embedding = EXCLUDED.aie_embedding, aie_snippet = EXCLUDED.aie_snippet,
-                  aie_updated_at = EXCLUDED.aie_updated_at
+                  aie_model = EXCLUDED.aie_model, aie_updated_at = EXCLUDED.aie_updated_at
     """
 
     params = [
@@ -287,6 +458,7 @@ defmodule Samen.AI.Embeddings do
       Atom.to_string(field),
       encode_vector(vector),
       snippet,
+      model,
       now
     ]
 

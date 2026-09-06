@@ -1,0 +1,36 @@
+# SABOTAGE: T182 (ADR-047 §4.3a, the PROPOSED ingress addendum) gate sabotage — the
+# tool-result INGRESS neutralization becomes a NO-OP. `Samen.AI.Agent.Ingress.sanitize/1`
+# still runs both passes and then DISCARDS their result, returning the raw untrusted binary,
+# so a governed tool result's attacker-controlled scalar enters the loop's `:history` byte
+# for byte: instruction-shaped text keeps its imperative frame-override intact, and every
+# zero-width / bidi / tag-block codepoint survives into the transcript a human reviews and
+# into the next turn's prompt. This is the whole direction §4.3a exists to close — §4.3's
+# six numbered points are egress-only and none of them fires here. The two named ingress
+# reds (one per payload class) MUST flip; the CLEAN positive control and the egress
+# assertions in the same file stay green, proving the failure is the ingress pass and not
+# the renderer breaking.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_ingress_test.exs
+# MUST_FAIL: an INSTRUCTION-SHAPED tool-result payload enters history byte-DIFFERENT and NOT reversibly
+# MUST_FAIL: a ZERO-WIDTH / BIDI tool-result payload enters history byte-DIFFERENT and NOT reversibly
+diff --git a/samen_core/lib/samen/ai/agent/ingress.ex b/samen_core/lib/samen/ai/agent/ingress.ex
+--- a/samen_core/lib/samen/ai/agent/ingress.ex
++++ b/samen_core/lib/samen/ai/agent/ingress.ex
+@@ -113,9 +113,15 @@
+   @spec sanitize(binary()) :: binary()
+   def sanitize(value) when is_binary(value) do
+     if String.valid?(value) do
++      # SABOTAGE (T182, ADR-047 §4.3a): the ingress neutralization is a NO-OP. Both passes
++      # still run and their result is DISCARDED, so the RAW untrusted binary is what the
++      # renderer emits and what enters the loop's :history.
++      _neutralized =
++        value
++        |> neutralize_controls()
++        |> neutralize_instructions(@instruction_passes)
++
+       value
+-      |> neutralize_controls()
+-      |> neutralize_instructions(@instruction_passes)
+     else
+       @invalid_marker
+     end

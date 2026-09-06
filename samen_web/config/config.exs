@@ -34,6 +34,14 @@ config :samen_core, :verify_repo, Samen.WebTest.Repo
 config :samen_core, :vault_repo, Samen.WebTest.Repo
 config :samen_core, :impersonation_repo, Samen.WebTest.Repo
 
+# UXD-04 follow-up (W5): `swp_engagement_note` is an operational shadow column added
+# by priv/repo/migrations/20260905100000_expand_add_person_engagement_note.exs, not an
+# Ash attribute, so it is allow-listed here rather than catalogued — same pattern as
+# driftwood/config/config.exs's `stl_settlement_note` entry.
+config :samen_web, :catalog_parity_allow_list, [
+  {"swp_person", "swp_engagement_note"}
+]
+
 # ADR-047 A5: the agent-loop resources back the tenant AgentLive + operator
 # AgentHealthLive surfaces, so samen_web's scratch DB carries their tables (the three
 # migrations mirror samen_core's test_repo byte-for-byte apart from the module name) and

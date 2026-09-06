@@ -1,0 +1,56 @@
+# SABOTAGE: UXD-05 attempt-3 — the F-4 raw-spawn lock's KNOWN RESIDUALS disclosure is
+# deleted from the tier moduledoc. T11-verdict.json refuted attempt 2 for claiming the
+# behavioural negative-control test "pinned" this documentation: the verifier deleted the
+# paragraph and that test stayed GREEN, because it asserts only that the Module.concat
+# fixture goes undetected — true with or without the disclosure. The lock's residuals are
+# now pinned by reading the tier source itself, and THIS patch is the proof that the pin
+# is refutable. A security control with a silent bypass is worse than one with a documented
+# limit, so the disclosure is a deliverable and deleting it must turn a test red.
+# (Regenerated at UXD-05 attempt 4: the paragraph now carries a FOURTH residual,
+# module-attribute indirection, so the old hunk no longer applied.)
+# APP: samen_core
+# TEST_FILES: test/ai/agent_coverage_verifier_test.exs
+# MUST_FAIL: KNOWN RESIDUAL — the disclosure itself is pinned in the tier source
+diff --git a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+--- a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
++++ b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+@@ -49,39 +49,6 @@
+       raw, unexpanded reference is tested too, so this check is a strict SUPERSET of the
+       pre-fix literal one. See `resolves_to_kernel?/3` for the termination argument — no
+       alias cycle, and no self-growing alias such as `alias A.B, as: A`, can hang the scan.
+-
+-      **KNOWN RESIDUALS — DOCUMENTED, NOT CLOSED.** This lock is a static AST scan of one
+-      file at a time. It does NOT catch, and does not claim to:
+-
+-        1. **Dynamic module construction.** `mod = Module.concat(Samen.AI, Agent);
+-           apply(mod, :start, [...])`. No `__aliases__` node and no atom literal names the
+-           target at the call site, so there is nothing static to resolve — a DISTINCT
+-           vulnerability class from an alias rename (which is a compile-time textual
+-           substitution the AST still names). Closing it needs data-flow/taint tracking and
+-           should be scoped as its own item, not folded in here silently.
+-        2. **The unparsable-source fallback.** When `Code.string_to_quoted/2` fails, the
+-           scan degrades to `reentry_regex_fallback?/1`, a hardcoded literal-name regex with
+-           NO alias tracking at all: every rename above evades that branch. It is reached
+-           only by source that does not compile.
+-        3. **Indirection through another module or a macro.** A reference the kernel gains
+-           only after macro expansion, or a call routed through a helper module in a
+-           different file, is invisible to a per-file pre-expansion scan.
+-        4. **MODULE-ATTRIBUTE INDIRECTION** (UXD-05 attempt 4, named here because it was
+-           found live and silent). `@k Samen.AI.Agent` followed by `@k.start(...)` or
+-           `apply(@k, :start, [...])` INSIDE a `tool_schema/0` module is a working call
+-           that this lock DOES NOT FLAG. A module attribute is not an alias: it is a
+-           compile-time binding held in the module's own attribute table, so it never
+-           enters `alias_env/1`, and the call site's target is an `{:@, _, _}` node that
+-           `agent_kernel_alias?/2` has no clause for. Resolving it means tracking attribute
+-           assignment and re-binding (attributes may be reassigned, accumulated, or set
+-           from another attribute), i.e. the same data-flow analysis residual 1 needs —
+-           deliberately NOT folded in here. This is a STATED, TESTED limit: the negative
+-           control is `"KNOWN RESIDUAL (module-attribute indirection)"` in
+-           `test/ai/agent_coverage_verifier_test.exs`.
+-
+-      Residuals 1 and 4 are pinned by negative-control tests, and a further test asserts
+-      this paragraph is still present in this source, so deleting any disclosure above
+-      turns it red (`test/ai/agent_coverage_verifier_test.exs`, the "KNOWN RESIDUAL" tests).
+ 
+       **Unqualified `import`.** `import Samen.AI.Agent` binds `start/…` and `run/…` as bare
+       names, which no qualified-call clause can see. `imported_kernel_reentry?/2` closes

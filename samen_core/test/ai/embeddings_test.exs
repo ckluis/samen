@@ -353,4 +353,215 @@ defmodule Samen.AI.EmbeddingsTest do
                )
     end
   end
+
+  # ---------------------------------------------------------------------------------------
+  # T186 — embedding-model staleness stamp + incremental re-embed pipeline
+  # ---------------------------------------------------------------------------------------
+  describe "T186 model_identifier/1" do
+    test "an explicit config :model wins" do
+      assert Embeddings.model_identifier({Embedder.Deterministic, %{model: "det-v2"}}) == "det-v2"
+    end
+
+    test "no :model key falls back to the module identity" do
+      assert Embeddings.model_identifier({Embedder.Deterministic, %{}}) == inspect(Embedder.Deterministic)
+    end
+  end
+
+  describe "T186 store_vector stamps aie_model on every write" do
+    test "embed_field stamps the row with the resolved embedder's model identifier" do
+      org = Ash.UUID.generate()
+      s = scope(org)
+      id = Ash.UUID.generate()
+
+      assert {:ok, _vec} = Embeddings.embed_field(s, Article, id, :body, "quarterly report", opts())
+
+      assert stamped_model(org, id) == inspect(Embedder.Deterministic)
+    end
+
+    test "a different :model config stamps that exact identifier" do
+      org = Ash.UUID.generate()
+      s = scope(org)
+      id = Ash.UUID.generate()
+
+      assert {:ok, _vec} =
+               Embeddings.embed_field(
+                 s,
+                 Article,
+                 id,
+                 :body,
+                 "quarterly report",
+                 Keyword.merge(opts(), embedder: {Embedder.Deterministic, %{model: "det-v1"}})
+               )
+
+      assert stamped_model(org, id) == "det-v1"
+    end
+  end
+
+  describe "T186 stale_rows/2 — fail-honest staleness (never assume current)" do
+    test "an unstamped row (aie_model NULL — the pre-T186 shape) is stale under ANY current model" do
+      org = Ash.UUID.generate()
+      id = Ash.UUID.generate()
+      # Simulate the pre-migration shape directly: a row with a NULL stamp (never backfilled).
+      insert_raw_row!(org, Article, id, :body, nil)
+
+      rows = Embeddings.stale_rows(TestRepo, "det-v1")
+      assert Enum.any?(rows, &(&1.org_id == org and &1.source_id == id))
+    end
+
+    test "drift on model upgrade: a row stamped under the OLD model flips stale under the NEW current model" do
+      org = Ash.UUID.generate()
+      s = scope(org)
+      id = Ash.UUID.generate()
+
+      assert {:ok, _} =
+               Embeddings.embed_field(
+                 s,
+                 Article,
+                 id,
+                 :body,
+                 "quarterly report",
+                 Keyword.merge(opts(), embedder: {Embedder.Deterministic, %{model: "det-v1"}})
+               )
+
+      # Fresh under its OWN model — never flagged against the model that wrote it.
+      refute Embeddings.stale_rows(TestRepo, "det-v1") |> Enum.any?(&(&1.org_id == org and &1.source_id == id))
+
+      # The SAME row flips stale the instant the CURRENT model is a newer one — the drift-on-
+      # upgrade proof: nothing about the row changed, only what it is compared against.
+      assert Embeddings.stale_rows(TestRepo, "det-v2") |> Enum.any?(&(&1.org_id == org and &1.source_id == id))
+    end
+  end
+
+  describe "T186 reembed_stale/1 — incremental batch touches ONLY stale rows" do
+    test "a stale row is re-embedded and stamped current; a FRESH row is byte-unchanged (untouched)" do
+      org = Ash.UUID.generate()
+      s = scope(org)
+      stale_id = Ash.UUID.generate()
+      fresh_id = Ash.UUID.generate()
+      stale_body = "the quick brown fox jumps over the lazy dog"
+      fresh_body = "quarterly billing invoices and payment reconciliation"
+
+      # Seed a MIXED set: one row under the OLD model (stale relative to "det-v2"), one already
+      # under the CURRENT model (fresh).
+      assert {:ok, _} =
+               Embeddings.embed_field(s, Article, stale_id, :body, stale_body,
+                 Keyword.merge(opts(), embedder: {Embedder.Deterministic, %{model: "det-v1"}})
+               )
+
+      assert {:ok, _} =
+               Embeddings.embed_field(s, Article, fresh_id, :body, fresh_body,
+                 Keyword.merge(opts(), embedder: {Embedder.Deterministic, %{model: "det-v2"}})
+               )
+
+      fresh_before = row_snapshot(org, fresh_id)
+
+      loader = fn Article, id ->
+        text = if id == stale_id, do: stale_body, else: fresh_body
+        {:ok, %{body: text}}
+      end
+
+      assert {:ok, %{reembedded: 1, errors: []}} =
+               Embeddings.reembed_stale(
+                 Keyword.merge(opts(),
+                   embedder: {Embedder.Deterministic, %{model: "det-v2"}},
+                   record_loader: loader
+                 )
+               )
+
+      # The stale row is now stamped current.
+      assert stamped_model(org, stale_id) == "det-v2"
+
+      # The fresh row was NEVER touched: byte-identical vector AND updated_at (proves the batch
+      # is scoped to stale rows, not a full-table re-embed that happens to compute the same
+      # vector for identical text).
+      assert row_snapshot(org, fresh_id) == fresh_before
+    end
+
+    test "an unresolvable source_resource is recorded as an error, never silently dropped" do
+      org = Ash.UUID.generate()
+      bogus_id = Ash.UUID.generate()
+
+      {:ok, _} =
+        TestRepo.query(
+          "INSERT INTO aie_embedding (aie_org_id, aie_source_resource, aie_source_id, aie_field, aie_embedding, aie_model, aie_inserted_at, aie_updated_at) " <>
+            "VALUES ($1::text::uuid, $2, $3, $4, $5::text::vector, $6, $7, $7)",
+          [
+            org,
+            "SamenCore.Support.EmbeddingsDomain.NoSuchModule",
+            bogus_id,
+            "body",
+            Embedder.Deterministic.vector("x") |> then(&("[" <> Enum.map_join(&1, ",", fn v -> to_string(v) end) <> "]")),
+            "det-v1",
+            NaiveDateTime.utc_now()
+          ]
+        )
+
+      assert {:ok, %{reembedded: 0, errors: [{row, reason}]}} =
+               Embeddings.reembed_stale(
+                 Keyword.merge(opts(), embedder: {Embedder.Deterministic, %{model: "det-v2"}})
+               )
+
+      assert row.org_id == org
+      assert match?({:unresolvable_resource, _}, reason)
+    end
+
+    test "unwired outside :test refuses fail-closed — {:error, :not_configured}, never a crash into a re-embed" do
+      assert {:error, :not_configured} =
+               Embeddings.reembed_stale(Keyword.merge(opts(), env_reader: fn -> :prod end))
+    end
+  end
+
+  describe "T186 ReembedWorker — the scheduled sweep" do
+    test "perform/1 runs the sweep and returns :ok even with nothing stale" do
+      assert :ok = Samen.AI.Embeddings.ReembedWorker.perform(%Oban.Job{id: 999, args: %{}})
+    end
+
+    test "default_crontab/0 schedules the sweep on the shared :maintenance queue" do
+      workers = Enum.map(Samen.Jobs.default_crontab(), fn {_cron, w} -> w end)
+      assert Samen.AI.Embeddings.ReembedWorker in workers
+      assert Samen.AI.Embeddings.ReembedWorker.__opts__()[:queue] == :maintenance
+    end
+  end
+
+  # --- T186 test helpers -----------------------------------------------------------------
+
+  defp stamped_model(org, source_id) do
+    {:ok, %{rows: [[model]]}} =
+      TestRepo.query(
+        "SELECT aie_model FROM aie_embedding WHERE aie_org_id = $1::text::uuid AND aie_source_id = $2",
+        [org, to_string(source_id)]
+      )
+
+    model
+  end
+
+  defp row_snapshot(org, source_id) do
+    {:ok, %{rows: [[emb, model, updated_at]]}} =
+      TestRepo.query(
+        "SELECT aie_embedding::text, aie_model, aie_updated_at FROM aie_embedding " <>
+          "WHERE aie_org_id = $1::text::uuid AND aie_source_id = $2",
+        [org, to_string(source_id)]
+      )
+
+    {emb, model, updated_at}
+  end
+
+  defp insert_raw_row!(org, resource, source_id, field, model) do
+    {:ok, _} =
+      TestRepo.query(
+        "INSERT INTO aie_embedding (aie_org_id, aie_source_resource, aie_source_id, aie_field, aie_embedding, aie_model, aie_inserted_at, aie_updated_at) " <>
+          "VALUES ($1::text::uuid, $2, $3, $4, $5::text::vector, $6, $7, $7)",
+        [
+          org,
+          inspect(resource),
+          to_string(source_id),
+          Atom.to_string(field),
+          Embedder.Deterministic.vector("seed") |> then(&("[" <> Enum.map_join(&1, ",", fn v -> to_string(v) end) <> "]")),
+          model,
+          NaiveDateTime.utc_now()
+        ]
+      )
+
+    :ok
+  end
 end

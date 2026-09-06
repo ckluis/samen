@@ -167,6 +167,20 @@ down→up round trip when exercised in a throwaway scratch DB (`<db>_downcheck_<
 expand migrations additive so the reverse is possible. Never mark an expand migration
 `:contract` just to dodge the check.
 
+**`--min-expand` floor (OPT-IN, per-gate):**
+
+```text
+--min-expand <N> declared but found only <count> :expand migration(s) under <path> (observed <count>, floor <N>).
+```
+
+**Meaning:** the gate declared `mix samen.verify.migrations --min-expand N` and the
+discovered `:expand`-phase migration count fell below `N` — e.g. an app's one known expand
+migration lost its `phase: :expand` tag (the tag makes it disappear from discovery, not
+just from the down/0 exercise). This is OPT-IN: a gate that passes no `--min-expand` keeps
+today's behaviour byte-for-byte, including a count of 0 staying green.
+**Fix:** restore the `phase: :expand` tag on the migration that should carry it, or lower
+the declared floor if the app's expand-migration count has legitimately changed.
+
 ---
 
 ## Step 8 — `mix samen.verify.sink_schema`
@@ -528,6 +542,68 @@ only kernel-referencing `lib/` files are its agent definitions + router). Wired 
 **Fix:** remove the `Samen.AI.Agent.start/run` call from the tool module (a tool proposes/reads,
 never re-enters the loop); add the missing `AgentCase` proof / tool test / retention arm; move
 re-implemented agent behaviour out of the vertical into the framework.
+
+### `mix samen.verify.tool_actor_identity`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.tool_actor_identity.ex`):
+
+```text
+<Module> (<kind>): tool_schema/0 declares an actor/org/tenant identity parameter <name> — tool identity MUST come from ctx[:actor] only (ADR-043 §6.2); an LLM-supplied identity parameter can spoof or widen scope.
+MCP tool <name>: inputSchema declares an actor/org/tenant identity property <name> — tool identity MUST come from the resolved token scope (ctx[:actor]) only (ADR-043 §6.2/§9); an LLM-supplied identity property can spoof or widen scope.
+```
+
+**Meaning:** T185 (backlog OSS-SCAN, findings/009 pattern #2: ZAQ's trusted-execution-context
+identity rule, AGPL-3.0 patterns-only) — the STRUCTURAL half of the `ctx[:actor]`-only tool
+identity rule (ADR-043 §6.2: "the chokepoint never elevates, substitutes, or synthesizes an
+actor"). A tool author could otherwise declare an `actor_id`/`org_id`/`tenant_id` model
+parameter — untrusted model output — and a careless `run/2` could read it instead of the
+loop-owned `ctx.actor`, spoofing or widening scope. This tier refuses the declaration itself,
+FOUNDRY-WIDE across BOTH shared tool-schema surfaces: the `Samen.Automation.Action` agent-tool
+registry (`tool_kinds()` — core kinds + host `extra:`, so a generated app cannot slip an actor
+param past this gate either) and the `Samen.AI.Mcp` MCP tool catalogue (`tools/0` inputSchema
+properties) — not scoped inside any one feature's own work (e.g. T177's OAuth-grant surface).
+A name is flagged if it normalizes (camelCase→`_`, downcase, split on non-letters) to a token
+set containing `actor`/`org`/`organization`/`tenant`; a target-record field like
+`assign_record_owner`'s `user_id` is deliberately NOT flagged (the rule is about the *acting*
+identity leaking in as a parameter, not every UUID-shaped arg). Wired into the ROOT `ci.sh`,
+sabotage-refutable via `scripts/sabotages/286-t185-tool-actor-identity.patch` (disabling the
+`identity_leak?/1` predicate flips both the unit-level defect tests and the exit-code RED PATH).
+**Fix:** drop the actor/org/tenant-shaped parameter from the tool's `tool_schema/0` (or the MCP
+`inputSchema` `properties`); read the calling actor from `ctx.actor` (Action tools) or the
+resolved token scope (MCP), never from a model-supplied argument.
+
+### `mix samen.verify.tool_surface`
+
+**Errors** (`samen_core/lib/mix/tasks/samen.verify.tool_surface.ex`):
+
+```text
+<kind>: tool_kinds/0 lists it as an opted-in tool but Samen.AI.ToolSurface.surfaces_for/1 returns [] (on no surface, unreachable anywhere) — a malformed or dropped tool_surfaces/0 declaration.
+Samen.AI.Mcp.tool_names/0 (<list>) and Samen.AI.ToolSurface.names(:mcp) (<list>) disagree — the :mcp registry must be read straight from its own source, never hand-rolled.
+Samen.AI.ToolSurface.surfaces/0 is <list>, expected exactly [:mcp, :operator, :tenant, :ci_eval] — the closed surface set changed.
+<kind>: registered on the :ci_eval surface with effect: :write — a write tool on the CI eval lane could open a REAL E3 approval from a CI run (UXD-11; the :ci_eval surface's moduledoc guarantee).
+```
+
+**Meaning:** T183b (backlog UXD-REMEDIATION, `_orch/ux-debt.yaml` UXD-11 + UXD-12) — T183
+shipped `Samen.AI.ToolSurface` (ADR-043 §7/§9 + ADR-047 §5.1a, PROPOSED — the one
+surface-scoped tool registry: `:mcp`/`:operator`/`:tenant`/`:ci_eval`) with no verifier tier
+asserting its invariants, so they could rot silently once the shipping unit test's hardcoded
+fixtures stopped being the only thing exercising the property. This tier is the mechanical
+fix: (1) every opted-in tool in `Samen.Automation.Action.tool_kinds/0` lands on at least one
+surface (a malformed `tool_surfaces/0` fails CLOSED to `[]`, silently uncallable everywhere —
+this check turns that silence into a named violation); (2) `Samen.AI.Mcp.tool_names/0` and
+`Samen.AI.ToolSurface.names(:mcp)` agree — `ToolSurface` never hand-rolls a second MCP list;
+(3) `Samen.AI.ToolSurface.surfaces/0` stays exactly the closed four; (4) every tool registered
+on `:ci_eval` is `effect: :read` — the structural half of UXD-11's "a write tool can never
+open a real E3 approval from a CI eval run" guarantee (wiring the D8 eval tier itself onto
+`:ci_eval` is a behaviour change to another gate and stays out of this tier's scope). Wired
+into the ROOT `ci.sh` beside `mix samen.verify.tool_actor_identity`, sabotage-refutable via
+`scripts/sabotages/300-t183b-ci-eval-dropped-from-closed-surface-set.patch` (dropping
+`:ci_eval` from `Samen.AI.ToolSurface`'s closed `@surfaces` set flips both this tier and the
+shipped `samen_core/test/ai/tool_surface_test.exs` suite).
+**Fix:** add/repair the tool's `tool_surfaces/0` declaration; keep `Samen.AI.ToolSurface`'s
+`:mcp` registry reading straight from `Samen.AI.Mcp.tool_names/0`; restore the closed
+`surfaces/0` set to the four named surfaces; move an `effect: :write` action off the
+`:ci_eval` surface (or make the action genuinely read-only).
 
 ### `mix samen.verify.fleet_wire`
 

@@ -117,6 +117,12 @@
           "type": "String"
         },
         {
+          "column_name": "arn_hooks",
+          "logical_name": "hooks",
+          "pii": false,
+          "type": "{:array, Ash.Type.String}"
+        },
+        {
           "column_name": "arn_id",
           "logical_name": "id",
           "pii": false,

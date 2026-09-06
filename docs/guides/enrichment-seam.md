@@ -162,9 +162,18 @@ assert result == %{"title" => "VP"}
 1. Implement `Samen.Enrichment.Provider` in a separate package (e.g., `samen_enrichment_clearbit`).
 2. Test the adapter against the fail-honest contract this doc states (unconfigured refusal,
    honest-empty, capability gating). NOTE: unlike `Samen.Delivery.Provider`, there is currently
-   NO `Samen.Enrichment.ProviderConformanceCase` shipped — `Samen.Delivery.ProviderConformanceCase`
-   is the pattern to follow if/when one is built for enrichment; until then, an adapter author
-   writes these conformance assertions by hand against `Samen.Enrichment.Provider`'s callbacks.
+   NO `Samen.Enrichment.ProviderConformanceCase` shipped. The kit to follow if/when one is built
+   for enrichment is `Samen.AdapterConformanceCase` (`samen_core`) — the shared CROSS-FAMILY
+   conformance kit an adapter of ANY family can `use` directly, whose plain imported assertions
+   (`load_fixtures!/1`, `assert_refusal_table!/1`, `assert_masked_payload_only!/2`,
+   `assert_capture_no_leak!/2`, `assert_redaction!/3`) cover exactly the fail-honest contract
+   above. `samen_postmark/test/conformance_test.exs` is the worked ESP example and
+   `samen_anthropic/test/conformance_test.exs` the AI-provider one;
+   `Samen.Delivery.ProviderConformanceCase` remains the macro harness `samen_resend` and
+   `samen_ses` consume, but (A13/T27-owned follow-up decision) is now a thin shim over this
+   same kit rather than a separately-implemented harness. Until an enrichment adapter adopts
+   the kit directly, an adapter author writes
+   these conformance assertions by hand against `Samen.Enrichment.Provider`'s callbacks.
 3. Wire it in the host config — never in core or demo.
 4. Consume enrichment via the host's surface — enrich is NOT a framework surface, it is a host integration point.
 5. For PII enrichment, route writes through `Samen.Vault.Change` + test with `Samen.MaskingCase`.

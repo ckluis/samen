@@ -80,7 +80,7 @@ echo "    PASSED"
 
 # 7. T2.4 expand-migration down/0 check.
 echo "--- step 7/17: mix samen.verify.migrations"
-mix samen.verify.migrations
+mix samen.verify.migrations --min-expand 1
 echo "    PASSED"
 
 # 8. J2 sink-schema allow-list.

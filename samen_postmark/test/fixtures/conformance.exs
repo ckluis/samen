@@ -1,7 +1,7 @@
 # Checked-in, hand-curated conformance fixture (ADR-038 §7.2 — never
 # network-recorded in CI). Consumed by
-# Samen.Delivery.ProviderConformanceCase (samen_core) via
-# `use Samen.Delivery.ProviderConformanceCase, fixtures: "test/fixtures", ...`.
+# Samen.AdapterConformanceCase (samen_core) via
+# `load_fixtures!/1`, called from samen_postmark/test/conformance_test.exs.
 
 bounce_pii_email = "bounced-person@example.test"
 bounce_pii_name = "Bounced Person"

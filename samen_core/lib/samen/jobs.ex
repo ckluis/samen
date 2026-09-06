@@ -179,6 +179,10 @@ defmodule Samen.Jobs do
       existing data. The daily cadence with a 2-month lookahead means even a long run of
       missed executions cannot open a partition gap. `aud_event` is the only partitioned
       table, so this single entry covers the whole partition surface.)
+    - `"*/30 * * * *"` → `Samen.AI.Embeddings.ReembedWorker` (T186 incremental re-embed sweep;
+      re-embeds ONLY `aie_embedding` rows whose stamped model has drifted from the currently
+      configured embedder — never a full-table re-embed. A no-op / self-discarding job on a
+      host with no embedder wired (ADR-014 fail-honest: nothing to re-embed against).)
   """
   @spec default_crontab() :: [{String.t(), module()}]
   def default_crontab do
@@ -188,7 +192,8 @@ defmodule Samen.Jobs do
       {"*/15 * * * *", Samen.AuditChain.VerifyWorker},
       {"*/10 * * * *", Samen.BreakGlass.ReconcileWorker},
       {"0 3 * * *", Samen.Retention.SweepWorker},
-      {"0 1 * * *", Samen.AuditEvent.PartitionManager}
+      {"0 1 * * *", Samen.AuditEvent.PartitionManager},
+      {"*/30 * * * *", Samen.AI.Embeddings.ReembedWorker}
     ]
   end
 

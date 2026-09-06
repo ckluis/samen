@@ -72,6 +72,11 @@ defmodule Samen.Automation.Actions.FetchRecord do
   @impl true
   def effect, do: :read
 
+  # T183 (ADR-047 §5.1a): a READ tool, safe in the deterministic CI eval lane as well as
+  # on the tenant plane. Never `:operator` — ADR-047 §7.3 is categorical for that plane.
+  @impl true
+  def tool_surfaces, do: [:tenant, :ci_eval]
+
   @impl true
   def validate(config, _resource_key) when is_map(config) do
     resource = config["resource"] || config[:resource]
