@@ -1,15 +1,17 @@
 # ADR-048 — Context compaction inside the ADR-046 erasure envelope: a dual-view transcript, a re-scrubbed summary, three-level overflow recovery, and withdrawal propagation on shred
 
-- **Status:** **PROPOSED** (2026-08-26) — **draft only.** Nothing here is ratified; every ruling
-  in §10 is **OPEN (needs-operator-input)**. The operator ratifies or amends, per the ADR-046 §7 /
-  ADR-047 §9 convention.
+- **Status:** **ACCEPTED** (2026-09-05) — ratified in full by the operator, per the ADR-046 §7 / ADR-047 §9 convention.
+  All twelve items — §10 D1–D6 and §11 O-1–O-6 — are ruled below (E-09, 2026-09-05). Batches
+  C1–C4 (§9) are **AUTHORISED** and filed as backlog rows (see `Binds`, below); C4 is additionally
+  gated on the O-3 implementation spike.
 - **Date:** 2026-08-26
 - **Build status:** **NOT STARTED — no code exists and none is authored here.** This ADR authors
   no product code: it touches no source, no test, no sabotage, no migration, no mix task, no
   abbrev-registry row, no `schema.dict.json`. It is docs-only per the standing
-  decompose-cross-cutting-changes rule. The build, if ratified, lands in the batches §9 sequences,
-  each behind its own adversarial gate. Code fragments below are **illustrative shapes, not
-  shipped modules** — no module named in §4–§7 exists today.
+  decompose-cross-cutting-changes rule. The build lands in the batches §9 sequences, now ratified
+  and filed as backlog rows (see `Binds`, below), each behind its own adversarial gate. Code
+  fragments below are **illustrative shapes, not shipped modules** — no module named in §4–§7
+  exists today.
 - **Task:** ADR-047's loop has **no compaction story at all.** `context_cutoff`, `token_budget`,
   `context.window` and `overflow_recover` return **zero hits** across `samen_core/lib` and
   `samen_web/lib` (re-checked at `c41e169`; all 30 `compact` hits are CSV/UI helpers), nothing
@@ -58,8 +60,12 @@
   Sagents (Apache-2.0) — the dual-view AgentState-vs-DisplayMessage transcript shape;
   **Neoharness (UNLICENSED)** — the three-level overflow ladder, taken **clean-room from the
   finding's prose only**; no line of its code was read, translated, or adapted.
-- **Binds (implementing batches):** C1–C4 (§9), **none filed** — the batches are recorded design,
-  not backlog rows, and are filed only if and when the operator ratifies.
+- **Binds (implementing batches):** C1–C4 (§9) are **RATIFIED** (E-09, 2026-09-05) and filed as
+  backlog rows: C1 → `T217`, C2 → `T218`, C3 → `T219`, the O-3 implementation spike → `T220`, C4 →
+  `T221`. `T221` (C4) is additionally **blocked by** `T220` — C4's build does not start until the
+  O-3 spike (§11 O-3) resolves whether a pre-shred pseudonym computation can be added unchanged;
+  ratifying O-3 in full ratifies its fallback (a separately shreddable derived key), not the
+  primary question, which is a code fact the spike must confirm.
 
 ---
 
@@ -514,16 +520,16 @@ is why §11 O-1 asks whether that is the whole of v1.1.
 
 ## 10 · Decisions for the operator
 
-All **OPEN — needs-operator-input**. Nothing below is taken.
+All six ruled by the operator on **2026-09-05** (E-09). Every row below is **RATIFIED**.
 
 | # | Decision | Options | Recommendation | Status |
 |---|---|---|---|---|
-| **1** | **May a model-written summary enter a governed transcript at all?** | (a) yes, through §5's full ingress path · (b) no — deterministic fold only, never model-written · (c) yes, but only for runs that never persist | **(a)**, with (b) as the C1+C2 staging. (c) repeats the mistake §9#2 rejected: making a governance property depend on whether a run happened to be resumed. | **OPEN** |
-| **2** | **Do the two views multiply shred units?** | (a) one blob, two keys, one DEK · (b) two rows, two retention specs | **(a).** (b) forces a second erasure arm and a second E7 target for zero benefit. | **OPEN** |
-| **3** | **Is compaction output categorically ineligible for embedding / cross-run memory?** | (a) yes, categorical · (b) allow with a subject-DEK-keyed store · (c) allow, retention-bounded | **(a).** ADR-043 M3's reasoning generalizes; (b) is the right *future* door and §7.1 leaves it open for the memory ADR to walk through, but opening it here would ship the first cross-run derived store in the same batch that designs it. | **OPEN** |
-| **4** | **Do folds spend the turn budget?** | (a) tokens+deadline yes, turns/tool-calls no · (b) everything yes · (c) folds are free | **(a).** (b) lets a compaction storm eat the turns a tenant was promised; (c) is not fail-honest — the tokens are real and are billed. | **OPEN** |
-| **5** | **How many mid-turn recovery attempts?** | (a) exactly one · (b) two · (c) until the watermark clears | **(a).** Each attempt is a full-price provider call on an already-oversized prompt; (c) is a budget hole disguised as resilience. | **OPEN** |
-| **6** | **Does an invalidated fold terminate the run?** | (a) terminate `:source_withdrawn` · (b) continue on the shortened context · (c) re-fold from the surviving sources | **(a).** `:transcript_unavailable`'s precedent. (b) reasons over text whose source was withdrawn; (c) re-derives from a source set that no longer includes what was withdrawn, and quietly changes what the run believed. | **OPEN** |
+| **1** | **May a model-written summary enter a governed transcript at all?** | (a) yes, through §5's full ingress path · (b) no — deterministic fold only, never model-written · (c) yes, but only for runs that never persist | **(a)**, with (b) as the C1+C2 staging. (c) repeats the mistake §9#2 rejected: making a governance property depend on whether a run happened to be resumed. | **RATIFIED (a)** — 2026-09-05. Plain (a), **not staged**: a model-written summary may enter via §5's ingress path from the first build; C1, C2, C3 and C4 are all authorised now (E-09 §1). |
+| **2** | **Do the two views multiply shred units?** | (a) one blob, two keys, one DEK · (b) two rows, two retention specs | **(a).** (b) forces a second erasure arm and a second E7 target for zero benefit. | **RATIFIED (a)** — 2026-09-05. |
+| **3** | **Is compaction output categorically ineligible for embedding / cross-run memory?** | (a) yes, categorical · (b) allow with a subject-DEK-keyed store · (c) allow, retention-bounded | **(a).** ADR-043 M3's reasoning generalizes; (b) is the right *future* door and §7.1 leaves it open for the memory ADR to walk through, but opening it here would ship the first cross-run derived store in the same batch that designs it. | **RATIFIED (a)** — 2026-09-05. |
+| **4** | **Do folds spend the turn budget?** | (a) tokens+deadline yes, turns/tool-calls no · (b) everything yes · (c) folds are free | **(a).** (b) lets a compaction storm eat the turns a tenant was promised; (c) is not fail-honest — the tokens are real and are billed. | **RATIFIED (a)** — 2026-09-05. |
+| **5** | **How many mid-turn recovery attempts?** | (a) exactly one · (b) two · (c) until the watermark clears | **(a).** Each attempt is a full-price provider call on an already-oversized prompt; (c) is a budget hole disguised as resilience. | **RATIFIED (a)** — 2026-09-05. |
+| **6** | **Does an invalidated fold terminate the run?** | (a) terminate `:source_withdrawn` · (b) continue on the shortened context · (c) re-fold from the surviving sources | **(a).** `:transcript_unavailable`'s precedent. (b) reasons over text whose source was withdrawn; (c) re-derives from a source set that no longer includes what was withdrawn, and quietly changes what the run believed. | **RATIFIED (a)** — 2026-09-05. Terminates `:source_withdrawn`. |
 
 ---
 
@@ -534,11 +540,17 @@ All **OPEN — needs-operator-input**. Nothing below is taken.
   Landing the dual view plus deterministic folding plus the honest terminal — **with no
   model-written text in the transcript** — closes the audit-integrity and honesty halves and defers
   every governance question §5 raises. **Recommendation: yes, stage it**, and treat C3+C4 as a
-  second ratification with real usage data behind it.
+  later phase to build once real usage data exists. **RULED (2026-09-05):** Concur with the §9
+  build order — C1+C2 land before C3+C4, and that sequencing stands (`X3` files it as a
+  `blocked_by` chain). The recommendation's proposed second ratification is **SUPERSEDED**: the
+  operator ratified C1–C4 in one act (E-09 §1), so there is no second operator gate before C3+C4
+  build.
 - **O-2 — Rule the third-party free-text boundary together with this ADR, or keep it open?**
   ADR-046 §7#5 (about-a-subject blobs) and ADR-047 §11 (third-party free text in a goal) are the
   same question; §7.4 shows a fold inherits it without widening it. **Recommendation: rule them
   together**, since a summary makes the boundary more visible without changing it.
+  **RULED (2026-09-05):** Concur with the ADR's own recommendation — rule the two together
+  with ADR-047 §11's identical question.
 - **O-3 — Can a new pre-shred computation carry a pseudonym into the steps-2–5 transaction?**
   §7.3 needs the subject's pseudonym computed **before** step 1 destroys the key, without
   reordering ADR-046's fail-safe step order. No such computation exists today (UXD-19: `shred/2`'s
@@ -547,17 +559,23 @@ All **OPEN — needs-operator-input**. Nothing below is taken.
   is the one implementation fact C4 must confirm before its design is final. If it turns out no
   call site can supply it unchanged, the fallback is an index keyed on a **separately shreddable**
   derived key, and that fallback needs its own crypto review (it is a `k_bidx`-shaped decision, and
-  `k_bidx` is the one that went wrong).
+  `k_bidx` is the one that went wrong). **RULED (2026-09-05):** The primary question is a code
+  fact, not an operator-rulable opinion — the ADR itself says it cannot verify it from the ADRs
+  alone (`:439`). Ratifying in full therefore ratifies the **fallback** (a separately shreddable
+  derived key) as what ships, and gates C4's build on an **O-3 implementation spike**, filed as
+  `T220`, which **blocks** `T221` (C4).
 - **O-4 — What is the default `context_cutoff_tokens` watermark?** Proposed: 70% of
   `max_input_tokens` (42k of the ratified 60k), host-configurable, floor non-configurable at
-  "never fold the goal, the tool defs, or the 2 most recent turns."
+  "never fold the goal, the tool defs, or the 2 most recent turns." **RULED (2026-09-05):** Concur
+  — 70% of `max_input_tokens` (42k of 60k), host-configurable, floor non-configurable.
 - **O-5 — Whole-fold or micro-compaction?** §5 recommends **whole-fold** and names the
   prompt-cache-invalidation cost. Micro-compaction is steadier on cost but cache-hostile and
   multiplies §7's provenance edges by roughly the turn count, weakening the walk's non-vacuity
-  floor. **Recommendation: whole-fold.**
+  floor. **Recommendation: whole-fold.** **RULED (2026-09-05):** Concur — whole-fold.
 - **O-6 — Does `:context_exhausted` warrant its own operator-health column?** It is the signal that
   an agent definition's goal has outgrown its budget shape — arguably more actionable than
   `:budget_exhausted`. Cheap either way; ruled here only so it is not discovered later.
+  **RULED (2026-09-05):** Concur — yes.
 
 ---
 
@@ -581,7 +599,8 @@ ones.
   unfolded one; folding is a *degradation* chosen over a terminal, and the ledger exists so it is
   a visible one.
 - **C3 puts model-written text into a governed transcript for the first time.** §5's six points are
-  the reason that is defensible; O-1's staging is the reason it need not be decided today.
+  the reason that is defensible; §10 D1 and §11 O-1 record that this has now been decided, not
+  staged.
 - **The index is a new structure outside the sealed body.** §7.3's pseudonym keying is what makes it
   safe, and O-3 is the one open link in that argument — named rather than assumed.
 - **`:source_withdrawn` will terminate runs that a user thinks are fine.** That is the fail-honest
