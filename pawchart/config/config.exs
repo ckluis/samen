@@ -266,4 +266,12 @@ config :samen_core, Oban,
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60}
   ]
 
+# UXD-04 follow-up (W5): `vcb_engagement_note` is an operational shadow column added
+# by priv/repo/migrations/20260905110000_expand_add_person_engagement_note.exs, not an
+# Ash attribute, so it is allow-listed here rather than catalogued — same pattern as
+# driftwood/config/config.exs's `stl_settlement_note` entry.
+config :pawchart, :catalog_parity_allow_list, [
+  {"vcb_person", "vcb_engagement_note"}
+]
+
 import_config "#{config_env()}.exs"
