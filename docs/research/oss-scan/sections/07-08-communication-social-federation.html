@@ -1,0 +1,184 @@
+<section id="08-communication-social-federation">
+<h2>Deep Dive: Communication &amp; Social / Federation</h2>
+
+<p>Five self-hosted Elixir projects sit in this cluster, and all five share a domain samen has zero use for: ActivityPub-federated bulletin boards, social networks, event platforms, and community toolkits. None of it — federation, feeds, follows, boosts, moderation strike ladders — transfers to a multi-tenant B2B SaaS foundry, and the license mix keeps code-lifting off the table for four of five (Baudrate, Bonfire, Kammer, and Mobilizon are all AGPL-3.0; only vutuv clears MIT). What makes the cluster worth reading closely anyway is that federated/social products are forced to solve exactly the hostile-input problems samen's chokepoint philosophy already cares about — untrusted URLs, account takeover, privacy-by-default, i18n at scale — and three of the five converge hard on the same two answers: <strong>passkeys via <code>wax_</code></strong> and <strong>DNS-rebinding-proof outbound fetch</strong>. Where a lesson repeats across projects it is said once below and attributed to all; per-project cards then cover what's unique to each.</p>
+
+<table class="quick-table">
+<thead>
+<tr><th>Project</th><th>What it is</th><th>License</th><th>Headline pattern to mine</th><th>Effort</th><th>Relevance</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="https://github.com/hiroshiyui/baudrate">Baudrate</a></td><td>ActivityPub-federated BBS (threads, boards, DMs, moderation)</td><td>AGPL-3.0</td><td>22-ADR security playbook: SSRF-pinned egress, sudo mode, WebAuthn, claim gate</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/bonfire-networks/bonfire-app">Bonfire</a></td><td>Federated-digital-spaces toolkit (Social/Community/Coordination flavours)</td><td>AGPL-3.0</td><td>Boundaries three-valued ACL model; config-declared Epics pipeline</td><td><span class="effort">S</span>–<span class="effort">L</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/tskovlund/kammer">Kammer</a></td><td>Self-hosted community platform ("Facebook Groups for associations")</td><td>AGPL-3.0</td><td>Step-up reauth as a token property; three-tier config + first-run wizard; email privacy mode</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://framagit.org/framasoft/mobilizon">Mobilizon</a></td><td>Federated event/group platform (Framasoft's Facebook Events alternative)</td><td>AGPL-3.0-or-later</td><td>Pluggable geocoder behaviour; tokenized ICS feeds; one rich-text sanitize chokepoint</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/wintermeyer/vutuv">vutuv</a></td><td>Federated professional/social network ("LinkedIn of the Fediverse")</td><td>MIT</td><td>Three-layer SSRF module; versioned DSAR export; member-facing activity log; blue/green deploy script</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+</tbody>
+</table>
+
+<h3>Cluster 1 — three projects converge on passkeys, two on step-up reauth</h3>
+<p>Samen's identity spine (ADR-035) has TOTP and OIDC but no hardware-key second factor — an open rung on the auth ladder. Baudrate, Kammer, and vutuv independently built the same answer with the same library (<code>wax_</code> + <code>eqrcode</code> for the QR enrollment flow already used for TOTP), which turns "which WebAuthn library and what does the LiveView integration look like" from an open question into a settled one. The three implementations also agree on the one invariant that matters most: passkeys are a <em>faster return login</em>, never a new root of trust — vutuv states this explicitly (enrollment lives behind an already-authenticated settings page, the original password/PIN flow stays the only way to bootstrap an account), Baudrate mandates 2FA enrollment by role rather than letting it self-serve trust, and Kammer's usernameless discoverable-credential flow still feeds the same login handler that magic links use rather than forking a parallel session path. Kammer adds the detail worth stealing for clone-detection: COSE keys stored opaquely, `sign_count` checked to catch credential cloning.
+
+A second, related convergence: Baudrate and Kammer both build a generalized step-up ("sudo mode") layer on top of whatever first factor authenticated the session — Baudrate checks a `verified_at` timestamp on admin routes (stale past 10 minutes ⇒ redirect to TOTP/WebAuthn re-verify, 5 failures lock verification without dropping the session), Kammer instead scopes the elevation to the credential itself (`stepped_up_at` lives on the `users_tokens` row, dies with that token, cannot be replayed onto another device). Kammer's framing is the sharper of the two: the elevation is a property of the credential that asked, not the session. Samen has TOTP step-up for OIDC but no generalized version of this gate, and both projects hand it a ready list of trigger surfaces — PII reveal-grant approval, session revocation, DSAR export, and crypto-shred initiation are exactly the actions step-up gates were designed for in both source projects.</p>
+
+<svg viewBox="0 0 700 260" style="width:100%;max-width:700px;height:auto" role="img" aria-labelledby="idspine-title">
+<title id="idspine-title">Baudrate, Kammer, and vutuv converging on wax_ passkeys plus a step-up reauth pattern, feeding samen's ADR-035 identity spine and reveal-grant approval flow</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">THREE PROJECTS -&gt; PASSKEYS + STEP-UP -&gt; samen ADR-035</text>
+
+<rect x="10" y="40" width="160" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="90" y="59" text-anchor="middle" font-size="11">Baudrate</text>
+<text x="90" y="74" text-anchor="middle" font-size="9" fill="var(--muted)">wax_ + role-mandated 2FA, sudo mode</text>
+
+<rect x="10" y="94" width="160" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="90" y="113" text-anchor="middle" font-size="11">Kammer</text>
+<text x="90" y="128" text-anchor="middle" font-size="9" fill="var(--muted)">usernameless wax_, stepped_up_at on token</text>
+
+<rect x="10" y="148" width="160" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="90" y="167" text-anchor="middle" font-size="11">vutuv</text>
+<text x="90" y="182" text-anchor="middle" font-size="9" fill="var(--muted)">wax_ behind settings, never account root</text>
+
+<path d="M170,63 L250,110" stroke="var(--accent)" fill="none" marker-end="url(#id1)"/>
+<path d="M170,117 L250,121" stroke="var(--accent)" fill="none" marker-end="url(#id1)"/>
+<path d="M170,171 L250,132" stroke="var(--accent)" fill="none" marker-end="url(#id1)"/>
+
+<rect x="250" y="95" width="180" height="52" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="340" y="116" text-anchor="middle" font-size="11">wax_ passkeys +</text>
+<text x="340" y="131" text-anchor="middle" font-size="9" fill="var(--muted)">credential-scoped step-up</text>
+
+<path d="M430,121 L480,121" stroke="var(--accent)" fill="none" marker-end="url(#id1)"/>
+
+<rect x="480" y="95" width="200" height="52" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="580" y="112" text-anchor="middle" font-size="11">samen ADR-035 spine</text>
+<text x="580" y="127" text-anchor="middle" font-size="9" fill="var(--muted)">reveal-grant / DSAR / shred gate</text>
+
+<defs>
+<marker id="id1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+</defs>
+</svg>
+
+<h3>Cluster 2 — DNS-rebinding-proof outbound fetch, two implementations of the same three layers</h3>
+<p>Samen's fail-honest adapters and <code>Samen.Delivery.Chokepoint</code> already take operator- or tenant-supplied URLs (webhook subscriptions, org verification, fleet heartbeat endpoints per ADR-044), and the digest doesn't record a rebinding-proof answer for any of them — Baudrate and vutuv both do, and they land on the identical three-layer shape independently. Layer one is a literal, no-DNS check safe to run inside a changeset — reject localhost/private/link-local/reserved ranges outright, and vutuv is explicit that this must also catch the cloud metadata IP (<code>169.254.169.254</code>). Layer two closes the gap layer one cannot: resolve the hostname's A/AAAA records at fetch time, because a public hostname can have a DNS record that resolves to an internal address — this is the actual SSRF defense, not the literal check. Layer three closes the TOCTOU window between layer two's lookup and the real connection: pin the outbound connection to the exact IP just validated and set the Host header manually, so there is no second DNS lookup for an attacker to race or poison. Baudrate names this "ADR-0007" and applies it to every outbound POST including Web Push; vutuv's version (<code>Vutuv.Ssrf</code>) goes one step further, using the vetted-address pin to drive a headless-browser screenshot fetch through a loopback SOCKS5 proxy that dials only that address, covering redirects and in-page navigation too. Both make the resolver injectable for deterministic tests. This is a clean fit for samen's existing chokepoint discipline (`Samen.Delivery.Chokepoint`, the AI egress chokepoint) — one client, enforced by a verifier that no module calls `Req` directly outside it, exactly the "one place to audit" shape samen already applies elsewhere. Baudrate additionally specs a bounded hostile-fetch walk (≤N hops, ≤M distinct hosts, visited-URI cycle guard, rate limits keyed on the target host as well as the sender) for the day samen agents or link-unfurl features fetch attacker-influenced URLs.</p>
+
+<svg viewBox="0 0 700 200" style="width:100%;max-width:700px;height:auto" role="img" aria-labelledby="ssrf-title">
+<title id="ssrf-title">Three-layer SSRF-safe outbound fetch: literal private-range check, DNS-rebinding check at fetch time, and connection pinned to the vetted IP, feeding samen's Delivery Chokepoint</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">BAUDRATE + VUTUV -&gt; SSRF-SAFE EGRESS (3 LAYERS)</text>
+
+<rect x="10" y="40" width="150" height="60" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="85" y="58" text-anchor="middle" font-size="10">1. Literal check</text>
+<text x="85" y="72" text-anchor="middle" font-size="9" fill="var(--muted)">reject private/loopback/</text>
+<text x="85" y="84" text-anchor="middle" font-size="9" fill="var(--muted)">link-local, incl. metadata IP</text>
+
+<path d="M160,70 L200,70" stroke="var(--accent)" fill="none" marker-end="url(#sf1)"/>
+
+<rect x="200" y="40" width="150" height="60" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="275" y="58" text-anchor="middle" font-size="10">2. Resolve at fetch</text>
+<text x="275" y="72" text-anchor="middle" font-size="9" fill="var(--muted)">catches DNS rebinding —</text>
+<text x="275" y="84" text-anchor="middle" font-size="9" fill="var(--muted)">public host, internal record</text>
+
+<path d="M350,70 L390,70" stroke="var(--accent)" fill="none" marker-end="url(#sf1)"/>
+
+<rect x="390" y="40" width="150" height="60" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="465" y="58" text-anchor="middle" font-size="10">3. Pin connection</text>
+<text x="465" y="72" text-anchor="middle" font-size="9" fill="var(--muted)">connect to vetted IP,</text>
+<text x="465" y="84" text-anchor="middle" font-size="9" fill="var(--muted)">set Host header — no 2nd lookup</text>
+
+<path d="M540,70 L580,70" stroke="var(--accent)" fill="none" marker-end="url(#sf1)"/>
+
+<rect x="580" y="40" width="110" height="60" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="635" y="63" text-anchor="middle" font-size="10">samen</text>
+<text x="635" y="78" text-anchor="middle" font-size="10">Delivery</text>
+<text x="635" y="93" text-anchor="middle" font-size="10">Chokepoint</text>
+
+<text x="10" y="140" font-size="9" fill="var(--muted)">Baudrate: applies to every outbound POST incl. Web Push · one HTTPClient module (ADR-0007)</text>
+<text x="10" y="158" font-size="9" fill="var(--muted)">vutuv: same 3 layers + loopback SOCKS5 proxy pin for headless-screenshot fetches (Vutuv.Ssrf)</text>
+<text x="10" y="176" font-size="9" fill="var(--muted)">verifier target: no module calls Req directly outside the chokepoint (AST lint)</text>
+
+<defs>
+<marker id="sf1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+</defs>
+</svg>
+
+<h3>Cluster 3 — Bonfire's Boundaries model as the design reference for G28</h3>
+<p>Samen's open RBAC-granularity gap (G28) currently has org-scope + role as its only sharing primitive; saved_views and support/CRM objects will eventually want per-record or per-group sharing. Bonfire's Boundaries system is the most battle-tested Elixir implementation of exactly that shape: named user-defined <em>circles</em> crossed with <em>verbs</em> (read, reply, like, quote, mention, edit) crossed with a three-valued grant (Yes / No / Nil), resolved most-restrictive-first — an explicit No always wins, Nil falls through to the next rule, and preset boundaries (public, local, follows, mentions) plus role bundles compile down to ordinary grants. The resolution semantics map cleanly onto Ash policy checks the way samen already composes `OrgScope` + `PiiResolution` — steal the model, not the code (AGPL-3.0). A scoped pilot (a circle resource + grant check inside existing Ash policies for one surface, e.g. saved_views) is <span class="effort">M</span>; generalizing it substrate-wide is <span class="effort">L</span>.
+
+Bonfire contributes two smaller, unrelated ideas worth noting alongside it. Its Epics pattern — pipeline steps declared as config data so any extension package can insert or wrap a step in another extension's workflow without editing it — is a useful review lens on samen's ADR-039 automation engine (Action registry → Compile → Reactor): the automation engine already covers execution, but Epics demonstrates the *authoring* seam samen's `Automation.Compile` should have if it doesn't already, so verticals like driftwood or pawchart can insert acts into a substrate-owned flow purely via config (<span class="effort">S</span> to audit the seam, <span class="effort">M</span> to add config-driven step injection). And its operator plane mounts Phoenix LiveDashboard plus an Oban queue monitor behind admin auth — a cheap, dependency-light addition that complements samen's ops-hardening workstream (WS-L, G11 metrics/alerts) (<span class="effort">S</span>).</p>
+
+<svg viewBox="0 0 640 190" style="width:100%;max-width:640px;height:auto" role="img" aria-labelledby="acl-title">
+<title id="acl-title">Bonfire's Boundaries grant resolution: circles times verbs produce a Yes, No, or Nil grant, resolved most-restrictive-first with No overriding Yes and Nil falling through, feeding an Ash policy check</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">BONFIRE BOUNDARIES -&gt; GRANT RESOLUTION (most-restrictive-first)</text>
+
+<rect x="10" y="40" width="120" height="42" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="70" y="65" text-anchor="middle" font-size="10">circle × verb</text>
+
+<path d="M130,61 L180,61" stroke="var(--accent)" fill="none" marker-end="url(#ac1)"/>
+
+<rect x="180" y="30" width="90" height="34" rx="6" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="225" y="52" text-anchor="middle" font-size="10">No</text>
+<rect x="180" y="68" width="90" height="34" rx="6" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="225" y="90" text-anchor="middle" font-size="10">Yes</text>
+<rect x="180" y="106" width="90" height="34" rx="6" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="225" y="128" text-anchor="middle" font-size="10">Nil (fall through)</text>
+
+<text x="290" y="52" font-size="9" fill="var(--muted)">No &gt; Yes &gt; Nil</text>
+<path d="M270,47 L340,80" stroke="var(--accent)" fill="none" marker-end="url(#ac1)"/>
+<path d="M270,85 L340,85" stroke="var(--accent)" fill="none" marker-end="url(#ac1)"/>
+<path d="M270,123 L340,90" stroke="var(--muted)" stroke-dasharray="4 3" fill="none" marker-end="url(#ac2)"/>
+
+<rect x="340" y="60" width="150" height="50" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="415" y="80" text-anchor="middle" font-size="10">resolved grant</text>
+<text x="415" y="95" text-anchor="middle" font-size="9" fill="var(--muted)">design ref for G28</text>
+
+<path d="M490,85 L540,85" stroke="var(--accent)" fill="none" marker-end="url(#ac1)"/>
+
+<rect x="540" y="62" width="90" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="585" y="80" text-anchor="middle" font-size="10">Ash policy</text>
+<text x="585" y="95" text-anchor="middle" font-size="9" fill="var(--muted)">check</text>
+
+<defs>
+<marker id="ac1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+<marker id="ac2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<div class="grid">
+
+<div class="card">
+<h4><a href="https://github.com/hiroshiyui/baudrate">Baudrate</a> <span class="badge badge-medium">medium</span></h4>
+<p>ActivityPub-federated BBS on Phoenix/LiveView/Postgres with Rust NIFs for untrusted parsing — plain Ecto contexts, no Ash, no Oban. AGPL-3.0, single maintainer, 22-ADR security doc set, Wallaby e2e, notably itself an AI-authored codebase with committed CLAUDE.md/AGENTS.md.</p>
+<p><strong>Adopt:</strong> the SSRF-pinned egress client (Cluster 2, <span class="effort">M</span>); operator sudo mode / step-up reverification (Cluster 1, <span class="effort">S</span>–<span class="effort">M</span>); WebAuthn via wax_ (Cluster 1, <span class="effort">M</span>); first-run claim gate — setup-key-gated `/setup`, 503 until complete, guard duplicated in LiveView `mount/3` since websocket bypasses the plug, never enforced via a `runtime.exs` raise (<span class="effort">S</span>, directly template-able into `mix samen.gen.app`); rate-limiter failure-mode doctrine — Hammer fails open, `RealIp`/trusted-proxies fails closed (<span class="effort">S</span>); progressive per-account login delay over hard lockout (<span class="effort">S</span>); session-token hygiene — SHA-256-hashed tokens, dual token + 24h rotation (<span class="effort">S</span> each, verify what samen already has first); total-i18n discipline as the enforceable-convention playbook for G24 (no bare user-visible strings, gettext interpolation only, locales kept in sync — doctrine is <span class="effort">S</span> to write down, retrofit is <span class="effort">L</span>).</p>
+<p><strong>Skip:</strong> ActivityPub federation itself; the DB-backed delivery queue (right call for a single-node BBS, wrong once Oban is pinned); Rust NIFs (contradicts samen's no-NIF posture); config-keyed vault encryption (samen's per-subject-KMS vault is already stronger). AGPL-3.0 — patterns only, clean-room reimplementation, never code.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/bonfire-networks/bonfire-app">Bonfire</a> <span class="badge badge-medium">medium</span></h4>
+<p>NGI/EC-funded toolkit for federated digital spaces, composed from per-feature extension repos into deployable "flavours." Phoenix + LiveView + Surface, plain Ecto (not Ash) via the Needle universal-pointer layer, Oban, GraphQL, Meilisearch. AGPL-3.0, ~933★, actively maintained.</p>
+<p><strong>Adopt:</strong> the Boundaries three-valued ACL model as the design reference for G28 (Cluster 3, <span class="effort">M</span> scoped pilot / <span class="effort">L</span> substrate-wide); the Epics config-declared pipeline as a review lens on the ADR-039 automation engine's extensibility seam (Cluster 3, <span class="effort">S</span> audit / <span class="effort">M</span> to build); LiveDashboard + Oban queue monitor under the operator plane (Cluster 3, <span class="effort">S</span>); release-channel discipline (stable/RC/beta/alpha tags) if samen ever ships `mix samen.gen.app` outputs to external builders (<span class="effort">S</span>, docs only).</p>
+<p><strong>Skip:</strong> the Needle universal-pointer data layer (trades away referential integrity and would fight samen's Ash resources and verifiers — samen's `object_ref` + catalog already solve this); ActivityPub federation and the whole social domain; separate-repo-per-extension modularity (contradicts ADR-033's in-monorepo distribution); LiveAdmin's raw DB browser (exactly what mask-by-default forbids); Meilisearch, Surface UI, GraphQL, Co-op Cloud/Guix deploy paths. AGPL-3.0 — steal the model, never the code.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/tskovlund/kammer">Kammer</a> <span class="badge badge-medium">medium</span></h4>
+<p>Self-hosted community platform ("Facebook Groups for associations") on Phoenix 1.8/Ecto with a Svelte PWA frontend, Oban, Docker Compose. AGPL-3.0, pre-v1, tiny audience but strikingly disciplined: 29 ADRs, Credo strict + Dialyzer + coverage floors, Playwright e2e — and notably authored primarily by Claude working autonomously on the issue queue, the same development religion samen applies to itself.</p>
+<p><strong>Adopt:</strong> step-up reauth as a credential-scoped token property (Cluster 1, <span class="effort">M</span>); passkeys via wax_ (Cluster 1, <span class="effort">M</span>); three-tier settings precedence — DB-backed admin UI overlaid by boot-validated env (rate limits, token lifetimes) overlaid by non-configurable module-attribute security constants, "security footguns shouldn't hide behind runtime knobs" — plus its first-run wizard, setup token printed to server logs (<span class="effort">M</span> doctrine + settings resource, <span class="effort">S</span> wizard on top of existing onboarding); email privacy mode — an instance-level switch stripping content from notification emails so substantive content never transits third-party ESPs, a `content_minimal` variant of the Delivery Chokepoint (<span class="effort">S</span>); `sobelow` + `mix_audit` added to the CI gate, closing a supply-chain/OWASP lane samen's bespoke verifiers don't cover (<span class="effort">S</span>); i18n + timezone existence proof (gettext + `tz`) validating the G24 library set already confirmed elsewhere in this scan (<span class="effort">L</span> for the retrofit, libraries now de-risked).</p>
+<p><strong>Skip:</strong> all code verbatim (AGPL-3.0); the Svelte PWA migration (samen is LiveView-committed); domain features — feeds, polls, sealed groups, decisions register; presets-not-ACLs (right for a consumer product, wrong once samen's Ash-policy + reveal-grant model is the differentiator); the plain-Ecto context architecture.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://framagit.org/framasoft/mobilizon">Mobilizon</a> <span class="badge badge-medium">medium</span></h4>
+<p>Framasoft's federated event/group platform — Elixir/Phoenix API-first behind a Vue SPA + Absinthe GraphQL, PostGIS, Oban, Guardian JWT + wide Ueberauth matrix. Mature (~6,900 commits, 91 releases, active since 2017). AGPL-3.0-or-later, no Ash, authorization via a forked GraphQL middleware rather than a policy engine.</p>
+<p><strong>Adopt:</strong> the extracted `geospatial` hex package — a pluggable `Provider` behaviour (Nominatim, Addok, Photon, Mimirsbrunn…) swapped by one config line — as the shape for a `Samen.Geo.Provider` INV-4 adapter package with fail-honest `{:error, :not_configured}` skeletons (<span class="effort">S</span>–<span class="effort">M</span>); tokenized private ICS feed URLs as a distinct revocable-credential class layered on samen's existing ICS support and grant/audit machinery (<span class="effort">S</span>); web push (`web_push_encryption`, VAPID) as a third notification channel behind the Delivery Chokepoint (<span class="effort">M</span>); one named rich-text sanitize chokepoint (`fast_sanitize` + Floki + `linkify`) for any scope with user-authored markup — cms, docs, chat, support (<span class="effort">S</span>); `ex_cldr` + `tz_world`/`tzdata` as a further-validated G24 library set, including the timezone-from-lat/long trick any calendar scope eventually needs (<span class="effort">M</span> library adoption, <span class="effort">L</span> full gettext sweep); anonymous, capability-token, email-confirmed participation as a pattern for end-customer-facing verticals like pawchart booking (<span class="effort">M</span>, only when a vertical needs it).</p>
+<p><strong>Skip:</strong> ActivityPub federation and instance moderation/relays; Absinthe GraphQL + Vue SPA + Dataloader + `rajska` authz (would fork samen's deny-by-default JSON:API + Ash-policy authz story); Guardian JWT + the wide Ueberauth OAuth matrix (samen's assent-based ADR-035 spine is stronger and already vaulted); PostGIS (heavyweight until a vertical needs radius search). No multi-tenancy, no masking/vault, no policy engine, no verification harness — domain reference only, not a substrate reference.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/wintermeyer/vutuv">vutuv</a> <span class="badge badge-medium">medium</span></h4>
+<p>Self-hostable federated professional network ("LinkedIn of the Fediverse"), MIT-licensed, ~90 top-level context modules of plain Ecto/Phoenix (no Ash), Bandit, LiveView, Tailwind v4, a reference production install (vutuv.de). Active daily development, 334★, last push same-day as this scan.</p>
+<p><strong>Adopt:</strong> the three-layer SSRF module (Cluster 2, <span class="effort">S</span>–<span class="effort">M</span>); passkeys via wax_, never a root of trust (Cluster 1, <span class="effort">M</span>); a versioned DSAR self-serve export registry (`@schema_version` with an inline changelog, required to stay in lockstep with `delete_user/1`) for the open G19 gap — samen's catalog and `pii_declared` metadata could auto-derive most of it (<span class="effort">M</span>); a member-facing account-activity log complementing samen's hash-chained audit — a *declared* vocabulary of event kinds with a build-time test that fails if any `details` key looks like a credential, emails masked at write time rather than read time, no IP stored, and admin reads of a member's log themselves logged as an event on the admin's own account (<span class="effort">S</span>); a blue/green deploy script as a concrete worked example of the invariants samen's Fly production deploy (currently operator-TODO) needs — backward-compatible migrations, health-gated cutover, single-flight lock, careful cleanup-on-abort (<span class="effort">S</span> to read as reference, <span class="effort">M</span> to adapt); bounce-driven deliverability state — hard-bounce ledger, address marked undeliverable, account frozen only after repeated failures, auto-thaw on next successful login — as an optional `samen_core` capability feeding the ESP adapters (<span class="effort">M</span>); the same real bilingual gettext + `ex_cldr` + `ex_phone_number` + `tz` (compiled into the release, no runtime network) stack as a third production-proven G24 reference (<span class="effort">L</span>, own ADR + phased items per the decompose-cross-cutting-changes convention).</p>
+<p><strong>Skip:</strong> the entire product surface — profiles, follows, DMs, job board, CV export, organization pages; ActivityPub/Fediverse federation and Bluesky bridging; the moderation strike ladder and reporter trust scoring (no analogous surface today); the single-node ETS rate limiter, explicitly weaker than samen's already-pinned `ash_rate_limiter` + Hammer combination; ads/newsletter/CV-export subsystems; German-Impressum-law-specific legal pages.</p>
+</div>
+
+</div>
+
+<p class="verdict">Net read: nothing in this cluster is vendorable at the code level (four of five AGPL, only vutuv MIT), so its value is entirely as hardened design reference for problems samen already has open gaps against. Two convergences carry the most weight because independent teams solving unrelated problems landed on the same answer: <code>wax_</code> passkeys plus credential-scoped step-up reauth (Baudrate, Kammer, vutuv) directly fills the missing rung on ADR-035's identity spine and hands samen ready trigger points — reveal-grant approval, DSAR export, crypto-shred initiation; and the three-layer SSRF-safe egress pattern (Baudrate, vutuv) closes an unaddressed DNS-rebinding gap in the webhook/AI-egress chokepoints with a design that composes directly with samen's existing "one place to audit" discipline. Bonfire's Boundaries model is the strongest single design reference for the open G28 RBAC gap, sized to a cheap scoped pilot before any substrate-wide commitment. Everything else — Mobilizon's geocoder behaviour and sanitize chokepoint, vutuv's DSAR export and activity log, Kammer's config-tier doctrine and email privacy mode — is <span class="effort">S</span>–<span class="effort">M</span> reference material that closes named, already-tracked gaps (G19, G24, G28) rather than opening new scope. Effort clusters low across the board; the one <span class="effort">L</span> item (i18n) is cross-cutting by nature and already flagged for the ADR-plus-phased-items treatment elsewhere in this scan.</p>
+
+</section>

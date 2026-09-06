@@ -1,0 +1,1020 @@
+{
+  "projects": [
+    {
+      "index": 0,
+      "name": "AlexClaw",
+      "slug": "alexclaw",
+      "url": "https://github.com/thatsme/AlexClaw",
+      "description": "Personal AI agent with workflows, memory, local-model support, and chat-platform control. `Apache-2.0`.",
+      "category": "AI and Agents"
+    },
+    {
+      "index": 1,
+      "name": "Ankole",
+      "slug": "ankole",
+      "url": "https://github.com/AgentBull/ankole",
+      "description": "AI workforce and agent operating system with durable execution and an operator console. `Apache-2.0`.",
+      "category": "AI and Agents"
+    },
+    {
+      "index": 2,
+      "name": "Fermix",
+      "slug": "fermix",
+      "url": "https://github.com/tezra-io/fermix",
+      "description": "Local personal-agent daemon with browser setup, plugins, memory, and chat-platform connections. `MIT`.",
+      "category": "AI and Agents"
+    },
+    {
+      "index": 3,
+      "name": "Glorbo",
+      "slug": "glorbo",
+      "url": "https://github.com/foobarto/glorbo",
+      "description": "Agent orchestration platform with Linux sandboxes, approvals, audit records, memory, and a LiveView dashboard. `MIT OR Apache-2.0`.",
+      "category": "AI and Agents"
+    },
+    {
+      "index": 4,
+      "name": "Long",
+      "slug": "long",
+      "url": "https://github.com/mjason/long",
+      "description": "LAN-first LLM agent runtime with a web interface, memory, scheduled tasks, and platform bots. `MIT`.",
+      "category": "AI and Agents"
+    },
+    {
+      "index": 5,
+      "name": "OSA",
+      "slug": "osa",
+      "url": "https://github.com/Miosa-osa/OSA",
+      "description": "Local coding and general-purpose agent with a terminal interface, tools, memory, MCP, sandboxes, and subagents. `Apache-2.0`.",
+      "category": "AI and Agents"
+    },
+    {
+      "index": 6,
+      "name": "Pepe",
+      "slug": "pepe",
+      "url": "https://github.com/pepe-agent/pepe",
+      "description": "Agent runtime with a CLI, LiveView dashboard, APIs, tools, skills, delegation, and chat-platform connections. `MIT`.",
+      "category": "AI and Agents"
+    },
+    {
+      "index": 7,
+      "name": "Shem",
+      "slug": "shem",
+      "url": "https://github.com/thephilip/shem",
+      "description": "Agent platform with a flight recorder, time-travel debugger, tool packs, TUI, and web interface. `Apache-2.0`.",
+      "category": "AI and Agents"
+    },
+    {
+      "index": 8,
+      "name": "Vibe",
+      "slug": "vibe",
+      "url": "https://github.com/elixir-vibe/vibe",
+      "description": "Local coding agent with a TUI, LiveView console, tools, memory, plugins, and subagents. `MIT`.",
+      "category": "AI and Agents"
+    },
+    {
+      "index": 9,
+      "name": "ZAQ",
+      "slug": "zaq",
+      "url": "https://github.com/www-zaq-ai/zaq",
+      "description": "Collaborative agent operating system with workflows, tools, MCP connections, knowledge management, and a LiveView control panel. `AGPL-3.0`.",
+      "category": "AI and Agents"
+    },
+    {
+      "index": 10,
+      "name": "Buster Claw",
+      "slug": "buster-claw",
+      "url": "https://github.com/hightowerbuilds/buster-claw",
+      "description": "Desktop command, memory, browser, integration, and audit surface for external coding agents. `PolyForm-Shield-1.0.0`; not OSI-approved.",
+      "category": "Agent Platforms With License Warnings"
+    },
+    {
+      "index": 11,
+      "name": "Codex Pooler",
+      "slug": "codex-pooler",
+      "url": "https://github.com/icoretech/codex-pooler",
+      "description": "Self-hosted Codex gateway with team accounts, API keys, sessions, and an operator dashboard. `Elastic-2.0`; not OSI-approved.",
+      "category": "Agent Platforms With License Warnings"
+    },
+    {
+      "index": 12,
+      "name": "CYFR",
+      "slug": "cyfr",
+      "url": "https://github.com/cyfrworks/cyfr",
+      "description": "Self-hosted policy, sandbox, permission, and execution control plane for AI agents. The core uses `Apache-2.0`, and the Sanctum subsystem uses `FSL-1.1-Apache-2.0`, which is not OSI-approved until its future conversion.",
+      "category": "Agent Platforms With License Warnings"
+    },
+    {
+      "index": 13,
+      "name": "Frontman",
+      "slug": "frontman",
+      "url": "https://github.com/frontman-ai/frontman",
+      "description": "Browser-attached AI coding agent that uses live application context to edit source files and preview changes. The server uses `AGPL-3.0-only` with additional AI-use restrictions that are not OSI-approved; client libraries use `Apache-2.0`.",
+      "category": "Agent Platforms With License Warnings"
+    },
+    {
+      "index": 14,
+      "name": "JidoBuilder",
+      "slug": "jidobuilder",
+      "url": "https://github.com/TMDLRG/JidoBuilder",
+      "description": "Visual console for building, configuring, deploying, and monitoring Jido agents. `PolyForm-Noncommercial-1.0.0`; not OSI-approved.",
+      "category": "Agent Platforms With License Warnings"
+    },
+    {
+      "index": 15,
+      "name": "jido-conductor",
+      "slug": "jido-conductor",
+      "url": "https://github.com/jmanhype/jido-conductor",
+      "description": "Early desktop interface for managing and orchestrating Jido agents. The README states MIT, but the repository has no license file.",
+      "category": "Agent Platforms With License Warnings"
+    },
+    {
+      "index": 16,
+      "name": "Neoharness",
+      "slug": "neoharness",
+      "url": "https://github.com/Neofox/neoharness",
+      "description": "Personal-agent runtime with tools, memory, schedules, chat connections, and a LiveView interface. No license is stated.",
+      "category": "Agent Platforms With License Warnings"
+    },
+    {
+      "index": 17,
+      "name": "Camelot",
+      "slug": "camelot",
+      "url": "https://github.com/T0ha/camelot",
+      "description": "Self-hosted Kanban control plane for assigning approved tasks to Codex and Claude Code agents. `GPL-2.0`.",
+      "category": "Software Factories"
+    },
+    {
+      "index": 18,
+      "name": "ControlKeel",
+      "slug": "controlkeel",
+      "url": "https://github.com/aryaminus/controlkeel",
+      "description": "Control plane for policy gates, findings, proofs, and evaluations in AI-assisted software development. `Apache-2.0`.",
+      "category": "Software Factories"
+    },
+    {
+      "index": 19,
+      "name": "Genesis",
+      "slug": "genesis",
+      "url": "https://github.com/EMI-Group/genesis",
+      "description": "Desktop system for long-running autonomous software development and transformation. `AGPL-3.0`.",
+      "category": "Software Factories"
+    },
+    {
+      "index": 20,
+      "name": "Hive",
+      "slug": "hive",
+      "url": "https://github.com/tuist/hive",
+      "description": "Agentic product-development system with GitHub and Slack integration. `MPL-2.0`.",
+      "category": "Software Factories"
+    },
+    {
+      "index": 21,
+      "name": "Loomkin",
+      "slug": "loomkin",
+      "url": "https://github.com/pass-agent/loomkin",
+      "description": "Multi-agent development workspace with persistent decision memory, approvals, skills, and a LiveView mission-control interface. `MIT`.",
+      "category": "Software Factories"
+    },
+    {
+      "index": 22,
+      "name": "Loopyard",
+      "slug": "loopyard",
+      "url": "https://github.com/loopyard/loopyard",
+      "description": "Multiplayer software factory with isolated Docker workspaces, concurrent coding agents, shared terminals, and durable review decisions. `AGPL-3.0-or-later`.",
+      "category": "Software Factories"
+    },
+    {
+      "index": 23,
+      "name": "Maestro",
+      "slug": "maestro",
+      "url": "https://github.com/joosure/Maestro",
+      "description": "Task-driven engineering platform for Codex, Claude Code, CodeBuddy Code, and OpenCode. `AGPL-3.0-only`.",
+      "category": "Software Factories"
+    },
+    {
+      "index": 24,
+      "name": "Pixir",
+      "slug": "pixir",
+      "url": "https://github.com/Ranvier-Technologies/pixir",
+      "description": "Coding-agent runtime for supervised subagents, workflows, tool execution, and replayable evidence logs. `MIT`.",
+      "category": "Software Factories"
+    },
+    {
+      "index": 25,
+      "name": "Shep",
+      "slug": "shep",
+      "url": "https://github.com/craigruks/shep",
+      "description": "Worktree-based orchestrator that turns labeled GitHub issues into CI-verified pull requests. `MIT`.",
+      "category": "Software Factories"
+    },
+    {
+      "index": 26,
+      "name": "Symphony",
+      "slug": "symphony",
+      "url": "https://github.com/openai/symphony",
+      "description": "Experimental system for running coding agents from project tasks and verifying their work. `Apache-2.0`.",
+      "category": "Software Factories"
+    },
+    {
+      "index": 27,
+      "name": "Agent Harness",
+      "slug": "agent-harness",
+      "url": "https://github.com/nyelbangash/agent-harness",
+      "description": "Always-on coding-agent system with a LiveView mission-control dashboard, safety controls, and GitHub issue automation. No license is stated.",
+      "category": "Software Factories With License Warnings"
+    },
+    {
+      "index": 28,
+      "name": "Codrift",
+      "slug": "codrift",
+      "url": "https://github.com/filipecabaco/codrift",
+      "description": "Desktop and MCP control panel for agent initiatives, worktrees, shared memory, and integrations. The README states MIT, but the repository has no license file.",
+      "category": "Software Factories With License Warnings"
+    },
+    {
+      "index": 29,
+      "name": "Conductor",
+      "slug": "conductor",
+      "url": "https://github.com/dangeranger/conductor",
+      "description": "Coding-agent harness that turns Linear issues into isolated Codex workspaces with an optional LiveView dashboard. No license is stated.",
+      "category": "Software Factories With License Warnings"
+    },
+    {
+      "index": 30,
+      "name": "Svärm",
+      "slug": "sv-rm",
+      "url": "https://github.com/svarm-dev/svarm",
+      "description": "Self-hosted coding-agent control plane for tickets, approvals, and run costs. `FSL-1.1-MIT`; not OSI-approved until its future conversion.",
+      "category": "Software Factories With License Warnings"
+    },
+    {
+      "index": 31,
+      "name": "Jido",
+      "slug": "jido",
+      "url": "https://github.com/agentjido/jido",
+      "description": "Distributed autonomous-agent framework with signals, actions, workflows, and OTP-native execution. `Apache-2.0`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 32,
+      "name": "Agens",
+      "slug": "agens",
+      "url": "https://github.com/jessedrelick/agens",
+      "description": "OTP components for reliable multi-agent LLM workflows. `Apache-2.0`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 33,
+      "name": "AgentForge",
+      "slug": "agentforge",
+      "url": "https://github.com/i365dev/agent_forge",
+      "description": "Signal-driven workflow framework for intelligent and adaptive systems. `MIT`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 34,
+      "name": "Alloy",
+      "slug": "alloy",
+      "url": "https://github.com/alloy-ex/alloy",
+      "description": "Model-independent agent harness for Elixir applications. `MIT`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 35,
+      "name": "Avalon",
+      "slug": "avalon",
+      "url": "https://github.com/elixir-avalon/avalon",
+      "description": "Standardization framework for agentic workflows in Elixir. `Apache-2.0`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 36,
+      "name": "BeamWeaver",
+      "slug": "beamweaver",
+      "url": "https://github.com/caudena/beam_weaver",
+      "description": "Framework for traceable agents, graph workflows, tools, memory, approvals, and streaming. `Apache-2.0`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 37,
+      "name": "Cantrip",
+      "slug": "cantrip",
+      "url": "https://github.com/deepfates/cantrip",
+      "description": "Extensible multi-agent environment with delegation, gates, storage, and sandbox options. `MIT`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 38,
+      "name": "Condukt",
+      "slug": "condukt",
+      "url": "https://github.com/tuist/condukt",
+      "description": "Library and standalone engine for agentic workflows, tools, and sandboxed execution. `MIT`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 39,
+      "name": "ElGraph",
+      "slug": "elgraph",
+      "url": "https://github.com/showjihyun/ElGraph",
+      "description": "Graph-first agent framework with durable execution, approvals, checkpoints, MCP, and an observability interface. `MIT`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 40,
+      "name": "Jido Studio",
+      "slug": "jido-studio",
+      "url": "https://github.com/agentjido/jido_studio",
+      "description": "Embeddable LiveView dashboard for managing and debugging Jido agents. `Apache-2.0`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 41,
+      "name": "LangChain for Elixir",
+      "slug": "langchain-for-elixir",
+      "url": "https://github.com/brainlid/langchain",
+      "description": "Framework for adding LLMs, tools, chains, and agents to Elixir applications. `Apache-2.0`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 42,
+      "name": "Legion",
+      "slug": "legion",
+      "url": "https://github.com/software-mansion-labs/legion",
+      "description": "Runtime-agent framework with tool modules, agent delegation, approvals, persistence, and sandboxes. `MIT`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 43,
+      "name": "LegionWeb",
+      "slug": "legionweb",
+      "url": "https://github.com/software-mansion-labs/legion_web",
+      "description": "Embeddable LiveView dashboard for Legion agent activity and execution traces. `MIT`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 44,
+      "name": "Lemon",
+      "slug": "lemon",
+      "url": "https://github.com/z80dev/lemon",
+      "description": "BEAM-native agent platform with pluggable engines, channels, memory, tools, and a reference runtime. `MIT`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 45,
+      "name": "LLMAgent",
+      "slug": "llmagent",
+      "url": "https://github.com/i365dev/llm_agent",
+      "description": "Abstraction for domain-specific LLM agents built on AgentForge. `MIT`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 46,
+      "name": "Nous",
+      "slug": "nous",
+      "url": "https://github.com/nyo16/nous",
+      "description": "Agent framework with multiple model providers, tools, memory, workflows, teams, approvals, and LiveView integration. `Apache-2.0`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 47,
+      "name": "Sagents",
+      "slug": "sagents",
+      "url": "https://github.com/sagents-ai/sagents",
+      "description": "Interactive-agent framework with OTP supervision, approvals, subagents, and LiveView integration. `Apache-2.0`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 48,
+      "name": "Synapse",
+      "slug": "synapse",
+      "url": "https://github.com/nshkrdotcom/synapse",
+      "description": "Headless multi-agent orchestration framework with signals, workflows, persistence, and audit records. `MIT`.",
+      "category": "Agent Frameworks and Development Tools"
+    },
+    {
+      "index": 49,
+      "name": "Plausible Analytics",
+      "slug": "plausible-analytics",
+      "url": "https://github.com/plausible/analytics",
+      "description": "Privacy-focused web analytics without cookies. `AGPL-3.0`.",
+      "category": "Analytics"
+    },
+    {
+      "index": 50,
+      "name": "Lightning",
+      "slug": "lightning",
+      "url": "https://github.com/OpenFn/lightning",
+      "description": "Workflow automation and data integration platform from OpenFn. `LGPL-3.0`.",
+      "category": "Automation and Data"
+    },
+    {
+      "index": 51,
+      "name": "Sequin",
+      "slug": "sequin",
+      "url": "https://github.com/sequinstream/sequin",
+      "description": "PostgreSQL change-data capture for streams, queues, search indexes, and webhooks. `MIT`.",
+      "category": "Automation and Data"
+    },
+    {
+      "index": 52,
+      "name": "Supabase Realtime",
+      "slug": "supabase-realtime",
+      "url": "https://github.com/supabase/realtime",
+      "description": "WebSocket server for PostgreSQL changes, broadcast messages, and presence. `Apache-2.0`.",
+      "category": "Automation and Data"
+    },
+    {
+      "index": 53,
+      "name": "Accent",
+      "slug": "accent",
+      "url": "https://github.com/mirego/accent",
+      "description": "Translation management for software teams. `BSD-3-Clause`.",
+      "category": "Business and Collaboration"
+    },
+    {
+      "index": 54,
+      "name": "Claper",
+      "slug": "claper",
+      "url": "https://github.com/ClaperCo/Claper",
+      "description": "Live audience questions, polls, and presentations. `AGPL-3.0`.",
+      "category": "Business and Collaboration"
+    },
+    {
+      "index": 55,
+      "name": "Craftplan",
+      "slug": "craftplan",
+      "url": "https://github.com/puemos/craftplan",
+      "description": "Order, inventory, and production management for small manufacturing businesses. `AGPL-3.0`.",
+      "category": "Business and Collaboration"
+    },
+    {
+      "index": 56,
+      "name": "Mindwendel",
+      "slug": "mindwendel",
+      "url": "https://github.com/b310-digital/mindwendel",
+      "description": "Collaborative brainstorming and idea prioritization. `AGPL-3.0`.",
+      "category": "Business and Collaboration"
+    },
+    {
+      "index": 57,
+      "name": "nyght",
+      "slug": "nyght",
+      "url": "https://gitlab.com/nyght/nyght",
+      "description": "Event, staff, ticket, and schedule management for music venues. `AGPL-3.0-only`.",
+      "category": "Business and Collaboration"
+    },
+    {
+      "index": 58,
+      "name": "Operately",
+      "slug": "operately",
+      "url": "https://github.com/operately/operately",
+      "description": "Company goals, projects, and operating processes. The core uses Apache-2.0, and optional enterprise files use a separate license. `Apache-2.0`.",
+      "category": "Business and Collaboration"
+    },
+    {
+      "index": 59,
+      "name": "Tymeslot",
+      "slug": "tymeslot",
+      "url": "https://github.com/Tymeslot/tymeslot",
+      "description": "Meeting scheduling with booking pages and calendar synchronization. `AGPL-3.0`.",
+      "category": "Business and Collaboration"
+    },
+    {
+      "index": 60,
+      "name": "Wraft",
+      "slug": "wraft",
+      "url": "https://github.com/wraft/wraft",
+      "description": "Document lifecycle management and structured document generation. `AGPL-3.0`.",
+      "category": "Business and Collaboration"
+    },
+    {
+      "index": 61,
+      "name": "Akkoma",
+      "slug": "akkoma",
+      "url": "https://akkoma.dev/AkkomaGang/akkoma",
+      "description": "Federated microblogging server compatible with ActivityPub. `AGPL-3.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 62,
+      "name": "Baudrate",
+      "slug": "baudrate",
+      "url": "https://github.com/hiroshiyui/baudrate",
+      "description": "ActivityPub-enabled bulletin board system with threaded discussions and moderation. `AGPL-3.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 63,
+      "name": "BBoard",
+      "slug": "bboard",
+      "url": "https://codeberg.org/fungal/bboard",
+      "description": "Forum and bulletin board with a production release and system service configuration. `EUPL-1.2`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 64,
+      "name": "Bonfire",
+      "slug": "bonfire",
+      "url": "https://github.com/bonfire-networks/bonfire-app",
+      "description": "Modular federated social and community platform. `AGPL-3.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 65,
+      "name": "Comcent CE",
+      "slug": "comcent-ce",
+      "url": "https://github.com/comcent-io/comcent-ce",
+      "description": "Voice contact center with browser calling, queues, recordings, transcripts, and webhooks. `AGPL-3.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 66,
+      "name": "Foglet BBS",
+      "slug": "foglet-bbs",
+      "url": "https://github.com/bmanturner/foglet-bbs",
+      "description": "SSH-first bulletin board system with forums, chat rooms, mail, and door games. `Apache-2.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 67,
+      "name": "Inkwell",
+      "slug": "inkwell",
+      "url": "https://github.com/stantondev/inkwell",
+      "description": "Federated social journaling and community platform based on ActivityPub. `AGPL-3.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 68,
+      "name": "Kammer",
+      "slug": "kammer",
+      "url": "https://github.com/tskovlund/kammer",
+      "description": "Community platform for associations, clubs, and other real-world groups. `AGPL-3.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 69,
+      "name": "Kazarma",
+      "slug": "kazarma",
+      "url": "https://gitlab.com/technostructures/kazarma/kazarma",
+      "description": "Bridge for communication between Matrix and ActivityPub networks. `AGPL-3.0-only`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 70,
+      "name": "Keila",
+      "slug": "keila",
+      "url": "https://github.com/pentacent/keila",
+      "description": "Newsletter creation and email campaign management. `AGPL-3.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 71,
+      "name": "Lanyard",
+      "slug": "lanyard",
+      "url": "https://github.com/Phineas/lanyard",
+      "description": "REST and WebSocket service for Discord presence data. `MIT`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 72,
+      "name": "linkhut",
+      "slug": "linkhut",
+      "url": "https://git.sr.ht/~mlb/linkhut",
+      "description": "Social bookmarking service with imports, exports, feeds, and an API. `AGPL-3.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 73,
+      "name": "LIV",
+      "slug": "liv",
+      "url": "https://github.com/derek-zhou/liv",
+      "description": "Webmail designed for use on your own email server. `AGPL-3.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 74,
+      "name": "Mobilizon",
+      "slug": "mobilizon",
+      "url": "https://framagit.org/kaihuri/mobilizon",
+      "description": "Federated event and group management platform. `AGPL-3.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 75,
+      "name": "Myconet",
+      "slug": "myconet",
+      "url": "https://codeberg.org/myconet/myconet",
+      "description": "ActivityPub social network designed for users to own and host their data. `EUPL-1.2`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 76,
+      "name": "Philomena",
+      "slug": "philomena",
+      "url": "https://github.com/philomena-dev/philomena",
+      "description": "Imageboard platform for organizing, discussing, and sharing images. `AGPL-3.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 77,
+      "name": "Pleroma",
+      "slug": "pleroma",
+      "url": "https://git.pleroma.social/pleroma/pleroma",
+      "description": "Lightweight federated microblogging server compatible with ActivityPub. `AGPL-3.0`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 78,
+      "name": "vutuv",
+      "slug": "vutuv",
+      "url": "https://github.com/wintermeyer/vutuv",
+      "description": "Federated professional social network. `MIT`.",
+      "category": "Communication and Social"
+    },
+    {
+      "index": 79,
+      "name": "Soundbored",
+      "slug": "soundbored",
+      "url": "https://github.com/christomitov/soundbored",
+      "description": "Self-hosted Discord soundboard with sound uploads, browser playback controls, voice-channel automation, and an authenticated API. No license is stated.",
+      "category": "Communication and Social With License Warnings"
+    },
+    {
+      "index": 80,
+      "name": "AlchemyPub",
+      "slug": "alchemypub",
+      "url": "https://codeberg.org/j4nk/alchemy_pub",
+      "description": "Server-side Markdown publishing and presentation application. `Apache-2.0`.",
+      "category": "Content Management and Publishing"
+    },
+    {
+      "index": 81,
+      "name": "Nivose",
+      "slug": "nivose",
+      "url": "https://codeberg.org/Nivose/nivose",
+      "description": "Content management system with Docker Compose and release deployment options. `AGPL-3.0`.",
+      "category": "Content Management and Publishing"
+    },
+    {
+      "index": 82,
+      "name": "asciinema server",
+      "slug": "asciinema-server",
+      "url": "https://github.com/asciinema/asciinema-server",
+      "description": "Platform for hosting and sharing terminal session recordings. `Apache-2.0`.",
+      "category": "Developer Tools"
+    },
+    {
+      "index": 83,
+      "name": "Azimutt",
+      "slug": "azimutt",
+      "url": "https://github.com/azimuttapp/azimutt",
+      "description": "Database schema exploration, documentation, and analysis. `MIT`.",
+      "category": "Developer Tools"
+    },
+    {
+      "index": 84,
+      "name": "Code::Stats",
+      "slug": "code-stats",
+      "url": "https://gitlab.com/code-stats/code-stats",
+      "description": "Programming activity and experience-point tracking service. `BSD-3-Clause`.",
+      "category": "Developer Tools"
+    },
+    {
+      "index": 85,
+      "name": "GitBlixt",
+      "slug": "gitblixt",
+      "url": "https://gitblixt.com/gitblixt/gitblixt",
+      "description": "Git hosting and collaboration forge built with Phoenix LiveView. `AGPL-3.0`.",
+      "category": "Developer Tools"
+    },
+    {
+      "index": 86,
+      "name": "Harpoon",
+      "slug": "harpoon",
+      "url": "https://github.com/aschiavon91/harpoon",
+      "description": "Webhook receiver and request inspector. `MIT`.",
+      "category": "Developer Tools"
+    },
+    {
+      "index": 87,
+      "name": "Livebook",
+      "slug": "livebook",
+      "url": "https://github.com/livebook-dev/livebook",
+      "description": "Collaborative notebooks for code, data, automation, and machine learning. `Apache-2.0`.",
+      "category": "Developer Tools"
+    },
+    {
+      "index": 88,
+      "name": "Notesclub",
+      "slug": "notesclub",
+      "url": "https://github.com/notesclub/notesclub",
+      "description": "Discovery and indexing service for public Livebook notebooks. `MIT`.",
+      "category": "Developer Tools"
+    },
+    {
+      "index": 89,
+      "name": "OpenCov",
+      "slug": "opencov",
+      "url": "https://github.com/danhper/opencov",
+      "description": "Test-coverage history viewer. `MIT`.",
+      "category": "Developer Tools"
+    },
+    {
+      "index": 90,
+      "name": "RawPair",
+      "slug": "rawpair",
+      "url": "https://github.com/rawpair/rawpair",
+      "description": "Collaborative development environment with shared terminals and code editors. `MPL-2.0`.",
+      "category": "Developer Tools"
+    },
+    {
+      "index": 91,
+      "name": "Remit",
+      "slug": "remit",
+      "url": "https://github.com/barsoom/ex-remit",
+      "description": "Commit-by-commit code review application. `MIT`.",
+      "category": "Developer Tools"
+    },
+    {
+      "index": 92,
+      "name": "Semaphore",
+      "slug": "semaphore",
+      "url": "https://github.com/semaphoreio/semaphore",
+      "description": "Continuous integration and delivery platform. The Community Edition core uses Apache-2.0, and files under `ee/` use a separate commercial license. `Apache-2.0`.",
+      "category": "Developer Tools"
+    },
+    {
+      "index": 93,
+      "name": "Share a Secret",
+      "slug": "share-a-secret",
+      "url": "https://github.com/Flo0807/share-a-secret",
+      "description": "One-time secret sharing with expiration controls and a self-hosted web interface. `Apache-2.0`.",
+      "category": "Developer Tools"
+    },
+    {
+      "index": 94,
+      "name": "Listudy",
+      "slug": "listudy",
+      "url": "https://github.com/ArneVogel/listudy",
+      "description": "Chess training platform for openings, tactics, and spaced repetition. `AGPL-3.0`.",
+      "category": "Education"
+    },
+    {
+      "index": 95,
+      "name": "OLI Torus",
+      "slug": "oli-torus",
+      "url": "https://github.com/Simon-Initiative/oli-torus",
+      "description": "Course authoring and delivery platform with learning activities and analytics. `MIT`.",
+      "category": "Education"
+    },
+    {
+      "index": 96,
+      "name": "Codebattle",
+      "slug": "codebattle",
+      "url": "https://github.com/hexlet-codebattle/codebattle",
+      "description": "Multiplayer programming game with tournaments and algorithm challenges. `AGPL-3.0`.",
+      "category": "Games"
+    },
+    {
+      "index": 97,
+      "name": "Wanderer",
+      "slug": "wanderer",
+      "url": "https://github.com/wanderer-industries/wanderer",
+      "description": "Mapping and collaboration tool for EVE Online. `MIT`.",
+      "category": "Games"
+    },
+    {
+      "index": 98,
+      "name": "AetherS3",
+      "slug": "aethers3",
+      "url": "https://github.com/wizenink/aethers3",
+      "description": "Distributed S3-compatible object store that runs on the BEAM. `MIT`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 99,
+      "name": "Astarte",
+      "slug": "astarte",
+      "url": "https://github.com/astarte-platform/astarte",
+      "description": "IoT platform for device management, data collection, and application integration. `Apache-2.0`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 100,
+      "name": "Boruta Server",
+      "slug": "boruta-server",
+      "url": "https://github.com/malach-it/boruta-server",
+      "description": "OAuth, OpenID Connect, and identity management server. `Apache-2.0`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 101,
+      "name": "ExTracker",
+      "slug": "extracker",
+      "url": "https://github.com/Dahrkael/ExTracker",
+      "description": "BitTorrent tracker with Docker and Elixir release deployment options. `Apache-2.0`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 102,
+      "name": "FlyingDdns",
+      "slug": "flyingddns",
+      "url": "https://gitlab.com/timopallach/FlyingDdns",
+      "description": "Dynamic DNS service for PowerDNS with a web interface and API. `BSD-2-Clause`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 103,
+      "name": "Health",
+      "slug": "health",
+      "url": "https://codeberg.org/ppatrzyk/health",
+      "description": "Infrastructure and cron-job monitor with container and release deployment options. `AGPL-3.0`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 104,
+      "name": "Logflare",
+      "slug": "logflare",
+      "url": "https://github.com/Logflare/logflare",
+      "description": "Structured log ingestion, search, browser tailing, and OpenTelemetry service. `Apache-2.0`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 105,
+      "name": "Lynx",
+      "slug": "lynx",
+      "url": "https://github.com/Clivern/Lynx",
+      "description": "Remote state backend for Terraform. `MIT`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 106,
+      "name": "NervesHub",
+      "slug": "nerveshub",
+      "url": "https://github.com/nerves-hub/nerves_hub_web",
+      "description": "Firmware, update, and device-fleet management for Nerves devices. `Apache-2.0`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 107,
+      "name": "OCSF Schema Server",
+      "slug": "ocsf-schema-server",
+      "url": "https://github.com/ocsf/ocsf-server",
+      "description": "Web server for browsing and working with Open Cybersecurity Schema Framework schemas. `Apache-2.0`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 108,
+      "name": "Osmotic",
+      "slug": "osmotic",
+      "url": "https://github.com/ReifiedException/osmotic",
+      "description": "AI gateway for keys, quotas, spend controls, data protection, and audit records. `BSD-2-Clause`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 109,
+      "name": "Plural Console",
+      "slug": "plural-console",
+      "url": "https://github.com/pluralsh/console",
+      "description": "Kubernetes fleet-management control plane for GitOps, infrastructure-as-code automation, pull-request workflows, notifications, and AI-assisted operations. `AGPL-3.0` source; vendor-built binaries use `MIT`, and a Plural license is required.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 110,
+      "name": "Poxa",
+      "slug": "poxa",
+      "url": "https://github.com/edgurgel/poxa",
+      "description": "Standalone Pusher-compatible server for real-time applications. `MIT`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 111,
+      "name": "Runhyve Webapp",
+      "slug": "runhyve-webapp",
+      "url": "https://gitlab.com/runhyve/webapp",
+      "description": "Management interface for Runhyve hypervisors and virtual machines. `BSD-2-Clause`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 112,
+      "name": "ServiceRadar",
+      "slug": "serviceradar",
+      "url": "https://code.carverauto.dev/carverauto/serviceradar",
+      "description": "Network management, monitoring, and security analytics. `Apache-2.0`.",
+      "category": "Infrastructure and Operations"
+    },
+    {
+      "index": 113,
+      "name": "Ambry",
+      "slug": "ambry",
+      "url": "https://github.com/ambry-app/ambry",
+      "description": "Personal audiobook library and streaming server. `MIT`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 114,
+      "name": "Atlas",
+      "slug": "atlas",
+      "url": "https://github.com/dawarich-app/atlas",
+      "description": "Local-first offline map server based on OpenStreetMap data. `AGPL-3.0`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 115,
+      "name": "Cannery",
+      "slug": "cannery",
+      "url": "https://codeberg.org/shibao/cannery",
+      "description": "Firearm and ammunition inventory management application. `AGPL-3.0-or-later`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 116,
+      "name": "Charsh",
+      "slug": "charsh",
+      "url": "https://gitlab.com/owni.dev/charsh",
+      "description": "Detailed reference-sheet manager for fictional characters. `Apache-2.0`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 117,
+      "name": "Domovik",
+      "slug": "domovik",
+      "url": "https://github.com/domovikapp/domovik-server",
+      "description": "End-to-end encrypted synchronization for browser tabs, bookmarks, and reading lists. `AGPL-3.0`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 118,
+      "name": "Hacker News frontend",
+      "slug": "hacker-news-frontend",
+      "url": "https://codeberg.org/jorams/hacker-news",
+      "description": "Mobile-focused alternative web interface for Hacker News. `EUPL-1.2`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 119,
+      "name": "HydraSRT",
+      "slug": "hydrasrt",
+      "url": "https://github.com/streamband/hydra-srt",
+      "description": "Gateway for routing and managing SRT, UDP, and RTP video streams. `Apache-2.0`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 120,
+      "name": "Midarr",
+      "slug": "midarr",
+      "url": "https://github.com/midarrlabs/midarr-server",
+      "description": "Lightweight media server for video libraries. `MIT`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 121,
+      "name": "Mydia",
+      "slug": "mydia",
+      "url": "https://github.com/getmydia/mydia",
+      "description": "Movie and television library management platform. `AGPL-3.0`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 122,
+      "name": "Pinchflat",
+      "slug": "pinchflat",
+      "url": "https://github.com/kieraneglin/pinchflat",
+      "description": "YouTube media manager and downloader based on yt-dlp. `AGPL-3.0`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 123,
+      "name": "PodSync",
+      "slug": "podsync",
+      "url": "https://codeberg.org/jorams/pod-sync",
+      "description": "Single-user podcast synchronization server compatible with the Nextcloud GPodder Sync API. `EUPL-1.2`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 124,
+      "name": "Revix",
+      "slug": "revix",
+      "url": "https://github.com/curt/revix",
+      "description": "Personal location journal with ActivityPub federation. `AGPL-3.0`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 125,
+      "name": "TeslaMate",
+      "slug": "teslamate",
+      "url": "https://github.com/teslamate-org/teslamate",
+      "description": "Data logger and dashboard for Tesla vehicles. `AGPL-3.0`.",
+      "category": "Media and Personal"
+    },
+    {
+      "index": 126,
+      "name": "TRMNL BYOS Phoenix",
+      "slug": "trmnl-byos-phoenix",
+      "url": "https://github.com/usetrmnl/byos_phoenix",
+      "description": "Bring-your-own server for TRMNL e-paper display devices. `MIT`.",
+      "category": "Media and Personal"
+    }
+  ]
+}

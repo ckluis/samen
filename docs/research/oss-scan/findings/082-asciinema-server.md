@@ -1,0 +1,30 @@
+---
+project: asciinema server
+url: https://github.com/asciinema/asciinema-server
+category: Developer Tools
+relevance: low
+verdict: Same Elixir/Phoenix/Oban stack and a few solid ops patterns worth a look, but a single-tenant public recording-sharing site with no Ash, no multi-tenancy, no PII, and no billing — mostly wrong problem domain for samen.
+---
+
+# What the project is
+
+asciinema server is the platform behind asciinema.org: a Phoenix app for hosting and sharing terminal-session recordings (asciicast v3 format), with live streaming, an embeddable player, full-text search over titles/descriptions/session content, and privacy tiers (private/unlisted/public). It's an active, mature project (~2.5k stars, ~3,876 commits, "develop" branch is primary) written in Elixir 1.19+/OTP 28+, using Phoenix 1.8 / LiveView 1.2, with a Rust NIF (via `rustler`) embedding asciinema's `avt` virtual-terminal library for preview generation, recording analysis, and live-stream state bookkeeping. `lib/asciinema/` is organized into `accounts/`, `authorization.ex`, `streaming/`, `recordings/`, `file_store/` (+ `file_cache.ex`), `fts.ex` (full-text search), `emails/`, and `workers/`. It is a single-tenant public-sharing product, not a framework — no Ash, no org/tenant model, no PII vault, no billing engine.
+
+Key dependencies: `oban` + `oban_web` (background jobs + admin UI), `ex_aws`/`ex_aws_s3` (S3-backed storage), `horde` + `libcluster` (distributed process registry / clustering), `plug_attack` (rate limiting), `swoosh` + `gen_smtp` (mail), `sentry` (error tracking), `scrivener_ecto` (pagination), `remote_ip`, `rustler` (Rust NIFs), plain `ecto_sql`/`postgrex` (no Ash anywhere in the dependency tree).
+
+# What samen could adopt
+
+- **`file_store.ex` + `file_cache.ex` storage abstraction (local vs S3, with a caching layer in front).** Samen's WS-E gap explicitly lists a real `Storage.S3` implementation as still open (fail-honest skeleton only). asciinema-server's `file_store`/`file_cache` split is a concrete, production Elixir reference for the same shape: a behaviour-backed store swappable between local disk and `ex_aws_s3`, with a cache layer to avoid re-fetching. Worth reading before implementing samen's real S3 adapter. Effort: S (reference only, not a dependency to pull in — samen's fail-honest/chokepoint conventions still apply on top).
+- **`horde` + `libcluster` for BEAM clustering.** Samen's multi-node Oban proof (L4) is "proven locally only" per the gap register. asciinema-server runs `horde` (distributed, CRDT-backed process registry/supervisor) over `libcluster` in production for its live-streaming process bookkeeping — a real example of multi-node BEAM clustering that samen's own multi-node story could benchmark against, even though samen would likely stay on Oban's native peer/leader election rather than adopt Horde wholesale. Effort: S (research reference), M if actually piloted for a samen subsystem.
+- **`oban_web` as the operator-facing job dashboard.** Samen already depends on `ash_oban`; `oban_web` is a drop-in LiveView admin UI for queues/jobs that could sit inside samen's operator plane (control-plane workspace) for job visibility without hand-building one. Fits ADR-009's mountable-module pattern reasonably well. Effort: S.
+- **`plug_attack` as a second rate-limiting layer at the Plug/edge level.** Samen uses `ash_rate_limiter` + Hammer for auth/webhook ingress. `plug_attack` operates a layer lower (raw Plug pipeline, IP/user-agent heuristics, throttle rules composable before requests reach the router) — a pattern worth comparing against samen's current Hammer-backed ingress limiter, particularly for abuse patterns Hammer doesn't cover (e.g., per-IP crawling/scraping throttles). Effort: S.
+- **Postgres full-text search over large text bodies (`fts.ex`) indexing recording titles/descriptions/session transcripts.** Samen's own gap register flags "per-abbrev tsvector trigger/GIN index for search-at-scale" as an open WS-E follow-on. asciinema-server's `fts.ex` is a live example of a tsvector-based FTS module at production scale (search over potentially large terminal-session text) worth reading for indexing/trigger patterns before samen builds its own. Effort: S (reference read).
+
+# What to ignore and why
+
+- **The entire product surface**: asciicast recording/playback, live terminal streaming, the Rust `avt` NIF, player embedding, theme/font customization — none of this is SaaS-foundry-relevant; it's a single vertical consumer product, not infrastructure samen would mount.
+- **No multi-tenancy, no org model, no PII handling of any kind.** This is the single biggest domain gap: samen's actual differentiators (vault chokepoints, two-plane masking, token-blind aggregates, crypto-shred, reveal grants, hash-chained audit) have no analog here at all — asciinema-server is a public-sharing site with simple account ownership, not a tenant-isolation or privacy-governance system. There is nothing to adopt on samen's core moat.
+- **No Ash usage.** Everything is raw `Ecto`/`Ecto.Changeset`/Phoenix contexts. Any code-level pattern from this repo (schemas, changesets, contexts) would need a full re-derivation through Ash Resources to be usable in samen — not a copy-paste source.
+- **No billing, no approvals engine, no automation engine, no AI plane.** Samen's ADR-039/040/043/047 subsystems (automation, lifecycle, AI kernel, agent loop) have nothing comparable here to compare against or borrow from.
+- **Rustler/Rust NIF integration**: interesting engineering but solves a terminal-rendering performance problem samen doesn't have; adopting a Rust toolchain into samen's stack for this reason would add build/ops complexity with no corresponding samen need.
+- **Single-tenant identity model (plain user accounts, no org/membership, no roles beyond basic auth).** Samen's identity spine (ADR-035) is already substantially more complete (OIDC, TOTP, org/membership atomic creation, invites, session eviction) — nothing here is more advanced than what samen has.

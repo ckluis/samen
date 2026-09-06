@@ -1,0 +1,34 @@
+---
+project: BeamWeaver
+url: https://github.com/caudena/beam_weaver
+category: Agent Frameworks and Development Tools
+relevance: medium
+verdict: Do not adopt as a dependency (fails INV-4 and the same gate that rejected ash_ai/Jido), but it is the most complete LangGraph-in-Elixir port and worth mining for 4 concrete patterns — checkpoint pause/resume for approval-gated agent runs, typed stream envelopes for samen's deferred streaming, retry/fallback/call-limit middleware at the AI chokepoint, and record-manager incremental indexing for RAG.
+---
+
+# 036 — BeamWeaver
+
+## What the project is
+
+BeamWeaver (`caudena/beam_weaver`, Apache-2.0, v0.1.18) is an Elixir-native port of the LangChain + LangGraph + Deep Agents stack: module-DSL agents (`use BeamWeaver.Agent` with `tools do` / `middleware do` blocks), LangGraph-style graph workflows with reducers/subgraphs/commands, checkpoint-backed durable execution (ETS for dev, Ecto/Postgres-or-SQLite for prod) keyed by stable `thread_id`, time-travel replay and state forking from prior checkpoints, HITL interrupts resumable via `Graph.Compiled.resume/3` / `Agent.resume/3`, typed streaming (`%BeamWeaver.Stream.Envelope{}` exposed as Elixir Enumerables via `stream_events/3`), a middleware-as-data lifecycle system (module | struct | `{mod, opts}`; prebuilt ModelRetry, ToolRetry, ToolCallLimit, ToolSelection allow/deny, ModelFallback, DynamicPrompt, PII redaction, structured-output retry), Deep-Agents features (subagents, virtual filesystems, skills, planning/todo tools, sandboxes), a RAG pipeline (loaders, splitters, embeddings, vector stores, record managers, incremental indexing), and multi-provider model profiles (OpenAI, Anthropic, Gemini, DeepSeek, Grok, etc.) with checked-in family profiles and permissive fallbacks. Tracing is local-first run trees with telemetry, plus native export to WeaveScope — the maintainer's commercial observability SaaS, which is the project's evident funnel.
+
+Maturity: created 2026-06, actively pushed (2026-08-15), 46 stars, extensive GitBook-style docs (30+ guides), HTTP-cassette replay transports and fake models for deterministic tests. Hard deps: `ecto_sql`, `postgrex`, `req`, `finch`, `fastest_tiktoken` (Rust NIF), `yamerl`. Young (0.1.x) and single-vendor, but unusually well-documented for its age.
+
+## What samen could adopt
+
+Samen already hand-built its agent loop (ADR-047, zero new deps) and rejected ash_ai and Jido on structural grounds, so this is pattern-mining, not dependency adoption.
+
+1. **Checkpoint-backed pause/resume for approval-gated agent runs.** What: BeamWeaver compiles a graph/agent with a checkpointer and a stable `thread_id`; a HITL interrupt persists the run, and `resume/3` continues from the exact boundary after the human decision. Why it fits: samen's E3 approvals engine already gates AI side effects, but an agent run that hits an approval today has no first-class "suspend the loop, resume post-grant" seam — the checkpoint-at-tool-boundary + `resume/3` shape maps cleanly onto samen's Oban-backed loop and would let approvals interleave mid-run instead of terminating a run into a draft. Checkpoint rows carry only governed EG2 payloads (already re-scrubbed per turn), so it composes with the masking model. Effort: M.
+2. **Typed stream envelope for the deferred streaming lane.** What: `%BeamWeaver.Stream.Envelope{}` values surfaced as a plain Enumerable via `stream_events/3`. Why it fits: ADR-047 deferred streaming; when samen builds it, a typed envelope stream — with envelopes minted only after the masking chokepoint, mirroring `%MaskedPayload{}` — is the right shape (providers refuse raw chunks by pattern-match, same FunctionClauseError trick samen already uses). Effort: M.
+3. **Retry/fallback/call-limit middleware at the AI chokepoint.** What: prebuilt ModelRetry (transient-only, backoff), ToolRetry, ToolCallLimit, ModelFallback (ordered fallback models), ToolSelection allow/deny — all declared as plain data. Why it fits: samen's AI kernel has budgets/cost caps but (per the digest) no documented bounded-retry/model-fallback layer; a small fail-honest retry+fallback policy inside `Samen.AI`'s chokepoint (never in adapters) closes an ops-robustness gap without new deps. ToolCallLimit is a natural extra guard beside ADR-047 budgets. Effort: S–M.
+4. **Model-profile registry with permissive family fallbacks.** What: checked-in per-model-family profiles (context sizes, capabilities) plus permissive fallback matching for future model IDs. Why it fits: samen currently ships only `samen_anthropic`; when a second provider adapter lands, a data-driven profile registry in core (data only — HTTP stays in adapter packages, preserving INV-4) avoids re-litigating capability plumbing per provider and feeds the catalog/LLM-grounding story. Effort: S.
+5. **Record manager + incremental indexing for RAG.** What: a record-manager layer that tracks indexed document identity/hashes so re-indexing only touches changed content. Why it fits: samen has pgvector embeddings as required substrate and G22 (agent-grounding packaging for builders) still open; incremental indexing is the missing hygiene layer that keeps tenant knowledge bases cheap to re-embed, and it is pure Ecto/pgvector work with no new deps. Effort: M.
+6. **Time-travel replay/fork as an eval affordance.** What: continue or fork a run from any prior checkpoint with modified state. Why it fits: samen's red-team eval tier and sabotage culture would benefit from "replay this agent transcript from step N with a perturbed input" as a deterministic eval primitive; builds directly on item 1's checkpoints. Effort: L (only after item 1).
+
+## What to ignore and why
+
+- **BeamWeaver as a dependency.** Hard `req`/`finch`/`ecto_sql` deps would put vendor/HTTP code in core (INV-4 violation — the exact reason ash_ai was rejected); its own Ecto repo/migrations conflict with Ash-managed persistence; `fastest_tiktoken` is a Rust NIF (samen chose `simple_sat` specifically to avoid NIFs); and it has no chokepoint concept — tools and prompts take raw strings.
+- **Its PII redaction middleware.** Regex-based email/credit-card scrubbing is masking-by-policy, strictly weaker than samen's token-blind masking-by-construction; adopting it would be a regression in kind, not degree.
+- **WeaveScope trace export.** Vendor observability funnel; samen already has OpenTelemetry with `db_statement` disabled precisely so tokens never serialize into spans — a third-party trace sink is a new egress surface with no governing chokepoint.
+- **Virtual filesystem / shell tools and sandboxes.** Samen's tool egress is governed EG2 with approvals on side effects; ungoverned FS/shell tool access is counter to the model, and sandboxing is out of scope for a SaaS foundry's product plane.
+- **The agent module DSL itself.** Samen's `mix samen.gen.agent` + resource-based agents already own this surface; a second DSL adds nothing.

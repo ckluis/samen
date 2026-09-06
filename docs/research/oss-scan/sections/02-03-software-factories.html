@@ -1,0 +1,182 @@
+<section id="03-software-factories">
+<h2>Deep Dive: Software Factories &amp; Multi-Agent Dev Platforms</h2>
+
+<p>Eight self-hosted Elixir projects here are a different species from the agent-framework libraries in the previous section: none of them are runtime dependencies a product embeds. They are <strong>development-process tools</strong> — control planes that sit outside the product, delegating coding tasks to Claude Code, Codex, or similar CLI agents against a real repo, gating the result behind CI and a human merge. That makes them irrelevant to samen's product kernel (no PII vaulting, no multi-tenancy, no billing surface among any of them) but directly on-topic for two things samen already owns and is actively hardening: its own <code>_orch/</code> autonomous burn-down loop, and the in-product durable agent loop (ADR-047, BUILT, accepted 2026-08-17). All eight land the same verdict as the agent-framework set — pattern quarry, not dependency — for an added reason beyond the masking-chokepoint test: five of the eight ship under licenses samen's MIT posture can't vendor from at all (GPL-2.0, AGPL-3.0, MPL-2.0, FSL-1.1-MIT), so even the three that are MIT (Pixir, Shep) are being read here for design, not code.</p>
+
+<table class="quick-table">
+<thead>
+<tr><th>Project</th><th>License · shape</th><th>Headline pattern to mine</th><th>Effort</th><th>Relevance</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="https://github.com/T0ha/camelot">Camelot</a></td><td>GPL-2.0, same stack (Ash/Phoenix/Oban)</td><td>Session adoption after restart via tee-marker + reconciler</td><td><span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/aryaminus/controlkeel">ControlKeel</a></td><td>Apache-2.0, plain Ecto/SQLite</td><td>Findings→eval-candidate→benchmark promotion loop, budget circuit breakers</td><td><span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/EMI-Group/genesis">Genesis</a></td><td>AGPL-3.0, OTP umbrella</td><td>Per-model concurrency slot pools, graceful cancellation, monitor-driven reclaim</td><td><span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/tuist/hive">Hive</a></td><td>MPL-2.0, Tuist</td><td>"Flights" — durable, inspectable, resumable agent-run operator surface</td><td><span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/Ranvier-Technologies/pixir">Pixir</a></td><td>MIT, dev preview</td><td>Five-state checkpoint-status vocabulary + canonical/ephemeral event split</td><td><span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/craigruks/shep">Shep</a></td><td>MIT, ~3k LOC solo</td><td>"Green means a check reported" CI-verification honesty</td><td><span class="effort">S</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/openai/symphony">Symphony</a></td><td>Apache-2.0, OpenAI, 26.8k★</td><td>Formal poll→claim→dispatch→reconcile orchestrator spec + terminal-state taxonomy</td><td><span class="effort">L</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/svarm-dev/svarm">Svärm</a></td><td>FSL-1.1-MIT, same stack</td><td>Budget hard/hold modes routed through approvals + cost receipts + ROI dashboard</td><td><span class="effort">S</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+</tbody>
+</table>
+
+<h3>Cluster 1 — the tracker-driven orchestrator shape, for samen's own <code>_orch/</code> loop</h3>
+<p>Four of the eight independently converge on the identical service shape: a supervised process polls a source of truth (a tracker, a backlog file), <em>claims</em> exactly one item under a single-authority lock, prepares an isolated workspace, runs the coding agent inside it, verifies the result, and <em>reconciles</em> on restart by re-deriving state from the source rather than trusting in-memory history. Symphony's SPEC.md formalizes this most completely (claim state machine <code>Unclaimed → Claimed → Running → RetryQueued → Released</code>, restart recovery with no database — re-poll the tracker, reuse persisted workspaces); Shep implements a scrappier version of the same idea with GitHub labels literally <em>as</em> the state machine ("tracker-as-database": restart and re-learn the world from label positions, no Postgres/Redis/state file); Svärm wraps it in a <code>GenServer</code> poll over pluggable <code>Tracker</code>/<code>Runner</code>/<code>Provider</code> behaviours; ControlKeel runs a lighter-weight variant purely for verification (mine failures → draft eval candidates → human-gate promotion → auto-archive on results). This is the single most load-bearing finding in the section, because it maps onto a named samen pain point almost exactly: the <code>_orch/</code> loop today is session-driven and manually cranked (backlog.yaml + per-task handoffs run inside a human-launched Claude Code session), with documented failure modes — session-limit hits stranding an agent mid-task, serialized fan-outs, phase-gate tasks deadlocking when backgrounded instead of run foreground. All four projects prove the OTP idioms that would let BATON-style burn-downs run unattended between human phase gates: one GenServer authority owns claims (no two processes can double-claim an item), a supervisor tree owns each run's lifecycle, and restart recovery costs nothing extra because the backlog file — already samen's source of truth — is re-read, not reconstructed from process memory. The honest scoping: building the full service is <span class="effort">L</span>; a thin <code>mix samen.orch.tick</code> implementing just poll→claim→dispatch against the existing <code>backlog.yaml</code> is <span class="effort">M</span> and captures most of the value.</p>
+
+<svg viewBox="0 0 720 260" style="width:100%;max-width:720px;height:auto" role="img" aria-labelledby="orch-title">
+<title id="orch-title">Tracker-driven orchestrator cycle shared by Symphony, Shep, Svärm, and ControlKeel: poll, claim, isolate, run, verify, reconcile — restart re-derives state from the tracker, never from process memory</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">POLL -&gt; CLAIM -&gt; DISPATCH -&gt; RECONCILE (Symphony, Shep, Svärm, ControlKeel)</text>
+
+<rect x="10" y="40" width="110" height="42" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="65" y="58" text-anchor="middle" font-size="11">Poll source</text>
+<text x="65" y="72" text-anchor="middle" font-size="10" fill="var(--muted)">backlog.yaml</text>
+<path d="M120,61 L166,61" stroke="var(--accent)" fill="none" marker-end="url(#c1)"/>
+
+<rect x="166" y="40" width="110" height="42" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="221" y="58" text-anchor="middle" font-size="11">Claim (1 item)</text>
+<text x="221" y="72" text-anchor="middle" font-size="10" fill="var(--muted)">single authority</text>
+<path d="M276,61 L322,61" stroke="var(--accent)" fill="none" marker-end="url(#c1)"/>
+
+<rect x="322" y="40" width="120" height="42" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="382" y="58" text-anchor="middle" font-size="11">Isolated workspace</text>
+<text x="382" y="72" text-anchor="middle" font-size="10" fill="var(--muted)">worktree / sandbox</text>
+<path d="M442,61 L488,61" stroke="var(--accent)" fill="none" marker-end="url(#c1)"/>
+
+<rect x="488" y="40" width="100" height="42" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="538" y="58" text-anchor="middle" font-size="11">Run agent</text>
+<path d="M588,61 L634,61" stroke="var(--accent)" fill="none" marker-end="url(#c1)"/>
+
+<rect x="634" y="40" width="76" height="42" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="672" y="58" text-anchor="middle" font-size="11">Verify</text>
+
+<path d="M672,82 L672,140 L221,140 L221,82" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#c2)"/>
+<text x="447" y="132" text-anchor="middle" font-size="10" fill="var(--muted)">on restart: re-poll source, re-derive claims — no process-memory trust</text>
+
+<rect x="166" y="150" width="220" height="50" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="276" y="170" text-anchor="middle" font-size="11">Reconcile</text>
+<text x="276" y="186" text-anchor="middle" font-size="10" fill="var(--muted)">restart-safe, no extra DB required</text>
+
+<text x="10" y="230" font-size="10" fill="var(--muted)">samen's gap: this cycle is hand-run inside human-launched Claude Code sessions today —</text>
+<text x="10" y="245" font-size="10" fill="var(--muted)">a supervised GenServer authority removes session-limit stranding and fan-out serialization pain</text>
+
+<defs>
+<marker id="c1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+<marker id="c2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<h3>Cluster 2 — durable run-lifecycle taxonomy, for ADR-047's in-product agent loop</h3>
+<p>A second cluster targets not samen's own dev process but the agent loop it ships inside products. ADR-047 already has budgets, cost caps, and transcript retention, but per the digest it has no liveness watchdog and no vocabulary richer than pass/fail for a run that stops partway. Four projects supply exactly that missing vocabulary, and they agree closely enough to read as one design: Symphony's run-attempt states (<code>Succeeded | Failed | TimedOut | Stalled | CanceledByReconciliation</code>) name two outcomes samen's RunRecord allowlist doesn't — <em>stalled</em> (no events within a timeout) and <em>canceled-by-reconciliation</em> (the underlying work item changed state out from under the run); Genesis's cancellation path distinguishes graceful (mark <code>:cancelling</code>, give the agent three full turns to wind down, auto-commit recovered state, terminal status <code>:cancelled</code> with a result) from forced (immediate kill, terminal status <code>:failed</code> with a nil result) — never letting a forced kill masquerade as a clean stop; Camelot's session-adoption reconciler solves the orthogonal problem of a run that finished correctly but the supervising process didn't survive to record it (tee output to a durable file, write an exit-code marker only after the tee completes, and on boot a pure <code>recovery_action/4</code> decides adopt-vs-fail per orphaned session, re-attaching without re-running); Pixir's <code>checkpoint_status</code> vocabulary (<code>checkpoint_ready | partial | failed | held | needs_orchestrator</code>) adds the "partial-but-usable vs partial-but-blocking" distinction that samen's Automation engine's bounded-outcome RunRecord lacks today, with a <code>dependent_safe</code> flag gating whether downstream steps may consume a partial result. Read together, these close the exact gap the "resume re-runs only the stragglers" fan-out memory names: a durable-marker-plus-reconciler discipline lets a resumed session <em>adopt</em> completed-but-unharvested work rather than re-executing it.</p>
+
+<svg viewBox="0 0 700 210" style="width:100%;max-width:700px;height:auto" role="img" aria-labelledby="states-title">
+<title id="states-title">Terminal-state taxonomy assembled from Symphony, Genesis, Camelot, and Pixir: a running agent step ends in one of six honestly-distinguished states, never a generic pass/fail</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">RUNNING AGENT STEP -&gt; HONEST TERMINAL STATES</text>
+
+<rect x="10" y="80" width="110" height="42" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="65" y="98" text-anchor="middle" font-size="11">Running</text>
+<text x="65" y="112" text-anchor="middle" font-size="10" fill="var(--muted)">turn N</text>
+
+<path d="M120,90 L180,40" stroke="currentColor" fill="none" marker-end="url(#d1)"/>
+<rect x="180" y="16" width="120" height="34" rx="7" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="240" y="38" text-anchor="middle" font-size="10">Succeeded</text>
+
+<path d="M120,95 L180,74" stroke="currentColor" fill="none" marker-end="url(#d1)"/>
+<rect x="180" y="58" width="120" height="34" rx="7" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="240" y="80" text-anchor="middle" font-size="10">Failed</text>
+
+<path d="M120,101 L180,101" stroke="currentColor" fill="none" marker-end="url(#d1)"/>
+<rect x="180" y="84" width="120" height="34" rx="7" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="240" y="106" text-anchor="middle" font-size="10">Cancelled (graceful, has result)</text>
+
+<path d="M120,108 L180,128" stroke="currentColor" fill="none" marker-end="url(#d1)"/>
+<rect x="180" y="110" width="120" height="34" rx="7" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="240" y="132" text-anchor="middle" font-size="10">Stalled (silent, timeout)</text>
+
+<path d="M120,113 L180,162" stroke="currentColor" fill="none" marker-end="url(#d1)"/>
+<rect x="180" y="144" width="120" height="34" rx="7" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="240" y="166" text-anchor="middle" font-size="10">Canceled-by-reconciliation</text>
+
+<rect x="340" y="58" width="180" height="34" rx="7" fill="var(--card-bg)" stroke="var(--accent)"/>
+<text x="430" y="80" text-anchor="middle" font-size="10">Checkpoint: ready / partial / held</text>
+<path d="M300,75 L340,75" stroke="var(--accent)" fill="none" marker-end="url(#d2)"/>
+
+<rect x="340" y="110" width="180" height="34" rx="7" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="430" y="132" text-anchor="middle" font-size="10">Adopted-on-restart (Camelot)</text>
+<path d="M300,127 L340,127" stroke="var(--muted)" fill="none" marker-end="url(#d3)"/>
+
+<text x="10" y="195" font-size="10" fill="var(--muted)">samen's gap: RunRecord allowlist today has no stalled / adopted-on-restart / partial-but-usable states</text>
+
+<defs>
+<marker id="d1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="currentColor"/></marker>
+<marker id="d2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+<marker id="d3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<h3>Cluster 3 — cost governance and operator visibility</h3>
+<p>A third theme, less architecturally novel but directly fundable, is turning ADR-047's existing budgets/cost caps from a blunt cutoff into a governed, visible economic layer. Svärm's <code>hard</code>-vs-<code>hold</code> budget modes are the sharpest single idea: instead of a silent refusal when a cap is hit, <code>hold</code> parks the run and routes it through the same E3 approvals engine samen already has (requester ≠ approver, enforced in policy and DB-CHECK) — composing two existing subsystems instead of building a third. ControlKeel adds the layer above cutoffs: rolling 24-hour budget windows (not just per-run totals), preflight estimate-and-block, circuit breakers on burn <em>rate</em> and consecutive-failure rate (not just absolute spend), cached-token accounting, and allowlisted capture of provider rate-limit headers (<code>anthropic-ratelimit-*</code>, <code>retry-after</code>) — all describable, honestly, as "records telemetry, does not pretend to throttle," the same fail-honest framing samen already applies to its adapters. Genesis's per-model concurrency slot pools (capacity from config profiles, agents block on saturation, a <code>PeakHourEngine</code> that swaps capacity by IANA-timezone window) is the fleet-scale sibling of the same governance problem. On the visibility side, Svärm posts append-only cost receipts to each run (tokens, model, estimated USD, explicitly labeled "estimated") and a merge-rate/$-per-outcome ROI dashboard; Hive's Inference gateway meters billable usage per model binding at its relay chokepoint; both are read-model work over data samen's chokepoint already has — they feed the roadmap's open usage-rating gap with real numbers rather than requiring a new instrumentation point. Hive's "Flights" — durable, inspectable, resumable agent executions launched from a domain object, listed and filtered per-user — is the cleanest reference for the operator-plane surface all of this cost and state data should render into: a fleet-cockpit view of agent runs, not a raw log tail.</p>
+
+<h3>The eight, in detail</h3>
+
+<div class="grid">
+
+<div class="card">
+<h4><a href="https://github.com/T0ha/camelot">Camelot</a> <span class="badge badge-medium">medium</span></h4>
+<p>GPL-2.0, ~10★/247 commits, actively developed. A Kanban control plane for Claude Code/Codex agents built on <strong>exactly samen's stack</strong> — Phoenix 1.8, Ash 3.0 + AshPostgres + ash_oban, Oban, LiveView 1.1. Tasks move through a 6-stage state machine with human-approved plans and a pluggable runner backend (LocalPort/Docker Engine/Docker Swarm).</p>
+<p><strong>Adopt:</strong> the headless-Claude-Code <em>planning output contract</em> — a schema-validated <code>StructuredOutput</code> tool with a 7-level fallback parser, guaranteeing a question always persists a message and a plan is never scraped from the last transcript turn — hardens any future <code>_orch/</code> planning step against exactly the class of bug it documents (ExitPlanMode not registering in headless mode). Session adoption after restart (see Cluster 2) is the other headline item. <span class="effort">M</span></p>
+<p>Why it fits: same-stack idioms transplant almost verbatim as design, and it is direct prior art for reattaching to completed-but-unharvested work instead of re-running stranded agents — a named samen pain point.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/aryaminus/controlkeel">ControlKeel</a> <span class="badge badge-medium">medium</span></h4>
+<p>Apache-2.0, ~11★/1,283 commits, single author, actively developed with CI/release automation. A governance control plane between agent hosts (Claude, Codex, Copilot, OpenCode) and production: deterministic pre-mutation scanning (median 52ms), decision lineage, precedent retrieval, cost governance. Plain Ecto on embedded SQLite, not Ash.</p>
+<p><strong>Adopt:</strong> the findings→eval-candidate→benchmark promotion loop (Cluster 1) mined from real agent-loop transcripts, human-gated into samen's existing red-team eval tier (≥90% bar, ADR-043); policy-version stamping on approval/reveal audit rows so historical decisions replay against the ruleset in force at the time; the budget circuit breakers from Cluster 3. <span class="effort">M</span></p>
+<p>Why it fits: grows samen's eval corpus from production behavior rather than hand-authored candidates, and the decision-lineage idea makes compliance answers mechanical rather than reconstructed.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/EMI-Group/genesis">Genesis</a> <span class="badge badge-medium">medium</span></h4>
+<p>AGPL-3.0 + CLA, Elixir ~1.18/OTP 29 umbrella, 38★ but 5,314 commits — unusually mature OTP engineering for its size. Spawns transient LLM agents in recursive hierarchies, each in a fresh git worktree; only validated results advance the repo's "accepted version" lineage. Headline demo: a 248,989-line Rust C compiler built from empty in 123.4h for $44.38.</p>
+<p><strong>Adopt:</strong> per-model concurrency slot pools with peak-hour scheduling and graceful-vs-forced cancellation semantics (Clusters 2–3), plus monitor-driven workspace reclaim (<code>Process.monitor(agent_pid)</code>, idempotent cleanup on <code>:DOWN</code>) as the OTP-native pattern for any samen scratch resource — export staging, generated-app probes — that should be reclaimed by monitor rather than cron sweep. <span class="effort">M</span></p>
+<p>Why it fits: independently converges on samen's own "AI outputs are proposals; only accepted results advance the persistent lineage" stance, and the cancellation/reclaim mechanics are directly portable OTP idioms, not domain-specific code.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/tuist/hive">Hive</a> <span class="badge badge-medium">medium</span></h4>
+<p>MPL-2.0, ~7★/300 commits, early-stage but built by Tuist, a credible Elixir team. A "product-development system" — Forage (inbound signals), Specs, Domains, Drops (releases), and Flights (durable agent executions), all Phoenix 1.8/LiveView 1.1/Postgres/Oban, delegating agent runtime to Condukt.</p>
+<p><strong>Adopt:</strong> "Flights" as the operator-plane surface pattern for agent runs (Cluster 3) — typed objective/outcome vocabulary, list/filter/inspect UI, launchable from a domain object; the Slack-message/alert → structured item → agent-run pipeline is a concrete design for the open product-feedback-to-roadmap gap. <span class="effort">M</span></p>
+<p>Why it fits: it is the one project in this set that ships the missing UI layer, not just the missing mechanism — read models over agent-loop records samen's kernel already persists, no new kernel work required.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/Ranvier-Technologies/pixir">Pixir</a> <span class="badge badge-medium">medium</span></h4>
+<p>MIT, developer preview — 21★/~24 commits, explicitly unstable as a library API, but backed by 39 unusually thorough ADRs. An OTP-supervised runtime for coding agents (Claude Code presenters, Zed ACP clients) whose philosophy — "summaries are not evidence; local logs and artifacts are" — reads as unusually samen-shaped.</p>
+<p><strong>Adopt:</strong> the five-state checkpoint-status vocabulary (Cluster 2) and the canonical-vs-ephemeral event-log split — streaming deltas broadcast for UI but never persisted, only canonical events get monotonic seq and fold into history, failures are dedicated <code>turn_failed</code> events, salvaged partial text is explicitly flagged. Both are near-zero-cost design inputs to ADR-047's deferred streaming work. <span class="effort">M</span></p>
+<p>Why it fits: pre-solves the dedup/replay trap for AI streaming while keeping transcripts append-only and crypto-shreddable — exactly the shape samen's own transcript retention (ADR-046) needs.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/craigruks/shep">Shep</a> <span class="badge badge-medium">medium</span></h4>
+<p>MIT, ~3,000 LOC, single maintainer, 0★ but 71 commits and 166 no-mock integration tests. Turns GitHub issues labeled <code>shep</code> into CI-verified PRs: a single-GenServer error kernel, Port-per-agent under a Task.Supervisor, tracker-as-database (no Postgres/Redis/state file at all).</p>
+<p><strong>Adopt:</strong> "green means a check reported" — require a named CI check to have actually reported, treat no-report-within-grace as failure, poll mergeability and treat un-mergeable PRs as red (GitHub builds no check suite for those). Also the two-phase verify-then-PR loop with capped fix turns, feeding failure logs back into the same agent session before any PR exists. <span class="effort">S</span></p>
+<p>Why it fits: closes a real false-green hole in exactly the fail-honest style samen already verifies mechanically elsewhere — cheap to encode as a rule in <code>_orch/</code> prompts plus a small <code>gh</code>-based check script alongside <code>verify.sh</code>.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/openai/symphony">Symphony</a> <span class="badge badge-medium">medium</span></h4>
+<p>Apache-2.0, OpenAI, ~26.8k★ — "a low-key engineering preview for testing in trusted environments," not a finished product. Ships a language-agnostic formal spec (SPEC.md) plus an OTP reference implementation: Phoenix LiveView dashboard, Burrito executables, hot code reloading without stopping running subagents.</p>
+<p><strong>Adopt:</strong> the full poll→claim→dispatch→reconcile orchestrator spec (Cluster 1, the section's headline finding) and its claim/run-attempt terminal-state taxonomy (Cluster 2); also worth lifting as small standalone rules: strict prompt-template rendering (unknown variables/filters MUST fail — samen's Prompt resource wants this today), and blocked-state surfacing (a run waiting on approval stays claimed and visible in state/API/dashboard, rather than disappearing into a queue). <span class="effort">L</span></p>
+<p>Why it fits: samen's dev loop already <em>is</em> this shape, just manually cranked — Symphony proves the exact OTP idioms (one GenServer claim authority, supervisor-per-run, restart recovery from source-of-truth with no extra DB) that would let BATON-style burn-downs run unattended between human phase gates. Full service is L; a thin poll→claim→dispatch slice against <code>backlog.yaml</code> is M.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/svarm-dev/svarm">Svärm</a> <span class="badge badge-medium">medium</span></h4>
+<p>FSL-1.1-MIT (converts to MIT after two years, not OSI-approved today), v0.1.5, 1★/132 commits — an early solo project on <strong>exactly samen's stack</strong> (Elixir 1.20+/OTP 29, Phoenix LiveView). A gatekeeper for external coding agents: preflight checks, per-ticket isolated workspaces, humans keep the merge button.</p>
+<p><strong>Adopt:</strong> budget <code>hold</code> mode routed through E3 approvals instead of a silent refusal (Cluster 3, the section's sharpest single idea — composes two subsystems samen already has); per-run cost receipts as first-class, honestly-labeled ledger entries; a bounded mid-run pause-for-human-Q&amp;A step kind (ask, wait ≤N minutes, fail honest to <code>{:error, :no_human_response}</code> on timeout) that extends "AI writes do not exist" to ambiguity mid-run instead of forcing abort-or-guess. <span class="effort">S</span></p>
+<p>Why it fits: same-stack idioms transplant directly, and every item above is a composition of subsystems samen already ships (budgets, E3 approvals, hash-chained audit) rather than new infrastructure — the cheapest cluster in this section to actually build.</p>
+</div>
+
+</div>
+
+<p class="verdict">Net read for a product leader skimming only this section: none of the eight are dependency candidates — five carry licenses (GPL-2.0, AGPL-3.0, MPL-2.0, FSL-1.1-MIT) that forbid vendoring outright, and even the two MIT entrants (Pixir, Shep) are pre-1.0/single-maintainer projects better read as design documents than supply chain. The value clusters into three funded-looking work items: (1) a supervised, tracker-driven orchestrator service for samen's own <code>_orch/</code> loop — independently proven by four projects, and the direct fix for stranded-agent and serialized-fan-out pain that's already on record; (2) an honest terminal-state taxonomy (stalled, adopted-on-restart, partial-but-usable) for ADR-047's in-product agent loop, assembled from four projects that converge tightly enough to read as one design; (3) budget <code>hold</code>-mode-via-approvals plus cost receipts, the single cheapest win in the section since it composes subsystems samen already ships. Effort clusters at <span class="effort">S</span>–<span class="effort">M</span>, with one <span class="effort">L</span> (Symphony's full orchestrator service, though a thin M-sized slice captures most of the value).</p>
+
+</section>

@@ -1,0 +1,164 @@
+<section id="02-agent-frameworks-orchestration">
+<h2>Deep Dive: Agent Frameworks &amp; Orchestration Libraries</h2>
+
+<p>Eight self-hosted Elixir agent frameworks cleared the bar for <span class="badge badge-medium">medium</span> relevance, and every one of them lands the same verdict: not a dependency, but a pattern quarry. Samen already BUILT its own agent loop (ADR-047, accepted 2026-08-17, zero new dependencies) after evaluating and rejecting ash_ai and Jido (ADR-037) for the same structural reason — none of them route prompt assembly through a masking chokepoint. All eight projects here fail that identical test: their LLM adapters accept raw strings rather than a chokepoint-minted <code>%MaskedPayload{}</code>, most pull ReqLLM or an equivalent multi-provider client (and therefore vendor/HTTP deps) toward what would become <code>samen_core</code>, violating INV-4, and two (Condukt, Cantrip's optional container runner) lean on Rust NIFs samen deliberately avoids. None of that makes them uninteresting — three ship real production engineering (BeamWeaver, Cantrip, Lemon), one is from a serious shop (Legion, Software Mansion Labs), and collectively they converge on the same handful of mechanisms samen's own gap register is missing. The value is entirely in mining those mechanisms, not in the libraries themselves.</p>
+
+<table class="quick-table">
+<thead>
+<tr><th>Project</th><th>Shape</th><th>Headline pattern to mine</th><th>Effort</th><th>Relevance</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="https://github.com/alloy-ex/alloy">Alloy</a></td><td>MIT, 81★, dependency-light harness</td><td><code>until_tool</code> terminal-proposal pattern + block/edit middleware seam</td><td><span class="effort">S</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/caudena/beam_weaver">BeamWeaver</a></td><td>Apache-2.0, LangGraph-in-Elixir port</td><td>Checkpoint-backed pause/resume for approval-gated runs</td><td><span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/deepfates/cantrip">Cantrip</a></td><td>MIT, 122★, gates/wards vocabulary</td><td>Port-isolated Dune sandbox for LLM-authored code</td><td><span class="effort">L</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/tuist/condukt">Condukt</a></td><td>MIT/MPL-2.0, 37★, Rust+Elixir+WASM</td><td>Surface-scoped tool registries + secrets-redaction lane</td><td><span class="effort">S</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/showjihyun/ElGraph">ElGraph</a></td><td>MIT, 2★, single-author</td><td>Interrupt-as-checkpoint HITL + ElTrace operator timeline</td><td><span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/software-mansion-labs/legion">Legion</a></td><td>MIT, 103★, Software Mansion</td><td>AST-denylist audit + Lua no-NIF compute sandbox</td><td><span class="effort">S</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/z80dev/lemon">Lemon</a></td><td>MIT, 129★, 17-app umbrella</td><td>EventStream backpressure + adapter contract-test kits</td><td><span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/nyo16/nous">Nous</a></td><td>Apache-2.0, 14★, single-author</td><td>Pull-based streaming backpressure + fallback-chain taxonomy</td><td><span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+</tbody>
+</table>
+
+<h3>Two lessons taught by six projects each</h3>
+<p>Rather than repeat the same mechanism eight times, the two patterns that recur most are worth diagramming once and attributing broadly. <strong>Streaming backpressure</strong> is the biggest cluster: Alloy's versioned event envelope, BeamWeaver's typed <code>%Stream.Envelope{}</code>, Cantrip's <code>cast_stream</code>, Lemon's bounded-queue <code>EventStream</code>, and Nous's pull-based Hackney <code>[{:async, :once}]</code> mode are all working answers to the one feature ADR-047 explicitly deferred. They agree on shape — normalize provider chunks into a typed, versioned event, bound the queue so a fast model can't overwhelm a slow LiveView consumer, and never let a raw provider chunk reach a subscriber — but none of them solve the part that actually matters for samen: re-scrubbing through the masking chokepoint <em>per delta</em>, not once per turn. That is samen's own work to do; these six are proof the surrounding plumbing is a solved, cheap, zero-new-dependency problem.</p>
+
+<svg viewBox="0 0 700 210" style="width:100%;max-width:700px;height:auto" role="img" aria-labelledby="stream-title">
+<title id="stream-title">Streaming backpressure shape shared by Alloy, BeamWeaver, Cantrip, Lemon, and Nous, with samen's missing per-delta re-scrub step highlighted</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">THE SHARED SHAPE (six projects converge on this)</text>
+
+<rect x="10" y="34" width="130" height="44" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="75" y="52" text-anchor="middle" font-size="11">Provider chunk</text>
+<text x="75" y="66" text-anchor="middle" font-size="11">(raw)</text>
+<path d="M140,56 L192,56" stroke="var(--accent)" fill="none" marker-end="url(#a1)"/>
+
+<rect x="192" y="34" width="150" height="44" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="267" y="52" text-anchor="middle" font-size="11">Masking chokepoint</text>
+<text x="267" y="66" text-anchor="middle" font-size="11">(re-scrub per delta)</text>
+<path d="M342,56 L394,56" stroke="var(--accent)" fill="none" marker-end="url(#a1)"/>
+
+<rect x="394" y="34" width="140" height="44" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="464" y="52" text-anchor="middle" font-size="11">Typed envelope</text>
+<text x="464" y="66" text-anchor="middle" font-size="11">v1 / seq / turn</text>
+<path d="M534,56 L586,56" stroke="var(--accent)" fill="none" marker-end="url(#a1)"/>
+
+<rect x="586" y="34" width="104" height="44" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="638" y="52" text-anchor="middle" font-size="11">Bounded queue</text>
+<text x="638" y="66" text-anchor="middle" font-size="11">pull consumer</text>
+
+<path d="M638,78 L638,130 L267,130 L267,90" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#a2)"/>
+<text x="450" y="122" text-anchor="middle" font-size="11" fill="var(--muted)">backpressure signal (slow LiveView consumer stalls the pull, never the chokepoint)</text>
+
+<text x="192" y="160" font-size="10" fill="var(--muted)">samen's gap: everyone downstream of the chokepoint is proven;</text>
+<text x="192" y="174" font-size="10" fill="var(--muted)">the chokepoint minting per-delta (not just per-turn) is samen's own build</text>
+
+<defs>
+<marker id="a1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+<marker id="a2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<p>The second cluster is <strong>checkpoint-backed pause/resume for approval-gated runs</strong>, taught most completely by BeamWeaver and ElGraph (Legion's <code>HumanTool</code> and Lemon's steering queues are lighter variants of the same idea). Samen's rule is "AI writes do not exist" — every side effect becomes a draft routed through the E3 approvals engine — but today a multi-step agent run that hits an approval mid-flight has no first-class way to suspend and resume; it terminates into a draft and the operator restarts the surrounding context by hand. BeamWeaver and ElGraph both solve this the same way: checkpoint the run state keyed by a stable thread/run id after every step, let an interrupt persist durably (the OS process can crash during the wait without losing state), and have a plain <code>resume/3</code> call continue from the exact boundary once the human decides — with already-completed steps and memoized tool calls never re-run, so approvals that take days don't re-bill LLM calls on resume.</p>
+
+<svg viewBox="0 0 700 230" style="width:100%;max-width:700px;height:auto" role="img" aria-labelledby="checkpoint-title">
+<title id="checkpoint-title">Checkpoint-backed pause/resume: an agent run suspends at an approval boundary, persists to Postgres, and resumes after an E3 grant without re-running completed steps</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">AGENT LOOP (ADR-047)</text>
+
+<rect x="10" y="30" width="120" height="40" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="70" y="54" text-anchor="middle" font-size="11">Step N</text>
+<path d="M130,50 L182,50" stroke="currentColor" fill="none" marker-end="url(#b1)"/>
+
+<rect x="182" y="30" width="150" height="40" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="257" y="54" text-anchor="middle" font-size="11">Interrupt: side effect proposed</text>
+
+<path d="M257,70 L257,104" stroke="var(--accent)" fill="none" marker-end="url(#b2)"/>
+<rect x="152" y="104" width="210" height="40" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="257" y="122" text-anchor="middle" font-size="11">Checkpoint persisted</text>
+<text x="257" y="136" text-anchor="middle" font-size="11">(Postgres, thread_id, tokens only)</text>
+
+<path d="M362,124 L420,124" stroke="var(--accent)" fill="none" marker-end="url(#b2)"/>
+<rect x="420" y="104" width="180" height="40" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="510" y="122" text-anchor="middle" font-size="11">E3 approval Gate</text>
+<text x="510" y="136" text-anchor="middle" font-size="11">requester ≠ approver</text>
+
+<path d="M510,144 L510,178 L400,178" stroke="var(--muted)" fill="none" marker-end="url(#b3)"/>
+<text x="500" y="196" text-anchor="end" font-size="10" fill="var(--muted)">resume(thread_id) after grant —</text>
+<text x="500" y="210" text-anchor="end" font-size="10" fill="var(--muted)">Step N and memoized calls not re-run</text>
+
+<path d="M400,178 L400,70" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#b3)"/>
+<rect x="332" y="30" width="130" height="40" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="397" y="54" text-anchor="middle" font-size="11">Step N+1</text>
+
+<defs>
+<marker id="b1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="currentColor"/></marker>
+<marker id="b2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+<marker id="b3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<p>Two smaller clusters are worth naming once rather than per-card: <strong>bounded-retry/fallback middleware at the chokepoint</strong> (BeamWeaver's ModelRetry/ModelFallback/ToolCallLimit, Alloy's block/edit hooks, Nous's transport-vs-application error taxonomy) all agree that retries and provider fallback belong inside the AI kernel's chokepoint, never in an adapter, and that only transport-layer failures — never validation or max-iteration errors — should trigger fallback; that discrimination already matches samen's <code>:not_configured</code>/<code>:not_implemented</code> fail-honest adapter contracts. And <strong>sandboxed code execution for LLM-authored compute</strong> (Cantrip's port-isolated Dune VM, Legion's Lua VM, Condukt's in-memory→microVM→K8s-pod ladder) all agree the safe move on the BEAM is a language that structurally cannot reach the host process — no NIF, no AST denylist to maintain by hand — which is why, of the three, only Legion's pure-Elixir <code>lua</code> package matches samen's existing no-NIF posture (the same reason it chose <code>simple_sat</code> over a SAT-solver NIF).</p>
+
+<h3>The eight, in detail</h3>
+
+<div class="grid">
+
+<div class="card">
+<h4><a href="https://github.com/alloy-ex/alloy">Alloy</a> <span class="badge badge-medium">medium</span></h4>
+<p>MIT, ~9,000 LOC, 81★/118 commits, actively maintained. The most minimal entrant — "the agent loop and nothing else" — OTP-native, dependency-light, six provider adapters, a single <code>Middleware.call/2</code> hook over eight lifecycle points.</p>
+<p><strong>Adopt:</strong> its <code>until_tool</code> pattern — the loop terminates only when the model calls a named tool, making the final output an API-schema-validated structure instead of a prompted format — as the terminal shape for samen's draft/proposal hand-off to E3. Its <code>{:block, reason}</code> / <code>{:edit, modified_call}</code> / <code>{:halt, reason}</code> contract at <code>:before_tool_call</code> (edited calls can't change id/name) is also the cleanest single-seam design seen across all eight for formalizing EG2's per-turn re-scrub as an ordered hook chain. <span class="effort">S</span></p>
+<p>Why it fits: samen's "AI writes do not exist" posture means every agent outcome already is a draft handed to approvals — a terminal proposal-tool with a validated schema removes parse-failure red paths entirely, and it composes with zero behavior change to the already-BUILT loop.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/caudena/beam_weaver">BeamWeaver</a> <span class="badge badge-medium">medium</span></h4>
+<p>Apache-2.0, v0.1.18, 46★, pushed within the last week. The most complete LangChain+LangGraph+Deep-Agents port in Elixir: module-DSL agents, graph workflows with reducers/subgraphs, an extensive middleware-as-data library, and a RAG pipeline with incremental indexing.</p>
+<p><strong>Adopt:</strong> checkpoint-backed pause/resume for approval-gated runs (see diagram above) is the headline item, alongside its record-manager pattern — tracking indexed-document identity/hashes so re-indexing only touches changed content — as the missing hygiene layer for keeping tenant knowledge bases cheap to re-embed under G22. <span class="effort">M</span></p>
+<p>Why it fits: young (created 2026-06) and single-vendor, but the checkpoint-at-tool-boundary shape maps directly onto samen's Oban-backed loop, and both picks are pure Postgres/pgvector work with no new infrastructure.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/deepfates/cantrip">Cantrip</a> <span class="badge badge-medium">medium</span></h4>
+<p>MIT, ~122★/298 commits, actively developed. A multi-agent runtime whose governance vocabulary — gates (allowlisted boundary tools), wards (declarative runtime constraints), a forkable "loom" of turns — rhymes with samen's chokepoint philosophy more than any other entrant, making it a more interesting second data point than Jido.</p>
+<p><strong>Adopt:</strong> the port-isolated Dune sandbox — LLM-authored Elixir code evaluated in a child BEAM with no host-BEAM authority, injected proxy gates, a length-prefixed term protocol, and kill-on-timeout — as the reference architecture if samen's automation engine ever grows a "compute over already-masked results" step. Dune itself is a small, vendor-free hex dep that could live in an adapter package. <span class="effort">L</span></p>
+<p>Why it fits: it is the one code-execution shape structurally compatible with "AI writes do not exist," since sandboxed code and its inputs/outputs are still EG2-governed egress; effort is L and only worth scheduling once a compute step is actually on the roadmap.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/tuist/condukt">Condukt</a> <span class="badge badge-medium">medium</span></h4>
+<p>MIT (library) / MPL-2.0 (web server), ~37★/177 commits, published on Hex with unusually thorough docs. Ships as a Rust terminal binary, an Elixir library, and a WASM browser package; frames its architecture as "the loop is Condukt's, the reach is the host's" — tools, credentials, and network policy stay outside the session.</p>
+<p><strong>Adopt:</strong> surface-scoped tool registries — each agent surface (MCP server, operator plane, tenant plane, CI eval lane) owns its own tool registry so a tool registered for one surface structurally cannot be invoked from another — plus a secrets-redaction lane treated as a taxonomy distinct from PII masking, since operator/app secrets (API keys, connection strings) aren't <code>pii_*</code>-classed today. <span class="effort">S</span></p>
+<p>Why it fits: Condukt independently arrived at "host-owned tools, loop-owned history, credentials outside the session" — external confirmation that ADR-047's shape is the right one — and both picks are contract-plus-verifier extensions over existing machinery, not new subsystems.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/showjihyun/ElGraph">ElGraph</a> <span class="badge badge-medium">medium</span></h4>
+<p>MIT, ~v0.3, 2★/0 forks, single author but ~157 commits across five milestones. An explicitly "Python-free LangGraph alternative": checkpoint after every step (swappable ETS/DETS/Postgres/Valkey backends), task memoization skipping re-run LLM calls, and an <code>ElTrace</code> LiveView dashboard rendering agent threads as timelines with inline approve/reject.</p>
+<p><strong>Adopt:</strong> its <code>Ctx.interrupt/2</code> + <code>ElGraph.resume(thread_id: id, resume: answer)</code> mechanic is the cleanest worked example of the checkpoint/resume pattern in the synthesis diagram above, and its ElTrace timeline is a ready information-architecture reference for a masked-by-default agent-run debugging surface in the operator plane. <span class="effort">M</span></p>
+<p>Why it fits: 2 stars and a single author is real abandonment risk for a dependency, but the mechanic itself is proven enough to copy the idea rather than the code — and a fork-from-any-checkpoint primitive, cheap once resume exists, is a natural fit for samen's red-team eval tier.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/software-mansion-labs/legion">Legion</a> <span class="badge badge-medium">medium</span></h4>
+<p>MIT, v0.4.0, ~103★/41 commits — young, but from Software Mansion, a serious shop. Agents write Lua (or optionally Elixir) code that executes in a sandbox rather than doing classic tool-call round trips; tool functions are the only bridge out.</p>
+<p><strong>Adopt:</strong> diff Legion's Elixir-sandbox AST denylist (<code>defmodule</code>, <code>import</code>, <code>spawn</code>, <code>send</code>, <code>apply</code>) against samen's existing raw-spawn AST lock as a cheap adversarial audit that may surface misses like <code>apply/3</code> indirection — worth doing regardless of any code-execution roadmap. Flag, but don't schedule yet, its pure-Elixir <code>lua</code> package (no NIF, matching samen's <code>simple_sat</code> posture) as the compute-step option if loop latency ever becomes a measured problem. <span class="effort">S</span></p>
+<p>Why it fits: Legion's core execution model — LLM writes code as the primary action — is rejected outright as contrary to "AI writes do not exist," but the sandbox-hardening details underneath it are worth stealing independent of that rejection.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/z80dev/lemon">Lemon</a> <span class="badge badge-medium">medium</span></h4>
+<p>MIT, ~129★, 1,500+ commits, 17-app umbrella, 9 packages on Hex. A personal-assistant platform (messaging channels, TUI, skills marketplace) with no tenancy or PII vault — the overlap with samen is entirely in engineering and testing discipline, not domain fit.</p>
+<p><strong>Adopt:</strong> its bounded <code>EventStream</code> GenServer (synchronous push, overflow signaling, configurable drop strategies) as a zero-dependency streaming-lane design, and <code>lemon_platform_test</code>-style shared ExUnit case kits that assert every adapter behaviour (<code>Samen.AI.Provider</code>, <code>Samen.Kms</code>, delivery/ESP adapters) proves its fail-honest refusal contract uniformly rather than per-adapter by convention. <span class="effort">M</span></p>
+<p>Why it fits: the stateless-Loop/stateful-Agent split with a cooperative ETS <code>AbortSignal</code> makes the agent step property-testable without processes, and the docs-freshness registry (<code>docs/catalog.exs</code>, owner + review cadence, CI-enforced) is a cheap addition to samen's existing 49-ADR discipline.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/nyo16/nous">Nous</a> <span class="badge badge-medium">medium</span></h4>
+<p>Apache-2.0, v0.17, 14★, single author (nyo16) but well-documented (18 guides, 18+ runnable examples) — roughly "Pydantic AI with OTP supervision." 13-provider abstraction, a DAG workflow engine, and a six-evaluator eval framework driven by YAML suites.</p>
+<p><strong>Adopt:</strong> the pull-based Hackney <code>[{:async, :once}]</code> streaming mode with between-chunk cancellation checks as a working BEAM reference for backpressure, and the fallback-chain error taxonomy — failover fires only on transport-layer <code>ProviderError</code>/<code>ModelError</code>, never on application errors like validation or max-iterations — inside <code>Samen.AI</code>'s chokepoint. Its RRF hybrid-retrieval scoring (BM25 + vector, temporal decay, evergreen exemption) is also a small pure-function upgrade worth a glance for catalog/context grounding. <span class="effort">M</span></p>
+<p>Why it fits: the transport-vs-application error split is exactly the discrimination samen's adapter contracts already encode via <code>:not_configured</code>/<code>:not_implemented</code>, applied here to retries — resilience without faking success.</p>
+</div>
+
+</div>
+
+<p class="verdict">Net read for a product leader skimming only this section: zero of the eight are dependency candidates — all fail the ash_ai/Jido test on the same masking-chokepoint ground — so nothing here closes a named gap the way the executive summary's four high-relevance picks do. What they collectively supply is engineering confidence: streaming backpressure (six independent implementations) and checkpoint-backed approval resume (BeamWeaver, ElGraph, Legion) are both proven, cheap, zero-new-dependency problems whenever ADR-047's deferred streaming and mid-run approval suspension get scheduled. Effort clusters at <span class="effort">S</span>–<span class="effort">M</span> across the set, with a single <span class="effort">L</span> (Cantrip's sandbox) gated behind a code-execution feature that isn't yet on the roadmap.</p>
+
+</section>
