@@ -144,6 +144,7 @@ run_spike "$REPO_ROOT/spikes/s02_transformer"
 run_spike "$REPO_ROOT/spikes/s03_fragments"
 run_spike "$REPO_ROOT/spikes/s04_catalog_tx"
 run_spike "$REPO_ROOT/spikes/s05_vault"
+run_spike "$REPO_ROOT/spikes/s06_verify"
 run_spike "$REPO_ROOT/spikes/s07_pii_reads"
 
 echo ""
