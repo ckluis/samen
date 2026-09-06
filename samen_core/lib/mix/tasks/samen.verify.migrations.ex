@@ -21,13 +21,21 @@ defmodule Mix.Tasks.Samen.Verify.Migrations do
 
       mix samen.verify.migrations
       mix samen.verify.migrations --repo MyApp.Repo --migrations priv/repo/migrations
+      mix samen.verify.migrations --min-expand 1
 
   Defaults: repo from `config :samen_core, :verify_repo` (or the first configured
   repo); migrations path from the repo's `priv/<repo>/migrations`.
 
+  `--min-expand N` is an OPT-IN, PER-GATE floor: when passed, the discovered
+  `:expand`-phase migration count under `migrations_path` must be at least `N` or the
+  task fails closed. Absent the flag, no floor is enforced and a count of 0 is green
+  — exactly today's behaviour. This exists so a gate can declare "this app owns at
+  least one expand migration" without the task imposing that as a repo-wide policy.
+
   ## Exit code (fail-closed)
 
-  Exits 0 when every expand down is green, 1 otherwise, via `:erlang.halt/1`.
+  Exits 0 when every expand down is green (and, if `--min-expand` was passed, the
+  discovered count meets the declared floor), 1 otherwise, via `:erlang.halt/1`.
   """
 
   use Mix.Task
@@ -37,7 +45,9 @@ defmodule Mix.Tasks.Samen.Verify.Migrations do
   @impl Mix.Task
   def run(args) do
     {opts, _rest} =
-      OptionParser.parse!(args, strict: [repo: :string, migrations: :string])
+      OptionParser.parse!(args,
+        strict: [repo: :string, migrations: :string, min_expand: :integer]
+      )
 
     Mix.Task.run("app.start")
 
@@ -48,7 +58,9 @@ defmodule Mix.Tasks.Samen.Verify.Migrations do
       Mix.raise("migrations path does not exist: #{migrations_path}")
     end
 
-    violations = check_in_scratch_db(base_repo, migrations_path)
+    violations =
+      check_in_scratch_db(base_repo, migrations_path) ++
+        min_expand_violations(migrations_path, opts)
 
     Samen.Verifier.halt_if_violations(@task_name, violations)
   end
@@ -78,6 +90,33 @@ defmodule Mix.Tasks.Samen.Verify.Migrations do
     after
       Supervisor.stop(pid)
       _ = Ecto.Adapters.Postgres.storage_down(scratch_config)
+    end
+  end
+
+  @doc """
+  Return violation strings for the OPT-IN `--min-expand` floor, or `[]` if no floor
+  was declared (`opts` carries no `:min_expand`) or the discovered `:expand`-phase
+  migration count under `migrations_path` meets it. Pure and source-level — reuses
+  `Samen.Migration.DownCheck.expand_migrations/1`'s discovery, no scratch DB needed.
+  Separated from `check_in_scratch_db/2` so tests can exercise the floor alone,
+  independent of the down/0 exercise it never weakens, reorders, or shadows.
+  """
+  def min_expand_violations(migrations_path, opts) do
+    case Keyword.get(opts, :min_expand) do
+      nil ->
+        []
+
+      floor ->
+        count = migrations_path |> Samen.Migration.DownCheck.expand_migrations() |> length()
+
+        if count < floor do
+          [
+            "--min-expand #{floor} declared but found only #{count} :expand migration(s) " <>
+              "under #{migrations_path} (observed #{count}, floor #{floor})."
+          ]
+        else
+          []
+        end
     end
   end
 

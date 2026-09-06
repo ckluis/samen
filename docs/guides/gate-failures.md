@@ -167,6 +167,20 @@ down→up round trip when exercised in a throwaway scratch DB (`<db>_downcheck_<
 expand migrations additive so the reverse is possible. Never mark an expand migration
 `:contract` just to dodge the check.
 
+**`--min-expand` floor (OPT-IN, per-gate):**
+
+```text
+--min-expand <N> declared but found only <count> :expand migration(s) under <path> (observed <count>, floor <N>).
+```
+
+**Meaning:** the gate declared `mix samen.verify.migrations --min-expand N` and the
+discovered `:expand`-phase migration count fell below `N` — e.g. an app's one known expand
+migration lost its `phase: :expand` tag (the tag makes it disappear from discovery, not
+just from the down/0 exercise). This is OPT-IN: a gate that passes no `--min-expand` keeps
+today's behaviour byte-for-byte, including a count of 0 staying green.
+**Fix:** restore the `phase: :expand` tag on the migration that should carry it, or lower
+the declared floor if the app's expand-migration count has legitimately changed.
+
 ---
 
 ## Step 8 — `mix samen.verify.sink_schema`

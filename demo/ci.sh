@@ -96,7 +96,7 @@ echo "    PASSED"
 #    exercised in a throwaway scratch DB (created + dropped by the task). Fails
 #    closed if any expand's down is missing/broken/non-reversible.
 echo "--- step 7/18: mix samen.verify.migrations (expand down/0 check)"
-mix samen.verify.migrations
+mix samen.verify.migrations --min-expand 1
 echo "    PASSED"
 
 # 8. J2 sink-schema allow-list check (T2.7): every wide-event/span field must be a

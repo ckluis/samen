@@ -37,6 +37,6 @@ MIX_ENV=test mix samen.verify.fleet_wire --host samen_web --router Samen.WebTest
 # MIX_ENV=test convention (ci.sh:21, ci.sh:24, ci.sh:32 above) rather than pawchart/driftwood's
 # bare form.
 echo "==> samen_web: mix samen.verify.migrations (T2.4 expand-migration down/0 check)"
-MIX_ENV=test mix samen.verify.migrations
+MIX_ENV=test mix samen.verify.migrations --min-expand 1
 
 echo "==> samen_web: PASSED"

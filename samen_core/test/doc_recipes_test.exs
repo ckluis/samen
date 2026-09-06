@@ -227,6 +227,8 @@ defmodule Samen.Gen.DocRecipesTest do
     {"samen_core/lib/mix/tasks/samen.verify.migrations.ex", "migrations path does not exist: "},
     {"samen_core/lib/mix/tasks/samen.verify.migrations.ex",
      "no repo: pass --repo or set config :samen_core, :verify_repo"},
+    {"samen_core/lib/mix/tasks/samen.verify.migrations.ex", "--min-expand"},
+    {"samen_core/lib/mix/tasks/samen.verify.migrations.ex", "declared but found only"},
     # sink_schema
     {"samen_core/lib/samen/wide_event/schema.ex", "FORBIDDEN (name-carrier)"},
     {"samen_core/lib/samen/wide_event/schema.ex", "declares no closed `allowed:` set"},
