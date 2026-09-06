@@ -31,4 +31,12 @@ MIX_ENV=test mix test --warnings-as-errors
 echo "==> samen_web: mix samen.verify.fleet_wire (RP-J-4 / RP-J-4b / P8)"
 MIX_ENV=test mix samen.verify.fleet_wire --host samen_web --router Samen.WebTest.FleetCockpitRouter
 
+# T2.4 expand-migration down/0 check (pawchart/ci.sh:82, driftwood/ci.sh:81). samen_web points
+# :verify_repo at Samen.WebTest.Repo (config/config.exs:33), which lives under test/support and is
+# only compiled under MIX_ENV=test (mix.exs:44-45) — so this step follows samen_web's own
+# MIX_ENV=test convention (ci.sh:21, ci.sh:24, ci.sh:32 above) rather than pawchart/driftwood's
+# bare form.
+echo "==> samen_web: mix samen.verify.migrations (T2.4 expand-migration down/0 check)"
+MIX_ENV=test mix samen.verify.migrations
+
 echo "==> samen_web: PASSED"
