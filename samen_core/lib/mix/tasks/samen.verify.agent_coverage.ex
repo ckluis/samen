@@ -67,17 +67,21 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
            only after macro expansion, or a call routed through a helper module in a
            different file, is invisible to a per-file pre-expansion scan.
         4. **MODULE-ATTRIBUTE INDIRECTION** (UXD-05 attempt 4, named here because it was
-           found live and silent). `@k Samen.AI.Agent` followed by `@k.start(...)` or
-           `apply(@k, :start, [...])` INSIDE a `tool_schema/0` module is a working call
-           that this lock DOES NOT FLAG. A module attribute is not an alias: it is a
-           compile-time binding held in the module's own attribute table, so it never
-           enters `alias_env/1`, and the call site's target is an `{:@, _, _}` node that
-           `agent_kernel_alias?/2` has no clause for. Resolving it means tracking attribute
-           assignment and re-binding (attributes may be reassigned, accumulated, or set
-           from another attribute), i.e. the same data-flow analysis residual 1 needs —
-           deliberately NOT folded in here. This is a STATED, TESTED limit: the negative
-           control is `"KNOWN RESIDUAL (module-attribute indirection)"` in
-           `test/ai/agent_coverage_verifier_test.exs`.
+           found live and silent; PARTIALLY CLOSED AT A9). `@k Samen.AI.Agent` followed by `@k.start(...)`
+           or `apply(@k, :start, [...])` INSIDE a `tool_schema/0` module was a working call
+           this lock did not flag. A9 closed the single, static, TOP-LEVEL ASSIGNMENT case:
+           `attr_env/1` (new) collects every top-level `@name <value>` assignment the same
+           way `alias_env/1` collects `alias`/`require` bindings, and `agent_kernel_alias?/2`
+           gained an `{:@, _, _}` clause resolving an attribute reference through the same
+           alias/atom machinery every other reference uses — so the worked example above IS
+           FLAGGED NOW. What A9 deliberately did NOT attempt, and what remains open:
+           attribute REASSIGNMENT ordering, ACCUMULATION (`Module.register_attribute/3,
+           accumulate: true`), and attribute-of-attribute CHAINING (`@k @j`, one attribute
+           assigned from another) — each is data-flow through a binding, the same class
+           residual 1 (dynamic module construction) already declines to fold in. This is a
+           STATED, TESTED limit: the closed case is pinned by the "RED FIXTURE (A9)" tests
+           and the open chaining case by "KNOWN RESIDUAL (A9, still open) — attribute-of-
+           attribute chaining" in `test/ai/agent_coverage_verifier_test.exs`.
 
       Residuals 1 and 4 are pinned by negative-control tests, and a further test asserts
       this paragraph is still present in this source, so deleting any disclosure above
