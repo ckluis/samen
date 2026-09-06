@@ -1,0 +1,169 @@
+<section id="01-executive-summary">
+<h2>Executive Summary &amp; Scoreboard</h2>
+
+<p>This report triages 127 self-hosted Elixir/BEAM repositories (the awesome-selfhosted-elixir list) against samen's own architecture — its ADRs, its chokepoint invariants, and the open items in its gap register. Ten repositories cleared the bar for <span class="badge badge-high">high</span> relevance: projects mature or novel enough to change a concrete decision, either by filling a named samen gap outright or by supplying a battle-tested pattern worth reimplementing. This section owns all ten outright — their full write-ups live here, not scattered across the thematic deep-dives that follow, which are built entirely from the 50 <span class="badge badge-medium">medium</span> repositories instead.</p>
+
+<table class="quick-table">
+<thead>
+<tr><th>Relevance tier</th><th>Files</th><th>Treatment in this report</th></tr>
+</thead>
+<tbody>
+<tr><td><span class="badge badge-high">high</span></td><td>10</td><td>Full write-up below — what it is, what to adopt, why, effort</td></tr>
+<tr><td><span class="badge badge-medium">medium</span></td><td>50</td><td>Seven themed deep-dive sections plus one catch-all</td></tr>
+<tr><td><span class="badge badge-low">low</span></td><td>65</td><td>One line each, grouped for scanability</td></tr>
+<tr><td><span class="badge badge-low">none</span></td><td>2</td><td>One line each, grouped for scanability</td></tr>
+<tr><td><strong>Total scanned</strong></td><td><strong>127</strong></td><td>—</td></tr>
+</tbody>
+</table>
+
+<p>Three lessons repeat often enough across these ten to state once rather than re-litigate in every card. First, <strong>license risk clusters hard</strong>: Plausible Analytics, Lightning, Keila, and Health are copyleft (AGPL-3.0 or LGPL/GPL-3.0) and cannot be vendored into MIT-licensed samen under any circumstance — every recommendation attributed to those four is pattern-only, independently reimplemented, never transcribed from source. Second, the three agent-framework entrants — LangChain for Elixir, Sagents, and Loomkin — are each rejected as a <em>dependency</em> for the same structural reason samen already rejected ash_ai and Jido (ADR-037): none of them route prompt assembly through a masking chokepoint, and pulling any of them into samen would put vendor/HTTP deps or raw-string prompt handling inside <code>samen_core</code>, violating INV-4. Their value is real but lives entirely in patterns worth mining — trajectory-based regression testing, HITL decision UX, decision-graph memory — never in the library itself. Third, four of the ten map to a specific, already-named line in samen's own gap register rather than a vague good idea: AetherS3 fills the open <code>Storage.S3</code> skeleton, Health fills G11's still-open public status page, Osmotic fills G13's stubbed usage rating, and Boruta Server fills the explicitly deferred OIDC-provider capability. Those four are the shortest path from "read this" to "close a line in the roadmap."</p>
+
+<svg viewBox="0 0 680 250" style="width:100%;max-width:680px;height:auto" role="img" aria-labelledby="gapmap-title">
+<title id="gapmap-title">Four named samen gaps mapped directly to the project that fills them</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">SAMEN'S OPEN GAP</text>
+<text x="470" y="20" font-size="11" fill="var(--muted)">FILLS IT</text>
+
+<rect x="10" y="34" width="300" height="40" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="160" y="58" text-anchor="middle">Storage.S3 skeleton (WS-E)</text>
+<path d="M310,54 L470,54" stroke="var(--accent)" fill="none" marker-end="url(#arr)"/>
+<rect x="470" y="34" width="200" height="40" rx="8" fill="var(--card-bg)" stroke="var(--accent)"/>
+<text x="570" y="58" text-anchor="middle">AetherS3</text>
+
+<rect x="10" y="88" width="300" height="40" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="160" y="112" text-anchor="middle">G11 — public status page</text>
+<path d="M310,108 L470,108" stroke="var(--accent)" fill="none" marker-end="url(#arr)"/>
+<rect x="470" y="88" width="200" height="40" rx="8" fill="var(--card-bg)" stroke="var(--accent)"/>
+<text x="570" y="112" text-anchor="middle">Health</text>
+
+<rect x="10" y="142" width="300" height="40" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="160" y="166" text-anchor="middle">G13 — usage rating stub</text>
+<path d="M310,162 L470,162" stroke="var(--accent)" fill="none" marker-end="url(#arr)"/>
+<rect x="470" y="142" width="200" height="40" rx="8" fill="var(--card-bg)" stroke="var(--accent)"/>
+<text x="570" y="166" text-anchor="middle">Osmotic</text>
+
+<rect x="10" y="196" width="300" height="40" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="160" y="220" text-anchor="middle">Deferred: OIDC provider role</text>
+<path d="M310,216 L470,216" stroke="var(--accent)" fill="none" marker-end="url(#arr)"/>
+<rect x="470" y="196" width="200" height="40" rx="8" fill="var(--card-bg)" stroke="var(--accent)"/>
+<text x="570" y="220" text-anchor="middle">Boruta Server</text>
+
+<defs>
+<marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+</defs>
+</svg>
+
+<h3>The ten adoption candidates</h3>
+<p>Each card below names the project and its license, the concrete thing samen should take from it, why that fits samen's architecture rather than generic best practice, and an effort badge for the primary recommendation (a project's finding file often lists several picks at different sizes — the badge here reflects the single highest-value one).</p>
+
+<div class="grid">
+
+<div class="card">
+<h4><a href="https://github.com/brainlid/langchain">LangChain for Elixir</a> <span class="badge badge-high">high</span></h4>
+<p>Apache-2.0. The de-facto Elixir LLM/agent framework (not a Python port): an <code>LLMChain</code> agent loop, tool/function calling, twelve-plus provider support with fallback chains and prompt caching, and its own trajectory-testing and GenAI-semconv telemetry.</p>
+<p><strong>Adopt:</strong> trajectory-based agent regression testing — capture an ADR-047 run's tool-call sequence into a comparable structure with strict/wildcard/unordered/superset matchers, ExUnit assertion macros, and golden files — plus its actionable tool-argument error feedback and GenAI OTel semantic-convention spans on the AI chokepoint. <span class="effort">M</span></p>
+<p>Why it fits: this is samen's own "every guarantee ships with a proof" religion applied to agent behavior, complementing <code>samen.verify.agent_coverage</code> with behavioral regression pins that are themselves sabotage-able.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/sagents-ai/sagents">Sagents</a> <span class="badge badge-high">high</span></h4>
+<p>Apache-2.0 (Hex). Built on top of LangChain for interactive Phoenix LiveView agents: OTP-supervised per-agent servers, HITL approve/edit/reject decisions with per-tool-call granularity, a rich PubSub streaming-event taxonomy, and a dual-view transcript model.</p>
+<p><strong>Adopt:</strong> the dual-view transcript split — a compactable LLM-facing AgentState blob versus masked-token-only DisplayMessages — and the LiveView streaming event vocabulary for when ADR-047's deferred streaming lands; the <code>:edit</code> HITL decision type also enriches the E3 approvals engine beyond plain approve/reject. <span class="effort">M</span></p>
+<p>Why it fits: it's the closest existing analogue to samen's own agent loop, proven in production LiveView apps, and its patterns transfer without importing LangChain or its direct-execution-on-approval model (which would regress samen's "AI writes do not exist" invariant).</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/plausible/analytics">Plausible Analytics</a> <span class="badge badge-high">high</span></h4>
+<p>AGPL-3.0, patterns only. Mature (28.7k stars), privacy-first Elixir/Phoenix web analytics: no cookies, no persistent identifiers, PostgreSQL for accounts plus ClickHouse for the event store.</p>
+<p><strong>Adopt:</strong> rotating daily-salt SipHash visitor identity (structurally unlinkable across days, nothing PII-shaped ever at rest) for <code>Samen.Scopes.Analytics</code>, its closed drop-reason taxonomy at the ingestion chokepoint, and its streamed S3 zip-export machinery for the open DSAR self-serve gap (G19). <span class="effort">M</span></p>
+<p>Why it fits: "token-blind by construction" is exactly samen's own masking philosophy, applied here to analytics identity instead of vaulted PII — a natural sibling to the token-blind aggregate plane.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/OpenFn/lightning">Lightning (OpenFn)</a> <span class="badge badge-high">high</span></h4>
+<p>LGPL-3.0/GPL-3.0, patterns only. A production workflow-automation platform (DAG jobs/triggers/edges) used by governments and NGOs in 40+ countries, on Elixir/Phoenix/Ecto/Oban — the closest thing to samen's own Automation engine running at real scale in the wild.</p>
+<p><strong>Adopt:</strong> snapshot-per-run workflow versioning (editing or deleting an action never corrupts an in-flight or historical run) and the WorkOrder⊃Run(s) retry model, plus <code>libcluster_postgres</code> for config-free multi-node clustering and its streaming-zip DSAR export shape. <span class="effort">M</span></p>
+<p>Why it fits: it validates and sharpens ADR-039's Action → Compile → Reactor design with an operator-grade "edit freely, history stays true" contract that composes cleanly with the already-adopted <code>ash_paper_trail</code> versioning.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/pentacent/keila">Keila</a> <span class="badge badge-high">high</span></h4>
+<p>AGPL-3.0, patterns only. A self-hostable newsletter/campaign platform (2.2k stars) on Phoenix/LiveView/Oban with pluggable ESP adapters, a Mongo-style contact segment DSL, and MJML+Liquid templating.</p>
+<p><strong>Adopt:</strong> multi-scale per-sender token-bucket rate limiting — ETS buckets at second/minute/hour scales, persisted across restarts, Oban-snooze on throttle — and bounce/complaint-driven suppression semantics for the delivery chokepoint, both currently absent from samen. <span class="effort">M</span></p>
+<p>Why it fits: samen ships <code>samen_postmark</code>/<code>samen_ses</code>/<code>samen_resend</code> send adapters but no evidenced rate-limit or suppression-list logic; without it, any vertical emailing tenants' end-customers burns sender reputation with no chokepoint-level defense.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/wizenink/aethers3">AetherS3</a> <span class="badge badge-high">high</span></h4>
+<p>MIT. An actively developed, self-hostable, BEAM-native, distributed S3-compatible object store with an AP data plane (rendezvous hashing, CubDB) and a CP control plane (Khepri/Raft), plus an unusually candid "status and limitations" README.</p>
+<p><strong>Adopt:</strong> run it as the local/CI target for samen's own <code>Storage.S3</code> skeleton — currently an explicit unimplemented operator-TODO in <code>samen_core/lib/samen/files/storage/s3.ex</code> — instead of mocking S3 or requiring live AWS credentials; its dual <code>/ready</code> vs <code>/ready/cp</code> readiness split is also a sharper template than samen's current <code>/readyz</code>. <span class="effort">S</span></p>
+<p>Why it fits: MIT license makes it directly runnable, not just readable, closing the fixture-availability half of a named gap in a docker-compose command.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/malach-it/boruta-server">Boruta Server</a> <span class="badge badge-high">high</span></h4>
+<p>Apache-2.0. An OpenID-Foundation-certified OAuth2/OIDC authorization-server umbrella (five sibling apps) with PKCE, DPoP, PAR, WebAuthn, and LDAP federation, developed daily.</p>
+<p><strong>Adopt:</strong> its core <code>boruta</code> library as an architecture reference — and a real candidate to vendor as a new <code>samen_oauth</code> adapter package, path-dep on <code>samen_core</code> only, matching the existing <code>samen_stripe</code>/<code>samen_anthropic</code> convention — for samen's explicitly deferred "become an OIDC provider" gap, plus <code>wax_</code> for passkey/WebAuthn support on the existing identity spine. <span class="effort">L</span></p>
+<p>Why it fits: samen's ADR-035 identity spine only <em>consumes</em> OIDC today (via <code>assent</code>, logging users into samen); nothing lets a tenant's own integrations authenticate against samen, and standards-certified code beats hand-rolling PKCE/DPoP/introspection correctness from scratch.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://codeberg.org/ppatrzyk/health">Health</a> <span class="badge badge-high">high</span></h4>
+<p>AGPL-3.0, patterns only. A deliberately non-Phoenix/non-Ecto (Bandit + Plug + raw Postgrex) self-hosted uptime monitor with push mode (dead-man's-switch heartbeats, structurally similar to samen's fleet heartbeat) and pull mode (active HTTP/DNS/TCP/SMTP probing).</p>
+<p><strong>Adopt:</strong> the missing feature itself — a masked, publicly-viewable status page — is the exact open item under G11 ("<code>/readyz</code> shipped, public status page still open"); its pull-mode active probing also closes a real blind spot, since an app whose heartbeat job is wedged reads as healthy in samen's push-only fleet model today. <span class="effort">M</span></p>
+<p>Why it fits: samen already has LiveView and two-plane masking, so it needs Health's <em>feature</em>, not its SSE/Datastar transport; AGPL means reimplement, never copy.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/ReifiedException/osmotic">Osmotic</a> <span class="badge badge-high">high</span></h4>
+<p>BSD-2-Clause. An early-stage but unusually well-documented self-hosted Elixir/Phoenix AI gateway: issues API keys, enforces spend/token quotas, scans outbound prompts for leaked secrets, meters cost per request.</p>
+<p><strong>Adopt:</strong> its idempotent, insert-only usage ledger (telemetry → ETS-buffered writer with a UUID idempotency key → immutable <code>usage_records</code> fact table with <code>on_conflict: :nothing</code> → live tallies rebuilt from source at rollover) plus an effective-dated, never-updated pricing table — close to a direct blueprint for the open G13 gap, where Stripe sync is presently a stub and usage rating/proration is operator-TODO. <span class="effort">M</span></p>
+<p>Why it fits: architecturally consistent with samen's own effective-dated rich types (ADR-036) and hash-chained-audit precedent for immutability; permissive license makes even direct code study viable, though 0-star/7-commit maturity argues for pattern-adoption over dependency.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/pass-agent/loomkin">Loomkin</a> <span class="badge badge-high">high</span></h4>
+<p>MIT. A persistent multi-agent development workspace (~179 stars, 800+ commits) on Elixir/Phoenix/LiveView, built on Jido + req_llm, with a Postgres-backed decision-graph memory and full-fidelity "keeper" context offload instead of lossy summarization.</p>
+<p><strong>Adopt:</strong> the decision graph as a new samen Ash resource family — goal/decision/option/action/outcome/observation/revisit nodes, typed edges including <code>rejected</code>/<code>supersedes</code>, confidence scores that cascade uncertainty downstream — written by the agent loop and injected into prompt assembly through the existing masking chokepoint; also its keeper-style full-fidelity context offload and diff-in-approval-modal UI. <span class="effort">M</span></p>
+<p>Why it fits: ADR-047's agent loop has transcripts and retention but no structured, queryable reasoning memory; the graph would stay crypto-shreddable (tokens only, per ADR-046) and give the operator plane a genuinely new capability.</p>
+</div>
+
+</div>
+
+<h3>Why the agent frameworks get mined, not merged</h3>
+<p>LangChain, Sagents, and Loomkin all assemble prompts and marshal tool results themselves, outside samen's EG2 governed-egress boundary — the same objection that already sank ash_ai and Jido (ADR-037). Samen's <code>Samen.AI</code> chokepoint mints a <code>%Samen.AI.MaskedPayload{}</code> and every provider adapter refuses a raw string with a <code>FunctionClauseError</code>; none of the three external frameworks have an equivalent concept, so adopting any of them as a dependency would either pull vendor/HTTP deps into <code>samen_core</code> (violating INV-4) or reopen a raw-prompt path the masking chokepoint exists specifically to close. The diagram below contrasts the two shapes — external library on top, samen's own chokepoint on the bottom — which is why the verdict on all three is identical: real design value, zero dependency value.</p>
+
+<svg viewBox="0 0 680 190" style="width:100%;max-width:680px;height:auto" role="img" aria-labelledby="chokepoint-title">
+<title id="chokepoint-title">Contrast: external agent frameworks assemble raw prompts themselves; samen's chokepoint mints a masked payload providers must accept</title>
+
+<text x="10" y="20" font-size="11" fill="var(--muted)">LANGCHAIN / SAGENTS / LOOMKIN (rejected as a dependency)</text>
+<rect x="10" y="30" width="150" height="40" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="85" y="54" text-anchor="middle">Raw prompt text</text>
+<path d="M160,50 L230,50" stroke="var(--muted)" fill="none" marker-end="url(#arr2)"/>
+<rect x="230" y="30" width="220" height="40" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="340" y="48" text-anchor="middle" font-size="11">Framework assembles prompt</text>
+<text x="340" y="62" text-anchor="middle" font-size="11">+ calls provider directly</text>
+<path d="M450,50 L520,50" stroke="var(--muted)" fill="none" marker-end="url(#arr2)"/>
+<rect x="520" y="30" width="150" height="40" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="595" y="54" text-anchor="middle">Provider accepts it</text>
+
+<text x="10" y="110" font-size="11" fill="var(--muted)">SAMEN'S AI CHOKEPOINT (ADR-043/047)</text>
+<rect x="10" y="120" width="150" height="40" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="85" y="144" text-anchor="middle">Raw prompt text</text>
+<path d="M160,140 L230,140" stroke="var(--accent)" fill="none" marker-end="url(#arr3)"/>
+<rect x="230" y="120" width="220" height="40" rx="8" fill="var(--card-bg)" stroke="var(--accent)"/>
+<text x="340" y="138" text-anchor="middle" font-size="11">Samen.AI mints</text>
+<text x="340" y="152" text-anchor="middle" font-size="11">%MaskedPayload{}</text>
+<path d="M450,140 L520,140" stroke="var(--accent)" fill="none" marker-end="url(#arr3)"/>
+<rect x="520" y="120" width="150" height="40" rx="8" fill="var(--card-bg)" stroke="var(--accent)"/>
+<text x="595" y="138" text-anchor="middle" font-size="11">Provider refuses raw</text>
+<text x="595" y="152" text-anchor="middle" font-size="11">strings by construction</text>
+
+<defs>
+<marker id="arr2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+<marker id="arr3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+</defs>
+</svg>
+
+<p class="verdict">Net read for a product leader skimming only this section: four items (AetherS3, Health, Osmotic, Boruta Server) close named gaps and are worth scheduling directly; three items (Plausible, Lightning, Keila) hand over production-proven delivery/analytics/automation patterns behind a copyleft wall that only permits reimplementation; three items (LangChain, Sagents, Loomkin) are agent-framework pattern quarries whose libraries samen has already, correctly, decided not to depend on. Effort skews toward <span class="effort">M</span> across the board — one <span class="effort">S</span> (AetherS3, a docker-compose fixture) and one <span class="effort">L</span> (Boruta Server, a new adapter package plus real OAuth flows) bracket the set.</p>
+
+</section>

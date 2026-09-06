@@ -1,0 +1,37 @@
+---
+project: Pixir
+url: https://github.com/Ranvier-Technologies/pixir
+category: Software Factories
+relevance: medium
+verdict: Do not depend on it (dev-preview coding-agent CLI, OpenAI-centric), but pattern-mine its ADRs — checkpoint-status vocabulary, canonical/ephemeral event split, and subagent-manager invariants map directly onto samen's ADR-047 agent-loop follow-ons.
+---
+
+# 024 — Pixir
+
+## What the project is
+
+Pixir (Ranvier Technologies, MIT) is an **Elixir/OTP supervised runtime for coding agents**: presenters (CLI escript, ACP stdio clients like Zed, an experimental Phoenix/Bandit read-only monitor) request work; the runtime owns sessions, turns, provider calls, supervised tool execution, and evidence. Its philosophy is unusually samen-shaped: "summaries are not evidence; local Logs and artifacts are," append-only replayable NDJSON session logs, honest terminal states, partial outcomes reported as data rather than faked success. Default provider is ChatGPT/OpenAI (an Anthropic provider ADR-0037 exists); Elixir ~> 1.20; ships as a Hex escript. Maturity: **developer preview** — 21 stars, ~24 commits, explicitly unstable as a library API, no MCP server. What it lacks in adoption it makes up for in documentation: 39 ADRs covering event-log design, BEAM-native subagents, workflows, checkpoints, workspace strategies, and provider honesty.
+
+Key architecture (from README + ADRs):
+- **ADR-0004 unified event log**: one envelope `{id, session_id, seq, ts, type, data}`; 13 canonical event types get monotonic per-session seq and persist to a per-session append-only NDJSON file (History = fold over the log); ephemeral events (`text_delta`, `reasoning_delta`, `status`) broadcast on the event bus for UI but **never persist** — eliminating stream-dedup bugs. Failures are dedicated `turn_failed` events, never fabricated answers; salvaged partial text is marked `metadata.partial == true`.
+- **ADR-0011 BEAM-native subagents**: a Subagents Manager GenServer launches child Sessions via a DynamicSupervisor; explicit `spawn_agent` only (no silent fan-out); `max_threads`/`max_depth` caps; durable `timeout_ms`/`deadline_at` in the parent log so timeouts re-arm after Manager restart; read-only children get bounded auto-retry with `retry_history` lineage, **write-capable children never auto-retry**; failed-attempt logs are referenced, never overwritten; only terminal summaries fold back into parent context; isolated per-child workspace snapshots.
+- **ADR-0012/0014/0032/0033 workflows + checkpoints**: structural workflows over subagents; each step yields a **Checkpoint Bundle** (artifact + verification evidence + known limitations + `dependent_safe` flag + provenance IDs) and a derived `checkpoint_status` from a bounded set: `checkpoint_ready | partial | failed | held | needs_orchestrator`. Dependents unlock only on `checkpoint_ready` unless a step explicitly opts into `allow_unverified_depends_on`, which records `unverified_dependencies` as a known limitation. Interrupted workflows return a Partial Workflow Outcome with usable bundles and safe next actions (retry / rerun-failed-only / ask / abort).
+- **ADR-0028–0031 workspace strategies**: virtual overlay workspaces, **virtual diff artifacts** with explicit apply/merge-back, git-worktree strategy.
+- **ADR-0019/0020/0039**: provider usage + prompt-cache accounting events; versioned prompt contract with cache-family + compaction triggers; provider output **truncation honesty**.
+
+## What samen could adopt
+
+Samen already built and gated its own agent loop (ADR-047, zero new deps) and rejected Jido; the same posture applies here — adopt designs, not the dependency.
+
+1. **Checkpoint-status vocabulary for multi-step agent/automation runs** — the five-state `checkpoint_ready/partial/failed/held/needs_orchestrator` projection plus `dependent_safe` bundles. *Why it fits*: samen's Automation engine (ADR-039) has RunRecord bounded-outcome allowlists and Reactor compensation, and ADR-047 governs multi-step tool use, but neither has a first-class "partial-but-usable vs partial-but-blocking" vocabulary; this is exactly the fail-honest, bounded-enum style samen already verifies. Also the `allow_unverified_depends_on` → recorded `unverified_dependencies` pattern matches samen's claim-evidence discipline. **Effort: M** (extend RunRecord/agent transcript schema + verifier tier).
+2. **Canonical-vs-ephemeral event split for AI streaming** — deltas broadcast, never persisted; only canonical events get monotonic seq and fold into history; failures as `turn_failed` events; salvaged text flagged `partial: true`. *Why it fits*: AI streaming is samen's explicitly deferred ADR-047 item; this design pre-solves the dedup/replay trap while keeping transcripts append-only and crypto-shreddable (envelope carries tokens/IDs, not new PII paths). **Effort: M** (design input to the streaming ADR; near-zero cost to adopt now as a written invariant).
+3. **Subagent-manager hardening invariants** — durable `timeout_ms`/`deadline_at` persisted in the run log so deadlines re-arm after supervisor restart; auto-retry only for read-only work, with `retry_history` lineage and failed-attempt logs referenced-not-overwritten; only terminal summaries folded into parent context. *Why it fits*: samen's agent loop already has the raw-spawn AST lock and E3-gated writes (write-children-never-auto-retry is the same instinct); the restart-rearm and retry-lineage details are cheap robustness wins for Oban-backed agent runs. **Effort: S** each.
+4. **Virtual-diff artifact + explicit apply as the "draft" shape** — represent an agent's proposed change as a materialized diff artifact that only an explicit approval applies. *Why it fits*: samen's rule is "AI writes do not exist — outputs are drafts routed through E3 approvals"; a typed diff/proposal artifact with provenance gives that rule a concrete, previewable, auditable payload (and matches the Approvals Gate face). **Effort: M**.
+5. **Provider usage/cache accounting + truncation honesty as log events** — per-turn provider usage events (tokens, cache family) and an explicit truncated-output marker. *Why it fits*: samen has budgets/cost caps (ADR-047) and fail-honest adapters; emitting usage and truncation as canonical audit events makes the caps verifiable rather than advisory, and `samen_anthropic` could surface truncation honestly today. **Effort: S**.
+
+## What to ignore and why
+
+- **Pixir as a dependency or runtime**: developer preview, 21 stars, explicitly unstable API, escript/CLI packaging, OpenAI/ChatGPT-first — conflicts with INV-4 (vendor-free core), samen's zero-new-deps agent-loop posture, and the Jido-rejection precedent. Samen's loop is domain-embedded (Ash actors, PII chokepoints, E3 approvals); Pixir's is filesystem/coding-task-embedded.
+- **Coding-agent surfaces**: ACP stdio transport, CLI ergonomics, skills/attachments, patch.md customization, the Phoenix SSE monitor SPA — all solve "local dev tool" problems samen doesn't have (samen's operator plane and MCP server already cover its surfaces).
+- **Workspace snapshot/worktree machinery (ADR-0028/0031)**: built for agents editing checked-out code; samen's agents act on tenant data through Ash actions, not files. Only the diff-artifact *concept* (item 4) transfers.
+- **NDJSON-file-as-source-of-truth storage**: samen's Postgres-backed hash-chained audit + transcript retention with erasure envelopes (ADR-046) is strictly stronger; adopt the event taxonomy, not the file store.

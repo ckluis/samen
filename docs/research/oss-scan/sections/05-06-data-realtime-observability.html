@@ -1,0 +1,193 @@
+<section id="06-data-realtime-observability">
+<h2>Deep Dive: Data Pipelines, Realtime &amp; Observability/Ops</h2>
+
+<p>Five self-hosted Elixir/Phoenix projects, three different problem domains, one recurring lesson: mature BEAM systems that face CDC, realtime fan-out, or logging/alerting at production scale keep re-deriving the same handful of shapes — a stable idempotency key on every emitted event, a pluggable sink registry instead of a hard-coded egress path, Postgres as the only piece of infrastructure a cluster needs to find itself, and partition-drop instead of row-delete for high-churn retention tables. None of the five is a dependency samen should take: Sequin is CDC-focused and now maintenance-mode after an acquisition, Supabase Realtime and Logflare are both hosted-product codebases with no masking chokepoint, Plural Console is AGPL and solves Kubernetes fleet management (not SaaS tenancy), and ServiceRadar is a polyglot network-monitoring platform whose Elixir slice is one satellite among Go and Rust services. What all five earn is architecture reading against samen's own open gaps — multi-node Oban clustering, the single-sink wide-event exporter, retention-by-partition, and the still-open G11 alerting/status-page item — and in three cases (Sequin, Supabase Realtime, Logflare) the transferable pattern is concrete enough to scope at S–M effort without touching INV-4's vendor-free-core rule.</p>
+
+<div class="quick-table" style="overflow-x:auto">
+<table class="quick-table">
+<thead>
+<tr><th>Project</th><th>Status / license</th><th>Headline pattern to mine</th><th>Effort</th><th>Relevance</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="https://github.com/sequinstream/sequin">Sequin</a></td><td>MIT, but OSS in maintenance mode post-acquisition</td><td>Watermark-coordinated backfill, stable idempotency keys, Broadway sink pipelines</td><td><span class="effort">S</span>–<span class="effort">L</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/supabase/realtime">Supabase Realtime</a></td><td>Apache-2.0, actively maintained (forked Phoenix)</td><td><code>libcluster_postgres</code> node discovery, partition-drop retention, per-tenant rate counters</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/Logflare/logflare">Logflare</a></td><td>Apache-2.0, production codebase (Supabase-owned SaaS)</td><td>Adaptor-behaviour sink registry, cron AlertQuery loop, Cloak key-ring rotation</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/pluralsh/console">Plural Console</a></td><td>AGPL-3.0 source (patterns only, never code)</td><td>Pull-based reverse-tunnel agents, <code>prom_ex</code>, per-rule multi-channel notification fan-out</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://code.carverauto.dev/carverauto/serviceradar">ServiceRadar</a></td><td>Apache-2.0</td><td>Ash-core-plus-non-BEAM-satellite topology; validates samen's own lean-kernel posture</td><td><span class="effort">S</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Cluster 1 — CDC and data-pipeline discipline, from Sequin</h3>
+<p>Sequin (sequinstream/sequin, MIT, Elixir/Phoenix/OTP, ~50k ops/s claimed) is a self-hosted Postgres change-data-capture platform: it attaches to a logical replication slot on any Postgres 14+ and streams row changes to 16+ sinks with strict per-key ordering. The company was acquired and Sequin Cloud shut down in late 2025, so the open-source repo is now explicitly maintenance-mode — fine as a reference codebase, wrong as a runtime dependency, and INV-4 would rule it out of core either way. Three patterns are worth re-implementing clean-room. The <strong>watermark-coordinated backfill</strong> — low/high watermark markers emitted around a chunked table scan, PK-filtered against changes seen between the marks, cursor persisted for crash-resume — is the correct, memory-bounded way to replay historical rows into a derived store on plain Postgres, directly relevant once samen's deferred ClickHouse rollup wiring (an open operator TODO) activates, and it composes cleanly with the ADR-015 default-deny CDC classifier since column filtering happens before egress either way. A <strong>stable idempotency key on every emitted event</strong> (slot LSN + PK, or backfill cursor + PK) is the cheapest win in the cluster: samen's webhook egress, <code>Samen.Delivery.Chokepoint</code>, notification fan-out, and fleet report wire already retry via Oban, and a first-party, verifier-checkable idempotency-key convention upgrades "at-least-once and hope" into auditable exactly-once semantics — a guarantee samen can sabotage-test. And Sequin's <strong>Broadway/GenStage sink pipelines, partitioned by primary key</strong> so per-row ordering survives parallelization, is the canonical OTP answer for the day samen's fan-out (webhooks, ESP delivery, fleet reports, tsvector maintenance at scale) needs more throughput than discrete Oban jobs give it — read Sequin's SlotProcessor before designing that subsystem, and land Broadway itself in a samen_web/adapter package only, never core. The one item to explicitly reject is Sequin's security model: it streams raw row data to external sinks by design, no masking, no vault awareness — the precise anti-pattern samen's hero claim exists to prevent, so any CDC egress in samen stays behind the classifier and the token-blind wire regardless of what pattern is borrowed above it.</p>
+
+<svg viewBox="0 0 720 250" style="width:100%;max-width:720px;height:auto" role="img" aria-labelledby="sequin-title">
+<title id="sequin-title">Sequin's watermark-coordinated backfill merges with the live change stream via idempotency keys, then fans out through per-key-ordered Broadway sink pipelines</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">CDC PIPELINE SHAPE (Sequin, clean-room) -&gt; samen's cdc / rollup plane</text>
+
+<rect x="10" y="42" width="130" height="44" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="75" y="60" text-anchor="middle" font-size="11">Postgres source</text>
+<text x="75" y="74" text-anchor="middle" font-size="10" fill="var(--muted)">replication slot</text>
+
+<path d="M140,55 L190,55" stroke="currentColor" fill="none" marker-end="url(#s1)"/>
+<rect x="190" y="34" width="150" height="40" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="265" y="58" text-anchor="middle" font-size="11">Live change stream</text>
+
+<path d="M140,75 L190,110" stroke="currentColor" fill="none" marker-end="url(#s1)"/>
+<rect x="190" y="92" width="150" height="40" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="265" y="112" text-anchor="middle" font-size="11">Chunked backfill scan</text>
+<text x="265" y="126" text-anchor="middle" font-size="10" fill="var(--muted)">low/high watermarks</text>
+
+<path d="M340,54 L390,88" stroke="var(--accent)" fill="none" marker-end="url(#s2)"/>
+<path d="M340,112 L390,88" stroke="var(--accent)" fill="none" marker-end="url(#s2)"/>
+<rect x="390" y="66" width="150" height="44" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="465" y="85" text-anchor="middle" font-size="11">Idempotency-key merge</text>
+<text x="465" y="99" text-anchor="middle" font-size="10" fill="var(--muted)">LSN+PK / cursor+PK</text>
+
+<path d="M540,88 L590,88" stroke="var(--accent)" fill="none" marker-end="url(#s2)"/>
+<rect x="590" y="66" width="120" height="44" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="650" y="85" text-anchor="middle" font-size="11">Broadway sink</text>
+<text x="650" y="99" text-anchor="middle" font-size="10" fill="var(--muted)">per-key ordered</text>
+
+<path d="M650,110 L650,150 L465,150 L465,170" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#s3)"/>
+<rect x="345" y="172" width="240" height="42" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="465" y="190" text-anchor="middle" font-size="10">ADR-015 default-deny classifier</text>
+<text x="465" y="203" text-anchor="middle" font-size="10" fill="var(--muted)">gates every field before egress</text>
+
+<text x="10" y="238" font-size="10" fill="var(--muted)">samen's gap: backfill + idempotency-key convention absent today; classifier already exists and stays load-bearing</text>
+
+<defs>
+<marker id="s1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="currentColor"/></marker>
+<marker id="s2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+<marker id="s3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<h3>Cluster 2 — realtime, clustering, and retention, from Supabase Realtime</h3>
+<p>Supabase Realtime (supabase/realtime, Apache-2.0, ~7.6k stars, actively developed) is the WebSocket server behind Supabase's Postgres Changes/Broadcast/Presence features — a globally distributed Elixir cluster, multi-tenant by design, explicitly at-most-once ("does not guarantee that every message will be delivered"). The product itself is not adoptable: Broadcast payloads go to clients as raw JSON with no masking chokepoint, and samen's chat/notifications/operator cockpit are already served in-process by LiveView and Phoenix.PubSub, so bolting on a separate WebSocket server would only add an ungoverned egress surface. But three infrastructure choices inside it are the section's best single steal. <strong><code>libcluster</code> + <code>libcluster_postgres</code></strong> discovers cluster nodes through the Postgres database itself — no epmd, no DNS, no Kubernetes — which closes samen's own listed gap ("Oban multi-node in production: proven locally only, via a two-BEAM-node <code>:peer</code> sim") with zero new infrastructure, exactly the "encode knowledge as infra" and Postgres-only-purity posture samen already holds; it's a small hex dep at the host/deploy layer, not core, so INV-4 doesn't even need to weigh in. <strong>Partition-by-day with drop-partition retention</strong> — Realtime's <code>realtime.messages</code> table is daily-partitioned with a 3-day retention enforced by dropping old partitions rather than deleting rows — is an O(1), vacuum-free pattern that maps directly onto samen's own <code>retention</code> subsystem, wide-event/audit/notification streams, and the ADR-046 transcript-retention rule, and composes cleanly with the crypto-shred story since tokens-only rows simply expire by partition. And <strong>per-tenant rate/usage counters</strong> (ETS/counters flushed periodically to telemetry, feeding both throttling and metrics) generalize samen's current Hammer-backed ingress-only rate limiting into something that can back ADR-047 AI budget enforcement, the automation engine's existing Health/Breaker, and eventual usage-based billing. One more idea is worth naming without adopting the mechanism: Realtime authorizes channel joins by asking the tenant's own Postgres (RLS on <code>realtime.messages</code>) — the samen-native equivalent, if tenant-facing realtime subscriptions ever ship, is routing channel-join through Ash policies and <code>OrgScope</code> at a single subscribe chokepoint, same seam, samen's policy engine instead of RLS.</p>
+
+<svg viewBox="0 0 720 220" style="width:100%;max-width:720px;height:auto" role="img" aria-labelledby="realtime-title">
+<title id="realtime-title">Supabase Realtime's two infrastructure steals: BEAM nodes discover each other through a Postgres table instead of DNS or Kubernetes, and high-churn tables retain data by dropping daily partitions instead of deleting rows</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">TWO INFRASTRUCTURE STEALS (Supabase Realtime) -&gt; samen host/deploy layer</text>
+
+<rect x="10" y="40" width="110" height="40" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="65" y="64" text-anchor="middle" font-size="11">BEAM node A</text>
+<rect x="10" y="90" width="110" height="40" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="65" y="114" text-anchor="middle" font-size="11">BEAM node B</text>
+
+<path d="M120,60 L190,80" stroke="var(--accent)" fill="none" marker-end="url(#r1)"/>
+<path d="M120,110 L190,90" stroke="var(--accent)" fill="none" marker-end="url(#r1)"/>
+<rect x="190" y="62" width="170" height="44" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="275" y="81" text-anchor="middle" font-size="11">Postgres nodes table</text>
+<text x="275" y="95" text-anchor="middle" font-size="10" fill="var(--muted)">libcluster_postgres discovery</text>
+<path d="M360,84 L400,84" stroke="var(--accent)" fill="none" marker-end="url(#r1)"/>
+<rect x="400" y="62" width="140" height="44" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="470" y="81" text-anchor="middle" font-size="11">Cluster formed</text>
+<text x="470" y="95" text-anchor="middle" font-size="10" fill="var(--muted)">Oban multi-node ready</text>
+
+<rect x="10" y="155" width="150" height="44" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="85" y="174" text-anchor="middle" font-size="11">wide_event table</text>
+<text x="85" y="188" text-anchor="middle" font-size="10" fill="var(--muted)">partitioned by day</text>
+<path d="M160,177 L210,177" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#r2)"/>
+<rect x="210" y="155" width="180" height="44" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="300" y="174" text-anchor="middle" font-size="11">Old partition: DROP</text>
+<text x="300" y="188" text-anchor="middle" font-size="10" fill="var(--muted)">not row DELETE — O(1), no vacuum</text>
+
+<text x="410" y="177" font-size="10" fill="var(--muted)">candidates: wide events, transcripts,</text>
+<text x="410" y="191" font-size="10" fill="var(--muted)">notification feed, automation RunRecords</text>
+
+<defs>
+<marker id="r1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+<marker id="r2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<h3>Cluster 3 — sink registries and alert loops, from Logflare, Plural Console, and ServiceRadar</h3>
+<p>The remaining three projects converge on the same lesson from different angles: once an event or metric leaves the code that produced it, route it through one small, uniform behaviour instead of hard-coding the destination — and Sequin's Broadway sink delivery (Cluster 1) is really the same idea from the ingestion side, so the pattern shows up on both ends of samen's pipeline. Logflare (Logflare/logflare, Apache-2.0, Supabase-owned production SaaS) structures multi-backend fan-out as an <code>Adaptor</code> behaviour — <code>cast_config/validate_config/transform_config</code> per backend type, a type→module registry, one supervised process pair per <code>{source, backend}</code> — which is the clean, minimal-surface way to grow samen's currently single-sink wide-event exporter (<code>samen_core/lib/samen/wide_event/sinks/otlp.ex</code>) into a plural story (webhook/Slack for operator alerts, a Postgres sink for local dev) without touching the emit path; effort S–M. Layered on top of that same adaptor set, Logflare's <strong>AlertQuery loop</strong> — a stored query, a cron schedule via Oban, a threshold check, dispatch through the adaptors — is a direct design blueprint for samen's still-open G11 "public status/SLA + alerting" gap, mapping onto samen's own <code>Samen.Metrics.definitions/0</code> and Prometheus egress; samen would harden it further with fail-honest behavior on an unconfigured notify target and approvals-gating if an alert can trigger a mutating action. Logflare's third contribution is narrower but concrete: its <code>Cloak.Vault</code> key ring (<code>default/retired/fallback</code> keys plus a <code>do_migrate/0</code> re-encryption path) is a well-tested rotation <em>state machine</em> worth adapting for <code>Samen.Kms</code>'s operator-facing key-rotation UX — samen keeps its own AES-256-GCM vault (ADR-003 already rejected Cloak itself for the PII path), only the rotation shape transfers. Plural Console (pluralsh/console, AGPL-3.0 — patterns only, no code lift) is a Kubernetes-fleet control plane whose domain doesn't transfer, but three of its ops-library choices do: <code>prom_ex</code> auto-instruments Phoenix/Ecto/Oban/BEAM metrics on top of the same <code>:telemetry</code> events samen already emits, additive and cheap (verify it doesn't leak <code>pii_</code>-prefixed labels via the existing <code>samen.verify.metric_labels</code> tier); its <strong>per-rule multi-channel notification fan-out</strong> (one event, routed by rule to Slack, Teams, and email concurrently) is the shape for a future <code>samen_slack</code>/<code>samen_teams</code> adapter pair once the fleet cockpit's notifications module needs more than inbox+prefs; and its <strong>pull-based, reverse-tunnel agent model</strong> — managed nodes poll the control plane and tunnel back, never receiving inbound connections — is a naming/stance clarification samen's ADR-044 fleet cockpit already leans toward but hasn't committed to explicitly, worth locking in as directives execution matures past observability. ServiceRadar (Carver Automation, Apache-2.0) is the outlier: a network-monitoring platform with an Ash/Phoenix/Oban control plane wrapped by Go and Rust satellites for collection and query execution. Nothing in its product surface overlaps samen's mission, and it has no PII vaulting, masking, or crypto-shred equivalent to compare against — but it stands as real-world validation that Ash/Phoenix/Oban can serve as the "brain" of a production system while performance-sensitive edges live in satellite services, reinforcing rather than contradicting samen's ADR-037 lean-kernel posture. Its Rust-NIF-embedded query engine (Rustler, not a sidecar) is worth a line as a precedent if samen ever needs a compiled expression evaluator inside <code>samen_web</code>, but nothing on the roadmap calls for it today.</p>
+
+<svg viewBox="0 0 720 230" style="width:100%;max-width:720px;height:auto" role="img" aria-labelledby="sink-title">
+<title id="sink-title">A uniform sink-adaptor registry, echoed by Logflare and Sequin, feeds both direct wide-event export and a cron-scheduled alert loop; Plural Console's per-rule fan-out extends the same registry to multi-channel operator notifications</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">SINK REGISTRY + ALERT LOOP (Logflare, Plural) -&gt; samen wide_event / G11</text>
+
+<rect x="10" y="42" width="120" height="42" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="70" y="61" text-anchor="middle" font-size="11">wide_event emit</text>
+<path d="M130,63 L180,63" stroke="currentColor" fill="none" marker-end="url(#l1)"/>
+
+<rect x="180" y="42" width="150" height="42" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="255" y="61" text-anchor="middle" font-size="11">Sink registry</text>
+<text x="255" y="74" text-anchor="middle" font-size="9" fill="var(--muted)">Adaptor behaviour, type→module</text>
+
+<path d="M330,55 L380,42" stroke="currentColor" fill="none" marker-end="url(#l1)"/>
+<path d="M330,63 L380,63" stroke="currentColor" fill="none" marker-end="url(#l1)"/>
+<path d="M330,71 L380,84" stroke="currentColor" fill="none" marker-end="url(#l1)"/>
+<rect x="380" y="26" width="90" height="30" rx="6" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="425" y="45" text-anchor="middle" font-size="10">OTLP</text>
+<rect x="380" y="60" width="90" height="30" rx="6" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="425" y="79" text-anchor="middle" font-size="10">Webhook/Slack</text>
+
+<rect x="10" y="120" width="150" height="42" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="85" y="139" text-anchor="middle" font-size="11">Stored query, cron</text>
+<text x="85" y="152" text-anchor="middle" font-size="9" fill="var(--muted)">Oban-scheduled</text>
+<path d="M160,141 L200,141" stroke="currentColor" fill="none" marker-end="url(#l1)"/>
+<rect x="200" y="120" width="130" height="42" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="265" y="139" text-anchor="middle" font-size="11">Threshold check</text>
+<path d="M330,141 L255,110" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#l2)"/>
+
+<text x="365" y="141" font-size="9" fill="var(--muted)">match -&gt; dispatch through</text>
+<text x="365" y="153" font-size="9" fill="var(--muted)">the same sink registry</text>
+
+<rect x="200" y="185" width="130" height="30" rx="6" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="265" y="204" text-anchor="middle" font-size="10">Per-rule fan-out</text>
+<path d="M265,162 L265,185" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#l2)"/>
+<text x="345" y="204" font-size="9" fill="var(--muted)">Slack + Teams + email, concurrently (Plural)</text>
+
+<defs>
+<marker id="l1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="currentColor"/></marker>
+<marker id="l2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<h3>The five, in detail</h3>
+
+<div class="grid">
+
+<div class="card">
+<h4><a href="https://github.com/sequinstream/sequin">Sequin</a> <span class="badge badge-medium">medium</span></h4>
+<p>MIT, Elixir/Phoenix/OTP, ~50k ops/s claimed at ~55ms latency, 16+ sink adapters — but the company was acquired, Sequin Cloud shut down 2025-10-23, and the OSS repo is now explicitly maintenance-mode (security/critical fixes only). A single-container Postgres CDC platform that attaches to a logical replication slot and streams row changes downstream.</p>
+<p><strong>Adopt:</strong> the watermark-coordinated backfill protocol for merging a chunked historical scan with the live change stream; a stable idempotency-key convention (LSN+PK or cursor+PK) on every emitted event; Broadway/GenStage sink pipelines partitioned by primary key for per-row ordering under parallel fan-out; Postgrex-level replication-slot ownership as a reference for a future WAL-level tap. <span class="effort">S</span> for the idempotency-key convention, <span class="effort">M</span> for backfill and Broadway, <span class="effort">L</span> for a first-party WAL tap (defer until ClickHouse rollup activates).</p>
+<p>Why it fits: it's the best open Elixir/OTP reference for exactly the CDC mechanics samen's deferred rollup wiring will eventually need, on the same stack — but its raw-row streaming model has no masking chokepoint, so every pattern gets re-implemented behind ADR-015's classifier rather than vendored, and INV-4 rules it out as a dependency regardless of maintenance status.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/supabase/realtime">Supabase Realtime</a> <span class="badge badge-medium">medium</span></h4>
+<p>Apache-2.0, ~7.6k stars, v2.129.x, actively developed. Supabase's production WebSocket server: Postgres Changes (WAL-polling with pid-routing), Broadcast (ephemeral or durable-via-partitioned-table), and Presence (CRDT-backed). Explicitly at-most-once delivery; multi-tenant with per-tenant RLS-delegated authorization.</p>
+<p><strong>Adopt:</strong> <code>libcluster</code> + <code>libcluster_postgres</code> for production multi-node BEAM clustering with zero new infrastructure; partition-by-day + drop-partition retention for high-churn append tables (wide events, transcripts, notification feed, RunRecords); per-tenant rate/usage counters (ETS/counters flushed to telemetry) generalizing today's ingress-only Hammer limiting. The RLS-as-authz-seam idea is worth studying, not copying, if tenant-facing realtime subscriptions ever ship. <span class="effort">S</span> for clustering, <span class="effort">M</span> for retention and counters, <span class="effort">L</span> for a policy-routed subscribe chokepoint (speculative).</p>
+<p>Why it fits: closes a named samen gap (multi-node Oban proven only via local <code>:peer</code> sim) with a Postgres-only dependency that matches samen's own purity rule, and the retention/counter patterns are directly reusable Postgres-native infrastructure — while the product itself (raw JSON to clients, no masking) is exactly what samen's own LiveView/PubSub realtime avoids.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/Logflare/logflare">Logflare</a> <span class="badge badge-medium">medium</span></h4>
+<p>Apache-2.0, ~1,000 stars, actively pushed — the real production codebase behind Supabase's hosted log-ingestion/search/alerting product, not a reference toy. Per-source Broadway pipelines fan out to a pluggable set of backends (BigQuery, ClickHouse, Postgres, S3, Datadog, Slack, webhook, OTLP, and more) through a uniform <code>Adaptor</code> behaviour.</p>
+<p><strong>Adopt:</strong> generalize samen's single OTLP wide-event sink into an Adaptor-style registry (uniform config validation, per-backend supervision, type→module mapping) so adding a webhook/Slack operator-alert sink or a Postgres dev sink doesn't touch the emit path; the cron-query-threshold-dispatch <code>AlertQuery</code> loop as the design blueprint for G11's still-open alerting/status gap; the <code>Cloak.Vault</code> key-ring rotation state machine (<code>default/retired/fallback</code> + background <code>do_migrate/0</code>) as a rotation UX to adapt for <code>Samen.Kms</code>. <span class="effort">S</span>–<span class="effort">M</span> across the set.</p>
+<p>Why it fits: it's a mature, actively-maintained Elixir codebase solving the exact "one event, many destinations" and "scheduled query becomes a notification" problems samen has named as open gaps — narrow enough to mine piecewise without adopting the BigQuery/ClickHouse-heavy dependency surface or the multi-tenant SaaS shell around it.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/pluralsh/console">Plural Console</a> <span class="badge badge-medium">medium</span></h4>
+<p>AGPL-3.0 source (MIT vendor binaries require a Plural license) — patterns only, never code. A mature Elixir/Phoenix + Absinthe GraphQL control plane for Kubernetes fleet GitOps, with a Go <code>deployment-operator</code> agent on each managed cluster that polls the control plane and reverse-tunnels back, so Console never needs inbound network access to tenant infrastructure. Not Ash-based.</p>
+<p><strong>Adopt:</strong> the pull-based, reverse-tunnel agent stance as an explicit commitment for samen's ADR-044 fleet cockpit (rather than a future push/webhook-to-tenant path); <code>prom_ex</code> for Phoenix/Ecto/Oban-aware Prometheus metrics layered on samen's existing <code>:telemetry</code> events; per-rule multi-channel notification fan-out (Slack/Teams/email, decoupled from the event source) as the shape for a future <code>samen_slack</code>/<code>samen_teams</code> adapter pair. <code>anubis_mcp</code> is worth a read-only diff against samen's hand-built MCP server for protocol-compliance edges. <span class="effort">S</span> for the stance clarification and <code>prom_ex</code>, <span class="effort">M</span> for notification routing.</p>
+<p>Why it fits: the domain (Kubernetes GitOps/IaC) doesn't transfer at all, but a handful of Elixir/Phoenix ops libraries and architectural stances a mature multi-tenant control plane converged on independently line up cleanly with samen's own fleet-cockpit and observability gaps — read for the pattern, never the code, given the AGPL boundary.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://code.carverauto.dev/carverauto/serviceradar">ServiceRadar</a> <span class="badge badge-medium">medium</span></h4>
+<p>Apache-2.0. An AI-native network-monitoring/ITOM/security-analytics platform, polyglot by design: Go edge agents, NATS JetStream as the message backbone, an Elixir/Phoenix/Ash control plane (<code>core-elx</code>) for orchestration and Oban job scheduling, and a Rust-based query language (SRQL) embedded into the Phoenix LiveView dashboard via Rustler/NIF.</p>
+<p><strong>Adopt:</strong> mostly validation rather than new mechanism — a real production system running Ash/Phoenix/Oban as its control-plane "brain" while pushing performance-sensitive edges (collection, query execution, visualization) to Go/Rust satellites reinforces samen's own ADR-037 lean-kernel posture. The Rustler/NIF pattern (embed a compiled query engine directly rather than a sidecar service) is a concrete precedent worth a line if samen ever needs a performance-critical, non-Elixir computation inside <code>samen_web</code>. <span class="effort">S</span>, mostly documentation/framing rather than code.</p>
+<p>Why it fits: lowest-relevance of the five — no PII vaulting, no tenant-scoped RBAC, no analog anywhere in samen's product surface — but it's independent, real-world confirmation that samen's "keep the Elixir core lean, push vendor/perf-sensitive code to satellites" choice is a validated production shape, not a theoretical one.</p>
+</div>
+
+</div>
+
+<p class="verdict">Net read for a product leader skimming only this section: none of the five changes samen's dependency graph today — one MIT-but-abandoned, two Apache-2.0 hosted-product codebases with no masking chokepoint, one AGPL, one out-of-domain — but four separate, currently-open samen gaps get a concrete blueprint from this batch: multi-node Oban clustering (<code>libcluster_postgres</code>, Supabase Realtime, <span class="effort">S</span>), the single-sink wide-event exporter (Adaptor-style registry, Logflare/Sequin, <span class="effort">S</span>–<span class="effort">M</span>), the still-open G11 alerting/status gap (cron-query-threshold-dispatch loop, Logflare, <span class="effort">M</span>), and retention-by-partition for high-churn tables (Supabase Realtime, <span class="effort">M</span>). A first-party idempotency-key convention (Sequin, <span class="effort">S</span>) is the cheapest, highest-leverage single item in the whole set — it upgrades every existing Oban-backed retry path to auditable exactly-once with no new subsystem. Everything else — Plural's notification routing and reverse-tunnel stance, Logflare's key-rotation UX, ServiceRadar's architecture validation — is real but secondary, worth scheduling after the four headline items rather than alongside them.</p>
+
+</section>

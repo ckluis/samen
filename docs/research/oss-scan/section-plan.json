@@ -1,0 +1,262 @@
+{
+  "report_title": "samen OSS Scan: Backlog Adoption Report",
+  "reader": "Product leader selecting samen backlog items (Elixir/Ash SaaS foundry)",
+  "source_dir": "/Users/clank/Desktop/projects/samen-oss-scan/findings/",
+  "total_files": 127,
+  "design_notes": [
+    "Every one of the 127 findings files is assigned to exactly one section's `files` array.",
+    "The Executive Summary owns the 10 relevance:high files outright (their full deep-dive treatment lives there, not duplicated elsewhere).",
+    "Thematic deep-dive sections are built entirely from the 50 relevance:medium files, clustered into 7 real themes derived from the actual category/verdict data (not the high-relevance items, which are already fully covered in the Executive Summary).",
+    "Quick Hits is the single required medium-relevance catch-all for medium items too scattered across small categories (Developer Tools, Content Mgmt, Education, Games) to justify their own theme section.",
+    "Evaluated & Skipped closes the report with all 65 low + 2 none items (67 total), one line each.",
+    "Section order runs from most strategically central to samen's own architecture (agent-loop core patterns) outward to peripheral vertical-app patterns, ending in the scoreboard's long tail."
+  ],
+  "sections": [
+    {
+      "id": "01-executive-summary",
+      "title": "Executive Summary & Scoreboard",
+      "position": 1,
+      "relevance_tier": "high",
+      "purpose": "Fast top-of-report scoreboard: what to actually act on. Lists the 10 strongest adoption candidates (all relevance:high), each with project name, license, one-line verdict, and the specific samen gap/ADR it maps to. Includes a small counts table (10 high / 50 medium / 65 low / 2 none across 127 scanned repos) so the reader has denominator context before diving in.",
+      "file_count": 10,
+      "files": [
+        "041-langchain-for-elixir.md",
+        "047-sagents.md",
+        "049-plausible-analytics.md",
+        "050-lightning.md",
+        "070-keila.md",
+        "098-aethers3.md",
+        "100-boruta-server.md",
+        "103-health.md",
+        "108-osmotic.md",
+        "021-loomkin.md"
+      ],
+      "file_notes": {
+        "041-langchain-for-elixir.md": "Do not depend on it (INV-4 risk), but mine trajectory-eval testing, tool-arg error feedback, GenAI OTel semconv, MessageDelta streaming for the AI plane.",
+        "047-sagents.md": "Do not adopt (LangChain dep, no masking chokepoint), but its LiveView streaming event taxonomy and HITL decision model map directly onto ADR-047.",
+        "049-plausible-analytics.md": "AGPL — patterns only. Cookie-less identity + ClickHouse ingestion + streamed export map onto samen's analytics/DSAR/status-page gaps.",
+        "050-lightning.md": "LGPL — patterns only. Production workflow-automation platform on samen's exact stack; run/snapshot execution model and retention discipline worth mining.",
+        "070-keila.md": "AGPL — patterns only. Delivery pipeline, per-sender rate limiting, bounce handling, MJML+Liquid templating for marketing/delivery scope.",
+        "098-aethers3.md": "Fills the open Storage.S3 skeleton gap directly; AP/CP split and honest-gaps doc style echo samen's own philosophy.",
+        "100-boruta-server.md": "OpenID-certified OAuth2/OIDC authorization-server umbrella — strongest reference (possible vendor candidate) for samen's deferred 'become an OIDC provider' gap.",
+        "103-health.md": "AGPL — patterns only. Targets the open G11 status-page gap; pull-mode active probing samen's push-only heartbeat lacks.",
+        "108-osmotic.md": "BSD-2-Clause (direct code study viable) but pre-adoption-stage (0 stars). Billing-ledger and fail-open/closed discipline map ~1:1 onto the G13 usage-rating gap.",
+        "021-loomkin.md": "Do not adopt its Jido/req_llm stack (already rejected), but steal the decision graph, keeper-based context offload, and mission-control UI ideas."
+      }
+    },
+    {
+      "id": "02-agent-frameworks-orchestration",
+      "title": "Deep Dive: Agent Frameworks & Orchestration Libraries",
+      "position": 2,
+      "relevance_tier": "medium",
+      "purpose": "Elixir/OTP-native agent-loop and tool-orchestration libraries (the 'Agent Frameworks and Development Tools' category, medium tier). Directly informs samen's own ADR-047 agent-loop design: what governance, tool-calling, and multi-agent-coordination patterns other BEAM builders have already worked out.",
+      "file_count": 8,
+      "files": [
+        "034-alloy.md",
+        "036-beamweaver.md",
+        "037-cantrip.md",
+        "038-condukt.md",
+        "039-elgraph.md",
+        "042-legion.md",
+        "044-lemon.md",
+        "046-nous.md"
+      ]
+    },
+    {
+      "id": "03-software-factories",
+      "title": "Deep Dive: Software Factories & Multi-Agent Dev Platforms",
+      "position": 3,
+      "relevance_tier": "medium",
+      "purpose": "Full 'AI-writes-software' orchestration platforms (build/plan/review/ship loops for coding agents) — the category samen's own autonomous-loop tooling most directly competes with and can learn UX/process patterns from. Includes one license-encumbered entrant (Svärm) called out inline rather than siloed, since it's substantively a software-factory play.",
+      "file_count": 8,
+      "files": [
+        "017-camelot.md",
+        "018-controlkeel.md",
+        "019-genesis.md",
+        "020-hive.md",
+        "024-pixir.md",
+        "025-shep.md",
+        "026-symphony.md",
+        "030-sv-rm.md"
+      ]
+    },
+    {
+      "id": "04-agent-platforms-license-risk",
+      "title": "Deep Dive: Agent Platforms With License Risk",
+      "position": 4,
+      "relevance_tier": "medium",
+      "purpose": "Agent/orchestration platforms that are technically relevant but carry licensing terms (source-available, non-OSS, field-of-use restrictions, etc.) that block direct adoption into MIT-licensed samen. Kept as its own section because the go/no-go call here is legal, not technical — a product leader needs this flagged distinctly rather than buried in a general agent-frameworks list.",
+      "file_count": 3,
+      "files": [
+        "011-codex-pooler.md",
+        "012-cyfr.md",
+        "016-neoharness.md"
+      ]
+    },
+    {
+      "id": "05-ai-agent-products",
+      "title": "Deep Dive: AI Agent Products & Personal Assistants",
+      "position": 5,
+      "relevance_tier": "medium",
+      "purpose": "Single-user / personal-scale AI agent products (personal assistants, dreaming/memory agents, coding companions) built on Elixir/OTP. Wrong problem domain for samen's multi-tenant SaaS posture, but a dense source of pattern-mining ideas for the AI plane: memory, skills, self-scheduling, introspectable tool surfaces.",
+      "file_count": 9,
+      "files": [
+        "000-alexclaw.md",
+        "001-ankole.md",
+        "003-glorbo.md",
+        "004-long.md",
+        "005-osa.md",
+        "006-pepe.md",
+        "007-shem.md",
+        "008-vibe.md",
+        "009-zaq.md"
+      ]
+    },
+    {
+      "id": "06-data-realtime-observability",
+      "title": "Deep Dive: Data Pipelines, Realtime & Observability/Ops",
+      "position": 6,
+      "relevance_tier": "medium",
+      "purpose": "Plumbing samen needs regardless of vertical: change-data-capture/streaming (Sequin, Supabase Realtime), and operational visibility (Logflare log ingestion, Plural Console platform ops, ServiceRadar monitoring). Complements the high-relevance Health and AetherS3 findings already covered in the Executive Summary.",
+      "file_count": 5,
+      "files": [
+        "051-sequin.md",
+        "052-supabase-realtime.md",
+        "104-logflare.md",
+        "109-plural-console.md",
+        "112-serviceradar.md"
+      ]
+    },
+    {
+      "id": "07-business-collaboration-saas",
+      "title": "Deep Dive: Business & Collaboration / Productivity SaaS",
+      "position": 7,
+      "relevance_tier": "medium",
+      "purpose": "Vertical Elixir/Phoenix SaaS products (scheduling, project/goal tracking, contract docs, team collaboration) whose domain models and multi-tenant UX patterns are directly analogous to what samen tenants will eventually build or what samen's own product surface could look like.",
+      "file_count": 6,
+      "files": [
+        "053-accent.md",
+        "055-craftplan.md",
+        "057-nyght.md",
+        "058-operately.md",
+        "059-tymeslot.md",
+        "060-wraft.md"
+      ]
+    },
+    {
+      "id": "08-communication-social-federation",
+      "title": "Deep Dive: Communication & Social / Federation",
+      "position": 8,
+      "relevance_tier": "medium",
+      "purpose": "Fediverse/ActivityPub and social-communication platforms (Bonfire, Mobilizon, vutuv, etc.). Lower direct-adoption likelihood for a SaaS foundry, but real patterns around federation protocols, moderation, and social-graph data modeling worth a scoped look.",
+      "file_count": 5,
+      "files": [
+        "062-baudrate.md",
+        "064-bonfire.md",
+        "068-kammer.md",
+        "074-mobilizon.md",
+        "078-vutuv.md"
+      ]
+    },
+    {
+      "id": "09-quick-hits",
+      "title": "Quick Hits (Medium Relevance, Miscellaneous)",
+      "position": 9,
+      "relevance_tier": "medium",
+      "purpose": "Remaining medium-relevance findings that don't cluster into a theme large enough to warrant its own deep-dive section — one project each from Developer Tools, Content Management, Education, and Games categories. One paragraph each: what it is, the one pattern worth noting, why it didn't rate a full section.",
+      "file_count": 6,
+      "files": [
+        "081-nivose.md",
+        "083-azimutt.md",
+        "085-gitblixt.md",
+        "092-semaphore.md",
+        "095-oli-torus.md",
+        "097-wanderer.md"
+      ]
+    },
+    {
+      "id": "10-evaluated-and-skipped",
+      "title": "Evaluated & Skipped",
+      "position": 10,
+      "relevance_tier": "low/none",
+      "purpose": "Full accounting of every project scanned but not carried forward: all 65 relevance:low and 2 relevance:none findings, one line each (project name + one-line verdict), grouped by category for scanability. Exists so the reader can confirm nothing was silently dropped and spot-check any 'low' call they disagree with.",
+      "file_count": 67,
+      "files": [
+        "002-fermix.md",
+        "010-buster-claw.md",
+        "013-frontman.md",
+        "014-jidobuilder.md",
+        "015-jido-conductor.md",
+        "022-loopyard.md",
+        "023-maestro.md",
+        "027-agent-harness.md",
+        "028-codrift.md",
+        "029-conductor.md",
+        "031-jido.md",
+        "032-agens.md",
+        "033-agentforge.md",
+        "035-avalon.md",
+        "040-jido-studio.md",
+        "043-legionweb.md",
+        "045-llmagent.md",
+        "048-synapse.md",
+        "054-claper.md",
+        "056-mindwendel.md",
+        "061-akkoma.md",
+        "063-bboard.md",
+        "065-comcent-ce.md",
+        "066-foglet-bbs.md",
+        "067-inkwell.md",
+        "069-kazarma.md",
+        "071-lanyard.md",
+        "072-linkhut.md",
+        "073-liv.md",
+        "075-myconet.md",
+        "076-philomena.md",
+        "077-pleroma.md",
+        "079-soundbored.md",
+        "080-alchemypub.md",
+        "082-asciinema-server.md",
+        "084-code-stats.md",
+        "086-harpoon.md",
+        "087-livebook.md",
+        "088-notesclub.md",
+        "089-opencov.md",
+        "090-rawpair.md",
+        "091-remit.md",
+        "093-share-a-secret.md",
+        "094-listudy.md",
+        "096-codebattle.md",
+        "099-astarte.md",
+        "101-extracker.md",
+        "102-flyingddns.md",
+        "105-lynx.md",
+        "106-nerveshub.md",
+        "107-ocsf-schema-server.md",
+        "110-poxa.md",
+        "111-runhyve-webapp.md",
+        "113-ambry.md",
+        "114-atlas.md",
+        "115-cannery.md",
+        "116-charsh.md",
+        "117-domovik.md",
+        "118-hacker-news-frontend.md",
+        "119-hydrasrt.md",
+        "120-midarr.md",
+        "121-mydia.md",
+        "122-pinchflat.md",
+        "123-podsync.md",
+        "124-revix.md",
+        "125-teslamate.md",
+        "126-trmnl-byos-phoenix.md"
+      ]
+    }
+  ],
+  "coverage_check": {
+    "sections_total": 10,
+    "files_assigned_total": 127,
+    "files_on_disk_total": 127,
+    "duplicates": 0,
+    "missing": 0
+  }
+}

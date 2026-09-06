@@ -1,0 +1,225 @@
+<section id="05-ai-agent-products">
+<h2>Deep Dive: AI Agent Products &amp; Personal Assistants</h2>
+
+<p>Nine self-hosted, BEAM-native agent products — AlexClaw, Ankole, Glorbo, Long, OSA, Pepe, Shem, Vibe, ZAQ — cluster together for the opposite reason the license-risk section did: nothing here is legally blocked, but every one of them is architecturally wrong for samen at the top level. All nine are single-user or single-tenant by design (no org model, no policy layer in samen's sense, several run <code>bash</code>/shell tools with full host access or eval directly against the runtime), and several are built on stacks samen has already rejected on the record (Jido, in Long and ZAQ; a filesystem-as-source-of-truth posture in Glorbo that has no answer to crypto-shred or org-scoping). None is a dependency candidate — bus factor ranges from "one maintainer, 0 stars" (Shem, Pepe) to "42–224 commits, pre-1.0, no compat contract" (Ankole, Glorbo) even at the higher-star end (Vibe ~99★, ZAQ 66★). What they are, collectively, is the densest idea-mine in this scan for one specific target: samen's own ADR-047 agent loop and the open G22 gap (packaging agent grounding for builders). Because eight of the nine independently solved overlapping problems — cost-aware model routing, long-horizon memory under a context budget, tool/skill discoverability, agent self-scheduling, egress attribution — the pattern below groups by <em>lesson</em> first and attributes every source, then gives each project its own card with the concrete adopt/reject call. Read the clusters for the design target; read the cards for provenance and effort.</p>
+
+<table class="quick-table">
+<thead>
+<tr><th>Project</th><th>Headline pattern to mine</th><th>Effort</th><th>Relevance</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="https://github.com/thatsme/AlexClaw">AlexClaw</a></td><td>Inbound content sanitizer, tier-based LLM router, embedding staleness tracking, capability-token attenuation</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/AgentBull/ankole">Ankole</a></td><td>Two-stage memory consolidation ("Dreaming"), citation-required audit-reversible memory blocks, RRF recall ranking</td><td><span class="effort">S</span>–<span class="effort">L</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/foobarto/glorbo">Glorbo</a></td><td>Tri-state fail-honest budget check, per-dispatch egress attribution token, heartbeat maintenance ticks, <code>doctor</code> preflight</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/mjason/long">Long</a></td><td>SKILL.md filesystem skills, single introspectable data tool instead of N bespoke tools, agent self-scheduling</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/Miosa-osa/OSA">OSA</a></td><td>6-step context-compaction pipeline, complexity-scored model-tier routing, deferred tool loading, workspace-trust gate</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/pepe-agent/pepe">Pepe</a></td><td>Complexity-based model triage + honest failover chain, tool-approval TTL vocabulary, directed agent-to-agent ACLs</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/thephilip/shem">Shem</a></td><td>Deterministic agent-run replay as a CI tier, fail-closed declared-action tool manifests, offline-verifiable attestation bundles</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/elixir-vibe/vibe">Vibe</a></td><td>Multi-surface attach over one supervised session, inspect/cancel/resume verbs on agent runs, skill-from-session-history distillation</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/www-zaq-ai/zaq">ZAQ</a></td><td>Progressive-disclosure agent skills, LLM-supplied-params-never-select-actor rule, persist-before-deliver ordering</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+</tbody>
+</table>
+
+<h3>Cluster 1 — cost control by construction: tiered routing and fail-honest budgets</h3>
+<p>Four projects independently arrive at the same shape for AI spend: classify the request, route it to the cheapest model tier that can do the job, and refuse rather than silently run up an unattributed bill. AlexClaw's router is DB-backed (provider type/tier/priority/daily-limit rows) with ETS+DB usage counters keyed <code>{provider, date}</code> and a step &gt; workflow &gt; global tier-override hierarchy. OSA classifies every inbound message into a 5-tuple and routes across a three-tier model ladder (utility/specialist/elite) with automatic mid-stream fallback. Pepe runs a one-shot triage classifier at session start that downgrades the whole session to a cheaper model on a "SIMPLE" verdict, paired with an explicit <code>failover</code> event on transient errors so substitution is never silent. Glorbo is the outlier worth stealing whole: its <code>BudgetTracker.check_budget/1</code> returns a tri-state — <code>:ok</code> / <code>{:alert, used, cap}</code> (80%, deduplicated) / <code>{:stop, used, cap}</code> (hard refusal) — and, critically, a provider whose usage parser can't attribute cost is <strong>refused at dispatch</strong> unless the caller explicitly opts in. That refusal is exactly samen's fail-honest adapter doctrine (ADR-014/024/026/038) applied to AI spend: samen's AI kernel already has one real provider behind <code>Samen.AI.Provider</code> and ADR-047 already commits to budgets and cost caps, so the tier router and the tri-state check are two halves of the same feature, both fitting as chokepoint-side logic — never inside `samen_anthropic` itself, per INV-4 — and both testable with the same sabotage-harness discipline the rest of samen uses (flip the refusal, a named test fails). Effort <span class="effort">M</span> for the router, <span class="effort">S</span> for the tri-state refusal grafted onto the existing budget substrate.</p>
+
+<svg viewBox="0 0 700 230" style="width:100%;max-width:700px;height:auto" role="img" aria-labelledby="cost-title">
+<title id="cost-title">Cost-aware dispatch: a request is classified into a tier, routed to the cheapest suitable provider, and a tri-state budget check either dispatches, alerts, or refuses before any spend is committed</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">COST-AWARE DISPATCH (AlexClaw + OSA + Pepe + Glorbo) -&gt; samen AI kernel</text>
+
+<rect x="10" y="46" width="120" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="70" y="65" text-anchor="middle" font-size="11">AI request</text>
+<text x="70" y="80" text-anchor="middle" font-size="10" fill="var(--muted)">at chokepoint</text>
+<path d="M130,69 L170,69" stroke="currentColor" fill="none" marker-end="url(#c1)"/>
+
+<rect x="170" y="46" width="130" height="46" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="235" y="65" text-anchor="middle" font-size="11">Tier classify</text>
+<text x="235" y="80" text-anchor="middle" font-size="10" fill="var(--muted)">light / medium / heavy</text>
+<path d="M300,69 L340,69" stroke="currentColor" fill="none" marker-end="url(#c1)"/>
+
+<rect x="340" y="46" width="130" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="405" y="65" text-anchor="middle" font-size="11">Provider select</text>
+<text x="405" y="80" text-anchor="middle" font-size="10" fill="var(--muted)">priority + daily limit</text>
+<path d="M470,69 L510,69" stroke="currentColor" fill="none" marker-end="url(#c1)"/>
+
+<rect x="510" y="46" width="180" height="46" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="600" y="65" text-anchor="middle" font-size="11">Budget check (tri-state)</text>
+<text x="600" y="80" text-anchor="middle" font-size="10" fill="var(--muted)">ok / alert 80% / stop</text>
+
+<path d="M600,92 L600,140" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#c2)"/>
+<rect x="480" y="140" width="210" height="70" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="585" y="159" text-anchor="middle" font-size="10">stop: refuse to run,</text>
+<text x="585" y="174" text-anchor="middle" font-size="10">operator notified —</text>
+<text x="585" y="189" text-anchor="middle" font-size="10" fill="var(--muted)">unattributed-cost provider</text>
+<text x="585" y="204" text-anchor="middle" font-size="10" fill="var(--muted)">refused unless opted in</text>
+
+<path d="M235,92 L235,150" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#c2)"/>
+<rect x="60" y="150" width="230" height="60" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="175" y="169" text-anchor="middle" font-size="10">ok: dispatch, counters update</text>
+<text x="175" y="184" text-anchor="middle" font-size="10">transient error: honest</text>
+<text x="175" y="199" text-anchor="middle" font-size="10" fill="var(--muted)">failover event, next tier tried</text>
+
+<text x="10" y="228" font-size="10" fill="var(--muted)">samen's gap: provider behaviour + one adapter exist; tier router and tri-state refusal are the missing chokepoint-side logic</text>
+
+<defs>
+<marker id="c1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="currentColor"/></marker>
+<marker id="c2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<h3>Cluster 2 — long-horizon memory: consolidation, chunking, and compaction under a context budget</h3>
+<p>A durable multi-turn agent loop eventually runs into two related but distinct pressures — the working context window fills up, and the useful facts from old sessions need to survive into new ones — and this scan turns up a clean division of labor between them. For the context-window pressure, OSA's 6-step pipeline (micro-compact old tool results, strip/merge tool args, structured compression, 413-recovery collapse, post-compact reinjection of critical context, priority-weighted budget allocation) and Pepe's simpler at-60%-replace-the-middle-with-a-summary approach — including Pepe's explicit tradeoff note that per-turn "micro-compaction" keeps cost steady but breaks provider prompt-cache reuse — are both directly portable to ADR-047's loop, with one non-negotiable samen twist neither source enforces: every compaction/summarization call is itself governed egress and must run through the masking chokepoint with a per-turn grant re-scrub, and the compacted history must stay crypto-shreddable (tokens, not restored plaintext) to respect the ADR-046 erasure envelope. For the cross-session pressure, Ankole's "Dreaming" is the standout design doc: a two-stage offline job (Stage A collapses raw chat into episode summaries; Stage B curates episodes into knowledge entries) triggered by silence/backlog thresholds, where the cursor advances only on success and every persisted block must cite a canonical source marker — paired with a before/after audit log that supports inverse-operation recovery (replay newest-to-oldest, stop on conflict rather than clobber) and withdrawal propagation (deleting a source reverses only the derived blocks that still match it). AlexClaw contributes the mechanical half that composes underneath either design: async embed-after-insert so writes never block on the embedding call, parent/child semantic chunking (children embedded, parent keeps full text, search dedups by parent), and embedding-model staleness tracking with a batch <code>reembed_all</code>. Ankole's recall recipe layers on top: hybrid keyword+vector via Reciprocal Rank Fusion, exponential temporal decay with a knowledge floor, and per-candidate token caps inside a global budget so one long thread can't starve others — directly upgradeable onto samen's existing pgvector + non-PII tsvector search using Postgres FTS instead of Ankole's ParadeDB dependency, so zero new infra. The unifying samen-specific constraint across all of it: consolidation, chunking, and recall all operate on already-masked content and gate any shared-store write through the E3 approvals engine — Ankole explicitly ships no approval flow for memory writes, which is the one place samen should deliberately diverge. Effort <span class="effort">M</span> for compaction (both sources), <span class="effort">L</span> for full Dreaming-style consolidation, <span class="effort">S</span> each for staleness tracking and parent/child chunking.</p>
+
+<svg viewBox="0 0 700 220" style="width:100%;max-width:700px;height:auto" role="img" aria-labelledby="mem-title">
+<title id="mem-title">Long-horizon memory pipeline: in-session compaction relieves context pressure turn by turn, while an offline two-stage consolidation job turns episodes into cited, embedded, re-rankable knowledge with audit-reversible writes</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">MEMORY UNDER A CONTEXT BUDGET (Ankole + AlexClaw + OSA + Pepe) -&gt; samen agent loop</text>
+
+<rect x="10" y="44" width="140" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="80" y="63" text-anchor="middle" font-size="11">Live turn</text>
+<text x="80" y="78" text-anchor="middle" font-size="10" fill="var(--muted)">context nearing budget</text>
+<path d="M150,67 L190,67" stroke="currentColor" fill="none" marker-end="url(#m1)"/>
+
+<rect x="190" y="44" width="150" height="46" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="265" y="63" text-anchor="middle" font-size="11">In-session compact</text>
+<text x="265" y="78" text-anchor="middle" font-size="10" fill="var(--muted)">masked chokepoint, per-turn</text>
+
+<rect x="10" y="120" width="140" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="80" y="139" text-anchor="middle" font-size="11">Session ends</text>
+<text x="80" y="154" text-anchor="middle" font-size="10" fill="var(--muted)">silence / backlog trigger</text>
+<path d="M150,143 L190,143" stroke="currentColor" fill="none" marker-end="url(#m1)"/>
+
+<rect x="190" y="120" width="150" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="265" y="139" text-anchor="middle" font-size="11">Stage A: episode</text>
+<text x="265" y="154" text-anchor="middle" font-size="10" fill="var(--muted)">chat -&gt; summary</text>
+<path d="M340,143 L380,143" stroke="currentColor" fill="none" marker-end="url(#m1)"/>
+
+<rect x="380" y="120" width="150" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="455" y="139" text-anchor="middle" font-size="11">Stage B: curate</text>
+<text x="455" y="154" text-anchor="middle" font-size="10" fill="var(--muted)">cited knowledge entry</text>
+<path d="M530,143 L570,143" stroke="currentColor" fill="none" marker-end="url(#m1)"/>
+
+<rect x="570" y="120" width="120" height="46" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="630" y="139" text-anchor="middle" font-size="11">Chunk + embed</text>
+<text x="630" y="154" text-anchor="middle" font-size="10" fill="var(--muted)">parent/child, RRF recall</text>
+
+<path d="M630,166 L630,190 L265,190 L265,166" stroke="var(--muted)" fill="none" stroke-dasharray="4 3"/>
+<text x="270" y="188" font-size="10" fill="var(--muted)">E3 approval gates every shared-store write; cursor advances only on success</text>
+
+<text x="10" y="208" font-size="10" fill="var(--muted)">samen's gap: erasure-envelope-compliant transcripts exist; the offline consolidation job and RRF recall do not</text>
+
+<defs>
+<marker id="m1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="currentColor"/></marker>
+</defs>
+</svg>
+
+<h3>Cluster 3 — skills as data: progressive disclosure over hand-registered tools</h3>
+<p>Three projects converge on the same fix for a tool catalog that grows without bound: stop putting every tool/skill's full definition in every prompt, and instead give the model an index it can pull from on demand. ZAQ's "Open Agent Skills" implementation is the most rigorous: skills live as DB records (name, description, markdown body, tool keys); the system prompt carries only the name+description index (O(skill count) tokens, not O(skill count × body size)); a <code>load_skill</code> tool call pulls the full body as a tool result, scoped to the invoking agent's own enabled skills, with an explicit fix over the pattern's upstream form — a not-found response never enumerates the catalog, closing an info-leak. Long's version is filesystem-native (<code>SKILL.md</code> files with YAML frontmatter, a watcher-driven ETS index, per-member-vs-promoted-to-global scoping) and is the more portable authoring format since it's Anthropic-ecosystem-compatible — operators could author skills as files that <code>mix samen.gen.agent</code> then consumes. Vibe adds the generative end of the same loop: distilling a successful session into a reusable, versioned skill discovered from well-known paths ("create a skill from what just worked"). All three map onto the same samen shape — a skills-as-data extension of the Prompt resource, index-only in the system prompt, full body loaded via a governed tool call that stays inside the EG2 masking chokepoint, personal-vs-global scoping mapping to tenant-vs-operator plane, and any session-to-skill distillation routed through the normal review/approval path rather than auto-trusted. This is the most direct available design input for G22 (packaging the agent-grounding differentiator for builders), a gap the report currently has no other section closing. Related but adjacent, three projects add self-scheduling verbs worth folding into the same automation surface: Ankole's typed <code>check_back_later</code> wake event (a durable "check back at T" ActorEvent the loop consumes), Long's agent-initiated <code>createScheduledTask</code> mid-conversation, and Glorbo's heartbeat-with-empty-inbox grooming tick (agent dispatches against a checklist even when nothing is queued) — all three are thin wrappers over machinery samen already has (Oban + ash_oban + ADR-039's automation engine), landing as agent-proposable <strong>drafts routed through the E3 approvals engine</strong>, never auto-executed. Effort <span class="effort">M</span> for the skills-as-data extension, <span class="effort">S</span>–<span class="effort">M</span> for each self-scheduling verb.</p>
+
+<svg viewBox="0 0 700 200" style="width:100%;max-width:700px;height:auto" role="img" aria-labelledby="skill-title">
+<title id="skill-title">Progressive-disclosure skills: the system prompt carries only a name-and-description index; the model calls load_skill to pull the full body on demand, scoped to its own enabled skills</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">SKILLS AS DATA (ZAQ + Long + Vibe) -&gt; samen Prompt resource / G22</text>
+
+<rect x="10" y="44" width="170" height="50" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="95" y="63" text-anchor="middle" font-size="11">System prompt</text>
+<text x="95" y="78" text-anchor="middle" font-size="10" fill="var(--muted)">skill index: name + desc only</text>
+
+<path d="M180,69 L230,69" stroke="currentColor" fill="none" marker-end="url(#s1)"/>
+
+<rect x="230" y="44" width="170" height="50" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="315" y="63" text-anchor="middle" font-size="11">Model calls load_skill</text>
+<text x="315" y="78" text-anchor="middle" font-size="10" fill="var(--muted)">scoped to enabled skills</text>
+
+<path d="M400,69 L450,69" stroke="currentColor" fill="none" marker-end="url(#s1)"/>
+
+<rect x="450" y="44" width="170" height="50" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="535" y="63" text-anchor="middle" font-size="11">Full skill body</text>
+<text x="535" y="78" text-anchor="middle" font-size="10" fill="var(--muted)">returned as tool result</text>
+
+<path d="M535,94 L535,130" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#s2)"/>
+<rect x="380" y="130" width="310" height="50" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="535" y="150" text-anchor="middle" font-size="10">not-found never enumerates the catalog;</text>
+<text x="535" y="165" text-anchor="middle" font-size="10" fill="var(--muted)">body still transits EG2 masking chokepoint</text>
+
+<text x="10" y="196" font-size="10" fill="var(--muted)">samen's gap: catalog-as-data exists for schema; skills-as-data for agent instructions does not (G22)</text>
+
+<defs>
+<marker id="s1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="currentColor"/></marker>
+<marker id="s2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<h3>Cluster 4 — the governance fine print: injection, attribution, identity, and honest replay</h3>
+<p>The remaining patterns are smaller but sharper, each closing one specific hole in the ADR-047 loop rather than a whole subsystem. AlexClaw's <strong>ContentSanitizer</strong> is the complementary threat to samen's egress-only chokepoint: a layered scrubber (zero-width Unicode stripping, hidden-HTML/CSS detection, a runtime-data injection-pattern list, an imperative-tone heuristic) applied to external content <em>before</em> it enters prompt assembly — samen governs what goes out via <code>%MaskedPayload{}</code>, but nothing today governs what comes in from tool results and web content, which is exactly what the ≥90% red-team eval bar should be measuring on both sides. Glorbo's <strong>per-dispatch egress attribution token</strong> (an ephemeral id minted per agent dispatch, stamped into every audit event downstream) and ZAQ's <strong>trusted-execution-context identity rule</strong> (identity for permission-scoped tools comes only from the loop's actor context, never from LLM-supplied parameters — an explicit <code>skip_permissions: true</code> opt-in required to override, and a blank/nil actor is never an implicit grant) are two sides of the same "know who really caused this" problem, and both are cheap: threading a dispatch id through the AI chokepoint into the hash-chained audit is a schema addition, and the actor-never-from-params rule is exactly the kind of AST/structural check samen's <code>samen.verify.agent_coverage</code> tier already does for other invariants. Shem contributes the most differentiated idea in the section: <strong>deterministic replay of recorded agent-loop turns as a CI regression tier</strong> (<code>samen.verify.agent_replay</code>-shaped — replay recorded events, diff against current code, fail on divergence) plus <strong>fail-closed declared-action tool manifests</strong> (undeclared action ⇒ refused, checked by a manifest-parity verifier) and <strong>offline-verifiable attestation bundles</strong> (a stdlib-only verifier script an auditor can run with no samen checkout) — all three extend samen's existing "every guarantee ships with a proof" culture into the AI plane specifically, and the replay tier is buildable now since EG2-governed transcripts and fixture-transport cassettes already exist. ZAQ's smaller <strong>persist-before-deliver ordering</strong> rule (transcript persistence must succeed before channel delivery, never delivered-but-unrecorded) is almost certainly already true of samen's delivery chokepoint but is worth encoding as a named, sabotage-able red-path test rather than left implicit. Vibe closes the loop with pure operator-plane ergonomics: first-class inspect/cancel/resume verbs on a running agent run (an operator "stop this run now" button, audited, mostly wiring existing OTP + AshStateMachine state to UI) and multi-surface attach (TUI and LiveView as adapters over one supervised session) as a live-attach affordance for the operator cockpit. Effort <span class="effort">S</span>–<span class="effort">M</span> across the cluster; the replay tier is the only <span class="effort">M</span>-leaning item, and none require new infrastructure beyond what ADR-046/047 already ships.</p>
+
+<h3>The nine, in detail</h3>
+
+<div class="grid">
+
+<div class="card">
+<h4><a href="https://github.com/thatsme/AlexClaw">AlexClaw</a> <span class="badge badge-medium">medium</span></h4>
+<p>A self-hosted, single-user BEAM-native personal agent (Apache-2.0, 115★, actively maintained) on samen's own stack — Phoenix LiveView, Ecto/Postgres + pgvector — monitoring RSS/web/GitHub sources, running scheduled workflows, and talking to its owner over Telegram/Discord.</p>
+<p><strong>Adopt:</strong> the ContentSanitizer inbound-scrubbing pattern (Cluster 4); the DB-backed tier-based LLM router with ETS+DB usage counters (Cluster 1); embedding-model staleness tracking + batch reembed, and parent/child semantic chunking with search dedup (Cluster 2); capability-token attenuation (HKDF-derived, chain-depth-capped) for nested tool/agent calls, adopted as a concept into <code>Samen.AI</code> tool dispatch, not its process-dictionary carriage.</p>
+<p>Why it fits: same stack, different domain — no wholesale adoption, but five to six concrete AI-plane patterns transfer cleanly because they're already Elixir/Postgres/pgvector-native.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/AgentBull/ankole">Ankole</a> <span class="badge badge-medium">medium</span></h4>
+<p>A self-hosted "AI workforce operating system" (Apache-2.0, 42★, MVP/early-production, explicit no-compat-contract) — agents as bounded-authority workers with durable execution and an operator console — but built on a polyglot Rust-NIF/Bun/ZeroMQ runtime samen deliberately avoids.</p>
+<p><strong>Adopt:</strong> the Dreaming two-stage memory consolidation blueprint, citation-required audit-reversible memory blocks, and withdrawal propagation (Cluster 2, this project's design docs are the reference blueprint); RRF-based recall ranking with temporal decay and per-candidate token caps (Cluster 2); the typed <code>check_back_later</code> wake-event verb (Cluster 3); Oban Lifeline as a stale-lock guard for long agent jobs.</p>
+<p>Why it fits: don't adopt the platform — the polyglot stack and CEL-based AuthZ conflict with samen's pure-BEAM, zero-NIF posture and its already-stronger Ash-policy trust kernel — but mine the unusually rigorous design docs as the reference blueprint for agent long-term memory.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/foobarto/glorbo">Glorbo</a> <span class="badge badge-medium">medium</span></h4>
+<p>A filesystem-first agent orchestration platform (MIT OR Apache-2.0, 3★, pre-1.0) modeling companies as org charts with AI-agent "employees" run in kernel-level bwrap sandboxes; state is Markdown + YAML/JSONL with SQLite as a rebuildable index — the structural opposite of samen's Postgres/Ash substrate.</p>
+<p><strong>Adopt:</strong> the tri-state fail-honest budget check with explicit-opt-in for untracked-cost providers (Cluster 1); per-dispatch egress attribution tokens (Cluster 4); heartbeat-with-empty-inbox maintenance ticks (Cluster 3); a <code>mix samen.doctor</code>-style operator preflight composing samen's ~20 existing verifier tiers into one command.</p>
+<p>Why it fits: adjacent domain, tiny community, but a serious solo-built OTP codebase with three to four concrete governance patterns worth mining for ADR-047 — take patterns, not code; the company-as-employees metaphor and filesystem-as-truth model add nothing over samen's stronger substrate.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/mjason/long">Long</a> <span class="badge badge-medium">medium</span></h4>
+<p>A LAN-first, single-binary LLM agent runtime for a household or small team (MIT, ~26★, beta) — and, unexpectedly for the category, a genuine Ash 3 stack (AshSQLite, AshOban, ReqLLM, Jido). Trust posture is the deliberate inverse of samen's: no RBAC, unsandboxed <code>bash</code> tool, no PII controls, no cost budgets.</p>
+<p><strong>Adopt:</strong> Anthropic-compatible <code>SKILL.md</code> filesystem skills with a watcher-driven index (Cluster 3); the schema-introspection tool idea — one read-only, policy-scoped query tool over the catalog instead of N hand-registered tools, writes excluded (Cluster 3); agent self-scheduling as a first-class, approval-gated verb (Cluster 3); the L1–L4 memory-tier taxonomy as design input only, not code (Cluster 2).</p>
+<p>Why it fits: a well-built personal-scale Ash agent runtime with the opposite trust posture to samen; mine the agent-UX patterns, ignore the architecture wholesale — ReqLLM and Jido are both already-rejected dependencies.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/Miosa-osa/OSA">OSA</a> <span class="badge badge-medium">medium</span></h4>
+<p>A local-first coding/general-purpose agent (Apache-2.0, 43★, active, v1.0.118) — an Elixir/OTP engine paired with a Rust ratatui TUI, 82 deferred-loaded tools, 27 LLM providers, and up to 16-agent bounded fan-out. A developer tool, not a SaaS substrate: no tenancy, no PII model.</p>
+<p><strong>Adopt:</strong> the 6-step context-compaction pipeline with priority budget allocation (Cluster 2); complexity-scored model-tier routing with fail-honest fallback chains (Cluster 1); deferred tool loading + tool search to shrink the governed-egress scrub surface (Cluster 4-adjacent); the workspace-trust pattern (untrusted repo-local config until explicitly trusted) mapped onto tenant-authored automations.</p>
+<p>Why it fits: an actively maintained Elixir/OTP agent engine worth mining for loop mechanics, but its local-first, ungoverned execution model — shell/file/browser access, "overdrive" yes-to-everything mode — is the philosophical inverse of samen's governed-egress AI plane; adopt patterns, never the trust posture.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/pepe-agent/pepe">Pepe</a> <span class="badge badge-medium">medium</span></h4>
+<p>A deliberately database-free agent runtime (MIT, ~253 commits, 6★, one maintainer) — agent definitions as JSON config, OTP process-per-conversation state — speaking the OpenAI Chat Completions protocol across dashboard, API, WebSocket, CLI, embeddable widget, and chat-channel connectors.</p>
+<p><strong>Adopt:</strong> complexity-based model triage with fail-open fallback and honest failover events (Cluster 1); context-window compaction at ~60% with the documented prompt-cache-reuse tradeoff (Cluster 2); the tool-approval TTL vocabulary (once / this-turn / this-session / permanent) plus surface-aware refusal — headless surfaces deny-by-default for gated tools (Cluster 4-adjacent); directed agent-to-agent ACLs as declarative, tenant-scoped data (Cluster 4-adjacent).</p>
+<p>Why it fits: tiny single-maintainer runtime, never a dependency, but a dense catalog of agent-runtime product patterns worth mining — its reversible PII redaction is explicitly weaker than samen's token-blind masking and should not be adopted.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/thephilip/shem">Shem</a> <span class="badge badge-medium">medium</span></h4>
+<p>A newly public, single-author BEAM-native agent platform (Apache-2.0, 0★, ~847 commits) built around debuggability: a hash-chained flight recorder, a forensic time-travel WebUI, and install-time "graduation gate" re-verification of third-party tool packs in throwaway containers.</p>
+<p><strong>Adopt:</strong> deterministic replay of recorded agent-loop runs as a <code>samen.verify.agent_replay</code>-style CI tier (Cluster 4, the section's most differentiated idea); fail-closed declared-action tool manifests with a parity verifier (Cluster 4); offline-verifiable attestation bundles (<code>mix samen.attest</code>-shaped) extending the claim-evidence/audit-chain story; the forensic-UI design register (monospace numerics, integrity badges, zero decorative chrome) as free direction for the operator cockpit, idea only.</p>
+<p>Why it fits: pattern mine, not a dependency — 0 stars, single author, pre-1.0 rules out depending on it, but the replay/attestation ideas are on-brand extensions of samen's existing "every guarantee ships with a proof" posture; skip its container tool-sandboxing, which guards an escape hatch samen's ADR-047 AST lock already covers differently.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/elixir-vibe/vibe">Vibe</a> <span class="badge badge-medium">medium</span></h4>
+<p>An experimental BEAM-native local coding agent (MIT, ~99★, actively developed) that runs as a real OTP application — sessions, jobs, and subagents as supervised, monitorable, cancellable, resumable processes — with a deliberately eval-first control plane (few tools; the model gets a rich Elixir eval context instead).</p>
+<p><strong>Adopt:</strong> multi-surface attach over one supervised session — TUI and LiveView as adapters — as a live-attach affordance for the operator cockpit (Cluster 4); first-class inspect/cancel/resume verbs on agent runs, mostly wiring existing OTP + AshStateMachine machinery (Cluster 4); "create a skill from session history" as a concrete shape for G22 (Cluster 3); the rules-directory pattern (markdown standing instructions, per-model filtering) as a cheap delta on the existing Prompt resource.</p>
+<p>Why it fits: excellent OTP session/subagent supervision and multi-surface attach UX worth borrowing, but its eval-first control plane is the structural opposite of samen's governed-egress AI plane — handing the model an open eval context would un-prove samen's hero claim, so that core idea must never be adopted.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/www-zaq-ai/zaq">ZAQ</a> <span class="badge badge-medium">medium</span></h4>
+<p>A sovereign, self-hosted "company brain" (AGPL-3.0 with commercial dual-license, 66★, active, v0.16.0) connecting org knowledge (pgvector RAG) to configured AI agents with person-scoped permission filtering, multi-channel delivery, and a JSONB-DAG workflow engine — built almost entirely on the already-rejected Jido ecosystem.</p>
+<p><strong>Adopt:</strong> progressive-disclosure agent skills — index-only in the prompt, full body via <code>load_skill</code> tool call, no-catalog-leak on not-found (Cluster 3, this project's implementation is the most rigorous of the three); the trusted-execution-context identity rule as a verifier — LLM-supplied params must never select the acting identity (Cluster 4); persist-before-deliver ordering as a named, testable rule (Cluster 4); no-answer/low-confidence telemetry feeding an operator-cockpit tile for support/CRM AI surfaces; the atom-safety guard pattern for any runtime-minted atoms.</p>
+<p>Why it fits: AGPL-3.0 rules out any code reuse regardless of technical merit, and its all-in Jido dependency list (several pinned to forks/branches) is exactly the fragility INV-4 exists to prevent — but the skills index and identity-rule invariants are free, license-clean ideas worth re-deriving clean-room.</p>
+</div>
+
+</div>
+
+<p class="verdict">Net read for a product leader skimming only this section: none of these nine are dependency candidates — wrong trust posture, wrong tenancy model, or (ZAQ) copyleft-incompatible — so nothing here changes samen's dependency graph, and every item below is a clean-room re-derivation. What they collectively hand samen is design input at the two places the report currently has the thinnest coverage: the ADR-047 agent loop's cost, memory, and governance mechanics (Clusters 1, 2, and 4 — cost-tier routing and fail-honest budgets, consolidation/compaction/recall under a context budget, and injection/attribution/identity/replay hardening), and the open G22 gap of packaging agent grounding for builders (Cluster 3 — skills as data, plus the self-scheduling verbs that make an agent's own automation proposals a normal E3-approved draft). Effort clusters at <span class="effort">S</span>–<span class="effort">M</span> throughout, with exactly two <span class="effort">L</span>-sized items flagged as future-roadmap rather than now: Ankole's full Dreaming-style consolidation and Long's L1–L4 memory taxonomy. Every adoption, without exception, routes through samen's existing masking chokepoint and E3 approvals rather than adding a parallel path — the one invariant all nine source projects, in their different ways, do not enforce.</p>
+
+</section>

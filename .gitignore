@@ -32,3 +32,6 @@ driftwood/reports/*.sidecar.*
 # planning workspace + orchestrator state — never committed
 spec/
 _orch/
+
+# earlier baton runs, moved in from siblings
+_orch-*/

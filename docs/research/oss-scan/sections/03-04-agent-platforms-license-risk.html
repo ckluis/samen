@@ -1,0 +1,148 @@
+<section id="04-agent-platforms-license-risk">
+<h2>Deep Dive: Agent Platforms With License Risk</h2>
+
+<p>These three self-hosted Elixir/Phoenix agent platforms share a structure that makes them worth grouping apart from the frameworks and factories sections: each is architecturally instructive right where samen is actively hardening (the operator trust plane, the ADR-047 agent loop), and each is blocked from direct adoption for a <em>legal</em> reason rather than a technical one. Codex Pooler is Elastic-2.0 — source-available but not OSI-approved. CYFR is dual-licensed: the umbrella is Apache-2.0, but Sanctum — precisely the auth/policy/audit/tenancy subsystem most relevant to samen — is FSL-1.1-Apache-2.0, non-compete-restricted until each release converts to Apache-2.0 two years later. Neoharness's README claims MIT, but there is no LICENSE file in the repo and the GitHub API reports <code>license: null</code>, which makes it all-rights-reserved regardless of the claim. None of the three can be vendored, forked, or copied from; every item below is a pattern to re-derive clean-room, not code to pull in. A product leader should read this section as "steal the idea, write the implementation," full stop — the same posture samen already takes toward ash_ai and Jido, just for a different reason (copyright, not fit).</p>
+
+<table class="quick-table">
+<thead>
+<tr><th>Project</th><th>License blocker</th><th>Headline pattern to mine</th><th>Effort</th><th>Relevance</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="https://github.com/icoretech/codex-pooler">Codex Pooler</a></td><td>Elastic-2.0 — source-available, not OSI-approved</td><td>Per-key Observatory dashboard, metadata-only AI request logging, HMAC-digest bearer tokens</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/cyfrworks/cyfr">CYFR</a></td><td>Core Apache-2.0, but Sanctum (policy/auth/audit) is FSL-1.1-Apache-2.0</td><td>Enforcement reconciliation, version-pinned consent, <code>vault:</code> credential indirection</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/Neofox/neoharness">Neoharness</a></td><td>No LICENSE file — <code>license: null</code>, all-rights-reserved despite README's MIT claim</td><td>Duplicate-call guard, three-level context-overflow recovery, cancellation registry, provider circuit breaker</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+</tbody>
+</table>
+
+<h3>Cluster 1 — trust-plane and credential hygiene, from Codex Pooler and CYFR</h3>
+<p>Codex Pooler (an AI-gateway pooling Codex accounts behind stable keys, ~152★, ~2,094 commits, Elastic-2.0) and CYFR (a WASM-sandboxed agent-permission control system, 0★, 507 commits, Apache-2.0 core / FSL Sanctum) are different products but converge on the same lesson for samen's operator plane: <strong>never store a recoverable secret when a digest or a reference will do, and always give the credential holder a scoped, read-only view of their own usage.</strong> Codex Pooler stores its metrics bearer token only as a keyed HMAC digest — never encrypted-and-recoverable — and pairs that with a per-key "Observatory," a read-only self-serve dashboard scoped to one API key's own request counts, latency, and quota posture. CYFR generalizes the same idea one layer further with <code>vault:CONNECTION_NAME</code> references: secrets never appear in configs, MCP headers, or automation definitions at all, only a name that resolves to the sealed credential inside the trusted runtime at request time. For samen these compose directly: <code>Samen.Kms</code>-resolved <code>vault:</code> tokens for fleet self-registration credentials, webhook secrets, and any outbound automation-step headers, plus HMAC-digest (show-once, non-recoverable) storage for operator MCP tokens and future tenant API keys, plus a tenant-facing Observatory-style read scope over samen's existing wide-event/metrics data — the last is a natural G22 (agent-grounding packaging) and operator-cockpit-v2 feature, not new instrumentation. Codex Pooler's related discipline of logging AI requests as metadata only (model, routing, token counts, latency — never prompt bodies) is worth codifying explicitly as a <code>samen.verify.ai_log_shape</code> tier that closes the gap between transcripts (governed, erasable under ADR-046/047) and operational logs (should be content-free by construction, not just by convention). CYFR contributes two adjacent items beyond credentials: <strong>enforcement records</strong> that pair every execution with an immutable reconciliation of what an approval authorized against what the run actually did — a concrete extension of ADR-047's RunRecord + hash-chained audit + E3 approvals, since today the join "this approval covered X; the transcript shows only X happened" is implicit rather than asserted — and <strong>version-pinned consent</strong>, where a grant applies to a component <em>line</em> or a pinned version, recorded as an immutable revision, so a changed tool definition invalidates the old grant instead of silently inheriting it. Both map onto samen's existing requester≠approver DB-CHECK discipline as a hash-of-definition addition, not a new subsystem. Two smaller, cheaper items round out the cluster: Codex Pooler's DB-managed instance settings, cached in ETS and invalidated via Phoenix.PubSub so operator-plane knobs (rate limits, AI budgets, retention windows) change live without a redeploy; and CYFR's explicit per-tenant execution concurrency caps, a noisy-neighbor guard cheaply expressed with samen's existing Oban queue partitioning.</p>
+
+<svg viewBox="0 0 700 250" style="width:100%;max-width:700px;height:auto" role="img" aria-labelledby="cred-title">
+<title id="cred-title">Credential and consent handling pattern from Codex Pooler and CYFR: secrets are never stored recoverable, only digested or referenced, and every execution is reconciled against a version-pinned, scoped grant</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">TRUST-PLANE PATTERN (Codex Pooler + CYFR) -&gt; samen's Kms / Approvals</text>
+
+<rect x="10" y="40" width="140" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="80" y="59" text-anchor="middle" font-size="11">Bearer token</text>
+<text x="80" y="74" text-anchor="middle" font-size="10" fill="var(--muted)">stored as HMAC digest</text>
+
+<rect x="10" y="100" width="140" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="80" y="119" text-anchor="middle" font-size="11">Credential</text>
+<text x="80" y="134" text-anchor="middle" font-size="10" fill="var(--muted)">referenced as vault:name</text>
+
+<path d="M150,63 L200,105" stroke="var(--accent)" fill="none" marker-end="url(#e1)"/>
+<path d="M150,123 L200,105" stroke="var(--accent)" fill="none" marker-end="url(#e1)"/>
+
+<rect x="200" y="82" width="140" height="46" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="270" y="101" text-anchor="middle" font-size="11">Samen.Kms</text>
+<text x="270" y="116" text-anchor="middle" font-size="10" fill="var(--muted)">resolves at chokepoint only</text>
+<path d="M340,105 L390,105" stroke="var(--accent)" fill="none" marker-end="url(#e1)"/>
+
+<rect x="390" y="82" width="150" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="465" y="101" text-anchor="middle" font-size="11">Version-pinned grant</text>
+<text x="465" y="116" text-anchor="middle" font-size="10" fill="var(--muted)">action-def hash recorded</text>
+<path d="M540,105 L590,105" stroke="var(--accent)" fill="none" marker-end="url(#e1)"/>
+
+<rect x="590" y="82" width="100" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="640" y="101" text-anchor="middle" font-size="11">Run executes</text>
+<text x="640" y="116" text-anchor="middle" font-size="10" fill="var(--muted)">E3 approvals</text>
+
+<path d="M640,128 L640,175 L270,175 L270,128" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#e2)"/>
+<rect x="150" y="182" width="240" height="46" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="270" y="201" text-anchor="middle" font-size="11">Enforcement record</text>
+<text x="270" y="216" text-anchor="middle" font-size="10" fill="var(--muted)">approved scope vs actual egress</text>
+
+<text x="10" y="240" font-size="10" fill="var(--muted)">samen's gap: RunRecord + audit exist; the explicit approved-vs-actual reconciliation step does not</text>
+
+<defs>
+<marker id="e1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+<marker id="e2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<h3>Cluster 2 — agent-loop runtime hardening, from Neoharness</h3>
+<p>Neoharness ("my own take on openclaw") is a different animal from the other two: a single-user, single-node personal-agent runtime (Elixir 1.19+/OTP 27+, Phoenix LiveView, Postgres, Oban) with no policy layer, no masking, and direct AI writes to memory — the opposite of samen's trust posture on almost every axis. But its <code>Agent.Loop.run/2</code> GenServer has clearly absorbed real production pain running an LLM tool-call loop unattended, and five of its hardening tripwires are cheap, clean-room-portable upgrades to ADR-047 regardless of the rest of the architecture. A <strong>duplicate tool-call guard</strong> tracks consecutive identical <code>{name, arguments}</code> pairs: a second repeat forces extended thinking, a third-plus blocks with a synthetic tool result (tools flagged <code>allow_repeat: true</code> for legitimate polling bypass the guard) — a cheaper, earlier tripwire against degenerate model loops than waiting for a budget cap to fire, and it keeps the transcript honest rather than silently truncating it. A <strong>three-level context-overflow recovery</strong> path handles the same failure at three different points: pre-turn trimming against a token budget, a mid-turn fold-and-retry-once when the provider rejects a too-long prompt, and post-turn extraction of durable facts before compaction — worth adopting with one caveat samen must enforce that Neoharness doesn't: any summarizer output is governed egress (EG2) and the fold has to run through the masking chokepoint with a per-turn grant re-scrub, and compacted history must stay crypto-shreddable (tokens, not plaintext) to respect the ADR-046 erasure envelope. A <strong>cancellation registry</strong> — ETS-backed cancel flags keyed by run id with a TTL, checked between loop iterations and before each tool call — gives the operator plane a real "stop this agent run" button with an auditable, non-lossy transcript tail, which is a named gap in samen's current operator-cockpit list. A <strong>circuit breaker on AI provider egress</strong> (Req transient retries plus a fuse that melts after N failures in a window and backs off the whole fleet for a cooldown, returning an honest <code>{:error, :provider_unavailable}</code> rather than a retry storm) is a direct extension of the breaker samen's automation engine already runs (ADR-039 Health/Breaker), just applied to the AI provider adapter layer instead — breaker state stays in the adapter package, never core, per INV-4. Two smaller items are worth a line each: isolated conversation ids for scheduled/cron agent runs (<code>&lt;agent&gt;:cron:&lt;name&gt;</code>) so heartbeat reasoning never pollutes a user-facing context budget, directly relevant once ADR-039 automation and ADR-047's loop wire together; and validate-then-retry-once-with-errors for structured LLM output against Ecto schemas, a cheap robustness pattern for samen's structured AI verbs (adopt the shape, not InstructorLite — keep the AI kernel vendor-free).</p>
+
+<svg viewBox="0 0 700 220" style="width:100%;max-width:700px;height:auto" role="img" aria-labelledby="loop-title">
+<title id="loop-title">Neoharness agent-loop hardening tripwires layered onto a single turn: duplicate-call guard, context-overflow recovery, cancellation check, and provider circuit breaker, each degrading honestly instead of failing silently</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">ONE AGENT-LOOP TURN, HARDENED (Neoharness, clean-room)</text>
+
+<rect x="10" y="46" width="100" height="44" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="60" y="65" text-anchor="middle" font-size="11">LLM call</text>
+<text x="60" y="79" text-anchor="middle" font-size="10" fill="var(--muted)">breaker-guarded</text>
+<path d="M110,68 L150,68" stroke="currentColor" fill="none" marker-end="url(#f1)"/>
+
+<rect x="150" y="46" width="120" height="44" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="210" y="65" text-anchor="middle" font-size="11">Tool call proposed</text>
+<text x="210" y="79" text-anchor="middle" font-size="10" fill="var(--muted)">check duplicate guard</text>
+<path d="M270,68 L310,68" stroke="currentColor" fill="none" marker-end="url(#f1)"/>
+
+<rect x="310" y="46" width="120" height="44" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="370" y="65" text-anchor="middle" font-size="11">Cancel flag?</text>
+<text x="370" y="79" text-anchor="middle" font-size="10" fill="var(--muted)">ETS, checked pre-call</text>
+<path d="M430,68 L470,68" stroke="currentColor" fill="none" marker-end="url(#f1)"/>
+
+<rect x="470" y="46" width="120" height="44" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="530" y="65" text-anchor="middle" font-size="11">Tool executes</text>
+<path d="M590,68 L630,68" stroke="currentColor" fill="none" marker-end="url(#f1)"/>
+
+<rect x="630" y="46" width="60" height="44" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="660" y="65" text-anchor="middle" font-size="10">Result</text>
+
+<path d="M60,90 L60,140" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#f2)"/>
+<rect x="10" y="140" width="150" height="44" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="85" y="159" text-anchor="middle" font-size="10">3rd+ repeat: synthetic</text>
+<text x="85" y="173" text-anchor="middle" font-size="10" fill="var(--muted)">result, no real call</text>
+
+<path d="M210,90 L210,140" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#f2)"/>
+<rect x="180" y="140" width="150" height="44" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="255" y="159" text-anchor="middle" font-size="10">Context overflow:</text>
+<text x="255" y="173" text-anchor="middle" font-size="10" fill="var(--muted)">trim / fold / compact</text>
+
+<path d="M370,90 L370,140" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#f2)"/>
+<rect x="340" y="140" width="150" height="44" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="415" y="159" text-anchor="middle" font-size="10">Set: short-circuit</text>
+<text x="415" y="173" text-anchor="middle" font-size="10" fill="var(--muted)">remaining calls, synthetic tail</text>
+
+<path d="M530,90 L530,140" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#f2)"/>
+<rect x="500" y="140" width="150" height="44" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="575" y="159" text-anchor="middle" font-size="10">N melts: fuse blows,</text>
+<text x="575" y="173" text-anchor="middle" font-size="10" fill="var(--muted)">honest :provider_unavailable</text>
+
+<text x="10" y="208" font-size="10" fill="var(--muted)">samen's gap: ADR-047 has budgets/caps as a backstop but no earlier, cheaper tripwires at any of these four points</text>
+
+<defs>
+<marker id="f1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="currentColor"/></marker>
+<marker id="f2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<h3>The three, in detail</h3>
+
+<div class="grid">
+
+<div class="card">
+<h4><a href="https://github.com/icoretech/codex-pooler">Codex Pooler</a> <span class="badge badge-medium">medium</span></h4>
+<p>Elastic-2.0 (source-available, not OSI-approved), ~152★/~2,094 commits, semantic-versioned with a docs site and Helm/Compose deploys — the most mature and production-shaped of the three. An Elixir/Phoenix gateway that pools multiple upstream OpenAI Codex accounts behind stable "Pool API keys," with eligibility-aware routing, three runtime surfaces (native, OpenAI-compatible <code>/v1</code>, <code>/mcp</code>), and privacy-first observability.</p>
+<p><strong>Adopt:</strong> the per-key Observatory dashboard and metadata-only AI request logging discipline as a tenant-facing/operator-plane pattern (Cluster 1); HMAC-digest bearer-token storage for operator MCP tokens and future tenant API keys; DB-managed instance settings with PubSub-invalidated ETS cache for live operator-plane config; provider health/quota-evidence tracking as an ADR-sized extension of <code>Samen.AI.Provider</code>; its four-role K8s deploy split (web/worker/scheduler/migration) as a concrete reference once samen's own Fly production deploy (WS-L) lands. <span class="effort">S</span>–<span class="effort">M</span> across the set.</p>
+<p>Why it fits: it is the most mature single-tenant-adjacent reference for exactly the operator-plane surfaces (per-key visibility, non-recoverable secrets, live config) samen is actively building; the core mission — pooling consumer AI accounts — is explicitly out of scope and ToS-gray, so only the surrounding infrastructure transfers.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/cyfrworks/cyfr">CYFR</a> <span class="badge badge-medium">medium</span></h4>
+<p>Apache-2.0 core / FSL-1.1-Apache-2.0 Sanctum, 0★/507 commits, single-user by design. "Give your AI power, not trust" — an Elixir/Phoenix umbrella where the model proposes actions, a policy layer validates them against explicitly granted permissions, and sandboxed WASM components execute them, with every step MCP-addressable.</p>
+<p><strong>Adopt:</strong> enforcement records reconciling approved scope against actual egress, and version-pinned immutable consent revisions keyed to an action-definition hash (Cluster 1, the section's most direct ADR-047 extension); <code>vault:</code> credential indirection at the egress chokepoint; request-anchored causal chains (a <code>log correlate</code>-style "show me everything this agent turn caused" view) as an open cockpit-v2 theme; explicit per-tenant execution concurrency caps as a cheap Oban-queue-partitioned fairness guard. The MCP stdio→HTTP bridge with namespaced tool prefixes is worth filing away for later — only relevant once samen consumes external MCP tools rather than only serving them. <span class="effort">S</span>–<span class="effort">M</span> across the set (bridge pattern is M–L and not currently on the roadmap).</p>
+<p>Why it fits: the precise subsystem samen can't touch for copyright reasons (Sanctum) is also the one whose design vocabulary — enforcement, consent revision, vault reference — maps almost one-to-one onto samen's existing E3 approvals and requester≠approver discipline; reading it clean-room costs nothing and the ideas are free.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/Neofox/neoharness">Neoharness</a> <span class="badge badge-medium">medium</span></h4>
+<p>License claimed MIT in the README but no LICENSE file exists and the GitHub API reports <code>license: null</code> — treat as all-rights-reserved. ~178 commits, 0★, single author, last push 2026-07-14. A personal-agent runtime (one GenServer per conversation, ~30 built-in tools, MCP client pool, Telegram/Discord connectors) with a trust posture that is the opposite of samen's on every axis except the loop-hardening mechanics.</p>
+<p><strong>Adopt:</strong> the duplicate tool-call guard, three-level context-overflow recovery (with samen's masking-chokepoint and erasure-envelope caveats attached), ETS-backed cancellation registry, and AI-provider circuit breaker (Cluster 2, the section's cheapest and most concrete wins); isolated conversation ids for scheduled/cron agent runs; validate-then-retry-once-with-errors for structured LLM output. Its streaming handoff design (per-iteration persist+broadcast, LiveView buffered deltas) is a proven reference to revisit once ADR-047's deferred streaming work is re-scoped. <span class="effort">S</span> for the headline tripwires, <span class="effort">M</span> for context-overflow recovery and streaming.</p>
+<p>Why it fits: everything about the architecture as a whole is wrong for samen (single-tenant, no policy layer, direct AI memory writes, shell/browser tool access) — but the five loop-hardening mechanics are narrowly-scoped OTP idioms that solve real degenerate-loop and long-run failure modes ADR-047 hasn't hit yet, cheap enough to re-derive without touching anything else in the repo.</p>
+</div>
+
+</div>
+
+<p class="verdict">Net read for a product leader skimming only this section: all three are legally closed to vendoring — one source-available (Elastic-2.0), one split-licensed with the most relevant part FSL-restricted, one with no license at all — so nothing here changes samen's dependency graph. What they earn is design input at two points already on samen's own roadmap: the operator trust plane (non-recoverable/reference-only credentials, per-key usage visibility, live-editable settings, approved-vs-actual enforcement reconciliation — Codex Pooler and CYFR, largely composing subsystems samen already ships) and the in-product agent loop (five concrete, cheap tripwires against degenerate loops, context overflow, ungraceful cancellation, and provider outages — Neoharness, clean-room only). Effort clusters tightly at <span class="effort">S</span>–<span class="effort">M</span> across all three; none require an L-sized build, and several items are largely composition of E3 approvals, ADR-039's breaker, and ADR-046/047's masking chokepoint rather than new infrastructure.</p>
+
+</section>

@@ -1,0 +1,169 @@
+<section id="07-business-collaboration-saas">
+<h2>Deep Dive: Business &amp; Collaboration / Productivity SaaS</h2>
+
+<p>Six self-hosted Elixir SaaS products sit in this cluster — a translation management system, an artisan-manufacturing ERP, a venue/staff-ops platform, a goals-and-projects "operating system," a Calendly clone, and a document-lifecycle/e-sign platform. None of the six offer a substrate to lift wholesale: four are AGPL-3.0 (Craftplan, nyght, Tymeslot, Wraft — patterns and library picks only, never source), one is Apache-2.0 with a separately-licensed enterprise slice (Operately), and only one clears MIT-compatible outright (Accent, BSD-3-Clause). What makes the group worth reading together is the convergence: four independent codebases, built by different teams for different problems, land on the identical <code>ex_cldr + gettext + tz</code> stack to solve i18n — strong signal for closing samen's own G24 gap. A second convergence, just as loud, is four different teams each inventing a new "scope" vertical samen's blueprint catalog doesn't have yet (staffing/shifts, bookable scheduling, light-ERP/inventory, document-lifecycle). A third, quieter thread: three of the six independently reject <code>cloak_ecto</code>-shaped field encryption in favor of nothing stronger, which functions as repeated confirmation that samen's ADR-003 vault (per-subject KMS keys, crypto-shred) is already ahead of the ecosystem norm — nothing to adopt there, just validation.</p>
+
+<table class="quick-table">
+<thead>
+<tr><th>Project</th><th>What it is</th><th>License</th><th>Headline pattern to mine</th><th>Effort</th><th>Relevance</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="https://github.com/mirego/accent">Accent</a></td><td>Self-hosted translation management system (Phrase/Crowdin alternative)</td><td>BSD-3-Clause</td><td>Format-agnostic Langue parser/serializer core; fleet-wide gettext workflow tool</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/puemos/craftplan">Craftplan</a></td><td>Artisan-manufacturer ERP: BOMs, inventory, production, forecasting</td><td>AGPL-3.0</td><td>ex_cldr/gettext/tz i18n wiring on Ash 3 + ex_money; S3 adapter reference; runtime email-provider settings UX</td><td><span class="effort">S</span>–<span class="effort">L</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://gitlab.com/nyght/nyght">nyght</a></td><td>Event and staff management for music venues</td><td>AGPL-3.0</td><td>CLDR-first i18n in production; shifts/staffing scope blueprint; integrations marketplace; DB-backed RBAC</td><td><span class="effort">S</span>–<span class="effort">L</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/operately/operately">Operately</a></td><td>Goals/OKRs, projects, and team-ops "operating system"</td><td>Apache-2.0 (core)</td><td>MCP OAuth with default-read, single-tenant grant binding; agent CLI/skills packaging; check-in cadence engine</td><td><span class="effort">S</span>–<span class="effort">M</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/Tymeslot/tymeslot">Tymeslot</a></td><td>Self-hosted Calendly alternative — booking pages and availability</td><td>AGPL-3.0</td><td>Calendar-sync adapter family; layered availability engine; SSRF guard suite; credential re-encryption workers</td><td><span class="effort">S</span>–<span class="effort">L</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+<tr><td><a href="https://github.com/wraft/wraft">Wraft</a></td><td>Document Lifecycle Management — DocuSign/PandaDoc alternative</td><td>AGPL-3.0</td><td>Content-type → template → engine → branded-PDF pipeline; external-counterparty signing on E3 approvals</td><td><span class="effort">S</span>–<span class="effort">L</span></td><td><span class="badge badge-medium">medium</span></td></tr>
+</tbody>
+</table>
+
+<h3>Cluster 1 — four codebases, one i18n stack (closes G24)</h3>
+<p>Samen is hardcoded to USD and UTC with no gettext catalog — an acknowledged P2 gap (G24). Four unrelated projects in this batch independently converged on the same fix. Craftplan pairs Cldr, Gettext, and the <code>tz</code> timezone database with <code>ash_money</code>/<code>ex_money_sql</code> on the same Ash 3 base samen runs, which makes it a working reference for exactly the libraries samen would pick and confirms they compose cleanly with <code>Samen.Type.Money</code>. nyght proves the identical stack (ex_cldr + ex_cldr_dates_times/calendars/territories/plugs + gettext 1.0 + tz/tz_extra) in a real production, multilingual (fr/de/en) Phoenix 1.8/LiveView 1.1 app, and adds a detail Craftplan doesn't: Weblate as the community translation pipeline, plus locale negotiation via <code>ex_cldr_plugs</code>. Tymeslot proves the same core (gettext + tz) still works at samen's exact current stack versions (Elixir ~1.20/OTP 28, Phoenix 1.8, LiveView 1.1) with six shipped UI locales. Accent contributes a different, complementary piece: not the runtime stack but the <em>data model</em> for the string catalogs themselves — a neutral Document/Entry/ValueType core (<code>lib/langue/</code>) with pluggable per-format parser+serializer pairs behind one behaviour, which is the right shape reference for samen's own i18n string import/export chokepoint (one module, format plugins, round-trip tested — the same discipline samen already applies to its RFC-4180 CSV chokepoint). Put together: three projects de-risk the library selection for G24, one de-risks the format-abstraction design once G24 actually builds import/export. Per the decompose-cross-cutting-changes convention, G24 itself should land as an ADR plus phased items rather than one L-sized push, but the risk of picking the wrong libraries is now close to zero.</p>
+
+<svg viewBox="0 0 700 260" style="width:100%;max-width:700px;height:auto" role="img" aria-labelledby="i18n-title">
+<title id="i18n-title">Four projects converging on ex_cldr plus gettext plus tz as the i18n stack, feeding samen's G24 gap, with Accent's Langue format-abstraction core as a separate input for the string import/export design</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">FOUR PROJECTS, ONE STACK -&gt; samen G24</text>
+
+<rect x="10" y="40" width="140" height="42" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="80" y="58" text-anchor="middle" font-size="11">Craftplan</text>
+<text x="80" y="72" text-anchor="middle" font-size="9" fill="var(--muted)">Cldr + Gettext + tz on Ash 3</text>
+
+<rect x="10" y="90" width="140" height="42" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="80" y="108" text-anchor="middle" font-size="11">nyght</text>
+<text x="80" y="122" text-anchor="middle" font-size="9" fill="var(--muted)">CLDR-first, fr/de/en + Weblate</text>
+
+<rect x="10" y="140" width="140" height="42" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="80" y="158" text-anchor="middle" font-size="11">Tymeslot</text>
+<text x="80" y="172" text-anchor="middle" font-size="9" fill="var(--muted)">same stack at samen's versions</text>
+
+<path d="M150,61 L230,110" stroke="var(--accent)" fill="none" marker-end="url(#g1)"/>
+<path d="M150,111 L230,120" stroke="var(--accent)" fill="none" marker-end="url(#g1)"/>
+<path d="M150,161 L230,130" stroke="var(--accent)" fill="none" marker-end="url(#g1)"/>
+
+<rect x="230" y="95" width="160" height="52" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="310" y="116" text-anchor="middle" font-size="11">ex_cldr + gettext + tz</text>
+<text x="310" y="131" text-anchor="middle" font-size="9" fill="var(--muted)">library selection de-risked</text>
+
+<path d="M390,121 L440,121" stroke="var(--accent)" fill="none" marker-end="url(#g1)"/>
+
+<rect x="440" y="95" width="150" height="52" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="515" y="116" text-anchor="middle" font-size="11">samen G24</text>
+<text x="515" y="131" text-anchor="middle" font-size="9" fill="var(--muted)">Samen.Type.Money-aware</text>
+
+<rect x="10" y="200" width="200" height="42" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="110" y="218" text-anchor="middle" font-size="11">Accent's Langue core</text>
+<text x="110" y="232" text-anchor="middle" font-size="9" fill="var(--muted)">Document/Entry + format plugins</text>
+
+<path d="M210,214 L440,140" stroke="var(--muted)" fill="none" stroke-dasharray="4 3" marker-end="url(#g2)"/>
+<text x="230" y="185" font-size="9" fill="var(--muted)">design ref for string import/export</text>
+
+<defs>
+<marker id="g1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+<marker id="g2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<h3>Cluster 2 — four projects, four proposed scope blueprints</h3>
+<p>Samen's scope catalog (work, calendar, locations, docs…) has gaps that these four AGPL products each fill with a different, well-proven vertical shape — none copyable as code, all copyable as design. nyght contributes <strong>shifts/staffing</strong>: a shift + shift_location + application model (worker applies, manager approves) that maps cleanly onto samen's E3 approvals engine and calendar/notifications scopes — a recurring need across venues, clinics, field service, and retail. Tymeslot contributes <strong>bookable scheduling</strong>: a layered availability engine (weekly schedule → date overrides → breaks → buffers/min-notice → conflict merge against synced calendars → slot generation) plus a public booking page, the natural fit for pawchart's vet-appointment vertical, backed by the best open Elixir calendar-sync adapter family found in the scan (Google/Outlook/Apple iCloud/CalDAV/Nextcloud/Radicale/Zimbra/Baikal, with reconnection and cross-calendar conflict detection). Craftplan contributes a <strong>light-ERP/inventory idea bank</strong>: versioned BOMs with cost rollups, movement-based inventory, production batching, and a pure forecasting module — filed as reference rather than a build, since samen already has versioning and rollup machinery a third vertical could reuse. Wraft contributes <strong>document lifecycle</strong>: content authored as Markdown+JSON, strictly separated from layout, compiled through a typesetting engine to branded PDFs — directly relevant since every samen vertical eventually needs generated documents (driftwood BOLs/invoices, pawchart discharge summaries, G8 dunning letters), with a natural <code>samen_typst</code> adapter package keeping the engine dependency out of core per INV-4. Wraft's second contribution extends samen's own approvals machinery rather than inventing new machinery: <strong>external-counterparty signing</strong> — a document state machine (draft → approved → sent → signed) plus QR verification, layered onto the existing E3 requester≠approver engine and AshStateMachine, with the counterparty treated as a vaulted, masked-by-default identity and the sign token time-boxed like a reveal grant. That's the same "governed signing" idea nobody else in the ecosystem has, because nobody else has samen's masking/vault substrate to hang it on.</p>
+
+<svg viewBox="0 0 700 230" style="width:100%;max-width:700px;height:auto" role="img" aria-labelledby="scope-title">
+<title id="scope-title">Four AGPL projects each proposing a distinct new scope blueprint for samen's catalog: shifts and staffing from nyght, bookable scheduling from Tymeslot, light-ERP inventory from Craftplan, and document lifecycle from Wraft</title>
+<text x="10" y="20" font-size="11" fill="var(--muted)">FOUR SOURCE PROJECTS -&gt; FOUR PROPOSED SCOPES (design only, AGPL)</text>
+
+<rect x="10" y="40" width="150" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="85" y="59" text-anchor="middle" font-size="11">nyght</text>
+<text x="85" y="74" text-anchor="middle" font-size="9" fill="var(--muted)">shift + application model</text>
+
+<rect x="10" y="94" width="150" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="85" y="113" text-anchor="middle" font-size="11">Tymeslot</text>
+<text x="85" y="128" text-anchor="middle" font-size="9" fill="var(--muted)">availability + calendar sync</text>
+
+<rect x="10" y="148" width="150" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="85" y="167" text-anchor="middle" font-size="11">Craftplan</text>
+<text x="85" y="182" text-anchor="middle" font-size="9" fill="var(--muted)">versioned BOM + forecasting</text>
+
+<rect x="10" y="202" width="150" height="20" rx="6" fill="none"/>
+
+<rect x="220" y="40" width="150" height="46" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="295" y="59" text-anchor="middle" font-size="11">Shifts / Staffing</text>
+<text x="295" y="74" text-anchor="middle" font-size="9" fill="var(--muted)">→ E3 approvals + calendar</text>
+
+<rect x="220" y="94" width="150" height="46" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="295" y="113" text-anchor="middle" font-size="11">Scheduling / Booking</text>
+<text x="295" y="128" text-anchor="middle" font-size="9" fill="var(--muted)">→ pawchart vet visits</text>
+
+<rect x="220" y="148" width="150" height="46" rx="8" fill="var(--card-bg)" stroke="var(--muted)"/>
+<text x="295" y="167" text-anchor="middle" font-size="11">Inventory / Light-ERP</text>
+<text x="295" y="182" text-anchor="middle" font-size="9" fill="var(--muted)">idea bank, not queued</text>
+
+<rect x="440" y="80" width="160" height="46" rx="8" fill="var(--card-bg)" stroke="currentColor"/>
+<text x="520" y="99" text-anchor="middle" font-size="11">Wraft</text>
+<text x="520" y="114" text-anchor="middle" font-size="9" fill="var(--muted)">docs pipeline + counterparty sign</text>
+
+<path d="M160,63 L220,63" stroke="var(--accent)" fill="none" marker-end="url(#h1)"/>
+<path d="M160,117 L220,117" stroke="var(--accent)" fill="none" marker-end="url(#h1)"/>
+<path d="M160,171 L220,171" stroke="var(--muted)" fill="none" marker-end="url(#h2)"/>
+
+<rect x="440" y="150" width="160" height="46" rx="8" fill="var(--card-bg)" stroke="var(--accent)" stroke-width="2"/>
+<text x="520" y="169" text-anchor="middle" font-size="11">Document Lifecycle</text>
+<text x="520" y="184" text-anchor="middle" font-size="9" fill="var(--muted)">→ samen_typst adapter + E3</text>
+<path d="M520,126 L520,150" stroke="var(--accent)" fill="none" marker-end="url(#h1)"/>
+
+<defs>
+<marker id="h1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--accent)"/></marker>
+<marker id="h2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+</defs>
+</svg>
+
+<h3>Cluster 3 — Operately: the one with a clean-enough license to study closely</h3>
+<p>Operately's core is Apache-2.0 (a separate license covers optional enterprise files), which puts it a notch closer to actually inspectable than the four AGPL neighbors in this batch, even though samen would still re-derive rather than vendor. Two pieces are worth real attention. First, its <strong>MCP OAuth model</strong>: grants carry <code>mcp:read</code>/<code>mcp:write</code>-style scopes that default to read-only when unrequested, each grant binds to exactly one company so a tool structurally cannot take a tenant-selection argument, arbitrary clients connect via Client ID Metadata Documents with no pre-registration step, and operators get a connection dashboard with immediate revocation. That one-grant-one-tenant rule is the same shape as samen's token-blind, org-scoped actor discipline, and it's a concrete hardening target for samen's own MCP server (ADR-043, currently per-operator tokens over HTTP+SSE) — samen already has assent, sessions, and revocation machinery, so this is composition, not new infrastructure. Second, Operately ships the packaging layer samen's G22 gap ("agent-grounding packaging for builders") is missing: a small CLI over its API, published agent skills for Claude Code/Codex/OpenClaw, and docs written for AI agents as a primary client persona — the last mile samen's catalog and MCP server don't yet have. Two smaller items round out the card: a per-mutation <code>activities</code> record that doubles as both audit trail and a human-readable feed (samen already pays the write cost via its hash-chained audit and wide events; a masked-aware read-side projection would convert that into product value with zero new invariant risk), and an opinionated check-in-cadence engine on top of goals/projects (scheduled reviews, on-track/at-risk status, reminder jobs) that's a vertical-agnostic depth addition to samen's existing <code>work</code> scope, buildable from parts samen already owns (Oban scheduling, notifications, automation engine).</p>
+
+<div class="grid">
+
+<div class="card">
+<h4><a href="https://github.com/mirego/accent">Accent</a> <span class="badge badge-medium">medium</span></h4>
+<p>Self-hosted developer-facing TMS (Phrase/Crowdin alternative): Phoenix + GraphQL backend, format-agnostic Langue parser/serializer core, MT provider adapters, per-string collaboration and rollback. v1.30.5, BSD-3-Clause, ~1.5k★, actively maintained.</p>
+<p><strong>Adopt:</strong> Accent itself as the fleet's translation workflow once G24 lands — self-hosted, CLI+GraphQL-driven, exactly the "many repos, one translation team" shape a foundry needs (<span class="effort">M</span>, ops integration only); the Langue Document/Entry/ValueType format-abstraction pattern as the design reference for samen's own i18n import/export chokepoint (<span class="effort">L</span> when G24 builds it, reference-only now); <code>opentelemetry_oban</code> to round out samen's existing OTel stack (<span class="effort">S</span>); <code>telemetry_ui</code> as a small first-party-friendly metrics-panel dep for the operator cockpit (<span class="effort">S</span>–<span class="effort">M</span>).</p>
+<p><strong>Skip:</strong> Absinthe/GraphQL (samen is deny-by-default JSON:API), ueberauth (samen standardized on assent), cloak_ecto (weaker than ADR-003's vault), the EmberJS frontend, and the product's core domain code — nothing exports as a Hex dep to vendor.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/puemos/craftplan">Craftplan</a> <span class="badge badge-medium">medium</span></h4>
+<p>Single-tenant artisan-manufacturer ERP on Ash 3 + ash_postgres: versioned BOMs with cost rollup, production batching, lot-traced inventory, z-score demand forecasting, JSON:API + GraphQL. AGPL-3.0, ~1.1k★, v0.6.0, actively maintained.</p>
+<p><strong>Adopt:</strong> ex_cldr + gettext + tz wiring on the same Ash 3 + ash_money base samen runs (Cluster 1, <span class="effort">M</span>); its waffle + ex_aws_s3 + MinIO local-dev setup as the reference for turning samen's honest <code>Storage.S3</code> stub into a real, CI-provable adapter (<span class="effort">M</span>); open_api_spex-emitted OpenAPI docs alongside JSON:API, strengthening samen's contract-verifier story and G22 grounding (<span class="effort">S</span>); the singleton encrypted-settings-resource <em>UX</em> for runtime email-provider selection, adopting the shape only — Craftplan's own cloak_ecto storage must be swapped for samen's vault (<span class="effort">M</span>); the inventory/manufacturing domain decomposition as an idea-bank reference for a future light-ERP vertical (<span class="effort">L</span>, file don't build).</p>
+<p><strong>Skip:</strong> any code reuse (AGPL vs MIT), ash_authentication, ash_graphql, cloak_ecto encryption, and its single-tenant CSV/command-palette/iCal handling — samen's equivalents already meet or exceed these.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://gitlab.com/nyght/nyght">nyght</a> <span class="badge badge-medium">medium</span></h4>
+<p>Real, revenue-adjacent venue/staff-ops platform (plain Ecto, no Ash) run by a Swiss music venue under a paying-member steering committee: events, shifts with volunteer applications, integrations marketplace, DB-backed RBAC. AGPL-3.0, 2,759 commits, 67 releases.</p>
+<p><strong>Adopt:</strong> the CLDR-first i18n stack proven in fr/de/en production (Cluster 1, <span class="effort">L</span>, cross-cutting per the decompose rule); shifts/staffing as a new scope blueprint (Cluster 2, <span class="effort">M</span>); its Integration/Installation split with per-adapter config UI and tenant-visible buffered delivery logs, as the pattern for a tenant-facing "install and configure an integration" surface samen's webhook machinery lacks today (<span class="effort">M</span>); DB-backed granular RBAC (org-defined roles from a permission catalog) for the open G28 gap (<span class="effort">M</span>); hand-rolled iCalendar/vCard emission confirming samen's zero-dependency <code>ics</code> approach and adding a vCard idea (<span class="effort">S</span>); sobelow in CI, cheap to add to samen's gate (<span class="effort">S</span>).</p>
+<p><strong>Skip:</strong> the plain-Ecto context architecture (Ash + generators already supersede it), cloak_ecto, Flop pagination (would regress samen's keyset-pagination contract), and Kino/kino_db in prod deps.</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/operately/operately">Operately</a> <span class="badge badge-medium">medium</span></h4>
+<p>Goals/OKRs, projects, and team-space "operating system" for 5–100 person teams. Phoenix/plain-Ecto backend, React+TypeScript frontend (diverges from samen's LiveView), hosted MCP server with OAuth. Apache-2.0 core, ~543★, 4,300+ commits, active.</p>
+<p><strong>Adopt:</strong> MCP OAuth with default-read scopes and single-tenant grant binding, as a direct hardening target for samen's ADR-043 MCP server (Cluster 3, <span class="effort">M</span>); agent CLI + skills packaging closing the G22 last-mile gap (<span class="effort">M</span>); check-in cadence engine deepening the <code>work</code> scope (<span class="effort">M</span>); a masked-aware activity feed as a read-side projection over samen's existing audit substrate (<span class="effort">S</span>–<span class="effort">M</span>); <code>site_encrypt</code> in-BEAM Let's Encrypt as a reference for a future self-host lane (<span class="effort">S</span> to note, <span class="effort">M</span> to ship).</p>
+<p><strong>Skip:</strong> the React/GraphQL/Apollo frontend and API layer (reverses samen's LiveView + deny-by-default JSON:API decisions and reopens the <code>%Masked{}</code> server-side-rendering problem), plain-Ecto operations-pattern architecture (Ash actions + chokepoints already deliver the same audit/notify pipeline), ueberauth, and the tenancy model (no PII vaulting, no two-plane split — strictly weaker than samen's).</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/Tymeslot/tymeslot">Tymeslot</a> <span class="badge badge-medium">medium</span></h4>
+<p>Self-hosted Calendly alternative backing a real managed cloud (tymeslot.app): named availability schedules, calendar sync across seven+ providers, Stripe Connect payments. Same-stack as samen (Elixir 1.20/Phoenix 1.8/LiveView/Oban). AGPL-3.0, v1.11.1, ~3,300 commits.</p>
+<p><strong>Adopt:</strong> the calendar-sync adapter family (Google/Outlook/CalDAV/Nextcloud/…) as a <code>samen_calendar_*</code> vendor package with reconnection and conflict detection, feeding OAuth refresh tokens through the vault (Cluster 2, <span class="effort">L</span>); the layered availability/booking engine for a scheduling scope (Cluster 2, <span class="effort">M</span> on top); signed no-login action links (HMAC, expiring, single-purpose) as a general "capability URL" primitive for notifications/DSAR/approvals (<span class="effort">S</span>); its SSRF guard suite (DNS pinning, private-IP rejection, URL validation) at the outbound-webhook/CalDAV chokepoint (<span class="effort">S</span>–<span class="effort">M</span>); online credential re-encryption workers as a modeled key-rotation drill for samen's vault (<span class="effort">M</span>); excellent_migrations + sobelow + mix_audit for the CI gate (<span class="effort">S</span>); its Stripe Connect integration as a live reference once samen's G13 stub goes live (reference only).</p>
+<p><strong>Skip:</strong> any code reuse (AGPL), plain-Ecto architecture, its auth stack (samen's identity spine is already deeper), video-provider/Slack/Telegram integrations, and single-container bundled-Postgres deploy (contradicts samen's Fly/Neon posture).</p>
+</div>
+
+<div class="card">
+<h4><a href="https://github.com/wraft/wraft">Wraft</a> <span class="badge badge-medium">medium</span></h4>
+<p>Open-source Document Lifecycle Management platform (DocuSign/PandaDoc alternative): content-type → template → layout/theme → typesetting-engine → branded PDF, with external counterparty signing. Elixir/Phoenix, Rust NIF PDF analyzer, recent AI additions. AGPL-3.0, ~1,685 commits, v0.6.6.</p>
+<p><strong>Adopt:</strong> the structured document-generation pipeline as design input for deepening samen's shallow <code>docs</code>/cms scope, via a fail-honest <code>samen_typst</code> adapter package (Cluster 2, <span class="effort">L</span> full depth, <span class="effort">M</span> first cut); external-counterparty signature lifecycle extending E3 approvals with a vaulted, masked counterparty identity and QR verification (Cluster 2, <span class="effort">L</span>, design as an ADR first); reusable content blocks/templates/frames as the authoring schema underneath the pipeline (<span class="effort">M</span>, bundled with the pipeline item); OpenAPI spec emission strengthening G22 grounding (<span class="effort">M</span>).</p>
+<p><strong>Skip:</strong> any code lifting (AGPL), jido_ai/req_llm (samen already evaluated and rejected Jido), cloak_ecto, mutable ex_audit (samen's hash-chained WORM audit is strictly stronger), backpex admin + fun_with_flags (first-party operator plane and feature flags already exist), the Rust NIF PDF analyzer (no-NIF posture), ex_typesense (Postgres tsvector is the settled search story), and y_ex/Yjs collaborative editing (large PII-masking surface, revisit only once the docs scope itself ships).</p>
+</div>
+
+</div>
+
+<p class="verdict">Net read for a product leader skimming only this section: nothing here is vendorable at the code level — four of six projects are AGPL, one is Apache-2.0-with-caveats, only Accent is outright clean — so this cluster earns its keep as design evidence, not dependencies. The clearest, lowest-risk win is closing G24: four independent codebases converge on <code>ex_cldr + gettext + tz</code>, which turns "which i18n libraries" from an open question into a settled one, leaving only the (already-flagged, ADR-plus-phased-items-sized) integration work. The second win is a menu, not a mandate: four well-proven scope blueprints (staffing/shifts, bookable scheduling, light-ERP, document lifecycle) that samen can pull off the shelf whenever a vertical actually demands one, each cleanly composable with machinery samen already owns (E3 approvals, calendar/notifications scopes, the vault, INV-4 adapter packages). The third is Operately's MCP OAuth scope model and agent-CLI packaging — the one item in this section that's both concretely actionable now and sitting on the cleaner license, directly hardening samen's own ADR-043 MCP surface and closing the G22 agent-grounding gap. Effort clusters at <span class="effort">S</span>–<span class="effort">M</span> for the immediately actionable items, with the vertical-scope and document-pipeline ideas correctly filed as <span class="effort">L</span> idea-bank material rather than queued work.</p>
+
+</section>
