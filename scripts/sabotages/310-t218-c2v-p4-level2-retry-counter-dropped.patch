@@ -1,0 +1,32 @@
+# SABOTAGE: ADR-048 §8 P4 (T218 / batch C2, §10 row 5 RATIFIED (a)) — the Level 2
+# retry counter is DROPPED. `note_context_retry!/2` becomes a no-op: the single mid-turn
+# recovery attempt still happens, but `context_retries` is never stamped on the
+# `:proposed` turn row, so 'Level 2 retried EXACTLY once' is recorded nowhere a test —
+# or an operator — can read it, and a second retry could not be told from the first.
+# The counter on the turn row IS the whole of the once-only claim. Flips the named red
+# asserting two provider attempts on one turn row, and its mandatory anti-tautology
+# control (which asserts the row still reads context_retries == 1).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_compaction_test.exs
+# MUST_FAIL: Level 2 retries EXACTLY once
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1099,12 +1099,13 @@
+   # The counter §6 puts "on the same turn row". Written through the `:decide` checkpoint
+   # action (meta only — the tool stamp is untouched) and MERGED into the row's existing
+   # meta, so it can never mint a second turn index for a recovery attempt.
+-  defp note_context_retry!(turn_row, n) do
++  defp note_context_retry!(turn_row, _n) do
++    # SABOTAGE (ADR-048 §8 P4 / §10 row 5 RATIFIED (a)): the retry counter is DROPPED.
++    # The single recovery attempt still happens, but nothing is stamped on the
++    # `:proposed` turn row, so "Level 2 retried EXACTLY once" is recorded nowhere a test
++    # — or an operator — can read it, and a second retry could not be told from the
++    # first. The counter on the turn row IS the whole of the once-only claim.
+     turn_row
+-    |> Ash.Changeset.for_update(:decide, %{
+-      meta: bounded_meta(Map.put(turn_row.meta || %{}, "context_retries", n))
+-    })
+-    |> Ash.update!(authorize?: false)
+   end
+ 
+   # ------------------------------------------------------------------------------------

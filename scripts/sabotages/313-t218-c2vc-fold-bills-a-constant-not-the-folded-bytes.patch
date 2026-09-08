@@ -1,0 +1,31 @@
+# SABOTAGE: ADR-048 §8 P13's two MANDATORY anti-tautology positive controls (T218 /
+# batch C2, §10 row 4 RATIFIED (a)) -- `apply_fold!/4` now bills a FIXED CONSTANT OF 1
+# TOKEN for a fold's input side instead of `est_tokens(span.folded)`, so a fold that
+# reads an arbitrarily large span into the marker bills as if it read almost nothing.
+# `est_tokens/1`'s own comment claims a fold "can never bill on one scale and trigger on
+# another" by construction; this sabotage is exactly that decoupling on the input side.
+# NOT P4 (:497): that is the level-2 retry-once counter, a different counter and a
+# different claim. Flips P13 POSITIVE CONTROL 2 on its own strengthened ledger-pinned
+# assertion (measured: `billed_in` reads 1, which cannot reach
+# `div(byte_size("turn one -- a long span destined to be folded") + 3, 4)`) -- the bare
+# `run.input_tokens_used > 300` inequality that used to be CONTROL 2's whole input-side
+# check does NOT catch this on its own, because 300 + 1 (this sabotage's bill) still
+# exceeds 300; only the ledger-pinned floor added in C2VC does.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_compaction_test.exs
+# MUST_FAIL: P13 POSITIVE CONTROL 2 (anti-tautology, MANDATORY): the fold DID spend real tokens against max_input_tokens/max_output_tokens in the same window
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1316,7 +1316,11 @@
+   end
+ 
+   defp apply_fold!(%Run{} = run, views, goal, span) do
+-    in_tokens = est_tokens(span.folded)
++    # SABOTAGE (ADR-048 §8 P13 CONTROL 2): the fold now bills a FIXED CONSTANT of 1
++    # token for its input side, decoupled from the bytes it actually folded -- the exact
++    # "bill on one scale and trigger on another" failure est_tokens/1's own comment
++    # claims to have ruled out by construction.
++    in_tokens = 1
+     out_tokens = est_tokens([span.marker])
+ 
+     entry = %{

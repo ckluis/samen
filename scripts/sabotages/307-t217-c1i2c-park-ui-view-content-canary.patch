@@ -13,12 +13,12 @@ diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
 index 647f225..b067dd6 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -2468,7 +2468,7 @@ defmodule Samen.AI.Agent do
-         "goal" => goal,
-         "lines" => lines,
-         "pending" => pending,
--        "ui_view" => lines,
-+        "ui_view" => ["CORRUPTED-PARK-UI-VIEW-CANARY"],
-         "llm_view" => lines,
-         "folds" => []
-       })
+@@ -2977,7 +2977,7 @@ defmodule Samen.AI.Agent do
+     base = %{
+       "goal" => goal,
+       "lines" => lines,
+-      "ui_view" => ui_view,
++      "ui_view" => ["CORRUPTED-PARK-UI-VIEW-CANARY"],
+       "llm_view" => lines,
+       "folds" => folds,
+       "turn_lens" => turn_lens

@@ -45,7 +45,11 @@ defmodule Samen.WebTest.AgentFixture do
         max_tool_calls: 12,
         max_input_tokens: 60_000,
         max_output_tokens: 8_000,
-        deadline_seconds: 600
+        deadline_seconds: 600,
+        # ADR-048 §6's context WATERMARK, resolved on every real run by
+        # `Samen.AI.Agent.resolve_budgets/2`; the fixture mints rows directly, so it
+        # states the same default the kernel would (70% of `max_input_tokens`).
+        context_cutoff_tokens: 42_000
       })
       |> Ash.create!(authorize?: false)
 
