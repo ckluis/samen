@@ -2399,13 +2399,79 @@ defmodule Samen.AI.Agent do
     end
   end
 
-  defp encode_transcript(goal, lines), do: Jason.encode!(%{"goal" => goal, "lines" => lines})
+  @doc """
+  ADR-048 §4 (T217) — READER-SIDE-ONLY migration. Returns the run's `ui_view` and
+  `llm_view` from the same sealed blob `transcript_state/1` reads. No backfill and
+  no sealed-byte rewrite ever runs: a blob written before this change carries only
+  the legacy `lines` key, so both views fall back to `lines` when their own key is
+  absent. A blob written by the current `encode_transcript/2,3` already carries
+  both keys explicitly and this simply passes them through unchanged.
+  """
+  @spec transcript_views(Ash.Resource.record()) ::
+          {:ok, %{goal: String.t(), ui_view: [String.t()], llm_view: [String.t()]}}
+          | {:error, term()}
+  def transcript_views(%Run{} = run) do
+    case run.transcript do
+      %Samen.Masked{} = masked ->
+        case Samen.Vault.reveal(masked, repo!(), subject_id: run.id) do
+          {:ok, json} -> decode_transcript_views(json)
+          {:error, _reason} -> {:error, :transcript_unavailable}
+        end
+
+      _ ->
+        {:error, :transcript_unavailable}
+    end
+  end
+
+  defp decode_transcript_views(json) do
+    case Jason.decode(json) do
+      {:ok, %{"goal" => goal, "lines" => lines} = decoded}
+      when is_binary(goal) and is_list(lines) ->
+        if Enum.all?(lines, &is_binary/1) do
+          {:ok,
+           %{
+             goal: goal,
+             ui_view: Map.get(decoded, "ui_view", lines),
+             llm_view: Map.get(decoded, "llm_view", lines)
+           }}
+        else
+          {:error, :transcript_unavailable}
+        end
+
+      _ ->
+        {:error, :transcript_unavailable}
+    end
+  end
+
+  # ADR-048 §4 (D2, T217): ONE JSON blob, three fields, sealed under the run's single
+  # DEK — never two tables with two retention specs. `ui_view` is append-only (exactly
+  # what the tenant saw); `llm_view` is the loop's compactable working set; `folds` is
+  # the compaction ledger. C1 ships no compactor, so every write here sets `ui_view`
+  # and `llm_view` to the same authoritative `lines` and `folds` to an empty ledger —
+  # C2/C3 own the only place that diverges them — no compaction hook call site lands here.
+  defp encode_transcript(goal, lines),
+    do:
+      Jason.encode!(%{
+        "goal" => goal,
+        "lines" => lines,
+        "ui_view" => lines,
+        "llm_view" => lines,
+        "folds" => []
+      })
 
   # The 3-arity encoder is used ONLY by the park: it carries the pending proposal. Every
   # other write uses the 2-arity form, which is exactly how an executed/rejected proposal
   # gets CLEARED — a proposal can never be re-bindable after its decision.
   defp encode_transcript(goal, lines, pending),
-    do: Jason.encode!(%{"goal" => goal, "lines" => lines, "pending" => pending})
+    do:
+      Jason.encode!(%{
+        "goal" => goal,
+        "lines" => lines,
+        "pending" => pending,
+        "ui_view" => lines,
+        "llm_view" => lines,
+        "folds" => []
+      })
 
   # ------------------------------------------------------------------------------------
   # Durable-cursor writes (kernel-only, the Approvals trusted-API precedent)

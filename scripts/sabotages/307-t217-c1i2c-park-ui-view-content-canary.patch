@@ -1,0 +1,24 @@
+# SABOTAGE: ADR-048 §4 (T217) — coverage-truth SECOND PASS
+# (nodes/C1V/work/seats/coverage-truth-2.verdict.md, mutation #6) proved that
+# `encode_transcript/3` — used ONLY by the park/pending-approval path — performs its own
+# `"ui_view" => lines` write, a SEPARATE call site from `encode_transcript/2`'s identical
+# write (sabotage 306). Corrupting THIS call site alone left all 7 then-existing tests,
+# including 306's own new assertion, passing silently: nothing in the repo drove a write
+# tool call through a real proposal to exercise the park path's own ui_view write. This
+# mutation corrupts ONLY the 3-arity function body; the 2-arity path is untouched.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_dual_view_test.exs
+# MUST_FAIL: PARK UI VIEW CONTENT: the park path's ui_view equals its transcript lines, encoded through encode_transcript/3
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 647f225..b067dd6 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2468,7 +2468,7 @@ defmodule Samen.AI.Agent do
+         "goal" => goal,
+         "lines" => lines,
+         "pending" => pending,
+-        "ui_view" => lines,
++        "ui_view" => ["CORRUPTED-PARK-UI-VIEW-CANARY"],
+         "llm_view" => lines,
+         "folds" => []
+       })

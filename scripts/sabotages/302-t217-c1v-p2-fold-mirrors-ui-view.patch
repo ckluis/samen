@@ -1,0 +1,47 @@
+# SABOTAGE: ADR-048 §8 P2 — compaction never rewrites the UI view. "Point the fold at
+# ui_view": the SAME :advance persistence path a real compactor will use to write a
+# fold is made to mirror the (possibly-folded) llm_view into ui_view whenever the
+# transcript blob it is writing already carries an llm_view key. On an ordinary turn
+# commit this is a no-op (encode_transcript/2,3 already sets ui_view == llm_view), so
+# it only corrupts ui_view once a fold has diverged the two views from each other —
+# exactly the boundary P2's red exists to prove never happens.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_dual_view_test.exs
+# MUST_FAIL: P2: RED — compaction never rewrites ui_view; a TEST-ONLY fold driver mutates llm_view through the same :advance persistence path and ui_view bytes must stay unchanged
+diff --git a/samen_core/lib/samen/ai/agent/run.ex b/samen_core/lib/samen/ai/agent/run.ex
+index 295b060..cf42e4d 100644
+--- a/samen_core/lib/samen/ai/agent/run.ex
++++ b/samen_core/lib/samen/ai/agent/run.ex
+@@ -234,6 +234,32 @@ defmodule Samen.AI.Agent.Run do
+       ])
+ 
+       require_atomic?(false)
++
++      # SABOTAGE (ADR-048 §8 P2): "point the fold at ui_view" — a fold write through
++      # this SAME :advance persistence path mirrors llm_view into ui_view instead of
++      # leaving ui_view untouched. On an ordinary turn commit ui_view and llm_view are
++      # already identical (encode_transcript/2,3 sets both to the same `lines`), so
++      # this is a no-op there; it only corrupts ui_view when a fold has diverged the
++      # two views — exactly the case P2's red proves must never happen.
++      change(fn changeset, _ctx ->
++        case Ash.Changeset.get_attribute(changeset, :transcript) do
++          json when is_binary(json) ->
++            case Jason.decode(json) do
++              {:ok, %{"llm_view" => llm} = decoded} ->
++                Ash.Changeset.force_change_attribute(
++                  changeset,
++                  :transcript,
++                  Jason.encode!(Map.put(decoded, "ui_view", llm))
++                )
++
++              _ ->
++                changeset
++            end
++
++          _ ->
++            changeset
++        end
++      end)
+     end
+ 
+     # The durable cancel flag — deliberately NOT a state transition: the RUNNING loop owns
