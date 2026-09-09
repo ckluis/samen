@@ -11,9 +11,10 @@ defmodule Samen.AI.Agent do
   by `Samen.AI.Agent.Hooks` — resolved once per run (host config, then the per-run `:hooks`
   opt) and threaded on `opts` as `:resolved_hooks` beside `:resolved_tools`. Six of the
   seven points have call sites here (`:session_start`, `:before_completion`,
-  `:after_tool_request`, `:before_tool_call`, `:after_tool_execution`, `:on_error`);
-  `:after_compaction` is declared and dispatchable but has no caller, because this loop
-  performs no transcript compaction in v1.
+  `:after_tool_request`, `:before_tool_call`, `:after_tool_execution`, `:on_error`), and
+  ADR-048 §5#6 gives the seventh — `:after_compaction` — its first: the Level-1 fold
+  dispatches it once the summary has passed §5#3's ingress path and been appended, and
+  before the fold is persisted, so a `:block` there means the fold does not happen.
 
   **First-decision-wins**, and hooks may only NARROW: a `{:block, reason}` is the fail-honest
   refusal turn `:hook_blocked`, a `{:halt, reason}` is a real terminal `:hook_halted`
@@ -179,6 +180,7 @@ defmodule Samen.AI.Agent do
 
   alias Samen.AI.Agent.Approver
   alias Samen.AI.Agent.Breaker
+  alias Samen.AI.Agent.Compaction
   alias Samen.AI.Agent.Hooks
   alias Samen.AI.Agent.Run
   alias Samen.AI.Agent.ToolResult
@@ -290,6 +292,13 @@ defmodule Samen.AI.Agent do
     # the enum is closed — an unlisted kind degrades to the useless `:unknown`.
     :context_overflow,
     :context_exhausted,
+    # ADR-048 §5#5 (T219) — the compaction REFUSAL kind. The §5 summarize call refused
+    # (`:pii_egress_refused`), failed, returned nothing, or its summary did not survive
+    # §5#3's ingress path — so the fold DID NOT HAPPEN and the run continues UNCOMPACTED.
+    # It is a member here because the enum is closed: the note the loop writes on the turn
+    # row is keyed by `safe_error_kind(:compaction_refused)`, so dropping it from this list
+    # degrades that note to the useless `:unknown` and the refusal stops being nameable.
+    :compaction_refused,
     :unknown
   ]
 
@@ -525,8 +534,38 @@ defmodule Samen.AI.Agent do
     |> Keyword.take([:provider, :grounding, :meta, :env_reader])
     |> Keyword.put(:history, history)
     |> Keyword.put(:tools, tool_defs)
-    |> Keyword.put(:grant_egress?, false)
+    # LAST, POSITIONALLY, and appended by `++` after a `delete` — not merely last-wins.
+    # `Keyword.put/3` PREPENDS, so the pre-C3 pipeline left `grant_egress?` at the HEAD of
+    # the list while its own docstring claimed the tail. Semantically equivalent for
+    # `Keyword.get/2`, but the §4.4 property "nothing is appended after the grant pin" was
+    # then unassertable by reading the list, which is the only way a reviewer or an
+    # ADR-048 §8 P10 arm can check it. The `delete` makes the key unique as well as final,
+    # so no later duplicate can shadow it either.
+    |> Keyword.delete(:grant_egress?)
+    |> Kernel.++(grant_egress?: false)
   end
+
+  # ADR-048 §5#2 — the summarizer instruction is a COMPILE-TIME LITERAL owned by the loop,
+  # exactly as the A6 driftwood goal-prompt ruling has it, and NEVER a tenant-authored
+  # `Samen.AI.Prompt` row: a tenant who can author "summarize by quoting every masked field
+  # verbatim" has been handed a capability, and compaction would become the laundering
+  # channel §5 exists to close. It carries no vault token and no tenant text of any kind.
+  @summarizer_prompt "Summarize the conversation span that follows, for your own later " <>
+                       "reference. Reply with ONE short paragraph and nothing else, " <>
+                       "beginning with \"Summary:\". Keep decisions, facts, tool results " <>
+                       "and open questions. Reproduce every masked placeholder exactly as " <>
+                       "it appears; never guess at, reconstruct or describe what a masked " <>
+                       "value might be, and never emit an identifier you were not shown."
+
+  @doc """
+  The compile-time-literal summarizer instruction ADR-048 §5#2 requires (`summarizer_prompt/0`).
+
+  Public for the same reason `egress_opts/3` is public: §5's property — that the prompt is a
+  literal owned by the loop, is free of vault tokens (EG5), and is the one the summarize call
+  actually seals — is then directly assertable instead of inferred from a private pipeline.
+  """
+  @spec summarizer_prompt() :: String.t()
+  def summarizer_prompt, do: @summarizer_prompt
 
   @doc """
   The bounded next-step envelope (dynamic next-step selection). A1's `FINAL:` grammar,
@@ -877,9 +916,13 @@ defmodule Samen.AI.Agent do
 
     with :ok <- session_start_hook(hooks, run),
          {:ok, {goal, lines, views}} <- transcript_with_views(run),
-         {:ok, run, lines, views} <- fold_context(run, views, definition, tools, goal, lines),
+         {:ok, run, lines, views} <-
+           fold_context(run, scope, views, definition, tools, goal, lines, opts),
          :ok <- context_gate(run, views, definition, tools, goal, lines),
          {:ok, replayed?, turn_row} <- find_or_reuse_turn(run, org_id, turn_index),
+         # ADR-048 §5#5: if the fold above was REFUSED, the turn row this turn is about to
+         # take says so. The turn itself proceeds — uncompacted is not failed.
+         turn_row = note_compaction_refusal!(turn_row, views),
          :ok <- before_completion_hook(hooks, run, turn_row, turn_index) do
       # Every provider-bound byte still routes kernel → chokepoint: prior turns re-enter
       # ONLY as `:history` (re-scrubbed per §3.2a + allowlist-scanned per §3.2 step 3/4,
@@ -1073,21 +1116,33 @@ defmodule Samen.AI.Agent do
     retries = attempt - 1
 
     if attempt <= @max_context_retries and context_overflow?(result) do
-      {:ok, run, lines, views} = derive_fold(run, views, definition, tools, goal, lines)
-      turn_row = note_context_retry!(turn_row, attempt)
+      case derive_fold(run, scope, views, definition, tools, goal, lines, opts) do
+        {:ok, run, lines, views} ->
+          turn_row =
+            turn_row
+            |> note_compaction_refusal!(views)
+            |> note_context_retry!(attempt)
 
-      complete_with_recovery(
-        run,
-        scope,
-        definition,
-        tools,
-        goal,
-        lines,
-        views,
-        turn_row,
-        opts,
-        attempt + 1
-      )
+          complete_with_recovery(
+            run,
+            scope,
+            definition,
+            tools,
+            goal,
+            lines,
+            views,
+            turn_row,
+            opts,
+            attempt + 1
+          )
+
+        # A hook HALTED the run at `:after_compaction` during a LEVEL 2 fold. This turn row
+        # already exists, so the honest spelling is the loop's own error terminal: the
+        # caller's `{:error, reason}` branch finalizes the row `:failed` with the bounded
+        # kind and takes the run terminal. Never a retry, and never a silent continue.
+        {:halt, kind, _reason, _turn_row} ->
+          {run, lines, turn_row, {:error, kind}, duration_ms, retries}
+      end
     else
       {run, lines, turn_row, result, duration_ms, retries}
     end
@@ -1182,12 +1237,16 @@ defmodule Samen.AI.Agent do
   # ------------------------------------------------------------------------------------
   # ADR-048 §6 LEVEL 1 — the deterministic, non-model, drop-with-marker fold (T218 / C2)
   #
-  # PRE-TURN (before `seal/3`), OLDEST-eligible-span, WHOLE TURNS ONLY, deterministic.
-  # **No model writes anything here.** There is no summarizer in this batch: no
-  # `Samen.AI.complete/4` call, no provider round-trip, no clock — the selection AND the
-  # replacement text are pure functions of `{the carried view state, the assembled size}`.
-  # C3 is the batch that replaces the marker with a model-written summary through §5's
-  # full ingress path; until then the fold is drop-with-marker and nothing else.
+  # PRE-TURN (before `seal/3`), OLDEST-eligible-span, WHOLE TURNS ONLY.
+  #
+  # ADR-048 §5 / C3 (`T219`) has now replaced C2's deterministic drop-with-marker REPLACEMENT
+  # TEXT with a model-written summary: `summarize_span/3` below is an ordinary governed
+  # `Samen.AI.complete/4` through `seal/3`, so exactly one extra provider call rides each
+  # folding turn, ahead of that turn's own call. **SELECTION is still deterministic** — which
+  # span folds is a pure function of `{the carried view state, the assembled size}` and no
+  # model influences it; only the replacement text is model-written, and the ledger entry says
+  # so (`"deterministic" => false`). A summarize call that REFUSES folds nothing at all and
+  # the run continues uncompacted (§5#4): compaction is not a laundering channel.
   #
   # §4 non-negotiable 4 holds by construction: the folded span is replaced in `llm_view`
   # by ONE bounded marker, and `ui_view` GAINS one appended line saying a fold happened
@@ -1202,9 +1261,10 @@ defmodule Samen.AI.Agent do
   # Ruling UXD-18's TWO CHECKPOINTS, at the top of every turn:
   #
   #   * checkpoint 1 — `apply_fold!/4` persists the entry `"proposed"` BEFORE the slow
-  #     provider call (in C3 that call is the summarizer; in C2 the fold body is already
-  #     deterministic, so what the checkpoint protects is the derivation and the view
-  #     rewrite it committed);
+  #     provider call, i.e. before the TURN's own `complete/4`. Since C3 the §5 summarize
+  #     call sits EARLIER still, ahead of checkpoint 1 — a crash inside it therefore leaves
+  #     no ledger row and the replay legitimately re-derives, which is precisely the case
+  #     UXD-18 already sanctions below ("a crash BEFORE checkpoint 1 leaves no row");
   #   * checkpoint 2 — the SAME transaction that advances the run cursor finalizes the
   #     entry to `"done"` (`encode_transcript_finalizing/3-4`).
   #
@@ -1213,22 +1273,140 @@ defmodule Samen.AI.Agent do
   # a re-derivation would be invisible in the body; the `meta.replayed` stamp is what
   # makes reuse refutable on the ledger itself instead of inferred from a call count.
   # A crash BEFORE checkpoint 1 leaves no row, and that replay legitimately re-derives.
-  defp fold_context(%Run{} = run, views, definition, tools, goal, lines) do
+  defp fold_context(%Run{} = run, scope, views, definition, tools, goal, lines, opts) do
     case reusable_fold(views, run.current_turn + 1) do
-      nil -> derive_fold(run, views, definition, tools, goal, lines)
+      nil -> derive_fold(run, scope, views, definition, tools, goal, lines, opts)
       entry -> reuse_fold!(run, views, goal, entry, lines)
     end
   end
 
-  defp derive_fold(%Run{} = run, views, definition, tools, goal, lines) do
+  defp derive_fold(%Run{} = run, scope, views, definition, tools, goal, lines, opts) do
     if context_tokens(definition, tools, goal, lines) > run.context_cutoff_tokens do
       case fold_span(run, views, definition, tools, goal, lines) do
-        nil -> {:ok, run, lines, views}
-        span -> apply_fold!(run, views, goal, span)
+        nil ->
+          {:ok, run, lines, views}
+
+        span ->
+          # `summarize_span/3` returns the summary ALREADY through §5#3's ingress path —
+          # `Secrets.redact/1` then `Ingress.sanitize/1` then the chokepoint allowlist — so
+          # there is no spelling of this call site that appends an unscrubbed binary.
+          case summarize_span(scope, span, opts) do
+            {:ok, summary} ->
+              # §5#6: the point fires on the span the summary has ALREADY been folded into,
+              # and BEFORE `apply_fold!/4` persists it — the only ordering in which `:block`
+              # can still mean "this fold does not happen".
+              folded = with_summary(span, summary)
+
+              case after_compaction_hook(Keyword.get(opts, :resolved_hooks, []), run, folded) do
+                :ok ->
+                  apply_fold!(run, views, goal, folded)
+
+                # A hook REFUSED the fold (its own `{:block, _}`, or the fail-closed
+                # `:hook_error` an `{:edit, _}` at this point degrades to — §5#6 forbids
+                # edits outright). Same honest answer as a refused summarize.
+                {:block, kind, _reason} ->
+                  {:ok, run, lines, refused(views, kind)}
+
+                # A hook STOPPED the run. The `with` in `execute_turn/4` routes this to
+                # `halt_run/4`, a real terminal — never a promoted partial answer.
+                {:halt, kind, reason} ->
+                  {:halt, kind, reason, nil}
+              end
+
+            # The summarize call REFUSED or failed, or its summary did not survive the
+            # ingress path. §5's whole point is that compaction is not a laundering channel,
+            # so there is exactly one honest answer: the fold does not happen and the run
+            # continues UNCOMPACTED on the span it already had. Appending an unscrubbed — or
+            # un-obtained — summary anyway is the fail-OPEN reading this batch exists to make
+            # impossible. §5#5's bounded `:compaction_refused` carries WHICH refusal it was
+            # onto the turn row, so a refusal is never a silently shorter transcript.
+            {:error, reason} ->
+              {:ok, run, lines, refused(views, reason)}
+          end
       end
     else
       {:ok, run, lines, views}
     end
+  end
+
+  # ADR-048 §5#1 — THE SUMMARIZE CALL. An ORDINARY governed `Samen.AI.complete/4`, sealed by
+  # `Samen.AI.Chokepoint.seal/3` like every other provider-bound byte in this loop, with the
+  # SAME `egress_opts/3` allowlist and therefore `grant_egress?: false` pinned LAST — a
+  # caller-supplied `grant_egress?: true` cannot re-open grant plaintext on the summarize path
+  # any more than it can on an ordinary turn. §5#1's "its input is already-masked history, so
+  # no new egress class opens" is honoured BY CONSTRUCTION: the span rides `:history`, the
+  # exact field prior turns re-enter through (re-scrubbed per §3.2a and allowlist-scanned per
+  # §3.2 step 3/4, every call), and the only authored bytes are the compile-time
+  # `summarizer_prompt/0` literal. No tool defs are offered — the summarizer selects nothing.
+  defp summarize_span(scope, span, opts), do: Compaction.summarize(scope, span.folded, opts)
+
+  # ADR-048 §5#6 — `:after_compaction`'s FIRST call site. It fires AFTER the summary has
+  # passed §5#3's ingress path and been folded into the span's `llm_view` lines, and BEFORE
+  # `apply_fold!/4` writes anything, so:
+  #
+  #   * a hook observes only GOVERNED bytes (post-redact, post-sanitize, allowlist-checked);
+  #   * `:block` is meaningful — nothing has been persisted yet, so "skip this fold" is a
+  #     real option and the run continues uncompacted (§5#5);
+  #   * `{:edit, _}` is refused by `Hook`'s closed `@accepts` (it is not in the set) and
+  #     `Hooks.refuse/1` turns it into the strongest refusal the point honours — a `:block`
+  #     tagged `:hook_error`. The host's payload is NEVER applied to the summary, which is
+  #     the one thing §5#6 forbids outright.
+  #
+  # The ctx is bounded and token-only like every other point's. It carries the SCRUBBED
+  # summary, because a hook that cannot see what was folded cannot narrow on it — and by
+  # construction those are the only bytes it can see.
+  defp after_compaction_hook(hooks, %Run{} = run, span) do
+    Hooks.dispatch(hooks, :after_compaction, %{
+      run_id: run.id,
+      agent: run.agent,
+      org_id: run.org_id,
+      turn_index: run.current_turn + 1,
+      seq: span.seq,
+      first_turn: span.first_turn,
+      last_turn: span.last_turn,
+      summary: span.marker
+    })
+  end
+
+  # ADR-048 §5#5 — the fold was REFUSED. The views are returned UNCHANGED (that is what
+  # "the run continues uncompacted" means: not a partial fold, not a dropped span) and the
+  # transient note rides them to the turn row, where `note_compaction_refusal!/2` records it.
+  # The note is NEVER persisted into the transcript blob: `encode_views/6` takes the four
+  # view fields by name and this is not one of them.
+  defp refused(views, reason), do: Map.put(views, :compaction_refusal, reason)
+
+  # The bounded, observable half of §5#5: a refused fold leaves a NAMED note on the turn row
+  # it would have folded for. The key is `safe_error_kind(:compaction_refused)` — routed
+  # through the closed enum on purpose, so removing the kind from `@error_kinds` degrades
+  # this note to `"unknown"` and the refusal stops being nameable (that is the mutation
+  # `nodes/C3I2/work/mutation-controls.md` M4 records). The value is the bounded reason the
+  # refusal carried, so `:pii_egress_refused`, `:unsafe_summary` and a hook's `:hook_error`
+  # stay distinguishable on the record.
+  defp note_compaction_refusal!(turn_row, views) do
+    case Map.get(views, :compaction_refusal) do
+      nil ->
+        turn_row
+
+      reason ->
+        meta =
+          (turn_row.meta || %{})
+          |> Map.put(
+            to_string(safe_error_kind(:compaction_refused)),
+            Hooks.bounded_reason(reason)
+          )
+          |> bounded_meta()
+
+        turn_row
+        |> Ash.Changeset.for_update(:decide, %{meta: meta})
+        |> Ash.update!(authorize?: false)
+    end
+  end
+
+  # The model-written summary REPLACES the deterministic marker in the span, in place: the
+  # marker sits at index `seq - 1` of `new_lines` (the `seq - 1` retained earlier markers
+  # precede it), so this substitution cannot move a neighbouring segment.
+  defp with_summary(span, summary) do
+    %{span | marker: summary, new_lines: List.replace_at(span.new_lines, span.seq - 1, summary)}
   end
 
   # The `find_or_reuse_turn/3` row-reuse pattern, one level down (§6's own citation): the
@@ -1327,7 +1505,10 @@ defmodule Samen.AI.Agent do
       # has not passed the fold's own turn index.
       "status" => "proposed",
       "level" => 1,
-      "deterministic" => true,
+      # ADR-048 §5: the body is MODEL-WRITTEN now — the summarize call above produced it —
+      # so the ledger says so. C2's drop-with-marker was `true`; nothing else reads this
+      # field, and the P10 arms refute exactly it.
+      "deterministic" => false,
       "body" => span.marker,
       "covered" => span.turns,
       "lines" => length(span.folded),
@@ -1385,7 +1566,9 @@ defmodule Samen.AI.Agent do
   # policy threshold, not a billing figure, and the real spend ceilings
   # (`max_input_tokens`/`max_output_tokens`) are still enforced from measured usage.
   defp context_tokens(definition, tools, goal, lines) do
-    est_tokens([definition.goal_prompt, goal | lines] ++ Enum.map(Tools.defs(tools), &def_bytes/1))
+    est_tokens(
+      [definition.goal_prompt, goal | lines] ++ Enum.map(Tools.defs(tools), &def_bytes/1)
+    )
   end
 
   # The ONE deterministic estimator: the fold's own bill (§6 "the tokens are real and are
@@ -2225,7 +2408,7 @@ defmodule Samen.AI.Agent do
     #    CLEARED by the 2-arity encoder — an expired proposal is never re-bindable.
     case transcript_state(run) do
       {:ok, {goal, lines, _pending}} ->
-        kind = (pending_kind(run) || "write")
+        kind = pending_kind(run) || "write"
 
         run
         |> Ash.Changeset.for_update(:advance, %{
@@ -2276,18 +2459,33 @@ defmodule Samen.AI.Agent do
     case load_approval(approval_id_of(approval)) do
       {:ok, loaded} ->
         cond do
-          loaded.state != :approved -> {:error, :approval_not_approved}
-          loaded.org_id != run.org_id -> {:error, :approval_org_mismatch}
-          loaded.kind != WriteProposal.kind() -> {:error, :proposal_mismatch}
-          loaded.subject_ref != WriteProposal.subject_ref(turn_row.id) -> {:error, :proposal_mismatch}
-          not is_binary(loaded.decided_by) or loaded.decided_by == "" -> {:error, :approval_not_approved}
+          loaded.state != :approved ->
+            {:error, :approval_not_approved}
+
+          loaded.org_id != run.org_id ->
+            {:error, :approval_org_mismatch}
+
+          loaded.kind != WriteProposal.kind() ->
+            {:error, :proposal_mismatch}
+
+          loaded.subject_ref != WriteProposal.subject_ref(turn_row.id) ->
+            {:error, :proposal_mismatch}
+
+          not is_binary(loaded.decided_by) or loaded.decided_by == "" ->
+            {:error, :approval_not_approved}
+
           # The persisted decision IS the authority: the actor executing must be the party
           # the row records as having decided, and that party must be distinct from the
           # requester (the engine's own rule, re-asserted from the row rather than trusted
           # from the call).
-          loaded.decided_by == loaded.requested_by -> {:error, :not_authorized}
-          loaded.decided_by != approver_id -> {:error, :not_authorized}
-          true -> {:ok, loaded}
+          loaded.decided_by == loaded.requested_by ->
+            {:error, :not_authorized}
+
+          loaded.decided_by != approver_id ->
+            {:error, :not_authorized}
+
+          true ->
+            {:ok, loaded}
         end
 
       _ ->

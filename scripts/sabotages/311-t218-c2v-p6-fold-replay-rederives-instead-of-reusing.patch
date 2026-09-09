@@ -12,12 +12,12 @@
 # MUST_FAIL: a crash AFTER the pre-call :proposed fold write REUSES that ledger row
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1214,10 +1214,19 @@
+@@ -1274,10 +1274,19 @@
    # makes reuse refutable on the ledger itself instead of inferred from a call count.
    # A crash BEFORE checkpoint 1 leaves no row, and that replay legitimately re-derives.
-   defp fold_context(%Run{} = run, views, definition, tools, goal, lines) do
+   defp fold_context(%Run{} = run, scope, views, definition, tools, goal, lines, opts) do
 -    case reusable_fold(views, run.current_turn + 1) do
--      nil -> derive_fold(run, views, definition, tools, goal, lines)
+-      nil -> derive_fold(run, scope, views, definition, tools, goal, lines, opts)
 -      entry -> reuse_fold!(run, views, goal, entry, lines)
 -    end
 +    # SABOTAGE (ADR-048 §8 P6, ruling UXD-18): the REUSE arm is removed. A replay that
@@ -32,7 +32,7 @@
 +    # Retained as a bare reference ONLY so the sabotage introduces no unused-function
 +    # warning; the reuse arm is never called under this patch.
 +    _reuse_arm = &reuse_fold!/5
-+    derive_fold(run, views, definition, tools, goal, lines)
++    derive_fold(run, scope, views, definition, tools, goal, lines, opts)
    end
- 
-   defp derive_fold(%Run{} = run, views, definition, tools, goal, lines) do
+
+   defp derive_fold(%Run{} = run, scope, views, definition, tools, goal, lines, opts) do

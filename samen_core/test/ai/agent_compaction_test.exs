@@ -331,6 +331,12 @@ defmodule Samen.AI.AgentCompactionTest do
     script([
       {:continue, "turn one — a long span destined to be folded"},
       {:continue, "turn two"},
+      # C3I1 SCRIPT EXTENSION (no assertion changed). ADR-048 §5#1's governed summarizer is
+      # an ordinary `Samen.AI.complete/4`, so a FOLDING turn now makes TWO provider calls —
+      # the summarize call first, then the turn's own — and `Samen.AI.Provider.Scripted`
+      # serves one entry per call. One extra entry per fold keeps the script aligned with
+      # the turns each assertion below names.
+      {:continue, "Summary: turns one and two were reviewed."},
       # Evaluated INSIDE the worker process, AFTER the pre-call :proposed fold-entry
       # write committed: the narrow crash window UXD-18 names.
       fn -> exit(:mid_fold_death) end,
@@ -377,6 +383,12 @@ defmodule Samen.AI.AgentCompactionTest do
     script([
       {:continue, "turn one — a long span destined to be folded"},
       {:continue, "turn two"},
+      # C3I1 SCRIPT EXTENSION (no assertion changed). ADR-048 §5#1's governed summarizer is
+      # an ordinary `Samen.AI.complete/4`, so a FOLDING turn now makes TWO provider calls —
+      # the summarize call first, then the turn's own — and `Samen.AI.Provider.Scripted`
+      # serves one entry per call. One extra entry per fold keeps the script aligned with
+      # the turns each assertion below names.
+      {:continue, "Summary: turns one and two were reviewed."},
       {:final, "done"}
     ])
 
@@ -410,6 +422,12 @@ defmodule Samen.AI.AgentCompactionTest do
     script([
       {:continue, "turn one — a long span destined to be folded"},
       {:continue, "turn two"},
+      # C3I1 SCRIPT EXTENSION (no assertion changed). ADR-048 §5#1's governed summarizer is
+      # an ordinary `Samen.AI.complete/4`, so a FOLDING turn now makes TWO provider calls —
+      # the summarize call first, then the turn's own — and `Samen.AI.Provider.Scripted`
+      # serves one entry per call. One extra entry per fold keeps the script aligned with
+      # the turns each assertion below names.
+      {:continue, "Summary: turns one and two were reviewed."},
       fn -> exit(:mid_fold_death) end,
       {:final, "rolled back"},
       {:final, "committed"}
@@ -457,9 +475,12 @@ defmodule Samen.AI.AgentCompactionTest do
   test "P13: RED — a fold NEVER decrements max_turns or max_tool_calls; the two ceilings and the two used-counters are all byte-identical across a fold" do
     s = new_scope()
 
+    # C3I1 SCRIPT EXTENSION (no assertion changed) — one extra entry for the ADR-048 §5#1
+    # summarize call the folding turn now makes ahead of its own call.
     script(
       continue: "turn one — a long span destined to be folded",
       continue: "turn two",
+      continue: "Summary: turns one and two were reviewed.",
       final: "done"
     )
 
@@ -525,9 +546,15 @@ defmodule Samen.AI.AgentCompactionTest do
 
     usage = %{input_tokens: 100, output_tokens: 10}
 
+    # C3I1 SCRIPT EXTENSION (no assertion changed): the third entry answers the ADR-048
+    # §5#1 SUMMARIZE call, not an ordinary turn. Its scripted `usage` is deliberately
+    # never billed — §6's fold bill is the DETERMINISTIC `est_tokens/1` of the bytes the
+    # fold read and wrote, which is exactly what the two equalities below pin. The three
+    # ORDINARY turns still bill 300 in / 30 out.
     script([
       {:continue, "turn one — a long span destined to be folded", usage},
       {:continue, "turn two", usage},
+      {:continue, "Summary: turns one and two were reviewed.", usage},
       {:final, "done", usage}
     ])
 
@@ -623,13 +650,20 @@ defmodule Samen.AI.AgentCompactionTest do
 
   # Four scripted turns under a watermark of 1 token: turns 3 and 4 each fold the OLDEST
   # eligible turn, so every arm below runs against a transcript with TWO folds in it.
+  #
+  # C3I1 SCRIPT EXTENSION (no assertion changed): each of those two folding turns now
+  # makes the ADR-048 §5#1 SUMMARIZE call ahead of its own call, so the script carries one
+  # extra entry per fold and the two summaries are deliberately DISTINCT — the
+  # prior-fold arm counts each fold body in `llm_view` exactly once.
   defp folded_run!(goal) do
     s = new_scope()
 
     script(
       continue: "turn one — the oldest span, destined to be folded first",
       continue: "turn two — the second-oldest span",
+      continue: "Summary: fold one covered the oldest span.",
       continue: "turn three — the most recent committed turn",
+      continue: "Summary: fold two covered the second-oldest span.",
       final: "done"
     )
 
@@ -665,10 +699,14 @@ defmodule Samen.AI.AgentCompactionTest do
     s = new_scope()
     subject = create_subject!(s.actor.org_id)
 
+    # C3I1 SCRIPT EXTENSION (no assertion changed): one extra entry per folding turn for
+    # the ADR-048 §5#1 summarize call.
     script([
       {:tool_call, "fetch_record", %{"resource" => @uxd17_subject_key, "id" => subject.id}},
       {:continue, "turn two — after the tool turn"},
+      {:continue, "Summary: fold one covered the tool turn."},
       {:continue, "turn three — the most recent committed turn"},
+      {:continue, "Summary: fold two covered turn two."},
       {:final, "done"}
     ])
 
@@ -743,10 +781,14 @@ defmodule Samen.AI.AgentCompactionTest do
     s = new_scope()
     subject = create_subject!(s.actor.org_id)
 
+    # C3I1 SCRIPT EXTENSION (no assertion changed): one extra entry per folding turn for
+    # the ADR-048 §5#1 summarize call.
     script([
       {:tool_call, "fetch_record", %{"resource" => @uxd17_subject_key, "id" => subject.id}},
       {:continue, "turn two — after the tool turn"},
+      {:continue, "Summary: fold one covered the tool turn."},
       {:continue, "turn three — the most recent committed turn"},
+      {:continue, "Summary: fold two covered turn two."},
       {:final, "done"}
     ])
 

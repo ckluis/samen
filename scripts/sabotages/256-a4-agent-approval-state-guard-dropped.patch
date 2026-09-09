@@ -17,25 +17,40 @@
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1258,26 +1258,14 @@
+@@ -2456,41 +2456,14 @@
    # caller who reached this seam directly, holding nothing but the id, sees `:pending` and
    # is refused.
    defp verify_approval(approval, %Run{} = run, turn_row, approver_id) do
 -    case load_approval(approval_id_of(approval)) do
 -      {:ok, loaded} ->
 -        cond do
--          loaded.state != :approved -> {:error, :approval_not_approved}
--          loaded.org_id != run.org_id -> {:error, :approval_org_mismatch}
--          loaded.kind != WriteProposal.kind() -> {:error, :proposal_mismatch}
--          loaded.subject_ref != WriteProposal.subject_ref(turn_row.id) -> {:error, :proposal_mismatch}
--          not is_binary(loaded.decided_by) or loaded.decided_by == "" -> {:error, :approval_not_approved}
+-          loaded.state != :approved ->
+-            {:error, :approval_not_approved}
+-
+-          loaded.org_id != run.org_id ->
+-            {:error, :approval_org_mismatch}
+-
+-          loaded.kind != WriteProposal.kind() ->
+-            {:error, :proposal_mismatch}
+-
+-          loaded.subject_ref != WriteProposal.subject_ref(turn_row.id) ->
+-            {:error, :proposal_mismatch}
+-
+-          not is_binary(loaded.decided_by) or loaded.decided_by == "" ->
+-            {:error, :approval_not_approved}
+-
 -          # The persisted decision IS the authority: the actor executing must be the party
 -          # the row records as having decided, and that party must be distinct from the
 -          # requester (the engine's own rule, re-asserted from the row rather than trusted
 -          # from the call).
--          loaded.decided_by == loaded.requested_by -> {:error, :not_authorized}
--          loaded.decided_by != approver_id -> {:error, :not_authorized}
--          true -> {:ok, loaded}
+-          loaded.decided_by == loaded.requested_by ->
+-            {:error, :not_authorized}
+-
+-          loaded.decided_by != approver_id ->
+-            {:error, :not_authorized}
+-
+-          true ->
+-            {:ok, loaded}
 -        end
 -
 -      _ ->
