@@ -423,6 +423,20 @@ defmodule Samen.AI.Agent.Run do
     end
   end
 
+  # ADR-048 §7.3 (C4) — the PSEUDONYM-KEYED PROVENANCE INDEX is projected out of the fold
+  # ledger at the single accepted transcript-persistence chokepoint, so a fold can never
+  # arrive through a write path that skips the index. Deliberately a resource-level change
+  # rather than another clause inside `:advance`: EVERY accepted transcript write
+  # (`:start`, `:advance`, `:park`, `:resume`, `:reject`) is covered by construction, and
+  # the run row keeps exactly ONE sealed body — the index rows live in their own table
+  # (`Samen.AI.Agent.FoldSource`), never as a second `pii_attribute` here.
+  changes do
+    change(
+      fn changeset, _context -> Samen.AI.Agent.FoldSource.index_change(changeset) end,
+      on: [:create, :update]
+    )
+  end
+
   oban do
     triggers do
       trigger :agent_turn_due do

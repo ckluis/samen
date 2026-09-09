@@ -1,0 +1,33 @@
+# SABOTAGE: ADR-048 §8 P8 / §7.3 step 3 — THE DELETE-THE-ROWS BUILD.
+# `FoldSource.withdraw_subject/3` DELETES every index row keyed by the subject's pseudonym
+# instead of STAMPING it withdrawn. This is the exact build ADR-048 §8 P8 is written to
+# discriminate against: it satisfies a naive "no index row remains" check while proving
+# NOTHING about unlinkability, because unlinkability is a property of the KEY being gone,
+# not of the rows being gone. P8's assertion is ON THE PSEUDONYM
+# (`assert {:error, :shredded} = Vault.pseudonym(sid)` plus `surviving != []`), so this
+# build flips it. Derived by C4V from the obligation text in ADR-048 §8 P8.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_withdrawal_test.exs
+# MUST_FAIL: P8: RED — after shred NO provenance index row resolves to the subject, asserted ON THE PSEUDONYM (never on absence of rows)
+diff --git a/samen_core/lib/samen/ai/agent/fold_source.ex b/samen_core/lib/samen/ai/agent/fold_source.ex
+--- a/samen_core/lib/samen/ai/agent/fold_source.ex
++++ b/samen_core/lib/samen/ai/agent/fold_source.ex
+@@ -214,15 +214,14 @@ defmodule Samen.AI.Agent.FoldSource do
+           rows_withdrawn: non_neg_integer()
+         }
+   def withdraw_subject(subject_ref, repo, opts \\ []) when is_binary(subject_ref) do
+-    now = Keyword.get(opts, :now, DateTime.utc_now())
++    _now = Keyword.get(opts, :now, DateTime.utc_now())
+ 
+     if table_present?(repo) do
+       {:ok, %{num_rows: n}} =
+         Ecto.Adapters.SQL.query(
+           repo,
+-          "UPDATE #{@table} SET afs_withdrawn_at = $1, afs_updated_at = $2 " <>
+-            "WHERE afs_subject_ref = $3 AND afs_withdrawn_at IS NULL",
+-          [now, DateTime.truncate(now, :second), subject_ref]
++          "DELETE FROM #{@table} WHERE afs_subject_ref = $1",
++          [subject_ref]
+         )
+ 
+       %{table: :present, rows_withdrawn: n}

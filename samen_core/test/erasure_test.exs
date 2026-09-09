@@ -117,6 +117,19 @@ defmodule Samen.ErasureTest do
       # stub a KMS adapter that returns :unavailable from shred/1.
       Application.put_env(:samen_core, :kms_adapter, Samen.ErasureTest.UnreachableKms)
 
+      # THERE ARE NOW TWO FAIL-CLOSED GATES, and an unreachable store trips the FIRST.
+      # ADR-048 §7.3 (C4) adds a STEP 0 pseudonym read, taken while the DEK is still live
+      # because the pseudonym can never be recomputed once STEP 1 has destroyed the key.
+      # `UnreachableKms.pseudonym/2` is `:unavailable` too, so the erasure aborts there —
+      # with its own error class, which is what proves it aborted BEFORE the key was
+      # touched rather than after.
+      assert {:error, {:pseudonym_unavailable, :unavailable}} = Erasure.shred(subject_id)
+
+      # The ORIGINAL claim, preserved and asserted on its own: an adapter whose pseudonym
+      # read is HONEST and whose shred/1 is unreachable still fails closed at STEP 1, with
+      # the STEP 1 error class. Neither gate is load-bearing for the other.
+      Application.put_env(:samen_core, :kms_adapter, Samen.ErasureTest.UnreachableShredKms)
+
       assert {:error, {:kms_shred_failed, :unavailable}} = Erasure.shred(subject_id)
 
       # No sentinel written (fail closed): rows are still active.
@@ -345,6 +358,31 @@ defmodule Samen.ErasureTest do
     {:ok, _} = Vault.store_field(subject_id, :pii_email, :emails, "d@example.com", @repo)
     :ok
   end
+end
+
+defmodule Samen.ErasureTest.UnreachableShredKms do
+  @moduledoc """
+  A KMS adapter whose PSEUDONYM read is honest (it delegates to the real FileBacked store)
+  but whose `shred/1` fails `:unavailable`. Isolates ADR-046's STEP 1 fail-closed arm from
+  ADR-048 §7.3's STEP 0 one, so each gate is asserted on its own.
+  """
+  @behaviour Samen.Kms
+  alias Samen.Kms.FileBacked
+
+  @impl true
+  def generate_subject_key(s), do: FileBacked.generate_subject_key(s)
+  @impl true
+  def unwrap(s), do: FileBacked.unwrap(s)
+  @impl true
+  def shred(_), do: {:error, :unavailable}
+  @impl true
+  def attest(_), do: {:error, :unavailable}
+  @impl true
+  def backups_disabled?, do: true
+  @impl true
+  def key_material_present?(_), do: true
+  @impl true
+  def pseudonym(s, t), do: FileBacked.pseudonym(s, t)
 end
 
 defmodule Samen.ErasureTest.UnreachableKms do

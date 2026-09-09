@@ -62,10 +62,24 @@ defmodule Samen.AI.Agent.Compaction do
   fail-open reading ADR-048 §5 exists to make impossible.
   """
 
+  alias Samen.AI.Agent.FoldSource
   alias Samen.AI.Agent.Ingress
+  alias Samen.AI.Agent.Run
   alias Samen.AI.Agent.Secrets
   alias Samen.AI.Chokepoint
   alias Samen.AI.Completion
+
+  require Ash.Query
+
+  # ADR-048 §7.3 — the WITHDRAWAL WALK's hard round bound. The walk is a FIXPOINT over ONE
+  # run's finite fold ledger, so the fixpoint alone already terminates: every round either
+  # adds at least one fold number to the withdrawn set or stops, and the set can never grow
+  # past the ledger's own size. The bound is the SECOND, structural guarantee — a fold that
+  # cites ITSELF (`seq == n`), or a pair of folds that cite each other, must not be able to
+  # spin this loop even if a later edit breaks the fixpoint reasoning. BOUNDED is a
+  # requirement here, not an adjective: `agent_withdrawal_walk_test.exs`'s cyclic arm
+  # asserts it by name.
+  @withdraw_max_rounds 64
 
   @doc """
   Summarize `folded` — the whole turns the Level-1 fold selected, already-masked history — for
@@ -116,6 +130,263 @@ defmodule Samen.AI.Agent.Compaction do
 
       true ->
         {:ok, scrubbed}
+    end
+  end
+
+  @doc """
+  Build ONE ADR-048 §7.3 fold-ledger source marker: `{resource, record_id, subject_ref}`.
+
+  Token-only by construction — a marker carries an opaque resource name, an opaque record
+  id and a `subject_ref`, and never a value. This is the constructor the Level-1 fold uses
+  when it records WHERE a folded span came from, and it is the ONE site that decides how a
+  citation is keyed.
+
+  Fails closed: a subject whose pseudonym cannot be read yields
+  `{:error, {:pseudonym_unavailable, reason}}` and no marker at all. A fold that cannot
+  say whose data it cites must not claim a citation it cannot later withdraw.
+  """
+  @spec source_marker(module() | String.t(), String.t(), String.t()) ::
+          {:ok, map()} | {:error, {:pseudonym_unavailable, term()}}
+  def source_marker(resource, record_id, subject_id)
+      when is_binary(record_id) and is_binary(subject_id) do
+    case source_ref(subject_id) do
+      {:ok, ref} ->
+        {:ok,
+         %{
+           "resource" => to_string(resource),
+           "record_id" => record_id,
+           "subject_ref" => ref
+         }}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Hex-encode an already-computed pseudonym into the ledger/index `subject_ref` token.
+
+  The SAME encoding `source_ref/1` applies, exposed separately for the ONE caller that
+  must compute the pseudonym itself: `Samen.Erasure`, which reads it from the LIVE DEK
+  before `Samen.Kms.shred/1` destroys the key (after that it is uncomputable forever) and
+  needs the `:absent` / `:shredded` / outage classification that `source_ref/1` collapses.
+  Kept beside `source_ref/1` so the two can never disagree about what a ref looks like;
+  `agent_fold_source_test.exs` asserts they agree.
+  """
+  @spec encode_ref(binary()) :: String.t()
+  def encode_ref(pseudonym) when is_binary(pseudonym),
+    do: Base.encode16(pseudonym, case: :lower)
+
+  @doc """
+  ADR-048 §7.3 step 3 — the BOUNDED WITHDRAWAL WALK. NEUTRALIZE every derived-summary
+  segment that descends from the erased subject, in every run that cites them.
+
+  Called from `Samen.Erasure`'s steps-2–5 `Ecto.Multi` with the hex `subject_ref` the
+  caller captured from the LIVE DEK **before** `Samen.Kms.shred/1` destroyed it (ADR-046's
+  envelope is untouched: key destruction still runs FIRST and OUTSIDE the transaction).
+
+  ## Why this is a WALK and not a filter
+
+  A fold summary is derived text. A LATER fold can fold the earlier fold's summary — so a
+  segment can descend from the subject without ever carrying a marker naming them. §7.3
+  therefore withdraws the TRANSITIVE CLOSURE inside each run's ledger: the folds citing the
+  subject directly, plus every fold citing one of those, to a fixpoint.
+
+  ## Why it is BOUNDED
+
+  Two independent guarantees, because a cycle in derived provenance is a real shape and a
+  walk that loops on it is an erasure job that never completes:
+
+    1. the closure is a fixpoint over a FINITE ledger — each round adds ≥ 1 fold number or
+       halts, and the set is capped by the ledger's own length; a self-citing fold
+       (`seq == n`) adds nothing it does not already contain;
+    2. a hard `@withdraw_max_rounds` cap that halts with `halted: :round_bound` regardless.
+
+  ## Why targets come from the INDEX, never from a transcript scan
+
+  `Samen.AI.Agent.FoldSource` is keyed on the pseudonym, so the walk resolves WHICH runs to
+  open without decrypting anything, and it opens only those. Cross-run citation is NOT
+  followed: ADR-048 D3 refuses compaction output crossing a run boundary at WRITE time
+  (§8 `P12`), so a cross-run parent is a defect to refuse, never a link to traverse.
+
+  NEUTRALIZES — it never deletes. The marker is fixed, bounded and uniform
+  (`"[withdrawn: fold #N, source withdrawn]"`), so the transform is many-to-one and carries
+  no residual signal about what stood there. The fold's token-only provenance markers are
+  KEPT: after the shred the pseudonym is uncomputable forever, so they are permanently
+  unlinkable, and dropping them would erase the evidence that a withdrawal happened.
+
+  Returns a report; `:absent`-shaped hosts (no AI plane mounted) walk zero runs.
+  """
+  @spec withdraw(String.t(), keyword()) :: %{
+          runs_walked: non_neg_integer(),
+          folds_withdrawn: non_neg_integer(),
+          rounds: non_neg_integer(),
+          halted: :fixpoint | :round_bound
+        }
+  def withdraw(subject_ref, opts \\ []) when is_binary(subject_ref) do
+    repo = Keyword.get(opts, :repo) || AshPostgres.DataLayer.Info.repo(Run, :mutate)
+    max_rounds = Keyword.get(opts, :max_rounds, @withdraw_max_rounds)
+
+    subject_ref
+    |> FoldSource.run_ids_citing(repo)
+    |> Enum.reduce(
+      %{runs_walked: 0, folds_withdrawn: 0, rounds: 0, halted: :fixpoint},
+      fn run_id, acc ->
+        {withdrawn, rounds, halted} = withdraw_run(run_id, subject_ref, repo, max_rounds)
+
+        %{
+          runs_walked: acc.runs_walked + 1,
+          folds_withdrawn: acc.folds_withdrawn + withdrawn,
+          rounds: acc.rounds + rounds,
+          halted: if(halted == :round_bound, do: :round_bound, else: acc.halted)
+        }
+      end
+    )
+  end
+
+  @doc """
+  ADR-048 §7.3 step 5 — does this run hold a fold whose SOURCE was withdrawn?
+
+  Read from the pseudonym-keyed index, so the turn boundary answers it without decrypting
+  the transcript. `Samen.AI.Agent`'s loop calls this at every turn boundary and terminates
+  the run fail-honest with the bounded kind `:source_withdrawn`: a run that keeps executing
+  on a neutralized context is the defect D6 exists to make impossible.
+  """
+  @spec source_withdrawn?(Run.t() | %{id: String.t()}) :: boolean()
+  def source_withdrawn?(%{id: run_id}) when is_binary(run_id) do
+    FoldSource.withdrawn?(run_id, AshPostgres.DataLayer.Info.repo(Run, :mutate))
+  end
+
+  def source_withdrawn?(_run), do: false
+
+  # ---------------------------------------------------------------------------
+  # The walk, one run at a time
+  # ---------------------------------------------------------------------------
+
+  defp withdraw_run(run_id, subject_ref, repo, max_rounds) do
+    case load_ledger(run_id, repo) do
+      {:ok, run, decoded, folds} ->
+        {targets, rounds, halted} = withdrawal_closure(run_id, folds, subject_ref, max_rounds)
+
+        if MapSet.size(targets) == 0 do
+          {0, rounds, halted}
+        else
+          neutralized = Enum.map(folds, &neutralize(&1, targets))
+          persist_ledger!(run, Map.put(decoded, "folds", neutralized))
+          {MapSet.size(targets), rounds, halted}
+        end
+
+      :error ->
+        {0, 0, :fixpoint}
+    end
+  end
+
+  # The TRANSITIVE CLOSURE, bounded twice over (see `withdraw/2`'s "Why it is BOUNDED").
+  defp withdrawal_closure(run_id, folds, subject_ref, max_rounds) do
+    seed =
+      for %{"n" => n} = fold <- folds,
+          is_integer(n),
+          cites_subject?(fold, subject_ref),
+          into: MapSet.new(),
+          do: n
+
+    expand(run_id, folds, seed, 0, max_rounds)
+  end
+
+  defp expand(_run_id, _folds, acc, rounds, max_rounds) when rounds >= max_rounds,
+    do: {acc, rounds, :round_bound}
+
+  defp expand(run_id, folds, acc, rounds, max_rounds) do
+    next =
+      for %{"n" => n} = fold <- folds,
+          is_integer(n),
+          not MapSet.member?(acc, n),
+          cites_withdrawn_fold?(fold, run_id, acc),
+          into: acc,
+          do: n
+
+    if MapSet.equal?(next, acc) do
+      {acc, rounds, :fixpoint}
+    else
+      expand(run_id, folds, next, rounds + 1, max_rounds)
+    end
+  end
+
+  defp cites_subject?(fold, subject_ref) do
+    fold
+    |> markers()
+    |> Enum.any?(&(Map.get(&1, "subject_ref") == subject_ref))
+  end
+
+  # SAME-RUN citation only — D3 refuses a cross-run parent at write time (§8 `P12`), so a
+  # ledger carrying one is a defect for that gate to name, never a link this walk follows.
+  defp cites_withdrawn_fold?(fold, run_id, acc) do
+    fold
+    |> Map.get("sources", [])
+    |> List.wrap()
+    |> Enum.any?(fn source ->
+      Map.get(source, "run_id") == run_id and MapSet.member?(acc, Map.get(source, "seq"))
+    end)
+  end
+
+  defp markers(fold) do
+    fold
+    |> Map.get("sources", [])
+    |> List.wrap()
+    |> Enum.flat_map(fn source -> source |> Map.get("markers", []) |> List.wrap() end)
+  end
+
+  # §7.3 step 3: replace the SUMMARY, keep everything else — the entry, its number, and its
+  # token-only provenance all survive, because the record that a withdrawal happened is
+  # itself part of the honest answer.
+  defp neutralize(%{"n" => n} = fold, targets) do
+    if MapSet.member?(targets, n) do
+      Map.put(fold, "summary", withdrawn_marker(n))
+    else
+      fold
+    end
+  end
+
+  defp neutralize(fold, _targets), do: fold
+
+  @doc """
+  The ADR-048 §7.3 step-3 neutralizing marker — FIXED, bounded and uniform, so the
+  transform is many-to-one and leaks nothing about the segment it replaced.
+  """
+  @spec withdrawn_marker(integer()) :: String.t()
+  def withdrawn_marker(n) when is_integer(n), do: "[withdrawn: fold ##{n}, source withdrawn]"
+
+  defp load_ledger(run_id, repo) do
+    with {:ok, [run]} <-
+           Run
+           |> Ash.Query.filter(id == ^run_id)
+           |> Ash.Query.ensure_selected([:org_id, :transcript])
+           |> Ash.Query.limit(1)
+           |> Ash.read(authorize?: false),
+         %Samen.Masked{} = masked <- run.transcript,
+         {:ok, json} <- Samen.Vault.reveal(masked, repo, subject_id: run.id),
+         {:ok, %{} = decoded} <- Jason.decode(json),
+         folds when is_list(folds) <- Map.get(decoded, "folds", []) do
+      {:ok, run, decoded, folds}
+    else
+      _ -> :error
+    end
+  end
+
+  defp persist_ledger!(run, decoded) do
+    run
+    |> Ash.Changeset.for_update(:advance, %{transcript: Jason.encode!(decoded)})
+    |> Ash.update!(authorize?: false)
+  end
+
+  # ADR-048 §7.3 — the provenance index lives OUTSIDE the sealed body, so the
+  # walk never decrypts a transcript to find its own targets. `subject_ref` is
+  # therefore the DEK-KEYED PSEUDONYM, never the subject id: after the shred the
+  # key is gone and every remaining row is permanently unlinkable.
+  defp source_ref(subject_id) do
+    case Samen.Vault.pseudonym(subject_id) do
+      {:ok, pseudonym} -> {:ok, Base.encode16(pseudonym, case: :lower)}
+      {:error, reason} -> {:error, {:pseudonym_unavailable, reason}}
     end
   end
 

@@ -31,6 +31,14 @@ defmodule Mix.Tasks.Samen.Verify.ErasureCompleteness do
   on an empty residue set — `email_bidx` + `storage_key` columns exist in every host that
   mounts identity + primitives, so an empty discovery is a broken verifier, not a pass.
 
+  The third hard class, `derived_summary` (ADR-048 §7.3), carries the same floor with a
+  DECLARED scope: it binds a host that mounts the AI plane (`Samen.AI.Domain` in the host's
+  own `:ash_domains`). Such a host discovering zero is a FAILURE, exactly as before. A host
+  that does not mount the plane has no agent-run fold ledger; the class is scoped out and
+  the task SAYS SO on its own output line. The predicate reads the host's domain list, never
+  the transcript attribute the class discovers — so no edit inside the guarded surface can
+  switch the floor off.
+
   ## Exit codes
 
   - `0` — every discovered residue has a registered erasure arm
@@ -55,12 +63,40 @@ defmodule Mix.Tasks.Samen.Verify.ErasureCompleteness do
         sk = report.storage_key.count
         bag = report.custom_bag.count
         tr = report.transcript.count
+        ds = report.derived_summary.count
 
         Mix.shell().info(
           "[erasure-completeness] #{dl} derived-linkable + #{sk} storage_key + #{bag} custom-bag " <>
             "+ #{tr} vaulted-transcript residues discovered — every one reached by a registered " <>
             "erasure arm. ✓"
         )
+
+        # ADR-048 §7.3 (C4). Printed on its OWN line and ALWAYS, because this class is the
+        # one whose scope is derived from another class: a reader must be able to see the
+        # number, not infer it.
+        #
+        # C4I4 / the Q-01 ruling: the class's hard floor binds a host that MOUNTS the AI
+        # plane (`Samen.AI.Domain` in the host's `:ash_domains`). In such a host zero can
+        # never reach here — `check/1`'s hard floor refuses it — so the line is a positive
+        # enumeration. In a host that does NOT mount the plane the class is scoped out, and
+        # that is stated EXPLICITLY on this same line. A gate that quietly declines to run
+        # is indistinguishable from one that passed, so "not applicable" is REPORTED here,
+        # never inferred from a missing line or from a bare `0`.
+        if report.derived_summary.applicable do
+          Mix.shell().info(
+            "[erasure-completeness] derived_summary: #{ds} discovered — " <>
+              "#{Enum.join(report.derived_summary.columns, ", ")} (ADR-048 §7.3 withdrawal arm " <>
+              "wired: #{report.derived_summary.arm_wired})"
+          )
+        else
+          Mix.shell().info(
+            "[erasure-completeness] derived_summary: NOT APPLICABLE — this host does not mount the " <>
+              "AI plane (Samen.AI.Domain is absent from its :ash_domains), so it has no agent-run " <>
+              "fold ledger and the ADR-048 §7.3 hard non-vacuity floor is SCOPED OUT here. This is " <>
+              "a declared skip, not a pass: a host that DOES mount the AI plane and discovers zero " <>
+              "still FAILS this gate."
+          )
+        end
 
         report_transcripts(report.transcript)
         report_org_assets(report.org_asset_residuals)

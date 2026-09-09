@@ -299,6 +299,23 @@ defmodule Samen.AI.Agent do
     # row is keyed by `safe_error_kind(:compaction_refused)`, so dropping it from this list
     # degrades that note to the useless `:unknown` and the refusal stops being nameable.
     :compaction_refused,
+    # ADR-048 §7.3 step 5 / §8 P14 (T221, C4) — the WITHDRAWAL terminal. A subject whose
+    # data a fold cites was erased, the §7.3 walk neutralized that fold, and this run is
+    # still live: it terminates fail-honest on its OWN NEXT TURN rather than continuing on
+    # a context that has been emptied under it. Distinct from `:context_exhausted` (§6
+    # Level 3, "this run outgrew its window") — nothing here is about size. It is a member
+    # of this CLOSED list because an unlisted kind degrades to the useless `:unknown` and
+    # the terminal stops being nameable on the turn row.
+    :source_withdrawn,
+    # ADR-048 §7.1 / §8 P12 / §10 row 3 (a) (T221, C4) — the CATEGORICAL WRITE-TIME
+    # REFUSAL kind. Compaction output (a fold summary, a durable fact, a memo, any text a
+    # summarizer produced from a run's history) is ineligible for `pgvector` and for every
+    # other cross-run store, and `Samen.AI.CrossRunWriteGuard` refuses the write BEFORE the
+    # row lands — never by writing it and cleaning it up later, which is the failure mode
+    # P7 and P8 both pass. It is a member of this CLOSED list because an unlisted kind
+    # degrades to the useless `:unknown`, and a refusal that cannot be named on the turn
+    # row is a refusal nobody can audit.
+    :cross_run_write_refused,
     :unknown
   ]
 
@@ -896,6 +913,18 @@ defmodule Samen.AI.Agent do
         # Batch boundary (worker mode): the durable cursor carries everything; the
         # worker re-arms and the watchdog covers a lost re-arm.
         {:continue, run}
+
+      Compaction.source_withdrawn?(run) ->
+        # ADR-048 §7.3 step 5 / §8 P14 (D6): a subject cited by one of this run's folds was
+        # erased between turn N and N+1, so the §7.3 walk NEUTRALIZED that fold. The run is
+        # holding a context that no longer says what it said. Terminate fail-honest with the
+        # bounded kind rather than take turn N+1 on the emptied text — a run that keeps
+        # executing on a withdrawn source is exactly the defect D6 exists to make impossible.
+        # Checked HERE, at the turn boundary, for the same reason the cancel flag and the
+        # kill switch are: it is durable state another process may have set since turn N.
+        run = terminal!(run, :fail, :source_withdrawn)
+        log_terminal(run)
+        {:error, :source_withdrawn, run}
 
       true ->
         case execute_turn(run, scope, definition, opts) do

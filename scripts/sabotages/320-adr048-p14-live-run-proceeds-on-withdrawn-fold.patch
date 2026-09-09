@@ -1,0 +1,38 @@
+# SABOTAGE: ADR-048 §8 P14 / D6 — LET THE LIVE RUN PROCEED ON THE NEUTRALIZED CONTEXT.
+# The `Compaction.source_withdrawn?(run)` clause is removed from `Samen.AI.Agent`'s turn-
+# boundary `cond`, so a live run holding a fold the §7.3 walk has already neutralized falls
+# through to `true -> execute_turn(...)` and takes turn N+1 on the emptied text. This is the
+# sabotage ADR-048 §8 P14 names in its own words: "after a withdrawal walk marks a fold's
+# body `[withdrawn: ...]` (§7.3 step 3), let the live run holding that fold proceed to its
+# next turn on the neutralized context anyway".
+# NOT a fold-marking change — that is P7's. `Compaction.withdraw/2` and
+# `FoldSource.withdraw_subject/3` are untouched, so P7 and P8 both stay GREEN under this
+# patch and only the run's OWN NEXT TURN changes. Derived by C4V from the obligation text;
+# C4R's `P14.planned.patch` names a predicate `withdrawn_fold?/1` local to `Samen.AI.Agent`
+# and a clause position that do not exist in the shipped code (C4I2 moved the clause below
+# `remaining == 0 ->` so sabotages 240/244 keep their anchors).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_withdrawal_test.exs
+# MUST_FAIL: P14: RED — a live run whose fold's source was withdrawn returns the literal three-tuple {:error, :source_withdrawn, run} on its OWN NEXT TURN
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -914,18 +914,6 @@ defmodule Samen.AI.Agent do
+         # worker re-arms and the watchdog covers a lost re-arm.
+         {:continue, run}
+ 
+-      Compaction.source_withdrawn?(run) ->
+-        # ADR-048 §7.3 step 5 / §8 P14 (D6): a subject cited by one of this run's folds was
+-        # erased between turn N and N+1, so the §7.3 walk NEUTRALIZED that fold. The run is
+-        # holding a context that no longer says what it said. Terminate fail-honest with the
+-        # bounded kind rather than take turn N+1 on the emptied text — a run that keeps
+-        # executing on a withdrawn source is exactly the defect D6 exists to make impossible.
+-        # Checked HERE, at the turn boundary, for the same reason the cancel flag and the
+-        # kill switch are: it is durable state another process may have set since turn N.
+-        run = terminal!(run, :fail, :source_withdrawn)
+-        log_terminal(run)
+-        {:error, :source_withdrawn, run}
+-
+       true ->
+         case execute_turn(run, scope, definition, opts) do
+           {:continue, run} -> loop(run, scope, definition, opts, dec(remaining))
