@@ -1103,8 +1103,10 @@ defmodule Samen.AI.Agent do
   #
   #   1. the failed attempt's tokens still count — both attempts are real chokepoint
   #      calls and the committing site bills the usage it is handed;
-  #   2. the retry boundary's kill-switch/cancel/budget re-check is **P5** and is
-  #      deliberately NOT taken in this batch (`nodes/C2R/work/spec-notes.md` §2);
+  #   2. the retry boundary's re-check is **P5**. The KILL-SWITCH half IS now built:
+  #      the `cond` below re-checks `Breaker.killed?/2` BEFORE any retry work (ADR-048
+  #      §8 P5, operator ruling D-04). The CANCEL/BUDGET half is deliberately NOT taken
+  #      here and remains open (`nodes/C2R/work/spec-notes.md` §2);
   #   3. if the single retry ALSO overflows, the caller turns it into LEVEL 3
   #      (`:context_exhausted`) — never a second retry.
   #
@@ -1144,36 +1146,55 @@ defmodule Samen.AI.Agent do
     duration_ms = System.monotonic_time(:millisecond) - started
     retries = attempt - 1
 
-    if attempt <= @max_context_retries and context_overflow?(result) do
-      case derive_fold(run, scope, views, definition, tools, goal, lines, opts) do
-        {:ok, run, lines, views} ->
-          turn_row =
-            turn_row
-            |> note_compaction_refusal!(views)
-            |> note_context_retry!(attempt)
+    cond do
+      # P5 (ADR-048 §8, operator ruling D-04) — the kill-switch is RE-CHECKED at the
+      # RETRY boundary, before ANY retry work: before `derive_fold/8` and before the
+      # recursive call. The kill-switch is the emergency stop; a compaction retry must not
+      # proceed, and must not spend a second provider call, after someone has hit stop.
+      # This is the SAME WIDENED notion the turn boundary uses (the host switch OR this
+      # org's DURABLE per-definition row), never a narrower one — the sabotage-244 shape
+      # ONE LEVEL DOWN. Returning `{:error, :killed}` in the result slot hands the caller's
+      # existing `{:error, reason}` branch the work: the turn row is finalized `:failed`
+      # with `error_kind: "killed"` and the run takes its terminal, so `run/4` answers
+      # `{:error, :killed, run}` exactly as the turn boundary does. `:killed` is already a
+      # member of the closed `@error_kinds` list, so nothing degrades to `:unknown`.
+      # Sabotage 322 makes this clause refutable.
+      attempt <= @max_context_retries and context_overflow?(result) and
+          Breaker.killed?(run.org_id, run.agent) ->
+        {run, lines, turn_row, {:error, :killed}, duration_ms, retries}
 
-          complete_with_recovery(
-            run,
-            scope,
-            definition,
-            tools,
-            goal,
-            lines,
-            views,
-            turn_row,
-            opts,
-            attempt + 1
-          )
+      attempt <= @max_context_retries and context_overflow?(result) ->
+        case derive_fold(run, scope, views, definition, tools, goal, lines, opts) do
+          {:ok, run, lines, views} ->
+            turn_row =
+              turn_row
+              |> note_compaction_refusal!(views)
+              |> note_context_retry!(attempt)
 
-        # A hook HALTED the run at `:after_compaction` during a LEVEL 2 fold. This turn row
-        # already exists, so the honest spelling is the loop's own error terminal: the
-        # caller's `{:error, reason}` branch finalizes the row `:failed` with the bounded
-        # kind and takes the run terminal. Never a retry, and never a silent continue.
-        {:halt, kind, _reason, _turn_row} ->
-          {run, lines, turn_row, {:error, kind}, duration_ms, retries}
-      end
-    else
-      {run, lines, turn_row, result, duration_ms, retries}
+            complete_with_recovery(
+              run,
+              scope,
+              definition,
+              tools,
+              goal,
+              lines,
+              views,
+              turn_row,
+              opts,
+              attempt + 1
+            )
+
+          # A hook HALTED the run at `:after_compaction` during a LEVEL 2 fold. This turn
+          # row already exists, so the honest spelling is the loop's own error terminal:
+          # the caller's `{:error, reason}` branch finalizes the row `:failed` with the
+          # bounded kind and takes the run terminal. Never a retry, never a silent
+          # continue.
+          {:halt, kind, _reason, _turn_row} ->
+            {run, lines, turn_row, {:error, kind}, duration_ms, retries}
+        end
+
+      true ->
+        {run, lines, turn_row, result, duration_ms, retries}
     end
   end
 

@@ -1,0 +1,56 @@
+# SABOTAGE: P5 (ADR-048 §8, operator ruling D-04) — the kill-switch re-check at the LEVEL 2
+# RETRY boundary is REMOVED from `Samen.AI.Agent.complete_with_recovery/10`. This is the
+# sabotage-244 shape ONE LEVEL DOWN: 244 removes the re-check at the TURN boundary in
+# `loop/5`, so an operator kill landing between turn N and turn N+1 is silently ignored;
+# THIS removes it at the RETRY boundary, so a kill landing DURING the overflowing attempt
+# is silently ignored and Level 2 derives a fold and spends a SECOND provider call after
+# someone has already hit the emergency stop. The kill-switch is the emergency stop: a
+# compaction retry must not proceed after it is hit.
+#
+# Flips the named P5 red. Everything else stays GREEN, which is what makes the red mean
+# what it says: the P5 POSITIVE CONTROL (the byte-identical script WITHOUT the kill, in
+# which the retry DOES happen) still passes, and 244's own turn-boundary red
+# (`a kill flipped DURING turn 2 stops turn 3`) and its positive control still pass — so
+# the red fails because the RETRY-boundary re-check is gone, not because Level 2, the
+# turn boundary, or the switch itself broke. C2's Level 2 bound is untouched: the
+# `attempt <= @max_context_retries and context_overflow?(result)` clause and its
+# `derive_fold/8` + recursive call are left exactly as they are.
+#
+# Deletes ONE CONTIGUOUS `cond` clause and its comment, replacing it with a `# SABOTAGE`
+# comment, so the file still compiles under `--warnings-as-errors` (an `if false do`
+# shape would trip Elixir's always-same-result warning). Touches agent.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: P5 RED: a kill flipped DURING the overflowing attempt stops the Level 2 retry
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1147,22 +1147,12 @@
+     retries = attempt - 1
+ 
+     cond do
+-      # P5 (ADR-048 §8, operator ruling D-04) — the kill-switch is RE-CHECKED at the
+-      # RETRY boundary, before ANY retry work: before `derive_fold/8` and before the
+-      # recursive call. The kill-switch is the emergency stop; a compaction retry must not
+-      # proceed, and must not spend a second provider call, after someone has hit stop.
+-      # This is the SAME WIDENED notion the turn boundary uses (the host switch OR this
+-      # org's DURABLE per-definition row), never a narrower one — the sabotage-244 shape
+-      # ONE LEVEL DOWN. Returning `{:error, :killed}` in the result slot hands the caller's
+-      # existing `{:error, reason}` branch the work: the turn row is finalized `:failed`
+-      # with `error_kind: "killed"` and the run takes its terminal, so `run/4` answers
+-      # `{:error, :killed, run}` exactly as the turn boundary does. `:killed` is already a
+-      # member of the closed `@error_kinds` list, so nothing degrades to `:unknown`.
+-      # Sabotage 322 makes this clause refutable.
+-      attempt <= @max_context_retries and context_overflow?(result) and
+-          Breaker.killed?(run.org_id, run.agent) ->
+-        {run, lines, turn_row, {:error, :killed}, duration_ms, retries}
+-
++      # SABOTAGE (P5, ADR-048 §8, ruling D-04): the RETRY-boundary kill-switch re-check is
++      # REMOVED — the sabotage-244 shape ONE LEVEL DOWN. 244 removes the check at the TURN
++      # boundary in `loop/5`; this removes it at the RETRY boundary inside
++      # `complete_with_recovery/10`, so an operator kill landing DURING the overflowing
++      # attempt is silently ignored: Level 2 derives a fold and spends a SECOND provider
++      # call after someone has already hit the emergency stop.
+       attempt <= @max_context_retries and context_overflow?(result) ->
+         case derive_fold(run, scope, views, definition, tools, goal, lines, opts) do
+           {:ok, run, lines, views} ->

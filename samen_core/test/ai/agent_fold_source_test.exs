@@ -30,6 +30,7 @@ defmodule Samen.AI.AgentFoldSourceTest do
   alias Samen.AI.Agent.FoldSource
   alias Samen.Erasure
   alias Samen.Kms.FileBacked
+  alias Samen.Reveal.Grants
   alias Samen.Vault
   alias Samen.Vault.VaultRow
 
@@ -320,5 +321,79 @@ defmodule Samen.AI.AgentFoldSourceTest do
     assert FoldSource.citations(Jason.encode!(%{"folds" => []})) == []
     assert FoldSource.citations(Jason.encode!(%{"folds" => [%{"n" => 1}]})) == []
     assert FoldSource.citations("not json at all") == []
+  end
+
+  # ===========================================================================
+  # D-01 (operator ruling, 2026-09-09) — the erasure report must DISCLOSE that
+  # derived-summary invalidation could not be performed. RED-FIRST: the three arms
+  # below are written against the UNBUILT `"derived_summaries"` tier. The repo's own
+  # fail-honest contract (ADR-014/024/026, `CLAUDE.md`) applied to erasure: never claim
+  # work you did not do. A report written after a `{:error, :shredded}` STEP 0 read is
+  # today INDISTINGUISHABLE from one written after a clean invalidation — that is the lie.
+  #
+  # Anti-tautology (CF-15): the ANTI-TAUTOLOGY arm refutes a build that hardcodes
+  # "unavailable" everywhere; the IDEMPOTENCY arm is GREEN TODAY and must stay green —
+  # D-01 forbids moving `:shredded` into the fail-closed class.
+  # ===========================================================================
+
+  test "D-01 DISCLOSURE: a STEP 0 read of {:error, :shredded} makes the erasure report say derived-summary invalidation was UNAVAILABLE, with the reason pseudonym_shredded" do
+    sid = seed_subject!()
+
+    # The first erasure destroys the DEK, which is what makes the SECOND read `:shredded`.
+    assert {:ok, _} = Erasure.shred(sid, repo: @repo)
+
+    # NON-VACUITY: STEP 0 on the second call really does read the shredded disposition —
+    # without this the arm below could be asserting on the `:absent` branch instead.
+    assert {:error, :shredded} = Vault.pseudonym(sid)
+
+    assert {:ok, %{report: report}} = Erasure.shred(sid, repo: @repo)
+
+    assert report.tiers["derived_summaries"]["invalidation"] == "unavailable",
+           "D-01: the report must disclose derived-summary invalidation as unavailable"
+
+    assert report.tiers["derived_summaries"]["reason"] == "pseudonym_shredded",
+           "D-01: the report must disclose WHY invalidation was unavailable"
+
+    # D-01 is two obligations, not one: the run RECORDS it (STEP 4a) and the report SAYS
+    # SO (above). Token-only, never PII.
+    erased_details =
+      sid
+      |> Grants.audit_for(repo: @repo)
+      |> Enum.filter(&(&1.event == "erased"))
+      |> Enum.map(& &1.detail)
+
+    assert Enum.any?(erased_details, &String.contains?(&1, "derived_summary_invalidation=unavailable")),
+           "D-01: the STEP 4a audit detail must carry the derived_summary_invalidation token"
+  end
+
+  test "D-01 ANTI-TAUTOLOGY: on the NORMAL path (a live pseudonym) the SAME report field reads performed with a null reason" do
+    sid = seed_subject!()
+
+    # NON-VACUITY: this subject's pseudonym is LIVE, so STEP 0 takes the `{:ok, ref}` arm.
+    assert {:ok, pseudonym} = Vault.pseudonym(sid)
+    assert is_binary(pseudonym)
+
+    assert {:ok, %{report: report}} = Erasure.shred(sid, repo: @repo)
+
+    # A build that hardcodes "unavailable" satisfies the DISCLOSURE arm and fails HERE.
+    assert report.tiers["derived_summaries"]["invalidation"] == "performed",
+           "D-01: a live pseudonym must report invalidation as performed, not unavailable"
+
+    assert report.tiers["derived_summaries"]["reason"] == nil,
+           "D-01: a performed invalidation carries no reason"
+  end
+
+  test "D-01 IDEMPOTENCY (GREEN TODAY, must stay green): a SECOND Samen.Erasure.shred/2 on an already-shredded subject still returns :ok with outcome already_shredded" do
+    sid = seed_subject!()
+
+    assert {:ok, _} = Erasure.shred(sid, repo: @repo)
+    assert {:error, :shredded} = Vault.pseudonym(sid)
+
+    # The shipped contract D-01 explicitly forbids breaking (`erasure_test.exs` RED PATH
+    # C). A strict fail-closed on `:shredded` would make this
+    # `{:error, {:pseudonym_unavailable, :shredded}}`.
+    assert {:ok, %{attestation: att, report: report}} = Erasure.shred(sid, repo: @repo)
+    assert att.state == :shredded
+    assert report.outcome == "already_shredded"
   end
 end

@@ -788,4 +788,59 @@ defmodule Samen.AI.AgentDurabilityTest do
       assert Agent.bounded_meta(:not_a_map) == %{}
     end
   end
+
+  # ── P5 (ADR-048 §8, ruling D-04): the kill-switch is RE-CHECKED at the RETRY boundary ──
+  #
+  # RED-FIRST. Sabotage 244 removes the TURN-boundary re-check in `Samen.AI.Agent`'s loop.
+  # `P5` is that shape ONE LEVEL DOWN: inside `complete_with_recovery/10`, on the §6
+  # LEVEL 2 branch (`attempt <= @max_context_retries and context_overflow?(result)`), the
+  # kill-switch must be re-checked BEFORE any retry work — before `derive_fold/8` and
+  # before the recursive call. The kill-switch is the emergency stop: a compaction retry
+  # must not proceed, and must not spend a second provider call, after someone hit stop.
+  # Today that re-check does not exist (the function's own comment says it "is P5 and is
+  # deliberately NOT taken in this batch"), so the red below fails by RETRYING ANYWAY.
+  describe "P5: the kill-switch re-check at the Level 2 retry boundary" do
+    test "P5 RED: a kill flipped DURING the overflowing attempt stops the Level 2 retry — no second provider call, {:error, :killed, run}" do
+      s = new_scope()
+
+      # Attempt 1 overflows AND flips the operator kill in the same breath (the
+      # between-turns seam sabotage 244's red uses, one level down). Entry 2 is the retry
+      # that must NEVER be made.
+      script([
+        fn ->
+          Breaker.kill(:operator)
+          {:error, :context_overflow}
+        end,
+        {:final, "the Level 2 retry that must NEVER be made"}
+      ])
+
+      assert {:error, :killed, run} = run_scripted(Durable, s, "goal")
+
+      run = assert_terminal!(run, :failed)
+      assert run.error_kind == "killed"
+
+      # EXACTLY ONE provider attempt: the retry never left. The UNCONSUMED entry is what
+      # makes "no second provider call" refutable — a retry would have eaten it.
+      assert length(sent_segments()) == 1
+      assert Scripted.remaining() == [{:final, "the Level 2 retry that must NEVER be made"}]
+    end
+
+    test "P5 POSITIVE CONTROL: the SAME script WITHOUT the kill DOES retry — two provider attempts on one turn index and the run reaches its final answer" do
+      s = new_scope()
+
+      script([
+        {:error, :context_overflow},
+        {:final, "the Level 2 retry that must NEVER be made"}
+      ])
+
+      assert {:ok, %{answer: "the Level 2 retry that must NEVER be made", turns: 1}} =
+               run_scripted(Durable, s, "goal")
+
+      # C2's shipped Level 2 behaviour, unbroken: one original + one retry = 2 calls, on
+      # ONE turn index. This is what proves the red above fails because the re-check is
+      # MISSING, not because Level 2 is broken.
+      assert length(sent_segments()) == 2
+      assert Scripted.remaining() == []
+    end
+  end
 end
