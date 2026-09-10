@@ -1103,10 +1103,16 @@ defmodule Samen.AI.Agent do
   #
   #   1. the failed attempt's tokens still count — both attempts are real chokepoint
   #      calls and the committing site bills the usage it is handed;
-  #   2. the retry boundary's re-check is **P5**. The KILL-SWITCH half IS now built:
-  #      the `cond` below re-checks `Breaker.killed?/2` BEFORE any retry work (ADR-048
-  #      §8 P5, operator ruling D-04). The CANCEL/BUDGET half is deliberately NOT taken
-  #      here and remains open (`nodes/C2R/work/spec-notes.md` §2);
+  #   2. the retry boundary's re-checks are **P5** (kill) and **D-05** (cancel). The
+  #      KILL-SWITCH half IS built: the `cond` below re-checks `Breaker.killed?/2` BEFORE
+  #      any retry work (ADR-048 §8 P5, operator ruling D-04). The CANCEL half IS NOW BUILT
+  #      TOO, but narrowly and NOT at this boundary: operator ruling D-05 puts it inside
+  #      `derive_fold/8`, immediately before the SUMMARIZING fold, because the harm is the
+  #      EGRESS and not the turn — so a cancelled run may still make the retry call and
+  #      finish its turn (RP-AG-8 preserved: cancel is honoured at the NEXT turn boundary),
+  #      it simply may not ship its conversation to the provider for summarization. The
+  #      BUDGET half is deliberately NOT built here, is NOT in D-05's scope, and remains
+  #      open (`nodes/C2R/work/spec-notes.md` §2);
   #   3. if the single retry ALSO overflows, the caller turns it into LEVEL 3
   #      (`:context_exhausted`) — never a second retry.
   #
@@ -1337,45 +1343,81 @@ defmodule Samen.AI.Agent do
           {:ok, run, lines, views}
 
         span ->
-          # `summarize_span/3` returns the summary ALREADY through §5#3's ingress path —
-          # `Secrets.redact/1` then `Ingress.sanitize/1` then the chokepoint allowlist — so
-          # there is no spelling of this call site that appends an unscrubbed binary.
-          case summarize_span(scope, span, opts) do
-            {:ok, summary} ->
-              # §5#6: the point fires on the span the summary has ALREADY been folded into,
-              # and BEFORE `apply_fold!/4` persists it — the only ordering in which `:block`
-              # can still mean "this fold does not happen".
-              folded = with_summary(span, summary)
-
-              case after_compaction_hook(Keyword.get(opts, :resolved_hooks, []), run, folded) do
-                :ok ->
-                  apply_fold!(run, views, goal, folded)
-
-                # A hook REFUSED the fold (its own `{:block, _}`, or the fail-closed
-                # `:hook_error` an `{:edit, _}` at this point degrades to — §5#6 forbids
-                # edits outright). Same honest answer as a refused summarize.
-                {:block, kind, _reason} ->
-                  {:ok, run, lines, refused(views, kind)}
-
-                # A hook STOPPED the run. The `with` in `execute_turn/4` routes this to
-                # `halt_run/4`, a real terminal — never a promoted partial answer.
-                {:halt, kind, reason} ->
-                  {:halt, kind, reason, nil}
-              end
-
-            # The summarize call REFUSED or failed, or its summary did not survive the
-            # ingress path. §5's whole point is that compaction is not a laundering channel,
-            # so there is exactly one honest answer: the fold does not happen and the run
-            # continues UNCOMPACTED on the span it already had. Appending an unscrubbed — or
-            # un-obtained — summary anyway is the fail-OPEN reading this batch exists to make
-            # impossible. §5#5's bounded `:compaction_refused` carries WHICH refusal it was
-            # onto the turn row, so a refusal is never a silently shorter transcript.
-            {:error, reason} ->
-              {:ok, run, lines, refused(views, reason)}
+          # D-05 (ADR-048 §8 `P8`, operator ruling D-05) — THE DURABLE CANCEL CHECK, and it
+          # is the LAST thing that happens before the tenant's folded conversation leaves
+          # for the provider. `cancel_requested?/1` RE-READS the run row (`reload!/1`): at
+          # the LEVEL 2 INLINE site a provider call has ALREADY returned, so a cancel the
+          # tenant issued DURING that call is durably on the row and is NOT visible on the
+          # in-memory `run` the turn boundary loaded — a check on that struct is vacuous
+          # here. RP-AG-8 is PRESERVED: the in-flight turn still completes and the run takes
+          # its terminal at the NEXT turn boundary; what stops is the EGRESS. The answer is
+          # the SAME honest shape a refused summarize already takes, so
+          # `note_compaction_refusal!/2` names it on the turn row under
+          # `safe_error_kind(:compaction_refused)` with the bounded reason "run_cancelled".
+          if cancel_requested?(run) do
+            {:ok, run, lines, refused(views, :run_cancelled)}
+          else
+            summarize_fold(run, scope, views, goal, lines, span, opts)
           end
       end
     else
       {:ok, run, lines, views}
+    end
+  end
+
+  # D-05 (ADR-048 §8 `P8`, operator ruling D-05) — the DURABLE half of the cancel flag,
+  # re-read from the run ROW on the same `run.id` through the loop's own `reload!/1` rather
+  # than hand-rolled as a second reader. NEVER the in-memory struct: the turn boundary in
+  # `loop/5` already read that value, so `run.cancel_requested_at != nil` spelled against
+  # the threaded struct can never be true at the LEVEL 2 INLINE site. It is the SAME RP-AG-8
+  # flag the turn boundary reads — `cancel_requested_at != nil` — never a narrower or
+  # differently-named one. `reload!/1`'s `ensure_selected` needs no widening: only `:org_id`
+  # and the vault-routed `:transcript` are non-default; `:cancel_requested_at` is a plain
+  # attribute the boundary already reads off the same reload.
+  defp cancel_requested?(%Run{} = run), do: reload!(run).cancel_requested_at != nil
+
+  # The SUMMARIZING fold itself, lifted out of `derive_fold/8`'s `span ->` arm UNCHANGED so
+  # that D-05's guard above it is one contiguous `if/else`. That is what lets sabotage 323
+  # remove the guard — the `if/else` plus the now-orphaned `cancel_requested?/1` it was the
+  # only caller of — and NOTHING else, while the file still compiles under
+  # `--warnings-as-errors` (leaving the predicate behind would trip the unused-private
+  # warning; an `if false do` shape would trip the always-same-result one).
+  defp summarize_fold(%Run{} = run, scope, views, goal, lines, span, opts) do
+    # `summarize_span/3` returns the summary ALREADY through §5#3's ingress path —
+    # `Secrets.redact/1` then `Ingress.sanitize/1` then the chokepoint allowlist — so
+    # there is no spelling of this call site that appends an unscrubbed binary.
+    case summarize_span(scope, span, opts) do
+      {:ok, summary} ->
+        # §5#6: the point fires on the span the summary has ALREADY been folded into,
+        # and BEFORE `apply_fold!/4` persists it — the only ordering in which `:block`
+        # can still mean "this fold does not happen".
+        folded = with_summary(span, summary)
+
+        case after_compaction_hook(Keyword.get(opts, :resolved_hooks, []), run, folded) do
+          :ok ->
+            apply_fold!(run, views, goal, folded)
+
+          # A hook REFUSED the fold (its own `{:block, _}`, or the fail-closed
+          # `:hook_error` an `{:edit, _}` at this point degrades to — §5#6 forbids
+          # edits outright). Same honest answer as a refused summarize.
+          {:block, kind, _reason} ->
+            {:ok, run, lines, refused(views, kind)}
+
+          # A hook STOPPED the run. The `with` in `execute_turn/4` routes this to
+          # `halt_run/4`, a real terminal — never a promoted partial answer.
+          {:halt, kind, reason} ->
+            {:halt, kind, reason, nil}
+        end
+
+      # The summarize call REFUSED or failed, or its summary did not survive the
+      # ingress path. §5's whole point is that compaction is not a laundering channel,
+      # so there is exactly one honest answer: the fold does not happen and the run
+      # continues UNCOMPACTED on the span it already had. Appending an unscrubbed — or
+      # un-obtained — summary anyway is the fail-OPEN reading this batch exists to make
+      # impossible. §5#5's bounded `:compaction_refused` carries WHICH refusal it was
+      # onto the turn row, so a refusal is never a silently shorter transcript.
+      {:error, reason} ->
+        {:ok, run, lines, refused(views, reason)}
     end
   end
 
