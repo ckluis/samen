@@ -1,0 +1,76 @@
+# SABOTAGE: D-13 (ADR-048 §6/§8, operator ruling D-13) — the BUDGET re-check at the LEVEL 2
+# RETRY boundary is REMOVED from `Samen.AI.Agent.complete_with_recovery/10`. This is the
+# 322 shape for the THIRD of the turn boundary's three guards: 322 removes the kill-switch
+# re-check at that boundary, 323 removes the durable cancel check one level down inside
+# `derive_fold/8`, and THIS removes the budget one — so a run that exhausted the allowance
+# its tenant set DURING the overflowing attempt is silently ignored. Level 2 derives a fold,
+# ships the tenant's folded conversation to the provider for summarization (a REAL governed
+# provider call since C3, and D4 is explicit that it SPENDS the run's token allowances and
+# its wall-clock one) and then spends a SECOND provider call on the retry, noticing the
+# overrun only at the NEXT turn boundary. That is a knowing overrun of a tenant budget.
+#
+# Flips the named D-13 red. Everything else stays GREEN, which is what makes the red mean
+# what it says: the D-13 POSITIVE CONTROL (the byte-identical script WITHIN budget, whose
+# Level 2 fold IS recorded model-written and whose retry DOES happen) still passes, and so
+# do the P5 red, the P5 positive control and all three D-05 arms — so the red fails because
+# the BUDGET re-check is gone, not because Level 2, the summarizer, or the budget predicate
+# itself broke.
+#
+# NOT TOUCHED, deliberately: `over_budget/2` and the TURN-boundary budget terminal it feeds
+# (sabotage 240 owns that), the kill-switch clause immediately above (322 owns it), D-05's
+# cancel check inside `derive_fold/8` (323 owns it), the closed `@error_kinds` literal, and
+# C2's Level 2 bound — the `attempt <= @max_context_retries and context_overflow?(result)`
+# clause with its `derive_fold/8` call, its recursion, its `{:halt, ...}` arm and the
+# `true ->` arm are all left exactly as they are.
+#
+# Deletes ONE CONTIGUOUS `cond` clause and its comment, replacing it with a `# SABOTAGE`
+# comment, so the file still compiles under `--warnings-as-errors` (an `if false do` shape
+# would trip Elixir's always-same-result warning). No private function goes uncalled:
+# `over_budget/2` is public and still called at the turn boundary, and `reload!/1` keeps its
+# other callers. Touches agent.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: D-13 RED: a budget exhausted DURING the overflowing first attempt stops the Level 2 retry — no summarizing fold, no second provider call
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1169,33 +1169,12 @@
+           Breaker.killed?(run.org_id, run.agent) ->
+         {run, lines, turn_row, {:error, :killed}, duration_ms, retries}
+ 
+-      # D-13 (ADR-048 §6/§8, operator ruling D-13) — the BUDGET is RE-CHECKED here too, and
+-      # with it the triple is complete: the turn boundary guards budget, cancel and the
+-      # kill-switch, and until now this boundary guarded only the last two (cancel one level
+-      # down, inside `derive_fold/8`). Since C3 the Level 2 summarizing fold is a REAL
+-      # governed provider call, and D4 is explicit that it SPENDS the run's token allowances
+-      # and its wall-clock one — so a run that exhausted what the tenant set DURING the
+-      # overflowing attempt would otherwise fold, retry, and notice only at the NEXT turn
+-      # boundary. That is a knowing overrun. The state read here is DURABLE — the loop's own
+-      # `reload!/1`, never the struct threaded in: a provider call has ALREADY returned at
+-      # this site, so the spend is on the run ROW and the copy the turn boundary loaded is
+-      # stale, the same fact recorded one level down about the cancel flag. The kind is
+-      # `over_budget/2`'s OWN return, never a second notion of "over budget" derived beside
+-      # it (the divergence §6 warns about) and never the symbolic run-state reason the turn
+-      # boundary hands back from its own 3-tuple: that one is not a member of the closed
+-      # `@error_kinds` list and would degrade to `:unknown` through `safe_error_kind/1`,
+-      # while every atom `over_budget/2` can return is already a member. Returning it in the
+-      # result slot hands the caller's existing `{:error, reason}` branch the work exactly as
+-      # the clause above does: the turn row is finalized `:failed` with the bounded kind and
+-      # the run takes its terminal. Ordered AFTER the emergency stop, which outranks a spend
+-      # ceiling — the turn boundary orders the two the same way. The predicate is asked twice,
+-      # once to decide and once for the kind, and the two cannot disagree: every counter it
+-      # reads only ever grows within a run. Sabotage 324 makes this clause refutable.
+-      attempt <= @max_context_retries and context_overflow?(result) and
+-          over_budget(reload!(run), DateTime.utc_now()) != nil ->
+-        {run, lines, turn_row, {:error, over_budget(reload!(run), DateTime.utc_now())},
+-         duration_ms, retries}
+-
++      # SABOTAGE (D-13, ADR-048 §6/§8, ruling D-13): the RETRY-boundary BUDGET re-check is
++      # REMOVED — the 322 shape for the third of the turn boundary's three guards. A run
++      # that exhausted its allowance DURING the overflowing attempt is silently ignored:
++      # Level 2 derives a fold, ships the tenant's folded conversation to the provider for
++      # summarization, and spends a SECOND provider call, all past the budget the tenant
++      # set, noticing only at the next turn boundary.
+       attempt <= @max_context_retries and context_overflow?(result) ->
+         case derive_fold(run, scope, views, definition, tools, goal, lines, opts) do
+           {:ok, run, lines, views} ->

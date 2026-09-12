@@ -1169,6 +1169,33 @@ defmodule Samen.AI.Agent do
           Breaker.killed?(run.org_id, run.agent) ->
         {run, lines, turn_row, {:error, :killed}, duration_ms, retries}
 
+      # D-13 (ADR-048 §6/§8, operator ruling D-13) — the BUDGET is RE-CHECKED here too, and
+      # with it the triple is complete: the turn boundary guards budget, cancel and the
+      # kill-switch, and until now this boundary guarded only the last two (cancel one level
+      # down, inside `derive_fold/8`). Since C3 the Level 2 summarizing fold is a REAL
+      # governed provider call, and D4 is explicit that it SPENDS the run's token allowances
+      # and its wall-clock one — so a run that exhausted what the tenant set DURING the
+      # overflowing attempt would otherwise fold, retry, and notice only at the NEXT turn
+      # boundary. That is a knowing overrun. The state read here is DURABLE — the loop's own
+      # `reload!/1`, never the struct threaded in: a provider call has ALREADY returned at
+      # this site, so the spend is on the run ROW and the copy the turn boundary loaded is
+      # stale, the same fact recorded one level down about the cancel flag. The kind is
+      # `over_budget/2`'s OWN return, never a second notion of "over budget" derived beside
+      # it (the divergence §6 warns about) and never the symbolic run-state reason the turn
+      # boundary hands back from its own 3-tuple: that one is not a member of the closed
+      # `@error_kinds` list and would degrade to `:unknown` through `safe_error_kind/1`,
+      # while every atom `over_budget/2` can return is already a member. Returning it in the
+      # result slot hands the caller's existing `{:error, reason}` branch the work exactly as
+      # the clause above does: the turn row is finalized `:failed` with the bounded kind and
+      # the run takes its terminal. Ordered AFTER the emergency stop, which outranks a spend
+      # ceiling — the turn boundary orders the two the same way. The predicate is asked twice,
+      # once to decide and once for the kind, and the two cannot disagree: every counter it
+      # reads only ever grows within a run. Sabotage 324 makes this clause refutable.
+      attempt <= @max_context_retries and context_overflow?(result) and
+          over_budget(reload!(run), DateTime.utc_now()) != nil ->
+        {run, lines, turn_row, {:error, over_budget(reload!(run), DateTime.utc_now())},
+         duration_ms, retries}
+
       attempt <= @max_context_retries and context_overflow?(result) ->
         case derive_fold(run, scope, views, definition, tools, goal, lines, opts) do
           {:ok, run, lines, views} ->
