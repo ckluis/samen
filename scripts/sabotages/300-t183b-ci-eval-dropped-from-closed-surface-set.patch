@@ -6,8 +6,8 @@
 # the shipped T183 unit suite) MUST flip; the clean shipped set proves the checks are not
 # blanket-failing.
 # APP: samen_core
-# TEST_FILES: samen_core/test/ai/tool_surface_test.exs
-# MUST_FAIL: the exactly-four-surfaces check (mix samen.verify.tool_surface exits 1)
+# TEST_FILES: test/ai/tool_surface_test.exs
+# MUST_FAIL: there are EXACTLY four surfaces
 diff --git a/samen_core/lib/samen/ai/tool_surface.ex b/samen_core/lib/samen/ai/tool_surface.ex
 index d5af019..4289acc 100644
 --- a/samen_core/lib/samen/ai/tool_surface.ex

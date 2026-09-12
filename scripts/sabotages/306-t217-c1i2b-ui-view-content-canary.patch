@@ -1,0 +1,23 @@
+# SABOTAGE: ADR-048 §4 (T217) — coverage-truth (nodes/C1V/work/seats/coverage-truth.verdict.md,
+# mutation #4) proved that no test in this file asserts `ui_view`'s CONTENT for a normally-created
+# run (through `encode_transcript`, never a hand-built legacy blob) — only P11's positive control
+# checks it is present and non-empty. This mutation writes `ui_view` from a fixed canary value
+# never derived from `lines` at all, on the SAME 2-arity `encode_transcript` path a real run's
+# final persisted state goes through; P11's own positive control ("not in [nil, \"\"]") is trivially
+# satisfied by this value, so only a genuine equals-lines VALUE check can catch it.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_dual_view_test.exs
+# MUST_FAIL: UI VIEW CONTENT: a normally-created run's ui_view equals its transcript lines, encoded through encode_transcript
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 647f2259518fa79337d0fd683b542120f82263cc..8516f6c6c783a7b5b6ef44c2828e92630cec29ac 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2977,7 +2977,7 @@ defmodule Samen.AI.Agent do
+     base = %{
+       "goal" => goal,
+       "lines" => lines,
+-      "ui_view" => ui_view,
++      "ui_view" => ["CORRUPTED-UI-VIEW-CANARY"],
+       "llm_view" => lines,
+       "folds" => folds,
+       "turn_lens" => turn_lens

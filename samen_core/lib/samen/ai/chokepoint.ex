@@ -397,6 +397,24 @@ defmodule Samen.AI.Chokepoint do
     _ -> @refusal
   end
 
+  @doc """
+  The step-3 scrub ALLOWLIST, exposed read-only for the ONE INGRESS site that must apply it
+  before a segment is written (ADR-048 §5#3).
+
+  `seal/3` applies `safe_segment?/1` to everything leaving for a provider. A compaction
+  summary is model-written text arriving in the OTHER direction, and §5#3 requires the same
+  predicate to gate it BEFORE it is appended to `llm_view` — otherwise the first place a
+  `vt_`-bearing summary would refuse is its RE-ENTRY on the next turn, i.e. after it was
+  already persisted into the governed transcript.
+
+  This is a pure delegation: same predicate, same fail-closed inversion, nothing widened and
+  no second scrub. It ANSWERS a question (`is this term provably safe?`); it can neither
+  admit a segment `seal/3` would refuse nor be used to bypass the seal, which remains the
+  only minting site.
+  """
+  @spec admissible_segment?(term()) :: boolean()
+  def admissible_segment?(segment), do: not unsafe_segment?(segment)
+
   # THE scrub predicate (§3.2 step 3), stated as the NEGATION of an allowlist. This inversion
   # is the whole fail-closed property: a blocklist of "bad" shapes silently admits every shape
   # nobody enumerated — the pre-fix predicate fell through to `false` (= safe) for tuples,

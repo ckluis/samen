@@ -49,7 +49,7 @@ defmodule Samen.AI.Embeddings do
   ranks; the HNSW index (§7.1) accelerates it.
   """
 
-  alias Samen.AI.{Chokepoint, Embedder}
+  alias Samen.AI.{Chokepoint, CrossRunWriteGuard, Embedder}
   alias Samen.Pii.Info
 
   defmodule Hit do
@@ -124,6 +124,11 @@ defmodule Samen.AI.Embeddings do
           {:ok, [float()]} | {:error, term()}
   def embed_field(scope, resource, source_id, field, text, opts) when is_atom(field) do
     with {:ok, org_id} <- org_id_from(scope, opts),
+         # ADR-048 §8 P12 / D3 — CATEGORICAL write-time refusal. Compaction output
+         # (a fold summary, or any other derived-summary artifact) may never enter
+         # pgvector or any other cross-run store. Refused HERE, before the embedder
+         # is even resolved, so nothing can land and be cleaned up later.
+         :ok <- assert_not_cross_run(opts),
          :ok <- assert_embeddable(resource, field),
          {:ok, {embedder, config}} <- embedder_for(opts),
          {:ok, [vector]} <- Chokepoint.embed(embedder, config, [text], chokepoint_opts(opts)) do
@@ -435,6 +440,21 @@ defmodule Samen.AI.Embeddings do
     Keyword.take(opts, [:actor, :scope, :grant, :repo, :vault, :grant_egress?, :grounding, :meta])
     |> Keyword.drop([:repo])
   end
+
+  # --- ADR-048 §8 P12 / D3: the categorical cross-run write refusal -------------------------
+
+  # The write-time refusal `embed_field/6` runs BEFORE it resolves an embedder, so nothing
+  # can land and be cleaned up later — it stands here, immediately in front of the storage
+  # section, because that is what it guards. It is a claim about the ARTIFACT (is this
+  # compaction output?), where `assert_embeddable/2` above is a claim about the FIELD (is
+  # this field declared and non-vault?) — orthogonal, which is why `P12`'s red drives a fold
+  # summary at a field that embeds perfectly well for ordinary content.
+  # `Samen.AI.CrossRunWriteGuard` owns the decision so the same rule can guard a future
+  # cross-run store without being re-derived here; the `@table` pgvector index is the ONE
+  # cross-run store this module writes to today.
+  defp assert_not_cross_run(opts), do: assert_not_cross_run(:pgvector, opts)
+
+  defp assert_not_cross_run(store, opts), do: CrossRunWriteGuard.check(store, opts)
 
   # --- storage (raw SQL; pgvector `::vector` text cast, dependency-free) --------------------
 

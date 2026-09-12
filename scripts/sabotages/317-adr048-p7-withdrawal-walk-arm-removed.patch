@@ -1,0 +1,29 @@
+# SABOTAGE: ADR-048 §7.3 step 3 / §8 P7 — REMOVE THE WITHDRAWAL ARM.
+# The `:fold_ledger` Multi step still runs and still reports success, but it no longer
+# calls `Samen.AI.Agent.Compaction.withdraw/2`, so no citing fold is ever neutralized.
+# This is the sabotage ADR-048 §7.3's gate obligation names in its own words: "a sabotage
+# that removes the withdrawal arm and must flip a named assertion". Derived by C4V from
+# the obligation text, not copied from C4R's `.planned.patch` (which was drafted against
+# the unbuilt feature and names `Ecto.Multi.run(:withdraw_folds, ...)`, a step that does
+# not exist in the shipped code).
+# P8 stays GREEN under this patch — the `:fold_sources` index arm is a separate Multi
+# step and is untouched — which is exactly the P7/P8 separation the two obligations have.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_withdrawal_test.exs
+# MUST_FAIL: P7: RED — shredding a subject marks EVERY fold citing it with the §7.3 neutralizing withdrawn marker
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -408,10 +408,10 @@ defmodule Samen.Erasure do
+       # each cited run's transcript through the SAME accepted `:advance` chokepoint, which
+       # re-projects the ledger into the index. Doing the ledger first therefore leaves the
+       # stamp as the LAST word on those rows. `nil` is the same recorded no-op as below.
+-      |> Ecto.Multi.run(:fold_ledger, fn repo, _changes ->
++      |> Ecto.Multi.run(:fold_ledger, fn _repo, _changes ->
+         case subject_ref do
+           ref when is_binary(ref) ->
+-            {:ok, Samen.AI.Agent.Compaction.withdraw(ref, repo: repo)}
++            {:ok, %{runs_walked: 0, folds_withdrawn: 0, rounds: 0, halted: :fixpoint}}
+ 
+           nil ->
+             {:ok, %{runs_walked: 0, folds_withdrawn: 0, rounds: 0, halted: :no_pseudonym}}

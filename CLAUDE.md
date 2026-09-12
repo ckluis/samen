@@ -38,10 +38,12 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
   replays every shipped gate sabotage (`scripts/sabotages/*.patch`): apply → the NAMED
   tests must FAIL → revert → SHA-256 byte-exact restore. Gates add new sabotages as
   patches (header lines: APP / TEST_FILES / MUST_FAIL) instead of re-deriving them.
-  Default (no args) = the full 212-patch harness (unchanged). At 212 the full serial run
-  exceeds the 600s single tool-call ceiling, so certify it **backgrounded** or in **chunks**
-  via additive selection flags (they COMPOSE as an intersection; a FILTERED run certifies
-  ONLY its subset — full coverage still needs a full/background run):
+  Default (no args) = the full harness (count: `ls scripts/sabotages/*.patch | wc -l` — **323**
+  as of 2026-09-10). At that count the full serial run exceeds the 600s single tool-call ceiling,
+  so certify it **backgrounded** or in **chunks**
+  via additive selection flags (different FLAGS compose as an intersection; repeating the SAME
+  flag is an error — use separate runs for two ranges; a FILTERED run certifies ONLY its
+  subset — full coverage still needs a full/background run):
   `--app <name>` (per-app: samen_web/samen_core/driftwood/pawchart/demo/samen_stripe),
   `--range <lo>-<hi>` / `--from`/`--to` (by filename number, inclusive),
   `--touching <path>…` / `--changed [<ref>]` (only patches whose touched files intersect

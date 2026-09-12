@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-048 §4 (T217) — coverage-truth (nodes/C1V/work/seats/coverage-truth.verdict.md,
+# mutation #3) proved `encode_transcript/2`'s "folds" => [] promise is checked for PRESENCE only
+# (`Map.has_key?(decoded, "folds")`), never for VALUE. This mutation keeps the "folds" key present
+# but silently populates it with a fake fold entry instead of the authoritative empty ledger — the
+# exact shape a real compaction-ledger bug could take without any five pre-existing test noticing.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_dual_view_test.exs
+# MUST_FAIL: FOLDS CONTENT: a freshly-created run's folds ledger equals the empty ledger, not merely present
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 647f2259518fa79337d0fd683b542120f82263cc..f70aca63748d31f550b1f92999610e90f2e743b5 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -2979,7 +2979,7 @@ defmodule Samen.AI.Agent do
+       "lines" => lines,
+       "ui_view" => ui_view,
+       "llm_view" => lines,
+-      "folds" => folds,
++      "folds" => ["FAKE-FOLD-CANARY"],
+       "turn_lens" => turn_lens
+     }
+

@@ -49,7 +49,7 @@ defmodule Samen.CustomFields.ErasureTest do
       Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
     end)
 
-    :ok
+    Samen.Kms.FileBacked.init!()
   end
 
   defp define_bag!(org_id) do

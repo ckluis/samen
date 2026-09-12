@@ -40,7 +40,7 @@ defmodule Samen.CustomObjects.ErasureTest do
     Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
     Samen.Kms.FileBacked.simulate_outage(false)
     on_exit(fn -> Samen.Kms.FileBacked.simulate_outage(false) end)
-    :ok
+    Samen.Kms.FileBacked.init!()
   end
 
   defp scope_for(org_id), do: Scope.new(%{id: Ash.UUID.generate(), org_id: org_id, role: :admin})

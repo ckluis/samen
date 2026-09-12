@@ -3,6 +3,60 @@
     {
       "fields": [
         {
+          "column_name": "afs_fold_n",
+          "logical_name": "fold_n",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "afs_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "afs_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "afs_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "afs_run_id",
+          "logical_name": "run_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "afs_subject_ref",
+          "logical_name": "subject_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "afs_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "afs_withdrawn_at",
+          "logical_name": "withdrawn_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        }
+      ],
+      "resource": "Samen.AI.Agent.FoldSource",
+      "table_name": "ai_agent_fold_source"
+    },
+    {
+      "fields": [
+        {
           "column_name": "akl_agent",
           "logical_name": "agent",
           "pii": false,
@@ -91,6 +145,12 @@
           "logical_name": "chain",
           "pii": false,
           "type": "{:array, Ash.Type.String}"
+        },
+        {
+          "column_name": "arn_context_cutoff_tokens",
+          "logical_name": "context_cutoff_tokens",
+          "pii": false,
+          "type": "Integer"
         },
         {
           "column_name": "arn_current_turn",

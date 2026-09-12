@@ -1,0 +1,26 @@
+# SABOTAGE: ADR-048 §8 P1 — "drop `Secrets.redact/1` + `Ingress.sanitize/1` from the summary
+# path". Derived by C3V from the OBLIGATION TEXT against the shipped code, not copied from
+# C3R's `P1.planned.patch` (which does not apply: it was written against a guessed pre-image
+# in `compaction.ex` before that file existed). The shipped pre-image is the single line
+# `    scrubbed = summary |> Secrets.redact() |> Ingress.sanitize()` in
+# `Samen.AI.Agent.Compaction.scrub/1`; the ADR's edit against it is `    scrubbed = summary`.
+# The `_ = {Secrets, Ingress}` line exists ONLY so the two aliases stay used and the module
+# still compiles warning-free under `--warnings-as-errors`; it changes no behaviour.
+# NOT P2 (ADR-048 :495 — pointing the fold at `ui_view`, C1's obligation) and NOT the ORDER
+# attack (which SWAPS the two lanes rather than deleting them).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_summarizer_test.exs
+# MUST_FAIL: P1: RED — an INJECTED INSTRUCTION the summarizer reproduced from tool output is NEUTRALIZED in the persisted llm_view (Ingress.sanitize/1 ran on the summary)
+# MUST_FAIL: P1: RED — a VENDOR-PREFIXED KEY the summarizer reproduced from tool output is REDACTED in the persisted llm_view (Secrets.redact/1 ran on the summary)
+--- a/samen_core/lib/samen/ai/agent/compaction.ex
++++ b/samen_core/lib/samen/ai/agent/compaction.ex
+@@ -101,7 +101,8 @@
+   def scrub(summary) when is_binary(summary) do
+     # THE ORDER (§5#3 / T184): the secrets lane runs FIRST, on the untouched raw binary, so
+     # ingress's own marker can never be inserted between a secret's label and its value.
+-    scrubbed = summary |> Secrets.redact() |> Ingress.sanitize()
++    scrubbed = summary
++    _ = {Secrets, Ingress}
+ 
+     cond do
+       # "…or ingress collapses it to nothing" (§5#5). An empty segment is not a summary; the

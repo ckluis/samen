@@ -1,0 +1,42 @@
+# SABOTAGE: D-01 (operator ruling, 2026-09-09) — THE ERASURE REPORT'S DERIVED-SUMMARY
+# DISCLOSURE IS DROPPED. The `:shredded` clauses of `derived_summary_invalidation/1` and
+# `derived_summary_reason/1` are rewritten to the CLEAN-PATH answer, so a report written
+# after a `{:error, :shredded}` STEP 0 pseudonym read claims `"invalidation" => "performed"`
+# with a `null` reason — byte-identical to a report written after a genuinely clean
+# derived-summary invalidation. The subject's derived AI summaries survive un-invalidated
+# and NOTHING says so: not the report tier, not the STEP 4a audit detail, not the STEP 4b
+# AuditChain detail (all three read the same function). That is the repo's own fail-honest
+# lie (ADR-014/024/026, `CLAUDE.md`: "an adapter NEVER returns {:ok, _} for work it did not
+# do") wearing an erasure hat, and it is exactly what D-01 forbids.
+#
+# WHAT STAYS GREEN UNDER THIS PATCH — the proof the red fires for the RIGHT reason:
+#   * `D-01 ANTI-TAUTOLOGY` (the `:performed` clauses are untouched),
+#   * `D-01 IDEMPOTENCY` and every shipped `C4I1` arm — CARVE-OUT `:shredded`, CARVE-OUT
+#     `:absent`, FAIL-CLOSED + its positive control, ORDER + its positive control.
+# Erasure still PROCEEDS, stays IDEMPOTENT, and stays FAIL-CLOSED: this patch changes only
+# what the run SAYS, never what it DOES. Compiles clean under `--warnings-as-errors` (two
+# literal clause bodies swap; no clause is deleted, so no head becomes unreachable and no
+# variable becomes unused). Touches `samen_core/lib/samen/erasure.ex` ALONE.
+#
+# Authored by D1I against its OWN built code, not lifted from D1R's `D01.planned.patch`
+# (which anchored on a different shape and could not apply).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_fold_source_test.exs
+# MUST_FAIL: D-01 DISCLOSURE: a STEP 0 read of {:error, :shredded}
+diff --git a/samen_core/lib/samen/erasure.ex b/samen_core/lib/samen/erasure.ex
+--- a/samen_core/lib/samen/erasure.ex
++++ b/samen_core/lib/samen/erasure.ex
+@@ -615,11 +615,11 @@
+   end
+ 
+   defp derived_summary_invalidation(:performed), do: "performed"
+-  defp derived_summary_invalidation(:shredded), do: "unavailable"
++  defp derived_summary_invalidation(:shredded), do: "performed"
+   defp derived_summary_invalidation(:absent), do: "not_applicable"
+ 
+   defp derived_summary_reason(:performed), do: nil
+-  defp derived_summary_reason(:shredded), do: "pseudonym_shredded"
++  defp derived_summary_reason(:shredded), do: nil
+   defp derived_summary_reason(:absent), do: "no_dek"
+ 
+   # ---------------------------------------------------------------------------

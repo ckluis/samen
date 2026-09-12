@@ -254,8 +254,10 @@ defmodule Samen.Abbrev.AllocatorTest do
       # (Samen.WebTest.Outreach.{Sequence,Enrollment,StepSend}) → 408.
       # +2 A1 (ADR-047 §4.1/§6) — samen_core host's agent-loop cursor pair `arn`/`atn`
       # (Samen.AI.Agent.{Run,Turn}) → 410, growing the file to 20_439 bytes.
-      assert byte_size(committed) == 20668
-      assert map_size(R.load()) == 442
+      # +1 C4 (ADR-048 §7.3) — samen_core host's `afs` (Samen.AI.Agent.FoldSource), the
+      # pseudonym-keyed provenance index, growing the file to 20_710 bytes.
+      assert byte_size(committed) == 20710
+      assert map_size(R.load()) == 443
     end
   end
 

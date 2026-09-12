@@ -27,7 +27,7 @@ defmodule Samen.AI.Agent.SecretsTest do
     end
 
     test "Slack bot token" do
-      assert redacted?("xoxb-111111111111-222222222222-abcdefghijklmnopqrstuvwx")
+      assert redacted?("xoxb-" <> String.duplicate("1", 20))
     end
 
     test "Stripe live secret key" do

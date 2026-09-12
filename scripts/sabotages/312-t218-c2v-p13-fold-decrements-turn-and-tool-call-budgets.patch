@@ -1,0 +1,29 @@
+# SABOTAGE: ADR-048 §8 P13 / D4 (T218 / batch C2, §10 row 4 RATIFIED (a)) — a fold now
+# DECREMENTS the run's remaining `max_turns` and `max_tool_calls` headroom. `apply_fold!/4`'s
+# `:advance` map gains `current_turn: run.current_turn + 1` and
+# `tool_calls_used: run.tool_calls_used + 1`, so a compaction storm eats the turns and
+# tool calls the tenant was promised — §10 row 4 option (b), the one RATIFIED (a)
+# rejects. NOT P4 (:497): that is the level-2 retry-once counter, a different counter
+# and a different claim; a build whose folds silently eat `max_turns` passes P4
+# untouched. Flips the named D4 red on its own cursor assertion (measured: the cursor
+# reads 4 for 3 ordinary turns and 1 fold).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_compaction_test.exs
+# MUST_FAIL: a fold NEVER decrements max_turns or max_tool_calls
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1359,7 +1359,13 @@
+             views.pending
+           ),
+         input_tokens_used: run.input_tokens_used + in_tokens,
+-        output_tokens_used: run.output_tokens_used + out_tokens
++        output_tokens_used: run.output_tokens_used + out_tokens,
++        # SABOTAGE (ADR-048 §8 P13 / D4): the fold now DECREMENTS the run's remaining
++        # max_turns and max_tool_calls headroom by advancing both used-counters on every
++        # fold — a compaction storm eats the turns the tenant was promised (§10 row 4
++        # option (b), the one RATIFIED (a) rejects).
++        current_turn: run.current_turn + 1,
++        tool_calls_used: run.tool_calls_used + 1
+       })
+       |> Ash.update!(authorize?: false)
+ 

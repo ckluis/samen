@@ -1,0 +1,66 @@
+# SABOTAGE: ADR-048 §8 P3 (T218 / batch C2) — the fail-honest floor does NOT survive
+# context recovery. BOTH halves of the §6 Level 3 `:context_exhausted` terminal — the
+# pre-turn context gate and the mid-turn 'the single retry overflowed too' arm — stop
+# returning `{:error, :context_exhausted, run}` and instead PROMOTE the last assistant
+# turn (the durable, vault-routed transcript's last llm_view line) to
+# `{:ok, %{answer: ...}}`, finalizing the run `:succeeded`. A partial answer dressed as
+# a result for a goal the model never finished — sabotage 240's target, extended to the
+# new terminal exactly as ADR-048 §8 P3 words it. Flips P3's named red; the P4 CONTROL
+# flips with it because it asserts the same terminal from the mid-turn side.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_compaction_test.exs
+# MUST_FAIL: the fail-honest floor survives context recovery
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -980,9 +980,22 @@
+               meta: bounded_meta(Map.put(turn_row.meta || %{}, "replayed", replayed?))
+             })
+ 
+-            run = terminal!(run, :context_exhaust, :context_exhausted)
++            # SABOTAGE (ADR-048 §8 P3), the MID-TURN half of the same terminal: the
++            # single recovery attempt overflowed too, and instead of the honest Level 3
++            # terminal the run PROMOTES the last assistant turn to {:ok, answer}.
++            answer =
++              case transcript_with_views(run) do
++                {:ok, {_goal, promoted, _views}} -> List.last(promoted) || ""
++                _ -> ""
++              end
++
++            run =
++              run
++              |> Ash.Changeset.for_update(:succeed, %{})
++              |> Ash.update!(authorize?: false)
++
+             log_terminal(run)
+-            {:error, :context_exhausted, run}
++            {:ok, %{answer: answer, run: run, turns: run.current_turn}}
+           else
+             if kind in [:provider_error, :not_configured],
+               do: Breaker.note_provider_error(run.agent)
+@@ -1012,9 +1025,24 @@
+       # row and no bytes ever reach the provider: the turn that cannot fit is never taken,
+       # exactly as the budget floor refuses the turn that would overrun.
+       {:error, :context_exhausted} ->
+-        run = terminal!(run, :context_exhaust, :context_exhausted)
++        # SABOTAGE (ADR-048 §8 P3): the fail-honest floor does NOT survive recovery.
++        # Level 3 now PROMOTES the last assistant turn — the durable, vault-routed
++        # transcript's last line — to {:ok, %{answer: ...}} and finalizes the run
++        # :succeeded, i.e. a partial answer dressed as a result for a goal the model
++        # never finished. Sabotage 240's target, extended to the new terminal.
++        answer =
++          case transcript_with_views(run) do
++            {:ok, {_goal, lines, _views}} -> List.last(lines) || ""
++            _ -> ""
++          end
++
++        run =
++          run
++          |> Ash.Changeset.for_update(:succeed, %{})
++          |> Ash.update!(authorize?: false)
++
+         log_terminal(run)
+-        {:error, :context_exhausted, run}
++        {:ok, %{answer: answer, run: run, turns: run.current_turn}}
+ 
+       {:error, kind} when is_atom(kind) ->
+         {:error, kind, terminal_logged!(run, kind)}
