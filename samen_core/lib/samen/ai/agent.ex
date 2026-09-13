@@ -11,9 +11,10 @@ defmodule Samen.AI.Agent do
   by `Samen.AI.Agent.Hooks` — resolved once per run (host config, then the per-run `:hooks`
   opt) and threaded on `opts` as `:resolved_hooks` beside `:resolved_tools`. Six of the
   seven points have call sites here (`:session_start`, `:before_completion`,
-  `:after_tool_request`, `:before_tool_call`, `:after_tool_execution`, `:on_error`);
-  `:after_compaction` is declared and dispatchable but has no caller, because this loop
-  performs no transcript compaction in v1.
+  `:after_tool_request`, `:before_tool_call`, `:after_tool_execution`, `:on_error`), and
+  ADR-048 §5#6 gives the seventh — `:after_compaction` — its first: the Level-1 fold
+  dispatches it once the summary has passed §5#3's ingress path and been appended, and
+  before the fold is persisted, so a `:block` there means the fold does not happen.
 
   **First-decision-wins**, and hooks may only NARROW: a `{:block, reason}` is the fail-honest
   refusal turn `:hook_blocked`, a `{:halt, reason}` is a real terminal `:hook_halted`
@@ -134,13 +135,24 @@ defmodule Samen.AI.Agent do
 
   ## Fail-honest budgets (§6; §9#3 TAKEN — the floor is NON-configurable)
 
-  Five budgets per run, checked at EVERY turn boundary (`over_budget/2`) alongside the
-  durable cancel flag and the kill-switch. Exhaustion is a terminal `:budget_exhausted`
+  Five SPEND budgets per run, checked at EVERY turn boundary (`over_budget/2`) alongside
+  the durable cancel flag and the kill-switch. Exhaustion is a terminal `:budget_exhausted`
   with a bounded `error_kind` — **the last assistant turn is NEVER promoted to an
   answer** (RP-AG-6; sabotage 240). Token budgets are deliberately soft by up to ONE
   turn (`over_budget/2` uses `>` on the summed counters — the turn that crosses the
   ceiling completes and is billed; the NEXT turn is refused); the breaker assumes soft
   ceilings and never treats the overshoot as a violation.
+
+  A sixth budget, `context_cutoff_tokens` (ADR-048 §6), is a WATERMARK rather than a
+  spend ceiling and is deliberately NOT part of `over_budget/2`: crossing it means the
+  assembled context is too large to keep growing, not that the tenant's allowance is
+  spent. Level 1 folds the oldest eligible span; Level 3 is the honest terminal
+  `{:error, :context_exhausted, run}` for a context that will not fit under the run's HARD
+  `max_input_tokens` ceiling with nothing eligible left to fold.
+  It is a DIFFERENT terminal from `:budget_exhausted`, because "this run outgrew its
+  context window" and "this run spent its allowance" are different facts for an operator.
+  The floor is identical and equally non-configurable: the last assistant turn is NEVER
+  promoted, at Level 3 no less than at budget exhaustion.
 
   ## Token-only observability (EG6, §6)
 
@@ -168,6 +180,7 @@ defmodule Samen.AI.Agent do
 
   alias Samen.AI.Agent.Approver
   alias Samen.AI.Agent.Breaker
+  alias Samen.AI.Agent.Compaction
   alias Samen.AI.Agent.Hooks
   alias Samen.AI.Agent.Run
   alias Samen.AI.Agent.ToolResult
@@ -191,7 +204,13 @@ defmodule Samen.AI.Agent do
     max_tool_calls: 12,
     max_input_tokens: 60_000,
     max_output_tokens: 8_000,
-    deadline_seconds: 600
+    deadline_seconds: 600,
+    # ADR-048 §6 (T218/C2) — the CONTEXT watermark, not a spend ceiling. It is the point
+    # at which the assembled context is too large to keep growing: Level 1 folds the
+    # oldest eligible span, and Level 3 (`:context_exhausted`) is what is left when the
+    # watermark is crossed and NOTHING is eligible to fold. Default = 70% of the default
+    # `max_input_tokens`, exactly as §6 states it.
+    context_cutoff_tokens: 42_000
   ]
   @budget_keys Keyword.keys(@default_budgets)
 
@@ -265,6 +284,38 @@ defmodule Samen.AI.Agent do
     :hook_blocked,
     :hook_halted,
     :hook_error,
+    # ADR-048 §6 (T218) — the two CONTEXT kinds. `:context_overflow` is the provider's
+    # "prompt too long" answer, normalized out of the content-free `:provider_error` it
+    # collapses into today (Level 2's trigger). `:context_exhausted` is Level 3's terminal
+    # kind: this run outgrew its context window, which is a DIFFERENT fact from
+    # `:budget_exhausted`'s "this run spent its allowance". Both are members here because
+    # the enum is closed — an unlisted kind degrades to the useless `:unknown`.
+    :context_overflow,
+    :context_exhausted,
+    # ADR-048 §5#5 (T219) — the compaction REFUSAL kind. The §5 summarize call refused
+    # (`:pii_egress_refused`), failed, returned nothing, or its summary did not survive
+    # §5#3's ingress path — so the fold DID NOT HAPPEN and the run continues UNCOMPACTED.
+    # It is a member here because the enum is closed: the note the loop writes on the turn
+    # row is keyed by `safe_error_kind(:compaction_refused)`, so dropping it from this list
+    # degrades that note to the useless `:unknown` and the refusal stops being nameable.
+    :compaction_refused,
+    # ADR-048 §7.3 step 5 / §8 P14 (T221, C4) — the WITHDRAWAL terminal. A subject whose
+    # data a fold cites was erased, the §7.3 walk neutralized that fold, and this run is
+    # still live: it terminates fail-honest on its OWN NEXT TURN rather than continuing on
+    # a context that has been emptied under it. Distinct from `:context_exhausted` (§6
+    # Level 3, "this run outgrew its window") — nothing here is about size. It is a member
+    # of this CLOSED list because an unlisted kind degrades to the useless `:unknown` and
+    # the terminal stops being nameable on the turn row.
+    :source_withdrawn,
+    # ADR-048 §7.1 / §8 P12 / §10 row 3 (a) (T221, C4) — the CATEGORICAL WRITE-TIME
+    # REFUSAL kind. Compaction output (a fold summary, a durable fact, a memo, any text a
+    # summarizer produced from a run's history) is ineligible for `pgvector` and for every
+    # other cross-run store, and `Samen.AI.CrossRunWriteGuard` refuses the write BEFORE the
+    # row lands — never by writing it and cleaning it up later, which is the failure mode
+    # P7 and P8 both pass. It is a member of this CLOSED list because an unlisted kind
+    # degrades to the useless `:unknown`, and a refusal that cannot be named on the turn
+    # row is a refusal nobody can audit.
+    :cross_run_write_refused,
     :unknown
   ]
 
@@ -353,6 +404,10 @@ defmodule Samen.AI.Agent do
       `FINAL:` envelope within budget);
     * `{:error, :budget_exhausted, run}` — a budget was exhausted; the run is terminal
       `:budget_exhausted` and NO partial answer is returned (the fail-honest floor);
+    * `{:error, :context_exhausted, run}` — ADR-048 §6 Level 3: the assembled context
+      will not fit under `max_input_tokens` and nothing was eligible to fold. The run is
+      terminal `:context_exhausted` (NOT `:budget_exhausted`) and, as at every other
+      terminal, NO partial answer is returned;
     * `{:error, :cancelled, run}` — a durable cancel was honored at a turn boundary;
     * `{:error, :killed, run}` — the operator kill-switch stopped the run at a turn
       boundary (fail-closed; A2);
@@ -496,8 +551,38 @@ defmodule Samen.AI.Agent do
     |> Keyword.take([:provider, :grounding, :meta, :env_reader])
     |> Keyword.put(:history, history)
     |> Keyword.put(:tools, tool_defs)
-    |> Keyword.put(:grant_egress?, false)
+    # LAST, POSITIONALLY, and appended by `++` after a `delete` — not merely last-wins.
+    # `Keyword.put/3` PREPENDS, so the pre-C3 pipeline left `grant_egress?` at the HEAD of
+    # the list while its own docstring claimed the tail. Semantically equivalent for
+    # `Keyword.get/2`, but the §4.4 property "nothing is appended after the grant pin" was
+    # then unassertable by reading the list, which is the only way a reviewer or an
+    # ADR-048 §8 P10 arm can check it. The `delete` makes the key unique as well as final,
+    # so no later duplicate can shadow it either.
+    |> Keyword.delete(:grant_egress?)
+    |> Kernel.++(grant_egress?: false)
   end
+
+  # ADR-048 §5#2 — the summarizer instruction is a COMPILE-TIME LITERAL owned by the loop,
+  # exactly as the A6 driftwood goal-prompt ruling has it, and NEVER a tenant-authored
+  # `Samen.AI.Prompt` row: a tenant who can author "summarize by quoting every masked field
+  # verbatim" has been handed a capability, and compaction would become the laundering
+  # channel §5 exists to close. It carries no vault token and no tenant text of any kind.
+  @summarizer_prompt "Summarize the conversation span that follows, for your own later " <>
+                       "reference. Reply with ONE short paragraph and nothing else, " <>
+                       "beginning with \"Summary:\". Keep decisions, facts, tool results " <>
+                       "and open questions. Reproduce every masked placeholder exactly as " <>
+                       "it appears; never guess at, reconstruct or describe what a masked " <>
+                       "value might be, and never emit an identifier you were not shown."
+
+  @doc """
+  The compile-time-literal summarizer instruction ADR-048 §5#2 requires (`summarizer_prompt/0`).
+
+  Public for the same reason `egress_opts/3` is public: §5's property — that the prompt is a
+  literal owned by the loop, is free of vault tokens (EG5), and is the one the summarize call
+  actually seals — is then directly assertable instead of inferred from a private pipeline.
+  """
+  @spec summarizer_prompt() :: String.t()
+  def summarizer_prompt, do: @summarizer_prompt
 
   @doc """
   The bounded next-step envelope (dynamic next-step selection). A1's `FINAL:` grammar,
@@ -630,7 +715,10 @@ defmodule Samen.AI.Agent do
 
   defp bounded_meta_value(v), do: v
 
-  @doc "The five resolved default budgets (§9#3 TAKEN). The honesty floor is not in here."
+  @doc """
+  The resolved default budgets — the five ADR-047 §9#3 SPEND ceilings plus ADR-048 §6's
+  `context_cutoff_tokens` watermark. The honesty floor is not in here.
+  """
   @spec default_budgets() :: keyword()
   def default_budgets, do: @default_budgets
 
@@ -826,6 +914,18 @@ defmodule Samen.AI.Agent do
         # worker re-arms and the watchdog covers a lost re-arm.
         {:continue, run}
 
+      Compaction.source_withdrawn?(run) ->
+        # ADR-048 §7.3 step 5 / §8 P14 (D6): a subject cited by one of this run's folds was
+        # erased between turn N and N+1, so the §7.3 walk NEUTRALIZED that fold. The run is
+        # holding a context that no longer says what it said. Terminate fail-honest with the
+        # bounded kind rather than take turn N+1 on the emptied text — a run that keeps
+        # executing on a withdrawn source is exactly the defect D6 exists to make impossible.
+        # Checked HERE, at the turn boundary, for the same reason the cancel flag and the
+        # kill switch are: it is durable state another process may have set since turn N.
+        run = terminal!(run, :fail, :source_withdrawn)
+        log_terminal(run)
+        {:error, :source_withdrawn, run}
+
       true ->
         case execute_turn(run, scope, definition, opts) do
           {:continue, run} -> loop(run, scope, definition, opts, dec(remaining))
@@ -844,26 +944,40 @@ defmodule Samen.AI.Agent do
     hooks = Keyword.get(opts, :resolved_hooks, [])
 
     with :ok <- session_start_hook(hooks, run),
-         {:ok, {goal, lines}} <- transcript(run),
+         {:ok, {goal, lines, views}} <- transcript_with_views(run),
+         {:ok, run, lines, views} <-
+           fold_context(run, scope, views, definition, tools, goal, lines, opts),
+         :ok <- context_gate(run, views, definition, tools, goal, lines),
          {:ok, replayed?, turn_row} <- find_or_reuse_turn(run, org_id, turn_index),
+         # ADR-048 §5#5: if the fold above was REFUSED, the turn row this turn is about to
+         # take says so. The turn itself proceeds — uncompacted is not failed.
+         turn_row = note_compaction_refusal!(turn_row, views),
          :ok <- before_completion_hook(hooks, run, turn_row, turn_index) do
-      started = System.monotonic_time(:millisecond)
-
       # Every provider-bound byte still routes kernel → chokepoint: prior turns re-enter
       # ONLY as `:history` (re-scrubbed per §3.2a + allowlist-scanned per §3.2 step 3/4,
       # every turn), tool DEFS ride the sealed payload's `:tools` field (scrubbed +
       # static-membership-checked, §4.2), and grant plaintext is categorically excluded
       # (§4.4). The slow provider call sits BETWEEN the two checkpoints, outside any
       # transaction (§4.1).
-      result =
-        Samen.AI.complete(
+      #
+      # ADR-048 §6 LEVEL 2 rides inside `complete_with_recovery/10`: a `:context_overflow`
+      # on the FIRST attempt folds inline and retries ONCE on this same turn index, and
+      # the counter is stamped on the turn ROW before the retry leaves. The helper hands
+      # back the (possibly re-folded) run + history, the turn row carrying the counter,
+      # and how many retries were spent — which is never more than one.
+      {run, lines, turn_row, result, duration_ms, retries} =
+        complete_with_recovery(
+          run,
           scope,
-          [definition.goal_prompt, goal],
-          %{},
-          egress_opts(opts, lines, Tools.defs(tools))
+          definition,
+          tools,
+          goal,
+          lines,
+          views,
+          turn_row,
+          opts,
+          1
         )
-
-      duration_ms = System.monotonic_time(:millisecond) - started
 
       case result do
         {:ok, %Completion{} = completion} ->
@@ -925,19 +1039,37 @@ defmodule Samen.AI.Agent do
           # normalized reason (already content-free by the chokepoint) to the caller.
           kind = safe_error_kind(reason)
 
-          if kind in [:provider_error, :not_configured],
-            do: Breaker.note_provider_error(run.agent)
+          if kind == :context_overflow and retries > 0 do
+            # ADR-048 §6 LEVEL 3, reached ONLY here: the single mid-turn recovery attempt
+            # overflowed too. §10 row 5 RATIFIED (a) forbids a second retry, and §6
+            # forbids collapsing this into `:budget_exhausted` — "outgrew its context
+            # window" and "spent its allowance" are different facts for an operator. The
+            # last assistant turn is NOT promoted (the floor, unweakened).
+            finalize_turn!(turn_row, %{
+              status: :failed,
+              error_kind: "context_exhausted",
+              duration_ms: duration_ms,
+              meta: bounded_meta(Map.put(turn_row.meta || %{}, "replayed", replayed?))
+            })
 
-          finalize_turn!(turn_row, %{
-            status: :failed,
-            error_kind: to_string(kind),
-            duration_ms: duration_ms,
-            meta: bounded_meta(%{"replayed" => replayed?})
-          })
+            run = terminal!(run, :context_exhaust, :context_exhausted)
+            log_terminal(run)
+            {:error, :context_exhausted, run}
+          else
+            if kind in [:provider_error, :not_configured],
+              do: Breaker.note_provider_error(run.agent)
 
-          run = terminal!(run, :fail, kind)
-          log_terminal(run)
-          {:error, reason, run}
+            finalize_turn!(turn_row, %{
+              status: :failed,
+              error_kind: to_string(kind),
+              duration_ms: duration_ms,
+              meta: bounded_meta(Map.put(turn_row.meta || %{}, "replayed", replayed?))
+            })
+
+            run = terminal!(run, :fail, kind)
+            log_terminal(run)
+            {:error, reason, run}
+          end
       end
     else
       # T181: a hook stopped the run at `:session_start` or `:before_completion`. The turn
@@ -946,8 +1078,631 @@ defmodule Samen.AI.Agent do
       {:halt, kind, reason, turn_row} ->
         halt_run(run, turn_row, kind, reason)
 
+      # ADR-048 §6 Level 3. Its own terminal STATE, so an operator health surface can tell
+      # "outgrew its context window" from "spent its allowance" — the whole point of the
+      # kind. Reached BEFORE `find_or_reuse_turn/3`, so the refused turn leaves no turn
+      # row and no bytes ever reach the provider: the turn that cannot fit is never taken,
+      # exactly as the budget floor refuses the turn that would overrun.
+      {:error, :context_exhausted} ->
+        run = terminal!(run, :context_exhaust, :context_exhausted)
+        log_terminal(run)
+        {:error, :context_exhausted, run}
+
       {:error, kind} when is_atom(kind) ->
         {:error, kind, terminal_logged!(run, kind)}
+    end
+  end
+
+  # ------------------------------------------------------------------------------------
+  # ADR-048 §6 LEVEL 2 — mid-turn recovery, EXACTLY ONE attempt (§10 row 5, RATIFIED (a))
+
+  # One turn index, at most TWO provider attempts, never a loop. The bound is the
+  # `attempt` argument, NOT "whether the watermark cleared" — so option (c) ("until it
+  # fits", the budget hole §10 row 5 rejected) is unreachable by construction rather than
+  # by discipline. §6's three constraints, each one located:
+  #
+  #   1. the failed attempt's tokens still count — both attempts are real chokepoint
+  #      calls and the committing site bills the usage it is handed;
+  #   2. the retry boundary's re-checks are **P5** (kill) and **D-05** (cancel). The
+  #      KILL-SWITCH half IS built: the `cond` below re-checks `Breaker.killed?/2` BEFORE
+  #      any retry work (ADR-048 §8 P5, operator ruling D-04). The CANCEL half IS NOW BUILT
+  #      TOO, but narrowly and NOT at this boundary: operator ruling D-05 puts it inside
+  #      `derive_fold/8`, immediately before the SUMMARIZING fold, because the harm is the
+  #      EGRESS and not the turn — so a cancelled run may still make the retry call and
+  #      finish its turn (RP-AG-8 preserved: cancel is honoured at the NEXT turn boundary),
+  #      it simply may not ship its conversation to the provider for summarization. The
+  #      BUDGET half is deliberately NOT built here, is NOT in D-05's scope, and remains
+  #      open (`nodes/C2R/work/spec-notes.md` §2);
+  #   3. if the single retry ALSO overflows, the caller turns it into LEVEL 3
+  #      (`:context_exhausted`) — never a second retry.
+  #
+  # The counter is stamped on the `:proposed` turn ROW before the retry leaves, so it
+  # survives whichever commit path finalizes the turn (plain, tool, feedback or failure)
+  # rather than living only on the happy path.
+  #
+  # D4 (§10 row 4, RATIFIED (a)): the inline fold goes through `derive_fold/6`, which
+  # spends `input_tokens_used`/`output_tokens_used` and NOTHING else — `current_turn` and
+  # `tool_calls_used` are not in its `:advance` map at all. The reuse arm of
+  # `fold_context/6` is deliberately bypassed here: a Level 2 fold is a NEW fold on an
+  # already-started turn, not a replay of one.
+  @max_context_retries 1
+
+  defp complete_with_recovery(
+         %Run{} = run,
+         scope,
+         definition,
+         tools,
+         goal,
+         lines,
+         views,
+         turn_row,
+         opts,
+         attempt
+       ) do
+    started = System.monotonic_time(:millisecond)
+
+    result =
+      Samen.AI.complete(
+        scope,
+        [definition.goal_prompt, goal],
+        %{},
+        egress_opts(opts, lines, Tools.defs(tools))
+      )
+
+    duration_ms = System.monotonic_time(:millisecond) - started
+    retries = attempt - 1
+
+    cond do
+      # P5 (ADR-048 §8, operator ruling D-04) — the kill-switch is RE-CHECKED at the
+      # RETRY boundary, before ANY retry work: before `derive_fold/8` and before the
+      # recursive call. The kill-switch is the emergency stop; a compaction retry must not
+      # proceed, and must not spend a second provider call, after someone has hit stop.
+      # This is the SAME WIDENED notion the turn boundary uses (the host switch OR this
+      # org's DURABLE per-definition row), never a narrower one — the sabotage-244 shape
+      # ONE LEVEL DOWN. Returning `{:error, :killed}` in the result slot hands the caller's
+      # existing `{:error, reason}` branch the work: the turn row is finalized `:failed`
+      # with `error_kind: "killed"` and the run takes its terminal, so `run/4` answers
+      # `{:error, :killed, run}` exactly as the turn boundary does. `:killed` is already a
+      # member of the closed `@error_kinds` list, so nothing degrades to `:unknown`.
+      # Sabotage 322 makes this clause refutable.
+      attempt <= @max_context_retries and context_overflow?(result) and
+          Breaker.killed?(run.org_id, run.agent) ->
+        {run, lines, turn_row, {:error, :killed}, duration_ms, retries}
+
+      # D-13 (ADR-048 §6/§8, operator ruling D-13) — the BUDGET is RE-CHECKED here too, and
+      # with it the triple is complete: the turn boundary guards budget, cancel and the
+      # kill-switch, and until now this boundary guarded only the last two (cancel one level
+      # down, inside `derive_fold/8`). Since C3 the Level 2 summarizing fold is a REAL
+      # governed provider call, and D4 is explicit that it SPENDS the run's token allowances
+      # and its wall-clock one — so a run that exhausted what the tenant set DURING the
+      # overflowing attempt would otherwise fold, retry, and notice only at the NEXT turn
+      # boundary. That is a knowing overrun. The state read here is DURABLE — the loop's own
+      # `reload!/1`, never the struct threaded in: a provider call has ALREADY returned at
+      # this site, so the spend is on the run ROW and the copy the turn boundary loaded is
+      # stale, the same fact recorded one level down about the cancel flag. The kind is
+      # `over_budget/2`'s OWN return, never a second notion of "over budget" derived beside
+      # it (the divergence §6 warns about) and never the symbolic run-state reason the turn
+      # boundary hands back from its own 3-tuple: that one is not a member of the closed
+      # `@error_kinds` list and would degrade to `:unknown` through `safe_error_kind/1`,
+      # while every atom `over_budget/2` can return is already a member. Returning it in the
+      # result slot hands the caller's existing `{:error, reason}` branch the work exactly as
+      # the clause above does: the turn row is finalized `:failed` with the bounded kind and
+      # the run takes its terminal. Ordered AFTER the emergency stop, which outranks a spend
+      # ceiling — the turn boundary orders the two the same way. The predicate is asked twice,
+      # once to decide and once for the kind, and the two cannot disagree: every counter it
+      # reads only ever grows within a run. Sabotage 324 makes this clause refutable.
+      attempt <= @max_context_retries and context_overflow?(result) and
+          over_budget(reload!(run), DateTime.utc_now()) != nil ->
+        {run, lines, turn_row, {:error, over_budget(reload!(run), DateTime.utc_now())},
+         duration_ms, retries}
+
+      attempt <= @max_context_retries and context_overflow?(result) ->
+        case derive_fold(run, scope, views, definition, tools, goal, lines, opts) do
+          {:ok, run, lines, views} ->
+            turn_row =
+              turn_row
+              |> note_compaction_refusal!(views)
+              |> note_context_retry!(attempt)
+
+            complete_with_recovery(
+              run,
+              scope,
+              definition,
+              tools,
+              goal,
+              lines,
+              views,
+              turn_row,
+              opts,
+              attempt + 1
+            )
+
+          # A hook HALTED the run at `:after_compaction` during a LEVEL 2 fold. This turn
+          # row already exists, so the honest spelling is the loop's own error terminal:
+          # the caller's `{:error, reason}` branch finalizes the row `:failed` with the
+          # bounded kind and takes the run terminal. Never a retry, never a silent
+          # continue.
+          {:halt, kind, _reason, _turn_row} ->
+            {run, lines, turn_row, {:error, kind}, duration_ms, retries}
+        end
+
+      true ->
+        {run, lines, turn_row, result, duration_ms, retries}
+    end
+  end
+
+  defp context_overflow?({:error, reason}), do: safe_error_kind(reason) == :context_overflow
+  defp context_overflow?(_result), do: false
+
+  # The counter §6 puts "on the same turn row". Written through the `:decide` checkpoint
+  # action (meta only — the tool stamp is untouched) and MERGED into the row's existing
+  # meta, so it can never mint a second turn index for a recovery attempt.
+  defp note_context_retry!(turn_row, n) do
+    turn_row
+    |> Ash.Changeset.for_update(:decide, %{
+      meta: bounded_meta(Map.put(turn_row.meta || %{}, "context_retries", n))
+    })
+    |> Ash.update!(authorize?: false)
+  end
+
+  # ------------------------------------------------------------------------------------
+  # ADR-048 §6 — the pre-turn context gate (the LEVEL 1 / LEVEL 3 boundary)
+
+  # Run BEFORE `seal/3`, as §6 states it. Two DIFFERENT numbers decide two different
+  # things, and conflating them is the mistake this comment exists to prevent:
+  #
+  #   * `context_cutoff_tokens` is the WATERMARK — crossing it is Level 1's trigger to
+  #     fold the oldest eligible span. Crossing it is NOT a failure and NEVER ends a run:
+  #     the deterministic drop-with-marker fold is the next node of this batch, and until
+  #     it lands a run over the watermark simply proceeds exactly as it does today.
+  #   * `max_input_tokens` is the run's HARD input ceiling. A context that does not fit
+  #     under it with NOTHING eligible left to fold is **Level 3**, and there is no honest
+  #     third option: the alternative to refusing is sending a prompt that cannot fit, or
+  #     silently truncating one — and silent truncation is the exact dishonesty the floor
+  #     forbids.
+  #
+  # Under the ceiling the turn proceeds unchanged, which is what every shipped agent test
+  # exercises — so this gate cannot be satisfied by a constant.
+  defp context_gate(%Run{} = run, views, definition, tools, goal, lines) do
+    if context_tokens(definition, tools, goal, lines) > run.max_input_tokens and
+         foldable(views, lines) == [] do
+      {:error, :context_exhausted}
+    else
+      :ok
+    end
+  end
+
+  # What Level 1 is allowed to fold — UXD-17's FOUR exclusions, each one structural:
+  #
+  #   * the GOAL is never in `llm_view` at all (it rides the sealed payload's own field),
+  #     so no span can reach it;
+  #   * the TOOL DEFS are never in `llm_view` either (compile-time static, §4.2);
+  #   * a PRIOR FOLD's own summary segment is excluded EXPLICITLY: every fold replaces its
+  #     span with ONE marker segment and appends ONE ledger entry, and markers accumulate
+  #     oldest-first at the head of `llm_view` — so the leading `length(folds)` segments
+  #     are markers and selection starts strictly AFTER them. This is the ruling that
+  #     keeps folds ONE LEVEL DEEP: no fold ever consumes another fold's summary;
+  #   * the PROTECTED RECENT TAIL is `@protected_tail_turns` most recent turns. At the
+  #     moment the fold runs the turn being ASSEMBLED is the most recent turn — it has no
+  #     committed segment yet — so the tail costs `@protected_tail_turns - 1` committed
+  #     segments and the in-flight turn is the other one.
+  #
+  # Eligibility is expressed in whole TURNS, never in lines: a turn can append more than
+  # one line (a tool call and its result), and a fold that split one would put a call in
+  # the ledger without its result (§6). `views.turn_lens` is what makes that decidable.
+  @protected_tail_turns 2
+
+  defp foldable(views, lines) do
+    segments = segments(views, lines)
+
+    segments
+    |> Enum.drop(length(views.folds))
+    |> Enum.drop(-(@protected_tail_turns - 1))
+  end
+
+  # `llm_view` chunked into whole turns. `turn_lens` is written by every transcript write
+  # and is verified against the line count on read, so a blob whose boundaries do not
+  # reconcile degrades to one-line turns rather than to a boundary this build invented.
+  defp segments(views, lines) do
+    lens =
+      if Enum.sum(views.turn_lens) == length(lines),
+        do: views.turn_lens,
+        else: List.duplicate(1, length(lines))
+
+    {segs, _rest} =
+      Enum.map_reduce(lens, lines, fn len, rest ->
+        {Enum.take(rest, len), Enum.drop(rest, len)}
+      end)
+
+    segs
+  end
+
+  # ------------------------------------------------------------------------------------
+  # ADR-048 §6 LEVEL 1 — the deterministic, non-model, drop-with-marker fold (T218 / C2)
+  #
+  # PRE-TURN (before `seal/3`), OLDEST-eligible-span, WHOLE TURNS ONLY.
+  #
+  # ADR-048 §5 / C3 (`T219`) has now replaced C2's deterministic drop-with-marker REPLACEMENT
+  # TEXT with a model-written summary: `summarize_span/3` below is an ordinary governed
+  # `Samen.AI.complete/4` through `seal/3`, so exactly one extra provider call rides each
+  # folding turn, ahead of that turn's own call. **SELECTION is still deterministic** — which
+  # span folds is a pure function of `{the carried view state, the assembled size}` and no
+  # model influences it; only the replacement text is model-written, and the ledger entry says
+  # so (`"deterministic" => false`). A summarize call that REFUSES folds nothing at all and
+  # the run continues uncompacted (§5#4): compaction is not a laundering channel.
+  #
+  # §4 non-negotiable 4 holds by construction: the folded span is replaced in `llm_view`
+  # by ONE bounded marker, and `ui_view` GAINS one appended line saying a fold happened
+  # and loses nothing.
+  #
+  # D4 (§10 row 4, RATIFIED (a)) is enforced BY CONSTRUCTION: the fold's `:advance` sets
+  # ONLY `transcript`, `input_tokens_used` and `output_tokens_used`. `current_turn` and
+  # `tool_calls_used` are not in the map at all, so both the ceilings and the used-counters
+  # are byte-identical immediately before and after a fold. The tokens ARE billed —
+  # RATIFIED (a) says a fold's spend is real — and the deterministic bill is the bytes the
+  # fold read (the folded span) and the bytes it wrote (the marker).
+  # Ruling UXD-18's TWO CHECKPOINTS, at the top of every turn:
+  #
+  #   * checkpoint 1 — `apply_fold!/4` persists the entry `"proposed"` BEFORE the slow
+  #     provider call, i.e. before the TURN's own `complete/4`. Since C3 the §5 summarize
+  #     call sits EARLIER still, ahead of checkpoint 1 — a crash inside it therefore leaves
+  #     no ledger row and the replay legitimately re-derives, which is precisely the case
+  #     UXD-18 already sanctions below ("a crash BEFORE checkpoint 1 leaves no row");
+  #   * checkpoint 2 — the SAME transaction that advances the run cursor finalizes the
+  #     entry to `"done"` (`encode_transcript_finalizing/3-4`).
+  #
+  # A replay therefore lands here with the entry already on disk and REUSES it — it does
+  # not re-derive. The fold is a pure function of `{run_id, turn_index, view state}`, so
+  # a re-derivation would be invisible in the body; the `meta.replayed` stamp is what
+  # makes reuse refutable on the ledger itself instead of inferred from a call count.
+  # A crash BEFORE checkpoint 1 leaves no row, and that replay legitimately re-derives.
+  defp fold_context(%Run{} = run, scope, views, definition, tools, goal, lines, opts) do
+    case reusable_fold(views, run.current_turn + 1) do
+      nil -> derive_fold(run, scope, views, definition, tools, goal, lines, opts)
+      entry -> reuse_fold!(run, views, goal, entry, lines)
+    end
+  end
+
+  defp derive_fold(%Run{} = run, scope, views, definition, tools, goal, lines, opts) do
+    if context_tokens(definition, tools, goal, lines) > run.context_cutoff_tokens do
+      case fold_span(run, views, definition, tools, goal, lines) do
+        nil ->
+          {:ok, run, lines, views}
+
+        span ->
+          # D-05 (ADR-048 §8 `P8`, operator ruling D-05) — THE DURABLE CANCEL CHECK, and it
+          # is the LAST thing that happens before the tenant's folded conversation leaves
+          # for the provider. `cancel_requested?/1` RE-READS the run row (`reload!/1`): at
+          # the LEVEL 2 INLINE site a provider call has ALREADY returned, so a cancel the
+          # tenant issued DURING that call is durably on the row and is NOT visible on the
+          # in-memory `run` the turn boundary loaded — a check on that struct is vacuous
+          # here. RP-AG-8 is PRESERVED: the in-flight turn still completes and the run takes
+          # its terminal at the NEXT turn boundary; what stops is the EGRESS. The answer is
+          # the SAME honest shape a refused summarize already takes, so
+          # `note_compaction_refusal!/2` names it on the turn row under
+          # `safe_error_kind(:compaction_refused)` with the bounded reason "run_cancelled".
+          if cancel_requested?(run) do
+            {:ok, run, lines, refused(views, :run_cancelled)}
+          else
+            summarize_fold(run, scope, views, goal, lines, span, opts)
+          end
+      end
+    else
+      {:ok, run, lines, views}
+    end
+  end
+
+  # D-05 (ADR-048 §8 `P8`, operator ruling D-05) — the DURABLE half of the cancel flag,
+  # re-read from the run ROW on the same `run.id` through the loop's own `reload!/1` rather
+  # than hand-rolled as a second reader. NEVER the in-memory struct: the turn boundary in
+  # `loop/5` already read that value, so `run.cancel_requested_at != nil` spelled against
+  # the threaded struct can never be true at the LEVEL 2 INLINE site. It is the SAME RP-AG-8
+  # flag the turn boundary reads — `cancel_requested_at != nil` — never a narrower or
+  # differently-named one. `reload!/1`'s `ensure_selected` needs no widening: only `:org_id`
+  # and the vault-routed `:transcript` are non-default; `:cancel_requested_at` is a plain
+  # attribute the boundary already reads off the same reload.
+  defp cancel_requested?(%Run{} = run), do: reload!(run).cancel_requested_at != nil
+
+  # The SUMMARIZING fold itself, lifted out of `derive_fold/8`'s `span ->` arm UNCHANGED so
+  # that D-05's guard above it is one contiguous `if/else`. That is what lets sabotage 323
+  # remove the guard — the `if/else` plus the now-orphaned `cancel_requested?/1` it was the
+  # only caller of — and NOTHING else, while the file still compiles under
+  # `--warnings-as-errors` (leaving the predicate behind would trip the unused-private
+  # warning; an `if false do` shape would trip the always-same-result one).
+  defp summarize_fold(%Run{} = run, scope, views, goal, lines, span, opts) do
+    # `summarize_span/3` returns the summary ALREADY through §5#3's ingress path —
+    # `Secrets.redact/1` then `Ingress.sanitize/1` then the chokepoint allowlist — so
+    # there is no spelling of this call site that appends an unscrubbed binary.
+    case summarize_span(scope, span, opts) do
+      {:ok, summary} ->
+        # §5#6: the point fires on the span the summary has ALREADY been folded into,
+        # and BEFORE `apply_fold!/4` persists it — the only ordering in which `:block`
+        # can still mean "this fold does not happen".
+        folded = with_summary(span, summary)
+
+        case after_compaction_hook(Keyword.get(opts, :resolved_hooks, []), run, folded) do
+          :ok ->
+            apply_fold!(run, views, goal, folded)
+
+          # A hook REFUSED the fold (its own `{:block, _}`, or the fail-closed
+          # `:hook_error` an `{:edit, _}` at this point degrades to — §5#6 forbids
+          # edits outright). Same honest answer as a refused summarize.
+          {:block, kind, _reason} ->
+            {:ok, run, lines, refused(views, kind)}
+
+          # A hook STOPPED the run. The `with` in `execute_turn/4` routes this to
+          # `halt_run/4`, a real terminal — never a promoted partial answer.
+          {:halt, kind, reason} ->
+            {:halt, kind, reason, nil}
+        end
+
+      # The summarize call REFUSED or failed, or its summary did not survive the
+      # ingress path. §5's whole point is that compaction is not a laundering channel,
+      # so there is exactly one honest answer: the fold does not happen and the run
+      # continues UNCOMPACTED on the span it already had. Appending an unscrubbed — or
+      # un-obtained — summary anyway is the fail-OPEN reading this batch exists to make
+      # impossible. §5#5's bounded `:compaction_refused` carries WHICH refusal it was
+      # onto the turn row, so a refusal is never a silently shorter transcript.
+      {:error, reason} ->
+        {:ok, run, lines, refused(views, reason)}
+    end
+  end
+
+  # ADR-048 §5#1 — THE SUMMARIZE CALL. An ORDINARY governed `Samen.AI.complete/4`, sealed by
+  # `Samen.AI.Chokepoint.seal/3` like every other provider-bound byte in this loop, with the
+  # SAME `egress_opts/3` allowlist and therefore `grant_egress?: false` pinned LAST — a
+  # caller-supplied `grant_egress?: true` cannot re-open grant plaintext on the summarize path
+  # any more than it can on an ordinary turn. §5#1's "its input is already-masked history, so
+  # no new egress class opens" is honoured BY CONSTRUCTION: the span rides `:history`, the
+  # exact field prior turns re-enter through (re-scrubbed per §3.2a and allowlist-scanned per
+  # §3.2 step 3/4, every call), and the only authored bytes are the compile-time
+  # `summarizer_prompt/0` literal. No tool defs are offered — the summarizer selects nothing.
+  defp summarize_span(scope, span, opts), do: Compaction.summarize(scope, span.folded, opts)
+
+  # ADR-048 §5#6 — `:after_compaction`'s FIRST call site. It fires AFTER the summary has
+  # passed §5#3's ingress path and been folded into the span's `llm_view` lines, and BEFORE
+  # `apply_fold!/4` writes anything, so:
+  #
+  #   * a hook observes only GOVERNED bytes (post-redact, post-sanitize, allowlist-checked);
+  #   * `:block` is meaningful — nothing has been persisted yet, so "skip this fold" is a
+  #     real option and the run continues uncompacted (§5#5);
+  #   * `{:edit, _}` is refused by `Hook`'s closed `@accepts` (it is not in the set) and
+  #     `Hooks.refuse/1` turns it into the strongest refusal the point honours — a `:block`
+  #     tagged `:hook_error`. The host's payload is NEVER applied to the summary, which is
+  #     the one thing §5#6 forbids outright.
+  #
+  # The ctx is bounded and token-only like every other point's. It carries the SCRUBBED
+  # summary, because a hook that cannot see what was folded cannot narrow on it — and by
+  # construction those are the only bytes it can see.
+  defp after_compaction_hook(hooks, %Run{} = run, span) do
+    Hooks.dispatch(hooks, :after_compaction, %{
+      run_id: run.id,
+      agent: run.agent,
+      org_id: run.org_id,
+      turn_index: run.current_turn + 1,
+      seq: span.seq,
+      first_turn: span.first_turn,
+      last_turn: span.last_turn,
+      summary: span.marker
+    })
+  end
+
+  # ADR-048 §5#5 — the fold was REFUSED. The views are returned UNCHANGED (that is what
+  # "the run continues uncompacted" means: not a partial fold, not a dropped span) and the
+  # transient note rides them to the turn row, where `note_compaction_refusal!/2` records it.
+  # The note is NEVER persisted into the transcript blob: `encode_views/6` takes the four
+  # view fields by name and this is not one of them.
+  defp refused(views, reason), do: Map.put(views, :compaction_refusal, reason)
+
+  # The bounded, observable half of §5#5: a refused fold leaves a NAMED note on the turn row
+  # it would have folded for. The key is `safe_error_kind(:compaction_refused)` — routed
+  # through the closed enum on purpose, so removing the kind from `@error_kinds` degrades
+  # this note to `"unknown"` and the refusal stops being nameable (that is the mutation
+  # `nodes/C3I2/work/mutation-controls.md` M4 records). The value is the bounded reason the
+  # refusal carried, so `:pii_egress_refused`, `:unsafe_summary` and a hook's `:hook_error`
+  # stay distinguishable on the record.
+  defp note_compaction_refusal!(turn_row, views) do
+    case Map.get(views, :compaction_refusal) do
+      nil ->
+        turn_row
+
+      reason ->
+        meta =
+          (turn_row.meta || %{})
+          |> Map.put(
+            to_string(safe_error_kind(:compaction_refused)),
+            Hooks.bounded_reason(reason)
+          )
+          |> bounded_meta()
+
+        turn_row
+        |> Ash.Changeset.for_update(:decide, %{meta: meta})
+        |> Ash.update!(authorize?: false)
+    end
+  end
+
+  # The model-written summary REPLACES the deterministic marker in the span, in place: the
+  # marker sits at index `seq - 1` of `new_lines` (the `seq - 1` retained earlier markers
+  # precede it), so this substitution cannot move a neighbouring segment.
+  defp with_summary(span, summary) do
+    %{span | marker: summary, new_lines: List.replace_at(span.new_lines, span.seq - 1, summary)}
+  end
+
+  # The `find_or_reuse_turn/3` row-reuse pattern, one level down (§6's own citation): the
+  # ledger entry for THIS turn index, whatever checkpoint it stopped at.
+  defp reusable_fold(%{folds: folds}, turn_index) when is_list(folds) do
+    Enum.find(folds, fn
+      %{"turn_index" => ^turn_index, "status" => status} -> status in ["proposed", "done"]
+      _entry -> false
+    end)
+  end
+
+  defp reusable_fold(_views, _turn_index), do: nil
+
+  # REUSE, not re-derivation. Nothing is re-billed (the tokens were billed at checkpoint
+  # 1), no span is re-selected, and D4 holds trivially: the `:advance` map carries the
+  # transcript and nothing else — not `current_turn`, not `tool_calls_used`, not either
+  # token counter. The stamp is persisted at the MOMENT of reuse rather than at the
+  # commit, so a run that dies again still says on disk that its fold was replayed.
+  defp reuse_fold!(%Run{} = run, views, goal, entry, lines) do
+    replayed_entry =
+      Map.put(entry, "meta", Map.put(Map.get(entry, "meta") || %{}, "replayed", true))
+
+    folds = Enum.map(views.folds, fn e -> if e == entry, do: replayed_entry, else: e end)
+    views = %{views | folds: folds}
+
+    run =
+      run
+      |> Ash.Changeset.for_update(:advance, %{
+        transcript:
+          encode_views(
+            goal,
+            views.llm_view,
+            views.ui_view,
+            folds,
+            views.turn_lens,
+            views.pending
+          )
+      })
+      |> Ash.update!(authorize?: false)
+
+    {:ok, run, lines, views}
+  end
+
+  # SELECTION, kept apart from eligibility on purpose: oldest-first over the eligible
+  # turns, whole turns only, and the SMALLEST prefix whose removal brings the assembled
+  # context back under the watermark — the whole eligible span when no prefix can (a
+  # watermark below the protected tail's own size is not a reason to fold nothing).
+  defp fold_span(%Run{} = run, views, definition, tools, goal, lines) do
+    segments = segments(views, lines)
+    markers = length(views.folds)
+    eligible = foldable(views, lines)
+
+    if eligible == [] do
+      nil
+    else
+      kept_markers = Enum.take(lines, markers)
+      first_turn = 1 + Enum.sum(Enum.map(views.folds, &fold_covered/1))
+      total = length(eligible)
+
+      turns =
+        Enum.find(1..total//1, total, fn k ->
+          projected =
+            kept_markers ++
+              [fold_marker(markers + 1, first_turn, first_turn + k - 1)] ++
+              Enum.concat(Enum.drop(segments, markers + k))
+
+          context_tokens(definition, tools, goal, projected) <= run.context_cutoff_tokens
+        end)
+
+      marker = fold_marker(markers + 1, first_turn, first_turn + turns - 1)
+
+      %{
+        seq: markers + 1,
+        first_turn: first_turn,
+        last_turn: first_turn + turns - 1,
+        turns: turns,
+        marker: marker,
+        folded: Enum.concat(Enum.take(eligible, turns)),
+        new_lines: kept_markers ++ [marker] ++ Enum.concat(Enum.drop(segments, markers + turns)),
+        new_lens:
+          List.duplicate(1, markers + 1) ++
+            (segments |> Enum.drop(markers + turns) |> Enum.map(&length/1))
+      }
+    end
+  end
+
+  defp apply_fold!(%Run{} = run, views, goal, span) do
+    in_tokens = est_tokens(span.folded)
+    out_tokens = est_tokens([span.marker])
+
+    entry = %{
+      "seq" => span.seq,
+      "turn_index" => run.current_turn + 1,
+      # UXD-18 checkpoint 1: the entry is born `"proposed"`. Only the cursor-advance
+      # transaction may finalize it, so a `"done"` entry can never sit at a cursor that
+      # has not passed the fold's own turn index.
+      "status" => "proposed",
+      "level" => 1,
+      # ADR-048 §5: the body is MODEL-WRITTEN now — the summarize call above produced it —
+      # so the ledger says so. C2's drop-with-marker was `true`; nothing else reads this
+      # field, and the P10 arms refute exactly it.
+      "deterministic" => false,
+      "body" => span.marker,
+      "covered" => span.turns,
+      "lines" => length(span.folded),
+      "first_turn" => span.first_turn,
+      "last_turn" => span.last_turn,
+      "input_tokens" => in_tokens,
+      "output_tokens" => out_tokens,
+      "meta" => %{"replayed" => false}
+    }
+
+    folded_views = %{
+      views
+      | llm_view: span.new_lines,
+        ui_view: views.ui_view ++ [fold_note(span)],
+        folds: views.folds ++ [entry],
+        turn_lens: span.new_lens
+    }
+
+    run =
+      run
+      |> Ash.Changeset.for_update(:advance, %{
+        transcript:
+          encode_views(
+            goal,
+            folded_views.llm_view,
+            folded_views.ui_view,
+            folded_views.folds,
+            folded_views.turn_lens,
+            views.pending
+          ),
+        input_tokens_used: run.input_tokens_used + in_tokens,
+        output_tokens_used: run.output_tokens_used + out_tokens
+      })
+      |> Ash.update!(authorize?: false)
+
+    {:ok, run, span.new_lines, folded_views}
+  end
+
+  defp fold_covered(%{"covered" => n}) when is_integer(n) and n > 0, do: n
+  defp fold_covered(_entry), do: 1
+
+  defp fold_marker(seq, turn, turn), do: "[folded: turn #{turn} → fold ##{seq}]"
+
+  defp fold_marker(seq, first, last), do: "[folded: turns #{first}–#{last} → fold ##{seq}]"
+
+  defp fold_note(span) do
+    "[fold ##{span.seq}: turns #{span.first_turn}–#{span.last_turn} were folded out of " <>
+      "the model's working set. Nothing above was removed from this record.]"
+  end
+
+  # A deterministic size estimate over exactly the bytes the turn would seal: the authored
+  # goal prompt, the tenant goal, the re-entering history, and the static tool defs. A pure
+  # function of its arguments (§6's determinism rule) — no provider round-trip, no model,
+  # no clock. ~4 bytes per token is the standard coarse approximation; the watermark is a
+  # policy threshold, not a billing figure, and the real spend ceilings
+  # (`max_input_tokens`/`max_output_tokens`) are still enforced from measured usage.
+  defp context_tokens(definition, tools, goal, lines) do
+    est_tokens(
+      [definition.goal_prompt, goal | lines] ++ Enum.map(Tools.defs(tools), &def_bytes/1)
+    )
+  end
+
+  # The ONE deterministic estimator: the fold's own bill (§6 "the tokens are real and are
+  # billed") is measured with exactly the function that decides the watermark, so a fold
+  # can never bill on one scale and trigger on another.
+  defp est_tokens(texts) do
+    texts
+    |> Enum.map(fn text -> div(byte_size(text) + 3, 4) end)
+    |> Enum.sum()
+  end
+
+  defp def_bytes(schema) do
+    case Jason.encode(schema) do
+      {:ok, json} -> json
+      {:error, _} -> ""
     end
   end
 
@@ -1036,7 +1791,10 @@ defmodule Samen.AI.Agent do
           duration_ms: duration_ms,
           provider: bounded_provider(completion.provider),
           simulated: completion.simulated,
-          meta: bounded_meta(%{"replayed" => replayed?})
+          # MERGED, not replaced: ADR-048 §6 Level 2's `context_retries` counter is
+          # stamped on the `:proposed` row before the retry and must survive the
+          # finalize (the `commit_tool_turn!` idiom, applied here too).
+          meta: bounded_meta(Map.put(turn_row.meta || %{}, "replayed", replayed?))
         })
 
         run =
@@ -1044,7 +1802,7 @@ defmodule Samen.AI.Agent do
           |> Ash.Changeset.for_update(:advance, %{
             current_turn: turn_index,
             next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
-            transcript: encode_transcript(goal, lines ++ [completion.text]),
+            transcript: encode_transcript_finalizing(run, goal, lines ++ [completion.text]),
             input_tokens_used: run.input_tokens_used + in_tokens,
             output_tokens_used: run.output_tokens_used + out_tokens
           })
@@ -1542,7 +2300,7 @@ defmodule Samen.AI.Agent do
     run
     |> Ash.Changeset.for_update(:park, %{
       next_turn_at: park_deadline(approval),
-      transcript: encode_transcript(goal, lines, pending),
+      transcript: encode_transcript(run, goal, lines, pending),
       # The provider turn genuinely happened, so its tokens are billed. `tool_calls_used`
       # is NOT touched: nothing executed (A3's `executed?` rule, unchanged) — the
       # approved execution bills the one tool call it actually performs.
@@ -1677,7 +2435,7 @@ defmodule Samen.AI.Agent do
         case transcript_state(run) do
           {:ok, {goal, lines, _pending}} ->
             kind = turn_row.tool_kind || "write"
-            %{transcript: encode_transcript(goal, lines ++ ["tool_rejected: #{kind}"])}
+            %{transcript: encode_transcript(run, goal, lines ++ ["tool_rejected: #{kind}"])}
 
           _ ->
             %{}
@@ -1769,11 +2527,11 @@ defmodule Samen.AI.Agent do
     #    CLEARED by the 2-arity encoder — an expired proposal is never re-bindable.
     case transcript_state(run) do
       {:ok, {goal, lines, _pending}} ->
-        kind = (pending_kind(run) || "write")
+        kind = pending_kind(run) || "write"
 
         run
         |> Ash.Changeset.for_update(:advance, %{
-          transcript: encode_transcript(goal, lines ++ ["tool_expired: #{kind}"])
+          transcript: encode_transcript(run, goal, lines ++ ["tool_expired: #{kind}"])
         })
         |> Ash.update!(authorize?: false)
 
@@ -1820,18 +2578,33 @@ defmodule Samen.AI.Agent do
     case load_approval(approval_id_of(approval)) do
       {:ok, loaded} ->
         cond do
-          loaded.state != :approved -> {:error, :approval_not_approved}
-          loaded.org_id != run.org_id -> {:error, :approval_org_mismatch}
-          loaded.kind != WriteProposal.kind() -> {:error, :proposal_mismatch}
-          loaded.subject_ref != WriteProposal.subject_ref(turn_row.id) -> {:error, :proposal_mismatch}
-          not is_binary(loaded.decided_by) or loaded.decided_by == "" -> {:error, :approval_not_approved}
+          loaded.state != :approved ->
+            {:error, :approval_not_approved}
+
+          loaded.org_id != run.org_id ->
+            {:error, :approval_org_mismatch}
+
+          loaded.kind != WriteProposal.kind() ->
+            {:error, :proposal_mismatch}
+
+          loaded.subject_ref != WriteProposal.subject_ref(turn_row.id) ->
+            {:error, :proposal_mismatch}
+
+          not is_binary(loaded.decided_by) or loaded.decided_by == "" ->
+            {:error, :approval_not_approved}
+
           # The persisted decision IS the authority: the actor executing must be the party
           # the row records as having decided, and that party must be distinct from the
           # requester (the engine's own rule, re-asserted from the row rather than trusted
           # from the call).
-          loaded.decided_by == loaded.requested_by -> {:error, :not_authorized}
-          loaded.decided_by != approver_id -> {:error, :not_authorized}
-          true -> {:ok, loaded}
+          loaded.decided_by == loaded.requested_by ->
+            {:error, :not_authorized}
+
+          loaded.decided_by != approver_id ->
+            {:error, :not_authorized}
+
+          true ->
+            {:ok, loaded}
         end
 
       _ ->
@@ -1926,8 +2699,9 @@ defmodule Samen.AI.Agent do
       current_turn: turn_row.turn_index,
       next_turn_at: DateTime.utc_now(),
       # The pending proposal is CLEARED (the 2-arity encoder): an executed proposal must
-      # never be re-bindable by a second decision.
-      transcript: encode_transcript(goal, lines ++ new_lines),
+      # never be re-bindable by a second decision. This is also a cursor advance, so it
+      # is a UXD-18 checkpoint 2 and finalizes any `:proposed` fold entry with it.
+      transcript: encode_transcript_finalizing(run, goal, lines ++ new_lines),
       tool_calls_used: run.tool_calls_used + 1,
       input_tokens_used: run.input_tokens_used,
       output_tokens_used: run.output_tokens_used
@@ -2284,7 +3058,7 @@ defmodule Samen.AI.Agent do
         |> Ash.Changeset.for_update(:advance, %{
           current_turn: turn_index,
           next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
-          transcript: encode_transcript(turn.goal, turn.lines ++ turn.new_lines),
+          transcript: encode_transcript_finalizing(run, turn.goal, turn.lines ++ turn.new_lines),
           tool_calls_used: run.tool_calls_used + if(turn.executed?, do: 1, else: 0),
           input_tokens_used: run.input_tokens_used + in_tokens,
           output_tokens_used: run.output_tokens_used + out_tokens
@@ -2359,12 +3133,24 @@ defmodule Samen.AI.Agent do
   # own subject id (the Samen.Identity.Totp precedent). A shredded / missing / undecodable
   # transcript is fail-honest :transcript_unavailable — an erased run never keeps
   # executing on cached text.
-  defp transcript(%Run{} = run) do
-    case transcript_state(run) do
-      {:ok, {goal, lines, _pending}} -> {:ok, {goal, lines}}
-      {:error, reason} -> {:error, reason}
+  # ADR-048 §6 (C2): the SAME single reveal, returning the carried view state alongside
+  # the history — the fold needs `folds` (UXD-17's prior-fold exclusion) and `turn_lens`
+  # (whole-turns-only) at the top of every turn, and paying a second decrypt for them
+  # would be a second read of the same envelope for no reason.
+  defp transcript_with_views(%Run{transcript: %Samen.Masked{} = masked} = run) do
+    with {:ok, json} <- Samen.Vault.reveal(masked, repo!(), subject_id: run.id),
+         {:ok, {goal, _lines, _pending}} <- decode_transcript(json) do
+      views = decode_views(json)
+      # §4 non-negotiable 3: the loop threads `llm_view` and ONLY `llm_view`. Taking the
+      # history from the same map the fold reasons over is what keeps the fold's segment
+      # arithmetic and the sealed payload describing the same list.
+      {:ok, {goal, views.llm_view, views}}
+    else
+      _ -> {:error, :transcript_unavailable}
     end
   end
+
+  defp transcript_with_views(%Run{}), do: {:error, :transcript_unavailable}
 
   # A4: the same single reveal, returning the PENDING write proposal alongside the
   # history. The proposal's ARGS are the one place a write's argument VALUES are ever
@@ -2399,13 +3185,196 @@ defmodule Samen.AI.Agent do
     end
   end
 
-  defp encode_transcript(goal, lines), do: Jason.encode!(%{"goal" => goal, "lines" => lines})
+  @doc """
+  ADR-048 §4 (T217) — READER-SIDE-ONLY migration. Returns the run's `ui_view` and
+  `llm_view` from the same sealed blob `transcript_state/1` reads. No backfill and
+  no sealed-byte rewrite ever runs: a blob written before this change carries only
+  the legacy `lines` key, so both views fall back to `lines` when their own key is
+  absent. A blob written by the current `encode_transcript/2,3` already carries
+  both keys explicitly and this simply passes them through unchanged.
+  """
+  @spec transcript_views(Ash.Resource.record()) ::
+          {:ok, %{goal: String.t(), ui_view: [String.t()], llm_view: [String.t()]}}
+          | {:error, term()}
+  def transcript_views(%Run{} = run) do
+    case run.transcript do
+      %Samen.Masked{} = masked ->
+        case Samen.Vault.reveal(masked, repo!(), subject_id: run.id) do
+          {:ok, json} -> decode_transcript_views(json)
+          {:error, _reason} -> {:error, :transcript_unavailable}
+        end
 
-  # The 3-arity encoder is used ONLY by the park: it carries the pending proposal. Every
-  # other write uses the 2-arity form, which is exactly how an executed/rejected proposal
-  # gets CLEARED — a proposal can never be re-bindable after its decision.
-  defp encode_transcript(goal, lines, pending),
-    do: Jason.encode!(%{"goal" => goal, "lines" => lines, "pending" => pending})
+      _ ->
+        {:error, :transcript_unavailable}
+    end
+  end
+
+  defp decode_transcript_views(json) do
+    case Jason.decode(json) do
+      {:ok, %{"goal" => goal, "lines" => lines} = decoded}
+      when is_binary(goal) and is_list(lines) ->
+        if Enum.all?(lines, &is_binary/1) do
+          {:ok,
+           %{
+             goal: goal,
+             ui_view: Map.get(decoded, "ui_view", lines),
+             llm_view: Map.get(decoded, "llm_view", lines)
+           }}
+        else
+          {:error, :transcript_unavailable}
+        end
+
+      _ ->
+        {:error, :transcript_unavailable}
+    end
+  end
+
+  # ADR-048 §4 (D2, T217) + §6 (T218/C2): ONE JSON blob, sealed under the run's single
+  # DEK — never two tables with two retention specs. `ui_view` is APPEND-ONLY (exactly
+  # what the tenant saw); `llm_view` is the loop's compactable working set (`lines` is its
+  # legacy alias and stays byte-identical to it); `folds` is the compaction ledger;
+  # `turn_lens` is `llm_view`'s per-turn line count, which is what makes §6's WHOLE TURNS
+  # ONLY rule decidable — a turn can append more than one line (a tool call and its
+  # result) and a fold that split one would put a call in the ledger without its result.
+  #
+  # Every write carries the prior blob's `ui_view`, `folds` and boundaries FORWARD. Only
+  # the Level 1 fold diverges the two views, and a later turn's write must not silently
+  # re-flatten them — that would delete what the tenant was shown, which is the
+  # audit-integrity regression §4 exists to prevent.
+  defp encode_transcript(run, goal, lines), do: encode_transcript(run, goal, lines, :none)
+
+  defp encode_transcript(run, goal, lines, pending) do
+    {ui_view, turn_lens, folds} = carried_for_write(run, lines)
+    encode_views(goal, lines, ui_view, folds, turn_lens, pending)
+  end
+
+  # ADR-048 §6 / ruling UXD-18 CHECKPOINT 2. Identical to `encode_transcript/3-4` except
+  # that it finalizes every `:proposed` fold-ledger entry to `"done"`. Call it ONLY from
+  # inside a transaction that also advances the run cursor — that co-location IS the
+  # ruling: the fold entry and the cursor move together or neither moves, so no crash
+  # window can leave a finalized fold at an un-advanced cursor (the mirror of
+  # `commit_turn!`'s single-transaction rule for turn ROWS).
+  defp encode_transcript_finalizing(run, goal, lines, pending \\ :none) do
+    {ui_view, turn_lens, folds} = carried_for_write(run, lines)
+    encode_views(goal, lines, ui_view, finalize_folds(folds), turn_lens, pending)
+  end
+
+  defp finalize_folds(folds) when is_list(folds) do
+    Enum.map(folds, fn
+      %{"status" => "proposed"} = entry -> Map.put(entry, "status", "done")
+      entry -> entry
+    end)
+  end
+
+  defp finalize_folds(folds), do: folds
+
+  defp carried_for_write(run, lines) do
+    prior = carried_views(run)
+
+    {ui_view, turn_lens} =
+      cond do
+        not List.starts_with?(lines, prior.llm_view) ->
+          # Not a suffix append — only reachable if a caller threaded a `lines` that did
+          # not come from this run's own current blob. Degrade to the pre-C2 shape rather
+          # than invent a UI history.
+          {lines, List.duplicate(1, length(lines))}
+
+        length(lines) == length(prior.llm_view) ->
+          {prior.ui_view, prior.turn_lens}
+
+        true ->
+          appended = Enum.drop(lines, length(prior.llm_view))
+          {prior.ui_view ++ appended, prior.turn_lens ++ [length(appended)]}
+      end
+
+    {ui_view, turn_lens, prior.folds}
+  end
+
+  defp encode_views(goal, lines, ui_view, folds, turn_lens, pending) do
+    base = %{
+      "goal" => goal,
+      "lines" => lines,
+      "ui_view" => ui_view,
+      "llm_view" => lines,
+      "folds" => folds,
+      "turn_lens" => turn_lens
+    }
+
+    Jason.encode!(if pending in [:none, nil], do: base, else: Map.put(base, "pending", pending))
+  end
+
+  # The carried view state, read through the SAME single decrypt chokepoint
+  # `transcript_state/1` uses. A run with no transcript yet (create) or an unreadable one
+  # degrades to the empty carry — never to a fabricated history.
+  defp carried_views(nil), do: empty_views()
+
+  defp carried_views(%Run{transcript: %Samen.Masked{} = masked} = run),
+    do: reveal_views(masked, run.id)
+
+  # A vault-routed attribute is NOT handed back on the record an `:advance` writes — the
+  # plaintext must never ride home on the struct — so a run THIS process just wrote
+  # carries `%Ash.NotLoaded{}` here. Re-read that one row rather than degrade: silently
+  # dropping the carry would erase the fold ledger and the append-only `ui_view` on the
+  # very next write, which is exactly the deletion §4 forbids. The common path (a run
+  # read at the top of a turn) is already `%Samen.Masked{}` and never reaches here.
+  defp carried_views(%Run{id: id}) when is_binary(id) do
+    require Ash.Query
+
+    Run
+    |> Ash.Query.filter(id == ^id)
+    |> Ash.Query.ensure_selected([:transcript])
+    |> Ash.Query.limit(1)
+    |> Ash.read!(authorize?: false)
+    |> case do
+      [%Run{transcript: %Samen.Masked{} = masked}] -> reveal_views(masked, id)
+      _ -> empty_views()
+    end
+  end
+
+  defp carried_views(_run), do: empty_views()
+
+  defp reveal_views(masked, subject_id) do
+    case Samen.Vault.reveal(masked, repo!(), subject_id: subject_id) do
+      {:ok, json} -> decode_views(json)
+      {:error, _reason} -> empty_views()
+    end
+  end
+
+  defp decode_views(json) do
+    case Jason.decode(json) do
+      {:ok, %{"lines" => lines} = decoded} when is_list(lines) ->
+        if Enum.all?(lines, &is_binary/1) do
+          llm = Map.get(decoded, "llm_view", lines)
+
+          %{
+            llm_view: llm,
+            ui_view: Map.get(decoded, "ui_view", lines),
+            folds: Map.get(decoded, "folds", []),
+            turn_lens: carried_turn_lens(Map.get(decoded, "turn_lens"), llm),
+            pending: Map.get(decoded, "pending")
+          }
+        else
+          empty_views()
+        end
+
+      _ ->
+        empty_views()
+    end
+  end
+
+  defp empty_views,
+    do: %{llm_view: [], ui_view: [], folds: [], turn_lens: [], pending: nil}
+
+  # A blob written before C2 records no turn boundaries. The honest reader-side default is
+  # one line per turn: it never CLAIMS a boundary that was not recorded, and every turn
+  # this build itself wrote carries its real one.
+  defp carried_turn_lens(lens, llm) when is_list(lens) do
+    if Enum.all?(lens, &is_integer/1) and Enum.sum(lens) == length(llm),
+      do: lens,
+      else: List.duplicate(1, length(llm))
+  end
+
+  defp carried_turn_lens(_lens, llm), do: List.duplicate(1, length(llm))
 
   # ------------------------------------------------------------------------------------
   # Durable-cursor writes (kernel-only, the Approvals trusted-API precedent)
@@ -2432,7 +3401,7 @@ defmodule Samen.AI.Agent do
             # durability path for this. Shared by run/4 AND start/4 (both funnel through
             # this one function), so both modes now agree on what they persisted.
             hooks: opts |> Keyword.get(:hooks) |> List.wrap() |> Enum.map(&Atom.to_string/1),
-            transcript: encode_transcript(goal, []),
+            transcript: encode_transcript(nil, goal, []),
             next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds)
           },
           Map.new(budgets)

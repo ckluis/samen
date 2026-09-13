@@ -70,10 +70,30 @@ expand_path = Path.join([File.cwd!(), "priv", "drills", "expand_migrations"])
 # expand migration is the one that actually adds/removes the column here — this
 # affects only this drill's throwaway DB, never a real migrate/deploy path.
 stage_drill_migrations = fn source_dir, excluded_basenames ->
+  # D-10 fix: the old name (a per-BEAM-instance counter) was unique PER BEAM INSTANCE,
+  # not per machine — it restarted on every run and collided against leftovers from
+  # earlier runs (File.LinkError). Two create-and-own shapes, chosen by the caller:
+  #   - the orchestrator (pitr_gameday_sim.sh) creates+owns the dir with `mktemp -d`
+  #     (atomic, genuinely unique) and hands it in via DRIFTWOOD_DRILL_STAGING_DIR, so
+  #     its own trap can remove it on an OS-level interrupt the BEAM cannot trap;
+  #   - a direct `mix run` (no orchestrator) self-generates a name from the OS pid +
+  #     nanosecond time and creates it with File.mkdir! (raises if it already exists —
+  #     a pre-existing directory at the path is never silently reused).
   staged =
-    Path.join(System.tmp_dir!(), "driftwood_drill_migrations_#{System.unique_integer([:positive])}")
+    case System.get_env("DRIFTWOOD_DRILL_STAGING_DIR") do
+      dir when is_binary(dir) and dir != "" ->
+        dir
 
-  File.mkdir_p!(staged)
+      _ ->
+        path =
+          Path.join(
+            System.tmp_dir!(),
+            "driftwood_drill_migrations_#{System.pid()}_#{System.system_time(:nanosecond)}"
+          )
+
+        File.mkdir!(path)
+        path
+    end
 
   source_dir
   |> Path.join("*.exs")
@@ -255,28 +275,43 @@ case phase do
         "20260905090000_expand_add_settlement_note.exs"
       ])
 
-    Ecto.Migrator.run(Repo, drill_migrations_path, :up, all: true, log: false)
-    :ok = Driftwood.NonPiiSetup.register_all()
+    # D-10: the staging dir is removed on every exit path the BEAM itself can reach out
+    # of this branch — success (below, before halt) and any raised failure (rescue,
+    # which cleans up then re-raises the SAME exception so the failure signal is
+    # unchanged). An OS-level interrupt is NOT reachable here at all (no :sigint clause
+    # in System.trap_signal/3, and a SIGTERM kill gives no chance to run this rescue
+    # either) — that path is the bash orchestrator's trap in pitr_gameday_sim.sh,
+    # matching ci.sh's run_gen_probe wrapper (T107, repo CLAUDE.md).
+    try do
+      Ecto.Migrator.run(Repo, drill_migrations_path, :up, all: true, log: false)
+      :ok = Driftwood.NonPiiSetup.register_all()
 
-    # 2. Generate the PRODUCTION-SIZED dataset (thousands of loads/settlements across
-    #    several tenants). Committed — the pg_dump must capture it.
-    totals = DrillDataset.generate(Repo)
+      # 2. Generate the PRODUCTION-SIZED dataset (thousands of loads/settlements across
+      #    several tenants). Committed — the pg_dump must capture it.
+      totals = DrillDataset.generate(Repo)
 
-    # 3. Seed a real CDL-bearing DRIVER into the vault: the scalar pii_drv_cdl_number
-    #    ciphertext lands in Postgres (pii_vault), the wrapped DEK lands in the
-    #    EXTERNAL key dir. This is the subject the key-store-exclusion arm uses.
-    {:ok, cdl_token} =
-      Vault.store_field(subject_id, :pii_cdl, :cdl_number, driver_cdl, Repo)
+      # 3. Seed a real CDL-bearing DRIVER into the vault: the scalar pii_drv_cdl_number
+      #    ciphertext lands in Postgres (pii_vault), the wrapped DEK lands in the
+      #    EXTERNAL key dir. This is the subject the key-store-exclusion arm uses.
+      {:ok, cdl_token} =
+        Vault.store_field(subject_id, :pii_cdl, :cdl_number, driver_cdl, Repo)
 
-    # Sanity: live decrypt works BEFORE any backup/restore (proves non-vacuity).
-    {:ok, ^driver_cdl} = Vault.reveal(Masked.new(cdl_token, :cdl_number), Repo)
+      # Sanity: live decrypt works BEFORE any backup/restore (proves non-vacuity).
+      {:ok, ^driver_cdl} = Vault.reveal(Masked.new(cdl_token, :cdl_number), Repo)
 
-    IO.puts(
-      "DRILL migrate: dataset generated — #{totals.tenants} tenants, " <>
-        "#{totals.carriers} carriers, #{totals.loads} loads, #{totals.settlements} settlements"
-    )
+      IO.puts(
+        "DRILL migrate: dataset generated — #{totals.tenants} tenants, " <>
+          "#{totals.carriers} carriers, #{totals.loads} loads, #{totals.settlements} settlements"
+      )
 
-    IO.puts("DRILL migrate: seeded CDL-bearing driver subject=#{subject_id} cdl_token=#{cdl_token}")
+      IO.puts("DRILL migrate: seeded CDL-bearing driver subject=#{subject_id} cdl_token=#{cdl_token}")
+    rescue
+      e ->
+        File.rm_rf!(drill_migrations_path)
+        reraise e, __STACKTRACE__
+    end
+
+    File.rm_rf!(drill_migrations_path)
     halt.(0)
 
   "expand" ->

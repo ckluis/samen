@@ -24,8 +24,9 @@
 # Flags narrow the set — a FILTERED run certifies ONLY its subset; total
 # coverage still requires a full (unfiltered) run, which at 212 patches exceeds
 # the 600s single tool-call ceiling and so must be run BACKGROUNDED or in
-# `--app`/`--range` CHUNKS (see docs/adr/ADR-045 §4.2). Filters COMPOSE as an
-# intersection.
+# `--app`/`--range` CHUNKS (see docs/adr/ADR-045 §4.2). Different FLAGS compose
+# as an intersection (e.g. --app + --range); repeating the SAME flag is an
+# error — use two separate runs for two ranges.
 #   --app <name>            only patches whose APP: header == <name>
 #   --range <lo>-<hi>       only patches whose FILENAME number (the NNN in
 #   --from <lo> --to <hi>     NNN-slug.patch — stable, matches how we say
@@ -143,16 +144,29 @@ TOUCH_DESC=""
 TOUCH_SET="$WORK/touch_set"
 : > "$TOUCH_SET"
 LIST_ONLY=0
+SEEN_APP=0; APP_FIRST=""
+SEEN_RANGE=0; RANGE_FIRST=""
+SEEN_FROM=0; FROM_FIRST=""
+SEEN_TO=0; TO_FIRST=""
+SEEN_TOUCHING_FILE=0; TOUCHING_FILE_FIRST=""
+SEEN_CHANGED=0; CHANGED_FIRST=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --app)
       shift; [[ $# -gt 0 ]] || arg_err "--app requires a name"
-      FILTER_APP="$1"; shift ;;
+      if [[ $SEEN_APP -eq 1 ]]; then
+        arg_err "--app given twice: '$APP_FIRST' and '$1' — repeating the same flag is an error; run separate invocations for separate apps"
+      fi
+      FILTER_APP="$1"; APP_FIRST="$1"; SEEN_APP=1; shift ;;
     --range)
       shift; [[ $# -gt 0 ]] || arg_err "--range requires <lo>-<hi>"
       if [[ "$1" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+        if [[ $SEEN_RANGE -eq 1 ]]; then
+          arg_err "--range given twice: '$RANGE_FIRST' and '$1' — repeating the same flag is an error; use two separate runs for two ranges"
+        fi
         RANGE_LO="${BASH_REMATCH[1]}"; RANGE_HI="${BASH_REMATCH[2]}"; RANGE_ACTIVE=1
+        RANGE_FIRST="$1"; SEEN_RANGE=1
       else
         arg_err "--range wants <lo>-<hi> (e.g. --range 200-212), got: $1"
       fi
@@ -160,11 +174,17 @@ while [[ $# -gt 0 ]]; do
     --from)
       shift; [[ $# -gt 0 ]] || arg_err "--from requires a number"
       [[ "$1" =~ ^[0-9]+$ ]] || arg_err "--from wants a number, got: $1"
-      RANGE_LO="$1"; RANGE_ACTIVE=1; shift ;;
+      if [[ $SEEN_FROM -eq 1 ]]; then
+        arg_err "--from given twice: '$FROM_FIRST' and '$1' — repeating the same flag is an error; use two separate runs for two ranges"
+      fi
+      RANGE_LO="$1"; RANGE_ACTIVE=1; FROM_FIRST="$1"; SEEN_FROM=1; shift ;;
     --to)
       shift; [[ $# -gt 0 ]] || arg_err "--to requires a number"
       [[ "$1" =~ ^[0-9]+$ ]] || arg_err "--to wants a number, got: $1"
-      RANGE_HI="$1"; RANGE_ACTIVE=1; shift ;;
+      if [[ $SEEN_TO -eq 1 ]]; then
+        arg_err "--to given twice: '$TO_FIRST' and '$1' — repeating the same flag is an error; use two separate runs for two ranges"
+      fi
+      RANGE_HI="$1"; RANGE_ACTIVE=1; TO_FIRST="$1"; SEEN_TO=1; shift ;;
     --touching)
       shift
       [[ $# -gt 0 && "$1" != --* ]] || arg_err "--touching requires one or more repo-relative paths"
@@ -177,9 +197,13 @@ while [[ $# -gt 0 ]]; do
     --touching-file)
       shift; [[ $# -gt 0 ]] || arg_err "--touching-file requires a file"
       [[ -f "$1" ]] || arg_err "--touching-file: no such file: $1"
+      if [[ $SEEN_TOUCHING_FILE -eq 1 ]]; then
+        arg_err "--touching-file given twice: '$TOUCHING_FILE_FIRST' and '$1' — repeating the same flag is an error; run separate invocations for separate files"
+      fi
       grep -v '^[[:space:]]*$' "$1" >> "$TOUCH_SET" || true
       TOUCH_MODE=1
-      TOUCH_DESC="touching-file=$(basename "$1")"; shift ;;
+      TOUCH_DESC="touching-file=$(basename "$1")"
+      TOUCHING_FILE_FIRST="$1"; SEEN_TOUCHING_FILE=1; shift ;;
     --changed)
       shift
       changed_ref=""
@@ -193,6 +217,9 @@ while [[ $# -gt 0 ]]; do
       fi
       git -C "$REPO_ROOT" rev-parse --verify -q "$changed_ref" >/dev/null \
         || arg_err "--changed: not a valid git ref: $changed_ref"
+      if [[ $SEEN_CHANGED -eq 1 ]]; then
+        arg_err "--changed given twice: '$CHANGED_FIRST' and '$changed_ref' — repeating the same flag is an error; run separate invocations for separate refs"
+      fi
       # The changed set is the UNION of tracked modifications AND untracked-but-not-
       # ignored files. `git diff --name-only` lists ONLY tracked paths, so a batch that
       # ADDS files (a new lib module + the sabotages that target it) silently
@@ -204,7 +231,8 @@ while [[ $# -gt 0 ]]; do
       git -C "$REPO_ROOT" diff --name-only "$changed_ref" >> "$TOUCH_SET"
       git -C "$REPO_ROOT" ls-files --others --exclude-standard >> "$TOUCH_SET"
       TOUCH_MODE=1
-      TOUCH_DESC="changed=${changed_ref}+untracked" ;;
+      TOUCH_DESC="changed=${changed_ref}+untracked"
+      CHANGED_FIRST="$changed_ref"; SEEN_CHANGED=1 ;;
     --list|--dry-run)
       LIST_ONLY=1; shift ;;
     -h|--help)

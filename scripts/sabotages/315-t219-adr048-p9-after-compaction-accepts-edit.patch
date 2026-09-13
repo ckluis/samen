@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-048 §8 P9 — ":after_compaction cannot widen". Derived by C3V from the
+# obligation text (§5#6: the point "must not accept {:edit, _}", because an edit there is a
+# host rewriting governed transcript text AFTER §5#3's scrub). This patch WIDENS what the
+# point accepts so a hook's `{:edit, _}` return is APPLIED rather than refused: `:edit` is
+# added to `@accepts`'s `after_compaction` list, which is the single closed set
+# `Hook.accepts?/2` and `Hooks.interpret/3` both read.
+# NOT a deletion of the call site (that is P9's non-vacuity control, not its sabotage).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_summarizer_test.exs
+# MUST_FAIL: P9: RED — a hook returning {:edit, _} at :after_compaction is REFUSED (:hook_error) and NEVER applied: the point fires at a REAL call site and stays narrowing-only
+--- a/samen_core/lib/samen/ai/agent/hook.ex
++++ b/samen_core/lib/samen/ai/agent/hook.ex
+@@ -148,7 +148,7 @@
+   @accepts %{
+     session_start: [:halt],
+     before_completion: [:halt],
+-    after_compaction: [:block, :halt],
++    after_compaction: [:block, :edit, :halt],
+     after_tool_request: [:block, :halt],
+     before_tool_call: [:block, :edit, :halt],
+     after_tool_execution: [:halt],

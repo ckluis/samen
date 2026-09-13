@@ -1,0 +1,135 @@
+# SABOTAGE: P5 (ADR-048 §8, operator ruling D-04) — the kill-switch re-check at the LEVEL 2
+# RETRY boundary is REMOVED from `Samen.AI.Agent.complete_with_recovery/10`. This is the
+# sabotage-244 shape ONE LEVEL DOWN: 244 removes the re-check at the TURN boundary in
+# `loop/5`, so an operator kill landing between turn N and turn N+1 is silently ignored;
+# THIS removes it at the RETRY boundary, so a kill landing DURING the overflowing attempt
+# is silently ignored and Level 2 derives a fold and spends a SECOND provider call after
+# someone has already hit the emergency stop. The kill-switch is the emergency stop: a
+# compaction retry must not proceed after it is hit.
+#
+# Flips the named P5 red. Everything else stays GREEN, which is what makes the red mean
+# what it says: the P5 POSITIVE CONTROL (the byte-identical script WITHOUT the kill, in
+# which the retry DOES happen) still passes, and 244's own turn-boundary red
+# (`a kill flipped DURING turn 2 stops turn 3`) and its positive control still pass — so
+# the red fails because the RETRY-boundary re-check is gone, not because Level 2, the
+# turn boundary, or the switch itself broke. C2's Level 2 bound is untouched: the
+# `attempt <= @max_context_retries and context_overflow?(result)` clause and its
+# `derive_fold/8` + recursive call are left exactly as they are.
+#
+# Deletes ONE CONTIGUOUS `cond` clause and its comment, replacing it with a `# SABOTAGE`
+# comment, so the file still compiles under `--warnings-as-errors` (an `if false do`
+# shape would trip Elixir's always-same-result warning). Touches agent.ex ALONE.
+#
+# Re-anchored at HEAD `68eb340` (operator ruling D-14) after D-13's `over_budget/2` arm
+# shifted this clause's position; D-13's arm is deliberately preserved as unmodified
+# trailing context here, not deleted.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: P5 RED: a kill flipped DURING the overflowing attempt stops the Level 2 retry
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 206cb66..87ea36e 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1116,96 +1116,86 @@ defmodule Samen.AI.Agent do
+   #   3. if the single retry ALSO overflows, the caller turns it into LEVEL 3
+   #      (`:context_exhausted`) — never a second retry.
+   #
+   # The counter is stamped on the `:proposed` turn ROW before the retry leaves, so it
+   # survives whichever commit path finalizes the turn (plain, tool, feedback or failure)
+   # rather than living only on the happy path.
+   #
+   # D4 (§10 row 4, RATIFIED (a)): the inline fold goes through `derive_fold/6`, which
+   # spends `input_tokens_used`/`output_tokens_used` and NOTHING else — `current_turn` and
+   # `tool_calls_used` are not in its `:advance` map at all. The reuse arm of
+   # `fold_context/6` is deliberately bypassed here: a Level 2 fold is a NEW fold on an
+   # already-started turn, not a replay of one.
+   @max_context_retries 1
+ 
+   defp complete_with_recovery(
+          %Run{} = run,
+          scope,
+          definition,
+          tools,
+          goal,
+          lines,
+          views,
+          turn_row,
+          opts,
+          attempt
+        ) do
+     started = System.monotonic_time(:millisecond)
+ 
+     result =
+       Samen.AI.complete(
+         scope,
+         [definition.goal_prompt, goal],
+         %{},
+         egress_opts(opts, lines, Tools.defs(tools))
+       )
+ 
+     duration_ms = System.monotonic_time(:millisecond) - started
+     retries = attempt - 1
+ 
+     cond do
+-      # P5 (ADR-048 §8, operator ruling D-04) — the kill-switch is RE-CHECKED at the
+-      # RETRY boundary, before ANY retry work: before `derive_fold/8` and before the
+-      # recursive call. The kill-switch is the emergency stop; a compaction retry must not
+-      # proceed, and must not spend a second provider call, after someone has hit stop.
+-      # This is the SAME WIDENED notion the turn boundary uses (the host switch OR this
+-      # org's DURABLE per-definition row), never a narrower one — the sabotage-244 shape
+-      # ONE LEVEL DOWN. Returning `{:error, :killed}` in the result slot hands the caller's
+-      # existing `{:error, reason}` branch the work: the turn row is finalized `:failed`
+-      # with `error_kind: "killed"` and the run takes its terminal, so `run/4` answers
+-      # `{:error, :killed, run}` exactly as the turn boundary does. `:killed` is already a
+-      # member of the closed `@error_kinds` list, so nothing degrades to `:unknown`.
+-      # Sabotage 322 makes this clause refutable.
+-      attempt <= @max_context_retries and context_overflow?(result) and
+-          Breaker.killed?(run.org_id, run.agent) ->
+-        {run, lines, turn_row, {:error, :killed}, duration_ms, retries}
+-
++      # SABOTAGE (P5, ADR-048 §8, ruling D-04): the RETRY-boundary kill-switch re-check is
++      # REMOVED — the sabotage-244 shape ONE LEVEL DOWN. 244 removes the check at the TURN
++      # boundary in `loop/5`; this removes it at the RETRY boundary inside
++      # `complete_with_recovery/10`, so an operator kill landing DURING the overflowing
++      # attempt is silently ignored: Level 2 derives a fold and spends a SECOND provider
++      # call after someone has already hit the emergency stop.
+       # D-13 (ADR-048 §6/§8, operator ruling D-13) — the BUDGET is RE-CHECKED here too, and
+       # with it the triple is complete: the turn boundary guards budget, cancel and the
+       # kill-switch, and until now this boundary guarded only the last two (cancel one level
+       # down, inside `derive_fold/8`). Since C3 the Level 2 summarizing fold is a REAL
+       # governed provider call, and D4 is explicit that it SPENDS the run's token allowances
+       # and its wall-clock one — so a run that exhausted what the tenant set DURING the
+       # overflowing attempt would otherwise fold, retry, and notice only at the NEXT turn
+       # boundary. That is a knowing overrun. The state read here is DURABLE — the loop's own
+       # `reload!/1`, never the struct threaded in: a provider call has ALREADY returned at
+       # this site, so the spend is on the run ROW and the copy the turn boundary loaded is
+       # stale, the same fact recorded one level down about the cancel flag. The kind is
+       # `over_budget/2`'s OWN return, never a second notion of "over budget" derived beside
+       # it (the divergence §6 warns about) and never the symbolic run-state reason the turn
+       # boundary hands back from its own 3-tuple: that one is not a member of the closed
+       # `@error_kinds` list and would degrade to `:unknown` through `safe_error_kind/1`,
+       # while every atom `over_budget/2` can return is already a member. Returning it in the
+       # result slot hands the caller's existing `{:error, reason}` branch the work exactly as
+       # the clause above does: the turn row is finalized `:failed` with the bounded kind and
+       # the run takes its terminal. Ordered AFTER the emergency stop, which outranks a spend
+       # ceiling — the turn boundary orders the two the same way. The predicate is asked twice,
+       # once to decide and once for the kind, and the two cannot disagree: every counter it
+       # reads only ever grows within a run. Sabotage 324 makes this clause refutable.
+       attempt <= @max_context_retries and context_overflow?(result) and
+           over_budget(reload!(run), DateTime.utc_now()) != nil ->
+         {run, lines, turn_row, {:error, over_budget(reload!(run), DateTime.utc_now())},
+          duration_ms, retries}
+ 
+       attempt <= @max_context_retries and context_overflow?(result) ->
+         case derive_fold(run, scope, views, definition, tools, goal, lines, opts) do
+           {:ok, run, lines, views} ->
+             turn_row =
+               turn_row
+               |> note_compaction_refusal!(views)
+               |> note_context_retry!(attempt)
+ 
+             complete_with_recovery(
+               run,
+               scope,
+               definition,
+               tools,

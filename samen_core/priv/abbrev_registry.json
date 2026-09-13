@@ -388,6 +388,7 @@
       "sar": "SamenCore.Support.AutomationFixture.Run",
       "sxv": "SamenCore.Support.SuppressionFixture.ConsentEvent",
       "aac": "SamenCore.Support.AnalyticsFixture.CleanAggregate",
+      "afs": "Samen.AI.Agent.FoldSource",
       "csp": "SamenCore.Support.CrmScopeFixture.Pipeline",
       "sfd": "SamenCore.Support.FleetFixture.Directive",
       "smm": "SamenCore.Support.MailboxFixture.MailMessage",

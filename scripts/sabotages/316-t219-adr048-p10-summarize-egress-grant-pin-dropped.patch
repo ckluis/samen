@@ -1,0 +1,35 @@
+# SABOTAGE: ADR-048 §8 P10 — "INV-7 holds on the new surface": the summarize call must be an
+# ORDINARY governed egress with the SAME `egress_opts/3` `Keyword.take/2` allowlist and
+# `grant_egress?: false` pinned LAST (§5#1), which is what keeps a vault-seeded canary inside
+# a FOLDED span masked on the way to the provider. Derived by C3V from the obligation text,
+# NOT copied from C3R's `P10.planned.patch`.
+# The sabotage opens the grant lane on the summarize path two ways at once, so it is a real
+# INV-7 hole and not a positional cosmetic: (1) `:grant_egress?` is ADMITTED to the caller-opts
+# allowlist, and (2) the categorical pin becomes `Keyword.put_new/3`, which yields to a
+# caller-supplied `grant_egress?: true`. A caller can then re-open grant plaintext on ADR-048
+# §5's summarizer surface, which §4.4 excludes categorically.
+# NOT P1 (the ingress scrubs) and NOT P9 (the :after_compaction closed set).
+# APP: samen_core
+# TEST_FILES: test/ai/ai_prompt_masking_test.exs
+# MUST_FAIL: P10 — ADR-048 §5 summarizer egress: its compile-time-literal prompt is vt_-free (EG5) and a canary in the folded span reaches the provider MASKED
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -531,7 +531,7 @@ defmodule Samen.AI.Agent do
+   @spec egress_opts(keyword(), [String.t()], [map()]) :: keyword()
+   def egress_opts(opts, history, tool_defs \\ []) do
+     opts
+-    |> Keyword.take([:provider, :grounding, :meta, :env_reader])
++    |> Keyword.take([:provider, :grounding, :meta, :env_reader, :grant_egress?])
+     |> Keyword.put(:history, history)
+     |> Keyword.put(:tools, tool_defs)
+     # LAST, POSITIONALLY, and appended by `++` after a `delete` — not merely last-wins.
+@@ -541,8 +541,7 @@ defmodule Samen.AI.Agent do
+     # then unassertable by reading the list, which is the only way a reviewer or an
+     # ADR-048 §8 P10 arm can check it. The `delete` makes the key unique as well as final,
+     # so no later duplicate can shadow it either.
+-    |> Keyword.delete(:grant_egress?)
+-    |> Kernel.++(grant_egress?: false)
++    |> Keyword.put_new(:grant_egress?, false)
+   end
+ 
+   # ADR-048 §5#2 — the summarizer instruction is a COMPILE-TIME LITERAL owned by the loop,

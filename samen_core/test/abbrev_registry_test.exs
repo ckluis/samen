@@ -400,7 +400,11 @@ defmodule Samen.AbbrevRegistryTest do
                  # A5 (ADR-047 §6): the DURABLE per-{org, definition} agent kill switch
                  # that closes A2/A3's cross-tenant rate-trip blast radius,
                  # allocator-reserved.
-                 "akl" => "Samen.AI.Agent.Kill"
+                 "akl" => "Samen.AI.Agent.Kill",
+                 # C4 (ADR-048 §7.3): the pseudonym-keyed provenance index that lets the
+                 # withdrawal walk resolve its targets without decrypting a transcript,
+                 # allocator-reserved.
+                 "afs" => "Samen.AI.Agent.FoldSource"
                },
                "samen_web" => %{
                  "wmv" => "Samen.WebTest.Marketing.ConsentEvent",
@@ -565,7 +569,9 @@ defmodule Samen.AbbrevRegistryTest do
       # +3 T85 (spec §I2 M5): samen_web test host's Outreach mount `wso`/`woe`/`ows` = 408.
       # +2 A1 (ADR-047 §4.1/§6): samen_core host's agent-loop cursor pair `arn`/`atn`
       # (Samen.AI.Agent.{Run,Turn}), allocator-reserved = 410.
-      assert map_size(Reg.load()) == 442
+      # +1 C4 (ADR-048 §7.3): samen_core host's `afs` (Samen.AI.Agent.FoldSource), the
+      # pseudonym-keyed provenance index, allocator-reserved.
+      assert map_size(Reg.load()) == 443
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do

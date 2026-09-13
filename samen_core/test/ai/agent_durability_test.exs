@@ -788,4 +788,443 @@ defmodule Samen.AI.AgentDurabilityTest do
       assert Agent.bounded_meta(:not_a_map) == %{}
     end
   end
+
+  # ── P5 (ADR-048 §8, ruling D-04): the kill-switch is RE-CHECKED at the RETRY boundary ──
+  #
+  # RED-FIRST. Sabotage 244 removes the TURN-boundary re-check in `Samen.AI.Agent`'s loop.
+  # `P5` is that shape ONE LEVEL DOWN: inside `complete_with_recovery/10`, on the §6
+  # LEVEL 2 branch (`attempt <= @max_context_retries and context_overflow?(result)`), the
+  # kill-switch must be re-checked BEFORE any retry work — before `derive_fold/8` and
+  # before the recursive call. The kill-switch is the emergency stop: a compaction retry
+  # must not proceed, and must not spend a second provider call, after someone hit stop.
+  # Today that re-check does not exist (the function's own comment says it "is P5 and is
+  # deliberately NOT taken in this batch"), so the red below fails by RETRYING ANYWAY.
+  describe "P5: the kill-switch re-check at the Level 2 retry boundary" do
+    test "P5 RED: a kill flipped DURING the overflowing attempt stops the Level 2 retry — no second provider call, {:error, :killed, run}" do
+      s = new_scope()
+
+      # Attempt 1 overflows AND flips the operator kill in the same breath (the
+      # between-turns seam sabotage 244's red uses, one level down). Entry 2 is the retry
+      # that must NEVER be made.
+      script([
+        fn ->
+          Breaker.kill(:operator)
+          {:error, :context_overflow}
+        end,
+        {:final, "the Level 2 retry that must NEVER be made"}
+      ])
+
+      assert {:error, :killed, run} = run_scripted(Durable, s, "goal")
+
+      run = assert_terminal!(run, :failed)
+      assert run.error_kind == "killed"
+
+      # EXACTLY ONE provider attempt: the retry never left. The UNCONSUMED entry is what
+      # makes "no second provider call" refutable — a retry would have eaten it.
+      assert length(sent_segments()) == 1
+      assert Scripted.remaining() == [{:final, "the Level 2 retry that must NEVER be made"}]
+    end
+
+    test "P5 POSITIVE CONTROL: the SAME script WITHOUT the kill DOES retry — two provider attempts on one turn index and the run reaches its final answer" do
+      s = new_scope()
+
+      script([
+        {:error, :context_overflow},
+        {:final, "the Level 2 retry that must NEVER be made"}
+      ])
+
+      assert {:ok, %{answer: "the Level 2 retry that must NEVER be made", turns: 1}} =
+               run_scripted(Durable, s, "goal")
+
+      # C2's shipped Level 2 behaviour, unbroken: one original + one retry = 2 calls, on
+      # ONE turn index. This is what proves the red above fails because the re-check is
+      # MISSING, not because Level 2 is broken.
+      assert length(sent_segments()) == 2
+      assert Scripted.remaining() == []
+    end
+  end
+
+  # ── D-05 (ADR-048 §8 `P8`, operator ruling D-05): the DURABLE cancel flag is re-read ──
+  # ── immediately before the SUMMARIZING fold, at the LEVEL 2 INLINE `derive_fold/8` ────
+  #
+  # RED-FIRST. Sabotage 241 removes the TURN-boundary cancel re-check. D-05 is that shape
+  # one MECHANISM over and one LEVEL down: inside `derive_fold/8`, on the `span ->` arm,
+  # immediately BEFORE `summarize_span/3`. The harm the ruling names is the EGRESS, not the
+  # turn — a cancelled tenant's conversation must not be shipped to the provider FOR
+  # SUMMARIZATION — so RP-AG-8 is PRESERVED: the in-flight turn still completes and the run
+  # still takes its terminal at the NEXT turn boundary (ARM 3 is that preservation control).
+  #
+  # WHY THE SCENARIO LOOKS LIKE THIS (CF-17(a)). The Level 2 INLINE fold can only SUMMARIZE
+  # when the PRE-TURN fold on the same turn was REFUSED: `execute_turn/4` runs
+  # `fold_context/8` first, and a pre-turn fold that SUCCEEDS either brings the context back
+  # under the watermark (so the Level 2 gate is false) or folds the whole eligible span (so
+  # `fold_span/6` selects nothing at Level 2). Turn 3's script therefore refuses the PRE-TURN
+  # summarize call with a scripted provider error; the turn's own attempt 1 then overflows,
+  # and the Level 2 branch re-derives the SAME span and DOES summarize. That refusal is also
+  # how these arms tell the two `derive_fold/8` call sites apart: the turn row records the
+  # PRE-TURN refusal under `compaction_refused`, so the ONE ledger entry on that turn cannot
+  # have come through the pre-turn site.
+  #
+  # THE CHECK MUST READ DURABLE STATE. The turn boundary at `agent.ex:883` already read
+  # `run.cancel_requested_at` off the struct threaded into the turn, and the cancel here is
+  # issued DURING that turn's first provider call — so a Level 2 check written against the
+  # in-memory `run` can never be true and would leave ARM 1 red. The flag has to be re-read
+  # from the run row (`reload!/1`) at the moment of the check.
+
+  # Turn 1's bulk segment: the only thing over the watermark, and the span both folds select.
+  @d05_bulk String.duplicate("shipment manifest line. ", 100)
+  @d05_short "acknowledged"
+  # The model-written summary. Deliberately free of every `Ingress`/`Secrets` trigger so
+  # §5#3's ingress path is the identity on it and the ledger body is byte-comparable.
+  @d05_summary "Summary: the depot received seventeen crates on Tuesday."
+  # Watermark: above turn 1's assembled context (~20 tokens) and above turn 4's post-fold
+  # context (~51 tokens), below turns 2/3's (~620 tokens). Turn 3 is the ONLY folding turn.
+  @d05_cutoff 200
+  # Provider calls ARM 1 may make once D-05 ships: turn 1, turn 2, turn 3's PRE-TURN
+  # summarize (refused), turn 3 attempt 1 (overflow + cancel), turn 3's retry. The SIXTH —
+  # the Level 2 SUMMARIZE — is the one the check must stop.
+  @d05_arm1_calls 5
+  # ARM 2 adds that summarize call AND turn 4 (which does not fold: the summary shrank the
+  # context back under the watermark).
+  @d05_arm2_calls 7
+
+  # The ADR-048 §4 compaction LEDGER, read out of the one sealed transcript blob.
+  defp d05_folds(run) do
+    run = reload(run)
+    %Samen.Masked{} = masked = run.transcript
+    {:ok, json} = Samen.Vault.reveal(masked, TestRepo, subject_id: run.id)
+    Map.get(Jason.decode!(json), "folds", [])
+  end
+
+  # The LITERAL script. `cancel_entry` is the ONLY byte that differs between ARM 1 and
+  # ARM 2 — entries 5 and 6 are identical on purpose, so whether the Level 2 summarize
+  # consumes one of them cannot shift what the retry sees.
+  defp d05_script(cancel_entry) do
+    script([
+      {:continue, @d05_bulk},
+      {:continue, @d05_short},
+      {:error, :provider_error},
+      cancel_entry,
+      {:continue, @d05_summary},
+      {:continue, @d05_summary},
+      {:continue, @d05_short}
+    ])
+  end
+
+  defp d05_overflow, do: {:error, :context_overflow}
+
+  # The `agent_loop_test.exs` cancel-from-inside-the-provider-callback idiom: issued while
+  # turn 3's FIRST attempt is in flight, on the `state == :running` row, so the durable flag
+  # lands AFTER the turn boundary loaded its struct.
+  defp d05_cancelling_overflow(org_id) do
+    fn ->
+      [running] =
+        Run
+        |> Ash.Query.filter(org_id == ^org_id and state == :running)
+        |> Ash.read!(authorize?: false)
+
+      {:ok, _} = Agent.cancel(scope(org_id), running.id)
+      d05_overflow()
+    end
+  end
+
+  defp d05_run(s) do
+    run_scripted(Durable, s, "goal", budgets: [max_turns: 4, context_cutoff_tokens: @d05_cutoff])
+  end
+
+  # The three arms' VERBATIM names, bound once so the name ExUnit registers and the name
+  # the passing arms announce cannot drift apart. ExUnit's default formatter prints a name
+  # only for a FAILING test, so ARM 2 and ARM 3 — which must be seen PASSING BY NAME in the
+  # captured red — announce themselves, with the integers they measured, on their last line.
+  @d05_arm1_name "D-05 ARM 1 RED: a cancel issued DURING the overflowing first attempt means the Level 2 SUMMARIZE call never leaves — no summarization egress and no new fold for that turn"
+  @d05_arm2_name "D-05 ARM 2 POSITIVE CONTROL: the byte-identical script WITHOUT the cancel DOES summarize — a model-written fold is recorded at the LEVEL 2 INLINE site and the run makes strictly MORE provider calls"
+  @d05_arm3_name "D-05 ARM 3 PRESERVATION CONTROL (RP-AG-8): the cancelled run's in-flight turn still COMPLETES and the run takes its terminal at the NEXT turn boundary"
+
+  describe "D-05: the durable cancel flag is checked before the SUMMARIZING Level 2 fold" do
+    test @d05_arm1_name do
+      s = new_scope()
+      org_id = s.actor.org_id
+      d05_script(d05_cancelling_overflow(org_id))
+
+      assert {:error, :cancelled, run} = d05_run(s)
+
+      calls = length(sent_segments())
+
+      # THE RED. Strictly fewer provider calls than ARM 2's #{@d05_arm2_calls}: the ONE the
+      # cancelled run must not make is the Level 2 SUMMARIZE — the governed
+      # `Samen.AI.complete/4` that ships this tenant's folded conversation to the provider.
+      assert calls == @d05_arm1_calls,
+             "the SUMMARIZING fold's provider call went out AFTER the tenant cancelled: " <>
+               "#{calls} provider calls, expected #{@d05_arm1_calls}. D-05 requires the " <>
+               "DURABLE cancel flag to be re-read immediately before summarize_span/3 at " <>
+               "the LEVEL 2 INLINE derive_fold/8 site; a check on the in-memory run struct " <>
+               "is vacuous here because the turn boundary already read it."
+
+      assert calls < @d05_arm2_calls
+
+      # And nothing was folded: `summarize_span/3` was not called, so `apply_fold!/4` was
+      # not called and the ledger gains no entry for turn 3.
+      assert d05_folds(run) == [],
+             "a fold was recorded for a run that had already asked to stop — the Level 2 " <>
+               "INLINE fold summarized after cancel"
+
+      # The refusal is NAMED on the turn row, through the existing §5#5 machinery, with
+      # D-05's bounded reason — never a new terminal and never a silent skip.
+      [_t1, _t2, t3] = turn_rows(run)
+      assert t3.meta["compaction_refused"] == "run_cancelled"
+
+      # The unconsumed tail is what makes "the summarize call never left" refutable.
+      assert Scripted.remaining() == [{:continue, @d05_summary}, {:continue, @d05_short}]
+    end
+
+    test @d05_arm2_name do
+      s = new_scope()
+      d05_script(d05_overflow())
+
+      run = assert_honest_exhaustion!(d05_run(s))
+
+      calls = length(sent_segments())
+
+      # STRICTLY GREATER than ARM 1's. C2/C3's shipped Level 2 + summarizer behaviour,
+      # unbroken — this is what proves ARM 1 fails because the CHECK is missing rather than
+      # because nothing in this scenario ever summarizes (CF-17(a)).
+      assert calls == @d05_arm2_calls
+      assert calls > @d05_arm1_calls
+
+      # The fold IS recorded, it is MODEL-WRITTEN, and its body is the summarizer's text.
+      assert [fold] = d05_folds(run)
+      refute fold["deterministic"] == true
+      assert fold["body"] == @d05_summary
+      assert fold["turn_index"] == 3
+
+      # It came through the LEVEL 2 INLINE call site, not the PRE-TURN one: turn 3 carries
+      # the Level 2 retry counter, and its PRE-TURN fold was REFUSED (named on the same row)
+      # — so the one ledger entry on this turn cannot be the pre-turn fold's.
+      [_t1, _t2, t3, t4] = turn_rows(run)
+      assert t3.meta["context_retries"] == 1
+      assert t3.status == :done
+      # Turn 4 ran and did NOT fold — the summary shrank the context back under the
+      # watermark — so the ONE ledger entry above is turn 3's Level 2 fold and nothing else.
+      assert t4.status == :done
+      refute Map.has_key?(t4.meta, "context_retries")
+
+      IO.puts(
+        "\nPASSED — " <>
+          @d05_arm2_name <>
+          " | ARM 2 provider calls MEASURED = #{calls}; ARM 1's asserted count = " <>
+          "#{@d05_arm1_calls}; ARM 2 > ARM 1 = #{calls > @d05_arm1_calls}; " <>
+          "fold body = #{inspect(fold["body"])}; deterministic = #{inspect(fold["deterministic"])}"
+      )
+
+      assert Scripted.remaining() == []
+    end
+
+    test @d05_arm3_name do
+      s = new_scope()
+      org_id = s.actor.org_id
+      d05_script(d05_cancelling_overflow(org_id))
+
+      assert {:error, :cancelled, run} = d05_run(s)
+
+      run = assert_terminal!(run, :cancelled)
+      assert run.error_kind == "cancelled"
+      assert run.cancel_requested_at != nil
+
+      # "Stopping after the current step", never "stopped": turn 3 — the turn the cancel
+      # landed inside — is :done, and there is no turn 4. A build that "fixed" D-05 by
+      # stopping the whole turn flips THIS arm from green to red.
+      assert [
+               %{turn_index: 1, status: :done},
+               %{turn_index: 2, status: :done},
+               %{turn_index: 3, status: :done}
+             ] = turn_rows(run)
+
+      IO.puts(
+        "\nPASSED — " <>
+          @d05_arm3_name <>
+          " | terminal = {:error, :cancelled, run}; error_kind = #{inspect(run.error_kind)}; " <>
+          "cancel_requested_at set = #{run.cancel_requested_at != nil}; turn rows = 3, all :done"
+      )
+    end
+  end
+
+  # ── D-13 (ADR-048 §8, operator ruling D-13): the BUDGET is re-checked at the LEVEL 2 ───
+  # ── RETRY boundary — the last of the turn boundary's three guards to get there ────────
+  #
+  # RED-FIRST. The TURN boundary (`agent.ex:880` / `:904`) checks three things before every
+  # turn: budget (`over_budget/2`), cancel, and the kill-switch. The RETRY boundary inside
+  # `complete_with_recovery/10` checks the kill-switch (P5 / D-04, `agent.ex:1168`) and — one
+  # level down, inside `derive_fold/8` — cancel (D-05, `agent.ex:1357`). BUDGET IS THE ONE
+  # LEFT. So a run that has already exhausted its token budget still performs the Level 2
+  # summarizing fold — since C3 a real governed `Samen.AI.complete/4` shipping this tenant's
+  # conversation — and still spends the retry, noticing only at the NEXT turn boundary. That
+  # is a knowing overrun of a budget the tenant set. Today that re-check does not exist, so
+  # the RED below fails by FOLDING AND RETRYING ANYWAY.
+  #
+  # THE CHECK MUST READ DURABLE STATE — D-05's fact, one mechanism over. At the LEVEL 2 site
+  # a provider call has ALREADY returned, so counters written to the run ROW during that call
+  # are NOT on the `run` struct threaded into `complete_with_recovery/10`; a budget check
+  # spelled against that struct can never be true and would leave this red red.
+  #
+  # THE TERMINAL. The retry boundary has no hand-built 3-tuple of its own: it returns
+  # `{:error, reason}` in the result slot and `execute_turn/4`'s shared `{:error, reason}`
+  # branch finalizes the turn row `:failed` and takes `terminal!(run, :fail, kind)` — exactly
+  # what the shipped kill clause does. So the run state is `:failed` and the kind is the
+  # BOUNDED atom `over_budget/2` itself returned (`:max_input_tokens` here), NEVER
+  # `:budget_exhausted`: that is a run STATE, it is not an `@error_kinds` member, and it would
+  # degrade to `:unknown` through `safe_error_kind/1`.
+  #
+  # WHY THE SCENARIO LOOKS LIKE D-05'S. The Level 2 INLINE fold can only SUMMARIZE when the
+  # PRE-TURN fold on the same turn was REFUSED (CF-17(a)), so turn 3's script refuses the
+  # pre-turn summarize with a scripted provider error; the turn's own attempt 1 then overflows
+  # and the Level 2 branch re-derives the SAME span and DOES summarize. That is what makes
+  # "no summarizing fold" a measurement rather than a vacuous truth.
+
+  # Turn 1's bulk segment: the only thing over the watermark, and the span both folds select.
+  @d13_bulk String.duplicate("shipment manifest line. ", 100)
+  @d13_short "acknowledged"
+  # The model-written summary, free of every `Ingress`/`Secrets` trigger.
+  @d13_summary "Summary: the depot received seventeen crates on Tuesday."
+  @d13_answer "the depot is clear"
+  # Watermark: above turn 1's assembled context and above turn 4's post-fold context, below
+  # turns 2/3's. Turn 3 is the ONLY folding turn.
+  @d13_cutoff 200
+  # Provider calls the RED may make once D-13 ships: turn 1, turn 2, turn 3's PRE-TURN
+  # summarize (refused), turn 3 attempt 1 (overflow + the durable budget write). The FIFTH —
+  # the Level 2 SUMMARIZE — and the SIXTH — the Level 2 RETRY — are the two the re-check must
+  # stop. Unlike D-05's cancel, which stops only the EGRESS, an exhausted budget stops BOTH.
+  @d13_red_calls 4
+  # The CONTROL adds those two back AND turn 4, which does not fold (the summary shrank the
+  # context back under the watermark) and carries the FINAL.
+  @d13_control_calls 7
+
+  # The LITERAL script. `overflow_entry` is the ONLY byte that differs between the RED and
+  # the CONTROL.
+  defp d13_script(overflow_entry) do
+    script([
+      {:continue, @d13_bulk},
+      {:continue, @d13_short},
+      {:error, :provider_error},
+      overflow_entry,
+      {:continue, @d13_summary},
+      {:continue, @d13_short},
+      {:final, @d13_answer}
+    ])
+  end
+
+  defp d13_overflow, do: {:error, :context_overflow}
+
+  # The budget is pushed DURABLY, onto the run ROW, from inside turn 3's FIRST provider call —
+  # so it lands AFTER the turn boundary loaded its struct and BEFORE the retry boundary is
+  # reached. `:advance` already accepts `:input_tokens_used` (`agent/run.ex:245`). No clock and
+  # no `Process.sleep`: a wall-clock `deadline_seconds` race would be a flaky red.
+  defp d13_exhausting_overflow(org_id) do
+    fn ->
+      [running] =
+        Run
+        |> Ash.Query.filter(org_id == ^org_id and state == :running)
+        |> Ash.read!(authorize?: false)
+
+      running
+      |> Ash.Changeset.for_update(:advance, %{input_tokens_used: running.max_input_tokens + 1})
+      |> Ash.update!(authorize?: false)
+
+      d13_overflow()
+    end
+  end
+
+  defp d13_run(s) do
+    run_scripted(Durable, s, "goal", budgets: [max_turns: 4, context_cutoff_tokens: @d13_cutoff])
+  end
+
+  describe "D-13: the BUDGET is re-checked at the Level 2 retry boundary" do
+    test "D-13 RED: a budget exhausted DURING the overflowing first attempt stops the Level 2 retry — no summarizing fold, no second provider call" do
+      s = new_scope()
+      org_id = s.actor.org_id
+      d13_script(d13_exhausting_overflow(org_id))
+
+      result = d13_run(s)
+      calls = length(sent_segments())
+
+      # THE RED, measured FIRST so that a failure here can never be read as a setup error:
+      # the two provider calls an over-budget run must NOT make are the Level 2 SUMMARIZE
+      # (the governed `Samen.AI.complete/4` shipping this tenant's folded conversation) and
+      # the Level 2 RETRY itself.
+      assert calls == @d13_red_calls,
+             "the Level 2 summarizing fold and/or the Level 2 retry went out AFTER this " <>
+               "run's token budget was exhausted: #{calls} provider calls, expected " <>
+               "#{@d13_red_calls}. D-13 requires over_budget/2 to be RE-CHECKED as a cond " <>
+               "arm at the retry boundary inside complete_with_recovery/10, beside the " <>
+               "shipped kill-switch clause, against DURABLE run state — a check on the " <>
+               "in-memory run struct is vacuous here because the turn boundary already " <>
+               "read it."
+
+      assert calls < @d13_control_calls
+
+      # The unconsumed tail is what makes "neither call left" refutable: the summarize and
+      # the retry would have eaten one scripted entry each.
+      assert Scripted.remaining() == [
+               {:continue, @d13_summary},
+               {:continue, @d13_short},
+               {:final, @d13_answer}
+             ]
+
+      # The BOUNDED kind over_budget/2 returned for this scenario, in the result slot —
+      # never :budget_exhausted (a run STATE, not an @error_kinds member, and it would
+      # degrade to :unknown through safe_error_kind/1).
+      assert {:error, :max_input_tokens, run} = result
+
+      # And nothing was folded: `summarize_span/3` was not called, so `apply_fold!/4` was not
+      # called and the §4 ledger gains no entry for turn 3.
+      assert d05_folds(run) == [],
+             "a fold was recorded for a run that had already spent its token budget — the " <>
+               "Level 2 INLINE fold summarized past the budget the tenant set"
+
+      run = assert_terminal!(run, :failed)
+      assert run.error_kind == "max_input_tokens"
+
+      # The turn the overrun landed inside is finalized :failed by execute_turn/4's shared
+      # {:error, reason} branch — the same path the shipped kill clause takes — and there is
+      # no turn 4.
+      assert [
+               %{turn_index: 1, status: :done},
+               %{turn_index: 2, status: :done},
+               %{turn_index: 3, status: :failed}
+             ] = turn_rows(run)
+    end
+
+    test "D-13 POSITIVE CONTROL: the byte-identical script WITHIN budget DOES fold and retry — two provider attempts on one turn index and the run reaches its final answer" do
+      s = new_scope()
+      d13_script(d13_overflow())
+
+      # (b) THE RUN REACHES ITS FINAL ANSWER.
+      assert {:ok, %{answer: @d13_answer, turns: 4, run: run}} = d13_run(s)
+
+      calls = length(sent_segments())
+
+      # (a) THE NUMBER OF PROVIDER ATTEMPTS — strictly greater than the RED's. C2/C3's
+      # shipped Level 2 + summarizer behaviour, unbroken: this is what proves the red above
+      # fails because the re-check is MISSING, not because nothing in this scenario ever
+      # folds or retries.
+      assert calls == @d13_control_calls
+      assert calls > @d13_red_calls
+
+      # The fold IS recorded and it is MODEL-WRITTEN (the summarizer's own text).
+      assert [fold] = d05_folds(run)
+      refute fold["deterministic"] == true
+      assert fold["body"] == @d13_summary
+      assert fold["turn_index"] == 3
+
+      # TWO PROVIDER ATTEMPTS ON ONE TURN INDEX: turn 3 carries the Level 2 retry counter,
+      # and its PRE-TURN fold was REFUSED (named on the same row), so the one ledger entry on
+      # that turn came through the LEVEL 2 INLINE site and not the pre-turn one.
+      [_t1, _t2, t3, t4] = turn_rows(run)
+      assert t3.meta["context_retries"] == 1
+      assert t3.status == :done
+      assert t4.status == :done
+      refute Map.has_key?(t4.meta, "context_retries")
+
+      assert Scripted.remaining() == []
+    end
+  end
 end

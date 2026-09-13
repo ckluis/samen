@@ -1,0 +1,28 @@
+# SABOTAGE: ADR-048 §8 P12 / D3 — REMOVE THE CALL-SITE REFUSAL.
+# `Samen.AI.Embeddings.embed_field/6` no longer runs `assert_not_cross_run/1`, so a fold
+# summary's embedding call reaches pgvector unblocked and the vector LANDS. This is the
+# sabotage ADR-048 §8 P12 names in its own words: "remove the call-site refusal and let a
+# fold summary's embedding call reach pgvector (or any other cross-run memory/fact store)
+# unblocked". `Samen.AI.CrossRunWriteGuard` is left entirely intact — the module still
+# exists and still answers correctly; only the CALL SITE is gone, which is the point: a
+# guard nobody calls is a comment. Derived by C4V from the obligation text, not copied
+# from C4R's `P12.planned.patch` (which carries a BARE `@@` hunk header `git apply`
+# refuses even with --recount, per C4I3).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_withdrawal_test.exs
+# MUST_FAIL: P12: RED — a fold summary's embedding write toward pgvector is REJECTED BEFORE IT LANDS with {:error, :cross_run_write_refused}
+diff --git a/samen_core/lib/samen/ai/embeddings.ex b/samen_core/lib/samen/ai/embeddings.ex
+--- a/samen_core/lib/samen/ai/embeddings.ex
++++ b/samen_core/lib/samen/ai/embeddings.ex
+@@ -124,11 +124,6 @@ defmodule Samen.AI.Embeddings do
+           {:ok, [float()]} | {:error, term()}
+   def embed_field(scope, resource, source_id, field, text, opts) when is_atom(field) do
+     with {:ok, org_id} <- org_id_from(scope, opts),
+-         # ADR-048 §8 P12 / D3 — CATEGORICAL write-time refusal. Compaction output
+-         # (a fold summary, or any other derived-summary artifact) may never enter
+-         # pgvector or any other cross-run store. Refused HERE, before the embedder
+-         # is even resolved, so nothing can land and be cleaned up later.
+-         :ok <- assert_not_cross_run(opts),
+          :ok <- assert_embeddable(resource, field),
+          {:ok, {embedder, config}} <- embedder_for(opts),
+          {:ok, [vector]} <- Chokepoint.embed(embedder, config, [text], chokepoint_opts(opts)) do

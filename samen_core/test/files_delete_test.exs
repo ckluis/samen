@@ -48,7 +48,7 @@ defmodule Samen.FilesDeleteTest do
     Samen.Kms.FileBacked.simulate_outage(false)
     Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
     on_exit(fn -> Samen.Kms.FileBacked.simulate_outage(false) end)
-
+    Samen.Kms.FileBacked.init!()
     root = Path.join(System.tmp_dir!(), "files_delete_test_#{System.unique_integer([:positive])}")
     Elixir.File.rm_rf!(root)
     on_exit(fn -> Elixir.File.rm_rf!(root) end)

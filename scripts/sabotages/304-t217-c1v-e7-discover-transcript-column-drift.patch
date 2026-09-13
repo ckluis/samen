@@ -1,0 +1,28 @@
+# SABOTAGE: ADR-048 §9 E7 — discover_transcript/1 stops re-running byte-identical to
+# its pre-C1 baseline once the dual-view transcript lands. Reports the LOGICAL pii
+# attribute name (`attr.name`, "transcript") instead of the materialized physical
+# column (`attr.source`, "pii_arn_transcript") — a plausible naming-drift regression
+# a real change to the discovery/reporting path could introduce, distinct from P11's
+# sabotage (which persists two separate residues instead of drifting one column name).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_dual_view_test.exs
+# MUST_FAIL: E7: RED — discover_transcript/1 must stay byte-identical to the pre-C1 baseline once the dual-view transcript lands (ADR-048 §9)
+diff --git a/samen_core/lib/samen/erasure/completeness.ex b/samen_core/lib/samen/erasure/completeness.ex
+index 06fba42..1a6a998 100644
+--- a/samen_core/lib/samen/erasure/completeness.ex
++++ b/samen_core/lib/samen/erasure/completeness.ex
+@@ -199,7 +199,13 @@ defmodule Samen.Erasure.Completeness do
+       %{
+         resource: resource,
+         table: table(resource),
+-        column: to_string((attr && (attr.source || attr.name)) || :transcript),
++        # SABOTAGE (ADR-048 §9 E7): discover_transcript/1 stops re-running byte-identical.
++        # Reports the LOGICAL attribute name instead of the materialized physical
++        # column (drops the `attr.source` preference) — "pii_arn_transcript" drifts to
++        # "transcript", so a caller that pins the physical column shape (the E7
++        # byte-identical baseline) sees it change even though nothing about the
++        # underlying schema actually moved.
++        column: to_string((attr && attr.name) || :transcript),
+         vault: field.vault
+       }
+     end

@@ -3,7 +3,9 @@ defmodule Samen.AI.Agent.Run do
   `Samen.AI.Agent.Run` — the durable agent-run cursor (ADR-047 §4.1, batches A1+A2).
 
   One row per agent run: the AshStateMachine lifecycle (`queued → running →
-  {succeeded, failed, cancelled, budget_exhausted}`, plus A4's propose-then-approve park
+  {succeeded, failed, cancelled, budget_exhausted, context_exhausted}` — ADR-048 §6's
+  Level 3 terminal is its own state, not a re-labelled budget exhaustion — plus A4's
+  propose-then-approve park
   `running → awaiting_approval → {running, rejected}` — ADR-047 §5.3), the
   turn cursor (`current_turn`), the resolved fail-honest budgets and their consumption
   counters, and the durable cancel flag (`cancel_requested_at`) `Samen.AI.Agent.cancel/2`
@@ -60,6 +62,11 @@ defmodule Samen.AI.Agent.Run do
       transition(:fail, from: [:queued, :running, :awaiting_approval], to: :failed)
       # Exhaustion is its OWN honest terminal state (never dressed as :succeeded — §6).
       transition(:exhaust, from: :running, to: :budget_exhausted)
+      # ADR-048 §6 Level 3: outgrowing the context window is a DIFFERENT fact from
+      # spending the allowance, so it gets its own transition and its own terminal —
+      # never a re-labelled :budget_exhausted and never a :failed (the ENGINE did not
+      # fail; the context did not fit).
+      transition(:context_exhaust, from: :running, to: :context_exhausted)
       # A cancel can land before the first turn ever runs (queued), between turns, or
       # while the run is PARKED on a human decision (A4 — `Samen.AI.Agent.cancel/2`
       # withdraws the pending approval in the same breath).
@@ -121,7 +128,12 @@ defmodule Samen.AI.Agent.Run do
           # precedent), so widening this enum needs no migration and no schema.dict change.
           :rejected,
           # A5: the proposal's deadline lapsed undecided (see the `:expire` transition).
-          :expired
+          :expired,
+          # ADR-048 §6 Level 3 (T218): the run outgrew its context window and nothing was
+          # eligible to fold. Terminal, honest, and DISTINCT from :budget_exhausted — an
+          # operator health surface that cannot tell the two apart is useless. Same plain
+          # text column, so widening this enum needs no migration.
+          :context_exhausted
         ]
       ]
     )
@@ -152,6 +164,12 @@ defmodule Samen.AI.Agent.Run do
     attribute(:max_input_tokens, :integer, public?: true, allow_nil?: false)
     attribute(:max_output_tokens, :integer, public?: true, allow_nil?: false)
     attribute(:deadline_seconds, :integer, public?: true, allow_nil?: false)
+
+    # ADR-048 §6's context WATERMARK — recorded on the row for the same reason the five
+    # spend ceilings are: the durable TurnWorker resumes from the row, so a per-run
+    # override has to survive the worker boundary. Not a spend ceiling and deliberately
+    # not part of `Samen.AI.Agent.over_budget/2`.
+    attribute(:context_cutoff_tokens, :integer, public?: true, allow_nil?: false)
 
     # Consumption counters (summed from `%Samen.AI.Completion{}.usage` per turn).
     attribute(:tool_calls_used, :integer, public?: true, allow_nil?: false, default: 0)
@@ -210,7 +228,8 @@ defmodule Samen.AI.Agent.Run do
         :max_tool_calls,
         :max_input_tokens,
         :max_output_tokens,
-        :deadline_seconds
+        :deadline_seconds,
+        :context_cutoff_tokens
       ])
     end
 
@@ -333,6 +352,17 @@ defmodule Samen.AI.Agent.Run do
       change(transition_state(:budget_exhausted))
     end
 
+    # ADR-048 §6 Level 3: the context window was outgrown with nothing left to fold. The
+    # shape is `:exhaust`'s deliberately — an explicit terminal state with a bounded
+    # error_kind, NEVER a promotion of the last turn — but the STATE differs, because the
+    # two exhaustions are different facts.
+    update :context_exhaust do
+      accept([:error_kind])
+      require_atomic?(false)
+      change(set_attribute(:next_turn_at, nil))
+      change(transition_state(:context_exhausted))
+    end
+
     update :cancel do
       accept([])
       require_atomic?(false)
@@ -391,6 +421,20 @@ defmodule Samen.AI.Agent.Run do
         end
       end)
     end
+  end
+
+  # ADR-048 §7.3 (C4) — the PSEUDONYM-KEYED PROVENANCE INDEX is projected out of the fold
+  # ledger at the single accepted transcript-persistence chokepoint, so a fold can never
+  # arrive through a write path that skips the index. Deliberately a resource-level change
+  # rather than another clause inside `:advance`: EVERY accepted transcript write
+  # (`:start`, `:advance`, `:park`, `:resume`, `:reject`) is covered by construction, and
+  # the run row keeps exactly ONE sealed body — the index rows live in their own table
+  # (`Samen.AI.Agent.FoldSource`), never as a second `pii_attribute` here.
+  changes do
+    change(
+      fn changeset, _context -> Samen.AI.Agent.FoldSource.index_change(changeset) end,
+      on: [:create, :update]
+    )
   end
 
   oban do

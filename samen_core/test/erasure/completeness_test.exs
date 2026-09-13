@@ -49,8 +49,18 @@ defmodule Samen.Erasure.CompletenessTest do
 
   defp derived_specs, do: Erasure.default_specs(resources: @clean)
 
+  # ADR-048 §7.3 (C4): `derived_summary` JOINED `check/1`'s HARD non-vacuity floor, so a
+  # resource set carrying no vault-routed transcript surface now fails closed BEFORE any
+  # per-class arm is judged. Every `check/1` below therefore runs over a set that includes
+  # the transcript-bearing `Samen.AI.Agent.Run` — the same shape a real host has — with the
+  # retention arm that covers it. The fixture lists themselves stay transcript-free so the
+  # discovery-difference arm below can still measure the class BY ITS ABSENCE.
+  defp with_transcript(resources), do: [Samen.AI.Agent.Run | resources]
+
   defp check(resources, extra \\ []) do
     specs = derived_specs()
+    resources = with_transcript(resources)
+    retention = Erasure.default_specs(resources: resources).retention_specs
 
     Completeness.check(
       Keyword.merge(
@@ -58,6 +68,7 @@ defmodule Samen.Erasure.CompletenessTest do
           resources: resources,
           bidx_specs: specs.blind_index_erasure_specs,
           file_specs: specs.file_erasure_specs,
+          retention_specs: retention,
           skip_bag_guard?: true
         ],
         extra
@@ -242,12 +253,14 @@ defmodule Samen.Erasure.CompletenessTest do
   # ======================================================================
 
   defp check_with_attachment(file_specs) do
-    specs = Erasure.default_specs(resources: @with_attachment)
+    resources = with_transcript(@with_attachment)
+    specs = Erasure.default_specs(resources: resources)
 
     Completeness.check(
-      resources: @with_attachment,
+      resources: resources,
       bidx_specs: specs.blind_index_erasure_specs,
       file_specs: file_specs || specs.file_erasure_specs,
+      retention_specs: specs.retention_specs,
       skip_bag_guard?: true
     )
   end
@@ -394,5 +407,172 @@ defmodule Samen.Erasure.CompletenessTest do
              )
 
     assert Enum.any?(violations2, &(&1 =~ "UNREACHED vault-routed transcript"))
+  end
+  # ======================================================================
+  # CLASS (f) — DERIVED-SUMMARY segments (ADR-048 §7.3, batch C4)
+  # ======================================================================
+
+  @tag :derived_summary_nonvacuity
+  test "NON-VACUITY: the derived_summary class DECLARES what it expects to find — zeroing its scope makes check/1 FAIL, never pass at count 0 (ADR-048 §7.3)" do
+    agent_run = Samen.AI.Agent.Run
+
+    # ------------------------------------------------------------------
+    # (a) THE CLASS IS NON-EMPTY ON A REAL RESOURCE SET.
+    # This half is what a scope-zeroing edit breaks: neuter the ONE traversal the class
+    # rides (`discover_transcript/1`) or its projection and this assertion fails, which is
+    # the whole point — a guard whose scope is derived from the thing it guards must be
+    # unable to be silently zeroed (directive §6).
+    # ------------------------------------------------------------------
+    residues = Completeness.discover(resources: with_transcript(@clean))
+
+    assert [ds] = residues.derived_summary,
+           "the derived_summary class must discover the agent-run fold-ledger surface — " <>
+             "an EMPTY enumeration is the vacuity this class exists to refuse"
+
+    assert ds.resource == agent_run
+    assert ds.table == "ai_agent_run"
+    assert ds.column == "pii_arn_transcript"
+    assert ds.index_table == "ai_agent_fold_source"
+
+    # It rides the SAME arm as the transcript class — one traversal, two reported classes.
+    assert length(residues.derived_summary) == length(residues.transcript)
+
+    assert {:ok, report} = check(@clean)
+    assert report.derived_summary.count == 1
+    assert report.derived_summary.columns == ["ai_agent_run.pii_arn_transcript"]
+    assert report.derived_summary.arm_wired
+
+    # ------------------------------------------------------------------
+    # (b) AT COUNT ZERO THE GATE FAILS CLOSED — it does NOT go green.
+    # The other two hard classes are satisfied here on purpose, so the ONLY thing that can
+    # produce this error is the new class's own floor. Before C4 this same resource set
+    # returned {:ok, _} with `transcript: []` — a class that passes at count zero is not a
+    # gate (nodes/C4R/work/nonvacuity.md).
+    # ------------------------------------------------------------------
+    specs = derived_specs()
+
+    zeroed =
+      Completeness.check(
+        resources: @clean,
+        bidx_specs: specs.blind_index_erasure_specs,
+        file_specs: specs.file_erasure_specs,
+        skip_bag_guard?: true
+      )
+
+    assert zeroed == {:error, {:no_residues_discovered, :derived_summary}},
+           "a resource set with NO derived-summary residue must fail closed on the §7.3 " <>
+             "floor, never pass at count 0 — got #{inspect(zeroed)}"
+
+    # And the discovery really is empty there (so (b) is failing for the reason claimed,
+    # not because some other class collapsed).
+    assert Completeness.discover(resources: @clean).derived_summary == []
+  end
+
+  @tag :derived_summary_nonvacuity
+  test "REFUTABLE: with the §7.3 withdrawal arm UNWIRED the derived-summary residue is named UNREACHED; with it wired it passes (control)" do
+    # POSITIVE CONTROL — the live arm (Compaction.withdraw/2 + FoldSource.withdraw_subject/3).
+    assert {:ok, report} = check(@clean)
+    assert report.derived_summary.arm_wired
+    assert report.derived_summary.count == 1
+
+    # RED half: model the arm being deleted. A coverage assertion that cannot fail asserts
+    # nothing (the E7 rule), so the class is injectable exactly like the storage_key blob
+    # predicate and the object-bag guard.
+    assert {:error, {:incomplete, violations, red_report}} =
+             check(@clean, derived_summary_arm_fun: fn -> false end)
+
+    refute red_report.derived_summary.arm_wired
+
+    assert Enum.any?(
+             violations,
+             &(&1 =~ "UNREACHED derived-summary segments" and &1 =~ "pii_arn_transcript" and
+                 &1 =~ "ai_agent_fold_source")
+           )
+  end
+
+  # ======================================================================
+  # CLASS (f) APPLICABILITY — the two arms of the C4I4 / Q-01 ruling
+  #
+  # The §7.3 floor stays HARD; only its SCOPE became explicit. The scope is read from the
+  # HOST's configured `:ash_domains` (does this host mount `Samen.AI.Domain` at all), NOT
+  # from the transcript attribute the class discovers — a predicate derived from the thing
+  # it guards could be silently zeroed by deleting that thing, which is directive §6's
+  # defect in its purest form.
+  #
+  # Arm (a) is the load-bearing one: it proves the predicate is not itself an escape hatch.
+  # Mutate `ai_plane_mounted?/1` to always-false and arm (a) MUST fail by name.
+  # ======================================================================
+
+  @tag :derived_summary_applicability
+  test "ARM (a): a host that DOES mount the AI plane and discovers ZERO derived_summary residues still HARD-FAILS (the applicability predicate is not an escape hatch)" do
+    specs = derived_specs()
+
+    # The host mounts the AI plane — declared STRUCTURALLY, from the host domain list,
+    # exactly the way driftwood's own `config/config.exs` declares it.
+    ai_host = [domains: [Samen.AI.Domain]]
+
+    # ...and this resource set carries NO transcript surface, so the class discovers zero.
+    assert Completeness.discover([resources: @clean] ++ ai_host).derived_summary == [],
+           "the fixture set must discover zero derived_summary residues for this arm to " <>
+             "be measuring the floor at count 0"
+
+    # The other two hard classes are satisfied on purpose, so the ONLY thing that can
+    # produce this error is the §7.3 floor itself.
+    result =
+      Completeness.check(
+        [
+          resources: @clean,
+          bidx_specs: specs.blind_index_erasure_specs,
+          file_specs: specs.file_erasure_specs,
+          skip_bag_guard?: true
+        ] ++ ai_host
+      )
+
+    assert result == {:error, {:no_residues_discovered, :derived_summary}},
+           "a host that MOUNTS the AI plane and discovers zero derived-summary residues " <>
+             "must still HARD-FAIL — scoping the floor to AI-mounting hosts must not turn " <>
+             "it into an unguarded escape hatch (nodes/C4R/work/nonvacuity.md STANDS) — " <>
+             "got #{inspect(result)}"
+
+    # POSITIVE CONTROL — same predicate, same host, a set that DOES carry the surface
+    # passes and is reported APPLICABLE. Without this the arm above could be passing
+    # because everything is broken rather than because the floor fired.
+    assert {:ok, report} = check(@clean)
+    assert report.derived_summary.applicable
+    assert report.derived_summary.count == 1
+  end
+
+  @tag :derived_summary_applicability
+  test "ARM (b): a host that does NOT mount the AI plane passes, with derived_summary REPORTED not-applicable (never a silent skip)" do
+    specs = derived_specs()
+
+    # A host whose `:ash_domains` carry no AI plane — demo/pawchart/samen_web and every
+    # `mix samen.gen.app`-generated app are exactly this shape.
+    assert {:ok, report} =
+             Completeness.check(
+               resources: @clean,
+               domains: [SamenCore.Support.Crm],
+               bidx_specs: specs.blind_index_erasure_specs,
+               file_specs: specs.file_erasure_specs,
+               skip_bag_guard?: true
+             )
+
+    assert report.derived_summary.count == 0
+
+    refute report.derived_summary.applicable,
+           "the report must carry the class's applicability so the mix task can REPORT the " <>
+             "skip — a bare count of 0 cannot tell a reader whether the class was scoped " <>
+             "out or silently broken"
+
+    # And the skip is SCOPE, not blindness: the very same resource set on an AI-mounting
+    # host fails closed (arm (a)'s property, asserted here as this arm's own control).
+    assert {:error, {:no_residues_discovered, :derived_summary}} =
+             Completeness.check(
+               resources: @clean,
+               domains: [Samen.AI.Domain],
+               bidx_specs: specs.blind_index_erasure_specs,
+               file_specs: specs.file_erasure_specs,
+               skip_bag_guard?: true
+             )
   end
 end

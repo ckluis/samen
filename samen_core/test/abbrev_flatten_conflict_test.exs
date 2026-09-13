@@ -67,7 +67,7 @@ defmodule Samen.AbbrevFlattenConflictTest do
       # the CRM Sequences LiveView = 408.
       # +2 A1 (ADR-047 §4.1/§6): samen_core host's agent-loop cursor pair `arn`/`atn`
       # (Samen.AI.Agent.{Run,Turn}) = 410.
-      assert map_size(flat) == 442
+      assert map_size(flat) == 443
       # A global entry and a host entry both survive the (lossless) flatten.
       assert flat["com"] == "SamenCore.Support.Crm.Contact"
       assert flat["mce"] == "Demo.MarketingScope.ConsentEvent"

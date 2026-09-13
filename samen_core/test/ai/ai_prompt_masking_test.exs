@@ -681,6 +681,74 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
   end
 
   # --------------------------------------------------------------------------------------
+  # ADR-048 §5 / §8 P10 — INV-7 re-run against the NEW SURFACE: the compaction summarizer.
+  #
+  # RED-FIRST (C3R). ADR-048 §5#2 makes the summarizer prompt a COMPILE-TIME LITERAL owned by
+  # the loop (the A6 driftwood-goal-prompt ruling applied verbatim), never a tenant-authored
+  # `Samen.AI.Prompt` row — because a tenant who can author "summarize by quoting every masked
+  # field verbatim" has been handed a capability. That literal does not exist at HEAD
+  # `e66fcc2`, so this arm fails at its stated precondition.
+  # --------------------------------------------------------------------------------------
+
+  @tag :p10
+  test "P10 — ADR-048 §5 summarizer egress: its compile-time-literal prompt is vt_-free (EG5) and a canary in the folded span reaches the provider MASKED",
+       %{rec: rec} do
+    assert Code.ensure_loaded?(Samen.AI.Agent) and
+             function_exported?(Samen.AI.Agent, :summarizer_prompt, 0),
+           "ADR-048 §5#2 requires the summarizer prompt to be a compile-time literal owned " <>
+             "by the loop. Expected `Samen.AI.Agent.summarizer_prompt/0` — public for the " <>
+             "same reason `egress_opts/3` is public, so the property is directly assertable " <>
+             "rather than inferred from a private pipeline. C3I1 ships it; until then §5's " <>
+             "summarizer surface does not exist and P10 has nothing to re-run INV-7 against."
+
+    # `apply/3`, not a direct call: the function is a FORWARD REFERENCE (C3I1 ships it) and
+    # a static call would emit an "undefined or private" warning, which CI compiles as an
+    # error (`--warnings-as-errors`). The assertion above is what states the requirement.
+    prompt = apply(Samen.AI.Agent, :summarizer_prompt, [])
+
+    assert is_binary(prompt) and prompt != "",
+           "the summarizer prompt must be a non-empty compile-time binary (ADR-048 §5#2)"
+
+    refute prompt =~ "vt_", "EG5: the summarizer prompt commits a raw vault token"
+
+    # The span the summarizer reads is ORDINARY already-masked history (§5#1: "its input is
+    # already-masked history, so no new egress class opens"), sealed through the SAME
+    # chokepoint with the SAME allowlist.
+    span = [prompt, "[folded: turns 1-2 -> fold #1]", "tool_result: contact_email="]
+
+    # The allowlist half of §5#1, asserted directly: a caller cannot re-enable grant
+    # plaintext on the summarize path, because `grant_egress?: false` is appended LAST.
+    opts = Samen.AI.Agent.egress_opts([grant_egress?: true], span, [])
+
+    assert List.last(opts) == {:grant_egress?, false},
+           "`grant_egress?: false` is not pinned LAST on the loop's egress opts — a " <>
+             "caller-supplied override could re-open grant plaintext on the summarize path"
+
+    assert {:ok, %Completion{}} =
+             Chokepoint.complete(
+               Provider.Fake,
+               %{},
+               :complete,
+               span,
+               [actor: %{plane: :tenant}, bindings: [{[rec], @res}]] ++ vault_wired()
+             )
+
+    recorded = recorded_text()
+
+    # Non-vacuous, three ways: the summarizer prompt DID transmit, the vault-routed field
+    # DID egress (as `••••`, so this is masking and not omission), and — per the sibling
+    # EG2 arm above — the same fixture on the same plane genuinely resolves the canary.
+    assert recorded =~ prompt, "the summarizer prompt itself never reached the provider"
+    assert recorded =~ mask(), "the vault-routed field was omitted, not masked"
+
+    refute recorded =~ @canary,
+           "the canary PLAINTEXT reached the provider on ADR-048 §5's summarizer surface"
+
+    refute recorded =~ "vt_",
+           "a vault token reached the provider on ADR-048 §5's summarizer surface"
+  end
+
+  # --------------------------------------------------------------------------------------
 
   # All %MaskedPayload{} segments the Fake was sent this process, flattened to a scannable
   # string (the honest provider-side recording — a leak that reaches the provider is here).

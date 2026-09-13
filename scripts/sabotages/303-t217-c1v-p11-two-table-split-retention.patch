@@ -1,0 +1,34 @@
+# SABOTAGE: ADR-048 §8 P11 (D2) — the transcript stops being one blob, two keys, one
+# DEK. Models "persist llm_view and ui_view as two separate rows or tables with
+# independent retention specs" at the schema-discovery level: the same resource's
+# transcript is reported as TWO physical residues (a real second pii_attribute split
+# would need a companion physical column + abbrev-registry reservation, which this
+# harness must not hand-edit — CLAUDE.md's abbrev registry rule — so the violation is
+# modeled at the point the schema-level assertion actually inspects: discover's
+# reported shape), the second one under its OWN vault (its own retention spec).
+# Distinct from P2's sabotage (a run.ex :advance write-path bug, not a schema-report
+# bug) and from E7's (E7 drifts ONE column's name; this DUPLICATES the residue).
+# APP: samen_core
+# TEST_FILES: test/ai/agent_dual_view_test.exs
+# MUST_FAIL: P11: RED — shredding the run's single DEK renders BOTH ui_view and llm_view unreadable in ONE operation (D2: one blob, two keys, one DEK)
+diff --git a/samen_core/lib/samen/erasure/completeness.ex b/samen_core/lib/samen/erasure/completeness.ex
+index 06fba42..a45b5bc 100644
+--- a/samen_core/lib/samen/erasure/completeness.ex
++++ b/samen_core/lib/samen/erasure/completeness.ex
+@@ -203,6 +203,16 @@ defmodule Samen.Erasure.Completeness do
+         vault: field.vault
+       }
+     end
++    # SABOTAGE (ADR-048 §8 P11 / D2): "persist llm_view and ui_view as two separate
++    # rows or tables with independent retention specs" — models exactly that split at
++    # the schema-discovery level: the SAME resource's transcript is reported as TWO
++    # physical residues, a second one under its OWN vault (its own retention spec),
++    # instead of the one blob / one DEK shape D2 requires. Distinct from P2's sabotage
++    # (a run.ex :advance write-path bug) — this corrupts the SCHEMA-LEVEL report a
++    # real two-pii_attribute split would produce.
++    |> Enum.flat_map(fn entry ->
++      [entry, %{entry | column: "pii_arn_llm_view", vault: :pii_transcript_llm_view}]
++    end)
+   end
+ 
+   defp pii_fields(resource) do

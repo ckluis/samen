@@ -131,6 +131,31 @@ defmodule Samen.Erasure.Completeness do
     end
   end
 
+  # ADR-048 §7.3 (C4I4, the Q-01 ruling) — APPLICABILITY of the derived-summary HARD floor.
+  #
+  # The floor itself is unchanged and still HARD (`nodes/C4R/work/nonvacuity.md`): where the
+  # class has meaning, discovering zero is a FAILURE. What C4 got wrong was its SCOPE — its
+  # own comment asserted "every host that mounts samen_core has the agent-run transcript
+  # surface", and that premise is FALSE for this repo (`Samen.AI.Domain`: driftwood mounts
+  # it, demo/pawchart/samen_web and every `mix samen.gen.app` template do not). So the floor
+  # applies where the AI plane is MOUNTED, and that applicability is DECLARED rather than
+  # assumed.
+  #
+  # The predicate is STRUCTURAL and HOST-LEVEL: it reads the HOST's own configured
+  # `:ash_domains` through the SAME `domains/1` the resource traversal uses, and asks one
+  # question — does this host mount the AI plane at all?
+  #
+  # It is deliberately NOT derived from the thing it guards. Keying applicability off "does
+  # any resource declare a `:transcript` pii attribute" would reintroduce directive §6's
+  # defect in its purest form: deleting the attribute would silently zero the floor and the
+  # gate would go green having verified nothing about withdrawal. No resource-level edit can
+  # switch this predicate off — only un-mounting the whole AI plane from the host's config
+  # can, and that is a visible, reviewable change to the host, not a quiet deletion inside
+  # the surface under audit.
+  defp ai_plane_mounted?(opts) do
+    Enum.member?(domains(opts), Samen.AI.Domain)
+  end
+
   # ---------------------------------------------------------------------------
   # Discovery (from the LIVE schema — never schema.dict)
   # ---------------------------------------------------------------------------
@@ -146,16 +171,19 @@ defmodule Samen.Erasure.Completeness do
           derived_linkable: [map()],
           storage_key: [map()],
           custom_bag: [map()],
-          transcript: [map()]
+          transcript: [map()],
+          derived_summary: [map()]
         }
   def discover(opts \\ []) do
     resources = resources(opts)
+    transcript = discover_transcript(resources)
 
     %{
       derived_linkable: DerivedLinkable.discover(resources),
       storage_key: discover_storage_key(resources),
       custom_bag: discover_custom_bag(resources),
-      transcript: discover_transcript(resources)
+      transcript: transcript,
+      derived_summary: derived_summary(transcript)
     }
   end
 
@@ -211,6 +239,36 @@ defmodule Samen.Erasure.Completeness do
     _ -> []
   end
 
+  # (f) DERIVED-SUMMARY segments (ADR-048 §7.3, batch C4) — the compaction fold ledger a
+  # vault-routed transcript carries.
+  #
+  # This is a PROJECTION of `discover_transcript/1`, deliberately NOT a second arm: there
+  # is ONE traversal over `pii_fields/1` in this module and this class rides it, so a
+  # resource whose transcript surface stops being discovered loses BOTH classes at once
+  # and cannot be silently half-covered. It is reported under its OWN key because it is a
+  # DIFFERENT residue with a different reach:
+  #
+  #   * the `transcript` class is IN-envelope — sealed under the ROW's own DEK, so it is
+  #     reached by the row's retention `:shred` arm (ADR-047 §7.4);
+  #   * a fold SUMMARY inside that same blob is derived from a DIFFERENT subject's data and
+  #     is sealed under the RUN's DEK, not theirs. Shredding the cited subject's key does
+  #     NOT make it undecryptable — it is out of THEIR envelope. That is precisely why
+  #     §7.3 needs an explicit withdrawal arm, and why this class carries its own floor.
+  #
+  # `discover_transcript/1`'s own map is left byte-identical: `agent_dual_view_test.exs`'s
+  # E7 arm pins its exact shape against the pre-C1 baseline.
+  defp derived_summary(transcript_residues) do
+    for r <- transcript_residues do
+      %{
+        resource: r.resource,
+        table: r.table,
+        column: r.column,
+        vault: r.vault,
+        index_table: "ai_agent_fold_source"
+      }
+    end
+  end
+
   defp subject_field(resource) do
     Enum.find(@subject_fields, fn f -> attribute(resource, f) != nil end)
   end
@@ -254,21 +312,43 @@ defmodule Samen.Erasure.Completeness do
       residues.storage_key == [] ->
         {:error, {:no_residues_discovered, :storage_key}}
 
+      # ADR-048 §7.3 (C4) — the THIRD hard class. A guard whose SCOPE is derived from the
+      # thing it guards can be silently zeroed by editing that thing: `derived_summary` is
+      # discovered from the SAME `pii_fields/1` traversal the transcript class rides, so a
+      # change that stops discovering transcripts would zero this class too and — on the
+      # SOFT side of the floor, where `transcript` and `custom_bag` sit — the gate would go
+      # green having verified nothing about withdrawal. It is HARD for the same reason
+      # `derived_linkable` and `storage_key` are: in a host that mounts the AI plane, an
+      # empty set is a broken discovery (or an unregistered §7.3 arm), never a pass.
+      # `nodes/C4R/work/nonvacuity.md` is the ruling and it STANDS.
+      #
+      # Its SCOPE, however, is declared rather than assumed (C4I4 / the Q-01 ruling): the
+      # floor binds a host that MOUNTS the AI plane. `ai_plane_mounted?/1` reads the HOST's
+      # configured `:ash_domains` — never the transcript attribute this class discovers, so
+      # nothing inside the guarded surface can switch the floor off. A host that does not
+      # mount the plane skips the class and the mix task SAYS SO on its own line; a skip
+      # that is not reported is indistinguishable from a pass.
+      residues.derived_summary == [] and ai_plane_mounted?(opts) ->
+        {:error, {:no_residues_discovered, :derived_summary}}
+
       true ->
         {dl_violations, dl_report} = check_derived_linkable(residues.derived_linkable, bidx_specs)
         {sk_violations, sk_report} = check_storage_key(residues.storage_key, file_specs, opts)
         {bag_violations, bag_report} = check_custom_bag(residues.custom_bag, opts)
         {tr_violations, tr_report} = check_transcript(residues.transcript, retention_specs)
+        {ds_violations, ds_report} = check_derived_summary(residues.derived_summary, opts)
         floor = regression_floor()
 
         violations =
-          dl_violations ++ sk_violations ++ bag_violations ++ tr_violations ++ floor.violations
+          dl_violations ++
+            sk_violations ++ bag_violations ++ tr_violations ++ ds_violations ++ floor.violations
 
         report = %{
           derived_linkable: dl_report,
           storage_key: sk_report,
           custom_bag: bag_report,
           transcript: tr_report,
+          derived_summary: ds_report,
           regression_floor: floor.report,
           org_asset_residuals: sk_report.org_assets
         }
@@ -533,6 +613,51 @@ defmodule Samen.Erasure.Completeness do
       spec.resource == r.resource and spec.action == :shred and spec.subject_field == :id and
         is_integer(spec.ttl_seconds) and spec.ttl_seconds > 0
     end)
+  end
+
+  # (f) derived-summary — ADR-048 §7.3's WITHDRAWAL arm must actually be reachable.
+  #
+  # The class is only a gate if the arm behind it exists: the bounded walk that neutralizes
+  # the cited folds, and the pseudonym-keyed index the walk resolves its targets from. Both
+  # are asserted as LIVE exports (the `regression_floor/0` discipline), so deleting either
+  # names this class unreached instead of quietly leaving the residue with no arm.
+  # Injectable so a unit test can model the gap and prove the detection is refutable.
+  defp check_derived_summary(residues, opts) do
+    arm_fun = opts[:derived_summary_arm_fun] || (&derived_summary_arm_wired?/0)
+    arm_wired? = arm_fun.()
+
+    violations =
+      Enum.flat_map(residues, fn r ->
+        if arm_wired? do
+          []
+        else
+          [
+            "UNREACHED derived-summary segments in #{r.table}.#{r.column} " <>
+              "(#{inspect(r.resource)}): the fold ledger carries summaries DERIVED from " <>
+              "other subjects' data and sealed under THIS row's DEK — shredding a cited " <>
+              "subject's key does not reach them. ADR-048 §7.3's withdrawal arm " <>
+              "(Samen.AI.Agent.Compaction.withdraw/2 + the #{r.index_table} provenance " <>
+              "index) is NOT wired, so an erased subject's derived text survives."
+          ]
+        end
+      end)
+
+    {violations,
+     %{
+       count: length(residues),
+       columns: Enum.map(residues, &"#{&1.table}.#{&1.column}"),
+       arm_wired: arm_wired?,
+       # C4I4 / the Q-01 ruling: applicability travels IN the report so the mix task can
+       # REPORT a skipped class instead of silently omitting it. Read from the host's
+       # `:ash_domains`, never from the discovered residues — `count: 0` alone can never
+       # tell a reader whether the class was scoped out or broken.
+       applicable: ai_plane_mounted?(opts)
+     }}
+  end
+
+  defp derived_summary_arm_wired? do
+    loaded_exported?(Samen.AI.Agent.Compaction, :withdraw, 2) and
+      loaded_exported?(Samen.AI.Agent.FoldSource, :withdraw_subject, 3)
   end
 
   # (d) regression floor — the already-covered classes must stay wired.

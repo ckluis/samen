@@ -695,7 +695,12 @@ defmodule Samen.AI.AgentHooksTest do
       assert Hook.accepts(:before_tool_call) == [:block, :edit, :halt]
       assert Hook.accepts(:after_tool_request) == [:block, :halt]
       assert Hook.accepts(:session_start) == [:halt]
-      assert Hook.accepts(:after_compaction) == [:halt]
+      # ADR-048 §5#6 (T219): the point now accepts `:block` — "skip this fold; the run
+      # continues uncompacted" — as well as `:halt`, and STILL refuses `:edit` outright,
+      # because an edit there is a host rewriting governed transcript text after §5#3's
+      # scrub. Widening it to accept `:edit` is sabotage `P9.planned.patch`.
+      assert Hook.accepts(:after_compaction) == [:block, :halt]
+      refute Hook.accepts?(:after_compaction, :edit)
       assert Hook.accepts(:after_tool_execution) == [:halt]
       assert Hook.accepts(:on_error) == [:halt]
 
@@ -704,17 +709,20 @@ defmodule Samen.AI.AgentHooksTest do
       refute Hook.accepts?(:session_start, :edit)
     end
 
-    test ":after_compaction is DECLARED and dispatchable even though v1's loop has no compactor" do
+    test ":after_compaction is DECLARED, dispatchable, and — since ADR-048 §5#6 — has a REAL in-loop caller" do
       assert :after_compaction in Hook.points()
       T181Probe.put(:halt_point, :after_compaction)
 
       assert Hooks.dispatch([T181Hooks.Halter], :after_compaction, %{}) ==
                {:halt, :hook_halted, "operator_stop"}
 
-      # Honestly recorded as having no in-loop caller in v1: the loop dispatches the
-      # other six points and never this one.
+      # Through ADR-047 v1 this point had NO in-loop caller and this assertion was a
+      # `refute`. ADR-048 §5#6 gives it its first: the Level-1 fold dispatches it once the
+      # model-written summary has passed §5#3's ingress path and been folded in, and before
+      # the fold is persisted. Asserted on the LOOP SOURCE because that is what makes
+      # ADR-048 §8 P9 non-vacuous — `@accepts` alone is satisfied by a point nobody calls.
       loop_source = File.read!("lib/samen/ai/agent.ex")
-      refute loop_source =~ "Hooks.dispatch(hooks, :after_compaction"
+      assert loop_source =~ "Hooks.dispatch(hooks, :after_compaction"
       assert loop_source =~ "Hooks.dispatch(hooks, :before_tool_call"
     end
 

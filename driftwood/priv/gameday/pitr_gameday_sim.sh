@@ -94,6 +94,13 @@ fmt_ms() { python3 -c "import sys; ms=int(sys.argv[1]); print(f'{ms} ms ({ms/100
 # (:db_connection/:ecto_sql) DO start; the drill script then starts Driftwood.Repo itself.
 run_phase() {
   local phase="$1" db="$2" keydir="$3"
+
+  if [[ "$phase" == "migrate" ]]; then
+    STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/driftwood_drill_migrations_XXXXXXXX")"
+  else
+    STAGING_DIR=""
+  fi
+
   ( cd "$DW_DIR" && \
     MIX_ENV=drill \
     DRILL_DB="$db" \
@@ -101,8 +108,13 @@ run_phase() {
     DRILL_PGPORT="$PGPORT" \
     DRILL_SUBJECT_ID="$DRILL_SUBJECT_ID" \
     DRIFTWOOD_KMS_KEY_DIR="$keydir" \
+    DRIFTWOOD_DRILL_STAGING_DIR="$STAGING_DIR" \
     mix run priv/drills/pitr_drill.exs "$phase" 2>&1 | grep -E "DRILL|error|Error|\*\*" )
-  return "${PIPESTATUS[0]}"
+  local code="${PIPESTATUS[0]}"
+
+  cleanup_staging_dir
+
+  return "$code"
 }
 
 cleanup() {
@@ -112,6 +124,36 @@ cleanup() {
 }
 
 fail() { echo "DRILL FAILED: $*" >&2; cleanup; exit 1; }
+
+# --------------------------------------------------------------------------
+# D-10 — staging dir for stage_drill_migrations (pitr_drill.exs "migrate" phase):
+# THIS script creates+owns it with `mktemp -d` (atomic, genuinely unique per machine)
+# and hands the path to the drill via DRIFTWOOD_DRILL_STAGING_DIR, so it can be removed
+# on success, on failure, AND on an OS-level interrupt via a trap here — the BEAM
+# cannot trap SIGINT at all, so that path can only be handled at this bash level,
+# exactly like ci.sh's run_gen_probe wrapper for the abbrev registry (T107, repo
+# CLAUDE.md). "" (unset) for every non-"migrate" phase, which does not stage anything.
+# --------------------------------------------------------------------------
+STAGING_DIR=""
+
+cleanup_staging_dir() {
+  if [[ -n "$STAGING_DIR" ]]; then
+    rm -rf "$STAGING_DIR"
+    STAGING_DIR=""
+  fi
+}
+
+on_interrupt() {
+  local sig="$1"
+  echo "" >&2
+  echo "DRILL INTERRUPTED: caught $sig — cleaning up staging dir + scratch DBs/work dir" >&2
+  cleanup_staging_dir
+  cleanup
+  trap - INT TERM
+  exit 130
+}
+trap 'on_interrupt SIGINT' INT
+trap 'on_interrupt SIGTERM' TERM
 
 # --------------------------------------------------------------------------
 # Preflight

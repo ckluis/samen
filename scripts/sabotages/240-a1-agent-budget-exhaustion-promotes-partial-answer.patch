@@ -31,8 +31,8 @@ index 51594c5..bcba650 100644
 +        # for a goal the model never finished. The exact "partial answer dressed as a
 +        # result" lie the fail-honest floor forbids (ADR-047 §6).
 +        answer =
-+          case transcript(run) do
-+            {:ok, {_goal, lines}} -> List.last(lines) || ""
++          case transcript_with_views(run) do
++            {:ok, {_goal, lines, _views}} -> List.last(lines) || ""
 +            _ -> ""
 +          end
 +

@@ -16,17 +16,24 @@ defmodule Samen.AI.Agent.Hook do
   |---|---|---|
   | `:session_start` | once, before the run's FIRST turn (both `run/4` and the worker) | `:halt` |
   | `:before_completion` | after the turn row is committed `:proposed`, before the provider call | `:halt` |
-  | `:after_compaction` | **declared, no call site in v1** — this loop performs no transcript compaction | `:halt` |
+  | `:after_compaction` | the ADR-048 §5 fold's summary passed ingress and was appended, before the fold is persisted | `:block`, `:halt` |
   | `:after_tool_request` | the model asked for a tool, before the intersection resolves it | `:block`, `:halt` |
   | `:before_tool_call` | the call passed the intersection + `validate/2`, before it executes or proposes | `:block`, `:edit`, `:halt` |
   | `:after_tool_execution` | the governed action returned, before the outcome is committed | `:halt` |
   | `:on_error` | the loop recorded a RECOVERABLE error it would otherwise absorb | `:halt` |
 
-  `:after_compaction` is declared and dispatchable and has **no in-loop caller**, because
-  ADR-047 v1 ships no compactor (the pattern is `findings/034` item 5, unbuilt). Declaring
-  the point without a call site is the honest spelling: the contract is fixed now, so the
-  compactor lands as a caller rather than as a second seam. `Samen.AI.Agent.Hooks.dispatch/3`
-  accepts it today, and the test suite proves it does.
+  `:after_compaction` was declared with **no in-loop caller** through ADR-047 v1, which shipped
+  no compactor (the pattern is `findings/034` item 5). ADR-048 §5#6 gives it its FIRST caller:
+  `Samen.AI.Agent`'s Level-1 fold dispatches it **after** the model-written summary has passed
+  §5#3's ingress path (`Secrets.redact/1` → `Ingress.sanitize/1` → the chokepoint allowlist) and
+  been appended to the fold's `llm_view`, and **before** the fold is persisted — so a hook can
+  observe only GOVERNED bytes, and a `:block` still means "this fold does not happen".
+
+  Its accepted set is `[:block, :halt]` and — a deliberate divergence §5#6 states outright —
+  **it must not accept `{:edit, _}`**: an edit there is a host rewriting governed transcript
+  text AFTER the scrub, which is the one thing the ingress path exists to prevent. A hook that
+  raises, or returns an `:edit` here, fails the fold CLOSED (`:hook_error`): the fold does not
+  happen and the run continues uncompacted (§5#5), never unhooked.
 
   ## The return contract
 
@@ -141,7 +148,7 @@ defmodule Samen.AI.Agent.Hook do
   @accepts %{
     session_start: [:halt],
     before_completion: [:halt],
-    after_compaction: [:halt],
+    after_compaction: [:block, :halt],
     after_tool_request: [:block, :halt],
     before_tool_call: [:block, :edit, :halt],
     after_tool_execution: [:halt],

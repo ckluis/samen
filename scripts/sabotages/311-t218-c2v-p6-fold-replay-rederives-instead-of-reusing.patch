@@ -1,0 +1,38 @@
+# SABOTAGE: ADR-048 §8 P6 (T218 / batch C2, ruling UXD-18) — fold REUSE on replay is
+# removed. `fold_context/6`'s reuse arm no longer fires: a replay landing on a turn
+# index whose pre-call `:proposed` fold-ledger entry is already on disk re-derives the
+# fold from scratch instead of FINDING and REUSING that row, so the entry is never
+# stamped `meta: %{"replayed" => true}`. Checkpoint 1 of the two-checkpoint ruling is
+# made worthless and the crash window UXD-18 exists to close is reopened.
+# THE DISCRIMINATION THAT MAKES THIS A PROOF: CASE B (crash BEFORE the pre-call write,
+# no ledger row to reuse) is a LEGITIMATE re-derivation and stays GREEN under this
+# patch — only CASE A flips. A blunt 'break the fold' sabotage would flip both.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_compaction_test.exs
+# MUST_FAIL: a crash AFTER the pre-call :proposed fold write REUSES that ledger row
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1274,10 +1274,19 @@
+   # makes reuse refutable on the ledger itself instead of inferred from a call count.
+   # A crash BEFORE checkpoint 1 leaves no row, and that replay legitimately re-derives.
+   defp fold_context(%Run{} = run, scope, views, definition, tools, goal, lines, opts) do
+-    case reusable_fold(views, run.current_turn + 1) do
+-      nil -> derive_fold(run, scope, views, definition, tools, goal, lines, opts)
+-      entry -> reuse_fold!(run, views, goal, entry, lines)
+-    end
++    # SABOTAGE (ADR-048 §8 P6, ruling UXD-18): the REUSE arm is removed. A replay that
++    # lands on a turn index whose pre-call `:proposed` fold entry is already on disk no
++    # longer FINDS and REUSES that row — it re-derives the fold from scratch, minting a
++    # second ledger entry for the one turn index and never stamping `meta.replayed`.
++    # That is checkpoint 1 of the two-checkpoint ruling made worthless: the crash window
++    # UXD-18 exists to close is reopened. CASE B (crash BEFORE the write, no row to
++    # reuse) is a LEGITIMATE re-derivation and must stay green — that discrimination is
++    # what makes this sabotage a proof rather than a blunt instrument.
++    _reusable = reusable_fold(views, run.current_turn + 1)
++    # Retained as a bare reference ONLY so the sabotage introduces no unused-function
++    # warning; the reuse arm is never called under this patch.
++    _reuse_arm = &reuse_fold!/5
++    derive_fold(run, scope, views, definition, tools, goal, lines, opts)
+   end
+
+   defp derive_fold(%Run{} = run, scope, views, definition, tools, goal, lines, opts) do

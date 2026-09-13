@@ -60,6 +60,7 @@ defmodule Samen.Erasure do
   """
 
   alias Samen.Kms
+  alias Samen.Vault
   alias Samen.Vault.VaultRow
   alias Samen.Erasure.Report
   alias Samen.NonPii
@@ -244,40 +245,109 @@ defmodule Samen.Erasure do
     # Empty when no spec is registered.
     record_bag_specs = Keyword.get(opts, :record_bag_specs)
 
-    # STEP 1 — destroy the key FIRST, outside the DB tx. This is the load-bearing
-    # act. It is the ONLY thing that can make the guarantee fail closed (if the
-    # key store is unreachable we must NOT proceed and NOT fabricate an
-    # attestation).
-    case Kms.shred(subject_id) do
-      {:ok, attestation} ->
-        seal_db_tiers(subject_id, attestation, :from_state, actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs)
+    # STEP 0 (ADR-048 §7.3, C4 / O-3 answer (i)) — READ THE PSEUDONYM WHILE THE DEK IS
+    # STILL LIVE. `HMAC(psk_S, subject_id)` is keyed off the subject's OWN DEK, so once
+    # STEP 1 destroys that key the ref can NEVER be recomputed — and the §7.3 provenance
+    # index rows keyed by it would be permanently orphaned, unreachable by any later
+    # re-run. This is a parameter CAPTURE, not a reordering: `Kms.shred/1` below still
+    # runs FIRST and OUTSIDE the DB transaction, exactly as ADR-046's envelope requires.
+    #
+    # FAIL-CLOSED: a read that fails for any reason other than the two AUTHORITATIVE ones
+    # aborts the erasure here — nothing is destroyed, nothing is sealed, nothing is
+    # attested, no report is written — because an outage must never masquerade as a
+    # completed erasure. See `pseudonym_ref/1` for the disposition table.
+    case pseudonym_ref(subject_id) do
+      {:error, {:pseudonym_unavailable, _reason}} = fail_closed ->
+        fail_closed
 
-      {:error, :absent} ->
-        # Subject never had a key. Still redact any non_pii! rows and write a
-        # report so an erasure request for a plaintext-only subject is honored
-        # and attested (outcome: "absent").
-        absent_att = %{
-          subject_id: subject_id,
-          state: :absent,
-          destroyed_at: nil,
-          attestation_id: nil,
-          km_version: nil,
-          checked_at: DateTime.utc_now()
-        }
+      {:ok, subject_ref, disposition} ->
+        # STEP 1 — destroy the key FIRST, outside the DB tx. This is the load-bearing
+        # act. It is the ONLY thing that can make the guarantee fail closed (if the
+        # key store is unreachable we must NOT proceed and NOT fabricate an
+        # attestation).
+        case Kms.shred(subject_id) do
+          {:ok, attestation} ->
+            seal_db_tiers(subject_id, attestation, :from_state, actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs, subject_ref, disposition)
 
-        seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs)
+          {:error, :absent} ->
+            # Subject never had a key. Still redact any non_pii! rows and write a
+            # report so an erasure request for a plaintext-only subject is honored
+            # and attested (outcome: "absent").
+            absent_att = %{
+              subject_id: subject_id,
+              state: :absent,
+              destroyed_at: nil,
+              attestation_id: nil,
+              km_version: nil,
+              checked_at: DateTime.utc_now()
+            }
 
-      {:error, reason} ->
-        # Key store unreachable (outage) — FAIL CLOSED. No sentinel, no report,
-        # no fabricated attestation. The caller retries when the store heals.
-        {:error, {:kms_shred_failed, reason}}
+            seal_db_tiers(subject_id, absent_att, "absent", actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs, subject_ref, disposition)
+
+          {:error, reason} ->
+            # Key store unreachable (outage) — FAIL CLOSED. No sentinel, no report,
+            # no fabricated attestation. The caller retries when the store heals.
+            {:error, {:kms_shred_failed, reason}}
+        end
     end
   end
+
+  # The STEP 0 pseudonym read and its DISPOSITION TABLE (ADR-048 §7.3; the C4 ruling in
+  # `_orch-runs/.../nodes/C4R/work/fail-closed.md`):
+  #
+  # The THIRD element is D-01's DISPOSITION (operator ruling 2026-09-09). `:absent` and
+  # `:shredded` both yield a `nil` ref, but they are NOT the same fact, and collapsing them —
+  # as this function did before D-01 — is what left the erasure report unable to say whether
+  # derived-summary invalidation was performed. The ref drives the withdrawal arms; the
+  # disposition drives the DISCLOSURE (`derived_summaries_tier/1`). Token-only, never PII.
+  #
+  #   {:ok, pseudonym}      -> {:ok, hex ref, :performed}
+  #                                            — the normal path; threads into seal_db_tiers/13
+  #   {:error, :absent}     -> {:ok, nil, :absent}
+  #                                            — AUTHORITATIVE: the subject never had a DEK, so
+  #                                              no subject_ref keyed to one can exist
+  #   {:error, :shredded}   -> {:ok, nil, :shredded}
+  #                                            — AUTHORITATIVE: the DEK is provably gone, so every
+  #                                              index row is ALREADY permanently unlinkable.
+  #                                              The DISCLOSED CARVE-OUT: the criterion's literal
+  #                                              phrasing is "other than :absent", but a strict
+  #                                              fail-closed here would break the shipped
+  #                                              idempotency contract (`erasure_test.exs`
+  #                                              RED PATH C — a second shred stays positive and
+  #                                              writes a second report). `:shredded` is not an
+  #                                              outage; it is a positive statement that the key
+  #                                              is gone, which is the very condition that makes
+  #                                              the rows inert. Fail-closed is not wrong here —
+  #                                              it simply has no residue left to protect.
+  #   anything else         -> FAIL CLOSED     — :unavailable, :not_configured, :not_implemented,
+  #                                              a timeout, an unexpected term, a raise. This is
+  #                                              byte-for-byte the posture the `Kms.shred/1` arm
+  #                                              above already takes for the key store itself.
+  defp pseudonym_ref(subject_id) do
+    case Vault.pseudonym(subject_id) do
+      {:ok, pseudonym} when is_binary(pseudonym) ->
+        {:ok, Samen.AI.Agent.Compaction.encode_ref(pseudonym), :performed}
+
+      {:error, :absent} ->
+        {:ok, nil, :absent}
+
+      {:error, :shredded} ->
+        {:ok, nil, :shredded}
+
+      other ->
+        {:error, {:pseudonym_unavailable, pseudonym_reason(other)}}
+    end
+  rescue
+    e -> {:error, {:pseudonym_unavailable, Exception.message(e)}}
+  end
+
+  defp pseudonym_reason({:error, reason}), do: reason
+  defp pseudonym_reason(other), do: other
 
   # STEP 2–5 in one transaction. `outcome_mode` is `:from_state` (derive from the
   # seal result — "shredded" on the first call that seals rows, "already_shredded"
   # on an idempotent later call) or a fixed string (e.g. "absent").
-  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs) do
+  defp seal_db_tiers(subject_id, attestation, outcome_mode, actor_id, org_id, r, rollup_opts, file_opts, bidx_specs, custom_bag_specs, record_bag_specs, subject_ref, disposition) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     multi =
@@ -341,6 +411,38 @@ defmodule Samen.Erasure do
       |> Ecto.Multi.run(:record_bag, fn repo, _changes ->
         {:ok, Samen.CustomObjects.Erasure.erase_subject(subject_id, repo, record_bag_specs: record_bag_specs)}
       end)
+      # STEP 3f-b — ADR-048 §7.3 step 3, the BOUNDED WITHDRAWAL WALK over the fold LEDGERS
+      # (C4). Runs BEFORE the index arm below on purpose: the walk resolves its targets from
+      # the index rows (by `subject_ref`, regardless of their withdrawn stamp) and rewrites
+      # each cited run's transcript through the SAME accepted `:advance` chokepoint, which
+      # re-projects the ledger into the index. Doing the ledger first therefore leaves the
+      # stamp as the LAST word on those rows. `nil` is the same recorded no-op as below.
+      |> Ecto.Multi.run(:fold_ledger, fn repo, _changes ->
+        case subject_ref do
+          ref when is_binary(ref) ->
+            {:ok, Samen.AI.Agent.Compaction.withdraw(ref, repo: repo)}
+
+          nil ->
+            {:ok, %{runs_walked: 0, folds_withdrawn: 0, rounds: 0, halted: :no_pseudonym}}
+        end
+      end)
+      # STEP 3g — ADR-048 §7.3 step 3, the PROVENANCE-INDEX withdrawal arm (C4). The
+      # pseudonym-keyed `ai_agent_fold_source` rows are NEUTRALIZED (stamped withdrawn),
+      # never deleted: §7.3 keeps the rows and kills the key, and the key is already gone
+      # by the time this runs. `subject_ref` is the STEP 0 capture — the only way to match
+      # these rows now, since the pseudonym became uncomputable the instant STEP 1 ran.
+      # `nil` means the STEP 0 read was authoritatively `:absent`/`:shredded`: there is no
+      # ref, therefore nothing keyed to one, and the arm is a recorded no-op rather than a
+      # silent skip.
+      |> Ecto.Multi.run(:fold_sources, fn repo, _changes ->
+        case subject_ref do
+          ref when is_binary(ref) ->
+            {:ok, Samen.AI.Agent.FoldSource.withdraw_subject(ref, repo, now: now)}
+
+          nil ->
+            {:ok, %{table: :no_pseudonym, rows_withdrawn: 0}}
+        end
+      end)
       # STEP 5 (built here, needs step 2/3/3b/3c results) — the erasure report.
       |> Ecto.Multi.run(:report, fn repo, changes ->
         {sealed, _} = changes.seal_vault
@@ -352,7 +454,7 @@ defmodule Samen.Erasure do
         record_bag_report = changes.record_bag
 
         tiers =
-          build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, custom_bag_report, record_bag_report, repo)
+          build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, custom_bag_report, record_bag_report, repo, disposition)
         outcome = resolve_outcome(outcome_mode, subject_id, sealed, repo)
 
         report_attrs = %{
@@ -387,9 +489,13 @@ defmodule Samen.Erasure do
           event: "erased",
           subject_id: subject_id,
           actor_id: actor_id,
+          # D-01 clause 5 — the run RECORDS the derived-summary disposition, not only the
+          # report. Same value the `"derived_summaries"` report tier carries, from the same
+          # `derived_summary_invalidation/1`. Token-only, never PII.
           detail:
             "outcome=#{outcome} attestation_id=#{attestation[:attestation_id] || "none"} " <>
-              "vault_sealed=#{sealed} non_pii_redacted=#{redacted}"
+              "vault_sealed=#{sealed} non_pii_redacted=#{redacted} " <>
+              "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}"
         })
       end)
       # STEP 4b — append-only event tier row (T2.2: erasure events mirror to
@@ -408,9 +514,12 @@ defmodule Samen.Erasure do
           event_type: "erasure",
           subject_id: subject_id,
           actor_id: actor_id,
+          # D-01 clause 5, the chain half — the tamper-evident record carries the same
+          # derived-summary disposition token the report tier and the STEP 4a audit carry.
           detail:
             "outcome=#{outcome} vault_sealed=#{sealed} non_pii_redacted=#{redacted} " <>
-              "attestation_id=#{attestation[:attestation_id] || "none"}",
+              "attestation_id=#{attestation[:attestation_id] || "none"} " <>
+              "derived_summary_invalidation=#{derived_summary_invalidation(disposition)}",
           occurred_at: now
         })
       end)
@@ -428,7 +537,7 @@ defmodule Samen.Erasure do
   # Tier descriptors — what the T2.9 oracle reads (D7 report).
   # ---------------------------------------------------------------------------
 
-  defp build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, custom_bag_report, record_bag_report, repo) do
+  defp build_tiers(subject_id, attestation, sealed, redaction_details, rollup_report, file_report, blind_index_report, custom_bag_report, record_bag_report, repo, disposition) do
     remaining_active =
       repo.aggregate(
         from(v in VaultRow, where: v.subject_id == ^subject_id and v.state == "active"),
@@ -483,9 +592,35 @@ defmodule Samen.Erasure do
       # Custom-OBJECT record-bag tier (ADR-046 §8 residual #2): the per-object report of
       # `pii_declared` keys redacted from the subject's `tnt_record` rows. Empty when no
       # record-bag spec is registered. Token-only (row/key counts + object label).
-      "record_bag" => record_bag_report
+      "record_bag" => record_bag_report,
+      # Derived-summary invalidation tier (D-01, operator ruling 2026-09-09) — the erasure
+      # report DISCLOSES whether the §7.3 derived-summary invalidation could be performed for
+      # this subject, and WHY NOT when it could not. Before D-01 a report written after a
+      # `{:error, :shredded}` STEP 0 read was INDISTINGUISHABLE from one written after a clean
+      # invalidation: the report claimed a clean erasure while the subject's derived AI
+      # summaries survived un-invalidated. That is the repo's own fail-honest lie
+      # (ADR-014/024/026) wearing an erasure hat. Token-only, never PII.
+      "derived_summaries" => derived_summaries_tier(disposition)
     }
   end
+
+  # D-01's disclosure, keyed off the STEP 0 disposition (`pseudonym_ref/1`). `:absent` and
+  # `:shredded` MUST stay distinct here — collapsing them back into one value is exactly the
+  # defect D-01 was raised against.
+  defp derived_summaries_tier(disposition) do
+    %{
+      "invalidation" => derived_summary_invalidation(disposition),
+      "reason" => derived_summary_reason(disposition)
+    }
+  end
+
+  defp derived_summary_invalidation(:performed), do: "performed"
+  defp derived_summary_invalidation(:shredded), do: "unavailable"
+  defp derived_summary_invalidation(:absent), do: "not_applicable"
+
+  defp derived_summary_reason(:performed), do: nil
+  defp derived_summary_reason(:shredded), do: "pseudonym_shredded"
+  defp derived_summary_reason(:absent), do: "no_dek"
 
   # ---------------------------------------------------------------------------
   # Read side — the oracle / operator consumes these.

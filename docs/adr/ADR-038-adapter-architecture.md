@@ -242,54 +242,73 @@ per ADR-024. Unconfigured-everywhere remains the honest `:blocked` path of ADR-0
   enables provider-side tracking when the flag says so, and `:open`/`:click` events for
   non-consented orgs are dropped at the handler (asserted both ways in T30).
 
-### 4.5 The shared conformance harness (defined T27, consumed READ-ONLY by T94/T95)
+### 4.5 The shared conformance kit (defined T27/T188; consumed by ALL THREE ESP adapters)
 
-`Samen.Delivery.ProviderConformanceCase` at
-`samen_core/lib/samen/delivery/provider_conformance_case.ex` — test infra ships in lib, per the
+**Current state.** All three ESP adapter packages — `samen_postmark`, `samen_resend` and
+`samen_ses` — consume the SHARED CROSS-FAMILY kit `Samen.AdapterConformanceCase`
+(`samen_core/lib/samen/adapter_conformance_case.ex`, T188). Their conformance suites are
+`samen_postmark/test/conformance_test.exs`, `samen_resend/test/conformance_test.exs` and
+`samen_ses/test/conformance_test.exs`. Test infra ships in lib, per the
 `Samen.MaskingCase`/`Samen.RedPath` house precedent. Usage:
-
-```elixir
-use Samen.Delivery.ProviderConformanceCase,
-  provider: SamenPostmark.Provider,
-  fixtures: "test/fixtures",           # adapter-local recorded fixtures
-  capabilities: [:deliverability_webhooks, :inbound, :tracking]
-```
-
-The harness asserts, for ANY adapter: (a) the unconfigured table — every callback refuses with
-`:not_configured`, never `{:ok, _}`; (b) configured `deliver/2` against the adapter's fixture
-transport returns a receipt carrying `provider_message_id`; (c) webhook red/green — a
-fixture event with a valid signature parses, the same body with a tampered signature returns
-`:invalid_signature` and parses NOTHING (plus the positive control, anti-tautology); (d)
-redaction — no plaintext email/name survives `redact_payload/1` on the bounce/complaint
-fixtures (asserted against the fixture's known PII strings); (e) capability honesty both
-directions (§4.1). T94/T95 cite the harness **unchanged** — any needed harness change is a
-T27-owned follow-up, not an in-place edit by an adapter task (roadmap collision rule).
-
-Adapter split: `samen_postmark` (reference; inbound-capable; serves C5 later),
-`samen_ses` (SNS-envelope webhook verification, including the SNS subscription-confirmation
-handshake, inside the adapter; no inbound), `samen_resend` (Svix-style signatures; no inbound).
-
-**UXD-07 / A6 — the cross-family kit, adopted by one ESP adapter.**
-`Samen.AdapterConformanceCase` (`samen_core/lib/samen/adapter_conformance_case.ex`, T188) is the
-SHARED CROSS-FAMILY conformance kit — plain imported assertion functions rather than a
-macro-generated fixture DSL. It has been extended with the delivery-shaped assertions this
-section's (d) and (f) guarantees need — `load_fixtures!/1`, `assert_capture_no_leak!/2`,
-`assert_redaction!/3` — and `samen_postmark` now consumes IT instead of the macro harness, from
-the SAME `test/fixtures/conformance.exs` file and proving the same (a)-(f) list, written as
-explicit `test` blocks:
 
 ```elixir
 use Samen.AdapterConformanceCase, adapter: SamenPostmark.Provider
 use ExUnit.Case, async: true
 ```
 
-That adoption leaves `Samen.Delivery.ProviderConformanceCase` UNCHANGED: it is still the harness
-`samen_resend` and `samen_ses` cite, and still the module samen_core's own
-`Samen.Delivery.DeliverLeakGateTest` and `Samen.Delivery.ChokepointAntiBypassProbeTest` depend on
-— the frozen signature never moved, so the roadmap-collision rule above still holds. Converging
-the remaining two ESP adapters onto the cross-family kit, and deciding whether
-`ProviderConformanceCase` eventually becomes a shim or stays a separate contract, remain OPEN
-T27-owned follow-ups; neither is settled here.
+`adapter:` is the only required option, checked at COMPILE time (`Code.ensure_loaded?/1`) —
+a missing adapter module raises the named `Samen.AdapterConformanceCase.AdapterNotLoadedError`,
+which is how INV-4's "samen_core never depends on an adapter package" stays a provable
+optionality rather than a silent one. The kit exposes PLAIN imported assertion functions
+(`load_fixtures!/1`, `assert_refusal_table!/1`, `assert_capture_no_leak!/2`,
+`assert_redaction!/3`, `assert_masked_segments!/1`) called from explicit `test` blocks, rather
+than a macro-generated fixture DSL. Each adapter's `test/fixtures/conformance.exs` is unchanged
+across the swap.
+
+The conformance run asserts, for ANY adapter: (a) the unconfigured table — every callback
+refuses with `:not_configured`, never `{:ok, _}`; (b) configured `deliver/2` against the
+adapter's fixture transport returns a receipt carrying `provider_message_id`; (c) webhook
+red/green — a fixture event with a valid signature parses, the same body with a tampered
+signature returns `:invalid_signature` and parses NOTHING (plus the positive control,
+anti-tautology); (d) redaction — no plaintext email/name survives `redact_payload/1` on the
+bounce/complaint fixtures (asserted against the fixture's known PII strings); (e) capability
+honesty both directions (§4.1), including the CONFIGURED-but-credential-less refusal, so the
+refusal is not a side effect of being unconfigured; (f) the deliver-leak gate (C3/T29) — the
+captured outbound ESP payload carries no `vt_` vault token and no forbidden plaintext (INV-1).
+
+**Convergence history — both seams now CLOSED.**
+*Seam 1* (`4a2ba48`, A13/T27-owned follow-up): `Samen.Delivery.ProviderConformanceCase`
+(`samen_core/lib/samen/delivery/provider_conformance_case.ex`) became a thin SHIM over the
+cross-family kit. Its public macro signature and its public function names/arities are FIXED
+and unchanged; internally `load_fixtures!/1`, `assert_deliver_no_leak!/2` and
+`assert_redaction!/2` now delegate to the kit's `load_fixtures!/1`,
+`assert_capture_no_leak!/2` and `assert_redaction!/3` instead of duplicating that logic.
+*Seam 2* (adapter-by-adapter adoption): `samen_resend` converged in `423593a` and `samen_ses`
+in `6c26f5b`, following `samen_postmark`. Consequently **no adapter package consumes
+`ProviderConformanceCase` any more.** Its only remaining consumers are samen_core-internal:
+`Samen.Delivery.ProviderConformanceCaseNonVacuityTest`
+(`samen_core/test/delivery_provider_conformance_case_test.exs`, which exercises the macro
+against a local `ToyProvider`) and `Samen.Delivery.DeliverLeakGateTest`
+(`samen_core/test/delivery/deliver_leak_gate_test.exs`, which calls
+`assert_deliver_no_leak!/2` as a plain function). `Samen.Delivery.ChokepointAntiBypassProbeTest`
+does NOT reference it.
+
+Because the shim's signature never moved, the roadmap-collision rule still holds in its
+original form: any change to `ProviderConformanceCase`'s contract is a T27-owned follow-up, not
+an in-place edit by an adapter task. What is no longer open is the pair of questions this
+section previously left open — whether `ProviderConformanceCase` becomes a shim (it did,
+`4a2ba48`) and whether the remaining two ESP adapters converge (they did, `423593a` and
+`6c26f5b`).
+
+Adapter split: `samen_postmark` (reference; inbound-capable; serves C5 later),
+`samen_ses` (SNS-envelope webhook verification, including the SNS subscription-confirmation
+handshake, inside the adapter; no inbound), `samen_resend` (Svix-style signatures; no inbound).
+For `samen_postmark` and `samen_resend` the (e) credential-less gap sits on
+`verify_and_parse_event/3` (a missing webhook secret). `samen_ses` verifies SNS envelopes by RSA
+signature and needs no per-host secret, so its genuine "configured but not wired" gap is
+`deliver/2`, which requires an injectable `config[:resolve_recipient]` (ADR-014: no generic ESP
+adapter may vault-reveal `to_subscriber_id` to a plaintext email) — its (e) test exercises that
+gap instead.
 
 ## 5 · Webhook ingress (shared by billing + delivery; T19 builds, T20/T21/T24/T30 consume)
 

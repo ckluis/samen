@@ -1,0 +1,81 @@
+# SABOTAGE: D-05 (ADR-048 §8 `P8`, operator ruling D-05) — the DURABLE CANCEL CHECK before
+# the SUMMARIZING fold is REMOVED from `Samen.AI.Agent.derive_fold/8`. This is the
+# sabotage-241 shape ONE MECHANISM AND ONE LEVEL over: 241 removes the cancel re-check at
+# the TURN boundary in `loop/5`, so a cancel landing between turn N and turn N+1 is silently
+# ignored; THIS removes it inside `derive_fold/8`, on the `span ->` arm, immediately before
+# `summarize_fold/7` → `summarize_span/3` — so a cancel landing DURING the overflowing
+# attempt is silently ignored and the LEVEL 2 INLINE fold ships the tenant's folded
+# conversation to the provider FOR SUMMARIZATION after the tenant has already asked to stop.
+# D-05's ruling is that the harm is the EGRESS, not the turn.
+#
+# Flips the named D-05 red. Everything else stays GREEN, which is what makes the red mean
+# what it says: the D-05 ARM 2 POSITIVE CONTROL (the byte-identical script WITHOUT the
+# cancel, whose LEVEL 2 fold DOES summarize and IS recorded model-written) still passes, and
+# the D-05 ARM 3 PRESERVATION CONTROL (RP-AG-8: the in-flight turn still completes and the
+# run takes its terminal at the NEXT turn boundary) still passes — so the red fails because
+# the CANCEL check is gone, not because Level 2, the summarizer, or cancel itself broke.
+#
+# NOT TOUCHED, deliberately: the BREAKER path (`Breaker.killed?(run.org_id, run.agent)` stays
+# checked at BOTH the turn boundary and the retry boundary, exactly as P5/D-04 shipped it —
+# sabotage 322 owns that clause), the deterministic `reuse_fold!/5` replay arm (no model
+# call, no data leaves — D-05 says it is NOT to be guarded), `fold_span/6`'s pure span
+# SELECTION, and the whole body of `summarize_fold/7`, which is left byte-for-byte alone.
+#
+# Deletes ONE CONTIGUOUS `if/else` and its comment, replacing it with the `else` branch's own
+# single call, AND the `cancel_requested?/1` predicate the `if` was the only caller of — both
+# inside one hunk. Removing the predicate is not extra scope, it is what "the check is gone"
+# means here: leaving an uncalled private function behind trips Elixir's unused-private
+# warning under `--warnings-as-errors` and the patch would fail to COMPILE instead of failing
+# the named test (an `if false do` shape would trip the always-same-result warning the same
+# way). Touches agent.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: D-05 ARM 1 RED: a cancel issued DURING the overflowing first attempt means the Level 2 SUMMARIZE call never leaves
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1343,38 +1343,17 @@
+           {:ok, run, lines, views}
+ 
+         span ->
+-          # D-05 (ADR-048 §8 `P8`, operator ruling D-05) — THE DURABLE CANCEL CHECK, and it
+-          # is the LAST thing that happens before the tenant's folded conversation leaves
+-          # for the provider. `cancel_requested?/1` RE-READS the run row (`reload!/1`): at
+-          # the LEVEL 2 INLINE site a provider call has ALREADY returned, so a cancel the
+-          # tenant issued DURING that call is durably on the row and is NOT visible on the
+-          # in-memory `run` the turn boundary loaded — a check on that struct is vacuous
+-          # here. RP-AG-8 is PRESERVED: the in-flight turn still completes and the run takes
+-          # its terminal at the NEXT turn boundary; what stops is the EGRESS. The answer is
+-          # the SAME honest shape a refused summarize already takes, so
+-          # `note_compaction_refusal!/2` names it on the turn row under
+-          # `safe_error_kind(:compaction_refused)` with the bounded reason "run_cancelled".
+-          if cancel_requested?(run) do
+-            {:ok, run, lines, refused(views, :run_cancelled)}
+-          else
+-            summarize_fold(run, scope, views, goal, lines, span, opts)
+-          end
++          # SABOTAGE (D-05, ADR-048 §8 `P8`, ruling D-05): the DURABLE cancel check before
++          # the SUMMARIZING fold is REMOVED — the sabotage-241 shape one mechanism over. A
++          # cancel issued DURING the overflowing attempt is silently ignored and the LEVEL 2
++          # INLINE fold summarizes the tenant's conversation anyway: the egress D-05 exists
++          # to stop goes out after the tenant asked to stop.
++          summarize_fold(run, scope, views, goal, lines, span, opts)
+       end
+     else
+       {:ok, run, lines, views}
+     end
+   end
+-
+-  # D-05 (ADR-048 §8 `P8`, operator ruling D-05) — the DURABLE half of the cancel flag,
+-  # re-read from the run ROW on the same `run.id` through the loop's own `reload!/1` rather
+-  # than hand-rolled as a second reader. NEVER the in-memory struct: the turn boundary in
+-  # `loop/5` already read that value, so `run.cancel_requested_at != nil` spelled against
+-  # the threaded struct can never be true at the LEVEL 2 INLINE site. It is the SAME RP-AG-8
+-  # flag the turn boundary reads — `cancel_requested_at != nil` — never a narrower or
+-  # differently-named one. `reload!/1`'s `ensure_selected` needs no widening: only `:org_id`
+-  # and the vault-routed `:transcript` are non-default; `:cancel_requested_at` is a plain
+-  # attribute the boundary already reads off the same reload.
+-  defp cancel_requested?(%Run{} = run), do: reload!(run).cancel_requested_at != nil
+ 
+   # The SUMMARIZING fold itself, lifted out of `derive_fold/8`'s `span ->` arm UNCHANGED so
+   # that D-05's guard above it is one contiguous `if/else`. That is what lets sabotage 323
