@@ -1,0 +1,38 @@
+# SABOTAGE: GA (CF-17(a) coverage gap) — ADR-048 §6 Level 2's INLINE fold. `derive_fold/8`'s
+# watermark guard (`agent.ex:1367`) is FLIPPED from `>` to `<`, so it takes its real
+# fold_span/summarize_fold branch when the assembled context is UNDER the watermark and takes
+# the no-op `else` branch when it is OVER — backwards from ADR-048 §6's "if the assembled
+# history exceeds context_cutoff_tokens, fold the oldest eligible span." This is the SAME
+# function `fold_context/8`'s pre-turn (Level 1) call and `complete_with_recovery/10`'s INLINE
+# (Level 2) call both share (`agent.ex:1195`), so flipping it defeats BOTH, and this sabotage
+# targets the INLINE call site specifically: `test/ai/agent_compaction_test.exs`'s
+# "P4: OVER-WATERMARK" arm drives a Level 2 retry over a small `context_cutoff_tokens` and
+# asserts the fold ledger (`folds_of/1`) is non-empty and stamped with the retrying turn's own
+# index — with the guard flipped, no fold ever lands there and the assertion fails.
+#
+# Flips the named P4-OVER-WATERMARK red. Everything else Level-2-shaped that never overrides
+# `context_cutoff_tokens` stays GREEN: the two PRE-EXISTING P4 arms ("P4: RED — Level 2 retries
+# EXACTLY once…" and "P4 CONTROL (anti-tautology, MANDATORY)…") never have anything eligible to
+# fold at their own (single-turn) retry site regardless of the guard's direction, so they pass
+# unweakened — the red fails because the INLINE fold's watermark guard is inverted, not because
+# the retry counter or the Level 3 terminal broke. The new "P4: UNDER-WATERMARK CONTROL" arm
+# also passes unweakened for the same single-turn reason.
+#
+# One-line operator change: `>` to `<`. Touches agent.ex ALONE.
+#
+# APP: samen_core
+# TEST_FILES: test/ai/agent_compaction_test.exs
+# MUST_FAIL: P4: OVER-WATERMARK — the retry crosses context_cutoff_tokens so Level 2's INLINE fold actually executes; folds_of/1 is non-empty and context_retries == 1
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 206cb66..2e6ff01 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1364,7 +1364,7 @@ defmodule Samen.AI.Agent do
+   end
+
+   defp derive_fold(%Run{} = run, scope, views, definition, tools, goal, lines, opts) do
+-    if context_tokens(definition, tools, goal, lines) > run.context_cutoff_tokens do
++    if context_tokens(definition, tools, goal, lines) < run.context_cutoff_tokens do
+       case fold_span(run, views, definition, tools, goal, lines) do
+         nil ->
+           {:ok, run, lines, views}
