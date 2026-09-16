@@ -26,6 +26,10 @@ defmodule Samen.AI.Provider.Scripted do
       `{:tool_call, kind, args, usage}` is the token-budget sugar. The TEXT-envelope
       fallback needs no special form — script `{:continue, ~s(TOOL: {"tool": ...})}`;
     * `{:error, reason}` — a scripted provider failure (the chokepoint EG6-normalizes it);
+    * `{:error, reason, usage}` — the SAME failure carrying the tokens the failed call
+      actually spent (CF-17(d); ADR-048 §6 Level 2: "the failed attempt's tokens still
+      count toward `max_input_tokens` (it was a real call)"). Returned verbatim as
+      `{:error, reason, usage}` — a failure is NEVER softened into an `{:ok, _}`;
     * `%{text: ..., usage: %{input_tokens: _, output_tokens: _}}` — full control (token
       budgets); `{:continue | :final, text, usage}` is sugar for the same;
     * a zero-arity fun returning any of the above, evaluated AT CALL TIME — the seam a
@@ -77,6 +81,9 @@ defmodule Samen.AI.Provider.Scripted do
       # Fail-honest: nothing (left) scripted = no work done. NEVER a canned {:ok, _}.
       :exhausted -> {:error, :not_configured}
       {:error, reason} -> {:error, reason}
+      # CF-17(d): a scripted failure that SPENT tokens reports what it spent — still an
+      # :error (never a canned {:ok, _}), now carrying what the call actually cost.
+      {:error, reason, usage} -> {:error, reason, usage}
       %{text: _} = entry -> {:ok, scripted_completion(entry)}
     end
   end
@@ -137,6 +144,13 @@ defmodule Samen.AI.Provider.Scripted do
     do: %{text: "", tool_calls: [%{"name" => kind, "args" => args}], usage: usage}
 
   defp normalize({:error, reason}), do: {:error, reason}
+
+  # CF-17(d): the token-budget sugar for a FAILED turn. WITHOUT this clause the entry falls
+  # through to the malformed catch-all below and the usage it carries is silently swallowed —
+  # the failed call then reports spending nothing. A non-map usage is a test-authoring bug and
+  # still refuses honestly down there.
+  defp normalize({:error, reason, usage}) when is_map(usage), do: {:error, reason, usage}
+
   defp normalize(%{text: text} = entry) when is_binary(text), do: entry
 
   # A malformed entry is a test-authoring bug: refuse honestly (the unconfigured shape),
