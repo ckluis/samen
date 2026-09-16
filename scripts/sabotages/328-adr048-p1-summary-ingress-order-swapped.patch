@@ -1,0 +1,36 @@
+# SABOTAGE: ADR-048 §8 P1 / CF-22 (Gap D) — the ingress ORDER in
+# `Samen.AI.Agent.Compaction.scrub/1` is SWAPPED: `Ingress.sanitize/1` now runs BEFORE
+# `Secrets.redact/1`, instead of the pinned order (`compaction.ex:118`,
+# `summary |> Secrets.redact() |> Ingress.sanitize()`). A labeled secret whose value is
+# separated from its label by U+200B (a `\p{Cf}` format character) survives: redact-first
+# treats U+200B as inside the label/value gap and collapses the whole span in one match;
+# sanitize-first replaces U+200B with the eleven-LETTER marker `[neutralized]`, which ENDS
+# that non-language gap before `Secrets.redact/1` ever sees it, so the credential is left in
+# cleartext. This is the ORDER attack, distinct from `314-t219-...-dropped.patch`, which
+# DROPS both lanes rather than swapping them.
+#
+# Flips the new P1 ORDER red added for CF-22. The three pre-existing P1 arms (the two
+# `P1: RED —` neutralization arms and the `P1: POSITIVE CONTROL —` prose arm) stay GREEN
+# under this swap: their `@poisoned_summary` fixture carries an injected instruction matched
+# by a `\p{L}`-only phrase pattern and a contiguous vendor-prefixed key matched by a
+# contiguous-printable pattern, and neither class depends on label/value adjacency — so
+# neither lane's order matters to them. That is the literal restatement of CF-22: the order
+# bug is real but none of P1's existing coverage could see it before this node's new arm.
+#
+# Touches compaction.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_summarizer_test.exs
+# MUST_FAIL: P1: RED — a LABELED SECRET separated from its label by U+200B is REDACTED in the persisted llm_view under the correct ingress ORDER (Secrets.redact/1 runs before Ingress.sanitize/1)
+diff --git a/samen_core/lib/samen/ai/agent/compaction.ex b/samen_core/lib/samen/ai/agent/compaction.ex
+index 48a0486..9f8540d 100644
+--- a/samen_core/lib/samen/ai/agent/compaction.ex
++++ b/samen_core/lib/samen/ai/agent/compaction.ex
+@@ -115,7 +115,7 @@ defmodule Samen.AI.Agent.Compaction do
+   def scrub(summary) when is_binary(summary) do
+     # THE ORDER (§5#3 / T184): the secrets lane runs FIRST, on the untouched raw binary, so
+     # ingress's own marker can never be inserted between a secret's label and its value.
+-    scrubbed = summary |> Secrets.redact() |> Ingress.sanitize()
++    scrubbed = summary |> Ingress.sanitize() |> Secrets.redact()
+ 
+     cond do
+       # "…or ingress collapses it to nothing" (§5#5). An empty segment is not a summary; the
