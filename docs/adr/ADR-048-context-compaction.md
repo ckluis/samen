@@ -325,7 +325,7 @@ normalizes to a new bounded `@error_kind` `:context_overflow` (today it collapse
 content-free `:provider_error`, which is honest but useless). On it: fold inline and retry
 **exactly once**, tracked by a counter on the **same turn row** — one turn index, two provider
 attempts, no loop. Three constraints:
-- the failed attempt's tokens still count toward `max_input_tokens` (it was a real call);
+- the failed attempt's own provider call is a real spend, but as shipped it is not yet billed into `run.input_tokens_used`: `agent.ex`'s fold accounting records only an ESTIMATE of the folded span (`in_tokens = est_tokens(span.folded)`), and `Samen.AI.Agent.Compaction.summarize/3`'s `{:ok, String.t()}` return shape discards the summarizer's real usage before any caller could bill it — so the summarization call is estimated, not billed, and the failed attempt is not billed at all today. End-to-end billing across `chokepoint.ex`, `agent.ex`, `provider.ex` and `ai.ex` is filed as backlog row `T223`, which also carries the ruling that billing must land BEFORE the retry-boundary budget re-check;
 - the retry boundary **re-checks the kill-switch, the durable cancel flag, and every budget**, for
   the same reason the loop re-checks them at every turn boundary and not only at run start
   (sabotage 244's target) — a recovery path that skips the kill-switch is a kill-switch with a hole;
