@@ -1,6 +1,6 @@
 # ADR-048 — Context compaction inside the ADR-046 erasure envelope: a dual-view transcript, a re-scrubbed summary, three-level overflow recovery, and withdrawal propagation on shred
 
-- **Status:** **ACCEPTED** (2026-09-05) — ratified in full by the operator, per the ADR-046 §7 / ADR-047 §9 convention.
+- **Status:** **ACCEPTED** (2026-09-05) — ratified in full by the operator, per the ADR-046 §7 / ADR-047 §9 convention. **Amended 2026-09-18 (§6 Level 2 constraint 1)** — see the `AMENDED` note at that constraint; the original obligation is unmet and tracked as [issue #11](https://github.com/ckluis/samen/issues/11).
   All twelve items — §10 D1–D6 and §11 O-1–O-6 — are ruled below (E-09, 2026-09-05). Batches
   C1–C4 (§9) are **AUTHORISED** and filed as backlog rows (see `Binds`, below); C4 is additionally
   gated on the O-3 implementation spike.
@@ -325,7 +325,18 @@ normalizes to a new bounded `@error_kind` `:context_overflow` (today it collapse
 content-free `:provider_error`, which is honest but useless). On it: fold inline and retry
 **exactly once**, tracked by a counter on the **same turn row** — one turn index, two provider
 attempts, no loop. Three constraints:
-- the failed attempt's own provider call is a real spend, but as shipped it is not yet billed into `run.input_tokens_used`: `agent.ex`'s fold accounting records only an ESTIMATE of the folded span (`in_tokens = est_tokens(span.folded)`), and `Samen.AI.Agent.Compaction.summarize/3`'s `{:ok, String.t()}` return shape discards the summarizer's real usage before any caller could bill it — so the summarization call is estimated, not billed, and the failed attempt is not billed at all today. End-to-end billing across `chokepoint.ex`, `agent.ex`, `provider.ex` and `ai.ex` is filed as backlog row `T223`, which also carries the ruling that billing must land BEFORE the retry-boundary budget re-check;
+- the failed attempt's own provider call is a real spend, but as shipped it is not yet billed into `run.input_tokens_used`: `agent.ex`'s fold accounting records only an ESTIMATE of the folded span (`in_tokens = est_tokens(span.folded)`), and `Samen.AI.Agent.Compaction.summarize/3`'s `{:ok, String.t()}` return shape discards the summarizer's real usage before any caller could bill it — so the summarization call is estimated, not billed, and the failed attempt is not billed at all today. End-to-end billing across `chokepoint.ex`, `agent.ex`, `provider.ex` and `ai.ex` is tracked as [issue #11](https://github.com/ckluis/samen/issues/11) (backlog row `T223`), which also carries the ruling that billing must land BEFORE the retry-boundary budget re-check;
+
+  > **AMENDED 2026-09-18 by the ADR-048 coverage run (PR #10).** This constraint originally read
+  > *"the failed attempt's tokens still count toward `max_input_tokens` (it was a real call)"*.
+  > That obligation was **ratified but never implemented**, and the amendment above describes what
+  > the code does TODAY rather than what it owes: `chokepoint.ex` flattens a usage-carrying
+  > `{:error, reason, usage}` to a content-free `{:provider_error, provider}`, losing **both** the
+  > usage and the reason, so §6 Level 2 never fires for a usage-carrying overflow and nothing bills
+  > the attempt. **Amending the record does not discharge the obligation** — the original text
+  > remains the target, and the ruling that billing must land BEFORE the retry-boundary budget
+  > re-check binds the implementation. Tracked as
+  > [issue #11](https://github.com/ckluis/samen/issues/11).
 - the retry boundary **re-checks the kill-switch, the durable cancel flag, and every budget**, for
   the same reason the loop re-checks them at every turn boundary and not only at run start
   (sabotage 244's target) — a recovery path that skips the kill-switch is a kill-switch with a hole;
