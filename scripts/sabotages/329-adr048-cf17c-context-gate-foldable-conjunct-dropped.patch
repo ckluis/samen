@@ -1,0 +1,51 @@
+# SABOTAGE: CF-17(c) (ADR-048 §6) — `context_gate/6`'s SECOND CONJUNCT IS DROPPED. The
+# `foldable(views, lines) == []` half of the LEVEL 1 / LEVEL 3 boundary is removed, so the
+# gate ends a run the instant its assembled context crosses `max_input_tokens` — without
+# ever asking whether a span is still eligible to fold. §6 defines Level 3 as "a context
+# that does not fit under it with NOTHING eligible left to fold"; this build fires on the
+# first half of that sentence alone, and a run that a later turn's Level 1 fold would have
+# rescued takes the `:context_exhausted` terminal instead.
+#
+# This is the coverage gap CF-17(c) named: before `test/ai/agent_context_gate_test.exs`
+# shipped, `grep -rn context_gate samen_core/test` returned ZERO hits and this deletion
+# passed the whole suite. The comment shipped directly above the gate CLAIMS "this gate
+# cannot be satisfied by a constant" — that claim is what this patch, and the test it
+# flips, turn into a measurement.
+#
+# Flips the RESCUED arm ONLY. Everything else stays GREEN, which is what makes the red mean
+# what it says: the EXHAUSTED CONTROL in the same file (same ceiling, same script shape,
+# the bulk text simply on turn one instead of turn two, so NOTHING is eligible to fold)
+# still passes — both before and after — so the red fails because the foldable conjunct is
+# gone, not because the gate, the ceiling, or the Level 3 terminal broke. `P3`'s two arms
+# in `agent_compaction_test.exs` are likewise untouched: they exercise the FIRST conjunct,
+# which this patch leaves intact.
+#
+# `views` is renamed to `_views` in the head in the same hunk — not extra scope, it is what
+# "the conjunct is gone" means here: the parameter has no remaining reader and leaving it
+# named would trip Elixir's unused-variable warning under `--warnings-as-errors`, so the
+# patch would fail to COMPILE instead of failing the named test. `foldable/2` itself keeps
+# its other caller (`fold_span/6`) and is untouched. Touches agent.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_context_gate_test.exs
+# MUST_FAIL: CF-17(c) RESCUED: a run OVER max_input_tokens that STILL HAS a foldable span does NOT end :context_exhausted
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1263,9 +1263,14 @@ defmodule Samen.AI.Agent do
+   #
+   # Under the ceiling the turn proceeds unchanged, which is what every shipped agent test
+   # exercises — so this gate cannot be satisfied by a constant.
+-  defp context_gate(%Run{} = run, views, definition, tools, goal, lines) do
+-    if context_tokens(definition, tools, goal, lines) > run.max_input_tokens and
+-         foldable(views, lines) == [] do
++  defp context_gate(%Run{} = run, _views, definition, tools, goal, lines) do
++    # SABOTAGE (CF-17(c), ADR-048 §6): the SECOND CONJUNCT is dropped. The gate now ends
++    # a run the moment its assembled context crosses `max_input_tokens`, WITHOUT asking
++    # whether anything is still eligible to fold — so a run a later turn's Level 1 fold
++    # would have rescued takes the Level 3 terminal instead. §6 defines Level 3 as "a
++    # context that does not fit under it with NOTHING eligible left to fold"; this is the
++    # gate firing on the first half of that sentence alone.
++    if context_tokens(definition, tools, goal, lines) > run.max_input_tokens do
+       {:error, :context_exhausted}
+     else
+       :ok
