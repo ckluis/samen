@@ -1,0 +1,62 @@
+# SABOTAGE: CF-17(b) (ADR-048 §6 / ruling UXD-18) — THE REPLAY BILLS FOR THE FOLD IT CLAIMS
+# TO REUSE. `reuse_fold!/5`'s `:advance` gains the two token counters `apply_fold!/4`
+# already charged at checkpoint 1, so every replay of a crashed folding turn charges the
+# tenant a SECOND time for a fold that was derived exactly once. Nothing else moves: the
+# `meta.replayed` stamp is still written, the ledger still holds exactly one entry per turn
+# index, and its `body` is still byte-identical to the `"proposed"` one.
+#
+# That last paragraph is the whole point of the gap. `P6 CASE A` in
+# `agent_compaction_test.exs` asserts reuse on the `replayed` boolean — a flag the reusing
+# path writes ABOUT ITSELF — plus the ledger shape, and this build satisfies every one of
+# those assertions. The fold is a pure function of `{run_id, turn_index, view state}`, so
+# the body cannot tell a reuse from a re-derivation either. The only thing that can is what
+# the replay SPENDS, and before `test/ai/agent_fold_reuse_cost_test.exs` shipped, NOTHING
+# measured it.
+#
+# Flips the REUSE arm ONLY. Everything else stays GREEN, which is what makes the red mean
+# what it says: the DERIVE COST control in the same file (no ledger row to reuse, so the
+# same fold is legitimately derived through `apply_fold!/4`, which this patch does not
+# touch) still passes — both before and after — so the red fails because the REPLAY billed,
+# not because folds stopped billing, stopped being recorded, or stopped being reused.
+#
+# `fold_entry_tokens/2` is introduced in the same hunk rather than reading the entry inline:
+# a fold-ledger entry is decoded JSON whose token fields are only guaranteed present on
+# entries this build wrote, and an inline `entry["input_tokens"]` would make the sabotage
+# crash on a legacy entry instead of BILLING — a crash proves nothing about the property.
+# Touches agent.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_fold_reuse_cost_test.exs
+# MUST_FAIL: CF-17(b) REUSE COST: a replay that REUSES the :proposed fold ledger row SPENDS NOTHING for it
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1562,13 +1562,28 @@ defmodule Samen.AI.Agent do
+             folds,
+             views.turn_lens,
+             views.pending
+-          )
++          ),
++        # SABOTAGE (CF-17(b), ADR-048 §6 / ruling UXD-18): the REPLAY BILLS FOR THE FOLD IT
++        # CLAIMS TO REUSE. The `replayed` stamp above is still written, the body is still
++        # byte-identical and there is still exactly ONE ledger entry per turn index — so
++        # every assertion `P6 CASE A` makes still holds. What changed is the only thing
++        # that distinguishes reuse from re-derivation: the spend. The tokens billed at
++        # checkpoint 1 are charged to the tenant a SECOND time on every replay.
++        input_tokens_used: run.input_tokens_used + fold_entry_tokens(entry, "input_tokens"),
++        output_tokens_used: run.output_tokens_used + fold_entry_tokens(entry, "output_tokens")
+       })
+       |> Ash.update!(authorize?: false)
+ 
+     {:ok, run, lines, views}
+   end
+ 
++  defp fold_entry_tokens(entry, key) do
++    case Map.get(entry, key) do
++      n when is_integer(n) and n > 0 -> n
++      _ -> 0
++    end
++  end
++
+   # SELECTION, kept apart from eligibility on purpose: oldest-first over the eligible
+   # turns, whole turns only, and the SMALLEST prefix whose removal brings the assembled
+   # context back under the watermark — the whole eligible span when no prefix can (a
