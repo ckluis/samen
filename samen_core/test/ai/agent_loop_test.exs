@@ -626,4 +626,43 @@ defmodule Samen.AI.AgentLoopTest do
                Chokepoint.complete(Scripted, %{}, :complete, ["x"], grounding: %{}, meta: %{})
     end
   end
+
+  # ── CF-17(d): the `{:error, reason, usage}` arm, red-first ──────────────────────────
+  #
+  # ADR-048 §6 Level 2 constraint 1: "the failed attempt's tokens still count toward
+  # `max_input_tokens` (it was a real call)". They cannot count if the failed call cannot
+  # SAY what it spent, so the double must be able to script a failure that carries usage.
+  #
+  # ONE shared binding is read by BOTH arms below, each time in a POSITIVE equality and in
+  # the SAME direction — so a single assertion-site substitution of a differing map literal
+  # flips BOTH arms, which is the non-disjointness proof. Mutating this DEFINITION instead
+  # would move the input and the expectation together and both arms would still pass, which
+  # is exactly how a tautological control survives mutation and looks fine.
+  @scripted_usage %{input_tokens: 4321, output_tokens: 765}
+
+  describe "Samen.AI.Provider.Scripted: CF-17(d) error-with-usage arm" do
+    test "RED: a scripted {:error, reason, usage} entry carries its usage out of complete/2, never as {:ok, _}" do
+      {:ok, payload} = Chokepoint.seal(:complete, ["x"], grounding: %{}, meta: %{})
+      Scripted.script([{:error, :provider_overloaded, @scripted_usage}])
+
+      result = Scripted.complete(payload, %{})
+
+      # Fail-honest (ADR-014/024/026): the call FAILED, so it is reported as a failure. This
+      # arm WIDENS the error return to carry what the failed call spent; it never softens a
+      # failure into an {:ok, _} for work the double did not do.
+      assert elem(result, 0) == :error
+      refute match?({:ok, _}, result)
+
+      assert {:error, :provider_overloaded, usage} = result
+      assert usage == @scripted_usage
+    end
+
+    test "CONTROL: a successful scripted call still returns its usage unchanged" do
+      {:ok, payload} = Chokepoint.seal(:complete, ["x"], grounding: %{}, meta: %{})
+      Scripted.script([{:continue, "spent the very same tokens", @scripted_usage}])
+
+      assert {:ok, completion} = Scripted.complete(payload, %{})
+      assert completion.usage == @scripted_usage
+    end
+  end
 end

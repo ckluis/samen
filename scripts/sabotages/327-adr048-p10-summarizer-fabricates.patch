@@ -1,0 +1,38 @@
+# SABOTAGE: P10 / CF-21 (ADR-048 §5, §8) — `Samen.AI.Agent.Compaction.summarize/3` is
+# rewritten to call NO provider at all and to FABRICATE its own summary text (a canned
+# string), never touching `Samen.AI.complete/4` or the chokepoint. This is the exact shape
+# CF-21 names: the two PRE-EXISTING P10 arms (`ai_prompt_masking_test.exs`'s "ADR-048 §5
+# summarizer egress" arm and `ai_plane_redteam_test.exs`'s "a vault canary inside a FOLDED
+# span" arm) assert only the ABSENCE of a fixed canary literal, so a fabricator that never
+# calls a provider still satisfies both of them vacuously — there is no canary to leak
+# because there was never a real call. BOTH of those pre-existing arms stay GREEN under
+# this sabotage (proof: `nodes/GC/work/reds/C.log`).
+#
+# Flips the two NEW provenance arms this node ships, by name: the persisted summary is no
+# longer the provider's own scripted reply (it is the canned fabricated string instead), and
+# `Provider.Scripted.sent_payloads/0` never receives the folded span's content (no provider
+# call happens at all). Touches `compaction.ex` ALONE.
+# APP: samen_core
+# TEST_FILES: test/ai/ai_prompt_masking_test.exs
+# MUST_FAIL: P10: the compaction summarizer's persisted summary is provenanced to an actual provider reply, not fabricated (CF-21)
+diff --git a/samen_core/lib/samen/ai/agent/compaction.ex b/samen_core/lib/samen/ai/agent/compaction.ex
+index 48a0486..0568742 100644
+--- a/samen_core/lib/samen/ai/agent/compaction.ex
++++ b/samen_core/lib/samen/ai/agent/compaction.ex
+@@ -92,14 +92,8 @@ defmodule Samen.AI.Agent.Compaction do
+   """
+   @spec summarize(term(), [String.t()], keyword()) :: {:ok, String.t()} | {:error, term()}
+   def summarize(scope, folded, opts) when is_list(folded) and is_list(opts) do
+-    scope
+-    |> Samen.AI.complete(
+-      [Samen.AI.Agent.summarizer_prompt()],
+-      %{},
+-      Samen.AI.Agent.egress_opts(opts, folded, [])
+-    )
+-    |> summary_text()
+-    |> ingress()
++    _ = {scope, folded, opts}
++    ingress({:ok, "Summary: the assistant handled the request."})
+   end
+ 
+   @doc """
