@@ -8,6 +8,19 @@ All notable changes to Samen are recorded here. The format follows
 
 ### Added
 
+- **The G-06 double sweep is machinery, not prose** (`scripts/double-sweep.sh`, wired
+  UNCONDITIONALLY as `./ci.sh`'s first step): every run sweeps the sabotage corpus twice —
+  the branch's NEW patches against a pristine `git archive` of `origin/main` (each must
+  FAIL there, or it anchors on nothing the branch added) and the WHOLE corpus against the
+  tree about to ship (proving no edit disarmed an already-shipped sabotage). The new-patch
+  set is derived by set difference and each failing set is re-derived by its own sweep, so
+  no count is ever inherited. Distinct exit codes name the failure: 3 anchor, 4 disarm,
+  5 accounting. `git apply --check` only — ~6s over 324 patches, no compile, no DB — which
+  is what makes an always-on gate affordable; the expensive REPLAY stays the opt-in
+  `SAMEN_SABOTAGE=1` harness. Before this the rule lived only in session prompts, and nine
+  commits disarmed a shipped sabotage anyway. `scripts/double_sweep_test.sh` (also
+  unconditional in `ci.sh`) proves the sweep goes red once per failure class against a
+  throwaway fixture repo, including a mutation that deletes its own coverage counter.
 - **Canonical Work scope — `Project` + the self-referential `Task`** (ADR-041 §3, F1): a new
   `Samen.Scopes.Work` blueprint ships one canonical Work item (`kind`/`title`/`body`/`status`/
   `priority`/`due_at`/`completed_at`, a generic CRM-agnostic `(subject_key, subject_id)`
@@ -50,6 +63,17 @@ All notable changes to Samen are recorded here. The format follows
   impersonated write produces BOTH a Version row (E7) and a separate §6.6 `impersonation_write`
   governance `aud_event` — never one row serving both (the impersonation-write audit no-ops on
   version resources).
+
+### Fixed
+
+- **`scripts/sabotage.sh` no longer under-reports its own coverage.** The harness is
+  fail-fast and iterates in the glob's LEXICOGRAPHIC order (`240-` before `44-`), so an
+  abort printed only the patch that died: a `--touching` run that SELECTED 34 and
+  EXERCISED 3, and a full run that SELECTED 324 and EXERCISED 34, were both indistinguishable
+  from broad coverage. Every exit path now prints `SABOTAGE HARNESS: PROCESSED <n> of <m>
+  SELECTED`; an abort additionally NAMES every patch it never exercised and says in words
+  that the run is not coverage. Each replayed patch is prefixed `[k/m]`, and `ALL PASSED`
+  is now guarded by a `PROCESSED == SELECTED` invariant.
 
 ### Removed
 

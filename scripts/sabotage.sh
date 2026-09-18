@@ -62,6 +62,26 @@
 # vs the full-run line:
 #   SABOTAGE HARNESS: ALL PASSED (212 sabotages flipped their named tests; byte-exact restores)
 #
+# ── PROCESSED-vs-SELECTED ACCOUNTING (the harness must not over-report itself) ─
+# This harness is FAIL-FAST: the first patch that will not apply, will not flip or
+# leaves residue ends the run. Until this accounting existed, the summary named ONLY
+# the patch that died — so an abort three patches into a 34-patch selection printed
+# output INDISTINGUISHABLE from full coverage of that selection. Two real runs were
+# read that way: a `--touching` run that SELECTED 34 and EXERCISED 3 (aborted at
+# `243-…`), and a full run that SELECTED 324 and EXERCISED 34 (aborted at `121-…`).
+#
+# The failing patch's NUMBER is no help, because the selection is iterated in the
+# glob's LEXICOGRAPHIC order — `240-` sorts before `44-`, `121-` before `13-` — so
+# "it died at 243" says nothing about how far the run got. (The order is deliberately
+# left as-is: it is the order `--list` prints and the order every gate log records.)
+#
+# Therefore EVERY exit path — success and abort — prints
+#   SABOTAGE HARNESS: PROCESSED <n> of <m> SELECTED
+# and an abort additionally NAMES the patches that were never exercised. `n == m` is
+# the only shape that certifies the selection; `n < m` is an abort and says so in
+# words. A reader (or a script grepping that line) can no longer mistake an early
+# abort for coverage.
+#
 # Wiring: a permanent OPT-IN root ci.sh step, gated by SAMEN_SABOTAGE=1 (the
 # WS-D generative probes run unconditionally; this one deliberately breaks the
 # tree and re-runs targeted suites, so it is opt-in — gates run it explicitly).
@@ -82,6 +102,13 @@ WORK="$(mktemp -d "${TMPDIR:-/tmp}/samen_sabotage.XXXXXX")"
 
 APPLIED_PATCH=""
 
+# ── run accounting (see PROCESSED-vs-SELECTED in the header) ─────────────────
+# SEL_COUNT stays -1 until a selection actually exists, so a failure BEFORE that
+# (header preflight, no patches on disk) prints no accounting line it cannot honour.
+SEL_COUNT=-1
+PROCESSED=0
+SELECTED_NAMES=""
+
 cleanup() {
   # Never leave a sabotaged tree behind — revert the in-flight patch on ANY exit.
   if [[ -n "$APPLIED_PATCH" ]]; then
@@ -92,9 +119,39 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# coverage_report <ABORT|OK> — say, on EVERY exit path, how much of the SELECTED
+# set this run actually EXERCISED. An abort names what it never reached: silence
+# there is what let two real runs be read as coverage they never had.
+coverage_report() {
+  [[ $SEL_COUNT -ge 0 ]] || return 0   # died before a selection existed — nothing to account for
+  local mode="$1"
+  local missed=$((SEL_COUNT - PROCESSED))
+  echo "SABOTAGE HARNESS: PROCESSED $PROCESSED of $SEL_COUNT SELECTED"
+  [[ "$mode" == "ABORT" ]] || return 0
+  if [[ $missed -le 0 ]]; then
+    echo "  (every selected patch had been exercised before this failure)"
+    return 0
+  fi
+  echo "  !! NOT COVERAGE: $missed of the $SEL_COUNT selected patches were NEVER EXERCISED."
+  echo "     This run certifies ONLY the $PROCESSED patch(es) that passed above the failure."
+  echo "     The failing patch's NUMBER is not progress: the run order is the glob's"
+  echo "     LEXICOGRAPHIC order ('240-' sorts before '44-'), not numeric."
+  echo "  NOT EXERCISED (the first is the patch that FAILED; the rest never ran):"
+  if [[ -n "$SELECTED_NAMES" && -s "$SELECTED_NAMES" ]]; then
+    tail -n +"$((PROCESSED + 1))" "$SELECTED_NAMES" | head -20 | sed 's/^/    - /'
+    if [[ $missed -gt 20 ]]; then
+      echo "    … and $((missed - 20)) more — re-run the same flags with --list for the full set."
+    fi
+  else
+    echo "    (selection listing unavailable)"
+  fi
+  return 0
+}
+
 fail() {
   echo ""
   echo "SABOTAGE HARNESS: FAILED — $1"
+  coverage_report ABORT
   exit 1
 }
 
@@ -340,6 +397,17 @@ if [[ $sel_count -eq 0 ]]; then
   fail "selection is empty ($sel_count of $grand_total) for filter [$(filter_label)] — nothing to certify"
 fi
 
+# Arm the PROCESSED-vs-SELECTED accounting: from here on every exit path can and must
+# say how much of this selection was exercised. The names are written in the SAME order
+# the replay loop walks them, so `tail -n +<PROCESSED+1>` on abort is exactly the
+# never-exercised tail — no re-derivation, no chance of listing a different set.
+SEL_COUNT=$sel_count
+SELECTED_NAMES="$WORK/selected_names"
+: > "$SELECTED_NAMES"
+for patch in "${selected[@]}"; do
+  basename "$patch" >> "$SELECTED_NAMES"
+done
+
 # Announce the effective selection at the start of any FILTERED run (the default
 # full run stays byte-identical: it prints no such preamble).
 if [[ $FILTER_ACTIVE -eq 1 ]]; then
@@ -348,9 +416,10 @@ if [[ $FILTER_ACTIVE -eq 1 ]]; then
 fi
 
 # ── replay the selected patches ──────────────────────────────────────────────
-total=0
+idx=0
 
 for patch in "${selected[@]}"; do
+  idx=$((idx + 1))
   name="$(basename "$patch")"
   app="$(meta "$patch" APP)"
   test_files="$(meta "$patch" TEST_FILES)"
@@ -359,7 +428,9 @@ for patch in "${selected[@]}"; do
   [[ -s "$WORK/must_fail" ]] || fail "$name: no MUST_FAIL headers"
 
   echo ""
-  echo "==> sabotage $name (app: $app)"
+  # [k/m] is the run's own progress meter: a log tail now shows where an abort
+  # stopped without the reader having to count '==>' lines.
+  echo "==> [$idx/$sel_count] sabotage $name (app: $app)"
 
   # 1. Byte-exact baseline of every file the patch touches.
   touched_paths "$patch" > "$WORK/touched"
@@ -406,14 +477,22 @@ for patch in "${selected[@]}"; do
     fail "$name: SHA mismatch after revert — residue left behind"
   echo "    restore: byte-exact (sha-256 verified)"
 
-  total=$((total + 1))
+  # ONLY here — after the flip was confirmed AND the restore verified — does a patch
+  # count as EXERCISED. Anything that exits earlier leaves it in the not-exercised tail.
+  PROCESSED=$((PROCESSED + 1))
 done
 
-[[ $total -gt 0 ]] || fail "no patches replayed"
+[[ $PROCESSED -gt 0 ]] || fail "no patches replayed"
+# Defensive invariant: ALL PASSED may never print over a short run. fail() exits, so
+# this cannot trip today — it exists so that a future `continue` in the loop above
+# cannot quietly turn a partial replay into a green summary.
+[[ $PROCESSED -eq $sel_count ]] ||
+  fail "accounting mismatch: exercised $PROCESSED of $sel_count selected patches without an earlier failure"
 
 echo ""
+coverage_report OK
 if [[ $FILTER_ACTIVE -eq 1 ]]; then
-  echo "SABOTAGE HARNESS: ALL PASSED ($total of $grand_total sabotages — FILTERED: $(filter_label))"
+  echo "SABOTAGE HARNESS: ALL PASSED ($PROCESSED of $grand_total sabotages — FILTERED: $(filter_label))"
 else
-  echo "SABOTAGE HARNESS: ALL PASSED ($total sabotages flipped their named tests; byte-exact restores)"
+  echo "SABOTAGE HARNESS: ALL PASSED ($PROCESSED sabotages flipped their named tests; byte-exact restores)"
 fi
