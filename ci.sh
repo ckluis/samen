@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # ci.sh — run all spike test suites + samen_core + demo gate in sequence.
 # Exits non-zero on the first failure.
+#
+# Order: the G-06 double sweep (seconds, no DB — proves no shipped sabotage was disarmed)
+# → spikes → samen_core → the AI tier → adapter gates → gen_app probes → the opt-in
+# sabotage REPLAY (SAMEN_SABOTAGE=1) → the four app gates, concurrently.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,6 +21,51 @@ run_spike() {
   )
   echo "==> spike $spike_name: PASSED"
 }
+
+# --- G-06 DOUBLE SWEEP — the anti-disarm gate, UNCONDITIONAL and FIRST ---------------
+# THE RULE. Every increment sweeps the sabotage corpus TWICE: (a) the increment's NEW
+# patches against a pristine archive of origin/main — each MUST fail there, or it is
+# testing nothing this increment added; (b) the WHOLE corpus against the tree about to
+# ship — proving no edit in this increment stopped a shipped sabotage from biting.
+#
+# WHY IT IS A GATE STEP AND NOT A PARAGRAPH. That rule lived only in session prompts and
+# gate handoffs, enforced by whoever remembered to look — and NINE commits disarmed a
+# shipped sabotage anyway. Each was caught by a person deciding to check; the tenth would
+# not have been. Prose that nine people have already walked past is not a control.
+#
+# WHY IT RUNS FIRST, AND WHY IT IS FREE. It is `git apply --check` per patch per baseline:
+# no compile, no DB, no `mix test`. MEASURED at 324 patches: ~6s for the sweep plus ~1s
+# for its own regression harness, against a ~12-minute gate. First, because a disarmed
+# sabotage invalidates every proof that would otherwise run for twelve minutes after it.
+#
+# WHAT IT IS NOT. It is NOT the REPLAY — apply → run the named tests → they must FAIL →
+# revert → SHA-256 byte-exact — which is the opt-in `SAMEN_SABOTAGE=1` harness further
+# down and costs ~17 minutes for the full corpus. That one stays opt-in; this one cannot
+# be, because "does the guard still bite at all" is not a question worth a flag.
+echo ""
+echo "==> Running G-06 double sweep (anchor new patches at origin/main; disarm check against this tree)"
+if git -C "$REPO_ROOT" rev-parse --verify -q origin/main >/dev/null; then
+  bash "$REPO_ROOT/scripts/double-sweep.sh"
+  echo "==> double sweep: PASSED"
+else
+  # Not a silent skip: without origin/main there is no previous HEAD to anchor against,
+  # and a gate that quietly drops a control is how the control stops existing.
+  echo "########################################################################"
+  echo "##  DOUBLE SWEEP NOT RUN — origin/main is not present in this clone   ##"
+  echo "########################################################################"
+  echo "  The G-06 anchor/disarm check needs a previous HEAD. This run proves NOTHING"
+  echo "  about whether your edits disarmed a shipped sabotage."
+  echo "  Fix: git fetch origin main   (or run scripts/double-sweep.sh --base <ref>)"
+  echo "########################################################################"
+fi
+
+# The double sweep's own red cases must still go red — six of them, one per failure
+# class, including a mutation that deletes its PROCESSED counter. Runs against a
+# throwaway fixture repo in a temp dir; ~1s; never reads or writes this tree.
+echo ""
+echo "==> Running double-sweep regression harness (every red case must still go red)"
+bash "$REPO_ROOT/scripts/double_sweep_test.sh"
+echo "==> double-sweep regression: PASSED"
 
 # --- spike list ---
 run_spike "$REPO_ROOT/spikes/s00_smoke"

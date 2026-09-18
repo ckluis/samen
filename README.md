@@ -124,6 +124,25 @@ fail is treated as a bug.
   It is opt-in because it deliberately breaks the tree hundreds of times and re-runs
   DB-backed suites; the default CI path stays green-only. Later gates add a new `.patch`
   rather than re-deriving sabotages by hand.
+
+  Every run — success or abort — ends with `SABOTAGE HARNESS: PROCESSED <n> of <m>
+  SELECTED`. The harness is fail-fast, so `n < m` means the run stopped early and
+  certified only the `n` patches above the failure; it then NAMES the patches it never
+  exercised. Nothing else in the output distinguishes an early abort from full coverage,
+  and twice it was read as coverage it never had.
+- **The double sweep, as a gate step rather than a convention** (`scripts/double-sweep.sh`,
+  run UNCONDITIONALLY and FIRST by `./ci.sh`). Two questions, both asked on every run:
+  *(a) anchor* — each sabotage patch the branch ADDS is swept against a pristine
+  `git archive` of `origin/main` and must **fail** there, or it is not testing anything
+  the branch added; *(b) disarm* — the whole corpus is swept against the tree about to
+  ship, so an edit that stops an already-shipped sabotage from biting is caught by name.
+  Both halves re-derive their own numbers (the new-patch set by set difference, each
+  failing set by its own sweep — never inherited from a table). It is `git apply --check`
+  only: ~6s over 324 patches, no compile and no DB, which is why it is affordable as an
+  always-on gate. Nine commits disarmed a shipped sabotage before this existed; each was
+  caught by a person deciding to look. `scripts/double_sweep_test.sh` (also in `ci.sh`)
+  proves the sweep still goes red once per failure class, including a mutation that
+  deletes its own coverage counter.
 - **Destruction oracle for crypto-shred.** `mix samen.verify.no_plaintext_pii` runs as a
   separate OS process across every tier (domain rows, vault, audit events, rollups, Oban
   args, the KMS store) and attests that a shredded subject is unrecoverable — the erasure
