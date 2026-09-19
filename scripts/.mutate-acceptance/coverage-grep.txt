@@ -1,0 +1,4 @@
+context_gate in test/ (expect NONE):
+  -> rc=1 (1=absent, the finding)
+positive control 'defmodule' in test/ (expect a hit):
+samen_core/test/gen_scope_authn_ergonomics_test.exs

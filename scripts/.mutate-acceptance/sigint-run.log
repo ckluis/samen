@@ -1,0 +1,14 @@
+== samen mutation-testing harness ==
+   repo:    /private/tmp/claude-501/-Users-clank-Desktop-projects/ddcaac3e-fe77-4692-bdd1-7edbf68b2a13/scratchpad/mutation
+   scratch: /var/folders/_6/44y5p5453njbczf2l4nzx0_w0000gn/T//mutate.n068Fj
+
+── TARGET: context_gate/6  (samen_core/lib/samen/ai/agent.ex)
+   clause: samen_core/lib/samen/ai/agent.ex:1266-1273   mutants: 6   ops: drop-conjunct,flip-comparison,force-guard
+   baseline: compile + scoped test GREEN
+
+!! SIGNAL received mid-run -- restoring tree from snapshots before exit
+   restore: byte-exact (sha-256 verified)
+
+MUTANTS: generated 6, run 0, killed 0, survived 0, stillborn 0
+   NOT RUN (aborted before completion): 6 mutant(s)
+RUN STATUS: ABORTED (signal)
