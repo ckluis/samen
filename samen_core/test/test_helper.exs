@@ -18,8 +18,51 @@ Application.put_env(:samen_core, :kms_key_dir, kms_key_dir)
 System.at_exit(fn _ -> File.rm_rf!(kms_key_dir) end)
 
 # Drop + create + migrate so the schema always matches the generated migrations.
-_ = Ecto.Adapters.Postgres.storage_down(TestRepo.config())
-:ok = Ecto.Adapters.Postgres.storage_up(TestRepo.config())
+#
+# The drop can LOSE A RACE with a previous `mix test` whose connections have not
+# finished closing: `storage_down` then cannot drop the database, and the following
+# `storage_up` answers `{:error, :already_up}`. That used to blow up here as a bare
+# MatchError with no explanation. Surfaced by the ADR-049 mutation gate, which runs
+# `mix test` dozens of times back to back and so loses that race regularly.
+#
+# `{:error, :already_up}` is NOT tolerated: the drop is load-bearing (it is what
+# makes the schema match the generated migrations rather than whatever the last run
+# left behind), so accepting an un-dropped database would quietly run the suite
+# against a stale schema. Instead, retry the drop briefly, then fail LOUDLY with the
+# reason and the fix.
+defmodule TestDbReset do
+  @moduledoc false
+  def reset!(config, attempts \\ 25) do
+    _ = Ecto.Adapters.Postgres.storage_down(config)
+
+    case Ecto.Adapters.Postgres.storage_up(config) do
+      :ok ->
+        :ok
+
+      {:error, :already_up} when attempts > 1 ->
+        # A lingering connection from a previous run still holds the database open.
+        Process.sleep(200)
+        reset!(config, attempts - 1)
+
+      {:error, :already_up} ->
+        raise """
+        could not drop the samen_core test database (#{config[:database]}): something is
+        still connected to it after 5s of retrying, so `storage_down` cannot drop it and
+        the schema would not match the generated migrations.
+
+        Usually a `mix test` (or an iex -S mix) from this app is still shutting down, or a
+        psql session is sitting in it. Close it and re-run. This is NOT tolerated
+        automatically: running the suite against a database this helper did not create is
+        how a stale column outlives the migration that removed it.
+        """
+
+      {:error, reason} ->
+        raise "could not create the samen_core test database: #{inspect(reason)}"
+    end
+  end
+end
+
+:ok = TestDbReset.reset!(TestRepo.config())
 
 {:ok, _} = TestRepo.start_link()
 

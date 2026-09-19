@@ -82,6 +82,26 @@ defmodule Samen.Delivery.LifecycleTest do
     )
   end
 
+  # --- MG-05/MG-06 suppression stubs (filed by the mutation gate, ADR-049) -----
+  # Three shapes the documented `Chokepoint.suppressed?/2` contract distinguishes:
+  # an honest `true`, a TRUTHY-BUT-NOT-`true` answer (which the `== true` coercion
+  # must read as NOT suppressed rather than trusting truthiness), and a check that
+  # RAISES (which must fail CLOSED).
+  defmodule SuppressYes do
+    @moduledoc false
+    def suppressed?(_org_id, _subscriber_id), do: true
+  end
+
+  defmodule SuppressTruthyNotTrue do
+    @moduledoc false
+    def suppressed?(_org_id, _subscriber_id), do: :probably
+  end
+
+  defmodule SuppressRaises do
+    @moduledoc false
+    def suppressed?(_org_id, _subscriber_id), do: raise("suppression backend down")
+  end
+
   setup do
     # Oban.insert (enqueue seam tests) writes an oban_jobs row via the test repo.
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(SamenCore.TestRepo)
@@ -90,10 +110,12 @@ defmodule Samen.Delivery.LifecycleTest do
     prev = Application.get_env(:samen_core, EmailWorker)
     prev_mkt = Application.get_env(:samen_core, Samen.Scopes.Marketing.SendWorker)
     prev_env = Application.get_env(:samen_core, :delivery_env)
+    prev_chokepoint = Application.get_env(:samen_core, Samen.Delivery.Chokepoint)
 
     on_exit(fn ->
       restore(EmailWorker, prev)
       restore(Samen.Scopes.Marketing.SendWorker, prev_mkt)
+      restore(Samen.Delivery.Chokepoint, prev_chokepoint)
 
       if prev_env,
         do: Application.put_env(:samen_core, :delivery_env, prev_env),
@@ -342,6 +364,68 @@ defmodule Samen.Delivery.LifecycleTest do
 
       assert args["subscriber_id"] == "cust-9"
       assert args["event"] == "payment_failed"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # The chokepoint's own two pre-delivery decisions (MG-04, MG-05, MG-06).
+  #
+  # Filed by the mutation gate (ADR-049), not by hand. `scripts/mutate.sh` mutated
+  # `Samen.Delivery.Chokepoint`'s provider-resolution guard and all three arms of
+  # its suppression coercion, and this suite — the owning suite for
+  # chokepoint.ex — killed none of them. The module's two documented fail-closed
+  # promises ("returns nil when NEITHER resolves", "a check that RAISES fails
+  # CLOSED") had no test at all; the mutants that break them would have shipped
+  # green.
+
+  describe "Chokepoint.resolve_provider/3 (the nothing-is-wired case)" do
+    test "returns nil — NOT a {nil, %{}} pair — when neither selection nor fallback resolves" do
+      # THE MUTANT THIS KILLS: the fallback clause guards on
+      # `is_atom(fallback_adapter) and not is_nil(fallback_adapter)`. `is_atom(nil)`
+      # is TRUE, so the `not is_nil` half is the entire thing keeping a nil fallback
+      # out — weaken that `and` to `or` and this returns `{nil, %{}}`, which reads
+      # downstream as a RESOLVED provider. That is a fail-OPEN: delivery proceeds
+      # against a nil adapter instead of being honestly blocked.
+      assert Samen.Delivery.Chokepoint.resolve_provider(nil, nil, %{}) == nil
+    end
+
+    test "CONTROL: a real fallback adapter IS resolved (the nil case above is the guard, not a dead path)" do
+      assert Samen.Delivery.Chokepoint.resolve_provider(nil, OkAdapter, %{k: 1}) ==
+               {OkAdapter, %{k: 1}}
+    end
+  end
+
+  describe "Chokepoint.suppressed?/2 (strict coercion + fail-closed)" do
+    test "an honest true IS suppressed" do
+      Application.put_env(:samen_core, Samen.Delivery.Chokepoint, suppression_module: SuppressYes)
+      assert Samen.Delivery.Chokepoint.suppressed?("org_1", "sub_1")
+    end
+
+    test "a TRUTHY-but-not-true answer is NOT suppressed (the `== true` coercion is load-bearing)" do
+      # The check is `mod.suppressed?(...) == true`, not a bare truthiness test: a
+      # backend that answers `:probably` has not said yes. Mutate the `==` to `!=`
+      # and this same call reports SUPPRESSED, silently dropping deliverable mail.
+      Application.put_env(:samen_core, Samen.Delivery.Chokepoint,
+        suppression_module: SuppressTruthyNotTrue
+      )
+
+      refute Samen.Delivery.Chokepoint.suppressed?("org_1", "sub_1")
+    end
+
+    test "a suppression check that RAISES fails CLOSED (refuses the send)" do
+      # The documented promise: "a broken check must never silently let a send
+      # through." The rescue arm returns `true`; flip that literal to `false` and a
+      # crashed suppression backend turns into a green light for every send.
+      Application.put_env(:samen_core, Samen.Delivery.Chokepoint,
+        suppression_module: SuppressRaises
+      )
+
+      assert Samen.Delivery.Chokepoint.suppressed?("org_1", "sub_1")
+    end
+
+    test "CONTROL: with NO suppression module configured nothing is suppressed" do
+      Application.put_env(:samen_core, Samen.Delivery.Chokepoint, [])
+      refute Samen.Delivery.Chokepoint.suppressed?("org_1", "sub_1")
     end
   end
 

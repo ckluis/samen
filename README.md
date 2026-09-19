@@ -124,6 +124,28 @@ fail is treated as a bug.
   It is opt-in because it deliberately breaks the tree hundreds of times and re-runs
   DB-backed suites; the default CI path stays green-only. Later gates add a new `.patch`
   rather than re-deriving sabotages by hand.
+- **Mutation gate — the converse question.** A sabotage corpus proves the guarantees the repo
+  *claims* are still guarded, but every sabotage is a claim someone thought to make, so it can
+  never report what it is missing. `scripts/mutate.sh` (ADR-049) closes that: it enumerates
+  mutation sites **mechanically from the AST** over four operator families (`==`/`!=`, `>`/`>=`,
+  `and`/`or`, `true`/`false` — the shapes these mechanisms actually fail in) and requires each
+  mutant to be killed by that file's **owning** tests only, so a kill is attributed by
+  construction rather than counted:
+
+  ```
+  SAMEN_MUTATION=1 ./ci.sh          # the tier-1 chokepoint/guard watch-list
+  scripts/mutate.sh --changed       # just the mutants your diff touches
+  ```
+
+  A surviving mutant fails the run unless it carries a **content-pinned** ledger entry — one that
+  hashes the source line it excuses, so editing that line expires the exemption, and an exemption
+  whose mutant is now killed fails the gate as obsolete. `--emit-patches` writes each survivor as
+  a sabotage-format patch, so a mechanically-found hole gets **promoted** into a permanent
+  hand-named guarantee. The gate's own 30-assertion self-test pins the three ways a mutation gate
+  lies (scoring everything as killed, scoring a compile breakage as a kill, scoring mutants
+  against an already-red baseline) and runs unconditionally. Its first run over the eight guard
+  modules killed 42 of 61 mutants and closed six real holes with tests — among them a
+  `Pii.Classification.pii?/1` that could be fully **inverted** with nothing noticing.
 - **Destruction oracle for crypto-shred.** `mix samen.verify.no_plaintext_pii` runs as a
   separate OS process across every tier (domain rows, vault, audit events, rollups, Oban
   args, the KMS store) and attests that a shredded subject is unrecoverable — the erasure
@@ -149,6 +171,8 @@ re-run this pass), `--warnings-as-errors` clean; treat exact counts as direction
 | `driftwood` | 123 |
 | `pawchart` | 49 |
 | sabotage harness | 285/285 sabotages flipped their named tests; byte-exact restores |
+| mutation gate (tier 1) | 61 mutants over 8 chokepoint/guard modules: 42 killed by their owning tests, 17 ledgered (16 referenced gaps + 1 proven equivalent), 2 build-refused |
+| mutation-gate self-test | 30/30 assertions, including the negative controls that prove the gate can report a survivor |
 
 ## Getting started
 
@@ -202,7 +226,7 @@ command in this README and that tutorial is verified against the CI probes' exec
 | `pawchart/` | Reference vertical: veterinary — thin scope mounts (~188 lines) plus a real, hand-authored clinic UI on top |
 | `spikes/` | The mechanism spikes (s00–s07) that de-risked the kernel; still run by root `ci.sh` |
 | `docs/` | ADRs (`docs/adr/`), guides (`docs/guides/`), the gate reports (`docs/gate-*.md`), the roadmap (`docs/saas-gap-roadmap.md`), and an archived long-form design variant (`docs/archive/samen-foundry.html`) |
-| `scripts/` | `sabotage.sh` + every committed sabotage patch (285 today, growing every phase) |
+| `scripts/` | `sabotage.sh` + every committed sabotage patch (285 today, growing every phase), and the ADR-049 mutation gate (`mutate.sh`, `mutation_lint.sh`, `mutation_selection_test.sh`, `mutation/`) |
 | `ci.sh` | The root gate: everything above, in sequence, fail-fast |
 
 ## Docs

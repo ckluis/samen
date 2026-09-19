@@ -85,6 +85,23 @@ defmodule Samen.ScopeMaskCaseTest do
         assert_scope_masked!(render_rows([@acme], MapSet.new()), [], [])
       end
     end
+
+    # MG-03 — filed by the mutation gate (ADR-049), not by hand. The anti-vacuity
+    # guard is `refute names == [] and handles == []`: refuse ONLY when there is
+    # nothing to assert at all. `scripts/mutate.sh` mutated that `and` to `or` and
+    # this suite did not notice, because the empty-AND-empty case above was its only
+    # anti-vacuity test. Under `or` the helper refuses a ONE-SIDED call — and a
+    # one-sided call is the normal shape of a real mask proof (a table with a name
+    # but no handle column, a CSV projection with handles and no display name), so
+    # the mutant would have broken every such call site while every test here stayed
+    # green. Both one-sided directions are asserted: `or` breaks both, and a guard
+    # that refuses nothing at all still fails the empty-pair test above.
+    test "ACCEPTS a one-sided call — names-only and handles-only are real mask proofs, not vacuous" do
+      html = render_rows([@acme], MapSet.new())
+
+      assert assert_scope_masked!(html, [@acme.name], []) == html
+      assert assert_scope_masked!(html, [], [@acme.handle]) == html
+    end
   end
 
   describe "sabotage twin — flipping scope_of/2 permissive is CAUGHT" do

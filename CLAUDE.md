@@ -51,6 +51,36 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
   (names + resolved APP + count) without applying anything. The header preflight still
   lints ALL patch headers even under a filter.
 
+## Mutation gate (ADR-049) — the converse question the sabotage corpus cannot ask
+The sabotage harness proves the guarantees we CLAIM are still guarded. The mutation gate asks the
+converse — is there some OTHER way to break the same file that its owning tests do NOT catch? —
+because every sabotage is a claim someone thought to make.
+- `./scripts/mutate.sh` (default: the tier-1 watch-list, `scripts/mutation/targets.tsv`, 8
+  chokepoint/guard modules / 61 mutants / ~3 min). Sites are enumerated from the **AST** by
+  `scripts/mutation/mutate.exs` over four operator families (EQ / REL / BOOLOP / BOOLLIT) and
+  spliced at exact line:column; each mutant runs ONLY that target's **owning** tests, so a kill is
+  attributed by construction. Ends `MUTATION GATE: ALL PASSED`.
+- Flags mirror `sabotage.sh` (`--app`, `--file`, `--family`, `--changed [<ref>]`, `--list`;
+  same-flag-twice is an error; different flags intersect) plus `--corpus` (derive targets from the
+  sabotage headers — 163 (file, app) rows over 155 distinct lib files / 2,852 mutants, a soak not a gate step), `--shard <i>/<n>`
+  (deterministic disjoint partition for sweeping a soak across runs), and `--emit-patches <dir>`
+  (write each survivor as a sabotage-format patch — THE promotion path: write the test, fill
+  `MUST_FAIL`, move it into `scripts/sabotages/`).
+- CI: two UNCONDITIONAL steps (`scripts/mutation_lint.sh` + `scripts/mutation_selection_test.sh`,
+  ~17s, no DB) and one OPT-IN replay tier, `SAMEN_MUTATION=1 ./ci.sh`.
+- NEVER weaken these to make a survivor go away: (1) baseline green before scoring — against a red
+  suite every mutant "dies" and the gate reports 100%; (2) a kill is a NAMED test failure — a
+  non-zero exit with no `N) test` header means the COMPILER refused the mutant (`BUILD-REFUSED`,
+  never a kill), and the owning suites deliberately run WITHOUT `--warnings-as-errors`; (3)
+  byte-exact SHA-256 restore; (4) an unexempt survivor fails the run; (5) full report, then fail.
+- A survivor is closed ONE of two honest ways: write the test that kills it, or — only if the
+  mutation provably cannot change behaviour — add the printed key to `scripts/mutation/ledger.tsv`
+  with class `EQUIVALENT` + a specific proof, or `ACCEPTED_GAP` + a mandatory `ref=`. Do NOT widen
+  a target's owning-test set to make red go green: widening is legitimate ONLY when the added file
+  genuinely guards that module and actually kills the mutant. Ledger rows are **content-pinned**
+  (they hash the source line they excuse), so editing that line EXPIRES the exemption, and an
+  exemption whose mutant is now killed FAILS the gate as obsolete.
+
 ## Fail-honest adapter contract (ADR-014, ADR-024, ADR-026)
 An unconfigured/unimplemented adapter NEVER returns `{:ok, _}` for work it did not do —
 it returns `{:error, :not_configured | :not_implemented}`. Precedents: `Samen.Delivery.Smtp`,
