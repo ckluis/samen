@@ -1,0 +1,41 @@
+# scripts/mutation/targets.tsv — the TIER-1 mutation watch-list (ADR-049).
+#
+# Columns (tab-separated):  relpath <TAB> app <TAB> owning test files (space-separated)
+#
+# WHAT EARNS A ROW HERE. Tier 1 is the structural chokepoint/guard set — the
+# modules CLAUDE.md calls "governed by construction", the ones whose failure mode
+# is a silent policy bypass rather than a visible crash. Every mutant of every row
+# must be killed by that row's OWNING tests, or carry a ledger entry. ~60 mutants,
+# a few minutes: this is the set ci.sh runs under SAMEN_MUTATION=1.
+#
+# WHERE THE OWNING-TEST COLUMN COMES FROM. Wherever a shipped sabotage already
+# targets the file, the owning tests are that sabotage's TEST_FILES header — so
+# the attribution is not a guess, it is already gate-proven by
+# scripts/sabotage.sh. Rows marked (derived) below are exactly those.
+#
+# ADDING A ROW. Run `scripts/mutate.sh --file <relpath> --targets <this file>`
+# first: a row whose owning suite does not kill its mutants must not be committed
+# green — either write the tests or put the survivors in the ledger with a
+# justification. A row whose file has ZERO mutation sites is refused by
+# scripts/mutation_lint.sh (a target that cannot be mutated certifies nothing).
+#
+# NOT tier 1: Ash resource/blueprint DSL files (their `public? true` /
+# `allow_nil? false` options mutate into hundreds of low-signal sites) and the
+# 155-file sabotage corpus at large — reach those with `--corpus`, which derives
+# its target set from the sabotage headers and is a soak, not a gate step.
+#
+# --- files chokepoint (ADR-014/ADR-024; the only storage_key minting path) -----
+samen_core/lib/samen/files/chokepoint_guard.ex	samen_core	test/files_upload_test.exs
+# --- PII write path (the vault write guard + the change that routes plaintext) --
+samen_core/lib/samen/pii/write_guard.ex	samen_core	test/pii_write_guard_test.exs
+samen_core/lib/samen/vault/change.ex	samen_core	test/vault_change_integration_test.exs
+samen_core/lib/samen/pii/classification.ex	samen_core	test/pii_type_clearance_test.exs
+# --- delivery chokepoint (derived: sabotage TEST_FILES) ------------------------
+samen_core/lib/samen/delivery/chokepoint.ex	samen_core	test/delivery_lifecycle_test.exs
+# --- approvals / reveal gate (derived: sabotage TEST_FILES) --------------------
+samen_core/lib/samen/approvals/gate.ex	samen_core	test/approvals/engine_test.exs
+# --- cross-org FK policy (derived: sabotage TEST_FILES) -----------------------
+samen_core/lib/samen/policy/same_org_fk.ex	samen_core	test/same_org_fk_change_test.exs
+# --- the masking test-infra itself: if this can be weakened undetected, every
+# --- masking proof built on it is suspect (derived: sabotage TEST_FILES) -------
+samen_core/lib/samen/scope_mask_case.ex	samen_core	test/samen/scope_mask_case_test.exs

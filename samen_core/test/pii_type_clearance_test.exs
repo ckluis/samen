@@ -39,6 +39,16 @@ defmodule Samen.PiiTypeClearanceTest do
     def samen_pii_class, do: :pii
   end
 
+  # A host type that self-classifies NOTHING and is not a known non-PII scalar —
+  # i.e. the mask-unknown-by-default case. Load-bearing for `classified?/1`: it is
+  # an ATOM (a real, compiled module), so a `classified?` that answers on
+  # atom-ness rather than on membership of the non-PII scalar registry would call
+  # it "classified" and hand the C4 verifier a deliberately-plain column that is
+  # only plain because nobody classified it.
+  defmodule PlainUnclassifiedType do
+    @moduledoc false
+  end
+
   @config_key :non_pii_type_clearances
 
   setup do
@@ -150,6 +160,47 @@ defmodule Samen.PiiTypeClearanceTest do
   # ==========================================================================
   # Anti-tautology: the SAME module flips on the clearance, nothing else
   # ==========================================================================
+
+  # ==========================================================================
+  # The two PUBLIC predicates over classify/1 (MG-01, MG-02)
+  #
+  # Filed by the mutation gate (ADR-049), not by hand: `scripts/mutate.sh` mutated
+  # `pii?/1`'s `classify(type) == :pii` to `!= :pii` and `classified?/1`'s
+  # `is_atom(module) and MapSet.member?(...)` to `or`, and this suite — the owning
+  # suite for classification.ex — killed NEITHER. Both predicates had zero
+  # coverage here: every existing test calls `classify/1` directly. An inverted
+  # `pii?/1` is a total fail-open (every PII type reports non-PII to every caller)
+  # and it would have shipped green.
+  # ==========================================================================
+
+  test "pii?/1 tracks classify/1 in BOTH directions (an inverted predicate is a total fail-open)" do
+    # PII direction — the assertion an inverted `==`/`!=` breaks.
+    assert Classification.pii?(SelfPiiType)
+    assert Classification.pii?(PlainUnclassifiedType), "mask-unknown-by-default: an unclassified type IS PII"
+
+    # NON-PII direction — the positive control. Without it, `pii?/1 = fn _ -> true end`
+    # would pass the assertions above, so the pair is what pins the predicate.
+    refute Classification.pii?(:boolean)
+    refute Classification.pii?(Ash.Type.UUID)
+  end
+
+  test "classified?/1 answers on the non-PII REGISTRY, not on atom-ness (fail-open closed)" do
+    put_clearances([])
+
+    # RED: a compiled module that self-classifies nothing and is not in the non-PII
+    # scalar registry is NOT classified — it is merely unknown, and the default masks
+    # it. A `classified?` whose unknown-branch answers `is_atom(module) or
+    # MapSet.member?(...)` calls every atom classified and this refute is the only
+    # thing standing in its way.
+    refute Classification.classified?(PlainUnclassifiedType)
+    refute Classification.classified?(:no_such_type_anywhere)
+
+    # GREEN positive control (anti-tautology): a REGISTERED non-PII scalar IS
+    # classified, so the refutes above are the registry biting, not a predicate that
+    # can never say yes.
+    assert Classification.classified?(:boolean)
+    assert Classification.classified?(Ash.Type.UUID)
+  end
 
   test "anti-tautology: the SAME type is :pii without a clearance and :non_pii with one" do
     put_clearances([])
