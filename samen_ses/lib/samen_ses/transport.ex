@@ -16,8 +16,13 @@ defmodule SamenSes.Transport do
   @doc """
   `request` is `%{access_key_id:, secret_access_key:, region:, from:,
   to_email:, subject:, text_body:, session_token: (optional)}`. Returns
-  `{:ok, %{status: integer(), body: map() | binary()}}` or `{:error, reason}`
-  on a transport-level failure.
+  `{:ok, %{status: integer(), body: map() | binary(), headers: map()}}` or
+  `{:error, reason}` on a transport-level failure.
+
+  `:headers` is carried (T170) so `SamenSes.Provider` can read `Retry-After` off a
+  throttle response and turn it into a `{:throttled, seconds}` snooze instead of a
+  burned Oban attempt. A fake transport that omits `:headers` still works — the
+  provider defaults it to `%{}`.
   """
   @spec live(map()) :: {:ok, map()} | {:error, term()}
   def live(%{
@@ -64,8 +69,8 @@ defmodule SamenSes.Transport do
       )
 
     case Req.post(url, body: body, headers: signed_headers) do
-      {:ok, %Req.Response{status: status, body: resp_body}} ->
-        {:ok, %{status: status, body: resp_body}}
+      {:ok, %Req.Response{status: status, body: resp_body, headers: resp_headers}} ->
+        {:ok, %{status: status, body: resp_body, headers: resp_headers}}
 
       {:error, reason} ->
         {:error, reason}

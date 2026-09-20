@@ -66,7 +66,7 @@ defmodule Samen.Notifications.EmailDispatchWorker do
 
   require Logger
 
-  alias Samen.Delivery.{Chokepoint, Message}
+  alias Samen.Delivery.{Chokepoint, Message, Throttle}
 
   @compiled_env Mix.env()
 
@@ -98,6 +98,19 @@ defmodule Samen.Notifications.EmailDispatchWorker do
           )
 
           err
+
+        # T170: an ESP throttle SNOOZES — no burned attempt, and the notification is NOT
+        # marked :failed (nothing failed; the attempt was deferred). Ordered before the
+        # generic error arm so a throttle can never fall into it.
+        {:error, {:throttled, _seconds}} = throttle ->
+          {:snooze, seconds} = Throttle.oban_result(throttle)
+
+          Logger.info(
+            "[Notifications.EmailDispatchWorker] ESP THROTTLED — snoozing #{seconds}s " <>
+              "(no attempt burned) send_id=#{message.send_id} org_id=#{message.org_id}"
+          )
+
+          {:snooze, seconds}
 
         {:error, reason} = err ->
           mark_status(message, :failed)

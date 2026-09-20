@@ -1,0 +1,102 @@
+# SABOTAGE: T170 (bug half) — the THROTTLE clauses are REMOVED from
+# `SamenSes.Provider.handle_response/1`, restoring the exact pre-T170 state: an SES
+# throttle falls through to the generic `{:ses_error, status, __type, message}` arm. That
+# tuple is what the delivery Oban workers hand straight back to Oban, so Oban retries on
+# its ordinary exponential schedule — against an account that has just said "maximum
+# sending rate exceeded" — and burns one of 20 attempts per hammer.
+#
+# Flips the named reds in `test/throttle_test.exs`, one per way SES names the condition:
+# the SESv2 `429` + `TooManyRequestsException`, the older query API's `400` + `Throttling`,
+# and the fully-qualified `com.amazonaws.ses#ThrottlingException`. Each asserts the
+# DISTINCT `{:error, {:throttled, seconds}}`; with the clauses gone they get the generic
+# SES error back instead. The 400 cases are the load-bearing ones: a sabotage that only
+# broke the status match would leave them green.
+#
+# The POSITIVE CONTROLS in the same file still PASS — a `500` InternalFailure, a
+# non-throttle `400` MessageRejected, an error body with no `__type`, a non-map body and a
+# `2xx` all keep their exact pre-T170 returns — so the reds fail because the throttle is
+# unrecognised, not because SES error handling or delivery broke.
+#
+# NOT TOUCHED, deliberately: `Samen.Delivery.Throttle` itself (its own reds own that), the
+# workers' snooze arms (356 owns that), and the Postmark/Resend adapters (353/355 own
+# those). The transport still CARRIES `:headers`, so the plumbing is present and simply
+# never consulted.
+#
+# Removes four contiguous regions (the `Throttle` alias entry, the two throttle clauses,
+# and the `generic_error/1` + `throttle_type?/1` + `headers/1` helpers that existed only to
+# serve them) so nothing is left unused and the file compiles under
+# `--warnings-as-errors`; the two original generic clauses below resume handling every
+# error again. Touches samen_ses's provider.ex ALONE.
+# APP: samen_ses
+# TEST_FILES: test/throttle_test.exs
+# MUST_FAIL: T170 RED: an SESv2 429 TooManyRequestsException is a throttle carrying Retry-After
+# MUST_FAIL: T170 RED: the older query API's 400 Throttling is a throttle too, caught by NAME
+# MUST_FAIL: T170 RED: a fully-qualified ThrottlingException __type is a throttle
+diff --git a/samen_ses/lib/samen_ses/provider.ex b/samen_ses/lib/samen_ses/provider.ex
+--- a/samen_ses/lib/samen_ses/provider.ex
++++ b/samen_ses/lib/samen_ses/provider.ex
+@@ -74,7 +74,7 @@
+ 
+   use Samen.Delivery.Provider
+ 
+-  alias Samen.Delivery.{Message, ProviderEvent, Throttle}
++  alias Samen.Delivery.{Message, ProviderEvent}
+   alias SamenSes.{SnsSignature, Transport}
+ 
+   # Real SES event `eventType` (also seen as the legacy `notificationType` key)
+@@ -201,24 +201,9 @@
+     {:ok, %{provider_message_id: id}}
+   end
+ 
+-  # T170 — THROTTLE, before the generic error clauses. SESv2 answers `429` with
+-  # `__type: "TooManyRequestsException"`; the older query API answers `400` with
+-  # `__type: "Throttling"` / `"ThrottlingException"`. Matched BY NAME at any status as
+-  # well as by the status itself, so a throttle is not missed just because the number
+-  # differs between API generations. A `500`/`503` is untouched — that IS a retriable
+-  # failure and still retries exactly as before.
+-  defp handle_response({:ok, %{status: 429} = response}) do
+-    Throttle.throttled(headers(response))
+-  end
++  # SABOTAGE (T170): the THROTTLE clauses are GONE — an SES throttle falls through to the
++  # generic error arm again, so Oban retries it and burns an attempt per hammer.
+ 
+-  defp handle_response({:ok, %{body: %{"__type" => type}} = response}) when is_binary(type) do
+-    if throttle_type?(type) do
+-      Throttle.throttled(headers(response))
+-    else
+-      generic_error(response)
+-    end
+-  end
+-
+   defp handle_response({:ok, %{status: status, body: %{"message" => msg} = body}}) do
+     {:error, {:ses_error, status, Map.get(body, "__type", "SesError"), msg}}
+   end
+@@ -229,28 +214,6 @@
+ 
+   defp handle_response({:error, reason}), do: {:error, reason}
+ 
+-  # The two non-throttle arms of the `__type` clause above, kept as ONE function so the
+-  # `__type` clause does not duplicate the generic bodies below it.
+-  defp generic_error(%{status: status, body: %{"message" => msg} = body}) do
+-    {:error, {:ses_error, status, Map.get(body, "__type", "SesError"), msg}}
+-  end
+-
+-  defp generic_error(%{status: status, body: body}) do
+-    {:error, {:unexpected_response, status, body}}
+-  end
+-
+-  # SES throttle `__type` values. Compared on the bare name so the fully-qualified
+-  # `com.amazonaws.ses#ThrottlingException` form matches too.
+-  defp throttle_type?(type) do
+-    bare = type |> String.split("#") |> List.last() |> String.downcase()
+-    bare in ["toomanyrequestsexception", "throttling", "throttlingexception"]
+-  end
+-
+-  # A fake transport (the §7.2 injectable hook, used by every hermetic test) may omit
+-  # `:headers`; an absent header set is not an error, it just means the wait falls back
+-  # to `Samen.Delivery.Throttle.default_seconds/0`.
+-  defp headers(response), do: Map.get(response, :headers, %{})
+-
+   # ---------------------------------------------------------------------------
+   # verify_and_parse_event/3
+ 

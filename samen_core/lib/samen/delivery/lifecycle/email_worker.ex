@@ -52,6 +52,17 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
   adapter returned `{:ok, _}`. There is NO code path from an unconfigured/failed
   adapter to `:sent`.
 
+  ## ESP throttling -> snooze, not retry (T170 — bug half)
+
+  `{:error, {:throttled, seconds}}` from an adapter is NOT a failure and NOT an Oban
+  retry: it becomes `{:snooze, seconds}`. Oban's snooze re-schedules the job and raises
+  `max_attempts` to compensate, so a throttle costs **no attempt**. Before T170 an ESP
+  `429` was an ordinary `{:error, _}`, which Oban retried on its exponential schedule
+  against an account that had just said "too fast" — a retry storm aimed at the
+  operator's own ESP. The send is NOT marked failed on a throttle: nothing failed, the
+  attempt was deferred. `Samen.Delivery.Throttle` owns the throttle vocabulary and the
+  wait; this worker only translates it to Oban's verb.
+
   ## Configuration
 
       config :samen_core, Samen.Delivery.Lifecycle.EmailWorker,
@@ -74,7 +85,7 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
 
   require Logger
 
-  alias Samen.Delivery.{Chokepoint, Message, Rendering}
+  alias Samen.Delivery.{Chokepoint, Message, Rendering, Throttle}
 
   # Captured at compile time so the runtime never consults Mix (unavailable in
   # releases). Overridable at runtime via :delivery_env for tests / staging.
@@ -128,6 +139,13 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
               mark_blocked(message, event)
               err
 
+            # T170: an ESP throttle SNOOZES — no burned attempt, no :failed mark.
+            # Ordered before the generic error arm so a throttle can never fall into it.
+            {:error, {:throttled, _seconds}} = throttle ->
+              {:snooze, seconds} = Throttle.oban_result(throttle)
+              log_throttled(message, event, seconds)
+              {:snooze, seconds}
+
             {:error, reason} = err ->
               log_failed(message, event, reason)
               err
@@ -164,6 +182,15 @@ defmodule Samen.Delivery.Lifecycle.EmailWorker do
     Logger.warning(
       "[Lifecycle.EmailWorker] delivery FAILED event=#{event} send_id=#{message.send_id} " <>
         "reason=#{inspect(reason)}"
+    )
+  end
+
+  # Deliberately :info, not :warning — a throttle is the ESP pacing us, not a fault, and
+  # a warning per throttled send is exactly the noise that gets an alert channel muted.
+  defp log_throttled(message, event, seconds) do
+    Logger.info(
+      "[Lifecycle.EmailWorker] ESP THROTTLED — snoozing #{seconds}s (no attempt burned) " <>
+        "event=#{event} send_id=#{message.send_id} org_id=#{message.org_id}"
     )
   end
 
