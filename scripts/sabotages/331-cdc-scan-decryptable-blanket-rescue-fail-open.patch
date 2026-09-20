@@ -1,0 +1,80 @@
+# SABOTAGE: the erasure-completeness CDC mirror scan goes FAIL-OPEN again — the blanket
+# `rescue _ -> false` is restored on `Samen.Cdc.LocalPostgres.decryptable?/2`. That private
+# helper is the per-token filter `scan_no_plaintext/2` runs over every `vt_*` token the
+# mirror holds for a subject; the scanner itself is fail-closed BY DESIGN (its own
+# `rescue e -> {:leaks, ["cdc mirror scan failed: …"]}` reports any raise as a leak), and
+# the blanket rescue one frame below defeats it: it catches the raise first and answers
+# "not decryptable" = SAFE. So an infrastructure failure mid-scan — vault/KMS unreachable,
+# repo misconfigured, a bug under `Vault.reveal/2` — is classified per token as "no leak",
+# the outer fail-closed rescue never fires, and when every token errors the scan returns
+# `{:ok, :no_plaintext}`: a merely-unreachable vault reported as a PROVEN erasure.
+#
+# Load-bearing because this IS the erasure-completeness verifier read by
+# `test/erasure_test.exs`, `test/shred_key_material_test.exs` and
+# `driftwood/test/crypto_shred_gameday_test.exs`. A false `:no_plaintext` there is a false
+# "erasure verified" — exactly the lie the fail-honest contract (ADR-014/024/026) forbids:
+# an error you cannot classify must fail CLOSED.
+#
+# The distinction the fix rests on: `Vault.reveal/2` answers a legitimately shredded,
+# absent or corrupt token with an ERROR TUPLE (`{:error, :shredded | :absent | :not_found |
+# :unavailable | :decrypt_failed}`), never a raise — so no correct outcome needs a rescue
+# here at all, and the sibling live-tier scanner `Samen.Vault.scan_no_plaintext/2` has
+# none either.
+#
+# Flips RP-E ONLY, which is what makes the red mean what it says: RP-E's two POSITIVE
+# CONTROLS stay GREEN under this sabotage — a genuinely shredded token still scans
+# `{:ok, :no_plaintext}` (it DENIES with an error tuple, it never raises) and a genuinely
+# decryptable token still reports `{:leaks, [token]}`. So RP-E fails because the raise
+# path is swallowed, not because the scan, the vault or the mirror broke.
+#
+# Replaces one contiguous comment-plus-function block with the pre-fix body; the file still
+# compiles under `--warnings-as-errors`. Touches local_postgres.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/cdc_mirror_test.exs
+# MUST_FAIL: RP-E: a reveal that RAISES mid-scan is a LEAK
+diff --git a/samen_core/lib/samen/cdc/local_postgres.ex b/samen_core/lib/samen/cdc/local_postgres.ex
+--- a/samen_core/lib/samen/cdc/local_postgres.ex
++++ b/samen_core/lib/samen/cdc/local_postgres.ex
+@@ -198,31 +198,25 @@ defmodule Samen.Cdc.LocalPostgres do
+       rows
+       |> List.flatten()
+       |> Enum.filter(fn v -> is_binary(v) and String.starts_with?(v, "vt_") end)
+     end)
+   end
+ 
+-  # Is this mirror token still decryptable? ONLY an `{:ok, _}` reveal means yes.
+-  #
+-  # NO `rescue` here, deliberately (and matching `Samen.Vault.scan_no_plaintext/2`,
+-  # the sibling live-tier scanner, which also lets raises through). `Vault.reveal/2`
+-  # answers a legitimately shredded, absent or corrupt token with an ERROR TUPLE —
+-  # `{:error, :shredded | :absent | :not_found | :unavailable | :decrypt_failed}` —
+-  # never a raise, so every raise reaching here is an infrastructure failure this
+-  # function cannot classify (vault/KMS unreachable, repo misconfigured, a bug in
+-  # the reveal path). A blanket `rescue _ -> false` would answer "not decryptable"
+-  # = SAFE for exactly those cases, shadowing `scan_no_plaintext/2`'s fail-closed
+-  # rescue: if every token errored, the scan returned `{:ok, :no_plaintext}` and a
+-  # merely-unreachable vault was reported as a PROVEN erasure to the erasure-
+-  # completeness callers (`erasure_test.exs`, `shred_key_material_test.exs`,
+-  # driftwood's crypto-shred gameday). Letting the raise propagate hands it to that
+-  # rescue, which reports it as a leak — fail-honest per ADR-014/024/026: an error
+-  # you cannot classify fails CLOSED. Red: cdc_mirror_test.exs RP-E (+ its two
+-  # controls: a shredded token still scans clean, a live one still reports a leak).
++  # SABOTAGE (fail-open): the blanket `rescue _ -> false` is BACK on `decryptable?/2`.
++  # Every raise out of the reveal path — vault/KMS unreachable, repo misconfigured, a
++  # bug under `Vault.reveal/2` — is swallowed and answered "not decryptable", i.e.
++  # SAFE, per token. That shadows `scan_no_plaintext/2`'s own fail-closed rescue: the
++  # raise never reaches it, so an infrastructure failure mid-scan is classified as "no
++  # leak", and when every token errors the scan returns `{:ok, :no_plaintext}` — a
++  # merely-unreachable vault reported as a PROVEN erasure to the erasure-completeness
++  # callers (`erasure_test.exs`, `shred_key_material_test.exs`, driftwood's crypto-shred
++  # gameday). Exactly the lie the fail-honest contract (ADR-014/024/026) forbids.
+   defp decryptable?(token, repo) do
+     match?({:ok, _}, Vault.reveal(%Samen.Masked{token: token, label: "cdc"}, repo))
++  rescue
++    _ -> false
+   end
+ 
+   defp repo! do
+     Config.repo() ||
+       raise "Samen.Cdc.LocalPostgres requires a repo — wire config :samen_core, :cdc, repo: MyRepo"
+   end
