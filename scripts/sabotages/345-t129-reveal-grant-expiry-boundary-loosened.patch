@@ -1,0 +1,34 @@
+# SABOTAGE: T129 (reveal-grant clock property, determinism round 2) — `Samen.Reveal.Grants
+# .active?/3`'s deny-on-read comparison is loosened from `>` to `>=`, so a grant stays
+# ACTIVE at the exact instant it expires. One second of a privileged reveal window that the
+# row says is over: clause (c) ("it DENIES the moment `now() > expires_at`") no longer holds
+# at the one clock position where `>` and `>=` disagree.
+#
+# This is the off-by-one no signed-offset generator reliably catches. The property used to
+# generate an offset in -7200..7200 and BRANCH on its sign, so the `offset == 0` position was
+# exercised only on the runs where StreamData happened to produce a 0 — a seed-dependent
+# proof of the boundary, which is no proof at all. The boundary is now PINNED in its own
+# deterministic test (-1s allow / 0s deny / +1s deny), which is what makes this patch
+# reliably refutable.
+#
+# Flips the named boundary red on every seed. The two properties around it stay green under
+# this patch — strictly-before is still allowed, and at-or-after only disagrees at 0, which
+# the generators reach only by chance — so the red fails because the boundary moved, not
+# because the query, the requestor binding or the fixture broke.
+#
+# One comparison operator. Touches reveal/grants.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/reveal_grant_property_test.exs
+# MUST_FAIL: the expiry boundary itself, pinned: ALLOW at -1s, DENY at 0s and +1s
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -521,7 +521,7 @@ defmodule Samen.Reveal.Grants do
+             # a self-approved grant can never authorize a reveal).
+             g.granted_by != g.requestor_id and
+             is_nil(g.revoked_at) and
+-            g.expires_at > ^now,
++            g.expires_at >= ^now,
+         select: g.id,
+         limit: 1
+       )
