@@ -1,0 +1,30 @@
+# SABOTAGE: MG-17 (ADR-049 mutation ledger) — LINK 2 of `Samen.Vault.Change.repo!/1`'s
+# three-step chain is severed: `(resource_repo || config_repo) || raise` becomes
+# `resource_repo || (config_repo && raise)` (`&&` binds tighter than `||`), so the
+# `:samen_core, :vault_repo` FALLBACK stops being a fallback and becomes a trap. A resource
+# whose own repo does not resolve — the case the fallback exists for, e.g. a PII-bearing
+# resource whose data layer is not the one holding `pii_vault` — raises instead of vaulting.
+#
+# Invisible whenever the resource resolves its own repo (the `||` short-circuits before the
+# mutated conjunction is ever reached), which is why the named red makes the resource's own
+# AshPostgres repo unresolvable for the duration of the write, through Spark's own
+# configurable-option override, and asserts both halves of the chain's state first.
+#
+# NOT TOUCHED, deliberately: LINK 1 (sabotage 340 owns that) and the raise message.
+#
+# One boolean operator. Touches vault/change.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/vault_change_fail_closed_test.exs
+# MUST_FAIL: MG-17: when the RESOURCE resolves no repo, the write falls back to :vault_repo
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -275,7 +275,7 @@ defmodule Samen.Vault.Change do
+ 
+   defp repo!(changeset) do
+     AshPostgres.DataLayer.Info.repo(changeset.resource, :mutate) ||
+-      Application.get_env(:samen_core, :vault_repo) ||
++      Application.get_env(:samen_core, :vault_repo) &&
+       raise "Samen.Vault.Change: could not resolve a repo for #{inspect(changeset.resource)}"
+   end
+ end

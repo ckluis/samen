@@ -1,0 +1,33 @@
+# SABOTAGE: MG-15 (ADR-049 mutation ledger) — `Samen.Vault.Change.ensure_subject_attr/2`'s
+# cond FALLTHROUGH is made unreachable (`true ->` → `false ->`). That arm is the one that
+# FORCES the generated subject onto the row when the primary key is not yet set, so the
+# ciphertext and the domain row share a subject. With every arm falsifiable the `cond`
+# raises `CondClauseError` and the vaulted write dies inside the action instead.
+#
+# The shape that reaches it is the DB-generated-pk one the function's own comment names
+# ("On create it may be unset (DB default gen_random_uuid())"): a create whose changeset
+# carries no non-nil pk change and whose data has no pk. A resource taking the
+# `Samen.Resource` default (`default: &Ash.UUID.generate/0`) short-circuits on the clause
+# above instead, which is why every other create in the suite stays green under this flip —
+# and why this red has to construct the unset-pk changeset explicitly.
+#
+# Flips the named MG-15 red. Every other test in that file stays green, so the red fails
+# because the fallthrough is gone, not because vault routing, the subject resolver or the
+# repo chain broke.
+#
+# One boolean literal on one cond clause. Touches vault/change.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/vault_change_fail_closed_test.exs
+# MUST_FAIL: MG-15: a CREATE whose pk is UNSET still vaults (the fallthrough forces the subject)
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -260,7 +260,7 @@ defmodule Samen.Vault.Change do
+       match?({:ok, v} when not is_nil(v), Ash.Changeset.fetch_change(changeset, pk)) ->
+         changeset
+ 
+-      true ->
++      false ->
+         Ash.Changeset.force_change_attribute(changeset, pk, subject_id)
+     end
+   end

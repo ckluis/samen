@@ -1,0 +1,31 @@
+# SABOTAGE: MG-12 (ADR-049 mutation ledger) — `Samen.Vault.Change.cast_declared_types/1`'s
+# Address carve-out is INVERTED: `field.type != Samen.Type.Address` becomes `==`, so the
+# no-cast arm matches exactly the ONE composite type the ADR-036 §10 addendum (T14, binding)
+# opted INTO cast-and-refuse, and skips it for FullName/Emails/Phones. The narrow,
+# by-module-identity exception becomes its own opposite: a malformed Address vaults, while
+# the three loose-shape composites the addendum deliberately left alone are suddenly gated
+# — the cross-cutting writer cleanup T14 explicitly declined to land.
+#
+# Flips the named MG-11/MG-12 red (the malformed Address is accepted instead of refused),
+# and its CONTROL with it (a well-formed Address stops being normalized), so the patch is
+# refutable from both sides.
+#
+# NOT TOUCHED, deliberately: the `and` joining the two conjuncts (sabotage 336 owns that),
+# the `true ->` cast arm, and `reject_cast/2`.
+#
+# One comparison operator on one cond clause. Touches vault/change.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/vault_change_fail_closed_test.exs
+# MUST_FAIL: MG-11/MG-12: a malformed Samen.Type.Address is REFUSED before vaulting
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -165,7 +165,7 @@ defmodule Samen.Vault.Change do
+   defp cast_declared_types(to_vault) do
+     Enum.reduce_while(to_vault, {:ok, {[], []}}, fn {field, plaintext}, {:ok, {casted, clears}} ->
+       cond do
+-        field.composite? and field.type != Samen.Type.Address ->
++        field.composite? and field.type == Samen.Type.Address ->
+           # Preserve today's behavior byte-for-byte: no cast, store the original value.
+           {:cont, {:ok, {[{field, plaintext} | casted], clears}}}
+ 

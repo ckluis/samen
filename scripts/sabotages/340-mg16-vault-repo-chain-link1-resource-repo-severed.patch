@@ -1,0 +1,31 @@
+# SABOTAGE: MG-16 (ADR-049 mutation ledger) — LINK 1 of `Samen.Vault.Change.repo!/1`'s
+# three-step chain is severed: `resource_repo || config_repo` becomes `resource_repo &&
+# config_repo`, so the resource's OWN AshPostgres repo is no longer enough. A host that
+# wires its resources and never sets the optional `:samen_core, :vault_repo` fallback — the
+# documented single-repo case — now gets the chain's terminal `raise` on every vaulted
+# write instead of a working vault.
+#
+# It is invisible while `:vault_repo` happens to be configured (the `&&` then yields that
+# repo, which in a single-repo app IS the same module), which is exactly why the named red
+# UNSETS `:vault_repo` for the duration of the write and re-installs it afterwards. Without
+# that the mutation is unobservable — the anti-tautology point of the proof.
+#
+# NOT TOUCHED, deliberately: LINK 2, the `||` joining the pair to the `raise` (sabotage 341
+# owns that), and the raise message itself.
+#
+# One boolean operator. Touches vault/change.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/vault_change_fail_closed_test.exs
+# MUST_FAIL: MG-16: a vaulted write resolves the RESOURCE's own repo, with no :vault_repo set
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -274,7 +274,7 @@ defmodule Samen.Vault.Change do
+   end
+ 
+   defp repo!(changeset) do
+-    AshPostgres.DataLayer.Info.repo(changeset.resource, :mutate) ||
++    AshPostgres.DataLayer.Info.repo(changeset.resource, :mutate) &&
+       Application.get_env(:samen_core, :vault_repo) ||
+       raise "Samen.Vault.Change: could not resolve a repo for #{inspect(changeset.resource)}"
+   end

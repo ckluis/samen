@@ -1,0 +1,33 @@
+# SABOTAGE: MG-08 (ADR-049 mutation ledger) — `Samen.Pii.WriteGuard.plaintext_write?/2`
+# is WIDENED so a round-tripping `%Masked{}` counts as operator-authored PLAINTEXT. An
+# operator who re-submits the very value they were SHOWN (`••••`, the masked struct the
+# vault-routed column presents on every read) is then refused under MC-1 / Invariant L1 as
+# if they had typed the tenant's PII themselves.
+#
+# The OVER-refusal direction again, and the reason it needs its own red: every shipped
+# RP-L1 test writes genuine plaintext, so they all stay green — the guard gets STRICTER.
+# What breaks is the operator plane's ordinary form round-trip: any operator edit of a
+# PII-bearing row that re-sends the masked field is refused.
+#
+# Flips the named MG-08 red. The anti-tautology CONTROL stays green — genuine operator
+# plaintext into the SAME field is still refused with "no-operator-plaintext-write" and the
+# stored token is unchanged — so the red fails because the `%Masked{}` arm was widened, not
+# because the guard, the plane detection or the vault write path broke. MG-09's and MG-10's
+# reds (the raw-token and explicit-nil arms) also stay green: this patch touches ONE clause.
+#
+# One case clause, one literal. Touches write_guard.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/pii_write_guard_fail_closed_test.exs
+# MUST_FAIL: MG-08: an OPERATOR re-setting the %Masked{} value they were shown is ALLOWED
+diff --git a/samen_core/lib/samen/pii/write_guard.ex b/samen_core/lib/samen/pii/write_guard.ex
+--- a/samen_core/lib/samen/pii/write_guard.ex
++++ b/samen_core/lib/samen/pii/write_guard.ex
+@@ -116,7 +116,7 @@ defmodule Samen.Pii.WriteGuard do
+   # explicit nil (clear), a round-tripping %Masked{}, or a raw vt_* token are NOT writes.
+   defp plaintext_write?(changeset, name) do
+     case Ash.Changeset.fetch_change(changeset, name) do
+-      {:ok, %Masked{}} -> false
++      {:ok, %Masked{}} -> true
+       {:ok, "vt_" <> _} -> false
+       {:ok, nil} -> false
+       {:ok, _plaintext} -> true

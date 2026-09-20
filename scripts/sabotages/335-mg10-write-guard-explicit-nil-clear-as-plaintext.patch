@@ -1,0 +1,31 @@
+# SABOTAGE: MG-10 (ADR-049 mutation ledger) — `Samen.Pii.WriteGuard.plaintext_write?/2`
+# is WIDENED so an EXPLICIT NIL counts as operator-authored PLAINTEXT. Clearing a field is
+# the opposite of authoring one: nothing is written to the vault, the column is emptied, and
+# there is no operator-supplied value for MC-1 / Invariant L1 to refuse. The guard's own
+# comment names the case ("An untouched field, an explicit nil (clear) … are NOT writes").
+#
+# The OVER-refusal direction: every shipped RP-L1 test writes genuine plaintext and stays
+# green. What breaks is the operator's ability to REMOVE a vaulted value at all — which is
+# also the shape an erasure/redaction workflow uses.
+#
+# Flips the named MG-10 red. The anti-tautology CONTROL stays green — genuine operator
+# plaintext is still refused with "no-operator-plaintext-write" — so the red fails because
+# the explicit-nil arm was widened, not because the guard or the vault write path broke.
+# MG-08's and MG-09's reds stay green: this patch touches ONE clause.
+#
+# One case clause, one literal. Touches write_guard.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/pii_write_guard_fail_closed_test.exs
+# MUST_FAIL: MG-10: an OPERATOR CLEARING a vaulted field is ALLOWED and the column is cleared
+diff --git a/samen_core/lib/samen/pii/write_guard.ex b/samen_core/lib/samen/pii/write_guard.ex
+--- a/samen_core/lib/samen/pii/write_guard.ex
++++ b/samen_core/lib/samen/pii/write_guard.ex
+@@ -118,7 +118,7 @@ defmodule Samen.Pii.WriteGuard do
+     case Ash.Changeset.fetch_change(changeset, name) do
+       {:ok, %Masked{}} -> false
+       {:ok, "vt_" <> _} -> false
+-      {:ok, nil} -> false
++      {:ok, nil} -> true
+       {:ok, _plaintext} -> true
+       :error -> false
+     end

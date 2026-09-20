@@ -1,0 +1,36 @@
+# SABOTAGE: MG-13 (ADR-049 mutation ledger) — `Samen.Vault.Change.resolve_subject_id/1`'s
+# fall-back to the row's EXISTING primary key is severed (`changeset.data || %{}` → `&&`,
+# which yields the empty map for any real changeset). The lookup then always misses and the
+# function GENERATES A FRESH UUID, so re-vaulting a field on an UPDATE files the new
+# ciphertext under a subject that belongs to NO ROW.
+#
+# That is a silent crypto-shred hole, not a crash: the write succeeds, the column gets a
+# valid token, reveal still works (reveal keys on the token). What is lost is the invariant
+# the subject exists for — `Samen.Erasure.shred/2` deletes by SUBJECT, so a shred of the
+# row's own id leaves that ciphertext decryptable behind it. Nothing about the domain row
+# looks wrong; only the `pii_vault.subject_id` of the re-vaulted value does.
+#
+# Flips the named MG-13 red, which asserts the vault row's subject equals the record's pk
+# both on the initial create and after the update. The create arm is UNAFFECTED by this
+# patch (on create the lookup misses either way and a fresh subject is correct), which is
+# what makes the update assertion the discriminating one.
+#
+# NOT TOUCHED, deliberately: the identical `||` in `ensure_subject_attr/2` (a different
+# clause, one line later in that function's cond), the pk-change arm above, and `pk_attr/1`.
+#
+# One boolean operator. Touches vault/change.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/vault_change_fail_closed_test.exs
+# MUST_FAIL: MG-13: re-vaulting a field on an UPDATE files the ciphertext under the row's own pk
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -241,7 +241,7 @@ defmodule Samen.Vault.Change do
+         to_string(value)
+ 
+       _ ->
+-        case Map.get(changeset.data || %{}, pk) do
++        case Map.get(changeset.data && %{}, pk) do
+           nil -> Ash.UUID.generate()
+           existing -> to_string(existing)
+         end

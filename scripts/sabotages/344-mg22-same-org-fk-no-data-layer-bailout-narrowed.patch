@@ -1,0 +1,32 @@
+# SABOTAGE: MG-22 (ADR-049 mutation ledger) — `Samen.Policy.SameOrgFk.target_org_id/2`'s
+# `:no_data_layer` bail-out is NARROWED from `or` to `and`, so it fires only when BOTH the
+# repo AND the table are missing. A destination with one but not the other no longer fails
+# closed: execution falls through to the query arm, which interpolates the missing table
+# into SQL or calls `query/2` on `nil`. The guard stops REFUSING what it cannot verify and
+# starts crashing on it instead — the fail-closed contract replaced by an incident.
+#
+# Invisible to every shipped resource: no samen_core resource has a table without a repo, so
+# `or` never has to be an `or`. That is why the named red builds a destination that has a
+# real `cpy_company` table and a function repo that never resolves, and asserts the
+# exactly-one-is-nil precondition before exercising the guard — and why it asserts the
+# `:no_data_layer` message specifically, not merely that the write was refused.
+#
+# Flips the named MG-22 red. MG-21's red and its cross-org control stay green: this patch
+# touches ONE line, leaving the repo fallback chain above it exactly as it is.
+#
+# One boolean operator. Touches policy/same_org_fk.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/same_org_fk_fail_closed_test.exs
+# MUST_FAIL: MG-22: a target with a table but NO resolvable repo fails CLOSED with :no_data_layer
+diff --git a/samen_core/lib/samen/policy/same_org_fk.ex b/samen_core/lib/samen/policy/same_org_fk.ex
+--- a/samen_core/lib/samen/policy/same_org_fk.ex
++++ b/samen_core/lib/samen/policy/same_org_fk.ex
+@@ -178,7 +178,7 @@ defmodule Samen.Policy.SameOrgFk do
+     org_id_source = attribute_source(dest, :org_id)
+ 
+     cond do
+-      is_nil(repo) or is_nil(table) ->
++      is_nil(repo) and is_nil(table) ->
+         {:error, :no_data_layer}
+ 
+       is_nil(org_id_source) ->

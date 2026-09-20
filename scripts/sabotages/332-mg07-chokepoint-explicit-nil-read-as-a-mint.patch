@@ -1,0 +1,35 @@
+# SABOTAGE: MG-07 (ADR-049 mutation ledger) — `Samen.Files.ChokepointGuard`'s
+# `sets_storage_key?/1` is WIDENED so an EXPLICIT NIL counts as minting a `storage_key`.
+# The guard then refuses a write that repoints NOTHING: a nil clears the pointer, it does
+# not attach an ungoverned one, so RP-FI-1 has nothing to govern there. The moduledoc says
+# so in as many words ("An untouched storage_key, or an explicit nil, is not a mint").
+#
+# This is the OVER-refusal direction, which is why it needs its own red: every existing
+# RP-FI-1 test drives a NON-nil smuggled key, so all of them stay green under this flip —
+# the guard gets STRICTER, not looser. What breaks is the sanctioned archive/destroy
+# lifecycle: the `:destroy`-typed path is the only one where an explicit nil reaches the
+# guard at all (on create/update Ash's own `allow_nil?: false` required rule refuses a nil
+# before any before_action hook runs), so a hard destroy carrying a nilled storage_key is
+# refused as an ungoverned mint.
+#
+# Flips the named MG-07 red. Its two anti-tautology CONTROLS stay green — a NON-nil
+# repoint, on the destroy path AND on the update path, is still refused with the same
+# "ungoverned-file-row" message — so the red fails because the explicit-nil arm was
+# widened, not because the guard, the chokepoint marker or the destroy registration broke.
+#
+# One case clause, one literal. Touches chokepoint_guard.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/files_chokepoint_fail_closed_test.exs
+# MUST_FAIL: MG-07: a destroy-typed changeset whose storage_key is explicitly NILLED is ALLOWED
+diff --git a/samen_core/lib/samen/files/chokepoint_guard.ex b/samen_core/lib/samen/files/chokepoint_guard.ex
+--- a/samen_core/lib/samen/files/chokepoint_guard.ex
++++ b/samen_core/lib/samen/files/chokepoint_guard.ex
+@@ -141,7 +141,7 @@ defmodule Samen.Files.ChokepointGuard do
+   # gated. An untouched storage_key, or an explicit nil, is not a mint.
+   defp sets_storage_key?(changeset) do
+     case Ash.Changeset.fetch_change(changeset, :storage_key) do
+-      {:ok, nil} -> false
++      {:ok, nil} -> true
+       {:ok, _value} -> true
+       :error -> false
+     end
