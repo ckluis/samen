@@ -219,7 +219,11 @@ defmodule Samen.Cdc.LocalPostgres do
   # you cannot classify fails CLOSED. Red: cdc_mirror_test.exs RP-E (+ its two
   # controls: a shredded token still scans clean, a live one still reports a leak).
   defp decryptable?(token, repo) do
-    match?({:ok, _}, Vault.reveal(%Samen.Masked{token: token, label: "cdc"}, repo))
+    # Built through `Samen.Masked.new/2`, NOT a bare struct literal: `new/2` guards
+    # `is_atom(label)`, and `t:Samen.Masked.t/0` (hence `Vault.reveal/3`'s contract)
+    # declares an atom label. The vault never reads it, so behaviour was already
+    # correct — the constructor makes the ill-typed value unrepresentable.
+    match?({:ok, _}, Vault.reveal(Samen.Masked.new(token, :cdc), repo))
   end
 
   defp repo! do
