@@ -52,6 +52,30 @@ defmodule Samen.AuditChain.Canonical do
           ciphertext_sha256: String.t()
         }
 
+  @typedoc """
+  The break-glass **local** audit payload (`Samen.BreakGlass.LocalAudit`) — a
+  SECOND, differently-shaped token-only payload that rides this same canonical
+  hash. The local chain is not the central chain: it carries the who/what/why
+  (`reason`) and its own `prior_hash` INSIDE the hashed payload (so a line lifted
+  to a different position cannot verify), and it has no `event_type` /
+  `ciphertext_sha256`. It is spelled out here, rather than referenced from
+  `Samen.BreakGlass.LocalAudit` (which aliases this module), so `hash/2`'s
+  contract names every shape it really accepts instead of a blanket `map()` that
+  would accept a genuinely wrong caller too.
+  """
+  @type local_audit_payload :: %{
+          seq: non_neg_integer(),
+          prior_hash: String.t(),
+          org_id: String.t(),
+          subject_id: String.t(),
+          actor_id: String.t(),
+          reason: String.t(),
+          resource: String.t() | nil,
+          action: String.t() | nil,
+          correlation_id: String.t(),
+          occurred_at: String.t()
+        }
+
   @doc "The genesis prior_hash — the fixed prior_hash of seq 0 in every org chain."
   @spec genesis() :: String.t()
   def genesis, do: :crypto.hash(:sha256, @genesis_preimage) |> Base.encode16(case: :lower)
@@ -73,8 +97,12 @@ defmodule Samen.AuditChain.Canonical do
   Compute the chain hash for `payload` given `prior_hash`.
 
       hash = SHA256( prior_hash <> canonical_json(payload) )
+
+  Two payload shapes ride this hash: the central chain's `t:payload/0` and the
+  break-glass local audit's `t:local_audit_payload/0`. Both are token-only and
+  both encode through `encode/1`'s bounded value set.
   """
-  @spec hash(String.t(), payload()) :: String.t()
+  @spec hash(String.t(), payload() | local_audit_payload()) :: String.t()
   def hash(prior_hash, payload) when is_binary(prior_hash) and is_map(payload) do
     preimage = prior_hash <> encode(payload)
     :crypto.hash(:sha256, preimage) |> Base.encode16(case: :lower)
