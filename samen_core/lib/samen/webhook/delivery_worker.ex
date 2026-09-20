@@ -63,6 +63,30 @@ defmodule Samen.Webhook.DeliveryWorker do
   This satisfies the token-only-args invariant: the args hold references and bounded
   data, never plaintext PII values.
 
+  ## SSRF / egress guard (issue #25)
+
+  The endpoint URL is a TENANT-SUPPLIED value: an org admin registers it on the
+  `webhook🔒` Tier-0 config row. Before #25 the worker POSTed it verbatim through a
+  redirect-following adapter, so any tenant that could register an endpoint could make
+  the platform issue signed POSTs to `169.254.169.254` (cloud instance metadata),
+  loopback, or RFC1918 — and a redirect let a benign-looking public URL pivot inward.
+
+  `perform/1` now runs `Samen.Egress.Guard.check/2` — the SAME guard the automation
+  `webhook` action uses — BEFORE `deliver/3`, and before the signing secret is even
+  revealed (a request we are going to refuse has no business decrypting a credential).
+  The guard is https-only outside `:dev`/`:test` and resolve-then-deny for
+  loopback/RFC1918/link-local/CGNAT and their IPv6 forms; an unresolvable host is
+  refused too.
+
+  A blocked URL is a `{:discard, reason}`, NOT an `{:error, reason}`: it is a permanent
+  configuration fault, not a transient network one. Discarding means the job is never
+  POSTed and never retried — 20 attempts against the metadata service would be the same
+  defect twenty times over. The reason string names the endpoint and the guard verdict so
+  the DLQ read (`state = 'discarded'`) says why.
+
+  Redirects are off in `Samen.Webhook.HttpAdapter.Httpc` as of #25, so a 3xx is a
+  delivery failure rather than a followed hop.
+
   ## HTTP adapter injection
 
   The HTTP client is injected via `:http_adapter` in job args (for tests) or via
@@ -84,8 +108,9 @@ defmodule Samen.Webhook.DeliveryWorker do
     repo = resolve_repo(args)
 
     with {:ok, endpoint} <- load_endpoint(endpoint_id, repo),
-         {:ok, secret} <- reveal_secret(endpoint, repo),
          {:ok, url} <- endpoint_url(endpoint),
+         :ok <- egress_check(url),
+         {:ok, secret} <- reveal_secret(endpoint, repo),
          {:ok, _} <- deliver(url, body, secret) do
       :ok
     else
@@ -96,6 +121,12 @@ defmodule Samen.Webhook.DeliveryWorker do
       {:error, :not_found} ->
         # Endpoint row deleted between enqueue and delivery. Discard.
         {:discard, "webhook endpoint not found: #{endpoint_id}"}
+
+      {:error, {:egress_blocked, reason}} ->
+        # Issue #25: the registered URL failed the SSRF/egress guard. PERMANENT —
+        # never POSTed, never retried. Fail closed and say why.
+        {:discard,
+         "webhook endpoint URL refused by egress guard (#{reason}): endpoint #{endpoint_id}"}
 
       {:error, reason} ->
         {:error, reason}
@@ -142,6 +173,17 @@ defmodule Samen.Webhook.DeliveryWorker do
     case Map.get(endpoint, :url) do
       nil -> {:error, :no_url}
       url -> {:ok, url}
+    end
+  end
+
+  # Issue #25 / T161 §5.3 — the delivery-time SSRF authority. Wrapped in
+  # `{:egress_blocked, reason}` so `perform/1`'s `else` can tell a guard refusal (a
+  # permanent discard) apart from a transient delivery error (an Oban retry), and so no
+  # other `{:error, atom}` in the `with` can be mistaken for one.
+  defp egress_check(url) do
+    case Samen.Egress.Guard.check(url) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:egress_blocked, reason}}
     end
   end
 

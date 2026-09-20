@@ -1,0 +1,56 @@
+# SABOTAGE: issue #25 step 3 — the registration-time `validations` block is REMOVED from
+# `Samen.Scopes.Primitives.Blueprint.define_webhook/5`, so nothing stops a tenant from
+# SAVING a `webhook` endpoint row whose `url` is `http://169.254.169.254/latest/meta-data/`,
+# `https://127.0.0.1/hook`, `http://[::1]/hook`, an IPv4-mapped private address, or a
+# `file:` scheme. The row persists; the defect then lives in the tenant's own
+# configuration, waiting for the delivery path to be the only thing between it and the
+# metadata service.
+#
+# Flips the named reds in `test/egress/url_validation_test.exs`, which builds a real
+# `Ash.Changeset.for_create/3` against the Primitives-scope `webhook` resource mounted in
+# samen_core's own test tree (`SamenCore.Support.NotificationFixture.Webhook`, abbrev
+# `nwh`) — the SAME `define_webhook/5` blueprint every host mounts — and asserts a
+# FIELD-SCOPED error on `:url`. With the block gone there is no `:url` error to find.
+#
+# The POSITIVE CONTROL in the same file still PASSES — a public `https` URL produces no
+# `:url` error on create OR update — which is what makes the red mean what it says: the
+# assertion is field-scoped, so an unrelated required-attribute error can neither
+# manufacture a pass on the red nor break the control.
+#
+# NOT TOUCHED, deliberately: `Samen.Egress.UrlValidation` and `Samen.Egress.Guard`
+# themselves (still compiled, still correct, just not WIRED — the "the guard exists, it is
+# simply never asked" shape), the delivery-time authority in `Samen.Webhook.DeliveryWorker`
+# (351 owns that), `:autoredirect` (350 owns that), the resource's attributes, its `pii`
+# block, its `reveal_webhook` action and its policies. The moduledoc STILL documents the
+# write-time refusal, so the resource advertises a guard it no longer runs.
+#
+# Deletes one contiguous `validations` block and replaces it with a `# SABOTAGE` comment,
+# so the macro still expands and the file compiles under `--warnings-as-errors`. Touches
+# blueprint.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/egress/url_validation_test.exs
+# MUST_FAIL: #25 RED: a cloud-metadata URL cannot be registered
+# MUST_FAIL: #25 RED: a loopback URL cannot be registered
+# MUST_FAIL: #25 RED: an RFC1918 URL cannot be registered
+# MUST_FAIL: #25 RED: a non-http(s) scheme cannot be registered
+diff --git a/samen_core/lib/samen/scopes/primitives/blueprint.ex b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+--- a/samen_core/lib/samen/scopes/primitives/blueprint.ex
++++ b/samen_core/lib/samen/scopes/primitives/blueprint.ex
+@@ -626,15 +626,8 @@
+           reveal(:reveal_webhook)
+         end
+ 
+-        validations do
+-          # Issue #25 / T161 §5.3 — a tenant-registered egress URL cannot be SAVED
+-          # pointing at cloud instance metadata, loopback, RFC1918 or a non-http(s)
+-          # scheme. This is the LITERAL check (no DNS on a write path); the resolving
+-          # authority is `Samen.Egress.Guard.check/2` in `Samen.Webhook.DeliveryWorker`,
+-          # because DNS can change between registration and delivery.
+-          validate({Samen.Egress.UrlValidation, attribute: :url}, on: [:create, :update])
+-        end
+-
++        # SABOTAGE (issue #25 step 3): the `validations` block is GONE — a tenant can
++        # SAVE a webhook endpoint pointing at cloud instance metadata or loopback.
+         actions do
+           defaults([:read, :destroy, create: :*, update: :*])
+ 

@@ -557,6 +557,14 @@ defmodule Samen.Scopes.Primitives.Blueprint do
         webhook delivery machinery (T3.13 scope or Oban job) looks up the endpoint
         URL + decrypts the signing secret at delivery time.
 
+        ## Egress guard on `url` (issue #25)
+
+        `url` is tenant-supplied, so it is an SSRF surface. `Samen.Egress.UrlValidation`
+        refuses a literal private/link-local/metadata address or a non-http(s) scheme at
+        write time; `Samen.Egress.Guard.check/2` in `Samen.Webhook.DeliveryWorker`
+        re-checks it RESOLVING on every delivery attempt (DNS changes between
+        registration and delivery, so the delivery-time check is the authority).
+
         ## Webhook delivery (doc §external-surface)
 
         Outbound events are Oban-backed: at-least-once, capped exponential backoff,
@@ -586,6 +594,8 @@ defmodule Samen.Scopes.Primitives.Blueprint do
 
         attributes do
           # The endpoint URL to deliver events to. NOT PII — it is a system address.
+          # Guarded at write time by `Samen.Egress.UrlValidation` (see `validations`
+          # below) and again, resolving, at delivery time (issue #25).
           attribute(:url, :string, public?: true, allow_nil?: false)
 
           # A human-readable label for this endpoint. NOT PII.
@@ -614,6 +624,15 @@ defmodule Samen.Scopes.Primitives.Blueprint do
           # This is a per-endpoint credential — must not appear in logs/spans/CDC.
           pii_attribute(:signing_secret, :string, vault: :pii_secret)
           reveal(:reveal_webhook)
+        end
+
+        validations do
+          # Issue #25 / T161 §5.3 — a tenant-registered egress URL cannot be SAVED
+          # pointing at cloud instance metadata, loopback, RFC1918 or a non-http(s)
+          # scheme. This is the LITERAL check (no DNS on a write path); the resolving
+          # authority is `Samen.Egress.Guard.check/2` in `Samen.Webhook.DeliveryWorker`,
+          # because DNS can change between registration and delivery.
+          validate({Samen.Egress.UrlValidation, attribute: :url}, on: [:create, :update])
         end
 
         actions do

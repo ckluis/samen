@@ -1,0 +1,47 @@
+# SABOTAGE: issue #25 step 4 — `:autoredirect` is RE-ENABLED (removed from the options
+# list) on the SHARED `Samen.Webhook.HttpAdapter.Httpc`, restoring httpc's default
+# follow-redirects behaviour. This is the exact pre-#25 state of the file, which is what
+# makes the red mean what it says: the adapter is reached with a TENANT-SUPPLIED URL (the
+# org-registered `webhook` endpoint row that `Samen.Webhook.DeliveryWorker` delivers), so
+# following a 3xx lets an apparently-public endpoint 302-pivot to `169.254.169.254` or
+# loopback AFTER `Samen.Egress.Guard` has already cleared the original host. The guard
+# checked the host it was given; the redirect goes somewhere else entirely.
+#
+# Flips the mechanism red in `test/webhook/http_adapter_redirect_test.exs`: two real
+# `:gen_tcp` listeners on 127.0.0.1, the first answering `302 Location:` toward the
+# second. With the flag gone httpc DIALS the second listener, so both halves of that
+# test's assertion flip — the returned value stops being `{:error, {:http_status, 302}}`
+# and `:pivot_never_dialed` never arrives.
+#
+# The POSITIVE CONTROL in the same file (the same adapter against a plain `200`
+# responder, asserting `{:ok, 200}` and that the POST line + `Samen-Signature` header
+# actually arrive on the wire) still PASSES — so the red fails because redirects are
+# followed again, not because the adapter, the socket fixture or header building broke.
+#
+# NOT TOUCHED, deliberately: the `{:timeout, 10_000}` option beside it, every response
+# clause of the `case`, the separate `Samen.Automation.Actions.WebhookHttpAdapter.Httpc`
+# (which has always disabled the flag and is sabotage-covered by its own automation
+# reds), and the moduledoc — the module still DOCUMENTS no-redirect while no longer
+# doing it, which is precisely the shape a stale security claim takes.
+#
+# Deletes the two-line explanatory comment and swaps one options list, so the file still
+# compiles under `--warnings-as-errors`. Touches http_adapter.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/webhook/http_adapter_redirect_test.exs
+# MUST_FAIL: #25 RED: the shared adapter does not follow a 302 — the pivot target is never dialed
+diff --git a/samen_core/lib/samen/webhook/http_adapter.ex b/samen_core/lib/samen/webhook/http_adapter.ex
+--- a/samen_core/lib/samen/webhook/http_adapter.ex
++++ b/samen_core/lib/samen/webhook/http_adapter.ex
+@@ -87,9 +87,9 @@
+     case :httpc.request(
+            :post,
+            {url_charlist, headers_charlist, ~c"application/json", body_charlist},
+-           # `:autoredirect` OFF (issue #25) — see the moduledoc. A tenant-supplied URL
+-           # must not be able to 302 past the egress guard.
+-           [{:timeout, 10_000}, {:autoredirect, false}],
++           # SABOTAGE (issue #25 step 4): `:autoredirect` is GONE — httpc's default
++           # (follow) applies again, so a 302 can pivot past the egress guard.
++           [{:timeout, 10_000}],
+            []
+          ) do
+       {:ok, {{_, status, _}, _resp_headers, _body}} when status in 200..299 ->

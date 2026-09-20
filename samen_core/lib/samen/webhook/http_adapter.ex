@@ -32,6 +32,43 @@ end
 defmodule Samen.Webhook.HttpAdapter.Httpc do
   @moduledoc """
   Production HTTP adapter using Erlang's built-in `:httpc`.
+
+  ## No redirect following (issue #25)
+
+  `:autoredirect` is explicitly `false`. httpc's DEFAULT is to follow redirects, and
+  this adapter is reached with a TENANT-SUPPLIED URL (`Samen.Webhook.DeliveryWorker`
+  delivers the org-registered `webhook🔒` endpoint row), so following a redirect
+  let an apparently-public URL 302-pivot to `169.254.169.254` or loopback AFTER
+  `Samen.Egress.Guard` had cleared the original host. A 3xx is now a delivery failure
+  (`{:error, {:http_status, 302}}`) that Oban retries, not a followed hop.
+
+  This module's moduledoc used to justify leaving the flag unset on the grounds that
+  changing it "would change behaviour for its own callers". Enumerating them at #25
+  found exactly one lib caller — `Samen.Webhook.DeliveryWorker` — so there were no
+  other callers behind that concern. A host that substitutes its own adapter via
+  `config :samen_core, :webhook_http_adapter` owns its own redirect posture; the
+  `Samen.Egress.Guard` check in the worker runs regardless of which adapter is wired.
+
+  ## Layer 3 (pinned-IP connect) is NOT implemented here — honestly named
+
+  A DNS-rebinding TOCTOU remains: `Samen.Egress.Guard.check/2` resolves the hostname,
+  and then `:httpc` resolves it AGAIN at connect time. An attacker controlling the
+  authoritative DNS for their own registered hostname can answer public on the first
+  lookup and private on the second.
+
+  Closing it means connecting to the *pinned* address the guard checked while still
+  presenting the original `Host` header and TLS SNI. `:httpc` has no option for that.
+  The only way to approximate it is to rewrite the request URI's host to the literal IP
+  and then hand `:httpc` an `{:ssl, opts}` http_option carrying
+  `server_name_indication` plus a `customize_hostname_check` match_fun for the real
+  hostname — and because that option REPLACES httpc's whole TLS option list, it would
+  make this module responsible for reconstructing `verify_peer`, the CA store and the
+  protocol versions by hand. Getting that subtly wrong silently downgrades certificate
+  verification, which is a worse defect than the TOCTOU it closes. So it is deliberately
+  NOT done here and NOT faked: layers 1-2 (scheme + resolve-then-deny) and no-redirect
+  remove the bulk of the exposure; pinned-IP connect is a named follow-up that wants a
+  client which supports it (Finch/Mint expose the connect address directly) rather than
+  a hand-rolled httpc TLS option list.
   """
 
   @behaviour Samen.Webhook.HttpAdapter
@@ -50,7 +87,9 @@ defmodule Samen.Webhook.HttpAdapter.Httpc do
     case :httpc.request(
            :post,
            {url_charlist, headers_charlist, ~c"application/json", body_charlist},
-           [{:timeout, 10_000}],
+           # `:autoredirect` OFF (issue #25) — see the moduledoc. A tenant-supplied URL
+           # must not be able to 302 past the egress guard.
+           [{:timeout, 10_000}, {:autoredirect, false}],
            []
          ) do
       {:ok, {{_, status, _}, _resp_headers, _body}} when status in 200..299 ->
