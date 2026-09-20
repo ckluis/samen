@@ -124,6 +124,23 @@ fail is treated as a bug.
   It is opt-in because it deliberately breaks the tree hundreds of times and re-runs
   DB-backed suites; the default CI path stays green-only. Later gates add a new `.patch`
   rather than re-deriving sabotages by hand.
+- **Destruction oracle for crypto-shred.** `mix samen.verify.no_plaintext_pii` runs as a
+  separate OS process across every tier (domain rows, vault, audit events, rollups, Oban
+  args, the KMS store) and attests that a shredded subject is unrecoverable — the erasure
+  game-day regenerates and re-verifies this on every driftwood `ci.sh` run.
+- **Generative proof in the root gate.** `./ci.sh` doesn't just test the substrate — it
+  *generates* a fresh app, runs the app's entire gate, seeds it, boots it, HTTP-probes its
+  routes, and drives sabotages against the generated gate to prove it is non-vacuous.
+- **AC-mapped gate reports.** Every workstream's adversarial gate is written up in `docs/`
+  (`gate-ws-*.md`, `gate-*.md`): each acceptance criterion mapped to a named covering test,
+  suite counts reproduced, sabotages re-flipped. The newest is the full F1–F7 burn-down gate
+  [docs/gate-burndown.md](docs/gate-burndown.md) (see also [docs/gate-ws-e.md](docs/gate-ws-e.md)).
+
+Suite totals grow with every phase — the table below is reproduced against the current tree
+(`./ci-fast.sh` for `samen_core`/`samen_web`; the F1–F7 burn-down gate for the rest, not
+re-run this pass), `--warnings-as-errors` clean; treat exact counts as directional and rerun
+`mix test` for the live number:
+
 - **Mutation gate — the converse question.** A sabotage corpus proves the guarantees the repo
   *claims* are still guarded, but every sabotage is a claim someone thought to make, so it can
   never report what it is missing. `scripts/mutate.sh` (ADR-049) closes that: it enumerates
@@ -146,22 +163,6 @@ fail is treated as a bug.
   against an already-red baseline) and runs unconditionally. Its first run over the eight guard
   modules killed 42 of 61 mutants and closed six real holes with tests — among them a
   `Pii.Classification.pii?/1` that could be fully **inverted** with nothing noticing.
-- **Destruction oracle for crypto-shred.** `mix samen.verify.no_plaintext_pii` runs as a
-  separate OS process across every tier (domain rows, vault, audit events, rollups, Oban
-  args, the KMS store) and attests that a shredded subject is unrecoverable — the erasure
-  game-day regenerates and re-verifies this on every driftwood `ci.sh` run.
-- **Generative proof in the root gate.** `./ci.sh` doesn't just test the substrate — it
-  *generates* a fresh app, runs the app's entire gate, seeds it, boots it, HTTP-probes its
-  routes, and drives sabotages against the generated gate to prove it is non-vacuous.
-- **AC-mapped gate reports.** Every workstream's adversarial gate is written up in `docs/`
-  (`gate-ws-*.md`, `gate-*.md`): each acceptance criterion mapped to a named covering test,
-  suite counts reproduced, sabotages re-flipped. The newest is the full F1–F7 burn-down gate
-  [docs/gate-burndown.md](docs/gate-burndown.md) (see also [docs/gate-ws-e.md](docs/gate-ws-e.md)).
-
-Suite totals grow with every phase — the table below is reproduced against the current tree
-(`./ci-fast.sh` for `samen_core`/`samen_web`; the F1–F7 burn-down gate for the rest, not
-re-run this pass), `--warnings-as-errors` clean; treat exact counts as directional and rerun
-`mix test` for the live number:
 
 | Suite | Passing |
 |---|---|

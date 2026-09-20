@@ -8,6 +8,13 @@ All notable changes to Samen are recorded here. The format follows
 
 ### Added
 
+- **Canonical Work scope — `Project` + the self-referential `Task`** (ADR-041 §3, F1): a new
+  `Samen.Scopes.Work` blueprint ships one canonical Work item (`kind`/`title`/`body`/`status`/
+  `priority`/`due_at`/`completed_at`, a generic CRM-agnostic `(subject_key, subject_id)`
+  object-ref anchor, `custom`, `owner_id`, and the self-referential `parent_id` Subtask tree
+  with cycle refusal), archivable with a subtree cascade. Every vertical inherits Project +
+  Task at ≈0 authored LOC; no PII (the scope's catalog PII map is empty).
+
 - **Mutation testing as a gate** (ADR-049): `scripts/mutate.sh` enumerates mutation sites
   **mechanically from the AST** (`scripts/mutation/mutate.exs` — `Code.string_to_quoted/2` with
   `columns: true` plus a literal encoder, never a regex) over four deliberately-chosen operator
@@ -84,12 +91,6 @@ All notable changes to Samen are recorded here. The format follows
   approval gate's `authorize?: true`, whose loss turns the gate into a policy **bypass** its owning
   suite does not notice — and 1 as a proven `EQUIVALENT`.
 
-- **Canonical Work scope — `Project` + the self-referential `Task`** (ADR-041 §3, F1): a new
-  `Samen.Scopes.Work` blueprint ships one canonical Work item (`kind`/`title`/`body`/`status`/
-  `priority`/`due_at`/`completed_at`, a generic CRM-agnostic `(subject_key, subject_id)`
-  object-ref anchor, `custom`, `owner_id`, and the self-referential `parent_id` Subtask tree
-  with cycle refusal), archivable with a subtree cascade. Every vertical inherits Project +
-  Task at ≈0 authored LOC; no PII (the scope's catalog PII map is empty).
 - **Tier-1 custom fields gain five new bounded types** (ADR-036 H6): `money`, `url`, `phone`,
   `email`, `address` join `Samen.CustomFields`'s existing `string`/`integer`/`number`/
   `boolean`/`date`/`enum` set, reusing the matching `Samen.Type.*` module's own cast/
