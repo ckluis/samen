@@ -80,6 +80,14 @@ defmodule Samen.Fleet.Scope.Blueprint do
 
           attribute(:registered_at, :utc_datetime_usec, public?: true, allow_nil?: false)
           attribute(:stale_after_s, :integer, public?: true, allow_nil?: false, default: 300)
+
+          # T166 / ADR-050 (G11) — per-app OPT-IN to the PUBLIC status page.
+          # `default: false` is the whole safety property: registering an app
+          # publishes NOTHING, and no code path other than the admin-gated
+          # `Samen.Fleet.Registry.set_publish_status/4` can set it (the update
+          # policy below is `FleetAdminOnly`, so a heartbeat actor — the app
+          # itself — is refused; §4.5's "never app-initiated" lesson).
+          attribute(:publish_status, :boolean, public?: true, allow_nil?: false, default: false)
         end
 
         actions do

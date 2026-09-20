@@ -62,7 +62,9 @@ defmodule Samen.Fleet.Registry do
                base_url: Map.get(attrs, :base_url),
                status: :active,
                registered_at: DateTime.utc_now(),
-               stale_after_s: Map.get(attrs, :stale_after_s, @default_stale_after_s)
+               stale_after_s: Map.get(attrs, :stale_after_s, @default_stale_after_s),
+               # T166/ADR-050: absent -> false. Registering never publishes.
+               publish_status: Map.get(attrs, :publish_status, false)
              },
              actor: actor
            )
@@ -161,6 +163,28 @@ defmodule Samen.Fleet.Registry do
 
   @spec get_app(module(), String.t(), term()) :: {:ok, map()} | {:error, term()}
   def get_app(ns, app_id, actor), do: Ash.get(app_res(ns), app_id, actor: actor)
+
+  @doc """
+  Publish (or un-publish) `app_id` on the PUBLIC status page (T166 / ADR-050 §4).
+
+  OPERATOR-INITIATED ONLY, and that is enforced by the resource's own update policy
+  (`Samen.Policy.FleetAdminOnly`) rather than by a check here — a `HeartbeatActor`
+  (the reporting app itself) is refused, which is ADR-044 §4.5's "never an
+  app-initiated verb" lesson applied to visibility. Reversible in both directions:
+  `false` takes the app straight back off the page on the next read.
+
+  Nothing about this flag changes what is PROBED or stored; it only decides whether
+  `Samen.Fleet.PublicStatus.read/2` may project the app's already-computed row.
+  """
+  @spec set_publish_status(module(), String.t(), boolean(), term()) ::
+          {:ok, map()} | {:error, term()}
+  def set_publish_status(ns, app_id, publish?, actor) when is_boolean(publish?) do
+    with {:ok, app} <- Ash.get(app_res(ns), app_id, actor: actor) do
+      app
+      |> Ash.Changeset.for_update(:update, %{publish_status: publish?}, actor: actor)
+      |> Ash.update()
+    end
+  end
 
   @spec deregister_app(module(), String.t(), term()) :: {:ok, map()} | {:error, term()}
   def deregister_app(ns, app_id, actor) do
@@ -675,6 +699,10 @@ defmodule Samen.Fleet.Registry do
       transport: latest && latest.transport,
       received_at: latest && latest.received_at,
       stale_after_s: app.stale_after_s,
+      # T166/ADR-050 — carried so `Samen.Fleet.PublicStatus` can filter on the
+      # opt-in WITHOUT re-reading the app rows and WITHOUT re-deriving staleness
+      # (the §4.6 dead-man semantics are computed exactly once, right here).
+      publish_status: app.publish_status,
       report: latest && latest.payload
     }
   end

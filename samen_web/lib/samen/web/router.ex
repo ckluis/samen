@@ -396,6 +396,57 @@ defmodule Samen.Web.Router do
   end
 
   @doc """
+  Mount the **public status page** (T166 / ADR-050, G11) — `GET /status`, the one
+  fleet-substrate surface with no authority gate on it. ≈0-LOC adoption on whichever
+  product hosts the cockpit, in a PUBLIC router scope (no auth pipeline, no
+  `on_mount`) — the same posture as `samen_module_routes :kb` / `:csat`:
+
+      import Samen.Web.Router
+
+      scope "/", MyAppWeb do
+        pipe_through :browser
+        samen_fleet_status_route(namespace: MyApp.Fleet)
+      end
+
+  It renders `Samen.Fleet.PublicStatus.read/2` — the token-blind projection of the
+  status the EXISTING probes already computed (mode-A pull / mode-B heartbeat with
+  ADR-044 §4.6 dead-man staleness). It re-probes nothing and it publishes nothing
+  until an operator opts an app in with
+  `Samen.Fleet.Registry.set_publish_status/4` — `flt_app.publish_status` defaults to
+  `false`, so mounting this route on a live cockpit exposes an empty page, never the
+  fleet.
+
+  Rate-limited per remote IP through the shared `Samen.Web.RateLimit` seam
+  (`:public_status_ip`, default 120/min — tune it there, not here). Over the window
+  is a bare 429.
+
+  The default path is `/status`, deliberately NOT under `/fleet`: everything under
+  `/fleet*` is authority-gated and cross-checked by `mix samen.verify.fleet_wire`
+  against `Samen.Fleet.RouteTable.declared/0`, and a public path does not belong in
+  that surface.
+
+  ## Options
+
+    * `:namespace` — required. The `Samen.Fleet.Scope`-mounted Ash domain.
+    * `:path` — the route path (default `/status`).
+    * `:labels` — optional operator-authored chrome (`%{title: "Acme status"}`).
+      Operator-authored ONLY: this string is rendered on a public page.
+  """
+  defmacro samen_fleet_status_route(opts) do
+    namespace = Keyword.fetch!(opts, :namespace)
+    path = Keyword.get(opts, :path, "/status")
+    labels = Keyword.get(opts, :labels, quote(do: %{}))
+
+    quote bind_quoted: [namespace: namespace, path: path, labels: labels] do
+      status_opts = [namespace: namespace, labels: labels]
+
+      get(path, Samen.Web.FleetStatusController, :index,
+        private: %{samen_fleet_status: status_opts}
+      )
+    end
+  end
+
+  @doc """
   Mount the FLAGSHIP cross-plane realtime CHAT (ADR-012 §6.3) — the `/chat` inbox + `/chat/:id`
   room — over a host's materialized `Samen.Scopes.Chat` resources. A tenant chat and a
   SaaS-desk chat are the SAME LiveViews on different planes.
