@@ -1,0 +1,49 @@
+# SABOTAGE: T166 / ADR-050 §4.6 — the public page's slug MASK is defeated twice
+# over: the bounded operator shape is widened to admit `_` and capitals, and the
+# explicit `vt_` refusal beside it is deleted. `slug` is the only string that
+# crosses to the public plane, and ADR-044 §5.2's guarantee that it is
+# operator-typed cockpit-side is a CONVENTION about who writes the column, not a
+# constraint the column enforces — which is exactly why the renderer refuses
+# anything outside the shape instead of trusting it. With both guards gone a value
+# that reached the slug column renders verbatim: a `vt_*` vault token, a tenant's
+# legal name, an operator's e-mail address.
+#
+# Flips the named §4.6 red (the `vt_`-shaped smuggled value must render `••••`).
+# Everything else stays GREEN: the opt-in filter, the internal→public enum mapping,
+# the deregistered exclusion and the `Entry` two-field closure all still hold, and
+# the mask's own POSITIVE CONTROL (a slug that IS the bounded shape renders
+# unmasked) still passes — so the red fails because the mask was widened, not
+# because slugs stopped rendering.
+#
+# NOT TOUCHED, deliberately: `@masked` itself and the non-binary `public_slug/1`
+# clause (both still reached, so no clause goes dead and no attribute goes unused
+# under `--warnings-as-errors`), the status mapping, and the web layer's HTML
+# escaping — escaping is not masking, and a token is just as leaked escaped.
+# APP: samen_core
+# TEST_FILES: test/fleet_public_status_test.exs
+# MUST_FAIL: a vt_-shaped value smuggled into the slug renders
+diff --git a/samen_core/lib/samen/fleet/public_status.ex b/samen_core/lib/samen/fleet/public_status.ex
+--- a/samen_core/lib/samen/fleet/public_status.ex
++++ b/samen_core/lib/samen/fleet/public_status.ex
+@@ -90,7 +90,9 @@ defmodule Samen.Fleet.PublicStatus do
+   # The bounded operator slug shape (ADR-044 §5.2). Anchored, length-capped,
+   # lowercase-and-dash only: no `_` (so every `vt_*` token fails it), no `@`, no
+   # whitespace, no capitals.
+-  @slug_shape ~r/\A[a-z0-9][a-z0-9-]{0,62}\z/
++  # SABOTAGE (T166/ADR-050 §4.6): the bounded operator shape is WIDENED to admit
++  # `_` and capitals, which is exactly the class `vt_*` lives in.
++  @slug_shape ~r/\A[a-zA-Z0-9][a-zA-Z0-9_-]{0,62}\z/
+ 
+   @type view :: %{entries: [Entry.t()], overall: atom()}
+ 
+@@ -173,7 +175,9 @@ defmodule Samen.Fleet.PublicStatus do
+   defp public_status(_other), do: :down
+ 
+   defp public_slug(slug) when is_binary(slug) do
+-    if Regex.match?(@slug_shape, slug) and not String.starts_with?(slug, "vt_") do
++    # SABOTAGE (T166/ADR-050 §4.6): the explicit `vt_` refusal is deleted too, so a
++    # vault token in the slug column renders verbatim on the public page.
++    if Regex.match?(@slug_shape, slug) do
+       slug
+     else
+       @masked

@@ -1,0 +1,44 @@
+# SABOTAGE: T166 / ADR-050 §4.4 — the public status page's flood guard still COUNTS
+# and no longer ENFORCES. `Samen.Web.Fleet.PublicStatus.rate_limit/1` is rewritten
+# from `RateLimit.check/3` to `RateLimit.bump/3` plus a bare `:ok`, so the very same
+# per-IP bucket keeps incrementing — an operator watching rate-limit counters sees
+# the identical numbers — while every request is served. This is the only gate the
+# surface has: there is no session, no actor and no authority check on it by design,
+# and the page reads the fleet substrate on every hit.
+#
+# Flips the named §4.4 red (over the per-IP window must be a 429 with an empty
+# body). Everything else stays GREEN: the 200 control still serves, the opt-in
+# filter still hides unpublished apps, the masking reds still mask, and the
+# fail-closed 503 still fires — and the limiter's own POSITIVE CONTROL (a raised
+# limit lets the third request through) still passes, so the red fails because
+# enforcement is gone, not because the limiter or its config seam broke.
+#
+# NOT TOUCHED, deliberately: the `{:error, :rate_limited}` arm of `index/2`'s `else`
+# (it is simply never reached now — left in place so the diff is exactly the
+# enforcement, not the response shape), the bucket key discipline (`ip/1` is
+# unchanged, so the key stays non-PII), the `:public_status_ip` default in
+# `Samen.Web.RateLimit`, and every other surface's `check/3` call site.
+#
+# Uses `bump/3` rather than deleting the call so no private function goes uncalled
+# and the file still compiles under `--warnings-as-errors`.
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_public_status_test.exs
+# MUST_FAIL: over the per-IP window -> 429 with an EMPTY body
+diff --git a/samen_web/lib/samen/web/fleet/public_status.ex b/samen_web/lib/samen/web/fleet/public_status.ex
+--- a/samen_web/lib/samen/web/fleet/public_status.ex
++++ b/samen_web/lib/samen/web/fleet/public_status.ex
+@@ -88,7 +88,13 @@ defmodule Samen.Web.Fleet.PublicStatus do
+   # Gates
+   # ---------------------------------------------------------------------------
+ 
+-  defp rate_limit(conn), do: RateLimit.check(:public_status_ip, :ip, ip(conn))
++  # SABOTAGE (T166/ADR-050 §4.4): the flood guard still COUNTS but no longer
++  # ENFORCES — `bump/3` increments the same bucket and always returns `:ok`, so a
++  # dashboard of rate-limit counters looks exactly as healthy as before.
++  defp rate_limit(conn) do
++    _ = RateLimit.bump(:public_status_ip, :ip, ip(conn))
++    :ok
++  end
+ 
+   # The ONLY value keyed into the bucket: the remote IP, which ADR-038 §6.2 already
+   # admits as a non-PII ephemeral counter key. Never persisted anywhere by this path.
