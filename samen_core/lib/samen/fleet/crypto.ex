@@ -230,10 +230,22 @@ defmodule Samen.Fleet.Crypto do
   @doc """
   Replay-bound timestamp check (§4.4): `|now - ts| > tolerance_s` ⇒ stale.
   Default tolerance 300s.
+
+  ## Clock injection (issue #46)
+
+  `now` is read once via `opts[:now]`, defaulting to `System.os_time(:second)`
+  — the SAME default as before this option existed, so every real caller
+  (`Samen.Fleet.Registry`, `samen_web`'s fleet ingress) is unaffected. This
+  exists so a test can PIN the clock instead of racing it: without a seam, this
+  function re-reads the wall clock on every call, so a test that captures `now`
+  separately and asserts on `now ± tolerance_s` can have a real clock tick land
+  between its own read and this function's — flipping the delta by exactly
+  1 second at the boundary and flaking the assertion (never a sleep/retry/
+  widened-tolerance fix; the seam removes the race instead of tolerating it).
   """
-  @spec fresh_timestamp?(integer(), integer()) :: boolean()
-  def fresh_timestamp?(ts, tolerance_s \\ 300) when is_integer(ts) do
-    now = System.os_time(:second)
+  @spec fresh_timestamp?(integer(), integer(), keyword()) :: boolean()
+  def fresh_timestamp?(ts, tolerance_s \\ 300, opts \\ []) when is_integer(ts) do
+    now = Keyword.get(opts, :now, System.os_time(:second))
     abs(now - ts) <= tolerance_s
   end
 
