@@ -68,6 +68,17 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
   `••••` — and a NAMED test here flips (the canary reaches an egress). The positive controls
   (`grant ON` egresses the canary; `assert_leak_detected!`) prove the refutations are not
   vacuous: the canary CAN reach the provider when the value layer permits it.
+
+  ## Why this stays `async: true` — and what left (issue #13)
+
+  Every arm here observes `Provider.Fake`, whose recording is PER-PROCESS, so these tests
+  are parallel-safe by construction. The two ADR-048 §8 P10 / CF-21 **provenance** arms are
+  not: they script `Samen.AI.Provider.Scripted`, whose script and recording live in
+  `:persistent_term` (a deliberate cross-process seam — the A2 worker writes, the test
+  reads), making it a one-runner-at-a-time double. They now live in
+  `ai_prompt_masking_provenance_test.exs` (`async: false`), and
+  `test/meta/scripted_async_isolation_test.exs` fails any `async: true` module that
+  references `Scripted`, so the trap cannot be re-armed here.
   """
   use ExUnit.Case, async: true
   use Samen.MaskingCase
@@ -86,18 +97,6 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
   # leak, and a grant-path appearance is the one permitted egress.
   @canary "canary-egress-9z8y7x@leak.example"
   @vt_token "vt_" <> String.duplicate("a", 32)
-
-  # ADR-048 §8 P10 / CF-21 — a summarizer that calls NO provider and FABRICATES its own text
-  # leaves both P10 arms above GREEN: neither asserts PROVENANCE, only the canary's absence.
-  # `@p10_reply_marker` is the ONE shared binding the new provenance arm and its positive
-  # control below BOTH assert PRESENT in the persisted summary — true of that summary ONLY
-  # because `Samen.AI.Agent.Compaction.summarize/3` actually dispatched to a provider and the
-  # provider's own reply (never an invented string) flowed back through `scrub/1` unmangled.
-  @p10_reply_marker "P10-PROVENANCE-REPLY-4d8b2f19"
-  # A distinctive token planted in the folded span handed to `summarize/3`, read back off
-  # `Provider.Scripted.sent_payloads/0` — proof the provider call actually carried the fold's
-  # OWN content rather than being skipped entirely.
-  @p10_fold_marker "P10-FOLD-CONTENT-7a61c4e0"
 
   setup do
     Provider.Fake.reset()
@@ -758,70 +757,6 @@ defmodule Samen.AI.AiPromptMaskingRedTeamTest do
 
     refute recorded =~ "vt_",
            "a vault token reached the provider on ADR-048 §5's summarizer surface"
-  end
-
-  # --------------------------------------------------------------------------------------
-  # ADR-048 §5 / §8 P10 — CF-21: PROVENANCE, not merely the canary's absence.
-  #
-  # The two P10 arms above assert only that a fixed canary literal is absent from what the
-  # provider was sent / what the summary contains. A summarizer that calls NO provider at
-  # all and FABRICATES its own summary text satisfies both vacuously — there is no canary to
-  # leak because there was never a real call. These two arms close that: they run the
-  # PRODUCTION seam (`Samen.AI.Agent.Compaction.summarize/3` — exactly what
-  # `Samen.AI.Agent`'s private `summarize_span/3` calls, ADR-048 §5#1), script
-  # `Provider.Scripted` with a distinctive reply, and assert (a) the provider was actually
-  # invoked carrying the fold's own content (`Provider.Scripted.sent_payloads/0`) and (b) the
-  # persisted summary carries the text the provider actually returned — never an invented one.
-  # --------------------------------------------------------------------------------------
-
-  @tag :p10
-  test "P10: the compaction summarizer's persisted summary is provenanced to an actual provider reply, not fabricated (CF-21)" do
-    Provider.Scripted.reset()
-    Provider.Scripted.script([{:continue, "Summary: " <> @p10_reply_marker}])
-
-    folded = ["turn 1: the customer opened a ticket", "turn 2: " <> @p10_fold_marker]
-
-    assert {:ok, summary} =
-             Samen.AI.Agent.Compaction.summarize(
-               %{plane: :tenant},
-               folded,
-               provider: {Provider.Scripted, %{}},
-               grounding: %{}
-             )
-
-    sent_segments =
-      Provider.Scripted.sent_payloads()
-      |> Enum.flat_map(fn {_callback, payload} -> payload.segments end)
-
-    assert Enum.any?(sent_segments, fn seg -> is_binary(seg) and seg =~ @p10_fold_marker end),
-           "P10: summarize/3 never handed the folded span's own content to the provider — " <>
-             "a fabricator that calls no provider at all would still pass without this " <>
-             "assertion (CF-21)"
-
-    assert summary =~ @p10_reply_marker,
-           "P10: the persisted summary does not carry the provider's actual reply text — a " <>
-             "fabricator invents its own text, and only this assertion catches it (CF-21)"
-  end
-
-  @tag :p10
-  test "P10: control — a genuine provider-backed compaction summary carries the provider's own reply (CF-21 anti-tautology)" do
-    Provider.Scripted.reset()
-    Provider.Scripted.script([{:continue, "Summary: " <> @p10_reply_marker}])
-
-    folded = ["turn 1: a routine status update, nothing sensitive"]
-
-    assert {:ok, summary} =
-             Samen.AI.Agent.Compaction.summarize(
-               %{plane: :tenant},
-               folded,
-               provider: {Provider.Scripted, %{}},
-               grounding: %{}
-             )
-
-    assert summary =~ @p10_reply_marker,
-           "P10 control: the plain happy path must ALSO show the provider's reply text " <>
-             "present in the persisted summary — the shared assertion the mutation proof " <>
-             "flips together with the arm above"
   end
 
   # --------------------------------------------------------------------------------------
