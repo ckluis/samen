@@ -1,0 +1,58 @@
+# SABOTAGE: T1.1 / issue #41 — the abbrev prefix property's generator domain loses its
+# PAN/CVC half. `legal_attr_name?/1` drops the
+# `Samen.Verifiers.NoPanColumns.pan_shaped?/1` conjunct and keeps only the
+# injected-core-column check, which is exactly the pre-fix generator: arbitrary
+# `[a-z][a-z0-9_]*` atoms, filtered against four names.
+#
+# That domain includes names the BASE `Samen.Extension` is REQUIRED to refuse at compile
+# time — `Samen.Transformers.NoPanColumns` (the hard abort for the ADR-038 §3.5 B5 no-PAN
+# invariant) rejects any PAN/CVC-shaped attribute — so the property compiles a resource
+# the framework must not compile, and reads the correct `Spark.Error.DslError` as a
+# failure of the abbrev prefix. `:cvv` is the value issue #41 reports; `:cvc_i3jq6h` and
+# `:cvv_e` are the two the generator actually produced.
+#
+# Flips TWO named tests, on purpose, at two different determinism levels:
+#
+#   * the deterministic boundary test flips at EVERY seed — it asserts directly that a
+#     PAN/CVC-shaped name is outside the generator's domain, so it is the arm that makes
+#     this defect refutable without any scheduling or sampling luck;
+#   * the property itself flips only at a seed that actually SAMPLES such a name. Hence
+#     the `--seed 342` in TEST_FILES (the harness's `mix test $test_files` word-splits, so
+#     the seed travels with the file): seed 342 samples `:cvc_i3jq6h` after 31 successful
+#     runs and reproduced 3 of 3 attempts on unfixed origin/main; `--seed 1760` samples
+#     `:cvv_e`. A probe replicating ExUnitProperties' seed derivation (initial_seed =
+#     {0, 0, exunit_seed}) over the first 2000 seeds found exactly those 2, i.e. ~0.1% of
+#     runs — which is precisely why this defect survived as a "known flake" instead of a
+#     red, and precisely why the seed is pinned here rather than left to chance.
+#
+# Everything else in the file stays GREEN: the round-trip property, the T102 trim-stable
+# boundary tests and the whitespace-only normalization test all pass — so the failures are
+# attributable to the generator's domain alone.
+#
+# NOT TOUCHED, deliberately: `Samen.Verifiers.NoPanColumns.pan_shaped?/1` and
+# `Samen.Transformers.NoPanColumns` (the invariant is CORRECT; this was a generator
+# defect), `@reserved` and its injected-core-column half (still enforced, and the boundary
+# test still proves it), every `== :"pgn_<name>"` prefix assertion, and the property's
+# `max_runs: 40`.
+#
+# One conjunct removed from one private predicate, so the file still compiles under
+# `--warnings-as-errors` (nothing becomes unused: `@reserved` is still read here and in
+# the property body).
+# APP: samen_core
+# TEST_FILES: test/abbrev_property_test.exs --seed 342
+# MUST_FAIL: every attribute's storage source is `<abbrev>_<name>`; logical name untouched
+# MUST_FAIL: the generator's own domain predicate refuses every PAN/CVC-shaped name, and admits ordinary ones
+diff --git a/samen_core/test/abbrev_property_test.exs b/samen_core/test/abbrev_property_test.exs
+index 876f9cd..95310a5 100644
+--- a/samen_core/test/abbrev_property_test.exs
++++ b/samen_core/test/abbrev_property_test.exs
+@@ -54,8 +54,7 @@ defmodule Samen.AbbrevPropertyTest do
+   # at the bottom of this file, and independently by
+   # `test/no_pan_columns_red_path_test.exs`'s own compile-refusal reds.
+   defp legal_attr_name?(name) when is_atom(name) do
+-    name not in @reserved and
+-      not Samen.Verifiers.NoPanColumns.pan_shaped?(Atom.to_string(name))
++    name not in @reserved
+   end
+ 
+   defp attr_name do
