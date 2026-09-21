@@ -56,11 +56,27 @@ defmodule SamenResend.Provider do
   key, so a top-level-only allowlist retains only the genuinely safe,
   genuinely top-level scalar fields (`type`, `created_at`) and drops `data`
   (and any invented/unenumerated future top-level field) WHOLESALE.
+
+  ## Throttling (T170 — bug half)
+
+  A Resend `429` used to fall through to the generic `{:resend_error, …}` clause, which
+  the delivery Oban workers hand straight back to Oban — so Oban retried on its ordinary
+  exponential schedule against an account that had just said "too fast", burning one of
+  20 attempts each time. `handle_response/1` now maps a throttle to
+  `Samen.Delivery.Throttle.throttled/1`'s distinct `{:error, {:throttled, seconds}}`,
+  which the workers turn into a `{:snooze, seconds}` — the ESP's own `Retry-After` (or
+  its `ratelimit-reset`), and NO attempt burned.
+
+  Recognised by NAME as well as by status: Resend answers `429` and names the condition
+  in the body's `name` — `rate_limit_exceeded` (the per-second limit) or
+  `daily_quota_exceeded`. A `500` is untouched — that IS a retriable failure and still
+  retries exactly as before.
+
   """
 
   use Samen.Delivery.Provider
 
-  alias Samen.Delivery.{Message, ProviderEvent}
+  alias Samen.Delivery.{Message, ProviderEvent, Throttle}
   alias SamenResend.{SvixSignature, Transport}
 
   # Real Resend webhook `type` -> the bounded, samen-owned ProviderEvent kind
@@ -176,6 +192,20 @@ defmodule SamenResend.Provider do
     {:ok, %{provider_message_id: id}}
   end
 
+  # T170 — THROTTLE, before the generic error clauses. Resend answers `429` and names
+  # the condition in the body's `name`: `rate_limit_exceeded` (the per-second limit) or
+  # `daily_quota_exceeded`. Matched BY NAME as well as by status, and the wait prefers
+  # Resend's `ratelimit-reset` header when `Retry-After` is absent. A `500` is
+  # untouched — that IS a retriable failure and still retries exactly as before.
+  defp handle_response({:ok, %{status: 429} = response}) do
+    Throttle.throttled(headers(response))
+  end
+
+  defp handle_response({:ok, %{body: %{"name" => name}} = response})
+       when name in ["rate_limit_exceeded", "daily_quota_exceeded"] do
+    Throttle.throttled(headers(response))
+  end
+
   defp handle_response({:ok, %{status: status, body: %{"message" => msg} = body}}) do
     {:error, {:resend_error, status, Map.get(body, "name", "ResendError"), msg}}
   end
@@ -185,6 +215,11 @@ defmodule SamenResend.Provider do
   end
 
   defp handle_response({:error, reason}), do: {:error, reason}
+
+  # A fake transport (the §7.2 injectable hook, used by every hermetic test) may omit
+  # `:headers`; an absent header set is not an error, it just means the wait falls back
+  # to `Samen.Delivery.Throttle.default_seconds/0`.
+  defp headers(response), do: Map.get(response, :headers, %{})
 
   # ---------------------------------------------------------------------------
   # verify_and_parse_event/3

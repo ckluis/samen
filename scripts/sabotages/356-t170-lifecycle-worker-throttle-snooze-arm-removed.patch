@@ -1,0 +1,80 @@
+# SABOTAGE: T170 (bug half) — the SNOOZE arm is REMOVED from
+# `Samen.Delivery.Lifecycle.EmailWorker.perform/1`, so a `{:error, {:throttled, seconds}}`
+# from an adapter falls into the generic error arm and goes back to Oban as an ordinary
+# `{:error, _}`. THIS is the half of the bug that actually storms: Oban then retries on its
+# exponential schedule against an ESP that has just asked us to slow down, and — unlike a
+# snooze, which raises `max_attempts` to compensate — each hammer BURNS one of the job's 20
+# attempts. The send is also marked FAILED, which it is not: it was deferred.
+#
+# Flips the named reds in `test/delivery/throttle_snooze_test.exs`, which drives all three
+# throttle-snoozing Oban workers' REAL `perform/1` through `Chokepoint.send/2` with an
+# adapter double whose canned response is the throttle. The assertion is on the Oban verb
+# itself: `{:snooze, seconds}`, never `{:error, _}`. With the arm gone this worker returns
+# the error tuple, so the loop over the three workers fails on THIS one.
+#
+# The POSITIVE CONTROLS in the same file still PASS for all three workers — a `500` still
+# comes back as an `{:error, _}` Oban retries as today, `:adapter_unconfigured` is still
+# the blocked error rather than a snooze, and a real delivery still returns `:ok` — so the
+# reds fail because the throttle is retried instead of snoozed, not because worker
+# dispatch, the chokepoint or the adapter double broke. The other two workers'
+# (`Marketing.SendWorker`, `Notifications.EmailDispatchWorker`) snooze arms are
+# deliberately left INTACT: the red must fail because of the arm removed here, and a
+# per-worker assertion message names which worker regressed.
+#
+# NOT TOUCHED, deliberately: `Samen.Delivery.Throttle` and the wait derivation (its own
+# reds own that), the three adapters' recognition step (353/354/355 own those), the
+# `:suppressed` and `:adapter_unconfigured` arms above, and `log_failed/3` — the throttle
+# now takes the FAILED log path, which is precisely the operator-visible symptom of this
+# regression.
+#
+# Removes two contiguous regions (the `Throttle` alias entry and the snooze arm) plus the
+# `log_throttled/3` helper that existed only to serve it, so nothing is left unused and the
+# file compiles under `--warnings-as-errors`. Touches email_worker.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/delivery/throttle_snooze_test.exs
+# MUST_FAIL: T170 RED: an ESP throttle SNOOZES for the ESP's own Retry-After — no burned attempt
+# MUST_FAIL: T170 RED: a throttle is never returned to Oban as an error (that IS the retry storm)
+# MUST_FAIL: T170 RED: the snooze carries the adapter's seconds verbatim, not a fixed constant
+diff --git a/samen_core/lib/samen/delivery/lifecycle/email_worker.ex b/samen_core/lib/samen/delivery/lifecycle/email_worker.ex
+--- a/samen_core/lib/samen/delivery/lifecycle/email_worker.ex
++++ b/samen_core/lib/samen/delivery/lifecycle/email_worker.ex
+@@ -85,7 +85,7 @@
+ 
+   require Logger
+ 
+-  alias Samen.Delivery.{Chokepoint, Message, Rendering, Throttle}
++  alias Samen.Delivery.{Chokepoint, Message, Rendering}
+ 
+   # Captured at compile time so the runtime never consults Mix (unavailable in
+   # releases). Overridable at runtime via :delivery_env for tests / staging.
+@@ -139,12 +139,8 @@
+               mark_blocked(message, event)
+               err
+ 
+-            # T170: an ESP throttle SNOOZES — no burned attempt, no :failed mark.
+-            # Ordered before the generic error arm so a throttle can never fall into it.
+-            {:error, {:throttled, _seconds}} = throttle ->
+-              {:snooze, seconds} = Throttle.oban_result(throttle)
+-              log_throttled(message, event, seconds)
+-              {:snooze, seconds}
++            # SABOTAGE (T170): the SNOOZE arm is GONE — an ESP throttle falls into the
++            # generic error arm, so Oban retries it and burns an attempt per hammer.
+ 
+             {:error, reason} = err ->
+               log_failed(message, event, reason)
+@@ -185,15 +181,6 @@
+     )
+   end
+ 
+-  # Deliberately :info, not :warning — a throttle is the ESP pacing us, not a fault, and
+-  # a warning per throttled send is exactly the noise that gets an alert channel muted.
+-  defp log_throttled(message, event, seconds) do
+-    Logger.info(
+-      "[Lifecycle.EmailWorker] ESP THROTTLED — snoozing #{seconds}s (no attempt burned) " <>
+-        "event=#{event} send_id=#{message.send_id} org_id=#{message.org_id}"
+-    )
+-  end
+-
+   # Suppressed AT the chokepoint (spec C2) — never reaches the provider. Distinct
+   # from :adapter_unconfigured (blocked): the adapter WAS configured, the
+   # recipient was refused. Best-effort operator signal, same degrade-to-log

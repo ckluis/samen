@@ -62,7 +62,7 @@ defmodule Samen.Scopes.Marketing.SendWorker do
 
   require Logger
 
-  alias Samen.Delivery.{Chokepoint, Message}
+  alias Samen.Delivery.{Chokepoint, Message, Throttle}
 
   # Captured at compile time so the runtime never consults Mix (unavailable in
   # releases). Overridable at runtime via :delivery_env for tests / staging.
@@ -89,6 +89,19 @@ defmodule Samen.Scopes.Marketing.SendWorker do
         {:error, :adapter_unconfigured} = err ->
           mark_blocked(message, repo)
           err
+
+        # T170: an ESP throttle SNOOZES — no burned attempt, and the send row is NOT
+        # marked :failed (nothing failed; the attempt was deferred). Ordered before the
+        # generic error arm so a throttle can never fall into it.
+        {:error, {:throttled, _seconds}} = throttle ->
+          {:snooze, seconds} = Throttle.oban_result(throttle)
+
+          Logger.info(
+            "[Marketing.SendWorker] ESP THROTTLED — snoozing #{seconds}s (no attempt " <>
+              "burned) send_id=#{message.send_id} org_id=#{message.org_id}"
+          )
+
+          {:snooze, seconds}
 
         {:error, reason} = err ->
           mark_failed(message, reason, repo)

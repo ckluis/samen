@@ -32,11 +32,26 @@ defmodule SamenPostmark.Provider do
   HMAC body signature — Postmark does not sign webhook bodies), so
   "invalid_signature" here means "the Authorization header does not match the
   configured Basic Auth credentials."
+
+  ## Throttling (T170 — bug half)
+
+  A Postmark `429` used to fall through to the generic `{:postmark_error, 429, …}`
+  clause, which the delivery Oban workers hand straight back to Oban — so Oban
+  retried on its ordinary exponential schedule against an account that had just said
+  "too fast", burning one of 20 attempts each time. `handle_response/1` now maps a
+  throttle to `Samen.Delivery.Throttle.throttled/1`'s distinct
+  `{:error, {:throttled, seconds}}`, which the workers turn into a
+  `{:snooze, seconds}` — the ESP's own `Retry-After`, and NO attempt burned.
+
+  Postmark signals rate limiting with the HTTP status (`429`). The body's `ErrorCode`
+  is matched too when it echoes `429`, which costs nothing and covers a gateway that
+  rewrites the status. A `500`/`503` is untouched — that IS a retriable failure and
+  still retries exactly as before.
   """
 
   use Samen.Delivery.Provider
 
-  alias Samen.Delivery.{InboundMessage, Message, ProviderEvent}
+  alias Samen.Delivery.{InboundMessage, Message, ProviderEvent, Throttle}
   alias SamenPostmark.Transport
 
   # Postmark `RecordType` -> the bounded, samen-owned ProviderEvent kind enum
@@ -179,6 +194,16 @@ defmodule SamenPostmark.Provider do
     {:ok, %{provider_message_id: id}}
   end
 
+  # T170 — THROTTLE, before the generic error clauses. Ordered first among the error
+  # arms so a `429` can never be read as an ordinary Postmark error again.
+  defp handle_response({:ok, %{status: 429} = response}) do
+    Throttle.throttled(headers(response))
+  end
+
+  defp handle_response({:ok, %{body: %{"ErrorCode" => 429}} = response}) do
+    Throttle.throttled(headers(response))
+  end
+
   defp handle_response({:ok, %{status: status, body: %{"ErrorCode" => code, "Message" => msg}}}) do
     {:error, {:postmark_error, status, code, msg}}
   end
@@ -188,6 +213,11 @@ defmodule SamenPostmark.Provider do
   end
 
   defp handle_response({:error, reason}), do: {:error, reason}
+
+  # A fake transport (the §7.2 injectable hook, used by every hermetic test) may omit
+  # `:headers`; an absent header set is not an error, it just means the wait falls back
+  # to `Samen.Delivery.Throttle.default_seconds/0`.
+  defp headers(response), do: Map.get(response, :headers, %{})
 
   # ---------------------------------------------------------------------------
   # verify_and_parse_event/3
