@@ -1,0 +1,35 @@
+# SABOTAGE: issue #45 — re-arms the exact isolation bug this PR fixes. Swaps
+# the WRITER'S `Ecto.Adapters.SQL.Sandbox.checkout/1` in
+# `Samen.Delivery.ThrottleSnoozeIsolationTest` for
+# `Ecto.Adapters.SQL.Sandbox.checkout(repo, sandbox: false)` — i.e. it takes a
+# connection that is genuinely NOT wrapped in a per-test rollback transaction,
+# reproducing the exact state `throttle_snooze_test.exs` was in before this PR
+# (a write that is NOT sandbox-isolated for this process).
+#
+# With the checkout weakened this way, the worker's blocked-audit write is
+# genuinely, immediately committed — visible to the test's own INDEPENDENT
+# reader connection (a separate Postgres session, via `Task.async`) while the
+# test is still running, instead of staying invisible inside a still-open
+# sandbox transaction. This is the same mechanism issue #45 describes for
+# `throttle_snooze_test.exs` itself, reproduced deterministically here instead
+# of depending on winning the real (non-seed-bound) race.
+#
+# NOT TOUCHED: the reader Task's own `sandbox: false` checkout (it must be
+# unsandboxed to see genuinely-committed data at all — that one is correct as
+# shipped), the worker call, the stub adapter, and every other test file.
+#
+# APP: samen_core
+# TEST_FILES: test/delivery/throttle_snooze_isolation_test.exs
+# MUST_FAIL: a blocked-audit write never survives this test
+diff --git a/samen_core/test/delivery/throttle_snooze_isolation_test.exs b/samen_core/test/delivery/throttle_snooze_isolation_test.exs
+--- a/samen_core/test/delivery/throttle_snooze_isolation_test.exs
++++ b/samen_core/test/delivery/throttle_snooze_isolation_test.exs
+@@ -102,7 +102,7 @@ defmodule Samen.Delivery.ThrottleSnoozeIsolationTest do
+   end
+
+   test "a blocked-audit write never survives this test — no non-UUID aud_subject_id row leaks (issue #45)" do
+-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
++    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo, sandbox: false)
+
+     subject_id = "iso-#{System.unique_integer([:positive])}"
+
