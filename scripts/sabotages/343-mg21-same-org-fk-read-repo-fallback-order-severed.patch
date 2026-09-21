@@ -1,0 +1,36 @@
+# SABOTAGE: MG-21 (ADR-049 mutation ledger) — `Samen.Policy.SameOrgFk.target_org_id/2`'s
+# repo resolution order is severed: `repo(dest, :read) || repo(dest)` becomes `&&`, so the
+# READ repo is no longer tried first and no longer suffices. A destination whose repo
+# resolves for `:read` and not for `:mutate` — AshPostgres's own documented function-repo
+# shape, the read-replica split — then resolves to nil, the guard bails out
+# `{:error, :no_data_layer}`, and every legitimate SAME-ORG write through that FK is
+# REFUSED. Fail-closed, but on a target the guard could have read perfectly well.
+#
+# Invisible to every shipped resource: in samen_core every `postgres do repo … end` is a
+# static module, so both calls return the same value and the ORDER cannot be observed. That
+# is why the named red builds a destination with a function repo that resolves for `:read`
+# only, pointed at the REAL `cpy_company` table, and asserts both halves of the pair before
+# exercising the guard.
+#
+# Flips the named MG-21 red. Its anti-tautology CONTROL — a genuine CROSS-org FK against the
+# same destination is still refused with "cross-org FK" — flips too, and that is the point:
+# with no repo the guard can neither pass a same-org target nor identify a foreign one, so
+# the patch is refutable from both sides. MG-22's red (the one-of-the-pair-missing bail-out)
+# stays green: this patch touches ONE line.
+#
+# One boolean operator. Touches policy/same_org_fk.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/same_org_fk_fail_closed_test.exs
+# MUST_FAIL: MG-21: a same-org FK PASSES against a target whose repo resolves only for :read
+diff --git a/samen_core/lib/samen/policy/same_org_fk.ex b/samen_core/lib/samen/policy/same_org_fk.ex
+--- a/samen_core/lib/samen/policy/same_org_fk.ex
++++ b/samen_core/lib/samen/policy/same_org_fk.ex
+@@ -171,7 +171,7 @@ defmodule Samen.Policy.SameOrgFk do
+   # foreign target from this validation (the whole point is to SEE it and REFUSE it).
+   defp target_org_id(rel, fk_value) do
+     dest = rel.destination
+-    repo = AshPostgres.DataLayer.Info.repo(dest, :read) || AshPostgres.DataLayer.Info.repo(dest)
++    repo = AshPostgres.DataLayer.Info.repo(dest, :read) && AshPostgres.DataLayer.Info.repo(dest)
+     table = AshPostgres.DataLayer.Info.table(dest)
+ 
+     dest_pk_source = attribute_source(dest, rel.destination_attribute)

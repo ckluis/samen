@@ -1,0 +1,33 @@
+# SABOTAGE: MG-11 (ADR-049 mutation ledger) — `Samen.Vault.Change.cast_declared_types/1`'s
+# composite-EXCEPT-Address guard is widened from `and` to `or`, so the no-cast arm swallows
+# EVERY field: `composite? or type != Address` is true for a composite (whatever its type)
+# AND for every scalar (whose type is not Address). ADR-036 D3's single validation point on
+# the vaulted write path is then gone — a malformed `Samen.Type.Address`, and a garbage
+# `EmailAddress`/`URL`/`PhoneNumber` with it, vaults successfully and reveals byte-for-byte,
+# which is the exact contradiction T99 shipped this arm to close.
+#
+# Flips the named MG-11/MG-12 red (the malformed Address is accepted instead of refused).
+# Its CONTROL flips too, and that is the point: a well-formed Address stops being
+# NORMALIZED (`country: "us"` no longer reveals as `"US"`), so the patch is refutable from
+# both sides — the arm is not merely stricter or looser, it is bypassed.
+#
+# NOT TOUCHED, deliberately: the `!=` comparison itself (sabotage 337 owns that), the
+# `true ->` cast arm, `reject_cast/2`, and the composite preservation contract for
+# FullName/Emails/Phones.
+#
+# One boolean operator on one cond clause. Touches vault/change.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/vault_change_fail_closed_test.exs
+# MUST_FAIL: MG-11/MG-12: a malformed Samen.Type.Address is REFUSED before vaulting
+diff --git a/samen_core/lib/samen/vault/change.ex b/samen_core/lib/samen/vault/change.ex
+--- a/samen_core/lib/samen/vault/change.ex
++++ b/samen_core/lib/samen/vault/change.ex
+@@ -165,7 +165,7 @@ defmodule Samen.Vault.Change do
+   defp cast_declared_types(to_vault) do
+     Enum.reduce_while(to_vault, {:ok, {[], []}}, fn {field, plaintext}, {:ok, {casted, clears}} ->
+       cond do
+-        field.composite? and field.type != Samen.Type.Address ->
++        field.composite? or field.type != Samen.Type.Address ->
+           # Preserve today's behavior byte-for-byte: no cast, store the original value.
+           {:cont, {:ok, {[{field, plaintext} | casted], clears}}}
+ 

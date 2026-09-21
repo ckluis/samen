@@ -1,0 +1,31 @@
+# SABOTAGE: MG-09 (ADR-049 mutation ledger) — `Samen.Pii.WriteGuard.plaintext_write?/2`
+# is WIDENED so a raw `vt_*` VAULT TOKEN counts as operator-authored PLAINTEXT. A token is
+# the opposite of plaintext: it is the opaque FK the domain column is allowed to hold, the
+# one value `Samen.Type.VaultField.dump_to_native/2` accepts without a vault write. Writing
+# it back re-states what is already stored and encrypts nothing.
+#
+# The OVER-refusal direction: every shipped RP-L1 test writes genuine plaintext and stays
+# green under this flip. What breaks is the token round-trip an operator-plane write
+# performs whenever the vaulted column's current value is carried through unchanged.
+#
+# Flips the named MG-09 red. The anti-tautology CONTROL stays green — genuine operator
+# plaintext is still refused with "no-operator-plaintext-write" — so the red fails because
+# the `vt_*` arm was widened, not because the guard or the vault write path broke. MG-08's
+# and MG-10's reds stay green: this patch touches ONE clause.
+#
+# One case clause, one literal. Touches write_guard.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/pii_write_guard_fail_closed_test.exs
+# MUST_FAIL: MG-09: an OPERATOR writing back the raw vt_* token is ALLOWED
+diff --git a/samen_core/lib/samen/pii/write_guard.ex b/samen_core/lib/samen/pii/write_guard.ex
+--- a/samen_core/lib/samen/pii/write_guard.ex
++++ b/samen_core/lib/samen/pii/write_guard.ex
+@@ -117,7 +117,7 @@ defmodule Samen.Pii.WriteGuard do
+   defp plaintext_write?(changeset, name) do
+     case Ash.Changeset.fetch_change(changeset, name) do
+       {:ok, %Masked{}} -> false
+-      {:ok, "vt_" <> _} -> false
++      {:ok, "vt_" <> _} -> true
+       {:ok, nil} -> false
+       {:ok, _plaintext} -> true
+       :error -> false

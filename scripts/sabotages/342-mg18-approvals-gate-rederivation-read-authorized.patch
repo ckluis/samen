@@ -1,0 +1,39 @@
+# SABOTAGE: MG-18 (ADR-049 mutation ledger) — `Samen.Approvals.Gate.on_approve/2`'s §4.4
+# RE-DERIVATION read is switched from `authorize?: false` to `authorize?: true`. The read is
+# not the authorization decision — it is how the engine FINDS the subject named by
+# `subject_ref`; the decision is the `for_update`/`Ash.update` two lines below, which is
+# already `authorize?: true` and is left untouched here.
+#
+# Authorizing the lookup silently changes WHO CAN BE APPROVED FOR WHAT. The requester
+# principal is reconstructed from the approval's bounded ids, so an approval whose `org_id`
+# does not match the subject's real org stops being a REFUSED write (§12: approval adds
+# second-party consent, never privilege) and becomes an invisible NOT-FOUND read —
+# `{:subject_unavailable, _}`, the answer §7.1 reserves for "the subject vanished or was
+# archived between request and decision", which leaves the approval PENDING for the approver
+# to retry. A real refusal is re-labelled a transient one, and the engine's own error
+# vocabulary stops meaning what it says.
+#
+# Every existing Gate test drives a requester whose org MATCHES the document's, where both
+# settings answer identically — which is why this red constructs the mismatch and asserts
+# the EXACT error shape, not merely `{:error, _}`.
+#
+# Flips the named MG-18 red. Its CONTROL (the honest same-org approval still executes as the
+# requester, `published_by == requested_by`) stays green, so the red fails because the read
+# was authorized, not because the engine, the handler registry or the gate kind broke.
+#
+# One keyword value. Touches approvals/gate.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/hardening/approvals_gate_rederivation_fail_closed_test.exs
+# MUST_FAIL: MG-18: an approval whose org does not match the subject fails on the WRITE, not as a missing subject
+diff --git a/samen_core/lib/samen/approvals/gate.ex b/samen_core/lib/samen/approvals/gate.ex
+--- a/samen_core/lib/samen/approvals/gate.ex
++++ b/samen_core/lib/samen/approvals/gate.ex
+@@ -93,7 +93,7 @@ defmodule Samen.Approvals.Gate do
+       # Re-derive the record from governed domain state (§4.4 — no persisted inputs). The
+       # one-shot `approval_ok` context MUST be set via for_update's :context opt (the Gate's
+       # change/3 runs during for_update, before any later set_context would apply).
+-      case Ash.get(resource, record_id, actor: requester, authorize?: false) do
++      case Ash.get(resource, record_id, actor: requester, authorize?: true) do
+         {:ok, record} ->
+           record
+           |> Ash.Changeset.for_update(action, %{},
