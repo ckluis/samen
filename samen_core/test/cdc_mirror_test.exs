@@ -290,6 +290,68 @@ defmodule Samen.CdcMirrorTest do
         LocalPostgres.read_current(@patient_table, "some-key", [])
       end
     end
+
+    # -----------------------------------------------------------------------
+    # RP-E — the scan is FAIL-CLOSED on an infrastructure failure it cannot
+    # classify. `Vault.reveal/2` answers a legitimately shredded/missing token
+    # with an ERROR TUPLE (`{:error, :shredded | :absent | :not_found |
+    # :unavailable | :decrypt_failed}`) — it does NOT raise — so a RAISE out of
+    # the reveal path is never "this token is safely undecryptable"; it is "the
+    # scan did not run". This oracle is the erasure-completeness verifier
+    # (`erasure_test.exs`, `shred_key_material_test.exs`, driftwood's crypto-shred
+    # gameday read its verdict as proof of erasure), so a vault that was merely
+    # unreachable must never come back as a proven erasure (ADR-014/024/026
+    # fail-honest: an error you cannot classify fails CLOSED).
+    # -----------------------------------------------------------------------
+    @tag :red_path
+    test "RP-E: a reveal that RAISES mid-scan is a LEAK, never {:ok, :no_plaintext}" do
+      enable_cdc!()
+      subject_id = subj()
+      tokens = seed_vault(subject_id)
+      mirror_patient_row(subject_id, tokens)
+
+      # The mirror holds real tokens; now the KMS transport blows up mid-scan
+      # (socket closed / adapter misconfigured / a bug under the reveal path).
+      # Nothing at all has been proven about this subject's erasure.
+      on_exit(fn -> Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked) end)
+      Application.put_env(:samen_core, :kms_adapter, Samen.CdcMirrorTest.RaisingKms)
+
+      assert {:leaks, [leak]} = LocalPostgres.scan_no_plaintext(subject_id, [])
+      assert leak =~ "cdc mirror scan failed"
+      assert leak =~ "kms transport closed"
+    end
+
+    @tag :red_path
+    test "RP-E control A: a genuinely SHREDDED token still scans {:ok, :no_plaintext}" do
+      enable_cdc!()
+      subject_id = subj()
+      tokens = seed_vault(subject_id)
+      mirror_patient_row(subject_id, tokens)
+      {:ok, _} = Erasure.shred(subject_id, repo: @repo)
+
+      # The distinction RP-E turns on: a shredded token DENIES with an error tuple,
+      # it does not raise. An undecryptable token is the CORRECT safe outcome — the
+      # scan's whole purpose — and must keep reading as :no_plaintext.
+      assert {:error, :shredded} =
+               Vault.reveal(%Samen.Masked{token: hd(tokens), label: "cdc"}, @repo)
+
+      assert {:ok, :no_plaintext} = LocalPostgres.scan_no_plaintext(subject_id, [])
+    end
+
+    @tag :red_path
+    test "RP-E control B: a genuinely DECRYPTABLE mirror token still scans as a leak" do
+      enable_cdc!()
+      subject_id = subj()
+      tokens = seed_vault(subject_id)
+      mirror_patient_row(subject_id, tokens)
+
+      # No shred — the per-subject key is live, so both mirror tokens decrypt. The
+      # scan must name each one (this is the arm that proves it still detects).
+      assert {:leaks, leaks} = LocalPostgres.scan_no_plaintext(subject_id, [])
+      assert length(leaks) == 2
+      assert Enum.all?(leaks, &(&1 =~ "still decrypts"))
+      assert Enum.any?(leaks, &(&1 =~ hd(tokens)))
+    end
   end
 
   # ======================================================================
@@ -325,4 +387,36 @@ defmodule Samen.CdcMirrorTest do
            "the tier that PASSED the clean mirror must FAIL the sabotaged one — proving it " <>
              "discriminates rather than always-passing"
   end
+end
+
+defmodule Samen.CdcMirrorTest.RaisingKms do
+  @moduledoc """
+  A KMS adapter whose `unwrap/1` **RAISES** instead of returning `{:error, _}` —
+  the shape of an infrastructure failure mid-scan (transport closed, adapter
+  misconfigured, a bug under `Samen.Vault.reveal/2`). Deliberately distinct from
+  `Samen.ErasureTest.UnreachableKms`, which returns `{:error, :unavailable}`: an
+  error TUPLE is a classified answer ("undecryptable" — the safe outcome), a RAISE
+  is not, and only a raise can be mistaken for "safely undecryptable" by a rescue
+  that swallows it. Drives RP-E.
+  """
+  @behaviour Samen.Kms
+
+  @blown "kms transport closed"
+
+  @impl true
+  def generate_subject_key(_), do: raise(RuntimeError, message: @blown)
+  @impl true
+  def unwrap(_), do: raise(RuntimeError, message: @blown)
+  @impl true
+  def shred(_), do: raise(RuntimeError, message: @blown)
+  @impl true
+  def attest(_), do: raise(RuntimeError, message: @blown)
+  @impl true
+  def backups_disabled?, do: true
+  # Store unreachable ⇒ key presence is UNKNOWN ⇒ assume present (fail closed:
+  # an outage never masquerades as a completed erasure).
+  @impl true
+  def key_material_present?(_), do: true
+  @impl true
+  def pseudonym(_, _), do: raise(RuntimeError, message: @blown)
 end

@@ -201,10 +201,29 @@ defmodule Samen.Cdc.LocalPostgres do
     end)
   end
 
+  # Is this mirror token still decryptable? ONLY an `{:ok, _}` reveal means yes.
+  #
+  # NO `rescue` here, deliberately (and matching `Samen.Vault.scan_no_plaintext/2`,
+  # the sibling live-tier scanner, which also lets raises through). `Vault.reveal/2`
+  # answers a legitimately shredded, absent or corrupt token with an ERROR TUPLE —
+  # `{:error, :shredded | :absent | :not_found | :unavailable | :decrypt_failed}` —
+  # never a raise, so every raise reaching here is an infrastructure failure this
+  # function cannot classify (vault/KMS unreachable, repo misconfigured, a bug in
+  # the reveal path). A blanket `rescue _ -> false` would answer "not decryptable"
+  # = SAFE for exactly those cases, shadowing `scan_no_plaintext/2`'s fail-closed
+  # rescue: if every token errored, the scan returned `{:ok, :no_plaintext}` and a
+  # merely-unreachable vault was reported as a PROVEN erasure to the erasure-
+  # completeness callers (`erasure_test.exs`, `shred_key_material_test.exs`,
+  # driftwood's crypto-shred gameday). Letting the raise propagate hands it to that
+  # rescue, which reports it as a leak — fail-honest per ADR-014/024/026: an error
+  # you cannot classify fails CLOSED. Red: cdc_mirror_test.exs RP-E (+ its two
+  # controls: a shredded token still scans clean, a live one still reports a leak).
   defp decryptable?(token, repo) do
-    match?({:ok, _}, Vault.reveal(%Samen.Masked{token: token, label: "cdc"}, repo))
-  rescue
-    _ -> false
+    # Built through `Samen.Masked.new/2`, NOT a bare struct literal: `new/2` guards
+    # `is_atom(label)`, and `t:Samen.Masked.t/0` (hence `Vault.reveal/3`'s contract)
+    # declares an atom label. The vault never reads it, so behaviour was already
+    # correct — the constructor makes the ill-typed value unrepresentable.
+    match?({:ok, _}, Vault.reveal(Samen.Masked.new(token, :cdc), repo))
   end
 
   defp repo! do
