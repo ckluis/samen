@@ -19,6 +19,16 @@ config :logger, level: :warning
 # Quiet Ecto's per-query debug logging in the test suite (the render tests issue many reads).
 config :samen_web, Samen.WebTest.Repo, log: false
 
+# Ash notifications are structurally "missed" under the SQL sandbox: every test body runs
+# inside a checked-out transaction, so `Ash.Notifier.notify/1` can never fire and Ash logs a
+# ~20-line warning WITH a captured `Process.info(self(), :current_stacktrace)` for each write.
+# This suite writes through Ash 1389 times per run — 54k lines of guaranteed-noise output that
+# drowns the failures a reader is scrolling for, and that makes the gate unprofilable (a
+# per-line timestamping filter over this tier inflates it from 38.5s to 82s). samen_core
+# (config/config.exs) and driftwood (config/test.exs) already set this; samen_web was the
+# outlier. Test-env only — dev/prod keep Ash's default :warn.
+config :ash, :missed_notifications, :ignore
+
 # The library does not boot an application supervisor; the test setup starts the repo.
 config :samen_web, start_repo?: false
 
