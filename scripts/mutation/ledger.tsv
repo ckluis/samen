@@ -3,6 +3,20 @@
 # Columns (tab-separated):
 #   relpath <TAB> line_sha12 <TAB> col <TAB> family <TAB> from>to <TAB> class <TAB> reason
 #
+# THE THIRD FIELD IS A COLUMN, NOT A LINE. `col` is the 1-based CODEPOINT column
+# of the mutated token on the line `line_sha12` pins — the `21` in the first row
+# below is column 21, not line 21. There is deliberately NO line field: a line
+# number would rot silently on any insertion above the row, which is the exact
+# failure content-pinning exists to prevent, and scripts/mutation_lint.sh has no
+# way to detect that rot. Issue #20 read these numbers as file lines and
+# concluded the column was harness-normalized. It is not — the engine's line
+# numbers are real file lines, straight from `Code.string_to_quoted/2` with
+# `columns: true`, and it is only the ledger that (deliberately) does not store
+# them. To recover the absolute line for a row:
+#   elixir scripts/mutation/mutate.exs list <relpath>
+# and match on (col, family, from, to, line_sha12). A gate run prints every site
+# as `<line>:<col>` for the same reason.
+#
 # CONTENT-PINNED, NOT LINE-PINNED. `line_sha12` is the first 12 hex of SHA-256
 # over the exact source line the exemption excuses. Inserting lines above a
 # justified survivor keeps the exemption valid; EDITING that line changes the
@@ -29,6 +43,29 @@
 # Filed 2026-09-18 from the first tier-1 run (61 mutants, 42 killed, 17 survived,
 # 2 build-refused). Six further survivors from that same run were CLOSED WITH TESTS
 # rather than exempted (MG-01..MG-06) — see ADR-049 section 7.
+# ── 2026-09-21: RE-REPLAYED AGAINST `main` @ f8fcd79 (issues #20, #21) ───────
+# Issue #21 predicted 13 rows (MG-07..13, 15..18, 21, 22) would be OBSOLETE once
+# PR #26's 13 fail-closed proofs merged. The full tier-1 replay on that merge
+# commit says otherwise: 61 mutants, 42 killed, 17 ledger-exempt, 2
+# build-refused, ZERO obsolete — `MUTATION GATE: ALL PASSED`. No row below is
+# dead weight by this gate's own rule, so no row was removed.
+#
+# WHY the prediction missed, and it is not a nuance: PR #26 put its proofs in NEW
+# files (samen_core/test/hardening/*_fail_closed_test.exs) and did NOT add them
+# to the owning-test column of scripts/mutation/targets.tsv. Every mutant runs
+# ONLY its target's declared owning tests (that is the attribution contract, not
+# an implementation detail), so the gate never executes those suites and these
+# mutants genuinely survive the tests that claim to guard these files. Proven,
+# not assumed: re-running with a scratch targets.tsv whose owning-test column is
+# UNION'd with the five hardening suites FAILS with 14 obsolete rows — the
+# predicted 13 PLUS MG-19, the highest-severity row — and leaves MG-14, MG-20 and
+# the EQUIVALENT row still surviving.
+#
+# So the stale record here was never the ledger; it is targets.tsv's owning-test
+# column. Wiring the five hardening suites in is a gate-configuration change with
+# a real per-mutant runtime cost and it is what settles these 14 rows in one move;
+# it is an operator call, not a records edit, and is deliberately NOT made here.
+# Until it is made, every row below is live and load-bearing.
 samen_core/lib/samen/files/chokepoint_guard.ex	ff8787106ac1	21	BOOLLIT	false>true	ACCEPTED_GAP	ref=ADR-049#MG-07 sets_storage_key?/1's documented 'an explicit nil is not a mint' clause is untested. The mutant makes a nil-clear count as a mint, so the guard REFUSES clearing a storage_key. Direction is fail-CLOSED (stricter, never a leak), which is why it is deferred rather than urgent.
 samen_core/lib/samen/pii/write_guard.ex	49ba7e96e22a	27	BOOLLIT	false>true	ACCEPTED_GAP	ref=ADR-049#MG-08 plaintext_write?/2's %Masked{} round-trip clause is untested. The mutant treats a round-tripping masked value as a plaintext write, so WriteGuard refuses a legitimate governed re-save. Fail-CLOSED direction (breaks a write, never leaks one).
 samen_core/lib/samen/pii/write_guard.ex	28833ec24e75	28	BOOLLIT	false>true	ACCEPTED_GAP	ref=ADR-049#MG-09 plaintext_write?/2's vt_* token clause is untested. Same shape as MG-08 for a raw token round-trip: the mutant refuses a governed re-save of an already-vaulted value. Fail-CLOSED direction.
@@ -36,7 +73,7 @@ samen_core/lib/samen/pii/write_guard.ex	ff8787106ac1	21	BOOLLIT	false>true	ACCEP
 samen_core/lib/samen/vault/change.ex	8549eff1df0a	26	BOOLOP	and>or	ACCEPTED_GAP	ref=ADR-049#MG-11 the composite-except-Address cast branch is unexercised: no target in the owning suite declares a composite vault field, so both halves of `field.composite? and field.type != Samen.Type.Address` are free. Needs an Address-typed and a non-Address composite fixture.
 samen_core/lib/samen/vault/change.ex	8549eff1df0a	41	EQ	!=>==	ACCEPTED_GAP	ref=ADR-049#MG-12 the same unexercised composite-cast branch as MG-11, mutated on the type comparison instead of the conjunction. One composite-field fixture pair closes MG-11 and MG-12 together.
 samen_core/lib/samen/vault/change.ex	a532b530a3db	37	BOOLOP	||>&&	ACCEPTED_GAP	ref=ADR-049#MG-13 subject_id/1's fall-back to the EXISTING data pk is unexercised: the owning suite never re-vaults on an update where the pk comes from changeset.data, so the mutant's fresh-UUID subject (which would orphan the ciphertext from its row) goes unnoticed.
-samen_core/lib/samen/vault/change.ex	7a9033910afd	41	BOOLOP	||>&&	ACCEPTED_GAP	ref=ADR-049#MG-14 ensure_subject_attr/2's already-has-a-pk clause is unexercised for the same reason as MG-13 (no update-path vault write in the owning suite).
+samen_core/lib/samen/vault/change.ex	7a9033910afd	41	BOOLOP	||>&&	EQUIVALENT	ADR-049#MG-14, reclassified from ACCEPTED_GAP per issue #20 — it is not a debt. ensure_subject_attr/2's already-has-a-pk clause can only diverge on an UPDATE, and on an update the cond's fallthrough force-changes the pk to the value it already holds, where Ash's force_change_attribute/3 deletes a no-op change — so no input can observe the mutation. Proof by attempt, not by argument: a candidate test was written, run WITH and WITHOUT the mutation, passed both ways, and was deleted rather than shipped (a test that cannot fail is the tautology this repo refuses). Closing it would need a lib change, not a test.
 samen_core/lib/samen/vault/change.ex	91f4cd93e0b1	7	BOOLLIT	true>false	ACCEPTED_GAP	ref=ADR-049#MG-15 ensure_subject_attr/2's cond FALLTHROUGH (the clause that actually forces the generated pk on create) is never the clause taken in the owning suite — an earlier clause always matches first, so removing the fallthrough changes nothing it observes.
 samen_core/lib/samen/vault/change.ex	00389db68257	66	BOOLOP	||>&&	ACCEPTED_GAP	ref=ADR-049#MG-16 repo!/1's three-step fallback chain (data-layer repo, then :vault_repo config, then raise) has no test pinning its ORDER or its raise. Under test config every step resolves to the same repo, so reordering is invisible. Not equivalent in general: a host with only one of the two configured gets a nil repo.
 samen_core/lib/samen/vault/change.ex	d685a4627c5f	53	BOOLOP	||>&&	ACCEPTED_GAP	ref=ADR-049#MG-17 the second link of the same unpinned repo!/1 fallback chain as MG-16, including the raise arm that is supposed to be the honest failure when nothing resolves.
