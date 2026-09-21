@@ -40,11 +40,32 @@ defmodule Samen.Scope do
   @enforce_keys [:actor]
   defstruct [:actor, :context]
 
+  @typedoc """
+  The actor map policies see. The four RBAC facts are always present. Two further
+  keys are present on the OPERATOR-plane scopes (`Samen.Impersonation.Scope`,
+  `Samen.OperatorPlane`) and read by the egress matrix
+  (`Samen.Api.PiiResolution`) rather than by RBAC:
+
+    * `:plane` — `:tenant` | `:operator`. A vaulted field read on the `:operator`
+      plane stays masked/absent unless a live reveal grant covers the subject.
+    * `:impersonation` — the `%{operator_id, org_id, session_id}` marker proving
+      this scope is an impersonated one (a plain member scope has no such key).
+
+  They are declared OPTIONAL, not added to the required four, because a plain
+  tenant member scope built by `for_membership/1` genuinely does not carry them —
+  and `Samen.Impersonation.Scope.impersonated?/1` keys on their absence.
+  """
   @type actor :: %{
-          id: String.t(),
-          org_id: String.t(),
-          role: atom() | String.t(),
-          membership_id: String.t() | nil
+          :id => String.t(),
+          :org_id => String.t(),
+          :role => atom() | String.t(),
+          :membership_id => String.t() | nil,
+          optional(:plane) => :tenant | :operator,
+          optional(:impersonation) => %{
+            operator_id: String.t(),
+            org_id: String.t(),
+            session_id: String.t()
+          }
         }
 
   @type t :: %__MODULE__{actor: actor(), context: map() | nil}

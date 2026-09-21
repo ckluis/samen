@@ -19,6 +19,16 @@ defmodule Samen.Fleet.LocalCredential do
   The reference `Agent` implementation is what T82's own tests/probes use, and is
   good enough for `:embedded` mode's zero-config default (which never calls this
   module at all — §8.1: "no credential, no secret, no HTTP call").
+
+  ## The cockpit's own identity rides the same store
+
+  Besides the two app-side shapes this store also holds the COCKPIT's own Ed25519
+  identity (`t:cockpit/0`, written/read by `Samen.Fleet.Registry.cockpit_identity/1`
+  under a namespaced host key) — the same host-local-custody argument applies, and
+  the registry refuses to run at all unless a host has EXPLICITLY configured an
+  implementation, because the reference `Agent` is not durable across a restart and
+  a cockpit that re-mints its identity every boot silently breaks every already
+  enrolled app.
   """
 
   @type mode_a :: %{kind: :shared_secret, secret: binary()}
@@ -30,15 +40,39 @@ defmodule Samen.Fleet.LocalCredential do
           key_version: pos_integer()
         }
 
-  @callback put(host :: atom(), mode_a() | mode_b()) :: :ok
-  @callback fetch(host :: atom()) :: {:ok, mode_a() | mode_b()} | {:error, :not_configured}
+  @typedoc """
+  The COCKPIT's own Ed25519 identity (`Samen.Fleet.Registry.cockpit_identity/1`).
+
+  A third shape this same store holds: not an app-side credential but the
+  cockpit's own keypair, generated ONCE and persisted here (keyed on the
+  cockpit's namespace) so every enroll response and every mode-B directive push
+  is signed by a STABLE identity across restarts. It is stored through this
+  behaviour rather than a schema for the same reason mode B is — private-key
+  custody is host-local state the ADR deliberately leaves unspecified.
+
+  `:ed25519_cockpit` is a DISTINCT `kind` from mode B's `:ed25519`: mode B holds
+  the app's own private key plus the cockpit's PUBLIC key, while this holds both
+  halves of the cockpit's keypair. `Samen.Fleet.Registry` discriminates on the
+  `kind`, so the two can never be confused for one another.
+  """
+  @type cockpit :: %{
+          kind: :ed25519_cockpit,
+          public_key: binary(),
+          private_key: binary()
+        }
+
+  @typedoc "Any credential shape this store holds."
+  @type credential :: mode_a() | mode_b() | cockpit()
+
+  @callback put(host :: atom(), credential()) :: :ok
+  @callback fetch(host :: atom()) :: {:ok, credential()} | {:error, :not_configured}
 
   @doc "The configured implementation for `host` (defaults to the reference Agent)."
   @spec impl() :: module()
   def impl, do: Application.get_env(:samen_core, :fleet_local_credential, __MODULE__.Agent)
 
   @doc "Store this host's local fleet credential material."
-  @spec put(atom(), mode_a() | mode_b()) :: :ok
+  @spec put(atom(), credential()) :: :ok
   def put(host, credential), do: impl().put(host, credential)
 
   @doc """
@@ -47,7 +81,7 @@ defmodule Samen.Fleet.LocalCredential do
   `SAMEN_FLEET_PROBE_SECRET` env var was never set; mode B: enrollment never
   completed). This is the RP-J-10 fail-honest floor for the app side.
   """
-  @spec fetch(atom()) :: {:ok, mode_a() | mode_b()} | {:error, :not_configured}
+  @spec fetch(atom()) :: {:ok, credential()} | {:error, :not_configured}
   def fetch(host), do: impl().fetch(host)
 
   defmodule Agent do

@@ -400,20 +400,34 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
   # cyclic shape uniformly — a plain cycle (`alias A, as: B` / `alias B, as: A`), a cycle
   # that does bottom out at the kernel, and the SELF-GROWING form `alias A.B, as: A` whose
   # expansion never repeats a value and would defeat a value-based `seen` set.
+  #
+  # `visited` is a PLAIN MAP used as an atom set (`%{head => true}`), not a `MapSet`.
+  # It carries nothing a MapSet would add — membership and insert of alias HEAD
+  # segments, which are atoms — and `MapSet.t/1` is an OPAQUE type, which dialyzer
+  # cannot follow through a private recursion: it inferred the set's INTERNAL
+  # `:sets` representation for `visited` and then reported the `member?/2` call as
+  # one that "does not have a term of type MapSet.t()" plus the recursive call as
+  # "contains an opaque term as 3rd argument". Those were opacity artefacts, not
+  # reachable defects — but the honest way to retire them is to stop depending on an
+  # opaque type in a private recursion, not to assert a contract dialyzer will not
+  # believe. Behaviour is identical (see the cycle / self-growing-alias / mutual-
+  # prefix-cycle cases in test/ai/agent_coverage_verifier_test.exs).
+  @spec resolves_to_kernel?([term()], map(), %{optional(atom()) => true}) :: boolean()
   defp resolves_to_kernel?(parts, env, visited) when is_list(parts) do
     agent_module_parts?(parts) or resolve_head(parts, env, visited)
   end
 
+  @spec resolve_head([term()], map(), %{optional(atom()) => true}) :: boolean()
   defp resolve_head([head | rest], env, visited) when is_atom(head) do
     case Map.get(env, head) do
       nil ->
         false
 
       candidates ->
-        if MapSet.member?(visited, head) do
+        if Map.has_key?(visited, head) do
           false
         else
-          seen = MapSet.put(visited, head)
+          seen = Map.put(visited, head, true)
           Enum.any?(candidates, &resolves_to_kernel?(&1 ++ rest, env, seen))
         end
     end
@@ -523,7 +537,7 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
     # as `Agent.Run`/`Agent.Breaker` (those end in the sub-segment, not `:Agent`) — OR any
     # reference that RESOLVES there under this file's own alias environment, at any depth
     # and whichever segment was renamed (UXD-05, attempt 3; see `alias_env/1`).
-    resolves_to_kernel?(parts, env, MapSet.new())
+    resolves_to_kernel?(parts, env, %{})
   end
 
   # A bare module-atom literal target, e.g. `apply(:"Elixir.Samen.AI.Agent", :start, [])` —
@@ -553,7 +567,7 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
     |> Map.get({:attr, name}, [])
     |> Enum.any?(fn
       {:__aliases__, _, parts} when is_list(parts) ->
-        resolves_to_kernel?(parts, env, MapSet.new())
+        resolves_to_kernel?(parts, env, %{})
 
       mod when is_atom(mod) and mod not in [nil, true, false] ->
         mod |> Module.split() |> Enum.map(&String.to_atom/1) |> agent_module_parts?()
