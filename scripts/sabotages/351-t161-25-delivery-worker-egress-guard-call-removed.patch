@@ -1,0 +1,68 @@
+# SABOTAGE: issue #25 step 2 — the SSRF/egress guard call is REMOVED from
+# `Samen.Webhook.DeliveryWorker.perform/1`: the `:ok <- egress_check(url)` step vanishes
+# from the `with` chain and `egress_check/1` itself is deleted, so the worker is back to
+# `load_endpoint -> endpoint_url -> reveal_secret -> deliver` with the org-registered URL
+# taken VERBATIM. This is the exact pre-#25 defect: any tenant able to register a webhook
+# endpoint can make the platform issue signed POSTs to `169.254.169.254` (cloud instance
+# metadata), loopback, RFC1918, or an IPv6/IPv4-mapped equivalent — and a public hostname
+# whose authoritative DNS answers privately (the rebinding shape) delivers too.
+#
+# Flips EVERY named red in `test/webhook/delivery_worker_ssrf_test.exs`, which drives the
+# real `perform/1` against an injected adapter double and an injected resolver and asserts
+# "the double recorded ZERO posts". With the guard gone the double records a POST and
+# `perform/1` returns `:ok` instead of `{:discard, ...}` — the defect is visible as a
+# delivered request, not merely as a changed return value.
+#
+# The POSITIVE CONTROLS in the same file still PASS — a public `https` endpoint with a
+# public-resolving stub delivers exactly once with its `Samen-Signature`, and a 503 is
+# still a retry rather than a discard — so the reds fail because the guard is gone, not
+# because delivery, signing, the repo double or the adapter injection broke.
+#
+# NOT TOUCHED, deliberately: `Samen.Egress.Guard` itself and its range matrix (the guard's
+# own reds own that), `:autoredirect` on the shared adapter (350 owns it), and the
+# registration-time validation on the `webhook` resource (352 owns it) — so this red
+# isolates the DELIVERY-time authority alone. The `{:error, {:egress_blocked, reason}}`
+# arm of the `else` STAYS, now unreachable: that is exactly how a quietly-unwired guard
+# looks from the outside — the discard branch is still written down and never taken.
+#
+# Deletes one `with` step and one contiguous private function plus its comment; no private
+# function is left uncalled and the file compiles under `--warnings-as-errors`. Touches
+# delivery_worker.ex ALONE.
+# APP: samen_core
+# TEST_FILES: test/webhook/delivery_worker_ssrf_test.exs
+# MUST_FAIL: #25 RED: an endpoint registered at the cloud metadata service is refused and never POSTed
+# MUST_FAIL: #25 RED: an endpoint registered at loopback is refused and never POSTed
+# MUST_FAIL: #25 RED: an endpoint registered at an RFC1918 address is refused and never POSTed
+# MUST_FAIL: #25 RED: an endpoint registered at IPv6 loopback is refused and never POSTed
+# MUST_FAIL: #25 RED: a public hostname whose resolver answers with a private address (DNS rebinding shape) is refused
+diff --git a/samen_core/lib/samen/webhook/delivery_worker.ex b/samen_core/lib/samen/webhook/delivery_worker.ex
+--- a/samen_core/lib/samen/webhook/delivery_worker.ex
++++ b/samen_core/lib/samen/webhook/delivery_worker.ex
+@@ -109,7 +109,8 @@
+ 
+     with {:ok, endpoint} <- load_endpoint(endpoint_id, repo),
+          {:ok, url} <- endpoint_url(endpoint),
+-         :ok <- egress_check(url),
++         # SABOTAGE (issue #25 step 2): the egress guard step is GONE — the
++         # org-registered URL is delivered VERBATIM.
+          {:ok, secret} <- reveal_secret(endpoint, repo),
+          {:ok, _} <- deliver(url, body, secret) do
+       :ok
+@@ -176,17 +177,6 @@
+     end
+   end
+ 
+-  # Issue #25 / T161 §5.3 — the delivery-time SSRF authority. Wrapped in
+-  # `{:egress_blocked, reason}` so `perform/1`'s `else` can tell a guard refusal (a
+-  # permanent discard) apart from a transient delivery error (an Oban retry), and so no
+-  # other `{:error, atom}` in the `with` can be mistaken for one.
+-  defp egress_check(url) do
+-    case Samen.Egress.Guard.check(url) do
+-      :ok -> :ok
+-      {:error, reason} -> {:error, {:egress_blocked, reason}}
+-    end
+-  end
+-
+   defp deliver(url, body, secret) do
+     timestamp = System.os_time(:second)
+     signature = Signer.sign(body, timestamp, secret)

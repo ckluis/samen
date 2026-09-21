@@ -28,14 +28,23 @@ defmodule Samen.Automation.Actions.Webhook do
 
   ## SSRF guard (§5.3)
 
-  `ssrf_check/1` resolves the URL's hostname and REFUSES loopback, RFC1918, and
-  link-local targets; outside `:dev`/`:test` the scheme must be `https`. No
-  redirect following: the production adapter
+  `ssrf_check/1` delegates to the SHARED `Samen.Egress.Guard` (issue #25): it
+  resolves the URL's hostname and REFUSES loopback, RFC1918, link-local
+  (including `169.254.0.0/16`, the cloud metadata service), CGNAT and the IPv6
+  equivalents; outside `:dev`/`:test` the scheme must be `https`; an
+  unresolvable host is refused too (fail closed). The guard used to live HERE,
+  in this module, while B9's outbound-webhook delivery worker had none — #25
+  extracted it so both egress surfaces share one implementation and cannot
+  drift. This module's configuration surface is unchanged: the `:resolver` key
+  under `config :samen_core, Samen.Automation.Actions.Webhook` is still what
+  the action resolves with, passed through to the guard.
+
+  No redirect following: the production adapter
   (`Samen.Automation.Actions.WebhookHttpAdapter.Httpc`) explicitly disables
-  `:autoredirect` — the SHARED `Samen.Webhook.HttpAdapter.Httpc` (a different
-  subsystem, B9's outbound webhook endpoints) does not set this, so a dedicated
-  adapter is used here rather than silently changing that module's behavior for
-  its own callers.
+  `:autoredirect`, and as of #25 so does the shared
+  `Samen.Webhook.HttpAdapter.Httpc` — the two adapters remain separate modules
+  only because this one predates the fix, not because their redirect posture
+  differs any more.
 
   ## Idempotency (§4.6 / §5.3)
 
@@ -155,43 +164,25 @@ defmodule Samen.Automation.Actions.Webhook do
   end
 
   # ---------------------------------------------------------------------------
-  # SSRF guard (§5.3): https-only outside dev/test, resolve-then-deny
+  # SSRF guard (§5.3) — https-only outside dev/test, resolve-then-deny
   # loopback/RFC1918/link-local. dev/test are both non-production sandboxes —
   # neither ever fronts a real tenant secret over plaintext HTTP in prod.
+  #
+  # The implementation lives in `Samen.Egress.Guard` (issue #25), shared with
+  # `Samen.Webhook.DeliveryWorker`. This module keeps its OWN `:resolver`/`:env`
+  # config keys and hands them to the guard, so nothing a host has configured
+  # for this action moved.
 
-  defp ssrf_check(url) do
-    case URI.new(url) do
-      {:ok, %URI{scheme: scheme, host: host}} when is_binary(host) and host != "" ->
-        with :ok <- check_scheme(scheme), do: check_host(host)
+  defp ssrf_check(url), do: Samen.Egress.Guard.check(url, resolver: resolver(), env: env())
 
-      _other ->
-        {:error, :invalid_url}
-    end
-  end
-
-  defp check_scheme("https"), do: :ok
-  defp check_scheme("http"), do: if(env() in [:dev, :test], do: :ok, else: {:error, :https_required})
-  defp check_scheme(_other), do: {:error, :invalid_scheme}
-
-  defp check_host(host) do
-    case resolver().resolve(host) do
-      {:ok, ip} -> if private_ip?(ip), do: {:error, :ssrf_blocked}, else: :ok
-      {:error, _reason} -> {:error, :ssrf_blocked}
-    end
-  end
-
+  # The DEFAULT is the shared guard's resolver (both address families, every answer
+  # tested), not this module's IPv4-only `Resolver.Inet`. That module stays — a host
+  # or test that names it explicitly keeps working — but an unconfigured action now
+  # gets IPv6 coverage for free.
   defp resolver do
     Application.get_env(:samen_core, __MODULE__, [])
-    |> Keyword.get(:resolver, Samen.Automation.Actions.Webhook.Resolver.Inet)
+    |> Keyword.get(:resolver, Samen.Egress.Guard.Resolver.Inet)
   end
-
-  defp private_ip?({127, _, _, _}), do: true
-  defp private_ip?({10, _, _, _}), do: true
-  defp private_ip?({172, b, _, _}) when b in 16..31, do: true
-  defp private_ip?({192, 168, _, _}), do: true
-  defp private_ip?({169, 254, _, _}), do: true
-  defp private_ip?({0, 0, 0, 0}), do: true
-  defp private_ip?(_other), do: false
 
   defp valid_url_shape?(url) do
     case URI.new(url) do
@@ -218,6 +209,14 @@ end
 
 defmodule Samen.Automation.Actions.Webhook.Resolver do
   @moduledoc """
+  > #### Superseded by `Samen.Egress.Guard.Resolver` {: .info}
+  >
+  > Issue #25 extracted the SSRF guard into `Samen.Egress.Guard`, whose resolver
+  > seam has the same `resolve/1` contract (widened to allow a LIST of addresses).
+  > This behaviour and its two impls remain so a host or test that names them
+  > explicitly keeps working; new code should name the `Samen.Egress.Guard.Resolver`
+  > family.
+
   DNS-resolution seam for the `webhook` action's SSRF guard (§5.3
   "resolve-then-deny loopback/RFC1918/link-local"). Injectable so tests can
   prove BOTH branches (allow a public-looking target, deny a private one)
