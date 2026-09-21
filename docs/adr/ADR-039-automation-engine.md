@@ -54,7 +54,7 @@ Materialized per-host by the ADR-004 convention; abbrevs allocated **only** thro
 | Resource | Task | Purpose | Key columns (logical names) |
 |---|---|---|---|
 | `Automation.Workflow` | T39 | E1 rule definition | `name`, `status` (enum `draft\|active\|paused`), `trigger_kind` (enum `resource_event\|schedule\|manual`), `resource_key` (catalog key of the target resource), `event` (enum `created\|updated\|destroyed`, resource_event only), `schedule_cron` (bounded cron string, schedule only), `next_fire_at` (utc, schedule only), `conditions` (bounded jsonb, §4.4), `actions` (ordered bounded jsonb of action configs, §5), `owner_id` (bounded FK — the execution principal, §4.5), `disabled_by_operator_at` + `disabled_reason` (enum, §8.4), `webhook_secret` (`public?: false`, §5.3) |
-| `Automation.Run` | T42 | E8 run log | `workflow_id`, `dispatch_key` (unique, §4.6), `state` (AshStateMachine, §8.1), `trigger_kind`, `subject_ref` (object ref string), `depth`, `outcome` (bounded jsonb: per-action `{index, kind, status, error_kind}` — enums/ids only), `started_at`, `finished_at`, `duration_ms`, `error_kind` (bounded enum) |
+| `Automation.Run` | T42 | E8 run log | `workflow_id`, `dispatch_key` (unique, §4.6), `state` (AshStateMachine, §8.1), `trigger_kind`, `subject_ref` (object ref string), `depth`, `outcome` (bounded jsonb: per-action `{index, kind, status, error_kind}` — enums/ids only), `started_at`, `finished_at`, `duration_ms`, `error_kind` (bounded enum), `definition` + `definition_digest` (the pinned definition this run executed, §8.5 — non-PII rule structure) |
 | `Automation.Reminder` | T41 | E4 | `recipient_id`, `subject_ref`, `remind_at`, `note` 🔒 (vault-routed `pii_attribute`, §6.2), `source` (enum `user\|automation\|system`), `state` (enum `scheduled\|sent\|cancelled`), `sent_at` |
 | `Automation.Escalation` | T41 | E5 | `kind` (bounded string: `"sla_breach"\|"dunning"\|"automation"\|host-registered`), `dedupe_key`, `subject_ref`, `deadline_at`, `chain` (bounded jsonb, §7.2), `current_step`, `next_action_at`, `state` (AshStateMachine, §7.1), `resolved_at` |
 
@@ -87,13 +87,14 @@ enums, timestamps, and object refs only. Freeform user content appears exactly o
 ```
 capture (in-txn, non-PII envelope)          §4.2
   → DispatchWorker (match active workflows by org+resource+event)
+    → PIN the definition into the job args  §8.5  — actions/conditions/resource_key
     → per-match RunWorker (Oban unique)     §4.6
-        kill-switch re-check                §8.4
+        kill-switch re-check                §8.4  — LIVE read, never pinned
         loop/depth/rate guards              §4.7
-        re-read subject via governed read (owner actor)  §4.5
-        condition AND-gate                  §4.4  — no match ⇒ run recorded :skipped
-        Compile → Reactor.run               §5    — outcomes recorded per action
-  → Run row finalized (T42)                 §8
+        re-read subject via governed read (owner actor)  §4.5  — LIVE read
+        condition AND-gate                  §4.4  — the PINNED conditions; no match ⇒ :skipped
+        Compile → Reactor.run               §5    — the PINNED actions, outcomes per action
+  → Run row finalized (T42) carrying the pin §8, §8.5
 ```
 
 Schedule and manual triggers enter at DispatchWorker with the same envelope shape.
@@ -416,6 +417,9 @@ timings and outcomes captured without action code knowing about the log. Log row
 non-PII by schema (ids/enums/timestamps only — passes `mix samen.verify.no_pii_columns`,
 T42 c3); exception detail beyond `error_kind` goes to Logger, never to rows.
 
+T162 adds the two pin columns (`definition`, `definition_digest`) so a row is interpretable
+against the definition that actually ran, not against the rule as it looks today — §8.5.
+
 T39 ships the engine with test-asserted outcomes but without Run rows; T42 adds the resource
 + recorder + the durable `dispatch_key` unique index (§4.6 tier 2). To avoid migration churn,
 **T39's Workflow schema already includes** `disabled_by_operator_at`/`disabled_reason` and
@@ -447,6 +451,55 @@ queued runs of a killed rule finalize `skipped / :killed`) — a kill takes effe
 most one in-flight run, and killed-while-queued work is visible in the log, never silently
 dropped. Other workflows are unaffected (T42 c2 control). Switch flips write audit events;
 re-arming is explicit (§4.7).
+
+### 8.5 Run-definition pinning (T162, BINDING — addendum)
+
+Addendum closing a correctness defect in the §3.3 pipeline as shipped: `RunWorker` carried
+only `workflow_id` from enqueue to execution and **re-read the rule at perform time**
+(`load_workflow/2` → `Compile.run(wf.actions, ctx)`). So a tenant edit landing while a run
+sat queued — or between Oban retries of one job — **changed what an already-triggered run
+executed**, and a historical Run row could not be interpreted against the definition that
+actually ran, only against whatever the rule says today.
+
+**Rule.** A run executes the definition in force when the run came into existence, and its
+Run row records that definition.
+
+- **Pin shape: SNAPSHOT, content-addressed.** `Samen.Automation.Definition.snapshot/1` is the
+  `%{actions, conditions, resource_key}` map — the three fields execution consumes.
+  `digest/1` is `sha256` over a canonical encoding (keys sorted; atoms as strings), stable
+  across the Oban-args and jsonb round trips, so the digest IS the version identity: equal
+  definitions share it, any edit changes it, and no separate version table or backfill is
+  needed. The immutable store it resolves against is the Run row itself
+  (`definition` + `definition_digest`, §8.1): `digest(run.definition) ==
+  run.definition_digest` holds on read-back.
+- **Stamped once, at enqueue, by the only holder of the matched rule.**
+  `DispatchWorker` stamps the pin into the `RunWorker` job args as it enqueues (and onto the
+  loop/depth no-enqueue skips it records directly). `RunRecord.open!/2` copies it onto the row
+  **from those same args**, never re-deriving it from the live row — which is what makes the
+  record and the execution structurally unable to disagree. Because the pin rides the job
+  args, every retry of a job executes the same definition as its first attempt.
+- **Pinned vs LIVE (the §8.4 interplay, load-bearing).** ONLY the definition is pinned. Both
+  kill-switches (`status`, `disabled_by_operator_at`), the owner (§4.5) and the governed
+  subject re-read (§3.3) stay live at perform: a workflow paused or killed after enqueue must
+  still finalize `skipped / :killed`. Pinning the *right to execute* would be a strictly worse
+  defect than the one pinning fixes, so the paused/killed/owner-removed-after-enqueue skips
+  are carried as standing CONTROLS beside the pinning reds
+  (`samen_core/test/automation/run_definition_pin_test.exs`; sabotages 364/365).
+- **PII posture unchanged (INV-1; §13 untouched).** The snapshot is a byte-copy of three
+  columns that are already non-PII BY SCHEMA: `conditions`/`actions` pass the write-time
+  `NonPiiPredicates` refusal (a vault-routed or plaintext-PII attribute is structurally
+  unreferenceable in a workflow definition, §10.1) and freeform to-addresses are rejected
+  outright (§13); `resource_key` is a catalog module identity. It carries rule STRUCTURE,
+  never a subject value — so this is NOT the "snapshot-based undo for update actions" §13
+  rejects, which is about persisting prior SUBJECT ATTRIBUTE VALUES. Run rows stay non-PII by
+  schema (`no_pii_columns`, §8.1).
+- **Transition window.** A job enqueued by the previous release (or enqueued directly, as the
+  §8.4 already-queued-half tests do) carries no pin and falls back to the live rule, logged —
+  the pre-T162 behaviour for jobs that never got a pin, rather than dropping queued work on
+  deploy. Every job enqueued from T162 onward carries one.
+- **Complements, does not duplicate, a future approval-hash item:** this pins the WORKFLOW
+  definition for every run; an E3 approval-hash reconciliation would pin tool/action
+  definitions into approval records.
 
 ## 9 · Plane placement (INV-2)
 
@@ -491,6 +544,15 @@ re-arming is explicit (§4.7).
 - **T42:** `no_pii_columns` on Run; kill-switch red (killed stops) + control (others fire);
   dispatch_key uniqueness under concurrent duplicate dispatch; sabotage: bypass the
   RunWorker kill re-check — the killed-rule test must fail.
+- **T162 (§8.5):** red: a workflow edited after enqueue still executes the pinned v1
+  (actions AND conditions); red: the Run row resolves to v1's definition/digest, never v2's,
+  and the enqueued job args carry the pin; red: a retry re-executes the same pin; CONTROLS
+  that must pass on BOTH sides of the fix: paused / operator-killed / owner-removed after
+  enqueue still skip (the live-read guards were not pinned); anti-tautology control: with no
+  edit the run still executes v1 and the digest assertion fails against a mutated definition
+  map. Sabotages: `364` ignores the pin at execution while the row still records it (the
+  recorded-pin-only gate would be vacuous), `365` drops the enqueue-time stamp so every job
+  looks pre-T162 forever.
 
 ## 12 · Follow-up tasks (done-criterion 3)
 

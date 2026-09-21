@@ -15,6 +15,17 @@ defmodule Samen.Automation.DispatchWorker do
   `disabled_by_operator_at` set (both switches). This is the "no new runs enqueued"
   half; `RunWorker` re-checks at run start (the already-queued half).
 
+  ## Definition pinning (T162 — ADR-039 §8.5)
+
+  This is the ONE place a run's definition is pinned, because it is the only place
+  that holds the matched workflow at the moment the run comes into existence: the
+  `actions`/`conditions`/`resource_key` snapshot and its content digest are stamped
+  into the `RunWorker` job args here (`Samen.Automation.Definition.put_pin/2`), and
+  `RunRecord` copies them onto the Run row from those same args. A tenant edit landing
+  after this point — or an Oban retry of the job after one — can no longer change what
+  the run executes. Only the DEFINITION is pinned; the kill-switches, the owner and
+  the subject stay live-read at `RunWorker` perform.
+
   ## Loop + depth guards (ADR-039 §4.7 guards 1-2)
 
   A candidate workflow whose id already appears in the envelope `chain` is skipped
@@ -28,7 +39,7 @@ defmodule Samen.Automation.DispatchWorker do
   import Ash.Query
 
   alias Samen.Automation
-  alias Samen.Automation.{RunRecord, RunWorker}
+  alias Samen.Automation.{Definition, RunRecord, RunWorker}
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
@@ -61,6 +72,7 @@ defmodule Samen.Automation.DispatchWorker do
     |> filter(event == ^event_atom(args["event"]))
     |> filter(status == :active)
     |> filter(is_nil(disabled_by_operator_at))
+    |> pinnable()
     |> Ash.read!(authorize?: false)
   end
 
@@ -76,8 +88,16 @@ defmodule Samen.Automation.DispatchWorker do
         |> filter(id == ^wid)
         |> filter(status == :active)
         |> filter(is_nil(disabled_by_operator_at))
+        |> pinnable()
         |> Ash.read!(authorize?: false)
     end
+  end
+
+  # T162: the pin is only as complete as the read that feeds it — select the three
+  # definition fields (and `org_id`, which is not selected by default) explicitly
+  # rather than relying on the default selection staying what it is today.
+  defp pinnable(query) do
+    Ash.Query.ensure_selected(query, [:actions, :conditions, :resource_key, :org_id])
   end
 
   defp maybe_enqueue_run(wf, args) do
@@ -101,6 +121,17 @@ defmodule Samen.Automation.DispatchWorker do
           args
           |> Map.put("workflow_id", to_string(wf.id))
           |> Map.put_new("event_id", Ecto.UUID.generate())
+          # T162 — PIN THE DEFINITION HERE, the one place that holds the matched
+          # rule at the moment the run comes into existence. Before this, the job
+          # carried only `workflow_id` and `RunWorker` re-read the rule at perform
+          # time, so a tenant edit (or a retry after one) changed what an
+          # already-triggered run executed. The snapshot travels in the args, so
+          # every attempt of this job — first try and every retry — executes the
+          # same definition. `Samen.Automation.RunRecord` copies it onto the Run
+          # row from these same args, which is what makes the historical row
+          # interpretable. Only the DEFINITION is pinned: the kill-switches, the
+          # owner and the subject stay live-read at perform (ADR-039 §8.4/§4.5).
+          |> Definition.put_pin(wf)
 
         case Oban.insert(RunWorker.new(run_args)) do
           {:ok, _job} -> :ok
@@ -113,7 +144,14 @@ defmodule Samen.Automation.DispatchWorker do
   # enqueue) — write the terminal Run row directly. `event_id` defaults exactly
   # like the enqueue path so the dispatch_key is stable/reproducible.
   defp record_no_enqueue_skip(wf, args, reason) do
-    args = Map.put_new(args, "event_id", Ecto.UUID.generate())
+    args =
+      args
+      |> Map.put_new("event_id", Ecto.UUID.generate())
+      # T162: these rows execute nothing, but they are still Run rows — pin the
+      # definition that WOULD have run so every row in the log is interpretable
+      # by the same rule, with no "except these two reasons" carve-out.
+      |> Definition.put_pin(wf)
+
     run = RunRecord.open!(wf, args)
     RunRecord.skip!(run, reason)
     :ok

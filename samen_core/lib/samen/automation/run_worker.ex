@@ -19,6 +19,20 @@ defmodule Samen.Automation.RunWorker do
        to parse) or unmet conditions ⇒ `:skipped`; else the actions run.
     5. **Compile → Reactor.run** (§5) — outcomes recorded per action.
 
+  ## The definition is PINNED; the guards are LIVE (T162)
+
+  Steps 4 and 5 run the definition **pinned into the job args at enqueue**
+  (`Samen.Automation.Definition`), not a fresh read of the Workflow row. Before
+  T162 this worker re-read the rule at perform time and executed whatever it found,
+  so a tenant edit landing while the run sat queued — or between retries of this
+  same job — changed what an already-triggered run did, and the Run row could not be
+  interpreted against the definition that actually ran.
+
+  Steps 1-3 are deliberately NOT pinned and still read the live row: the two
+  kill-switches (§8.4 — a workflow paused or operator-killed after enqueue must
+  still skip), the owner (§4.5) and the governed subject re-read (§3.3). Pinning the
+  right to execute would be a worse bug than the one pinning fixes.
+
   T39 asserted these outcomes via the action side-effect (the notify record);
   T42 adds the durable `Automation.Run` rows + `dispatch_key` (tier 2) — EVERY
   branch below now finalizes a Run row before returning `:ok` (ADR-039 §8.1
@@ -40,7 +54,16 @@ defmodule Samen.Automation.RunWorker do
   import Ash.Query
 
   alias Samen.Automation
-  alias Samen.Automation.{Breaker, Compile, Condition, Context, NonPiiPredicates, RunRecord}
+
+  alias Samen.Automation.{
+    Breaker,
+    Compile,
+    Condition,
+    Context,
+    Definition,
+    NonPiiPredicates,
+    RunRecord
+  }
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args}) do
@@ -53,8 +76,14 @@ defmodule Samen.Automation.RunWorker do
   defp run(workflow_mod, args) do
     case load_workflow(workflow_mod, args["workflow_id"]) do
       {:ok, wf} ->
+        # T162. The workflow row is still loaded — but ONLY for the live checks
+        # (kill-switch, owner, org). What this run EXECUTES is the definition
+        # pinned into the job args at enqueue, so an edit landing in the queue (or
+        # between retries of this same job) cannot change it.
+        {_source, definition} = Definition.resolve(args, wf)
+
         run_row = RunRecord.open!(wf, args)
-        result = execute(wf, args, run_row)
+        result = execute(wf, definition, args, run_row)
         Breaker.check!(wf)
         result
 
@@ -71,12 +100,16 @@ defmodule Samen.Automation.RunWorker do
     end
   end
 
-  defp execute(wf, args, run_row) do
+  # `wf` is the LIVE row (kill-switch, owner, org — ADR-039 §8.4/§4.5); `definition`
+  # is the PINNED rule (conditions + actions + resource_key — T162). Keeping them as
+  # two separate arguments is deliberate: it is what stops a later edit here from
+  # quietly reading `wf.actions` again.
+  defp execute(wf, definition, args, run_row) do
     with :ok <- kill_switch(wf),
          {:ok, owner} <- owner_actor(wf),
-         {:ok, subject_map} <- reread_subject(wf, args),
-         :ok <- conditions_gate(wf, subject_map, args) do
-      fire(wf, subject_map, owner, args, run_row)
+         {:ok, subject_map} <- reread_subject(definition, args),
+         :ok <- conditions_gate(definition, subject_map, args) do
+      fire(wf, definition, subject_map, owner, args, run_row)
     else
       # kill_switch/owner_actor/reread_subject/conditions_gate only ever
       # produce {:skip, reason} — no `{:error, _}` branch here (would be
@@ -119,9 +152,9 @@ defmodule Samen.Automation.RunWorker do
 
   # Governed re-read, projected to condition-eligible attributes ONLY. A schedule /
   # manual trigger with no subject record yields an empty subject map.
-  defp reread_subject(wf, args) do
+  defp reread_subject(definition, args) do
     record_id = args["record_id"]
-    resource_key = args["resource_key"] || wf.resource_key
+    resource_key = args["resource_key"] || Definition.resource_key(definition)
 
     cond do
       is_nil(record_id) or is_nil(resource_key) ->
@@ -156,8 +189,8 @@ defmodule Samen.Automation.RunWorker do
     _ -> %{}
   end
 
-  defp conditions_gate(wf, subject_map, args) do
-    conditions = wf.conditions
+  defp conditions_gate(definition, subject_map, args) do
+    conditions = Definition.conditions(definition)
 
     cond do
       not Condition.valid?(conditions) ->
@@ -172,7 +205,7 @@ defmodule Samen.Automation.RunWorker do
     end
   end
 
-  defp fire(wf, subject_map, owner, args, run_row) do
+  defp fire(wf, definition, subject_map, owner, args, run_row) do
     run_row = RunRecord.mark_running!(run_row)
 
     ctx = %Context{
@@ -187,7 +220,7 @@ defmodule Samen.Automation.RunWorker do
       # are none); the webhook action signs with webhook_secret and stamps a
       # stable delivery_id from event_id. All four are read-only carries, never
       # re-derived or bypassed downstream.
-      resource_key: args["resource_key"] || wf.resource_key,
+      resource_key: args["resource_key"] || Definition.resource_key(definition),
       record_id: args["record_id"],
       event_id: args["event_id"],
       webhook_secret: Map.get(wf, :webhook_secret),
@@ -195,7 +228,9 @@ defmodule Samen.Automation.RunWorker do
       chain: List.wrap(args["chain"] || [])
     }
 
-    case Compile.run(wf.actions, ctx) do
+    # T162: the PINNED actions, never `wf.actions` — `wf` is the row as it looks
+    # NOW, which is exactly what must not decide what an already-triggered run does.
+    case Compile.run(Definition.actions(definition), ctx) do
       {:ok, outcomes} ->
         RunRecord.succeed!(run_row, outcomes)
         Logger.debug("[Automation.RunWorker] workflow #{wf.id} fired: #{inspect(outcomes)}")

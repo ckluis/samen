@@ -734,6 +734,31 @@ defmodule Samen.Scopes.Automation.Blueprint do
           # numbers only (ADR-039 §5.1 outcome shape), never a subject value.
           attribute(:outcome, {:array, :map}, public?: true, default: [])
 
+          # T162 — the PINNED DEFINITION this run executed: the snapshot of the
+          # rule (`actions` / `conditions` / `resource_key`) taken at ENQUEUE and
+          # copied here from the job args, never re-read from the live Workflow
+          # row. Two duties:
+          #
+          #   1. a tenant edit between enqueue and execution (or between retries)
+          #      cannot change what an already-triggered run executes, and
+          #   2. a historical Run row is INTERPRETABLE — it resolves to exactly
+          #      the definition that ran, not to whatever the rule says today.
+          #
+          # `definition_digest` is that definition's content identity (sha256 over
+          # a canonical encoding, `Samen.Automation.Definition.digest/1`), so the
+          # row is self-verifying: `digest(definition) == definition_digest`.
+          #
+          # NO PII (INV-1): this is a byte-copy of three columns that are already
+          # non-PII BY SCHEMA — `conditions`/`actions` pass the write-time
+          # `Samen.Automation.NonPiiPredicates` refusal (a vaulted or plaintext
+          # attribute is structurally unreferenceable in a workflow) and
+          # `resource_key` is a catalog module identity. It carries rule
+          # STRUCTURE, never a subject value — so it is NOT the "snapshot-based
+          # undo" ADR-039 §13 rejects (that rejection is about persisting prior
+          # SUBJECT ATTRIBUTE VALUES), and the §13/INV-1 posture is untouched.
+          attribute(:definition, :map, public?: true)
+          attribute(:definition_digest, :string, public?: true)
+
           attribute(:started_at, :utc_datetime, public?: true)
           attribute(:finished_at, :utc_datetime, public?: true)
           attribute(:duration_ms, :integer, public?: true)
@@ -822,7 +847,20 @@ defmodule Samen.Scopes.Automation.Blueprint do
           # Opens the run row (RunRecord.open!/2) — :queued, timing not yet
           # started. accept-only, no PII-shaped attribute exists to accept.
           create :record do
-            accept([:org_id, :workflow_id, :dispatch_key, :trigger_kind, :subject_ref, :depth])
+            accept([
+              :org_id,
+              :workflow_id,
+              :dispatch_key,
+              :trigger_kind,
+              :subject_ref,
+              :depth,
+              # T162: the pin is written ONCE, at open, from the dispatch
+              # envelope — never updated afterwards (`upsert_fields([])` below
+              # means a duplicate dispatch lands on the existing row and its
+              # original pin stands).
+              :definition,
+              :definition_digest
+            ])
 
             # Tier-2 dedupe: a concurrent duplicate dispatch racing the SAME
             # (workflow_id, event_id) upserts onto the existing row instead of
