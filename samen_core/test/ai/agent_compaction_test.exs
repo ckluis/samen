@@ -131,6 +131,24 @@ defmodule Samen.AI.AgentCompactionTest do
     Map.get(Jason.decode!(json), "folds", [])
   end
 
+  # GA (CF-17(a) coverage gap) — the same sealed transcript blob `folds_of/1` reads
+  # carries the run's own `"goal"` field verbatim (`agent.ex:112`). Reading it back the
+  # same way `folds_of/1` does gives the two new P4 arms below a PERSISTED-ARTIFACT
+  # binding they can both assert PRESENT — the mutation-refutable shared binding G-06's
+  # control section requires (never a `sent_texts/0` read, which is the provider-call
+  # recording, not the persisted run artifact).
+  defp goal_of(run) do
+    run = reload(run)
+    %Samen.Masked{} = masked = run.transcript
+    {:ok, json} = Samen.Vault.reveal(masked, TestRepo, subject_id: run.id)
+    Map.get(Jason.decode!(json), "goal", "")
+  end
+
+  # GA — the ONE module attribute both new P4 arms below assert PRESENT in the persisted
+  # run artifact (via `goal_of/1`). Read `## GA — the shared, mutation-refutable binding`
+  # ahead of the two arms for why this is a content canary and not the threshold itself.
+  @p4_ga_canary "P4-GA-SHARED-CANARY-7f3c1a"
+
   # ======================================================================
   # P3 — the fail-honest floor survives recovery (ADR-048 §8 `:496`)
   # ======================================================================
@@ -306,6 +324,140 @@ defmodule Samen.AI.AgentCompactionTest do
     # The floor, unweakened: nothing was promoted, no attempt text is at rest.
     refute match?({:ok, _}, result)
     assert_no_text_at_rest!(run, ["a third attempt that must NEVER be made"])
+  end
+
+  # ======================================================================
+  # GA (CF-17(a) coverage gap) — drive a P4 retry OVER the watermark so §6 Level 2's
+  # INLINE fold (`derive_fold/8`, `agent.ex:1366-1367`, called from
+  # `complete_with_recovery/10` at `agent.ex:1195`) actually executes, instead of always
+  # taking its no-op `else` branch under the huge default `context_cutoff_tokens`
+  # (`42_000`) the two P4 arms above inherit. No lib change — the shipped behaviour is
+  # already correct; this is a test-coverage-only gap (G-03).
+  #
+  # GA — the shared, mutation-refutable binding. The over-watermark arm and its positive
+  # control below assert COMPLEMENTARY outcomes of the same threshold (folded vs.
+  # not-folded), so no single mutation can flip both through the threshold — moving the
+  # threshold moves both runs the SAME way across it. The mutation must therefore hang on
+  # something else the two arms share: `@p4_ga_canary`, read back from BOTH runs'
+  # persisted transcript via `goal_of/1` (never `folds_of/1` — folding is exactly the
+  # property under test and must stay disjoint from the shared binding) and asserted
+  # PRESENT (`=~`, never `refute`) by both. A build that ignores `@p4_ga_canary` entirely
+  # still passes every OTHER assertion in both arms, so this one is what a mutation to a
+  # differing literal genuinely refutes.
+  # ======================================================================
+
+  test "P4: OVER-WATERMARK — the retry crosses context_cutoff_tokens so Level 2's INLINE fold actually executes; folds_of/1 is non-empty and context_retries == 1" do
+    s = new_scope()
+    goal = "goal CANARY-p4-inline #{@p4_ga_canary}"
+
+    # Two ordinary turns first: `@protected_tail_turns` is 2 and the in-flight turn is
+    # one of its own protected slots (`agent.ex:1285-1292`), so turn 1 is the earliest
+    # span old enough to be eligible once turn 3 is in flight — measured the same way
+    # P6's own script comment states it ("TURN 3 is the earliest turn at which anything
+    # is eligible to fold").
+    #
+    # `fold_context/8` (`agent.ex:1358`) runs `derive_fold/8` PRE-TURN on EVERY turn, not
+    # only inside the retry — so with a tiny watermark it would otherwise fold turn 1
+    # proactively BEFORE turn 3's own call ever has a chance to overflow, and the
+    # increment would end up proving Level 1, not Level 2. The 3rd and 7th scripted
+    # entries below are that pre-turn summarize attempt for turns 3 and 4 respectively,
+    # deliberately made to FAIL (`summarize_fold/7`'s `{:error, reason}` branch,
+    # `agent.ex:1441-1443`, is a graceful REFUSAL — nothing is folded, the eligible span
+    # survives untouched, agent.ex:1504-1519's `compaction_refused` note is the only
+    # trace). Turn 1 therefore reaches turn 3's OWN call still unfolded; that call
+    # overflows (entry 4), Level 2's retry boundary calls `derive_fold/8` a SECOND time —
+    # this time INLINE from `complete_with_recovery/10` (`agent.ex:1195`) — and THIS
+    # summarize attempt (entry 5) is left to succeed, so the fold that lands is
+    # attributable to the retry call site the gap names, not to the pre-turn one.
+    script([
+      {:continue, "turn one — a long span destined to be folded"},
+      {:continue, "turn two"},
+      {:error, :provider_error},
+      {:error, :context_overflow},
+      {:continue, "Summary: turn one was reviewed."},
+      {:continue, "recovered after exactly one fold-and-retry"},
+      {:error, :provider_error},
+      {:final, "done"}
+    ])
+
+    assert {:ok, %{run: run}} = run_scripted(Durable, s, goal, budgets: [context_cutoff_tokens: 1])
+    run = reload(run)
+
+    rows = turn_rows(run)
+
+    overflow_row = Enum.find(rows, &(&1.meta["context_retries"] not in [nil, 0]))
+
+    assert overflow_row != nil,
+           "no turn row recorded a Level 2 recovery attempt — the retry counter is absent"
+
+    assert overflow_row.meta["context_retries"] == 1,
+           "Level 2 must retry EXACTLY once (ADR-048 §10 row 5, RATIFIED (a)); got " <>
+             "#{inspect(overflow_row.meta["context_retries"])}"
+
+    # THE GAP CLOSED: over the watermark, `derive_fold/8`'s guard is TRUE at the INLINE
+    # call site and the fold ledger is non-empty — never the vacuous no-op the default
+    # watermark always took.
+    folds = folds_of(run)
+
+    assert folds != [],
+           "Level 2's INLINE fold never ran — the transcript's folds ledger is empty " <>
+             "even though this run crossed context_cutoff_tokens; derive_fold/8 took " <>
+             "its no-op else branch (agent.ex:1367) instead of actually folding"
+
+    # ATTRIBUTION: the fold that landed is stamped with the SAME turn index as the retry
+    # itself — this is the INLINE call site (agent.ex:1195), not the pre-turn one
+    # (agent.ex:950/1358), which the script above deliberately refused twice over.
+    assert Enum.any?(folds, &(&1["turn_index"] == overflow_row.turn_index)),
+           "no fold entry is stamped with the retrying turn's own index " <>
+             "(#{overflow_row.turn_index}) — got: #{inspect(folds)}"
+
+    # THE SHARED BINDING, asserted PRESENT (never `refute`) — see the GA section comment
+    # above for why this, and not the threshold, is what a mutation must hang on.
+    assert goal_of(run) =~ @p4_ga_canary,
+           "the persisted run's own goal field lost the GA shared canary — got: " <>
+             inspect(goal_of(run))
+  end
+
+  test "P4: UNDER-WATERMARK CONTROL (anti-tautology, MANDATORY) — the retry stays under the default context_cutoff_tokens so Level 2 takes the ordinary no-fold path; folds_of/1 stays empty and context_retries == 1" do
+    s = new_scope()
+    goal = "goal CANARY-p4-inline-control #{@p4_ga_canary}"
+
+    # Deliberately NO `budgets:` override — the default watermark (42_000) against this
+    # tiny scripted transcript is exactly the shape the two pre-existing P4 arms already
+    # exercise. Under it, `derive_fold/8`'s guard is FALSE at the INLINE call site: the
+    # retry still happens (Level 2's counter is independent of whether the fold guard
+    # trips), but no fold is ever produced. This is the OTHER side of the one threshold
+    # the over-watermark arm above crosses — proving the watermark, not merely the
+    # presence of an overflow, is what drives Level 2's fold branch.
+    script([
+      {:error, :context_overflow},
+      {:continue, "recovered after exactly one fold-and-retry"},
+      {:final, "done"}
+    ])
+
+    assert {:ok, %{run: run}} = run_scripted(Durable, s, goal)
+    run = reload(run)
+
+    rows = turn_rows(run)
+    overflow_row = Enum.find(rows, &(&1.meta["context_retries"] not in [nil, 0]))
+
+    assert overflow_row != nil,
+           "no turn row recorded a Level 2 recovery attempt — the retry counter is absent"
+
+    assert overflow_row.meta["context_retries"] == 1,
+           "Level 2 must retry EXACTLY once (ADR-048 §10 row 5, RATIFIED (a)); got " <>
+             "#{inspect(overflow_row.meta["context_retries"])}"
+
+    assert folds_of(run) == [],
+           "under the default watermark no fold should ever run — got: " <>
+             inspect(folds_of(run))
+
+    # THE SHARED BINDING, asserted PRESENT the SAME way and in the SAME direction as the
+    # over-watermark arm above — the pair a single assertion-site mutation must flip
+    # together (G-06's non-disjointness proof).
+    assert goal_of(run) =~ @p4_ga_canary,
+           "the persisted run's own goal field lost the GA shared canary — got: " <>
+             inspect(goal_of(run))
   end
 
   # ======================================================================

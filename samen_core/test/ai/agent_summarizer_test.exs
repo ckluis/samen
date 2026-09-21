@@ -152,6 +152,20 @@ defmodule Samen.AI.AgentSummarizerTest do
                       " The record also carried aws_access_key_id=" <>
                       @vendor_key <> " in its payload."
 
+  # ADR-048 CF-22 (Gap D) — THE ORDER DISCRIMINATOR, brought into P1 from the input already
+  # proven at `agent_summary_ingress_test.exs:79-83`: a labeled secret whose value is
+  # separated from its label by U+200B (a `\p{Cf}` format character). `Secrets`' generic
+  # labeled fallback treats U+200B as inside the non-language label/value gap, so
+  # redact-first (the pinned order, `compaction.ex:118`) collapses the whole span in one
+  # match. `Ingress.sanitize/1` replaces U+200B with `[neutralized]` — Unicode LETTERS —
+  # which ENDS that gap, so sanitize-first leaves the credential in cleartext. This value is
+  # independently re-derived, never read from or copied out of that other module.
+  @order_secret_value "vaultsecret20260916xyz"
+  @order_poisoned_summary "Summary: " <>
+                            @prose_canary <>
+                            ". The rotation note said password:" <>
+                            <<0x200B::utf8>> <> @order_secret_value <> " was retired."
+
   setup do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
     Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
@@ -203,6 +217,28 @@ defmodule Samen.AI.AgentSummarizerTest do
         Durable,
         s,
         "goal CANARY-c3r-summarizer",
+        Keyword.merge([budgets: [max_turns: 4, context_cutoff_tokens: 1]], opts)
+      )
+
+    run = assert_honest_exhaustion!(result)
+    run = reload(run)
+    assert {:ok, views} = Agent.transcript_views(run)
+    {run, views, folds_of(run)}
+  end
+
+  # ADR-048 CF-22 (Gap D) — the SAME driver `poisoned_run!/1` above already has, generalized
+  # to a caller-supplied summary so the ORDER discrimination can be exercised through P1's
+  # own obligation module instead of being duplicated into a second one. This is a NEW
+  # arity, added beside the existing clause; the existing `poisoned_run!/1` is untouched.
+  defp poisoned_run!(summary, opts) do
+    s = new_scope()
+    script(for _ <- 1..24, do: {:continue, summary})
+
+    result =
+      run_scripted(
+        Durable,
+        s,
+        "goal CANARY-c3r-summarizer-order",
         Keyword.merge([budgets: [max_turns: 4, context_cutoff_tokens: 1]], opts)
       )
 
@@ -311,6 +347,53 @@ defmodule Samen.AI.AgentSummarizerTest do
 
     # The prose is intact BYTE-FOR-BYTE, not merely present in some normalized form.
     assert String.contains?(summary, "Summary: " <> @prose_canary <> ".")
+  end
+
+  # ======================================================================
+  # P1 (Gap D / CF-22) — the ingress ORDER, brought into P1 itself
+  # ======================================================================
+
+  @tag :p1
+  test "P1: RED — a LABELED SECRET separated from its label by U+200B is REDACTED in the persisted llm_view under the correct ingress ORDER (Secrets.redact/1 runs before Ingress.sanitize/1)" do
+    {_run, views, folds} = poisoned_run!(@order_poisoned_summary, [])
+    summary = persisted_summary!(folds, views)
+
+    # THE DISCRIMINATION. Redact-first collapses `password:<U+200B><value>` to one marker.
+    # Sanitize-first turns U+200B into `[neutralized]`, breaking the label/value adjacency,
+    # and the credential survives — so this refutation is the ORDER's.
+    refute summary =~ @order_secret_value,
+           "the labeled credential survived into the persisted summary " <>
+             "(#{inspect(summary)}) — the two ingress lanes ran in the WRONG ORDER: " <>
+             "`Ingress.sanitize/1` inserted its marker between the label and the value " <>
+             "before `Secrets.redact/1` ever saw them, which is precisely why ADR-048 " <>
+             "§5#3 pins the secrets lane FIRST, on the untouched raw binary"
+
+    assert summary =~ Secrets.marker(),
+           "the credential is absent but carries no `#{Secrets.marker()}` marker — it was " <>
+             "deleted or never arrived. The refutation must be a REDACTION, not an absence."
+
+    assert summary =~ @prose_canary,
+           "ordinary summary prose did not survive alongside the ORDER discrimination — " <>
+             "the persisted summary is #{inspect(summary)}"
+  end
+
+  @tag :p1
+  test "P1: POSITIVE CONTROL — ORDINARY SUMMARY PROSE SURVIVES INTACT alongside the U+200B-separated labeled secret redaction" do
+    {_run, views, folds} = poisoned_run!(@order_poisoned_summary, [])
+    summary = persisted_summary!(folds, views)
+
+    # REFUTABLE, and deliberately NOT variable-disjoint from the arm above: this reads the
+    # SAME `summary` binding produced by the SAME `@order_poisoned_summary`. A build whose
+    # scrub deletes the whole summary (or collapses it to one marker) fails HERE.
+    assert summary =~ @prose_canary,
+           "ordinary summary prose did not survive the ingress path — the persisted summary " <>
+             "is #{inspect(summary)}"
+
+    # The prose is intact BYTE-FOR-BYTE at the summary's own head, not merely present
+    # somewhere in a normalized form.
+    assert String.contains?(summary, "Summary: " <> @prose_canary <> "."),
+           "the prose canary is present but not byte-intact at the summary's own head " <>
+             "(#{inspect(summary)})"
   end
 
   # ======================================================================
