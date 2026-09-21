@@ -30,12 +30,40 @@ defmodule Samen.AbbrevPropertyTest do
   # starting with a letter, not colliding with the injected core columns.
   @reserved ~w(id org_id inserted_at updated_at)a
 
+  # ROOT-CAUSE FIX (issue #41): the generator's DOMAIN is "attribute names a samen
+  # resource may legally declare", and there are two ways a `[a-z][a-z0-9_]*` atom
+  # falls outside it. `@reserved` covers the first (a collision with an injected core
+  # column). The second is PAN/CVC shape: `Samen.Transformers.NoPanColumns`
+  # (lib/samen/transformers/no_pan_columns.ex:44) is wired into the BASE
+  # `Samen.Extension`, so a resource declaring such an attribute does not compile — in
+  # any host, in any plane, by design (ADR-038 §3.5 B5). `:cvv`, `:cvc`, `:pan`,
+  # `:cvv2`, and compounds like `:cvc_i3jq6h` / `:cvv_e` (the two vectors this file
+  # actually generated, at `--seed 342` and `--seed 1760`) are all reachable from
+  # `[a-z][a-z0-9_]*`, so the prefix property was generating input the framework is
+  # REQUIRED to refuse and reading the refusal as a failure of the abbrev prefix.
+  #
+  # The PAN/CVC half delegates to `Samen.Verifiers.NoPanColumns.pan_shaped?/1` — the
+  # IDENTICAL function `Samen.Transformers.NoPanColumns.transform/1` calls (via
+  # `violations/2`) — rather than restating the rule as a second literal list. One
+  # classifier, so the generator's domain and the invariant can never drift: widening
+  # or narrowing the no-PAN rule moves this generator with it, automatically.
+  #
+  # This is a generator-domain fix, not an exclusion of an inconvenient value and not
+  # an assertion change: the `== :"pgn_<name>"` prefix assertions below are untouched,
+  # and the refusal itself stays pinned — deterministically by the `:cvv` boundary test
+  # at the bottom of this file, and independently by
+  # `test/no_pan_columns_red_path_test.exs`'s own compile-refusal reds.
+  defp legal_attr_name?(name) when is_atom(name) do
+    name not in @reserved and
+      not Samen.Verifiers.NoPanColumns.pan_shaped?(Atom.to_string(name))
+  end
+
   defp attr_name do
     gen all(
           first <- StreamData.string(?a..?z, length: 1),
           rest <- StreamData.string([?a..?z, ?0..?9, ?_..?_], min_length: 0, max_length: 10),
           name = String.to_atom(first <> rest),
-          name not in @reserved
+          legal_attr_name?(name)
         ) do
       name
     end
@@ -209,6 +237,39 @@ defmodule Samen.AbbrevPropertyTest do
         |> Ash.read!()
 
       assert read_back.notes == nil
+    end
+  end
+
+  # DETERMINISTIC regression for issue #41, same shape as the T102 block above: pin
+  # BOTH sides of the boundary the prefix property's generator now respects, so the
+  # flake cannot silently return and the fix's premise stays honest.
+  describe "issue #41 — the PAN/CVC boundary the prefix property's generator depends on" do
+    test "the generator's own domain predicate refuses every PAN/CVC-shaped name, and admits ordinary ones" do
+      # The names this file actually generated before the fix, plus the bare tokens
+      # reachable from the same `[a-z][a-z0-9_]*` space. Each is outside the generator's
+      # domain because the framework refuses it at COMPILE time, not because it is
+      # inconvenient — `Samen.Verifiers.NoPanColumns.pan_shaped?/1` is the single
+      # classifier both this generator and `Samen.Transformers.NoPanColumns` consult.
+      for forbidden <- [:cvv, :cvc, :pan, :cvv2, :cvc2, :cvc_i3jq6h, :cvv_e, :card_number] do
+        assert Samen.Verifiers.NoPanColumns.pan_shaped?(Atom.to_string(forbidden)),
+               "#{inspect(forbidden)} must be PAN/CVC-shaped per the ONE classifier"
+
+        refute legal_attr_name?(forbidden),
+               "#{inspect(forbidden)} must be outside the prefix property's generator domain"
+      end
+
+      # ANTI-TAUTOLOGY control: the predicate discriminates — it does not simply reject
+      # everything, and it does not reject the legitimate words a raw substring match on
+      # "pan"/"card" would false-positive on (the reason the classifier is token-based).
+      for legal <- [:a, :notes, :label, :expansion, :company, :medical_card_expiry, :last4] do
+        assert legal_attr_name?(legal),
+               "#{inspect(legal)} is a legal attribute name and must stay in the domain"
+      end
+
+      # The injected-core-column half of the domain is still enforced, unchanged.
+      for core <- @reserved do
+        refute legal_attr_name?(core)
+      end
     end
   end
 end
