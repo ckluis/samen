@@ -77,6 +77,12 @@ defmodule Samen.Web.RateLimit do
     fleet_enroll: {60, 60_000},
     fleet_heartbeat: {120, 60_000},
     fleet_heartbeat_bad_sig: {10, 60_000},
+    # PUBLIC status page (T166 / ADR-050 §4.4). The one fleet surface with no
+    # authority gate, so the flood guard is the only gate it has: keyed per remote
+    # IP, checked BEFORE the substrate is read, and over-limit is a bare 429 with an
+    # empty body (never a differentiated response a scanner could read as an oracle
+    # for whether this cockpit publishes anything).
+    public_status_ip: {120, 60_000},
     # Bounded `auth.login_failed` audit counter (ADR-035 §5 taxonomy / ADR-038 §6.4;
     # T103). NOT a rate limit — a bidx-keyed FAILURE counter: every failed attempt bumps
     # it, but the append-only `aud_event` row is emitted only on a window EDGE (the first

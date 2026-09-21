@@ -1,0 +1,42 @@
+# SABOTAGE: T166 / ADR-050 §4.3 — the OPT-IN conjunct is dropped from
+# `Samen.Fleet.PublicStatus.published?/1`, so the public status page renders EVERY
+# registered app the moment a host mounts the route. This is the shape the whole
+# feature is built to make impossible: `flt_app.publish_status` defaults to `false`
+# precisely so that mounting `samen_fleet_status_route/1` on a live cockpit exposes
+# an EMPTY page rather than the fleet, and an operator publishes one app at a time
+# with `Samen.Fleet.Registry.set_publish_status/4`. With the conjunct gone the
+# default silently inverts: a cockpit that registered 30 tenant deployments
+# publishes all 30 slugs and their current health to an unauthenticated URL, having
+# been asked about none of them.
+#
+# Flips the named §4.3 red. Everything else stays GREEN, which is what makes the red
+# mean what it says: the projection still masks an out-of-shape slug, still maps the
+# internal vocabulary to the smaller public one, still excludes deregistered apps,
+# and `set_publish_status/4` is still refused for a heartbeat actor — so the red
+# fails because the opt-in filter is gone, not because the projection broke.
+#
+# NOT TOUCHED, deliberately: the `status != :deregistered` half of the same clause
+# (a deregistered app must still leave the page — that is not what this proves), the
+# fallback `published?(_row)` clause, the slug mask (361 owns it), the rate limit
+# (362 owns it) and the fail-closed arm (363 owns it).
+#
+# Edits ONE pattern in ONE private clause head, so the file still compiles under
+# `--warnings-as-errors`: the second clause stays reachable (a row with no `:status`
+# key), and no attribute or function goes unused.
+# APP: samen_core
+# TEST_FILES: test/fleet_public_status_test.exs
+# MUST_FAIL: registering an app does NOT publish it
+diff --git a/samen_core/lib/samen/fleet/public_status.ex b/samen_core/lib/samen/fleet/public_status.ex
+--- a/samen_core/lib/samen/fleet/public_status.ex
++++ b/samen_core/lib/samen/fleet/public_status.ex
+@@ -156,7 +156,9 @@ defmodule Samen.Fleet.PublicStatus do
+   # Opt-in AND still registered. A deregistered app is not "down" — it is gone, so
+   # it leaves the page entirely. Anything that is not literally `true` is unpublished
+   # (fail closed: a `nil` from a namespace mid-migration publishes nothing).
+-  defp published?(%{publish_status: true, status: status}), do: status != :deregistered
++  # SABOTAGE (T166/ADR-050 §4.3): the OPT-IN conjunct is dropped from the filter —
++  # every registered app is published the moment the route is mounted.
++  defp published?(%{status: status}), do: status != :deregistered
+   defp published?(_row), do: false
+ 
+   defp entry(%{slug: slug, status: status}) do

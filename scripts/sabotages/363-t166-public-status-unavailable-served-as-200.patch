@@ -1,0 +1,41 @@
+# SABOTAGE: T166 / ADR-050 §4.5 — the fail-closed arm of the public status page
+# keeps its honest BODY and loses its honest STATUS CODE: a substrate it cannot read
+# is served as `200` carrying the "temporarily unavailable" page instead of `503`.
+# This is the fail-honest lie in its most plausible form, because it looks like a
+# UX improvement — a human opening the page reads the truth either way, and the
+# maintainer can argue the page "rendered fine". What breaks is every reader that is
+# not a human: an uptime checker, a load balancer, a synthetic monitor and a status
+# aggregator all read the code, not the prose, so a cockpit whose own status source
+# is down reports itself green for as long as the outage lasts.
+#
+# Flips the named §4.5 red (an unreadable substrate must be a 503 that SAYS it is
+# unavailable). Everything else stays GREEN: the 200 control, the opt-in reds, both
+# masking reds, the rate-limit red and the no-namespace arm's own refusal all still
+# pass — so the red fails on the status code alone, which is exactly the claim.
+#
+# NOT TOUCHED, deliberately: `unavailable_page/1` and its wording (the point is that
+# the body stays truthful while the code lies), the `{:error, :rate_limited}` arm
+# above it, `Samen.Fleet.PublicStatus.read/2`'s own `{:error, :unavailable}` return
+# and its `rescue` (the projection is still honest; only the HTTP framing lies), and
+# the 200 success path.
+#
+# Changes ONE integer literal, so nothing goes unused and the file still compiles
+# under `--warnings-as-errors`.
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_public_status_test.exs
+# MUST_FAIL: an unreadable substrate -> 503 that SAYS it is unavailable
+diff --git a/samen_web/lib/samen/web/fleet/public_status.ex b/samen_web/lib/samen/web/fleet/public_status.ex
+--- a/samen_web/lib/samen/web/fleet/public_status.ex
++++ b/samen_web/lib/samen/web/fleet/public_status.ex
+@@ -80,7 +80,10 @@ defmodule Samen.Web.Fleet.PublicStatus do
+         |> send_resp(429, "")
+ 
+       {:error, _reason} ->
+-        html(conn, 503, unavailable_page(title(opts)))
++        # SABOTAGE (T166/ADR-050 §4.5): the fail-closed STATUS CODE becomes 200. The
++        # body still says "unavailable", so a human sees the truth and every monitor
++        # reading only the HTTP code sees green.
++        html(conn, 200, unavailable_page(title(opts)))
+     end
+   end
+ 
