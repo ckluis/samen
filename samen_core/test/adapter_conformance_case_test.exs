@@ -55,16 +55,27 @@ defmodule Samen.AdapterConformanceCaseTest do
     end
 
     test "a REAL, loaded adapter module compiles cleanly (positive control)" do
-      # HonestFakeAdapter (defined above in this file) is already compiled/loaded by the
-      # time this test runs, so the compile-time guard must let this fixture through.
-      source = """
-      defmodule Samen.AdapterConformanceCase.FixtureRealAdapterModule do
-        use Samen.AdapterConformanceCase, adapter: Samen.AdapterConformanceCaseTest.HonestFakeAdapter
-      end
-      """
+      # `Samen.AdapterConformanceCase.FixtureRealAdapterModule` (defined at this file's
+      # top level, below `Samen.AdapterConformanceCaseTest` — see the comment there) is
+      # the positive control: it `use`s this kit with a REAL, loaded adapter module
+      # (`HonestFakeAdapter`, defined above in this file). It is compiled at COMPILE TIME,
+      # not via `Code.compile_string/1` inside this test — dynamically compiling a NEW
+      # ExUnit.Case module at RUNTIME, after the suite has started, is refused outright by
+      # `mix test --trace` (`max_cases: 1`): "cannot add module ... after the suite starts
+      # running". If the compile-time `Code.ensure_loaded?/1` guard in `using/1` ever
+      # regressed to reject a genuinely loaded adapter, this ENTIRE FILE would fail to
+      # compile — so merely reaching this test already exercises the guard's happy path.
+      # This asserts directly on the resulting, already-compiled module: that it is
+      # loaded, and that it is a genuine ExUnit case (i.e. the `using/1` macro's
+      # `use ExUnit.Case` really ran to completion, not merely a plain `defmodule`).
+      assert {:module, Samen.AdapterConformanceCase.FixtureRealAdapterModule} =
+               Code.ensure_loaded(Samen.AdapterConformanceCase.FixtureRealAdapterModule)
 
-      assert [{Samen.AdapterConformanceCase.FixtureRealAdapterModule, _}] =
-               Code.compile_string(source)
+      assert function_exported?(
+               Samen.AdapterConformanceCase.FixtureRealAdapterModule,
+               :__ex_unit__,
+               0
+             )
     end
   end
 
@@ -642,4 +653,20 @@ defmodule Samen.AdapterConformanceCaseTest do
       end
     end
   end
+end
+
+# ---------------------------------------------------------------------------
+# Fixture for `Samen.AdapterConformanceCaseTest`'s "a REAL, loaded adapter module
+# compiles cleanly (positive control)" test above. Defined here, at this file's own top
+# level — COMPILE TIME, after `Samen.AdapterConformanceCaseTest.HonestFakeAdapter` above
+# has already compiled and loaded — never via `Code.compile_string/1` inside a `test`
+# block. `use Samen.AdapterConformanceCase, adapter: ...` internally `use`s
+# `ExUnit.Case`, so compiling this module registers it with `ExUnit.Server`; doing that
+# via `Code.compile_string/1` at RUNTIME, after the suite has started, is exactly what
+# `mix test --trace` (`max_cases: 1`) refuses ("cannot add module ... after the suite
+# starts running"). Defining it here instead means the registration happens during
+# ordinary `mix test` COMPILATION, before any suite is running, under `--trace` or not.
+defmodule Samen.AdapterConformanceCase.FixtureRealAdapterModule do
+  @moduledoc false
+  use Samen.AdapterConformanceCase, adapter: Samen.AdapterConformanceCaseTest.HonestFakeAdapter
 end
