@@ -27,6 +27,83 @@ All notable changes to Samen are recorded here. The format follows
   object-ref anchor, `custom`, `owner_id`, and the self-referential `parent_id` Subtask tree
   with cycle refusal), archivable with a subtree cascade. Every vertical inherits Project +
   Task at ≈0 authored LOC; no PII (the scope's catalog PII map is empty).
+
+- **Mutation testing as a gate** (ADR-049): `scripts/mutate.sh` enumerates mutation sites
+  **mechanically from the AST** (`scripts/mutation/mutate.exs` — `Code.string_to_quoted/2` with
+  `columns: true` plus a literal encoder, never a regex) over four deliberately-chosen operator
+  families (`EQ` `==`/`!=`/`===`/`!==`, `REL` `>`/`>=`/`<`/`<=`, `BOOLOP` `and`/`or`/`&&`/`||`,
+  `BOOLLIT` `true`/`false`), splices each at its exact line:column, and requires it to be killed by
+  that file's **OWNING** test files only — so a kill is attributed by construction, not counted.
+  This answers the converse of the question the 328-patch sabotage corpus answers: that corpus
+  proves every guarantee the repo *claims* is still guarded, but each sabotage is a claim someone
+  thought to make, so it cannot report what it is missing. Where the owning-test column is derived
+  from the sabotage `APP:`/`TEST_FILES:` headers, the attribution is already gate-proven. Five
+  non-weakenable contracts: **baseline green before scoring** (against a red suite every mutant
+  "dies" and the gate reports a confident 100%); **a kill is a NAMED test failure** — a non-zero
+  exit with no `N) test` header means the *compiler* refused the mutant, scored `BUILD-REFUSED`
+  and never a kill (the owning suites deliberately run **without** `--warnings-as-errors` so a
+  warning masquerades as neither); **byte-exact SHA-256 restore** on every exit path including
+  SIGINT/SIGTERM; **an unexempt survivor fails the run**; and **the full report before the
+  failure** (a mutation run's value is the complete survivor list). Selection mirrors
+  `sabotage.sh`'s grammar (`--app`, `--file`, `--family`, `--changed [<ref>]` with the same
+  load-bearing untracked-file union, `--list`/`--dry-run`; same-flag-twice is an error; different
+  flags intersect; a filtered run's success line is distinct from a full run's) and adds
+  `--corpus` (derive the target set from the sabotage corpus — 163 (file, app) rows over 155 distinct lib files / 2,852 mutants, a soak
+  not a gate step), `--shard <i>/<n>` (a deterministic partition, proven disjoint **and** total, so
+  a soak is schedulable without overlap or gaps), and `--emit-patches <dir>` (write each survivor
+  as a sabotage-format patch with `MUST_FAIL` left TODO — the promotion path that turns a
+  mechanically-found hole into a permanent hand-named guarantee).
+- **The mutation gate's exemption ledger is content-pinned, not line-pinned** (ADR-049 §3):
+  `scripts/mutation/ledger.tsv` keys each exemption on the SHA-256 of the **exact source line** it
+  excuses, so inserting lines above a justified survivor keeps it valid while **editing that line
+  expires it** — `scripts/mutation_lint.sh` then fails the row as STALE. Exactly two classes are
+  allowed (`EQUIVALENT` with a specific proof; `ACCEPTED_GAP` with a mandatory `ref=` naming the
+  ADR/backlog item that owns the hole) and an exemption whose mutant is now **killed** fails the
+  gate as obsolete, so the ledger shrinks by construction as tests land. Exempt and unexempt
+  survivors are counted separately, so no report can round a ledgered hole into a clean number.
+- **The mutation gate is itself refutable** (ADR-049 §6): `scripts/mutation_selection_test.sh`
+  drives the gate's scoring logic against a throwaway probe module with stub runners — 30
+  assertions, ~15s, no database, no real mutant applied — with a negative control for each way a
+  mutation gate can lie rather than crash: a runner that always passes (every mutant survives, the
+  gate must FAIL — a gate that cannot report a survivor reports 100% forever), a failure with no
+  test header (must be `BUILD-REFUSED`, zero kills), a RED baseline (must fail **and print no
+  score**), a stale ledger hash, an `ACCEPTED_GAP` with no `ref=`, a three-character "reason", an
+  exemption whose mutant is now killed, a zero-site watch-list row, a missing owning test file, a
+  splice at a column that does not hold the expected token, and `--shard` shards proven both
+  disjoint and total. Wired into `ci.sh` as **two unconditional steps** (preflight + self-test,
+  ~17s, no DB, nothing mutated) plus one **opt-in** replay tier, `SAMEN_MUTATION=1 ./ci.sh`,
+  matching the sabotage harness's posture.
+
+### Fixed
+
+- **`samen_core/test/test_helper.exs` no longer blows up as a bare `MatchError` when a previous
+  run's connections defeat the test-DB drop** (found by ADR-049's gate, which runs `mix test`
+  dozens of times back to back and so loses that race regularly): `storage_down` cannot drop the
+  database, the following `storage_up` answers `{:error, :already_up}`, and the helper crashed with
+  no explanation. The drop is now retried briefly and then fails **loudly** with the reason and the
+  fix. `{:error, :already_up}` is deliberately **not** tolerated — the drop is what makes the
+  schema match the generated migrations, so accepting an un-dropped database would quietly run the
+  suite against a stale schema.
+
+### Changed
+
+- **Six real holes found by the mutation gate's first run are closed with tests** (ADR-049 §7,
+  MG-01…MG-06): `Samen.Pii.Classification.pii?/1` — the public "is this type PII" predicate —
+  could be **fully inverted** with nothing noticing, because its owning suite tested `classify/1`
+  exclusively and `pii?/1` had zero coverage (an inverted `pii?` is a total fail-open);
+  `classified?/1`'s unknown-type branch answered on **atom-ness** rather than non-PII-registry
+  membership under `and`→`or`, calling every atom "classified"; `Samen.ScopeMaskCase`'s own
+  anti-vacuity guard (`names == [] and handles == []`) survived `and`→`or`, which would have
+  refused every **one-sided** call — the normal shape of a real mask proof — while every test in
+  its suite stayed green; `Samen.Delivery.Chokepoint.resolve_provider/3` returned `{nil, %{}}`
+  (which reads downstream as a *resolved* provider — a fail-open onto a nil adapter) because
+  `is_atom(nil)` is `true` and the `and not is_nil(...)` half was the entire guard; and
+  `suppressed?/2`'s `== true` strict coercion and its documented **fail-closed-on-raise** promise
+  ("a broken check must never silently let a send through") both had no test at all. The remaining
+  16 survivors are ledgered as individually-referenced `ACCEPTED_GAP`s — highest severity being the
+  approval gate's `authorize?: true`, whose loss turns the gate into a policy **bypass** its owning
+  suite does not notice — and 1 as a proven `EQUIVALENT`.
+
 - **Tier-1 custom fields gain five new bounded types** (ADR-036 H6): `money`, `url`, `phone`,
   `email`, `address` join `Samen.CustomFields`'s existing `string`/`integer`/`number`/
   `boolean`/`date`/`enum` set, reusing the matching `Samen.Type.*` module's own cast/

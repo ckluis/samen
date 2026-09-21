@@ -386,14 +386,50 @@ else
   echo "==> Skipping sabotage harness (opt-in: SAMEN_SABOTAGE=1 ./ci.sh replays all gate sabotages)"
 fi
 
+# --- Mutation gate (ADR-049) — two steps, mirroring the sabotage pair above ----------
+# UNCONDITIONAL (fast, no DB, ~17s): the gate's own preflight + anti-tautology harness.
+# `mutation_lint.sh` proves the committed watch-list and exemption ledger still resolve —
+# in particular that no ledger entry has gone STALE (its content hash no longer matches a
+# live mutation site), which is what stops an exemption outliving the code it excused.
+# `mutation_selection_test.sh` then drives the gate's SCORING logic with stub runners and
+# pins the three ways a mutation gate lies: scoring everything as killed, scoring a
+# compile breakage as a kill, and scoring mutants against an already-red baseline. Both
+# are unconditional for the same reason the sabotage SELECTION regression is: they apply
+# no mutant, need no database, and a mutation gate that cannot report a survivor is worse
+# than no mutation gate because it reports a confident 100% over a hole.
+echo ""
+echo "==> Running mutation-gate preflight (ADR-049 — watch-list + ledger must resolve, no stale exemptions)"
+bash "$REPO_ROOT/scripts/mutation_lint.sh"
+echo "==> mutation-gate preflight: PASSED"
+
+echo ""
+echo "==> Running mutation-gate self-test (ADR-049 §6 — the gate must be able to report a survivor)"
+bash "$REPO_ROOT/scripts/mutation_selection_test.sh"
+echo "==> mutation-gate self-test: PASSED"
+
+# OPT-IN (SAMEN_MUTATION=1, ~3 min): the tier-1 mutation replay itself. Opt-in for the
+# same reason as the sabotage harness — it deliberately breaks the tree 61 times and
+# re-runs DB-backed suites. Where the sabotage harness asks "are the guarantees this repo
+# CLAIMS still guarded?", this asks the converse the sabotage corpus structurally cannot:
+# "is there some OTHER way to break these same files that their owning tests do NOT
+# catch?" A surviving mutant with no ledger entry fails the run.
+echo ""
+if [[ "${SAMEN_MUTATION:-0}" == "1" ]]; then
+  echo "==> Running mutation gate (SAMEN_MUTATION=1 — every tier-1 mutant must die or be ledgered)"
+  bash "$REPO_ROOT/scripts/mutate.sh"
+  echo "==> mutation gate: PASSED"
+else
+  echo "==> Skipping mutation gate (opt-in: SAMEN_MUTATION=1 ./ci.sh replays the tier-1 watch-list)"
+fi
+
 # --- Independent app/framework gates — RUN CONCURRENTLY (10-core box) -----------------
 # The four vertical/framework gates below are independent (own apps, own test DBs —
 # samen_web_test / demo_test / driftwood_test / pawchart_test — own _build) so they run
 # in PARALLEL to cut wall-clock. HAZARD GUARD: everything above this point (spikes,
-# samen_core, the 3 registry-mutating gen probes, and the opt-in sabotage harness — which
-# patches samen_core/samen_web/demo/pawchart source) is SEQUENTIAL and has already fully
-# completed; nothing below touches the shared abbrev_registry.json or patches source, so
-# concurrency here is race-free.
+# samen_core, the 3 registry-mutating gen probes, and the opt-in sabotage harness AND
+# mutation gate — both of which patch samen_core/samen_web/demo/pawchart source) is
+# SEQUENTIAL and has already fully completed; nothing below touches the shared
+# abbrev_registry.json or patches source, so concurrency here is race-free.
 #
 # CORRECTNESS CONTRACT (do NOT weaken): a backgrounded command that fails does NOT trip
 # `set -e`. Each gate's stdout+stderr is captured to its own log; each background PID's exit
