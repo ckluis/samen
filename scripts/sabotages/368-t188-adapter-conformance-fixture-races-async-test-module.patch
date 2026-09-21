@@ -1,0 +1,115 @@
+# SABOTAGE: T188 / issue #40 — the adapter-conformance positive control's fixture
+# module is moved BACK below `defmodule Samen.AdapterConformanceCaseTest`, exactly where
+# PR #34 left it. Nothing else changes: the same fixture, the same `adapter:`, the same
+# assertions, the same 41 tests. Only the byte position of one `defmodule` moves.
+#
+# That position is the defect. `Samen.AdapterConformanceCaseTest` is `async: true`, and
+# ExUnit takes an async module for execution as soon as the module's own `defmodule` has
+# registered it with `ExUnit.Server` — i.e. WHILE the rest of that same file is still
+# being compiled. With the fixture below the test module, the positive control races the
+# compilation of its own fixture, and on the losing side `Code.ensure_loaded/1` answers
+# `{:error, :nofile}` for a module that was never unloaded because it had not yet
+# finished compiling.
+#
+# SEED-PINNED, deliberately. The defect is a compile-vs-run race, so it is not refutable
+# at an arbitrary seed: the flip needs a seed that schedules that test early enough in
+# the module's own shuffle. `--seed 5` does, and does so reliably — 14 of 14 runs of this
+# file alone on unfixed `origin/main` flipped at that seed (and the full suite flips at
+# `--seed 636821` and `--seed 12`, the seeds issue #40 was filed from). Hence the `--seed
+# 5` in TEST_FILES: the harness's `mix test $test_files` word-splits, so the seed travels
+# with the file. Without the pin this patch would flip only some of the time, which is
+# the one thing a sabotage may not do.
+#
+# Flips the named positive control on the `Code.ensure_loaded/1` arm. Everything else in
+# the file stays GREEN: the AdapterNotLoadedError red beside it, all three
+# assert_refusal_table!/1 arms, both assert_masked_payload_only!/2 arms, the
+# assert_masked_segments!/1 arms, load_fixtures!/1, assert_capture_no_leak!/2 and
+# assert_redaction!/3 — so the failure is attributable to the fixture's placement alone.
+#
+# NOT TOUCHED, deliberately: `Samen.AdapterConformanceCase`'s `using/1` guard and its
+# `Code.ensure_loaded?/1` check (the kit is correct; this was a test-ordering defect, not
+# a kit defect), the `adapter:` module named (`Samen.Kms.FileBacked`, still real and still
+# loaded), the precondition assertion on that adapter (it still passes — proving the flip
+# is about the FIXTURE, not about the adapter), and the file's test count.
+#
+# The file still compiles under `--warnings-as-errors`: nothing is added or removed, only
+# reordered.
+# APP: samen_core
+# TEST_FILES: test/adapter_conformance_case_test.exs --seed 5
+# MUST_FAIL: a REAL, loaded adapter module compiles cleanly (positive control)
+diff --git a/samen_core/test/adapter_conformance_case_test.exs b/samen_core/test/adapter_conformance_case_test.exs
+index a1547f4..08cb53e 100644
+--- a/samen_core/test/adapter_conformance_case_test.exs
++++ b/samen_core/test/adapter_conformance_case_test.exs
+@@ -1,35 +1,3 @@
+-# ---------------------------------------------------------------------------
+-# Fixture for `Samen.AdapterConformanceCaseTest`'s "a REAL, loaded adapter module
+-# compiles cleanly (positive control)" test below. It lives at this file's own top level,
+-# at COMPILE TIME — never via `Code.compile_string/1` inside a `test` block: `use
+-# Samen.AdapterConformanceCase, adapter: ...` internally `use`s `ExUnit.Case`, so
+-# compiling this module registers it with `ExUnit.Server`, and doing THAT at RUNTIME,
+-# after the suite has started, is exactly what `mix test --trace` (`max_cases: 1`)
+-# refuses ("cannot add module ... after the suite starts running").
+-#
+-# It sits ABOVE `Samen.AdapterConformanceCaseTest` on purpose (issue #40). That test
+-# module is `async: true`, and ExUnit takes an async module for execution as soon as the
+-# module's own `defmodule` has registered it with `ExUnit.Server` — i.e. WHILE the REST of
+-# this very file (and the rest of the suite's test files) is still being compiled. With
+-# this fixture placed BELOW the test module, the positive control raced the compilation of
+-# its own fixture: at some seeds the test ran first and `Code.ensure_loaded/1` answered
+-# `{:error, :nofile}` (deterministic on `origin/main` at `--seed 636821` and `--seed 12`).
+-# Compilation WITHIN one file is strictly sequential, so defining the fixture HERE —
+-# before the test module exists, let alone is registered or taken — makes "the fixture is
+-# already loaded before any test in this file can run" true BY CONSTRUCTION, at every
+-# seed, instead of by scheduling luck.
+-#
+-# The `adapter:` it names is `Samen.Kms.FileBacked`: a REAL, already-loaded adapter module
+-# from `lib` (the KMS family whose hand-rolled `test/kms_conformance_test.exs` loop this
+-# kit generalizes — see the kit's moduledoc). Naming a lib adapter rather than a fake
+-# defined in this file keeps the positive control's precondition ("the adapter module is
+-# genuinely loaded") independent of this file's own compilation order, which is the whole
+-# point of the fix.
+-defmodule Samen.AdapterConformanceCase.FixtureRealAdapterModule do
+-  @moduledoc false
+-  use Samen.AdapterConformanceCase, adapter: Samen.Kms.FileBacked
+-end
+-
+ defmodule Samen.AdapterConformanceCaseTest do
+   @moduledoc """
+   T188 — self-test for `Samen.AdapterConformanceCase`. Proves the kit's own guarantees,
+@@ -695,3 +663,35 @@ defmodule Samen.AdapterConformanceCaseTest do
+     end
+   end
+ end
++
++# ---------------------------------------------------------------------------
++# Fixture for `Samen.AdapterConformanceCaseTest`'s "a REAL, loaded adapter module
++# compiles cleanly (positive control)" test below. It lives at this file's own top level,
++# at COMPILE TIME — never via `Code.compile_string/1` inside a `test` block: `use
++# Samen.AdapterConformanceCase, adapter: ...` internally `use`s `ExUnit.Case`, so
++# compiling this module registers it with `ExUnit.Server`, and doing THAT at RUNTIME,
++# after the suite has started, is exactly what `mix test --trace` (`max_cases: 1`)
++# refuses ("cannot add module ... after the suite starts running").
++#
++# It sits ABOVE `Samen.AdapterConformanceCaseTest` on purpose (issue #40). That test
++# module is `async: true`, and ExUnit takes an async module for execution as soon as the
++# module's own `defmodule` has registered it with `ExUnit.Server` — i.e. WHILE the REST of
++# this very file (and the rest of the suite's test files) is still being compiled. With
++# this fixture placed BELOW the test module, the positive control raced the compilation of
++# its own fixture: at some seeds the test ran first and `Code.ensure_loaded/1` answered
++# `{:error, :nofile}` (deterministic on `origin/main` at `--seed 636821` and `--seed 12`).
++# Compilation WITHIN one file is strictly sequential, so defining the fixture HERE —
++# before the test module exists, let alone is registered or taken — makes "the fixture is
++# already loaded before any test in this file can run" true BY CONSTRUCTION, at every
++# seed, instead of by scheduling luck.
++#
++# The `adapter:` it names is `Samen.Kms.FileBacked`: a REAL, already-loaded adapter module
++# from `lib` (the KMS family whose hand-rolled `test/kms_conformance_test.exs` loop this
++# kit generalizes — see the kit's moduledoc). Naming a lib adapter rather than a fake
++# defined in this file keeps the positive control's precondition ("the adapter module is
++# genuinely loaded") independent of this file's own compilation order, which is the whole
++# point of the fix.
++defmodule Samen.AdapterConformanceCase.FixtureRealAdapterModule do
++  @moduledoc false
++  use Samen.AdapterConformanceCase, adapter: Samen.Kms.FileBacked
++end
