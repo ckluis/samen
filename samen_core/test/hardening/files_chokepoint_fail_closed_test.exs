@@ -1,3 +1,6 @@
+# Drives the guard through the resource that uses it, never naming it in code, so the
+# mutation gate cannot back-reference it (scripts/mutation/mutate.exs, OWNING-TEST DERIVATION).
+# MUTATION_OWNS: samen_core/lib/samen/files/chokepoint_guard.ex
 defmodule Samen.Hardening.FilesChokepointFailClosedTest do
   @moduledoc """
   Fail-closed PROOF for the one `Samen.Files.ChokepointGuard` clause the ADR-049 mutation

@@ -2,7 +2,7 @@
 # scripts/mutate.sh — the MUTATION GATE (ADR-049).
 #
 # ── WHAT THIS ADDS THAT THE SABOTAGE HARNESS CANNOT ──────────────────────────
-# `scripts/sabotage.sh` replays 328 HAND-AUTHORED patches and proves each still
+# `scripts/sabotage.sh` replays every HAND-AUTHORED patch and proves each still
 # flips its NAMED tests. That answers: "are the guarantees this repo claims still
 # guarded?" It cannot answer the converse — "is there some OTHER way to break
 # this same file that these same tests do NOT catch?" — because every sabotage is
@@ -26,6 +26,17 @@
 # the file, not by some unrelated test three apps away. Where the owning-test
 # mapping comes from the sabotage corpus (most of it does), the attribution is
 # already gate-proven.
+#
+# ── OWNING TESTS = DECLARED ∪ DERIVED (issue #20) ────────────────────────────
+# Declared owners (targets.tsv column 3, sabotage TEST_FILES headers) see only
+# the tests someone remembered to wire up, so a proof added later in a NEW file
+# (test/hardening/*) was invisible and its kills scored as survivors. Every
+# target's set is therefore UNIONED with the test files that own it by
+# `mutate.exs owners`: files in the target's app whose AST names one of the
+# target's modules, or that carry `# MUTATION_OWNS: <relpath>`. The claim lives
+# in the test file, so it cannot rot the way a hand-edited list does, and the
+# evidence section still names which test killed each mutant. `--list` prints
+# the derived additions per target.
 #
 # ── THE FIVE CONTRACTS (do not weaken any of them) ───────────────────────────
 #  1. BASELINE GREEN FIRST. Before a target's first mutant, its owning tests run
@@ -324,6 +335,39 @@ case "$MODE" in
              END { for (i = 1; i <= c; i++) print keys[i] "\t" union[keys[i]] }' >> "$TARGET_ROWS" ;;
 esac
 
+# ── owning-test derivation (issue #20) ───────────────────────────────────────
+# One engine call per app (it parses that app's test files once), then each
+# row's owning tests become declared ∪ derived, declared order first.
+DERIVED="$WORK/derived"   # relpath \t app \t test_file, derived-only additions
+: > "$DERIVED"
+for d_app in $(cut -f2 "$TARGET_ROWS" | sort -u); do
+  [[ -d "$REPO_ROOT/$d_app/test" ]] || continue
+  # shellcheck disable=SC2046  # relpaths never contain whitespace (lint-enforced rows)
+  (cd "$REPO_ROOT" && elixir "$ENGINE" owners "$d_app" \
+      $(awk -F'\t' -v a="$d_app" '$2 == a { print $1 }' "$TARGET_ROWS")) \
+    > "$WORK/owners.$d_app" 2>"$WORK/owners.err" \
+    || { cat "$WORK/owners.err"; fail "engine could not derive owning tests for app $d_app"; }
+  awk -F'\t' -v a="$d_app" '{ print $1 "\t" a "\t" $2 }' "$WORK/owners.$d_app" >> "$DERIVED"
+done
+# FILENAME, not the FNR == NR idiom: with nothing derived the first file is empty
+# and FNR == NR would swallow every target row as a derivation.
+awk -F'\t' '
+  FILENAME == ARGV[2] { add[$1 "\t" $2] = add[$1 "\t" $2] " " $3; next }
+  { key = $1 "\t" $2; out = $3; n = split($3, have, " ")
+    for (i = 1; i <= n; i++) seen[key SUBSEP have[i]] = 1
+    m = split(add[key], extra, " ")
+    for (i = 1; i <= m; i++) if (!((key SUBSEP extra[i]) in seen)) {
+      seen[key SUBSEP extra[i]] = 1; out = out " " extra[i]
+      print key "\t" extra[i] > dfile
+    }
+    print key "\t" out }' dfile="$WORK/derived.new" "$DERIVED" "$TARGET_ROWS" > "$WORK/targets.union"
+mv "$WORK/targets.union" "$TARGET_ROWS"
+touch "$WORK/derived.new"; mv "$WORK/derived.new" "$DERIVED"
+
+derived_for() { # derived_for <relpath> <app> -> space-separated derived additions
+  awk -F'\t' -v r="$1" -v a="$2" '$1 == r && $2 == a { printf "%s%s", sep, $3; sep = " " }' "$DERIVED"
+}
+
 # Apply the target-level filters (app / file / --changed).
 FILTERED_ROWS="$WORK/targets_filtered"
 : > "$FILTERED_ROWS"
@@ -381,6 +425,12 @@ if [[ $LIST_ONLY -eq 1 ]]; then
   awk -F'\t' '{ printf "  %-60s %s:%s %-7s %s -> %s\n", $1, $2, $3, $4, $5, $6 }' "$MUTANTS"
   echo ""
   awk -F'\t' '{ n[$1]++ } END { for (f in n) printf "  %-60s %d mutants\n", f, n[f] }' "$MUTANTS" | sort
+  echo ""
+  echo "Owning tests derived beyond the declared set (issue #20 — back-reference or MUTATION_OWNS):"
+  while IFS=$'\t' read -r relpath app _tests; do
+    extra="$(derived_for "$relpath" "$app")"
+    [[ -n "$extra" ]] && printf '  %s (%s)\n     + %s\n' "$relpath" "$app" "$extra"
+  done < "$FILTERED_ROWS"
   echo ""
   echo "MUTATION SELECTION: $sel_mutants of $total_mutants mutants selected (dry-run — nothing applied)"
   exit 0
@@ -462,6 +512,8 @@ while IFS=$'\t' read -r relpath line col family from to lsha app tests; do
     echo ""
     echo "==> target $relpath (app: $app)"
     echo "    owning tests: $tests"
+    extra="$(derived_for "$relpath" "$app")"
+    [[ -n "$extra" ]] && echo "    (derived, issue #20: $extra)"
 
     base_out="$WORK/baseline.$(echo "$relpath" | tr '/' '_').out"
     if ! run_tests "$app" "$tests" baseline "$relpath" "$base_out"; then

@@ -38,6 +38,30 @@
 #                             (exit 3) unless the source at line/col is exactly
 #                             <from> — so a stale site can never corrupt a file.
 #   count <relpath>...        one `<relpath>\t<n>` line per file.
+#   owners <app_dir> <relpath>...
+#                             one `<relpath>\t<test_file>` line per test file
+#                             under <app_dir>/test that owns the target (test
+#                             paths relative to <app_dir>, sorted) — see
+#                             "OWNING-TEST DERIVATION" below.
+#
+# OWNING-TEST DERIVATION (issue #20). Declared owners (targets.tsv, sabotage
+# TEST_FILES headers) only see tests someone remembered to wire up; a proof
+# written later in a new file (test/hardening/*) is invisible to the gate and its
+# kills score as survivors. `owners` derives the missing half, and a test file
+# owns a target by EITHER of two rules, both of which travel with the test:
+#   (a) BACK-REFERENCE — its AST names one of the target's fully-qualified
+#       modules (nested defmodules included) EXACTLY, aliases expanded (`alias
+#       Samen.Files.{ChokepointGuard}`, `alias X, as: Y`, `Short.Name`). A
+#       submodule (`Samen.Vault.Change`) never names its parent (`Samen.Vault`),
+#       and a multi-alias base is not a reference.
+#   (b) DECLARATION — a `# MUTATION_OWNS: <repo-relative lib path>...` comment
+#       line. For proofs that drive a guard THROUGH the resource that uses it
+#       (test/hardening/pii_write_guard_fail_closed_test.exs never names
+#       Samen.Pii.WriteGuard in code): following the resource transitively
+#       would make nearly every test own Samen.Vault.Change. The claim is
+#       co-located, like a sabotage header, and mutation_lint.sh refuses one
+#       naming a file that does not exist.
+# A textual pre-filter keeps (a) to a few parses per call.
 #
 # `list` TSV columns (tab-separated, stable order, no header):
 #   relpath  line  col  family  from  to  line_sha12
@@ -192,11 +216,117 @@ defmodule Samen.Mutation.Engine do
   end
 end
 
+defmodule Samen.Mutation.Refs do
+  # Module names are lists of atoms ([:Samen, :Vault, :Change]) throughout, so
+  # "names exactly this module" is list equality — never a prefix/substring test.
+
+  # Every module a lib file defines, nested defmodules resolved against their
+  # parent (`defmodule Inner` inside `Samen.X` is Samen.X.Inner).
+  def modules(source) do
+    case Code.string_to_quoted(source, emit_warnings: false) do
+      {:ok, ast} -> ast |> defs([]) |> Enum.uniq()
+      {:error, _} -> []
+    end
+  end
+
+  defp defs({:defmodule, _, [{:__aliases__, _, parts}, kw]}, prefix) when is_list(kw) do
+    if Enum.all?(parts, &is_atom/1) do
+      name = prefix ++ parts
+      [name | defs(Keyword.get(kw, :do), name)]
+    else
+      []
+    end
+  end
+
+  defp defs({_, _, args}, prefix) when is_list(args), do: defs(args, prefix)
+  defp defs({a, b}, prefix), do: defs(a, prefix) ++ defs(b, prefix)
+  defp defs(list, prefix) when is_list(list), do: Enum.flat_map(list, &defs(&1, prefix))
+  defp defs(_, _), do: []
+
+  # Every fully-qualified module a test file names, aliases expanded. An
+  # unparseable file names nothing (it cannot be an owning test anyway).
+  def references(source) do
+    case Code.string_to_quoted(source, emit_warnings: false) do
+      {:ok, ast} ->
+        aliases = ast |> alias_decls() |> Map.new()
+
+        ast
+        |> refs()
+        |> Enum.map(fn [h | rest] = name ->
+          case Map.fetch(aliases, h) do
+            {:ok, full} -> full ++ rest
+            :error -> name
+          end
+        end)
+        |> MapSet.new()
+
+      {:error, _} ->
+        MapSet.new()
+    end
+  end
+
+  # short name => full name, for `alias A.B`, `alias A.B, as: C`, `alias A.{B, C.D}`.
+  defp alias_decls(ast) do
+    {_, acc} =
+      Macro.prewalk(ast, [], fn
+        {:alias, _, [{:__aliases__, _, parts}, opts]} = node, acc when is_list(opts) ->
+          case {atoms?(parts), Keyword.get(opts, :as)} do
+            {true, {:__aliases__, _, [as]}} -> {node, [{as, parts} | acc]}
+            {true, nil} -> {node, [{List.last(parts), parts} | acc]}
+            _ -> {node, acc}
+          end
+
+        {:alias, _, [{:__aliases__, _, parts}]} = node, acc ->
+          if atoms?(parts), do: {node, [{List.last(parts), parts} | acc]}, else: {node, acc}
+
+        {:alias, _, [{{:., _, [{:__aliases__, _, base}, :{}]}, _, children}]} = node, acc ->
+          new =
+            for {:__aliases__, _, c} <- children, atoms?(base ++ c), do: {List.last(c), base ++ c}
+
+          {node, new ++ acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    Enum.reverse(acc)
+  end
+
+  defp refs(ast) do
+    {_, acc} =
+      Macro.prewalk(ast, [], fn
+        # A multi-alias's base is not a reference (`alias Samen.Files.{Upload}` must
+        # not own Samen.Files), so the declaration is not walked at all: its children
+        # count through their USES, expanded by alias_decls/1. (An unused alias is a
+        # compile warning, and CI builds with --warnings-as-errors.)
+        {:alias, _, [{{:., _, [{:__aliases__, _, _base}, :{}]}, _, _children}]}, acc ->
+          {:skip, acc}
+
+        {:__aliases__, _, parts} = node, acc ->
+          if atoms?(parts), do: {node, [parts | acc]}, else: {node, acc}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    acc
+  end
+
+  defp atoms?(parts), do: parts != [] and Enum.all?(parts, &is_atom/1)
+
+  # The lib paths a `# MUTATION_OWNS:` comment line declares (space-separated).
+  def declared(source) do
+    Regex.scan(~r/^[ \t]*# MUTATION_OWNS:[ \t]*(.+)$/m, source, capture: :all_but_first)
+    |> Enum.flat_map(fn [paths] -> String.split(paths) end)
+  end
+end
+
 defmodule Samen.Mutation.CLI do
-  alias Samen.Mutation.Engine
+  alias Samen.Mutation.{Engine, Refs}
 
   def main(["list" | files]) when files != [], do: list(files)
   def main(["count" | files]) when files != [], do: count(files)
+  def main(["owners", app_dir | files]) when files != [], do: owners(app_dir, files)
 
   def main(["apply", file, line, col, from, to]) do
     source = File.read!(file)
@@ -239,6 +369,47 @@ defmodule Samen.Mutation.CLI do
     end)
   end
 
+  defp owners(app_dir, files) do
+    tests =
+      Path.wildcard(Path.join(app_dir, "test/**/*_test.exs"))
+      |> Enum.sort()
+      |> Enum.map(fn path ->
+        src = File.read!(path)
+        {Path.relative_to(path, app_dir), src, Refs.declared(src)}
+      end)
+
+    refs_cache = :ets.new(:refs, [:set])
+
+    Enum.each(files, fn file ->
+      mods = Refs.modules(read(file))
+      lasts = mods |> Enum.map(&List.last/1) |> Enum.uniq() |> Enum.map(&Atom.to_string/1)
+
+      for {rel, src, declared} <- tests,
+          file in declared or references_any?(refs_cache, rel, src, mods, lasts) do
+        IO.puts("#{file}\t#{rel}")
+      end
+    end)
+  end
+
+  defp references_any?(_cache, _rel, _src, [], _lasts), do: false
+
+  defp references_any?(cache, rel, src, mods, lasts) do
+    String.contains?(src, lasts) and
+      Enum.any?(mods, &MapSet.member?(cached_refs(cache, rel, src), &1))
+  end
+
+  defp cached_refs(cache, rel, src) do
+    case :ets.lookup(cache, rel) do
+      [{^rel, refs}] ->
+        refs
+
+      [] ->
+        refs = Refs.references(src)
+        :ets.insert(cache, {rel, refs})
+        refs
+    end
+  end
+
   # A candidate becomes a SITE only if it splices cleanly AND the result parses.
   defp valid_sites(file, source) do
     sites =
@@ -269,6 +440,7 @@ defmodule Samen.Mutation.CLI do
     Usage:
       mutate.exs list  <file>...
       mutate.exs count <file>...
+      mutate.exs owners <app_dir> <file>...
       mutate.exs apply <file> <line> <col> <from> <to>
     """
   end

@@ -56,10 +56,16 @@ The sabotage harness proves the guarantees we CLAIM are still guarded. The mutat
 converse — is there some OTHER way to break the same file that its owning tests do NOT catch? —
 because every sabotage is a claim someone thought to make.
 - `./scripts/mutate.sh` (default: the tier-1 watch-list, `scripts/mutation/targets.tsv`, 8
-  chokepoint/guard modules / 61 mutants / ~3 min). Sites are enumerated from the **AST** by
+  chokepoint/guard modules / 61 mutants / ~5 min). Sites are enumerated from the **AST** by
   `scripts/mutation/mutate.exs` over four operator families (EQ / REL / BOOLOP / BOOLLIT) and
   spliced at exact line:column; each mutant runs ONLY that target's **owning** tests, so a kill is
   attributed by construction. Ends `MUTATION GATE: ALL PASSED`.
+- Owning tests = DECLARED (`targets.tsv` / sabotage `TEST_FILES`) ∪ DERIVED (`mutate.exs owners`,
+  issue #20): every test file in the target's app whose AST names one of the target's modules
+  (aliases expanded; exact names, never a submodule), plus any carrying `# MUTATION_OWNS:
+  <repo-relative lib path>`. A new proof file is picked up with NO list edit — if it drives the
+  guard through a resource and never names it in code, add the `MUTATION_OWNS` line (lint refuses
+  one naming a missing file). `--list` prints the derived additions per target.
 - Flags mirror `sabotage.sh` (`--app`, `--file`, `--family`, `--changed [<ref>]`, `--list`;
   same-flag-twice is an error; different flags intersect) plus `--corpus` (derive targets from the
   sabotage headers — 163 (file, app) rows over 155 distinct lib files / 2,852 mutants, a soak not a gate step), `--shard <i>/<n>`
