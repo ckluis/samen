@@ -1,7 +1,7 @@
 # ADR-051 — Usage-metering capture: an insert-only event ledger behind one chokepoint, with tallies derived from it and the reporter keyed end to end
 
 - **Status:** **PROPOSED (2026-09-24) — DRAFT ONLY, no code authored.** Four operator decisions
-  are open (§5). Nothing here is ratified; §4 records the recommended answer to each so the
+  are open (§5). Nothing here is ratified; §5 records the recommended answer to each so the
   build can start the moment they are taken.
 - **Date:** 2026-09-24
 - **Task:** backlog **T163** (`_orch/plan/backlog.yaml:173`; OSS-scan shortlist item 3,
