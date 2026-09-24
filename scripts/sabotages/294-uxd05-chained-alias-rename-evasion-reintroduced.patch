@@ -13,13 +13,14 @@
 # MUST_FAIL: spawn_lock_violations/2 flips on the chained-alias fixture path (refutable)
 # MUST_FAIL: RED FIXTURE (UXD-05, attempt 3) — a PARENT rename carrying a further as: chain
 diff --git a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+index 3ddb746..b9fac1f 100644
 --- a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
 +++ b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
-@@ -318,8 +318,11 @@
-         if MapSet.member?(visited, head) do
+@@ -427,8 +427,11 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
+         if Map.has_key?(visited, head) do
            false
          else
--          seen = MapSet.put(visited, head)
+-          seen = Map.put(visited, head, true)
 -          Enum.any?(candidates, &resolves_to_kernel?(&1 ++ rest, env, seen))
 +          # SABOTAGE (UXD-05 attempt 2, ADR-047 §10a row 19): head substitution no longer
 +          # RECURSES, so exactly one hop resolves. A rename OF a rename (`alias

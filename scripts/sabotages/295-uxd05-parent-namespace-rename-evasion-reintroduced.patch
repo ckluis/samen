@@ -16,12 +16,13 @@
 # MUST_FAIL: an alias declared INSIDE a function body is resolved, not only a module-top alias
 # MUST_FAIL: spawn_lock_violations/2 flips on the parent-rename fixture path (refutable)
 diff --git a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
+index 3ddb746..851e684 100644
 --- a/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
 +++ b/samen_core/lib/mix/tasks/samen.verify.agent_coverage.ex
-@@ -319,7 +319,12 @@
+@@ -428,7 +428,12 @@ defmodule Mix.Tasks.Samen.Verify.AgentCoverage do
            false
          else
-           seen = MapSet.put(visited, head)
+           seen = Map.put(visited, head, true)
 -          Enum.any?(candidates, &resolves_to_kernel?(&1 ++ rest, env, seen))
 +          # SABOTAGE (UXD-05 attempt 3, ADR-047 §10a row 19): the substituted head is
 +          # re-resolved WITHOUT the reference's remaining segments, so a renamed PARENT

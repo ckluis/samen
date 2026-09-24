@@ -33,12 +33,10 @@
 # TEST_FILES: test/cdc_mirror_test.exs
 # MUST_FAIL: RP-E: a reveal that RAISES mid-scan is a LEAK
 diff --git a/samen_core/lib/samen/cdc/local_postgres.ex b/samen_core/lib/samen/cdc/local_postgres.ex
+index f3abd3c..3dc087b 100644
 --- a/samen_core/lib/samen/cdc/local_postgres.ex
 +++ b/samen_core/lib/samen/cdc/local_postgres.ex
-@@ -198,31 +198,25 @@ defmodule Samen.Cdc.LocalPostgres do
-       rows
-       |> List.flatten()
-       |> Enum.filter(fn v -> is_binary(v) and String.starts_with?(v, "vt_") end)
+@@ -201,29 +201,23 @@ defmodule Samen.Cdc.LocalPostgres do
      end)
    end
  
@@ -69,12 +67,13 @@ diff --git a/samen_core/lib/samen/cdc/local_postgres.ex b/samen_core/lib/samen/c
 +  # callers (`erasure_test.exs`, `shred_key_material_test.exs`, driftwood's crypto-shred
 +  # gameday). Exactly the lie the fail-honest contract (ADR-014/024/026) forbids.
    defp decryptable?(token, repo) do
-     match?({:ok, _}, Vault.reveal(%Samen.Masked{token: token, label: "cdc"}, repo))
+     # Built through `Samen.Masked.new/2`, NOT a bare struct literal: `new/2` guards
+     # `is_atom(label)`, and `t:Samen.Masked.t/0` (hence `Vault.reveal/3`'s contract)
+     # declares an atom label. The vault never reads it, so behaviour was already
+     # correct — the constructor makes the ill-typed value unrepresentable.
+     match?({:ok, _}, Vault.reveal(Samen.Masked.new(token, :cdc), repo))
 +  rescue
 +    _ -> false
    end
  
    defp repo! do
-     Config.repo() ||
-       raise "Samen.Cdc.LocalPostgres requires a repo — wire config :samen_core, :cdc, repo: MyRepo"
-   end
