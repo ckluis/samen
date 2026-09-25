@@ -42,6 +42,7 @@ defmodule Samen.Delivery.ThrottleSnoozeTest do
   alias Samen.Delivery.ThrottleSnoozeStubAdapter, as: Stub
   alias Samen.Notifications.EmailDispatchWorker
   alias Samen.Scopes.Marketing.SendWorker
+  alias SamenCore.TestRepo
 
   @workers [
     {EmailWorker, %{"send_id" => "s1", "org_id" => nil, "event" => "welcome"}},
@@ -50,6 +51,18 @@ defmodule Samen.Delivery.ThrottleSnoozeTest do
   ]
 
   setup do
+    # Issue #45: every worker below routes through Samen.Delivery.Chokepoint,
+    # and its :adapter_unconfigured arm (SendWorker.emit_blocked_audit/2 in
+    # particular) writes this test's non-UUID "s1"/"s2"/"s3" send_ids straight
+    # into aud_event.aud_subject_id (Samen.AuditEvent.insert/2). Every sibling
+    # suite that touches Postgres takes this same sandbox checkout (see
+    # test/retention_sweep_test.exs, test/feature_flags_engine_test.exs) so
+    # its writes roll back with the test; this file omitted it, so those rows
+    # could survive the test and later poison Samen.Rollup.refresh/2's
+    # aud_subject_id::uuid cast (ERROR 22P02) for every rollup rebuild in the
+    # same run — see test/delivery/throttle_snooze_isolation_test.exs.
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
+
     previous =
       Map.new([EmailWorker, SendWorker, EmailDispatchWorker], fn worker ->
         {worker, Application.get_env(:samen_core, worker)}
