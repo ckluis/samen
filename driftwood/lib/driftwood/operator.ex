@@ -57,7 +57,8 @@ defmodule Driftwood.Operator do
       payment: "dpy",
       usage: "dpu",
       entitlement: "dpe",
-      subscription_event: "dpv"
+      subscription_event: "dpv",
+      usage_event: "dpx"
     }
 
   use Samen.Scopes.Support,

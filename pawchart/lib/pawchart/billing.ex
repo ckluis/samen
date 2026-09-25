@@ -37,6 +37,7 @@ defmodule PawChart.Billing do
       payment: "pby",
       usage: "pbu",
       entitlement: "pbe",
-      subscription_event: "pbv"
+      subscription_event: "pbv",
+      usage_event: "pbx"
     }
 end

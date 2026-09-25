@@ -26,6 +26,7 @@ defmodule Acme.Billing do
       payment: "acy",
       usage: "acu",
       entitlement: "ace",
-      subscription_event: "acv"
+      subscription_event: "acv",
+      usage_event: "acx"
     }
 end

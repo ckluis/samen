@@ -18,6 +18,7 @@ defmodule Samen.WebTest.Billing do
       payment: "wby",
       usage: "wbu",
       entitlement: "wbe",
-      subscription_event: "wbv"
+      subscription_event: "wbv",
+      usage_event: "wbx"
     }
 end

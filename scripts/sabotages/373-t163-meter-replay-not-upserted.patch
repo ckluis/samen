@@ -1,0 +1,34 @@
+# SABOTAGE: T163 / ADR-051 R1 — the Meter stops upserting on the idempotency identity
+# and does a plain insert. A replayed capture then hits the unique index: the caller
+# gets an error instead of `{:ok, :duplicate}`, and — the sharper failure — a replay
+# inside the caller's own transaction aborts it (Postgres 25P02 on every later
+# statement), so metering poisons whatever request it rides in.
+#
+# Flips the replay test and the in-transaction test. The distinct-event POSITIVE
+# CONTROL stays green (distinct keys never conflict), so the red is the dedup path,
+# not the write path. The unique index itself is untouched: it still refuses a second
+# row, which is why no double-count appears — only the broken replay contract.
+# APP: demo
+# TEST_FILES: test/usage_event_ledger_test.exs
+# MUST_FAIL: the same source_ref captured twice is recorded once, the replay answers :duplicate
+# MUST_FAIL: a replay inside the caller's transaction does not abort it
+diff --git a/samen_core/lib/samen/billing/meter.ex b/samen_core/lib/samen/billing/meter.ex
+index 18e36a3..e4ddf11 100644
+--- a/samen_core/lib/samen/billing/meter.ex
++++ b/samen_core/lib/samen/billing/meter.ex
+@@ -83,12 +83,9 @@ defmodule Samen.Billing.Meter do
+       }
+ 
+       resource
+-      |> Ash.Changeset.for_create(:record, attrs,
+-        upsert?: true,
+-        upsert_identity: :unique_idempotency_key,
+-        upsert_fields: [],
+-        authorize?: false
+-      )
++      # SABOTAGE (ADR-051 R1): a plain insert — a replay now hits the unique index
++      # instead of upserting onto the existing row.
++      |> Ash.Changeset.for_create(:record, attrs, authorize?: false)
+       |> Ash.Changeset.force_change_attribute(:id, id)
+       |> Ash.Changeset.set_context(%{private: %{ChokepointGuard.marker_key() => true}})
+       |> Ash.create(authorize?: false)

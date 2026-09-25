@@ -42,6 +42,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
     <%= module %>.Operator.Usage,
     <%= module %>.Operator.Entitlement,
     <%= module %>.Operator.SubscriptionEvent,
+    <%= module %>.Operator.UsageEvent,
     # Support (operator: tenant-filed desk tickets)
     <%= module %>.Operator.Sla,
     <%= module %>.Operator.Ticket,
@@ -569,6 +570,28 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_sev %>_updated_at, :utc_datetime, null: false)
     end
 
+    # ---- Usage-capture ledger (T163; ADR-051) — insert-only, no PII, written only by
+    #      Samen.Billing.Meter.record/3; soft subscription ref (no FK) ----
+    create table(:<%= o_uev %>_usage_event, primary_key: false) do
+      add(:<%= o_uev %>_metric, :text, null: false)
+      add(:<%= o_uev %>_quantity, :integer, null: false)
+      add(:<%= o_uev %>_subscription_id, :uuid)
+      add(:<%= o_uev %>_idempotency_key, :uuid, null: false)
+      add(:<%= o_uev %>_occurred_at, :utc_datetime_usec, null: false)
+      add(:<%= o_uev %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= o_uev %>_org_id, :uuid, null: false)
+      add(:<%= o_uev %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= o_uev %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create(
+      unique_index(:<%= o_uev %>_usage_event, [:<%= o_uev %>_org_id, :<%= o_uev %>_idempotency_key],
+        name: "<%= o_uev %>_usage_event_unique_idempotency_key_index"
+      )
+    )
+
+    create(constraint(:<%= o_uev %>_usage_event, :<%= o_uev %>_usage_event_quantity_positive, check: "<%= o_uev %>_quantity > 0"))
+
     # =====================================================================
     # SUPPORT — the SaaS help desk (tenants file tickets WITH the SaaS)
     # =====================================================================
@@ -823,6 +846,7 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
 
     # --- Billing (reverse FK order; ledger has no FKs) ---
     drop(table(:<%= o_sev %>_subscription_event))
+    drop(table(:<%= o_uev %>_usage_event))
     drop(constraint(:<%= o_ent %>_entitlement, "<%= o_ent %>_entitlement_<%= o_ent %>_plan_id_fkey"))
     drop(constraint(:<%= o_ent %>_entitlement, "<%= o_ent %>_entitlement_<%= o_ent %>_subscription_id_fkey"))
     drop(table(:<%= o_ent %>_entitlement))

@@ -981,6 +981,66 @@
     {
       "fields": [
         {
+          "column_name": "bux_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "bux_idempotency_key",
+          "logical_name": "idempotency_key",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "bux_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "bux_metric",
+          "logical_name": "metric",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "bux_occurred_at",
+          "logical_name": "occurred_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "bux_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "bux_quantity",
+          "logical_name": "quantity",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "bux_subscription_id",
+          "logical_name": "subscription_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "bux_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Demo.BillingScope.UsageEvent",
+      "table_name": "bux_usage_event"
+    },
+    {
+      "fields": [
+        {
           "column_name": "cbl_archived_at",
           "logical_name": "archived_at",
           "pii": false,

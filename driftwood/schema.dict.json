@@ -2619,6 +2619,66 @@
     {
       "fields": [
         {
+          "column_name": "dpx_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dpx_idempotency_key",
+          "logical_name": "idempotency_key",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dpx_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "dpx_metric",
+          "logical_name": "metric",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "dpx_occurred_at",
+          "logical_name": "occurred_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "dpx_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dpx_quantity",
+          "logical_name": "quantity",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "dpx_subscription_id",
+          "logical_name": "subscription_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "dpx_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Operator.UsageEvent",
+      "table_name": "dpx_usage_event"
+    },
+    {
+      "fields": [
+        {
           "column_name": "dpy_amount_cents",
           "logical_name": "amount_cents",
           "pii": false,
@@ -4823,6 +4883,66 @@
       ],
       "resource": "Driftwood.Billing.SubscriptionEvent",
       "table_name": "fbv_subscription_event"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "fbx_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbx_idempotency_key",
+          "logical_name": "idempotency_key",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbx_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbx_metric",
+          "logical_name": "metric",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "fbx_occurred_at",
+          "logical_name": "occurred_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "fbx_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbx_quantity",
+          "logical_name": "quantity",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fbx_subscription_id",
+          "logical_name": "subscription_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "fbx_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Driftwood.Billing.UsageEvent",
+      "table_name": "fbx_usage_event"
     },
     {
       "fields": [

@@ -26,6 +26,7 @@ defmodule <%= module %>.Billing do
       payment: "<%= by %>",
       usage: "<%= bu %>",
       entitlement: "<%= be %>",
-      subscription_event: "<%= bv %>"
+      subscription_event: "<%= bv %>",
+      usage_event: "<%= bx %>"
     }
 end

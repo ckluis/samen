@@ -1,0 +1,26 @@
+# SABOTAGE: T163 / ADR-051 R3 — the usage ledger regains the generic `update: :*` and
+# `:destroy` the old `Usage` tally ships with. A captured event becomes editable after
+# the fact: a quantity can be rewritten or a row deleted after it was billed, which is
+# exactly the mutable-history defect ADR-051 §1 records against `Usage`.
+#
+# Flips the "no update and no destroy" test. Nothing else in the suite goes red — the
+# Meter never calls either action — which is the point: without this structural test a
+# re-added mutation surface would be invisible.
+# APP: demo
+# TEST_FILES: test/usage_event_ledger_test.exs
+# MUST_FAIL: UsageEvent exposes read and ONE create, no update and no destroy
+diff --git a/samen_core/lib/samen/scopes/billing/blueprint.ex b/samen_core/lib/samen/scopes/billing/blueprint.ex
+index a83a193..ff0ef41 100644
+--- a/samen_core/lib/samen/scopes/billing/blueprint.ex
++++ b/samen_core/lib/samen/scopes/billing/blueprint.ex
+@@ -936,8 +936,8 @@ defmodule Samen.Scopes.Billing.Blueprint do
+         end
+ 
+         actions do
+-          # Insert-only: read + ONE guarded create. No update/destroy.
+-          defaults([:read])
++          # SABOTAGE (ADR-051 R3): the ledger regains a mutation surface.
++          defaults([:read, :destroy, update: :*])
+ 
+           create :record do
+             accept([

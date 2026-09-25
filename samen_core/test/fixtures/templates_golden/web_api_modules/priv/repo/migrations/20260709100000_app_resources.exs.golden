@@ -1,6 +1,6 @@
 defmodule Acme.Repo.Migrations.AppResources do
   @moduledoc """
-  Creates Acme's Billing scope (abbrevs acc/acs/acl/acp/aci/acy/acu/ace/acv)
+  Creates Acme's Billing scope (abbrevs acc/acs/acl/acp/aci/acy/acu/ace/acv/acx)
   mounted AS-IS, the authored vertical table (acm_record with the scalar vault
   field pii_acm_secret), and the token-blind aggregate projection (aca_record_count),
   and catalogs every resource in the SAME migration transaction (ADR-004 catalog-in-tx).
@@ -17,6 +17,7 @@ defmodule Acme.Repo.Migrations.AppResources do
     Acme.Billing.Usage,
     Acme.Billing.Entitlement,
     Acme.Billing.SubscriptionEvent,
+    Acme.Billing.UsageEvent,
     Acme.Vertical.Record,
     Acme.Aggregate.RecordCountBySegment
   ]
@@ -283,6 +284,28 @@ defmodule Acme.Repo.Migrations.AppResources do
       add(:acv_updated_at, :utc_datetime, null: false)
     end
 
+    # ---- Usage-capture ledger (T163; ADR-051) — insert-only, no PII, written only by
+    #      Samen.Billing.Meter.record/3; soft subscription ref (no FK) ----
+    create table(:acx_usage_event, primary_key: false) do
+      add(:acx_metric, :text, null: false)
+      add(:acx_quantity, :integer, null: false)
+      add(:acx_subscription_id, :uuid)
+      add(:acx_idempotency_key, :uuid, null: false)
+      add(:acx_occurred_at, :utc_datetime_usec, null: false)
+      add(:acx_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:acx_org_id, :uuid, null: false)
+      add(:acx_inserted_at, :utc_datetime, null: false)
+      add(:acx_updated_at, :utc_datetime, null: false)
+    end
+
+    create(
+      unique_index(:acx_usage_event, [:acx_org_id, :acx_idempotency_key],
+        name: "acx_usage_event_unique_idempotency_key_index"
+      )
+    )
+
+    create(constraint(:acx_usage_event, :acx_usage_event_quantity_positive, check: "acx_quantity > 0"))
+
     # ---- Authored vertical table (the "20%") ----
     create table(:acm_record, primary_key: false) do
       # Scalar pii_ vault field → column pii_acm_secret (vt_* token):
@@ -319,6 +342,7 @@ defmodule Acme.Repo.Migrations.AppResources do
     drop(table(:acm_record))
 
     drop(table(:acv_subscription_event))
+    drop(table(:acx_usage_event))
 
     drop(constraint(:ace_entitlement, "ace_entitlement_ace_plan_id_fkey"))
     drop(constraint(:ace_entitlement, "ace_entitlement_ace_subscription_id_fkey"))

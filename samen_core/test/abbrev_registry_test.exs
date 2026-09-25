@@ -173,7 +173,9 @@ defmodule Samen.AbbrevRegistryTest do
                  # T79 (spec §I6 macros composer palette + CSAT loop closed): the
                  # new `CsatSurveyToken` resource (I6's single-use CSAT
                  # survey-response link), allocator-proposed.
-                 "dsc" => "Demo.SupportScope.CsatSurveyToken"
+                 "dsc" => "Demo.SupportScope.CsatSurveyToken",
+                 # T163 (ADR-051): the usage-capture ledger, allocator-reserved.
+                 "bux" => "Demo.BillingScope.UsageEvent"
                },
                "driftwood" => %{
                  "fmv" => "Driftwood.Marketing.ConsentEvent",
@@ -239,7 +241,10 @@ defmodule Samen.AbbrevRegistryTest do
                  "dcs" => "Driftwood.Support.CsatSurveyToken",
                  # T79: the operator-book sibling — driftwood's OPERATOR Support
                  # mount (ADR-010 §8.1), allocator-proposed.
-                 "dco" => "Driftwood.Operator.CsatSurveyToken"
+                 "dco" => "Driftwood.Operator.CsatSurveyToken",
+                 # T163 (ADR-051): the usage-capture ledger, tenant + operator Billing.
+                 "fbx" => "Driftwood.Billing.UsageEvent",
+                 "dpx" => "Driftwood.Operator.UsageEvent"
                },
                "pawchart" => %{
                  "vmv" => "PawChart.Marketing.ConsentEvent",
@@ -292,7 +297,10 @@ defmodule Samen.AbbrevRegistryTest do
                  "pqm" => "PawChart.Operator.Message",
                  "pqn" => "PawChart.Operator.Macro",
                  "pqs" => "PawChart.Operator.Csat",
-                 "pqo" => "PawChart.Operator.CsatSurveyToken"
+                 "pqo" => "PawChart.Operator.CsatSurveyToken",
+                 # T163 (ADR-051): the usage-capture ledger, tenant + operator Billing.
+                 "pbx" => "PawChart.Billing.UsageEvent",
+                 "pmx" => "PawChart.Operator.UsageEvent"
                },
                "samen_core" => %{
                  # T75 (spec §I2 CRM sequences actually send): the new Outreach
@@ -494,7 +502,10 @@ defmodule Samen.AbbrevRegistryTest do
                  "scw" => "Samen.WebTest.Support.CsatSurveyToken",
                  # T79: the operator-book sibling — the samen_web test host's
                  # OPERATOR Support mount (ADR-010 §8.2), allocator-proposed.
-                 "wco" => "Samen.WebTest.Operator.CsatSurveyToken"
+                 "wco" => "Samen.WebTest.Operator.CsatSurveyToken",
+                 # T163 (ADR-051): the usage-capture ledger, tenant + operator Billing.
+                 "wbx" => "Samen.WebTest.Billing.UsageEvent",
+                 "wpx" => "Samen.WebTest.Operator.UsageEvent"
                }
              }
 
@@ -571,7 +582,9 @@ defmodule Samen.AbbrevRegistryTest do
       # (Samen.AI.Agent.{Run,Turn}), allocator-reserved = 410.
       # +1 C4 (ADR-048 §7.3): samen_core host's `afs` (Samen.AI.Agent.FoldSource), the
       # pseudonym-keyed provenance index, allocator-reserved.
-      assert map_size(Reg.load()) == 443
+      # +7 T163 (ADR-051): the usage-capture ledger on every Billing mount
+      # (`bux` demo; `fbx`/`dpx` driftwood; `pbx`/`pmx` pawchart; `wbx`/`wpx` samen_web) = 450.
+      assert map_size(Reg.load()) == 450
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do
