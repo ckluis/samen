@@ -138,6 +138,20 @@ run_spike() {
   echo "==> spike $spike_name: PASSED"
 }
 
+# --- every shipped sabotage must still APPLY (issue #53) -------------------------------
+# The double sweep deliberately treats a patch that fails in BOTH baselines as
+# pre-existing, so a sabotage whose code moved (294/295/331 after #22) rotted for four
+# days with every run green. `git apply --check` of every patch against this working
+# tree, ~2s, no DB; its self-test proves the red case goes red (~1s, temp dir only).
+echo ""
+echo "==> Running sabotage apply-check (every shipped sabotage must still apply to this tree)"
+bash "$REPO_ROOT/scripts/sabotage_apply_check_test.sh" >/dev/null || {
+  echo "sabotage apply-check SELF-TEST FAILED — rerun scripts/sabotage_apply_check_test.sh for detail"
+  exit 1
+}
+bash "$REPO_ROOT/scripts/sabotage_apply_check.sh"
+echo "==> sabotage apply-check: PASSED"
+
 # --- spike list (same set as ci.sh) ---
 run_spike "$REPO_ROOT/spikes/s00_smoke"
 run_spike "$REPO_ROOT/spikes/s02_transformer"
