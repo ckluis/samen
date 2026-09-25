@@ -17,7 +17,8 @@
 # (git apply ignores everything before the first `diff --git`):
 #   APP:        the app dir to run tests in (samen_core | samen_web | ...)
 #   TEST_FILES: space-separated test files (relative to APP) that hold the named tests
-#   MUST_FAIL:  a substring of a test name that MUST be among the failures (repeatable)
+#   MUST_FAIL:  a substring of a test (or property) name that MUST be among the
+#               failures (repeatable)
 #
 # ── SELECTION / FILTER MODES (additive; DEFAULT no-arg run is UNCHANGED) ──────
 # With no flags this replays ALL patches, in filename order, exactly as before.
@@ -457,7 +458,14 @@ for patch in "${selected[@]}"; do
   fi
 
   # 4. The NAMED tests are among the failures (not just any breakage).
-  grep -E '^[[:space:]]*[0-9]+\) test' "$out" > "$WORK/failed_tests" || {
+  #
+  # `property` as well as `test`: ExUnit prints a failing StreamData property as
+  # `  1) property <name> (<Module>)`, not `  1) test ...`, so a MUST_FAIL naming a
+  # property matched NOTHING and the patch was rejected as "named test did not flip"
+  # while the property had in fact flipped (sabotage 369, the first to name one).
+  # Purely additive: this only ever captures MORE failure headers, so every existing
+  # patch's `grep -qF` match is unaffected.
+  grep -E '^[[:space:]]*[0-9]+\) (test|property) ' "$out" > "$WORK/failed_tests" || {
     tail -30 "$out"
     fail "$name: suite failed but no test-failure headers found (compile error?)"
   }
