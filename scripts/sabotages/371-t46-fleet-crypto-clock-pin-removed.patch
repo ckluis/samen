@@ -1,0 +1,30 @@
+# SABOTAGE: issue #46 — the test stops pinning the clock and falls through to
+# `Crypto.fresh_timestamp?/2`'s real-wall-clock default on ONE call inside the
+# deterministic boundary test. `pinned_now` is a fixed HISTORICAL epoch
+# (1_700_000_000, Nov 2023); with the `now:` override dropped, that call reads
+# the REAL current wall clock instead, which is now roughly two years further
+# on — `abs(real_now - ts)` is on the order of tens of millions of seconds,
+# nowhere near the 300s tolerance, so the `assert` (expecting "fresh") flips to
+# a hard, deterministic failure. No timing race is needed to prove the pin
+# matters: an unpinned call against a fixed historical timestamp fails every
+# single time, by a huge margin, on every machine, forever.
+#
+# NOT TOUCHED: `Samen.Fleet.Crypto.fresh_timestamp?/3` itself (the seam this PR
+# adds), the other pinned assertions in the same test, and every other test.
+#
+# APP: samen_core
+# TEST_FILES: test/fleet_crypto_test.exs
+# MUST_FAIL: PINNED CLOCK: the exact boundary is deterministic
+diff --git a/samen_core/test/fleet_crypto_test.exs b/samen_core/test/fleet_crypto_test.exs
+index e560929..dd4ecb5 100644
+--- a/samen_core/test/fleet_crypto_test.exs
++++ b/samen_core/test/fleet_crypto_test.exs
+@@ -98,7 +98,7 @@ defmodule Samen.Fleet.CryptoTest do
+       tolerance_s = 300
+ 
+       # Positive side: ts in the past.
+-      assert Crypto.fresh_timestamp?(pinned_now - (tolerance_s - 1), tolerance_s, now: pinned_now)
++      assert Crypto.fresh_timestamp?(pinned_now - (tolerance_s - 1), tolerance_s)
+       assert Crypto.fresh_timestamp?(pinned_now - tolerance_s, tolerance_s, now: pinned_now)
+       refute Crypto.fresh_timestamp?(pinned_now - (tolerance_s + 1), tolerance_s, now: pinned_now)
+ 

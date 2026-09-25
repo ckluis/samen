@@ -76,11 +76,46 @@ defmodule Samen.Fleet.CryptoTest do
   end
 
   describe "replay-bound timestamp (§4.4)" do
-    test "fresh timestamp passes, stale one fails" do
+    test "fresh timestamp passes, stale one fails (real clock, coarse — unaffected by the seam)" do
       now = System.os_time(:second)
       assert Crypto.fresh_timestamp?(now)
       refute Crypto.fresh_timestamp?(now - 301)
       refute Crypto.fresh_timestamp?(now + 301)
+    end
+
+    # Issue #46: fresh_timestamp?/2 re-read System.os_time(:second) itself, so
+    # a test that captures `now` separately and asserts on `now ± tolerance_s`
+    # could have a real clock tick land between its own read and the
+    # function's — flipping the delta by exactly 1 second AT the boundary and
+    # flaking the `refute` above (reproduced deterministically once, at
+    # PR-review time, by forcing a real wall-clock tick between the two reads
+    # — see the PR description). Deterministic-by-construction fix: PIN the
+    # clock via the `now:` seam so no wall-clock read — and so no race — is
+    # ever in play, and assert the EXACT boundary (tolerance_s itself is
+    # fresh; tolerance_s + 1 is stale) on both sides, positive and negative.
+    test "PINNED CLOCK: the exact boundary is deterministic — no wall-clock read, no race" do
+      pinned_now = 1_700_000_000
+      tolerance_s = 300
+
+      # Positive side: ts in the past.
+      assert Crypto.fresh_timestamp?(pinned_now - (tolerance_s - 1), tolerance_s, now: pinned_now)
+      assert Crypto.fresh_timestamp?(pinned_now - tolerance_s, tolerance_s, now: pinned_now)
+      refute Crypto.fresh_timestamp?(pinned_now - (tolerance_s + 1), tolerance_s, now: pinned_now)
+
+      # Negative side: ts in the future (issue #46's exact failing case).
+      assert Crypto.fresh_timestamp?(pinned_now + (tolerance_s - 1), tolerance_s, now: pinned_now)
+      assert Crypto.fresh_timestamp?(pinned_now + tolerance_s, tolerance_s, now: pinned_now)
+      refute Crypto.fresh_timestamp?(pinned_now + (tolerance_s + 1), tolerance_s, now: pinned_now)
+
+      # Exact equality (ts == now) is trivially fresh — the zero-delta control.
+      assert Crypto.fresh_timestamp?(pinned_now, tolerance_s, now: pinned_now)
+    end
+
+    test "PINNED CLOCK: a custom tolerance is honored exactly, still with no wall-clock read" do
+      pinned_now = 1_700_000_000
+
+      assert Crypto.fresh_timestamp?(pinned_now - 5, 5, now: pinned_now)
+      refute Crypto.fresh_timestamp?(pinned_now - 6, 5, now: pinned_now)
     end
   end
 end
