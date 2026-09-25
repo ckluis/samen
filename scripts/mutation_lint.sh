@@ -22,6 +22,13 @@
 #       either it has no mutable logic (drop the row) or the engine cannot see it.
 #     · a duplicate target row
 #
+#   `# MUTATION_OWNS:` declarations (test files claiming ownership of a lib
+#   file the gate cannot back-reference — scripts/mutation/mutate.exs, issue #20)
+#     · a declared path that does not exist — a typo there owns nothing, so the
+#       proof the author wired up silently drops out of the gate again
+#     · a declaration outside a `*_test.exs` file — the gate only scans test
+#       files, so the claim would be read by nobody
+#
 #   ledger.tsv  (the exemption file — the one place the gate can be told "this
 #               survivor is acceptable", so it gets the strictest checks)
 #     · a row that is not exactly 7 tab-separated fields
@@ -117,6 +124,22 @@ done < <(data_rows "$TARGETS_FILE")
 
 [[ "$targets_total" -gt 0 ]] || refuse "targets file $TARGETS_FILE has no data rows"
 
+# ── MUTATION_OWNS declarations ───────────────────────────────────────────────
+owns_total=0
+while IFS= read -r hit; do
+  file="${hit%%:*}"
+  owns_total=$((owns_total + 1))
+  if [[ "$file" != *_test.exs ]]; then
+    refuse "$file: MUTATION_OWNS outside a *_test.exs file — the gate only reads test files, so this claim is dead"
+  fi
+  for decl in $(sed 's/^[^:]*:[[:space:]]*# MUTATION_OWNS:[[:space:]]*//' <<<"$hit"); do
+    [[ -f "$REPO_ROOT/$decl" ]] \
+      || refuse "$file: MUTATION_OWNS names a file that does not exist: $decl (the proof drops out of the gate)"
+  done
+done < <(cd "$REPO_ROOT" && find . -path ./spikes -prune -o \( -name deps -o -name _build -o -name node_modules \) -prune \
+           -o -type f \( -name '*.exs' -o -name '*.ex' \) -print 2>/dev/null \
+         | sed 's|^\./||' | sort | xargs grep -HE '^[[:space:]]*# MUTATION_OWNS:' 2>/dev/null)
+
 # ── ledger.tsv ───────────────────────────────────────────────────────────────
 ledger_total=0
 SEEN_KEYS="$WORK/seen_keys"
@@ -187,4 +210,4 @@ if [[ "$bad" -gt 0 ]]; then
   echo "MUTATION LINT: FAILED — $bad refusal(s) over $targets_total target row(s) and $ledger_total ledger row(s)"
   exit 1
 fi
-echo "MUTATION LINT: ALL PASSED ($targets_total target row(s) resolvable + mutable, $ledger_total ledger row(s) well-formed and live)"
+echo "MUTATION LINT: ALL PASSED ($targets_total target row(s) resolvable + mutable, $owns_total MUTATION_OWNS declaration(s) resolvable, $ledger_total ledger row(s) well-formed and live)"

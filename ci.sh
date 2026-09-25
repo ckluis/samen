@@ -407,7 +407,7 @@ echo "==> Running mutation-gate self-test (ADR-049 §6 — the gate must be able
 bash "$REPO_ROOT/scripts/mutation_selection_test.sh"
 echo "==> mutation-gate self-test: PASSED"
 
-# OPT-IN (SAMEN_MUTATION=1, ~3 min): the tier-1 mutation replay itself. Opt-in for the
+# OPT-IN (SAMEN_MUTATION=1, ~5 min): the tier-1 mutation replay itself. Opt-in for the
 # same reason as the sabotage harness — it deliberately breaks the tree 61 times and
 # re-runs DB-backed suites. Where the sabotage harness asks "are the guarantees this repo
 # CLAIMS still guarded?", this asks the converse the sabotage corpus structurally cannot:

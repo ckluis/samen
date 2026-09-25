@@ -1,3 +1,6 @@
+# Drives the guard through the resource that uses it, never naming it in code, so the
+# mutation gate cannot back-reference it (scripts/mutation/mutate.exs, OWNING-TEST DERIVATION).
+# MUTATION_OWNS: samen_core/lib/samen/vault/change.ex
 defmodule Samen.Hardening.VaultChangeFailClosedTest do
   @moduledoc """
   Fail-closed PROOFS for `Samen.Vault.Change` clauses the ADR-049 mutation gate found

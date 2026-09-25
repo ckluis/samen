@@ -243,3 +243,17 @@ contract 2.
   ledgered, never red.
 - Closing a ledgered gap: write the test, re-run, and the obsolescence check (§3) will *require*
   you to delete the exemption — the ledger shrinks by construction as the tests land.
+
+## 9 · Amendment (2026-09-23, issue #20) — owning tests are DECLARED ∪ DERIVED
+
+§2's owning set was declared only (`targets.tsv` column 3, sabotage `TEST_FILES`). That broke the
+last bullet of §8 in practice: PR #26 closed 14 ledgered gaps with proofs in NEW files
+(`samen_core/test/hardening/*`), the gate never ran them, and the ledger could not shrink. Each
+target's owning set is now UNIONED with `mutate.exs owners`: test files in the target's app whose
+AST names one of its modules exactly (aliases expanded; a submodule never names its parent), plus
+any file carrying `# MUTATION_OWNS: <repo-relative lib path>` — for proofs that drive a guard
+through the resource that uses it, where following references transitively would make nearly
+every test own `Samen.Vault.Change`. The specificity argument in §2 holds: a derived test named
+the module (or claimed it, lint-checked), and the evidence section still names which test killed
+each mutant. Cost: the tier-1 replay went from ~3 to ~5 min (the owning sets grew from 8 to 36
+files). Self-test assertion 17 pins both rules and their negative controls.

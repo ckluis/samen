@@ -1,3 +1,6 @@
+# Drives the guard through the resource that uses it, never naming it in code, so the
+# mutation gate cannot back-reference it (scripts/mutation/mutate.exs, OWNING-TEST DERIVATION).
+# MUTATION_OWNS: samen_core/lib/samen/pii/write_guard.ex
 defmodule Samen.Hardening.PiiWriteGuardFailClosedTest do
   @moduledoc """
   Fail-closed PROOFS for the three `Samen.Pii.WriteGuard.plaintext_write?/2` clauses the

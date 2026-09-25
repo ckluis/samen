@@ -38,7 +38,19 @@
 #  15  --shard partitions the mutant list EXACTLY: shards are disjoint and their
 #      union is the whole selection (no mutant run twice, none skipped)
 #  16  --changed sees an UNTRACKED probe (the sabotage --changed miss, not repeated)
-#  17  zero residue: every probe file removed, the tree as we found it
+#  17  owning-test derivation (issue #20), over throwaway probe TEST files:
+#      a) POSITIVE: a test naming the probe through `alias Samen, as: S` +
+#         `S.MutationProbe` is derived AND handed to the runner — listed-but-not-run
+#         would be a false fix; a second probe test does the same through a
+#         multi-alias (`alias Samen.{MutationProbe}`), each form on its own
+#      b) NEGATIVE CONTROL: a test naming only a SUBMODULE of the probe, with the
+#         probe's name in a string, is NOT derived (exact names, not substrings)
+#      c) POSITIVE: `# MUTATION_OWNS: <probe>` derives a test that never names it
+#      d) NEGATIVE CONTROL: lint refuses a MUTATION_OWNS naming a missing file,
+#         and one outside a *_test.exs file (the gate never reads it there)
+#      (With NO test deriving, the declared rows must survive untouched — that is
+#      what 4-16 already exercise, since they run before any probe test exists.)
+#  18  zero residue: every probe file removed, the tree as we found it
 #
 # Usage: scripts/mutation_selection_test.sh
 # Exit:  0 if every assertion passes; non-zero + FAIL lines otherwise.
@@ -60,7 +72,18 @@ fail_count=0
 ok()  { echo "PASS: $*"; pass_count=$((pass_count + 1)); }
 bad() { echo "FAIL: $*"; fail_count=$((fail_count + 1)); }
 
-cleanup() { rm -f "$PROBE" "$EMPTY"; rm -rf "$SCRATCH"; }
+REF_TEST_REL="test/__mutation_probe_ref_test.exs"
+MULTI_TEST_REL="test/__mutation_probe_multi_test.exs"
+SUB_TEST_REL="test/__mutation_probe_sub_test.exs"
+OWNS_TEST_REL="test/__mutation_probe_owns_test.exs"
+BADOWNS_TEST_REL="test/__mutation_probe_badowns_test.exs"
+DEADOWNS_REL="test/__mutation_probe_deadowns.exs"
+PROBE_TESTS=("$REPO_ROOT/samen_core/$REF_TEST_REL" "$REPO_ROOT/samen_core/$MULTI_TEST_REL"
+             "$REPO_ROOT/samen_core/$SUB_TEST_REL"
+             "$REPO_ROOT/samen_core/$OWNS_TEST_REL" "$REPO_ROOT/samen_core/$BADOWNS_TEST_REL"
+             "$REPO_ROOT/samen_core/$DEADOWNS_REL")
+
+cleanup() { rm -f "$PROBE" "$EMPTY" "${PROBE_TESTS[@]}"; rm -rf "$SCRATCH"; }
 trap cleanup EXIT INT TERM
 
 # ── the probe module: five sites, one per operator family plus a second REL ────
@@ -342,17 +365,113 @@ else
 fi
 
 echo ""
-echo "== 17: residue =="
+echo "== 17: owning-test derivation (issue #20) =="
+
+# Probe TEST files. Plain modules, not ExUnit cases: they exist only for the
+# engine to parse and are deleted by cleanup on every exit path.
+cat > "$REPO_ROOT/samen_core/$REF_TEST_REL" <<'T'
+defmodule Samen.MutationProbeRefTest do
+  @moduledoc false
+  alias Samen, as: S
+  def ref, do: S.MutationProbe.eq?(1)
+end
+T
+cat > "$REPO_ROOT/samen_core/$MULTI_TEST_REL" <<'T'
+defmodule Samen.MutationProbeMultiTest do
+  @moduledoc false
+  alias Samen.{MutationProbe}
+  def ref, do: MutationProbe.eq?(1)
+end
+T
+cat > "$REPO_ROOT/samen_core/$SUB_TEST_REL" <<'T'
+defmodule Samen.MutationProbeSubTest do
+  @moduledoc false
+  def ref, do: {Samen.MutationProbe.Inner, "Samen.MutationProbe"}
+end
+T
+cat > "$REPO_ROOT/samen_core/$OWNS_TEST_REL" <<T
+# MUTATION_OWNS: $PROBE_REL
+defmodule Samen.MutationProbeOwnsTest do
+  @moduledoc false
+end
+T
+
+owners="$(cd "$REPO_ROOT" && elixir "$ENGINE" owners samen_core "$PROBE_REL" 2>&1)"
+
+# a) derived AND run: the stub runner records exactly what it was handed.
+R_RECORD='echo "$MUT_TEST_FILES" >> "$MUT_RECORD"; if [ "$MUT_PHASE" = baseline ]; then exit 0; else echo "  1) test the probe guard is pinned (Samen.MutationProbeTest)"; exit 1; fi'
+export MUT_RECORD="$SCRATCH/handed.txt"; : > "$MUT_RECORD"
+run_gate "$R_RECORD" --family EQ >"$SCRATCH/derive.out"; st=$?
+if grep -qxF "$PROBE_REL	$REF_TEST_REL" <<<"$owners" \
+   && [[ $st -eq 0 ]] && grep -qF "$REF_TEST_REL" "$MUT_RECORD" \
+   && grep -qF "test/files_upload_test.exs" "$MUT_RECORD"; then
+  ok "a test naming the probe through an as:-alias is DERIVED and HANDED to the runner, alongside the declared owner"
+else
+  echo "$owners"; cat "$SCRATCH/derive.out"; cat "$MUT_RECORD"
+  bad "back-reference derivation missed a test that names the probe through an as:-alias (or the gate listed it but never ran it)"
+fi
+if grep -qxF "$PROBE_REL	$MULTI_TEST_REL" <<<"$owners"; then
+  ok "a test naming the probe through a multi-alias is DERIVED"
+else
+  echo "$owners"
+  bad "back-reference derivation missed a test that names the probe through a multi-alias"
+fi
+
+# b) a submodule is not its parent; a string is not a reference.
+if grep -qF "$SUB_TEST_REL" <<<"$owners"; then
+  bad "a test naming only Samen.MutationProbe.Inner (and the probe's name in a STRING) was derived — substring matching would make a parent module owned by every child's tests"
+else
+  ok "NEGATIVE CONTROL: a submodule reference / string mention is NOT derived as ownership"
+fi
+
+# c) the co-located declaration, for proofs that drive a guard through a resource.
+if grep -qxF "$PROBE_REL	$OWNS_TEST_REL" <<<"$owners"; then
+  ok "a MUTATION_OWNS declaration derives a test that never names the module in code"
+else
+  echo "$owners"
+  bad "MUTATION_OWNS did not derive its test — resource-driven proofs would drop out of the gate again"
+fi
+
+# d) a typo'd declaration owns nothing, so the lint must refuse it by name.
+cat > "$REPO_ROOT/samen_core/$BADOWNS_TEST_REL" <<'T'
+# MUTATION_OWNS: samen_core/lib/samen/__no_such_guard.ex
+defmodule Samen.MutationProbeBadOwnsTest do
+  @moduledoc false
+end
+T
+if bash "$LINT" --targets "$TARGETS" --ledger "$EMPTY_LEDGER" >"$SCRATCH/badowns.out" 2>&1; then
+  bad "lint ACCEPTED a MUTATION_OWNS naming a file that does not exist"
+else
+  grep -q "MUTATION_OWNS names a file that does not exist: samen_core/lib/samen/__no_such_guard.ex" "$SCRATCH/badowns.out" \
+    && ok "NEGATIVE CONTROL: lint refuses a MUTATION_OWNS naming a missing file" \
+    || { cat "$SCRATCH/badowns.out"; bad "lint failed but not for the missing MUTATION_OWNS path"; }
+fi
+rm -f "$REPO_ROOT/samen_core/$BADOWNS_TEST_REL"
+# A REAL path, so only the file-name rule can refuse it.
+printf '# MUTATION_OWNS: %s\n' "$PROBE_REL" > "$REPO_ROOT/samen_core/$DEADOWNS_REL"
+if bash "$LINT" --targets "$TARGETS" --ledger "$EMPTY_LEDGER" >"$SCRATCH/deadowns.out" 2>&1; then
+  bad "lint ACCEPTED a MUTATION_OWNS outside a *_test.exs file — a claim the gate never reads"
+else
+  grep -q "samen_core/$DEADOWNS_REL: MUTATION_OWNS outside a \*_test.exs file" "$SCRATCH/deadowns.out" \
+    && ok "NEGATIVE CONTROL: lint refuses a MUTATION_OWNS outside a *_test.exs file" \
+    || { cat "$SCRATCH/deadowns.out"; bad "lint failed but not for the non-test MUTATION_OWNS"; }
+fi
+rm -f "${PROBE_TESTS[@]}"
+
+echo ""
+echo "== 18: residue =="
 if [[ "$(shasum -a 256 "$PROBE" | cut -d' ' -f1)" == "$PROBE_SHA_BEFORE" ]]; then
   ok "the probe target is byte-identical after every run (no mutant residue)"
 else
   bad "the probe target was left MUTATED"
 fi
 cleanup
-if [[ -e "$PROBE" || -e "$EMPTY" ]]; then
+residue=0
+for f in "$PROBE" "$EMPTY" "${PROBE_TESTS[@]}"; do [[ -e "$f" ]] && residue=1; done
+if [[ $residue -eq 1 ]]; then
   bad "scratch residue left behind"
 else
-  ok "zero residue (both probe modules removed)"
+  ok "zero residue (both probe modules and every probe test file removed)"
 fi
 
 echo ""
