@@ -1,0 +1,51 @@
+# SABOTAGE: issue #36 / ADR-038 §6.2 — the rate-limit bucket name loses its per-subject
+# VALUE: `"{surface}:{kind}:{value}"` becomes `"{surface}:{kind}"`, so every `kid` on a
+# surface shares ONE counter. This is the isolation RP-J-13 now depends on, removed at the
+# seam rather than in the test: a single noisy cockpit consumes every other app's heartbeat
+# budget, and the §4.4a starvation mitigation that gives each app its own budget is gone.
+#
+# Flips RP-J-13's PRECONDITION CONTROL, and nothing else in that suite: the arm plants the
+# prior traffic the pre-fix version silently assumed away — another cockpit's kid driven PAST
+# the limit in the same window — and then asserts its OWN bucket is still below limit before
+# it sends anything. With the value dropped from the key, the planted flood lands in this
+# app's bucket and the `refute over_limit?(:fleet_heartbeat, :kid, app_id)` control fires.
+#
+# VERIFIED, and the point of the patch: against the PRE-FIX test file this same sabotage runs
+# 14/14 GREEN. One kid per test and a `reset/0` between tests make a collapsed key
+# indistinguishable from a per-kid one — which is exactly why the old arm could take its
+# precondition on faith and go red by seed instead. The control this patch flips is the new
+# thing, not a restatement of an existing red.
+#
+# NOT TOUCHED: the limits themselves (`@default_limits`, `limit_for/1`), the fixed-window
+# algorithm and its wall-clock window index (issue #36's root cause — the fix pins the window
+# open in the test, and this patch leaves that alone), `check/3`/`over_limit?/3`/
+# `record_failure/3`/`bump/3`'s return contracts, and the charge-only-on-{:ok,_} BLOCKER-1
+# ordering in `CockpitIngress`.
+#
+# Changes one function head + body, so the module still compiles under
+# --warnings-as-errors (the unused parameter is spelled `_value`).
+#
+# Out of scope for TEST_FILES but worth stating: this is a key-discipline regression the auth
+# (`Samen.Web.Auth.RateLimitTest`), webhook and public-status suites ALSO catch — 8 further
+# reds across samen_web. Those prove per-key isolation for their own surfaces; none of them
+# covers the fleet heartbeat bucket, which is why RP-J-13 needs its own control.
+# APP: samen_web
+# TEST_FILES: test/samen/web/fleet_ingress_test.exs
+# MUST_FAIL: RP-J-13: over-limit is a byte-identical 429 for a KNOWN kid
+diff --git a/samen_web/lib/samen/web/rate_limit.ex b/samen_web/lib/samen/web/rate_limit.ex
+index fc6558a..bab66ef 100644
+--- a/samen_web/lib/samen/web/rate_limit.ex
++++ b/samen_web/lib/samen/web/rate_limit.ex
+@@ -163,7 +163,11 @@ defmodule Samen.Web.RateLimit do
+   # The non-PII key discipline (§6.2): surface:kind:value — value is provider/ip/bidx/id.
+   # Hammer stamps the fixed window internally; this string is the "bucket name" the
+   # non-PII probe (done-criterion 2) greps + inspects at runtime.
+-  defp bucket(surface, kind, value), do: "#{surface}:#{kind}:#{value}"
++  # SABOTAGE (issue #36 / ADR-038 §6.2): the per-subject VALUE is dropped from the bucket
++  # name, so every `kid` (and every IP, bidx, credential id) on a surface shares ONE counter.
++  # Each individual test still looks right — one kid per test, reset between tests — while a
++  # single noisy cockpit now consumes every other app's heartbeat budget.
++  defp bucket(surface, kind, _value), do: "#{surface}:#{kind}"
+ 
+   @doc """
+   The configured `{limit, window_ms}` for `surface` (config override or the

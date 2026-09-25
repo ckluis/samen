@@ -19,6 +19,17 @@ defmodule Samen.Web.FleetIngressTest do
   @admin Samen.Fleet.AdminActor.new("operator-1")
   @host :fleet_ingress_test_host
 
+  # RP-J-13 (issue #36). `Hammer.ETS.FixWindow` indexes its counter by `div(now, window_ms)`
+  # — a WALL-CLOCK aligned window, i.e. global state no test owns. A window WIDER THAN THE
+  # EPOCH ITSELF (~1000 years in ms) makes that index a constant 0 for any `now` this
+  # millennium, so the window cannot roll over mid-test. That is the whole of the fix for
+  # RP-J-13's seed dependence, and the arm below ASSERTS the index rather than assuming it.
+  @window_pinned_open_ms 31_536_000_000_000
+
+  # The kid RP-J-13 plants its "another cockpit was here first" traffic under — deliberately
+  # NOT the enrolled app's own kid, which is what makes the bucket-key isolation assertable.
+  @prior_traffic_kid "rp-j-13-prior-traffic-kid"
+
   setup do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
     Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
@@ -165,15 +176,103 @@ defmodule Samen.Web.FleetIngressTest do
       # signed requests, never forged ones.
       {limit, _window} = Samen.Web.RateLimit.limit_for(:fleet_heartbeat)
 
+      # ---------------------------------------------------------------------------------
+      # ISSUE #36 — this arm was seed-dependent, and the dependence was NOT a shared bucket:
+      # the key is `fleet_heartbeat:kid:<app_id>` on a per-test enrollment and `setup` above
+      # already calls `RateLimit.reset/0`. What it shared was the WINDOW CLOCK.
+      # `Hammer.ETS.FixWindow` counts against `div(now, window_ms)`, so all `limit + 1`
+      # charges must land in ONE wall-clock window for ANY of them to be over limit. When a
+      # 60s boundary fell inside this ~130ms loop the counter restarted mid-flight, nothing
+      # exceeded the limit, and `over_limit` came back EMPTY. Whether the boundary fell there
+      # depended on how long everything before this test took — the order/seed dependence.
+      # Reproduced deterministically by parking the loop across a boundary: 123 requests,
+      # 123 x 204, zero 429s, this exact assertion red.
+      #
+      # Fixed by construction — no sleep, no retry, no widened tolerance:
+      #
+      #   1. PIN THE WINDOW OPEN. The surface's window is scoped (config, restored on exit)
+      #      to one wider than the epoch, so the window index is 0 before and after the loop
+      #      and a mid-loop rollover is arithmetically impossible. Asserted below, both as
+      #      the index itself and as before == after. The LIMIT is read from `limit_for/1`
+      #      BEFORE the override and asserted unchanged after it; a wider window can only
+      #      make the budget STRICTER, since what it removes is the refill that was letting
+      #      over-limit traffic through.
+      #
+      #   2. OWN THE BUCKET, PROVABLY. The test plants exactly the prior traffic the old arm
+      #      silently assumed away — another cockpit's kid driven PAST the limit inside this
+      #      same window — and then asserts its OWN bucket is still below limit. That is the
+      #      precondition control: every 429 below is charged by this test's own requests,
+      #      and the per-kid key discipline (ADR-038 §6.2) is what makes it hold.
+      # ---------------------------------------------------------------------------------
+      original = Application.fetch_env(:samen_web, Samen.Web.RateLimit)
+      base = case original do
+               {:ok, config} -> config
+               :error -> []
+             end
+
+      on_exit(fn ->
+        case original do
+          {:ok, config} -> Application.put_env(:samen_web, Samen.Web.RateLimit, config)
+          :error -> Application.delete_env(:samen_web, Samen.Web.RateLimit)
+        end
+
+        Samen.Web.RateLimit.reset()
+      end)
+
+      pinned =
+        base
+        |> Keyword.get(:limits, %{})
+        |> Map.put(:fleet_heartbeat, {limit, @window_pinned_open_ms})
+
+      Application.put_env(:samen_web, Samen.Web.RateLimit, Keyword.put(base, :limits, pinned))
+
+      assert Samen.Web.RateLimit.limit_for(:fleet_heartbeat) == {limit, @window_pinned_open_ms},
+             "the pinned window must keep the SHIPPED limit — this test may not weaken it"
+
+      window_index = fn -> div(System.system_time(:millisecond), @window_pinned_open_ms) end
+
+      assert window_index.() == 0,
+             "the pinned window must exceed the current epoch time, so that the fixed-window " <>
+               "index cannot change while this test runs (issue #36's root cause)"
+
+      index_before = window_index.()
+
+      # PRIOR TRAFFIC, planted: another cockpit's kid PAST the limit, in this same window.
+      for _ <- 1..(limit + 1) do
+        Samen.Web.RateLimit.check(:fleet_heartbeat, :kid, @prior_traffic_kid)
+      end
+
+      assert Samen.Web.RateLimit.over_limit?(:fleet_heartbeat, :kid, @prior_traffic_kid),
+             "the planted prior traffic did not drive its OWN bucket over limit, so the " <>
+               "isolation control below would pass vacuously"
+
+      # PRECONDITION CONTROL — the state the old arm silently assumed and never checked:
+      # this test's own bucket is BELOW limit before this test issues a single request.
+      refute Samen.Web.RateLimit.over_limit?(:fleet_heartbeat, :kid, app_id),
+             "this app's own :fleet_heartbeat bucket was ALREADY over limit before the test " <>
+               "sent anything — the 429s below would not be this test's own doing"
+
       responses =
         for _ <- 1..(limit + 3) do
           conn = signed_heartbeat_conn(app_id, priv, unique_nonce: true)
           CockpitIngress.heartbeat(conn, namespace: @ns)
         end
 
+      assert window_index.() == index_before,
+             "the fixed window rolled over mid-loop, so the counts below are split across " <>
+               "two windows — the pinned window was supposed to make this impossible"
+
       over_limit = Enum.filter(responses, &(&1.status == 429))
       assert over_limit != []
       assert Enum.all?(over_limit, &(&1.resp_body == ""))
+
+      # Exactly the budget was served and exactly the excess was refused — sharper than
+      # `over_limit != []`, and only true when this test's own requests did all the charging.
+      assert Enum.count(responses, &(&1.status == 204)) == limit
+      assert length(over_limit) == 3
+
+      # The planted traffic never mixed into this app's budget, in either direction.
+      assert Samen.Web.RateLimit.over_limit?(:fleet_heartbeat, :kid, @prior_traffic_kid)
     end
 
     test "RP-J-13: an UNKNOWN kid can never reach 204, and its own (smaller) bad-sig bucket still 429s eventually" do
