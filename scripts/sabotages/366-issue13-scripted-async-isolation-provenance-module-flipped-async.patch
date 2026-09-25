@@ -1,0 +1,41 @@
+# SABOTAGE: issue #13 — the class guard's own subject: the provenance module that was
+# split out of `ai_prompt_masking_test.exs` precisely so it would run SERIALLY is flipped
+# back to `async: true`. Nothing else changes: the arms, their assertions, their
+# `Scripted.reset/0` + `script/1` calls and the whole masking suite are untouched, and the
+# module still passes its own two tests when run alone (which is exactly why the original
+# trap survived review — it was green 14/14 in isolation too).
+#
+# This is the ONLY faithful sabotage of a test-tree isolation guarantee, and so the first
+# patch in this harness whose diff lands under `test/`: the guarantee being defended is
+# "no `async: true` module drives the `:persistent_term` double", a property OF the test
+# tree. A patch to `lib/` could not express it. The runtime seam it protects is deliberately
+# NOT touched — `Samen.AI.Provider.Scripted` keeps its `:persistent_term` script and
+# recording (the A2 worker seam the 18 sync agent suites need), because making it
+# process-scoped is the regression issue #13 rules out, not the sabotage.
+#
+# Flips the named class guard, which reports the file and the alias lines. The provenance
+# arms themselves stay GREEN under this patch — that IS the finding: a re-armed trap is
+# invisible to the suite it was armed in, and only the guard sees it. So the guard is the
+# whole of the protection, and this proves it is not vacuous.
+#
+# Changes one `use` option (plus a comment), so the file still compiles under
+# --warnings-as-errors and no function or attribute goes unused.
+# APP: samen_core
+# TEST_FILES: test/meta/scripted_async_isolation_test.exs
+# MUST_FAIL: no async: true test module references Samen.AI.Provider.Scripted
+diff --git a/samen_core/test/ai/ai_prompt_masking_provenance_test.exs b/samen_core/test/ai/ai_prompt_masking_provenance_test.exs
+index a81d49f..9da9d55 100644
+--- a/samen_core/test/ai/ai_prompt_masking_provenance_test.exs
++++ b/samen_core/test/ai/ai_prompt_masking_provenance_test.exs
+@@ -26,7 +26,10 @@ defmodule Samen.AI.AiPromptMaskingProvenanceTest do
+   Every assertion below is byte-identical to the arms as they stood in
+   `ai_prompt_masking_test.exs`; only the enclosing module changed.
+   """
+-  use ExUnit.Case, async: false
++  # SABOTAGE (issue #13): the provenance arms go back to running in PARALLEL with every
++  # other async module, so the `:persistent_term` script and recording of the
++  # one-runner-at-a-time double are shared state again — the trap this split disarmed.
++  use ExUnit.Case, async: true
+ 
+   alias Samen.AI.Provider
+ 
