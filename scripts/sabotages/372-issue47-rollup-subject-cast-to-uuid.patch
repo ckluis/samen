@@ -1,0 +1,35 @@
+# SABOTAGE: issue #47 — the `rol_daily_event_count` rebuild casts the audit subject back
+# to `uuid` (`aud_subject_id::uuid AS rol_subject_id`), the exact shape that shipped until
+# this fix. A subject is a UUID OR a token (`Samen.AuditEvent.Schema` declares
+# `aud_subject_id` `:string`; `Samen.AuditChain` documents "subject UUID / token"), so
+# the first token row raises 22P02 and aborts the WHOLE rebuild transaction: every
+# subject's dashboard row goes stale, not just the token's.
+#
+# Flips both #47 tests: the token-subject rebuild (whose UUID-subject POSITIVE CONTROL
+# would pass on its own — it fails here only because the transaction aborts), and the
+# token-subject suppress-arm erasure (its pre-erasure rebuild aborts the same way).
+# Every other rollup test stays green: they seed UUID subjects only, which cast cleanly.
+# That is why nothing caught this before, and why the red is specific to the defect.
+#
+# Touches samen_core/config/config.exs only; the column stays TEXT (migration
+# 20260925100000), so this is purely the cast regression, not a schema one.
+# APP: samen_core
+# TEST_FILES: test/rollup_test.exs
+# MUST_FAIL: #47: a rebuild over a TOKEN subject counts it instead of raising 22P02
+# MUST_FAIL: #47: erasing a TOKEN subject takes the suppress arm on its own row
+diff --git a/samen_core/config/config.exs b/samen_core/config/config.exs
+index 62a02f6..6e26cb3 100644
+--- a/samen_core/config/config.exs
++++ b/samen_core/config/config.exs
+@@ -139,8 +139,9 @@ config :samen_core, :rollups, [
+        SELECT
+          aud_occurred_at::date AS rol_day,
+          aud_correlation_id    AS rol_org_id,
+-         -- a subject is a UUID OR a token (issue #47): carried as TEXT, never cast to uuid
+-         aud_subject_id        AS rol_subject_id,
++         -- SABOTAGE (issue #47): the subject is cast back to uuid, so the first token
++         -- subject raises 22P02 and aborts the whole rebuild transaction.
++         aud_subject_id::uuid  AS rol_subject_id,
+          COUNT(*)::int         AS rol_event_count,
+          FALSE                 AS rol_suppressed,
+          now()                 AS rol_refreshed_at

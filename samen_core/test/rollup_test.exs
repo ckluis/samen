@@ -148,6 +148,45 @@ defmodule Samen.RollupTest do
   # (b) THE ERASURE POLICY — rebuild arm
   # ======================================================================
 
+  describe "(a) refresh framework — a token subject is a legitimate subject (issue #47)" do
+    # `aud_subject_id` is a `:string` column holding a "subject UUID / token"
+    # (`AuditEvent.Schema`, `AuditChain`), and `rol_subject_id` documents the same
+    # domain. A rebuild that cast the subject to `uuid` raised 22P02 on the first
+    # token row and aborted the WHOLE rebuild transaction — every subject's
+    # dashboard row, not just the token's.
+    test "#47: a rebuild over a TOKEN subject counts it instead of raising 22P02" do
+      token_subject = "vt_" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+      uuid_subject = uuid_subject()
+      org_id = Ecto.UUID.generate()
+
+      seed_events(token_subject, org_id, ~D[2026-07-06], 3)
+      seed_events(uuid_subject, org_id, ~D[2026-07-06], 2)
+
+      assert {:ok, _} = Rollup.rebuild_all(Repo)
+
+      assert %{count: 3, suppressed: false} = rollup_row(token_subject)
+      # POSITIVE CONTROL: the UUID subject in the same rebuild is still counted —
+      # a token row must neither abort nor displace the rest of the rollup.
+      assert %{count: 2, suppressed: false} = rollup_row(uuid_subject)
+    end
+
+    test "#47: erasing a TOKEN subject takes the suppress arm on its own row" do
+      token_subject = "vt_" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+      other = "vt_" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+      org_id = Ecto.UUID.generate()
+
+      seed_events(token_subject, org_id, ~D[2026-07-06], 2)
+      seed_events(other, org_id, ~D[2026-07-06], 1)
+      {:ok, _} = Rollup.rebuild_all(Repo)
+
+      report = Rollup.erase_subject(token_subject, Repo, raw_retained?: false)
+      assert Enum.any?(report, &(&1["rollup"] == "daily_event_count" and &1["rows_affected"] == 1))
+
+      assert %{count: 2, suppressed: true} = rollup_row(token_subject)
+      assert %{count: 1, suppressed: false} = rollup_row(other)
+    end
+  end
+
   describe "(b) REBUILD arm — raw retained" do
     test "RED PATH R1: a pre-shred rollup must NOT resurrect the subject post-shred" do
       subject_id = uuid_subject()

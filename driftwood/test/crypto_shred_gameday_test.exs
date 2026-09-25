@@ -105,7 +105,7 @@ defmodule Driftwood.CryptoShredGamedayTest do
         Ecto.Adapters.SQL.query!(
           @repo,
           "SELECT COALESCE(SUM(drl_load_count),0) FROM drl_driver_load_count WHERE drl_subject_id = $1",
-          [Ecto.UUID.dump!(d)]
+          [d]
         )
 
       assert post_count == 0, "a pre-shred rollup must not resurrect the driver"
@@ -124,7 +124,7 @@ defmodule Driftwood.CryptoShredGamedayTest do
         Ecto.Adapters.SQL.query!(
           @repo,
           "SELECT bool_and(drl_suppressed) FROM drl_driver_load_count WHERE drl_subject_id = $1",
-          [Ecto.UUID.dump!(d)]
+          [d]
         )
 
       assert suppressed == true

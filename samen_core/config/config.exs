@@ -139,13 +139,14 @@ config :samen_core, :rollups, [
        SELECT
          aud_occurred_at::date AS rol_day,
          aud_correlation_id    AS rol_org_id,
-         aud_subject_id::uuid  AS rol_subject_id,
+         -- a subject is a UUID OR a token (issue #47): carried as TEXT, never cast to uuid
+         aud_subject_id        AS rol_subject_id,
          COUNT(*)::int         AS rol_event_count,
          FALSE                 AS rol_suppressed,
          now()                 AS rol_refreshed_at
        FROM aud_event
        WHERE aud_subject_id IS NOT NULL
-       GROUP BY aud_occurred_at::date, aud_correlation_id, aud_subject_id::uuid
+       GROUP BY aud_occurred_at::date, aud_correlation_id, aud_subject_id
        """}
   }
 ]

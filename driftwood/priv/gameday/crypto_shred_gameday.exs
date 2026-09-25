@@ -168,7 +168,7 @@ check.("Vault: 4 active rows (name/email/phone/cdl) all decryptable pre-shred", 
 check.("aud_event: 3 dispatch events keyed on the driver", dispatch_evts == 3)
 
 %{rows: [[rollup_pre]]} =
-  Repo.query!("SELECT COALESCE(SUM(drl_load_count),0) FROM drl_driver_load_count WHERE drl_subject_id = $1", [Ecto.UUID.dump!(d)])
+  Repo.query!("SELECT COALESCE(SUM(drl_load_count),0) FROM drl_driver_load_count WHERE drl_subject_id = $1", [d])
 
 check.("Rollup: the pre-shred load-count rollup COUNTS the driver (#{rollup_pre} loads)", rollup_pre == 3)
 
@@ -269,7 +269,7 @@ section.("5. Rollup: both arms exercised + no resurrection of the driver")
 # raw events, recompute the rollup driver-free). Prove the rollup no longer counts
 # the driver.
 %{rows: [[rollup_post]]} =
-  Repo.query!("SELECT COALESCE(SUM(drl_load_count),0) FROM drl_driver_load_count WHERE drl_subject_id = $1", [Ecto.UUID.dump!(d)])
+  Repo.query!("SELECT COALESCE(SUM(drl_load_count),0) FROM drl_driver_load_count WHERE drl_subject_id = $1", [d])
 
 rebuild_arm = get_in(report.tiers, ["rollups"]) |> Enum.find(&(&1["arm"] == "rebuild"))
 check.("REBUILD arm ran on shred (raw retained): report shows `#{inspect(rebuild_arm)}`", rebuild_arm != nil)
@@ -293,7 +293,7 @@ suppress_arm = get_in(report2.tiers, ["rollups"]) |> Enum.find(&(&1["arm"] == "s
 check.("SUPPRESS arm ran (window archived, simulated): report shows `#{inspect(suppress_arm)}`", suppress_arm != nil)
 
 %{rows: [[suppressed_flag]]} =
-  Repo.query!("SELECT bool_and(drl_suppressed) FROM drl_driver_load_count WHERE drl_subject_id = $1", [Ecto.UUID.dump!(d2)])
+  Repo.query!("SELECT bool_and(drl_suppressed) FROM drl_driver_load_count WHERE drl_subject_id = $1", [d2])
 
 check.("The suppressed driver's derived rollup rows are flagged drl_suppressed = TRUE", suppressed_flag == true)
 
