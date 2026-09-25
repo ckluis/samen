@@ -3321,6 +3321,18 @@
     {
       "fields": [
         {
+          "column_name": "dru_definition",
+          "logical_name": "definition",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "dru_definition_digest",
+          "logical_name": "definition_digest",
+          "pii": false,
+          "type": "String"
+        },
+        {
           "column_name": "dru_depth",
           "logical_name": "depth",
           "pii": false,

@@ -364,8 +364,15 @@ defmodule Samen.Automation.ObservabilityTest do
     assert Map.keys(outcome) -- ["index", "kind", "status", "error_kind", "meta", "duration_ms"] == []
 
     # Red-path: the whole row — outcome jsonb AND every other column — never
-    # carries the secret, a vt_* token, or the subject's plaintext email.
-    encoded = run |> Map.take([:outcome, :subject_ref, :error_kind, :state]) |> Jason.encode!()
+    # carries the secret, a vt_* token, or the subject's plaintext email. T162's
+    # `definition` jsonb is included deliberately: it is the second freeform column
+    # on this table, and `webhook_secret` is EXCLUDED from the pinned definition
+    # precisely so a snapshot can never copy credential material onto a Run row
+    # (`Samen.Automation.Definition`).
+    encoded =
+      run
+      |> Map.take([:outcome, :subject_ref, :error_kind, :state, :definition, :definition_digest])
+      |> Jason.encode!()
     refute encoded =~ wf.webhook_secret
     refute encoded =~ "victim@example.com"
     refute encoded =~ "vt_"

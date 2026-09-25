@@ -1,0 +1,59 @@
+# SABOTAGE: T162 / ADR-039 §3.3 — the enqueue stops stamping the pin, so the
+# RunWorker job again carries only a `workflow_id` and the executing worker falls
+# back to reading the live workflow row. The worker's pin-aware code is untouched and
+# still correct; it simply never receives a pin, which is the second way this defect
+# comes back: not by re-adding a live read, but by quietly dropping the stamp at the
+# only place that holds the matched rule.
+#
+# It is the plausible failure precisely because nothing looks broken. The
+# `record_no_enqueue_skip` path still pins (so the module still references
+# `Definition` and the file still compiles under `--warnings-as-errors`), the
+# loop/depth Run rows still carry definitions, dispatch still fans out correctly, and
+# the fallback is deliberately quiet — it exists so jobs enqueued by the PREVIOUS
+# release keep running across a deploy. Under this patch every job looks like a
+# pre-T162 job forever, and the engine silently returns to executing whatever the
+# rule says at perform time.
+#
+# Flips the enqueue-side and record-side reds together: the edit-after-enqueue red
+# (v2 runs), its condition twin, the retry red, the args-carry-the-pin red (RED 3b)
+# and the interpretable-row red (RED 3 — the Run row's pin is NULL, so a historical
+# run can no longer be resolved to the definition that ran).
+#
+# Everything else stays GREEN: RED 2's three controls (paused / operator-killed /
+# owner-removed after enqueue) still skip, because those guards were never pinned.
+#
+# NOT TOUCHED, deliberately: `Samen.Automation.Definition`, `RunRecord.open!/2`'s
+# copy of the envelope pin onto the row, `RunWorker`'s pinned execution, and the
+# no-enqueue-skip stamp.
+# APP: samen_core
+# TEST_FILES: test/automation/run_definition_pin_test.exs
+# MUST_FAIL: a workflow edited AFTER enqueue still executes the pinned v1 definition
+# MUST_FAIL: a CONDITION edited after enqueue does not re-gate the queued run
+# MUST_FAIL: the Run row carries the pinned definition + digest of v1, never v2
+# MUST_FAIL: the enqueued job args carry the pin, stamped at dispatch with the rule in hand
+# MUST_FAIL: a retry of the same job re-executes the pinned v1, not the edited v2
+diff --git a/samen_core/lib/samen/automation/dispatch_worker.ex b/samen_core/lib/samen/automation/dispatch_worker.ex
+--- a/samen_core/lib/samen/automation/dispatch_worker.ex
++++ b/samen_core/lib/samen/automation/dispatch_worker.ex
+@@ -110,16 +110,9 @@ defmodule Samen.Automation.DispatchWorker do
+         run_args =
+           args
+           |> Map.put("workflow_id", to_string(wf.id))
+           |> Map.put_new("event_id", Ecto.UUID.generate())
+-          # T162 — PIN THE DEFINITION HERE, the one place that holds the matched
+-          # rule at the moment the run comes into existence. Before this, the job
+-          # carried only `workflow_id` and `RunWorker` re-read the rule at perform
+-          # time, so a tenant edit (or a retry after one) changed what an
+-          # already-triggered run executed. The snapshot travels in the args, so
+-          # every attempt of this job — first try and every retry — executes the
+-          # same definition. `Samen.Automation.RunRecord` copies it onto the Run
+-          # row from these same args, which is what makes the historical row
+-          # interpretable. Only the DEFINITION is pinned: the kill-switches, the
+-          # owner and the subject stay live-read at perform (ADR-039 §8.4/§4.5).
+-          |> Definition.put_pin(wf)
++          # SABOTAGE (T162/ADR-039 §3.3): the enqueue-time stamp is gone. Every job
++          # now reaches the worker unpinned, takes the pre-T162 compatibility
++          # fallback, and executes the live rule — and its Run row records no
++          # definition at all.
+
+         case Oban.insert(RunWorker.new(run_args)) do

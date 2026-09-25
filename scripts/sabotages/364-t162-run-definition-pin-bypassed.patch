@@ -1,0 +1,56 @@
+# SABOTAGE: T162 / ADR-039 §3.3 — the run-definition PIN is stamped, stored, and
+# then ignored at execution. `DispatchWorker` still snapshots the definition at
+# enqueue and `RunRecord` still writes it onto the Run row, so every artifact a
+# reviewer inspects looks correct: the job args carry a definition, the Run row
+# carries a definition and a digest, the operator health view shows a pin. Only the
+# ONE line that decides what actually runs goes back to the live workflow row.
+#
+# This is the most plausible form of the regression, because it is what a
+# well-meaning refactor produces: someone "simplifies" the resolve step to derive the
+# definition from the `wf` already in scope, the suite's pin-shaped assertions about
+# the ROW still pass, and the pin silently becomes decoration. The whole point of
+# T162 is that a tenant edit landing between enqueue and execution — or between Oban
+# retries of one job — cannot change what an already-triggered run executes; under
+# this patch it changes it again, and the stored digest now LIES about what ran.
+#
+# Flips the named execution reds: the edit-after-enqueue red (v2 runs instead of the
+# pinned v1), its condition twin (the narrowed gate re-gates a queued run into a
+# skip), and the retry red (attempt 2 executes the edited definition).
+#
+# Everything else stays GREEN, which is the claim's sharp edge: RED 2's three
+# kill-switch/owner controls still skip (they were always live-read and are untouched
+# here), RED 3/RED 3b still pass because the ROW and the ARGS still carry the correct
+# v1 pin — proving the flip is about EXECUTION, not about the plumbing that records
+# it, and that a gate resting only on the recorded pin would be vacuous.
+#
+# NOT TOUCHED, deliberately: `Samen.Automation.Definition` itself (the snapshot and
+# the digest stay honest), `DispatchWorker`'s enqueue-time stamp, `RunRecord.open!/2`,
+# and every live-read guard in `execute/4`.
+#
+# Substitutes one expression for another of the same shape, so nothing goes unused
+# and the file still compiles under `--warnings-as-errors`.
+# APP: samen_core
+# TEST_FILES: test/automation/run_definition_pin_test.exs
+# MUST_FAIL: a workflow edited AFTER enqueue still executes the pinned v1 definition
+# MUST_FAIL: a CONDITION edited after enqueue does not re-gate the queued run
+# MUST_FAIL: a retry of the same job re-executes the pinned v1, not the edited v2
+diff --git a/samen_core/lib/samen/automation/run_worker.ex b/samen_core/lib/samen/automation/run_worker.ex
+--- a/samen_core/lib/samen/automation/run_worker.ex
++++ b/samen_core/lib/samen/automation/run_worker.ex
+@@ -75,11 +75,11 @@ defmodule Samen.Automation.RunWorker do
+   defp run(workflow_mod, args) do
+     case load_workflow(workflow_mod, args["workflow_id"]) do
+       {:ok, wf} ->
+-        # T162. The workflow row is still loaded — but ONLY for the live checks
+-        # (kill-switch, owner, org). What this run EXECUTES is the definition
+-        # pinned into the job args at enqueue, so an edit landing in the queue (or
+-        # between retries of this same job) cannot change it.
+-        {_source, definition} = Definition.resolve(args, wf)
++        # SABOTAGE (T162/ADR-039 §3.3): the pin in the job args is ignored and the
++        # definition is taken from the workflow row AS IT LOOKS NOW. The Run row
++        # still records the pin (RunRecord reads the args), so the log claims one
++        # definition ran while another did.
++        {_source, definition} = {:pinned, Definition.snapshot(wf)}
+
+         run_row = RunRecord.open!(wf, args)
+         result = execute(wf, definition, args, run_row)

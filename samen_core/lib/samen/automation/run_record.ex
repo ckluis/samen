@@ -16,6 +16,14 @@ defmodule Samen.Automation.RunRecord do
   already-terminal row on an Oban retry) all degrade to `nil` / a no-op rather
   than raising — the pipeline keeps running with or without a Run row.
 
+  ## The pinned definition (T162)
+
+  `open!/2` copies the dispatch envelope's `definition` + `definition_digest` onto
+  the row — the snapshot `Samen.Automation.DispatchWorker` stamped at enqueue, so a
+  historical Run row resolves to exactly the definition that ran rather than to
+  whatever the Workflow says today. It is read from the ARGS, never re-derived from
+  the live `wf` struct: see `Samen.Automation.Definition`.
+
   ## Tier-2 dedupe (ADR-039 §4.6)
 
   `dispatch_key/2` = `sha256(workflow_id <> ":" <> event_id)`, unique-indexed on
@@ -30,6 +38,7 @@ defmodule Samen.Automation.RunRecord do
   import Ash.Query
 
   alias Samen.Automation
+  alias Samen.Automation.Definition
 
   @doc "The tier-2 dedupe key (ADR-039 §4.6): sha256(workflow_id <> event_id), hex."
   @spec dispatch_key(String.t() | nil, String.t() | nil) :: String.t()
@@ -71,7 +80,15 @@ defmodule Samen.Automation.RunRecord do
         dispatch_key: key,
         trigger_kind: trigger_atom(args["trigger_kind"]),
         subject_ref: args["subject_ref"],
-        depth: args["depth"] || 0
+        depth: args["depth"] || 0,
+        # T162 — the pinned definition comes from the ENVELOPE, never from `wf`.
+        # That is the whole guarantee: the row's pin is derived from the same
+        # args the worker executes, so the record and the execution cannot
+        # disagree about which definition ran. Re-deriving it from the live `wf`
+        # here would silently reintroduce the read-at-perform-time bug on the
+        # observability side.
+        definition: args[Definition.pin_key()],
+        definition_digest: args[Definition.digest_key()]
       },
       authorize?: false
     )

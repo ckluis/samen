@@ -76,6 +76,23 @@ All notable changes to Samen are recorded here. The format follows
 
 ### Fixed
 
+- **An automation run now executes the definition it was TRIGGERED with, not the one the rule
+  happens to carry at execution time** (T162, ADR-039 §8.5; `Samen.Automation.Definition`).
+  `RunWorker` carried only a `workflow_id` from enqueue to execution and re-read the rule at
+  perform time, so a tenant edit landing while a run sat queued — or between Oban retries of
+  one job — changed what an already-triggered run did, and a historical `Automation.Run` row
+  could only be read against the rule as it looks today. `DispatchWorker` now stamps a
+  SNAPSHOT of the definition (`actions`/`conditions`/`resource_key`) plus its content digest
+  into the job args as it enqueues; `RunRecord` copies both onto the Run row **from those same
+  args** (new `definition` / `definition_digest` columns), so the record and the execution
+  cannot disagree, and `digest(run.definition) == run.definition_digest` makes the row
+  self-verifying. Retries re-execute the same pin because the pin rides the args. Only the
+  DEFINITION is pinned: both kill-switches, the owner and the governed subject re-read stay
+  LIVE, so a workflow paused or killed after enqueue still skips — carried as standing
+  controls beside the pinning reds, with sabotages `364` (pin recorded but ignored at
+  execution) and `365` (enqueue stops stamping). No new PII surface: the snapshot copies three
+  columns that are already non-PII by schema via the write-time `NonPiiPredicates` refusal —
+  rule structure, never a subject value, so ADR-039 §13's undo-snapshot rejection is untouched.
 - **`samen_core/test/test_helper.exs` no longer blows up as a bare `MatchError` when a previous
   run's connections defeat the test-DB drop** (found by ADR-049's gate, which runs `mix test`
   dozens of times back to back and so loses that race regularly): `storage_down` cannot drop the
