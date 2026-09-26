@@ -735,6 +735,66 @@
     {
       "fields": [
         {
+          "column_name": "pbx_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbx_idempotency_key",
+          "logical_name": "idempotency_key",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbx_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pbx_metric",
+          "logical_name": "metric",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pbx_occurred_at",
+          "logical_name": "occurred_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "pbx_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbx_quantity",
+          "logical_name": "quantity",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pbx_subscription_id",
+          "logical_name": "subscription_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pbx_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Billing.UsageEvent",
+      "table_name": "pbx_usage_event"
+    },
+    {
+      "fields": [
+        {
           "column_name": "pby_amount_cents",
           "logical_name": "amount_cents",
           "pii": false,
@@ -1883,6 +1943,66 @@
       ],
       "resource": "PawChart.Operator.SubscriptionEvent",
       "table_name": "pmv_subscription_event"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "pmx_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pmx_idempotency_key",
+          "logical_name": "idempotency_key",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pmx_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pmx_metric",
+          "logical_name": "metric",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "pmx_occurred_at",
+          "logical_name": "occurred_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "pmx_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pmx_quantity",
+          "logical_name": "quantity",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pmx_subscription_id",
+          "logical_name": "subscription_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "pmx_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "PawChart.Operator.UsageEvent",
+      "table_name": "pmx_usage_event"
     },
     {
       "fields": [

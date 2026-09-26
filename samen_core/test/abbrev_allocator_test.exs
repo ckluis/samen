@@ -256,8 +256,10 @@ defmodule Samen.Abbrev.AllocatorTest do
       # (Samen.AI.Agent.{Run,Turn}) → 410, growing the file to 20_439 bytes.
       # +1 C4 (ADR-048 §7.3) — samen_core host's `afs` (Samen.AI.Agent.FoldSource), the
       # pseudonym-keyed provenance index, growing the file to 20_710 bytes.
-      assert byte_size(committed) == 20710
-      assert map_size(R.load()) == 443
+      # +7 T163 (ADR-051) — the usage-capture ledger on every Billing mount (`bux`;
+      # `fbx`/`dpx`; `pbx`/`pmx`; `wbx`/`wpx`), growing the file to 21_034 bytes.
+      assert byte_size(committed) == 21034
+      assert map_size(R.load()) == 450
     end
   end
 

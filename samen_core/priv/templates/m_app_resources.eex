@@ -1,6 +1,6 @@
 defmodule <%= module %>.Repo.Migrations.AppResources do
   @moduledoc """
-  Creates <%= module %>'s Billing scope (abbrevs <%= bc %>/<%= bs %>/<%= bl %>/<%= bp %>/<%= bi %>/<%= by %>/<%= bu %>/<%= be %>/<%= bv %>)
+  Creates <%= module %>'s Billing scope (abbrevs <%= bc %>/<%= bs %>/<%= bl %>/<%= bp %>/<%= bi %>/<%= by %>/<%= bu %>/<%= be %>/<%= bv %>/<%= bx %>)
   mounted AS-IS, the authored vertical table (<%= resource_table %> with the scalar vault
   field pii_<%= abbrev %>_secret), and the token-blind aggregate projection (<%= agg_table %>),
   and catalogs every resource in the SAME migration transaction (ADR-004 catalog-in-tx).
@@ -17,6 +17,7 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
     <%= module %>.Billing.Usage,
     <%= module %>.Billing.Entitlement,
     <%= module %>.Billing.SubscriptionEvent,
+    <%= module %>.Billing.UsageEvent,
     <%= module %>.Vertical.Record,
     <%= module %>.Aggregate.RecordCountBySegment
   ]
@@ -283,6 +284,28 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
       add(:<%= bv %>_updated_at, :utc_datetime, null: false)
     end
 
+    # ---- Usage-capture ledger (T163; ADR-051) — insert-only, no PII, written only by
+    #      Samen.Billing.Meter.record/3; soft subscription ref (no FK) ----
+    create table(:<%= bx %>_usage_event, primary_key: false) do
+      add(:<%= bx %>_metric, :text, null: false)
+      add(:<%= bx %>_quantity, :integer, null: false)
+      add(:<%= bx %>_subscription_id, :uuid)
+      add(:<%= bx %>_idempotency_key, :uuid, null: false)
+      add(:<%= bx %>_occurred_at, :utc_datetime_usec, null: false)
+      add(:<%= bx %>_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:<%= bx %>_org_id, :uuid, null: false)
+      add(:<%= bx %>_inserted_at, :utc_datetime, null: false)
+      add(:<%= bx %>_updated_at, :utc_datetime, null: false)
+    end
+
+    create(
+      unique_index(:<%= bx %>_usage_event, [:<%= bx %>_org_id, :<%= bx %>_idempotency_key],
+        name: "<%= bx %>_usage_event_unique_idempotency_key_index"
+      )
+    )
+
+    create(constraint(:<%= bx %>_usage_event, :<%= bx %>_usage_event_quantity_positive, check: "<%= bx %>_quantity > 0"))
+
     # ---- Authored vertical table (the "20%") ----
     create table(:<%= resource_table %>, primary_key: false) do
       # Scalar pii_ vault field → column pii_<%= abbrev %>_secret (vt_* token):
@@ -319,6 +342,7 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
     drop(table(:<%= resource_table %>))
 
     drop(table(:<%= bv %>_subscription_event))
+    drop(table(:<%= bx %>_usage_event))
 
     drop(constraint(:<%= be %>_entitlement, "<%= be %>_entitlement_<%= be %>_plan_id_fkey"))
     drop(constraint(:<%= be %>_entitlement, "<%= be %>_entitlement_<%= be %>_subscription_id_fkey"))

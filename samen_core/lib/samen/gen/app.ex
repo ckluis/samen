@@ -157,9 +157,9 @@ defmodule Samen.Gen.App do
     resource_name = "Record"
     resource_table = "#{abbrev}_record"
 
-    # Nine Billing-scope abbrevs derived from the 2-char prefix (mirrors pawchart's
-    # pbc/pbs/pbl/ppc/pbi/pby/pbu/pbe/pbv — one suffix letter per resource; luminary X10
-    # corrected this comment from "Eight" — the map below always had nine entries).
+    # Ten Billing-scope abbrevs derived from the 2-char prefix (mirrors pawchart's
+    # pbc/pbs/pbl/ppc/pbi/pby/pbu/pbe/pbv/pbx — one suffix letter per resource; ADR-051
+    # added the usage-capture ledger's `x`).
     billing_abbrevs = %{
       customer: prefix <> "c",
       subscription: prefix <> "s",
@@ -170,14 +170,16 @@ defmodule Samen.Gen.App do
       usage: prefix <> "u",
       entitlement: prefix <> "e",
       # WS-B / G7 (ADR-017): the append-only subscription-movement ledger (`mov`).
-      subscription_event: prefix <> "v"
+      subscription_event: prefix <> "v",
+      # T163 (ADR-051): the insert-only usage-capture ledger.
+      usage_event: prefix <> "x"
     }
 
     agg_abbrev = prefix <> "a"
     agg_table = "#{agg_abbrev}_record_count"
 
     # T37h — the per-app Approval resource's abbrev (ADR-040 §4.7/T35 fold-in). `z` is
-    # unused by the prefix-derived billing (c/s/l/p/i/y/u/e/v) or aggregate (a) suffix
+    # unused by the prefix-derived billing (c/s/l/p/i/y/u/e/v/x) or aggregate (a) suffix
     # letters, so `<prefix>z` cannot collide with either family.
     approval_abbrev = prefix <> "z"
 
@@ -260,6 +262,7 @@ defmodule Samen.Gen.App do
           usage: p1 <> "pu",
           entitlement: p1 <> "pe",
           subscription_event: p1 <> "pv",
+          usage_event: p1 <> "px",
           # Support — the SaaS help desk (keys mirror @support_resources; abbrev suffixes
           # are independent registry-collision-driven data, not derivable from the atom).
           ticket: p1 <> "qk",
@@ -541,7 +544,8 @@ defmodule Samen.Gen.App do
       :payment,
       :usage,
       :entitlement,
-      :subscription_event
+      :subscription_event,
+      :usage_event
     ]
 
   defp billing_module(:customer), do: "Customer"
@@ -553,6 +557,7 @@ defmodule Samen.Gen.App do
   defp billing_module(:usage), do: "Usage"
   defp billing_module(:entitlement), do: "Entitlement"
   defp billing_module(:subscription_event), do: "SubscriptionEvent"
+  defp billing_module(:usage_event), do: "UsageEvent"
 
   defp primitives_resource_order,
     do: [:notification, :notification_preference, :file, :search_index, :webhook, :feature_flag]
@@ -609,7 +614,8 @@ defmodule Samen.Gen.App do
       :payment,
       :usage,
       :entitlement,
-      :subscription_event
+      :subscription_event,
+      :usage_event
     ] ++ @support_resources
 
   defp operator_module(:org), do: "Org"
@@ -632,6 +638,7 @@ defmodule Samen.Gen.App do
   defp operator_module(:usage), do: "Usage"
   defp operator_module(:entitlement), do: "Entitlement"
   defp operator_module(:subscription_event), do: "SubscriptionEvent"
+  defp operator_module(:usage_event), do: "UsageEvent"
   # Support scope (keys mirror @support_resources above) — explicit strings, not a
   # lookup keyed by that list: a map-based rewrite would turn a typo'd/unmatched atom's
   # `FunctionClauseError` into a `KeyError`, a real behaviour change to this generator.
@@ -671,7 +678,8 @@ defmodule Samen.Gen.App do
       "by" => ba.payment,
       "bu" => ba.usage,
       "be" => ba.entitlement,
-      "bv" => ba.subscription_event
+      "bv" => ba.subscription_event,
+      "bx" => ba.usage_event
     }
 
     if s.web?, do: Map.merge(base, web_bindings(s)), else: base
@@ -720,6 +728,7 @@ defmodule Samen.Gen.App do
       "o_usage" => oa.usage,
       "o_ent" => oa.entitlement,
       "o_sev" => oa.subscription_event,
+      "o_uev" => oa.usage_event,
       # Support scope (keys mirror @support_resources above) — binding-key aliases are
       # independent compact template-variable names, not derivable from the atom.
       "o_tick" => oa.ticket,

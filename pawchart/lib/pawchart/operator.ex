@@ -60,7 +60,8 @@ defmodule PawChart.Operator do
       payment: "pmy",
       usage: "pmu",
       entitlement: "pme",
-      subscription_event: "pmv"
+      subscription_event: "pmv",
+      usage_event: "pmx"
     }
 
   use Samen.Scopes.Support,

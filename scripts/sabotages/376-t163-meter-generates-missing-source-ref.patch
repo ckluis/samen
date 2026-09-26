@@ -1,0 +1,24 @@
+# SABOTAGE: T163 / ADR-051 R5 — a capture without a `source_ref` is given a generated
+# one instead of being refused. Every retry of such a capture then gets a fresh random
+# key, so the dedup identity never matches and a retried job double-counts: the ledger
+# still "works", it just stops being idempotent for any caller who forgot the ref.
+#
+# Flips the missing-ref refusal test. The key-derivation test stays green (the
+# derivation itself is intact), so the red is the refusal, not the hashing.
+# APP: demo
+# TEST_FILES: test/usage_event_ledger_test.exs
+# MUST_FAIL: a capture without a source_ref is refused, not given a random key
+diff --git a/samen_core/lib/samen/billing/meter.ex b/samen_core/lib/samen/billing/meter.ex
+index 18e36a3..7f35a62 100644
+--- a/samen_core/lib/samen/billing/meter.ex
++++ b/samen_core/lib/samen/billing/meter.ex
+@@ -135,7 +135,8 @@ defmodule Samen.Billing.Meter do
+   defp fetch_source_ref(event) do
+     case Map.get(event, :source_ref) do
+       ref when is_binary(ref) and byte_size(ref) > 0 -> {:ok, ref}
+-      _ -> {:error, :idempotency_ref_required}
++      # SABOTAGE (ADR-051 R5): a missing ref gets a generated one.
++      _ -> {:ok, Ecto.UUID.generate()}
+     end
+   end
+ end

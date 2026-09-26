@@ -128,20 +128,23 @@ defmodule Samen.Gen.AppTest do
                usage: "wgu",
                entitlement: "wge",
                # WS-B / G7 (ADR-017): the subscription-movement ledger (`mov`).
-               subscription_event: "wgv"
+               subscription_event: "wgv",
+               # T163 (ADR-051): the insert-only usage-capture ledger.
+               usage_event: "wgx"
              }
 
       assert s.agg_abbrev == "wga"
       assert s.agg_table == "wga_record_count"
     end
 
-    test "headless reserved_pairs covers the 9 billing + aggregate + authored + approvals abbrevs (12)" do
+    test "headless reserved_pairs covers the 10 billing + aggregate + authored + approvals abbrevs (13)" do
       pairs = Gen.reserved_pairs(spec(web: false))
       abbrevs = Enum.map(pairs, &elem(&1, 0))
 
-      # 9 billing resources (incl. the `mov` subscription-movement ledger, ADR-017)
-      # + aggregate + authored + approvals (T37h) = 12.
-      assert length(pairs) == 12
+      # 10 billing resources (incl. the `mov` subscription-movement ledger, ADR-017,
+      # and the usage-capture ledger, ADR-051) + aggregate + authored + approvals
+      # (T37h) = 13.
+      assert length(pairs) == 13
       assert "wid" in abbrevs
       assert "wga" in abbrevs
       assert "wgc" in abbrevs
@@ -151,20 +154,22 @@ defmodule Samen.Gen.AppTest do
       assert {"wga", "Widgetco.Aggregate.RecordCountBySegment"} in pairs
       assert {"wgc", "Widgetco.Billing.Customer"} in pairs
       assert {"wgv", "Widgetco.Billing.SubscriptionEvent"} in pairs
+      assert {"wgx", "Widgetco.Billing.UsageEvent"} in pairs
       assert {"wgz", "Widgetco.Approvals.Approval"} in pairs
     end
 
-    test "web (default) reserved_pairs adds the 6 Primitives + 28 operator abbrevs (46)" do
+    test "web (default) reserved_pairs adds the 6 Primitives + 29 operator abbrevs (48)" do
       pairs = Gen.reserved_pairs(spec())
       abbrevs = Enum.map(pairs, &elem(&1, 0))
 
-      # 12 headless (incl. T37h's approvals abbrev) + 6 Primitives + 28 operator
+      # 13 headless (incl. T37h's approvals abbrev) + 6 Primitives + 29 operator
       # (Identity 11 [incl. ADR-035's Credential/AuthToken/Session/UserIdentity and
-      # ADR-038 §6.4's LoginFailure, T109] + Billing 9 + Support 8 [T79/I6 added
-      # `csat_survey_token`, the CSAT request→response loop's single-use survey
-      # link]) = 46.
-      assert length(pairs) == 46
-      assert length(Enum.uniq(abbrevs)) == 46
+      # ADR-038 §6.4's LoginFailure, T109] + Billing 10 [ADR-051 added the
+      # usage-capture ledger] + Support 8 [T79/I6 added `csat_survey_token`, the
+      # CSAT request→response loop's single-use survey link]) = 48.
+      assert length(pairs) == 48
+      assert length(Enum.uniq(abbrevs)) == 48
+      assert {"wpx", "Widgetco.Operator.UsageEvent"} in pairs
 
       # Primitives — <p1> + the blueprint suffix (the samen_web test-host convention).
       assert {"wnt", "Widgetco.Primitives.Notification"} in pairs

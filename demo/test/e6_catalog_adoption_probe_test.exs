@@ -68,6 +68,8 @@ defmodule Demo.E6CatalogAdoptionProbeTest do
     {Demo.BillingScope, Demo.BillingScope.Usage, {:excluded, :ledger}},
     {Demo.BillingScope, Demo.BillingScope.Entitlement, {:excluded, :mirror_derived}},
     {Demo.BillingScope, Demo.BillingScope.SubscriptionEvent, {:excluded, :ledger}},
+    # T163 (ADR-051): the insert-only usage-capture ledger — immutable by construction.
+    {Demo.BillingScope, Demo.BillingScope.UsageEvent, {:excluded, :ledger}},
     {Demo.CmsScope, Demo.CmsScope.Page, :archivable},
     {Demo.CmsScope, Demo.CmsScope.Post, :archivable},
     {Demo.CmsScope, Demo.CmsScope.Block, :archivable},

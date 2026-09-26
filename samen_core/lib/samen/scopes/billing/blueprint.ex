@@ -857,6 +857,121 @@ defmodule Samen.Scopes.Billing.Blueprint do
   end
 
   # ---------------------------------------------------------------------------
+  # UsageEvent — the insert-only usage-capture ledger (T163; ADR-051). One row per
+  # captured usage event, written ONLY through `Samen.Billing.Meter.record/3`. Every
+  # column is a bounded id / enum / integer / timestamp — NO PII, no plain string.
+  # Org-scoped. Soft ref (id only) to a subscription.
+  # ---------------------------------------------------------------------------
+  defmacro define_usage_event(module, otp_app, domain, repo, abbrev) do
+    quote do
+      defmodule unquote(module) do
+        @moduledoc """
+        Billing.UsageEvent — the insert-only usage-capture ledger (T163; ADR-051 §2).
+        One row per captured usage event. The per-period `Usage` tally is DERIVED from
+        these rows; it is never the thing a caller writes.
+
+        ## One write path
+
+        `Samen.Billing.Meter.record/3` is the only sanctioned writer. The `:record`
+        action carries `Samen.Billing.Meter.ChokepointGuard`, which refuses any create
+        that did not come through the Meter, so a direct `Ash.create` fails closed.
+
+        ## Insert-only, idempotent
+
+        No `:update` / `:destroy` action exists — a captured event is an immutable fact.
+        The identity `(org_id, idempotency_key)` makes a replayed capture a no-op: the
+        Meter upserts on it with no fields to change, so the second capture returns the
+        first row and never a second one. `idempotency_key` is a UUID DERIVED from the
+        caller's event identity (`Meter.idempotency_key/2`), so it is stable across
+        retries by construction and carries no free text.
+
+        ## No PII by construction
+
+        Every column is a bounded id, an enum, a positive integer or a timestamp (the
+        `mov` discipline): the default-deny CDC classifier mirrors all of them without
+        a `non_pii!` clearance. The caller's `source_ref` is hashed into the key and is
+        NEVER stored.
+        """
+        use Samen.Resource,
+          otp_app: unquote(otp_app),
+          domain: unquote(domain),
+          data_layer: AshPostgres.DataLayer,
+          authorizers: [Ash.Policy.Authorizer],
+          abbrev: unquote(abbrev)
+
+        postgres do
+          table("#{unquote(abbrev)}_usage_event")
+          repo(unquote(repo))
+        end
+
+        attributes do
+          # The metric — the same bounded set as the Usage tally, so a tally rebuild
+          # (ADR-051 P2) groups events without translation.
+          attribute(:metric, :atom,
+            public?: true,
+            allow_nil?: false,
+            constraints: [
+              one_of: [:api_calls, :seats, :storage_gb, :events, :messages, :custom_metric]
+            ]
+          )
+
+          # A capture is a positive quantity. A decrease is not a usage event — the
+          # tally is derived, so there is nothing to "undo" by writing a negative row.
+          attribute(:quantity, :integer, public?: true, allow_nil?: false, constraints: [min: 1])
+
+          # Soft ref (id only — NOT belongs_to): usage can be captured before, and must
+          # outlive, the subscription row it will be billed against.
+          attribute(:subscription_id, :uuid, public?: true)
+
+          # The derived dedup key (see `Samen.Billing.Meter.idempotency_key/2`).
+          attribute(:idempotency_key, :uuid, public?: true, allow_nil?: false)
+
+          # Microsecond business time (the T121 lesson from `mov`): events inside one
+          # wall-clock second must keep a total order.
+          attribute(:occurred_at, :utc_datetime_usec, public?: true, allow_nil?: false)
+        end
+
+        identities do
+          identity(:unique_idempotency_key, [:org_id, :idempotency_key])
+        end
+
+        actions do
+          # Insert-only: read + ONE guarded create. No update/destroy.
+          defaults([:read])
+
+          create :record do
+            accept([
+              :metric,
+              :quantity,
+              :subscription_id,
+              :idempotency_key,
+              :occurred_at,
+              :org_id
+            ])
+
+            change(Samen.Billing.Meter.ChokepointGuard)
+          end
+        end
+
+        policies do
+          policy action_type(:read) do
+            authorize_if(Samen.Policy.OrgScope)
+          end
+
+          # The Meter writes with authorize?: false (a framework capture, like the
+          # `mov` change); this gate governs any DIRECT caller, which the chokepoint
+          # guard refuses regardless.
+          policy action_type(:create) do
+            forbid_unless(Samen.Policy.OrgScope)
+            forbid_unless({Samen.Policy.RoleAtLeast, role: :member})
+            authorize_if(always())
+          end
+        end
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Entitlement — a feature entitlement for a subscription. Org-scoped. No PII.
   # Belongs to subscription + plan.
   # ---------------------------------------------------------------------------

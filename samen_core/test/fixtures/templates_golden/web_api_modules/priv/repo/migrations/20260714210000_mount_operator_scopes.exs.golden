@@ -42,6 +42,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
     Acme.Operator.Usage,
     Acme.Operator.Entitlement,
     Acme.Operator.SubscriptionEvent,
+    Acme.Operator.UsageEvent,
     # Support (operator: tenant-filed desk tickets)
     Acme.Operator.Sla,
     Acme.Operator.Ticket,
@@ -569,6 +570,28 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:apv_updated_at, :utc_datetime, null: false)
     end
 
+    # ---- Usage-capture ledger (T163; ADR-051) — insert-only, no PII, written only by
+    #      Samen.Billing.Meter.record/3; soft subscription ref (no FK) ----
+    create table(:apx_usage_event, primary_key: false) do
+      add(:apx_metric, :text, null: false)
+      add(:apx_quantity, :integer, null: false)
+      add(:apx_subscription_id, :uuid)
+      add(:apx_idempotency_key, :uuid, null: false)
+      add(:apx_occurred_at, :utc_datetime_usec, null: false)
+      add(:apx_id, :uuid, null: false, default: fragment("gen_random_uuid()"), primary_key: true)
+      add(:apx_org_id, :uuid, null: false)
+      add(:apx_inserted_at, :utc_datetime, null: false)
+      add(:apx_updated_at, :utc_datetime, null: false)
+    end
+
+    create(
+      unique_index(:apx_usage_event, [:apx_org_id, :apx_idempotency_key],
+        name: "apx_usage_event_unique_idempotency_key_index"
+      )
+    )
+
+    create(constraint(:apx_usage_event, :apx_usage_event_quantity_positive, check: "apx_quantity > 0"))
+
     # =====================================================================
     # SUPPORT — the SaaS help desk (tenants file tickets WITH the SaaS)
     # =====================================================================
@@ -823,6 +846,7 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
 
     # --- Billing (reverse FK order; ledger has no FKs) ---
     drop(table(:apv_subscription_event))
+    drop(table(:apx_usage_event))
     drop(constraint(:ape_entitlement, "ape_entitlement_ape_plan_id_fkey"))
     drop(constraint(:ape_entitlement, "ape_entitlement_ape_subscription_id_fkey"))
     drop(table(:ape_entitlement))

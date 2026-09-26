@@ -1,0 +1,25 @@
+# SABOTAGE: T163 / ADR-051 R2 — the usage ledger's chokepoint guard admits every
+# create, as if each came through `Samen.Billing.Meter.record/3`. A direct `Ash.create`
+# can then write a row with a hand-picked (or random) `idempotency_key`, skipping the
+# Meter's `source_ref` requirement and its derived key — the double-count the ledger
+# exists to remove, re-opened by any caller that never heard of the Meter.
+#
+# Flips the direct-create refusal test; the Meter-path POSITIVE CONTROL stays green
+# (the guard only ever added a refusal), so the red is the bypass, not the write.
+# APP: demo
+# TEST_FILES: test/usage_event_ledger_test.exs
+# MUST_FAIL: a direct Ash.create on :record is refused and writes nothing
+diff --git a/samen_core/lib/samen/billing/meter/chokepoint_guard.ex b/samen_core/lib/samen/billing/meter/chokepoint_guard.ex
+index 5561f00..5fed8e1 100644
+--- a/samen_core/lib/samen/billing/meter/chokepoint_guard.ex
++++ b/samen_core/lib/samen/billing/meter/chokepoint_guard.ex
+@@ -31,7 +31,8 @@ defmodule Samen.Billing.Meter.ChokepointGuard do
+   def atomic(_changeset, _opts, _context), do: :ok
+ 
+   defp refuse_ungoverned_capture(changeset) do
+-    if get_in(changeset.context, [:private, @marker_key]) == true do
++    # SABOTAGE (ADR-051 R2): every create is treated as governed.
++    if true do
+       changeset
+     else
+       Ash.Changeset.add_error(

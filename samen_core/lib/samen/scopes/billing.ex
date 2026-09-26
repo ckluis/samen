@@ -62,6 +62,9 @@ defmodule Samen.Scopes.Billing do
     * `Demo.BillingScope.Payment`      — a payment record (provider-mirror)
     * `Demo.BillingScope.Usage`        — metered usage for a subscription
     * `Demo.BillingScope.Entitlement`  — feature entitlement for a subscription
+    * `Demo.BillingScope.SubscriptionEvent` — the append-only movement ledger (ADR-017)
+    * `Demo.BillingScope.UsageEvent`   — the insert-only usage-capture ledger, written only
+      by `Samen.Billing.Meter.record/3` (T163; ADR-051)
 
   ## Abbrevs (permanent, registry-checked)
 
@@ -76,6 +79,8 @@ defmodule Samen.Scopes.Billing do
     * `Demo.BillingScope.Payment`      → `bpy`
     * `Demo.BillingScope.Usage`        → `bus`
     * `Demo.BillingScope.Entitlement`  → `ben`
+    * `Demo.BillingScope.SubscriptionEvent` → `mov`
+    * `Demo.BillingScope.UsageEvent`   → `bux`
 
   The macro does NOT invent abbrevs. Defaults are provided for the demo mount.
   """
@@ -90,7 +95,9 @@ defmodule Samen.Scopes.Billing do
     usage: "bus",
     entitlement: "ben",
     # WS-B / G7 (ADR-017): the append-only subscription-movement ledger.
-    subscription_event: "mov"
+    subscription_event: "mov",
+    # T163 (ADR-051): the insert-only usage-capture ledger.
+    usage_event: "bux"
   }
 
   @doc false
@@ -117,6 +124,7 @@ defmodule Samen.Scopes.Billing do
     usage_mod = Module.concat(namespace, Usage)
     entitlement_mod = Module.concat(namespace, Entitlement)
     subscription_event_mod = Module.concat(namespace, SubscriptionEvent)
+    usage_event_mod = Module.concat(namespace, UsageEvent)
 
     quote do
       require Samen.Scopes.Billing.Blueprint
@@ -132,6 +140,7 @@ defmodule Samen.Scopes.Billing do
         resource(unquote(usage_mod))
         resource(unquote(entitlement_mod))
         resource(unquote(subscription_event_mod))
+        resource(unquote(usage_event_mod))
       end
 
       # Materialize resource modules in the host namespace. Each is a normal Samen
@@ -210,6 +219,16 @@ defmodule Samen.Scopes.Billing do
         unquote(repo),
         unquote(abbrevs.usage),
         unquote(subscription_mod)
+      )
+
+      # T163 (ADR-051): the insert-only usage-capture ledger, written only by
+      # `Samen.Billing.Meter.record/3`.
+      Samen.Scopes.Billing.Blueprint.define_usage_event(
+        unquote(usage_event_mod),
+        unquote(otp_app),
+        unquote(domain),
+        unquote(repo),
+        unquote(abbrevs.usage_event)
       )
 
       Samen.Scopes.Billing.Blueprint.define_entitlement(
