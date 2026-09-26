@@ -500,6 +500,8 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:apu_period_start, :utc_datetime)
       add(:apu_period_end, :utc_datetime)
       add(:apu_reported_at, :utc_datetime)
+      # T163 (ADR-051 P2): how much of quantity the provider already has (delta reporting).
+      add(:apu_reported_quantity, :integer, null: false, default: 0)
 
       add(
         :apu_subscription_id,
@@ -516,6 +518,17 @@ defmodule Acme.Repo.Migrations.MountOperatorScopes do
       add(:apu_inserted_at, :utc_datetime, null: false)
       add(:apu_updated_at, :utc_datetime, null: false)
     end
+
+    # T163 (ADR-051 P2): the derived tally's identity + the reported bound.
+    create(
+      unique_index(:apu_usage, [:apu_org_id, :apu_subscription_id, :apu_metric, :apu_period_start],
+        name: "apu_usage_unique_tally_index"
+      )
+    )
+
+    create(constraint(:apu_usage, :apu_usage_reported_quantity_bounded,
+      check: "apu_reported_quantity >= 0 AND apu_reported_quantity <= apu_quantity"
+    ))
 
     create table(:ape_entitlement, primary_key: false) do
       add(:ape_feature, :text, null: false)

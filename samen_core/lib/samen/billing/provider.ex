@@ -96,8 +96,10 @@ defmodule Samen.Billing.Provider do
             ) :: {:ok, normalized :: map()} | {:error, :not_found | term()}
 
   @doc """
-  B8 — metered usage reporting. Each record in `batch` carries an idempotency key
-  derived from the `UsageRecord` id, so a retried batch is a safe no-op provider-side.
+  B8 — metered usage reporting. Each record in `batch` carries the tally's unreported
+  DELTA as `quantity` (T163; ADR-051 P2: the call increments, so a grown tally is never
+  re-sent whole) and an idempotency key derived from that delta
+  (`UsageReporter.idempotency_key/3`), so a retried batch is a safe no-op provider-side.
   """
   @callback report_usage(batch :: [map()], config :: map()) ::
               {:ok, %{reported: non_neg_integer()}} | {:error, term()}

@@ -400,15 +400,25 @@ defmodule Demo.BillingScopePolicyMatrixTest do
       })
       |> Ash.create(authorize?: false)
 
-    {:ok, _use_b} =
-      Usage
-      |> Ash.Changeset.for_create(:create, %{
-        org_id: org_b.id,
-        subscription_id: sub_b.id,
-        metric: :api_calls,
-        quantity: 1000
-      })
-      |> Ash.create(authorize?: false)
+    # Usage is a derived tally (T163; ADR-051 P2): capture through the Meter, then
+    # rebuild — the only path that writes a Usage row.
+    {:ok, :recorded} =
+      Samen.Billing.Meter.record(
+        org_b.id,
+        %{metric: :api_calls, quantity: 1000, source_ref: "matrix:1", subscription_id: sub_b.id,
+          occurred_at: ~U[2026-07-15 12:00:00Z]},
+        resource: Demo.BillingScope.UsageEvent
+      )
+
+    {:ok, %{api_calls: 1000}} =
+      Samen.Billing.UsageTally.rebuild(
+        org_b.id,
+        sub_b.id,
+        ~U[2026-07-01 00:00:00Z],
+        ~U[2026-08-01 00:00:00Z],
+        usage: Usage,
+        usage_event: Demo.BillingScope.UsageEvent
+      )
 
     # org_a actor sees ZERO of org_b's rows across all resources.
     {:ok, invs} = Ash.read(Invoice, actor: scope_a.actor, authorize?: true)

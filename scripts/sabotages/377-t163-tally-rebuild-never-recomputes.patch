@@ -1,0 +1,26 @@
+# SABOTAGE: T163 / ADR-051 R4 — the tally rebuild stops RECOMPUTING: its upsert no longer
+# replaces `quantity` on an existing tally, so the first rebuild's total sticks forever.
+# Late captures land in the ledger and never reach the tally, and so never reach the
+# provider — usage that happened silently goes unbilled. (The mirror image of the
+# additive bug: a rebuild that ADDS double-counts; one that never updates under-counts.)
+#
+# Flips the late-capture test. The first-rebuild derivation test and the idempotency
+# test stay green (a fresh tally is still inserted with the right total, and re-running
+# is still a no-op), which is exactly why this regression would pass a shallow suite.
+# APP: demo
+# TEST_FILES: test/usage_tally_test.exs
+# MUST_FAIL: a late capture grows the tally on the next rebuild; what was reported is untouched
+diff --git a/samen_core/lib/samen/billing/usage_tally.ex b/samen_core/lib/samen/billing/usage_tally.ex
+index ccb07f8..7c3f77d 100644
+--- a/samen_core/lib/samen/billing/usage_tally.ex
++++ b/samen_core/lib/samen/billing/usage_tally.ex
+@@ -96,7 +96,8 @@ defmodule Samen.Billing.UsageTally do
+       upsert_identity: :unique_tally,
+       # REPLACE the total (recompute), never add to it. `reported_quantity` is not
+       # listed, so a rebuild never disturbs what has already been reported.
+-      upsert_fields: [:quantity, :period_end],
++      # SABOTAGE (ADR-051 R4): an existing tally is never recomputed.
++      upsert_fields: [],
+       authorize?: false
+     )
+     |> Ash.Changeset.set_context(%{private: %{Guard.marker_key() => true}})

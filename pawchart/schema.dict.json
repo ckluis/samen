@@ -615,6 +615,12 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "pbu_reported_quantity",
+          "logical_name": "reported_quantity",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
           "column_name": "pbu_subscription_id",
           "logical_name": "subscription_id",
           "pii": false,
@@ -1825,6 +1831,12 @@
           "logical_name": "reported_at",
           "pii": false,
           "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pmu_reported_quantity",
+          "logical_name": "reported_quantity",
+          "pii": false,
+          "type": "Integer"
         },
         {
           "column_name": "pmu_subscription_id",

@@ -7,7 +7,13 @@
   (`Samen.Scopes.Billing.Blueprint.define_usage_event/5`), `Samen.Billing.Meter.record/3` +
   `Samen.Billing.Meter.ChokepointGuard`, migrations in all four hosts that mount Billing
   (seven mounts), the `Samen.Gen.App` templates, red paths R1/R2/R3/R5
-  (`demo/test/usage_event_ledger_test.exs`), sabotages **373–376**. P2–P4 are not built.
+  (`demo/test/usage_event_ledger_test.exs`), sabotages **373–376**.
+  **P2 BUILT** (2026-09-26): `Samen.Billing.UsageTally.rebuild/5` + its guard and the
+  forward-only `:mark_reported` validation, `reported_quantity` + the tally identity on every
+  `Usage` table, delta reporting in `Samen.Billing.UsageReporter` / the `UsageMirror` port
+  (`demo/test/usage_tally_test.exs`, `samen_core/test/billing_usage_reporter_test.exs`),
+  sabotages **377–380**. **§2.4 and §2.5 carry as-built corrections** — §2.5's drafted key
+  scheme would have double-billed. P3 and P4 are not built.
 - **Task:** backlog **T163** (`_orch/plan/backlog.yaml:173`; OSS-scan shortlist item 3,
   `docs/research/oss-scan/capability-parse.md:117`; confirmed OPEN by mechanism in issue #33 and
   re-confirmed on `f8fcd79`: zero hits for `Billing.Meter` / `within_limit?` in `samen_core/lib`
@@ -85,10 +91,31 @@ price computation in samen.
    rebuild arm) at period rollover and on demand. Its generic `update: :*` is replaced by exactly
    two narrow actions: `:rebuild_tally` (Rollup only) and `:mark_reported` (the reporter's
    `reported_at` stamp, the one mutation `UsageMirror.mark_reported/3` needs).
+   *As built (P2):* a dedicated `Samen.Billing.UsageTally.rebuild/5`, not a `Samen.Rollup` spec.
+   `Samen.Rollup` is the erasure-governed rollup registry: a `:domain` spec must declare a
+   subject column and a subject-delete hook for the destruction oracle, and usage has no
+   subject. The rebuild sums the ledger over the half-open period `[start, end)` per metric
+   and upserts that sum on the `(org, subscription, metric, period_start)` identity,
+   REPLACING the quantity (R4: recompute, never increment). `:rebuild_tally` carries
+   `Samen.Billing.UsageTally.Guard` (a direct write is refused). `:mark_reported` carries
+   `Samen.Billing.UsageTally.ForwardOnly`, and the table bounds `0 <= reported_quantity <= quantity`.
+   Events captured with no subscription are not tallied.
 5. **The reporter's key goes end to end** (Part 5, T25/B8 annotation). A tally's report key
    becomes `sha256` over its period, metric, subscription and the sorted ledger keys it sums, so
    a rebuilt-but-unchanged tally re-reports under the **same** key and the provider dedups it,
    while a tally that genuinely grew gets a new one.
+   *Corrected in P2 — the drafted scheme above would DOUBLE-BILL.* The provider's
+   metered-usage call INCREMENTS (`samen_stripe` sends `"action" => "increment"`), so
+   re-sending a grown tally's whole quantity under a new key bills the already-reported part
+   again. As built: the tally carries `reported_quantity`. The reporter sends only the delta
+   `quantity - reported_quantity`, under `"usage:<id>:<from>-<to>"`, so a retried delta keeps
+   its key AND its quantity (a key never names two different amounts). On success,
+   `mark_reported` moves `reported_quantity` to exactly the `to` that was SENT, not the tally's
+   current quantity, so growth that lands mid-report goes out as the next delta instead of
+   being dropped. A fully reported, unchanged tally is not sent at all. Because the ledger is
+   insert-only, a tally never shrinks, so a delta is never negative. The `UsageMirror` port
+   changes with it: `pending_record` gains `reported_quantity`, pending means
+   `quantity > reported_quantity`, and `mark_reported/3` takes `[{id, to}]`.
 6. **Quota is a read, never a lock.** `within_limit?/4` answers from the current tally plus the
    limit in D2. It never blocks capture: usage that happened is recorded, and over-limit is a
    policy decision for the caller. Fail-closed semantics apply only to the *check*: an
@@ -101,7 +128,7 @@ price computation in samen.
 | R1 | A replayed event never double-counts | record the same `source_ref` twice → one ledger row, tally = 1× | drop the identity's `on_conflict: :nothing` → the second insert must error, or the dedup test flips |
 | R2 | The chokepoint is the only write path | direct `Ash.create` on the ledger → refused | remove the guard change |
 | R3 | The ledger is immutable | there is no update/destroy action; a raw `Ash.update` → `NoSuchAction` | re-add `update: :*` → the "no mutation surface" test flips |
-| R4 | The tally is derived | mutate a ledger row out of band, rebuild → tally matches the ledger, not the stale value | make `:rebuild_tally` additive instead of recomputing |
+| R4 | The tally is derived | mutate a ledger row out of band, rebuild → tally matches the ledger, not the stale value | make `:rebuild_tally` additive instead of recomputing. *As built:* the ledger has no mutation to observe, so the red is a late capture that must grow the tally on the next rebuild; sabotage 377 stops the upsert replacing `quantity` (the under-count twin of "additive"). 378 sends the whole tally instead of the delta; 379 lets `:mark_reported` go backwards; 380 admits a direct tally write |
 | R5 | No generated key | `record/3` without `source_ref` → `{:error, :idempotency_ref_required}` | default `source_ref` to `Ecto.UUID.generate()` → R1's replay test double-counts |
 | R6 | The limit check fails closed | an unreadable/absent limit row under D2 option (a) → `{:error, _}` | return `{:ok, true}` on the error arm |
 

@@ -23,15 +23,23 @@ defmodule Samen.Billing.UsageReporter do
        (`UsageMirror.read_pending/2`, oldest-first). Zero pending rows is a true
        no-op: `{:ok, %{reported: 0}}` — never an error, never a wasted provider
        call.
-    3. Builds ONE batch. Each item's idempotency key is DERIVED from the
-       `UsageRecord`'s own id (`idempotency_key/1`: `"usage:" <> id`) — stable
-       across retries and re-runs, so re-sending the SAME still-pending record
-       always carries the SAME key and a compliant provider dedups on it,
-       treating a redelivery as a safe no-op rather than double-billing.
+    3. Builds ONE batch of DELTAS (T163; ADR-051 P2). A record is pending while
+       `quantity > reported_quantity`; its batch item carries only the unreported
+       part, `quantity - reported_quantity`, because the provider's metered-usage
+       call INCREMENTS (the reference adapter posts an increment action): sending a
+       grown total again would bill the already-reported part twice. Each item's
+       idempotency key is DERIVED from the delta it carries
+       (`idempotency_key/3`: `"usage:<id>:<from>-<to>"`) — stable across retries,
+       so re-sending the SAME delta always carries the SAME key and a compliant
+       provider dedups it; and a key never names two different quantities (a
+       provider may reject a reused key with different parameters).
     4. Calls `provider.report_usage/2` ONCE for the whole batch — never split,
        never partially dispatched.
     5. `{:ok, _}` from the provider ⇒ `UsageMirror.mark_reported/3` stamps EVERY
-       id in the batch, ALL AT ONCE (the port's own all-or-nothing contract).
+       record in the batch, ALL AT ONCE (the port's own all-or-nothing contract),
+       moving each `reported_quantity` to exactly the `to` value that was SENT —
+       not to the record's current quantity, which a rebuild may have grown in the
+       meantime (that later growth is the next run's delta).
        Marking only ever follows a provider success for the EXACT batch that was
        marked — there is no window where a row is marked reported without the
        provider having accepted it.
@@ -90,10 +98,14 @@ defmodule Samen.Billing.UsageReporter do
     end
   end
 
-  @doc "The idempotency key for a given `UsageRecord` id — derived, stable, reused on retry."
-  @spec idempotency_key(String.t()) :: String.t()
-  def idempotency_key(usage_record_id) when is_binary(usage_record_id) do
-    "usage:" <> usage_record_id
+  @doc """
+  The idempotency key for reporting the delta `from → to` of one `UsageRecord`:
+  derived, stable across retries, and unique per delta (ADR-051 P2).
+  """
+  @spec idempotency_key(String.t(), non_neg_integer(), pos_integer()) :: String.t()
+  def idempotency_key(usage_record_id, from, to)
+      when is_binary(usage_record_id) and is_integer(from) and is_integer(to) and from < to do
+    "usage:#{usage_record_id}:#{from}-#{to}"
   end
 
   # ---------------------------------------------------------------------------
@@ -104,11 +116,14 @@ defmodule Samen.Billing.UsageReporter do
     limit = Keyword.get(opts, :limit, @default_limit)
 
     case usage_mirror.read_pending(usage_mirror_ref, limit) do
-      {:ok, []} ->
-        {:ok, %{reported: 0}}
-
       {:ok, records} ->
-        report_batch(provider, provider_config, usage_mirror, usage_mirror_ref, records)
+        # Defensive: a record with no positive delta is not pending, whatever the
+        # mirror returned. It is neither sent nor marked.
+        case Enum.filter(records, &(delta(&1) > 0)) do
+          [] -> {:ok, %{reported: 0}}
+          pending -> report_batch(provider, provider_config, usage_mirror, usage_mirror_ref, pending)
+        end
+
 
       {:error, reason} ->
         {:error, reason}
@@ -120,10 +135,11 @@ defmodule Samen.Billing.UsageReporter do
 
     case provider.report_usage(batch, provider_config) do
       {:ok, _result} ->
-        ids = Enum.map(records, & &1.id)
+        # Mark each record at exactly the quantity that was SENT (its `to`).
+        marks = Enum.map(records, &{&1.id, Map.get(&1, :quantity)})
         reported_at = DateTime.utc_now()
 
-        case usage_mirror.mark_reported(usage_mirror_ref, ids, reported_at) do
+        case usage_mirror.mark_reported(usage_mirror_ref, marks, reported_at) do
           {:ok, count} -> {:ok, %{reported: count}}
           {:error, reason} -> {:error, reason}
         end
@@ -136,14 +152,27 @@ defmodule Samen.Billing.UsageReporter do
   end
 
   defp to_batch_item(record) do
+    from = reported_quantity(record)
+    to = Map.get(record, :quantity)
+
     %{
       usage_record_id: record.id,
-      idempotency_key: idempotency_key(record.id),
+      idempotency_key: idempotency_key(record.id, from, to),
       metric: Map.get(record, :metric),
-      quantity: Map.get(record, :quantity),
+      # The DELTA: the provider increments, so only the unreported part is sent.
+      quantity: to - from,
       timestamp: Map.get(record, :period_end) || Map.get(record, :period_start),
       subscription_id: Map.get(record, :subscription_id),
       provider_ref: Map.get(record, :provider_ref)
     }
+  end
+
+  defp reported_quantity(record), do: Map.get(record, :reported_quantity) || 0
+
+  defp delta(record) do
+    case Map.get(record, :quantity) do
+      q when is_integer(q) -> q - reported_quantity(record)
+      _ -> 0
+    end
   end
 end

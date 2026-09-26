@@ -963,6 +963,12 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "bus_reported_quantity",
+          "logical_name": "reported_quantity",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
           "column_name": "bus_subscription_id",
           "logical_name": "subscription_id",
           "pii": false,
