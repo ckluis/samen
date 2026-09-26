@@ -214,6 +214,8 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
       add(:<%= bu %>_period_start, :utc_datetime)
       add(:<%= bu %>_period_end, :utc_datetime)
       add(:<%= bu %>_reported_at, :utc_datetime)
+      # T163 (ADR-051 P2): how much of quantity the provider already has (delta reporting).
+      add(:<%= bu %>_reported_quantity, :integer, null: false, default: 0)
 
       add(
         :<%= bu %>_subscription_id,
@@ -230,6 +232,17 @@ defmodule <%= module %>.Repo.Migrations.AppResources do
       add(:<%= bu %>_inserted_at, :utc_datetime, null: false)
       add(:<%= bu %>_updated_at, :utc_datetime, null: false)
     end
+
+    # T163 (ADR-051 P2): the derived tally's identity + the reported bound.
+    create(
+      unique_index(:<%= bu %>_usage, [:<%= bu %>_org_id, :<%= bu %>_subscription_id, :<%= bu %>_metric, :<%= bu %>_period_start],
+        name: "<%= bu %>_usage_unique_tally_index"
+      )
+    )
+
+    create(constraint(:<%= bu %>_usage, :<%= bu %>_usage_reported_quantity_bounded,
+      check: "<%= bu %>_reported_quantity >= 0 AND <%= bu %>_reported_quantity <= <%= bu %>_quantity"
+    ))
 
     create table(:<%= be %>_entitlement, primary_key: false) do
       add(:<%= be %>_feature, :text, null: false)

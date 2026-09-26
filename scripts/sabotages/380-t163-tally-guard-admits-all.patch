@@ -1,0 +1,23 @@
+# SABOTAGE: T163 / ADR-051 §2.4 — the tally guard admits every `:rebuild_tally`
+# create. Any caller can then write a `Usage` row with an arbitrary quantity that no
+# ledger event supports, and the reporter will bill it: the tally stops being derived.
+#
+# Flips the direct-write refusal test. The rebuild-path tests stay green (they carry the
+# marker), so the red is the bypass, not the write.
+# APP: demo
+# TEST_FILES: test/usage_tally_test.exs
+# MUST_FAIL: a direct :rebuild_tally create is refused and writes nothing
+diff --git a/samen_core/lib/samen/billing/usage_tally/guard.ex b/samen_core/lib/samen/billing/usage_tally/guard.ex
+index f5cc80e..c0ccd7a 100644
+--- a/samen_core/lib/samen/billing/usage_tally/guard.ex
++++ b/samen_core/lib/samen/billing/usage_tally/guard.ex
+@@ -15,7 +15,8 @@ defmodule Samen.Billing.UsageTally.Guard do
+   @impl true
+   def change(changeset, _opts, _context) do
+     Ash.Changeset.before_action(changeset, fn changeset ->
+-      if get_in(changeset.context, [:private, @marker_key]) == true do
++      # SABOTAGE (ADR-051 §2.4): every tally write is treated as derived.
++      if true do
+         changeset
+       else
+         Ash.Changeset.add_error(changeset,

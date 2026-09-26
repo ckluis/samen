@@ -1,0 +1,24 @@
+# SABOTAGE: T163 / ADR-051 P2 — `:mark_reported` may move `reported_quantity`
+# BACKWARDS. A tally marked 6 can be re-marked 5, and the next report then re-sends
+# the 1 unit the provider already has — a double bill, under increment semantics,
+# produced by any buggy or replayed mirror write.
+#
+# Flips the backwards-refusal test. The forward positive control and the past-quantity
+# refusal stay green, so the red is the direction check alone.
+# APP: demo
+# TEST_FILES: test/usage_tally_test.exs
+# MUST_FAIL: backwards is refused (it would re-report usage the provider already has)
+diff --git a/samen_core/lib/samen/billing/usage_tally/forward_only.ex b/samen_core/lib/samen/billing/usage_tally/forward_only.ex
+index b8f6266..6d67ce8 100644
+--- a/samen_core/lib/samen/billing/usage_tally/forward_only.ex
++++ b/samen_core/lib/samen/billing/usage_tally/forward_only.ex
+@@ -17,7 +17,8 @@ defmodule Samen.Billing.UsageTally.ForwardOnly do
+       not is_integer(reported) ->
+         {:error, field: :reported_quantity, message: "must be an integer"}
+ 
+-      reported < before ->
++      # SABOTAGE (ADR-051 P2): backwards is no longer refused.
++      false and reported < before ->
+         {:error,
+          field: :reported_quantity,
+          message: "may only move forward (was #{before}, got #{reported}) — ADR-051 P2"}
