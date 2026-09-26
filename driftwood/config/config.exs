@@ -166,14 +166,15 @@ config :samen_core, :rollups, [
        SELECT
          aud_occurred_at::date AS drl_day,
          aud_correlation_id    AS drl_org_id,
-         aud_subject_id::uuid  AS drl_subject_id,
+         -- a subject is a UUID OR a token (issue #47): carried as TEXT, never cast to uuid
+         aud_subject_id        AS drl_subject_id,
          COUNT(*)::int         AS drl_load_count,
          FALSE                 AS drl_suppressed,
          now()                 AS drl_refreshed_at
        FROM aud_event
        WHERE aud_subject_id IS NOT NULL
          AND aud_event_type = 'dispatch'
-       GROUP BY aud_occurred_at::date, aud_correlation_id, aud_subject_id::uuid
+       GROUP BY aud_occurred_at::date, aud_correlation_id, aud_subject_id
        """}
   },
   # WS-B B9 (AC-X1) / ADR-018: the DOMAIN-SOURCED revenue-movement rollup
