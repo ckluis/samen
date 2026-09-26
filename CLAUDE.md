@@ -50,6 +50,11 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
   your diff — the verifier primitive), and `--list`/`--dry-run` to preview a selection
   (names + resolved APP + count) without applying anything. The header preflight still
   lints ALL patch headers even under a filter.
+- Apply-check (UNCONDITIONAL in `ci.sh` + `ci-fast.sh`, ~2s): `scripts/sabotage_apply_check.sh`
+  requires EVERY patch to `git apply --check` against the working tree. A patch that stops
+  applying is a guard with no red — re-anchor it (same semantics, regenerated from a real
+  edit, then `sabotage.sh --range n-n`), never delete it. Issue #53: the double sweep alone
+  cannot see this, because a patch failing in BOTH baselines is "pre-existing" by design.
 
 ## Mutation gate (ADR-049) — the converse question the sabotage corpus cannot ask
 The sabotage harness proves the guarantees we CLAIM are still guarded. The mutation gate asks the
