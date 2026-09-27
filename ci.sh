@@ -384,6 +384,17 @@ echo "==> Running sabotage-harness selection regression (ADR-047 A4 fold (a) —
 bash "$REPO_ROOT/scripts/sabotage_selection_test.sh"
 echo "==> sabotage selection regression: PASSED"
 
+# The two-lane scheduler's own red cases (issue #30): a failing lane, a lane that exits 0
+# over a short run, a partition gap and a dirty tree must each fail it, and the lanes must
+# run in two different trees at one commit. Stub harness in a temp repo; ~1s, no DB.
+echo ""
+echo "==> Running sabotage-lanes regression (#30 — the two-lane replay can never over-report)"
+bash "$REPO_ROOT/scripts/sabotage_lanes_test.sh" >/dev/null || {
+  echo "sabotage-lanes SELF-TEST FAILED — rerun scripts/sabotage_lanes_test.sh for detail"
+  exit 1
+}
+echo "==> sabotage-lanes regression: PASSED"
+
 # --- WS-E sabotage harness (E2i.1) — permanent OPT-IN step (SAMEN_SABOTAGE=1) ---
 # Replays every shipped gate sabotage as a committed patch (scripts/sabotages/*.patch):
 # apply → targeted `mix test` MUST fail with the NAMED tests among the failures (the
@@ -394,7 +405,16 @@ echo "==> sabotage selection regression: PASSED"
 echo ""
 if [[ "${SAMEN_SABOTAGE:-0}" == "1" ]]; then
   echo "==> Running sabotage harness (SAMEN_SABOTAGE=1 — every gate sabotage must flip + restore byte-exact)"
-  bash "$REPO_ROOT/scripts/sabotage.sh"
+  # Issue #30: on a clean tree, the same per-patch replay in two concurrent lanes
+  # (samen_core | everything else, own worktree, disjoint test DBs) — ~40% less wall
+  # time. Lanes certify a COMMIT, so uncommitted edits fall back to the serial harness,
+  # which certifies the working tree as-is. Either way the verdict line is the same.
+  if [[ -z "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
+    bash "$REPO_ROOT/scripts/sabotage-lanes.sh"
+  else
+    echo "    (working tree has uncommitted edits — running the SERIAL harness; lanes need a commit)"
+    bash "$REPO_ROOT/scripts/sabotage.sh"
+  fi
   echo "==> sabotage harness: PASSED"
 else
   echo "==> Skipping sabotage harness (opt-in: SAMEN_SABOTAGE=1 ./ci.sh replays all gate sabotages)"

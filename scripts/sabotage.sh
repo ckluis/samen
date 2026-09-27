@@ -29,6 +29,10 @@
 # as an intersection (e.g. --app + --range); repeating the SAME flag is an
 # error — use two separate runs for two ranges.
 #   --app <name>            only patches whose APP: header == <name>
+#   --not-app <name>        only patches whose APP: header != <name> — the
+#                             complement of --app, so `--app X` and `--not-app X`
+#                             PARTITION the corpus (issue #30: the two lanes of
+#                             scripts/sabotage-lanes.sh)
 #   --range <lo>-<hi>       only patches whose FILENAME number (the NNN in
 #   --from <lo> --to <hi>     NNN-slug.patch — stable, matches how we say
 #                             "sabotage 205") is in [lo,hi] INCLUSIVE. --from/
@@ -157,11 +161,11 @@ fail() {
 }
 
 usage() {
-  echo "Usage: sabotage.sh [--app <name>] [--range <lo>-<hi> | --from <lo> --to <hi>]"
+  echo "Usage: sabotage.sh [--app <name>] [--not-app <name>] [--range <lo>-<hi> | --from <lo> --to <hi>]"
   echo "                   [--touching <path>... | --touching-file <file> | --changed [<ref>]]"
   echo "                   [--list | --dry-run]"
   echo ""
-  sed -n '22,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '22,48p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 arg_err() {
@@ -194,6 +198,7 @@ sha_files() { # sha_files <listfile> <outfile>
 
 # ── argument parsing ─────────────────────────────────────────────────────────
 FILTER_APP=""
+FILTER_NOT_APP=""
 RANGE_LO=""
 RANGE_HI=""
 RANGE_ACTIVE=0
@@ -203,6 +208,7 @@ TOUCH_SET="$WORK/touch_set"
 : > "$TOUCH_SET"
 LIST_ONLY=0
 SEEN_APP=0; APP_FIRST=""
+SEEN_NOT_APP=0; NOT_APP_FIRST=""
 SEEN_RANGE=0; RANGE_FIRST=""
 SEEN_FROM=0; FROM_FIRST=""
 SEEN_TO=0; TO_FIRST=""
@@ -217,6 +223,12 @@ while [[ $# -gt 0 ]]; do
         arg_err "--app given twice: '$APP_FIRST' and '$1' — repeating the same flag is an error; run separate invocations for separate apps"
       fi
       FILTER_APP="$1"; APP_FIRST="$1"; SEEN_APP=1; shift ;;
+    --not-app)
+      shift; [[ $# -gt 0 ]] || arg_err "--not-app requires a name"
+      if [[ $SEEN_NOT_APP -eq 1 ]]; then
+        arg_err "--not-app given twice: '$NOT_APP_FIRST' and '$1' — repeating the same flag is an error"
+      fi
+      FILTER_NOT_APP="$1"; NOT_APP_FIRST="$1"; SEEN_NOT_APP=1; shift ;;
     --range)
       shift; [[ $# -gt 0 ]] || arg_err "--range requires <lo>-<hi>"
       if [[ "$1" =~ ^([0-9]+)-([0-9]+)$ ]]; then
@@ -310,12 +322,13 @@ if [[ $RANGE_ACTIVE -eq 1 ]]; then
 fi
 
 FILTER_ACTIVE=0
-[[ -n "$FILTER_APP" || $RANGE_ACTIVE -eq 1 || $TOUCH_MODE -eq 1 ]] && FILTER_ACTIVE=1
+[[ -n "$FILTER_APP" || -n "$FILTER_NOT_APP" || $RANGE_ACTIVE -eq 1 || $TOUCH_MODE -eq 1 ]] && FILTER_ACTIVE=1
 
 # Human-readable selection label (for the effective-selection line + success line).
 filter_label() {
   local parts=()
   [[ -n "$FILTER_APP" ]] && parts+=("app=$FILTER_APP")
+  [[ -n "$FILTER_NOT_APP" ]] && parts+=("not-app=$FILTER_NOT_APP")
   [[ $RANGE_ACTIVE -eq 1 ]] && parts+=("range=${RANGE_LO}-${RANGE_HI}")
   [[ $TOUCH_MODE -eq 1 ]] && parts+=("$TOUCH_DESC")
   local IFS=', '
@@ -340,6 +353,11 @@ select_patch() {
   if [[ -n "$FILTER_APP" ]]; then
     app="$(meta "$patch" APP)"
     [[ "$app" == "$FILTER_APP" ]] || return 1
+  fi
+
+  if [[ -n "$FILTER_NOT_APP" ]]; then
+    app="$(meta "$patch" APP)"
+    [[ "$app" != "$FILTER_NOT_APP" ]] || return 1
   fi
 
   if [[ $RANGE_ACTIVE -eq 1 ]]; then
