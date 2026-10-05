@@ -13,7 +13,6 @@
   #    refusal into a FunctionClauseError at runtime.
   {"lib/mix/tasks/samen.doctor.ex", :pattern_match_cov},
   {"lib/samen/adapter_conformance_case.ex", :pattern_match_cov},
-  {"lib/samen/ai/agent.ex", :pattern_match_cov},
   {"lib/samen/ai/agent/tool_result.ex", :pattern_match_cov},
   {"lib/samen/analytics.ex", :pattern_match_cov},
   {"lib/samen/approvals.ex", :pattern_match_cov},

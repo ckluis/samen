@@ -1,0 +1,23 @@
+# SABOTAGE: issue #74 — a committed turn's row records no cached input (the run's counter
+# still moves). The turn ledger then cannot explain the run's cached-input total: an
+# operator sees cached spend that belongs to no turn.
+#
+# Flips the turn-field test. The run-counter assertions stay green, which is why the test
+# checks the turn row too.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: #74 RED: a turn's cached input lands in its OWN run counter and turn field, not in the uncached one
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 2180604..64fa540 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1900,7 +1900,8 @@ defmodule Samen.AI.Agent do
+         finalize_turn!(turn_row, %{
+           status: :done,
+           input_tokens: spend.input,
+-          cached_input_tokens: spend.cached,
++          # SABOTAGE (#74): the turn row does not record its cached input.
++          cached_input_tokens: 0,
+           output_tokens: spend.output,
+           duration_ms: duration_ms,
+           provider: bounded_provider(completion.provider),

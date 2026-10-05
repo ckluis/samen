@@ -15,25 +15,27 @@
 # `encode_transcript_finalizing/3` (UXD-18 checkpoint 2) and the create_run! map gained the
 # UXD-08 `hooks:` attribute, so the old context lines no longer matched anywhere. Same two
 # removed arming sites, same three MUST_FAIL targets, re-verified flip + byte-exact restore.)
+# Re-anchored for issue #74 (separate cached/uncached buckets): every billing site now
+# goes through `spent/1` / `spend_attrs/2`, so the surrounding code moved. Same edit.
 # APP: samen_core
 # TEST_FILES: test/ai/agent_durability_test.exs
 # MUST_FAIL: ARMED watchdog and a token-only TurnWorker job
 # MUST_FAIL: re-arms with a non-nil watchdog
 # MUST_FAIL: never-nil invariant holds at every non-terminal point
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index 206cb66..30f5a05 100644
+index ecb3ecb..dfcddba 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1801,7 +1801,7 @@ defmodule Samen.AI.Agent do
-           run
-           |> Ash.Changeset.for_update(:advance, %{
-             current_turn: turn_index,
--            next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
-+            next_turn_at: nil,
-             transcript: encode_transcript_finalizing(run, goal, lines ++ [completion.text]),
-             input_tokens_used: run.input_tokens_used + in_tokens,
-             output_tokens_used: run.output_tokens_used + out_tokens
-@@ -3401,8 +3401,12 @@ defmodule Samen.AI.Agent do
+@@ -1918,7 +1918,7 @@ defmodule Samen.AI.Agent do
+             Map.merge(
+               %{
+                 current_turn: turn_index,
+-                next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
++                next_turn_at: nil,
+                 transcript: encode_transcript_finalizing(run, goal, lines ++ [completion.text])
+               },
+               spend_attrs(run, spend)
+@@ -3533,8 +3533,12 @@ defmodule Samen.AI.Agent do
              # durability path for this. Shared by run/4 AND start/4 (both funnel through
              # this one function), so both modes now agree on what they persisted.
              hooks: opts |> Keyword.get(:hooks) |> List.wrap() |> Enum.map(&Atom.to_string/1),

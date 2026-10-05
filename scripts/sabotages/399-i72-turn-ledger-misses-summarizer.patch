@@ -4,20 +4,22 @@
 #
 # Flips the fold-billing test's turn-row assertions. The run total stays right, which is
 # why only a turn-ledger assertion catches it.
+# Re-anchored for issue #74 (separate cached/uncached buckets): every billing site now
+# goes through `spent/1` / `spend_attrs/2`, so the surrounding code moved. Same edit.
 # APP: samen_core
 # TEST_FILES: test/ai/agent_durability_test.exs
 # MUST_FAIL: #72 RED: a fold is billed the summarize call's reported usage, and its turn row carries it
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index bb202cc..8d2f01c 100644
+index 2180604..99ce8a6 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
 @@ -1603,7 +1603,8 @@ defmodule Samen.AI.Agent do
-   # the run's total without decrypting the fold ledger. Nothing is stamped for zero.
    defp note_summarizer_usage!(turn_row, views) do
-     case Map.get(views, :summarizer_usage) do
--      %{input_tokens: in_tokens, output_tokens: out_tokens} when in_tokens + out_tokens > 0 ->
-+      # SABOTAGE (#72): the turn row is never stamped with the summarizer's spend.
-+      %{input_tokens: in_tokens, output_tokens: out_tokens} when in_tokens + out_tokens < 0 ->
-         meta = turn_row.meta || %{}
+     spend = views |> Map.get(:summarizer_usage) |> spent()
  
-         meta =
+-    if spent_any?(spend) do
++    # SABOTAGE (#72): the turn row is never stamped with the summarizer's spend.
++    if spent_any?(%{spend | input: -1, cached: 0, output: 0}) do
+       meta = add_spend_meta(turn_row.meta || %{}, "summarizer", spend)
+ 
+       turn_row

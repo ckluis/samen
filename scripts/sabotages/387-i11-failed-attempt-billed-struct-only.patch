@@ -8,29 +8,25 @@
 # why a struct-only bill looks correct until the budget boundary is what reads it.
 # Re-anchored for the #11 follow-up: `bill_failed_attempt` now also stamps the turn row
 # (it takes and returns `turn_row`), so the surrounding context moved. Same edit.
+# Re-anchored for issue #74 (separate cached/uncached buckets): every billing site now
+# goes through `spent/1` / `spend_attrs/2`, so the surrounding code moved. Same edit.
 # APP: samen_core
 # TEST_FILES: test/ai/agent_durability_test.exs
 # MUST_FAIL: #11 D-17 RED: a failed attempt whose OWN tokens exhaust the budget stops the Level 2 retry — billed before the re-check
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index 19b9f66..d60527b 100644
+index 2180604..6174381 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1256,12 +1256,12 @@ defmodule Samen.AI.Agent do
+@@ -1267,10 +1267,8 @@ defmodule Samen.AI.Agent do
+     spend = spent(usage)
  
-     if in_tokens + out_tokens > 0 do
-       run =
+     if spent_any?(spend) do
+-      run =
 -        run
--        |> Ash.Changeset.for_update(:advance, %{
--          input_tokens_used: run.input_tokens_used + in_tokens,
--          output_tokens_used: run.output_tokens_used + out_tokens
--        })
+-        |> Ash.Changeset.for_update(:advance, spend_attrs(run, spend))
 -        |> Ash.update!(authorize?: false)
-+        # SABOTAGE (#11 / D-17): the bill is written to the in-memory struct only.
-+        %{
-+          run
-+          | input_tokens_used: run.input_tokens_used + in_tokens,
-+            output_tokens_used: run.output_tokens_used + out_tokens
-+        }
++      # SABOTAGE (#11 / D-17): the bill is written to the in-memory struct only.
++      run = struct(run, spend_attrs(run, spend))
  
-       {run, note_failed_attempt!(turn_row, in_tokens, out_tokens), {:error, reason}}
+       {run, note_failed_attempt!(turn_row, spend), {:error, reason}}
      else

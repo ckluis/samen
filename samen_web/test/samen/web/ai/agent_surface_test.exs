@@ -163,6 +163,27 @@ defmodule Samen.Web.AI.AgentSurfaceTest do
     assert render_detail(org_id, cancelled.id) =~ "Stopped at a turn boundary"
   end
 
+  test "the run detail shows cached input as its own bucket, and only when there is some (issue #74)",
+       %{org_id: org_id} do
+    cached = AgentFixture.run!(org_id, state: :running)
+    plain = AgentFixture.run!(org_id, state: :running)
+
+    cached
+    |> Ash.Changeset.for_update(:advance, %{
+      input_tokens_used: 10,
+      cached_input_tokens_used: 1500,
+      output_tokens_used: 4
+    })
+    |> Ash.update!(authorize?: false)
+
+    html = render_detail(org_id, cached.id)
+    assert html =~ "tokens 10/4"
+    assert html =~ "(+1500 cached)"
+
+    # Positive control: a run that read nothing from the cache shows no cached figure.
+    refute render_detail(org_id, plain.id) =~ "cached)"
+  end
+
   test "CANCEL goes through the kernel's org-scoped cancel/2 and is honest about WHEN it stops",
        %{org_id: org_id} do
     run = AgentFixture.run!(org_id, state: :running)
@@ -271,10 +292,36 @@ defmodule Samen.Web.AI.AgentSurfaceTest do
   # The operator surface
   # ==========================================================================
 
+  test "the operator SUMMARY rolls cached input up as its own figure, apart from tokens (issue #74)",
+       %{org_id: org_id} do
+    for {input, cached} <- [{10, 1_000}, {5, 250}] do
+      AgentFixture.run!(org_id, agent: "support_triage", state: :succeeded)
+      |> Ash.Changeset.for_update(:advance, %{
+        input_tokens_used: input,
+        cached_input_tokens_used: cached,
+        output_tokens_used: 1
+      })
+      |> Ash.update!(authorize?: false)
+    end
+
+    {:ok, [support]} = Health.summary(Actor.new("op-1", :operator_admin), org_id)
+
+    # `tokens` stays fresh input + output; cached input is reported beside it, not in it.
+    assert support.tokens == 10 + 1 + 5 + 1
+    assert support.cached_tokens == 1_250
+  end
+
   test "the operator SUMMARY aggregates per definition and reports the durable kill state",
        %{org_id: org_id} do
     _ = AgentFixture.run!(org_id, agent: "support_triage", state: :succeeded)
-    _ = AgentFixture.run!(org_id, agent: "support_triage", state: :failed, error_kind: "provider_error")
+
+    _ =
+      AgentFixture.run!(org_id,
+        agent: "support_triage",
+        state: :failed,
+        error_kind: "provider_error"
+      )
+
     _ = AgentFixture.run!(org_id, agent: "billing_triage", state: :awaiting_approval)
 
     operator = Actor.new("op-1", :operator_admin)
@@ -383,7 +430,9 @@ defmodule Samen.Web.AI.AgentSurfaceTest do
       refute empty =~ "agent-plane-unavailable"
     end
 
-    test "an UNREADABLE kill row renders 'kill state unreadable', never 'active'", %{org_id: org_id} do
+    test "an UNREADABLE kill row renders 'kill state unreadable', never 'active'", %{
+      org_id: org_id
+    } do
       operator = Actor.new("op-1", :operator_admin)
       _ = AgentFixture.run!(org_id, agent: "support_triage", state: :running)
 
@@ -456,6 +505,7 @@ defmodule Samen.Web.AI.AgentSurfaceTest do
 
     render_html(Samen.Web.Operator.AgentHealthLive, assigns)
   end
+
   # ==========================================================================
   # A5 FOLD F1 — the approver-membership seam, on a REAL Identity mount
   # ==========================================================================
@@ -500,7 +550,12 @@ defmodule Samen.Web.AI.AgentSurfaceTest do
     test "an UNWIRED host is fail-closed — never a synthesized member", %{org_id: org_id} do
       {member, _} = seed_member!(org_id, :member)
       prior = Application.get_env(:samen_core, Samen.AI.Agent, [])
-      Application.put_env(:samen_core, Samen.AI.Agent, Keyword.delete(prior, :approver_membership))
+
+      Application.put_env(
+        :samen_core,
+        Samen.AI.Agent,
+        Keyword.delete(prior, :approver_membership)
+      )
 
       try do
         assert Approver.seam() == nil
@@ -515,7 +570,10 @@ defmodule Samen.Web.AI.AgentSurfaceTest do
     defp seed_member!(org_id, role) do
       user =
         User
-        |> Ash.Changeset.for_create(:create, %{org_id: org_id, handle: "u-#{System.unique_integer([:positive])}"})
+        |> Ash.Changeset.for_create(:create, %{
+          org_id: org_id,
+          handle: "u-#{System.unique_integer([:positive])}"
+        })
         |> Ash.create!(authorize?: false)
 
       membership =

@@ -6,15 +6,17 @@
 #
 # Flips the extra-key test. The plain-usage test and the bad-count test stay green (the
 # two counts are still right), which is why only an allowlist assertion catches it.
+# Re-anchored for issue #74 (separate cached/uncached buckets): every billing site now
+# goes through `spent/1` / `spend_attrs/2`, so the surrounding code moved. Same edit.
 # APP: samen_core
 # TEST_FILES: test/ai/chokepoint_error_usage_test.exs
 # MUST_FAIL: EG6: no other key in the usage map travels — the map is rebuilt, never passed through
 diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
-index dfb4f1f..358172d 100644
+index b4b9429..1a2267b 100644
 --- a/samen_core/lib/samen/ai/chokepoint.ex
 +++ b/samen_core/lib/samen/ai/chokepoint.ex
-@@ -405,10 +405,12 @@ defmodule Samen.AI.Chokepoint do
-   # EG6 for the usage channel: rebuild, never pass through. Any other key, and any value
+@@ -411,11 +411,13 @@ defmodule Samen.AI.Chokepoint do
+   # (`:cached_input_tokens` is input served from the prompt cache, issue #74). Any other key, and any value
    # that is not a non-negative integer, is dropped (a bad value bills 0, never a guess).
    defp scrub_usage(usage) do
 -    %{
@@ -22,6 +24,7 @@ index dfb4f1f..358172d 100644
 +    # key it put in the usage slot now travels past the normalizer.
 +    Map.merge(usage, %{
        input_tokens: usage_count(usage, :input_tokens),
+       cached_input_tokens: usage_count(usage, :cached_input_tokens),
        output_tokens: usage_count(usage, :output_tokens)
 -    }
 +    })

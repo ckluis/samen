@@ -9,21 +9,24 @@
 # 300 plus the fold ledger's own recorded input (which records the reported usage), and the
 # bill no longer equals the summarize call's reported usage. The bare `> 300` inequality
 # would NOT catch it (300 + 1 > 300); only the ledger-pinned equalities do.
+# Re-anchored for issue #74 (separate cached/uncached buckets): every billing site now
+# goes through `spent/1` / `spend_attrs/2`, so the surrounding code moved. Same edit.
 # APP: samen_core
 # TEST_FILES: test/ai/agent_compaction_test.exs
 # MUST_FAIL: P13 POSITIVE CONTROL 2 (anti-tautology, MANDATORY): the fold DID spend real tokens against max_input_tokens/max_output_tokens in the same window
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index bb202cc..b52a285 100644
+index 2180604..3017fc4 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1550,7 +1550,9 @@ defmodule Samen.AI.Agent do
-   defp bill_summarizer!(%Run{} = run, %{input_tokens: in_tokens, output_tokens: out_tokens}) do
-     run
-     |> Ash.Changeset.for_update(:advance, %{
--      input_tokens_used: run.input_tokens_used + in_tokens,
+@@ -1547,8 +1547,10 @@ defmodule Samen.AI.Agent do
+     spend = spent(usage)
+ 
+     if spent_any?(spend) do
 +      # SABOTAGE (ADR-048 §8 P13 CONTROL 2; issue #72): the fold bills a CONSTANT of at
 +      # most 1 input token instead of what its summarize call reported spending.
-+      input_tokens_used: run.input_tokens_used + min(in_tokens, 1),
-       output_tokens_used: run.output_tokens_used + out_tokens
-     })
-     |> Ash.update!(authorize?: false)
+       run
+-      |> Ash.Changeset.for_update(:advance, spend_attrs(run, spend))
++      |> Ash.Changeset.for_update(:advance, spend_attrs(run, %{spend | input: min(spend.input, 1)}))
+       |> Ash.update!(authorize?: false)
+     else
+       run

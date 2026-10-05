@@ -1,0 +1,22 @@
+# SABOTAGE: issue #74 — `over_budget/2` stops checking the cached-input ceiling
+# (`max_cached_input_tokens`). The counter still moves and is still persisted, so every
+# display looks right, but a run can read unbounded cached input without ever ending: the
+# bucket exists and its limit does not.
+#
+# Flips the cached-ceiling test.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: #74 RED: exceeding the CACHED ceiling ends the run with its own bounded kind
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 2180604..d00a25a 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -678,7 +678,7 @@ defmodule Samen.AI.Agent do
+       run.current_turn >= run.max_turns -> :max_turns
+       run.tool_calls_used >= run.max_tool_calls -> :max_tool_calls
+       run.input_tokens_used > run.max_input_tokens -> :max_input_tokens
+-      run.cached_input_tokens_used > run.max_cached_input_tokens -> :max_cached_input_tokens
++      # SABOTAGE (#74): the cached-input ceiling is not enforced.
+       run.output_tokens_used > run.max_output_tokens -> :max_output_tokens
+       deadline_passed?(run, now) -> :deadline
+       true -> nil

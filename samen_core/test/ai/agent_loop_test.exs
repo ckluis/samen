@@ -241,7 +241,8 @@ defmodule Samen.AI.AgentLoopTest do
     end
 
     test "egress_opts/2 pins grant_egress?: false LAST — a caller override cannot re-enable it (§4.4)" do
-      opts = Agent.egress_opts([grant_egress?: true, history: [:forged], provider: {X, %{}}], ["h1"])
+      opts =
+        Agent.egress_opts([grant_egress?: true, history: [:forged], provider: {X, %{}}], ["h1"])
 
       assert Keyword.get(opts, :grant_egress?) == false
       assert Keyword.get(opts, :history) == ["h1"]
@@ -340,7 +341,7 @@ defmodule Samen.AI.AgentLoopTest do
       assert run.output_tokens_used == 20
     end
 
-    test "over_budget/2 covers all five budgets (the pure boundary check, unit-proved)" do
+    test "over_budget/2 covers all six budgets (the pure boundary check, unit-proved)" do
       now = DateTime.utc_now()
 
       base = %Run{
@@ -350,6 +351,8 @@ defmodule Samen.AI.AgentLoopTest do
         max_tool_calls: 12,
         input_tokens_used: 0,
         max_input_tokens: 60_000,
+        cached_input_tokens_used: 0,
+        max_cached_input_tokens: 600_000,
         output_tokens_used: 0,
         max_output_tokens: 8_000,
         started_at: now,
@@ -360,6 +363,14 @@ defmodule Samen.AI.AgentLoopTest do
       assert Agent.over_budget(%{base | current_turn: 8}, now) == :max_turns
       assert Agent.over_budget(%{base | tool_calls_used: 12}, now) == :max_tool_calls
       assert Agent.over_budget(%{base | input_tokens_used: 60_001}, now) == :max_input_tokens
+
+      # Issue #74: the cached-input bucket has its own ceiling, and heavy cached input never
+      # trips the uncached one.
+      assert Agent.over_budget(%{base | cached_input_tokens_used: 600_001}, now) ==
+               :max_cached_input_tokens
+
+      assert Agent.over_budget(%{base | cached_input_tokens_used: 600_000}, now) == nil
+      assert Agent.over_budget(%{base | cached_input_tokens_used: 500_000}, now) == nil
       assert Agent.over_budget(%{base | output_tokens_used: 8_001}, now) == :max_output_tokens
 
       assert Agent.over_budget(%{base | started_at: DateTime.add(now, -601)}, now) == :deadline

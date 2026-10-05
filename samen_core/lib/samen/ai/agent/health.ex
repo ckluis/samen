@@ -66,6 +66,7 @@ defmodule Samen.AI.Agent.Health do
     :cancel_requested_at,
     :tool_calls_used,
     :input_tokens_used,
+    :cached_input_tokens_used,
     :output_tokens_used,
     :max_turns,
     :max_tool_calls,
@@ -84,6 +85,7 @@ defmodule Samen.AI.Agent.Health do
     :arg_keys,
     :error_kind,
     :input_tokens,
+    :cached_input_tokens,
     :output_tokens,
     :duration_ms,
     :provider,
@@ -303,6 +305,8 @@ defmodule Samen.AI.Agent.Health do
         tool_calls: Enum.reduce(agent_runs, 0, &(&1.tool_calls_used + &2)),
         tokens:
           Enum.reduce(agent_runs, 0, &(&1.input_tokens_used + &1.output_tokens_used + &2)),
+        # Issue #74: input served from the prompt cache, its own bucket (not in `tokens`).
+        cached_tokens: Enum.reduce(agent_runs, 0, &(&1.cached_input_tokens_used + &2)),
         last_run_at: agent_runs |> Enum.map(& &1.inserted_at) |> latest(),
         last_failure_at:
           agent_runs

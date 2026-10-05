@@ -1,0 +1,22 @@
+# SABOTAGE: issue #74 — the chokepoint's usage allowlist zeroes the cached-input bucket when
+# it rebuilds a failure's usage, so a usage-carrying failure that read cached input bills
+# none of it: the bucket exists in the adapter and in the run, and is lost in between.
+#
+# Flips the cached-bucket chokepoint test. The input/output counts still travel.
+# APP: samen_core
+# TEST_FILES: test/ai/chokepoint_error_usage_test.exs
+# MUST_FAIL: the cached-input bucket travels as its own count (issue #74)
+diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+index b4b9429..9bc2c6b 100644
+--- a/samen_core/lib/samen/ai/chokepoint.ex
++++ b/samen_core/lib/samen/ai/chokepoint.ex
+@@ -413,7 +413,8 @@ defmodule Samen.AI.Chokepoint do
+   defp scrub_usage(usage) do
+     %{
+       input_tokens: usage_count(usage, :input_tokens),
+-      cached_input_tokens: usage_count(usage, :cached_input_tokens),
++      # SABOTAGE (#74): the cached-input bucket is dropped at the chokepoint.
++      cached_input_tokens: 0 * usage_count(usage, :cached_input_tokens),
+       output_tokens: usage_count(usage, :output_tokens)
+     }
+   end

@@ -111,7 +111,11 @@ defmodule Samen.AI.Agent.Compaction do
   end
 
   @typedoc "What one summarize call spent."
-  @type usage :: %{input_tokens: non_neg_integer(), output_tokens: non_neg_integer()}
+  @type usage :: %{
+          input_tokens: non_neg_integer(),
+          cached_input_tokens: non_neg_integer(),
+          output_tokens: non_neg_integer()
+        }
 
   @doc """
   ADR-048 §5#3 — the INGRESS path over ONE model-written binary: `Secrets.redact/1` **then**
@@ -428,10 +432,15 @@ defmodule Samen.AI.Agent.Compaction do
   defp ingress({:error, reason, usage}), do: {:error, reason, usage}
 
   # Usage as two non-negative integers; anything else counts 0, never a guess.
-  defp spent(usage) when is_map(usage),
-    do: %{input_tokens: count(usage, :input_tokens), output_tokens: count(usage, :output_tokens)}
+  defp spent(usage) when is_map(usage) do
+    %{
+      input_tokens: count(usage, :input_tokens),
+      cached_input_tokens: count(usage, :cached_input_tokens),
+      output_tokens: count(usage, :output_tokens)
+    }
+  end
 
-  defp spent(_usage), do: %{input_tokens: 0, output_tokens: 0}
+  defp spent(_usage), do: %{input_tokens: 0, cached_input_tokens: 0, output_tokens: 0}
 
   defp count(usage, key) do
     case Map.get(usage, key) do

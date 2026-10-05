@@ -204,6 +204,11 @@ defmodule Samen.AI.Agent do
     max_tool_calls: 12,
     max_input_tokens: 60_000,
     max_output_tokens: 8_000,
+    # Issue #74: input SERVED from the provider's prompt cache — its own bucket and ceiling.
+    # 10x the uncached ceiling: a cache read costs about a tenth of fresh input, so this is
+    # the same spend headroom, and an agent that re-reads a cached prefix every turn is not
+    # starved of its real budget.
+    max_cached_input_tokens: 600_000,
     deadline_seconds: 600,
     # ADR-048 §6 (T218/C2) — the CONTEXT watermark, not a spend ceiling. It is the point
     # at which the assembled context is too large to keep growing: Level 1 folds the
@@ -224,6 +229,7 @@ defmodule Samen.AI.Agent do
     :max_turns,
     :max_tool_calls,
     :max_input_tokens,
+    :max_cached_input_tokens,
     :max_output_tokens,
     :deadline,
     :cancelled,
@@ -672,6 +678,7 @@ defmodule Samen.AI.Agent do
       run.current_turn >= run.max_turns -> :max_turns
       run.tool_calls_used >= run.max_tool_calls -> :max_tool_calls
       run.input_tokens_used > run.max_input_tokens -> :max_input_tokens
+      run.cached_input_tokens_used > run.max_cached_input_tokens -> :max_cached_input_tokens
       run.output_tokens_used > run.max_output_tokens -> :max_output_tokens
       deadline_passed?(run, now) -> :deadline
       true -> nil
@@ -716,7 +723,8 @@ defmodule Samen.AI.Agent do
   defp bounded_meta_value(v), do: v
 
   @doc """
-  The resolved default budgets — the five ADR-047 §9#3 SPEND ceilings plus ADR-048 §6's
+  The resolved default budgets — the six SPEND ceilings (ADR-047 §9#3, plus the cached-input
+  ceiling issue #74 added) plus ADR-048 §6's
   `context_cutoff_tokens` watermark. The honesty floor is not in here.
   """
   @spec default_budgets() :: keyword()
@@ -1257,19 +1265,15 @@ defmodule Samen.AI.Agent do
   # `input_tokens` is the attempt that produced its result, and the failed one belongs to
   # the same turn index.
   defp bill_failed_attempt(%Run{} = run, turn_row, {:error, reason, usage}) do
-    in_tokens = usage_int(usage, :input_tokens)
-    out_tokens = usage_int(usage, :output_tokens)
+    spend = spent(usage)
 
-    if in_tokens + out_tokens > 0 do
+    if spent_any?(spend) do
       run =
         run
-        |> Ash.Changeset.for_update(:advance, %{
-          input_tokens_used: run.input_tokens_used + in_tokens,
-          output_tokens_used: run.output_tokens_used + out_tokens
-        })
+        |> Ash.Changeset.for_update(:advance, spend_attrs(run, spend))
         |> Ash.update!(authorize?: false)
 
-      {run, note_failed_attempt!(turn_row, in_tokens, out_tokens), {:error, reason}}
+      {run, note_failed_attempt!(turn_row, spend), {:error, reason}}
     else
       {run, turn_row, {:error, reason}}
     end
@@ -1277,13 +1281,8 @@ defmodule Samen.AI.Agent do
 
   defp bill_failed_attempt(run, turn_row, result), do: {run, turn_row, result}
 
-  defp note_failed_attempt!(turn_row, in_tokens, out_tokens) do
-    meta = turn_row.meta || %{}
-
-    meta =
-      meta
-      |> Map.put("failed_input_tokens", meta_int(meta, "failed_input_tokens") + in_tokens)
-      |> Map.put("failed_output_tokens", meta_int(meta, "failed_output_tokens") + out_tokens)
+  defp note_failed_attempt!(turn_row, spend) do
+    meta = add_spend_meta(turn_row.meta || %{}, "failed", spend)
 
     turn_row
     |> Ash.Changeset.for_update(:decide, %{meta: bounded_meta(meta)})
@@ -1545,15 +1544,16 @@ defmodule Samen.AI.Agent do
   # The summarizer's bill (issue #72): the same `:advance` write and the same in-memory-
   # total-plus-delta every committing site uses, returning the UPDATED struct so later
   # writes total off it. Nothing is written when nothing was spent.
-  defp bill_summarizer!(%Run{} = run, %{input_tokens: 0, output_tokens: 0}), do: run
+  defp bill_summarizer!(%Run{} = run, usage) do
+    spend = spent(usage)
 
-  defp bill_summarizer!(%Run{} = run, %{input_tokens: in_tokens, output_tokens: out_tokens}) do
-    run
-    |> Ash.Changeset.for_update(:advance, %{
-      input_tokens_used: run.input_tokens_used + in_tokens,
-      output_tokens_used: run.output_tokens_used + out_tokens
-    })
-    |> Ash.update!(authorize?: false)
+    if spent_any?(spend) do
+      run
+      |> Ash.Changeset.for_update(:advance, spend_attrs(run, spend))
+      |> Ash.update!(authorize?: false)
+    else
+      run
+    end
   end
 
   # ADR-048 §5#6 — `:after_compaction`'s FIRST call site. It fires AFTER the summary has
@@ -1602,27 +1602,16 @@ defmodule Samen.AI.Agent do
   # ACCUMULATED (a turn can fold twice: pre-turn and Level 2), so the turn ledger explains
   # the run's total without decrypting the fold ledger. Nothing is stamped for zero.
   defp note_summarizer_usage!(turn_row, views) do
-    case Map.get(views, :summarizer_usage) do
-      %{input_tokens: in_tokens, output_tokens: out_tokens} when in_tokens + out_tokens > 0 ->
-        meta = turn_row.meta || %{}
+    spend = views |> Map.get(:summarizer_usage) |> spent()
 
-        meta =
-          meta
-          |> Map.put(
-            "summarizer_input_tokens",
-            meta_int(meta, "summarizer_input_tokens") + in_tokens
-          )
-          |> Map.put(
-            "summarizer_output_tokens",
-            meta_int(meta, "summarizer_output_tokens") + out_tokens
-          )
+    if spent_any?(spend) do
+      meta = add_spend_meta(turn_row.meta || %{}, "summarizer", spend)
 
-        turn_row
-        |> Ash.Changeset.for_update(:decide, %{meta: bounded_meta(meta)})
-        |> Ash.update!(authorize?: false)
-
-      _none ->
-        turn_row
+      turn_row
+      |> Ash.Changeset.for_update(:decide, %{meta: bounded_meta(meta)})
+      |> Ash.update!(authorize?: false)
+    else
+      turn_row
     end
   end
 
@@ -1740,10 +1729,9 @@ defmodule Samen.AI.Agent do
   # The fold's ledger entry records what its summarize call SPENT (issue #72) — the bill
   # itself was already written by `bill_summarizer!/2`, so this write carries only the
   # transcript.
-  defp apply_fold!(%Run{} = run, views, goal, span, %{
-         input_tokens: in_tokens,
-         output_tokens: out_tokens
-       }) do
+  defp apply_fold!(%Run{} = run, views, goal, span, usage) do
+    spend = spent(usage)
+
     entry = %{
       "seq" => span.seq,
       "turn_index" => run.current_turn + 1,
@@ -1761,8 +1749,9 @@ defmodule Samen.AI.Agent do
       "lines" => length(span.folded),
       "first_turn" => span.first_turn,
       "last_turn" => span.last_turn,
-      "input_tokens" => in_tokens,
-      "output_tokens" => out_tokens,
+      "input_tokens" => spend.input,
+      "cached_input_tokens" => spend.cached,
+      "output_tokens" => spend.output,
       "meta" => %{"replayed" => false}
     }
 
@@ -1905,15 +1894,15 @@ defmodule Samen.AI.Agent do
          replayed?
        ) do
     turn_index = run.current_turn + 1
-    in_tokens = usage_int(completion.usage, :input_tokens)
-    out_tokens = usage_int(completion.usage, :output_tokens)
+    spend = spent(completion.usage)
 
     {:ok, run} =
       repo!().transaction(fn ->
         finalize_turn!(turn_row, %{
           status: :done,
-          input_tokens: in_tokens,
-          output_tokens: out_tokens,
+          input_tokens: spend.input,
+          cached_input_tokens: spend.cached,
+          output_tokens: spend.output,
           duration_ms: duration_ms,
           provider: bounded_provider(completion.provider),
           simulated: completion.simulated,
@@ -1925,13 +1914,17 @@ defmodule Samen.AI.Agent do
 
         run =
           run
-          |> Ash.Changeset.for_update(:advance, %{
-            current_turn: turn_index,
-            next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
-            transcript: encode_transcript_finalizing(run, goal, lines ++ [completion.text]),
-            input_tokens_used: run.input_tokens_used + in_tokens,
-            output_tokens_used: run.output_tokens_used + out_tokens
-          })
+          |> Ash.Changeset.for_update(
+            :advance,
+            Map.merge(
+              %{
+                current_turn: turn_index,
+                next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
+                transcript: encode_transcript_finalizing(run, goal, lines ++ [completion.text])
+              },
+              spend_attrs(run, spend)
+            )
+          )
           |> Ash.update!(authorize?: false)
 
         case next do
@@ -2424,15 +2417,19 @@ defmodule Samen.AI.Agent do
 
   defp park_run!(%Run{} = run, %Completion{} = completion, {goal, lines}, pending, approval) do
     run
-    |> Ash.Changeset.for_update(:park, %{
-      next_turn_at: park_deadline(approval),
-      transcript: encode_transcript(run, goal, lines, pending),
-      # The provider turn genuinely happened, so its tokens are billed. `tool_calls_used`
-      # is NOT touched: nothing executed (A3's `executed?` rule, unchanged) — the
-      # approved execution bills the one tool call it actually performs.
-      input_tokens_used: run.input_tokens_used + usage_int(completion.usage, :input_tokens),
-      output_tokens_used: run.output_tokens_used + usage_int(completion.usage, :output_tokens)
-    })
+    # The provider turn genuinely happened, so its tokens are billed. `tool_calls_used`
+    # is NOT touched: nothing executed (A3's `executed?` rule, unchanged) — the approved
+    # execution bills the one tool call it actually performs.
+    |> Ash.Changeset.for_update(
+      :park,
+      Map.merge(
+        %{
+          next_turn_at: park_deadline(approval),
+          transcript: encode_transcript(run, goal, lines, pending)
+        },
+        spend_attrs(run, spent(completion.usage))
+      )
+    )
     |> Ash.update!(authorize?: false)
   end
 
@@ -2830,6 +2827,7 @@ defmodule Samen.AI.Agent do
       transcript: encode_transcript_finalizing(run, goal, lines ++ new_lines),
       tool_calls_used: run.tool_calls_used + 1,
       input_tokens_used: run.input_tokens_used,
+      cached_input_tokens_used: run.cached_input_tokens_used,
       output_tokens_used: run.output_tokens_used
     })
     |> Ash.update!(authorize?: false)
@@ -3161,8 +3159,7 @@ defmodule Samen.AI.Agent do
   # ONE transaction (the commit_turn! discipline).
   defp commit_tool_turn!(%Run{} = run, turn_row, %Completion{} = completion, turn) do
     turn_index = run.current_turn + 1
-    in_tokens = usage_int(completion.usage, :input_tokens)
-    out_tokens = usage_int(completion.usage, :output_tokens)
+    spend = spent(completion.usage)
 
     finalize_meta =
       (turn_row.meta || %{})
@@ -3176,8 +3173,9 @@ defmodule Samen.AI.Agent do
           tool_kind: turn.tool_kind,
           arg_keys: turn.arg_keys,
           error_kind: turn.error_kind && to_string(safe_error_kind(turn.error_kind)),
-          input_tokens: in_tokens,
-          output_tokens: out_tokens,
+          input_tokens: spend.input,
+          cached_input_tokens: spend.cached,
+          output_tokens: spend.output,
           duration_ms: turn.duration_ms,
           provider: bounded_provider(completion.provider),
           simulated: completion.simulated,
@@ -3185,14 +3183,19 @@ defmodule Samen.AI.Agent do
         })
 
         run
-        |> Ash.Changeset.for_update(:advance, %{
-          current_turn: turn_index,
-          next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
-          transcript: encode_transcript_finalizing(run, turn.goal, turn.lines ++ turn.new_lines),
-          tool_calls_used: run.tool_calls_used + if(turn.executed?, do: 1, else: 0),
-          input_tokens_used: run.input_tokens_used + in_tokens,
-          output_tokens_used: run.output_tokens_used + out_tokens
-        })
+        |> Ash.Changeset.for_update(
+          :advance,
+          Map.merge(
+            %{
+              current_turn: turn_index,
+              next_turn_at: DateTime.add(DateTime.utc_now(), @inflight_watchdog_seconds),
+              transcript:
+                encode_transcript_finalizing(run, turn.goal, turn.lines ++ turn.new_lines),
+              tool_calls_used: run.tool_calls_used + if(turn.executed?, do: 1, else: 0)
+            },
+            spend_attrs(run, spend)
+          )
+        )
         |> Ash.update!(authorize?: false)
       end)
 
@@ -3620,7 +3623,8 @@ defmodule Samen.AI.Agent do
     Logger.info(
       "samen.ai.agent run=#{run.id} agent=#{run.agent} state=#{run.state} " <>
         "turns=#{run.current_turn} error_kind=#{run.error_kind || "none"} " <>
-        "in_tokens=#{run.input_tokens_used} out_tokens=#{run.output_tokens_used}"
+        "in_tokens=#{run.input_tokens_used} cached_in_tokens=#{run.cached_input_tokens_used} " <>
+        "out_tokens=#{run.output_tokens_used}"
     )
   end
 
@@ -3665,6 +3669,41 @@ defmodule Samen.AI.Agent do
     do: DateTime.diff(now, started_at, :second) >= run.deadline_seconds
 
   defp deadline_passed?(_run, _now), do: false
+
+  # Issue #74 — what one provider call spent, as the run's three token buckets. `input` is
+  # input processed FRESH (uncached, including cache writes); `cached` is input SERVED from
+  # the provider's prompt cache. Every billing site goes through `spend_attrs/2`, so no site
+  # can bill one bucket and forget another.
+  defp spent(usage) do
+    %{
+      input: usage_int(usage, :input_tokens),
+      cached: usage_int(usage, :cached_input_tokens),
+      output: usage_int(usage, :output_tokens)
+    }
+  end
+
+  defp spent_any?(%{input: input, cached: cached, output: output}),
+    do: input + cached + output > 0
+
+  defp spend_attrs(%Run{} = run, %{input: input, cached: cached, output: output}) do
+    %{
+      input_tokens_used: run.input_tokens_used + input,
+      cached_input_tokens_used: run.cached_input_tokens_used + cached,
+      output_tokens_used: run.output_tokens_used + output
+    }
+  end
+
+  # The turn ledger's copy of a spend, under `<prefix>_input_tokens` /
+  # `<prefix>_cached_input_tokens` / `<prefix>_output_tokens`, ACCUMULATED.
+  defp add_spend_meta(meta, prefix, %{input: input, cached: cached, output: output}) do
+    meta
+    |> Map.put("#{prefix}_input_tokens", meta_int(meta, "#{prefix}_input_tokens") + input)
+    |> Map.put(
+      "#{prefix}_cached_input_tokens",
+      meta_int(meta, "#{prefix}_cached_input_tokens") + cached
+    )
+    |> Map.put("#{prefix}_output_tokens", meta_int(meta, "#{prefix}_output_tokens") + output)
+  end
 
   defp usage_int(usage, key) when is_map(usage) do
     case Map.get(usage, key, 0) do
