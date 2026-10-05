@@ -141,6 +141,16 @@ defmodule Samen.AdapterConformanceCaseTest do
       end
     end
 
+    test "flunks when a refusal claims to have spent tokens (issue #11 — a refusal makes no call)" do
+      assert_raise ExUnit.AssertionError, ~r/claims to have spent tokens/, fn ->
+        Harness.assert_refusal_table!([
+          {"usage-carrying refusal",
+           fn -> {:error, :not_configured, %{input_tokens: 5, output_tokens: 0}} end,
+           :not_configured}
+        ])
+      end
+    end
+
     test "flunks when the adapter returns the wrong error atom" do
       assert_raise ExUnit.AssertionError, fn ->
         Harness.assert_refusal_table!([
@@ -210,6 +220,7 @@ defmodule Samen.AdapterConformanceCaseTest do
       end
     end
   end
+
   # ---------------------------------------------------------------------------
   # load_fixtures!/1 — UXD-07 / A6 (delivery-shaped addition)
 

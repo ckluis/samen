@@ -27,6 +27,31 @@ defmodule SamenAnthropic.Provider do
   A host wires a real `api_key` and the live transport is exercised ONLY behind
   `SAMEN_AI_LIVE=1` (ADR-043 §4) — the test suite injects a fixture transport so `mix test`
   makes zero live calls (the samen_postmark cassette precedent).
+
+  ## Context overflow (ADR-048 §6 Level 2; issue #11)
+
+  The Messages API signals an overflowing context two ways, and both map to the bounded
+  `:context_overflow` kind the agent loop's Level 2 recovery keys on:
+
+    * the INPUT alone exceeds the model's window — a 400 `invalid_request_error`
+      ("prompt is too long"). The request is rejected before any work is done and the
+      error body carries no usage, so this is `{:error, :context_overflow}`: nothing was
+      spent, and nothing is invented;
+    * GENERATION fills the window — an HTTP 200 with `stop_reason:
+      "model_context_window_exceeded"`. The docs say to treat that response as
+      truncated, and it reports what it spent, so it is NOT a completion: it is
+      `{:error, :context_overflow, usage}`, the failed attempt whose tokens still count
+      (ADR-048 §6 Level 2 constraint 1). A truncated answer is never handed back as a
+      finished one.
+
+  The error message is read only to classify; it is never returned (EG6).
+
+  ## Usage
+
+  `input_tokens` is the input the request was billed for. With prompt caching the API
+  splits it across `input_tokens`, `cache_creation_input_tokens` and
+  `cache_read_input_tokens`, and all three count toward the context window, so the
+  reported `input_tokens` is their sum (a missing or non-integer field counts as 0).
   """
 
   @behaviour Samen.AI.Provider
@@ -93,6 +118,15 @@ defmodule SamenAnthropic.Provider do
     [%{"role" => "user", "content" => text}]
   end
 
+  # Generation filled the context window: truncated, and it spent tokens — the
+  # usage-carrying overflow (see the moduledoc). Ordered before the success clause.
+  defp handle_response(
+         {:ok, %{status: 200, body: %{"stop_reason" => "model_context_window_exceeded"} = body}},
+         _model
+       ) do
+    {:error, :context_overflow, normalize_usage(Map.get(body, "usage", %{}))}
+  end
+
   defp handle_response({:ok, %{status: 200, body: %{"content" => content} = body}}, model)
        when is_list(content) do
     {:ok,
@@ -103,6 +137,21 @@ defmodule SamenAnthropic.Provider do
        usage: normalize_usage(Map.get(body, "usage", %{})),
        meta: %{stop_reason: Map.get(body, "stop_reason")}
      }}
+  end
+
+  # The input alone exceeds the window: rejected before any work, no usage reported.
+  defp handle_response(
+         {:ok,
+          %{
+            status: 400,
+            body: %{"error" => %{"type" => "invalid_request_error", "message" => message}}
+          }},
+         _model
+       )
+       when is_binary(message) do
+    if prompt_too_long?(message),
+      do: {:error, :context_overflow},
+      else: {:error, {:anthropic_error, 400, "invalid_request_error"}}
   end
 
   defp handle_response({:ok, %{status: status, body: %{"error" => %{"type" => type}}}}, _model) do
@@ -122,11 +171,26 @@ defmodule SamenAnthropic.Provider do
     |> Enum.map_join("", &Map.get(&1, "text", ""))
   end
 
+  defp prompt_too_long?(message),
+    do: message |> String.downcase() |> String.contains?("prompt is too long")
+
+  # All three input fields count toward the window (see the moduledoc).
   defp normalize_usage(usage) when is_map(usage) do
     %{
-      input_tokens: Map.get(usage, "input_tokens"),
-      output_tokens: Map.get(usage, "output_tokens")
+      input_tokens:
+        count(usage, "input_tokens") + count(usage, "cache_creation_input_tokens") +
+          count(usage, "cache_read_input_tokens"),
+      output_tokens: count(usage, "output_tokens")
     }
+  end
+
+  defp normalize_usage(_usage), do: %{input_tokens: 0, output_tokens: 0}
+
+  defp count(usage, key) do
+    case Map.get(usage, key) do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> 0
+    end
   end
 
   defp present?(config, key) do

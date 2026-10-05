@@ -92,7 +92,8 @@ defmodule Samen.AdapterConformanceCase do
   and the KMS family's ad hoc refusal checks). `table` is a list of
   `{description, invoke_fn/0, expected_error}` tuples. For each entry, `invoke_fn.()` MUST
   return `{:error, expected_error}` — NEVER a fake `{:ok, _}` (the CLAUDE.md fail-honest
-  adapter contract; ADR-014/024/026).
+  adapter contract; ADR-014/024/026), and never a usage-carrying `{:error, reason, usage}`:
+  a refusal made no call, so it spent nothing (issue #11).
   """
   @spec assert_refusal_table!([{String.t(), (-> term()), term()}]) :: :ok
   def assert_refusal_table!(table) when is_list(table) do
@@ -106,6 +107,16 @@ defmodule Samen.AdapterConformanceCase do
             "#{description}: got a FAKE success #{inspect(ok)} instead of " <>
               "{:error, #{inspect(expected)}} — an adapter must never claim success for " <>
               "work it did not do (CLAUDE.md fail-honest adapter contract)."
+          )
+
+        # A provider MAY report a failure that spent tokens as `{:error, reason, usage}`
+        # (ADR-048 §6 Level 2 constraint 1, issue #11). A REFUSAL made no call, so a refusal
+        # that claims usage is inventing spend — the mirror image of a fake success.
+        {:error, _reason, _usage} ->
+          flunk(
+            "#{description}: the refusal claims to have spent tokens (a three-element " <>
+              "{:error, reason, usage}) — a refusal makes no provider call, so it has no " <>
+              "usage to report; expected {:error, #{inspect(expected)}}."
           )
 
         other ->
@@ -162,6 +173,7 @@ defmodule Samen.AdapterConformanceCase do
 
     :ok
   end
+
   @doc """
   Family-neutral conformance-fixture loader (the delivery-shaped generalization of
   `Samen.Delivery.ProviderConformanceCase`'s own ESP-scoped loader, which stays

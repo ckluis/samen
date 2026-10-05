@@ -101,9 +101,18 @@ defmodule SamenAnthropic.ProviderTest do
 
   describe "complete/2 with a fixture transport (no live call)" do
     test "configured + transport genuinely builds a request and parses the response" do
-      config = %{api_key: "sk-ant-xxx", model: "claude-opus-5", transport: fixture_transport(self())}
+      config = %{
+        api_key: "sk-ant-xxx",
+        model: "claude-opus-5",
+        transport: fixture_transport(self())
+      }
 
-      assert {:ok, %Completion{provider: :anthropic, text: "fixture completion", model: "claude-opus-5"}} =
+      assert {:ok,
+              %Completion{
+                provider: :anthropic,
+                text: "fixture completion",
+                model: "claude-opus-5"
+              }} =
                Provider.complete(sealed(["summarize the account"]), config)
 
       # The outbound request carries the sealed segment text in a user message and the
@@ -117,7 +126,11 @@ defmodule SamenAnthropic.ProviderTest do
 
     test "an Anthropic API error is surfaced as a bounded, content-free term (EG6)" do
       erroring = fn _request ->
-        {:ok, %{status: 400, body: %{"error" => %{"type" => "invalid_request_error", "message" => "PROMPT-CANARY"}}}}
+        {:ok,
+         %{
+           status: 400,
+           body: %{"error" => %{"type" => "invalid_request_error", "message" => "PROMPT-CANARY"}}
+         }}
       end
 
       config = %{api_key: "sk-ant-xxx", transport: erroring}
@@ -150,6 +163,119 @@ defmodule SamenAnthropic.ProviderTest do
       assert_raise FunctionClauseError, fn ->
         apply(Provider, :embed, ["raw", %{api_key: "sk-ant-xxx"}])
       end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Context overflow (ADR-048 §6 Level 2 constraint 1; issue #11)
+  #
+  # The two ways the Messages API says the context overflowed, both mapped to the bounded
+  # `:context_overflow` kind the agent's Level 2 recovery keys on — and the one that spent
+  # tokens carries them, so the failed attempt can be billed.
+
+  @canary "Ada Lovelace, 12 Analytical Way"
+
+  defp responding(response), do: fn _request -> {:ok, response} end
+
+  defp complete_with(response),
+    do: Provider.complete(sealed(["p"]), %{api_key: "sk-ant-x", transport: responding(response)})
+
+  defp window_exceeded(usage) do
+    %{
+      status: 200,
+      body: %{
+        "type" => "message",
+        "model" => "claude-opus-5",
+        "stop_reason" => "model_context_window_exceeded",
+        "content" => [%{"type" => "text", "text" => "truncated mid-sentence about " <> @canary}],
+        "usage" => usage
+      }
+    }
+  end
+
+  defp invalid_request(message) do
+    %{
+      status: 400,
+      body: %{
+        "type" => "error",
+        "error" => %{"type" => "invalid_request_error", "message" => message},
+        "request_id" => "req_fixture"
+      }
+    }
+  end
+
+  describe "context overflow (issue #11)" do
+    test "a 400 'prompt is too long' is a :context_overflow — nothing was spent, so no usage" do
+      result =
+        complete_with(invalid_request("prompt is too long: 1048577 tokens > 1048576 maximum"))
+
+      assert result == {:error, :context_overflow}
+    end
+
+    test "any other invalid request stays a bounded provider error (the classifier is narrow)" do
+      result =
+        complete_with(
+          invalid_request("messages: roles must alternate between \"user\" and \"assistant\"")
+        )
+
+      assert result == {:error, {:anthropic_error, 400, "invalid_request_error"}}
+    end
+
+    test "a 200 that filled the context window is a usage-carrying :context_overflow, never a completion" do
+      result = complete_with(window_exceeded(%{"input_tokens" => 900, "output_tokens" => 48}))
+
+      assert result == {:error, :context_overflow, %{input_tokens: 900, output_tokens: 48}}
+      # The truncated text is never handed back as an answer (and never echoed — EG6).
+      refute inspect(result) =~ "Lovelace"
+    end
+
+    test "positive control: a 200 that ended normally is still a completion" do
+      assert {:ok, %Completion{text: "fixture completion"}} =
+               Provider.complete(sealed(["p"]), %{
+                 api_key: "sk-ant-x",
+                 transport: fixture_transport()
+               })
+    end
+
+    test "end to end through the chokepoint: the agent loop's opt-in sees the usage, every other caller the 2-tuple" do
+      config = %{
+        api_key: "sk-ant-x",
+        transport: responding(window_exceeded(%{"input_tokens" => 900, "output_tokens" => 48}))
+      }
+
+      assert Chokepoint.complete(Provider, config, :complete, ["p"], error_usage: true) ==
+               {:error, :context_overflow, %{input_tokens: 900, output_tokens: 48}}
+
+      assert Chokepoint.complete(Provider, config, :complete, ["p"], []) ==
+               {:error, :context_overflow}
+    end
+  end
+
+  describe "usage (issue #11)" do
+    test "input_tokens is the whole billed input — uncached plus cache write plus cache read" do
+      usage = %{
+        "input_tokens" => 40,
+        "cache_creation_input_tokens" => 1_000,
+        "cache_read_input_tokens" => 20_000,
+        "output_tokens" => 7
+      }
+
+      assert {:error, :context_overflow, %{input_tokens: 21_040, output_tokens: 7}} =
+               complete_with(window_exceeded(usage))
+    end
+
+    test "a missing or malformed count is 0, never a guess" do
+      assert {:error, :context_overflow, %{input_tokens: 5, output_tokens: 0}} =
+               complete_with(
+                 window_exceeded(%{
+                   "input_tokens" => 5,
+                   "output_tokens" => "9",
+                   "cache_read_input_tokens" => -3
+                 })
+               )
+
+      assert {:error, :context_overflow, %{input_tokens: 0, output_tokens: 0}} =
+               complete_with(window_exceeded(nil))
     end
   end
 end

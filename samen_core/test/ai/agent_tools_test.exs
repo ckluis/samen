@@ -518,7 +518,11 @@ defmodule Samen.AI.AgentToolsTest do
     end
 
     test "next_step/1: ONE native call wins over text; more than one is refused honestly; empty falls back to the text grammar" do
-      native = %Completion{text: "commentary", tool_calls: [%{"name" => "fetch_record", "args" => %{"id" => "x"}}]}
+      native = %Completion{
+        text: "commentary",
+        tool_calls: [%{"name" => "fetch_record", "args" => %{"id" => "x"}}]
+      }
+
       assert Agent.next_step(native) == {:tool, "fetch_record", %{"id" => "x"}}
 
       two = %Completion{text: "", tool_calls: [%{"name" => "a"}, %{"name" => "b"}]}
@@ -675,7 +679,10 @@ defmodule Samen.AI.AgentToolsTest do
 
       assert {:error, :invalid_args} = mod.validate(%{"query" => "x", "sneaky" => true}, nil)
       assert {:error, :invalid_query} = mod.validate(%{"query" => "   "}, nil)
-      assert {:error, :invalid_query} = mod.validate(%{"query" => String.duplicate("q", 501)}, nil)
+
+      assert {:error, :invalid_query} =
+               mod.validate(%{"query" => String.duplicate("q", 501)}, nil)
+
       assert {:error, :invalid_limit} = mod.validate(%{"query" => "x", "limit" => 0}, nil)
       assert {:error, :invalid_limit} = mod.validate(%{"query" => "x", "limit" => 21}, nil)
       assert {:error, :invalid_config} = mod.validate("not a map", nil)
@@ -685,11 +692,16 @@ defmodule Samen.AI.AgentToolsTest do
       s = new_scope()
       other_org = Ash.UUID.generate()
 
-      mine = struct(Article, id: Ash.UUID.generate(), body: "the quick brown fox jumps the lazy dog")
-      foreign = struct(Article, id: Ash.UUID.generate(), body: "the quick brown fox jumps the lazy dog")
+      mine =
+        struct(Article, id: Ash.UUID.generate(), body: "the quick brown fox jumps the lazy dog")
+
+      foreign =
+        struct(Article, id: Ash.UUID.generate(), body: "the quick brown fox jumps the lazy dog")
 
       assert {:ok, 1} = Embeddings.embed_record(s, mine, Article, repo: TestRepo)
-      assert {:ok, 1} = Embeddings.embed_record(scope(other_org), foreign, Article, repo: TestRepo)
+
+      assert {:ok, 1} =
+               Embeddings.embed_record(scope(other_org), foreign, Article, repo: TestRepo)
 
       script([
         {:tool_call, "search_records", %{"query" => "quick brown fox"}},
@@ -748,7 +760,9 @@ defmodule Samen.AI.AgentToolsTest do
       assert {:error, :invalid_args} =
                mod.validate(%{"resource" => @subject_key, "id" => id, "x" => 1}, nil)
 
-      assert {:error, :invalid_id} = mod.validate(%{"resource" => @subject_key, "id" => "42"}, nil)
+      assert {:error, :invalid_id} =
+               mod.validate(%{"resource" => @subject_key, "id" => "42"}, nil)
+
       assert {:error, :invalid_resource} = mod.validate(%{"resource" => "", "id" => id}, nil)
 
       assert {:error, :invalid_resource} =
@@ -759,7 +773,8 @@ defmodule Samen.AI.AgentToolsTest do
       s = new_scope()
 
       script([
-        {:tool_call, "fetch_record", %{"resource" => "No.Such.Resource", "id" => Ash.UUID.generate()}},
+        {:tool_call, "fetch_record",
+         %{"resource" => "No.Such.Resource", "id" => Ash.UUID.generate()}},
         {:final, "cannot"}
       ])
 
@@ -799,7 +814,6 @@ defmodule Samen.AI.AgentToolsTest do
       assert wf_ctx.origin == nil
     end
   end
-
 
   # ── fold (b): the vt_ ARG GATE, refutable in the SHIPPED suite (A4) ─────────────────
 
@@ -975,7 +989,10 @@ defmodule Samen.AI.AgentToolsTest do
     end
 
     test "an {:error, kind} outcome renders ONE bounded tool_error line; a rich error degrades" do
-      assert ToolResult.render({:error, :record_not_found}, []) == ["tool_error: record_not_found"]
+      assert ToolResult.render({:error, :record_not_found}, []) == [
+               "tool_error: record_not_found"
+             ]
+
       assert ToolResult.render({:error, {:rich, "SECRET"}}, []) == ["tool_error: tool_failed"]
       assert ToolResult.render(:garbage, []) == ["tool_error: tool_failed"]
     end
@@ -985,6 +1002,48 @@ defmodule Samen.AI.AgentToolsTest do
       assert line == "tool_call: fetch_record id=1 resource=R"
       assert is_binary(ToolResult.render_call("x", %{"nested" => %{"deep" => "v"}}))
       assert ToolResult.render_call("x", %{"nested" => %{}}) =~ "[unrenderable:nested]"
+    end
+  end
+
+  # ── ADR-048 §6 Level 2 on a TOOL turn (issue #11) ───────────────────────────────────
+  #
+  # The retry counter and the failed attempt's bill are stamped on the turn row BEFORE the
+  # retry. A retry that comes back as a TOOL call goes through `decide_tool!/3`, which used
+  # to REPLACE the row's meta with a fresh map — erasing both. §6 puts the counter "on the
+  # same turn row" whichever path commits the turn.
+
+  describe "Level 2 recovery on a tool turn (issue #11)" do
+    test "RED: a recovered TOOL turn keeps its context_retries counter and the failed attempt's tokens" do
+      s = new_scope()
+      subject = create_subject!(s.actor.org_id)
+
+      script([
+        {:error, :context_overflow, %{input_tokens: 30, output_tokens: 4}},
+        fetch_call(subject.id),
+        {:final, "found it"}
+      ])
+
+      assert {:ok, %{answer: "found it", run: run}} = run_scripted(Reader, s, "look it up")
+
+      assert [t1, t2] = turn_rows(run)
+      assert t1.tool_kind == "fetch_record"
+
+      assert t1.meta["context_retries"] == 1,
+             "the Level 2 retry counter was erased when the retry came back as a tool call: " <>
+               inspect(t1.meta)
+
+      assert t1.meta["failed_input_tokens"] == 30
+      assert t1.meta["failed_output_tokens"] == 4
+      # The tool stamp itself still lands.
+      assert is_binary(t1.meta["args_digest"])
+
+      # The ledger reconciles: with no fold in this run, the run's input total is exactly
+      # its turns' own tokens plus the failed attempt stamped on turn 1.
+      run = Ash.get!(Run, run.id, authorize?: false)
+      turns_in = t1.input_tokens + t2.input_tokens + t1.meta["failed_input_tokens"]
+      turns_out = t1.output_tokens + t2.output_tokens + t1.meta["failed_output_tokens"]
+      assert run.input_tokens_used == turns_in
+      assert run.output_tokens_used == turns_out
     end
   end
 end

@@ -1,0 +1,25 @@
+# SABOTAGE: issue #11 — `samen_anthropic` stops recognising Anthropic's "prompt is too long"
+# rejection (a 400 `invalid_request_error`), so an input that exceeds the context window
+# comes back as a generic `{:anthropic_error, 400, ...}`, the chokepoint normalizes it to
+# `{:provider_error, _}`, and ADR-048 §6 Level 2 recovery never fires on the one real
+# adapter. The state before #11's follow-up.
+#
+# Flips the prompt-too-long test. The narrow-classifier control (any OTHER invalid request
+# stays a bounded provider error) stays green.
+# APP: samen_anthropic
+# TEST_FILES: test/provider_test.exs
+# MUST_FAIL: a 400 'prompt is too long' is a :context_overflow — nothing was spent, so no usage
+diff --git a/samen_anthropic/lib/samen_anthropic/provider.ex b/samen_anthropic/lib/samen_anthropic/provider.ex
+index bdbbb81..3feff57 100644
+--- a/samen_anthropic/lib/samen_anthropic/provider.ex
++++ b/samen_anthropic/lib/samen_anthropic/provider.ex
+@@ -172,7 +172,8 @@ defmodule SamenAnthropic.Provider do
+   end
+ 
+   defp prompt_too_long?(message),
+-    do: message |> String.downcase() |> String.contains?("prompt is too long")
++    # SABOTAGE (#11): the classifier never recognises the overflow message.
++    do: message |> String.downcase() |> String.contains?("prompt is too short")
+ 
+   # All three input fields count toward the window (see the moduledoc).
+   defp normalize_usage(usage) when is_map(usage) do

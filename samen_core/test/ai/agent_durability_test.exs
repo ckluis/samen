@@ -1359,4 +1359,51 @@ defmodule Samen.AI.AgentDurabilityTest do
       assert [%{turn_index: 1, status: :failed}] = turn_rows(run)
     end
   end
+
+  describe "issue #11: the failed attempt is on the TURN ledger, not only the run" do
+    test "#11 LEDGER: a recovered turn's row carries the failed attempt's tokens in its meta — the run total is explained by its turns" do
+      d13_script(i11_overflow(@i11_usage))
+      assert {:ok, %{run: run}} = d13_run(new_scope())
+
+      [_t1, _t2, t3, t4] = turn_rows(run)
+
+      # The turn that overflowed and recovered carries BOTH its retry counter and the bill
+      # for the attempt that failed; its own `input_tokens` stays the attempt that
+      # produced its result.
+      assert t3.meta["context_retries"] == 1
+      assert t3.meta["failed_input_tokens"] == @i11_usage.input_tokens
+      assert t3.meta["failed_output_tokens"] == @i11_usage.output_tokens
+
+      # Positive control: a turn with no failed attempt carries no such keys.
+      refute Map.has_key?(t4.meta, "failed_input_tokens")
+    end
+
+    test "#11 LEDGER: two failed attempts on one turn ACCUMULATE on its row (Level 3)" do
+      script([
+        {:continue, @d13_bulk},
+        {:continue, @d13_short},
+        {:error, :provider_error},
+        i11_overflow(%{input_tokens: 40, output_tokens: 3}),
+        {:continue, @d13_summary},
+        i11_overflow(%{input_tokens: 2, output_tokens: 1})
+      ])
+
+      assert {:error, :context_exhausted, run} = d13_run(new_scope())
+
+      t3 = run |> turn_rows() |> Enum.find(&(&1.turn_index == 3))
+      assert t3.status == :failed
+      assert t3.meta["failed_input_tokens"] == 42
+      assert t3.meta["failed_output_tokens"] == 4
+    end
+
+    test "#11 LEDGER: a failed turn that never recovered carries its bill too" do
+      script([{:error, :provider_error, %{input_tokens: 9, output_tokens: 2}}])
+
+      assert {:error, :provider_error, run} = run_scripted(Durable, new_scope(), "goal")
+
+      assert [t1] = turn_rows(run)
+      assert t1.meta["failed_input_tokens"] == 9
+      assert t1.meta["failed_output_tokens"] == 2
+    end
+  end
 end

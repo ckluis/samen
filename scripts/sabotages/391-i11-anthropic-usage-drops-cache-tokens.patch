@@ -1,0 +1,26 @@
+# SABOTAGE: issue #11 — `samen_anthropic` reports only the UNCACHED `input_tokens` as the
+# input a call spent, dropping `cache_creation_input_tokens` and `cache_read_input_tokens`.
+# All three count toward the context window, so with prompt caching on, every bill —
+# successful or failed — under-counts what the run consumed against `max_input_tokens`,
+# silently, the day caching is switched on.
+#
+# Flips the whole-billed-input test.
+# APP: samen_anthropic
+# TEST_FILES: test/provider_test.exs
+# MUST_FAIL: input_tokens is the whole billed input — uncached plus cache write plus cache read
+diff --git a/samen_anthropic/lib/samen_anthropic/provider.ex b/samen_anthropic/lib/samen_anthropic/provider.ex
+index bdbbb81..2099bed 100644
+--- a/samen_anthropic/lib/samen_anthropic/provider.ex
++++ b/samen_anthropic/lib/samen_anthropic/provider.ex
+@@ -177,9 +177,8 @@ defmodule SamenAnthropic.Provider do
+   # All three input fields count toward the window (see the moduledoc).
+   defp normalize_usage(usage) when is_map(usage) do
+     %{
+-      input_tokens:
+-        count(usage, "input_tokens") + count(usage, "cache_creation_input_tokens") +
+-          count(usage, "cache_read_input_tokens"),
++      # SABOTAGE (#11): only the uncached remainder is counted.
++      input_tokens: count(usage, "input_tokens") + 0 * count(usage, "cache_creation_input_tokens") + 0 * count(usage, "cache_read_input_tokens"),
+       output_tokens: count(usage, "output_tokens")
+     }
+   end
