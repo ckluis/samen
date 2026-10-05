@@ -248,6 +248,10 @@ defmodule Acme.Repo.Migrations.AppResources do
       add(:ace_feature, :text, null: false)
       add(:ace_granted, :boolean, default: true)
       add(:ace_expires_at, :utc_datetime)
+      # T163 (ADR-051 P3): the usage metric this row limits + its per-period limit
+      # (mirrored from the plan; NULL = unlimited).
+      add(:ace_metric, :text)
+      add(:ace_limit, :integer)
       add(:ace_custom, :map, default: fragment("'{}'::jsonb"))
 
       add(
@@ -275,6 +279,10 @@ defmodule Acme.Repo.Migrations.AppResources do
       add(:ace_inserted_at, :utc_datetime, null: false)
       add(:ace_updated_at, :utc_datetime, null: false)
     end
+
+    create(constraint(:ace_entitlement, :ace_entitlement_limit_non_negative,
+      check: "ace_limit IS NULL OR ace_limit >= 0"
+    ))
 
     # ---- Subscription-movement ledger (`mov`; ADR-017) — append-only, no PII,
     #      soft id refs (no FK: the immutable ledger outlives its subscription row) ----

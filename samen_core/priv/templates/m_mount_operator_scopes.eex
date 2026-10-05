@@ -534,6 +534,10 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_ent %>_feature, :text, null: false)
       add(:<%= o_ent %>_granted, :boolean, default: true)
       add(:<%= o_ent %>_expires_at, :utc_datetime)
+      # T163 (ADR-051 P3): the usage metric this row limits + its per-period limit
+      # (mirrored from the plan; NULL = unlimited).
+      add(:<%= o_ent %>_metric, :text)
+      add(:<%= o_ent %>_limit, :integer)
       add(:<%= o_ent %>_custom, :map, default: fragment("'{}'::jsonb"))
 
       add(
@@ -561,6 +565,10 @@ defmodule <%= module %>.Repo.Migrations.MountOperatorScopes do
       add(:<%= o_ent %>_inserted_at, :utc_datetime, null: false)
       add(:<%= o_ent %>_updated_at, :utc_datetime, null: false)
     end
+
+    create(constraint(:<%= o_ent %>_entitlement, :<%= o_ent %>_entitlement_limit_non_negative,
+      check: "<%= o_ent %>_limit IS NULL OR <%= o_ent %>_limit >= 0"
+    ))
 
     # --- Subscription-movement ledger (`mov`; ADR-017) — append-only, no PII,
     #     soft id refs (no FK: the immutable ledger outlives its subscription row) ---

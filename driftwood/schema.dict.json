@@ -2037,6 +2037,18 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "dpe_limit",
+          "logical_name": "limit",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "dpe_metric",
+          "logical_name": "metric",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
           "column_name": "dpe_org_id",
           "logical_name": "org_id",
           "pii": false,
@@ -4309,6 +4321,18 @@
           "logical_name": "inserted_at",
           "pii": false,
           "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbe_limit",
+          "logical_name": "limit",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "fbe_metric",
+          "logical_name": "metric",
+          "pii": false,
+          "type": "Atom"
         },
         {
           "column_name": "fbe_org_id",
