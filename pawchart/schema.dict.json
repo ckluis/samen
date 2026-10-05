@@ -225,6 +225,18 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "pbe_limit",
+          "logical_name": "limit",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pbe_metric",
+          "logical_name": "metric",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
           "column_name": "pbe_org_id",
           "logical_name": "org_id",
           "pii": false,
@@ -1369,6 +1381,18 @@
           "logical_name": "inserted_at",
           "pii": false,
           "type": "UtcDatetime"
+        },
+        {
+          "column_name": "pme_limit",
+          "logical_name": "limit",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "pme_metric",
+          "logical_name": "metric",
+          "pii": false,
+          "type": "Atom"
         },
         {
           "column_name": "pme_org_id",

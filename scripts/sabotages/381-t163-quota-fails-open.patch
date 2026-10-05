@@ -1,0 +1,25 @@
+# SABOTAGE: T163 / ADR-051 R6 — the quota check FAILS OPEN: its single error arm answers
+# `{:ok, true}`, so an org with no limit row, an ambiguous limit, or a subscription whose
+# period the mirror has not rolled over is told it is within its quota. An absent limit
+# silently becomes an unlimited one.
+#
+# Flips the no-limit-row test. Its positive control (a real row answers) and every
+# within/over test stay green (a readable limit still answers correctly), which is
+# exactly why this regression would pass a suite that only tests the happy path.
+# APP: demo
+# TEST_FILES: test/usage_quota_test.exs
+# MUST_FAIL: no entitlement row carrying the metric is an error, never {:ok, true}
+diff --git a/samen_core/lib/samen/billing/quota.ex b/samen_core/lib/samen/billing/quota.ex
+index 325ae84..8442a26 100644
+--- a/samen_core/lib/samen/billing/quota.ex
++++ b/samen_core/lib/samen/billing/quota.ex
+@@ -73,7 +73,8 @@ defmodule Samen.Billing.Quota do
+       {:ok, within?}
+     else
+       # Every unreadable limit or period lands here, and stays an error (R6).
+-      {:error, reason} -> {:error, reason}
++      # SABOTAGE (ADR-051 R6): an unreadable limit is treated as within it.
++      {:error, _reason} -> {:ok, true}
+     end
+   rescue
+     e -> {:error, e}

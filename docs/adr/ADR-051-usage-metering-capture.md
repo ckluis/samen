@@ -13,7 +13,11 @@
   `Usage` table, delta reporting in `Samen.Billing.UsageReporter` / the `UsageMirror` port
   (`demo/test/usage_tally_test.exs`, `samen_core/test/billing_usage_reporter_test.exs`),
   sabotages **377–380**. **§2.4 and §2.5 carry as-built corrections** — §2.5's drafted key
-  scheme would have double-billed. P3 and P4 are not built.
+  scheme would have double-billed.
+  **P3 BUILT** (2026-10-05): `Samen.Billing.Quota.within_limit?/4` + a nullable `metric` /
+  `limit` on every `Entitlement` table (`demo/test/usage_quota_test.exs`), sabotage **381**
+  (R6). **§2.6 carries an as-built note**: usage is summed from the ledger, not the tally.
+  P4 is not built.
 - **Task:** backlog **T163** (`_orch/plan/backlog.yaml:173`; OSS-scan shortlist item 3,
   `docs/research/oss-scan/capability-parse.md:117`; confirmed OPEN by mechanism in issue #33 and
   re-confirmed on `f8fcd79`: zero hits for `Billing.Meter` / `within_limit?` in `samen_core/lib`
@@ -120,6 +124,17 @@ price computation in samen.
    limit in D2. It never blocks capture: usage that happened is recorded, and over-limit is a
    policy decision for the caller. Fail-closed semantics apply only to the *check*: an
    unreadable limit is `{:error, _}`, never `{:ok, true}`.
+   *As built (P3):* `Samen.Billing.Quota.within_limit?(org_id, metric, quantity, opts)` answers
+   whether `used + quantity <= limit`. The limit is the nullable `limit` on the org's one active
+   `Entitlement` row carrying that `metric` (D2 (a); `nil` = unlimited). The period is that
+   row's subscription's `[current_period_start, current_period_end)`. **Usage is summed from the
+   ledger, not read from the tally:** the tally is only rebuilt at rollover and on demand, so
+   mid-period it can lag the ledger, and a lagging tally would let a quota under-count. The sum
+   takes the subscription's events plus the org's unsubscribed ones (which no tally holds).
+   Fail-closed errors: `:no_limit` (no row, so an absent limit is never treated as unlimited),
+   `:ambiguous_limit` (several subscriptions limit the metric; `subscription_id:` picks one),
+   and `:no_current_period` (no subscription, no period, or a period the mirror has not yet
+   rolled over).
 
 ## 3. Red paths (each ships with a sabotage patch, next free number at build time)
 

@@ -405,6 +405,18 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "ben_limit",
+          "logical_name": "limit",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "ben_metric",
+          "logical_name": "metric",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
           "column_name": "ben_org_id",
           "logical_name": "org_id",
           "pii": false,

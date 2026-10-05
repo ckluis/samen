@@ -1036,6 +1036,14 @@ defmodule Samen.Scopes.Billing.Blueprint do
 
             Samen.Scopes.Billing.Entitlement.entitled?(org_id, :advanced_reporting, repo)
             # => {:ok, true} | {:ok, false}
+
+        ## Numeric limits (T163; ADR-051 P3, D2 option (a))
+
+        A row may also carry a usage `metric` and a `limit` on it: the most of that
+        metric the subscription may use per billing period, with `nil` meaning
+        unlimited. The limit is MIRRORED from the provider's plan like every other
+        entitlement field, never computed here. `Samen.Billing.Quota.within_limit?/4`
+        reads it.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -1072,6 +1080,18 @@ defmodule Samen.Scopes.Billing.Blueprint do
           )
           attribute(:granted, :boolean, public?: true, default: true)
           attribute(:expires_at, :utc_datetime, public?: true)
+
+          # ADR-051 P3: the usage metric this row limits (same bounded set as Usage),
+          # and the per-period limit on it, mirrored from the plan. nil = unlimited.
+          attribute(:metric, :atom,
+            public?: true,
+            constraints: [
+              one_of: [:api_calls, :seats, :storage_gb, :events, :messages, :custom_metric]
+            ]
+          )
+
+          attribute(:limit, :integer, public?: true, constraints: [min: 0])
+
           # Tier-1 custom bag.
           attribute(:custom, :map, public?: true)
         end
