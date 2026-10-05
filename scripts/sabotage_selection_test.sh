@@ -32,6 +32,9 @@
 #      selector that shipped before.
 #   5. FILTERS STILL COMPOSE AS AN INTERSECTION — `--changed HEAD --range` narrows to the
 #      intersection and does not resurrect the probe patch.
+#   6. `--not-app X` IS THE COMPLEMENT OF `--app X` (issue #30) — together they partition
+#      the corpus exactly (disjoint, total, name for name); the flag refuses repetition
+#      and composes as an intersection.
 #
 # Usage: scripts/sabotage_selection_test.sh
 # Exit:  0 if every assertion passes; non-zero + FAIL lines otherwise.
@@ -146,6 +149,43 @@ if grep -qF "999-sabotage-selection-probe.patch" <<<"$narrowed"; then
   bad "--changed + --range did not intersect: the out-of-range probe survived"
 else
   ok "filters still COMPOSE as an intersection (--changed HEAD --range 1-2 excludes the probe)"
+fi
+
+# 6. --not-app IS THE COMPLEMENT OF --app (issue #30: the two lanes of
+#    scripts/sabotage-lanes.sh). The pair must PARTITION the corpus: disjoint, and
+#    together total. A gap would let the lanes certify a subset as the full run.
+cleanup
+names() { bash "$SABOTAGE" "$@" --list 2>&1 | sed -n 's/^  \([0-9][^ ]*\.patch\).*/\1/p' | sort; }
+all_names="$(cd "$REPO_ROOT" && names)"
+core_names="$(cd "$REPO_ROOT" && names --app samen_core)"
+rest_names="$(cd "$REPO_ROOT" && names --not-app samen_core)"
+n_all=$(grep -c . <<<"$all_names"); n_core=$(grep -c . <<<"$core_names"); n_rest=$(grep -c . <<<"$rest_names")
+if [[ $n_core -gt 0 && $n_rest -gt 0 && $((n_core + n_rest)) -eq $n_all ]]; then
+  ok "--app samen_core ($n_core) + --not-app samen_core ($n_rest) = the whole corpus ($n_all)"
+else
+  bad "--app/--not-app do not sum to the corpus: $n_core + $n_rest != $n_all"
+fi
+if [[ -z "$(comm -12 <(echo "$core_names") <(echo "$rest_names"))" ]]; then
+  ok "--app and --not-app are DISJOINT (no patch in both lanes)"
+else
+  bad "a patch is selected by both --app and --not-app"
+fi
+if [[ "$(sort <<<"$core_names"$'\n'"$rest_names" | grep .)" == "$(grep . <<<"$all_names")" ]]; then
+  ok "their union is exactly the default selection, name for name"
+else
+  bad "the --app/--not-app union differs from the default selection"
+fi
+twice="$(cd "$REPO_ROOT" && bash "$SABOTAGE" --not-app samen_core --not-app samen_web --list 2>&1)"; rc=$?
+if [[ $rc -eq 2 ]] && grep -qF -- "--not-app given twice" <<<"$twice"; then
+  ok "--not-app twice is an error (exit 2), like every other repeated flag"
+else
+  bad "--not-app twice was accepted (exit $rc)"
+fi
+empty="$(cd "$REPO_ROOT" && bash "$SABOTAGE" --app samen_core --not-app samen_core --list 2>&1 | tail -1)"
+if grep -qF "SABOTAGE SELECTION: 0 of" <<<"$empty"; then
+  ok "--app X --not-app X composes as an intersection (empty)"
+else
+  echo "$empty"; bad "--app X --not-app X did not intersect to empty"
 fi
 
 cleanup

@@ -52,6 +52,11 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
   your diff — the verifier primitive), and `--list`/`--dry-run` to preview a selection
   (names + resolved APP + count) without applying anything. The header preflight still
   lints ALL patch headers even under a filter.
+- Two lanes (issue #30): `scripts/sabotage-lanes.sh` runs the FULL replay as `--app samen_core`
+  in this tree and `--not-app samen_core` in a second worktree (`.git/samen-lanes/b`, warm
+  `_build`) concurrently — disjoint test DBs, unchanged per-patch semantics, merged
+  PROCESSED/SELECTED accounting that must be total. It certifies a COMMIT (refuses a dirty
+  tree). `SAMEN_SABOTAGE=1 ./ci.sh` uses it on a clean tree and the serial harness otherwise.
 - Apply-check (UNCONDITIONAL in `ci.sh` + `ci-fast.sh`, ~2s): `scripts/sabotage_apply_check.sh`
   requires EVERY patch to `git apply --check` against the working tree. A patch that stops
   applying is a guard with no red — re-anchor it (same semantics, regenerated from a real
