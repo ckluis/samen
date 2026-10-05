@@ -90,6 +90,10 @@ defmodule Samen.AI.AgentFoldReuseCostTest do
   # the "shared, mutation-refutable binding" section of the moduledoc.
   @cf17b_canary "CF17B-SHARED-CANARY-9a26f4"
 
+  # What the summarize call reports spending. Since issue #72 the fold is billed the
+  # summarize call's OWN usage (never an estimate), so this is the whole of a fold's bill.
+  @cf17b_summarize_usage %{input_tokens: 42, output_tokens: 5}
+
   test "CF-17(b) REUSE COST: a replay that REUSES the :proposed fold ledger row SPENDS NOTHING for it — both token counters are byte-identical across the replay and exactly ONE provider call rides it" do
     scripted_worker_config()
     s = new_scope()
@@ -103,7 +107,7 @@ defmodule Samen.AI.AgentFoldReuseCostTest do
     script([
       {:continue, "turn one — a long span destined to be folded"},
       {:continue, "turn two"},
-      {:continue, "Summary: turns one and two were reviewed."},
+      {:continue, "Summary: turns one and two were reviewed.", @cf17b_summarize_usage},
       fn -> exit(:mid_fold_death) end,
       {:final, "done"}
     ])
@@ -120,10 +124,11 @@ defmodule Samen.AI.AgentFoldReuseCostTest do
     calls_before = provider_calls()
 
     # ANTI-VACUITY, on this arm's OWN fixture: the DERIVATION that is about to be reused
-    # really did spend. Every scripted completion carries `usage: %{}` (`Scripted`'s
-    # `scripted_completion/1`) and `usage_int/2` reads a missing key as 0, so turns 1-3
-    # billed nothing at all — the whole of both counters is `apply_fold!/4`'s bill, and
-    # the ledger row's own `input_tokens`/`output_tokens` say so to the byte.
+    # really did spend. The ordinary turns' scripted completions carry `usage: %{}`
+    # (`Scripted`'s `scripted_completion/1`) and `usage_int/2` reads a missing key as 0, so
+    # turns 1-2 billed nothing at all — the whole of both counters is the summarize call's
+    # own reported usage (issue #72), and the ledger row's own
+    # `input_tokens`/`output_tokens` say so to the byte.
     assert in_before > 0 and out_before > 0,
            "the fold billed nothing when it was DERIVED, so 'the replay bills nothing' " <>
              "would be vacuous; got #{inspect({in_before, out_before})}"
@@ -178,7 +183,7 @@ defmodule Samen.AI.AgentFoldReuseCostTest do
     script([
       {:continue, "turn one — a long span destined to be folded"},
       {:continue, "turn two"},
-      {:continue, "Summary: turns one and two were reviewed."},
+      {:continue, "Summary: turns one and two were reviewed.", @cf17b_summarize_usage},
       {:final, "done"}
     ])
 
@@ -208,8 +213,8 @@ defmodule Samen.AI.AgentFoldReuseCostTest do
     # deriving a fold COSTS. Without this the reuse arm's equality is satisfiable by a
     # build whose counters never move at all.
     assert in_after > in_before and out_after > out_before,
-           "a DERIVED fold must bill its span in and its marker out (§6: the tokens are " <>
-             "real); counters went #{inspect({in_before, out_before})} → " <>
+           "a DERIVED fold must bill its summarize call's reported usage (§6: the tokens " <>
+             "are real; issue #72); counters went #{inspect({in_before, out_before})} → " <>
              "#{inspect({in_after, out_after})}"
 
     assert {fresh["input_tokens"], fresh["output_tokens"]} == {in_after, out_after},

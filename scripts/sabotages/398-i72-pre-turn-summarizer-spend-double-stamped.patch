@@ -1,0 +1,26 @@
+# SABOTAGE: issue #72 — after the PRE-TURN fold's summarizer spend is stamped on the turn
+# row, it is left on the views. Level 2 re-enters the fold path with those views, so the
+# pre-turn spend is stamped a SECOND time and the turn ledger over-reports what the turn's
+# summarize calls cost (the run's own bill is unaffected; only the ledger lies).
+#
+# Flips the cancelled-Level-2 test: Level 2 re-enters the fold path, sees the tenant's
+# cancel and refuses WITHOUT summarizing, so the leftover pre-turn note is all it has to
+# stamp. (When Level 2 DOES summarize, its own spend overwrites the note, which is why the
+# two-folds test cannot catch this.)
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: #72 RED: a Level 2 that re-enters the fold path WITHOUT summarizing does not re-stamp the pre-turn spend
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index bb202cc..8ab04aa 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -956,7 +956,8 @@ defmodule Samen.AI.Agent do
+          # Both notes are this turn's PRE-TURN fold's and are now on the row. Level 2
+          # re-enters the fold path with these views, so they are cleared here, or a Level 2
+          # that does not fold would stamp the pre-turn spend a second time.
+-         views = Map.drop(views, [:compaction_refusal, :summarizer_usage]),
++         # SABOTAGE (#72): the pre-turn summarizer spend is not cleared after stamping.
++         views = Map.drop(views, [:compaction_refusal]),
+          :ok <- before_completion_hook(hooks, run, turn_row, turn_index) do
+       # Every provider-bound byte still routes kernel → chokepoint: prior turns re-enter
+       # ONLY as `:history` (re-scrubbed per §3.2a + allowlist-scanned per §3.2 step 3/4,

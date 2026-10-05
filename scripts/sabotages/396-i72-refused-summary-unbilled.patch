@@ -1,0 +1,24 @@
+# SABOTAGE: issue #72 — when the ingress path REFUSES a summary (empty after the scrubs, or
+# inadmissible to the chokepoint), `Compaction.summarize/3` reports that the call spent
+# nothing. The call happened and the provider reported its usage; the refusal is about the
+# TEXT, not the spend. The fold is correctly refused, but the run is silently not billed.
+#
+# Flips the refused-summary billing test. Folds that succeed still bill (the success path
+# is untouched), which is why only a refusal test catches it.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: #72 RED: a summary the ingress path REFUSES was still paid for — billed, and the refusal row says what it cost
+diff --git a/samen_core/lib/samen/ai/agent/compaction.ex b/samen_core/lib/samen/ai/agent/compaction.ex
+index 6bce58b..320124f 100644
+--- a/samen_core/lib/samen/ai/agent/compaction.ex
++++ b/samen_core/lib/samen/ai/agent/compaction.ex
+@@ -421,7 +421,8 @@ defmodule Samen.AI.Agent.Compaction do
+   defp ingress({:ok, text, usage}) do
+     case scrub(text) do
+       {:ok, scrubbed} -> {:ok, scrubbed, usage}
+-      {:error, reason} -> {:error, reason, usage}
++      # SABOTAGE (#72): a summary the ingress path refuses reports spending nothing.
++      {:error, reason} -> {:error, reason, %{input_tokens: 0, output_tokens: 0}}
+     end
+   end
+ 

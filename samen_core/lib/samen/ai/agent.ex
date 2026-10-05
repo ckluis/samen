@@ -952,6 +952,11 @@ defmodule Samen.AI.Agent do
          # ADR-048 §5#5: if the fold above was REFUSED, the turn row this turn is about to
          # take says so. The turn itself proceeds — uncompacted is not failed.
          turn_row = note_compaction_refusal!(turn_row, views),
+         turn_row = note_summarizer_usage!(turn_row, views),
+         # Both notes are this turn's PRE-TURN fold's and are now on the row. Level 2
+         # re-enters the fold path with these views, so they are cleared here, or a Level 2
+         # that does not fold would stamp the pre-turn spend a second time.
+         views = Map.drop(views, [:compaction_refusal, :summarizer_usage]),
          :ok <- before_completion_hook(hooks, run, turn_row, turn_index) do
       # Every provider-bound byte still routes kernel → chokepoint: prior turns re-enter
       # ONLY as `:history` (re-scrubbed per §3.2a + allowlist-scanned per §3.2 step 3/4,
@@ -1211,6 +1216,7 @@ defmodule Samen.AI.Agent do
             turn_row =
               turn_row
               |> note_compaction_refusal!(views)
+              |> note_summarizer_usage!(views)
               |> note_context_retry!(attempt)
 
             complete_with_recovery(
@@ -1473,7 +1479,19 @@ defmodule Samen.AI.Agent do
     # `summarize_span/3` returns the summary ALREADY through §5#3's ingress path —
     # `Secrets.redact/1` then `Ingress.sanitize/1` then the chokepoint allowlist — so
     # there is no spelling of this call site that appends an unscrubbed binary.
-    case summarize_span(scope, span, opts) do
+    #
+    # Issue #72 (ruled option 1): the summarize call is a real call, so what it SPENT is
+    # billed here, durably and BEFORE the outcome is looked at — a summary that folds, a
+    # summary the ingress path refused, a hook that blocks the fold, and a provider failure
+    # that reported its usage all cost the same real tokens. The bill is the provider's own
+    # usage, never an estimate; `est_tokens/1` only decides WHEN to fold. The spend also
+    # rides `views` to the turn row (`note_summarizer_usage!/2`), so the turn ledger keeps
+    # explaining the run's total.
+    {result, usage} = summarize_span(scope, span, opts)
+    run = bill_summarizer!(run, usage)
+    views = Map.put(views, :summarizer_usage, usage)
+
+    case result do
       {:ok, summary} ->
         # §5#6: the point fires on the span the summary has ALREADY been folded into,
         # and BEFORE `apply_fold!/4` persists it — the only ordering in which `:block`
@@ -1482,7 +1500,7 @@ defmodule Samen.AI.Agent do
 
         case after_compaction_hook(Keyword.get(opts, :resolved_hooks, []), run, folded) do
           :ok ->
-            apply_fold!(run, views, goal, folded)
+            apply_fold!(run, views, goal, folded, usage)
 
           # A hook REFUSED the fold (its own `{:block, _}`, or the fail-closed
           # `:hook_error` an `{:edit, _}` at this point degrades to — §5#6 forbids
@@ -1517,7 +1535,26 @@ defmodule Samen.AI.Agent do
   # exact field prior turns re-enter through (re-scrubbed per §3.2a and allowlist-scanned per
   # §3.2 step 3/4, every call), and the only authored bytes are the compile-time
   # `summarizer_prompt/0` literal. No tool defs are offered — the summarizer selects nothing.
-  defp summarize_span(scope, span, opts), do: Compaction.summarize(scope, span.folded, opts)
+  defp summarize_span(scope, span, opts) do
+    case Compaction.summarize(scope, span.folded, opts) do
+      {:ok, summary, usage} -> {{:ok, summary}, usage}
+      {:error, reason, usage} -> {{:error, reason}, usage}
+    end
+  end
+
+  # The summarizer's bill (issue #72): the same `:advance` write and the same in-memory-
+  # total-plus-delta every committing site uses, returning the UPDATED struct so later
+  # writes total off it. Nothing is written when nothing was spent.
+  defp bill_summarizer!(%Run{} = run, %{input_tokens: 0, output_tokens: 0}), do: run
+
+  defp bill_summarizer!(%Run{} = run, %{input_tokens: in_tokens, output_tokens: out_tokens}) do
+    run
+    |> Ash.Changeset.for_update(:advance, %{
+      input_tokens_used: run.input_tokens_used + in_tokens,
+      output_tokens_used: run.output_tokens_used + out_tokens
+    })
+    |> Ash.update!(authorize?: false)
+  end
 
   # ADR-048 §5#6 — `:after_compaction`'s FIRST call site. It fires AFTER the summary has
   # passed §5#3's ingress path and been folded into the span's `llm_view` lines, and BEFORE
@@ -1561,6 +1598,34 @@ defmodule Samen.AI.Agent do
   # `nodes/C3I2/work/mutation-controls.md` M4 records). The value is the bounded reason the
   # refusal carried, so `:pii_egress_refused`, `:unsafe_summary` and a hook's `:hook_error`
   # stay distinguishable on the record.
+  # Issue #72: what the summarize call spent, on the row of the turn it folded for,
+  # ACCUMULATED (a turn can fold twice: pre-turn and Level 2), so the turn ledger explains
+  # the run's total without decrypting the fold ledger. Nothing is stamped for zero.
+  defp note_summarizer_usage!(turn_row, views) do
+    case Map.get(views, :summarizer_usage) do
+      %{input_tokens: in_tokens, output_tokens: out_tokens} when in_tokens + out_tokens > 0 ->
+        meta = turn_row.meta || %{}
+
+        meta =
+          meta
+          |> Map.put(
+            "summarizer_input_tokens",
+            meta_int(meta, "summarizer_input_tokens") + in_tokens
+          )
+          |> Map.put(
+            "summarizer_output_tokens",
+            meta_int(meta, "summarizer_output_tokens") + out_tokens
+          )
+
+        turn_row
+        |> Ash.Changeset.for_update(:decide, %{meta: bounded_meta(meta)})
+        |> Ash.update!(authorize?: false)
+
+      _none ->
+        turn_row
+    end
+  end
+
   defp note_compaction_refusal!(turn_row, views) do
     case Map.get(views, :compaction_refusal) do
       nil ->
@@ -1672,10 +1737,13 @@ defmodule Samen.AI.Agent do
     end
   end
 
-  defp apply_fold!(%Run{} = run, views, goal, span) do
-    in_tokens = est_tokens(span.folded)
-    out_tokens = est_tokens([span.marker])
-
+  # The fold's ledger entry records what its summarize call SPENT (issue #72) — the bill
+  # itself was already written by `bill_summarizer!/2`, so this write carries only the
+  # transcript.
+  defp apply_fold!(%Run{} = run, views, goal, span, %{
+         input_tokens: in_tokens,
+         output_tokens: out_tokens
+       }) do
     entry = %{
       "seq" => span.seq,
       "turn_index" => run.current_turn + 1,
@@ -1717,9 +1785,7 @@ defmodule Samen.AI.Agent do
             folded_views.folds,
             folded_views.turn_lens,
             views.pending
-          ),
-        input_tokens_used: run.input_tokens_used + in_tokens,
-        output_tokens_used: run.output_tokens_used + out_tokens
+          )
       })
       |> Ash.update!(authorize?: false)
 
@@ -1750,9 +1816,9 @@ defmodule Samen.AI.Agent do
     )
   end
 
-  # The ONE deterministic estimator: the fold's own bill (§6 "the tokens are real and are
-  # billed") is measured with exactly the function that decides the watermark, so a fold
-  # can never bill on one scale and trigger on another.
+  # The ONE deterministic estimator, and now ONLY the trigger: it decides the watermark,
+  # which must be known BEFORE any call. The fold's BILL is the summarize call's own
+  # reported usage (issue #72, ruled option 1), known only after the call.
   defp est_tokens(texts) do
     texts
     |> Enum.map(fn text -> div(byte_size(text) + 3, 4) end)

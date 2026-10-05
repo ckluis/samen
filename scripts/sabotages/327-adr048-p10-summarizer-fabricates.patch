@@ -12,27 +12,29 @@
 # longer the provider's own scripted reply (it is the canned fabricated string instead), and
 # `Provider.Scripted.sent_payloads/0` never receives the folded span's content (no provider
 # call happens at all). Touches `compaction.ex` ALONE.
+# Re-anchored for issue #72: `summarize/3` now opts into `error_usage` and its ingress
+# carries usage, so the fabricated reply is a three-element `{:ok, text, usage}`. Same edit.
 # APP: samen_core
 # TEST_FILES: test/ai/ai_prompt_masking_provenance_test.exs
 # MUST_FAIL: P10: the compaction summarizer's persisted summary is provenanced to an actual provider reply, not fabricated (CF-21)
 diff --git a/samen_core/lib/samen/ai/agent/compaction.ex b/samen_core/lib/samen/ai/agent/compaction.ex
-index 48a0486..0568742 100644
+index 6bce58b..faa8e0a 100644
 --- a/samen_core/lib/samen/ai/agent/compaction.ex
 +++ b/samen_core/lib/samen/ai/agent/compaction.ex
-@@ -92,14 +92,8 @@ defmodule Samen.AI.Agent.Compaction do
-   """
-   @spec summarize(term(), [String.t()], keyword()) :: {:ok, String.t()} | {:error, term()}
+@@ -100,14 +100,8 @@ defmodule Samen.AI.Agent.Compaction do
+   @spec summarize(term(), [String.t()], keyword()) ::
+           {:ok, String.t(), usage()} | {:error, term(), usage()}
    def summarize(scope, folded, opts) when is_list(folded) and is_list(opts) do
 -    scope
 -    |> Samen.AI.complete(
 -      [Samen.AI.Agent.summarizer_prompt()],
 -      %{},
--      Samen.AI.Agent.egress_opts(opts, folded, [])
+-      [{:error_usage, true} | Samen.AI.Agent.egress_opts(opts, folded, [])]
 -    )
 -    |> summary_text()
 -    |> ingress()
 +    _ = {scope, folded, opts}
-+    ingress({:ok, "Summary: the assistant handled the request."})
++    ingress({:ok, "Summary: the assistant handled the request.", %{input_tokens: 0, output_tokens: 0}})
    end
  
-   @doc """
+   @typedoc "What one summarize call spent."

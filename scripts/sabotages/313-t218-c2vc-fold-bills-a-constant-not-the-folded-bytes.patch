@@ -1,31 +1,29 @@
-# SABOTAGE: ADR-048 §8 P13's two MANDATORY anti-tautology positive controls (T218 /
-# batch C2, §10 row 4 RATIFIED (a)) -- `apply_fold!/4` now bills a FIXED CONSTANT OF 1
-# TOKEN for a fold's input side instead of `est_tokens(span.folded)`, so a fold that
-# reads an arbitrarily large span into the marker bills as if it read almost nothing.
-# `est_tokens/1`'s own comment claims a fold "can never bill on one scale and trigger on
-# another" by construction; this sabotage is exactly that decoupling on the input side.
-# NOT P4 (:497): that is the level-2 retry-once counter, a different counter and a
-# different claim. Flips P13 POSITIVE CONTROL 2 on its own strengthened ledger-pinned
-# assertion (measured: `billed_in` reads 1, which cannot reach
-# `div(byte_size("turn one -- a long span destined to be folded") + 3, 4)`) -- the bare
-# `run.input_tokens_used > 300` inequality that used to be CONTROL 2's whole input-side
-# check does NOT catch this on its own, because 300 + 1 (this sabotage's bill) still
-# exceeds 300; only the ledger-pinned floor added in C2VC does.
+# SABOTAGE: ADR-048 §8 P13's MANDATORY anti-tautology positive control 2 (T218 / batch C2,
+# §10 row 4 RATIFIED (a)), restated for issue #72 (ruled option 1) — the fold's input
+# bill is a CONSTANT of at most 1 token instead of what its summarize call REPORTED
+# spending, so a summarize that read a large span bills as if it read almost nothing.
+# Before #72 the bill was `est_tokens/1` of the folded bytes and this patch pinned that;
+# #72 made the bill the provider's own usage and the patch pins THAT now.
+#
+# Flips P13 POSITIVE CONTROL 2: the run's input total no longer equals the ordinary turns'
+# 300 plus the fold ledger's own recorded input (which records the reported usage), and the
+# bill no longer equals the summarize call's reported usage. The bare `> 300` inequality
+# would NOT catch it (300 + 1 > 300); only the ledger-pinned equalities do.
 # APP: samen_core
 # TEST_FILES: test/ai/agent_compaction_test.exs
 # MUST_FAIL: P13 POSITIVE CONTROL 2 (anti-tautology, MANDATORY): the fold DID spend real tokens against max_input_tokens/max_output_tokens in the same window
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index bb202cc..b52a285 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1316,7 +1316,11 @@
-   end
- 
-   defp apply_fold!(%Run{} = run, views, goal, span) do
--    in_tokens = est_tokens(span.folded)
-+    # SABOTAGE (ADR-048 §8 P13 CONTROL 2): the fold now bills a FIXED CONSTANT of 1
-+    # token for its input side, decoupled from the bytes it actually folded -- the exact
-+    # "bill on one scale and trigger on another" failure est_tokens/1's own comment
-+    # claims to have ruled out by construction.
-+    in_tokens = 1
-     out_tokens = est_tokens([span.marker])
- 
-     entry = %{
+@@ -1550,7 +1550,9 @@ defmodule Samen.AI.Agent do
+   defp bill_summarizer!(%Run{} = run, %{input_tokens: in_tokens, output_tokens: out_tokens}) do
+     run
+     |> Ash.Changeset.for_update(:advance, %{
+-      input_tokens_used: run.input_tokens_used + in_tokens,
++      # SABOTAGE (ADR-048 §8 P13 CONTROL 2; issue #72): the fold bills a CONSTANT of at
++      # most 1 input token instead of what its summarize call reported spending.
++      input_tokens_used: run.input_tokens_used + min(in_tokens, 1),
+       output_tokens_used: run.output_tokens_used + out_tokens
+     })
+     |> Ash.update!(authorize?: false)

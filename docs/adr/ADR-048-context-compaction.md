@@ -369,6 +369,22 @@ attempts, no loop. Three constraints:
   > `samen_anthropic/test/provider_test.exs`, `samen_core/test/ai/error_usage_contract_test.exs`
   > and the `issue #11` blocks in `agent_durability_test.exs` / `agent_tools_test.exs`;
   > sabotages 389–395.
+
+  > **AMENDED 2026-10-05, latest — the fold is billed what it spent (issue #72, ruled option
+  > 1).** The second note above recorded the Level 2 summarizing fold as "billed by an ESTIMATE
+  > of the folded span… a separate design call". That call is made. The summarize call's own
+  > reported usage is billed — input AND output, on every outcome: a summary that folds, one
+  > the ingress path refuses, one a hook blocks, and a provider failure that reports its
+  > usage (the summarize call now opts into `error_usage: true`). `Compaction.summarize/3`
+  > returns `{:ok, summary, usage}` / `{:error, reason, usage}`; `summarize_fold` bills it
+  > durably BEFORE looking at the outcome; the fold ledger entry records it; and the turn row
+  > carries it as `summarizer_input_tokens` / `summarizer_output_tokens`, so the turn ledger
+  > (turn tokens + `failed_*` + `summarizer_*`) sums to the run's bill. `est_tokens/1` now
+  > only decides WHEN to fold (the watermark), which must be known before any call. D4
+  > RATIFIED (a) — a fold's tokens are real and are billed, and never spend turns or tool
+  > calls — is unchanged. Proofs: `samen_core/test/ai/compaction_summarize_usage_test.exs`,
+  > the `issue #72` block in `agent_durability_test.exs`, P13 POSITIVE CONTROL 2 (now pinned
+  > to reported usage); sabotages 313 (restated), 396–399.
 - the retry boundary **re-checks the kill-switch, the durable cancel flag, and every budget**, for
   the same reason the loop re-checks them at every turn boundary and not only at run start
   (sabotage 244's target) — a recovery path that skips the kill-switch is a kill-switch with a hole;

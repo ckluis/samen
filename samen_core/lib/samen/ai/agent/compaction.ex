@@ -86,21 +86,32 @@ defmodule Samen.AI.Agent.Compaction do
   `scope`, through the governed chokepoint. `opts` is the loop's own opts keyword; only
   `Samen.AI.Agent.egress_opts/3`'s allowlist survives it.
 
-  Returns `{:ok, scrubbed_summary}` — the summary AFTER §5#3's full ingress path, which is the
-  only form of it any caller ever sees — or a fail-closed `{:error, reason}` (never a fabricated
-  summary, and never the raw binary the model returned).
+  Returns `{:ok, scrubbed_summary, usage}` — the summary AFTER §5#3's full ingress path, which
+  is the only form of it any caller ever sees — or a fail-closed `{:error, reason, usage}`
+  (never a fabricated summary, and never the raw binary the model returned).
+
+  `usage` is what the summarize CALL spent, `%{input_tokens: n, output_tokens: n}`, on every
+  outcome (issue #72, ruled option 1): a summary that comes back fine, a summary the ingress
+  path refuses, and a provider failure that reports its spend (`error_usage: true`) all cost
+  real tokens, and the caller bills them whether or not the fold happens. It is zero only when
+  nothing was spent: an unconfigured provider, a refusal before any call, a failure that
+  reported no usage.
   """
-  @spec summarize(term(), [String.t()], keyword()) :: {:ok, String.t()} | {:error, term()}
+  @spec summarize(term(), [String.t()], keyword()) ::
+          {:ok, String.t(), usage()} | {:error, term(), usage()}
   def summarize(scope, folded, opts) when is_list(folded) and is_list(opts) do
     scope
     |> Samen.AI.complete(
       [Samen.AI.Agent.summarizer_prompt()],
       %{},
-      Samen.AI.Agent.egress_opts(opts, folded, [])
+      [{:error_usage, true} | Samen.AI.Agent.egress_opts(opts, folded, [])]
     )
     |> summary_text()
     |> ingress()
   end
+
+  @typedoc "What one summarize call spent."
+  @type usage :: %{input_tokens: non_neg_integer(), output_tokens: non_neg_integer()}
 
   @doc """
   ADR-048 §5#3 — the INGRESS path over ONE model-written binary: `Secrets.redact/1` **then**
@@ -393,15 +404,39 @@ defmodule Samen.AI.Agent.Compaction do
   # An adapter that returned a completion with no text did not summarize anything. The
   # fail-honest contract (ADR-014/024/026) says so out loud instead of appending `""` to the
   # governed transcript as though a model had written it.
-  defp summary_text({:ok, %Completion{text: text}}) when is_binary(text) and text != "",
-    do: {:ok, text}
+  #
+  # Every clause carries what the call spent (issue #72): a completion's own usage, a
+  # usage-carrying failure's usage, or zero when the failure reported none.
+  defp summary_text({:ok, %Completion{text: text} = c}) when is_binary(text) and text != "",
+    do: {:ok, text, spent(c.usage)}
 
-  defp summary_text({:ok, %Completion{}}), do: {:error, :empty_summary}
-  defp summary_text({:error, reason}), do: {:error, reason}
+  defp summary_text({:ok, %Completion{} = c}), do: {:error, :empty_summary, spent(c.usage)}
+  defp summary_text({:error, reason, usage}), do: {:error, reason, spent(usage)}
+  defp summary_text({:error, reason}), do: {:error, reason, spent(nil)}
 
   # A refusal short-circuits the ingress path: there is no text to scrub, and inventing one
   # here is the fail-open reading. The reason travels UNCHANGED to the caller, so the fold's
-  # bounded `:compaction_refused` note can say WHICH refusal this was (§5#5).
-  defp ingress({:ok, text}), do: scrub(text)
-  defp ingress({:error, reason}), do: {:error, reason}
+  # bounded `:compaction_refused` note can say WHICH refusal this was (§5#5). A summary the
+  # ingress path refuses was still PAID for, so its usage travels with the refusal.
+  defp ingress({:ok, text, usage}) do
+    case scrub(text) do
+      {:ok, scrubbed} -> {:ok, scrubbed, usage}
+      {:error, reason} -> {:error, reason, usage}
+    end
+  end
+
+  defp ingress({:error, reason, usage}), do: {:error, reason, usage}
+
+  # Usage as two non-negative integers; anything else counts 0, never a guess.
+  defp spent(usage) when is_map(usage),
+    do: %{input_tokens: count(usage, :input_tokens), output_tokens: count(usage, :output_tokens)}
+
+  defp spent(_usage), do: %{input_tokens: 0, output_tokens: 0}
+
+  defp count(usage, key) do
+    case Map.get(usage, key) do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> 0
+    end
+  end
 end
