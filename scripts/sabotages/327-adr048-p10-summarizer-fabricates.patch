@@ -13,7 +13,7 @@
 # `Provider.Scripted.sent_payloads/0` never receives the folded span's content (no provider
 # call happens at all). Touches `compaction.ex` ALONE.
 # APP: samen_core
-# TEST_FILES: test/ai/ai_prompt_masking_test.exs
+# TEST_FILES: test/ai/ai_prompt_masking_provenance_test.exs
 # MUST_FAIL: P10: the compaction summarizer's persisted summary is provenanced to an actual provider reply, not fabricated (CF-21)
 diff --git a/samen_core/lib/samen/ai/agent/compaction.ex b/samen_core/lib/samen/ai/agent/compaction.ex
 index 48a0486..0568742 100644
