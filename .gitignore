@@ -35,3 +35,7 @@ _orch/
 
 # earlier baton runs, moved in from siblings
 _orch-*/
+
+# Dialyzer PLT caches (issue #73) — machine-local build artifacts, rebuilt on demand.
+# Never committed: they are ~15 MB each and embed absolute build paths.
+**/priv/plts/
