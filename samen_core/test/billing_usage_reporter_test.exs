@@ -66,6 +66,96 @@ defmodule Samen.Billing.UsageReporterTest do
     )
   end
 
+  # T163 (ADR-051 P2): the provider INCREMENTS, so a tally that grew after it was
+  # reported must send only its delta — never its whole total again.
+  defmodule GrowingProvider do
+    @moduledoc false
+    # A provider that, while the batch is "in flight", grows the mirrored tally —
+    # a rebuild landing between read_pending and mark_reported.
+    def configured?(_config), do: true
+
+    def report_usage(batch, %{mirror: ref, grow: {id, to}} = config) do
+      row = Samen.Billing.FakeUsageMirror.get(ref, id)
+      Samen.Billing.FakeUsageMirror.seed(ref, %{row | quantity: to})
+      Samen.Billing.FakeProvider.report_usage(batch, Map.drop(config, [:mirror, :grow]))
+    end
+  end
+
+  defp seed_one(mirror_ref, quantity, reported_quantity) do
+    FakeUsageMirror.seed(mirror_ref, %{
+      id: "ur_1",
+      metric: :api_calls,
+      quantity: quantity,
+      reported_quantity: reported_quantity,
+      period_start: ~U[2026-07-01 00:00:00Z],
+      period_end: ~U[2026-07-31 23:59:59Z],
+      subscription_id: "sub_row_1",
+      provider_ref: "si_stripe_1"
+    })
+  end
+
+  # Chronological (FakeProvider.calls/0 is newest-first).
+  defp batches, do: for({:report_usage, %{batch: b}} <- Enum.reverse(FakeProvider.calls()), do: b)
+
+  describe "T163 P2: deltas — a grown tally never re-bills what was already reported" do
+    test "a tally that grew after it was reported sends ONLY the delta, under a delta key" do
+      mirror_ref = FakeUsageMirror.new() |> seed_one(42, 0)
+      assert {:ok, %{reported: 1}} = UsageReporter.report_pending(opts(mirror_ref))
+      assert %{reported_quantity: 42} = FakeUsageMirror.get(mirror_ref, "ur_1")
+
+      # A rebuild grows the tally from 42 to 50 (late events in the same period).
+      seed_one(mirror_ref, 50, 42)
+      assert {:ok, %{reported: 1}} = UsageReporter.report_pending(opts(mirror_ref))
+
+      assert [[first], [second]] = batches()
+      assert first.quantity == 42
+      assert second.quantity == 8, "the provider increments: sending 50 again would bill 42 twice"
+      assert second.idempotency_key == UsageReporter.idempotency_key("ur_1", 42, 50)
+      refute second.idempotency_key == first.idempotency_key
+      assert %{reported_quantity: 50} = FakeUsageMirror.get(mirror_ref, "ur_1")
+    end
+
+    test "POSITIVE CONTROL: an unchanged, fully reported tally is not sent at all" do
+      mirror_ref = FakeUsageMirror.new() |> seed_one(42, 42)
+      assert {:ok, %{reported: 0}} = UsageReporter.report_pending(opts(mirror_ref))
+      assert batches() == []
+    end
+
+    test "a retried delta carries the SAME key and the SAME quantity" do
+      mirror_ref = FakeUsageMirror.new() |> seed_one(50, 42)
+
+      FakeProvider.configure_report_usage_result({:error, :temporary_outage})
+      assert {:error, :temporary_outage} = UsageReporter.report_pending(opts(mirror_ref))
+      assert %{reported_quantity: 42} = FakeUsageMirror.get(mirror_ref, "ur_1")
+
+      FakeProvider.configure_report_usage_result(nil)
+      assert {:ok, %{reported: 1}} = UsageReporter.report_pending(opts(mirror_ref))
+
+      assert [[failed], [retried]] = batches()
+      assert {failed.quantity, failed.idempotency_key} == {retried.quantity, retried.idempotency_key}
+      assert retried.quantity == 8
+    end
+
+    test "growth DURING a report is marked at the value SENT, and goes out as the next delta" do
+      mirror_ref = FakeUsageMirror.new() |> seed_one(42, 0)
+
+      grow_opts =
+        opts(mirror_ref,
+          provider: GrowingProvider,
+          provider_config: %{configured: true, mirror: mirror_ref, grow: {"ur_1", 50}}
+        )
+
+      assert {:ok, %{reported: 1}} = UsageReporter.report_pending(grow_opts)
+      # The provider was sent 42; the tally is now 50. Marking it 50 would silently
+      # drop the 8 that arrived mid-flight.
+      assert %{quantity: 50, reported_quantity: 42} = FakeUsageMirror.get(mirror_ref, "ur_1")
+
+      assert {:ok, %{reported: 1}} = UsageReporter.report_pending(opts(mirror_ref))
+      assert [[first], [second]] = batches()
+      assert {first.quantity, second.quantity} == {42, 8}
+    end
+  end
+
   describe "done-criterion 1: batch + idempotency + not re-sent" do
     test "pending records batch into one report_usage/2 call, carrying quantity/timestamp/idempotency-key" do
       mirror_ref = FakeUsageMirror.new() |> seed_two_pending()
@@ -78,10 +168,10 @@ defmodule Samen.Billing.UsageReporterTest do
       item1 = Enum.find(batch, &(&1.usage_record_id == "ur_1"))
       assert item1.quantity == 42
       assert item1.timestamp == ~U[2026-07-31 23:59:59Z]
-      assert item1.idempotency_key == UsageReporter.idempotency_key("ur_1")
+      assert item1.idempotency_key == UsageReporter.idempotency_key("ur_1", 0, 42)
 
       item2 = Enum.find(batch, &(&1.usage_record_id == "ur_2"))
-      assert item2.idempotency_key == UsageReporter.idempotency_key("ur_2")
+      assert item2.idempotency_key == UsageReporter.idempotency_key("ur_2", 0, 3)
       # Anti-tautology: the two keys are genuinely distinct per record.
       refute item1.idempotency_key == item2.idempotency_key
     end

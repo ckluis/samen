@@ -129,11 +129,11 @@ defmodule SamenStripe.UsageTest do
       req1 = Enum.find(requests, &String.contains?(&1.url, "si_stripe_1"))
       assert req1.form["quantity"] == 42
       assert req1.form["timestamp"] == DateTime.to_unix(~U[2026-07-31 23:59:59Z])
-      assert req1.idempotency_key == UsageReporter.idempotency_key("ur_1")
+      assert req1.idempotency_key == UsageReporter.idempotency_key("ur_1", 0, 42)
 
       req2 = Enum.find(requests, &String.contains?(&1.url, "si_stripe_2"))
       assert req2.form["quantity"] == 3
-      assert req2.idempotency_key == UsageReporter.idempotency_key("ur_2")
+      assert req2.idempotency_key == UsageReporter.idempotency_key("ur_2", 0, 3)
 
       refute req1.idempotency_key == req2.idempotency_key
     end
@@ -208,8 +208,8 @@ defmodule SamenStripe.UsageTest do
 
       assert retry_keys ==
                Enum.sort([
-                 UsageReporter.idempotency_key("ur_1"),
-                 UsageReporter.idempotency_key("ur_2")
+                 UsageReporter.idempotency_key("ur_1", 0, 42),
+                 UsageReporter.idempotency_key("ur_2", 0, 3)
                ])
     end
   end

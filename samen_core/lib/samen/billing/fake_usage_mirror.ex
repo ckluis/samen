@@ -17,7 +17,7 @@ defmodule Samen.Billing.FakeUsageMirror do
                                    period_end: ~U[2026-07-31 23:59:59Z],
                                    subscription_id: "sub_row_1", provider_ref: "si_123"})
       # ... drive Samen.Billing.UsageReporter.report_pending/1
-      FakeUsageMirror.get(ref, "ur_1")           # the row, including reported_at
+      FakeUsageMirror.get(ref, "ur_1")           # the row, incl. reported_at/_quantity
       FakeUsageMirror.mark_count(ref)             # how many mark_reported/3 calls WROTE
 
   `mark_count/1` is the idempotency witness: a `report_pending/1` re-run against
@@ -42,12 +42,19 @@ defmodule Samen.Billing.FakeUsageMirror do
   end
 
   @doc """
-  Seed a usage-record row (pending unless `:reported_at` is explicitly given).
-  Returns `ref` (chainable).
+  Seed a usage-record row. It is pending (`reported_quantity: 0`) unless
+  `:reported_quantity` is given, or `:reported_at` is given without one (a legacy
+  "already reported" seed, treated as fully reported). Returns `ref` (chainable).
   """
   @spec seed(pid(), map()) :: pid()
   def seed(ref, %{id: id} = record) do
-    row = Map.put_new(record, :reported_at, nil)
+    default_reported = if Map.get(record, :reported_at), do: Map.get(record, :quantity, 0), else: 0
+
+    row =
+      record
+      |> Map.put_new(:reported_at, nil)
+      |> Map.put_new(:reported_quantity, default_reported)
+
     Agent.update(ref, fn st -> %{st | records: Map.put(st.records, id, row)} end)
     ref
   end
@@ -57,7 +64,7 @@ defmodule Samen.Billing.FakeUsageMirror do
     pending =
       Agent.get(ref, fn %{records: records} -> records end)
       |> Map.values()
-      |> Enum.filter(&is_nil(&1.reported_at))
+      |> Enum.filter(&(&1.quantity > &1.reported_quantity))
       |> Enum.sort_by(& &1.id)
       |> Enum.take(limit)
       |> Enum.map(
@@ -65,6 +72,7 @@ defmodule Samen.Billing.FakeUsageMirror do
           :id,
           :metric,
           :quantity,
+          :reported_quantity,
           :period_start,
           :period_end,
           :subscription_id,
@@ -76,18 +84,21 @@ defmodule Samen.Billing.FakeUsageMirror do
   end
 
   @impl true
-  def mark_reported(ref, ids, %DateTime{} = reported_at) when is_list(ids) do
+  def mark_reported(ref, marks_in, %DateTime{} = reported_at) when is_list(marks_in) do
     count =
       Agent.get_and_update(ref, fn %{records: records, marks: marks} ->
-        existing_ids = Enum.filter(ids, &Map.has_key?(records, &1))
+        existing = Enum.filter(marks_in, fn {id, _to} -> Map.has_key?(records, id) end)
 
         updated_records =
-          Enum.reduce(existing_ids, records, fn id, acc ->
-            Map.update!(acc, id, &Map.put(&1, :reported_at, reported_at))
+          Enum.reduce(existing, records, fn {id, to}, acc ->
+            # Forward-only, like the real tally's `:mark_reported` validation.
+            Map.update!(acc, id, fn row ->
+              %{row | reported_at: reported_at, reported_quantity: max(row.reported_quantity, to)}
+            end)
           end)
 
-        new_marks = if existing_ids == [], do: marks, else: marks + 1
-        {length(existing_ids), %{records: updated_records, marks: new_marks}}
+        new_marks = if existing == [], do: marks, else: marks + 1
+        {length(existing), %{records: updated_records, marks: new_marks}}
       end)
 
     {:ok, count}

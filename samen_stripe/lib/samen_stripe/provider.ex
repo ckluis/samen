@@ -183,9 +183,11 @@ defmodule SamenStripe.Provider do
   # HTTP call that fails halts the whole call with `{:error, reason}` — the core
   # `UsageReporter` marks NOTHING on any error, so a retry safely re-sends the
   # ENTIRE batch. That retry is safe (not a double-bill) precisely because each
-  # record's `idempotency_key` (`"usage:" <> usage_record_id`, derived by the
-  # core, unchanged across retries) is sent as Stripe's `Idempotency-Key` header
-  # — Stripe dedups any record it already durably processed before the failure.
+  # record's `idempotency_key` (`"usage:<id>:<from>-<to>"`, derived by the core from
+  # the delta it carries, unchanged across retries) is sent as Stripe's
+  # `Idempotency-Key` header — Stripe dedups any record it already durably processed
+  # before the failure. `quantity` is that DELTA (T163; ADR-051 P2): with
+  # `"action" => "increment"`, sending a grown tally's whole total would double-bill.
   @impl true
   def report_usage(batch, config) when is_list(batch) do
     if configured?(config) do

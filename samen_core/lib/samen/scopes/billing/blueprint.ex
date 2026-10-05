@@ -642,6 +642,20 @@ defmodule Samen.Scopes.Billing.Blueprint do
 
         Maps to the billing provider's UsageRecord. Used to track seat-count, API calls, storage, etc.
         for usage-based billing plans.
+
+        ## A derived tally (T163; ADR-051 P2)
+
+        A `Usage` row is never written by a caller. `Samen.Billing.UsageTally.rebuild/5`
+        RECOMPUTES it from the insert-only `UsageEvent` ledger (the sum of the period's
+        captured quantities — never an increment of the previous value), through the
+        guarded `:rebuild_tally` upsert on the `(org, subscription, metric, period_start)`
+        identity. The ledger is insert-only, so a tally only ever grows.
+
+        `reported_quantity` is how much of `quantity` the provider has already been sent.
+        The reporter sends only the DELTA (`quantity - reported_quantity`), because the
+        provider's metered-usage call INCREMENTS: re-sending a grown total would bill the
+        already-reported part twice. `:mark_reported` is the one other mutation, and it
+        only ever moves `reported_quantity` forward, never past `quantity`.
         """
         use Samen.Resource,
           otp_app: unquote(otp_app),
@@ -669,6 +683,18 @@ defmodule Samen.Scopes.Billing.Blueprint do
           attribute(:period_start, :utc_datetime, public?: true)
           attribute(:period_end, :utc_datetime, public?: true)
           attribute(:reported_at, :utc_datetime, public?: true)
+
+          # How much of `quantity` the provider has already been sent (ADR-051 P2).
+          attribute(:reported_quantity, :integer,
+            public?: true,
+            allow_nil?: false,
+            default: 0,
+            constraints: [min: 0]
+          )
+        end
+
+        identities do
+          identity(:unique_tally, [:org_id, :subscription_id, :metric, :period_start])
         end
 
         relationships do
@@ -685,7 +711,20 @@ defmodule Samen.Scopes.Billing.Blueprint do
         end
 
         actions do
-          defaults([:read, :destroy, create: :*, update: :*])
+          # A derived tally: read, the guarded rebuild upsert, and the reporter's
+          # forward-only stamp. No generic create/update/destroy (ADR-051 §2.4).
+          defaults([:read])
+
+          create :rebuild_tally do
+            accept([:org_id, :subscription_id, :metric, :quantity, :period_start, :period_end])
+            change(Samen.Billing.UsageTally.Guard)
+          end
+
+          update :mark_reported do
+            accept([:reported_quantity, :reported_at])
+            require_atomic?(false)
+            validate(Samen.Billing.UsageTally.ForwardOnly)
+          end
         end
 
         policies do

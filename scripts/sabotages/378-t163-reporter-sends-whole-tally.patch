@@ -1,0 +1,26 @@
+# SABOTAGE: T163 / ADR-051 P2 — the reporter sends the tally's WHOLE quantity instead
+# of its unreported delta. The provider increments (`samen_stripe`: "action" =>
+# "increment"), so every time a reported tally grows, everything already billed is
+# billed again: 42 reported, grows to 50, and the provider is sent 50 — 92 billed.
+#
+# Flips the grown-tally delta test and the growth-during-report test. The fresh-record
+# tests stay green (for a never-reported record the delta IS the whole quantity), which
+# is why the pre-P2 suite could never have caught a double bill.
+# APP: samen_core
+# TEST_FILES: test/billing_usage_reporter_test.exs
+# MUST_FAIL: a tally that grew after it was reported sends ONLY the delta, under a delta key
+# MUST_FAIL: growth DURING a report is marked at the value SENT, and goes out as the next delta
+diff --git a/samen_core/lib/samen/billing/usage_reporter.ex b/samen_core/lib/samen/billing/usage_reporter.ex
+index 2322c18..f73522a 100644
+--- a/samen_core/lib/samen/billing/usage_reporter.ex
++++ b/samen_core/lib/samen/billing/usage_reporter.ex
+@@ -160,7 +160,8 @@ defmodule Samen.Billing.UsageReporter do
+       idempotency_key: idempotency_key(record.id, from, to),
+       metric: Map.get(record, :metric),
+       # The DELTA: the provider increments, so only the unreported part is sent.
+-      quantity: to - from,
++      # SABOTAGE (ADR-051 P2): the whole tally is sent, not the delta.
++      quantity: to,
+       timestamp: Map.get(record, :period_end) || Map.get(record, :period_start),
+       subscription_id: Map.get(record, :subscription_id),
+       provider_ref: Map.get(record, :provider_ref)

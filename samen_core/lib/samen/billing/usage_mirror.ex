@@ -43,6 +43,9 @@ defmodule Samen.Billing.UsageMirror do
           id: String.t(),
           metric: atom(),
           quantity: integer(),
+          # How much of `quantity` the provider already has (T163; ADR-051 P2).
+          # The reporter sends only `quantity - reported_quantity`.
+          reported_quantity: non_neg_integer(),
           period_start: DateTime.t() | nil,
           period_end: DateTime.t() | nil,
           subscription_id: String.t(),
@@ -54,7 +57,9 @@ defmodule Samen.Billing.UsageMirror do
         }
 
   @doc """
-  Read up to `limit` pending (unreported — `reported_at IS NULL`) usage records,
+  Read up to `limit` pending usage records — those with unreported usage,
+  `quantity > reported_quantity` (T163; ADR-051 P2: a tally can grow after it was
+  first reported, so "has it ever been reported" is not the test),
   oldest-first (stable ordering so repeated calls under a persistent backlog make
   forward progress instead of starving older rows). Fewer than `limit` (including
   zero) is a completely normal result — NOT an error.
@@ -63,7 +68,10 @@ defmodule Samen.Billing.UsageMirror do
               {:ok, [pending_record()]} | {:error, term()}
 
   @doc """
-  Mark exactly the given usage-record `ids` as reported at `reported_at`.
+  Mark exactly the given records as reported at `reported_at`. Each mark is
+  `{id, to}`: set that record's `reported_quantity` to `to`, the quantity that was
+  just SENT (not the record's current quantity, which a rebuild may have grown
+  since it was read). `reported_quantity` only ever moves forward.
 
   MUST be all-or-nothing for the given id list: either every id is stamped or
   none are. `Samen.Billing.UsageReporter` calls this ONLY after the provider has
@@ -75,9 +83,13 @@ defmodule Samen.Billing.UsageMirror do
   can fail halfway.
 
   Returns `{:ok, count}` — the number of rows actually stamped (lets the caller
-  detect a `count != length(ids)` short-write, e.g. a row deleted between read and
+  detect a `count != length(marks)` short-write, e.g. a row deleted between read and
   mark).
   """
-  @callback mark_reported(ref(), ids :: [String.t()], reported_at :: DateTime.t()) ::
+  @callback mark_reported(
+              ref(),
+              marks :: [{id :: String.t(), to :: pos_integer()}],
+              reported_at :: DateTime.t()
+            ) ::
               {:ok, non_neg_integer()} | {:error, term()}
 end

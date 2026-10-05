@@ -6,7 +6,7 @@ defmodule Demo.BillingScopeRbacRedPathTest do
     * member actors cannot mutate Tier-0 config rows (Plan, Price);
     * member actors cannot mutate admin-gated resources (Subscription, Invoice, Payment, Entitlement);
     * admin actors CAN mutate the same resources;
-    * member actors CAN mutate member-gated resources (Usage);
+    * usage is recorded through the Meter, never by writing the derived Usage tally;
     * admin actors cannot read foreign org rows (cross-org RBAC + org-scope).
 
   The RBAC checks are exercised through the REAL Ash policy authorizer against the
@@ -250,27 +250,33 @@ defmodule Demo.BillingScopeRbacRedPathTest do
   end
 
   # =========================================================================
-  # Usage — member-gated writes (members CAN record usage).
+  # Usage — a derived tally (T163; ADR-051 P2). Members record usage through the
+  # Meter; nobody, at any role, writes the tally row directly.
   # =========================================================================
 
-  test "member CAN record usage (member-gate positive control)" do
+  test "usage is recorded through the Meter (positive control), and a member cannot write the tally directly" do
     org = mk_org("rbac-use-member")
     member = mk_actor(org.id, :member)
     customer = mk_customer(org.id)
     plan = mk_plan(org.id)
     sub = mk_subscription(org.id, customer.id, plan.id)
 
-    assert {:ok, usage} =
+    assert {:ok, :recorded} =
+             Samen.Billing.Meter.record(
+               org.id,
+               %{metric: :api_calls, quantity: 100, source_ref: "rbac:1", subscription_id: sub.id},
+               resource: Demo.BillingScope.UsageEvent
+             )
+
+    assert {:error, _} =
              Usage
-             |> Ash.Changeset.for_create(:create, %{
+             |> Ash.Changeset.for_create(:rebuild_tally, %{
                org_id: org.id,
                subscription_id: sub.id,
                metric: :api_calls,
                quantity: 100
              })
              |> Ash.create(actor: member.actor, authorize?: true)
-
-    assert usage.quantity == 100
   end
 
   # =========================================================================

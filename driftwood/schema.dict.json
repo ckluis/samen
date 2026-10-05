@@ -2499,6 +2499,12 @@
           "type": "UtcDatetime"
         },
         {
+          "column_name": "dpu_reported_quantity",
+          "logical_name": "reported_quantity",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
           "column_name": "dpu_subscription_id",
           "logical_name": "subscription_id",
           "pii": false,
@@ -4765,6 +4771,12 @@
           "logical_name": "reported_at",
           "pii": false,
           "type": "UtcDatetime"
+        },
+        {
+          "column_name": "fbu_reported_quantity",
+          "logical_name": "reported_quantity",
+          "pii": false,
+          "type": "Integer"
         },
         {
           "column_name": "fbu_subscription_id",
