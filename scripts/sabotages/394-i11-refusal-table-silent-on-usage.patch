@@ -1,0 +1,29 @@
+# SABOTAGE: issue #11 — `assert_refusal_table!/1` stops calling out a refusal that claims to
+# have spent tokens (`{:error, reason, usage}` where an adapter refused and made no call).
+# The shape then lands in the generic mismatch arm, which still flunks but no longer SAYS
+# the adapter invented spend — the adapter conformance suites lose the reason a reviewer
+# needs. The test pins the specific diagnosis, not just "some failure".
+# APP: samen_core
+# TEST_FILES: test/adapter_conformance_case_test.exs
+# MUST_FAIL: flunks when a refusal claims to have spent tokens (issue #11 — a refusal makes no call)
+diff --git a/samen_core/lib/samen/adapter_conformance_case.ex b/samen_core/lib/samen/adapter_conformance_case.ex
+index 335283a..0252df3 100644
+--- a/samen_core/lib/samen/adapter_conformance_case.ex
++++ b/samen_core/lib/samen/adapter_conformance_case.ex
+@@ -109,15 +109,7 @@ defmodule Samen.AdapterConformanceCase do
+               "work it did not do (CLAUDE.md fail-honest adapter contract)."
+           )
+ 
+-        # A provider MAY report a failure that spent tokens as `{:error, reason, usage}`
+-        # (ADR-048 §6 Level 2 constraint 1, issue #11). A REFUSAL made no call, so a refusal
+-        # that claims usage is inventing spend — the mirror image of a fake success.
+-        {:error, _reason, _usage} ->
+-          flunk(
+-            "#{description}: the refusal claims to have spent tokens (a three-element " <>
+-              "{:error, reason, usage}) — a refusal makes no provider call, so it has no " <>
+-              "usage to report; expected {:error, #{inspect(expected)}}."
+-          )
++        # SABOTAGE (#11): a usage-carrying refusal is no longer called out.
+ 
+         other ->
+           flunk("#{description}: expected {:error, #{inspect(expected)}}, got #{inspect(other)}")

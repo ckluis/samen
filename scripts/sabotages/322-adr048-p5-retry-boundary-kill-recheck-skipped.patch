@@ -26,15 +26,17 @@
 # Re-anchored again for issue #11 (bill the failed attempt): the D-17 billing step now
 # sits between `retries = attempt - 1` and this `cond`, and the §6 comment above it was
 # rewritten, so the old context no longer matched. Same deletion, same semantics.
+# Re-anchored a third time for the #11 follow-up: `bill_failed_attempt` now returns the
+# turn row too, so the line above this `cond` changed. Same deletion, same semantics.
 # APP: samen_core
 # TEST_FILES: test/ai/agent_durability_test.exs
 # MUST_FAIL: P5 RED: a kill flipped DURING the overflowing attempt stops the Level 2 retry
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index e8bec49..1ebfd83 100644
+index 19b9f66..1038271 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
 @@ -1162,22 +1162,12 @@ defmodule Samen.AI.Agent do
-     {run, result} = bill_failed_attempt(run, result)
+     {run, turn_row, result} = bill_failed_attempt(run, turn_row, result)
  
      cond do
 -      # P5 (ADR-048 §8, operator ruling D-04) — the kill-switch is RE-CHECKED at the

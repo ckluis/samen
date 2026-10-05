@@ -12,6 +12,11 @@ T64/D1). Implements `Samen.AI.Provider` for Anthropic's Messages API.
 - **By-construction raw-refusal** (the INV-7 seam): both callbacks accept ONLY a
   chokepoint-minted `%Samen.AI.MaskedPayload{}` — a raw string/map refuses by
   `FunctionClauseError`, so unmasked input cannot reach Anthropic.
+- **Context overflow → `:context_overflow`** (ADR-048 §6 Level 2; issue #11): a 400
+  "prompt is too long" is `{:error, :context_overflow}` (nothing was spent), and a 200 with
+  `stop_reason: "model_context_window_exceeded"` is `{:error, :context_overflow, usage}` —
+  truncated, so never handed back as a completion, and billed as a failed attempt. Usage
+  counts `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`.
 - **No live calls in CI**: the test suite injects a fixture transport (the
   `samen_postmark` cassette precedent); the real Messages-API call
   (`SamenAnthropic.Transport`, via `req`) is exercised only behind the host opt-in

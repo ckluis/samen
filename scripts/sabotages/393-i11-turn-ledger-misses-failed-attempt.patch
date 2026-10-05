@@ -1,0 +1,23 @@
+# SABOTAGE: issue #11 — the failed attempt is billed onto the RUN but stamped onto its TURN
+# row as zero. The run's token total is then larger than its turn ledger can explain: an
+# operator reading the turns sees spend with no turn it belongs to.
+#
+# Flips the recovered-turn ledger test. The run-total billing tests stay green (the run IS
+# billed), which is exactly why only a turn-ledger assertion catches it.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: #11 LEDGER: a recovered turn's row carries the failed attempt's tokens in its meta — the run total is explained by its turns
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 19b9f66..4f299f8 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1263,7 +1263,8 @@ defmodule Samen.AI.Agent do
+         })
+         |> Ash.update!(authorize?: false)
+ 
+-      {run, note_failed_attempt!(turn_row, in_tokens, out_tokens), {:error, reason}}
++      # SABOTAGE (#11): the turn ledger is stamped with zeros — the run is billed, the turn is not.
++      {run, note_failed_attempt!(turn_row, 0, 0), {:error, reason}}
+     else
+       {run, turn_row, {:error, reason}}
+     end

@@ -1,0 +1,26 @@
+# SABOTAGE: issue #11 / ADR-048 §6 — the tool DECISION stamp (`decide_tool!/3`) REPLACES the
+# turn row's meta with a fresh map instead of merging into it, as it did before #11's
+# follow-up. A turn whose Level 2 retry comes back as a TOOL call then loses the
+# `context_retries` counter §6 puts "on the same turn row", and the failed attempt's tokens
+# stamped beside it — the turn ledger stops explaining the run's bill.
+#
+# Flips the recovered-tool-turn test. Plain (non-tool) recovered turns stay green: they
+# never pass through `decide_tool!/3`, which is why this survived every shipped Level 2 test.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_tools_test.exs
+# MUST_FAIL: RED: a recovered TOOL turn keeps its context_retries counter and the failed attempt's tokens
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 19b9f66..9d040b9 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3050,8 +3050,8 @@ defmodule Samen.AI.Agent do
+     # `context_retries` counter and the failed attempt's tokens are stamped on this row
+     # BEFORE the retry, and a retry that comes back as a tool call must not erase them.
+     meta =
+-      prior
+-      |> Map.put("args_digest", digest)
++      # SABOTAGE (#11): the tool stamp REPLACES the row's meta again.
++      %{"args_digest" => digest}
+       |> maybe_put_divergent(prior["args_digest"], digest)
+ 
+     turn_row

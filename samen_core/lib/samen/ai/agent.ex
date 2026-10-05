@@ -1159,7 +1159,7 @@ defmodule Samen.AI.Agent do
     # BEFORE the `cond` (D-17) so the D-13 budget re-check reads them off the run row. It
     # also narrows the result back to `{:error, reason}`: `execute_turn/4`'s `case` has no
     # arm for a three-element error, and nothing past this point needs the usage.
-    {run, result} = bill_failed_attempt(run, result)
+    {run, turn_row, result} = bill_failed_attempt(run, turn_row, result)
 
     cond do
       # P5 (ADR-048 §8, operator ruling D-04) — the kill-switch is RE-CHECKED at the
@@ -1244,26 +1244,52 @@ defmodule Samen.AI.Agent do
   # delta the committing sites use) and the UPDATED struct is returned: the D-13 re-check
   # reads the row through `reload!/1`, and every later write totals off this struct, so a
   # struct-only bill would be invisible to one and overwritten by the other.
-  defp bill_failed_attempt(%Run{} = run, {:error, reason, usage}) do
+  #
+  # The same tokens are stamped on the TURN row (`failed_input_tokens` /
+  # `failed_output_tokens` in its bounded meta, accumulated across attempts), because the
+  # run's total is otherwise unexplained by its turn ledger: the turn's own
+  # `input_tokens` is the attempt that produced its result, and the failed one belongs to
+  # the same turn index.
+  defp bill_failed_attempt(%Run{} = run, turn_row, {:error, reason, usage}) do
     in_tokens = usage_int(usage, :input_tokens)
     out_tokens = usage_int(usage, :output_tokens)
 
-    run =
-      if in_tokens + out_tokens > 0 do
+    if in_tokens + out_tokens > 0 do
+      run =
         run
         |> Ash.Changeset.for_update(:advance, %{
           input_tokens_used: run.input_tokens_used + in_tokens,
           output_tokens_used: run.output_tokens_used + out_tokens
         })
         |> Ash.update!(authorize?: false)
-      else
-        run
-      end
 
-    {run, {:error, reason}}
+      {run, note_failed_attempt!(turn_row, in_tokens, out_tokens), {:error, reason}}
+    else
+      {run, turn_row, {:error, reason}}
+    end
   end
 
-  defp bill_failed_attempt(run, result), do: {run, result}
+  defp bill_failed_attempt(run, turn_row, result), do: {run, turn_row, result}
+
+  defp note_failed_attempt!(turn_row, in_tokens, out_tokens) do
+    meta = turn_row.meta || %{}
+
+    meta =
+      meta
+      |> Map.put("failed_input_tokens", meta_int(meta, "failed_input_tokens") + in_tokens)
+      |> Map.put("failed_output_tokens", meta_int(meta, "failed_output_tokens") + out_tokens)
+
+    turn_row
+    |> Ash.Changeset.for_update(:decide, %{meta: bounded_meta(meta)})
+    |> Ash.update!(authorize?: false)
+  end
+
+  defp meta_int(meta, key) do
+    case Map.get(meta, key) do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> 0
+    end
+  end
 
   defp context_overflow?({:error, reason}), do: safe_error_kind(reason) == :context_overflow
   defp context_overflow?(_result), do: false
@@ -3020,8 +3046,12 @@ defmodule Samen.AI.Agent do
     digest = args_digest(normalized)
     prior = turn_row.meta || %{}
 
+    # MERGED into the row's meta, never a fresh map: ADR-048 §6 Level 2's
+    # `context_retries` counter and the failed attempt's tokens are stamped on this row
+    # BEFORE the retry, and a retry that comes back as a tool call must not erase them.
     meta =
-      %{"args_digest" => digest}
+      prior
+      |> Map.put("args_digest", digest)
       |> maybe_put_divergent(prior["args_digest"], digest)
 
     turn_row

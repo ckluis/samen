@@ -1,0 +1,30 @@
+# SABOTAGE: issue #11 — `samen_anthropic` no longer recognises `stop_reason:
+# "model_context_window_exceeded"` (HTTP 200: generation filled the context window, the
+# response is TRUNCATED, and it reports what it spent). The response falls through to the
+# success clause, so the agent loop accepts a truncated answer as a finished turn and the
+# tokens are never billed as a failed attempt — the usage-carrying overflow ADR-048 §6
+# Level 2 constraint 1 is about, silently swallowed.
+#
+# Flips the window-exceeded test. The normal-completion control stays green.
+# APP: samen_anthropic
+# TEST_FILES: test/provider_test.exs
+# MUST_FAIL: a 200 that filled the context window is a usage-carrying :context_overflow, never a completion
+diff --git a/samen_anthropic/lib/samen_anthropic/provider.ex b/samen_anthropic/lib/samen_anthropic/provider.ex
+index bdbbb81..bc5ace6 100644
+--- a/samen_anthropic/lib/samen_anthropic/provider.ex
++++ b/samen_anthropic/lib/samen_anthropic/provider.ex
+@@ -120,12 +120,8 @@ defmodule SamenAnthropic.Provider do
+ 
+   # Generation filled the context window: truncated, and it spent tokens — the
+   # usage-carrying overflow (see the moduledoc). Ordered before the success clause.
+-  defp handle_response(
+-         {:ok, %{status: 200, body: %{"stop_reason" => "model_context_window_exceeded"} = body}},
+-         _model
+-       ) do
+-    {:error, :context_overflow, normalize_usage(Map.get(body, "usage", %{}))}
+-  end
++  # SABOTAGE (#11): a response that filled the context window is no longer recognised;
++  # it falls through to the success clause and is handed back as a completion.
+ 
+   defp handle_response({:ok, %{status: 200, body: %{"content" => content} = body}}, model)
+        when is_list(content) do

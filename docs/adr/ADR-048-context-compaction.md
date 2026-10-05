@@ -1,6 +1,6 @@
 # ADR-048 — Context compaction inside the ADR-046 erasure envelope: a dual-view transcript, a re-scrubbed summary, three-level overflow recovery, and withdrawal propagation on shred
 
-- **Status:** **ACCEPTED** (2026-09-05) — ratified in full by the operator, per the ADR-046 §7 / ADR-047 §9 convention. **Amended 2026-09-18 (§6 Level 2 constraint 1)** — see the `AMENDED` note at that constraint; the original obligation was unmet and tracked as [issue #11](https://github.com/ckluis/samen/issues/11). **Amended again 2026-10-05: the obligation is MET** (issue #11) — the constraint is restored to its ratified wording; see the second `AMENDED` note.
+- **Status:** **ACCEPTED** (2026-09-05) — ratified in full by the operator, per the ADR-046 §7 / ADR-047 §9 convention. **Amended 2026-09-18 (§6 Level 2 constraint 1)** — see the `AMENDED` note at that constraint; the original obligation was unmet and tracked as [issue #11](https://github.com/ckluis/samen/issues/11). **Amended again 2026-10-05: the obligation is MET** (issue #11) — the constraint is restored to its ratified wording; see the second `AMENDED` note, and the third, which records that it became true for the shipped provider adapter only in the follow-up.
   All twelve items — §10 D1–D6 and §11 O-1–O-6 — are ruled below (E-09, 2026-09-05). Batches
   C1–C4 (§9) are **AUTHORISED** and filed as backlog rows (see `Binds`, below); C4 is additionally
   gated on the O-3 implementation spike.
@@ -352,6 +352,23 @@ attempts, no loop. Three constraints:
   > sabotages 384–388. **Still open and out of #11's scope:** the Level 2 summarizing fold's own
   > call is billed by an ESTIMATE of the folded span, not its real usage (a separate design call).
   > The 2026-09-18 wording this note supersedes, verbatim: *"the failed attempt's own provider call is a real spend, but as shipped it is not yet billed into `run.input_tokens_used`: `agent.ex`'s fold accounting records only an ESTIMATE of the folded span (`in_tokens = est_tokens(span.folded)`), and `Samen.AI.Agent.Compaction.summarize/3`'s `{:ok, String.t()}` return shape discards the summarizer's real usage before any caller could bill it — so the summarization call is estimated, not billed, and the failed attempt is not billed at all today. End-to-end billing across `chokepoint.ex`, `agent.ex`, `provider.ex` and `ai.ex` is tracked as [issue #11](https://github.com/ckluis/samen/issues/11) (backlog row `T223`), which also carries the ruling that billing must land BEFORE the retry-boundary budget re-check;"*
+
+  > **AMENDED 2026-10-05, later — the note above overstated it; now true for the shipped
+  > adapter (issue #11, reopened).** "Met" held only for a provider that reports usage on a
+  > failure, and no shipped adapter did: `samen_anthropic` mapped neither of the Messages API's
+  > overflow signals to `:context_overflow`, so in production Level 2 never fired and nothing
+  > was billed. It now maps both. A 400 "prompt is too long" (the input alone exceeds the
+  > window; rejected before any work, no usage in the body) is `{:error, :context_overflow}`.
+  > A 200 with `stop_reason: "model_context_window_exceeded"` (generation filled the window;
+  > the response is truncated and reports its usage) is `{:error, :context_overflow, usage}`,
+  > never a completion. Its usage counts `input_tokens + cache_creation_input_tokens +
+  > cache_read_input_tokens`, all of which count toward the window. The failed attempt is also
+  > on the TURN ledger (`failed_input_tokens` / `failed_output_tokens` in the turn row's
+  > meta), and a recovered turn whose retry is a tool call no longer loses this constraint's
+  > `context_retries` counter (`decide_tool!/3` merged nothing; it now merges). Proofs:
+  > `samen_anthropic/test/provider_test.exs`, `samen_core/test/ai/error_usage_contract_test.exs`
+  > and the `issue #11` blocks in `agent_durability_test.exs` / `agent_tools_test.exs`;
+  > sabotages 389–395.
 - the retry boundary **re-checks the kill-switch, the durable cancel flag, and every budget**, for
   the same reason the loop re-checks them at every turn boundary and not only at run start
   (sabotage 244's target) — a recovery path that skips the kill-switch is a kill-switch with a hole;

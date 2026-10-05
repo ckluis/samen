@@ -6,20 +6,22 @@
 # Flips the billing test (the run's totals no longer grow by the failed attempt's tokens).
 # The Level 2 fold-and-retry still reaches the final answer, so only a test that measures
 # the bill catches it.
+# Re-anchored for the #11 follow-up: `bill_failed_attempt` now also stamps the turn row
+# (it takes and returns `turn_row`), so the surrounding context moved. Same edit.
 # APP: samen_core
 # TEST_FILES: test/ai/agent_durability_test.exs
 # MUST_FAIL: #11 RED: an overflow that carries usage bills it — the run's totals grow by exactly the failed attempt's tokens
 diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
-index e8bec49..3a7db5f 100644
+index 19b9f66..de4e66c 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1249,7 +1249,8 @@ defmodule Samen.AI.Agent do
+@@ -1254,7 +1254,8 @@ defmodule Samen.AI.Agent do
+     in_tokens = usage_int(usage, :input_tokens)
      out_tokens = usage_int(usage, :output_tokens)
  
-     run =
--      if in_tokens + out_tokens > 0 do
-+      # SABOTAGE (#11): the failed attempt is never billed — the condition cannot hold.
-+      if in_tokens + out_tokens < 0 do
+-    if in_tokens + out_tokens > 0 do
++    # SABOTAGE (#11): the failed attempt is never billed — the condition cannot hold.
++    if in_tokens + out_tokens < 0 do
+       run =
          run
          |> Ash.Changeset.for_update(:advance, %{
-           input_tokens_used: run.input_tokens_used + in_tokens,

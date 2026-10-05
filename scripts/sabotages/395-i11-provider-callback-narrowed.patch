@@ -1,0 +1,25 @@
+# SABOTAGE: issue #11 — the `Samen.AI.Provider.complete/2` @callback is narrowed back to
+# two-element errors. Nothing in the code breaks (no dialyzer runs anywhere in this repo),
+# which is the point: the contract every adapter author reads would again say a failure
+# cannot report what it spent, while the chokepoint and the agent loop depend on exactly
+# that. The contract test reads the compiled BEAM and is the only thing that notices.
+# APP: samen_core
+# TEST_FILES: test/ai/error_usage_contract_test.exs
+# MUST_FAIL: Samen.AI.Provider's complete/2 @callback admits a usage-carrying failure
+diff --git a/samen_core/lib/samen/ai/provider.ex b/samen_core/lib/samen/ai/provider.ex
+index 69a6b22..8d2ed53 100644
+--- a/samen_core/lib/samen/ai/provider.ex
++++ b/samen_core/lib/samen/ai/provider.ex
+@@ -54,11 +54,7 @@ defmodule Samen.AI.Provider do
+   @callback complete(Samen.AI.MaskedPayload.t(), config :: map()) ::
+               {:ok, Samen.AI.Completion.t()}
+               | {:error, :not_configured | term()}
+-              | {:error, term(),
+-                 %{
+-                   optional(:input_tokens) => non_neg_integer(),
+-                   optional(:output_tokens) => non_neg_integer()
+-                 }}
++  # SABOTAGE (#11): the @callback no longer admits a usage-carrying failure.
+ 
+   @doc """
+   Embed a sealed payload's input, returning one vector per input segment. Same
