@@ -90,10 +90,14 @@ defmodule Samen.Fleet.LocalCredential do
 
     @name __MODULE__
 
+    # Started UNLINKED. It is started lazily by whichever process first calls it — a
+    # request, a job, a test — and `start_link` tied its life to that caller: when the
+    # caller exited non-normally (`:shutdown`, a crash), the store died with it and every
+    # stored credential silently vanished (`fetch/1` then answers `:not_configured`).
     defp ensure_started do
       case Process.whereis(@name) do
         nil ->
-          case Elixir.Agent.start_link(fn -> %{} end, name: @name) do
+          case Elixir.Agent.start(fn -> %{} end, name: @name) do
             {:ok, _pid} -> :ok
             {:error, {:already_started, _pid}} -> :ok
           end
