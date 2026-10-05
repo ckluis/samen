@@ -9,6 +9,15 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# --- toolchain floor (.tool-versions) — FIRST, before anything compiles -------------------
+# The running Elixir / Erlang-OTP must be at least the pinned versions: the repo once ran
+# for weeks on a toolchain ten CVEs behind with nothing noticing. ~1s; self-test included.
+bash "$REPO_ROOT/scripts/toolchain_check_test.sh" >/dev/null || {
+  echo "toolchain-check SELF-TEST FAILED — rerun scripts/toolchain_check_test.sh for detail"
+  exit 1
+}
+bash "$REPO_ROOT/scripts/toolchain_check.sh"
+
 run_spike() {
   local spike_dir="$1"
   local spike_name
