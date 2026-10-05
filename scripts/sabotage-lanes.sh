@@ -35,8 +35,9 @@
 # override with SAMEN_LANE_B_DIR) — never tracked, never in the way — and is REUSED
 # across runs, so its `_build` stays warm: only the first run pays a full compile. Each
 # run resets it to the certified commit (tracked edits and untracked non-ignored files
-# discarded; `_build`/`deps` kept). Missing `deps/` dirs are cloned from the main tree
-# (`cp -c`, an APFS clone: no copy cost) — fetched deps never change per patch.
+# discarded; `_build` kept). Every run re-clones each app's `deps/` from the main tree
+# (`cp -c`, an APFS clone: no copy cost) and runs `mix deps.get` there, so a dependency
+# bump never leaves lane B on a stale `deps/` — fetched deps never change per patch.
 #
 # Usage: scripts/sabotage-lanes.sh
 # Exit:  0 both lanes ALL PASSED and the partition is total · 1 a lane failed or the
@@ -86,11 +87,20 @@ fi
 [[ "$(git -C "$LANE_B" rev-parse HEAD)" == "$HEAD_SHA" ]] || env_err "lane-B tree is not at $HEAD_SHA"
 [[ -z "$(git -C "$LANE_B" status --porcelain)" ]] || env_err "lane-B tree is not clean after reset"
 
+# deps/ is gitignored, so the reset above never touches it — and a lane-B deps/ that was
+# only ever copied when MISSING went stale on the first dependency bump: every lane-B
+# patch then died on `lock mismatch` before running. So EVERY run re-clones each app's
+# deps/ from the main tree (`-p` keeps mtimes, so lane B's `_build` stays warm), then
+# `mix deps.get` in lane B, because the main tree's own deps/ can lag its lockfiles.
 for deps in "$REPO_ROOT"/*/deps; do
   [[ -d "$deps" ]] || continue
   app="$(basename "$(dirname "$deps")")"
-  [[ -d "$LANE_B/$app" && ! -e "$LANE_B/$app/deps" ]] || continue
-  cp -Rc "$deps" "$LANE_B/$app/deps" 2>/dev/null || cp -R "$deps" "$LANE_B/$app/deps"
+  [[ -d "$LANE_B/$app" ]] || continue
+  rm -rf "$LANE_B/$app/deps"
+  cp -Rpc "$deps" "$LANE_B/$app/deps" 2>/dev/null || cp -Rp "$deps" "$LANE_B/$app/deps" \
+    || env_err "could not copy $app/deps into the lane-B tree"
+  (cd "$LANE_B/$app" && mix deps.get >/dev/null 2>&1) \
+    || env_err "mix deps.get failed in the lane-B tree for $app — rerun it in $LANE_B/$app for detail"
 done
 
 echo "SABOTAGE LANES: certifying commit $HEAD_SHA — $TOTAL patches in 2 lanes"
