@@ -1,0 +1,26 @@
+# SABOTAGE: `Samen.Auth.SessionRevoke.revoke_one/3` answers `{:ok, :revoked}` for a session
+# that is still LIVE after the revoke attempt — the fail-open dialyzer found (issue #73):
+# the old code matched `{:ok, %Ash.BulkResult{}}`, which `Ash.bulk_update/4` never
+# returns, so every call fell to a fallback that said "revoked" whenever the row merely
+# existed. A revoke that failed told the user their session was gone while it stayed
+# usable, and the "session revoked" audit + notification fired for nothing.
+#
+# Flips the failed-revoke test. The working-revoke, idempotent and other-credential tests
+# stay green, which is exactly why this hid: every happy path looks identical.
+# APP: samen_core
+# TEST_FILES: test/auth/session_revoke_test.exs
+# MUST_FAIL: RED: a revoke that FAILS is reported as a failure — never {:ok, :revoked} for a session that is still live
+diff --git a/samen_core/lib/samen/auth/session_revoke.ex b/samen_core/lib/samen/auth/session_revoke.ex
+index add1b2f..e93e864 100644
+--- a/samen_core/lib/samen/auth/session_revoke.ex
++++ b/samen_core/lib/samen/auth/session_revoke.ex
+@@ -81,7 +81,8 @@ defmodule Samen.Auth.SessionRevoke do
+     |> Ash.read!(authorize?: false)
+     |> case do
+       [%{revoked_at: %DateTime{}} | _] -> {:ok, :revoked}
+-      [_still_live | _] -> {:error, :revoke_failed}
++      # SABOTAGE: a session that is still live after the attempt reads as revoked.
++      [_still_live | _] -> {:ok, :revoked}
+       [] -> {:error, :not_found}
+     end
+   end

@@ -219,14 +219,19 @@ defmodule Samen.Web.Auth.SessionController do
 
   defp complete_second_factor_verified(conn, mount, credential_id, digest, code) do
     with {:ok, method} <- verify_second_factor(mount, credential_id, code),
-         {:ok, _consumed} <- TokenConsume.consume_once(Mount.resource(mount, AuthToken), digest, :totp_pending) do
+         {:ok, _consumed} <-
+           TokenConsume.consume_once(Mount.resource(mount, AuthToken), digest, :totp_pending) do
       if method == :recovery do
         SessionRevoke.revoke_all(Mount.resource(mount, Session), credential_id)
 
         # ADR-035 §5 A10 (T09) — audit + notify, co-located exactly as
         # `Samen.Web.Auth.TotpEnrollLive.fan_out/4` does for the sibling
         # totp_* kinds. Unconditional audit (token-only); best-effort notify.
-        Audit.auth_event(mount.repo, event: "auth.recovery_code_used", subject_id: credential_id, actor_id: credential_id)
+        Audit.auth_event(mount.repo,
+          event: "auth.recovery_code_used",
+          subject_id: credential_id,
+          actor_id: credential_id
+        )
 
         Notify.notify_credential(
           Mount.resource(mount, User),
@@ -248,7 +253,11 @@ defmodule Samen.Web.Auth.SessionController do
         # against one credential does NOT grow the audit partition per attempt. The
         # detail stays the fixed token-blind string (T101), subject_id set.
         if login_failed_edge?(:credential, to_string(credential_id)) do
-          Audit.auth_event(mount.repo, event: "auth.login_failed", subject_id: credential_id, actor_id: credential_id)
+          Audit.auth_event(mount.repo,
+            event: "auth.login_failed",
+            subject_id: credential_id,
+            actor_id: credential_id
+          )
         end
 
         # ADR-038 §6.4 (T109) — durable bump for the credential-keyed axis, same
@@ -284,7 +293,11 @@ defmodule Samen.Web.Auth.SessionController do
         # ADR-035 §5 A10 (T101) — self-initiated logout: audit always, no
         # notify (this is the credential's OWN current session ending
         # itself, not "revoke-by-another-session" — see moduledoc).
-        Audit.auth_event(mount.repo, event: "auth.logout", subject_id: credential_id, actor_id: credential_id)
+        Audit.auth_event(mount.repo,
+          event: "auth.logout",
+          subject_id: credential_id,
+          actor_id: credential_id
+        )
 
       _ ->
         :ok
@@ -329,7 +342,11 @@ defmodule Samen.Web.Auth.SessionController do
             # caller's CURRENT session revoking a (typically different)
             # session in the list: the ADR's "revoke-by-another-session"
             # notify condition. Audit always; notify the credential owner.
-            Audit.auth_event(mount.repo, event: "auth.session_revoked", subject_id: credential_id, actor_id: credential_id)
+            Audit.auth_event(mount.repo,
+              event: "auth.session_revoked",
+              subject_id: credential_id,
+              actor_id: credential_id
+            )
 
             Notify.notify_credential(
               Mount.resource(mount, User),
@@ -338,7 +355,9 @@ defmodule Samen.Web.Auth.SessionController do
               "A session was signed out on your account. If this wasn't you, secure your account immediately."
             )
 
-          {:error, :not_found} ->
+          # Not yours / unknown, or yours but the revoke did not take: either way
+          # nothing was revoked, so nothing is audited or notified as revoked.
+          {:error, reason} when reason in [:not_found, :revoke_failed] ->
             :ok
         end
 
@@ -368,7 +387,11 @@ defmodule Samen.Web.Auth.SessionController do
         # OTHER session: also "revoke-by-another-session". Audit always;
         # notify the credential owner (the classic mass-signout security
         # notice).
-        Audit.auth_event(mount.repo, event: "auth.sessions_revoked_all", subject_id: credential_id, actor_id: credential_id)
+        Audit.auth_event(mount.repo,
+          event: "auth.sessions_revoked_all",
+          subject_id: credential_id,
+          actor_id: credential_id
+        )
 
         Notify.notify_credential(
           Mount.resource(mount, User),
@@ -392,7 +415,10 @@ defmodule Samen.Web.Auth.SessionController do
   # session id (fixation defense at the FIRST privileged step, not just the
   # last) — `finish_login/4` renews again at the real sign-in.
   defp start_totp_challenge(conn, mount, credential, remember?, return_to) do
-    case TotpStepUp.challenge(conn, mount, credential.id, remember?: remember?, return_to: return_to) do
+    case TotpStepUp.challenge(conn, mount, credential.id,
+           remember?: remember?,
+           return_to: return_to
+         ) do
       {:ok, conn} -> redirect(conn, to: totp_path(conn))
       {:error, _reason} -> redirect(conn, to: "#{login_path(conn)}?error=1")
     end
@@ -402,14 +428,20 @@ defmodule Samen.Web.Auth.SessionController do
   # no-2FA password path and the post-2FA-verify path, so the cookie-writing
   # + fixation-defense discipline is identical either way.
   defp finish_login(conn, mount, credential_id, remember?, return_to) do
-    case SessionCreate.create(session_create_mods(mount), credential_id, device_label: device_label(conn)) do
+    case SessionCreate.create(session_create_mods(mount), credential_id,
+           device_label: device_label(conn)
+         ) do
       {:ok, _session, raw_token} ->
         # ADR-035 §5 A10 (T101) — every real login, password-only OR
         # post-2FA, mints its session HERE; auditing once at this single
         # chokepoint covers both without duplicating the call at each
         # caller. Audit always; NO notify (the ADR row's Notification column
         # is `—` for `auth.login`).
-        Audit.auth_event(mount.repo, event: "auth.login", subject_id: credential_id, actor_id: credential_id)
+        Audit.auth_event(mount.repo,
+          event: "auth.login",
+          subject_id: credential_id,
+          actor_id: credential_id
+        )
 
         # ADR-038 §6.4 (T109) — "successful login -> reset": clear the durable
         # brute-force signal for BOTH key axes now that a real session minted.
@@ -474,7 +506,12 @@ defmodule Samen.Web.Auth.SessionController do
     case lookup_credential_id_for_audit(mount, email) do
       {:ok, credential_id} ->
         if edge?,
-          do: Audit.auth_event(mount.repo, event: "auth.login_failed", subject_id: credential_id, actor_id: credential_id)
+          do:
+            Audit.auth_event(mount.repo,
+              event: "auth.login_failed",
+              subject_id: credential_id,
+              actor_id: credential_id
+            )
 
       :error ->
         if edge?, do: Audit.auth_event(mount.repo, event: "auth.login_failed")
@@ -557,7 +594,8 @@ defmodule Samen.Web.Auth.SessionController do
 
     Mount.resource(mount, AuthToken)
     |> Ash.Query.filter(
-      token_digest == ^digest and context == :totp_pending and is_nil(consumed_at) and expires_at > ^now
+      token_digest == ^digest and context == :totp_pending and is_nil(consumed_at) and
+        expires_at > ^now
     )
     |> Ash.Query.select([:id, :credential_id])
     |> Ash.Query.limit(1)
@@ -584,7 +622,8 @@ defmodule Samen.Web.Auth.SessionController do
       if Totp.totp_shaped?(code) do
         with {:ok, _} <- Totp.verify_login_code(mods, credential_id, code), do: {:ok, :totp}
       else
-        with {:ok, _} <- Totp.verify_recovery_code(mods, credential_id, code), do: {:ok, :recovery}
+        with {:ok, _} <- Totp.verify_recovery_code(mods, credential_id, code),
+             do: {:ok, :recovery}
       end
 
     case result do
@@ -593,7 +632,8 @@ defmodule Samen.Web.Auth.SessionController do
     end
   end
 
-  defp totp_mods(%Mount{} = mount), do: %{credential: Mount.resource(mount, Credential), repo: mount.repo}
+  defp totp_mods(%Mount{} = mount),
+    do: %{credential: Mount.resource(mount, Credential), repo: mount.repo}
 
   defp extract_code(%{"code" => code}) when is_binary(code), do: code
   defp extract_code(%{"totp" => %{"code" => code}}) when is_binary(code), do: code
@@ -678,7 +718,9 @@ defmodule Samen.Web.Auth.SessionController do
     end
   end
 
-  defp remote_ip(%Plug.Conn{remote_ip: ip}) when is_tuple(ip), do: ip |> :inet.ntoa() |> to_string()
+  defp remote_ip(%Plug.Conn{remote_ip: ip}) when is_tuple(ip),
+    do: ip |> :inet.ntoa() |> to_string()
+
   defp remote_ip(_), do: "unknown"
 
   # The over-limit response (ADR-035 §4.5 "429 or interstitial"): a bare 429, identical
