@@ -17,6 +17,8 @@ through codemunch first. A single grep for one exact string in one known file is
 not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full rules + decision tree.
 
 ## Suites / CI (local Postgres + pgvector required)
+- Toolchain floor: `.tool-versions` (Elixir 1.20.4 / OTP 29.1.1). `ci.sh` and `ci-fast.sh` run
+  `scripts/toolchain_check.sh` FIRST and fail on an older Elixir or OTP; raise the pin when upgrading.
 - Prerequisite: a local Postgres server WITH the `pgvector` extension installed (`CREATE
   EXTENSION vector`) — the samen_core AI-embeddings migration hard-requires it (ADR-043
   §7.1/M3; `docs/adr/ADR-043-ai-plane.md`). Install via `brew install pgvector` (or build

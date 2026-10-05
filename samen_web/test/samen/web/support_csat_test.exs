@@ -50,7 +50,10 @@ defmodule Samen.Web.SupportCsatTest do
     @impl true
     def configured?(_config), do: true
     @impl true
-    def deliver(%Message{}, _config), do: send(self(), :should_never_be_called) && {:ok, %{}}
+    def deliver(%Message{}, _config) do
+      send(self(), :should_never_be_called)
+      {:ok, %{}}
+    end
   end
 
   setup do
