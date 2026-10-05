@@ -15,6 +15,16 @@ defmodule SamenWeb.MixProject do
   # any vertical — the two-plane masking guarantee is proven by a framework-local test.
   def project do
     [
+      # Issue #73: PLT cached in priv/plts (gitignored); pre-existing warnings that are
+      # false positives or deliberate code are listed, each with its reason, in
+      # .dialyzer_ignore.exs, so the gate fails on NEW warnings only.
+      dialyzer: [
+        plt_local_path: "priv/plts",
+        plt_core_path: "priv/plts",
+        plt_add_apps: [:ex_unit, :mix],
+        ignore_warnings: ".dialyzer_ignore.exs",
+        list_unused_filters: true
+      ],
       app: :samen_web,
       version: "0.1.0",
       elixir: "~> 1.18",
@@ -46,6 +56,8 @@ defmodule SamenWeb.MixProject do
 
   defp deps do
     [
+      # Issue #73: dialyzer runs in the default ./ci.sh (dev/test only, never shipped).
+      {:dialyxir, "== 1.4.8", only: [:dev, :test], runtime: false},
       # The pure kernel — %Masked{}, Samen.Scope, Samen.Api.PiiResolution, the scope
       # blueprints. No web dep flows back into it.
       {:samen_core, path: "../samen_core"},

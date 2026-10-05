@@ -67,7 +67,15 @@ defmodule Samen.Identity.Reset do
   `auth.password_reset_requested` for a real account. `{:error, reason}`
   only when the account is real and Delivery is honestly blocked/failed.
   """
-  @spec request(String.t(), mods) :: {:ok, :sent} | {:error, term()}
+  @typedoc "What `request/2` reads: no `:session` — revoking sessions is the reset's COMPLETION."
+  @type request_mods :: %{
+          required(:credential) => module(),
+          required(:auth_token) => module(),
+          required(:repo) => module(),
+          optional(atom()) => module()
+        }
+
+  @spec request(String.t(), request_mods) :: {:ok, :sent} | {:error, term()}
   def request(email, %{} = mods) when is_binary(email) do
     with {:ok, bidx} <- BlindIndex.compute(email) do
       case find_credential(mods, bidx) do

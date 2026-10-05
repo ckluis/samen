@@ -41,34 +41,43 @@ defmodule Samen.Scope do
   defstruct [:actor, :context]
 
   @typedoc """
-  The actor map policies see. The four RBAC facts are always present. Two further
-  keys are present on the OPERATOR-plane scopes (`Samen.Impersonation.Scope`,
-  `Samen.OperatorPlane`) and read by the egress matrix
-  (`Samen.Api.PiiResolution`) rather than by RBAC:
+  The actor map policies see. Every key is optional in the TYPE, because the framework
+  builds actors of several shapes and the type must be true of all of them. The membership
+  scope from `for_membership/1` carries all four RBAC facts (`:id`, `:org_id`, `:role`,
+  `:membership_id`), but the framework's other actors do not: the plane scopes
+  (`Samen.Web.Plane.scope/2`) carry `:kind`/`:plane` and no `:membership_id`, and the
+  bounded read/system scopes carry little more than `:org_id`, and the operator analytics
+  surface's fail-closed actor (`%{kind: :tenant, plane: :tenant}`) deliberately carries no
+  `:org_id` at all, so the org-scope filter refuses it. An operator-plane actor may also be a
+  `Samen.OperatorPlane.Actor` struct rather than a map. The type says all of this, so a
+  `@spec … :: Samen.Scope.t()` is TRUE of every scope the framework actually builds
+  (dialyzer, issue #73: the stricter type made every such spec an invalid contract).
+
+  The plane/impersonation keys are read by the egress matrix (`Samen.Api.PiiResolution`)
+  rather than by RBAC:
 
     * `:plane` — `:tenant` | `:operator`. A vaulted field read on the `:operator`
       plane stays masked/absent unless a live reveal grant covers the subject.
+    * `:kind` — the same two values, as the plane scopes stamp them.
     * `:impersonation` — the `%{operator_id, org_id, session_id}` marker proving
       this scope is an impersonated one (a plain member scope has no such key).
-
-  They are declared OPTIONAL, not added to the required four, because a plain
-  tenant member scope built by `for_membership/1` genuinely does not carry them —
-  and `Samen.Impersonation.Scope.impersonated?/1` keys on their absence.
   """
   @type actor :: %{
-          :id => String.t(),
-          :org_id => String.t(),
-          :role => atom() | String.t(),
-          :membership_id => String.t() | nil,
+          optional(:org_id) => String.t(),
+          optional(:id) => String.t(),
+          optional(:role) => atom() | String.t(),
+          optional(:membership_id) => String.t() | nil,
           optional(:plane) => :tenant | :operator,
+          optional(:kind) => :tenant | :operator,
           optional(:impersonation) => %{
             operator_id: String.t(),
             org_id: String.t(),
             session_id: String.t()
-          }
+          },
+          optional(atom()) => term()
         }
 
-  @type t :: %__MODULE__{actor: actor(), context: map() | nil}
+  @type t :: %__MODULE__{actor: actor() | struct(), context: map() | nil}
 
   @doc """
   Build a scope from a loaded Identity membership struct/map.

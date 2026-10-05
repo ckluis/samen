@@ -48,6 +48,8 @@ defmodule Samen.CustomObjects.ObjectRow do
   """
   use Ecto.Schema
 
+  @type t :: %__MODULE__{}
+
   @primary_key {:tnt_id, :binary_id, autogenerate: true}
   schema "tnt_object" do
     field(:tnt_org_id, :binary_id)

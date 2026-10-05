@@ -57,6 +57,16 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
   `_build`) concurrently — disjoint test DBs, unchanged per-patch semantics, merged
   PROCESSED/SELECTED accounting that must be total. It certifies a COMMIT (refuses a dirty
   tree). `SAMEN_SABOTAGE=1 ./ci.sh` uses it on a clean tree and the serial harness otherwise.
+- Dialyzer (issue #73; UNCONDITIONAL in `ci.sh`, sequential before the concurrent app gates):
+  `scripts/dialyzer_gate.sh [app…]` runs `mix dialyzer` over all ten product projects; any
+  warning not in that project's `.dialyzer_ignore.exs` fails (every entry there says why it
+  is a false positive or deliberate code, and an UNUSED entry also fails). Fix a new warning
+  or add it WITH its reason — never a bare entry. PLTs live in `*/priv/plts/` (gitignored —
+  never commit them; #77 once did). A path dep is invisible to dialyxir's lockfile hash, so:
+  samen_web keeps samen_core IN its PLT and the script rebuilds it when samen_core's source
+  hash changes (~95 s); the other eight keep the framework OUT of their PLT and ignore
+  `Samen.`-scoped unknown calls. Cached runs are ~8 s per project; a first build ~2 min and
+  ~2-3 GB each.
 - Apply-check (UNCONDITIONAL in `ci.sh` + `ci-fast.sh`, ~2s): `scripts/sabotage_apply_check.sh`
   requires EVERY patch to `git apply --check` against the working tree. A patch that stops
   applying is a guard with no red — re-anchor it (same semantics, regenerated from a real

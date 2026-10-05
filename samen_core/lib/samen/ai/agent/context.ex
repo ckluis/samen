@@ -23,7 +23,7 @@ defmodule Samen.AI.Agent.Context do
   alias Samen.Automation.Context
 
   @doc "Build the fire-time context for one agent tool call (kernel-only)."
-  @spec build(Ash.Resource.record(), Samen.Scope.t()) :: Context.t()
+  @spec build(Ash.Resource.Record.t(), Samen.Scope.t()) :: Context.t()
   def build(%Run{} = run, %Samen.Scope{} = scope) do
     %Context{
       org_id: run.org_id,

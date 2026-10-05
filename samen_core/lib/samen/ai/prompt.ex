@@ -105,7 +105,7 @@ defmodule Samen.AI.Prompt do
   `vt_`-sentinel/PII-shaped body is refused fail-closed, DB unchanged.
   """
   @spec new_version(Samen.Scope.t(), String.t(), String.t()) ::
-          {:ok, Ash.Resource.record()} | {:error, term()}
+          {:ok, Ash.Resource.Record.t()} | {:error, term()}
   def new_version(%Samen.Scope{} = scope, name, body) when is_binary(name) and is_binary(body) do
     __MODULE__
     |> Ash.Changeset.for_create(
@@ -123,7 +123,7 @@ defmodule Samen.AI.Prompt do
   a leak). Returns `{:ok, %Prompt{}}` or `{:error, :not_found}`.
   """
   @spec fetch(Samen.Scope.t(), String.t(), pos_integer() | :latest) ::
-          {:ok, Ash.Resource.record()} | {:error, :not_found} | {:error, term()}
+          {:ok, Ash.Resource.Record.t()} | {:error, :not_found} | {:error, term()}
   def fetch(%Samen.Scope{} = scope, name, version \\ :latest) do
     query =
       __MODULE__

@@ -4,7 +4,8 @@
 #
 # Order: the G-06 double sweep (seconds, no DB — proves no shipped sabotage was disarmed)
 # → spikes → samen_core → the AI tier → adapter gates → gen_app probes → the opt-in
-# sabotage REPLAY (SAMEN_SABOTAGE=1) → the four app gates, concurrently.
+# sabotage REPLAY (SAMEN_SABOTAGE=1) → dialyzer (every product project, sequential) → the
+# four app gates, concurrently.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -464,6 +465,18 @@ if [[ "${SAMEN_MUTATION:-0}" == "1" ]]; then
 else
   echo "==> Skipping mutation gate (opt-in: SAMEN_MUTATION=1 ./ci.sh replays the tier-1 watch-list)"
 fi
+
+# --- Dialyzer over every product project (issue #73, ruled: in the default gate) -------
+# Sequential, and BEFORE the concurrent app gates: each run peaks at ~2-3 GB. Fails on any
+# warning a project's `.dialyzer_ignore.exs` does not cover (each entry there says why it is
+# a false positive or deliberate code). See scripts/dialyzer_gate.sh for the PLT rule that
+# keeps a path dependency's specs from going stale.
+echo "==> Running dialyzer (issue #73 — every product project; new warnings fail)"
+bash "$REPO_ROOT/scripts/dialyzer_gate.sh" || {
+  echo "dialyzer FAILED — rerun scripts/dialyzer_gate.sh <app> for detail"
+  exit 1
+}
+echo "==> dialyzer: PASSED"
 
 # --- Independent app/framework gates — RUN CONCURRENTLY (10-core box) -----------------
 # The four vertical/framework gates below are independent (own apps, own test DBs —

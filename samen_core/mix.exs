@@ -19,6 +19,18 @@ defmodule SamenCore.MixProject do
       # protocols stay consolidated. Pre-existing condition surfaced by T1.6's
       # --warnings-as-errors gate.
       consolidate_protocols: Mix.env() != :test,
+      # Issue #73: the PLT is cached under _build-adjacent priv/plts (gitignored), so only
+      # the first run pays for building it; the baseline of pre-existing warnings lives in
+      # .dialyzer_ignore.exs, so the gate fails on NEW warnings only.
+      dialyzer: [
+        plt_local_path: "priv/plts",
+        # samen_core ships ExUnit test-support (Samen.RedPath, MaskingCase, …) and mix tasks
+        # in lib/, so both apps belong in the PLT or every call into them reads as unknown.
+        plt_add_apps: [:ex_unit, :mix],
+        plt_core_path: "priv/plts",
+        ignore_warnings: ".dialyzer_ignore.exs",
+        list_unused_filters: true
+      ],
       start_permanent: Mix.env() == :prod,
       # test/pii_reads_corpus/ holds the C3 `pii_reads` verifier corpus (T1.8b):
       # `.ex` files with INTENTIONAL PII leaks that the walker reads as TEXT and
@@ -63,6 +75,8 @@ defmodule SamenCore.MixProject do
   # Versions pinned in spikes/s00_smoke/VERSIONS.md (Elixir 1.20.2 / OTP 29).
   defp deps do
     [
+      # Issue #73: dialyzer runs in the default ./ci.sh (dev/test only, never shipped).
+      {:dialyxir, "== 1.4.8", only: [:dev, :test], runtime: false},
       {:ash, "== 3.34.4"},
       {:ash_postgres, "== 2.14.2"},
       {:spark, "== 2.7.6"},
