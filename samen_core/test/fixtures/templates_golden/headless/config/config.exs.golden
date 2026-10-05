@@ -16,6 +16,12 @@ config :samen_core, :ash_domains, [
   Acme.Aggregate
 ]
 
+# Ash 3.32+ (CVE-2026-82752): string `min_length`/`max_length`, the `string_length`
+# validation and `string_length/1` count UNICODE CODEPOINTS — how Postgres counts — so a
+# length bound actually bounds the stored value. Grapheme counting (the old behaviour)
+# lets one "character" carry an unbounded number of combining marks.
+config :ash, default_string_length_count: :codepoints
+
 config :ash, disable_async?: true
 
 config :acme, Acme.Repo, migration_primary_key: [name: :id, type: :binary_id]

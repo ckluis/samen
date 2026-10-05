@@ -38,8 +38,8 @@ defmodule Acme.MixProject do
       # SAME exact versions the framework kernel declares, so this app's authored DSL
       # (`postgres do ... end`, `attributes do ... end`, `pii do ... end`) formats
       # correctly without a second resolution of either package.
-      {:ash, "== 3.31.2"},
-      {:ash_postgres, "== 2.10.0"},
+      {:ash, "== 3.34.4"},
+      {:ash_postgres, "== 2.14.2"},
       {:jason, "~> 1.4"},
       {:stream_data, "== 1.3.0"},
       # simple_sat: the Ash policy authorizer's pure-Elixir SAT solver, needed by the

@@ -50,6 +50,12 @@ config :samen_core, :samen_ai_agent_turn_repo, SamenCore.TestRepo
 # cross-tenant blast-radius residual, closed. Same compile_env seam as its siblings.
 config :samen_core, :samen_ai_agent_kill_repo, SamenCore.TestRepo
 
+# Ash 3.32+ (CVE-2026-82752): string `min_length`/`max_length`, the `string_length`
+# validation and `string_length/1` count UNICODE CODEPOINTS — how Postgres counts — so a
+# length bound actually bounds the stored value. Grapheme counting (the old behaviour)
+# lets one "character" carry an unbounded number of combining marks.
+config :ash, default_string_length_count: :codepoints
+
 config :ash, disable_async?: true
 
 # T145: quiet Ash's benign `[warning] Missed N notifications` runtime log noise. The AI

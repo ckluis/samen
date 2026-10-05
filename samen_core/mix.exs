@@ -63,9 +63,9 @@ defmodule SamenCore.MixProject do
   # Versions pinned in spikes/s00_smoke/VERSIONS.md (Elixir 1.20.2 / OTP 29).
   defp deps do
     [
-      {:ash, "== 3.31.2"},
-      {:ash_postgres, "== 2.10.0"},
-      {:spark, "== 2.7.2"},
+      {:ash, "== 3.34.4"},
+      {:ash_postgres, "== 2.14.2"},
+      {:spark, "== 2.7.6"},
       {:ecto_sql, "== 3.14.0"},
       {:postgrex, "== 0.22.4"},
       {:jason, "~> 1.4"},
@@ -148,7 +148,7 @@ defmodule SamenCore.MixProject do
       # gets full samen governance (allocator-owned abbrev, org_id mirror, OrgScope,
       # catalog, no_plaintext_pii roster) via the version-resource mixin (§6.2). An
       # ash-project extension over Ash (already in the tree), not a vendor SDK.
-      {:ash_paper_trail, "~> 0.6.0"},
+      {:ash_paper_trail, "~> 0.7.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end
