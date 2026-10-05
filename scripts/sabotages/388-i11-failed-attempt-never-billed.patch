@@ -1,0 +1,25 @@
+# SABOTAGE: issue #11 — the failed attempt's usage is read, narrowed and then DROPPED: the
+# bill is never written. ADR-048 §6 Level 2 constraint 1 says the failed attempt's tokens
+# still count (it was a real call); this is the state before #11, minus the crash — the
+# Level 2 path still runs, so nothing looks wrong except the bill.
+#
+# Flips the billing test (the run's totals no longer grow by the failed attempt's tokens).
+# The Level 2 fold-and-retry still reaches the final answer, so only a test that measures
+# the bill catches it.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: #11 RED: an overflow that carries usage bills it — the run's totals grow by exactly the failed attempt's tokens
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index e8bec49..3a7db5f 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1249,7 +1249,8 @@ defmodule Samen.AI.Agent do
+     out_tokens = usage_int(usage, :output_tokens)
+ 
+     run =
+-      if in_tokens + out_tokens > 0 do
++      # SABOTAGE (#11): the failed attempt is never billed — the condition cannot hold.
++      if in_tokens + out_tokens < 0 do
+         run
+         |> Ash.Changeset.for_update(:advance, %{
+           input_tokens_used: run.input_tokens_used + in_tokens,

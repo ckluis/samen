@@ -1,0 +1,34 @@
+# SABOTAGE: issue #11 / D-17 — the failed attempt is billed onto the in-memory `%Run{}`
+# struct only, never written. The D-13 budget re-check at the retry boundary reads the run
+# ROW through `reload!/1`, so it cannot see the bill: a failed attempt that by itself
+# exhausted the budget folds and retries anyway — the knowing overrun D-17 rules out.
+#
+# Flips the D-17 test. The plain billing test can stay GREEN under this sabotage (the
+# struct carries the bill on to a later committing site that writes it), which is exactly
+# why a struct-only bill looks correct until the budget boundary is what reads it.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: #11 D-17 RED: a failed attempt whose OWN tokens exhaust the budget stops the Level 2 retry — billed before the re-check
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index e8bec49..b30d2da 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -1250,12 +1250,12 @@ defmodule Samen.AI.Agent do
+ 
+     run =
+       if in_tokens + out_tokens > 0 do
+-        run
+-        |> Ash.Changeset.for_update(:advance, %{
+-          input_tokens_used: run.input_tokens_used + in_tokens,
+-          output_tokens_used: run.output_tokens_used + out_tokens
+-        })
+-        |> Ash.update!(authorize?: false)
++        # SABOTAGE (#11 / D-17): the bill is written to the in-memory struct only.
++        %{
++          run
++          | input_tokens_used: run.input_tokens_used + in_tokens,
++            output_tokens_used: run.output_tokens_used + out_tokens
++        }
+       else
+         run
+       end

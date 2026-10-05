@@ -1,0 +1,23 @@
+# SABOTAGE: issue #11 — the chokepoint returns `{:error, reason, usage}` to EVERY caller of
+# `Samen.AI.complete/4`, not only to one that passed `error_usage: true`. Seven callers
+# outside the agent loop (the CRM and MCP AI paths, the support-draft LiveView, a Phoenix
+# component, the smoke task, the compaction summarizer) `case` on a TWO-element error and
+# would crash, a user-facing render among them, the first time a provider failed with usage.
+#
+# Flips the default-caller test. The opted-in tests stay green (they ask for the 3-tuple).
+# APP: samen_core
+# TEST_FILES: test/ai/chokepoint_error_usage_test.exs
+# MUST_FAIL: a caller that does not ask gets the two-element error it always has
+diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+index dfb4f1f..f0d0c57 100644
+--- a/samen_core/lib/samen/ai/chokepoint.ex
++++ b/samen_core/lib/samen/ai/chokepoint.ex
+@@ -190,7 +190,7 @@ defmodule Samen.AI.Chokepoint do
+     end
+   end
+ 
+-  defp error_usage({:error, reason, _usage}, false), do: {:error, reason}
++  # SABOTAGE (#11): the usage-carrying error reaches EVERY caller, asked or not.
+   defp error_usage(result, _wanted), do: result
+ 
+   @doc """

@@ -171,13 +171,27 @@ defmodule Samen.AI.Chokepoint do
   Seal `segments` and dispatch to `provider.complete/2` — the ONE provider-invocation site
   for completions. Any adapter error is normalized (EG6) before it propagates.
   """
+  #
+  # A provider may fail AFTER spending tokens (a context overflow is a real call). It reports
+  # that as `{:error, reason, usage}`; the dispatch below keeps the usage, scrubbed to two
+  # non-negative integers, so the agent loop can bill the failed attempt (ADR-048 §6 Level 2
+  # constraint 1, issue #11). Only a caller that passes `error_usage: true` receives that
+  # three-element error; every other caller gets the two-element `{:error, reason}` it
+  # always has, so no existing `case` on this result can meet a shape it does not match.
   @spec complete(module(), map(), MaskedPayload.kind(), [term()] | term(), keyword()) ::
-          {:ok, Samen.AI.Completion.t()} | {:error, term()}
+          {:ok, Samen.AI.Completion.t()}
+          | {:error, term()}
+          | {:error, term(), %{input_tokens: non_neg_integer(), output_tokens: non_neg_integer()}}
   def complete(provider, config, kind, segments, opts \\ []) when is_atom(provider) do
     with {:ok, %MaskedPayload{} = payload} <- seal(kind, segments, opts) do
-      dispatch(provider, :complete, payload, config)
+      provider
+      |> dispatch(:complete, payload, config)
+      |> error_usage(Keyword.get(opts, :error_usage, false))
     end
   end
+
+  defp error_usage({:error, reason, _usage}, false), do: {:error, reason}
+  defp error_usage(result, _wanted), do: result
 
   @doc """
   Seal `segments` and dispatch to `provider.embed/2` — the ONE provider-invocation site for
@@ -350,10 +364,25 @@ defmodule Samen.AI.Chokepoint do
     # provider-invocation site is the honest place to decide it, never the completion
     # `:text`. A keyless/deterministic double declares itself simulated via the optional
     # `simulated?/0` callback; a live adapter that omits it is treated as live (`false`).
-    {:ok, %Completion{} = c} -> {:ok, %{c | simulated: simulated_provider?(provider)}}
-    {:ok, _} = ok -> ok
-    {:error, reason} -> {:error, normalize_error(reason, provider)}
-    other -> {:error, normalize_error(other, provider)}
+    {:ok, %Completion{} = c} ->
+      {:ok, %{c | simulated: simulated_provider?(provider)}}
+
+    {:ok, _} = ok ->
+      ok
+
+    {:error, reason} ->
+      {:error, normalize_error(reason, provider)}
+
+    # A failure that spent tokens (issue #11). The reason is normalized exactly as above;
+    # the usage is the ONE channel carrying adapter-authored data past the normalizer, so
+    # it is NARROWER than the reason: exactly two non-negative integers, rebuilt here from
+    # an allowlist, never the adapter's map. A non-map or a struct (an exception, say) in
+    # the usage slot is not usage and falls to the catch-all below.
+    {:error, reason, usage} when is_map(usage) and not is_struct(usage) ->
+      {:error, normalize_error(reason, provider), scrub_usage(usage)}
+
+    other ->
+      {:error, normalize_error(other, provider)}
   end
 
   defp dispatch(provider, :embed, %MaskedPayload{} = payload, config) do
@@ -372,6 +401,22 @@ defmodule Samen.AI.Chokepoint do
   # `{:provider_error, provider}`.
   defp normalize_error(reason, _provider) when is_atom(reason), do: reason
   defp normalize_error(_reason, provider), do: {:provider_error, provider}
+
+  # EG6 for the usage channel: rebuild, never pass through. Any other key, and any value
+  # that is not a non-negative integer, is dropped (a bad value bills 0, never a guess).
+  defp scrub_usage(usage) do
+    %{
+      input_tokens: usage_count(usage, :input_tokens),
+      output_tokens: usage_count(usage, :output_tokens)
+    }
+  end
+
+  defp usage_count(usage, key) do
+    case Map.get(usage, key) do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> 0
+    end
+  end
 
   # Is the dispatched provider a SIMULATED (keyless/deterministic) double? (T152.) Read the
   # provider's OWN optional `simulated?/0` declaration — a provider that omits it is LIVE

@@ -137,9 +137,16 @@ defmodule Samen.AI do
       `:grounding` to opt out entirely.
     * `:env_reader` — test-only seam (`Samen.AI.resolved_env/1`, T66-F2): overrides how the
       unwired-provider env fallback is read. Never set this outside a test.
+    * `:error_usage` — `true` to receive a failure that spent tokens as
+      `{:error, reason, %{input_tokens: n, output_tokens: n}}` (the usage scrubbed to two
+      non-negative integers by the chokepoint) instead of `{:error, reason}`. The agent loop
+      sets it to bill a failed attempt (ADR-048 §6 Level 2 constraint 1). Default `false`:
+      every other caller gets the two-element error.
   """
   @spec complete(term(), term(), map() | keyword(), keyword()) ::
-          {:ok, Samen.AI.Completion.t()} | {:error, term()}
+          {:ok, Samen.AI.Completion.t()}
+          | {:error, term()}
+          | {:error, term(), %{input_tokens: non_neg_integer(), output_tokens: non_neg_integer()}}
   def complete(scope, prompt_ref, bindings \\ %{}, opts \\ []) do
     case provider_for(opts, resolved_env(env_reader(opts))) do
       {:error, :not_configured} = err ->

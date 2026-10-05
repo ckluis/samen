@@ -1,0 +1,24 @@
+# SABOTAGE: issue #11 / EG6 — the new `{:error, reason, usage}` arm in `dispatch/4` passes
+# the adapter's REASON through raw instead of through `normalize_error/2`. "We now have
+# structure, so the reason can travel" is exactly the regression the issue warned about:
+# a rich reason (a tuple echoing the prompt) would reach the agent loop beside the usage.
+#
+# Flips the reason-normalized test. Every atom-reason test stays green (an atom passes the
+# normalizer unchanged anyway), which is why the red needs a NON-atom reason.
+# APP: samen_core
+# TEST_FILES: test/ai/chokepoint_error_usage_test.exs
+# MUST_FAIL: EG6: the reason is still normalized — a rich reason never travels beside the usage
+diff --git a/samen_core/lib/samen/ai/chokepoint.ex b/samen_core/lib/samen/ai/chokepoint.ex
+index dfb4f1f..a5733e0 100644
+--- a/samen_core/lib/samen/ai/chokepoint.ex
++++ b/samen_core/lib/samen/ai/chokepoint.ex
+@@ -379,7 +379,8 @@ defmodule Samen.AI.Chokepoint do
+     # an allowlist, never the adapter's map. A non-map or a struct (an exception, say) in
+     # the usage slot is not usage and falls to the catch-all below.
+     {:error, reason, usage} when is_map(usage) and not is_struct(usage) ->
+-      {:error, normalize_error(reason, provider), scrub_usage(usage)}
++      # SABOTAGE (#11 / EG6): the reason skips the normalizer on the usage arm.
++      {:error, reason, scrub_usage(usage)}
+ 
+     other ->
+       {:error, normalize_error(other, provider)}
