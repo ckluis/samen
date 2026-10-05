@@ -1861,6 +1861,10 @@ defmodule Samen.Web.Router do
       {"#{path}/invoices", Samen.Web.Billing.InvoicesLive},
       {"#{path}/dunning", Samen.Web.Billing.DunningLive},
       {"#{path}/plans", Samen.Web.Billing.PlansLive},
+      # T163 / ADR-051 P4 — the tenant usage panel: the derived usage tallies, quantities
+      # only (never a local price, D2). Inherited by every `samen_module_routes(:billing, ...)`
+      # host with no host change.
+      {"#{path}/usage", Samen.Web.Billing.UsageLive},
       # B10/T26 — the billing SETTINGS page: plan picker + T23 hosted payment-method
       # portal + T22 invoice history when `Samen.Billing.Provider.configured?/1` is
       # true, the honest "bring your billing" empty state when false. Inherited by

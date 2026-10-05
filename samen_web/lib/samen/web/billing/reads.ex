@@ -363,6 +363,23 @@ defmodule Samen.Web.Billing.Reads do
   def feature_keys, do: @feature_keys
 
   @doc """
+  Read the usage tallies for `scope` (T163 / ADR-051 P4), newest period first. Each row
+  is a `Usage` tally DERIVED from the insert-only ledger (`Samen.Billing.UsageTally`):
+  `metric`, `quantity`, `reported_quantity` and the period. Quantities only, never a
+  price (ADR-051 D2: money is mirrored from the provider, never computed here). Non-PII.
+  BOUNDED to #{@detail_limit} rows. On any read error the list is EMPTY.
+  """
+  def usage(mount, scope) do
+    Mount.resource(mount, Usage)
+    |> Ash.Query.ensure_selected([:metric, :quantity, :reported_quantity, :period_start, :period_end, :subscription_id])
+    |> Ash.Query.sort(period_start: :desc, metric: :asc)
+    |> Ash.Query.limit(@detail_limit)
+    |> Ash.read!(scope: scope)
+  rescue
+    _ -> []
+  end
+
+  @doc """
   Read the Tier-0 feature entitlements for `scope` (non-PII config rows). BOUNDED to
   #{@detail_limit} rows. On any read error the list is EMPTY.
   """

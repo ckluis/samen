@@ -104,7 +104,7 @@ defmodule Samen.UI.Nav do
     * `org_id`   — threaded into every href so navigation preserves the `?org=` selector.
     * `active`   — one of `:crm_companies | :crm_contacts | :crm_pipeline | :crm_calendar |
       :crm_dashboard | :crm_mailbox | :crm_sequences | :billing_overview | :billing_invoices |
-      :billing_dunning | :billing_plans | :support_tickets | :settings | :automation` (or `nil`).
+      :billing_dunning | :billing_usage | :billing_plans | :support_tickets | :settings | :automation` (or `nil`).
     * `crm_path` / `billing_path` / `support_path` — the mount path prefix per module
       (default `/crm`, `/billing`, `/support`). A host that mounted CRM at `/customers`
       passes `crm_path: "/customers"`.
@@ -218,6 +218,11 @@ defmodule Samen.UI.Nav do
       <.nav_item label="Dunning" href={"#{@billing_path}/dunning?org=#{@org_id}"} active={@active == :billing_dunning}>
         <:icon>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+        </:icon>
+      </.nav_item>
+      <.nav_item label="Usage" href={"#{@billing_path}/usage?org=#{@org_id}"} active={@active == :billing_usage}>
+        <:icon>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>
         </:icon>
       </.nav_item>
       <.nav_item label="Plans" href={"#{@billing_path}/plans?org=#{@org_id}"} active={@active == :billing_plans}>
