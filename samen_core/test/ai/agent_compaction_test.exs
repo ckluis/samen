@@ -380,7 +380,9 @@ defmodule Samen.AI.AgentCompactionTest do
       {:final, "done"}
     ])
 
-    assert {:ok, %{run: run}} = run_scripted(Durable, s, goal, budgets: [context_cutoff_tokens: 1])
+    assert {:ok, %{run: run}} =
+             run_scripted(Durable, s, goal, budgets: [context_cutoff_tokens: 1])
+
     run = reload(run)
 
     rows = turn_rows(run)
@@ -698,15 +700,17 @@ defmodule Samen.AI.AgentCompactionTest do
 
     usage = %{input_tokens: 100, output_tokens: 10}
 
-    # C3I1 SCRIPT EXTENSION (no assertion changed): the third entry answers the ADR-048
-    # §5#1 SUMMARIZE call, not an ordinary turn. Its scripted `usage` is deliberately
-    # never billed — §6's fold bill is the DETERMINISTIC `est_tokens/1` of the bytes the
-    # fold read and wrote, which is exactly what the two equalities below pin. The three
-    # ORDINARY turns still bill 300 in / 30 out.
+    # The third entry answers the ADR-048 §5#1 SUMMARIZE call, not an ordinary turn. Since
+    # issue #72 (ruled option 1) the fold is billed the summarize call's OWN reported usage —
+    # never `est_tokens/1`, which now only decides WHEN to fold. Its usage is deliberately
+    # DIFFERENT from the ordinary turns' so the equalities below can tell the two apart. The
+    # three ORDINARY turns still bill 300 in / 30 out.
+    summarize_usage = %{input_tokens: 77, output_tokens: 7}
+
     script([
       {:continue, "turn one — a long span destined to be folded", usage},
       {:continue, "turn two", usage},
-      {:continue, "Summary: turns one and two were reviewed.", usage},
+      {:continue, "Summary: turns one and two were reviewed.", summarize_usage},
       {:final, "done", usage}
     ])
 
@@ -725,13 +729,7 @@ defmodule Samen.AI.AgentCompactionTest do
     folds = folds_of(run)
     assert folds != [], "no fold ran, so there is no fold token spend to control for"
 
-    # The ledger's OWN measured bill, not a bare inequality against the scripted
-    # subtotal. `input_tokens_used > 300` and `output_tokens_used > 30` below are
-    # variable-disjoint from each other (one reads only the input side, the other only
-    # the output side), so a build that bills a FIXED CONSTANT on each side — instead of
-    # `est_tokens/1` of the bytes it actually folded — satisfies both while satisfying
-    # neither's intent. These equalities pin the run totals to the ledger's own recorded
-    # per-fold bill:
+    # The ledger's OWN recorded bill, pinned to the run totals...
     billed_in = Enum.sum(Enum.map(folds, & &1["input_tokens"]))
     billed_out = Enum.sum(Enum.map(folds, & &1["output_tokens"]))
 
@@ -743,22 +741,13 @@ defmodule Samen.AI.AgentCompactionTest do
            "run.output_tokens_used must be EXACTLY the 3 ordinary turns' 30 plus the " <>
              "ledger's own recorded fold output bill (#{billed_out}), not merely > 30"
 
-    # ...and the ledger's own bill must be the FOLDED BYTES, not a constant. This is
-    # what a build carrying `est_tokens(span.folded) -> 1` and separately
-    # `est_tokens([span.marker]) -> 1` cannot pass — each such build still moves
-    # `run.input_tokens_used`/`run.output_tokens_used` off zero (satisfying the two `>`
-    # assertions below) and still keeps the ledger's own field equal to the run total
-    # (satisfying the two equalities above), but a constant-1 bill can never equal
-    # `est_tokens/1` of the actual bytes folded.
-    assert billed_out == div(byte_size(hd(folds)["body"]) + 3, 4),
-           "the fold's ledgered output bill must equal est_tokens/1 of its own marker " <>
-             "body (#{div(byte_size(hd(folds)["body"]) + 3, 4)}), not a constant " <>
-             "(#{billed_out})"
-
-    assert billed_in >=
-             div(byte_size("turn one — a long span destined to be folded") + 3, 4),
-           "the fold's ledgered input bill (#{billed_in}) must be at least est_tokens/1 " <>
-             "of the turn text it folded — a fixed constant of 1 cannot reach that floor"
+    # ...and that bill is the summarize call's REPORTED usage — not a byte estimate of the
+    # span or the marker, and not a constant. A build that still estimates, or bills 1, or
+    # bills nothing, cannot equal the provider's own numbers.
+    assert {billed_in, billed_out} ==
+             {summarize_usage.input_tokens, summarize_usage.output_tokens},
+           "the fold's ledgered bill must be the summarize call's own reported usage " <>
+             "#{inspect(summarize_usage)}, got #{inspect({billed_in, billed_out})} (issue #72)"
 
     # Three ordinary turns billed 300 in / 30 out. D4 RATIFIED (a): the fold's own
     # tokens are REAL and ARE billed — so the totals must exceed the ordinary-turn
@@ -819,7 +808,8 @@ defmodule Samen.AI.AgentCompactionTest do
       final: "done"
     )
 
-    assert {:ok, %{run: run}} = run_scripted(Durable, s, goal, budgets: [context_cutoff_tokens: 1])
+    assert {:ok, %{run: run}} =
+             run_scripted(Durable, s, goal, budgets: [context_cutoff_tokens: 1])
 
     run = reload(run)
     assert {:ok, views} = Agent.transcript_views(run)

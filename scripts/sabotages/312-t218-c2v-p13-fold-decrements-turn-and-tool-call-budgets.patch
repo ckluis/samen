@@ -7,17 +7,21 @@
 # and a different claim; a build whose folds silently eat `max_turns` passes P4
 # untouched. Flips the named D4 red on its own cursor assertion (measured: the cursor
 # reads 4 for 3 ordinary turns and 1 fold).
+# Re-anchored for issue #72: the fold's TOKEN bill moved to `bill_summarizer!/2`, so
+# `apply_fold!`'s `:advance` now carries only the transcript. Same counters, same edit.
 # APP: samen_core
 # TEST_FILES: test/ai/agent_compaction_test.exs
 # MUST_FAIL: a fold NEVER decrements max_turns or max_tool_calls
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index bb202cc..8f4690c 100644
 --- a/samen_core/lib/samen/ai/agent.ex
 +++ b/samen_core/lib/samen/ai/agent.ex
-@@ -1359,7 +1359,13 @@
+@@ -1785,7 +1785,13 @@ defmodule Samen.AI.Agent do
+             folded_views.folds,
+             folded_views.turn_lens,
              views.pending
-           ),
-         input_tokens_used: run.input_tokens_used + in_tokens,
--        output_tokens_used: run.output_tokens_used + out_tokens
-+        output_tokens_used: run.output_tokens_used + out_tokens,
+-          )
++          ),
 +        # SABOTAGE (ADR-048 §8 P13 / D4): the fold now DECREMENTS the run's remaining
 +        # max_turns and max_tool_calls headroom by advancing both used-counters on every
 +        # fold — a compaction storm eats the turns the tenant was promised (§10 row 4

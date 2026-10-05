@@ -1276,10 +1276,9 @@ defmodule Samen.AI.AgentDurabilityTest do
 
       run = reload(run)
 
-      # Positive control, shared by both arms: the baseline billed real calls, so the
-      # deltas below are measured against a non-zero total.
-      assert base.input_tokens_used > 0
-
+      # The baseline is the SAME scenario with an overflow that reports nothing, so every
+      # other bill in it (the turns, and since issue #72 the summarize call's reported
+      # usage) is identical on both runs — the deltas below are the failed attempt's alone.
       assert run.input_tokens_used - base.input_tokens_used == @i11_usage.input_tokens,
              "the failed attempt's input tokens were not billed (ADR-048 §6 Level 2 " <>
                "constraint 1): #{run.input_tokens_used} vs baseline #{base.input_tokens_used}"
@@ -1404,6 +1403,144 @@ defmodule Samen.AI.AgentDurabilityTest do
       assert [t1] = turn_rows(run)
       assert t1.meta["failed_input_tokens"] == 9
       assert t1.meta["failed_output_tokens"] == 2
+    end
+  end
+
+  # ── Issue #72 (ruled option 1): the summarize call is billed its OWN reported usage, on ──
+  # ── EVERY outcome, and the turn ledger carries it ────────────────────────────────────────
+  #
+  # D-13's scenario again. Turn 3 is the folding turn: its PRE-TURN summarize is the third
+  # entry, its own first attempt overflows (the fourth), and the Level 2 summarize is the
+  # fifth. Each test changes ONLY the entries it is about.
+
+  @i72_summarize %{input_tokens: 77, output_tokens: 7}
+
+  defp i72_script(pre_turn_summarize, level2_summarize) do
+    script([
+      {:continue, @d13_bulk},
+      {:continue, @d13_short},
+      pre_turn_summarize,
+      d13_overflow(),
+      level2_summarize,
+      {:continue, @d13_short},
+      {:final, @d13_answer}
+    ])
+  end
+
+  defp i72_turn3(run), do: run |> turn_rows() |> Enum.find(&(&1.turn_index == 3))
+
+  describe "issue #72: the summarizer is billed what it actually spent" do
+    test "#72 RED: a fold is billed the summarize call's reported usage, and its turn row carries it" do
+      i72_script({:error, :provider_error}, {:continue, @d13_summary, @i72_summarize})
+
+      assert {:ok, %{run: run}} = d13_run(new_scope())
+      run = reload(run)
+
+      # Every other call in this script reports no usage, so the run's whole bill is the
+      # Level 2 summarize call's own numbers — no estimate of any byte count.
+      assert {run.input_tokens_used, run.output_tokens_used} == {77, 7}
+
+      t3 = i72_turn3(run)
+      assert t3.meta["summarizer_input_tokens"] == 77
+      assert t3.meta["summarizer_output_tokens"] == 7
+    end
+
+    test "#72 RED: a summary the ingress path REFUSES was still paid for — billed, and the refusal row says what it cost" do
+      # A whitespace-only reply is a non-empty completion that the INGRESS scrubs collapse to
+      # nothing (:empty_summary), so the fold is refused and the run continues uncompacted —
+      # but the call happened and reported its spend. Level 2's own summarize is refused the
+      # same way and reports nothing, so the row's refusal reason and its summarizer spend
+      # are both the pre-turn call's.
+      i72_script({:continue, "   ", %{input_tokens: 40, output_tokens: 2}}, {:continue, "   "})
+
+      result = d13_run(new_scope())
+      run = reload(elem(result, 2))
+
+      assert run.input_tokens_used >= 40,
+             "a refused summary's call was not billed: #{run.input_tokens_used}"
+
+      t3 = i72_turn3(run)
+      assert t3.meta["compaction_refused"] == "empty_summary"
+      assert t3.meta["summarizer_input_tokens"] == 40
+      assert t3.meta["summarizer_output_tokens"] == 2
+    end
+
+    test "#72 RED: a summarize call that FAILS reporting usage is billed (a summarizer that overflows)" do
+      i72_script(
+        {:error, :context_overflow, %{input_tokens: 500, output_tokens: 9}},
+        {:continue, @d13_summary, @i72_summarize}
+      )
+
+      assert {:ok, %{run: run}} = d13_run(new_scope())
+      run = reload(run)
+
+      assert {run.input_tokens_used, run.output_tokens_used} == {577, 16}
+
+      # Both folds happened on turn 3 — pre-turn (failed, paid) then Level 2 (folded, paid)
+      # — and the row carries their SUM exactly once each. A pre-turn note left on the views
+      # would be stamped a second time by Level 2 and read 1077.
+      t3 = i72_turn3(run)
+      assert t3.meta["summarizer_input_tokens"] == 577
+      assert t3.meta["summarizer_output_tokens"] == 16
+    end
+
+    test "#72 RED: a Level 2 that re-enters the fold path WITHOUT summarizing does not re-stamp the pre-turn spend" do
+      # D-05's scenario: the tenant cancels during turn 3's overflowing attempt, so Level 2
+      # re-enters the fold path, sees the cancel, and refuses WITHOUT a summarize call.
+      # Its views are the pre-turn fold's — and the pre-turn summarize here FAILED having
+      # spent 500/9. That spend must land on the row exactly once.
+      s = new_scope()
+
+      script([
+        {:continue, @d05_bulk},
+        {:continue, @d05_short},
+        {:error, :provider_error, %{input_tokens: 500, output_tokens: 9}},
+        d05_cancelling_overflow(s.actor.org_id),
+        {:continue, @d05_summary},
+        {:continue, @d05_summary},
+        {:continue, @d05_short}
+      ])
+
+      result = d05_run(s)
+      run = reload(elem(result, 2))
+
+      t3 = run |> turn_rows() |> Enum.find(&(&1.turn_index == 3))
+      assert t3.meta["compaction_refused"] == "run_cancelled"
+
+      assert t3.meta["summarizer_input_tokens"] == 500,
+             "the pre-turn summarize's spend was stamped more than once: " <> inspect(t3.meta)
+
+      assert t3.meta["summarizer_output_tokens"] == 9
+      assert run.input_tokens_used == 500
+    end
+
+    test "#72: the turn ledger reconciles with the run — turns, failed attempts and summarize calls sum to its bill" do
+      i72_script(
+        {:error, :provider_error, %{input_tokens: 11, output_tokens: 1}},
+        {:continue, @d13_summary, @i72_summarize}
+      )
+
+      assert {:ok, %{run: run}} = d13_run(new_scope())
+      run = reload(run)
+      rows = turn_rows(run)
+
+      ledger = fn field, failed, summarizer ->
+        Enum.sum(
+          Enum.map(rows, fn row ->
+            Map.fetch!(row, field) + Map.get(row.meta, failed, 0) +
+              Map.get(row.meta, summarizer, 0)
+          end)
+        )
+      end
+
+      assert run.input_tokens_used ==
+               ledger.(:input_tokens, "failed_input_tokens", "summarizer_input_tokens")
+
+      assert run.output_tokens_used ==
+               ledger.(:output_tokens, "failed_output_tokens", "summarizer_output_tokens")
+
+      # Positive control: the ledger is not trivially zero.
+      assert run.input_tokens_used == 88
     end
   end
 end

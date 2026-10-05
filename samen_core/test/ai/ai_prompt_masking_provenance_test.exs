@@ -64,7 +64,7 @@ defmodule Samen.AI.AiPromptMaskingProvenanceTest do
 
     folded = ["turn 1: the customer opened a ticket", "turn 2: " <> @p10_fold_marker]
 
-    assert {:ok, summary} =
+    assert {:ok, summary, _usage} =
              Samen.AI.Agent.Compaction.summarize(
                %{plane: :tenant},
                folded,
@@ -93,7 +93,7 @@ defmodule Samen.AI.AiPromptMaskingProvenanceTest do
 
     folded = ["turn 1: a routine status update, nothing sensitive"]
 
-    assert {:ok, summary} =
+    assert {:ok, summary, _usage} =
              Samen.AI.Agent.Compaction.summarize(
                %{plane: :tenant},
                folded,

@@ -1,0 +1,24 @@
+# SABOTAGE: issue #72 — the summarize call stops opting into `error_usage`, so the
+# chokepoint narrows a usage-carrying failure to `{:error, reason}`. A summarizer that
+# overflows mid-generation (Anthropic's `model_context_window_exceeded`, a real, billed
+# call) is then billed nothing, exactly the gap #72 was split out of #11 to close.
+#
+# Flips the failed-summarizer billing test. Successful and ingress-refused summaries still
+# bill (they are `{:ok, _}` completions), so only a usage-carrying FAILURE catches it.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: #72 RED: a summarize call that FAILS reporting usage is billed (a summarizer that overflows)
+diff --git a/samen_core/lib/samen/ai/agent/compaction.ex b/samen_core/lib/samen/ai/agent/compaction.ex
+index 6bce58b..92f638a 100644
+--- a/samen_core/lib/samen/ai/agent/compaction.ex
++++ b/samen_core/lib/samen/ai/agent/compaction.ex
+@@ -104,7 +104,8 @@ defmodule Samen.AI.Agent.Compaction do
+     |> Samen.AI.complete(
+       [Samen.AI.Agent.summarizer_prompt()],
+       %{},
+-      [{:error_usage, true} | Samen.AI.Agent.egress_opts(opts, folded, [])]
++      # SABOTAGE (#72): the summarize call does not ask the chokepoint for a failure's usage.
++      [{:error_usage, false} | Samen.AI.Agent.egress_opts(opts, folded, [])]
+     )
+     |> summary_text()
+     |> ingress()
