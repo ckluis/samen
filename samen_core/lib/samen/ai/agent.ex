@@ -1102,7 +1102,10 @@ defmodule Samen.AI.Agent do
   # by discipline. §6's three constraints, each one located:
   #
   #   1. the failed attempt's tokens still count — both attempts are real chokepoint
-  #      calls and the committing site bills the usage it is handed;
+  #      calls. The SUCCESSFUL attempt is billed by its committing site; the FAILED one is
+  #      billed here, by `bill_failed_attempt/2`, from the usage the chokepoint keeps on a
+  #      failure (`error_usage: true`, issue #11), BEFORE the retry boundary's re-checks
+  #      (operator ruling D-17), so the budget re-check below sees what it spent;
   #   2. the retry boundary's re-checks are **P5** (kill) and **D-05** (cancel). The
   #      KILL-SWITCH half IS built: the `cond` below re-checks `Breaker.killed?/2` BEFORE
   #      any retry work (ADR-048 §8 P5, operator ruling D-04). The CANCEL half IS NOW BUILT
@@ -1111,8 +1114,8 @@ defmodule Samen.AI.Agent do
   #      EGRESS and not the turn — so a cancelled run may still make the retry call and
   #      finish its turn (RP-AG-8 preserved: cancel is honoured at the NEXT turn boundary),
   #      it simply may not ship its conversation to the provider for summarization. The
-  #      BUDGET half is deliberately NOT built here, is NOT in D-05's scope, and remains
-  #      open (`nodes/C2R/work/spec-notes.md` §2);
+  #      BUDGET half is built too (operator ruling D-13): the `cond` re-checks
+  #      `over_budget/2` on the durable run, after the kill-switch;
   #   3. if the single retry ALSO overflows, the caller turns it into LEVEL 3
   #      (`:context_exhausted`) — never a second retry.
   #
@@ -1146,11 +1149,17 @@ defmodule Samen.AI.Agent do
         scope,
         [definition.goal_prompt, goal],
         %{},
-        egress_opts(opts, lines, Tools.defs(tools))
+        [{:error_usage, true} | egress_opts(opts, lines, Tools.defs(tools))]
       )
 
     duration_ms = System.monotonic_time(:millisecond) - started
     retries = attempt - 1
+
+    # ADR-048 §6 Level 2 constraint 1 (issue #11): bill a failed attempt's tokens, durably,
+    # BEFORE the `cond` (D-17) so the D-13 budget re-check reads them off the run row. It
+    # also narrows the result back to `{:error, reason}`: `execute_turn/4`'s `case` has no
+    # arm for a three-element error, and nothing past this point needs the usage.
+    {run, result} = bill_failed_attempt(run, result)
 
     cond do
       # P5 (ADR-048 §8, operator ruling D-04) — the kill-switch is RE-CHECKED at the
@@ -1230,6 +1239,31 @@ defmodule Samen.AI.Agent do
         {run, lines, turn_row, result, duration_ms, retries}
     end
   end
+
+  # The write is DURABLE (`:advance`, the same action and the same in-memory-total-plus-
+  # delta the committing sites use) and the UPDATED struct is returned: the D-13 re-check
+  # reads the row through `reload!/1`, and every later write totals off this struct, so a
+  # struct-only bill would be invisible to one and overwritten by the other.
+  defp bill_failed_attempt(%Run{} = run, {:error, reason, usage}) do
+    in_tokens = usage_int(usage, :input_tokens)
+    out_tokens = usage_int(usage, :output_tokens)
+
+    run =
+      if in_tokens + out_tokens > 0 do
+        run
+        |> Ash.Changeset.for_update(:advance, %{
+          input_tokens_used: run.input_tokens_used + in_tokens,
+          output_tokens_used: run.output_tokens_used + out_tokens
+        })
+        |> Ash.update!(authorize?: false)
+      else
+        run
+      end
+
+    {run, {:error, reason}}
+  end
+
+  defp bill_failed_attempt(run, result), do: {run, result}
 
   defp context_overflow?({:error, reason}), do: safe_error_kind(reason) == :context_overflow
   defp context_overflow?(_result), do: false

@@ -45,11 +45,20 @@ defmodule Samen.AI.Provider do
   @doc """
   Generate a completion for a sealed payload. Returns `{:ok, %Samen.AI.Completion{}}`
   ONLY when a configured provider genuinely produced output; `{:error, :not_configured}`
-  when unconfigured (fail-honest); `{:error, term()}` on a provider-side failure. MUST
+  when unconfigured (fail-honest); `{:error, term()}` on a provider-side failure. A failure
+  that still spent tokens (a context overflow is a real call) MAY be reported as
+  `{:error, term(), usage}`, `usage` a map with `:input_tokens` / `:output_tokens`; the
+  chokepoint normalizes the reason and scrubs the usage to those two integers. MUST
   accept ONLY `%Samen.AI.MaskedPayload{}` (§3.2 — refuse anything else by function clause).
   """
   @callback complete(Samen.AI.MaskedPayload.t(), config :: map()) ::
-              {:ok, Samen.AI.Completion.t()} | {:error, :not_configured | term()}
+              {:ok, Samen.AI.Completion.t()}
+              | {:error, :not_configured | term()}
+              | {:error, term(),
+                 %{
+                   optional(:input_tokens) => non_neg_integer(),
+                   optional(:output_tokens) => non_neg_integer()
+                 }}
 
   @doc """
   Embed a sealed payload's input, returning one vector per input segment. Same

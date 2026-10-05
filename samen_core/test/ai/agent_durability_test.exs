@@ -288,7 +288,9 @@ defmodule Samen.AI.AgentDurabilityTest do
       assert Scripted.remaining() == []
 
       assert {:ok, json} = reveal_transcript(run)
-      assert %{"lines" => ["turn one", "turn two (replayed)", "FINAL: answer"]} = Jason.decode!(json)
+
+      assert %{"lines" => ["turn one", "turn two (replayed)", "FINAL: answer"]} =
+               Jason.decode!(json)
     end
 
     test "POSITIVE CONTROL: the same script shape without the death runs straight through (3 rows, none replayed)" do
@@ -515,7 +517,10 @@ defmodule Samen.AI.AgentDurabilityTest do
       assert {:error, :killed, run} = run_scripted(Durable, s, "goal")
       run = assert_terminal!(run, :failed)
       assert run.error_kind == "killed"
-      assert length(sent_segments()) == 1, "the in-flight turn completed and was recorded honestly"
+
+      assert length(sent_segments()) == 1,
+             "the in-flight turn completed and was recorded honestly"
+
       assert length(Scripted.remaining()) == 1
 
       # Another org running the same definition is unaffected (blast radius).
@@ -726,7 +731,10 @@ defmodule Samen.AI.AgentDurabilityTest do
       # No host entry: the derived 90d arm installs (gen.app complete by construction).
       Application.delete_env(:samen_core, :retention_specs)
       Erasure.install_default_specs(resources: [Run])
-      assert [%{resource: Run, ttl_seconds: ttl}] = Application.get_env(:samen_core, :retention_specs)
+
+      assert [%{resource: Run, ttl_seconds: ttl}] =
+               Application.get_env(:samen_core, :retention_specs)
+
       assert ttl == 90 * 86_400
 
       # Idempotent: a second install adds no duplicate.
@@ -748,7 +756,11 @@ defmodule Samen.AI.AgentDurabilityTest do
     test "RED: a canary inside a map value / key / nested map IS detected; clean maps and structs are not (controls)" do
       assert Samen.AgentCase.leaks?(%{"note" => "has CANARY-map-a2 inside"}, "CANARY-map-a2")
       assert Samen.AgentCase.leaks?(%{"CANARY-key-a2" => true}, "CANARY-key-a2")
-      assert Samen.AgentCase.leaks?(%{"outer" => %{"inner" => ["CANARY-deep-a2"]}}, "CANARY-deep-a2")
+
+      assert Samen.AgentCase.leaks?(
+               %{"outer" => %{"inner" => ["CANARY-deep-a2"]}},
+               "CANARY-deep-a2"
+             )
 
       refute Samen.AgentCase.leaks?(%{"note" => "clean"}, "CANARY-map-a2")
       refute Samen.AgentCase.leaks?(%Samen.Masked{token: "vt_x", label: :t}, "vt_x")
@@ -1225,6 +1237,126 @@ defmodule Samen.AI.AgentDurabilityTest do
       refute Map.has_key?(t4.meta, "context_retries")
 
       assert Scripted.remaining() == []
+    end
+  end
+
+  # ── Issue #11 (ADR-048 §6 Level 2 constraint 1, operator rulings D-16 / D-17): the FAILED ──
+  # ── attempt's tokens still count — they are billed, and billed BEFORE the re-checks ──────
+  #
+  # A provider that overflows has still made a real call. It reports the spend as
+  # `{:error, reason, usage}`. Before #11 the chokepoint flattened that 3-tuple to a
+  # content-free `{:provider_error, _}` — losing the usage AND the reason, so Level 2 never
+  # fired for it and nothing billed it. Now the chokepoint keeps the usage (scrubbed to two
+  # integers) for the agent loop, which writes it to the run row BEFORE the retry boundary's
+  # `cond` (D-17), so the D-13 budget re-check sees it.
+  #
+  # These reuse D-13's scenario. The ONLY difference from D-13's own entries is that the
+  # overflow carries usage — so every delta below is the failed attempt's bill and nothing
+  # else.
+
+  @i11_usage %{input_tokens: 150, output_tokens: 7}
+
+  defp i11_overflow(usage), do: {:error, :context_overflow, usage}
+
+  describe "issue #11: the failed attempt's tokens are billed (ADR-048 §6 Level 2 constraint 1)" do
+    test "#11 RED: an overflow that carries usage bills it — the run's totals grow by exactly the failed attempt's tokens" do
+      # Baseline: D-13's control, the overflow carrying NO usage.
+      d13_script(d13_overflow())
+      assert {:ok, %{answer: @d13_answer, run: base}} = d13_run(new_scope())
+      base = reload(base)
+      base_calls = length(sent_segments())
+
+      # The byte-identical scenario, the overflow now reporting what it spent.
+      d13_script(i11_overflow(@i11_usage))
+
+      assert {:ok, %{answer: @d13_answer, turns: 4, run: run}} = d13_run(new_scope()),
+             "a usage-carrying overflow did not take the Level 2 path (fold + one retry) to " <>
+               "the final answer — the chokepoint lost the reason, or a 3-tuple reached a case " <>
+               "with no arm for it"
+
+      run = reload(run)
+
+      # Positive control, shared by both arms: the baseline billed real calls, so the
+      # deltas below are measured against a non-zero total.
+      assert base.input_tokens_used > 0
+
+      assert run.input_tokens_used - base.input_tokens_used == @i11_usage.input_tokens,
+             "the failed attempt's input tokens were not billed (ADR-048 §6 Level 2 " <>
+               "constraint 1): #{run.input_tokens_used} vs baseline #{base.input_tokens_used}"
+
+      assert run.output_tokens_used - base.output_tokens_used == @i11_usage.output_tokens
+
+      # Same calls as D-13's control: billing the failure changed what was spent, not what
+      # was done.
+      assert base_calls == @d13_control_calls
+      assert length(sent_segments()) - base_calls == @d13_control_calls
+    end
+
+    test "#11 D-17 RED: a failed attempt whose OWN tokens exhaust the budget stops the Level 2 retry — billed before the re-check" do
+      # Turn 3's first attempt overflows having spent more than the whole input budget
+      # (default `max_input_tokens` 60_000). Nothing else pushes the run over: the ONLY way
+      # the retry boundary can see an exhausted budget is if the failed attempt was billed,
+      # durably, BEFORE its `cond` — D-17's order.
+      d13_script(i11_overflow(%{input_tokens: 60_001, output_tokens: 0}))
+
+      result = d13_run(new_scope())
+
+      assert {:error, :max_input_tokens, run} = result,
+             "the retry boundary did not see the failed attempt's tokens: got " <>
+               "#{inspect(elem(result, 0))}/#{inspect(elem(result, 1))}. D-17 bills the " <>
+               "failed attempt BEFORE the budget re-check"
+
+      # The summarize and the retry never went out (D-13's red shape, driven by the bill).
+      assert length(sent_segments()) == @d13_red_calls
+
+      assert Scripted.remaining() == [
+               {:continue, @d13_summary},
+               {:continue, @d13_short},
+               {:final, @d13_answer}
+             ]
+
+      run = reload(run)
+      assert run.input_tokens_used > 60_000
+      assert run.error_kind == "max_input_tokens"
+    end
+
+    test "#11: a retry that ALSO overflows is billed too and still reaches LEVEL 3 — no 3-tuple reaches execute_turn/4" do
+      exhausting = fn ovf1, ovf2 ->
+        script([
+          {:continue, @d13_bulk},
+          {:continue, @d13_short},
+          {:error, :provider_error},
+          ovf1,
+          {:continue, @d13_summary},
+          ovf2
+        ])
+      end
+
+      exhausting.(d13_overflow(), d13_overflow())
+      assert {:error, :context_exhausted, base} = d13_run(new_scope())
+
+      exhausting.(
+        i11_overflow(%{input_tokens: 40, output_tokens: 3}),
+        i11_overflow(%{input_tokens: 2, output_tokens: 1})
+      )
+
+      assert {:error, :context_exhausted, run} = d13_run(new_scope())
+
+      assert reload(run).input_tokens_used - reload(base).input_tokens_used == 42
+      assert reload(run).output_tokens_used - reload(base).output_tokens_used == 4
+      assert run.error_kind == "context_exhausted"
+    end
+
+    test "#11: a non-overflow failure that carries usage is billed and fails the turn cleanly" do
+      script([{:error, :provider_error, %{input_tokens: 9, output_tokens: 2}}])
+
+      assert {:error, :provider_error, run} = run_scripted(Durable, new_scope(), "goal")
+
+      run = reload(run)
+      assert run.input_tokens_used == 9
+      assert run.output_tokens_used == 2
+      assert run.error_kind == "provider_error"
+      assert [%{turn_index: 1, status: :failed}] = turn_rows(run)
     end
   end
 end
