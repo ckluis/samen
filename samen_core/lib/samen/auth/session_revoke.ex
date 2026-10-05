@@ -46,37 +46,43 @@ defmodule Samen.Auth.SessionRevoke do
   session belonging to a different credential is refused (`{:error,
   :not_found}`), never silently a no-op success. `{:ok, :revoked}` on
   success (idempotent: revoking an already-revoked session of yours is still
-  a success, not an error).
+  a success, not an error). `{:error, :revoke_failed}` when the session is
+  yours and still LIVE after the attempt — a failed revoke is never reported
+  as a success.
+
+  The answer is read back from the ROW, never from the bulk update's result.
+  `Ash.bulk_update/4` returns a bare `%Ash.BulkResult{}` (this used to match
+  `{:ok, %Ash.BulkResult{}}`, which never matched, so every call fell to a
+  fallback that answered `{:ok, :revoked}` whenever the row merely existed —
+  a failed revoke read as success; found by dialyzer, issue #73). And with
+  `return_records?: false` even a successful bulk result cannot tell "revoked
+  your session" from "matched no row", so it is not the signal either.
   """
-  @spec revoke_one(module(), String.t(), String.t()) :: {:ok, :revoked} | {:error, :not_found}
+  @spec revoke_one(module(), String.t(), String.t()) ::
+          {:ok, :revoked} | {:error, :not_found | :revoke_failed}
   def revoke_one(session_mod, session_id, credential_id)
       when is_binary(session_id) and is_binary(credential_id) do
     now = DateTime.utc_now()
 
+    _ =
+      session_mod
+      |> Ash.Query.filter(
+        id == ^session_id and credential_id == ^credential_id and is_nil(revoked_at)
+      )
+      |> Ash.bulk_update(:revoke, %{revoked_at: now},
+        authorize?: false,
+        return_records?: false,
+        return_errors?: true
+      )
+
     session_mod
-    |> Ash.Query.filter(id == ^session_id and credential_id == ^credential_id and is_nil(revoked_at))
-    |> Ash.bulk_update(:revoke, %{revoked_at: now},
-      authorize?: false,
-      return_records?: false,
-      return_errors?: true
-    )
+    |> Ash.Query.filter(id == ^session_id and credential_id == ^credential_id)
+    |> Ash.Query.select([:id, :revoked_at])
+    |> Ash.read!(authorize?: false)
     |> case do
-      {:ok, %Ash.BulkResult{status: :success, error_count: 0}} ->
-        {:ok, :revoked}
-
-      _ ->
-        # Zero rows matched (wrong credential, unknown id, or already revoked-and-
-        # gone) vs. an already-revoked row OF YOURS both need distinguishing before
-        # reporting :not_found — an idempotent re-revoke of your own row is a
-        # success, not an error.
-        already_mine? =
-          session_mod
-          |> Ash.Query.filter(id == ^session_id and credential_id == ^credential_id)
-          |> Ash.Query.select([:id])
-          |> Ash.read!(authorize?: false)
-          |> Enum.any?()
-
-        if already_mine?, do: {:ok, :revoked}, else: {:error, :not_found}
+      [%{revoked_at: %DateTime{}} | _] -> {:ok, :revoked}
+      [_still_live | _] -> {:error, :revoke_failed}
+      [] -> {:error, :not_found}
     end
   end
 
