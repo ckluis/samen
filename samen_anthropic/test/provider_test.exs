@@ -224,7 +224,10 @@ defmodule SamenAnthropic.ProviderTest do
     test "a 200 that filled the context window is a usage-carrying :context_overflow, never a completion" do
       result = complete_with(window_exceeded(%{"input_tokens" => 900, "output_tokens" => 48}))
 
-      assert result == {:error, :context_overflow, %{input_tokens: 900, output_tokens: 48}}
+      assert result ==
+               {:error, :context_overflow,
+                %{input_tokens: 900, cached_input_tokens: 0, output_tokens: 48}}
+
       # The truncated text is never handed back as an answer (and never echoed — EG6).
       refute inspect(result) =~ "Lovelace"
     end
@@ -244,7 +247,8 @@ defmodule SamenAnthropic.ProviderTest do
       }
 
       assert Chokepoint.complete(Provider, config, :complete, ["p"], error_usage: true) ==
-               {:error, :context_overflow, %{input_tokens: 900, output_tokens: 48}}
+               {:error, :context_overflow,
+                %{input_tokens: 900, cached_input_tokens: 0, output_tokens: 48}}
 
       assert Chokepoint.complete(Provider, config, :complete, ["p"], []) ==
                {:error, :context_overflow}
@@ -252,7 +256,7 @@ defmodule SamenAnthropic.ProviderTest do
   end
 
   describe "usage (issue #11)" do
-    test "input_tokens is the whole billed input — uncached plus cache write plus cache read" do
+    test "cached input is its own bucket — fresh = uncached + cache write, cached = cache read (issue #74)" do
       usage = %{
         "input_tokens" => 40,
         "cache_creation_input_tokens" => 1_000,
@@ -260,12 +264,14 @@ defmodule SamenAnthropic.ProviderTest do
         "output_tokens" => 7
       }
 
-      assert {:error, :context_overflow, %{input_tokens: 21_040, output_tokens: 7}} =
+      assert {:error, :context_overflow,
+              %{input_tokens: 1_040, cached_input_tokens: 20_000, output_tokens: 7}} =
                complete_with(window_exceeded(usage))
     end
 
     test "a missing or malformed count is 0, never a guess" do
-      assert {:error, :context_overflow, %{input_tokens: 5, output_tokens: 0}} =
+      assert {:error, :context_overflow,
+              %{input_tokens: 5, cached_input_tokens: 0, output_tokens: 0}} =
                complete_with(
                  window_exceeded(%{
                    "input_tokens" => 5,

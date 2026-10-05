@@ -6,8 +6,9 @@ defmodule Samen.AI.ErrorUsageContractTest do
   code would keep working while the contract every adapter author reads went back to
   saying it cannot happen. This is the test that notices.
 
-  Three declarations must admit the three-element error, each with a usage map naming
-  BOTH `:input_tokens` and `:output_tokens`:
+  Three declarations must admit the three-element error, each with a usage map naming all
+  three token buckets — `:input_tokens`, `:cached_input_tokens` (issue #74) and
+  `:output_tokens`:
 
     * `Samen.AI.Provider.complete/2` — the `@callback` an adapter implements;
     * `Samen.AI.complete/4` — the public entry point (`error_usage: true` callers);
@@ -53,8 +54,11 @@ defmodule Samen.AI.ErrorUsageContractTest do
 
     keys = quoted |> Enum.flat_map(&usage_tuples/1)
 
-    assert Enum.any?(keys, &MapSet.subset?(MapSet.new([:input_tokens, :output_tokens]), &1)),
-           "#{label} no longer admits {:error, reason, %{input_tokens: _, output_tokens: _}}: " <>
+    # Issue #74: all three buckets, the cached-input one included.
+    buckets = MapSet.new([:input_tokens, :cached_input_tokens, :output_tokens])
+
+    assert Enum.any?(keys, &MapSet.subset?(buckets, &1)),
+           "#{label} no longer admits {:error, reason, %{input_tokens: _, cached_input_tokens: _, output_tokens: _}}: " <>
              Enum.map_join(quoted, "\n", &Macro.to_string/1)
   end
 

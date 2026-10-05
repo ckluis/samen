@@ -47,8 +47,9 @@ defmodule Samen.AI.Provider do
   ONLY when a configured provider genuinely produced output; `{:error, :not_configured}`
   when unconfigured (fail-honest); `{:error, term()}` on a provider-side failure. A failure
   that still spent tokens (a context overflow is a real call) MAY be reported as
-  `{:error, term(), usage}`, `usage` a map with `:input_tokens` / `:output_tokens`; the
-  chokepoint normalizes the reason and scrubs the usage to those two integers. MUST
+  `{:error, term(), usage}`, `usage` a map with `:input_tokens` / `:cached_input_tokens`
+  (input served from the prompt cache, issue #74) / `:output_tokens`; the chokepoint
+  normalizes the reason and scrubs the usage to those three integers. MUST
   accept ONLY `%Samen.AI.MaskedPayload{}` (§3.2 — refuse anything else by function clause).
   """
   @callback complete(Samen.AI.MaskedPayload.t(), config :: map()) ::
@@ -57,6 +58,7 @@ defmodule Samen.AI.Provider do
               | {:error, term(),
                  %{
                    optional(:input_tokens) => non_neg_integer(),
+                   optional(:cached_input_tokens) => non_neg_integer(),
                    optional(:output_tokens) => non_neg_integer()
                  }}
 

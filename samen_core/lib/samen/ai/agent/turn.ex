@@ -57,6 +57,8 @@ defmodule Samen.AI.Agent.Turn do
     attribute(:error_kind, :string, public?: true)
 
     attribute(:input_tokens, :integer, public?: true, allow_nil?: false, default: 0)
+    # Issue #74: input SERVED from the provider's prompt cache, its own bucket.
+    attribute(:cached_input_tokens, :integer, public?: true, allow_nil?: false, default: 0)
     attribute(:output_tokens, :integer, public?: true, allow_nil?: false, default: 0)
     attribute(:duration_ms, :integer, public?: true, allow_nil?: false, default: 0)
 
@@ -98,6 +100,7 @@ defmodule Samen.AI.Agent.Turn do
         :arg_keys,
         :error_kind,
         :input_tokens,
+        :cached_input_tokens,
         :output_tokens,
         :duration_ms,
         :provider,
@@ -128,6 +131,7 @@ defmodule Samen.AI.Agent.Turn do
         :arg_keys,
         :error_kind,
         :input_tokens,
+        :cached_input_tokens,
         :output_tokens,
         :duration_ms,
         :provider,

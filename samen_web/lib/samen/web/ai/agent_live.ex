@@ -293,7 +293,7 @@ defmodule Samen.Web.AI.AgentLive do
         <b>{@run.agent}</b>
         <span style="color:var(--muted);font-size:12px">
           turn {@run.current_turn}/{@run.max_turns} · tool calls {@run.tool_calls_used}/{@run.max_tool_calls}
-          · tokens {@run.input_tokens_used}/{@run.output_tokens_used}
+          · tokens {@run.input_tokens_used}/{@run.output_tokens_used}<span :if={Map.get(@run, :cached_input_tokens_used, 0) > 0} class="agent-cached-tokens"> (+{Map.get(@run, :cached_input_tokens_used, 0)} cached)</span>
         </span>
         <a href={"#{@base}/agents"} id="agent-back" style="margin-left:auto;font-size:12px">← All runs</a>
       </div>
@@ -341,7 +341,7 @@ defmodule Samen.Web.AI.AgentLive do
             <td class="t-tool">{t.tool_kind || "—"}</td>
             <td class="t-argkeys mono">{Enum.join(t.arg_keys, ", ")}</td>
             <td class="t-error" style="color:#B42318">{t.error_kind || ""}</td>
-            <td>{t.input_tokens}/{t.output_tokens}</td>
+            <td>{t.input_tokens}/{t.output_tokens}<span :if={Map.get(t, :cached_input_tokens, 0) > 0} class="t-cached"> +{Map.get(t, :cached_input_tokens, 0)} cached</span></td>
             <td>
               {t.provider || "—"}
               <.pill :if={t.simulated} variant="warn"><span class="agent-sim-badge">SIMULATED — not a real model</span></.pill>

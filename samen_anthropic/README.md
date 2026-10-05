@@ -16,7 +16,8 @@ T64/D1). Implements `Samen.AI.Provider` for Anthropic's Messages API.
   "prompt is too long" is `{:error, :context_overflow}` (nothing was spent), and a 200 with
   `stop_reason: "model_context_window_exceeded"` is `{:error, :context_overflow, usage}` —
   truncated, so never handed back as a completion, and billed as a failed attempt. Usage
-  counts `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`.
+  keeps cached input in its own bucket: `input_tokens` = `input_tokens +
+  cache_creation_input_tokens` (fresh), `cached_input_tokens` = `cache_read_input_tokens`.
 - **No live calls in CI**: the test suite injects a fixture transport (the
   `samen_postmark` cassette precedent); the real Messages-API call
   (`SamenAnthropic.Transport`, via `req`) is exercised only behind the host opt-in

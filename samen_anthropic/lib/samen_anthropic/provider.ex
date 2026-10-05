@@ -48,10 +48,15 @@ defmodule SamenAnthropic.Provider do
 
   ## Usage
 
-  `input_tokens` is the input the request was billed for. With prompt caching the API
-  splits it across `input_tokens`, `cache_creation_input_tokens` and
-  `cache_read_input_tokens`, and all three count toward the context window, so the
-  reported `input_tokens` is their sum (a missing or non-integer field counts as 0).
+  With prompt caching the API splits a request's input across `input_tokens` (uncached),
+  `cache_creation_input_tokens` (processed and written to the cache) and
+  `cache_read_input_tokens` (served from the cache). Samen keeps two buckets (issue #74),
+  because cached input costs a fraction of fresh input but still fills the window:
+
+    * `input_tokens` — input processed FRESH: `input_tokens + cache_creation_input_tokens`;
+    * `cached_input_tokens` — input SERVED from the cache: `cache_read_input_tokens`.
+
+  A missing or non-integer field counts as 0.
   """
 
   @behaviour Samen.AI.Provider
@@ -177,14 +182,13 @@ defmodule SamenAnthropic.Provider do
   # All three input fields count toward the window (see the moduledoc).
   defp normalize_usage(usage) when is_map(usage) do
     %{
-      input_tokens:
-        count(usage, "input_tokens") + count(usage, "cache_creation_input_tokens") +
-          count(usage, "cache_read_input_tokens"),
+      input_tokens: count(usage, "input_tokens") + count(usage, "cache_creation_input_tokens"),
+      cached_input_tokens: count(usage, "cache_read_input_tokens"),
       output_tokens: count(usage, "output_tokens")
     }
   end
 
-  defp normalize_usage(_usage), do: %{input_tokens: 0, output_tokens: 0}
+  defp normalize_usage(_usage), do: %{input_tokens: 0, cached_input_tokens: 0, output_tokens: 0}
 
   defp count(usage, key) do
     case Map.get(usage, key) do

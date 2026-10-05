@@ -1543,4 +1543,130 @@ defmodule Samen.AI.AgentDurabilityTest do
       assert run.input_tokens_used == 88
     end
   end
+
+  # ── Issue #74 (ruled: separate buckets for cached and not cached, done properly) ───────
+  #
+  # Input SERVED from the provider's prompt cache is its own bucket: its own run counter
+  # (`cached_input_tokens_used`), its own ceiling (`max_cached_input_tokens`, default 10x the
+  # uncached one), its own turn-ledger field, and its own `failed_*` / `summarizer_*` meta.
+  # It fills the window like any input but costs a fraction to process, so it must neither
+  # vanish nor be charged against the uncached allowance.
+
+  @i74_turn %{input_tokens: 10, cached_input_tokens: 500, output_tokens: 3}
+
+  describe "issue #74: cached input is its own bucket" do
+    test "#74 RED: a turn's cached input lands in its OWN run counter and turn field, not in the uncached one" do
+      script([{:final, "done", @i74_turn}])
+
+      assert {:ok, %{run: run}} = run_scripted(Durable, new_scope(), "goal")
+      run = reload(run)
+
+      assert {run.input_tokens_used, run.cached_input_tokens_used, run.output_tokens_used} ==
+               {10, 500, 3}
+
+      assert [t1] = turn_rows(run)
+      assert {t1.input_tokens, t1.cached_input_tokens, t1.output_tokens} == {10, 500, 3}
+    end
+
+    test "#74 RED: heavy cached input does NOT exhaust the uncached max_input_tokens — the buckets are separate" do
+      # 5_000 cached tokens per turn against an UNCACHED ceiling of 100: lumped together,
+      # turn 1 alone would end the run. Kept separate, the run finishes.
+      script([
+        {:continue, "one", %{input_tokens: 20, cached_input_tokens: 5_000, output_tokens: 1}},
+        {:final, "done", %{input_tokens: 20, cached_input_tokens: 5_000, output_tokens: 1}}
+      ])
+
+      assert {:ok, %{answer: "done", run: run}} =
+               run_scripted(Durable, new_scope(), "goal", budgets: [max_input_tokens: 100])
+
+      run = reload(run)
+      assert run.input_tokens_used == 40
+      assert run.cached_input_tokens_used == 10_000
+    end
+
+    test "#74 RED: exceeding the CACHED ceiling ends the run with its own bounded kind" do
+      script([
+        {:continue, "one", %{input_tokens: 1, cached_input_tokens: 101, output_tokens: 1}},
+        {:final, "never reached"}
+      ])
+
+      assert {:error, :budget_exhausted, run} =
+               run_scripted(Durable, new_scope(), "goal", budgets: [max_cached_input_tokens: 100])
+
+      run = reload(run)
+      assert run.error_kind == "max_cached_input_tokens"
+      # Positive control: the uncached bucket was nowhere near its own ceiling.
+      assert run.input_tokens_used < run.max_input_tokens
+    end
+
+    test "#74: the cached ceiling is persisted on the run, defaulting to 10x the uncached one" do
+      script([{:final, "done"}])
+      assert {:ok, %{run: run}} = run_scripted(Durable, new_scope(), "goal")
+      run = reload(run)
+      assert run.max_cached_input_tokens == 600_000
+      assert run.max_cached_input_tokens == 10 * run.max_input_tokens
+    end
+
+    test "#74: a failed attempt's and a summarize call's cached input land in their own meta buckets" do
+      # D-13's scenario, every call reporting cached input: turn 3's pre-turn summarize fails
+      # (900 cached), its own first attempt overflows (300 cached), and the Level 2
+      # summarize folds (40 cached).
+      script([
+        {:continue, @d13_bulk},
+        {:continue, @d13_short},
+        {:error, :provider_error,
+         %{input_tokens: 11, cached_input_tokens: 900, output_tokens: 1}},
+        {:error, :context_overflow,
+         %{input_tokens: 2, cached_input_tokens: 300, output_tokens: 0}},
+        {:continue, @d13_summary, %{input_tokens: 77, cached_input_tokens: 40, output_tokens: 7}},
+        {:continue, @d13_short},
+        {:final, @d13_answer}
+      ])
+
+      assert {:ok, %{run: run}} = d13_run(new_scope())
+      run = reload(run)
+
+      t3 = run |> turn_rows() |> Enum.find(&(&1.turn_index == 3))
+      assert t3.meta["summarizer_cached_input_tokens"] == 940
+      assert t3.meta["failed_cached_input_tokens"] == 300
+      assert run.cached_input_tokens_used == 1_240
+    end
+
+    test "#74: the turn ledger reconciles with the run in EVERY bucket" do
+      i72_script(
+        {:error, :provider_error,
+         %{input_tokens: 11, cached_input_tokens: 900, output_tokens: 1}},
+        {:continue, @d13_summary, %{input_tokens: 77, cached_input_tokens: 40, output_tokens: 7}}
+      )
+
+      assert {:ok, %{run: run}} = d13_run(new_scope())
+      run = reload(run)
+      rows = turn_rows(run)
+
+      sum = fn field, failed, summarizer ->
+        Enum.sum(
+          Enum.map(rows, fn row ->
+            Map.fetch!(row, field) + Map.get(row.meta, failed, 0) +
+              Map.get(row.meta, summarizer, 0)
+          end)
+        )
+      end
+
+      assert run.input_tokens_used ==
+               sum.(:input_tokens, "failed_input_tokens", "summarizer_input_tokens")
+
+      assert run.cached_input_tokens_used ==
+               sum.(
+                 :cached_input_tokens,
+                 "failed_cached_input_tokens",
+                 "summarizer_cached_input_tokens"
+               )
+
+      assert run.output_tokens_used ==
+               sum.(:output_tokens, "failed_output_tokens", "summarizer_output_tokens")
+
+      # Positive control: the cached bucket is not trivially zero.
+      assert run.cached_input_tokens_used == 940
+    end
+  end
 end

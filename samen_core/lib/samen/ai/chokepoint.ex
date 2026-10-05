@@ -181,7 +181,12 @@ defmodule Samen.AI.Chokepoint do
   @spec complete(module(), map(), MaskedPayload.kind(), [term()] | term(), keyword()) ::
           {:ok, Samen.AI.Completion.t()}
           | {:error, term()}
-          | {:error, term(), %{input_tokens: non_neg_integer(), output_tokens: non_neg_integer()}}
+          | {:error, term(),
+             %{
+               input_tokens: non_neg_integer(),
+               cached_input_tokens: non_neg_integer(),
+               output_tokens: non_neg_integer()
+             }}
   def complete(provider, config, kind, segments, opts \\ []) when is_atom(provider) do
     with {:ok, %MaskedPayload{} = payload} <- seal(kind, segments, opts) do
       provider
@@ -402,11 +407,13 @@ defmodule Samen.AI.Chokepoint do
   defp normalize_error(reason, _provider) when is_atom(reason), do: reason
   defp normalize_error(_reason, provider), do: {:provider_error, provider}
 
-  # EG6 for the usage channel: rebuild, never pass through. Any other key, and any value
+  # EG6 for the usage channel: rebuild, never pass through — the three token buckets
+  # (`:cached_input_tokens` is input served from the prompt cache, issue #74). Any other key, and any value
   # that is not a non-negative integer, is dropped (a bad value bills 0, never a guess).
   defp scrub_usage(usage) do
     %{
       input_tokens: usage_count(usage, :input_tokens),
+      cached_input_tokens: usage_count(usage, :cached_input_tokens),
       output_tokens: usage_count(usage, :output_tokens)
     }
   end

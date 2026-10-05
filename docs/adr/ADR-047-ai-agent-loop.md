@@ -669,6 +669,20 @@ governed action without an approve event**, with the approve-then-execute positi
 **terminal state `:budget_exhausted` with a bounded `error_kind`**, and the run's result is
 `{:error, :budget_exhausted}`.
 
+> **AMENDED 2026-10-06 (issue #74, operator ruling "separate buckets for cached and not cached,
+> done properly").** A sixth spend ceiling joins the ratified five: **`max_cached_input_tokens`**
+> (default **600_000**), over its own counter `cached_input_tokens_used`. Input SERVED from the
+> provider's prompt cache fills the context window like any input but costs about a tenth to
+> process, so it is its own bucket rather than part of `max_input_tokens` (which would starve a
+> cached agent of its real budget) or nothing (which would leave it unbounded and invisible). The
+> default is 10x `max_input_tokens` — the same spend headroom. `max_input_tokens` now bounds
+> input processed FRESH (uncached, including cache writes). Exhaustion is the same terminal
+> `:budget_exhausted` with its own bounded `error_kind` `:max_cached_input_tokens`; the
+> fail-honest floor is unchanged. The bucket is carried end to end: the adapter's usage,
+> the chokepoint's allowlist, the run row, the turn ledger (`cached_input_tokens` and the
+> `failed_*` / `summarizer_*` meta), the fold ledger, the operator health rollup and both agent
+> surfaces. The ratified text above is kept as written.
+
 > **Never a partial answer.** The last assistant turn is **not** promoted to a result. The UI
 > says "Stopped at the turn/token budget — this is not a partial answer." This is the ADR-014
 > fail-honest contract applied to a new surface: a run that did not finish must not return a

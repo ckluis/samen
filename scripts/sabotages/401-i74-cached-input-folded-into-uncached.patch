@@ -1,0 +1,25 @@
+# SABOTAGE: issue #74 — the run's billing folds input SERVED from the prompt cache into the
+# UNCACHED counter (`input_tokens_used`) as well as its own. Cached input costs a fraction of
+# fresh input, so an agent that re-reads a cached prefix every turn exhausts its uncached
+# `max_input_tokens` in a turn or two — exactly what separate buckets exist to prevent.
+#
+# Flips the separate-buckets test. The cached-ceiling test stays green (the cached counter
+# still moves), which is why only a test that drives heavy cached input under a small
+# uncached ceiling catches it.
+# APP: samen_core
+# TEST_FILES: test/ai/agent_durability_test.exs
+# MUST_FAIL: #74 RED: heavy cached input does NOT exhaust the uncached max_input_tokens — the buckets are separate
+diff --git a/samen_core/lib/samen/ai/agent.ex b/samen_core/lib/samen/ai/agent.ex
+index 2180604..332e48f 100644
+--- a/samen_core/lib/samen/ai/agent.ex
++++ b/samen_core/lib/samen/ai/agent.ex
+@@ -3677,7 +3677,8 @@ defmodule Samen.AI.Agent do
+ 
+   defp spend_attrs(%Run{} = run, %{input: input, cached: cached, output: output}) do
+     %{
+-      input_tokens_used: run.input_tokens_used + input,
++      # SABOTAGE (#74): cached input is ALSO billed as uncached input.
++      input_tokens_used: run.input_tokens_used + input + cached,
+       cached_input_tokens_used: run.cached_input_tokens_used + cached,
+       output_tokens_used: run.output_tokens_used + output
+     }

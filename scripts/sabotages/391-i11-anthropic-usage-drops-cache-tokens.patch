@@ -5,22 +5,22 @@
 # silently, the day caching is switched on.
 #
 # Flips the whole-billed-input test.
+# Restated for issue #74: cache reads are now their OWN bucket (`cached_input_tokens`), so
+# the sabotage drops that bucket instead of dropping them from a single sum.
 # APP: samen_anthropic
 # TEST_FILES: test/provider_test.exs
-# MUST_FAIL: input_tokens is the whole billed input — uncached plus cache write plus cache read
+# MUST_FAIL: cached input is its own bucket — fresh = uncached + cache write, cached = cache read (issue #74)
 diff --git a/samen_anthropic/lib/samen_anthropic/provider.ex b/samen_anthropic/lib/samen_anthropic/provider.ex
-index bdbbb81..2099bed 100644
+index 726483a..8f1da05 100644
 --- a/samen_anthropic/lib/samen_anthropic/provider.ex
 +++ b/samen_anthropic/lib/samen_anthropic/provider.ex
-@@ -177,9 +177,8 @@ defmodule SamenAnthropic.Provider do
-   # All three input fields count toward the window (see the moduledoc).
+@@ -183,7 +183,8 @@ defmodule SamenAnthropic.Provider do
    defp normalize_usage(usage) when is_map(usage) do
      %{
--      input_tokens:
--        count(usage, "input_tokens") + count(usage, "cache_creation_input_tokens") +
--          count(usage, "cache_read_input_tokens"),
-+      # SABOTAGE (#11): only the uncached remainder is counted.
-+      input_tokens: count(usage, "input_tokens") + 0 * count(usage, "cache_creation_input_tokens") + 0 * count(usage, "cache_read_input_tokens"),
+       input_tokens: count(usage, "input_tokens") + count(usage, "cache_creation_input_tokens"),
+-      cached_input_tokens: count(usage, "cache_read_input_tokens"),
++      # SABOTAGE (#11/#74): input served from the cache is dropped — it bills nothing.
++      cached_input_tokens: 0 * count(usage, "cache_read_input_tokens"),
        output_tokens: count(usage, "output_tokens")
      }
    end

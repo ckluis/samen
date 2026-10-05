@@ -162,6 +162,16 @@ defmodule Samen.AI.Agent.Run do
     attribute(:max_turns, :integer, public?: true, allow_nil?: false)
     attribute(:max_tool_calls, :integer, public?: true, allow_nil?: false)
     attribute(:max_input_tokens, :integer, public?: true, allow_nil?: false)
+    # Issue #74: input served from the provider's prompt CACHE is its own bucket with its own
+    # ceiling — it fills the context window like any input but costs a fraction to process,
+    # so lumping it into `max_input_tokens` would starve a cached agent of its real budget,
+    # and leaving it out would make it invisible. Defaulted on existing rows by migration.
+    attribute(:max_cached_input_tokens, :integer,
+      public?: true,
+      allow_nil?: false,
+      default: 600_000
+    )
+
     attribute(:max_output_tokens, :integer, public?: true, allow_nil?: false)
     attribute(:deadline_seconds, :integer, public?: true, allow_nil?: false)
 
@@ -173,7 +183,10 @@ defmodule Samen.AI.Agent.Run do
 
     # Consumption counters (summed from `%Samen.AI.Completion{}.usage` per turn).
     attribute(:tool_calls_used, :integer, public?: true, allow_nil?: false, default: 0)
+    # `input_tokens_used` is input processed FRESH (uncached, including what was written to
+    # the cache); `cached_input_tokens_used` is input SERVED from the cache (issue #74).
     attribute(:input_tokens_used, :integer, public?: true, allow_nil?: false, default: 0)
+    attribute(:cached_input_tokens_used, :integer, public?: true, allow_nil?: false, default: 0)
     attribute(:output_tokens_used, :integer, public?: true, allow_nil?: false, default: 0)
 
     # Loop provenance (the Automation.Context idiom, ADR-047 §5.1 recursion guard):
@@ -227,6 +240,7 @@ defmodule Samen.AI.Agent.Run do
         :max_turns,
         :max_tool_calls,
         :max_input_tokens,
+        :max_cached_input_tokens,
         :max_output_tokens,
         :deadline_seconds,
         :context_cutoff_tokens
@@ -249,6 +263,7 @@ defmodule Samen.AI.Agent.Run do
         :transcript,
         :tool_calls_used,
         :input_tokens_used,
+        :cached_input_tokens_used,
         :output_tokens_used
       ])
 
@@ -273,7 +288,14 @@ defmodule Samen.AI.Agent.Run do
     # `next_turn_at` is set to the approval DEADLINE: non-nil, because a parked run is
     # non-terminal (the Sequences MED-2 invariant).
     update :park do
-      accept([:next_turn_at, :transcript, :input_tokens_used, :output_tokens_used])
+      accept([
+        :next_turn_at,
+        :transcript,
+        :input_tokens_used,
+        :cached_input_tokens_used,
+        :output_tokens_used
+      ])
+
       require_atomic?(false)
       change(transition_state(:awaiting_approval))
     end
@@ -288,6 +310,7 @@ defmodule Samen.AI.Agent.Run do
         :transcript,
         :tool_calls_used,
         :input_tokens_used,
+        :cached_input_tokens_used,
         :output_tokens_used
       ])
 

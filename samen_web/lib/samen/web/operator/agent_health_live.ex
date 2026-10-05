@@ -343,7 +343,7 @@ defmodule Samen.Web.Operator.AgentHealthLive do
                     <td class="a-by-error">{counts_str(a.error_kind_counts)}</td>
                     <td class="a-awaiting">{a.awaiting_approval}</td>
                     <td class="a-tools">{a.tool_calls}</td>
-                    <td class="a-tokens">{a.tokens}</td>
+                    <td class="a-tokens">{a.tokens}<span :if={Map.get(a, :cached_tokens, 0) > 0} class="a-cached"> +{Map.get(a, :cached_tokens, 0)} cached</span></td>
                     <td class="a-last" style="color:var(--muted)">{ts(a.last_run_at)}</td>
                     <td class="a-actions">
                       <button :if={a.kill_state == :active} class="btn-kill" id={"kill-#{a.agent}"} phx-click="kill" phx-value-agent={a.agent}
@@ -386,7 +386,7 @@ defmodule Samen.Web.Operator.AgentHealthLive do
                     <td class="r-turn">{r.current_turn}/{r.max_turns}</td>
                     <td class="r-error" style="color:#B42318">{r.error_kind}</td>
                     <td class="r-tools">{r.tool_calls_used}</td>
-                    <td class="r-tokens">{r.input_tokens_used}/{r.output_tokens_used}</td>
+                    <td class="r-tokens">{r.input_tokens_used}/{r.output_tokens_used}<span :if={Map.get(r, :cached_input_tokens_used, 0) > 0} class="r-cached"> +{Map.get(r, :cached_input_tokens_used, 0)} cached</span></td>
                     <td class="r-started" style="color:var(--muted)">{ts(r.started_at)}</td>
                     <td><button class="btn-turns" id={"turns-#{r.id}"} phx-click="select_run" phx-value-id={r.id}>Turns</button></td>
                   </tr>
@@ -416,7 +416,7 @@ defmodule Samen.Web.Operator.AgentHealthLive do
                     <td class="t-tool">{t.tool_kind || "—"}</td>
                     <td class="t-argkeys mono">{Enum.join(t.arg_keys, ", ")}</td>
                     <td class="t-error" style="color:#B42318">{t.error_kind}</td>
-                    <td>{t.input_tokens}/{t.output_tokens}</td>
+                    <td>{t.input_tokens}/{t.output_tokens}<span :if={Map.get(t, :cached_input_tokens, 0) > 0} class="t-cached"> +{Map.get(t, :cached_input_tokens, 0)} cached</span></td>
                     <td>{t.duration_ms}</td>
                     <td>
                       {t.provider || "—"}

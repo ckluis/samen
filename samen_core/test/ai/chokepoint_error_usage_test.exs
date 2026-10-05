@@ -8,8 +8,9 @@ defmodule Samen.AI.ChokepointErrorUsageTest do
 
     * the reason still goes through `normalize_error/2` (an atom passes; anything richer
       becomes the content-free `{:provider_error, provider}`);
-    * the usage is REBUILT from an allowlist: exactly `:input_tokens` and `:output_tokens`,
-      each a non-negative integer (anything else is 0), and no other key travels;
+    * the usage is REBUILT from an allowlist: exactly `:input_tokens`, `:cached_input_tokens`
+      (input served from the prompt cache, issue #74) and `:output_tokens`, each a
+      non-negative integer (anything else is 0), and no other key travels;
     * a non-map or a struct in the usage slot is not usage: the whole return reduces to
       the content-free 2-tuple;
     * only a caller that passes `error_usage: true` sees the 3-tuple. Every other caller
@@ -33,9 +34,19 @@ defmodule Samen.AI.ChokepointErrorUsageTest do
   defp complete(result, opts \\ [error_usage: true]),
     do: Chokepoint.complete(Raw, %{return: result}, :complete, ["p"], opts)
 
-  test "the usage is kept, as exactly two non-negative integers, for a caller that asks" do
+  test "the usage is kept, as exactly three non-negative integers, for a caller that asks" do
     assert complete({:error, :context_overflow, %{input_tokens: 5, output_tokens: 2}}) ==
-             {:error, :context_overflow, %{input_tokens: 5, output_tokens: 2}}
+             {:error, :context_overflow,
+              %{input_tokens: 5, cached_input_tokens: 0, output_tokens: 2}}
+  end
+
+  test "the cached-input bucket travels as its own count (issue #74)" do
+    assert complete(
+             {:error, :context_overflow,
+              %{input_tokens: 5, cached_input_tokens: 70, output_tokens: 2}}
+           ) ==
+             {:error, :context_overflow,
+              %{input_tokens: 5, cached_input_tokens: 70, output_tokens: 2}}
   end
 
   test "EG6: no other key in the usage map travels — the map is rebuilt, never passed through" do
@@ -45,23 +56,31 @@ defmodule Samen.AI.ChokepointErrorUsageTest do
 
     # Positive control: the two counts DID travel, so the refutes are not vacuous.
     assert {:error, :context_overflow, kept} = result
-    assert kept == %{input_tokens: 5, output_tokens: 2}
+    assert kept == %{input_tokens: 5, cached_input_tokens: 0, output_tokens: 2}
     refute inspect(result) =~ "Lovelace"
   end
 
   test "EG6: the reason is still normalized — a rich reason never travels beside the usage" do
     result = complete({:error, {:boom, @canary}, %{input_tokens: 5, output_tokens: 2}})
 
-    assert result == {:error, {:provider_error, Raw}, %{input_tokens: 5, output_tokens: 2}}
+    assert result ==
+             {:error, {:provider_error, Raw},
+              %{input_tokens: 5, cached_input_tokens: 0, output_tokens: 2}}
+
     refute inspect(result) =~ "Lovelace"
   end
 
   test "a count that is not a non-negative integer bills 0, never a guess" do
-    assert complete({:error, :context_overflow, %{input_tokens: -1, output_tokens: "9"}}) ==
-             {:error, :context_overflow, %{input_tokens: 0, output_tokens: 0}}
+    assert complete(
+             {:error, :context_overflow,
+              %{input_tokens: -1, cached_input_tokens: 1.5, output_tokens: "9"}}
+           ) ==
+             {:error, :context_overflow,
+              %{input_tokens: 0, cached_input_tokens: 0, output_tokens: 0}}
 
     assert complete({:error, :context_overflow, %{}}) ==
-             {:error, :context_overflow, %{input_tokens: 0, output_tokens: 0}}
+             {:error, :context_overflow,
+              %{input_tokens: 0, cached_input_tokens: 0, output_tokens: 0}}
   end
 
   test "EG6: a charlist, a struct or an exception in the usage slot reduces to the content-free 2-tuple" do
@@ -93,7 +112,8 @@ defmodule Samen.AI.ChokepointErrorUsageTest do
              grounding: %{},
              error_usage: true
            ) ==
-             {:error, :context_overflow, %{input_tokens: 5, output_tokens: 2}}
+             {:error, :context_overflow,
+              %{input_tokens: 5, cached_input_tokens: 0, output_tokens: 2}}
   end
 
   test "a raised exception still reduces to the 2-tuple — a raise has no honest usage" do
