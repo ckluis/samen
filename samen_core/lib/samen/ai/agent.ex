@@ -431,8 +431,8 @@ defmodule Samen.AI.Agent do
   (`egress_opts/2` — §4.4 masked-only, categorically).
   """
   @spec run(module(), Samen.Scope.t(), String.t(), keyword()) ::
-          {:ok, %{answer: String.t(), run: Ash.Resource.record(), turns: non_neg_integer()}}
-          | {:error, term(), Ash.Resource.record()}
+          {:ok, %{answer: String.t(), run: Ash.Resource.Record.t(), turns: non_neg_integer()}}
+          | {:error, term(), Ash.Resource.Record.t()}
           | {:error, term()}
   def run(agent_mod, scope, goal, opts \\ [])
 
@@ -480,7 +480,7 @@ defmodule Samen.AI.Agent do
   would under `run/4`, host config still first (`Samen.AI.Agent.Hooks.resolve/1`).
   """
   @spec start(module(), Samen.Scope.t(), String.t(), keyword()) ::
-          {:ok, Ash.Resource.record()} | {:error, term()}
+          {:ok, Ash.Resource.Record.t()} | {:error, term()}
   def start(agent_mod, scope, goal, opts \\ [])
 
   def start(agent_mod, %Samen.Scope{} = scope, goal, opts)
@@ -509,7 +509,7 @@ defmodule Samen.AI.Agent do
   `{:ok, run}`, `{:error, :not_found}`, or `{:error, :already_terminal}`.
   """
   @spec cancel(Samen.Scope.t(), String.t()) ::
-          {:ok, Ash.Resource.record()} | {:error, :not_found | :already_terminal | term()}
+          {:ok, Ash.Resource.Record.t()} | {:error, :not_found | :already_terminal | term()}
   def cancel(%Samen.Scope{} = scope, run_id) do
     case Ash.get(Run, run_id, scope: scope) do
       # A4: a PARKED run has no loop to honour the durable flag at a turn boundary, and
@@ -666,7 +666,7 @@ defmodule Samen.AI.Agent do
   use `>` on the summed counters — deliberately soft by up to one turn (the crossing
   turn completes; the next is refused). Returns a bounded error kind or `nil`.
   """
-  @spec over_budget(Ash.Resource.record(), DateTime.t()) :: atom() | nil
+  @spec over_budget(Ash.Resource.Record.t(), DateTime.t()) :: atom() | nil
   def over_budget(%Run{} = run, %DateTime{} = now) do
     cond do
       run.current_turn >= run.max_turns -> :max_turns
@@ -744,7 +744,7 @@ defmodule Samen.AI.Agent do
   `{:error, :not_found}`, or `{:error, reason}` (a transient fetch failure the worker
   surfaces to Oban as retriable — the ONE `{:error, _}` a business run ever returns).
   """
-  @spec fetch_run(String.t() | nil) :: {:ok, Ash.Resource.record()} | {:error, term()}
+  @spec fetch_run(String.t() | nil) :: {:ok, Ash.Resource.Record.t()} | {:error, term()}
   def fetch_run(nil), do: {:error, :not_found}
 
   def fetch_run(id) do
@@ -774,8 +774,8 @@ defmodule Samen.AI.Agent do
   tuple. An already-terminal run returns `{:done, run}` (a duplicate job is a no-op —
   the RunWorker "already-queued half" posture).
   """
-  @spec execute_batch(Ash.Resource.record()) ::
-          {:continue, Ash.Resource.record()} | {:done, Ash.Resource.record()} | term()
+  @spec execute_batch(Ash.Resource.Record.t()) ::
+          {:continue, Ash.Resource.Record.t()} | {:done, Ash.Resource.Record.t()} | term()
   def execute_batch(%Run{} = run) do
     cond do
       run.state not in [:queued, :running] ->
@@ -2602,8 +2602,8 @@ defmodule Samen.AI.Agent do
   Public + idempotent so the sweep is directly drivable in a test (and by an operator
   surface) without waiting on a cron tick. A run that is not parked is a no-op.
   """
-  @spec expire_parked(Ash.Resource.record() | String.t()) ::
-          {:ok, Ash.Resource.record()} | {:error, term()}
+  @spec expire_parked(Ash.Resource.Record.t() | String.t()) ::
+          {:ok, Ash.Resource.Record.t()} | {:error, term()}
   def expire_parked(%Run{} = run), do: expire_parked(run.id)
 
   def expire_parked(run_id) when is_binary(run_id) do
@@ -2621,7 +2621,7 @@ defmodule Samen.AI.Agent do
   def expire_parked(_run), do: {:error, :not_found}
 
   @doc false
-  @spec on_proposal_expired(Ash.Resource.record()) :: :ok
+  @spec on_proposal_expired(Ash.Resource.Record.t()) :: :ok
   def on_proposal_expired(%Run{} = updated) do
     # Re-read the row so the vault-routed transcript is a `%Samen.Masked{}` this path can
     # reveal: the record an update hands back carries the just-written attributes, not
@@ -3323,7 +3323,7 @@ defmodule Samen.AI.Agent do
   absent. A blob written by the current `encode_transcript/2,3` already carries
   both keys explicitly and this simply passes them through unchanged.
   """
-  @spec transcript_views(Ash.Resource.record()) ::
+  @spec transcript_views(Ash.Resource.Record.t()) ::
           {:ok, %{goal: String.t(), ui_view: [String.t()], llm_view: [String.t()]}}
           | {:error, term()}
   def transcript_views(%Run{} = run) do

@@ -33,8 +33,8 @@ defmodule Samen.Archival do
   already-archived record is a no-op that returns `{:ok, record}` without moving the
   timestamp or writing a duplicate audit event. Returns the archived record.
   """
-  @spec archive(Ash.Resource.record(), Keyword.t()) ::
-          {:ok, Ash.Resource.record()} | {:error, term()}
+  @spec archive(Ash.Resource.Record.t(), Keyword.t()) ::
+          {:ok, Ash.Resource.Record.t()} | {:error, term()}
   def archive(record, opts \\ []) do
     Ash.destroy(record, Keyword.merge([action: :archive, return_destroyed?: true], opts))
   end
@@ -44,8 +44,8 @@ defmodule Samen.Archival do
   record. Returns `{:error, :restore_conflict}` when a live row now occupies the
   record's unique slot (§5.3) — honest, never clobbering.
   """
-  @spec restore(Ash.Resource.record(), Keyword.t()) ::
-          {:ok, Ash.Resource.record()} | {:error, :restore_conflict | term()}
+  @spec restore(Ash.Resource.Record.t(), Keyword.t()) ::
+          {:ok, Ash.Resource.Record.t()} | {:error, :restore_conflict | term()}
   def restore(record, opts \\ []) do
     case Ash.update(record, %{}, Keyword.merge([action: :restore], opts)) do
       {:ok, restored} -> {:ok, restored}

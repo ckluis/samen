@@ -64,6 +64,26 @@ defmodule Samen.Web.SearchSurfaceTest do
     assert html =~ "cmdk"
   end
 
+  test "the org switcher's return_to is the search page's own path (taken from the URI, not the params map)" do
+    org = Ash.UUID.generate()
+    mount = search_mount()
+    params = %{"org" => org, "q" => "invoice"}
+
+    {:ok, socket} =
+      Samen.Web.Search.SearchLive.mount(params, mount_session(mount), %Phoenix.LiveView.Socket{})
+
+    {:noreply, socket} =
+      Samen.Web.Search.SearchLive.handle_params(
+        params,
+        "http://localhost/search?org=#{org}&q=invoice",
+        socket
+      )
+
+    # It used to be derived from the params MAP by a function that only reads a URI, so
+    # it was always nil and switching org from this page lost the way back (issue #73).
+    assert socket.assigns.return_to == "/search"
+  end
+
   test "a search from org A never renders org B rows (org-scoped surface)" do
     org_a = Ash.UUID.generate()
     org_b = Ash.UUID.generate()

@@ -19,7 +19,7 @@ defmodule Samen.Archival.Audit do
   (`Writer.write/2` gracefully skips the hash chain if a host has not migrated
   `aud_chain`); the `aud_event` row always lands. Returns `:ok`.
   """
-  @spec write(Ash.Changeset.t(), Ash.Resource.record(), String.t()) :: :ok
+  @spec write(Ash.Changeset.t(), Ash.Resource.Record.t(), String.t()) :: :ok
   def write(changeset, record, event_type) do
     repo = AshPostgres.DataLayer.Info.repo(changeset.resource, :mutate)
 

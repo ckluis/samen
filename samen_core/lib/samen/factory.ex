@@ -78,7 +78,7 @@ defmodule Samen.Factory do
   Raises `ArgumentError` if any attrs key names a vault-routed field's PHYSICAL
   storage column instead of its logical field (fail loud, DB untouched).
   """
-  @spec create!(module(), map(), Samen.Scope.t() | keyword()) :: Ash.Resource.record()
+  @spec create!(module(), map(), Samen.Scope.t() | keyword()) :: Ash.Resource.Record.t()
   def create!(resource, attrs, scope_or_opts \\ [])
 
   def create!(resource, attrs, %Samen.Scope{} = scope) when is_map(attrs),

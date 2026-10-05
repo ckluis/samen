@@ -172,7 +172,6 @@ defmodule Samen.Web.AI.AgentReads do
   def decide(:approve, approval_id, actor_id) when is_binary(approval_id) and is_binary(actor_id) do
     case Samen.Approvals.approve(approval_id, actor_id) do
       {:ok, decided, meta} -> {:ok, {decided, meta}}
-      {:ok, decided} -> {:ok, decided}
       {:error, reason} -> {:error, reason}
     end
   rescue

@@ -114,8 +114,8 @@ defmodule Samen.Clone do
   `:source_not_found`, and `{:pii_unresolved, field}` (actor lacks the plane/grant
   to read a vault field — refused, never aliased).
   """
-  @spec clone(Ash.Resource.record(), Samen.Scope.t() | map(), keyword()) ::
-          {:ok, Ash.Resource.record()} | {:error, term()}
+  @spec clone(Ash.Resource.Record.t(), Samen.Scope.t() | map(), keyword()) ::
+          {:ok, Ash.Resource.Record.t()} | {:error, term()}
   def clone(%resource{} = source, actor_or_scope, opts \\ []) do
     actor = actor_of(actor_or_scope)
     repo = repo_for(resource, opts)

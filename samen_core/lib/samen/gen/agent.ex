@@ -36,6 +36,8 @@ defmodule Samen.Gen.Agent do
     @moduledoc false
     @enforce_keys [:app_module, :otp_app, :app_dir, :scope, :name, :agent_module, :agent_name, :goal, :tools]
     defstruct [:app_module, :otp_app, :app_dir, :scope, :name, :agent_module, :agent_name, :goal, :tools]
+
+    @type t :: %__MODULE__{}
   end
 
   @doc "Build the agent spec from the CLI opts (`:scope`, `:name`, `:goal`, `:tools`, `:app_dir`)."

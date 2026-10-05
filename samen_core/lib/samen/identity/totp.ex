@@ -44,7 +44,11 @@ defmodule Samen.Identity.Totp do
 
   alias Samen.Vault
 
-  @type mods :: %{required(:credential) => module(), required(:repo) => module()}
+  @type mods :: %{
+          required(:credential) => module(),
+          required(:repo) => module(),
+          optional(:user) => module()
+        }
 
   @recovery_select [:id, :totp_secret, :recovery_codes, :totp_enabled_at, :totp_last_verified_at]
 

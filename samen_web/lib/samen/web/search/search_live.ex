@@ -42,11 +42,19 @@ defmodule Samen.Web.Search.SearchLive do
 
     socket =
       socket
-      |> assign(:return_to, CurrentOrg.return_path(params))
+      |> assign(:return_to, nil)
       |> load(org_id, params["q"] || "")
 
     {:ok, socket}
   end
+
+  # `return_to` is the CURRENT page's path, so the org switcher can bring the operator back
+  # here. It comes from the request URI, in `handle_params/3`, like every other framework
+  # LiveView — `mount/3` used to derive it from the params MAP, which `return_path/1` (a URI
+  # function) can never read, so it was always nil (found by dialyzer, issue #73).
+  @impl true
+  def handle_params(_params, uri, socket),
+    do: {:noreply, assign(socket, :return_to, CurrentOrg.return_path(uri))}
 
   @doc """
   Assign the page state for `org_id` + term `q`: the acting org, the echoed term, and

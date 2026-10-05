@@ -118,7 +118,10 @@ defmodule Samen.Scope.ApiKey do
   with NO `expires_at` (a legacy pre-gate row) is not expired by this pure predicate;
   the minter never produces one, so this only relaxes for rows that predate the gate.
   """
-  @spec expired?(key(), DateTime.t()) :: boolean()
+  @spec expired?(
+          %{optional(:expires_at) => DateTime.t() | nil, optional(atom()) => term()},
+          DateTime.t()
+        ) :: boolean()
   def expired?(key, now \\ DateTime.utc_now())
 
   def expired?(%{expires_at: %DateTime{} = expires_at}, now),

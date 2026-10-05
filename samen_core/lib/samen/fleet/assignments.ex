@@ -22,7 +22,7 @@ defmodule Samen.Fleet.Assignments do
   — re-granting an existing pair is not an error. Gated `:operator_admin`.
   """
   @spec grant(module(), String.t(), atom() | String.t(), String.t(), Samen.OperatorPlane.Actor.t()) ::
-          {:ok, Ash.Resource.record()} | {:error, term()}
+          {:ok, Ash.Resource.Record.t()} | {:error, term()}
   def grant(resource, operator_id, app_scope, account_org_id, %Samen.OperatorPlane.Actor{} = admin)
       when is_atom(resource) and is_binary(operator_id) and is_binary(account_org_id) do
     resource
@@ -68,7 +68,7 @@ defmodule Samen.Fleet.Assignments do
   `{:ok, [record]}` or `{:error, ...}` when the actor may not manage assignments.
   """
   @spec list(module(), String.t(), atom() | String.t(), Samen.OperatorPlane.Actor.t()) ::
-          {:ok, [Ash.Resource.record()]} | {:error, term()}
+          {:ok, [Ash.Resource.Record.t()]} | {:error, term()}
   def list(resource, operator_id, app_scope, %Samen.OperatorPlane.Actor{} = admin)
       when is_atom(resource) and is_binary(operator_id) do
     app_scope_str = to_string(app_scope)
