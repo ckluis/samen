@@ -160,6 +160,12 @@ Every red pairs with a positive control that must stay green under its sabotage 
 - **P3 — quota:** `within_limit?/4` + R6. Depends on D2.
 - **P4 — tenant usage panel:** quantities only, unless D2's spend question resolves otherwise.
   samen_web, ≈0-LOC vertical mount.
+  *Built (2026-10-05):* `Samen.Web.Billing.UsageLive` at `<billing path>/usage`, declared in
+  `Router.__routes__(:billing)`, so every `samen_module_routes(:billing, ...)` host inherits it
+  with no host change. It reads the derived tallies (`Samen.Web.Billing.Reads.usage/2`) and
+  shows used and sent-to-provider quantities per metric and period. It shows no amount and
+  links to the provider's invoices instead (D2). Read-only on both planes, non-PII.
+  `samen_web/test/samen/web/usage_live_test.exs`; sabotage **382** (a local spend estimate).
 
 ## 5. Decisions (taken 2026-09-25: the recommended option on each)
 

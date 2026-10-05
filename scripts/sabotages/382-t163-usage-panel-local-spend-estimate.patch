@@ -1,0 +1,29 @@
+# SABOTAGE: T163 / ADR-051 D2 — the tenant usage panel grows a LOCAL spend estimate:
+# each row prices its quantity at a hard-coded local rate ("≈ $2.47 est."). That is the
+# first local price computation in samen, which D2 ruled out: money is MIRRORED from the
+# provider, never computed (`Samen.Billing.Mirror`), so a local estimate can disagree with
+# the invoice the org is actually charged.
+#
+# Flips the quantities-only test. Every other panel test stays green (the quantities,
+# periods and org scoping all still render), which is exactly why this regression would
+# pass a suite that only checks the numbers are there.
+# APP: samen_web
+# TEST_FILES: test/samen/web/usage_live_test.exs
+# MUST_FAIL: quantities only: the panel shows no price, amount or spend estimate (D2)
+diff --git a/samen_web/lib/samen/web/billing/usage_live.ex b/samen_web/lib/samen/web/billing/usage_live.ex
+index e702157..fe6415b 100644
+--- a/samen_web/lib/samen/web/billing/usage_live.ex
++++ b/samen_web/lib/samen/web/billing/usage_live.ex
+@@ -112,7 +112,11 @@ defmodule Samen.Web.Billing.UsageLive do
+                 <tr :for={row <- @rows} class="usage-row" id={"usage-#{row.id}"}>
+                   <td class="u-metric" style="font-weight:500;color:#3a3b45">{metric_label(row.metric)}</td>
+                   <td class="u-period" style="color:var(--muted)">{period(row.period_start, row.period_end)}</td>
+-                  <td class="u-quantity" style="font-weight:500;color:#3a3b45">{count(row.quantity)}</td>
++                  <td class="u-quantity" style="font-weight:500;color:#3a3b45">
++                    {count(row.quantity)}
++                    <%!-- SABOTAGE (ADR-051 D2): a LOCAL spend estimate, computed from a local rate. --%>
++                    <div style="font-size:11px;color:var(--muted)">≈ ${:erlang.float_to_binary(row.quantity * 0.002, decimals: 2)} est.</div>
++                  </td>
+                   <td class="u-reported" style="color:var(--muted)">{count(row.reported_quantity)}</td>
+                   <td class="u-status">
+                     <.pill variant={status_variant(row)}>{status_label(row)}</.pill>

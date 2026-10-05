@@ -53,6 +53,7 @@ defmodule Samen.Web.MountSmokeTest do
       {"billing/overview", Billing.OverviewLive, build_mount(:billing), %{"org" => org}},
       {"billing/invoices", Billing.InvoicesLive, build_mount(:billing), %{"org" => org}},
       {"billing/plans", Billing.PlansLive, build_mount(:billing), %{"org" => org}},
+      {"billing/usage", Billing.UsageLive, build_mount(:billing), %{"org" => org}},
       # Support
       {"support/tickets", Support.TicketsLive, build_mount(:support), %{"org" => org}},
       {"support/ticket", Support.TicketLive, build_mount(:support), %{"org" => org, "id" => t.support.ticket.id}},
