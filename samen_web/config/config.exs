@@ -3,6 +3,12 @@ import Config
 # ADR-036 D1 / ADR-037 §5.2: AshMoney/ex_money wiring — the mounted test-support
 # CRM Opportunity / Billing Price Money attributes. No FX feature — the background
 # exchange-rate poller stays off.
+# Ash 3.32+ (CVE-2026-82752): string `min_length`/`max_length`, the `string_length`
+# validation and `string_length/1` count UNICODE CODEPOINTS — how Postgres counts — so a
+# length bound actually bounds the stored value. Grapheme counting (the old behaviour)
+# lets one "character" carry an unbounded number of combining marks.
+config :ash, default_string_length_count: :codepoints
+
 config :ash, :known_types, [AshMoney.Types.Money]
 config :ex_money, auto_start_exchange_rate_service: false
 
