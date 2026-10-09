@@ -37,7 +37,8 @@ defmodule Samen.MetricsEgressTest do
 
       # Exactly the pre-existing map-spec children: otel-ecto + contention handlers, plus the
       # ADR-052 §2.1 default-ON request wide events + job spans and the §2.1.2 param filter
-      # (setup-only `:ignore` children).
+      # (setup-only `:ignore` children), and the §2.4 replay retention installer (this host
+      # mounts the replay tables: `:samen_replay_repo` is set).
       map_ids =
         specs
         |> Enum.filter(&is_map/1)
@@ -48,7 +49,8 @@ defmodule Samen.MetricsEgressTest do
       assert {Observability, :request_events, @app} in map_ids
       assert {Observability, :job_spans, @app} in map_ids
       assert {Observability, :param_filter, @app} in map_ids
-      assert length(specs) == 5
+      assert {Observability, :replay_retention, @app} in map_ids
+      assert length(specs) == 6
     end
 
     test "an unrelated Observability config does not add an egress child" do

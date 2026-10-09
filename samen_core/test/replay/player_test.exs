@@ -505,6 +505,87 @@ defmodule Samen.Replay.PlayerTest do
       assert Player.load(tenant_scope(ctx.org), "not-a-uuid") == {:error, :not_found}
     end
 
+    # ADR-052 §2.4.1 (P3 gate note 7): one row with a kind outside the closed set (or a payload
+    # that is not an object), written past RowGuard, failed the typed read — and the WHOLE
+    # replay answered :not_found. It is now ONE :invalid frame; the rest still plays.
+    test "a stored row with a bad kind or a non-object payload is ONE :invalid frame, not a hidden replay",
+         ctx do
+      bogus = "zz_kind_#{System.unique_integer([:positive])}"
+
+      for {seq, kind, payload} <- [{98, bogus, %{}}, {99, "render", ["Grace Hopper"]}] do
+        @repo.query!(
+          "INSERT INTO replay_frame (rpf_session_id, rpf_org_id, rpf_seq, rpf_kind, rpf_at_ms, " <>
+            "rpf_payload, rpf_inserted_at, rpf_updated_at) " <>
+            "VALUES ($1, $2, $3, $4, 50, $5::jsonb, now(), now())",
+          [Ecto.UUID.dump!(ctx.replay_id), Ecto.UUID.dump!(ctx.org), seq, kind, payload]
+        )
+      end
+
+      assert {:ok, %{frames: frames}} = Player.load(tenant_scope(ctx.org), ctx.replay_id)
+      assert Enum.map(frames, & &1.kind) == [:mount, :event, :render, :exit, :invalid, :invalid]
+      assert Enum.all?(Enum.take(frames, -2), &(&1.payload == %{}))
+      refute inspect(frames) =~ @first
+      assert_raise ArgumentError, fn -> String.to_existing_atom(bogus) end
+    end
+
+    # ADR-052 §2.4.1 (P3 gate note 8): the player decoded BEFORE the recorded view was loaded,
+    # so an assign key whose atom only that (not yet loaded) module defines was dropped. The
+    # view is now loaded first — and only an allowed one (an existing atom naming a .beam on
+    # the code path that exports render/1 or __live__/0; never a new atom).
+    @tag :tmp_dir
+    test "the recorded view is loaded before decoding: its own assign atoms survive",
+         %{tmp_dir: dir} = ctx do
+      n = System.unique_integer([:positive])
+      name = "ReplayLazyView#{n}"
+      key = "replay_lazy_key_#{n}"
+      src = Path.join(dir, "lazy.ex")
+
+      File.write!(
+        src,
+        "defmodule #{name} do\n  def render(_), do: :#{key}\nend\n" <>
+          "defmodule ReplayLazyPlain#{n} do\n  def other, do: :ok\nend\n"
+      )
+
+      # Compiled in ANOTHER VM, so neither the module nor its key atom is loaded here.
+      {out, 0} = System.cmd("elixirc", ["-o", dir, src], stderr_to_stdout: true)
+      assert out == "" or is_binary(out)
+      assert_raise ArgumentError, fn -> String.to_existing_atom(key) end
+
+      true = Code.prepend_path(dir)
+      on_exit(fn -> Code.delete_path(dir) end)
+      # The module NAME is an existing atom (the recorder wrote it from a live module).
+      mod = String.to_atom("Elixir." <> name)
+
+      session =
+        @repo.query!(
+          "INSERT INTO replay_session (rps_org_id, rps_view, rps_started_at, rps_inserted_at, " <>
+            "rps_updated_at) VALUES ($1, $2, now(), now(), now()) RETURNING rps_id::text",
+          [Ecto.UUID.dump!(ctx.org), name]
+        )
+
+      %{rows: [[sid]]} = session
+
+      @repo.query!(
+        "INSERT INTO replay_frame (rpf_session_id, rpf_org_id, rpf_seq, rpf_kind, rpf_at_ms, " <>
+          "rpf_payload, rpf_inserted_at, rpf_updated_at) " <>
+          "VALUES ($1, $2, 1, 'mount', 0, $3::jsonb, now(), now())",
+        [Ecto.UUID.dump!(sid), Ecto.UUID.dump!(ctx.org), %{"assigns" => %{key => 7}}]
+      )
+
+      refute :code.is_loaded(mod)
+      assert {:ok, %{frames: [frame]}} = Player.load(tenant_scope(ctx.org), sid)
+      assert frame.kind == :mount
+      assert frame.payload.assigns == %{String.to_existing_atom(key) => 7}
+
+      # Never loaded: a module NAME that is not an existing atom, or one off the code path /
+      # exporting no view callback.
+      assert Player.load_view("NeverAModule#{n}") == nil
+      assert_raise ArgumentError, fn -> String.to_existing_atom("Elixir.NeverAModule#{n}") end
+      plain = String.to_atom("Elixir.ReplayLazyPlain#{n}")
+      assert Player.load_view("ReplayLazyPlain#{n}") == nil
+      refute :code.is_loaded(plain)
+    end
+
     test "assigns_at folds the mount assigns with each later render's changed assigns", ctx do
       {:ok, %{frames: frames}} = Player.load(tenant_scope(ctx.org), ctx.replay_id)
       refute Map.has_key?(Player.assigns_at(frames, 0), :count)

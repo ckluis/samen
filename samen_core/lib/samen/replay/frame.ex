@@ -34,6 +34,16 @@ defmodule Samen.Replay.Frame do
     attribute(:payload, :map, public?: true, allow_nil?: false, default: %{})
   end
 
+  # The player reads a stored row through these, never through the typed `kind` / `payload`
+  # attributes: a row written past `RowGuard` (raw SQL) with a kind outside the closed set or a
+  # payload that is not an object would fail the typed cast and take the WHOLE session read
+  # with it. As text, every row loads; `Samen.Replay.Decoder` then degrades a bad one to a
+  # single `:invalid` frame (ADR-052 §2.4.1).
+  calculations do
+    calculate(:stored_kind, :string, expr(fragment("(?)::text", kind)))
+    calculate(:stored_payload, :string, expr(fragment("(?)::text", payload)))
+  end
+
   identities do
     identity(:session_seq, [:session_id, :seq])
   end

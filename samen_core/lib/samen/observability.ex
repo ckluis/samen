@@ -80,8 +80,12 @@ defmodule Samen.Observability do
      a keyword list of `Samen.Replay.config!/1` options: `:sample_rate`, `:max_frames`,
      `:max_bytes`, `:max_sessions`, `:retention_days`, `:flag_opts`), a
      `Samen.Replay.Supervisor` child owns the in-flight buffer, the session monitor and the
-     event handler. Off (the default), the child list is exactly what it was before P2.
+     event handler. Off (the default), no capture child is started.
      Capture then still needs the org's `samen.replay` flag ON (per-org opt-in).
+  5b. **Session replay retention — ON wherever the replay tables are mounted (ADR-052 §2.4).**
+     When `config :samen_core, :samen_replay_repo` names the host's repo, one transient child
+     installs the replay retention specs (`replay:`'s `:retention_days`, default 14, max 90)
+     into the regular `:retention_specs` registry, whether or not capture is on.
   6. **Wide-event sinks** — none by default (matching the reference verticals:
      sinks are a debug surface attached on demand). Opt in with
      `wide_event_sinks: [:in_memory | :file]` or
@@ -152,6 +156,7 @@ defmodule Samen.Observability do
       request_event_specs(otp_app, opts) ++
       param_filter_specs(otp_app, opts) ++
       job_span_specs(otp_app, opts) ++
+      replay_retention_specs(otp_app, opts) ++
       replay_specs(otp_app, opts) ++
       prometheus_specs(otp_app, opts) ++
       wide_event_sink_specs(otp_app, opts)
@@ -261,6 +266,46 @@ defmodule Samen.Observability do
               "Samen.Observability: replay: #{inspect(other)} — expected false, true or a " <>
                 "keyword list of Samen.Replay options."
     end
+  end
+
+  # Replay RETENTION does not depend on capture (ADR-052 §2.4.1): wherever the replay tables are
+  # mounted — the host points `config :samen_core, :samen_replay_repo` at its repo — the replay
+  # retention specs join the host's regular retention registry (`:samen_core,
+  # :retention_specs`, swept by the daily `Samen.Retention.SweepWorker`) at boot, whether or
+  # not `replay:` turns capture on. Turning capture off (or never on) must not stop the rows
+  # already stored from being pruned. The window is the `replay:` option list's
+  # `retention_days` when one is given, else the default; it is validated here, at build time.
+  defp replay_retention_specs(otp_app, opts) do
+    if Application.get_env(:samen_core, :samen_replay_repo) do
+      days =
+        case fetch_opt(opts, Application.get_env(otp_app, __MODULE__, []), :replay, false) do
+          replay_opts when is_list(replay_opts) ->
+            Keyword.get(replay_opts, :retention_days, Samen.Replay.default_retention_days())
+
+          _ ->
+            Samen.Replay.default_retention_days()
+        end
+
+      %{retention_days: days} = Samen.Replay.config!(retention_days: days)
+
+      [
+        %{
+          id: {__MODULE__, :replay_retention, otp_app},
+          start: {__MODULE__, :install_replay_retention, [[retention_days: days]]},
+          restart: :transient,
+          type: :worker
+        }
+      ]
+    else
+      []
+    end
+  end
+
+  @doc false
+  @spec install_replay_retention(keyword()) :: :ignore
+  def install_replay_retention(opts) do
+    _ = Samen.Replay.install_retention_specs(opts)
+    :ignore
   end
 
   # Validate at BUILD time (fail-honest: an over-long retention window raises here, before the

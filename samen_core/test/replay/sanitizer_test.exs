@@ -12,7 +12,20 @@ defmodule Samen.Replay.SanitizerTest do
   """
   use ExUnit.Case, async: false
 
-  alias Samen.Replay.{Count, Dropped, Id, Kept, More, Record, Redacted, Ref, Sanitizer, Shape}
+  alias Samen.Replay.{
+    Count,
+    Dropped,
+    FrameSchema,
+    Id,
+    Kept,
+    More,
+    Record,
+    Redacted,
+    Ref,
+    Sanitizer,
+    Shape
+  }
+
   alias SamenCore.Support.Clinical.{Patient, Staff}
 
   @repo SamenCore.TestRepo
@@ -505,6 +518,50 @@ defmodule Samen.Replay.SanitizerTest do
       assert f.id == %Id{value: id}
       assert f.secret_count == %Redacted{kind: :free_text}
       assert f.note == %Redacted{kind: :free_text, length: 12}
+    end
+
+    # ADR-052 §2.4.1 (P3 gate note 4): a `Samen.Web.Page` cursor is `{sort_value, id}`, and the
+    # sort value IS a record attribute's value. A list sorted by a `:date` column kept the last
+    # row's date as a bare `Date` in the cursor while the SAME column inside the record was
+    # redacted (a date can be a date of birth). The cursor now takes the column's decision.
+    test "a Page cursor's sort value gets the decision its column gets inside the record" do
+      id = Ash.UUID.generate()
+      shipped = ~D[1906-12-09]
+      rec = %Gadget{id: id, count: 7, shipped_on: shipped}
+
+      page = fn sort, value ->
+        # `Samen.Web.Page` lives in samen_web; the walker matches the struct NAME.
+        %{
+          __struct__: Samen.Web.Page,
+          items: [rec],
+          sort: sort,
+          cursor: nil,
+          next_cursor: {value, id},
+          prev_cursor: {value, id},
+          has_more: true
+        }
+      end
+
+      %Record{fields: by_date} = Sanitizer.value(page.({:shipped_on, :asc}, shipped))
+      [%Record{fields: row}] = by_date.items
+      assert row.shipped_on == %Redacted{kind: :free_text}
+      assert by_date.next_cursor == {%Redacted{kind: :free_text}, %Id{value: id}}
+      assert by_date.prev_cursor == {%Redacted{kind: :free_text}, %Id{value: id}}
+      assert by_date.cursor == nil
+      refute inspect(by_date) =~ "1906"
+
+      assert :ok =
+               FrameSchema.validate(
+                 FrameSchema.encode({1, 1, :render, %{assigns: %{page: by_date}}})
+               )
+
+      # Positive control: a column the record KEEPS keeps its cursor value too.
+      %Record{fields: by_count} = Sanitizer.value(page.({:count, :desc}, 7))
+      assert by_count.next_cursor == {7, %Id{value: id}}
+
+      # Fail closed: no determinable column (no sort / no record items) → shape only.
+      %Record{fields: unsorted} = Sanitizer.value(page.(nil, shipped))
+      assert unsorted.next_cursor == {%Redacted{kind: :free_text}, %Id{value: id}}
     end
 
     test "keep-listed strings: the exact length and byte bounds, and printability" do

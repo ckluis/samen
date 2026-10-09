@@ -73,6 +73,7 @@ defmodule Samen.Replay.Sanitizer do
   @projected_kinds [:bounded_id, :enum, :timestamp, :number, :boolean]
 
   @default_walk_structs [Samen.Web.Page, Phoenix.LiveView.AsyncResult]
+  @cursor_keys [:cursor, :next_cursor, :prev_cursor]
 
   @budget_key {__MODULE__, :budget}
   @classify_key {__MODULE__, :classify_opts}
@@ -362,16 +363,59 @@ defmodule Samen.Replay.Sanitizer do
 
   defp struct_name(mod) do
     name = inspect(mod)
-    if Samen.Replay.FrameSchema.opaque_id?(name), do: name
+    if Samen.Replay.FrameSchema.module_name?(name), do: name
   end
 
   defp safe_length(list) when is_list(list), do: length(list)
   defp safe_length(_), do: 0
 
+  # A `Samen.Web.Page`'s keyset cursors are `{sort_value, id}` — the sort value IS a record
+  # attribute's value (the last row's `dob` when the list sorts by date of birth). It is
+  # recorded under the SAME decision that attribute gets inside the record (ADR-052 §2.4.1):
+  # kept only when the items' resource keeps that column; otherwise shape only. A bare `Date`
+  # in a cursor is never more visible than the column it was read from.
+  defp walked_struct(Samen.Web.Page = mod, term, depth, walk) do
+    decision = cursor_decision(Map.get(term, :items), Map.get(term, :sort))
+
+    fields =
+      Enum.reduce(
+        @cursor_keys,
+        term |> Map.from_struct() |> Map.drop(@cursor_keys) |> map(depth, walk),
+        fn key, acc -> Map.put(acc, key, cursor(Map.get(term, key), decision, depth, walk)) end
+      )
+
+    %Record{resource: inspect(mod), pk: nil, fields: fields}
+  end
+
   defp walked_struct(mod, term, depth, walk) do
     fields = term |> Map.from_struct() |> map(depth, walk)
     %Record{resource: inspect(mod), pk: nil, fields: fields}
   end
+
+  # The decision the sort column gets inside the page's own records (the first Ash record in
+  # `items`), `:free` when it cannot be determined (no record, no sort, unknown column).
+  defp cursor_decision([%mod{} | _], {field, _dir}) when is_atom(field) do
+    if ash_resource?(mod) do
+      case List.keyfind(plan(mod).attributes, field, 0) do
+        {^field, decision} -> decision
+        nil -> :free
+      end
+    else
+      :free
+    end
+  end
+
+  defp cursor_decision(_items, _sort), do: :free
+
+  defp cursor(nil, _decision, _depth, _walk), do: nil
+
+  defp cursor({sort_value, id}, :keep, depth, walk),
+    do: {walk(sort_value, depth + 1, walk), walk(id, depth + 1, walk)}
+
+  defp cursor({sort_value, id}, _decision, depth, walk),
+    do: {free_text(sort_value), walk(id, depth + 1, walk)}
+
+  defp cursor(other, _decision, _depth, _walk), do: free_text(other)
 
   @doc """
   The struct modules the sanitizer walks field-by-field into a `%Record{}`: the framework

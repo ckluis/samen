@@ -127,6 +127,32 @@ defmodule Samen.Replay.CaptureTest do
     )
   end
 
+  # A stored session with one frame, written through the kernel's own `:record` actions (no
+  # capture plane running) — what a host has in its tables after capture is turned off.
+  defp stored_session!(org) do
+    session =
+      Samen.Replay.Session
+      |> Ash.Changeset.for_create(:record, %{
+        org_id: org,
+        view: "SamenCore.Support.ReplayView",
+        started_at: DateTime.utc_now()
+      })
+      |> Ash.create!(authorize?: false)
+
+    Samen.Replay.Frame
+    |> Ash.Changeset.for_create(:record, %{
+      org_id: org,
+      session_id: session.id,
+      seq: 1,
+      kind: :exit,
+      at_ms: 0,
+      payload: %{"reason" => "normal"}
+    })
+    |> Ash.create!(authorize?: false)
+
+    session.id
+  end
+
   defp raw_rows do
     %{rows: frames} =
       @repo.query!("SELECT rpf_kind, rpf_payload::text FROM replay_frame ORDER BY rpf_seq")
@@ -349,6 +375,59 @@ defmodule Samen.Replay.CaptureTest do
       assert n > 0
     end
 
+    # ADR-052 §2.4.1 (P3 gate note 1): the replay spec was installed ONLY by
+    # `Samen.Replay.Supervisor`'s init — so a host that turned capture off (or never on) after
+    # rows were stored stopped pruning them. The host's boot now installs it wherever the
+    # replay tables are mounted.
+    test "capture OFF: the host's boot still installs the replay spec, and old replays are pruned",
+         ctx do
+      Application.delete_env(:samen_core, :retention_specs)
+      children = Samen.Observability.child_specs(:samen_core, replay: false)
+      refute Enum.any?(children, &match?({Replay.Supervisor, _}, &1))
+
+      installers =
+        for %{id: {Samen.Observability, :replay_retention, :samen_core}} = c <- children, do: c
+
+      assert [_] = installers
+      Enum.each(installers, &({:ok, _} = start_supervised(&1)))
+      refute Replay.running?()
+
+      old = stored_session!(ctx.org)
+      fresh = stored_session!(ctx.org)
+
+      for {table, col} <- [{"replay_session", "rps"}, {"replay_frame", "rpf"}] do
+        id_col = if col == "rps", do: "rps_id", else: "rpf_session_id"
+
+        @repo.query!(
+          "UPDATE #{table} SET #{col}_inserted_at = now() - interval '15 days' WHERE #{id_col}::text = $1",
+          [old]
+        )
+      end
+
+      specs = Application.get_env(:samen_core, :retention_specs, [])
+
+      assert Enum.any?(
+               specs,
+               &(Samen.Retention.Spec.normalize(&1).resource == Samen.Replay.Frame)
+             )
+
+      Samen.Retention.sweep(specs)
+
+      assert %{rows: [[^fresh]]} = @repo.query!("SELECT rps_id::text FROM replay_session")
+      assert %{rows: [[1]]} = @repo.query!("SELECT count(*) FROM replay_frame")
+    end
+
+    test "no replay tables mounted (no :samen_replay_repo) → no retention child" do
+      prev = Application.get_env(:samen_core, :samen_replay_repo)
+      Application.delete_env(:samen_core, :samen_replay_repo)
+      on_exit(fn -> Application.put_env(:samen_core, :samen_replay_repo, prev) end)
+
+      refute Enum.any?(
+               Samen.Observability.child_specs(:samen_core, replay: false),
+               &match?(%{id: {Samen.Observability, :replay_retention, _}}, &1)
+             )
+    end
+
     test "the spec defaults to 14 days and refuses a host entry above the max" do
       assert [%{ttl_seconds: ttl} | _] = Replay.retention_specs()
       assert ttl == 14 * 86_400
@@ -358,6 +437,99 @@ defmodule Samen.Replay.CaptureTest do
       ])
 
       assert_raise ArgumentError, ~r/bounded/, fn -> Replay.install_retention_specs() end
+    end
+  end
+
+  # ADR-052 §2.4.1 (P3 gate note 2): the persist tasks ran under an UNBOUNDED task supervisor,
+  # a failed persist was only a log line, and `async_nolink` at a bound would have crashed the
+  # monitor (taking every in-flight session's buffer with it).
+  describe "persist tasks: bounded, every outcome counted" do
+    defp attach_outcomes do
+      test_pid = self()
+      id = "replay-outcomes-#{System.unique_integer([:positive])}"
+
+      :ok =
+        :telemetry.attach(
+          id,
+          [:samen, :replay, :session],
+          fn _e, %{count: 1}, %{result: r}, _ -> send(test_pid, {:replay_session, r}) end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+    end
+
+    test "a failed persist is COUNTED (stats + a bounded telemetry event), not only logged",
+         ctx do
+      start_capture!([ctx.org])
+      attach_outcomes()
+
+      # Positive control: an ordinary session persists and counts as such.
+      run_lv(ctx.org, fn -> lv_event("save", %{}) end)
+      assert_receive {:replay_session, :persisted}
+
+      # A session the store refuses (its `view` is not a module name: RowGuard) fails.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          {pid, ref} =
+            spawn_monitor(fn ->
+              {:ok, _} = Capture.open(%{org_id: ctx.org, view: :"not a module", principal: nil})
+              _ = :sys.get_state(Monitor)
+              lv_event("save", %{})
+            end)
+
+          assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+          :ok = Monitor.flush()
+        end)
+
+      assert log =~ "persist failed"
+
+      assert_receive {:replay_session, :failed}
+      assert %{persisted: 1, failed: 1, dropped: 0} = Monitor.stats()
+      assert %{rows: [[1]]} = @repo.query!("SELECT count(*) FROM replay_session")
+    end
+
+    test "over max_persist_tasks the session is DROPPED and counted — the monitor never waits",
+         ctx do
+      start_capture!([ctx.org], max_persist_tasks: 1)
+      attach_outcomes()
+
+      # Occupy the ONE persist slot.
+      {:ok, blocker} =
+        Task.Supervisor.start_child(Samen.Replay.TaskSupervisor, fn ->
+          receive do
+            :go -> :ok
+          end
+        end)
+
+      monitor = Process.whereis(Monitor)
+      t0 = System.monotonic_time(:millisecond)
+      {:ok, id} = run_lv(ctx.org, fn -> lv_event("save", %{}) end)
+      assert System.monotonic_time(:millisecond) - t0 < 2_000
+
+      assert_receive {:replay_session, :dropped}
+      assert %{dropped: 1, persisted: 0} = Monitor.stats()
+      # The monitor survived the bound (it owns every in-flight session's buffer) …
+      assert Process.whereis(Monitor) == monitor
+      # … the dropped session's buffer row is freed, and nothing was stored.
+      assert Samen.Replay.Buffer.take(id) == :error
+      assert :ets.lookup(Samen.Replay.Buffer.table(), :sessions) == [{:sessions, 0}]
+      assert %{rows: [[0]]} = @repo.query!("SELECT count(*) FROM replay_session")
+
+      # Positive control: with the slot free again, the next session persists.
+      send(blocker, :go)
+      Process.sleep(20)
+      run_lv(ctx.org, fn -> lv_event("save", %{}) end)
+      assert_receive {:replay_session, :persisted}
+      assert %{rows: [[1]]} = @repo.query!("SELECT count(*) FROM replay_session")
+    end
+
+    test "max_persist_tasks is a bounded, validated option" do
+      assert Replay.config!([]).max_persist_tasks == 16
+
+      assert_raise ArgumentError, ~r/max_persist_tasks/, fn ->
+        Replay.config!(max_persist_tasks: 0)
+      end
     end
   end
 

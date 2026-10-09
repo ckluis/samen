@@ -7,8 +7,8 @@ defmodule Samen.Replay.RowGuard do
 
     * a **frame** must validate against `Samen.Replay.FrameSchema` (`validate/1`): no bare string
       anywhere in its tree, every field of its declared bounded type;
-    * a **session**'s three strings must be what the kernel writes: `view` a code identifier
-      (`FrameSchema.opaque_id?/1`), `view_md5` 32 lowercase hex characters, `actor_ref` the
+    * a **session**'s three strings must be what the kernel writes: `view` a module name
+      (`FrameSchema.module_name?/1`), `view_md5` 32 lowercase hex characters, `actor_ref` the
       P1 HMAC pseudonym (64 lowercase hex characters) — never a principal id, a name or an email.
 
   The error names the field, never the offending value (an error can be logged).
@@ -50,8 +50,8 @@ defmodule Samen.Replay.RowGuard do
     actor = Ash.Changeset.get_attribute(changeset, :actor_ref)
 
     cond do
-      not (is_binary(view) and Samen.Replay.FrameSchema.opaque_id?(view)) ->
-        refuse(:view, "must be a code identifier")
+      not Samen.Replay.FrameSchema.module_name?(view) ->
+        refuse(:view, "must be a module name")
 
       not (is_nil(md5) or (is_binary(md5) and Regex.match?(@hex32, md5))) ->
         refuse(:view_md5, "must be a hex MD5")

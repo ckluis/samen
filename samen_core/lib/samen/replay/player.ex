@@ -76,11 +76,14 @@ defmodule Samen.Replay.Player do
            |> Ash.read(scope: scope),
          {:ok, frames} <-
            Frame
+           |> Ash.Query.select([:id, :session_id, :org_id, :seq, :at_ms])
+           |> Ash.Query.load([:stored_kind, :stored_payload])
            |> Ash.Query.filter(session_id == ^session.id)
            |> Ash.Query.sort(seq: :asc)
            |> Ash.Query.limit(@frame_limit)
            |> Ash.read(scope: scope) do
-      {:ok, %{session: meta(session), frames: Enum.map(frames, &Decoder.frame/1)}}
+      _ = load_view(session.view)
+      {:ok, %{session: meta(session), frames: Enum.map(frames, &decode/1)}}
     else
       _ -> {:error, :not_found}
     end
@@ -89,6 +92,88 @@ defmodule Samen.Replay.Player do
   end
 
   def load(_scope, _id), do: {:error, :not_found}
+
+  # A stored row arrives as TEXT (`Frame`'s `stored_kind` / `stored_payload`), so a row written
+  # past `RowGuard` with a kind outside the closed set, or a payload that is not an object,
+  # still loads — and `Decoder.frame/1` turns it into ONE `:invalid` frame. The typed read
+  # failed the whole session on such a row (`{:error, :not_found}`, ADR-052 §2.4.1).
+  defp decode(%Frame{} = row) do
+    payload =
+      case is_binary(row.stored_payload) and Jason.decode(row.stored_payload) do
+        {:ok, %{} = map} -> map
+        _ -> :invalid
+      end
+
+    _ = preload_records(payload)
+    Decoder.frame(%{seq: row.seq, at_ms: row.at_ms, kind: row.stored_kind, payload: payload})
+  end
+
+  @doc """
+  Load the recorded view module BEFORE its frames are decoded (ADR-052 §2.4.1): an assign key
+  or `live_action` atom that only the view's own code defines does not exist until the module
+  is loaded (interactive/dev code loading), and the decoder never creates an atom — so the
+  key would be dropped. Loads ONLY an allowed module:
+
+    * its name is an `inspect/1`-shaped module name that is ALREADY an existing atom (never a
+      new atom);
+    * it is on the code path as a `.beam` file (not preloaded, not cover-compiled);
+    * that file — read with `:beam_lib`, BEFORE anything is loaded — exports `render/1` or
+      `__live__/0` (a view; for `allowed: :record`, `spark_dsl_config/0`: an Ash resource).
+
+  Returns the module or `nil`.
+  """
+  @spec load_view(term(), :view | :record) :: module() | nil
+  def load_view(name, kind \\ :view)
+
+  def load_view(name, kind) when is_binary(name) do
+    with true <- Samen.Replay.FrameSchema.module_name?(name),
+         mod when is_atom(mod) and not is_nil(mod) <- Decoder.existing_atom("Elixir." <> name) do
+      if :code.is_loaded(mod) != false or allowed_beam?(mod, kind),
+        do: loaded(Code.ensure_loaded(mod), mod)
+    else
+      _ -> nil
+    end
+  end
+
+  def load_view(_name, _kind), do: nil
+
+  defp loaded({:module, mod}, mod), do: mod
+  defp loaded(_, _mod), do: nil
+
+  @allowed_exports %{
+    view: [{:render, 1}, {:__live__, 0}],
+    record: [{:spark_dsl_config, 0}]
+  }
+
+  defp allowed_beam?(mod, kind) do
+    with path when is_list(path) <- :code.which(mod),
+         {:ok, {^mod, [exports: exports]}} <- :beam_lib.chunks(path, [:exports]) do
+      Enum.any?(@allowed_exports[kind], &(&1 in exports))
+    else
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  # The same for the resources a frame's `$record`s name (their attribute names are the
+  # record's field keys), bounded to the first few names per frame.
+  defp preload_records(%{} = payload) do
+    payload
+    |> record_names([])
+    |> Enum.uniq()
+    |> Enum.take(20)
+    |> Enum.each(&load_view(&1, :record))
+  end
+
+  defp preload_records(_), do: :ok
+
+  defp record_names(%{"$record" => %{"resource" => name} = body}, acc) when is_binary(name),
+    do: record_names(Map.get(body, "fields"), [name | acc])
+
+  defp record_names(%{} = map, acc), do: map |> Map.values() |> Enum.reduce(acc, &record_names/2)
+  defp record_names(list, acc) when is_list(list), do: Enum.reduce(list, acc, &record_names/2)
+  defp record_names(_other, acc), do: acc
 
   @doc """
   The assigns frame `index` (0-based into `frames`) showed: the mount frame's assigns with

@@ -62,6 +62,7 @@ defmodule Samen.Replay do
     max_frames: 500,
     max_bytes: 512 * 1024,
     max_sessions: 1_000,
+    max_persist_tasks: 16,
     retention_days: @default_retention_days,
     flag_opts: []
   ]
@@ -72,6 +73,7 @@ defmodule Samen.Replay do
           max_frames: pos_integer(),
           max_bytes: pos_integer(),
           max_sessions: pos_integer(),
+          max_persist_tasks: pos_integer(),
           retention_days: pos_integer(),
           flag_opts: keyword()
         }
@@ -250,7 +252,7 @@ defmodule Samen.Replay do
       raise ArgumentError, "Samen.Replay: sample_rate #{inspect(rate)} must be in 0.0..1.0"
     end
 
-    for key <- [:max_frames, :max_bytes, :max_sessions] do
+    for key <- [:max_frames, :max_bytes, :max_sessions, :max_persist_tasks] do
       unless is_integer(cfg[key]) and cfg[key] > 0 do
         raise ArgumentError,
               "Samen.Replay: #{key} must be a positive integer, got #{inspect(cfg[key])}"
@@ -262,6 +264,7 @@ defmodule Samen.Replay do
       max_frames: cfg[:max_frames],
       max_bytes: cfg[:max_bytes],
       max_sessions: cfg[:max_sessions],
+      max_persist_tasks: cfg[:max_persist_tasks],
       retention_days: days,
       flag_opts: List.wrap(cfg[:flag_opts])
     }

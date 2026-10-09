@@ -97,6 +97,116 @@ defmodule Samen.Replay.FrameSchemaTest do
       assert {:error, _} = FrameSchema.validate(frame(:render, %{assigns: %{e: bad_ref}}))
     end
 
+    # ADR-052 §2.4.1 (P3 gate note 3): the validator accepted ANY code-identifier string for
+    # `$id`, `$ref.pk` and a shape key, while the sanitizer only ever writes a lowercase UUID /
+    # an integer / a server-known key there. A label-shaped name a row chose passed.
+    test "RED: identifier fields accept exactly what the sanitizer emits, never a chosen name" do
+      name = "Selectsecret#{System.unique_integer([:positive])}"
+      uuid = Ash.UUID.generate()
+
+      refused = [
+        render: %{assigns: %{"a" => %{"$id" => %{"value" => "Jane.Doe"}}}},
+        render: %{assigns: %{"a" => %{"$id" => %{"value" => String.upcase(uuid)}}}},
+        render: %{
+          assigns: %{
+            "a" => %{"$ref" => %{"resource" => "My.Person", "pk" => name, "attribute" => "email"}}
+          }
+        },
+        render: %{
+          assigns: %{
+            "a" => %{"$record" => %{"resource" => "My.Person", "pk" => name, "fields" => %{}}}
+          }
+        },
+        render: %{
+          assigns: %{
+            "a" => %{"$ref" => %{"resource" => "jane.doe", "pk" => uuid, "attribute" => "email"}}
+          }
+        },
+        render: %{
+          assigns: %{
+            "a" => %{
+              "$ref" => %{"resource" => "My.Person", "pk" => uuid, "attribute" => "Jane.Doe"}
+            }
+          }
+        },
+        render: %{
+          assigns: %{"a" => %{"$dropped" => %{"kind" => "struct", "struct" => "jane-doe"}}}
+        },
+        event: %{event: "sort", params: [%{"key" => name, "type" => "string"}]},
+        mount: %{view: "jane_doe", assigns: %{}},
+        mount: %{view: "My.View", view_md5: "Jane", assigns: %{}}
+      ]
+
+      for {kind, payload} <- refused do
+        encoded = %{
+          seq: 1,
+          at_ms: 1,
+          kind: kind,
+          payload: Map.new(payload, fn {k, v} -> {Atom.to_string(k), v} end)
+        }
+
+        assert {:error, _} = FrameSchema.validate(encoded), "accepted #{inspect(payload)}"
+      end
+
+      # Positive control: the same slots holding what the sanitizer writes validate.
+      ok = [
+        render: %{assigns: %{"a" => %{"$id" => %{"value" => uuid}}}},
+        render: %{
+          assigns: %{
+            "a" => %{
+              "$ref" => %{
+                "resource" => "My.Person",
+                "pk" => uuid,
+                "attribute" => "email",
+                "label" => "email"
+              }
+            }
+          }
+        },
+        render: %{
+          assigns: %{
+            "a" => %{"$record" => %{"resource" => "My.Person", "pk" => 42, "fields" => %{}}}
+          }
+        },
+        event: %{
+          event: "sort",
+          params: [%{"key" => "field", "type" => "string"}, %{"key" => "$k0"}]
+        },
+        mount: %{view: "My.View", view_md5: String.duplicate("ab", 16), assigns: %{}}
+      ]
+
+      for {kind, payload} <- ok do
+        encoded = %{
+          seq: 1,
+          at_ms: 1,
+          kind: kind,
+          payload: Map.new(payload, fn {k, v} -> {Atom.to_string(k), v} end)
+        }
+
+        assert :ok = FrameSchema.validate(encoded), "refused #{inspect(payload)}"
+      end
+    end
+
+    test "RED: a tree key is a server-known identifier, never a name a row chose" do
+      name = "Janesecret#{System.unique_integer([:positive])}"
+
+      tree = fn key ->
+        %{
+          seq: 1,
+          at_ms: 1,
+          kind: :render,
+          payload: %{"assigns" => %{"m" => %{key => 1, "page_title" => 2}}}
+        }
+      end
+
+      assert {:error, _} = FrameSchema.validate(tree.(name))
+      refute FrameSchema.tree_key?(name)
+
+      for key <- ["count", Ash.UUID.generate(), "12", "$k3", "$more"] do
+        assert :ok = FrameSchema.validate(tree.(key)), "refused #{key}"
+      end
+    end
+
     test "RED: an undeclared payload field, kind, or enum value is refused" do
       assert {:error, _} = FrameSchema.validate(frame(:render, %{assigns: %{}, extra: 1}))
       assert {:error, _} = FrameSchema.validate(frame(:exit, %{reason: :exploded}))

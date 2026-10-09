@@ -135,7 +135,7 @@ defmodule Samen.Replay.Capture do
 
   defp component_name(mod) do
     name = inspect(mod)
-    if Samen.Replay.FrameSchema.opaque_id?(name), do: name
+    if Samen.Replay.FrameSchema.module_name?(name), do: name
   end
 
   # The keep declaration, memoized per process (a view module never changes in a process).

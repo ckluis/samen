@@ -13,8 +13,17 @@ defmodule Samen.Replay.FrameSchema do
 
   ## Bounded field types
 
-    * `:opaque_id`   — a code identifier or id: a module name, an MD5, a UUID, a route
-      template, an attribute name. `[A-Za-z0-9_./:-]{1,200}`, never email/SSN/phone-shaped.
+    * `:opaque_id`   — a code identifier (a route template). `[A-Za-z0-9_./:*-]{1,200}`, never
+      email/SSN/phone-shaped.
+    * `:module_name` — an Elixir module name as `inspect/1` prints it (`Samen.Web.Page`).
+    * `:md5`         — 32 lowercase hex characters.
+    * `:uuid`        — a lowercase UUID (the sanitizer downcases every id it keeps).
+    * `:pk`          — a primary key: a lowercase UUID or an integer.
+    * `:field_name`  — an attribute name (`[a-z_][A-Za-z0-9_]*[?!]?`, ≤ 64).
+    * `:label`       — a short label-shaped, non-PII string (`Samen.Replay.Sanitizer.label?/1`).
+    * `:param_key`   — a params key: a positional `$kN`, or a label-shaped string that names
+      something the server already knows (an existing atom, a UUID, a list index of ≤ 3
+      digits) — exactly `Samen.Replay.Sanitizer.known_key?/1`.
     * `:enum`        — a value from a declared closed set (`allowed:`), or — only for
       `open_enum_fields/0` — a label resolved from developer code (an event literal, an
       atom), validated label-shaped at persist.
@@ -31,7 +40,23 @@ defmodule Samen.Replay.FrameSchema do
 
   alias Samen.Replay.{Count, Dropped, Id, Kept, More, Record, Redacted, Ref, Shape}
 
-  @bounded_types [:opaque_id, :enum, :number, :boolean, :timestamp, :tree, :shape, :keep_listed]
+  @bounded_types [
+    :opaque_id,
+    :module_name,
+    :md5,
+    :uuid,
+    :pk,
+    :field_name,
+    :label,
+    :param_key,
+    :enum,
+    :number,
+    :boolean,
+    :timestamp,
+    :tree,
+    :shape,
+    :keep_listed
+  ]
   @known_forbidden [:string, :binary, :text, :map, :any, :term, :list, :atom]
   @max_keep_listed 200
 
@@ -42,6 +67,11 @@ defmodule Samen.Replay.FrameSchema do
   @param_classes [:email, :ssn, :phone, :name, :uuid, :number, :none]
   @dt_types [:date, :time, :datetime, :naive]
 
+  @module_name ~r/\A[A-Z][A-Za-z0-9_]*(\.[A-Z][A-Za-z0-9_]*)*\z/
+  @md5 ~r/\A[0-9a-f]{32}\z/
+  @lower_uuid ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
+  @field_name ~r/\A[a-z_][A-Za-z0-9_]{0,62}[?!]?\z/
+
   @envelope [
     {:seq, :number, []},
     {:at_ms, :number, []},
@@ -50,15 +80,15 @@ defmodule Samen.Replay.FrameSchema do
 
   @payloads %{
     mount: [
-      {:view, :opaque_id, []},
-      {:view_md5, :opaque_id, []},
+      {:view, :module_name, []},
+      {:view_md5, :md5, []},
       {:live_action, :enum, [allowed: :open]},
       {:assigns, :tree, []}
     ],
     params: [{:route, :opaque_id, []}, {:params, :shape, []}],
     event: [{:event, :enum, [allowed: :open]}, {:params, :shape, []}],
     component_event: [
-      {:component, :opaque_id, []},
+      {:component, :module_name, []},
       {:event, :enum, [allowed: :open]},
       {:params, :shape, []}
     ],
@@ -70,23 +100,23 @@ defmodule Samen.Replay.FrameSchema do
 
   @markers %{
     "$ref" => [
-      {:resource, :opaque_id, []},
-      {:pk, :opaque_id, []},
-      {:attribute, :opaque_id, []},
-      {:label, :opaque_id, []}
+      {:resource, :module_name, []},
+      {:pk, :pk, []},
+      {:attribute, :field_name, []},
+      {:label, :field_name, []}
     ],
     "$redacted" => [
       {:kind, :enum, [allowed: Redacted.kinds()]},
       {:length, :number, []},
-      {:label, :opaque_id, []}
+      {:label, :label, []}
     ],
-    "$dropped" => [{:kind, :enum, [allowed: Dropped.kinds()]}, {:struct, :opaque_id, []}],
+    "$dropped" => [{:kind, :enum, [allowed: Dropped.kinds()]}, {:struct, :module_name, []}],
     "$kept" => [{:value, :keep_listed, [max_length: @max_keep_listed]}],
-    "$id" => [{:value, :opaque_id, []}],
+    "$id" => [{:value, :uuid, []}],
     "$atom" => [{:value, :enum, [allowed: :open]}],
     "$dt" => [{:type, :enum, [allowed: @dt_types]}, {:value, :timestamp, []}],
     "$dec" => [{:value, :number, []}],
-    "$record" => [{:resource, :opaque_id, []}, {:pk, :opaque_id, []}, {:fields, :tree, []}],
+    "$record" => [{:resource, :module_name, []}, {:pk, :pk, []}, {:fields, :tree, []}],
     "$count" => [
       {:kind, :enum, [allowed: [:stream, :upload, :streams, :uploads]]},
       {:n, :number, []}
@@ -97,7 +127,7 @@ defmodule Samen.Replay.FrameSchema do
   }
 
   @shape_field [
-    {:key, :opaque_id, []},
+    {:key, :param_key, []},
     {:type, :enum, [allowed: @param_types]},
     {:length, :number, []},
     {:class, :enum, [allowed: @param_classes]},
@@ -403,6 +433,16 @@ defmodule Samen.Replay.FrameSchema do
     if opaque_id?(v), do: :ok, else: {:error, path}
   end
 
+  # The identifier types are EXACTLY what the sanitizer/capture can emit (ADR-052 §2.4.1):
+  # anything looser lets a row carry a label-shaped name the recorder never writes.
+  defp check(:module_name, v, _opts, path), do: ok_if(module_name?(v), path)
+  defp check(:md5, v, _opts, path), do: ok_if(is_binary(v) and Regex.match?(@md5, v), path)
+  defp check(:uuid, v, _opts, path), do: ok_if(lower_uuid?(v), path)
+  defp check(:pk, v, _opts, path), do: ok_if(is_integer(v) or lower_uuid?(v), path)
+  defp check(:field_name, v, _opts, path), do: ok_if(field_name?(v), path)
+  defp check(:label, v, _opts, path), do: ok_if(Samen.Replay.Sanitizer.label?(v), path)
+  defp check(:param_key, v, _opts, path), do: ok_if(param_key?(v), path)
+
   defp check(:enum, v, opts, path) do
     s = if is_atom(v) and not is_boolean(v), do: Atom.to_string(v), else: v
 
@@ -495,18 +535,58 @@ defmodule Samen.Replay.FrameSchema do
     end)
   end
 
-  defp tree_key?(k) when is_binary(k) do
-    Samen.Replay.Sanitizer.label?(k) or k == "$more" or Regex.match?(~r/\A\$k\d{1,6}\z/, k)
+  defp ok_if(true, _path), do: :ok
+  defp ok_if(_false, path), do: {:error, path}
+
+  @doc """
+  A plain tree map key, exactly as the sanitizer writes one (`map_key/2`): the `$more` tail
+  marker, a positional `$kN`, or a label-shaped, non-PII string that is a UUID, an integer (an
+  integer key encodes as its digits) or an EXISTING atom (an atom key, or a string key naming
+  one). A label-shaped string the server never knew — a name a row or a client chose — is
+  refused, so a hostile row cannot carry it as a key.
+  """
+  @spec tree_key?(term()) :: boolean()
+  def tree_key?(k) when is_binary(k) do
+    k == "$more" or positional?(k) or
+      (Samen.Replay.Sanitizer.label?(k) and
+         (Samen.Replay.Sanitizer.uuid?(k) or Regex.match?(~r/\A-?\d+\z/, k) or
+            existing_atom?(k)))
   end
 
-  defp tree_key?(_), do: false
+  def tree_key?(_), do: false
+
+  @doc "A params key exactly as the sanitizer writes one: `$kN` or `Sanitizer.known_key?/1`."
+  @spec param_key?(term()) :: boolean()
+  def param_key?(k) when is_binary(k), do: positional?(k) or Samen.Replay.Sanitizer.known_key?(k)
+  def param_key?(_), do: false
+
+  @doc "An Elixir module name as `inspect/1` prints one (`Samen.Web.CRM.ContactsLive`)."
+  @spec module_name?(term()) :: boolean()
+  def module_name?(v) when is_binary(v),
+    do: byte_size(v) <= 200 and Regex.match?(@module_name, v)
+
+  def module_name?(_), do: false
+
+  @doc "An Ash attribute name as `Atom.to_string/1` prints one (`full_name`, `active?`)."
+  @spec field_name?(term()) :: boolean()
+  def field_name?(v) when is_binary(v), do: Regex.match?(@field_name, v)
+  def field_name?(_), do: false
+
+  defp lower_uuid?(v), do: is_binary(v) and Regex.match?(@lower_uuid, v)
+  defp positional?(k), do: Regex.match?(~r/\A\$k\d{1,6}\z/, k)
+
+  defp existing_atom?(k) do
+    _ = String.to_existing_atom(k)
+    true
+  rescue
+    ArgumentError -> false
+  end
 
   @doc false
   @spec opaque_id?(String.t()) :: boolean()
   def opaque_id?(v) when is_binary(v) do
-    Regex.match?(~r/\A\$k\d{1,6}\z/, v) or
-      (byte_size(v) <= 200 and Regex.match?(~r/\A[A-Za-z0-9_.\/:*\-]{1,200}\z/, v) and
-         not elem(Samen.PiiValueShape.classify_value(v), 0))
+    byte_size(v) <= 200 and Regex.match?(~r/\A[A-Za-z0-9_.\/:*\-]{1,200}\z/, v) and
+      not elem(Samen.PiiValueShape.classify_value(v), 0)
   end
 
   def opaque_id?(_), do: false

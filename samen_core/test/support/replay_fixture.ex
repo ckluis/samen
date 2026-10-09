@@ -36,7 +36,7 @@ defmodule SamenCore.Support.ReplayFixtureDomain.Gadget do
   @moduledoc """
   ADR-052 P2 fixture: a table-less resource whose attributes exercise every non-vault branch of
   the sanitizer's record decision — a structural integer (kept), a `sensitive?` structural
-  integer (never kept), a freeform string (shape only), an enum atom (kept).
+  integer (never kept), a freeform string (shape only), an enum atom (kept), a date.
   """
   use Ash.Resource,
     domain: SamenCore.Support.ReplayFixtureDomain,
@@ -48,5 +48,7 @@ defmodule SamenCore.Support.ReplayFixtureDomain.Gadget do
     attribute(:secret_count, :integer, public?: true, sensitive?: true)
     attribute(:note, :string, public?: true)
     attribute(:status, :atom, public?: true)
+    # A plain date (a ship date here — but a date column can as well be a date of birth).
+    attribute(:shipped_on, :date, public?: true)
   end
 end
