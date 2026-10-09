@@ -15,7 +15,8 @@ defmodule Samen.Replay.Sanitizer do
   | Captured term | Recorded as |
   |---|---|
   | Ash record, vault-routed attribute (declared in `pii do … end`) | `%Ref{resource, pk, attribute, label}` — the value (tenant-plane CLEAR, `%Samen.Pii.Plaintext{}`, `%Samen.Masked{}`) is never read |
-  | Ash record, attribute `Samen.Cdc.Projection.classify_columns/2` would project as a value (`:bounded_id`/`:enum`/`:timestamp`/`:number`/`:boolean`, or a two-reviewer `non_pii!`-cleared `:metadata` column) | the value, sanitized (a cleared string → `Kept` if bounded, else `Redacted{:string}`) |
+  | Ash record, attribute `Samen.Cdc.Projection.classify_columns/2` would project as a structural value (`:bounded_id`/`:enum`/`:timestamp`/`:number`/`:boolean`) | the value, sanitized (a string is never kept: a UUID → `Id`, anything else `Redacted`) |
+  | Ash record, a cleared `:metadata` column (a `non_pii!`/type-cleared freeform value) | `%Ref{}` — by reference, like a vault field: erasure overwrites the row, so a stored copy would outlive it (ADR-052 §2.2.1 gate fix) |
   | Ash record, any other attribute (`:plaintext_pii` freeform, an unknown kind, `sensitive?`) | `%Redacted{kind: :free_text, length: n}` |
   | Ash record, loaded relationship | the related record(s), same rules; calculations + aggregates are not captured |
   | bare `%Samen.Masked{}` (outside a record) | `%Redacted{kind: :masked, label: label}` — the `vt_*` token is NOT kept (ADR §2.2.1) |
@@ -26,15 +27,17 @@ defmodule Samen.Replay.Sanitizer do
   | number, boolean, `nil`, `Date`/`Time`/`DateTime`/`NaiveDateTime`, `Decimal` | kept |
   | atom | kept if label-shaped and not PII-shaped, else `%Redacted{kind: :atom}` |
   | map / list / tuple | recursed; depth cap #{8}, #{50} items per level (`%More{n}` marks the cut), #{5000} nodes per capture |
-  | map key | an atom/integer, a label-shaped non-PII string, else a positional `"$kN"` |
+  | map key / param key | an atom/integer, or a label-shaped non-PII string that is ALSO a server-known identifier (an existing atom, a UUID or a list index ≤ 3 digits) — else a positional `"$kN"` (a client or a row can never write its own string as a key) |
   | `%Samen.Scope{}`, an actor map (`:plane` + an id), the framework actor/principal assigns | `%Dropped{kind: :scope \\| :actor}` |
   | socket, PID, port, reference, function | `%Dropped{}` of that kind |
   | `Phoenix.LiveView` stream / upload | `%Count{}` only (ADR-052 §7) |
   | a struct on the walk-list (`Samen.Web.Page`, `Phoenix.LiveView.AsyncResult`, host-extensible) | `%Record{}` of its fields, each sanitized |
   | any other struct (forms, changesets, `GeoSet` markers, …) | `%Dropped{kind: :struct, struct: "Module"}` — provenance unknown ⇒ dropped, never guessed |
 
-  Event params are recorded by `params/3` as `%Shape{}` (key, type, length, PII-shape class);
-  a value is kept only for a key on the event's declared keep-list (ADR-052 D3).
+  Event params are recorded by `params/2` as `%Shape{}` (key, type, length, PII-shape class);
+  a value is kept only for a key on the event's declared keep-list (ADR-052 D3), and then only
+  when it is an integer, a boolean, a UUID, or a member of the closed set the declaration names
+  (`{"dir", ["next", "prev"]}`) — never a string the client chose.
 
   ## Never crashes its caller
 
@@ -48,7 +51,6 @@ defmodule Samen.Replay.Sanitizer do
   @max_items 50
   @node_budget 5_000
   @max_kept 120
-  @max_cleared 200
   @max_param_keys 32
   @max_param_depth 5
 
@@ -65,10 +67,10 @@ defmodule Samen.Replay.Sanitizer do
   ]
   @scope_keys [:scope, :current_scope, :samen_scope, :write_scope]
 
-  # The projection kinds `Samen.Cdc.Projection.classify_columns/2` mirrors as a value — a
-  # structural-safe scalar, or a two-reviewer `non_pii!`-cleared column (`:metadata`). Any
-  # other kind (`:plaintext_pii`, `:token`, an unknown future kind) is never kept.
-  @projected_kinds [:bounded_id, :enum, :timestamp, :number, :boolean, :metadata]
+  # The STRUCTURAL projection kinds `Samen.Cdc.Projection.classify_columns/2` mirrors as a
+  # value. A cleared `:metadata` column is recorded by reference (see `decision/3`); any other
+  # kind (`:plaintext_pii`, `:token`, an unknown future kind) is never kept.
+  @projected_kinds [:bounded_id, :enum, :timestamp, :number, :boolean]
 
   @default_walk_structs [Samen.Web.Page, Phoenix.LiveView.AsyncResult]
 
@@ -121,11 +123,14 @@ defmodule Samen.Replay.Sanitizer do
     finish()
   end
 
-  # Per-capture state: the node budget, and the classifier options (`:non_pii_entries` — the
-  # `Samen.Cdc.Projection.classify_columns/2` injection seam, for tests).
+  # Per-capture state: the node budget, and the classifier options. `:non_pii_entries` is the
+  # `Samen.Cdc.Projection.classify_columns/2` injection seam; it defaults to `[]`, so the
+  # sanitizer never queries the DB-backed `non_pii!` registry from the LiveView process (a
+  # render must not wait on Postgres). Without a clearance every freeform column is shape only
+  # — stricter than the CDC mirror, never looser (ADR-052 §2.2.1 gate fix).
   defp begin(opts) do
     Process.put(@budget_key, @node_budget)
-    Process.put(@classify_key, Keyword.take(opts, [:non_pii_entries]))
+    Process.put(@classify_key, non_pii_entries: Keyword.get(opts, :non_pii_entries, []))
   end
 
   defp finish do
@@ -135,11 +140,13 @@ defmodule Samen.Replay.Sanitizer do
 
   @doc """
   Record `params` as SHAPE (ADR-052 D3): per key its type, length and `Samen.PiiValueShape`
-  class. A top-level key in `keep` keeps its value when that value is a bounded label, an
-  integer or a boolean; nothing else ever keeps a value. Keys themselves are kept only when
-  label-shaped and not PII-shaped (a client can send any key), else positional (`"$kN"`).
+  class. `keep` is the event's declared keep-list: each entry is a param name (`"id"` — keeps
+  an integer, a boolean or a UUID) or `{name, allowed}` (`{"dir", ["next", "prev"]}` — also
+  keeps a string in that closed set). Nothing else ever keeps a value: a client-chosen string
+  never reaches a frame. Keys are kept only when they name a server-known identifier (see
+  the decision table), else positional (`"$kN"`) — a client can send any key.
   """
-  @spec params(term(), [String.t()]) :: Shape.t()
+  @spec params(term(), [String.t() | {String.t(), [String.t()]}]) :: Shape.t()
   def params(params, keep \\ [])
 
   def params(params, keep) when is_map(params) and not is_struct(params) do
@@ -315,7 +322,7 @@ defmodule Samen.Replay.Sanitizer do
   end
 
   defp map_key(key, i) when is_binary(key) do
-    if label?(key), do: {key, i}, else: {"$k#{i}", i + 1}
+    if known_key?(key), do: {key, i}, else: {"$k#{i}", i + 1}
   end
 
   defp map_key(_key, i), do: {"$k#{i}", i + 1}
@@ -422,11 +429,9 @@ defmodule Samen.Replay.Sanitizer do
   defp attribute(:ref, name, _value, plan, pk, _depth, _walk),
     do: %Ref{resource: plan.name, pk: pk, attribute: name, label: name}
 
-  defp attribute(:keep, _name, value, _plan, _pk, depth, walk) when is_binary(value) do
-    if uuid?(value), do: %Id{value: String.downcase(value)}, else: kept(value, @max_cleared)
-  rescue
-    _ -> walk(value, depth + 1, walk)
-  end
+  # A structural column holding a string is an id (UUID) or nothing: no record string is kept.
+  defp attribute(:keep, _name, value, _plan, _pk, _depth, _walk) when is_binary(value),
+    do: string(value)
 
   defp attribute(:keep, _name, value, _plan, _pk, depth, walk), do: walk(value, depth + 1, walk)
   defp attribute(:free, _name, value, _plan, _pk, _depth, _walk), do: free_text(value)
@@ -479,11 +484,14 @@ defmodule Samen.Replay.Sanitizer do
     }
   end
 
-  # The ADR-015 decision, reused verbatim: vault-routed (declared in `pii do … end` — every
-  # column the classifier calls `:token` is one of these) → by reference; a `sensitive?`
-  # attribute → never kept; otherwise kept only when the CDC classifier would project it.
+  # The ADR-015 decision: vault-routed (declared in `pii do … end` — every column the
+  # classifier calls `:token` is one of these) → by reference; a `sensitive?` attribute →
+  # never kept; a cleared `:metadata` column → by reference (its value is freeform text that
+  # the erasure arm overwrites on shred — a stored copy would outlive the erasure); a
+  # structural kind → kept; anything else → shape only.
   defp decision(_attr, true, _class), do: :ref
   defp decision(%{sensitive?: true}, false, _class), do: :free
+  defp decision(_attr, false, :metadata), do: :ref
   defp decision(_attr, false, class) when class in @projected_kinds, do: :keep
   defp decision(_attr, false, _class), do: :free
 
@@ -537,6 +545,26 @@ defmodule Samen.Replay.Sanitizer do
   def label?(_), do: false
 
   @doc false
+  # A string key survives only when it names something the SERVER already knows: an existing
+  # atom (a code identifier — a form field, an attribute), a UUID, or a short list index. A
+  # client (a URL query key, a form name built from data) or a row (a name used as a map key)
+  # cannot introduce its own string. Label-shaped and non-PII-shaped first, as before.
+  @spec known_key?(term()) :: boolean()
+  def known_key?(key) when is_binary(key),
+    do: label?(key) and (uuid?(key) or index?(key) or existing_atom?(key))
+
+  def known_key?(_), do: false
+
+  defp index?(key), do: byte_size(key) <= 3 and Regex.match?(~r/\A\d+\z/, key)
+
+  defp existing_atom?(key) do
+    _ = String.to_existing_atom(key)
+    true
+  rescue
+    ArgumentError -> false
+  end
+
+  @doc false
   @spec uuid?(term()) :: boolean()
   def uuid?(value) when is_binary(value) and byte_size(value) == 36 do
     match?({:ok, _}, Ecto.UUID.cast(value))
@@ -553,14 +581,14 @@ defmodule Samen.Replay.Sanitizer do
       |> Enum.take(@max_param_keys)
       |> Enum.map_reduce(0, fn {k, v}, i ->
         {key, i} = param_key(k, i)
-        {param_field(key, k in keep, v, depth), i}
+        {param_field(key, keep_spec(keep, k), v, depth), i}
       end)
 
     %Shape{fields: fields, more: max(map_size(params) - @max_param_keys, 0)}
   end
 
   defp param_key(key, i) when is_binary(key) do
-    if label?(key), do: {key, i}, else: {"$k#{i}", i + 1}
+    if known_key?(key), do: {key, i}, else: {"$k#{i}", i + 1}
   end
 
   defp param_key(key, i) when is_atom(key) and not is_nil(key) and not is_boolean(key),
@@ -568,11 +596,26 @@ defmodule Samen.Replay.Sanitizer do
 
   defp param_key(_key, i), do: {"$k#{i}", i + 1}
 
-  defp param_field(key, keep?, value, depth) do
+  # The declaration entry for param `k`: `nil` (not keep-listed), `[]` (a bare name: integer,
+  # boolean or UUID only) or the declared closed set of strings.
+  defp keep_spec(keep, k) when is_binary(k) do
+    Enum.find_value(keep, fn
+      ^k -> []
+      {^k, allowed} when is_list(allowed) -> allowed
+      _ -> nil
+    end)
+  end
+
+  defp keep_spec(keep, k) when is_atom(k) and not is_nil(k) and not is_boolean(k),
+    do: keep_spec(keep, Atom.to_string(k))
+
+  defp keep_spec(_keep, _k), do: nil
+
+  defp param_field(key, spec, value, depth) do
     field = %{key: key, type: param_type(value), length: param_length(value), class: class(value)}
 
     field =
-      if keep? and keepable?(value),
+      if is_list(spec) and keepable?(value, spec),
         do: Map.put(field, :value, value),
         else: field
 
@@ -609,9 +652,9 @@ defmodule Samen.Replay.Sanitizer do
   defp class(v) when is_number(v), do: :number
   defp class(_), do: :none
 
-  # A keep-listed value is kept only when it is a bounded label (a sort field, a page
-  # direction, a filter enum), an integer or a boolean — never free text, even keep-listed.
-  defp keepable?(v) when is_binary(v), do: label?(v)
-  defp keepable?(v) when is_integer(v) or is_boolean(v), do: true
-  defp keepable?(_), do: false
+  # A keep-listed value is kept only when it is an integer, a boolean, a UUID, or a member of
+  # the declared closed set (a sort field, a page direction) — never a client-chosen string.
+  defp keepable?(v, allowed) when is_binary(v), do: uuid?(v) or v in allowed
+  defp keepable?(v, _allowed) when is_integer(v) or is_boolean(v), do: true
+  defp keepable?(_v, _allowed), do: false
 end

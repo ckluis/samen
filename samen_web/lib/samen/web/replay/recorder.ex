@@ -29,6 +29,11 @@ defmodule Samen.Web.Replay.Recorder do
   `samen.replay` flag AND the sample. `:off` (or no org after #{3} callbacks) DETACHES every
   hook, so an unrecorded LiveView pays nothing afterwards.
 
+  The decision is per ORG: when a recorded LiveView switches org (`?org=` on a disarmed host,
+  the org switcher on an armed one), recording STOPS at once — nothing of the new org reaches
+  the old org's session, whatever the new org's flag says (ADR-052 §2.2.1 gate fix). The frames
+  already captured for the opted-in org still persist.
+
   ## Never crashes, never blocks
 
   Every hook body runs inside `rescue`/`catch`: a failure turns capture `:off` for that
@@ -105,7 +110,7 @@ defmodule Samen.Web.Replay.Recorder do
   def handle_params(params, uri, socket) do
     {:cont,
      guarded(socket, fn s ->
-       s = decide(s)
+       s = s |> decide() |> same_org()
        if state(s) == :on, do: record_params(s, params, uri), else: s
      end)}
   end
@@ -120,7 +125,8 @@ defmodule Samen.Web.Replay.Recorder do
           s
 
         :on ->
-          record_render(s)
+          s = same_org(s)
+          if state(s) == :on, do: record_render(s), else: s
 
         _ ->
           s
@@ -132,6 +138,7 @@ defmodule Samen.Web.Replay.Recorder do
   def handle_info(message, socket) do
     {:cont,
      guarded(socket, fn s ->
+       s = same_org(s)
        if state(s) == :on, do: record_info(s, message), else: s
      end)}
   end
@@ -179,11 +186,30 @@ defmodule Samen.Web.Replay.Recorder do
              principal: socket.assigns[:samen_tenant_principal]
            }) do
       keep = Capture.keep(socket.view)
-      socket = put_private(socket, @private, %{state: :on, tries: 0, keep: keep})
+      socket = put_private(socket, @private, %{state: :on, tries: 0, keep: keep, org: org})
       record_mount(socket, keep)
       socket
     else
       _ -> off(socket)
+    end
+  end
+
+  # Recording is decided for ONE org. A different org in the assigns stops it for good: the
+  # buffer forgets this process (later events are not recorded) and every hook detaches.
+  defp same_org(socket) do
+    case socket.private[@private] do
+      %{state: :on, org: org} ->
+        case org_id(socket.assigns) do
+          other when is_binary(other) and other != org ->
+            Capture.stop()
+            off(socket)
+
+          _ ->
+            socket
+        end
+
+      _ ->
+        socket
     end
   end
 

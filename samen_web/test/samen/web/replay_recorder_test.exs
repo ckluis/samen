@@ -209,6 +209,98 @@ defmodule Samen.Web.ReplayRecorderTest do
     assert inspect(validate) =~ ~s("class" => "email")
   end
 
+  # ADR-052 §2.2.1 gate fix — the gate's probe, kept as a proof: a REAL ContactsLive session
+  # where the client sends label-shaped strings of its own (a URL query key, a sort value
+  # outside the view's :sortable set, a row id that is not an id, an event param key). Before
+  # the fix all four landed verbatim in replay_frame.
+  test "a client-chosen string never reaches the replay tables (keys, keep-listed values)",
+       ctx do
+    start_capture!([ctx.org])
+    mount = build_mount(:crm, [])
+    row_id = ctx.seeded.crm.person.id
+
+    assert play(ctx.org, mount, fn socket, org ->
+             socket = ContactsLive.load(Phoenix.Component.assign(socket, :org_id, org), org)
+             uri = "http://localhost/crm/contacts?org=#{org}&Urlkeysecret=1"
+
+             {:cont, socket} =
+               Lifecycle.handle_params(%{"org" => org, "Urlkeysecret" => "1"}, uri, socket)
+
+             socket = socket |> Lifecycle.after_render() |> clear_changed()
+             event!(socket, "sort", %{"field" => "Sortvaluesecret"})
+             event!(socket, "sort", %{"field" => "job_title"})
+             event!(socket, "select", %{"id" => "Jane.Selectsecret"})
+             event!(socket, "select", %{"id" => row_id})
+             event!(socket, "paginate", %{"dir" => "next"})
+             event!(socket, "validate_new", %{"Paramkeysecret" => "x"})
+             socket
+           end)
+
+    {frames, _} = rows = raw()
+    all = text(rows)
+
+    for secret <- ["Urlkeysecret", "Sortvaluesecret", "Jane.Selectsecret", "Paramkeysecret"],
+        do: refute(all =~ secret, "client string #{inspect(secret)} reached the replay tables")
+
+    # Positive controls: declared, closed values ARE kept — the fix is not "keep nothing".
+    values =
+      for [k, p] <- frames,
+          k == "event",
+          f <- Jason.decode!(p)["params"]["$shape"]["fields"],
+          Map.has_key?(f, "value"),
+          do: f["value"]
+
+    assert "job_title" in values
+    assert row_id in values
+    assert "next" in values
+    assert length(values) == 3
+  end
+
+  test "an org switch stops the recording: nothing of the new org reaches the session", ctx do
+    other = Ash.UUID.generate()
+    # The flag is ON for ctx.org only: `other` never opted in.
+    start_capture!([ctx.org])
+    mount = build_mount(:crm, [])
+
+    assert play(ctx.org, mount, fn socket, org ->
+             socket = ContactsLive.load(Phoenix.Component.assign(socket, :org_id, org), org)
+             uri = "http://localhost/crm/contacts?org=#{org}"
+             {:cont, socket} = Lifecycle.handle_params(%{"org" => org}, uri, socket)
+             socket = socket |> Lifecycle.after_render() |> clear_changed()
+             event!(socket, "paginate", %{"dir" => "next"})
+
+             # The switch: the view now shows `other` (the ADR-031 `?org=` re-resolve).
+             socket = Phoenix.Component.assign(socket, :org_id, other)
+             uri = "http://localhost/crm/contacts?org=#{other}"
+             {:cont, socket} = Lifecycle.handle_params(%{"org" => other}, uri, socket)
+             socket = socket |> Lifecycle.after_render() |> clear_changed()
+             event!(socket, "paginate", %{"dir" => "prev"})
+
+             # Recording stopped for good: every hook detached, events no longer recorded.
+             lifecycle = socket.private.lifecycle
+
+             for stage <- [:handle_params, :after_render, :handle_info] do
+               refute Enum.any?(Map.fetch!(lifecycle, stage), &(&1.id == :samen_replay))
+             end
+
+             refute Capture.recording?()
+             socket
+           end)
+
+    {frames, _} = rows = raw()
+    all = text(rows)
+    # Positive control: the opted-in org's frames persisted (with its one interaction).
+    assert Enum.map(frames, &hd/1) == ["mount", "params", "render", "event", "exit"]
+    assert all =~ ~s("next")
+    refute all =~ other
+    refute all =~ ~s("prev")
+
+    assert %{rows: [[org_str]]} =
+             Samen.WebTest.Repo.query!("SELECT rps_org_id::text FROM replay_session")
+
+    assert org_str == ctx.org
+  end
+
   describe "R11 — off unless the org's flag is on; never on the operator plane" do
     test "flag OFF for the org: hooks detach, nothing is persisted", ctx do
       start_capture!([Ash.UUID.generate()])
@@ -284,8 +376,10 @@ defmodule Samen.Web.ReplayRecorderTest do
 
   test "framework list views declare their replay keep-list through the ListLive mixin" do
     keep = Replay.keep(ContactsLive)
-    assert keep.params["sort"] == ["field"]
-    assert keep.params["paginate"] == ["dir"]
+    # Closed sets only: the sort field is one of ContactsLive's literal :sortable names.
+    assert keep.params["sort"] == [{"field", ["display_name", "job_title"]}]
+    assert keep.params["paginate"] == [{"dir", ["next", "prev"]}]
+    assert keep.params["select"] == ["id"]
     refute Map.has_key?(keep.params, "filter")
     # "sort" is handled by the mixin's hook, not a ContactsLive clause: the label comes from
     # the DECLARED literal, never the client string.

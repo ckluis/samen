@@ -146,6 +146,19 @@ defmodule Samen.Replay.Buffer do
   end
 
   @doc """
+  Stop recording for `pid`: its process row goes, so `record/4`, `accepting?/1` and
+  `session/1` answer as for an unrecorded process. The session's meta, counters and frames
+  stay for the monitor's `take/1`.
+  """
+  @spec stop(pid()) :: :ok
+  def stop(pid) do
+    :ets.delete(@table, {:proc, pid})
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  @doc """
   Remove the session `id` from the buffer and return it:
   `{:ok, meta, frames_in_seq_order, counters}` or `:error`. Called by the monitor, once.
   """

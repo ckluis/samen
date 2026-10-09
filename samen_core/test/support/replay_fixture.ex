@@ -2,9 +2,11 @@ defmodule SamenCore.Support.ReplayView do
   @moduledoc """
   ADR-052 P2 fixture: a LiveView-SHAPED module (samen_core has no Phoenix) that declares a
   replay keep-list — `page_title` may keep a bounded string; the `"sort"` event keeps its
-  `"field"` param — and handles `save` / `sort` / `validate`.
+  `"field"` param when it is one of the declared sort names — and handles `save` / `sort` / `validate`.
   """
-  use Samen.Replay, keep_assigns: [:page_title], keep_params: %{"sort" => ["field"]}
+  use Samen.Replay,
+    keep_assigns: [:page_title],
+    keep_params: %{"sort" => [{"field", ["inserted_at", "name"]}]}
 
   def handle_event("save", _params, socket), do: {:noreply, socket}
   def handle_event("sort", _params, socket), do: {:noreply, socket}

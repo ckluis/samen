@@ -42,13 +42,14 @@ defmodule Samen.Replay do
 
       use Samen.Replay,
         keep_assigns: [:tab],
-        keep_params: %{"sort" => ["field", "dir"], "paginate" => ["dir"]},
-        keep_url_params: ["tab"]
+        keep_params: %{"sort" => [{"field", ["name", "inserted_at"]}], "select" => ["id"]},
+        keep_url_params: [{"tab", ["billing", "usage"]}]
 
   Declarations accumulate (a mixin such as `Samen.Web.ListLive` contributes its own) into one
   `__samen_replay__/0`. A declared value is still bounded: a kept assign string must be ≤ 120
-  codepoints and not email/SSN/phone-shaped; a kept param value must be a label, an integer or
-  a boolean.
+  codepoints and not email/SSN/phone-shaped. A kept param value is an integer, a boolean or a
+  UUID for a bare name (`"id"`), and additionally a member of the closed set for
+  `{name, [allowed]}` — a client-chosen string is never kept (ADR-052 §2.2.1 gate fix).
   """
 
   @flag "samen.replay"
@@ -135,25 +136,37 @@ defmodule Samen.Replay do
       end
 
     unless is_map(params) and
-             Enum.all?(params, fn {k, v} ->
-               is_binary(k) and is_list(v) and Enum.all?(v, &is_binary/1)
-             end) do
+             Enum.all?(params, fn {k, v} -> is_binary(k) and param_specs?(v) end) do
       raise CompileError,
         file: caller.file,
         line: caller.line,
         description:
-          "use Samen.Replay: :keep_params must be a literal %{\"event\" => [\"param\", ...]} map"
+          "use Samen.Replay: :keep_params must be a literal %{\"event\" => [\"param\" | " <>
+            "{\"param\", [\"allowed\", ...]}, ...]} map"
     end
 
-    unless is_list(url) and Enum.all?(url, &is_binary/1) do
+    unless param_specs?(url) do
       raise CompileError,
         file: caller.file,
         line: caller.line,
-        description: "use Samen.Replay: :keep_url_params must be a list of strings"
+        description:
+          "use Samen.Replay: :keep_url_params must be a list of \"param\" | " <>
+            "{\"param\", [\"allowed\", ...]}"
     end
 
     %{assigns: assigns, params: params, url_params: url}
   end
+
+  # A param spec list: bare names, or `{name, [allowed string]}` closed sets (literals).
+  defp param_specs?(specs) when is_list(specs) do
+    Enum.all?(specs, fn
+      name when is_binary(name) -> true
+      {name, allowed} when is_binary(name) and is_list(allowed) -> Enum.all?(allowed, &is_binary/1)
+      _ -> false
+    end)
+  end
+
+  defp param_specs?(_), do: false
 
   @doc false
   def merge_decls(decls) do

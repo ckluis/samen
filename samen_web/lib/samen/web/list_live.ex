@@ -88,6 +88,10 @@ defmodule Samen.Web.ListLive do
   @events ~w(sort filter paginate select select_all bulk toggle_archived restore)
 
   defmacro __using__(opts) do
+    # ADR-052 P2 — the replay keep-list's closed set for "sort": the view's literal `:sortable`
+    # field names (a non-literal declaration keeps no sort value — shape only).
+    sort_values = replay_sort_values(opts)
+
     quote do
       @samen_list_opts unquote(opts)
 
@@ -108,19 +112,35 @@ defmodule Samen.Web.ListLive do
 
       defoverridable handle_bulk: 3
 
-      # ADR-052 P2 — the session-replay keep-list for the events this mixin owns: the
-      # sort field, the page direction, the bulk action and a row id are bounded labels/ids,
-      # so a replay keeps them; the free-text "filter" box is NOT listed (shape only).
+      # ADR-052 P2 — the session-replay keep-list for the events this mixin owns. Every kept
+      # value is closed: the sort field is one of the view's `:sortable` names, the page
+      # direction "next"/"prev", a row id a UUID. The bulk action (view-defined, open) is a bare
+      # name, so only an integer/boolean/UUID would keep — a string action is shape only; the
+      # free-text "filter" box is NOT listed (shape only). A client-chosen string never keeps.
       use Samen.Replay,
         keep_params: %{
-          "sort" => ["field"],
-          "paginate" => ["dir"],
+          "sort" => [{"field", unquote(sort_values)}],
+          "paginate" => [{"dir", ["next", "prev"]}],
           "bulk" => ["action"],
           "select" => ["id"],
           "restore" => ["id"]
         }
     end
   end
+
+  @doc false
+  # The literal `:sortable` atoms of a `use Samen.Web.ListLive` call, as strings (macro time).
+  def replay_sort_values(opts) when is_list(opts) do
+    case Keyword.get(opts, :sortable, [:id]) do
+      fields when is_list(fields) ->
+        if Enum.all?(fields, &is_atom/1), do: Enum.map(fields, &Atom.to_string/1), else: []
+
+      _ ->
+        []
+    end
+  end
+
+  def replay_sort_values(_opts), do: []
 
   @doc false
   def build_config(opts) do

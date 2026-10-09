@@ -206,11 +206,18 @@ defmodule Samen.Replay.CaptureTest do
         lv_event("sort", %{"field" => "inserted_at", "q" => "Grace"})
         lv_event("validate", %{"q" => "Grace", "email" => @typed_email})
         lv_event("zz_unhandled_#{System.unique_integer([:positive])}", %{"x" => "Grace"})
+        # ADR-052 §2.2.1 gate fix: client-chosen, label-shaped strings — a sort value outside
+        # the declared set, and a key no server code knows — never reach the row.
+        lv_event("sort", %{"field" => "Sortvaluesecret", "Paramkeysecret" => 1})
       end)
 
       {frames, _} = raw_rows()
       events = for [k, p] <- frames, k == "event", do: Jason.decode!(p)
-      assert [sort, validate, other] = events
+      assert [sort, validate, other, client] = events
+      assert client["event"] == "sort"
+      [field | _] = client["params"]["$shape"]["fields"] |> Enum.sort_by(& &1["key"], :desc)
+      assert field["key"] == "field"
+      refute Map.has_key?(field, "value")
       assert sort["event"] == "sort"
       assert validate["event"] == "validate"
       assert other["event"] == "other"
@@ -231,6 +238,8 @@ defmodule Samen.Replay.CaptureTest do
       text = all_text(raw_rows())
       refute text =~ "Grace"
       refute text =~ "typed.secret"
+      refute text =~ "Sortvaluesecret"
+      refute text =~ "Paramkeysecret"
     end
   end
 

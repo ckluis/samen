@@ -126,7 +126,7 @@ defmodule Samen.Replay.SanitizerTest do
       refute inspect(fields, limit: :infinity) =~ @title
     end
 
-    test "a two-reviewer non_pii!-cleared freeform column IS kept (the classifier's allow-list)" do
+    test "a two-reviewer non_pii!-cleared freeform column is recorded BY REFERENCE, never by value" do
       patient = tenant_patient!()
 
       cleared = [
@@ -138,8 +138,20 @@ defmodule Samen.Replay.SanitizerTest do
         }
       ]
 
+      # Positive control: the record DOES carry the cleared column's plaintext.
+      assert patient.job_title == @title
+
+      # Cleared ⇒ a Ref (the erasure arm overwrites the row on shred; a stored copy would
+      # outlive it), never the value.
       %Record{fields: fields} = Sanitizer.value(patient, non_pii_entries: cleared)
-      assert %Kept{value: @title} = fields.job_title
+      assert %Ref{attribute: :job_title, pk: pk} = fields.job_title
+      assert pk == patient.id
+      refute inspect(fields, limit: :infinity) =~ @title
+
+      # Default (no injected entries): the sanitizer never queries the DB-backed registry from
+      # the LiveView process — no clearance, so the column is shape only.
+      %Record{fields: fields} = Sanitizer.value(patient)
+      assert %Redacted{kind: :free_text} = fields.job_title
 
       # A self-reviewed clearance is not a clearance — default-deny holds.
       self_review = [%{hd(cleared) | reviewed_by: "a"}]
@@ -302,7 +314,8 @@ defmodule Samen.Replay.SanitizerTest do
         "sort" => "inserted_at"
       }
 
-      %Shape{fields: fields} = Sanitizer.params(params, ["sort", "page"])
+      keep = [{"sort", ["inserted_at", "name"]}, "page"]
+      %Shape{fields: fields} = Sanitizer.params(params, keep)
       by_key = Map.new(fields, &{&1.key, &1})
 
       assert by_key["sort"].value == "inserted_at"
@@ -315,7 +328,7 @@ defmodule Samen.Replay.SanitizerTest do
       assert contact["email"] == %{key: "email", type: :string, length: 15, class: :email}
       assert contact["full_name"] == %{key: "full_name", type: :string, length: 12, class: :name}
 
-      dump = inspect(Sanitizer.params(params, ["sort", "page"]), limit: :infinity)
+      dump = inspect(Sanitizer.params(params, keep), limit: :infinity)
       for secret <- ["ada@", "Lovelace", "Grace"], do: refute(dump =~ secret)
     end
 
@@ -328,6 +341,95 @@ defmodule Samen.Replay.SanitizerTest do
     test "a client-chosen PII-shaped key is positional" do
       %Shape{fields: [field]} = Sanitizer.params(%{"ada@example.com" => "1"})
       assert field.key == "$k0"
+    end
+  end
+
+  # ADR-052 §2.2.1 gate fix — the gate wrote "Sortvaluesecret", "Jane.Selectsecret",
+  # "Paramkeysecret" and "Urlkeysecret" into replay_frame through a real ContactsLive session:
+  # every one is label-shaped, so the old rules (a keep-listed value or any key only had to be
+  # label-shaped) stored the client's own string.
+  describe "a client-chosen string never reaches a frame (keep values and keys)" do
+    test "a bare keep-listed name keeps only an integer, a boolean or a UUID" do
+      id = Ash.UUID.generate()
+
+      for {value, kept?} <- [
+            {"Jane.Selectsecret", false},
+            {"inserted_at", false},
+            {id, true},
+            {7, true},
+            {true, true},
+            {1.5, false}
+          ] do
+        %Shape{fields: [field]} = Sanitizer.params(%{"id" => value}, ["id"])
+        assert Map.has_key?(field, :value) == kept?, inspect(value)
+        if kept?, do: assert(field.value == value)
+      end
+    end
+
+    test "{name, allowed} keeps a string only from the declared closed set" do
+      keep = [{"dir", ["next", "prev"]}]
+
+      %Shape{fields: [ok]} = Sanitizer.params(%{"dir" => "next"}, keep)
+      assert ok.value == "next"
+
+      %Shape{fields: [no]} = Sanitizer.params(%{"dir" => "Sortvaluesecret"}, keep)
+      refute Map.has_key?(no, :value)
+      assert no == %{key: "dir", type: :string, length: 15, class: :none}
+
+      # Positive control: the same value under a NON-declared key is shape only too, and the
+      # old rule (label-shaped) WOULD have kept it.
+      assert Sanitizer.label?("Sortvaluesecret")
+      %Shape{fields: [other]} = Sanitizer.params(%{"dir" => "next"}, [{"sort", ["next"]}])
+      refute Map.has_key?(other, :value)
+    end
+
+    test "an atom-keyed param is matched to its declared name" do
+      %Shape{fields: [f]} = Sanitizer.params(%{dir: "prev"}, [{"dir", ["next", "prev"]}])
+      assert f.key == "dir"
+      assert f.value == "prev"
+      %Shape{fields: [n]} = Sanitizer.params(%{nil => 3}, ["nil"])
+      refute Map.has_key?(n, :value)
+    end
+
+    test "a param key survives only as a server-known identifier" do
+      id = Ash.UUID.generate()
+      email = Atom.to_string(:email)
+
+      params = %{
+        "Paramkeysecret" => "x",
+        email => "y",
+        "999" => 1,
+        "1000" => 1,
+        id => 1
+      }
+
+      %Shape{fields: fields} = Sanitizer.params(params)
+      keys = Enum.map(fields, & &1.key)
+
+      # Positive control: the refused keys ARE label-shaped (the old rule kept them).
+      assert Sanitizer.label?("Paramkeysecret") and Sanitizer.label?("1000")
+      refute "Paramkeysecret" in keys
+      refute "1000" in keys
+      assert email in keys
+      assert "999" in keys
+      assert id in keys
+      assert Enum.count(keys, &String.starts_with?(&1, "$k")) == 2
+    end
+
+    test "an assigns map keyed by row data keeps no data-derived key" do
+      email = Atom.to_string(:email)
+      out = Sanitizer.assigns(%{groups: %{"Aurelia" => 1, email => 2, "0" => 3}})
+      assert out.groups[email] == 2
+      assert out.groups["0"] == 3
+      refute Map.has_key?(out.groups, "Aurelia")
+      assert Sanitizer.label?("Aurelia")
+      refute inspect(out, limit: :infinity) =~ "Aurelia"
+    end
+
+    test "known_key?/1 refuses a non-label and a non-string" do
+      refute Sanitizer.known_key?("a b")
+      refute Sanitizer.known_key?(:email)
+      assert Sanitizer.known_key?("email")
     end
   end
 

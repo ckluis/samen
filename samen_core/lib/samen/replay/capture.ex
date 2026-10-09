@@ -79,6 +79,13 @@ defmodule Samen.Replay.Capture do
   def record(kind, payload, interaction? \\ false),
     do: Buffer.record(self(), kind, payload, interaction?)
 
+  @doc """
+  Stop recording the calling process: later frames and events are not captured. The frames
+  already buffered stay, and persist when the process exits (the monitor finalizes by session).
+  """
+  @spec stop() :: :ok
+  def stop, do: Buffer.stop(self())
+
   @doc "Is the calling process recording and under its caps (worth sanitizing a frame for)?"
   @spec accepting?() :: boolean()
   def accepting?, do: Buffer.accepting?(self())
