@@ -33,6 +33,16 @@ defmodule Samen.Reveal.Grant do
       config :samen_core, :reveal_grant, MyApp.Reveal.Grant
   """
   @callback granted?(Samen.Reveal.Context.t()) :: boolean()
+
+  @doc """
+  OPTIONAL batch form (ADR-052 §2.4.1): the verdict for each context, in order — exactly what
+  `granted?/1` would answer for each, read in a bounded number of queries instead of one per
+  context. `Samen.Api.PiiResolution.prefetch/4` calls it once per resolve call when the
+  checker implements it, and falls back to `granted?/1` per context otherwise.
+  """
+  @callback granted_many([Samen.Reveal.Context.t()]) :: [boolean()]
+
+  @optional_callbacks granted_many: 1
 end
 
 defmodule Samen.Reveal.DenyAll do

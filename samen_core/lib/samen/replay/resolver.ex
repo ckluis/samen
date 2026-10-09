@@ -124,11 +124,15 @@ defmodule Samen.Replay.Resolver do
     |> Ash.read(scope: scope)
     |> case do
       {:ok, rows} ->
-        rows
         # Belt over the resource's own policies: a row of ANOTHER org than the viewer's is
         # gone, even on a resource that declares no org policy (no cross-org replay, ever).
-        |> Enum.filter(&same_org?(&1, scope.actor))
-        |> Enum.map(&plane_resolve(&1, mod, scope.actor, opts))
+        rows = Enum.filter(rows, &same_org?(&1, scope.actor))
+        # ONE read of the grant decisions + vault rows for every row of this batch (no N+1,
+        # ADR-052 §2.4.1); each record is still resolved alone, inside its reveal span.
+        resolve_opts = batch_opts(rows, mod, scope.actor, opts)
+
+        rows
+        |> Enum.map(&plane_resolve(&1, mod, scope.actor, resolve_opts))
         |> Map.new(&{normalize_pk(Map.get(&1, pk_field)), &1})
 
       {:error, _} ->
@@ -139,11 +143,19 @@ defmodule Samen.Replay.Resolver do
     _ -> %{}
   end
 
+  # The PiiResolution options for one batch: the viewer's repo/grant/vault, plus what
+  # `PiiResolution.prefetch/4` read ONCE for all the batch's rows. Lives for this call only.
+  defp batch_opts(rows, mod, actor, opts) do
+    base = Keyword.merge([repo: repo(mod, opts)], Keyword.take(opts, [:grant, :vault]))
+    PiiResolution.prefetch(rows, mod, actor, base)
+  rescue
+    # A failed prefetch costs only the per-record reads it would have saved.
+    _ -> Keyword.merge([repo: repo(mod, opts)], Keyword.take(opts, [:grant, :vault]))
+  end
+
   # The ONE resolution rule (PiiResolution) with the VIEWER's actor. On the operator plane it
   # runs inside a reveal span: a granted replay reveal is traced like any other reveal.
-  defp plane_resolve(record, mod, actor, opts) do
-    resolve_opts = Keyword.merge([repo: repo(mod, opts)], Keyword.take(opts, [:grant, :vault]))
-
+  defp plane_resolve(record, mod, actor, resolve_opts) do
     if operator?(actor) do
       Samen.Tracer.with_reveal_span(
         Samen.Reveal.span_name(),

@@ -137,13 +137,133 @@ defmodule Samen.Api.PiiResolution do
     fields = Info.pii_attributes(resource)
     reveal_action = resource |> Info.reveal_actions() |> Enum.at(0)
     plane = plane_of(actor)
-    bag_ctx = bag_context(resource, records, plane, actor, opts)
+    opts = prefetch(records, resource, actor, opts)
+    bag_ctx = Keyword.fetch!(opts, :__bag_ctx)
 
     Enum.map(records, fn record ->
       record
       |> resolve_pii_fields(fields, plane, resource, reveal_action, actor, opts)
       |> resolve_bag_keys(bag_ctx, plane, resource, reveal_action, actor, opts)
     end)
+  end
+
+  @doc """
+  Read, ONCE for all of `records`, what resolving them needs from the database
+  (ADR-052 §2.4.1 — no N+1): the grant decision for every vault-routed `%Masked{}` value on
+  a plane that consults grants (one `granted_many/1` call when the grant checker implements
+  it — `Samen.Reveal.Grants` does: one suspension check + one grant read — else one
+  `granted?/1` per value, as before), the vault rows (CIPHERTEXT only — never plaintext) of
+  every value the plane will decrypt (one `prefetch_rows/2` read when the vault module
+  implements it), and the custom-bag catalog context. Returns `opts` carrying them; every
+  decision is still made per value by `resolve/4`, and plaintext is still produced per value
+  by the vault chokepoint (`Samen.Vault.reveal/3` over the prefetched row).
+
+  Deny-on-read is unchanged: the result lives only in the returned `opts` — no table, no
+  process state — so the NEXT call (the next frame batch, the next page) reads again, and a
+  grant revoked or an operator suspended in between takes effect there. `resolve/4` calls
+  this itself; a caller that resolves the same `records` one at a time (the replay resolver,
+  inside a per-record reveal span) prefetches once and passes the returned `opts` to each
+  call. Idempotent on already-prefetched `opts`.
+  """
+  @spec prefetch(list(struct()), module(), map() | nil, keyword()) :: keyword()
+  def prefetch(records, resource, actor, opts) when is_list(records) do
+    if Keyword.get(opts, :__prefetched, false) do
+      opts
+    else
+      fields = Info.pii_attributes(resource)
+      reveal_action = resource |> Info.reveal_actions() |> Enum.at(0)
+      plane = plane_of(actor)
+
+      masked =
+        for record <- records,
+            %Samen.Pii.Attribute{name: name} <- fields,
+            %Masked{} = value <- [Map.get(record, name)],
+            do: {record, name, value}
+
+      grants = grant_decisions(masked, plane, resource, reveal_action, actor, opts)
+
+      tokens =
+        for {record, name, %Masked{token: token}} <- masked,
+            is_binary(token),
+            decrypts?(plane, record, name, grants, opts),
+            uniq: true,
+            do: token
+
+      Keyword.merge(opts,
+        __prefetched: true,
+        __grants: grants,
+        __vault_rows: vault_rows(tokens, opts),
+        __bag_ctx: bag_context(resource, records, plane, actor, opts)
+      )
+    end
+  end
+
+  # The grant verdict for each masked value, keyed `{subject_id, label}` — only on a plane
+  # whose resolution consults grants (operator render; egress with the host opt-in). The
+  # verdicts are the checker's RAW answers (the egress path's `=== true` strictness applies
+  # to them unchanged).
+  defp grant_decisions(masked, plane, resource, reveal_action, actor, opts) do
+    egress? = Keyword.get(opts, :egress, false)
+
+    consults? =
+      reveal_action != nil and masked != [] and
+        ((not egress? and plane == :operator) or
+           (egress? and Keyword.get(opts, :grant_egress?, false)))
+
+    if consults? do
+      grant = Keyword.get(opts, :grant, Reveal.grant_checker())
+
+      contexts =
+        masked
+        |> Enum.map(fn {record, name, _} ->
+          %Reveal.Context{
+            actor: actor,
+            subject_id: Map.get(record, :id),
+            resource: resource,
+            action: reveal_action,
+            label: name
+          }
+        end)
+        |> Enum.uniq_by(&{&1.subject_id, &1.label})
+
+      verdicts =
+        if Code.ensure_loaded?(grant) and function_exported?(grant, :granted_many, 1),
+          do: grant.granted_many(contexts),
+          else: Enum.map(contexts, &grant.granted?/1)
+
+      contexts
+      |> Enum.zip(verdicts)
+      |> Map.new(fn {ctx, verdict} -> {{ctx.subject_id, ctx.label}, verdict} end)
+    else
+      %{}
+    end
+  end
+
+  # Will this plane decrypt this value? (The same rule `resolve_field/8` applies.)
+  defp decrypts?(plane, record, name, grants, opts) do
+    egress? = Keyword.get(opts, :egress, false)
+    verdict = Map.get(grants, {Map.get(record, :id), name})
+
+    cond do
+      egress? -> Keyword.get(opts, :grant_egress?, false) and verdict === true
+      plane == :tenant -> true
+      plane == :operator -> verdict not in [nil, false]
+      true -> false
+    end
+  end
+
+  defp vault_rows([], _opts), do: %{}
+
+  defp vault_rows(tokens, opts) do
+    vault = Keyword.get(opts, :vault, Samen.Vault)
+    repo = Keyword.get(opts, :repo)
+
+    if repo != nil and Code.ensure_loaded?(vault) and function_exported?(vault, :prefetch_rows, 2),
+      do: vault.prefetch_rows(tokens, repo),
+      else: %{}
+  rescue
+    # A failed prefetch only costs the per-value read it would have saved.
+    _ -> %{}
   end
 
   defp resolve_pii_fields(record, fields, plane, resource, reveal_action, actor, opts) do
@@ -257,14 +377,31 @@ defmodule Samen.Api.PiiResolution do
         nil
 
       repo ->
-        case vault.reveal(masked, repo, []) do
+        case vault.reveal(masked, repo, vault_opts(opts)) do
           {:ok, plaintext} -> plaintext
           _ -> nil
         end
     end
   end
 
+  defp vault_opts(opts) do
+    case Keyword.get(opts, :__vault_rows) do
+      rows when is_map(rows) and map_size(rows) > 0 -> [prefetched: rows]
+      _ -> []
+    end
+  end
+
+  # The verdict `prefetch/4` read for this value in THIS call, else ask the checker now.
   defp operator_granted?(record, label, resource, reveal_action, actor, opts) do
+    grants = Keyword.get(opts, :__grants, %{})
+
+    case Map.fetch(grants, {Map.get(record, :id), label}) do
+      {:ok, verdict} -> reveal_action != nil and verdict
+      :error -> ask_granted?(record, label, resource, reveal_action, actor, opts)
+    end
+  end
+
+  defp ask_granted?(record, label, resource, reveal_action, actor, opts) do
     grant = Keyword.get(opts, :grant, Reveal.grant_checker())
     subject_id = Map.get(record, :id)
 

@@ -182,6 +182,32 @@ defmodule Samen.Web.ReplayPlayerTest do
     sid
   end
 
+  # The number of repo queries `fun` issues, its wall time (ms) and its result.
+  defp count_queries(fun) do
+    test_pid = self()
+    id = "player-n1-#{System.unique_integer([:positive])}"
+
+    :ok =
+      :telemetry.attach(
+        id,
+        [:samen, :web_test, :repo, :query],
+        fn _, _, _, _ -> send(test_pid, :q) end,
+        nil
+      )
+
+    {us, result} = :timer.tc(fun)
+    :telemetry.detach(id)
+    {drain_queries(0), div(us, 1000), result}
+  end
+
+  defp drain_queries(n) do
+    receive do
+      :q -> drain_queries(n + 1)
+    after
+      0 -> n
+    end
+  end
+
   # The frame that shows the listed contacts (mount → params → render: index 2).
   @list_frame 2
 
@@ -263,6 +289,63 @@ defmodule Samen.Web.ReplayPlayerTest do
       assert srcdoc =~ "[erased]"
       for s <- sentinels(), do: refute(srcdoc =~ s)
       assert Enum.all?(socket.assigns.refs, &(&1.outcome == :shredded))
+    end
+
+    # ADR-052 §2.4.1 (P3 gate note 9): a frame batch over a full contacts page cost one vault
+    # read per vault field per row (tenant), plus a suspension check, a grant read and a
+    # custom-bag catalog read per field / row (operator) — 151 / 351 queries for 51 rows. The
+    # grant/suspension decisions, the vault rows and the bag catalog are now read once per
+    # batch; outcomes and deny-on-read are unchanged (the tests above and below).
+    test "a frame batch over a full 50-row contacts page costs the same queries as a 1-row one",
+         ctx do
+      user = user!(ctx.org, :admin)
+      open_impersonation!(ctx.operator, ctx.org)
+
+      measure = fn replay_id ->
+        tenant = tenant_player(ctx.org, replay_id, user.id)
+        operator = operator_player(ctx.org, replay_id, ctx.operator)
+        {t, t_ms, t_socket} = count_queries(fn -> at_list(tenant) end)
+        {o, o_ms, o_socket} = count_queries(fn -> at_list(operator) end)
+        %{tenant: {t, t_ms, t_socket}, operator: {o, o_ms, o_socket}}
+      end
+
+      one = measure.(ctx.replay_id)
+
+      for i <- 1..50 do
+        Samen.WebTest.Crm.Person
+        |> Ash.Changeset.for_create(
+          :create,
+          %{
+            org_id: ctx.org,
+            display_name: "Row #{i}",
+            full_name: %Samen.Type.FullName{first: "Row#{i}", last: "Person"},
+            emails: [%{label: "work", address: "row#{i}@example.test"}],
+            phones: [%{label: "mobile", number: "+1555010#{String.pad_leading("#{i}", 4, "0")}"}],
+            custom: %{"lifecycle_stage" => "lead"}
+          },
+          authorize?: false
+        )
+        |> Ash.create!()
+      end
+
+      fifty_one = measure.(ReplayRecording.record_contacts!(ctx.org, build_mount(:crm, [])))
+
+      {_, _, t_socket} = fifty_one.tenant
+      {_, _, o_socket} = fifty_one.operator
+      # A full page: 50 rows on screen (the 51st person is past the page).
+      assert length(for r <- t_socket.assigns.refs, r.attribute == "full_name", do: r) == 50
+      assert t_socket.assigns.frame_html =~ "Row"
+      assert Enum.all?(o_socket.assigns.refs, &(&1.outcome == :masked))
+
+      IO.puts(
+        "\n[player N+1] 50-row frame: tenant #{elem(fifty_one.tenant, 0)} queries " <>
+          "(#{elem(fifty_one.tenant, 1)} ms), operator #{elem(fifty_one.operator, 0)} queries " <>
+          "(#{elem(fifty_one.operator, 1)} ms); 1-row frame: tenant #{elem(one.tenant, 0)}, " <>
+          "operator #{elem(one.operator, 0)}"
+      )
+
+      assert elem(fifty_one.tenant, 0) == elem(one.tenant, 0)
+      assert elem(fifty_one.operator, 0) == elem(one.operator, 0)
     end
 
     test "a reveal grant revoked mid-playback masks the very next frame batch", ctx do
