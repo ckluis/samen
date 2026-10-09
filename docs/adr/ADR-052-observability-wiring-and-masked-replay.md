@@ -529,8 +529,8 @@ Built as §2.3 says. The choices the section left open, and the deviations:
    (audit dropped), 450 (dead render opens).
 6. **Rendering (zero side effects).** For frame *i* the player folds the mount frame's
    assigns with every later render frame's changed assigns, resolves, and calls the recorded
-   view's CURRENT `render/1` (`__changed__: nil`) in the player's process, under
-   `rescue`/`catch`. The resulting string is made inert — `<script>` elements removed,
+   view's CURRENT `render/1` (`__changed__: nil`) under `rescue`/`catch` — since the P3 gate
+   in a throwaway process with a heap cap and a deadline (item 10). The resulting string is made inert — `<script>` elements removed,
    `phx-*` and `on*` attributes stripped inside tags, `javascript:` neutralised — and wrapped
    in a document with a `default-src 'none'` CSP and the kit stylesheet (inlined at compile
    time), shown in `<iframe srcdoc sandbox="">` (no `allow-scripts`, no
@@ -569,6 +569,30 @@ Built as §2.3 says. The choices the section left open, and the deviations:
    the tenant plane leaks and the scan catches it). Kernel proofs in
    `samen_core/test/replay/player_test.exs`.
 
+10. **P3 gate fixes (2026-10-09).** The adversarial gate wrote hostile rows straight into
+    `replay_frame` with raw SQL (past the store and `RowGuard`) and found ONE blocking class:
+    a stored row could choose a code path the recorder never writes. (a) The resolver rebuilt
+    ANY loaded struct a `$record` named — a 552-byte frame naming `Range` (1..2,000,000) made
+    `Samen.Web.AI.AgentLive` render a 137 MB srcdoc in 5 s and +246 MB of memory; 1..10¹² never
+    ends (a hung player, then an OOM node); a LiveView `Rendered`/`Comprehension` would render
+    raw. `build_struct/2` now rebuilds only an Ash resource or a sanitizer walk-list struct
+    (`Samen.Replay.Sanitizer.walk_structs/1`, now public), anything else `:code_changed`.
+    (b) A `$tuple` of `$atom safe` + `$kept` decoded to `{:safe, iodata}` and rendered raw (a
+    `<meta http-equiv=refresh>` that navigates the sandboxed frame): the resolver turns any
+    `{:safe, _}` into a `:redacted` placeholder. (c) Data can still drive a loop the template
+    owns (`1..@count`), so the renderer no longer trusts input size at all: `render/2` runs the
+    template in a throwaway monitored process with a 64 MiB heap cap (`max_heap_size`, shared
+    binaries included, `kill: true`) and a 3 s deadline (`Renderer.budget/0`); over budget →
+    `:render_failed`, the player lives. (d) `inert/1` also strips `<meta>`, `<base>` and
+    `<link>` — elements that act with no script, which neither the CSP nor `sandbox=""` stops.
+    The parent page was never at risk: HEEx attribute-escapes `srcdoc` (a `"'><script>
+    </iframe>` full name round-trips byte-exact through the attribute), and the srcdoc
+    document is `sandbox=""` + `default-src 'none'`. Resolver 16/16 mutants killed after the
+    change. Sabotages 461 (any struct), 462 (`{:safe, _}` passes), 463 (render unbounded), 464
+    (meta kept); 453 and 457 re-anchored onto the bounded renderer with the same semantics
+    (457 also lets the render process's crash become the player's — the isolated render would
+    otherwise absorb the reraise and the guard would go vacuous).
+
 *Not done in P3:* no `:replay` `no_plaintext_pii` tier and no post-shred replay check (P4);
 no host turns the capture plane on; the player cannot show a `live_render` child or a stream's
 rows (counts only, §7); a view whose template needs a value the recorder dropped (a form) shows
@@ -584,6 +608,7 @@ nothing).
 | inert rendering | 453, 454, 457, 458 | `replay_player_test.exs` |
 | list authorized like an open | 459 | `replay_player_test.exs` |
 | decode safety | 455, 456 | `player_test.exs` |
+| P3 gate: a stored row picks no code path (struct, raw markup, unbounded render, meta) | 461, 462, 463, 464 | `player_test.exs`, `replay_player_test.exs` |
 
 ### 2.4 P4 — mounts, tiers, docs
 
