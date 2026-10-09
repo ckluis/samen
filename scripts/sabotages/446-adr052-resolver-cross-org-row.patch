@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.3 — the resolver's org belt is dropped: a referenced row of ANOTHER org (on a
+# resource that declares no org policy) resolves for the viewer.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/player_test.exs
+# MUST_FAIL: another org's viewer gets :gone
+diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
+index 210603d..d8d5c8f 100644
+--- a/samen_core/lib/samen/replay/resolver.ex
++++ b/samen_core/lib/samen/replay/resolver.ex
+@@ -125,7 +125,8 @@ defmodule Samen.Replay.Resolver do
+         rows
+         # Belt over the resource's own policies: a row of ANOTHER org than the viewer's is
+         # gone, even on a resource that declares no org policy (no cross-org replay, ever).
+-        |> Enum.filter(&same_org?(&1, scope.actor))
++        # SABOTAGE (ADR-052 §2.3): no org belt.
++        |> Enum.filter(&(same_org?(&1, scope.actor) or true))
+         |> Enum.map(&plane_resolve(&1, mod, scope.actor, opts))
+         |> Map.new(&{normalize_pk(Map.get(&1, pk_field)), &1})
+ 

@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.3 — the decoder turns stored strings into NEW atoms (String.to_atom on stored data:
+# an atom-table exhaustion vector, and an unknown name decodes instead of :code_changed).
+#
+# Flips the named player/resolver test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/player_test.exs
+# MUST_FAIL: no atom is created
+diff --git a/samen_core/lib/samen/replay/decoder.ex b/samen_core/lib/samen/replay/decoder.ex
+index bc456d5..456c1c6 100644
+--- a/samen_core/lib/samen/replay/decoder.ex
++++ b/samen_core/lib/samen/replay/decoder.ex
+@@ -253,7 +253,8 @@ defmodule Samen.Replay.Decoder do
+   """
+   @spec existing_atom(term()) :: atom() | nil
+   def existing_atom(s) when is_binary(s) and byte_size(s) in 1..255 do
+-    String.to_existing_atom(s)
++    # SABOTAGE (ADR-052 §2.3): stored strings become new atoms.
++    String.to_atom(s)
+   rescue
+     ArgumentError -> nil
+   end

@@ -1,0 +1,28 @@
+# SABOTAGE: ADR-052 §2.3 / R8 — the same resolution cache, caught END TO END: a reveal grant revoked
+# mid-playback still renders plaintext on the next frame batch.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: a reveal grant revoked mid-playback masks the very next frame batch
+diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
+index 210603d..e80faab 100644
+--- a/samen_core/lib/samen/replay/resolver.ex
++++ b/samen_core/lib/samen/replay/resolver.ex
+@@ -114,6 +114,16 @@ defmodule Samen.Replay.Resolver do
+   defp records(_mod, _pk_field, [], _scope, _opts), do: %{}
+ 
+   defp records(mod, pk_field, ids, scope, opts) do
++    # SABOTAGE (ADR-052 §2.3 / R8): memoize the resolved records — plaintext outlives the grant.
++    key = {:replay_resolved, mod, ids}
++
++    case Process.get(key) do
++      nil -> Process.put(key, records_uncached(mod, pk_field, ids, scope, opts)) || Process.get(key)
++      hit -> hit
++    end
++  end
++
++  defp records_uncached(mod, pk_field, ids, scope, opts) do
+     attrs = mod |> Ash.Resource.Info.attributes() |> Enum.map(& &1.name)
+ 
+     mod

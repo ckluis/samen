@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-052 §2.3 — the replay LIST skips the authorization a replay open requires.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: authorized like an open
+diff --git a/samen_web/lib/samen/web/replay/index_live.ex b/samen_web/lib/samen/web/replay/index_live.ex
+index 7602ab6..3d06d8d 100644
+--- a/samen_web/lib/samen/web/replay/index_live.ex
++++ b/samen_web/lib/samen/web/replay/index_live.ex
+@@ -41,7 +41,8 @@ defmodule Samen.Web.Replay.IndexLive do
+ 
+   @doc false
+   def load(socket) do
+-    case Access.authorize(socket, socket.assigns[:org_id], socket.assigns[:user_id]) do
++    # SABOTAGE (ADR-052 §2.3): list without asking.
++    case {:ok, %{scope: %Samen.Scope{actor: %{org_id: socket.assigns[:org_id], plane: :tenant}}}} do
+       {:ok, viewer} ->
+         sessions =
+           viewer.scope

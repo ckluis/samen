@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.3 / R8 — a crypto-shredded subject is shown as masked (••••), not :shredded: erasure
+# no longer visibly reaches stored replays.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: after Samen.Erasure.shred of the subject the frame shows the erased placeholder
+diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
+index 210603d..5784dd2 100644
+--- a/samen_core/lib/samen/replay/resolver.ex
++++ b/samen_core/lib/samen/replay/resolver.ex
+@@ -295,7 +295,8 @@ defmodule Samen.Replay.Resolver do
+   defp ref_attribute(_mod, _attribute), do: :code_changed
+ 
+   defp value(%Masked{}, pk, _opts) do
+-    if shredded?(pk),
++    # SABOTAGE (ADR-052 §2.3 / R8): the shred attestation is never consulted.
++    if shredded?(pk) and false,
+       do: {Placeholder.new(:shredded), :shredded},
+       else: {Placeholder.new(:masked), :masked}
+   end

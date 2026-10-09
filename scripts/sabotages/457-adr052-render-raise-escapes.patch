@@ -1,0 +1,23 @@
+# SABOTAGE: ADR-052 §2.3 rule 3 — a template that raises crashes the player instead of showing a
+# placeholder for that frame.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: a frame whose template raises shows a placeholder
+diff --git a/samen_web/lib/samen/web/replay/renderer.ex b/samen_web/lib/samen/web/replay/renderer.ex
+index 525ed07..2c1aa23 100644
+--- a/samen_web/lib/samen/web/replay/renderer.ex
++++ b/samen_web/lib/samen/web/replay/renderer.ex
+@@ -65,9 +65,8 @@ defmodule Samen.Web.Replay.Renderer do
+       {:error, :no_view}
+     end
+   rescue
+-    _ -> {:error, :render_failed}
+-  catch
+-    _kind, _reason -> {:error, :render_failed}
++    # SABOTAGE (ADR-052 §2.3): a raising template escapes.
++    e -> reraise e, __STACKTRACE__
+   end
+ 
+   @doc """

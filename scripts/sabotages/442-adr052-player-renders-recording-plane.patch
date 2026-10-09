@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.3 / R8 + masking watch-list — the same recording-plane resolution, caught END TO END:
+# the player's srcdoc for an ungranted operator carries the contact's plaintext.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: RED operator WITHOUT a grant
+diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
+index 210603d..138ef6b 100644
+--- a/samen_core/lib/samen/replay/resolver.ex
++++ b/samen_core/lib/samen/replay/resolver.ex
+@@ -126,7 +126,8 @@ defmodule Samen.Replay.Resolver do
+         # Belt over the resource's own policies: a row of ANOTHER org than the viewer's is
+         # gone, even on a resource that declares no org policy (no cross-org replay, ever).
+         |> Enum.filter(&same_org?(&1, scope.actor))
+-        |> Enum.map(&plane_resolve(&1, mod, scope.actor, opts))
++        # SABOTAGE (ADR-052 §2.3 / R8): resolve on the recording (tenant) plane, not the viewer's.
++        |> Enum.map(&plane_resolve(&1, mod, Map.put(scope.actor, :plane, :tenant), opts))
+         |> Map.new(&{normalize_pk(Map.get(&1, pk_field)), &1})
+ 
+       {:error, _} ->

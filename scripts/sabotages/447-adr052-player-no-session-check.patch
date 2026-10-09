@@ -1,0 +1,32 @@
+# SABOTAGE: ADR-052 §2.3 / R9 — the impersonation-session check is removed: an operator with no active
+# session (or one that ended) watches a tenant's replay.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: no active impersonation session: denied
+# MUST_FAIL: a session that ends mid-playback stops the next batch
+diff --git a/samen_web/lib/samen/web/replay/access.ex b/samen_web/lib/samen/web/replay/access.ex
+index ee8985e..23de229 100644
+--- a/samen_web/lib/samen/web/replay/access.ex
++++ b/samen_web/lib/samen/web/replay/access.ex
+@@ -88,8 +88,18 @@ defmodule Samen.Web.Replay.Access do
+       :out_of_scope ->
+         {:error, :out_of_scope}
+ 
++      # SABOTAGE (ADR-052 §2.3 / R9): no session is no obstacle.
+       _ ->
+-        {:error, :no_session}
++        {:ok,
++         %{
++           plane: :operator,
++           scope: %Samen.Scope{
++             actor: %{id: operator_id, org_id: org_id, role: :member, plane: :operator, impersonation: %{session_id: nil}}
++           },
++           viewer_id: operator_id,
++           org_id: org_id,
++           impersonation_session_id: nil
++         }}
+     end
+   end
+ 

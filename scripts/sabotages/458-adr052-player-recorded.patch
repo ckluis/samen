@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-052 §2.3 — the player does not opt out of the recorder: watching a replay is itself recorded.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: the player itself is never recorded
+diff --git a/samen_web/lib/samen/web/replay/live.ex b/samen_web/lib/samen/web/replay/live.ex
+index 239bb72..24b5ce7 100644
+--- a/samen_web/lib/samen/web/replay/live.ex
++++ b/samen_web/lib/samen/web/replay/live.ex
+@@ -29,7 +29,8 @@ defmodule Samen.Web.Replay.Live do
+   """
+   @spec viewer_context(Phoenix.LiveView.Socket.t(), map(), map()) :: Phoenix.LiveView.Socket.t()
+   def viewer_context(socket, params, session) do
+-    socket = socket |> Samen.Web.Live.assign_mount(session) |> Recorder.opt_out()
++    # SABOTAGE (ADR-052 §2.3): the player is recorded like any tenant view.
++    socket = socket |> Samen.Web.Live.assign_mount(session) |> then(&(Recorder && &1))
+     mount = socket.assigns[:samen_mount]
+ 
+     if Access.operator_mount?(mount) do
