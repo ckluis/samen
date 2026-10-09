@@ -267,6 +267,14 @@ defmodule Samen.Web.Router do
         # link. Inherited at 0 vertical LOC. (Resolve route declared first — see above.)
         live("#{path}/activity/resolve", Samen.Web.Operator.FleetResolveLive, :activity)
         live("#{path}/activity/:org_id", Samen.Web.Operator.ActivityLive)
+        # ADR-052 P3 — session REPLAY on the operator plane: the list + the player, scoped to ONE
+        # tenant org at a time (the route param). Watching is impersonating: both gate on an
+        # ACTIVE impersonation session for the org (`Samen.Web.Replay.Access`, re-checked per
+        # frame batch) and resolve every referenced field on the operator plane (`••••` unless a
+        # reveal grant covers the subject). Rides this SAME live_session, so the T146
+        # `:require_operator` on_mount gates it. Inherited at 0 vertical LOC.
+        live("#{path}/replays/:org_id", Samen.Web.Replay.IndexLive)
+        live("#{path}/replays/:org_id/:id", Samen.Web.Replay.PlayerLive)
 
         if include_aggregate do
           live("#{path}/aggregate", Samen.Web.Operator.AggregateLive)
@@ -2009,7 +2017,13 @@ defmodule Samen.Web.Router do
       # PENDING operator reveal-requests for their org, completing the
       # request → approve → unmask lifecycle. Inherited by every host that already mounts
       # `samen_settings_routes` at ≈0 authored LOC.
-      {"#{path}/reveal-approvals", Samen.Web.Settings.RevealApprovalsLive}
+      {"#{path}/reveal-approvals", Samen.Web.Settings.RevealApprovalsLive},
+      # ADR-052 P3 — the TENANT replay list + player: an admin-class member of the SAME org
+      # watches its own org's recorded sessions (`Samen.Web.Replay.Access`), every referenced
+      # field resolved on the tenant plane now. Behind the same `TenantAuthz` on_mount as every
+      # settings surface; inherited at ≈0 authored LOC by every host mounting this macro.
+      {"#{path}/replays", Samen.Web.Replay.IndexLive},
+      {"#{path}/replays/:id", Samen.Web.Replay.PlayerLive}
     ]
   end
 

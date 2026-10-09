@@ -110,6 +110,15 @@ defmodule Samen.Web.Operator.AccountDetailLive do
             >
               Activity →
             </a>
+            <%!-- ADR-052 P3: the per-tenant session replays (impersonation-gated, like Activity). --%>
+            <a
+              :if={@account_id}
+              href={"/operator/replays/#{@account_id}"}
+              id="account-replays-link"
+              style="font-size:12px;color:#3B4CCA;margin-right:14px"
+            >
+              Replays →
+            </a>
             <a href="/operator/accounts" id="back-to-accounts" style="font-size:12px;color:#3B4CCA">← Accounts</a>
           </:actions>
         </.topbar>

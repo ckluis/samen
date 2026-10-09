@@ -84,6 +84,14 @@ defmodule Samen.Web.Replay.Recorder do
     _ -> socket
   end
 
+  @doc """
+  Opt this LiveView out of recording: every recorder hook detached, nothing captured. The
+  replay player (ADR-052 P3) calls it in `mount/3` — a player is never itself recorded.
+  """
+  @spec opt_out(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
+  def opt_out(%Phoenix.LiveView.Socket{private: %{@private => _}} = socket), do: off(socket)
+  def opt_out(socket), do: socket
+
   defp attachable?(socket, mount) do
     connected?(socket) and is_nil(socket.parent_pid) and tenant_plane?(mount) and
       not Map.has_key?(socket.private, @private) and Samen.Replay.running?()
