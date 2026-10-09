@@ -73,6 +73,7 @@ defmodule Samen.Observability.RevealSpanTest do
 
   test "R3 GREEN: a granted reveal runs inside exactly ONE allow-listed reveal span" do
     subject = Ecto.UUID.generate()
+    grant = Ecto.UUID.generate()
 
     assert {:ok, @plaintext} =
              Reveal.reveal("operator-1", @masked, :reveal_email, RevealPerson,
@@ -80,7 +81,7 @@ defmodule Samen.Observability.RevealSpanTest do
                vault: OkVault,
                grant: ApproveAll,
                subject_id: subject,
-               grant_id: "grant-123",
+               grant_id: grant,
                reason: :support_ticket,
                decrypted_value: @plaintext
              )
@@ -90,7 +91,7 @@ defmodule Samen.Observability.RevealSpanTest do
     a = attrs(s)
     assert Map.keys(a) |> Enum.all?(&(&1 in Samen.Tracer.reveal_allowed_attrs()))
     assert a[:subject_id] == subject
-    assert a[:grant_id] == "grant-123"
+    assert a[:grant_id] == grant
     assert a[:reason] == "support_ticket"
 
     refute inspect(a) =~ @plaintext
@@ -135,5 +136,46 @@ defmodule Samen.Observability.RevealSpanTest do
     assert [s] = reveal_spans()
     refute Map.has_key?(attrs(s), :reason)
     refute inspect(attrs(s)) =~ "Alice"
+  end
+
+  describe "subject_id / grant_id are shape-checked opaque ids (ADR-052 §2.1.2 item 5)" do
+    defp span_ids(subject_id, grant_id) do
+      {:ok, _} =
+        Reveal.reveal("operator-1", @masked, :reveal_email, RevealPerson,
+          repo: :unused,
+          vault: OkVault,
+          grant: ApproveAll,
+          subject_id: subject_id,
+          grant_id: grant_id
+        )
+
+      assert [s] = reveal_spans()
+      Map.take(attrs(s), [:subject_id, :grant_id])
+    end
+
+    test "POSITIVE CONTROL: a UUID, a ULID and an integer key reach the span" do
+      uuid = Ecto.UUID.generate()
+      ulid = "01J9ZQ8X4M5N6P7R8S9T0V1W2X"
+      assert span_ids(uuid, ulid) == %{subject_id: uuid, grant_id: ulid}
+      assert span_ids(42, uuid) == %{subject_id: "42", grant_id: uuid}
+    end
+
+    test "a free string under the old length cap never reaches the span" do
+      free = [
+        "alice@example.com",
+        "Alice Anders",
+        "alice",
+        "grant-123",
+        "+15551234567",
+        "5551234567",
+        "vt_" <> String.duplicate("a", 30),
+        Ecto.UUID.generate() <> " alice"
+      ]
+
+      for value <- free do
+        ids = span_ids(value, value)
+        assert ids == %{}, "#{inspect(value)} reached the reveal span as #{inspect(ids)}"
+      end
+    end
   end
 end
