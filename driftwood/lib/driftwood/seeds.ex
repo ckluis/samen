@@ -290,6 +290,9 @@ defmodule Driftwood.Seeds do
 
     {:ok, _agg} = Driftwood.Aggregate.Rebuild.run(Driftwood.Repo)
 
+    # ADR-052 §2.4 — session replay demo (DEV): opt the Blue Ridge org into capture.
+    :ok = seed_replay_flag(@blue_ridge_org_id)
+
     # ADR-010/013 — the OPERATOR org's book of business OVER the seeded tenant orgs: the SaaS
     # company (Samen SaaS, Inc.) whose ACCOUNTS ARE these five freight brokerages, each with a
     # tenant-admin (PII the SaaS owns — CLEAR to the operator), a platform subscription (2 orgs
@@ -298,6 +301,46 @@ defmodule Driftwood.Seeds do
     :ok = Driftwood.OperatorSeeds.seed()
 
     @blue_ridge_org_id
+  end
+
+  @doc """
+  Opt `org_id` into session-replay capture (ADR-052 §2.2 rule 5): the `samen.replay` flag
+  row, enabled, 0 % rollout, with ONE `allow` rule for exactly this org. Capture also needs
+  the host's `replay:` option (`config/dev.exs`). Idempotent: an existing row is left as is.
+  """
+  def seed_replay_flag(org_id) do
+    actor = %{org_id: org_id, role: :admin, plane: :tenant, kind: :tenant}
+    name = Samen.Replay.flag_name()
+
+    exists? =
+      Driftwood.Primitives.FeatureFlag
+      |> Ash.Query.filter(name == ^name)
+      |> Ash.exists?(authorize?: false)
+
+    unless exists? do
+      Driftwood.Primitives.FeatureFlag
+      |> Ash.Changeset.for_create(
+        :create,
+        %{
+          org_id: org_id,
+          name: name,
+          description: "Session replay capture (ADR-052) — recorded by reference, never by value",
+          enabled: true,
+          rollout_pct: 0,
+          stage: :beta,
+          target_rules: [
+            %{"attribute" => "org_id", "op" => "in", "values" => [org_id], "then" => "allow"}
+          ]
+        },
+        actor: actor,
+        authorize?: false
+      )
+      |> Ash.create!()
+
+      :ok = Samen.FeatureFlags.Cache.invalidate(name)
+    end
+
+    :ok
   end
 
   # -- guards ----------------------------------------------------------------
