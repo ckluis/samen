@@ -103,4 +103,82 @@ defmodule Samen.NoPlaintextPii.Tiers.LoggerGovernanceTest do
     assert f.severity == :violation
     assert f.subject == "prod config"
   end
+
+  describe "config/runtime.exs can not lower the prod level (ADR-052 §2.1.2 item 3)" do
+    defp runtime(source), do: LoggerGovernance.runtime_findings({:ok, source})
+
+    test "POSITIVE CONTROL: no runtime.exs, a logger-free one, literals ≥ :info and the clamp pass" do
+      assert LoggerGovernance.runtime_findings(:absent) == []
+
+      # The generated --deploy runtime.exs (fail-closed secrets, OTLP mapping) sets no level.
+      assert runtime(deploy_runtime_exs()) == []
+
+      assert runtime("""
+             import Config
+             if config_env() == :prod do
+               config :logger, level: :warning
+               config :logger, :default_handler, level: :info
+               config :logger, :default_formatter, format: "$message\\n", metadata: [:request_id]
+               Logger.put_module_level(MyApp.Noisy, :error)
+               :logger.set_primary_config(:level, :notice)
+               config :logger,
+                 level: Samen.Observability.prod_log_level(System.get_env("LOG_LEVEL"))
+             end
+             """) == []
+    end
+
+    test "an env-var level (LOG_LEVEL) is refused — it cannot be proven ≥ :info" do
+      assert [f] =
+               runtime("""
+               import Config
+               config :logger, level: String.to_existing_atom(System.get_env("LOG_LEVEL", "info"))
+               """)
+
+      assert f.severity == :violation
+      assert f.subject == "logger level (runtime.exs)"
+      assert f.detail =~ "LOG_LEVEL"
+    end
+
+    test "a literal level below :info is refused, wherever runtime.exs sets it" do
+      for source <- [
+            "config :logger, level: :debug",
+            "if config_env() == :prod, do: config(:logger, level: :all)",
+            "config :logger, :default_handler, level: :debug",
+            "Logger.configure(level: :debug)",
+            "Logger.put_application_level(:my_app, :debug)",
+            ":logger.set_primary_config(:level, :debug)",
+            ":logger.set_primary_config(%{level: :debug})",
+            ":logger.set_handler_config(:default, :level, :all)",
+            ":logger.set_module_level(MyApp.Repo, :debug)"
+          ] do
+        assert [_] = runtime(source), "not refused: #{source}"
+      end
+    end
+
+    test "fail closed: non-literal options, an unparsable file, an unreadable file" do
+      assert [_] = runtime("opts = [level: :debug]\nconfig :logger, opts")
+      assert [_] = runtime("Logger.configure(Application.get_env(:my_app, :log))")
+      assert [_] = runtime(":logger.update_primary_config(cfg)")
+      assert [_] = runtime("config :logger, level: (")
+      assert [_] = LoggerGovernance.runtime_findings({:error, :eacces})
+    end
+
+    test "the clamp itself never yields a level below :info" do
+      assert Samen.Observability.prod_log_level("warning") == :warning
+      assert Samen.Observability.prod_log_level(" ERROR ") == :error
+
+      for v <- ["debug", "all", "", "alice", nil] do
+        assert Samen.Observability.prod_log_level(v) == :info
+      end
+    end
+  end
+
+  # The --deploy runtime.exs the generator emits (rendered with placeholder bindings).
+  defp deploy_runtime_exs do
+    {"config/runtime.exs", template} =
+      Samen.Gen.Templates.files(true, false, true)
+      |> Enum.find(&match?({"config/runtime.exs", _}, &1))
+
+    Samen.Gen.App.render(template, module: "MyApp", otp_app: "my_app")
+  end
 end

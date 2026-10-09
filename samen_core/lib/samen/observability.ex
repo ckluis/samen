@@ -69,6 +69,10 @@ defmodule Samen.Observability do
      `Samen.Observability.LiveTelemetry` turns each LiveView `mount`/`handle_params`/
      `handle_event` (and LiveComponent `handle_event`) callback and each endpoint request
      into ONE bounded `Samen.WideEvent`. Opt out with `request_events: false`.
+  4a. **Nested-value-safe param logging — ON by default (ADR-052 §2.1.2).**
+     `Samen.Observability.ParamFilter` wraps Phoenix's and LiveView's param-logging handlers
+     so a kept `filter_parameters` key keeps only a scalar value, never a nested map/list
+     (`id[x]=alice@…`). Opt out with `param_filter: false`.
   5. **Oban job spans — ON by default (ADR-052 §2.1).** `Samen.Observability.JobSpans`
      opens an `oban.job` span per job execution, parented on the trace context
      `Samen.Jobs.enqueue_in_tx/4` stamps into the job's meta. Opt out with `job_spans: false`.
@@ -86,6 +90,8 @@ defmodule Samen.Observability do
     * `:metrics` — attach the contention handlers (default `true`)
     * `:request_events` — attach the LiveView/request wide events (default `true`)
     * `:job_spans` — attach the Oban job spans (default `true`)
+    * `:param_filter` — wrap Phoenix's param logging with the nested-value-safe keep-list
+      (default `true`)
     * `:kms` — the KMS adapter the request events use for the actor pseudonym
       (default: the configured `Samen.Kms` adapter)
     * `:pool_saturation_threshold_ms` — forwarded to the contention handlers
@@ -136,6 +142,7 @@ defmodule Samen.Observability do
     [otel_ecto_spec(otp_app, prefix)] ++
       metrics_specs(otp_app, prefix, opts) ++
       request_event_specs(otp_app, opts) ++
+      param_filter_specs(otp_app, opts) ++
       job_span_specs(otp_app, opts) ++
       prometheus_specs(otp_app, opts) ++
       wide_event_sink_specs(otp_app, opts)
@@ -170,6 +177,32 @@ defmodule Samen.Observability do
   end
 
   # ---------------------------------------------------------------------------
+  # Nested-value-safe param logging (ADR-052 §2.1.2 item 2; ON by default)
+  # ---------------------------------------------------------------------------
+
+  defp param_filter_specs(otp_app, opts) do
+    if Keyword.get(opts, :param_filter, true) do
+      [
+        %{
+          id: {__MODULE__, :param_filter, otp_app},
+          start: {__MODULE__, :install_param_filter, []},
+          restart: :transient,
+          type: :worker
+        }
+      ]
+    else
+      []
+    end
+  end
+
+  @doc false
+  @spec install_param_filter() :: :ignore
+  def install_param_filter do
+    _ = Samen.Observability.ParamFilter.install()
+    :ignore
+  end
+
+  # ---------------------------------------------------------------------------
   # Oban job spans (ADR-052 §2.1; ON by default)
   # ---------------------------------------------------------------------------
 
@@ -196,6 +229,30 @@ defmodule Samen.Observability do
       {:error, :already_exists} -> :ignore
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Prod Logger level from an env var, clamped (ADR-052 §2.1.2 item 3)
+  # ---------------------------------------------------------------------------
+
+  @prod_log_levels ~w(info notice warning error critical alert emergency none)
+
+  @doc """
+  The Logger level for a prod `config/runtime.exs` driven by an env var, CLAMPED to `:info` or
+  above: a recognised level at or above `:info` is honoured, anything else (`"debug"`, unset,
+  garbage) is `:info`. The `:logger` `no_plaintext_pii` tier accepts this call as a runtime
+  level and refuses any other non-literal one:
+
+      config :logger, level: Samen.Observability.prod_log_level(System.get_env("LOG_LEVEL"))
+  """
+  @spec prod_log_level(String.t() | nil) :: Logger.level() | :none
+  def prod_log_level(value) when is_binary(value) do
+    case String.downcase(String.trim(value)) do
+      level when level in @prod_log_levels -> String.to_existing_atom(level)
+      _ -> :info
+    end
+  end
+
+  def prod_log_level(_), do: :info
 
   # ---------------------------------------------------------------------------
   # OTLP trace exporter (ADR-052 §2.1 — the --deploy runtime layer; fail-honest)

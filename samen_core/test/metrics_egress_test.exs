@@ -36,7 +36,8 @@ defmodule Samen.MetricsEgressTest do
       assert prometheus_children(specs) == []
 
       # Exactly the pre-existing map-spec children: otel-ecto + contention handlers, plus the
-      # ADR-052 §2.1 default-ON request wide events + job spans (setup-only `:ignore` children).
+      # ADR-052 §2.1 default-ON request wide events + job spans and the §2.1.2 param filter
+      # (setup-only `:ignore` children).
       map_ids =
         specs
         |> Enum.filter(&is_map/1)
@@ -46,7 +47,8 @@ defmodule Samen.MetricsEgressTest do
       assert {Observability, :contention_handlers, @app} in map_ids
       assert {Observability, :request_events, @app} in map_ids
       assert {Observability, :job_spans, @app} in map_ids
-      assert length(specs) == 4
+      assert {Observability, :param_filter, @app} in map_ids
+      assert length(specs) == 5
     end
 
     test "an unrelated Observability config does not add an egress child" do
