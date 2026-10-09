@@ -1,0 +1,24 @@
+# SABOTAGE: ADR-052 §2.1.2 item 2 — the framework param filter keeps the WHOLE value under a kept
+# key again (Phoenix's own {:keep, _} semantics), so `id[x]=alice@example.com` and every field of
+# a form posted under a kept root (`org[...]`) reach the log in the clear.
+#
+# Flips the real-Phoenix proof (Phoenix.Logger.filter_values/2 composed, and Phoenix's own
+# handlers wrapped and captured from the log).
+# APP: samen_web
+# TEST_FILES: test/samen/web/param_filter_logging_test.exs
+# MUST_FAIL: composed with Phoenix.Logger.filter_values/2, a nested value is filtered
+# MUST_FAIL: installed, Phoenix's own handlers print no nested value under a kept key
+diff --git a/samen_core/lib/samen/observability/param_filter.ex b/samen_core/lib/samen/observability/param_filter.ex
+index b0036a6..8c968eb 100644
+--- a/samen_core/lib/samen/observability/param_filter.ex
++++ b/samen_core/lib/samen/observability/param_filter.ex
+@@ -47,7 +47,8 @@ defmodule Samen.Observability.ParamFilter do
+ 
+   defp keep(%{} = map, keys) do
+     Map.new(map, fn {k, v} ->
+-      if is_binary(k) and k in keys and scalar?(v), do: {k, v}, else: {k, keep(v, keys)}
++      # SABOTAGE (ADR-052 §2.1.2 item 2): Phoenix's semantics — a kept key keeps ANY value.
++      if is_binary(k) and k in keys and (scalar?(v) or true), do: {k, v}, else: {k, keep(v, keys)}
+     end)
+   end
+ 

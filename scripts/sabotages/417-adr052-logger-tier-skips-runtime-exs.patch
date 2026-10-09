@@ -1,0 +1,23 @@
+# SABOTAGE: ADR-052 §2.1.2 item 3 (wiring half) — the :logger tier's check/1 stops reading the
+# host's config/runtime.exs. runtime_findings/1 still works in isolation, so only a check/1 run
+# against a real host project can see that the file is never looked at.
+#
+# Flips the check/1 wiring test.
+# APP: samen_core
+# TEST_FILES: test/observability/logger_tier_runtime_wiring_test.exs
+# MUST_FAIL: a host whose runtime.exs sets the level from LOG_LEVEL fails the tier
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+index b2bd78a..719502e 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+@@ -74,7 +74,9 @@ defmodule Samen.NoPlaintextPii.Tiers.LoggerGovernance do
+       read_prod_config(),
+       Application.get_env(:phoenix, :filter_parameters),
+       phoenix?
+-    ) ++ runtime_findings(read_runtime_config())
++    )
++    # SABOTAGE (ADR-052 §2.1.2 item 3): the tier never reads config/runtime.exs.
++    |> Kernel.++(if(false, do: runtime_findings(read_runtime_config()), else: []))
+   end
+ 
+   @doc """

@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-052 §2.1.2 item 5 — the reveal span's subject_id / grant_id go back to a length
+# cap, so any short free string a caller hands in (an email, a name, a digit string) becomes a
+# trace attribute.
+#
+# Flips the reveal-span id-shape test.
+# APP: samen_core
+# TEST_FILES: test/observability/reveal_span_test.exs
+# MUST_FAIL: a free string under the old length cap never reaches the span
+diff --git a/samen_core/lib/samen/reveal.ex b/samen_core/lib/samen/reveal.ex
+index c06acb8..05b7d81 100644
+--- a/samen_core/lib/samen/reveal.ex
++++ b/samen_core/lib/samen/reveal.ex
+@@ -185,7 +185,8 @@ defmodule Samen.Reveal do
+   @ulid ~r/\A[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}\z/
+ 
+   defp opaque_id(id) when is_binary(id) do
+-    if id =~ @uuid or id =~ @ulid, do: id, else: nil
++    # SABOTAGE (ADR-052 §2.1.2 item 5): back to a length cap — any short free string passes.
++    if id =~ @uuid or id =~ @ulid or byte_size(id) <= 256, do: id, else: nil
+   end
+ 
+   defp opaque_id(id) when is_integer(id) and id >= 0, do: Integer.to_string(id)

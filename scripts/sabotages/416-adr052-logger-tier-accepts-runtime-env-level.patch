@@ -1,0 +1,23 @@
+# SABOTAGE: ADR-052 §2.1.2 item 3 (decision half) — the :logger tier trusts a NON-LITERAL Logger
+# level in config/runtime.exs, so `config :logger, level: String.to_atom(System.get_env("LOG_LEVEL"))`
+# passes and one env var nobody reviews puts prod back at :debug.
+#
+# Flips the env-var-level tests (unit + check/1 against a real host project).
+# APP: samen_core
+# TEST_FILES: test/observability/logger_tier_test.exs test/observability/logger_tier_runtime_wiring_test.exs
+# MUST_FAIL: an env-var level (LOG_LEVEL) is refused
+# MUST_FAIL: a host whose runtime.exs sets the level from LOG_LEVEL fails the tier
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+index b2bd78a..72643da 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+@@ -261,6 +261,9 @@ defmodule Samen.NoPlaintextPii.Tiers.LoggerGovernance do
+        ),
+        do: []
+ 
++  # SABOTAGE (ADR-052 §2.1.2 item 3): a non-literal runtime level is trusted.
++  defp level_problems(_level, _where) when true, do: []
++
+   defp level_problems(level, where) do
+     [
+       "#{where} sets the Logger level from a non-literal expression " <>
