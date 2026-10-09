@@ -40,7 +40,9 @@ config :driftwood,
     # Samen.AI.SupportReplyDraft) so AI support-reply drafts PERSIST in a real host
     # (repo overrides + migrations below; the ai_support_reply approval kind registered
     # in the Approvals.Registry block).
-    Samen.AI.Domain
+    Samen.AI.Domain,
+    # ADR-052 P2 — the framework replay capture storage (Samen.Replay.Session / Frame).
+    Samen.Replay.Domain
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…)
@@ -66,7 +68,9 @@ config :samen_core, :ash_domains, [
   Driftwood.Analytics,
   Driftwood.Automation,
   # T155 — verifiers must scan the mounted AI-plane resources too.
-  Samen.AI.Domain
+  Samen.AI.Domain,
+  # ADR-052 P2 — and the mounted replay capture resources.
+  Samen.Replay.Domain
 ]
 
 # WS-A A4/A5 — the kernel notification ENGINE (`Samen.Notifications.Engine`) wired to
@@ -342,6 +346,11 @@ config :samen_core, :samen_ai_agent_turn_repo, Driftwood.Repo
 
 # A5 (ADR-047 §6): the durable per-{org, definition} agent kill switch.
 config :samen_core, :samen_ai_agent_kill_repo, Driftwood.Repo
+
+# ADR-052 P2 — the replay capture tables (Samen.Replay.Session / Frame) persist in this host's
+# repo (compile-time; the `samen_ai_*_repo` seam above). Capture itself stays OFF until the host
+# passes `replay:` to `Samen.Observability.child_specs/2` AND an org's `samen.replay` flag is on.
+config :samen_core, :samen_replay_repo, Driftwood.Repo
 
 # The FMCSA dispatch gate reads the CDL vault-token PRESENCE (not plaintext) via a
 # bounded repo query on the pii_vault table (design §4 / OR-7). It needs the repo.

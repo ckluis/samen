@@ -93,6 +93,8 @@ defmodule Samen.Gen.Templates do
   @m_ash_functions File.read!(Path.join(@templates_dir, "m_ash_functions.eex"))
   @external_resource Path.join(@templates_dir, "m_aud_event.eex")
   @m_aud_event File.read!(Path.join(@templates_dir, "m_aud_event.eex"))
+  @external_resource Path.join(@templates_dir, "m_samen_replay.eex")
+  @m_samen_replay File.read!(Path.join(@templates_dir, "m_samen_replay.eex"))
   @external_resource Path.join(@templates_dir, "m_catalog.eex")
   @m_catalog File.read!(Path.join(@templates_dir, "m_catalog.eex"))
   @external_resource Path.join(@templates_dir, "m_erasure.eex")
@@ -248,6 +250,8 @@ defmodule Samen.Gen.Templates do
        m_mount_primitives_scope()},
       {"priv/repo/migrations/20260714210000_mount_operator_scopes.exs",
        m_mount_operator_scopes()},
+      # ADR-052 P2 — the replay capture storage every tenant-LiveView host mounts.
+      {"priv/repo/migrations/20261009100000_samen_replay.exs", m_samen_replay()},
       # The 5-file `*_web/` tree (the pawchart shape, ADR-022).
       {"lib/<%= otp_app %>_web/endpoint.ex", endpoint_ex()},
       {"lib/<%= otp_app %>_web/router.ex", router_ex()},
@@ -588,6 +592,7 @@ defmodule Samen.Gen.Templates do
 
   # ------------------------------------------------------------ operator migration
   defp m_mount_operator_scopes, do: @m_mount_operator_scopes
+  defp m_samen_replay, do: @m_samen_replay
 
   # ------------------------------------------------------------------ misc (web)
   defp gitignore_web do

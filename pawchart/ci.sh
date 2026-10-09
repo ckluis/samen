@@ -84,8 +84,9 @@ mix samen.verify.migrations --min-expand 1
 echo "    PASSED"
 
 # 8. J2 sink-schema allow-list.
-echo "--- step 8/17: mix samen.verify.sink_schema"
+echo "--- step 8/17: mix samen.verify.sink_schema + replay_schema"
 mix samen.verify.sink_schema
+mix samen.verify.replay_schema
 echo "    PASSED"
 
 # 9. T2.8 metric label-lint.

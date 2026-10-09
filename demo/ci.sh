@@ -102,8 +102,9 @@ echo "    PASSED"
 # 8. J2 sink-schema allow-list check (T2.7): every wide-event/span field must be a
 #    bounded ID / token / enum / number. Fails on any free-string/untyped field —
 #    the laundered-leak backstop the layered privacy design (C3 + J2) promises.
-echo "--- step 8/18: mix samen.verify.sink_schema (J2 wide-event/span schema)"
+echo "--- step 8/18: mix samen.verify.sink_schema (J2 wide-event/span schema) + replay_schema (ADR-052 P2 frame schema)"
 mix samen.verify.sink_schema
+mix samen.verify.replay_schema
 echo "    PASSED"
 
 # 9. T2.8 metric label-lint (Gate-2 F2.3): every Telemetry.Metrics definition must
