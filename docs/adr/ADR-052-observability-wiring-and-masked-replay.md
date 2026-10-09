@@ -6,7 +6,9 @@
 - **Date:** 2026-10-09
 - **Build status:** **P1 BUILT** on `feat/adr-052-p1-telemetry` (2026-10-09): §2.1 items 1–3 and red
   paths R1–R4 (sabotages 405–409, plus 410–411), as-built notes in §2.1.1. The P1 gate's six
-  follow-ups are closed in §2.1.2 (sabotages 414–420). P2–P4 not built.
+  follow-ups are closed in §2.1.2 (sabotages 414–420). **P2 BUILT** on `feat/adr-052-replay`
+  (2026-10-09, local, on top of P1): §2.2 capture, red paths R5–R7, R11, R12 (sabotages
+  421–435), as-built notes and deviations in §2.2.1. P3–P4 not built.
 - **Deciders:** the operator, on §6 D1–D4.
 - **Inspiration (not a dependency):** `phoenix_replay` v0.6.2 (elixir-vibe/phoenix_replay, MIT).
   Read 2026-10-09; we take its capture shape, not its code or its storage/privacy model.
@@ -270,6 +272,125 @@ monitor that finalises on exit. Rebuilt with these rules:
 5. **Off by default, opt-in per org** through the feature-flag engine (ADR-020), with a sample
    rate, a per-session frame cap and a byte cap; only sessions with user interaction persist.
    Tenant plane only in v1 (the operator plane is already fully audited).
+
+### 2.2.1 P2 as built (2026-10-09) — and where it deviates
+
+Built as §2.2 says. Every design choice the section left open, and every deviation, with its
+reason:
+
+1. **Where the recorder attaches (≈0 LOC).** `Samen.Web.Replay.Recorder` is attached by
+   `Samen.Web.TenantAuthz` itself, on its two TENANT legs (armed and disarmed), not by a second
+   `on_mount` entry in each route macro. Every framework tenant `live_session` already carries
+   `{TenantAuthz, :require_tenant}`, and so do the hosts' own tenant sessions
+   (`:driftwood_broker`, `:pawchart_clinic`); a second entry would have missed those. The
+   operator leg never attaches, and the recorder refuses any mount that is not an explicit
+   tenant-plane `%Samen.Web.Mount{}` (two layers; sabotage 425 proves the inner one).
+   `on_mount {Samen.Web.Replay.Recorder, :record}` exists for a host that wants it explicitly.
+   Connected, top-level LiveViews only (no `live_render` children).
+2. **Deciding needs the org, which arrives late.** On a disarmed host the org is a
+   `handle_params` value, so the hooks start `:pending` and decide at the first callback that
+   sees a UUID `:org_id` / `:samen_tenant_org_id` (else off after 3 callbacks). The decision is
+   `Samen.FeatureFlags.evaluate("samen.replay", %{org_id: org}, emit: false)` AND the sample
+   draw. Off ⇒ every recorder hook is DETACHED (sabotage 434), so a non-opted-in LiveView pays
+   nothing after that. The flag is not seeded anywhere: an unknown flag is OFF.
+3. **Capture plane.** `Samen.Observability.child_specs(app, replay: true | [opts])` adds ONE
+   `Samen.Replay.Supervisor` (task supervisor, `Samen.Replay.Monitor` owning the ETS buffer,
+   the event handler); without `replay:` the child list is unchanged (tested like the F5.1
+   metrics no-op). No host turns it on in this phase. Options and defaults: `sample_rate` 1.0,
+   `max_frames` 500, `max_bytes` 512 KiB (external term size of sanitized payloads),
+   `max_sessions` 1 000 per node (a buffer memory cap the ADR did not name), `retention_days`
+   14 (1..90; outside ⇒ `ArgumentError` at `child_specs/2` build time). A cap truncates with
+   ONE `:truncated` frame naming it; a truncated session stops sanitizing renders.
+4. **Frames.** Kinds `mount` (view module, view MD5, `live_action`, sanitized assigns),
+   `params` (the matched ROUTE TEMPLATE from `Phoenix.Router.route_info/4` — never the concrete
+   path, whose segments can be slugs — and params as shape), `event` / `component_event`
+   (bounded label + params shape, from LiveView's `:start` telemetry, so events halted by
+   another hook are seen), `render` (only the `__changed__` assigns), `info` (a label-shaped
+   atom tag, else nothing), `exit` (`normal | shutdown | killed | crash` — never the exit term)
+   and `truncated`. The event label is the view's own `handle_event` literal (P1
+   `LiveEvents`), else a key the view DECLARED in its keep-list (a developer literal), else
+   `"other"`.
+5. **Keep-list API.** `use Samen.Replay, keep_assigns: [...], keep_params: %{"event" =>
+   ["param"]}, keep_url_params: [...]`; declarations accumulate (a mixin and the view) into one
+   `__samen_replay__/0`. A kept assign string must still be ≤ 120 codepoints, printable and not
+   email/SSN/phone-shaped; a kept param value must be a label, an integer or a boolean. The
+   framework declaration is in the `Samen.Web.ListLive` mixin (31 list views): `sort`/`field`,
+   `paginate`/`dir`, `bulk`/`action`, `select`/`restore` `id` — never the `filter` text. No
+   framework LiveView assigns `:page_title`, so none declares it (the ADR's example).
+6. **Sanitizer decision table** (`Samen.Replay.Sanitizer`, tier-1 mutation target, 61/61
+   mutants killed): vault-routed attribute of an Ash record → `Ref` (the value — tenant CLEAR,
+   `Plaintext`, `Masked` — is never read); other attributes kept only when
+   `Samen.Cdc.Projection.classify_columns/2` gives a value kind (`bounded_id`, `enum`,
+   `timestamp`, `number`, `boolean`, or a two-reviewer-cleared `metadata` string, which is then
+   still length/PII-bounded) — `plaintext_pii`, `token` or any unknown kind ⇒
+   `Redacted{:free_text, length}`; a `sensitive?` attribute is never kept; loaded relationships
+   recurse; calculations and aggregates are not captured. Bare: UUID → `Id`; other strings,
+   non-UTF-8 binaries, printable charlists → `Redacted`; numbers, booleans, `nil`,
+   dates/times, decimals, label-shaped atoms kept; scope, actor maps (`:plane` + an id) and the
+   framework actor/principal assigns, sockets, PIDs, refs, funs dropped; streams and uploads
+   as counts; maps/lists/tuples recurse under a depth cap of 8, 50 items per level and 5 000
+   nodes per capture. Map keys survive only as atoms or label-shaped, non-PII strings; else
+   positional `"$kN"`. Each top-level assign is sanitized under its own rescue.
+7. **Bare `%Samen.Masked{}` → `Redacted{kind: :masked, label}`, the `vt_*` token dropped**
+   (§2.2 rule 1 said "kept as-is"; deviation). Checked first: the DB tiers (`aud_event`,
+   `oban_jobs`) and the post-shred `db_content` oracle do treat a `vt_*` token in a non-vault
+   table as allowed — shredding the DEK makes it undecryptable. But a bare token has no
+   resource or primary key, so P3 could only resolve it through `Samen.Vault.reveal/3`
+   directly, outside the grant check `PiiResolution` keys on subject + resource + reveal
+   action; storing it would add a 14-day, cross-table-linkable handle with no governed way to
+   use it. A `Masked` INSIDE a record is a `Ref` (the record supplies the provenance).
+8. **List-row provenance (the finding §2.2 asked for).** `Samen.Web.ListLive` keeps the
+   `%Samen.Web.Page{}` whose `items` are the plane-resolved Ash RECORDS themselves (PII
+   resolution rewrites fields in place on the struct), so provenance survives: `Page` is on the
+   sanitizer's walk-list and each row becomes a `Record` with `Ref`s (proven on the real
+   ContactsLive). Where the kit has already flattened rows into non-record terms provenance is
+   lost and the sanitizer redacts: `Samen.Web.GeoSet` markers (a plaintext `label` on a plain
+   struct) drop as an unknown struct; ContactsLive's `company_names` map keeps its UUID keys and
+   redacts the names; `ListState` (its `filter` is typed text) drops; forms
+   (`Phoenix.HTML.Form`) drop. Walk-list is extensible by config
+   (`config :samen_core, Samen.Replay, walk_structs: [...]`).
+9. **Storage (the `Samen.AI.Domain` precedent).** `Samen.Replay.Session` (`rps`) and
+   `Samen.Replay.Frame` (`rpf`) are framework-owned `Samen.Resource`s in `Samen.Replay.Domain`,
+   abbrevs reserved with `mix samen.abbrev.reserve --host samen_core`; repo via
+   `:samen_replay_repo` (compile-time). DDL + catalog rows live once in
+   `Samen.Replay.Migration` (the `DeliverabilityMigration` two-line-delegate shape); mounted in
+   the samen_core test repo, samen_web, driftwood, pawchart and the `Samen.Gen.App` web/api
+   templates (demo serves no tenant LiveViews). Frames cascade with their session. Payload is
+   JSONB. Writes are kernel-only (`forbid_if always()` for any authorized create/destroy);
+   reads are `OrgScope`d. Persisted only with ≥ 1 user interaction.
+10. **Frame schema, enforced twice.** `Samen.Replay.FrameSchema` declares envelope, per-kind
+    payload, every tree marker (`$ref`, `$redacted`, `$dropped`, `$kept`, `$id`, `$atom`, `$dt`,
+    `$dec`, `$record`, `$count`, `$more`, `$tuple`, `$shape`) and the shape entry, with bounded
+    types (`opaque_id`, `enum`, `number`, `boolean`, `timestamp`, `tree`, `shape`, and the one
+    text type `keep_listed` with `max_length` ≤ 200). `mix samen.verify.replay_schema` runs in
+    the same CI step as `sink_schema` (demo, driftwood, pawchart, both generated `ci.sh`).
+    Beyond the ADR: the store validates every ENCODED frame against the same declaration and
+    refuses one with a bare string anywhere in its tree (counted in `rejected_count`, never
+    stored); the encoder passes a bare string through unchanged precisely so the validator, not
+    a silent rewrite, catches a sanitizer bug.
+11. **Session actor** = `Samen.WideEvent.for_subject/2` of the `:samen_tenant_principal`
+    assign (the P1 pseudonym); no live subject key ⇒ no actor recorded.
+12. **Never crashes, measured cost.** Recorder hooks rescue into "off"; the event handler
+    rescues (a raising `:telemetry` handler is detached — sabotage 430); buffer calls return
+    `:error` without a table. Measured on the real ContactsLive (median of 2 000): an
+    `after_render` whose changed assigns hold a 50-row page of Person records costs **~178 µs**
+    with capture on (≈ 3.5 µs per record) and **< 1 µs** when off; a recorded form event
+    **~15 µs**; an unrecorded LiveView's event **< 1 µs** (one ETS lookup).
+
+*Not done in P2 (by design or deferred):* no host enables the capture plane; the `:replay`
+`no_plaintext_pii` tier and the post-shred check are P4; there is no player (P3). A
+`live_render` child LiveView is not recorded. A release that strips debug info records
+`"other"` for undeclared events (the P1 `LiveEvents` limitation, inherited).
+
+| Red path | Sabotage | Owning test file(s) |
+|---|---|---|
+| R5 vault value never stored | 421 | `samen_core/test/replay/sanitizer_test.exs`, `samen_core/test/replay/capture_test.exs` (raw JSONB scan); end to end over ContactsLive: `samen_web/test/samen/web/replay_recorder_test.exs` |
+| R6 freeform is shape only | 422 | `samen_core/test/replay/sanitizer_test.exs` |
+| R7 param values shape only unless keep-listed | 423 | `sanitizer_test.exs`, `capture_test.exs` |
+| R11 off unless the org flag is on | 424 (flag), 425 (operator plane), 434 (hooks detach when off) | `capture_test.exs`, `replay_recorder_test.exs` |
+| R12 retention prunes past TTL | 426 | `capture_test.exs` |
+| frame schema / validator | 427 (build check), 428 (store skips validation), 429 (bare string in tree) | `frame_schema_test.exs`, `capture_test.exs` |
+| capture guards | 430 (handler rescue), 431 (frame cap), 432 (interaction rule), 433 (raw actor), 435 (changed-only renders) | `capture_test.exs`, `replay_recorder_test.exs` |
 
 ### 2.3 P3 — the player and who may watch (D4)
 

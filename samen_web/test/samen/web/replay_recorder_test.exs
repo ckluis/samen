@@ -241,7 +241,10 @@ defmodule Samen.Web.ReplayRecorderTest do
       operator = build_mount(:crm, plane: :operator, target_org_id: ctx.org)
 
       # Positive control: a tenant-plane mount attaches through both entry points.
-      assert Map.has_key?(Recorder.attach(connected_socket(tenant), tenant).private, :samen_replay)
+      assert Map.has_key?(
+               Recorder.attach(connected_socket(tenant), tenant).private,
+               :samen_replay
+             )
 
       assert {:cont, s} =
                Recorder.on_mount(:record, %{}, mount_session(tenant), connected_socket(tenant))
@@ -254,7 +257,12 @@ defmodule Samen.Web.ReplayRecorderTest do
              )
 
       assert {:cont, s} =
-               Recorder.on_mount(:record, %{}, mount_session(operator), connected_socket(operator))
+               Recorder.on_mount(
+                 :record,
+                 %{},
+                 mount_session(operator),
+                 connected_socket(operator)
+               )
 
       refute Map.has_key?(s.private, :samen_replay)
       # No mount at all → fail closed.
@@ -325,13 +333,23 @@ defmodule Samen.Web.ReplayRecorderTest do
       runs = 2_000
       on = median_us(fn -> Lifecycle.after_render(changed) end, runs)
       off = median_us(fn -> Lifecycle.after_render(plain) end, runs)
-      send(parent, {:overhead, on, off, length(page.items)})
+      form = %{"form" => %{"full_name" => %{"first" => "Ada", "last" => "Lovelace"}}}
+      meta = %{socket: socket, event: "validate_new", params: form}
+      ev = [:phoenix, :live_view, :handle_event, :start]
+      event_on = median_us(fn -> Capture.handle_event(ev, %{}, meta, nil) end, runs)
+      send(parent, {:overhead, on, off, length(page.items), event_on})
     end)
 
-    assert_receive {:overhead, on, off, rows}, 60_000
+    assert_receive {:overhead, on, off, rows, event_on}, 60_000
+
+    # An UNRECORDED LiveView's event: the handler's one buffer lookup.
+    meta = %{socket: %{view: ContactsLive}, event: "validate_new", params: %{}}
+    ev = [:phoenix, :live_view, :handle_event, :start]
+    event_off = median_us(fn -> Capture.handle_event(ev, %{}, meta, nil) end, 2_000)
 
     IO.puts(
-      "\n[replay overhead] after_render, #{rows}-row page changed: ON #{on} µs, OFF #{off} µs (median)"
+      "\n[replay overhead] after_render, #{rows}-row page changed: ON #{on} µs, OFF #{off} µs; " <>
+        "handle_event: recorded #{event_on} µs, unrecorded #{event_off} µs (medians)"
     )
 
     assert on < 2_000
