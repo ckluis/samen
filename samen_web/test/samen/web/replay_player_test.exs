@@ -83,6 +83,7 @@ defmodule Samen.Web.ReplayPlayerTest do
       transport_pid: self(),
       router: Samen.WebTest.SecurityRouter,
       endpoint: Samen.WebTest.SecurityEndpoint,
+      private: %{lifecycle: %Phoenix.LiveView.Lifecycle{}},
       assigns: %{__changed__: %{}, flash: %{}}
     }
   end
@@ -475,8 +476,18 @@ defmodule Samen.Web.ReplayPlayerTest do
 
     test "the player itself is never recorded", ctx do
       user = user!(ctx.org, :admin)
-      socket = tenant_player(ctx.org, ctx.replay_id, user.id)
-      assert socket.private[:samen_replay][:state] in [nil, :off]
+      mount = build_mount(:settings)
+      session = %{"samen_mount" => Samen.Web.Mount.to_session(mount), "samen_current_user" => user.id}
+      params = %{"id" => ctx.replay_id, "org" => ctx.org}
+      {:cont, socket} = Samen.Web.TenantAuthz.on_mount(:require_tenant, params, session, connected_socket())
+
+      # Positive control: the tenant on_mount DID attach the recorder to the player's socket.
+      assert socket.private[:samen_replay][:state] == :pending
+      assert Enum.any?(socket.private.lifecycle.after_render, &(&1.id == :samen_replay))
+
+      {:ok, socket} = PlayerLive.mount(params, session, socket)
+      assert socket.private[:samen_replay][:state] == :off
+      refute Enum.any?(socket.private.lifecycle.after_render, &(&1.id == :samen_replay))
     end
   end
 
