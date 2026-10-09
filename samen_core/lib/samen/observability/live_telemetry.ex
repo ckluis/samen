@@ -29,8 +29,21 @@ defmodule Samen.Observability.LiveTelemetry do
       the per-subject HMAC pseudonym (unlinkable on shred), never the raw id or an email.
       Computed at most once per process (a LiveView process memoizes it), omitted when the
       subject has no live key.
-    * `request_id` (Logger metadata, set by `Plug.RequestId`), `trace_id` / `span_id` (the
-      current OTel span, if any), `duration_ms`, and for a request `method` + `status`.
+    * `request_id` — the Logger metadata id, ONLY when this server generated it (see below);
+      `trace_id` / `span_id` (the current OTel span, if any), `duration_ms`, and for a request
+      `method` + `status`.
+
+  ## `request_id` — server-generated ids only (ADR-052 §2.1.2 item 1)
+
+  `Plug.RequestId` adopts any client `x-request-id` of 20–200 bytes, so the Logger metadata id
+  can be a string the client chose. It lands in the event verbatim only when it provably came
+  from `Plug.RequestId.generate/0` in THIS process: exactly 20 url-safe base64 characters that
+  decode to its `<<nanos::64, phash2({node(), self()}, 2^24)::24, unique::32>>` layout with the
+  process hash matching `self()`, and — for a request, where the conn is in the metadata — equal
+  to no request-header value. That id is also the response header, so the event stays
+  correlatable with it. Any other id is replaced by `sub_` + a keyed hash (HMAC-SHA256 under a
+  random per-node key, 16 url-safe characters): bounded and server-shaped, still the same for
+  every event carrying the same client id on this node, and never the client's bytes.
 
   Params, session, URI, path, query string and assigns other than the two above are never
   read into the event.
@@ -87,6 +100,9 @@ defmodule Samen.Observability.LiveTelemetry do
   """
   @spec attach(keyword()) :: :ok | {:error, :already_exists}
   def attach(opts \\ []) do
+    # Mint the per-node request-id substitution key once, here, not racily on first use.
+    _ = request_id_key()
+
     :telemetry.attach_many(@handler_id, @events, &__MODULE__.handle_event/4, %{
       kms: Keyword.get(opts, :kms)
     })
@@ -101,7 +117,7 @@ defmodule Samen.Observability.LiveTelemetry do
   # is detached by :telemetry, which would turn the plane dark for the rest of the node's life.
   def handle_event(event, measurements, metadata, config) do
     case build(event, measurements, metadata, config) do
-      {:ok, fields} -> WideEvent.emit(fields, :build)
+      {:ok, fields} -> WideEvent.emit(fields, :best_effort)
       :skip -> :ok
     end
 
@@ -113,7 +129,8 @@ defmodule Samen.Observability.LiveTelemetry do
   end
 
   @doc false
-  # Pure-ish: the bounded field map for one telemetry event (exposed for tests).
+  # Pure-ish: the field map for one telemetry event (exposed for tests). Values are validated
+  # once, by `WideEvent.emit(fields, :best_effort)`, which drops any that fail their type.
   @spec build([atom()], map(), map(), map()) :: {:ok, map()} | :skip
   def build([:phoenix, :live_view, callback, kind], measurements, metadata, config)
       when callback in @lv_callbacks and kind in [:stop, :exception] do
@@ -130,7 +147,7 @@ defmodule Samen.Observability.LiveTelemetry do
     {:ok,
      base
      |> put_view(view)
-     |> put_common(measurements, assigns(socket), config)}
+     |> put_common(measurements, assigns(socket), nil, config)}
   end
 
   def build([:phoenix, :live_component, :handle_event, kind], measurements, metadata, config)
@@ -147,7 +164,7 @@ defmodule Samen.Observability.LiveTelemetry do
     {:ok,
      base
      |> put_view(component)
-     |> put_common(measurements, assigns(Map.get(metadata, :socket)), config)}
+     |> put_common(measurements, assigns(Map.get(metadata, :socket)), nil, config)}
   end
 
   def build([:phoenix, :endpoint, :stop], measurements, metadata, config) do
@@ -162,8 +179,8 @@ defmodule Samen.Observability.LiveTelemetry do
 
     {:ok,
      base
-     |> put_bounded(:status, status(field(conn, :status)))
-     |> put_common(measurements, field(conn, :assigns), config)}
+     |> put_present(:status, status(field(conn, :status)))
+     |> put_common(measurements, field(conn, :assigns), conn, config)}
   end
 
   def build(_event, _measurements, _metadata, _config), do: :skip
@@ -174,29 +191,76 @@ defmodule Samen.Observability.LiveTelemetry do
   defp outcome(:exception), do: :exception
 
   defp put_view(fields, view) when is_atom(view) and view not in [nil, true, false],
-    do: put_bounded(fields, :view, inspect(view))
+    do: put_present(fields, :view, inspect(view))
 
   defp put_view(fields, _), do: fields
 
-  defp put_common(fields, measurements, assigns, config) do
+  defp put_common(fields, measurements, assigns, conn, config) do
     assigns = if is_map(assigns), do: assigns, else: %{}
 
     fields
-    |> put_bounded(:duration_ms, duration_ms(measurements))
-    |> put_bounded(:tenant_id, tenant_id(Map.get(assigns, :org_id)))
-    |> put_bounded(:actor_id, actor_id(Map.get(assigns, :samen_tenant_principal), config))
-    |> put_bounded(:request_id, Logger.metadata()[:request_id])
+    |> put_present(:duration_ms, duration_ms(measurements))
+    |> put_present(:tenant_id, tenant_id(Map.get(assigns, :org_id)))
+    |> put_present(:actor_id, actor_id(Map.get(assigns, :samen_tenant_principal), config))
+    |> put_present(:request_id, request_id(Logger.metadata()[:request_id], conn))
     |> put_trace()
   end
 
-  # Keep `value` only if it passes its declared bounded type on its own — so one bad value
-  # drops one field, not the whole event.
-  defp put_bounded(fields, _key, nil), do: fields
+  # Absent stays absent. Type validation happens ONCE, at emit (`:best_effort` drops a value
+  # that fails its bounded type, so one bad value still drops one field, not the event).
+  defp put_present(fields, _key, nil), do: fields
+  defp put_present(fields, key, value), do: Map.put(fields, key, value)
 
-  defp put_bounded(fields, key, value) do
-    case WideEvent.new(%{key => value, :action => :live_view}) do
-      {:ok, _} -> Map.put(fields, key, value)
-      {:error, _} -> fields
+  # ---------------------------------------------------------------------------
+  # request_id provenance (ADR-052 §2.1.2 item 1)
+
+  @doc false
+  # The value the event carries for a Logger-metadata request id (exposed for tests).
+  @spec request_id(term(), term()) :: String.t() | nil
+  def request_id(id, conn) when is_binary(id) do
+    if server_generated?(id, conn), do: id, else: substitute_request_id(id)
+  end
+
+  def request_id(_id, _conn), do: nil
+
+  # `Plug.RequestId.generate/0`: url_encode64(<<nanos::64, phash2({node(), self()}, 2^24)::24,
+  # unique_integer::32>>) — 15 bytes, exactly 20 characters, no padding.
+  defp server_generated?(id, conn) when byte_size(id) == 20 do
+    case Base.url_decode64(id) do
+      {:ok, <<_nanos::64, process_hash::24, _unique::32>>} ->
+        process_hash == :erlang.phash2({node(), self()}, 16_777_216) and
+          not client_sent?(id, conn)
+
+      _ ->
+        false
+    end
+  end
+
+  defp server_generated?(_id, _conn), do: false
+
+  # For a request the conn is in hand: a value the client sent in ANY header is the client's,
+  # whatever the header is called (`Plug.RequestId`'s `:http_header` is configurable).
+  defp client_sent?(id, %{req_headers: headers}) when is_list(headers),
+    do: Enum.any?(headers, &match?({_, ^id}, &1))
+
+  defp client_sent?(_id, _conn), do: false
+
+  defp substitute_request_id(id) do
+    digest = :crypto.mac(:hmac, :sha256, request_id_key(), id)
+    "sub_" <> Base.url_encode64(binary_part(digest, 0, 12), padding: false)
+  end
+
+  @request_id_key {__MODULE__, :request_id_key}
+
+  defp request_id_key do
+    case :persistent_term.get(@request_id_key, nil) do
+      nil ->
+        key = :crypto.strong_rand_bytes(32)
+        :persistent_term.put(@request_id_key, key)
+        key
+
+      key ->
+        key
     end
   end
 
@@ -259,8 +323,8 @@ defmodule Samen.Observability.LiveTelemetry do
 
     if :otel_span.is_valid(ctx) do
       fields
-      |> put_bounded(:trace_id, to_string(:otel_span.hex_trace_id(ctx)))
-      |> put_bounded(:span_id, to_string(:otel_span.hex_span_id(ctx)))
+      |> put_present(:trace_id, to_string(:otel_span.hex_trace_id(ctx)))
+      |> put_present(:span_id, to_string(:otel_span.hex_span_id(ctx)))
     else
       fields
     end
