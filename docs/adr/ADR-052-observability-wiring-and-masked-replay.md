@@ -8,7 +8,10 @@
   paths R1–R4 (sabotages 405–409, plus 410–411), as-built notes in §2.1.1. The P1 gate's six
   follow-ups are closed in §2.1.2 (sabotages 414–420). **P2 BUILT** on `feat/adr-052-replay`
   (2026-10-09, local, on top of P1): §2.2 capture, red paths R5–R7, R11, R12 (sabotages
-  421–435), as-built notes and deviations in §2.2.1. P3–P4 not built.
+  421–435), as-built notes and deviations in §2.2.1. **P3 BUILT** on `feat/adr-052-replay`
+  (2026-10-09, local): §2.3 player + who may watch, red paths R8–R10 plus tenant authz, inert
+  rendering and decode safety (sabotages 441–460), as-built notes and deviations in §2.3.1.
+  P4 not built.
 - **Deciders:** the operator, on §6 D1–D4.
 - **Inspiration (not a dependency):** `phoenix_replay` v0.6.2 (elixir-vibe/phoenix_replay, MIT).
   Read 2026-10-09; we take its capture shape, not its code or its storage/privacy model.
@@ -455,6 +458,132 @@ reason:
    so it ships the three proofs via `Samen.MaskingCase` (green tenant/operator-with-grant;
    red operator-without-grant renders `••••`, never plaintext, never a `vt_*` token; sabotage
    twin).
+
+### 2.3.1 P3 as built (2026-10-09) — and where it deviates
+
+Built as §2.3 says. The choices the section left open, and the deviations:
+
+1. **Kernel / web split.** `samen_core` holds everything that touches data:
+   `Samen.Replay.Decoder` (stored frame → capture vocabulary), `Samen.Replay.Resolver` (the
+   view-time resolver), `Samen.Replay.Placeholder`, `Samen.Replay.Player` (list, load, fold,
+   timeline, drift, audit). `samen_web` holds who may watch (`Samen.Web.Replay.Access`), the
+   inert renderer (`Samen.Web.Replay.Renderer`) and the two LiveViews
+   (`Samen.Web.Replay.IndexLive`, `Samen.Web.Replay.PlayerLive`, chrome in
+   `Samen.Web.Replay.Live`). Both chokepoints are tier-1 mutation targets: resolver 14/14,
+   access 11/11 killed.
+2. **Decode safety.** Every stored frame is re-validated against `FrameSchema.validate/1`
+   before anything in it is decoded; a row that fails becomes ONE `:invalid` frame
+   ("unreadable frame" on the timeline). No stored string becomes a new atom: module names,
+   attribute names, map keys and `$atom` values go through `String.to_existing_atom/1` under a
+   rescue (`Decoder.existing_atom/1`, `Decoder.module/1` also requires the module to be
+   loaded). An unknown module, atom or marker decodes to a `:code_changed` placeholder; an
+   unknown map key is dropped; a bare stored string (the validator refuses one) decodes to a
+   `:redacted` placeholder, so no stored free string reaches a template. Closed-set fields
+   are matched as strings. Sabotages 455 (new atoms), 456 (schema skipped).
+3. **Resolution (R8).** `Resolver.resolve/3` collects the tree's `Ref`s, reads each
+   referenced resource ONCE per call with `Ash.read(scope: viewer_scope)` (pk `in` the
+   referenced ids, ≤ 500), and passes each row through `Samen.Api.PiiResolution.resolve/4`
+   with the VIEWER's actor. Beyond the ADR, a belt over the resource's own policies: a row
+   whose `org_id` is not the viewer's (or a viewer scope with no org) is `:gone`, so a
+   resource that declares no org policy still cannot leak across orgs. On the operator plane
+   each record's resolution runs inside `Samen.Tracer.with_reveal_span/3`
+   (`samen.reveal`, `subject_id` + `reason: "replay"` only) — PiiResolution's granted path
+   calls `Samen.Vault.reveal/3` directly, outside `Samen.Reveal.reveal/5`'s span, so the
+   resolver opens it. Outcomes: plaintext → the value (`:clear`); `%Masked{}` →
+   `Placeholder :masked` (`••••`; the `vt_*` token never reaches a template) unless the KMS
+   attests the subject (the record's pk, the `Samen.Vault.Change` subject) `:shredded` →
+   `Placeholder :shredded` (`[erased]`); a KMS that cannot attest never claims shredded; row
+   absent/unreadable/other org → `:gone`; resource no longer an Ash resource, or the
+   attribute no longer vault-routed (`Samen.Pii.Info.pii_attributes/1` ∪ the sanitizer's
+   `:ref` plan) → `:code_changed`. Nothing is cached: each frame batch reads and resolves
+   again (no table, log, ETS or process dictionary), so a lapsed grant or a closed session
+   takes effect on the next batch. The player labels resolved values CURRENT (banner +
+   reference table "current value"). Sabotages 441/442 (recording plane), 443/444 (cache),
+   445 (shred), 446 (cross-org row), 460 (no reveal span).
+4. **Who may watch (R9).** `Access.authorize/3`, called for every list, every open and every
+   frame batch:
+   - operator (`scope_kind: :operator` mount, i.e. `samen_operator_routes/2`, behind T146):
+     `Samen.Web.Operator.Impersonation.gate_socket/3` — the per-tenant drill-in gate, with the
+     R-B scope conjunct; the viewer scope IS the impersonation actor (`plane: :operator`, the
+     real session marker, member-equivalent, no grant). No session → `:no_session` (the
+     refusal card offers the reason-required open-session form, as `ActivityLive` does);
+   - tenant (a tenant-plane mount, i.e. `samen_settings_routes/3`, behind `TenantAuthz`): the
+     org must be in the principal's pinned authorized set (armed hosts; `:cross_org`
+     otherwise), the principal's real `Identity.Membership` role in THAT org must be
+     `Samen.Scope.Role.at_least?(role, :admin)` (owner or admin; `:not_admin` otherwise).
+     An operator-plane settings mount is refused (`:operator_plane`).
+   A refusal renders nothing of any replay and writes nothing. A batch that fails the
+   re-check STOPS playback: frames, the rendered frame and the reference table are dropped
+   from the socket; later batches render nothing. Sabotages 447 (no session check), 448 (no
+   per-batch re-check), 451 (member may watch), 452 (cross-org), 459 (list unauthorized).
+5. **The audit row (R10).** One `Samen.AuditChain.Writer.write/2` per open (its PII-reason
+   scan runs on `detail`), on the replay org's chain: `event_type "replay.viewed"`,
+   `subject_id` = replay session id, `actor_id` = the viewer's id (operator id, or the tenant
+   principal's user id), `correlation_id` = the impersonation session id (operator) / `nil`
+   (tenant), `detail` = `"event=replay.viewed plane=<operator|tenant>"`. *Deviation:* the ADR
+   said "viewer pseudonym"; `aud_event` convention everywhere else is the actor's opaque id
+   (operator id, approver user id), and the HMAC pseudonym is the wide-event/trace
+   convention, so the id is used. The open happens on the CONNECTED mount only (the dead
+   render reads and writes nothing), so one page open is one row; stepping frames writes
+   none. If the audit write fails the player fails closed (nothing shown). Sabotages 449
+   (audit dropped), 450 (dead render opens).
+6. **Rendering (zero side effects).** For frame *i* the player folds the mount frame's
+   assigns with every later render frame's changed assigns, resolves, and calls the recorded
+   view's CURRENT `render/1` (`__changed__: nil`) in the player's process, under
+   `rescue`/`catch`. The resulting string is made inert — `<script>` elements removed,
+   `phx-*` and `on*` attributes stripped inside tags, `javascript:` neutralised — and wrapped
+   in a document with a `default-src 'none'` CSP and the kit stylesheet (inlined at compile
+   time), shown in `<iframe srcdoc sandbox="">` (no `allow-scripts`, no
+   `allow-same-origin`). No socket, no handler, no LiveSocket: nothing can be re-driven.
+   Context the recorder never stores is supplied from code, not data: `samen_mount` is the
+   mount the HOST router routes the recorded view with (route metadata, preferring the
+   recorded route template), rebuilt on the VIEWER's plane; a dropped struct becomes its
+   module's DEFAULT struct (never `Samen.Scope`, a socket or an Ash resource); records are
+   rebuilt as the current resource struct with the captured fields. A template that raises
+   (e.g. the new-contact form, which the recorder drops) shows a placeholder for that frame
+   and playback continues. Placeholders (`Samen.Replay.Placeholder`) implement
+   `Phoenix.HTML.Safe`, `String.Chars`, `Inspect`, `Jason.Encoder`: `▒▒▒ (n)`, `••••`,
+   `[erased]`, `[gone]`, `[changed]`, `▒ n items`. Sabotages 453 (not inert), 454 (sandbox
+   allows scripts), 457 (raise escapes).
+7. **Code drift and timeline.** `Player.drift/1`: `:same` when `Capture.md5/1` of the loaded
+   view equals the stored MD5, `:changed` otherwise, `:missing` when the module is gone or has
+   no `render/1`. The timeline lists each frame with a bounded label (kind + the validated
+   event/route/tag/reason) and marks gaps: missing `seq` (frames refused at persist) and idle
+   periods over 5 s. Step, scrub (range input), seek (timeline) and play (a 900 ms tick) are
+   all batches. The UI uses the kit (`app_shell`, `topbar`, `token_blind_bar`, `pill`,
+   `data_table`, `empty_state`) and collapses to one column under 900 px (ADR-030).
+8. **Mounts (≈0 authored LOC).** `/operator/replays/:org_id` and
+   `/operator/replays/:org_id/:id` ride `samen_operator_routes/2`'s live_session (T146
+   on_mount); `/settings/replays` and `/settings/replays/:id` ride `samen_settings_routes/3`
+   (`TenantAuthz`). driftwood and pawchart already call both macros, so they adopt at 0 lines
+   (route + gate proofs in each: `replay_player_mount_test.exs`); the samen_web test hosts
+   carry them through `SecurityRouter` / `FleetCockpitRouter`. Links: the account drill-down
+   ("Replays →") and the settings sidebar ("Session replays"). The player opts out of the
+   recorder (`Samen.Web.Replay.Recorder.opt_out/1`) — watching a replay is never recorded
+   (sabotage 458). §2.4's separate `samen_replay_routes` macro is therefore not needed.
+9. **Masking watch-list.** The three proofs over a REAL recorded ContactsLive session and the
+   vault-routed `Samen.WebTest.Crm.Person` (`samen_web/test/samen/web/replay_player_test.exs`,
+   `use Samen.MaskingCase`): green (tenant admin; operator with a real `Samen.Reveal.Grants`
+   grant) clear; red (operator without a grant) `assert_masked_dom!` on the srcdoc and on the
+   whole player page — `••••`, no plaintext, no `vt_`; sabotage twin (the same row flipped to
+   the tenant plane leaks and the scan catches it). Kernel proofs in
+   `samen_core/test/replay/player_test.exs`.
+
+*Not done in P3:* no `:replay` `no_plaintext_pii` tier and no post-shred replay check (P4);
+no host turns the capture plane on; the player cannot show a `live_render` child or a stream's
+rows (counts only, §7); a view whose template needs a value the recorder dropped (a form) shows
+a placeholder frame; the player's controls need the LiveView client (the frame itself needs
+nothing).
+
+| Red path | Sabotage | Owning test file(s) |
+|---|---|---|
+| R8 viewer's plane, grant, shred, no cache | 441, 442, 443, 444, 445, 446, 460 | `samen_core/test/replay/player_test.exs`, `samen_web/test/samen/web/replay_player_test.exs` |
+| R9 impersonation session, per-batch re-check | 447, 448 | `replay_player_test.exs` |
+| R10 one token-only aud_event per open | 449, 450 | `replay_player_test.exs`, `player_test.exs` |
+| tenant: admin-class, same org | 451, 452 | `replay_player_test.exs` |
+| inert rendering | 453, 454, 457, 458 | `replay_player_test.exs` |
+| list authorized like an open | 459 | `replay_player_test.exs` |
+| decode safety | 455, 456 | `player_test.exs` |
 
 ### 2.4 P4 — mounts, tiers, docs
 
