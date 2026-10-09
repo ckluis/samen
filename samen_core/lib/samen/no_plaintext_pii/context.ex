@@ -29,6 +29,9 @@ defmodule Samen.NoPlaintextPii.Context do
     * `replica_declared_absent?` — set true by `replica: :none`; lets an operator
       state on the record "there is no replica in this deployment" so the tier
       passes with a documented note instead of failing closed on a `nil` repo.
+    * `plaintext_probes` — known plaintext values a caller SEEDED (a game-day, a red-path
+      test) that a content-scanning tier (`:replay`, `:post_shred_replay`) must find
+      nowhere it scans. Never printed in a finding. Default `[]`.
 
   ## Plaintext-PII-type classification
 
@@ -58,7 +61,8 @@ defmodule Samen.NoPlaintextPii.Context do
     :subject_id,
     :replica_repo,
     :pitr_repos,
-    replica_declared_absent?: false
+    replica_declared_absent?: false,
+    plaintext_probes: []
   ]
 
   @type t :: %__MODULE__{
@@ -70,7 +74,8 @@ defmodule Samen.NoPlaintextPii.Context do
           subject_id: String.t() | nil,
           replica_repo: module() | nil,
           pitr_repos: [module()] | nil,
-          replica_declared_absent?: boolean()
+          replica_declared_absent?: boolean(),
+          plaintext_probes: [String.t()]
         }
 
   @doc """
@@ -97,7 +102,8 @@ defmodule Samen.NoPlaintextPii.Context do
       subject_id: Keyword.get(opts, :subject_id),
       replica_repo: replica_repo,
       pitr_repos: Keyword.get(opts, :pitr_repos),
-      replica_declared_absent?: replica_absent?
+      replica_declared_absent?: replica_absent?,
+      plaintext_probes: opts |> Keyword.get(:plaintext_probes, []) |> Enum.filter(&is_binary/1)
     }
   end
 

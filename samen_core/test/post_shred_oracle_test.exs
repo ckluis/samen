@@ -184,9 +184,18 @@ defmodule Samen.PostShredOracleTest do
       assert "audit" in db_subjects
     end
 
-    test "the default post_shred_tiers roster is the three checks + ingress + cdc-stub" do
+    test "the default post_shred_tiers roster is the three checks + ingress + cdc-stub + replay" do
       names = Enum.map(NoPlaintextPii.post_shred_tiers(), & &1.tier_name())
-      assert names == [:db_content, :backup_pitr, :kms_attestation, :trace_sink, :cdc_mirror]
+
+      assert names == [
+               :db_content,
+               :backup_pitr,
+               :kms_attestation,
+               :trace_sink,
+               :cdc_mirror,
+               :post_shred_replay
+             ]
+
       # And they are ALL :post_shred mode.
       assert Enum.all?(NoPlaintextPii.post_shred_tiers(), &(&1.mode() == :post_shred))
     end

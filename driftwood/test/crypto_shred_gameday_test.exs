@@ -49,6 +49,86 @@ defmodule Driftwood.CryptoShredGamedayTest do
     do: Enum.flat_map(NoPlaintextPii.post_shred_tiers(), fn t -> t.check(ctx) end)
 
   # ==========================================================================
+  # SESSION REPLAY (ADR-052 §2.4) — erasure reaches stored replays by reference
+  # ==========================================================================
+
+  describe "SESSION REPLAY — the driver's recorded replay after the shred" do
+    defp replay_text do
+      %{rows: rows} =
+        Ecto.Adapters.SQL.query!(
+          @repo,
+          "SELECT rpf_payload::text FROM replay_frame UNION ALL SELECT row_to_json(s)::text FROM replay_session s"
+        )
+
+      rows |> List.flatten() |> Enum.join("\n")
+    end
+
+    test "GREEN: the replay holds references only, and every one resolves to [erased] post-shred" do
+      s = GD.seed_driver_across_tiers(repo: @repo)
+      d = s.driver_id
+
+      # Pre-shred: the stored frames REFERENCE the driver and hold none of its plaintext.
+      raw = replay_text()
+      assert raw =~ d
+      for v <- [s.cdl_plaintext, s.name_last, s.email, s.phone], do: refute(raw =~ v)
+
+      {:ok, _} = Erasure.shred(d, repo: @repo, org_id: s.org_id)
+
+      findings =
+        PostShred.Replay.check(
+          post_ctx(d, plaintext_probes: [s.cdl_plaintext, s.name_last, s.email])
+        )
+
+      assert NoPlaintextPii.violations(findings) == []
+      assert Enum.any?(findings, &(&1.severity == :pass and &1.detail =~ "resolve to [erased]"))
+
+      # The player itself, on the tenant plane, shows [erased] for every driver reference.
+      scope = %Samen.Scope{actor: %{org_id: s.org_id, plane: :tenant, role: :admin}}
+      {:ok, %{frames: frames}} = Samen.Replay.Player.load(scope, s.replay_session_id)
+
+      %{value: v, refs: refs} =
+        Samen.Replay.Player.resolve(Samen.Replay.Player.assigns_at(frames, 0), scope)
+
+      driver_refs = Enum.filter(refs, &(&1.pk == d))
+      assert driver_refs != []
+      assert Enum.all?(driver_refs, &(&1.outcome in [:shredded, :empty]))
+      assert Enum.any?(driver_refs, &(&1.outcome == :shredded))
+      refute inspect(v) =~ s.name_last
+    end
+
+    test "RED (anti-tautology): the same check on a driver whose key was NOT destroyed fails" do
+      s = GD.seed_driver_across_tiers(repo: @repo)
+      findings = PostShred.Replay.check(post_ctx(s.driver_id))
+      assert %{detail: detail} = violation(findings, "replay")
+      assert detail =~ "do NOT resolve to [erased]"
+      refute detail =~ s.name_last
+    end
+
+    test "RED: a plaintext copy of the erased driver in a replay row (written past the store) is caught" do
+      s = GD.seed_driver_across_tiers(repo: @repo)
+      {:ok, _} = Erasure.shred(s.driver_id, repo: @repo, org_id: s.org_id)
+
+      Ecto.Adapters.SQL.query!(
+        @repo,
+        "INSERT INTO replay_frame (rpf_session_id, rpf_org_id, rpf_seq, rpf_kind, rpf_at_ms, rpf_payload, " <>
+          "rpf_inserted_at, rpf_updated_at) VALUES ($1, $2, 90, 'render', 1, $3, now(), now())",
+        [
+          Ecto.UUID.dump!(s.replay_session_id),
+          Ecto.UUID.dump!(s.org_id),
+          %{"assigns" => %{"t" => %{"$kept" => %{"value" => s.cdl_plaintext}}}}
+        ]
+      )
+
+      findings =
+        PostShred.Replay.check(post_ctx(s.driver_id, plaintext_probes: [s.cdl_plaintext]))
+
+      assert [f] = NoPlaintextPii.violations(findings)
+      assert f.detail =~ "seeded plaintext"
+      refute Samen.NoPlaintextPii.Finding.format(f) =~ s.cdl_plaintext
+    end
+  end
+
+  # ==========================================================================
   # GREEN PATH — the driver is spread across every tier, shredded, oracle clean
   # ==========================================================================
 
@@ -77,6 +157,8 @@ defmodule Driftwood.CryptoShredGamedayTest do
       assert :kms_attestation in tiers
       assert :trace_sink in tiers
       assert :cdc_mirror in tiers
+      # ADR-052 §2.4 — the driver's recorded replay: every reference resolves to [erased].
+      assert :post_shred_replay in tiers
 
       # Every db_content sub-tier attested (live/rollup/audit/registered_non_pii/wrong_key).
       db_subjects = passes |> Enum.filter(&(&1.tier == :db_content)) |> Enum.map(& &1.subject)

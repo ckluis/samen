@@ -30,6 +30,12 @@ defmodule Driftwood.CryptoShredGameday do
       key-shred cannot reach; erased by row-level redaction).
     * **wide-event sink / trace-sink** — schema-level (token/bounded-id/pseudonym
       only); the pseudonym unlinks on shred.
+    * **session replay** (ADR-052 §2.4) — a recorded tenant replay session whose frames
+      hold the driver as the broker desk saw it (resolved CLEAR on the tenant plane), written
+      through the real capture sanitizer + store: every vault field is a REFERENCE
+      (`$ref` → resource + driver id + attribute), never the value. Erasure reaches it
+      without touching the replay rows — the post-shred replay tier proves every reference
+      resolves to `[erased]`.
 
   ## Running the oracle (the auditor CLI contract)
 
@@ -172,6 +178,9 @@ defmodule Driftwood.CryptoShredGameday do
       raise "seed sanity check failed: revealed CDL #{inspect(revealed_cdl)} != #{inspect(cdl_plaintext)}"
     end
 
+    # --- session replay: the broker desk's recorded session showing the driver.
+    replay_session_id = seed_replay(org_id, driver.id, repo)
+
     %{
       org_id: org_id,
       driver_id: driver_id,
@@ -185,12 +194,59 @@ defmodule Driftwood.CryptoShredGameday do
       reveal_request_id: request.id,
       reveal_grant_id: grant.id,
       oban_job_id: job.id,
+      replay_session_id: replay_session_id,
       requestor: requestor,
       approver: approver,
       # `operator` kept as an alias for the party that reveals (the requestor), so
       # callers/tests reference one field for "who unmasks the CDL".
       operator: requestor
     }
+  end
+
+  @doc """
+  Persist ONE recorded tenant replay session of `org_id` whose frames hold driver `driver_id`
+  exactly as a tenant LiveView holds it — the record resolved CLEAR on the tenant plane —
+  through the real capture path: `Samen.Replay.Sanitizer` (vault fields become references)
+  and `Samen.Replay.Store` (frame schema + `RowGuard`). Returns the replay session id.
+  """
+  @spec seed_replay(String.t(), String.t(), module()) :: String.t()
+  def seed_replay(org_id, driver_id, repo \\ Repo) do
+    [driver] =
+      Driftwood.Freight.Driver
+      |> Ash.Query.filter_input(%{id: driver_id})
+      |> Ash.Query.select(
+        Driftwood.Freight.Driver
+        |> Ash.Resource.Info.attribute_names()
+        |> Enum.to_list()
+      )
+      |> Ash.read!(authorize?: false)
+      |> Samen.Api.PiiResolution.resolve(
+        Driftwood.Freight.Driver,
+        %{plane: :tenant, org_id: org_id}, repo: repo)
+
+    view = "DriftwoodWeb.BrokerLive"
+    assigns = Samen.Replay.Sanitizer.assigns(%{driver: driver, drivers_count: 1}, keep: [])
+    shape = Samen.Replay.Sanitizer.params(%{"id" => driver_id}, [])
+
+    {:ok, session} =
+      Samen.Replay.Store.persist(
+        %{
+          org_id: org_id,
+          actor_ref: nil,
+          view: view,
+          view_md5: nil,
+          started_at: DateTime.utc_now()
+        },
+        [
+          {1, 0, :mount, %{view: view, assigns: assigns}},
+          {2, 40, :event, %{event: "other", params: shape}},
+          {3, 41, :render,
+           %{assigns: Samen.Replay.Sanitizer.assigns(%{driver: driver}, only: [:driver])}}
+        ],
+        %{bytes: 0, interactions: 1, truncated: false, exit_reason: :normal}
+      )
+
+    session.id
   end
 
   @doc """
