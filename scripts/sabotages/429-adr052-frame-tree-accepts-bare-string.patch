@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.2 rule 3 — the frame-tree validator accepts a bare value (a raw string)
+# anywhere in a sanitized tree.
+#
+# Flips the bare-string refusal test.
+# APP: samen_core
+# TEST_FILES: test/replay/frame_schema_test.exs
+# MUST_FAIL: RED: a bare string anywhere in the tree is refused
+diff --git a/samen_core/lib/samen/replay/frame_schema.ex b/samen_core/lib/samen/replay/frame_schema.ex
+index 8fc78d6..b1f821c 100644
+--- a/samen_core/lib/samen/replay/frame_schema.ex
++++ b/samen_core/lib/samen/replay/frame_schema.ex
+@@ -478,7 +478,8 @@ defmodule Samen.Replay.FrameSchema do
+   end
+ 
+   defp check_tree(v, path) when is_map(v), do: check_plain_object(v, path)
+-  defp check_tree(_v, path), do: {:error, "#{path}: bare value"}
++  # SABOTAGE (ADR-052 §2.2 rule 3): a bare value is accepted.
++  defp check_tree(_v, _path), do: :ok
+ 
+   defp check_plain_object(v, path) do
+     Enum.reduce_while(v, :ok, fn {k, val}, :ok ->

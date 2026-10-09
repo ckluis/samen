@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.2 rule 5 — the per-session frame cap is never applied: a long session
+# buffers frames without bound and never truncates.
+#
+# Flips the max_frames truncation test.
+# APP: samen_core
+# TEST_FILES: test/replay/capture_test.exs
+# MUST_FAIL: max_frames truncates with ONE marker; the LiveView never sees an error
+diff --git a/samen_core/lib/samen/replay/buffer.ex b/samen_core/lib/samen/replay/buffer.ex
+index 18a511b..9ac1a1d 100644
+--- a/samen_core/lib/samen/replay/buffer.ex
++++ b/samen_core/lib/samen/replay/buffer.ex
+@@ -129,7 +129,8 @@ defmodule Samen.Replay.Buffer do
+ 
+       cap =
+         cond do
+-          seq > max_frames -> :max_frames
++          # SABOTAGE (ADR-052 §2.2 rule 5): the frame cap is ignored.
++          seq > max_frames and false -> :max_frames
+           bytes > max_bytes -> :max_bytes
+           true -> nil
+         end

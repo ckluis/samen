@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.2 rule 5 / R11 — capture no longer consults the org's samen.replay flag:
+# every sampled tenant session records, opted in or not.
+#
+# Flips the per-org decision test.
+# APP: samen_core
+# TEST_FILES: test/replay/capture_test.exs
+# MUST_FAIL: decide/1 is :on only for an opted-in org; an unknown flag is :off
+diff --git a/samen_core/lib/samen/replay.ex b/samen_core/lib/samen/replay.ex
+index 04001a1..4ff709b 100644
+--- a/samen_core/lib/samen/replay.ex
++++ b/samen_core/lib/samen/replay.ex
+@@ -284,7 +284,8 @@ defmodule Samen.Replay do
+   def decide(org_id, cfg \\ runtime_config())
+ 
+   def decide(org_id, %{} = cfg) when is_binary(org_id) do
+-    if flag_on?(org_id, cfg) and sampled?(cfg.sample_rate), do: :on, else: :off
++    # SABOTAGE (ADR-052 R11): the flag check is bypassed.
++    if sampled?(cfg.sample_rate), do: :on, else: :off
+   end
+ 
+   def decide(_org_id, _cfg), do: :off

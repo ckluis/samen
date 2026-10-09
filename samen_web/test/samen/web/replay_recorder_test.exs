@@ -195,6 +195,13 @@ defmodule Samen.Web.ReplayRecorderTest do
     for s <- sentinels, do: refute(all =~ s, "plaintext #{inspect(s)} reached the replay tables")
     refute all =~ "vt_"
 
+    # A render records ONLY the assigns it changed: the last render (after "validate_new")
+    # changed nothing but the form.
+    [_, last_render] =
+      for([k, p] <- frames, k == "render", do: Jason.decode!(p)) |> Enum.take(-2)
+
+    assert Map.keys(last_render["assigns"]) == ["new_form"]
+
     # R7: the typed form arrived as shape — key, type, length, class.
     [validate] =
       for [k, p] <- frames, k == "event", (d = Jason.decode!(p))["event"] == "validate_new", do: d
@@ -225,6 +232,33 @@ defmodule Samen.Web.ReplayRecorderTest do
       mount = build_mount(:crm, plane: :operator, target_org_id: ctx.org)
       refute play(ctx.org, mount, fn _socket, _org -> :ok end)
       assert %{rows: [[0]]} = Samen.WebTest.Repo.query!("SELECT count(*) FROM replay_session")
+    end
+
+    test "the recorder itself refuses an operator-plane mount (second layer under TenantAuthz)",
+         ctx do
+      start_capture!([ctx.org])
+      tenant = build_mount(:crm, [])
+      operator = build_mount(:crm, plane: :operator, target_org_id: ctx.org)
+
+      # Positive control: a tenant-plane mount attaches through both entry points.
+      assert Map.has_key?(Recorder.attach(connected_socket(tenant), tenant).private, :samen_replay)
+
+      assert {:cont, s} =
+               Recorder.on_mount(:record, %{}, mount_session(tenant), connected_socket(tenant))
+
+      assert Map.has_key?(s.private, :samen_replay)
+
+      refute Map.has_key?(
+               Recorder.attach(connected_socket(operator), operator).private,
+               :samen_replay
+             )
+
+      assert {:cont, s} =
+               Recorder.on_mount(:record, %{}, mount_session(operator), connected_socket(operator))
+
+      refute Map.has_key?(s.private, :samen_replay)
+      # No mount at all → fail closed.
+      refute Map.has_key?(Recorder.attach(connected_socket(tenant), nil).private, :samen_replay)
     end
 
     test "a DEAD (disconnected) mount never attaches", ctx do

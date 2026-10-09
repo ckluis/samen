@@ -1,0 +1,26 @@
+# SABOTAGE: ADR-052 P2 — the replay event handler no longer rescues: one malformed telemetry
+# metadata map raises inside :telemetry, which DETACHES the handler for the node's life (and,
+# under a hostile sanitizer input, a LiveView's event path pays for the crash).
+#
+# Flips the handler-survives test.
+# APP: samen_core
+# TEST_FILES: test/replay/capture_test.exs
+# MUST_FAIL: the event handler survives garbage metadata and stays attached
+diff --git a/samen_core/lib/samen/replay/capture.ex b/samen_core/lib/samen/replay/capture.ex
+index ec8a229..76f29ca 100644
+--- a/samen_core/lib/samen/replay/capture.ex
++++ b/samen_core/lib/samen/replay/capture.ex
+@@ -89,12 +89,9 @@ defmodule Samen.Replay.Capture do
+ 
+   @doc false
+   def handle_event(event, _measurements, metadata, _config) do
++    # SABOTAGE (ADR-052 P2): no rescue — :telemetry detaches a raising handler.
+     capture(event, metadata)
+     :ok
+-  rescue
+-    _ -> :ok
+-  catch
+-    _, _ -> :ok
+   end
+ 
+   defp capture([:phoenix, :live_view, :handle_event, :start], %{socket: socket, event: ev} = meta) do

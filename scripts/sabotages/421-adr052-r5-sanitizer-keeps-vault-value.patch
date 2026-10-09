@@ -1,0 +1,27 @@
+# SABOTAGE: ADR-052 §2.2 rule 1 / R5 — the replay sanitizer records a vault-routed attribute BY
+# VALUE instead of by reference: on the tenant plane that value is the resolved plaintext, so a
+# scalar vault field (an MRN) reaches the replay tables in the clear.
+#
+# Flips the sanitizer's by-reference test and the persisted-JSONB scan.
+# APP: samen_core
+# TEST_FILES: test/replay/sanitizer_test.exs test/replay/capture_test.exs
+# MUST_FAIL: a tenant-plane CLEAR record: every vault field is a Ref; no plaintext survives
+# MUST_FAIL: raw JSONB carries Refs for the vault fields and none of the seeded plaintext
+diff --git a/samen_core/lib/samen/replay/sanitizer.ex b/samen_core/lib/samen/replay/sanitizer.ex
+index bb4f227..41f7008 100644
+--- a/samen_core/lib/samen/replay/sanitizer.ex
++++ b/samen_core/lib/samen/replay/sanitizer.ex
+@@ -416,8 +416,11 @@ defmodule Samen.Replay.Sanitizer do
+     %Record{resource: plan.name, pk: pk, fields: fields}
+   end
+ 
+-  defp attribute(:ref, name, _value, plan, pk, _depth, _walk),
+-    do: %Ref{resource: plan.name, pk: pk, attribute: name, label: name}
++  # SABOTAGE (ADR-052 R5): the vault-routed value is kept instead of referenced.
++  defp attribute(:ref, _name, value, _plan, _pk, _depth, _walk) when is_binary(value),
++    do: %Kept{value: value}
++
++  defp attribute(:ref, _name, value, _plan, _pk, depth, walk), do: walk(value, depth + 1, walk)
+ 
+   defp attribute(:keep, _name, value, _plan, _pk, depth, walk) when is_binary(value) do
+     if uuid?(value), do: %Id{value: String.downcase(value)}, else: kept(value, @max_cleared)

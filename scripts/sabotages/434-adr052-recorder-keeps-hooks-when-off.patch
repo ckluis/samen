@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-052 §2.2 rule 5 — when capture is decided OFF the recorder keeps its lifecycle
+# hooks attached, so an un-opted-in LiveView pays a hook call on every params/render/info.
+#
+# Flips the flag-off detach test.
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_recorder_test.exs
+# MUST_FAIL: flag OFF for the org: hooks detach, nothing is persisted
+diff --git a/samen_web/lib/samen/web/replay/recorder.ex b/samen_web/lib/samen/web/replay/recorder.ex
+index 4955c35..74510c6 100644
+--- a/samen_web/lib/samen/web/replay/recorder.ex
++++ b/samen_web/lib/samen/web/replay/recorder.ex
+@@ -190,7 +190,9 @@ defmodule Samen.Web.Replay.Recorder do
+   defp off(socket) do
+     socket = put_private(socket, @private, %{state: :off, tries: 0, keep: nil})
+ 
+-    Enum.reduce(@stages, socket, fn stage, acc -> detach_hook(acc, @private, stage) end)
++    # SABOTAGE (ADR-052 §2.2 rule 5): hooks stay attached when off.
++    _ = @stages
++    socket
+   rescue
+     _ -> socket
+   end

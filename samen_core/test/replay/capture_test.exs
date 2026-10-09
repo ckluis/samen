@@ -443,11 +443,13 @@ defmodule Samen.Replay.CaptureTest do
   describe "never crashes or slows the LiveView" do
     test "the event handler survives garbage metadata and stays attached", ctx do
       start_capture!([ctx.org])
+      # This process records, so garbage metadata reaches the capture path (and raises in it).
+      assert {:ok, _} = Capture.open(%{org_id: ctx.org, view: ReplayView})
 
       for meta <- [
-            %{},
             %{socket: nil, event: 1, params: :x},
-            %{socket: %{view: 42}, event: "e", params: [1]}
+            %{socket: %{view: 42}, event: "e", params: [1]},
+            %{component: nil, event: "e", params: %{}}
           ] do
         :telemetry.execute([:phoenix, :live_view, :handle_event, :start], %{}, meta)
         :telemetry.execute([:phoenix, :live_component, :handle_event, :start], %{}, meta)
@@ -455,6 +457,11 @@ defmodule Samen.Replay.CaptureTest do
 
       assert Enum.any?(
                :telemetry.list_handlers([:phoenix, :live_view, :handle_event, :start]),
+               &(&1.id == Capture.handler_id())
+             )
+
+      assert Enum.any?(
+               :telemetry.list_handlers([:phoenix, :live_component, :handle_event, :start]),
                &(&1.id == Capture.handler_id())
              )
     end

@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.2 rule 5 — a session is persisted even when the user never interacted
+# (every page view becomes a stored replay).
+#
+# Flips the interaction rule test.
+# APP: samen_core
+# TEST_FILES: test/replay/capture_test.exs
+# MUST_FAIL: a session with no user interaction is discarded
+diff --git a/samen_core/lib/samen/replay/monitor.ex b/samen_core/lib/samen/replay/monitor.ex
+index 71f97f6..287fa18 100644
+--- a/samen_core/lib/samen/replay/monitor.ex
++++ b/samen_core/lib/samen/replay/monitor.ex
+@@ -94,7 +94,8 @@ defmodule Samen.Replay.Monitor do
+   def finalize(id, reason) do
+     case Buffer.take(id) do
+       {:ok, meta, frames, counters} ->
+-        if counters.interactions > 0 do
++        # SABOTAGE (ADR-052 §2.2 rule 5): persist regardless of interaction.
++        if counters.interactions >= 0 do
+           persist(meta, frames, counters, reason)
+         else
+           :telemetry.execute([:samen, :replay, :discarded], %{frames: length(frames)}, %{})

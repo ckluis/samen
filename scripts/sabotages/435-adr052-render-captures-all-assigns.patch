@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.2 — after_render sanitizes and records EVERY assign instead of only the
+# changed ones (the frame stream re-sends the whole page on each render).
+#
+# Flips the changed-assigns-only assertion of the ContactsLive end-to-end test.
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_recorder_test.exs
+# MUST_FAIL: a captured ContactsLive session persists Refs and shapes
+diff --git a/samen_web/lib/samen/web/replay/recorder.ex b/samen_web/lib/samen/web/replay/recorder.ex
+index 4955c35..e3f25df 100644
+--- a/samen_web/lib/samen/web/replay/recorder.ex
++++ b/samen_web/lib/samen/web/replay/recorder.ex
+@@ -233,7 +233,8 @@ defmodule Samen.Web.Replay.Recorder do
+       keep = socket.private[@private].keep
+ 
+       Capture.record(:render, %{
+-        assigns: Sanitizer.assigns(socket.assigns, only: Map.keys(changed), keep: keep.assigns)
++        # SABOTAGE (ADR-052 §2.2): every assign, not only the changed ones.
++        assigns: Sanitizer.assigns(socket.assigns, keep: keep.assigns)
+       })
+     end
+ 
