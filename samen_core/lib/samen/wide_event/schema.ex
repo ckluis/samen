@@ -81,8 +81,28 @@ defmodule Samen.WideEvent.Schema do
     {:table, :opaque_id, []},
     {:row_count, :number, []},
     {:duration_ms, :number, []},
-    {:queue_depth, :number, []}
+    {:queue_depth, :number, []},
+    # ADR-052 §2.1 (P1) — the LiveView + request wide event. Every field is bounded:
+    #   * `view` — the LiveView/LiveComponent MODULE name, a catalog identifier like
+    #     `table` (code-defined, never request data);
+    #   * `callback` / `outcome` / `method` — closed enums;
+    #   * `event` — the `handle_event` name, drawn from the view's OWN statically
+    #     handled event literals (`Samen.Observability.LiveEvents`); anything else is
+    #     `:other`. A client-sent string never becomes an atom (R2);
+    #   * `status` — the HTTP status code, a number.
+    {:view, :opaque_id, []},
+    {:callback, :enum, [allowed: ~w(mount handle_params handle_event component_event request)a]},
+    {:event, :enum, [allowed: :open]},
+    {:outcome, :enum, [allowed: ~w(ok exception)a]},
+    {:method, :enum, [allowed: ~w(get head post put patch delete options other)a]},
+    {:status, :number, []}
   ]
+
+  # The ONLY fields that may use the `allowed: :open` sentinel. `:action` is the
+  # app-defined label set; `:event` is the per-view static event set, resolved by
+  # `Samen.Observability.LiveEvents` (a code-derived set, never client input). Any
+  # other field declaring `:open` is a J2 violation — an open enum is a carrier.
+  @open_enum_fields [:action, :event]
 
   @doc "The list of bounded (permitted-at-sink) field types."
   @spec bounded_types() :: [atom()]
@@ -95,6 +115,18 @@ defmodule Samen.WideEvent.Schema do
   @doc "The canonical wide-event field schema (doc §runs 4b)."
   @spec canonical_fields() :: [field_spec()]
   def canonical_fields, do: @canonical_fields
+
+  @doc "The fields permitted to declare the `allowed: :open` enum sentinel."
+  @spec open_enum_fields() :: [atom()]
+  def open_enum_fields, do: @open_enum_fields
+
+  @doc "The names of the `:number` fields (the telemetry measurements of an emitted event)."
+  @spec number_fields() :: [atom()]
+  def number_fields, do: for({name, :number, _} <- @canonical_fields, do: name)
+
+  @doc "The names of the `:enum` fields (atom-valued in the struct)."
+  @spec enum_fields() :: [atom()]
+  def enum_fields, do: for({name, :enum, _} <- @canonical_fields, do: name)
 
   @doc "The set of declared field names (atoms)."
   @spec field_names() :: MapSet.t(atom())
@@ -123,9 +155,10 @@ defmodule Samen.WideEvent.Schema do
     * its declared type is not a bounded type (`:string`/`:binary`/`:map`/… — the
       name-carrier surface), OR
     * it is an `:enum` with no closed `allowed:` set (an open enum could carry an
-      arbitrary label — it must enumerate its values, `allowed: :open` being the
-      ONE reserved sentinel for `action`, whose closed set is enforced at emit
-      via `Samen.WideEvent.action_allowed?/1`).
+      arbitrary label — it must enumerate its values), OR
+    * it declares the reserved `allowed: :open` sentinel but is not one of
+      `open_enum_fields/0` (`:action`, whose set is app-defined, and `:event`,
+      whose set is the view's own static `handle_event` literals — ADR-052 §2.1).
 
   This is a **pure function over the declared schema** so the mix task and tests
   drive it identically. It also accepts an override field list (used by red-path
@@ -152,6 +185,13 @@ defmodule Samen.WideEvent.Schema do
           "enum field #{inspect(name)} declares no closed `allowed:` set. An open enum " <>
             "could carry an arbitrary label — declare `allowed: [..]` (or the reserved " <>
             "`allowed: :open` sentinel whose closed set is enforced at emit)."
+        ]
+
+      type == :enum and Keyword.get(opts, :allowed) == :open and name not in @open_enum_fields ->
+        [
+          "enum field #{inspect(name)} declares the reserved `allowed: :open` sentinel, which " <>
+            "only #{inspect(@open_enum_fields)} may use (their sets are enforced at emit). " <>
+            "Declare a closed `allowed: [..]` list instead."
         ]
 
       true ->
