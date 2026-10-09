@@ -5,7 +5,8 @@
   ruling "be inspired by phoenix_replay, but rebuild it for our needs and our approach."
 - **Date:** 2026-10-09
 - **Build status:** **P1 BUILT** on `feat/adr-052-p1-telemetry` (2026-10-09): §2.1 items 1–3 and red
-  paths R1–R4 (sabotages 405–409, plus 410–411), as-built notes in §2.1.1. P2–P4 not built.
+  paths R1–R4 (sabotages 405–409, plus 410–411), as-built notes in §2.1.1. The P1 gate's six
+  follow-ups are closed in §2.1.2 (sabotages 414–420). P2–P4 not built.
 - **Deciders:** the operator, on §6 D1–D4.
 - **Inspiration (not a dependency):** `phoenix_replay` v0.6.2 (elixir-vibe/phoenix_replay, MIT).
   Read 2026-10-09; we take its capture shape, not its code or its storage/privacy model.
@@ -170,6 +171,71 @@ Built as §2.1 says, with these specifics and deviations (each with its reason):
 | §2.1.3 Ash inspect | 410 | `samen_core/test/observability/vault_inspect_redaction_test.exs` |
 | §2.1.1 handler never detaches | 411 | `samen_core/test/observability/live_telemetry_test.exs` |
 | §2.1.1 gate: vaulted form round trip | 412 (framework), 413 (driftwood) | `samen_web/test/samen/web/vault_form_roundtrip_test.exs`, `driftwood/test/broker_driver_form_roundtrip_test.exs` |
+
+### 2.1.2 P1 follow-ups (2026-10-09) — the six non-blocking gate findings, closed
+
+1. **`request_id` was client-choosable (MEDIUM).** `Plug.RequestId` adopts any client
+   `x-request-id` of 20–200 bytes, and `LiveTelemetry` copied it into every event. Now the id
+   lands verbatim only when `Plug.RequestId.generate/0` made it *in this process*: exactly 20
+   url-safe base64 characters decoding to `<<nanos::64, phash2({node(), self()}, 2^24)::24,
+   unique::32>>` with the hash matching `self()`, and, for a request (conn in hand), equal to no
+   request-header value under any header name. That id is the response header, so correlation is
+   kept. Anything else becomes `sub_` + HMAC-SHA256 under a random per-node key (16 url-safe
+   chars). *Why a keyed hash, not a fresh id:* events carrying the same client id still group
+   together on that node, and an unkeyed hash of a low-entropy client string (an email) could be
+   reversed by dictionary. *Why not a framework plug that always generates:* it would mean an
+   endpoint edit in every host; the provenance check needs none. A client cannot pass the check
+   without the server's process hash (2^-24 per blind guess, no oracle). Tests:
+   `samen_core/test/observability/live_telemetry_test.exs` (request_id describe),
+   `samen_web/test/samen/web/request_id_provenance_test.exs` (real `Plug.RequestId`).
+   Sabotage **414**.
+2. **A kept `filter_parameters` key kept nested values (LOW).** Phoenix offers no hook into
+   `filter_values/2`, so `Samen.Observability.ParamFilter` (in `child_specs/2`, default ON,
+   `param_filter: false` opts out) re-attaches every `Phoenix.Logger` and
+   `Phoenix.LiveView.Logger` handler under its own id, wrapped. The wrapper filters
+   `params` / `conn.params` first, keeping a kept key's value only when it is a scalar. Phoenix's
+   keep filter then runs over values that are already scalar or `[FILTERED]`. LiveView's mount
+   session, which LiveView printed unfiltered, gets the same keep-list. If the sanitizer fails,
+   the whole value is `[FILTERED]`; raw params are never passed on. Proven against real
+   `Phoenix.Logger.filter_values/2` and Phoenix's own handlers, with a positive control showing
+   the leak without the wrap: `samen_web/test/samen/web/param_filter_logging_test.exs`. Sabotage
+   **415**.
+3. **runtime.exs could lower the prod level (LOW).** The `:logger` tier now reads
+   `config/runtime.exs` **statically**. Evaluating it would need the deploy's secrets (the
+   generated one raises on a missing `DATABASE_URL` by design), and it would still prove only the
+   env vars the check happened to pick. The tier fails closed. Every level runtime.exs can set
+   must be a literal at or above `:info`: `config :logger, …` (any depth, handler sub-keys
+   included), `Logger.configure`, `Logger.put_*_level`, and `:logger.set_*`/`update_*`. The one
+   exception is the new clamp `Samen.Observability.prod_log_level(System.get_env("LOG_LEVEL"))`,
+   whose result is always `:info` or above. A non-literal option list or an unparsable file is a
+   violation. No host in the repo has a runtime.exs; the generated `--deploy` one passes. Tests:
+   `logger_tier_test.exs` (runtime describe) and `logger_tier_runtime_wiring_test.exs`
+   (`check/1` against a throwaway host project). Sabotages **416** (decision) and **417**
+   (`check/1` wiring).
+4. **~45 µs per LiveView callback (LOW, perf).** Each value was validated three times: once
+   per field through `WideEvent.new/1`, again by `new/1` in `emit/2`, and again by `emit/1`.
+   `WideEvent.emit(fields, :best_effort)` now validates each value exactly once and drops a
+   value that fails its type, as the per-field pre-check did. The struct is built from passing
+   values only, so it skips `emit/1`'s re-validation (which still applies to a struct built
+   elsewhere). `:build` no longer re-validates the struct `new/1` just built, and the schema
+   lookups are compiled maps. The build-time `sink_schema` check is unchanged.
+   **Measured** (`handle_event` callback with view, tenant and request id, 7×50k runs, median):
+   **56.6 µs → 19.1 µs**. `PiiValueShape.pii_shaped_id?/1` calls per callback: **17 → 5** (one
+   per id field plus the two open-enum labels; pinned by a trace-session test in
+   `live_telemetry_test.exs`). Perf only: no sabotage.
+5. **Reveal span ids were length-capped, not shaped (LOW).** `subject_id` / `grant_id` reach
+   the span only as a UUID string, a ULID string or an integer key. Any other string is dropped,
+   including a digit string (a phone number has that shape). Test: `reveal_span_test.exs` (id
+   describe). Sabotage **418**.
+6. **Job rows carried the global propagator's output (LOW).** `Samen.Tracer.job_trace_headers/0`
+   injects through `:otel_propagator_trace_context` only (`traceparent`/`tracestate`), never the
+   SDK's default `[trace_context, baggage]` composite. A host adding `opentelemetry_phoenix`
+   would otherwise write the client's `baggage` header into `oban_jobs.meta`.
+   `attach_job_trace_context/1`, used by `JobSpans` and `with_job_span/3`, extracts the same two
+   headers only, so a baggage pair already stored in a row is ignored. The `oban_jobs` tier
+   stays green. Tests: `job_spans_test.exs` (W3C describe, with positive controls showing that
+   the global propagator would carry and restore the baggage). Sabotages **419** (inject) and
+   **420** (extract).
 
 ### 2.2 P2 — `Samen.Replay` capture (D2, D3)
 
