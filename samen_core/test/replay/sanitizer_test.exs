@@ -330,4 +330,152 @@ defmodule Samen.Replay.SanitizerTest do
       assert field.key == "$k0"
     end
   end
+
+  describe "edges (the mutation gate's survivors, each pinned)" do
+    alias SamenCore.Support.ReplayFixtureDomain.Gadget
+
+    defp depth_of(%Dropped{kind: :depth}, n), do: n
+    defp depth_of(%{n: inner}, n), do: depth_of(inner, n + 1)
+
+    # Nodes the walker actually spent budget on (markers it emitted instead do not count).
+    defp walked(%Dropped{kind: :budget}), do: 0
+    defp walked(%More{}), do: 0
+    defp walked(list) when is_list(list), do: 1 + Enum.sum(Enum.map(list, &walked/1))
+    defp walked(_leaf), do: 1
+
+    test "__changed__ is never captured; an `only:` key absent from the assigns is skipped" do
+      out = Sanitizer.assigns(%{a: 1, __changed__: %{a: true}})
+      assert out == %{a: 1}
+      assert Sanitizer.assigns(%{a: 1}, only: [:a, :gone]) == %{a: 1}
+    end
+
+    test "params that are a struct or not a map are an empty shape" do
+      assert Sanitizer.params(URI.parse("https://example.com")) == %Shape{fields: []}
+      assert Sanitizer.params("ada@example.com") == %Shape{fields: []}
+    end
+
+    test "the depth cap cuts at exactly #{8} levels" do
+      deep = Enum.reduce(1..12, :leaf, fn _, acc -> %{n: acc} end)
+      assert depth_of(Sanitizer.assigns(%{deep: deep}).deep, 0) == 8
+    end
+
+    test "the node budget is exactly #{5000} nodes per capture" do
+      cube = for _ <- 1..50, do: for(_ <- 1..50, do: Enum.to_list(1..50))
+      out = Sanitizer.assigns(%{cube: cube}).cube
+      assert inspect(out, limit: :infinity) =~ "budget"
+      assert walked(out) == 5000
+    end
+
+    test "an actor map needs :plane plus an id; a row-like map without :plane is walked" do
+      id = Ash.UUID.generate()
+
+      out =
+        Sanitizer.assigns(%{
+          row: %{id: id, org_id: id, n: 1},
+          a: %{plane: :tenant, id: id},
+          b: %{plane: :tenant, org_id: id},
+          c: %{plane: :tenant}
+        })
+
+      assert out.row == %{id: %Id{value: id}, org_id: %Id{value: id}, n: 1}
+      assert out.a == %Dropped{kind: :actor}
+      assert out.b == %Dropped{kind: :actor}
+      assert out.c == %{plane: :tenant}
+    end
+
+    test "a map keeps exactly #{50} entries; a small map carries no $more marker" do
+      big = Map.new(1..51, &{&1, &1})
+      out = Sanitizer.assigns(%{big: big, small: %{a: 1}})
+      assert map_size(out.big) == 51
+      assert out.big["$more"] == %More{n: 1}
+      refute Map.has_key?(out.small, "$more")
+    end
+
+    test "a sensitive? structural attribute is never kept; projected kinds are" do
+      id = Ash.UUID.generate()
+      rec = %Gadget{id: id, count: 7, secret_count: 42, note: "Ada Lovelace", status: :open}
+
+      %Record{resource: "SamenCore.Support.ReplayFixtureDomain.Gadget", pk: ^id, fields: f} =
+        Sanitizer.value(rec)
+
+      assert f.count == 7
+      assert f.status == :open
+      assert f.id == %Id{value: id}
+      assert f.secret_count == %Redacted{kind: :free_text}
+      assert f.note == %Redacted{kind: :free_text, length: 12}
+    end
+
+    test "keep-listed strings: the exact length and byte bounds, and printability" do
+      emoji = String.duplicate("😀", 120)
+
+      out =
+        Sanitizer.assigns(
+          %{
+            e: emoji,
+            a120: String.duplicate("a", 120),
+            a121: String.duplicate("a", 121),
+            ctl: "a\u0001b"
+          },
+          keep: [:e, :a120, :a121, :ctl]
+        )
+
+      assert out.e == %Kept{value: emoji}
+      assert out.a120 == %Kept{value: String.duplicate("a", 120)}
+      assert out.a121 == %Redacted{kind: :string, length: 121}
+      assert out.ctl == %Redacted{kind: :string, length: 3}
+    end
+
+    test "a Masked with a non-atom label keeps no label" do
+      out = Sanitizer.assigns(%{m: %Samen.Masked{token: "vt_x", label: "Ada Lovelace"}})
+      assert out.m == %Redacted{kind: :masked, label: nil}
+    end
+
+    test "a redacted string's length is computed up to 16 KiB, then omitted" do
+      at = String.duplicate("a", 16_384)
+      over = String.duplicate("a", 16_385)
+      out = Sanitizer.assigns(%{at: at, over: over})
+      assert out.at == %Redacted{kind: :string, length: 16_384}
+      assert out.over == %Redacted{kind: :string, length: nil}
+    end
+
+    test "label? and uuid? boundaries" do
+      assert Sanitizer.label?(String.duplicate("a", 64))
+      refute Sanitizer.label?(String.duplicate("a", 65))
+      refute Sanitizer.label?("a/b")
+      refute Sanitizer.label?(nil)
+      refute Sanitizer.label?(42)
+      # Ecto.UUID.cast/1 would accept a RAW 16-byte binary; a 16-character string is not an id.
+      refute Sanitizer.uuid?("abcdefghijklmnop")
+      assert Sanitizer.uuid?(Ash.UUID.generate())
+    end
+
+    test "param keys: atoms by name; nil and booleans positional" do
+      %Shape{fields: fields} = Sanitizer.params(%{:status => 1, nil => 2, true => 3})
+      keys = fields |> Enum.map(& &1.key) |> Enum.sort()
+      assert "status" in keys
+      refute "nil" in keys
+      refute "true" in keys
+      assert Enum.count(keys, &String.starts_with?(&1, "$k")) == 2
+    end
+
+    test "param shapes nest exactly #{5} levels" do
+      nested = Enum.reduce(1..8, 1, fn _, acc -> %{"a" => acc} end)
+      %Shape{fields: [top]} = Sanitizer.params(nested)
+
+      levels =
+        Stream.unfold(top, fn
+          nil -> nil
+          f -> {f, f |> Map.get(:fields, []) |> List.first()}
+        end)
+
+      assert Enum.count(levels) == 5
+    end
+
+    test "a keep-listed float or map value is shape only" do
+      %Shape{fields: fields} =
+        Sanitizer.params(%{"rate" => 1.5, "m" => %{"x" => 1}}, ["rate", "m"])
+
+      for f <- fields, do: refute(Map.has_key?(f, :value))
+    end
+  end
 end

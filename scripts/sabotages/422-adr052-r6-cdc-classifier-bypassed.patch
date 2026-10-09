@@ -7,16 +7,16 @@
 # TEST_FILES: test/replay/sanitizer_test.exs
 # MUST_FAIL: job_title (freeform string) is Redacted free_text; structural columns are kept
 diff --git a/samen_core/lib/samen/replay/sanitizer.ex b/samen_core/lib/samen/replay/sanitizer.ex
-index bb4f227..f29f080 100644
+index 7b61549..7e8fb0e 100644
 --- a/samen_core/lib/samen/replay/sanitizer.ex
 +++ b/samen_core/lib/samen/replay/sanitizer.ex
-@@ -482,7 +482,8 @@ defmodule Samen.Replay.Sanitizer do
+@@ -485,7 +485,8 @@ defmodule Samen.Replay.Sanitizer do
    defp decision(_attr, true, _class), do: :ref
-   defp decision(_attr, false, :token), do: :ref
    defp decision(%{sensitive?: true}, false, _class), do: :free
--  defp decision(_attr, false, class) when class in [nil, :plaintext_pii], do: :free
+   defp decision(_attr, false, class) when class in @projected_kinds, do: :keep
+-  defp decision(_attr, false, _class), do: :free
 +  # SABOTAGE (ADR-052 R6): the classifier's default-deny is ignored.
-+  defp decision(_attr, false, class) when class in [nil, :plaintext_pii], do: :keep
-   defp decision(_attr, false, _class), do: :keep
++  defp decision(_attr, false, _class), do: :keep
  
    defp pk_value(record, [field]) do
+     case Map.get(record, field) do

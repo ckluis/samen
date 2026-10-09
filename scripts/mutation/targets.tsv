@@ -39,3 +39,7 @@ samen_core/lib/samen/policy/same_org_fk.ex	samen_core	test/same_org_fk_change_te
 # --- the masking test-infra itself: if this can be weakened undetected, every
 # --- masking proof built on it is suspect (derived: sabotage TEST_FILES) -------
 samen_core/lib/samen/scope_mask_case.ex	samen_core	test/samen/scope_mask_case_test.exs
+# --- session replay capture sanitizer (ADR-052 P2): the ONE path from a LiveView's assigns
+# --- and params into a persisted frame — a silent weakening is a plaintext store
+# --- (derived: sabotage TEST_FILES 421-423) ------------------------------------
+samen_core/lib/samen/replay/sanitizer.ex	samen_core	test/replay/sanitizer_test.exs test/replay/capture_test.exs

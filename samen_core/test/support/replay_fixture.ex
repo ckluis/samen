@@ -20,3 +20,31 @@ defmodule SamenCore.Support.ReplayMixinView do
   use Samen.Replay, keep_params: %{"paginate" => ["dir"]}
   use Samen.Replay, keep_assigns: [:tab], keep_params: %{"paginate" => ["page"]}
 end
+
+defmodule SamenCore.Support.ReplayFixtureDomain do
+  @moduledoc "ADR-052 P2 fixture domain (not registered in :ash_domains — a sanitizer input only)."
+  use Ash.Domain, validate_config_inclusion?: false
+
+  resources do
+    resource(SamenCore.Support.ReplayFixtureDomain.Gadget)
+  end
+end
+
+defmodule SamenCore.Support.ReplayFixtureDomain.Gadget do
+  @moduledoc """
+  ADR-052 P2 fixture: a table-less resource whose attributes exercise every non-vault branch of
+  the sanitizer's record decision — a structural integer (kept), a `sensitive?` structural
+  integer (never kept), a freeform string (shape only), an enum atom (kept).
+  """
+  use Ash.Resource,
+    domain: SamenCore.Support.ReplayFixtureDomain,
+    data_layer: Ash.DataLayer.Simple
+
+  attributes do
+    uuid_primary_key(:id)
+    attribute(:count, :integer, public?: true)
+    attribute(:secret_count, :integer, public?: true, sensitive?: true)
+    attribute(:note, :string, public?: true)
+    attribute(:status, :atom, public?: true)
+  end
+end

@@ -14,9 +14,9 @@ defmodule Samen.Replay.Sanitizer do
 
   | Captured term | Recorded as |
   |---|---|
-  | Ash record, vault-routed attribute (`pii do … end`, or a CDC `:token` column) | `%Ref{resource, pk, attribute, label}` — the value (tenant-plane CLEAR, `%Samen.Pii.Plaintext{}`, `%Samen.Masked{}`) is never read |
-  | Ash record, attribute `Samen.Cdc.Projection.classify_columns/2` would project (bounded id / enum / timestamp / number / boolean, or a two-reviewer `non_pii!`-cleared column) | the value, sanitized (a cleared string → `Kept` if bounded, else `Redacted{:string}`) |
-  | Ash record, any other attribute (freeform, unknown type, `sensitive?`) | `%Redacted{kind: :free_text, length: n}` |
+  | Ash record, vault-routed attribute (declared in `pii do … end`) | `%Ref{resource, pk, attribute, label}` — the value (tenant-plane CLEAR, `%Samen.Pii.Plaintext{}`, `%Samen.Masked{}`) is never read |
+  | Ash record, attribute `Samen.Cdc.Projection.classify_columns/2` would project as a value (`:bounded_id`/`:enum`/`:timestamp`/`:number`/`:boolean`, or a two-reviewer `non_pii!`-cleared `:metadata` column) | the value, sanitized (a cleared string → `Kept` if bounded, else `Redacted{:string}`) |
+  | Ash record, any other attribute (`:plaintext_pii` freeform, an unknown kind, `sensitive?`) | `%Redacted{kind: :free_text, length: n}` |
   | Ash record, loaded relationship | the related record(s), same rules; calculations + aggregates are not captured |
   | bare `%Samen.Masked{}` (outside a record) | `%Redacted{kind: :masked, label: label}` — the `vt_*` token is NOT kept (ADR §2.2.1) |
   | bare `%Samen.Pii.Plaintext{}` | `%Redacted{kind: :vault_plaintext}` — no length |
@@ -64,6 +64,11 @@ defmodule Samen.Replay.Sanitizer do
     :samen_authorized_orgs
   ]
   @scope_keys [:scope, :current_scope, :samen_scope, :write_scope]
+
+  # The projection kinds `Samen.Cdc.Projection.classify_columns/2` mirrors as a value — a
+  # structural-safe scalar, or a two-reviewer `non_pii!`-cleared column (`:metadata`). Any
+  # other kind (`:plaintext_pii`, `:token`, an unknown future kind) is never kept.
+  @projected_kinds [:bounded_id, :enum, :timestamp, :number, :boolean, :metadata]
 
   @default_walk_structs [Samen.Web.Page, Phoenix.LiveView.AsyncResult]
 
@@ -184,7 +189,7 @@ defmodule Samen.Replay.Sanitizer do
     end
   end
 
-  defp walk_term(term, _depth, _walk) when is_nil(term) or is_boolean(term), do: term
+  # `nil`, `true` and `false` are atoms: they take the atom clause (always label-shaped → kept).
   defp walk_term(term, _depth, _walk) when is_integer(term) or is_float(term), do: term
   defp walk_term(term, _depth, _walk) when is_atom(term), do: atom(term)
   defp walk_term(term, _depth, _walk) when is_binary(term), do: string(term)
@@ -220,9 +225,7 @@ defmodule Samen.Replay.Sanitizer do
         Process.put(@budget_key, n - 1)
         true
 
-      nil ->
-        true
-
+      # Exhausted. (`assigns/2` and `value/2` always set the budget before walking.)
       _ ->
         false
     end
@@ -372,6 +375,8 @@ defmodule Samen.Replay.Sanitizer do
     @default_walk_structs ++ List.wrap(extra)
   end
 
+  # `Ash.Resource.Info.resource?/1` answers false (never raises) for any atom; the walker's
+  # per-assign guard still catches the unexpected.
   defp ash_resource?(mod) do
     key = {__MODULE__, :resource?, mod}
 
@@ -384,8 +389,6 @@ defmodule Samen.Replay.Sanitizer do
       value ->
         value
     end
-  rescue
-    _ -> false
   end
 
   # ---------------------------------------------------------------------------
@@ -476,14 +479,13 @@ defmodule Samen.Replay.Sanitizer do
     }
   end
 
-  # The ADR-015 decision, reused verbatim: vault-routed (declared, or a `:token` storage
-  # column) → by reference; a `sensitive?` attribute → never kept; otherwise kept only when the
-  # CDC classifier would project it.
+  # The ADR-015 decision, reused verbatim: vault-routed (declared in `pii do … end` — every
+  # column the classifier calls `:token` is one of these) → by reference; a `sensitive?`
+  # attribute → never kept; otherwise kept only when the CDC classifier would project it.
   defp decision(_attr, true, _class), do: :ref
-  defp decision(_attr, false, :token), do: :ref
   defp decision(%{sensitive?: true}, false, _class), do: :free
-  defp decision(_attr, false, class) when class in [nil, :plaintext_pii], do: :free
-  defp decision(_attr, false, _class), do: :keep
+  defp decision(_attr, false, class) when class in @projected_kinds, do: :keep
+  defp decision(_attr, false, _class), do: :free
 
   defp pk_value(record, [field]) do
     case Map.get(record, field) do
