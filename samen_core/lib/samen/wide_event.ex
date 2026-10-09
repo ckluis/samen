@@ -238,15 +238,12 @@ defmodule Samen.WideEvent do
 
   defp reject_nils(map), do: map |> Enum.reject(fn {_k, v} -> is_nil(v) end) |> Map.new()
 
-  # The schema, compiled into this module once: the hot path does a map lookup per field
-  # instead of rebuilding the name set and scanning the field list on every call.
-  @field_names Schema.field_names()
+  # The schema, compiled into this module once as a plain map: the hot path does a map lookup
+  # per field instead of rebuilding the name set and scanning the field list on every call.
   @field_specs Map.new(Schema.canonical_fields(), fn {name, _, _} = spec -> {name, spec} end)
 
   defp reject_unknown_fields(fields) do
-    allowed = @field_names
-
-    case Enum.reject(Map.keys(fields), &MapSet.member?(allowed, &1)) do
+    case Enum.reject(Map.keys(fields), &Map.has_key?(@field_specs, &1)) do
       [] ->
         :ok
 
@@ -254,7 +251,7 @@ defmodule Samen.WideEvent do
         {:error,
          Enum.map(unknown, fn f ->
            "unknown wide-event field #{inspect(f)} — not in the declared schema " <>
-             "(#{inspect(MapSet.to_list(allowed))}). Add it to Samen.WideEvent.Schema " <>
+             "(#{inspect(MapSet.to_list(Schema.field_names()))}). Add it to Samen.WideEvent.Schema " <>
              "with a bounded type first (J2)."
          end)}
     end
