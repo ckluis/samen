@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 5) — `Application.put_env(:logger, …)` (and :kernel, put_all_env,
+# :application.set_env) is no longer refused in runtime.exs.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/observability/logger_tier_test.exs
+# MUST_FAIL: every shape that HIDES a Logger level write is refused
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+index 82cb70c..2ab2abe 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+@@ -366,7 +366,10 @@ defmodule Samen.NoPlaintextPii.Tiers.LoggerGovernance do
+   end
+ 
+   defp app_env_problems(fun, app, acc) do
++    # SABOTAGE (ADR-052 §2.4.1): app-env writes pass.
+     cond do
++      fun != nil -> acc
++
+       app in [:logger, :kernel] ->
+         [hidden("`#{fun}(#{inspect(app)}, …)` rewrites Logger configuration at runtime") | acc]
+ 

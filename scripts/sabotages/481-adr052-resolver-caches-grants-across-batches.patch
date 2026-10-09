@@ -1,0 +1,31 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 9) — the batch prefetch is cached ACROSS frame batches: a grant
+# issued (or a suspension) between two batches never takes effect (deny-on-read broken).
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/resolver_batch_test.exs
+# MUST_FAIL: deny-on-read survives batching
+diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
+index 4b97a97..60152af 100644
+--- a/samen_core/lib/samen/replay/resolver.ex
++++ b/samen_core/lib/samen/replay/resolver.ex
+@@ -147,7 +147,18 @@ defmodule Samen.Replay.Resolver do
+   # `PiiResolution.prefetch/4` read ONCE for all the batch's rows. Lives for this call only.
+   defp batch_opts(rows, mod, actor, opts) do
+     base = Keyword.merge([repo: repo(mod, opts)], Keyword.take(opts, [:grant, :vault]))
+-    PiiResolution.prefetch(rows, mod, actor, base)
++    # SABOTAGE (ADR-052 §2.4.1): the batch read is cached across batches.
++    key = {__MODULE__, :sabotage_cache, mod, Map.get(actor, :id)}
++
++    case :persistent_term.get(key, nil) do
++      nil ->
++        prefetched = PiiResolution.prefetch(rows, mod, actor, base)
++        :persistent_term.put(key, prefetched)
++        prefetched
++
++      prefetched ->
++        prefetched
++    end
+   rescue
+     # A failed prefetch costs only the per-record reads it would have saved.
+     _ -> Keyword.merge([repo: repo(mod, opts)], Keyword.take(opts, [:grant, :vault]))

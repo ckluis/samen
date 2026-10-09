@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4 — the :replay tier stops validating stored frames against the frame schema: a
+# bare free string written past the store passes.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/replay_tier_test.exs
+# MUST_FAIL: a frame with a bare free string is a violation
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/replay.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/replay.ex
+index cf23a79..aa8002d 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/replay.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/replay.ex
+@@ -138,7 +138,8 @@ defmodule Samen.NoPlaintextPii.Tiers.Replay do
+   defp frame_pass(repo) do
+     each_frame_page(repo, %{findings: [], subjects: MapSet.new()}, fn frame, acc ->
+       acc =
+-        case validate_stored(frame) do
++        # SABOTAGE (ADR-052 §2.4): every frame passes.
++        case validate_stored(frame) && :ok do
+           :ok ->
+             acc
+ 

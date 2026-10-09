@@ -1,0 +1,18 @@
+# SABOTAGE: ADR-052 §2.4 — Driftwood PROD turns session replay capture on (the demo config leaks out of
+# dev).
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/replay_dev_demo_test.exs
+# MUST_FAIL: capture is configured ON in dev only
+diff --git a/driftwood/config/prod.exs b/driftwood/config/prod.exs
+index 2fcddd2..d06f308 100644
+--- a/driftwood/config/prod.exs
++++ b/driftwood/config/prod.exs
+@@ -23,3 +23,6 @@ config :driftwood, auth_required?: true
+ # `Samen.Kms.assert_prod_adapter_ready!/0` admits it), but NOT durable across an ephemeral release
+ # filesystem. Before running a real production deploy, wire a `config/runtime.exs` that selects a
+ # real KMS you operate (see the generated deploy runbook for the pattern).
++
++# SABOTAGE (ADR-052 §2.4): capture on in prod.
++config :driftwood, Samen.Observability, replay: true

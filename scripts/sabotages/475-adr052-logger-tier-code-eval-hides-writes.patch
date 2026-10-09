@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 5) — `Code.eval_file` / `Code.eval_string` / `import_config` in
+# runtime.exs are no longer refused: code the check cannot see may set any level.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/observability/logger_tier_test.exs
+# MUST_FAIL: every shape that HIDES a Logger level write is refused
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+index 82cb70c..f322458 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+@@ -304,7 +304,8 @@ defmodule Samen.NoPlaintextPii.Tiers.LoggerGovernance do
+        when is_atom(fun) do
+     name = Atom.to_string(fun)
+ 
+-    if String.starts_with?(name, ["eval_", "compile_", "require_file", "load_file"]),
++    # SABOTAGE (ADR-052 §2.4.1): unseen code passes.
++    if String.starts_with?(name, ["eval_", "compile_", "require_file", "load_file"]) and false,
+       do: {node, [hidden("`Code.#{name}` runs code the check cannot see") | acc]},
+       else: {node, acc}
+   end

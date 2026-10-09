@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4 — the :replay tier treats a KMS outage as "nothing to find": vault rows it could
+# not decrypt are silently skipped instead of failing closed.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/replay_tier_test.exs
+# MUST_FAIL: fail closed: no repo, and a KMS that cannot decrypt
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/replay.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/replay.ex
+index cf23a79..6bc55b2 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/replay.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/replay.ex
+@@ -250,7 +250,8 @@ defmodule Samen.NoPlaintextPii.Tiers.Replay do
+       Enum.reduce(tokens, {[], 0}, fn token, {acc, n} ->
+         case Samen.Vault.reveal(%Samen.Masked{token: token, label: nil}, repo) do
+           {:ok, plaintext} -> {[plaintext | acc], n}
+-          {:error, :unavailable} -> {acc, n + 1}
++          # SABOTAGE (ADR-052 §2.4): an outage is not counted.
++          {:error, :unavailable} -> {acc, n}
+           # Erased / never keyed / gone: no plaintext exists to leak.
+           {:error, _} -> {acc, n}
+         end

@@ -7,16 +7,21 @@
 # MUST_FAIL: RED operator without a grant
 # MUST_FAIL: the SAME recording resolves per viewer
 diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
-index 210603d..138ef6b 100644
+index 4b97a97..2830f84 100644
 --- a/samen_core/lib/samen/replay/resolver.ex
 +++ b/samen_core/lib/samen/replay/resolver.ex
-@@ -126,7 +126,8 @@ defmodule Samen.Replay.Resolver do
-         # Belt over the resource's own policies: a row of ANOTHER org than the viewer's is
-         # gone, even on a resource that declares no org policy (no cross-org replay, ever).
-         |> Enum.filter(&same_org?(&1, scope.actor))
--        |> Enum.map(&plane_resolve(&1, mod, scope.actor, opts))
+@@ -129,10 +129,12 @@ defmodule Samen.Replay.Resolver do
+         rows = Enum.filter(rows, &same_org?(&1, scope.actor))
+         # ONE read of the grant decisions + vault rows for every row of this batch (no N+1,
+         # ADR-052 §2.4.1); each record is still resolved alone, inside its reveal span.
+-        resolve_opts = batch_opts(rows, mod, scope.actor, opts)
 +        # SABOTAGE (ADR-052 §2.3 / R8): resolve on the recording (tenant) plane, not the viewer's.
-+        |> Enum.map(&plane_resolve(&1, mod, Map.put(scope.actor, :plane, :tenant), opts))
++        actor = Map.put(scope.actor, :plane, :tenant)
++        resolve_opts = batch_opts(rows, mod, actor, opts)
+ 
+         rows
+-        |> Enum.map(&plane_resolve(&1, mod, scope.actor, resolve_opts))
++        |> Enum.map(&plane_resolve(&1, mod, actor, resolve_opts))
          |> Map.new(&{normalize_pk(Map.get(&1, pk_field)), &1})
  
        {:error, _} ->

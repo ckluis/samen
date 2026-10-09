@@ -1,0 +1,23 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 9) — PiiResolution.prefetch reads nothing ahead: every vault row and
+# every grant/suspension check is one query per value again (the frame batch N+1).
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/resolver_batch_test.exs
+# MUST_FAIL: a 50-row frame costs a CONSTANT number of queries
+diff --git a/samen_core/lib/samen/api/pii_resolution.ex b/samen_core/lib/samen/api/pii_resolution.ex
+index 0b11dcd..63af63d 100644
+--- a/samen_core/lib/samen/api/pii_resolution.ex
++++ b/samen_core/lib/samen/api/pii_resolution.ex
+@@ -191,8 +191,9 @@ defmodule Samen.Api.PiiResolution do
+ 
+       Keyword.merge(opts,
+         __prefetched: true,
+-        __grants: grants,
+-        __vault_rows: vault_rows(tokens, opts),
++        # SABOTAGE (ADR-052 §2.4.1): nothing prefetched.
++        __grants: Map.take(grants, []),
++        __vault_rows: Map.take(vault_rows([], opts), tokens),
+         __bag_ctx: bag_context(resource, records, plane, actor, opts)
+       )
+     end

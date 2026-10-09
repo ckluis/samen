@@ -6,13 +6,13 @@
 # TEST_FILES: test/replay/player_test.exs
 # MUST_FAIL: one allow-listed reveal span per referenced record
 diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
-index 210603d..4fe79b9 100644
+index 4b97a97..e5123e8 100644
 --- a/samen_core/lib/samen/replay/resolver.ex
 +++ b/samen_core/lib/samen/replay/resolver.ex
-@@ -142,7 +142,8 @@ defmodule Samen.Replay.Resolver do
-   defp plane_resolve(record, mod, actor, opts) do
-     resolve_opts = Keyword.merge([repo: repo(mod, opts)], Keyword.take(opts, [:grant, :vault]))
- 
+@@ -156,7 +156,8 @@ defmodule Samen.Replay.Resolver do
+   # The ONE resolution rule (PiiResolution) with the VIEWER's actor. On the operator plane it
+   # runs inside a reveal span: a granted replay reveal is traced like any other reveal.
+   defp plane_resolve(record, mod, actor, resolve_opts) do
 -    if operator?(actor) do
 +    # SABOTAGE (ADR-052 §2.3): no span.
 +    if operator?(actor) and false do
