@@ -241,3 +241,51 @@ The `no_plaintext_pii` CI tier **`:logger`** (`Samen.NoPlaintextPii.Tiers.Logger
 LiveView's own `log:` option is left at its `:debug` default: with the keep-list in every env and the prod floor at `:info`, its event line never reaches a prod log and its params are filtered everywhere (ADR-052 as-built note).
 
 **In-flight vault plaintext is redacted at the type.** Ash hides a `sensitive?` field on a record and redacts a `sensitive?` changeset argument, but prints a changeset *attribute* verbatim — so `inspect(changeset)` (a log line, a crash report, a `FunctionClauseError` blame) showed a typed email until `Samen.Vault.Change` swapped in the token. `Samen.Type.VaultField.cast_input/2` now holds that plaintext as `%Samen.Pii.Plaintext{}` (`Inspect` → `**redacted**`). Code that edits its own pending value opens it with `Samen.Pii.Plaintext.unwrap/1` (e.g. a composer reading `AshPhoenix.Form.value(form, :body)`); a form re-render shows the user's own input back (`Phoenix.HTML.Safe`). Ash's error structs never carried it: `Ash.Error.Invalid` prints the changeset as `#Changeset<>`, and the vault's own D3 cast refusal adds no value.
+
+## 7 · Session replay (ADR-052 P2–P4)
+
+`Samen.Replay` records tenant-plane LiveView sessions **by reference, never by value**, and replays
+them on the **viewer's** plane. (ADR-052 §2.4 named this "§5 Replay"; §5 and §6 above went to the
+P1 wide events and Logger governance.) Operating it day to day: `docs/runbooks/session-replay.md`.
+
+**Two switches, both required.** The host passes `replay:` to `Samen.Observability.child_specs/2`
+(`true` or a keyword list: `sample_rate` 1.0, `max_frames` 500, `max_bytes` 512 KiB,
+`max_sessions` 1 000 per node, `max_persist_tasks` 16, `retention_days` 14 (1..90), `flag_opts`),
+and the org's `samen.replay` feature flag is ON. Without `replay:` no capture child starts; an
+unknown flag is OFF. Only Driftwood **dev** sets `replay:` in this repo.
+
+**What is stored.** `replay_session` (`rps`) and `replay_frame` (`rpf`), framework-owned,
+catalogued, JSONB payloads, mounted by `Samen.Replay.Migration`. The sanitizer turns every
+vault-routed attribute of an Ash record into a `$ref` (resource + primary key + attribute),
+freeform columns and bare strings into shape only, event params into key/type/length/class.
+Every frame is validated against `Samen.Replay.FrameSchema` at the store AND by
+`Samen.Replay.RowGuard` on every create, and the validator accepts exactly what the sanitizer
+emits (lowercase UUIDs, integer/UUID primary keys, module and attribute names, server-known keys).
+The session actor is only the HMAC pseudonym.
+
+**Retention does not depend on capture.** Wherever the tables are mounted (`config :samen_core,
+:samen_replay_repo`), `child_specs/2` installs the replay retention specs into the regular
+`:retention_specs` registry, which the nightly `Samen.Retention.SweepWorker` sweeps, with capture on or off.
+
+**Persisting is bounded and counted.** A finished session persists in a supervised task (at most
+`max_persist_tasks` at once; over the bound the session is dropped, never queued). Every outcome
+is counted: `Samen.Replay.Monitor.stats/0` on the node, and one `[:samen, :replay, :session]`
+event with a bounded `result` (`persisted | discarded | failed | dropped`), exported as the
+`samen.replay.session.count` metric.
+
+**Watching.** Operators: `/operator/replays/:org_id` while holding an ACTIVE impersonation
+session for the org (re-checked on every frame batch). Tenant admins/owners:
+`/settings/replays` for their own org. Every open writes one token-only `replay.viewed`
+`aud_event`. References resolve at view time through `Samen.Api.PiiResolution` on the viewer's
+plane: `••••` without a grant, clear with a live reveal grant, `[erased]` after a crypto-shred,
+`[gone]` for a deleted row, `[changed]` when the code moved. Values are labelled CURRENT. The
+recorded view renders in a sandboxed, script-free iframe in a bounded process. Grant and
+suspension checks and vault-row reads happen once per frame batch, not once per row (a 50-row
+frame: tenant 3 queries, operator 7).
+
+**The oracle covers it.** `mix samen.verify.no_plaintext_pii` runs the `:replay` tier (every
+stored frame passes the frame schema, every session row is kernel-shaped, no referenced
+subject's decrypted vault plaintext appears in any row); `--subject <uuid> --tiers all` runs
+`:post_shred_replay` (every stored reference to the erased subject resolves to `[erased]` on
+the tenant plane). The Driftwood crypto-shred game-day records the driver in a replay and
+proves both on every CI run.

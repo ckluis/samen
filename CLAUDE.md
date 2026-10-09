@@ -40,8 +40,8 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
   replays every shipped gate sabotage (`scripts/sabotages/*.patch`): apply → the NAMED
   tests must FAIL → revert → SHA-256 byte-exact restore. Gates add new sabotages as
   patches (header lines: APP / TEST_FILES / MUST_FAIL) instead of re-deriving them.
-  Default (no args) = the full harness (count: `ls scripts/sabotages/*.patch | wc -l` — **397**
-  as of 2026-10-05). At that count the full serial run exceeds the 600s single tool-call ceiling,
+  Default (no args) = the full harness (count: `ls scripts/sabotages/*.patch | wc -l` — **482**
+  as of 2026-10-09). At that count the full serial run exceeds the 600s single tool-call ceiling,
   so certify it **backgrounded** or in **chunks**
   via additive selection flags (different FLAGS compose as an intersection; repeating the SAME
   flag is an error — use separate runs for two ranges; a FILTERED run certifies ONLY its
@@ -77,8 +77,9 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
 The sabotage harness proves the guarantees we CLAIM are still guarded. The mutation gate asks the
 converse — is there some OTHER way to break the same file that its owning tests do NOT catch? —
 because every sabotage is a claim someone thought to make.
-- `./scripts/mutate.sh` (default: the tier-1 watch-list, `scripts/mutation/targets.tsv`, 8
-  chokepoint/guard modules / 61 mutants / ~5 min). Sites are enumerated from the **AST** by
+- `./scripts/mutate.sh` (default: the tier-1 watch-list, `scripts/mutation/targets.tsv`, 12
+  chokepoint/guard modules / 166 mutants as of 2026-10-09 — `./scripts/mutate.sh --list`; ~15 min,
+  so run it in `--file`/`--shard` chunks under the 600 s tool-call ceiling). Sites are enumerated from the **AST** by
   `scripts/mutation/mutate.exs` over four operator families (EQ / REL / BOOLOP / BOOLLIT) and
   spliced at exact line:column; each mutant runs ONLY that target's **owning** tests, so a kill is
   attributed by construction. Ends `MUTATION GATE: ALL PASSED`.

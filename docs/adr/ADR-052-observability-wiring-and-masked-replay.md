@@ -11,7 +11,10 @@
   421–435), as-built notes and deviations in §2.2.1. **P3 BUILT** on `feat/adr-052-replay`
   (2026-10-09, local): §2.3 player + who may watch, red paths R8–R10 plus tenant authz, inert
   rendering and decode safety (sabotages 441–460), as-built notes and deviations in §2.3.1.
-  P4 not built.
+  **P4 BUILT** on `feat/adr-052-replay` (2026-10-09, local): §2.4 tiers (`:replay`,
+  `:post_shred_replay`, wired into the Driftwood crypto-shred game-day), the nine P3 gate notes,
+  replay ON in Driftwood dev, runbook and guide (sabotages 465–489; 441/442/446/460
+  re-anchored), as-built notes in §2.4.1. **All phases BUILT.**
 - **Deciders:** the operator, on §6 D1–D4.
 - **Inspiration (not a dependency):** `phoenix_replay` v0.6.2 (elixir-vibe/phoenix_replay, MIT).
   Read 2026-10-09; we take its capture shape, not its code or its storage/privacy model.
@@ -617,6 +620,134 @@ nothing).
 - `no_plaintext_pii` gains a **`:replay`** tier (no plaintext in replay tables) and a post-shred
   check (a shredded subject's refs resolve to `:shredded` in every stored replay).
 - `docs/observability-guide.md` gains §5 Replay; this ADR's build status is updated per phase.
+
+### 2.4.1 P4 as built (2026-10-09) — and where it deviates
+
+1. **Mounts.** Already done in P3 (§2.3.1 item 8): the player rides `samen_operator_routes/2`
+   and `samen_settings_routes/3`; no `samen_replay_routes` macro. demo serves no tenant
+   LiveViews and mounts no replay tables, so it adopts nothing.
+2. **`:replay` tier** (`Samen.NoPlaintextPii.Tiers.Replay`, CI mode, in `default_tiers/0`).
+   Over every stored row (keyset pages, not a sample; rows are bounded by retention): every
+   frame passes `FrameSchema.validate/1` (no bare free string, nothing undeclared, every
+   identifier exactly what the sanitizer emits); every session row is what the kernel writes
+   (module-name `view`, hex MD5, 64-hex `actor_ref`, bounded exit); and no referenced
+   subject's plaintext is in any row. That last check takes every subject a frame references
+   (`$ref`/`$record` pk, `$id`), decrypts its vault rows through `Samen.Vault.reveal/3`, and
+   searches every string of every replay row (keys too) for each plaintext value (string
+   leaves of 4+ characters; a date must match exactly; id-shaped strings are never hits), plus
+   any caller-SEEDED probe (new `Context` field `plaintext_probes`). A finding names the row,
+   never the value. It fails closed on a missing repo, a half-mounted store, a read error, a
+   KMS outage (an erased or never-keyed subject is fine: nothing left to leak) and more than
+   5 000 referenced subjects. A host without the tables gets no finding.
+   *Stored-row validation:* the schema accepts a key only when it names an existing atom, and
+   in a fresh process (the oracle CLI) a key that only a not-yet-loaded module defines does
+   not exist yet. A frame that fails is re-checked once after every module of every loaded
+   application is loaded (what a release does at boot). The game-day CLI hit exactly this
+   before the fix.
+3. **Post-shred check** (`Samen.NoPlaintextPii.Tiers.PostShred.Replay`, `:post_shred_replay`,
+   in `post_shred_tiers/0`). For the erased subject it proves three things. Every stored frame
+   that mentions it passes the schema. Every reference to it, decoded and resolved by the
+   player's own `Resolver` on the frame org's TENANT plane (the plane that reads CLEAR, so a
+   shred that did not take shows as plaintext, not as a mask), comes back `:shredded`.
+   `:gone`/`:code_changed`/`:empty` count only while the KMS attests the subject shredded.
+   And no seeded probe appears in any row. It always reports, `:pass` or `:violation`.
+   Post-shred the subject's plaintext cannot be recomputed, which is why the value search
+   takes the caller's probes. *Game-day:* `Driftwood.CryptoShredGameday.seed_driver_across_tiers/1`
+   now records the driver in a replay through the real sanitizer and store. The T5.4 script
+   checks that the frames reference the driver and hold no plaintext, that the oracle CLI
+   attests `[post_shred_replay] PASS`, and that the player shows `[erased]` for every driver
+   reference after the shred. Its red paths: an un-shredded driver's replay fails the tier,
+   and a plaintext CDL copy written past the store fails it until it is removed. Regenerated
+   every Driftwood CI run (44 checks).
+4. **The P3 gate notes, closed** (each with a red-before test and a sabotage):
+   1. *Retention without capture.* `Observability.child_specs/2` adds a transient child that
+      installs the replay retention specs wherever `:samen_replay_repo` is set, `replay:` or
+      not; the window comes from `replay:`'s `retention_days` when given. Sabotage 465.
+   2. *Bounded, counted persists.* `Samen.Replay.TaskSupervisor` has `max_children:
+      max_persist_tasks` (default 16). `async_nolink` raises at the bound, so the monitor
+      rescues it, frees the session's buffer row and counts it `:dropped`; it never waits.
+      Every outcome is counted in `Monitor.stats/0`, and each emits one `[:samen, :replay,
+      :session]` event (bounded `result`), exported as the new `samen.replay.session.count`
+      metric. A missing buffer row (an org switch stopped the recording) counts as
+      `:discarded`. Sabotages 466 (unbounded), 467 (monitor crashes at the bound), 468
+      (failure uncounted).
+   3. *Validator = sanitizer.* New bounded types `:module_name`, `:md5`, `:uuid`
+      (lowercase), `:pk` (lowercase UUID or integer), `:field_name`, `:label`,
+      `:param_key`; tree keys are `$more`, `$kN`, a UUID, an integer, or an EXISTING atom
+      (what `map_key/2` emits). `RowGuard`'s `view` is a module name; capture's component
+      name is too. *Limitation:* an `allowed: :open` value (an event label, a kept param
+      value) is still checked label-shaped, not against the view's own closed set, which the
+      frame does not carry. Sabotages 469, 470.
+   4. *Cursor vs record (decided: the record is right).* A `Page` cursor `{sort_value, id}`
+      now takes the decision its sort column gets inside the page's own records: kept only
+      when the record keeps the column, else shape only; undeterminable means shape only. The
+      CDC classifier is the one default-deny authority, and a `:date` column can be a date of
+      birth. The cursor holds the SAME column's value, so it must not be more visible than
+      the column. Sabotage 471.
+   5. *`:logger` fails closed on hidden writes.* runtime.exs now fails on: `alias`/`import` of
+      `Logger`/`:logger`; `require Logger, as:`; `apply`/`Kernel.apply`/`:erlang.apply` on
+      Logger, `:logger` or a non-literal module; `Application.put_env`/`put_all_env`/
+      `:application.set_env` touching `:logger`, `:kernel` or a non-literal app;
+      `config :kernel` `logger_level`/`logger`; `config` with a non-literal app;
+      `Config.config/2`; a captured level writer; a level writer called on a variable module;
+      and any `Code.eval_*`/`require_file`/`compile_*`/`load_file` or `import_config`. The
+      one sanctioned non-literal `config` is the generated runtime.exs's `for {app, settings}
+      <- Samen.Observability.otlp_runtime_config(...)`. Sabotages 472–475.
+   6. *`ParamFilter` fails loud.* After wrapping, every expected owner (`Phoenix.Logger` when
+      `:phoenix` runs with its logger on, `Phoenix.LiveView.Logger` when LiveView runs) must
+      have a wrapped handler, or `install/0` raises `ParamFilter.HandlersNotFound` naming it,
+      at boot. Sabotage 476.
+   7. *One bad row = one `:invalid` frame.* The player reads `kind`/`payload` through two text
+      calculations on `Samen.Replay.Frame` (`stored_kind`, `stored_payload`) instead of the
+      typed attributes. A kind outside the closed set or a non-object payload loads, and the
+      decoder makes it one `:invalid` frame. The typed read failed the whole session
+      (`:not_found`). Sabotage 477.
+   8. *View loaded before decoding.* `Player.load_view/2` loads the recorded view, and each
+      `$record`'s resource, before decoding. It loads only an allowed module: an existing
+      atom with an `inspect`-shaped name, on the code path as a `.beam` whose exports (read
+      with `:beam_lib` BEFORE loading) include `render/1` or `__live__/0` (`spark_dsl_config/0`
+      for a resource). Sabotages 478 (not loaded), 479 (any module loaded).
+   9. *No N+1.* `Samen.Api.PiiResolution.prefetch/4` reads, once per resolve call, the grant
+      verdicts (new optional `Samen.Reveal.Grant.granted_many/1`; `Samen.Reveal.Grants`
+      makes one suspension check and one grant read per actor), the vault rows of every value
+      the plane decrypts (new `Samen.Vault.prefetch_rows/2`, ciphertext only), and the bag
+      catalog. Decisions and decrypts stay per value, and nothing outlives the call, so the
+      next batch reads again (deny-on-read). The resolver prefetches per batch and still
+      resolves each record inside its own reveal span. Every other `PiiResolution.resolve/4`
+      caller (list pages, API) gets the same batching. Measured (`samen_web`
+      `replay_player_test.exs`, a full 50-row ContactsLive page, one frame batch):
+      **tenant 152 → 3 queries (62 → 11 ms), operator 354 → 7 (78 → 9 ms)**. A 1-row frame
+      costs the same 3 / 7. Kernel fixture (`resolver_batch_test.exs`, 50 refs): tenant
+      51 → 2, operator 101 → 3. Sabotages 480 (N+1 back), 481 (batch cached across batches),
+      482 (batch skips suspension).
+5. **Demo.** Driftwood `config/dev.exs` passes `replay:` with `flag_opts: [flag_module:
+   Driftwood.Primitives.FeatureFlag]`, which scopes the flag loader to replay. No host
+   configured the flag cache's loader, so every flag evaluated OFF. `mix driftwood.seed`
+   seeds the `samen.replay` row for the Blue Ridge org. prod/test never set `replay:`
+   (sabotage 489). Runbook: `docs/runbooks/session-replay.md`. Guide:
+   `docs/observability-guide.md` §7, not §5, because P1 used §5–6.
+6. *Tooling:* `scripts/dialyzer_gate.sh` now hashes samen_core's untracked-but-not-ignored lib
+   files too, by path and content (the P3 builder's stale-PLT note).
+
+*Not done in P4:* the flag cache resolves a flag by NAME across org-scoped FeatureFlag rows
+(first match). So once a host wires the loader, a second `samen.replay` row created by a
+tenant admin in its own org would be ambiguous. The runbook says to keep one
+operator-governed row; scoping the replay flag to an operator-owned row is a follow-up. A
+`live_render` child and stream rows are still not recorded (§7).
+
+| Red path | Sabotage | Owning test file(s) |
+|---|---|---|
+| `:replay` tier — content, schema, KMS outage | 483, 484, 485 | `samen_core/test/replay/replay_tier_test.exs` |
+| post-shred replay — accepts clear, ignores probes | 486, 487 | `replay_tier_test.exs` |
+| game-day oracle covers replays | 488 | `driftwood/test/crypto_shred_gameday_test.exs` |
+| gate notes 1–2 (retention, bounded/counted persists) | 465, 466, 467, 468 | `samen_core/test/replay/capture_test.exs` |
+| gate note 3 (validator = sanitizer) | 469, 470 | `samen_core/test/replay/frame_schema_test.exs` |
+| gate note 4 (cursor) | 471 | `samen_core/test/replay/sanitizer_test.exs` |
+| gate note 5 (`:logger` hidden writes) | 472–475 | `samen_core/test/observability/logger_tier_test.exs` |
+| gate note 6 (ParamFilter loud) | 476 | `samen_web/test/samen/web/param_filter_logging_test.exs` |
+| gate notes 7–8 (bad row, view loading) | 477, 478, 479 | `samen_core/test/replay/player_test.exs` |
+| gate note 9 (N+1, deny-on-read, suspension) | 480, 481, 482 | `samen_core/test/replay/resolver_batch_test.exs` |
+| dev only | 489 | `driftwood/test/replay_dev_demo_test.exs` |
 
 ---
 
