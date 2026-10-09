@@ -18,7 +18,9 @@ defmodule Samen.NoPlaintextPii do
       the catalog itself expose only bounded-ID / token / enum / metadata columns
       (`Samen.NoPlaintextPii.Tiers.AuditRows`, `…Tiers.Catalog`);
     * **(c)** `db_statement` is disabled if `opentelemetry_ecto` is present
-      (`Samen.NoPlaintextPii.Tiers.LogTelemetry`);
+      (`Samen.NoPlaintextPii.Tiers.LogTelemetry`), and the log itself is governed —
+      a `filter_parameters` keep-list + a prod level of `:info` or above
+      (`Samen.NoPlaintextPii.Tiers.LoggerGovernance`, tier `:logger`, ADR-052);
     * **(d)** registered `non_pii!` columns are **exempt-but-listed** (plaintext-at-
       rest by design) — emitted as `:exempt` findings, listed in output, never
       failing the build.
@@ -48,6 +50,7 @@ defmodule Samen.NoPlaintextPii do
     Rollup,
     Catalog,
     LogTelemetry,
+    LoggerGovernance,
     TraceSink,
     ObanJobs
   }
@@ -66,6 +69,8 @@ defmodule Samen.NoPlaintextPii do
   (or passes them via `run(tiers: …)`).
   T3.13 / F2.1 adds `ObanJobs` — the `oban_jobs` token-only-args convention tier.
   T4.3 adds `AuditChain` — the `aud_chain` hash-chain token-only tier.
+  ADR-052 §2.1 adds `LoggerGovernance` (`:logger`) — `filter_parameters` is a keep-list and
+  the prod Logger level is `:info` or above.
   """
   @spec default_tiers() :: [module()]
   def default_tiers,
@@ -76,6 +81,7 @@ defmodule Samen.NoPlaintextPii do
       Rollup,
       Catalog,
       LogTelemetry,
+      LoggerGovernance,
       TraceSink,
       ObanJobs,
       AuditChainTier
