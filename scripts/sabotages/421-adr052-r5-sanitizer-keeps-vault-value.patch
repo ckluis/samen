@@ -8,10 +8,10 @@
 # MUST_FAIL: a tenant-plane CLEAR record: every vault field is a Ref; no plaintext survives
 # MUST_FAIL: raw JSONB carries Refs for the vault fields and none of the seeded plaintext
 diff --git a/samen_core/lib/samen/replay/sanitizer.ex b/samen_core/lib/samen/replay/sanitizer.ex
-index bb4f227..41f7008 100644
+index 46c7089..b1956e8 100644
 --- a/samen_core/lib/samen/replay/sanitizer.ex
 +++ b/samen_core/lib/samen/replay/sanitizer.ex
-@@ -416,8 +416,11 @@ defmodule Samen.Replay.Sanitizer do
+@@ -426,8 +426,11 @@ defmodule Samen.Replay.Sanitizer do
      %Record{resource: plan.name, pk: pk, fields: fields}
    end
  
@@ -23,5 +23,5 @@ index bb4f227..41f7008 100644
 +
 +  defp attribute(:ref, _name, value, _plan, _pk, depth, walk), do: walk(value, depth + 1, walk)
  
-   defp attribute(:keep, _name, value, _plan, _pk, depth, walk) when is_binary(value) do
-     if uuid?(value), do: %Id{value: String.downcase(value)}, else: kept(value, @max_cleared)
+   # A structural column holding a string is an id (UUID) or nothing: no record string is kept.
+   defp attribute(:keep, _name, value, _plan, _pk, _depth, _walk) when is_binary(value),

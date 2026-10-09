@@ -7,12 +7,12 @@
 # TEST_FILES: test/replay/sanitizer_test.exs
 # MUST_FAIL: job_title (freeform string) is Redacted free_text; structural columns are kept
 diff --git a/samen_core/lib/samen/replay/sanitizer.ex b/samen_core/lib/samen/replay/sanitizer.ex
-index 7b61549..7e8fb0e 100644
+index 46c7089..9052b49 100644
 --- a/samen_core/lib/samen/replay/sanitizer.ex
 +++ b/samen_core/lib/samen/replay/sanitizer.ex
-@@ -485,7 +485,8 @@ defmodule Samen.Replay.Sanitizer do
-   defp decision(_attr, true, _class), do: :ref
+@@ -493,7 +493,8 @@ defmodule Samen.Replay.Sanitizer do
    defp decision(%{sensitive?: true}, false, _class), do: :free
+   defp decision(_attr, false, :metadata), do: :ref
    defp decision(_attr, false, class) when class in @projected_kinds, do: :keep
 -  defp decision(_attr, false, _class), do: :free
 +  # SABOTAGE (ADR-052 R6): the classifier's default-deny is ignored.
