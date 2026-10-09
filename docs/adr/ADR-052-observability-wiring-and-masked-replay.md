@@ -313,16 +313,18 @@ reason:
 5. **Keep-list API.** `use Samen.Replay, keep_assigns: [...], keep_params: %{"event" =>
    ["param"]}, keep_url_params: [...]`; declarations accumulate (a mixin and the view) into one
    `__samen_replay__/0`. A kept assign string must still be ≤ 120 codepoints, printable and not
-   email/SSN/phone-shaped; a kept param value must be a label, an integer or a boolean. The
-   framework declaration is in the `Samen.Web.ListLive` mixin (31 list views): `sort`/`field`,
-   `paginate`/`dir`, `bulk`/`action`, `select`/`restore` `id` — never the `filter` text. No
+   email/SSN/phone-shaped; a kept param value must be an integer, a boolean, a UUID or a member
+   of a declared closed set (item 13). The framework declaration is in the `Samen.Web.ListLive`
+   mixin (31 list views): `sort`/`field` (closed: the view's `:sortable` names),
+   `paginate`/`dir` (`next`/`prev`), `bulk`/`action`, `select`/`restore` `id` — never the
+   `filter` text. No
    framework LiveView assigns `:page_title`, so none declares it (the ADR's example).
 6. **Sanitizer decision table** (`Samen.Replay.Sanitizer`, tier-1 mutation target, 61/61
    mutants killed): vault-routed attribute of an Ash record → `Ref` (the value — tenant CLEAR,
    `Plaintext`, `Masked` — is never read); other attributes kept only when
-   `Samen.Cdc.Projection.classify_columns/2` gives a value kind (`bounded_id`, `enum`,
-   `timestamp`, `number`, `boolean`, or a two-reviewer-cleared `metadata` string, which is then
-   still length/PII-bounded) — `plaintext_pii`, `token` or any unknown kind ⇒
+   `Samen.Cdc.Projection.classify_columns/2` gives a structural value kind (`bounded_id`,
+   `enum`, `timestamp`, `number`, `boolean`; a cleared `metadata` column is a `Ref`, item 13) —
+   `plaintext_pii`, `token` or any unknown kind ⇒
    `Redacted{:free_text, length}`; a `sensitive?` attribute is never kept; loaded relationships
    recurse; calculations and aggregates are not captured. Bare: UUID → `Id`; other strings,
    non-UTF-8 binaries, printable charlists → `Redacted`; numbers, booleans, `nil`,
@@ -377,6 +379,40 @@ reason:
     with capture on (≈ 3.5 µs per record) and **< 1 µs** when off; a recorded form event
     **~15 µs**; an unrecorded LiveView's event **< 1 µs** (one ETS lookup).
 
+13. **Gate fixes (2026-10-09, adversarial P2 gate).** The gate drove a real ContactsLive
+    session and scanned the raw rows; five defects, each fixed with a red-before test and a
+    sabotage:
+    - *Client strings in frames (BLOCKING).* A URL query key, an event param key, a sort value
+      outside `:sortable` and a non-id `select` id — all label-shaped (`"Sortvaluesecret"`,
+      `"Jane.Selectsecret"`) — were stored verbatim: "label-shaped, not PII-shaped" is passed by
+      a name. Now a kept param value is an integer, a boolean, a UUID, or a member of the
+      declared closed set (`keep_params: %{"paginate" => [{"dir", ["next", "prev"]}]}`; a bare
+      name keeps no string but a UUID). A param key or an assigns map key survives only as a
+      server-known identifier — an existing atom, a UUID, or a list index of ≤ 3 digits — so
+      neither a client nor a row (a name used as a map key) can write its own string. Sabotages
+      **436** (values), **437** (keys); proof on the real view in `replay_recorder_test.exs`.
+    - *Bypassable last line (BLOCKING).* The frame-schema check ran only inside
+      `Samen.Replay.Store`; a direct `Ash.create(authorize?: false)` (which skips
+      `forbid_if always()`) stored a frame holding a plaintext name and a session whose `view`
+      was that name. `Samen.Replay.RowGuard` now validates every `:record` create, single or
+      bulk, on both resources: the frame against `FrameSchema`, `view` a code identifier,
+      `view_md5` hex MD5, `actor_ref` the 64-hex pseudonym. Tier-1 mutation target (6/6).
+      Sabotage **438**; `samen_core/test/replay/row_guard_test.exs`.
+    - *An org switch kept recording (R11).* The decision is per org, but a recorded LiveView that
+      re-resolved to another org (`?org=`, the org switcher) went on recording into the first
+      org's session, whatever the second org's flag said. Recording now stops at once (buffer
+      row dropped, hooks detached); the opted-in org's frames still persist. Sabotage **439**.
+    - *Cleared columns outlived erasure.* A `non_pii!`-cleared freeform column (driftwood's
+      `drv_cdl_state`, which the erasure arm overwrites on shred) was copied into frames as
+      `$kept` text. A cleared `:metadata` column is now a `Ref` (by reference, so erasure
+      reaches it like a vault field). Sabotage **440**.
+    - *A DB query on the render path.* `classify_columns/2` read the `non_pii!` registry from
+      Postgres inside the LiveView process (first render per resource). The sanitizer now
+      passes no registry entries unless injected: without a clearance every freeform column is
+      shape only — stricter than the CDC mirror, never looser, and no render waits on the DB.
+    Sanitizer mutation: 73/73 killed after the change. Sabotages 421–423 re-anchored (same
+    semantics).
+
 *Not done in P2 (by design or deferred):* no host enables the capture plane; the `:replay`
 `no_plaintext_pii` tier and the post-shred check are P4; there is no player (P3). A
 `live_render` child LiveView is not recorded. A release that strips debug info records
@@ -391,6 +427,7 @@ reason:
 | R12 retention prunes past TTL | 426 | `capture_test.exs` |
 | frame schema / validator | 427 (build check), 428 (store skips validation), 429 (bare string in tree) | `frame_schema_test.exs`, `capture_test.exs` |
 | capture guards | 430 (handler rescue), 431 (frame cap), 432 (interaction rule), 433 (raw actor), 435 (changed-only renders) | `capture_test.exs`, `replay_recorder_test.exs` |
+| gate fixes (item 13) | 436 (closed keep values), 437 (server-known keys), 438 (row guard), 439 (org switch), 440 (cleared by reference) | `sanitizer_test.exs`, `capture_test.exs`, `row_guard_test.exs`, `replay_recorder_test.exs` |
 
 ### 2.3 P3 — the player and who may watch (D4)
 
