@@ -1,0 +1,24 @@
+# SABOTAGE: ADR-052 P3 gate — the resolver rebuilds ANY loaded struct a stored $record names (a Range a
+# template loops over without end, a LiveView Rendered/Comprehension that renders raw), not only an Ash
+# resource or a sanitizer walk-list struct.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/player_test.exs
+# MUST_FAIL: a stored $record rebuilds only what the recorder writes
+diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
+index 28e60d5..be7e372 100644
+--- a/samen_core/lib/samen/replay/resolver.ex
++++ b/samen_core/lib/samen/replay/resolver.ex
+@@ -329,8 +329,9 @@ defmodule Samen.Replay.Resolver do
+   defp build_struct(name, fields) do
+     with mod when not is_nil(mod) <- Decoder.module(name),
+          true <- function_exported?(mod, :__struct__, 0),
+-         false <- mod in @deny_structs,
+-         true <- Ash.Resource.Info.resource?(mod) or mod in Sanitizer.walk_structs() do
++         # SABOTAGE (ADR-052 P3 gate): any loaded struct a stored row names is rebuilt.
++         false <- mod in @deny_structs do
++      _ = &Sanitizer.walk_structs/0
+       struct(mod, Enum.filter(fields, fn {k, _v} -> is_atom(k) end))
+     else
+       _ -> Placeholder.new(:code_changed)

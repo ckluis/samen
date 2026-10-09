@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-052 P3 gate — a stored {:safe, _} tuple passes through the resolver, so a row written
+# past RowGuard becomes raw markup in the frame (a <meta http-equiv=refresh> navigates it).
+#
+# Flips the named player/resolver test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/player_test.exs
+# MUST_FAIL: a {:safe, _} tuple never becomes markup
+diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
+index 28e60d5..7e9d22c 100644
+--- a/samen_core/lib/samen/replay/resolver.ex
++++ b/samen_core/lib/samen/replay/resolver.ex
+@@ -239,9 +239,8 @@ defmodule Samen.Replay.Resolver do
+   end
+ 
+   defp substitute(tuple, table, opts, acc) when is_tuple(tuple) do
++    # SABOTAGE (ADR-052 P3 gate): a stored {:safe, _} tuple renders as raw markup.
+     case substitute(Tuple.to_list(tuple), table, opts, acc) do
+-      # `{:safe, iodata}` is raw markup to Phoenix.HTML: a stored row never becomes markup.
+-      {[:safe | _], acc} -> {Placeholder.new(:redacted), acc}
+       {items, acc} -> {List.to_tuple(items), acc}
+     end
+   end

@@ -6,12 +6,12 @@
 # TEST_FILES: test/samen/web/replay_player_test.exs
 # MUST_FAIL: a frame whose template raises shows a placeholder
 diff --git a/samen_web/lib/samen/web/replay/renderer.ex b/samen_web/lib/samen/web/replay/renderer.ex
-index 525ed07..2c1aa23 100644
+index 9d9185c..f642144 100644
 --- a/samen_web/lib/samen/web/replay/renderer.ex
 +++ b/samen_web/lib/samen/web/replay/renderer.ex
-@@ -65,9 +65,8 @@ defmodule Samen.Web.Replay.Renderer do
-       {:error, :no_view}
-     end
+@@ -74,9 +74,8 @@ defmodule Samen.Web.Replay.Renderer do
+ 
+     {:ok, document(inert(body))}
    rescue
 -    _ -> {:error, :render_failed}
 -  catch
@@ -21,3 +21,15 @@ index 525ed07..2c1aa23 100644
    end
  
    @doc """
+@@ -114,8 +113,9 @@ defmodule Samen.Web.Replay.Renderer do
+         Process.demonitor(mref, [:flush])
+         result
+ 
+-      {:DOWN, ^mref, :process, ^pid, _reason} ->
+-        {:error, :render_failed}
++      {:DOWN, ^mref, :process, ^pid, reason} ->
++        # SABOTAGE (ADR-052 §2.3): the render's crash is the player's crash.
++        exit(reason)
+     after
+       @render_timeout_ms ->
+         Process.exit(pid, :kill)

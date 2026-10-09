@@ -6,11 +6,11 @@
 # MUST_FAIL: the srcdoc has no phx- binding and no script
 # MUST_FAIL: inert/1 strips bindings, handlers and scripts
 diff --git a/samen_web/lib/samen/web/replay/renderer.ex b/samen_web/lib/samen/web/replay/renderer.ex
-index 525ed07..def8849 100644
+index 9d9185c..84b97c4 100644
 --- a/samen_web/lib/samen/web/replay/renderer.ex
 +++ b/samen_web/lib/samen/web/replay/renderer.ex
-@@ -75,7 +75,10 @@ defmodule Samen.Web.Replay.Renderer do
-   attributes, inline `on*` event handlers and `javascript:` URLs.
+@@ -137,7 +137,10 @@ defmodule Samen.Web.Replay.Renderer do
+   `javascript:` URLs.
    """
    @spec inert(String.t()) :: String.t()
 -  def inert(html) when is_binary(html) do
