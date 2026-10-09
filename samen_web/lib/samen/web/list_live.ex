@@ -66,6 +66,13 @@ defmodule Samen.Web.ListLive do
       any view riding this mixin inherits `restore` "for free" the moment its
       resource is archivable and its `reads/3` surfaces archived rows).
 
+  ## Session replay (ADR-052 P2)
+
+  `use Samen.Web.ListLive` also declares the replay keep-list for the events above
+  (`sort`/`field`, `paginate`/`dir`, `bulk`/`action`, `select`/`restore` `id`), so a captured
+  session records WHICH column was sorted and which way the page turned. The `filter` text is
+  recorded as shape only.
+
   ## Masking posture
 
   The mixin moves STATE and re-runs the caller's read. It never renders, stringifies,
@@ -100,6 +107,18 @@ defmodule Samen.Web.ListLive do
       def handle_bulk(_action, _ids, socket), do: socket
 
       defoverridable handle_bulk: 3
+
+      # ADR-052 P2 — the session-replay keep-list for the events this mixin owns: the
+      # sort field, the page direction, the bulk action and a row id are bounded labels/ids,
+      # so a replay keeps them; the free-text "filter" box is NOT listed (shape only).
+      use Samen.Replay,
+        keep_params: %{
+          "sort" => ["field"],
+          "paginate" => ["dir"],
+          "bulk" => ["action"],
+          "select" => ["id"],
+          "restore" => ["id"]
+        }
     end
   end
 
