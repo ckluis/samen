@@ -16,6 +16,11 @@ defmodule Samen.Web.SupportKbComposerTest do
   alias Samen.Web.Support.KbReads
   alias Samen.Web.Mount
 
+  # The draft reply body. `body` is vault-routed, so the pending value rides a redacting
+  # %Samen.Pii.Plaintext{} until it is sent (ADR-052 §2.1); open it for the assertion.
+  defp draft_body(socket),
+    do: Samen.Pii.Plaintext.unwrap(AshPhoenix.Form.value(socket.assigns.reply_form, :body))
+
   defp mount_socket(org_id, ticket_id, plane_opts \\ []) do
     %Phoenix.LiveView.Socket{}
     |> Phoenix.Component.assign(:samen_mount, build_mount(:support, plane_opts))
@@ -118,11 +123,11 @@ defmodule Samen.Web.SupportKbComposerTest do
 
       # Agent has already started typing a reply.
       socket = event(socket, "validate_reply", %{"form" => %{"body" => "Hi there,", "message_type" => "reply"}})
-      assert AshPhoenix.Form.value(socket.assigns.reply_form, :body) == "Hi there,"
+      assert draft_body(socket) == "Hi there,"
 
       socket = event(socket, "insert_suggestion", %{"article_id" => to_string(article.id)})
 
-      new_body = AshPhoenix.Form.value(socket.assigns.reply_form, :body)
+      new_body = draft_body(socket)
       assert new_body =~ "Hi there,"
       assert new_body =~ article.title
       assert new_body =~ "Rate confirmation documents"
@@ -156,7 +161,7 @@ defmodule Samen.Web.SupportKbComposerTest do
 
       socket = event(socket, "insert_suggestion", %{"article_id" => Ash.UUID.generate()})
 
-      assert AshPhoenix.Form.value(socket.assigns.reply_form, :body) == "unchanged"
+      assert draft_body(socket) == "unchanged"
     end
   end
 end

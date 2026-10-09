@@ -137,6 +137,12 @@ defmodule Samen.Web.Support.TicketLive do
   # AshPhoenix.Form draft (AshPhoenix.Form.validate/2) — it does not itself write
   # to the DB; the vaulted `body` still routes through Samen.Vault.Change on the
   # eventual "Send reply" submit, exactly like any other edit to this form.
+  # The draft reply body. `body` is vault-routed, so a pending (not yet sent) value rides a
+  # redacting `%Samen.Pii.Plaintext{}` (ADR-052 §2.1) — the composer edits its OWN draft, so it
+  # opens it here.
+  defp draft_body(form),
+    do: Samen.Pii.Plaintext.unwrap(AshPhoenix.Form.value(form, :body)) || ""
+
   # H4 — the crash-gate: a FRESH ticket (no conversation seeded yet) has
   # `reply_form == nil` (`new_reply_form/3` below). `AshPhoenix.Form.value/2`
   # calls `to_form!/1` on its first arg, which RAISES on anything that isn't
@@ -155,7 +161,7 @@ defmodule Samen.Web.Support.TicketLive do
         {:noreply, socket}
 
       hit ->
-        current_body = AshPhoenix.Form.value(socket.assigns.reply_form, :body) || ""
+        current_body = draft_body(socket.assigns.reply_form)
         current_type = AshPhoenix.Form.value(socket.assigns.reply_form, :message_type) || "reply"
 
         new_body = insert_snippet(current_body, hit)
@@ -183,7 +189,7 @@ defmodule Samen.Web.Support.TicketLive do
         {:noreply, socket}
 
       macro ->
-        current_body = AshPhoenix.Form.value(socket.assigns.reply_form, :body) || ""
+        current_body = draft_body(socket.assigns.reply_form)
         current_type = AshPhoenix.Form.value(socket.assigns.reply_form, :message_type) || "reply"
 
         expanded = Reads.expand_macro(macro, socket.assigns.agents)

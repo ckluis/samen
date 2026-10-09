@@ -112,7 +112,9 @@ defmodule Samen.AI.Agent.FoldSource do
   """
   @spec index_change(Ash.Changeset.t()) :: Ash.Changeset.t()
   def index_change(changeset) do
-    case Ash.Changeset.get_attribute(changeset, :transcript) do
+    # `transcript` is vault-routed: the pending plaintext rides a redacting
+    # %Samen.Pii.Plaintext{} until Samen.Vault.Change swaps in the token (ADR-052 §2.1).
+    case changeset |> Ash.Changeset.get_attribute(:transcript) |> Samen.Pii.Plaintext.unwrap() do
       json when is_binary(json) ->
         case citations(json) do
           [] ->
