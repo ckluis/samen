@@ -1,0 +1,24 @@
+# SABOTAGE: ADR-052 §2.2.1 (gate fix) — a param key / assigns map key survives when merely
+# label-shaped, not only as a server-known identifier: a client's URL query key or event param
+# key ("Paramkeysecret"), or a row's name used as a map key ("Aurelia"), lands in replay_frame.
+#
+# Flips the server-known-key tests and the capture JSONB scan.
+# APP: samen_core
+# TEST_FILES: test/replay/sanitizer_test.exs test/replay/capture_test.exs
+# MUST_FAIL: a param key survives only as a server-known identifier
+# MUST_FAIL: an assigns map keyed by row data keeps no data-derived key
+# MUST_FAIL: an event's typed values are shape only; a declared keep-list key keeps its label
+diff --git a/samen_core/lib/samen/replay/sanitizer.ex b/samen_core/lib/samen/replay/sanitizer.ex
+index 46c7089..3bc27ea 100644
+--- a/samen_core/lib/samen/replay/sanitizer.ex
++++ b/samen_core/lib/samen/replay/sanitizer.ex
+@@ -551,7 +551,8 @@ defmodule Samen.Replay.Sanitizer do
+   # cannot introduce its own string. Label-shaped and non-PII-shaped first, as before.
+   @spec known_key?(term()) :: boolean()
+   def known_key?(key) when is_binary(key),
+-    do: label?(key) and (uuid?(key) or index?(key) or existing_atom?(key))
++    # SABOTAGE (ADR-052 §2.2.1): any label-shaped key survives.
++    do: label?(key) or (uuid?(key) and index?(key) and existing_atom?(key))
+ 
+   def known_key?(_), do: false
+ 

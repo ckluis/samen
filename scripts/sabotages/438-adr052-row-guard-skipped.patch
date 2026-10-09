@@ -1,0 +1,24 @@
+# SABOTAGE: ADR-052 §2.2.1 (gate fix) — the replay row guard accepts every row, so a direct
+# Ash.create(authorize?: false) (which skips forbid_if always()) stores a frame with a plaintext
+# name in its payload and a session whose view/actor_ref is a free string.
+#
+# Flips the RowGuard refusals.
+# APP: samen_core
+# TEST_FILES: test/replay/row_guard_test.exs
+# MUST_FAIL: a frame with a bare string in its tree is refused on a direct, unauthorized create
+# MUST_FAIL: bulk_create (the store's own path) is guarded too
+# MUST_FAIL: a session's strings must be what the kernel writes
+diff --git a/samen_core/lib/samen/replay/row_guard.ex b/samen_core/lib/samen/replay/row_guard.ex
+index a60a258..76a64df 100644
+--- a/samen_core/lib/samen/replay/row_guard.ex
++++ b/samen_core/lib/samen/replay/row_guard.ex
+@@ -26,7 +26,8 @@ defmodule Samen.Replay.RowGuard do
+   end
+ 
+   @impl true
+-  def validate(changeset, opts, _context), do: check(opts[:row], changeset)
++  # SABOTAGE (ADR-052 §2.2.1): no row is checked.
++  def validate(_changeset, _opts, _context), do: :ok
+ 
+   defp check(:frame, changeset) do
+     frame = %{
