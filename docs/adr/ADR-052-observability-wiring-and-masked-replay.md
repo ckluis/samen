@@ -147,6 +147,16 @@ Built as §2.1 says, with these specifics and deviations (each with its reason):
    `AshPhoenix.Form.value(form, :vaulted_field)` returns the wrapper before the write — open it
    with `Samen.Pii.Plaintext.unwrap/1` (done in the support composer and the AI fold indexer).
    Ash error structs never carried the value (`Ash.Error.Invalid` prints `#Changeset<>`).
+   *Gate fix (P1 gate, 2026-10-09):* a scalar vaulted input re-renders correctly through the
+   wrapper's `Phoenix.HTML.Safe` impl, but a component that destructures the value did not.
+   `Samen.Web.CRM.Live.full_name_field/1` matched the wrapper with its `%{}` clause and
+   re-rendered first/last BLANK after every validate. The Contact edit and Contacts create
+   modals and driftwood's driver modals then resubmitted the blank and erased the stored name.
+   It now unwraps the pending value first. Proven by a browser-emulating round trip (render
+   after validate, scrape the DOM, resubmit) in
+   `samen_web/test/samen/web/vault_form_roundtrip_test.exs` and
+   `driftwood/test/broker_driver_form_roundtrip_test.exs`. A new component that pattern-matches
+   a vaulted form value must unwrap it the same way.
 4. **samen_web end-to-end proof** covers a real dead render (mount + handle_params) and
    `handle_event` metadata built on a real `%Phoenix.LiveView.Socket{}` for a real framework
    view. A *connected* LiveView test was not possible: no app in the repo carries `lazy_html`.
@@ -159,6 +169,7 @@ Built as §2.1 says, with these specifics and deviations (each with its reason):
 | R4 | 408 (filter), 409 (level) | `samen_core/test/observability/logger_tier_test.exs` |
 | §2.1.3 Ash inspect | 410 | `samen_core/test/observability/vault_inspect_redaction_test.exs` |
 | §2.1.1 handler never detaches | 411 | `samen_core/test/observability/live_telemetry_test.exs` |
+| §2.1.1 gate: vaulted form round trip | 412 (framework), 413 (driftwood) | `samen_web/test/samen/web/vault_form_roundtrip_test.exs`, `driftwood/test/broker_driver_form_roundtrip_test.exs` |
 
 ### 2.2 P2 — `Samen.Replay` capture (D2, D3)
 
