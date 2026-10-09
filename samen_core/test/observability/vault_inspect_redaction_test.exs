@@ -55,9 +55,15 @@ defmodule Samen.Observability.VaultInspectRedactionTest do
       try do
         apply(__MODULE__, :only_atoms, [cs])
       rescue
-        e in FunctionClauseError -> Exception.format_banner(:error, e, __STACKTRACE__)
+        e in FunctionClauseError ->
+          # `blame/3` is what renders "The following arguments were given" (ExUnit and the
+          # crash formatters call it): the arguments are INSPECTED into the message.
+          {blamed, _stack} = Exception.blame(:error, e, __STACKTRACE__)
+          Exception.message(blamed)
       end
 
+    # POSITIVE CONTROL: the blame really did render the changeset argument.
+    assert message =~ "#Ash.Changeset<"
     refute message =~ @secret
   end
 

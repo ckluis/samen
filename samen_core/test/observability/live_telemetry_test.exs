@@ -296,6 +296,17 @@ defmodule Samen.Observability.LiveTelemetryTest do
       assert_receive {:wide_event, %{event: :save}}, 1000
     end
 
+    test "handle_event/4 returns :ok for ANY input — the guard, not the caller, absorbs a raise" do
+      # :telemetry only ever passes maps, but the callback's contract is total: a shape that
+      # makes the builder raise (here a nil metadata — Map.get/2 raises BadMapError) must be
+      # absorbed, because a raise would detach the handler.
+      for event <- LiveTelemetry.events() do
+        assert :ok = LiveTelemetry.handle_event(event, %{duration: 1}, nil, %{})
+      end
+
+      assert :ok = LiveTelemetry.handle_event([:phoenix, :endpoint, :stop], nil, nil, nil)
+    end
+
     test "POSITIVE CONTROL: a handler that raises IS detached by :telemetry" do
       id = {__MODULE__, :raiser}
       :ok = :telemetry.attach(id, [:samen_test, :raise], fn _, _, _, _ -> raise "boom" end, nil)

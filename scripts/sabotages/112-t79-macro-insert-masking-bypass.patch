@@ -17,8 +17,8 @@
 # APPLY: patch -p1 --no-backup-if-mismatch < scripts/sabotages/112-t79-macro-insert-masking-bypass.patch
 --- a/samen_web/lib/samen/web/support/ticket_live.ex
 +++ b/samen_web/lib/samen/web/support/ticket_live.ex
-@@ -174,7 +174,11 @@
-         current_body = AshPhoenix.Form.value(socket.assigns.reply_form, :body) || ""
+@@ -186,7 +186,11 @@ defmodule Samen.Web.Support.TicketLive do
+         current_body = draft_body(socket.assigns.reply_form)
          current_type = AshPhoenix.Form.value(socket.assigns.reply_form, :message_type) || "reply"
  
 -        expanded = Reads.expand_macro(macro, socket.assigns.agents)

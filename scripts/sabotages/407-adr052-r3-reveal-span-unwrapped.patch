@@ -1,0 +1,30 @@
+# SABOTAGE: ADR-052 R3 — Samen.Reveal.reveal/5 no longer runs inside
+# Samen.Tracer.with_reveal_span/3. A granted reveal (the one operation that most deserves a span)
+# and a denied one both vanish from the trace again.
+#
+# Flips the R3 tests: no `samen.reveal` span is exported for either outcome.
+# APP: samen_core
+# TEST_FILES: test/observability/reveal_span_test.exs
+# MUST_FAIL: R3 GREEN: a granted reveal runs inside exactly ONE allow-listed reveal span
+# MUST_FAIL: R3 RED: a DENIED reveal is also exactly one span, ERROR status, no plaintext
+diff --git a/samen_core/lib/samen/reveal.ex b/samen_core/lib/samen/reveal.ex
+index 50ab09b..de139d8 100644
+--- a/samen_core/lib/samen/reveal.ex
++++ b/samen_core/lib/samen/reveal.ex
+@@ -152,11 +152,11 @@ defmodule Samen.Reveal do
+     # visible in the trace as a granted one. The span carries only the three allow-listed
+     # attributes (`Samen.Tracer.with_reveal_span/3` strips anything else) and NEVER the
+     # plaintext: the outcome rides the span STATUS as a bounded reason label.
+-    Samen.Tracer.with_reveal_span(@span_name, span_attrs(opts)) do
+-      result = gate(actor, masked, action_name, resource, opts)
+-      mark_outcome(result)
+-      result
+-    end
++    # SABOTAGE (ADR-052 R3): the reveal span wrap is removed — the gate runs untraced.
++    _ = span_attrs(opts)
++    result = gate(actor, masked, action_name, resource, opts)
++    mark_outcome(result)
++    result
+   end
+ 
+   @doc "The name of the span every `reveal/5` call runs inside (ADR-052 §2.1)."

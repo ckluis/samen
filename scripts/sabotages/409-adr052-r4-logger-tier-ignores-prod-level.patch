@@ -1,0 +1,23 @@
+# SABOTAGE: ADR-052 R4 (level half) — the :logger tier stops checking the prod Logger level, so a
+# prod build at :debug (or with no level at all — Logger's default logs everything) passes and
+# every :debug call site, LiveView's handle_event line included, reaches the production log.
+#
+# Flips the R4 level tests.
+# APP: samen_core
+# TEST_FILES: test/observability/logger_tier_test.exs
+# MUST_FAIL: :debug fails
+# MUST_FAIL: an UNSET level fails (Logger's default logs everything)
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+index 2dfb736..556cf83 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+@@ -93,7 +93,8 @@ defmodule Samen.NoPlaintextPii.Tiers.LoggerGovernance do
+   defp level_findings(prod) do
+     level = get_in(prod, [:logger, :level])
+ 
+-    if level in @ok_levels do
++    # SABOTAGE (ADR-052 R4): the prod level floor is not checked.
++    if level in @ok_levels or true do
+       []
+     else
+       [
