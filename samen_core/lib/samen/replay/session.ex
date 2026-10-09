@@ -63,6 +63,10 @@ defmodule Samen.Replay.Session do
         :rejected_count,
         :truncated
       ])
+
+      # The last line (ADR-052 §2.2.1 gate fix): every write, whoever makes it and whether or
+      # not it is authorized, passes the replay row guard.
+      validate({Samen.Replay.RowGuard, row: :session})
     end
   end
 
