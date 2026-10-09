@@ -431,6 +431,42 @@ defmodule Samen.Replay.PlayerTest do
       assert v.actor == nil
     end
 
+    test "a stored $record rebuilds only what the recorder writes; a {:safe, _} tuple never becomes markup" do
+      # ADR-052 P3 gate: a row written past RowGuard (raw SQL) named `Range` (a template loops
+      # over it without end) or a LiveView `Rendered`/`Comprehension` (renders raw) and the
+      # resolver minted it. Only an Ash resource or a sanitizer walk-list struct is rebuilt.
+      prev = Application.get_env(:samen_core, Samen.Replay)
+      Application.put_env(:samen_core, Samen.Replay, Keyword.put(prev || [], :walk_structs, [URI]))
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:samen_core, Samen.Replay, prev),
+          else: Application.delete_env(:samen_core, Samen.Replay)
+      end)
+
+      record = fn name, fields -> %Samen.Replay.Record{resource: name, pk: nil, fields: fields} end
+      raw = "<meta http-equiv=refresh content=0;url=https://x.example/>"
+
+      tree = %{
+        range: record.("Range", %{first: 1, last: 1_000_000_000_000, step: 1}),
+        map_set: record.("MapSet", %{}),
+        walked: record.("URI", %{port: 1}),
+        resource: record.("SamenCore.Support.Clinical.Patient", %{}),
+        raw: {:safe, %Samen.Replay.Kept{value: raw}},
+        pair: {:ok, 1}
+      }
+
+      %{value: v} = Resolver.resolve(tree, tenant_scope(Ash.UUID.generate()))
+      assert v.range == Placeholder.new(:code_changed)
+      assert v.map_set == Placeholder.new(:code_changed)
+      assert %Placeholder{kind: :redacted} = v.raw
+      refute inspect(v) =~ "meta http-equiv"
+      # Positive controls: what the recorder DOES write still rebuilds; other tuples pass.
+      assert %URI{port: 1} = v.walked
+      assert %Patient{} = v.resource
+      assert v.pair == {:ok, 1}
+    end
+
     test "a stored frame that fails the frame schema decodes as ONE :invalid frame, nothing in it" do
       bad = %{seq: 4, at_ms: 10, kind: :render, payload: %{"assigns" => %{"x" => "free text"}}}
       assert %{kind: :invalid, payload: %{}} = Decoder.frame(bad)

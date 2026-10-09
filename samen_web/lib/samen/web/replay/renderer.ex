@@ -14,7 +14,9 @@ defmodule Samen.Web.Replay.Renderer do
       `<script>` element removed, before the document is assembled;
     * the document carries a Content-Security-Policy that forbids scripts, connections,
       frames and form submission (`default-src 'none'`), and the player's iframe is
-      `sandbox=""` (no `allow-scripts`) — two independent locks over the same door.
+      `sandbox=""` (no `allow-scripts`) — two independent locks over the same door;
+    * the template runs in a throwaway process with a capped heap and a deadline
+      (`budget/0`): stored rows are untrusted, and no row can make a render unbounded.
 
   A template that raises (a placeholder where it expected a struct, a renamed assign, code
   that changed since the recording) returns `{:error, :render_failed}`; the player shows a
@@ -35,6 +37,11 @@ defmodule Samen.Web.Replay.Renderer do
           _ -> ""
         end)
 
+  # 8M words = 64 MiB on a 64-bit VM; a real frame (a 50-row list with the inlined kit
+  # stylesheet) needs well under 1 MiB.
+  @max_heap_words 8_000_000
+  @render_timeout_ms 3_000
+
   @csp "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; " <>
          "form-action 'none'; frame-src 'none'; base-uri 'none'"
 
@@ -51,19 +58,21 @@ defmodule Samen.Web.Replay.Renderer do
   def render(nil, _assigns), do: {:error, :no_view}
 
   def render(view, assigns) when is_atom(view) and is_map(assigns) do
-    if function_exported?(view, :render, 1) do
-      body =
-        assigns
-        |> Map.put(:__changed__, nil)
-        |> Map.put_new(:flash, %{})
-        |> view.render()
-        |> Phoenix.HTML.Safe.to_iodata()
-        |> IO.iodata_to_binary()
+    if function_exported?(view, :render, 1),
+      do: bounded(fn -> render_body(view, assigns) end),
+      else: {:error, :no_view}
+  end
 
-      {:ok, document(inert(body))}
-    else
-      {:error, :no_view}
-    end
+  defp render_body(view, assigns) do
+    body =
+      assigns
+      |> Map.put(:__changed__, nil)
+      |> Map.put_new(:flash, %{})
+      |> view.render()
+      |> Phoenix.HTML.Safe.to_iodata()
+      |> IO.iodata_to_binary()
+
+    {:ok, document(inert(body))}
   rescue
     _ -> {:error, :render_failed}
   catch
@@ -71,14 +80,70 @@ defmodule Samen.Web.Replay.Renderer do
   end
 
   @doc """
-  Strip everything that could act from rendered HTML: `<script>` elements, `phx-*` binding
-  attributes, inline `on*` event handlers and `javascript:` URLs.
+  The render's budget (ADR-052 P3 gate): the template runs in a throwaway process whose heap
+  (shared binaries included) is capped and which is killed at the deadline. Stored rows are
+  untrusted — an integer a template loops over (`1..@n`), a list or a nested term can make a
+  tiny row render without bound — so a frame that exceeds the budget is `:render_failed`, never
+  a player (or node) that runs out of memory. `$callers` is set so the render's reads see the
+  same DB ownership as the player.
+  """
+  @spec budget() :: %{max_heap_words: pos_integer(), timeout_ms: pos_integer()}
+  def budget, do: %{max_heap_words: @max_heap_words, timeout_ms: @render_timeout_ms}
+
+  defp bounded(fun) do
+    parent = self()
+    callers = [parent | Process.get(:"$callers", [])]
+    tag = make_ref()
+
+    {pid, mref} =
+      spawn_monitor(fn ->
+        Process.put(:"$callers", callers)
+
+        Process.flag(:max_heap_size, %{
+          size: @max_heap_words,
+          kill: true,
+          error_logger: false,
+          include_shared_binaries: true
+        })
+
+        send(parent, {tag, fun.()})
+      end)
+
+    receive do
+      {^tag, result} ->
+        Process.demonitor(mref, [:flush])
+        result
+
+      {:DOWN, ^mref, :process, ^pid, _reason} ->
+        {:error, :render_failed}
+    after
+      @render_timeout_ms ->
+        Process.exit(pid, :kill)
+        Process.demonitor(mref, [:flush])
+
+        receive do
+          {^tag, _late} -> :ok
+        after
+          0 -> :ok
+        end
+
+        {:error, :render_failed}
+    end
+  end
+
+  @doc """
+  Strip everything that could act from rendered HTML: `<script>` elements, `<meta>` /
+  `<base>` / `<link>` elements, `phx-*` binding attributes, inline `on*` event handlers and
+  `javascript:` URLs.
   """
   @spec inert(String.t()) :: String.t()
   def inert(html) when is_binary(html) do
     html
     |> String.replace(~r/<script\b[^>]*>.*?<\/script\s*>/is, "")
     |> String.replace(~r/<script\b[^>]*\/?>/i, "")
+    # Elements that act without a script and that neither the CSP nor the sandbox stops: a
+    # `<meta http-equiv=refresh>` navigates the frame, `<base>` re-targets every link.
+    |> String.replace(~r/<(?:meta|base|link)\b[^>]*>/i, "")
     # Inside TAGS only (Phoenix escapes `>` in attribute values, so a tag ends at its first `>`).
     |> then(&Regex.replace(~r/<[a-zA-Z][^>]*>/, &1, fn tag -> strip_attrs(tag) end))
     |> String.replace(~r/javascript\s*:/i, "about:blank#")

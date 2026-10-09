@@ -30,6 +30,31 @@ defmodule Samen.Web.ReplayPlayerTest do
   alias Samen.WebTest.ReplayRecording
 
   @operator_org "0f000000-0000-4000-8000-0000000000ee"
+
+  # A view whose template loops over an integer assign, as any `1..@count` template does: a
+  # stored row (untrusted) chooses the integer.
+  defmodule LoopView do
+    @moduledoc false
+    use Phoenix.Component
+
+    def render(assigns) do
+      ~H"""
+      <p :for={i <- 1..@n} class="row">row-{i}</p>
+      """
+    end
+  end
+
+  # A view whose template does not finish by the render deadline.
+  defmodule SlowView do
+    @moduledoc false
+    use Phoenix.Component
+
+    def render(assigns) do
+      ~H"""
+      <p>{Process.sleep(@ms)}slow</p>
+      """
+    end
+  end
   @first "Aurelia"
   @last "Sentinelson"
 
@@ -136,6 +161,25 @@ defmodule Samen.Web.ReplayPlayerTest do
 
     {:ok, grant} = Grants.approve(req, %{granted_by: Ash.UUID.generate(), org_id: org})
     grant
+  end
+
+  # A replay session of ONE mount frame written with raw SQL — past the store and RowGuard, as
+  # anyone with database write access could.
+  defp hostile_replay!(org, payload) do
+    %{rows: [[sid]]} =
+      Repo.query!(
+        "INSERT INTO replay_session (rps_view, rps_started_at, rps_frame_count, rps_org_id, rps_inserted_at, rps_updated_at) " <>
+          "VALUES ('Samen.Web.AI.AgentLive', now(), 1, $1::uuid, now(), now()) RETURNING rps_id::text",
+        [Ecto.UUID.dump!(org)]
+      )
+
+    Repo.query!(
+      "INSERT INTO replay_frame (rpf_session_id, rpf_seq, rpf_kind, rpf_at_ms, rpf_payload, rpf_org_id, rpf_inserted_at, rpf_updated_at) " <>
+        "VALUES ($1::uuid, 1, 'mount', 0, $2::text::jsonb, $3::uuid, now(), now())",
+      [Ecto.UUID.dump!(sid), payload, Ecto.UUID.dump!(org)]
+    )
+
+    sid
   end
 
   # The frame that shows the listed contacts (mount → params → render: index 2).
@@ -456,6 +500,77 @@ defmodule Samen.Web.ReplayPlayerTest do
       refute out =~ "javascript:"
       # Text is untouched.
       assert out =~ "ok on file"
+    end
+
+    test "inert/1 strips meta refresh, base and link — they act with no script" do
+      html =
+        ~S|<p>kept text</p><meta http-equiv="refresh" content="0;url=https://evil.example/">| <>
+          ~S|<META HTTP-EQUIV=refresh content=0;url=https://evil.example/><base href="https://evil.example/">| <>
+          ~S|<link rel="prefetch" href="https://evil.example/"><a href="/crm">link</a>|
+
+      out = Renderer.inert(html)
+      refute out =~ ~r/<meta/i
+      refute out =~ ~r/<base/i
+      refute out =~ ~r/<link/i
+      refute out =~ "evil.example"
+      # Positive control: content and ordinary elements are untouched.
+      assert out =~ "<p>kept text</p>"
+      assert out =~ ~S|<a href="/crm">link</a>|
+    end
+
+    test "a render is bounded: a template made unbounded by stored data is :render_failed, the player lives" do
+      # Positive control: the same template with a small value renders.
+      assert {:ok, html} = Renderer.render(LoopView, %{n: 3})
+      assert html =~ "row-3"
+
+      # ~2M rows: hundreds of MB of iodata without the heap cap (a 10^12 row would never end).
+      assert Renderer.render(LoopView, %{n: 2_000_000}) == {:error, :render_failed}
+      assert Process.alive?(self())
+    end
+
+    test "a render that misses the deadline is :render_failed" do
+      %{timeout_ms: timeout} = Renderer.budget()
+      assert {:ok, _} = Renderer.render(SlowView, %{ms: 1})
+      {us, result} = :timer.tc(fn -> Renderer.render(SlowView, %{ms: timeout + 4_000}) end)
+      assert result == {:error, :render_failed}
+      assert us < (timeout + 2_000) * 1_000
+    end
+
+    test "a hostile stored row (raw SQL, past RowGuard) mints no struct, no raw markup, no unbounded render",
+         ctx do
+      # The view must be loaded for its assign names to be existing atoms (as in a release).
+      Code.ensure_loaded!(Samen.Web.AI.AgentLive)
+      user = user!(ctx.org, :admin)
+
+      run =
+        ~s|{"state": {"$atom": {"value": "done"}}, "agent": 1, "id": 1, "current_turn": 1, | <>
+          ~s|"max_turns": 1, "tool_calls_used": 1, "max_tool_calls": 1, "input_tokens_used": 1, "output_tokens_used": 1}|
+
+      payload = fn lines ->
+        ~s|{"view": "Samen.Web.AI.AgentLive", "assigns": {"org_id": {"$id": {"value": "#{ctx.org}"}}, | <>
+          ~s|"samen_acting_as": false, "outcome": null, "runs": [], "detail": {"run": #{run}, | <>
+          ~s|"approval": false, "provenance": null, "goal": 1, "turns": [], "lines": #{lines}}}}|
+      end
+
+      raw =
+        ~s|[{"$tuple": {"items": [{"$atom": {"value": "safe"}}, {"$kept": {"value": | <>
+          ~s|"<meta http-equiv=refresh content=0;url=https://evil.example/>"}}]}}]|
+
+      range = ~s|{"$record": {"resource": "Range", "pk": null, "fields": {"first": 1, "last": 1000000000000, "step": 1}}}|
+
+      # Positive control: an honest row of the same shape renders.
+      honest = ctx.org |> hostile_replay!(payload.("[7]")) |> then(&tenant_player(ctx.org, &1, user.id))
+      assert honest.assigns.state == :open
+      assert honest.assigns.frame_html =~ "agent-transcript-line"
+
+      markup = ctx.org |> hostile_replay!(payload.(raw)) |> then(&tenant_player(ctx.org, &1, user.id))
+      assert markup.assigns.state == :open
+      refute (markup.assigns.frame_html || "") =~ "evil.example"
+
+      {us, looped} = :timer.tc(fn -> ctx.org |> hostile_replay!(payload.(range)) |> then(&tenant_player(ctx.org, &1, user.id)) end)
+      assert looped.assigns.state == :open
+      assert looped.assigns.frame_html == nil
+      assert us < (Renderer.budget().timeout_ms + 2_000) * 1_000
     end
 
     test "a frame whose template raises shows a placeholder for that frame and playback continues",

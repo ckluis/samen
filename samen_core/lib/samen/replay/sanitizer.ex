@@ -373,7 +373,14 @@ defmodule Samen.Replay.Sanitizer do
     %Record{resource: inspect(mod), pk: nil, fields: fields}
   end
 
-  defp walk_structs(opts) do
+  @doc """
+  The struct modules the sanitizer walks field-by-field into a `%Record{}`: the framework
+  defaults plus the host's `config :samen_core, Samen.Replay, walk_structs: [...]` (or
+  `opts[:walk_structs]`). The player rebuilds ONLY these (and Ash resources) from a stored
+  `$record` (`Samen.Replay.Resolver`).
+  """
+  @spec walk_structs(keyword()) :: [module()]
+  def walk_structs(opts \\ []) do
     extra =
       Keyword.get_lazy(opts, :walk_structs, fn ->
         :samen_core |> Application.get_env(Samen.Replay, []) |> Keyword.get(:walk_structs, [])

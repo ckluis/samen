@@ -34,7 +34,9 @@ defmodule Samen.Replay.Resolver do
   returned to the caller, which renders it and drops it.
 
   The rest of the decoded vocabulary becomes render terms too: `Record` → the resource struct
-  with its captured fields; `Redacted` → a `:redacted` placeholder (a label-only bare `Masked`
+  with its captured fields (an Ash resource or a sanitizer walk-list struct ONLY — any other
+  module a stored row names is `:code_changed`); a `{:safe, _}` tuple → `:redacted` (a row
+  never becomes raw markup); `Redacted` → a `:redacted` placeholder (a label-only bare `Masked`
   → `:masked`); `Kept` and `Id` → their strings; `Count` → `:count`; `More` cut from lists;
   `Dropped` → `nil`, or a struct module's DEFAULT struct (code, not data).
 
@@ -46,7 +48,7 @@ defmodule Samen.Replay.Resolver do
 
   alias Samen.Api.PiiResolution
   alias Samen.Masked
-  alias Samen.Replay.{Count, Decoder, Dropped, Id, Kept, More, Placeholder, Record, Redacted, Ref}
+  alias Samen.Replay.{Count, Decoder, Dropped, Id, Kept, More, Placeholder, Record, Redacted, Ref, Sanitizer}
 
   @max_pks 500
   @deny_structs [Phoenix.LiveView.Socket, Samen.Scope]
@@ -237,8 +239,11 @@ defmodule Samen.Replay.Resolver do
   end
 
   defp substitute(tuple, table, opts, acc) when is_tuple(tuple) do
-    {items, acc} = substitute(Tuple.to_list(tuple), table, opts, acc)
-    {List.to_tuple(items), acc}
+    case substitute(Tuple.to_list(tuple), table, opts, acc) do
+      # `{:safe, iodata}` is raw markup to Phoenix.HTML: a stored row never becomes markup.
+      {[:safe | _], acc} -> {Placeholder.new(:redacted), acc}
+      {items, acc} -> {List.to_tuple(items), acc}
+    end
   end
 
   defp substitute(map, table, opts, acc) when is_map(map), do: substitute_map(map, table, opts, acc)
@@ -317,11 +322,15 @@ defmodule Samen.Replay.Resolver do
   end
 
   # A walked struct or an Ash record: the CURRENT module's struct with the captured fields
-  # (atom keys only). An unknown module is `:code_changed`.
+  # (atom keys only). Only what the recorder itself writes as a `$record` is rebuilt — an Ash
+  # resource, or a struct on the sanitizer's walk-list. A stored row naming any other module
+  # (a `Range` a template would loop over, a LiveView `Rendered`/`Comprehension` that renders
+  # raw) is `:code_changed`, as is an unknown module: a row never picks the code path.
   defp build_struct(name, fields) do
     with mod when not is_nil(mod) <- Decoder.module(name),
          true <- function_exported?(mod, :__struct__, 0),
-         false <- mod in @deny_structs do
+         false <- mod in @deny_structs,
+         true <- Ash.Resource.Info.resource?(mod) or mod in Sanitizer.walk_structs() do
       struct(mod, Enum.filter(fields, fn {k, _v} -> is_atom(k) end))
     else
       _ -> Placeholder.new(:code_changed)
