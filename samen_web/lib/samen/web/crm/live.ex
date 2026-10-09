@@ -142,6 +142,13 @@ defmodule Samen.Web.CRM.Live do
   # Read one part of a NON-masked full-name value: the cast struct (after validate),
   # a raw map (nested params), the resolver's JSON string (tenant-plane read), or nil
   # (create form). NEVER a %Samen.Masked{} — that shape dispatches to form_field/1 above.
+  # After a validate the value is the caller's OWN pending input held as a redacting
+  # %Samen.Pii.Plaintext{} (ADR-052 §2.1); open it BEFORE the `%{}` clause, which would
+  # otherwise match the wrapper struct, find no :first/:last, and blank both inputs — the
+  # browser then resubmits the blank and the vault stores an erased name.
+  defp name_part(%Samen.Pii.Plaintext{} = pending, part),
+    do: name_part(Samen.Pii.Plaintext.unwrap(pending), part)
+
   defp name_part(%Samen.Type.FullName{} = v, part), do: Map.get(v, part)
   defp name_part(%{} = m, part), do: Map.get(m, part) || Map.get(m, to_string(part))
 
