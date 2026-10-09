@@ -163,6 +163,57 @@ defmodule Samen.NoPlaintextPii.Tiers.LoggerGovernanceTest do
       assert [_] = LoggerGovernance.runtime_findings({:error, :eacces})
     end
 
+    # ADR-052 §2.4.1 (P3 gate note 5): the check is shape-based, so `alias Logger, as: L` +
+    # `L.configure(level: :debug)`, `apply(Logger, …)`, `Application.put_env(:logger, …)` and
+    # `Code.eval_file` all walked past it. Every shape that hides a Logger write fails closed.
+    test "fail closed: every shape that HIDES a Logger level write is refused" do
+      for source <- [
+            "alias Logger, as: L\nL.configure(level: :debug)",
+            "alias Logger\nLogger.configure(level: :info)",
+            "import Logger\nconfigure(level: :debug)",
+            "require Logger, as: L",
+            "alias :logger, as: Erl",
+            "apply(Logger, :configure, [[level: :debug]])",
+            "Kernel.apply(:logger, :set_primary_config, [:level, :debug])",
+            ":erlang.apply(:logger, :set_primary_config, [:level, :debug])",
+            "m = Logger\napply(m, :configure, [[level: :debug]])",
+            "Application.put_env(:logger, :level, :debug)",
+            "Application.put_all_env(logger: [level: :debug])",
+            "Application.put_env(:kernel, :logger_level, :debug)",
+            ":application.set_env(:logger, :level, :debug)",
+            "app = :logger\nApplication.put_env(app, :level, :debug)",
+            "Code.eval_file(\"config/log.exs\")",
+            "Code.eval_string(\"Logger.configure(level: :debug)\")",
+            "Code.require_file(\"log.exs\")",
+            "import_config \"log.exs\"",
+            "f = &Logger.put_module_level/2\nf.(MyApp, :debug)",
+            "f = &:logger.set_primary_config/2\nf.(:level, :debug)",
+            "mod = Logger\nmod.configure(level: :debug)",
+            "app = :logger\nconfig app, level: :debug",
+            "Config.config(:logger, level: :debug)",
+            "config :kernel, logger_level: :debug",
+            "config :kernel, logger_level: String.to_atom(System.get_env(\"L\"))",
+            # Only the framework's OTLP mapping may drive a non-literal `config`.
+            "for {app, s} <- MyApp.log_config(), do: config(app, s)"
+          ] do
+        assert [_ | _] = runtime(source), "not refused: #{source}"
+      end
+    end
+
+    test "POSITIVE CONTROL: ordinary runtime.exs code that touches no Logger level passes" do
+      assert runtime("""
+             import Config
+             require Logger
+             config :kernel, logger_level: :info
+             config :my_app, MyApp.Repo, url: System.get_env("DATABASE_URL")
+             Application.put_env(:my_app, :flag, true)
+             apply(MyApp.Setup, :run, [])
+             Code.ensure_loaded?(MyApp.Repo)
+             repo = MyApp.Repo
+             repo.config()
+             """) == []
+    end
+
     test "the clamp itself never yields a level below :info" do
       assert Samen.Observability.prod_log_level("warning") == :warning
       assert Samen.Observability.prod_log_level(" ERROR ") == :error

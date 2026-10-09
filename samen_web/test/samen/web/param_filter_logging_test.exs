@@ -80,6 +80,31 @@ defmodule Samen.Web.ParamFilterLoggingTest do
     end
   end
 
+  # ADR-052 §2.4.1 (P3 gate note 6): `install/0` found Phoenix's handlers by owner module and
+  # returned 0 when there were none — a Phoenix that MOVED its log handlers would have booted
+  # with the nested-value leak back and no signal. It now raises, naming the missing owner.
+  test "fails LOUD when an expected Phoenix log handler is not found to wrap" do
+    assert ParamFilter.expected_owners() == [Phoenix.Logger, Phoenix.LiveView.Logger]
+
+    lv_handlers =
+      for %{function: fun} = h <- :telemetry.list_handlers([:phoenix]),
+          Function.info(fun, :module) == {:module, Phoenix.LiveView.Logger},
+          do: h
+
+    assert lv_handlers != []
+    on_exit(fn -> Phoenix.LiveView.Logger.install() end)
+    # Simulate a Phoenix LiveView that attaches its log handlers somewhere we do not look.
+    Enum.each(lv_handlers, &:telemetry.detach(&1.id))
+
+    assert_raise ParamFilter.HandlersNotFound, ~r/Phoenix.LiveView.Logger/, fn ->
+      ParamFilter.install()
+    end
+
+    # Positive control: the owner that IS still there wraps fine when it is all we expect.
+    ParamFilter.uninstall()
+    assert ParamFilter.install([Phoenix.Logger]) > 0
+  end
+
   test "uninstall restores Phoenix's handlers (the wrap is what closes the leak)" do
     ParamFilter.install()
     assert ParamFilter.uninstall() > 0

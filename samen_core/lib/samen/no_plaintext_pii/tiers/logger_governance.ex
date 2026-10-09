@@ -38,6 +38,16 @@ defmodule Samen.NoPlaintextPii.Tiers.LoggerGovernance do
   not a literal keyword list, or a runtime.exs that does not parse is a violation. A host with
   no runtime.exs has nothing to check.
 
+  The check is shape-based, so every shape that HIDES a Logger write from it fails closed too
+  (ADR-052 §2.4.1, P3 gate note 5): `alias`/`import` of `Logger` or `:logger` (and `require
+  Logger, as: …`); `apply/2,3` (`Kernel.apply`, `:erlang.apply`) whose module is `Logger`,
+  `:logger` or not a literal; `Application.put_env`/`put_all_env`/`:application.set_env` that
+  touch `:logger` or `:kernel` (or name a non-literal app); `config :kernel` setting
+  `logger_level`/`logger`; `config` with a non-literal app; a capture of a Logger
+  level-writing function; a level-writing call on a variable module; and any
+  `Code.eval_*`/`Code.require_file`/`Code.compile_*`/`Code.load_file`/`import_config` (code
+  the check cannot see).
+
   LiveView `log:` — with (1) and (2) both enforced, LiveView's `:debug` event logging is
   dropped in prod and its params are keep-list filtered in every env, so the framework does
   not additionally set `log:` per LiveView (ADR-052 as-built note).
@@ -197,7 +207,227 @@ defmodule Samen.NoPlaintextPii.Tiers.LoggerGovernance do
     end
   end
 
+  # `config :kernel, logger_level: L` / `config :kernel, :logger, [...]` — the primary level
+  # and handlers under the kernel app.
+  defp collect_level_writes({:config, _, [:kernel | rest]} = node, acc) do
+    problems =
+      Enum.flat_map(rest, fn
+        :logger_level -> []
+        :logger -> []
+        sub_key when is_atom(sub_key) -> []
+        opts when is_list(opts) -> kernel_problems(opts, rest)
+        other -> ["`config :kernel` takes a non-literal option list #{Macro.to_string(other)}"]
+      end)
+
+    {node, Enum.reverse(problems, acc)}
+  end
+
+  # The one sanctioned non-literal `config`: the generated runtime.exs's OTLP mapping,
+  # `for {app, settings} <- Samen.Observability.otlp_runtime_config(endpoint), do: config app,
+  # settings` — the framework function returns only the `:opentelemetry` /
+  # `:opentelemetry_exporter` entries (never `:logger`). The comprehension is replaced by `nil`
+  # so the walk does not descend into it.
+  defp collect_level_writes(
+         {:for, _,
+          [
+            {:<-, _,
+             [
+               {{app, _, app_ctx}, {settings, _, settings_ctx}},
+               {{:., _, [{:__aliases__, _, [:Samen, :Observability]}, :otlp_runtime_config]}, _,
+                [_endpoint]}
+             ]},
+            [do: {:config, _, [{app, _, app_ctx}, {settings, _, settings_ctx}]}]
+          ]},
+         acc
+       )
+       when is_atom(app) and is_atom(app_ctx) and is_atom(settings) and is_atom(settings_ctx),
+       do: {nil, acc}
+
+  # `config <non-literal app>, …` — could be :logger.
+  defp collect_level_writes({:config, _, [app | _]} = node, acc) when not is_atom(app) do
+    {node, [hidden("`config` names a non-literal application #{Macro.to_string(app)}") | acc]}
+  end
+
+  # `Config.config(:logger, …)` — the same rules as the bare macro.
+  defp collect_level_writes(
+         {{:., _, [{:__aliases__, _, [:Config]}, :config]}, meta, args} = node,
+         acc
+       ) do
+    {_, acc} = collect_level_writes({:config, meta, args}, acc)
+    {node, acc}
+  end
+
+  # alias / import of Logger hides every later call from the shape check.
+  defp collect_level_writes({directive, _, [target | _]} = node, acc)
+       when directive in [:alias, :import] do
+    if logger_module?(target),
+      do: {node, [hidden("`#{directive} #{Macro.to_string(target)}` hides Logger calls") | acc]},
+      else: {node, acc}
+  end
+
+  defp collect_level_writes({:require, _, [target, opts]} = node, acc) when is_list(opts) do
+    if logger_module?(target) and Keyword.has_key?(opts, :as),
+      do:
+        {node, [hidden("`require #{Macro.to_string(target)}, as: …` hides Logger calls") | acc]},
+      else: {node, acc}
+  end
+
+  # apply/2,3 — Kernel.apply / :erlang.apply with Logger, :logger or a non-literal module.
+  defp collect_level_writes({:apply, _, [mod | _]} = node, acc),
+    do: {node, apply_problems(mod, acc)}
+
+  defp collect_level_writes({{:., _, [:erlang, :apply]}, _, [mod | _]} = node, acc),
+    do: {node, apply_problems(mod, acc)}
+
+  defp collect_level_writes(
+         {{:., _, [{:__aliases__, _, [:Kernel]}, :apply]}, _, [mod | _]} = node,
+         acc
+       ),
+       do: {node, apply_problems(mod, acc)}
+
+  # Application.put_env(:logger | :kernel | <non-literal>, …) / put_all_env / :application.set_env
+  defp collect_level_writes(
+         {{:., _, [{:__aliases__, _, [:Application]}, fun]}, _, [app | _]} = node,
+         acc
+       )
+       when fun in [:put_env, :put_all_env, :delete_env] do
+    {node, app_env_problems(fun, app, acc)}
+  end
+
+  defp collect_level_writes({{:., _, [:application, fun]}, _, [app | _]} = node, acc)
+       when fun in [:set_env, :unset_env] do
+    {node, app_env_problems(fun, app, acc)}
+  end
+
+  # Code.eval_* / Code.require_file / Code.compile_* / Code.load_file — unseen code.
+  defp collect_level_writes({{:., _, [{:__aliases__, _, [:Code]}, fun]}, _, _} = node, acc)
+       when is_atom(fun) do
+    name = Atom.to_string(fun)
+
+    if String.starts_with?(name, ["eval_", "compile_", "require_file", "load_file"]),
+      do: {node, [hidden("`Code.#{name}` runs code the check cannot see") | acc]},
+      else: {node, acc}
+  end
+
+  defp collect_level_writes({:import_config, _, _} = node, acc),
+    do: {node, [hidden("`import_config` pulls in a file the check cannot see") | acc]}
+
+  # &Logger.put_module_level/2, &:logger.set_primary_config/2, … — a captured level writer.
+  defp collect_level_writes(
+         {:&, _, [{:/, _, [{{:., _, [mod, fun]}, _, []}, _arity]}]} = node,
+         acc
+       )
+       when is_atom(fun) do
+    if logger_module?(mod) and level_writer?(fun),
+      do: {node, [hidden("a capture of a Logger level writer (#{fun}) hides its level") | acc]},
+      else: {node, acc}
+  end
+
+  # mod.configure(...) where `mod` is a variable — it can be Logger.
+  defp collect_level_writes({{:., _, [{name, _, ctx}, fun]}, _, _} = node, acc)
+       when is_atom(name) and is_atom(ctx) and is_atom(fun) do
+    if level_writer?(fun),
+      do: {node, [hidden("a level-writing call (#{fun}) on a variable module") | acc]},
+      else: {node, acc}
+  end
+
   defp collect_level_writes(node, acc), do: {node, acc}
+
+  @level_writers [
+    :configure,
+    :configure_backend,
+    :put_module_level,
+    :put_application_level,
+    :put_process_level,
+    :put_all_env,
+    :add_handler,
+    :add_handlers
+  ]
+
+  defp level_writer?(fun) do
+    name = Atom.to_string(fun)
+    fun in @level_writers or String.starts_with?(name, ["set_", "update_"])
+  end
+
+  defp logger_module?({:__aliases__, _, [:Logger | _]}), do: true
+  defp logger_module?(:logger), do: true
+  defp logger_module?(Logger), do: true
+  defp logger_module?(_), do: false
+
+  defp literal_module?({:__aliases__, _, parts}), do: Enum.all?(parts, &is_atom/1)
+  defp literal_module?(mod), do: is_atom(mod)
+
+  defp apply_problems(mod, acc) do
+    cond do
+      logger_module?(mod) -> [hidden("`apply` calls Logger (#{Macro.to_string(mod)})") | acc]
+      literal_module?(mod) -> acc
+      true -> [hidden("`apply` on a non-literal module #{Macro.to_string(mod)}") | acc]
+    end
+  end
+
+  defp app_env_problems(fun, app, acc) do
+    cond do
+      app in [:logger, :kernel] ->
+        [hidden("`#{fun}(#{inspect(app)}, …)` rewrites Logger configuration at runtime") | acc]
+
+      is_list(app) ->
+        keys = for {k, _} <- app, do: k
+
+        cond do
+          not literal_keyword?(app) ->
+            [hidden("`#{fun}` takes a non-literal application list") | acc]
+
+          Enum.any?(keys, &(&1 in [:logger, :kernel])) ->
+            [hidden("`#{fun}` rewrites :logger / :kernel configuration at runtime") | acc]
+
+          true ->
+            acc
+        end
+
+      is_atom(app) ->
+        acc
+
+      true ->
+        [hidden("`#{fun}` names a non-literal application #{Macro.to_string(app)}") | acc]
+    end
+  end
+
+  defp kernel_problems(opts, rest) do
+    cond do
+      not literal_keyword?(opts) ->
+        ["`config :kernel` takes a non-literal option list #{Macro.to_string(opts)}"]
+
+      :logger in rest ->
+        keyword_level_problems(opts, "config :kernel, :logger")
+
+      true ->
+        Enum.flat_map(opts, fn
+          {:logger_level, level} -> level_problems(level, "config :kernel, logger_level:")
+          {:logger, handlers} when is_list(handlers) -> handler_problems(handlers)
+          {:logger, other} -> ["`config :kernel, logger:` takes #{Macro.to_string(other)}"]
+          _ -> []
+        end)
+    end
+  end
+
+  # Kernel handler tuples: {:handler, id, module, %{level: …}} — any level in a literal config.
+  defp handler_problems(handlers) do
+    Enum.flat_map(handlers, fn
+      {:{}, _, [_kind | args]} ->
+        Enum.flat_map(args, fn
+          {:%{}, _, pairs} -> keyword_level_problems_nested(pairs, "config :kernel, logger:")
+          _ -> []
+        end)
+
+      _ ->
+        []
+    end)
+  end
+
+  defp hidden(problem),
+    do:
+      problem <>
+        " — the Logger level it may set cannot be proven to stay at :info or above (fail closed)"
 
   defp erlang_logger_problems(name, args) do
     cond do

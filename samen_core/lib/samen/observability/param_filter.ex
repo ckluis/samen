@@ -22,7 +22,32 @@ defmodule Samen.Observability.ParamFilter do
   Wired by `Samen.Observability.child_specs/2`, ON by default (`param_filter: false` opts out).
   Idempotent: a handler already wrapped is left alone. If the sanitizer itself fails, the params
   are replaced by `"[FILTERED]"` whole — never passed through raw.
+
+  **Fails loud (ADR-052 §2.4.1, P3 gate note 6).** `install/0` finds Phoenix's handlers by the
+  module that owns the handler function. If Phoenix moves them (renames the module, attaches
+  under another event prefix), a silent install would wrap NOTHING and the nested-value leak
+  would be back with no signal. So after wrapping, every EXPECTED owner must have a wrapped
+  handler — `Phoenix.Logger` when `:phoenix` is started with its logger on (`config :phoenix,
+  :logger`), `Phoenix.LiveView.Logger` when `:phoenix_live_view` is started — or install
+  raises `Samen.Observability.ParamFilter.HandlersNotFound`, naming the owner, at boot.
   """
+
+  defmodule HandlersNotFound do
+    @moduledoc """
+    Raised at boot by `Samen.Observability.ParamFilter.install/0` when the param filter is
+    enabled but an expected Phoenix param-logging handler was not found to wrap.
+    """
+    defexception [:missing]
+
+    @impl true
+    def message(%{missing: missing}) do
+      "Samen.Observability.ParamFilter: the param filter is enabled but no :telemetry handler " <>
+        "owned by #{inspect(missing)} was found to wrap — Phoenix has moved its param-logging " <>
+        "handlers, so request/event params would be logged without the nested-value-safe " <>
+        "keep-list. Refusing to boot silently unfiltered (ADR-052 §2.4.1). Update " <>
+        "`Samen.Observability.ParamFilter.owners/0`, or opt out with `param_filter: false`."
+    end
+  end
 
   @filtered "[FILTERED]"
   @owners [Phoenix.Logger, Phoenix.LiveView.Logger]
@@ -62,18 +87,51 @@ defmodule Samen.Observability.ParamFilter do
   @doc """
   Wrap every attached `Phoenix.Logger` / `Phoenix.LiveView.Logger` handler (same id, same
   events) so the params it prints pass through `filter_values/1` first. Returns the number of
-  handlers wrapped by this call (already-wrapped ones are skipped).
+  handlers wrapped by this call (already-wrapped ones are skipped). Raises
+  `Samen.Observability.ParamFilter.HandlersNotFound` when an owner in `expected` (default
+  `expected_owners/0`) has no wrapped handler afterwards — never a silent no-op.
   """
-  @spec install() :: non_neg_integer()
-  def install do
-    for %{id: id, event_name: event, function: fun, config: config} <- phoenix_handlers(),
-        owner(fun) in @owners,
-        reduce: 0 do
-      n ->
-        :ok = :telemetry.detach(id)
-        :ok = :telemetry.attach(id, event, &__MODULE__.handle_event/4, {fun, config})
-        n + 1
+  @spec install([module()]) :: non_neg_integer()
+  def install(expected \\ expected_owners()) do
+    n =
+      for %{id: id, event_name: event, function: fun, config: config} <- phoenix_handlers(),
+          owner(fun) in @owners,
+          reduce: 0 do
+        n ->
+          :ok = :telemetry.detach(id)
+          :ok = :telemetry.attach(id, event, &__MODULE__.handle_event/4, {fun, config})
+          n + 1
+      end
+
+    case Enum.reject(expected, &wrapped?/1) do
+      [] -> n
+      missing -> raise HandlersNotFound, missing: missing
     end
+  end
+
+  @doc """
+  The owners whose handlers MUST be found and wrapped: `Phoenix.Logger` when `:phoenix` is
+  started with its logger on, `Phoenix.LiveView.Logger` when `:phoenix_live_view` is started.
+  """
+  @spec expected_owners() :: [module()]
+  def expected_owners do
+    started = MapSet.new(Application.started_applications(), &elem(&1, 0))
+
+    [
+      {Phoenix.Logger,
+       MapSet.member?(started, :phoenix) and Application.get_env(:phoenix, :logger, true) != false},
+      {Phoenix.LiveView.Logger, MapSet.member?(started, :phoenix_live_view)}
+    ]
+    |> Enum.filter(&elem(&1, 1))
+    |> Enum.map(&elem(&1, 0))
+  end
+
+  # Some handler is ours AND wraps a function owned by `owner`.
+  defp wrapped?(owner) do
+    Enum.any?(phoenix_handlers(), fn
+      %{function: fun, config: {orig, _}} -> owner(fun) == __MODULE__ and owner(orig) == owner
+      _ -> false
+    end)
   end
 
   @doc "Restore Phoenix's own handlers (tests). Returns the number restored."
