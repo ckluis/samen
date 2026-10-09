@@ -412,7 +412,11 @@ defmodule Samen.AbbrevRegistryTest do
                  # C4 (ADR-048 §7.3): the pseudonym-keyed provenance index that lets the
                  # withdrawal walk resolve its targets without decrypting a transcript,
                  # allocator-reserved.
-                 "afs" => "Samen.AI.Agent.FoldSource"
+                 "afs" => "Samen.AI.Agent.FoldSource",
+                 # ADR-052 P2: the replay capture storage (session + frames),
+                 # allocator-reserved.
+                 "rps" => "Samen.Replay.Session",
+                 "rpf" => "Samen.Replay.Frame"
                },
                "samen_web" => %{
                  "wmv" => "Samen.WebTest.Marketing.ConsentEvent",
@@ -584,7 +588,9 @@ defmodule Samen.AbbrevRegistryTest do
       # pseudonym-keyed provenance index, allocator-reserved.
       # +7 T163 (ADR-051): the usage-capture ledger on every Billing mount
       # (`bux` demo; `fbx`/`dpx` driftwood; `pbx`/`pmx` pawchart; `wbx`/`wpx` samen_web) = 450.
-      assert map_size(Reg.load()) == 450
+      # +2 ADR-052 P2: samen_core host's replay capture pair `rps`/`rpf`
+      # (Samen.Replay.{Session,Frame}), allocator-reserved = 452.
+      assert map_size(Reg.load()) == 452
     end
 
     test "load/1 (compat shim) reads a flat file byte-identically — hosts empty" do

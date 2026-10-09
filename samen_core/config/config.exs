@@ -20,7 +20,10 @@ config :samen_core,
     # Samen.CustomObjects.Domain precedent) — registered here so samen_core's OWN
     # test/dev suite can exercise it against SamenCore.TestRepo with a real migration.
     # Host apps mount it by adding Samen.AI.Domain to THEIR OWN :ash_domains.
-    Samen.AI.Domain
+    Samen.AI.Domain,
+    # ADR-052 P2: the replay capture storage (Samen.Replay.Session / Frame) — the
+    # Samen.AI.Domain precedent; hosts that serve tenant LiveViews mount it too.
+    Samen.Replay.Domain
   ]
 
 # T3.9 Tier-2 custom objects: the repo backing the `tnt_record` Ash resource +
@@ -49,6 +52,10 @@ config :samen_core, :samen_ai_agent_turn_repo, SamenCore.TestRepo
 # ADR-047 A5: the DURABLE per-{org, definition} agent kill switch — the A2/A3
 # cross-tenant blast-radius residual, closed. Same compile_env seam as its siblings.
 config :samen_core, :samen_ai_agent_kill_repo, SamenCore.TestRepo
+
+# ADR-052 P2: the repo backing the replay capture resources (Samen.Replay.Session / Frame).
+# Same compile_env seam as the AI-plane resources; hosts point it at their own repo.
+config :samen_core, :samen_replay_repo, SamenCore.TestRepo
 
 # Ash 3.32+ (CVE-2026-82752): string `min_length`/`max_length`, the `string_length`
 # validation and `string_length/1` count UNICODE CODEPOINTS — how Postgres counts — so a

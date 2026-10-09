@@ -76,6 +76,12 @@ defmodule Samen.Observability do
   5. **Oban job spans — ON by default (ADR-052 §2.1).** `Samen.Observability.JobSpans`
      opens an `oban.job` span per job execution, parented on the trace context
      `Samen.Jobs.enqueue_in_tx/4` stamps into the job's meta. Opt out with `job_spans: false`.
+  5a. **Session replay capture — OFF by default (ADR-052 §2.2, P2).** With `replay: true` (or
+     a keyword list of `Samen.Replay.config!/1` options: `:sample_rate`, `:max_frames`,
+     `:max_bytes`, `:max_sessions`, `:retention_days`, `:flag_opts`), a
+     `Samen.Replay.Supervisor` child owns the in-flight buffer, the session monitor and the
+     event handler. Off (the default), the child list is exactly what it was before P2.
+     Capture then still needs the org's `samen.replay` flag ON (per-org opt-in).
   6. **Wide-event sinks** — none by default (matching the reference verticals:
      sinks are a debug surface attached on demand). Opt in with
      `wide_event_sinks: [:in_memory | :file]` or
@@ -90,6 +96,8 @@ defmodule Samen.Observability do
     * `:metrics` — attach the contention handlers (default `true`)
     * `:request_events` — attach the LiveView/request wide events (default `true`)
     * `:job_spans` — attach the Oban job spans (default `true`)
+    * `:replay` — start the session replay capture plane (default from
+      `config otp_app, Samen.Observability`, else `false`)
     * `:param_filter` — wrap Phoenix's param logging with the nested-value-safe keep-list
       (default `true`)
     * `:kms` — the KMS adapter the request events use for the actor pseudonym
@@ -144,6 +152,7 @@ defmodule Samen.Observability do
       request_event_specs(otp_app, opts) ++
       param_filter_specs(otp_app, opts) ++
       job_span_specs(otp_app, opts) ++
+      replay_specs(otp_app, opts) ++
       prometheus_specs(otp_app, opts) ++
       wide_event_sink_specs(otp_app, opts)
   end
@@ -228,6 +237,37 @@ defmodule Samen.Observability do
       :ok -> :ignore
       {:error, :already_exists} -> :ignore
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Session replay capture (ADR-052 §2.2, P2; OFF by default)
+  # ---------------------------------------------------------------------------
+
+  defp replay_specs(otp_app, opts) do
+    cfg = Application.get_env(otp_app, __MODULE__, [])
+
+    case fetch_opt(opts, cfg, :replay, false) do
+      off when off in [false, nil] ->
+        []
+
+      true ->
+        [replay_child([])]
+
+      replay_opts when is_list(replay_opts) ->
+        [replay_child(replay_opts)]
+
+      other ->
+        raise ArgumentError,
+              "Samen.Observability: replay: #{inspect(other)} — expected false, true or a " <>
+                "keyword list of Samen.Replay options."
+    end
+  end
+
+  # Validate at BUILD time (fail-honest: an over-long retention window raises here, before the
+  # supervisor ever starts), then hand the supervisor the same options.
+  defp replay_child(replay_opts) do
+    _ = Samen.Replay.config!(replay_opts)
+    {Samen.Replay.Supervisor, replay_opts}
   end
 
   # ---------------------------------------------------------------------------

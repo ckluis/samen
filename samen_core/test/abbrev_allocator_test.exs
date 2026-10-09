@@ -258,8 +258,10 @@ defmodule Samen.Abbrev.AllocatorTest do
       # pseudonym-keyed provenance index, growing the file to 20_710 bytes.
       # +7 T163 (ADR-051) — the usage-capture ledger on every Billing mount (`bux`;
       # `fbx`/`dpx`; `pbx`/`pmx`; `wbx`/`wpx`), growing the file to 21_034 bytes.
-      assert byte_size(committed) == 21034
-      assert map_size(R.load()) == 450
+      # +2 ADR-052 P2 — samen_core host's replay capture pair `rps`/`rpf`
+      # (Samen.Replay.{Session,Frame}), growing the file to 21_106 bytes.
+      assert byte_size(committed) == 21106
+      assert map_size(R.load()) == 452
     end
   end
 

@@ -198,6 +198,24 @@ without a closed `allowed:` set.
 **Fix:** retype the field as a bounded ID, token, closed enum or number; if you need a
 label, make it a closed `allowed: [...]` enum. Free text never enters the sink schema.
 
+### Step 8 (same step) — `mix samen.verify.replay_schema`
+
+**Errors** (`samen_core/lib/samen/replay/frame_schema.ex`):
+
+```text
+payload <kind>: field :<name> is typed :string — a FORBIDDEN (name-carrier) type. Replay frame fields must be one of [...]. ...
+<where>: enum field :<name> declares no closed `allowed:` set.
+<where>: :keep_listed field :<name> must declare max_length: 1..200 ...
+```
+
+**Meaning:** the session-replay frame schema (ADR-052 §2.2) declares a field that could
+carry tenant plaintext into the replay tables — a free-string/map name-carrier, an open enum
+outside the reserved fields, or an unbounded keep-listed text field.
+**Fix:** retype the field as an opaque id, a closed enum, a number, a timestamp, a sanitized
+`:tree` or a `:shape`; the only text type is `:keep_listed` with a bounded `max_length`. A
+view that wants a string kept declares the ASSIGN on its keep-list (`use Samen.Replay,
+keep_assigns: [...]`) — it never widens the schema.
+
 ---
 
 ## Step 9 — `mix samen.verify.metric_labels`
