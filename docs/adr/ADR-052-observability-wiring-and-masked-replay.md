@@ -4,7 +4,8 @@
   recommended option on all four decisions (§6: D1 (1), D2 (1), D3 (1), D4 (1)), with the
   ruling "be inspired by phoenix_replay, but rebuild it for our needs and our approach."
 - **Date:** 2026-10-09
-- **Build status:** P1 in progress on `feat/adr-052-p1-telemetry`. P2–P4 not built.
+- **Build status:** **P1 BUILT** on `feat/adr-052-p1-telemetry` (2026-10-09): §2.1 items 1–3 and red
+  paths R1–R4 (sabotages 405–409, plus 410–411), as-built notes in §2.1.1. P2–P4 not built.
 - **Deciders:** the operator, on §6 D1–D4.
 - **Inspiration (not a dependency):** `phoenix_replay` v0.6.2 (elixir-vibe/phoenix_replay, MIT).
   Read 2026-10-09; we take its capture shape, not its code or its storage/privacy model.
@@ -101,6 +102,63 @@ rendering a `%Masked{}` prints `••••` and never raises. `Samen.Cdc.Proje
    logger level is below `:info`. Ash changeset/error inspection of vault-routed attributes is
    verified to print `••••`/redacted (builder verifies; if it does not, it is fixed at the
    attribute, not in Logger).
+
+### 2.1.1 P1 as built (2026-10-09) — and where it deviates
+
+Built as §2.1 says, with these specifics and deviations (each with its reason):
+
+1. **Wide events.** `Samen.Observability.LiveTelemetry`, attached by `child_specs/2` (opt out:
+   `request_events: false`). New `Samen.WideEvent.Schema` fields: `view` (`:opaque_id`, the
+   module name), `callback`, `outcome`, `method` (closed enums), `status` (`:number`), `event`.
+   The ADR named `event` "an enum drawn from a bounded set"; as built it is `allowed: :open` with
+   the set resolved per view by `Samen.Observability.LiveEvents` — the view's own
+   `handle_event/3` string literals, read from its compiled debug info (or an explicit
+   `__samen_live_events__/0`), else `:other`. A single global closed list was not possible: the
+   event set is per host/view. To keep that from widening the schema, the `:open` sentinel is now
+   **reserved** to `:action` and `:event` (any other field declaring it is a J2 violation).
+   *Limitation:* `mix release` strips debug info by default, so a release reports `:other` for
+   every event unless it keeps `Dbgi` or the view declares `__samen_live_events__/0`.
+   `tenant_id` = the `:org_id` assign when it is a UUID; `actor_id` = `for_subject/2` of the
+   `:samen_tenant_principal` assign, memoized per process. The request event needs
+   `Plug.Telemetry` (`[:phoenix, :endpoint]`) in the host endpoint.
+2. **Spans.** The single grant-gated chokepoint is `Samen.Reveal.reveal/5`; its whole gate runs
+   in one `samen.reveal` span, so a denial is visible (error status = the bounded refusal atom).
+   `reason` reaches the span only as an atom code — a free-text reason is not a trace attribute.
+   *Not wrapped:* the operator-with-grant resolution in `Samen.Api.PiiResolution` and the
+   internal system decrypts (TOTP, DSAR, AI agent) that call `Samen.Vault.reveal/3` directly.
+   Jobs: instead of editing each worker, `Samen.Observability.JobSpans` (opt out:
+   `job_spans: false`) opens an `oban.job` span per job from Oban's own telemetry, parented on
+   the context `Samen.Jobs.enqueue_in_tx/4` now injects. *Remaining:* the ~40 enqueue sites that
+   call `Oban.insert/2` directly carry no trace context (their job spans are roots).
+   OTLP: `Samen.Observability.otlp_runtime_config/2`, called from the generated `--deploy`
+   `runtime.exs`; `traces_exporter: :none` is now explicit in every host and generated app.
+3. **Logger.** Keep-list `~w(id org org_id page per_page limit cursor after before sort sort_by
+   order dir)` in demo/driftwood/pawchart/samen_web and both `Gen.App` config templates; demo
+   gains a `prod.exs` (level `:info`). Tier `:logger` = `Samen.NoPlaintextPii.Tiers.LoggerGovernance`
+   (also refuses a PII- or secret-named kept key, and fails closed on an unreadable prod config).
+   **LiveView `log:` is not set per view** (deviation): with the keep-list in every env and the
+   enforced prod floor at `:info`, LiveView's `:debug` event line never reaches a prod log and its
+   params are filtered everywhere; editing ~80 framework LiveViews would add no guarantee.
+   **Ash inspection — the builder check found a real leak:** Ash hides a `sensitive?` field on a
+   record and redacts a `sensitive?` changeset argument, but prints a changeset *attribute*
+   verbatim, so `inspect(changeset)` showed vault-routed plaintext until the vault write. Fixed at
+   the type, as §2.1 required: `Samen.Type.VaultField.cast_input/2` holds plaintext as
+   `%Samen.Pii.Plaintext{}` (`Inspect` → `**redacted**`). Consequence for adopters:
+   `AshPhoenix.Form.value(form, :vaulted_field)` returns the wrapper before the write — open it
+   with `Samen.Pii.Plaintext.unwrap/1` (done in the support composer and the AI fold indexer).
+   Ash error structs never carried the value (`Ash.Error.Invalid` prints `#Changeset<>`).
+4. **samen_web end-to-end proof** covers a real dead render (mount + handle_params) and
+   `handle_event` metadata built on a real `%Phoenix.LiveView.Socket{}` for a real framework
+   view. A *connected* LiveView test was not possible: no app in the repo carries `lazy_html`.
+
+| Red path | Sabotage | Owning test file |
+|---|---|---|
+| R1 | 405 | `samen_core/test/observability/wide_event_live_fields_test.exs` |
+| R2 | 406 | `samen_core/test/observability/live_telemetry_test.exs` |
+| R3 | 407 | `samen_core/test/observability/reveal_span_test.exs` |
+| R4 | 408 (filter), 409 (level) | `samen_core/test/observability/logger_tier_test.exs` |
+| §2.1.3 Ash inspect | 410 | `samen_core/test/observability/vault_inspect_redaction_test.exs` |
+| §2.1.1 handler never detaches | 411 | `samen_core/test/observability/live_telemetry_test.exs` |
 
 ### 2.2 P2 — `Samen.Replay` capture (D2, D3)
 
