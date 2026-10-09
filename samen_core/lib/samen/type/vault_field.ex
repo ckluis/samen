@@ -16,6 +16,8 @@ defmodule Samen.Type.VaultField do
       value), or a raw `"vt_*"` token. Casting does NOT encrypt: encryption is a
       side-effecting operation that needs the subject key, so it happens in
       `Samen.Vault.Change` (a changeset change), never in a pure type callback.
+      A plaintext value is held as `%Samen.Pii.Plaintext{}` until then, whose
+      `Inspect` is `**redacted**` (ADR-052 §2.1).
 
     * **Stored face** (`cast_stored/2`): a value read back from Postgres is ALWAYS
       a `vt_*` token string (or `nil`). `cast_stored` turns it into `%Masked{}` —
@@ -44,10 +46,17 @@ defmodule Samen.Type.VaultField do
 
   # ---------------------------------------------------------------------------
   # Input: accept anything; encryption happens in Samen.Vault.Change, not here.
+  # Already-vaulted values (a %Masked{} round-trip, a raw vt_* token) pass through; a
+  # PLAINTEXT value is wrapped in %Samen.Pii.Plaintext{} so `inspect(changeset)` — a log
+  # line, a crash report, a FunctionClauseError blame — prints `**redacted**`, never the
+  # value, in the window before the vault write (ADR-052 §2.1 item 3; Ash redacts a
+  # sensitive changeset ARGUMENT but not a sensitive ATTRIBUTE).
   # ---------------------------------------------------------------------------
   @impl true
   def cast_input(nil, _constraints), do: {:ok, nil}
-  def cast_input(value, _constraints), do: {:ok, value}
+  def cast_input(%Masked{} = masked, _constraints), do: {:ok, masked}
+  def cast_input("vt_" <> _ = token, _constraints), do: {:ok, token}
+  def cast_input(value, _constraints), do: {:ok, Samen.Pii.Plaintext.wrap(value)}
 
   # ---------------------------------------------------------------------------
   # Stored → the field's normal value is %Masked{}. A stored value is always a

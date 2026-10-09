@@ -1,0 +1,24 @@
+# SABOTAGE: ADR-052 R1 — the new LiveView `view` field is declared `:string` instead of a bounded
+# `:opaque_id`. A free-string sink field is exactly where a laundered name would land; the J2
+# schema check must refuse it (and `mix samen.verify.sink_schema` / the :trace_sink tier with it).
+#
+# Flips the R1 schema tests: the real schema is no longer clean, and the pinned bounded type for
+# `view` no longer holds.
+# APP: samen_core
+# TEST_FILES: test/observability/wide_event_live_fields_test.exs
+# MUST_FAIL: POSITIVE CONTROL: the real schema (with the LiveView fields) has no J2 violation
+# MUST_FAIL: R1: every LiveView/request field is declared with its bounded type
+diff --git a/samen_core/lib/samen/wide_event/schema.ex b/samen_core/lib/samen/wide_event/schema.ex
+index 57baf0b..cbe19e7 100644
+--- a/samen_core/lib/samen/wide_event/schema.ex
++++ b/samen_core/lib/samen/wide_event/schema.ex
+@@ -90,7 +90,8 @@ defmodule Samen.WideEvent.Schema do
+     #     handled event literals (`Samen.Observability.LiveEvents`); anything else is
+     #     `:other`. A client-sent string never becomes an atom (R2);
+     #   * `status` — the HTTP status code, a number.
+-    {:view, :opaque_id, []},
++    # SABOTAGE (ADR-052 R1): a LiveView field becomes a free string — a name-carrier.
++    {:view, :string, []},
+     {:callback, :enum, [allowed: ~w(mount handle_params handle_event component_event request)a]},
+     {:event, :enum, [allowed: :open]},
+     {:outcome, :enum, [allowed: ~w(ok exception)a]},

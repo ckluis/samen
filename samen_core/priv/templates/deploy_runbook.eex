@@ -73,6 +73,19 @@ the default is a true no-op.
   add it to a public `[[http_service]]`. Front it with allow-listing if it must be
   reachable off the private net.
 
+## Trace export (optional — ADR-052 §2.1)
+
+Trace export is **OFF by default** (`traces_exporter: :none`). To ship spans to an OTLP
+collector (Honeycomb, Tempo, …):
+
+1. add `{:opentelemetry_exporter, "~> 1.8"}` to `mix.exs` and rebuild the release;
+2. `fly secrets set OTEL_EXPORTER_OTLP_ENDPOINT=https://…` (plus any collector auth via
+   `OTEL_EXPORTER_OTLP_HEADERS`).
+
+If the endpoint is set but the exporter dep is missing, the release **refuses to boot**
+with a named error — it never claims to export traces while dropping them. Spans carry
+bounded attributes only (no SQL text, reveal spans carry three allow-listed keys).
+
 ## Verify fail-closed (before you trust the deploy)
 
 Boot the release with a required secret UNSET and confirm it REFUSES to start with a

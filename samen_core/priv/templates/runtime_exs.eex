@@ -125,6 +125,17 @@ if config_env() == :prod do
     key_id: kms_key_id,
     region: kms_region
 
+  # --- trace export (ADR-052 §2.1) — OFF unless OTEL_EXPORTER_OTLP_ENDPOINT is set -------
+  # Unset/empty → nothing here; config.exs keeps `traces_exporter: :none`. Set → the OTLP
+  # exporter (batch processor, http_protobuf) pointed at that endpoint. FAIL-HONEST (ADR-024):
+  # if the endpoint is set but the `opentelemetry_exporter` dep is not in the release, this
+  # RAISES at boot, naming the dep — never a deploy that believes it exports traces and drops
+  # every span. Add `{:opentelemetry_exporter, "~> 1.8"}` to mix.exs before setting it.
+  for {app, settings} <-
+        Samen.Observability.otlp_runtime_config(System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT")) do
+    config app, settings
+  end
+
   # --- metrics egress (WS-F5 F5.1) — OFF unless SAMEN_METRICS_ENABLED is truthy ---
   # When on, Samen.Observability starts a Prometheus reporter (:<%= otp_app %>_prometheus)
   # over Samen.Metrics.definitions/0 and the framework `GET /metrics` route serves it.

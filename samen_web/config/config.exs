@@ -67,4 +67,16 @@ config :samen_core, Oban,
   queues: false,
   plugins: false
 
+# ADR-052 §2.1 — Logger governance. Phoenix logs request params and every LiveView
+# `handle_event`'s params through this ONE filter. A KEEP-list is default-DENY: every param
+# value not named here prints as `[FILTERED]` (Phoenix's default, ["password"], is a deny-list
+# — default-ALLOW, so every email/name a user types would be logged). Keep only bounded ids,
+# paging and sort keys. The `no_plaintext_pii` tier `:logger` fails on anything else.
+config :phoenix, :filter_parameters,
+  {:keep, ~w(id org org_id page per_page limit cursor after before sort sort_by order dir)}
+
+# ADR-052 §2.1 — trace export stays OFF by default (no exporter configured, no "exporter not
+# found" warning); a deployed release maps OTEL_EXPORTER_OTLP_ENDPOINT to the OTLP exporter.
+config :opentelemetry, traces_exporter: :none
+
 import_config "#{config_env()}.exs"

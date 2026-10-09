@@ -85,9 +85,13 @@ defmodule Samen.Reveal do
   configures an approving grant checker. This is the policy seam, not a policy.
   """
 
+  require Samen.Tracer
+
   alias Samen.Masked
   alias Samen.Pii.Info
   alias Samen.Reveal.Context
+
+  @span_name "samen.reveal"
 
   @doc """
   Reveal the plaintext behind a `%Masked{}` value for `actor` performing
@@ -123,7 +127,11 @@ defmodule Samen.Reveal do
 
   Optional:
     * `:subject_id` — the subject the grant is checked against (lets the grant
-      model scope by subject before any vault hit).
+      model scope by subject before any vault hit). Also the reveal span's
+      `subject_id` attribute.
+    * `:grant_id` — the grant id, recorded as the reveal span's `grant_id` attribute.
+    * `:reason` — a bounded reason CODE (an atom), recorded as the span's `reason`
+      attribute. A binary (free text) is never put on the span.
     * `:vault` — the `Samen.Vault` module to call (defaults to `Samen.Vault`,
       injectable for tests).
     * `:grant` — override the configured grant checker (injectable for tests).
@@ -140,6 +148,56 @@ defmodule Samen.Reveal do
              | :not_found
              | term}
   def reveal(actor, %Masked{} = masked, action_name, resource, opts \\ []) do
+    # ADR-052 §2.1 (R3): the WHOLE gate runs inside ONE reveal span, so a DENIED reveal is as
+    # visible in the trace as a granted one. The span carries only the three allow-listed
+    # attributes (`Samen.Tracer.with_reveal_span/3` strips anything else) and NEVER the
+    # plaintext: the outcome rides the span STATUS as a bounded reason label.
+    Samen.Tracer.with_reveal_span(@span_name, span_attrs(opts)) do
+      result = gate(actor, masked, action_name, resource, opts)
+      mark_outcome(result)
+      result
+    end
+  end
+
+  @doc "The name of the span every `reveal/5` call runs inside (ADR-052 §2.1)."
+  @spec span_name() :: String.t()
+  def span_name, do: @span_name
+
+  # The allow-listed attributes, from the caller's opts. `reason` is accepted only as a
+  # bounded ATOM code: a free-text reason belongs in the audited grant/aud_event row, not in
+  # the trace sink.
+  defp span_attrs(opts) do
+    %{
+      subject_id: bounded_id(Keyword.get(opts, :subject_id)),
+      grant_id: bounded_id(Keyword.get(opts, :grant_id)),
+      reason: reason_code(Keyword.get(opts, :reason))
+    }
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Map.new()
+  end
+
+  defp bounded_id(id) when is_binary(id) and byte_size(id) <= 256, do: id
+  defp bounded_id(_), do: nil
+
+  defp reason_code(code) when is_atom(code) and code not in [nil, true, false],
+    do: Atom.to_string(code)
+
+  defp reason_code(_), do: nil
+
+  # A refusal is an ERROR status whose message is the bounded refusal atom (`denied`,
+  # `not_reveal_action`, …) — never a value, never an inspected term.
+  defp mark_outcome({:ok, _plaintext}), do: :ok
+
+  defp mark_outcome({:error, reason}) do
+    label = if is_atom(reason), do: Atom.to_string(reason), else: "error"
+    ctx = :otel_tracer.current_span_ctx()
+    :otel_span.set_status(ctx, :opentelemetry.status(:error, label))
+    :ok
+  end
+
+  defp mark_outcome(_), do: :ok
+
+  defp gate(actor, masked, action_name, resource, opts) do
     vault_mod = Keyword.get(opts, :vault, Samen.Vault)
     grant_mod = Keyword.get(opts, :grant, grant_checker())
 

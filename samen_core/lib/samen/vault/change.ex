@@ -205,11 +205,13 @@ defmodule Samen.Vault.Change do
   end
 
   # The plaintext value the caller set for a field, if any. We read the CASTED
-  # attribute value on the changeset (VaultField.cast_input passes plaintext
-  # through unchanged), distinguishing "set to nil" from "not set at all".
+  # attribute value on the changeset (VaultField.cast_input wraps plaintext in a
+  # redacting %Samen.Pii.Plaintext{}, unwrapped here — the ONE place it is opened),
+  # distinguishing "set to nil" from "not set at all".
   defp fetch_plaintext(changeset, name) do
     case Ash.Changeset.fetch_change(changeset, name) do
-      {:ok, value} -> {:set, value}
+      # VaultField.cast_input holds plaintext as a redacting %Samen.Pii.Plaintext{}.
+      {:ok, value} -> {:set, Samen.Pii.Plaintext.unwrap(value)}
       :error -> :unset
     end
   end

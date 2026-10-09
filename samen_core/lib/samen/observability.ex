@@ -65,7 +65,14 @@ defmodule Samen.Observability do
      FAIL-HONEST: when the flag is on but the reporter module is not loadable
      (the dep was not added), `child_specs/2` RAISES a named error rather than
      booting an app that claims metrics egress but exports nothing.
-  4. **Wide-event sinks** — none by default (matching the reference verticals:
+  4. **LiveView + request wide events — ON by default (ADR-052 §2.1).**
+     `Samen.Observability.LiveTelemetry` turns each LiveView `mount`/`handle_params`/
+     `handle_event` (and LiveComponent `handle_event`) callback and each endpoint request
+     into ONE bounded `Samen.WideEvent`. Opt out with `request_events: false`.
+  5. **Oban job spans — ON by default (ADR-052 §2.1).** `Samen.Observability.JobSpans`
+     opens an `oban.job` span per job execution, parented on the trace context
+     `Samen.Jobs.enqueue_in_tx/4` stamps into the job's meta. Opt out with `job_spans: false`.
+  6. **Wide-event sinks** — none by default (matching the reference verticals:
      sinks are a debug surface attached on demand). Opt in with
      `wide_event_sinks: [:in_memory | :file]` or
      `config :my_app, Samen.Observability, wide_event_sinks: [...]`.
@@ -77,6 +84,10 @@ defmodule Samen.Observability do
 
     * `:repo_event_prefix` — Ecto telemetry prefix (default `[otp_app, :repo]`)
     * `:metrics` — attach the contention handlers (default `true`)
+    * `:request_events` — attach the LiveView/request wide events (default `true`)
+    * `:job_spans` — attach the Oban job spans (default `true`)
+    * `:kms` — the KMS adapter the request events use for the actor pseudonym
+      (default: the configured `Samen.Kms` adapter)
     * `:pool_saturation_threshold_ms` — forwarded to the contention handlers
     * `:wide_event_sinks` — list of `:in_memory` / `:file` (default from
       `config otp_app, Samen.Observability`, else `[]`)
@@ -91,10 +102,15 @@ defmodule Samen.Observability do
   """
 
   alias Samen.Metrics.ContentionHandlers
+  alias Samen.Observability.{JobSpans, LiveTelemetry}
   alias Samen.WideEvent.Sinks
 
   @db_statement_posture :disabled
   @known_sinks [:in_memory, :file]
+
+  # The OTLP exporter application/module (an Erlang module atom; a VALUE here, so samen_core
+  # compiles without the dep — the host adds it when it sets OTEL_EXPORTER_OTLP_ENDPOINT).
+  @otlp_exporter :opentelemetry_exporter
 
   # The default Prometheus reporter. A bare module alias used only as a VALUE (never
   # a remote call here) so samen_core compiles without the reporter dep present — the
@@ -119,8 +135,107 @@ defmodule Samen.Observability do
 
     [otel_ecto_spec(otp_app, prefix)] ++
       metrics_specs(otp_app, prefix, opts) ++
+      request_event_specs(otp_app, opts) ++
+      job_span_specs(otp_app, opts) ++
       prometheus_specs(otp_app, opts) ++
       wide_event_sink_specs(otp_app, opts)
+  end
+
+  # ---------------------------------------------------------------------------
+  # LiveView + request wide events (ADR-052 §2.1; ON by default)
+  # ---------------------------------------------------------------------------
+
+  defp request_event_specs(otp_app, opts) do
+    if Keyword.get(opts, :request_events, true) do
+      [
+        %{
+          id: {__MODULE__, :request_events, otp_app},
+          start: {__MODULE__, :attach_request_events, [Keyword.take(opts, [:kms])]},
+          restart: :transient,
+          type: :worker
+        }
+      ]
+    else
+      []
+    end
+  end
+
+  @doc false
+  @spec attach_request_events(keyword()) :: :ignore
+  def attach_request_events(opts) do
+    case LiveTelemetry.attach(opts) do
+      :ok -> :ignore
+      {:error, :already_exists} -> :ignore
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Oban job spans (ADR-052 §2.1; ON by default)
+  # ---------------------------------------------------------------------------
+
+  defp job_span_specs(otp_app, opts) do
+    if Keyword.get(opts, :job_spans, true) do
+      [
+        %{
+          id: {__MODULE__, :job_spans, otp_app},
+          start: {__MODULE__, :attach_job_spans, []},
+          restart: :transient,
+          type: :worker
+        }
+      ]
+    else
+      []
+    end
+  end
+
+  @doc false
+  @spec attach_job_spans() :: :ignore
+  def attach_job_spans do
+    case JobSpans.attach() do
+      :ok -> :ignore
+      {:error, :already_exists} -> :ignore
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # OTLP trace exporter (ADR-052 §2.1 — the --deploy runtime layer; fail-honest)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  The runtime config that turns trace export ON for an `OTEL_EXPORTER_OTLP_ENDPOINT`
+  (ADR-052 §2.1; called from the `--deploy` `config/runtime.exs`).
+
+  Returns `[]` for a `nil`/empty endpoint — the exporter stays `traces_exporter: :none`, the
+  framework default. For a set endpoint it returns the `{app, keyword}` pairs that select the
+  OTLP exporter (`:opentelemetry` batch processor + `:opentelemetry_exporter` endpoint).
+
+  FAIL-HONEST (ADR-024): if the endpoint is set but the `opentelemetry_exporter` dependency is
+  not loadable it RAISES, naming the dependency, rather than booting an app whose operator
+  believes traces are exported while every span is dropped.
+
+  `:loadable?` (a 1-arity predicate over a module) is injectable for tests.
+  """
+  @spec otlp_runtime_config(String.t() | nil, keyword()) :: [{atom(), keyword()}]
+  def otlp_runtime_config(endpoint, opts \\ [])
+
+  def otlp_runtime_config(endpoint, _opts) when endpoint in [nil, ""], do: []
+
+  def otlp_runtime_config(endpoint, opts) when is_binary(endpoint) do
+    loadable? = Keyword.get(opts, :loadable?, &Code.ensure_loaded?/1)
+
+    unless loadable?.(@otlp_exporter) do
+      raise ArgumentError,
+            "Samen.Observability: OTEL_EXPORTER_OTLP_ENDPOINT is set (#{inspect(endpoint)}) but " <>
+              "the OTLP exporter #{inspect(@otlp_exporter)} is not available. Add " <>
+              "{:opentelemetry_exporter, \"~> 1.8\"} to your deps, or unset the endpoint. " <>
+              "Refusing to boot an app that claims trace export while exporting nothing " <>
+              "(fail-honest, ADR-024)."
+    end
+
+    [
+      {:opentelemetry, [span_processor: :batch, traces_exporter: :otlp]},
+      {@otlp_exporter, [otlp_protocol: :http_protobuf, otlp_endpoint: endpoint]}
+    ]
   end
 
   # ---------------------------------------------------------------------------

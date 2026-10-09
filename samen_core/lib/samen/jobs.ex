@@ -359,13 +359,26 @@ defmodule Samen.Jobs do
 
   The crash test in `jobs_enqueue_in_tx_test.exs` proves that a multi that rolls
   back AFTER the `enqueue_in_tx` step leaves no `oban_jobs` row.
+
+  Trace context (ADR-052 §2.1): a changeset enqueued inside an active OTel span carries
+  that span's W3C context in `meta["trace_context"]`; the worker's span (opened by
+  `Samen.Observability.JobSpans`) becomes its child.
   """
   @spec enqueue_in_tx(Ecto.Multi.t(), atom(), Oban.Job.t() | Ecto.Changeset.t()) ::
           Ecto.Multi.t()
   def enqueue_in_tx(%Ecto.Multi{} = multi, name, changeset_or_job, opts \\ []) do
     on_conflict = Keyword.get(opts, :on_conflict, :nothing)
-    Oban.insert(multi, name, changeset_or_job, on_conflict: on_conflict)
+    Oban.insert(multi, name, with_trace_context(changeset_or_job), on_conflict: on_conflict)
   end
+
+  # ADR-052 §2.1: the enqueue seam stamps the CURRENT span's W3C trace context into the
+  # job's `meta["trace_context"]`, so `Samen.Observability.JobSpans` parents the worker's
+  # `oban.job` span on the request that enqueued it — one trace across the queue boundary.
+  # No active span → the changeset is unchanged (graceful; never fails the enqueue).
+  defp with_trace_context(%Ecto.Changeset{} = changeset),
+    do: Samen.Tracer.inject_trace_context(changeset)
+
+  defp with_trace_context(other), do: other
 
   @doc """
   Build a DLQ-policy-compliant `use Oban.Worker` worker module spec.

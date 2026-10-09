@@ -64,7 +64,13 @@ defmodule Samen.WideEvent do
             table: nil,
             row_count: nil,
             duration_ms: nil,
-            queue_depth: nil
+            queue_depth: nil,
+            view: nil,
+            callback: nil,
+            event: nil,
+            outcome: nil,
+            method: nil,
+            status: nil
 
   @type t :: %__MODULE__{
           request_id: String.t() | nil,
@@ -77,7 +83,13 @@ defmodule Samen.WideEvent do
           table: String.t() | nil,
           row_count: non_neg_integer() | nil,
           duration_ms: number() | nil,
-          queue_depth: non_neg_integer() | nil
+          queue_depth: non_neg_integer() | nil,
+          view: String.t() | nil,
+          callback: atom() | nil,
+          event: atom() | nil,
+          outcome: atom() | nil,
+          method: atom() | nil,
+          status: non_neg_integer() | nil
         }
 
   @doc "The telemetry event name the sink adapters attach to."
@@ -175,7 +187,9 @@ defmodule Samen.WideEvent do
 
   # ---------------------------------------------------------------------------
 
-  @number_fields [:row_count, :duration_ms, :queue_depth]
+  # The measurements are exactly the schema's `:number` fields (derived, so a new
+  # numeric field — e.g. ADR-052's HTTP `status` — never lands in metadata by omission).
+  @number_fields Schema.number_fields()
 
   defp split(%__MODULE__{} = ev) do
     map = Map.from_struct(ev)

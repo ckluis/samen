@@ -1,0 +1,27 @@
+# SABOTAGE: ADR-052 §2.1 item 1 — the LiveView wide-event handler loses its rescue/catch. One
+# malformed metadata map then raises inside the :telemetry callback, :telemetry DETACHES the
+# handler, and the plane goes dark for the rest of the node's life with no error to the caller.
+#
+# Flips the total-callback test (the malformed-map test alone cannot see it: the builder is total
+# over every map shape Phoenix sends, so the rescue is what covers the shapes it does not).
+# APP: samen_core
+# TEST_FILES: test/observability/live_telemetry_test.exs
+# MUST_FAIL: handle_event/4 returns :ok for ANY input
+diff --git a/samen_core/lib/samen/observability/live_telemetry.ex b/samen_core/lib/samen/observability/live_telemetry.ex
+index 8f24986..6055d9b 100644
+--- a/samen_core/lib/samen/observability/live_telemetry.ex
++++ b/samen_core/lib/samen/observability/live_telemetry.ex
+@@ -105,11 +105,9 @@ defmodule Samen.Observability.LiveTelemetry do
+       :skip -> :ok
+     end
+ 
++    # SABOTAGE (ADR-052 §2.1): the handler no longer guards itself — a malformed metadata map
++    # raises out of the telemetry callback and :telemetry detaches it for good.
+     :ok
+-  rescue
+-    _ -> :ok
+-  catch
+-    _, _ -> :ok
+   end
+ 
+   @doc false

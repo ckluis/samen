@@ -127,8 +127,11 @@ defmodule Samen.WideEvent.Sinks.File do
     Map.new(map, fn {k, v} -> {String.to_existing_atom(k), atomize_value(k, v)} end)
   end
 
-  # :action / :op are enum atoms in the struct; re-atomize them on read.
-  defp atomize_value(k, v) when k in ["action", "op"] and is_binary(v),
+  # Every schema `:enum` field (:action, :op, and ADR-052's :callback/:event/:outcome/
+  # :method) is an atom in the struct; re-atomize it on read. `to_existing_atom` — the
+  # atom was created by the emitter, never by this reader.
+  @enum_keys Enum.map(Samen.WideEvent.Schema.enum_fields(), &Atom.to_string/1)
+  defp atomize_value(k, v) when k in @enum_keys and is_binary(v),
     do: String.to_existing_atom(v)
 
   defp atomize_value(_k, v), do: v

@@ -1,0 +1,24 @@
+# SABOTAGE: ADR-052 §2.1 item 3 — Samen.Type.VaultField.cast_input/2 stops wrapping in-flight
+# plaintext in %Samen.Pii.Plaintext{}. Ash prints a changeset ATTRIBUTE verbatim (it only redacts
+# sensitive ARGUMENTS), so inspect(changeset) — a log line, a crash report, a FunctionClauseError
+# blame — shows the typed email again until the vault write swaps in the token.
+#
+# Flips the inspect-redaction tests.
+# APP: samen_core
+# TEST_FILES: test/observability/vault_inspect_redaction_test.exs
+# MUST_FAIL: inspect(changeset) never prints a vault-routed attribute's plaintext
+# MUST_FAIL: a FunctionClauseError blame over a changeset does not print the plaintext
+diff --git a/samen_core/lib/samen/type/vault_field.ex b/samen_core/lib/samen/type/vault_field.ex
+index 5b35163..cfe2ac7 100644
+--- a/samen_core/lib/samen/type/vault_field.ex
++++ b/samen_core/lib/samen/type/vault_field.ex
+@@ -56,7 +56,8 @@ defmodule Samen.Type.VaultField do
+   def cast_input(nil, _constraints), do: {:ok, nil}
+   def cast_input(%Masked{} = masked, _constraints), do: {:ok, masked}
+   def cast_input("vt_" <> _ = token, _constraints), do: {:ok, token}
+-  def cast_input(value, _constraints), do: {:ok, Samen.Pii.Plaintext.wrap(value)}
++  # SABOTAGE (ADR-052 §2.1): in-flight plaintext rides the changeset unwrapped again.
++  def cast_input(value, _constraints), do: {:ok, value}
+ 
+   # ---------------------------------------------------------------------------
+   # Stored → the field's normal value is %Masked{}. A stored value is always a

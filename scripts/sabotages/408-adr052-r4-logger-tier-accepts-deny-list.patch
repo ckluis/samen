@@ -1,0 +1,25 @@
+# SABOTAGE: ADR-052 R4 (filter half) — the :logger tier stops refusing a `filter_parameters`
+# that is not a {:keep, [...]} keep-list. Phoenix's default deny-list (["password"]) — which
+# logs every other param a user types, emails and names included — would pass the oracle.
+#
+# Flips the R4 deny-list tests.
+# APP: samen_core
+# TEST_FILES: test/observability/logger_tier_test.exs
+# MUST_FAIL: Phoenix's default deny-list shape fails (prod config AND running env)
+# MUST_FAIL: a {:discard, _} filter fails
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+index 2dfb736..3e147ba 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+@@ -135,7 +135,10 @@ defmodule Samen.NoPlaintextPii.Tiers.LoggerGovernance do
+     end
+   end
+ 
+-  defp keep_list_findings(subject, other) do
++  # SABOTAGE (ADR-052 R4): a non-keep-list filter_parameters is waved through.
++  defp keep_list_findings(_subject, _other), do: []
++
++  defp keep_list_findings_disabled(subject, other) do
+     [
+       Finding.violation(
+         @tier,

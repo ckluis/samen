@@ -1,0 +1,26 @@
+# SABOTAGE: ADR-052 R2 — the LiveView wide event's `event` is the CLIENT-sent string interned as
+# an atom instead of a lookup into the view's own static handle_event literals. A client can then
+# exhaust the atom table and put any string (a name, an email) into the trace sink.
+#
+# Flips the R2 test: the unknown event is no longer :other, and its atom now exists.
+# APP: samen_core
+# TEST_FILES: test/observability/live_telemetry_test.exs
+# MUST_FAIL: an unknown event is :other and NO atom is created for it
+diff --git a/samen_core/lib/samen/observability/live_events.ex b/samen_core/lib/samen/observability/live_events.ex
+index 9cf30c9..c24a338 100644
+--- a/samen_core/lib/samen/observability/live_events.ex
++++ b/samen_core/lib/samen/observability/live_events.ex
+@@ -56,10 +56,9 @@ defmodule Samen.Observability.LiveEvents do
+   """
+   @spec resolve(module() | term(), term()) :: atom()
+   def resolve(module, event) when is_atom(module) and is_binary(event) do
+-    case Map.fetch(events(module), event) do
+-      {:ok, atom} -> atom
+-      :error -> @other
+-    end
++    # SABOTAGE (ADR-052 R2): the client-sent event string is passed through raw — interned.
++    _ = events(module)
++    String.to_atom(event)
+   end
+ 
+   def resolve(_module, _event), do: @other

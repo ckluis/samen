@@ -1,7 +1,7 @@
 # Samen Observability Guide (T2.6)
 
-**Date:** 2026-07-05  
-**Source:** vision doc §runs 4a–4d; plan T2.6
+**Date:** 2026-07-05 (ADR-052 P1 additions: 2026-10-09)  
+**Source:** vision doc §runs 4a–4d; plan T2.6; ADR-052 §2.1
 
 ---
 
@@ -11,8 +11,9 @@ Samen's observability plane is governed, not exempt — every signal stays insid
 
 | Layer | Module/Tool | PII posture |
 |---|---|---|
-| Distributed tracing | OpenTelemetry via `Samen.Tracer` | `db_statement: :disabled`; reveal span allow-listed |
-| Structured wide events | `Samen.WideEvent` (T2.7) | build-time schema allow-list, actor_id = HMAC pseudonym |
+| Distributed tracing | OpenTelemetry via `Samen.Tracer` | `db_statement: :disabled`; reveal span allow-listed (live on every `Samen.Reveal.reveal/5`); Oban job spans |
+| Structured wide events | `Samen.WideEvent` (T2.7) | build-time schema allow-list, actor_id = HMAC pseudonym; one event per LiveView callback / request (§5) |
+| Application log | Phoenix `filter_parameters` keep-list + prod level ≥ `:info` | `no_plaintext_pii` tier `:logger` (§6) |
 | Bounded metrics | Prometheus + exemplars (T2.8) | hashed/bucketed tenant labels only |
 | BEAM introspection | remote console runbook (T2.8) | guarded, operator-only |
 
@@ -57,6 +58,8 @@ config :opentelemetry,
 **Scrub 2 — Reveal span allow-list.**  
 A `:reveal` span carries EXACTLY three attributes: `subject_id`, `grant_id`, `reason`. The decrypted value is NEVER a span attribute or event. `Samen.Tracer.with_reveal_span/3` enforces this structurally: any attribute key not in the allow-list is silently stripped before span creation.
 
+**Live since ADR-052 P1.** `Samen.Reveal.reveal/5` — the grant-gated chokepoint in front of `Samen.Vault.reveal/3` — runs its WHOLE gate inside one `samen.reveal` span. A denied reveal is therefore as visible as a granted one: its span carries status `error` with the bounded refusal atom as the message (`denied`, `not_reveal_action`, `aggregate_actor_denied`, …), never a value. The attributes come from the caller's opts: `:subject_id`, `:grant_id`, and `:reason` **only as an atom code** — a free-text reason is not put on the span (it belongs in the audited grant / `aud_event` row). Not wrapped (yet): the operator-with-grant resolution inside `Samen.Api.PiiResolution` and internal system decrypts (TOTP, DSAR export, AI agent transcript) — they call `Samen.Vault.reveal/3` directly.
+
 ```elixir
 require Samen.Tracer
 
@@ -82,7 +85,9 @@ end
 
 ### Oban trace propagation
 
-Spans cross the Oban worker boundary via the job's `meta` field:
+**Automatic since ADR-052 P1.** `Samen.Jobs.enqueue_in_tx/4` stamps the current span's W3C context into `meta["trace_context"]`, and `Samen.Observability.JobSpans` (attached by `child_specs/2`, opt out with `job_spans: false`) opens an `oban.job` span on Oban's own `[:oban, :job, :start]` telemetry, parented on that context, and ends it on `:stop`/`:exception`. Every worker gets a job span with no per-worker code; the span carries only `oban.worker`, `oban.queue`, `oban.attempt`. Jobs inserted with a bare `Oban.insert/2` (not through `enqueue_in_tx/4`) still get a span, as a fresh root.
+
+The manual form below remains available (and composes — a `with_job_span/3` inside a worker becomes a child of the `oban.job` span):
 
 ```elixir
 # Enqueueing side:
@@ -174,19 +179,16 @@ There is no physical OTel collector in the local development or CI environment. 
 - **Tests:** `Samen.TracerTest` uses `:otel_exporter_pid` (built into the OTel SDK) which delivers spans as `{:span, record}` messages to the test process, enabling synchronous assertion on span attributes.
 - **Trace assertion:** `Record.defrecord(:span, ...)` extracts the span record; `:otel_attributes.map/1` converts the attributes to a plain map for assertion.
 
-**Operator TODO:** In production, configure:
+**Production export (ADR-052 P1).** `traces_exporter: :none` stays the default in every host and in generated apps. The `--deploy` runtime layer (`config/runtime.exs`, generated) maps one env var:
 
 ```elixir
-# config/prod.exs
-config :opentelemetry,
-  span_processor: :batch,
-  traces_exporter: {:opentelemetry_exporter, %{
-    otlp_endpoint: "https://api.honeycomb.io",
-    otlp_headers: [{"x-honeycomb-team", System.get_env("HONEYCOMB_API_KEY")}]
-  }}
+for {app, settings} <-
+      Samen.Observability.otlp_runtime_config(System.get_env("OTEL_EXPORTER_OTLP_ENDPOINT")) do
+  config app, settings
+end
 ```
 
-Add `{:opentelemetry_exporter, "~> 1.10"}` to `mix.exs` deps.
+Unset/empty → nothing changes. Set → `traces_exporter: :otlp` with a batch processor and `opentelemetry_exporter` pointed at the endpoint (`http_protobuf`). **Fail-honest (ADR-024):** if the endpoint is set but `opentelemetry_exporter` is not loadable, boot RAISES naming the dependency — never a deploy that claims trace export and drops every span. Add `{:opentelemetry_exporter, "~> 1.8"}` to `mix.exs` before setting the variable; collector auth rides `OTEL_EXPORTER_OTLP_HEADERS`.
 
 ---
 
@@ -200,3 +202,42 @@ The `Samen.NoPlaintextPii.Tiers.LogTelemetry` tier (T1.8d config level + T2.6 li
 A handler registered via `OpentelemetryEcto.setup(prefix, db_statement: :enabled)` fails the tier even if the config-level key says `:disabled`. This double-check catches the case where the application calls `setup/2` with the wrong option after startup.
 
 The tier is run by `mix samen.verify.no_plaintext_pii` (step 6 of `demo/ci.sh`) and exits non-zero on any violation.
+
+---
+
+## 5 · LiveView + request wide events (ADR-052 P1)
+
+`Samen.Observability.child_specs/2` attaches `Samen.Observability.LiveTelemetry` by default (opt out with `request_events: false`). Each Phoenix callback becomes exactly ONE `Samen.WideEvent` (`:telemetry.span/3` emits `:stop` or `:exception`, never both):
+
+| Telemetry event | Wide event |
+|---|---|
+| `[:phoenix, :live_view, :mount \| :handle_params \| :handle_event, :stop \| :exception]` | `action: :live_view`, `callback: :mount \| :handle_params \| :handle_event` |
+| `[:phoenix, :live_component, :handle_event, :stop \| :exception]` | `action: :live_component`, `callback: :component_event` |
+| `[:phoenix, :endpoint, :stop]` (needs `Plug.Telemetry` in the endpoint) | `action: :http_request`, `callback: :request`, `method`, `status` |
+
+New schema fields, all bounded (`mix samen.verify.sink_schema` still passes): `view` (`:opaque_id` — the LiveView/component **module** name), `callback`, `outcome` (`:ok`/`:exception`), `method` (closed enums), `status` (`:number`), and `event`.
+
+**`event` never comes from the client.** The `handle_event` string is client-controlled: interning it would let a client exhaust the atom table, and recording it would let any string reach the sink. `Samen.Observability.LiveEvents` uses it only as a lookup key into the view's OWN statically handled event literals — the first argument of its `handle_event/3` clauses, read from the module's compiled debug info (or an explicit `__samen_live_events__/0` list) and memoized per module version. A match yields the literal's atom; anything else (prefix patterns, catch-alls, unknown strings) is `:other`. Atoms are only ever minted from developer literals. `:event` and `:action` are the only fields allowed the open-enum sentinel; the schema check now fails any other field that declares it. Releases built with `strip_beams: true` (the `mix release` default) carry no debug info, so every event is `:other` unless the release keeps `Dbgi` or the view declares `__samen_live_events__/0` — less detail, never more.
+
+**Identity.** `tenant_id` is the socket/conn `:org_id` assign, kept only if it is a UUID. `actor_id` is `Samen.WideEvent.for_subject/2` of the `:samen_tenant_principal` assign — the per-subject HMAC pseudonym, memoized per process, omitted when the subject has no live key. Params, session, URI, path, query string and every other assign are never read; an exception's reason is never recorded.
+
+**Never crashes the caller.** `:telemetry` detaches a raising handler for the rest of the node's life. The handler rescues and catches everything; a value that fails its bounded type is dropped from the event, an event that still fails validation is dropped whole.
+
+## 6 · Logger governance — the `:logger` tier (ADR-052 P1)
+
+Phoenix logs controller params and every LiveView `handle_event`'s params through one filter, `config :phoenix, :filter_parameters`, whose default (`["password"]`) is a deny-list: default-ALLOW. Every host and every generated app now sets the framework keep-list (default-DENY — every other param value prints `[FILTERED]`):
+
+```elixir
+config :phoenix, :filter_parameters,
+  {:keep, ~w(id org org_id page per_page limit cursor after before sort sort_by order dir)}
+```
+
+The `no_plaintext_pii` CI tier **`:logger`** (`Samen.NoPlaintextPii.Tiers.LoggerGovernance`) fails when:
+
+1. `filter_parameters` is not `{:keep, [...]}` — checked in the host's prod config (read with `Config.Reader` for `env: :prod`) and in the running app env — or a kept key is PII-named (`Samen.PiiClassify.pii_name?/1`) or secret-named (`password`/`secret`/`token`). Only when Phoenix is a dependency.
+2. The prod Logger level is below `:info` (an unset level counts as below — Logger's default logs everything).
+3. The prod config cannot be read (fail closed).
+
+LiveView's own `log:` option is left at its `:debug` default: with the keep-list in every env and the prod floor at `:info`, its event line never reaches a prod log and its params are filtered everywhere (ADR-052 as-built note).
+
+**In-flight vault plaintext is redacted at the type.** Ash hides a `sensitive?` field on a record and redacts a `sensitive?` changeset argument, but prints a changeset *attribute* verbatim — so `inspect(changeset)` (a log line, a crash report, a `FunctionClauseError` blame) showed a typed email until `Samen.Vault.Change` swapped in the token. `Samen.Type.VaultField.cast_input/2` now holds that plaintext as `%Samen.Pii.Plaintext{}` (`Inspect` → `**redacted**`). Code that edits its own pending value opens it with `Samen.Pii.Plaintext.unwrap/1` (e.g. a composer reading `AshPhoenix.Form.value(form, :body)`); a form re-render shows the user's own input back (`Phoenix.HTML.Safe`). Ash's error structs never carried it: `Ash.Error.Invalid` prints the changeset as `#Changeset<>`, and the vault's own D3 cast refusal adds no value.
