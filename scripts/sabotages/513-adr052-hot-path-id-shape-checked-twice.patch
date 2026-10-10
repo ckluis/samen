@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.1.2 item 4 — the hot path validates each opaque id TWICE: every wide event
+# pays a second id-shape heuristic per id/token field. Proves the "validated ONCE" count is not
+# vacuous after its warm-up run (the untraced first call that keeps the order-dependent
+# per-module literal map out of the count).
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/observability/live_telemetry_test.exs
+# MUST_FAIL: a warm handle_event callback runs the id-shape check once per id/token field
+diff --git a/samen_core/lib/samen/wide_event.ex b/samen_core/lib/samen/wide_event.ex
+index aec7c48..42e754e 100644
+--- a/samen_core/lib/samen/wide_event.ex
++++ b/samen_core/lib/samen/wide_event.ex
+@@ -348,6 +348,7 @@ defmodule Samen.WideEvent do
+   defp bounded_id_shape?(value) do
+     byte_size(value) <= @max_id_len and
+       not String.contains?(value, [" ", "\t", "\n"]) and
++      not Samen.PiiValueShape.pii_shaped_id?(value) and
+       not Samen.PiiValueShape.pii_shaped_id?(value)
+   end
+ 

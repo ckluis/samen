@@ -428,12 +428,20 @@ defmodule Samen.Observability.LiveTelemetryTest do
 
   describe "hot path: each value is validated ONCE (ADR-052 §2.1.2 item 4)" do
     # Runs `fun` in a fresh process traced by an isolated trace session (no global tracer is
-    # touched) and counts its calls to the id-shape heuristic.
+    # touched) and counts its calls to the id-shape heuristic. `fun` runs once untraced first:
+    # the steady-state hot path is what is measured, not the one-time per-module literal map
+    # LiveEvents computes and caches in :persistent_term (order-dependent: "got 7"). The module
+    # is loaded first — tracing an unloaded module matches nothing ("got 0" when run alone).
     defp count_shape_checks(fun) do
+      {:module, _} = Code.ensure_loaded(Samen.PiiValueShape)
+      fun.()
+      _warm_up = one_event!()
       session = :trace.session_create(:samen_live_telemetry_validation_count, self(), [])
 
       try do
-        :trace.function(session, {Samen.PiiValueShape, :pii_shaped_id?, 1}, true, [:local])
+        assert :trace.function(session, {Samen.PiiValueShape, :pii_shaped_id?, 1}, true, [:local]) ==
+                 1
+
         test_pid = self()
 
         {pid, ref} =
@@ -460,7 +468,7 @@ defmodule Samen.Observability.LiveTelemetryTest do
       end
     end
 
-    test "one handle_event callback runs the id-shape check once per id/token field" do
+    test "a warm handle_event callback runs the id-shape check once per id/token field" do
       org = Ecto.UUID.generate()
 
       calls =
