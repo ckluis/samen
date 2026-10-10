@@ -22,7 +22,7 @@
 # SAMEN_MULTINODE=1 (the two-node Oban proof). Extra args pass through (e.g. --no-cache, -j 2).
 #
 # CORRECTNESS CONTRACT (do NOT weaken): ALL PASSED prints only when the driver exited 0 AND the
-# verdict it wrote to _ci/last.json is PASS. The driver collects every concurrent step's exit
+# verdict it wrote to _ci/last.json is PASS for the WHOLE pr gate (mode pr, no --only). The driver collects every concurrent step's exit
 # code explicitly (scripts/ci_test.sh C6 fails a run whose concurrent step failure is lost).
 #
 # The whole body is one { … } block: bash parses it completely before running any of it, so a
@@ -42,7 +42,14 @@
   rm -f "$CI_HOME/last.json"   # a stale PASS verdict can never vouch for this run
   "$CI_DRIVER" pr --budget 0 --markers ${opt_in[@]+"${opt_in[@]}"} "$@"
   rc=$?
-  verdict="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("verdict", ""))' "$CI_HOME/last.json" 2>/dev/null || true)"
+  # The verdict, believed only when it is the WHOLE gate: an unfiltered pr run (`./ci.sh --only X`
+  # passes X through, and a PASS over X alone is not ALL PASSED). Like the pre-ADR-053 script, a
+  # clone without origin/main still passes — with the loud DOUBLE SWEEP NOT RUN banner — while the
+  # driver's own line says NOT PR-READY.
+  verdict="$(python3 -c 'import json,sys
+d = json.load(open(sys.argv[1]))
+whole = d.get("mode") == "pr" and not d.get("only")
+print(d.get("verdict", "") if whole or d.get("verdict") != "PASS" else "PASS-BUT-FILTERED")' "$CI_HOME/last.json" 2>/dev/null || true)"
 
   if [[ $rc -eq 0 && "$verdict" == "PASS" ]]; then
     echo ""

@@ -8,12 +8,12 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: C2 the cache invalidates on any input change, an untracked file, a definition change
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index 64ad0ab..28a89b4 100755
+index c88cdcc..c50640f 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -315,7 +315,7 @@ class Snapshot(object):
+@@ -323,7 +323,7 @@ class Snapshot(object):
          if os.path.exists(idx):
-             shutil.copyfile(idx, tmp)
+             shutil.copy2(idx, tmp)  # keep its mtime: git's racy-clean check compares against it
          env = dict(os.environ, GIT_INDEX_FILE=tmp)
 -        p = subprocess.run(["git", "-C", REPO, "add", "-A", "--", "."], stdout=subprocess.DEVNULL,
 +        p = subprocess.run(["git", "-C", REPO, "add", "-u", "--", "."], stdout=subprocess.DEVNULL,

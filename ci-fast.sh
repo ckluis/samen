@@ -18,7 +18,8 @@
 #
 # Like ci.sh: local Postgres required; compiles with --warnings-as-errors; exits non-zero on a
 # failure and ends `CI-FAST: ALL PASSED` on success — printed only when the driver exited 0 AND
-# its _ci/last.json verdict is PASS. One { … } block, parsed whole before it runs.
+# its _ci/last.json verdict is PASS for the whole fast subset (no --only). One { … } block,
+# parsed whole before it runs.
 {
   set -uo pipefail
   REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -123,7 +124,11 @@
   rm -f "$CI_HOME/last.json"   # a stale PASS verdict can never vouch for this run
   "$CI_DRIVER" fast --budget 0 --markers "$@"
   rc=$?
-  verdict="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("verdict", ""))' "$CI_HOME/last.json" 2>/dev/null || true)"
+  # believed only for the WHOLE fast subset (`./ci-fast.sh --only X` passes X through)
+  verdict="$(python3 -c 'import json,sys
+d = json.load(open(sys.argv[1]))
+whole = d.get("mode") == "fast" and not d.get("only")
+print(d.get("verdict", "") if whole or d.get("verdict") != "PASS" else "PASS-BUT-FILTERED")' "$CI_HOME/last.json" 2>/dev/null || true)"
 
   if [[ $rc -ne 0 || "$verdict" != "PASS" ]]; then
     echo ""

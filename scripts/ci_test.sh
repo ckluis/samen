@@ -6,25 +6,31 @@
 # no network; seconds, not minutes. Each case pairs its red assertions with a positive control so
 # it can fail (a harness that cannot go red is the bug it exists to catch).
 #
-#   C1     budget/resume: a deferred, interrupted or unrun step never yields PASS; resume runs each
-#          step exactly once; the first step of an invocation always runs; shard accounting.
+#   C1     budget/resume: a deferred, interrupted or unrun step never yields PASS (nor a signalled
+#          step whose trap exits 0); resume runs each step exactly once; the first step of an
+#          invocation always runs; shard accounting, incl. a listing whose own count disagrees with
+#          its parsed items or is missing; a concurrent driver is refused.
 #   C2     cache: invalidated by a tracked edit, an UNTRACKED file, a reads-only file, a step-
-#          definition change and a toolchain change; never for an ignored file; a step with no
-#          inputs is never cached; a step whose inputs moved while it ran is not cached.
+#          definition change, a toolchain change and a behaviour-changing env var; never for an
+#          ignored file or ./ci.sh's opt-in switches (stripped from steps); a step with no inputs is
+#          never cached; a step whose inputs moved while it ran is not cached.
 #   C3     a FAIL is never cached; the run stops at the first failure; --keep-going still FAILs.
 #   C4     quick / fast / --only never print a PR-ready verdict (pr does — the positive control).
 #   C5     an ExUnit failure is re-run once in isolation; FLAKY (passed on rerun) still FAILS the
 #          run and is not cached; a real failure stays FAIL.
 #   C6     ./ci.sh and ./ci-fast.sh never print ALL PASSED after a failed step — including a step
 #          failing CONCURRENTLY with a passing one, in either completion order — nor when the
-#          driver's exit code and its last.json disagree.
+#          driver's exit code and its last.json disagree, nor over a FILTERED (--only) run; a
+#          driver that errors or crashes leaves last.json ERROR, never an earlier run's PASS.
 #   C9     quick selection: a core change selects every dependant; a vertical change selects only
 #          it (+ always-steps); an untracked file is seen; a framework test/ edit does not select
 #          dependants; no base → refusal.
 #   LOCKS  steps sharing a lock never overlap; a serial step runs alone (positive control:
 #          lock-disjoint steps DO overlap).
 #   EQUIV  the wrappers keep the pre-ADR-053 step list and every `==> … PASSED` marker
-#          (ci/legacy_markers.txt, re-derived from `git show 208dfc5:ci.sh` when that commit exists).
+#          (ci/legacy_markers.txt, re-derived from `git show 208dfc5:ci.sh` when that commit exists);
+#          the known tree-wide reads (samen_web's lint sweeps, samen_stripe's template scan, the
+#          selection tests' corpus/test reads) stay in those steps' cache keys.
 #
 # Usage: scripts/ci_test.sh [CASE…]      (default: every case)
 # Exit:  0 all assertions pass · 1 otherwise. Residue: none (temp dirs, trap on EXIT/INT/TERM).
@@ -137,7 +143,8 @@ case_C1() {
   mkrepo c1s
   { echo "$APPS"
     printf '[step sh]\ncmd = case "$CI_SHARD_ARGS" in "--range 1-2") echo "PROCESSED 2";; *) echo "PROCESSED ${CI_TEST_LIE:-1}";; esac\n'
-    printf 'shard_list = printf "1-a.patch\\n2-b.patch\\n3-c.patch\\n"\nshard_kind = ranges\nshard_each_s = 1\nshard_target_s = 2\n'
+    printf 'shard_list = printf "  1-a.patch x\\n  2-b.patch x\\n  3-c.patch x\\nSELECTED ${CI_TEST_TOTAL:-3}\\n"\nshard_kind = ranges\nshard_each_s = 1\nshard_target_s = 2\n'
+    printf 'shard_item = ^  ([0-9]+-\\S+\\.patch)\\s\nshard_total = ^SELECTED ([0-9]+)$\n'
     printf 'shard_check = ^PROCESSED ([0-9]+)$\nmodes = pr\ninputs = core/\nest_s = 3\n'; } > "$SAMEN_CI_MANIFEST"
   drive "$T/o7" pr -j 1
   has "$T/o7" '^PASS sh\[1/2\] ' "C1: shard 1 (--range 1-2)"
@@ -145,6 +152,53 @@ case_C1() {
   CI_TEST_LIE=0 drive "$T/o8" pr -j 1 --no-cache
   has "$T/o8" 'shard accounting: processed 0, expected 1' "C1: a shard that under-processes FAILS"
   hasnt "$T/o8" '^CI\(pr\): PASS' "C1: never PASS over a short shard"
+  # the lister's own count is the selection: a listing whose item lines no longer match (format
+  # drift) or whose count line is gone FAILS — it never shrinks to "nothing selected — PASS"
+  CI_TEST_TOTAL=4 drive "$T/o9" pr -j 1 --no-cache
+  has "$T/o9" 'the lister says 4 selected, shard_item .* matched 3' "C1: listed count ≠ parsed items FAILS"
+  hasnt "$T/o9" '^CI\(pr\): PASS|nothing selected' "C1: ... never PASS, never 'nothing selected'"
+  CI_TEST_TOTAL=none drive "$T/o10" pr -j 1 --no-cache
+  has "$T/o10" 'shard listing unparseable: shard_total' "C1: a listing without its count line FAILS"
+  hasnt "$T/o10" '^CI\(pr\): PASS' "C1: ... never PASS"
+  mkrepo c1m
+  { echo "$APPS"
+    printf '[step mod]\ncmd = echo "  mutants run   : 0"\nshard_list = echo "MUTATION SELECTION: ${CI_TEST_MOD:-0} of 9 mutants selected"\n'
+    printf 'shard_kind = modulo\nshard_total = ^MUTATION SELECTION: ([0-9]+) of [0-9]+ mutants selected\nshard_check = ^  mutants run +: ([0-9]+)\nmodes = pr\ninputs = core/\nest_s = 3\n'; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/o11" pr -j 1
+  has "$T/o11" '^PASS mod 0.0s \(nothing selected' "C1: a genuine count of 0 is an empty PASS (positive control)"
+  CI_TEST_MOD=x drive "$T/o12" pr -j 1 --no-cache
+  has "$T/o12" 'shard listing unparseable' "C1: an unparseable modulo count FAILS"
+  hasnt "$T/o12" '^CI\(pr\): PASS' "C1: ... never PASS"
+
+  # a step that swallows the driver's SIGTERM in a trap and exits 0 was INTERRUPTED, not PASSED:
+  # never PASS, never cached, re-run by resume
+  mkrepo c1t
+  { echo "$APPS"
+    printf '[step trapper]\ncmd = trap "exit 0" TERM\n    echo start >> "$CI_TEST_RUNS"; sleep 4 & wait $!\n    echo end >> "$CI_TEST_RUNS"\nmodes = pr\ninputs = core/\nest_s = 1\n'; } > "$SAMEN_CI_MANIFEST"
+  "$CI" pr -j 1 > "$T/o13" 2>&1 &
+  pid=$!
+  for _ in $(seq 1 150); do grep -q start "$CI_TEST_RUNS" && break; sleep 0.1; done
+  kill -TERM "$pid"; wait "$pid"; RC=$?
+  eq "$RC" 130 "C1: interrupted (trap exit 0) run exits 130"
+  has "$T/o13" '^INTERRUPTED trapper ' "C1: a signalled step that exits 0 is INTERRUPTED"
+  hasnt "$T/o13" '^PASS trapper' "C1: ... never PASS"
+  drive "$T/o14" resume
+  has "$T/o14" '^PASS trapper [0-9.]+s$' "C1: resume re-runs it (it was neither cached nor kept)"
+  eq "$(runs_of end)" 1 "C1: ... and only the resumed run reached its end"
+
+  # a second driver against the same state refuses — and leaves the first run's verdict alone
+  mkrepo c1c
+  { echo "$APPS"
+    printf '[step long]\ncmd = echo start >> "$CI_TEST_RUNS"; sleep 2\nmodes = pr\ninputs = core/\nest_s = 1\n'; } > "$SAMEN_CI_MANIFEST"
+  "$CI" pr -j 1 > "$T/o15" 2>&1 &
+  pid=$!
+  for _ in $(seq 1 150); do grep -q start "$CI_TEST_RUNS" && break; sleep 0.1; done
+  drive "$T/o16" pr -j 1
+  eq "$RC" 2 "C1: a concurrent driver is refused"
+  has "$T/o16" 'another scripts/ci is running' "C1: ... and says why"
+  wait "$pid"
+  has "$T/o15" '^CI\(pr\): PASS 1/1' "C1: the first run completes unharmed"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'd["verdict"]')" PASS "C1: ... and its last.json is its own"
 }
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -191,6 +245,21 @@ PY
   has "$T/o9" '^PASS s_core ' "C2: a step-definition (cmd) change re-runs it"
   SAMEN_CI_TOOLCHAIN=fake-toolchain-2 drive "$T/o10" pr
   has "$T/o10" '^PASS s_web ' "C2: a toolchain change re-runs every cached step"
+  # behaviour-changing environment is part of the key (SAMEN_UPDATE_GOLDEN=1, a stub
+  # SAMEN_MUTATION_RUNNER, another PGHOST …); ./ci.sh's opt-in switches are not — and never reach a step
+  SAMEN_CI_TOOLCHAIN=fake-toolchain-2 drive "$T/o10b" pr
+  has "$T/o10b" '^CACHED s_web$' "C2: same env → CACHED (positive control)"
+  SAMEN_CI_TOOLCHAIN=fake-toolchain-2 SAMEN_UPDATE_GOLDEN=1 drive "$T/o10c" pr
+  has "$T/o10c" '^PASS s_web ' "C2: a SAMEN_* env change re-runs the step"
+  SAMEN_CI_TOOLCHAIN=fake-toolchain-2 PGHOST=elsewhere drive "$T/o10d" pr
+  has "$T/o10d" '^PASS s_web ' "C2: a PG* env change re-runs the step"
+  SAMEN_CI_TOOLCHAIN=fake-toolchain-2 SAMEN_MULTINODE=1 SAMEN_SABOTAGE=1 drive "$T/o10e" pr
+  has "$T/o10e" '^CACHED s_web$' "C2: the wrapper opt-in switches do not split the cache"
+  mkrepo c2e
+  { echo "$APPS"
+    printf '[step envp]\ncmd = echo "multinode=${SAMEN_MULTINODE:-unset} sabotage=${SAMEN_SABOTAGE:-unset}" >> "$CI_TEST_RUNS"\nmodes = pr\ninputs = core/\nest_s = 1\n'; } > "$SAMEN_CI_MANIFEST"
+  SAMEN_MULTINODE=1 SAMEN_SABOTAGE=1 drive "$T/o10f" pr
+  eq "$(cat "$CI_TEST_RUNS")" "multinode=unset sabotage=unset" "C2: ... and are stripped from every step's environment"
   # inputs moving while the step runs: never cached
   mkrepo c2m
   { echo "$APPS"
@@ -245,7 +314,15 @@ case_C4() {
   has "$T/o5" '^CI\(quick\): FAIL .* — NOT PR-READY — run: scripts/ci pr$' "C4: a quick FAIL says it too"
   drive "$T/o6" quick --budget 1 -j 1 --no-cache
   has "$T/o6" '^CI\(quick\): INCOMPLETE .* — NOT PR-READY' "C4: a quick INCOMPLETE says it too"
-  cat "$T"/o[12356] > "$T/all"
+  # PR-READY is relative to a base: none in this clone → green but NOT PR-READY; another base → named
+  touch "$T/c4.ok"
+  (cd "$R" && git update-ref -d refs/remotes/origin/main)
+  drive "$T/o7" pr
+  has "$T/o7" '^CI\(pr\): PASS 2/2 in .* — NOT PR-READY: base origin/main is missing' "C4: pr without its base is NOT PR-READY"
+  (cd "$R" && git update-ref refs/remotes/origin/main HEAD)
+  drive "$T/o8" pr --base HEAD
+  has "$T/o8" '^CI\(pr\): PASS 2/2 in .* — PR-READY \(vs HEAD\)$' "C4: pr against another base names it"
+  cat "$T"/o[123567] > "$T/all"
   hasnt "$T/all" '(^|[^T] )PR-READY' "C4: no quick/fast/--only line ever claims PR-READY"
 }
 
@@ -340,6 +417,28 @@ LIAR
   hasnt "$T/o6" 'ALL PASSED' "C6: ... and never ALL PASSED"
   SAMEN_CI_DRIVER="$T/liar" bash "$W/ci-fast.sh" > "$T/o7" 2>&1; RC=$?
   hasnt "$T/o7" 'CI-FAST: ALL PASSED' "C6: ci-fast.sh does not believe it either"
+  # a FILTERED run passes args through to the driver — its PASS is not the whole gate
+  { echo "$APPS"; echo "$P"; step also_ok "vert_a/"; } > "$SAMEN_CI_MANIFEST"
+  bash "$W/ci.sh" --only pass_slow > "$T/o8" 2>&1; RC=$?
+  has "$T/o8" '^CI\(pr --only pass_slow\): PASS 1/1' "C6: (the filtered driver run itself passed)"
+  eq "$RC" 1 "C6: ci.sh --only exits 1 — a filtered PASS is not the root gate"
+  hasnt "$T/o8" 'ALL PASSED' "C6: ci.sh never prints ALL PASSED over a filtered run"
+  bash "$W/ci-fast.sh" --only pass_slow > "$T/o9" 2>&1; RC=$?
+  eq "$RC" 1 "C6: ci-fast.sh --only exits 1"
+  hasnt "$T/o9" 'CI-FAST: ALL PASSED' "C6: ci-fast.sh never prints ALL PASSED over a filtered run"
+  # a driver that dies after a green run never leaves that green verdict readable as its own
+  drive "$T/o10" pr
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'd["verdict"]')" PASS "C6: (a green run first)"
+  echo "[step broken]" >> "$SAMEN_CI_MANIFEST"
+  drive "$T/o11" pr
+  eq "$RC" 2 "C6: a manifest error exits 2"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'd["verdict"]')" ERROR "C6: ... and last.json says ERROR, not the earlier PASS"
+  { echo "$APPS"; echo "$P"; step also_ok "vert_a/"; } > "$SAMEN_CI_MANIFEST"
+  python3 -c 'import json,sys; json.dump({"mode": "pr", "options": {"base": "origin/main", "budget": 540}, "steps": []}, open(sys.argv[1], "w"))' "$SAMEN_CI_HOME/state.json"
+  drive "$T/o12" resume
+  [[ "$RC" -ne 0 ]] && ok || bad "C6: a driver crash (corrupt state) exits non-zero"
+  has "$T/o12" 'ERROR — the driver crashed' "C6: ... says it crashed"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'd["verdict"]')" ERROR "C6: ... and last.json says ERROR"
 }
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -442,6 +541,17 @@ case_EQUIV() {
   # (4) ordering: ci.sh's serial prefix keeps its order in the manifest (preflight → spikes → samen_core)
   local order; order="$(grep -nE 'double sweep: PASSED|spike s00_smoke: PASSED|==> samen_core: PASSED' "$T/off" | cut -d: -f1 | tr '\n' ' ')"
   [[ "$(echo $order | tr ' ' '\n' | sort -n | tr '\n' ' ')" == "$order" ]] && ok || bad "EQUIV: preflight/spikes/samen_core order changed: $order"
+  # (5) the tree-wide reads found by the ADR-053 gate audit stay in their steps' cache keys: each of
+  # these suites reads files OUTSIDE its app, and without the declaration an edit there would be
+  # reported CACHED over a suite that never saw it (over-caching = a PASS for an unrun tree)
+  local pin st want
+  for pin in "samen_web:inc:demo/lib/" "samen_web:inc:driftwood/lib/" "samen_web:inc:pawchart/lib/" \
+             "samen_stripe:inc:samen_web/lib/" "sabotage_selection_test:inc:scripts/sabotages/" \
+             "mutation_selection_test:inc:samen_core/test/"; do
+    st="${pin%%:*}"; want="${pin#*:}"
+    "$CI" explain "$st" > "$T/ex_$st" 2>&1
+    grep -qF -- " $want" "$T/ex_$st" && ok || bad "EQUIV: step $st no longer keys on $want (a tree-wide read it performs) — over-caching"
+  done
 }
 
 ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV)

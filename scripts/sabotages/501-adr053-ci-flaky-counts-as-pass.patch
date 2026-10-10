@@ -7,11 +7,11 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: C5 a flaky test still fails the run
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index 64ad0ab..2ea4405 100755
+index c88cdcc..a539c5a 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -774,7 +774,7 @@ class Run(object):
-         if rc != 97 and not self.interrupted:
+@@ -838,7 +838,7 @@ class Run(object):
+         if rc != 97 and not self.interrupted and not r.get("signalled"):
              flaky = self.flaky_rerun(step, text, logabs)
              if flaky:
 -                status = "FLAKY"

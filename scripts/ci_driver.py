@@ -42,7 +42,7 @@ import sys
 import tempfile
 import time
 
-KEY_VERSION = "adr053-1"  # bump to invalidate every cached PASS after a semantic driver change
+KEY_VERSION = "adr053-2"  # bump to invalidate every cached PASS after a semantic driver change
 
 SELF_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.environ.get("SAMEN_CI_REPO") or os.path.join(SELF_DIR, ".."))
@@ -127,8 +127,8 @@ def fmt_s(x):
 # ── manifest ────────────────────────────────────────────────────────────────────────────────────
 STEP_KEYS = {"cmd", "cwd", "modes", "inputs", "reads", "always", "serial", "locks", "est_s", "group",
              "marker", "marker_if", "skip_marker", "echo_log", "exunit_dir", "superseded_by",
-             "shard_list", "shard_kind", "shard_each_s", "shard_target_s", "shard_check",
-             "unsharded_cmd", "desc"}
+             "shard_list", "shard_kind", "shard_item", "shard_total", "shard_each_s", "shard_target_s",
+             "shard_check", "unsharded_cmd", "desc"}
 
 
 class Step(object):
@@ -162,12 +162,20 @@ class Step(object):
         self.superseded_by = d.get("superseded_by", "").split()
         self.shard_list = d.get("shard_list", "").strip() or None
         self.shard_kind = d.get("shard_kind", "").strip() or None
+        self.shard_item = d.get("shard_item", "").strip() or None
+        self.shard_total = d.get("shard_total", "").strip() or None
         self.shard_each = float(d.get("shard_each_s", "30"))
         self.shard_target = float(d.get("shard_target_s", "300"))
         self.shard_check = d.get("shard_check", "").strip() or None
         self.unsharded_cmd = d.get("unsharded_cmd") or None
         if self.shard_list and self.shard_kind not in ("ranges", "modulo"):
             raise UsageError("manifest: step %s: shard_kind must be ranges|modulo" % sid)
+        # the lister's OWN count is required: an item regex that stops matching (the lister's
+        # output format drifted) must FAIL the step, never shrink the selection to "0 — PASS"
+        if self.shard_list and not self.shard_total:
+            raise UsageError("manifest: step %s: a sharded step needs shard_total (the lister's own count)" % sid)
+        if self.shard_kind == "ranges" and not self.shard_item:
+            raise UsageError("manifest: step %s: ranges sharding needs shard_item" % sid)
         # runtime (filled by the planner)
         self.parent = None
         self.shard_args = ""
@@ -313,7 +321,7 @@ class Snapshot(object):
         tmpdir = tempfile.mkdtemp(prefix="samen_ci_snap.")
         tmp = os.path.join(tmpdir, "index")
         if os.path.exists(idx):
-            shutil.copyfile(idx, tmp)
+            shutil.copy2(idx, tmp)  # keep its mtime: git's racy-clean check compares against it
         env = dict(os.environ, GIT_INDEX_FILE=tmp)
         p = subprocess.run(["git", "-C", REPO, "add", "-A", "--", "."], stdout=subprocess.DEVNULL,
                            stderr=subprocess.PIPE, env=env)
@@ -352,6 +360,26 @@ class Snapshot(object):
         return self._memo[k]
 
 
+# The ./ci.sh opt-in switches select steps (--also); they are never a step's business. Stripped from
+# every step's environment so `SAMEN_MULTINODE=1 ./ci.sh` runs the SAME samen_core suite as
+# `./ci.sh` (the multinode step sets the variable itself) and the cache keys below do not split.
+WRAPPER_FLAGS = ("SAMEN_SABOTAGE", "SAMEN_MUTATION", "SAMEN_MULTINODE")
+# C2: environment that changes what a step does is part of every cache key — a PASS earned under
+# SAMEN_UPDATE_GOLDEN=1, SAMEN_EMPTY_ASH_DOMAINS=1, a stub SAMEN_MUTATION_RUNNER, another
+# PGHOST/DATABASE_URL or MIX_ENV, GEN_PROBE_GUARD_DISABLE_TRAP=1 … never vouches for a run without
+# it. SAMEN_CI_* are the driver's own seams (SAMEN_CI_TOOLCHAIN feeds the toolchain part).
+ENV_KEYED = re.compile(r"^(SAMEN_|MIX_|ELIXIR_|ERL_|HEX_|REBAR|PG|DATABASE_URL$|DRILL_|DRIFTWOOD_|GEN_PROBE_|LOG_LEVEL$)")
+
+
+def step_base_env():
+    return {k: v for k, v in os.environ.items() if k not in WRAPPER_FLAGS}
+
+
+def env_fingerprint():
+    return "\n".join("%s=%s" % (k, v) for k, v in sorted(step_base_env().items())
+                     if ENV_KEYED.match(k) and not k.startswith("SAMEN_CI_"))
+
+
 def toolchain_fingerprint():
     fp = os.environ.get("SAMEN_CI_TOOLCHAIN")
     if fp is not None:
@@ -387,6 +415,7 @@ class Context(object):
         self.snap = Snapshot()
         self.tree = self.snap.tree
         self.toolchain = toolchain_fingerprint()
+        self.env_fp = env_fingerprint()
         self._changed = None
 
     def changed(self):
@@ -403,7 +432,7 @@ class Context(object):
         return self._changed
 
     def env(self, mode, step):
-        e = dict(os.environ)
+        e = step_base_env()
         e.update({"REPO_ROOT": REPO, "CI_MODE": mode, "CI_STEP": step.id,
                   "CI_BASE": self.base, "CI_BASE_SHA": self.base_sha, "CI_MERGE_BASE": self.merge_base,
                   "CI_SHARD_ARGS": step.shard_args})
@@ -418,6 +447,7 @@ class Context(object):
         h = hashlib.sha256()
         h.update(json.dumps(step.definition(apps), sort_keys=True).encode())
         h.update(b"\0toolchain\0" + self.toolchain.encode())
+        h.update(b"\0env\0" + self.env_fp.encode())
         h.update(b"\0files\0" + dig.encode())
         if "@base" in rules:
             h.update(("\0base\0%s\0%s" % (self.base_sha, self.merge_base)).encode())
@@ -468,12 +498,27 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
         rc, text = run_capture(step.shard_list, step.cwd, env)
         if rc == 0 and pkey:
             atomic_write_json(lpath, {"cmd": step.shard_list, "text": text})
-    if rc != 0:
+    def listing_fail(why):
         s = clone_step(step, step.id)
         s.parent = None
-        s.preset = ("FAIL", "could not list the shard items (exit %d):\n%s" % (rc, text[-4000:]))
+        s.preset = ("FAIL", why)
         return [s]
-    items = [l.strip() for l in text.splitlines() if l.strip()]
+    if rc != 0:
+        return listing_fail("could not list the shard items (exit %d):\n%s" % (rc, text[-4000:]))
+    # the lister's own count, exactly once — the selection is never inferred from what the item
+    # regex happened to match (a drifted output format would otherwise read as "0 selected")
+    totals = [m.group(1) for m in re.finditer(step.shard_total, text, re.M)]
+    if len(totals) != 1 or not totals[0].isdigit():
+        return listing_fail("shard listing unparseable: shard_total /%s/ matched %d time(s) %r — refusing to "
+                            "guess the selection:\n%s" % (step.shard_total, len(totals), totals[:3], text[-2000:]))
+    total = int(totals[0])
+    if step.shard_kind == "ranges":
+        items = [m.group(1) for m in re.finditer(step.shard_item, text, re.M)]
+        if len(items) != total:
+            return listing_fail("shard listing accounting: the lister says %d selected, shard_item /%s/ matched %d "
+                                "— refusing to run a different selection than the one listed" % (total, step.shard_item, len(items)))
+    else:
+        items = [str(total)]
     if step.shard_kind == "ranges":
         nums = []
         for it in items:
@@ -499,13 +544,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
             raise UsageError("shard accounting: %s chunks hold %d of %d items" % (step.id, sum(len(c) for c in chunks), len(items)))
         specs = [("--range %d-%d" % (c[0][0], c[-1][0]), [it for _n, it in c]) for c in chunks]
     else:
-        try:
-            count = int(items[0]) if items else 0
-        except ValueError:
-            s = clone_step(step, step.id)
-            s.parent = None
-            s.preset = ("FAIL", "shard_list must print a count for modulo sharding, got: %r" % items[:3])
-            return [s]
+        count = total
         n = max(1, int(math.ceil(count * step.shard_each / step.shard_target))) if count else 0
         specs = []
         for i in range(1, n + 1):
@@ -764,6 +803,12 @@ class Run(object):
             text = f.read()
         self.echo(step, text)
         note = None
+        if r.get("signalled") and rc == 0:
+            # C1: the driver signalled this step's process group. An exit 0 after that is a TRAP
+            # that swallowed the signal (bash continues after a TERM trap returns), not a step
+            # that ran to completion — it can never be PASS, never be cached, never be "earlier
+            # in this run" on resume.
+            rc = 143
         if rc == 0 and step.shard_check and step.expected is not None:
             m = None
             for m in re.finditer(step.shard_check, text, re.M):
@@ -790,14 +835,14 @@ class Run(object):
             self.check_groups()
             return
         status = "FAIL"
-        if rc != 97 and not self.interrupted:
+        if rc != 97 and not self.interrupted and not r.get("signalled"):
             flaky = self.flaky_rerun(step, text, logabs)
             if flaky:
                 status = "FLAKY"
                 note = "FLAKY (passed on rerun) — a flaky test still FAILS the run; rerun log: %s.rerun" % r["log"]
             elif flaky is False:
                 note = "failed again on an isolated rerun (not a flake); rerun log: %s.rerun" % r["log"]
-        if self.interrupted:
+        if self.interrupted or r.get("signalled"):
             status = "INTERRUPTED"
         digest = ([note] if note and status != "INTERRUPTED" else []) + make_digest(text)
         self.record(step, status, dur, log=r["log"], digest=digest, note=note)
@@ -889,6 +934,7 @@ class Run(object):
 
     def terminate_all(self):
         for r in self.running.values():
+            r["signalled"] = True
             try:
                 os.killpg(r["proc"].pid, signal.SIGTERM)  # SIGTERM first: gen-probe/sabotage traps restore
             except OSError:
@@ -946,6 +992,33 @@ def cmd_run(mode, opts, resume=False):
             pass
         except PermissionError:
             raise UsageError("step %s from an earlier invocation may still be running (pgid %d)" % (sid, pid))
+    # From here this invocation OWNS _ci/last.json: whatever an earlier run concluded stops being
+    # readable as this run's verdict before anything else happens. A crash anywhere below leaves
+    # RUNNING (or ERROR), never an earlier PASS for a tree it did not run.
+    # (--plan runs nothing and reports nothing: it leaves last.json alone.)
+    last_path = os.path.join(HOME, "last.json")
+    if not opts.get("plan"):
+        atomic_write_json(last_path, {"mode": mode, "verdict": "RUNNING", "resume": bool(resume),
+                                      "pid": os.getpid(), "started": time.strftime("%Y-%m-%dT%H:%M:%S")})
+    holder = {}
+    try:
+        return _cmd_run_locked(mode, opts, resume, t_start, old, holder)
+    except BaseException as e:
+        run = holder.get("run")
+        if run is not None and run.running:
+            run.interrupted = True
+            run.terminate_all()  # never orphan a step (start_new_session: nothing else would stop it)
+        if opts.get("plan"):
+            raise
+        atomic_write_json(last_path, {"mode": mode, "verdict": "ERROR", "error": "%s: %s" % (type(e).__name__, e),
+                                      "final_line": "CI(%s): ERROR — the driver stopped before a verdict: %s" % (mode, e)})
+        if not isinstance(e, UsageError):
+            out("CI(%s): ERROR — the driver crashed (%s: %s); verdict ERROR in %s/last.json" % (
+                mode, type(e).__name__, e, os.path.relpath(HOME, REPO)))
+        raise
+
+
+def _cmd_run_locked(mode, opts, resume, t_start, old, holder):
     man = Manifest(MANIFEST)
     ctx = Context(opts["base"], need_base=(mode == "quick"))
     if resume:
@@ -962,6 +1035,7 @@ def cmd_run(mode, opts, resume=False):
                  "head": ctx.head, "tree": ctx.tree, "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
                  "invocations": 1, "cumulative_s": 0.0, "steps": {}}
     run = Run(man, mode, opts, ctx, state, resume)
+    holder["run"] = run
     plan, skipped = build_plan(man, mode, ctx, opts)
     run.plan = plan
     state["plan"] = [s.id for s in plan]
@@ -1000,6 +1074,14 @@ def cmd_run(mode, opts, resume=False):
     state["cumulative_s"] = round(state.get("cumulative_s", 0.0) + elapsed, 1)
     first_fail = next((s.id for s in plan if run.status.get(s.id) in ("FAIL", "FLAKY")), None)
     line, verdict, n, m = final_line(mode, opts, plan, run.status, elapsed, first_fail)
+    if line.endswith(" — PR-READY"):
+        # PR-READY is a claim RELATIVE TO A BASE: without it the double sweep did not run and the
+        # --changed replays fell back to the harnesses' own default (HEAD~1) — green, not ready
+        if not ctx.base_sha:
+            line = line[:-len(" — PR-READY")] + (" — NOT PR-READY: base %s is missing in this clone (no double sweep; "
+                                                 "--changed replays had no base) — git fetch origin main" % opts["base"])
+        elif opts["base"] != "origin/main":
+            line += " (vs %s)" % opts["base"]
     unrun = [s.id for s in plan if run.status.get(s.id) not in DONE + ("FAIL", "FLAKY")]
     if verdict == "INCOMPLETE":
         if run.interrupted:
@@ -1008,8 +1090,6 @@ def cmd_run(mode, opts, resume=False):
             out("CI(%s): budget — %s" % (mode, stop_reason))
     elif verdict == "FAIL" and unrun:
         out("CI(%s): stopped at the first failure — %d planned step(s) not run (--keep-going runs them)" % (mode, len(unrun)))
-    if verdict == "PASS" and any(s.parent and s.parent == "mutation_watchlist" for s in plan):
-        out("NOTE: mutation_watchlist ran sharded — mutate.sh's obsolete-ledger check runs only unfiltered: scripts/ci full --budget 0 (or ./ci.sh with SAMEN_MUTATION=1)")
     state["verdict"] = verdict
     run.save_state()
     last = {"mode": mode, "verdict": verdict, "final_line": line, "passed": n, "planned": m,

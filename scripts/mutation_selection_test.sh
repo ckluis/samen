@@ -33,6 +33,7 @@
 #  10  NEGATIVE CONTROL: ACCEPTED_GAP with no ref= → lint FAILS
 #  11  NEGATIVE CONTROL: a reason too short to be a reason → lint FAILS
 #  12  NEGATIVE CONTROL: an exemption whose mutant is now KILLED → gate FAILS obsolete
+#      (unfiltered AND under --shard i/n, so a sharded sweep refuses it too — 12b)
 #  13  lint refuses a target with ZERO mutation sites (certifies nothing)
 #  14  lint refuses a missing owning test file (the gate's quietest failure mode)
 #  15  --shard partitions the mutant list EXACTLY: shards are disjoint and their
@@ -286,6 +287,18 @@ if [[ $st -ne 0 ]] && grep -q "OBSOLETE ledger entries" <<<"$out"; then
 else
   echo "$out"
   bad "an obsolete exemption was accepted silently (exit $st)"
+fi
+# 12b. ... and a SHARDED sweep reproduces that refusal (ADR-053: scripts/ci shards the watch-list
+# under a budget; if only the unfiltered run checked, a sharded verdict would skip it for good).
+obs_shards=0
+for i in 1 2; do
+  out="$(SAMEN_MUTATION_RUNNER="$R_KILL" bash "$MUTATE" --targets "$TARGETS" --ledger "$LEDGER_OK" --shard "$i/2" 2>&1)"; st=$?
+  [[ $st -ne 0 ]] && grep -q "OBSOLETE ledger entries" <<<"$out" && obs_shards=$((obs_shards + 1))
+done
+if [[ $obs_shards -ge 1 ]]; then
+  ok "NEGATIVE CONTROL: a --shard sweep still FAILS an obsolete exemption (the shards reproduce the unfiltered check)"
+else
+  bad "an obsolete exemption passed every --shard i/2 run — a sharded watch-list would never refuse it"
 fi
 
 echo ""

@@ -7,15 +7,15 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: C2 the cache invalidates on any input change, an untracked file, a definition change
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index 64ad0ab..8d9833f 100755
+index c88cdcc..830dab2 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -416,7 +416,7 @@ class Context(object):
+@@ -445,7 +445,7 @@ class Context(object):
          snap = snap or self.snap
          dig, _n = snap.digest(rules)
          h = hashlib.sha256()
 -        h.update(json.dumps(step.definition(apps), sort_keys=True).encode())
 +        h.update(json.dumps({"id": step.parent or step.id}, sort_keys=True).encode())
          h.update(b"\0toolchain\0" + self.toolchain.encode())
+         h.update(b"\0env\0" + self.env_fp.encode())
          h.update(b"\0files\0" + dig.encode())
-         if "@base" in rules:
