@@ -237,6 +237,10 @@ has a red-path assertion in `scripts/ci_test.sh`; sabotages 506–512 flip them.
 | `scripts/ci quick --no-cache` (this branch: 11 of 46 selected, 24 SKIP) | PASS 11/11 — NOT PR-READY | 220 s (116 s of it the 10 new sabotages) |
 | `scripts/ci quick`, cached | PASS 11/11 — NOT PR-READY | 2.4 s |
 | `./ci-fast.sh --no-cache` | `CI-FAST: ALL PASSED` | 93 s |
+| *gate, 7a7d3bf:* `scripts/ci pr --no-cache` → `resume` → `resume` | PASS 46/46 — PR-READY | 428 + 312 + 456 s (3 calls) |
+| *gate, ec95c5e:* `./ci.sh --no-cache` (cold, unbudgeted) | `ROOT CI: ALL PASSED` (PASS 47/47) | 1359 s — of which `sabotage --changed` (17 ADR-053 patches, ~31 s each, 2 shards) ~520 s |
+| *gate, ec95c5e:* `./ci-fast.sh --no-cache` | `CI-FAST: ALL PASSED` | 113 s |
+| *gate, ec95c5e:* `scripts/ci pr` / `quick` / `./ci.sh`, nothing changed | PASS 47/47 PR-READY / PASS 14/14 NOT PR-READY / ALL PASSED | 0.5 s / 2.1 s / 0.4 s |
 
 **Not in P1:** C7/C8/C10 and `sabotage new`/`reanchor`/`scripts/counts` (P3), Actions (P2), the
 CLAUDE.md rewrite (P4 — P1 adds a pointer only). `full` mode's corpus and watch-list shards were
