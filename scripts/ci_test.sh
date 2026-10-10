@@ -666,7 +666,7 @@ case_A1() {
 # the expected base; and --require-base turns a missing base into a failure instead of a pass.
 runjob() { # runjob <job> <only> → results/ci-result-<job>/last.json, its own state dir
   local job="$1" only="$2"
-  SAMEN_CI_HOME="$T/a2.home.$job" "$CI" pr --only "$only" --budget 0 -j 2 --no-cache --require-base > "$T/a2.$job.out" 2>&1
+  SAMEN_CI_HOME="$T/a2.home.$job" "$CI" pr --only-steps "$only" --budget 0 -j 2 --no-cache --require-base > "$T/a2.$job.out" 2>&1
   mkdir -p "$RES/ci-result-$job" && cp "$T/a2.home.$job/last.json" "$RES/ci-result-$job/last.json"
 }
 case_A2() {
@@ -675,6 +675,15 @@ case_A2() {
   { echo "$APPS"; astep s1 group=g1; astep s2 group=g1; astep s3 group=g2; astep s4 group=g2 'actions_skip=needs an operator credential that CI never holds'; } > "$SAMEN_CI_MANIFEST"
   local base; base="$(git -C "$R" rev-parse origin/main)"
   runjob g1 s1,s2; runjob g2 s3
+  # --only-steps is ids ONLY: a step named like a group must not drag its group in (the nightly samen_core
+  # job once ran `multinode` too, because the step `samen_core` is also the group `samen_core`)
+  { echo "$APPS"; astep grp group=grp; astep other group=grp; } > "$T/a2.grp.conf"
+  SAMEN_CI_MANIFEST="$T/a2.grp.conf" SAMEN_CI_HOME="$T/a2.home.grp" drive "$T/o0" pr --only-steps grp --budget 0 --no-cache
+  has "$T/o0" '^CI\(pr --only grp\): PASS 1/1' "A2: --only-steps grp runs the step grp alone"
+  SAMEN_CI_MANIFEST="$T/a2.grp.conf" SAMEN_CI_HOME="$T/a2.home.grp2" drive "$T/o0b" pr --only grp --budget 0 --no-cache
+  has "$T/o0b" '^CI\(pr --only grp\): PASS 2/2' "A2: ... while --only grp selects the whole group (positive control)"
+  SAMEN_CI_MANIFEST="$T/a2.grp.conf" SAMEN_CI_HOME="$T/a2.home.grp3" drive "$T/o0c" pr --only-steps nosuch --budget 0
+  eq "$RC" 2 "A2: --only-steps with an unknown id is a usage error"
   drive "$T/o1" actions verify pr --results "$RES" --expect-base "$base"
   eq "$RC" 0 "A2: every planned step ran once, PASS, on the expected base -> coverage PASS"
   has "$T/o1" 'ACTIONS COVERAGE \(pr\): PASS — 3/3 steps verified, 1 excluded' "A2: ... the verdict line counts verified and excluded"
@@ -739,7 +748,7 @@ case_A3() {
   eq "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(",".join(j["name"]+"@"+j["slice"] for j in d["jobs"]))' "$T/o0")" "corp_01@1/3,corp_02@2/3,corp_03@3/3" "A3: a sliced step plans one job per slice"
   local i
   for i in 1 2 3; do
-    SAMEN_CI_HOME="$T/a3.home.$i" "$CI" pr --only corp --slice "$i/3" --budget 0 --no-cache --require-base > "$T/a3.out.$i" 2>&1
+    SAMEN_CI_HOME="$T/a3.home.$i" "$CI" pr --only-steps corp --slice "$i/3" --budget 0 --no-cache --require-base > "$T/a3.out.$i" 2>&1
     eq "$?" 0 "A3: slice $i/3 passes"
     mkdir -p "$RES/ci-result-corp_0$i" && cp "$T/a3.home.$i/last.json" "$RES/ci-result-corp_0$i/last.json"
   done
@@ -768,7 +777,7 @@ PY
   eq "$RC" 1 "A3: a total that disagrees with an independent count fails"
   has "$T/o4" 'the lister selected 8 but the independent count is 9' "A3: ... and says so"
 
-  CI_TEST_LIE=1 SAMEN_CI_HOME="$T/a3.home.x" "$CI" pr --only corp --slice 1/3 --budget 0 --no-cache > "$T/o5" 2>&1; RC=$?
+  CI_TEST_LIE=1 SAMEN_CI_HOME="$T/a3.home.x" "$CI" pr --only-steps corp --slice 1/3 --budget 0 --no-cache > "$T/o5" 2>&1; RC=$?
   eq "$RC" 1 "A3: a slice that under-processes its chunk fails in its own job"
   has "$T/o5" 'shard accounting: processed 3, expected 4' "A3: ... by shard accounting"
 }

@@ -54,7 +54,7 @@ NOT_PR_READY = "NOT PR-READY — run: scripts/ci pr"
 DONE = ("PASS", "CACHED")
 
 USAGE = """\
-usage: scripts/ci quick|fast|pr|full [--budget S] [-j N] [--only STEP|GROUP[,…]] [--also STEP|GROUP]
+usage: scripts/ci quick|fast|pr|full [--budget S] [-j N] [--only STEP|GROUP[,…] | --only-steps STEP[,…]] [--also STEP|GROUP]
                                      [--no-cache] [--base REF] [--keep-going] [--markers] [--plan]
                                      [--slice i/n] [--require-base]
        scripts/ci resume [--budget S] [-j N] [--markers]
@@ -71,6 +71,7 @@ usage: scripts/ci quick|fast|pr|full [--budget S] [-j N] [--only STEP|GROUP[,…
                 runs. Ends `INCOMPLETE n/m — continue: scripts/ci resume`.
   -j N          concurrent non-serial steps (default: cores/2).
   --only X      run only these steps/groups (comma-separated). A filtered run is never PR-ready.
+  --only-steps X  like --only, but X are step IDS only (a step named like a group does not select the group).
   --also X      add an opt-in step/group outside the mode (./ci.sh maps SAMEN_SABOTAGE=1 etc.).
   --no-cache    ignore cached PASSes (this run's own progress still resumes).
   --base REF    diff base for quick / --changed steps / the double sweep (default origin/main).
@@ -648,10 +649,20 @@ def build_plan(man, mode, ctx, opts, quiet=False):
     also = set(opts.get("also") or [])
     only = set(opts.get("only") or [])
     for x in also | only:
-        if not man.by_id(x) and x not in {s.group for s in man.steps}:
+        if not man.by_id(x) and x not in {s.group for s in man.steps} and not opts.get("exact"):
             raise UsageError("no step or group named %r (scripts/ci list)" % x)
     cand = [s for s in man.steps if mode in s.modes or s.id in also or s.group in also]
-    if only:
+    if only and opts.get("exact"):
+        # --only-steps: step IDS only. A step whose id equals a group name (samen_core) must not drag in
+        # the rest of that group — the Actions jobs name their steps, and `actions verify` would catch the
+        # extra step only after it ran twice.
+        unknown = sorted(x for x in only if not man.by_id(x))
+        if unknown:
+            raise UsageError("--only-steps: no step named %s" % ", ".join(unknown))
+        cand = [s for s in cand if s.id in only]
+        if not cand:
+            raise UsageError("--only-steps %s selects nothing in mode %s" % (",".join(sorted(only)), mode))
+    elif only:
         cand = [s for s in cand if s.id in only or s.group in only]
         if not cand:
             raise UsageError("--only %s selects nothing in mode %s" % (",".join(sorted(only)), mode))
@@ -1598,7 +1609,7 @@ def parse(argv):
     cmd, rest = argv[0], argv[1:]
     opts = {"budget": 540.0, "jobs": max(1, (os.cpu_count() or 2) // 2), "only": [], "also": [],
             "no_cache": False, "base": "origin/main", "keep_going": False, "markers": False, "apps": False,
-            "plan": False, "require_base": False, "json": False, "results": None, "expect_base": None,
+            "plan": False, "exact": False, "require_base": False, "json": False, "results": None, "expect_base": None,
             "last": None, "slice": None, "expect_total": None,
             "_given": set()}
     pos = []
@@ -1613,7 +1624,7 @@ def parse(argv):
             return rest[i + 1]
         if a.startswith("-"):
             opts["_given"].add(a)
-        if a in ("--budget", "-j", "--jobs", "--base", "--only"):
+        if a in ("--budget", "-j", "--jobs", "--base", "--only", "--only-steps"):
             if a in seen and a != "--only":
                 raise UsageError("%s given twice" % a)
             seen.add(a)
@@ -1631,6 +1642,8 @@ def parse(argv):
                 opts["base"] = v
             else:
                 opts["only"] += [x for x in v.split(",") if x]
+                if a == "--only-steps":
+                    opts["exact"] = True
             i += 2
         elif a == "--also":
             opts["also"] += [x for x in val().split(",") if x]

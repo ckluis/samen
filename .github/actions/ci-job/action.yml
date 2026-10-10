@@ -103,7 +103,7 @@ runs:
         JOBS: ${{ inputs.jobs }}
       run: |
         set -uo pipefail
-        args=(--only "$ONLY" --budget 0 -j "$JOBS" --no-cache --require-base)
+        args=(--only-steps "$ONLY" --budget 0 -j "$JOBS" --no-cache --require-base)
         [ -n "$SLICE" ] && args+=(--slice "$SLICE")
         scripts/ci "$MODE" "${args[@]}"
 
