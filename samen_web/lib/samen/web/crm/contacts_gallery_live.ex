@@ -37,10 +37,12 @@ defmodule Samen.Web.CRM.ContactsGalleryLive do
   import Samen.UI
   import Samen.Web.CRM.Live, only: [assign_mount: 2, crm_sidebar: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
+  import Samen.Web.ObjectRef.FieldValue, only: [opaque: 1]
 
   alias Samen.Web.CRM.Reads
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.ObjectRef.FieldValue
   alias Samen.Web.Page
 
   @impl true
@@ -178,7 +180,7 @@ defmodule Samen.Web.CRM.ContactsGalleryLive do
   # via `Phoenix.HTML.Safe` — never unwrapped, never plaintext-downgraded. On the tenant plane
   # the field arrives as the clear composite (a JSON string / an `Emails` struct / a list) and is
   # decoded to a display string. This never calls the vault.
-  defp render_name(%Samen.Masked{} = masked, _display), do: masked
+  defp render_name(name, _display) when opaque(name), do: name
 
   defp render_name(name, _display) when is_binary(name) do
     case Jason.decode(name) do
@@ -194,23 +196,8 @@ defmodule Samen.Web.CRM.ContactsGalleryLive do
   defp render_name(_other, display) when is_binary(display), do: display
   defp render_name(_other, _display), do: "—"
 
-  defp render_email(%Samen.Masked{} = masked), do: masked
-  defp render_email(%Samen.Type.Emails{entries: entries}), do: render_email(entries)
-
-  defp render_email(json) when is_binary(json) do
-    case Jason.decode(json) do
-      {:ok, list} when is_list(list) -> render_email(list)
-      _ -> "—"
-    end
-  end
-
-  defp render_email(emails) when is_list(emails) do
-    case List.first(emails) do
-      %{"address" => addr} -> addr
-      %{address: addr} -> addr
-      _ -> "—"
-    end
-  end
-
-  defp render_email(_), do: "—"
+  # Vault-routed cells delegate to the ONE masking-aware formatter, `FieldValue`: a
+  # %Masked{} (operator plane) or a replay %Placeholder{} (ADR-052 player) passes through
+  # AS-IS and renders its own text (••••, [erased], …) — never "—", which means "no value".
+  defp render_email(emails), do: FieldValue.email(emails)
 end

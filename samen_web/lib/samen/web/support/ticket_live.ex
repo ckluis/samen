@@ -80,6 +80,7 @@ defmodule Samen.Web.Support.TicketLive do
   import Samen.UI
   import Samen.Web.Support.Live, only: [assign_mount: 2, support_sidebar: 1, writable?: 1]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
+  import Samen.Web.ObjectRef.FieldValue, only: [opaque: 1]
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
@@ -753,7 +754,7 @@ defmodule Samen.Web.Support.TicketLive do
 
   defp render_sender(%{sender_type: :agent, __agent__: %{full_name: full_name, handle: handle}}) do
     case full_name do
-      %Samen.Masked{} = m -> m
+      m when opaque(m) -> m
       name when is_binary(name) -> decode_full_name(name) || handle
       nil -> handle || "Agent"
       _ -> handle || "Agent"
@@ -765,17 +766,17 @@ defmodule Samen.Web.Support.TicketLive do
   defp render_sender(%{sender_type: :system}), do: "System"
   defp render_sender(_), do: "Unknown"
 
-  defp render_body(%Samen.Masked{} = m), do: m
+  defp render_body(body) when opaque(body), do: body
   defp render_body(body) when is_binary(body), do: body
   defp render_body(nil), do: "—"
   defp render_body(_), do: "—"
 
-  defp render_agent_name(%Samen.Masked{} = m), do: m
+  defp render_agent_name(name) when opaque(name), do: name
   defp render_agent_name(name) when is_binary(name), do: decode_full_name(name) || name
   defp render_agent_name(nil), do: "—"
   defp render_agent_name(_), do: "—"
 
-  defp render_agent_email(%Samen.Masked{} = m), do: m
+  defp render_agent_email(email) when opaque(email), do: email
   defp render_agent_email(email) when is_binary(email), do: email
   defp render_agent_email(nil), do: "—"
   defp render_agent_email(_), do: "—"

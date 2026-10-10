@@ -597,6 +597,23 @@ Built as §2.3 says. The choices the section left open, and the deviations:
     (457 also lets the render process's crash become the player's — the isolated render would
     otherwise absorb the reraise and the guard would go vacuous).
 
+11. **Placeholder cells (follow-up, 2026-10-10).** Item 6's placeholders reached the frame, but
+    the framework's vault-cell renderers matched only `%Samen.Masked{}`: a `%Placeholder{}` fell
+    to their "no value" clause, so a masked or erased email/phone printed "—" (the glyph of a
+    contact with NO email; landing claim RP12), a gallery/ticket name fell back to the display
+    name/handle, and the AI grounding preview printed `inspect/1` output. Not a leak; a fidelity
+    lie. Fixed framework-first: `Samen.Web.ObjectRef.FieldValue.opaque/1` (a guard: `%Masked{}`
+    or `%Placeholder{}` — present, not shown to this viewer) is the one test; `FieldValue`'s
+    `email/phone/full_name/generic` pass an opaque value through, the five CRM views' private
+    copies (byte-identical to `FieldValue`'s) now delegate to it (`ContactsLive`, `ContactLive`,
+    `CompanyLive`, `ContactsGalleryLive`, `LeadsLive`), and the renderers with their own
+    semantics match the guard (`Operator.Live`, `Support.TicketLive`, `AI.CrmLive`,
+    `Chat.Components`, `DefaultCard`, the CRM initials avatars). Live rendering is unchanged (the
+    plane masking suites stay green). Proof per renderer on the player's own path
+    (`Renderer.render/2`) in `samen_web/test/samen/web/replay_placeholder_cells_test.exs`, with an
+    empty-email positive control, and end to end over the real recording in
+    `replay_player_test.exs`. Sabotage 495 (guard back to `%Masked{}` only).
+
 *Not done in P3:* no `:replay` `no_plaintext_pii` tier and no post-shred replay check (P4);
 no host turns the capture plane on; the player cannot show a `live_render` child or a stream's
 rows (counts only, §7); a view whose template needs a value the recorder dropped (a form) shows
@@ -613,6 +630,7 @@ nothing).
 | list authorized like an open | 459 | `replay_player_test.exs` |
 | decode safety | 455, 456 | `player_test.exs` |
 | P3 gate: a stored row picks no code path (struct, raw markup, unbounded render, meta) | 461, 462, 463, 464 | `player_test.exs`, `replay_player_test.exs` |
+| placeholder cells render as the placeholder, never "—" (item 11) | 495 | `replay_placeholder_cells_test.exs`, `replay_player_test.exs` |
 
 ### 2.4 P4 — mounts, tiers, docs
 

@@ -46,9 +46,11 @@ defmodule Samen.Web.CRM.ContactLive do
     ]
 
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, return_path: 1]
+  import Samen.Web.ObjectRef.FieldValue, only: [opaque: 1]
 
   alias Samen.Web.CurrentOrg
   alias Samen.Web.Mount
+  alias Samen.Web.ObjectRef.FieldValue
 
   alias Samen.Web.CRM.Reads
 
@@ -555,7 +557,7 @@ defmodule Samen.Web.CRM.ContactLive do
 
   # PII renderers — copied in posture from ContactsLive (render %Masked{} as-is).
 
-  defp contact_initials(%{full_name: %Samen.Masked{}}), do: "··"
+  defp contact_initials(%{full_name: name}) when opaque(name), do: "··"
 
   defp contact_initials(%{full_name: name, display_name: display_name}),
     do: contact_initials_of(name, display_name)
@@ -581,56 +583,10 @@ defmodule Samen.Web.CRM.ContactLive do
     |> String.upcase()
   end
 
-  defp render_full_name(%Samen.Masked{} = masked, _display_name), do: masked
-
-  defp render_full_name(name, _display_name) when is_binary(name) do
-    case Jason.decode(name) do
-      {:ok, %{"first" => first, "last" => last}} -> String.trim("#{first} #{last}")
-      _ -> name
-    end
-  end
-
-  defp render_full_name(nil, display_name) when is_binary(display_name), do: display_name
-  defp render_full_name(nil, _display_name), do: "—"
-  defp render_full_name(other, _display_name), do: other
-
-  defp render_email(%Samen.Masked{} = masked), do: masked
-  defp render_email(%Samen.Type.Emails{entries: entries}), do: render_email(entries)
-
-  defp render_email(json) when is_binary(json) do
-    case Jason.decode(json) do
-      {:ok, list} when is_list(list) -> render_email(list)
-      _ -> "—"
-    end
-  end
-
-  defp render_email(emails) when is_list(emails) do
-    case List.first(emails) do
-      %{"address" => addr} -> addr
-      %{address: addr} -> addr
-      _ -> "—"
-    end
-  end
-
-  defp render_email(_), do: "—"
-
-  defp render_phone(%Samen.Masked{} = masked), do: masked
-  defp render_phone(%Samen.Type.Phones{entries: entries}), do: render_phone(entries)
-
-  defp render_phone(json) when is_binary(json) do
-    case Jason.decode(json) do
-      {:ok, list} when is_list(list) -> render_phone(list)
-      _ -> "—"
-    end
-  end
-
-  defp render_phone(phones) when is_list(phones) do
-    case List.first(phones) do
-      %{"number" => num} -> num
-      %{number: num} -> num
-      _ -> "—"
-    end
-  end
-
-  defp render_phone(_), do: "—"
+  # Vault-routed cells delegate to the ONE masking-aware formatter, `FieldValue`: a
+  # %Masked{} (operator plane) or a replay %Placeholder{} (ADR-052 player) passes through
+  # AS-IS and renders its own text (••••, [erased], …) — never "—", which means "no value".
+  defp render_full_name(name, display_name), do: FieldValue.full_name(name, display_name)
+  defp render_email(emails), do: FieldValue.email(emails)
+  defp render_phone(phones), do: FieldValue.phone(phones)
 end

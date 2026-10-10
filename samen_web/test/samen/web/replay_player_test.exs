@@ -291,6 +291,30 @@ defmodule Samen.Web.ReplayPlayerTest do
       assert Enum.all?(socket.assigns.refs, &(&1.outcome == :shredded))
     end
 
+    # claim-evidence RP12: the email/phone cells used to fall through to "—" (the "no email"
+    # glyph) for a placeholder. They now show the placeholder, like every other cell.
+    test "email and phone cells: •••• without a grant, [erased] after shred — never the empty —",
+         ctx do
+      cells = fn html ->
+        for class <- ~w(p-email p-phone) do
+          [_, inner] = Regex.run(~r/class="#{class}"[^>]*>(.*?)</s, html)
+          String.trim(inner)
+        end
+      end
+
+      open_impersonation!(ctx.operator, ctx.org)
+      masked = ctx.org |> operator_player(ctx.replay_id, ctx.operator) |> at_list()
+      assert cells.(masked.assigns.frame_html) == ["••••", "••••"]
+
+      user = user!(ctx.org, :admin)
+      clear = ctx.org |> tenant_player(ctx.replay_id, user.id) |> at_list()
+      assert cells.(clear.assigns.frame_html) == [Seeds.contact_email(), Seeds.contact_phone()]
+
+      {:ok, _} = Samen.Erasure.shred(ctx.person_id, repo: Repo, org_id: ctx.org)
+      erased = ctx.org |> tenant_player(ctx.replay_id, user.id) |> at_list()
+      assert cells.(erased.assigns.frame_html) == ["[erased]", "[erased]"]
+    end
+
     # ADR-052 §2.4.1 (P3 gate note 9): a frame batch over a full contacts page cost one vault
     # read per vault field per row (tenant), plus a suspension check, a grant read and a
     # custom-bag catalog read per field / row (operator) — 151 / 351 queries for 51 rows. The
