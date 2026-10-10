@@ -1,0 +1,106 @@
+# ADR-053 §2.8 — `scripts/ci full`, nightly: the `pr` set plus the WHOLE sabotage corpus and the WHOLE
+# mutation watch-list, each SHARDED across a job matrix (`scripts/ci full --slice i/N`). Every slice
+# asserts PROCESSED == its chunk; the `ci-full` aggregate sums the slices and fails unless the sum equals
+# the lister's selected total (and the independent patch-file count) — a slice that processes 0, or
+# silently drops a patch, cannot pass (ADR red path C7's Actions twin).
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # once a night, UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the manifest (fails on a step in no job, in two, or excluded without a reason)
+        id: plan
+        run: |
+          set -euo pipefail
+          scripts/ci actions plan full --json > plan.json
+          scripts/ci actions plan full | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "matrix=$(python3 -c 'import json; d=json.load(open("plan.json")); print(json.dumps({"include": d["jobs"]}))')" >> "$GITHUB_OUTPUT"
+
+  ci:
+    name: ci (${{ matrix.name }})
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.0-pg16
+        env:
+          POSTGRES_USER: clank
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clank"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      USER: clank
+      PGUSER: clank
+      PGHOST: localhost
+      PGPORT: "5432"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/ci-job
+        with:
+          mode: full
+          name: ${{ matrix.name }}
+          only: ${{ matrix.only }}
+          slice: ${{ matrix.slice }}
+          cache-paths: ${{ matrix.cache_paths }}
+
+  ci-full:
+    name: ci-full
+    if: always()
+    needs: [plan, ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.ci.result != 'skipped'
+        with:
+          pattern: ci-result-*
+          path: results
+      - name: Coverage - jobs' union == `scripts/ci list full`; slices sum to the selected totals
+        if: needs.plan.result == 'success'
+        run: |
+          set -o pipefail
+          patches="$(ls scripts/sabotages/*.patch | wc -l | tr -d ' ')"
+          scripts/ci actions verify full --results results --expect-total "sabotage_corpus=$patches" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Aggregate - every job must have SUCCEEDED
+        env:
+          PLAN: ${{ needs.plan.result }}
+          CI: ${{ needs.ci.result }}
+        run: |
+          echo "plan=$PLAN ci=$CI"
+          [ "$PLAN" = success ] && [ "$CI" = success ] || { echo "::error::ci-full: plan=$PLAN ci=$CI — not every job succeeded"; exit 1; }
