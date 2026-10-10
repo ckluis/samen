@@ -601,6 +601,11 @@ case_EQUIV() {
   # (4) ordering: ci.sh's serial prefix keeps its order in the manifest (preflight → spikes → samen_core)
   local order; order="$(grep -nE 'double sweep: PASSED|spike s00_smoke: PASSED|==> samen_core: PASSED' "$T/off" | cut -d: -f1 | tr '\n' ' ')"
   [[ "$(echo $order | tr ' ' '\n' | sort -n | tr '\n' ' ')" == "$order" ]] && ok || bad "EQUIV: preflight/spikes/samen_core order changed: $order"
+  # (4b) the REAL manifest plans for Actions in pr and full: every step in one job or excluded with a reason
+  local m
+  for m in pr full; do
+    "$CI" actions plan "$m" > "$T/ap_$m" 2>&1 && ok || { bad "EQUIV: the real manifest has no valid Actions plan for $m:"; sed 's/^/      | /' "$T/ap_$m"; }
+  done
   # (5) the tree-wide reads found by the ADR-053 gate audit stay in their steps' cache keys: each of
   # these suites reads files OUTSIDE its app, and without the declaration an edit there would be
   # reported CACHED over a suite that never saw it (over-caching = a PASS for an unrun tree)
@@ -614,7 +619,161 @@ case_EQUIV() {
   done
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV)
+
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+# A1 (ADR-053 §2.8): the GitHub Actions plan is a PARTITION of `scripts/ci list MODE` — every step in
+# exactly one job, or excluded WITH a reason; anything else fails the plan job, naming the step.
+astep() { # astep <id> [key=value…] — a fake pr step; no group unless a key line gives one
+  local id="$1"; shift
+  printf '[step %s]\ncmd = echo "$CI_STEP" >> "$CI_TEST_RUNS"\nmodes = pr\ninputs = core/\nest_s = 1\n' "$id"
+  local kv; for kv in "$@"; do printf '%s\n' "$kv"; done
+}
+case_A1() {
+  mkrepo a1
+  { echo "$APPS"; astep s1 group=g1; astep s2 group=g1; astep s3 group=g2; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/o1" actions plan pr --json
+  eq "$RC" 0 "A1: a manifest whose every step has a group plans"
+  eq "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(";".join(j["name"]+"="+j["only"] for j in d["jobs"]))' "$T/o1")" "g1=s1,s2;g2=s3" "A1: one job per group, steps in manifest order"
+  eq "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(sorted(sum((j["steps"] for j in d["jobs"]),[]))==sorted(d["steps"]))' "$T/o1")" True "A1: the jobs' union equals the mode's step list exactly"
+
+  { echo "$APPS"; astep s1 group=g1; astep orphan; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/o2" actions plan pr
+  eq "$RC" 2 "A1: a step in NO job fails the plan"
+  has "$T/o2" 'orphan is assigned to no Actions job' "A1: ... and names the step"
+
+  { echo "$APPS"; astep s1 group=g1 actions_job=g2 'actions_skip=needs a model API key we do not have'; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/o3" actions plan pr
+  eq "$RC" 2 "A1: a step in a job AND excluded (in two places) fails the plan"
+  has "$T/o3" 's1 is assigned to a job \(g2\) AND excluded' "A1: ... and names the step"
+
+  { echo "$APPS"; astep s1 group=g1; astep s2 group=g1 actions_skip=no; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/o4" actions plan pr
+  eq "$RC" 2 "A1: an exclusion without a real reason fails the plan"
+  has "$T/o4" 's2 is excluded from Actions without a reason' "A1: ... and names the step"
+  { echo "$APPS"; astep s1 group=g1; astep s2 group=g1 'actions_skip='; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/o4b" actions plan pr
+  eq "$RC" 2 "A1: an EMPTY actions_skip fails the plan (not read as 'no exclusion')"
+
+  { echo "$APPS"; astep s1 group=g1; astep s2 group=g1 'actions_skip=needs docker-in-docker, which the hosted runner lacks'; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/o5" actions plan pr --json
+  eq "$RC" 0 "A1: an exclusion WITH a reason plans (positive control)"
+  eq "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print([e["id"] for e in d["excluded"]], [j["only"] for j in d["jobs"]])' "$T/o5")" "['s2'] ['s1']" "A1: ... the step is listed as excluded, not dropped, and runs in no job"
+  drive "$T/o5t" actions plan pr
+  has "$T/o5t" 'EXCLUDED s2 +needs docker-in-docker' "A1: ... and the text plan prints the exclusion and its reason"
+}
+
+# A2: the aggregate verifier — what the jobs ACTUALLY ran must equal the plan, each step once, all PASS, on
+# the expected base; and --require-base turns a missing base into a failure instead of a pass.
+runjob() { # runjob <job> <only> → results/ci-result-<job>/last.json, its own state dir
+  local job="$1" only="$2"
+  SAMEN_CI_HOME="$T/a2.home.$job" "$CI" pr --only "$only" --budget 0 -j 2 --no-cache --require-base > "$T/a2.$job.out" 2>&1
+  mkdir -p "$RES/ci-result-$job" && cp "$T/a2.home.$job/last.json" "$RES/ci-result-$job/last.json"
+}
+case_A2() {
+  mkrepo a2
+  RES="$T/a2.results"; rm -rf "$RES" "$T"/a2.home.*
+  { echo "$APPS"; astep s1 group=g1; astep s2 group=g1; astep s3 group=g2; astep s4 group=g2 'actions_skip=needs an operator credential that CI never holds'; } > "$SAMEN_CI_MANIFEST"
+  local base; base="$(git -C "$R" rev-parse origin/main)"
+  runjob g1 s1,s2; runjob g2 s3
+  drive "$T/o1" actions verify pr --results "$RES" --expect-base "$base"
+  eq "$RC" 0 "A2: every planned step ran once, PASS, on the expected base -> coverage PASS"
+  has "$T/o1" 'ACTIONS COVERAGE \(pr\): PASS — 3/3 steps verified, 1 excluded' "A2: ... the verdict line counts verified and excluded"
+  has "$T/o1" '`s4` — needs an operator credential' "A2: ... and the summary lists the exclusion with its reason"
+
+  rm -rf "$RES/ci-result-g2"
+  drive "$T/o2" actions verify pr --results "$RES" --expect-base "$base"
+  eq "$RC" 1 "A2: a job with no result (its steps never verified) fails coverage"
+  has "$T/o2" 'job g2 produced no result' "A2: ... naming the job"
+  runjob g2 s3
+
+  { echo "$APPS"; astep s1 group=g1; astep s2 group=g1; astep s3 group=g2; astep s5 group=g2; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/o3" actions verify pr --results "$RES" --expect-base "$base"
+  eq "$RC" 1 "A2: a step added to the manifest that no job ran fails coverage"
+  has "$T/o3" 'step s5 is planned in job g2 but job g2 did not run it' "A2: ... naming the step and the job"
+  { echo "$APPS"; astep s1 group=g1; astep s2 group=g1; astep s3 group=g2; astep s4 group=g2 'actions_skip=needs an operator credential that CI never holds'; } > "$SAMEN_CI_MANIFEST"
+
+  mkdir -p "$RES/ci-result-g3" && cp "$RES/ci-result-g1/last.json" "$RES/ci-result-g3/last.json"
+  drive "$T/o4" actions verify pr --results "$RES" --expect-base "$base"
+  eq "$RC" 1 "A2: a result for a job the plan does not have fails coverage"
+  has "$T/o4" 'step s1 ran in 2 jobs' "A2: ... a step run twice is named"
+  rm -rf "$RES/ci-result-g3"
+
+  drive "$T/o5" actions verify pr --results "$RES" --expect-base "0000000000000000000000000000000000000000"
+  eq "$RC" 1 "A2: a job that ran against another base than the PR's fails coverage"
+  has "$T/o5" 'ran against base' "A2: ... and says so"
+
+  python3 - "$RES/ci-result-g2/last.json" <<'PY'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p)); d["verdict"] = "FAIL"; d["steps"][0]["status"] = "FAIL"; json.dump(d, open(p, "w"))
+PY
+  drive "$T/o6" actions verify pr --results "$RES" --expect-base "$base"
+  eq "$RC" 1 "A2: a failed job fails coverage"
+  has "$T/o6" 'job g2 verdict is FAIL' "A2: ... naming the job"
+
+  # --require-base: no origin/main => a FAILURE, never a pass (G7's Actions twin); control: without it, it runs
+  mkrepo a2b
+  { echo "$APPS"; astep s1 group=g1; } > "$SAMEN_CI_MANIFEST"
+  git -C "$R" update-ref -d refs/remotes/origin/main
+  drive "$T/o7" pr --require-base --no-cache
+  eq "$RC" 2 "A2: --require-base with no base exits 2"
+  hasnt "$T/o7" '^CI\(pr\): PASS' "A2: ... and never prints PASS"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'd["verdict"]')" ERROR "A2: ... last.json is ERROR"
+  drive "$T/o8" pr --no-cache
+  eq "$RC" 0 "A2: without --require-base the same run passes (control)"
+  has "$T/o8" 'NOT PR-READY: base origin/main is missing' "A2: ... but is NOT PR-READY"
+}
+
+# A3 (C7's Actions twin): a sliced corpus — N parallel jobs each run `--slice i/N`; the sum of what they
+# PROCESSED must equal the lister's total. A slice that processes 0, a missing slice, a slice that
+# disagrees on the total, or a total that disagrees with an independent count fails.
+case_A3() {
+  mkrepo a3
+  RES="$T/a3.results"; rm -rf "$RES" "$T"/a3.home.*
+  printf '  1-a.patch x\n  2-b.patch x\n  3-c.patch x\n  3-d.patch x\n  4-e.patch x\n  5-f.patch x\n  6-g.patch x\n  7-h.patch x\nSELECTED 8\n' > "$T/a3.list"
+  { echo "$APPS"
+    printf '[step corp]\ncmd = r="${CI_SHARD_ARGS#--range }"; awk -F"[- ]+" -v lo="${r%%%%-*}" -v hi="${r#*-}" -v lie="${CI_TEST_LIE:-0}" '"'"'$2>=lo+0 && $2<=hi+0 {n++} END{print "PROCESSED", n+0-lie}'"'"' %s\n' "$T/a3.list"
+    printf 'shard_list = cat %s\nshard_kind = ranges\nshard_each_s = 1\nshard_target_s = 2\nactions_slices = 3\ngroup = g\n' "$T/a3.list"
+    printf 'shard_item = ^  ([0-9]+-\\S+\\.patch)\\s\nshard_total = ^SELECTED ([0-9]+)$\n'
+    printf 'shard_check = ^PROCESSED ([0-9]+)$\nmodes = pr\ninputs = core/\nest_s = 3\n'; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/o0" actions plan pr --json
+  eq "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(",".join(j["name"]+"@"+j["slice"] for j in d["jobs"]))' "$T/o0")" "corp_01@1/3,corp_02@2/3,corp_03@3/3" "A3: a sliced step plans one job per slice"
+  local i
+  for i in 1 2 3; do
+    SAMEN_CI_HOME="$T/a3.home.$i" "$CI" pr --only corp --slice "$i/3" --budget 0 --no-cache --require-base > "$T/a3.out.$i" 2>&1
+    eq "$?" 0 "A3: slice $i/3 passes"
+    mkdir -p "$RES/ci-result-corp_0$i" && cp "$T/a3.home.$i/last.json" "$RES/ci-result-corp_0$i/last.json"
+  done
+  has "$T/a3.out.1" '^PASS corp\[1/3\]' "A3: the slice runs as its own sub-step"
+  drive "$T/o1" actions verify pr --results "$RES" --expect-total corp=8
+  eq "$RC" 0 "A3: three slices cover the selection -> coverage PASS"
+  has "$T/o1" '`corp`: 3 slices processed 8 of 8 selected \(slice counts: 4 3 1\)' "A3: ... and the summary shows each slice's processed count"
+
+  cp -r "$RES" "$T/a3.res2"
+  python3 - "$T/a3.res2/ci-result-corp_02/last.json" <<'PY'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p))
+for st in d["steps"]: st["processed"] = 0
+json.dump(d, open(p, "w"))
+PY
+  drive "$T/o2" actions verify pr --results "$T/a3.res2" --expect-total corp=8
+  eq "$RC" 1 "A3: a slice that processed 0 fails (the sum is short)"
+  has "$T/o2" 'corp: the slices processed 5 and were assigned 8, but 8 were selected' "A3: ... and the sums are named"
+
+  rm -rf "$T/a3.res2/ci-result-corp_03"
+  drive "$T/o3" actions verify pr --results "$T/a3.res2"
+  eq "$RC" 1 "A3: a missing slice fails"
+  has "$T/o3" 'job corp_03 produced no result' "A3: ... naming the slice job"
+
+  drive "$T/o4" actions verify pr --results "$RES" --expect-total corp=9
+  eq "$RC" 1 "A3: a total that disagrees with an independent count fails"
+  has "$T/o4" 'the lister selected 8 but the independent count is 9' "A3: ... and says so"
+
+  CI_TEST_LIE=1 SAMEN_CI_HOME="$T/a3.home.x" "$CI" pr --only corp --slice 1/3 --budget 0 --no-cache > "$T/o5" 2>&1; RC=$?
+  eq "$RC" 1 "A3: a slice that under-processes its chunk fails in its own job"
+  has "$T/o5" 'shard accounting: processed 3, expected 4' "A3: ... by shard accounting"
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do
