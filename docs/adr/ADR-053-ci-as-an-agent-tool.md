@@ -335,6 +335,15 @@ sabotage 63 · mutation 81 · mutation_changed 57; nightly slices 145–578 (sab
 The ≤ 30 min target holds warm (14.9 min); a cold cache costs ≈ 17 extra minutes once, dominated by the
 ten PLTs.
 
+**Proof runs (PR #88).** `pr` green incl. `ci-pr`: https://github.com/ckluis/samen/actions/runs/38091846960
+(13.3 min). Nightly via `workflow_dispatch --ref feat/adr-053-p2-actions`:
+https://github.com/ckluis/samen/actions/runs/38090956053 (47 jobs, 15.7 min). Nightly cold (temporary
+push trigger, since removed): https://github.com/ckluis/samen/actions/runs/38087214703 (its `ci-full` failed
+on the `multinode` double-run above — the fix and sabotage 522 followed). **A1 on GitHub:** a throwaway
+commit adding a `pr` step with no group/job/exclusion made the `plan` job fail — `zz_a1_unassigned is assigned
+to no Actions job`, every `ci` job skipped, `ci-pr` red (https://github.com/ckluis/samen/actions/runs/38091814640);
+reverted in the next commit.
+
 **Known flake, surfaced not hidden.** One `pr` run failed `samen_core` as `FLAKY (passed on rerun)` —
 `delivery_provider_test.exs:196` (an `aud_event` insert whose sandbox owner exited). The driver did what
 C5 requires (a flaky test still fails the run); the job was re-run and passed. Pre-existing, not touched by
