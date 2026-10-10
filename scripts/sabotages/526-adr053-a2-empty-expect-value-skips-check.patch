@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 A2 — an explicitly EMPTY --expect-base (an unset workflow expression) silently disables the base check instead of failing.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: A2 the Actions aggregate fails unless every planned step ran once, PASS, on the PR base
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 8fb6f38..601d822 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1428,7 +1428,7 @@ def cmd_actions(pos, opts):
+         if not opts.get("results"):
+             raise UsageError("actions verify needs --results DIR (one sub-directory per job holding its last.json)")
+         for k in ("expect_head", "expect_base"):
+-            if opts.get(k) is not None and not opts[k].strip():
++            if False:
+                 # an EMPTY value (an unset ${{ … }} in a workflow) must not read as "do not check"
+                 raise UsageError("--%s was given an empty value" % k.replace("_", "-"))
+         if not opts.get("expect_head"):

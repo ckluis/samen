@@ -271,7 +271,8 @@ digest into `$GITHUB_STEP_SUMMARY` (`scripts/ci actions summary`), `_ci/last.jso
   `needs:` `plan` and `ci`, fails unless both are `success` (skipped, cancelled and failed all fail), and
   runs `scripts/ci actions verify pr`: from each job's uploaded `last.json` the union of the steps that
   actually ran must equal `scripts/ci list pr` minus the exclusions — each exactly once, all
-  PASS/CACHED, every job on `base_sha` = the PR's base. The exclusions are printed in the summary. The
+  PASS/CACHED, every job on `base_sha` = the PR's base, and (gate G12) every job's `head` = `$GITHUB_SHA` and
+  its content snapshot `tree` = that commit's tree (`--expect-head`, required). The exclusions are printed in the summary. The
   first full run proved it earns its keep: the nightly's `samen_core` job also ran `multinode` (the step
   `samen_core` is also the group `samen_core`, and `--only` matches groups) — `verify` named it as a step
   run in two jobs, and `--only-steps` (ids only) is the fix (sabotage 522).
@@ -314,10 +315,12 @@ falls back to `cp -Rp`. Two environment facts the configs hard-wire: they connec
 and `aud_event` revokes from role `clank`, so the service container's superuser is `clank` and the jobs set
 `USER=clank PGUSER=clank PGHOST=localhost`.
 
-**Sabotages 514–522** (all flip their named `ci_driver_guard_test.exs` test and restore byte-exact):
+**Sabotages 514–527** (all flip their named `ci_driver_guard_test.exs` test and restore byte-exact):
 514–516 A1 (no job / job AND exclusion / exclusion without a reason), 517–518 + 522 A2 (a planned step
 no job ran / a wrong base / `--only-steps` selecting a group), 519 G7 (`--require-base` ignored), 520–521
-A3 (slice sum unchecked / independent total unchecked).
+A3 (slice sum unchecked / independent total unchecked); the gate's 523–524 A2 (a job on another commit /
+another tree), 525 A2 (an empty plan passes), 526 A2 (an empty `--expect-base` skips the check), 527 G11
+(samen_core's lib compiled without `--warnings-as-errors`).
 
 **Measured on GitHub** (`ubuntu-24.04`, 4 vCPU, `-j 2` per job):
 
@@ -343,6 +346,55 @@ on the `multinode` double-run above — the fix and sabotage 522 followed). **A1
 commit adding a `pr` step with no group/job/exclusion made the `plan` job fail — `zz_a1_unassigned is assigned
 to no Actions job`, every `ci` job skipped, `ci-pr` red (https://github.com/ckluis/samen/actions/runs/38091814640);
 reverted in the next commit.
+
+**Adversarial gate (P2, 2026-10-10) — defects found and fixed before merge.** Each has a red-path
+assertion in `scripts/ci_test.sh` (A2 / WAE); sabotages 523–527 flip them, and 518 was re-anchored (same
+semantics) onto the edited `actions_verify`.
+
+| # | Defect (repro) | Fix |
+|---|---|---|
+| G11 | **A framework/adapter `lib/` warning passed every gate** (pre-existing since `ci.sh`; `ci-pr` inherited it). `mix test --warnings-as-errors` treats only TEST-file warnings as errors (`mix help test`), and a path dep's warnings never fail a dependant's `mix compile --warnings-as-errors`. Repro: `def zz_gate_probe(x), do: :ok` in `samen_core/lib/samen/operator_plane/migration.ex` → `mix test --warnings-as-errors …` exit 0 with the warning printed; same for a path dep compiled from a parent. | samen_core + the five adapters run `MIX_ENV=test mix compile --warnings-as-errors` first (the four app gates' `ci.sh` already did). `ci_test.sh` WAE lints that all ten `[app]` projects are compiled with the flag by a `pr` step (527). |
+| G12 | **`actions verify` was not bound to the commit under test** — it checked `base_sha` only, so a job that checked out another ref (a re-pointed `ref:`, a PR head instead of the merge commit) or ran over a tree with extra/changed files would have been accepted. Not reachable in today's YAML (every job checks out `github.sha`; artifacts are run-scoped), so this is a property made mechanical rather than an observed splice. | `--expect-head SHA` is required: each job's `head` must equal it and its snapshot `tree` must equal `SHA^{tree}` (all 18 `pr` and 47 nightly jobs of the proof runs already matched) (523 head, 524 tree). |
+| G13 | An explicitly EMPTY `--expect-base` (an unset `${{ … }}`) was read as "do not check". | Empty `--expect-base` / `--expect-head` are usage errors (526). |
+| G14 | A plan with 0 runnable steps verified as `0/0 PASS`. | 0 runnable steps is a coverage failure (525). |
+| G15 | The tested merge commit was not required to contain the base: `--changed` / the double sweep select from `merge-base(HEAD, base)..HEAD`, which covers the PR's edits only when the base is in HEAD's history. | `ci-job` fails unless `git merge-base --is-ancestor $BASE_SHA HEAD` (YAML; no sabotage). |
+| G16 | Cache budget: each of the 24 corpus slices and 6 watch-list slices kept its OWN copy of the same deps/`_build` (≈ 4.5 GB of the repo's 10 GB cache cap after one nightly, 7.4 GB used in total by one PR + one branch). | The plan gives the slices of one step one shared cache name (`cache` in the matrix; 47 nightly jobs → 19 caches). |
+
+**Gate checks that held (measured, not assumed).**
+- *Which tree.* Every job of a run checks out `github.sha` (the PR merge commit); re-runs reuse the same
+  event and sha; `download-artifact` without `run-id` reads only this run, and on a re-run attempt takes the
+  latest artifact per name (run 38089382100, attempt 2: two `ci-result-samen_core` artifacts, the attempt-2
+  one downloaded). That run's "2m52s" is attempt 2 alone — a re-run of the one FLAKY `samen_core` job
+  (`delivery_provider_test.exs:196`) + `ci-pr`; the other 17 jobs are attempt 1's, on the same merge commit
+  325f… no short-circuit. A re-run of a FLAKY job turning green is a human action GitHub records as attempt 2.
+- *Stale caches.* Reproduced at a fixed path with a restored `_build` (mtimes older than the checkout):
+  a function removed from a module that an unchanged file calls, a deleted module still referenced by a
+  test, a removed protocol impl, and an unchanged file whose warning was compiled into the cache all give
+  the same result as a cold build (`mix compile --warnings-as-errors` exit 1 / `mix test` red) — Elixir
+  1.20's manifest checks sources by size + digest and re-verifies runtime dependants, and `--all-warnings`
+  (default) re-reports earlier warnings. samen_core disables protocol consolidation in `:test`.
+- *Cache scope.* `pull_request` runs save under `refs/pull/N/merge`, readable only by that PR; a fork PR
+  cannot write a scope main or another PR reads; main's scope is written only by runs on main (nightly).
+- *Security.* No `${{ }}` inside any `run:` (scripted scan); `pull_request_target`, `secrets.*` and
+  `continue-on-error` absent; `permissions: contents: read`; `persist-credentials: false`; all five actions
+  pinned to the commit their tag resolves to (`gh api …/git/ref/tags/<tag>`, all lightweight tags).
+
+**Limits the operator should know (not fixable inside the PR's own workflow).**
+- `pull_request` runs the PR's OWN `pr.yml`, `ci-job`, `ci/steps.conf` and driver, so a PR that edits them
+  can make `ci-pr` green without running anything (an `actions_skip` with a 12-character reason is printed,
+  but not refused; a new workflow with its own job named `ci-pr` also reports a check of that name). Requiring `ci-pr` is only as strong as review of `.github/`, `ci/` and `scripts/ci*`
+  changes: add CODEOWNERS for those paths with "require review from Code Owners", or a ruleset that runs a
+  required workflow from `main`.
+- An exact key hit never re-saves a cache, so the main-scope cache stays the one the first nightly after a
+  `mix.lock`/toolchain change wrote; PRs then recompile more of `lib/` as main moves (correct — see above —
+  but slower; samen_web's PLT rebuilds whenever samen_core changed since).
+- The `USER=clank` / `PGUSER=clank` / `POSTGRES_USER=clank` env: the configs connect as `$USER`, and
+  samen_core's own test-repo migrations (`samen_core/priv/test_repo/migrations/20260705080000_aud_event.exs`,
+  `20260707020000_aud_chain.exs`: `Application.compile_env(:samen_core, :aud_event_app_role, "clank")`) and
+  `operator_plane_migration_test.exs` (`@app_role "clank"`) hardcode the maintainer's role, unlike the
+  verticals and the generator, which derive it (`Samen.OperatorPlane.Migration.app_role!/2`). Any
+  contributor whose Postgres role is not `clank` fails the kernel suite. Acceptable for P2 (the service
+  container is ours); follow-up: derive the role there too and drop the env override.
 
 **Known flake, surfaced not hidden.** One `pr` run failed `samen_core` as `FLAKY (passed on rerun)` —
 `delivery_provider_test.exs:196` (an `aud_event` insert whose sandbox owner exited). The driver did what
@@ -375,11 +427,11 @@ DB), named in `samen_core/test/meta/ci_driver_guard_test.exs`; sabotages 496 (C1
 evicts the cached PASS of the same content) likewise.
 | C10 | counts in CLAUDE.md drift without `quick` failing |
 | A1 | the Actions plan lets a step sit in no job, in two places, or be excluded without a reason |
-| A2 | the Actions aggregate passes though a planned step did not run, ran twice, ran on the wrong base, or a job failed |
+| A2 | the Actions aggregate passes though a planned step did not run, ran twice, ran on the wrong base or another commit/tree, the plan is empty, or a job failed |
 | A3 | sliced corpus: the slices' processed counts sum to ≠ the selected total (C7's Actions twin) |
 
-P2 (as built): A1–A3 are cases of `scripts/ci_test.sh` (named in `ci_driver_guard_test.exs`); sabotages
-514–522 flip them (§2.9 "Actions").
+P2 (as built): A1–A3 (and the gate's WAE) are cases of `scripts/ci_test.sh` (named in
+`ci_driver_guard_test.exs`); sabotages 514–527 flip them (§2.9 "Actions").
 
 ## 4. Phasing (one PR each, all off `main`, none stacked; each phase gated adversarially)
 

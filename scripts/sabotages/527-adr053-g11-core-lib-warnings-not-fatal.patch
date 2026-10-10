@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 G11 — samen_core's step only runs `mix test --warnings-as-errors` (test files only), so a samen_core lib/ warning passes every gate.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: WAE every product project's lib is compiled with --warnings-as-errors by a pr step
+diff --git a/ci/steps.conf b/ci/steps.conf
+index 2261246..74955ed 100644
+--- a/ci/steps.conf
++++ b/ci/steps.conf
+@@ -261,7 +261,7 @@ group = spikes
+ # fail its dependants' compile — so each framework/adapter project compiles its own lib/ with the flag
+ # here, or a lib/ warning passes every gate (ADR-053 P2 gate, G11; ci_test.sh WAE).
+ [step samen_core]
+-cmd = mix deps.get --quiet && MIX_ENV=test mix compile --warnings-as-errors && mix test --warnings-as-errors
++cmd = mix deps.get --quiet && mix test --warnings-as-errors
+ cwd = samen_core
+ modes = quick fast pr full
+ inputs = app:samen_core

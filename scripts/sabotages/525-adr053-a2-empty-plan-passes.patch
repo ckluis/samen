@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 A2 — a plan with 0 runnable steps (every step excluded, an empty matrix) verifies as 0/0 PASS.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: A2 the Actions aggregate fails unless every planned step ran once, PASS, on the PR base
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 8fb6f38..8ee82e3 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1576,7 +1576,7 @@ def actions_verify(plan, results_dir, expect_base, expect_totals=None, expect_he
+         out("**Excluded from Actions (declared in `ci/steps.conf`, never silent):**")
+         for e in plan["excluded"]:
+             out("- `%s` — %s" % (e["id"], e["reason"]))
+-    if total == 0:
++    if False:
+         errors.append("the plan has 0 runnable steps — an empty matrix verifies nothing and is not a pass")
+     if covered != total and not errors:
+         errors.append("coverage arithmetic: %d verified != %d runnable steps" % (covered, total))

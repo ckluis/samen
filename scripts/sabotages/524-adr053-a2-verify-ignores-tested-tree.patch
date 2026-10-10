@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 A2 — the aggregate accepts a job that ran over a tree other than the commit's own (files added or changed before the run), as long as HEAD matches.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: A2 the Actions aggregate fails unless every planned step ran once, PASS, on the PR base
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 8fb6f38..79f9c24 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1492,7 +1492,7 @@ def actions_verify(plan, results_dir, expect_base, expect_totals=None, expect_he
+         # (`tree` is the driver's content snapshot, untracked-not-ignored files included) vouches for other code
+         if expect_head and last.get("head") != expect_head[0]:
+             errors.append("job %s tested commit %s, expected %s" % (n, (last.get("head") or "none")[:12], expect_head[0][:12]))
+-        if expect_head and last.get("tree") != expect_head[1]:
++        if False:
+             errors.append("job %s tested tree %s, not commit %s's tree %s (files added or changed before the run)"
+                           % (n, (last.get("tree") or "none")[:12], expect_head[0][:12], expect_head[1][:12]))
+         if expect_base and last.get("base_sha") != expect_base:
