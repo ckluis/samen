@@ -20,30 +20,36 @@ Two switches, both required.
 
    ```elixir
    config :my_app, Samen.Observability,
-     replay: [retention_days: 14, flag_opts: [flag_module: MyApp.Primitives.FeatureFlag]]
+     replay: [
+       retention_days: 14,
+       flag_opts: [flag_module: MyApp.Primitives.FeatureFlag, owner_org_id: operator_org_id]
+     ]
    ```
 
-   `flag_opts:` points the flag lookup at the host's FeatureFlag rows for replay only. Bounds
-   are validated at boot (`retention_days` 1..90, positive caps, `sample_rate` 0..1); a bad
-   value refuses to boot. Driftwood sets this in `config/dev.exs` only.
+   `flag_opts:` points the flag lookup at the host's FeatureFlag rows for replay only, and
+   `owner_org_id:` (the host's `:operator_org_id`) restricts it to the OPERATOR org's rows. The
+   capture decision is operator-governed: a tenant's own row named `samen.replay` is never
+   read, for its org or any other. A `flag_module` without a UUID `owner_org_id` refuses to
+   boot, as do out-of-range bounds (`retention_days` 1..90, positive caps, `sample_rate`
+   0..1). Driftwood sets this in `config/dev.exs` only.
 
-2. **The org's `samen.replay` flag is ON.** Create (or update) the FeatureFlag row named
-   `samen.replay`: `enabled: true`, `rollout_pct: 0`, and ONE target rule
+2. **The org's `samen.replay` flag is ON.** In the OPERATOR org, create (or update) the
+   FeatureFlag row named `samen.replay`: `enabled: true`, `rollout_pct: 0`, and ONE target rule
    `%{"attribute" => "org_id", "op" => "in", "values" => [org_id], "then" => "allow"}` (add
    org ids to opt more orgs in). Writes go through the flag resource's admin-gated actions
    (the operator flag admin at `/operator/flags`). The decision is cached; a write through the
    framework invalidates it, and a direct DB edit needs `Samen.FeatureFlags.Cache.invalidate("samen.replay")`.
 
-   Driftwood dev: `MIX_ENV=dev mix driftwood.seed` seeds this row for the Blue Ridge
-   Logistics org (`b1112d00-0000-4000-8000-000000000001`, `Driftwood.Seeds.seed_replay_flag/1`).
+   Driftwood dev: `MIX_ENV=dev mix driftwood.seed` seeds this row in the operator org
+   (`0f000000-0000-4000-8000-0000000000aa`), allowing only the Blue Ridge Logistics org
+   (`b1112d00-0000-4000-8000-000000000001`, `Driftwood.Seeds.seed_replay_flag/1`).
 
 To turn it **off** for an org: remove the org from the rule, or set `enabled: false` (the kill
 switch: every org stops on the next LiveView). Already-stored replays stay until retention
 removes them.
 
-Caveat: the flag cache resolves `samen.replay` by NAME across the FeatureFlag rows. Keep exactly
-one `samen.replay` row, governed by the operator; do not let a tenant create a second row with
-the same name.
+Only the operator org's row decides. Two `samen.replay` rows in the operator org are
+ambiguous and turn capture OFF for every org until one is removed (and the cache invalidated).
 
 ## 2. Watch a replay
 

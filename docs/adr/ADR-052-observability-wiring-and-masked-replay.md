@@ -14,7 +14,8 @@
   **P4 BUILT** on `feat/adr-052-replay` (2026-10-09, local): §2.4 tiers (`:replay`,
   `:post_shred_replay`, wired into the Driftwood crypto-shred game-day), the nine P3 gate notes,
   replay ON in Driftwood dev, runbook and guide (sabotages 465–489; 441/442/446/460
-  re-anchored), as-built notes in §2.4.1. **All phases BUILT.**
+  re-anchored), as-built notes in §2.4.1. The P4 gate's flag-ownership fix (a flag resolves
+  from the operator org's rows only) is §2.4.1 item 7 (sabotages 490–494). **All phases BUILT.**
 - **Deciders:** the operator, on §6 D1–D4.
 - **Inspiration (not a dependency):** `phoenix_replay` v0.6.2 (elixir-vibe/phoenix_replay, MIT).
   Read 2026-10-09; we take its capture shape, not its code or its storage/privacy model.
@@ -721,19 +722,45 @@ nothing).
       51 → 2, operator 101 → 3. Sabotages 480 (N+1 back), 481 (batch cached across batches),
       482 (batch skips suspension).
 5. **Demo.** Driftwood `config/dev.exs` passes `replay:` with `flag_opts: [flag_module:
-   Driftwood.Primitives.FeatureFlag]`, which scopes the flag loader to replay. No host
-   configured the flag cache's loader, so every flag evaluated OFF. `mix driftwood.seed`
-   seeds the `samen.replay` row for the Blue Ridge org. prod/test never set `replay:`
-   (sabotage 489). Runbook: `docs/runbooks/session-replay.md`. Guide:
+   Driftwood.Primitives.FeatureFlag, owner_org_id: <the operator org>]`, which scopes the flag
+   loader to replay and to the operator org's rows (item 7). No host configured the flag
+   cache's loader, so every flag evaluated OFF. `mix driftwood.seed` seeds the operator org's
+   `samen.replay` row with one allow rule for the Blue Ridge org. prod/test never set
+   `replay:` (sabotage 489). Runbook: `docs/runbooks/session-replay.md`. Guide:
    `docs/observability-guide.md` §7, not §5, because P1 used §5–6.
 6. *Tooling:* `scripts/dialyzer_gate.sh` now hashes samen_core's untracked-but-not-ignored lib
    files too, by path and content (the P3 builder's stale-PLT note).
 
-*Not done in P4:* the flag cache resolves a flag by NAME across org-scoped FeatureFlag rows
-(first match). So once a host wires the loader, a second `samen.replay` row created by a
-tenant admin in its own org would be ambiguous. The runbook says to keep one
-operator-governed row; scoping the replay flag to an operator-owned row is a follow-up. A
-`live_render` child and stream rows are still not recorded (§7).
+7. **P4 gate: a flag resolves from the operator org's rows only.** The flag cache's Ash
+   loader read `name == flag` across EVERY org's `FeatureFlag` rows and took the first. Flag
+   rows are org-scoped and admin-gated (`OrgScope` + `RoleAtLeast :admin`), so a tenant admin
+   edits, and may create, rows in its own org. Any tenant row carrying a platform flag's name
+   could therefore decide the gate for every org. A tenant B row at `rollout_pct: 100` turned
+   replay capture ON for B and for every other org. A tenant's killed row could turn it OFF
+   for the opted-in org. The Driftwood seed also put the opt-in row in the Blue Ridge
+   TENANT org, where that tenant's admin could roll it out to everyone at `/settings/flags`.
+   This was an engine bug, not a replay bug: `delivery.open_click_tracking` had the same
+   shape. *Fixed at the engine*, by ADR-020's ownership model (WS-B design §3.5: the engine's
+   flags are PLATFORM flags, i.e. the operator org's OWN rows, managed at `/operator/flags`
+   and evaluated per org through targeting rules and the org bucket):
+   `Samen.FeatureFlags.Cache` reads only rows with `org_id == owner_org_id` (opts or
+   `config :samen_core, Samen.FeatureFlags.Cache`). With no owner, or one that is not a
+   UUID, the result is `{:error, :no_flag_owner}`. Two owner rows with the same name give
+   `{:error, :ambiguous_flag}`. Both are fail-safe OFF. We ignore tenant rows instead of
+   refusing them at write: the kernel resource does not know the operator org, and a
+   tenant's own config row stays what ADR-020 says it is, that tenant's row. It is simply
+   never a platform flag. `Samen.Replay.config!/1` refuses `flag_opts` that name a
+   `:flag_module` without a UUID `:owner_org_id`. Driftwood dev passes the operator org, and
+   the seed writes the operator row. A host-supplied `:loader` is the host's own seam and is
+   used as given. Tests: the engine's ownership describe (`feature_flags_engine_test.exs`,
+   tenant rows written FIRST so the old loader picks them, plus the ownerless and ambiguous
+   cases) and Driftwood's cross-tenant test, where a tenant B admin's row and Blue Ridge's own
+   killed row are created through the kernel's admin-gated action and change nothing, and the
+   seeded opt-in is `Forbidden` to the Blue Ridge admin. Both were red on the old loader.
+   Sabotages 490 (any-org read), 491 (ownerless guess), 492 (ambiguous guess), 493 (ownerless
+   replay config), 494 (opt-in seeded in the tenant org).
+
+*Not done in P4:* a `live_render` child and stream rows are still not recorded (§7).
 
 | Red path | Sabotage | Owning test file(s) |
 |---|---|---|
@@ -748,6 +775,7 @@ operator-governed row; scoping the replay flag to an operator-owned row is a fol
 | gate notes 7–8 (bad row, view loading) | 477, 478, 479 | `samen_core/test/replay/player_test.exs` |
 | gate note 9 (N+1, deny-on-read, suspension) | 480, 481, 482 | `samen_core/test/replay/resolver_batch_test.exs` |
 | dev only | 489 | `driftwood/test/replay_dev_demo_test.exs` |
+| P4 gate: flag ownership (operator org only, ownerless/ambiguous OFF) | 490, 491, 492, 493, 494 | `samen_core/test/feature_flags_engine_test.exs`, `samen_core/test/replay/capture_test.exs`, `driftwood/test/replay_dev_demo_test.exs` |
 
 ---
 

@@ -251,7 +251,10 @@ P1 wide events and Logger governance.) Operating it day to day: `docs/runbooks/s
 **Two switches, both required.** The host passes `replay:` to `Samen.Observability.child_specs/2`
 (`true` or a keyword list: `sample_rate` 1.0, `max_frames` 500, `max_bytes` 512 KiB,
 `max_sessions` 1 000 per node, `max_persist_tasks` 16, `retention_days` 14 (1..90), `flag_opts`),
-and the org's `samen.replay` feature flag is ON. Without `replay:` no capture child starts; an
+and the org's `samen.replay` feature flag is ON. The flag is the operator's: `flag_opts` carries
+`flag_module:` and `owner_org_id:` (the operator org), the loader reads only that org's row and
+evaluates it for the recording org, and a tenant's own `samen.replay` row decides nothing (a
+`flag_module` without an owner refuses to boot). Without `replay:` no capture child starts; an
 unknown flag is OFF. Only Driftwood **dev** sets `replay:` in this repo.
 
 **What is stored.** `replay_session` (`rps`) and `replay_frame` (`rpf`), framework-owned,
