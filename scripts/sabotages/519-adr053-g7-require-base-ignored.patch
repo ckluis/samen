@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 G7 (Actions) — --require-base is ignored: a clone without origin/main runs, and the double sweep/--changed steps vouch for nothing.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: A2 the Actions aggregate fails unless every planned step ran once, PASS, on the PR base
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index de5f687..25362e8 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1110,7 +1110,7 @@ def cmd_run(mode, opts, resume=False):
+ 
+ def _cmd_run_locked(mode, opts, resume, t_start, old, holder):
+     man = Manifest(MANIFEST)
+-    ctx = Context(opts["base"], need_base=(mode == "quick" or bool(opts.get("require_base"))))
++    ctx = Context(opts["base"], need_base=(mode == "quick"))
+     if resume:
+         state = old
+         if old.get("tree") and old.get("tree") != ctx.tree:

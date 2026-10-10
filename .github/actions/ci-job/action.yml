@@ -79,6 +79,20 @@ runs:
         restore-keys: |
           ci-v1-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-ex${{ steps.beam.outputs.elixir-version }}-${{ inputs.name }}-
 
+    # Steps assume their mix projects' deps are on disk (locally an earlier step fetched them); a clean runner
+    # has none. Fetch for every project this job caches (a no-op when the cache restored them).
+    - name: mix deps.get (this job's projects)
+      if: inputs.cache-paths != ''
+      shell: bash
+      env:
+        CACHE_PATHS: ${{ inputs.cache-paths }}
+      run: |
+        set -euo pipefail
+        printf '%s\n' "$CACHE_PATHS" | grep '/deps$' | while read -r p; do
+          echo "==> mix deps.get in ${p%/deps}"
+          (cd "${p%/deps}" && mix deps.get --quiet)
+        done
+
     - name: scripts/ci ${{ inputs.mode }} --only ${{ inputs.name }}
       id: run
       shell: bash

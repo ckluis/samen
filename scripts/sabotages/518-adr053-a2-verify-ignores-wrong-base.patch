@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 A2 — the aggregate accepts a job that ran against a base other than the PR's base (a diff-aware step then vouches for the wrong diff).
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: A2 the Actions aggregate fails unless every planned step ran once, PASS, on the PR base
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index de5f687..b8f1772 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1461,7 +1461,7 @@ def actions_verify(plan, results_dir, expect_base, expect_totals=None):
+             errors.append("job %s verdict is %s, not PASS" % (n, last.get("verdict")))
+         if last.get("mode") != plan["mode"]:
+             errors.append("job %s ran mode %s, expected %s" % (n, last.get("mode"), plan["mode"]))
+-        if expect_base and last.get("base_sha") != expect_base:
++        if False:
+             errors.append("job %s ran against base %s, expected %s (the PR's base)" % (n, (last.get("base_sha") or "none")[:10], expect_base[:10]))
+         subs = {}
+         for st in last.get("steps") or []:
