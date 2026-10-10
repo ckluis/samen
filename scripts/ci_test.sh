@@ -14,7 +14,8 @@
 #          definition change, a toolchain change and a behaviour-changing env var; never for an
 #          ignored file or ./ci.sh's opt-in switches (stripped from steps); a step with no inputs is
 #          never cached; a step whose inputs moved while it ran is not cached.
-#   C3     a FAIL is never cached; the run stops at the first failure; --keep-going still FAILs.
+#   C3     a FAIL is never cached, and evicts an earlier cached PASS of the same content; the run
+#          stops at the first failure; --keep-going still FAILs.
 #   C4     quick / fast / --only never print a PR-ready verdict (pr does — the positive control).
 #   C5     an ExUnit failure is re-run once in isolation; FLAKY (passed on rerun) still FAILS the
 #          run and is not cached; a real failure stays FAIL.
@@ -318,6 +319,14 @@ case_C3() {
   touch "$T/c3.ok"
   drive "$T/o4" pr -j 1
   has "$T/o4" '^CI\(pr\): PASS 3/3' "C3: green once fixed"
+  # the same content going red later (a flake, the environment) EVICTS its cached PASS: the next
+  # run re-runs it instead of reporting CACHED over the red it just saw
+  rm -f "$T/c3.ok"
+  drive "$T/o5" pr -j 1 --no-cache
+  has "$T/o5" '^FAIL bad ' "C3: (the cached content fails when re-run)"
+  drive "$T/o6" pr -j 1
+  hasnt "$T/o6" '^CACHED bad$' "C3: a FAIL evicts the cached PASS under the same key"
+  has "$T/o6" '^FAIL bad ' "C3: ... so the next run re-runs it and stays red"
 }
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════

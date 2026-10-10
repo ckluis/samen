@@ -7,7 +7,7 @@
 - **Build status:** **P1 BUILT** on `feat/adr-053-ci-modes` (2026-10-10): `ci/steps.conf` +
   `scripts/ci` (quick / fast / pr / full, budget + resume, content cache, digests, FLAKY, locks,
   `_ci/last.json`), `./ci.sh` + `./ci-fast.sh` as wrappers; red paths C1–C6, C9 in
-  `scripts/ci_test.sh` with sabotages 496–511 (506–511 from the adversarial gate, §2.9 G1–G8);
+  `scripts/ci_test.sh` with sabotages 496–512 (506–512 from the adversarial gate, §2.9 G1–G9);
   measured timings §1.1, as-built §2.9. P2–P4 open.
 
 ---
@@ -197,7 +197,7 @@ cache key both use it, so they cannot disagree.
    coverage guard now derives the covered set from the manifest (`scripts/ci list fast --apps`).
 10. **Root-script guards need an ExUnit owner.** `sabotage.sh` proves a guard by NAMED `mix test`
     failures in an APP, so `samen_core/test/meta/ci_driver_guard_test.exs` names each
-    `scripts/ci_test.sh` case (APP `samen_core`); sabotages 496–511 flip them.
+    `scripts/ci_test.sh` case (APP `samen_core`); sabotages 496–512 flip them.
 11. **Listing cache.** A sharded step's item list is cached under its parent's content key
     (fully warm `pr`: 30.5 s → 0.5 s).
 12. **Environment.** `SAMEN_SABOTAGE`/`SAMEN_MUTATION`/`SAMEN_MULTINODE` select steps (`--also`)
@@ -212,7 +212,7 @@ cache key both use it, so they cannot disagree.
     `PR-READY (vs X)`.
 
 **Adversarial gate (2026-10-10) — defects found in the P1 build and fixed before merge.** Each
-has a red-path assertion in `scripts/ci_test.sh`; sabotages 506–511 flip them.
+has a red-path assertion in `scripts/ci_test.sh`; sabotages 506–512 flip them.
 
 | # | Defect (repro) | Fix |
 |---|---|---|
@@ -224,6 +224,7 @@ has a red-path assertion in `scripts/ci_test.sh`; sabotages 506–511 flip them.
 | G6 | **Stale verdict after a driver error.** A run that died before writing a verdict (manifest error, crash) left the PREVIOUS run's `last.json` PASS in place for an agent to read; a crash also orphaned running steps (own sessions). | `last.json` = RUNNING once the lock is held, ERROR on any exception, children terminated (510). |
 | G7 | **PR-READY without a base** (see 13); a cached `@base` step also lost the double sweep's NOT RUN banner on the second run in such a clone. | NOT PR-READY when the base is missing; an `@base` step is never cached without its base. |
 | G8 | **Obsolete-ledger check skipped by a sharded watch-list** (deviation 5, as first built). | Enforced per shard in `mutate.sh`. |
+| G9 | **A red on cached content went green on the next run.** Observed in this gate's own dogfood: `./ci-fast.sh --no-cache` failed samen_core (a pre-existing order-dependent test, `live_telemetry_test.exs:463`); the very next `./ci-fast.sh` reported samen_core CACHED from the earlier `pr` PASS of the same tree and printed ALL PASSED. | A FAIL/FLAKY evicts the cached PASS under its key (512). |
 
 **Measured, as built (this branch, `-j 5`)**
 
@@ -257,7 +258,8 @@ exercised by the fake-manifest tests and `--plan`, not end to end (hours; nightl
 P1 (as built): C1–C6, C9 are cases of `scripts/ci_test.sh` (real driver, fake manifests, ~60 s, no
 DB), named in `samen_core/test/meta/ci_driver_guard_test.exs`; sabotages 496 (C1), 497–498 (C2),
 499 (C3), 500 (C4), 501 (C5), 502–503 (C6), 504–505 (C9) each flip their named test; the gate's
-506–507 (C1), 508 (C2), 509–510 (C6) and 511 (EQUIV: declared tree-wide reads) likewise.
+506–507 (C1), 508 (C2), 509–510 (C6), 511 (EQUIV: declared tree-wide reads) and 512 (C3: a FAIL
+evicts the cached PASS of the same content) likewise.
 | C10 | counts in CLAUDE.md drift without `quick` failing |
 
 ## 4. Phasing (one PR each, all off `main`, none stacked; each phase gated adversarially)

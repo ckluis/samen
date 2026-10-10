@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 C3 (gate G9) — a FAIL no longer evicts the cached PASS of the SAME content: a test that
+# goes red on a tree that once passed (a flake, the environment) is reported CACHED — green — on
+# the very next run, over the red the driver just saw.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C3 a failing step is never cached
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 66eeaea..8c3f74a 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -855,7 +855,7 @@ class Run(object):
+         if status in ("FAIL", "FLAKY") and not (self.interrupted or r.get("signalled")):
+             # C3/C5: this exact content just went red — an older PASS under the same key no longer
+             # vouches for it (a flaky red must not turn into "CACHED" on the very next run)
+-            self.cache_evict(step)
++            pass
+         if self.interrupted or r.get("signalled"):
+             status = "INTERRUPTED"
+         digest = ([note] if note and status != "INTERRUPTED" else []) + make_digest(text)

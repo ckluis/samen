@@ -761,6 +761,14 @@ class Run(object):
                                                       "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                                                       "tree": self.ctx.tree})
 
+    def cache_evict(self, step):
+        if not step.key:
+            return
+        try:
+            os.remove(self.cache_path(step.key))
+        except OSError:
+            pass
+
     # ── launch / finish ──
     def launch(self, step):
         logrel = os.path.join(os.path.relpath(HOME, REPO), "logs", safe_name(step.id) + ".log")
@@ -844,6 +852,10 @@ class Run(object):
                 note = "FLAKY (passed on rerun) — a flaky test still FAILS the run; rerun log: %s.rerun" % r["log"]
             elif flaky is False:
                 note = "failed again on an isolated rerun (not a flake); rerun log: %s.rerun" % r["log"]
+        if status in ("FAIL", "FLAKY") and not (self.interrupted or r.get("signalled")):
+            # C3/C5: this exact content just went red — an older PASS under the same key no longer
+            # vouches for it (a flaky red must not turn into "CACHED" on the very next run)
+            self.cache_evict(step)
         if self.interrupted or r.get("signalled"):
             status = "INTERRUPTED"
         digest = ([note] if note and status != "INTERRUPTED" else []) + make_digest(text)
