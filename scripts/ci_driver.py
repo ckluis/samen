@@ -446,7 +446,7 @@ def clone_step(step, sid):
     return s
 
 
-def expand_shards(step, ctx, mode, budget, apps):
+def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
     """A long internal loop → budget-sized sub-steps. Unbudgeted (budget 0) a step with an
     unsharded_cmd runs it as ONE step, exactly the pre-ADR-053 command."""
     if budget == 0 and step.unsharded_cmd:
@@ -457,7 +457,17 @@ def expand_shards(step, ctx, mode, budget, apps):
         s.shard_list = None
         return [s]
     env = ctx.env(mode, step)
-    rc, text = run_capture(step.shard_list, step.cwd, env)
+    # the LISTING is a pure function of the parent step's content key (inputs + base + definition):
+    # reuse it while that key holds (sabotage --list / mutate --list cost 15-20 s each)
+    pkey = ctx.key(step, apps)
+    lpath = os.path.join(HOME, "cache", "listing", (pkey or "none") + ".json")
+    hit = read_json(lpath) if (pkey and not no_cache) else None
+    if hit and hit.get("cmd") == step.shard_list:
+        rc, text = 0, hit["text"]
+    else:
+        rc, text = run_capture(step.shard_list, step.cwd, env)
+        if rc == 0 and pkey:
+            atomic_write_json(lpath, {"cmd": step.shard_list, "text": text})
     if rc != 0:
         s = clone_step(step, step.id)
         s.parent = None
@@ -555,7 +565,7 @@ def build_plan(man, mode, ctx, opts, quiet=False):
     budget = opts.get("budget", 540)
     for s in cand:
         if s.shard_list:
-            plan.extend(expand_shards(s, ctx, mode, budget, man.apps))
+            plan.extend(expand_shards(s, ctx, mode, budget, man.apps, no_cache=bool(opts.get("no_cache"))))
         else:
             plan.append(s)
     seen = read_json(os.path.join(HOME, "timings.json")) or {}
