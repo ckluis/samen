@@ -37,6 +37,13 @@ defmodule Samen.Web.TenantAuthz do
     3. **NEVER self-elevate.** The hook derives no role and grants none. It only decides WHICH
        org — the provenance question `Samen.Policy.OrgScope` delegates to its caller.
 
+  ## Session replay (ADR-052 P2)
+
+  The two TENANT legs (armed, disarmed) also attach `Samen.Web.Replay.Recorder` — so every
+  tenant `live_session` adopts capture at 0 authored lines — and the operator leg never does.
+  The recorder is inert unless the host runs the capture plane and the org's `samen.replay`
+  flag is on.
+
   ## What it deliberately does NOT change
 
     * **The DISARMED (dev/dogfood) posture is untouched.** A host with `auth_required?` false
@@ -55,6 +62,7 @@ defmodule Samen.Web.TenantAuthz do
   use Phoenix.Component
 
   alias Samen.Web.{CurrentOrg, Mount}
+  alias Samen.Web.Replay.Recorder
 
   @default_login_path "/login"
 
@@ -81,8 +89,9 @@ defmodule Samen.Web.TenantAuthz do
         {:cont, unconstrained(socket, mount, session)}
 
       # The explicitly DISARMED dev/dogfood posture — the sanctioned ADR-031 `?org=` convenience.
+      # A TENANT leg: the replay recorder attaches here (a no-op unless capture is running).
       not CurrentOrg.tenant_gate_armed?(mount) ->
-        {:cont, unconstrained(socket, mount, session)}
+        {:cont, socket |> unconstrained(mount, session) |> Recorder.attach(mount)}
 
       # ARMED + no authenticated principal → render NOTHING. This is the halt that closes the
       # `handle_params`-on-dead-render bypass.
@@ -98,7 +107,10 @@ defmodule Samen.Web.TenantAuthz do
          # so the tenant `write_scope` helpers (`Samen.Web.TenantRole`) can derive the REAL
          # `Identity.Membership` role on an armed host instead of self-elevating `:member` to
          # `:admin` (S1a).
-         |> assign(:samen_tenant_principal, CurrentOrg.principal_id(mount, session))}
+         |> assign(:samen_tenant_principal, CurrentOrg.principal_id(mount, session))
+         # ADR-052 P2 — the replay recorder rides the TENANT legs only (never the operator leg
+         # above). A no-op unless the capture plane is running AND the org's flag is on.
+         |> Recorder.attach(mount)}
     end
   end
 

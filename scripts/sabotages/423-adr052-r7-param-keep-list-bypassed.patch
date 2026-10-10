@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-052 D3 / R7 — the event param keep-list check is bypassed: any label-shaped value
+# is kept, so a single typed word (a first name in a search box) is recorded verbatim.
+#
+# Flips the shape-only param tests (sanitizer unit + persisted event frames).
+# APP: samen_core
+# TEST_FILES: test/replay/sanitizer_test.exs test/replay/capture_test.exs
+# MUST_FAIL: typed form values never survive; their shape does
+# MUST_FAIL: an event's typed values are shape only; a declared keep-list key keeps its label
+diff --git a/samen_core/lib/samen/replay/sanitizer.ex b/samen_core/lib/samen/replay/sanitizer.ex
+index 46c7089..342c72a 100644
+--- a/samen_core/lib/samen/replay/sanitizer.ex
++++ b/samen_core/lib/samen/replay/sanitizer.ex
+@@ -615,7 +615,8 @@ defmodule Samen.Replay.Sanitizer do
+     field = %{key: key, type: param_type(value), length: param_length(value), class: class(value)}
+ 
+     field =
+-      if is_list(spec) and keepable?(value, spec),
++      # SABOTAGE (ADR-052 R7): the keep-list is not consulted.
++      if (is_binary(value) and label?(value)) or keepable?(value, []),
+         do: Map.put(field, :value, value),
+         else: field
+ 

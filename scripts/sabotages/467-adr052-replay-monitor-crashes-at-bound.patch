@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 2) — the monitor no longer rescues `async_nolink` at the bound: it
+# crashes, and every in-flight session's buffer goes with it.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/capture_test.exs
+# MUST_FAIL: over max_persist_tasks the session is DROPPED and counted
+diff --git a/samen_core/lib/samen/replay/monitor.ex b/samen_core/lib/samen/replay/monitor.ex
+index 565914d..a156437 100644
+--- a/samen_core/lib/samen/replay/monitor.ex
++++ b/samen_core/lib/samen/replay/monitor.ex
+@@ -117,7 +117,8 @@ defmodule Samen.Replay.Monitor do
+   defp start_finalize(task_sup, id, reason) do
+     {:ok, Task.Supervisor.async_nolink(task_sup, fn -> finalize(id, reason) end)}
+   rescue
+-    RuntimeError -> :max_children
++    # SABOTAGE (ADR-052 §2.4.1): re-raised.
++    e in RuntimeError -> if(true, do: reraise(e, __STACKTRACE__), else: :max_children)
+   end
+ 
+   defp outcome(:persisted), do: :persisted

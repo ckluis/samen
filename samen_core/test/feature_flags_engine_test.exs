@@ -330,7 +330,7 @@ defmodule Samen.FeatureFlagsEngineTest do
         })
         |> Ash.create(authorize?: false)
 
-      opts = [flag_module: FeatureFlag]
+      opts = [flag_module: FeatureFlag, owner_org_id: org]
 
       # First evaluate loads + caches; render is ON.
       assert FeatureFlags.evaluate("db.flag", org, opts).on
@@ -348,6 +348,73 @@ defmodule Samen.FeatureFlagsEngineTest do
       # A WRITE broadcasts an invalidation → next evaluate reloads and sees it gone.
       Cache.invalidate("db.flag")
       assert %Decision{on: false, reason: :kill_switch} = FeatureFlags.evaluate("db.flag", org, opts)
+    end
+  end
+
+  # ==========================================================================
+  # Ownership — only the owner org's row decides (ADR-052 §2.4.1 item 7)
+  # ==========================================================================
+
+  describe "ownership: a flag name never resolves across orgs" do
+    defp flag_row!(org_id, name, attrs) do
+      FeatureFlag
+      |> Ash.Changeset.for_create(
+        :create,
+        Map.merge(%{name: name, org_id: org_id, enabled: true, rollout_pct: 100}, Map.new(attrs))
+      )
+      |> Ash.create!(authorize?: false)
+    end
+
+    defp allow_only(org_id),
+      do: [%{"attribute" => "org_id", "op" => "in", "values" => [org_id], "then" => "allow"}]
+
+    test "CROSS-TENANT: a tenant's row of the same name cannot turn the flag ON for itself or another org, nor OFF for the opted-in org" do
+      operator = Ash.UUID.generate()
+      opted_in = Ash.UUID.generate()
+      tenant_b = Ash.UUID.generate()
+      tenant_c = Ash.UUID.generate()
+
+      # Tenant-authored rows land FIRST (the old loader took the first row of ANY org): B
+      # rolls the flag out to everyone, the opted-in org's own admin writes a killed row.
+      flag_row!(tenant_b, "platform.gate", rollout_pct: 100)
+      flag_row!(opted_in, "platform.gate", enabled: false)
+      # The operator's row: on for exactly one org.
+      flag_row!(operator, "platform.gate", rollout_pct: 0, target_rules: allow_only(opted_in))
+
+      opts = [flag_module: FeatureFlag, owner_org_id: operator]
+
+      # Positive control: the operator's row decides — ON for the org it allows…
+      assert %Decision{on: true, reason: :allow} = FeatureFlags.evaluate("platform.gate", opted_in, opts)
+      # …and the tenants' rows decide nothing, for themselves or anyone else.
+      assert %Decision{on: false} = FeatureFlags.evaluate("platform.gate", tenant_b, opts)
+      assert %Decision{on: false} = FeatureFlags.evaluate("platform.gate", tenant_c, opts)
+    end
+
+    test "no owner configured is OFF, never the first row of any org" do
+      org = Ash.UUID.generate()
+      flag_row!(org, "ownerless.gate", rollout_pct: 100)
+
+      for owner <- [nil, "", "not-a-uuid"] do
+        Cache.invalidate_all()
+        opts = [flag_module: FeatureFlag, owner_org_id: owner]
+        assert %Decision{on: false, reason: :kill_switch} = FeatureFlags.evaluate("ownerless.gate", org, opts)
+      end
+
+      # Positive control: the same row with its org as the owner is ON.
+      Cache.invalidate_all()
+      assert FeatureFlags.evaluate("ownerless.gate", org, flag_module: FeatureFlag, owner_org_id: org).on
+    end
+
+    test "two rows of one name in the owner org are ambiguous: OFF, not a guess" do
+      owner = Ash.UUID.generate()
+      flag_row!(owner, "twin.gate", rollout_pct: 100)
+      assert FeatureFlags.evaluate("twin.gate", owner, flag_module: FeatureFlag, owner_org_id: owner).on
+
+      flag_row!(owner, "twin.gate", rollout_pct: 100)
+      Cache.invalidate("twin.gate")
+
+      assert %Decision{on: false, reason: :kill_switch} =
+               FeatureFlags.evaluate("twin.gate", owner, flag_module: FeatureFlag, owner_org_id: owner)
     end
   end
 

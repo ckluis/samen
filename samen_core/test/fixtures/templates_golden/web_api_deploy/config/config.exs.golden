@@ -11,7 +11,9 @@ config :acme,
     Acme.Vertical,
     Acme.Aggregate,
     Acme.Primitives,
-    Acme.Operator
+    Acme.Operator,
+    # ADR-052 P2 — the framework replay capture storage (Samen.Replay.Session / Frame).
+    Samen.Replay.Domain
   ]
 
 # The samen_core verifiers discover domains from :samen_core :ash_domains. Register
@@ -22,7 +24,8 @@ config :samen_core, :ash_domains, [
   Acme.Vertical,
   Acme.Aggregate,
   Acme.Primitives,
-  Acme.Operator
+  Acme.Operator,
+  Samen.Replay.Domain
 ]
 
 # Ash 3.32+ (CVE-2026-82752): string `min_length`/`max_length`, the `string_length`
@@ -42,6 +45,11 @@ config :samen_core, :non_pii_repo, Acme.Repo
 config :samen_core, :verify_repo, Acme.Repo
 config :samen_core, :vault_repo, Acme.Repo
 config :samen_core, :tnt_record_repo, Acme.Repo
+
+# ADR-052 P2 — the replay capture tables persist in this app's repo (compile-time). Capture
+# stays OFF until `Samen.Observability.child_specs/2` gets `replay:` AND an org's
+# `samen.replay` flag is on.
+config :samen_core, :samen_replay_repo, Acme.Repo
 
 # T35 §4.7 / T37h: reveal grants are a CLIENT of the T34 E3 approve/reject engine.
 # This app's own Approval resource (Samen.Approvals.Blueprint.define_approval/5,

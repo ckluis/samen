@@ -52,7 +52,8 @@ defmodule Samen.NoPlaintextPii do
     LogTelemetry,
     LoggerGovernance,
     TraceSink,
-    ObanJobs
+    ObanJobs,
+    Replay
   }
 
   # T4.3: the hash-chain audit tier. Aliased under a distinct name to avoid colliding
@@ -71,6 +72,9 @@ defmodule Samen.NoPlaintextPii do
   T4.3 adds `AuditChain` — the `aud_chain` hash-chain token-only tier.
   ADR-052 §2.1 adds `LoggerGovernance` (`:logger`) — `filter_parameters` is a keep-list and
   the prod Logger level is `:info` or above.
+  ADR-052 §2.4 adds `Replay` (`:replay`) — the session-replay tables hold no plaintext (every
+  frame passes the frame schema; no referenced subject's vault plaintext in any row). Inert
+  (no finding) on a host that does not mount the replay tables.
   """
   @spec default_tiers() :: [module()]
   def default_tiers,
@@ -84,7 +88,8 @@ defmodule Samen.NoPlaintextPii do
       LoggerGovernance,
       TraceSink,
       ObanJobs,
-      AuditChainTier
+      AuditChainTier,
+      Replay
     ]
 
   @doc """
@@ -102,6 +107,9 @@ defmodule Samen.NoPlaintextPii do
     * `PostShred.TraceSinkIngress` — ingress-class trace-sink schema assertion +
       pseudonym-unlinks-on-shred (NOT a content scan).
     * `PostShred.CdcMirror`        — STUB (inactive until Phase-6 H4 / T6.5).
+    * `PostShred.Replay`           — ADR-052 §2.4: every stored replay frame referencing the
+      subject passes the frame schema and resolves to `[erased]` (no seeded plaintext in
+      any replay row).
 
   These are `:post_shred`-mode tiers: inert in CI mode, driven only by a `run/1`
   with `mode: :post_shred` and a `:subject_id`.
@@ -113,7 +121,8 @@ defmodule Samen.NoPlaintextPii do
       PostShred.BackupPitr,
       PostShred.KmsAttestation,
       PostShred.TraceSinkIngress,
-      PostShred.CdcMirror
+      PostShred.CdcMirror,
+      PostShred.Replay
     ]
 
   @doc """

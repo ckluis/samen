@@ -33,6 +33,16 @@ defmodule Samen.Reveal.Grant do
       config :samen_core, :reveal_grant, MyApp.Reveal.Grant
   """
   @callback granted?(Samen.Reveal.Context.t()) :: boolean()
+
+  @doc """
+  OPTIONAL batch form (ADR-052 §2.4.1): the verdict for each context, in order — exactly what
+  `granted?/1` would answer for each, read in a bounded number of queries instead of one per
+  context. `Samen.Api.PiiResolution.prefetch/4` calls it once per resolve call when the
+  checker implements it, and falls back to `granted?/1` per context otherwise.
+  """
+  @callback granted_many([Samen.Reveal.Context.t()]) :: [boolean()]
+
+  @optional_callbacks granted_many: 1
 end
 
 defmodule Samen.Reveal.DenyAll do
@@ -168,16 +178,28 @@ defmodule Samen.Reveal do
   # the trace sink.
   defp span_attrs(opts) do
     %{
-      subject_id: bounded_id(Keyword.get(opts, :subject_id)),
-      grant_id: bounded_id(Keyword.get(opts, :grant_id)),
+      subject_id: opaque_id(Keyword.get(opts, :subject_id)),
+      grant_id: opaque_id(Keyword.get(opts, :grant_id)),
       reason: reason_code(Keyword.get(opts, :reason))
     }
     |> Enum.reject(fn {_k, v} -> is_nil(v) end)
     |> Map.new()
   end
 
-  defp bounded_id(id) when is_binary(id) and byte_size(id) <= 256, do: id
-  defp bounded_id(_), do: nil
+  # ADR-052 §2.1.2 item 5: an id reaches the span only in an opaque-id SHAPE — a UUID string
+  # (8-4-4-4-12 hex), a ULID string (26 Crockford base32), or an integer primary key passed as
+  # an integer. A length cap alone let any short free string (a name, an email, a ticket note)
+  # through; a digit STRING is refused too (a phone number has that shape). Anything else is
+  # dropped, never trimmed or passed on.
+  @uuid ~r/\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
+  @ulid ~r/\A[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}\z/
+
+  defp opaque_id(id) when is_binary(id) do
+    if id =~ @uuid or id =~ @ulid, do: id, else: nil
+  end
+
+  defp opaque_id(id) when is_integer(id) and id >= 0, do: Integer.to_string(id)
+  defp opaque_id(_), do: nil
 
   defp reason_code(code) when is_atom(code) and code not in [nil, true, false],
     do: Atom.to_string(code)

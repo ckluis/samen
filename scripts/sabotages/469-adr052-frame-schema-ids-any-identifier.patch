@@ -1,0 +1,44 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 3) — `$id`, `$ref.pk`, `$record.pk` and a shape key accept any
+# code-identifier string again: a label-shaped name a row chose passes the validator.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/frame_schema_test.exs
+# MUST_FAIL: identifier fields accept exactly what the sanitizer emits
+diff --git a/samen_core/lib/samen/replay/frame_schema.ex b/samen_core/lib/samen/replay/frame_schema.ex
+index 412e01c..d483194 100644
+--- a/samen_core/lib/samen/replay/frame_schema.ex
++++ b/samen_core/lib/samen/replay/frame_schema.ex
+@@ -101,7 +101,7 @@ defmodule Samen.Replay.FrameSchema do
+   @markers %{
+     "$ref" => [
+       {:resource, :module_name, []},
+-      {:pk, :pk, []},
++      {:pk, :opaque_id, []},
+       {:attribute, :field_name, []},
+       {:label, :field_name, []}
+     ],
+@@ -112,11 +112,12 @@ defmodule Samen.Replay.FrameSchema do
+     ],
+     "$dropped" => [{:kind, :enum, [allowed: Dropped.kinds()]}, {:struct, :module_name, []}],
+     "$kept" => [{:value, :keep_listed, [max_length: @max_keep_listed]}],
+-    "$id" => [{:value, :uuid, []}],
++    # SABOTAGE (ADR-052 §2.4.1): looser than the sanitizer.
++    "$id" => [{:value, :opaque_id, []}],
+     "$atom" => [{:value, :enum, [allowed: :open]}],
+     "$dt" => [{:type, :enum, [allowed: @dt_types]}, {:value, :timestamp, []}],
+     "$dec" => [{:value, :number, []}],
+-    "$record" => [{:resource, :module_name, []}, {:pk, :pk, []}, {:fields, :tree, []}],
++    "$record" => [{:resource, :module_name, []}, {:pk, :opaque_id, []}, {:fields, :tree, []}],
+     "$count" => [
+       {:kind, :enum, [allowed: [:stream, :upload, :streams, :uploads]]},
+       {:n, :number, []}
+@@ -127,7 +128,7 @@ defmodule Samen.Replay.FrameSchema do
+   }
+ 
+   @shape_field [
+-    {:key, :param_key, []},
++    {:key, :opaque_id, []},
+     {:type, :enum, [allowed: @param_types]},
+     {:length, :number, []},
+     {:class, :enum, [allowed: @param_classes]},

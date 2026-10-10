@@ -170,18 +170,56 @@ defmodule Samen.WideEvent do
     with :ok <- reject_unknown_fields(fields),
          :ok <- ensure_action(fields),
          :ok <- validate_values(fields) do
-      {measurements, metadata} = split(ev)
-      :telemetry.execute(@telemetry_event, measurements, metadata)
-      :ok
+      execute(ev)
     end
   end
 
-  @doc "Convenience: build + emit in one call. Returns `:ok` or `{:error, reasons}`."
-  @spec emit(keyword() | map(), :build) :: :ok | {:error, [String.t()]}
+  # Only ever reached with a struct whose every value has just passed validation.
+  defp execute(%__MODULE__{} = ev) do
+    {measurements, metadata} = split(ev)
+    :telemetry.execute(@telemetry_event, measurements, metadata)
+    :ok
+  end
+
+  @doc """
+  Build + emit in one call.
+
+    * `:build` — strict: any invalid value refuses the whole event (`{:error, reasons}`).
+    * `:best_effort` — for framework telemetry handlers (ADR-052 §2.1.2 item 4): a value that
+      fails its declared bounded type is DROPPED, so one bad value costs one field, not the
+      event. An unknown field, or a missing / invalid `:action`, still refuses the whole event.
+
+  Either way every supplied value is validated EXACTLY ONCE, and the struct handed to the sink
+  is built only from values that passed — so it is executed without the second validation
+  `emit/1` gives a struct built elsewhere.
+  """
+  @spec emit(keyword() | map(), :build | :best_effort) :: :ok | {:error, [String.t()]}
   def emit(fields, :build) do
     case new(fields) do
-      {:ok, ev} -> emit(ev)
+      {:ok, ev} -> execute(ev)
       {:error, reasons} -> {:error, reasons}
+    end
+  end
+
+  def emit(fields, :best_effort) do
+    fields = Map.new(fields)
+
+    with :ok <- reject_unknown_fields(fields),
+         :ok <- ensure_action(fields) do
+      kept =
+        for {name, value} <- fields,
+            not is_nil(value),
+            value_violation(name, value) == [],
+            into: %{},
+            do: {name, value}
+
+      case kept do
+        %{action: _} ->
+          execute(struct(__MODULE__, kept))
+
+        _ ->
+          {:error, ["wide event :action #{inspect(fields.action)} failed its bounded type"]}
+      end
     end
   end
 
@@ -200,10 +238,12 @@ defmodule Samen.WideEvent do
 
   defp reject_nils(map), do: map |> Enum.reject(fn {_k, v} -> is_nil(v) end) |> Map.new()
 
-  defp reject_unknown_fields(fields) do
-    allowed = Schema.field_names()
+  # The schema, compiled into this module once as a plain map: the hot path does a map lookup
+  # per field instead of rebuilding the name set and scanning the field list on every call.
+  @field_specs Map.new(Schema.canonical_fields(), fn {name, _, _} = spec -> {name, spec} end)
 
-    case Enum.reject(Map.keys(fields), &MapSet.member?(allowed, &1)) do
+  defp reject_unknown_fields(fields) do
+    case Enum.reject(Map.keys(fields), &Map.has_key?(@field_specs, &1)) do
       [] ->
         :ok
 
@@ -211,7 +251,7 @@ defmodule Samen.WideEvent do
         {:error,
          Enum.map(unknown, fn f ->
            "unknown wide-event field #{inspect(f)} — not in the declared schema " <>
-             "(#{inspect(MapSet.to_list(allowed))}). Add it to Samen.WideEvent.Schema " <>
+             "(#{inspect(MapSet.to_list(Schema.field_names()))}). Add it to Samen.WideEvent.Schema " <>
              "with a bounded type first (J2)."
          end)}
     end
@@ -225,15 +265,16 @@ defmodule Samen.WideEvent do
   defp validate_values(fields) do
     reasons =
       Enum.flat_map(fields, fn {name, value} ->
-        if is_nil(value) do
-          []
-        else
-          {:ok, {^name, type, opts}} = Schema.fetch(name)
-          value_violation(name, type, opts, value)
-        end
+        if is_nil(value), do: [], else: value_violation(name, value)
       end)
 
     if reasons == [], do: :ok, else: {:error, reasons}
+  end
+
+  # Callers have already refused unknown fields, so the spec is always present.
+  defp value_violation(name, value) do
+    {^name, type, opts} = Map.fetch!(@field_specs, name)
+    value_violation(name, type, opts, value)
   end
 
   # :opaque_id — a bounded, printable identifier (uuid/ulid-shaped). We accept a

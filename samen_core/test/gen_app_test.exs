@@ -70,6 +70,8 @@ defmodule Samen.Gen.AppTest do
     "lib/<%= otp_app %>/operator.ex",
     "priv/repo/migrations/20260714200000_mount_primitives_scope.exs",
     "priv/repo/migrations/20260714210000_mount_operator_scopes.exs",
+    # ADR-052 P2: the replay capture storage every tenant-LiveView host mounts.
+    "priv/repo/migrations/20261009100000_samen_replay.exs",
     "lib/<%= otp_app %>_web/endpoint.ex",
     "lib/<%= otp_app %>_web/router.ex",
     "lib/<%= otp_app %>_web/layouts.ex",
@@ -340,7 +342,7 @@ defmodule Samen.Gen.AppTest do
       assert Samen.Gen.Templates.files(false) == Samen.Gen.Templates.files(false, false)
     end
 
-    test "web-only file set = the headless paths + the 9 web emissions, in order (AC-G4-1)" do
+    test "web-only file set = the headless paths + the 10 web emissions, in order (AC-G4-1)" do
       assert Enum.map(Samen.Gen.Templates.files(true, false), &elem(&1, 0)) ==
                @headless_paths ++ @web_only_paths
     end

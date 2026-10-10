@@ -1,0 +1,25 @@
+# SABOTAGE: ADR-052 §2.1.2 item 6 (inject half) — jobs inject through the globally configured
+# text-map propagator again, so with the SDK's [trace_context, baggage] composite a client's
+# baggage (extracted by opentelemetry_phoenix) is written into oban_jobs.meta.
+#
+# Flips the enqueue test.
+# APP: samen_core
+# TEST_FILES: test/observability/job_spans_test.exs
+# MUST_FAIL: enqueue writes traceparent/tracestate only, even with client baggage in context
+diff --git a/samen_core/lib/samen/tracer.ex b/samen_core/lib/samen/tracer.ex
+index cac795d..17d5cc6 100644
+--- a/samen_core/lib/samen/tracer.ex
++++ b/samen_core/lib/samen/tracer.ex
+@@ -210,9 +210,9 @@ defmodule Samen.Tracer do
+   """
+   @spec job_trace_headers() :: [{String.t(), String.t()}]
+   def job_trace_headers do
+-    @job_propagator
+-    |> :otel_propagator_text_map.inject([])
+-    |> Enum.filter(&job_trace_header?/1)
++    # SABOTAGE (ADR-052 §2.1.2 item 6): inject through the GLOBAL propagator, baggage included.
++    _ = @job_propagator
++    :otel_propagator_text_map.inject([])
+   end
+ 
+   @doc """

@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 5) — `alias Logger, as: L` / `import Logger` are no longer refused:
+# a level write through the alias walks past the shape-based runtime.exs check.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/observability/logger_tier_test.exs
+# MUST_FAIL: every shape that HIDES a Logger level write is refused
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+index 82cb70c..5138055 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/logger_governance.ex
+@@ -260,7 +260,8 @@ defmodule Samen.NoPlaintextPii.Tiers.LoggerGovernance do
+   # alias / import of Logger hides every later call from the shape check.
+   defp collect_level_writes({directive, _, [target | _]} = node, acc)
+        when directive in [:alias, :import] do
+-    if logger_module?(target),
++    # SABOTAGE (ADR-052 §2.4.1): aliases / imports pass.
++    if logger_module?(target) and false,
+       do: {node, [hidden("`#{directive} #{Macro.to_string(target)}` hides Logger calls") | acc]},
+       else: {node, acc}
+   end

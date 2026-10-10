@@ -35,7 +35,9 @@ config :pawchart,
     PawChart.Analytics,
     # T157 — the ADR-010 OPERATOR namespace (a SECOND Identity+Billing+Support mount over the
     # SaaS's OWN book of business: the clinic ACCOUNTS + their admins + subscriptions + desk).
-    PawChart.Operator
+    PawChart.Operator,
+    # ADR-052 P2 — the framework replay capture storage (Samen.Replay.Session / Frame).
+    Samen.Replay.Domain
   ]
 
 # The samen_core verifiers (catalog_parity/prefixes/pii_reads/pii_classify/…) discover
@@ -59,8 +61,15 @@ config :samen_core, :ash_domains, [
   PawChart.Analytics,
   # T157 — register the operator namespace so the verifier gate scans its mounted
   # Identity/Billing/Support resources (catalog_parity / prefixes / pii_* / vault parity).
-  PawChart.Operator
+  PawChart.Operator,
+  # ADR-052 P2 — verifiers scan the mounted replay capture resources too.
+  Samen.Replay.Domain
 ]
+
+# ADR-052 P2 — the replay capture tables (Samen.Replay.Session / Frame) persist in this host's
+# repo (compile-time; the `samen_ai_*_repo` seam). Capture itself stays OFF until the host
+# passes `replay:` to `Samen.Observability.child_specs/2` AND an org's `samen.replay` flag is on.
+config :samen_core, :samen_replay_repo, PawChart.Repo
 
 # T157 (ADR-010) — the well-known OPERATOR org id (the SaaS company's own org). The operator
 # workspace (`/operator/accounts` · `/billing` · `/revenue` · `/desk`) scopes to this org over

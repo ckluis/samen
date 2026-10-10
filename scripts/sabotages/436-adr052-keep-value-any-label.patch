@@ -1,0 +1,24 @@
+# SABOTAGE: ADR-052 §2.2.1 (gate fix) — a keep-listed param keeps ANY label-shaped string, not
+# only an integer/boolean/UUID or a member of the declared closed set: a client-chosen string
+# ("Sortvaluesecret", "Jane.Selectsecret") lands in replay_frame.
+#
+# Flips the closed-set tests and the real-ContactsLive JSONB scan (the gate's probe).
+# APP: samen_core
+# TEST_FILES: test/replay/sanitizer_test.exs test/replay/capture_test.exs
+# MUST_FAIL: a bare keep-listed name keeps only an integer, a boolean or a UUID
+# MUST_FAIL: {name, allowed} keeps a string only from the declared closed set
+# MUST_FAIL: an event's typed values are shape only; a declared keep-list key keeps its label
+diff --git a/samen_core/lib/samen/replay/sanitizer.ex b/samen_core/lib/samen/replay/sanitizer.ex
+index 46c7089..c990817 100644
+--- a/samen_core/lib/samen/replay/sanitizer.ex
++++ b/samen_core/lib/samen/replay/sanitizer.ex
+@@ -654,7 +654,8 @@ defmodule Samen.Replay.Sanitizer do
+ 
+   # A keep-listed value is kept only when it is an integer, a boolean, a UUID, or a member of
+   # the declared closed set (a sort field, a page direction) — never a client-chosen string.
+-  defp keepable?(v, allowed) when is_binary(v), do: uuid?(v) or v in allowed
++  # SABOTAGE (ADR-052 §2.2.1): any label-shaped client string is kept.
++  defp keepable?(v, _allowed) when is_binary(v), do: label?(v)
+   defp keepable?(v, _allowed) when is_integer(v) or is_boolean(v), do: true
+   defp keepable?(_v, _allowed), do: false
+ end

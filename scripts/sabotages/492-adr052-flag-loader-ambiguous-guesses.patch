@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-052 §2.4.1 item 7 — two rows of one flag name in the owner org resolve to whichever comes
+# first instead of failing safe OFF (:ambiguous_flag).
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/feature_flags_engine_test.exs
+# MUST_FAIL: two rows of one name in the owner org are ambiguous: OFF, not a guess
+diff --git a/samen_core/lib/samen/feature_flags/cache.ex b/samen_core/lib/samen/feature_flags/cache.ex
+index e8fc479..d5242c8 100644
+--- a/samen_core/lib/samen/feature_flags/cache.ex
++++ b/samen_core/lib/samen/feature_flags/cache.ex
+@@ -228,7 +228,7 @@ defmodule Samen.FeatureFlags.Cache do
+       |> Ash.read(authorize?: false)
+ 
+     case result do
+-      {:ok, [flag]} -> {:ok, to_config(flag)}
++      {:ok, [flag | _]} -> {:ok, to_config(flag)}
+       {:ok, []} -> {:ok, nil}
+       {:ok, [_, _ | _]} -> {:error, :ambiguous_flag}
+       {:error, reason} -> {:error, reason}

@@ -30,6 +30,15 @@ defmodule Samen.Tracer do
   changeset with the current trace context before passing it to
   `Samen.Jobs.enqueue_in_tx/3`.
 
+  **W3C trace context only (ADR-052 §2.1.2 item 6).** The job row is stored data, so only the
+  two W3C Trace Context headers (`traceparent`, `tracestate`) cross into it — injected with the
+  trace-context propagator itself, NOT the globally configured text-map propagator. The SDK's
+  default global propagator is `[trace_context, baggage]`, and a host that adds
+  `opentelemetry_phoenix` / `opentelemetry_cowboy` extracts the CLIENT's `baggage` header into
+  the request context; injecting through the global propagator would then write that
+  client-chosen baggage into `oban_jobs.meta`. Extraction on the worker side is restricted the
+  same way, so a baggage pair already sitting in an old row is ignored.
+
   ## Module setup (in application start)
 
   Host applications MUST call this in `YourApp.Application.start/2`:
@@ -55,6 +64,10 @@ defmodule Samen.Tracer do
   """
 
   @reveal_allowed_attrs ~w(subject_id grant_id reason)a
+
+  # The only headers a job row may carry, and the only propagator that writes/reads them.
+  @job_trace_headers ~w(traceparent tracestate)
+  @job_propagator :otel_propagator_trace_context
 
   @doc """
   The allow-list of span attribute keys permitted on a `:reveal` span.
@@ -174,9 +187,8 @@ defmodule Samen.Tracer do
   """
   @spec inject_trace_context(Ecto.Changeset.t()) :: Ecto.Changeset.t()
   def inject_trace_context(%Ecto.Changeset{} = changeset) do
-    # inject/1 takes a carrier (list) and returns it with W3C headers prepended.
-    # The carrier format is a list of {key, value} tuples.
-    headers = :otel_propagator_text_map.inject([])
+    # W3C Trace Context ONLY — never the global propagator (which carries baggage).
+    headers = job_trace_headers()
 
     if headers == [] do
       changeset
@@ -191,6 +203,42 @@ defmodule Samen.Tracer do
   rescue
     _ -> changeset
   end
+
+  @doc """
+  The current span's W3C trace-context headers — `traceparent` (and `tracestate` when
+  non-empty), and nothing else — as `{name, value}` pairs. `[]` when there is no valid span.
+  """
+  @spec job_trace_headers() :: [{String.t(), String.t()}]
+  def job_trace_headers do
+    @job_propagator
+    |> :otel_propagator_text_map.inject([])
+    |> Enum.filter(&job_trace_header?/1)
+  end
+
+  @doc """
+  Attach the parent context stored in a job's `meta["trace_context"]` to the current process,
+  reading ONLY its W3C trace-context pairs with the trace-context propagator (any other pair —
+  `baggage` included — is ignored). Returns the `:otel_ctx` token to detach.
+  """
+  @spec attach_job_trace_context(term()) :: :otel_ctx.token()
+  def attach_job_trace_context(meta) do
+    headers =
+      case meta do
+        %{"trace_context" => encoded} when is_list(encoded) ->
+          for [k, v] <- encoded,
+              is_binary(k) and is_binary(v),
+              job_trace_header?({k, v}),
+              do: {k, v}
+
+        _ ->
+          []
+      end
+
+    :otel_propagator_text_map.extract(@job_propagator, headers)
+  end
+
+  defp job_trace_header?({k, _v}) when is_binary(k), do: String.downcase(k) in @job_trace_headers
+  defp job_trace_header?(_), do: false
 
   @doc """
   Open a span as a child of the trace context stored in a job's `meta` map,
@@ -217,18 +265,8 @@ defmodule Samen.Tracer do
 
   @doc false
   def __with_job_span__(name, meta, fun) when is_map(meta) do
-    encoded = Map.get(meta, "trace_context", [])
-    # Decode list-of-2-element-lists back to {key, value} tuples for the carrier
-    headers =
-      Enum.flat_map(encoded, fn
-        [k, v] when is_binary(k) and is_binary(v) -> [{k, v}]
-        _ -> []
-      end)
-
-    # Extract the parent context from the propagated headers.
-    # :otel_propagator_text_map.extract/1 attaches the parent context as the
-    # current process context and returns a token for restoration.
-    token = :otel_propagator_text_map.extract(headers)
+    # Attach the W3C parent context (only) and keep the token for restoration.
+    token = attach_job_trace_context(meta)
 
     tracer = :opentelemetry.get_application_tracer(__MODULE__)
 

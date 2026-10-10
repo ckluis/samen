@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-052 §2.2 rule 3 — the store persists every buffered frame without validating it
+# against the frame schema, so a sanitizer bug that leaves a raw string in a payload lands in
+# the replay tables.
+#
+# Flips the refuse-and-count test.
+# APP: samen_core
+# TEST_FILES: test/replay/capture_test.exs
+# MUST_FAIL: a frame that fails the schema is refused and counted, never stored
+diff --git a/samen_core/lib/samen/replay/store.ex b/samen_core/lib/samen/replay/store.ex
+index f9a23e5..86a901d 100644
+--- a/samen_core/lib/samen/replay/store.ex
++++ b/samen_core/lib/samen/replay/store.ex
+@@ -24,7 +24,8 @@ defmodule Samen.Replay.Store do
+     {valid, rejected} =
+       (frames ++ [exit_frame])
+       |> Enum.map(&FrameSchema.encode/1)
+-      |> Enum.split_with(&(FrameSchema.validate(&1) == :ok))
++      # SABOTAGE (ADR-052 §2.2 rule 3): no persist-time validation.
++      |> Enum.split_with(fn _frame -> true end)
+ 
+     repo = AshPostgres.DataLayer.Info.repo(Session, :mutate)
+ 

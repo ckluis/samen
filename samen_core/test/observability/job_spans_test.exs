@@ -130,4 +130,88 @@ defmodule Samen.Observability.JobSpansTest do
              Observability.child_specs(:js_app, job_spans: false)
            )
   end
+
+  describe "W3C trace context only — client baggage never reaches oban_jobs (ADR-052 §2.1.2 item 6)" do
+    # What a host that adds opentelemetry_phoenix gets: the SDK's composite propagator, and the
+    # CLIENT's `baggage` header extracted into the request context.
+    setup do
+      injector = :opentelemetry.get_text_map_injector()
+      extractor = :opentelemetry.get_text_map_extractor()
+
+      :opentelemetry.set_text_map_propagator(
+        :otel_propagator_text_map_composite.create([:trace_context, :baggage])
+      )
+
+      on_exit(fn ->
+        :opentelemetry.set_text_map_injector(injector)
+        :opentelemetry.set_text_map_extractor(extractor)
+      end)
+    end
+
+    test "enqueue writes traceparent/tracestate only, even with client baggage in context" do
+      :otel_baggage.set("user_email", "alice@example.com")
+
+      {meta, global} =
+        try do
+          Samen.Tracer.with_span "request" do
+            {enqueued_meta(%{}), :otel_propagator_text_map.inject([])}
+          end
+        after
+          :otel_baggage.clear()
+        end
+
+      # POSITIVE CONTROL: the globally configured propagator WOULD carry the baggage.
+      assert Enum.any?(global, fn {k, _} -> k == "baggage" end)
+      assert inspect(global) =~ "alice"
+
+      assert %{"trace_context" => [_ | _] = pairs} = meta
+      assert Enum.all?(pairs, fn [k, _] -> k in ["traceparent", "tracestate"] end)
+      refute inspect(meta) =~ "alice"
+    end
+
+    test "a baggage pair already in a job row is ignored when the job span starts" do
+      {meta, parent_trace} =
+        Samen.Tracer.with_span "request" do
+          {enqueued_meta(%{}), :otel_span.trace_id(:otel_tracer.current_span_ctx())}
+        end
+
+      poisoned =
+        Map.update!(
+          meta,
+          "trace_context",
+          &(&1 ++ [["baggage", "user_email=alice%40example.com"]])
+        )
+
+      headers = for [k, v] <- poisoned["trace_context"], do: {k, v}
+      job = %{id: 4545, meta: poisoned, worker: "W", queue: "default", attempt: 1}
+
+      {global_baggage, job_baggage, with_job_span_baggage} =
+        Task.async(fn ->
+          # POSITIVE CONTROL: the global extractor WOULD restore the client's baggage.
+          token = :otel_propagator_text_map.extract(headers)
+          global = :otel_baggage.get_all()
+          :otel_ctx.detach(token)
+
+          :telemetry.execute([:oban, :job, :start], %{}, %{job: job})
+          in_job = :otel_baggage.get_all()
+          :telemetry.execute([:oban, :job, :stop], %{duration: 1}, %{job: job, state: :success})
+
+          in_macro =
+            Samen.Tracer.with_job_span "w", poisoned do
+              :otel_baggage.get_all()
+            end
+
+          {global, in_job, in_macro}
+        end)
+        |> Task.await()
+
+      assert Map.has_key?(global_baggage, "user_email")
+      assert job_baggage == %{}
+      assert with_job_span_baggage == %{}
+
+      # … and the trace is still continued from the traceparent.
+      assert [s] = spans_named(JobSpans.span_name())
+      assert span(s, :trace_id) == parent_trace
+    end
+  end
 end

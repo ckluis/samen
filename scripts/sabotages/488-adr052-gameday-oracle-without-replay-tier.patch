@@ -1,0 +1,24 @@
+# SABOTAGE: ADR-052 §2.4 — the replay check is dropped from the destruction oracle's post-shred roster: the
+# driftwood game-day erases a driver whose recorded replays nobody checks.
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/crypto_shred_gameday_test.exs
+# MUST_FAIL: the post-shred oracle tiers pass with zero violations
+diff --git a/samen_core/lib/samen/no_plaintext_pii.ex b/samen_core/lib/samen/no_plaintext_pii.ex
+index 46e2de2..d93e734 100644
+--- a/samen_core/lib/samen/no_plaintext_pii.ex
++++ b/samen_core/lib/samen/no_plaintext_pii.ex
+@@ -121,9 +121,9 @@ defmodule Samen.NoPlaintextPii do
+       PostShred.BackupPitr,
+       PostShred.KmsAttestation,
+       PostShred.TraceSinkIngress,
+-      PostShred.CdcMirror,
+-      PostShred.Replay
+-    ]
++      # SABOTAGE (ADR-052 §2.4): replays unchecked.
++      PostShred.CdcMirror
++    ] ++ Enum.take([PostShred.Replay], 0)
+ 
+   @doc """
+   Run the oracle and return every finding (violations + exempts + passes).

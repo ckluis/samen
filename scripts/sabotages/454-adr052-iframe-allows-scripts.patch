@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-052 §2.3 rule 3 — the player's iframe sandbox allows scripts and same-origin.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: the iframe sandbox forbids scripts
+diff --git a/samen_web/lib/samen/web/replay/player_live.ex b/samen_web/lib/samen/web/replay/player_live.ex
+index f804f8a..e21753e 100644
+--- a/samen_web/lib/samen/web/replay/player_live.ex
++++ b/samen_web/lib/samen/web/replay/player_live.ex
+@@ -282,7 +282,7 @@ defmodule Samen.Web.Replay.PlayerLive do
+                     :if={@frame_html}
+                     id="replay-frame"
+                     title="Recorded frame (inert)"
+-                    sandbox=""
++                    sandbox="allow-scripts allow-same-origin"
+                     referrerpolicy="no-referrer"
+                     loading="lazy"
+                     srcdoc={@frame_html}

@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 3) — a tree key is accepted when merely label-shaped: a name a row
+# chose rides into storage as a map key.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/frame_schema_test.exs
+# MUST_FAIL: a tree key is a server-known identifier
+diff --git a/samen_core/lib/samen/replay/frame_schema.ex b/samen_core/lib/samen/replay/frame_schema.ex
+index 412e01c..500b1f8 100644
+--- a/samen_core/lib/samen/replay/frame_schema.ex
++++ b/samen_core/lib/samen/replay/frame_schema.ex
+@@ -549,8 +549,9 @@ defmodule Samen.Replay.FrameSchema do
+   def tree_key?(k) when is_binary(k) do
+     k == "$more" or positional?(k) or
+       (Samen.Replay.Sanitizer.label?(k) and
++         # SABOTAGE (ADR-052 §2.4.1): any label-shaped string.
+          (Samen.Replay.Sanitizer.uuid?(k) or Regex.match?(~r/\A-?\d+\z/, k) or
+-            existing_atom?(k)))
++            existing_atom?(k) or true))
+   end
+ 
+   def tree_key?(_), do: false

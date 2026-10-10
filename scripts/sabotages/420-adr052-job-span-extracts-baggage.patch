@@ -1,0 +1,28 @@
+# SABOTAGE: ADR-052 §2.1.2 item 6 (extract half) — a job span restores EVERY pair stored in the
+# job row through the global propagator, so a baggage pair sitting in oban_jobs.meta becomes the
+# worker's baggage context.
+#
+# Flips the stored-baggage test.
+# APP: samen_core
+# TEST_FILES: test/observability/job_spans_test.exs
+# MUST_FAIL: a baggage pair already in a job row is ignored when the job span starts
+diff --git a/samen_core/lib/samen/tracer.ex b/samen_core/lib/samen/tracer.ex
+index cac795d..653e6fa 100644
+--- a/samen_core/lib/samen/tracer.ex
++++ b/samen_core/lib/samen/tracer.ex
+@@ -234,7 +234,14 @@ defmodule Samen.Tracer do
+           []
+       end
+ 
+-    :otel_propagator_text_map.extract(@job_propagator, headers)
++    # SABOTAGE (ADR-052 §2.1.2 item 6): extract every stored pair through the GLOBAL propagator.
++    _ = headers
++
++    all =
++      for [k, v] <- Map.get(meta || %{}, "trace_context", []), is_binary(k) and is_binary(v),
++          do: {k, v}
++
++    :otel_propagator_text_map.extract(all)
+   end
+ 
+   defp job_trace_header?({k, _v}) when is_binary(k), do: String.downcase(k) in @job_trace_headers

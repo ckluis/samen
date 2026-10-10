@@ -39,3 +39,16 @@ samen_core/lib/samen/policy/same_org_fk.ex	samen_core	test/same_org_fk_change_te
 # --- the masking test-infra itself: if this can be weakened undetected, every
 # --- masking proof built on it is suspect (derived: sabotage TEST_FILES) -------
 samen_core/lib/samen/scope_mask_case.ex	samen_core	test/samen/scope_mask_case_test.exs
+# --- session replay capture sanitizer (ADR-052 P2): the ONE path from a LiveView's assigns
+# --- and params into a persisted frame — a silent weakening is a plaintext store
+# --- (derived: sabotage TEST_FILES 421-423) ------------------------------------
+samen_core/lib/samen/replay/sanitizer.ex	samen_core	test/replay/sanitizer_test.exs test/replay/capture_test.exs
+# --- replay row guard (ADR-052 P2 gate): the LAST LINE on every replay_frame / replay_session
+# --- write, authorized or not — a silent weakening re-opens the direct-create bypass
+samen_core/lib/samen/replay/row_guard.ex	samen_core	test/replay/row_guard_test.exs
+# --- replay view-time resolver (ADR-052 P3): the ONE place a stored replay reference becomes a
+# --- value, on the VIEWER's plane — a silent weakening resolves on the wrong plane or caches
+samen_core/lib/samen/replay/resolver.ex	samen_core	test/replay/player_test.exs
+# --- replay player authorization (ADR-052 P3): watching is impersonating — the chokepoint every
+# --- list, open and frame batch re-checks; a silent weakening shows a replay to the wrong viewer
+samen_web/lib/samen/web/replay/access.ex	samen_web	test/samen/web/replay_player_test.exs

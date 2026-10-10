@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-052 §2.4.1 item 7 — the flag loader reads a flag by NAME across every org's rows again
+# (the owner-org filter dropped), so a tenant's own row of a platform flag's name decides for every org.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/feature_flags_engine_test.exs
+# MUST_FAIL: CROSS-TENANT: a tenant's row of the same name cannot turn the flag ON for itself or another org, nor OFF for the opted-in org
+diff --git a/samen_core/lib/samen/feature_flags/cache.ex b/samen_core/lib/samen/feature_flags/cache.ex
+index e8fc479..829b4b6 100644
+--- a/samen_core/lib/samen/feature_flags/cache.ex
++++ b/samen_core/lib/samen/feature_flags/cache.ex
+@@ -220,7 +220,7 @@ defmodule Samen.FeatureFlags.Cache do
+ 
+     result =
+       flag_module
+-      |> Ash.Query.filter(name == ^flag_name and org_id == ^owner_org_id)
++      |> Ash.Query.filter(name == ^flag_name)
+       |> Ash.Query.limit(2)
+       # authz-scope: system-plane flag-config load of the OWNER org's rows only (the platform
+       # flags, ADR-020) — a row of any other org never decides; per-org targeting is evaluated

@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 8) — load_view loads ANY module a stored row names that is on the
+# code path, not only an allowed view (render/1 or __live__/0 per its .beam).
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/player_test.exs
+# MUST_FAIL: the recorded view is loaded before decoding
+diff --git a/samen_core/lib/samen/replay/player.ex b/samen_core/lib/samen/replay/player.ex
+index a909236..180cec5 100644
+--- a/samen_core/lib/samen/replay/player.ex
++++ b/samen_core/lib/samen/replay/player.ex
+@@ -128,7 +128,8 @@ defmodule Samen.Replay.Player do
+   def load_view(name, kind) when is_binary(name) do
+     with true <- Samen.Replay.FrameSchema.module_name?(name),
+          mod when is_atom(mod) and not is_nil(mod) <- Decoder.existing_atom("Elixir." <> name) do
+-      if :code.is_loaded(mod) != false or allowed_beam?(mod, kind),
++      # SABOTAGE (ADR-052 §2.4.1): any module.
++      if :code.is_loaded(mod) != false or allowed_beam?(mod, kind) or true,
+         do: loaded(Code.ensure_loaded(mod), mod)
+     else
+       _ -> nil

@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.3 — the tenant role gate is lowered to :member: any member of the org watches its
+# replays (an admin-class role is required).
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: a non-admin member is denied
+diff --git a/samen_web/lib/samen/web/replay/access.ex b/samen_web/lib/samen/web/replay/access.ex
+index ee8985e..a7c566a 100644
+--- a/samen_web/lib/samen/web/replay/access.ex
++++ b/samen_web/lib/samen/web/replay/access.ex
+@@ -108,7 +108,8 @@ defmodule Samen.Web.Replay.Access do
+         %Samen.Scope{actor: actor} = Mount.scope(mount, org_id)
+         role = membership_role(mount, org_id, principal)
+ 
+-        if Samen.Scope.Role.at_least?(role, :admin) do
++        # SABOTAGE (ADR-052 §2.3): any member may watch.
++        if Samen.Scope.Role.at_least?(role, :member) do
+           {:ok,
+            %{
+              plane: :tenant,

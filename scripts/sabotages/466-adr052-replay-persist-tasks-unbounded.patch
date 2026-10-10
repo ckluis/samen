@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 2) — the persist task supervisor is unbounded again: no session is
+# ever dropped at the bound, persists pile up behind a slow database.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/capture_test.exs
+# MUST_FAIL: over max_persist_tasks the session is DROPPED and counted
+diff --git a/samen_core/lib/samen/replay/supervisor.ex b/samen_core/lib/samen/replay/supervisor.ex
+index a523015..acbeda8 100644
+--- a/samen_core/lib/samen/replay/supervisor.ex
++++ b/samen_core/lib/samen/replay/supervisor.ex
+@@ -24,7 +24,8 @@ defmodule Samen.Replay.Supervisor do
+     _ = Samen.Replay.install_retention_specs(retention_days: cfg.retention_days)
+ 
+     children = [
+-      {Task.Supervisor, name: Samen.Replay.TaskSupervisor, max_children: cfg.max_persist_tasks},
++      # SABOTAGE (ADR-052 §2.4.1): unbounded.
++      {Task.Supervisor, name: Samen.Replay.TaskSupervisor, max_children: :infinity},
+       {Monitor, task_sup: Samen.Replay.TaskSupervisor},
+       %{
+         id: Samen.Replay.Activate,

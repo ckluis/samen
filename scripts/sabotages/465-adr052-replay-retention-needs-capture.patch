@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 1) — the replay retention specs are installed only by the capture
+# supervisor again: a host that turns capture off stops pruning the replays it already stored.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/capture_test.exs
+# MUST_FAIL: capture OFF: the host's boot still installs the replay spec
+diff --git a/samen_core/lib/samen/observability.ex b/samen_core/lib/samen/observability.ex
+index 5ce09ea..a609a98 100644
+--- a/samen_core/lib/samen/observability.ex
++++ b/samen_core/lib/samen/observability.ex
+@@ -156,7 +156,8 @@ defmodule Samen.Observability do
+       request_event_specs(otp_app, opts) ++
+       param_filter_specs(otp_app, opts) ++
+       job_span_specs(otp_app, opts) ++
+-      replay_retention_specs(otp_app, opts) ++
++      # SABOTAGE (ADR-052 §2.4.1): retention only rides the capture supervisor.
++      Enum.take(replay_retention_specs(otp_app, opts), 0) ++
+       replay_specs(otp_app, opts) ++
+       prometheus_specs(otp_app, opts) ++
+       wide_event_sink_specs(otp_app, opts)

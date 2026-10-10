@@ -172,6 +172,9 @@ defmodule Samen.Metrics do
       (WS-F5 F5.2), no per-row tags; emitted by `Samen.Search.query/3`
     - `samen.csv.export.row_count` — histogram of rows in a CSV export (WS-F5 F5.2),
       tagged by `result`; emitted by `Samen.Web.Csv.export/3`
+    - `samen.replay.session.count` — counter of finished replay capture sessions by
+      `result` (`persisted | discarded | failed | dropped`; ADR-052 §2.4.1); emitted by
+      `Samen.Replay.Monitor`
   """
   @spec definitions() :: [Telemetry.Metrics.t()]
   def definitions do
@@ -255,6 +258,16 @@ defmodule Samen.Metrics do
         unit: {:native, :millisecond},
         tags: [],
         description: "Full-text search query latency (no unbounded term label)"
+      ),
+
+      # ADR-052 §2.4.1 — one count per finished replay capture session, by bounded outcome
+      # (`persisted | discarded | failed | dropped`). Emitted by Samen.Replay.Monitor.
+      counter(
+        "samen.replay.session.count",
+        event_name: [:samen, :replay, :session],
+        tags: [:result],
+        description:
+          "Replay capture sessions by outcome — a failed or dropped persist is a series, not a log line"
       ),
 
       # CSV export row count — bounded tag: result. Emitted by Samen.Web.Csv.export/3.

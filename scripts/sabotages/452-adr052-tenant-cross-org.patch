@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-052 §2.3 — the pinned-org check is dropped: an admin of another org passes the org gate.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: a cross-org admin is denied
+diff --git a/samen_web/lib/samen/web/replay/access.ex b/samen_web/lib/samen/web/replay/access.ex
+index ee8985e..e7f1ad3 100644
+--- a/samen_web/lib/samen/web/replay/access.ex
++++ b/samen_web/lib/samen/web/replay/access.ex
+@@ -125,6 +125,8 @@ defmodule Samen.Web.Replay.Access do
+ 
+   # Armed host: the org must be one the authenticated principal holds (pinned by TenantAuthz).
+   # Disarmed (`:unconstrained`): the membership check below is the gate.
++  # SABOTAGE (ADR-052 §2.3): every org is "the same org".
++  defp same_org?(_any, _org_id), do: true
+   defp same_org?(:unconstrained, _org_id), do: true
+ 
+   defp same_org?(orgs, org_id) when is_list(orgs),

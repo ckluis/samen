@@ -341,4 +341,163 @@ defmodule Samen.Observability.LiveTelemetryTest do
              )
     end
   end
+
+  describe "request_id — only a server-generated id reaches the event (ADR-052 §2.1.2 item 1)" do
+    # `Plug.RequestId.generate/0`, byte for byte (samen_core has no Plug dependency; the
+    # samen_web e2e test drives the real plug).
+    defp plug_generated_id do
+      Base.url_encode64(<<
+        System.system_time(:nanosecond)::64,
+        :erlang.phash2({node(), self()}, 16_777_216)::24,
+        :erlang.unique_integer()::32
+      >>)
+    end
+
+    defp with_request_id(id, fun) do
+      Logger.metadata(request_id: id)
+
+      try do
+        fun.()
+      after
+        Logger.metadata(request_id: nil)
+      end
+    end
+
+    defp request_event(id, req_headers) do
+      with_request_id(id, fn ->
+        :telemetry.execute([:phoenix, :endpoint, :stop], %{duration: 1}, %{
+          conn: %{method: "GET", status: 200, req_headers: req_headers, assigns: %{}}
+        })
+
+        one_event!()
+      end)
+    end
+
+    test "POSITIVE CONTROL: a server-generated id is kept verbatim (it IS the response header)" do
+      id = plug_generated_id()
+      assert request_event(id, [{"accept", "text/html"}]).request_id == id
+
+      with_request_id(id, fn ->
+        lv(:handle_event, :stop, %{socket: socket(LiveEventsFixture), event: "save"})
+        assert one_event!().request_id == id
+      end)
+    end
+
+    test "a client-chosen x-request-id never reaches the event — a bounded substitute does" do
+      client = "alice@example.com-ticket-4711"
+      ev = request_event(client, [{"x-request-id", client}])
+
+      refute ev.request_id == client
+      refute inspect(ev) =~ "alice"
+      assert ev.request_id =~ ~r/\Asub_[A-Za-z0-9_-]{16}\z/
+
+      # Still correlatable across the events that carry the same client id on this node …
+      assert request_event(client, [{"x-request-id", client}]).request_id == ev.request_id
+      # … and distinct from another client id.
+      refute request_event(client <> "x", [{"x-request-id", client <> "x"}]).request_id ==
+               ev.request_id
+    end
+
+    test "a client id in the server's exact shape is still the client's when the client sent it" do
+      # A replayed / forged id that even carries this process's hash: the conn proves the
+      # client sent it, under whatever header name.
+      forged = plug_generated_id()
+      assert request_event(forged, [{"x-correlation-id", forged}]).request_id =~ ~r/\Asub_/
+    end
+
+    test "a 20-char base64 id the client chose (no conn in hand) is substituted" do
+      for id <- ["AliceAndersSmith1234", "alice-anders-1234567"] do
+        with_request_id(id, fn ->
+          lv(:handle_event, :stop, %{socket: socket(LiveEventsFixture), event: "save"})
+          ev = one_event!()
+          assert ev.request_id =~ ~r/\Asub_/
+          refute inspect(ev) =~ "lice"
+        end)
+      end
+    end
+
+    test "an id Plug generated in ANOTHER process is substituted (provenance, not just shape)" do
+      other = Task.async(fn -> plug_generated_id() end) |> Task.await()
+
+      with_request_id(other, fn ->
+        lv(:mount, :stop, %{socket: socket(LiveEventsFixture)})
+        assert one_event!().request_id =~ ~r/\Asub_/
+      end)
+    end
+  end
+
+  describe "hot path: each value is validated ONCE (ADR-052 §2.1.2 item 4)" do
+    # Runs `fun` in a fresh process traced by an isolated trace session (no global tracer is
+    # touched) and counts its calls to the id-shape heuristic.
+    defp count_shape_checks(fun) do
+      session = :trace.session_create(:samen_live_telemetry_validation_count, self(), [])
+
+      try do
+        :trace.function(session, {Samen.PiiValueShape, :pii_shaped_id?, 1}, true, [:local])
+        test_pid = self()
+
+        {pid, ref} =
+          spawn_monitor(fn ->
+            receive do: (:go -> fun.())
+            send(test_pid, :ran)
+          end)
+
+        :trace.process(session, pid, true, [:call])
+        send(pid, :go)
+        assert_receive :ran, 1000
+        assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1000
+        drain_calls(0)
+      after
+        :trace.session_destroy(session)
+      end
+    end
+
+    defp drain_calls(n) do
+      receive do
+        {:trace, _pid, :call, {Samen.PiiValueShape, :pii_shaped_id?, _}} -> drain_calls(n + 1)
+      after
+        100 -> n
+      end
+    end
+
+    test "one handle_event callback runs the id-shape check once per id/token field" do
+      org = Ecto.UUID.generate()
+
+      calls =
+        count_shape_checks(fn ->
+          # Generated in the emitting process, as Plug.RequestId does.
+          id =
+            Base.url_encode64(<<1::64, :erlang.phash2({node(), self()}, 16_777_216)::24, 2::32>>)
+
+          Logger.metadata(request_id: id)
+
+          lv(:handle_event, :stop, %{
+            socket: socket(LiveEventsFixture, %{org_id: org}),
+            event: "save"
+          })
+        end)
+
+      ev = one_event!()
+      # view + tenant_id + request_id are the opaque ids present (no principal, no span).
+      assert Map.take(ev, [:view, :tenant_id, :request_id]) |> map_size() == 3
+      # One check per field, plus one per enum atom of the open `:action` / `:event` labels.
+      assert calls == 3 + 2, "expected one shape check per value, got #{calls}"
+    end
+
+    test "best_effort drops ONLY the failing value; strict :build still refuses the event" do
+      fields = %{action: :live_view, callback: :mount, tenant_id: "Alice Anders", duration_ms: 1}
+
+      assert :ok = WideEvent.emit(fields, :best_effort)
+      ev = one_event!()
+      assert ev.callback == :mount
+      refute Map.has_key?(ev, :tenant_id)
+
+      assert {:error, _} = WideEvent.emit(fields, :build)
+      refute_receive {:wide_event, _}, 100
+
+      assert {:error, _} = WideEvent.emit(%{action: :live_view, bogus: 1}, :best_effort)
+      assert {:error, _} = WideEvent.emit(%{action: :"alice@example.com"}, :best_effort)
+      refute_receive {:wide_event, _}, 100
+    end
+  end
 end

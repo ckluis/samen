@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 9) — Grants.granted_many/1 skips the suspension check: a suspended
+# operator keeps every live grant on the batched path.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/resolver_batch_test.exs
+# MUST_FAIL: deny-on-read survives batching
+diff --git a/samen_core/lib/samen/reveal/grants.ex b/samen_core/lib/samen/reveal/grants.ex
+index b46966e..7ae9213 100644
+--- a/samen_core/lib/samen/reveal/grants.ex
++++ b/samen_core/lib/samen/reveal/grants.ex
+@@ -660,7 +660,8 @@ defmodule Samen.Reveal.Grants do
+         subjects = subjects |> Enum.filter(&is_binary/1) |> Enum.uniq()
+ 
+         allowed =
+-          if subjects == [] or Samen.OperatorPlane.Suspension.suspended?(actor),
++          # SABOTAGE (ADR-052 §2.4.1): no suspension check.
++          if subjects == [] or (Samen.OperatorPlane.Suspension.suspended?(actor) and false),
+             do: MapSet.new(),
+             else: active_subjects(actor, subjects)
+ 

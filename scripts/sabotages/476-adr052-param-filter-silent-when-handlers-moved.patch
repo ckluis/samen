@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 6) — ParamFilter.install/0 wraps nothing and returns quietly when
+# Phoenix has moved its log handlers: params are logged without the nested-value-safe keep-list.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/param_filter_logging_test.exs
+# MUST_FAIL: fails LOUD when an expected Phoenix log handler is not found to wrap
+diff --git a/samen_core/lib/samen/observability/param_filter.ex b/samen_core/lib/samen/observability/param_filter.ex
+index e887cd1..08fd982 100644
+--- a/samen_core/lib/samen/observability/param_filter.ex
++++ b/samen_core/lib/samen/observability/param_filter.ex
+@@ -103,8 +103,9 @@ defmodule Samen.Observability.ParamFilter do
+           n + 1
+       end
+ 
++    # SABOTAGE (ADR-052 §2.4.1): silent.
+     case Enum.reject(expected, &wrapped?/1) do
+-      [] -> n
++      _ -> n
+       missing -> raise HandlersNotFound, missing: missing
+     end
+   end

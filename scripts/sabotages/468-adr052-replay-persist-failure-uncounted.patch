@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 2) — a failed persist is counted as persisted: the failure is a log
+# line again, invisible to the metric and to stats/0.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/capture_test.exs
+# MUST_FAIL: a failed persist is COUNTED
+diff --git a/samen_core/lib/samen/replay/monitor.ex b/samen_core/lib/samen/replay/monitor.ex
+index 565914d..d10d00e 100644
+--- a/samen_core/lib/samen/replay/monitor.ex
++++ b/samen_core/lib/samen/replay/monitor.ex
+@@ -122,7 +122,8 @@ defmodule Samen.Replay.Monitor do
+ 
+   defp outcome(:persisted), do: :persisted
+   defp outcome(:discarded), do: :discarded
+-  defp outcome(_), do: :failed
++  # SABOTAGE (ADR-052 §2.4.1): failures disappear into the success count.
++  defp outcome(_), do: :persisted
+ 
+   defp count(state, result) do
+     :telemetry.execute([:samen, :replay, :session], %{count: 1}, %{result: result})

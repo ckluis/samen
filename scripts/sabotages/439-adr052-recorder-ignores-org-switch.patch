@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.2.1 (gate fix) / R11 — a recorded LiveView keeps recording after it
+# switches org, so a non-opted-in org's activity lands in the opted-in org's session.
+#
+# Flips the org-switch test.
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_recorder_test.exs
+# MUST_FAIL: an org switch stops the recording
+diff --git a/samen_web/lib/samen/web/replay/recorder.ex b/samen_web/lib/samen/web/replay/recorder.ex
+index 29f9697..c67fba2 100644
+--- a/samen_web/lib/samen/web/replay/recorder.ex
++++ b/samen_web/lib/samen/web/replay/recorder.ex
+@@ -200,7 +200,8 @@ defmodule Samen.Web.Replay.Recorder do
+     case socket.private[@private] do
+       %{state: :on, org: org} ->
+         case org_id(socket.assigns) do
+-          other when is_binary(other) and other != org ->
++          # SABOTAGE (ADR-052 §2.2.1 / R11): an org switch is ignored.
++          other when is_binary(other) and other != org and false ->
+             Capture.stop()
+             off(socket)
+ 

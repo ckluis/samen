@@ -69,9 +69,23 @@ defmodule Samen.Observability do
      `Samen.Observability.LiveTelemetry` turns each LiveView `mount`/`handle_params`/
      `handle_event` (and LiveComponent `handle_event`) callback and each endpoint request
      into ONE bounded `Samen.WideEvent`. Opt out with `request_events: false`.
+  4a. **Nested-value-safe param logging — ON by default (ADR-052 §2.1.2).**
+     `Samen.Observability.ParamFilter` wraps Phoenix's and LiveView's param-logging handlers
+     so a kept `filter_parameters` key keeps only a scalar value, never a nested map/list
+     (`id[x]=alice@…`). Opt out with `param_filter: false`.
   5. **Oban job spans — ON by default (ADR-052 §2.1).** `Samen.Observability.JobSpans`
      opens an `oban.job` span per job execution, parented on the trace context
      `Samen.Jobs.enqueue_in_tx/4` stamps into the job's meta. Opt out with `job_spans: false`.
+  5a. **Session replay capture — OFF by default (ADR-052 §2.2, P2).** With `replay: true` (or
+     a keyword list of `Samen.Replay.config!/1` options: `:sample_rate`, `:max_frames`,
+     `:max_bytes`, `:max_sessions`, `:retention_days`, `:flag_opts`), a
+     `Samen.Replay.Supervisor` child owns the in-flight buffer, the session monitor and the
+     event handler. Off (the default), no capture child is started.
+     Capture then still needs the org's `samen.replay` flag ON (per-org opt-in).
+  5b. **Session replay retention — ON wherever the replay tables are mounted (ADR-052 §2.4).**
+     When `config :samen_core, :samen_replay_repo` names the host's repo, one transient child
+     installs the replay retention specs (`replay:`'s `:retention_days`, default 14, max 90)
+     into the regular `:retention_specs` registry, whether or not capture is on.
   6. **Wide-event sinks** — none by default (matching the reference verticals:
      sinks are a debug surface attached on demand). Opt in with
      `wide_event_sinks: [:in_memory | :file]` or
@@ -86,6 +100,10 @@ defmodule Samen.Observability do
     * `:metrics` — attach the contention handlers (default `true`)
     * `:request_events` — attach the LiveView/request wide events (default `true`)
     * `:job_spans` — attach the Oban job spans (default `true`)
+    * `:replay` — start the session replay capture plane (default from
+      `config otp_app, Samen.Observability`, else `false`)
+    * `:param_filter` — wrap Phoenix's param logging with the nested-value-safe keep-list
+      (default `true`)
     * `:kms` — the KMS adapter the request events use for the actor pseudonym
       (default: the configured `Samen.Kms` adapter)
     * `:pool_saturation_threshold_ms` — forwarded to the contention handlers
@@ -136,7 +154,10 @@ defmodule Samen.Observability do
     [otel_ecto_spec(otp_app, prefix)] ++
       metrics_specs(otp_app, prefix, opts) ++
       request_event_specs(otp_app, opts) ++
+      param_filter_specs(otp_app, opts) ++
       job_span_specs(otp_app, opts) ++
+      replay_retention_specs(otp_app, opts) ++
+      replay_specs(otp_app, opts) ++
       prometheus_specs(otp_app, opts) ++
       wide_event_sink_specs(otp_app, opts)
   end
@@ -170,6 +191,32 @@ defmodule Samen.Observability do
   end
 
   # ---------------------------------------------------------------------------
+  # Nested-value-safe param logging (ADR-052 §2.1.2 item 2; ON by default)
+  # ---------------------------------------------------------------------------
+
+  defp param_filter_specs(otp_app, opts) do
+    if Keyword.get(opts, :param_filter, true) do
+      [
+        %{
+          id: {__MODULE__, :param_filter, otp_app},
+          start: {__MODULE__, :install_param_filter, []},
+          restart: :transient,
+          type: :worker
+        }
+      ]
+    else
+      []
+    end
+  end
+
+  @doc false
+  @spec install_param_filter() :: :ignore
+  def install_param_filter do
+    _ = Samen.Observability.ParamFilter.install()
+    :ignore
+  end
+
+  # ---------------------------------------------------------------------------
   # Oban job spans (ADR-052 §2.1; ON by default)
   # ---------------------------------------------------------------------------
 
@@ -196,6 +243,101 @@ defmodule Samen.Observability do
       {:error, :already_exists} -> :ignore
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Session replay capture (ADR-052 §2.2, P2; OFF by default)
+  # ---------------------------------------------------------------------------
+
+  defp replay_specs(otp_app, opts) do
+    cfg = Application.get_env(otp_app, __MODULE__, [])
+
+    case fetch_opt(opts, cfg, :replay, false) do
+      off when off in [false, nil] ->
+        []
+
+      true ->
+        [replay_child([])]
+
+      replay_opts when is_list(replay_opts) ->
+        [replay_child(replay_opts)]
+
+      other ->
+        raise ArgumentError,
+              "Samen.Observability: replay: #{inspect(other)} — expected false, true or a " <>
+                "keyword list of Samen.Replay options."
+    end
+  end
+
+  # Replay RETENTION does not depend on capture (ADR-052 §2.4.1): wherever the replay tables are
+  # mounted — the host points `config :samen_core, :samen_replay_repo` at its repo — the replay
+  # retention specs join the host's regular retention registry (`:samen_core,
+  # :retention_specs`, swept by the daily `Samen.Retention.SweepWorker`) at boot, whether or
+  # not `replay:` turns capture on. Turning capture off (or never on) must not stop the rows
+  # already stored from being pruned. The window is the `replay:` option list's
+  # `retention_days` when one is given, else the default; it is validated here, at build time.
+  defp replay_retention_specs(otp_app, opts) do
+    if Application.get_env(:samen_core, :samen_replay_repo) do
+      days =
+        case fetch_opt(opts, Application.get_env(otp_app, __MODULE__, []), :replay, false) do
+          replay_opts when is_list(replay_opts) ->
+            Keyword.get(replay_opts, :retention_days, Samen.Replay.default_retention_days())
+
+          _ ->
+            Samen.Replay.default_retention_days()
+        end
+
+      %{retention_days: days} = Samen.Replay.config!(retention_days: days)
+
+      [
+        %{
+          id: {__MODULE__, :replay_retention, otp_app},
+          start: {__MODULE__, :install_replay_retention, [[retention_days: days]]},
+          restart: :transient,
+          type: :worker
+        }
+      ]
+    else
+      []
+    end
+  end
+
+  @doc false
+  @spec install_replay_retention(keyword()) :: :ignore
+  def install_replay_retention(opts) do
+    _ = Samen.Replay.install_retention_specs(opts)
+    :ignore
+  end
+
+  # Validate at BUILD time (fail-honest: an over-long retention window raises here, before the
+  # supervisor ever starts), then hand the supervisor the same options.
+  defp replay_child(replay_opts) do
+    _ = Samen.Replay.config!(replay_opts)
+    {Samen.Replay.Supervisor, replay_opts}
+  end
+
+  # ---------------------------------------------------------------------------
+  # Prod Logger level from an env var, clamped (ADR-052 §2.1.2 item 3)
+  # ---------------------------------------------------------------------------
+
+  @prod_log_levels ~w(info notice warning error critical alert emergency none)
+
+  @doc """
+  The Logger level for a prod `config/runtime.exs` driven by an env var, CLAMPED to `:info` or
+  above: a recognised level at or above `:info` is honoured, anything else (`"debug"`, unset,
+  garbage) is `:info`. The `:logger` `no_plaintext_pii` tier accepts this call as a runtime
+  level and refuses any other non-literal one:
+
+      config :logger, level: Samen.Observability.prod_log_level(System.get_env("LOG_LEVEL"))
+  """
+  @spec prod_log_level(String.t() | nil) :: Logger.level() | :none
+  def prod_log_level(value) when is_binary(value) do
+    case String.downcase(String.trim(value)) do
+      level when level in @prod_log_levels -> String.to_existing_atom(level)
+      _ -> :info
+    end
+  end
+
+  def prod_log_level(_), do: :info
 
   # ---------------------------------------------------------------------------
   # OTLP trace exporter (ADR-052 §2.1 — the --deploy runtime layer; fail-honest)

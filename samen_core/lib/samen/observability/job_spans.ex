@@ -44,8 +44,8 @@ defmodule Samen.Observability.JobSpans do
 
   @doc false
   def handle_event([:oban, :job, :start], _measurements, %{job: job}, _config) do
-    headers = decode(Map.get(job, :meta))
-    token = :otel_propagator_text_map.extract(headers)
+    # W3C trace context only — never baggage (ADR-052 §2.1.2 item 6).
+    token = Samen.Tracer.attach_job_trace_context(Map.get(job, :meta))
     tracer = :opentelemetry.get_application_tracer(__MODULE__)
 
     span_ctx =
@@ -89,12 +89,6 @@ defmodule Samen.Observability.JobSpans do
   # ---------------------------------------------------------------------------
 
   defp key(job), do: {__MODULE__, Map.get(job, :id)}
-
-  defp decode(%{"trace_context" => encoded}) when is_list(encoded) do
-    for [k, v] <- encoded, is_binary(k) and is_binary(v), do: {k, v}
-  end
-
-  defp decode(_), do: []
 
   defp attributes(job) do
     %{

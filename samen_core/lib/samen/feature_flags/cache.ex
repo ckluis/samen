@@ -25,6 +25,22 @@ defmodule Samen.FeatureFlags.Cache do
     2. **TTL** — an entry older than `ttl_ms` (default 60s) is treated as a miss and
        reloaded on read, bounding staleness even absent an explicit invalidation.
 
+  ## Ownership — one org's rows decide (ADR-052 §2.4.1 item 7)
+
+  `FeatureFlag` rows are org-scoped config (`OrgScope`, admin-gated writes), so a flag NAME
+  is not unique: every org may hold a row with the same name, and a tenant admin may edit
+  (or create) rows in their own org. The engine's flags are PLATFORM flags (ADR-020; WS-B
+  design §3.5): the operator org's OWN rows, managed in `/operator/flags`, evaluated per org
+  through targeting rules and the org bucket. So the Ash loader reads ONLY the rows of the
+  configured owner org (`:owner_org_id`, opts or `config :samen_core, Samen.FeatureFlags.Cache`):
+
+    * no owner configured → `{:error, :no_flag_owner}` (fail-SAFE OFF) — never "the first
+      row of any org", which let a tenant-authored row decide every org's gate;
+    * more than one row of that name in the owner org → `{:error, :ambiguous_flag}` (OFF);
+    * a row in any other org is never read, whatever its name.
+
+  A host-supplied `:loader` is the host's own seam and is used as given.
+
   ## Fail-safe (RP-F4)
 
   If the ETS table is missing (owner never started / crashed) or the DB load errors,
@@ -175,26 +191,46 @@ defmodule Samen.FeatureFlags.Cache do
         {:error, :no_flag_module}
 
       true ->
-        load_via_ash(flag_module, flag_name)
+        case owner_org_id(opts) do
+          {:ok, owner} -> load_via_ash(flag_module, flag_name, owner)
+          :error -> {:error, :no_flag_owner}
+        end
     end
   rescue
     e -> {:error, {:load_raised, Exception.message(e)}}
   end
 
-  defp load_via_ash(flag_module, flag_name) do
+  # The owner org whose rows are the platform flags. A UUID-shaped binary only: anything else
+  # (nil, "", an atom) is "no owner" and fails safe.
+  defp owner_org_id(opts) do
+    case opt(opts, :owner_org_id) do
+      owner when is_binary(owner) ->
+        case Ecto.UUID.cast(owner) do
+          {:ok, uuid} -> {:ok, uuid}
+          :error -> :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp load_via_ash(flag_module, flag_name, owner_org_id) do
     require Ash.Query
 
     result =
       flag_module
-      |> Ash.Query.filter(name == ^flag_name)
-      |> Ash.Query.limit(1)
-      # authz-scope: system-plane flag-config load keyed on the unique flag name — config rows,
-      # not a tenant row set; per-org targeting is evaluated downstream by the engine
+      |> Ash.Query.filter(name == ^flag_name and org_id == ^owner_org_id)
+      |> Ash.Query.limit(2)
+      # authz-scope: system-plane flag-config load of the OWNER org's rows only (the platform
+      # flags, ADR-020) — a row of any other org never decides; per-org targeting is evaluated
+      # downstream by the engine
       |> Ash.read(authorize?: false)
 
     case result do
-      {:ok, [flag | _]} -> {:ok, to_config(flag)}
+      {:ok, [flag]} -> {:ok, to_config(flag)}
       {:ok, []} -> {:ok, nil}
+      {:ok, [_, _ | _]} -> {:error, :ambiguous_flag}
       {:error, reason} -> {:error, reason}
     end
   end

@@ -7323,6 +7323,162 @@
     {
       "fields": [
         {
+          "column_name": "rpf_at_ms",
+          "logical_name": "at_ms",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "rpf_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "rpf_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "rpf_kind",
+          "logical_name": "kind",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "rpf_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "rpf_payload",
+          "logical_name": "payload",
+          "pii": false,
+          "type": "Map"
+        },
+        {
+          "column_name": "rpf_seq",
+          "logical_name": "seq",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "rpf_session_id",
+          "logical_name": "session_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "rpf_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        }
+      ],
+      "resource": "Samen.Replay.Frame",
+      "table_name": "replay_frame"
+    },
+    {
+      "fields": [
+        {
+          "column_name": "rps_actor_ref",
+          "logical_name": "actor_ref",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "rps_byte_count",
+          "logical_name": "byte_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "rps_ended_at",
+          "logical_name": "ended_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "rps_exit_reason",
+          "logical_name": "exit_reason",
+          "pii": false,
+          "type": "Atom"
+        },
+        {
+          "column_name": "rps_frame_count",
+          "logical_name": "frame_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "rps_id",
+          "logical_name": "id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "rps_inserted_at",
+          "logical_name": "inserted_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "rps_interaction_count",
+          "logical_name": "interaction_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "rps_org_id",
+          "logical_name": "org_id",
+          "pii": false,
+          "type": "UUID"
+        },
+        {
+          "column_name": "rps_rejected_count",
+          "logical_name": "rejected_count",
+          "pii": false,
+          "type": "Integer"
+        },
+        {
+          "column_name": "rps_started_at",
+          "logical_name": "started_at",
+          "pii": false,
+          "type": "UtcDatetimeUsec"
+        },
+        {
+          "column_name": "rps_truncated",
+          "logical_name": "truncated",
+          "pii": false,
+          "type": "Boolean"
+        },
+        {
+          "column_name": "rps_updated_at",
+          "logical_name": "updated_at",
+          "pii": false,
+          "type": "UtcDatetime"
+        },
+        {
+          "column_name": "rps_view",
+          "logical_name": "view",
+          "pii": false,
+          "type": "String"
+        },
+        {
+          "column_name": "rps_view_md5",
+          "logical_name": "view_md5",
+          "pii": false,
+          "type": "String"
+        }
+      ],
+      "resource": "Samen.Replay.Session",
+      "table_name": "replay_session"
+    },
+    {
+      "fields": [
+        {
           "column_name": "stl_accessorial_cents",
           "logical_name": "accessorial_cents",
           "pii": false,

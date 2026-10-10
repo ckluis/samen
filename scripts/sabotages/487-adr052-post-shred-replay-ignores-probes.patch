@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4 — the post-shred replay check ignores the seeded plaintext probes: a plaintext
+# copy of the erased subject in a replay row passes.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/replay_tier_test.exs
+# MUST_FAIL: a seeded plaintext of the erased subject anywhere in a replay row
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/post_shred/replay.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/post_shred/replay.ex
+index d5f1af7..d8e671f 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/post_shred/replay.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/post_shred/replay.ex
+@@ -94,7 +94,8 @@ defmodule Samen.NoPlaintextPii.Tiers.PostShred.Replay do
+         [read_violation(e)]
+ 
+       :mounted ->
+-        subject_findings(repo, String.downcase(sid)) ++ probe_findings(repo, ctx.plaintext_probes)
++        # SABOTAGE (ADR-052 §2.4): probes ignored.
++        subject_findings(repo, String.downcase(sid)) ++ probe_findings(repo, Enum.take(ctx.plaintext_probes, 0))
+     end
+   end
+ 

@@ -1,0 +1,26 @@
+# SABOTAGE: ADR-052 §2.1.2 item 1 — the wide event copies the Logger request_id verbatim again.
+# Plug.RequestId adopts any client x-request-id of 20-200 bytes, so a client-chosen string (an
+# email, a name, a ticket note) lands in every wide event the request emits.
+#
+# Flips the request_id provenance tests (the server-generated positive control stays green).
+# APP: samen_core
+# TEST_FILES: test/observability/live_telemetry_test.exs
+# MUST_FAIL: a client-chosen x-request-id never reaches the event
+# MUST_FAIL: a client id in the server's exact shape is still the client's when the client sent it
+# MUST_FAIL: a 20-char base64 id the client chose (no conn in hand) is substituted
+# MUST_FAIL: an id Plug generated in ANOTHER process is substituted
+diff --git a/samen_core/lib/samen/observability/live_telemetry.ex b/samen_core/lib/samen/observability/live_telemetry.ex
+index 68329c0..79aaf2e 100644
+--- a/samen_core/lib/samen/observability/live_telemetry.ex
++++ b/samen_core/lib/samen/observability/live_telemetry.ex
+@@ -218,7 +218,9 @@ defmodule Samen.Observability.LiveTelemetry do
+   # The value the event carries for a Logger-metadata request id (exposed for tests).
+   @spec request_id(term(), term()) :: String.t() | nil
+   def request_id(id, conn) when is_binary(id) do
+-    if server_generated?(id, conn), do: id, else: substitute_request_id(id)
++    # SABOTAGE (ADR-052 §2.1.2 item 1): the Logger request id is copied verbatim, whoever chose it.
++    _ = &substitute_request_id/1
++    if server_generated?(id, conn) or true, do: id, else: substitute_request_id(id)
+   end
+ 
+   def request_id(_id, _conn), do: nil

@@ -115,7 +115,8 @@ emit.("")
 emit.("A REAL Driftwood driver subject — name / emails / phones / `pii_drv_cdl_number` —")
 emit.("is seeded so its PII lands on EVERY tier (domain rows, vault, aud_event, the")
 emit.("driver load-count rollup, oban job args, the audit/impersonation chain from a")
-emit.("reveal, and the registered `non_pii!` carve-out). Then `Samen.Erasure.shred/2`")
+emit.("reveal, the registered `non_pii!` carve-out, and a recorded session replay that")
+emit.("holds the driver BY REFERENCE — ADR-052 §2.4). Then `Samen.Erasure.shred/2`")
 emit.("runs, and the destruction oracle")
 emit.("`mix samen.verify.no_plaintext_pii --subject <uuid> --tiers all` is run exactly as")
 emit.("an auditor would (a separate OS process) and asserted to EXIT 0. Both rollup arms")
@@ -177,6 +178,19 @@ check.("Rollup: the pre-shred load-count rollup COUNTS the driver (#{rollup_pre}
 
 check.("Oban job args carry the driver id (token-only)", oban_driver == d)
 
+# ADR-052 §2.4 — the recorded session replay: the frames REFERENCE the driver, by id.
+replay_dump = fn ->
+  %{rows: rows} =
+    Repo.query!("SELECT rpf_payload::text FROM replay_frame UNION ALL SELECT row_to_json(x)::text FROM replay_session x")
+
+  rows |> List.flatten() |> Enum.join(" ")
+end
+
+replay_pre = replay_dump.()
+check.("Session replay: the recorded frames REFERENCE the driver (its id is in them)", replay_pre =~ d)
+check.("Session replay: no driver plaintext (CDL / name / email / phone) in any replay row",
+  Enum.all?([s.cdl_plaintext, s.name_last, s.email, s.phone], &(not (replay_pre =~ &1))))
+
 %{rows: chain_orgs_pre} =
   Repo.query!("SELECT DISTINCT ach_org_id FROM aud_chain WHERE ach_subject_id = $1", [d])
 
@@ -229,6 +243,8 @@ emit.("```")
 check.("Oracle EXITS 0 on the properly-erased driver (the auditor PASS)", oracle_exit == 0)
 check.("Oracle output shows positive post-shred attestations", oracle_out =~ "positive post-shred attestation" or oracle_out =~ "what you show an auditor")
 check.("Oracle output shows the POSITIVE :shredded tombstone", oracle_out =~ ":shredded")
+check.("Oracle output attests the stored session replays (every reference resolves to [erased])",
+  oracle_out =~ "[post_shred_replay] PASS" and oracle_out =~ "resolve to [erased]")
 
 # ===========================================================================
 # 4. UNRECOVERABILITY — the driver is gone across every tier
@@ -252,6 +268,24 @@ check.("Vault scan: NO vault row for the driver decrypts under its (destroyed) k
 
 check.("CDL plaintext absent from the driver domain row", not (dbdump =~ "CDL-GAMEDAY"))
 check.("Driver surname absent from the driver domain row", not (dbdump =~ s.name_last))
+
+# ADR-052 §2.4 — the recorded replay after the shred: the player, on the tenant plane (the
+# plane that reads CLEAR), shows [erased] for every reference to the driver; the replay rows
+# were never touched and still hold no plaintext.
+replay_scope = %Samen.Scope{actor: %{org_id: s.org_id, plane: :tenant, role: :admin}}
+{:ok, %{frames: replay_frames}} = Samen.Replay.Player.load(replay_scope, s.replay_session_id)
+
+%{refs: replay_refs} =
+  Samen.Replay.Player.resolve(Samen.Replay.Player.assigns_at(replay_frames, 0), replay_scope)
+
+driver_refs = Enum.filter(replay_refs, &(&1.pk == d))
+emit.("Replay references to the driver after the shred: `#{inspect(Enum.frequencies(Enum.map(driver_refs, & &1.outcome)))}`")
+check.("Session replay: every reference to the driver now resolves to [erased] (the player, tenant plane)",
+  driver_refs != [] and Enum.all?(driver_refs, &(&1.outcome in [:shredded, :empty])) and
+    Enum.any?(driver_refs, &(&1.outcome == :shredded)))
+replay_post = replay_dump.()
+check.("Session replay rows still hold no driver plaintext post-shred (erasure needed no replay delete)",
+  Enum.all?([s.cdl_plaintext, s.name_last, s.email, s.phone], &(not (replay_post =~ &1))))
 
 # non_pii! redaction: cdl_state / cdl_expiry overwritten with sentinels.
 %{rows: [[state_post, expiry_post]]} =
@@ -349,6 +383,11 @@ rp = GD.seed_driver_across_tiers(repo: Repo)
 live_findings = PostShred.DbContent.check(post_ctx.(rp.driver_id, []))
 check.("RED (live tier): an un-shredded driver's vault STILL DECRYPTS → oracle violation",
   find_v.(live_findings, "live") != nil)
+# ADR-052 §2.4 — the same un-shredded driver's recorded replay: its references resolve CLEAR
+# on the tenant plane, so the replay tier FAILS it (the discriminating pair of the green pass).
+replay_rp = PostShred.Replay.check(post_ctx.(rp.driver_id, []))
+check.("RED (replay): an un-shredded driver's replay references do NOT resolve to [erased] → oracle violation",
+  find_v.(replay_rp, "replay") != nil)
 # clean it up so it does not pollute later runs
 {:ok, _} = Samen.Erasure.shred(rp.driver_id, repo: Repo)
 
@@ -361,6 +400,28 @@ check.("RED (registered_non_pii): an un-redacted non_pii! residue → oracle vio
   find_v.(npi_findings, "registered_non_pii") != nil)
 # re-redact for hygiene
 Repo.query!("UPDATE drv_driver SET drv_cdl_state = '[REDACTED_NON_PII]' WHERE drv_id = $1", [Ecto.UUID.dump!(rp2.driver_id)])
+
+# RP-replay-copy: shred, then put a plaintext COPY of the CDL into a replay row past the store
+# and RowGuard (raw SQL). The seeded-probe scan FAILS it; remove the row → green again.
+rp_r = GD.seed_driver_across_tiers(repo: Repo)
+{:ok, _} = Samen.Erasure.shred(rp_r.driver_id, repo: Repo)
+
+Repo.query!(
+  "INSERT INTO replay_frame (rpf_session_id, rpf_org_id, rpf_seq, rpf_kind, rpf_at_ms, rpf_payload, " <>
+    "rpf_inserted_at, rpf_updated_at) VALUES ($1, $2, 90, 'render', 1, $3, now(), now())",
+  [Ecto.UUID.dump!(rp_r.replay_session_id), Ecto.UUID.dump!(rp_r.org_id),
+   %{"assigns" => %{"t" => %{"$kept" => %{"value" => rp_r.cdl_plaintext}}}}]
+)
+
+copy_findings = PostShred.Replay.check(post_ctx.(rp_r.driver_id, plaintext_probes: [rp_r.cdl_plaintext]))
+check.("RED (replay copy): a plaintext CDL copy in a replay row → oracle violation (never printed)",
+  Enum.any?(copy_findings, &(&1.severity == :violation and &1.detail =~ "seeded plaintext")) and
+    not Enum.any?(copy_findings, &(Samen.NoPlaintextPii.Finding.format(&1) =~ rp_r.cdl_plaintext)))
+
+Repo.query!("DELETE FROM replay_frame WHERE rpf_session_id = $1 AND rpf_seq = 90", [Ecto.UUID.dump!(rp_r.replay_session_id)])
+copy_clean = PostShred.Replay.check(post_ctx.(rp_r.driver_id, plaintext_probes: [rp_r.cdl_plaintext]))
+check.("RED (replay copy) reverted: the copy removed → the replay tier is GREEN again",
+  NoPlaintextPii.violations(copy_clean) == [])
 
 # RP-kms-absent: a never-keyed subject → attest :absent → violation (positive
 # tombstone required, not mere absence).

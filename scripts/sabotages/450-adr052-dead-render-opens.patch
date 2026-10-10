@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.3 / R10 — the replay opens on the DEAD render too: every page load reads the frames
+# and writes an extra audit row (two per open).
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: the dead render reads and writes nothing
+diff --git a/samen_web/lib/samen/web/replay/player_live.ex b/samen_web/lib/samen/web/replay/player_live.ex
+index f804f8a..7a9e1f8 100644
+--- a/samen_web/lib/samen/web/replay/player_live.ex
++++ b/samen_web/lib/samen/web/replay/player_live.ex
+@@ -50,7 +50,8 @@ defmodule Samen.Web.Replay.PlayerLive do
+       )
+       |> clear()
+ 
+-    if connected?(socket), do: {:ok, open(socket)}, else: {:ok, socket}
++    # SABOTAGE (ADR-052 §2.3 / R10): open on the dead render as well.
++    if connected?(socket) or true, do: {:ok, open(socket)}, else: {:ok, socket}
+   end
+ 
+   @impl true

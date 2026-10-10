@@ -52,6 +52,9 @@ defmodule Samen.Web.Settings.Live do
         >
           Reveal approvals
         </a>
+        <a href={href("/settings/replays", @org_id, @user_id)} class={nav_class(@active, :replays)} id="settings-nav-replays">
+          Session replays
+        </a>
       </nav>
     </.sidebar>
     """

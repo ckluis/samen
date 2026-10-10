@@ -642,6 +642,66 @@ defmodule Samen.Reveal.Grants do
   # No subject scope in the context ⇒ cannot resolve a grant ⇒ deny (fail closed).
   def granted?(%Context{}), do: false
 
+  @doc """
+  The batch form of `granted?/1` (ADR-052 §2.4.1): for each context, in order, exactly the
+  verdict `granted?/1` gives — per actor, ONE suspension check (a suspended operator is denied
+  on every context; the check fails closed) and ONE grant read over all the subjects
+  (`active_subjects/3`, the same requestor-bound, distinct-party, unrevoked, unexpired gate as
+  `active?/3`). A context with no binary subject is denied. Nothing is cached: a second call
+  reads again (deny-on-read).
+  """
+  @impl Samen.Reveal.Grant
+  @spec granted_many([Context.t()]) :: [boolean()]
+  def granted_many(contexts) when is_list(contexts) do
+    live =
+      contexts
+      |> Enum.group_by(& &1.actor, & &1.subject_id)
+      |> Map.new(fn {actor, subjects} ->
+        subjects = subjects |> Enum.filter(&is_binary/1) |> Enum.uniq()
+
+        allowed =
+          if subjects == [] or Samen.OperatorPlane.Suspension.suspended?(actor),
+            do: MapSet.new(),
+            else: active_subjects(actor, subjects)
+
+        {actor, allowed}
+      end)
+
+    Enum.map(contexts, fn
+      %Context{actor: actor, subject_id: sid} when is_binary(sid) ->
+        MapSet.member?(Map.fetch!(live, actor), sid)
+
+      %Context{} ->
+        false
+    end)
+  end
+
+  @doc """
+  The subset of `subject_ids` on which `actor` holds a LIVE grant as the requestor — the gate
+  of `active?/3` (requestor-bound, distinct-party, unrevoked, `expires_at > now`) over many
+  subjects in ONE query.
+  """
+  @spec active_subjects(term(), [String.t()], keyword()) :: MapSet.t(String.t())
+  def active_subjects(actor, subject_ids, opts \\ []) do
+    r = Keyword.get(opts, :repo, repo())
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    requestor_id = actor_id(actor)
+
+    query =
+      from(g in RevealGrant,
+        where:
+          g.subject_id in ^subject_ids and
+            g.requestor_id == ^requestor_id and
+            g.granted_by != g.requestor_id and
+            is_nil(g.revoked_at) and
+            g.expires_at > ^now,
+        select: g.subject_id,
+        distinct: true
+      )
+
+    query |> r.all() |> MapSet.new()
+  end
+
   # ==========================================================================
   # Audit (clause (f)) — plain rows now; hash chain is Phase 4 (G4)
   # ==========================================================================

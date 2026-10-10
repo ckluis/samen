@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 8) — the player decodes before the recorded view is loaded: an
+# assign atom only that (not yet loaded) module defines is dropped.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/player_test.exs
+# MUST_FAIL: the recorded view is loaded before decoding
+diff --git a/samen_core/lib/samen/replay/player.ex b/samen_core/lib/samen/replay/player.ex
+index a909236..cf89ada 100644
+--- a/samen_core/lib/samen/replay/player.ex
++++ b/samen_core/lib/samen/replay/player.ex
+@@ -82,7 +82,8 @@ defmodule Samen.Replay.Player do
+            |> Ash.Query.sort(seq: :asc)
+            |> Ash.Query.limit(@frame_limit)
+            |> Ash.read(scope: scope) do
+-      _ = load_view(session.view)
++      # SABOTAGE (ADR-052 §2.4.1): not loaded.
++      _ = &load_view/1
+       {:ok, %{session: meta(session), frames: Enum.map(frames, &decode/1)}}
+     else
+       _ -> {:error, :not_found}

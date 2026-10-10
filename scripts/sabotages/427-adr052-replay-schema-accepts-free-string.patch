@@ -1,0 +1,23 @@
+# SABOTAGE: ADR-052 §2.2 rule 3 — the replay frame schema's build-time check no longer refuses a
+# non-bounded field type, so a :string payload field (a name-carrier) passes
+# mix samen.verify.replay_schema.
+#
+# Flips the schema red path and the task's exit-code red path.
+# APP: samen_core
+# TEST_FILES: test/replay/frame_schema_test.exs
+# MUST_FAIL: RED: a :string payload field is a violation (the name-carrier)
+# MUST_FAIL: RED: mix samen.verify.replay_schema exits 1 on a seeded string field
+diff --git a/samen_core/lib/samen/replay/frame_schema.ex b/samen_core/lib/samen/replay/frame_schema.ex
+index 8fc78d6..ee31b33 100644
+--- a/samen_core/lib/samen/replay/frame_schema.ex
++++ b/samen_core/lib/samen/replay/frame_schema.ex
+@@ -183,7 +183,8 @@ defmodule Samen.Replay.FrameSchema do
+ 
+   defp field_violations(where, name, type, opts) do
+     cond do
+-      type not in @bounded_types ->
++      # SABOTAGE (ADR-052 §2.2 rule 3): forbidden types pass.
++      type not in @bounded_types and false ->
+         [
+           "#{where}: field #{inspect(name)} is typed #{inspect(type)} — a FORBIDDEN (name-carrier) " <>
+             "type. Replay frame fields must be one of #{inspect(@bounded_types)}. A " <>

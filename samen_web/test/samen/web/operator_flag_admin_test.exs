@@ -100,7 +100,8 @@ defmodule Samen.Web.OperatorFlagAdminTest do
   # The REAL cached-evaluation path over the test host's flag rows — the same
   # flag_module seam the B5 AC-G6-6 test uses. LONG TTL so ONLY an explicit
   # invalidation can refresh (models the write-through hop being load-bearing).
-  defp eval_opts, do: [flag_module: FeatureFlag, ttl_ms: 3_600_000]
+  # The operator org OWNS the platform flags: the loader reads only its rows (ADR-052 §2.4.1 item 7).
+  defp eval_opts(owner), do: [flag_module: FeatureFlag, owner_org_id: owner, ttl_ms: 3_600_000]
 
   # ---------------------------------------------------------------------------
   # The platform flag list + the visually distinct, confirm-gated kill switch
@@ -140,7 +141,7 @@ defmodule Samen.Web.OperatorFlagAdminTest do
     flag = seed_flag(op_org.id, name: "incident.lever", rollout_pct: 100)
 
     # Warm the REAL cache through the DB-backed flag_module path: the flag is ON.
-    assert FeatureFlags.evaluate("incident.lever", op_org.id, eval_opts()).on
+    assert FeatureFlags.evaluate("incident.lever", op_org.id, eval_opts(op_org.id)).on
 
     # The operator flips the kill switch through the confirm-gated UI event.
     socket = mount_socket(operator_mount(op_org.id))
@@ -152,7 +153,7 @@ defmodule Samen.Web.OperatorFlagAdminTest do
     # …and ROUND-TRIPPED through Cache.invalidate/1: despite the hour-long TTL, the
     # next evaluate reloads and short-circuits OFF (reason: :kill_switch).
     assert %Decision{on: false, reason: :kill_switch} =
-             FeatureFlags.evaluate("incident.lever", op_org.id, eval_opts())
+             FeatureFlags.evaluate("incident.lever", op_org.id, eval_opts(op_org.id))
 
     # The page renders the killed state.
     assert html(socket) =~ "killed / off"
@@ -163,7 +164,7 @@ defmodule Samen.Web.OperatorFlagAdminTest do
     flag = seed_flag(op_org.id, name: "incident.stale", rollout_pct: 100)
 
     # Warm the cache: ON, hour-long TTL — only an explicit invalidation can refresh.
-    assert FeatureFlags.evaluate("incident.stale", op_org.id, eval_opts()).on
+    assert FeatureFlags.evaluate("incident.stale", op_org.id, eval_opts(op_org.id)).on
 
     # Flip enabled=false DIRECTLY in the DB — the UI (and its write-through
     # invalidate) is bypassed, exactly the sabotage of the mechanism under test.
@@ -173,14 +174,14 @@ defmodule Samen.Web.OperatorFlagAdminTest do
 
     # The warm cache still serves ON. If this were OFF, the round-trip test above
     # would be a tautology (any evaluate would re-read the DB regardless).
-    assert FeatureFlags.evaluate("incident.stale", op_org.id, eval_opts()).on,
+    assert FeatureFlags.evaluate("incident.stale", op_org.id, eval_opts(op_org.id)).on,
            "without the UI's Cache.invalidate the stale ON must persist — the invalidate is the mechanism"
 
     # The write-through hop is exactly what closes it.
     Cache.invalidate("incident.stale")
 
     assert %Decision{on: false, reason: :kill_switch} =
-             FeatureFlags.evaluate("incident.stale", op_org.id, eval_opts())
+             FeatureFlags.evaluate("incident.stale", op_org.id, eval_opts(op_org.id))
   end
 
   # ---------------------------------------------------------------------------

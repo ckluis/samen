@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4 — the post-shred replay check accepts a reference that still resolves CLEAR (or
+# masked with the key alive): a shred that did not take passes the oracle.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/replay_tier_test.exs
+# MUST_FAIL: ANTI-TAUTOLOGY: the same check on a subject whose key was NOT destroyed is a violation
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/post_shred/replay.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/post_shred/replay.ex
+index d5f1af7..0b3abc8 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/post_shred/replay.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/post_shred/replay.ex
+@@ -131,7 +131,8 @@ defmodule Samen.NoPlaintextPii.Tiers.PostShred.Replay do
+ 
+     bad =
+       Enum.reject(outcomes, fn outcome ->
+-        outcome == :shredded or (outcome in [:gone, :code_changed, :empty] and erased?)
++        # SABOTAGE (ADR-052 §2.4): a readable value passes.
++        outcome in [:shredded, :clear, :masked] or (outcome in [:gone, :code_changed, :empty] and erased?)
+       end)
+ 
+     case {outcomes, bad} do

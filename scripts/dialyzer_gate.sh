@@ -29,9 +29,17 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APPS=("$@")
 [[ ${#APPS[@]} -gt 0 ]] || APPS=(samen_core samen_web demo driftwood pawchart samen_stripe samen_postmark samen_ses samen_resend samen_anthropic)
 
-# samen_core's source identity: every lib/ file's content plus its lockfile.
+# samen_core's source identity: every lib/ file's PATH and content, plus mix.exs/mix.lock —
+# tracked files AND untracked-but-not-ignored ones (a new core module that is not yet
+# committed is still compiled into samen_web's PLT; hashing only `git ls-files` left that PLT
+# stale until the commit — ADR-052 P3 builder note). Sorted, and a path the index lists but
+# the work tree no longer has is skipped, so the hash is the work tree as dialyzer sees it.
 core_hash() {
-  (cd "$REPO_ROOT/samen_core" && git ls-files -z lib mix.exs mix.lock | xargs -0 cat | shasum -a 256 | cut -d' ' -f1)
+  (cd "$REPO_ROOT/samen_core" &&
+    git ls-files -z --cached --others --exclude-standard -- lib mix.exs mix.lock | sort -zu |
+      while IFS= read -r -d '' f; do
+        [[ -f "$f" ]] && { printf '%s\0' "$f"; cat "$f"; }
+      done | shasum -a 256 | cut -d' ' -f1)
 }
 
 refresh_web_plt() {

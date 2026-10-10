@@ -1,0 +1,32 @@
+# SABOTAGE: ADR-052 P3 gate — the render runs in the player's own process with no heap cap and no
+# deadline: a stored integer a template loops over makes a tiny row render without bound.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: a render is bounded
+# MUST_FAIL: a render that misses the deadline
+diff --git a/samen_web/lib/samen/web/replay/renderer.ex b/samen_web/lib/samen/web/replay/renderer.ex
+index 9d9185c..f638ef2 100644
+--- a/samen_web/lib/samen/web/replay/renderer.ex
++++ b/samen_web/lib/samen/web/replay/renderer.ex
+@@ -59,7 +59,8 @@ defmodule Samen.Web.Replay.Renderer do
+ 
+   def render(view, assigns) when is_atom(view) and is_map(assigns) do
+     if function_exported?(view, :render, 1),
+-      do: bounded(fn -> render_body(view, assigns) end),
++      # SABOTAGE (ADR-052 P3 gate): the render runs unbounded in the player's own process.
++      do: render_body(view, assigns),
+       else: {:error, :no_view}
+   end
+ 
+@@ -90,7 +91,8 @@ defmodule Samen.Web.Replay.Renderer do
+   @spec budget() :: %{max_heap_words: pos_integer(), timeout_ms: pos_integer()}
+   def budget, do: %{max_heap_words: @max_heap_words, timeout_ms: @render_timeout_ms}
+ 
+-  defp bounded(fun) do
++  @doc false
++  def bounded(fun) do
+     parent = self()
+     callers = [parent | Process.get(:"$callers", [])]
+     tag = make_ref()

@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-052 P3 gate — inert/1 keeps <meta http-equiv=refresh>, <base> and <link>: elements that
+# act with no script, which neither the CSP nor the sandbox stops.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: inert/1 strips meta refresh, base and link
+diff --git a/samen_web/lib/samen/web/replay/renderer.ex b/samen_web/lib/samen/web/replay/renderer.ex
+index 9d9185c..eb720ab 100644
+--- a/samen_web/lib/samen/web/replay/renderer.ex
++++ b/samen_web/lib/samen/web/replay/renderer.ex
+@@ -143,7 +143,7 @@ defmodule Samen.Web.Replay.Renderer do
+     |> String.replace(~r/<script\b[^>]*\/?>/i, "")
+     # Elements that act without a script and that neither the CSP nor the sandbox stops: a
+     # `<meta http-equiv=refresh>` navigates the frame, `<base>` re-targets every link.
+-    |> String.replace(~r/<(?:meta|base|link)\b[^>]*>/i, "")
++    # SABOTAGE (ADR-052 P3 gate): meta refresh, base and link survive.
+     # Inside TAGS only (Phoenix escapes `>` in attribute values, so a tag ends at its first `>`).
+     |> then(&Regex.replace(~r/<[a-zA-Z][^>]*>/, &1, fn tag -> strip_attrs(tag) end))
+     |> String.replace(~r/javascript\s*:/i, "about:blank#")

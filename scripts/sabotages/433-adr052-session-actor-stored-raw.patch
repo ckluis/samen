@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.2 rule 1 — the session actor is stored as the raw principal id instead
+# of the P1 HMAC pseudonym (linkable forever, survives a shred).
+#
+# Flips the pseudonym test.
+# APP: samen_core
+# TEST_FILES: test/replay/capture_test.exs
+# MUST_FAIL: the session actor is stored only as the HMAC pseudonym
+diff --git a/samen_core/lib/samen/replay/capture.ex b/samen_core/lib/samen/replay/capture.ex
+index ec8a229..5abc9a7 100644
+--- a/samen_core/lib/samen/replay/capture.ex
++++ b/samen_core/lib/samen/replay/capture.ex
+@@ -55,7 +55,8 @@ defmodule Samen.Replay.Capture do
+              self(),
+              %{
+                org_id: org_id,
+-               actor_ref: pseudonym(Map.get(attrs, :principal)),
++               # SABOTAGE (ADR-052 §2.2 rule 1): the raw principal id is stored.
++               actor_ref: Map.get(attrs, :principal),
+                view: inspect(view),
+                view_md5: md5(view),
+                started_at: DateTime.utc_now(),

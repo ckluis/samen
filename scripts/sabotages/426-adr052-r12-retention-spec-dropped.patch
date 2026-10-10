@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-052 §2.2 rule 4 / R12 — the replay retention specs are computed but never
+# installed into :samen_core, :retention_specs, so the sweep never prunes replays.
+#
+# Flips the retention test.
+# APP: samen_core
+# TEST_FILES: test/replay/capture_test.exs
+# MUST_FAIL: the installed replay spec deletes sessions + frames older than the window, keeps fresh ones
+diff --git a/samen_core/lib/samen/replay.ex b/samen_core/lib/samen/replay.ex
+index 04001a1..970594f 100644
+--- a/samen_core/lib/samen/replay.ex
++++ b/samen_core/lib/samen/replay.ex
+@@ -362,7 +362,9 @@ defmodule Samen.Replay do
+     host_covered = MapSet.new(host, &Samen.Retention.Spec.normalize(&1).resource)
+     added = Enum.reject(specs, &MapSet.member?(host_covered, &1.resource))
+ 
+-    Application.put_env(:samen_core, :retention_specs, existing ++ added)
++    # SABOTAGE (ADR-052 R12): the replay specs are dropped from the sweep registry.
++    _ = added
++    Application.put_env(:samen_core, :retention_specs, existing)
+     specs
+   end
+ end

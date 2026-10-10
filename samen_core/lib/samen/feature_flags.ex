@@ -58,8 +58,10 @@ defmodule Samen.FeatureFlags do
   (fail-SAFE — OFF on any error).
 
   `subject` is a non-PII map (`%{org_id: ..., plan: ...}`) or a bare `org_id`
-  binary. `opts` may carry `:flag_module` / `:repo` (DI seams; default to config)
-  and `:emit` (the assignment seam — see `assignment_payload/3`):
+  binary. `opts` may carry `:flag_module` / `:repo` (DI seams; default to config),
+  `:owner_org_id` (the org whose rows are the platform flags — the loader reads no other
+  org's rows, and without it the flag is OFF; see `Samen.FeatureFlags.Cache`) and `:emit`
+  (the assignment seam — see `assignment_payload/3`):
 
     * a 1-arity fn — called with the payload (test/bespoke consumers);
     * omitted — falls back to the CONFIGURED emitter, the B7 `track/1` wiring

@@ -58,6 +58,11 @@ config :samen_core, :samen_ai_agent_run_repo, Samen.WebTest.Repo
 config :samen_core, :samen_ai_agent_turn_repo, Samen.WebTest.Repo
 config :samen_core, :samen_ai_agent_kill_repo, Samen.WebTest.Repo
 
+# ADR-052 P2: the replay capture tables (Samen.Replay.Session / Frame) live in samen_web's
+# scratch DB too, so the recorder suite persists a REAL captured tenant session and scans the
+# raw JSONB (migration: the two-line Samen.Replay.Migration delegate).
+config :samen_core, :samen_replay_repo, Samen.WebTest.Repo
+
 
 config :phoenix, :json_library, Jason
 

@@ -1,0 +1,28 @@
+# SABOTAGE: ADR-052 §2.3 / R8 — the resolver CACHES what it resolved (process dictionary, keyed by
+# resource + ids): a reveal grant that lapses mid-playback keeps showing plaintext.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/player_test.exs
+# MUST_FAIL: deny-on-read: a grant that lapses between two batches
+diff --git a/samen_core/lib/samen/replay/resolver.ex b/samen_core/lib/samen/replay/resolver.ex
+index 210603d..e80faab 100644
+--- a/samen_core/lib/samen/replay/resolver.ex
++++ b/samen_core/lib/samen/replay/resolver.ex
+@@ -114,6 +114,16 @@ defmodule Samen.Replay.Resolver do
+   defp records(_mod, _pk_field, [], _scope, _opts), do: %{}
+ 
+   defp records(mod, pk_field, ids, scope, opts) do
++    # SABOTAGE (ADR-052 §2.3 / R8): memoize the resolved records — plaintext outlives the grant.
++    key = {:replay_resolved, mod, ids}
++
++    case Process.get(key) do
++      nil -> Process.put(key, records_uncached(mod, pk_field, ids, scope, opts)) || Process.get(key)
++      hit -> hit
++    end
++  end
++
++  defp records_uncached(mod, pk_field, ids, scope, opts) do
+     attrs = mod |> Ash.Resource.Info.attributes() |> Enum.map(& &1.name)
+ 
+     mod

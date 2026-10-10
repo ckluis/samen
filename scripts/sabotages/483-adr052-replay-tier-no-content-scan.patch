@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4 — the :replay tier stops searching the rows for referenced subjects' vault
+# plaintext: a schema-valid `$kept` holding a surname passes.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/replay_tier_test.exs
+# MUST_FAIL: a frame holding a referenced subject's vault plaintext
+diff --git a/samen_core/lib/samen/no_plaintext_pii/tiers/replay.ex b/samen_core/lib/samen/no_plaintext_pii/tiers/replay.ex
+index cf23a79..ab71bcc 100644
+--- a/samen_core/lib/samen/no_plaintext_pii/tiers/replay.ex
++++ b/samen_core/lib/samen/no_plaintext_pii/tiers/replay.ex
+@@ -91,7 +91,8 @@ defmodule Samen.NoPlaintextPii.Tiers.Replay do
+       case vault_probes(repo, subjects) do
+         {:ok, vault_probes} ->
+           probes = Enum.uniq(vault_probes ++ probes_of(seeded))
+-          structural ++ content_findings(repo, sessions, probes)
++          # SABOTAGE (ADR-052 §2.4): no content scan.
++          structural ++ Enum.take(content_findings(repo, sessions, probes), 0)
+ 
+         {:error, finding} ->
+           structural ++ [finding]

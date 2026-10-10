@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-052 §2.3 — the decoder no longer re-checks stored frames against the frame schema.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/player_test.exs
+# MUST_FAIL: decodes as ONE :invalid frame
+diff --git a/samen_core/lib/samen/replay/decoder.ex b/samen_core/lib/samen/replay/decoder.ex
+index bc456d5..86e95dd 100644
+--- a/samen_core/lib/samen/replay/decoder.ex
++++ b/samen_core/lib/samen/replay/decoder.ex
+@@ -45,7 +45,8 @@ defmodule Samen.Replay.Decoder do
+   def frame(%{seq: seq, at_ms: at_ms, kind: kind, payload: payload}) do
+     encoded = %{seq: seq, at_ms: at_ms, kind: kind, payload: payload}
+ 
+-    case FrameSchema.validate(encoded) do
++    # SABOTAGE (ADR-052 §2.3): every stored frame is trusted.
++    case (_ = FrameSchema.validate(encoded); :ok) do
+       :ok -> %{seq: seq, at_ms: at_ms, kind: kind_atom(kind), payload: payload(payload)}
+       {:error, _path} -> invalid(seq, at_ms)
+     end

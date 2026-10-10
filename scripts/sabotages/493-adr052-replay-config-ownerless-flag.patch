@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-052 §2.4.1 item 7 — Samen.Replay.config! accepts flag_opts that name a flag module but no
+# operator owner org (the capture decision would be silently dead, or decided by no-one's row).
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/capture_test.exs
+# MUST_FAIL: fail-honest: a flag loader without the operator org as owner refuses to build
+diff --git a/samen_core/lib/samen/replay.ex b/samen_core/lib/samen/replay.ex
+index aeb0ca4..75634a0 100644
+--- a/samen_core/lib/samen/replay.ex
++++ b/samen_core/lib/samen/replay.ex
+@@ -265,7 +265,7 @@ defmodule Samen.Replay do
+     flag_opts = List.wrap(cfg[:flag_opts])
+ 
+     if flag_opts[:flag_module] != nil and flag_opts[:loader] == nil and
+-         not uuid?(flag_opts[:owner_org_id]) do
++         not uuid?(flag_opts[:owner_org_id]) and false do
+       raise ArgumentError,
+             "Samen.Replay: flag_opts names a :flag_module but no :owner_org_id. The capture " <>
+               "decision is operator-governed (ADR-052 §2.4.1 item 7): pass the operator org's " <>

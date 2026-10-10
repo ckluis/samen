@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-052 §2.3 / R10 — opening a replay writes no aud_event: watching leaves no trace in the
+# tenant's ledger.
+#
+# Flips the named player/resolver test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_player_test.exs
+# MUST_FAIL: operator: one replay.viewed row per open
+# MUST_FAIL: tenant admin: one row
+diff --git a/samen_web/lib/samen/web/replay/player_live.ex b/samen_web/lib/samen/web/replay/player_live.ex
+index f804f8a..6b389f5 100644
+--- a/samen_web/lib/samen/web/replay/player_live.ex
++++ b/samen_web/lib/samen/web/replay/player_live.ex
+@@ -112,7 +112,8 @@ defmodule Samen.Web.Replay.PlayerLive do
+     with {:auth, {:ok, viewer}} <- {:auth, Access.authorize(socket, org_id, user_id)},
+          {:load, {:ok, %{session: session, frames: frames}}} <-
+            {:load, Player.load(viewer.scope, to_string(replay_id))},
+-         {:audit, {:ok, _}} <- {:audit, Player.audit_viewed(audit_attrs(viewer, session))} do
++         # SABOTAGE (ADR-052 §2.3 / R10): the audit write is dropped.
++         {:audit, {:ok, _}} <- {:audit, {:ok, audit_attrs(viewer, session)}} do
+       view = Player.view_module(session.view)
+ 
+       socket

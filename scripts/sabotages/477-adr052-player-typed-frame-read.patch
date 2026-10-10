@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 7) — the player reads the typed `kind` again: one stored row with a
+# kind outside the closed set fails the whole read and the replay answers :not_found.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/player_test.exs
+# MUST_FAIL: a stored row with a bad kind or a non-object payload is ONE :invalid frame
+diff --git a/samen_core/lib/samen/replay/player.ex b/samen_core/lib/samen/replay/player.ex
+index a909236..c50f7ac 100644
+--- a/samen_core/lib/samen/replay/player.ex
++++ b/samen_core/lib/samen/replay/player.ex
+@@ -76,7 +76,8 @@ defmodule Samen.Replay.Player do
+            |> Ash.read(scope: scope),
+          {:ok, frames} <-
+            Frame
+-           |> Ash.Query.select([:id, :session_id, :org_id, :seq, :at_ms])
++           # SABOTAGE (ADR-052 §2.4.1): the typed kind is read.
++           |> Ash.Query.select([:id, :session_id, :org_id, :seq, :at_ms, :kind])
+            |> Ash.Query.load([:stored_kind, :stored_payload])
+            |> Ash.Query.filter(session_id == ^session.id)
+            |> Ash.Query.sort(seq: :asc)

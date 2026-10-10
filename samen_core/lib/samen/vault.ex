@@ -206,11 +206,31 @@ defmodule Samen.Vault do
           {:ok, binary()}
           | {:error, :subject_mismatch | :shredded | :unavailable | :not_found | term}
   def reveal(%Masked{token: token}, repo, opts \\ []) do
-    reveal_token(token, repo, Keyword.get(opts, :subject_id))
+    reveal_token(token, repo, Keyword.get(opts, :subject_id), Keyword.get(opts, :prefetched))
   end
 
-  defp reveal_token(token, repo, asserted_subject_id \\ nil) do
-    case repo.get(VaultRow, token) do
+  @doc """
+  Read the vault rows of `tokens` in ONE query (ADR-052 §2.4.1 — no N+1 on a list or a replay
+  frame): `%{token => %VaultRow{} | nil}`, a key for EVERY requested token (`nil` = no row).
+  Ciphertext only — nothing is decrypted here. Pass the map to `reveal/3` as `prefetched:`;
+  the decrypt (and its KMS unwrap, subject bind and shred check) still happens per value, in
+  `reveal/3`. Nothing is cached: the caller holds the map for one resolve call.
+  """
+  @spec prefetch_rows([String.t()], Ecto.Repo.t()) :: %{String.t() => struct() | nil}
+  def prefetch_rows(tokens, repo) when is_list(tokens) do
+    tokens = tokens |> Enum.filter(&is_binary/1) |> Enum.uniq()
+
+    found =
+      case tokens do
+        [] -> %{}
+        _ -> repo.all(from(r in VaultRow, where: r.token in ^tokens)) |> Map.new(&{&1.token, &1})
+      end
+
+    Map.new(tokens, &{&1, Map.get(found, &1)})
+  end
+
+  defp reveal_token(token, repo, asserted_subject_id \\ nil, prefetched \\ nil) do
+    case fetch_row(token, repo, prefetched) do
       nil ->
         {:error, :not_found}
 
@@ -221,6 +241,18 @@ defmodule Samen.Vault do
         end
     end
   end
+
+  # A prefetched row is used only when it IS the row for this token (`prefetch_rows/2`'s
+  # shape); anything else in the map — or a token it does not cover — is read from the repo.
+  defp fetch_row(token, repo, %{} = prefetched) do
+    case Map.fetch(prefetched, token) do
+      {:ok, %VaultRow{token: ^token} = row} -> row
+      {:ok, nil} -> nil
+      _ -> repo.get(VaultRow, token)
+    end
+  end
+
+  defp fetch_row(token, repo, _prefetched), do: repo.get(VaultRow, token)
 
   # F4.1 accountability bind: a caller-asserted subject MUST match the token's
   # real subject. `nil` (no assertion) is allowed for internal/raw callers; a

@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.4.1 (gate note 4) — a Page cursor keeps its sort value whatever the column's
+# decision: a list sorted by a date column stores the last row's date (a date of birth) in the clear.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/replay/sanitizer_test.exs
+# MUST_FAIL: a Page cursor's sort value gets the decision its column gets inside the record
+diff --git a/samen_core/lib/samen/replay/sanitizer.ex b/samen_core/lib/samen/replay/sanitizer.ex
+index 638feb7..730fd87 100644
+--- a/samen_core/lib/samen/replay/sanitizer.ex
++++ b/samen_core/lib/samen/replay/sanitizer.ex
+@@ -375,7 +375,8 @@ defmodule Samen.Replay.Sanitizer do
+   # kept only when the items' resource keeps that column; otherwise shape only. A bare `Date`
+   # in a cursor is never more visible than the column it was read from.
+   defp walked_struct(Samen.Web.Page = mod, term, depth, walk) do
+-    decision = cursor_decision(Map.get(term, :items), Map.get(term, :sort))
++    # SABOTAGE (ADR-052 §2.4.1): every cursor value kept.
++    decision = if(cursor_decision(Map.get(term, :items), Map.get(term, :sort)), do: :keep)
+ 
+     fields =
+       Enum.reduce(

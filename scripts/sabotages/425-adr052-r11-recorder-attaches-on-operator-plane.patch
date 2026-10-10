@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-052 §2.2 rule 5 / R11 — the recorder's own plane guard accepts any mount, so an
+# operator-plane (impersonation) LiveView that reaches it records a session.
+#
+# Flips the recorder's operator-plane refusal test.
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_recorder_test.exs
+# MUST_FAIL: the recorder itself refuses an operator-plane mount
+diff --git a/samen_web/lib/samen/web/replay/recorder.ex b/samen_web/lib/samen/web/replay/recorder.ex
+index 4955c35..395e337 100644
+--- a/samen_web/lib/samen/web/replay/recorder.ex
++++ b/samen_web/lib/samen/web/replay/recorder.ex
+@@ -90,7 +90,8 @@ defmodule Samen.Web.Replay.Recorder do
+        when kind not in [:operator, :aggregate],
+        do: true
+ 
+-  defp tenant_plane?(_), do: false
++  # SABOTAGE (ADR-052 R11): any plane records.
++  defp tenant_plane?(_), do: true
+ 
+   # LiveViews rendered with live_render/3 are not mounted at the router: no handle_params hook.
+   defp maybe_attach_params(%{router: nil} = socket), do: socket
