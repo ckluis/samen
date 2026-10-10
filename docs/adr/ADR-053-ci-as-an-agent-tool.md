@@ -7,7 +7,8 @@
 - **Build status:** **P1 BUILT** on `feat/adr-053-ci-modes` (2026-10-10): `ci/steps.conf` +
   `scripts/ci` (quick / fast / pr / full, budget + resume, content cache, digests, FLAKY, locks,
   `_ci/last.json`), `./ci.sh` + `./ci-fast.sh` as wrappers; red paths C1–C6, C9 in
-  `scripts/ci_test.sh` with sabotages 496–505; measured timings §1.1, as-built §2.9. P2–P4 open.
+  `scripts/ci_test.sh` with sabotages 496–511 (506–511 from the adversarial gate, §2.9 G1–G8);
+  measured timings §1.1, as-built §2.9. P2–P4 open.
 
 ---
 
@@ -135,7 +136,10 @@ worktrees with warm `_build`), keeping per-patch semantics and total accounting.
 `[step id]` stanza per step, continuation lines for multi-line commands and markers. A step is
 `cmd`, `cwd`, `modes`, `inputs`, `reads`, `always`, `serial`, `locks`, `est_s`, `group`,
 `marker`/`marker_if`/`skip_marker`, `echo_log`, `exunit_dir`, `superseded_by`, and for long
-loops `shard_list`/`shard_kind`/`shard_each_s`/`shard_target_s`/`shard_check`/`unsharded_cmd`.
+loops `shard_list`/`shard_kind`/`shard_item`/`shard_total`/`shard_each_s`/`shard_target_s`/
+`shard_check`/`unsharded_cmd`. `shard_list` prints the lister's raw output; `shard_total` (required)
+is the lister's own count and must match exactly once, and for `ranges` the `shard_item` matches
+must number exactly that — a drifted listing format FAILS instead of reading as "0 selected — PASS".
 Unknown keys are an error (a typo can never become "no inputs"). A TSV row would have been ten
 columns with 300-character cells; nobody could review one in a diff. `scripts/ci list [mode]`,
 `scripts/ci explain <step>` (expanded inputs, current key, cache hit, why quick would select it).
@@ -179,8 +183,10 @@ cache key both use it, so they cannot disagree.
    (~300 s chunks, never splitting a number — 25 and 35 are duplicated), the mutation steps by
    `--shard i/n`; each sub-step's `PROCESSED` / `mutants run` must equal its chunk or it FAILS.
    Unbudgeted (`./ci.sh`, `--budget 0`) they run the EXACT legacy command (`sabotage-lanes.sh` on
-   a clean tree, else the serial harness; `mutate.sh` unfiltered). A sharded watch-list skips
-   `mutate.sh`'s obsolete-ledger check (it runs only unfiltered) and the run says so.
+   a clean tree, else the serial harness; `mutate.sh` unfiltered). `mutate.sh` refuses an
+   OBSOLETE ledger exemption on an unfiltered run AND on a `--shard`-only run (a shard scores
+   each mutant against the same owning tests, so the n shards reproduce the unfiltered check
+   exactly; `mutation_selection_test.sh` 12b) — a sharded watch-list skips nothing.
 6. **Toolchain** is the first manifest step (serial; keyed by the elixir/OTP/psql fingerprint).
 7. **Output.** The wrappers print one verdict line per step + the legacy markers, and on failure a
    digest + `_ci/logs/<step>.log` instead of streaming every suite. The double sweep's
@@ -191,9 +197,33 @@ cache key both use it, so they cannot disagree.
    coverage guard now derives the covered set from the manifest (`scripts/ci list fast --apps`).
 10. **Root-script guards need an ExUnit owner.** `sabotage.sh` proves a guard by NAMED `mix test`
     failures in an APP, so `samen_core/test/meta/ci_driver_guard_test.exs` names each
-    `scripts/ci_test.sh` case (APP `samen_core`); sabotages 496–505 flip them.
+    `scripts/ci_test.sh` case (APP `samen_core`); sabotages 496–511 flip them.
 11. **Listing cache.** A sharded step's item list is cached under its parent's content key
     (fully warm `pr`: 30.5 s → 0.5 s).
+12. **Environment.** `SAMEN_SABOTAGE`/`SAMEN_MUTATION`/`SAMEN_MULTINODE` select steps (`--also`)
+    and are stripped from every step's environment (the multinode step sets its own), so
+    `SAMEN_MULTINODE=1 ./ci.sh` runs the same samen_core suite as `./ci.sh` — the multinode file
+    runs once, in its own step, not twice. Every other behaviour-changing variable (`SAMEN_*`
+    except the driver's `SAMEN_CI_*` seams, `MIX_*`, `ELIXIR_*`, `ERL_*`, `HEX_*`, `PG*`,
+    `DATABASE_URL`, `DRILL_*`, `DRIFTWOOD_*`, `GEN_PROBE_*`, `LOG_LEVEL`) is part of every cache key.
+13. **PR-READY is relative to a base.** With `origin/main` missing, `pr` still runs everything
+    (the double sweep prints its NOT RUN banner; `./ci.sh` still ends ALL PASSED, as before) but
+    its line says `NOT PR-READY: base origin/main is missing`; with `--base X` it says
+    `PR-READY (vs X)`.
+
+**Adversarial gate (2026-10-10) — defects found in the P1 build and fixed before merge.** Each
+has a red-path assertion in `scripts/ci_test.sh`; sabotages 506–511 flip them.
+
+| # | Defect (repro) | Fix |
+|---|---|---|
+| G1 | **Over-caching: undeclared tree-wide reads.** samen_web's suite (`Authz.ReadScopeLint`, `Reads.Lint`) sweeps `demo/` `driftwood/` `pawchart/lib`; samen_stripe's `payment_method_test` scans `samen_web/lib`; the two selection self-tests read the real corpus / samen_core tests. An unscoped read added to `driftwood/lib` left `samen_web` CACHED → `pr` PR-READY over a red lint (`scripts/ci explain samen_web`: key unchanged). | `reads` declared on all four; EQUIV pins them (sabotage 511). |
+| G2 | **A signalled step that exits 0 counted as PASS.** A step whose trap swallows the driver's SIGTERM (`trap … TERM` + exit 0; bash resumes after a TERM trap) was recorded PASS, cached, and kept as "earlier in this run" by `resume`. | Any step the driver signalled is INTERRUPTED whatever its exit code (506). |
+| G3 | **Shard listing fail-open.** Items were scraped with a `sed` over `--list`; if that format drifted the scrape matched nothing and the step was a preset `PASS (nothing selected)`. | `shard_total`/`shard_item` cross-check (507). |
+| G4 | **Environment leaked across cache keys.** A PASS earned under `SAMEN_UPDATE_GOLDEN=1`, `SAMEN_EMPTY_ASH_DOMAINS=1`, a stub `SAMEN_MUTATION_RUNNER`, `GEN_PROBE_GUARD_DISABLE_TRAP=1` or another `PGHOST` was reused without it. | Env fingerprint in the key; wrapper switches stripped (508). |
+| G5 | **The wrappers printed ALL PASSED over a filtered run.** `./ci.sh --only demo` (args pass through) ran one step and ended `ROOT CI: ALL PASSED`; same for `./ci-fast.sh --only`. | Wrappers believe only a whole-mode, unfiltered verdict (509). |
+| G6 | **Stale verdict after a driver error.** A run that died before writing a verdict (manifest error, crash) left the PREVIOUS run's `last.json` PASS in place for an agent to read; a crash also orphaned running steps (own sessions). | `last.json` = RUNNING once the lock is held, ERROR on any exception, children terminated (510). |
+| G7 | **PR-READY without a base** (see 13). | NOT PR-READY when the base is missing. |
+| G8 | **Obsolete-ledger check skipped by a sharded watch-list** (deviation 5, as first built). | Enforced per shard in `mutate.sh`. |
 
 **Measured, as built (this branch, `-j 5`)**
 
@@ -224,9 +254,10 @@ exercised by the fake-manifest tests and `--plan`, not end to end (hours; nightl
 | C8 | `reanchor` rewrites a patch whose named tests no longer fail under it |
 | C9 | the diff-aware selection misses an app that depends on a changed app |
 
-P1 (as built): C1–C6, C9 are cases of `scripts/ci_test.sh` (real driver, fake manifests, ~35 s, no
+P1 (as built): C1–C6, C9 are cases of `scripts/ci_test.sh` (real driver, fake manifests, ~60 s, no
 DB), named in `samen_core/test/meta/ci_driver_guard_test.exs`; sabotages 496 (C1), 497–498 (C2),
-499 (C3), 500 (C4), 501 (C5), 502–503 (C6), 504–505 (C9) each flip their named test.
+499 (C3), 500 (C4), 501 (C5), 502–503 (C6), 504–505 (C9) each flip their named test; the gate's
+506–507 (C1), 508 (C2), 509–510 (C6) and 511 (EQUIV: declared tree-wide reads) likewise.
 | C10 | counts in CLAUDE.md drift without `quick` failing |
 
 ## 4. Phasing (one PR each, all off `main`, none stacked; each phase gated adversarially)
