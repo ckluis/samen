@@ -21,6 +21,9 @@ inputs:
     description: Newline-separated deps/_build/PLT paths this job caches (from the plan)
     required: false
     default: ""
+  cache-name:
+    description: The cache key's job part (from the plan; the slices of one sharded step share one cache)
+    required: true
   base-sha:
     description: The PR base commit (empty outside pull_request; origin/main is used as fetched)
     required: false
@@ -61,6 +64,9 @@ runs:
         set -euo pipefail
         if [ -n "$BASE_SHA" ]; then
           git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags origin "$BASE_SHA"
+          # the tested merge commit must CONTAIN the base we diff against: `--changed` and the double sweep
+          # select from merge-base(HEAD, base)..HEAD, which only covers the PR's edits when base is in HEAD's history
+          git merge-base --is-ancestor "$BASE_SHA" HEAD || { echo "::error::base $BASE_SHA is not an ancestor of the tested commit $(git rev-parse HEAD) — NOT PR-READY"; exit 1; }
           git update-ref refs/remotes/origin/main "$BASE_SHA"
         fi
         git rev-parse --verify -q 'origin/main^{commit}' >/dev/null || { echo "::error::origin/main does not resolve in this clone — NOT PR-READY"; exit 1; }
@@ -75,9 +81,9 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ inputs.cache-paths }}
-        key: ci-v1-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-ex${{ steps.beam.outputs.elixir-version }}-${{ inputs.name }}-${{ hashFiles('**/mix.lock') }}
+        key: ci-v1-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-ex${{ steps.beam.outputs.elixir-version }}-${{ inputs.cache-name }}-${{ hashFiles('**/mix.lock') }}
         restore-keys: |
-          ci-v1-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-ex${{ steps.beam.outputs.elixir-version }}-${{ inputs.name }}-
+          ci-v1-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-ex${{ steps.beam.outputs.elixir-version }}-${{ inputs.cache-name }}-
 
     # Steps assume their mix projects' deps are on disk (locally an earlier step fetched them); a clean runner
     # has none. Fetch for every project this job caches (a no-op when the cache restored them).

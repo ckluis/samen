@@ -75,6 +75,7 @@ jobs:
           only: ${{ matrix.only }}
           slice: ${{ matrix.slice }}
           cache-paths: ${{ matrix.cache_paths }}
+          cache-name: ${{ matrix.cache }}
 
   ci-full:
     name: ci-full
@@ -96,7 +97,7 @@ jobs:
         run: |
           set -o pipefail
           patches="$(ls scripts/sabotages/*.patch | wc -l | tr -d ' ')"
-          scripts/ci actions verify full --results results --expect-total "sabotage_corpus=$patches" | tee -a "$GITHUB_STEP_SUMMARY"
+          scripts/ci actions verify full --results results --expect-head "$GITHUB_SHA" --expect-total "sabotage_corpus=$patches" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Aggregate - every job must have SUCCEEDED
         env:
           PLAN: ${{ needs.plan.result }}

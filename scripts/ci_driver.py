@@ -63,7 +63,8 @@ usage: scripts/ci quick|fast|pr|full [--budget S] [-j N] [--only STEP|GROUP[,…
        scripts/ci explain STEP [--base REF]
        scripts/ci actions plan MODE [--json]          (GitHub Actions: job matrix + exclusions; fails on a
                                                        step in no job, in two, or excluded without a reason)
-       scripts/ci actions verify MODE --results DIR [--expect-base SHA]   (every planned step ran, once, PASS)
+       scripts/ci actions verify MODE --results DIR --expect-head SHA [--expect-base SHA]
+                                                      (every planned step ran, once, PASS, on commit SHA)
        scripts/ci actions summary [--last FILE]       (markdown verdict + failure digest for $GITHUB_STEP_SUMMARY)
 
   --budget S    stop STARTING steps once the next one's est_s would overrun S seconds of this
@@ -1343,7 +1344,7 @@ def step_dirs(man, s):
     return dirs
 
 
-def job_entry(man, name, steps, slice_):
+def job_entry(man, name, steps, slice_, cache=None):
     dirs = []
     for x in steps:
         for d in step_dirs(man, x):
@@ -1356,7 +1357,10 @@ def job_entry(man, name, steps, slice_):
             paths.append(d + "/priv/plts")
     return {"name": name, "steps": [x.id for x in steps], "only": ",".join(x.id for x in steps),
             "slice": "%d/%d" % slice_ if slice_ else "", "est_s": round(sum(x.est for x in steps)),
-            "cache_paths": "\n".join(paths)}
+            "cache_paths": "\n".join(paths),
+            # the actions/cache key's job part: the N slices of one step build the same projects, so they
+            # share ONE cache (24 copies of the same deps/_build would eat the repo's 10 GB cache budget)
+            "cache": cache or name}
 
 
 def actions_plan(man, mode):
@@ -1393,7 +1397,7 @@ def actions_plan(man, mode):
         for x in v:
             if x.actions_slices:  # one job per slice: name_NN, `--slice i/N`
                 for i in range(1, x.actions_slices + 1):
-                    out_jobs.append(job_entry(man, "%s_%02d" % (x.id, i), [x], (i, x.actions_slices)))
+                    out_jobs.append(job_entry(man, "%s_%02d" % (x.id, i), [x], (i, x.actions_slices), cache=x.id))
     names = [j["name"] for j in out_jobs]
     if len(set(names)) != len(names):
         raise UsageError("actions plan (%s): duplicate job name(s): %s" % (mode, ", ".join(sorted({x for x in names if names.count(x) > 1}))))
@@ -1423,17 +1427,28 @@ def cmd_actions(pos, opts):
     if sub == "verify":
         if not opts.get("results"):
             raise UsageError("actions verify needs --results DIR (one sub-directory per job holding its last.json)")
+        for k in ("expect_head", "expect_base"):
+            if opts.get(k) is not None and not opts[k].strip():
+                # an EMPTY value (an unset ${{ … }} in a workflow) must not read as "do not check"
+                raise UsageError("--%s was given an empty value" % k.replace("_", "-"))
+        if not opts.get("expect_head"):
+            raise UsageError("actions verify needs --expect-head SHA: the commit every job must have tested "
+                             "(Actions: $GITHUB_SHA, the PR merge commit)")
+        want_tree = git("rev-parse", "--verify", "-q", opts["expect_head"] + "^{tree}", check=False).strip()
+        if not want_tree:
+            raise UsageError("--expect-head %s does not resolve to a commit in this clone" % opts["expect_head"])
+        want_head = git("rev-parse", "--verify", "-q", opts["expect_head"] + "^{commit}", check=False).strip()
         totals = {}
         for kv in opts.get("expect_total") or []:
             k, _, v = kv.partition("=")
             if not v.isdigit():
                 raise UsageError("--expect-total wants step=N, got %r" % kv)
             totals[k] = int(v)
-        return actions_verify(plan, opts["results"], opts.get("expect_base"), totals)
+        return actions_verify(plan, opts["results"], opts.get("expect_base"), totals, expect_head=(want_head, want_tree))
     raise UsageError("unknown actions subcommand %r" % sub)
 
 
-def actions_verify(plan, results_dir, expect_base, expect_totals=None):
+def actions_verify(plan, results_dir, expect_base, expect_totals=None, expect_head=None):
     """The Actions twin of C1/C7: the union of what the jobs ACTUALLY ran must equal `list MODE` minus the
     declared exclusions — each step exactly once, every one PASS/CACHED, every job on the expected base;
     for sliced steps (nightly) the slices must be 1..N, each once, and their PROCESSED counts must sum to
@@ -1472,6 +1487,14 @@ def actions_verify(plan, results_dir, expect_base, expect_totals=None):
             errors.append("job %s verdict is %s, not PASS" % (n, last.get("verdict")))
         if last.get("mode") != plan["mode"]:
             errors.append("job %s ran mode %s, expected %s" % (n, last.get("mode"), plan["mode"]))
+        # every job must have tested THE commit under verification, as committed: a job that checked out another
+        # ref (a re-pointed `ref:`, a moved PR head) or ran over a tree with extra/changed files at start
+        # (`tree` is the driver's content snapshot, untracked-not-ignored files included) vouches for other code
+        if expect_head and last.get("head") != expect_head[0]:
+            errors.append("job %s tested commit %s, expected %s" % (n, (last.get("head") or "none")[:12], expect_head[0][:12]))
+        if expect_head and last.get("tree") != expect_head[1]:
+            errors.append("job %s tested tree %s, not commit %s's tree %s (files added or changed before the run)"
+                          % (n, (last.get("tree") or "none")[:12], expect_head[0][:12], expect_head[1][:12]))
         if expect_base and last.get("base_sha") != expect_base:
             errors.append("job %s ran against base %s, expected %s (the PR's base)" % (n, (last.get("base_sha") or "none")[:10], expect_base[:10]))
         subs = {}
@@ -1553,6 +1576,8 @@ def actions_verify(plan, results_dir, expect_base, expect_totals=None):
         out("**Excluded from Actions (declared in `ci/steps.conf`, never silent):**")
         for e in plan["excluded"]:
             out("- `%s` — %s" % (e["id"], e["reason"]))
+    if total == 0:
+        errors.append("the plan has 0 runnable steps — an empty matrix verifies nothing and is not a pass")
     if covered != total and not errors:
         errors.append("coverage arithmetic: %d verified != %d runnable steps" % (covered, total))
     if errors:
@@ -1610,7 +1635,7 @@ def parse(argv):
     opts = {"budget": 540.0, "jobs": max(1, (os.cpu_count() or 2) // 2), "only": [], "also": [],
             "no_cache": False, "base": "origin/main", "keep_going": False, "markers": False, "apps": False,
             "plan": False, "exact": False, "require_base": False, "json": False, "results": None, "expect_base": None,
-            "last": None, "slice": None, "expect_total": None,
+            "last": None, "slice": None, "expect_total": None, "expect_head": None,
             "_given": set()}
     pos = []
     seen = set()
@@ -1676,7 +1701,7 @@ def parse(argv):
         elif a == "--expect-total":
             opts["expect_total"] = (opts.get("expect_total") or []) + [val()]
             i += 2
-        elif a in ("--results", "--expect-base", "--last"):
+        elif a in ("--results", "--expect-base", "--expect-head", "--last"):
             opts[a[2:].replace("-", "_")] = val()
             i += 2
         elif a == "--apps":

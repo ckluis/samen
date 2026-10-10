@@ -1,7 +1,8 @@
 # ADR-053 §2.8 — GitHub Actions mirrors `scripts/ci pr`. WHAT runs is decided by ci/steps.conf alone:
 # the `plan` job derives the job matrix from the manifest, so a new step can never silently go unrun,
 # and the `ci-pr` aggregate re-verifies from each job's last.json that the union of what actually ran
-# equals `scripts/ci list pr` minus the declared exclusions (each step once, all PASS, on the PR's base).
+# equals `scripts/ci list pr` minus the declared exclusions (each step once, all PASS, on the PR's base,
+# every job on this run's merge commit $GITHUB_SHA and its exact tree).
 # `ci-pr` is the single check name to require.
 name: pr
 
@@ -75,6 +76,7 @@ jobs:
           only: ${{ matrix.only }}
           slice: ${{ matrix.slice }}
           cache-paths: ${{ matrix.cache_paths }}
+          cache-name: ${{ matrix.cache }}
           base-sha: ${{ github.event.pull_request.base.sha }}
 
   ci-pr:
@@ -99,7 +101,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -o pipefail
-          scripts/ci actions verify pr --results results --expect-base "$BASE_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+          scripts/ci actions verify pr --results results --expect-head "$GITHUB_SHA" --expect-base "$BASE_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Aggregate - every job must have SUCCEEDED (failed, skipped and cancelled all fail)
         env:
           PLAN: ${{ needs.plan.result }}

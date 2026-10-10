@@ -126,3 +126,11 @@ defmodule Samen.Meta.CiDriverGuardTest.A3ActionsSlices do
     Samen.Meta.CiDriverGuard.run_case!("A3")
   end
 end
+
+defmodule Samen.Meta.CiDriverGuardTest.WaeLibWarnings do
+  use ExUnit.Case, async: true
+
+  test "WAE every product project's lib is compiled with --warnings-as-errors by a pr step" do
+    Samen.Meta.CiDriverGuard.run_case!("WAE")
+  end
+end
