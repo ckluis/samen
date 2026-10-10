@@ -186,6 +186,24 @@ case_C1() {
   has "$T/o14" '^PASS trapper [0-9.]+s$' "C1: resume re-runs it (it was neither cached nor kept)"
   eq "$(runs_of end)" 1 "C1: ... and only the resumed run reached its end"
 
+  # SIGKILL of the driver: its step (own session) runs on as an orphan — the next invocation refuses
+  # while it runs, and once it is gone resume RE-RUNS it (nothing was recorded for it)
+  mkrepo c1k
+  { echo "$APPS"
+    printf '[step orphan]\ncmd = echo start >> "$CI_TEST_RUNS"; sleep 2\nmodes = pr\ninputs = core/\nest_s = 1\n'; } > "$SAMEN_CI_MANIFEST"
+  "$CI" pr -j 1 > "$T/o17" 2>&1 &
+  pid=$!
+  for _ in $(seq 1 150); do grep -q start "$CI_TEST_RUNS" && break; sleep 0.1; done
+  kill -KILL "$pid"; wait "$pid" 2>/dev/null
+  drive "$T/o18" resume
+  eq "$RC" 2 "C1: after a SIGKILLed driver, resume refuses while its orphaned step still runs"
+  has "$T/o18" 'still running' "C1: ... and says so"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'd["verdict"]')" RUNNING "C1: ... and the killed run's last.json is RUNNING, never PASS"
+  sleep 2.5
+  drive "$T/o19" resume
+  has "$T/o19" '^PASS orphan [0-9.]+s$' "C1: once the orphan is gone, resume re-runs the step"
+  eq "$(runs_of start)" 2 "C1: ... it ran twice (the killed invocation's run never counted)"
+
   # a second driver against the same state refuses — and leaves the first run's verdict alone
   mkrepo c1c
   { echo "$APPS"
@@ -268,6 +286,14 @@ PY
   has "$T/o11" 'not cached: its inputs changed while it ran' "C2: a step whose inputs moved mid-run is not cached"
   drive "$T/o12" pr
   has "$T/o12" '^PASS mut ' "C2: ... so it runs again"
+  # a step keyed on the base (@base) is cached with it, never without it
+  mkrepo c2b
+  { echo "$APPS"; step based "core/ @base"; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/o13" pr; drive "$T/o14" pr
+  has "$T/o14" '^CACHED based$' "C2: an @base step is cached while its base resolves (positive control)"
+  (cd "$R" && git update-ref -d refs/remotes/origin/main)
+  drive "$T/o15" pr; drive "$T/o16" pr
+  has "$T/o16" '^PASS based ' "C2: ... and never cached when the base is missing"
 }
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════
@@ -423,6 +449,9 @@ LIAR
   has "$T/o8" '^CI\(pr --only pass_slow\): PASS 1/1' "C6: (the filtered driver run itself passed)"
   eq "$RC" 1 "C6: ci.sh --only exits 1 — a filtered PASS is not the root gate"
   hasnt "$T/o8" 'ALL PASSED' "C6: ci.sh never prints ALL PASSED over a filtered run"
+  bash "$W/ci.sh" --base HEAD > "$T/o8b" 2>&1; RC=$?
+  eq "$RC" 1 "C6: ci.sh --base X exits 1 — the root gate's double sweep + replays are vs origin/main"
+  hasnt "$T/o8b" 'ALL PASSED' "C6: ... never ALL PASSED"
   bash "$W/ci-fast.sh" --only pass_slow > "$T/o9" 2>&1; RC=$?
   eq "$RC" 1 "C6: ci-fast.sh --only exits 1"
   hasnt "$T/o9" 'CI-FAST: ALL PASSED' "C6: ci-fast.sh never prints ALL PASSED over a filtered run"

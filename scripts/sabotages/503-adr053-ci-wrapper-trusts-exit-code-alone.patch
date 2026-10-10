@@ -7,11 +7,11 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: C6 a wrapper never prints ALL PASSED after a failed step, concurrent ones included
 diff --git a/ci.sh b/ci.sh
-index 1e34ad0..4b19973 100755
+index fecad42..19042a2 100755
 --- a/ci.sh
 +++ b/ci.sh
-@@ -51,7 +51,7 @@ d = json.load(open(sys.argv[1]))
- whole = d.get("mode") == "pr" and not d.get("only")
+@@ -54,7 +54,7 @@ d = json.load(open(sys.argv[1]))
+ whole = d.get("mode") == "pr" and not d.get("only") and d.get("base") == "origin/main"
  print(d.get("verdict", "") if whole or d.get("verdict") != "PASS" else "PASS-BUT-FILTERED")' "$CI_HOME/last.json" 2>/dev/null || true)"
  
 -  if [[ $rc -eq 0 && "$verdict" == "PASS" ]]; then

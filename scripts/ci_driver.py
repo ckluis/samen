@@ -442,6 +442,8 @@ class Context(object):
         rules = expand_tokens(step.inputs + step.reads, apps)
         if not [r for r in rules if r != "@base"]:
             return None  # C2: a step with no declared inputs is NEVER cached
+        if "@base" in rules and not self.base_sha:
+            return None  # keyed on a base this clone does not have: never cached (nor its banner lost)
         snap = snap or self.snap
         dig, _n = snap.digest(rules)
         h = hashlib.sha256()

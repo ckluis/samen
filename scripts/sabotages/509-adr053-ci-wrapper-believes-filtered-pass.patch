@@ -6,14 +6,14 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: C6 a wrapper never prints ALL PASSED after a failed step, concurrent ones included
 diff --git a/ci.sh b/ci.sh
-index 1e34ad0..3d4c3ba 100755
+index fecad42..921a326 100755
 --- a/ci.sh
 +++ b/ci.sh
-@@ -48,7 +48,7 @@
+@@ -51,7 +51,7 @@
    # driver's own line says NOT PR-READY.
    verdict="$(python3 -c 'import json,sys
  d = json.load(open(sys.argv[1]))
--whole = d.get("mode") == "pr" and not d.get("only")
+-whole = d.get("mode") == "pr" and not d.get("only") and d.get("base") == "origin/main"
 +whole = True
  print(d.get("verdict", "") if whole or d.get("verdict") != "PASS" else "PASS-BUT-FILTERED")' "$CI_HOME/last.json" 2>/dev/null || true)"
  
