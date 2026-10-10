@@ -140,9 +140,19 @@ defmodule Samen.Replay.ResolverBatchTest do
     %{value: v} = Resolver.resolve(tree([s1, s2]), op, grant: Samen.Reveal.Grants)
     assert v.rows == [Placeholder.new(:masked), Placeholder.new(:masked)]
 
-    grant!(op_id, s2.id)
+    g = grant!(op_id, s2.id)
 
     # The NEXT batch reads again: s2 now clear, s1 still masked — per subject, not per batch.
+    %{value: v} = Resolver.resolve(tree([s1, s2]), op, grant: Samen.Reveal.Grants)
+    assert v.rows == [Placeholder.new(:masked), "batch.2.secret@example.com"]
+
+    # A grant revoked between batches masks s2 again on the next one.
+    g |> Ecto.Changeset.change(revoked_at: DateTime.utc_now()) |> @repo.update!()
+    %{value: v} = Resolver.resolve(tree([s1, s2]), op, grant: Samen.Reveal.Grants)
+    assert v.rows == [Placeholder.new(:masked), Placeholder.new(:masked)]
+
+    # Re-granted (positive control for the suspension step below).
+    grant!(op_id, s2.id)
     %{value: v} = Resolver.resolve(tree([s1, s2]), op, grant: Samen.Reveal.Grants)
     assert v.rows == [Placeholder.new(:masked), "batch.2.secret@example.com"]
 
