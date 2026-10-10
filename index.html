@@ -492,6 +492,7 @@ code:not(.term code){font-family:var(--mono);font-size:.9em;background:var(--rul
    Auto-play: 1 s per frame, 14 s loop, keyframed visibility. Reduced motion: frame 1, no loop. */
 .rp-sec{background:radial-gradient(900px 520px at 88% 0%,rgba(59,76,202,.07),transparent 62%),var(--paper)}
 .rp-tag{margin-top:22px;font-family:var(--mono);font-size:13px;letter-spacing:.04em;color:var(--muted)}
+.rp-credit{margin-top:12px;max-width:72ch}.rp-credit a{font-weight:500}
 .rp-tag b{font-family:var(--display);font-size:24px;font-weight:560;color:var(--ink);margin-right:3px}
 .rp-tag span{color:var(--rule);margin:0 8px}
 .rp{position:relative;left:50%;transform:translateX(-50%);width:min(1240px,calc(100vw - 32px));margin-top:38px;
@@ -2901,6 +2902,9 @@ code:not(.term code){font-family:var(--mono);font-size:.9em;background:var(--rul
       grants</strong>. So one recording plays back four ways &mdash; and an erased person stays erased inside it.
     </p>
     <p class="rp-tag"><b>1</b> recording <span>&middot;</span> <b>4</b> viewers <span>&middot;</span> <b>0</b> plaintext values stored</p>
+    <p class="small rp-credit">Built for Samen, on Samen&rsquo;s principles &mdash; record by reference, resolve on the
+      viewer&rsquo;s plane, store no plaintext. Inspired by <a href="https://github.com/elixir-vibe/phoenix_replay" rel="noopener">phoenix_replay</a>
+      by Danila Poyarkov (MIT), whose server-side capture shape it builds on &mdash; with thanks.</p>
 
     <div class="rp">
       <input type="radio" name="rpv" id="rpv-o" checked aria-label="Viewer: operator, no grant">

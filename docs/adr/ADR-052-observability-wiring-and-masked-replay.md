@@ -17,8 +17,10 @@
   re-anchored), as-built notes in §2.4.1. The P4 gate's flag-ownership fix (a flag resolves
   from the operator org's rows only) is §2.4.1 item 7 (sabotages 490–494). **All phases BUILT.**
 - **Deciders:** the operator, on §6 D1–D4.
-- **Inspiration (not a dependency):** `phoenix_replay` v0.6.2 (elixir-vibe/phoenix_replay, MIT).
-  Read 2026-10-09; we take its capture shape, not its code or its storage/privacy model.
+- **Inspiration (not a dependency):** `phoenix_replay` v0.6.2 by Danila Poyarkov
+  ([elixir-vibe/phoenix_replay](https://github.com/elixir-vibe/phoenix_replay), MIT). Read
+  2026-10-09; we take its capture shape, not its code or its storage/privacy model. Credited on
+  the landing `#replay` section and in `docs/runbooks/session-replay.md`.
 
 ---
 
