@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-053 C2 — the content snapshot that keys the step cache stages TRACKED files only
+# (`git add -u` instead of `git add -A`): a brand-new untracked module under an app's lib/ no
+# longer changes that app's key, so its suite is reported CACHED over code it never compiled — the
+# same tracked-only blind spot that once made `sabotage.sh --changed` miss A3's 247/248/249.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C2 the cache invalidates on any input change, an untracked file, a definition change
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index c88cdcc..c50640f 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -323,7 +323,7 @@ class Snapshot(object):
+         if os.path.exists(idx):
+             shutil.copy2(idx, tmp)  # keep its mtime: git's racy-clean check compares against it
+         env = dict(os.environ, GIT_INDEX_FILE=tmp)
+-        p = subprocess.run(["git", "-C", REPO, "add", "-A", "--", "."], stdout=subprocess.DEVNULL,
++        p = subprocess.run(["git", "-C", REPO, "add", "-u", "--", "."], stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE, env=env)
+         if p.returncode != 0:
+             shutil.rmtree(tmpdir, ignore_errors=True)

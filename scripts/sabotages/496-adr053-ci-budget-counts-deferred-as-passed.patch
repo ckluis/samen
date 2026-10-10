@@ -1,0 +1,31 @@
+# SABOTAGE: ADR-053 C1 — the driver's run accounting counts a step the budget DEFERRED (or an
+# interrupted / never-reached one) as done, and the PASS branch's re-assertion is gone with it: a
+# budget-stopped `scripts/ci pr` prints `CI(pr): PASS 3/3 … PR-READY` after running ONE step —
+# the hand-segmenting failure mode ADR-053 exists to end, now automated.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C1 budget/resume never reports PASS over a deferred, interrupted or unrun step
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 64ad0ab..0e2d377 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -892,7 +892,7 @@ class Run(object):
+ 
+ def final_line(mode, opts, plan, status, elapsed, first_fail):
+     m = len(plan)
+-    n = sum(1 for s in plan if status.get(s.id) in DONE)
++    n = sum(1 for s in plan if status.get(s.id) not in ("FAIL", "FLAKY"))
+     tag = mode + (" --only " + ",".join(opts["only"]) if opts.get("only") else "")
+     if first_fail:
+         line, verdict = "CI(%s): FAIL step=%s (%d/%d) — see %s/last.json" % (
+@@ -900,8 +900,6 @@ def final_line(mode, opts, plan, status, elapsed, first_fail):
+     elif n < m:
+         line, verdict = "CI(%s): INCOMPLETE %d/%d — continue: scripts/ci resume" % (tag, n, m), "INCOMPLETE"
+     else:
+-        # C1: PASS only when every planned step is PASS/CACHED — re-asserted, not inferred
+-        assert all(status.get(s.id) in DONE for s in plan)
+         line, verdict = "CI(%s): PASS %d/%d in %s" % (tag, n, m, fmt_s(elapsed)), "PASS"
+         if mode in ("pr", "full") and not opts.get("only"):
+             line += " — PR-READY"

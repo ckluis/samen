@@ -1,0 +1,46 @@
+# ci/legacy_steps.tsv — the pre-ADR-053 ci.sh (208dfc5) step list: marker <TAB> cwd <TAB> command it ran.
+# scripts/ci_test.sh EQUIV proves each row is still a manifest step running that command in that
+# directory, and that every row's marker is a real legacy marker (ci/legacy_markers.txt). cwd '-' =
+# a group / opt-in skip / final line, proven printed by `scripts/ci list pr --markers` instead.
+==> double sweep: PASSED	.	bash scripts/double-sweep.sh
+==> double-sweep regression: PASSED	.	bash scripts/double_sweep_test.sh
+==> sabotage apply-check: PASSED	.	bash scripts/sabotage_apply_check.sh
+==> spike s00_smoke: PASSED	spikes/s00_smoke	mix test
+==> spike s02_transformer: PASSED	spikes/s02_transformer	mix test
+==> spike s03_fragments: PASSED	spikes/s03_fragments	mix test
+==> spike s04_catalog_tx: PASSED	spikes/s04_catalog_tx	mix test
+==> spike s05_vault: PASSED	spikes/s05_vault	mix test
+==> spike s06_verify: PASSED	spikes/s06_verify	mix test
+==> spike s07_pii_reads: PASSED	spikes/s07_pii_reads	mix test
+==> All spikes passed.	-	group marker: every spike step passed
+==> samen_core: PASSED	samen_core	mix test --warnings-as-errors
+==> multi-node Oban proof: PASSED	samen_core	SAMEN_MULTINODE=1 mix test test/multinode/oban_multinode_test.exs
+==> Skipping multi-node Oban proof (opt-in: SAMEN_MULTINODE=1 ./ci.sh boots the 2-node cluster)	-	skip marker
+==> AI eval tier: PASSED	samen_core	mix test --warnings-as-errors test/ai_eval/
+==> agent coverage verifier: PASSED	samen_core	mix samen.verify.agent_coverage
+==> tool-actor-identity verifier: PASSED	samen_core	mix samen.verify.tool_actor_identity
+==> tool-surface verifier: PASSED	samen_core	mix samen.verify.tool_surface
+==> samen_stripe: PASSED	samen_stripe	mix test --warnings-as-errors
+==> samen_postmark: PASSED	samen_postmark	mix test --warnings-as-errors
+==> samen_ses: PASSED	samen_ses	mix test --warnings-as-errors
+==> samen_resend: PASSED	samen_resend	mix test --warnings-as-errors
+==> samen_anthropic: PASSED	samen_anthropic	mix test --warnings-as-errors
+==> gen_app flagship probe (WS-D D6 / AC-X-1 — generate → ci.sh → seed → boot → 2 sabotages): PASSED	.	run_gen_probe "priv/gen_app_flagship_probe.exs"
+==> gen_app post-app generator probe (WS-D D7a — gen.scope + gen.resource → ci.sh + 4 G26 files + sabotage): PASSED	.	run_gen_probe "priv/gen_post_probe.exs"
+==> gen_app deploy probe (WS-D D10 / AC-G16-1/2/3 — --deploy → ci.sh + fail-closed runtime + sabotage): PASSED	.	run_gen_probe "priv/gen_app_deploy_probe.exs"
+==> gen_agent probe (ADR-047 A7 — samen.gen.agent scaffold → emitted AgentCase proof + sabotage): PASSED	.	run_gen_probe "priv/gen_agent_probe.exs"
+==> sabotage selection regression: PASSED	.	bash scripts/sabotage_selection_test.sh
+==> sabotage-lanes regression: PASSED	.	bash scripts/sabotage_lanes_test.sh
+==> sabotage harness: PASSED	.	bash scripts/sabotage-lanes.sh
+==> Skipping sabotage harness (opt-in: SAMEN_SABOTAGE=1 ./ci.sh replays all gate sabotages)	-	skip marker
+==> mutation-gate preflight: PASSED	.	bash scripts/mutation_lint.sh
+==> mutation-gate self-test: PASSED	.	bash scripts/mutation_selection_test.sh
+==> mutation gate: PASSED	.	bash scripts/mutate.sh
+==> Skipping mutation gate (opt-in: SAMEN_MUTATION=1 ./ci.sh replays the tier-1 watch-list)	-	skip marker
+==> dialyzer: PASSED	.	bash scripts/dialyzer_gate.sh
+==> samen_web gate: PASSED	samen_web	bash ci.sh
+==> demo tests: PASSED	demo	mix test --warnings-as-errors
+==> demo CI gate: PASSED	demo	MIX_ENV=test bash ci.sh
+==> Driftwood CI gate: PASSED	driftwood	MIX_ENV=test bash ci.sh
+==> PawChart CI gate: PASSED	pawchart	MIX_ENV=test bash ci.sh
+==> ROOT CI: ALL PASSED	-	final line, printed by ./ci.sh itself

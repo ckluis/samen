@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-053 C6 / the ci.sh background-exit CORRECTNESS CONTRACT — the scheduler keeps a
+# step's exit code only when it is the LAST one running; a step that fails while another is still
+# in flight is recorded with exit 0. The concurrent app gates' failures vanish and ./ci.sh prints
+# ROOT CI: ALL PASSED over them — the lost-background-exit bug the old wait loop was written against.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C6 a wrapper never prints ALL PASSED after a failed step, concurrent ones included
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 64ad0ab..5952587 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -861,7 +861,7 @@ class Run(object):
+             for sid in list(self.running):
+                 rc = self.running[sid]["proc"].poll()
+                 if rc is not None:
+-                    self.finish(sid, rc)  # C6: every exit code collected, one by one
++                    self.finish(sid, rc if len(self.running) == 1 else 0)
+                     if self.status.get(sid) in ("FAIL", "FLAKY"):
+                         failed = True
+             if self.interrupted:

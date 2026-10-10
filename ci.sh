@@ -1,575 +1,65 @@
 #!/usr/bin/env bash
-# ci.sh — run all spike test suites + samen_core + demo gate in sequence.
-# Exits non-zero on the first failure.
+# ci.sh — the ROOT GATE. Since ADR-053 a thin wrapper over the CI driver:
 #
-# Order: the G-06 double sweep (seconds, no DB — proves no shipped sabotage was disarmed)
-# → spikes → samen_core → the AI tier → adapter gates → gen_app probes → the opt-in
-# sabotage REPLAY (SAMEN_SABOTAGE=1) → dialyzer (every product project, sequential) → the
-# four app gates, concurrently.
-set -euo pipefail
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# --- toolchain floor (.tool-versions) — FIRST, before anything compiles -------------------
-# The running Elixir / Erlang-OTP must be at least the pinned versions: the repo once ran
-# for weeks on a toolchain ten CVEs behind with nothing noticing. ~1s; self-test included.
-bash "$REPO_ROOT/scripts/toolchain_check_test.sh" >/dev/null || {
-  echo "toolchain-check SELF-TEST FAILED — rerun scripts/toolchain_check_test.sh for detail"
-  exit 1
-}
-bash "$REPO_ROOT/scripts/toolchain_check.sh"
-
-run_spike() {
-  local spike_dir="$1"
-  local spike_name
-  spike_name="$(basename "$spike_dir")"
-  echo "==> Running tests for spike: $spike_name"
-  (
-    cd "$spike_dir"
-    mix deps.get --quiet
-    mix test
-  )
-  echo "==> spike $spike_name: PASSED"
-}
-
-# --- G-06 DOUBLE SWEEP — the anti-disarm gate, UNCONDITIONAL and FIRST ---------------
-# THE RULE. Every increment sweeps the sabotage corpus TWICE: (a) the increment's NEW
-# patches against a pristine archive of origin/main — each MUST fail there, or it is
-# testing nothing this increment added; (b) the WHOLE corpus against the tree about to
-# ship — proving no edit in this increment stopped a shipped sabotage from biting.
+#     scripts/ci pr --budget 0 --markers [--also <opt-in>…] [args…]
 #
-# WHY IT IS A GATE STEP AND NOT A PARAGRAPH. That rule lived only in session prompts and
-# gate handoffs, enforced by whoever remembered to look — and NINE commits disarmed a
-# shipped sabotage anyway. Each was caught by a person deciding to check; the tenth would
-# not have been. Prose that nine people have already walked past is not a control.
+# WHAT RUNS lives in ONE place, ci/steps.conf (`scripts/ci list pr` prints it; `scripts/ci explain
+# <step>` says why a step would re-run). It is everything this script ran before ADR-053 — the G-06
+# double sweep, apply-check, the regression harnesses, spikes, samen_core, the AI tier and three
+# verifiers, the five adapter gates, the four gen probes, the mutation preflight + self-test,
+# dialyzer over all ten projects, the four app gates — plus the sabotages and tier-1 mutants that
+# touch your diff (`pr` mode). Same commands, same `==> … PASSED` markers (proven by
+# scripts/ci_test.sh EQUIV against the pre-ADR-053 script), and it still ends `ROOT CI: ALL PASSED`.
 #
-# WHY IT RUNS FIRST, AND WHY IT IS FREE. It is `git apply --check` per patch per baseline:
-# no compile, no DB, no `mix test`. MEASURED at 324 patches: ~6s for the sweep plus ~1s
-# for its own regression harness, against a ~12-minute gate. First, because a disarmed
-# sabotage invalidates every proof that would otherwise run for twelve minutes after it.
+# WHAT CHANGED. Steps run concurrently where they are isolated (own DB, own project dir; serial
+# steps — the registry-mutating gen probes, anything patching source — run alone), a step whose
+# inputs' CONTENT already passed is reported CACHED (`--no-cache` to force), each step's output
+# goes to _ci/logs/<step>.log and a failure prints a digest, not the log. No budget here: this runs
+# to completion. Inside a 600 s tool call use `scripts/ci pr` + `scripts/ci resume` instead.
 #
-# WHAT IT IS NOT. It is NOT the REPLAY — apply → run the named tests → they must FAIL →
-# revert → SHA-256 byte-exact — which is the opt-in `SAMEN_SABOTAGE=1` harness further
-# down and costs ~17 minutes for the full corpus. That one stays opt-in; this one cannot
-# be, because "does the guard still bite at all" is not a question worth a flag.
-echo ""
-echo "==> Running G-06 double sweep (anchor new patches at origin/main; disarm check against this tree)"
-if git -C "$REPO_ROOT" rev-parse --verify -q origin/main >/dev/null; then
-  bash "$REPO_ROOT/scripts/double-sweep.sh"
-  echo "==> double sweep: PASSED"
-else
-  # Not a silent skip: without origin/main there is no previous HEAD to anchor against,
-  # and a gate that quietly drops a control is how the control stops existing.
-  echo "########################################################################"
-  echo "##  DOUBLE SWEEP NOT RUN — origin/main is not present in this clone   ##"
-  echo "########################################################################"
-  echo "  The G-06 anchor/disarm check needs a previous HEAD. This run proves NOTHING"
-  echo "  about whether your edits disarmed a shipped sabotage."
-  echo "  Fix: git fetch origin main   (or run scripts/double-sweep.sh --base <ref>)"
-  echo "########################################################################"
-fi
-
-# The double sweep's own red cases must still go red — six of them, one per failure
-# class, including a mutation that deletes its PROCESSED counter. Runs against a
-# throwaway fixture repo in a temp dir; ~1s; never reads or writes this tree.
-echo ""
-echo "==> Running double-sweep regression harness (every red case must still go red)"
-bash "$REPO_ROOT/scripts/double_sweep_test.sh"
-echo "==> double-sweep regression: PASSED"
-
-# --- every shipped sabotage must still APPLY (issue #53) -------------------------------
-# The double sweep deliberately treats a patch that fails in BOTH baselines as
-# pre-existing, so a sabotage whose code moved (294/295/331 after #22) rotted for four
-# days with every run green. `git apply --check` of every patch against this working
-# tree, ~2s, no DB; its self-test proves the red case goes red (~1s, temp dir only).
-echo ""
-echo "==> Running sabotage apply-check (every shipped sabotage must still apply to this tree)"
-bash "$REPO_ROOT/scripts/sabotage_apply_check_test.sh" >/dev/null || {
-  echo "sabotage apply-check SELF-TEST FAILED — rerun scripts/sabotage_apply_check_test.sh for detail"
-  exit 1
-}
-bash "$REPO_ROOT/scripts/sabotage_apply_check.sh"
-echo "==> sabotage apply-check: PASSED"
-
-# --- spike list ---
-run_spike "$REPO_ROOT/spikes/s00_smoke"
-run_spike "$REPO_ROOT/spikes/s02_transformer"
-# Gate-1 F6: s03/s04 re-enabled — both suites pass (s03 15 tests, s04 6 tests)
-# against local Postgres. Their mechanisms are also ported into samen_core, but
-# the spike suites are green so we run them rather than drop coverage.
-run_spike "$REPO_ROOT/spikes/s03_fragments"
-run_spike "$REPO_ROOT/spikes/s04_catalog_tx"
-run_spike "$REPO_ROOT/spikes/s05_vault"
-run_spike "$REPO_ROOT/spikes/s06_verify"
-run_spike "$REPO_ROOT/spikes/s07_pii_reads"
-
-echo ""
-echo "==> All spikes passed."
-
-# --- samen_core kernel tests ---
-echo ""
-echo "==> Running samen_core tests"
-(
-  cd "$REPO_ROOT/samen_core"
-  mix deps.get --quiet
-  mix test --warnings-as-errors
-)
-echo "==> samen_core: PASSED"
-
-# --- L4 multi-node Oban proof (T90) — permanent OPT-IN tier (SAMEN_MULTINODE=1) --------
-# Boots TWO real BEAM peer nodes against ONE Postgres and proves the Oban substrate is
-# safe under multiple nodes: (1) exactly-once fetch across nodes (SKIP LOCKED — 120
-# distinct jobs, no double-grab), (2) `unique` insert-time dedup with a refutable no-unique
-# control, (3) reveal auto-revoke FAILOVER (kill the enqueuing node; the survivor runs the
-# scheduled revoke exactly once — no double side effect). This is a genuine distributed
-# test (local nodes satisfy spec §L4), not a simulation. OPT-IN because it needs epmd + a
-# dedicated non-sandbox DB + real distribution (~10s): the default green-only path skips it;
-# phase gates and the final sweep run it explicitly. Every node spawns+joins inside the
-# test's own lifecycle — nothing is backgrounded and polled.
-echo ""
-if [[ "${SAMEN_MULTINODE:-0}" == "1" ]]; then
-  echo "==> Running multi-node Oban proof (SAMEN_MULTINODE=1 — two BEAM nodes, one Postgres)"
-  (
-    cd "$REPO_ROOT/samen_core"
-    epmd -daemon 2>/dev/null || true
-    SAMEN_MULTINODE=1 mix test test/multinode/oban_multinode_test.exs
-  )
-  echo "==> multi-node Oban proof: PASSED"
-else
-  echo "==> Skipping multi-node Oban proof (opt-in: SAMEN_MULTINODE=1 ./ci.sh boots the 2-node cluster)"
-fi
-
-# --- AI runtime eval + mask-leak red-team tier (ADR-043 §10 / D8, T72) -----------------
-# The PERMANENT D8 CI tier — a keyless, deterministic runtime eval of the AI plane, wired
-# as a first-class ROOT-gate step (like the samen_core suite / the demo verifier gate) so a
-# mask leak or an eval regression FAILS THE ROOT GATE. Two standing gates run here:
-#   (1) the mask-leak RED-TEAM (RP-AI-7, ADR-043 §10.2) — full-DB vault CANARY seeding
-#       (real Factory vault writes, two orgs) fired through EVERY AI egress surface (the six
-#       T68 verbs, the T69 MCP tools, the T70 support operator, the T71 CRM + analytics
-#       surfaces, the T67 embeddings plane) asserting ZERO canary plaintext + ZERO vt_ token
-#       reaches ANY egress class EG1–EG6 (provider recording, vector store, captured logs,
-#       telemetry events, rendered errors, MCP responses, persisted drafts) — plus cross-org
-#       isolation and the §3.2a multi-turn expired-grant re-mask (RP-AI-10);
-#   (2) the grounding-context EVAL (ADR-043 §10.1) — the committed ≥20-case corpus asserted
-#       at the AUTHORITATIVE ≥90% context-assembly bar (an assembly-not-fidelity bar, §10).
-# Keyless (Provider.Fake / Embedder.Deterministic) + deterministic — no flake, because a
-# flaky permanent gate is a real red; SAMEN_AI_LIVE=1 is the sole live lane, never in CI.
-# Sabotage-refutable at the TIER level (scripts/sabotages/53-*): a value-layer mask leak
-# flips the NAMED EG1 red-team test in this exact `mix test test/ai_eval/` run, proving the
-# TIER fails, not merely a unit test. samen_core's own `mix test` above also loads these
-# files (test/ai_eval/); this step re-runs them as the named, legible D8 tier so a leak is
-# attributable to the AI plane. NOT wired into the generated-app ci_sh.eex template (that
-# cross-cutting generator change is decomposed out — backlog T134).
-echo ""
-echo "==> Running AI runtime eval + mask-leak red-team tier (ADR-043 D8 / §10 — T72)"
-(
-  cd "$REPO_ROOT/samen_core"
-  mix test --warnings-as-errors test/ai_eval/
-)
-echo "==> AI eval tier: PASSED"
-
-# --- agent-coverage verifier (ADR-047 A7 / §9#6) --------------------------------------
-# The agent loop A1-A6 built is made SELF-DEFENDING here. `mix samen.verify.agent_coverage`
-# runs from samen_core but scans the WHOLE umbrella tree (the anti-bypass probe technique),
-# so it discovers driftwood's shipped agent (non-vacuity floor) and locks in the F-4
-# obligation by static AST: NO `tool_schema/0`-exporting module may call
-# `Samen.AI.Agent.start/run` — a tool that cannot name the loop-entry primitives cannot
-# reopen the raw-spawn recursion escape (ADR-047 §10a row 19; the A6 verifier's R-A6-3),
-# regardless of which spawn primitive a future edit reaches for. It also asserts the
-# opted-in tools declare both callbacks + carry tests, the agent-run resource carries its
-# :shred retention arm (§7.4), every agent ships an AgentCase proof, and the TREE-WIDE
-# leverage guard (no vertical re-implements agent behaviour outside its definition/router).
-# Fail-closed (:erlang.halt(1)); sabotage-refutable at scripts/sabotages/268-*. NOT wired
-# into the ci_sh.eex generated-app template — the non-vacuity floor is host-specific (a
-# generated app authors no agent until it adopts one), the same T134 decomposition
-# `ai_prompt_masking` took; recorded as ADR-047 §10a row 22.
-echo ""
-echo "==> Running agent-coverage verifier (ADR-047 A7 / §9#6 — F-4 raw-spawn AST lock + coverage floor)"
-(
-  cd "$REPO_ROOT/samen_core"
-  mix samen.verify.agent_coverage
-)
-echo "==> agent coverage verifier: PASSED"
-
-# --- tool-actor-identity verifier (T185, ADR-043 §6.2/§7 — OSS-SCAN findings/009 #2) ---
-# The structural half of the "ctx[:actor]-only" tool identity rule (informal convention at
-# agent/tools.ex ~:18; ADR-043 §6.2: the chokepoint never elevates, substitutes, or
-# synthesizes an actor). `mix samen.verify.tool_actor_identity` refuses ANY tool schema
-# declaring an actor/org/tenant identity parameter, FOUNDRY-WIDE across BOTH shared
-# tool-schema surfaces — the `Samen.Automation.Action` agent-tool registry (core + host
-# `extra:`, so a generated app cannot slip an actor param past this gate either) and the
-# `Samen.AI.Mcp` tool catalogue — not scoped inside any one feature's own work. Fail-closed
-# (:erlang.halt(1)); sabotage-refutable at scripts/sabotages/286-*.
-echo ""
-echo "==> Running tool-actor-identity verifier (T185, ADR-043 §6.2/§7 — ctx[:actor]-only tool identity)"
-(
-  cd "$REPO_ROOT/samen_core"
-  mix samen.verify.tool_actor_identity
-)
-echo "==> tool-actor-identity verifier: PASSED"
-
-# --- tool-surface verifier (T183b, UXD-11/UXD-12 — ADR-043 §7/§9 + ADR-047 §5.1a) -----
-# T183 shipped `Samen.AI.ToolSurface` (the one surface-scoped tool registry: :mcp /
-# :operator / :tenant / :ci_eval) with no verifier tier asserting its invariants, so they
-# could rot silently (UXD-12). `mix samen.verify.tool_surface` closes that gap: every
-# opted-in tool (`Action.tool_kinds/0`) lands on at least one surface (a malformed
-# declaration fails CLOSED to unreachable-everywhere, which this gate now catches loudly
-# instead of silently), the `:mcp` registry agrees with its own source
-# (`Samen.AI.Mcp.tool_names/0`), `surfaces/0` stays exactly the closed four, and every tool
-# on `:ci_eval` is `effect: :read` — the structural half of UXD-11's "a write tool can
-# never open a real E3 approval from a CI eval run" guarantee. Fail-closed
-# (:erlang.halt(1)); sabotage-refutable at scripts/sabotages/300-*.
-echo ""
-echo "==> Running tool-surface verifier (T183b, UXD-11/UXD-12 — Samen.AI.ToolSurface invariants)"
-(
-  cd "$REPO_ROOT/samen_core"
-  mix samen.verify.tool_surface
-)
-echo "==> tool-surface verifier: PASSED"
-
-# --- samen_stripe adapter package gate (ADR-038 §8.1, T18/B1) ---
-# The first-party-but-separate Stripe billing adapter (skeleton): path-deps on
-# samen_core ONLY (never samen_web), owns its own vendor HTTP client dep (req),
-# and runs its own standalone suite. Wired here (root gate) rather than
-# ci-fast.sh, matching the demo/driftwood/pawchart precedent — ci-fast.sh stays
-# framework-only (spikes/samen_core/samen_web). samen_core itself never
-# references this package (INV-4; proved by samen_core's own
-# billing_vendor_free_test.exs above, which already ran).
-echo ""
-echo "==> Running samen_stripe tests (ADR-038 B1 skeleton — standalone, samen_core path-dep only)"
-(
-  cd "$REPO_ROOT/samen_stripe"
-  mix deps.get --quiet
-  mix test --warnings-as-errors
-)
-echo "==> samen_stripe: PASSED"
-
-# --- samen_postmark adapter package gate (ADR-038 §4/§8.1, T27/C1) ---
-# The first-party-but-separate, INBOUND-CAPABLE reference delivery adapter:
-# path-deps on samen_core ONLY (never samen_web), owns its own vendor HTTP
-# client dep (req), runs its own standalone suite INCLUDING the shared
-# cross-family Samen.AdapterConformanceCase kit (samen_core, ADR-038 §4.5;
-# UXD-07/A6 switched this adapter onto it — samen_ses/samen_resend still cite
-# Samen.Delivery.ProviderConformanceCase, which is UNCHANGED).
-# samen_core itself never references this package (INV-4; proved by
-# samen_core's own delivery_vendor_free_test.exs above, which already ran).
-echo ""
-echo "==> Running samen_postmark tests (ADR-038 C1 reference adapter — standalone, samen_core path-dep only)"
-(
-  cd "$REPO_ROOT/samen_postmark"
-  mix deps.get --quiet
-  mix test --warnings-as-errors
-)
-echo "==> samen_postmark: PASSED"
-
-# --- samen_ses adapter package gate (ADR-038 §4/§8.1, T94/C1) ---
-# The first-party-but-separate SECOND reference delivery adapter (M1 ruling):
-# path-deps on samen_core ONLY (never samen_web), owns its own vendor HTTP
-# client dep (req) + AWS SigV4 signing dep (aws_signature, ADR-038 §8.2), runs
-# its own standalone suite INCLUDING the shared
-# Samen.Delivery.ProviderConformanceCase harness (samen_core, ADR-038 §4.5) —
-# UNCHANGED, same harness samen_postmark/samen_resend (T27/T95) run. NOT
-# inbound-capable (ADR-038 §4.5 adapter split). samen_core itself never
-# references this package (INV-4; proved by samen_core's own
-# delivery_vendor_free_test.exs above, which already ran, plus the scoped
-# SamenSes/aws/amazonses grep the T94 gate runs — ADR-038 §8.3).
-echo ""
-echo "==> Running samen_ses tests (ADR-038 C1 second reference adapter — standalone, samen_core path-dep only)"
-(
-  cd "$REPO_ROOT/samen_ses"
-  mix deps.get --quiet
-  mix test --warnings-as-errors
-)
-echo "==> samen_ses: PASSED"
-
-# --- samen_resend adapter package gate (ADR-038 §4/§8.1, T95/C1) ---
-# The first-party-but-separate THIRD reference delivery adapter (M1 ruling):
-# path-deps on samen_core ONLY (never samen_web), owns its own vendor HTTP
-# client dep (req) — no extra signing dep needed, HMAC-SHA256 for the
-# Svix-style webhook scheme is served natively by Erlang/OTP's :crypto — and
-# runs its own standalone suite INCLUDING the shared
-# Samen.Delivery.ProviderConformanceCase harness (samen_core, ADR-038 §4.5) —
-# UNCHANGED, same harness samen_postmark/samen_ses (T27/T94) run. NOT
-# inbound-capable (ADR-038 §4.5 adapter split). samen_core itself never
-# references this package (INV-4; proved by samen_core's own
-# delivery_vendor_free_test.exs above, which already ran, plus the scoped
-# Resend-module/`:resend`-dep-atom grep the T95 gate runs — ADR-038 §8.3).
-echo ""
-echo "==> Running samen_resend tests (ADR-038 C1 third reference adapter — standalone, samen_core path-dep only)"
-(
-  cd "$REPO_ROOT/samen_resend"
-  mix deps.get --quiet
-  mix test --warnings-as-errors
-)
-echo "==> samen_resend: PASSED"
-
-# --- samen_anthropic AI-provider adapter package gate (ADR-043 §5.1, T64/D1) ---
-# The first-party-but-separate reference AI-provider adapter: path-deps on samen_core
-# ONLY (never samen_web — the samen_stripe/samen_postmark §8.1 layout precedent), owns
-# its own vendor HTTP client dep (req, used ONLY on the SAMEN_AI_LIVE=1 live lane), and
-# runs its own standalone suite. KEYLESS/fail-honest (ADR-043 §4; ADR-014/024/026):
-# unconfigured complete/2 -> {:error, :not_configured} (never a fake ok); the request-
-# shaping/response-parsing pipeline is proven through an injected fixture transport so
-# `mix test` makes ZERO live LLM calls. samen_core itself never references this package
-# (INV-4; proved by samen_core's own Samen.AI.VendorFreeTest, which already ran above).
-echo ""
-echo "==> Running samen_anthropic tests (ADR-043 D1 reference AI adapter — standalone, samen_core path-dep only)"
-(
-  cd "$REPO_ROOT/samen_anthropic"
-  mix deps.get --quiet
-  mix test --warnings-as-errors
-)
-echo "==> samen_anthropic: PASSED"
-
-# --- T107: interrupt-safe wrapper for the registry-mutating gen_app probes ------------
-# See scripts/gen_probe_guard.sh for the full rationale (recurring Phase-2 failure,
-# SIGINT non-trappability inside the BEAM, etc.) — sourced here so this exact code is
-# also what scripts/interrupt_probe_test.sh (the T107 interrupt-proof harness) exercises.
-source "$REPO_ROOT/scripts/gen_probe_guard.sh"
-
-# --- gen_app tier: the flagship generative proof (WS-D D6, AC-X-1) ---
-# The PERMANENT gen_app test tier (design.md §4). In ONE automated run it generates a
-# fresh app with the FULL running product (--web --api --seeds --observability), runs
-# its entire ci.sh (verifier gate + generated tests + all red-paths), seeds it via the
-# emitted `mix <app>.seed`, boots it and HTTP-probes /healthz + the framework LiveViews
-# + the bounded deny-by-default JSON:API, and drives TWO sabotages (API allowlist,
-# observability db_statement) that each flip the gate and revert byte-exact — proving the
-# generated gate is non-vacuous. Kept as a SEPARATE step (not folded into `mix test`)
-# because it deps.get/compiles a scratch app and runs its ci.sh five times (~100s); it
-# needs local Postgres. Zero scratch residue; the committed abbrev registry is restored
-# byte-exact on every exit path.
-run_gen_probe "priv/gen_app_flagship_probe.exs" \
-  "gen_app flagship probe (WS-D D6 / AC-X-1 — generate → ci.sh → seed → boot → 2 sabotages)"
-
-# --- gen_app tier: the POST-APP generator proof (WS-D D7a, AC-G4-7 / AC-G26-1/3) ---
-# The permanent proof for `mix samen.gen.scope` + `mix samen.gen.resource`: it generates a
-# fresh app, adds a SECOND scope + Tier-0 resource via the post-app generators, re-baselines
-# schema.dict.json, runs the app's FULL ci.sh (the whole verifier gate STILL green with the
-# new resource + the four emitted G26 red-path files green), runs the emitted per-resource
-# anti-tautology probe, then SABOTAGES a red-path mechanism (removes the resource's RoleAtLeast
-# admin gate) and proves the RBAC red path FLIPS + reverts byte-exact. Correct-by-construction,
-# ZERO hand-edits. Separate step (deps.get/compiles a scratch app + runs its ci.sh; ~80s; needs
-# local Postgres). Zero scratch residue; the committed abbrev registry is restored byte-exact.
-run_gen_probe "priv/gen_post_probe.exs" \
-  "gen_app post-app generator probe (WS-D D7a — gen.scope + gen.resource → ci.sh + 4 G26 files + sabotage)"
-
-# --- gen_app tier: the DEPLOY proof (WS-D D10, AC-G16-1/2/3 — ADR-024 fail-honest) ---
-# The permanent proof for `mix samen.gen.app --deploy`: it generates a fresh --web --api
-# --deploy app, runs its FULL ci.sh (the deploy artifacts do NOT break the gate — AC-G16-1),
-# asserts the six deploy artifacts exist + fly.toml parses, then drives the load-bearing
-# fail-closed RED PATH: the emitted config/runtime.exs RAISES (naming the secret) on EACH
-# missing required secret (DATABASE_URL/SECRET_KEY_BASE/PHX_HOST/SAMEN_KMS_*) while staying
-# silent when all are set + in :dev — and a sabotage that makes the KMS read permissive
-# FLIPS the raise + reverts byte-exact (non-vacuity). Finally it asserts the runbook names
-# the four operator TODOs with no turnkey "fly deploy" claim (AC-G16-3). NO live Fly/Neon/KMS
-# call anywhere (ADR-024 — no live deploy execution). Separate step (deps.get/compiles a
-# scratch app + runs its ci.sh; ~75s; needs local Postgres). Zero scratch residue; the
-# committed abbrev registry is restored byte-exact.
-run_gen_probe "priv/gen_app_deploy_probe.exs" \
-  "gen_app deploy probe (WS-D D10 / AC-G16-1/2/3 — --deploy → ci.sh + fail-closed runtime + sabotage)"
-
-# --- gen_agent tier: the AGENT scaffolder proof (ADR-047 A7) ---------------------------
-# The permanent proof for `mix samen.gen.agent`: it scaffolds a first-party agent (a valid
-# opted-in tool) + its AgentCase proof into a scratch scope, runs the emitted test (MUST
-# pass — correct-by-construction), SABOTAGES the definition's tools with a non-opted-in
-# kind (the four-way-intersection resolution assertion MUST flip), and reverts to green.
-# SCHEMA: NONE — gen.agent reserves no abbrev + writes no migration, so the committed
-# registry is untouched and run_gen_probe's SHA-256 byte-exact restore (T107) is satisfied
-# trivially; the probe additionally leaves zero file residue. Wrapped by run_gen_probe like
-# the three gen_app probes so the interrupt-safe registry backstop covers it uniformly.
-run_gen_probe "priv/gen_agent_probe.exs" \
-  "gen_agent probe (ADR-047 A7 — samen.gen.agent scaffold → emitted AgentCase proof + sabotage)"
-
-# --- Sabotage-harness SELECTION regression (ADR-047 A4 fold (a)) ----------------------
-# `scripts/sabotage.sh --changed [<ref>]` is the VERIFIER PRIMITIVE ("replay the sabotages
-# relevant to my diff"). It used to derive its touched set from `git diff --name-only`,
-# which lists only TRACKED paths — so any batch that ADDED files silently under-selected
-# (A3's own new patches 247/248/249 were missed, because their touched files were brand
-# new). A selector that reports a confident green over a hole is worse than no selector,
-# so the union with `git ls-files --others --exclude-standard` is pinned by a permanent,
-# UNCONDITIONAL gate step (unlike the opt-in replay below, this one is ~1s, needs no DB,
-# and applies no patch — it only runs `--list`). Ships with its own negative control.
-echo ""
-echo "==> Running sabotage-harness selection regression (ADR-047 A4 fold (a) — --changed must see untracked files)"
-bash "$REPO_ROOT/scripts/sabotage_selection_test.sh"
-echo "==> sabotage selection regression: PASSED"
-
-# The two-lane scheduler's own red cases (issue #30): a failing lane, a lane that exits 0
-# over a short run, a partition gap and a dirty tree must each fail it, and the lanes must
-# run in two different trees at one commit. Stub harness in a temp repo; ~1s, no DB.
-echo ""
-echo "==> Running sabotage-lanes regression (#30 — the two-lane replay can never over-report)"
-bash "$REPO_ROOT/scripts/sabotage_lanes_test.sh" >/dev/null || {
-  echo "sabotage-lanes SELF-TEST FAILED — rerun scripts/sabotage_lanes_test.sh for detail"
-  exit 1
-}
-echo "==> sabotage-lanes regression: PASSED"
-
-# --- WS-E sabotage harness (E2i.1) — permanent OPT-IN step (SAMEN_SABOTAGE=1) ---
-# Replays every shipped gate sabotage as a committed patch (scripts/sabotages/*.patch):
-# apply → targeted `mix test` MUST fail with the NAMED tests among the failures (the
-# flip) → revert → SHA-256 byte-exact restore, zero residue. Opt-in (unlike the
-# unconditional gen_app probes above) because it deliberately breaks the tree 5x and
-# re-runs DB-backed suites (~3-4 min): the default CI path stays green-only; phase
-# gates and E7.2 run it explicitly instead of re-deriving sabotages by hand.
-echo ""
-if [[ "${SAMEN_SABOTAGE:-0}" == "1" ]]; then
-  echo "==> Running sabotage harness (SAMEN_SABOTAGE=1 — every gate sabotage must flip + restore byte-exact)"
-  # Issue #30: on a clean tree, the same per-patch replay in two concurrent lanes
-  # (samen_core | everything else, own worktree, disjoint test DBs) — ~40% less wall
-  # time. Lanes certify a COMMIT, so uncommitted edits fall back to the serial harness,
-  # which certifies the working tree as-is. Either way the verdict line is the same.
-  if [[ -z "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
-    bash "$REPO_ROOT/scripts/sabotage-lanes.sh"
-  else
-    echo "    (working tree has uncommitted edits — running the SERIAL harness; lanes need a commit)"
-    bash "$REPO_ROOT/scripts/sabotage.sh"
-  fi
-  echo "==> sabotage harness: PASSED"
-else
-  echo "==> Skipping sabotage harness (opt-in: SAMEN_SABOTAGE=1 ./ci.sh replays all gate sabotages)"
-fi
-
-# --- Mutation gate (ADR-049) — two steps, mirroring the sabotage pair above ----------
-# UNCONDITIONAL (fast, no DB, ~17s): the gate's own preflight + anti-tautology harness.
-# `mutation_lint.sh` proves the committed watch-list and exemption ledger still resolve —
-# in particular that no ledger entry has gone STALE (its content hash no longer matches a
-# live mutation site), which is what stops an exemption outliving the code it excused.
-# `mutation_selection_test.sh` then drives the gate's SCORING logic with stub runners and
-# pins the three ways a mutation gate lies: scoring everything as killed, scoring a
-# compile breakage as a kill, and scoring mutants against an already-red baseline. Both
-# are unconditional for the same reason the sabotage SELECTION regression is: they apply
-# no mutant, need no database, and a mutation gate that cannot report a survivor is worse
-# than no mutation gate because it reports a confident 100% over a hole.
-echo ""
-echo "==> Running mutation-gate preflight (ADR-049 — watch-list + ledger must resolve, no stale exemptions)"
-bash "$REPO_ROOT/scripts/mutation_lint.sh"
-echo "==> mutation-gate preflight: PASSED"
-
-echo ""
-echo "==> Running mutation-gate self-test (ADR-049 §6 — the gate must be able to report a survivor)"
-bash "$REPO_ROOT/scripts/mutation_selection_test.sh"
-echo "==> mutation-gate self-test: PASSED"
-
-# OPT-IN (SAMEN_MUTATION=1, ~5 min): the tier-1 mutation replay itself. Opt-in for the
-# same reason as the sabotage harness — it deliberately breaks the tree 61 times and
-# re-runs DB-backed suites. Where the sabotage harness asks "are the guarantees this repo
-# CLAIMS still guarded?", this asks the converse the sabotage corpus structurally cannot:
-# "is there some OTHER way to break these same files that their owning tests do NOT
-# catch?" A surviving mutant with no ledger entry fails the run.
-echo ""
-if [[ "${SAMEN_MUTATION:-0}" == "1" ]]; then
-  echo "==> Running mutation gate (SAMEN_MUTATION=1 — every tier-1 mutant must die or be ledgered)"
-  bash "$REPO_ROOT/scripts/mutate.sh"
-  echo "==> mutation gate: PASSED"
-else
-  echo "==> Skipping mutation gate (opt-in: SAMEN_MUTATION=1 ./ci.sh replays the tier-1 watch-list)"
-fi
-
-# --- Dialyzer over every product project (issue #73, ruled: in the default gate) -------
-# Sequential, and BEFORE the concurrent app gates: each run peaks at ~2-3 GB. Fails on any
-# warning a project's `.dialyzer_ignore.exs` does not cover (each entry there says why it is
-# a false positive or deliberate code). See scripts/dialyzer_gate.sh for the PLT rule that
-# keeps a path dependency's specs from going stale.
-echo "==> Running dialyzer (issue #73 — every product project; new warnings fail)"
-bash "$REPO_ROOT/scripts/dialyzer_gate.sh" || {
-  echo "dialyzer FAILED — rerun scripts/dialyzer_gate.sh <app> for detail"
-  exit 1
-}
-echo "==> dialyzer: PASSED"
-
-# --- Independent app/framework gates — RUN CONCURRENTLY (10-core box) -----------------
-# The four vertical/framework gates below are independent (own apps, own test DBs —
-# samen_web_test / demo_test / driftwood_test / pawchart_test — own _build) so they run
-# in PARALLEL to cut wall-clock. HAZARD GUARD: everything above this point (spikes,
-# samen_core, the 3 registry-mutating gen probes, and the opt-in sabotage harness AND
-# mutation gate — both of which patch samen_core/samen_web/demo/pawchart source) is
-# SEQUENTIAL and has already fully completed; nothing below touches the shared
-# abbrev_registry.json or patches source, so concurrency here is race-free.
+# Opt-in tiers, unchanged:  SAMEN_SABOTAGE=1 (the whole sabotage corpus — two lanes on a clean
+# tree, the serial harness otherwise) · SAMEN_MUTATION=1 (the tier-1 mutation watch-list) ·
+# SAMEN_MULTINODE=1 (the two-node Oban proof). Extra args pass through (e.g. --no-cache, -j 2).
 #
-# CORRECTNESS CONTRACT (do NOT weaken): a backgrounded command that fails does NOT trip
-# `set -e`. Each gate's stdout+stderr is captured to its own log; each background PID's exit
-# code is collected explicitly with `wait <pid>`; if ANY gate failed we dump its log, print
-# which one, and `exit 1` — never reaching the ALL PASSED line. Each gate's own
-# `==> ... : PASSED` marker(s) print ONLY after that gate's exit code is confirmed 0.
+# CORRECTNESS CONTRACT (do NOT weaken): ALL PASSED prints only when the driver exited 0 AND the
+# verdict it wrote to _ci/last.json is PASS for the WHOLE pr gate (mode pr, no --only, base
+# origin/main). The driver collects every concurrent step's exit
+# code explicitly (scripts/ci_test.sh C6 fails a run whose concurrent step failure is lost).
+#
+# The whole body is one { … } block: bash parses it completely before running any of it, so a
+# sabotage patching this file mid-run (SAMEN_SABOTAGE=1 replays one that does) cannot change what
+# is already executing.
+{
+  set -uo pipefail
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  CI_DRIVER="${SAMEN_CI_DRIVER:-$REPO_ROOT/scripts/ci}"   # SAMEN_CI_DRIVER: test seam (ci_test.sh C6)
+  CI_HOME="${SAMEN_CI_HOME:-$REPO_ROOT/_ci}"
 
-echo ""
-echo "==> Running app gates CONCURRENTLY: samen_web · demo · driftwood · pawchart"
+  opt_in=()
+  [[ "${SAMEN_SABOTAGE:-0}" == "1" ]] && opt_in+=(--also sabotage_corpus)
+  [[ "${SAMEN_MUTATION:-0}" == "1" ]] && opt_in+=(--also mutation_watchlist)
+  [[ "${SAMEN_MULTINODE:-0}" == "1" ]] && opt_in+=(--also multinode)
 
-GATE_LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/samen_ci_gates.XXXXXX")"
+  rm -f "$CI_HOME/last.json"   # a stale PASS verdict can never vouch for this run
+  "$CI_DRIVER" pr --budget 0 --markers ${opt_in[@]+"${opt_in[@]}"} "$@"
+  rc=$?
+  # The verdict, believed only when it is the WHOLE gate: an unfiltered pr run (`./ci.sh --only X`
+  # passes X through, and a PASS over X alone is not ALL PASSED) against the legacy base
+  # (`--base X` would move the double sweep and the --changed replays off origin/main; a run that
+  # proved something else is not the root gate's ALL PASSED). Like the pre-ADR-053 script, a
+  # clone without origin/main still passes — with the loud DOUBLE SWEEP NOT RUN banner — while the
+  # driver's own line says NOT PR-READY.
+  verdict="$(python3 -c 'import json,sys
+d = json.load(open(sys.argv[1]))
+whole = d.get("mode") == "pr" and not d.get("only") and d.get("base") == "origin/main"
+print(d.get("verdict", "") if whole or d.get("verdict") != "PASS" else "PASS-BUT-FILTERED")' "$CI_HOME/last.json" 2>/dev/null || true)"
 
-# --- samen_web framework UI library gate (ADR-009) ---
-gate_samen_web() {
-  cd "$REPO_ROOT/samen_web"
-  bash ci.sh
-}
-
-# --- demo dogfood gate: warnings-as-errors test suite + the 5-verifier CI gate ---
-gate_demo() {
-  cd "$REPO_ROOT/demo"
-  mix deps.get --quiet
-  mix test --warnings-as-errors
-  MIX_ENV=test bash ci.sh
-}
-
-# --- Driftwood reference-vertical gate (Phase 5, T5.2) ---
-gate_driftwood() {
-  cd "$REPO_ROOT/driftwood"
-  mix deps.get --quiet
-  MIX_ENV=test bash ci.sh
-}
-
-# --- PawChart second-vertical thin slice gate (Phase 6, T6.2) ---
-gate_pawchart() {
-  cd "$REPO_ROOT/pawchart"
-  mix deps.get --quiet
-  MIX_ENV=test bash ci.sh
-}
-
-# Gate registry: name | function | PASSED marker line(s) to emit on success.
-gate_names=(samen_web demo driftwood pawchart)
-gate_fns=(gate_samen_web gate_demo gate_driftwood gate_pawchart)
-gate_markers=(
-  "==> samen_web gate: PASSED"
-  $'==> demo tests: PASSED\n==> demo CI gate: PASSED'
-  "==> Driftwood CI gate: PASSED"
-  "==> PawChart CI gate: PASSED"
-)
-
-# Launch all four in the background, each redirected to its own per-app log.
-gate_pids=()
-gate_logs=()
-for i in "${!gate_names[@]}"; do
-  log="$GATE_LOG_DIR/${gate_names[$i]}.log"
-  gate_logs+=("$log")
-  "${gate_fns[$i]}" >"$log" 2>&1 &
-  gate_pids+=("$!")
-done
-
-# Collect each background job's exit code EXPLICITLY (set -e will not catch a bg failure).
-gate_failed=0
-for i in "${!gate_names[@]}"; do
-  if wait "${gate_pids[$i]}"; then
-    printf '%s\n' "${gate_markers[$i]}"
-  else
-    code=$?
-    gate_failed=1
+  if [[ $rc -eq 0 && "$verdict" == "PASS" ]]; then
     echo ""
-    echo "==> ${gate_names[$i]} gate: FAILED (exit $code)"
-    echo "==> ----- begin ${gate_names[$i]} log (${gate_logs[$i]}) -----"
-    cat "${gate_logs[$i]}"
-    echo "==> ----- end ${gate_names[$i]} log -----"
+    echo "==> ROOT CI: ALL PASSED"
+    exit 0
   fi
-done
-
-if [[ "$gate_failed" != 0 ]]; then
   echo ""
-  echo "==> ROOT CI: FAILED — one or more app gates failed (logs in $GATE_LOG_DIR). NOT all passed."
+  echo "==> ROOT CI: FAILED — scripts/ci exit $rc, verdict ${verdict:-none} (see _ci/last.json; logs in _ci/logs/). NOT all passed."
   exit 1
-fi
-
-# All four gates confirmed exit 0 — logs no longer needed.
-rm -rf "$GATE_LOG_DIR"
-
-echo ""
-echo "==> ROOT CI: ALL PASSED"
+}

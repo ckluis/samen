@@ -257,6 +257,14 @@ done
 FILTER_ACTIVE=0
 [[ "$MODE" != "tier1" || -n "$FILTER_APP" || -n "$FILTER_FILE" || -n "$FILTER_FAMILY" \
    || $TOUCH_MODE -eq 1 || -n "$SHARD_I" ]] && FILTER_ACTIVE=1
+# The OBSOLETE-exemption refusal holds on an unfiltered run AND on a --shard-only run (ADR-053):
+# a shard runs each of its mutants against the very owning tests the unfiltered run would, so a
+# ledgered mutant killed in ANY shard is killed in the unfiltered run too — the n shards of the
+# watch-list therefore reproduce the unfiltered check exactly, with nothing deferred to a run
+# that never happens. Every other filter keeps it off (a narrowed exploratory run is not a verdict).
+OBSOLETE_ENFORCED=0
+[[ "$MODE" == "tier1" && -z "$FILTER_APP" && -z "$FILTER_FILE" && -z "$FILTER_FAMILY" \
+   && $TOUCH_MODE -eq 0 ]] && OBSOLETE_ENFORCED=1
 
 filter_label() {
   local parts=()
@@ -651,7 +659,7 @@ if [[ -s "$SURVIVOR_LOG" ]]; then
   fail "$survived mutant(s) survived their owning tests with no ledger entry (contract 4)"
 fi
 
-if [[ -s "$OBSOLETE" && $FILTER_ACTIVE -eq 0 ]]; then
+if [[ -s "$OBSOLETE" && $OBSOLETE_ENFORCED -eq 1 ]]; then
   echo ""
   echo "── OBSOLETE ledger entries — the mutant is now KILLED, the exemption is dead weight ──"
   while IFS= read -r k; do

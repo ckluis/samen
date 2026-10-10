@@ -1,0 +1,25 @@
+# SABOTAGE: ADR-053 C1 (gate G2) — the driver forgets that it SIGNALLED a step: a step whose trap swallows
+# the SIGTERM (bash resumes after a TERM trap returns) and exits 0 is recorded PASS, written to the
+# cache and kept by `scripts/ci resume` as "earlier in this run" — an interrupted step counted done.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C1 budget/resume never reports PASS over a deferred, interrupted or unrun step
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index c88cdcc..855620d 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -803,12 +803,6 @@ class Run(object):
+             text = f.read()
+         self.echo(step, text)
+         note = None
+-        if r.get("signalled") and rc == 0:
+-            # C1: the driver signalled this step's process group. An exit 0 after that is a TRAP
+-            # that swallowed the signal (bash continues after a TERM trap returns), not a step
+-            # that ran to completion — it can never be PASS, never be cached, never be "earlier
+-            # in this run" on resume.
+-            rc = 143
+         if rc == 0 and step.shard_check and step.expected is not None:
+             m = None
+             for m in re.finditer(step.shard_check, text, re.M):

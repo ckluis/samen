@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 C6 (gate G5) — ./ci.sh believes ANY PASS verdict: `./ci.sh --only demo` (args pass
+# through to the driver) runs one step and prints ROOT CI: ALL PASSED over the whole gate.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C6 a wrapper never prints ALL PASSED after a failed step, concurrent ones included
+diff --git a/ci.sh b/ci.sh
+index fecad42..921a326 100755
+--- a/ci.sh
++++ b/ci.sh
+@@ -51,7 +51,7 @@
+   # driver's own line says NOT PR-READY.
+   verdict="$(python3 -c 'import json,sys
+ d = json.load(open(sys.argv[1]))
+-whole = d.get("mode") == "pr" and not d.get("only") and d.get("base") == "origin/main"
++whole = True
+ print(d.get("verdict", "") if whole or d.get("verdict") != "PASS" else "PASS-BUT-FILTERED")' "$CI_HOME/last.json" 2>/dev/null || true)"
+ 
+   if [[ $rc -eq 0 && "$verdict" == "PASS" ]]; then

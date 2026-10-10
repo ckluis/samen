@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 C6 — ./ci.sh trusts the driver's exit code ALONE and stops cross-checking the
+# verdict the driver wrote to _ci/last.json: a driver that exits 0 over a FAIL verdict (a crash in
+# the reporting path, a future refactor's early return) gets ROOT CI: ALL PASSED printed for it.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C6 a wrapper never prints ALL PASSED after a failed step, concurrent ones included
+diff --git a/ci.sh b/ci.sh
+index fecad42..19042a2 100755
+--- a/ci.sh
++++ b/ci.sh
+@@ -54,7 +54,7 @@ d = json.load(open(sys.argv[1]))
+ whole = d.get("mode") == "pr" and not d.get("only") and d.get("base") == "origin/main"
+ print(d.get("verdict", "") if whole or d.get("verdict") != "PASS" else "PASS-BUT-FILTERED")' "$CI_HOME/last.json" 2>/dev/null || true)"
+ 
+-  if [[ $rc -eq 0 && "$verdict" == "PASS" ]]; then
++  if [[ $rc -eq 0 ]]; then
+     echo ""
+     echo "==> ROOT CI: ALL PASSED"
+     exit 0
