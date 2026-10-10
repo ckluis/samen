@@ -91,7 +91,7 @@ because every sabotage is a claim someone thought to make.
   one naming a missing file). `--list` prints the derived additions per target.
 - Flags mirror `sabotage.sh` (`--app`, `--file`, `--family`, `--changed [<ref>]`, `--list`;
   same-flag-twice is an error; different flags intersect) plus `--corpus` (derive targets from the
-  sabotage headers — 163 (file, app) rows over 155 distinct lib files / 2,852 mutants, a soak not a gate step), `--shard <i>/<n>`
+  sabotage headers — 224 (file, app) targets / 3,939 mutants as of 2026-10-09, `--corpus --list`; a soak not a gate step), `--shard <i>/<n>`
   (deterministic disjoint partition for sweeping a soak across runs), and `--emit-patches <dir>`
   (write each survivor as a sabotage-format patch — THE promotion path: write the test, fill
   `MUST_FAIL`, move it into `scripts/sabotages/`).
