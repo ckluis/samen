@@ -8,7 +8,11 @@
   `scripts/ci` (quick / fast / pr / full, budget + resume, content cache, digests, FLAKY, locks,
   `_ci/last.json`), `./ci.sh` + `./ci-fast.sh` as wrappers; red paths C1–C6, C9 in
   `scripts/ci_test.sh` with sabotages 496–512 (506–512 from the adversarial gate, §2.9 G1–G10);
-  measured timings §1.1, as-built §2.9. P2–P4 open.
+  measured timings §1.1, as-built §2.9. **P2 BUILT** on `feat/adr-053-p2-actions` (PR #88):
+  `.github/workflows/pr.yml` + `nightly.yml` + the `ci-job` composite action, the manifest-derived
+  job matrix, `scripts/ci actions plan|verify|summary`, `--slice` / `--require-base` /
+  `--only-steps`; red paths A1–A3 with sabotages 514–522; proven green on GitHub (§2.9 "Actions").
+  P3–P4 open.
 
 ---
 
@@ -246,6 +250,101 @@ has a red-path assertion in `scripts/ci_test.sh`; sabotages 506–512 flip them.
 CLAUDE.md rewrite (P4 — P1 adds a pointer only). `full` mode's corpus and watch-list shards were
 exercised by the fake-manifest tests and `--plan`, not end to end (hours; nightly/P2).
 
+#### Actions (P2) — as built
+
+**Design.** `.github/workflows/pr.yml` (on `pull_request` to main — never `pull_request_target`;
+`permissions: contents: read`; concurrency per PR, cancel-in-progress) is `plan` → `ci` (matrix) →
+`ci-pr`. `plan` runs `scripts/ci actions plan pr --json` — **the matrix is derived from the manifest**:
+a step's job is its `group`, or `actions_job` when a group is too coarse (the four dialyzer jobs, one
+job per app gate, `sabotage_changed`, `mutation_changed`, `gen_flagship`). Each `ci` job is the
+composite action `.github/actions/ci-job`: pinned toolchain (`erlef/setup-beam` with
+`version-file: .tool-versions`, strict, on `ubuntu-24.04` — OTP 29.1.1 / Elixir 1.20.4-otp-29 install
+from builds.hex.pm there; first try), a `pgvector/pgvector:0.8.0-pg16` service container (the local
+server is PG 16.13 + pgvector 0.8.0), `postgresql-client-16` for `pg_dump`/`createdb`, then
+`scripts/ci pr --only-steps <ids> --budget 0 -j 2 --no-cache --require-base`, the verdict + failure
+digest into `$GITHUB_STEP_SUMMARY` (`scripts/ci actions summary`), `_ci/last.json` uploaded always
+(`ci-result-<job>`), `_ci/logs` on failure. 18 jobs in `pr`; 47 in `full` (below).
+
+- **Coverage (A1) is mechanical, twice.** (1) `actions plan` FAILS — naming the step — on a step in no
+  job, in two places (a job AND `actions_skip`), or excluded without a reason (`actions_skip = <≥12
+  chars>`; an empty value is not "no exclusion"). (2) The aggregate `ci-pr` (the one name to require)
+  `needs:` `plan` and `ci`, fails unless both are `success` (skipped, cancelled and failed all fail), and
+  runs `scripts/ci actions verify pr`: from each job's uploaded `last.json` the union of the steps that
+  actually ran must equal `scripts/ci list pr` minus the exclusions — each exactly once, all
+  PASS/CACHED, every job on `base_sha` = the PR's base. The exclusions are printed in the summary. The
+  first full run proved it earns its keep: the nightly's `samen_core` job also ran `multinode` (the step
+  `samen_core` is also the group `samen_core`, and `--only` matches groups) — `verify` named it as a step
+  run in two jobs, and `--only-steps` (ids only) is the fix (sabotage 522).
+- **Base.** `fetch-depth: 0`, then `refs/remotes/origin/main` is set to `github.event.pull_request.base.sha`
+  (never HEAD~1, never a moved `main`), and every job runs `--require-base`: an unresolved base is a
+  driver ERROR (exit 2, `last.json` ERROR), not a pass (G7's Actions twin; sabotage 519).
+- **Caches** (`actions/cache`, per job): `<proj>/deps`, `<proj>/_build` and (dialyzer jobs) `<proj>/priv/plts`
+  for the projects the job's steps touch (`cwd`, `app:` inputs, or `actions_dirs`), keyed by OS +
+  exact OTP + exact Elixir + job + `hashFiles('**/mix.lock')`, with a same-job prefix as restore key. A
+  restored `_build` cannot go stale against sources the way a hand-rolled cache can: checkout runs
+  after the cache was written, so every source file is newer than the compile manifest and mix
+  re-checks it by content, exactly as in a warm local tree; a lockfile or toolchain change misses the key.
+  PLT staleness stays `dialyzer_gate.sh`'s own rule (lockfile hash + the samen_core source stamp). The
+  driver's `_ci/cache` is **never** restored: `pr` in Actions is always cold (`--no-cache`).
+  Behaviour measured: first run = miss everywhere (`Cache not found`); a later run on the same PR =
+  `Cache restored successfully` (86–118 MB per job); a push-triggered run cannot read a pull-request-scoped
+  cache, and a nightly run on `main` seeds the default-branch scope every PR can read.
+- **Nightly** (`nightly.yml`: `schedule` 03:17 UTC + `workflow_dispatch`; `permissions: contents: read`):
+  `scripts/ci full`, the same jobs as `pr` (minus the two `--changed` jobs) plus `multinode` and **24
+  sabotage-corpus slices + 6 mutation-watch-list slices**. A slice is `scripts/ci full --only-steps
+  sabotage_corpus --slice i/24`: balanced chunks that never split a duplicated patch number
+  (`actions_slices = 24` in the manifest), each asserting `PROCESSED == its chunk`. `ci-full` sums the
+  slices and fails unless the sum equals the lister's total **and** (for the corpus) `ls
+  scripts/sabotages/*.patch | wc -l` — C7's Actions twin. The summary prints every slice's count.
+- **Third-party actions are pinned to full SHAs** with version comments (`actions/checkout` v7.0.1,
+  `actions/cache` v6.1.0, `actions/upload-artifact` v7.0.2, `actions/download-artifact` v8.0.2,
+  `erlef/setup-beam` v1.24.1).
+
+**Exclusions: none.** Nothing in `pr` or `full` had to be excluded. The AI eval and the five adapters
+run keyless (fail-honest: no model/provider key is read), `multinode` boots two BEAM nodes on one hosted
+runner, and the gen-app probes only need git + a Postgres they can reach. `actions_skip = <reason>` exists
+(and is tested) for the first step that genuinely cannot run there; it would be listed in every job summary.
+
+**Linux portability fixes** (macOS behaviour unchanged): `scripts/ci_test.sh` used `bc` (absent on a
+clean Linux box; now `awk`); `dialyzer_gate.sh` assumed deps were already fetched by an earlier step (now
+`mix deps.get` itself — a no-op when present — and prints the log tail when dialyzer dies without a
+warning line, instead of a bare `FAILED`). Everything else the audit flagged was already portable:
+`shasum`/`mktemp`/`sed -i.bak`/`sort -V`/`date +%s` behave the same on the runner; `cp -Rpc` (APFS clone)
+falls back to `cp -Rp`. Two environment facts the configs hard-wire: they connect as `$USER@localhost`
+and `aud_event` revokes from role `clank`, so the service container's superuser is `clank` and the jobs set
+`USER=clank PGUSER=clank PGHOST=localhost`.
+
+**Sabotages 514–522** (all flip their named `ci_driver_guard_test.exs` test and restore byte-exact):
+514–516 A1 (no job / job AND exclusion / exclusion without a reason), 517–518 + 522 A2 (a planned step
+no job ran / a wrong base / `--only-steps` selecting a group), 519 G7 (`--require-base` ignored), 520–521
+A3 (slice sum unchecked / independent total unchecked).
+
+**Measured on GitHub** (`ubuntu-24.04`, 4 vCPU, `-j 2` per job):
+
+| Run | Result | Wall |
+|---|---|---|
+| `pr`, first run, every cache cold | 15 of 18 jobs green; dialyzer jobs 13–16 min (cold PLTs), samen_core 6.5 min | 16.8 min |
+| `pr`, same PR, caches warm | 18/18 + `ci-pr` green | 14.7 min (longest job `sabotage_changed` 14.3 min: replays this PR's own new patches) |
+| `pr`, warm, shared with a concurrent nightly | `ci-pr` green after rerunning one job (below) | 20.3 min |
+| `nightly`, cold (branch scope) | 47/47 jobs green, coverage PASS: 515/515 patches, 166/166 mutants | 32.0 min incl. queueing behind the 20-runner cap; dialyzer cold 16–23 min |
+| `nightly`, warm | 47/47 jobs, `ci-full` coverage PASS | 14.9 min |
+
+Warm per-job (s): preflight 89 · spikes 60 · samen_core 195 · adapters 60 · dialyzer_* 60–104 ·
+app_samen_web 132 · app_demo 100 · app_driftwood 166 · app_pawchart 78 · gen_flagship 376 · gen_probes 584 ·
+sabotage 63 · mutation 81 · mutation_changed 57; nightly slices 145–578 (sabotage) and 408–478 (mutation).
+The ≤ 30 min target holds warm (14.9 min); a cold cache costs ≈ 17 extra minutes once, dominated by the
+ten PLTs.
+
+**Known flake, surfaced not hidden.** One `pr` run failed `samen_core` as `FLAKY (passed on rerun)` —
+`delivery_provider_test.exs:196` (an `aud_event` insert whose sandbox owner exited). The driver did what
+C5 requires (a flaky test still fails the run); the job was re-run and passed. Pre-existing, not touched by
+this phase; worth its own fix.
+
+**Not in P2 / risks.** Branch protection is the operator's call: require `ci-pr`. `sabotage_changed` and
+`mutation_changed` are one job each, so a PR touching most of samen_core replays hundreds of patches in a
+single job (hours; the corpus slicing is nightly-only). The nightly must run on `main` once to seed the
+default-branch caches.
+
 ## 3. Red paths (each with a test; sabotage where it guards a property)
 
 | # | Must fail when |
@@ -266,13 +365,19 @@ DB), named in `samen_core/test/meta/ci_driver_guard_test.exs`; sabotages 496 (C1
 506–507 (C1), 508 (C2), 509–510 (C6), 511 (EQUIV: declared tree-wide reads) and 512 (C3: a FAIL
 evicts the cached PASS of the same content) likewise.
 | C10 | counts in CLAUDE.md drift without `quick` failing |
+| A1 | the Actions plan lets a step sit in no job, in two places, or be excluded without a reason |
+| A2 | the Actions aggregate passes though a planned step did not run, ran twice, ran on the wrong base, or a job failed |
+| A3 | sliced corpus: the slices' processed counts sum to ≠ the selected total (C7's Actions twin) |
+
+P2 (as built): A1–A3 are cases of `scripts/ci_test.sh` (named in `ci_driver_guard_test.exs`); sabotages
+514–522 flip them (§2.9 "Actions").
 
 ## 4. Phasing (one PR each, all off `main`, none stacked; each phase gated adversarially)
 
 | Phase | Content |
 |---|---|
 | P1 | Measure every step (cold + warm). Manifest, `scripts/ci` (quick/pr/full, budget/resume, cache, verdict digests, `_ci/last.json`, flake classification), `ci.sh`/`ci-fast.sh` as wrappers. C1–C6, C9. |
-| P2 | GitHub Actions: `pr.yml` + `nightly.yml` (sharded corpus + mutation), caches, pgvector service; proven green on its own PR. |
+| P2 | **BUILT (PR #88).** GitHub Actions: `pr.yml` + `nightly.yml` (sharded corpus + mutation), caches, pgvector service; proven green on its own PR. |
 | P3 | Sabotage/mutation ergonomics: N-lane corpus, `sabotage new`, `sabotage reanchor`, `scripts/counts`. C7, C8, C10. |
 | P4 | CLAUDE.md "Suites / CI" rewritten around the three modes (shorter, not longer); `docs/ci.md`; before/after numbers for a typical round. |
 
