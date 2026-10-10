@@ -9,6 +9,8 @@ on:
   schedule:
     - cron: "17 3 * * *"   # once a night, UTC
   workflow_dispatch:
+  push: # TEMPORARY (ADR-053 P2 proof run) - removed before the PR is ready
+    branches: [feat/adr-053-p2-actions]
 
 permissions:
   contents: read
