@@ -478,6 +478,17 @@ def clone_step(step, sid):
     return s
 
 
+def per_item_bucket(old, rate):
+    """The learned per-item cost, as a power-of-two bucket with hysteresis. Chunk boundaries are
+    part of every sub-step's cache key, so the rate must not wobble with machine noise: it moves UP
+    as soon as one run is slower than the bucket, and DOWN only when a run is under a quarter of it."""
+    old = float(old or 0)
+    fit = 2.0 ** math.ceil(math.log(max(rate, 0.01), 2))
+    if rate > old or (old and rate < old / 4):
+        return fit
+    return old
+
+
 def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
     """A long internal loop → budget-sized sub-steps. Unbudgeted (budget 0) a step with an
     unsharded_cmd runs it as ONE step, exactly the pre-ADR-053 command."""
@@ -837,7 +848,7 @@ class Run(object):
             seen = read_json(tp) or {}
             seen[step.id] = round(dur, 1)
             if rc == 0 and step.parent and step.expected:
-                seen[step.parent + "#per_item"] = round(dur / step.expected, 2)
+                seen[step.parent + "#per_item"] = per_item_bucket(seen.get(step.parent + "#per_item", 0), dur / step.expected)
             atomic_write_json(tp, seen)
         if rc == 0:
             # C2: cache only if the step's inputs did not change while it ran

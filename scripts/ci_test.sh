@@ -175,14 +175,23 @@ case_C1() {
   # (a chunk that outgrows a tool call is one resume can never finish)
   mkrepo c1r
   { echo "$APPS"
-    printf '[step slowsh]\ncmd = sleep 1.5; echo "PROCESSED 3"\n'
+    printf '[step slowsh]\ncmd = r="${CI_SHARD_ARGS#--range }"; n=$(( ${r#*-} - ${r%%%%-*} + 1 )); sleep "$(echo "0.6 * $n" | bc)"; echo "PROCESSED $n"\n'
     printf 'shard_list = printf "  1-a.patch x\\n  2-b.patch x\\n  3-c.patch x\\nSELECTED 3\\n"\nshard_kind = ranges\nshard_each_s = 0.2\nshard_target_s = 1\n'
     printf 'shard_item = ^  ([0-9]+-\\S+\\.patch)\\s\nshard_total = ^SELECTED ([0-9]+)$\n'
     printf 'shard_check = ^PROCESSED ([0-9]+)$\nmodes = pr\ninputs = core/\nest_s = 3\n'; } > "$SAMEN_CI_MANIFEST"
   drive "$T/o20" pr -j 1
   has "$T/o20" '^PASS slowsh\[1/1\] ' "C1: first run — one chunk on the manifest estimate"
   drive "$T/o21" pr --plan --no-cache
-  has "$T/o21" '^PLAN slowsh\[1/[23]\] ' "C1: ... re-chunked smaller once the observed per-item rate is known"
+  has "$T/o21" '^PLAN slowsh\[1/3\] ' "C1: ... re-chunked smaller once the observed per-item rate is known"
+  drive "$T/o22" pr -j 1
+  has "$T/o22" '^CI\(pr\): PASS 3/3' "C1: the re-chunked run passes"
+  drive "$T/o23" pr -j 1
+  eq "$(grep -c '^CACHED slowsh\[' "$T/o23")" 3 "C1: ... and the chunking is STABLE: the next run is all CACHED (no re-learn churn)"
+  # the learned rate moves in power-of-two buckets with hysteresis — chunk boundaries (part of every
+  # sub-step's key) must not wobble with run-to-run noise (26.8 s then 28.1 s re-chunked a warm pr)
+  eq "$(python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import ci_driver as c; b = c.per_item_bucket
+print(b(0, 26.78), b(32, 28.1), b(32, 17), b(32, 33), b(32, 7.9))' "$ROOT/scripts")" "32.0 32.0 32.0 64.0 8.0" \
+     "C1: per-item buckets: learn 26.8→32; noise (28.1, 17) keeps 32; slower (33)→64; much faster (7.9)→8"
 
   # a step that swallows the driver's SIGTERM in a trap and exits 0 was INTERRUPTED, not PASSED:
   # never PASS, never cached, re-run by resume
