@@ -558,8 +558,12 @@ def build_plan(man, mode, ctx, opts, quiet=False):
             plan.extend(expand_shards(s, ctx, mode, budget, man.apps))
         else:
             plan.append(s)
+    seen = read_json(os.path.join(HOME, "timings.json")) or {}
     for s in plan:
         s.key = ctx.key(s, man.apps)
+        # the budget plans with max(manifest est, last observed wall-clock): a step that ran long
+        # once is never again scheduled into a slot it cannot finish in
+        s.est = max(s.est, float(seen.get(s.id, 0)))
     return plan, skipped
 
 
@@ -758,6 +762,11 @@ class Run(object):
             if got != step.expected:
                 rc = 97
                 note = "shard accounting: processed %s, expected %d — a sub-step that does not cover its chunk can never pass" % (got, step.expected)
+        if not self.interrupted:
+            tp = os.path.join(HOME, "timings.json")
+            seen = read_json(tp) or {}
+            seen[step.id] = round(dur, 1)
+            atomic_write_json(tp, seen)
         if rc == 0:
             # C2: cache only if the step's inputs did not change while it ran
             post = self.ctx.key(step, self.man.apps, snap=Snapshot()) if step.key else None
@@ -794,12 +803,12 @@ class Run(object):
             out("==> %s: FAILED (exit %d)" % (step.id, rc))
 
     # ── the scheduler ──
-    def execute(self):
+    def execute(self, t0):
+        """t0 = when this invocation STARTED (planning time counts against the budget too)."""
         opts, plan = self.opts, self.plan
         budget = float(opts.get("budget", 540))
         jobs = max(1, int(opts.get("jobs") or 1))
         keep_going = bool(opts.get("keep_going"))
-        t0 = time.time()
         prior = self.state.get("steps", {}) if self.resumed else {}
         pending = []
         for s in plan:
@@ -911,6 +920,7 @@ def final_line(mode, opts, plan, status, elapsed, first_fail):
 
 
 def cmd_run(mode, opts, resume=False):
+    t_start = time.time()
     os.makedirs(HOME, exist_ok=True)
     lockf = open(os.path.join(HOME, "lock"), "w")
     try:
@@ -975,7 +985,7 @@ def cmd_run(mode, opts, resume=False):
             out("PLAN %s est %s — %s%s" % (s.id, fmt_s(s.est), how, " (serial)" if s.serial else ""))
         out("CI(%s): plan only — %d step(s), nothing run" % (mode, len(plan)))
         return 0
-    t0, pending, stop_reason = run.execute()
+    t0, pending, stop_reason = run.execute(t_start)
     elapsed = time.time() - t0
     state["cumulative_s"] = round(state.get("cumulative_s", 0.0) + elapsed, 1)
     first_fail = next((s.id for s in plan if run.status.get(s.id) in ("FAIL", "FLAKY")), None)
