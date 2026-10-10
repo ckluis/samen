@@ -175,7 +175,7 @@ case_C1() {
   # (a chunk that outgrows a tool call is one resume can never finish)
   mkrepo c1r
   { echo "$APPS"
-    printf '[step slowsh]\ncmd = r="${CI_SHARD_ARGS#--range }"; n=$(( ${r#*-} - ${r%%%%-*} + 1 )); sleep "$(echo "0.6 * $n" | bc)"; echo "PROCESSED $n"\n'
+    printf '[step slowsh]\ncmd = r="${CI_SHARD_ARGS#--range }"; n=$(( ${r#*-} - ${r%%%%-*} + 1 )); sleep "$(awk "BEGIN{print 0.6 * $n}")"; echo "PROCESSED $n"\n'
     printf 'shard_list = printf "  1-a.patch x\\n  2-b.patch x\\n  3-c.patch x\\nSELECTED 3\\n"\nshard_kind = ranges\nshard_each_s = 0.2\nshard_target_s = 1\n'
     printf 'shard_item = ^  ([0-9]+-\\S+\\.patch)\\s\nshard_total = ^SELECTED ([0-9]+)$\n'
     printf 'shard_check = ^PROCESSED ([0-9]+)$\nmodes = pr\ninputs = core/\nest_s = 3\n'; } > "$SAMEN_CI_MANIFEST"
