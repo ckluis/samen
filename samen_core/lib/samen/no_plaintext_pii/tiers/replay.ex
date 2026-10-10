@@ -451,5 +451,4 @@ defmodule Samen.NoPlaintextPii.Tiers.Replay do
   end
 
   defp error_kind(%{__struct__: mod}), do: mod
-  defp error_kind(other), do: other
 end
