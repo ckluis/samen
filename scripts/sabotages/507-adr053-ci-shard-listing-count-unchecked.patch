@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-053 C1 (gate G3) — a sharded step trusts whatever its item regex scraped from the lister and
+# stops cross-checking it against the lister's OWN count: when the listing format drifts, the run
+# replays a different (smaller, even empty) selection than the one listed and still PASSes.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C1 budget/resume never reports PASS over a deferred, interrupted or unrun step
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index c88cdcc..6f11749 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -514,9 +514,6 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
+     total = int(totals[0])
+     if step.shard_kind == "ranges":
+         items = [m.group(1) for m in re.finditer(step.shard_item, text, re.M)]
+-        if len(items) != total:
+-            return listing_fail("shard listing accounting: the lister says %d selected, shard_item /%s/ matched %d "
+-                                "— refusing to run a different selection than the one listed" % (total, step.shard_item, len(items)))
+     else:
+         items = [str(total)]
+     if step.shard_kind == "ranges":

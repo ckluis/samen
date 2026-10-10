@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 EQUIV (gate G1) — samen_web's step drops its declared tree-wide reads: its suite's
+# Authz.ReadScopeLint / Reads.Lint sweep demo/driftwood/pawchart lib/, so an unscoped read added
+# to a vertical leaves samen_web CACHED and `scripts/ci pr` PR-READY over a red lint.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: the wrappers keep the pre-ADR-053 step list and markers
+diff --git a/ci/steps.conf b/ci/steps.conf
+index 72af9ba..58ba61f 100644
+--- a/ci/steps.conf
++++ b/ci/steps.conf
+@@ -465,7 +465,6 @@ modes = quick fast pr full
+ inputs = app:samen_web
+ # tree-wide lint sweeps in its suite: Authz.ReadScopeLint globs demo/driftwood/pawchart lib/,
+ # Reads.Lint globs the verticals' *reads.ex — a vertical lib/ edit can break THIS suite
+-reads = demo/lib/ driftwood/lib/ pawchart/lib/
+ locks = db:samen_web_test
+ marker = ==> samen_web gate: PASSED
+ exunit_dir = samen_web

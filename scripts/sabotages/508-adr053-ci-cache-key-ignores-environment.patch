@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 C2 (gate G4) — the cache key stops hashing the behaviour-changing environment: a PASS
+# earned under SAMEN_UPDATE_GOLDEN=1, SAMEN_EMPTY_ASH_DOMAINS=1, a stub SAMEN_MUTATION_RUNNER or
+# another PGHOST is reported CACHED for a run without it.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C2 the cache invalidates on any input change, an untracked file, a definition change
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index c88cdcc..bbd0bb5 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -447,7 +447,6 @@ class Context(object):
+         h = hashlib.sha256()
+         h.update(json.dumps(step.definition(apps), sort_keys=True).encode())
+         h.update(b"\0toolchain\0" + self.toolchain.encode())
+-        h.update(b"\0env\0" + self.env_fp.encode())
+         h.update(b"\0files\0" + dig.encode())
+         if "@base" in rules:
+             h.update(("\0base\0%s\0%s" % (self.base_sha, self.merge_base)).encode())

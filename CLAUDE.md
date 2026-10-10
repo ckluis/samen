@@ -23,7 +23,7 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
   the final line is `CI(pr): PASS n/n … — PR-READY`. Content-cached (`--no-cache` forces), failures
   print a digest + `_ci/logs/<step>.log`, verdict in `_ci/last.json`. Steps live in `ci/steps.conf`
   (`scripts/ci list pr`, `scripts/ci explain <step>`); `./ci.sh` / `./ci-fast.sh` are unbudgeted
-  wrappers over it with the same markers. Driver red paths: `scripts/ci_test.sh` (sabotages 496–505).
+  wrappers over it with the same markers. Driver red paths: `scripts/ci_test.sh` (sabotages 496–511).
 - Toolchain floor: `.tool-versions` (Elixir 1.20.4 / OTP 29.1.1). `ci.sh` and `ci-fast.sh` run
   `scripts/toolchain_check.sh` FIRST and fail on an older Elixir or OTP; raise the pin when upgrading.
 - Prerequisite: a local Postgres server WITH the `pgvector` extension installed (`CREATE
@@ -47,7 +47,7 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
   replays every shipped gate sabotage (`scripts/sabotages/*.patch`): apply → the NAMED
   tests must FAIL → revert → SHA-256 byte-exact restore. Gates add new sabotages as
   patches (header lines: APP / TEST_FILES / MUST_FAIL) instead of re-deriving them.
-  Default (no args) = the full harness (count: `ls scripts/sabotages/*.patch | wc -l` — **498**
+  Default (no args) = the full harness (count: `ls scripts/sabotages/*.patch | wc -l` — **504**
   as of 2026-10-10). At that count the full serial run exceeds the 600s single tool-call ceiling,
   so certify it **backgrounded** or in **chunks**
   via additive selection flags (different FLAGS compose as an intersection; repeating the SAME

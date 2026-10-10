@@ -1,0 +1,30 @@
+# SABOTAGE: ADR-053 C6 (gate G6) — the driver no longer claims _ci/last.json when it starts nor marks it ERROR
+# when it dies: a run that errors before its verdict (manifest error, crash) leaves the PREVIOUS
+# run's PASS in last.json — the file every agent is told to read for the verdict.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C6 a wrapper never prints ALL PASSED after a failed step, concurrent ones included
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index c88cdcc..935dea8 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -997,7 +997,7 @@ def cmd_run(mode, opts, resume=False):
+     # RUNNING (or ERROR), never an earlier PASS for a tree it did not run.
+     # (--plan runs nothing and reports nothing: it leaves last.json alone.)
+     last_path = os.path.join(HOME, "last.json")
+-    if not opts.get("plan"):
++    if False:
+         atomic_write_json(last_path, {"mode": mode, "verdict": "RUNNING", "resume": bool(resume),
+                                       "pid": os.getpid(), "started": time.strftime("%Y-%m-%dT%H:%M:%S")})
+     holder = {}
+@@ -1008,7 +1008,7 @@ def cmd_run(mode, opts, resume=False):
+         if run is not None and run.running:
+             run.interrupted = True
+             run.terminate_all()  # never orphan a step (start_new_session: nothing else would stop it)
+-        if opts.get("plan"):
++        if True:
+             raise
+         atomic_write_json(last_path, {"mode": mode, "verdict": "ERROR", "error": "%s: %s" % (type(e).__name__, e),
+                                       "final_line": "CI(%s): ERROR — the driver stopped before a verdict: %s" % (mode, e)})
