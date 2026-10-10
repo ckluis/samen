@@ -558,8 +558,8 @@ def build_plan(man, mode, ctx, opts, quiet=False):
             else:
                 skipped.append((s, "not affected"))
         cand = keep
-    for s in man.steps:
-        if s not in cand and s.skip_marker and s.id not in ids and not only:
+    for s in man.steps:  # opt-in tiers are a pr-mode notion (./ci.sh's SAMEN_* flags)
+        if mode == "pr" and s not in cand and s.skip_marker and s.id not in ids and not only:
             skipped.append((s, "opt-in: not in %s" % mode))
     plan = []
     budget = opts.get("budget", 540)
@@ -1056,7 +1056,7 @@ def cmd_list(mode, opts):
                 if s.group and last_in_group.get(s.group) == s.id:
                     for m in man.groups.get(s.group, {}).get("markers", []):
                         out(m)
-            elif s.skip_marker and mode:
+            elif s.skip_marker and mode == "pr":
                 out(s.skip_marker)
         return 0
     out("%-28s %-20s %7s %-6s %-12s %s" % ("STEP", "MODES", "EST_S", "SERIAL", "GROUP", "LOCKS"))

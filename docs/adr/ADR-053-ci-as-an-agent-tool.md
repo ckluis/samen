@@ -4,7 +4,10 @@
   drive this one completely"), with the goal: quality maximal for building a real B2B SaaS on
   Samen, with as little pain as needed — but not less than needed.
 - **Date:** 2026-10-10
-- **Build status:** P1 in progress on `feat/adr-053-ci-modes`.
+- **Build status:** **P1 BUILT** on `feat/adr-053-ci-modes` (2026-10-10): `ci/steps.conf` +
+  `scripts/ci` (quick / fast / pr / full, budget + resume, content cache, digests, FLAKY, locks,
+  `_ci/last.json`), `./ci.sh` + `./ci-fast.sh` as wrappers; red paths C1–C6, C9 in
+  `scripts/ci_test.sh` with sabotages 496–505; measured timings §1.1, as-built §2.9. P2–P4 open.
 
 ---
 
@@ -24,6 +27,37 @@ The gates are right; the *tooling around them* taxes every round:
 | Mode confusion | `ci-fast.sh` vs `ci.sh` vs `SAMEN_SABOTAGE=1` vs `SAMEN_MUTATION=1` vs `--changed` — the right combination for "am I done with this round?" vs "is this PR mergeable?" lives in prose. |
 
 Machine: 10 cores, 16 GB. Tooling available everywhere we run: bash, git, jq, python3 (stdlib).
+
+### 1.1 Measured: what every step of today's gate costs (P1 step 0, 2026-10-10)
+
+Every step of the pre-ADR-053 `ci.sh` + `ci-fast.sh`, run ONE AT A TIME (`scripts/ci pr -j 1
+--no-cache`, same commands, resumed across three tool calls each) on this branch. *Cold-ish* = the
+first run after switching to the branch with `_build`/PLTs as the previous session left them (a
+from-scratch `_build` adds compile time not measured here); *warm* = the immediate re-run. The
+spread between the two is mostly machine noise (driftwood 92 → 140 s), not caching. Seconds:
+
+| Step | cold-ish | warm | | Step | cold-ish | warm |
+|---|---:|---:|---|---|---:|---:|
+| gen_flagship_probe | 164.8 | 169.8 | | samen_web gate | 57.5 | 89.2 |
+| driftwood gate | 92.4 | 139.8 | | demo gate | 63.6 | 35.4 |
+| sabotage `--changed` (10 patches, new in `pr`) | 118.9 | 115.3 | | pawchart gate | 28.3 | 40.9 |
+| gen_post_probe | 99.1 | 95.8 | | mutation_selection_test | 37.5 | 35.7 |
+| gen_deploy_probe | 92.5 | 76.7 | | sabotage_selection_test | 35.1 | 32.2 |
+| samen_core suite | 90.0 | 87.5 | | ci_selftest (new) | 35.8 | 35.9 |
+| dialyzer, 10 projects (sum) | 85.5 | 72.6 | | spikes, 7 (sum) | 22.2 | 14.1 |
+| adapters, 5 (sum) | 26.4 | 15.1 | | preflight: toolchain, double sweep + test, apply-check, lanes test, mutation lint (sum) | 20.9 | 21.2 |
+| AI tier + 3 verifiers (sum) | 7.6 | 6.1 | | gen_agent_probe | 8.2 | 5.4 |
+
+- **Serial sum, all 46 `pr` steps:** 1086 s cold-ish / 1089 s warm (≈ 18 min).
+- **Old `./ci.sh`, as it ran:** a sequential prefix of 632–690 s, then the four app gates
+  concurrently (92–140 s each alone, slower together) — ≈ 13 min. It could never fit one 600 s
+  tool call; every agent hand-segmented it.
+- **Old `./ci-fast.sh`:** 174–195 s serial — fits.
+- **Planning overhead** of the driver itself: toolchain probe ~0.9 s; `sabotage.sh --changed
+  --list` 15 s and `mutate.sh --changed --list` 20 s (cached by content since — §2.9).
+
+These numbers seed `est_s` in `ci/steps.conf` (`ceil(1.15 × max)`); the scheduler then plans with
+`max(est_s, last observed)` from `_ci/timings.json`.
 
 ## 2. Decision
 
@@ -95,6 +129,87 @@ worktrees with warm `_build`), keeping per-patch semantics and total accounting.
   matrix** (the harness already has `--shard`/ranges), results summarised in the job summary.
 - Branch protection (required checks) is the operator's call; this ADR only makes it possible.
 
+### 2.9 As built (P1) — deviations, manifest format, dependency graph
+
+**Manifest** — `ci/steps.conf`, not a TSV: python3's stdlib `configparser` (interpolation off), one
+`[step id]` stanza per step, continuation lines for multi-line commands and markers. A step is
+`cmd`, `cwd`, `modes`, `inputs`, `reads`, `always`, `serial`, `locks`, `est_s`, `group`,
+`marker`/`marker_if`/`skip_marker`, `echo_log`, `exunit_dir`, `superseded_by`, and for long
+loops `shard_list`/`shard_kind`/`shard_each_s`/`shard_target_s`/`shard_check`/`unsharded_cmd`.
+Unknown keys are an error (a typo can never become "no inputs"). A TSV row would have been ten
+columns with 300-character cells; nobody could review one in a diff. `scripts/ci list [mode]`,
+`scripts/ci explain <step>` (expanded inputs, current key, cache hit, why quick would select it).
+
+**Dependency graph** — `[app]` stanzas, verified against every `mix.exs` path dep:
+
+| App | path-deps on | A change here selects (quick) |
+|---|---|---|
+| samen_core | — | everything below + the samen_core lane (suite, AI tier, verifiers, doc tests) |
+| samen_web | samen_core | samen_web, driftwood, pawchart, gen probes |
+| demo | samen_core | demo (demo does NOT depend on samen_web) |
+| driftwood · pawchart | samen_core, samen_web | itself |
+| samen_stripe · postmark · ses · resend · anthropic | samen_core | itself |
+| spikes/sNN | — | itself |
+| docs/, *.md | — | `doc_tests` (quick-only: doc_commands + doc_recipes) |
+| index.html | — | only the whole-tree steps (double sweep, apply-check); there is no landing check to select |
+
+`app:X` expands to X's directory plus every TRANSITIVE dep's directory minus that dep's `test/`
+(deps compile `lib` only; no dependant reads a framework test file — checked). Selection and the
+cache key both use it, so they cannot disagree.
+
+**Deviations from §2.1–§2.6, and why**
+
+1. **`inputs` vs `reads`.** The samen_core suite is not self-contained — doc tests read `docs/`,
+   the anti-bypass probes and tree-wide verifiers scan every app, meta tests glob `*/test/**` — so
+   its cache key is the whole tree (`reads = **`) while quick still selects it only for samen_core
+   changes. Consequence: in `pr`, a docs-only change re-runs the kernel suite (§2.4 promised it
+   would not); `quick` gives that promise via `doc_tests`. Narrowing samen_core's reads file by
+   file is follow-up work.
+2. **Order.** Serial steps are barriers, so they now form a TAIL after the parallel batch (gen
+   probes, sabotage/mutation self-tests, `--changed` replays) instead of sitting mid-script;
+   `ci.sh`'s markers are the same set (EQUIV test) in a different order.
+3. **Dialyzer** is ten per-project steps (one `dialyzer` lock — one at a time, 2–3 GB each), so a
+   vertical-only change re-checks one PLT, not ten. `ci/legacy_steps.tsv` + EQUIV prove the ten
+   together are exactly `dialyzer_gate.sh`'s default list.
+4. **Locks.** Every step with a non-root `cwd` holds `dir:<cwd>` (one mix process per project —
+   no `_build`/`deps` race; the samen_core lane runs in sequence), plus `db:<name>` per database.
+   Verified isolated: spikes s02–s06, samen_core_test, samen_web_test, demo_test (+
+   samen_pitr_drill), driftwood_test (+ two PITR drill DBs), pawchart_test; adapters use none.
+5. **Long loops.** Under a budget, `sabotage --changed` / the corpus shard by patch-number range
+   (~300 s chunks, never splitting a number — 25 and 35 are duplicated), the mutation steps by
+   `--shard i/n`; each sub-step's `PROCESSED` / `mutants run` must equal its chunk or it FAILS.
+   Unbudgeted (`./ci.sh`, `--budget 0`) they run the EXACT legacy command (`sabotage-lanes.sh` on
+   a clean tree, else the serial harness; `mutate.sh` unfiltered). A sharded watch-list skips
+   `mutate.sh`'s obsolete-ledger check (it runs only unfiltered) and the run says so.
+6. **Toolchain** is the first manifest step (serial; keyed by the elixir/OTP/psql fingerprint).
+7. **Output.** The wrappers print one verdict line per step + the legacy markers, and on failure a
+   digest + `_ci/logs/<step>.log` instead of streaming every suite. The double sweep's
+   no-origin/main banner lines are echoed (prefixed `##`) on every run.
+8. **FLAKY rerun** = `mix test <file:line>…` once in the step's `exunit_dir`; a failure with no
+   `file:line` (setup_all), or > 25 of them, is not re-run and stays FAIL.
+9. **`fast`** is a fourth mode (`./ci-fast.sh`'s subset); like `quick` it is never PR-ready. Its
+   coverage guard now derives the covered set from the manifest (`scripts/ci list fast --apps`).
+10. **Root-script guards need an ExUnit owner.** `sabotage.sh` proves a guard by NAMED `mix test`
+    failures in an APP, so `samen_core/test/meta/ci_driver_guard_test.exs` names each
+    `scripts/ci_test.sh` case (APP `samen_core`); sabotages 496–505 flip them.
+11. **Listing cache.** A sharded step's item list is cached under its parent's content key
+    (fully warm `pr`: 30.5 s → 0.5 s).
+
+**Measured, as built (this branch, `-j 5`)**
+
+| Run | Result | Wall |
+|---|---|---|
+| `scripts/ci pr --no-cache` (cold) | INCOMPLETE 44/46 → `resume` → PASS 46/46 | 496 s + 159 s (2 calls) vs 1086 s serial |
+| `scripts/ci pr` after a driver edit (`**`-keyed steps re-key) | PASS 46/46, 1 call | 355 s |
+| `scripts/ci pr`, nothing changed | PASS 46/46 (45 CACHED + 1 empty shard) | 0.5 s |
+| `scripts/ci quick --no-cache` (this branch: 11 of 46 selected, 24 SKIP) | PASS 11/11 — NOT PR-READY | 220 s (116 s of it the 10 new sabotages) |
+| `scripts/ci quick`, cached | PASS 11/11 — NOT PR-READY | 2.4 s |
+| `./ci-fast.sh --no-cache` | `CI-FAST: ALL PASSED` | 93 s |
+
+**Not in P1:** C7/C8/C10 and `sabotage new`/`reanchor`/`scripts/counts` (P3), Actions (P2), the
+CLAUDE.md rewrite (P4 — P1 adds a pointer only). `full` mode's corpus and watch-list shards were
+exercised by the fake-manifest tests and `--plan`, not end to end (hours; nightly/P2).
+
 ## 3. Red paths (each with a test; sabotage where it guards a property)
 
 | # | Must fail when |
@@ -108,6 +223,10 @@ worktrees with warm `_build`), keeping per-patch semantics and total accounting.
 | C7 | the N-lane corpus processes ≠ the selected patch count |
 | C8 | `reanchor` rewrites a patch whose named tests no longer fail under it |
 | C9 | the diff-aware selection misses an app that depends on a changed app |
+
+P1 (as built): C1–C6, C9 are cases of `scripts/ci_test.sh` (real driver, fake manifests, ~35 s, no
+DB), named in `samen_core/test/meta/ci_driver_guard_test.exs`; sabotages 496 (C1), 497–498 (C2),
+499 (C3), 500 (C4), 501 (C5), 502–503 (C6), 504–505 (C9) each flip their named test.
 | C10 | counts in CLAUDE.md drift without `quick` failing |
 
 ## 4. Phasing (one PR each, all off `main`, none stacked; each phase gated adversarially)
