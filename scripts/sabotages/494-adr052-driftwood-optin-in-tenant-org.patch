@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-052 §2.4.1 item 7 — the Driftwood dev seed writes the samen.replay opt-in row into the
+# TENANT org (Blue Ridge) again, where that tenant's own admin could edit it (and the operator-scoped
+# loader would never see it).
+#
+# Flips the named test(s).
+# APP: driftwood
+# TEST_FILES: test/replay_dev_demo_test.exs
+# MUST_FAIL: CROSS-TENANT: a tenant admin's own samen.replay row cannot change any org's capture
+# MUST_FAIL: the dev seed opts exactly its org in (the dev loader reads the seeded flag row)
+diff --git a/driftwood/lib/driftwood/seeds.ex b/driftwood/lib/driftwood/seeds.ex
+index 534b44c..42a11b7 100644
+--- a/driftwood/lib/driftwood/seeds.ex
++++ b/driftwood/lib/driftwood/seeds.ex
+@@ -312,7 +312,7 @@ defmodule Driftwood.Seeds do
+   row is left as is.
+   """
+   def seed_replay_flag(org_id) do
+-    owner = Driftwood.OperatorSeeds.operator_org_id()
++    owner = org_id
+     actor = %{org_id: owner, role: :admin, plane: :tenant, kind: :tenant}
+     name = Samen.Replay.flag_name()
+ 

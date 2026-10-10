@@ -1,0 +1,24 @@
+# SABOTAGE: ADR-052 §2.4.1 item 7 — with no owner org configured the flag loader falls back to the first
+# row of any org instead of failing safe OFF (:no_flag_owner).
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/feature_flags_engine_test.exs
+# MUST_FAIL: no owner configured is OFF, never the first row of any org
+diff --git a/samen_core/lib/samen/feature_flags/cache.ex b/samen_core/lib/samen/feature_flags/cache.ex
+index e8fc479..bae3c37 100644
+--- a/samen_core/lib/samen/feature_flags/cache.ex
++++ b/samen_core/lib/samen/feature_flags/cache.ex
+@@ -191,9 +191,11 @@ defmodule Samen.FeatureFlags.Cache do
+         {:error, :no_flag_module}
+ 
+       true ->
++        require Ash.Query
++
+         case owner_org_id(opts) do
+           {:ok, owner} -> load_via_ash(flag_module, flag_name, owner)
+-          :error -> {:error, :no_flag_owner}
++          :error -> flag_module |> Ash.Query.filter(name == ^flag_name) |> Ash.read(authorize?: false) |> then(fn {:ok, [f | _]} -> {:ok, to_config(f)}; {:ok, []} -> {:ok, nil}; e -> e end)
+         end
+     end
+   rescue
