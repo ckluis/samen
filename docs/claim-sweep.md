@@ -61,6 +61,8 @@ overclaim, but the outward face should be accurate, so it was corrected.*
 | Test counts: 2,786 kernel · 1,773 framework · 631 demo · 251 freight · 125 vet | `index-html-rebuild-verdict.json`: "internally consistent, plausible, not re-run this pass" | SUPPORTED-as-of-rebuild (see §5 note) |
 | "This is a foundry on an open pre-merge branch, not a deployed product" (honest-edges) | true of the branch; recontextualizes every "live/port/HTTP 200" | SUPPORTED — the load-bearing honesty framing |
 | **New** compliance-posture section — GDPR-relevant capabilities / supports your SOC 2 journey | each card cites a claim-evidence anchor or verdict; honesty-boundary callout leads | SUPPORTED — control-posture framing only, no certification claim |
+| **New** `#replay` — session replay demo (ADR-052, labelled "pre-merge · lands with PR #83"): one recording, four viewers, 0 plaintext values stored; per-subject reveal grant; `[erased]` after shred with rows unchanged; impersonation-gated, one `replay.viewed` row per open; off by default; 74 sabotages (421–494) | claim-evidence §P RP1–RP10 (tests, sabotages, the exporter `scripts/landing/replay_demo_export_test.exs`) | SUPPORTED — evidence lives on `feat/adr-052-replay` until #83 merges |
+| `#replay` — the screen is a CSS redraw of the player's frame; masked/erased email/phone print "—" | claim-evidence §P RP11/RP12 — both disclosed in the section's figcaption | HONEST RESIDUE (disclosed) |
 
 ---
 
