@@ -1,0 +1,12 @@
+==> All spikes passed.
+==> CI-FAST: ALL PASSED
+==> sabotage apply-check: PASSED
+==> samen_core: PASSED
+==> samen_web gate: PASSED
+==> spike s00_smoke: PASSED
+==> spike s02_transformer: PASSED
+==> spike s03_fragments: PASSED
+==> spike s04_catalog_tx: PASSED
+==> spike s05_vault: PASSED
+==> spike s06_verify: PASSED
+==> spike s07_pii_reads: PASSED

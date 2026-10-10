@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# scripts/ci — the ADR-053 CI driver: `scripts/ci quick|pr|full`, `scripts/ci resume`, `status`,
+# `list`, `explain <step>`. The logic lives in scripts/ci_driver.py (python3 stdlib); the step
+# manifest in ci/steps.conf. `exec` on the first command line: bash never reads this file again,
+# so a sabotage patching it mid-run cannot change what is already running.
+exec python3 -I "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/ci_driver.py" "$@"

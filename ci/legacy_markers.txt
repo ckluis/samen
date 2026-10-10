@@ -1,0 +1,42 @@
+==> AI eval tier: PASSED
+==> All spikes passed.
+==> Driftwood CI gate: PASSED
+==> PawChart CI gate: PASSED
+==> ROOT CI: ALL PASSED
+==> Skipping multi-node Oban proof (opt-in: SAMEN_MULTINODE=1 ./ci.sh boots the 2-node cluster)
+==> Skipping mutation gate (opt-in: SAMEN_MUTATION=1 ./ci.sh replays the tier-1 watch-list)
+==> Skipping sabotage harness (opt-in: SAMEN_SABOTAGE=1 ./ci.sh replays all gate sabotages)
+==> agent coverage verifier: PASSED
+==> demo CI gate: PASSED
+==> demo tests: PASSED
+==> dialyzer: PASSED
+==> double sweep: PASSED
+==> double-sweep regression: PASSED
+==> gen_agent probe (ADR-047 A7 — samen.gen.agent scaffold → emitted AgentCase proof + sabotage): PASSED
+==> gen_app deploy probe (WS-D D10 / AC-G16-1/2/3 — --deploy → ci.sh + fail-closed runtime + sabotage): PASSED
+==> gen_app flagship probe (WS-D D6 / AC-X-1 — generate → ci.sh → seed → boot → 2 sabotages): PASSED
+==> gen_app post-app generator probe (WS-D D7a — gen.scope + gen.resource → ci.sh + 4 G26 files + sabotage): PASSED
+==> multi-node Oban proof: PASSED
+==> mutation gate: PASSED
+==> mutation-gate preflight: PASSED
+==> mutation-gate self-test: PASSED
+==> sabotage apply-check: PASSED
+==> sabotage harness: PASSED
+==> sabotage selection regression: PASSED
+==> sabotage-lanes regression: PASSED
+==> samen_anthropic: PASSED
+==> samen_core: PASSED
+==> samen_postmark: PASSED
+==> samen_resend: PASSED
+==> samen_ses: PASSED
+==> samen_stripe: PASSED
+==> samen_web gate: PASSED
+==> spike s00_smoke: PASSED
+==> spike s02_transformer: PASSED
+==> spike s03_fragments: PASSED
+==> spike s04_catalog_tx: PASSED
+==> spike s05_vault: PASSED
+==> spike s06_verify: PASSED
+==> spike s07_pii_reads: PASSED
+==> tool-actor-identity verifier: PASSED
+==> tool-surface verifier: PASSED

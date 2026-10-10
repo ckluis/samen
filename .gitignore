@@ -39,3 +39,6 @@ _orch-*/
 # Dialyzer PLT caches (issue #73) — machine-local build artifacts, rebuilt on demand.
 # Never committed: they are ~15 MB each and embed absolute build paths.
 **/priv/plts/
+
+# ADR-053: scripts/ci state, logs and the content-addressed step cache — machine-local, never committed
+_ci/
