@@ -514,6 +514,11 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
         return listing_fail("shard listing unparseable: shard_total /%s/ matched %d time(s) %r — refusing to "
                             "guess the selection:\n%s" % (step.shard_total, len(totals), totals[:3], text[-2000:]))
     total = int(totals[0])
+    # per-item cost = max(manifest shard_each_s, the per-item rate this machine last OBSERVED): a
+    # chunk sized on an optimistic estimate could outgrow a whole tool call, and a sub-step that can
+    # never finish inside one is a sub-step `resume` can never complete
+    learned = float((read_json(os.path.join(HOME, "timings.json")) or {}).get(step.id + "#per_item", 0))
+    each = max(step.shard_each, learned)
     if step.shard_kind == "ranges":
         items = [m.group(1) for m in re.finditer(step.shard_item, text, re.M)]
         if len(items) != total:
@@ -532,7 +537,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
                 return [s]
             nums.append((int(m.group(1)), it))
         nums.sort()
-        per = max(1, int(step.shard_target // max(step.shard_each, 0.001)))
+        per = max(1, int(step.shard_target // max(each, 0.001)))
         chunks, cur = [], []
         for n, it in nums:
             # never split one number across chunks (duplicate numbers exist: 25-, 35-)
@@ -547,7 +552,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
         specs = [("--range %d-%d" % (c[0][0], c[-1][0]), [it for _n, it in c]) for c in chunks]
     else:
         count = total
-        n = max(1, int(math.ceil(count * step.shard_each / step.shard_target))) if count else 0
+        n = max(1, int(math.ceil(count * each / step.shard_target))) if count else 0
         specs = []
         for i in range(1, n + 1):
             size = len([x for x in range(count) if x % n == i - 1])
@@ -568,7 +573,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
         s.shard_args = args
         s.shard_items = its
         s.expected = sp[2] if len(sp) > 2 else len(its)
-        s.est = (s.expected * step.shard_each) + 10
+        s.est = (s.expected * each) + 10
         s.group = step.id  # the parent's markers print once every shard passed
         subs.append(s)
     return subs
@@ -831,6 +836,8 @@ class Run(object):
             tp = os.path.join(HOME, "timings.json")
             seen = read_json(tp) or {}
             seen[step.id] = round(dur, 1)
+            if rc == 0 and step.parent and step.expected:
+                seen[step.parent + "#per_item"] = round(dur / step.expected, 2)
             atomic_write_json(tp, seen)
         if rc == 0:
             # C2: cache only if the step's inputs did not change while it ran

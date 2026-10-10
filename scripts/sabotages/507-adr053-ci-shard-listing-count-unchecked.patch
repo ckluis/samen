@@ -7,11 +7,11 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: C1 budget/resume never reports PASS over a deferred, interrupted or unrun step
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index c88cdcc..6f11749 100755
+index ca1735b..70f6ee2 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -514,9 +514,6 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
-     total = int(totals[0])
+@@ -521,9 +521,6 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
+     each = max(step.shard_each, learned)
      if step.shard_kind == "ranges":
          items = [m.group(1) for m in re.finditer(step.shard_item, text, re.M)]
 -        if len(items) != total:

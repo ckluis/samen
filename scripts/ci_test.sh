@@ -171,6 +171,19 @@ case_C1() {
   has "$T/o12" 'shard listing unparseable' "C1: an unparseable modulo count FAILS"
   hasnt "$T/o12" '^CI\(pr\): PASS' "C1: ... never PASS"
 
+  # chunks are sized on the per-item rate this machine OBSERVED when that is slower than shard_each_s
+  # (a chunk that outgrows a tool call is one resume can never finish)
+  mkrepo c1r
+  { echo "$APPS"
+    printf '[step slowsh]\ncmd = sleep 1.5; echo "PROCESSED 3"\n'
+    printf 'shard_list = printf "  1-a.patch x\\n  2-b.patch x\\n  3-c.patch x\\nSELECTED 3\\n"\nshard_kind = ranges\nshard_each_s = 0.2\nshard_target_s = 1\n'
+    printf 'shard_item = ^  ([0-9]+-\\S+\\.patch)\\s\nshard_total = ^SELECTED ([0-9]+)$\n'
+    printf 'shard_check = ^PROCESSED ([0-9]+)$\nmodes = pr\ninputs = core/\nest_s = 3\n'; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/o20" pr -j 1
+  has "$T/o20" '^PASS slowsh\[1/1\] ' "C1: first run — one chunk on the manifest estimate"
+  drive "$T/o21" pr --plan --no-cache
+  has "$T/o21" '^PLAN slowsh\[1/[23]\] ' "C1: ... re-chunked smaller once the observed per-item rate is known"
+
   # a step that swallows the driver's SIGTERM in a trap and exits 0 was INTERRUPTED, not PASSED:
   # never PASS, never cached, re-run by resume
   mkrepo c1t
