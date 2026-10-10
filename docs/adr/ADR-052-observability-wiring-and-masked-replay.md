@@ -760,6 +760,14 @@ nothing).
    Sabotages 490 (any-org read), 491 (ownerless guess), 492 (ambiguous guess), 493 (ownerless
    replay config), 494 (opt-in seeded in the tenant org).
 
+8. **P4 gate: a sabotage P1 disarmed, and one more deny-on-read step.** The full harness
+   (every patch, chunked) found sabotage 302 (ADR-048 P2, "the fold rewrites ui_view")
+   vacuous. It fails the same way on `main` (82aabda). §2.1's change made a vault-routed
+   attribute's pending value a redacting `%Samen.Pii.Plaintext{}`, so 302's `is_binary/1`
+   match stopped firing. Re-anchored with the same semantics (unwrap, then re-wrap); the
+   named test flips again. The batch deny-on-read test now also revokes a grant between
+   two batches and checks the subject is masked on the next one.
+
 *Not done in P4:* a `live_render` child and stream rows are still not recorded (§7).
 
 | Red path | Sabotage | Owning test file(s) |
