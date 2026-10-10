@@ -46,7 +46,8 @@ eq()    { if [[ "$1" == "$2" ]]; then ok; else bad "$3 — got [$1], want [$2]";
 count() { grep -cxF -- "$2" "$1" 2>/dev/null || true; }
 jsonget() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2], {"d": d}))' "$@"; }
 
-# mkrepo <name> — a git repo with an explicit app graph: core ← web ← vert_a / vert_b; docs/.
+# mkrepo <name> — a git repo with an explicit app graph: core ← web ← vert_a / vert_b (the verticals
+# name ONLY web, so reaching core proves the expansion is transitive); docs/.
 mkrepo() {
   R="$T/$1"
   rm -rf "$R" "$T/$1.home"
@@ -70,10 +71,10 @@ path = web/
 deps = core
 [app vert_a]
 path = vert_a/
-deps = core web
+deps = web
 [app vert_b]
 path = vert_b/
-deps = core web
+deps = web
 '
 # step <id> <inputs> [extra key=value lines…] — a fake step that logs its run.
 step() {

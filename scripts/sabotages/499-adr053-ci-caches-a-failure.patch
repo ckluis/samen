@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 C3 — a FAILED (or FLAKY) step is written to the content cache like a PASS: the
+# next run reports it CACHED and the red never shows again until an input changes.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C3 a failing step is never cached
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 64ad0ab..7655597 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -782,6 +782,7 @@ class Run(object):
+             status = "INTERRUPTED"
+         digest = ([note] if note and status != "INTERRUPTED" else []) + make_digest(text)
+         self.record(step, status, dur, log=r["log"], digest=digest, note=note)
++        self.cache_put(step, dur)
+         if status == "INTERRUPTED":
+             out("INTERRUPTED %s %s" % (step.id, fmt_s(dur)))
+             return

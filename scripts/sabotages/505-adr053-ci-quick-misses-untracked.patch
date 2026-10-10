@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 C9 — `quick`'s changed set is `git diff --name-only` alone, without the
+# untracked-not-ignored half: a round that ADDS a file (a new module, a new test) selects nothing
+# for it and `quick` reports a confident PASS over code it never looked at.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C9 quick selection follows the dependency graph and sees untracked files
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 64ad0ab..54287cc 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -397,7 +397,7 @@ class Context(object):
+                 raise UsageError("quick needs a base: --base %s does not resolve" % self.base)
+             a = git("diff", "--name-only", "--no-renames", "-z", self.merge_base, binary=True)
+             b = git("ls-files", "--others", "--exclude-standard", "-z", binary=True)
+-            paths = {p.decode(errors="surrogateescape") for p in (a + b).split(b"\0") if p}
++            paths = {p.decode(errors="surrogateescape") for p in a.split(b"\0") if p}
+             rel_home = os.path.relpath(HOME, REPO)
+             self._changed = sorted(p for p in paths if rel_home.startswith("..") or not p.startswith(rel_home + "/"))
+         return self._changed

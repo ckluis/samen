@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-053 C9 — `app:NAME` expands to NAME's DIRECT path deps only, not the transitive
+# closure: a vertical that names samen_web (which names samen_core) no longer sees samen_core, so a
+# kernel change in `scripts/ci quick` skips that vertical as "not affected" — and its cache key
+# no longer covers the kernel either.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C9 quick selection follows the dependency graph and sees untracked files
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 64ad0ab..64bad38 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -260,7 +260,7 @@ def expand_tokens(tokens, apps):
+         elif t.startswith("app:"):
+             name = t[4:]
+             rules.add("inc:" + apps[name]["path"])
+-            for dep in transitive_deps(apps, name):
++            for dep in apps[name]["deps"]:
+                 p = apps[dep]["path"]
+                 rules.add("inc:%s|-%stest/" % (p, p))
+         else:

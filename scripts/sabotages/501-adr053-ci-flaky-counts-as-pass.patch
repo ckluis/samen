@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 C5 — a failing ExUnit test that passes on its isolated rerun is recorded as a
+# PASS instead of FLAKY: the run goes green over a test that just failed, which is exactly how a
+# seed-dependent red gets waved through as "a known flake".
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C5 a flaky test still fails the run
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 64ad0ab..2ea4405 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -774,7 +774,7 @@ class Run(object):
+         if rc != 97 and not self.interrupted:
+             flaky = self.flaky_rerun(step, text, logabs)
+             if flaky:
+-                status = "FLAKY"
++                status = "PASS"
+                 note = "FLAKY (passed on rerun) — a flaky test still FAILS the run; rerun log: %s.rerun" % r["log"]
+             elif flaky is False:
+                 note = "failed again on an isolated rerun (not a flake); rerun log: %s.rerun" % r["log"]

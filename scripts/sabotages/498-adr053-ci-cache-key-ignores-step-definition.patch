@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 C2 — the cache key stops hashing the step's own DEFINITION (cmd, cwd, expanded
+# inputs): editing what a step runs — say, dropping `--warnings-as-errors` — leaves its key
+# unchanged, so the edited step is reported CACHED on the strength of the OLD command's PASS.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C2 the cache invalidates on any input change, an untracked file, a definition change
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 64ad0ab..8d9833f 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -416,7 +416,7 @@ class Context(object):
+         snap = snap or self.snap
+         dig, _n = snap.digest(rules)
+         h = hashlib.sha256()
+-        h.update(json.dumps(step.definition(apps), sort_keys=True).encode())
++        h.update(json.dumps({"id": step.parent or step.id}, sort_keys=True).encode())
+         h.update(b"\0toolchain\0" + self.toolchain.encode())
+         h.update(b"\0files\0" + dig.encode())
+         if "@base" in rules:

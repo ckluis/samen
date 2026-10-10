@@ -1,0 +1,24 @@
+# SABOTAGE: ADR-053 C4 — every unfiltered PASS gets the `PR-READY` suffix, `quick` and `fast`
+# included, and they lose their `NOT PR-READY — run: scripts/ci pr` tail: a diff-aware subset
+# that skipped every unaffected app now claims the merge verdict only `pr` may give.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C4 quick never prints a PR-ready verdict
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 64ad0ab..ee7ae75 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -903,9 +903,9 @@ def final_line(mode, opts, plan, status, elapsed, first_fail):
+         # C1: PASS only when every planned step is PASS/CACHED — re-asserted, not inferred
+         assert all(status.get(s.id) in DONE for s in plan)
+         line, verdict = "CI(%s): PASS %d/%d in %s" % (tag, n, m, fmt_s(elapsed)), "PASS"
+-        if mode in ("pr", "full") and not opts.get("only"):
++        if not opts.get("only"):
+             line += " — PR-READY"
+-    if mode in ("quick", "fast") or (opts.get("only") and verdict == "PASS"):
++    if opts.get("only") and verdict == "PASS":
+         line += " — " + NOT_PR_READY  # C4
+     return line, verdict, n, m
+ 
