@@ -7,7 +7,7 @@
 - **Build status:** **P1 BUILT** on `feat/adr-053-ci-modes` (2026-10-10): `ci/steps.conf` +
   `scripts/ci` (quick / fast / pr / full, budget + resume, content cache, digests, FLAKY, locks,
   `_ci/last.json`), `./ci.sh` + `./ci-fast.sh` as wrappers; red paths C1–C6, C9 in
-  `scripts/ci_test.sh` with sabotages 496–512 (506–512 from the adversarial gate, §2.9 G1–G9);
+  `scripts/ci_test.sh` with sabotages 496–512 (506–512 from the adversarial gate, §2.9 G1–G10);
   measured timings §1.1, as-built §2.9. P2–P4 open.
 
 ---
@@ -224,8 +224,8 @@ has a red-path assertion in `scripts/ci_test.sh`; sabotages 506–512 flip them.
 | G6 | **Stale verdict after a driver error.** A run that died before writing a verdict (manifest error, crash) left the PREVIOUS run's `last.json` PASS in place for an agent to read; a crash also orphaned running steps (own sessions). | `last.json` = RUNNING once the lock is held, ERROR on any exception, children terminated (510). |
 | G7 | **PR-READY without a base** (see 13); a cached `@base` step also lost the double sweep's NOT RUN banner on the second run in such a clone. | NOT PR-READY when the base is missing; an `@base` step is never cached without its base. |
 | G8 | **Obsolete-ledger check skipped by a sharded watch-list** (deviation 5, as first built). | Enforced per shard in `mutate.sh`. |
-| G10 | **A shard sized on an optimistic estimate can outgrow a tool call.** `sabotage_changed` planned 16 patches × `shard_each_s` 15 s as one ~250 s sub-step; it ran 402–428 s (each ADR-053 guard patch replays ~25 s). A few more patches and one sub-step exceeds 600 s — the tool kills the invocation and every `resume` restarts the same un-finishable sub-step. | Chunks are sized on max(`shard_each_s`, the per-item rate last observed on this machine, `_ci/timings.json` `<step>#per_item`). |
 | G9 | **A red on cached content went green on the next run.** Observed in this gate's own dogfood: `./ci-fast.sh --no-cache` failed samen_core (a pre-existing order-dependent test, `live_telemetry_test.exs:463`); the very next `./ci-fast.sh` reported samen_core CACHED from the earlier `pr` PASS of the same tree and printed ALL PASSED. | A FAIL/FLAKY evicts the cached PASS under its key (512). |
+| G10 | **A shard sized on an optimistic estimate can outgrow a tool call.** `sabotage_changed` planned 16 patches × `shard_each_s` 15 s as one ~250 s sub-step; it ran 402–428 s (each ADR-053 guard patch replays ~25 s). A few more patches and one sub-step exceeds 600 s — the tool kills the invocation and every `resume` restarts the same un-finishable sub-step. | Chunks are sized on max(`shard_each_s`, the per-item rate last observed on this machine, `_ci/timings.json` `<step>#per_item`). |
 
 **Measured, as built (this branch, `-j 5`)**
 
