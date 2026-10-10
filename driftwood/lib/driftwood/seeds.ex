@@ -304,17 +304,21 @@ defmodule Driftwood.Seeds do
   end
 
   @doc """
-  Opt `org_id` into session-replay capture (ADR-052 §2.2 rule 5): the `samen.replay` flag
-  row, enabled, 0 % rollout, with ONE `allow` rule for exactly this org. Capture also needs
-  the host's `replay:` option (`config/dev.exs`). Idempotent: an existing row is left as is.
+  Opt `org_id` into session-replay capture (ADR-052 §2.2 rule 5): the OPERATOR org's
+  `samen.replay` flag row (the platform flag — `config/dev.exs` reads only the operator org's
+  rows, ADR-052 §2.4.1 item 7), enabled, 0 % rollout, with ONE `allow` rule for exactly this
+  org. The tenant org owns no row, so its admin cannot edit the opt-in (OrgScope). Capture
+  also needs the host's `replay:` option (`config/dev.exs`). Idempotent: an existing operator
+  row is left as is.
   """
   def seed_replay_flag(org_id) do
-    actor = %{org_id: org_id, role: :admin, plane: :tenant, kind: :tenant}
+    owner = Driftwood.OperatorSeeds.operator_org_id()
+    actor = %{org_id: owner, role: :admin, plane: :tenant, kind: :tenant}
     name = Samen.Replay.flag_name()
 
     exists? =
       Driftwood.Primitives.FeatureFlag
-      |> Ash.Query.filter(name == ^name)
+      |> Ash.Query.filter(name == ^name and org_id == ^owner)
       |> Ash.exists?(authorize?: false)
 
     unless exists? do
@@ -322,7 +326,7 @@ defmodule Driftwood.Seeds do
       |> Ash.Changeset.for_create(
         :create,
         %{
-          org_id: org_id,
+          org_id: owner,
           name: name,
           description: "Session replay capture (ADR-052) — recorded by reference, never by value",
           enabled: true,

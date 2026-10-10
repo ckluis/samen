@@ -30,7 +30,9 @@ defmodule Samen.Replay do
        table, no handler: the recorder is a no-op;
     2. the org's `#{"samen.replay"}` flag is ON in the feature-flag engine (ADR-020;
        `Samen.FeatureFlags.evaluate/3`, an `org_id` allow rule or a rollout). An unknown flag
-       is OFF (the engine fails safe).
+       is OFF (the engine fails safe). The flag is the OPERATOR's: `flag_opts` carries
+       `owner_org_id:` (the operator org) and only that org's `samen.replay` row is read,
+       evaluated for the recording org. A tenant's own row of that name decides nothing.
 
   Tenant plane only: the operator plane never records (the recorder is attached only on
   `TenantAuthz`'s tenant legs, and refuses an operator-plane mount itself).
@@ -231,8 +233,9 @@ defmodule Samen.Replay do
 
   @doc """
   Resolve + validate a capture configuration. Raises `ArgumentError` (fail-honest, at boot) on
-  a retention window above `max_retention_days/0` or below 1, a sample rate outside 0..1, or a
-  non-positive cap.
+  a retention window above `max_retention_days/0` or below 1, a sample rate outside 0..1, a
+  non-positive cap, or `flag_opts` naming a `:flag_module` without the operator org's
+  `:owner_org_id` (only the operator org's flag row may decide capture).
   """
   @spec config!(keyword()) :: config()
   def config!(opts) when is_list(opts) do
@@ -259,6 +262,16 @@ defmodule Samen.Replay do
       end
     end
 
+    flag_opts = List.wrap(cfg[:flag_opts])
+
+    if flag_opts[:flag_module] != nil and flag_opts[:loader] == nil and
+         not uuid?(flag_opts[:owner_org_id]) do
+      raise ArgumentError,
+            "Samen.Replay: flag_opts names a :flag_module but no :owner_org_id. The capture " <>
+              "decision is operator-governed (ADR-052 §2.4.1 item 7): pass the operator org's " <>
+              "id so only its `#{@flag}` row decides, per org. Without it the flag is OFF."
+    end
+
     %{
       sample_rate: rate / 1,
       max_frames: cfg[:max_frames],
@@ -266,9 +279,12 @@ defmodule Samen.Replay do
       max_sessions: cfg[:max_sessions],
       max_persist_tasks: cfg[:max_persist_tasks],
       retention_days: days,
-      flag_opts: List.wrap(cfg[:flag_opts])
+      flag_opts: flag_opts
     }
   end
+
+  defp uuid?(value) when is_binary(value), do: match?({:ok, _}, Ecto.UUID.cast(value))
+  defp uuid?(_), do: false
 
   @doc false
   @spec put_runtime_config(config()) :: :ok

@@ -325,6 +325,24 @@ defmodule Samen.Replay.CaptureTest do
       assert_raise ArgumentError, fn -> Replay.config!(sample_rate: 2) end
       assert_raise ArgumentError, fn -> Replay.config!(max_frames: 0) end
     end
+
+    test "fail-honest: a flag loader without the operator org as owner refuses to build" do
+      for owner <- [nil, "", "not-a-uuid"] do
+        assert_raise ArgumentError, ~r/owner_org_id/, fn ->
+          Replay.config!(flag_opts: [flag_module: Samen.Replay.Session, owner_org_id: owner])
+        end
+      end
+
+      assert_raise ArgumentError, ~r/owner_org_id/, fn ->
+        Replay.config!(flag_opts: [flag_module: Samen.Replay.Session])
+      end
+
+      # Positive control: with the owner it builds (the module is never loaded here).
+      owner = Ash.UUID.generate()
+
+      assert %{flag_opts: [flag_module: Samen.Replay.Session, owner_org_id: ^owner]} =
+               Replay.config!(flag_opts: [flag_module: Samen.Replay.Session, owner_org_id: owner])
+    end
   end
 
   describe "R12 — retention prunes replays past TTL" do
