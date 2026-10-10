@@ -687,7 +687,7 @@ explicitly deferred (convention/product, not defects). Full accounting: `_orch/t
 
 ---
 
-## P. Landing `#replay` — ADR-052 session replay (lands with PR #83)
+## P. Landing `#replay` — ADR-052 session replay (on main since PR #83)
 
 The landing section `index.html#replay` shows ONE real recording played back for four viewers. Its
 data is exported, not drawn: `scripts/landing/replay_demo_export_test.exs` records a session through
@@ -695,9 +695,12 @@ the real P2 recorder over the real `Samen.Web.CRM.ContactsLive` (fictional Blue 
 `.example` addresses), dumps every `rpf_payload` verbatim, plays the session through the real P3
 `Samen.Web.Replay.PlayerLive` for each viewer, shreds the subject with `Samen.Erasure.shred/2`, and
 reads the `replay.viewed` rows. `scripts/landing/replay_demo_section.py` turns that JSON into the
-section (counts included). Everything runs in the samen_web SQL sandbox and is rolled back. The
-evidence below lives on `feat/adr-052-replay` (HEAD `4b9d6bf`) until #83 merges — the section's
-label says "pre-merge · lands with PR #83".
+section (counts included); with `index.html` as a third argument it splices the CSS block and the
+section into the page in place, so the page is reproducible byte for byte from the export JSON.
+Everything runs in the samen_web SQL sandbox and is rolled back. #83 is merged (main `7367f72`) and
+the section no longer carries a pre-merge label. Regenerated 2026-10-10 on
+`fix/replay-placeholder-contact-cells`, after the placeholder-cell fix (RP12) — that branch also
+adds sabotage 495 (RP9).
 
 | # | Landing claim | Evidence | Verdict |
 |---|---|---|---|
@@ -709,7 +712,7 @@ label says "pre-merge · lands with PR #83".
 | RP6 | "An operator watches only inside an active impersonation session, re-checked every frame batch; tenants need an admin role in that org. No session: nothing renders, nothing is written" | `Samen.Web.Replay.Access` (§2.3.1 item 4): R9 tests in `replay_player_test.exs` ("no active impersonation session: denied — nothing read, nothing rendered, nothing written", "a session that ends mid-playback stops the next batch", "a non-admin member is denied", "a cross-org admin is denied"); sabotages **447**, **448**, **451**, **452** | **MET** |
 | RP7 | "One `replay.viewed` row per open … ids and a bounded detail, never a value. Stepping through frames writes nothing" (+ the four rows shown) | §2.3.1 item 5: `replay_player_test.exs` ("operator: one replay.viewed row per open (ids + a bounded detail), none per frame", "tenant admin: one row, the principal as actor, no impersonation correlation"); sabotages **449**, **450**. The four rows on the page are the exporter's `aud_event` rows (event type, subject, actor, correlation, detail; ids shortened for display) | **MET** |
 | RP8 | "Off until the operator opts an org in … an unknown flag is off and an off org's hooks detach. Kept 14 days by default" | §2.2.1 items 2–3, §2.4.1 items 5 and 7: `samen_core/test/replay/capture_test.exs`, `samen_core/test/feature_flags_engine_test.exs`, `driftwood/test/replay_dev_demo_test.exs`; sabotages **424** (flag), **426** (retention), **434** (hooks detach), **489** (prod never captures), **490–494** (flag ownership) | **MET** |
-| RP9 | "74 sabotages ship with it (421–494)" | `ls scripts/sabotages/4{2[1-9],[3-8][0-9],9[0-4]}-*.patch \| wc -l` → **74** on `feat/adr-052-replay` `4b9d6bf`, every one named `adr052`; the per-phase tables in ADR-052 §2.2.1/§2.3.1/§2.4.1 list each with its owning test | **MET** |
+| RP9 | "75 sabotages ship with it (421–495)" | `ls scripts/sabotages/4{2[1-9],[3-8][0-9],9[0-5]}-*.patch \| wc -l` → **75** on `fix/replay-placeholder-contact-cells`, every one named `adr052` (405–420 are ADR-052 P1 observability, not replay); the per-phase tables in ADR-052 §2.2.1/§2.3.1/§2.4.1 list each with its owning test (495: §2.3.1 item 11) | **MET** |
 | RP10 | The player shows the recorded frame in a script-free sandboxed iframe; the form frames (7–10) cannot render on the tenant plane and show the player's placeholder card | §2.3.1 items 6 and 10: `replay_player_test.exs` ("the srcdoc has no phx- binding and no script; the iframe sandbox forbids scripts", "a frame whose template raises shows a placeholder for that frame and playback continues"); sabotages **453**, **454**, **457**. The exporter records `:render_failed` for exactly those frames on both tenant viewers | **MET** |
 | RP11 | The landing screen is a **redraw** in the page's CSS (not the player's srcdoc), and shows the recorded org as "Blue Ridge Logistics" where the samen_web test host labels its workspace "Security Probe" | Stated in the section's figcaption and its source comment | 🟡 RESIDUE (presentation, disclosed) |
-| RP12 | A masked or erased email/phone prints "—" in the replay (the References line says which) | Real player output: `ContactsLive.render_email/1` / `render_phone/1` match `%Samen.Masked{}` but not `%Samen.Replay.Placeholder{}`, so a placeholder falls through to "—" — indistinguishable from "no email". Not a leak (nothing is shown), a fidelity gap; disclosed in the figcaption. Suggested follow-up on top of #83: let those helpers pass a `Placeholder` through like a `Masked` | 🟡 RESIDUE (named, not fixed — #83 frozen) |
+| RP12 | A masked or erased cell shows the player's own placeholder, `••••` or `[erased]`; "—" means there is no value (the contact created in the session has no email or phone) | **Resolved 2026-10-10** (was 🟡 RESIDUE: the email/phone helpers matched only `%Samen.Masked{}`, so a `%Samen.Replay.Placeholder{}` fell through to "—"). ADR-052 §2.3.1 item 11: `Samen.Web.ObjectRef.FieldValue.opaque/1` (`%Masked{}` or `%Placeholder{}`) backs every framework cell renderer — the CRM views delegate to `FieldValue`, the rest match the guard. Per renderer on the player's `Renderer.render/2` path with an empty-email positive control: `samen_web/test/samen/web/replay_placeholder_cells_test.exs`; end to end over the real recording: `replay_player_test.exs` ("email and phone cells: •••• without a grant, [erased] after shred"); sabotage **495**. The landing's cells are the regenerated export (masked rows `••••`, Ada Whitfield after erasure `[erased]`, the new contact "—" on every viewer) | **MET** |

@@ -12,6 +12,14 @@ defmodule Samen.Web.ObjectRef.FieldValue do
   NEVER unwraps a vault value; it only shapes values the resolver already resolved to
   PLAINTEXT (tenant plane) or left MASKED (operator plane).
 
+  The replay player (ADR-052 §2.3) rebuilds a recorded view's assigns and puts a
+  `%Samen.Replay.Placeholder{}` where a referenced value cannot be shown on the viewer's plane
+  (`••••` masked, `[erased]` shredded, `[gone]`, `[changed]`, …). It is the same kind of value
+  as a `%Masked{}` — present, but not for this viewer — so it passes through the same way
+  (`opaque/1`), and renders its own text. Without that, a masked or erased email/phone fell
+  through to "—", indistinguishable from "no email". Every framework renderer of a
+  vault-routed cell either delegates here or matches `opaque/1` instead of `%Masked{}`.
+
   The kernel PII types serialize their PLAINTEXT form as a JSON binary on the tenant plane
   (`Samen.Api.PiiResolution` reveals through the vault as the field's stored JSON), so a
   revealed `full_name` arrives as `{"first":…,"last":…}` and a revealed `emails` as a JSON
@@ -20,14 +28,22 @@ defmodule Samen.Web.ObjectRef.FieldValue do
   """
 
   alias Samen.Masked
+  alias Samen.Replay.Placeholder
 
   @doc """
-  Format a resolved `full_name` value for display. `%Masked{}` → itself (`••••`); a FullName
-  JSON binary → `"First Last"`; a plain binary → itself; nil → the `display_name` fallback or
-  the em-dash.
+  Guard: `value` is present but not shown to this viewer — a `%Samen.Masked{}` (operator
+  plane) or a `%Samen.Replay.Placeholder{}` (the replay player). A renderer returns it AS-IS;
+  it renders its own text (`••••`, `[erased]`, …) and is never a reason to print "—".
+  """
+  defguard opaque(value) when is_struct(value, Masked) or is_struct(value, Placeholder)
+
+  @doc """
+  Format a resolved `full_name` value for display. An `opaque/1` value → itself (`••••`,
+  `[erased]`, …); a FullName JSON binary → `"First Last"`; a plain binary → itself; nil → the
+  `display_name` fallback or the em-dash.
   """
   def full_name(value, display_name \\ nil)
-  def full_name(%Masked{} = m, _display_name), do: m
+  def full_name(value, _display_name) when opaque(value), do: value
 
   def full_name(json, _display_name) when is_binary(json) do
     case Jason.decode(json) do
@@ -40,8 +56,8 @@ defmodule Samen.Web.ObjectRef.FieldValue do
   def full_name(nil, _display_name), do: "—"
   def full_name(other, _display_name), do: other
 
-  @doc "Format the first email of a resolved `emails` value. `%Masked{}` passes through."
-  def email(%Masked{} = m), do: m
+  @doc "Format the first email of a resolved `emails` value. An `opaque/1` value passes through."
+  def email(value) when opaque(value), do: value
   def email(%Samen.Type.Emails{entries: entries}), do: email(entries)
 
   def email(json) when is_binary(json) do
@@ -61,8 +77,8 @@ defmodule Samen.Web.ObjectRef.FieldValue do
 
   def email(_), do: "—"
 
-  @doc "Format the first phone of a resolved `phones` value. `%Masked{}` passes through."
-  def phone(%Masked{} = m), do: m
+  @doc "Format the first phone of a resolved `phones` value. An `opaque/1` value passes through."
+  def phone(value) when opaque(value), do: value
   def phone(%Samen.Type.Phones{entries: entries}), do: phone(entries)
 
   def phone(json) when is_binary(json) do
@@ -88,7 +104,7 @@ defmodule Samen.Web.ObjectRef.FieldValue do
   dates, and falls back to `to_string/1` for anything with `String.Chars`. A value with no
   safe string form is dropped (returns nil) so the default card never raises.
   """
-  def generic(%Masked{} = m), do: m
+  def generic(value) when opaque(value), do: value
   def generic(nil), do: nil
   def generic(value) when is_binary(value), do: maybe_decode_pii(value)
   def generic(value) when is_atom(value), do: humanize_atom(value)

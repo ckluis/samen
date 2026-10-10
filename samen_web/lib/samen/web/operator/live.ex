@@ -13,6 +13,7 @@ defmodule Samen.Web.Operator.Live do
 
   import Samen.UI
   import Samen.Web.CurrentOrg, only: [switcher: 1]
+  import Samen.Web.ObjectRef.FieldValue, only: [opaque: 1]
 
   alias Samen.Web.Mount
 
@@ -156,7 +157,7 @@ defmodule Samen.Web.Operator.Live do
   def dollars(_), do: "$0.00"
 
   @doc "Render a resolved PII value (plaintext string or `%Samen.Masked{}`) — NEVER unwraps."
-  def render_name(%Samen.Masked{} = masked), do: masked
+  def render_name(name) when opaque(name), do: name
 
   def render_name(name) when is_binary(name) do
     case Jason.decode(name) do
@@ -172,7 +173,7 @@ defmodule Samen.Web.Operator.Live do
   def render_name(other), do: other
 
   @doc "Render the first email of a resolved emails value — NEVER unwraps a `%Masked{}`."
-  def render_email(%Samen.Masked{} = masked), do: masked
+  def render_email(emails) when opaque(emails), do: emails
   def render_email(%Samen.Type.Emails{entries: entries}), do: render_email(entries)
 
   def render_email(json) when is_binary(json) do

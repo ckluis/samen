@@ -10,6 +10,11 @@ A replay records what a tenant user DID in a LiveView, never the personal data t
 typed: vault-routed fields are stored as references, typed input as shape only. It is
 off by default and opt-in per org.
 
+**Credit.** Session replay was built for Samen, on Samen's principles: record by reference,
+resolve on the viewer's plane, store no plaintext. It is inspired by
+[phoenix_replay](https://github.com/elixir-vibe/phoenix_replay) by Danila Poyarkov (MIT), whose
+server-side capture shape (an `on_mount` hook plus LiveView telemetry) it builds on — with thanks.
+
 ---
 
 ## 1. Enable replay for an org

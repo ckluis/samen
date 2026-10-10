@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Lay out the landing page's #replay section from the REAL replay export.
 
-Requires ADR-052 session replay (PR #83) only to PRODUCE the input; this script itself is plain
-Python 3 (stdlib only). Input: the JSON written by scripts/landing/replay_demo_export_test.exs.
+Requires ADR-052 session replay (on main since PR #83) only to PRODUCE the input; this script
+itself is plain Python 3 (stdlib only). Input: the JSON written by scripts/landing/replay_demo_export_test.exs.
 
-    python3 -I scripts/landing/replay_demo_section.py /tmp/replay-demo/replay_demo.json /tmp/replay-demo
+    python3 -I scripts/landing/replay_demo_section.py /tmp/replay-demo/replay_demo.json /tmp/replay-demo [index.html]
 
 writes <out>/replay.css and <out>/replay.html. index.html carries them verbatim: the CSS block
 (it starts "SESSION REPLAY (ADR-052)") at the end of the head <style>, the section right before
-"<!-- 08-generate -->". Every value shown comes from the export; the script only formats, groups
+"<!-- 08-generate -->". Given a third argument, the script splices both into that file in place
+(replacing the previous block and section), so the page is reproducible byte for byte from the
+JSON. Every value shown comes from the export; the script only formats, groups
 and counts (and asserts: per-viewer screens are consistent, no seeded value is in any stored row,
 the audit rows match the impersonation sessions).
 """
@@ -544,7 +546,7 @@ section = f"""
      REAL DATA, RE-CREATED SCREEN. Every value in this section comes from one session recorded
      by the ADR-052 P2 recorder over the real Samen.Web.CRM.ContactsLive (fictional Blue Ridge
      contacts, .example addresses) and played back by the real P3 player for four viewers:
-     scripts/landing/replay_demo_export_test.exs (requires ADR-052 / PR #83), laid out by
+     scripts/landing/replay_demo_export_test.exs (ADR-052 session replay), laid out by
      scripts/landing/replay_demo_section.py. Verbatim from that
      export: the frame labels and timestamps, every rpf_payload (key order as Postgres returns it;
      long record lists elided where marked), the rendered cell text per viewer (initials, name,
@@ -556,7 +558,7 @@ section = f"""
 <section class="stage rp-sec" id="replay">
   <div class="wrap">
 
-    <span class="sec-label">Session replay &#183; ADR-052 <span class="rp-pre">pre-merge &middot; lands with PR #83</span></span>
+    <span class="sec-label">Session replay &#183; ADR-052</span>
     <h2 style="max-width:18ch">Watch what happened. <em>Never what they typed.</em></h2>
     <p class="lede" style="margin-top:24px">
       A session replay that stores values is usually the largest plaintext copy in a product &mdash; every name
@@ -566,6 +568,9 @@ section = f"""
       grants</strong>. So one recording plays back four ways &mdash; and an erased person stays erased inside it.
     </p>
     <p class="rp-tag"><b>1</b> recording <span>&middot;</span> <b>4</b> viewers <span>&middot;</span> <b>0</b> plaintext values stored</p>
+    <p class="small rp-credit">Built for Samen, on Samen&rsquo;s principles &mdash; record by reference, resolve on the
+      viewer&rsquo;s plane, store no plaintext. Inspired by <a href="https://github.com/elixir-vibe/phoenix_replay" rel="noopener">phoenix_replay</a>
+      by Danila Poyarkov (MIT), whose server-side capture shape it builds on &mdash; with thanks.</p>
 
     <div class="rp">
       <input type="radio" name="rpv" id="rpv-o" checked aria-label="Viewer: operator, no grant">
@@ -633,8 +638,9 @@ section = f"""
         cell text, reference outcomes and audit rows are exported verbatim by
         <code>scripts/landing/replay_demo_export_test.exs</code>; the screen is redrawn in this page&rsquo;s CSS (the
         player shows it in a script-free sandboxed iframe). The recording ran in a scripted test session, hence
-        milliseconds. A masked or erased email or phone prints &ldquo;&mdash;&rdquo;: ContactsLive&rsquo;s own fallback for a
-        value it cannot show &mdash; the References line says which.</p>
+        milliseconds. A masked or erased cell shows the player&rsquo;s own placeholder, <span class="rp-m">&#8226;&#8226;&#8226;&#8226;</span>
+        or <span class="rp-er">[erased]</span>; &ldquo;&mdash;&rdquo; means there is no value (the contact created in the
+        session has no email or phone).</p>
 
       <div class="rp-audit">
         <div class="rp-auh"><span class="sec-label" style="margin:0">Every open is on the record</span>
@@ -678,8 +684,8 @@ section = f"""
         <p>An operator watches only inside an active impersonation session, re-checked every frame batch; tenants need
           an admin role in that org. No session: nothing renders, nothing is written.</p>
         <p class="tiny">R9/R10 &middot; sab 447&ndash;452</p></div>
-      <div class="card"><div class="metric">74</div><div class="metric-lab">sabotages ship with it</div>
-        <p>421&ndash;494, each proving a named test fails when its guard breaks. Erasure reaches replays without deleting
+      <div class="card"><div class="metric">75</div><div class="metric-lab">sabotages ship with it</div>
+        <p>421&ndash;495, each proving a named test fails when its guard breaks. Erasure reaches replays without deleting
           them: the post-shred oracle resolves every stored reference to the erased subject and demands <code>[erased]</code>.</p>
         <p class="tiny">R8 &middot; sab 445, 486&ndash;488 &middot; <code>:post_shred_replay</code></p></div>
     </div>
@@ -723,8 +729,8 @@ css = f"""
    viewers they belong to (.vo .vg .va .ve); per-frame elements .fx.fN; recorded screens .sx.sX.
    Auto-play: 1 s per frame, {T} s loop, keyframed visibility. Reduced motion: frame 1, no loop. */
 .rp-sec{{background:radial-gradient(900px 520px at 88% 0%,rgba(59,76,202,.07),transparent 62%),var(--paper)}}
-.rp-pre{{font-size:10.5px;letter-spacing:.06em;color:var(--reveal);background:var(--reveal-wash);border:1px solid var(--reveal-line);border-radius:100px;padding:2px 9px;margin-left:8px;white-space:nowrap}}
 .rp-tag{{margin-top:22px;font-family:var(--mono);font-size:13px;letter-spacing:.04em;color:var(--muted)}}
+.rp-credit{{margin-top:12px;max-width:72ch}}.rp-credit a{{font-weight:500}}
 .rp-tag b{{font-family:var(--display);font-size:24px;font-weight:560;color:var(--ink);margin-right:3px}}
 .rp-tag span{{color:var(--rule);margin:0 8px}}
 .rp{{position:relative;left:50%;transform:translateX(-50%);width:min(1240px,calc(100vw - 32px));margin-top:38px;
@@ -954,7 +960,6 @@ css = f"""
   .rp-card td.rp-nm{{grid-area:nm}}.rp-card td.rp-em{{grid-area:em}}.rp-card td.rp-ph{{grid-area:ph;text-align:right}}
   .rp-card td.rp-co{{grid-area:co}}.rp-card td.rp-ti{{grid-area:ti;text-align:right}}.rp-card td.rp-act{{grid-area:act;text-align:right}}
   .rp-filter{{width:100%;margin-left:0}}
-  .rp-pre{{display:inline-block;margin:6px 0 0}}
   .rp-tag b{{font-size:20px}}
 }}
 @media(max-width:400px){{.rp{{width:calc(100vw - 20px)}}.rp-stage{{border-radius:16px;padding:8px}}}}
@@ -962,5 +967,23 @@ css = f"""
 
 open(f"{out}/replay.css", "w").write(css)
 open(f"{out}/replay.html", "w").write(section)
+
+if len(sys.argv) > 3:
+    # Splice into the landing page. Both outputs carry their own leading newline: the CSS block
+    # runs from the newline before its banner to </style>; the section from the newline before its
+    # banner comment to the blank line before "<!-- 08-generate -->".
+    page_path = sys.argv[3]
+    page = open(page_path, encoding="utf-8").read()
+    c0 = page.index("/* ================== SESSION REPLAY (ADR-052)") - 1
+    c1 = page.index("</style>", c0)
+    assert page[c0] == "\n" and css.startswith("\n") and section.startswith("\n"), "splice anchors"
+    page = page[:c0] + css + page[c1:]
+    h0 = page.index("<!-- ======================= SESSION REPLAY (ADR-052)") - 1
+    h1 = page.index("\n<!-- 08-generate -->", h0)
+    assert page[h0] == "\n", "splice anchors"
+    page = page[:h0] + section + page[h1:]
+    assert "<script" not in page
+    open(page_path, "w", encoding="utf-8").write(page)
+    print("spliced", page_path, len(page.encode()))
 print("distinct", N_DISTINCT, "occ", naive_occ, "css", len(css.encode()), "html", len(section.encode()))
 print(sorted(people_strings))

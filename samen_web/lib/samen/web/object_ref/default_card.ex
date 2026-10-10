@@ -25,6 +25,8 @@ defmodule Samen.Web.ObjectRef.DefaultCard do
   plaintext — it only LAYS OUT already-resolved values.
   """
 
+  import Samen.Web.ObjectRef.FieldValue, only: [opaque: 1]
+
   alias Samen.Web.ObjectRef.{Card, FieldValue}
 
   # Attribute names, in priority order, that make a good card title. `full_name` (the vaulted
@@ -120,7 +122,7 @@ defmodule Samen.Web.ObjectRef.DefaultCard do
   end
 
   # A masked badge value should never happen (bounded enums aren't PII) but stay safe.
-  defp badge_label(%Samen.Masked{} = m), do: m
+  defp badge_label(v) when opaque(v), do: v
   defp badge_label(v) when is_atom(v), do: v |> Atom.to_string() |> String.replace("_", " ")
   defp badge_label(v) when is_binary(v), do: String.replace(v, "_", " ")
   defp badge_label(v), do: to_string(v)

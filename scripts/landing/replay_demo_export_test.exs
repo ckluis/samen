@@ -1,4 +1,4 @@
-# Landing-page replay demo exporter — ADR-052 session replay (requires PR #83, `Samen.Replay`).
+# Landing-page replay demo exporter — ADR-052 session replay (`Samen.Replay`, on main since PR #83).
 #
 # Records ONE real session through the real P2 recorder over the real
 # `Samen.Web.CRM.ContactsLive` (fictional Blue Ridge contacts, `.example` addresses), then plays
@@ -7,15 +7,15 @@
 # samen_web SQL sandbox, so every row it writes is rolled back when the test ends; the KMS key
 # dir is samen_web's per-run temp dir.
 #
-# Regenerate (from the repo root, on a tree that contains ADR-052 / #83):
+# Regenerate (from the repo root):
 #
 #     cp scripts/landing/replay_demo_export_test.exs samen_web/test/landing_replay_demo_export_test.exs
 #     (cd samen_web && LANDING_EXPORT_OUT=/tmp/replay-demo mix test test/landing_replay_demo_export_test.exs)
 #     rm samen_web/test/landing_replay_demo_export_test.exs
-#     python3 -I scripts/landing/replay_demo_section.py /tmp/replay-demo/replay_demo.json /tmp/replay-demo
+#     python3 -I scripts/landing/replay_demo_section.py /tmp/replay-demo/replay_demo.json /tmp/replay-demo index.html
 #
-# The last step lays out index.html's #replay section (see that script's header for where its
-# two outputs go). Ids and millisecond timestamps differ on every run; the rest should not.
+# The last step lays out index.html's #replay section and splices it in place (see that script's
+# header for where its two outputs go). Ids and millisecond timestamps differ on every run; the rest should not.
 #
 # The JSON holds, per frame: the bounded timeline label, the VERBATIM `rpf_payload` text exactly
 # as Postgres returns it, and the player's output (reference outcomes + the rendered contact

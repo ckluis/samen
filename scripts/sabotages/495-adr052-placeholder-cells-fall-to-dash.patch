@@ -1,0 +1,42 @@
+# SABOTAGE: ADR-052 §2.3 / claim-evidence RP12 — the replay player's vault-routed CELLS. The shared
+# guard `Samen.Web.ObjectRef.FieldValue.opaque/1` goes back to matching `%Samen.Masked{}` ONLY, so a
+# `%Samen.Replay.Placeholder{}` (the player's `••••` / `[erased]` / `[gone]` / `[changed]`) falls
+# through every cell renderer's "no value" clause: a masked or erased email/phone prints "—" — the
+# glyph of a contact with NO email — a placeholder name falls back to the display name / handle,
+# and the AI grounding preview prints `inspect/1` output. Not a leak (nothing is shown); a
+# fidelity lie. One guard backs every renderer (FieldValue + the views that delegate to it or
+# import the guard), so one patch flips them all, including the end-to-end recording proof.
+#
+# Flips the named test(s).
+# APP: samen_web
+# TEST_FILES: test/samen/web/replay_placeholder_cells_test.exs test/samen/web/replay_player_test.exs
+# MUST_FAIL: opaque/1 is true for %Masked{} and every %Placeholder{}
+# MUST_FAIL: email/phone/full_name/generic pass a placeholder through
+# MUST_FAIL: ContactsLive (list): name, initials, email, phone
+# MUST_FAIL: ContactLive (detail): header + overview email, phone, name
+# MUST_FAIL: CompanyLive (detail): the company's contacts table
+# MUST_FAIL: ContactsGalleryLive: card name + email
+# MUST_FAIL: LeadsLive: lead name + email
+# MUST_FAIL: TicketLive: message body, sender, agent name + email
+# MUST_FAIL: AI CrmLive grounding preview: name + email
+# MUST_FAIL: Operator.Live render_name/render_email
+# MUST_FAIL: email and phone cells: •••• without a grant, [erased] after shred
+diff --git a/samen_web/lib/samen/web/object_ref/field_value.ex b/samen_web/lib/samen/web/object_ref/field_value.ex
+--- a/samen_web/lib/samen/web/object_ref/field_value.ex
++++ b/samen_web/lib/samen/web/object_ref/field_value.ex
+@@ -28,14 +28,13 @@
+   """
+ 
+   alias Samen.Masked
+-  alias Samen.Replay.Placeholder
+ 
+   @doc """
+   Guard: `value` is present but not shown to this viewer — a `%Samen.Masked{}` (operator
+   plane) or a `%Samen.Replay.Placeholder{}` (the replay player). A renderer returns it AS-IS;
+   it renders its own text (`••••`, `[erased]`, …) and is never a reason to print "—".
+   """
+-  defguard opaque(value) when is_struct(value, Masked) or is_struct(value, Placeholder)
++  defguard opaque(value) when is_struct(value, Masked)
+ 
+   @doc """
+   Format a resolved `full_name` value for display. An `opaque/1` value → itself (`••••`,

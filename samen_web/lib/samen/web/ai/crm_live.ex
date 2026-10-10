@@ -18,6 +18,7 @@ defmodule Samen.Web.AI.CrmLive do
   import Samen.Web.Live, only: [assign_mount: 2]
   import Samen.Web.CurrentOrg, only: [acting_as_banner: 1, no_org_card: 1, name: 2]
   import Samen.Web.AI.Components
+  import Samen.Web.ObjectRef.FieldValue, only: [opaque: 1]
 
   alias Samen.Web.AI.Server
   alias Samen.Web.Mount
@@ -169,7 +170,7 @@ defmodule Samen.Web.AI.CrmLive do
 
   # Masking-aware formatters: a `%Samen.Masked{}` is handed back VERBATIM (renders `••••`),
   # never unwrapped; a clear value is formatted for display. (INV-1 — the kit adds no unmask.)
-  defp pii(%Samen.Masked{} = m), do: m
+  defp pii(value) when opaque(value), do: value
 
   defp pii(name) when is_binary(name) do
     case Jason.decode(name) do
@@ -182,7 +183,7 @@ defmodule Samen.Web.AI.CrmLive do
   defp pii(nil), do: "—"
   defp pii(other), do: inspect(other)
 
-  defp email(%Samen.Masked{} = m), do: m
+  defp email(value) when opaque(value), do: value
   defp email(%{entries: entries}), do: email(entries)
 
   defp email(json) when is_binary(json) do

@@ -11,6 +11,7 @@ defmodule Samen.Web.Chat.Components do
   use Phoenix.Component
 
   import Samen.UI, only: [pill: 1, object_card: 1]
+  import Samen.Web.ObjectRef.FieldValue, only: [opaque: 1]
 
   @doc """
   A single chat message row: the sender handle + party, the (plane-resolved) body, and any
@@ -90,7 +91,7 @@ defmodule Samen.Web.Chat.Components do
 
   # A %Masked{} renders •••• through Phoenix.HTML.Safe (returned as-is). A clear FullName /
   # binary is reshaped to a display string. nil falls back to the handle (never a leak).
-  defp render_identity(%Samen.Masked{} = masked, _handle), do: masked
+  defp render_identity(name, _handle) when opaque(name), do: name
 
   defp render_identity(%Samen.Type.FullName{first: first, last: last}, handle) do
     case String.trim("#{first} #{last}") do
