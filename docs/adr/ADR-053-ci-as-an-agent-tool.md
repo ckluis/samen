@@ -360,6 +360,20 @@ semantics) onto the edited `actions_verify`.
 | G15 | The tested merge commit was not required to contain the base: `--changed` / the double sweep select from `merge-base(HEAD, base)..HEAD`, which covers the PR's edits only when the base is in HEAD's history. | `ci-job` fails unless `git merge-base --is-ancestor $BASE_SHA HEAD` (YAML; no sabotage). |
 | G16 | Cache budget: each of the 24 corpus slices and 6 watch-list slices kept its OWN copy of the same deps/`_build` (≈ 4.5 GB of the repo's 10 GB cache cap after one nightly, 7.4 GB used in total by one PR + one branch). | The plan gives the slices of one step one shared cache name (`cache` in the matrix; 47 nightly jobs → 19 caches). |
 
+**Gate proof runs (PR #88).** `pr` green on the fixes incl. `ci-pr` (`ACTIONS COVERAGE (pr): PASS — 46/46`,
+14.9 min): https://github.com/ckluis/samen/actions/runs/38095761433. A throwaway commit (reverted next) that
+added a `samen_core/lib` warning AND re-pointed only the `spikes` job's checkout at the PR head instead of
+the merge commit: `ci (samen_core)` failed on `warning: variable "x" is unused … derived_linkable.ex:3`
+(G11) while `app_samen_web`/`app_demo`/`app_driftwood`/`app_pawchart`, which compile samen_core as a path
+dep, all passed (the pre-fix gap, on GitHub); `ci (spikes)` passed on the wrong commit and `ci-pr`'s verify
+named it — `job spikes tested commit 9d97a07300a1, expected 689292cca9b0` (G12; the tree check alone
+could not see it: a PR head rebased on its base has the same tree as its merge commit):
+https://github.com/ckluis/samen/actions/runs/38097047329. Nightly on the fixes (`workflow_dispatch`):
+47/47 jobs, `ACTIONS COVERAGE (full): PASS — 47/47`, 520/520 patches over 24 slices, 166/166 mutants over 6,
+two shared slice caches instead of 30, 23.6 min sharing runners with the throwaway `pr` run:
+https://github.com/ckluis/samen/actions/runs/38096985948. A shared slice cache holds whatever the first
+slice to finish compiled; the others compile the rest — correct, slightly slower, 28× smaller.
+
 **Gate checks that held (measured, not assumed).**
 - *Which tree.* Every job of a run checks out `github.sha` (the PR merge commit); re-runs reuse the same
   event and sha; `download-artifact` without `run-id` reads only this run, and on a re-run attempt takes the
