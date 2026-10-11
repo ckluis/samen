@@ -54,23 +54,34 @@ NOT_PR_READY = "NOT PR-READY — run: scripts/ci pr"
 DONE = ("PASS", "CACHED")
 
 USAGE = """\
-usage: scripts/ci quick|fast|pr|full [--budget S] [-j N] [--only STEP|GROUP[,…]] [--also STEP|GROUP]
+usage: scripts/ci quick|fast|pr|full [--budget S] [-j N] [--only STEP|GROUP[,…] | --only-steps STEP[,…]] [--also STEP|GROUP]
                                      [--no-cache] [--base REF] [--keep-going] [--markers] [--plan]
+                                     [--slice i/n] [--require-base]
        scripts/ci resume [--budget S] [-j N] [--markers]
        scripts/ci status
        scripts/ci list [MODE] [--markers] [--apps] [--also STEP]
        scripts/ci explain STEP [--base REF]
+       scripts/ci actions plan MODE [--json]          (GitHub Actions: job matrix + exclusions; fails on a
+                                                       step in no job, in two, or excluded without a reason)
+       scripts/ci actions verify MODE --results DIR --expect-head SHA [--expect-base SHA]
+                                                      (every planned step ran, once, PASS, on commit SHA)
+       scripts/ci actions summary [--last FILE]       (markdown verdict + failure digest for $GITHUB_STEP_SUMMARY)
 
   --budget S    stop STARTING steps once the next one's est_s would overrun S seconds of this
                 invocation (default 540; 0 = no budget). The first step of an invocation always
                 runs. Ends `INCOMPLETE n/m — continue: scripts/ci resume`.
   -j N          concurrent non-serial steps (default: cores/2).
   --only X      run only these steps/groups (comma-separated). A filtered run is never PR-ready.
+  --only-steps X  like --only, but X are step IDS only (a step named like a group does not select the group).
   --also X      add an opt-in step/group outside the mode (./ci.sh maps SAMEN_SABOTAGE=1 etc.).
   --no-cache    ignore cached PASSes (this run's own progress still resumes).
   --base REF    diff base for quick / --changed steps / the double sweep (default origin/main).
   --keep-going  keep starting steps after a failure (default: stop at the first failure).
   --markers     also print the legacy `==> … PASSED` marker lines (the ./ci.sh wrappers).
+  --slice i/n   run only the i-th of n balanced slices of every sharded step (nightly Actions matrix); each
+                slice's PROCESSED count must equal its chunk, and `actions verify` sums them to the total.
+  --require-base  FAIL (exit 2, last.json ERROR) when --base does not resolve, in any mode (Actions: a
+                missing base must never read as a pass).
   --plan        print what would run (and what is CACHED) and exit; runs nothing, writes no state.
 
 Exit: 0 PASS · 1 FAIL · 2 usage/environment · 3 INCOMPLETE · 130 interrupted.
@@ -128,7 +139,7 @@ def fmt_s(x):
 STEP_KEYS = {"cmd", "cwd", "modes", "inputs", "reads", "always", "serial", "locks", "est_s", "group",
              "marker", "marker_if", "skip_marker", "echo_log", "exunit_dir", "superseded_by",
              "shard_list", "shard_kind", "shard_item", "shard_total", "shard_each_s", "shard_target_s",
-             "shard_check", "unsharded_cmd", "desc"}
+             "shard_check", "unsharded_cmd", "desc", "actions_job", "actions_skip", "actions_dirs", "actions_slices"}
 
 
 class Step(object):
@@ -168,6 +179,16 @@ class Step(object):
         self.shard_target = float(d.get("shard_target_s", "300"))
         self.shard_check = d.get("shard_check", "").strip() or None
         self.unsharded_cmd = d.get("unsharded_cmd") or None
+        # GitHub Actions placement (ADR-053 §2.8): the job this step runs in (default: its group), or
+        # an explicit exclusion with its reason. None = key absent (an EMPTY actions_skip is "").
+        self.actions_job = d["actions_job"].strip() if "actions_job" in d else None
+        self.actions_skip = d["actions_skip"].strip() if "actions_skip" in d else None
+        # mix projects whose deps/_build (and PLTs) the Actions job caches; default: cwd + app: inputs
+        self.actions_dirs = d.get("actions_dirs", "").split() if "actions_dirs" in d else None
+        # nightly: split this sharded step across N parallel jobs (scripts/ci full --slice i/N)
+        self.actions_slices = int(d["actions_slices"]) if d.get("actions_slices", "").strip() else None
+        if self.actions_slices is not None and (not d.get("shard_list") or self.actions_slices < 2):
+            raise UsageError("manifest: step %s: actions_slices needs a sharded step (shard_list) and N >= 2" % sid)
         if self.shard_list and self.shard_kind not in ("ranges", "modulo"):
             raise UsageError("manifest: step %s: shard_kind must be ranges|modulo" % sid)
         # the lister's OWN count is required: an item regex that stops matching (the lister's
@@ -181,6 +202,8 @@ class Step(object):
         self.shard_args = ""
         self.shard_items = None
         self.expected = None       # shard_check expectation
+        self.processed = None      # what the sub-step reported (shard_check)
+        self.selected_total = None # the lister's own count of the whole selection
         self.preset = None         # ("PASS"|"FAIL", note) decided at plan time (empty shard / list error)
         self.key = None
 
@@ -489,10 +512,26 @@ def per_item_bucket(old, rate):
     return old
 
 
-def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
+def balanced_chunks(nums, n):
+    """nums = sorted [(number, item)] -> at most n chunks of near-equal size, never splitting a number."""
+    per = max(1, int(math.ceil(len(nums) / float(n))))
+    chunks, cur = [], []
+    for k, it in nums:
+        if cur and len(cur) >= per and k != cur[-1][0]:
+            chunks.append(cur)
+            cur = []
+        cur.append((k, it))
+    if cur:
+        chunks.append(cur)
+    if len(chunks) > n:
+        raise UsageError("slice accounting: %d chunks for %d slices" % (len(chunks), n))
+    return chunks
+
+
+def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None):
     """A long internal loop → budget-sized sub-steps. Unbudgeted (budget 0) a step with an
     unsharded_cmd runs it as ONE step, exactly the pre-ADR-053 command."""
-    if budget == 0 and step.unsharded_cmd:
+    if budget == 0 and step.unsharded_cmd and not slice_:
         s = clone_step(step, step.id)
         s.parent = None
         s.cmd = step.unsharded_cmd
@@ -548,22 +587,25 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
                 return [s]
             nums.append((int(m.group(1)), it))
         nums.sort()
-        per = max(1, int(step.shard_target // max(each, 0.001)))
-        chunks, cur = [], []
-        for n, it in nums:
-            # never split one number across chunks (duplicate numbers exist: 25-, 35-)
-            if cur and len(cur) >= per and n != cur[-1][0]:
+        if slice_:
+            chunks = balanced_chunks(nums, slice_[1])
+        else:
+            per = max(1, int(step.shard_target // max(each, 0.001)))
+            chunks, cur = [], []
+            for n, it in nums:
+                # never split one number across chunks (duplicate numbers exist: 25-, 35-)
+                if cur and len(cur) >= per and n != cur[-1][0]:
+                    chunks.append(cur)
+                    cur = []
+                cur.append((n, it))
+            if cur:
                 chunks.append(cur)
-                cur = []
-            cur.append((n, it))
-        if cur:
-            chunks.append(cur)
         if sum(len(c) for c in chunks) != len(items):  # accounting: the shards ARE the selection
             raise UsageError("shard accounting: %s chunks hold %d of %d items" % (step.id, sum(len(c) for c in chunks), len(items)))
         specs = [("--range %d-%d" % (c[0][0], c[-1][0]), [it for _n, it in c]) for c in chunks]
     else:
         count = total
-        n = max(1, int(math.ceil(count * each / step.shard_target))) if count else 0
+        n = slice_[1] if slice_ else (max(1, int(math.ceil(count * each / step.shard_target))) if count else 0)
         specs = []
         for i in range(1, n + 1):
             size = len([x for x in range(count) if x % n == i - 1])
@@ -571,16 +613,29 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
         if sum(sp[2] for sp in specs) != count:
             raise UsageError("shard accounting: %s shards hold %d of %d mutants" % (step.id, sum(sp[2] for sp in specs), count))
         specs = [(a, it, sz) for a, it, sz in specs]
+    if slice_:
+        i, n = slice_
+        if i <= len(specs):
+            specs = [specs[i - 1]]
+        else:  # fewer chunks than slices (a tiny selection): this slice is genuinely empty
+            s = clone_step(step, "%s[%d/%d]" % (step.id, i, n))
+            s.parent = step.id
+            s.expected, s.processed, s.selected_total = 0, 0, total
+            s.preset = ("PASS", "empty slice %d/%d — the selection of %d has fewer chunks than slices" % (i, n, total))
+            return [s]
     if not specs:
         s = clone_step(step, step.id)
         s.parent = None
         s.preset = ("PASS", "nothing selected — 0 items for %s" % step.id)
         return [s]
     subs = []
+    selected_total = total
     total = len(specs)
     for i, sp in enumerate(specs, 1):
         args, its = sp[0], sp[1]
-        s = clone_step(step, "%s[%d/%d]" % (step.id, i, total))
+        sid = "%s[%d/%d]" % (step.id, slice_[0], slice_[1]) if slice_ else "%s[%d/%d]" % (step.id, i, total)
+        s = clone_step(step, sid)
+        s.selected_total = selected_total
         s.shard_args = args
         s.shard_items = its
         s.expected = sp[2] if len(sp) > 2 else len(its)
@@ -595,10 +650,20 @@ def build_plan(man, mode, ctx, opts, quiet=False):
     also = set(opts.get("also") or [])
     only = set(opts.get("only") or [])
     for x in also | only:
-        if not man.by_id(x) and x not in {s.group for s in man.steps}:
+        if not man.by_id(x) and x not in {s.group for s in man.steps} and not opts.get("exact"):
             raise UsageError("no step or group named %r (scripts/ci list)" % x)
     cand = [s for s in man.steps if mode in s.modes or s.id in also or s.group in also]
-    if only:
+    if only and opts.get("exact"):
+        # --only-steps: step IDS only. A step whose id equals a group name (samen_core) must not drag in
+        # the rest of that group — the Actions jobs name their steps, and `actions verify` would catch the
+        # extra step only after it ran twice.
+        unknown = sorted(x for x in only if not man.by_id(x))
+        if unknown:
+            raise UsageError("--only-steps: no step named %s" % ", ".join(unknown))
+        cand = [s for s in cand if s.id in only]
+        if not cand:
+            raise UsageError("--only-steps %s selects nothing in mode %s" % (",".join(sorted(only)), mode))
+    elif only:
         cand = [s for s in cand if s.id in only or s.group in only]
         if not cand:
             raise UsageError("--only %s selects nothing in mode %s" % (",".join(sorted(only)), mode))
@@ -622,7 +687,8 @@ def build_plan(man, mode, ctx, opts, quiet=False):
     budget = opts.get("budget", 540)
     for s in cand:
         if s.shard_list:
-            plan.extend(expand_shards(s, ctx, mode, budget, man.apps, no_cache=bool(opts.get("no_cache"))))
+            plan.extend(expand_shards(s, ctx, mode, budget, man.apps, no_cache=bool(opts.get("no_cache")),
+                                      slice_=opts.get("slice")))
         else:
             plan.append(s)
     seen = read_json(os.path.join(HOME, "timings.json")) or {}
@@ -757,6 +823,9 @@ class Run(object):
         r = {"id": step.id, "status": status, "duration_s": round(duration, 2), "log": log,
              "digest": digest or [], "note": note, "key": key if key is not None else step.key,
              "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        for k in ("expected", "processed", "selected_total"):
+            if getattr(step, k, None) is not None:
+                r[k] = getattr(step, k)
         self.results[step.id] = r
         self.state.setdefault("steps", {})[step.id] = r
         self.save_state()
@@ -840,6 +909,7 @@ class Run(object):
             for m in re.finditer(step.shard_check, text, re.M):
                 pass
             got = int(m.group(1)) if m else None
+            step.processed = got
             if got != step.expected:
                 rc = 97
                 note = "shard accounting: processed %s, expected %d — a sub-step that does not cover its chunk can never pass" % (got, step.expected)
@@ -1052,7 +1122,7 @@ def cmd_run(mode, opts, resume=False):
 
 def _cmd_run_locked(mode, opts, resume, t_start, old, holder):
     man = Manifest(MANIFEST)
-    ctx = Context(opts["base"], need_base=(mode == "quick"))
+    ctx = Context(opts["base"], need_base=(mode == "quick" or bool(opts.get("require_base"))))
     if resume:
         state = old
         if old.get("tree") and old.get("tree") != ctx.tree:
@@ -1141,13 +1211,24 @@ def _cmd_run_locked(mode, opts, resume, t_start, old, holder):
 
 
 # ── read-only subcommands ───────────────────────────────────────────────────────────────────────
-def cmd_list(mode, opts):
-    man = Manifest(MANIFEST)
-    also = set(opts.get("also") or [])
+def mode_steps(man, mode, also=()):
+    """The steps `mode` runs (plus --also), superseded ones dropped — the ONE definition behind
+    `scripts/ci list`, `scripts/ci pr` and the Actions plan, so they cannot disagree."""
+    also = set(also or [])
     steps = [s for s in man.steps if mode is None or mode in s.modes or s.id in also or s.group in also]
     if mode:
         ids = {s.id for s in steps}
         steps = [s for s in steps if not any(x in ids for x in s.superseded_by)]
+    return steps
+
+
+def cmd_list(mode, opts):
+    man = Manifest(MANIFEST)
+    steps = mode_steps(man, mode, opts.get("also"))
+    if opts.get("json"):
+        out(json.dumps([{"id": s.id, "group": s.group, "modes": sorted(s.modes), "est_s": s.est, "serial": s.serial,
+                         "actions_job": s.actions_job, "actions_skip": s.actions_skip} for s in steps], indent=1))
+        return 0
     if opts.get("apps"):
         seen = []
         for s in steps:
@@ -1241,6 +1322,311 @@ def cmd_status():
     return 0
 
 
+
+# ── GitHub Actions (ADR-053 §2.8): the manifest decides what runs where ─────────────────────────
+JOB_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+SHARD_SUFFIX = re.compile(r"\[(\d+)/(\d+)\]$")
+MIN_REASON = 12  # an exclusion's reason is a sentence, not a word
+
+
+def step_dirs(man, s):
+    """The mix projects whose deps/_build the job caches: declared (actions_dirs) or cwd + app: inputs."""
+    if s.actions_dirs is not None:
+        return s.actions_dirs
+    dirs = []
+    if s.cwd != ".":
+        dirs.append(s.cwd)
+    for tok in s.inputs:
+        if tok.startswith("app:"):
+            d = man.apps[tok[4:]]["path"].rstrip("/")
+            if d not in dirs:
+                dirs.append(d)
+    return dirs
+
+
+def job_entry(man, name, steps, slice_, cache=None):
+    dirs = []
+    for x in steps:
+        for d in step_dirs(man, x):
+            if d not in dirs:
+                dirs.append(d)
+    paths = []
+    for d in dirs:
+        paths += [d + "/deps", d + "/_build"]
+        if any(x.id.startswith("dialyzer_") for x in steps):
+            paths.append(d + "/priv/plts")
+    return {"name": name, "steps": [x.id for x in steps], "only": ",".join(x.id for x in steps),
+            "slice": "%d/%d" % slice_ if slice_ else "", "est_s": round(sum(x.est for x in steps)),
+            "cache_paths": "\n".join(paths),
+            # the actions/cache key's job part: the N slices of one step build the same projects, so they
+            # share ONE cache (24 copies of the same deps/_build would eat the repo's 10 GB cache budget)
+            "cache": cache or name}
+
+
+def actions_plan(man, mode):
+    """-> dict(mode, steps, jobs=[{name, steps, only, est_s}], excluded=[{id, reason}]).
+    A1: every step of the mode lands in EXACTLY ONE job or is excluded WITH a reason; anything else is
+    an error naming the step — a new manifest step can never silently go unrun in Actions."""
+    steps = mode_steps(man, mode)
+    jobs, excluded, errors = {}, [], []
+    for s in steps:
+        has_job = s.actions_job is not None
+        if s.actions_skip is not None:
+            if has_job:
+                errors.append("%s is assigned to a job (%s) AND excluded (actions_skip) — pick one" % (s.id, s.actions_job))
+            elif len(s.actions_skip) < MIN_REASON:
+                errors.append("%s is excluded from Actions without a reason (actions_skip = %r): say WHY it cannot run there"
+                              % (s.id, s.actions_skip))
+            else:
+                excluded.append({"id": s.id, "reason": s.actions_skip})
+            continue
+        job = s.actions_job if has_job else s.group
+        if not job:
+            errors.append("%s is assigned to no Actions job (no group, no actions_job, no actions_skip)" % s.id)
+        elif not JOB_NAME.match(job):
+            errors.append("%s: Actions job name %r must match %s" % (s.id, job, JOB_NAME.pattern))
+        else:
+            jobs.setdefault(job, []).append(s)
+    if errors:
+        raise UsageError("actions plan (%s) is not a partition of `scripts/ci list %s`:\n  - %s" % (mode, mode, "\n  - ".join(errors)))
+    out_jobs = []
+    for n, v in jobs.items():
+        plain = [x for x in v if not x.actions_slices]
+        if plain:
+            out_jobs.append(job_entry(man, n, plain, None))
+        for x in v:
+            if x.actions_slices:  # one job per slice: name_NN, `--slice i/N`
+                for i in range(1, x.actions_slices + 1):
+                    out_jobs.append(job_entry(man, "%s_%02d" % (x.id, i), [x], (i, x.actions_slices), cache=x.id))
+    names = [j["name"] for j in out_jobs]
+    if len(set(names)) != len(names):
+        raise UsageError("actions plan (%s): duplicate job name(s): %s" % (mode, ", ".join(sorted({x for x in names if names.count(x) > 1}))))
+    return {"mode": mode, "steps": [s.id for s in steps], "jobs": out_jobs, "excluded": excluded}
+
+
+def cmd_actions(pos, opts):
+    if not pos:
+        raise UsageError("actions needs a subcommand: plan|verify|summary")
+    sub, rest = pos[0], pos[1:]
+    if sub == "summary":
+        return actions_summary(opts.get("last") or os.path.join(HOME, "last.json"))
+    if len(rest) != 1 or rest[0] not in MODES:
+        raise UsageError("actions %s takes one mode (%s)" % (sub, "|".join(MODES)))
+    man = Manifest(MANIFEST)
+    plan = actions_plan(man, rest[0])
+    if sub == "plan":
+        if opts.get("json"):
+            out(json.dumps(plan, indent=1))
+            return 0
+        out("Actions plan (%s): %d step(s) -> %d job(s), %d excluded" % (rest[0], len(plan["steps"]), len(plan["jobs"]), len(plan["excluded"])))
+        for j in plan["jobs"]:
+            out("  job %-14s est %5ds  %s" % (j["name"], j["est_s"], j["only"]))
+        for e in plan["excluded"]:
+            out("  EXCLUDED %-22s %s" % (e["id"], e["reason"]))
+        return 0
+    if sub == "verify":
+        if not opts.get("results"):
+            raise UsageError("actions verify needs --results DIR (one sub-directory per job holding its last.json)")
+        for k in ("expect_head", "expect_base"):
+            if opts.get(k) is not None and not opts[k].strip():
+                # an EMPTY value (an unset ${{ … }} in a workflow) must not read as "do not check"
+                raise UsageError("--%s was given an empty value" % k.replace("_", "-"))
+        if not opts.get("expect_head"):
+            raise UsageError("actions verify needs --expect-head SHA: the commit every job must have tested "
+                             "(Actions: $GITHUB_SHA, the PR merge commit)")
+        want_tree = git("rev-parse", "--verify", "-q", opts["expect_head"] + "^{tree}", check=False).strip()
+        if not want_tree:
+            raise UsageError("--expect-head %s does not resolve to a commit in this clone" % opts["expect_head"])
+        want_head = git("rev-parse", "--verify", "-q", opts["expect_head"] + "^{commit}", check=False).strip()
+        totals = {}
+        for kv in opts.get("expect_total") or []:
+            k, _, v = kv.partition("=")
+            if not v.isdigit():
+                raise UsageError("--expect-total wants step=N, got %r" % kv)
+            totals[k] = int(v)
+        return actions_verify(plan, opts["results"], opts.get("expect_base"), totals, expect_head=(want_head, want_tree))
+    raise UsageError("unknown actions subcommand %r" % sub)
+
+
+def actions_verify(plan, results_dir, expect_base, expect_totals=None, expect_head=None):
+    """The Actions twin of C1/C7: the union of what the jobs ACTUALLY ran must equal `list MODE` minus the
+    declared exclusions — each step exactly once, every one PASS/CACHED, every job on the expected base;
+    for sliced steps (nightly) the slices must be 1..N, each once, and their PROCESSED counts must sum to
+    the lister's total (a slice that processed 0, or dropped a patch, fails). Prints markdown (for
+    $GITHUB_STEP_SUMMARY); exit 1 on any discrepancy."""
+    errors, lines = [], []
+    spec = {j["name"]: j for j in plan["jobs"]}
+    want = {}
+    for n, j in spec.items():
+        if j.get("slice"):
+            want[n] = {"%s[%s]" % (j["steps"][0], j["slice"])}
+        else:
+            want[n] = set(j["steps"])
+    found = {}
+    if os.path.isdir(results_dir):
+        for d in sorted(os.listdir(results_dir)):
+            lp = os.path.join(results_dir, d, "last.json")
+            if os.path.isfile(lp):
+                found[re.sub(r"^ci-result-", "", d)] = read_json(lp)
+    ran_by = {}
+    for n in sorted(set(found) - set(spec)):
+        errors.append("a result for job %r which the plan does not have" % n)
+        for st in (found[n] or {}).get("steps") or []:  # still counted: a step run in two places ran twice
+            ran_by.setdefault(SHARD_SUFFIX.sub("", st["id"]), []).append(n)
+    slices = {}  # parent -> [(i, n, job, processed, expected, selected_total)]
+    lines.append("| job | verdict | steps | wall |")
+    lines.append("|---|---|---|---|")
+    for n in spec:
+        last = found.get(n)
+        if not last:
+            errors.append("job %s produced no result (last.json missing): its %d step(s) were never verified" % (n, len(want[n])))
+            lines.append("| %s | MISSING | 0/%d | - |" % (n, len(want[n])))
+            continue
+        errs0 = len(errors)
+        if last.get("verdict") != "PASS":
+            errors.append("job %s verdict is %s, not PASS" % (n, last.get("verdict")))
+        if last.get("mode") != plan["mode"]:
+            errors.append("job %s ran mode %s, expected %s" % (n, last.get("mode"), plan["mode"]))
+        # every job must have tested THE commit under verification, as committed: a job that checked out another
+        # ref (a re-pointed `ref:`, a moved PR head) or ran over a tree with extra/changed files at start
+        # (`tree` is the driver's content snapshot, untracked-not-ignored files included) vouches for other code
+        if expect_head and last.get("head") != expect_head[0]:
+            errors.append("job %s tested commit %s, expected %s" % (n, (last.get("head") or "none")[:12], expect_head[0][:12]))
+        if expect_head and last.get("tree") != expect_head[1]:
+            errors.append("job %s tested tree %s, not commit %s's tree %s (files added or changed before the run)"
+                          % (n, (last.get("tree") or "none")[:12], expect_head[0][:12], expect_head[1][:12]))
+        if expect_base and last.get("base_sha") != expect_base:
+            errors.append("job %s ran against base %s, expected %s (the PR's base)" % (n, (last.get("base_sha") or "none")[:10], expect_base[:10]))
+        subs = {}
+        for st in last.get("steps") or []:
+            m = SHARD_SUFFIX.search(st["id"])
+            subs.setdefault(SHARD_SUFFIX.sub("", st["id"]), []).append((m, st))
+            if st.get("status") not in DONE:
+                errors.append("job %s: step %s is %s" % (n, st["id"], st.get("status")))
+        ran_ids = set()
+        for parent, items in subs.items():
+            if n not in ran_by.setdefault(parent, []):
+                ran_by[parent].append(n)
+            ms = [(int(m.group(1)), int(m.group(2))) for m, _ in items if m]
+            if spec[n].get("slice"):
+                for m, st in items:
+                    ran_ids.add(st["id"])
+                    if m:
+                        slices.setdefault(parent, []).append((int(m.group(1)), int(m.group(2)), n, st.get("processed"),
+                                                              st.get("expected"), st.get("selected_total")))
+            else:
+                ran_ids.add(parent)
+                if ms and (len(ms) != len(items) or sorted(i for i, _t in ms) != list(range(1, ms[0][1] + 1)) or {t for _i, t in ms} != {ms[0][1]}):
+                    errors.append("job %s: shards of %s are not 1..N complete: %s" % (n, parent, sorted(ms)))
+        for sid in sorted(want[n] - ran_ids):
+            errors.append("step %s is planned in job %s but job %s did not run it" % (sid, n, n))
+        for sid in sorted(ran_ids - want[n]):
+            errors.append("job %s ran %s which the plan does not assign to it" % (n, sid))
+        lines.append("| %s | %s | %d/%d | %ss |" % (n, "PASS" if len(errors) == errs0 else "FAIL", len(ran_ids & want[n]), len(want[n]), last.get("elapsed_s")))
+    sliced_steps = {j["steps"][0] for j in spec.values() if j.get("slice")}
+    slice_lines = []
+    for parent in sorted(sliced_steps):
+        rows = slices.get(parent, [])
+        ns = {r[1] for r in rows}
+        idx = sorted(r[0] for r in rows)
+        want_n = {int(j["slice"].split("/")[1]) for j in spec.values() if j.get("slice") and j["steps"][0] == parent}
+        if ns != want_n or idx != list(range(1, next(iter(want_n)) + 1)):
+            errors.append("slices of %s are not exactly 1..%s, once each: got %s" % (parent, "/".join(map(str, sorted(want_n))), idx))
+            continue
+        totals = {r[5] for r in rows}
+        if len(totals) != 1 or None in totals:
+            errors.append("slices of %s disagree on the selected total: %s" % (parent, sorted(str(t) for t in totals)))
+            continue
+        total = totals.pop()
+        proc = sum(r[3] or 0 for r in rows)
+        exp = sum(r[4] or 0 for r in rows)
+        slice_lines.append("- `%s`: %d slices processed %d of %d selected (slice counts: %s)" % (
+            parent, len(rows), proc, total, " ".join("%d" % (r[3] or 0) for r in sorted(rows))))
+        if proc != total or exp != total:
+            errors.append("%s: the slices processed %d and were assigned %d, but %d were selected — a slice dropped or "
+                          "double-counted work" % (parent, proc, exp, total))
+        want_total = (expect_totals or {}).get(parent)
+        if want_total is not None and want_total != total:
+            errors.append("%s: the lister selected %d but the independent count is %d" % (parent, total, want_total))
+        if total == 0:
+            errors.append("%s: 0 items selected — an empty corpus is not a pass" % parent)
+    for sid, who in sorted(ran_by.items()):
+        if len(who) > 1 and sid not in sliced_steps:
+            errors.append("step %s ran in %d jobs (%s) — each step runs exactly once" % (sid, len(who), ", ".join(who)))
+    owner = {sid for j in spec.values() for sid in j["steps"]}
+    for sid in plan["steps"]:  # unreachable while actions_plan holds; re-asserted against `list`
+        if sid not in owner and sid not in {e["id"] for e in plan["excluded"]}:
+            errors.append("step %s of `scripts/ci list %s` is in no job and not excluded" % (sid, plan["mode"]))
+    total = len(plan["steps"]) - len(plan["excluded"])
+    covered = sum(1 for sid in plan["steps"] if sid in owner and sid in ran_by and (len(ran_by[sid]) == 1 or sid in sliced_steps))
+    out("### Actions coverage (%s)" % plan["mode"])
+    out("")
+    for l in lines:
+        out(l)
+    out("")
+    out("%d step(s) in `scripts/ci list %s` (%d runnable + %d deliberately excluded): %d verified." % (
+        len(plan["steps"]), plan["mode"], total, len(plan["excluded"]), covered))
+    if slice_lines:
+        out("")
+        out("**Sharded accounting (sum over slices must equal the selected total):**")
+        for l in slice_lines:
+            out(l)
+    if plan["excluded"]:
+        out("")
+        out("**Excluded from Actions (declared in `ci/steps.conf`, never silent):**")
+        for e in plan["excluded"]:
+            out("- `%s` — %s" % (e["id"], e["reason"]))
+    if total == 0:
+        errors.append("the plan has 0 runnable steps — an empty matrix verifies nothing and is not a pass")
+    if covered != total and not errors:
+        errors.append("coverage arithmetic: %d verified != %d runnable steps" % (covered, total))
+    if errors:
+        out("")
+        out("**COVERAGE FAILED:**")
+        for e in errors:
+            out("- " + e)
+        out("")
+        out("ACTIONS COVERAGE (%s): FAIL — %d problem(s)" % (plan["mode"], len(errors)))
+        return 1
+    out("")
+    out("ACTIONS COVERAGE (%s): PASS — %d/%d steps verified, %d excluded" % (plan["mode"], covered, total, len(plan["excluded"])))
+    return 0
+
+
+def actions_summary(last_path):
+    last = read_json(last_path)
+    if not last:
+        out("### CI: no verdict (`%s` missing)" % last_path)
+        return 0
+    out("### %s" % (last.get("final_line") or "CI(%s): %s" % (last.get("mode"), last.get("verdict"))))
+    out("")
+    out("verdict **%s** · mode %s · only `%s` · base `%s` @ `%s` · %ss" % (
+        last.get("verdict"), last.get("mode"), ",".join(last.get("only") or []) or "-", last.get("base"),
+        (last.get("base_sha") or "missing")[:10], last.get("elapsed_s")))
+    out("")
+    out("| step | status | wall |")
+    out("|---|---|---|")
+    for st in last.get("steps") or []:
+        out("| %s | %s | %s |" % (st.get("id"), st.get("status"), fmt_s(st.get("duration_s") or 0)))
+    bad = [st for st in last.get("steps") or [] if st.get("status") in ("FAIL", "FLAKY", "INTERRUPTED")]
+    if last.get("error"):
+        bad_txt = last["error"]
+        out("")
+        out("**driver error:** " + bad_txt)
+    for st in bad:
+        out("")
+        out("#### %s %s" % (st["status"], st["id"]))
+        out("```")
+        for l in (st.get("digest") or [])[:60]:
+            out(l)
+        out("log: %s" % st.get("log"))
+        out("```")
+    if last.get("not_run"):
+        out("")
+        out("not run: " + ", ".join(last["not_run"]))
+    return 0
+
+
 # ── argv ────────────────────────────────────────────────────────────────────────────────────────
 def parse(argv):
     if not argv or argv[0] in ("-h", "--help", "help"):
@@ -1248,7 +1634,8 @@ def parse(argv):
     cmd, rest = argv[0], argv[1:]
     opts = {"budget": 540.0, "jobs": max(1, (os.cpu_count() or 2) // 2), "only": [], "also": [],
             "no_cache": False, "base": "origin/main", "keep_going": False, "markers": False, "apps": False,
-            "plan": False,
+            "plan": False, "exact": False, "require_base": False, "json": False, "results": None, "expect_base": None,
+            "last": None, "slice": None, "expect_total": None, "expect_head": None,
             "_given": set()}
     pos = []
     seen = set()
@@ -1262,7 +1649,7 @@ def parse(argv):
             return rest[i + 1]
         if a.startswith("-"):
             opts["_given"].add(a)
-        if a in ("--budget", "-j", "--jobs", "--base", "--only"):
+        if a in ("--budget", "-j", "--jobs", "--base", "--only", "--only-steps"):
             if a in seen and a != "--only":
                 raise UsageError("%s given twice" % a)
             seen.add(a)
@@ -1280,6 +1667,8 @@ def parse(argv):
                 opts["base"] = v
             else:
                 opts["only"] += [x for x in v.split(",") if x]
+                if a == "--only-steps":
+                    opts["exact"] = True
             i += 2
         elif a == "--also":
             opts["also"] += [x for x in val().split(",") if x]
@@ -1296,6 +1685,25 @@ def parse(argv):
         elif a == "--plan":
             opts["plan"] = True
             i += 1
+        elif a == "--require-base":
+            opts["require_base"] = True
+            i += 1
+        elif a == "--json":
+            opts["json"] = True
+            i += 1
+        elif a == "--slice":
+            v = val()
+            m = re.match(r"^(\d+)/(\d+)$", v)
+            if not m or not (1 <= int(m.group(1)) <= int(m.group(2))) or int(m.group(2)) < 2:
+                raise UsageError("--slice wants i/n with 1 <= i <= n, n >= 2, got %r" % v)
+            opts["slice"] = (int(m.group(1)), int(m.group(2)))
+            i += 2
+        elif a == "--expect-total":
+            opts["expect_total"] = (opts.get("expect_total") or []) + [val()]
+            i += 2
+        elif a in ("--results", "--expect-base", "--expect-head", "--last"):
+            opts[a[2:].replace("-", "_")] = val()
+            i += 2
         elif a == "--apps":
             opts["apps"] = True
             i += 1
@@ -1335,6 +1743,8 @@ def main(argv):
             return cmd_run(st["mode"], saved, resume=True)
         if cmd == "status":
             return cmd_status()
+        if cmd == "actions":
+            return cmd_actions(pos, opts)
         if cmd == "list":
             mode = pos[0] if pos else None
             if mode and mode not in MODES:

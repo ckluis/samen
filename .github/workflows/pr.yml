@@ -1,0 +1,111 @@
+# ADR-053 §2.8 — GitHub Actions mirrors `scripts/ci pr`. WHAT runs is decided by ci/steps.conf alone:
+# the `plan` job derives the job matrix from the manifest, so a new step can never silently go unrun,
+# and the `ci-pr` aggregate re-verifies from each job's last.json that the union of what actually ran
+# equals `scripts/ci list pr` minus the declared exclusions (each step once, all PASS, on the PR's base,
+# every job on this run's merge commit $GITHUB_SHA and its exact tree).
+# `ci-pr` is the single check name to require.
+name: pr
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Plan from the manifest (fails on a step in no job, in two, or excluded without a reason)
+        id: plan
+        run: |
+          set -euo pipefail
+          scripts/ci actions plan pr --json > plan.json
+          scripts/ci actions plan pr | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "matrix=$(python3 -c 'import json; d=json.load(open("plan.json")); print(json.dumps({"include": d["jobs"]}))')" >> "$GITHUB_OUTPUT"
+
+  ci:
+    name: ci (${{ matrix.name }})
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.0-pg16
+        env:
+          POSTGRES_USER: clank
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clank"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # the configs connect as $USER@localhost, and samen_core's aud_event migration revokes from role "clank"
+      USER: clank
+      PGUSER: clank
+      PGHOST: localhost
+      PGPORT: "5432"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/ci-job
+        with:
+          mode: pr
+          name: ${{ matrix.name }}
+          only: ${{ matrix.only }}
+          slice: ${{ matrix.slice }}
+          cache-paths: ${{ matrix.cache_paths }}
+          cache-name: ${{ matrix.cache }}
+          base-sha: ${{ github.event.pull_request.base.sha }}
+
+  ci-pr:
+    name: ci-pr
+    if: always()
+    needs: [plan, ci]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.ci.result != 'skipped'
+        with:
+          pattern: ci-result-*
+          path: results
+      - name: Coverage - the jobs' union equals `scripts/ci list pr` (minus declared exclusions)
+        id: verify
+        if: needs.plan.result == 'success'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -o pipefail
+          scripts/ci actions verify pr --results results --expect-head "$GITHUB_SHA" --expect-base "$BASE_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Aggregate - every job must have SUCCEEDED (failed, skipped and cancelled all fail)
+        env:
+          PLAN: ${{ needs.plan.result }}
+          CI: ${{ needs.ci.result }}
+        run: |
+          echo "plan=$PLAN ci=$CI"
+          [ "$PLAN" = success ] && [ "$CI" = success ] || { echo "::error::ci-pr: plan=$PLAN ci=$CI — not every job succeeded"; exit 1; }

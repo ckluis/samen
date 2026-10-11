@@ -1,0 +1,139 @@
+# One Actions job = one `scripts/ci` invocation over the steps the plan assigned to it (ADR-053 §2.8).
+# Everything that decides WHAT runs lives in ci/steps.conf; this file only provisions the toolchain,
+# restores caches, resolves the base, runs the driver cold, and reports.
+name: ci-job
+description: Provision the pinned toolchain, run `scripts/ci MODE --only STEPS` cold, report.
+inputs:
+  mode:
+    description: scripts/ci mode (pr | full)
+    required: true
+  name:
+    description: Plan job name (also the cache and artifact name)
+    required: true
+  only:
+    description: Comma-separated manifest step ids for this job
+    required: true
+  slice:
+    description: Optional i/n slice of a sharded step (nightly)
+    required: false
+    default: ""
+  cache-paths:
+    description: Newline-separated deps/_build/PLT paths this job caches (from the plan)
+    required: false
+    default: ""
+  cache-name:
+    description: The cache key's job part (from the plan; the slices of one sharded step share one cache)
+    required: true
+  base-sha:
+    description: The PR base commit (empty outside pull_request; origin/main is used as fetched)
+    required: false
+    default: ""
+  jobs:
+    description: scripts/ci -j
+    required: false
+    default: "2"
+runs:
+  using: composite
+  steps:
+    - name: Toolchain (.tool-versions)
+      id: beam
+      uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+      with:
+        version-file: .tool-versions
+        version-type: strict
+
+    - name: Postgres client tools (pg_dump, pg_restore, createdb, psql)
+      shell: bash
+      run: |
+        if ! command -v pg_dump >/dev/null || ! command -v createdb >/dev/null; then
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-16
+        fi
+        psql --version && pg_dump --version
+
+    - name: Git identity (the gen_app probes commit inside scratch repos)
+      shell: bash
+      run: |
+        git config --global user.name  "samen-ci"
+        git config --global user.email "samen-ci@users.noreply.github.com"
+
+    - name: Resolve the base (never HEAD~1; a missing base FAILS)
+      shell: bash
+      env:
+        BASE_SHA: ${{ inputs.base-sha }}
+      run: |
+        set -euo pipefail
+        if [ -n "$BASE_SHA" ]; then
+          git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null || git fetch --no-tags origin "$BASE_SHA"
+          # the tested merge commit must CONTAIN the base we diff against: `--changed` and the double sweep
+          # select from merge-base(HEAD, base)..HEAD, which only covers the PR's edits when base is in HEAD's history
+          git merge-base --is-ancestor "$BASE_SHA" HEAD || { echo "::error::base $BASE_SHA is not an ancestor of the tested commit $(git rev-parse HEAD) — NOT PR-READY"; exit 1; }
+          git update-ref refs/remotes/origin/main "$BASE_SHA"
+        fi
+        git rev-parse --verify -q 'origin/main^{commit}' >/dev/null || { echo "::error::origin/main does not resolve in this clone — NOT PR-READY"; exit 1; }
+        echo "base origin/main = $(git rev-parse origin/main)  (HEAD $(git rev-parse HEAD))"
+
+    # deps/_build/PLTs keyed by every mix.lock + the exact OTP/Elixir + the OS + the job. mix recompiles
+    # whatever changed since the cached _build (checkout runs AFTER the cache was written, so every source
+    # file is newer than the compile manifest and is re-checked by content) — the same incremental
+    # behaviour as a warm local tree. The driver's own _ci/cache is NEVER restored: `pr` is always cold.
+    - name: Cache deps, _build, PLTs
+      if: inputs.cache-paths != ''
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.cache-paths }}
+        key: ci-v1-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-ex${{ steps.beam.outputs.elixir-version }}-${{ inputs.cache-name }}-${{ hashFiles('**/mix.lock') }}
+        restore-keys: |
+          ci-v1-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-ex${{ steps.beam.outputs.elixir-version }}-${{ inputs.cache-name }}-
+
+    # Steps assume their mix projects' deps are on disk (locally an earlier step fetched them); a clean runner
+    # has none. Fetch for every project this job caches (a no-op when the cache restored them).
+    - name: mix deps.get (this job's projects)
+      if: inputs.cache-paths != ''
+      shell: bash
+      env:
+        CACHE_PATHS: ${{ inputs.cache-paths }}
+      run: |
+        set -euo pipefail
+        printf '%s\n' "$CACHE_PATHS" | grep '/deps$' | while read -r p; do
+          echo "==> mix deps.get in ${p%/deps}"
+          (cd "${p%/deps}" && mix deps.get --quiet)
+        done
+
+    - name: scripts/ci ${{ inputs.mode }} --only ${{ inputs.name }}
+      id: run
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        ONLY: ${{ inputs.only }}
+        SLICE: ${{ inputs.slice }}
+        JOBS: ${{ inputs.jobs }}
+      run: |
+        set -uo pipefail
+        args=(--only-steps "$ONLY" --budget 0 -j "$JOBS" --no-cache --require-base)
+        [ -n "$SLICE" ] && args+=(--slice "$SLICE")
+        scripts/ci "$MODE" "${args[@]}"
+
+    - name: Verdict and failure digest
+      if: always()
+      shell: bash
+      run: scripts/ci actions summary >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload the machine-readable verdict
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ci-result-${{ inputs.name }}
+        path: _ci/last.json
+        if-no-files-found: error
+        retention-days: 7
+
+    - name: Upload step logs (failure)
+      if: failure()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ci-logs-${{ inputs.name }}
+        path: |
+          _ci/last.json
+          _ci/logs
+        if-no-files-found: ignore
+        retention-days: 7

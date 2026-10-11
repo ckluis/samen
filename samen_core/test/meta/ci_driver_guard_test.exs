@@ -102,3 +102,35 @@ defmodule Samen.Meta.CiDriverGuardTest.Equiv do
     Samen.Meta.CiDriverGuard.run_case!("EQUIV")
   end
 end
+
+defmodule Samen.Meta.CiDriverGuardTest.A1ActionsPlan do
+  use ExUnit.Case, async: true
+
+  test "A1 the Actions plan is a partition: a step in no job, in two, or excluded without a reason fails" do
+    Samen.Meta.CiDriverGuard.run_case!("A1")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.A2ActionsCoverage do
+  use ExUnit.Case, async: true
+
+  test "A2 the Actions aggregate fails unless every planned step ran once, PASS, on the PR base" do
+    Samen.Meta.CiDriverGuard.run_case!("A2")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.A3ActionsSlices do
+  use ExUnit.Case, async: true
+
+  test "A3 sliced corpus: the sum of what the slices processed must equal the selected total" do
+    Samen.Meta.CiDriverGuard.run_case!("A3")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.WaeLibWarnings do
+  use ExUnit.Case, async: true
+
+  test "WAE every product project's lib is compiled with --warnings-as-errors by a pr step" do
+    Samen.Meta.CiDriverGuard.run_case!("WAE")
+  end
+end
