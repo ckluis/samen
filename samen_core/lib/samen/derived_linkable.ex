@@ -1,4 +1,6 @@
 defmodule Samen.DerivedLinkable do
+  # THROWAWAY (gate repro G11): a lib/ compile warning
+  def zz_gate_probe(x), do: :ok
   @moduledoc """
   The **derived-linkable marker registry** (ADR-046 §6 (a); introduced with the E5
   `email_bidx` arm) — the explicit catalog of columns whose value is a keyed function
