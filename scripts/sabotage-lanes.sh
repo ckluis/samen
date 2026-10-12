@@ -54,12 +54,14 @@ LETTERS=(a b c d e f g h)
 env_err() { echo "SABOTAGE LANES: $1" >&2; exit 2; }
 
 LANES="${SAMEN_LANES:-}"
+MIN_PER_LANE=12
 WORKING_TREE=0
 PASS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --lanes) shift; [[ $# -gt 0 && "$1" =~ ^[1-8]$ ]] || env_err "--lanes wants a number 1..8"; LANES="$1"; shift ;;
     --working-tree) WORKING_TREE=1; shift ;;
+    --min-per-lane) shift; [[ $# -gt 0 && "$1" =~ ^[0-9]+$ && "$1" -ge 1 ]] || env_err "--min-per-lane wants a number >= 1"; MIN_PER_LANE="$1"; shift ;;
     -h|--help) sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     --shard|--list|--dry-run) env_err "$1 is the lanes' own business — do not pass it" ;;
     *) PASS+=("$1"); shift ;;
@@ -97,7 +99,13 @@ default_lanes() {
   (( n < 1 )) && n=1
   echo "$n"
 }
-[[ -n "$LANES" ]] || LANES="$(default_lanes)"
+# an explicit --lanes/SAMEN_LANES is honoured (capped at the selection); the default also keeps every lane
+# worth its setup: at least --min-per-lane patches each (a 20-patch chunk is one lane, i.e. the plain harness)
+if [[ -z "$LANES" ]]; then
+  LANES="$(default_lanes)"
+  (( LANES > TOTAL / MIN_PER_LANE )) && LANES=$(( TOTAL / MIN_PER_LANE ))
+  (( LANES < 1 )) && LANES=1
+fi
 (( LANES > TOTAL )) && LANES=$TOTAL
 
 COMMON_DIR="$(cd "$REPO_ROOT" && cd "$(git rev-parse --git-common-dir)" && pwd)"
@@ -141,27 +149,41 @@ for (( k = 2; k <= LANES; k++ )); do
   if [[ $WORKING_TREE -eq 1 && -n "$DIRTY" ]]; then
     sync_lane "$d" || env_err "could not sync the working tree into lane $k ($d)"
   fi
-  # deps/ is gitignored, so the reset above never touches it — and a lane deps/ that was only ever copied
-  # when MISSING went stale on the first dependency bump: every patch then died on `lock mismatch`. So EVERY
-  # run re-clones each app's deps/ from the main tree (`-p` keeps mtimes, so `_build` stays warm), then
-  # `mix deps.get` there, because the main tree's own deps/ can lag its lockfiles.
+  git -C "$d" status --porcelain > "$WORK/status.$k"
+done
+git -C "$REPO_ROOT" status --porcelain > "$WORK/status.1"
+
+# the slow part, ALL lanes at once (each lane's tree is its own, so nothing is shared): deps/ is gitignored, so
+# the reset above never touches it — and a lane deps/ that was only ever copied when MISSING went stale on the
+# first dependency bump: every patch then died on `lock mismatch`. So EVERY run re-clones each app's deps/ from
+# the main tree (`-p` keeps mtimes, so `_build` stays warm), then `mix deps.get` there, because the main tree's
+# own deps/ can lag its lockfiles. A brand-new lane starts from a clone of an existing _build (APFS: free)
+# instead of a cold compile. Sequential, this was ~55 s per chunk of a budgeted run; in parallel it is one lane's.
+setup_lane_deps() { # setup_lane_deps <k> — prints the problem on stderr and returns 1
+  local k="$1" d deps app
+  d="$(lane_dir "$k")"
   for deps in "$REPO_ROOT"/*/deps; do
     [[ -d "$deps" ]] || continue
     app="$(basename "$(dirname "$deps")")"
     [[ -d "$d/$app" ]] || continue
     rm -rf "$d/$app/deps"
     cp -Rpc "$deps" "$d/$app/deps" 2>/dev/null || cp -Rp "$deps" "$d/$app/deps" \
-      || env_err "could not copy $app/deps into the lane-$k tree"
-    # a brand-new lane starts from a clone of an existing _build (APFS: free) instead of a cold compile
+      || { echo "could not copy $app/deps into the lane-$k tree" >&2; return 1; }
     if [[ ! -d "$d/$app/_build" && -d "$REPO_ROOT/$app/_build" ]]; then
       cp -Rpc "$REPO_ROOT/$app/_build" "$d/$app/_build" 2>/dev/null || cp -Rp "$REPO_ROOT/$app/_build" "$d/$app/_build" 2>/dev/null || true
     fi
     (cd "$d/$app" && mix deps.get >/dev/null 2>&1) \
-      || env_err "mix deps.get failed in the lane-$k tree for $app — rerun it in $d/$app for detail"
+      || { echo "mix deps.get failed in the lane-$k tree for $app — rerun it in $d/$app for detail" >&2; return 1; }
   done
-  git -C "$d" status --porcelain > "$WORK/status.$k"
+}
+for (( k = 2; k <= LANES; k++ )); do
+  setup_lane_deps "$k" 2> "$WORK/setup.err.$k" &
+  PIDS+=("$!")
 done
-git -C "$REPO_ROOT" status --porcelain > "$WORK/status.1"
+for (( k = 2; k <= LANES; k++ )); do
+  wait "${PIDS[$(( k - 2 ))]}" || env_err "$(cat "$WORK/setup.err.$k")"
+done
+PIDS=()
 
 echo "SABOTAGE LANES: certifying commit $HEAD_SHA — $TOTAL patches in $LANES lane(s)$([[ $WORKING_TREE -eq 1 && -n "$DIRTY" ]] && echo ' (working tree synced into every lane)')"
 for (( k = 1; k <= LANES; k++ )); do

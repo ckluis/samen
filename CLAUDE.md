@@ -61,11 +61,12 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
   your diff — the verifier primitive), and `--list`/`--dry-run` to preview a selection
   (names + resolved APP + count) without applying anything. The header preflight still
   lints ALL patch headers even under a filter.
-- Two lanes (issue #30): `scripts/sabotage-lanes.sh` runs the FULL replay as `--app samen_core`
-  in this tree and `--not-app samen_core` in a second worktree (`.git/samen-lanes/b`, warm
-  `_build`) concurrently — disjoint test DBs, unchanged per-patch semantics, merged
-  PROCESSED/SELECTED accounting that must be total. It certifies a COMMIT (refuses a dirty
-  tree). `SAMEN_SABOTAGE=1 ./ci.sh` uses it on a clean tree and the serial harness otherwise.
+- N lanes (issue #30; ADR-053 P3): `scripts/sabotage-lanes.sh` runs the FULL replay as N concurrent
+  `sabotage.sh --shard k/N` lanes, each in its own worktree (`.git/samen-lanes/`, warm `_build`) with its
+  own test databases (`SAMEN_TEST_DB_SUFFIX`) — unchanged per-patch semantics, and the run FAILS unless the
+  lanes' processed counts sum to the selection. N defaults to what cores, RAM and Postgres connections allow
+  (`--lanes N` overrides). It certifies a COMMIT (refuses a dirty tree) unless `--working-tree` syncs the edits
+  into every lane; `scripts/ci full` and `SAMEN_SABOTAGE=1 ./ci.sh` use it.
 - Dialyzer (issue #73; UNCONDITIONAL in `ci.sh`, sequential before the concurrent app gates):
   `scripts/dialyzer_gate.sh [app…]` runs `mix dialyzer` over all ten product projects; any
   warning not in that project's `.dialyzer_ignore.exs` fails (every entry there says why it

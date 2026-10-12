@@ -23,7 +23,8 @@
 #   9. STALE DEPS — a lane `deps/` planted stale is re-cloned from the main tree and `mix deps.get`
 #      runs on it BEFORE the lanes run.
 #  10. DEPS.GET FAILS — exit 2, and NO lane runs.
-#  11. --lanes 1 runs the plain harness in the main tree only; selection flags pass through.
+#  11. --lanes 1 runs the plain harness in the main tree only; selection flags pass through; the default
+#      lane count scales with the selection (--min-per-lane) while an explicit count is honoured.
 #
 # Usage: scripts/sabotage_lanes_test.sh     Residue: none outside the temp dir.
 set -uo pipefail
@@ -214,6 +215,14 @@ expect_rc 0 "11a. one lane passes"
 expect_says "PROCESSED 3 of 3 SELECTED" "11b. over the range-selected 3 patches"
 [[ -e "$MARK/lane-1" && ! -e "$MARK/lane-2" ]] && ok "11c. only the main tree ran" || bad "11c. unexpected lanes: $(ls "$MARK")"
 grep -qF 'args=[2-4]' "$MARK/lane-1" && ok "11d. --range reached the lane" || bad "11d. --range was dropped: $(cat "$MARK/lane-1")"
+# the default lane count scales with the selection: --min-per-lane 8 over 8 patches is ONE lane (the plain
+# harness in this tree, no worktrees); an explicit SAMEN_LANES is honoured regardless
+run scaled.log SAMEN_LANES= -- --min-per-lane 8
+expect_rc 0 "11f. a selection too small for two lanes runs one"
+expect_says "in 1 lane(s)" "11g. and says 1 lane"
+[[ -e "$MARK/lane-1" && ! -e "$MARK/lane-2" ]] && ok "11h. only the main tree ran" || bad "11h. unexpected lanes: $(ls "$MARK")"
+run explicit.log -- --min-per-lane 8
+expect_says "in 3 lane(s)" "11i. an explicit SAMEN_LANES=3 is honoured despite --min-per-lane"
 run guard.log -- --shard 1/2
 expect_rc 2 "11e. --shard is the lanes' own business and is refused"
 
