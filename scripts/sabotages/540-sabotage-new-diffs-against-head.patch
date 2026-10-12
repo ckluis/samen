@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P3 — sabotage new diffs against HEAD instead of the INDEX, so a staged fix lands inside 
+#   the patch (the ADR-052 hand-built-patch accident).
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: SABNEW sabotage new refuses an unprovable patch
+diff --git a/scripts/sabotage_new.sh b/scripts/sabotage_new.sh
+index f3db529..8df6b79 100755
+--- a/scripts/sabotage_new.sh
++++ b/scripts/sabotage_new.sh
+@@ -166,7 +166,7 @@ for f in "${FILES[@]}"; do
+   cp -p "$f" "$SNAP/$f"
+ done
+ SNAPPED=1
+-git diff --no-color --no-ext-diff --binary -- "${FILES[@]}" > "$WORK/body.diff" || refuse "git diff failed"
++git diff HEAD --no-color --no-ext-diff --binary -- "${FILES[@]}" > "$WORK/body.diff" || refuse "git diff failed"
+ grep -q '^diff --git' "$WORK/body.diff" || refuse "git produced no diff for ${FILES[*]}"
+ grep -q '^GIT binary patch' "$WORK/body.diff" && refuse "the edit is binary — a sabotage must be a text edit"
+ 

@@ -696,7 +696,13 @@ def build_plan(man, mode, ctx, opts, quiet=False):
         s.key = ctx.key(s, man.apps)
         # the budget plans with max(manifest est, last observed wall-clock): a step that ran long
         # once is never again scheduled into a slot it cannot finish in
-        s.est = max(s.est, float(seen.get(s.id, 0)))
+        # ... but NEVER for a shard sub-step: its id (`sabotage_changed[1/1]`) names a SLOT, not a
+        # workload — the same id was a 36-patch chunk on one run (535.9 s) and a 1-patch chunk on the
+        # next (7 s), and the stale wall-clock overestimated the 1-patch run 75x (it then cost a whole
+        # `resume` call). A shard's estimate is expected * the learned per-item bucket, set in
+        # expand_shards, so it still never outgrows a tool call (G10) and still tracks this machine.
+        if not s.parent:
+            s.est = max(s.est, float(seen.get(s.id, 0)))
     return plan, skipped
 
 

@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P3 — sabotage new stops asking the double sweep whether the new patch anchors, so a 
+#   patch that fires in both baselines (testing nothing this branch added) is accepted.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: SABNEW sabotage new refuses an unprovable patch
+diff --git a/scripts/sabotage_new.sh b/scripts/sabotage_new.sh
+index f3db529..bf679d3 100755
+--- a/scripts/sabotage_new.sh
++++ b/scripts/sabotage_new.sh
+@@ -204,7 +204,7 @@ git rev-parse --verify -q "${BASE}^{commit}" >/dev/null \
+ bash scripts/double-sweep.sh --base "$BASE" --work "$WORK/ds" --quiet > "$WORK/ds.out" 2>&1
+ ds_rc=$?
+ SECTION="$(awk -v n="=== $NAME " 'index($0, n) == 1 {on=1; print; next} /^=== / {on=0} on {print}' "$WORK/ds/anchor.txt" 2>/dev/null)"
+-if ! printf '%s\n' "$SECTION" | grep -q '^  ANCHORED:'; then
++if false; then
+   refuse "the double sweep does not anchor $NAME against $BASE (double-sweep exit $ds_rc)." \
+     "A new patch must anchor on code or tests THIS BRANCH adds: it must fail to apply at $BASE, or name a" \
+     "test that does not exist there. Otherwise it would fire in both baselines and prove nothing new." \

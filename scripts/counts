@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# scripts/counts — the numbers CLAUDE.md states, generated from the sources that own them.
+# `exec` on the first command line (like scripts/ci): bash never reads this file again.
+exec python3 -I "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/counts.py" "$@"

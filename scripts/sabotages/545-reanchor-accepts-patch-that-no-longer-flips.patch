@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 C8 — reanchor stops judging the replay: a re-anchored patch whose named tests no longer 
+#   fail is rewritten over the original, replacing a guard with a patch that proves nothing.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C8 reanchor refuses, and leaves the original
+diff --git a/scripts/sabotage_reanchor.py b/scripts/sabotage_reanchor.py
+index 7457209..233e032 100644
+--- a/scripts/sabotage_reanchor.py
++++ b/scripts/sabotage_reanchor.py
+@@ -163,6 +163,7 @@ def candidate_body(merges, scratch):
+ def classify_flip(rc, out):
+     """-> None when the harness confirmed the flip + restore, else a refusal reason."""
+     text = out.decode(errors="replace")
++    return None
+     if rc == 0 and "restore: byte-exact" in text:
+         return None
+     if "no test-failure headers found" in text:

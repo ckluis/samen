@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 C8 (P3 gate) — reanchor takes a patch from outside scripts/sabotages/; its proof 
+#   replays the CORPUS patch with the same number, so an outside patch whose own edit flips nothing 
+#   is "proven" by another patch's flip and rewritten.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C8 reanchor refuses, and leaves the original, when the named tests no longer fail under it
+diff --git a/scripts/sabotage_reanchor.py b/scripts/sabotage_reanchor.py
+index ab8b82f..a2e2580 100644
+--- a/scripts/sabotage_reanchor.py
++++ b/scripts/sabotage_reanchor.py
+@@ -65,7 +65,7 @@ def find_patch(arg):
+         raise Refuse("no such patch: %s" % arg)
+     # the proof replays `sabotage.sh --range N-N`, i.e. the CORPUS patch numbered N: a patch anywhere else (an
+     # --emit-patches dir, another checkout) would be "proven" by a different patch's flip and then rewritten
+-    if os.path.dirname(os.path.realpath(p)) != os.path.realpath(SAB) or not re.match(r"^\d+-.*\.patch$", os.path.basename(p)):
++    if False and os.path.dirname(os.path.realpath(p)) != os.path.realpath(SAB) or not re.match(r"^\d+-.*\.patch$", os.path.basename(p)):
+         raise Refuse("%s is not a numbered patch in scripts/sabotages/ — the proof replays the corpus patch by number, "
+                      "so only a corpus patch can be re-anchored (move it into scripts/sabotages/ first)" % arg)
+     return p

@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 C10 — a count whose marker was deleted from CLAUDE.md is no longer reported, so that 
+#   number silently stops being checked.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C10 CLAUDE.md's counts are derived and drift fails
+diff --git a/scripts/counts.py b/scripts/counts.py
+index d6ff249..33c80e1 100644
+--- a/scripts/counts.py
++++ b/scripts/counts.py
+@@ -181,7 +181,7 @@ def main(argv):
+             seen.add(name)
+     # required markers: a count that lost its marker is a count nobody checks any more
+     for n in wanted:
+-        if n not in seen:
++        if False and n not in seen:
+             problems.append("%s: no <!--count:%s-->…<!--/count--> marker (a count without a marker is not checked)" % (path, n))
+     drift = []
+ 

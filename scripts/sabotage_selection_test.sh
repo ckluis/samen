@@ -35,6 +35,8 @@
 #   6. `--not-app X` IS THE COMPLEMENT OF `--app X` (issue #30) — together they partition
 #      the corpus exactly (disjoint, total, name for name); the flag refuses repetition
 #      and composes as an intersection.
+#   7. `--shard <i>/<n>` PARTITIONS the selection (disjoint, total, name for name; composes with
+#      `--range`; bad specs and repeats refused) — the split the N-lane corpus runs one shard per lane on.
 #
 # Usage: scripts/sabotage_selection_test.sh
 # Exit:  0 if every assertion passes; non-zero + FAIL lines otherwise.
@@ -187,6 +189,32 @@ if grep -qF "SABOTAGE SELECTION: 0 of" <<<"$empty"; then
 else
   echo "$empty"; bad "--app X --not-app X did not intersect to empty"
 fi
+
+# 7. --shard <i>/<n> PARTITIONS whatever the other filters selected (ADR-053 P3: one shard per lane of the
+#    N-lane corpus). Disjoint, total, name for name; composes with --range as an intersection; a bad spec or a
+#    repeated flag is a usage error.
+for n in 3 4; do
+  union=""; sizes=""
+  for i in $(seq 1 "$n"); do
+    part="$(cd "$REPO_ROOT" && names --shard "$i/$n")"
+    union+="$part"$'\n'; sizes+="$(grep -c . <<<"$part") "
+  done
+  if [[ "$(sort <<<"$union" | grep .)" == "$(grep . <<<"$all_names")" ]]; then
+    ok "--shard 1..$n/$n: the union is exactly the default selection, name for name (sizes: ${sizes% })"
+  else
+    bad "--shard $n: the shards' union differs from the default selection"
+  fi
+  if [[ -z "$(sort <<<"$union" | grep . | uniq -d)" ]]; then ok "--shard x/$n: the shards are DISJOINT"; else bad "--shard x/$n: a patch is in two shards"; fi
+done
+r_all="$(cd "$REPO_ROOT" && names --range 100-140)"
+r_u="$( (cd "$REPO_ROOT" && for i in 1 2 3; do names --range 100-140 --shard "$i/3"; done) | sort | grep .)"
+if [[ "$r_u" == "$(grep . <<<"$r_all")" ]]; then ok "--shard composes with --range (the union of the shards = the range's selection)"; else bad "--shard x/3 --range does not partition the range"; fi
+for spec in 0/3 4/3 1/0 a/b 2; do
+  out="$(cd "$REPO_ROOT" && bash "$SABOTAGE" --shard "$spec" --list 2>&1)"; rc=$?
+  if [[ $rc -eq 2 ]] && grep -qF -- "--shard wants" <<<"$out"; then ok "--shard $spec is refused (exit 2)"; else bad "--shard $spec was accepted (exit $rc)"; fi
+done
+twice="$(cd "$REPO_ROOT" && bash "$SABOTAGE" --shard 1/2 --shard 2/2 --list 2>&1)"; rc=$?
+[[ $rc -eq 2 ]] && grep -qF -- "--shard given twice" <<<"$twice" && ok "--shard twice is an error (exit 2)" || bad "--shard twice was accepted (exit $rc)"
 
 cleanup
 

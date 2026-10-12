@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-053 P3 — a shard sub-step's id names a SLOT, not a workload. Folding the slot's last 
+#   wall-clock into the estimate (max(est, seen[id])) planned a 1-patch run at 535.9 s because the 
+#   same slot once held a 36-patch chunk, and wasted a whole resume call.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: EST a shard's estimate is expected
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index f28e392..7565c19 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -701,8 +701,7 @@ def build_plan(man, mode, ctx, opts, quiet=False):
+         # next (7 s), and the stale wall-clock overestimated the 1-patch run 75x (it then cost a whole
+         # `resume` call). A shard's estimate is expected * the learned per-item bucket, set in
+         # expand_shards, so it still never outgrows a tool call (G10) and still tracks this machine.
+-        if not s.parent:
+-            s.est = max(s.est, float(seen.get(s.id, 0)))
++        s.est = max(s.est, float(seen.get(s.id, 0)))
+     return plan, skipped
+ 
+ 

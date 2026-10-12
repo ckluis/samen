@@ -1,0 +1,23 @@
+# SABOTAGE: ADR-053 C7 — the N-lane corpus no longer compares the lanes' SELECTED and PROCESSED totals with 
+#   the selection it listed itself, so lanes that are each internally complete but drop patches 
+#   between them certify a subset as the whole corpus.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C7 the N-lane corpus fails unless the patches processed across its lanes equal the selected count
+diff --git a/scripts/sabotage-lanes.sh b/scripts/sabotage-lanes.sh
+index 3f01edd..7528faa 100755
+--- a/scripts/sabotage-lanes.sh
++++ b/scripts/sabotage-lanes.sh
+@@ -212,8 +212,8 @@ for (( k = 1; k <= LANES; k++ )); do
+   SUMMARY+="lane $k PROCESSED $n of $m · "
+ done
+ 
+-[[ $SUM_M -eq $TOTAL ]] || problems+=("the lanes SELECTED $SUM_M patches in total, but the selection is $TOTAL — the partition is not total")
+-[[ $SUM_N -eq $TOTAL ]] || problems+=("the lanes PROCESSED $SUM_N patches in total, not the $TOTAL selected")
++true || problems+=("the lanes SELECTED $SUM_M patches in total, but the selection is $TOTAL — the partition is not total")
++true || problems+=("the lanes PROCESSED $SUM_N patches in total, not the $TOTAL selected")
+ for (( k = 1; k <= LANES; k++ )); do
+   if (( k == 1 )); then d="$REPO_ROOT"; else d="$(lane_dir "$k")"; [[ "$(git -C "$d" rev-parse HEAD)" == "$HEAD_SHA" ]] || problems+=("lane-$k tree moved off $HEAD_SHA during the run"); fi
+   [[ "$(git -C "$d" status --porcelain)" == "$(cat "$WORK/status.$k")" ]] || problems+=("the lane-$k tree changed during the run — residue")

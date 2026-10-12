@@ -12,7 +12,10 @@
   `.github/workflows/pr.yml` + `nightly.yml` + the `ci-job` composite action, the manifest-derived
   job matrix, `scripts/ci actions plan|verify|summary`, `--slice` / `--require-base` /
   `--only-steps`; red paths A1–A3 with sabotages 514–522; proven green on GitHub (§2.9 "Actions").
-  P3–P4 open.
+  **P3 BUILT** on `feat/adr-053-p3-sabotage-tooling`: `scripts/sabotage new` / `reanchor`, the N-lane
+  corpus (`sabotage.sh --shard`, per-lane test DBs), `scripts/counts` (+ a `counts` step in quick/pr/full),
+  the shard-estimate fix; red paths C7, C8, C10 (+ EST, SABNEW) in `scripts/ci_test.sh` with sabotages 531–549,
+  all made with `sabotage new` (§2.9 P3); the adversarial gate added 550–553 (§2.9 "Gate (P3)"). P4 open.
 
 ---
 
@@ -246,7 +249,7 @@ has a red-path assertion in `scripts/ci_test.sh`; sabotages 506–512 flip them.
 | *gate, ec95c5e:* `./ci-fast.sh --no-cache` | `CI-FAST: ALL PASSED` | 113 s |
 | *gate, ec95c5e:* `scripts/ci pr` / `quick` / `./ci.sh`, nothing changed | PASS 47/47 PR-READY / PASS 14/14 NOT PR-READY / ALL PASSED | 0.5 s / 2.1 s / 0.4 s |
 
-**Not in P1:** C7/C8/C10 and `sabotage new`/`reanchor`/`scripts/counts` (P3), Actions (P2), the
+**Not in P1:** C7/C8/C10 and `sabotage new`/`reanchor`/`scripts/counts` (built in P3), Actions (P2), the
 CLAUDE.md rewrite (P4 — P1 adds a pointer only). `full` mode's corpus and watch-list shards were
 exercised by the fake-manifest tests and `--plan`, not end to end (hours; nightly/P2).
 
@@ -420,6 +423,162 @@ this phase; worth its own fix.
 single job (hours; the corpus slicing is nightly-only). The nightly must run on `main` once to seed the
 default-branch caches.
 
+### 2.9 As built (P3) — sabotage/mutation ergonomics: `sabotage new`, `reanchor`, N lanes, `counts`, the estimate fix
+
+**Commands**
+
+| Command | What it does |
+|---|---|
+| `scripts/sabotage new <slug> --app A --test-file F… --must-fail "<literal>"… [--number N] [--description …] [--base REF] -- <lib file>…` | turns the working-tree edit of the named files into `scripts/sabotages/NNN-<slug>.patch` (next number = highest + 1), header in the existing `# SABOTAGE / # Flips … / # APP / # TEST_FILES / # MUST_FAIL` format |
+| `scripts/sabotage reanchor <n…>` | 3-way re-anchors patches that stopped applying, with proof, or refuses |
+| `scripts/sabotage-lanes.sh [--lanes N] [--working-tree] [selection flags]` | the corpus in N lanes (`--shard i/N` per lane) |
+| `scripts/sabotage.sh --shard i/n` | a deterministic partition of whatever the other filters selected; also prints `elapsed: Ns` per patch |
+| `scripts/counts --check \| --write \| --list [--only a,b]` | CLAUDE.md's counts, between `<!--count:NAME-->…<!--/count-->` |
+| `scripts/mutate.sh --list-targets` | the (file, app) rows of the selected set, no lint/enumeration (what `counts` reads) |
+
+`scripts/sabotage` is a dispatcher: `new` / `reanchor`, anything else is `sabotage.sh`.
+
+**`sabotage new` — the order that cannot go wrong.** The ADR-052 accident (edit a file that holds uncommitted
+fixes, `git diff`, `git checkout`) is made impossible by the workflow it documents in its `--help`: *stage the
+fix, sabotage the lib file (unstaged), run `new`.* The patch is `git diff` of the named files **against the index**,
+and the files are restored **from the index** (`git checkout-index`), nothing else is touched. (Unstaged work in a
+named file that the named tests do not exercise cannot be told apart from the sabotage: it is captured too — so the
+pre-command bytes are always kept and every captured line printed, gate G4.) A patch is kept only
+if every check holds; otherwise it is deleted, `CLAUDE.md` and the named files are put back to their pre-command
+bytes (the author's sabotage edit included), and the reason is printed:
+
+| Check | Refusal it produces |
+|---|---|
+| each `--must-fail` found by `grep -F` in the named test files | an interpolated name (`#{…}`) gets the pitfall explained (the harness and the double sweep both match literally); an absent one says so |
+| header lint + `git apply --check` on the restored tree | — |
+| **anchor**: `scripts/double-sweep.sh --base origin/main` is run (not re-implemented) and its `anchor.txt` section for the new patch must say `ANCHORED` | "does not anchor … would fire in both baselines" with the sweep's own reason; an unknown `--base` is refused, never skipped |
+| `scripts/sabotage.sh --range N-N` flips the NAMED tests and restores byte-exact | "suite failed but no test-failure headers found" is recognised as a compile/migration breaker and explained; "suite PASSED under sabotage" and "named test did not flip" each get their own message |
+| **baseline**: the same test files PASS on the restored tree | a red baseline — which is exactly what a captured *unstaged fix* produces once it is restored away |
+
+`scripts/counts --write --only sabotages[,driver_sabotages]` runs *before* the replay, because the guard tests check
+CLAUDE.md against the patch directory (a first dogfood run was refused by its own baseline for that reason; the
+counts are restored with the rest on a refusal). **Self-hosting:** sabotaging `sabotage_new.sh` with
+`sabotage_new.sh` would run the sabotaged copy, so `SAMEN_SABOTAGE_ROOT=<repo>` lets a pristine copy of the
+script (from the index) act on the repo; the test fixtures `unset` it so they can never aim at the real tree.
+
+**`sabotage reanchor`.** (1) every `MUST_FAIL` must still exist in the patch's `TEST_FILES`; (2) a patch that
+already applies is reported and left alone; (3) each `diff --git` section is 3-way merged with `git merge-file`:
+base = the patch's pre-image blob, theirs = that blob with the patch applied (the post-image blob is never
+stored by `git diff`), ours = the working-tree file; (4) the candidate patch = header copied **byte-identical**
++ the diff from the working tree to the merge result; (5) proof: `mix test <TEST_FILES>` is **green without** the
+patch, then the candidate is installed and `sabotage.sh --range N-N` must flip the named tests and restore
+byte-exact; (6) otherwise the original is copied back and verified by sha-256. Refused with a reason (C8): a
+conflict, a missing pre-image blob (history rewritten), a create/delete/rename patch, a vanished named test, a red
+baseline, a candidate that no longer fails the named test or breaks the compile instead, a patch that is not in
+`scripts/sabotages/` (the proof replays the corpus patch by number). Numbers shared by two
+patches (25, 35) are refused as ambiguous.
+
+**N lanes (C7).** The two-lane split by `APP:` was capped by `samen_core`'s share (331 of 542 patches ≈ 61%), so
+N lanes by app buy nothing past ~1.6×. The partition is now `sabotage.sh --shard i/N` (position mod N in the
+listing's order — equal lanes, every lane a mix of apps). Lanes need their own databases: every app's
+`config/test.exs` appends `SAMEN_TEST_DB_SUFFIX` (default empty) to its test database name
+(`samen_core`, `samen_web`, `demo`, `driftwood`, `pawchart`; the other five projects have no DB); lane 1 runs in the
+main tree on the inherited suffix (normally none), lane k>1 in `.git/samen-lanes/<b|c|d…>` with that suffix +
+`_lane<k>`. A fresh lane tree starts
+from an APFS clone of the main tree's `_build`; `deps/` is re-cloned and `mix deps.get` re-run on every run, **in
+parallel across lanes** (the G-stale-deps lesson from #30 kept; sequentially that was ~55 s of every chunk).
+Default lane count = `min(cores/2, RAM GB/3, (max_connections − used − 5)/22, 8)`, never more than
+selection/12 (`--min-per-lane`): each lane is a BEAM plus a 20-connection test pool and this server's
+`max_connections` is 100, so 4 lanes is the ceiling here (3 under load). `--working-tree` syncs the main tree's
+`git diff HEAD` and its untracked files into the other lanes so a dirty tree is certifiable (the driver always
+passes it); without it a dirty tree is still refused. The run **fails** unless every lane exits 0 with
+`PROCESSED n of n`, n > 0, the lanes' SELECTED sum equals the selection the script listed itself, and the PROCESSED
+sum equals it too; every lane tree must also be exactly as it was after the sync.
+
+Driver wiring: `sabotage_corpus` runs `sabotage-lanes.sh --working-tree $CI_SHARD_ARGS` locally (chunks by patch
+range, `shard_each_s = 8`, 420 s target) and the plain `sabotage.sh $CI_SHARD_ARGS` when `GITHUB_ACTIONS` is set
+(each nightly slice is already a runner — **the Actions slicing is unchanged**) or `SAMEN_LANES=1`; unbudgeted
+(`SAMEN_SABOTAGE=1 ./ci.sh`) it is one lane run over the whole corpus. The `pr`-time `sabotage_changed` replay
+gets the same treatment (`--changed` is passed through; seed 32 s/patch, `--min-per-lane 2`): on this branch it
+selects 48 patches, 22 of them 60-second guard patches, which serially is ~30 min of `pr`. The lane setup retries
+`mix deps.get` (one lane lost a race on hex's global state once).
+
+**Measured (this box: 10 cores, 16 GB, Postgres `max_connections` 100, and other sessions keeping the load average
+at 11–14 — so these are loaded numbers).** The corpus is 542 patches: 488 ordinary ones (3.3 s each serial, timed on
+a 41-patch uncontended sample) and 54 `ci_driver_guard_test.exs` patches (496–549, 57.6 s each: each replays the
+whole driver self-test).
+
+| Path | Wall-clock |
+|---|---|
+| serial `sabotage.sh` — **before** (estimated from those per-patch timings) | 488 × 3.3 + 54 × 57.6 ≈ **4,720 s ≈ 79 min** (the manifest's old seed, 25 s/patch, said 3.8 h) |
+| N lanes (3–4 lanes) through the driver, 32 budgeted chunks, `CI(full): PASS 32/32` — **after** | **3,074 s ≈ 51 min** of step wall; the lanes themselves 2,111 s ≈ 35 min, the rest is per-chunk driver work and lane setup |
+
+So 2.2× on lane time and 1.5× through the budgeted driver — less than N, because the CPU is shared with the other
+load, the 54 guard patches saturate whatever cores they get, and every budgeted chunk pays its own setup (a
+whole-corpus `--budget 0` run pays it once; the per-patch seconds summed across the lanes were 5,637 s under that
+contention). The pr-time `sabotage_changed` replay stays serial. Two things the run taught: (a) **the learned
+per-item rate re-chunks the plan when it rises** — the first attempt (seed 8 s/patch) hit the guard-patch region at
+12.7 s/patch, the bucket doubled, every finished chunk's key changed and ~30 min of passed chunks were void;
+`shard_each_s = 24` now covers the slow region, so the plan is stable. (b) **Patch 368 (a compile-vs-run race by
+design) failed once under 4 lanes** ("suite PASSED under sabotage") and passed alone five times and on resume; the
+lanes now name the failing patch with `scripts/sabotage.sh --range N-N` to re-check it alone — the verdict is not
+softened (a flaky guard still fails the run, as in C5), it is a timing-dependent patch to fix.
+
+**`scripts/counts` (C10).** Six counts, each from its owner: `sabotages` (patch files), `driver_sabotages`
+(lowest–highest patch number whose `TEST_FILES` names `ci_driver_guard_test.exs`), `watchlist_modules` /
+`corpus_targets` (`mutate.sh [--corpus] --list-targets`), `watchlist_mutants` / `corpus_mutants` (the engine's
+`list` over those rows, cached per file in `_ci/counts/` by sha-256 of engine + file; cold ≈ 75 s, warm ≈ 11 s,
+dominated by the corpus target derivation). `--check` fails on a stale value, **a vanished marker** (a count nobody
+checks) or an unknown name; `--write` only rewrites values. It is the `counts` step of `quick`, `pr` and `full`
+(`always`), so drift fails `quick`. It found real drift on its first run: the corpus line said 224 targets / 3,939
+mutants, the sources say 227 / 3,957. Counts that are words in prose ("ten product projects", "5 adapter gates")
+are not derived.
+
+**The estimate bug.** `build_plan` did `s.est = max(s.est, seen[s.id])` for every step. A shard sub-step is named
+by its *slot* (`sabotage_changed[1/1]`), not its workload: the same id was a 36-patch chunk (535.9 s) on one
+run and a 1-patch chunk (7.6 s) on the next, so the stale wall-clock overestimated the small run ~75× and the
+budget stopped it from fitting next to anything (one wasted `resume`). Sub-steps now skip the per-id maximum:
+their estimate is `expected × max(shard_each_s, learned per-item bucket) + 10`, so G10 holds (a shard is sized by
+the power-of-two per-item rate and never outgrows its target) while the estimate follows the *work*. Plain steps
+keep `max(est_s, last observed)`. Test: `ci_test.sh EST` (a planted `535.9` for the slot; the 1-item shard plans
+at 12.0 s, a plain step still at 535.9 s, a learned 64 s/item still splits 3 items into 3 shards).
+
+**Red paths and sabotages.** C7 → `ci_test.sh C7` (runs `sabotage_lanes_test.sh`: 49 assertions over a stub
+harness — a failing lane, a lane that lies, a partition gap, a lane that processes 0, a silent lane, residue, dirty
+tree, `--working-tree`, stale deps, lane DB suffixes); C8 → `ci_test.sh C8` and C10 → `ci_test.sh C10`;
+`sabotage new` → `ci_test.sh SABNEW`; the last two plus `EST` and `C7` are named in `ci_driver_guard_test.exs`.
+`scripts/sabotage_tooling_test.sh` (`new`, `reanchor`) runs the REAL scripts in a fixture repo with a fake
+`mix` (51 + 32 assertions, ~8 s each). `sabotage_selection_test.sh` gained the `--shard` partition proof.
+**Sabotages 531–549 were all created with `scripts/sabotage new`** (the tool dogfooded itself): 531 EST (slot
+wall-clock reused), 549 EST (learned rate ignored), 532–535 C7 (sums unchecked / failed lane's exit ignored / lanes
+share databases / residue unchecked), 536–538 C10 (stale value ignored / vanished marker unreported / not in
+`quick`), 539–544 `sabotage new` (baseline unchecked / diff against HEAD / interpolation accepted / anchor skipped /
+refusal does not restore the edit / compile breaker not recognised), 545–548 C8 (a non-flipping re-anchor accepted /
+refusal keeps the candidate / baseline unchecked / header rewritten). The double sweep anchors all 19.
+
+**Gate (P3).** The adversarial gate reproduced each of these before fixing it (red-path test + a sabotage, all four
+made with `sabotage new`, 553 through `SAMEN_SABOTAGE_ROOT`):
+
+| # | Found | Fix | Red path |
+|---|---|---|---|
+| G1 | The lanes self-test was not hermetic: a guard patch replayed in lane k>1 inherits `SAMEN_TEST_DB_SUFFIX=_lane<k>`, and the lanes script REPLACED it (lane 2 got `_lane2`, lane 1 kept the inherited `_lane2`), so `2d` failed there — the C7 guard test was RED at baseline in every lane but lane 1, and 3 of every 4 C7 sabotages "flipped" without proving anything. Also: any caller with the variable exported put lane 1 and lane 2 on the same databases. | lane k>1 = inherited suffix + `_lane<k>`; the self-test `unset`s it | `sabotage_lanes_test.sh` 2e; `ci_test.sh C7` runs the self-test as if inside lane 2; sabotage 550 |
+| G2 | The C7 guard test took 60.3 s against ExUnit's 60 s default timeout: the lanes self-test spent ~55 s in the lanes' start-stagger `sleep`s. One more lanes run (or load) turned it into a timeout — another baseline-red, flip-anything state. | a no-op `sleep` on the self-test's PATH (60 s → 5 s) | measured (`mix test … --slowest`) |
+| G3 | `reanchor <path>` accepted a patch outside `scripts/sabotages/` and proved it by replaying the CORPUS patch with the same number: an outside patch whose own edit flips nothing was rewritten (C8). | refuse anything that is not a numbered corpus patch | `sabotage_tooling_test.sh` R7, `ci_test.sh C8`; sabotage 551 |
+| G4 | `sabotage new` cannot tell a sabotage from unstaged work in progress beside it in the same file when the named tests do not exercise that work: every check passed, the WIP went into the patch and was restored AWAY — the ADR-052 loss again. | the named files' pre-command bytes are kept in `<git-dir>/samen-sabotage-new/<patch>/` and every captured line is printed | `sabotage_tooling_test.sh` N12, `ci_test.sh SABNEW`; sabotage 552 |
+| G5 | Nothing checked that the five `config/test.exs` actually append the suffix (sabotage 534 covers only the lanes script). | — | `ci_test.sh C7` checks the real configs; sabotage 553 |
+
+Patch 534's line was changed by G1, so it was regenerated from a real edit (`reanchor 534` refused it, correctly, as
+a conflict). Not fixed, noted: three samen_core tests create fixed-name scratch databases
+(`samen_core_backup_*`, `samen_core_opmigration_scratch`, `samen_core_pitr_restore_test`) — only patch 285 names one
+of them today, so no two lanes can collide yet; a second such patch would race. A `MUST_FAIL` may be any
+literal substring (a one-letter name matches every failing test) — the harness's long-standing rule, unchanged.
+
+**Deviations from §2.6/§2.7.** (1) N lanes need an environment knob in five `config/test.exs` files (a framework
+config change, default-off). (2) `reanchor` needs the patch's pre-image blob in the object database (always true
+for a patch made by `sabotage new` from a committed or staged file; false after a history rewrite) and does not
+handle create/delete/rename patches. (3) Lane count is limited by Postgres `max_connections`, not CPU. (4)
+the budgeted driver measures cost per *item* (`dur / expected`), which is wrong for a corpus with two cost classes
+(3 s and 58 s patches) and for lanes (a chunk's wall shrinks with its lane count): the learned rate re-chunks the plan
+whenever it rises, voiding finished chunks, and it did so twice on this branch (both fixed by seeding
+`shard_each_s` for the slow case, not by changing the mechanism). Cost-weighted chunking is the follow-up. (5) `new`'s baseline run doubles its cost (≈ 2 min for a sabotage whose
+test is a `ci_driver_guard_test.exs` case) — that run is the only thing that distinguishes "my fix was captured"
+from "the tree is red", so it stays.
+
 ## 3. Red paths (each with a test; sabotage where it guards a property)
 
 | # | Must fail when |
@@ -444,6 +603,9 @@ evicts the cached PASS of the same content) likewise.
 | A2 | the Actions aggregate passes though a planned step did not run, ran twice, ran on the wrong base or another commit/tree, the plan is empty, or a job failed |
 | A3 | sliced corpus: the slices' processed counts sum to ≠ the selected total (C7's Actions twin) |
 
+P3 (as built): C7, C8 and C10 (plus EST and SABNEW) are cases of `scripts/ci_test.sh`, named in
+`ci_driver_guard_test.exs`; sabotages 531–553 flip them (§2.9 "P3", 550–553 from its gate).
+
 P2 (as built): A1–A3 (and the gate's WAE) are cases of `scripts/ci_test.sh` (named in
 `ci_driver_guard_test.exs`); sabotages 514–527 flip them (§2.9 "Actions").
 
@@ -453,7 +615,7 @@ P2 (as built): A1–A3 (and the gate's WAE) are cases of `scripts/ci_test.sh` (n
 |---|---|
 | P1 | Measure every step (cold + warm). Manifest, `scripts/ci` (quick/pr/full, budget/resume, cache, verdict digests, `_ci/last.json`, flake classification), `ci.sh`/`ci-fast.sh` as wrappers. C1–C6, C9. |
 | P2 | **BUILT (PR #88).** GitHub Actions: `pr.yml` + `nightly.yml` (sharded corpus + mutation), caches, pgvector service; proven green on its own PR. |
-| P3 | Sabotage/mutation ergonomics: N-lane corpus, `sabotage new`, `sabotage reanchor`, `scripts/counts`. C7, C8, C10. |
+| P3 | **BUILT.** Sabotage/mutation ergonomics: N-lane corpus, `sabotage new`, `sabotage reanchor`, `scripts/counts`. C7, C8, C10. |
 | P4 | CLAUDE.md "Suites / CI" rewritten around the three modes (shorter, not longer); `docs/ci.md`; before/after numbers for a typical round. |
 
 ## 5. Consequences

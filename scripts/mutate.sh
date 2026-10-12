@@ -89,6 +89,8 @@
 #                       can be swept across runs without overlap or gaps.
 #   --list, --dry-run   print the selected mutants (and per-file counts) and EXIT.
 #                       Applies nothing, runs nothing, needs no DB.
+#   --list-targets      print only the selected MODE's target rows (relpath, app) and EXIT
+#                       (the input of scripts/counts).
 #   --emit-patches <d>  write each SURVIVOR as a sabotage-format .patch into <d>,
 #                       headers pre-filled, MUST_FAIL left as a TODO — the
 #                       promotion path: write the test, fill MUST_FAIL, move it
@@ -165,6 +167,7 @@ TOUCH_DESC=""
 TOUCH_SET="$WORK/touch_set"; : > "$TOUCH_SET"
 SHARD_I=""; SHARD_N=""
 LIST_ONLY=0
+TARGETS_ONLY=0
 EMIT_DIR=""
 SEEN_MODE=0; MODE_FIRST=""
 SEEN_APP=0; APP_FIRST=""
@@ -247,6 +250,8 @@ while [[ $# -gt 0 ]]; do
       LEDGER_FILE="$1"; SEEN_LEDGER=1; shift ;;
     --list|--dry-run)
       LIST_ONLY=1; shift ;;
+    --list-targets)
+      TARGETS_ONLY=1; shift ;;
     -h|--help)
       usage; exit 0 ;;
     *)
@@ -282,8 +287,12 @@ filter_label() {
 # Same discipline as scripts/sabotage.sh calling sabotage_lint.sh first: a
 # malformed watch-list or ledger row is a latent bug wherever it sits, and the
 # check costs milliseconds, so narrowing the run never lowers this protection.
-"$REPO_ROOT/scripts/mutation_lint.sh" --targets "$TARGETS_FILE" --ledger "$LEDGER_FILE" \
-  || fail "preflight failed (see above) — no mutant was applied"
+# (--list-targets only reads the rows for scripts/counts; the lint is its own manifest step and the
+# elixir script behind it costs ~9 s, which would put it on every `quick`.)
+if [[ $TARGETS_ONLY -eq 0 ]]; then
+  "$REPO_ROOT/scripts/mutation_lint.sh" --targets "$TARGETS_FILE" --ledger "$LEDGER_FILE" \
+    || fail "preflight failed (see above) — no mutant was applied"
+fi
 
 # ── the target set ───────────────────────────────────────────────────────────
 # Rows are `relpath \t app \t test_files`. Tier-1 rows come from the committed
@@ -342,6 +351,15 @@ case "$MODE" in
              }
              END { for (i = 1; i <= c; i++) print keys[i] "\t" union[keys[i]] }' >> "$TARGET_ROWS" ;;
 esac
+
+# --list-targets: the (file, app) rows of the selected MODE, and nothing else (no owner derivation, no
+# enumeration, no DB: ~1 s). scripts/counts reads the watch-list / corpus target counts from here so
+# CLAUDE.md's numbers come from the one derivation this script owns, never a second copy of it.
+if [[ $TARGETS_ONLY -eq 1 ]]; then
+  cut -f1,2 "$TARGET_ROWS"
+  echo "MUTATION TARGETS: $(grep -c '' "$TARGET_ROWS" || true) ($MODE)"
+  exit 0
+fi
 
 # ── owning-test derivation (issue #20) ───────────────────────────────────────
 # One engine call per app (it parses that app's test files once), then each

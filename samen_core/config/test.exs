@@ -4,7 +4,7 @@ config :samen_core, SamenCore.TestRepo,
   username: System.get_env("USER") || "postgres",
   password: "",
   hostname: "localhost",
-  database: "samen_core_test",
+  database: "samen_core_test" <> System.get_env("SAMEN_TEST_DB_SUFFIX", ""),
   pool: Ecto.Adapters.SQL.Sandbox,
   # pool_size 20 + queue slack: verify_vault_declared_parity opens direct
   # Postgrex connections outside the sandbox for DDL; under an unlucky seed the

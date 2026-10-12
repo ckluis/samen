@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 P3 — after a refusal sabotage new no longer puts the author's sabotage edit back, so 
+#   the tree is left restored-from-index: the edit is lost and the refusal is not a no-op.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: SABNEW sabotage new refuses an unprovable patch
+diff --git a/scripts/sabotage_new.sh b/scripts/sabotage_new.sh
+index f3db529..58ab717 100755
+--- a/scripts/sabotage_new.sh
++++ b/scripts/sabotage_new.sh
+@@ -97,7 +97,6 @@ cleanup() {
+   local rc=$?
+   if [[ $DONE -eq 0 ]]; then
+     [[ -n "$PATCH" ]] && rm -f "$PATCH"
+-    restore_snapshot
+   fi
+   rm -rf "$WORK"
+   return $rc

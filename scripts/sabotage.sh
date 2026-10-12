@@ -52,6 +52,10 @@
 #                             NONE of them (the A3 247/248/249 miss). The banner
 #                             says `changed=<ref>+untracked` so the union is
 #                             visible in the run's own output.
+#   --shard <i>/<n>         a DETERMINISTIC 1-based partition of whatever the other filters
+#                             selected (position mod n == i-1, in the listing's order): the n
+#                             shards are disjoint and their union is the selection. The N-lane
+#                             corpus (scripts/sabotage-lanes.sh) runs one shard per lane.
 #   --list, --dry-run       print the SELECTED patch set (name + resolved APP,
 #                             and the count) and EXIT — no patch is applied and
 #                             no test runs. Fast proof of what a filter will run.
@@ -162,10 +166,10 @@ fail() {
 
 usage() {
   echo "Usage: sabotage.sh [--app <name>] [--not-app <name>] [--range <lo>-<hi> | --from <lo> --to <hi>]"
-  echo "                   [--touching <path>... | --touching-file <file> | --changed [<ref>]]"
+  echo "                   [--shard <i>/<n>] [--touching <path>... | --touching-file <file> | --changed [<ref>]]"
   echo "                   [--list | --dry-run]"
   echo ""
-  sed -n '22,48p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '22,52p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 arg_err() {
@@ -214,6 +218,8 @@ SEEN_FROM=0; FROM_FIRST=""
 SEEN_TO=0; TO_FIRST=""
 SEEN_TOUCHING_FILE=0; TOUCHING_FILE_FIRST=""
 SEEN_CHANGED=0; CHANGED_FIRST=""
+SEEN_SHARD=0; SHARD_FIRST=""
+SHARD_I=""; SHARD_N=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -303,6 +309,17 @@ while [[ $# -gt 0 ]]; do
       TOUCH_MODE=1
       TOUCH_DESC="changed=${changed_ref}+untracked"
       CHANGED_FIRST="$changed_ref"; SEEN_CHANGED=1 ;;
+    --shard)
+      shift; [[ $# -gt 0 ]] || arg_err "--shard requires <i>/<n>"
+      if [[ "$1" =~ ^([0-9]+)/([0-9]+)$ ]] && (( 10#${BASH_REMATCH[2]} >= 1 && 10#${BASH_REMATCH[1]} >= 1 && 10#${BASH_REMATCH[1]} <= 10#${BASH_REMATCH[2]} )); then
+        if [[ $SEEN_SHARD -eq 1 ]]; then
+          arg_err "--shard given twice: '$SHARD_FIRST' and '$1' — repeating the same flag is an error"
+        fi
+        SHARD_I=$((10#${BASH_REMATCH[1]})); SHARD_N=$((10#${BASH_REMATCH[2]})); SHARD_FIRST="$1"; SEEN_SHARD=1
+      else
+        arg_err "--shard wants <i>/<n> with 1 <= i <= n (e.g. --shard 2/4), got: $1"
+      fi
+      shift ;;
     --list|--dry-run)
       LIST_ONLY=1; shift ;;
     -h|--help)
@@ -322,7 +339,7 @@ if [[ $RANGE_ACTIVE -eq 1 ]]; then
 fi
 
 FILTER_ACTIVE=0
-[[ -n "$FILTER_APP" || -n "$FILTER_NOT_APP" || $RANGE_ACTIVE -eq 1 || $TOUCH_MODE -eq 1 ]] && FILTER_ACTIVE=1
+[[ -n "$FILTER_APP" || -n "$FILTER_NOT_APP" || $RANGE_ACTIVE -eq 1 || $TOUCH_MODE -eq 1 || -n "$SHARD_I" ]] && FILTER_ACTIVE=1
 
 # Human-readable selection label (for the effective-selection line + success line).
 filter_label() {
@@ -331,6 +348,7 @@ filter_label() {
   [[ -n "$FILTER_NOT_APP" ]] && parts+=("not-app=$FILTER_NOT_APP")
   [[ $RANGE_ACTIVE -eq 1 ]] && parts+=("range=${RANGE_LO}-${RANGE_HI}")
   [[ $TOUCH_MODE -eq 1 ]] && parts+=("$TOUCH_DESC")
+  [[ -n "$SHARD_I" ]] && parts+=("shard=${SHARD_I}/${SHARD_N}")
   local IFS=', '
   echo "${parts[*]}"
 }
@@ -384,10 +402,16 @@ select_patch() {
 # ── build the selection ──────────────────────────────────────────────────────
 grand_total=0
 selected=()
+shard_pos=0
 for patch in "$SABOTAGE_DIR"/*.patch; do
   [[ -e "$patch" ]] || continue
   grand_total=$((grand_total + 1))
   if select_patch "$patch"; then
+    # --shard partitions what every OTHER filter selected, by position in this order
+    if [[ -n "$SHARD_I" ]]; then
+      shard_pos=$((shard_pos + 1))
+      (( (shard_pos - 1) % SHARD_N == SHARD_I - 1 )) || continue
+    fi
     selected+=("$patch")
   fi
 done
@@ -451,6 +475,7 @@ for patch in "${selected[@]}"; do
   # stopped without the reader having to count '==>' lines.
   echo "==> [$idx/$sel_count] sabotage $name (app: $app)"
 
+  patch_t0=$SECONDS
   # 1. Byte-exact baseline of every file the patch touches.
   touched_paths "$patch" > "$WORK/touched"
   [[ -s "$WORK/touched" ]] || fail "$name: could not parse touched files"
@@ -502,6 +527,7 @@ for patch in "${selected[@]}"; do
   diff -q "$WORK/sha_before" "$WORK/sha_after" > /dev/null ||
     fail "$name: SHA mismatch after revert — residue left behind"
   echo "    restore: byte-exact (sha-256 verified)"
+  echo "    elapsed: $((SECONDS - patch_t0))s"
 
   # ONLY here — after the flip was confirmed AND the restore verified — does a patch
   # count as EXERCISED. Anything that exits earlier leaves it in the not-exercised tail.

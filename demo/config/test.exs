@@ -4,7 +4,7 @@ config :demo, Demo.Repo,
   username: System.get_env("USER") || "postgres",
   password: "",
   hostname: "localhost",
-  database: "demo_test",
+  database: "demo_test" <> System.get_env("SAMEN_TEST_DB_SUFFIX", ""),
   pool: Ecto.Adapters.SQL.Sandbox,
   # pool_size 20 + queue slack (mirrors samen_core config/test.exs, WS-B B9 gate F1 /
   # WS-F4 QA): the dogfood + verifier suite opens concurrent checkouts (incl. direct

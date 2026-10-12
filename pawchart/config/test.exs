@@ -4,7 +4,7 @@ config :pawchart, PawChart.Repo,
   username: System.get_env("USER") || "postgres",
   password: "",
   hostname: "localhost",
-  database: "pawchart_test",
+  database: "pawchart_test" <> System.get_env("SAMEN_TEST_DB_SUFFIX", ""),
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 10
 
