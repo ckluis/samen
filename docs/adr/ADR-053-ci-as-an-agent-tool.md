@@ -15,7 +15,7 @@
   **P3 BUILT** on `feat/adr-053-p3-sabotage-tooling`: `scripts/sabotage new` / `reanchor`, the N-lane
   corpus (`sabotage.sh --shard`, per-lane test DBs), `scripts/counts` (+ a `counts` step in quick/pr/full),
   the shard-estimate fix; red paths C7, C8, C10 (+ EST, SABNEW) in `scripts/ci_test.sh` with sabotages 531–549,
-  all made with `sabotage new` (§2.9 P3). P4 open.
+  all made with `sabotage new` (§2.9 P3); the adversarial gate added 550–553 (§2.9 "Gate (P3)"). P4 open.
 
 ---
 
@@ -441,7 +441,9 @@ default-branch caches.
 **`sabotage new` — the order that cannot go wrong.** The ADR-052 accident (edit a file that holds uncommitted
 fixes, `git diff`, `git checkout`) is made impossible by the workflow it documents in its `--help`: *stage the
 fix, sabotage the lib file (unstaged), run `new`.* The patch is `git diff` of the named files **against the index**,
-and the files are restored **from the index** (`git checkout-index`), nothing else is touched. A patch is kept only
+and the files are restored **from the index** (`git checkout-index`), nothing else is touched. (Unstaged work in a
+named file that the named tests do not exercise cannot be told apart from the sabotage: it is captured too — so the
+pre-command bytes are always kept and every captured line printed, gate G4.) A patch is kept only
 if every check holds; otherwise it is deleted, `CLAUDE.md` and the named files are put back to their pre-command
 bytes (the author's sabotage edit included), and the reason is printed:
 
@@ -467,7 +469,8 @@ stored by `git diff`), ours = the working-tree file; (4) the candidate patch = h
 patch, then the candidate is installed and `sabotage.sh --range N-N` must flip the named tests and restore
 byte-exact; (6) otherwise the original is copied back and verified by sha-256. Refused with a reason (C8): a
 conflict, a missing pre-image blob (history rewritten), a create/delete/rename patch, a vanished named test, a red
-baseline, a candidate that no longer fails the named test or breaks the compile instead. Numbers shared by two
+baseline, a candidate that no longer fails the named test or breaks the compile instead, a patch that is not in
+`scripts/sabotages/` (the proof replays the corpus patch by number). Numbers shared by two
 patches (25, 35) are refused as ambiguous.
 
 **N lanes (C7).** The two-lane split by `APP:` was capped by `samen_core`'s share (331 of 542 patches ≈ 61%), so
@@ -475,7 +478,8 @@ N lanes by app buy nothing past ~1.6×. The partition is now `sabotage.sh --shar
 listing's order — equal lanes, every lane a mix of apps). Lanes need their own databases: every app's
 `config/test.exs` appends `SAMEN_TEST_DB_SUFFIX` (default empty) to its test database name
 (`samen_core`, `samen_web`, `demo`, `driftwood`, `pawchart`; the other five projects have no DB); lane 1 runs in the
-main tree on the default names, lane k>1 in `.git/samen-lanes/<b|c|d…>` with `_lane<k>`. A fresh lane tree starts
+main tree on the inherited suffix (normally none), lane k>1 in `.git/samen-lanes/<b|c|d…>` with that suffix +
+`_lane<k>`. A fresh lane tree starts
 from an APFS clone of the main tree's `_build`; `deps/` is re-cloned and `mix deps.get` re-run on every run, **in
 parallel across lanes** (the G-stale-deps lesson from #30 kept; sequentially that was ~55 s of every chunk).
 Default lane count = `min(cores/2, RAM GB/3, (max_connections − used − 5)/22, 8)`, never more than
@@ -547,6 +551,23 @@ share databases / residue unchecked), 536–538 C10 (stale value ignored / vanis
 refusal does not restore the edit / compile breaker not recognised), 545–548 C8 (a non-flipping re-anchor accepted /
 refusal keeps the candidate / baseline unchecked / header rewritten). The double sweep anchors all 19.
 
+**Gate (P3).** The adversarial gate reproduced each of these before fixing it (red-path test + a sabotage, all four
+made with `sabotage new`, 553 through `SAMEN_SABOTAGE_ROOT`):
+
+| # | Found | Fix | Red path |
+|---|---|---|---|
+| G1 | The lanes self-test was not hermetic: a guard patch replayed in lane k>1 inherits `SAMEN_TEST_DB_SUFFIX=_lane<k>`, and the lanes script REPLACED it (lane 2 got `_lane2`, lane 1 kept the inherited `_lane2`), so `2d` failed there — the C7 guard test was RED at baseline in every lane but lane 1, and 3 of every 4 C7 sabotages "flipped" without proving anything. Also: any caller with the variable exported put lane 1 and lane 2 on the same databases. | lane k>1 = inherited suffix + `_lane<k>`; the self-test `unset`s it | `sabotage_lanes_test.sh` 2e; `ci_test.sh C7` runs the self-test as if inside lane 2; sabotage 550 |
+| G2 | The C7 guard test took 60.3 s against ExUnit's 60 s default timeout: the lanes self-test spent ~55 s in the lanes' start-stagger `sleep`s. One more lanes run (or load) turned it into a timeout — another baseline-red, flip-anything state. | a no-op `sleep` on the self-test's PATH (60 s → 5 s) | measured (`mix test … --slowest`) |
+| G3 | `reanchor <path>` accepted a patch outside `scripts/sabotages/` and proved it by replaying the CORPUS patch with the same number: an outside patch whose own edit flips nothing was rewritten (C8). | refuse anything that is not a numbered corpus patch | `sabotage_tooling_test.sh` R7, `ci_test.sh C8`; sabotage 551 |
+| G4 | `sabotage new` cannot tell a sabotage from unstaged work in progress beside it in the same file when the named tests do not exercise that work: every check passed, the WIP went into the patch and was restored AWAY — the ADR-052 loss again. | the named files' pre-command bytes are kept in `<git-dir>/samen-sabotage-new/<patch>/` and every captured line is printed | `sabotage_tooling_test.sh` N12, `ci_test.sh SABNEW`; sabotage 552 |
+| G5 | Nothing checked that the five `config/test.exs` actually append the suffix (sabotage 534 covers only the lanes script). | — | `ci_test.sh C7` checks the real configs; sabotage 553 |
+
+Patch 534's line was changed by G1, so it was regenerated from a real edit (`reanchor 534` refused it, correctly, as
+a conflict). Not fixed, noted: three samen_core tests create fixed-name scratch databases
+(`samen_core_backup_*`, `samen_core_opmigration_scratch`, `samen_core_pitr_restore_test`) — only patch 285 names one
+of them today, so no two lanes can collide yet; a second such patch would race. A `MUST_FAIL` may be any
+literal substring (a one-letter name matches every failing test) — the harness's long-standing rule, unchanged.
+
 **Deviations from §2.6/§2.7.** (1) N lanes need an environment knob in five `config/test.exs` files (a framework
 config change, default-off). (2) `reanchor` needs the patch's pre-image blob in the object database (always true
 for a patch made by `sabotage new` from a committed or staged file; false after a history rewrite) and does not
@@ -583,7 +604,7 @@ evicts the cached PASS of the same content) likewise.
 | A3 | sliced corpus: the slices' processed counts sum to ≠ the selected total (C7's Actions twin) |
 
 P3 (as built): C7, C8 and C10 (plus EST and SABNEW) are cases of `scripts/ci_test.sh`, named in
-`ci_driver_guard_test.exs`; sabotages 531–549 flip them (§2.9 "P3").
+`ci_driver_guard_test.exs`; sabotages 531–553 flip them (§2.9 "P3", 550–553 from its gate).
 
 P2 (as built): A1–A3 (and the gate's WAE) are cases of `scripts/ci_test.sh` (named in
 `ci_driver_guard_test.exs`); sabotages 514–527 flip them (§2.9 "Actions").
