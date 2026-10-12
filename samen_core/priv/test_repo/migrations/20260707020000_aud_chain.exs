@@ -24,8 +24,12 @@ defmodule SamenCore.TestRepo.Migrations.AudChain do
 
   use Ecto.Migration
 
-  @app_role Application.compile_env(:samen_core, :aud_event_app_role, "clank")
+  # ADR-045 §4.2 (O4): DERIVE the app role at migration time (the `:aud_event_app_role` knob,
+  # else SamenCore.TestRepo's configured `:username`, else RAISE) via the shared helper, as the
+  # verticals and the generated template do. Never a hardcoded developer laptop role: a contributor
+  # (or a CI runner) whose Postgres role is not the maintainer's could not migrate the kernel suite.
+  defp app_role, do: Samen.OperatorPlane.Migration.app_role!(:samen_core, SamenCore.TestRepo)
 
-  def up, do: Samen.OperatorPlane.Migration.create_aud_chain(@app_role)
-  def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(@app_role)
+  def up, do: Samen.OperatorPlane.Migration.create_aud_chain(app_role())
+  def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(app_role())
 end
