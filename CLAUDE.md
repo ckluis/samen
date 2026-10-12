@@ -16,109 +16,42 @@ reading >1 source file to understand something, or grepping/globbing any of `sam
 through codemunch first. A single grep for one exact string in one known file is fine; a *sweep* is
 not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full rules + decision tree.
 
-## Suites / CI (local Postgres + pgvector required)
-- **Driver (ADR-053) — use this, never hand-segment `ci.sh`:** `scripts/ci quick` (inside a round:
-  diff-aware vs origin/main incl. untracked files; never PR-ready) · `scripts/ci pr` (before a PR) ·
-  `scripts/ci full`. Budgeted to 540 s per call: on `INCOMPLETE n/m` run `scripts/ci resume` until
-  the final line is `CI(pr): PASS n/n … — PR-READY`. Content-cached (`--no-cache` forces), failures
-  print a digest + `_ci/logs/<step>.log`, verdict in `_ci/last.json`. Steps live in `ci/steps.conf`
-  (`scripts/ci list pr`, `scripts/ci explain <step>`); `./ci.sh` / `./ci-fast.sh` are unbudgeted
-  wrappers over it with the same markers. Driver red paths: `scripts/ci_test.sh` (sabotages <!--count:driver_sabotages-->496–553<!--/count-->).
-- Sabotage/mutation tooling (ADR-053 P3): `scripts/sabotage new|reanchor` (headered patch from a working-tree edit /
-  3-way re-anchor with proof), `scripts/sabotage-lanes.sh` (N-lane corpus), `scripts/counts --check|--write` (the
-  counts in this file are generated between `<!--count:…-->` markers; never hand-edit them).
-- Toolchain floor: `.tool-versions` (Elixir 1.20.4 / OTP 29.1.1). `ci.sh` and `ci-fast.sh` run
-  `scripts/toolchain_check.sh` FIRST and fail on an older Elixir or OTP; raise the pin when upgrading.
-- Prerequisite: a local Postgres server WITH the `pgvector` extension installed (`CREATE
-  EXTENSION vector`) — the samen_core AI-embeddings migration hard-requires it (ADR-043
-  §7.1/M3; `docs/adr/ADR-043-ai-plane.md`). Install via `brew install pgvector` (or build
-  0.8.0 from source against your pg major when no bottle exists). Without it, `./ci.sh`
-  fails the samen_core suite at setup with a clear "pgvector not installed" guard message
-  (`samen_core/test/test_helper.exs`), not an opaque `CREATE EXTENSION` error.
-- Root gate: `./ci.sh` — spikes → samen_core → the AI eval/red-team tier → 5 adapter-package
-  gates (samen_stripe/postmark/ses/resend/anthropic) → 3 gen_app probes → an opt-in
-  (`SAMEN_SABOTAGE=1`) sabotage-harness step → samen_web + demo + driftwood + pawchart run
-  CONCURRENTLY last (own DBs, race-free once everything registry-mutating above has finished
-  sequentially). Takes minutes; must end `ROOT CI: ALL PASSED`.
-- Iteration tier: `./ci-fast.sh` — spikes → samen_core → samen_web ONLY (framework core,
-  skips the gen_app probes + demo/vertical gates). Fast inner-loop feedback; NOT a
-  substitute for `./ci.sh` before a milestone. Ends `CI-FAST: ALL PASSED`.
-- Per app: `cd samen_core && mix test` (test_helper owns DB lifecycle); `cd samen_web &&
-  mix test` (alias sets up the scratch DB); verticals/demo: `MIX_ENV=test bash ci.sh`
-  (full verifier gate). CI compiles with `--warnings-as-errors` — keep zero warnings.
-- Sabotage harness (opt-in): `SAMEN_SABOTAGE=1 ./ci.sh` or `./scripts/sabotage.sh` —
-  replays every shipped gate sabotage (`scripts/sabotages/*.patch`): apply → the NAMED
-  tests must FAIL → revert → SHA-256 byte-exact restore. Gates add new sabotages as
-  patches (header lines: APP / TEST_FILES / MUST_FAIL) instead of re-deriving them.
-  Default (no args) = the full harness (count: `ls scripts/sabotages/*.patch | wc -l` — **<!--count:sabotages-->546<!--/count-->**). At that count the full serial run exceeds the 600s single tool-call ceiling,
-  so certify it **backgrounded** or in **chunks**
-  via additive selection flags (different FLAGS compose as an intersection; repeating the SAME
-  flag is an error — use separate runs for two ranges; a FILTERED run certifies ONLY its
-  subset — full coverage still needs a full/background run):
-  `--app <name>` (per-app: samen_web/samen_core/driftwood/pawchart/demo/samen_stripe),
-  `--range <lo>-<hi>` / `--from`/`--to` (by filename number, inclusive),
-  `--touching <path>…` / `--changed [<ref>]` (only patches whose touched files intersect
-  your diff — the verifier primitive), and `--list`/`--dry-run` to preview a selection
-  (names + resolved APP + count) without applying anything. The header preflight still
-  lints ALL patch headers even under a filter.
-- N lanes (issue #30; ADR-053 P3): `scripts/sabotage-lanes.sh` runs the FULL replay as N concurrent
-  `sabotage.sh --shard k/N` lanes, each in its own worktree (`.git/samen-lanes/`, warm `_build`) with its
-  own test databases (`SAMEN_TEST_DB_SUFFIX`) — unchanged per-patch semantics, and the run FAILS unless the
-  lanes' processed counts sum to the selection. N defaults to what cores, RAM and Postgres connections allow
-  (`--lanes N` overrides). It certifies a COMMIT (refuses a dirty tree) unless `--working-tree` syncs the edits
-  into every lane; `scripts/ci full` and `SAMEN_SABOTAGE=1 ./ci.sh` use it.
-- Dialyzer (issue #73; UNCONDITIONAL in `ci.sh`, sequential before the concurrent app gates):
-  `scripts/dialyzer_gate.sh [app…]` runs `mix dialyzer` over all ten product projects; any
-  warning not in that project's `.dialyzer_ignore.exs` fails (every entry there says why it
-  is a false positive or deliberate code, and an UNUSED entry also fails). Fix a new warning
-  or add it WITH its reason — never a bare entry. PLTs live in `*/priv/plts/` (gitignored —
-  never commit them; #77 once did). A path dep is invisible to dialyxir's lockfile hash, so:
-  samen_web keeps samen_core IN its PLT and the script rebuilds it when samen_core's source
-  hash changes (~95 s); the other eight keep the framework OUT of their PLT and ignore
-  `Samen.`-scoped unknown calls. Cached runs are ~8 s per project; a first build ~2 min and
-  ~2-3 GB each.
-- Apply-check (UNCONDITIONAL in `ci.sh` + `ci-fast.sh`, ~2s): `scripts/sabotage_apply_check.sh`
-  requires EVERY patch to `git apply --check` against the working tree. A patch that stops
-  applying is a guard with no red — re-anchor it (same semantics, regenerated from a real
-  edit, then `sabotage.sh --range n-n`), never delete it. Issue #53: the double sweep alone
-  cannot see this, because a patch failing in BOTH baselines is "pre-existing" by design.
+## Suites / CI (local Postgres + pgvector required) — reference: `docs/ci.md`
+Use the driver; never hand-segment `ci.sh`, never background a run and poll it (run each call in the foreground).
+- `scripts/ci quick` during a round (diff-aware vs origin/main incl. untracked files; NEVER PR-ready) ·
+  `scripts/ci pr` before a PR: each call is budgeted to 540 s, on `INCOMPLETE n/m` run `scripts/ci resume`
+  until the last line is `CI(pr): PASS n/n … — PR-READY` · `scripts/ci full` = nightly/opt-in (whole corpus +
+  watch-list; Actions runs it nightly). `./ci.sh` / `./ci-fast.sh` are unbudgeted wrappers over the same steps.
+- A red step prints a digest + `_ci/logs/<step>.log`; `scripts/ci status` · `explain <step>` · `list pr`;
+  verdict in `_ci/last.json`. Content-cached (`--no-cache` forces); a FAIL is never cached and a FLAKY test
+  still fails the run — fix the flake. Steps live in `ci/steps.conf`; a step must declare every path it reads.
+- Never weaken a gate, ledger, ignore-file or test to go green. CI compiles with `--warnings-as-errors`.
+- Sabotages (`scripts/sabotages/*.patch`, header APP / TEST_FILES / MUST_FAIL): add one with `scripts/sabotage
+  new` — `git add` your fix FIRST, make ONLY the sabotage edit unstaged, then run it. `MUST_FAIL` is a literal test
+  name, never interpolated. A patch that stopped applying: `scripts/sabotage reanchor <n>`; never delete it.
+  Replay: `scripts/sabotage.sh` (filters) / `scripts/sabotage-lanes.sh` (N lanes). Unfiltered runs need `scripts/ci full`.
+- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->546<!--/count--> sabotages
+  (driver red paths <!--count:driver_sabotages-->496–553<!--/count-->), watch-list <!--count:watchlist_modules-->12<!--/count-->
+  modules / <!--count:watchlist_mutants-->166<!--/count--> mutants, corpus <!--count:corpus_targets-->227<!--/count--> targets /
+  <!--count:corpus_mutants-->3,957<!--/count--> mutants.
+- Toolchain floor `.tool-versions` (Elixir 1.20.4 / OTP 29.1.1); the `toolchain` step fails on older — raise the pin
+  when upgrading. Prerequisite: Postgres WITH `pgvector` (`brew install pgvector`; ADR-043 §7.1/M3) — else the
+  samen_core suite fails at setup with "pgvector not installed".
+- Dialyzer (`dialyzer_*` steps; `scripts/dialyzer_gate.sh [app…]`): a warning not in that project's
+  `.dialyzer_ignore.exs` fails, and so does an UNUSED entry. Fix it or add it WITH its reason — never a bare
+  entry. PLTs (`*/priv/plts/`) are gitignored — never commit them (#77).
 
 ## Mutation gate (ADR-049) — the converse question the sabotage corpus cannot ask
-The sabotage harness proves the guarantees we CLAIM are still guarded. The mutation gate asks the
-converse — is there some OTHER way to break the same file that its owning tests do NOT catch? —
-because every sabotage is a claim someone thought to make.
-- `./scripts/mutate.sh` (default: the tier-1 watch-list, `scripts/mutation/targets.tsv`, <!--count:watchlist_modules-->12<!--/count-->
-  chokepoint/guard modules / <!--count:watchlist_mutants-->166<!--/count--> mutants — `./scripts/mutate.sh --list`; ~15 min,
-  so run it in `--file`/`--shard` chunks under the 600 s tool-call ceiling). Sites are enumerated from the **AST** by
-  `scripts/mutation/mutate.exs` over four operator families (EQ / REL / BOOLOP / BOOLLIT) and
-  spliced at exact line:column; each mutant runs ONLY that target's **owning** tests, so a kill is
-  attributed by construction. Ends `MUTATION GATE: ALL PASSED`.
-- Owning tests = DECLARED (`targets.tsv` / sabotage `TEST_FILES`) ∪ DERIVED (`mutate.exs owners`,
-  issue #20): every test file in the target's app whose AST names one of the target's modules
-  (aliases expanded; exact names, never a submodule), plus any carrying `# MUTATION_OWNS:
-  <repo-relative lib path>`. A new proof file is picked up with NO list edit — if it drives the
-  guard through a resource and never names it in code, add the `MUTATION_OWNS` line (lint refuses
-  one naming a missing file). `--list` prints the derived additions per target.
-- Flags mirror `sabotage.sh` (`--app`, `--file`, `--family`, `--changed [<ref>]`, `--list`;
-  same-flag-twice is an error; different flags intersect) plus `--corpus` (derive targets from the
-  sabotage headers — <!--count:corpus_targets-->227<!--/count--> (file, app) targets / <!--count:corpus_mutants-->3,957<!--/count--> mutants, `--corpus --list`; a soak not a gate step), `--shard <i>/<n>`
-  (deterministic disjoint partition for sweeping a soak across runs), and `--emit-patches <dir>`
-  (write each survivor as a sabotage-format patch — THE promotion path: write the test, fill
-  `MUST_FAIL`, move it into `scripts/sabotages/`).
-- CI: two UNCONDITIONAL steps (`scripts/mutation_lint.sh` + `scripts/mutation_selection_test.sh`,
-  ~17s, no DB) and one OPT-IN replay tier, `SAMEN_MUTATION=1 ./ci.sh`.
-- NEVER weaken these to make a survivor go away: (1) baseline green before scoring — against a red
-  suite every mutant "dies" and the gate reports 100%; (2) a kill is a NAMED test failure — a
-  non-zero exit with no `N) test` header means the COMPILER refused the mutant (`BUILD-REFUSED`,
-  never a kill), and the owning suites deliberately run WITHOUT `--warnings-as-errors`; (3)
-  byte-exact SHA-256 restore; (4) an unexempt survivor fails the run; (5) full report, then fail.
-- A survivor is closed ONE of two honest ways: write the test that kills it, or — only if the
-  mutation provably cannot change behaviour — add the printed key to `scripts/mutation/ledger.tsv`
-  with class `EQUIVALENT` + a specific proof, or `ACCEPTED_GAP` + a mandatory `ref=`. Do NOT widen
-  a target's owning-test set to make red go green: widening is legitimate ONLY when the added file
-  genuinely guards that module and actually kills the mutant. Ledger rows are **content-pinned**
-  (they hash the source line they excuse), so editing that line EXPIRES the exemption, and an
-  exemption whose mutant is now killed FAILS the gate as obsolete.
+Sabotages prove the guarantees we CLAIM; the gate asks whether some OTHER change to the same file survives its
+owning tests. `./scripts/mutate.sh` scores the tier-1 watch-list (`scripts/mutation/targets.tsv`; `--list`,
+`--changed` runs in `pr`, chunk with `--shard i/n`); owning tests are declared ∪ derived (a proof file that never
+names the module needs `# MUTATION_OWNS: <lib path>`). Ends `MUTATION GATE: ALL PASSED`.
+- NEVER weaken it: baseline green before scoring; a kill is a NAMED test failure (a compiler refusal is
+  `BUILD-REFUSED`, not a kill); byte-exact SHA-256 restore; an unexempt survivor fails the run.
+- Close a survivor by writing the test that kills it, or — only if the mutation provably cannot change behaviour —
+  a `scripts/mutation/ledger.tsv` row (`EQUIVALENT` + proof, or `ACCEPTED_GAP` + `ref=`; rows are content-pinned).
+  Never widen a target's owning tests to turn red green. Promotion: `--emit-patches <dir>` → write the test, fill
+  `MUST_FAIL`, move the patch into `scripts/sabotages/`.
 
 ## Fail-honest adapter contract (ADR-014, ADR-024, ADR-026)
 An unconfigured/unimplemented adapter NEVER returns `{:ok, _}` for work it did not do —
