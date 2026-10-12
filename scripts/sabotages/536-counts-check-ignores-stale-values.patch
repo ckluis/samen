@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 C10 — scripts/counts --check stops reporting a stale value, so CLAUDE.md drifts (a 
+#   hand-edited or forgotten count) while quick stays green.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C10 CLAUDE.md's counts are derived and drift fails
+diff --git a/scripts/counts.py b/scripts/counts.py
+index d6ff249..0f0e5ed 100644
+--- a/scripts/counts.py
++++ b/scripts/counts.py
+@@ -196,7 +196,7 @@ def main(argv):
+ 
+     new_lines = [MARK.sub(sub, l) if "<!--count:" in l else l for l in lines]
+     if mode == "check":
+-        for name, have, want in drift:
++        for name, have, want in drift[:0]:
+             problems.append("%s: count %s says %s, the sources say %s" % (path, name, have, want))
+         if problems:
+             for p in problems:

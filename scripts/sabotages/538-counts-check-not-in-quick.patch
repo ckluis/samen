@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 C10 — the counts check is dropped from quick, so drift in CLAUDE.md fails only at pr 
+#   time instead of inside the round.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C10 CLAUDE.md's counts are derived and drift fails
+diff --git a/ci/steps.conf b/ci/steps.conf
+index 813a1b5..d14ed3a 100644
+--- a/ci/steps.conf
++++ b/ci/steps.conf
+@@ -154,7 +154,7 @@ group = preflight
+ # between <!--count:…--> markers by scripts/counts; drift fails quick (ADR-053 C10). Fix: scripts/counts --write.
+ [step counts]
+ cmd = bash scripts/counts --check
+-modes = quick pr full
++modes = pr full
+ always = 1
+ inputs = **
+ est_s = 12

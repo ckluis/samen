@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 C7 — a lane that leaves its tree changed (a sabotage that did not restore byte-exact) 
+#   is no longer reported as residue.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C7 the N-lane corpus fails unless the patches processed across its lanes equal the selected count
+diff --git a/scripts/sabotage-lanes.sh b/scripts/sabotage-lanes.sh
+index 3f01edd..475699c 100755
+--- a/scripts/sabotage-lanes.sh
++++ b/scripts/sabotage-lanes.sh
+@@ -216,7 +216,7 @@ done
+ [[ $SUM_N -eq $TOTAL ]] || problems+=("the lanes PROCESSED $SUM_N patches in total, not the $TOTAL selected")
+ for (( k = 1; k <= LANES; k++ )); do
+   if (( k == 1 )); then d="$REPO_ROOT"; else d="$(lane_dir "$k")"; [[ "$(git -C "$d" rev-parse HEAD)" == "$HEAD_SHA" ]] || problems+=("lane-$k tree moved off $HEAD_SHA during the run"); fi
+-  [[ "$(git -C "$d" status --porcelain)" == "$(cat "$WORK/status.$k")" ]] || problems+=("the lane-$k tree changed during the run — residue")
++  true || problems+=("the lane-$k tree changed during the run — residue")
+ done
+ 
+ for (( k = 1; k <= LANES; k++ )); do

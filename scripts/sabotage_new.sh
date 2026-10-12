@@ -46,7 +46,9 @@
 # Exit: 0 created · 1 refused (reason printed) · 2 usage
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# SAMEN_SABOTAGE_ROOT: run a PRISTINE copy of this script against the repo — needed to sabotage this very
+# script (the edit being captured must not be the code that captures it).
+REPO_ROOT="${SAMEN_SABOTAGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SAB_DIR="$REPO_ROOT/scripts/sabotages"
 cd "$REPO_ROOT" || exit 2
 
