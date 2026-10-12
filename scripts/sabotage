@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# scripts/sabotage — one entry point for the sabotage tooling (ADR-053 §2.7).
+#   scripts/sabotage new <slug> …        a working-tree sabotage edit -> a headered, proven patch
+#   scripts/sabotage reanchor <n…>       re-anchor patches that stopped applying (proof or refusal)
+#   scripts/sabotage <harness flags>     everything else is scripts/sabotage.sh (--range, --app, --list, …)
+D="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+case "${1:-}" in
+  new)      shift; exec bash "$D/sabotage_new.sh" "$@" ;;
+  reanchor) shift; exec bash "$D/sabotage_reanchor.sh" "$@" ;;
+  help)     sed -n '2,5p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  *)        exec bash "$D/sabotage.sh" "$@" ;;
+esac
