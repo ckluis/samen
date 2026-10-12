@@ -1004,15 +1004,28 @@ DOC
 # coverage. scripts/sabotage_lanes_test.sh runs the REAL sabotage-lanes.sh over a stub harness; this case
 # names the C7 assertions so the sabotages that break them flip THIS case.
 case_C7() {
-  bash "$ROOT/scripts/sabotage_lanes_test.sh" > "$T/c7" 2>&1
-  eq "$?" 0 "C7: scripts/sabotage_lanes_test.sh passes"
+  # run as if INSIDE lane 2 (the ci_driver_guard patches replay this case there, with SAMEN_TEST_DB_SUFFIX=_lane2
+  # exported): the self-test must be hermetic, or every C7 sabotage would "flip" in that lane on a red baseline
+  SAMEN_TEST_DB_SUFFIX=_lane2 bash "$ROOT/scripts/sabotage_lanes_test.sh" > "$T/c7" 2>&1
+  eq "$?" 0 "C7: scripts/sabotage_lanes_test.sh passes (also when run inside lane 2)"
   has "$T/c7" '^PASS: 1b\. ' "C7: positive control — honest lanes cover the whole selection"
   has "$T/c7" '^PASS: 4a\. ' "C7: a lane exiting 0 with PROCESSED < SELECTED fails the run"
   has "$T/c7" '^PASS: 5a\. ' "C7: lanes that are each complete but do not sum to the selection fail the run"
   has "$T/c7" '^PASS: 6a\. ' "C7: a lane that processes 0 fails the run"
   has "$T/c7" '^PASS: 6c\. ' "C7: a lane that prints no accounting fails the run"
   has "$T/c7" '^PASS: 3a\. ' "C7: a crashed lane fails the run"
+  has "$T/c7" '^PASS: 2e\. ' "C7: an inherited SAMEN_TEST_DB_SUFFIX is kept, so no two lanes share a database"
   hasnt "$T/c7" '^FAIL: ' "C7: no lane assertion failed"
+  # the lanes' databases are only separate if every app's test config appends the suffix (the real configs)
+  local cfg app n=0 miss=""
+  for cfg in "$ROOT"/*/config/test.exs; do
+    app="$(basename "$(dirname "$(dirname "$cfg")")")"
+    grep -q "database: \"${app}_test\"" "$cfg" || continue
+    n=$((n + 1))
+    grep -q "database: \"${app}_test\" <> System.get_env(\"SAMEN_TEST_DB_SUFFIX\", \"\")" "$cfg" || miss+=" $app"
+  done
+  eq "$n" 5 "C7: positive control — the five DB-backed apps' test configs were found"
+  eq "${miss:-none}" none "C7: every app's test database name appends SAMEN_TEST_DB_SUFFIX (lanes never share a test DB)"
 }
 
 # C8 (ADR-053 P3): `scripts/sabotage reanchor` rewrites a patch ONLY after proving its named tests still fail

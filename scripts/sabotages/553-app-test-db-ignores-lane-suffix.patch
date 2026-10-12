@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 C7 (P3 gate) — an app's config/test.exs stops appending SAMEN_TEST_DB_SUFFIX to its 
+#   test database name, so every lane that replays a pawchart patch drops and recreates the SAME 
+#   pawchart_test while the others run.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C7 the N-lane corpus fails unless the patches processed across its lanes equal the selected count
+diff --git a/pawchart/config/test.exs b/pawchart/config/test.exs
+index c7f1471..d4da188 100644
+--- a/pawchart/config/test.exs
++++ b/pawchart/config/test.exs
+@@ -4,7 +4,7 @@ config :pawchart, PawChart.Repo,
+   username: System.get_env("USER") || "postgres",
+   password: "",
+   hostname: "localhost",
+-  database: "pawchart_test" <> System.get_env("SAMEN_TEST_DB_SUFFIX", ""),
++  database: "pawchart_test",
+   pool: Ecto.Adapters.SQL.Sandbox,
+   pool_size: 10
+ 

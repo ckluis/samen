@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 C7 (P3 gate) — lane k>1 REPLACES an inherited SAMEN_TEST_DB_SUFFIX with a bare _lane<k> 
+#   instead of appending to it, so a lanes run inside lane 2 (a guard patch replaying the lanes 
+#   self-test there) puts lane 1 and lane 2 on the same databases.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C7 the N-lane corpus fails unless the patches processed across its lanes equal the selected count
+diff --git a/scripts/sabotage-lanes.sh b/scripts/sabotage-lanes.sh
+index 892f5a0..c628a3c 100755
+--- a/scripts/sabotage-lanes.sh
++++ b/scripts/sabotage-lanes.sh
+@@ -207,7 +207,7 @@ for (( k = 1; k <= LANES; k++ )); do
+     (cd "$REPO_ROOT" && bash "$SAB_REL" "${PASS[@]+"${PASS[@]}"}" --shard "1/$LANES") > "$WORK/lane-1.log" 2>&1 &
+   else
+     # staggered: concurrent CREATE DATABASE from template1 can collide
+-    (sleep $(( (k - 1) * 2 )); cd "$(lane_dir "$k")" && SAMEN_TEST_DB_SUFFIX="${BASE_SUFFIX}_lane$k" bash "$SAB_REL" "${PASS[@]+"${PASS[@]}"}" --shard "$k/$LANES") > "$WORK/lane-$k.log" 2>&1 &
++    (sleep $(( (k - 1) * 2 )); cd "$(lane_dir "$k")" && SAMEN_TEST_DB_SUFFIX="_lane$k" bash "$SAB_REL" "${PASS[@]+"${PASS[@]}"}" --shard "$k/$LANES") > "$WORK/lane-$k.log" 2>&1 &
+   fi
+   PIDS+=("$!")
+ done

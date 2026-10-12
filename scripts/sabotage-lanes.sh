@@ -11,8 +11,10 @@
 #     listing's order — disjoint, union = the selection, every lane a mix of apps),
 #   * each lane is a git worktree of its own (a sabotage edits `samen_core/lib`, which every other app
 #     compiles as a path dep, so one shared tree would leak one lane's sabotage into another's tests),
-#   * and each lane gets its OWN test databases: lane 1 (this tree) keeps the default names, lane k>1
-#     sets SAMEN_TEST_DB_SUFFIX=_lane<k> (every app's config/test.exs appends it to its database name).
+#   * and each lane gets its OWN test databases: lane 1 (this tree) keeps the inherited names, lane k>1
+#     sets SAMEN_TEST_DB_SUFFIX=<inherited>_lane<k> (every app's config/test.exs appends it to its database
+#     name). The inherited suffix is KEPT, not replaced: run inside lane 2 (a ci_driver_guard patch replays
+#     this script's self-test there), a bare `_lane2` would put lane 1 and lane 2 on the same databases.
 #
 # Each lane is the unchanged `sabotage.sh` — apply → fresh `mix test` → named MUST_FAIL flips → revert →
 # SHA-256 byte-exact — so per-patch semantics and attribution are exactly the serial harness's.
@@ -77,6 +79,9 @@ if [[ -n "$DIRTY" && $WORKING_TREE -eq 0 ]]; then
 fi
 
 HEAD_SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+# lane 1 runs on whatever suffix this process inherited; lane k>1 appends _lane<k> to it, so every lane's databases
+# differ from every other's whatever the caller exported
+BASE_SUFFIX="${SAMEN_TEST_DB_SUFFIX:-}"
 # THE selection, listed by this script itself: the number every lane's accounting is held to.
 LIST_OUT="$(cd "$REPO_ROOT" && bash "$SAB_REL" "${PASS[@]+"${PASS[@]}"}" --list 2>&1)" || { echo "$LIST_OUT" >&2; env_err "could not list the selection (see above)"; }
 TOTAL="$(printf '%s\n' "$LIST_OUT" | sed -n 's/^SABOTAGE SELECTION: \([0-9][0-9]*\) of [0-9][0-9]* patches selected.*/\1/p' | tail -1)"
@@ -192,8 +197,8 @@ PIDS=()
 
 echo "SABOTAGE LANES: certifying commit $HEAD_SHA — $TOTAL patches in $LANES lane(s)$([[ $WORKING_TREE -eq 1 && -n "$DIRTY" ]] && echo ' (working tree synced into every lane)')"
 for (( k = 1; k <= LANES; k++ )); do
-  if (( k == 1 )); then echo "  lane 1: --shard 1/$LANES in $REPO_ROOT (default test databases)"
-  else echo "  lane $k: --shard $k/$LANES in $(lane_dir "$k") (SAMEN_TEST_DB_SUFFIX=_lane$k)"; fi
+  if (( k == 1 )); then echo "  lane 1: --shard 1/$LANES in $REPO_ROOT (test databases suffix '${BASE_SUFFIX}')"
+  else echo "  lane $k: --shard $k/$LANES in $(lane_dir "$k") (SAMEN_TEST_DB_SUFFIX=${BASE_SUFFIX}_lane$k)"; fi
 done
 START=$(date +%s)
 
@@ -202,7 +207,7 @@ for (( k = 1; k <= LANES; k++ )); do
     (cd "$REPO_ROOT" && bash "$SAB_REL" "${PASS[@]+"${PASS[@]}"}" --shard "1/$LANES") > "$WORK/lane-1.log" 2>&1 &
   else
     # staggered: concurrent CREATE DATABASE from template1 can collide
-    (sleep $(( (k - 1) * 2 )); cd "$(lane_dir "$k")" && SAMEN_TEST_DB_SUFFIX="_lane$k" bash "$SAB_REL" "${PASS[@]+"${PASS[@]}"}" --shard "$k/$LANES") > "$WORK/lane-$k.log" 2>&1 &
+    (sleep $(( (k - 1) * 2 )); cd "$(lane_dir "$k")" && SAMEN_TEST_DB_SUFFIX="${BASE_SUFFIX}_lane$k" bash "$SAB_REL" "${PASS[@]+"${PASS[@]}"}" --shard "$k/$LANES") > "$WORK/lane-$k.log" 2>&1 &
   fi
   PIDS+=("$!")
 done

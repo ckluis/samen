@@ -10,7 +10,8 @@
 #
 #   1. GREEN — all lanes pass: exit 0, "PROCESSED 8 of 8", "ALL PASSED ... 3 lanes".
 #   2. ISOLATION — lane 1 ran in the main tree and each other lane in its OWN tree, all at the SAME
-#      commit; lane 1 on the default DB names, lane k>1 with SAMEN_TEST_DB_SUFFIX=_lane<k>.
+#      commit; lane 1 on the default DB names, lane k>1 with SAMEN_TEST_DB_SUFFIX=_lane<k>; an INHERITED suffix
+#      is kept (lane 1 on it, lane k>1 appends _lane<k>), so no two lanes ever share a database.
 #   3. A FAILING LANE — lane 3 exits 1: the run fails and names lane 3.
 #   4. A LYING LANE — lane 2 exits 0 but reports PROCESSED 2 of 3: the run fails.
 #   5. C7 — A PARTITION GAP — lane 1 silently selects one patch fewer: each lane is internally
@@ -28,6 +29,8 @@
 #
 # Usage: scripts/sabotage_lanes_test.sh     Residue: none outside the temp dir.
 set -uo pipefail
+# hermetic: a ci_driver_guard patch replays this self-test INSIDE a lane, which exports SAMEN_TEST_DB_SUFFIX=_lane<k>
+unset SAMEN_TEST_DB_SUFFIX
 
 REAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sabotage-lanes.sh"
 
@@ -58,6 +61,9 @@ echo "$(pwd -P) $* $(cat deps/pkg/VERSION 2>/dev/null)" >> "$STUB_MARKS/mix-call
 [[ "${STUB_MIX:-}" != fail ]]
 STUB
 chmod +x "$BIN/mix"
+# the lanes' start stagger and deps.get retry pauses are real `sleep`s (~4 s per 3-lane run, ~60 s over this file):
+# they buy nothing against a stub harness and put the C7 guard test (ExUnit's 60 s default timeout) on the edge
+printf '#!/usr/bin/env bash\nexit 0\n' > "$BIN/sleep"; chmod +x "$BIN/sleep"
 
 # The stub harness: understands the selection flags the lanes pass (`--list`, `--shard i/n`, `--range`,
 # `--app`), records where it ran. STUB_LANE<k>=fail|lie|short|zero|silent changes one lane's behaviour.
@@ -134,6 +140,13 @@ read -r tree1 sha1 suf1 _ < "$MARK/lane-1"; read -r tree2 sha2 suf2 _ < "$MARK/l
 [[ "$sha1" == "$head_sha" && "$sha2" == "$head_sha" && "$sha3" == "$head_sha" ]] && ok "2c. all lanes certified the same commit" || bad "2c. commits differ: $sha1 / $sha2 / $sha3"
 [[ "$suf1" == "suffix=[]" && "$suf2" == "suffix=[_lane2]" && "$suf3" == "suffix=[_lane3]" ]] \
   && ok "2d. lane 1 on the default test DBs, lanes 2-3 on their own (SAMEN_TEST_DB_SUFFIX)" || bad "2d. suffixes: $suf1 $suf2 $suf3"
+# run INSIDE a lane (an inherited suffix, e.g. a guard patch replayed in lane 2): every lane must still be on
+# databases of its own — a bare `_lane2` for lane 2 would share lane 1's
+run inherited.log SAMEN_TEST_DB_SUFFIX=_lane2
+read -r _ _ isuf1 _ < "$MARK/lane-1"; read -r _ _ isuf2 _ < "$MARK/lane-2"; read -r _ _ isuf3 _ < "$MARK/lane-3"
+[[ $RC -eq 0 && "$isuf1" == "suffix=[_lane2]" && "$isuf2" == "suffix=[_lane2_lane2]" && "$isuf3" == "suffix=[_lane2_lane3]" ]] \
+  && ok "2e. an inherited SAMEN_TEST_DB_SUFFIX is kept: lane 1 on it, lanes 2-3 append _lane<k> (no two lanes share a DB)" \
+  || bad "2e. inherited suffix: rc=$RC $isuf1 $isuf2 $isuf3"
 
 echo "== 3. a failing lane =="
 run failc.log STUB_LANE3=fail
