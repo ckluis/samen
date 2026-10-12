@@ -989,6 +989,14 @@ DOC
   # the real document: the two counts that need no Elixir are current
   bash "$ROOT/scripts/counts" --check --only sabotages,driver_sabotages > "$T/c10k" 2>&1
   eq "$?" 0 "C10: the real CLAUDE.md's sabotage counts are current"
+  # and the check is a manifest step of quick, pr and full — drift FAILS quick (the real manifest)
+  local m
+  for m in quick pr full; do
+    env -u SAMEN_CI_MANIFEST -u SAMEN_CI_REPO -u SAMEN_CI_HOME "$CI" list "$m" > "$T/c10l.$m" 2>&1
+    has "$T/c10l.$m" '^counts +' "C10: the counts check is a $m step"
+  done
+  env -u SAMEN_CI_MANIFEST -u SAMEN_CI_REPO -u SAMEN_CI_HOME "$CI" explain counts > "$T/c10x" 2>&1
+  has "$T/c10x" 'scripts/counts --check' "C10: ... and it runs scripts/counts --check"
 }
 
 # C7 (ADR-053 P3): the N-lane corpus must FAIL unless the patches processed across its lanes equal the
