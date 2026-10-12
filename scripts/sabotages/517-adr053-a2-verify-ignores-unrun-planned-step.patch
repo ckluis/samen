@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 A2 — the aggregate no longer names a step the plan assigned to a job that the job did not run.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: A2 the Actions aggregate fails unless every planned step ran once, PASS, on the PR base
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index de5f687..a630bcd 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1484,7 +1484,7 @@ def actions_verify(plan, results_dir, expect_base, expect_totals=None):
+                 ran_ids.add(parent)
+                 if ms and (len(ms) != len(items) or sorted(i for i, _t in ms) != list(range(1, ms[0][1] + 1)) or {t for _i, t in ms} != {ms[0][1]}):
+                     errors.append("job %s: shards of %s are not 1..N complete: %s" % (n, parent, sorted(ms)))
+-        for sid in sorted(want[n] - ran_ids):
++        for sid in []:
+             errors.append("step %s is planned in job %s but job %s did not run it" % (sid, n, n))
+         for sid in sorted(ran_ids - want[n]):
+             errors.append("job %s ran %s which the plan does not assign to it" % (n, sid))

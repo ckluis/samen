@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 A2 — --only-steps no longer means step ids only: a job named for a step that shares its group's name (samen_core) also runs the group's other steps (multinode) and the step runs in two jobs.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: A2 the Actions aggregate fails unless every planned step ran once, PASS, on the PR base
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 843e8b8..2575a48 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -652,7 +652,7 @@ def build_plan(man, mode, ctx, opts, quiet=False):
+         if not man.by_id(x) and x not in {s.group for s in man.steps} and not opts.get("exact"):
+             raise UsageError("no step or group named %r (scripts/ci list)" % x)
+     cand = [s for s in man.steps if mode in s.modes or s.id in also or s.group in also]
+-    if only and opts.get("exact"):
++    if False:
+         # --only-steps: step IDS only. A step whose id equals a group name (samen_core) must not drag in
+         # the rest of that group — the Actions jobs name their steps, and `actions verify` would catch the
+         # extra step only after it ran twice.

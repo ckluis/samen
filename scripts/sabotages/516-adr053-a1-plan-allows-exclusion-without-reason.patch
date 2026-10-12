@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 A1 — an exclusion from Actions no longer needs a reason: steps can be dropped from the remote gate with no explanation.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: A1 the Actions plan is a partition: a step in no job, in two, or excluded without a reason fails
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index de5f687..3ff09da 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1359,7 +1359,7 @@ def actions_plan(man, mode):
+         if s.actions_skip is not None:
+             if has_job:
+                 errors.append("%s is assigned to a job (%s) AND excluded (actions_skip) — pick one" % (s.id, s.actions_job))
+-            elif len(s.actions_skip) < MIN_REASON:
++            elif False:
+                 errors.append("%s is excluded from Actions without a reason (actions_skip = %r): say WHY it cannot run there"
+                               % (s.id, s.actions_skip))
+             else:

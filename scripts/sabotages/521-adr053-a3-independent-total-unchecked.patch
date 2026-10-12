@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 C7 (Actions twin) — the lister's selected total is no longer compared with the independent patch-file count: a lister that under-selects passes with every slice green.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: A3 sliced corpus: the sum of what the slices processed must equal the selected total
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index de5f687..edf2413 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1512,7 +1512,7 @@ def actions_verify(plan, results_dir, expect_base, expect_totals=None):
+             errors.append("%s: the slices processed %d and were assigned %d, but %d were selected — a slice dropped or "
+                           "double-counted work" % (parent, proc, exp, total))
+         want_total = (expect_totals or {}).get(parent)
+-        if want_total is not None and want_total != total:
++        if False:
+             errors.append("%s: the lister selected %d but the independent count is %d" % (parent, total, want_total))
+         if total == 0:
+             errors.append("%s: 0 items selected — an empty corpus is not a pass" % parent)

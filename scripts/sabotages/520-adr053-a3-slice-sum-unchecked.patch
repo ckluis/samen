@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 C7 (Actions twin) — the sum of the slices' PROCESSED counts is no longer compared with the selected total: a slice that processed 0 or dropped patches passes.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: A3 sliced corpus: the sum of what the slices processed must equal the selected total
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index de5f687..fd87481 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1508,7 +1508,7 @@ def actions_verify(plan, results_dir, expect_base, expect_totals=None):
+         exp = sum(r[4] or 0 for r in rows)
+         slice_lines.append("- `%s`: %d slices processed %d of %d selected (slice counts: %s)" % (
+             parent, len(rows), proc, total, " ".join("%d" % (r[3] or 0) for r in sorted(rows))))
+-        if proc != total or exp != total:
++        if False:
+             errors.append("%s: the slices processed %d and were assigned %d, but %d were selected — a slice dropped or "
+                           "double-counted work" % (parent, proc, exp, total))
+         want_total = (expect_totals or {}).get(parent)

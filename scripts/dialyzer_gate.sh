@@ -61,7 +61,8 @@ for app in "${APPS[@]}"; do
   echo "==> dialyzer: $app"
   [[ "$app" == samen_web ]] && refresh_web_plt
   log="$(mktemp "${TMPDIR:-/tmp}/dialyzer_${app}.XXXXXX")"
-  (cd "$REPO_ROOT/$app" && mix dialyzer --format short) > "$log" 2>&1
+  # self-contained: a clean checkout (Actions) has no deps; with them present this is a no-op
+  (cd "$REPO_ROOT/$app" && mix deps.get --quiet && mix dialyzer --format short) > "$log" 2>&1
   rc=$?
   if [[ $rc -eq 0 ]]; then
     echo "    clean"
@@ -71,6 +72,8 @@ for app in "${APPS[@]}"; do
     echo "    FAILED (exit $rc):"
     grep -E '^(lib|test)/.*:[0-9]+' "$log" | sed 's/^/      /' | head -40
     grep -E 'Unused filters|unused filter' -A20 "$log" | sed 's/^/      /' | head -20
+    # no warning line at all = dialyzer (or deps) itself failed: show why instead of a bare "FAILED"
+    grep -qE '^(lib|test)/.*:[0-9]+|[Uu]nused filter' "$log" || tail -25 "$log" | sed 's/^/      | /'
     failed+=("$app")
   fi
   rm -f "$log"
