@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P4: the doc-drift check is dropped from quick, so a stale doc fails only at pr time 
+#   instead of inside the round.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: DOCS the CI docs cannot name
+diff --git a/ci/steps.conf b/ci/steps.conf
+index d1b2ea3..0a1a1a9 100644
+--- a/ci/steps.conf
++++ b/ci/steps.conf
+@@ -164,7 +164,7 @@ group = preflight
+ # exist (ADR-053 P4). Reads the whole tree's paths, so it is keyed on all of it; ~1 s.
+ [step docs_check]
+ cmd = bash scripts/docs_check
+-modes = quick pr full
++modes = pr full
+ always = 1
+ inputs = **
+ est_s = 2

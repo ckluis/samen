@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P4: docs_check lets a documented scripts/ci/docs path not exist, so a moved or deleted 
+#   script stays documented.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: DOCS the CI docs cannot name
+diff --git a/scripts/docs_check.py b/scripts/docs_check.py
+index ef3b3cc..300238c 100644
+--- a/scripts/docs_check.py
++++ b/scripts/docs_check.py
+@@ -133,7 +133,7 @@ def check_paths(rel, n, line, found, problems):
+         found["path"] += 1
+         full = os.path.join(REPO, tok)
+         ok = bool(glob.glob(full)) if "*" in tok else os.path.exists(full)
+-        if not ok:
++        if False and not ok:
+             problems.append("%s:%d: path `%s` does not exist" % (rel, n, tok))
+ 
+ 

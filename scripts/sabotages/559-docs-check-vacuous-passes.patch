@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P4: docs_check passes a document in which it resolved nothing, so a regex that stops 
+#   matching reads as OK.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: DOCS the CI docs cannot name
+diff --git a/scripts/docs_check.py b/scripts/docs_check.py
+index ef3b3cc..48b385c 100644
+--- a/scripts/docs_check.py
++++ b/scripts/docs_check.py
+@@ -157,7 +157,7 @@ def main(argv):
+             check_commands(rel, n, line, subs, actions, flags, steps, groups, found, problems)
+             check_step_tokens(rel, n, line, families, known, found, problems)
+             check_paths(rel, n, line, found, problems)
+-        if found["sub"] == 0 or found["path"] == 0 or (rel.endswith("ci.md") and found["step"] == 0):
++        if False:
+             problems.append("%s: vacuous — resolved %d subcommand(s), %d step id(s), %d path(s); a check that finds nothing to check cannot go red" % (
+                 rel, found["sub"], found["step"], found["path"]))
+         for k in totals:
