@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# scripts/docs_check — ADR-053 P4: the CI docs cannot drift from the tooling they describe.
+# `exec` on the first command line (like scripts/ci): bash never reads this file again.
+exec python3 -I "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docs_check.py" "$@"
