@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 SABNEW (P3 gate) — sabotage new no longer keeps the named files' pre-command bytes, so 
+#   unstaged work in progress that sat beside the sabotage (which no check can tell apart) is 
+#   captured into the patch and LOST from the working tree.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: SABNEW sabotage new refuses an unprovable patch and leaves the tree exactly as it was
+diff --git a/scripts/sabotage_new.sh b/scripts/sabotage_new.sh
+index f905dfa..34fbf05 100755
+--- a/scripts/sabotage_new.sh
++++ b/scripts/sabotage_new.sh
+@@ -255,7 +255,7 @@ fi
+ # the named files' pre-command bytes are kept: whatever else was unstaged in them is now in the patch and no
+ # longer in the working tree, and this is where it can be got back from
+ KEPT="$(cd "$(git rev-parse --git-common-dir)" && pwd)/samen-sabotage-new/$NAME"
+-rm -rf "$KEPT" && mkdir -p "$KEPT" && cp -Rp "$SNAP/." "$KEPT/" \
++rm -rf "$KEPT" && mkdir -p "$KEPT" \
+   || refuse "could not keep the pre-command copy of ${FILES[*]} in $KEPT (nothing was kept, your tree is restored)"
+ DONE=1
+ echo ""

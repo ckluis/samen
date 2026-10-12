@@ -14,7 +14,7 @@
 #              N5 a captured UNSTAGED fix · N6 the staged-fix workflow (positive control: the staged fix is
 #              neither captured nor lost) · N7 no anchor against origin/main · N8 a sabotage that flips
 #              nothing · N9 no edit against the index / an untracked file · N10 the wrong test named ·
-#              N11 numbering
+#              N11 numbering · N12 unstaged WIP beside the sabotage is captured but never LOST (kept copy)
 #   reanchor   R0 already applies · R1 re-anchored (3-way, header byte-identical, proven) · R2 a conflict ·
 #              R3 (C8) the named test no longer fails under the re-anchored patch · R4 the named test is gone ·
 #              R5 a red baseline · R6 unknown / ambiguous numbers · R7 (C8) a patch outside the corpus
@@ -226,6 +226,17 @@ run_new() {
   eq "$RC" 0 "N11: an explicit free --number is used"
   [[ -f "$F/scripts/sabotages/40-limit-eleven.patch" ]] && ok "N11: ... as 40-limit-eleven.patch" || bad "N11: no 40-…"
 
+  # N12 ─ unstaged work in progress next to the sabotage, which the named tests do not exercise: every check passes
+  # (it cannot be told apart), so it lands in the patch and leaves the working tree — it must never be LOST
+  mkfix
+  sed -i.bak 's/  def max, do: 99/  def max, do: 100  # WIP, not staged/' "$F/app1/lib/a.ex"; rm -f "$F/app1/lib/a.ex.bak"
+  sabotage_limit; sum="$(sha_of "$F/app1/lib/a.ex")"
+  sab "$T/n12" new "${NEWARGS[@]}" -- app1/lib/a.ex
+  eq "$RC" 0 "N12: an edit with unstaged WIP beside the sabotage still becomes a patch (indistinguishable)"
+  says "$T/n12" "|+  def max, do: 100  # WIP, not staged" "N12: ... and prints every line it captured (the WIP line included)"
+  kept="$(git -C "$F" rev-parse --git-common-dir)"; kept="$(cd "$F" && cd "$kept" && pwd)/samen-sabotage-new/2-limit-eleven.patch/app1/lib/a.ex"
+  eq "$(sha_of "$kept" 2>/dev/null)" "$sum" "N12: ... and the pre-command file (WIP included) is KEPT, byte-exact, where it says"
+  says "$T/n12" "kept      : " "N12: ... naming where"
 }
 
 run_reanchor() {

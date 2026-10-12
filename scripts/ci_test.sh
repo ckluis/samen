@@ -1059,6 +1059,7 @@ case_SABNEW() {
   has "$T/sabnew" '^PASS: N7: a patch that fires in BOTH baselines is refused' "SABNEW: a patch with no anchor is refused"
   has "$T/sabnew" '^PASS: N1: ... numbered one past the highest' "SABNEW: the next number is derived"
   has "$T/sabnew" '^PASS: N1: scripts/counts --write updated CLAUDE.md' "SABNEW: the count in CLAUDE.md is written, not hand-edited"
+  has "$T/sabnew" '^PASS: N12: \.\.\. and the pre-command file \(WIP included\) is KEPT' "SABNEW: unstaged WIP captured beside the sabotage is never lost (kept copy)"
   hasnt "$T/sabnew" '^FAIL: ' "SABNEW: no assertion failed"
 }
 

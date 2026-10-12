@@ -43,6 +43,11 @@
 # On success it runs `scripts/counts --write` for the sabotage counts in CLAUDE.md. The new patch is left
 # untracked (git add it with the rest of your change).
 #
+# WHAT IT CANNOT TELL APART: an UNSTAGED edit in a named file that the named tests do not exercise (work in
+# progress next to the sabotage) passes every check above, so it ends up IN the patch and is restored away with
+# the sabotage. Nothing is lost: the named files' pre-command bytes are kept in
+# <git-dir>/samen-sabotage-new/<patch name>/, and every captured line is printed — read it.
+#
 # Exit: 0 created · 1 refused (reason printed) · 2 usage
 set -uo pipefail
 
@@ -247,9 +252,19 @@ if [[ $base_rc -ne 0 ]]; then
 fi
 
 # ── 7. keep it ───────────────────────────────────────────────────────────────
+# the named files' pre-command bytes are kept: whatever else was unstaged in them is now in the patch and no
+# longer in the working tree, and this is where it can be got back from
+KEPT="$(cd "$(git rev-parse --git-common-dir)" && pwd)/samen-sabotage-new/$NAME"
+rm -rf "$KEPT" && mkdir -p "$KEPT" && cp -Rp "$SNAP/." "$KEPT/" \
+  || refuse "could not keep the pre-command copy of ${FILES[*]} in $KEPT (nothing was kept, your tree is restored)"
 DONE=1
 echo ""
 echo "SABOTAGE NEW: CREATED scripts/sabotages/$NAME"
+echo "  captured  : every unstaged line of ${FILES[*]} — now in the patch and gone from the working tree:"
+grep -E '^[-+]' "$WORK/body.diff" | grep -vE '^(\+\+\+|---) ' | head -20 | sed 's/^/                |/'
+echo "              (a line above that is NOT the sabotage was unstaged work: take it back from the kept copy,"
+echo "              stage it, delete the patch and re-run)"
+echo "  kept      : $KEPT (the files as they were before this command)"
 echo "  anchored  : $ANCHOR_WHY"
 echo "  flip      : $(grep -m1 'flip confirmed' "$WORK/flip.out" | sed 's/^ *//')"
 echo "  restore   : byte-exact (sha-256), ${FILES[*]} back to the index"
