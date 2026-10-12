@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 P3 — sabotage new stops requiring the named tests to PASS without the sabotage, so a 
+#   patch that captured an unstaged fix (which makes them fail once the fix is restored away) is 
+#   accepted.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: SABNEW sabotage new refuses an unprovable patch
+diff --git a/scripts/sabotage_new.sh b/scripts/sabotage_new.sh
+index f3db529..5bdc822 100755
+--- a/scripts/sabotage_new.sh
++++ b/scripts/sabotage_new.sh
+@@ -239,7 +239,7 @@ git diff --quiet -- "${FILES[@]}" || refuse "the files differ from the index aft
+ # A captured unstaged fix shows up HERE: the restored tree lacks it, so the tests that need it fail.
+ ( cd "$APP" && mix test "${TEST_FILES[@]}" ) > "$WORK/base.out" 2>&1
+ base_rc=$?
+-if [[ $base_rc -ne 0 ]]; then
++if false; then
+   refuse "the test files FAIL on the restored tree even WITHOUT the sabotage (mix test exit $base_rc)." \
+     "Either the tree is red, or your real fix was UNSTAGED when you made the sabotage and was captured into the" \
+     "patch (and just restored away). Stage the fix first: git add <fix files>, redo the sabotage edit, re-run." \

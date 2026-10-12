@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 C8 — a refused re-anchor no longer puts the original patch back, so the unproven 
+#   candidate stays in the corpus.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C8 reanchor refuses, and leaves the original
+diff --git a/scripts/sabotage_reanchor.py b/scripts/sabotage_reanchor.py
+index 7457209..50307de 100644
+--- a/scripts/sabotage_reanchor.py
++++ b/scripts/sabotage_reanchor.py
+@@ -235,7 +235,7 @@ def reanchor(patch):
+         return "re-anchored (%d file(s) 3-way merged); header byte-identical; %s; baseline green; restore byte-exact" % (
+             len(merges), "; ".join(flipped[:2]) or "flip confirmed")
+     finally:
+-        if replaced:
++        if False:
+             shutil.copy2(backup, patch)
+             if sha(patch) != hashlib.sha256(original).hexdigest():
+                 print("sabotage reanchor: !! COULD NOT RESTORE %s byte-exact — recover it with git checkout" % name, file=sys.stderr)

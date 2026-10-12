@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 C8 — reanchor stops requiring the named tests to pass WITHOUT the patch, so "fails with 
+#   it, passes without it" is no longer proven (a red tree makes every sabotage look like it flips).
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C8 reanchor refuses, and leaves the original
+diff --git a/scripts/sabotage_reanchor.py b/scripts/sabotage_reanchor.py
+index 7457209..8886e04 100644
+--- a/scripts/sabotage_reanchor.py
++++ b/scripts/sabotage_reanchor.py
+@@ -210,7 +210,7 @@ def reanchor(patch):
+         candidate = header.encode() + body
+         # 3. the baseline: the named tests pass WITHOUT the patch
+         rc, out = run(["mix", "test"] + tfs, cwd=os.path.join(REPO, app))
+-        if rc != 0:
++        if False:
+             raise Refuse("%s: the baseline is RED — %s/{%s} fail on the current tree even without the sabotage, so "
+                          "\"fails with it, passes without it\" cannot be shown: %s"
+                          % (name, app, ",".join(tfs), " | ".join(l.strip() for l in out.decode(errors="replace").splitlines()

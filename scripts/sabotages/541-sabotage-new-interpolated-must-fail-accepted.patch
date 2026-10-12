@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P3 — sabotage new stops explaining the interpolation pitfall: a MUST_FAIL built from 
+#   "#{var}" can never match the test source, and the author is no longer told why.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: SABNEW sabotage new refuses an unprovable patch
+diff --git a/scripts/sabotage_new.sh b/scripts/sabotage_new.sh
+index f3db529..5344239 100755
+--- a/scripts/sabotage_new.sh
++++ b/scripts/sabotage_new.sh
+@@ -123,7 +123,7 @@ for tf in "${TEST_FILES[@]}"; do
+ done
+ for mf in "${MUST[@]}"; do
+   if [[ -z "$mf" || "$mf" == *$'\n'* ]]; then refuse "--must-fail must be one non-empty line"; fi
+-  if [[ "$mf" == *'#{'* ]]; then
++  if false; then
+     refuse "--must-fail \"$mf\" contains an interpolation (#{…})." \
+       "MUST_FAIL is matched with grep -F against the app's test SOURCE (the double sweep's positive control)" \
+       "and against the failed-test header the harness prints. A test named \"... #{var} ...\" can never match" \

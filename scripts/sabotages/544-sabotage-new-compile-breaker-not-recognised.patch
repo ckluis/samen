@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 P3 — sabotage new no longer recognises a compile/migration breaker ("suite failed but 
+#   no test-failure headers found"), so it reports a generic failure instead of the explanation 
+#   that no named flip is possible.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: SABNEW sabotage new refuses an unprovable patch
+diff --git a/scripts/sabotage_new.sh b/scripts/sabotage_new.sh
+index f3db529..c66fd3f 100755
+--- a/scripts/sabotage_new.sh
++++ b/scripts/sabotage_new.sh
+@@ -217,7 +217,7 @@ ANCHOR_WHY="$(printf '%s\n' "$SECTION" | sed -n 's/^  ANCHORED: //p')"
+ bash scripts/sabotage.sh --range "$NUMBER-$NUMBER" > "$WORK/flip.out" 2>&1
+ flip_rc=$?
+ if [[ $flip_rc -ne 0 ]]; then
+-  if grep -q 'no test-failure headers found' "$WORK/flip.out"; then
++  if grep -q 'no-such-text-xyz' "$WORK/flip.out"; then
+     refuse "the suite failed under the sabotage but printed NO named test failure — it breaks the compile or a migration." \
+       "The harness cannot see a named flip, so this patch is useless even though it \"fails\" (and the failure would" \
+       "read as a broken tree, not a broken guard). Make the sabotage compile and migrate: change behaviour, not syntax." \

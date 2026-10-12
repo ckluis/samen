@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 C8 — reanchor stops preserving the header byte-for-byte (it prepends a line), so a 
+#   re-anchored patch's APP / TEST_FILES / MUST_FAIL provenance changes with it.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C8 reanchor refuses, and leaves the original
+diff --git a/scripts/sabotage_reanchor.py b/scripts/sabotage_reanchor.py
+index 7457209..190e7b2 100644
+--- a/scripts/sabotage_reanchor.py
++++ b/scripts/sabotage_reanchor.py
+@@ -207,7 +207,7 @@ def reanchor(patch):
+         # 2. 3-way merge each file
+         merges = [merge_section(s, scratch) for s in sections]
+         body = candidate_body(merges, scratch)
+-        candidate = header.encode() + body
++        candidate = b"# regenerated\n" + header.encode() + body
+         # 3. the baseline: the named tests pass WITHOUT the patch
+         rc, out = run(["mix", "test"] + tfs, cwd=os.path.join(REPO, app))
+         if rc != 0:

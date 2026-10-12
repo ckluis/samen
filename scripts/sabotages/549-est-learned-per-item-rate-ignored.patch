@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 G10 — shard sizing stops honouring the per-item rate this machine last observed, so a 
+#   chunk sized on the optimistic manifest figure can outgrow a whole tool call and never finish.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: EST a shard's estimate is expected
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index f28e392..56b025c 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -568,7 +568,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None):
+     # chunk sized on an optimistic estimate could outgrow a whole tool call, and a sub-step that can
+     # never finish inside one is a sub-step `resume` can never complete
+     learned = float((read_json(os.path.join(HOME, "timings.json")) or {}).get(step.id + "#per_item", 0))
+-    each = max(step.shard_each, learned)
++    each = step.shard_each
+     if step.shard_kind == "ranges":
+         items = [m.group(1) for m in re.finditer(step.shard_item, text, re.M)]
+         if len(items) != total:
