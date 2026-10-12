@@ -251,6 +251,13 @@ echo ""
 echo "SABOTAGE LANES: ${SUMMARY}${ELAPSED}s wall"
 if [[ ${#problems[@]} -gt 0 ]]; then
   for p in "${problems[@]}"; do echo "  !! $p"; done
+  # N lanes load the machine: a patch whose flip is timing-dependent (e.g. a compile-vs-run race) can fail only
+  # here. The verdict is NOT softened — the run still fails — but the patch that failed is named with the
+  # command that tells "fails alone too" (a real regression) from "only under load" (a flake to fix).
+  for (( k = 1; k <= LANES; k++ )); do
+    failed_patch="$(sed -n 's/^SABOTAGE HARNESS: FAILED — \([0-9][0-9]*\)-[^ :]*\.patch:.*/\1/p' "$WORK/lane-$k.log" | head -1)"
+    [[ -n "$failed_patch" ]] && echo "  -> lane $k failed on patch $failed_patch; re-check it alone: scripts/sabotage.sh --range $failed_patch-$failed_patch (only-under-load = a timing-dependent patch, still a flake to fix)"
+  done
   echo "SABOTAGE HARNESS: PROCESSED $SUM_N of $TOTAL SELECTED"
   echo "SABOTAGE HARNESS: FAILED — lanes mode (see the lane logs above; each names its failing patch and what it never exercised)"
   exit 1

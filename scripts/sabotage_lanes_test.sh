@@ -92,7 +92,7 @@ cat "$root/samen_web/deps/pkg/VERSION" > "$STUB_MARKS/lane-$i-deps" 2>/dev/null
 [[ -n "${STUB_DIRTY:-}" && "$i" == "$STUB_DIRTY" ]] && echo residue > "$root/RESIDUE"
 behaviour="$(eval echo "\${STUB_LANE$i:-}")"
 case "$behaviour" in
-  fail)   echo "SABOTAGE HARNESS: PROCESSED 1 of $m SELECTED"; echo "SABOTAGE HARNESS: FAILED — stub"; exit 1 ;;
+  fail)   echo "SABOTAGE HARNESS: PROCESSED 1 of $m SELECTED"; echo "SABOTAGE HARNESS: FAILED — 7-web.patch: suite PASSED under sabotage — stub"; exit 1 ;;
   lie)    echo "SABOTAGE HARNESS: PROCESSED $((m - 1)) of $m SELECTED"; exit 0 ;;
   short)  m=$((m - 1)); echo "SABOTAGE HARNESS: PROCESSED $m of $m SELECTED"; exit 0 ;;
   zero)   echo "SABOTAGE HARNESS: PROCESSED 0 of 0 SELECTED"; exit 0 ;;
@@ -140,6 +140,7 @@ run failc.log STUB_LANE3=fail
 expect_rc 1 "3a. a lane that fails fails the run"
 expect_says "lane 3 FAILED" "3b. the failing lane is named"
 expect_silent "ALL PASSED (" "3c. and no pass is claimed"
+expect_says "lane 3 failed on patch 7; re-check it alone: scripts/sabotage.sh --range 7-7" "3d. and the failing patch is named with the command to re-check it alone"
 
 echo "== 4. a lying lane =="
 run lie2.log STUB_LANE2=lie
