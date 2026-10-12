@@ -63,6 +63,11 @@ def find_patch(arg):
         p = os.path.join(SAB, os.path.basename(arg))
     if not os.path.isfile(p):
         raise Refuse("no such patch: %s" % arg)
+    # the proof replays `sabotage.sh --range N-N`, i.e. the CORPUS patch numbered N: a patch anywhere else (an
+    # --emit-patches dir, another checkout) would be "proven" by a different patch's flip and then rewritten
+    if os.path.dirname(os.path.realpath(p)) != os.path.realpath(SAB) or not re.match(r"^\d+-.*\.patch$", os.path.basename(p)):
+        raise Refuse("%s is not a numbered patch in scripts/sabotages/ — the proof replays the corpus patch by number, "
+                     "so only a corpus patch can be re-anchored (move it into scripts/sabotages/ first)" % arg)
     return p
 
 

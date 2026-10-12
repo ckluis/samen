@@ -1041,6 +1041,7 @@ case_C8() {
   has "$T/c8" '^PASS: R2: a 3-way conflict is refused' "C8: a conflict is refused"
   has "$T/c8" '^PASS: R4: a named test that no longer exists is refused' "C8: a vanished named test is refused"
   has "$T/c8" '^PASS: R5: a red baseline is refused' "C8: a red baseline is refused"
+  has "$T/c8" '^PASS: R7 \(C8\): a patch outside scripts/sabotages/ is refused' "C8: a patch outside the corpus (proven by another patch's replay) is refused"
   hasnt "$T/c8" '^FAIL: ' "C8: no assertion failed"
 }
 

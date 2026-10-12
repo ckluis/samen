@@ -17,7 +17,7 @@
 #              N11 numbering
 #   reanchor   R0 already applies · R1 re-anchored (3-way, header byte-identical, proven) · R2 a conflict ·
 #              R3 (C8) the named test no longer fails under the re-anchored patch · R4 the named test is gone ·
-#              R5 a red baseline · R6 unknown / ambiguous numbers
+#              R5 a red baseline · R6 unknown / ambiguous numbers · R7 (C8) a patch outside the corpus
 #
 # Usage: scripts/sabotage_tooling_test.sh [new|reanchor]    (default: both)    Residue: none (temp dir).
 set -uo pipefail
@@ -225,6 +225,7 @@ run_new() {
   sab "$T/n11b" new limit-eleven "${NEWARGS[@]:1}" --number 40 -- app1/lib/a.ex
   eq "$RC" 0 "N11: an explicit free --number is used"
   [[ -f "$F/scripts/sabotages/40-limit-eleven.patch" ]] && ok "N11: ... as 40-limit-eleven.patch" || bad "N11: no 40-…"
+
 }
 
 run_reanchor() {
@@ -305,6 +306,21 @@ run_reanchor() {
   sab "$T/r6b" reanchor 2
   eq "$RC" 1 "R6: a number shared by two patches is refused as ambiguous"
   says "$T/r6b" "ambiguous" "R6: ... saying so"
+
+  # R7 (C8) ─ a patch OUTSIDE the corpus: the proof replays the corpus patch with the same number, so a drifted
+  # outside patch whose own edit flips nothing would be "proven" by corpus patch 2's flip and rewritten
+  prep; mkdir -p "$T/out"
+  sed -i.bak 's/def name, do: "a"/def name, do: "z"/' "$F/app1/lib/a.ex"; rm -f "$F/app1/lib/a.ex.bak"
+  { printf '# SABOTAGE: other\n#\n# Flips the named test(s).\n# APP: app1\n# TEST_FILES: test/a_test.exs\n# MUST_FAIL: limit is ten\n'
+    git -C "$F" diff --no-color -- app1/lib/a.ex; } > "$T/out/2-other.patch"
+  git -C "$F" checkout -q -- app1/lib/a.ex
+  sed -i.bak 's/  # filler three$/  # filler 3/' "$F/app1/lib/a.ex"; rm -f "$F/app1/lib/a.ex.bak"; git_ commit -q -am drift
+  sab "$T/r7a" reanchor 2; git_ commit -q -am "corpus patch 2 re-anchored"
+  outside="$(sha_of "$T/out/2-other.patch")"
+  sab "$T/r7" reanchor "$T/out/2-other.patch"
+  eq "$RC" 1 "R7 (C8): a patch outside scripts/sabotages/ is refused (its proof would replay corpus patch 2)"
+  says "$T/r7" "is not a numbered patch in scripts/sabotages/" "R7 (C8): ... saying why"
+  eq "$(sha_of "$T/out/2-other.patch")" "$outside" "R7 (C8): ... and it is not rewritten"
 }
 
 case "$WHICH" in
