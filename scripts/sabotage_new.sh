@@ -83,6 +83,7 @@ SNAPPED=0
 DONE=0
 
 restore_snapshot() {
+  [[ -f "$WORK/CLAUDE.md.snap" ]] && cp -p "$WORK/CLAUDE.md.snap" "$REPO_ROOT/CLAUDE.md"
   [[ $SNAPPED -eq 1 ]] || return 0
   local f
   for f in "${FILES[@]}"; do
@@ -185,6 +186,16 @@ git diff --quiet -- "${FILES[@]}" || refuse "restore from the index left a diff 
 bash scripts/sabotage_lint.sh >"$WORK/lint.out" 2>&1 || refuse "the header lint failed on the new patch" "$(tail -3 "$WORK/lint.out")"
 git apply --check "$PATCH" 2>"$WORK/apply.err" || refuse "the new patch does not apply to the restored tree" "$(head -3 "$WORK/apply.err")"
 
+# ── 3b. the counts: the guard tests check CLAUDE.md against the patch directory, so the new patch must be
+#        counted BEFORE the replay and the baseline run (restored with everything else on a refusal)
+FIXERS="sabotages"
+grep -q 'ci_driver_guard_test.exs' <<<"${TEST_FILES[*]}" && FIXERS="sabotages,driver_sabotages"
+COUNTS_NOTE="(scripts/counts not present)"
+if [[ -x scripts/counts ]]; then
+  [[ -f CLAUDE.md ]] && cp -p CLAUDE.md "$WORK/CLAUDE.md.snap"
+  COUNTS_NOTE="$(bash scripts/counts --write --only "$FIXERS" 2>&1 | tail -3 | tr '\n' ' ')"
+fi
+
 # ── 4. anchor — ask the double sweep itself ───────────────────────────────────
 git rev-parse --verify -q "${BASE}^{commit}" >/dev/null \
   || refuse "--base $BASE does not exist here, so the patch cannot be anchored (git fetch origin, or pass --base <ref>)"
@@ -235,12 +246,6 @@ fi
 
 # ── 7. keep it ───────────────────────────────────────────────────────────────
 DONE=1
-FIXERS="sabotages"
-grep -q 'ci_driver_guard_test.exs' <<<"${TEST_FILES[*]}" && FIXERS="sabotages,driver_sabotages"
-COUNTS_NOTE="(scripts/counts not present)"
-if [[ -x scripts/counts ]]; then
-  COUNTS_NOTE="$(bash scripts/counts --write --only "$FIXERS" 2>&1 | tail -3 | tr '\n' ' ')"
-fi
 echo ""
 echo "SABOTAGE NEW: CREATED scripts/sabotages/$NAME"
 echo "  anchored  : $ANCHOR_WHY"
