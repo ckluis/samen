@@ -492,7 +492,7 @@ range, `shard_each_s = 8`, 420 s target) and the plain `sabotage.sh $CI_SHARD_AR
 (`SAMEN_SABOTAGE=1 ./ci.sh`) it is one lane run over the whole corpus. The `pr`-time `sabotage_changed` replay
 gets the same treatment (`--changed` is passed through; seed 32 s/patch, `--min-per-lane 2`): on this branch it
 selects 48 patches, 22 of them 60-second guard patches, which serially is ~30 min of `pr`. The lane setup retries
-`mix deps.get` (three lanes lost a race on hex's global state once).
+`mix deps.get` (one lane lost a race on hex's global state once).
 
 **Measured (this box: 10 cores, 16 GB, Postgres `max_connections` 100, and other sessions keeping the load average
 at 11–14 — so these are loaded numbers).** The corpus is 542 patches: 488 ordinary ones (3.3 s each serial, timed on
