@@ -1,0 +1,25 @@
+# SABOTAGE: O4 (ADR-045 §4.2), repo-wide — samen_web's aud_event migration hand-rolls its REVOKE
+# role lookup with the maintainer's laptop role "clank" as the fallback, which is how it actually
+# shipped until the kernel-suite role fix (the per-app guards never covered samen_web). Nothing
+# fails where USER is set; only the repo-wide migrations scan in samen_core sees it. MUST flip.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/aud_role_derivation_test.exs
+# MUST_FAIL: no app's migrations hardcode the maintainer's laptop role (repo-wide)
+diff --git a/samen_web/priv/repo/migrations/20260705020000_aud_event.exs b/samen_web/priv/repo/migrations/20260705020000_aud_event.exs
+index 5e63f3e..5461d98 100644
+--- a/samen_web/priv/repo/migrations/20260705020000_aud_event.exs
++++ b/samen_web/priv/repo/migrations/20260705020000_aud_event.exs
+@@ -16,7 +16,10 @@ defmodule Samen.WebTest.Repo.Migrations.AudEvent do
+   # else Samen.WebTest.Repo's configured `:username`, else RAISE) via the shared helper. This was
+   # a compile_env default of the WRONG app's knob (:driftwood) and of the maintainer's laptop role,
+   # so the suite failed for anyone whose Postgres role differs.
+-  defp app_role, do: Samen.OperatorPlane.Migration.app_role!(:samen_web, Samen.WebTest.Repo)
++  defp app_role do
++    Application.get_env(:samen_web, :aud_event_app_role) ||
++      Application.get_env(:samen_web, Samen.WebTest.Repo)[:username] || "clank"
++  end
+ 
+   @resource "Samen.AuditEvent"
+   @table "aud_event"

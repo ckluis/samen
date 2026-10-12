@@ -11,7 +11,7 @@ defmodule SamenCore.TestRepo.Migrations.AudEvent do
        table (doc: "BRIN indexes on time columns").
     4. **Append-only trigger** `aud_event_append_only_tg` — raises on UPDATE/DELETE
        at the DB level (belt to the role-revocation braces).
-    5. **REVOKE UPDATE, DELETE** on `aud_event` from the `clank` app role.
+    5. **REVOKE UPDATE, DELETE** on `aud_event` from the app role (derived; see `app_role/0`).
     6. **Catalog rows** (inserted in the SAME transaction as the DDL above) via raw
        SQL into `tam_table` and `fld_field`.
 
@@ -39,12 +39,12 @@ defmodule SamenCore.TestRepo.Migrations.AudEvent do
 
   ## Role revocation (braces)
 
-  `REVOKE UPDATE, DELETE ON aud_event FROM clank` makes the app role structurally
+  `REVOKE UPDATE, DELETE ON aud_event FROM <app role>` makes the app role structurally
   incapable of mutating rows.  Any UPDATE or DELETE by the application fails with a
   Postgres permission error BEFORE the trigger even fires.
 
   In production, configure the least-privilege app role explicitly via
-  `:aud_event_app_role`; this migration defaults to `"clank"` (the CI/dev role).
+  `:aud_event_app_role`; this migration falls back to the repo's configured `:username`.
 
   ## Append-only trigger (belt)
 
@@ -61,9 +61,11 @@ defmodule SamenCore.TestRepo.Migrations.AudEvent do
 
   use Ecto.Migration
 
-  # The Postgres role the application uses.  In CI this is "clank" (the local dev
-  # role).  In production, configure the least-privilege app role explicitly.
-  @app_role Application.compile_env(:samen_core, :aud_event_app_role, "clank")
+  # ADR-045 §4.2 (O4): DERIVE the app role at migration time (the `:aud_event_app_role` knob,
+  # else SamenCore.TestRepo's configured `:username`, else RAISE) via the shared helper, as the
+  # verticals and the generated template do. Never a hardcoded developer laptop role: a contributor
+  # (or a CI runner) whose Postgres role is not the maintainer's could not migrate the kernel suite.
+  defp app_role, do: Samen.OperatorPlane.Migration.app_role!(:samen_core, SamenCore.TestRepo)
 
   # Catalog row data for the parent `aud_event` table.
   # Only the PARENT is registered — child partitions inherit and are not catalogued.
@@ -149,11 +151,11 @@ defmodule SamenCore.TestRepo.Migrations.AudEvent do
     # -----------------------------------------------------------------------
     # REVOKE is idempotent — safe even if the role does not hold the privilege.
     execute """
-    REVOKE UPDATE, DELETE ON aud_event FROM #{@app_role}
+    REVOKE UPDATE, DELETE ON aud_event FROM #{app_role()}
     """,
     # On rollback: restore what we revoked.
     """
-    GRANT UPDATE, DELETE ON aud_event TO #{@app_role}
+    GRANT UPDATE, DELETE ON aud_event TO #{app_role()}
     """
 
     # -----------------------------------------------------------------------
@@ -196,7 +198,7 @@ defmodule SamenCore.TestRepo.Migrations.AudEvent do
 
     execute "DELETE FROM tam_table WHERE tam_table_name = '#{@table}'"
 
-    execute "GRANT UPDATE, DELETE ON aud_event TO #{@app_role}"
+    execute "GRANT UPDATE, DELETE ON aud_event TO #{app_role()}"
     execute "DROP TRIGGER IF EXISTS aud_event_append_only_tg ON aud_event"
     execute "DROP FUNCTION IF EXISTS aud_event_enforce_append_only()"
     execute "DROP INDEX IF EXISTS aud_event_brin_occurred_at"

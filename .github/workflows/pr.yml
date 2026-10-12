@@ -49,19 +49,20 @@ jobs:
       postgres:
         image: pgvector/pgvector:0.8.0-pg16
         env:
-          POSTGRES_USER: clank
+          POSTGRES_USER: samen_ci
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U clank"
+          --health-cmd "pg_isready -U samen_ci"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
     env:
-      # the configs connect as $USER@localhost, and samen_core's aud_event migration revokes from role "clank"
-      USER: clank
-      PGUSER: clank
+      # the configs connect as $USER@localhost (the local-Postgres default role); any role name works:
+      # nothing in the suites may assume the maintainer's (samen_core aud_role_derivation_test)
+      USER: samen_ci
+      PGUSER: samen_ci
       PGHOST: localhost
       PGPORT: "5432"
     steps:
