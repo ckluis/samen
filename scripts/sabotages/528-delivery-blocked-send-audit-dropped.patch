@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-014/ADR-038 §4 RP-D1 — a send blocked for an unconfigured adapter no longer writes
+# its `marketing.send.blocked` aud_event: the job still errors (fail-honest return intact), but the
+# audit trail silently loses every blocked send. The worker's own `rescue` would hide a failing
+# insert the same way, so only a test that owns its sandbox and reads the row back can see it.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/delivery_provider_test.exs
+# MUST_FAIL: RP-D1 (audit): a blocked send writes its marketing.send.blocked aud_event, token-only
+diff --git a/samen_core/lib/samen/scopes/marketing/send_worker.ex b/samen_core/lib/samen/scopes/marketing/send_worker.ex
+index 6bb13fb..9ebdc0a 100644
+--- a/samen_core/lib/samen/scopes/marketing/send_worker.ex
++++ b/samen_core/lib/samen/scopes/marketing/send_worker.ex
+@@ -160,7 +160,6 @@ defmodule Samen.Scopes.Marketing.SendWorker do
+ 
+   defp mark_blocked(message, repo) do
+     update_status(message, :blocked, %{}, repo)
+-    emit_blocked_audit(message, repo)
+     notify_operator_blocked(message, repo)
+   end
+ 

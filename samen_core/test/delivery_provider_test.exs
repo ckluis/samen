@@ -124,6 +124,7 @@ defmodule Samen.Delivery.ProviderTest do
     test "no decision branch routes an unconfigured adapter to :deliver in any non-test env" do
       for env <- [:prod, :dev, :staging] do
         assert {:blocked, :adapter_unconfigured} = SendWorker.decide(nil, %{}, env)
+
         assert {:blocked, :adapter_unconfigured} =
                  SendWorker.decide(UnconfiguredAdapter, %{}, env)
       end
@@ -156,6 +157,14 @@ defmodule Samen.Delivery.ProviderTest do
 
   describe "AC-G2-3: perform/1 honors adapter outcome" do
     setup do
+      # The blocked path writes `marketing.send.blocked` to aud_event via :verify_repo.
+      # Own the connection: without a checkout the insert borrowed whatever {:shared, pid}
+      # mode a previous sync module left behind, and when that owner was still exiting the
+      # checkout died with `** (EXIT) shutdown: "owner … exited"` — an exit, which the
+      # worker's `rescue` does not catch (flaked in CI). An owned checkout takes precedence
+      # over any shared mode.
+      :ok = Ecto.Adapters.SQL.Sandbox.checkout(SamenCore.TestRepo)
+
       # Ensure no host send_module/repo is wired so status-update degrades to a
       # no-op log (kernel has no marketing send table). We assert on the job
       # return value, which is the authoritative fail-honest signal.
@@ -164,7 +173,8 @@ defmodule Samen.Delivery.ProviderTest do
       Application.delete_env(:samen_core, :marketing_send_module)
 
       on_exit(fn ->
-        if prev, do: Application.put_env(:samen_core, SendWorker, prev),
+        if prev,
+          do: Application.put_env(:samen_core, SendWorker, prev),
           else: Application.delete_env(:samen_core, SendWorker)
 
         if prev_mod, do: Application.put_env(:samen_core, :marketing_send_module, prev_mod)
@@ -202,6 +212,28 @@ defmodule Samen.Delivery.ProviderTest do
       result = SendWorker.perform(job(args()))
       assert {:error, :adapter_unconfigured} = result
       refute result == :ok, "a blocked send must NEVER return :ok (the delivered signal)"
+    end
+
+    test "RP-D1 (audit): a blocked send writes its marketing.send.blocked aud_event, token-only" do
+      Application.put_env(:samen_core, SendWorker, adapter: UnconfiguredAdapter)
+      Application.put_env(:samen_core, :delivery_env, :prod)
+      on_exit(fn -> Application.delete_env(:samen_core, :delivery_env) end)
+
+      assert {:error, :adapter_unconfigured} = SendWorker.perform(job(args()))
+
+      import Ecto.Query
+
+      rows =
+        SamenCore.TestRepo.all(
+          from(e in Samen.AuditEvent,
+            where: e.subject_id == ^args()["send_id"],
+            select: {e.event_type, e.correlation_id, e.detail}
+          )
+        )
+
+      assert rows == [
+               {"system", args()["org_id"], "marketing.send.blocked reason=adapter_unconfigured"}
+             ]
     end
 
     test "malformed args (no send_id) are discarded, never delivered" do
