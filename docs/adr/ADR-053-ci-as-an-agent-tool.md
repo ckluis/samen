@@ -489,7 +489,10 @@ sum equals it too; every lane tree must also be exactly as it was after the sync
 Driver wiring: `sabotage_corpus` runs `sabotage-lanes.sh --working-tree $CI_SHARD_ARGS` locally (chunks by patch
 range, `shard_each_s = 8`, 420 s target) and the plain `sabotage.sh $CI_SHARD_ARGS` when `GITHUB_ACTIONS` is set
 (each nightly slice is already a runner — **the Actions slicing is unchanged**) or `SAMEN_LANES=1`; unbudgeted
-(`SAMEN_SABOTAGE=1 ./ci.sh`) it is one lane run over the whole corpus.
+(`SAMEN_SABOTAGE=1 ./ci.sh`) it is one lane run over the whole corpus. The `pr`-time `sabotage_changed` replay
+gets the same treatment (`--changed` is passed through; seed 32 s/patch, `--min-per-lane 2`): on this branch it
+selects 48 patches, 22 of them 60-second guard patches, which serially is ~30 min of `pr`. The lane setup retries
+`mix deps.get` (three lanes lost a race on hex's global state once).
 
 **Measured (this box: 10 cores, 16 GB, Postgres `max_connections` 100, and other sessions keeping the load average
 at 11–14 — so these are loaded numbers).** The corpus is 542 patches: 488 ordinary ones (3.3 s each serial, timed on
@@ -548,8 +551,10 @@ refusal keeps the candidate / baseline unchecked / header rewritten). The double
 config change, default-off). (2) `reanchor` needs the patch's pre-image blob in the object database (always true
 for a patch made by `sabotage new` from a committed or staged file; false after a history rewrite) and does not
 handle create/delete/rename patches. (3) Lane count is limited by Postgres `max_connections`, not CPU. (4)
-`sabotage_changed` (the `--changed` replay in `pr`) still runs the serial harness; lanes would pay off only for
-selections above a few dozen patches. (5) `new`'s baseline run doubles its cost (≈ 2 min for a sabotage whose
+the budgeted driver measures cost per *item* (`dur / expected`), which is wrong for a corpus with two cost classes
+(3 s and 58 s patches) and for lanes (a chunk's wall shrinks with its lane count): the learned rate re-chunks the plan
+whenever it rises, voiding finished chunks, and it did so twice on this branch (both fixed by seeding
+`shard_each_s` for the slow case, not by changing the mechanism). Cost-weighted chunking is the follow-up. (5) `new`'s baseline run doubles its cost (≈ 2 min for a sabotage whose
 test is a `ci_driver_guard_test.exs` case) — that run is the only thing that distinguishes "my fix was captured"
 from "the tree is red", so it stays.
 

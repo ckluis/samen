@@ -160,7 +160,7 @@ git -C "$REPO_ROOT" status --porcelain > "$WORK/status.1"
 # own deps/ can lag its lockfiles. A brand-new lane starts from a clone of an existing _build (APFS: free)
 # instead of a cold compile. Sequential, this was ~55 s per chunk of a budgeted run; in parallel it is one lane's.
 setup_lane_deps() { # setup_lane_deps <k> — prints the problem on stderr and returns 1
-  local k="$1" d deps app
+  local k="$1" d deps app try got
   d="$(lane_dir "$k")"
   for deps in "$REPO_ROOT"/*/deps; do
     [[ -d "$deps" ]] || continue
@@ -172,8 +172,13 @@ setup_lane_deps() { # setup_lane_deps <k> — prints the problem on stderr and r
     if [[ ! -d "$d/$app/_build" && -d "$REPO_ROOT/$app/_build" ]]; then
       cp -Rpc "$REPO_ROOT/$app/_build" "$d/$app/_build" 2>/dev/null || cp -Rp "$REPO_ROOT/$app/_build" "$d/$app/_build" 2>/dev/null || true
     fi
-    (cd "$d/$app" && mix deps.get >/dev/null 2>&1) \
-      || { echo "mix deps.get failed in the lane-$k tree for $app — rerun it in $d/$app for detail" >&2; return 1; }
+    # retried: deps.get from several lanes at once shares hex's global state, and one lane lost that race once
+    got=0
+    for try in 1 2 3; do
+      if (cd "$d/$app" && mix deps.get >/dev/null 2>&1); then got=1; break; fi
+      [[ $try -lt 3 ]] && sleep $(( try * 2 ))
+    done
+    [[ $got -eq 1 ]] || { echo "mix deps.get failed in the lane-$k tree for $app — rerun it in $d/$app for detail" >&2; return 1; }
   done
 }
 for (( k = 2; k <= LANES; k++ )); do
