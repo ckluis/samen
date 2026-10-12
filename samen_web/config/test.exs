@@ -4,7 +4,7 @@ config :samen_web, Samen.WebTest.Repo,
   username: System.get_env("USER") || "postgres",
   password: "",
   hostname: "localhost",
-  database: "samen_web_test",
+  database: "samen_web_test" <> System.get_env("SAMEN_TEST_DB_SUFFIX", ""),
   pool: Ecto.Adapters.SQL.Sandbox,
   # pool_size 20 + queue slack (mirrors samen_core config/test.exs, WS-B B9 gate F1 /
   # WS-F4 QA): the render suite fans out many concurrent DB-backed reads under the
