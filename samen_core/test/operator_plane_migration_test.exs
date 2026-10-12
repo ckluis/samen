@@ -40,10 +40,12 @@ defmodule Samen.OperatorPlaneMigrationTest do
   defmodule ScratchAudChain do
     use Ecto.Migration
 
-    @app_role "clank"
+    # The role this suite really connects as (derived, as a host migration does): a literal
+    # laptop role here failed on any machine whose Postgres role is not that one.
+    defp app_role, do: Samen.OperatorPlane.Migration.app_role!(:samen_core, SamenCore.TestRepo)
 
-    def up, do: Samen.OperatorPlane.Migration.create_aud_chain(@app_role)
-    def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(@app_role)
+    def up, do: Samen.OperatorPlane.Migration.create_aud_chain(app_role())
+    def down, do: Samen.OperatorPlane.Migration.drop_aud_chain(app_role())
   end
 
   # A minimal catalog-bootstrap migration so the same-transaction catalog INSERTs

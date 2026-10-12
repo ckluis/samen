@@ -1,22 +1,26 @@
-# SABOTAGE: O4 (ADR-045 §4.2), kernel test repo — samen_core's test-repo aud_event migration
-# RE-HARDCODES the maintainer's laptop role "clank" as its REVOKE default instead of deriving it
-# through Samen.OperatorPlane.Migration.app_role!/2. Every contributor or CI runner whose Postgres
-# role is not "clank" then fails to migrate the kernel test database. The named guard MUST flip.
+# SABOTAGE: O4 (ADR-045 §4.2), kernel test repo — samen_core's test-repo aud_event migration stops
+# using the shared Samen.OperatorPlane.Migration.app_role!/2 and hand-rolls the lookup with the
+# maintainer's laptop role "clank" as the last-resort fallback (where app_role!/2 raises a named
+# error). It still migrates wherever USER is set, so nothing else notices — exactly how the literal
+# crept back into samen_web. The source guard MUST flip.
 #
 # Flips the named test(s).
 # APP: samen_core
 # TEST_FILES: test/aud_role_derivation_test.exs
 # MUST_FAIL: test-repo aud_event migration derives its REVOKE role and never ships the literal 'clank'
 diff --git a/samen_core/priv/test_repo/migrations/20260705080000_aud_event.exs b/samen_core/priv/test_repo/migrations/20260705080000_aud_event.exs
-index 64cc3b0..b78dc3e 100644
+index 64cc3b0..60ffe10 100644
 --- a/samen_core/priv/test_repo/migrations/20260705080000_aud_event.exs
 +++ b/samen_core/priv/test_repo/migrations/20260705080000_aud_event.exs
-@@ -65,7 +65,7 @@ defmodule SamenCore.TestRepo.Migrations.AudEvent do
+@@ -65,7 +65,10 @@ defmodule SamenCore.TestRepo.Migrations.AudEvent do
    # else SamenCore.TestRepo's configured `:username`, else RAISE) via the shared helper, as the
    # verticals and the generated template do. Never a hardcoded developer laptop role: a contributor
    # (or a CI runner) whose Postgres role is not the maintainer's could not migrate the kernel suite.
 -  defp app_role, do: Samen.OperatorPlane.Migration.app_role!(:samen_core, SamenCore.TestRepo)
-+  defp app_role, do: Application.get_env(:samen_core, :aud_event_app_role, "clank")
++  defp app_role do
++    Application.get_env(:samen_core, :aud_event_app_role) ||
++      Application.get_env(:samen_core, SamenCore.TestRepo)[:username] || "clank"
++  end
  
    # Catalog row data for the parent `aud_event` table.
    # Only the PARENT is registered — child partitions inherit and are not catalogued.

@@ -47,6 +47,34 @@ defmodule SamenCore.AudRoleDerivationTest do
     assert source("20260705080000_aud_event.exs") =~ "REVOKE UPDATE, DELETE ON aud_event"
   end
 
+  # Repo-wide: no migration in ANY app (kernel, web, verticals, spikes, adapters) may name the
+  # maintainer's laptop role. samen_web's aud_event migration slipped past the per-app guards
+  # (it read `compile_env(:driftwood, …, <laptop role>)`); a new vertical copying it would too.
+  # Matches the role as a literal or a REVOKE/GRANT target, not prose paths like /Users/<name>.
+  test "no app's migrations hardcode the maintainer's laptop role (repo-wide)" do
+    root = Path.expand("../..", __DIR__)
+    role_literal = ~r/["']clank["']|\b(FROM|TO)\s+clank\b/
+
+    offenders =
+      Path.wildcard(Path.join(root, "*/priv/**/migrations/*.exs")) ++
+        Path.wildcard(Path.join(root, "spikes/*/priv/**/migrations/*.exs"))
+
+    offenders =
+      offenders
+      |> Enum.uniq()
+      |> Enum.filter(&(File.read!(&1) =~ role_literal))
+      |> Enum.map(&Path.relative_to(&1, root))
+
+    # Positive control: the scan actually sees the migrations it guards.
+    assert Path.join(root, "samen_web/priv/repo/migrations/20260705020000_aud_event.exs") in Path.wildcard(
+             Path.join(root, "*/priv/**/migrations/*.exs")
+           )
+
+    assert offenders == [],
+           "migrations hardcoding the laptop role (derive it via Samen.OperatorPlane.Migration.app_role!/2): " <>
+             inspect(offenders)
+  end
+
   test "the shared derivation resolves SamenCore.TestRepo's configured role in this env" do
     role = Samen.OperatorPlane.Migration.app_role!(:samen_core, SamenCore.TestRepo)
     configured = Application.get_env(:samen_core, SamenCore.TestRepo)[:username]
