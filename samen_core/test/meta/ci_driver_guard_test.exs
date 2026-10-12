@@ -134,3 +134,45 @@ defmodule Samen.Meta.CiDriverGuardTest.WaeLibWarnings do
     Samen.Meta.CiDriverGuard.run_case!("WAE")
   end
 end
+
+# ── ADR-053 P3 — sabotage/mutation ergonomics ─────────────────────────────────────────────────────
+
+defmodule Samen.Meta.CiDriverGuardTest.EstShardSlot do
+  use ExUnit.Case, async: true
+
+  test "EST a shard's estimate is expected * the learned per-item rate, never a stale slot wall-clock" do
+    Samen.Meta.CiDriverGuard.run_case!("EST")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.C7LaneAccounting do
+  use ExUnit.Case, async: true
+
+  test "C7 the N-lane corpus fails unless the patches processed across its lanes equal the selected count" do
+    Samen.Meta.CiDriverGuard.run_case!("C7")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.C8Reanchor do
+  use ExUnit.Case, async: true
+
+  test "C8 reanchor refuses, and leaves the original, when the named tests no longer fail under it" do
+    Samen.Meta.CiDriverGuard.run_case!("C8")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.C10Counts do
+  use ExUnit.Case, async: true
+
+  test "C10 CLAUDE.md's counts are derived and drift fails the check" do
+    Samen.Meta.CiDriverGuard.run_case!("C10")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.SabotageNew do
+  use ExUnit.Case, async: true
+
+  test "SABNEW sabotage new refuses an unprovable patch and leaves the tree exactly as it was" do
+    Samen.Meta.CiDriverGuard.run_case!("SABNEW")
+  end
+end
