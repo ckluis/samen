@@ -22,6 +22,9 @@
 # Usage: scripts/sabotage_tooling_test.sh [new|reanchor]    (default: both)    Residue: none (temp dir).
 set -uo pipefail
 
+# the fixture must never act on the REAL repo (SAMEN_SABOTAGE_ROOT points sabotage_new.sh at one)
+unset SAMEN_SABOTAGE_ROOT
+
 SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WHICH="${1:-all}"
 T="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/samen_sabotage_tooling.XXXXXX")" && pwd -P)"

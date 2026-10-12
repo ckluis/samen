@@ -20,7 +20,7 @@ defmodule Samen.Meta.CiDriverGuard do
   @script Path.join(@repo_root, "scripts/ci_test.sh")
 
   # The nested driver must not inherit an outer run's state dir / manifest / repo override.
-  @scrub ~w(SAMEN_CI_HOME SAMEN_CI_MANIFEST SAMEN_CI_REPO SAMEN_CI_DRIVER SAMEN_CI_TOOLCHAIN)
+  @scrub ~w(SAMEN_CI_HOME SAMEN_CI_MANIFEST SAMEN_CI_REPO SAMEN_CI_DRIVER SAMEN_CI_TOOLCHAIN SAMEN_SABOTAGE_ROOT)
          |> Enum.map(&{&1, nil})
 
   def run_case!(name) do
