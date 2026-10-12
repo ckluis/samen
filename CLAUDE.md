@@ -23,7 +23,10 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
   the final line is `CI(pr): PASS n/n … — PR-READY`. Content-cached (`--no-cache` forces), failures
   print a digest + `_ci/logs/<step>.log`, verdict in `_ci/last.json`. Steps live in `ci/steps.conf`
   (`scripts/ci list pr`, `scripts/ci explain <step>`); `./ci.sh` / `./ci-fast.sh` are unbudgeted
-  wrappers over it with the same markers. Driver red paths: `scripts/ci_test.sh` (sabotages 496–527).
+  wrappers over it with the same markers. Driver red paths: `scripts/ci_test.sh` (sabotages <!--count:driver_sabotages-->496–527<!--/count-->).
+- Sabotage/mutation tooling (ADR-053 P3): `scripts/sabotage new|reanchor` (headered patch from a working-tree edit /
+  3-way re-anchor with proof), `scripts/sabotage-lanes.sh` (N-lane corpus), `scripts/counts --check|--write` (the
+  counts in this file are generated between `<!--count:…-->` markers; never hand-edit them).
 - Toolchain floor: `.tool-versions` (Elixir 1.20.4 / OTP 29.1.1). `ci.sh` and `ci-fast.sh` run
   `scripts/toolchain_check.sh` FIRST and fail on an older Elixir or OTP; raise the pin when upgrading.
 - Prerequisite: a local Postgres server WITH the `pgvector` extension installed (`CREATE
@@ -47,8 +50,7 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
   replays every shipped gate sabotage (`scripts/sabotages/*.patch`): apply → the NAMED
   tests must FAIL → revert → SHA-256 byte-exact restore. Gates add new sabotages as
   patches (header lines: APP / TEST_FILES / MUST_FAIL) instead of re-deriving them.
-  Default (no args) = the full harness (count: `ls scripts/sabotages/*.patch | wc -l` — **523**
-  as of 2026-10-10). At that count the full serial run exceeds the 600s single tool-call ceiling,
+  Default (no args) = the full harness (count: `ls scripts/sabotages/*.patch | wc -l` — **<!--count:sabotages-->523<!--/count-->**). At that count the full serial run exceeds the 600s single tool-call ceiling,
   so certify it **backgrounded** or in **chunks**
   via additive selection flags (different FLAGS compose as an intersection; repeating the SAME
   flag is an error — use separate runs for two ranges; a FILTERED run certifies ONLY its
@@ -84,8 +86,8 @@ not — that is what codemunch replaces. See `driftwood/CLAUDE.md` for the full 
 The sabotage harness proves the guarantees we CLAIM are still guarded. The mutation gate asks the
 converse — is there some OTHER way to break the same file that its owning tests do NOT catch? —
 because every sabotage is a claim someone thought to make.
-- `./scripts/mutate.sh` (default: the tier-1 watch-list, `scripts/mutation/targets.tsv`, 12
-  chokepoint/guard modules / 166 mutants as of 2026-10-09 — `./scripts/mutate.sh --list`; ~15 min,
+- `./scripts/mutate.sh` (default: the tier-1 watch-list, `scripts/mutation/targets.tsv`, <!--count:watchlist_modules-->12<!--/count-->
+  chokepoint/guard modules / <!--count:watchlist_mutants-->166<!--/count--> mutants — `./scripts/mutate.sh --list`; ~15 min,
   so run it in `--file`/`--shard` chunks under the 600 s tool-call ceiling). Sites are enumerated from the **AST** by
   `scripts/mutation/mutate.exs` over four operator families (EQ / REL / BOOLOP / BOOLLIT) and
   spliced at exact line:column; each mutant runs ONLY that target's **owning** tests, so a kill is
@@ -98,7 +100,7 @@ because every sabotage is a claim someone thought to make.
   one naming a missing file). `--list` prints the derived additions per target.
 - Flags mirror `sabotage.sh` (`--app`, `--file`, `--family`, `--changed [<ref>]`, `--list`;
   same-flag-twice is an error; different flags intersect) plus `--corpus` (derive targets from the
-  sabotage headers — 224 (file, app) targets / 3,939 mutants as of 2026-10-09, `--corpus --list`; a soak not a gate step), `--shard <i>/<n>`
+  sabotage headers — <!--count:corpus_targets-->227<!--/count--> (file, app) targets / <!--count:corpus_mutants-->3,957<!--/count--> mutants, `--corpus --list`; a soak not a gate step), `--shard <i>/<n>`
   (deterministic disjoint partition for sweeping a soak across runs), and `--emit-patches <dir>`
   (write each survivor as a sabotage-format patch — THE promotion path: write the test, fill
   `MUST_FAIL`, move it into `scripts/sabotages/`).
