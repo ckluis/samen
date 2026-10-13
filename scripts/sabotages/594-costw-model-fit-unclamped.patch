@@ -1,0 +1,22 @@
+# SABOTAGE: ADR-053 P5: the cost model's slope and overhead are unclamped, so one noisy window can plan a 
+#   chunk at ~0 s or a negative fixed cost
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: COSTW chunks are weighted by what each item last cost, not by the slowest item's rate
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index af5acde..9c92792 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -529,8 +529,8 @@ def cost_model(obs):
+     mx = sum(w for w, _ in pts) / len(pts)
+     my = sum(d for _, d in pts) / len(pts)
+     var = sum((w - mx) ** 2 for w, _ in pts)
+-    b = min(1.0, max(0.1, sum((w - mx) * (d - my) for w, d in pts) / var))
+-    a = min(120.0, max(10.0, my - b * mx))
++    b = sum((w - mx) * (d - my) for w, d in pts) / var
++    a = my - b * mx
+     margin = max(1.0, max(d / (a + b * w) for w, d in pts))
+     return (a, b, margin)
+ 
