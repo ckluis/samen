@@ -1,0 +1,20 @@
+# SABOTAGE: run_gen_probe stops exporting the helper seam, so the probes silently compile every dependency 
+#   from scratch again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENDEPS the gen probes' compiled-dependency cache is keyed
+diff --git a/scripts/gen_probe_guard.sh b/scripts/gen_probe_guard.sh
+index cee8ed0..4401a5c 100755
+--- a/scripts/gen_probe_guard.sh
++++ b/scripts/gen_probe_guard.sh
+@@ -128,7 +128,7 @@ run_gen_probe() {
+   # manifest-verified entries; samen_core/samen_web/the app always compile fresh). SAMEN_GEN_DEPS_CACHE=off disables it,
+   # =<dir> relocates it; `scripts/ci` strips the HELPER seam so only this function can arm it.
+   local -x SAMEN_GEN_DEPS_CACHE="${SAMEN_GEN_DEPS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/samen/gen_deps}"
+-  local -x SAMEN_GEN_DEPS_CACHE_HELPER="$REPO_ROOT/scripts/gen_deps_cache.py"
++  local SAMEN_GEN_DEPS_CACHE_HELPER="$REPO_ROOT/scripts/gen_deps_cache.py"
+   if [[ "$SAMEN_GEN_DEPS_CACHE" == off ]]; then unset SAMEN_GEN_DEPS_CACHE_HELPER; fi
+   GEN_PROBE_RESTORED=0
+ 

@@ -1,0 +1,20 @@
+# SABOTAGE: actions plan --selection lists the diff but sizes every job from history alone, so a large diff 
+#   still gets the small flat limit
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: SELTMO a --changed job's timeout scales
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index cc46ec1..60f53cd 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1666,7 +1666,7 @@ def cmd_actions(pos, opts):
+     selection = None
+     if sub == "plan" and opts.get("selection"):
+         selection = selection_counts(man, rest[0], opts["base"])
+-    plan = actions_plan(man, rest[0], selection)
++    plan = actions_plan(man, rest[0])
+     if sub == "plan":
+         if opts.get("json"):
+             out(json.dumps(plan, indent=1))

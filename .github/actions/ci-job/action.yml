@@ -85,6 +85,26 @@ runs:
         restore-keys: |
           ci-v1-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-ex${{ steps.beam.outputs.elixir-version }}-${{ inputs.cache-name }}-
 
+    # ADR-053 P6 — the gen probes' compiled HEX dependencies (scripts/gen_deps_cache.py, default dir ~/.cache/samen/gen_deps).
+    # The entries inside are content-addressed and re-verified against their MANIFEST before use, so this transport key only
+    # decides what is carried over; it can never make a stale or partial entry usable. The generated app's lock resolves
+    # from hex at run time (nothing in the repo pins it), so the key carries the ISO week: a stale-but-valid cache is
+    # refreshed at least weekly instead of missing forever. samen_core/samen_web are never in it - they compile from source.
+    - name: Week stamp (gen probes' dependency cache)
+      if: contains(inputs.only, 'gen_')
+      id: week
+      shell: bash
+      run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache the gen probes' compiled hex dependencies
+      if: contains(inputs.only, 'gen_')
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/samen/gen_deps
+        key: gen-deps-v1-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-ex${{ steps.beam.outputs.elixir-version }}-${{ hashFiles('samen_core/mix.lock', 'samen_web/mix.lock', 'samen_core/priv/templates/mix_exs*.eex', 'samen_core/priv/templates/config_*.eex') }}-${{ steps.week.outputs.week }}
+        restore-keys: |
+          gen-deps-v1-${{ runner.os }}-otp${{ steps.beam.outputs.otp-version }}-ex${{ steps.beam.outputs.elixir-version }}-
+
     # Steps assume their mix projects' deps are on disk (locally an earlier step fetched them); a clean runner
     # has none. Fetch for every project this job caches (a no-op when the cache restored them).
     - name: mix deps.get (this job's projects)

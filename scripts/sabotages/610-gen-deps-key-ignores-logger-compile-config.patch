@@ -1,0 +1,21 @@
+# SABOTAGE: the compiled-dependency cache key leaves out the logger config, so a 
+#   compile_time_purge_matching change reuses dependencies whose Logger calls a cold build would 
+#   have purged
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENDEPS the gen probes' compiled-dependency cache is keyed
+diff --git a/scripts/gen_deps_cache.py b/scripts/gen_deps_cache.py
+index cdb6bab..d11535f 100644
+--- a/scripts/gen_deps_cache.py
++++ b/scripts/gen_deps_cache.py
+@@ -98,7 +98,7 @@ def dep_config(app_dir, names, env):
+     removes Logger calls from every dependency's .beam — Gate P6 reproduced a seeded plug that a cold build had purged)."""
+     code = ("IO.puts(\"compile-time config\"); p = Mix.Project.config(); own = p[:app]; "
+             "cfg = Config.Reader.read!(p[:config_path], env: Mix.env(), target: Mix.target()); "
+-            "for {a, kv} <- Enum.sort(cfg), a != own, not String.starts_with?(Atom.to_string(a), \"samen_\"), "
++            "for {a, kv} <- Enum.sort(cfg), a != own, a != :logger, not String.starts_with?(Atom.to_string(a), \"samen_\"), "
+             "do: IO.puts(inspect({a, Enum.sort(kv)}, limit: :infinity, printable_limit: :infinity))")
+     e = dict(os.environ, MIX_ENV=env, MIX_QUIET="1")
+     p = subprocess.run(["mix", "run", "--no-start", "--no-compile", "--no-deps-check", "-e", code], cwd=app_dir, env=e,

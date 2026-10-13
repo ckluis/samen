@@ -126,6 +126,26 @@ Unbudgeted (`--budget 0`, `./ci.sh`) the loops run as one command.
 - PR-READY is relative to a base: with `origin/main` missing, `pr` still runs everything but says
   `NOT PR-READY: base origin/main is missing`, and a `@base` step (double sweep, `--changed` replays) is
   never cached without its base.
+- Gen-probe dependency cache (P6) — a SECOND cache, below the step cache and not a verdict cache: each gen probe
+  generates an app and compiles ≈ 62 hex dependencies, two thirds of its wall-clock. `scripts/gen_deps_cache.py`
+  seeds the app's `_build/test/lib/<hex dep>` from an earlier identical build (after `mix deps.get`) and stores a new
+  one after a green `mix compile`. Lives in `${XDG_CACHE_HOME:-~/.cache}/samen/gen_deps/v1/<key>/` (≈ 70 MB per key,
+  the 4 newest kept; `SAMEN_GEN_DEPS_CACHE=<dir>` relocates it, `=off` disables it — a `SAMEN_*` variable, so it is
+  part of the step key). The key is a sha-256 of the generated `mix.lock` bytes, the `mix_exs*.eex` templates,
+  Elixir + OTP + architecture, `MIX_ENV`, the build-relevant environment (`MIX_*`, `ELIXIR_*`, `ERL_*`, `REBAR*`,
+  `CC`/`CXX`/`*FLAGS`, plus every variable a hex dependency's own `mix.exs`/`rebar.config(.script)` names, minus
+  `GITHUB_*`/`COVERALLS_*` run metadata) and the COMPILE-TIME config (config.exs + imports, read by `Config.Reader`;
+  runtime.exs is not compile input) of every configured app except the app itself and `samen_*` — so a
+  `compile_env` difference or a `config :logger, compile_time_purge_matching:` is a different key (Gate P6, ADR-053
+  §2.9). It never contains `samen_core`, `samen_web` or the generated app — those are what the probe tests and compile from source every time (a `samen_web` edit with a warm
+  cache still fails the probe; proven live in ADR-053 §2.9 P6). An entry is built in a temp dir, published by one
+  rename, and used only after every file re-hashes to its `MANIFEST` (bound by a `COMPLETE` marker): a corrupt or
+  partial entry is deleted and the probe compiles from scratch; a seed cut short (entry evicted mid-copy, full disk)
+  removes every dependency it had copied. The first probe to miss holds `<key>.lock`; the
+  others wait (bounded, 420 s) and then seed from it. A failed compile stores nothing. `GENDEPS` in `ci_test.sh`
+  is the red-path harness. On Actions the same directory is carried by `actions/cache` (composite action
+  `.github/actions/ci-job`, only for jobs that run a `gen_*` step; the key carries the ISO week because the generated
+  app's lock resolves from hex at run time) — a transport only: the entries inside are re-verified before use.
 - Do not suspect the cache before the log: `scripts/ci explain <step>` shows the key and what feeds it; to
   prove a result, `scripts/ci pr --no-cache` (or `--only <step> --no-cache`).
 
@@ -326,6 +346,14 @@ followed by a plain word reads as a subcommand: write `scripts/ci` in backticks.
   Today: preflight/spikes/app_*/mutation* 15, adapters/samen_core/gen_flagship/app_driftwood 20, gen_probes and
   mutation_watchlist_* 30, dialyzer_core and sabotage_corpus_* 35, dialyzer_adapters_a 40, dialyzer_verticals 50,
   sabotage_changed 60 (the 29.8 min PR that touched the driver).
+  The two `--changed` jobs' work scales with the diff, not with history, so the PR workflow's `plan` job runs
+  `scripts/ci actions plan pr --selection --base <PR base>` (it needs the toolchain: `mutate.sh --list` runs the
+  mutation engine): it asks each such step's own lister how many items this diff selects and sets
+  `timeout = min(360, max(history value, 5 * ceil(2 * selected * shard_each_s / 60 / 5)))` — twice the lane-seconds at
+  the manifest's conservative per-item rate (`shard_each_s`: 32 s per sabotage patch, 6 s per mutant), never below the
+  history value, never over GitHub's ceiling. A lister that fails or has no count line REFUSES the plan. Without
+  `--selection` (a local `actions plan`) the history value alone applies. Not distinguished: guard vs ordinary
+  patches (one rate; the 2x margin and the cap carry it).
 - `.github/workflows/nightly.yml`: cron `17 3 * * *` (03:17 UTC) + `workflow_dispatch`; `scripts/ci full`, the
   same jobs as `pr` minus the two `--changed` jobs, plus `multinode`, 24 corpus slices (`--slice i/24`) and 6
   mutation slices; `ci-full` sums the slices against the lister's total and `ls scripts/sabotages/*.patch`.
@@ -419,15 +447,16 @@ test suites, then samen_core's tree-wide keys; a test-only edit no longer re-run
 | lane leftovers | lane trees `.git/samen-lanes/<b|c|d>` are kept on purpose (warm `_build`). Drop them with `git worktree remove --force .git/samen-lanes/b` (then `git worktree prune`) and the `*_lane<k>` databases with `psql -d postgres -Atc "select datname from pg_database where datname ~ '_lane[0-9]+$'"` → `dropdb <name>` per row. Never while a replay is running. |
 | a chunk passed earlier is re-running | its inputs changed (any edit re-keys a `**` step), or `--no-cache` was given: a rising per-item rate alone no longer voids finished chunks (§3, `_ci/partition/`). |
 | patch N fails once under lanes, passes alone | the lanes print `scripts/sabotage.sh --range N-N` to re-check it alone; a flaky guard still fails the run — fix the timing dependence (patch 368 is a known compile-vs-run race). |
+| a gen probe is slow, or you suspect its dependency cache | each probe prints `gen_deps_cache: HIT|MISS|STORED|CORRUPT …` in `_ci/logs/<probe>.log`. `rm -rf ~/.cache/samen/gen_deps` (or `python3 scripts/gen_deps_cache.py clear`) forgets every entry; `SAMEN_GEN_DEPS_CACHE=off scripts/ci pr --only gen_post_probe --no-cache` proves a result without it. A stale entry cannot be served (a different lock/toolchain/env/dependency config is a different key; a damaged entry fails its MANIFEST check), so this is for disk space or curiosity, not correctness. |
 | a run is "stuck" | another driver holds the lock (a concurrent driver is refused); `scripts/ci status`. Never start a second one beside it. |
 
 ## 13. Known limits and follow-ups
 
 - samen_core's own suite keys on the whole tree (`reads = **`); the gen probes and dialyzer steps re-run on any
   kernel `lib/` edit (but no longer on a test-module-only edit).
-- The three concurrent gen probes are CPU-bound; each generated app recompiles ≈ 62 dependencies. A shared
-  compiled-dependency cache between probes (and across runs) is the next win and needs its own soundness proof
-  (config-dependent compile env, path deps).
+- The three concurrent gen probes are CPU-bound. Their hex dependencies are cached (§4, P6); what stays cold on
+  every run, by design, is `samen_core` + `samen_web` + the generated app (≈ 12 s alone, more under load), the
+  probe's own `ci.sh`, its sabotages and boot checks.
 - `sabotage_changed` is one job on Actions and there it uses the plain harness, so its chunks are cost-weighted
   only from item costs learned on that runner (Actions starts cold: unknown items are priced at the old per-item
   rate). Per-item costs live in `_ci/timings.json` on the machine that ran the replay.

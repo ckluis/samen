@@ -61,8 +61,11 @@ usage: scripts/ci quick|fast|pr|full [--budget S] [-j N] [--only STEP|GROUP[,…
        scripts/ci status
        scripts/ci list [MODE] [--markers] [--apps] [--also STEP]
        scripts/ci explain STEP [--base REF]
-       scripts/ci actions plan MODE [--json]          (GitHub Actions: job matrix + exclusions; fails on a
-                                                       step in no job, in two, or excluded without a reason)
+       scripts/ci actions plan MODE [--json] [--selection [--base REF]]
+                                                      (GitHub Actions: job matrix + exclusions; fails on a
+                                                       step in no job, in two, or excluded without a reason;
+                                                       --selection sizes the --changed jobs' timeouts from
+                                                       the real selection vs --base)
        scripts/ci actions verify MODE --results DIR --expect-head SHA [--expect-base SHA]
                                                       (every planned step ran, once, PASS, on commit SHA)
        scripts/ci actions summary [--last FILE]       (markdown verdict + failure digest for $GITHUB_STEP_SUMMARY)
@@ -410,7 +413,8 @@ ENV_KEYED = re.compile(r"^(SAMEN_|MIX_|ELIXIR_|ERL_|HEX_|REBAR|PG|DATABASE_URL$|
 # caller. Inherited by the driver they would run the concurrent flagship/post/deploy probes in the legacy shared mode
 # (each restores the committed registry from its own snapshot: a later-started probe restores an earlier one's
 # reservation INTO the committed file and both pass), or check every compile against another registry file.
-PROBE_SEAMS = ("GEN_PROBE_SHARED_REGISTRY", "SAMEN_ABBREV_REGISTRY", "SAMEN_ABBREV_REGISTRY_GUARD")
+PROBE_SEAMS = ("GEN_PROBE_SHARED_REGISTRY", "SAMEN_ABBREV_REGISTRY", "SAMEN_ABBREV_REGISTRY_GUARD",
+               "SAMEN_GEN_DEPS_CACHE_HELPER")
 
 
 def step_base_env():
@@ -1557,7 +1561,33 @@ def job_timeout(name, rows):
     return DEFAULT_TIMEOUT_MIN, "default (no observed run yet — add a row to ci/actions_timeouts.tsv)"
 
 
-def job_entry(man, name, steps, slice_, cache=None, timeouts=()):
+def selection_timeout(history_min, items):
+    """(P6) The diff-scaled timeout of a job whose work is a SELECTION: twice the lane-seconds the selection costs at
+    the manifest's conservative per-item rate (`shard_each_s`), rounded up to 5 minutes, never under the history-based
+    value and never over GitHub's ceiling. `items` = [(selected, each_s)] per sharded step in the job."""
+    need = sum(n * each for n, each in items)
+    return min(MAX_TIMEOUT_MIN, max(history_min, 5 * int(math.ceil(2.0 * need / 60.0 / 5.0))))
+
+
+def selection_counts(man, mode, base):
+    """(P6) {step id: selected item count} for every sharded step of `mode` that is not sliced into fixed Actions
+    jobs — read from the step's OWN lister (`shard_list`) vs `base`, exactly as the job will list it. A lister that
+    fails or whose count line is missing raises: the job it sizes would fail the same way."""
+    ctx = Context(base, True)
+    counts = {}
+    for s in mode_steps(man, mode):
+        if not s.shard_list or s.actions_slices or s.actions_skip is not None:
+            continue
+        rc, text = run_capture(s.shard_list, s.cwd, ctx.env(mode, s))
+        totals = [m.group(1) for m in re.finditer(s.shard_total, text, re.M)]
+        if rc != 0 or len(totals) != 1 or not totals[0].isdigit():
+            raise UsageError("actions plan --selection: cannot size %s: its lister exited %d and matched shard_total /%s/ "
+                             "%d time(s):\n%s" % (s.id, rc, s.shard_total, len(totals), text[-1500:]))
+        counts[s.id] = int(totals[0])
+    return counts
+
+
+def job_entry(man, name, steps, slice_, cache=None, timeouts=(), selection=None):
     dirs = []
     for x in steps:
         for d in step_dirs(man, x):
@@ -1569,6 +1599,11 @@ def job_entry(man, name, steps, slice_, cache=None, timeouts=()):
         if any(x.id.startswith("dialyzer_") for x in steps):
             paths.append(d + "/priv/plts")
     tmo, basis = job_timeout(name, timeouts)
+    sized = [(selection[x.id], x.shard_each) for x in steps if selection and x.id in selection]
+    if sized:  # (P6) the work scales with the selection, the history does not
+        scaled = selection_timeout(tmo, sized)
+        basis += "; selection %s -> %d min" % (", ".join("%d x %gs" % z for z in sized), scaled)
+        tmo = scaled
     return {"name": name, "steps": [x.id for x in steps], "only": ",".join(x.id for x in steps),
             "slice": "%d/%d" % slice_ if slice_ else "", "est_s": round(sum(x.est for x in steps)),
             "timeout_min": tmo, "timeout_basis": basis,
@@ -1578,7 +1613,7 @@ def job_entry(man, name, steps, slice_, cache=None, timeouts=()):
             "cache": cache or name}
 
 
-def actions_plan(man, mode):
+def actions_plan(man, mode, selection=None):
     """-> dict(mode, steps, jobs=[{name, steps, only, est_s}], excluded=[{id, reason}]).
     A1: every step of the mode lands in EXACTLY ONE job or is excluded WITH a reason; anything else is
     an error naming the step — a new manifest step can never silently go unrun in Actions."""
@@ -1609,7 +1644,7 @@ def actions_plan(man, mode):
     for n, v in jobs.items():
         plain = [x for x in v if not x.actions_slices]
         if plain:
-            out_jobs.append(job_entry(man, n, plain, None, timeouts=timeouts))
+            out_jobs.append(job_entry(man, n, plain, None, timeouts=timeouts, selection=selection))
         for x in v:
             if x.actions_slices:  # one job per slice: name_NN, `--slice i/N`
                 for i in range(1, x.actions_slices + 1):
@@ -1629,7 +1664,10 @@ def cmd_actions(pos, opts):
     if len(rest) != 1 or rest[0] not in MODES:
         raise UsageError("actions %s takes one mode (%s)" % (sub, "|".join(MODES)))
     man = Manifest(MANIFEST)
-    plan = actions_plan(man, rest[0])
+    selection = None
+    if sub == "plan" and opts.get("selection"):
+        selection = selection_counts(man, rest[0], opts["base"])
+    plan = actions_plan(man, rest[0], selection)
     if sub == "plan":
         if opts.get("json"):
             out(json.dumps(plan, indent=1))
@@ -1637,6 +1675,8 @@ def cmd_actions(pos, opts):
         out("Actions plan (%s): %d step(s) -> %d job(s), %d excluded" % (rest[0], len(plan["steps"]), len(plan["jobs"]), len(plan["excluded"])))
         for j in plan["jobs"]:
             out("  job %-14s est %5ds  timeout %3dm  %s" % (j["name"], j["est_s"], j["timeout_min"], j["only"]))
+            if "; selection " in j["timeout_basis"]:
+                out("      timeout: %s" % j["timeout_basis"])
         for e in plan["excluded"]:
             out("  EXCLUDED %-22s %s" % (e["id"], e["reason"]))
         return 0
@@ -1850,7 +1890,7 @@ def parse(argv):
     cmd, rest = argv[0], argv[1:]
     opts = {"budget": 540.0, "jobs": max(1, (os.cpu_count() or 2) // 2), "only": [], "also": [],
             "no_cache": False, "base": "origin/main", "keep_going": False, "markers": False, "apps": False,
-            "plan": False, "exact": False, "require_base": False, "json": False, "results": None, "expect_base": None,
+            "plan": False, "exact": False, "require_base": False, "json": False, "selection": False, "results": None, "expect_base": None,
             "last": None, "slice": None, "expect_total": None, "expect_head": None,
             "_given": set()}
     pos = []
@@ -1906,6 +1946,9 @@ def parse(argv):
             i += 1
         elif a == "--json":
             opts["json"] = True
+            i += 1
+        elif a == "--selection":
+            opts["selection"] = True
             i += 1
         elif a == "--slice":
             v = val()

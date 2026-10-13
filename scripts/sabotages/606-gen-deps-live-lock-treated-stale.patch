@@ -1,0 +1,19 @@
+# SABOTAGE: a live probe's publish lock is treated as stale, so concurrent probes stampede the same compile 
+#   and can publish over each other
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENDEPS the gen probes' compiled-dependency cache is keyed
+diff --git a/scripts/gen_deps_cache.py b/scripts/gen_deps_cache.py
+index db36a8c..ee587b1 100644
+--- a/scripts/gen_deps_cache.py
++++ b/scripts/gen_deps_cache.py
+@@ -203,6 +203,7 @@ def take_lock(lockdir):
+ 
+ 
+ def lock_stale(lockdir):
++    return True
+     try:
+         with open(os.path.join(lockdir, "owner")) as f:
+             return not pid_alive(int(f.read().strip()))

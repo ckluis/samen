@@ -1,0 +1,20 @@
+# SABOTAGE: the compiled-dependency cache key reads the runtime-merged Application env instead of the 
+#   compile-time config files, so a config.exs value that runtime.exs overrides is not keyed
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENDEPS the gen probes' compiled-dependency cache is keyed
+diff --git a/scripts/gen_deps_cache.py b/scripts/gen_deps_cache.py
+index cdb6bab..68672f5 100644
+--- a/scripts/gen_deps_cache.py
++++ b/scripts/gen_deps_cache.py
+@@ -97,7 +97,7 @@ def dep_config(app_dir, names, env):
+     dependency's macros also read other apps' config at compile time (`config :logger, compile_time_purge_matching:`
+     removes Logger calls from every dependency's .beam — Gate P6 reproduced a seeded plug that a cold build had purged)."""
+     code = ("IO.puts(\"compile-time config\"); p = Mix.Project.config(); own = p[:app]; "
+-            "cfg = Config.Reader.read!(p[:config_path], env: Mix.env(), target: Mix.target()); "
++            "cfg = for {a, _, _} <- Application.loaded_applications(), do: {a, Application.get_all_env(a)}; "
+             "for {a, kv} <- Enum.sort(cfg), a != own, not String.starts_with?(Atom.to_string(a), \"samen_\"), "
+             "do: IO.puts(inspect({a, Enum.sort(kv)}, limit: :infinity, printable_limit: :infinity))")
+     e = dict(os.environ, MIX_ENV=env, MIX_QUIET="1")

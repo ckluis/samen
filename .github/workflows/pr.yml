@@ -21,7 +21,7 @@ jobs:
   plan:
     name: plan
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
@@ -29,12 +29,21 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # the selection listers (mutate.sh --list runs the mutation engine in elixir) need the pinned toolchain
+      - name: Toolchain (.tool-versions)
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          version-file: .tool-versions
+          version-type: strict
       - name: Plan from the manifest (fails on a step in no job, in two, or excluded without a reason)
         id: plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          scripts/ci actions plan pr --json > plan.json
-          scripts/ci actions plan pr | tee -a "$GITHUB_STEP_SUMMARY"
+          # --selection: the --changed jobs' timeouts are sized from THIS diff's selection (P6), not only from history
+          scripts/ci actions plan pr --json --selection --base "$BASE_SHA" > plan.json
+          scripts/ci actions plan pr --selection --base "$BASE_SHA" | tee -a "$GITHUB_STEP_SUMMARY"
           echo "matrix=$(python3 -c 'import json; d=json.load(open("plan.json")); print(json.dumps({"include": d["jobs"]}))')" >> "$GITHUB_OUTPUT"
 
   ci:
