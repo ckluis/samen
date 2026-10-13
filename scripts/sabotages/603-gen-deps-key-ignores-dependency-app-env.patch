@@ -1,0 +1,20 @@
+# SABOTAGE: the compiled-dependency cache key ignores the Application env the hex dependencies compile 
+#   under, so a build with another compile_env is reused
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENDEPS the gen probes' compiled-dependency cache is keyed
+diff --git a/scripts/gen_deps_cache.py b/scripts/gen_deps_cache.py
+index db36a8c..e075bba 100644
+--- a/scripts/gen_deps_cache.py
++++ b/scripts/gen_deps_cache.py
+@@ -128,7 +128,7 @@ def compute_key(app_dir, env):
+     part("mix_env", env.encode())
+     envs = "\n".join("%s=%s" % (k, v) for k, v in sorted(os.environ.items()) if ENV_RELEVANT.match(k) and k not in ENV_IGNORED)
+     part("env", envs.encode())
+-    part("depconfig", cfg)
++    pass
+     return h.hexdigest(), names
+ 
+ 

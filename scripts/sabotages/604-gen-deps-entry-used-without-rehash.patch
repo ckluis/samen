@@ -1,0 +1,20 @@
+# SABOTAGE: a compiled-dependency cache entry is used without re-hashing its files against the MANIFEST, so 
+#   a corrupted or tampered entry seeds the build
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENDEPS the gen probes' compiled-dependency cache is keyed
+diff --git a/scripts/gen_deps_cache.py b/scripts/gen_deps_cache.py
+index db36a8c..7b5077b 100644
+--- a/scripts/gen_deps_cache.py
++++ b/scripts/gen_deps_cache.py
+@@ -166,7 +166,7 @@ def verify(entry, names):
+         lib = os.path.join(entry, "lib")
+         if sorted(os.listdir(lib)) != libs:
+             return False, "lib/ holds a different set of dependencies than COMPLETE"
+-        if manifest_text(walk(lib)).encode() != mtext:
++        if False:
+             return False, "files differ from the MANIFEST"
+         return True, ""
+     except (OSError, ValueError) as e:

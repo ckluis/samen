@@ -236,3 +236,11 @@ defmodule Samen.Meta.CiDriverGuardTest.SelectionTimeouts do
     Samen.Meta.CiDriverGuard.run_case!("SELTMO")
   end
 end
+
+defmodule Samen.Meta.CiDriverGuardTest.GenDepsCache do
+  use ExUnit.Case, async: true
+
+  test "GENDEPS the gen probes' compiled-dependency cache is keyed, hex-only, and fails closed on a corrupt entry" do
+    Samen.Meta.CiDriverGuard.run_case!("GENDEPS")
+  end
+end

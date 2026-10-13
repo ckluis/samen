@@ -75,6 +75,12 @@
 #          shard_each_s x 2 (rounded up to 5 min), never below the history value, never over 360; a small selection keeps the
 #          floor; a lister with no count line refuses the plan.
 #
+#   GENDEPS  (P6) the gen probes' compiled-hex-dependency cache (scripts/gen_deps_cache.py): the key changes with the lock,
+#          a dependency's Application env, the toolchain, MIX_ENV and the build environment (and not with the app's name);
+#          only the lock's hex packages are ever stored or seeded (samen_*, samen_core, samen_web and the app compile fresh);
+#          a flipped / missing / extra file, a missing COMPLETE, a tampered MANIFEST or a foreign dep is CORRUPT -> deleted,
+#          never used; a temp dir is not an entry; a live lock is waited for (bounded), a dead one taken over.
+#
 # Usage: scripts/ci_test.sh [CASE…]      (default: every case)
 # Exit:  0 all assertions pass · 1 otherwise. Residue: none (temp dirs, trap on EXIT/INT/TERM).
 set -uo pipefail
@@ -1612,7 +1618,112 @@ case_SELTMO() {
   has "$T/st6" 'cannot size big' "SELTMO: ... naming the step"
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS GENPROBE NARROW RECHUNK COSTW TIMEOUT SELTMO)
+case_GENDEPS() {
+  # (P6) the compiled-dependency cache of the gen probes (scripts/gen_deps_cache.py) on a REAL tiny mix project with a
+  # hand-written mix.lock and a hand-built _build: key sensitivity, path deps never cached, corruption fails closed.
+  local H="$ROOT/scripts/gen_deps_cache.py" C="$T/gd.cache" A="$T/gd.a" B="$T/gd.b" k0 k1 k
+  mkgd() { # mkgd <dir> [config-value] — an app named after its dir, two hex deps + a samen_* one, a built _build
+    local d="$1" v="${2:-a}"
+    rm -rf "$d"; mkdir -p "$d/config" "$d/_build/test/lib"
+    printf 'defmodule Gd.MixProject do\n  use Mix.Project\n  def project, do: [app: :gd, version: "0.1.0", deps: []]\nend\n' > "$d/mix.exs"
+    printf 'import Config\nconfig :jason, mode: :%s\nconfig :gd, name: "%s"\n' "$v" "$(basename "$d")" > "$d/config/config.exs"
+    printf '%%{\n  "jason": {:hex, :jason, "1.4.4", "aaa", [:mix], [], "hexpm", "bbb"},\n  "telemetry": {:hex, :telemetry, "1.3.0", "ccc", [:rebar3], [], "hexpm", "ddd"},\n  "samen_extra": {:hex, :samen_extra, "0.1.0", "eee", [:mix], [], "hexpm", "fff"},\n}\n' > "$d/mix.lock"
+    local n; for n in jason telemetry samen_extra samen_core samen_web gd; do
+      mkdir -p "$d/_build/test/lib/$n/ebin" "$d/_build/test/lib/$n/.mix"
+      echo "app $n" > "$d/_build/test/lib/$n/ebin/$n.app"; echo "beam $n" > "$d/_build/test/lib/$n/ebin/Elixir.$n.beam"; echo m > "$d/_build/test/lib/$n/.mix/compile.elixir"
+      ln -s "../../../../deps/$n/priv" "$d/_build/test/lib/$n/priv"
+    done
+  }
+  local G="env SAMEN_GEN_DEPS_CACHE=$C python3 $H"
+  mkgd "$A"
+  $G key "$A" > "$T/gd.k0" 2>&1; k0="$(cat "$T/gd.k0")"
+  eq "$(printf '%s' "$k0" | wc -c | tr -d ' ')" 64 "GENDEPS: a key is a sha-256 hex digest"
+  eq "$($G key "$A")" "$k0" "GENDEPS: positive control — the key is deterministic"
+  mkgd "$B"
+  eq "$($G key "$B")" "$k0" "GENDEPS: ... and does not depend on the app's own name or directory (that is what lets three probes share)"
+  # (a) anything that changes what the dependencies are or how they compile is a DIFFERENT key
+  sed -i.bak 's/"bbb"/"bbc"/' "$B/mix.lock"; rm -f "$B/mix.lock.bak"
+  [[ "$($G key "$B")" != "$k0" ]] && ok || bad "GENDEPS: a changed lock (one checksum) must change the key"
+  mkgd "$B" b
+  [[ "$($G key "$B")" != "$k0" ]] && ok || bad "GENDEPS: a changed Application env of a hex dependency (compile_env) must change the key"
+  mkgd "$B"
+  [[ "$(ELIXIR_ERL_OPTIONS='+S 3' $G key "$B")" != "$k0" ]] && ok || bad "GENDEPS: a build-relevant environment variable (ELIXIR_ERL_OPTIONS) must change the key"
+  [[ "$(CFLAGS=-O0 $G key "$B")" != "$k0" ]] && ok || bad "GENDEPS: CFLAGS must change the key"
+  eq "$(MIX_QUIET=1 FOO_UNRELATED=1 $G key "$B")" "$k0" "GENDEPS: ... while an unrelated variable and MIX_QUIET do not"
+  eq "$($G key "$B" --env dev | tr -d '\n' | wc -c | tr -d ' ')" 64 "GENDEPS: MIX_ENV is an input"
+  [[ "$($G key "$B" --env dev)" != "$k0" ]] && ok || bad "GENDEPS: another MIX_ENV must change the key"
+  mkdir -p "$T/gd.fakebin"
+  printf '#!/usr/bin/env bash\nif [[ "${1:-}" == -e && "${2:-}" == *OTP_VERSION* ]]; then echo "1.0.0|99|99.9.9|fake-arch"; exit 0; fi\nexec %s "$@"\n' "$(command -v elixir)" > "$T/gd.fakebin/elixir"; chmod +x "$T/gd.fakebin/elixir"
+  [[ "$(PATH="$T/gd.fakebin:$PATH" $G key "$B")" != "$k0" ]] && ok || bad "GENDEPS: another Elixir/OTP must change the key"
+
+  # store: ONLY the hex packages of the lock — never a samen_* package, samen_core, samen_web or the app itself
+  rm -rf "$C"; mkgd "$A"
+  $G seed "$A" > "$T/gd.s1" 2>&1
+  has "$T/gd.s1" 'MISS' "GENDEPS: a cold cache MISSes"
+  $G store "$A" > "$T/gd.s2" 2>&1
+  has "$T/gd.s2" 'STORED .* \(2 hex dependencies\)' "GENDEPS: ... and the first build is stored (jason, telemetry)"
+  local E; E="$C/v1/$k0"
+  eq "$(ls "$E/lib" | tr '\n' ' ')" "jason telemetry " "GENDEPS: the entry holds exactly the lock's hex packages — never samen_extra, samen_core, samen_web or the app"
+  [[ -f "$E/COMPLETE" && -f "$E/MANIFEST" ]] && ok || bad "GENDEPS: the entry carries its COMPLETE marker and MANIFEST"
+  eq "$(ls "$C/v1" | grep -c '\.tmp\.\|\.lock')" 0 "GENDEPS: no temp dir or lock is left behind after a publish"
+  # seed a fresh app: HIT, only the hex packages arrive, samen_* stay absent (they compile from source)
+  rm -rf "$B/_build"; mkdir -p "$B/_build/test/lib"
+  $G seed "$B" > "$T/gd.s3" 2>&1
+  has "$T/gd.s3" 'HIT .* seeded 2 compiled hex dependencies' "GENDEPS: an identical build HITs"
+  eq "$(ls "$B/_build/test/lib" | grep -v '^gd$' | tr '\n' ' ')" "jason telemetry " "GENDEPS: a HIT seeds only hex packages — samen_core/samen_web/the app are left to compile from source"
+  [[ -L "$B/_build/test/lib/jason/priv" ]] && ok || bad "GENDEPS: symlinks (priv) survive the copy"
+  eq "$(cat "$B/_build/test/lib/jason/ebin/jason.app")" "app jason" "GENDEPS: and the content is the cached build"
+
+  # (c) corruption fails closed: the entry is deleted and the probe compiles from scratch
+  local how
+  for how in flip delete extra nocomplete manifest foreign; do
+    rm -rf "$C"; mkgd "$A"; $G seed "$A" >/dev/null 2>&1; $G store "$A" >/dev/null 2>&1
+    case "$how" in
+      flip) echo "beam jasoX" > "$E/lib/jason/ebin/Elixir.jason.beam" ;;
+      delete) rm "$E/lib/telemetry/ebin/telemetry.app" ;;
+      extra) echo stray > "$E/lib/jason/ebin/stray.beam" ;;
+      nocomplete) rm "$E/COMPLETE" ;;
+      manifest) echo "tampered" >> "$E/MANIFEST" ;;
+      foreign) mkdir -p "$E/lib/samen_core/ebin"; echo x > "$E/lib/samen_core/ebin/x.beam" ;;
+    esac
+    rm -rf "$B/_build"; mkdir -p "$B/_build/test/lib"
+    $G seed "$B" > "$T/gd.c.$how" 2>&1
+    has "$T/gd.c.$how" 'CORRUPT' "GENDEPS: a corrupt entry ($how) is detected"
+    hasnt "$T/gd.c.$how" 'HIT' "GENDEPS: ... never used ($how)"
+    eq "$(ls "$B/_build/test/lib" | grep -vc '^gd$')" 0 "GENDEPS: ... nothing seeded from it ($how)"
+    [[ ! -d "$E" ]] && ok || bad "GENDEPS: ... the corrupt entry is deleted ($how)"
+    $G store "$B" >/dev/null 2>&1   # nothing compiled in B: a store of an empty build must not publish
+    [[ ! -d "$E" ]] && ok || bad "GENDEPS: a store with no compiled dependency publishes nothing ($how)"
+  done
+  # a half-written publisher's temp dir is never an entry
+  rm -rf "$C"; mkgd "$A"; mkdir -p "$C/v1/$k0.tmp.1.2/lib/jason/ebin"; echo x > "$C/v1/$k0.tmp.1.2/lib/jason/ebin/jason.app"
+  $G seed "$A" > "$T/gd.t" 2>&1
+  has "$T/gd.t" 'MISS' "GENDEPS: a temp dir of a publisher that died is not an entry"
+  # races: a live holder is waited for (bounded), a dead one is taken over
+  rm -rf "$C"; mkgd "$A"; mkdir -p "$C/v1/$k0.lock"; echo "$$" > "$C/v1/$k0.lock/owner"
+  SAMEN_GEN_DEPS_CACHE_WAIT=3 $G seed "$A" > "$T/gd.w" 2>&1
+  has "$T/gd.w" 'waited 3s .* compiling my own' "GENDEPS: a live lock holder is waited for, then the probe compiles its own"
+  rm -rf "$C"; mkgd "$A"; mkdir -p "$C/v1/$k0.lock"; echo 99999999 > "$C/v1/$k0.lock/owner"
+  SAMEN_GEN_DEPS_CACHE_WAIT=3 $G seed "$A" > "$T/gd.d" 2>&1
+  has "$T/gd.d" 'MISS' "GENDEPS: a lock whose owner died is taken over, not waited on"
+  hasnt "$T/gd.d" 'waited' "GENDEPS: ... without waiting"
+  # a lock edited between seed and store is not stored; disabled means no state at all
+  rm -rf "$C"; mkgd "$A"; $G seed "$A" >/dev/null 2>&1; echo "x" >> "$A/mix.lock"; $G store "$A" > "$T/gd.l" 2>&1
+  has "$T/gd.l" 'mix.lock changed since seed' "GENDEPS: a lock that changed between seed and store is not stored"
+  [[ ! -d "$E" ]] && ok || bad "GENDEPS: ... and nothing was published"
+  mkgd "$A"; env -u SAMEN_GEN_DEPS_CACHE python3 "$H" seed "$A" > "$T/gd.o" 2>&1
+  has "$T/gd.o" 'disabled' "GENDEPS: unset = disabled"
+  [[ ! -e "$A/.gen_deps_cache.json" ]] && ok || bad "GENDEPS: ... and leaves no state file"
+  # wiring: the guard arms it for the probes (off disables), the driver strips the helper seam, the Elixir side calls it
+  has "$ROOT/scripts/gen_probe_guard.sh" 'local -x SAMEN_GEN_DEPS_CACHE_HELPER="\$REPO_ROOT/scripts/gen_deps_cache.py"' "GENDEPS: run_gen_probe arms the helper"
+  has "$ROOT/scripts/ci_driver.py" '"SAMEN_GEN_DEPS_CACHE_HELPER"' "GENDEPS: the driver strips the helper seam from every step"
+  has "$ROOT/samen_core/lib/samen/gen/app.ex" 'deps_cache!\(s, "seed"\)' "GENDEPS: the generator seeds after deps.get"
+  has "$ROOT/samen_core/lib/samen/gen/app.ex" 'deps_cache!\(s, "store"\)' "GENDEPS: ... and stores only after the compile"
+  local n; n="$(grep -c 'scripts/gen_deps_cache.py' "$ROOT/ci/steps.conf")"
+  eq "$n" 4 "GENDEPS: the four gen_* probe steps declare the helper as an input"
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS GENPROBE NARROW RECHUNK COSTW TIMEOUT SELTMO GENDEPS)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

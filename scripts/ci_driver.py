@@ -413,7 +413,8 @@ ENV_KEYED = re.compile(r"^(SAMEN_|MIX_|ELIXIR_|ERL_|HEX_|REBAR|PG|DATABASE_URL$|
 # caller. Inherited by the driver they would run the concurrent flagship/post/deploy probes in the legacy shared mode
 # (each restores the committed registry from its own snapshot: a later-started probe restores an earlier one's
 # reservation INTO the committed file and both pass), or check every compile against another registry file.
-PROBE_SEAMS = ("GEN_PROBE_SHARED_REGISTRY", "SAMEN_ABBREV_REGISTRY", "SAMEN_ABBREV_REGISTRY_GUARD")
+PROBE_SEAMS = ("GEN_PROBE_SHARED_REGISTRY", "SAMEN_ABBREV_REGISTRY", "SAMEN_ABBREV_REGISTRY_GUARD",
+               "SAMEN_GEN_DEPS_CACHE_HELPER")
 
 
 def step_base_env():

@@ -1,0 +1,20 @@
+# SABOTAGE: the compiled-dependency cache stores samen_* packages, so code under test could be served from 
+#   the cache instead of compiled from source
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENDEPS the gen probes' compiled-dependency cache is keyed
+diff --git a/scripts/gen_deps_cache.py b/scripts/gen_deps_cache.py
+index db36a8c..e5e285d 100644
+--- a/scripts/gen_deps_cache.py
++++ b/scripts/gen_deps_cache.py
+@@ -73,7 +73,7 @@ def hex_deps(app_dir):
+         return None, None
+     with open(lock, "rb") as f:
+         raw = f.read()
+-    names = sorted(n for n in HEX_LINE.findall(raw.decode("utf-8", "replace")) if not NEVER_CACHED.match(n))
++    names = sorted(n for n in HEX_LINE.findall(raw.decode("utf-8", "replace")) if True)
+     return raw, names
+ 
+ 

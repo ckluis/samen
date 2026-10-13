@@ -509,7 +509,9 @@ defmodule Samen.Gen.App do
   """
   def compile_and_dump!(%__MODULE__{} = s) do
     run_mix!(s, ["deps.get"])
+    deps_cache!(s, "seed")
     run_mix!(s, ["compile", "--warnings-as-errors"])
+    deps_cache!(s, "store")
     run_mix!(s, ["samen.catalog.dump", "--output", "schema.dict.json"])
 
     if s.api? do
@@ -517,6 +519,21 @@ defmodule Samen.Gen.App do
     end
 
     :ok
+  end
+
+  # ADR-053 P6 — opt-in, set only by scripts/gen_probe_guard.sh for the gen probes: seed the app's `_build` with the
+  # COMPILED HEX dependencies of an earlier identical build before `compile`, store them after a green one.
+  # scripts/gen_deps_cache.py is best-effort acceleration (any problem = compile from scratch) and never touches
+  # samen_core / samen_web / the app: those are compiled from source by the `compile` below, every time.
+  defp deps_cache!(%__MODULE__{app_dir: dir}, sub) do
+    case System.get_env("SAMEN_GEN_DEPS_CACHE_HELPER") do
+      nil ->
+        :ok
+
+      helper ->
+        {out, _code} = System.cmd("python3", [helper, sub, dir, "--env", "test"], stderr_to_stdout: true)
+        IO.write(out)
+    end
   end
 
   defp run_mix!(%__MODULE__{app_dir: dir} = s, args) do

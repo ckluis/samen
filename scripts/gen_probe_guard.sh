@@ -123,6 +123,13 @@ run_gen_probe() {
   # the companion without which Samen.AbbrevRegistry refuses SAMEN_ABBREV_REGISTRY (a stray export alone must never
   # redirect a real reservation); `local -x` exports it to this probe's children only, for this call only
   local -x SAMEN_ABBREV_REGISTRY_GUARD=gen_probe_guard
+  # ADR-053 P6 — the generated app's COMPILED HEX dependencies come from a content-keyed cache
+  # (scripts/gen_deps_cache.py: key = mix.lock + toolchain + MIX_ENV + build env + the deps' app env; immutable,
+  # manifest-verified entries; samen_core/samen_web/the app always compile fresh). SAMEN_GEN_DEPS_CACHE=off disables it,
+  # =<dir> relocates it; `scripts/ci` strips the HELPER seam so only this function can arm it.
+  local -x SAMEN_GEN_DEPS_CACHE="${SAMEN_GEN_DEPS_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/samen/gen_deps}"
+  local -x SAMEN_GEN_DEPS_CACHE_HELPER="$REPO_ROOT/scripts/gen_deps_cache.py"
+  if [[ "$SAMEN_GEN_DEPS_CACHE" == off ]]; then unset SAMEN_GEN_DEPS_CACHE_HELPER; fi
   GEN_PROBE_RESTORED=0
 
   # GEN_PROBE_GUARD_DISABLE_TRAP=1 skips installing the interrupt trap while keeping
