@@ -204,3 +204,19 @@ defmodule Samen.Meta.CiDriverGuardTest.NarrowedInputs do
     Samen.Meta.CiDriverGuard.run_case!("NARROW")
   end
 end
+
+defmodule Samen.Meta.CiDriverGuardTest.RechunkKeepsFinished do
+  use ExUnit.Case, async: true
+
+  test "RECHUNK a resume never discards a finished chunk when the learned per-item rate rises" do
+    Samen.Meta.CiDriverGuard.run_case!("RECHUNK")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.CostWeightedChunks do
+  use ExUnit.Case, async: true
+
+  test "COSTW chunks are weighted by what each item last cost, not by the slowest item's rate" do
+    Samen.Meta.CiDriverGuard.run_case!("COSTW")
+  end
+end

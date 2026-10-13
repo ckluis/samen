@@ -139,7 +139,7 @@ def fmt_s(x):
 STEP_KEYS = {"cmd", "cwd", "modes", "inputs", "reads", "always", "serial", "locks", "est_s", "group",
              "marker", "marker_if", "skip_marker", "echo_log", "exunit_dir", "superseded_by",
              "shard_list", "shard_kind", "shard_item", "shard_total", "shard_each_s", "shard_target_s",
-             "shard_check", "unsharded_cmd", "desc", "actions_job", "actions_skip", "actions_dirs", "actions_slices"}
+             "shard_check", "shard_cost", "unsharded_cmd", "desc", "actions_job", "actions_skip", "actions_dirs", "actions_slices"}
 
 
 class Step(object):
@@ -178,6 +178,17 @@ class Step(object):
         self.shard_each = float(d.get("shard_each_s", "30"))
         self.shard_target = float(d.get("shard_target_s", "300"))
         self.shard_check = d.get("shard_check", "").strip() or None
+        # (P5) how to read a per-item wall-clock out of a sub-step's log: ONE regex, two groups (item name, seconds).
+        # With it, `ranges` chunks are cost-weighted by what each item last cost on this machine.
+        self.shard_cost = d.get("shard_cost", "").strip() or None
+        if self.shard_cost:
+            try:
+                if re.compile(self.shard_cost, re.M).groups != 2:
+                    raise ValueError("needs exactly two groups (item name, seconds)")
+            except (re.error, ValueError) as e:
+                raise UsageError("manifest: step %s: shard_cost %s" % (sid, e))
+            if self.shard_kind != "ranges":
+                raise UsageError("manifest: step %s: shard_cost needs shard_kind = ranges" % sid)
         self.unsharded_cmd = d.get("unsharded_cmd") or None
         # GitHub Actions placement (ADR-053 §2.8): the job this step runs in (default: its group), or
         # an explicit exclusion with its reason. None = key absent (an EMPTY actions_skip is "").
@@ -204,6 +215,7 @@ class Step(object):
         self.expected = None       # shard_check expectation
         self.processed = None      # what the sub-step reported (shard_check)
         self.selected_total = None # the lister's own count of the whole selection
+        self.cost_sum = None       # (P5) the summed learned weight of this chunk's items (cost-weighted shards)
         self.preset = None         # ("PASS"|"FAIL", note) decided at plan time (empty shard / list error)
         self.key = None
 
@@ -501,6 +513,23 @@ def clone_step(step, sid):
     return s
 
 
+def learn_costs(seen, step, text, dur):
+    """(P5) Per-item wall-clock out of a PASSED sub-step's log (`shard_cost`: name, seconds) and the share of the
+    lane-seconds the wall-clock really paid. Items blend old and new (a loaded machine must not pin a cost);
+    the share keeps the last five observations (the plan uses the worst of them)."""
+    got = dict((m.group(1), float(m.group(2))) for m in re.finditer(step.shard_cost, text, re.M))
+    if not got:
+        return
+    table = dict(seen.get(step.parent + "#item_cost") or {})
+    for name, secs in got.items():
+        table[name] = round(secs if name not in table else 0.5 * table[name] + 0.5 * secs, 1)
+    seen[step.parent + "#item_cost"] = table
+    total = sum(got.values())
+    if total > 0 and len(got) == (step.expected or len(got)):
+        obs = round(max(0.0, dur - 10.0) / total, 3)
+        seen[step.parent + "#alpha"] = (list(seen.get(step.parent + "#alpha") or []) + [obs])[-5:]
+
+
 def per_item_bucket(old, rate):
     """The learned per-item cost, as a power-of-two bucket with hysteresis. Chunk boundaries are
     part of every sub-step's cache key, so the rate must not wobble with machine noise: it moves UP
@@ -528,7 +557,27 @@ def balanced_chunks(nums, n):
     return chunks
 
 
-def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None):
+def cache_file(key):
+    return os.path.join(HOME, "cache", key[:2], key + ".json")
+
+
+def partition_file(step_id):
+    return os.path.join(HOME, "partition", safe_name(step_id) + ".json")
+
+
+def load_partition(step_id, sel):
+    """The chunk partition last planned for exactly this selection of this step (None when the selection differs)."""
+    p = read_json(partition_file(step_id))
+    return p if isinstance(p, dict) and p.get("sel") == sel else None
+
+
+def save_partition(step_id, sel, body):
+    d = dict(body)
+    d["sel"] = sel
+    atomic_write_json(partition_file(step_id), d)
+
+
+def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, done_keys=frozenset(), no_plan_write=False):
     """A long internal loop → budget-sized sub-steps. Unbudgeted (budget 0) a step with an
     unsharded_cmd runs it as ONE step, exactly the pre-ADR-053 command."""
     if budget == 0 and step.unsharded_cmd and not slice_:
@@ -567,8 +616,15 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None):
     # per-item cost = max(manifest shard_each_s, the per-item rate this machine last OBSERVED): a
     # chunk sized on an optimistic estimate could outgrow a whole tool call, and a sub-step that can
     # never finish inside one is a sub-step `resume` can never complete
-    learned = float((read_json(os.path.join(HOME, "timings.json")) or {}).get(step.id + "#per_item", 0))
+    seen = read_json(os.path.join(HOME, "timings.json")) or {}
+    learned = float(seen.get(step.id + "#per_item", 0))
     each = max(step.shard_each, learned)
+    # (P5) cost-weighted ranges: what each item LAST cost (lane-seconds, read from the sub-step logs through
+    # `shard_cost`) and how much of that the wall-clock really paid (lanes overlap) — the worst of the last few
+    # observations, so a chunk is never planned shorter than it has recently run.
+    costs = seen.get(step.id + "#item_cost") or {} if step.shard_cost else {}
+    alphas = seen.get(step.id + "#alpha") or [] if step.shard_cost else []
+    alpha = min(1.0, max(0.2, max(alphas))) if alphas else 1.0
     if step.shard_kind == "ranges":
         items = [m.group(1) for m in re.finditer(step.shard_item, text, re.M)]
         if len(items) != total:
@@ -576,6 +632,10 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None):
                                 "— refusing to run a different selection than the one listed" % (total, step.shard_item, len(items)))
     else:
         items = [str(total)]
+    sel = hashlib.sha256(json.dumps([step.id, step.shard_kind, items], sort_keys=True).encode()).hexdigest()
+    persist = not slice_ and not no_plan_write
+    stored = None if slice_ else load_partition(step.id, sel)
+    done = lambda sub: bool(sub.key) and (sub.key in done_keys or (not no_cache and os.path.exists(cache_file(sub.key))))
     if step.shard_kind == "ranges":
         nums = []
         for it in items:
@@ -587,32 +647,88 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None):
                 return [s]
             nums.append((int(m.group(1)), it))
         nums.sort()
+        weight = (lambda it: float(costs.get(it) or each)) if step.shard_cost else (lambda it: each)
+
+        def plan_run(run):
+            """Chunk one stretch of (number, item) pairs at the CURRENT rate; never split one number across chunks
+            (duplicate numbers exist: 25-, 35-)."""
+            out_chunks, cur, tot = [], [], 0.0
+            per = max(1, int(step.shard_target // max(each, 0.001)))
+            for n, it in run:
+                if cur and n != cur[-1][0]:
+                    full = ((tot + weight(it)) * alpha + 10 > step.shard_target) if step.shard_cost else len(cur) >= per
+                    if full:
+                        out_chunks.append(cur)
+                        cur, tot = [], 0.0
+                cur.append((n, it))
+                tot += weight(it)
+            if cur:
+                out_chunks.append(cur)
+            return out_chunks
+
+        by_item = {}
+        if stored and stored.get("kind") == "ranges":
+            # a resume never discards a finished chunk of the SAME selection: finished chunks stay exactly as
+            # they were planned (same range, same items → same key), and only each unfinished stretch between
+            # them is re-planned at the current rate
+            by_item = dict((it, (n, it)) for n, it in nums)
+            if not all(it in by_item for sc in stored["chunks"] for it in sc[1]):
+                stored = None  # a damaged store is never trusted: plan afresh
         if slice_:
             chunks = balanced_chunks(nums, slice_[1])
+        elif stored and stored.get("kind") == "ranges":
+            chunks, run = [], []
+            for sc in stored["chunks"]:
+                members = [by_item[it] for it in sc[1]]
+                probe = clone_step(step, step.id + "#probe")
+                probe.shard_args, probe.shard_items = sc[0], list(sc[1])
+                probe.key = ctx.key(probe, apps)
+                if done(probe):
+                    chunks.extend(plan_run(run))
+                    run = []
+                    chunks.append(members)
+                else:
+                    run.extend(members)
+            chunks.extend(plan_run(run))
         else:
-            per = max(1, int(step.shard_target // max(each, 0.001)))
-            chunks, cur = [], []
-            for n, it in nums:
-                # never split one number across chunks (duplicate numbers exist: 25-, 35-)
-                if cur and len(cur) >= per and n != cur[-1][0]:
-                    chunks.append(cur)
-                    cur = []
-                cur.append((n, it))
-            if cur:
-                chunks.append(cur)
+            chunks = plan_run(nums)
         if sum(len(c) for c in chunks) != len(items):  # accounting: the shards ARE the selection
             raise UsageError("shard accounting: %s chunks hold %d of %d items" % (step.id, sum(len(c) for c in chunks), len(items)))
         specs = [("--range %d-%d" % (c[0][0], c[-1][0]), [it for _n, it in c]) for c in chunks]
+        if persist:
+            save_partition(step.id, sel, {"kind": "ranges", "chunks": [[a, list(its)] for a, its in specs]})
     else:
         count = total
-        n = slice_[1] if slice_ else (max(1, int(math.ceil(count * each / step.shard_target))) if count else 0)
-        specs = []
-        for i in range(1, n + 1):
-            size = len([x for x in range(count) if x % n == i - 1])
-            specs.append(("--shard %d/%d" % (i, n), ["%d mutants of %d" % (size, count)], size))
+
+        def size_of(m_, r_):
+            return len([x for x in range(count) if x % m_ == r_ - 1])
+        if slice_:
+            classes = [(slice_[1], i) for i in range(1, slice_[1] + 1)]
+        elif stored and stored.get("kind") == "modulo" and stored.get("count") == count and stored.get("classes"):
+            # keep every class that is finished OR still fits one tool call at the current rate; split only a class
+            # that outgrew it, into k sub-classes (x % M == r-1  ==  the union of x % kM == r-1 + j*M): finished
+            # classes keep their key, the classes still partition the selection exactly
+            classes = []
+            for m_, r_ in stored["classes"]:
+                probe = clone_step(step, step.id + "#probe")
+                probe.shard_args = "--shard %d/%d" % (r_, m_)
+                probe.shard_items = ["%d mutants of %d" % (size_of(m_, r_), count)]
+                probe.key = ctx.key(probe, apps)
+                est = size_of(m_, r_) * each
+                if done(probe) or est <= step.shard_target:
+                    classes.append((m_, r_))
+                else:
+                    k = int(math.ceil(est / step.shard_target))
+                    classes.extend((m_ * k, r_ + j * m_) for j in range(k))
+        else:
+            n = max(1, int(math.ceil(count * each / step.shard_target))) if count else 0
+            classes = [(n, i) for i in range(1, n + 1)]
+        specs = [("--shard %d/%d" % (r_, m_), ["%d mutants of %d" % (size_of(m_, r_), count)], size_of(m_, r_))
+                 for m_, r_ in classes]
         if sum(sp[2] for sp in specs) != count:
             raise UsageError("shard accounting: %s shards hold %d of %d mutants" % (step.id, sum(sp[2] for sp in specs), count))
-        specs = [(a, it, sz) for a, it, sz in specs]
+        if persist:
+            save_partition(step.id, sel, {"kind": "modulo", "count": count, "classes": [list(c) for c in classes]})
     if slice_:
         i, n = slice_
         if i <= len(specs):
@@ -640,6 +756,9 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None):
         s.shard_items = its
         s.expected = sp[2] if len(sp) > 2 else len(its)
         s.est = (s.expected * each) + 10
+        if step.shard_cost and step.shard_kind == "ranges":
+            s.cost_sum = sum(float(costs.get(it) or each) for it in its)
+            s.est = s.cost_sum * alpha + 10
         s.group = step.id  # the parent's markers print once every shard passed
         subs.append(s)
     return subs
@@ -688,7 +807,8 @@ def build_plan(man, mode, ctx, opts, quiet=False):
     for s in cand:
         if s.shard_list:
             plan.extend(expand_shards(s, ctx, mode, budget, man.apps, no_cache=bool(opts.get("no_cache")),
-                                      slice_=opts.get("slice")))
+                                      slice_=opts.get("slice"), done_keys=opts.get("_done_keys") or frozenset(),
+                                      no_plan_write=bool(opts.get("plan"))))
         else:
             plan.append(s)
     seen = read_json(os.path.join(HOME, "timings.json")) or {}
@@ -838,7 +958,7 @@ class Run(object):
 
     # ── cache ──
     def cache_path(self, key):
-        return os.path.join(HOME, "cache", key[:2], key + ".json")
+        return cache_file(key)
 
     def cache_hit(self, step):
         if self.opts.get("no_cache") or not step.key:
@@ -925,6 +1045,8 @@ class Run(object):
             seen[step.id] = round(dur, 1)
             if rc == 0 and step.parent and step.expected:
                 seen[step.parent + "#per_item"] = per_item_bucket(seen.get(step.parent + "#per_item", 0), dur / step.expected)
+            if rc == 0 and step.parent and step.shard_cost:
+                learn_costs(seen, step, text, dur)
             atomic_write_json(tp, seen)
         if rc == 0:
             # C2: cache only if the step's inputs did not change while it ran
@@ -973,9 +1095,15 @@ class Run(object):
         jobs = max(1, int(opts.get("jobs") or 1))
         keep_going = bool(opts.get("keep_going"))
         prior = self.state.get("steps", {}) if self.resumed else {}
+        # a finished chunk is the same work under any slot id: after a re-plan `[3/13]` may be `[3/15]`
+        prior_by_key = dict((r.get("key"), r) for r in prior.values() if r.get("status") == "PASS" and r.get("key"))
         pending = []
         for s in plan:
             pr = prior.get(s.id)
+            if not (pr and pr.get("status") == "PASS" and s.key and pr.get("key") == s.key):
+                pr = prior_by_key.get(s.key) if s.key else pr
+                if pr:
+                    pr = dict(pr, id=s.id)
             if s.preset:
                 st, note = s.preset
                 self.record(s, st, 0.0, note=note, digest=[note] if st != "PASS" else [])
@@ -1144,6 +1272,9 @@ def _cmd_run_locked(mode, opts, resume, t_start, old, holder):
                  "invocations": 1, "cumulative_s": 0.0, "steps": {}}
     run = Run(man, mode, opts, ctx, state, resume)
     holder["run"] = run
+    # (P5) the chunks this run already finished: a re-plan after a rising per-item rate keeps them as they were
+    opts["_done_keys"] = frozenset(r.get("key") for r in (state.get("steps") or {}).values()
+                                   if r.get("status") == "PASS" and r.get("key")) if resume else frozenset()
     plan, skipped = build_plan(man, mode, ctx, opts)
     run.plan = plan
     state["plan"] = [s.id for s in plan]

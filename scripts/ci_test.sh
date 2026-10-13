@@ -58,6 +58,14 @@
 #          app: the narrowing removes exactly the `_test.exs` files and nothing Mix compiles or a probe copies;
 #          editing an excluded file keeps the key and the quick selection, editing an included one changes both.
 #
+#   RECHUNK  (P5) a resume never discards a finished chunk of the SAME selection when the learned per-item rate rises:
+#          the partition is persisted (_ci/partition/), finished chunks stay as planned and only the unfinished
+#          stretches are re-planned at the new rate (ranges AND modulo shards); each sub-step still reports exactly
+#          its chunk (shard_check), no re-planned chunk outgrows the target (G10), the shards still sum to the selection.
+#   COSTW    (P5) `shard_cost`: ranges chunks are weighted by what each item last cost (read from the sub-step logs),
+#          so one slow item no longer sizes a chunk of cheap ones; the share of lane-seconds the wall-clock paid is
+#          learned too; an unknown item is planned at the old per-item rate.
+#
 # Usage: scripts/ci_test.sh [CASE…]      (default: every case)
 # Exit:  0 all assertions pass · 1 otherwise. Residue: none (temp dirs, trap on EXIT/INT/TERM).
 set -uo pipefail
@@ -208,8 +216,8 @@ case_C1() {
   has "$T/o20" '^PASS slowsh\[1/1\] ' "C1: first run — one chunk on the manifest estimate"
   drive "$T/o21" pr --plan --no-cache
   has "$T/o21" '^PLAN slowsh\[1/3\] ' "C1: ... re-chunked smaller once the observed per-item rate is known"
-  drive "$T/o22" pr -j 1
-  has "$T/o22" '^CI\(pr\): PASS 3/3' "C1: the re-chunked run passes"
+  drive "$T/o22" pr -j 1 --no-cache
+  has "$T/o22" '^CI\(pr\): PASS 3/3' "C1: the re-chunked run passes (--no-cache: the finished 3-item chunk is not reused; RECHUNK covers the reuse)"
   drive "$T/o23" pr -j 1
   eq "$(grep -c '^CACHED slowsh\[' "$T/o23")" 3 "C1: ... and the chunking is STABLE: the next run is all CACHED (no re-learn churn)"
   # the learned rate moves in power-of-two buckets with hysteresis — chunk boundaries (part of every
@@ -1297,7 +1305,175 @@ PY
   [[ "$(key)" != "$k0" ]] && ok || bad "NARROW: editing a lib file must change the key"
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS GENPROBE NARROW)
+# RECHUNK (ADR-053 P5): the learned per-item rate rising re-chunked the plan, every finished chunk's key changed, and
+# `resume` re-ran them (a builder lost ~30 min of sabotage replay). The partition of a (step, selection) is now
+# persisted: a finished chunk stays exactly as planned, only the unfinished stretches are re-planned.
+case_RECHUNK() {
+  rc_conf() { # rc_conf <list N> — a 'ranges' step; each chunk logs its range and reports exactly its size
+    { echo "$APPS"
+      cat <<'CONF'
+[step shd]
+cmd = a=${CI_SHARD_ARGS#--range }; lo=${a%-*}; hi=${a#*-}
+      echo "$CI_SHARD_ARGS" >> "$CI_TEST_RUNS"; echo "PROCESSED $((hi-lo+1))"
+shard_list = i=1; while [ $i -le 40 ]; do printf "  $i-a.patch x\n"; i=$((i+1)); done; printf "SELECTED 40\n"
+shard_kind = ranges
+shard_each_s = 2
+shard_target_s = 20
+shard_item = ^  ([0-9]+-\S+\.patch)\s
+shard_total = ^SELECTED ([0-9]+)$
+shard_check = ^PROCESSED ([0-9]+)$
+modes = pr
+inputs = core/
+est_s = 3
+CONF
+    } > "$SAMEN_CI_MANIFEST"
+  }
+  # items covered by the logged ranges: "<dups> <missing>" over 1..40
+  rc_cover() { python3 - "$CI_TEST_RUNS" "$1" <<'PY'
+import re, sys, collections
+n = collections.Counter()
+for l in open(sys.argv[1]):
+    m = re.match(r"--range (\d+)-(\d+)", l)
+    if m:
+        for i in range(int(m.group(1)), int(m.group(2)) + 1): n[i] += 1
+total = int(sys.argv[2])
+print(sum(1 for i in range(1, total + 1) if n[i] > 1), sum(1 for i in range(1, total + 1) if n[i] == 0))
+PY
+  }
+  mkrepo rc; rc_conf
+  drive "$T/rc1" pr --budget 1 -j 1 --no-cache
+  eq "$RC" 3 "RECHUNK: the first call finishes one chunk and is INCOMPLETE"
+  has "$T/rc1" '^PASS shd\[1/4\] ' "RECHUNK: positive control — 40 items at 2 s/item, target 20 s = 4 chunks of 10"
+  eq "$(grep -c -- '--range 1-10' "$CI_TEST_RUNS")" 1 "RECHUNK: chunk 1-10 ran once"
+  # the learned rate rises (a slow patch landed): a fresh plan would be 20 chunks of 2 and chunk 1-10 would be void
+  python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["shd#per_item"] = 8.0; json.dump(d, open(sys.argv[1], "w"))
+PY
+  mkdir -p "$T/rc.keep"; cp -R "$SAMEN_CI_HOME/partition" "$T/rc.keep/"; cp "$SAMEN_CI_HOME/timings.json" "$T/rc.keep/"
+  cp "$SAMEN_CI_HOME/state.json" "$T/rc.keep/"; cp -R "$SAMEN_CI_HOME/cache" "$T/rc.keep/"
+  drive "$T/rc2" resume --budget 0 -j 1
+  eq "$RC" 0 "RECHUNK: resume completes after the rate rose"
+  has "$T/rc2" '^CI\(pr\): PASS ' "RECHUNK: ... PASS"
+  has "$T/rc2" '^PASS shd\[1/[0-9]+\] .*\(earlier in this run\)$' "RECHUNK: the finished chunk is kept (found by key although its slot id changed)"
+  eq "$(grep -c -- '--range 1-10' "$CI_TEST_RUNS")" 1 "RECHUNK: chunk 1-10 was NOT re-run"
+  eq "$(rc_cover 40)" "0 0" "RECHUNK: every item ran exactly once across the resumes (no duplicate, no gap)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'sum(s["processed"] for s in d["steps"])')" 40 "RECHUNK: the sub-steps' PROCESSED sum to the selection (40)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'all(s["processed"] == s["expected"] for s in d["steps"])')" True "RECHUNK: each sub-step reported exactly its chunk (shard_check)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'max(s["expected"] for s in d["steps"][1:])')" 2 "RECHUNK: G10 — the re-planned chunks are sized at the NEW rate (2 items x 8 s <= 20 s)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'len(d["steps"])')" 16 "RECHUNK: ... 1 kept chunk + 15 re-planned chunks of 2 (items 11-40)"
+  # red twin: without the persisted partition the same resume re-plans from scratch and re-runs the finished items
+  rm -rf "$SAMEN_CI_HOME/partition" "$SAMEN_CI_HOME/cache"; : > "$CI_TEST_RUNS"
+  cp "$T/rc.keep/state.json" "$SAMEN_CI_HOME/state.json"; cp "$T/rc.keep/timings.json" "$SAMEN_CI_HOME/timings.json"
+  echo "--range 1-10" > "$CI_TEST_RUNS"
+  drive "$T/rc3" resume --budget 0 -j 1
+  eq "$(rc_cover 40 | cut -d' ' -f1)" 10 "RECHUNK: positive control — with no persisted partition the finished items 1-10 run AGAIN (10 duplicates)"
+  # modulo shards: a finished class survives; only a class that outgrew the target is split, and the classes still partition
+  mkrepo rcm
+  { echo "$APPS"
+    cat <<'CONF'
+[step mut]
+cmd = a=${CI_SHARD_ARGS#--shard }; r=${a%/*}; m=${a#*/}; k=0; x=0
+      while [ $x -lt 12 ]; do [ $((x % m)) -eq $((r-1)) ] && { k=$((k+1)); echo "$x" >> "$CI_TEST_COVER"; }; x=$((x+1)); done
+      echo "$CI_SHARD_ARGS" >> "$CI_TEST_RUNS"; echo "  mutants run : $k"
+shard_list = printf "SELECTED 12\n"
+shard_kind = modulo
+shard_total = ^SELECTED ([0-9]+)$
+shard_each_s = 2
+shard_target_s = 12
+shard_check = ^  mutants run +: ([0-9]+)
+modes = pr
+inputs = core/
+est_s = 3
+CONF
+  } > "$SAMEN_CI_MANIFEST"
+  export CI_TEST_COVER="$T/rcm.cover"; : > "$CI_TEST_COVER"
+  drive "$T/rcm1" pr --budget 1 -j 1 --no-cache
+  has "$T/rcm1" '^PASS mut\[1/2\] ' "RECHUNK: modulo — 12 mutants at 2 s, target 12 s = 2 classes of 6"
+  python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["mut#per_item"] = 6.0; json.dump(d, open(sys.argv[1], "w"))
+PY
+  drive "$T/rcm2" resume --budget 0 -j 1
+  eq "$RC" 0 "RECHUNK: modulo — resume completes after the rate rose"
+  eq "$(grep -c -- '--shard 1/2' "$CI_TEST_RUNS")" 1 "RECHUNK: modulo — the finished class 1/2 was not re-run"
+  eq "$(sort -n "$CI_TEST_COVER" | tr '\n' ' ')" "0 1 2 3 4 5 6 7 8 9 10 11 " "RECHUNK: modulo — every mutant ran exactly once (the split classes partition the selection)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'max(s["expected"] for s in d["steps"][1:])')" 2 "RECHUNK: modulo — G10: the split classes are sized at the new rate (2 mutants x 6 s <= 12 s)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'sum(s["processed"] for s in d["steps"])')" 12 "RECHUNK: modulo — PROCESSED sums to the selection (12)"
+  # a different selection never reuses the stored partition (positive control: the same store IS used when it matches)
+  drive "$T/rcm3" pr --plan --no-cache
+  eq "$(grep -c '^PLAN mut\[' "$T/rcm3")" 4 "RECHUNK: modulo — the stored partition (class 1/2 + three split classes) is what a new plan starts from"
+  python3 - "$SAMEN_CI_HOME/partition/mut.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["sel"] = "0" * 64; json.dump(d, open(sys.argv[1], "w"))
+PY
+  drive "$T/rcm4" pr --plan --no-cache
+  eq "$(grep -c '^PLAN mut\[' "$T/rcm4")" 2 "RECHUNK: modulo — a partition stored for a DIFFERENT selection is ignored (fresh plan: 2 classes)"
+}
+
+# COSTW (ADR-053 P5): chunks of a `shard_cost` step are weighted by what each item last cost, so one 40 s item no
+# longer sizes a chunk of 1 s items (the old per-item bucket planned every chunk at the slowest rate: 266 s estimated,
+# 110-150 s real). The share of lane-seconds the wall-clock paid is learned too, and an unknown item is planned at the
+# old per-item rate.
+case_COSTW() {
+  mkrepo cw
+  { echo "$APPS"
+    cat <<'CONF'
+[step shd]
+cmd = a=${CI_SHARD_ARGS#--range }; lo=${a%-*}; hi=${a#*-}; n=$lo
+      while [ $n -le $hi ]; do c=1; [ $n -eq 4 ] && c=40; echo "==> [1/1] sabotage $n-a.patch (app: core)"; echo "    flip confirmed"; echo "    elapsed: ${c}s"; n=$((n+1)); done
+      echo "$CI_SHARD_ARGS" >> "$CI_TEST_RUNS"; echo "PROCESSED $((hi-lo+1))"
+shard_list = i=1; while [ $i -le 12 ]; do printf "  $i-a.patch x\n"; i=$((i+1)); done; printf "SELECTED 12\n"
+shard_kind = ranges
+shard_each_s = 10
+shard_target_s = 50
+shard_item = ^  ([0-9]+-\S+\.patch)\s
+shard_total = ^SELECTED ([0-9]+)$
+shard_check = ^PROCESSED ([0-9]+)$
+shard_cost = ^==> \[\d+/\d+\] sabotage (\S+) [^\n]*\n(?:(?!==>)[^\n]*\n)*?\s+elapsed: (\d+)s
+modes = pr
+inputs = core/
+est_s = 3
+CONF
+  } > "$SAMEN_CI_MANIFEST"
+  drive "$T/cw1" pr --plan --no-cache
+  eq "$(grep -c '^PLAN shd\[' "$T/cw1")" 3 "COSTW: nothing learned yet — items planned at shard_each (10 s): 12 items, 4 per chunk"
+  has "$T/cw1" '^PLAN shd\[1/3\] est 50\.0s ' "COSTW: ... each estimated at 4 x 10 + 10"
+  drive "$T/cw2" pr --budget 0 -j 1 --no-cache
+  eq "$RC" 0 "COSTW: the first run passes"
+  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'd["shd#item_cost"]["4-a.patch"]')" 40.0 "COSTW: the 40 s item's cost was read from the log"
+  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'd["shd#item_cost"]["1-a.patch"]')" 1.0 "COSTW: ... and a 1 s item's"
+  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'len(d["shd#alpha"])')" 3 "COSTW: one wall-clock share observed per chunk"
+  # pin the share at 1.0 so the arithmetic is the weights', then re-plan
+  python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["shd#alpha"] = [1.0]; d["shd#per_item"] = 0; json.dump(d, open(sys.argv[1], "w"))
+PY
+  drive "$T/cw3" pr --plan --no-cache
+  eq "$(grep -c '^PLAN shd\[' "$T/cw3")" 3 "COSTW: weighted by cost: [1-3] | [4] | [5-12]"
+  has "$T/cw3" '^PLAN shd\[1/3\] est 13\.0s ' "COSTW: the three cheap items are estimated at 3 + 10 s, not 4 x 10 + 10"
+  has "$T/cw3" '^PLAN shd\[2/3\] est 50\.0s ' "COSTW: the slow item stands alone at 40 + 10 s"
+  has "$T/cw3" '^PLAN shd\[3/3\] est 18\.0s ' "COSTW: the eight cheap items share one chunk at 8 + 10 s"
+  drive "$T/cw4" pr --budget 0 -j 1 --no-cache
+  eq "$RC" 0 "COSTW: the weighted plan runs and every sub-step reports exactly its chunk"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'sum(s["processed"] for s in d["steps"])')" 12 "COSTW: PROCESSED sums to the selection (12)"
+  # a smaller observed share shrinks the estimate, never below 20% of the lane-seconds
+  python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["shd#alpha"] = [0.0, 0.01]; json.dump(d, open(sys.argv[1], "w"))
+PY
+  drive "$T/cw5" pr --plan --no-cache
+  eq "$(grep -c '^PLAN shd\[' "$T/cw5")" 1 "COSTW: at the 0.2 floor all 51 lane-seconds fit one chunk (51 x 0.2 + 10 = 20.2 s)"
+  has "$T/cw5" '^PLAN shd\[1/1\] est 20\.2s ' "COSTW: ... estimated at 20.2 s"
+  # an item with no recorded cost keeps the old rate: a step WITHOUT shard_cost plans exactly as before
+  mkrepo cw0
+  { echo "$APPS"; sed -n '/^\[step shd\]/,$p' "$T/cw.conf" | grep -v '^shard_cost'; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/cw6" pr --plan --no-cache
+  eq "$(grep -c '^PLAN shd\[' "$T/cw6")" 3 "COSTW: positive control — without shard_cost the count rule plans 3 chunks (per = 50 // 10 = 5: 5/5/2)"
+  has "$T/cw6" '^PLAN shd\[1/3\] est 60\.0s ' "COSTW: ... each estimated at 5 x 10 + 10 (the pre-P5 numbers)"
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS GENPROBE NARROW RECHUNK COSTW)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do
