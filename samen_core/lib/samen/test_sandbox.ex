@@ -33,10 +33,12 @@ defmodule Samen.TestSandbox do
   Own `repo` for this test in shared mode, and give the pool back (mode `:manual`) when the test exits.
   Returns the owner pid. Call it from `setup` / a test body, never from `setup_all`.
   """
-  @spec shared!(module()) :: pid()
-  def shared!(repo) do
+  @spec shared!(module(), keyword()) :: pid()
+  def shared!(repo, opts \\ []) do
+    # `:on_exit` is a seam for the helper's own test (a recorder instead of ExUnit's registry)
+    register = Keyword.get(opts, :on_exit, &ExUnit.Callbacks.on_exit/1)
     owner = Sandbox.start_owner!(repo, shared: true)
-    ExUnit.Callbacks.on_exit(fn -> release(owner) end)
+    register.(fn -> release(owner) end)
     owner
   end
 

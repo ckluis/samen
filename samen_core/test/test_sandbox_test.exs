@@ -86,6 +86,19 @@ defmodule Samen.TestSandboxTest do
     end)
   end
 
+  test "shared!/2 registers its own release - running it hands the pool back in :manual mode" do
+    recorder = fn callback -> send(self(), {:registered, callback}) end
+    owner = Samen.TestSandbox.shared!(TestRepo, on_exit: recorder)
+
+    assert_received {:registered, callback}
+    assert is_function(callback, 0)
+    assert stranger() == :ok
+
+    callback.()
+    assert eventually(fn -> stranger() == :no_connection end)
+    refute Process.alive?(owner)
+  end
+
   test "release/1 returns the pool to :manual and is idempotent" do
     owner = Samen.TestSandbox.shared!(TestRepo)
     assert stranger() == :ok
