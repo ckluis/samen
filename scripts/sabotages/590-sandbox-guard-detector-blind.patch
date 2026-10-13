@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: the raw-pair detector no longer matches {:shared, …}, so the guard passes over a 
+#   leak
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/sandbox_shared_guard_test.exs
+# MUST_FAIL: positive control: the detector flags the raw pair in every spelling and passes the helper
+diff --git a/samen_core/test/meta/sandbox_shared_guard_test.exs b/samen_core/test/meta/sandbox_shared_guard_test.exs
+index e7378f8..c5ed16e 100644
+--- a/samen_core/test/meta/sandbox_shared_guard_test.exs
++++ b/samen_core/test/meta/sandbox_shared_guard_test.exs
+@@ -18,7 +18,7 @@ defmodule Samen.TestSandboxGuardTest do
+   @root Path.expand("../../..", __DIR__)
+ 
+   # the raw pair, single- or multi-line: Sandbox.mode(<repo expr>, {:shared, …})
+-  @raw ~r/Sandbox\.mode\(\s*[^,()]+,\s*\{:shared\s*,/
++  @raw ~r/Sandbox\.mode\(\s*[^,()]+,\s*\{:sharedX\s*,/
+ 
+   @demonstrates ["samen_core/test/test_sandbox_test.exs"]
+   # this file spells the raw pair in its own positive control

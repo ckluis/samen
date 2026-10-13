@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 P5: the generated data_case ships the raw shared-sandbox pair again, so every new app 
+#   is born with the flake
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/sandbox_shared_guard_test.exs
+# MUST_FAIL: no test file or emitted template switches the sandbox to shared mode by hand
+diff --git a/samen_core/priv/templates/data_case.eex b/samen_core/priv/templates/data_case.eex
+index ef51455..b7cd3f7 100644
+--- a/samen_core/priv/templates/data_case.eex
++++ b/samen_core/priv/templates/data_case.eex
+@@ -12,7 +12,8 @@ defmodule <%= module %>.DataCase do
+   setup do
+     # a dedicated shared owner that outlives the test process (ADR-053 P5): the raw checkout + shared pair made
+     # the test process the owner, so on_exit callbacks and late async work died with "owner exited"
+-    Samen.TestSandbox.shared!(<%= module %>.Repo)
++    :ok = Ecto.Adapters.SQL.Sandbox.checkout(<%= module %>.Repo)
++    Ecto.Adapters.SQL.Sandbox.mode(<%= module %>.Repo, {:shared, self()})
+     :ok
+   end
+ end
