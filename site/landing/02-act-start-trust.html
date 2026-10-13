@@ -73,7 +73,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
       </ul>
       <div class="more"><a class="btn o" href="#p-vault" data-panel>Why exactly one chokepoint <span class="ar">→</span></a></div>
     </div>
-    <div class="stage rv" data-label="app.driftwood.test/customers/8812 · no grant present">
+    <div class="stage rv" data-label="/crm/contacts/:id · operator plane · no grant present">
 <svg viewBox="0 0 560 400" aria-hidden="true">
   <rect x="0" y="0" width="560" height="400" rx="14" fill="#0E1018"/>
   <g font-size="13">
@@ -94,7 +94,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
     <g transform="translate(24,296)">
       <rect width="512" height="44" rx="10" class="f-raised"/><text x="16" y="27" class="t-mute">Shipments</text><text x="150" y="27" class="t-ink">14 · all visible</text><text x="496" y="27" text-anchor="end" class="t-mono t-faint" font-size="10">not PII</text>
     </g>
-    <text x="24" y="376" class="t-mono t-mute" font-size="10.5">$ curl …/customers/8812 → {"email":"••••","phone":"••••"}  · no per-endpoint rule</text>
+    <text x="24" y="376" class="t-mono t-mute" font-size="10.5">JSON:API, CSV, logs: the same •••• · no per-endpoint rule</text>
   </g>
 </svg>
     </div>
@@ -206,7 +206,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
       <div class="eyebrow"><span class="n">04</span>Two planes, one core</div>
       <h2 class="w">Your admin tool is the biggest leak in the company. <em>Unless it's the same app.</em></h2>
       <p class="punch">The operator plane isn't a second application with its own queries. It's <b>the same objects rendered for a different actor</b>. Support sees the real UI, the real layout, the real bug. The PII inside it renders <span class="mask">••••</span>.</p>
-      <div class="big"><span class="n">3</span><span class="l">actors, one route, one template. <b>What you can see is a property of you, not of the page.</b> <span class="tag built">built</span></span></div>
+      <div class="big"><span class="n">3</span><span class="l">actors, one substrate. <b>What you can see is a property of you, not of the page.</b> <span class="tag built">built</span></span></div>
       <ul class="ticks">
         <li><b>Tenant</b>: reads its own org in the clear; scoping is enforced at the resource, not per query</li>
         <li><b>Operator</b>: masked impersonation, grant-capable, every read in the tenant's log</li>
@@ -214,38 +214,150 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
       </ul>
       <div class="more"><a class="btn o" href="#p-planes" data-panel>Why a separate admin app is the leak <span class="ar">→</span></a></div>
     </div>
-    <div class="stage rv" data-label="/drivers · the same route, resolved three times">
+    <div class="stage rv" data-label="driver roster · the same rows, resolved three times">
 <svg viewBox="0 0 560 430" aria-hidden="true">
   <g font-size="12">
     <!-- headers -->
     <text x="18" y="22" class="t-mono t-faint" font-size="10" letter-spacing="1.2">ACTOR</text>
     <text x="150" y="22" class="t-mono t-faint" font-size="10" letter-spacing="1.2">DRIVER</text>
-    <text x="300" y="22" class="t-mono t-faint" font-size="10" letter-spacing="1.2">PHONE</text>
-    <text x="430" y="22" class="t-mono t-faint" font-size="10" letter-spacing="1.2">HOS</text>
+    <text x="300" y="22" class="t-mono t-faint" font-size="10" letter-spacing="1.2">CDL #</text>
+    <text x="430" y="22" class="t-mono t-faint" font-size="10" letter-spacing="1.2">FMCSA</text>
     <!-- tenant -->
     <g transform="translate(0,36)"><rect width="560" height="112" rx="14" class="f-raised" stroke="#2A2E42"/>
       <text x="18" y="28" class="t-mono t-sky" font-size="10.5" letter-spacing="1">TENANT</text><text x="18" y="46" class="t-mute" font-size="11">Rosa · dispatcher</text>
-      <text x="150" y="34" class="t-ink">Marcus Vale</text><text x="300" y="34" class="t-ink">(312) 555-0147</text><text x="430" y="34" class="t-ink">6h 20m</text>
-      <text x="150" y="60" class="t-ink">Dana Whitfield</text><text x="300" y="60" class="t-ink">(617) 555-0182</text><text x="430" y="60" class="t-ink">9h 05m</text>
-      <text x="150" y="86" class="t-ink">Theo Brannigan</text><text x="300" y="86" class="t-ink">(614) 555-0119</text><text x="430" y="86" class="t-amber">10h 40m</text>
+      <text x="150" y="34" class="t-ink">Marcus Vale</text><text x="300" y="34" class="t-mono t-ink" font-size="11.5">D4471-8820</text><text x="430" y="34" class="t-green">OK</text>
+      <text x="150" y="60" class="t-ink">Dana Whitfield</text><text x="300" y="60" class="t-mono t-ink" font-size="11.5">D5120-3364</text><text x="430" y="60" class="t-green">OK</text>
+      <text x="150" y="86" class="t-ink">Theo Brannigan</text><text x="300" y="86" class="t-mono t-ink" font-size="11.5">D3388-1907</text><text x="430" y="86" class="t-rose">BLOCKED</text>
     </g>
     <!-- operator -->
     <g transform="translate(0,160)"><rect width="560" height="112" rx="14" class="f-raised" stroke="#2A2E42"/>
       <text x="18" y="28" class="t-mono t-indigo" font-size="10.5" letter-spacing="1">OPERATOR</text><text x="18" y="46" class="t-mute" font-size="11">impersonating</text><text x="18" y="64" class="t-mono t-faint" font-size="10">0 grants held</text>
-      <text x="150" y="34" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="300" y="34" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="430" y="34" class="t-ink">6h 20m</text>
-      <text x="150" y="60" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="300" y="60" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="430" y="60" class="t-ink">9h 05m</text>
-      <text x="150" y="86" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="300" y="86" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="430" y="86" class="t-amber">10h 40m</text>
+      <text x="150" y="34" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="300" y="34" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="430" y="34" class="t-green">OK</text>
+      <text x="150" y="60" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="300" y="60" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="430" y="60" class="t-green">OK</text>
+      <text x="150" y="86" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="300" y="86" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="430" y="86" class="t-rose">BLOCKED</text>
     </g>
     <!-- aggregate -->
     <g transform="translate(0,284)"><rect width="560" height="112" rx="14" class="f-raised" stroke="#2A2E42"/>
       <text x="18" y="28" class="t-mono t-green" font-size="10.5" letter-spacing="1">AGGREGATE</text><text x="18" y="46" class="t-mute" font-size="11">token-blind job</text><text x="18" y="64" class="t-mono t-faint" font-size="10">pii_* count: 0</text>
-      <text x="150" y="34" class="t-mute">Enterprise brokerage</text><text x="300" y="34" class="t-mono t-faint" font-size="11">no such column</text><text x="430" y="34" class="t-ink">96.1%</text>
-      <text x="150" y="60" class="t-mute">Mid-market</text><text x="300" y="60" class="t-mono t-faint" font-size="11">no such column</text><text x="430" y="60" class="t-ink">94.4%</text>
-      <text x="150" y="86" class="t-mute">Regional carrier</text><text x="300" y="86" class="t-mono t-faint" font-size="11">no such column</text><text x="430" y="86" class="t-ink">92.8%</text>
+      <text x="150" y="34" class="t-mute">lane TX→CA</text><text x="300" y="34" class="t-mono t-faint" font-size="11">no such column</text><text x="430" y="34" class="t-ink">412 loads</text>
+      <text x="150" y="60" class="t-mute">lane IL→GA</text><text x="300" y="60" class="t-mono t-faint" font-size="11">no such column</text><text x="430" y="60" class="t-ink">366 loads</text>
+      <text x="150" y="86" class="t-mute">lane MT→ND</text><text x="300" y="86" class="t-mono t-faint" font-size="11">no such column</text><text x="430" y="86" class="t-faint">⊘ k&lt;5</text>
     </g>
-    <text x="0" y="424" class="t-mono t-mute" font-size="10.5">no markup changes between the three; the difference is which actor asked</text>
+    <text x="0" y="424" class="t-mono t-mute" font-size="10.5">one business, three answers; the difference is which actor asked</text>
   </g>
 </svg>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="ip rv">
+      <div class="ip-h"><span class="ip-k">In the product</span><span class="ip-n">driftwood, the freight vertical · one Blue Ridge Logistics roster, three actors</span></div>
+      <p class="ip-t">Switch the actor. The rows don't move; what resolves inside them does.</p>
+      <div class="sw">
+        <input type="radio" name="sim" id="sim-t" class="sw-1" checked aria-label="Actor: tenant dispatcher">
+        <input type="radio" name="sim" id="sim-o" class="sw-2" aria-label="Actor: operator, masked impersonation">
+        <input type="radio" name="sim" id="sim-a" class="sw-3" aria-label="Actor: token-blind aggregate">
+        <div class="sw-tabs" role="presentation">
+          <label class="sw-tab t1" for="sim-t" style="color:#4CC294"><i></i><span>Tenant <small>/broker?panel=roster</small></span></label>
+          <label class="sw-tab t2" for="sim-o" style="color:#8C98F8"><i></i><span>Operator <small>/operator/impersonate</small></span></label>
+          <label class="sw-tab t3" for="sim-a" style="color:#B79CF5"><i></i><span>Aggregate <small>/operator/aggregate</small></span></label>
+        </div>
+        <p class="sw-c p1">Rosa dispatches for Blue Ridge, so her actor is a tenant member of that org: <b>every vaulted field on her own drivers resolves in the clear</b>. No grant, no ceremony; this is the ordinary case.</p>
+        <p class="sw-c p2">Support opened a masked impersonation session with a reason. <b>Same drivers, same order, same FMCSA badges</b>, read through the same <code>Driftwood.Reads.driver_roster</code>; name and CDL resolve to <code>%Masked{}</code> because the plane is <code>:operator</code> and no grant is held.</p>
+        <p class="sw-c p3">The portfolio view runs as the token-blind aggregate actor over projections that <b>have no <code>pii_</code> column at all</b>. Nothing is masked because nothing is maskable, and a lane with fewer than five tenants is suppressed to <code>⊘</code>.</p>
+
+        <div class="ui sw-p p1">
+          <div class="ui-app">
+            <div class="ui-side" aria-hidden="true">
+              <div class="ui-ws"><span class="ui-logo">B</span><span><b>Blue Ridge Logistics</b><span>Freight brokerage</span></span></div>
+              <div class="ui-grp">Operations</div>
+              <span class="ui-nav">Dispatch board</span><span class="ui-nav">Loads<em>18</em></span><span class="ui-nav on">Drivers<em>5</em></span><span class="ui-nav">Settlements</span>
+            </div>
+            <div class="ui-main">
+              <div class="ui-top"><span class="ui-crumb">Blue Ridge Logistics<i>/</i>Operations<i>/</i>Drivers</span><span class="ui-who"><span class="ui-av" style="background:#D6E9DF;color:#1E7A45">RM</span><span><b>Rosa Medina</b><br>dispatcher</span><span class="ui-chip t">tenant plane</span></span></div>
+              <div class="ui-head"><span class="ui-h">Drivers</span><span class="ui-acts"><span class="ui-btn">Filter</span><span class="ui-btn p">+ New driver</span></span></div>
+              <div class="ui-wrap">
+                <div class="ui-gt"><b>Driver roster</b><span class="ui-n">5</span><span class="ui-lane">· your org — driver names in the clear</span></div>
+                <div class="ui-card"><table class="ui-t">
+                  <thead><tr><th style="width:19%">Driver</th><th style="width:12%">CDL #</th><th style="width:7%">State</th><th style="width:11%">CDL expiry</th><th style="width:11%">Med card</th><th style="width:14%">Status</th><th style="width:15%">FMCSA</th><th style="width:11%">Dispatch</th></tr></thead>
+                  <tbody>
+                    <tr><td class="w"><span class="ui-drv"><span class="ui-av">MV</span><span>Marcus Vale</span></span></td><td data-k="CDL #" class="mo">D4471-8820</td><td data-k="State">IL</td><td data-k="CDL expiry" class="mo">2027-03-14</td><td data-k="Med card" class="mo">2026-11-02</td><td data-k="Status"><span class="ui-pill info">on_load</span></td><td data-k="FMCSA"><span class="ui-pill ok">OK</span></td><td data-k="Dispatch"><span class="ui-btn">Dispatch</span></td></tr>
+                    <tr><td class="w"><span class="ui-drv"><span class="ui-av" style="background:#F5E1EC;color:#B4437E">DW</span><span>Dana Whitfield</span></span></td><td data-k="CDL #" class="mo">D5120-3364</td><td data-k="State">MA</td><td data-k="CDL expiry" class="mo">2028-06-30</td><td data-k="Med card" class="mo">2027-01-18</td><td data-k="Status"><span class="ui-pill mut">available</span></td><td data-k="FMCSA"><span class="ui-pill ok">OK</span></td><td data-k="Dispatch"><span class="ui-btn">Dispatch</span></td></tr>
+                    <tr><td class="w"><span class="ui-drv"><span class="ui-av" style="background:#F3E3D6;color:#93630F">TB</span><span>Theo Brannigan</span></span></td><td data-k="CDL #" class="mo">D3388-1907</td><td data-k="State">OH</td><td data-k="CDL expiry" class="mo">2027-09-02</td><td data-k="Med card" class="mo">2026-09-30</td><td data-k="Status"><span class="ui-pill mut">available</span></td><td data-k="FMCSA" class="w"><span class="ui-pill bad">BLOCKED: medical card expired</span></td><td data-k="Dispatch"><span class="ui-btn off">Dispatch (blocked)</span></td></tr>
+                    <tr><td class="w"><span class="ui-drv"><span class="ui-av" style="background:#E0E9E3;color:#1E7A45">PR</span><span>Priya Raghunathan</span></span></td><td data-k="CDL #" class="mo">D6642-5518</td><td data-k="State">IL</td><td data-k="CDL expiry" class="mo">2029-02-11</td><td data-k="Med card" class="mo">2027-05-06</td><td data-k="Status"><span class="ui-pill warn">out_of_service</span></td><td data-k="FMCSA" class="w"><span class="ui-pill bad">BLOCKED: out of service</span></td><td data-k="Dispatch"><span class="ui-btn off">Dispatch (blocked)</span></td></tr>
+                    <tr><td class="w"><span class="ui-drv"><span class="ui-av" style="background:#E4E1F2;color:#6D45C4">CO</span><span>Curtis Okafor</span></span></td><td data-k="CDL #" class="mo">D2907-4471</td><td data-k="State">OH</td><td data-k="CDL expiry" class="mo">2028-12-01</td><td data-k="Med card" class="mo">2027-08-22</td><td data-k="Status"><span class="ui-pill info">on_load</span></td><td data-k="FMCSA"><span class="ui-pill ok">OK</span></td><td data-k="Dispatch"><span class="ui-btn">Dispatch</span></td></tr>
+                  </tbody></table></div>
+                <div class="ui-attrs"><span class="l">Freight.Driver · resolved</span><span class="c">full_name</span><span class="c">cdl_number</span><span>cdl_state</span><span>cdl_expiry</span><span>medical_card_expiry</span><span>status</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui sw-p p2">
+          <div class="ui-app">
+            <div class="ui-side" aria-hidden="true">
+              <div class="ui-ws"><span class="ui-logo op">D</span><span><b>Driftwood Ops</b><span>Operator control plane</span></span></div>
+              <div class="ui-grp">Operator plane</div>
+              <span class="ui-nav">Tenants</span><span class="ui-nav on">Impersonation</span><span class="ui-nav">Aggregate · MRR</span>
+              <div class="ui-grp">Viewing as tenant</div>
+              <span class="ui-nav">Loads<em>18</em></span><span class="ui-nav">Drivers<em>5</em></span><span class="ui-nav">Settlements</span>
+            </div>
+            <div class="ui-main">
+              <div class="ui-top"><span class="ui-crumb">Operator plane<i>/</i>Impersonation<i>/</i>Blue Ridge Logistics<i>/</i>Drivers</span><span class="ui-who"><span class="ui-av" style="background:#DDE1F7">CK</span><span><b>C. Kluis</b><br>operator · support</span><span class="ui-chip o">operator plane</span></span></div>
+              <div class="ui-head"><span class="ui-h">Driver roster</span><span class="ui-acts"><span class="ui-btn">Filter</span></span></div>
+              <div class="ui-bar o"><span><b>Masked impersonation.</b> Impersonating brokerage <b>Blue Ridge Logistics</b>. PII is masked (••••). Unmasking a subject needs a second-party reveal grant, is time-boxed, and is written to the tenant-readable audit log.<span class="ui-acct">Reason: ticket #7781: dispatch dispute · Session expires 14:52</span></span><span class="ui-tag">grants held: 0</span></div>
+              <div class="ui-wrap">
+                <div class="ui-gt"><b>Driver roster</b><span class="ui-n">5</span><span class="ui-lane">· real tenant data, personal fields render ••••</span></div>
+                <div class="ui-card"><table class="ui-t">
+                  <thead><tr><th style="width:15%">Driver</th><th style="width:11%">CDL #</th><th style="width:9%">CDL state</th><th style="width:12%">CDL expiry</th><th style="width:15%">Status</th><th style="width:19%">FMCSA</th><th style="width:19%">Reveal</th></tr></thead>
+                  <tbody>
+                    <tr><td class="w"><span class="ui-drv"><span class="ui-av q">·</span><span class="ui-m">••••</span></span></td><td data-k="CDL #"><span class="ui-m">••••</span></td><td data-k="CDL state">IL</td><td data-k="CDL expiry" class="mo">2027-03-14</td><td data-k="Status"><span class="ui-pill info">on_load</span></td><td data-k="FMCSA"><span class="ui-pill ok">OK</span></td><td data-k="Reveal" class="w"><span class="ui-btn rv">Reveal driver record</span> <span class="ui-btn rv">Request reveal</span></td></tr>
+                    <tr><td class="w"><span class="ui-drv"><span class="ui-av q">·</span><span class="ui-m">••••</span></span></td><td data-k="CDL #"><span class="ui-m">••••</span></td><td data-k="CDL state">MA</td><td data-k="CDL expiry" class="mo">2028-06-30</td><td data-k="Status"><span class="ui-pill mut">available</span></td><td data-k="FMCSA"><span class="ui-pill ok">OK</span></td><td data-k="Reveal" class="w"><span class="ui-btn rv">Reveal driver record</span> <span class="ui-btn rv">Request reveal</span></td></tr>
+                    <tr><td class="w"><span class="ui-drv"><span class="ui-av q">·</span><span class="ui-m">••••</span></span></td><td data-k="CDL #"><span class="ui-m">••••</span></td><td data-k="CDL state">OH</td><td data-k="CDL expiry" class="mo">2027-09-02</td><td data-k="Status"><span class="ui-pill mut">available</span></td><td data-k="FMCSA" class="w"><span class="ui-pill bad">BLOCKED: medical card expired</span></td><td data-k="Reveal" class="w"><span class="ui-btn rv">Reveal driver record</span> <span class="ui-btn rv">Request reveal</span></td></tr>
+                    <tr><td class="w"><span class="ui-drv"><span class="ui-av q">·</span><span class="ui-m">••••</span></span></td><td data-k="CDL #"><span class="ui-m">••••</span></td><td data-k="CDL state">IL</td><td data-k="CDL expiry" class="mo">2029-02-11</td><td data-k="Status"><span class="ui-pill warn">out_of_service</span></td><td data-k="FMCSA" class="w"><span class="ui-pill bad">BLOCKED: out of service</span></td><td data-k="Reveal" class="w"><span class="ui-btn rv">Reveal driver record</span> <span class="ui-btn rv">Request reveal</span></td></tr>
+                    <tr><td class="w"><span class="ui-drv"><span class="ui-av q">·</span><span class="ui-m">••••</span></span></td><td data-k="CDL #"><span class="ui-m">••••</span></td><td data-k="CDL state">OH</td><td data-k="CDL expiry" class="mo">2028-12-01</td><td data-k="Status"><span class="ui-pill info">on_load</span></td><td data-k="FMCSA"><span class="ui-pill ok">OK</span></td><td data-k="Reveal" class="w"><span class="ui-btn rv">Reveal driver record</span> <span class="ui-btn rv">Request reveal</span></td></tr>
+                  </tbody></table></div>
+                <div class="ui-attrs"><span class="l">Freight.Driver · resolved</span><span class="k">full_name → %Masked{}</span><span class="k">cdl_number → %Masked{}</span><span>cdl_state</span><span>cdl_expiry</span><span>status</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ui sw-p p3">
+          <div class="ui-app">
+            <div class="ui-side" aria-hidden="true">
+              <div class="ui-ws"><span class="ui-logo op">D</span><span><b>Driftwood Ops</b><span>Operator control plane</span></span></div>
+              <div class="ui-grp">Operator plane</div>
+              <span class="ui-nav">Tenants</span><span class="ui-nav">Impersonation</span><span class="ui-nav on">Aggregate · MRR</span>
+            </div>
+            <div class="ui-main">
+              <div class="ui-top"><span class="ui-crumb">Operator plane<i>/</i>Aggregate<i>/</i>Portfolio</span><span class="ui-who"><span class="ui-av" style="background:#E4DCF6;color:#6D45C4">AG</span><span><b>operator_aggregate</b><br>token-blind actor, no org</span><span class="ui-chip a">aggregate plane</span></span></div>
+              <div class="ui-head"><span class="ui-h">Portfolio</span></div>
+              <div class="ui-bar a"><span><b>Token-blind aggregate plane.</b> This actor has <b>no pii_ column</b> in its domain by construction — it reads a vault-excluded projection over tenant orgs. Cohorts below the k-anonymity floor are suppressed (⊘).</span><span class="ui-tag">no reveal path · k-anon suppressed</span></div>
+              <div class="ui-mets">
+                <div class="ui-met"><span>Portfolio MRR</span><b>$104,800</b><small>across tiers</small></div>
+                <div class="ui-met"><span>Active tenants</span><b>42</b><small>org-level cohorts</small></div>
+                <div class="ui-met"><span>Loads / total</span><b>1,284</b><small>across all lanes</small></div>
+                <div class="ui-met"><span>Total gross</span><b>$2.41M</b><small>across all lanes</small></div>
+              </div>
+              <div class="ui-wrap">
+                <div class="ui-gt"><b>Load volume by lane</b><span class="ui-n">5</span><span class="ui-lane">· org-level aggregates only — no personal data</span></div>
+                <div class="ui-card"><table class="ui-t keep">
+                  <thead><tr><th>Lane</th><th>Tenants</th><th>Loads</th><th>Gross</th></tr></thead>
+                  <tbody>
+                    <tr><td data-k="Lane" class="mo">TX-&gt;CA</td><td data-k="Tenants">14</td><td data-k="Loads">412</td><td data-k="Gross" class="mo">$771,400</td></tr>
+                    <tr><td data-k="Lane" class="mo">IL-&gt;GA</td><td data-k="Tenants">11</td><td data-k="Loads">366</td><td data-k="Gross" class="mo">$648,900</td></tr>
+                    <tr><td data-k="Lane" class="mo">FL-&gt;NY</td><td data-k="Tenants">9</td><td data-k="Loads">297</td><td data-k="Gross" class="mo">$602,300</td></tr>
+                    <tr><td data-k="Lane" class="mo">WA-&gt;AZ</td><td data-k="Tenants">6</td><td data-k="Loads">209</td><td data-k="Gross" class="mo">$389,700</td></tr>
+                    <tr><td data-k="Lane" class="mo">MT-&gt;ND</td><td data-k="Tenants">2</td><td data-k="Loads">⊘</td><td data-k="Gross">⊘</td></tr>
+                  </tbody></table>
+                  <div class="ui-supp">1 cohort below the k-anonymity floor — suppressed to prevent re-identification.</div></div>
+                <div class="ui-attrs"><span class="l">Aggregate.LoadVolumeByLane · resolved</span><span class="a">lane</span><span class="a">tenant_count</span><span class="a">load_count</span><span class="a">gross_cents</span><span class="l" style="margin-left:4px">pii_ columns: none</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="ip-cap">Redrawn from driftwood's own screens: <code>DriftwoodWeb.BrokerLive</code>, <code>DriftwoodWeb.OperatorImpersonationLive</code> and the framework's <code>Samen.Web.Operator.AggregateLive</code>, with fictional tenant data. Tenant and operator render through the same read layer and the same <code>Samen.Api.PiiResolution</code> resolver; only the actor's plane differs. The FMCSA badge stays readable on both, so support can work the problem without the person.</p>
     </div>
   </div>
 </section>
@@ -330,7 +442,7 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
     <g transform="translate(0,0)"><rect width="270" height="330" rx="14" class="f-raised" stroke="#2A2E42"/>
       <text x="16" y="26" class="t-mono t-sky" font-size="10" letter-spacing="1.2">TENANT ADMIN · CLEAR</text>
       <rect x="16" y="44" width="238" height="40" rx="8" class="f-raised2"/><text x="28" y="69" class="t-ink">Ada Whitfield</text>
-      <rect x="16" y="94" width="238" height="40" rx="8" class="f-raised2"/><text x="28" y="119" class="t-ink">ada@whitfield.co</text>
+      <rect x="16" y="94" width="238" height="40" rx="8" class="f-raised2"/><text x="28" y="119" class="t-ink" font-size="11.5">ada.whitfield@blueridge.example</text>
       <text x="16" y="160" class="t-mono t-faint" font-size="10">typed into "notes"</text>
       <rect x="16" y="168" width="238" height="40" rx="8" class="f-raised2"/><text x="28" y="193" class="t-mono t-violet" font-size="11">[42 chars]</text>
       <text x="16" y="236" class="t-mono t-faint" font-size="10">clicked</text>
@@ -352,6 +464,69 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
     <text x="16" y="386" class="t-mute" font-size="11.5">every reference resolves to [erased] · the replay rows are byte-identical</text>
   </g>
 </svg>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="ip rv">
+      <div class="ip-h"><span class="ip-k">In the product</span><code>/operator/replays/:org_id/:id</code><code>/settings/replays/:id</code></div>
+      <p class="ip-t">One recording of the real CRM contacts page. Four viewers. The stored bytes never change.</p>
+      <div class="sw">
+        <input type="radio" name="rpv" id="rpv-o" class="sw-1" checked aria-label="Viewer: operator, no grant">
+        <input type="radio" name="rpv" id="rpv-g" class="sw-2" aria-label="Viewer: operator with a reveal grant">
+        <input type="radio" name="rpv" id="rpv-a" class="sw-3" aria-label="Viewer: tenant admin">
+        <input type="radio" name="rpv" id="rpv-e" class="sw-4" aria-label="Viewer: tenant admin after erasure">
+        <div class="sw-tabs" role="presentation">
+          <label class="sw-tab t1" for="rpv-o" style="color:#8C98F8"><i></i>Operator · no grant</label>
+          <label class="sw-tab t2" for="rpv-g" style="color:#E3A54F"><i></i>Operator · reveal grant</label>
+          <label class="sw-tab t3" for="rpv-a" style="color:#4CC294"><i></i>Tenant admin</label>
+          <label class="sw-tab t4" for="rpv-e" style="color:#EC8582"><i></i>After erasure</label>
+        </div>
+        <p class="sw-c p1">An operator inside an <b>impersonation session</b> for Blue Ridge, the only way an operator can open a replay. Every referenced field resolves to <span class="mask">••••</span>.</p>
+        <p class="sw-c p2">The same operator, holding a second-party-approved <b>reveal grant on Ada Whitfield</b>. Her row resolves through the vault; nobody else's does. A grant is per subject.</p>
+        <p class="sw-c p3">Blue Ridge's own <b>admin</b>, on the tenant plane: their org, in the clear. Typed text is still only a length; the recording never had it.</p>
+        <p class="sw-c p4">The same admin after <code>Samen.Erasure.shred</code> of Ada Whitfield. Her key is gone, so <b>every reference to her resolves to [erased]</b>. The replay rows were not touched.</p>
+        <div class="rpx">
+          <div class="ui rpx-win">
+            <div class="rpx-url"><i></i><i></i><i></i><span><span class="v v1 v2">/operator/replays/b1112d00…0001/bafe11ed…d9df</span><span class="v v3 v4">/settings/replays/bafe11ed…d9df</span></span></div>
+            <div class="rpx-shell">
+              <div class="ui-head" style="padding:0"><span><span class="ui-crumb"><span class="v v1 v2">Operator plane</span><span class="v v3 v4">Settings</span><i>/</i>Replays<i>/</i>ContactsLive</span><br><span class="ui-h" style="font-size:17px">Session replay</span></span><span class="ui-acts"><span class="ui-pill ok">code unchanged since recording</span></span></div>
+              <div class="ui-bar a" style="margin:10px 0 0"><span><b>ContactsLive</b> recorded 2026-10-10 13:26:23 · 14 frames. Referenced fields show their <b>current</b> value, resolved for you now. Typed input is shape only.</span><span class="ui-tag">values are CURRENT · resolved on your plane now</span></div>
+              <div class="rpx-fl"><b>render</b> (17 changed) <i>· at 22 ms · frame 3 / 14</i></div>
+              <div class="rpx-screen">
+                <div class="ui-main">
+                  <div class="ui-head" style="padding:10px 12px 0"><span><span class="ui-crumb">Blue Ridge Logistics<i>/</i>CRM<i>/</i>Contacts</span><br><span class="ui-h" style="font-size:16px">Contacts</span></span><span class="ui-acts"><span class="ui-btn">Show archived</span><span class="v v3 v4 ui-btn p">+ New contact</span></span></div>
+                  <div class="v v1 v2 ui-bar o" style="margin:8px 12px 0;padding:6px 10px;font-size:11.5px"><span><b>Operator</b> · operator plane · masked</span></div>
+                  <div class="v v3 v4 ui-bar t" style="margin:8px 12px 0;padding:6px 10px;font-size:11.5px"><span><b>Blue Ridge Logistics</b> · tenant plane · in the clear</span></div>
+                  <div class="ui-wrap" style="padding:10px 12px 12px">
+                    <div class="ui-gt"><b>Contacts</b><span class="ui-n">5</span><span class="ui-lane">· name / email / phone via PiiResolution</span></div>
+                    <div class="ui-card"><table class="ui-t">
+                      <thead><tr><th style="width:24%">Name</th><th style="width:31%">Email</th><th style="width:17%">Phone</th><th style="width:14%">Company</th><th style="width:14%">Title</th></tr></thead>
+                      <tbody>
+                        <tr><td class="w"><span class="ui-drv"><span class="v v1 v2 ui-av q">·</span><span class="v v3 v4 ui-av">AV</span><span><span class="v v1 v2 ui-m">••••</span><span class="v v3 v4">Ada Villanueva</span></span></span></td><td data-k="Email" class="w"><span class="v v1 v2 ui-m">••••</span><span class="v v3 v4">ada.v@laurelfork.example</span></td><td data-k="Phone"><span class="v v1 v2 ui-m">••••</span><span class="v v3 v4">+1 555 0177</span></td><td data-k="Company"><span class="rpx-r">▒▒▒ (18)</span></td><td data-k="Title"><span class="rpx-r">▒▒▒ (15)</span></td></tr>
+                        <tr><td class="w"><span class="ui-drv"><span class="v v1 v4 ui-av q">·</span><span class="v v2 v3 ui-av">AW</span><span><span class="v v1 ui-m">••••</span><span class="v v2 rpx-rev">Ada Whitfield</span><span class="v v3">Ada Whitfield</span><span class="v v4 rpx-er">[erased]</span></span></span></td><td data-k="Email" class="w"><span class="v v1 ui-m">••••</span><span class="v v2 rpx-rev">ada.whitfield@blueridge.example</span><span class="v v3">ada.whitfield@blueridge.example</span><span class="v v4 rpx-er">[erased]</span></td><td data-k="Phone"><span class="v v1 ui-m">••••</span><span class="v v2 rpx-rev">+1 555 0142</span><span class="v v3">+1 555 0142</span><span class="v v4 rpx-er">[erased]</span></td><td data-k="Company"><span class="rpx-r">▒▒▒ (20)</span></td><td data-k="Title"><span class="rpx-r">▒▒▒ (13)</span></td></tr>
+                        <tr><td class="w"><span class="ui-drv"><span class="v v1 v2 ui-av q">·</span><span class="v v3 v4 ui-av">LH</span><span><span class="v v1 v2 ui-m">••••</span><span class="v v3 v4">Lena Hartmann</span></span></span></td><td data-k="Email" class="w"><span class="v v1 v2 ui-m">••••</span><span class="v v3 v4">lena@shenandoahcold.example</span></td><td data-k="Phone"><span class="v v1 v2 ui-m">••••</span><span class="v v3 v4">+1 555 0108</span></td><td data-k="Company"><span class="rpx-r">▒▒▒ (21)</span></td><td data-k="Title"><span class="rpx-r">▒▒▒ (5)</span></td></tr>
+                        <tr><td class="w"><span class="ui-drv"><span class="v v1 v2 ui-av q">·</span><span class="v v3 v4 ui-av">MO</span><span><span class="v v1 v2 ui-m">••••</span><span class="v v3 v4">Marcus Okafor</span></span></span></td><td data-k="Email" class="w"><span class="v v1 v2 ui-m">••••</span><span class="v v3 v4">marcus@cumberlandmills.example</span></td><td data-k="Phone"><span class="v v1 v2 ui-m">••••</span><span class="v v3 v4">+1 555 0119</span></td><td data-k="Company"><span class="rpx-r">▒▒▒ (16)</span></td><td data-k="Title"><span class="rpx-r">▒▒▒ (13)</span></td></tr>
+                        <tr><td class="w"><span class="ui-drv"><span class="v v1 v2 ui-av q">·</span><span class="v v3 v4 ui-av">PR</span><span><span class="v v1 v2 ui-m">••••</span><span class="v v3 v4">Priya Raman</span></span></span></td><td data-k="Email" class="w"><span class="v v1 v2 ui-m">••••</span><span class="v v3 v4">priya.raman@blueridge.example</span></td><td data-k="Phone"><span class="v v1 v2 ui-m">••••</span><span class="v v3 v4">+1 555 0163</span></td><td data-k="Company"><span class="rpx-r">▒▒▒ (20)</span></td><td data-k="Title"><span class="rpx-r">▒▒▒ (10)</span></td></tr>
+                      </tbody></table></div>
+                  </div>
+                </div>
+              </div>
+              <div class="rpx-refs"><span class="rpx-refn">References <b>15</b></span><span class="v v1 ui-pill mut">15 •••• masked</span><span class="v v2 ui-pill mut">12 •••• masked</span><span class="v v2 ui-pill ok">3 shown (current)</span><span class="v v3 ui-pill ok">15 shown (current)</span><span class="v v4 ui-pill ok">12 shown (current)</span><span class="v v4 ui-pill bad">3 erased (shredded)</span></div>
+            </div>
+          </div>
+          <aside class="rpx-pg" aria-label="What Postgres holds">
+            <div class="rpx-pgh"><span class="rpx-pgk">What Postgres holds</span><b>replay_frame.rpf_payload</b><span class="rpx-same">same bytes · four viewers</span></div>
+            <div class="rpx-meta"><span>seq <b>3</b> · kind <b>render</b> · 7,537 bytes</span><span>sha256 <b>8ff7d8f4f827</b>…</span></div>
+            <p class="rpx-cm">// one contact row, as stored</p>
+<pre class="rpx-json"><b class=j0>{</b><b class=j1>"display_name": {<b class=red>"$redacted"</b>: {"kind": <i class=s>"free_text"</i>, "label": <i class=l>null</i>, "length": <i class=n>13</i>}},</b><b class=j1>"full_name": {<b class=ref>"$ref"</b>: {"pk": <i class=s>"efb44c49-…-b4ae49c18be9"</i>, "resource": <i class=s>"Samen.WebTest.Crm.Person"</i>, "attribute": <i class=s>"full_name"</i>}},</b><b class=j1>"emails": {<b class=ref>"$ref"</b>: {"pk": <i class=s>"efb44c49-…"</i>, "attribute": <i class=s>"emails"</i>}},</b><b class=j1>"phones": {<b class=ref>"$ref"</b>: {"pk": <i class=s>"efb44c49-…"</i>, "attribute": <i class=s>"phones"</i>}},</b><b class=j1>"job_title": {<b class=red>"$redacted"</b>: {"kind": <i class=s>"free_text"</i>, "length": <i class=n>13</i>}}</b><b class=j0>}</b></pre>
+            <p class="rpx-cm">// frame 8 · event validate_new: the form being typed</p>
+<pre class="rpx-json"><b class=j0>{<b class=shp>"$shape"</b>: {"fields": [{"key": <i class=s>"form"</i>, "fields": [</b><b class=j1>{"key": <i class=s>"display_name"</i>, "class": <i class=s>"name"</i>, "length": <i class=n>11</i>},</b><b class=j1>{"key": <i class=s>"full_name"</i>, "fields": [{"key": <i class=s>"first"</i>, "length": <i class=n>4</i>}, {"key": <i class=s>"last"</i>, "length": <i class=n>6</i>}]},</b><b class=j1>{"key": <i class=s>"job_title"</i>, "class": <i class=s>"name"</i>, "length": <i class=n>12</i>}</b><b class=j0>]}]}}</b></pre>
+            <p class="rpx-foot">Switch the viewer: nothing on this side changes, not one byte, not after the erasure either. <b class="ref">$ref</b> is a pointer the player resolves for whoever is watching; <b class="red">$redacted</b> and <b class="shp">$shape</b> keep a kind and a length, never the text.</p>
+          </aside>
+          <div class="rpx-strip" aria-label="Timeline: 14 frames, frame 3 shown"><span class="rpx-sk">Timeline · 14 frames</span><span class=""><b>01</b> mount</span><span class=""><b>02</b> navigate</span><span class="on"><b>03</b> render</span><span class="ev"><b>04</b> event</span><span class=""><b>05</b> render</span><span class="ev"><b>06</b> event</span><span class=""><b>07</b> render</span><span class="ev"><b>08</b> event</span><span class=""><b>09</b> render</span><span class="ev"><b>10</b> event</span><span class=""><b>11</b> render</span><span class="ev"><b>12</b> event</span><span class=""><b>13</b> render</span><span class=""><b>14</b> exit</span></div>
+        </div>
+      </div>
+      <p class="ip-cap">Real data, redrawn: one session recorded by the ADR-052 recorder over the real <code>Samen.Web.CRM.ContactsLive</code> (fictional Blue Ridge contacts) and replayed by the real player for each viewer. Labels, payloads, cell text and reference outcomes are exported by <code>scripts/landing/replay_demo_export_test.exs</code>; the JSON is abridged (ids shortened, some keys dropped), never altered. The player itself shows the recorded screen in a script-free sandboxed iframe.</p>
     </div>
   </div>
 </section>
@@ -393,37 +568,61 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
       </ul>
       <div class="more"><a class="btn o" href="#p-chat" data-panel>How one message renders twice <span class="ar">→</span></a></div>
     </div>
-    <div class="stage rv" data-label="chat · rate confirmation for BR-4471">
-<svg viewBox="0 0 560 380" aria-hidden="true">
-  <g font-size="12">
-    <g><rect width="270" height="380" rx="14" class="f-raised" stroke="#2A2E42"/>
-      <text x="16" y="26" class="t-mono t-sky" font-size="10" letter-spacing="1.2">BLUE RIDGE · TENANT</text>
-      <text x="16" y="56" class="t-ink" font-weight="600">Rosa Medina</text><text x="110" y="56" class="t-mono t-faint" font-size="10">10:26</text>
-      <text x="16" y="76" class="t-body" font-size="11.5">Here's the driver on BR-4471:</text>
-      <rect x="16" y="90" width="238" height="150" rx="10" class="f-raised2" stroke="#2A2E42"/>
-      <text x="30" y="114" class="t-ink" font-weight="600">Terrence Vogel</text><text x="30" y="131" class="t-mono t-faint" font-size="9.5">samen:freight.driver</text>
-      <text x="30" y="158" class="t-mute" font-size="11">CDL #</text><text x="120" y="158" class="t-ink" font-size="11">D4471-8820</text>
-      <text x="30" y="180" class="t-mute" font-size="11">CDL state</text><text x="120" y="180" class="t-ink" font-size="11">TX</text>
-      <text x="30" y="202" class="t-mute" font-size="11">ELD</text><text x="120" y="202" class="t-ink" font-size="11">samsara</text>
-      <text x="30" y="224" class="t-mute" font-size="11">Status</text><text x="120" y="224" class="t-green" font-size="11">Available</text>
-      <text x="16" y="360" class="t-mono t-mute" font-size="10">own org · resolved clear</text>
-    </g>
-    <g transform="translate(290,0)"><rect width="270" height="380" rx="14" class="f-raised" stroke="#2A2E42"/>
-      <text x="16" y="26" class="t-mono t-indigo" font-size="10" letter-spacing="1.2">SAAS SUPPORT · OPERATOR</text>
-      <text x="16" y="56" class="t-mono t-ink" font-size="13" letter-spacing="2">••••</text><text x="64" y="56" class="t-mono t-faint" font-size="10">blueridge-dispatch · 10:26</text>
-      <text x="16" y="76" class="t-mono t-mute" font-size="11.5">•••• ••• •••••• •• ••-••••</text>
-      <rect x="16" y="90" width="238" height="150" rx="10" class="f-raised2" stroke="#2A2E42"/>
-      <text x="30" y="115" class="t-mono t-ink" font-size="13" letter-spacing="2">••••</text><text x="30" y="131" class="t-mono t-faint" font-size="9.5">samen:freight.driver</text>
-      <text x="30" y="158" class="t-mute" font-size="11">CDL #</text><text x="120" y="159" class="t-mono t-ink" font-size="12" letter-spacing="2">••••</text>
-      <text x="30" y="180" class="t-mute" font-size="11">CDL state</text><text x="120" y="180" class="t-ink" font-size="11">TX</text>
-      <text x="30" y="202" class="t-mute" font-size="11">ELD</text><text x="120" y="202" class="t-ink" font-size="11">samsara</text>
-      <text x="30" y="224" class="t-mute" font-size="11">Status</text><text x="120" y="224" class="t-green" font-size="11">Available</text>
-      <text x="16" y="270" class="t-mute" font-size="11">support can still work the load:</text>
-      <text x="16" y="288" class="t-mute" font-size="11">state, ELD and status stay readable</text>
-      <text x="16" y="360" class="t-mono t-mute" font-size="10">same card · same function · other actor</text>
-    </g>
-  </g>
-</svg>
+    <div class="stage rv" data-label="one message · the broadcast carries an id">
+<div class="fd">
+  <div class="fd-s"><div class="fd-k"><span style="color:var(--sky)">send · Rosa Medina · tenant</span></div><p>Persist the message through Ash. Its <code>body</code> goes to the vault.</p></div>
+  <div class="fd-a" style="color:var(--sky)">broadcast</div>
+  <div class="fd-s" style="background:#0E1520;border-color:#2C4A5C"><div class="fd-k"><span>pubsub · samen:chat:&lt;thread_id&gt;</span></div><p class="fd-c">{:chat_message, %{message_id, sender_party, refs}}</p><p class="fd-f" style="color:var(--sky)">no body field exists on the wire</p></div>
+  <div class="fd-a" style="color:var(--sky)">each subscriber re-reads under its own scope</div>
+  <div class="fd-2">
+    <div class="fd-s"><div class="fd-k"><span style="color:var(--green)">tenant</span></div><div class="fd-t2"><span>OrgScope</span><b style="color:var(--green)">own org</b><span>PiiResolution</span><b style="color:var(--green)">tenant</b></div><div class="fd-msg"><b>Rosa Medina</b>Confirmed. Here is the contact and the driver on BR-4471.</div></div>
+    <div class="fd-s"><div class="fd-k"><span style="color:var(--indigo)">operator</span></div><div class="fd-t2"><span>OrgScope</span><b style="color:var(--indigo)">via impersonation</b><span>PiiResolution</span><b style="color:var(--indigo)">operator</b></div><div class="fd-msg"><b class="mask">•••• <small>blueridge-dispatch</small></b><span class="mask">••••</span></div></div>
+  </div>
+</div>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="ip rv">
+      <div class="ip-h"><span class="ip-k">In the product</span><span class="ip-n">one thread, one message, one pair of refs, rendered per viewer's plane</span></div>
+      <p class="ip-t">Paste an object id and it unfurls into a live card: clear on one side, <span class="mask">••••</span> on the other.</p>
+      <div class="ui-two">
+        <div class="cht">
+          <div class="cht-tag" style="color:#4CC294"><i></i><b>Blue Ridge · tenant</b> <code>/chat/:id</code></div>
+          <div class="ui cht-f">
+            <div class="cht-h"><span class="cht-ic">#</span><span><b>Rate confirmation for load BR-4471</b><span>cross-plane thread · owned by the tenant org</span></span><span class="ui-chip t">tenant</span></div>
+            <div class="cht-th">
+              <div class="cht-m"><span class="ui-av">CK</span><div><div class="cht-mm"><b>SaaS support</b> <span class="mo">driftwood-desk</span> · 10:24</div><div class="cht-b">Confirming the rate on BR-4471. Can you send the shipper contact and the assigned driver?</div></div></div>
+              <div class="cht-m me"><span class="ui-av" style="background:#F5E1EC;color:#B4437E">RM</span><div><div class="cht-mm"><b>Rosa Medina</b> <span class="mo">blueridge-dispatch</span> · 10:26</div><div class="cht-b">Confirmed. Here is the contact and the driver on BR-4471: <span class="cht-ref">samen:crm.person:0f00…aa</span> <span class="cht-ref">samen:freight.driver:0f00…cc</span></div>
+                <div class="cht-oc"><div class="cht-och"><span class="cht-oi">P</span><span><b>Ada Whitfield</b><span>samen:crm.person</span></span><span class="ui-pill ok">customer</span></div>
+                  <div class="cht-r"><span>Title</span><span>Shipping manager</span></div><div class="cht-r"><span>Email</span><span class="mo">ada.whitfield@blueridge.example</span></div><div class="cht-r"><span>Phone</span><span class="mo">+1 555 0142</span></div>
+                  <div class="cht-of t">your org · resolved clear (tenant plane)</div></div>
+                <div class="cht-oc"><div class="cht-och"><span class="cht-oi d">D</span><span><b>Marcus Vale</b><span>samen:freight.driver · Driver</span></span><span class="ui-pill info">on load</span></div>
+                  <div class="cht-r"><span>CDL</span><span class="mo">D4471-8820</span></div><div class="cht-r"><span>CDL state</span><span>IL</span></div><div class="cht-r"><span>ELD</span><span>samsara</span></div>
+                  <div class="cht-of t">driftwood's own card for freight.driver · clear</div></div>
+              </div></div>
+            </div>
+            <div class="cht-p"><i></i>2 online · driftwood-desk is typing…</div>
+          </div>
+        </div>
+        <div class="cht">
+          <div class="cht-tag" style="color:#8C98F8"><i></i><b>Driftwood Ops · operator</b> <code>/operator/desk-chat/:id</code></div>
+          <div class="ui cht-f">
+            <div class="cht-h"><span class="cht-ic op">#</span><span><b>Rate confirmation for load BR-4471</b><span>the same thread · reached through impersonation</span></span><span class="ui-chip o">operator · masked</span></div>
+            <div class="cht-th">
+              <div class="cht-m"><span class="ui-av q">·</span><div><div class="cht-mm"><b class="ui-m">••••</b> <span class="mo">blueridge-dispatch</span> · 10:26</div><div class="cht-b"><span class="ui-m">••••</span></div>
+                <div class="cht-oc"><div class="cht-och"><span class="cht-oi">P</span><span><b class="ui-m">••••</b><span>samen:crm.person</span></span><span class="ui-pill ok">customer</span></div>
+                  <div class="cht-r"><span>Title</span><span>Shipping manager</span></div><div class="cht-r"><span>Email</span><span class="ui-m">••••</span></div><div class="cht-r"><span>Phone</span><span class="ui-m">••••</span></div>
+                  <div class="cht-of o">tenant's customer · identity •••• · non-PII clear</div></div>
+                <div class="cht-oc"><div class="cht-och"><span class="cht-oi d">D</span><span><b class="ui-m">••••</b><span>samen:freight.driver · Driver</span></span><span class="ui-pill info">on load</span></div>
+                  <div class="cht-r"><span>CDL</span><span class="ui-m">••••</span></div><div class="cht-r"><span>CDL state</span><span>IL</span></div><div class="cht-r"><span>ELD</span><span>samsara</span></div>
+                  <div class="cht-of o">the same card · state, ELD, status still readable</div></div>
+              </div></div>
+            </div>
+            <div class="cht-p"><i></i>2 online · blueridge-dispatch shown as a handle only</div>
+          </div>
+        </div>
+      </div>
+      <p class="ip-cap">Redrawn from <code>Samen.Web.Chat.ThreadLive</code>, mounted twice by driftwood: <code>samen_chat_routes</code> on the tenant plane and again at <code>/operator/desk-chat</code> with <code>plane: :operator</code>. The person card is the framework's; the driver card is <code>DriftwoodWeb.Chat.DriverCard</code>, registered as data on the mount. Message bodies are vaulted too, so the operator reads the tenant's words as <span class="mask">••••</span>. Proven by <code>chat_unfurl_masking_test.exs</code>: the live operator DOM is scanned for leaks.</p>
     </div>
   </div>
 </section>
@@ -462,24 +661,63 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
       </ul>
       <div class="more"><a class="btn o" href="#p-agent" data-panel>Why "runs as the approver" is the whole design <span class="ar">→</span></a></div>
     </div>
-    <div class="stage rv" data-label="driftwood · support-triage agent · run 6f2a…d1">
-<svg viewBox="0 0 560 430" aria-hidden="true">
-  <g font-size="12">
-    <g transform="translate(0,0)"><rect width="560" height="54" rx="12" class="f-raised" stroke="#2A2E42"/><circle cx="22" cy="27" r="9" fill="none" stroke="#4CC294" stroke-width="1.6"/><text x="22" y="31" text-anchor="middle" class="t-mono t-green" font-size="10">1</text><text x="42" y="24" class="t-mono t-ink" font-size="11.5">catalog_lookup</text><text x="160" y="24" class="t-mono t-faint" font-size="10">read</text><text x="42" y="42" class="t-mute" font-size="11">resolves load + driver against schema.dict.json</text><text x="540" y="31" text-anchor="end" class="t-mono t-green" font-size="10">done</text></g>
-    <g transform="translate(0,64)"><rect width="560" height="54" rx="12" class="f-raised" stroke="#2A2E42"/><circle cx="22" cy="27" r="9" fill="none" stroke="#4CC294" stroke-width="1.6"/><text x="22" y="31" text-anchor="middle" class="t-mono t-green" font-size="10">2</text><text x="42" y="24" class="t-mono t-ink" font-size="11.5">fetch_record</text><text x="160" y="24" class="t-mono t-faint" font-size="10">read</text><text x="42" y="42" class="t-mute" font-size="11">DRV-8821 · name •••• · phone •••• · HOS 6h 12m left</text><text x="540" y="31" text-anchor="end" class="t-mono t-green" font-size="10">done</text></g>
-    <g transform="translate(0,128)"><rect width="560" height="54" rx="12" fill="#1A1410" stroke="#E3A54F"/><circle cx="22" cy="27" r="9" fill="#E3A54F"/><text x="22" y="31" text-anchor="middle" class="t-mono" fill="#0A0B11" font-size="10">3</text><text x="42" y="24" class="t-mono t-ink" font-size="11.5">reassign_load</text><text x="160" y="24" class="t-mono t-amber" font-size="10">write · proposed</text><text x="42" y="42" class="t-mute" font-size="11">move LD-40277 from DRV-8821 to DRV-9134</text><text x="540" y="31" text-anchor="end" class="t-mono t-amber pulse" font-size="10">parked</text></g>
-    <g transform="translate(0,200)"><rect width="560" height="230" rx="14" class="f-raised2" stroke="#2A2E42"/>
-      <text x="20" y="30" class="t-disp t-ink" font-size="17" font-weight="600">Approve this agent write?</text>
-      <text x="20" y="64" class="t-mute" font-size="11.5">Agent authority</text><text x="200" y="64" class="t-rose" font-size="11.5">none — cannot write</text>
-      <text x="20" y="88" class="t-mute" font-size="11.5">Executes as</text><text x="200" y="88" class="t-ink" font-size="11.5">A. Reyes · dispatcher (you)</text>
-      <text x="20" y="112" class="t-mute" font-size="11.5">Registered kind</text><text x="200" y="112" class="t-mono t-ink" font-size="11">ai_agent_write</text>
-      <text x="20" y="136" class="t-mute" font-size="11.5">Arg values</text><text x="200" y="136" class="t-ink" font-size="11.5">masked in transcript</text>
-      <rect x="20" y="164" width="190" height="42" rx="21" fill="#E3A54F"/><text x="115" y="190" text-anchor="middle" font-size="13" font-weight="600" fill="#0A0B11">Approve, run as me</text>
-      <rect x="222" y="164" width="100" height="42" rx="21" fill="none" stroke="#2A2E42"/><text x="272" y="190" text-anchor="middle" class="t-ink" font-size="13">Reject</text>
-      <text x="340" y="182" class="t-mono t-faint" font-size="10">deadline 24h, then</text><text x="340" y="196" class="t-mono t-faint" font-size="10">it expires unapplied</text>
-    </g>
-  </g>
-</svg>
+    <div class="stage rv" data-label="where authority enters · ADR-047">
+<div class="fd">
+  <div class="fd-s"><div class="fd-k"><span>1 · the agent</span><span style="color:var(--rose)">write credential: none</span></div>
+    <div class="fd-t"><code>search_records</code><span>read · personal fields come back <span class="mask">••••</span></span><code>fetch_record</code><span>read · masked like any other actor</span><code style="color:var(--amber)">assign_record_owner</code><span>write · calling it executes nothing</span></div></div>
+  <div class="fd-a" style="color:var(--amber)">proposes</div>
+  <div class="fd-s hot"><div class="fd-k"><span style="color:var(--amber)">2 · the approval · ai_agent_write</span><span class="pulse" style="color:var(--amber)">run parked</span></div>
+    <p>Records the tool, the turn, the arg key <b>names</b> and a sha256 digest, never an argument value. A person who isn't the requester decides.</p><p class="fd-f">no decision in 24h → withdrawn, nothing executed</p></div>
+  <div class="fd-a" style="color:var(--green)">approve</div>
+  <div class="fd-s"><div class="fd-k"><span style="color:var(--green)">3 · the write · runs as the approver</span></div>
+    <p>Executes once, inside the decision, bound to that digest. <code>actor</code> is the approver; <code>requested_by</code> is the AI principal, which holds no write authority anywhere.</p><p class="fd-f">the blast radius is what the approver could do by hand</p></div>
+</div>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="ip rv">
+      <div class="ip-h"><span class="ip-k">In the product</span><code>/ai/agents/:id</code><span class="ip-n">a support-triage run, parked at the human gate</span></div>
+      <p class="ip-t">"Why is load BR-4471 late, and who should own it?" Two reads, one proposal, and a person decides.</p>
+      <div class="ui agt">
+        <div class="ui-main">
+          <div class="ui-top"><span class="ui-crumb">Blue Ridge Logistics<i>/</i>AI<i>/</i>Agent runs</span><span class="ui-who"><span class="ui-av" style="background:#D6E9DF;color:#1E7A45">RM</span><span><b>Rosa Medina</b><br>dispatcher</span><span class="ui-chip t">tenant plane</span></span></div>
+          <div class="ui-wrap">
+            <div class="agt-run"><span class="ui-pill warn">awaiting_approval</span><b>driftwood.support_triage</b><span class="agt-meta">turn 3/8 · tool calls 3/12 · tokens 2,914/388</span><span class="agt-back">← All runs</span></div>
+            <div class="agt-grid">
+              <div class="agt-dec">
+                <div class="agt-dh"><span class="ui-pill warn">Awaiting your decision</span><span>The agent PROPOSED this write. It has not run, and it cannot run without a decision from a person who is not the requester (ADR-043 §6.2).</span></div>
+                <dl class="agt-dl">
+                  <div><dt>tool:</dt> <dd class="mo">assign_record_owner</dd></div>
+                  <div><dt>turn:</dt> <dd>3</dd></div>
+                  <div><dt>arg keys:</dt> <dd class="mo">id, resource, user_id</dd></div>
+                  <div><dt>args digest:</dt> <dd class="mo">9c41d07be2…e07a</dd></div>
+                </dl>
+                <p class="agt-p">Only key NAMES and a digest are recorded on the approval, never argument values (INV-1). Approving executes the write <b>as you</b>, once, inside the decision; the digest binds it to exactly this proposal. Deadline: <span class="mo">2026-10-14 10:31Z</span>.</p>
+                <div class="agt-acts"><span class="ui-btn p">Approve + execute</span><span class="ui-btn">Reject</span></div>
+              </div>
+              <div class="agt-tr">
+                <div class="agt-h4">Transcript</div>
+                <p class="agt-p" style="margin-top:2px">Vault-routed. An agent run is masked-only toward the model on every plane (ADR-047 §4.4); this panel resolves on YOUR plane.</p>
+                <div class="agt-goal">Why is load BR-4471 late, and who should own it?</div>
+                <ol class="agt-ol">
+                  <li>search_records "BR-4471" → 3 hits</li>
+                  <li>fetch_record support.agent → full_name <span class="ui-m">••••</span> · email <span class="ui-m">••••</span></li>
+                  <li>assign_record_owner proposed → waiting for a person</li>
+                </ol>
+              </div>
+            </div>
+            <div class="agt-h4" style="margin-top:16px">Turns</div>
+            <div class="ui-card"><table class="ui-t">
+              <thead><tr><th style="width:6%">#</th><th style="width:12%">Status</th><th style="width:22%">Tool</th><th style="width:20%">Arg keys</th><th style="width:13%">Tokens</th><th style="width:27%">Provider</th></tr></thead>
+              <tbody>
+                <tr><td data-k="#">1</td><td data-k="Status">done</td><td data-k="Tool" class="mo w">search_records</td><td data-k="Arg keys" class="mo w">limit, query</td><td data-k="Tokens">806/94</td><td data-k="Provider" class="w">scripted <span class="ui-pill warn">SIMULATED — not a real model</span></td></tr>
+                <tr><td data-k="#">2</td><td data-k="Status">done</td><td data-k="Tool" class="mo w">fetch_record</td><td data-k="Arg keys" class="mo w">id, resource</td><td data-k="Tokens">1,031/151</td><td data-k="Provider" class="w">scripted <span class="ui-pill warn">SIMULATED — not a real model</span></td></tr>
+                <tr><td data-k="#">3</td><td data-k="Status"><b>proposed</b></td><td data-k="Tool" class="mo w">assign_record_owner</td><td data-k="Arg keys" class="mo w">id, resource, user_id</td><td data-k="Tokens">1,077/143</td><td data-k="Provider" class="w">scripted <span class="ui-pill warn">SIMULATED — not a real model</span></td></tr>
+              </tbody></table></div>
+          </div>
+        </div>
+      </div>
+      <p class="ip-cap">Redrawn from <code>Samen.Web.AI.AgentLive</code>, which driftwood inherits through one <code>samen_ai_routes</code> call. The agent is <code>Driftwood.Support.TriageAgent</code>: a name, a goal prompt and three tool kinds, nothing else. Driftwood configures no model provider, so its runs are honest about it: the deterministic <b>Scripted</b> provider, with a SIMULATED badge on every turn. Built and gated: ADR-047 batches A1–A7 landed.</p>
     </div>
   </div>
 </section>
