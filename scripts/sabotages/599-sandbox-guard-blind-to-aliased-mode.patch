@@ -1,0 +1,20 @@
+# SABOTAGE: gate P5: the raw-pair detector only sees a literal Sandbox.mode receiver with a paren-free 
+#   repo, so an alias, import, repo() call or pipe re-enters the owner-exited leak
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/sandbox_shared_guard_test.exs
+# MUST_FAIL: positive control: the detector flags the raw pair in every spelling and passes the helper
+diff --git a/samen_core/test/meta/sandbox_shared_guard_test.exs b/samen_core/test/meta/sandbox_shared_guard_test.exs
+index 0bb0016..9711197 100644
+--- a/samen_core/test/meta/sandbox_shared_guard_test.exs
++++ b/samen_core/test/meta/sandbox_shared_guard_test.exs
+@@ -30,7 +30,7 @@ defmodule Samen.TestSandboxGuardTest do
+   # not `…Sandbox.` (an alias `as: SB`, an imported bare `mode(Repo, {:shared, …})`), a repo given by a call
+   # (`Sandbox.mode(repo(), …)`), a pipe (`Repo |> Sandbox.mode({:shared, …})`). Not right after a backtick: moduledoc
+   # prose quoting the call is not the call.
+-  @raw_any ~r/(?<!`)(?<!Sandbox\.)\bmode\(\s*[^,]+?,\s*\{:shared\s*,|Sandbox\.mode\(\s*[^,]*\([^,]*,\s*\{:shared\s*,|\|>\s*(?:[A-Za-z_][\w.]*\.)?mode\(\s*\{:shared\s*,/
++  @raw_any ~r/(?<!`)(?<!Sandbox\.)\bmode\(\s*[^,]+?,\s*\{:sharedX\s*,|Sandbox\.mode\(\s*[^,]*\([^,]*,\s*\{:sharedX\s*,|\|>\s*(?:[A-Za-z_][\w.]*\.)?mode\(\s*\{:sharedX\s*,/
+ 
+   @doc false
+   def raw_pair?(source) when is_binary(source) do

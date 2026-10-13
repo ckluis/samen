@@ -26,13 +26,19 @@ defmodule Samen.TestSandboxGuardTest do
 
   @helper_call ~r/Samen\.TestSandbox\.shared!\(/
 
+  # (gate P5) the spellings @raw cannot see, and ONLY those (each pattern stays refutable on its own): a receiver that is
+  # not `…Sandbox.` (an alias `as: SB`, an imported bare `mode(Repo, {:shared, …})`), a repo given by a call
+  # (`Sandbox.mode(repo(), …)`), a pipe (`Repo |> Sandbox.mode({:shared, …})`). Not right after a backtick: moduledoc
+  # prose quoting the call is not the call.
+  @raw_any ~r/(?<!`)(?<!Sandbox\.)\bmode\(\s*[^,]+?,\s*\{:shared\s*,|Sandbox\.mode\(\s*[^,]*\([^,]*,\s*\{:shared\s*,|\|>\s*(?:[A-Za-z_][\w.]*\.)?mode\(\s*\{:shared\s*,/
+
   @doc false
   def raw_pair?(source) when is_binary(source) do
     source
     |> String.split("\n")
     |> Enum.reject(&(&1 |> String.trim_leading() |> String.starts_with?("#")))
     |> Enum.join("\n")
-    |> then(&Regex.match?(@raw, &1))
+    |> then(&(Regex.match?(@raw, &1) or Regex.match?(@raw_any, &1)))
   end
 
   defp scanned_files do
@@ -73,7 +79,13 @@ defmodule Samen.TestSandboxGuardTest do
     assert raw_pair?("Sandbox.mode(@repo, {:shared, self()})")
     assert raw_pair?("Sandbox.mode(\n  Samen.WebTest.Repo,\n  {:shared, pid}\n)")
     assert raw_pair?("Ecto.Adapters.SQL.Sandbox.mode(Demo.Repo,{:shared, self()})")
+    assert raw_pair?("SQLSandbox.mode(TestRepo, {:shared, self()})")
+    assert raw_pair?("SB.mode(TestRepo, {:shared, self()})")
+    assert raw_pair?("    mode(Demo.Repo, {:shared, self()})\n")
+    assert raw_pair?("Ecto.Adapters.SQL.Sandbox.mode(repo(), {:shared, self()})")
+    assert raw_pair?("TestRepo |> Ecto.Adapters.SQL.Sandbox.mode({:shared, self()})")
     refute raw_pair?("    Samen.TestSandbox.shared!(TestRepo)\n")
+    refute raw_pair?("  so `mode(@repo, {:shared, self()})` bought nothing\n")
     refute raw_pair?("    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, :manual)\n")
 
     refute raw_pair?(

@@ -767,6 +767,35 @@ needs a soundness proof for compile-env differences between generated apps). (b)
 rate). (c) The `demo`/`driftwood` PITR drill databases keep fixed names (no sabotage names them). (d) Item costs are
 machine-local (`_ci/timings.json`); a committed seed table was not added (it would drift).
 
+**Gate (P5).** The adversarial gate found, each reproduced mechanically:
+
+| # | Finding | Fix |
+|---|---|---|
+| G1 | `SAMEN_ABBREV_REGISTRY` (read by shipped lib code at call time) silently redirected the SANCTIONED allocator: `SAMEN_ABBREV_REGISTRY=<a copy> mix samen.abbrev.reserve --host gatep5 --owner GateP5.Vertical.Thing --propose` printed `reserved gatep5/gvt -> …`, exit 0, the committed registry's SHA-256 unchanged and the row only in the copy — a stray export loses a reservation with no sign. | `path/0` honours the override only next to the companion `SAMEN_ABBREV_REGISTRY_GUARD=gen_probe_guard` (exported by `run_gen_probe` with `local -x`, for that probe's children only); set alone it RAISES (path, load, and an allocator write). Red path in `abbrev_registry_override_test` (four companion values, the stray file and the committed one untouched, positive control); sabotage 597; GENPROBE asserts the probe receives the companion. |
+| G2 | The driver handed an inherited `GEN_PROBE_SHARED_REGISTRY=1` to every step, and the three probes are no longer `serial`: in shared mode a later-started probe snapshots the registry WITH an earlier probe's reservation and restores it into the committed file after that probe restored its own. Stub `mix`, probe A first, B 0.4 s later and finishing last: both `PASSED`, committed file left with A's row (`095caee6…` → `49246a5a…`). An inherited `SAMEN_ABBREV_REGISTRY` likewise checked every step's compile-time abbrev verification against another file. | `PROBE_SEAMS` (`GEN_PROBE_SHARED_REGISTRY`, `SAMEN_ABBREV_REGISTRY`, `SAMEN_ABBREV_REGISTRY_GUARD`) are stripped from every step environment, like the wrapper flags; GENPROBE 8 (driver run with all three exported; positive control: another `SAMEN_` variable passes through); sabotage 598. The T107 harness, which needs shared mode, does not run under the driver. |
+| G3 | `Samen.TestSandboxGuardTest` matched only a literal `Sandbox.mode(` receiver with a paren-free repo: `alias …Sandbox, as: SQLSandbox`, an imported `mode(Repo, {:shared, …})`, `mode(repo(), …)` and `Repo \|> Sandbox.mode({:shared, …})` all passed. | a second pattern for exactly the spellings the first cannot see (a non-`…Sandbox.` receiver, a call-repo, a pipe), disjoint from it so sabotage 590 stays refutable (a first, broader version swallowed `Sandbox.mode(Repo, …)` too and this gate's own `pr` caught 590 going vacuous), never right after a backtick (it had flagged prose in `reveal_grant_property_test`'s moduledoc); five new positive-control spellings and the prose negative; sabotage 599. A tuple bound to a variable first is still not caught (no regex can). |
+
+Checked and holding: the T107 interrupt harness (shared mode) 8 passed / 0 failed with the registry byte-exact; a stored
+partition is keyed on (step, kind, the full item list) and a finished chunk is found by its full cache key (range, items,
+inputs content, `@base`), so a changed selection or content cannot keep a chunk, and the accounting / PROCESSED checks are
+untouched; NARROW's `!<app>/test/*_test.exs` is an fnmatch (`*` crosses `/`), no `*_test.exs` lives under any
+`test/support`, and no lib/support module reads a test file at compile time; the workflow diff is only the two
+`timeout-minutes` lines (pins, permissions and the `ci-pr` verify unchanged) and every matrix entry carries
+`timeout_min` (pr 18 jobs, full 47). `Samen.TestSandbox` in `samen_core/lib` follows `Samen.RedPath` / `Samen.Factory` /
+`Samen.MaskingCase` (no lib caller; it only acts when a test calls it).
+
+Notes, not fixed: (N1) ecto_sql 3.14 refuses a second concurrent shared owner (`start_owner!` dies with
+`:already_shared`) where the raw pair ignored `mode/2`'s return; two `async: true` modules use the helper
+(`demo/test/e6_catalog_adoption_probe_test.exs`, `samen_web/test/samen/scopes/chat_catalog_adoption_probe_test.exs`), in
+different apps, so they never overlap — a second one in the same app would fail loudly in `setup`, not share silently
+(reproduced with a probe test). (N2) The timeouts of the two diff-scaled PR jobs follow history, not the selection:
+`sabotage_changed` 60 min (observed 29.8) and `mutation_changed` 15 min (observed 0.9), while a broad kernel PR can select
+far more (the whole watch-list is 6 nightly slices of ≤ 12.8 min). That fails closed (a red job, never a green one; it was
+350), but it would block such a PR: derive these two from the selection at plan time. (N3) Unknown items are weighted at
+`each` (64) lane-seconds and then discounted by the fitted share (0.31): with this machine's timings a chunk of unknown
+patches holds 8 where the old policy planned 4 (est 285 s within the 300 s target, margin 1.39) — "unknown items keep the
+old rate" is true of the weight, not of the wall-clock; an item far above 64 lane-seconds could overrun one call.
+
 ## 3. Red paths (each with a test; sabotage where it guards a property)
 
 | # | Must fail when |
@@ -799,7 +828,7 @@ evicts the cached PASS of the same content) likewise.
 
 P5 (as built): GENPROBE, NARROW, RECHUNK, COSTW, TIMEOUT (and C7's extension to the samen_core scratch databases) are cases
 of `scripts/ci_test.sh`, named in `ci_driver_guard_test.exs`; the sandbox helper has its own tests
-(`test_sandbox_test`, `meta/sandbox_shared_guard_test`); sabotages 564-596 (§2.9 "P5").
+(`test_sandbox_test`, `meta/sandbox_shared_guard_test`); sabotages 564-596 (§2.9 "P5"), 597-599 from its gate (§2.9 "Gate (P5)").
 
 P4 (as built): DOCS is a case of `scripts/ci_test.sh`, named in `ci_driver_guard_test.exs`; sabotages 554–563 flip it
 (§2.9 "P4", 561–563 from its gate).
