@@ -31,7 +31,7 @@ Use the driver; never hand-segment `ci.sh`, never background a run and poll it (
   name, never interpolated. A patch that stopped applying: `scripts/sabotage reanchor <n>`; never delete it.
   Replay: `scripts/sabotage.sh` (filters) / `scripts/sabotage-lanes.sh` (N lanes). Unfiltered runs need `scripts/ci full`.
 - Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->556<!--/count--> sabotages
-  (driver red paths <!--count:driver_sabotages-->496–563<!--/count-->), watch-list <!--count:watchlist_modules-->12<!--/count-->
+  (driver red paths `scripts/ci_test.sh` <!--count:driver_sabotages-->496–563<!--/count-->), watch-list <!--count:watchlist_modules-->12<!--/count-->
   modules / <!--count:watchlist_mutants-->166<!--/count--> mutants, corpus <!--count:corpus_targets-->227<!--/count--> targets /
   <!--count:corpus_mutants-->3,957<!--/count--> mutants.
 - Toolchain floor `.tool-versions` (Elixir 1.20.4 / OTP 29.1.1); the `toolchain` step fails on older — raise the pin
@@ -47,7 +47,7 @@ owning tests. `./scripts/mutate.sh` scores the tier-1 watch-list (`scripts/mutat
 `--changed` runs in `pr`, chunk with `--shard i/n`); owning tests are declared ∪ derived (a proof file that never
 names the module needs `# MUTATION_OWNS: <lib path>`). Ends `MUTATION GATE: ALL PASSED`.
 - NEVER weaken it: baseline green before scoring; a kill is a NAMED test failure (a compiler refusal is
-  `BUILD-REFUSED`, not a kill); byte-exact SHA-256 restore; an unexempt survivor fails the run.
+  `BUILD-REFUSED`, not a kill); byte-exact SHA-256 restore; an unexempt survivor fails the run; full report, then fail.
 - Close a survivor by writing the test that kills it, or — only if the mutation provably cannot change behaviour —
   a `scripts/mutation/ledger.tsv` row (`EQUIVALENT` + proof, or `ACCEPTED_GAP` + `ref=`; rows are content-pinned).
   Never widen a target's owning tests to turn red green. Promotion: `--emit-patches <dir>` → write the test, fill
@@ -86,9 +86,9 @@ NEVER add/edit rows in any `priv/abbrev_registry.json` by hand. Allocation goes 
 sanctioned allocator only (`mix samen.abbrev.reserve`, driven by `mix samen.gen.*`; ADR-023).
 Any probe/script touching the registry must restore it SHA-256 byte-exact on every exit path
 — INCLUDING an OS-level interrupt (SIGINT/SIGTERM), not just normal/error returns (T107).
-Enforced by `ci.sh`'s `run_gen_probe` wrapper around the three `samen_core/priv/gen_*_probe.exs`
-invocations: it snapshots the registry to a `mktemp`'d file before each probe and restores +
-SHA-256-verifies it in a trap covering SIGINT/SIGTERM/ERR/EXIT, independent of whether the
+Enforced by `run_gen_probe` (`scripts/gen_probe_guard.sh`) around each `samen_core/priv/gen_*_probe.exs`
+of the four serial `gen_*_probe` steps: it snapshots the registry to a `mktemp`'d file before each
+probe and restores + SHA-256-verifies it in a trap covering SIGINT/SIGTERM/ERR/EXIT, independent of whether the
 probe itself gets to run its own cleanup (SIGINT is not trappable inside the BEAM at all).
 
 ## Framework-first, ≈0-LOC vertical mounts

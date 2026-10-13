@@ -16,7 +16,7 @@ name works, the role just has to exist (`psql -d postgres -c '\du'`).
 
 | Mode | Use it | Runs | Last line |
 |---|---|---|---|
-| `scripts/ci quick` | during a round | diff-aware vs `origin/main` (tracked diff + untracked files): only the apps your diff reaches through the dependency graph, plus `always` steps (apply-check, counts, doc-drift, double sweep), plus `sabotage --changed` | `CI(quick): PASS 19/19 in 197.5s — NOT PR-READY — run: scripts/ci pr` |
+| `scripts/ci quick` | during a round | diff-aware vs `origin/main` (tracked diff + untracked files): only the apps your diff reaches through the dependency graph, plus the `always` steps (`toolchain`, `apply_check`, `counts`, `docs_check`) and `double_sweep` (keyed on the whole tree, so any diff selects it), plus `sabotage --changed` | `CI(quick): PASS 19/19 in 197.5s — NOT PR-READY — run: scripts/ci pr` |
 | `scripts/ci pr` | before a PR | every step of the old `ci.sh` + `sabotage --changed` + `mutate --changed` vs the base | `CI(pr): PASS 47/47 in 35.3s — PR-READY` |
 | `scripts/ci full` | nightly / milestone | `pr` + the whole sabotage corpus + the whole mutation watch-list + `multinode` | same shape, `CI(full): …` |
 | `scripts/ci fast` | `./ci-fast.sh`'s subset | spikes, samen_core, samen_web | like `quick`, never PR-ready |
@@ -90,7 +90,7 @@ Unbudgeted (`--budget 0`, `./ci.sh`) the loops run as one command.
 
 - A step's key = hash of its `inputs` + `reads` content (tracked AND untracked-not-ignored files) +
   toolchain versions + the step's own definition + every behaviour-changing environment variable
-  (`SAMEN_*` except the driver's `SAMEN_CI_*` seams, `MIX_*`, `ELIXIR_*`, `ERL_*`, `HEX_*`, `PG*`,
+  (`SAMEN_*` except the driver's `SAMEN_CI_*` seams, `MIX_*`, `ELIXIR_*`, `ERL_*`, `HEX_*`, `REBAR*`, `PG*`,
   `DATABASE_URL`, `DRILL_*`, `DRIFTWOOD_*`, `GEN_PROBE_*`, `LOG_LEVEL`). Same key and a recorded PASS →
   `CACHED`.
 - Only a PASS is cached. A FAIL or FLAKY is never cached and EVICTS an earlier cached PASS under the same
@@ -223,8 +223,16 @@ driver: locally `sabotage_changed` and `sabotage_corpus` use lanes; with `GITHUB
 
 **Double sweep.** `scripts/double-sweep.sh` (the `double_sweep` step) is the cheap, no-DB half: (a) ANCHOR —
 each NEW patch must apply-fail or name a missing test against a pristine archive of the base; (b) DISARM —
-every shipped patch must still `git apply` on the tree about to ship. `apply_check` additionally requires
-every patch to `git apply --check` on the working tree. Neither replaces the replay.
+every shipped patch must still `git apply` on the tree about to ship. `apply_check`
+(`scripts/sabotage_apply_check.sh`) additionally requires every patch to `git apply --check` on the working
+tree: a patch that fails in BOTH baselines is "pre-existing" to the double sweep by design, so without it a
+patch that stopped applying would be a guard with no red (issue #53). Neither replaces the replay.
+
+**Driver red paths.** `scripts/ci_test.sh [CASE…]` (the `ci_selftest` step) holds the driver's and the CI
+tooling's own red paths (C1–C10, A1–A3, SABNEW, DOCS, …), each with a positive control, and each case is a named
+test in `samen_core/test/meta/ci_driver_guard_test.exs` so a sabotage can flip it (the range is in CLAUDE.md). A
+change to `scripts/ci*`, `ci/steps.conf`, `ci.sh`/`ci-fast.sh` or the sabotage/counts/docs tooling adds or extends
+a case there and proves it with `scripts/sabotage new`.
 
 ## 7. Mutation gate (ADR-049)
 
@@ -232,8 +240,10 @@ The sabotage corpus proves the guarantees we CLAIM; the mutation gate asks wheth
 same file survives its owning tests. `scripts/mutate.sh` (default: the tier-1 watch-list in
 `scripts/mutation/targets.tsv`; `--list` shows it, counts in CLAUDE.md). Mutants come from the AST
 (`scripts/mutation/mutate.exs`: EQ, REL, BOOLOP, BOOLLIT), each run against only that target's owning
-tests = DECLARED (`targets.tsv`, sabotage `TEST_FILES`) ∪ DERIVED (test files whose AST names the target's
-modules, or carrying `# MUTATION_OWNS: <repo-relative lib path>` — the lint refuses a missing file). Flags:
+tests = DECLARED (`targets.tsv`, sabotage `TEST_FILES`) ∪ DERIVED (test files in the target's app whose AST names
+one of the target's modules — aliases expanded, exact names, never a submodule — or carrying `# MUTATION_OWNS:
+<repo-relative lib path>`; the lint refuses a missing file; `--list` prints the derived additions). Flags
+(repeating one is an error, different ones intersect):
 `--app`, `--file`, `--family`, `--changed [<ref>]`, `--shard i/n`, `--list`, `--list-targets`, `--corpus`
 (targets derived from sabotage headers: a soak, not a gate step), `--emit-patches <dir>`, `--targets`,
 `--ledger`. Ends `MUTATION GATE: ALL PASSED`. Full watch-list ≈ 15 min: use the driver (`mutation_changed`
@@ -267,9 +277,12 @@ two sabotage counts for you. Never hand-edit a count; a moved marker needs `scri
 The `docs_check` step (quick/pr/full, ~1 s) reads CLAUDE.md and `docs/ci.md` and fails when: a
 `scripts/ci <subcommand>` is not in `scripts/ci --help`; a `--flag` on a `scripts/ci` command is not in
 its help; a step id given to `explain`/`--only`/`--only-steps`/`--also` (or a backticked token that is
-shaped like a step id of a known family such as `dialyzer_*`) is not in `ci/steps.conf`; a repo path
-under `scripts/`, `ci/`, `docs/` or `.github/` does not exist (globs must match something); `docs/ci.md` is
-missing or CLAUDE.md does not point at it. Fix the doc, not the check.
+snake_case and whose first word starts some step id, such as `dialyzer_*` or `double_*`; `samen_*` is
+skipped) is not in `ci/steps.conf`; a repo path under `scripts/`, `ci/`, `docs/` or `.github/` (also written
+`./scripts/…`) does not exist (globs must match something); `docs/ci.md` is missing or CLAUDE.md does not point
+at it; or a document resolves nothing at all. Not checked: flags of the other scripts (`sabotage.sh`,
+`mutate.sh`, …), paths outside those four directories, `ini` code fences. Unquoted prose naming the driver
+followed by a plain word reads as a subcommand: write `scripts/ci` in backticks. Fix the doc, not the check.
 
 ## 10. GitHub Actions
 
@@ -328,13 +341,21 @@ driver (35 min of lane time, 3–4 lanes under load, P3).
 | failure | thousands of log lines | digest + `_ci/logs/<id>.log` + `last.json` |
 | full sabotage corpus | ≈ 79 min serial / ≈ 4 h by hand | 51 min budgeted (N lanes), nightly sliced in 24 on Actions |
 
+Read the table honestly: the cold paths are not faster. `quick` after a KERNEL edit (≈ 3.3 min) is no faster
+than the old `./ci-fast.sh` (2.9–3.25 min) — it runs every dependant app plus `sabotage --changed`, where
+`ci-fast.sh` ran spikes, samen_core and samen_web only — and a cold `pr` (18 min) is slower than the old
+`./ci.sh` (≈ 13 min) because `pr` runs more (`sabotage`/`mutate --changed`, the selection and driver
+self-tests). The win is that every call fits a tool call and resumes, nothing unchanged is paid for twice, a
+vertical-only or docs-only edit costs only what it touches, and the verdict is one machine-readable line.
+
 GitHub Actions (`gh run list --workflow pr.yml`, `ubuntu-24.04`, 4 vCPU, `-j 2` per job; wall = created →
-updated): cold caches 16.8 min (P2 first run); warm, small PR 9.0 min (run 38262212285; longest jobs
-gen_probes 516 s, samen_core 474 s); a PR with many new driver-guard patches 30.1 min (run 38307973704:
-`sabotage_changed` 1785 s, one job, serial on Actions); a PR with cold dialyzer PLTs 25.4 min (run
-38248251069: dialyzer jobs 805–1500 s). Nightly (`gh run list --workflow nightly.yml`): cold 32.0 min
-(47 jobs incl. queueing), warm 14.6–23.6 min. No scheduled (`schedule`) nightly had run yet when measured: the
-cron only fires from `main`, so the first one also seeds the default-branch caches.
+updated): cold caches 16.8 min (P2's first run, 38084336919 — it FAILED with 15 of 18 jobs green, so read it
+as a floor); warm, small PR 9.0 min (run 38262212285; longest jobs gen_probes 516 s, samen_core 474 s); a PR
+whose diff touched ≈ 53 driver-guard patches 30.1 min (run 38307973704: `sabotage_changed` 1785 s, one job,
+serial on Actions); a PR with cold dialyzer PLTs 25.4 min (run 38248251069: dialyzer jobs 805–1500 s). Nightly
+(`gh run list --workflow nightly.yml`): cold 32.0 min (47 jobs incl. queueing), warm 14.9–23.6 min (four
+runs: 14.9, 15.7, 20.6, 23.6). No scheduled (`schedule`) nightly had run yet when measured: the cron only
+fires from `main`, so the first one also seeds the default-branch caches.
 
 Where the time goes now: `pr` after a kernel edit is dominated by the four serial gen probes (≈ 370 s) and
 samen_core's tree-wide keys; narrowing their `reads` is the follow-up with the biggest payoff.

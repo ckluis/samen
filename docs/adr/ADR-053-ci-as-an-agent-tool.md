@@ -18,7 +18,7 @@
   all made with `sabotage new` (§2.9 P3); the adversarial gate added 550–553 (§2.9 "Gate (P3)").
   **P4 BUILT** on `feat/adr-053-p4-docs`: `docs/ci.md` (the one reference), CLAUDE.md's two CI sections cut from 104 to 37
   lines around the three modes, `scripts/docs_check` (a `docs_check` step of quick/pr/full), red path DOCS with sabotages
-  554–560, measured before/after numbers for a typical round (§2.9 P4).
+  554–560 (+ 561–563 from its gate), measured before/after numbers for a typical round (§2.9 P4).
 
 ---
 
@@ -649,15 +649,26 @@ GitHub Actions, from `gh run list --workflow pr.yml` / `nightly.yml` (created �
 
 | Run | Wall | Note |
 |---|---:|---|
-| `pr`, every cache cold (P2, run 38091846960) | 16.8 min | dialyzer jobs 13-16 min cold |
+| `pr`, every cache cold (P2's first run, 38084336919) | 16.8 min | FAILED, 15 of 18 jobs green (a floor); dialyzer jobs 13-16 min cold |
 | `pr`, #89 (run 38248251069) | 25.4 min | cold dialyzer PLTs (dialyzer jobs 805-1500 s) |
 | `pr`, #90 (run 38262212285) | 9.0 min | warm caches, small change; longest jobs gen_probes 516 s, samen_core 474 s |
-| `pr`, P3 (run 38307973704) | 30.1 min | `sabotage_changed` alone 1785 s: one job, serial on Actions, replaying this PR's own 53 new patches |
+| `pr`, P3 (run 38307973704) | 30.1 min | `sabotage_changed` alone 1785 s: one job, serial on Actions, replaying the ≈ 53 patches its diff touched (23 of them new) |
 | `nightly`, cold (P2, run 38087214703) | 32.0 min | 47 jobs incl. queueing behind the runner cap; failed on the multinode double-run fixed since |
-| `nightly`, warm (runs 38090956053, 38096985948, 38099726449) | 15.7 / 23.6 / 20.6 min | the 23.6 shared runners with a concurrent `pr` |
+| `nightly`, warm (runs 38089379874, 38090956053, 38096985948, 38099726449) | 14.9 / 15.7 / 23.6 / 20.6 min | the 23.6 shared runners with a concurrent `pr` |
 
 No scheduled (cron) nightly had run when this was measured (the listing holds only push and `workflow_dispatch`
 runs); a cron run only fires from `main`, so the first one also seeds the default-branch caches.
+
+**Gate (P4).** The adversarial gate found, each reproduced mechanically:
+
+| # | Finding | Fix |
+|---|---|---|
+| G1 | `docs_check` never resolved a path written `./scripts/…` (the regex refused a match preceded by `/`), and CLAUDE.md names `./scripts/mutate.sh` that way: a moved script stayed documented. | optional `./` in the path match; DOCS case; sabotage 561 |
+| G2 | Step-shaped tokens were checked only for prefixes shared by 3+ steps, so a misspelled `double_swep` / `apply_chek` in prose passed. | every step id's first word is a family (`samen_*` still skipped): 13 → 22 step ids resolve in CLAUDE.md + `docs/ci.md`, no false positive; DOCS case; sabotage 562 |
+| G3 | The `scripts/ci` flag rule had a DOCS assertion but no sabotage. | sabotage 563 |
+| G4 | Lost facts: `scripts/ci_test.sh` (the driver red-path suite) was named nowhere any more; CLAUDE.md kept four of the mutation gate's five never-weaken rules (dropped "full report, then fail") although this section said five; the apply-check's reason (issue #53) and the derived-owner details (aliases expanded, never a submodule; `--list` shows them) were dropped. | restored: CLAUDE.md count line + mutation rule; `docs/ci.md` §6 "Driver red paths", §6 apply-check, §7 |
+| G5 | Wrong numbers: the cold-`pr` row cited run 38091846960 (a 13.2 min warm proof run); the 16.8 min run is 38084336919 and it FAILED (15/18 jobs green); `docs/ci.md` said nightly warm 14.6 min (no such run: 14.9); "this PR's own 53 new patches" (P3 added 23; ≈ 53 is what its diff touched). | corrected here and in `docs/ci.md` §11, which now also states that the cold paths are not faster (kernel-edit `quick` ≈ old `ci-fast.sh`, cold `pr` 18 min > old `ci.sh` 13 min) |
+| G6 | Stale since before P4: CLAUDE.md's abbrev-registry section said `ci.sh`'s `run_gen_probe` wraps three probes; it is `scripts/gen_probe_guard.sh` in four `gen_*_probe` steps. `docs/ci.md` §1 listed the double sweep as an `always` step (it is selected by any diff via `inputs = **`; `toolchain` and `docs_check` are the unlisted `always` ones); §4's env list missed `REBAR*`. | corrected |
 
 **Where the time goes now / follow-ups.** `pr` after a kernel edit is dominated by the four serial gen probes
 (≈ 370 s) and samen_core's whole-tree cache key (deviation 1 of P1): narrowing their `reads` is the next large win.
@@ -689,8 +700,8 @@ evicts the cached PASS of the same content) likewise.
 | A2 | the Actions aggregate passes though a planned step did not run, ran twice, ran on the wrong base or another commit/tree, the plan is empty, or a job failed |
 | A3 | sliced corpus: the slices' processed counts sum to ≠ the selected total (C7's Actions twin) |
 
-P4 (as built): DOCS is a case of `scripts/ci_test.sh`, named in `ci_driver_guard_test.exs`; sabotages 554–560 flip it
-(§2.9 "P4").
+P4 (as built): DOCS is a case of `scripts/ci_test.sh`, named in `ci_driver_guard_test.exs`; sabotages 554–563 flip it
+(§2.9 "P4", 561–563 from its gate).
 
 P3 (as built): C7, C8 and C10 (plus EST and SABNEW) are cases of `scripts/ci_test.sh`, named in
 `ci_driver_guard_test.exs`; sabotages 531–553 flip them (§2.9 "P3", 550–553 from its gate).
@@ -705,7 +716,7 @@ P2 (as built): A1–A3 (and the gate's WAE) are cases of `scripts/ci_test.sh` (n
 | P1 | Measure every step (cold + warm). Manifest, `scripts/ci` (quick/pr/full, budget/resume, cache, verdict digests, `_ci/last.json`, flake classification), `ci.sh`/`ci-fast.sh` as wrappers. C1–C6, C9. |
 | P2 | **BUILT (PR #88).** GitHub Actions: `pr.yml` + `nightly.yml` (sharded corpus + mutation), caches, pgvector service; proven green on its own PR. |
 | P3 | **BUILT.** Sabotage/mutation ergonomics: N-lane corpus, `sabotage new`, `sabotage reanchor`, `scripts/counts`. C7, C8, C10. |
-| P4 | **BUILT.** CLAUDE.md "Suites / CI" + "Mutation gate" rewritten around the three modes (104 → 37 lines); `docs/ci.md`; `scripts/docs_check` (doc-drift guard, DOCS, sabotages 554–560); before/after numbers for a typical round (§2.9 P4). |
+| P4 | **BUILT.** CLAUDE.md "Suites / CI" + "Mutation gate" rewritten around the three modes (104 → 37 lines); `docs/ci.md`; `scripts/docs_check` (doc-drift guard, DOCS, sabotages 554–563); before/after numbers for a typical round (§2.9 P4). |
 
 ## 5. Consequences
 
