@@ -6,10 +6,10 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: COSTW chunks are weighted by what each item last cost, not by the slowest item's rate
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index af5acde..9c92792 100755
+index b80041a..f54cee6 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -529,8 +529,8 @@ def cost_model(obs):
+@@ -531,8 +531,8 @@ def cost_model(obs):
      mx = sum(w for w, _ in pts) / len(pts)
      my = sum(d for _, d in pts) / len(pts)
      var = sum((w - mx) ** 2 for w, _ in pts)
@@ -18,5 +18,5 @@ index af5acde..9c92792 100755
 +    b = sum((w - mx) * (d - my) for w, d in pts) / var
 +    a = my - b * mx
      margin = max(1.0, max(d / (a + b * w) for w, d in pts))
-     return (a, b, margin)
+     return (a, b, margin, 1.5 * max(w for w, _ in pts))
  

@@ -513,18 +513,20 @@ def clone_step(step, sid):
     return s
 
 
-PRIOR_MODEL = (10.0, 1.0, 1.0)  # (fixed overhead s, share of lane-seconds the wall-clock pays, margin)
+PRIOR_MODEL = (10.0, 1.0, 1.0, float("inf"))  # (fixed overhead s, share of lane-seconds paid, margin, lane-second cap)
 
 
 def cost_model(obs):
     """(P5) chunk wall-clock ~ margin * (overhead + share * sum of the items' lane-seconds), fitted to the last
     twelve (lane-seconds, wall-clock) observations of PASSED chunks (the fixed part is lane/worktree start-up, the
-    share is how much the parallel lanes overlap: measured 60 s + 0.32 on this machine). With fewer than four
-    observations, or all of one size, the prior stands (10 s, share 1: every lane-second paid in full). The margin
-    is the worst observed wall-clock over its own prediction (never under 1), so no plan is shorter than a chunk
-    has recently run: G10 stays on the pessimistic side by construction."""
+    share is how much the parallel lanes overlap: measured 60 s + 0.32 on this machine). A line through noisy points
+    of one size extrapolates wildly (four chunks of 224-350 lane-seconds once fitted 120 s + 0.11 and planned a
+    459 s chunk), so the fit is used ONLY when there are at least four observations spread over at least half of the
+    largest one; otherwise the prior stands (10 s, share 1: every lane-second paid in full). Even a good fit may not
+    plan a chunk more than 1.5x the largest lane-seconds seen to complete (the cap). The margin is the worst observed
+    wall-clock over its own prediction (never under 1): no plan is shorter than a chunk has recently run (G10)."""
     pts = [(float(w), float(d)) for w, d in (obs or [])][-12:]
-    if len(pts) < 4 or max(w for w, _ in pts) - min(w for w, _ in pts) < 20:
+    if len(pts) < 4 or max(w for w, _ in pts) - min(w for w, _ in pts) < 0.5 * max(w for w, _ in pts):
         return PRIOR_MODEL
     mx = sum(w for w, _ in pts) / len(pts)
     my = sum(d for _, d in pts) / len(pts)
@@ -532,7 +534,7 @@ def cost_model(obs):
     b = min(1.0, max(0.1, sum((w - mx) * (d - my) for w, d in pts) / var))
     a = min(120.0, max(10.0, my - b * mx))
     margin = max(1.0, max(d / (a + b * w) for w, d in pts))
-    return (a, b, margin)
+    return (a, b, margin, 1.5 * max(w for w, _ in pts))
 
 
 def learn_costs(seen, step, text, dur):
@@ -644,7 +646,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
     # (P5) cost-weighted ranges: what each item LAST cost (lane-seconds, read from the sub-step logs through
     # `shard_cost`) and what a chunk of that many lane-seconds really took (cost_model).
     costs = seen.get(step.id + "#item_cost") or {} if step.shard_cost else {}
-    ovh, share, margin = cost_model(seen.get(step.id + "#chunk_obs")) if step.shard_cost else PRIOR_MODEL
+    ovh, share, margin, cap = cost_model(seen.get(step.id + "#chunk_obs")) if step.shard_cost else PRIOR_MODEL
     chunk_est = lambda lane_s: margin * (ovh + share * lane_s)
     if step.shard_kind == "ranges":
         items = [m.group(1) for m in re.finditer(step.shard_item, text, re.M)]
@@ -677,7 +679,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
             per = max(1, int(step.shard_target // max(each, 0.001)))
             for n, it in run:
                 if cur and n != cur[-1][0]:
-                    full = (chunk_est(tot + weight(it)) > step.shard_target) if step.shard_cost else len(cur) >= per
+                    full = (chunk_est(tot + weight(it)) > step.shard_target or tot + weight(it) > cap) if step.shard_cost else len(cur) >= per
                     if full:
                         out_chunks.append(cur)
                         cur, tot = [], 0.0
