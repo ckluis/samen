@@ -15,8 +15,7 @@ defmodule Samen.AuditChainBoundedVerifyTest do
   alias Samen.AuditChain.Entry
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    Samen.TestSandbox.shared!(Repo)
     {:ok, org: "org-#{System.unique_integer([:positive])}"}
   end
 

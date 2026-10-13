@@ -45,8 +45,7 @@ defmodule Samen.AI.AgentWithdrawalWalkTest do
   @summary "[fold #1] the earlier turns, summarized"
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
 
     previous_kms = Application.get_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
     Samen.Kms.FileBacked.simulate_outage(false)

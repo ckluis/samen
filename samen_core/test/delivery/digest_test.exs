@@ -43,8 +43,7 @@ defmodule Samen.Notifications.DigestTest do
   end
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
-    Ecto.Adapters.SQL.Sandbox.mode(@repo, {:shared, self()})
+    Samen.TestSandbox.shared!(@repo)
 
     FakeProvider.reset()
     Application.put_env(:samen_core, :delivery_provider, {FakeProvider, %{configured: true}})

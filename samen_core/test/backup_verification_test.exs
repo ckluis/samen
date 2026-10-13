@@ -145,8 +145,9 @@ defmodule Samen.Backup.VerificationTest do
 
   # --- REAL pg_dump → pg_restore round-trip (done-criteria #1) --------------------
   describe "real restore round-trip" do
-    @src_db "samen_core_backup_src"
-    @scratch_db "samen_core_backup_scratch"
+    # per-lane suffix (ADR-053 P5): lanes must never share the source / scratch databases
+    @src_db "samen_core_backup_src" <> System.get_env("SAMEN_TEST_DB_SUFFIX", "")
+    @scratch_db "samen_core_backup_scratch" <> System.get_env("SAMEN_TEST_DB_SUFFIX", "")
 
     setup do
       unless LocalPgDump.configured?(%{dump_path: "x"}) do

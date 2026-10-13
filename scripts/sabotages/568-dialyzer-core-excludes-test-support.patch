@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: dialyzer_samen_core excludes the whole test/ tree, dropping test/support (compiled 
+#   by dev/test builds) from its key
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: NARROW a step's *_test.exs exclusion drops only test modules, never anything Mix compiles
+diff --git a/ci/steps.conf b/ci/steps.conf
+index dbe6524..787061f 100644
+--- a/ci/steps.conf
++++ b/ci/steps.conf
+@@ -407,7 +407,7 @@ group = adapters
+ [step dialyzer_samen_core]
+ cmd = bash scripts/dialyzer_gate.sh samen_core
+ modes = pr full
+-inputs = app:samen_core scripts/dialyzer_gate.sh !samen_core/test/*_test.exs
++inputs = app:samen_core scripts/dialyzer_gate.sh !samen_core/test/*
+ locks = dialyzer dir:samen_core
+ est_s = 13
+ group = dialyzer

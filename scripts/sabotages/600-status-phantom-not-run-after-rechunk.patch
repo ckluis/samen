@@ -1,0 +1,19 @@
+# SABOTAGE: a kept chunk is not filed under its new slot id: scripts/ci status shows a phantom NOT_RUN 
+#   after a PASS
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: RECHUNK a resume never discards a finished chunk when the learned per-item rate rises
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 453edbd..945ecd2 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1145,7 +1145,6 @@ class Run(object):
+                 self.status[s.id] = "PASS"
+                 self.results[s.id] = pr
+                 # file it under its CURRENT slot id too, or `scripts/ci status` reads the new plan's slot as NOT_RUN
+-                self.state.setdefault("steps", {})[s.id] = pr
+                 out("PASS %s %s (earlier in this run)" % (s.id, fmt_s(pr.get("duration_s", 0))))
+                 self.say_markers(s)
+                 continue

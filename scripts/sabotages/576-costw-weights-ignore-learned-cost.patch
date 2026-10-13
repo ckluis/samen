@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: chunks are cut at the per-item bucket again, so one slow patch sizes every chunk of 
+#   cheap ones
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: COSTW chunks are weighted by what each item last cost, not by the slowest item's rate
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 945aca7..e9018b6 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -647,7 +647,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
+                 return [s]
+             nums.append((int(m.group(1)), it))
+         nums.sort()
+-        weight = (lambda it: float(costs.get(it) or each)) if step.shard_cost else (lambda it: each)
++        weight = lambda it: each
+ 
+         def plan_run(run):
+             """Chunk one stretch of (number, item) pairs at the CURRENT rate; never split one number across chunks

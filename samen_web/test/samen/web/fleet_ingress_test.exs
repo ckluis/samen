@@ -31,8 +31,7 @@ defmodule Samen.Web.FleetIngressTest do
   @prior_traffic_kid "rp-j-13-prior-traffic-kid"
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
     Samen.Fleet.NonceCache.reset()
     Samen.Web.RateLimit.reset()
     Samen.Fleet.Attention.reset()

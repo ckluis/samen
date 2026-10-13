@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 P5: pr.yml's ci job ignores the plan's per-job timeout and keeps a flat 350 minutes
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: TIMEOUT every Actions job has a timeout from observed runs, never a flat 350
+diff --git a/.github/workflows/pr.yml b/.github/workflows/pr.yml
+index 4b3ce6e..eae0c4f 100644
+--- a/.github/workflows/pr.yml
++++ b/.github/workflows/pr.yml
+@@ -42,7 +42,7 @@ jobs:
+     needs: plan
+     runs-on: ubuntu-24.04
+     # per job, from ci/actions_timeouts.tsv (2x the slowest observed run; was a flat 350)
+-    timeout-minutes: ${{ matrix.timeout_min }}
++    timeout-minutes: 350
+     strategy:
+       fail-fast: false
+       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}

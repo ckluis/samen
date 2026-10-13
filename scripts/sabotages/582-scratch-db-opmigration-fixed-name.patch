@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 P5: the operator-plane migration scratch database has a fixed name again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C7 the N-lane corpus fails unless the patches processed across its lanes equal the selected count
+diff --git a/samen_core/test/operator_plane_migration_test.exs b/samen_core/test/operator_plane_migration_test.exs
+index 13ac580..0fac006 100644
+--- a/samen_core/test/operator_plane_migration_test.exs
++++ b/samen_core/test/operator_plane_migration_test.exs
+@@ -34,7 +34,7 @@ defmodule Samen.OperatorPlaneMigrationTest do
+   alias Samen.OperatorPlane.Migration, as: OpMig
+ 
+   # per-lane suffix (ADR-053 P5): two sabotage lanes replaying this file must never share the scratch database
+-  @scratch_db "samen_core_opmigration_scratch" <> System.get_env("SAMEN_TEST_DB_SUFFIX", "")
++  @scratch_db "samen_core_opmigration_scratch"
+ 
+   # An inline migration module that uses the EXTRACTED shared helpers — exactly the
+   # shape a host now writes (ADR-005). This is the thing under test.

@@ -19,8 +19,7 @@ defmodule Samen.Hardening.FilesChokepointFailClosedTest do
   alias SamenCore.TestRepo
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
 
     root =
       Path.join(System.tmp_dir!(), "hardening_chokepoint_#{System.unique_integer([:positive])}")

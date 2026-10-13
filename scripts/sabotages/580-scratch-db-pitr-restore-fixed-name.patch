@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: the PITR restore database has a fixed name again, so two lanes replaying 
+#   vault_pitr_test race on it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C7 the N-lane corpus fails unless the patches processed across its lanes equal the selected count
+diff --git a/samen_core/test/vault_pitr_test.exs b/samen_core/test/vault_pitr_test.exs
+index e0b55bc..4fdb19d 100644
+--- a/samen_core/test/vault_pitr_test.exs
++++ b/samen_core/test/vault_pitr_test.exs
+@@ -34,7 +34,7 @@ defmodule Samen.VaultPitrTest do
+ 
+   @repo SamenCore.TestRepo
+   # per-lane suffix (ADR-053 P5): lanes must never share the restore database
+-  @restore_db "samen_core_pitr_restore_test" <> System.get_env("SAMEN_TEST_DB_SUFFIX", "")
++  @restore_db "samen_core_pitr_restore_test"
+   @secret "dave.restore@example.com"
+ 
+   setup do

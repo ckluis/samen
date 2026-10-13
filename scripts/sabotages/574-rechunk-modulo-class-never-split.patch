@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: a stored modulo class is kept however slow the learned rate, so a shard can outgrow 
+#   a tool call (G10)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: RECHUNK a resume never discards a finished chunk when the learned per-item rate rises
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 945aca7..a0d4817 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -715,7 +715,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
+                 probe.shard_items = ["%d mutants of %d" % (size_of(m_, r_), count)]
+                 probe.key = ctx.key(probe, apps)
+                 est = size_of(m_, r_) * each
+-                if done(probe) or est <= step.shard_target:
++                if True:
+                     classes.append((m_, r_))
+                 else:
+                     k = int(math.ceil(est / step.shard_target))

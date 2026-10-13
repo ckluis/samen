@@ -7,11 +7,11 @@
 # TEST_FILES: test/meta/ci_driver_guard_test.exs
 # MUST_FAIL: C1 budget/resume never reports PASS over a deferred, interrupted or unrun step
 diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
-index ca1735b..70f6ee2 100755
+index af5acde..97579dc 100755
 --- a/scripts/ci_driver.py
 +++ b/scripts/ci_driver.py
-@@ -521,9 +521,6 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False):
-     each = max(step.shard_each, learned)
+@@ -648,9 +648,6 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
+     chunk_est = lambda lane_s: margin * (ovh + share * lane_s)
      if step.shard_kind == "ranges":
          items = [m.group(1) for m in re.finditer(step.shard_item, text, re.M)]
 -        if len(items) != total:
@@ -19,4 +19,4 @@ index ca1735b..70f6ee2 100755
 -                                "— refusing to run a different selection than the one listed" % (total, step.shard_item, len(items)))
      else:
          items = [str(total)]
-     if step.shard_kind == "ranges":
+     sel = hashlib.sha256(json.dumps([step.id, step.shard_kind, items], sort_keys=True).encode()).hexdigest()

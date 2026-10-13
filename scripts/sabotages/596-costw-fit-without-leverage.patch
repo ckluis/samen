@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: the cost model fits a line through chunks of nearly one size, so a noisy window 
+#   plans wildly (a 459 s chunk)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: COSTW chunks are weighted by what each item last cost, not by the slowest item's rate
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index b80041a..e11c0e5 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -526,7 +526,7 @@ def cost_model(obs):
+     plan a chunk more than 1.5x the largest lane-seconds seen to complete (the cap). The margin is the worst observed
+     wall-clock over its own prediction (never under 1): no plan is shorter than a chunk has recently run (G10)."""
+     pts = [(float(w), float(d)) for w, d in (obs or [])][-12:]
+-    if len(pts) < 4 or max(w for w, _ in pts) - min(w for w, _ in pts) < 0.5 * max(w for w, _ in pts):
++    if len(pts) < 4 or max(w for w, _ in pts) - min(w for w, _ in pts) < 0:
+         return PRIOR_MODEL
+     mx = sum(w for w, _ in pts) / len(pts)
+     my = sum(d for _, d in pts) / len(pts)

@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: gen_post_probe draws its HTTP port from the deploy probe's range, so two concurrent 
+#   probes can collide
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENPROBE the gen probes run on a private registry copy and sweep only their own scratch dirs
+diff --git a/samen_core/priv/gen_post_probe.exs b/samen_core/priv/gen_post_probe.exs
+index 949dc6f..6915d3b 100644
+--- a/samen_core/priv/gen_post_probe.exs
++++ b/samen_core/priv/gen_post_probe.exs
+@@ -84,7 +84,7 @@ prefix = identity.prefix
+ app_abbrev = identity.abbrev
+ resource_abbrev = identity.resource_abbrev
+ 
+-http_port = 4880 + rem(System.unique_integer([:positive]), 90)
++http_port = 4790 + rem(System.unique_integer([:positive]), 90)
+ 
+ samen_core_root = Gen.default_target() |> Path.join("samen_core")
+ scratch_root = Path.expand(Path.join(samen_core_root, ".."))

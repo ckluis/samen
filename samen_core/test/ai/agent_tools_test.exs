@@ -119,8 +119,7 @@ defmodule Samen.AI.AgentToolsTest do
   @mask Samen.Masked.mask()
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
     Scripted.reset()
     Samen.AI.Agent.Breaker.reset()
 

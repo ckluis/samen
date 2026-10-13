@@ -180,7 +180,9 @@ defmodule Samen.AI.CatalogRuntimeTest do
 
   describe "org isolation — one org cannot ground on another org's catalog" do
     setup do
-      Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+      # the file-level setup checked out a private connection; the shared owner replaces it for this describe
+      Ecto.Adapters.SQL.Sandbox.checkin(TestRepo)
+      Samen.TestSandbox.shared!(TestRepo)
       :ok
     end
 

@@ -32,8 +32,7 @@ defmodule Samen.Automation.EscalationTest do
   alias SamenCore.TestRepo
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
 
     prev_engine = Application.get_env(:samen_core, Samen.Notifications.Engine)
     prev_escalate = Application.get_env(:samen_core, Samen.Automation.Escalate)

@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: a fitted model may plan a chunk of any size, so a noisy fit can plan one far past 
+#   anything seen to complete (G10)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: COSTW chunks are weighted by what each item last cost, not by the slowest item's rate
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index b80041a..cc9f38b 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -679,7 +679,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
+             per = max(1, int(step.shard_target // max(each, 0.001)))
+             for n, it in run:
+                 if cur and n != cur[-1][0]:
+-                    full = (chunk_est(tot + weight(it)) > step.shard_target or tot + weight(it) > cap) if step.shard_cost else len(cur) >= per
++                    full = (chunk_est(tot + weight(it)) > step.shard_target) if step.shard_cost else len(cur) >= per
+                     if full:
+                         out_chunks.append(cur)
+                         cur, tot = [], 0.0

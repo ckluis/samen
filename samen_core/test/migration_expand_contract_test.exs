@@ -253,8 +253,7 @@ defmodule Samen.MigrationExpandContractTest do
 
   describe "contract_ready? bake-window gate" do
     setup do
-      :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      Samen.TestSandbox.shared!(Repo)
       :ok
     end
 

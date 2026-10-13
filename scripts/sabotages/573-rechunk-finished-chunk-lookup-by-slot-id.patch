@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: a finished chunk is only recognised under its old slot id, so a re-plan that 
+#   renumbers the slots re-runs it
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: RECHUNK a resume never discards a finished chunk when the learned per-item rate rises
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 945aca7..c87b6b8 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1101,7 +1101,7 @@ class Run(object):
+         for s in plan:
+             pr = prior.get(s.id)
+             if not (pr and pr.get("status") == "PASS" and s.key and pr.get("key") == s.key):
+-                pr = prior_by_key.get(s.key) if s.key else pr
++                pr = None
+                 if pr:
+                     pr = dict(pr, id=s.id)
+             if s.preset:

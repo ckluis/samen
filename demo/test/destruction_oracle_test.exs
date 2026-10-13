@@ -34,8 +34,7 @@ defmodule Demo.DestructionOracleTest do
   alias Samen.NoPlaintextPii.Tiers.PostShred
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    Samen.TestSandbox.shared!(Repo)
     Samen.Kms.FileBacked.simulate_outage(false)
     Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
 

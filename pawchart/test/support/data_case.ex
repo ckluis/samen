@@ -10,8 +10,7 @@ defmodule PawChart.DataCase do
   end
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(PawChart.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(PawChart.Repo, {:shared, self()})
+    Samen.TestSandbox.shared!(PawChart.Repo)
     :ok
   end
 end

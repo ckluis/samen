@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: a relative SAMEN_ABBREV_REGISTRY is resolved against whatever cwd the build has 
+#   instead of refused
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/abbrev_registry_override_test.exs
+# MUST_FAIL: a relative override is refused
+diff --git a/samen_core/lib/samen/abbrev_registry.ex b/samen_core/lib/samen/abbrev_registry.ex
+index b21eecd..9d819c6 100644
+--- a/samen_core/lib/samen/abbrev_registry.ex
++++ b/samen_core/lib/samen/abbrev_registry.ex
+@@ -101,7 +101,7 @@ defmodule Samen.AbbrevRegistry do
+         @default_registry_path
+ 
+       override ->
+-        if Path.type(override) != :absolute do
++        if false and Path.type(override) != :absolute do
+           raise "#{@registry_env} must be an absolute path, got #{inspect(override)}"
+         end
+ 

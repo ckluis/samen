@@ -35,8 +35,7 @@ defmodule Samen.Delivery.DeliverabilityTest do
   alias SamenCore.TestRepo
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
 
     # The "delivery.open_click_tracking" flag name is shared across every
     # test in this file — invalidate the shared ETS cache so one test's

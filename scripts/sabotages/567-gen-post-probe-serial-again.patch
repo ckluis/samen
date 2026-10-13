@@ -1,0 +1,18 @@
+# SABOTAGE: ADR-053 P5: gen_post_probe is serial again, so the concurrent probes lose their isolation proof
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENPROBE the gen probes run on a private registry copy and sweep only their own scratch dirs
+diff --git a/ci/steps.conf b/ci/steps.conf
+index dbe6524..3045005 100644
+--- a/ci/steps.conf
++++ b/ci/steps.conf
+@@ -591,6 +591,7 @@ actions_job = gen_flagship
+ cmd = source scripts/gen_probe_guard.sh
+     run_gen_probe "priv/gen_post_probe.exs" "gen_app post-app generator probe (WS-D D7a — gen.scope + gen.resource → ci.sh + 4 G26 files + sabotage)"
+ modes = pr full
++serial = 1
+ inputs = app:samen_web app:samen_core scripts/gen_probe_guard.sh !samen_core/test/*_test.exs !samen_web/test/*_test.exs
+ marker = ==> gen_app post-app generator probe (WS-D D7a — gen.scope + gen.resource → ci.sh + 4 G26 files + sabotage): PASSED
+ est_s = 114

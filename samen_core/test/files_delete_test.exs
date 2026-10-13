@@ -43,8 +43,7 @@ defmodule Samen.FilesDeleteTest do
   @repo TestRepo
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
-    Ecto.Adapters.SQL.Sandbox.mode(@repo, {:shared, self()})
+    Samen.TestSandbox.shared!(@repo)
     Samen.Kms.FileBacked.simulate_outage(false)
     Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
     on_exit(fn -> Samen.Kms.FileBacked.simulate_outage(false) end)

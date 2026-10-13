@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 P5: a job with no observed run gets the old 350 min limit again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: TIMEOUT every Actions job has a timeout from observed runs, never a flat 350
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 8b2143a..4668798 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1482,7 +1482,7 @@ def step_dirs(man, s):
+ 
+ 
+ TIMEOUTS = os.path.join(os.path.dirname(MANIFEST), "actions_timeouts.tsv")
+-DEFAULT_TIMEOUT_MIN = 60  # a job with no observed run yet
++DEFAULT_TIMEOUT_MIN = 350  # a job with no observed run yet
+ TIMEOUT_FLOOR_MIN = 15
+ MAX_TIMEOUT_MIN = 360     # GitHub's own ceiling for a hosted job
+ 

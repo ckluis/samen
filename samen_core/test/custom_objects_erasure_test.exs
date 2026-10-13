@@ -35,8 +35,7 @@ defmodule Samen.CustomObjects.ErasureTest do
   @plain "gold"
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
     Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
     Samen.Kms.FileBacked.simulate_outage(false)
     on_exit(fn -> Samen.Kms.FileBacked.simulate_outage(false) end)

@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: the stored chunk partition is never reused, so a rising per-item rate re-chunks the 
+#   plan and voids every finished chunk
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: RECHUNK a resume never discards a finished chunk when the learned per-item rate rises
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 945aca7..6bc7273 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -634,7 +634,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
+         items = [str(total)]
+     sel = hashlib.sha256(json.dumps([step.id, step.shard_kind, items], sort_keys=True).encode()).hexdigest()
+     persist = not slice_ and not no_plan_write
+-    stored = None if slice_ else load_partition(step.id, sel)
++    stored = None
+     done = lambda sub: bool(sub.key) and (sub.key in done_keys or (not no_cache and os.path.exists(cache_file(sub.key))))
+     if step.shard_kind == "ranges":
+         nums = []

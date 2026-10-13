@@ -121,7 +121,9 @@ run_wrapped_and_kill() {
   restore_outer_backup
   cleanup_residue
 
-  bash -c "REPO_ROOT='$REPO_ROOT'; source '$REPO_ROOT/scripts/gen_probe_guard.sh'; run_gen_probe '$PROBE_REL' 'T107 interrupt harness (wrapped)'" &
+  # GEN_PROBE_SHARED_REGISTRY=1: this harness proves the T107 trap over the REAL mutation window of the committed
+  # registry; the default (private copy, ADR-053 P5) never opens that window.
+  bash -c "export GEN_PROBE_SHARED_REGISTRY=1; REPO_ROOT='$REPO_ROOT'; source '$REPO_ROOT/scripts/gen_probe_guard.sh'; run_gen_probe '$PROBE_REL' 'T107 interrupt harness (wrapped)'" &
   local launcher_pid=$!
 
   if ! wait_for_mutation "$launcher_pid"; then

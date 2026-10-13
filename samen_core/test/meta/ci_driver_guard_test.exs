@@ -186,3 +186,45 @@ defmodule Samen.Meta.CiDriverGuardTest.DocDrift do
     Samen.Meta.CiDriverGuard.run_case!("DOCS")
   end
 end
+
+# ── ADR-053 P5 — follow-ups ───────────────────────────────────────────────────────────────────────
+
+defmodule Samen.Meta.CiDriverGuardTest.GenProbeIsolation do
+  use ExUnit.Case, async: true
+
+  test "GENPROBE the gen probes run on a private registry copy and sweep only their own scratch dirs" do
+    Samen.Meta.CiDriverGuard.run_case!("GENPROBE")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.NarrowedInputs do
+  use ExUnit.Case, async: true
+
+  test "NARROW a step's *_test.exs exclusion drops only test modules, never anything Mix compiles" do
+    Samen.Meta.CiDriverGuard.run_case!("NARROW")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.RechunkKeepsFinished do
+  use ExUnit.Case, async: true
+
+  test "RECHUNK a resume never discards a finished chunk when the learned per-item rate rises" do
+    Samen.Meta.CiDriverGuard.run_case!("RECHUNK")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.CostWeightedChunks do
+  use ExUnit.Case, async: true
+
+  test "COSTW chunks are weighted by what each item last cost, not by the slowest item's rate" do
+    Samen.Meta.CiDriverGuard.run_case!("COSTW")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.ActionsTimeouts do
+  use ExUnit.Case, async: true
+
+  test "TIMEOUT every Actions job has a timeout from observed runs, never a flat 350" do
+    Samen.Meta.CiDriverGuard.run_case!("TIMEOUT")
+  end
+end

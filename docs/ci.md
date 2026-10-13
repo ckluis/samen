@@ -82,8 +82,19 @@ and why quick would select it (try `scripts/ci explain counts`).
 
 Budgeted long loops (the corpus, `sabotage --changed`, the mutation steps) are split into sub-steps
 named `sabotage_changed[1/13]`; each must report exactly its chunk or it FAILS. A chunk is sized on
-`max(shard_each_s, learned per-item rate)`; when the learned rate rises, the plan re-chunks and finished
-chunks of that step are voided (their keys change) — expected, once, after a slow patch is added.
+`max(shard_each_s, learned per-item rate)`; the replays also learn what EACH patch cost (`shard_cost`) and size
+chunks by those lane-seconds through a fitted model (below), so a 35 s guard patch no longer prices a chunk of 3 s
+patches. **A resume never discards finished work:** the partition of a (step, selection) is stored under
+`_ci/partition/`; a finished chunk (a PASS in this run's state, or a cached PASS) stays exactly as planned — found
+by its key, so a changed slot number (`[3/13]` → `[3/15]`) does not void it — and only the unfinished stretches
+between finished chunks are re-planned at the current rate. Modulo shards (`mutation_*`) keep finished classes and
+split only a class that outgrew `shard_target_s` (x % M == r-1 is the union of x % kM == r-1+jM). Each sub-step
+still reports exactly its chunk, no re-planned chunk outgrows the target (G10), and the chunks still sum to the
+lister's count. `--no-cache` ignores cached PASSes (so nothing counts as finished unless this run did it).
+Cost model (`ranges` steps with `shard_cost`): chunk wall-clock ≈ margin × (overhead + share × lane-seconds),
+fitted to the last twelve passed chunks — only with ≥ 4 observations spread over half the largest, else the
+prior (10 s, share 1) — never planning a chunk past 1.5× the largest lane-seconds seen to complete; the margin is
+the worst observed wall-clock over its prediction. Measured here: ≈ 60 s lane start-up + 0.32 × lane-seconds.
 Unbudgeted (`--budget 0`, `./ci.sh`) the loops run as one command.
 
 ## 4. Cache semantics
@@ -100,6 +111,14 @@ Unbudgeted (`--budget 0`, `./ci.sh`) the loops run as one command.
   `exunit_dir`). If it passes the step is labelled `FLAKY (passed on rerun)` and STILL fails the run — a
   flake is a bug to fix, not a pass. A failure with no `file:line` (a `setup_all`), or more than 25 of them,
   is not re-run and stays FAIL.
+- Narrowed keys (P5): a step that never runs ExUnit on an app may declare `!<app>/test/*_test.exs` (an
+  exclusion is global to the step). Only the four gen probes and the ten `dialyzer_*` steps do — dialyzer reads
+  compiled `.ex`, and the probes run `mix test` only inside the generated scratch app (gen_agent: its own emitted
+  file). Everything Mix compiles (`lib/`, `test/support/`, `mix.exs`, `mix.lock`, `config/`, `priv/`,
+  `test/test_helper.exs`) stays in the key, so a kernel `lib/` edit still re-runs them. `NARROW` in `ci_test.sh`
+  proves the exclusion drops exactly the `*_test.exs` files and nothing Mix compiles, that no probe/guard/dialyzer
+  script names a kernel test path, and that the driver honours it; it was also executed (all four probes and all
+  ten dialyzer steps PASS with every `*_test.exs` deleted).
 - Tree-wide readers (the samen_core suite, samen_web's lint sweeps, the selection self-tests) key on the
   whole tree (`reads = **`), so in `pr` a docs-only change re-runs the kernel suite; `quick` gives the
   cheap path through `doc_tests`.
@@ -132,6 +151,7 @@ every key; the ones you will touch:
 | `marker`, `marker_if`, `skip_marker`, `echo_log` | legacy wrapper output |
 | `exunit_dir` | enables the FLAKY rerun |
 | `shard_*`, `unsharded_cmd` | split a long loop into budget-sized sub-steps (`shard_list` prints the lister's raw output; `shard_total` is a regex for the lister's own count and must match exactly once) |
+| `shard_cost` | `ranges` only, optional: ONE regex with two groups (item name, seconds) read from a PASSED chunk's log; chunks are then cost-weighted (§3) |
 | `superseded_by` | drop this step when a named step is also planned (the corpus covers `--changed`) |
 
 **Add a step** (worked example): a new lint script that reads `samen_web/lib`:
@@ -168,7 +188,10 @@ when samen_core's source hash changes (~95 s); the other eight keep the framewor
 ignore `Samen.`-scoped unknown calls. Cached runs are ~8 s per project; a first build ~2 min.
 
 The old `ci.sh` order (spikes → samen_core → AI tier → adapters → gen probes → sabotage → app gates) is now
-the manifest's: parallel DB-isolated steps first, then the `serial` steps (gen probes, selection self-tests,
+the manifest's: parallel DB-isolated steps first (the flagship/post/deploy gen probes among them: each works on a
+private copy of the abbrev registry, `SAMEN_ABBREV_REGISTRY` + its companion `SAMEN_ABBREV_REGISTRY_GUARD`, both set
+only by `scripts/gen_probe_guard.sh` and stripped by the driver from every step's environment), then the
+`serial` steps (`gen_agent_probe`, which writes a scratch scope into `samen_core/lib` + `test`, selection self-tests,
 `--changed` replays) as a tail. Markers are the same set in a different order.
 
 ## 6. Sabotages
@@ -296,6 +319,13 @@ followed by a plain word reads as a subcommand: write `scripts/ci` in backticks.
   `scripts/ci actions verify pr --results … --expect-head $GITHUB_SHA --expect-base <PR base>`: the union of
   steps that actually ran must equal `scripts/ci list pr` minus the exclusions, each exactly once, all
   PASS/CACHED, every job on the PR's base SHA, the merge commit and its exact tree.
+- Job timeouts: `timeout-minutes: ${{ matrix.timeout_min }}` in both workflows; `scripts/ci actions plan` puts
+  `timeout_min` on every job from `ci/actions_timeouts.tsv` — twice the slowest successful run seen in
+  `gh run list` / `gh run view --json jobs`, floor 15 min, 60 for a job with no row (it was a flat 350 / 120). A row
+  that is not that formula of its own observation is refused: change the observation, not the timeout alone.
+  Today: preflight/spikes/app_*/mutation* 15, adapters/samen_core/gen_flagship/app_driftwood 20, gen_probes and
+  mutation_watchlist_* 30, dialyzer_core and sabotage_corpus_* 35, dialyzer_adapters_a 40, dialyzer_verticals 50,
+  sabotage_changed 60 (the 29.8 min PR that touched the driver).
 - `.github/workflows/nightly.yml`: cron `17 3 * * *` (03:17 UTC) + `workflow_dispatch`; `scripts/ci full`, the
   same jobs as `pr` minus the two `--changed` jobs, plus `multinode`, 24 corpus slices (`--slice i/24`) and 6
   mutation slices; `ci-full` sums the slices against the lister's total and `ls scripts/sabotages/*.patch`.
@@ -357,8 +387,20 @@ serial on Actions); a PR with cold dialyzer PLTs 25.4 min (run 38248251069: dial
 runs: 14.9, 15.7, 20.6, 23.6). No scheduled (`schedule`) nightly had run yet when measured: the cron only
 fires from `main`, so the first one also seeds the default-branch caches.
 
-Where the time goes now: `pr` after a kernel edit is dominated by the four serial gen probes (≈ 370 s) and
-samen_core's tree-wide keys; narrowing their `reads` is the follow-up with the biggest payoff.
+**P5 (2026-10-13, same machine, branch `feat/adr-053-p5-followups`; `uptime` 1-min load in brackets).** The four
+gen probes, `scripts/ci pr --only gen_probes --no-cache --budget 0`: serial (flagship 163.3 s + post 105.7 + deploy
+79.0 + agent 5.2) **353.8 s** [2.6 → 8]; flagship/post/deploy concurrent on private registry copies **351.2 s**
+[5.5 → 13: flagship 339 s, post 271 s, deploy 237 s: other sessions and a 6-core VM held the cores, so the three
+probes (CPU-bound: generated-app dependency compile + test suite) just shared them]; the same concurrent run in a
+scratch worktree **215.5 s** [6.2]. Concurrency is correct and proven (isolation proven, two green concurrent runs plus the closing `pr`) but it only converts idle cores into wall-clock: on a quiet 10-core box expect the max of the three probes
+(≈ 160-210 s), on a saturated one nothing. The next lever is per-probe CPU: each generated app compiles its own ≈ 62
+dependencies (≈ half a probe) — sharing a compiled dependency cache between probes is the follow-up.
+`sabotage_changed` on a branch that touches the driver (66 patches, 17 chunks): 5 calls cold (3 → 3 → 2 → 2 → 1
+chunks; the plan re-chunked from 17 to 13 chunks mid-run and kept the 5 finished chunks — the old driver voided
+them and needed ≥ 6 calls and lost ≈ 30 min in the P3 builder).
+
+Where the time goes now: `pr` after a kernel `lib/` edit is dominated by the three probes' dependency compile and
+test suites, then samen_core's tree-wide keys; a test-only edit no longer re-runs the probes or any dialyzer step.
 
 ## 12. Troubleshooting
 
@@ -366,7 +408,7 @@ samen_core's tree-wide keys; narrowing their `reads` is the follow-up with the b
 |---|---|
 | `INCOMPLETE k/n` | not a failure: `scripts/ci resume`, repeat. It never says PASS until every planned step is done. |
 | `FAIL step=<id>` | read the digest, then `_ci/logs/<id>.log`; fix; re-run the same command. |
-| `FLAKY … (passed on rerun)` | the run FAILS by design. Find the nondeterminism (sandbox ownership, ordering, timing); a flake that reproduces only in a full suite is an ordering bug. Known class: a test whose sandbox owner exited before an async insert (`aud_event`) — the test must own its sandbox. |
+| `FLAKY … (passed on rerun)` | the run FAILS by design. Find the nondeterminism (sandbox ownership, ordering, timing); a flake that reproduces only in a full suite is an ordering bug. Known class: a test whose sandbox owner exited before an async insert (`aud_event`) or an `on_exit` call — `** (EXIT) shutdown: "owner … exited"`. Use `Samen.TestSandbox.shared!(Repo)` (a dedicated owner that outlives the test process); the raw `Sandbox.mode(_, {:shared, _})` is forbidden by `Samen.TestSandboxGuardTest`. |
 | result looks stale | `scripts/ci explain <step>` (key, inputs, CACHED?); prove with `scripts/ci pr --no-cache`. Failures are never cached, so a stale GREEN means undeclared inputs: fix `inputs`/`reads`. |
 | `role "…" does not exist` | the suites connect as `$USER`/`$PGUSER`: `psql -d postgres -c '\du'` lists roles; export `PGUSER` to one that exists (superuser-capable). Never hardcode a role in a migration or test. |
 | `pgvector not installed` | `brew install pgvector`, then `CREATE EXTENSION vector` works in your server. |
@@ -375,18 +417,23 @@ samen_core's tree-wide keys; narrowing their `reads` is the follow-up with the b
 | `counts` red | `scripts/counts --write`, commit the CLAUDE.md change. |
 | `docs_check` red | the line names the file, line and missing command/step/path; fix the doc. |
 | lane leftovers | lane trees `.git/samen-lanes/<b|c|d>` are kept on purpose (warm `_build`). Drop them with `git worktree remove --force .git/samen-lanes/b` (then `git worktree prune`) and the `*_lane<k>` databases with `psql -d postgres -Atc "select datname from pg_database where datname ~ '_lane[0-9]+$'"` → `dropdb <name>` per row. Never while a replay is running. |
-| a chunk passed earlier is re-running | the learned per-item rate rose and re-chunked the step, voiding that step's finished chunks (§3). Expected once; `shard_each_s` seeds the slow case. |
+| a chunk passed earlier is re-running | its inputs changed (any edit re-keys a `**` step), or `--no-cache` was given: a rising per-item rate alone no longer voids finished chunks (§3, `_ci/partition/`). |
 | patch N fails once under lanes, passes alone | the lanes print `scripts/sabotage.sh --range N-N` to re-check it alone; a flaky guard still fails the run — fix the timing dependence (patch 368 is a known compile-vs-run race). |
 | a run is "stuck" | another driver holds the lock (a concurrent driver is refused); `scripts/ci status`. Never start a second one beside it. |
 
 ## 13. Known limits and follow-ups
 
-- samen_core's cache key is the whole tree, and the four gen probes re-run (≈ 370 s) after any kernel edit.
-- `sabotage_changed` is one job on Actions; chunking there is by patch count, not cost (3 s ordinary patches
-  vs 58 s `ci_driver_guard_test.exs` patches): cost-weighted chunking is the follow-up.
-- Three samen_core tests create fixed-name scratch databases (`samen_core_backup_*`,
-  `samen_core_opmigration_scratch`, `samen_core_pitr_restore_test`); only patch 285 names one, so lanes
-  cannot collide yet — a second such patch would race.
+- samen_core's own suite keys on the whole tree (`reads = **`); the gen probes and dialyzer steps re-run on any
+  kernel `lib/` edit (but no longer on a test-module-only edit).
+- The three concurrent gen probes are CPU-bound; each generated app recompiles ≈ 62 dependencies. A shared
+  compiled-dependency cache between probes (and across runs) is the next win and needs its own soundness proof
+  (config-dependent compile env, path deps).
+- `sabotage_changed` is one job on Actions and there it uses the plain harness, so its chunks are cost-weighted
+  only from item costs learned on that runner (Actions starts cold: unknown items are priced at the old per-item
+  rate). Per-item costs live in `_ci/timings.json` on the machine that ran the replay.
+- Mutation shards are sized by count (`modulo`), not by cost.
+- Only samen_core's scratch databases got the lane suffix; the PITR drill databases of demo/driftwood
+  (`samen_pitr_drill*`) are not touched by any sabotage today.
 - `reanchor` needs the patch's pre-image blob in the object database and does not handle
   create/delete/rename patches.
 - Branch protection (require `ci-pr`) is the operator's call.

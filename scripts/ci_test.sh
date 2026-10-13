@@ -50,6 +50,27 @@
 #          a family-shaped token) or a scripts/ci/docs/.github path that does not exist; vacuous or missing docs
 #          fail; the real docs resolve; the check is a manifest step of quick, pr and full.
 #
+#   GENPROBE (P5) the gen probes run concurrently: each works on a PRIVATE registry copy (the committed file is
+#          never written; a probe that writes it anyway is repaired and FAILS), a finishing probe sweeps only its
+#          OWN scratch dirs, the HTTP port ranges are disjoint, and the manifest has flagship/post/deploy
+#          non-serial but gen_agent (which writes into samen_core/lib + test) still serial.
+#   NARROW   (P5) a step may exclude `<app>/test/*_test.exs` from its key only where it never runs ExUnit on that
+#          app: the narrowing removes exactly the `_test.exs` files and nothing Mix compiles or a probe copies;
+#          editing an excluded file keeps the key and the quick selection, editing an included one changes both.
+#
+#   RECHUNK  (P5) a resume never discards a finished chunk of the SAME selection when the learned per-item rate rises:
+#          the partition is persisted (_ci/partition/), finished chunks stay as planned and only the unfinished
+#          stretches are re-planned at the new rate (ranges AND modulo shards); each sub-step still reports exactly
+#          its chunk (shard_check), no re-planned chunk outgrows the target (G10), the shards still sum to the selection.
+#   COSTW    (P5) `shard_cost`: ranges chunks are weighted by what each item last cost (read from the sub-step logs),
+#          so one slow item no longer sizes a chunk of cheap ones; a fitted model (fixed overhead + share of the lane-seconds
+#          + a margin covering every observed chunk) turns lane-seconds into a wall-clock estimate; an unknown item is
+#          planned at the old per-item rate.
+#
+#   TIMEOUT  (P5) every Actions matrix job carries a `timeout_min` from ci/actions_timeouts.tsv (2x the slowest observed
+#          run, floor 15, a job with no row gets 60); a row that is not that formula is refused, no row is stale, the
+#          workflows read `matrix.timeout_min` and no job keeps the old flat 350 / 120.
+#
 # Usage: scripts/ci_test.sh [CASE…]      (default: every case)
 # Exit:  0 all assertions pass · 1 otherwise. Residue: none (temp dirs, trap on EXIT/INT/TERM).
 set -uo pipefail
@@ -200,8 +221,8 @@ case_C1() {
   has "$T/o20" '^PASS slowsh\[1/1\] ' "C1: first run — one chunk on the manifest estimate"
   drive "$T/o21" pr --plan --no-cache
   has "$T/o21" '^PLAN slowsh\[1/3\] ' "C1: ... re-chunked smaller once the observed per-item rate is known"
-  drive "$T/o22" pr -j 1
-  has "$T/o22" '^CI\(pr\): PASS 3/3' "C1: the re-chunked run passes"
+  drive "$T/o22" pr -j 1 --no-cache
+  has "$T/o22" '^CI\(pr\): PASS 3/3' "C1: the re-chunked run passes (--no-cache: the finished 3-item chunk is not reused; RECHUNK covers the reuse)"
   drive "$T/o23" pr -j 1
   eq "$(grep -c '^CACHED slowsh\[' "$T/o23")" 3 "C1: ... and the chunking is STABLE: the next run is all CACHED (no re-learn churn)"
   # the learned rate moves in power-of-two buckets with hysteresis — chunk boundaries (part of every
@@ -1029,6 +1050,14 @@ case_C7() {
   done
   eq "$n" 5 "C7: positive control — the five DB-backed apps' test configs were found"
   eq "${miss:-none}" none "C7: every app's test database name appends SAMEN_TEST_DB_SUFFIX (lanes never share a test DB)"
+  # (P5) ... and so does every scratch database a samen_core test creates (backup src/scratch, operator-plane migration,
+  # PITR restore, the multinode repo): a fixed name is a database two lanes replaying the same file would race on
+  local scratch nfound=0 unsuffixed=""
+  scratch="$(grep -rnE '(@[a-z_]*db|database:) +"samen_core_[a-z_0-9]+"' "$ROOT/samen_core/test" "$ROOT/samen_core/config/test.exs" | grep -v '/support/' || true)"
+  nfound="$(printf '%s\n' "$scratch" | grep -c . || true)"
+  unsuffixed="$(printf '%s\n' "$scratch" | grep -v 'SAMEN_TEST_DB_SUFFIX' | grep . || true)"
+  eq "$nfound" 6 "C7: positive control — the samen_core test DB names were found (main, multinode, backup src + scratch, opmigration, pitr)"
+  eq "${unsuffixed:-none}" none "C7: every samen_core scratch database name appends SAMEN_TEST_DB_SUFFIX (two lanes can never collide)"
 }
 
 # C8 (ADR-053 P3): `scripts/sabotage reanchor` rewrites a patch ONLY after proving its named tests still fail
@@ -1128,7 +1157,426 @@ STUB
   done
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS)
+# GENPROBE (ADR-053 P5): the flagship/post/deploy gen probes run CONCURRENTLY. What made them serial was one shared
+# resource — the committed abbrev registry, which each probe mutated in place and restored from a snapshot (two
+# probes would restore each other's reservations away) — plus a scratch sweep that deleted every probe's working
+# dirs. run_gen_probe now hands each probe a private registry copy (SAMEN_ABBREV_REGISTRY) and sweeps only its own
+# dirs. The fixture stubs `mix`, so this runs in seconds.
+case_GENPROBE() {
+  local F="$T/gp" B="$T/gpbin"
+  rm -rf "$F" "$B"; mkdir -p "$F/samen_core/priv" "$B"
+  printf '{"abbrevs": {}}\n' > "$F/samen_core/priv/abbrev_registry.json"
+  cat > "$B/mix" <<'STUB'
+#!/usr/bin/env bash
+# stub for `mix run <probe>`: reserve into the registry the probe was GIVEN, then behave per GP_MODE
+probe="$2"
+reg="${SAMEN_ABBREV_REGISTRY:-$REPO_ROOT/samen_core/priv/abbrev_registry.json}"
+echo "reserved-by-$probe" >> "$reg"
+echo "$probe saw ${SAMEN_ABBREV_REGISTRY:-<unset>}" >> "$GP_LOG"
+echo "$probe companion ${SAMEN_ABBREV_REGISTRY_GUARD:-<unset>}" >> "$GP_LOG"
+case "${GP_MODE:-quick}" in
+  committed) echo oops >> "$REPO_ROOT/samen_core/priv/abbrev_registry.json" ;;   # ignores the seam
+  scratch)  # keep a working dir for the whole run, then report whether it is still there at the end
+    d="$(mktemp -d "$REPO_ROOT/$GP_STEM.XXXXXX")"; sleep "$GP_SLEEP"
+    if [[ -d "$d" ]]; then echo "$probe scratch alive" >> "$GP_LOG"; else echo "$probe scratch DELETED" >> "$GP_LOG"; fi ;;
+esac
+exit 0
+STUB
+  chmod +x "$B/mix"
+  local reg="$F/samen_core/priv/abbrev_registry.json" pristine
+  pristine="$(shasum -a 256 "$reg" | awk '{print $1}')"
+  gp() { # gp <probe> [env…] — run_gen_probe the way the manifest does, with the stub mix first on PATH
+    local probe="$1"; shift
+    env PATH="$B:$PATH" REPO_ROOT="$F" GP_LOG="$T/gp.log" "$@" bash -c 'source "'"$ROOT"'/scripts/gen_probe_guard.sh"; run_gen_probe "$0" "stub probe"' "$probe"
+  }
+  : > "$T/gp.log"
+  # 1. positive control: private mode hands the probe a registry that is NOT the committed one, and leaves the file alone
+  gp priv/gen_post_probe.exs > "$T/gp1" 2>&1; eq "$?" 0 "GENPROBE: a probe that honours the seam passes"
+  has "$T/gp.log" 'gen_post_probe.exs saw /.*samen_ci_registry_private\.' "GENPROBE: the probe was pointed at a private registry copy"
+  eq "$(shasum -a 256 "$reg" | awk '{print $1}')" "$pristine" "GENPROBE: the committed registry is byte-identical afterwards (the reservation went to the copy)"
+  eq "$(ls "${TMPDIR:-/tmp}"/samen_ci_registry_private.* 2>/dev/null | wc -l | tr -d ' ')" "0" "GENPROBE: ... and the private copy is removed"
+  # 2. a probe that writes the committed file anyway is caught, the file repaired, the run fails
+  gp priv/gen_post_probe.exs GP_MODE=committed > "$T/gp2" 2>&1; eq "$?" 2 "GENPROBE: a probe that writes the committed registry FAILS (exit 2)"
+  has "$T/gp2" 'FATAL: .* left .*abbrev_registry.json changed' "GENPROBE: ... saying what it left changed"
+  eq "$(shasum -a 256 "$reg" | awk '{print $1}')" "$pristine" "GENPROBE: ... and the committed registry was repaired byte-exact from the snapshot"
+  # 3. two probes at once: the fast one finishing must not sweep away the slow one's scratch dir
+  : > "$T/gp.log"
+  ( gp priv/gen_app_flagship_probe.exs GP_MODE=scratch GP_STEM=_gen_flagship_scratch GP_SLEEP=3 > "$T/gp3a" 2>&1; echo $? > "$T/gp3a.rc" ) &
+  sleep 0.5
+  ( gp priv/gen_post_probe.exs GP_MODE=scratch GP_STEM=_gen_post_scratch GP_SLEEP=0.2 > "$T/gp3b" 2>&1; echo $? > "$T/gp3b.rc" ) &
+  wait
+  eq "$(cat "$T/gp3a.rc"),$(cat "$T/gp3b.rc")" "0,0" "GENPROBE: two concurrent probes both pass"
+  has "$T/gp.log" 'gen_app_flagship_probe.exs scratch alive' "GENPROBE: the slow probe's scratch dir survived the fast probe finishing (the sweep is per probe)"
+  has "$T/gp.log" 'gen_post_probe.exs scratch alive' "GENPROBE: ... and the fast probe's own"
+  eq "$(ls -d "$F"/_gen_* 2>/dev/null | wc -l | tr -d ' ')" "0" "GENPROBE: no scratch residue once both finished"
+  eq "$(shasum -a 256 "$reg" | awk '{print $1}')" "$pristine" "GENPROBE: ... and the committed registry is untouched by the pair"
+  # 4. the legacy shared mode (the T107 interrupt harness) is the red twin: its sweep DOES delete a concurrent probe's dir
+  : > "$T/gp.log"
+  ( gp priv/gen_app_flagship_probe.exs GEN_PROBE_SHARED_REGISTRY=1 GP_MODE=scratch GP_STEM=_gen_flagship_scratch GP_SLEEP=3 > "$T/gp4a" 2>&1 ) &
+  sleep 0.5
+  ( gp priv/gen_post_probe.exs GEN_PROBE_SHARED_REGISTRY=1 GP_MODE=scratch GP_STEM=_gen_post_scratch GP_SLEEP=0.2 > "$T/gp4b" 2>&1 ) &
+  wait
+  has "$T/gp.log" 'gen_app_flagship_probe.exs scratch DELETED' "GENPROBE: positive control — in shared mode the same pair DOES lose a working dir (why the seam exists)"
+  git -C "$F" init -q 2>/dev/null; rm -rf "$F"/_gen_* 2>/dev/null
+  # 5. HTTP ports: the three booting probes draw from disjoint ranges
+  local pf="$ROOT/samen_core/priv" ranges
+  ranges="$(grep -hE '^http_port = [0-9]+ \+ rem' "$pf/gen_app_flagship_probe.exs" "$pf/gen_post_probe.exs" "$pf/gen_app_deploy_probe.exs" \
+    | sed -E 's/^http_port = ([0-9]+) \+ rem.*, ([0-9]+)\)$/\1 \2/' | sort -n)"
+  eq "$(printf '%s\n' "$ranges" | wc -l | tr -d ' ')" 3 "GENPROBE: positive control — the three probes' port draws were found"
+  eq "$(printf '%s\n' "$ranges" | awk 'NR>1 && $1 < prev + plen {bad=1} {prev=$1; plen=$2} END{print bad+0}')" 0 "GENPROBE: the three port ranges do not overlap"
+  # 6. the manifest: the three concurrent ones are not serial; gen_agent (writes samen_core/lib + test) still is
+  local m="$ROOT/ci/steps.conf" id
+  for id in gen_flagship_probe gen_post_probe gen_deploy_probe; do
+    eq "$(awk -v s="[step $id]" '$0==s{f=1;next} /^\[/{f=0} f && /^serial *=/' "$m")" "" "GENPROBE: $id is not serial"
+  done
+  eq "$(awk -v s="[step gen_agent_probe]" '$0==s{f=1;next} /^\[/{f=0} f && /^serial *= *1/' "$m")" "serial = 1" "GENPROBE: gen_agent_probe stays serial (it mutates samen_core/lib and test)"
+  # 7. (gate P5) the companion: Samen.AbbrevRegistry honours SAMEN_ABBREV_REGISTRY only next to it, and only the guard sets it
+  has "$T/gp.log" 'gen_post_probe.exs companion gen_probe_guard' "GENPROBE: the guard hands the probe the registry seam's companion"
+  # 8. (gate P5) the driver strips the probe seams from every step: an inherited GEN_PROBE_SHARED_REGISTRY=1 would run the
+  # concurrent probes in shared mode (a later-started probe restores an earlier one's reservation INTO the committed
+  # file, both PASS), an inherited SAMEN_ABBREV_REGISTRY would check every compile against another registry
+  mkrepo gpenv
+  { echo "$APPS"
+    printf '[step seams]\ncmd = echo "shared=${GEN_PROBE_SHARED_REGISTRY:-unset} reg=${SAMEN_ABBREV_REGISTRY:-unset} guard=${SAMEN_ABBREV_REGISTRY_GUARD:-unset} control=${SAMEN_GATE_P5_CONTROL:-unset}" >> "$CI_TEST_RUNS"\nmodes = pr\ninputs = core/\nest_s = 1\n'
+  } > "$SAMEN_CI_MANIFEST"
+  GEN_PROBE_SHARED_REGISTRY=1 SAMEN_ABBREV_REGISTRY=/stray/registry.json SAMEN_ABBREV_REGISTRY_GUARD=gen_probe_guard \
+    SAMEN_GATE_P5_CONTROL=kept drive "$T/gp8" pr --no-cache
+  eq "$RC" 0 "GENPROBE: the seam-stripping run passes"
+  eq "$(cat "$CI_TEST_RUNS")" "shared=unset reg=unset guard=unset control=kept" \
+    "GENPROBE: no step inherits the probe seams (positive control: another SAMEN_ variable still passes through)"
+}
+
+# NARROW (ADR-053 P5): the gen probes and the ten dialyzer steps declare `!<app>/test/*_test.exs`. That is sound ONLY
+# because neither runs ExUnit on a kernel/vertical test module: dialyzer reads compiled .ex (never *_test.exs), and the
+# probes run `mix test` only inside the generated scratch app (the one exception, gen_agent, names its own emitted file).
+# The proof is mechanical: (a) the exclusion removes exactly the *_test.exs files and nothing Mix compiles; (b) no
+# probe/guard/dialyzer script names a kernel test path; (c) the driver honours it (an excluded edit keeps the key and
+# the quick selection, an included one changes both). Anything a step actually reads stays in the key.
+case_NARROW() {
+  local steps="gen_flagship_probe gen_post_probe gen_deploy_probe gen_agent_probe dialyzer_samen_core dialyzer_samen_web dialyzer_demo dialyzer_driftwood dialyzer_pawchart dialyzer_samen_stripe dialyzer_samen_postmark dialyzer_samen_ses dialyzer_samen_resend dialyzer_samen_anthropic"
+  # (a) against the REAL manifest and the REAL tracked files
+  SAMEN_CI_TOOLCHAIN=t python3 - "$ROOT" $steps > "$T/nr1" 2>&1 <<'PY'
+import os, re, subprocess, sys
+root, steps = sys.argv[1], sys.argv[2:]
+sys.path.insert(0, os.path.join(root, "scripts"))
+os.environ["SAMEN_CI_REPO"] = root
+import ci_driver as d
+man = d.Manifest(os.path.join(root, "ci", "steps.conf"))
+files = subprocess.run(["git", "-C", root, "ls-files"], stdout=subprocess.PIPE).stdout.decode().split("\n")
+files = [f for f in files if f and os.path.exists(os.path.join(root, f))]
+bad = 0
+def say(ok, msg):
+    global bad
+    print(("ok   " if ok else "BAD  ") + msg)
+    bad += 0 if ok else 1
+for sid in steps:
+    st = man.by_id(sid)
+    full = d.make_matcher(d.expand_tokens([t for t in st.inputs + st.reads if not t.startswith("!")], man.apps))
+    narrow = d.make_matcher(d.expand_tokens(st.inputs + st.reads, man.apps))
+    excl = [t[1:] for t in st.inputs if t.startswith("!")]
+    say(bool(excl), "%s declares an exclusion" % sid)
+    dropped = [f for f in files if full(f) and not narrow(f)]
+    kept_tests = [f for f in dropped if not re.match(r"^[a-z_]+/test/.*_test\.exs$", f)]
+    say(not kept_tests, "%s: the narrowing drops only <app>/test/**_test.exs (also dropped: %s)" % (sid, kept_tests[:3]))
+    say(len(dropped) > 0, "%s: positive control — it does drop test modules (%d)" % (sid, len(dropped)))
+    # nothing Mix compiles (elixirc_paths of any env, plus mix.exs/lock/config/priv/test_helper) may be dropped
+    for app in {f.split("/")[0] for f in dropped}:
+        mixexs = open(os.path.join(root, app, "mix.exs")).read()
+        dirs = {"lib"}
+        for m in re.finditer(r"defp elixirc_paths\(:\w+\),\s*do:\s*\[([^\]]*)\]", mixexs):
+            dirs |= set(re.findall(r'"([^"]+)"', m.group(1)))
+        compiled = [f for f in files if f.startswith(app + "/") and f.endswith(".ex")
+                    and any(f.startswith("%s/%s/" % (app, x)) for x in dirs)]
+        lost = [f for f in compiled if full(f) and not narrow(f)]
+        say(bool(compiled) and not lost, "%s/%s: every file Mix compiles (%s: %d files) stays in the key" % (sid, app, ",".join(sorted(dirs)), len(compiled)))
+        for extra in ("mix.exs", "mix.lock", "test/test_helper.exs"):
+            if os.path.exists(os.path.join(root, app, extra)):
+                say(narrow("%s/%s" % (app, extra)), "%s/%s: %s stays in the key" % (sid, app, extra))
+sys.exit(1 if bad else 0)
+PY
+  eq "$?" 0 "NARROW: the exclusions drop exactly *_test.exs files and nothing Mix compiles"
+  hasnt "$T/nr1" '^BAD' "NARROW: no assertion in the manifest sweep failed"
+  has "$T/nr1" '^ok   gen_post_probe: positive control' "NARROW: positive control — the sweep ran over the gen probes"
+  has "$T/nr1" '^ok   dialyzer_samen_core/samen_core: every file Mix compiles' "NARROW: ... and the dialyzer steps"
+  # (b) static: nothing the narrowed steps run names a kernel/framework/vertical test module
+  local f hits
+  hits="$(grep -nE '(samen_core|samen_web|demo|driftwood|pawchart|samen_[a-z]+)/test/' \
+    "$ROOT/samen_core/priv/gen_app_flagship_probe.exs" "$ROOT/samen_core/priv/gen_post_probe.exs" \
+    "$ROOT/samen_core/priv/gen_app_deploy_probe.exs" "$ROOT/samen_core/priv/gen_agent_probe.exs" \
+    "$ROOT/scripts/gen_probe_guard.sh" "$ROOT/scripts/dialyzer_gate.sh" | grep -vE '^[^:]+:[0-9]+:\s*#' || true)"
+  eq "${hits:-none}" none "NARROW: no probe, guard or dialyzer script names a samen_core/samen_web/vertical test path"
+  eq "$(grep -cE 'mix", \["test"|mix test' "$ROOT/scripts/dialyzer_gate.sh" "$ROOT/scripts/gen_probe_guard.sh" | awk -F: '{s+=$2} END{print s+0}')" 0 "NARROW: the guard and the dialyzer gate never run ExUnit"
+  has "$ROOT/samen_core/priv/gen_agent_probe.exs" 'System.cmd\("mix", \["test", Path.relative_to\(test_path, app_dir\)\]' "NARROW: the one in-tree ExUnit run (gen_agent) targets only its own emitted scratch file"
+  has "$ROOT/samen_core/priv/gen_agent_probe.exs" 'scope = "GenAgentProbe"' "NARROW: ... under the GenAgentProbe scratch scope"
+  # (c) the driver, in a fixture: an excluded edit keeps the key and the selection; an included edit moves both
+  mkrepo nr
+  { echo "$APPS"
+    step probe 'app:web app:core !core/test/*_test.exs !web/test/*_test.exs'
+  } > "$SAMEN_CI_MANIFEST"
+  mkdir -p "$SAMEN_CI_REPO/web/test/support" "$SAMEN_CI_REPO/core/test/support"
+  echo t > "$SAMEN_CI_REPO/core/test/a_test.exs"; echo t > "$SAMEN_CI_REPO/web/test/w_test.exs"
+  echo s > "$SAMEN_CI_REPO/core/test/support/s.ex"; echo s > "$SAMEN_CI_REPO/web/test/support/s.ex"
+  ( cd "$SAMEN_CI_REPO" && git add -A && git commit -qm base && git update-ref refs/remotes/origin/main HEAD )
+  local k0 k1
+  key() { "$CI" explain probe 2>&1 | awk '$1=="key"{print $2}'; }
+  k0="$(key)"; [[ -n "$k0" ]] && ok || bad "NARROW: explain printed no key"
+  echo more >> "$SAMEN_CI_REPO/core/test/a_test.exs"; echo more >> "$SAMEN_CI_REPO/web/test/w_test.exs"
+  eq "$(key)" "$k0" "NARROW: editing excluded *_test.exs files (core and web) leaves the key unchanged"
+  drive "$T/nr2" quick --plan
+  hasnt "$T/nr2" 'PLAN probe' "NARROW: ... and quick does not select the step for a test-module-only diff"
+  echo more >> "$SAMEN_CI_REPO/core/test/support/s.ex"
+  [[ "$(key)" != "$k0" ]] && ok || bad "NARROW: editing core/test/support/s.ex (compiled by dev/test builds) must change the key"
+  drive "$T/nr3" quick --plan
+  has "$T/nr3" 'PLAN probe' "NARROW: ... and quick selects it"
+  ( cd "$SAMEN_CI_REPO" && git checkout -q -- core/test/support/s.ex )
+  echo more >> "$SAMEN_CI_REPO/core/lib/a.txt"
+  [[ "$(key)" != "$k0" ]] && ok || bad "NARROW: editing a lib file must change the key"
+}
+
+# RECHUNK (ADR-053 P5): the learned per-item rate rising re-chunked the plan, every finished chunk's key changed, and
+# `resume` re-ran them (a builder lost ~30 min of sabotage replay). The partition of a (step, selection) is now
+# persisted: a finished chunk stays exactly as planned, only the unfinished stretches are re-planned.
+case_RECHUNK() {
+  rc_conf() { # rc_conf <list N> — a 'ranges' step; each chunk logs its range and reports exactly its size
+    { echo "$APPS"
+      cat <<'CONF'
+[step shd]
+cmd = a=${CI_SHARD_ARGS#--range }; lo=${a%-*}; hi=${a#*-}
+      echo "$CI_SHARD_ARGS" >> "$CI_TEST_RUNS"; echo "PROCESSED $((hi-lo+1))"
+shard_list = i=1; while [ $i -le 40 ]; do printf "  $i-a.patch x\n"; i=$((i+1)); done; printf "SELECTED 40\n"
+shard_kind = ranges
+shard_each_s = 2
+shard_target_s = 20
+shard_item = ^  ([0-9]+-\S+\.patch)\s
+shard_total = ^SELECTED ([0-9]+)$
+shard_check = ^PROCESSED ([0-9]+)$
+modes = pr
+inputs = core/
+est_s = 3
+CONF
+    } > "$SAMEN_CI_MANIFEST"
+  }
+  # items covered by the logged ranges: "<dups> <missing>" over 1..40
+  rc_cover() { python3 - "$CI_TEST_RUNS" "$1" <<'PY'
+import re, sys, collections
+n = collections.Counter()
+for l in open(sys.argv[1]):
+    m = re.match(r"--range (\d+)-(\d+)", l)
+    if m:
+        for i in range(int(m.group(1)), int(m.group(2)) + 1): n[i] += 1
+total = int(sys.argv[2])
+print(sum(1 for i in range(1, total + 1) if n[i] > 1), sum(1 for i in range(1, total + 1) if n[i] == 0))
+PY
+  }
+  mkrepo rc; rc_conf
+  drive "$T/rc1" pr --budget 1 -j 1 --no-cache
+  eq "$RC" 3 "RECHUNK: the first call finishes one chunk and is INCOMPLETE"
+  has "$T/rc1" '^PASS shd\[1/4\] ' "RECHUNK: positive control — 40 items at 2 s/item, target 20 s = 4 chunks of 10"
+  eq "$(grep -c -- '--range 1-10' "$CI_TEST_RUNS")" 1 "RECHUNK: chunk 1-10 ran once"
+  # the learned rate rises (a slow patch landed): a fresh plan would be 20 chunks of 2 and chunk 1-10 would be void
+  python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["shd#per_item"] = 8.0; json.dump(d, open(sys.argv[1], "w"))
+PY
+  mkdir -p "$T/rc.keep"; cp -R "$SAMEN_CI_HOME/partition" "$T/rc.keep/"; cp "$SAMEN_CI_HOME/timings.json" "$T/rc.keep/"
+  cp "$SAMEN_CI_HOME/state.json" "$T/rc.keep/"; cp -R "$SAMEN_CI_HOME/cache" "$T/rc.keep/"
+  drive "$T/rc2" resume --budget 0 -j 1
+  eq "$RC" 0 "RECHUNK: resume completes after the rate rose"
+  has "$T/rc2" '^CI\(pr\): PASS ' "RECHUNK: ... PASS"
+  has "$T/rc2" '^PASS shd\[1/[0-9]+\] .*\(earlier in this run\)$' "RECHUNK: the finished chunk is kept (found by key although its slot id changed)"
+  eq "$(grep -c -- '--range 1-10' "$CI_TEST_RUNS")" 1 "RECHUNK: chunk 1-10 was NOT re-run"
+  eq "$(rc_cover 40)" "0 0" "RECHUNK: every item ran exactly once across the resumes (no duplicate, no gap)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'sum(s["processed"] for s in d["steps"])')" 40 "RECHUNK: the sub-steps' PROCESSED sum to the selection (40)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'all(s["processed"] == s["expected"] for s in d["steps"])')" True "RECHUNK: each sub-step reported exactly its chunk (shard_check)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'max(s["expected"] for s in d["steps"][1:])')" 2 "RECHUNK: G10 — the re-planned chunks are sized at the NEW rate (2 items x 8 s <= 20 s)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'len(d["steps"])')" 16 "RECHUNK: ... 1 kept chunk + 15 re-planned chunks of 2 (items 11-40)"
+  drive "$T/rc2s" status
+  has "$T/rc2s" '^CI\(pr\): PASS — 16/16 done' "RECHUNK: positive control — status counts every planned slot done"
+  hasnt "$T/rc2s" 'NOT_RUN' "RECHUNK: status files the kept chunk under its new slot id (no phantom NOT_RUN after a PASS)"
+  # red twin: without the persisted partition the same resume re-plans from scratch and re-runs the finished items
+  rm -rf "$SAMEN_CI_HOME/partition" "$SAMEN_CI_HOME/cache"; : > "$CI_TEST_RUNS"
+  cp "$T/rc.keep/state.json" "$SAMEN_CI_HOME/state.json"; cp "$T/rc.keep/timings.json" "$SAMEN_CI_HOME/timings.json"
+  echo "--range 1-10" > "$CI_TEST_RUNS"
+  drive "$T/rc3" resume --budget 0 -j 1
+  eq "$(rc_cover 40 | cut -d' ' -f1)" 10 "RECHUNK: positive control — with no persisted partition the finished items 1-10 run AGAIN (10 duplicates)"
+  # modulo shards: a finished class survives; only a class that outgrew the target is split, and the classes still partition
+  mkrepo rcm
+  { echo "$APPS"
+    cat <<'CONF'
+[step mut]
+cmd = a=${CI_SHARD_ARGS#--shard }; r=${a%/*}; m=${a#*/}; k=0; x=0
+      while [ $x -lt 12 ]; do [ $((x % m)) -eq $((r-1)) ] && { k=$((k+1)); echo "$x" >> "$CI_TEST_COVER"; }; x=$((x+1)); done
+      echo "$CI_SHARD_ARGS" >> "$CI_TEST_RUNS"; echo "  mutants run : $k"
+shard_list = printf "SELECTED 12\n"
+shard_kind = modulo
+shard_total = ^SELECTED ([0-9]+)$
+shard_each_s = 2
+shard_target_s = 12
+shard_check = ^  mutants run +: ([0-9]+)
+modes = pr
+inputs = core/
+est_s = 3
+CONF
+  } > "$SAMEN_CI_MANIFEST"
+  export CI_TEST_COVER="$T/rcm.cover"; : > "$CI_TEST_COVER"
+  drive "$T/rcm1" pr --budget 1 -j 1 --no-cache
+  has "$T/rcm1" '^PASS mut\[1/2\] ' "RECHUNK: modulo — 12 mutants at 2 s, target 12 s = 2 classes of 6"
+  python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["mut#per_item"] = 6.0; json.dump(d, open(sys.argv[1], "w"))
+PY
+  drive "$T/rcm2" resume --budget 0 -j 1
+  eq "$RC" 0 "RECHUNK: modulo — resume completes after the rate rose"
+  eq "$(grep -c -- '--shard 1/2' "$CI_TEST_RUNS")" 1 "RECHUNK: modulo — the finished class 1/2 was not re-run"
+  eq "$(sort -n "$CI_TEST_COVER" | tr '\n' ' ')" "0 1 2 3 4 5 6 7 8 9 10 11 " "RECHUNK: modulo — every mutant ran exactly once (the split classes partition the selection)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'max(s["expected"] for s in d["steps"][1:])')" 2 "RECHUNK: modulo — G10: the split classes are sized at the new rate (2 mutants x 6 s <= 12 s)"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'sum(s["processed"] for s in d["steps"])')" 12 "RECHUNK: modulo — PROCESSED sums to the selection (12)"
+  # a different selection never reuses the stored partition (positive control: the same store IS used when it matches)
+  drive "$T/rcm3" pr --plan --no-cache
+  eq "$(grep -c '^PLAN mut\[' "$T/rcm3")" 4 "RECHUNK: modulo — the stored partition (class 1/2 + three split classes) is what a new plan starts from"
+  python3 - "$SAMEN_CI_HOME/partition/mut.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["sel"] = "0" * 64; json.dump(d, open(sys.argv[1], "w"))
+PY
+  drive "$T/rcm4" pr --plan --no-cache
+  eq "$(grep -c '^PLAN mut\[' "$T/rcm4")" 2 "RECHUNK: modulo — a partition stored for a DIFFERENT selection is ignored (fresh plan: 2 classes)"
+}
+
+# COSTW (ADR-053 P5): chunks of a `shard_cost` step are weighted by what each item last cost, so one 40 s item no
+# longer sizes a chunk of 1 s items (the old per-item bucket planned every chunk at the slowest rate: 266 s estimated,
+# 110-150 s real). The share of lane-seconds the wall-clock paid is learned too, and an unknown item is planned at the
+# old per-item rate.
+case_COSTW() {
+  mkrepo cw
+  { echo "$APPS"
+    cat <<'CONF'
+[step shd]
+cmd = a=${CI_SHARD_ARGS#--range }; lo=${a%-*}; hi=${a#*-}; n=$lo
+      while [ $n -le $hi ]; do c=1; [ $n -eq 4 ] && c=40; echo "==> [1/1] sabotage $n-a.patch (app: core)"; echo "    flip confirmed"; echo "    elapsed: ${c}s"; n=$((n+1)); done
+      echo "$CI_SHARD_ARGS" >> "$CI_TEST_RUNS"; echo "PROCESSED $((hi-lo+1))"
+shard_list = i=1; while [ $i -le 12 ]; do printf "  $i-a.patch x\n"; i=$((i+1)); done; printf "SELECTED 12\n"
+shard_kind = ranges
+shard_each_s = 10
+shard_target_s = 50
+shard_item = ^  ([0-9]+-\S+\.patch)\s
+shard_total = ^SELECTED ([0-9]+)$
+shard_check = ^PROCESSED ([0-9]+)$
+shard_cost = ^==> \[\d+/\d+\] sabotage (\S+) [^\n]*\n(?:(?!==>)[^\n]*\n)*?\s+elapsed: (\d+)s
+modes = pr
+inputs = core/
+est_s = 3
+CONF
+  } > "$SAMEN_CI_MANIFEST"
+  drive "$T/cw1" pr --plan --no-cache
+  eq "$(grep -c '^PLAN shd\[' "$T/cw1")" 3 "COSTW: nothing learned yet — items planned at shard_each (10 s): 12 items, 4 per chunk"
+  has "$T/cw1" '^PLAN shd\[1/3\] est 50\.0s ' "COSTW: ... each estimated at 4 x 10 + 10"
+  drive "$T/cw2" pr --budget 0 -j 1 --no-cache
+  eq "$RC" 0 "COSTW: the first run passes"
+  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'd["shd#item_cost"]["4-a.patch"]')" 40.0 "COSTW: the 40 s item's cost was read from the log"
+  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'd["shd#item_cost"]["1-a.patch"]')" 1.0 "COSTW: ... and a 1 s item's"
+  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'len(d["shd#chunk_obs"])')" 3 "COSTW: one (lane-seconds, wall-clock) observation per chunk"
+  eq "$(jsonget "$SAMEN_CI_HOME/timings.json" 'd["shd#chunk_obs"][0][0]')" 43.0 "COSTW: ... the first chunk (items 1-4: 1+1+1+40) is 43 lane-seconds"
+  # fewer than four observations: the prior (10 s fixed, every lane-second paid in full) stands
+  python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["shd#per_item"] = 0; json.dump(d, open(sys.argv[1], "w"))
+PY
+  drive "$T/cw3" pr --plan --no-cache
+  eq "$(grep -c '^PLAN shd\[' "$T/cw3")" 3 "COSTW: weighted by cost: [1-3] | [4] | [5-12]"
+  has "$T/cw3" '^PLAN shd\[1/3\] est 13\.0s ' "COSTW: the three cheap items are estimated at 3 + 10 s, not 4 x 10 + 10"
+  has "$T/cw3" '^PLAN shd\[2/3\] est 50\.0s ' "COSTW: the slow item stands alone at 40 + 10 s"
+  has "$T/cw3" '^PLAN shd\[3/3\] est 18\.0s ' "COSTW: the eight cheap items share one chunk at 8 + 10 s"
+  drive "$T/cw4" pr --budget 0 -j 1 --no-cache
+  eq "$RC" 0 "COSTW: the weighted plan runs and every sub-step reports exactly its chunk"
+  eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'sum(s["processed"] for s in d["steps"])')" 12 "COSTW: PROCESSED sums to the selection (12)"
+  # four exact observations on  wall = 30 + 0.5 * lane-seconds  : the fitted model replaces the prior, the fixed
+  # overhead (lane start-up) now counts per chunk, so the cheap items no longer ride free next to the slow one
+  python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["shd#chunk_obs"] = [[10, 35], [40, 50], [80, 70], [120, 90]]; json.dump(d, open(sys.argv[1], "w"))
+PY
+  drive "$T/cw5" pr --plan --no-cache
+  has "$T/cw5" '^PLAN shd\[1/3\] est 31\.5s ' "COSTW: fitted 30 s + 0.5/lane-second: the three cheap items = 31.5 s"
+  has "$T/cw5" '^PLAN shd\[2/3\] est 50\.0s ' "COSTW: ... the slow item = 50.0 s (30 + 0.5 x 40)"
+  has "$T/cw5" '^PLAN shd\[3/3\] est 34\.0s ' "COSTW: ... the eight cheap items = 34.0 s"
+  # the cap: even a good fit may not plan a chunk beyond 1.5x the largest lane-seconds seen to complete (4.5 here)
+  python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["shd#chunk_obs"] = [[1, 30.5], [2, 31], [3, 31.5], [1, 30.5]]; json.dump(d, open(sys.argv[1], "w"))
+PY
+  drive "$T/cw5b" pr --plan --no-cache
+  eq "$(grep -c '^PLAN shd\[' "$T/cw5b")" 4 "COSTW: the 1.5x cap splits the cheap items into [1-3] | [4] | [5-8] | [9-12] (a fit alone would keep 5-12 together)"
+  has "$T/cw5b" '^PLAN shd\[3/4\] est 32\.0s ' "COSTW: ... four cheap items = 30 + 0.5 x 4"
+  # the model itself: exact on exact data, never shorter than any observed chunk (margin), clamped, prior when thin
+  eq "$(python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import ci_driver as c
+P = c.PRIOR_MODEL
+print(c.cost_model([[10,35],[40,50],[80,70],[120,90]]), c.cost_model([[10,35],[40,50],[80,70]]) == P, c.cost_model([[10,35]]*6) == P, c.cost_model([[224,161],[299,150],[338,175],[350,173]]) == P)' "$ROOT/scripts")" \
+     "(30.0, 0.5, 1.0, 180.0) True True True" "COSTW: cost_model — exact fit (+ the 1.5x cap); < 4 observations, no spread, or less than half-range spread = the prior"
+  eq "$(python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import ci_driver as c
+obs = [[10,35],[40,50],[80,70],[120,90],[60,200]]
+a, b, m, cap = c.cost_model(obs)
+print(all(d <= m * (a + b * w) + 1e-9 for w, d in obs), m > 1.0, c.cost_model([[10,50],[40,300],[80,700],[120,1000]])[1], c.cost_model([[10,5],[40,10],[80,30],[120,50]])[0])' "$ROOT/scripts")" \
+     "True True 1.0 10.0" "COSTW: cost_model — the margin covers every observed chunk (G10); slope clamped to <= 1, overhead to >= 10 s"
+  # an item with no recorded cost keeps the old rate: a step WITHOUT shard_cost plans exactly as before
+  mkrepo cw0
+  { echo "$APPS"; sed -n '/^\[step shd\]/,$p' "$T/cw.conf" | grep -v '^shard_cost'; } > "$SAMEN_CI_MANIFEST"
+  drive "$T/cw6" pr --plan --no-cache
+  eq "$(grep -c '^PLAN shd\[' "$T/cw6")" 3 "COSTW: positive control — without shard_cost the count rule plans 3 chunks (per = 50 // 10 = 5: 5/5/2)"
+  has "$T/cw6" '^PLAN shd\[1/3\] est 60\.0s ' "COSTW: ... each estimated at 5 x 10 + 10 (the pre-P5 numbers)"
+}
+
+# TIMEOUT (ADR-053 P5): the Actions jobs ran under a flat `timeout-minutes: 350` (pr) / 120 (nightly) - a hung job held a
+# runner for six hours. Each plan job now has a timeout from observed runs (ci/actions_timeouts.tsv).
+case_TIMEOUT() {
+  local W="$ROOT/.github/workflows" tsv="$ROOT/ci/actions_timeouts.tsv" mode
+  for mode in pr full; do
+    env -u SAMEN_CI_MANIFEST -u SAMEN_CI_REPO -u SAMEN_CI_HOME "$CI" actions plan "$mode" --json > "$T/to.$mode" 2>&1
+    eq "$?" 0 "TIMEOUT: the real $mode plan builds"
+    eq "$(jsonget "$T/to.$mode" 'all(isinstance(j["timeout_min"], int) and 15 <= j["timeout_min"] <= 360 for j in d["jobs"])')" True "TIMEOUT: every $mode job has a timeout_min in [15, 360]"
+  done
+  eq "$(jsonget "$T/to.pr" 'max(j["timeout_min"] for j in d["jobs"])')" 60 "TIMEOUT: positive control — the longest PR job (sabotage_changed) is 60 min, not 350"
+  eq "$(jsonget "$T/to.pr" '[j["timeout_min"] for j in d["jobs"] if j["name"] == "preflight"][0]')" 15 "TIMEOUT: ... and a 1.9 min job gets the 15 min floor"
+  # the table: every row is its own formula, and no row names a job neither plan has (a stale row hides a rename)
+  python3 - "$tsv" "$T/to.pr" "$T/to.full" <<'PY' > "$T/to.rows" 2>&1
+import fnmatch, json, math, sys
+rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1]) if l.strip() and not l.lstrip().startswith("#")]
+names = {j["name"] for f in sys.argv[2:] for j in json.load(open(f))["jobs"]}
+bad = 0
+for name, obs, tmo, runs in rows:
+    want = max(15, 5 * math.ceil(2 * float(obs) / 5))
+    if int(tmo) != want: print("BAD %s: %s != %s" % (name, tmo, want)); bad += 1
+    if not any(fnmatch.fnmatchcase(n, name) for n in names): print("STALE %s matches no job" % name); bad += 1
+print("rows=%d bad=%d" % (len(rows), bad))
+PY
+  has "$T/to.rows" '^rows=2[0-9] bad=0$' "TIMEOUT: every row of ci/actions_timeouts.tsv is max(15, 5*ceil(2*observed/5)) and names a real job"
+  # the workflows use it; the flat limits are gone from the ci jobs
+  has "$W/pr.yml" 'timeout-minutes: \$\{\{ matrix\.timeout_min \}\}' "TIMEOUT: pr.yml's ci job reads matrix.timeout_min"
+  has "$W/nightly.yml" 'timeout-minutes: \$\{\{ matrix\.timeout_min \}\}' "TIMEOUT: nightly.yml's ci job reads matrix.timeout_min"
+  hasnt "$W/pr.yml" 'timeout-minutes: (350|120)' "TIMEOUT: pr.yml keeps no flat 350"
+  hasnt "$W/nightly.yml" 'timeout-minutes: (350|120)' "TIMEOUT: nightly.yml keeps no flat 120"
+  # fixture: the refusals and the default
+  mkrepo to
+  { echo "$APPS"; step a core/ group=g1 'actions_job=alpha'; step b core/ 'actions_job=beta'; } > "$SAMEN_CI_MANIFEST"
+  mkdir -p "$SAMEN_CI_REPO/ci"; cp "$SAMEN_CI_MANIFEST" "$SAMEN_CI_REPO/ci/steps.conf"
+  export SAMEN_CI_MANIFEST="$SAMEN_CI_REPO/ci/steps.conf"
+  printf 'alpha\t3.0\t15\t4\nbet*\t40.2\t85\t2\n' > "$SAMEN_CI_REPO/ci/actions_timeouts.tsv"
+  drive "$T/to1" actions plan pr --json
+  eq "$RC" 0 "TIMEOUT: a consistent table plans"
+  eq "$(jsonget "$T/to1" '{j["name"]: j["timeout_min"] for j in d["jobs"]}')" "{'alpha': 15, 'beta': 85}" "TIMEOUT: an exact row and a glob row apply (3.0 -> floor 15; 40.2 -> 85)"
+  printf 'alpha\t3.0\t15\t4\n' > "$SAMEN_CI_REPO/ci/actions_timeouts.tsv"
+  drive "$T/to2" actions plan pr --json
+  eq "$(jsonget "$T/to2" '{j["name"]: j["timeout_min"] for j in d["jobs"]}')" "{'alpha': 15, 'beta': 60}" "TIMEOUT: a job with no row gets the 60 min default"
+  has "$T/to2" 'default \(no observed run yet' "TIMEOUT: ... and says it is a default"
+  printf 'alpha\t3.0\t300\t4\n' > "$SAMEN_CI_REPO/ci/actions_timeouts.tsv"
+  drive "$T/to3" actions plan pr --json
+  eq "$RC" 2 "TIMEOUT: a row whose timeout is not the formula of its observation is REFUSED"
+  has "$T/to3" 'change the observation, not the timeout alone' "TIMEOUT: ... saying why"
+  printf 'alpha\t3.0\t15\n' > "$SAMEN_CI_REPO/ci/actions_timeouts.tsv"
+  drive "$T/to4" actions plan pr --json
+  eq "$RC" 2 "TIMEOUT: a malformed row (3 columns) is refused"
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS GENPROBE NARROW RECHUNK COSTW TIMEOUT)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

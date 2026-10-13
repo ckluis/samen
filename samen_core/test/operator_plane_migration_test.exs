@@ -33,7 +33,8 @@ defmodule Samen.OperatorPlaneMigrationTest do
 
   alias Samen.OperatorPlane.Migration, as: OpMig
 
-  @scratch_db "samen_core_opmigration_scratch"
+  # per-lane suffix (ADR-053 P5): two sabotage lanes replaying this file must never share the scratch database
+  @scratch_db "samen_core_opmigration_scratch" <> System.get_env("SAMEN_TEST_DB_SUFFIX", "")
 
   # An inline migration module that uses the EXTRACTED shared helpers — exactly the
   # shape a host now writes (ADR-005). This is the thing under test.

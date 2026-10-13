@@ -89,8 +89,7 @@ defmodule Samen.Automation.ActionsTest do
   @target_key "SamenCore.Support.AutomationFixture.Target"
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
 
     prev = %{
       engine: Application.get_env(:samen_core, Samen.Notifications.Engine),

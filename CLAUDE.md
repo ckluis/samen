@@ -30,13 +30,16 @@ Use the driver; never hand-segment `ci.sh`, never background a run and poll it (
   new` — `git add` your fix FIRST, make ONLY the sabotage edit unstaged, then run it. `MUST_FAIL` is a literal test
   name, never interpolated. A patch that stopped applying: `scripts/sabotage reanchor <n>`; never delete it.
   Replay: `scripts/sabotage.sh` (filters) / `scripts/sabotage-lanes.sh` (N lanes). Unfiltered runs need `scripts/ci full`.
-- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->556<!--/count--> sabotages
-  (driver red paths `scripts/ci_test.sh` <!--count:driver_sabotages-->496–563<!--/count-->), watch-list <!--count:watchlist_modules-->12<!--/count-->
-  modules / <!--count:watchlist_mutants-->166<!--/count--> mutants, corpus <!--count:corpus_targets-->227<!--/count--> targets /
-  <!--count:corpus_mutants-->3,957<!--/count--> mutants.
+- Counts are generated (`scripts/counts --write`, never by hand): <!--count:sabotages-->593<!--/count--> sabotages
+  (driver red paths `scripts/ci_test.sh` <!--count:driver_sabotages-->496–600<!--/count-->), watch-list <!--count:watchlist_modules-->12<!--/count-->
+  modules / <!--count:watchlist_mutants-->166<!--/count--> mutants, corpus <!--count:corpus_targets-->228<!--/count--> targets /
+  <!--count:corpus_mutants-->3,960<!--/count--> mutants.
 - Toolchain floor `.tool-versions` (Elixir 1.20.4 / OTP 29.1.1); the `toolchain` step fails on older — raise the pin
   when upgrading. Prerequisite: Postgres WITH `pgvector` (`brew install pgvector`; ADR-043 §7.1/M3) — else the
   samen_core suite fails at setup with "pgvector not installed".
+- Tests needing a shared Ecto sandbox call `Samen.TestSandbox.shared!(Repo)`; a raw `Sandbox.mode(_, {:shared, _})` fails
+  `Samen.TestSandboxGuardTest` (it made the test process the owner: the `owner exited` flake). A step may drop
+  `<app>/test/*_test.exs` from its key only if it never runs ExUnit on that app (`NARROW` proves it).
 - Dialyzer (`dialyzer_*` steps; `scripts/dialyzer_gate.sh [app…]`): a warning not in that project's
   `.dialyzer_ignore.exs` fails, and so does an UNUSED entry. Fix it or add it WITH its reason — never a bare
   entry. PLTs (`*/priv/plts/`) are gitignored — never commit them (#77).
@@ -86,10 +89,13 @@ NEVER add/edit rows in any `priv/abbrev_registry.json` by hand. Allocation goes 
 sanctioned allocator only (`mix samen.abbrev.reserve`, driven by `mix samen.gen.*`; ADR-023).
 Any probe/script touching the registry must restore it SHA-256 byte-exact on every exit path
 — INCLUDING an OS-level interrupt (SIGINT/SIGTERM), not just normal/error returns (T107).
-Enforced by `run_gen_probe` (`scripts/gen_probe_guard.sh`) around each `samen_core/priv/gen_*_probe.exs`
-of the four serial `gen_*_probe` steps: it snapshots the registry to a `mktemp`'d file before each
-probe and restores + SHA-256-verifies it in a trap covering SIGINT/SIGTERM/ERR/EXIT, independent of whether the
-probe itself gets to run its own cleanup (SIGINT is not trappable inside the BEAM at all).
+Enforced by `run_gen_probe` (`scripts/gen_probe_guard.sh`) around each `samen_core/priv/gen_*_probe.exs` of the four
+`gen_*_probe` steps: the probe works on a PRIVATE copy of the registry (`SAMEN_ABBREV_REGISTRY`), so flagship/post/deploy
+run concurrently (`gen_agent_probe` stays serial) and the committed file is never written; the guard still snapshots it
+and, in a trap covering SIGINT/SIGTERM/ERR/EXIT (SIGINT is not trappable inside the BEAM at all), verifies it
+byte-identical — a difference is repaired from the snapshot and FAILS the probe. `GEN_PROBE_SHARED_REGISTRY=1` is the old
+in-place mode, used only by the T107 interrupt harness. `Samen.AbbrevRegistry` refuses `SAMEN_ABBREV_REGISTRY` unless the
+guard's companion `SAMEN_ABBREV_REGISTRY_GUARD` is set, and `scripts/ci` strips all three from every step — never export them.
 
 ## Framework-first, ≈0-LOC vertical mounts
 Features live in samen_core/samen_web; verticals adopt via one router/macro call

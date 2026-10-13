@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: shared!/1 starts a private (non-shared) owner, so processes the test spawns cannot 
+#   reach its connection
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_sandbox_test.exs
+# MUST_FAIL: shared!/1: a process the test spawns sees the test's connection and data
+diff --git a/samen_core/lib/samen/test_sandbox.ex b/samen_core/lib/samen/test_sandbox.ex
+index db181c1..547527e 100644
+--- a/samen_core/lib/samen/test_sandbox.ex
++++ b/samen_core/lib/samen/test_sandbox.ex
+@@ -37,7 +37,7 @@ defmodule Samen.TestSandbox do
+   def shared!(repo, opts \\ []) do
+     # `:on_exit` is a seam for the helper's own test (a recorder instead of ExUnit's registry)
+     register = Keyword.get(opts, :on_exit, &ExUnit.Callbacks.on_exit/1)
+-    owner = Sandbox.start_owner!(repo, shared: true)
++    owner = Sandbox.start_owner!(repo, shared: false)
+     register.(fn -> release(owner) end)
+     owner
+   end

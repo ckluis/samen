@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 P5: the multinode repo's database has a fixed name again
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: C7 the N-lane corpus fails unless the patches processed across its lanes equal the selected count
+diff --git a/samen_core/config/test.exs b/samen_core/config/test.exs
+index 4b41924..e080203 100644
+--- a/samen_core/config/test.exs
++++ b/samen_core/config/test.exs
+@@ -22,7 +22,7 @@ config :samen_core, Samen.MultiNode.Repo,
+   username: System.get_env("USER") || "postgres",
+   password: "",
+   hostname: "localhost",
+-  database: "samen_core_multinode_test" <> System.get_env("SAMEN_TEST_DB_SUFFIX", ""),
++  database: "samen_core_multinode_test",
+   pool_size: 10,
+   log: false
+ 

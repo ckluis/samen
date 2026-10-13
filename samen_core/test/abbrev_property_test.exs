@@ -21,8 +21,7 @@ defmodule Samen.AbbrevPropertyTest do
     # StreamData runs the property body in the test process, but Ash/Ecto may hand
     # work to pool processes; shared sandbox mode (safe under async: false) lets
     # them all see the same checked-out connection.
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(SamenCore.TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(SamenCore.TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(SamenCore.TestRepo)
     :ok
   end
 

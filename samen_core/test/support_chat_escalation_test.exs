@@ -141,8 +141,7 @@ defmodule Samen.Support.ChatEscalationTest do
 
   describe "open_escalation_record/3 — the T41 primitive, best-effort" do
     setup do
-      :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-      Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+      Samen.TestSandbox.shared!(TestRepo)
 
       prev = Application.get_env(:samen_core, Samen.Automation.Escalate)
 

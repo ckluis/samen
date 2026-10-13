@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 P5: release/1 forgets to stop the owner, so the pool stays shared and its data is never 
+#   rolled back
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/test_sandbox_test.exs
+# MUST_FAIL: release/1 returns the pool to :manual and is idempotent
+diff --git a/samen_core/lib/samen/test_sandbox.ex b/samen_core/lib/samen/test_sandbox.ex
+index db181c1..506cc90 100644
+--- a/samen_core/lib/samen/test_sandbox.ex
++++ b/samen_core/lib/samen/test_sandbox.ex
+@@ -45,7 +45,6 @@ defmodule Samen.TestSandbox do
+   @doc "Stop a `shared!/1` owner (idempotent): rolls the sandbox back and restores `:manual` mode."
+   @spec release(pid()) :: :ok
+   def release(owner) do
+-    Sandbox.stop_owner(owner)
+     :ok
+   catch
+     :exit, _ -> :ok

@@ -19,8 +19,7 @@ defmodule Samen.ImpersonationSameTxTest do
   @repo SamenCore.TestRepo
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
-    Ecto.Adapters.SQL.Sandbox.mode(@repo, {:shared, self()})
+    Samen.TestSandbox.shared!(@repo)
     :ok
   end
 

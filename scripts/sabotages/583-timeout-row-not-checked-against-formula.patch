@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: a timeout row is accepted whatever its observation, so the number can drift from 
+#   the data
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: TIMEOUT every Actions job has a timeout from observed runs, never a flat 350
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 8b2143a..3919a42 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -1509,7 +1509,7 @@ def load_timeouts():
+                 name, obs, tmo, runs = c[0].strip(), float(c[1]), int(c[2]), int(c[3])
+             except ValueError as e:
+                 raise UsageError("%s:%d: %s" % (os.path.relpath(TIMEOUTS, REPO), n, e))
+-            if tmo != timeout_formula(obs) or not (TIMEOUT_FLOOR_MIN <= tmo <= MAX_TIMEOUT_MIN) or runs < 1:
++            if False:
+                 raise UsageError("%s:%d: %s: timeout_min %d is not max(%d, 5*ceil(2*%.1f/5)) = %d (or runs < 1) — "
+                                  "change the observation, not the timeout alone" % (
+                                      os.path.relpath(TIMEOUTS, REPO), n, name, tmo, TIMEOUT_FLOOR_MIN, obs, timeout_formula(obs)))

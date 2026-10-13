@@ -42,8 +42,7 @@ defmodule Samen.NoPlaintextPii.Tiers.ObanJobsTest do
   # oban_jobs writes (in their own sandboxes) are invisible here. Deterministic, no
   # sleeps, no quarantine.
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
-    Ecto.Adapters.SQL.Sandbox.mode(@repo, {:shared, self()})
+    Samen.TestSandbox.shared!(@repo)
     :ok
   end
 

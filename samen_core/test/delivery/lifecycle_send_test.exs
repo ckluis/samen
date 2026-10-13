@@ -49,8 +49,7 @@ defmodule Samen.Delivery.LifecycleSendTest do
   @app_keys [EmailWorker, SendWorker, EmailDispatchWorker, Chokepoint]
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
 
     prev_env = for k <- @env_keys, into: %{}, do: {k, Application.get_env(:samen_core, k)}
     prev_app = for k <- @app_keys, into: %{}, do: {k, Application.get_env(:samen_core, k)}

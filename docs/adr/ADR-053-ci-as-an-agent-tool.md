@@ -675,6 +675,128 @@ runs); a cron run only fires from `main`, so the first one also seeds the defaul
 `sabotage_changed` / `mutation_changed` remain one Actions job each; cost-weighted chunking (P3 deviation 4) is
 still open. Branch protection (require `ci-pr`) stays the operator's call.
 
+### 2.9 As built (P5) — follow-ups: concurrent gen probes, narrowed keys, finished chunks survive a re-plan, per-job timeouts, no shared-sandbox leak
+
+Measured 2026-10-13 on the 10-core 16 GB dev machine with other sessions (and a 6-core Virtualization process)
+running — every number carries the `uptime` 1-minute load. Branch `feat/adr-053-p5-followups`, sabotages 564-596,
+driver cases GENPROBE, NARROW, RECHUNK, COSTW, TIMEOUT (+ C7 extended).
+
+**1. Gen probes (`pr` after a kernel edit was ≈ 370 s of serial probes).**
+*Why serial:* one shared resource — the committed `samen_core/priv/abbrev_registry.json`, which each probe mutated
+in place (the generated app's `use Samen.Resource` reads it at its own compile time) and restored from a snapshot,
+so two probes would restore each other's reservations away; plus `run_gen_probe`'s scratch sweep, which deleted
+EVERY probe family's `_gen_*_scratch.*` dirs, i.e. a concurrent probe's working tree. Not a shared port (the three
+HTTP ranges 4790/4880/4990 + 90 are disjoint — asserted), not a shared database (names derive from a per-probe app
+identity), not `_build` (each scratch app has its own; `samen_core`'s dev build is guarded by Mix's own lock).
+`gen_agent_probe` is genuinely shared-tree (it writes a scratch scope INTO `samen_core/lib` + `test` and runs
+`mix test` there), so it stays `serial`.
+*Fix:* `Samen.AbbrevRegistry.path/0` honours `SAMEN_ABBREV_REGISTRY` (absolute, read at call time, refused when
+relative or missing); `run_gen_probe` hands each probe a private copy, still snapshots and SHA-verifies the committed
+file in the SIGINT/SIGTERM/ERR/EXIT trap (a probe that writes it anyway is repaired and FAILS), and sweeps only its
+own scratch dirs; `/_gen_*_scratch*/` is gitignored (an untracked scratch dir would change every concurrent
+tree-wide step's cache key mid-run). `GEN_PROBE_SHARED_REGISTRY=1` keeps the in-place mode for the T107 interrupt
+harness, which proves the trap over the real mutation window. *Proof:* GENPROBE (stub `mix`: private registry
+untouched, a probe writing the committed file FAILS and is repaired, two probes at once do not delete each other's
+dirs — with the shared-mode twin that DOES lose a dir as the positive control — disjoint ports, manifest not-serial
+for three and serial for `gen_agent`), `abbrev_registry_override_test`, sabotages 564-567, 569-571; two green
+concurrent runs of the real probes (351.2 s and 215.5 s above) plus the closing `pr`. *Numbers (`pr --only gen_probes --no-cache --budget 0`):* serial **353.8 s**
+[load 2.6 → 8], concurrent **351.2 s** [5.5 → 13] (flagship 339 s, post 271 s, deploy 237 s), concurrent in a scratch
+worktree **215.5 s** [6.2]. The probes are CPU-bound (≈ 62 dependencies compiled per generated app + the app's own
+suite), so concurrency only turns idle cores into wall-clock: no gain on a saturated box, the max of the three
+(≈ 160-210 s) on a quiet one. Not claimed beyond that.
+*Narrowed keys:* the probes and the ten `dialyzer_*` steps now declare `!<app>/test/*_test.exs`. Sound because
+neither runs ExUnit on those apps: dialyzer reads compiled `.ex`; the probes run `mix test` only inside the scratch
+app (gen_agent: its own emitted file). NARROW proves, against the real manifest and tracked files, that the
+exclusion drops exactly `<app>/test/**_test.exs` and nothing Mix compiles (every `.ex` under the `elixirc_paths` of
+every env, `mix.exs`, `mix.lock`, `test/test_helper.exs` stay), that no probe/guard/dialyzer script names a test
+path, and the driver red path (an excluded edit keeps the key and the quick selection; an included one changes
+both); and it was EXECUTED: in a scratch worktree with every `*_test.exs` of every app deleted, the four probes
+(215.5 s) and all ten dialyzer steps PASS. Sabotage 568. *Not narrowed:* steps with `reads = **` (the suites,
+`verify_*`, `ai_eval`, `multinode`, the mutation/sabotage steps) — they read tests or declare the whole tree, and
+`app:samen_core` in the adapters' dialyzer keys already excludes the framework's `test/`.
+
+**2. Re-chunking voided finished work.** Root cause: a sub-step's key includes its range, the range changes when the
+learned per-item rate re-chunks, so `resume` re-ran chunks that had PASSed (builder P3 lost ≈ 30 min). Now the
+partition of a (step, selection-hash) is persisted (`_ci/partition/<step>.json`); finished chunks (state PASS or a
+cached PASS; `--no-cache` counts only this run's state) stay exactly as planned and are found BY KEY, so a changed
+slot id does not hide them; only the unfinished stretches between them are re-planned at the current rate. Modulo
+shards keep finished classes and split only a class that outgrew the target into `kM` sub-classes (x % M == r-1 is
+the union of x % kM == r-1+jM). A stored partition for another selection or with an unknown item is ignored. Kept:
+each sub-step's PROCESSED == its chunk, G10 (re-planned chunks are sized at the NEW rate), the accounting total.
+RECHUNK (ranges and modulo, with the no-partition twin that DOES re-run 10 items), sabotages 572-575; the old C1
+expectation that a re-learned rate re-chunks a finished run was rewritten (it reuses the finished chunk; `--no-cache`
+still re-chunks).
+
+**3. `sabotage_changed` estimate pessimistic when the driver changes.** The estimate priced every chunk at the
+slowest patch's rate (power-of-two bucket 64 s/item → 266 s for 4 patches, 110-150 s real). New manifest key
+`shard_cost` reads each item's `elapsed:` out of a passed chunk's log; chunks are cut by lane-seconds, and a fitted
+model turns them into wall-clock: measured here `wall ≈ 60 s + 0.32 × lane-seconds` (guard patches are ≈ 35 s in
+a lane, not 60). The fit is used only with ≥ 4 observations spread over half the largest (a first version fitted
+four chunks of one size to 120 s + 0.11 and planned a 459 s chunk — caught on the real run, rule added), never plans
+past 1.5× the largest lane-seconds seen to complete, and carries a margin = the worst observed/predicted ratio.
+Unknown items keep the old rate (G10). COSTW (weights, prior, exact fit, clamps, margin, leverage, cap), sabotages
+576-579, 594-596. *Numbers (66 patches touched by this branch's driver edits, 17 planned chunks):* old policy: 3
+chunks per call (est 266 s each) → 6 calls; new driver, cold item costs: **5 calls** (3, 3, 2, 2, 1 chunks, ≈ 1650 s
+wall, load 12-35), re-chunking 17 → 13 → 10 chunks mid-run with every finished chunk kept; warm item costs: the
+closing `pr` of this branch (calls in the PR description). Sabotages 507 and 549 (and 575/577/578/594 after the model
+changed) were re-anchored/regenerated onto the new lines.
+
+**4. Fixed-name scratch DBs.** `samen_core_backup_{src,scratch}`, `samen_core_opmigration_scratch`,
+`samen_core_pitr_restore_test` and the multinode repo now append `SAMEN_TEST_DB_SUFFIX`; C7 checks every samen_core
+test DB name (6 found) and the samen_core suite is green with and without a suffix. Sabotages 580-582.
+
+**5. Actions timeouts.** `timeout-minutes` was a flat 350 (pr) / 120 (nightly). `ci/actions_timeouts.tsv` holds, per
+job, the longest successful run in `gh run list` / `gh run view --json jobs` (17 pr + 5 nightly runs) and
+`max(15, 5·ceil(2·observed/5))`; the plan emits `timeout_min`, both workflows read `matrix.timeout_min`, a job with
+no row gets 60, a row off the formula is refused. Longest PR job `sabotage_changed` (29.8 min) → 60; dialyzer_verticals
+(25.0) → 50; the 15 s-to-8 min jobs → 15-20. TIMEOUT, sabotages 583-586.
+
+**6. Shared-sandbox leaks.** The cause is subtler than "never restored": the raw `checkout` + `mode(repo,
+{:shared, self()})` pair makes the TEST PROCESS the owner, and it is gone before `on_exit` callbacks and any late
+async work run, which then die with `** (EXIT) shutdown: "owner … exited"` (reproduced in a probe test).
+`Samen.TestSandbox.shared!/1` (lib; `start_owner!(shared: true)` + an `on_exit` that stops the owner, which outlives the
+test process and every later `on_exit`) replaced the pair in **123 files** (samen_core 109, samen_web 4, demo 7,
+driftwood 2, pawchart 1) and in the generator templates (`data_case`/`api_case`, goldens regenerated);
+`Samen.TestSandboxGuardTest` forbids the raw pair in any test file or emitted template (positive control, obsolete-
+allowlist rule, non-vacuity). Suites green after the migration: samen_core 156 s, samen_web 113 s, demo 92 s,
+driftwood 163 s, pawchart 76 s. Sabotages 587-593.
+
+**Deferred.** (a) A shared compiled-dependency cache for the gen probes (≈ half of each probe is dependency compile;
+needs a soundness proof for compile-env differences between generated apps). (b) Cost-weighting of `modulo`
+(mutation) shards and of the Actions `sabotage_changed` job (it starts cold: unknown items are priced at the old
+rate). (c) The `demo`/`driftwood` PITR drill databases keep fixed names (no sabotage names them). (d) Item costs are
+machine-local (`_ci/timings.json`); a committed seed table was not added (it would drift).
+
+**Gate (P5).** The adversarial gate found, each reproduced mechanically:
+
+| # | Finding | Fix |
+|---|---|---|
+| G1 | `SAMEN_ABBREV_REGISTRY` (read by shipped lib code at call time) silently redirected the SANCTIONED allocator: `SAMEN_ABBREV_REGISTRY=<a copy> mix samen.abbrev.reserve --host gatep5 --owner GateP5.Vertical.Thing --propose` printed `reserved gatep5/gvt -> …`, exit 0, the committed registry's SHA-256 unchanged and the row only in the copy — a stray export loses a reservation with no sign. | `path/0` honours the override only next to the companion `SAMEN_ABBREV_REGISTRY_GUARD=gen_probe_guard` (exported by `run_gen_probe` with `local -x`, for that probe's children only); set alone it RAISES (path, load, and an allocator write). Red path in `abbrev_registry_override_test` (four companion values, the stray file and the committed one untouched, positive control); sabotage 597; GENPROBE asserts the probe receives the companion. |
+| G2 | The driver handed an inherited `GEN_PROBE_SHARED_REGISTRY=1` to every step, and the three probes are no longer `serial`: in shared mode a later-started probe snapshots the registry WITH an earlier probe's reservation and restores it into the committed file after that probe restored its own. Stub `mix`, probe A first, B 0.4 s later and finishing last: both `PASSED`, committed file left with A's row (`095caee6…` → `49246a5a…`). An inherited `SAMEN_ABBREV_REGISTRY` likewise checked every step's compile-time abbrev verification against another file. | `PROBE_SEAMS` (`GEN_PROBE_SHARED_REGISTRY`, `SAMEN_ABBREV_REGISTRY`, `SAMEN_ABBREV_REGISTRY_GUARD`) are stripped from every step environment, like the wrapper flags; GENPROBE 8 (driver run with all three exported; positive control: another `SAMEN_` variable passes through); sabotage 598. The T107 harness, which needs shared mode, does not run under the driver. |
+| G3 | `Samen.TestSandboxGuardTest` matched only a literal `Sandbox.mode(` receiver with a paren-free repo: `alias …Sandbox, as: SQLSandbox`, an imported `mode(Repo, {:shared, …})`, `mode(repo(), …)` and `Repo \|> Sandbox.mode({:shared, …})` all passed. | a second pattern for exactly the spellings the first cannot see (a non-`…Sandbox.` receiver, a call-repo, a pipe), disjoint from it so sabotage 590 stays refutable (a first, broader version swallowed `Sandbox.mode(Repo, …)` too and this gate's own `pr` caught 590 going vacuous), never right after a backtick (it had flagged prose in `reveal_grant_property_test`'s moduledoc); five new positive-control spellings and the prose negative; sabotage 599. A tuple bound to a variable first is still not caught (no regex can). |
+| G4 | (found validating the PR) A chunk kept on resume under a NEW slot id (re-plan `[1/9]` → `[1/6]`) was recorded in `last.json` but left in `state.json` under its old id: the verdict said `PASS 53/53` while `scripts/ci status` said `PASS — 52/53 done` with `NOT_RUN sabotage_changed[1/6]` — a contradiction an agent would have to investigate. All 71 patches had run (`last.json` PROCESSED sums to the selection). | the kept result is filed under its current slot id too; RECHUNK asserts `status` shows 16/16 done and no `NOT_RUN` (red against the old driver); sabotage 600. |
+
+Checked and holding: the T107 interrupt harness (shared mode) 8 passed / 0 failed with the registry byte-exact; a stored
+partition is keyed on (step, kind, the full item list) and a finished chunk is found by its full cache key (range, items,
+inputs content, `@base`), so a changed selection or content cannot keep a chunk, and the accounting / PROCESSED checks are
+untouched; NARROW's `!<app>/test/*_test.exs` is an fnmatch (`*` crosses `/`), no `*_test.exs` lives under any
+`test/support`, and no lib/support module reads a test file at compile time; the workflow diff is only the two
+`timeout-minutes` lines (pins, permissions and the `ci-pr` verify unchanged) and every matrix entry carries
+`timeout_min` (pr 18 jobs, full 47). `Samen.TestSandbox` in `samen_core/lib` follows `Samen.RedPath` / `Samen.Factory` /
+`Samen.MaskingCase` (no lib caller; it only acts when a test calls it).
+
+Notes, not fixed: (N1) ecto_sql 3.14 refuses a second concurrent shared owner (`start_owner!` dies with
+`:already_shared`) where the raw pair ignored `mode/2`'s return; two `async: true` modules use the helper
+(`demo/test/e6_catalog_adoption_probe_test.exs`, `samen_web/test/samen/scopes/chat_catalog_adoption_probe_test.exs`), in
+different apps, so they never overlap — a second one in the same app would fail loudly in `setup`, not share silently
+(reproduced with a probe test). (N2) The timeouts of the two diff-scaled PR jobs follow history, not the selection:
+`sabotage_changed` 60 min (observed 29.8) and `mutation_changed` 15 min (observed 0.9), while a broad kernel PR can select
+far more (the whole watch-list is 6 nightly slices of ≤ 12.8 min). That fails closed (a red job, never a green one; it was
+350), but it would block such a PR: derive these two from the selection at plan time. (N3) Unknown items are weighted at
+`each` (64) lane-seconds and then discounted by the fitted share (0.31): with this machine's timings a chunk of unknown
+patches holds 8 where the old policy planned 4 (est 285 s within the 300 s target, margin 1.39) — "unknown items keep the
+old rate" is true of the weight, not of the wall-clock; an item far above 64 lane-seconds could overrun one call.
+
 ## 3. Red paths (each with a test; sabotage where it guards a property)
 
 | # | Must fail when |
@@ -699,6 +821,15 @@ evicts the cached PASS of the same content) likewise.
 | A1 | the Actions plan lets a step sit in no job, in two places, or be excluded without a reason |
 | A2 | the Actions aggregate passes though a planned step did not run, ran twice, ran on the wrong base or another commit/tree, the plan is empty, or a job failed |
 | A3 | sliced corpus: the slices' processed counts sum to ≠ the selected total (C7's Actions twin) |
+| GENPROBE | a gen probe writes the committed abbrev registry, or a finishing probe deletes a concurrent probe's scratch dir (P5) |
+| NARROW | a `*_test.exs` exclusion drops anything Mix compiles, or a narrowed step starts reading a test path (P5) |
+| RECHUNK | a resume re-runs a chunk that already passed because the learned rate re-chunked the plan (P5) |
+| COSTW | chunks ignore what each item cost, or the cost model plans a chunk shorter than one that ran / far past any that completed (P5) |
+| TIMEOUT | an Actions job keeps a flat limit, or a timeout row drifts from its observation (P5) |
+
+P5 (as built): GENPROBE, NARROW, RECHUNK, COSTW, TIMEOUT (and C7's extension to the samen_core scratch databases) are cases
+of `scripts/ci_test.sh`, named in `ci_driver_guard_test.exs`; the sandbox helper has its own tests
+(`test_sandbox_test`, `meta/sandbox_shared_guard_test`); sabotages 564-596 (§2.9 "P5"), 597-600 from its gate (§2.9 "Gate (P5)").
 
 P4 (as built): DOCS is a case of `scripts/ci_test.sh`, named in `ci_driver_guard_test.exs`; sabotages 554–563 flip it
 (§2.9 "P4", 561–563 from its gate).
@@ -717,6 +848,7 @@ P2 (as built): A1–A3 (and the gate's WAE) are cases of `scripts/ci_test.sh` (n
 | P2 | **BUILT (PR #88).** GitHub Actions: `pr.yml` + `nightly.yml` (sharded corpus + mutation), caches, pgvector service; proven green on its own PR. |
 | P3 | **BUILT.** Sabotage/mutation ergonomics: N-lane corpus, `sabotage new`, `sabotage reanchor`, `scripts/counts`. C7, C8, C10. |
 | P4 | **BUILT.** CLAUDE.md "Suites / CI" + "Mutation gate" rewritten around the three modes (104 → 37 lines); `docs/ci.md`; `scripts/docs_check` (doc-drift guard, DOCS, sabotages 554–563); before/after numbers for a typical round (§2.9 P4). |
+| P5 | **BUILT.** Follow-ups: gen probes concurrent on a private abbrev-registry copy + `*_test.exs` out of the probe/dialyzer keys; finished chunks survive a re-plan (persisted partitions); cost-weighted chunks with a fitted model; samen_core scratch DBs lane-suffixed; per-job Actions timeouts from observed runs; `Samen.TestSandbox.shared!/1` replacing the raw shared-sandbox pair (123 files + templates) with a guard. Sabotages 564-596 (§2.9 P5). |
 
 ## 5. Consequences
 

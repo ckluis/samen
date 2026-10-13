@@ -212,8 +212,7 @@ defmodule Samen.AI.AgentHooksTest do
   @vt_token "vt_" <> String.duplicate("d", 32)
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
     Scripted.reset()
     Agent.Breaker.reset()
     T181Probe.reset()

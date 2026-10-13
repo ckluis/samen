@@ -42,8 +42,7 @@ defmodule Samen.SearchEngineTest do
   @file_name inspect(FileResource)
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
 
     root = Path.join(System.tmp_dir!(), "search_test_#{System.unique_integer([:positive])}")
     Elixir.File.rm_rf!(root)

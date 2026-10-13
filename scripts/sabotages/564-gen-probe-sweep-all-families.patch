@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: a private-mode probe sweeps every probe family's scratch dirs, deleting a 
+#   concurrent probe's working tree
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENPROBE the gen probes run on a private registry copy and sweep only their own scratch dirs
+diff --git a/scripts/gen_probe_guard.sh b/scripts/gen_probe_guard.sh
+index 0918321..55116f0 100755
+--- a/scripts/gen_probe_guard.sh
++++ b/scripts/gen_probe_guard.sh
+@@ -84,7 +84,7 @@ gen_probe_restore() {
+ 
+   # Sweep scratch residue of THIS probe only (legacy fixed-name dir AND the mktemp'd unique-per-run dirs, T107).
+   # Shared mode keeps the pre-P5 sweep of every family (the interrupt harness launches one probe at a time).
+-  if [[ -n "$GEN_PROBE_PRIVATE" ]]; then
++  if [[ -z "$GEN_PROBE_PRIVATE" ]]; then
+     if [[ -n "$GEN_PROBE_SCRATCH" ]]; then
+       rm -rf "$REPO_ROOT/$GEN_PROBE_SCRATCH" "$REPO_ROOT/$GEN_PROBE_SCRATCH".*
+     fi

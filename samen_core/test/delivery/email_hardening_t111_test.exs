@@ -60,8 +60,7 @@ defmodule Samen.Delivery.EmailHardeningT111Test do
   end
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
-    Ecto.Adapters.SQL.Sandbox.mode(@repo, {:shared, self()})
+    Samen.TestSandbox.shared!(@repo)
 
     prev_provider = Application.get_env(:samen_core, :delivery_provider)
     prev_email = Application.get_env(:samen_core, EmailWorker)
