@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P4 gate: docs_check skips a path written ./scripts/…, so a moved script CLAUDE.md names 
+#   that way stays documented.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: DOCS the CI docs cannot name
+diff --git a/scripts/docs_check.py b/scripts/docs_check.py
+index e4b6895..2ddf9d4 100644
+--- a/scripts/docs_check.py
++++ b/scripts/docs_check.py
+@@ -28,7 +28,7 @@ import sys
+ REPO = os.path.abspath(os.environ.get("SAMEN_DOCS_REPO") or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+ DEFAULT_FILES = ["CLAUDE.md", "docs/ci.md"]
+ CMD = re.compile(r"(?<![\w/.-])scripts/ci[ \t]+(\S+)")
+-PATH = re.compile(r"(?<![\w./~-])(?:\./)?((?:scripts|ci|docs|\.github)/[A-Za-z0-9_./*-]+)")  # `./scripts/x` too
++PATH = re.compile(r"(?<![\w./~-])((?:scripts|ci|docs|\.github)/[A-Za-z0-9_./*-]+)")  # `./scripts/x` too
+ SPAN = re.compile(r"`([^`\n]+)`")
+ STEPLIKE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+(?:\[\d+/\d+\])?")
+ ARGREF = re.compile(r"(?:(?<![\w-])(explain)|(--only-steps)|(--only)(?![-\w])|(--also))[ \t]+(\S+)")
