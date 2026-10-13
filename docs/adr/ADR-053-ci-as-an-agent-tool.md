@@ -899,6 +899,36 @@ cover compiled `samen_core`/`samen_web`, which the probes must compile fresh —
 `modulo` shards is still open (P5 deferred b). (d) A cache entry is trusted for what its own MANIFEST says; a
 local attacker who rewrites an entry AND its MANIFEST is out of scope (same trust as `~/.hex`).
 
+**Gate (P6).** The adversarial gate found the cache could serve a build a cold compile would not produce, each
+reproduced mechanically on real mix projects (hex packages from the local hex cache, `HEX_OFFLINE=1`):
+
+| # | Finding | Fix |
+|---|---|---|
+| G1 | The key hashed only the HEX packages' own Application env, but a dependency's macros also read OTHER apps' config at compile time. `plug` 1.20.3 built with and without `config :logger, compile_time_purge_matching: [[level_lower_than: :error]]` got the SAME key (`54c50415…`); the second app was seeded (HIT) and its `Elixir.Plug.Logger.beam` was the unpurged `1d554677…` where a cold compile of that same app gives `278d4ee5…`. Latent (the templates set only `config :logger, level:`), but a template change would ship it. | the key reads every configured app's compile-time config except the app itself and `samen_*`; GENDEPS (logger purge → another key); sabotage 610. |
+| G2 | The key read the RUNTIME-merged env (`mix run` evaluates `runtime.exs`, which no compile sees): a `config.exs` value that `runtime.exs` overrides was not keyed — the compile changes, the key does not (and a `runtime.exs`-only edit re-keyed for nothing). | `Config.Reader.read!` of the config files (config.exs + imports, evaluated by Elixir); GENDEPS (runtime.exs alone keeps the key; config.exs under an override changes it); sabotage 609. |
+| G3 | Variables a dependency's own build file reads were outside the `MIX_*`/`ELIXIR_*`/`ERL_*`/`REBAR*`/`CC…` prefixes: `localize`'s mix.exs switches its compilers on `LOCALIZE_NIF` (also `LOCALIZE_SQL_SQLITE_ICU`, `PLUG_CRYPTO_2_0`, `ECTO_*_PATH`, `ASH_VERSION`), and the key ignored them. | every variable a hex dependency's `mix.exs` / `rebar.config(.script)` names literally is keyed with its value, except `GITHUB_*`/`COVERALLS_*` (yamerl's rebar.config.script reads `GITHUB_RUN_ID` for coveralls; keying it would make every Actions run a miss); GENDEPS (a mix.exs variable → another key; `GITHUB_RUN_ID` → same key); sabotage 608. |
+| G4 | A seed cut short (another key's `store` pruning this entry mid-copy — it is not locked while read — or a full disk) returned "ignored an error — compiling from scratch" but left what it had copied: with the entry deleted after 40 files, `plug` was left with 36 of 63 `.beam` files. Mix trusts a dependency dir whose `.app` and `.mix/compile.elixir_scm` are present (a seeded build shows `ok` in `mix deps`), so depending on copy order that is a half-built dependency mix never rebuilds. | the seed is all-or-nothing: on any error every dependency it copied is removed before the error is reported; GENDEPS (eviction during the 2nd copy → nothing seeded, exit 0); sabotage 611. |
+
+Checked and holding: mix trusts a seeded dependency only through its `.app`/`compile.elixir_scm`, which come from a build of
+the same lock bytes (checksums pin the tarballs), the same Elixir/OTP and, now, the same compile-time config and build
+variables; none of the 62 cached dependencies builds a NIF or writes into `deps/` at compile time (the `priv`/`src`/
+`include` symlinks are relative and resolve into the new app's own `deps/`), and their compile-time `System.get_env`
+reads are all in build files (`crux`'s `SAT_SOLVER` and the OTel variables are read at run time); git and path
+dependencies are not `{:hex, …}` lines, so never cached; a normal `mix samen.gen.app` never runs the helper (the variable
+is set only by `run_gen_probe`, the driver strips it); `actions plan pr --selection --base <sha>` in a fresh clone with no
+`deps/`/`_build` plans in ≈ 20 s (a watch-list edit selects 6 mutants), the pins, permissions and the `ci-pr` verify are
+unchanged and every matrix entry carries `timeout_min`; the timeout formula is monotone in the selection, floored at the
+history value, capped at 360, and refuses a lister without a count line.
+
+Notes, not fixed: (N1) two waiters that both find a dead owner's lock can each delete the lock the other just took, so both
+compile and one publish loses the rename — duplicated work, never a wrong entry (entries are immutable per key and
+re-verified). (N2) A path dependency that overrides a hex package's dependency is not in the lock, so its source is not
+keyed; the templates (keyed) declare only `samen_core`/`samen_web` and no override today. A dynamic variable name
+(`System.get_env(var)`) in a build file is not seen. (N3) `deps_cache!` calls `System.cmd("python3", …)`, which raises
+if python3 is missing — armed only under `run_gen_probe`, where the driver itself is Python. (N4) On Actions both gen jobs
+save under the same cache key; the second save is refused, so whichever finishes first decides what is carried that week
+(performance only), and a PR restores only caches its own runs or `main`'s nightly saved.
+
 ## 3. Red paths (each with a test; sabotage where it guards a property)
 
 | # | Must fail when |
@@ -929,7 +959,7 @@ evicts the cached PASS of the same content) likewise.
 | COSTW | chunks ignore what each item cost, or the cost model plans a chunk shorter than one that ran / far past any that completed (P5) |
 | TIMEOUT | an Actions job keeps a flat limit, or a timeout row drifts from its observation (P5) |
 | SELTMO | a `--changed` job's timeout ignores its selection, drops the history floor, exceeds 360, or the plan survives a lister with no count (P6) |
-| GENDEPS | the compiled-dependency cache is keyed on too little, stores/serves `samen_*`/path deps, uses a corrupt or partial entry, or is no longer armed by `run_gen_probe` (P6) |
+| GENDEPS | the compiled-dependency cache is keyed on too little (incl. another app's compile-time config, a dependency's build variable, config.exs under a runtime.exs override), stores/serves `samen_*`/path deps, uses a corrupt or partial entry, leaves a seed cut short half-done, or is no longer armed by `run_gen_probe` (P6, Gate P6) |
 
 P5 (as built): GENPROBE, NARROW, RECHUNK, COSTW, TIMEOUT (and C7's extension to the samen_core scratch databases) are cases
 of `scripts/ci_test.sh`, named in `ci_driver_guard_test.exs`; the sandbox helper has its own tests
@@ -953,7 +983,7 @@ P2 (as built): A1–A3 (and the gate's WAE) are cases of `scripts/ci_test.sh` (n
 | P3 | **BUILT.** Sabotage/mutation ergonomics: N-lane corpus, `sabotage new`, `sabotage reanchor`, `scripts/counts`. C7, C8, C10. |
 | P4 | **BUILT.** CLAUDE.md "Suites / CI" + "Mutation gate" rewritten around the three modes (104 → 37 lines); `docs/ci.md`; `scripts/docs_check` (doc-drift guard, DOCS, sabotages 554–563); before/after numbers for a typical round (§2.9 P4). |
 | P5 | **BUILT.** Follow-ups: gen probes concurrent on a private abbrev-registry copy + `*_test.exs` out of the probe/dialyzer keys; finished chunks survive a re-plan (persisted partitions); cost-weighted chunks with a fitted model; samen_core scratch DBs lane-suffixed; per-job Actions timeouts from observed runs; `Samen.TestSandbox.shared!/1` replacing the raw shared-sandbox pair (123 files + templates) with a guard. Sabotages 564-596 (§2.9 P5). |
-| P6 | **BUILT.** The cold path: a content-keyed cache of the gen probes' compiled HEX dependencies (`scripts/gen_deps_cache.py`; `samen_core`/`samen_web`/the app always compile fresh) and Actions timeouts for the two `--changed` jobs sized from the diff's selection (Gate P5 N2). Sabotages 601-607 (§2.9 P6). |
+| P6 | **BUILT.** The cold path: a content-keyed cache of the gen probes' compiled HEX dependencies (`scripts/gen_deps_cache.py`; `samen_core`/`samen_web`/the app always compile fresh) and Actions timeouts for the two `--changed` jobs sized from the diff's selection (Gate P5 N2). Sabotages 601-607 (§2.9 P6), 608-611 from its gate (§2.9 "Gate (P6)"). |
 
 ## 5. Consequences
 

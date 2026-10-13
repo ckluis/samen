@@ -1,0 +1,20 @@
+# SABOTAGE: a seed cut short (entry evicted mid-copy, full disk) leaves the dependencies it already copied, 
+#   so mix trusts a partly seeded build
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENDEPS the gen probes' compiled-dependency cache is keyed
+diff --git a/scripts/gen_deps_cache.py b/scripts/gen_deps_cache.py
+index cdb6bab..78d4e96 100644
+--- a/scripts/gen_deps_cache.py
++++ b/scripts/gen_deps_cache.py
+@@ -304,7 +304,7 @@ def cmd_seed(app_dir, env):
+             # all or nothing (Gate P6): a copy cut short — the entry evicted by another probe's prune mid-copy, a full
+             # disk — left a dependency with its .app and some of its .beam files, which mix trusts as compiled. Remove
+             # everything this seed wrote so the compile starts from scratch, then let main() report the error.
+-            for n in seeded:
++            for n in []:
+                 shutil.rmtree(os.path.join(dest, n), ignore_errors=True)
+             raise
+         os.utime(entry, None)

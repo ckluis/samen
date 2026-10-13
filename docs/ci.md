@@ -133,12 +133,15 @@ Unbudgeted (`--budget 0`, `./ci.sh`) the loops run as one command.
   the 4 newest kept; `SAMEN_GEN_DEPS_CACHE=<dir>` relocates it, `=off` disables it — a `SAMEN_*` variable, so it is
   part of the step key). The key is a sha-256 of the generated `mix.lock` bytes, the `mix_exs*.eex` templates,
   Elixir + OTP + architecture, `MIX_ENV`, the build-relevant environment (`MIX_*`, `ELIXIR_*`, `ERL_*`, `REBAR*`,
-  `CC`/`CXX`/`*FLAGS`) and the Application env every hex dependency will compile under (printed by Elixir itself, so
-  `Application.compile_env` differences are a different key). It never contains `samen_core`, `samen_web` or the
-  generated app — those are what the probe tests and compile from source every time (a `samen_web` edit with a warm
+  `CC`/`CXX`/`*FLAGS`, plus every variable a hex dependency's own `mix.exs`/`rebar.config(.script)` names, minus
+  `GITHUB_*`/`COVERALLS_*` run metadata) and the COMPILE-TIME config (config.exs + imports, read by `Config.Reader`;
+  runtime.exs is not compile input) of every configured app except the app itself and `samen_*` — so a
+  `compile_env` difference or a `config :logger, compile_time_purge_matching:` is a different key (Gate P6, ADR-053
+  §2.9). It never contains `samen_core`, `samen_web` or the generated app — those are what the probe tests and compile from source every time (a `samen_web` edit with a warm
   cache still fails the probe; proven live in ADR-053 §2.9 P6). An entry is built in a temp dir, published by one
   rename, and used only after every file re-hashes to its `MANIFEST` (bound by a `COMPLETE` marker): a corrupt or
-  partial entry is deleted and the probe compiles from scratch. The first probe to miss holds `<key>.lock`; the
+  partial entry is deleted and the probe compiles from scratch; a seed cut short (entry evicted mid-copy, full disk)
+  removes every dependency it had copied. The first probe to miss holds `<key>.lock`; the
   others wait (bounded, 420 s) and then seed from it. A failed compile stores nothing. `GENDEPS` in `ci_test.sh`
   is the red-path harness. On Actions the same directory is carried by `actions/cache` (composite action
   `.github/actions/ci-job`, only for jobs that run a `gen_*` step; the key carries the ISO week because the generated

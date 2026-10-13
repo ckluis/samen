@@ -18,9 +18,11 @@ degrades to "compile from scratch", never to a wrong build; exit status is 0 unl
 WHAT MAKES REUSE SOUND
   key        sha256 of: the generated mix.lock bytes (every hex package, version and checksum) · the mix_exs*.eex
              templates (how deps are declared) · Elixir, OTP and architecture · MIX_ENV · the build-relevant environment
-             (MIX_*, ELIXIR_*, ERL_*, REBAR*, CC/CXX/*FLAGS …) · the Application env the build will see for every hex
-             dependency (`config :ash, …` — what `Application.compile_env` reads). A change to any of them is a
-             different key; nothing is reused across keys.
+             (MIX_*, ELIXIR_*, ERL_*, REBAR*, CC/CXX/*FLAGS …) and every variable a hex dependency's mix.exs /
+             rebar.config(.script) names literally · the compile-time config (config.exs + imports, not runtime.exs)
+             of every configured app but the app itself and samen_* (`config :ash, …` — what `Application.compile_env`
+             reads; `config :logger, compile_time_purge_matching: …` — what Logger's macros read). A change to any of
+             them is a different key; nothing is reused across keys.
   scope      only the hex packages named in mix.lock. `samen_*` is never stored or seeded and the app itself is never in
              the lock, so `samen_core`/`samen_web`/the app ALWAYS compile fresh from source.
   entries    immutable, one directory per key, built beside the cache in a temp dir and published by ONE rename, with a
@@ -88,14 +90,40 @@ def toolchain():
 
 
 def dep_config(app_dir, names, env):
-    """The Application env every hex dependency will be compiled under, as the generated app's config sets it — printed
-    by Elixir itself (so config_env/imports/runtime values are evaluated, not guessed from the text)."""
-    code = ("for a <- [%s], do: IO.puts(inspect({a, Enum.sort(Application.get_all_env(a))}, limit: :infinity, printable_limit: :infinity))"
-            % ", ".join(":" + n for n in names))
+    """The COMPILE-TIME config the hex dependencies are built under, as the generated app's config files set it — read by
+    Elixir itself with Config.Reader (config.exs + its imports, evaluated; NOT runtime.exs, which no compile sees: Gate P6
+    found the key reading the runtime-merged Application env, so a config.exs value that runtime.exs overrides was not
+    keyed). Every configured application except the app itself and samen_* is included, not only the hex packages: a
+    dependency's macros also read other apps' config at compile time (`config :logger, compile_time_purge_matching:`
+    removes Logger calls from every dependency's .beam — Gate P6 reproduced a seeded plug that a cold build had purged)."""
+    code = ("IO.puts(\"compile-time config\"); p = Mix.Project.config(); own = p[:app]; "
+            "cfg = Config.Reader.read!(p[:config_path], env: Mix.env(), target: Mix.target()); "
+            "for {a, kv} <- Enum.sort(cfg), a != own, not String.starts_with?(Atom.to_string(a), \"samen_\"), "
+            "do: IO.puts(inspect({a, Enum.sort(kv)}, limit: :infinity, printable_limit: :infinity))")
     e = dict(os.environ, MIX_ENV=env, MIX_QUIET="1")
     p = subprocess.run(["mix", "run", "--no-start", "--no-compile", "--no-deps-check", "-e", code], cwd=app_dir, env=e,
                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=300)
     return p.stdout if p.returncode == 0 and p.stdout.strip() else None
+
+
+BUILD_FILES = ("mix.exs", "rebar.config", "rebar.config.script")
+BUILD_ENV_READ = re.compile(r"""(?:get_env|fetch_env!?|getenv)\(\s*["']([A-Za-z_][A-Za-z0-9_]*)["']""")
+BUILD_ENV_PROVENANCE = re.compile(r"^(GITHUB_|COVERALLS_)")  # CI run metadata for coverage plugins, never compile input
+
+
+def build_env(app_dir, names):
+    """Every environment variable a hex dependency's OWN build file names literally (`System.get_env("LOCALIZE_NIF")` in
+    localize's mix.exs switches its compilers), with its value — the ENV_RELEVANT prefixes cannot know these (Gate P6).
+    Only build files, not lib/: those are read at runtime too, and a per-run variable there would make every key unique."""
+    seen = set()
+    for n in names:
+        for fn in BUILD_FILES:
+            try:
+                with open(os.path.join(app_dir, "deps", n, fn), encoding="utf-8", errors="replace") as f:
+                    seen.update(v for v in BUILD_ENV_READ.findall(f.read()) if not BUILD_ENV_PROVENANCE.match(v))
+            except OSError:
+                pass
+    return "\n".join("%s=%r" % (v, os.environ.get(v)) for v in sorted(seen))
 
 
 def compute_key(app_dir, env):
@@ -125,6 +153,7 @@ def compute_key(app_dir, env):
             with open(os.path.join(tdir, fn), "rb") as f:
                 part("template:" + fn, f.read())
     part("toolchain", tc.encode())
+    part("buildenv", build_env(app_dir, names).encode())
     part("mix_env", env.encode())
     envs = "\n".join("%s=%s" % (k, v) for k, v in sorted(os.environ.items()) if ENV_RELEVANT.match(k) and k not in ENV_IGNORED)
     part("env", envs.encode())
@@ -264,10 +293,20 @@ def cmd_seed(app_dir, env):
             libs = json.load(f)["deps"]
         dest = os.path.join(app_dir, "_build", env, "lib")
         os.makedirs(dest, exist_ok=True)
-        for n in libs:
-            if os.path.exists(os.path.join(dest, n)):
-                continue
-            shutil.copytree(os.path.join(entry, "lib", n), os.path.join(dest, n), symlinks=True)
+        seeded = []
+        try:
+            for n in libs:
+                if os.path.exists(os.path.join(dest, n)):
+                    continue
+                seeded.append(n)
+                shutil.copytree(os.path.join(entry, "lib", n), os.path.join(dest, n), symlinks=True)
+        except BaseException:
+            # all or nothing (Gate P6): a copy cut short — the entry evicted by another probe's prune mid-copy, a full
+            # disk — left a dependency with its .app and some of its .beam files, which mix trusts as compiled. Remove
+            # everything this seed wrote so the compile starts from scratch, then let main() report the error.
+            for n in seeded:
+                shutil.rmtree(os.path.join(dest, n), ignore_errors=True)
+            raise
         os.utime(entry, None)
         say("HIT %s… — seeded %d compiled hex dependencies in %.1fs%s" % (key[:12], len(libs), time.time() - t0, " (after waiting)" if waited else ""))
         if owner:

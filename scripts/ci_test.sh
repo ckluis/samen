@@ -80,6 +80,9 @@
 #          only the lock's hex packages are ever stored or seeded (samen_*, samen_core, samen_web and the app compile fresh);
 #          a flipped / missing / extra file, a missing COMPLETE, a tampered MANIFEST or a foreign dep is CORRUPT -> deleted,
 #          never used; a temp dir is not an entry; a live lock is waited for (bounded), a dead one taken over.
+#          Gate P6: the key also follows another app's compile-time config (`:logger` purge), a variable a dependency's
+#          own mix.exs reads, and config.exs under a runtime.exs override (runtime.exs alone does not change it); a seed
+#          cut short by an eviction leaves nothing seeded.
 #
 # Usage: scripts/ci_test.sh [CASE…]      (default: every case)
 # Exit:  0 all assertions pass · 1 otherwise. Residue: none (temp dirs, trap on EXIT/INT/TERM).
@@ -1633,6 +1636,11 @@ case_GENDEPS() {
       echo "app $n" > "$d/_build/test/lib/$n/ebin/$n.app"; echo "beam $n" > "$d/_build/test/lib/$n/ebin/Elixir.$n.beam"; echo m > "$d/_build/test/lib/$n/.mix/compile.elixir"
       ln -s "../../../../deps/$n/priv" "$d/_build/test/lib/$n/priv"
     done
+    # the dependencies' own build files: a variable named there is a build input (localize's LOCALIZE_NIF), CI run
+    # metadata for coverage plugins (yamerl's rebar.config.script reads GITHUB_RUN_ID) is not
+    mkdir -p "$d/deps/jason" "$d/deps/telemetry"
+    printf 'defmodule Jason.MixProject do\n  def project, do: [compilers: if(System.get_env("GD_JASON_NIF") == "true", do: [:elixir_make], else: [])]\nend\n' > "$d/deps/jason/mix.exs"
+    printf '{coveralls_service_job_id, os:getenv("GITHUB_RUN_ID")}.\n' > "$d/deps/telemetry/rebar.config.script"
   }
   local G="env SAMEN_GEN_DEPS_CACHE=$C python3 $H"
   mkgd "$A"
@@ -1649,6 +1657,19 @@ case_GENDEPS() {
   mkgd "$B"
   [[ "$(ELIXIR_ERL_OPTIONS='+S 3' $G key "$B")" != "$k0" ]] && ok || bad "GENDEPS: a build-relevant environment variable (ELIXIR_ERL_OPTIONS) must change the key"
   [[ "$(CFLAGS=-O0 $G key "$B")" != "$k0" ]] && ok || bad "GENDEPS: CFLAGS must change the key"
+  # (Gate P6) what the key missed: another app's compile-time config, a dependency's own build variable, and a
+  # config.exs value that runtime.exs overrides (the key read the runtime-merged env; no compile sees runtime.exs)
+  echo 'config :logger, compile_time_purge_matching: [[level_lower_than: :error]]' >> "$B/config/config.exs"
+  [[ "$($G key "$B")" != "$k0" ]] && ok || bad "GENDEPS: config :logger, compile_time_purge_matching (it strips Logger calls from every dependency's .beam) must change the key"
+  mkgd "$B"
+  [[ "$(GD_JASON_NIF=true $G key "$B")" != "$k0" ]] && ok || bad "GENDEPS: a variable a dependency's mix.exs reads (its compilers) must change the key"
+  eq "$(GITHUB_RUN_ID=12345 $G key "$B")" "$k0" "GENDEPS: ... while CI run metadata a rebar.config.script reads (GITHUB_RUN_ID) does not (else Actions never hits)"
+  printf 'import Config\nconfig :jason, mode: :z\n' > "$B/config/runtime.exs"
+  k1="$($G key "$B")"
+  eq "$k1" "$k0" "GENDEPS: runtime.exs is not compile-time config: a dependency compiles the same whatever it sets"
+  sed -i.bak 's/mode: :a/mode: :b/' "$B/config/config.exs"; rm -f "$B/config/config.exs.bak"
+  [[ "$($G key "$B")" != "$k1" ]] && ok || bad "GENDEPS: a config.exs value that runtime.exs overrides is still what the dependency compiles under: it must change the key"
+  mkgd "$B"
   eq "$(MIX_QUIET=1 FOO_UNRELATED=1 $G key "$B")" "$k0" "GENDEPS: ... while an unrelated variable and MIX_QUIET do not"
   eq "$($G key "$B" --env dev | tr -d '\n' | wc -c | tr -d ' ')" 64 "GENDEPS: MIX_ENV is an input"
   [[ "$($G key "$B" --env dev)" != "$k0" ]] && ok || bad "GENDEPS: another MIX_ENV must change the key"
@@ -1673,6 +1694,24 @@ case_GENDEPS() {
   eq "$(ls "$B/_build/test/lib" | grep -v '^gd$' | tr '\n' ' ')" "jason telemetry " "GENDEPS: a HIT seeds only hex packages — samen_core/samen_web/the app are left to compile from source"
   [[ -L "$B/_build/test/lib/jason/priv" ]] && ok || bad "GENDEPS: symlinks (priv) survive the copy"
   eq "$(cat "$B/_build/test/lib/jason/ebin/jason.app")" "app jason" "GENDEPS: and the content is the cached build"
+  # (Gate P6) a seed cut short is all-or-nothing: another probe's prune evicts the entry while this one copies (or the
+  # disk fills) — a dependency left with its .app and part of its .beam files is one mix trusts as compiled
+  rm -rf "$B/_build"; mkdir -p "$B/_build/test/lib"
+  SAMEN_GEN_DEPS_CACHE="$C" python3 - "$H" "$B" > "$T/gd.ev" 2>&1 <<'PY'
+import importlib.util, os, shutil, sys
+spec = importlib.util.spec_from_file_location("gdc", sys.argv[1]); g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+real, n = shutil.copytree, [0]
+def evicting(src, dst, *a, **kw):  # the seed's per-dependency copies; the 2nd finds its entry gone
+    n[0] += 1
+    if n[0] == 2:
+        shutil.rmtree(os.path.dirname(os.path.dirname(src)))
+    return real(src, dst, *a, **kw)
+shutil.copytree = evicting
+sys.exit(g.main(["gen_deps_cache.py", "seed", sys.argv[2]]))
+PY
+  eq "$?" 0 "GENDEPS: an entry evicted mid-seed is not a probe failure (acceleration only)"
+  has "$T/gd.ev" 'ignored an error .* compiling from scratch' "GENDEPS: ... it is reported and the probe compiles from scratch"
+  eq "$(ls "$B/_build/test/lib" | grep -v '^gd$' | tr '\n' ' ')" "" "GENDEPS: ... with NOTHING seeded: the dependency copied before the eviction is removed again (all or nothing)"
 
   # (c) corruption fails closed: the entry is deleted and the probe compiles from scratch
   local how
