@@ -12,10 +12,10 @@ Per line, outside ```ini fences (config examples may name things that do not exi
   * `--flags` on a scripts/ci call   must appear in `scripts/ci --help`
   * `explain X` / `--only-steps X`   X must be a [step] in ci/steps.conf; `--only X` / `--also X`: a step or group
                                      (comma lists; a [i/n] shard suffix is stripped; <placeholders> are skipped)
-  * a backticked token shaped like a step id of a known family (dialyzer_*, spike_*, gen_*, …) must be a step,
-    group, app or Actions job in the manifest
-  * every scripts/…, ci/…, docs/…, .github/… path must exist (a glob must match something; a path followed by
-    < or { or containing NNN is a template and is skipped)
+  * a backticked snake_case token whose first word starts some step id (dialyzer_*, double_*, apply_*, …) must be
+    a step, group, app or Actions job in the manifest (samen_* is skipped: app names, databases, roles)
+  * every scripts/…, ci/…, docs/…, .github/… path (also as ./scripts/…) must exist (a glob must match something;
+    a path followed by < or { or containing NNN is a template and is skipped)
 And: docs/ci.md must exist, CLAUDE.md must point at it, and a file with no resolvable command or path at all
 FAILS (a check that finds nothing to check is a check that cannot go red).
 """
@@ -28,7 +28,7 @@ import sys
 REPO = os.path.abspath(os.environ.get("SAMEN_DOCS_REPO") or os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 DEFAULT_FILES = ["CLAUDE.md", "docs/ci.md"]
 CMD = re.compile(r"(?<![\w/.-])scripts/ci[ \t]+(\S+)")
-PATH = re.compile(r"(?<![\w./~-])((?:scripts|ci|docs|\.github)/[A-Za-z0-9_./*-]+)")
+PATH = re.compile(r"(?<![\w./~-])(?:\./)?((?:scripts|ci|docs|\.github)/[A-Za-z0-9_./*-]+)")  # `./scripts/x` too
 SPAN = re.compile(r"`([^`\n]+)`")
 STEPLIKE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+(?:\[\d+/\d+\])?")
 ARGREF = re.compile(r"(?:(?<![\w-])(explain)|(--only-steps)|(--only)(?![-\w])|(--also))[ \t]+(\S+)")
@@ -144,7 +144,9 @@ def main(argv):
     firsts = {}
     for s in steps:
         firsts[s.split("_")[0]] = firsts.get(s.split("_")[0], 0) + 1
-    families = {k for k, v in firsts.items() if v >= 3 and k != "samen"}  # samen_* is also app names, DBs, roles
+    # every step id's first word (double_*, apply_*, ci_*, …), not only the big families: a misspelled
+    # `double_swep` in prose is the same lie as a misspelled `dialyzer_*`. samen_* is also app names, DBs, roles.
+    families = {k for k in firsts if k != "samen"}
     known = steps | groups | apps
     problems, totals = [], {"sub": 0, "flag": 0, "step": 0, "path": 0}
     for rel in files:

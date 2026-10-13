@@ -1085,7 +1085,7 @@ usage: scripts/ci quick|pr|full [--budget S] [--only STEP|GROUP[,…] | --only-s
 H
 STUB
   chmod +x "$F/scripts/ci"; : > "$F/scripts/real.sh"; : > "$F/ci/steps.conf.extra"
-  printf '[step spike_a]\n[step spike_b]\n[step spike_c]\n[step lone]\n[group fast]\n' > "$F/ci/steps.conf"
+  printf '[step spike_a]\n[step spike_b]\n[step spike_c]\n[step lone]\n[step solo_step]\n[group fast]\n' > "$F/ci/steps.conf"
   local good='run `scripts/ci quick`, then `scripts/ci pr --plan --only fast`; `scripts/ci explain spike_a`; `scripts/ci actions plan pr`; see `scripts/real.sh`, `ci/steps.conf` and `docs/ci.md`.'
   local ptr='details: docs/ci.md and scripts/real.sh via scripts/ci quick'
   local C="env SAMEN_DOCS_REPO=$F bash $F/scripts/docs_check"
@@ -1104,10 +1104,12 @@ STUB
   defect 'run `scripts/ci pr --only-steps fast`' d6; eq "$?" 1 "DOCS: --only-steps takes step ids only (a group name fails)"
   defect 'the `spike_gone` step' d7; eq "$?" 1 "DOCS: a backticked token shaped like a step of a known family, absent from the manifest, fails"
   has "$T/d7" '`spike_gone` looks like a CI step id' "DOCS: ... naming it"
+  defect 'the `solo_stpe` step' d7b; eq "$?" 1 "DOCS: a misspelled step-shaped token whose first word starts ANY step (not only a 3-step family) fails"
   defect 'see `scripts/missing.sh`' d8; eq "$?" 1 "DOCS: a scripts/… path that does not exist fails"
+  defect 'run `./scripts/missing.sh --list`' d8b; eq "$?" 1 "DOCS: a ./scripts/… path that does not exist fails too"
   defect 'see `docs/*.nothing`' d9; eq "$?" 1 "DOCS: a glob that matches nothing fails"
-  defect 'run `scripts/ci pr --only fast,lone` and `scripts/ci explain spike_b[1/2]` and `scripts/ci explain <step>`, edit `scripts/ci*`, `docs/<x>.md`, `scripts/NNN-a.patch`' d10
-  eq "$?" 0 "DOCS: positive control — group in --only, a comma list, a shard suffix, a glob that matches, <placeholders> and NNN templates pass"
+  defect 'run `scripts/ci pr --only fast,lone` and `scripts/ci explain spike_b[1/2]` and `scripts/ci explain <step>`, edit `scripts/ci*`, `./scripts/real.sh`, `solo_step`, `docs/<x>.md`, `scripts/NNN-a.patch`' d10
+  eq "$?" 0 "DOCS: positive control — group in --only, a comma list, a shard suffix, a glob that matches, a ./scripts/ path and a lone step id that exist, <placeholders> and NNN templates pass"
   printf '%s\n```ini\n[step nope]\nscripts/ci frobnicate scripts/missing.sh\n```\n' "$good" > "$F/docs/ci.md"; $C > "$T/d11" 2>&1
   eq "$?" 0 "DOCS: an ini fence (a config example) is not checked"
   printf 'nothing to resolve here\n' > "$F/docs/ci.md"; $C > "$T/d12" 2>&1
