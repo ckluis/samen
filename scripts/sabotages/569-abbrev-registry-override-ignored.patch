@@ -1,0 +1,26 @@
+# SABOTAGE: ADR-053 P5: Samen.AbbrevRegistry.path/0 ignores SAMEN_ABBREV_REGISTRY, so a 'private' probe 
+#   registry is never read
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/abbrev_registry_override_test.exs
+# MUST_FAIL: an absolute override is what path/0, load/0 and load_namespaced/0 read
+diff --git a/samen_core/lib/samen/abbrev_registry.ex b/samen_core/lib/samen/abbrev_registry.ex
+index b21eecd..37d342a 100644
+--- a/samen_core/lib/samen/abbrev_registry.ex
++++ b/samen_core/lib/samen/abbrev_registry.ex
+@@ -100,12 +100,8 @@ defmodule Samen.AbbrevRegistry do
+       "" ->
+         @default_registry_path
+ 
+-      override ->
+-        if Path.type(override) != :absolute do
+-          raise "#{@registry_env} must be an absolute path, got #{inspect(override)}"
+-        end
+-
+-        override
++      _override ->
++        @default_registry_path
+     end
+   end
+ 

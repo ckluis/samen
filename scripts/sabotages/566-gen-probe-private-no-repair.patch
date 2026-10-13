@@ -1,0 +1,21 @@
+# SABOTAGE: ADR-053 P5: a private-mode probe that wrote the committed registry is detected but not repaired 
+#   from the snapshot
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: GENPROBE the gen probes run on a private registry copy and sweep only their own scratch dirs
+diff --git a/scripts/gen_probe_guard.sh b/scripts/gen_probe_guard.sh
+index 0918321..0b32382 100755
+--- a/scripts/gen_probe_guard.sh
++++ b/scripts/gen_probe_guard.sh
+@@ -72,9 +72,6 @@ gen_probe_restore() {
+     # private mode: the committed file must be exactly what it was; nothing to restore, only to prove — and
+     # if a probe wrote it anyway, repair it from the snapshot and fail below (never leave it corrupted)
+     post_sha="$(shasum -a 256 "$GEN_PROBE_REGISTRY" | awk '{print $1}')"
+-    if [[ "$post_sha" != "$GEN_PROBE_PRISTINE_SHA" ]]; then
+-      cp "$GEN_PROBE_SNAP" "$GEN_PROBE_REGISTRY"
+-    fi
+     rm -f "$GEN_PROBE_SNAP" "$GEN_PROBE_PRIVATE"
+   else
+     cp "$GEN_PROBE_SNAP" "$GEN_PROBE_REGISTRY"
