@@ -176,3 +176,13 @@ defmodule Samen.Meta.CiDriverGuardTest.SabotageNew do
     Samen.Meta.CiDriverGuard.run_case!("SABNEW")
   end
 end
+
+# ── ADR-053 P4 — docs match the tooling ───────────────────────────────────────────────────────────
+
+defmodule Samen.Meta.CiDriverGuardTest.DocDrift do
+  use ExUnit.Case, async: true
+
+  test "DOCS the CI docs cannot name a subcommand, flag, step id or path the tooling does not have" do
+    Samen.Meta.CiDriverGuard.run_case!("DOCS")
+  end
+end

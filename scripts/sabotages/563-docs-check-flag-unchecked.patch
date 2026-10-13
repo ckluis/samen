@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P4 gate: docs_check accepts any --flag on a scripts/ci command, so a removed or renamed 
+#   option stays documented.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: DOCS the CI docs cannot name
+diff --git a/scripts/docs_check.py b/scripts/docs_check.py
+index e4b6895..2b09921 100644
+--- a/scripts/docs_check.py
++++ b/scripts/docs_check.py
+@@ -102,7 +102,7 @@ def check_commands(rel, n, line, subs, actions, flags, steps, groups, found, pro
+                         problems.append("%s:%d: `scripts/ci actions %s` — no such action (scripts/ci --help: %s)" % (rel, n, nxt.group(1), " ".join(sorted(actions))))
+         for flag in re.findall(r"(?<![\w-])--[a-z][a-z-]*", tail):
+             found["flag"] += 1
+-            if flag not in flags:
++            if False and flag not in flags:
+                 problems.append("%s:%d: `scripts/ci … %s` — not a flag in `scripts/ci --help`" % (rel, n, flag))
+         for am in ARGREF.finditer(tail):
+             kind = am.group(1) or am.group(2) or am.group(3) or am.group(4)

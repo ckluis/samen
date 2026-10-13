@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P4: docs_check accepts any scripts/ci subcommand, so a renamed or removed subcommand 
+#   stays documented.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: DOCS the CI docs cannot name
+diff --git a/scripts/docs_check.py b/scripts/docs_check.py
+index ef3b3cc..7fad63c 100644
+--- a/scripts/docs_check.py
++++ b/scripts/docs_check.py
+@@ -92,7 +92,7 @@ def check_commands(rel, n, line, subs, actions, flags, steps, groups, found, pro
+             if not word or not word[0].isalpha():
+                 continue
+             found["sub"] += 1
+-            if word not in subs:
++            if False and word not in subs:
+                 problems.append("%s:%d: `scripts/ci %s` — no such subcommand (scripts/ci --help: %s)" % (rel, n, word, " ".join(sorted(subs))))
+             elif word == "actions":
+                 nxt = re.match(r"\s*([a-z]+)", tail[len("actions"):])

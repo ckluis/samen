@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P4 gate: docs_check checks step-shaped tokens only for prefixes shared by 3+ steps, so 
+#   a misspelled double_sweep or apply_check in prose stays documented.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: DOCS the CI docs cannot name
+diff --git a/scripts/docs_check.py b/scripts/docs_check.py
+index e4b6895..4416b61 100644
+--- a/scripts/docs_check.py
++++ b/scripts/docs_check.py
+@@ -146,7 +146,7 @@ def main(argv):
+         firsts[s.split("_")[0]] = firsts.get(s.split("_")[0], 0) + 1
+     # every step id's first word (double_*, apply_*, ci_*, …), not only the big families: a misspelled
+     # `double_swep` in prose is the same lie as a misspelled `dialyzer_*`. samen_* is also app names, DBs, roles.
+-    families = {k for k in firsts if k != "samen"}
++    families = {k for k, v in firsts.items() if v >= 3 and k != "samen"}
+     known = steps | groups | apps
+     problems, totals = [], {"sub": 0, "flag": 0, "step": 0, "path": 0}
+     for rel in files:

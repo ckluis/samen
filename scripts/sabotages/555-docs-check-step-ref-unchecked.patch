@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P4: docs_check treats every explain/--only/--only-steps argument as a real step, so a 
+#   renamed step stays documented.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: DOCS the CI docs cannot name
+diff --git a/scripts/docs_check.py b/scripts/docs_check.py
+index ef3b3cc..500ae75 100644
+--- a/scripts/docs_check.py
++++ b/scripts/docs_check.py
+@@ -111,7 +111,7 @@ def check_commands(rel, n, line, subs, actions, flags, steps, groups, found, pro
+                 if not item or item[0] in "<[$(-" or "<" in item:
+                     continue
+                 found["step"] += 1
+-                ok = item in steps if kind in ("explain", "--only-steps") else (item in steps or item in groups)
++                ok = True
+                 if not ok:
+                     problems.append("%s:%d: `%s %s` — not %s in ci/steps.conf" % (rel, n, kind, item, "a step" if kind in ("explain", "--only-steps") else "a step or group"))
+ 

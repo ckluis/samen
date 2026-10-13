@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P4: docs_check no longer requires CLAUDE.md to point at docs/ci.md, so an agent can 
+#   lose the way to the reference.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: DOCS the CI docs cannot name
+diff --git a/scripts/docs_check.py b/scripts/docs_check.py
+index ef3b3cc..3658c44 100644
+--- a/scripts/docs_check.py
++++ b/scripts/docs_check.py
+@@ -163,7 +163,7 @@ def main(argv):
+         for k in totals:
+             totals[k] += found[k]
+     claude = os.path.join(REPO, "CLAUDE.md")
+-    if "CLAUDE.md" in files and os.path.isfile(claude) and "docs/ci.md" not in open(claude, encoding="utf-8").read():
++    if False and "CLAUDE.md" in files and os.path.isfile(claude) and "docs/ci.md" not in open(claude, encoding="utf-8").read():
+         problems.append("CLAUDE.md: does not point at docs/ci.md (the pointer is how an agent finds the reference)")
+     if problems:
+         for p in problems:
