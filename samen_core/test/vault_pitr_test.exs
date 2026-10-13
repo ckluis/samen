@@ -33,7 +33,8 @@ defmodule Samen.VaultPitrTest do
   alias Samen.Masked
 
   @repo SamenCore.TestRepo
-  @restore_db "samen_core_pitr_restore_test"
+  # per-lane suffix (ADR-053 P5): lanes must never share the restore database
+  @restore_db "samen_core_pitr_restore_test" <> System.get_env("SAMEN_TEST_DB_SUFFIX", "")
   @secret "dave.restore@example.com"
 
   setup do

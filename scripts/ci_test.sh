@@ -1045,6 +1045,14 @@ case_C7() {
   done
   eq "$n" 5 "C7: positive control — the five DB-backed apps' test configs were found"
   eq "${miss:-none}" none "C7: every app's test database name appends SAMEN_TEST_DB_SUFFIX (lanes never share a test DB)"
+  # (P5) ... and so does every scratch database a samen_core test creates (backup src/scratch, operator-plane migration,
+  # PITR restore, the multinode repo): a fixed name is a database two lanes replaying the same file would race on
+  local scratch nfound=0 unsuffixed=""
+  scratch="$(grep -rnE '(@[a-z_]*db|database:) +"samen_core_[a-z_0-9]+"' "$ROOT/samen_core/test" "$ROOT/samen_core/config/test.exs" | grep -v '/support/' || true)"
+  nfound="$(printf '%s\n' "$scratch" | grep -c . || true)"
+  unsuffixed="$(printf '%s\n' "$scratch" | grep -v 'SAMEN_TEST_DB_SUFFIX' | grep . || true)"
+  eq "$nfound" 6 "C7: positive control — the samen_core test DB names were found (main, multinode, backup src + scratch, opmigration, pitr)"
+  eq "${unsuffixed:-none}" none "C7: every samen_core scratch database name appends SAMEN_TEST_DB_SUFFIX (two lanes can never collide)"
 }
 
 # C8 (ADR-053 P3): `scripts/sabotage reanchor` rewrites a patch ONLY after proving its named tests still fail

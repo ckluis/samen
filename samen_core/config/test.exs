@@ -22,7 +22,7 @@ config :samen_core, Samen.MultiNode.Repo,
   username: System.get_env("USER") || "postgres",
   password: "",
   hostname: "localhost",
-  database: "samen_core_multinode_test",
+  database: "samen_core_multinode_test" <> System.get_env("SAMEN_TEST_DB_SUFFIX", ""),
   pool_size: 10,
   log: false
 
