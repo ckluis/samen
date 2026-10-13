@@ -1,0 +1,512 @@
+
+<!-- ======================= ACT I ======================= -->
+<div class="actbar" style="--ac:var(--indigo)"><div class="wrap"><div class="an rv">Act I · Start</div><h2 class="rv">The proof that a substrate is real is <em style="color:var(--indigo)">generative.</em></h2></div></div>
+
+<!-- ======================= 01 GENERATE ======================= -->
+<section class="band" id="generate" style="--accent:var(--indigo)">
+  <div class="glow" style="right:-360px;top:-200px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">01</span>Generate</div>
+      <h2>One command. A product you can <em>boot.</em></h2>
+      <p class="punch"><code>mix samen.gen.app</code> doesn't hand you a folder of TODOs. It emits a product with a web UI, a JSON:API, seeds, observability, tests and <b>its own verifier gate</b>, and that app passes the gate on its first run with nothing edited in between.</p>
+      <div class="big"><span class="n" data-count="{{GEN_GATE_STEPS}}">{{GEN_GATE_STEPS}}</span><span class="l">steps in the generated app's own gate, <b>all green on the first run</b>, zero hand-edits. <span class="tag meas">re-run every PR</span></span></div>
+      <ul class="ticks">
+        <li><b>Billing, notifications, flags, an operator workspace</b> and a deny-by-default API, mounted, not copied</li>
+        <li><b>One authored resource with a real PII field</b>, so the vault and reveal path are live from the first migration</li>
+        <li><b>Four generators</b>: app, scope, resource and agent, plus a fail-honest <code>--deploy</code></li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-generate" data-panel>What you actually get <span class="ar">→</span></a><a class="btn" href="https://github.com/ckluis/samen/blob/main/docs/guides/getting-started.md">Getting started ↗</a></div>
+    </div>
+    <div class="stage rv" data-label="terminal · a new vertical in one command">
+<div class="term" aria-label="Terminal: generate Harbor, run its gate, all 19 steps pass, seed and boot."><span class="ln"><span class="p"># emit a new vertical from the substrate</span></span><span class="ln"><span class="p">$</span> <span class="c">mix samen.gen.app --module Harbor --prefix hb --abbrev hrb</span></span><span class="ln"><span class="mu">  * creating harbor/  web · api · seeds · telemetry · ci.sh</span></span><span class="ln"><span class="mu">  * mounting  Billing · Notifications · Flags · Operator desk</span></span><span class="ln"><span class="mu">  * reserving abbrev </span><span class="ac">hrb</span><span class="mu"> (permanent, like a ticker)</span></span><span class="ln"> </span><span class="ln"><span class="p"># run the generated app's own gate. nothing edited.</span></span><span class="ln"><span class="p">$</span> <span class="c">cd ../harbor &amp;&amp; MIX_ENV=test bash ci.sh</span></span><span class="ln"><span class="ok">  ✓</span> prefixes · catalog_parity · vault_declared_parity</span><span class="ln"><span class="ok">  ✓</span> no_plaintext_pii · no_pii_columns · pii_reads</span><span class="ln"><span class="ok">  ✓</span> api_contract · ai_prompt_masking · tnt_boundary</span><span class="ln"><span class="ok">  ✓</span> migrations · same_org_fk · oban_queues · …</span><span class="ln"><span class="ok">{{GEN_GATE_STEPS}}/{{GEN_GATE_STEPS}} steps ALL PASSED</span>   <span class="mu">zero hand-edits</span></span><span class="ln"> </span><span class="ln"><span class="p">$</span> <span class="c">mix harbor.seed &amp;&amp; mix phx.server</span></span><span class="ln"><span class="ac">→ http://localhost:4050</span> <span class="blink">▍</span></span></div>
+      <p class="cap">The root gate does exactly this on every PR: generate a fresh app, run its whole gate, seed it, boot it, probe its routes, then sabotage it.</p>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-generate" role="dialog" aria-labelledby="h-generate" tabindex="-1" style="--accent:var(--indigo)">
+  <div class="ph"><div class="eyebrow"><span class="n">01</span>Generate</div><a class="x" href="#generate" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-generate">Not an empty shell. Working surfaces.</h3>
+    <p>You give the generator three things: a module name, a table prefix and a <b>permanent abbreviation</b>. Every table and column the app ever creates is projected through that abbrev, so storage self-qualifies from the first migration (<code>attribute :name</code> becomes <code>hrb_name</code> in the database, the CDC stream, the logs and the catalog).</p>
+    <h4>What the generated app ships with</h4>
+    <table>
+      <tr><th>Surface</th><th>What makes it different</th></tr>
+      <tr><td>Billing scope</td><td>Plans, subscriptions, invoices and checkout, mounted as a framework scope, not copied into your tree</td></tr>
+      <tr><td>One authored resource</td><td>With a real <code>pii_attribute</code>, so masking and reveal are live, not described in a README</td></tr>
+      <tr><td>Token-blind aggregate</td><td>Cross-tenant rollups over resources with no <code>pii_*</code> columns at all</td></tr>
+      <tr><td>Notifications</td><td>One send chokepoint; unconfigured, it says so instead of pretending</td></tr>
+      <tr><td>Feature flags</td><td>Tenant-scoped, deterministic bucketing, fail-safe kill switch</td></tr>
+      <tr><td>Operator workspace</td><td>The second plane, masked by default</td></tr>
+      <tr><td>Deny-by-default API</td><td><code>/api/v1</code> as JSON:API; a resource is hidden until explicitly allowed</td></tr>
+      <tr><td>The gate</td><td>{{GEN_GATE_STEPS}} verifier steps the app inherits, not just the code</td></tr>
+    </table>
+    <h4>The four generators</h4>
+    <pre>mix samen.gen.app       # a whole product
+mix samen.gen.scope     # a new scope inside it
+mix samen.gen.resource  # a resource, catalogued and vaulted
+mix samen.gen.agent     # an AI agent + its emitted proof</pre>
+    <h4>How "zero hand-edits" is kept true</h4>
+    <p>Four generator probes run in CI on every pull request. The flagship probe generates a fresh app, runs its full gate, seeds it, boots it, HTTP-probes its routes and drives two sabotages against the generated gate. If the substrate drifts from what it generates, this is where it shows. The probes work on a private copy of the abbreviation registry and fail if the committed one changes by a single byte.</p>
+    <div class="not"><b>Measured honestly.</b> In pawchart, the veterinary vertical, the four scope-mount files total about 188 authored lines. That number is about mounting framework surfaces, not about apps: pawchart as a whole is a hand-built product of about 3,900 lines. An earlier page quoted the first number as if it were the second; that overclaim was retracted in the repo.</div>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-022-generator-emits-running-product.md">ADR-022</a> (the generator emits a running product) · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-024-generated-deploy-fail-honest.md">ADR-024</a> (fail-honest deploy) · samen_core/priv/gen_app_flagship_probe.exs</div>
+  </div>
+</aside>
+<a class="scrim" href="#generate" tabindex="-1" aria-hidden="true"></a>
+
+<!-- ======================= ACT II ======================= -->
+<div class="actbar" style="--ac:var(--amber)"><div class="wrap"><div class="an rv">Act II · Trust, by construction</div><h2 class="rv">Seven features that only work because <em style="color:var(--amber)">both planes share one core.</em></h2><p class="rv">Most products guard customer data in the places someone thought of. Samen moves the decision into the field itself, then builds every feature on top of that one decision.</p></div></div>
+
+<!-- ======================= 02 VAULT ======================= -->
+<section class="band flip" id="vault" style="--accent:var(--indigo)">
+  <div class="glow" style="left:-380px;top:-180px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">02</span>The vault</div>
+      <h2><em>••••</em> isn't a redaction. It's the value.</h2>
+      <p class="punch">Declare <code>pii_attribute :email</code> and the value goes to a <b>per-subject-keyed vault</b>. The row keeps a <code>vt_…</code> token; plaintext is nowhere at rest. Every reader gets <code>%Masked{}</code> back: the UI, the API, the CSV writer, the log line. Forgetting to mask is not a mistake available to you.</p>
+      <div class="big"><span class="n">1</span><span class="l">decrypt path in the whole system. <b>One function to gate, one to log, one for a reviewer to read.</b> <span class="tag built">built</span></span></div>
+      <ul class="ticks">
+        <li><b>Validated, then tokenized</b>: Money, Email, Phone, Address… each type's cast runs before encryption</li>
+        <li><b>CSV masks by omission</b>: the column isn't in the file, so there's nothing to un-redact</li>
+        <li><b>A verifier in a separate OS process</b> attests no tier holds plaintext</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-vault" data-panel>Why exactly one chokepoint <span class="ar">→</span></a></div>
+    </div>
+    <div class="stage rv" data-label="app.driftwood.test/customers/8812 · no grant present">
+<svg viewBox="0 0 560 400" aria-hidden="true">
+  <rect x="0" y="0" width="560" height="400" rx="14" fill="#0E1018"/>
+  <g font-size="13">
+    <text x="24" y="40" class="t-disp t-ink" font-size="22" font-weight="600">Ada Whitfield</text>
+    <text x="24" y="62" class="t-mono t-faint" font-size="10.5">samen:crm.person:8812 · Blue Ridge Logistics</text>
+    <g transform="translate(24,88)">
+      <rect width="512" height="44" rx="10" class="f-raised"/><text x="16" y="27" class="t-mute">Name</text><text x="150" y="27" class="t-ink">Ada Whitfield</text><text x="496" y="27" text-anchor="end" class="t-mono t-faint" font-size="10">not PII</text>
+    </g>
+    <g transform="translate(24,140)">
+      <rect width="512" height="44" rx="10" class="f-raised"/><text x="16" y="27" class="t-mute">Email</text><text x="150" y="28" class="t-mono t-ink" font-size="15" letter-spacing="2">••••</text><text x="496" y="27" text-anchor="end" class="t-mono t-indigo" font-size="10">%Masked{}</text>
+    </g>
+    <g transform="translate(24,192)">
+      <rect width="512" height="44" rx="10" class="f-raised"/><text x="16" y="27" class="t-mute">Phone</text><text x="150" y="28" class="t-mono t-ink" font-size="15" letter-spacing="2">••••</text><text x="496" y="27" text-anchor="end" class="t-mono t-indigo" font-size="10">%Masked{}</text>
+    </g>
+    <g transform="translate(24,244)">
+      <rect width="512" height="44" rx="10" class="f-raised"/><text x="16" y="27" class="t-mute">Row stores</text><text x="150" y="27" class="t-mono t-ink" font-size="12.5">vt_9f2c…</text><text x="496" y="27" text-anchor="end" class="t-mono t-faint" font-size="10">a join key, not a hint</text>
+    </g>
+    <g transform="translate(24,296)">
+      <rect width="512" height="44" rx="10" class="f-raised"/><text x="16" y="27" class="t-mute">Shipments</text><text x="150" y="27" class="t-ink">14 · all visible</text><text x="496" y="27" text-anchor="end" class="t-mono t-faint" font-size="10">not PII</text>
+    </g>
+    <text x="24" y="376" class="t-mono t-mute" font-size="10.5">$ curl …/customers/8812 → {"email":"••••","phone":"••••"}  · no per-endpoint rule</text>
+  </g>
+</svg>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-vault" role="dialog" aria-labelledby="h-vault" tabindex="-1" style="--accent:var(--indigo)">
+  <div class="ph"><div class="eyebrow"><span class="n">02</span>The vault</div><a class="x" href="#vault" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-vault">Why exactly one chokepoint</h3>
+    <p>If plaintext can be produced at forty call sites, "no plaintext leaks" is forty separate claims, each decaying as the code grows. Route every read through one function and the claim becomes one question a machine can answer: <b>who called it, under what grant, and was it recorded?</b></p>
+    <h4>What happens to one PII field</h4>
+    <table>
+      <tr><th>Where</th><th>What it holds</th></tr>
+      <tr><td>Domain row</td><td><code>vt_9f2c…</code>, a stable token you can join and group on, which says nothing about the value</td></tr>
+      <tr><td>Vault</td><td>AES-256-GCM ciphertext under a per-subject key held in an external KMS</td></tr>
+      <tr><td>UI · JSON:API · logs · CDC</td><td><code>%Masked{}</code>, rendered <span class="mask">••••</span> (four fixed bullets, so the mask doesn't leak the length)</td></tr>
+      <tr><td>CSV export</td><td>Nothing: the column isn't emitted</td></tr>
+    </table>
+    <h4>Six idioms, applied to every object</h4>
+    <ul>
+      <li><b>Self-qualifying storage</b>: abbrevs projected at compile time into the DB, CDC, logs and catalog</li>
+      <li><b>A machine catalog</b> written inside the migration transaction; an uncatalogued column doesn't compile</li>
+      <li><b>The PII vault</b> with one decrypt chokepoint</li>
+      <li><b>Postgres as the engine</b>: LISTEN/NOTIFY, SKIP LOCKED, Oban in the same transaction</li>
+      <li><b>A malleability ladder</b>: config rows, validated custom fields, tenant objects, code</li>
+      <li><b>Two planes, one core</b>: the next three sections</li>
+    </ul>
+    <h4>What it costs, on purpose</h4>
+    <div class="not"><b>The guarantee is exactly as strong as key custody.</b> Destroying a subject's key destroys their data everywhere; that's how erasure works. It also means a lost key is an accidental erasure, not a recoverable incident. Samen makes that trade deliberately.</div>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-001-key-hierarchy.md">ADR-001</a> key hierarchy · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-003-encryption-lib.md">ADR-003</a> vault on OTP :crypto · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-036-rich-types.md">ADR-036</a> rich types · mix samen.verify.no_plaintext_pii · Samen.Pii.WriteGuard</div>
+  </div>
+</aside>
+<a class="scrim" href="#vault" tabindex="-1" aria-hidden="true"></a>
+
+<!-- ======================= 03 REVEAL ======================= -->
+<section class="band" id="reveal" style="--accent:var(--amber)">
+  <div class="glow" style="right:-380px;top:-160px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">03</span>Reveal</div>
+      <h2 class="w">Support can see PII. <em>Only with a second person's yes.</em></h2>
+      <p class="punch">A dispatcher needs the address that bounced. Pretending support never sees data just moves the work into a spreadsheet nobody audits. Samen keeps the exception inside the system and makes it <b>expensive, visible and self-expiring</b>.</p>
+      <div class="big"><span class="n">2</span><span class="l">people, always. The requester cannot approve: <b>a database <code>CHECK</code> makes that row impossible</b>, not just a form rule. <span class="tag built">built</span></span></div>
+      <ul class="ticks">
+        <li><b>Time-boxed</b>: the auto-revoke job commits in the same transaction as the approval</li>
+        <li><b>Never renewed in place</b>: an extension is a new request and a new approval</li>
+        <li><b>Tenant-readable</b>: a hash-chained log the operator cannot edit, the tenant can read without asking</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-reveal" data-panel>The four properties, with teeth <span class="ar">→</span></a></div>
+    </div>
+    <div class="stage rv" data-label="reveal grant · ticket #7781 · drv_8841">
+<svg viewBox="0 0 560 420" aria-hidden="true">
+  <g font-size="12.5">
+    <g transform="translate(16,16)"><rect width="250" height="96" rx="12" class="f-raised" stroke="#2A2E42"/><text x="16" y="26" class="t-mono t-faint" font-size="10" letter-spacing="1.2">REQUEST</text><text x="16" y="50" class="t-ink">C. Kluis · support tier 2</text><text x="16" y="72" class="t-mute" font-size="11.5">fields: address · reason: bounced</text></g>
+    <g transform="translate(294,16)"><rect width="250" height="96" rx="12" class="f-raised" stroke="#E3A54F"/><text x="16" y="26" class="t-mono t-amber" font-size="10" letter-spacing="1.2">APPROVED BY</text><text x="16" y="50" class="t-ink">M. Okafor · support lead</text><text x="16" y="72" class="t-mute" font-size="11.5">a distinct party</text></g>
+    <path d="M266 64 H 294" stroke="#E3A54F" stroke-width="1.6" class="flow"/>
+    <g transform="translate(16,126)"><rect width="528" height="58" rx="12" fill="#1A1410" stroke="#5A4325"/><text x="16" y="25" class="t-mono t-amber" font-size="11">CHECK (granted_by &lt;&gt; requestor_id)</text><text x="16" y="44" class="t-mute" font-size="11.5">a self-approved row cannot exist: not from a console, a migration, a job or a refactor</text></g>
+    <!-- timeline -->
+    <text x="16" y="222" class="t-mono t-faint" font-size="10" letter-spacing="1.2">THE FIELD, OVER THE LIFE OF THE GRANT</text>
+    <path d="M30 262 H 530" stroke="#2A2E42" stroke-width="2"/>
+    <path d="M150 262 H 410" stroke="#E3A54F" stroke-width="3"/>
+    <circle cx="150" cy="262" r="6" fill="#E3A54F"/><circle cx="410" cy="262" r="6" fill="#E3A54F"/>
+    <text x="150" y="288" text-anchor="middle" class="t-mono t-mute" font-size="10">approved</text>
+    <text x="410" y="288" text-anchor="middle" class="t-mono t-mute" font-size="10">expires_at</text>
+    <text x="70" y="250" text-anchor="middle" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text>
+    <text x="280" y="250" text-anchor="middle" class="t-ink" font-size="13">14 Wharf Rd, Bristol</text>
+    <text x="478" y="250" text-anchor="middle" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text>
+    <!-- chain -->
+    <text x="16" y="330" class="t-mono t-faint" font-size="10" letter-spacing="1.2">TENANT-READABLE AUDIT CHAIN</text>
+    <g transform="translate(16,344)">
+      <rect width="160" height="54" rx="10" class="f-raised" stroke="#2A2E42"/><text x="12" y="22" class="t-mono t-mute" font-size="10">#4410 · h:a91c…</text><text x="12" y="40" class="t-body" font-size="11">reveal requested</text>
+      <path d="M160 27 H 184" stroke="#2A2E42" stroke-width="1.5"/>
+      <rect x="184" width="160" height="54" rx="10" class="f-raised" stroke="#2A2E42"/><text x="196" y="22" class="t-mono t-mute" font-size="10">#4411 · h:3e07…</text><text x="196" y="40" class="t-body" font-size="11">approved · 30 min</text>
+      <path d="M344 27 H 368" stroke="#2A2E42" stroke-width="1.5"/>
+      <rect x="368" width="160" height="54" rx="10" class="f-raised" stroke="#E3A54F"/><text x="380" y="22" class="t-mono t-amber" font-size="10">#4412 · h:c55d…</text><text x="380" y="40" class="t-body" font-size="11">auto-revoked</text>
+    </g>
+  </g>
+</svg>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-reveal" role="dialog" aria-labelledby="h-reveal" tabindex="-1" style="--accent:var(--amber)">
+  <div class="ph"><div class="eyebrow"><span class="n">03</span>Reveal</div><a class="x" href="#reveal" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-reveal">Four properties, three enforced by the database</h3>
+    <p>A property enforced only in application code holds until the next refactor. Three of these four live where a wrong deploy can't reach them.</p>
+    <table>
+      <tr><th>Property</th><th>How it's enforced</th></tr>
+      <tr><td>Second-party</td><td>Policy check <b>and</b> <code>CHECK (granted_by &lt;&gt; requestor_id)</code>. They fail differently and share no failure mode.</td></tr>
+      <tr><td>Time-boxed</td><td>Every grant has <code>expires_at</code>; the revoke job is enqueued in the approval's transaction. If it can't be enqueued, the approval doesn't commit.</td></tr>
+      <tr><td>Logged, tenant-side</td><td>Hash-chained, append-only; a trigger refuses <code>UPDATE</code> and <code>DELETE</code>. Each entry carries the hash of the one before.</td></tr>
+      <tr><td>Scoped</td><td>These fields, this subject. Not a role that gets unmasked, not a session that gets elevated.</td></tr>
+    </table>
+    <h4>Why "never renewed in place" matters</h4>
+    <p>A grant with a renew button becomes permanent the first afternoon someone puts it on a schedule. Here every extension is a separate, separately approved entry, so the log shows <b>how many times</b> access was granted, not one row with a date that keeps moving.</p>
+    <h4>The actor that can't be granted anything</h4>
+    <p>Cross-tenant analytics run as a token-blind actor over resources with no <code>pii_*</code> columns at all. The reveal path refuses that actor before any grant lookup, so an actor that can reveal can't run cross-tenant, and one that runs cross-tenant has nothing to reveal.</p>
+    <div class="not"><b>What we deliberately don't claim.</b> An earlier version of this page said "run support without ever seeing PII." It sounded better and was false by construction, so it was retired. Support can see PII: through a grant a second person approved, that expires on its own, and that the tenant can audit without asking permission.</div>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-002-worm-anchor.md">ADR-002</a> hash-chained audit + WORM anchor · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-010-operator-plane.md">ADR-010</a> operator plane · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-040-lifecycle-substrate.md">ADR-040</a> approvals (distinct-party CHECK)</div>
+  </div>
+</aside>
+<a class="scrim" href="#reveal" tabindex="-1" aria-hidden="true"></a>
+
+<!-- ======================= 04 TWO PLANES ======================= -->
+<section class="band flip" id="planes" style="--accent:var(--sky)">
+  <div class="glow" style="left:-380px;top:-200px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">04</span>Two planes, one core</div>
+      <h2 class="w">Your admin tool is the biggest leak in the company. <em>Unless it's the same app.</em></h2>
+      <p class="punch">The operator plane isn't a second application with its own queries. It's <b>the same objects rendered for a different actor</b>. Support sees the real UI, the real layout, the real bug. The PII inside it renders <span class="mask">••••</span>.</p>
+      <div class="big"><span class="n">3</span><span class="l">actors, one route, one template. <b>What you can see is a property of you, not of the page.</b> <span class="tag built">built</span></span></div>
+      <ul class="ticks">
+        <li><b>Tenant</b>: reads its own org in the clear; scoping is enforced at the resource, not per query</li>
+        <li><b>Operator</b>: masked impersonation, grant-capable, every read in the tenant's log</li>
+        <li><b>Aggregate</b>: token-blind, over resources with zero PII columns</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-planes" data-panel>Why a separate admin app is the leak <span class="ar">→</span></a></div>
+    </div>
+    <div class="stage rv" data-label="/drivers · the same route, resolved three times">
+<svg viewBox="0 0 560 430" aria-hidden="true">
+  <g font-size="12">
+    <!-- headers -->
+    <text x="18" y="22" class="t-mono t-faint" font-size="10" letter-spacing="1.2">ACTOR</text>
+    <text x="150" y="22" class="t-mono t-faint" font-size="10" letter-spacing="1.2">DRIVER</text>
+    <text x="300" y="22" class="t-mono t-faint" font-size="10" letter-spacing="1.2">PHONE</text>
+    <text x="430" y="22" class="t-mono t-faint" font-size="10" letter-spacing="1.2">HOS</text>
+    <!-- tenant -->
+    <g transform="translate(0,36)"><rect width="560" height="112" rx="14" class="f-raised" stroke="#2A2E42"/>
+      <text x="18" y="28" class="t-mono t-sky" font-size="10.5" letter-spacing="1">TENANT</text><text x="18" y="46" class="t-mute" font-size="11">Rosa · dispatcher</text>
+      <text x="150" y="34" class="t-ink">Marcus Vale</text><text x="300" y="34" class="t-ink">(312) 555-0147</text><text x="430" y="34" class="t-ink">6h 20m</text>
+      <text x="150" y="60" class="t-ink">Dana Whitfield</text><text x="300" y="60" class="t-ink">(617) 555-0182</text><text x="430" y="60" class="t-ink">9h 05m</text>
+      <text x="150" y="86" class="t-ink">Theo Brannigan</text><text x="300" y="86" class="t-ink">(614) 555-0119</text><text x="430" y="86" class="t-amber">10h 40m</text>
+    </g>
+    <!-- operator -->
+    <g transform="translate(0,160)"><rect width="560" height="112" rx="14" class="f-raised" stroke="#2A2E42"/>
+      <text x="18" y="28" class="t-mono t-indigo" font-size="10.5" letter-spacing="1">OPERATOR</text><text x="18" y="46" class="t-mute" font-size="11">impersonating</text><text x="18" y="64" class="t-mono t-faint" font-size="10">0 grants held</text>
+      <text x="150" y="34" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="300" y="34" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="430" y="34" class="t-ink">6h 20m</text>
+      <text x="150" y="60" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="300" y="60" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="430" y="60" class="t-ink">9h 05m</text>
+      <text x="150" y="86" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="300" y="86" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text><text x="430" y="86" class="t-amber">10h 40m</text>
+    </g>
+    <!-- aggregate -->
+    <g transform="translate(0,284)"><rect width="560" height="112" rx="14" class="f-raised" stroke="#2A2E42"/>
+      <text x="18" y="28" class="t-mono t-green" font-size="10.5" letter-spacing="1">AGGREGATE</text><text x="18" y="46" class="t-mute" font-size="11">token-blind job</text><text x="18" y="64" class="t-mono t-faint" font-size="10">pii_* count: 0</text>
+      <text x="150" y="34" class="t-mute">Enterprise brokerage</text><text x="300" y="34" class="t-mono t-faint" font-size="11">no such column</text><text x="430" y="34" class="t-ink">96.1%</text>
+      <text x="150" y="60" class="t-mute">Mid-market</text><text x="300" y="60" class="t-mono t-faint" font-size="11">no such column</text><text x="430" y="60" class="t-ink">94.4%</text>
+      <text x="150" y="86" class="t-mute">Regional carrier</text><text x="300" y="86" class="t-mono t-faint" font-size="11">no such column</text><text x="430" y="86" class="t-ink">92.8%</text>
+    </g>
+    <text x="0" y="424" class="t-mono t-mute" font-size="10.5">no markup changes between the three; the difference is which actor asked</text>
+  </g>
+</svg>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-planes" role="dialog" aria-labelledby="h-planes" tabindex="-1" style="--accent:var(--sky)">
+  <div class="ph"><div class="eyebrow"><span class="n">04</span>Two planes</div><a class="x" href="#planes" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-planes">Why a separate admin app is the leak</h3>
+    <p>The usual shape is an internal console with its own controllers, queries and serializers, written faster and reviewed less than the product. Same database, none of the same discipline.</p>
+    <ul>
+      <li><b>Every query path is a road to plaintext.</b> Masking in the product's render layer simply isn't present in the admin app.</li>
+      <li><b>Divergence is silent.</b> The product adds a field; the admin app never learns it's sensitive.</li>
+      <li><b>Audit coverage doesn't transfer.</b> A separate app that reads the row directly produces no audit record, so the tenant can't see it happened.</li>
+    </ul>
+    <p>Building the operator plane from the same resources inverts all three: one decrypt chokepoint means one place to gate, one place to log, one place to review. And impersonation is genuinely useful for support, because the reproduction is real.</p>
+    <h4>The SaaS company is itself a tenant</h4>
+    <p>The operator org mounts the same universal scopes as every customer: its own help desk, its own CRM, platform billing over tenants. The plane boundary is a property of actors, not of codebases.</p>
+    <div class="not"><b>The cost, named.</b> The operator plane is constrained by what the resource layer exposes. There's no escape hatch to "just run a query," by design, because that escape hatch is the thing being removed.</div>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-009-samen-web.md">ADR-009</a> two-plane mountable modules · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-010-operator-plane.md">ADR-010</a> the operator plane · Samen.Policy.OrgScope · Samen.Api.PiiResolution</div>
+  </div>
+</aside>
+<a class="scrim" href="#planes" tabindex="-1" aria-hidden="true"></a>
+
+<!-- ======================= 05 ERASURE ======================= -->
+<section class="band" id="erasure" style="--accent:var(--rose)">
+  <div class="glow" style="right:-380px;top:-160px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">05</span>Erasure</div>
+      <h2>"Delete my data" is a <code style="font-size:.7em">DELETE</code>. <em>That isn't erasure.</em></h2>
+      <p class="punch">The row goes; the value survives in the audit log, last night's rollup, a queued job's arguments, the CDC stream and the backup. Samen erases by <b>destroying the subject's key</b>: the ciphertext everywhere becomes unreadable at once, including in tiers you forgot you had.</p>
+      <div class="big"><span class="n" data-count="{{SHRED_TIERS}}">{{SHRED_TIERS}}</span><span class="l">tiers a <b>separate OS process</b> walks to attest a shredded subject is unrecoverable, including backups, PITR and replay. <span class="tag meas">every CI run</span></span></div>
+      <ul class="ticks">
+        <li><b>A positive over a finite set</b>, not a negative over every copy that might exist</li>
+        <li><b>The audit chain survives</b>: you can prove a reveal happened, not recover what it showed</li>
+        <li><b>A new tier that stores plaintext</b> turns CI red instead of slipping past a migration</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-erasure" data-panel>Why key destruction is checkable <span class="ar">→</span></a></div>
+    </div>
+    <div class="stage rv" data-label="driftwood · crypto-shred game-day · every CI run">
+<div class="term"><span class="ln"><span class="p">$</span> <span class="c">mix samen.verify.no_plaintext_pii --subject drv_8821</span></span><span class="ln"><span class="mu">  spawning verifier in a separate OS process</span></span><span class="ln"><span class="mu">  committed state only · no app caches · no warm keys</span></span><span class="ln"> </span><span class="ln">  domain rows      <span class="ok">unreadable</span></span><span class="ln">  pii vault        <span class="ok">unreadable</span></span><span class="ln">  audit events     <span class="ok">unreadable</span> <span class="mu">(chain intact)</span></span><span class="ln">  rollups          <span class="ok">unreadable</span></span><span class="ln">  oban args        <span class="ok">unreadable</span></span><span class="ln">  cdc mirror       <span class="ok">unreadable</span></span><span class="ln">  backup · PITR    <span class="ok">unreadable</span></span><span class="ln">  session replay   <span class="ok">[erased]</span></span><span class="ln">  kms store        <span class="ok">key material absent</span></span><span class="ln"> </span><span class="ln"><span class="ok">ATTESTED</span> <span class="c">drv_8821 is unrecoverable across all tiers</span></span></div>
+      <p class="cap">Nothing was walked, scrubbed or rewritten. One destruction, and every tier is unreadable at the same instant.</p>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-erasure" role="dialog" aria-labelledby="h-erasure" tabindex="-1" style="--accent:var(--rose)">
+  <div class="ph"><div class="eyebrow"><span class="n">05</span>Erasure</div><a class="x" href="#erasure" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-erasure">Why key destruction is checkable and row-scrubbing isn't</h3>
+    <p><b>Row-scrubbing asks you to prove a negative over an unbounded set:</b> no copy of the value survives in any table, rollup, job, log, replica, backup or downstream consumer, including the ones added last week. There's no finite list, so there's no test. What ships is a migration and a hope.</p>
+    <p><b>Key destruction asks you to prove a positive over a finite set:</b> this key material doesn't exist, and every tier that could hold this subject's data holds only ciphertext. Both halves are enumerable, so a verifier can walk them and a sabotage can make the walk fail.</p>
+    <h4>The tiers the oracle walks</h4>
+    <p>{{PII_TIERS}} tier checks in all, {{SHRED_TIERS}} of them run after a shred: database content, the CDC mirror, backups and PITR restores, the KMS attestation, session replay, and the trace-sink ingress. The others cover audit rows and the chain, the catalog, logs and telemetry, Oban jobs, rollups and vault declarations.</p>
+    <h4>Why a separate OS process</h4>
+    <p>An in-process check can be satisfied by the same memory that produced the data: a cached struct, a warm decrypt, a connection still holding a key. A fresh process sees only committed state, so what it attests is what actually persists.</p>
+    <h4>Agent transcripts are inside the envelope</h4>
+    <p>An AI conversation about a subject is subject data. Transcripts live under the subject's key with a 90-day default retention, so a shred takes them too, with no separate cleanup job to remember.</p>
+    <div class="not"><b>Scope, stated plainly.</b> The full regenerate-and-shred game-day runs end to end in driftwood, the deepest vertical; the verifier itself ships with every generated app. Erasure can't reach a system samen never wrote to: a spreadsheet someone exported, or a downstream consumer that stored its own plaintext.</div>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-001-key-hierarchy.md">ADR-001</a> per-subject KMS keys · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-046-erasure-completeness.md">ADR-046</a> erasure completeness (E1–E7 built) · samen_core/lib/samen/no_plaintext_pii/tiers/</div>
+  </div>
+</aside>
+<a class="scrim" href="#erasure" tabindex="-1" aria-hidden="true"></a>
+
+<!-- ======================= 06 REPLAY ======================= -->
+<section class="band flip" id="replay" style="--accent:var(--violet)">
+  <div class="glow" style="left:-380px;top:-180px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">06</span>Session replay</div>
+      <h2>Watch what happened. <em>Never what they typed.</em></h2>
+      <p class="punch">Session replay is how support finally sees the bug. It's also usually a recording of every value a user typed. Samen's replay records <b>references and shapes</b>: which record, which field, how long the text was. The value never enters the recording, so no viewer can get it back.</p>
+      <div class="big"><span class="n">0</span><span class="l">plaintext bytes stored. <b>The same recording plays four ways</b>, by who's watching, and erased subjects render <code>[erased]</code>. <span class="tag built">built</span></span></div>
+      <ul class="ticks">
+        <li><b>Per-viewer playback</b>: the tenant admin sees their org clear, an operator sees <span class="mask">••••</span></li>
+        <li><b>Shred-aware</b>: after erasure every reference resolves to <code>[erased]</code>; the replay rows aren't touched</li>
+        <li><b>Inert playback</b>: a script-free, sandboxed iframe</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-replay" data-panel>What the recorder keeps <span class="ar">→</span></a></div>
+    </div>
+    <div class="stage rv" data-label="replay · one recording · two viewers">
+<svg viewBox="0 0 560 400" aria-hidden="true">
+  <g font-size="12">
+    <g transform="translate(0,0)"><rect width="270" height="330" rx="14" class="f-raised" stroke="#2A2E42"/>
+      <text x="16" y="26" class="t-mono t-sky" font-size="10" letter-spacing="1.2">TENANT ADMIN · CLEAR</text>
+      <rect x="16" y="44" width="238" height="40" rx="8" class="f-raised2"/><text x="28" y="69" class="t-ink">Ada Whitfield</text>
+      <rect x="16" y="94" width="238" height="40" rx="8" class="f-raised2"/><text x="28" y="119" class="t-ink">ada@whitfield.co</text>
+      <text x="16" y="160" class="t-mono t-faint" font-size="10">typed into "notes"</text>
+      <rect x="16" y="168" width="238" height="40" rx="8" class="f-raised2"/><text x="28" y="193" class="t-mono t-violet" font-size="11">[42 chars]</text>
+      <text x="16" y="236" class="t-mono t-faint" font-size="10">clicked</text>
+      <rect x="16" y="244" width="238" height="40" rx="8" class="f-raised2"/><text x="28" y="269" class="t-ink">Save contact</text>
+      <text x="16" y="312" class="t-mono t-mute" font-size="10">frame 6 / 14 · 00:41</text>
+    </g>
+    <g transform="translate(290,0)"><rect width="270" height="330" rx="14" class="f-raised" stroke="#2A2E42"/>
+      <text x="16" y="26" class="t-mono t-indigo" font-size="10" letter-spacing="1.2">OPERATOR · MASKED</text>
+      <rect x="16" y="44" width="238" height="40" rx="8" class="f-raised2"/><text x="28" y="70" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text>
+      <rect x="16" y="94" width="238" height="40" rx="8" class="f-raised2"/><text x="28" y="120" class="t-mono t-ink" font-size="14" letter-spacing="2">••••</text>
+      <text x="16" y="160" class="t-mono t-faint" font-size="10">typed into "notes"</text>
+      <rect x="16" y="168" width="238" height="40" rx="8" class="f-raised2"/><text x="28" y="193" class="t-mono t-violet" font-size="11">[42 chars]</text>
+      <text x="16" y="236" class="t-mono t-faint" font-size="10">clicked</text>
+      <rect x="16" y="244" width="238" height="40" rx="8" class="f-raised2"/><text x="28" y="269" class="t-ink">Save contact</text>
+      <text x="16" y="312" class="t-mono t-mute" font-size="10">frame 6 / 14 · 00:41</text>
+    </g>
+    <rect x="0" y="346" width="560" height="50" rx="12" fill="#14101C" stroke="#3B2F55"/>
+    <text x="16" y="368" class="t-mono t-violet" font-size="10.5">after Samen.Erasure.shred(ada)</text>
+    <text x="16" y="386" class="t-mute" font-size="11.5">every reference resolves to [erased] · the replay rows are byte-identical</text>
+  </g>
+</svg>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-replay" role="dialog" aria-labelledby="h-replay" tabindex="-1" style="--accent:var(--violet)">
+  <div class="ph"><div class="eyebrow"><span class="n">06</span>Replay</div><a class="x" href="#replay" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-replay">A replay that records by value keeps all of it. This one keeps the shape.</h3>
+    <p>A conventional recorder stores the DOM and every input. Masking it after the fact means trusting every viewer, export and retention job to apply the same rule. Samen stores references, so the rule is applied at playback by the viewer's own scope, the same way every other page is rendered.</p>
+    <h4>What a frame holds</h4>
+    <table>
+      <tr><th>Kept</th><th>Never kept</th></tr>
+      <tr><td>Which record (<code>samen:</code> ref)</td><td>Field values</td></tr>
+      <tr><td>Which field was touched</td><td>Typed text</td></tr>
+      <tr><td>Text length, timing, clicks</td><td>Rendered HTML of a form</td></tr>
+    </table>
+    <h4>Who may watch</h4>
+    <p>The tenant's own admin, on the tenant plane, sees their org clear. An operator sees masked values. A frame the current code can't render (a removed view, a form the recorder never stored) shows an honest placeholder card instead of a guess.</p>
+    <h4>Proof</h4>
+    <p>Two verifier tiers cover it: <code>:replay</code> checks recordings carry no plaintext; <code>:post_shred_replay</code> runs inside the driftwood crypto-shred game-day. Sabotages 421–494 cover capture, playback, authorization and the shred path.</p>
+    <div class="not"><b>Credit.</b> Inspired by <a href="https://github.com/elixir-vibe/phoenix_replay">phoenix_replay</a> by Danila Poyarkov (MIT). We took its capture shape, not its code or its storage model, and rebuilt it around references.</div>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-052-observability-wiring-and-masked-replay.md">ADR-052</a> (all phases built) · docs/runbooks/session-replay.md · mix samen.verify.replay_schema</div>
+  </div>
+</aside>
+<a class="scrim" href="#replay" tabindex="-1" aria-hidden="true"></a>
+
+<!-- ======================= 07 CHAT ======================= -->
+<section class="band" id="chat" style="--accent:var(--sky)">
+  <div class="glow" style="right:-380px;top:-160px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">07</span>Cross-plane chat</div>
+      <h2>One thread. <em>Two truths.</em></h2>
+      <p class="punch">Your support team and your customer talk in one realtime thread. Paste any object id and it unfurls into a live card, <b>clear to the customer and <span class="mask">••••</span> to support</b>, resolved per viewer through the same two gates every page uses.</p>
+      <div class="big"><span class="n">1</span><span class="l">renderer, two actors. <b>No <code>if operator</code> branch exists in the card.</b> <span class="tag built">built</span></span></div>
+      <ul class="ticks">
+        <li><b>The broadcast carries an id, never a body</b>: every subscriber re-reads under its own actor</li>
+        <li><b>Any catalogued object unfurls</b> the day it's catalogued, with zero card code</li>
+        <li><b>Identity masked by default</b>; disclosing it is an opt-in, recorded act</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-chat" data-panel>How one message renders twice <span class="ar">→</span></a></div>
+    </div>
+    <div class="stage rv" data-label="chat · rate confirmation for BR-4471">
+<svg viewBox="0 0 560 380" aria-hidden="true">
+  <g font-size="12">
+    <g><rect width="270" height="380" rx="14" class="f-raised" stroke="#2A2E42"/>
+      <text x="16" y="26" class="t-mono t-sky" font-size="10" letter-spacing="1.2">BLUE RIDGE · TENANT</text>
+      <text x="16" y="56" class="t-ink" font-weight="600">Rosa Medina</text><text x="110" y="56" class="t-mono t-faint" font-size="10">10:26</text>
+      <text x="16" y="76" class="t-body" font-size="11.5">Here's the driver on BR-4471:</text>
+      <rect x="16" y="90" width="238" height="150" rx="10" class="f-raised2" stroke="#2A2E42"/>
+      <text x="30" y="114" class="t-ink" font-weight="600">Terrence Vogel</text><text x="30" y="131" class="t-mono t-faint" font-size="9.5">samen:freight.driver</text>
+      <text x="30" y="158" class="t-mute" font-size="11">CDL #</text><text x="120" y="158" class="t-ink" font-size="11">D4471-8820</text>
+      <text x="30" y="180" class="t-mute" font-size="11">CDL state</text><text x="120" y="180" class="t-ink" font-size="11">TX</text>
+      <text x="30" y="202" class="t-mute" font-size="11">ELD</text><text x="120" y="202" class="t-ink" font-size="11">samsara</text>
+      <text x="30" y="224" class="t-mute" font-size="11">Status</text><text x="120" y="224" class="t-green" font-size="11">Available</text>
+      <text x="16" y="360" class="t-mono t-mute" font-size="10">own org · resolved clear</text>
+    </g>
+    <g transform="translate(290,0)"><rect width="270" height="380" rx="14" class="f-raised" stroke="#2A2E42"/>
+      <text x="16" y="26" class="t-mono t-indigo" font-size="10" letter-spacing="1.2">SAAS SUPPORT · OPERATOR</text>
+      <text x="16" y="56" class="t-mono t-ink" font-size="13" letter-spacing="2">••••</text><text x="64" y="56" class="t-mono t-faint" font-size="10">blueridge-dispatch · 10:26</text>
+      <text x="16" y="76" class="t-mono t-mute" font-size="11.5">•••• ••• •••••• •• ••-••••</text>
+      <rect x="16" y="90" width="238" height="150" rx="10" class="f-raised2" stroke="#2A2E42"/>
+      <text x="30" y="115" class="t-mono t-ink" font-size="13" letter-spacing="2">••••</text><text x="30" y="131" class="t-mono t-faint" font-size="9.5">samen:freight.driver</text>
+      <text x="30" y="158" class="t-mute" font-size="11">CDL #</text><text x="120" y="159" class="t-mono t-ink" font-size="12" letter-spacing="2">••••</text>
+      <text x="30" y="180" class="t-mute" font-size="11">CDL state</text><text x="120" y="180" class="t-ink" font-size="11">TX</text>
+      <text x="30" y="202" class="t-mute" font-size="11">ELD</text><text x="120" y="202" class="t-ink" font-size="11">samsara</text>
+      <text x="30" y="224" class="t-mute" font-size="11">Status</text><text x="120" y="224" class="t-green" font-size="11">Available</text>
+      <text x="16" y="270" class="t-mute" font-size="11">support can still work the load:</text>
+      <text x="16" y="288" class="t-mute" font-size="11">state, ELD and status stay readable</text>
+      <text x="16" y="360" class="t-mono t-mute" font-size="10">same card · same function · other actor</text>
+    </g>
+  </g>
+</svg>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-chat" role="dialog" aria-labelledby="h-chat" tabindex="-1" style="--accent:var(--sky)">
+  <div class="ph"><div class="eyebrow"><span class="n">07</span>Chat</div><a class="x" href="#chat" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-chat">Why one message can render two truths without a second code path</h3>
+    <p>The naive build is two renderers: the tenant view, and an operator view that redacts. The redacting one is newer and less reviewed, and it drifts the first time someone adds a field.</p>
+    <h4>Two mechanisms, both reused</h4>
+    <ol>
+      <li><b>The PubSub envelope carries an id, never a body.</b> Every subscriber re-reads the message through its own scope. A masked session can't receive plaintext by subscribing, because the topic never carried any.</li>
+      <li><b>The unfurl resolver composes two kernel gates that didn't change:</b> <code>OrgScope</code>, then <code>PiiResolution</code>. Nothing in chat reads a column directly, unwraps <code>%Masked{}</code> or calls the vault.</li>
+    </ol>
+    <h4>A framework capability, not a chat trick</h4>
+    <p><code>Samen.Web.ObjectRef</code> takes a ref and an actor and returns a card. Chat is its first consumer: a CRM page can unfurl a related object, an audit entry its subject, a notification its target. Declare a new field as PII and it masks in every card on the next render, because the card was never the thing deciding.</p>
+    <h4>Crossing the plane boundary</h4>
+    <p>The thread belongs to the tenant org. Support reaches it through the impersonation grant, so <code>OrgScope</code> is satisfied for both parties with no new policy. An operator session targeting a different org sees the thread as zero rows.</p>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-012-crossplane-chat.md">ADR-012</a> cross-plane chat + object unfurl · chat_unfurl_masking_test.exs (live operator DOM scanned: 0 leaks)</div>
+  </div>
+</aside>
+<a class="scrim" href="#chat" tabindex="-1" aria-hidden="true"></a>
+
+<!-- ======================= 08 AGENT ======================= -->
+<section class="band flip" id="agent" style="--accent:var(--amber)">
+  <div class="glow" style="left:-380px;top:-160px" aria-hidden="true"></div>
+  <div class="wrap vh">
+    <div class="copy rv">
+      <div class="eyebrow"><span class="n">08</span>The AI agent</div>
+      <h2 class="w">The agent proposes. A human approves. <em>The write runs as the human.</em></h2>
+      <p class="punch">An agent near customer data is a governance problem before it's a feature. So samen's agent loop starts at authority: the agent holds <b>no credential that can write</b>. A write is a proposal parked for a person; on approval it executes under <b>that person's</b> actor, recorded as agent-originated.</p>
+      <div class="big"><span class="n">0</span><span class="l">vault values, plaintext or token, that reach a model. <b>Agent runs are masked-only on every plane.</b> <span class="tag built">built</span></span></div>
+      <ul class="ticks">
+        <li><b>Durable, multi-step tool use</b> with fail-honest budgets: 8 turns, 12 tool calls, 10 minutes by default</li>
+        <li><b>Grounded in the machine catalog</b>, not guessed field names</li>
+        <li><b><code>mix samen.gen.agent</code></b> scaffolds a new agent with its own masking proof</li>
+      </ul>
+      <div class="more"><a class="btn o" href="#p-agent" data-panel>Why "runs as the approver" is the whole design <span class="ar">→</span></a></div>
+    </div>
+    <div class="stage rv" data-label="driftwood · support-triage agent · run 6f2a…d1">
+<svg viewBox="0 0 560 430" aria-hidden="true">
+  <g font-size="12">
+    <g transform="translate(0,0)"><rect width="560" height="54" rx="12" class="f-raised" stroke="#2A2E42"/><circle cx="22" cy="27" r="9" fill="none" stroke="#4CC294" stroke-width="1.6"/><text x="22" y="31" text-anchor="middle" class="t-mono t-green" font-size="10">1</text><text x="42" y="24" class="t-mono t-ink" font-size="11.5">catalog_lookup</text><text x="160" y="24" class="t-mono t-faint" font-size="10">read</text><text x="42" y="42" class="t-mute" font-size="11">resolves load + driver against schema.dict.json</text><text x="540" y="31" text-anchor="end" class="t-mono t-green" font-size="10">done</text></g>
+    <g transform="translate(0,64)"><rect width="560" height="54" rx="12" class="f-raised" stroke="#2A2E42"/><circle cx="22" cy="27" r="9" fill="none" stroke="#4CC294" stroke-width="1.6"/><text x="22" y="31" text-anchor="middle" class="t-mono t-green" font-size="10">2</text><text x="42" y="24" class="t-mono t-ink" font-size="11.5">fetch_record</text><text x="160" y="24" class="t-mono t-faint" font-size="10">read</text><text x="42" y="42" class="t-mute" font-size="11">DRV-8821 · name •••• · phone •••• · HOS 6h 12m left</text><text x="540" y="31" text-anchor="end" class="t-mono t-green" font-size="10">done</text></g>
+    <g transform="translate(0,128)"><rect width="560" height="54" rx="12" fill="#1A1410" stroke="#E3A54F"/><circle cx="22" cy="27" r="9" fill="#E3A54F"/><text x="22" y="31" text-anchor="middle" class="t-mono" fill="#0A0B11" font-size="10">3</text><text x="42" y="24" class="t-mono t-ink" font-size="11.5">reassign_load</text><text x="160" y="24" class="t-mono t-amber" font-size="10">write · proposed</text><text x="42" y="42" class="t-mute" font-size="11">move LD-40277 from DRV-8821 to DRV-9134</text><text x="540" y="31" text-anchor="end" class="t-mono t-amber pulse" font-size="10">parked</text></g>
+    <g transform="translate(0,200)"><rect width="560" height="230" rx="14" class="f-raised2" stroke="#2A2E42"/>
+      <text x="20" y="30" class="t-disp t-ink" font-size="17" font-weight="600">Approve this agent write?</text>
+      <text x="20" y="64" class="t-mute" font-size="11.5">Agent authority</text><text x="200" y="64" class="t-rose" font-size="11.5">none — cannot write</text>
+      <text x="20" y="88" class="t-mute" font-size="11.5">Executes as</text><text x="200" y="88" class="t-ink" font-size="11.5">A. Reyes · dispatcher (you)</text>
+      <text x="20" y="112" class="t-mute" font-size="11.5">Registered kind</text><text x="200" y="112" class="t-mono t-ink" font-size="11">ai_agent_write</text>
+      <text x="20" y="136" class="t-mute" font-size="11.5">Arg values</text><text x="200" y="136" class="t-ink" font-size="11.5">masked in transcript</text>
+      <rect x="20" y="164" width="190" height="42" rx="21" fill="#E3A54F"/><text x="115" y="190" text-anchor="middle" font-size="13" font-weight="600" fill="#0A0B11">Approve, run as me</text>
+      <rect x="222" y="164" width="100" height="42" rx="21" fill="none" stroke="#2A2E42"/><text x="272" y="190" text-anchor="middle" class="t-ink" font-size="13">Reject</text>
+      <text x="340" y="182" class="t-mono t-faint" font-size="10">deadline 24h, then</text><text x="340" y="196" class="t-mono t-faint" font-size="10">it expires unapplied</text>
+    </g>
+  </g>
+</svg>
+    </div>
+  </div>
+</section>
+<aside class="panel" id="p-agent" role="dialog" aria-labelledby="h-agent" tabindex="-1" style="--accent:var(--amber)">
+  <div class="ph"><div class="eyebrow"><span class="n">08</span>The AI agent</div><a class="x" href="#agent" data-close>Close ✕</a></div>
+  <div class="pb">
+    <h3 id="h-agent">Why "runs as the approver" is the whole design</h3>
+    <p>Approval workflows usually get this backwards: the agent asks, a human clicks yes, and the write executes under the agent's identity because that process already holds a connection. That launders the agent's permissions through a click. The human approved one write; the credential that performed it can perform every other write, and the audit trail names a service account.</p>
+    <ul>
+      <li><b>Authority is bound at approval</b>, not before. There's no standing agent credential to escalate, steal or forget to rotate.</li>
+      <li><b>The blast radius is the approver's own permissions.</b> An agent can't propose its way past what its approver could do by hand.</li>
+      <li><b>The write is attributable to a person</b>, and <code>ai_agent_write</code> keeps its origin distinguishable from ordinary traffic.</li>
+    </ul>
+    <h4>The no-PII-egress chokepoint</h4>
+    <p>Every prompt, tool definition, tool argument and tool result passes one chokepoint before it reaches a provider. No vault-routed value, neither plaintext nor its <code>vt_</code> token, may cross it. Tool results re-enter the conversation masked. A live reveal grant does <b>not</b> admit plaintext into an agent run: runs persist, and grants never apply to persisted egress.</p>
+    <h4>The ratified decisions</h4>
+    <table>
+      <tr><th>Decision</th><th>Taken</th></tr>
+      <tr><td>Autonomous writes</td><td>Never: every mutating tool is propose-then-approve</td></tr>
+      <tr><td>Plaintext in runs</td><td>Never: masked-only on every plane</td></tr>
+      <tr><td>Budgets</td><td>8 turns · 12 tool calls · 60k in / 8k out tokens · 600 s; exhaustion is fail-honest, never a partial answer</td></tr>
+      <tr><td>Transcript retention</td><td>90 days, inside the subject's erasure envelope</td></tr>
+      <tr><td>Token streaming</td><td>Deferred: it would be a second egress surface</td></tr>
+    </table>
+    <h4>Also on the AI plane</h4>
+    <p>A keyless kernel: CI runs a deterministic fake provider, and live providers ship as packages (<code>samen_anthropic</code>). There are pgvector embeddings, plus MCP over HTTP+SSE with per-operator tokens.</p>
+    <div class="src">source · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-043-ai-plane.md">ADR-043</a> AI plane, INV-7 no-PII-egress · <a href="https://github.com/ckluis/samen/blob/main/docs/adr/ADR-047-ai-agent-loop.md">ADR-047</a> agent loop (A1–A7 built, zero new dependencies) · verifiers: ai_prompt_masking · agent_coverage · tool_surface · tool_actor_identity</div>
+  </div>
+</aside>
+<a class="scrim" href="#agent" tabindex="-1" aria-hidden="true"></a>

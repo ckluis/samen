@@ -1,0 +1,105 @@
+<script>
+(function () {
+  var root = document.documentElement;
+  root.classList.add('js');
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // a page that loads hidden (a background tab, a preview, a thumbnail) never runs transitions: show it as-is
+  if (document.visibilityState === 'hidden') reduce = true;
+
+  // reveal on scroll (content is visible without JS; this only enhances)
+  var rv = document.querySelectorAll('.rv');
+  if ('IntersectionObserver' in window && !reduce) {
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+    rv.forEach(function (el) { io.observe(el); });
+  } else {
+    root.classList.add('still');
+    rv.forEach(function (el) { el.classList.add('in'); });
+  }
+
+  // count-up on the big numbers
+  function countUp(el) {
+    var to = parseFloat(el.getAttribute('data-count'));
+    if (!isFinite(to) || reduce) return;
+    var t0 = null, dur = 1100;
+    function step(t) {
+      if (!t0) t0 = t;
+      var p = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(to * e).toLocaleString('en-US');
+      if (p < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+  if ('IntersectionObserver' in window) {
+    var cio = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { if (e.isIntersecting) { countUp(e.target); cio.unobserve(e.target); } });
+    }, { threshold: 0.6 });
+    document.querySelectorAll('[data-count]').forEach(function (el) { cio.observe(el); });
+  }
+
+  // nav: active section + progress bar
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.top ol a'));
+  var map = {};
+  links.forEach(function (a) { map[a.getAttribute('href').slice(1)] = a; });
+  var prog = document.querySelector('.prog');
+  var bands = Array.prototype.slice.call(document.querySelectorAll('section.band'));
+  function onScroll() {
+    var h = document.documentElement.scrollHeight - innerHeight;
+    if (prog) prog.style.width = (h > 0 ? (scrollY / h) * 100 : 0) + '%';
+    var cur = null;
+    for (var i = 0; i < bands.length; i++) {
+      if (bands[i].getBoundingClientRect().top < innerHeight * 0.4) cur = bands[i].id;
+    }
+    links.forEach(function (a) { a.classList.remove('on'); });
+    if (cur && map[cur]) map[cur].classList.add('on');
+  }
+  addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  // side panels: JS keeps the scroll position; :target is the no-JS fallback
+  var open = null, opener = null;
+  function show(p, from) {
+    if (open && open !== p) hide(true);
+    open = p; opener = from || null;
+    p.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    setTimeout(function () { p.focus({ preventScroll: true }); }, 30);
+  }
+  function hide(silent) {
+    if (!open) return;
+    open.classList.remove('open');
+    document.body.style.overflow = '';
+    if (!silent) {
+      // a panel opened by a deep link is also :target; move the target back to its band
+      if (location.hash === '#' + open.id) location.hash = open.id.slice(2);
+      else if (history.replaceState) history.replaceState(null, '', location.pathname + location.search);
+    }
+    if (opener && !silent) opener.focus({ preventScroll: true });
+    open = null;
+  }
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a');
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    if (a.hasAttribute('data-panel')) {
+      var p = document.getElementById(href.slice(1));
+      if (p) { e.preventDefault(); show(p, a); }
+    } else if (a.hasAttribute('data-close') || a.classList.contains('scrim')) {
+      if (open) { e.preventDefault(); hide(); }
+    }
+  });
+  addEventListener('keydown', function (e) { if (e.key === 'Escape' && open) hide(); });
+  // a deep link straight to a panel opens it with JS too (and keeps the page under it)
+  if (location.hash.indexOf('#p-') === 0) {
+    var p0 = document.getElementById(location.hash.slice(1));
+    if (p0) {
+      var band = document.getElementById(location.hash.slice(3));
+      if (band) band.scrollIntoView();
+      show(p0);
+    }
+  }
+})();
+</script>
+</body>
+</html>
