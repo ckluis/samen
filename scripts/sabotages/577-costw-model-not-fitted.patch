@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: the fitted chunk-cost model is never used (the prior always stands), so a chunk is estimated at
+#   its full lane-seconds with no fixed lane start-up.
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: COSTW chunks are weighted by what each item last cost, not by the slowest item's rate
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index af5acde..648a9b2 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -644,7 +644,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
+     # (P5) cost-weighted ranges: what each item LAST cost (lane-seconds, read from the sub-step logs through
+     # `shard_cost`) and what a chunk of that many lane-seconds really took (cost_model).
+     costs = seen.get(step.id + "#item_cost") or {} if step.shard_cost else {}
+-    ovh, share, margin = cost_model(seen.get(step.id + "#chunk_obs")) if step.shard_cost else PRIOR_MODEL
++    ovh, share, margin = PRIOR_MODEL
+     chunk_est = lambda lane_s: margin * (ovh + share * lane_s)
+     if step.shard_kind == "ranges":
+         items = [m.group(1) for m in re.finditer(step.shard_item, text, re.M)]
