@@ -1144,6 +1144,8 @@ class Run(object):
             if pr and pr.get("status") == "PASS" and s.key and pr.get("key") == s.key:
                 self.status[s.id] = "PASS"
                 self.results[s.id] = pr
+                # file it under its CURRENT slot id too, or `scripts/ci status` reads the new plan's slot as NOT_RUN
+                self.state.setdefault("steps", {})[s.id] = pr
                 out("PASS %s %s (earlier in this run)" % (s.id, fmt_s(pr.get("duration_s", 0))))
                 self.say_markers(s)
                 continue

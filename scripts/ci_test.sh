@@ -1390,6 +1390,9 @@ PY
   eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'all(s["processed"] == s["expected"] for s in d["steps"])')" True "RECHUNK: each sub-step reported exactly its chunk (shard_check)"
   eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'max(s["expected"] for s in d["steps"][1:])')" 2 "RECHUNK: G10 — the re-planned chunks are sized at the NEW rate (2 items x 8 s <= 20 s)"
   eq "$(jsonget "$SAMEN_CI_HOME/last.json" 'len(d["steps"])')" 16 "RECHUNK: ... 1 kept chunk + 15 re-planned chunks of 2 (items 11-40)"
+  drive "$T/rc2s" status
+  has "$T/rc2s" '^CI\(pr\): PASS — 16/16 done' "RECHUNK: positive control — status counts every planned slot done"
+  hasnt "$T/rc2s" 'NOT_RUN' "RECHUNK: status files the kept chunk under its new slot id (no phantom NOT_RUN after a PASS)"
   # red twin: without the persisted partition the same resume re-plans from scratch and re-runs the finished items
   rm -rf "$SAMEN_CI_HOME/partition" "$SAMEN_CI_HOME/cache"; : > "$CI_TEST_RUNS"
   cp "$T/rc.keep/state.json" "$SAMEN_CI_HOME/state.json"; cp "$T/rc.keep/timings.json" "$SAMEN_CI_HOME/timings.json"
