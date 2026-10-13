@@ -50,6 +50,14 @@
 #          a family-shaped token) or a scripts/ci/docs/.github path that does not exist; vacuous or missing docs
 #          fail; the real docs resolve; the check is a manifest step of quick, pr and full.
 #
+#   GENPROBE (P5) the gen probes run concurrently: each works on a PRIVATE registry copy (the committed file is
+#          never written; a probe that writes it anyway is repaired and FAILS), a finishing probe sweeps only its
+#          OWN scratch dirs, the HTTP port ranges are disjoint, and the manifest has flagship/post/deploy
+#          non-serial but gen_agent (which writes into samen_core/lib + test) still serial.
+#   NARROW   (P5) a step may exclude `<app>/test/*_test.exs` from its key only where it never runs ExUnit on that
+#          app: the narrowing removes exactly the `_test.exs` files and nothing Mix compiles or a probe copies;
+#          editing an excluded file keeps the key and the quick selection, editing an included one changes both.
+#
 # Usage: scripts/ci_test.sh [CASE…]      (default: every case)
 # Exit:  0 all assertions pass · 1 otherwise. Residue: none (temp dirs, trap on EXIT/INT/TERM).
 set -uo pipefail
@@ -1128,7 +1136,168 @@ STUB
   done
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS)
+# GENPROBE (ADR-053 P5): the flagship/post/deploy gen probes run CONCURRENTLY. What made them serial was one shared
+# resource — the committed abbrev registry, which each probe mutated in place and restored from a snapshot (two
+# probes would restore each other's reservations away) — plus a scratch sweep that deleted every probe's working
+# dirs. run_gen_probe now hands each probe a private registry copy (SAMEN_ABBREV_REGISTRY) and sweeps only its own
+# dirs. The fixture stubs `mix`, so this runs in seconds.
+case_GENPROBE() {
+  local F="$T/gp" B="$T/gpbin"
+  rm -rf "$F" "$B"; mkdir -p "$F/samen_core/priv" "$B"
+  printf '{"abbrevs": {}}\n' > "$F/samen_core/priv/abbrev_registry.json"
+  cat > "$B/mix" <<'STUB'
+#!/usr/bin/env bash
+# stub for `mix run <probe>`: reserve into the registry the probe was GIVEN, then behave per GP_MODE
+probe="$2"
+reg="${SAMEN_ABBREV_REGISTRY:-$REPO_ROOT/samen_core/priv/abbrev_registry.json}"
+echo "reserved-by-$probe" >> "$reg"
+echo "$probe saw ${SAMEN_ABBREV_REGISTRY:-<unset>}" >> "$GP_LOG"
+case "${GP_MODE:-quick}" in
+  committed) echo oops >> "$REPO_ROOT/samen_core/priv/abbrev_registry.json" ;;   # ignores the seam
+  scratch)  # keep a working dir for the whole run, then report whether it is still there at the end
+    d="$(mktemp -d "$REPO_ROOT/$GP_STEM.XXXXXX")"; sleep "$GP_SLEEP"
+    if [[ -d "$d" ]]; then echo "$probe scratch alive" >> "$GP_LOG"; else echo "$probe scratch DELETED" >> "$GP_LOG"; fi ;;
+esac
+exit 0
+STUB
+  chmod +x "$B/mix"
+  local reg="$F/samen_core/priv/abbrev_registry.json" pristine
+  pristine="$(shasum -a 256 "$reg" | awk '{print $1}')"
+  gp() { # gp <probe> [env…] — run_gen_probe the way the manifest does, with the stub mix first on PATH
+    local probe="$1"; shift
+    env PATH="$B:$PATH" REPO_ROOT="$F" GP_LOG="$T/gp.log" "$@" bash -c 'source "'"$ROOT"'/scripts/gen_probe_guard.sh"; run_gen_probe "$0" "stub probe"' "$probe"
+  }
+  : > "$T/gp.log"
+  # 1. positive control: private mode hands the probe a registry that is NOT the committed one, and leaves the file alone
+  gp priv/gen_post_probe.exs > "$T/gp1" 2>&1; eq "$?" 0 "GENPROBE: a probe that honours the seam passes"
+  has "$T/gp.log" 'gen_post_probe.exs saw /.*samen_ci_registry_private\.' "GENPROBE: the probe was pointed at a private registry copy"
+  eq "$(shasum -a 256 "$reg" | awk '{print $1}')" "$pristine" "GENPROBE: the committed registry is byte-identical afterwards (the reservation went to the copy)"
+  eq "$(ls "${TMPDIR:-/tmp}"/samen_ci_registry_private.* 2>/dev/null | wc -l | tr -d ' ')" "0" "GENPROBE: ... and the private copy is removed"
+  # 2. a probe that writes the committed file anyway is caught, the file repaired, the run fails
+  gp priv/gen_post_probe.exs GP_MODE=committed > "$T/gp2" 2>&1; eq "$?" 2 "GENPROBE: a probe that writes the committed registry FAILS (exit 2)"
+  has "$T/gp2" 'FATAL: .* left .*abbrev_registry.json changed' "GENPROBE: ... saying what it left changed"
+  eq "$(shasum -a 256 "$reg" | awk '{print $1}')" "$pristine" "GENPROBE: ... and the committed registry was repaired byte-exact from the snapshot"
+  # 3. two probes at once: the fast one finishing must not sweep away the slow one's scratch dir
+  : > "$T/gp.log"
+  ( gp priv/gen_app_flagship_probe.exs GP_MODE=scratch GP_STEM=_gen_flagship_scratch GP_SLEEP=3 > "$T/gp3a" 2>&1; echo $? > "$T/gp3a.rc" ) &
+  sleep 0.5
+  ( gp priv/gen_post_probe.exs GP_MODE=scratch GP_STEM=_gen_post_scratch GP_SLEEP=0.2 > "$T/gp3b" 2>&1; echo $? > "$T/gp3b.rc" ) &
+  wait
+  eq "$(cat "$T/gp3a.rc"),$(cat "$T/gp3b.rc")" "0,0" "GENPROBE: two concurrent probes both pass"
+  has "$T/gp.log" 'gen_app_flagship_probe.exs scratch alive' "GENPROBE: the slow probe's scratch dir survived the fast probe finishing (the sweep is per probe)"
+  has "$T/gp.log" 'gen_post_probe.exs scratch alive' "GENPROBE: ... and the fast probe's own"
+  eq "$(ls -d "$F"/_gen_* 2>/dev/null | wc -l | tr -d ' ')" "0" "GENPROBE: no scratch residue once both finished"
+  eq "$(shasum -a 256 "$reg" | awk '{print $1}')" "$pristine" "GENPROBE: ... and the committed registry is untouched by the pair"
+  # 4. the legacy shared mode (the T107 interrupt harness) is the red twin: its sweep DOES delete a concurrent probe's dir
+  : > "$T/gp.log"
+  ( gp priv/gen_app_flagship_probe.exs GEN_PROBE_SHARED_REGISTRY=1 GP_MODE=scratch GP_STEM=_gen_flagship_scratch GP_SLEEP=3 > "$T/gp4a" 2>&1 ) &
+  sleep 0.5
+  ( gp priv/gen_post_probe.exs GEN_PROBE_SHARED_REGISTRY=1 GP_MODE=scratch GP_STEM=_gen_post_scratch GP_SLEEP=0.2 > "$T/gp4b" 2>&1 ) &
+  wait
+  has "$T/gp.log" 'gen_app_flagship_probe.exs scratch DELETED' "GENPROBE: positive control — in shared mode the same pair DOES lose a working dir (why the seam exists)"
+  git -C "$F" init -q 2>/dev/null; rm -rf "$F"/_gen_* 2>/dev/null
+  # 5. HTTP ports: the three booting probes draw from disjoint ranges
+  local pf="$ROOT/samen_core/priv" ranges
+  ranges="$(grep -hE '^http_port = [0-9]+ \+ rem' "$pf/gen_app_flagship_probe.exs" "$pf/gen_post_probe.exs" "$pf/gen_app_deploy_probe.exs" \
+    | sed -E 's/^http_port = ([0-9]+) \+ rem.*, ([0-9]+)\)$/\1 \2/' | sort -n)"
+  eq "$(printf '%s\n' "$ranges" | wc -l | tr -d ' ')" 3 "GENPROBE: positive control — the three probes' port draws were found"
+  eq "$(printf '%s\n' "$ranges" | awk 'NR>1 && $1 < prev + plen {bad=1} {prev=$1; plen=$2} END{print bad+0}')" 0 "GENPROBE: the three port ranges do not overlap"
+  # 6. the manifest: the three concurrent ones are not serial; gen_agent (writes samen_core/lib + test) still is
+  local m="$ROOT/ci/steps.conf" id
+  for id in gen_flagship_probe gen_post_probe gen_deploy_probe; do
+    eq "$(awk -v s="[step $id]" '$0==s{f=1;next} /^\[/{f=0} f && /^serial *=/' "$m")" "" "GENPROBE: $id is not serial"
+  done
+  eq "$(awk -v s="[step gen_agent_probe]" '$0==s{f=1;next} /^\[/{f=0} f && /^serial *= *1/' "$m")" "serial = 1" "GENPROBE: gen_agent_probe stays serial (it mutates samen_core/lib and test)"
+}
+
+# NARROW (ADR-053 P5): the gen probes and the ten dialyzer steps declare `!<app>/test/*_test.exs`. That is sound ONLY
+# because neither runs ExUnit on a kernel/vertical test module: dialyzer reads compiled .ex (never *_test.exs), and the
+# probes run `mix test` only inside the generated scratch app (the one exception, gen_agent, names its own emitted file).
+# The proof is mechanical: (a) the exclusion removes exactly the *_test.exs files and nothing Mix compiles; (b) no
+# probe/guard/dialyzer script names a kernel test path; (c) the driver honours it (an excluded edit keeps the key and
+# the quick selection, an included one changes both). Anything a step actually reads stays in the key.
+case_NARROW() {
+  local steps="gen_flagship_probe gen_post_probe gen_deploy_probe gen_agent_probe dialyzer_samen_core dialyzer_samen_web dialyzer_demo dialyzer_driftwood dialyzer_pawchart dialyzer_samen_stripe dialyzer_samen_postmark dialyzer_samen_ses dialyzer_samen_resend dialyzer_samen_anthropic"
+  # (a) against the REAL manifest and the REAL tracked files
+  SAMEN_CI_TOOLCHAIN=t python3 - "$ROOT" $steps > "$T/nr1" 2>&1 <<'PY'
+import os, re, subprocess, sys
+root, steps = sys.argv[1], sys.argv[2:]
+sys.path.insert(0, os.path.join(root, "scripts"))
+os.environ["SAMEN_CI_REPO"] = root
+import ci_driver as d
+man = d.Manifest(os.path.join(root, "ci", "steps.conf"))
+files = subprocess.run(["git", "-C", root, "ls-files"], stdout=subprocess.PIPE).stdout.decode().split("\n")
+files = [f for f in files if f and os.path.exists(os.path.join(root, f))]
+bad = 0
+def say(ok, msg):
+    global bad
+    print(("ok   " if ok else "BAD  ") + msg)
+    bad += 0 if ok else 1
+for sid in steps:
+    st = man.by_id(sid)
+    full = d.make_matcher(d.expand_tokens([t for t in st.inputs + st.reads if not t.startswith("!")], man.apps))
+    narrow = d.make_matcher(d.expand_tokens(st.inputs + st.reads, man.apps))
+    excl = [t[1:] for t in st.inputs if t.startswith("!")]
+    say(bool(excl), "%s declares an exclusion" % sid)
+    dropped = [f for f in files if full(f) and not narrow(f)]
+    kept_tests = [f for f in dropped if not re.match(r"^[a-z_]+/test/.*_test\.exs$", f)]
+    say(not kept_tests, "%s: the narrowing drops only <app>/test/**_test.exs (also dropped: %s)" % (sid, kept_tests[:3]))
+    say(len(dropped) > 0, "%s: positive control — it does drop test modules (%d)" % (sid, len(dropped)))
+    # nothing Mix compiles (elixirc_paths of any env, plus mix.exs/lock/config/priv/test_helper) may be dropped
+    for app in {f.split("/")[0] for f in dropped}:
+        mixexs = open(os.path.join(root, app, "mix.exs")).read()
+        dirs = {"lib"}
+        for m in re.finditer(r"defp elixirc_paths\(:\w+\),\s*do:\s*\[([^\]]*)\]", mixexs):
+            dirs |= set(re.findall(r'"([^"]+)"', m.group(1)))
+        compiled = [f for f in files if f.startswith(app + "/") and f.endswith(".ex")
+                    and any(f.startswith("%s/%s/" % (app, x)) for x in dirs)]
+        lost = [f for f in compiled if full(f) and not narrow(f)]
+        say(bool(compiled) and not lost, "%s/%s: every file Mix compiles (%s: %d files) stays in the key" % (sid, app, ",".join(sorted(dirs)), len(compiled)))
+        for extra in ("mix.exs", "mix.lock", "test/test_helper.exs"):
+            if os.path.exists(os.path.join(root, app, extra)):
+                say(narrow("%s/%s" % (app, extra)), "%s/%s: %s stays in the key" % (sid, app, extra))
+sys.exit(1 if bad else 0)
+PY
+  eq "$?" 0 "NARROW: the exclusions drop exactly *_test.exs files and nothing Mix compiles"
+  hasnt "$T/nr1" '^BAD' "NARROW: no assertion in the manifest sweep failed"
+  has "$T/nr1" '^ok   gen_post_probe: positive control' "NARROW: positive control — the sweep ran over the gen probes"
+  has "$T/nr1" '^ok   dialyzer_samen_core/samen_core: every file Mix compiles' "NARROW: ... and the dialyzer steps"
+  # (b) static: nothing the narrowed steps run names a kernel/framework/vertical test module
+  local f hits
+  hits="$(grep -nE '(samen_core|samen_web|demo|driftwood|pawchart|samen_[a-z]+)/test/' \
+    "$ROOT/samen_core/priv/gen_app_flagship_probe.exs" "$ROOT/samen_core/priv/gen_post_probe.exs" \
+    "$ROOT/samen_core/priv/gen_app_deploy_probe.exs" "$ROOT/samen_core/priv/gen_agent_probe.exs" \
+    "$ROOT/scripts/gen_probe_guard.sh" "$ROOT/scripts/dialyzer_gate.sh" | grep -vE '^[^:]+:[0-9]+:\s*#' || true)"
+  eq "${hits:-none}" none "NARROW: no probe, guard or dialyzer script names a samen_core/samen_web/vertical test path"
+  eq "$(grep -cE 'mix", \["test"|mix test' "$ROOT/scripts/dialyzer_gate.sh" "$ROOT/scripts/gen_probe_guard.sh" | awk -F: '{s+=$2} END{print s+0}')" 0 "NARROW: the guard and the dialyzer gate never run ExUnit"
+  has "$ROOT/samen_core/priv/gen_agent_probe.exs" 'System.cmd\("mix", \["test", Path.relative_to\(test_path, app_dir\)\]' "NARROW: the one in-tree ExUnit run (gen_agent) targets only its own emitted scratch file"
+  has "$ROOT/samen_core/priv/gen_agent_probe.exs" 'scope = "GenAgentProbe"' "NARROW: ... under the GenAgentProbe scratch scope"
+  # (c) the driver, in a fixture: an excluded edit keeps the key and the selection; an included edit moves both
+  mkrepo nr
+  { echo "$APPS"
+    step probe 'app:web app:core !core/test/*_test.exs !web/test/*_test.exs'
+  } > "$SAMEN_CI_MANIFEST"
+  mkdir -p "$SAMEN_CI_REPO/web/test/support" "$SAMEN_CI_REPO/core/test/support"
+  echo t > "$SAMEN_CI_REPO/core/test/a_test.exs"; echo t > "$SAMEN_CI_REPO/web/test/w_test.exs"
+  echo s > "$SAMEN_CI_REPO/core/test/support/s.ex"; echo s > "$SAMEN_CI_REPO/web/test/support/s.ex"
+  ( cd "$SAMEN_CI_REPO" && git add -A && git commit -qm base && git update-ref refs/remotes/origin/main HEAD )
+  local k0 k1
+  key() { "$CI" explain probe 2>&1 | awk '$1=="key"{print $2}'; }
+  k0="$(key)"; [[ -n "$k0" ]] && ok || bad "NARROW: explain printed no key"
+  echo more >> "$SAMEN_CI_REPO/core/test/a_test.exs"; echo more >> "$SAMEN_CI_REPO/web/test/w_test.exs"
+  eq "$(key)" "$k0" "NARROW: editing excluded *_test.exs files (core and web) leaves the key unchanged"
+  drive "$T/nr2" quick --plan
+  hasnt "$T/nr2" 'PLAN probe' "NARROW: ... and quick does not select the step for a test-module-only diff"
+  echo more >> "$SAMEN_CI_REPO/core/test/support/s.ex"
+  [[ "$(key)" != "$k0" ]] && ok || bad "NARROW: editing core/test/support/s.ex (compiled by dev/test builds) must change the key"
+  drive "$T/nr3" quick --plan
+  has "$T/nr3" 'PLAN probe' "NARROW: ... and quick selects it"
+  ( cd "$SAMEN_CI_REPO" && git checkout -q -- core/test/support/s.ex )
+  echo more >> "$SAMEN_CI_REPO/core/lib/a.txt"
+  [[ "$(key)" != "$k0" ]] && ok || bad "NARROW: editing a lib file must change the key"
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS GENPROBE NARROW)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do

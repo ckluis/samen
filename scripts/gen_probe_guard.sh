@@ -27,6 +27,15 @@
 # merely attempted — a mismatch halts loudly (exit 2) rather than silently leaving
 # corruption, matching CLAUDE.md's HANDS-OFF invariant.
 #
+# ADR-053 P5 — PRIVATE REGISTRY (the probes run concurrently): `run_gen_probe` points the probe at its OWN copy
+# of the registry (`SAMEN_ABBREV_REGISTRY`, honoured by Samen.AbbrevRegistry.path/0 — also by the generated
+# app's compile, which asks it), so the committed file is never written and two probes cannot clobber each
+# other's reservations. The committed file is still SHA-256-verified byte-identical afterwards (a probe that
+# somehow wrote it fails loudly), and the scratch sweep only removes THIS probe's `_gen_*_scratch.*` dirs (the old
+# sweep of all three families would delete a concurrent probe's working tree). `GEN_PROBE_SHARED_REGISTRY=1`
+# restores the pre-P5 behaviour (probe mutates the committed file, the trap restores it) — only
+# scripts/interrupt_probe_test.sh sets it, to keep the T107 interrupt proof about the real mutation window.
+#
 # Sourced by root ci.sh AND by scripts/interrupt_probe_test.sh (the T107 interrupt-proof
 # harness) — both exercise this exact same code, not a reimplementation, so a proof
 # against the harness is a proof against the real ci.sh path. Requires REPO_ROOT to
@@ -39,6 +48,18 @@ GEN_PROBE_SNAP=""
 GEN_PROBE_PRISTINE_SHA=""
 GEN_PROBE_LABEL=""
 GEN_PROBE_RESTORED=1 # 1 = nothing pending (guards double-fire + spurious no-op calls)
+GEN_PROBE_PRIVATE="" # the probe's private registry copy ("" = shared mode)
+GEN_PROBE_SCRATCH="" # this probe's scratch-dir stem (_gen_<x>_scratch)
+
+# gen_probe_scratch_stem <probe-relative-path> — the `_gen_<x>_scratch` stem the probe mktemp's under REPO_ROOT.
+gen_probe_scratch_stem() {
+  case "$1" in
+    *gen_app_flagship_probe*) echo _gen_flagship_scratch ;;
+    *gen_post_probe*) echo _gen_post_scratch ;;
+    *gen_app_deploy_probe*) echo _gen_deploy_scratch ;;
+    *) echo "" ;; # gen_agent_probe: scratch lives under samen_core/lib + test and cleans itself
+  esac
+}
 
 gen_probe_restore() {
   if [[ "$GEN_PROBE_RESTORED" == 1 ]]; then
@@ -46,20 +67,36 @@ gen_probe_restore() {
   fi
   GEN_PROBE_RESTORED=1
 
-  cp "$GEN_PROBE_SNAP" "$GEN_PROBE_REGISTRY"
   local post_sha
-  post_sha="$(shasum -a 256 "$GEN_PROBE_REGISTRY" | awk '{print $1}')"
-  rm -f "$GEN_PROBE_SNAP"
+  if [[ -n "$GEN_PROBE_PRIVATE" ]]; then
+    # private mode: the committed file must be exactly what it was; nothing to restore, only to prove — and
+    # if a probe wrote it anyway, repair it from the snapshot and fail below (never leave it corrupted)
+    post_sha="$(shasum -a 256 "$GEN_PROBE_REGISTRY" | awk '{print $1}')"
+    if [[ "$post_sha" != "$GEN_PROBE_PRISTINE_SHA" ]]; then
+      cp "$GEN_PROBE_SNAP" "$GEN_PROBE_REGISTRY"
+    fi
+    rm -f "$GEN_PROBE_SNAP" "$GEN_PROBE_PRIVATE"
+  else
+    cp "$GEN_PROBE_SNAP" "$GEN_PROBE_REGISTRY"
+    post_sha="$(shasum -a 256 "$GEN_PROBE_REGISTRY" | awk '{print $1}')"
+    rm -f "$GEN_PROBE_SNAP"
+  fi
 
-  # Sweep scratch residue: legacy fixed-name dirs AND mktemp'd unique-per-run dirs
-  # (T107 switched gen_*_probe.exs to `mktemp -d _gen_*_scratch.XXXXXX`).
-  rm -rf "$REPO_ROOT"/_gen_flagship_scratch "$REPO_ROOT"/_gen_flagship_scratch.* \
-    "$REPO_ROOT"/_gen_post_scratch "$REPO_ROOT"/_gen_post_scratch.* \
-    "$REPO_ROOT"/_gen_deploy_scratch "$REPO_ROOT"/_gen_deploy_scratch.*
+  # Sweep scratch residue of THIS probe only (legacy fixed-name dir AND the mktemp'd unique-per-run dirs, T107).
+  # Shared mode keeps the pre-P5 sweep of every family (the interrupt harness launches one probe at a time).
+  if [[ -n "$GEN_PROBE_PRIVATE" ]]; then
+    if [[ -n "$GEN_PROBE_SCRATCH" ]]; then
+      rm -rf "$REPO_ROOT/$GEN_PROBE_SCRATCH" "$REPO_ROOT/$GEN_PROBE_SCRATCH".*
+    fi
+  else
+    rm -rf "$REPO_ROOT"/_gen_flagship_scratch "$REPO_ROOT"/_gen_flagship_scratch.* \
+      "$REPO_ROOT"/_gen_post_scratch "$REPO_ROOT"/_gen_post_scratch.* \
+      "$REPO_ROOT"/_gen_deploy_scratch "$REPO_ROOT"/_gen_deploy_scratch.*
+  fi
 
   if [[ "$post_sha" != "$GEN_PROBE_PRISTINE_SHA" ]]; then
-    echo "==> FATAL: ${GEN_PROBE_LABEL:-gen_app probe} could not restore $GEN_PROBE_REGISTRY" \
-      "SHA-256 byte-exact (pristine=$GEN_PROBE_PRISTINE_SHA restored=$post_sha)." \
+    echo "==> FATAL: ${GEN_PROBE_LABEL:-gen_app probe} left $GEN_PROBE_REGISTRY changed" \
+      "(pristine=$GEN_PROBE_PRISTINE_SHA now=$post_sha; private mode repairs it from the snapshot, shared mode could not)." \
       "MANUAL RECHECK REQUIRED." >&2
     exit 2
   fi
@@ -77,6 +114,12 @@ run_gen_probe() {
   cp "$GEN_PROBE_REGISTRY" "$GEN_PROBE_SNAP"
   GEN_PROBE_PRISTINE_SHA="$(shasum -a 256 "$GEN_PROBE_REGISTRY" | awk '{print $1}')"
   GEN_PROBE_LABEL="$label"
+  GEN_PROBE_SCRATCH="$(gen_probe_scratch_stem "$probe_rel")"
+  GEN_PROBE_PRIVATE=""
+  if [[ "${GEN_PROBE_SHARED_REGISTRY:-0}" != 1 ]]; then
+    GEN_PROBE_PRIVATE="$(mktemp "${TMPDIR:-/tmp}/samen_ci_registry_private.XXXXXX")"
+    cp "$GEN_PROBE_REGISTRY" "$GEN_PROBE_PRIVATE"
+  fi
   GEN_PROBE_RESTORED=0
 
   # GEN_PROBE_GUARD_DISABLE_TRAP=1 skips installing the interrupt trap while keeping
@@ -90,7 +133,11 @@ run_gen_probe() {
   echo ""
   echo "==> Running $label"
   local code=0
-  (cd "$REPO_ROOT/samen_core" && mix run "$probe_rel") || code=$?
+  if [[ -n "$GEN_PROBE_PRIVATE" ]]; then
+    (cd "$REPO_ROOT/samen_core" && SAMEN_ABBREV_REGISTRY="$GEN_PROBE_PRIVATE" mix run "$probe_rel") || code=$?
+  else
+    (cd "$REPO_ROOT/samen_core" && mix run "$probe_rel") || code=$?
+  fi
 
   gen_probe_restore
   trap - SIGINT SIGTERM ERR EXIT

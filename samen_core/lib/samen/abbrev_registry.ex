@@ -78,13 +78,36 @@ defmodule Samen.AbbrevRegistry do
   and an abbrev listed for resource A cannot be handed to resource B.
   """
 
-  @registry_path Path.join([:code.priv_dir(:samen_core) |> to_string(), "abbrev_registry.json"])
+  @default_registry_path Path.join([:code.priv_dir(:samen_core) |> to_string(), "abbrev_registry.json"])
+
+  # Test seam for the gen probes (ADR-053 P5): `scripts/gen_probe_guard.sh` points a probe at a PRIVATE copy of
+  # the registry so the committed file is never touched and probes can run concurrently. Read at CALL time (the
+  # generated app's compile asks `path()`/`load()` while it compiles), never baked into a module attribute.
+  @registry_env "SAMEN_ABBREV_REGISTRY"
 
   @abbrev_pattern ~r/\A[a-z]{3}\z/
 
-  @doc "Absolute path to the committed registry file."
+  @doc """
+  Absolute path to the registry file: the committed one, unless `SAMEN_ABBREV_REGISTRY` names an
+  absolute path (the gen probes' private copy — never set it in a real build).
+  """
   @spec path() :: String.t()
-  def path, do: @registry_path
+  def path do
+    case System.get_env(@registry_env) do
+      nil ->
+        @default_registry_path
+
+      "" ->
+        @default_registry_path
+
+      override ->
+        if Path.type(override) != :absolute do
+          raise "#{@registry_env} must be an absolute path, got #{inspect(override)}"
+        end
+
+        override
+    end
+  end
 
   @doc "The 3-letter-lowercase pattern every abbrev must match."
   @spec pattern() :: Regex.t()
@@ -99,7 +122,7 @@ defmodule Samen.AbbrevRegistry do
   """
   @spec load() :: %{optional(String.t()) => String.t()}
   def load do
-    load(@registry_path)
+    load(path())
   end
 
   @doc """
@@ -171,7 +194,7 @@ defmodule Samen.AbbrevRegistry do
   The `"hosts"` key is optional; a legacy flat file yields `hosts: %{}`.
   """
   @spec load_namespaced() :: %{global: map(), hosts: map()}
-  def load_namespaced, do: load_namespaced(@registry_path)
+  def load_namespaced, do: load_namespaced(path())
 
   @spec load_namespaced(String.t()) :: %{global: map(), hosts: map()}
   def load_namespaced(registry_path) do
@@ -329,7 +352,7 @@ defmodule Samen.AbbrevRegistry do
       not Map.has_key?(registry, abbrev) ->
         {:error,
          "abbrev #{inspect(abbrev)} for #{resource} is not in the abbrev registry " <>
-           "(#{@registry_path}). Abbrevs are permanent and must be reserved: add " <>
+           "(#{path()}). Abbrevs are permanent and must be reserved: add " <>
            "\"#{abbrev}\": \"#{resource}\" to the \"abbrevs\" map and commit it. " <>
            "This prevents two resources ever racing for the same prefix."}
 
@@ -430,7 +453,7 @@ defmodule Samen.AbbrevRegistry do
 
         {:error,
          "abbrev #{inspect(abbrev)} is already owned by #{other} in the GLOBAL cross-host net " <>
-           "(#{@registry_path}), not #{owner}. Two hosts sharing physical infrastructure cannot " <>
+           "(#{path()}), not #{owner}. Two hosts sharing physical infrastructure cannot " <>
            "silently clash on a 3-letter prefix — pick a new, unused abbrev."}
 
       cross_host != nil and not allow_cross_host_reuse? ->

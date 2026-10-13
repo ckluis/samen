@@ -186,3 +186,21 @@ defmodule Samen.Meta.CiDriverGuardTest.DocDrift do
     Samen.Meta.CiDriverGuard.run_case!("DOCS")
   end
 end
+
+# ── ADR-053 P5 — follow-ups ───────────────────────────────────────────────────────────────────────
+
+defmodule Samen.Meta.CiDriverGuardTest.GenProbeIsolation do
+  use ExUnit.Case, async: true
+
+  test "GENPROBE the gen probes run on a private registry copy and sweep only their own scratch dirs" do
+    Samen.Meta.CiDriverGuard.run_case!("GENPROBE")
+  end
+end
+
+defmodule Samen.Meta.CiDriverGuardTest.NarrowedInputs do
+  use ExUnit.Case, async: true
+
+  test "NARROW a step's *_test.exs exclusion drops only test modules, never anything Mix compiles" do
+    Samen.Meta.CiDriverGuard.run_case!("NARROW")
+  end
+end
