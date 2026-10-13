@@ -57,6 +57,36 @@
   addEventListener('scroll', onScroll, { passive: true });
   onScroll();
 
+  // product screens: below their design width they keep the desktop layout and scale to fit
+  var fits = Array.prototype.slice.call(document.querySelectorAll('.ui-fit'));
+  function fit() {
+    fits.forEach(function (f) {
+      var inn = f.firstElementChild;
+      var dw = parseFloat(getComputedStyle(f).getPropertyValue('--dw')) || 820;
+      var k = Math.min(1, f.clientWidth / dw);
+      if (k < 1) {
+        k = Math.floor(k * 1000) / 1000;
+        f.classList.add('fitting');
+        f.style.setProperty('--fit', String(k));
+        f.style.setProperty('--fh', Math.ceil(inn.offsetHeight * k) + 'px');
+      } else {
+        f.classList.remove('fitting');
+        f.style.removeProperty('--fit');
+        f.style.removeProperty('--fh');
+      }
+      f.classList.toggle('small', k < 0.6);
+    });
+  }
+  if (fits.length) {
+    fit();
+    if ('ResizeObserver' in window) {
+      var ro = new ResizeObserver(function () { fit(); });
+      fits.forEach(function (f) { ro.observe(f); ro.observe(f.firstElementChild); });
+    } else addEventListener('resize', fit);
+    // a switcher changes the screen's height; ResizeObserver catches it, this covers old engines
+    document.addEventListener('change', function (e) { if (e.target.closest && e.target.closest('.sw')) fit(); });
+  }
+
   // side panels: JS keeps the scroll position; :target is the no-JS fallback
   var open = null, opener = null;
   function show(p, from) {

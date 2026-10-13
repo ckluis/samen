@@ -265,7 +265,8 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
         <p class="sw-c p2">Support opened a masked impersonation session with a reason. <b>Same drivers, same order, same FMCSA badges</b>, read through the same <code>Driftwood.Reads.driver_roster</code>; name and CDL resolve to <code>%Masked{}</code> because the plane is <code>:operator</code> and no grant is held.</p>
         <p class="sw-c p3">The portfolio view runs as the token-blind aggregate actor over projections that <b>have no <code>pii_</code> column at all</b>. Nothing is masked because nothing is maskable, and a lane with fewer than five tenants is suppressed to <code>⊘</code>.</p>
 
-        <div class="ui sw-p p1">
+        <div class="ui-fit" style="--dw:820px"><div class="ui-fit-in">
+<div class="ui sw-p p1">
           <div class="ui-app">
             <div class="ui-side" aria-hidden="true">
               <div class="ui-ws"><span class="ui-logo">B</span><span><b>Blue Ridge Logistics</b><span>Freight brokerage</span></span></div>
@@ -356,6 +357,8 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
             </div>
           </div>
         </div>
+</div></div>
+<p class="ui-fit-hint">Pinch to zoom: the desktop screen, scaled to fit.</p>
       </div>
       <p class="ip-cap">Redrawn from driftwood's own screens: <code>DriftwoodWeb.BrokerLive</code>, <code>DriftwoodWeb.OperatorImpersonationLive</code> and the framework's <code>Samen.Web.Operator.AggregateLive</code>, with fictional tenant data. Tenant and operator render through the same read layer and the same <code>Samen.Api.PiiResolution</code> resolver; only the actor's plane differs. The FMCSA badge stays readable on both, so support can work the problem without the person.</p>
     </div>
@@ -485,7 +488,8 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
         <p class="sw-c p2">The same operator, holding a second-party-approved <b>reveal grant on Ada Whitfield</b>. Her row resolves through the vault; nobody else's does. A grant is per subject.</p>
         <p class="sw-c p3">Blue Ridge's own <b>admin</b>, on the tenant plane: their org, in the clear. Typed text is still only a length; the recording never had it.</p>
         <p class="sw-c p4">The same admin after <code>Samen.Erasure.shred</code> of Ada Whitfield. Her key is gone, so <b>every reference to her resolves to [erased]</b>. The replay rows were not touched.</p>
-        <div class="rpx">
+        <div class="ui-fit" style="--dw:920px"><div class="ui-fit-in">
+<div class="rpx">
           <div class="ui rpx-win">
             <div class="rpx-url"><i></i><i></i><i></i><span><span class="v v1 v2">/operator/replays/b1112d00…0001/bafe11ed…d9df</span><span class="v v3 v4">/settings/replays/bafe11ed…d9df</span></span></div>
             <div class="rpx-shell">
@@ -525,6 +529,8 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
           </aside>
           <div class="rpx-strip" aria-label="Timeline: 14 frames, frame 3 shown"><span class="rpx-sk">Timeline · 14 frames</span><span class=""><b>01</b> mount</span><span class=""><b>02</b> navigate</span><span class="on"><b>03</b> render</span><span class="ev"><b>04</b> event</span><span class=""><b>05</b> render</span><span class="ev"><b>06</b> event</span><span class=""><b>07</b> render</span><span class="ev"><b>08</b> event</span><span class=""><b>09</b> render</span><span class="ev"><b>10</b> event</span><span class=""><b>11</b> render</span><span class="ev"><b>12</b> event</span><span class=""><b>13</b> render</span><span class=""><b>14</b> exit</span></div>
         </div>
+</div></div>
+<p class="ui-fit-hint">Pinch to zoom: the desktop screen, scaled to fit.</p>
       </div>
       <p class="ip-cap">Real data, redrawn: one session recorded by the ADR-052 recorder over the real <code>Samen.Web.CRM.ContactsLive</code> (fictional Blue Ridge contacts) and replayed by the real player for each viewer. Labels, payloads, cell text and reference outcomes are exported by <code>scripts/landing/replay_demo_export_test.exs</code>; the JSON is abridged (ids shortened, some keys dropped), never altered. The player itself shows the recorded screen in a script-free sandboxed iframe.</p>
     </div>
@@ -585,7 +591,8 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
     <div class="ip rv">
       <div class="ip-h"><span class="ip-k">In the product</span><span class="ip-n">one thread, one message, one pair of refs, rendered per viewer's plane</span></div>
       <p class="ip-t">Paste an object id and it unfurls into a live card: clear on one side, <span class="mask">••••</span> on the other.</p>
-      <div class="ui-two">
+      <div class="ui-fit" style="--dw:760px"><div class="ui-fit-in">
+<div class="ui-two">
         <div class="cht">
           <div class="cht-tag" style="color:#4CC294"><i></i><b>Blue Ridge · tenant</b> <code>/chat/:id</code></div>
           <div class="ui cht-f">
@@ -622,6 +629,8 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
           </div>
         </div>
       </div>
+</div></div>
+<p class="ui-fit-hint">Pinch to zoom: the desktop screen, scaled to fit.</p>
       <p class="ip-cap">Redrawn from <code>Samen.Web.Chat.ThreadLive</code>, mounted twice by driftwood: <code>samen_chat_routes</code> on the tenant plane and again at <code>/operator/desk-chat</code> with <code>plane: :operator</code>. The person card is the framework's; the driver card is <code>DriftwoodWeb.Chat.DriverCard</code>, registered as data on the mount. Message bodies are vaulted too, so the operator reads the tenant's words as <span class="mask">••••</span>. Proven by <code>chat_unfurl_masking_test.exs</code>: the live operator DOM is scanned for leaks.</p>
     </div>
   </div>
@@ -678,7 +687,8 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
     <div class="ip rv">
       <div class="ip-h"><span class="ip-k">In the product</span><code>/ai/agents/:id</code><span class="ip-n">a support-triage run, parked at the human gate</span></div>
       <p class="ip-t">"Why is load BR-4471 late, and who should own it?" Two reads, one proposal, and a person decides.</p>
-      <div class="ui agt">
+      <div class="ui-fit" style="--dw:760px"><div class="ui-fit-in">
+<div class="ui agt">
         <div class="ui-main">
           <div class="ui-top"><span class="ui-crumb">Blue Ridge Logistics<i>/</i>AI<i>/</i>Agent runs</span><span class="ui-who"><span class="ui-av" style="background:#D6E9DF;color:#1E7A45">RM</span><span><b>Rosa Medina</b><br>dispatcher</span><span class="ui-chip t">tenant plane</span></span></div>
           <div class="ui-wrap">
@@ -717,6 +727,8 @@ mix samen.gen.agent     # an AI agent + its emitted proof</pre>
           </div>
         </div>
       </div>
+</div></div>
+<p class="ui-fit-hint">Pinch to zoom: the desktop screen, scaled to fit.</p>
       <p class="ip-cap">Redrawn from <code>Samen.Web.AI.AgentLive</code>, which driftwood inherits through one <code>samen_ai_routes</code> call. The agent is <code>Driftwood.Support.TriageAgent</code>: a name, a goal prompt and three tool kinds, nothing else. Driftwood configures no model provider, so its runs are honest about it: the deterministic <b>Scripted</b> provider, with a SIMULATED badge on every turn. Built and gated: ADR-047 batches A1–A7 landed.</p>
     </div>
   </div>

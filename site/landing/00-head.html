@@ -349,7 +349,7 @@ footer .credit{max-width:44em}
 .ui-drv{display:flex;align-items:center;gap:9px;min-width:0}
 .ui-drv>span{overflow:hidden;text-overflow:ellipsis;font-weight:550;color:#3a3b45}
 .ui-dim{color:var(--u-mut)}
-.ui-m{font-family:var(--mono);letter-spacing:.14em;color:#8C8D99;background:#F0F0F3;border-radius:5px;padding:1px 6px;font-size:11px;font-weight:500}
+.ui-m{white-space:nowrap;font-family:var(--mono);letter-spacing:.14em;color:#8C8D99;background:#F0F0F3;border-radius:5px;padding:1px 6px;font-size:11px;font-weight:500}
 .ui-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:550;padding:2px 8px;border-radius:999px;white-space:nowrap;line-height:1.5}
 .ui-pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
 .ui-pill.ok{background:var(--u-grw);color:var(--u-gr)}.ui-pill.bad{background:var(--u-rdw);color:var(--u-rd)}
@@ -423,7 +423,6 @@ footer .credit{max-width:44em}
 .agt-goal{margin-top:8px;font:12px/1.5 var(--mono);background:var(--u-pn);border:1px solid var(--u-ln);border-radius:8px;padding:7px 9px}
 .agt-ol{margin:8px 0 0;padding-left:18px;font-size:12px;line-height:1.55;color:#3a3b45}
 .agt-ol li{margin:3px 0;overflow-wrap:anywhere}
-@media (max-width:900px){.agt-grid{grid-template-columns:minmax(0,1fr)}}
 
 /* replay: the player window beside what Postgres holds */
 .rpx{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,380px);grid-template-areas:"win pg" "tl tl";gap:14px;align-items:start}
@@ -464,25 +463,24 @@ footer .credit{max-width:44em}
 .rpx-strip .ev{border-color:#3A4180}
 .rpx-strip .on{background:var(--indigo-deep);border-color:var(--indigo-deep);color:#fff}.rpx-strip .on b{color:#C9CFFB}
 .rpx-strip .rpx-sk{border:0;padding:6px 6px 6px 0;color:var(--faint);letter-spacing:.06em;text-transform:uppercase;font-size:10.5px}
-@media (max-width:1000px){.rpx{grid-template-columns:minmax(0,1fr);grid-template-areas:"win" "tl" "pg"}}
-@media (max-width:640px){.rpx-shell{padding:10px}.rpx-strip span{padding:5px 6px;font-size:10.5px}}
-@media (max-width:900px){.ui-app{grid-template-columns:minmax(0,1fr)}.ui-side{display:none}.ui-mets{grid-template-columns:repeat(2,minmax(0,1fr))}.ui-two{grid-template-columns:minmax(0,1fr)}}
-/* phone: tables become stacked records; every cell keeps its column name */
-@media (max-width:640px){
-  .ui{padding:6px;border-radius:14px}
-  .ui-top,.ui-head,.ui-wrap{padding-left:12px;padding-right:12px}.ui-bar{margin-left:12px;margin-right:12px;flex-direction:column;gap:6px}
-  .ui-who{margin-left:0}.ui-acts{margin-left:0}
-  .ui-bar .ui-tag{white-space:normal;align-self:flex-start}
-  .ui-t:not(.keep) thead{display:none}
-  .ui-t:not(.keep),.ui-t:not(.keep) tbody,.ui-t:not(.keep) tr{display:block}
-  .ui-t:not(.keep) tr{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px 10px;padding:11px 12px;border-bottom:1px solid var(--u-ln)}
-  .ui-t:not(.keep) tr:last-child{border-bottom:0}
-  .ui-t:not(.keep) td{display:block;border:0;padding:0;white-space:normal;overflow-wrap:anywhere;min-width:0}
-  .ui-t:not(.keep) td[data-k]::before{content:attr(data-k);display:block;font:500 9.5px/1.3 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--u-fnt);margin-bottom:2px}
-  .ui-t:not(.keep) td.w{grid-column:1/-1}
-  .ui-t.keep th,.ui-t.keep td{padding:8px 8px}
-  .ui-t .ui-pill{white-space:normal}
-  .ui-mets{padding:12px 12px 0;gap:8px}
+/* ---- fit: below its design width a product screen keeps its DESKTOP layout and scales down
+   like a screenshot (JS sets --fit, --fh and .fitting; transform, not zoom, so a minimum font
+   size can't re-flow the text). No JS: it keeps the design width and scrolls
+   sideways inside its own frame, never the page. The screens carry no media queries of their own. */
+.ui-fit{--dw:820px;position:relative;min-width:0;max-width:100%}
+.ui-fit.fitting{height:var(--fh,auto)}
+.ui-fit.fitting>.ui-fit-in{width:var(--dw);transform:scale(var(--fit,1));transform-origin:0 0}
+.ui-fit.fitting .ui-side{display:none}
+.ui-fit.fitting .ui-app{grid-template-columns:minmax(0,1fr)}
+.ui-fit.fitting .rpx{grid-template-columns:minmax(0,1fr) 330px}
+.ui-fit-hint{display:none;margin:10px 2px 0;font:11.5px/1.4 var(--mono);color:var(--faint)}
+.ui-fit.small+.ui-fit-hint{display:block}
+@media (max-width:899px){
+  html:not(.js) .ui-fit{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:6px}
+  html:not(.js) .ui-fit>.ui-fit-in{width:var(--dw)}
+  html:not(.js) .ui-fit .ui-side{display:none}
+  html:not(.js) .ui-fit .ui-app{grid-template-columns:minmax(0,1fr)}
+  html:not(.js) .ui-fit .rpx{grid-template-columns:minmax(0,1fr) 330px}
 }
 </style>
 </head>
