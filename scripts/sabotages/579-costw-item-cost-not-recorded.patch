@@ -1,0 +1,19 @@
+# SABOTAGE: ADR-053 P5: the per-item cost read from a passed chunk's log is never stored
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: COSTW chunks are weighted by what each item last cost, not by the slowest item's rate
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 945aca7..c9f3f0e 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -522,7 +522,7 @@ def learn_costs(seen, step, text, dur):
+         return
+     table = dict(seen.get(step.parent + "#item_cost") or {})
+     for name, secs in got.items():
+-        table[name] = round(secs if name not in table else 0.5 * table[name] + 0.5 * secs, 1)
++        table[name] = round(table.get(name, 0.0), 1)
+     seen[step.parent + "#item_cost"] = table
+     total = sum(got.values())
+     if total > 0 and len(got) == (step.expected or len(got)):

@@ -1,0 +1,20 @@
+# SABOTAGE: ADR-053 P5: the re-planned stretch is never cut into chunks, so one chunk holds the whole 
+#   remainder and outgrows a tool call (G10)
+#
+# Flips the named test(s).
+# APP: samen_core
+# TEST_FILES: test/meta/ci_driver_guard_test.exs
+# MUST_FAIL: RECHUNK a resume never discards a finished chunk when the learned per-item rate rises
+diff --git a/scripts/ci_driver.py b/scripts/ci_driver.py
+index 945aca7..f7af469 100755
+--- a/scripts/ci_driver.py
++++ b/scripts/ci_driver.py
+@@ -656,7 +656,7 @@ def expand_shards(step, ctx, mode, budget, apps, no_cache=False, slice_=None, do
+             per = max(1, int(step.shard_target // max(each, 0.001)))
+             for n, it in run:
+                 if cur and n != cur[-1][0]:
+-                    full = ((tot + weight(it)) * alpha + 10 > step.shard_target) if step.shard_cost else len(cur) >= per
++                    full = False
+                     if full:
+                         out_chunks.append(cur)
+                         cur, tot = [], 0.0
