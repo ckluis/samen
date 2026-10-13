@@ -1481,13 +1481,22 @@ PY
   has "$T/cw5" '^PLAN shd\[1/3\] est 31\.5s ' "COSTW: fitted 30 s + 0.5/lane-second: the three cheap items = 31.5 s"
   has "$T/cw5" '^PLAN shd\[2/3\] est 50\.0s ' "COSTW: ... the slow item = 50.0 s (30 + 0.5 x 40)"
   has "$T/cw5" '^PLAN shd\[3/3\] est 34\.0s ' "COSTW: ... the eight cheap items = 34.0 s"
+  # the cap: even a good fit may not plan a chunk beyond 1.5x the largest lane-seconds seen to complete (4.5 here)
+  python3 - "$SAMEN_CI_HOME/timings.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); d["shd#chunk_obs"] = [[1, 30.5], [2, 31], [3, 31.5], [1, 30.5]]; json.dump(d, open(sys.argv[1], "w"))
+PY
+  drive "$T/cw5b" pr --plan --no-cache
+  eq "$(grep -c '^PLAN shd\[' "$T/cw5b")" 4 "COSTW: the 1.5x cap splits the cheap items into [1-3] | [4] | [5-8] | [9-12] (a fit alone would keep 5-12 together)"
+  has "$T/cw5b" '^PLAN shd\[3/4\] est 32\.0s ' "COSTW: ... four cheap items = 30 + 0.5 x 4"
   # the model itself: exact on exact data, never shorter than any observed chunk (margin), clamped, prior when thin
   eq "$(python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import ci_driver as c
-print(c.cost_model([[10,35],[40,50],[80,70],[120,90]]), c.cost_model([[10,35],[40,50],[80,70]]), c.cost_model([[10,35]]*6))' "$ROOT/scripts")" \
-     "(30.0, 0.5, 1.0) (10.0, 1.0, 1.0) (10.0, 1.0, 1.0)" "COSTW: cost_model — exact fit; < 4 observations or no spread = the prior"
+P = c.PRIOR_MODEL
+print(c.cost_model([[10,35],[40,50],[80,70],[120,90]]), c.cost_model([[10,35],[40,50],[80,70]]) == P, c.cost_model([[10,35]]*6) == P, c.cost_model([[224,161],[299,150],[338,175],[350,173]]) == P)' "$ROOT/scripts")" \
+     "(30.0, 0.5, 1.0, 180.0) True True True" "COSTW: cost_model — exact fit (+ the 1.5x cap); < 4 observations, no spread, or less than half-range spread = the prior"
   eq "$(python3 -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import ci_driver as c
 obs = [[10,35],[40,50],[80,70],[120,90],[60,200]]
-a, b, m = c.cost_model(obs)
+a, b, m, cap = c.cost_model(obs)
 print(all(d <= m * (a + b * w) + 1e-9 for w, d in obs), m > 1.0, c.cost_model([[10,50],[40,300],[80,700],[120,1000]])[1], c.cost_model([[10,5],[40,10],[80,30],[120,50]])[0])' "$ROOT/scripts")" \
      "True True 1.0 10.0" "COSTW: cost_model — the margin covers every observed chunk (G10); slope clamped to <= 1, overhead to >= 10 s"
   # an item with no recorded cost keeps the old rate: a step WITHOUT shard_cost plans exactly as before
