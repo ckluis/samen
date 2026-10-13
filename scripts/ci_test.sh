@@ -1200,14 +1200,17 @@ STUB
   pristine="$(shasum -a 256 "$reg" | awk '{print $1}')"
   gp() { # gp <probe> [env…] — run_gen_probe the way the manifest does, with the stub mix first on PATH
     local probe="$1"; shift
-    env PATH="$B:$PATH" REPO_ROOT="$F" GP_LOG="$T/gp.log" "$@" bash -c 'source "'"$ROOT"'/scripts/gen_probe_guard.sh"; run_gen_probe "$0" "stub probe"' "$probe"
+    env PATH="$B:$PATH" REPO_ROOT="$F" GP_LOG="$T/gp.log" TMPDIR="$T/gp.tmp" "$@" bash -c 'source "'"$ROOT"'/scripts/gen_probe_guard.sh"; run_gen_probe "$0" "stub probe"' "$probe"
   }
   : > "$T/gp.log"
+  # the guard's snapshot/private copies go to $TMPDIR: a PRIVATE one, so the real gen probes of a concurrent `scripts/ci pr`
+  # (their copies live in the shared $TMPDIR for minutes) cannot be counted as this case's residue (Gate P6: got [3])
+  mkdir -p "$T/gp.tmp"
   # 1. positive control: private mode hands the probe a registry that is NOT the committed one, and leaves the file alone
   gp priv/gen_post_probe.exs > "$T/gp1" 2>&1; eq "$?" 0 "GENPROBE: a probe that honours the seam passes"
   has "$T/gp.log" 'gen_post_probe.exs saw /.*samen_ci_registry_private\.' "GENPROBE: the probe was pointed at a private registry copy"
   eq "$(shasum -a 256 "$reg" | awk '{print $1}')" "$pristine" "GENPROBE: the committed registry is byte-identical afterwards (the reservation went to the copy)"
-  eq "$(ls "${TMPDIR:-/tmp}"/samen_ci_registry_private.* 2>/dev/null | wc -l | tr -d ' ')" "0" "GENPROBE: ... and the private copy is removed"
+  eq "$(ls "$T/gp.tmp"/samen_ci_registry_private.* 2>/dev/null | wc -l | tr -d ' ')" "0" "GENPROBE: ... and the private copy is removed"
   # 2. a probe that writes the committed file anyway is caught, the file repaired, the run fails
   gp priv/gen_post_probe.exs GP_MODE=committed > "$T/gp2" 2>&1; eq "$?" 2 "GENPROBE: a probe that writes the committed registry FAILS (exit 2)"
   has "$T/gp2" 'FATAL: .* left .*abbrev_registry.json changed' "GENPROBE: ... saying what it left changed"
