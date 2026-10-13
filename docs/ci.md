@@ -326,6 +326,14 @@ followed by a plain word reads as a subcommand: write `scripts/ci` in backticks.
   Today: preflight/spikes/app_*/mutation* 15, adapters/samen_core/gen_flagship/app_driftwood 20, gen_probes and
   mutation_watchlist_* 30, dialyzer_core and sabotage_corpus_* 35, dialyzer_adapters_a 40, dialyzer_verticals 50,
   sabotage_changed 60 (the 29.8 min PR that touched the driver).
+  The two `--changed` jobs' work scales with the diff, not with history, so the PR workflow's `plan` job runs
+  `scripts/ci actions plan pr --selection --base <PR base>` (it needs the toolchain: `mutate.sh --list` runs the
+  mutation engine): it asks each such step's own lister how many items this diff selects and sets
+  `timeout = min(360, max(history value, 5 * ceil(2 * selected * shard_each_s / 60 / 5)))` — twice the lane-seconds at
+  the manifest's conservative per-item rate (`shard_each_s`: 32 s per sabotage patch, 6 s per mutant), never below the
+  history value, never over GitHub's ceiling. A lister that fails or has no count line REFUSES the plan. Without
+  `--selection` (a local `actions plan`) the history value alone applies. Not distinguished: guard vs ordinary
+  patches (one rate; the 2x margin and the cap carry it).
 - `.github/workflows/nightly.yml`: cron `17 3 * * *` (03:17 UTC) + `workflow_dispatch`; `scripts/ci full`, the
   same jobs as `pr` minus the two `--changed` jobs, plus `multinode`, 24 corpus slices (`--slice i/24`) and 6
   mutation slices; `ci-full` sums the slices against the lister's total and `ls scripts/sabotages/*.patch`.

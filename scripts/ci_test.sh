@@ -71,6 +71,10 @@
 #          run, floor 15, a job with no row gets 60); a row that is not that formula is refused, no row is stale, the
 #          workflows read `matrix.timeout_min` and no job keeps the old flat 350 / 120.
 #
+#   SELTMO   (P6) a --changed job's timeout follows its selection: `actions plan --selection` sizes it as selected x
+#          shard_each_s x 2 (rounded up to 5 min), never below the history value, never over 360; a small selection keeps the
+#          floor; a lister with no count line refuses the plan.
+#
 # Usage: scripts/ci_test.sh [CASE…]      (default: every case)
 # Exit:  0 all assertions pass · 1 otherwise. Residue: none (temp dirs, trap on EXIT/INT/TERM).
 set -uo pipefail
@@ -1576,7 +1580,39 @@ PY
   eq "$RC" 2 "TIMEOUT: a malformed row (3 columns) is refused"
 }
 
-ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS GENPROBE NARROW RECHUNK COSTW TIMEOUT)
+case_SELTMO() {
+  # (P6) a --changed job's timeout follows its SELECTION, not only history: selected x shard_each_s x 2, rounded up to 5
+  # min, floored at the history value, capped at GitHub's 360. Only `actions plan --selection` computes it.
+  mkrepo seltmo
+  { echo "$APPS"; step big core/ 'actions_job=alpha' \
+      'shard_list = printf "SELECTED ${CI_TEST_TOTAL:-3}\\n"' 'shard_kind = modulo' 'shard_total = ^SELECTED ([0-9]+)$' 'shard_each_s = 32'; } > "$SAMEN_CI_MANIFEST"
+  mkdir -p "$SAMEN_CI_REPO/ci"; cp "$SAMEN_CI_MANIFEST" "$SAMEN_CI_REPO/ci/steps.conf"
+  export SAMEN_CI_MANIFEST="$SAMEN_CI_REPO/ci/steps.conf"
+  printf 'alpha\t3.0\t15\t4\n' > "$SAMEN_CI_REPO/ci/actions_timeouts.tsv"
+  local tm='{j["name"]: j["timeout_min"] for j in d["jobs"]}'
+  drive "$T/st0" actions plan pr --json
+  eq "$(jsonget "$T/st0" "$tm")" "{'alpha': 15}" "SELTMO: without --selection the timeout is the history value"
+  CI_TEST_TOTAL=3 drive "$T/st1" actions plan pr --json --selection
+  eq "$RC" 0 "SELTMO: --selection plans"
+  eq "$(jsonget "$T/st1" "$tm")" "{'alpha': 15}" "SELTMO: a SMALL selection (3 x 32 s x 2 = 3.2 min) keeps the history floor"
+  CI_TEST_TOTAL=100 drive "$T/st2" actions plan pr --json --selection
+  eq "$(jsonget "$T/st2" "$tm")" "{'alpha': 110}" "SELTMO: a LARGE selection (100 x 32 s x 2 = 106.7 min) raises the timeout to 110"
+  has "$T/st2" 'selection 100 x 32s -> 110 min' "SELTMO: ... and the plan says why"
+  CI_TEST_TOTAL=100 drive "$T/st2t" actions plan pr --selection
+  has "$T/st2t" 'timeout: .*selection 100 x 32s -> 110 min' "SELTMO: the text plan shows the scaled basis"
+  CI_TEST_TOTAL=5000 drive "$T/st3" actions plan pr --json --selection
+  eq "$(jsonget "$T/st3" "$tm")" "{'alpha': 360}" "SELTMO: a huge selection is capped at GitHub's 360"
+  printf 'alpha\t40.0\t80\t4\n' > "$SAMEN_CI_REPO/ci/actions_timeouts.tsv"
+  CI_TEST_TOTAL=100 drive "$T/st4" actions plan pr --json --selection
+  eq "$(jsonget "$T/st4" "$tm")" "{'alpha': 110}" "SELTMO: scaled above a larger history value (80 -> 110)"
+  CI_TEST_TOTAL=10 drive "$T/st5" actions plan pr --json --selection
+  eq "$(jsonget "$T/st5" "$tm")" "{'alpha': 80}" "SELTMO: never BELOW the history value (10 x 32 s x 2 = 10.7 min; history 80)"
+  CI_TEST_TOTAL=none drive "$T/st6" actions plan pr --json --selection
+  eq "$RC" 2 "SELTMO: a lister whose count line is missing REFUSES the plan (never a silently unscaled timeout)"
+  has "$T/st6" 'cannot size big' "SELTMO: ... naming the step"
+}
+
+ALL=(C1 C2 C3 C4 C5 C6 C9 LOCKS EQUIV A1 A2 A3 WAE EST C10 C7 C8 SABNEW DOCS GENPROBE NARROW RECHUNK COSTW TIMEOUT SELTMO)
 CASES=("$@")
 [[ ${#CASES[@]} -gt 0 ]] || CASES=("${ALL[@]}")
 for c in "${CASES[@]}"; do
