@@ -99,8 +99,7 @@ defmodule Samen.AI.Eval.MaskLeakRedTeamTest do
   @grant_canary "canary-eval-grant-6y5t4r@leak.example"
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
     Provider.Fake.reset()
     FakeProvider.reset()
     {:ok, AiEvalCorpus.seed_full_db!()}

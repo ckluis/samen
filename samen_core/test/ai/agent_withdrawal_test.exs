@@ -77,8 +77,7 @@ defmodule Samen.AI.AgentWithdrawalTest do
   defp withdrawn_marker(n), do: "[withdrawn: fold ##{n}, source withdrawn]"
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
 
     previous_kms = Application.get_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
     Samen.Kms.FileBacked.simulate_outage(false)

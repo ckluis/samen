@@ -10,8 +10,9 @@ defmodule Acme.DataCase do
   end
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Acme.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Acme.Repo, {:shared, self()})
+    # a dedicated shared owner that outlives the test process (ADR-053 P5): the raw checkout + shared pair made
+    # the test process the owner, so on_exit callbacks and late async work died with "owner exited"
+    Samen.TestSandbox.shared!(Acme.Repo)
     :ok
   end
 end

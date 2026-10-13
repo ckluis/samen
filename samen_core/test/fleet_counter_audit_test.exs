@@ -13,8 +13,7 @@ defmodule Samen.Fleet.CounterAuditTest do
   @admin AdminActor.new("operator-1")
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
     Attention.reset()
     :ok
   end

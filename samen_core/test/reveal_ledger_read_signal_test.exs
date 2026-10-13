@@ -13,8 +13,7 @@ defmodule Samen.RevealLedgerReadSignalTest do
   alias Samen.AuditChain
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    Samen.TestSandbox.shared!(Repo)
     {:ok, org: "org-#{System.unique_integer([:positive])}"}
   end
 

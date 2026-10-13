@@ -54,8 +54,7 @@ defmodule Samen.Automation.RunDefinitionPinTest do
   @v2 [%{"kind" => "notify", "recipient" => "owner", "event_type" => "pin.v2"}]
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
 
     prev = %{
       engine: Application.get_env(:samen_core, Samen.Notifications.Engine),

@@ -32,8 +32,7 @@ defmodule Samen.Automation.ReminderTest do
   @note "REMIND-SENTINEL: call the customer back about renewal terms."
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
 
     prev_engine = Application.get_env(:samen_core, Samen.Notifications.Engine)
     prev_remind = Application.get_env(:samen_core, Samen.Automation.Remind)

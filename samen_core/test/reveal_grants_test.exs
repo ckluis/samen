@@ -23,10 +23,9 @@ defmodule Samen.Reveal.GrantsTest do
   @repo SamenCore.TestRepo
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
     # Oban runs in :manual mode; share the sandbox connection so same-tx enqueue
     # sees the checked-out connection.
-    Ecto.Adapters.SQL.Sandbox.mode(@repo, {:shared, self()})
+    Samen.TestSandbox.shared!(@repo)
     :ok
   end
 

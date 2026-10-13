@@ -44,8 +44,7 @@ defmodule Samen.Crm.SequenceSendTest do
   alias SamenCore.TestRepo
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
 
     prev_send_worker = Application.get_env(:samen_core, Samen.Sequences.SendWorker)
     prev_reply_check = Application.get_env(:samen_core, Samen.Sequences.ReplyCheck)

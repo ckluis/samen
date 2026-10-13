@@ -35,8 +35,7 @@ defmodule Samen.AI.SupportOperatorTest do
   @registry %{"ai_support_reply" => {:operator, ReplyHandler}}
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
     Provider.Fake.reset()
     FakeProvider.reset()
     :ok

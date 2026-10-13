@@ -40,8 +40,7 @@ defmodule Samen.ImpersonationWriteAuditTest do
   setup do
     # Impersonation.open/3 runs an Ecto.Multi + same-tx Oban enqueue, so the sandbox
     # must be shared (mirrors impersonation_same_tx_test.exs).
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
-    Ecto.Adapters.SQL.Sandbox.mode(@repo, {:shared, self()})
+    Samen.TestSandbox.shared!(@repo)
     :ok
   end
 

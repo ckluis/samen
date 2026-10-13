@@ -31,8 +31,7 @@ defmodule Samen.AuditChainTest do
   import Ecto.Query, only: [from: 2]
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    Samen.TestSandbox.shared!(Repo)
 
     # Fresh per-test WORM anchor file so seals from prior tests don't leak in.
     path =

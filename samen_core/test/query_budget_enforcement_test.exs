@@ -24,8 +24,7 @@ defmodule Samen.QueryBudgetEnforcementTest do
   @repo SamenCore.TestRepo
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
-    Ecto.Adapters.SQL.Sandbox.mode(@repo, {:shared, self()})
+    Samen.TestSandbox.shared!(@repo)
 
     # Snapshot the enforcement config and restore after each test (async: false).
     saved =

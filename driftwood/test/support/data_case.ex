@@ -10,8 +10,7 @@ defmodule Driftwood.DataCase do
   end
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Driftwood.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Driftwood.Repo, {:shared, self()})
+    Samen.TestSandbox.shared!(Driftwood.Repo)
 
     # The reviewed non_pii! rows the pii_classify gate + destruction oracle rely on.
     :ok = Driftwood.NonPiiSetup.register_all()

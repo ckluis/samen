@@ -79,8 +79,7 @@ defmodule Samen.AI.AgentCompactionTest do
   require Ash.Query
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
     Scripted.reset()
     Breaker.reset()
 

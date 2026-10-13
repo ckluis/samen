@@ -37,8 +37,7 @@ defmodule Samen.Auth.BlindIndexErasureTest do
   @spec_ [%{table_name: @table, bidx_column: "email_bidx", subject_column: "id", label: "credential"}]
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
-    Ecto.Adapters.SQL.Sandbox.mode(@repo, {:shared, self()})
+    Samen.TestSandbox.shared!(@repo)
     Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked)
     Samen.Kms.FileBacked.simulate_outage(false)
     on_exit(fn -> Application.put_env(:samen_core, :kms_adapter, Samen.Kms.FileBacked) end)

@@ -24,8 +24,7 @@ defmodule Samen.Observability.JobSpansTest do
   @repo SamenCore.TestRepo
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(@repo)
-    Ecto.Adapters.SQL.Sandbox.mode(@repo, {:shared, self()})
+    Samen.TestSandbox.shared!(@repo)
     :otel_simple_processor.set_exporter(:otel_exporter_pid, self())
     JobSpans.detach()
     :ok = JobSpans.attach()

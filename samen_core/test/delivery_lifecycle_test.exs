@@ -104,8 +104,7 @@ defmodule Samen.Delivery.LifecycleTest do
 
   setup do
     # Oban.insert (enqueue seam tests) writes an oban_jobs row via the test repo.
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(SamenCore.TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(SamenCore.TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(SamenCore.TestRepo)
 
     prev = Application.get_env(:samen_core, EmailWorker)
     prev_mkt = Application.get_env(:samen_core, Samen.Scopes.Marketing.SendWorker)

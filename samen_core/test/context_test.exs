@@ -25,8 +25,7 @@ defmodule Samen.ContextTest do
   alias Samen.Context.Info
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    Samen.TestSandbox.shared!(Repo)
     :ok
   end
 

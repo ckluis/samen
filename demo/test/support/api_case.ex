@@ -15,8 +15,7 @@ defmodule Demo.ApiCase do
   end
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Demo.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Demo.Repo, {:shared, self()})
+    Samen.TestSandbox.shared!(Demo.Repo)
     :ok
   end
 

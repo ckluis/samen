@@ -37,8 +37,7 @@ defmodule Samen.Notifications.EngineTest do
   end
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
     Process.register(self(), :notifications_engine_test_pid)
     on_exit(fn -> :ok end)
     :ok

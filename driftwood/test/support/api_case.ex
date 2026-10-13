@@ -21,8 +21,7 @@ defmodule Driftwood.ApiCase do
   end
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Driftwood.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(Driftwood.Repo, {:shared, self()})
+    Samen.TestSandbox.shared!(Driftwood.Repo)
     :ok = Driftwood.NonPiiSetup.register_all()
     :ok
   end

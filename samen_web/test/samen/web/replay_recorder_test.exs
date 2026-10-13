@@ -33,7 +33,7 @@ defmodule Samen.Web.ReplayRecorderTest do
   @typed_last "Typedname"
 
   setup do
-    Ecto.Adapters.SQL.Sandbox.mode(Samen.WebTest.Repo, {:shared, self()})
+    # (shared mode comes from Samen.WebTest.DataCase via Samen.TestSandbox.shared!/1)
     Cache.invalidate_all()
 
     on_exit(fn ->

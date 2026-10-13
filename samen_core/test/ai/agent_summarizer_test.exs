@@ -167,8 +167,7 @@ defmodule Samen.AI.AgentSummarizerTest do
                             <<0x200B::utf8>> <> @order_secret_value <> " was retired."
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(TestRepo)
-    Ecto.Adapters.SQL.Sandbox.mode(TestRepo, {:shared, self()})
+    Samen.TestSandbox.shared!(TestRepo)
     Scripted.reset()
     Breaker.reset()
     C3RHookProbe.reset()
